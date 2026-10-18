@@ -6,3 +6,5 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include <MinHook.h>

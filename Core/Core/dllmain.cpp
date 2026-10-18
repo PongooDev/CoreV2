@@ -2,6 +2,10 @@
 
 static DWORD WINAPI MainThread(LPVOID)
 {
+    if (MH_Initialize() != MH_OK)
+    {
+        return 1;
+    }
     return 0;
 }
 

@@ -4,6 +4,12 @@
     <Filter Include="Core">
       <UniqueIdentifier>{5d3e2b1a-7c41-4f0e-9a6b-2f8c1d4e6a10}</UniqueIdentifier>
     </Filter>
+    <Filter Include="ThirdParty">
+      <UniqueIdentifier>{8a1f6c2e-3b74-4d59-b0e2-7c9d5a1e4f23}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ThirdParty\MinHook">
+      <UniqueIdentifier>{c47e9b13-6d2a-4f85-a1c3-9e0b7d2f5a64}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
@@ -13,5 +19,17 @@
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="pch.cpp" />
+    <ClCompile Include="ThirdParty\MinHook\src\buffer.c">
+      <Filter>ThirdParty\MinHook</Filter>
+    </ClCompile>
+    <ClCompile Include="ThirdParty\MinHook\src\hook.c">
+      <Filter>ThirdParty\MinHook</Filter>
+    </ClCompile>
+    <ClCompile Include="ThirdParty\MinHook\src\trampoline.c">
+      <Filter>ThirdParty\MinHook</Filter>
+    </ClCompile>
+    <ClCompile Include="ThirdParty\MinHook\src\hde\hde64.c">
+      <Filter>ThirdParty\MinHook</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

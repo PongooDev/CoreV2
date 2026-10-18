@@ -91,15 +91,19 @@
     <ClInclude Include="Core\Public\Hooks.h" />
     <ClInclude Include="Core\Public\Log.h" />
     <ClInclude Include="Core\Public\Natives.h" />
+    <ClInclude Include="Core\Public\ObjectLayout.h" />
+    <ClInclude Include="Core\Public\Reflection.h" />
     <ClInclude Include="Engine\Source\Runtime\Core\Public\Containers\Array.h" />
     <ClInclude Include="Engine\Source\Runtime\Core\Public\Containers\UnrealString.h" />
     <ClInclude Include="Engine\Source\Runtime\Core\Public\HAL\UnrealMemory.h" />
     <ClInclude Include="Engine\Source\Runtime\Core\Public\UObject\NameTypes.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\Templates\Casts.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\Class.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h" />
-    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectLayout.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectArray.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBase.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBaseUtility.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectGlobals.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UnrealType.h" />
     <ClInclude Include="ThirdParty\Memcury\memcury.h" />
@@ -113,10 +117,12 @@
     <ClCompile Include="Core\Private\GameThread.cpp" />
     <ClCompile Include="Core\Private\Hooks.cpp" />
     <ClCompile Include="Core\Private\Log.cpp" />
+    <ClCompile Include="Core\Private\Reflection.cpp" />
     <ClCompile Include="Engine\Source\Runtime\Core\Private\HAL\UnrealMemory.cpp" />
     <ClCompile Include="Engine\Source\Runtime\Core\Private\UObject\UnrealNames.cpp" />
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Class.cpp" />
-    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Object.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Obj.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectBaseUtility.cpp" />
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectGlobals.cpp" />
     <ClCompile Include="ThirdParty\MinHook\src\buffer.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>

@@ -4,80 +4,71 @@
 
 class UProperty : public UField
 {
+    DefineUnrealClass(UProperty, CoreUObject)
+    DefineLayoutMember(int32_t, ArrayDim, UProperty_ArrayDim)
+    DefineLayoutMember(int32_t, ElementSize, UProperty_ElementSize)
+    DefineLayoutMember(uint64_t, PropertyFlags, UProperty_PropertyFlags)
+
 public:
-    int32_t GetArrayDim() const
+    int32_t GetOffset_ForInternal() const
     {
-        return *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UProperty_ArrayDim);
+        return *reinterpret_cast<const int32_t*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.UProperty_Offset_Internal);
     }
 
-    int32_t GetElementSize() const
-    {
-        return *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UProperty_ElementSize);
-    }
+    int32_t GetSize() const { return ArrayDim * ElementSize; }
 
-    uint64_t GetPropertyFlags() const
+    template <typename ValueType>
+    ValueType* ContainerPtrToValuePtr(const void* ContainerPtr, int32_t ArrayIndex = 0) const
     {
-        return *reinterpret_cast<const uint64_t*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UProperty_PropertyFlags);
-    }
-
-    int32_t GetOffset() const
-    {
-        return *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UProperty_Offset);
-    }
-
-    void* ContainerPtrToValuePtr(const void* Container) const
-    {
-        return const_cast<uint8_t*>(static_cast<const uint8_t*>(Container) + GetOffset());
+        return reinterpret_cast<ValueType*>(reinterpret_cast<uintptr_t>(ContainerPtr) + GetOffset_ForInternal() + ElementSize * ArrayIndex);
     }
 };
 
 class UBoolProperty : public UProperty
 {
+    DefineUnrealClass(UBoolProperty, CoreUObject)
+    DefineLayoutMember(uint8_t, FieldSize, UBoolProperty_FieldSize)
+    DefineLayoutMember(uint8_t, ByteOffset, UBoolProperty_ByteOffset)
+    DefineLayoutMember(uint8_t, ByteMask, UBoolProperty_ByteMask)
+    DefineLayoutMember(uint8_t, FieldMask, UBoolProperty_FieldMask)
+
 public:
-    uint8_t GetByteOffset() const
+    bool GetPropertyValue(const void* A) const
     {
-        return *(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UBoolProperty_ByteOffset);
+        return (*(static_cast<const uint8_t*>(A) + ByteOffset) & FieldMask) != 0;
     }
 
-    uint8_t GetFieldMask() const
+    void SetPropertyValue(void* A, bool Value) const
     {
-        return *(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UBoolProperty_FieldMask);
+        uint8_t* ByteValue = static_cast<uint8_t*>(A) + ByteOffset;
+        *ByteValue = static_cast<uint8_t>((*ByteValue & ~FieldMask) | (Value ? ByteMask : 0));
     }
 
-    bool GetPropertyValue(const void* Container) const
+    bool GetPropertyValue_InContainer(const void* A, int32_t ArrayIndex = 0) const
     {
-        const uint8_t* Byte = static_cast<const uint8_t*>(ContainerPtrToValuePtr(Container)) + GetByteOffset();
-        return (*Byte & GetFieldMask()) != 0;
+        return GetPropertyValue(ContainerPtrToValuePtr<void>(A, ArrayIndex));
     }
 
-    void SetPropertyValue(void* Container, bool bValue) const
+    void SetPropertyValue_InContainer(void* A, bool Value, int32_t ArrayIndex = 0) const
     {
-        uint8_t* Byte = static_cast<uint8_t*>(ContainerPtrToValuePtr(Container)) + GetByteOffset();
-        *Byte = bValue ? (*Byte | GetFieldMask()) : (*Byte & ~GetFieldMask());
+        SetPropertyValue(ContainerPtrToValuePtr<void>(A, ArrayIndex), Value);
     }
 };
 
 class UObjectPropertyBase : public UProperty
 {
-public:
-    UClass* GetPropertyClass() const
-    {
-        return *reinterpret_cast<UClass* const*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UObjectPropertyBase_PropertyClass);
-    }
+    DefineUnrealClass(UObjectPropertyBase, CoreUObject)
+    DefineLayoutMember(UClass*, PropertyClass, UObjectPropertyBase_PropertyClass)
 };
 
 class UStructProperty : public UProperty
 {
-public:
-    UStruct* GetStruct() const
-    {
-        return *reinterpret_cast<UStruct* const*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UStructProperty_Struct);
-    }
+    DefineUnrealClass(UStructProperty, CoreUObject)
+    DefineLayoutMember(UScriptStruct*, Struct, UStructProperty_Struct)
 };
 
-template <typename T>
-T* UObject::TryGet(const wchar_t* Name) const
+class UArrayProperty : public UProperty
 {
-    const UProperty* Property = FindProperty(Name);
-    return Property ? static_cast<T*>(Property->ContainerPtrToValuePtr(this)) : nullptr;
-}
+    DefineUnrealClass(UArrayProperty, CoreUObject)
+    DefineLayoutMember(UProperty*, Inner, UArrayProperty_Inner)
+};

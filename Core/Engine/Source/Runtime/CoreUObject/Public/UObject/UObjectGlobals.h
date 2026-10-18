@@ -2,22 +2,38 @@
 
 #include "UObject/Class.h"
 
-struct FUObjectItem;
+#define ANY_PACKAGE (reinterpret_cast<UObject*>(-1))
 
-UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, bool bExactClass = false);
-UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename = nullptr, uint32_t LoadFlags = 0);
-UClass* FindClass(const wchar_t* PathName);
-
-template <typename T>
-T* FindObject(const wchar_t* PathName, UClass* Class = nullptr)
+enum ELoadFlags : uint32_t
 {
-    return static_cast<T*>(StaticFindObject(Class, nullptr, PathName, false));
+    LOAD_None = 0x00000000,
+    LOAD_NoWarn = 0x00000010,
+    LOAD_Quiet = 0x00002000,
+};
+
+UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass = false);
+UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename = nullptr, uint32_t LoadFlags = LOAD_None, void* Sandbox = nullptr, bool bAllowObjectReconciliation = true);
+
+template <class T>
+T* FindObject(UObject* Outer, const wchar_t* Name, bool ExactClass = false)
+{
+    return static_cast<T*>(StaticFindObject(T::StaticClass(), Outer, Name, ExactClass));
 }
 
-template <typename T>
-T* LoadObject(const wchar_t* PathName, UClass* Class = nullptr)
+template <class T>
+T* LoadObject(UObject* Outer, const wchar_t* Name, const wchar_t* Filename = nullptr, uint32_t LoadFlags = LOAD_None, void* Sandbox = nullptr)
 {
-    return static_cast<T*>(StaticLoadObject(Class, nullptr, PathName));
+    return static_cast<T*>(StaticLoadObject(T::StaticClass(), Outer, Name, Filename, LoadFlags, Sandbox));
 }
 
-FUObjectItem* GetObjectItem(const UObjectBase* Object);
+template <class T>
+const T* GetDefault()
+{
+    return static_cast<const T*>(T::StaticClass()->GetDefaultObject());
+}
+
+template <class T>
+T* GetMutableDefault()
+{
+    return static_cast<T*>(T::StaticClass()->GetDefaultObject());
+}

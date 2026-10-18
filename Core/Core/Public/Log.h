@@ -9,6 +9,7 @@ enum class ELogLevel : uint8_t
     Info,
     Warning,
     Error,
+    Fatal,
 };
 
 namespace Log
@@ -32,5 +33,13 @@ namespace Log
     void Error(std::wformat_string<TArgs...> Format, TArgs&&... Args)
     {
         Write(ELogLevel::Error, std::format(Format, std::forward<TArgs>(Args)...));
+    }
+
+    [[noreturn]] void FatalError(std::wstring_view Message);
+
+    template <typename... TArgs>
+    [[noreturn]] void Fatal(std::wformat_string<TArgs...> Format, TArgs&&... Args)
+    {
+        FatalError(std::format(Format, std::forward<TArgs>(Args)...));
     }
 }

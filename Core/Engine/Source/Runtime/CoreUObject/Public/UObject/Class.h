@@ -1,85 +1,84 @@
 #pragma once
 
+#include "ObjectLayout.h"
 #include "UObject/Object.h"
-#include "UObject/ObjectLayout.h"
 
 class UProperty;
 
+namespace EIncludeSuperFlag
+{
+    enum Type
+    {
+        ExcludeSuper,
+        IncludeSuper,
+    };
+}
+
 class UField : public UObject
 {
-public:
-    UField* GetNext() const
-    {
-        return *reinterpret_cast<UField* const*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UField_Next);
-    }
+    DefineUnrealClass(UField, CoreUObject)
+    DefineLayoutMember(UField*, Next, UField_Next)
 };
 
 class UStruct : public UField
 {
+    DefineUnrealClass(UStruct, CoreUObject)
+    DefineLayoutMember(UField*, Children, UStruct_Children)
+    DefineLayoutMember(int32_t, PropertiesSize, UStruct_PropertiesSize)
+    DefineLayoutMember(int32_t, MinAlignment, UStruct_MinAlignment)
+
 public:
     UStruct* GetSuperStruct() const
     {
-        return *reinterpret_cast<UStruct* const*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UStruct_SuperStruct);
+        return *reinterpret_cast<UStruct* const*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.UStruct_SuperStruct);
     }
 
-    UField* GetChildren() const
-    {
-        return *reinterpret_cast<UField* const*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UStruct_Children);
-    }
+    int32_t GetPropertiesSize() const { return PropertiesSize; }
+    int32_t GetMinAlignment() const { return MinAlignment; }
 
-    int32_t GetPropertiesSize() const
-    {
-        return *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UStruct_PropertiesSize);
-    }
+    bool IsChildOf(const UStruct* SomeBase) const;
+    UProperty* FindPropertyByName(FName InName) const;
+};
 
-    bool IsChildOf(const UStruct* Base) const;
-    UProperty* FindPropertyByName(FName Name) const;
-    UFunction* FindFunctionByName(FName Name) const;
+class UScriptStruct : public UStruct
+{
+    DefineUnrealClass(UScriptStruct, CoreUObject)
 };
 
 class UClass : public UStruct
 {
+    DefineUnrealClass(UClass, CoreUObject)
+    DefineLayoutMember(EClassCastFlags, ClassCastFlags, UClass_ClassCastFlags)
+    DefineLayoutMember(UObject*, ClassDefaultObject, UClass_ClassDefaultObject)
+
 public:
-    EClassCastFlags GetClassCastFlags() const
-    {
-        return *reinterpret_cast<const EClassCastFlags*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UClass_ClassCastFlags);
-    }
+    UClass* GetSuperClass() const { return static_cast<UClass*>(GetSuperStruct()); }
+    bool HasAnyCastFlag(EClassCastFlags FlagToCheck) const { return (ClassCastFlags & FlagToCheck) != 0; }
+    bool HasAllCastFlags(EClassCastFlags FlagsToCheck) const { return (ClassCastFlags & FlagsToCheck) == FlagsToCheck; }
+    UObject* GetDefaultObject() const { return ClassDefaultObject; }
 
-    bool HasAnyCastFlag(EClassCastFlags Flags) const
-    {
-        return HasAnyCastFlags(GetClassCastFlags(), Flags);
-    }
-
-    UObject* GetDefaultObject() const
-    {
-        return *reinterpret_cast<UObject* const*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UClass_ClassDefaultObject);
-    }
-
-    static UClass* StaticClass();
+    UFunction* FindFunctionByName(FName InName, EIncludeSuperFlag::Type IncludeSuper = EIncludeSuperFlag::IncludeSuper) const;
 };
 
 class UFunction : public UStruct
 {
+    DefineUnrealClass(UFunction, CoreUObject)
+    DefineLayoutMember(EFunctionFlags, FunctionFlags, UFunction_FunctionFlags)
+    DefineLayoutMember(uint16_t, ParmsSize, UFunction_ParmsSize)
+    DefineLayoutMember(uint16_t, ReturnValueOffset, UFunction_ReturnValueOffset)
+
 public:
-    using FNativeFuncPtr = void (*)(UObject* Context, void* Stack, void* Result);
-
-    uint32_t GetFunctionFlags() const
-    {
-        return *reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UFunction_FunctionFlags);
-    }
-
-    uint16_t GetParmsSize() const
-    {
-        return *reinterpret_cast<const uint16_t*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UFunction_ParmsSize);
-    }
-
-    uint16_t GetReturnValueOffset() const
-    {
-        return *reinterpret_cast<const uint16_t*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UFunction_ReturnValueOffset);
-    }
+    using FNativeFuncPtr = void (*)(UObject* Context, void* TheStack, void* Result);
 
     FNativeFuncPtr GetNativeFunc() const
     {
-        return *reinterpret_cast<const FNativeFuncPtr*>(reinterpret_cast<const uint8_t*>(this) + ObjectLayout::Current.UFunction_Func);
+        return *reinterpret_cast<const FNativeFuncPtr*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.UFunction_Func);
     }
+
+    void SetNativeFunc(FNativeFuncPtr InFunc)
+    {
+        *reinterpret_cast<FNativeFuncPtr*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.UFunction_Func) = InFunc;
+    }
+
+    bool HasAnyFunctionFlags(EFunctionFlags FlagsToCheck) const { return (FunctionFlags & FlagsToCheck) != 0; }
 };

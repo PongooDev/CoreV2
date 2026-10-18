@@ -1,0 +1,137 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+
+class UClass;
+class UFunction;
+class UScriptStruct;
+class UStruct;
+
+namespace Reflection
+{
+    inline constexpr int32_t UnresolvedOffset = -2;
+    inline constexpr int32_t MissingOffset = -1;
+
+    enum class ETypeKind : uint8_t
+    {
+        Class,
+        ScriptStruct,
+    };
+
+    enum class EMemberKind : uint8_t
+    {
+        Value,
+        Bool,
+    };
+
+    using FOwnerGetter = UStruct* (*)();
+
+    class FTypeInfo
+    {
+    public:
+        FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind);
+
+        UStruct* Get();
+        UClass* GetClass();
+        UScriptStruct* GetScriptStruct();
+        const wchar_t* GetNativeName() const { return NativeName; }
+        const wchar_t* GetPackage() const { return Package; }
+
+    private:
+        const wchar_t* Package;
+        const wchar_t* NativeName;
+        ETypeKind Kind;
+        UStruct* Struct = nullptr;
+    };
+
+    class FMemberInfo
+    {
+    public:
+        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind);
+
+        int32_t GetOffsetChecked();
+        uint8_t GetFieldMask() const { return FieldMask; }
+        bool Resolve();
+        const wchar_t* GetName() const { return Name; }
+
+    private:
+        friend bool ResolveAll();
+
+        FOwnerGetter Owner;
+        const wchar_t* Name;
+        size_t Size;
+        EMemberKind Kind;
+        int32_t Offset = UnresolvedOffset;
+        uint8_t FieldMask = 0;
+    };
+
+    class FFunctionInfo
+    {
+    public:
+        FFunctionInfo(FOwnerGetter InOwner, const wchar_t* InName);
+
+        UFunction* Get();
+
+    private:
+        friend bool ResolveAll();
+
+        FOwnerGetter Owner;
+        const wchar_t* Name;
+        UFunction* Function = nullptr;
+    };
+
+    bool ResolveAll();
+
+    template <typename T>
+    T& AccessMember(const void* Object, FMemberInfo& Member)
+    {
+        return *reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(Object) + Member.GetOffsetChecked());
+    }
+
+    inline bool GetBoolMember(const void* Object, FMemberInfo& Member)
+    {
+        return (AccessMember<uint8_t>(Object, Member) & Member.GetFieldMask()) != 0;
+    }
+
+    inline void SetBoolMember(void* Object, FMemberInfo& Member, bool bValue)
+    {
+        uint8_t& Byte = AccessMember<uint8_t>(Object, Member);
+        Byte = bValue ? (Byte | Member.GetFieldMask()) : (Byte & ~Member.GetFieldMask());
+    }
+}
+
+#define DefineUnrealClass(ClassName, Package) \
+private: \
+    static inline Reflection::FTypeInfo TypeInfo_##ClassName{ TEXT(#Package), TEXT(#ClassName), Reflection::ETypeKind::Class }; \
+public: \
+    static UClass* StaticClass() { return TypeInfo_##ClassName.GetClass(); } \
+    static UStruct* StaticReflectionOwner() { return TypeInfo_##ClassName.Get(); }
+
+#define DefineUnrealStruct(StructName, Package) \
+private: \
+    static inline Reflection::FTypeInfo TypeInfo_##StructName{ TEXT(#Package), TEXT(#StructName), Reflection::ETypeKind::ScriptStruct }; \
+public: \
+    static UScriptStruct* StaticStruct() { return TypeInfo_##StructName.GetScriptStruct(); } \
+    static UStruct* StaticReflectionOwner() { return TypeInfo_##StructName.Get(); }
+
+#define DefineUProperty(Type, Name) \
+private: \
+    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value }; \
+public: \
+    Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
+    void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \
+    __declspec(property(get = GetMember_##Name, put = SetMember_##Name)) Type Name;
+
+#define DefineBitfieldUProperty(Name) \
+private: \
+    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(uint8_t), Reflection::EMemberKind::Bool }; \
+public: \
+    bool GetMember_##Name() const { return Reflection::GetBoolMember(this, Member_##Name); } \
+    void SetMember_##Name(bool bValue) { Reflection::SetBoolMember(this, Member_##Name, bValue); } \
+    __declspec(property(get = GetMember_##Name, put = SetMember_##Name)) bool Name;
+
+#define DefineUFunction(Name) \
+private: \
+    static inline Reflection::FFunctionInfo Function_##Name{ &StaticReflectionOwner, TEXT(#Name) }; \
+public:

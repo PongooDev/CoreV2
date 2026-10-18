@@ -1,30 +1,13 @@
 #include "pch.h"
 #include "UObject/UObjectGlobals.h"
-#include "UObject/UObjectArray.h"
 #include "Natives.h"
 
-UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, bool bExactClass)
+UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass)
 {
-    return Natives::StaticFindObject ? Natives::StaticFindObject(Class, InOuter, Name, bExactClass) : nullptr;
+    return Natives::StaticFindObject(Class, InOuter, Name, ExactClass);
 }
 
-UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename, uint32_t LoadFlags)
+UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename, uint32_t LoadFlags, void* Sandbox, bool bAllowObjectReconciliation)
 {
-    return Natives::StaticLoadObject ? Natives::StaticLoadObject(Class, InOuter, Name, Filename, LoadFlags, nullptr, true) : nullptr;
-}
-
-UClass* FindClass(const wchar_t* PathName)
-{
-    return static_cast<UClass*>(StaticFindObject(UClass::StaticClass(), nullptr, PathName, false));
-}
-
-FUObjectItem* GetObjectItem(const UObjectBase* Object)
-{
-    if (!Object || !Natives::GUObjectArray)
-    {
-        return nullptr;
-    }
-
-    FUObjectItem* Item = Natives::GUObjectArray->IndexToObject(Object->InternalIndex);
-    return Item && Item->Object == Object ? Item : nullptr;
+    return Natives::StaticLoadObject(Class, InOuter, Name, Filename, LoadFlags, Sandbox, bAllowObjectReconciliation);
 }

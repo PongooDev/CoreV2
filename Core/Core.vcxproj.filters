@@ -34,6 +34,9 @@
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public">
       <UniqueIdentifier>{2293a213-a961-40b8-a63a-f6882bd281b3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\CoreUObject\Public\Templates">
+      <UniqueIdentifier>{7340ca0b-724f-452f-be49-dc3d110face5}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public\UObject">
       <UniqueIdentifier>{3315ec9f-5983-40d6-8ce4-b6a9c80f80a3}</UniqueIdentifier>
     </Filter>
@@ -91,6 +94,12 @@
     <ClInclude Include="Core\Public\Natives.h">
       <Filter>Core\Public</Filter>
     </ClInclude>
+    <ClInclude Include="Core\Public\ObjectLayout.h">
+      <Filter>Core\Public</Filter>
+    </ClInclude>
+    <ClInclude Include="Core\Public\Reflection.h">
+      <Filter>Core\Public</Filter>
+    </ClInclude>
     <ClInclude Include="Engine\Source\Runtime\Core\Public\Containers\Array.h">
       <Filter>Engine\Source\Runtime\Core\Public\Containers</Filter>
     </ClInclude>
@@ -103,19 +112,25 @@
     <ClInclude Include="Engine\Source\Runtime\Core\Public\UObject\NameTypes.h">
       <Filter>Engine\Source\Runtime\Core\Public\UObject</Filter>
     </ClInclude>
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\Templates\Casts.h">
+      <Filter>Engine\Source\Runtime\CoreUObject\Public\Templates</Filter>
+    </ClInclude>
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\Class.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
-    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectLayout.h">
-      <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
-    </ClInclude>
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectArray.h">
+      <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBase.h">
+      <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
+    </ClInclude>
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBaseUtility.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectGlobals.h">
@@ -145,6 +160,9 @@
     <ClCompile Include="Core\Private\Log.cpp">
       <Filter>Core\Private</Filter>
     </ClCompile>
+    <ClCompile Include="Core\Private\Reflection.cpp">
+      <Filter>Core\Private</Filter>
+    </ClCompile>
     <ClCompile Include="Engine\Source\Runtime\Core\Private\HAL\UnrealMemory.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
     </ClCompile>
@@ -154,7 +172,10 @@
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Class.cpp">
       <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
     </ClCompile>
-    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Object.cpp">
+    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Obj.cpp">
+      <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectBaseUtility.cpp">
       <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectGlobals.cpp">

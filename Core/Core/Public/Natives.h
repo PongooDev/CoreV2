@@ -11,7 +11,7 @@ class UObject;
 class UWorld;
 struct FLogCategoryBase;
 struct FName;
-struct FUObjectArray;
+class FUObjectArray;
 struct FWorldContext;
 
 namespace Natives

@@ -2,6 +2,7 @@
 #include "Log.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <string>
 
@@ -27,6 +28,8 @@ namespace
             return L"Warning";
         case ELogLevel::Error:
             return L"Error";
+        case ELogLevel::Fatal:
+            return L"Fatal";
         default:
             return L"Info";
         }
@@ -68,4 +71,10 @@ void Log::Write(ELogLevel Level, std::wstring_view Message)
     }
 
     OutputDebugStringW(Line.c_str());
+}
+
+void Log::FatalError(std::wstring_view Message)
+{
+    Write(ELogLevel::Fatal, Message);
+    std::abort();
 }

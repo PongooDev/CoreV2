@@ -8,6 +8,7 @@ struct FObjectLayout
     int32_t UStruct_SuperStruct = 0x30;
     int32_t UStruct_Children = 0x38;
     int32_t UStruct_PropertiesSize = 0x40;
+    int32_t UStruct_MinAlignment = 0x44;
     int32_t UClass_ClassCastFlags = 0xB8;
     int32_t UClass_ClassDefaultObject = 0x100;
     int32_t UFunction_FunctionFlags = 0x88;
@@ -17,7 +18,7 @@ struct FObjectLayout
     int32_t UProperty_ArrayDim = 0x30;
     int32_t UProperty_ElementSize = 0x34;
     int32_t UProperty_PropertyFlags = 0x38;
-    int32_t UProperty_Offset = 0x50;
+    int32_t UProperty_Offset_Internal = 0x50;
     int32_t UBoolProperty_FieldSize = 0x78;
     int32_t UBoolProperty_ByteOffset = 0x79;
     int32_t UBoolProperty_ByteMask = 0x7A;
@@ -31,3 +32,9 @@ namespace ObjectLayout
 {
     inline FObjectLayout Current;
 }
+
+#define DefineLayoutMember(Type, Name, LayoutField) \
+public: \
+    Type& GetLayout_##Name() const { return *reinterpret_cast<Type*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.LayoutField); } \
+    void SetLayout_##Name(Type const& Value) { GetLayout_##Name() = Value; } \
+    __declspec(property(get = GetLayout_##Name, put = SetLayout_##Name)) Type Name;

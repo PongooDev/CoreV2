@@ -52,7 +52,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)ThirdParty\MinHook\include;$(ProjectDir)ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Core\Public;$(ProjectDir)Engine\Source\Runtime\Core\Public;$(ProjectDir)Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)ThirdParty\MinHook\include;$(ProjectDir)ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -72,7 +72,7 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)ThirdParty\MinHook\include;$(ProjectDir)ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Core\Public;$(ProjectDir)Engine\Source\Runtime\Core\Public;$(ProjectDir)Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)ThirdParty\MinHook\include;$(ProjectDir)ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization>MaxSpeed</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -86,13 +86,38 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
+    <ClInclude Include="Core\Public\Configuration.h" />
+    <ClInclude Include="Core\Public\GameThread.h" />
+    <ClInclude Include="Core\Public\Hooks.h" />
+    <ClInclude Include="Core\Public\Log.h" />
+    <ClInclude Include="Core\Public\Natives.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\Containers\Array.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\Containers\UnrealString.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\HAL\UnrealMemory.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\UObject\NameTypes.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\Class.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectLayout.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectArray.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectGlobals.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UnrealType.h" />
     <ClInclude Include="ThirdParty\Memcury\memcury.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Core\dllmain.cpp" />
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="Core\dllmain.cpp" />
+    <ClCompile Include="Core\Private\Configuration.cpp" />
+    <ClCompile Include="Core\Private\GameThread.cpp" />
+    <ClCompile Include="Core\Private\Hooks.cpp" />
+    <ClCompile Include="Core\Private\Log.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\Core\Private\HAL\UnrealMemory.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\Core\Private\UObject\UnrealNames.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Class.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Object.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectGlobals.cpp" />
     <ClCompile Include="ThirdParty\MinHook\src\buffer.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <SDLCheck>false</SDLCheck>

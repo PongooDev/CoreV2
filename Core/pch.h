@@ -8,3 +8,4 @@
 #include <vector>
 
 #include <MinHook.h>
+#include <memcury.h>

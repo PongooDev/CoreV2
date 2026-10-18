@@ -48,7 +48,7 @@ Looking for the original Core? Core V1 is still available at [PongooDev/Core](ht
 1. Clone the repository:
 
    ```
-   git clone https://github.com/PongooDev/CoreV2
+   git clone --recursive https://github.com/PongooDev/CoreV2
 
    cd CoreV2
    ```

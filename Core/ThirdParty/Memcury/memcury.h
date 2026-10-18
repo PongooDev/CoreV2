@@ -918,6 +918,71 @@ namespace Memcury
         {
             return _address.IsValid();
         }
+
+        template <typename T = const wchar_t*>
+        static auto FindStringRefs(T string) -> std::vector<Scanner>
+        {
+            std::vector<Scanner> refs;
+
+            constexpr auto bIsWide = std::is_same<T, const wchar_t*>::value;
+
+            auto textSection = PE::Section::GetSection(".text");
+            auto rdataSection = PE::Section::GetSection(".rdata");
+
+            const auto scanBytes = reinterpret_cast<std::uint8_t*>(textSection.GetSectionStart().Get());
+            const auto scanSize = textSection.GetSectionSize();
+
+            for (DWORD i = 0x0; i + 7 <= scanSize; i++)
+            {
+                if ((scanBytes[i] != ASM::CMOVL && scanBytes[i] != ASM::CMOVS) || scanBytes[i + 1] != ASM::LEA || (scanBytes[i + 2] & 0xC7) != 0x05)
+                {
+                    continue;
+                }
+
+                auto stringAdd = PE::Address(&scanBytes[i]).RelativeOffset(3);
+                if (!rdataSection.isInSection(stringAdd))
+                {
+                    continue;
+                }
+
+                if constexpr (bIsWide)
+                {
+                    if (wcscmp(string, stringAdd.GetAs<const wchar_t*>()) == 0)
+                    {
+                        refs.push_back(Scanner(PE::Address(&scanBytes[i])));
+                    }
+                }
+                else
+                {
+                    if (strcmp(string, stringAdd.GetAs<const char*>()) == 0)
+                    {
+                        refs.push_back(Scanner(PE::Address(&scanBytes[i])));
+                    }
+                }
+            }
+
+            return refs;
+        }
+
+        auto FindFunctionStart() -> Scanner
+        {
+            DWORD64 imageBase = 0;
+            auto entry = RtlLookupFunctionEntry(_address.Get(), &imageBase, nullptr);
+
+            while (entry)
+            {
+                const auto unwindInfo = reinterpret_cast<const std::uint8_t*>(imageBase + entry->UnwindData);
+                if (((unwindInfo[0] >> 3) & UNW_FLAG_CHAININFO) == 0)
+                {
+                    return Scanner(PE::Address(static_cast<uintptr_t>(imageBase + entry->BeginAddress)));
+                }
+
+                const auto countOfCodes = unwindInfo[2];
+                entry = reinterpret_cast<PRUNTIME_FUNCTION>(const_cast<std::uint8_t*>(unwindInfo) + 4 + ((countOfCodes + 1) & ~1) * 2);
+            }
+
+            return Scanner(PE::Address());
+        }
     };
 
     /* Bad don't use it tbh... */

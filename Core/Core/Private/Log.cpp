@@ -1,0 +1,71 @@
+#include "pch.h"
+#include "Log.h"
+
+#include <cstdio>
+#include <mutex>
+#include <string>
+
+namespace
+{
+    std::mutex LogMutex;
+    FILE* LogFile = nullptr;
+    HANDLE ConsoleOutput = nullptr;
+
+    std::wstring ExecutableDirectory()
+    {
+        wchar_t Path[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, Path, MAX_PATH);
+        const std::wstring FullPath = Path;
+        return FullPath.substr(0, FullPath.find_last_of(L"\\/") + 1);
+    }
+
+    const wchar_t* LevelName(ELogLevel Level)
+    {
+        switch (Level)
+        {
+        case ELogLevel::Warning:
+            return L"Warning";
+        case ELogLevel::Error:
+            return L"Error";
+        default:
+            return L"Info";
+        }
+    }
+}
+
+void Log::Initialize(bool bAllocateConsole)
+{
+    std::scoped_lock Lock(LogMutex);
+
+    if (bAllocateConsole && AllocConsole())
+    {
+        ConsoleOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+        SetConsoleTitleW(L"Core");
+    }
+
+    _wfopen_s(&LogFile, (ExecutableDirectory() + L"Server_log.txt").c_str(), L"w, ccs=UTF-8");
+}
+
+void Log::Write(ELogLevel Level, std::wstring_view Message)
+{
+    SYSTEMTIME Time = {};
+    GetLocalTime(&Time);
+
+    const std::wstring Line = std::format(L"[{:02}:{:02}:{:02}.{:03}] [{}] {}\n", Time.wHour, Time.wMinute, Time.wSecond, Time.wMilliseconds, LevelName(Level), Message);
+
+    std::scoped_lock Lock(LogMutex);
+
+    if (LogFile)
+    {
+        fputws(Line.c_str(), LogFile);
+        fflush(LogFile);
+    }
+
+    if (ConsoleOutput)
+    {
+        DWORD Written = 0;
+        WriteConsoleW(ConsoleOutput, Line.c_str(), static_cast<DWORD>(Line.size()), &Written, nullptr);
+    }
+
+    OutputDebugStringW(Line.c_str());
+}

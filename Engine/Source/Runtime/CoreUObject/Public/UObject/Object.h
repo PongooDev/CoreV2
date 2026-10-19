@@ -15,10 +15,17 @@ public:
     UFunction* FindFunction(FName InName) const;
     UFunction* FindFunctionChecked(FName InName) const;
 
+    bool NeedsLoadForClient() const;
+    bool NeedsLoadForServer() const;
+
+    static bool CanCreateInCurrentContext(UObject* Template);
+
     static UObject* GetArchetypeFromRequiredInfo(UClass* Class, UObject* Outer, FName Name, EObjectFlags ObjectFlags);
 
     UObject* GetArchetype() const
     {
         return GetArchetypeFromRequiredInfo(GetClass(), GetOuter(), GetFName(), GetFlags());
     }
+
+    static void Hook();
 };

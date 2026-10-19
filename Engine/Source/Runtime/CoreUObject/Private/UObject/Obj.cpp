@@ -1,6 +1,10 @@
 #include "pch.h"
 #include "UObject/Class.h"
 #include "Finder.h"
+#include "Hooks.h"
+#include "Misc/AssertionMacros.h"
+#include "Misc/CoreMisc.h"
+#include "ObjectLayout.h"
 #include "Log.h"
 #include "Natives.h"
 
@@ -41,4 +45,41 @@ UFunction* UObject::FindFunctionChecked(FName InName) const
 UObject* UObject::GetArchetypeFromRequiredInfo(UClass* Class, UObject* Outer, FName Name, EObjectFlags ObjectFlags)
 {
     return Natives::UObject_GetArchetypeFromRequiredInfo(Class, Outer, Name, static_cast<int32_t>(ObjectFlags));
+}
+
+bool UObject::NeedsLoadForClient() const
+{
+    return CallVirtual<bool>(this, Natives::UObject_NeedsLoadForClientIndex);
+}
+
+bool UObject::NeedsLoadForServer() const
+{
+    return CallVirtual<bool>(this, Natives::UObject_NeedsLoadForServerIndex);
+}
+
+bool UObject::CanCreateInCurrentContext(UObject* Template)
+{
+    check(Template);
+
+    if (IsRunningDedicatedServer())
+    {
+        return Template->NeedsLoadForServer();
+    }
+
+    if (IsRunningClientOnly())
+    {
+        return Template->NeedsLoadForClient();
+    }
+
+    if (IsRunningGame())
+    {
+        return Template->NeedsLoadForClient() || Template->NeedsLoadForServer();
+    }
+
+    return true;
+}
+
+void UObject::Hook()
+{
+    Hooks::Detour(L"UObject::CanCreateInCurrentContext", reinterpret_cast<void*>(Natives::UObject_CanCreateInCurrentContext), &CanCreateInCurrentContext, nullptr);
 }

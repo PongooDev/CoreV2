@@ -132,6 +132,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CommandLine.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\ConfigCacheIni.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMisc.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMiscDefines.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\DefaultValueHelper.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\MemStack.h" />

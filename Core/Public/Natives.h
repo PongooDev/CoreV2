@@ -97,6 +97,7 @@ namespace Natives
 
     inline void (*UGameInstance_StartGameInstance)(UGameInstance* This) = nullptr;
     inline bool (*UGameInstance_IsDedicatedServerInstance)(const UGameInstance* This) = nullptr;
+    inline bool (*UObject_CanCreateInCurrentContext)(UObject* Template) = nullptr;
     inline UClass** (*AFortGameMode_GetGameSessionClass)(const AFortGameMode* This, UClass** Result) = nullptr;
     inline bool (*FOnlineSubsystemImpl_IsDedicated)(const FOnlineSubsystemImpl* This) = nullptr;
     inline void (*UGameEngine_Tick)(UGameEngine* This, float DeltaSeconds, bool bIdleMode) = nullptr;
@@ -144,6 +145,8 @@ namespace Natives
     inline int32_t UNetDriver_ServerReplicateActorsIndex = -1;
     inline int32_t UEngine_LoadMapIndex = -1;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
+    inline int32_t UObject_NeedsLoadForClientIndex = -1;
+    inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;
     inline int32_t UNetConnection_TickIndex = -1;
     inline int32_t UNetConnection_IsNetReadyIndex = -1;

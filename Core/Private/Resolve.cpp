@@ -2076,6 +2076,24 @@ namespace
         return Entries;
     }
 
+    void ResolveSpawnContext()
+    {
+        const uintptr_t SpawnRefusal = OnlyRef(L"Unable to spawn class '%s' due to client/server context.");
+        uintptr_t CanCreate = 0;
+        for (uintptr_t Call = SpawnRefusal ? FindRawCall(SpawnRefusal - 0x60, SpawnRefusal) : 0; Call && !CanCreate; Call = FindRawCall(Call + 5, SpawnRefusal))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            if (Byte(Call + 5) == 0x84 && Byte(Call + 6) == 0xC0 && FindInstruction(Target, Target + 10, { 0x48, 0x8B, 0x01, 0x48, 0xFF, 0xA0 }) == Target)
+            {
+                CanCreate = Target;
+            }
+        }
+        Require(L"UObject::CanCreateInCurrentContext", Natives::UObject_CanCreateInCurrentContext, CanCreate);
+        const int32_t ClientSlot = CanCreate ? *reinterpret_cast<const int32_t*>(CanCreate + 6) / static_cast<int32_t>(sizeof(void*)) : -1;
+        RequireSlot(L"UObject::NeedsLoadForClient", Natives::UObject_NeedsLoadForClientIndex, ClientSlot);
+        RequireSlot(L"UObject::NeedsLoadForServer", Natives::UObject_NeedsLoadForServerIndex, ClientSlot >= 0 ? ClientSlot + 1 : -1);
+    }
+
     void ResolveEngineLoopTicks()
     {
         Sites::ShouldUseIdleModeCheck = nullptr;
@@ -2229,6 +2247,7 @@ bool Finder::ResolveServer()
     ResolveReplication();
     ResolveSession();
     ResolveEngineLoopTicks();
+    ResolveSpawnContext();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;

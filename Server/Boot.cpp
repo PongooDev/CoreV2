@@ -11,6 +11,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
+#include "UObject/Object.h"
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
 #include "OnlineSubsystemImpl.h"
@@ -34,6 +35,7 @@ void Boot::Initialize()
     }
 
     FConfigCacheIni::Hook();
+    UObject::Hook();
     FEngineLoop::Hook();
     UGameMapsSettings::Hook();
     UWorld::Hook();

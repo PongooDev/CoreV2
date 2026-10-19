@@ -2076,6 +2076,53 @@ namespace
         return Entries;
     }
 
+    void ResolveEngineLoopTicks()
+    {
+        Sites::ShouldUseIdleModeCheck = nullptr;
+        Sites::ShouldUseIdleModeFalse = nullptr;
+        const std::initializer_list<int32_t> IdleCheck = { 0x48, 0x8B, 0x05, -1, -1, -1, -1, 0x83, 0x38, 0x00, 0x74, -1 };
+        for (const uintptr_t Ref : Finder::StringRefs(L"t.IdleWhenNotForeground"))
+        {
+            const uintptr_t Function = Finder::FunctionStart(Ref);
+            const uintptr_t Check = Function ? FindInstruction(Function, Function + 0x40, IdleCheck) : 0;
+            if (Check && !Sites::ShouldUseIdleModeCheck)
+            {
+                Sites::ShouldUseIdleModeCheck = reinterpret_cast<uint8_t*>(Check);
+                Sites::ShouldUseIdleModeFalse = reinterpret_cast<uint8_t*>(Check + 12 + static_cast<int8_t>(Byte(Check + 11)));
+            }
+        }
+        const uint8_t* IdleFalse = Sites::ShouldUseIdleModeFalse;
+        if (!IdleFalse || IdleFalse[0] != 0x32 || IdleFalse[1] != 0xC0)
+        {
+            Log::Error(L"Finder: FEngineLoop::ShouldUseIdleMode not found");
+            Sites::ShouldUseIdleModeCheck = nullptr;
+            Sites::ShouldUseIdleModeFalse = nullptr;
+            ++MissingCount;
+        }
+
+        Sites::MaxTickRateWait = {};
+        const uintptr_t UpdateTime = Finder::FunctionStart(First(Finder::StringRefs(L"Detected negative delta time - on AMD systems please install http://files.aoaforums.com/I3199-setup.zip.html")));
+        const uintptr_t UpdateTimeEnd = Finder::FunctionEnd(UpdateTime);
+        const std::initializer_list<int32_t> SleepPattern = { 0x76, 0x10, 0xF3, 0x0F, 0x5C, -1, -1, -1, -1, -1, 0x0F, 0x28, -1, 0xE8 };
+        const uintptr_t Sleep = UpdateTimeEnd ? FindInstruction(UpdateTime, UpdateTimeEnd, SleepPattern) : 0;
+        const uintptr_t SleepTarget = Sleep ? Finder::RelativeTarget(Sleep + 13, 1, 5) : 0;
+        const bool bSlack = Sleep && (Byte(Sleep + 5) & 0xC7) == 0x05 && *reinterpret_cast<const float*>(Finder::RelativeTarget(Sleep + 2, 4, 8)) == 0.002f;
+        uintptr_t Spin = 0;
+        for (uintptr_t Exit = bSlack ? FindInstruction(Sleep + 18, Sleep + 0x60, { 0x73, -1, 0x0F, 0x28, -1, 0xE8 }) : 0; Exit && !Spin; Exit = FindInstruction(Exit + 1, Sleep + 0x60, { 0x73, -1, 0x0F, 0x28, -1, 0xE8 }))
+        {
+            Spin = Finder::RelativeTarget(Exit + 5, 1, 5) == SleepTarget ? Exit : 0;
+        }
+        if (Spin)
+        {
+            Sites::MaxTickRateWait = { reinterpret_cast<uint8_t*>(Sleep), reinterpret_cast<uint8_t*>(Sleep + 2), reinterpret_cast<uint8_t*>(Spin) };
+        }
+        else
+        {
+            Log::Error(L"Finder: UEngine::UpdateTimeAndHandleMaxTickRate wait not found");
+            ++MissingCount;
+        }
+    }
+
     void ResolveSession()
     {
         const uintptr_t FortInitGame = FunctionOf(L"playlistId");
@@ -2181,6 +2228,7 @@ bool Finder::ResolveServer()
     ResolveDedicatedServerChecks();
     ResolveReplication();
     ResolveSession();
+    ResolveEngineLoopTicks();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;

@@ -234,6 +234,16 @@ namespace Sites
     inline std::vector<uint8_t*> GameEngineTickDedicatedServerChecks;
     inline std::vector<void**> ConsoleVTables;
     inline std::vector<void**> NetDriverVTables;
+    inline uint8_t* ShouldUseIdleModeCheck = nullptr;
+    inline uint8_t* ShouldUseIdleModeFalse = nullptr;
+
+    struct FMaxTickRateWait
+    {
+        uint8_t* SleepThreshold = nullptr;
+        uint8_t* SleepSlack = nullptr;
+        uint8_t* SpinLoop = nullptr;
+    };
+    inline FMaxTickRateWait MaxTickRateWait;
     inline std::vector<uint8_t*> FlushActorDormancyCalls;
     inline uint8_t* FortGameInstanceStartDedicatedCheck = nullptr;
     inline uint8_t* FortGameInstanceStartDedicatedTarget = nullptr;

@@ -20,4 +20,11 @@ void FEngineLoop::Hook()
     {
         Hooks::SkipBranch(L"FEngineLoop::PreInit IsRunningDedicatedServer", Check);
     }
+
+    if (uint8_t* IdleCheck = Sites::ShouldUseIdleModeCheck)
+    {
+        uint8_t NotWindowed[7] = { 0xE9, 0, 0, 0, 0, 0x90, 0x90 };
+        *reinterpret_cast<int32_t*>(NotWindowed + 1) = static_cast<int32_t>(Sites::ShouldUseIdleModeFalse - (IdleCheck + 5));
+        Hooks::WriteBytes(L"FEngineLoop::ShouldUseIdleMode SupportsWindowedMode", IdleCheck, NotWindowed);
+    }
 }

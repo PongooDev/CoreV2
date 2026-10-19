@@ -29,4 +29,14 @@ void UEngine::Hook()
     {
         Hooks::SkipBranch(L"UEngine::Init IsRunningDedicatedServer", Check);
     }
+
+    if (Sites::MaxTickRateWait.SpinLoop)
+    {
+        const uint8_t AlwaysSleep[] = { 0x90, 0x90 };
+        const uint8_t FullWait[] = { 0x0F, 0x1F, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00 };
+        const uint8_t NoSpin[] = { 0xEB };
+        Hooks::WriteBytes(L"UEngine::UpdateTimeAndHandleMaxTickRate IsRunningDedicatedServer", Sites::MaxTickRateWait.SleepThreshold, AlwaysSleep);
+        Hooks::WriteBytes(L"UEngine::UpdateTimeAndHandleMaxTickRate IsRunningDedicatedServer", Sites::MaxTickRateWait.SleepSlack, FullWait);
+        Hooks::WriteBytes(L"UEngine::UpdateTimeAndHandleMaxTickRate IsRunningDedicatedServer", Sites::MaxTickRateWait.SpinLoop, NoSpin);
+    }
 }

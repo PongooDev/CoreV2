@@ -2076,6 +2076,49 @@ namespace
         return Entries;
     }
 
+    void ResolveThreadingForPerformance()
+    {
+        Sites::ShouldUseThreadingForPerformanceDedicatedCheck = nullptr;
+        const uintptr_t OneThread = OnlyRef(L"ONETHREAD");
+        const bool bParamTest = OneThread && Byte(OneThread + 7) == 0xE8 && Byte(OneThread + 12) == 0x84 && Byte(OneThread + 13) == 0xC0 && Byte(OneThread + 14) == 0x75;
+        const uintptr_t OnlyOneThread = bParamTest ? OneThread + 16 + static_cast<int8_t>(Byte(OneThread + 15)) : 0;
+        if (OnlyOneThread && Byte(OnlyOneThread) == 0xC6 && Byte(OnlyOneThread + 1) == 0x05 && Byte(OnlyOneThread + 6) == 0x01)
+        {
+            Sites::ShouldUseThreadingForPerformanceDedicatedCheck = reinterpret_cast<uint8_t*>(OneThread + 14);
+        }
+        else
+        {
+            Log::Error(L"Finder: FApp::ShouldUseThreadingForPerformance not found");
+            ++MissingCount;
+        }
+    }
+
+    void ResolveLinkerFilter()
+    {
+        Sites::LinkerFilterClientButNotServer = nullptr;
+        const uintptr_t IsClient = reinterpret_cast<uintptr_t>(Natives::GIsClient);
+        const uintptr_t IsServer = reinterpret_cast<uintptr_t>(Natives::GIsServer);
+        const std::initializer_list<int32_t> FilterPattern = { 0x40, 0x38, -1, -1, -1, -1, -1, 0x75, -1, 0x40, 0x38, -1, -1, -1, -1, -1, 0x74, -1, 0xC6, -1, -1, -1, 0x00, 0x00, 0x01 };
+        int32_t Filters = 0;
+        for (uintptr_t Site = IsClient && IsServer ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), FilterPattern) : 0; Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), FilterPattern))
+        {
+            const bool bReadsFlags = (Byte(Site + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Site, 3, 7) == IsClient
+                && (Byte(Site + 11) & 0xC7) == 0x05 && Finder::RelativeTarget(Site + 9, 3, 7) == IsServer;
+            const bool bStoresMember = (Byte(Site + 19) & 0xC0) == 0x80 && (Byte(Site + 19) & 0x38) == 0x00 && (Byte(Site + 19) & 0x07) != 0x04;
+            if (bReadsFlags && bStoresMember)
+            {
+                Sites::LinkerFilterClientButNotServer = reinterpret_cast<uint8_t*>(Site + 18);
+                ++Filters;
+            }
+        }
+        if (Filters != 1)
+        {
+            Log::Error(L"Finder: FLinker::FLinker FilterClientButNotServer store not found ({} matches)", Filters);
+            Sites::LinkerFilterClientButNotServer = nullptr;
+            ++MissingCount;
+        }
+    }
+
     void ResolveActorTick()
     {
         const uintptr_t GetWorldSettings = reinterpret_cast<uintptr_t>(Natives::UWorld_GetWorldSettings);
@@ -2270,6 +2313,8 @@ bool Finder::ResolveServer()
     ResolveEngineLoopTicks();
     ResolveSpawnContext();
     ResolveActorTick();
+    ResolveLinkerFilter();
+    ResolveThreadingForPerformance();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;

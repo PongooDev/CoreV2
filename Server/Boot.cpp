@@ -5,6 +5,7 @@
 #include "GameMapsSettings.h"
 #include "Hooks.h"
 #include "LaunchEngineLoop.h"
+#include "Misc/App.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Log.h"
 #include "Engine/GameEngine.h"
@@ -12,6 +13,7 @@
 #include "Engine/NetDriver.h"
 #include "GameFramework/Actor.h"
 #include "Engine/World.h"
+#include "UObject/Linker.h"
 #include "UObject/Object.h"
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
@@ -35,8 +37,10 @@ void Boot::Initialize()
         return;
     }
 
+    FApp::Hook();
     FConfigCacheIni::Hook();
     UObject::Hook();
+    FLinker::Hook();
     FEngineLoop::Hook();
     UGameMapsSettings::Hook();
     UWorld::Hook();

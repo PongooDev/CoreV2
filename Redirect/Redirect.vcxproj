@@ -129,6 +129,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\NumericLimits.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\UnrealMathUtility.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Vector.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\App.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\AssertionMacros.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Build.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CString.h" />
@@ -156,6 +157,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Templates\Casts.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Templates\SubclassOf.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Class.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Linker.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectArray.h" />
@@ -235,6 +237,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Internationalization\TextLocalizationManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Logging\LogCategory.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Math\UnrealMath.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\App.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\CommandLine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\ConfigCacheIni.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\DefaultValueHelper.cpp" />
@@ -245,6 +248,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\UObject\UnrealNames.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\Misc\PackageName.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Class.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Linker.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Obj.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Property.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectBaseUtility.cpp" />

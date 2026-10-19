@@ -239,6 +239,8 @@ namespace Sites
     inline std::vector<void**> ConsoleVTables;
     inline std::vector<void**> NetDriverVTables;
     inline uint8_t* ActorTickReceiveTick = nullptr;
+    inline uint8_t* ShouldUseThreadingForPerformanceDedicatedCheck = nullptr;
+    inline uint8_t* LinkerFilterClientButNotServer = nullptr;
     inline uint8_t* ShouldUseIdleModeCheck = nullptr;
     inline uint8_t* ShouldUseIdleModeFalse = nullptr;
 

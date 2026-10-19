@@ -111,6 +111,7 @@ namespace Natives
     inline void (*AFortWorldManager_OnWorldRecordQueryComplete)(AFortWorldManager* This) = nullptr;
     inline void (*AFortLobbyBeaconHost_SetWorldRecordLoaded)(AFortLobbyBeaconHost* This, bool bInWorldRecordLoaded) = nullptr;
     inline void* SharedEmptyFunction = nullptr;
+    inline void (*FortMcpConfig_UpdateServicePermissions)(void* Environment, void* Context, uint8_t* ServiceConfig, void* Extra) = nullptr;
     inline bool (*FOnlineSubsystemImpl_IsDedicated)(const FOnlineSubsystemImpl* This) = nullptr;
     inline void (*UGameEngine_Tick)(UGameEngine* This, float DeltaSeconds, bool bIdleMode) = nullptr;
     inline bool (*UEngine_LoadMap)(UEngine* This, FWorldContext& WorldContext, FURL* URL, void* Pending, FString& Error) = nullptr;
@@ -194,6 +195,7 @@ namespace Natives
     inline ptrdiff_t UWorld_NextSwitchCountdown = -1;
     inline ptrdiff_t FWorldContext_ThisCurrentWorld = -1;
     inline ptrdiff_t UGameInstance_WorldContext = -1;
+    inline ptrdiff_t FMcpServiceConfig_ServicePermissions = -1;
     inline ptrdiff_t FWorldContext_RunAsDedicated = -1;
     inline ptrdiff_t FOnlineSubsystemImpl_bForceDedicated = -1;
     inline ptrdiff_t UNetDriver_GuidCache = -1;

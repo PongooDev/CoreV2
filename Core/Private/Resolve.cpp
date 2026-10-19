@@ -2120,6 +2120,23 @@ namespace
             SharedEmpty = Byte(Target) == 0xC2 && Byte(Target + 1) == 0x00 && Byte(Target + 2) == 0x00 ? Target : 0;
         }
         Require(L"Shared empty function", Natives::SharedEmptyFunction, SharedEmpty);
+
+        const uintptr_t Permissions = FunctionOf(L"e1f31c211f28413186262d37a13fc84d");
+        const uintptr_t PermissionsEnd = Finder::FunctionEnd(Permissions);
+        ptrdiff_t PermissionsArray = 0;
+        int32_t PermissionAdds = 0;
+        for (uintptr_t Lea = PermissionsEnd ? FindInstruction(Permissions, PermissionsEnd, { 0x49, 0x8D, 0x8D }) : 0; Lea; Lea = FindInstruction(Lea + 1, PermissionsEnd, { 0x49, 0x8D, 0x8D }))
+        {
+            const uintptr_t AddCall = FindRawCall(Lea + 7, Lea + 0x10);
+            const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Lea + 3);
+            if (AddCall && (!PermissionAdds || Offset == PermissionsArray))
+            {
+                PermissionsArray = Offset;
+                ++PermissionAdds;
+            }
+        }
+        Require(L"FortMcpConfig service permissions", Natives::FortMcpConfig_UpdateServicePermissions, PermissionAdds >= 2 ? Permissions : 0);
+        RequireOffset(L"FMcpServiceConfig::ServicePermissions", Natives::FMcpServiceConfig_ServicePermissions, PermissionAdds >= 2 ? PermissionsArray : 0);
     }
 
     void ResolveThreadingForPerformance()

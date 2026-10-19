@@ -17,6 +17,9 @@
 #include "UObject/Object.h"
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
+#include "FortGameModeZone.h"
+#include "FortWorldManager.h"
+#include "GameThread.h"
 #include "OnlineSubsystemImpl.h"
 
 void Boot::Initialize()
@@ -50,9 +53,16 @@ void Boot::Initialize()
     UFortGameInstance::Hook();
     FOnlineSubsystemImpl::Hook();
     AFortGameMode::Hook();
+    AFortGameModeZone::Hook();
+    AFortWorldManager::Hook();
     UEngine::Hook();
     UGameEngine::Hook();
     Hooks::EnableAll();
+
+    GameThread::Enqueue([]
+    {
+        AFortGameModeZone::HookVTables();
+    });
 
     Log::Info(L"Core V2 startup complete");
 }

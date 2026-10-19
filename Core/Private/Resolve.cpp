@@ -2076,6 +2076,52 @@ namespace
         return Entries;
     }
 
+    bool IsFunctionEntry(uintptr_t Address)
+    {
+        if (!Address)
+        {
+            return false;
+        }
+        const uintptr_t Start = Finder::FunctionStart(Address);
+        return Start == Address || (!Start && (Address & 0xF) == 0 && (Byte(Address - 1) == 0xCC || Byte(Address - 1) == 0xC3));
+    }
+
+    uintptr_t UniqueFunction(std::initializer_list<int32_t> Pattern)
+    {
+        uintptr_t Found = 0;
+        int32_t Matches = 0;
+        for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), Pattern); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), Pattern))
+        {
+            Found = Site;
+            ++Matches;
+        }
+        return Matches == 1 ? Found : 0;
+    }
+
+    void ResolveZone()
+    {
+        const uintptr_t ZoneSpawnPawn = UniqueFunction({ 0x4D, 0x85, 0xC0, 0x74, 0x47, 0x48, 0x85, 0xD2, 0x74, 0x42, 0xE8 });
+        Require(L"AFortGameModeZone::SpawnDefaultPawnFor_Implementation", Natives::AFortGameModeZone_SpawnDefaultPawnFor, ZoneSpawnPawn ? Finder::FunctionStart(ZoneSpawnPawn) : 0);
+        Require(L"AFortGameMode::SpawnDefaultPawnFor_Implementation", Natives::AFortGameMode_SpawnDefaultPawnFor, FunctionOf(L"Couldn't spawn player pawn of type %s due to no start spot"));
+
+        const uintptr_t WorldIsReady = UniqueFunction({ 0x83, 0x8F, 0x30, 0x05, 0x00, 0x00, 0x01 });
+        Require(L"AFortGameMode::FinishWorldInitialization", Natives::AFortGameMode_FinishWorldInitialization, WorldIsReady ? Finder::FunctionStart(WorldIsReady) : 0);
+
+        Require(L"AFortWorldManager::OnWorldRecordQueryComplete", Natives::AFortWorldManager_OnWorldRecordQueryComplete, FunctionOf(L"Invalid world record when transition to world query complete state!"));
+
+        const uintptr_t RecordLoaded = UniqueFunction({ 0x83, 0xA1, 0xE0, 0x03, 0x00, 0x00, 0xFD, 0x0F, 0xB6, 0xC2, 0x83, 0xE0, 0x01, 0x03, 0xC0, 0x09, 0x81, 0xE0, 0x03, 0x00, 0x00 });
+        Require(L"AFortLobbyBeaconHost::SetWorldRecordLoaded", Natives::AFortLobbyBeaconHost_SetWorldRecordLoaded, IsFunctionEntry(RecordLoaded) ? RecordLoaded : 0);
+
+        const uintptr_t FlushDormancy = reinterpret_cast<uintptr_t>(Natives::AActor_FlushNetDormancy);
+        uintptr_t SharedEmpty = 0;
+        for (uintptr_t Call = FlushDormancy ? FindRawCall(FlushDormancy, Finder::FunctionEnd(FlushDormancy)) : 0; Call && !SharedEmpty; Call = FindRawCall(Call + 5, Finder::FunctionEnd(FlushDormancy)))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            SharedEmpty = Byte(Target) == 0xC2 && Byte(Target + 1) == 0x00 && Byte(Target + 2) == 0x00 ? Target : 0;
+        }
+        Require(L"Shared empty function", Natives::SharedEmptyFunction, SharedEmpty);
+    }
+
     void ResolveThreadingForPerformance()
     {
         Sites::ShouldUseThreadingForPerformanceDedicatedCheck = nullptr;
@@ -2315,6 +2361,7 @@ bool Finder::ResolveServer()
     ResolveActorTick();
     ResolveLinkerFilter();
     ResolveThreadingForPerformance();
+    ResolveZone();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;
@@ -2603,5 +2650,17 @@ bool Finder::ResolveReplicationLive()
     }
 
     Log::Info(L"Finder: replication live slots resolved, {} missing", MissingCount);
+    return MissingCount == 0;
+}
+
+bool Finder::ResolveGameModeZoneLive()
+{
+    MissingCount = 0;
+
+    void** FortVTable = CdoVTable(L"/Script/FortniteGame.FortGameMode");
+    const int32_t FinishIndex = Finder::VTableIndex(FortVTable, reinterpret_cast<void*>(Natives::AFortGameMode_FinishWorldInitialization), 0x400);
+    RequireSlot(L"AFortGameMode::FinishWorldInitialization", Natives::AFortGameMode_FinishWorldInitializationIndex, FinishIndex);
+
+    Log::Info(L"Finder: zone game mode live slots resolved, {} missing", MissingCount);
     return MissingCount == 0;
 }

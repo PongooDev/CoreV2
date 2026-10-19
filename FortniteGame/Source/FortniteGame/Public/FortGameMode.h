@@ -2,12 +2,23 @@
 
 #include "GameFramework/GameMode.h"
 
+class AActor;
+class AController;
+class AFortGameSession;
+class AFortWorldManager;
+class APawn;
+
 class AFortGameMode : public AGameMode
 {
     DefineUnrealClass(AFortGameMode, FortniteGame)
 
 public:
+    DefineUProperty(AFortGameSession*, FortGameSession)
+    DefineBitfieldUProperty(bWorldIsReady)
+
     TSubclassOf<AGameSession> GetGameSessionClass() const;
+    APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
+    void FinishWorldInitialization(AFortWorldManager* WorldManager);
 
     static void Hook();
 

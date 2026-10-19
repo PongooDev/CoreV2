@@ -1,6 +1,10 @@
 #include "pch.h"
 #include "Boot.h"
+#include "Finder.h"
+#include "Hooks.h"
 #include "Log.h"
+#include "Engine/Console.h"
+#include "Engine/GameViewportClient.h"
 
 void Boot::Initialize()
 {
@@ -12,6 +16,16 @@ void Boot::Initialize()
         Log::Error(L"MinHook failed to initialize");
         return;
     }
+
+    if (!Finder::ResolveRuntime() || !Finder::ResolveClient())
+    {
+        Log::Error(L"Startup aborted: required addresses are missing");
+        return;
+    }
+
+    UGameViewportClient::Hook();
+    UConsole::Hook();
+    Hooks::EnableAll();
 
     Log::Info(L"Core Client startup complete");
 }

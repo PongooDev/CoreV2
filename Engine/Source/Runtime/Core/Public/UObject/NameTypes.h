@@ -6,6 +6,8 @@
 #include <functional>
 #include <string>
 
+#define INVALID_LONGPACKAGE_CHARACTERS TEXT("\\:*?\"<>|' ,.&!~\n\r\t@#")
+
 enum EFindName
 {
     FNAME_Find,

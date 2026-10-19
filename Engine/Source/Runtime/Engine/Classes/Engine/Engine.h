@@ -16,6 +16,7 @@ public:
 class UEngine : public UObject
 {
     DefineUnrealClass(UEngine, Engine)
+    DefineUProperty(UClass*, ConsoleClass)
     DefineNativeMember(FOnNetworkFailure, NetworkFailureEvent, UEngine_NetworkFailureEvent)
 
 public:

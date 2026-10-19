@@ -5,6 +5,8 @@
 
 #include <string>
 #include <climits>
+#include <cstdarg>
+#include <cstdio>
 #include <cwctype>
 #include <string_view>
 
@@ -151,6 +153,50 @@ public:
         return Mid(0, Count);
     }
 
+    FString RightChop(int32_t Count) const
+    {
+        return Mid(Count);
+    }
+
+    FString ToLower() const
+    {
+        FString Result(*this);
+        for (int32_t Index = 0; Index < Result.Len(); ++Index)
+        {
+            Result.Data[Index] = static_cast<wchar_t>(std::towlower(Result.Data[Index]));
+        }
+        return Result;
+    }
+
+    bool EndsWith(const wchar_t* Suffix, ESearchCase::Type SearchCase = ESearchCase::IgnoreCase) const
+    {
+        const int32_t SuffixLen = Suffix ? static_cast<int32_t>(wcslen(Suffix)) : 0;
+        if (SuffixLen == 0 || SuffixLen > Len())
+        {
+            return SuffixLen == 0;
+        }
+        return Find(Suffix, SearchCase, ESearchDir::FromEnd) == Len() - SuffixLen;
+    }
+
+    static FString Printf(const wchar_t* Format, ...)
+    {
+        va_list Args;
+        va_start(Args, Format);
+        const int32_t Count = _vscwprintf(Format, Args);
+        va_end(Args);
+
+        FString Result;
+        if (Count > 0)
+        {
+            Result.Reserve(Count + 1);
+            va_start(Args, Format);
+            vswprintf(Result.Data, Count + 1, Format, Args);
+            va_end(Args);
+            Result.ArrayNum = Count + 1;
+        }
+        return Result;
+    }
+
     bool Split(const wchar_t* InS, FString* LeftS, FString* RightS, ESearchCase::Type SearchCase = ESearchCase::IgnoreCase, ESearchDir::Type SearchDir = ESearchDir::FromStart) const
     {
         const int32_t InPos = Find(InS, SearchCase, SearchDir);
@@ -182,5 +228,12 @@ public:
     {
         Left += Right;
         return Left;
+    }
+
+    friend FString operator+(const wchar_t* Left, const FString& Right)
+    {
+        FString Result(Left);
+        Result += Right;
+        return Result;
     }
 };

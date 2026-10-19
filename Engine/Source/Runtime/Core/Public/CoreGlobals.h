@@ -2,6 +2,12 @@
 
 #include "HAL/PlatformProperties.h"
 
+class FOutputDeviceRedirector;
+
+FOutputDeviceRedirector* GetGlobalLogSingleton();
+
+#define GLog GetGlobalLogSingleton()
+
 inline bool IsRunningDedicatedServer()
 {
     if (FPlatformProperties::IsServerOnly())

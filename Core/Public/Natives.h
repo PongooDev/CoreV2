@@ -4,7 +4,15 @@
 #include <cstdint>
 #include <vector>
 
+class FOutputDevice;
+class FOutputDeviceRedirector;
 class FString;
+class FTextLocalizationManager;
+class IConsoleManager;
+template <typename T>
+class TArray;
+class UGameViewportClient;
+class ULocalPlayer;
 class FUObjectArray;
 class UClass;
 class UEngine;
@@ -42,6 +50,19 @@ namespace Natives
     inline void (*FName_AppendString)(const FName* This, FString& Out) = nullptr;
     inline FString* (*FName_ToString)(const FName* This, FString* Out) = nullptr;
 
+    inline FOutputDeviceRedirector* (*GetGlobalLogSingleton)() = nullptr;
+    inline void (*FOutputDeviceRedirector_AddOutputDevice)(FOutputDeviceRedirector* This, FOutputDevice* OutputDevice) = nullptr;
+
+    inline const wchar_t* (*FPlatformMisc_GameDir)() = nullptr;
+    inline const wchar_t* (*FPlatformProcess_UserName)(bool bOnlyAlphaNumeric) = nullptr;
+    inline bool (*FPackageName_FindPackagesInDirectory)(TArray<FString>& OutPackages, const FString& RootDir) = nullptr;
+    inline FString* FPackageName_MapPackageExtension = nullptr;
+    inline IConsoleManager** IConsoleManager_Singleton = nullptr;
+    inline void (*IConsoleManager_SetupSingleton)() = nullptr;
+    inline FTextLocalizationManager** GTextLocalizationManager = nullptr;
+    inline void* (*FTextLocalizationManager_FindDisplayString)(const FTextLocalizationManager* This, void* Result, const FString* Namespace, const FString* Key, const FString* SourceString) = nullptr;
+    inline void* UConsole_RegisterConsoleAutoCompleteEntries = nullptr;
+
     inline void (*FMsg_Logf_Internal)(const char* File, int32_t Line, const FName& Category, int32_t Verbosity, const wchar_t* Format, ...) = nullptr;
     inline void (*FLogCategoryBase_FLogCategoryBase)(FLogCategoryBase* This, const wchar_t* CategoryName, uint8_t InDefaultVerbosity, uint8_t InCompileTimeVerbosity) = nullptr;
     inline void (*FDebug_AssertFailed)(const char* Expr, const char* File, int32_t Line, const wchar_t* Format, ...) = nullptr;
@@ -68,6 +89,8 @@ namespace Natives
     inline FWorldContext* (*UEngine_GetWorldContextFromWorldChecked)(UEngine* This, const UWorld* InWorld) = nullptr;
     inline void (*FOnNetworkFailure_Broadcast)(void* Delegate, UWorld* World, UNetDriver* NetDriver, int32_t FailureType, const FString& ErrorString) = nullptr;
 
+    inline ULocalPlayer* (*UGameViewportClient_SetupInitialLocalPlayer)(UGameViewportClient* This, FString& OutError) = nullptr;
+
     inline int32_t (*UWorld_InternalGetNetMode)(const UWorld* This) = nullptr;
     inline int32_t (*UWorld_AttemptDeriveFromURL)(const UWorld* This) = nullptr;
     inline FLevelCollection* (*UWorld_FindCollectionByType)(UWorld* This, ELevelCollectionType InType) = nullptr;
@@ -84,11 +107,18 @@ namespace Natives
     inline int32_t UNetDriver_IsServerIndex = -1;
     inline int32_t UNetDriver_ServerReplicateActorsIndex = -1;
     inline int32_t UEngine_LoadMapIndex = -1;
+    inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
+    inline int32_t IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = -1;
+    inline int32_t UProperty_GetCPPTypeIndex = -1;
 
     inline ptrdiff_t UEngine_WorldList = -1;
     inline ptrdiff_t UEngine_NetworkFailureEvent = -1;
     inline ptrdiff_t UWorld_NextSwitchCountdown = -1;
     inline ptrdiff_t FWorldContext_ThisCurrentWorld = -1;
+    inline ptrdiff_t UConsole_AutoCompleteList = -1;
+    inline ptrdiff_t UConsole_bIsRuntimeAutoCompleteUpToDate = -1;
+    inline ptrdiff_t UConsole_AutoCompleteTree = -1;
+    inline ptrdiff_t UConsole_ConsoleSettings = -1;
 }
 
 namespace Sites
@@ -104,6 +134,15 @@ namespace Sites
     inline std::vector<uint8_t*> PreInitDedicatedServerChecks;
     inline std::vector<uint8_t*> EngineInitDedicatedServerChecks;
     inline std::vector<uint8_t*> GameEngineTickDedicatedServerChecks;
+    inline std::vector<void**> ConsoleVTables;
+
+    struct FShowFlag
+    {
+        uint32_t Index = 0;
+        const wchar_t* Name = nullptr;
+    };
+
+    inline std::vector<FShowFlag> ShowFlags;
     inline uint8_t* LoadMapListenCall = nullptr;
     inline FInlinedNetMode InlinedNetMode[4] = {};
 }

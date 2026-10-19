@@ -11,3 +11,8 @@ UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, 
 {
     return Natives::StaticLoadObject(Class, InOuter, Name, Filename, LoadFlags, Sandbox, bAllowObjectReconciliation);
 }
+
+UObject* StaticConstructObject_Internal(UClass* Class, UObject* InOuter, FName Name, EObjectFlags SetFlags, EInternalObjectFlags InternalSetFlags, UObject* Template, bool bCopyTransientsFromClassDefaults, void* InstanceGraph, bool bAssumeTemplateIsArchetype)
+{
+    return Natives::StaticConstructObject_Internal(Class, InOuter, Name, SetFlags, static_cast<int32_t>(InternalSetFlags), Template, bCopyTransientsFromClassDefaults, InstanceGraph, bAssumeTemplateIsArchetype);
+}

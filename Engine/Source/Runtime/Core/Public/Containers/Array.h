@@ -109,6 +109,37 @@ public:
         return ArrayNum++;
     }
 
+    int32_t AddDefaulted(int32_t Count = 1)
+    {
+        const int32_t Index = ArrayNum;
+        Reserve(ArrayNum + Count);
+        for (int32_t Added = 0; Added < Count; ++Added)
+        {
+            new (Data + ArrayNum) T();
+            ++ArrayNum;
+        }
+        return Index;
+    }
+
+    int32_t AddZeroed(int32_t Count = 1)
+    {
+        const int32_t Index = ArrayNum;
+        Reserve(ArrayNum + Count);
+        memset(static_cast<void*>(Data + ArrayNum), 0, sizeof(T) * Count);
+        ArrayNum += Count;
+        return Index;
+    }
+
+    void InsertDefaulted(int32_t Index, int32_t Count = 1)
+    {
+        const int32_t OldNum = ArrayNum;
+        AddDefaulted(Count);
+        for (int32_t Move = OldNum - 1; Move >= Index; --Move)
+        {
+            std::swap(Data[Move], Data[Move + Count]);
+        }
+    }
+
     void Append(const TArray& Other)
     {
         Reserve(ArrayNum + Other.ArrayNum);

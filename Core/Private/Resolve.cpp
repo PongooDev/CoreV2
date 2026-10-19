@@ -930,6 +930,20 @@ namespace
         RequireChecks(L"UGameEngine::Tick", Sites::GameEngineTickDedicatedServerChecks, CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick)), 2);
     }
 
+    void ResolveOutputDevices()
+    {
+        uintptr_t LogSingleton = 0;
+        uintptr_t AddOutputDevice = 0;
+        const uintptr_t Ref = OnlyRef(L"AllowStdOutLogVerbosity");
+        if (const uintptr_t Tail = Ref ? FindInstruction(Ref, Ref + 0x100, { 0xE8, -1, -1, -1, -1, 0x48, 0x8B, 0xC8, 0x48, 0x8B, 0xD3, 0x48, 0x83, 0xC4, -1, 0x5B, 0xE9 }) : 0)
+        {
+            LogSingleton = Finder::RelativeTarget(Tail, 1, 5);
+            AddOutputDevice = Finder::RelativeTarget(Tail + 16, 1, 5);
+        }
+        Require(L"GetGlobalLogSingleton", Natives::GetGlobalLogSingleton, LogSingleton);
+        Require(L"FOutputDeviceRedirector::AddOutputDevice", Natives::FOutputDeviceRedirector_AddOutputDevice, AddOutputDevice);
+    }
+
     void ResolveLogging()
     {
         uintptr_t Logf = 0;
@@ -964,6 +978,7 @@ bool Finder::ResolveRuntime()
     ResolveObjectGlobals();
     ResolveMemory();
     ResolveLogging();
+    ResolveOutputDevices();
     ResolvePreInitGlobals();
     ResolveEngineReadiness();
     ResolveGameThreadTick();
@@ -971,6 +986,262 @@ bool Finder::ResolveRuntime()
     ResolveCreateDefaultObject();
 
     Log::Info(L"Finder: runtime resolved, {} missing", MissingCount);
+    return MissingCount == 0;
+}
+
+namespace
+{
+    void** VTableStoredAfter(uintptr_t From, size_t MaxDistance)
+    {
+        for (uintptr_t Lea = FindInstruction(From, From + MaxDistance, { 0x48, 0x8D, 0x05 }); Lea; Lea = FindInstruction(Lea + 1, From + MaxDistance, { 0x48, 0x8D, 0x05 }))
+        {
+            const uint8_t ModRm = Byte(Lea + 9);
+            if (Byte(Lea + 7) == 0x48 && Byte(Lea + 8) == 0x89 && (ModRm & 0xF8) == 0x00 && (ModRm & 0x07) != 0x04 && (ModRm & 0x07) != 0x05)
+            {
+                return reinterpret_cast<void**>(Finder::RelativeTarget(Lea, 3, 7));
+            }
+        }
+        return nullptr;
+    }
+
+    void CollectDerivedVTables(uintptr_t Constructor, std::vector<void**>& VTables, int32_t Depth)
+    {
+        for (const uintptr_t Site : Finder::CallsTo(Constructor, false))
+        {
+            void** VTable = VTableStoredAfter(Site + 5, 0x10);
+            if (!VTable || std::find(VTables.begin(), VTables.end(), VTable) != VTables.end())
+            {
+                continue;
+            }
+            VTables.push_back(VTable);
+            if (Depth < 8)
+            {
+                CollectDerivedVTables(Finder::FunctionStart(Site), VTables, Depth + 1);
+            }
+        }
+    }
+
+    void ResolveConsole()
+    {
+        const uintptr_t Constructor = Finder::FunctionStart(OnlyRef(L"/Engine/EngineResources/Black"));
+        const uintptr_t SuperCall = Constructor ? FindRawCall(Constructor, Constructor + 0x40) : 0;
+        void** ConsoleVTable = SuperCall ? VTableStoredAfter(SuperCall + 5, 0x20) : nullptr;
+        if (!ConsoleVTable)
+        {
+            Log::Error(L"Finder: UConsole vtable not found");
+            ++MissingCount;
+            return;
+        }
+
+        Sites::ConsoleVTables = { ConsoleVTable };
+        CollectDerivedVTables(Constructor, Sites::ConsoleVTables, 0);
+
+        for (int32_t Index = 0x43; Index < 0x60 && Natives::UConsole_BuildRuntimeAutoCompleteListIndex < 0; ++Index)
+        {
+            const uintptr_t Function = reinterpret_cast<uintptr_t>(ConsoleVTable[Index]);
+            const uintptr_t Test = FindInstruction(Function, Function + 0x30, { 0xF6, 0x81, -1, -1, 0x00, 0x00, 0x01 });
+            const uintptr_t Call = Test ? FindInstruction(Test, Test + 0x40, { 0xB2, 0x01, 0xFF, 0x90 }) : 0;
+            if (Call)
+            {
+                Natives::UConsole_bIsRuntimeAutoCompleteUpToDate = *reinterpret_cast<const int32_t*>(Test + 2);
+                Natives::UConsole_BuildRuntimeAutoCompleteListIndex = *reinterpret_cast<const int32_t*>(Call + 4) / static_cast<int32_t>(sizeof(void*));
+            }
+        }
+
+        const ptrdiff_t UpToDate = Natives::UConsole_bIsRuntimeAutoCompleteUpToDate;
+        const ptrdiff_t Settings = UpToDate + 0x44;
+        const uint8_t SettingsStore[] = { 0x48, 0x89, 0x83, static_cast<uint8_t>(Settings), static_cast<uint8_t>(Settings >> 8), 0x00, 0x00 };
+        const uintptr_t ConstructorEnd = Finder::FunctionEnd(Constructor);
+        bool bSettingsStored = false;
+        for (uintptr_t Scan = Constructor; UpToDate > 0 && Scan + sizeof(SettingsStore) <= ConstructorEnd && !bSettingsStored; ++Scan)
+        {
+            bSettingsStored = memcmp(reinterpret_cast<const void*>(Scan), SettingsStore, sizeof(SettingsStore)) == 0;
+        }
+        if (!bSettingsStored)
+        {
+            Log::Error(L"Finder: UConsole::UpdateCompleteIndices not found or the console layout differs from 4.16");
+            ++MissingCount;
+            return;
+        }
+
+        Natives::UConsole_AutoCompleteList = UpToDate - 0x1C;
+        Natives::UConsole_AutoCompleteTree = UpToDate + 0x0C;
+        Natives::UConsole_ConsoleSettings = Settings;
+        Log::Info(L"Finder: UConsole::BuildRuntimeAutoCompleteList is slot 0x{:X} in {} console vtables", Natives::UConsole_BuildRuntimeAutoCompleteListIndex, Sites::ConsoleVTables.size());
+    }
+
+    uintptr_t AddConsoleObject = 0;
+
+    uintptr_t ScanRipTarget(std::initializer_list<int32_t> Opcode, uint32_t OperandOffset, uint32_t Length, uintptr_t Target, int32_t& Matches)
+    {
+        uintptr_t Found = 0;
+        Matches = 0;
+        for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), Opcode); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), Opcode))
+        {
+            if (Finder::RelativeTarget(Site, OperandOffset, Length) == Target)
+            {
+                Found = Site;
+                ++Matches;
+            }
+        }
+        return Found;
+    }
+
+    void ResolveAutoCompleteSources()
+    {
+        uintptr_t Entries = 0;
+        int32_t Matches = 0;
+        const uintptr_t Handler = FunctionOf(L"showdebug SIGNIFICANCEMANAGER");
+        const uintptr_t Bind = Handler ? ScanRipTarget({ 0x4C, 0x8D, 0x05 }, 3, 7, Handler, Matches) : 0;
+        if (const uintptr_t Lea = Matches == 1 ? FindInstruction(Bind + 7, Bind + 0x18, { 0x48, 0x8D, 0x0D }) : 0)
+        {
+            Entries = Finder::RelativeTarget(Lea, 3, 7);
+            if (*reinterpret_cast<const int32_t*>(Entries + 0x60) != 2)
+            {
+                Entries = 0;
+            }
+        }
+        RequireAddress(L"UConsole::RegisterConsoleAutoCompleteEntries", reinterpret_cast<uintptr_t&>(Natives::UConsole_RegisterConsoleAutoCompleteEntries), Entries);
+
+        const uintptr_t SetupSingleton = FunctionOf(L"r.DumpingMovie");
+        const bool bSingletonCompare = SetupSingleton && Byte(SetupSingleton + 4) == 0x48 && Byte(SetupSingleton + 5) == 0x83 && Byte(SetupSingleton + 6) == 0x3D && Byte(SetupSingleton + 11) == 0x00;
+        Require(L"IConsoleManager::SetupSingleton", Natives::IConsoleManager_SetupSingleton, bSingletonCompare ? SetupSingleton : 0);
+        RequireAddress(L"IConsoleManager::Singleton", reinterpret_cast<uintptr_t&>(Natives::IConsoleManager_Singleton), bSingletonCompare ? Finder::RelativeTarget(SetupSingleton + 4, 3, 8) : 0);
+        AddConsoleObject = FunctionOf(L"Console object named '%s' already exists but is being registered again, but we weren't expected it to be! (FConsoleManager::AddConsoleObject)");
+        RequireAddress(L"FConsoleManager::AddConsoleObject", AddConsoleObject, AddConsoleObject);
+
+        uintptr_t GameDir = 0;
+        const std::vector<uintptr_t> GameDirRefs = Finder::StringRefs(L"../../");
+        if (!GameDirRefs.empty())
+        {
+            GameDir = Finder::FunctionStart(GameDirRefs.front());
+            for (const uintptr_t Ref : GameDirRefs)
+            {
+                if (Finder::FunctionStart(Ref) != GameDir)
+                {
+                    GameDir = 0;
+                }
+            }
+        }
+        Require(L"FPlatformMisc::GameDir", Natives::FPlatformMisc_GameDir, GameDir);
+
+        uintptr_t UserName = 0;
+        const uintptr_t GetUserName = Finder::ImportSlot("ADVAPI32.dll", "GetUserNameW");
+        for (uintptr_t Call = GetUserName ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0xFF, 0x15 }) : 0; Call; Call = FindInstruction(Call + 1, Finder::TextEnd(), { 0xFF, 0x15 }))
+        {
+            if (Finder::RelativeTarget(Call, 2, 6) != GetUserName)
+            {
+                continue;
+            }
+            const uintptr_t Caller = Finder::FunctionStart(Call);
+            if (UserName && Caller != UserName)
+            {
+                UserName = 0;
+                break;
+            }
+            UserName = Caller;
+        }
+        Require(L"FPlatformProcess::UserName", Natives::FPlatformProcess_UserName, UserName);
+
+        uintptr_t MapExtension = 0;
+        for (const uintptr_t Ref : Finder::StringRefs(L".umap"))
+        {
+            if (Byte(Ref - 7) == 0x48 && Byte(Ref - 6) == 0x8B && Byte(Ref - 5) == 0x0D)
+            {
+                MapExtension = Finder::RelativeTarget(Ref - 7, 3, 7);
+            }
+        }
+        RequireAddress(L"FPackageName::MapPackageExtension", reinterpret_cast<uintptr_t&>(Natives::FPackageName_MapPackageExtension), MapExtension);
+
+        uintptr_t FindPackages = 0;
+        for (const uintptr_t Ref : MapExtension ? Finder::StringRefs(L"*.*") : std::vector<uintptr_t>())
+        {
+            const uintptr_t Function = Finder::FunctionStart(Ref);
+            const uintptr_t End = Finder::FunctionEnd(Function);
+            for (uintptr_t Lea = Function && End ? FindInstruction(Function, End, { 0x48, 0x8D, 0x15 }) : 0; Lea; Lea = FindInstruction(Lea + 1, End, { 0x48, 0x8D, 0x15 }))
+            {
+                if (Finder::RelativeTarget(Lea, 3, 7) == MapExtension)
+                {
+                    FindPackages = Function;
+                    break;
+                }
+            }
+        }
+        Require(L"FPackageName::FindPackagesInDirectory", Natives::FPackageName_FindPackagesInDirectory, FindPackages);
+
+        Sites::ShowFlags.clear();
+        const uintptr_t ShowFlagSink = Finder::FunctionStart(First(Finder::StringRefs("ShowFlag.")));
+        for (const uintptr_t Call : ShowFlagSink ? Finder::CallsTo(ShowFlagSink, false) : std::vector<uintptr_t>())
+        {
+            Sites::FShowFlag ShowFlag;
+            if (Byte(Call - 5) == 0x33 && Byte(Call - 4) == 0xD2)
+            {
+                ShowFlag.Index = 0;
+            }
+            else if (Byte(Call - 8) == 0xBA)
+            {
+                ShowFlag.Index = *reinterpret_cast<const uint32_t*>(Call - 7);
+            }
+            else
+            {
+                continue;
+            }
+            for (uintptr_t Lea = FindInstruction(Call - 0x30, Call, { 0x48, 0x8D, 0x15 }); Lea; Lea = FindInstruction(Lea + 1, Call, { 0x48, 0x8D, 0x15 }))
+            {
+                ShowFlag.Name = reinterpret_cast<const wchar_t*>(Finder::RelativeTarget(Lea, 3, 7));
+            }
+            if (ShowFlag.Name)
+            {
+                Sites::ShowFlags.push_back(ShowFlag);
+            }
+        }
+        std::sort(Sites::ShowFlags.begin(), Sites::ShowFlags.end(), [](const Sites::FShowFlag& A, const Sites::FShowFlag& B) { return A.Index < B.Index; });
+        for (size_t Index = 0; Index < Sites::ShowFlags.size(); ++Index)
+        {
+            if (Sites::ShowFlags[Index].Index != Index)
+            {
+                Sites::ShowFlags.clear();
+                break;
+            }
+        }
+        if (Sites::ShowFlags.empty())
+        {
+            Log::Error(L"Finder: the engine show flags were not found");
+            ++MissingCount;
+        }
+    }
+
+    void ResolveViewportClient()
+    {
+        const uintptr_t GEngine = reinterpret_cast<uintptr_t>(Natives::GEngine);
+        uintptr_t Setup = 0;
+        int32_t Matches = 0;
+        for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0xC6, 0x41, -1, 0x00, 0x48, 0x8B, 0x0D }); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), { 0xC6, 0x41, -1, 0x00, 0x48, 0x8B, 0x0D }))
+        {
+            if (GEngine && Finder::RelativeTarget(Site + 4, 3, 7) == GEngine && Byte(Site + 11) == 0x48 && Byte(Site + 12) == 0x8D && Byte(Site + 13) == 0x05)
+            {
+                Setup = Finder::FunctionStart(Site);
+                ++Matches;
+            }
+        }
+        if (Matches != 1)
+        {
+            Log::Error(L"Finder: expected 1 UGameViewportClient::SetupInitialLocalPlayer, found {}", Matches);
+            Setup = 0;
+        }
+        Require(L"UGameViewportClient::SetupInitialLocalPlayer", Natives::UGameViewportClient_SetupInitialLocalPlayer, Setup);
+    }
+}
+
+bool Finder::ResolveClient()
+{
+    MissingCount = 0;
+
+    ResolveConsole();
+    ResolveAutoCompleteSources();
+    ResolveViewportClient();
+
+    Log::Info(L"Finder: client sites resolved, {} missing", MissingCount);
     return MissingCount == 0;
 }
 
@@ -1059,4 +1330,73 @@ uintptr_t Finder::LogCategory(const wchar_t* CategoryName)
         }
     }
     return 0;
+}
+
+bool Finder::ResolveConsoleManager()
+{
+    void** VTable = Natives::IConsoleManager_Singleton && *Natives::IConsoleManager_Singleton ? *reinterpret_cast<void***>(*Natives::IConsoleManager_Singleton) : nullptr;
+    int32_t LastRegister = -1;
+    for (int32_t Index = 0; VTable && AddConsoleObject && Index < 0x20; ++Index)
+    {
+        const uintptr_t Function = reinterpret_cast<uintptr_t>(VTable[Index]);
+        const uintptr_t End = Finder::FunctionEnd(Function);
+        if (End > Function && CallWithin(Function, End - Function, AddConsoleObject))
+        {
+            LastRegister = Index;
+        }
+    }
+
+    if (LastRegister < 0)
+    {
+        Log::Error(L"Finder: IConsoleManager::ForEachConsoleObjectThatStartsWith not found");
+        return false;
+    }
+    Natives::IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = LastRegister + 4;
+    Log::Info(L"Finder: IConsoleManager::ForEachConsoleObjectThatStartsWith is slot 0x{:X}", Natives::IConsoleManager_ForEachConsoleObjectThatStartsWithIndex);
+    return true;
+}
+
+bool Finder::ResolvePropertyCPPType()
+{
+    const uintptr_t PureVirtual = FunctionOf(L"UProperty::GetCPPType");
+    if (void** PropertyVTable = CdoVTable(L"/Script/CoreUObject.Property"))
+    {
+        Natives::UProperty_GetCPPTypeIndex = VTableIndex(PropertyVTable, reinterpret_cast<void*>(PureVirtual), 0x100);
+    }
+
+    if (Natives::UProperty_GetCPPTypeIndex < 0)
+    {
+        Log::Error(L"Finder: UProperty::GetCPPType index not found");
+        return false;
+    }
+    Log::Info(L"Finder: UProperty::GetCPPType is slot 0x{:X}", Natives::UProperty_GetCPPTypeIndex);
+    return true;
+}
+
+bool Finder::ResolveTextLocalizationManager()
+{
+    uintptr_t FindText = 0;
+    const UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/Engine.KismetTextLibrary:FindTextInLocalizationTable");
+    const uintptr_t Thunk = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t ThunkEnd = Finder::FunctionEnd(Thunk);
+    for (uintptr_t Call = Thunk && ThunkEnd ? FindRawCall(Thunk, ThunkEnd) : 0; Call && !FindText; Call = FindRawCall(Call + 5, ThunkEnd))
+    {
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        if (Byte(Target) == 0x45 && Byte(Target + 1) == 0x33 && Byte(Target + 2) == 0xC9 && Byte(Target + 3) == 0xE9)
+        {
+            FindText = Finder::RelativeTarget(Target + 3, 1, 5);
+        }
+    }
+
+    const uintptr_t ManagerLoad = FindText ? FindInstruction(FindText, FindText + 0x40, { 0x48, 0x8B, 0x05 }) : 0;
+    const uintptr_t DisplayCall = FindText ? FindInstruction(FindText, FindText + 0x100, { 0x4C, 0x8B, 0xCF, 0x48, 0x89, 0x5C, 0x24, 0x20, 0x4C, 0x8B, 0xC6, 0x48, 0x8D, 0x55, -1, 0x48, 0x8B, 0xC8, 0xE8 }) : 0;
+    if (!ManagerLoad || !DisplayCall)
+    {
+        Log::Error(L"Finder: FTextLocalizationManager::FindDisplayString not found");
+        return false;
+    }
+
+    Natives::GTextLocalizationManager = reinterpret_cast<FTextLocalizationManager**>(Finder::RelativeTarget(ManagerLoad, 3, 7));
+    Natives::FTextLocalizationManager_FindDisplayString = reinterpret_cast<decltype(Natives::FTextLocalizationManager_FindDisplayString)>(Finder::RelativeTarget(DisplayCall + 18, 1, 5));
+    return true;
 }

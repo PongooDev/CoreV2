@@ -13,6 +13,7 @@ enum ELoadFlags : uint32_t
 
 UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass = false);
 UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename = nullptr, uint32_t LoadFlags = LOAD_None, void* Sandbox = nullptr, bool bAllowObjectReconciliation = true);
+UObject* StaticConstructObject_Internal(UClass* Class, UObject* InOuter = nullptr, FName Name = FName(), EObjectFlags SetFlags = RF_NoFlags, EInternalObjectFlags InternalSetFlags = EInternalObjectFlags::None, UObject* Template = nullptr, bool bCopyTransientsFromClassDefaults = false, void* InstanceGraph = nullptr, bool bAssumeTemplateIsArchetype = false);
 
 template <class T>
 T* FindObject(UObject* Outer, const wchar_t* Name, bool ExactClass = false)
@@ -24,6 +25,12 @@ template <class T>
 T* LoadObject(UObject* Outer, const wchar_t* Name, const wchar_t* Filename = nullptr, uint32_t LoadFlags = LOAD_None, void* Sandbox = nullptr)
 {
     return static_cast<T*>(StaticLoadObject(T::StaticClass(), Outer, Name, Filename, LoadFlags, Sandbox));
+}
+
+template <class T>
+T* NewObject(UObject* Outer, UClass* Class, FName Name = FName(), EObjectFlags Flags = RF_NoFlags, UObject* Template = nullptr, bool bCopyTransientsFromClassDefaults = false, void* InInstanceGraph = nullptr)
+{
+    return static_cast<T*>(StaticConstructObject_Internal(Class, Outer, Name, Flags, EInternalObjectFlags::None, Template, bCopyTransientsFromClassDefaults, InInstanceGraph));
 }
 
 template <class T>

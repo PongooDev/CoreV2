@@ -2,145 +2,166 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Core">
-      <UniqueIdentifier>{9c3444c3-eb0f-445c-a2b1-9fb295b1a342}</UniqueIdentifier>
+      <UniqueIdentifier>{dc200c0e-1228-4504-a075-cb51b33ae5c5}</UniqueIdentifier>
     </Filter>
     <Filter Include="Core\Private">
-      <UniqueIdentifier>{1aa3b595-e92d-4d8d-9311-a32157c6f11e}</UniqueIdentifier>
+      <UniqueIdentifier>{e8204851-91c8-4028-b5c0-dc4c3eeec644}</UniqueIdentifier>
     </Filter>
     <Filter Include="Core\Public">
-      <UniqueIdentifier>{117f3f54-bc80-4781-a52e-601ac3e8cff5}</UniqueIdentifier>
+      <UniqueIdentifier>{b51a8513-cc28-4d13-bb0f-47bbdf510ed6}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine">
-      <UniqueIdentifier>{a1ed1181-a7ce-4196-9241-e00513f65e1f}</UniqueIdentifier>
+      <UniqueIdentifier>{6ce2369d-4985-426d-a3b1-76ca30c38e4f}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source">
-      <UniqueIdentifier>{24fb2ef0-0876-4086-9f40-66d62fefef17}</UniqueIdentifier>
+      <UniqueIdentifier>{d0349403-93a7-463c-ba3d-4e30df099908}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime">
-      <UniqueIdentifier>{8a00754c-ab4a-4b06-bd03-ac27ad8c2952}</UniqueIdentifier>
+      <UniqueIdentifier>{0389887a-ec9a-4ee6-8d7e-0565d87ad023}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core">
-      <UniqueIdentifier>{14eb422f-be4f-4972-acfc-5b1a4c88c455}</UniqueIdentifier>
+      <UniqueIdentifier>{140b3f03-49b8-4e57-88b1-bb47968e1dfa}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject">
-      <UniqueIdentifier>{e237ba53-059d-4ea3-a446-353f571845ee}</UniqueIdentifier>
+      <UniqueIdentifier>{06f3fe24-0b03-4c31-a8f9-e4f00c5b6ab8}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Private">
-      <UniqueIdentifier>{57c87edf-83f9-4805-a7e3-1656a163ed3d}</UniqueIdentifier>
+      <UniqueIdentifier>{5ee7feb3-bbff-42c0-9438-4c85ff0f9c33}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\CoreUObject\Private\Misc">
+      <UniqueIdentifier>{93c31217-394e-44ea-9eb3-d86b945f130a}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Private\UObject">
-      <UniqueIdentifier>{c41dcd0b-ecd0-43c1-be7f-42daff7553c8}</UniqueIdentifier>
+      <UniqueIdentifier>{5f71d7e4-2728-4098-b9bb-51a979ddb296}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public">
-      <UniqueIdentifier>{51bf7594-ff14-4b19-961f-ba59f2d58c7c}</UniqueIdentifier>
+      <UniqueIdentifier>{e4bdda0c-7d88-40fc-895c-8a1685c90a17}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public\Misc">
-      <UniqueIdentifier>{b0cece80-0ddd-4fb5-acfb-a0cdec283841}</UniqueIdentifier>
+      <UniqueIdentifier>{b2b05f6b-b435-4c35-8e1d-6554df3a520d}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public\Templates">
-      <UniqueIdentifier>{f0b0f4cb-5263-4d26-81ce-abffcd64796b}</UniqueIdentifier>
+      <UniqueIdentifier>{72e58a15-f302-4e69-adc8-a944b8fe24aa}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public\UObject">
-      <UniqueIdentifier>{dfe48ceb-aaf0-4fba-acb1-e98696629c48}</UniqueIdentifier>
+      <UniqueIdentifier>{1eb7d2df-ed34-4b7b-9d28-b76694b6b12b}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private">
-      <UniqueIdentifier>{9a0e92e5-74ba-44e1-a56c-2855c637724c}</UniqueIdentifier>
+      <UniqueIdentifier>{0b1a06d4-22a3-414e-964e-35f01142b287}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\HAL">
-      <UniqueIdentifier>{f8f88b99-73b2-401a-b59a-cefaeed40988}</UniqueIdentifier>
+      <UniqueIdentifier>{79448781-347e-4fb3-ac1b-6fcaee3c723f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Core\Private\Internationalization">
+      <UniqueIdentifier>{38764007-5594-4dee-9168-c3eaaf89d4d3}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\Logging">
-      <UniqueIdentifier>{f47a60d9-cef4-473e-81f9-e033e3bf6ae6}</UniqueIdentifier>
+      <UniqueIdentifier>{f0a6b983-b17d-4688-8f83-852d8fec1879}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\Misc">
-      <UniqueIdentifier>{9d575b32-277e-4f72-a1b5-36cc0dc3c30c}</UniqueIdentifier>
+      <UniqueIdentifier>{92532d77-d796-49ed-93ed-7f31aee37298}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\UObject">
-      <UniqueIdentifier>{5b00230b-00f1-4d45-b816-e155176abed1}</UniqueIdentifier>
+      <UniqueIdentifier>{51b69864-4bcd-4fb5-b4b2-13f9d5dcd1a1}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public">
-      <UniqueIdentifier>{0ad0bebc-f239-426b-aae4-b05e886cf1b0}</UniqueIdentifier>
+      <UniqueIdentifier>{b28f0ea8-9413-4b29-b5c0-5222610cfdbe}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Containers">
-      <UniqueIdentifier>{463d6c9c-d4a5-4450-b28c-be46bd921362}</UniqueIdentifier>
+      <UniqueIdentifier>{038a8ceb-ffd9-4530-8bc9-8b37786003d8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Core\Public\Delegates">
+      <UniqueIdentifier>{a4929a53-b0f7-4e86-86e7-471da3be87c1}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\HAL">
-      <UniqueIdentifier>{5ea7dddb-5a8a-4f91-b605-dd5285cacb34}</UniqueIdentifier>
+      <UniqueIdentifier>{089b6ca0-acb8-4802-8967-a55c045507a9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Core\Public\Internationalization">
+      <UniqueIdentifier>{1986919f-0235-464a-b915-af0d35662945}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Logging">
-      <UniqueIdentifier>{ded4f1b0-3549-49d1-b453-ffe677a6b528}</UniqueIdentifier>
+      <UniqueIdentifier>{23d38b45-3bab-415c-9846-e6738b9d2d97}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Math">
-      <UniqueIdentifier>{fefbdf90-f179-41e0-a31a-e4d21e42da18}</UniqueIdentifier>
+      <UniqueIdentifier>{865544c9-5b44-4d32-94ef-2201a8e12810}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Misc">
-      <UniqueIdentifier>{9e9e9bdf-82c0-45e7-b32f-26b20059008f}</UniqueIdentifier>
+      <UniqueIdentifier>{149702ef-cfc1-46e4-98c9-b809786c3548}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Templates">
-      <UniqueIdentifier>{15cc250f-83b8-4d40-9a3d-1a995968d8ed}</UniqueIdentifier>
+      <UniqueIdentifier>{ea843e6d-7a1e-4e5e-b8e5-dcc8b8ed3efa}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\UObject">
-      <UniqueIdentifier>{f74e5bea-ec18-4b56-964b-be3803445ce6}</UniqueIdentifier>
+      <UniqueIdentifier>{4b86f47d-bc21-4008-81e3-17c5afa97d13}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Windows">
-      <UniqueIdentifier>{b9e87039-6662-4411-b463-a92b89d9e84d}</UniqueIdentifier>
+      <UniqueIdentifier>{6b21e0d8-7986-44af-9ca9-f21be25a71bd}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine">
-      <UniqueIdentifier>{e296f341-a686-4e59-a9ae-b11fcf9558f5}</UniqueIdentifier>
+      <UniqueIdentifier>{b8bc2258-aa3b-40d6-9c66-9190484f936b}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\EngineSettings">
-      <UniqueIdentifier>{d91c92be-0211-4551-886e-776197a01c8f}</UniqueIdentifier>
+      <UniqueIdentifier>{89d83929-01ca-4243-9159-095543c2b0f0}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\EngineSettings\Classes">
-      <UniqueIdentifier>{e9489a85-b372-404f-a077-ce72cf382704}</UniqueIdentifier>
+      <UniqueIdentifier>{81bf27e9-8ac3-4ba7-9ff1-55b27bd8b124}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\EngineSettings\Private">
-      <UniqueIdentifier>{3e460997-cae8-4107-a2d5-1c1b817af9ee}</UniqueIdentifier>
+      <UniqueIdentifier>{185e880d-781f-40e1-a2bb-21f5debde6e7}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes">
-      <UniqueIdentifier>{d3acca71-cc4d-4e32-bdc1-6601e9276a46}</UniqueIdentifier>
+      <UniqueIdentifier>{d8aa4678-e241-41dd-ae06-9651211fbb84}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes\Engine">
-      <UniqueIdentifier>{41cfeaeb-5439-4df8-946e-3301f24b2075}</UniqueIdentifier>
+      <UniqueIdentifier>{fa23afb6-560e-44c9-897d-bb1dab31dc47}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Classes\GameFramework">
+      <UniqueIdentifier>{6b32f4d7-ca69-415e-b7d0-4e3665f135fb}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Private">
-      <UniqueIdentifier>{a632f44e-00cf-4681-b6b5-a87f895560e0}</UniqueIdentifier>
+      <UniqueIdentifier>{dfaa2695-ddb6-4f21-8505-25d453f8a2ed}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Private\UserInterface">
+      <UniqueIdentifier>{7229a134-ba70-44ef-a3e5-e038aebde698}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Public">
+      <UniqueIdentifier>{b40340dc-4268-48ae-84c2-d571b68a8ae7}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Launch">
-      <UniqueIdentifier>{0d8b1891-787c-42dd-a27d-3f5ec396ed21}</UniqueIdentifier>
+      <UniqueIdentifier>{7c7a3fe8-4a51-4fa9-815b-bd533a52b0f0}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Launch\Private">
-      <UniqueIdentifier>{e222090b-a0a3-40a3-8430-d2ae9efd6b5e}</UniqueIdentifier>
+      <UniqueIdentifier>{614b87b2-a6a6-4ef2-94e4-ab8b52e77517}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Launch\Public">
-      <UniqueIdentifier>{d9783004-27c2-4cdf-a1b8-5d9e23e3bbae}</UniqueIdentifier>
+      <UniqueIdentifier>{94a8b39f-3279-416a-afe2-afa4c21ca9d3}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Online">
-      <UniqueIdentifier>{fc26436f-c353-4989-b521-33d078cb9067}</UniqueIdentifier>
+      <UniqueIdentifier>{d8cb854b-dedd-4c92-afc3-dc3dee74fa6b}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Online\HTTP">
-      <UniqueIdentifier>{8264db5c-85ee-4698-8d24-df0653086437}</UniqueIdentifier>
+      <UniqueIdentifier>{118fa3af-d83c-4ec4-8bac-38102241b3f6}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Online\HTTP\Public">
-      <UniqueIdentifier>{59c7510b-98d3-444e-9d11-94c08d6d9b11}</UniqueIdentifier>
+      <UniqueIdentifier>{df135e5f-00a1-4f36-a640-c1f8bee410ef}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Online\HTTP\Public\Interfaces">
-      <UniqueIdentifier>{a3d57d50-c275-4284-9155-844274b857f0}</UniqueIdentifier>
+      <UniqueIdentifier>{cf7b4b5d-e4a6-4097-84d4-7623c5750131}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty">
-      <UniqueIdentifier>{dbdbaf0e-d64f-4d52-a547-1614f73c98dc}</UniqueIdentifier>
+      <UniqueIdentifier>{87c75c94-2377-4fc9-b0c4-d2f668cc057b}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty\Memcury">
-      <UniqueIdentifier>{d8b7d208-03a0-4b96-9417-bbcfd7f42f21}</UniqueIdentifier>
+      <UniqueIdentifier>{a11c2b97-982f-471b-becb-dbc9da79efdd}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty\MinHook">
-      <UniqueIdentifier>{feee41b7-9e3e-493a-9446-d8d9af4c3b85}</UniqueIdentifier>
+      <UniqueIdentifier>{235ee1fe-66e4-4437-a381-af8d7f7c854b}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty\MinHook\src">
-      <UniqueIdentifier>{e9e089ce-8ea9-4310-a2de-e6055c44b02a}</UniqueIdentifier>
+      <UniqueIdentifier>{4df0845d-d9ed-4fef-81fb-443fd3082c83}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty\MinHook\src\hde">
-      <UniqueIdentifier>{ad973616-45ba-4373-9d43-57b4dbc4b855}</UniqueIdentifier>
+      <UniqueIdentifier>{8f26ce02-6b92-43d5-b784-244b2f1c23a4}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -184,11 +205,32 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\UnrealString.h">
       <Filter>Engine\Source\Runtime\Core\Public\Containers</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\Delegate.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateBase.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\IDelegateInstance.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\IConsoleManager.h">
+      <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformMisc.h">
+      <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformProcess.h">
+      <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformProperties.h">
       <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\UnrealMemory.h">
       <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Internationalization\TextLocalizationManager.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Internationalization</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Logging\LogCategory.h">
       <Filter>Engine\Source\Runtime\Core\Public\Logging</Filter>
@@ -200,6 +242,9 @@
       <Filter>Engine\Source\Runtime\Core\Public\Logging</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Color.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Math</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\NumericLimits.h">
       <Filter>Engine\Source\Runtime\Core\Public\Math</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\AssertionMacros.h">
@@ -217,10 +262,19 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMiscDefines.h">
       <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\DefaultValueHelper.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\OutputDevice.h">
       <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\OutputDeviceRedirector.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Parse.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Paths.h">
       <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Templates\SharedPointerInternals.h">
@@ -234,6 +288,9 @@
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Windows\WindowsPlatformProperties.h">
       <Filter>Engine\Source\Runtime\Core\Public\Windows</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Misc\PackageName.h">
+      <Filter>Engine\Source\Runtime\CoreUObject\Public\Misc</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Misc\StringAssetReference.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\Misc</Filter>
@@ -265,8 +322,14 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectGlobals.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectIterator.h">
+      <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UnrealType.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Console.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\DemoNetDriver.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
@@ -283,6 +346,12 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\GameEngine.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\GameViewportClient.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\LevelScriptActor.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\NetDriver.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
     </ClInclude>
@@ -291,6 +360,12 @@
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\World.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\GameFramework</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\ShowFlags.h">
+      <Filter>Engine\Source\Runtime\Engine\Public</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\EngineSettings\Classes\ConsoleSettings.h">
       <Filter>Engine\Source\Runtime\EngineSettings\Classes</Filter>
@@ -338,8 +413,17 @@
     <ClCompile Include="..\Core\Private\pch.cpp">
       <Filter>Core\Private</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ConsoleManager.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\PlatformMisc.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
+    </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\UnrealMemory.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Internationalization\TextLocalizationManager.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\Internationalization</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Logging\LogCategory.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\Logging</Filter>
@@ -347,16 +431,31 @@
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\CommandLine.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\Misc</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\DefaultValueHelper.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\OutputDeviceRedirector.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\Misc</Filter>
+    </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\Parse.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\Misc</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\Paths.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\Misc</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\UObject\UnrealNames.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\UObject</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\Misc\PackageName.cpp">
+      <Filter>Engine\Source\Runtime\CoreUObject\Private\Misc</Filter>
+    </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Class.cpp">
       <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Obj.cpp">
+      <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Property.cpp">
       <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectBaseUtility.cpp">
@@ -368,7 +467,13 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameEngine.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameViewportClient.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetworkDriver.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp">
@@ -376,6 +481,9 @@
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UserInterface\Console.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private\UserInterface</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\EngineSettings\Private\EngineSettingsModule.cpp">
       <Filter>Engine\Source\Runtime\EngineSettings\Private</Filter>

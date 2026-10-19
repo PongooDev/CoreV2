@@ -143,3 +143,5 @@ enum EClassCastFlags : uint64_t
     CASTCLASS_USetProperty = 0x0000800000000000,
     CASTCLASS_UEnumProperty = 0x0001000000000000,
 };
+
+#define CPF_Parm 0x0000000000000080ull

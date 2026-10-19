@@ -10,6 +10,8 @@ class UProperty : public UField
     DefineLayoutMember(uint64_t, PropertyFlags, UProperty_PropertyFlags)
 
 public:
+    FString GetCPPType(FString* ExtendedTypeText = nullptr, uint32_t CPPExportFlags = 0) const;
+
     int32_t GetOffset_ForInternal() const
     {
         return *reinterpret_cast<const int32_t*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.UProperty_Offset_Internal);
@@ -71,4 +73,58 @@ class UArrayProperty : public UProperty
 {
     DefineUnrealClass(UArrayProperty, CoreUObject)
     DefineLayoutMember(UProperty*, Inner, UArrayProperty_Inner)
+};
+
+template <class T>
+class TFieldIterator
+{
+public:
+    explicit TFieldIterator(const UStruct* InStruct)
+        : Struct(InStruct), Field(InStruct ? InStruct->Children : nullptr)
+    {
+        IterateToNext();
+    }
+
+    explicit operator bool() const
+    {
+        return Field != nullptr;
+    }
+
+    T* operator*() const
+    {
+        return static_cast<T*>(Field);
+    }
+
+    T* operator->() const
+    {
+        return static_cast<T*>(Field);
+    }
+
+    TFieldIterator& operator++()
+    {
+        Field = Field->Next;
+        IterateToNext();
+        return *this;
+    }
+
+private:
+    void IterateToNext()
+    {
+        while (Struct)
+        {
+            while (Field)
+            {
+                if (Field->IsA(T::StaticClass()))
+                {
+                    return;
+                }
+                Field = Field->Next;
+            }
+            Struct = Struct->GetSuperStruct();
+            Field = Struct ? Struct->Children : nullptr;
+        }
+    }
+
+    const UStruct* Struct;
+    UField* Field;
 };

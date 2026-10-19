@@ -29,6 +29,10 @@ namespace Finder
 
     bool ResolveRuntime();
     bool ResolveServer();
+    bool ResolveClient();
+    bool ResolveConsoleManager();
+    bool ResolvePropertyCPPType();
+    bool ResolveTextLocalizationManager();
     bool ResolveProcessEvent();
     bool ResolveInitListen();
 }

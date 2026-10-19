@@ -92,4 +92,6 @@ public:
     }
 
     bool HasAnyFunctionFlags(EFunctionFlags FlagsToCheck) const { return (FunctionFlags & FlagsToCheck) != 0; }
+
+    UFunction* GetSuperFunction() const { return static_cast<UFunction*>(GetSuperStruct()); }
 };

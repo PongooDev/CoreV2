@@ -113,4 +113,5 @@ private:
     static inline void (*TickFlushOG)(UNetDriver* This, float DeltaSeconds) = nullptr;
     static void TickFlushHK(UNetDriver* This, float DeltaSeconds);
     static int32_t ServerReplicateActorsHK(UNetDriver* This, float DeltaSeconds);
+    static void FlushActorDormancyHK(UNetDriver* This, AActor* Actor);
 };

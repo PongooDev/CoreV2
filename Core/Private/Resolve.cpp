@@ -5,7 +5,9 @@
 #include "ObjectLayout.h"
 #include "Engine/EngineBaseTypes.h"
 #include "Engine/World.h"
+#include "GameFramework/WorldSettings.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 
 #include <algorithm>
@@ -1619,6 +1621,7 @@ namespace
             bDemoTickFlush = bDemoTickFlush || Finder::FunctionStart(Site) == DemoTickFlush;
         }
         RequireSlot(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlushIndex, bDemoTickFlush ? TickDispatch + 1 : -1);
+        Require(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlush, bDemoTickFlush ? TickFlush : 0);
 
         const int32_t IsServer = TickFlush ? VirtualSlot(FindVirtualCall(TickFlush, TickFlush + 0x60)) : -1;
         const uintptr_t IsServerBody = VTableEntry(NetDriverVTable, IsServer);
@@ -1968,6 +1971,90 @@ namespace
             }
         }
         RequireSlot(L"UEngine::GetMaxTickRate", Natives::UEngine_GetMaxTickRateIndex, bMaxTickRateAgree && MaxTickRateSites >= 2 ? MaxTickRate : -1);
+
+        const uintptr_t CreateChannelEnd = Finder::FunctionEnd(CreateChannel);
+        const bool bChannelLoop = CreateChannelEnd && FindInstruction(CreateChannel, CreateChannelEnd, { 0x48, 0x3D, 0x00, 0x28, 0x00, 0x00 });
+        ptrdiff_t Channels = 0;
+        for (uintptr_t Store = bChannelLoop ? FindInstruction(CreateChannel, CreateChannelEnd, { 0x48, 0x89 }) : 0; Store && !Channels; Store = FindInstruction(Store + 1, CreateChannelEnd, { 0x48, 0x89 }))
+        {
+            if ((Byte(Store + 2) & 0xC7) == 0x84 && (Byte(Store + 3) >> 6) == 3)
+            {
+                Channels = *reinterpret_cast<const int32_t*>(Store + 4);
+            }
+        }
+        RequireOffset(L"UNetConnection::Channels", Natives::UNetConnection_Channels, Channels);
+
+        ptrdiff_t IsPeer = 0;
+        size_t IsPeerSites = 0;
+        for (const uintptr_t Site : Finder::StringRefs(L"(PEER)"))
+        {
+            const bool bPeerTest = Byte(Site - 7) == 0x80 && (Byte(Site - 6) & 0xF8) == 0xB8 && (Byte(Site - 6) & 0x07) != 0x04 && Byte(Site - 1) == 0x00;
+            const ptrdiff_t Offset = bPeerTest ? *reinterpret_cast<const int32_t*>(Site - 5) : 0;
+            if (!Offset || (IsPeerSites && Offset != IsPeer))
+            {
+                IsPeerSites = 0;
+                break;
+            }
+            IsPeer = Offset;
+            ++IsPeerSites;
+        }
+        RequireOffset(L"UNetDriver::bIsPeer", Natives::UNetDriver_bIsPeer, IsPeerSites >= 2 ? IsPeer : 0);
+
+        const ptrdiff_t DebugActorLists = (Natives::UNetDriver_DebugRelevantActors + 1 + 7) & ~static_cast<ptrdiff_t>(7);
+        const bool bDebugActorLists = Natives::UNetDriver_DebugRelevantActors > 0 && DebugActorLists + 4 * 0x10 == Natives::UNetDriver_DestroyedStartupOrDormantActors;
+        RequireOffset(L"UNetDriver::LastPrioritizedActors", Natives::UNetDriver_LastPrioritizedActors, bDebugActorLists ? DebugActorLists : 0);
+        RequireOffset(L"UNetDriver::LastRelevantActors", Natives::UNetDriver_LastRelevantActors, bDebugActorLists ? DebugActorLists + 0x10 : 0);
+        RequireOffset(L"UNetDriver::LastSentActors", Natives::UNetDriver_LastSentActors, bDebugActorLists ? DebugActorLists + 0x20 : 0);
+        RequireOffset(L"UNetDriver::LastNonRelevantActors", Natives::UNetDriver_LastNonRelevantActors, bDebugActorLists ? DebugActorLists + 0x30 : 0);
+
+        ptrdiff_t OwningChannel = 0;
+        int32_t OwningChannelLoads = 0;
+        for (uintptr_t Load = ReplicatePropertiesEnd && ActorChannelBits > 0 ? FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, { 0x48, 0x8B }) : 0; Load; Load = FindInstruction(Load + 1, ReplicatePropertiesEnd, { 0x48, 0x8B }))
+        {
+            if ((Byte(Load + 2) & 0xF8) != 0x80 || (Byte(Load + 2) & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const uintptr_t BitsRead = FindInstruction(Load + 7, Load + 0x30, { 0x44, 0x8B, 0x88, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 });
+            if (BitsRead)
+            {
+                OwningChannel = *reinterpret_cast<const int32_t*>(Load + 3);
+                ++OwningChannelLoads;
+            }
+        }
+        RequireOffset(L"FObjectReplicator::OwningChannel", Natives::FObjectReplicator_OwningChannel, OwningChannelLoads == 1 ? OwningChannel : 0);
+
+        Sites::FlushActorDormancyCalls.clear();
+        uintptr_t StrippedFlushDormancy = 0;
+        bool bFlushDormancyCalls = AddNetworkActor != 0;
+        for (const uintptr_t Function : { FlushDormancy, SetDormancyFunctions == 1 ? SetDormancy : uintptr_t(0) })
+        {
+            const uintptr_t End = Finder::FunctionEnd(Function);
+            uintptr_t AddActorCall = 0;
+            for (uintptr_t Call = End ? FindRawCall(Function, End) : 0; Call && !AddActorCall; Call = FindRawCall(Call + 5, End))
+            {
+                AddActorCall = Finder::RelativeTarget(Call, 1, 5) == AddNetworkActor ? Call : 0;
+            }
+
+            int32_t Calls = 0;
+            for (uintptr_t Call = AddActorCall ? FindRawCall(AddActorCall + 5, End) : 0; Call; Call = FindRawCall(Call + 5, End))
+            {
+                const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+                if (Byte(Target) == 0xC2 && Byte(Target + 1) == 0x00 && Byte(Target + 2) == 0x00 && (!StrippedFlushDormancy || Target == StrippedFlushDormancy))
+                {
+                    StrippedFlushDormancy = Target;
+                    Sites::FlushActorDormancyCalls.push_back(reinterpret_cast<uint8_t*>(Call));
+                    ++Calls;
+                }
+            }
+            bFlushDormancyCalls = bFlushDormancyCalls && Calls == 2;
+        }
+        if (!bFlushDormancyCalls)
+        {
+            Log::Error(L"Finder: UNetDriver::FlushActorDormancy call sites not found ({})", Sites::FlushActorDormancyCalls.size());
+            Sites::FlushActorDormancyCalls.clear();
+            ++MissingCount;
+        }
     }
 }
 
@@ -2261,6 +2348,25 @@ bool Finder::ResolveReplicationLive()
 
     const int32_t Standby = Finder::VTableIndex(NetworkManagerVTable, reinterpret_cast<void*>(FunctionOf(L"Standby check is %s with RxTime (%f), TxTime (%f), PingThreshold (%d), JoinInProgressStandbyWaitTime (%f)")), 0x400);
     RequireSlot(L"AGameNetworkManager::IsInLowBandwidthMode", Natives::AGameNetworkManager_IsInLowBandwidthModeIndex, Standby >= 5 && VTableEntry(NetworkManagerVTable, Standby - 5) ? Standby - 5 : -1);
+
+    const uintptr_t ReplicateActor = reinterpret_cast<uintptr_t>(Natives::UActorChannel_ReplicateActor);
+    const uintptr_t ReplicateActorEnd = Finder::FunctionEnd(ReplicateActor);
+    const uintptr_t WorldSettingsCall = ReplicateActorEnd ? FindInstruction(ReplicateActor, ReplicateActorEnd, { 0x41, 0xB0, 0x01, 0x33, 0xD2, 0x48, 0x8B, 0xC8, 0xE8 }) : 0;
+    const uintptr_t ViewersNum = WorldSettingsCall ? FindInstruction(WorldSettingsCall + 13, WorldSettingsCall + 0x20, { 0x39, -1 }) : 0;
+    const uintptr_t ViewersStride = ViewersNum ? FindInstruction(ViewersNum, ViewersNum + 0x30, { 0x48, 0x8D, -1, 0x52, 0x48, 0xC1, -1, 0x04 }) : 0;
+    const uintptr_t ViewersData = ViewersStride ? FindInstruction(ViewersStride, ViewersStride + 0x10, { 0x49, 0x03, -1, 0x24 }) : 0;
+    const UProperty* ViewersProperty = AWorldSettings::StaticClass() ? AWorldSettings::StaticClass()->FindPropertyByName(FName(L"ReplicationViewers", FNAME_Find)) : nullptr;
+    const UScriptStruct* NetViewerStruct = FindObject<UScriptStruct>(nullptr, L"/Script/Engine.NetViewer");
+    const int32_t ReflectedViewers = ViewersProperty ? ViewersProperty->GetOffset_ForInternal() : -1;
+    const bool bViewersLayout = ViewersData && (Byte(ViewersNum + 1) & 0xC0) == 0x80
+        && *reinterpret_cast<const int32_t*>(ViewersData + 4) == ReflectedViewers
+        && *reinterpret_cast<const int32_t*>(ViewersNum + 2) == ReflectedViewers + 8
+        && NetViewerStruct && NetViewerStruct->GetPropertiesSize() == static_cast<int32_t>(sizeof(FNetViewer));
+    if (!bViewersLayout)
+    {
+        Log::Error(L"Finder: AWorldSettings::ReplicationViewers layout differs from ReplicateActor (reflected 0x{:X}, FNetViewer {} bytes)", ReflectedViewers, NetViewerStruct ? NetViewerStruct->GetPropertiesSize() : -1);
+        ++MissingCount;
+    }
 
     Log::Info(L"Finder: replication live slots resolved, {} missing", MissingCount);
     return MissingCount == 0;

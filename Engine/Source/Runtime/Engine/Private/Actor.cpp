@@ -5,7 +5,6 @@
 #include "Engine/Level.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
-#include "Hooks.h"
 #include "Natives.h"
 #include "Templates/Casts.h"
 
@@ -50,62 +49,12 @@ void AActor::ForceNetUpdate()
 
 void AActor::SetNetDormancy(ENetDormancy NewDormancy)
 {
-    if (IsNetMode(NM_Client))
-    {
-        return;
-    }
-
-    UWorld* MyWorld = GetWorld();
-    UNetDriver* NetDriver = GEngine->FindNamedNetDriver(MyWorld, NetDriverName);
-    if (!NetDriver)
-    {
-        return;
-    }
-
-    NetDormancy = NewDormancy;
-    if (NewDormancy > DORM_Awake)
-    {
-        return;
-    }
-
-    MyWorld->AddNetworkActor(this);
-    NetDriver->FlushActorDormancy(this);
-
-    if (MyWorld->DemoNetDriver && MyWorld->DemoNetDriver != NetDriver)
-    {
-        MyWorld->DemoNetDriver->FlushActorDormancy(this);
-    }
+    Natives::AActor_SetNetDormancy(this, NewDormancy);
 }
 
 void AActor::FlushNetDormancy()
 {
-    if (IsNetMode(NM_Client) || NetDormancy <= DORM_Awake)
-    {
-        return;
-    }
-
-    if (NetDormancy == DORM_Initial)
-    {
-        NetDormancy = DORM_DormantAll;
-    }
-
-    if (!bReplicates)
-    {
-        return;
-    }
-
-    UWorld* MyWorld = GetWorld();
-    MyWorld->AddNetworkActor(this);
-
-    if (UNetDriver* NetDriver = GetNetDriver())
-    {
-        NetDriver->FlushActorDormancy(this);
-
-        if (MyWorld->DemoNetDriver && MyWorld->DemoNetDriver != NetDriver)
-        {
-            MyWorld->DemoNetDriver->FlushActorDormancy(this);
-        }
-    }
+    Natives::AActor_FlushNetDormancy(this);
 }
 
 static UNetDriver* GetNetDriver_Internal(UWorld* World, FName NetDriverName)
@@ -137,20 +86,4 @@ ENetMode AActor::InternalGetNetMode() const
 UNetDriver* AActor::GetNetDriver() const
 {
     return GetNetDriver_Internal(GetWorld(), NetDriverName);
-}
-
-void AActor::Hook()
-{
-    Hooks::Detour(L"AActor::FlushNetDormancy", reinterpret_cast<void*>(Natives::AActor_FlushNetDormancy), &FlushNetDormancyHK, &FlushNetDormancyOG);
-    Hooks::Detour(L"AActor::SetNetDormancy", reinterpret_cast<void*>(Natives::AActor_SetNetDormancy), &SetNetDormancyHK, &SetNetDormancyOG);
-}
-
-void AActor::FlushNetDormancyHK(AActor* This)
-{
-    This->FlushNetDormancy();
-}
-
-void AActor::SetNetDormancyHK(AActor* This, ENetDormancy NewDormancy)
-{
-    This->SetNetDormancy(NewDormancy);
 }

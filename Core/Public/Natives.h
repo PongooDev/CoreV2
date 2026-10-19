@@ -226,6 +226,7 @@ namespace Sites
     inline std::vector<uint8_t*> GameEngineTickDedicatedServerChecks;
     inline std::vector<void**> ConsoleVTables;
     inline std::vector<void**> NetDriverVTables;
+    inline std::vector<uint8_t*> FlushActorDormancyCalls;
 
     struct FShowFlag
     {

@@ -891,14 +891,31 @@ void UNetDriver::Hook()
     {
         Hooks::SwapVTable(L"UNetDriver::ServerReplicateActors", VTable, Natives::UNetDriver_ServerReplicateActorsIndex, reinterpret_cast<void*>(&ServerReplicateActorsHK));
     }
+
+    for (uint8_t* Call : Sites::FlushActorDormancyCalls)
+    {
+        Hooks::RedirectCall(L"UNetDriver::FlushActorDormancy", Call, reinterpret_cast<void*>(&FlushActorDormancyHK));
+    }
 }
 
 void UNetDriver::TickFlushHK(UNetDriver* This, float DeltaSeconds)
 {
+    static const bool bReplicationResolved = Finder::ResolveReplicationLive();
+    if (!bReplicationResolved)
+    {
+        TickFlushOG(This, DeltaSeconds);
+        return;
+    }
+
     This->TickFlush(DeltaSeconds);
 }
 
 int32_t UNetDriver::ServerReplicateActorsHK(UNetDriver* This, float DeltaSeconds)
 {
     return This->ServerReplicateActors(DeltaSeconds);
+}
+
+void UNetDriver::FlushActorDormancyHK(UNetDriver* This, AActor* Actor)
+{
+    This->FlushActorDormancy(Actor);
 }

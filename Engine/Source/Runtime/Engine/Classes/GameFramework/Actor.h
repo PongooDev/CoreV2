@@ -79,15 +79,8 @@ public:
     void FlushNetDormancy();
     void SetNetDormancy(ENetDormancy NewDormancy);
 
-    static void Hook();
-
 private:
     ENetMode InternalGetNetMode() const;
-
-    static inline void (*FlushNetDormancyOG)(AActor* This) = nullptr;
-    static inline void (*SetNetDormancyOG)(AActor* This, ENetDormancy NewDormancy) = nullptr;
-    static void FlushNetDormancyHK(AActor* This);
-    static void SetNetDormancyHK(AActor* This, ENetDormancy NewDormancy);
 };
 
 inline ENetMode AActor::GetNetMode() const

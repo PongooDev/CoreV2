@@ -7,6 +7,7 @@
 #include "LaunchEngineLoop.h"
 #include "Log.h"
 #include "Engine/GameEngine.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 
 void Boot::Initialize()
@@ -30,6 +31,7 @@ void Boot::Initialize()
     FEngineLoop::Hook();
     UGameMapsSettings::Hook();
     UWorld::Hook();
+    UNetDriver::Hook();
     UEngine::Hook();
     UGameEngine::Hook();
     Hooks::EnableAll();

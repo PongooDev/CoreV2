@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Containers/UnrealString.h"
+
 #include <cstdint>
 
 class FNetworkGUID
@@ -30,6 +32,11 @@ public:
     }
 
     bool operator==(const FNetworkGUID& Other) const = default;
+
+    FString ToString() const
+    {
+        return FString::Printf(L"%d", Value);
+    }
 
     friend uint32_t GetTypeHash(const FNetworkGUID& Guid)
     {

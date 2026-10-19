@@ -11,5 +11,6 @@ class AController : public AActor
 public:
     DefineUProperty(APawn*, Pawn)
 
+    APawn* GetPawn() const { return Pawn; }
     AActor* GetViewTarget() const;
 };

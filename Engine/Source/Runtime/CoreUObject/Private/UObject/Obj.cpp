@@ -37,3 +37,8 @@ UFunction* UObject::FindFunctionChecked(FName InName) const
 
     return Result;
 }
+
+UObject* UObject::GetArchetypeFromRequiredInfo(UClass* Class, UObject* Outer, FName Name, EObjectFlags ObjectFlags)
+{
+    return Natives::UObject_GetArchetypeFromRequiredInfo(Class, Outer, Name, static_cast<int32_t>(ObjectFlags));
+}

@@ -15,6 +15,8 @@ public:
     DefineNativeMember(double, LastUpdateTime, UActorChannel_LastUpdateTime)
     DefineNativeBitfield(bForceCompareProperties, UActorChannel_Bits, 1u << 1)
 
+    AActor* GetActor() { return Actor; }
+
     bool ReplicateActor();
     void SetChannelActor(AActor* InActor);
     void SetChannelActorForDestroy(FActorDestructionInfo* DestructInfo);

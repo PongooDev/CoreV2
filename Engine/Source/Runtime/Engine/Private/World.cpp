@@ -74,6 +74,16 @@ bool UWorld::Listen(FURL& InURL)
 #endif
 }
 
+AWorldSettings* UWorld::GetWorldSettings(bool bCheckStreamingPersistent, bool bChecked) const
+{
+    return Natives::UWorld_GetWorldSettings(this, bCheckStreamingPersistent, bChecked);
+}
+
+void UWorld::AddNetworkActor(AActor* Actor)
+{
+    Natives::UWorld_AddNetworkActor(this, Actor);
+}
+
 ENetMode UWorld::InternalGetNetMode() const
 {
     if (NetDriver != nullptr)

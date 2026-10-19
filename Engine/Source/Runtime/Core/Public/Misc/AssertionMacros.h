@@ -1,6 +1,8 @@
 #pragma once
 
+#include "HAL/Platform.h"
 #include "Misc/Build.h"
+#include "Misc/CoreMiscDefines.h"
 #include "Natives.h"
 
 #include <cstdint>
@@ -28,20 +30,22 @@ void LowLevelFatalErrorHandler(const char* File, int32_t Line, const wchar_t* Fo
 
 #if DO_CHECK
     #define checkCode(Code) do { Code; } while (false);
-    #define verify(expr) { if (!(expr)) { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed(#expr, __FILE__, __LINE__); } }
-    #define check(expr) { if (!(expr)) { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed(#expr, __FILE__, __LINE__); } }
-    #define verifyf(expr, format, ...) { if (!(expr)) { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed(#expr, __FILE__, __LINE__, format, ##__VA_ARGS__); } }
-    #define checkf(expr, format, ...) { if (!(expr)) { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed(#expr, __FILE__, __LINE__, format, ##__VA_ARGS__); } }
-    #define checkNoEntry() { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed("Enclosing block should never be called", __FILE__, __LINE__); }
-    #define unimplemented() { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed("Unimplemented function called", __FILE__, __LINE__); }
+    #define verify(expr) { if (UNLIKELY(!(expr))) { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed(#expr, __FILE__, __LINE__); CA_ASSUME(false); } }
+    #define check(expr) { if (UNLIKELY(!(expr))) { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed(#expr, __FILE__, __LINE__); CA_ASSUME(false); } }
+    #define verifyf(expr, format, ...) { if (UNLIKELY(!(expr))) { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed(#expr, __FILE__, __LINE__, format, ##__VA_ARGS__); CA_ASSUME(false); } }
+    #define checkf(expr, format, ...) { if (UNLIKELY(!(expr))) { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed(#expr, __FILE__, __LINE__, format, ##__VA_ARGS__); CA_ASSUME(false); } }
+    #define checkNoEntry() { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed("Enclosing block should never be called", __FILE__, __LINE__); CA_ASSUME(false); }
+    #define unimplemented() { _DebugBreakAndPromptForRemote(); FDebug::AssertFailed("Unimplemented function called", __FILE__, __LINE__); CA_ASSUME(false); }
 #else
     #define checkCode(...)
-    #define check(expr) { __assume(expr); }
-    #define checkf(expr, format, ...) { __assume(expr); }
+    #define check(expr) { CA_ASSUME(expr); }
+    #define checkf(expr, format, ...) { CA_ASSUME(expr); }
     #define checkNoEntry()
-    #define verify(expr) { if (!(expr)) { __assume(false); } }
-    #define verifyf(expr, format, ...) { if (!(expr)) { __assume(false); } }
-    #define unimplemented() { __assume(false); }
+    #define checkNoReentry()
+    #define checkNoRecursion()
+    #define verify(expr) { if (UNLIKELY(!(expr))) { CA_ASSUME(false); } }
+    #define verifyf(expr, format, ...) { if (UNLIKELY(!(expr))) { CA_ASSUME(false); } }
+    #define unimplemented() { CA_ASSUME(false); }
 #endif
 
 #if DO_GUARD_SLOW
@@ -49,9 +53,9 @@ void LowLevelFatalErrorHandler(const char* File, int32_t Line, const wchar_t* Fo
     #define checkfSlow(expr, format, ...) checkf(expr, format, ##__VA_ARGS__)
     #define verifySlow(expr) verify(expr)
 #else
-    #define checkSlow(expr) { __assume(expr); }
-    #define checkfSlow(expr, format, ...) { __assume(expr); }
-    #define verifySlow(expr) { if (!(expr)) { __assume(false); } }
+    #define checkSlow(expr) { CA_ASSUME(expr); }
+    #define checkfSlow(expr, format, ...) { CA_ASSUME(expr); }
+    #define verifySlow(expr) { if (UNLIKELY(!(expr))) { CA_ASSUME(false); } }
 #endif
 
 #define ensure(InExpression) (!!(InExpression))

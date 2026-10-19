@@ -1,9 +1,12 @@
 #pragma once
 
 #include "Containers/EnumAsByte.h"
+#include "CoreGlobals.h"
+#include "Engine/EngineBaseTypes.h"
 #include "Math/Vector.h"
 #include "ObjectLayout.h"
 #include "UObject/NameTypes.h"
+#include "UObject/UnrealNames.h"
 #include "UObject/Object.h"
 
 class ULevel;
@@ -61,6 +64,9 @@ public:
     UWorld* GetWorld() const;
     UNetDriver* GetNetDriver() const;
 
+    ENetMode GetNetMode() const;
+    bool IsNetMode(ENetMode Mode) const;
+
     FVector GetVelocity() const;
     float GetNetPriority(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);
     bool GetNetDormancy(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);
@@ -76,8 +82,35 @@ public:
     static void Hook();
 
 private:
+    ENetMode InternalGetNetMode() const;
+
     static inline void (*FlushNetDormancyOG)(AActor* This) = nullptr;
     static inline void (*SetNetDormancyOG)(AActor* This, ENetDormancy NewDormancy) = nullptr;
     static void FlushNetDormancyHK(AActor* This);
     static void SetNetDormancyHK(AActor* This, ENetDormancy NewDormancy);
 };
+
+inline ENetMode AActor::GetNetMode() const
+{
+    if (IsRunningDedicatedServer() && (NetDriverName == NAME_None || NetDriverName == NAME_GameNetDriver))
+    {
+        return NM_DedicatedServer;
+    }
+
+    return InternalGetNetMode();
+}
+
+inline bool AActor::IsNetMode(ENetMode Mode) const
+{
+    if (Mode == NM_DedicatedServer)
+    {
+        return IsRunningDedicatedServer();
+    }
+
+    if (NetDriverName == NAME_None || NetDriverName == NAME_GameNetDriver)
+    {
+        return !IsRunningDedicatedServer() && InternalGetNetMode() == Mode;
+    }
+
+    return InternalGetNetMode() == Mode;
+}

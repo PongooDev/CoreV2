@@ -52,6 +52,11 @@ public: \
     Type& GetNative_##Name() const { return *reinterpret_cast<Type*>(reinterpret_cast<uintptr_t>(this) + Natives::Offset); } \
     __declspec(property(get = GetNative_##Name)) Type Name;
 
+#define DefineNativeArray(Type, Name, Offset) \
+public: \
+    Type* GetNative_##Name() const { return reinterpret_cast<Type*>(reinterpret_cast<uintptr_t>(this) + Natives::Offset); } \
+    __declspec(property(get = GetNative_##Name)) Type* Name;
+
 #define DefineNativeBitfield(Name, Offset, Mask) \
 public: \
     bool GetNative_##Name() const { return (*reinterpret_cast<const uint32_t*>(reinterpret_cast<uintptr_t>(this) + Natives::Offset) & (Mask)) != 0; } \

@@ -136,6 +136,16 @@ public:
         return -1;
     }
 
+    bool Contains(const wchar_t* SubStr, ESearchCase::Type SearchCase = ESearchCase::IgnoreCase, ESearchDir::Type SearchDir = ESearchDir::FromStart) const
+    {
+        return Find(SubStr, SearchCase, SearchDir) != -1;
+    }
+
+    bool Contains(const FString& SubStr, ESearchCase::Type SearchCase = ESearchCase::IgnoreCase, ESearchDir::Type SearchDir = ESearchDir::FromStart) const
+    {
+        return Find(*SubStr, SearchCase, SearchDir) != -1;
+    }
+
     FString Mid(int32_t Start, int32_t Count = INT_MAX) const
     {
         const int32_t TextLen = Len();

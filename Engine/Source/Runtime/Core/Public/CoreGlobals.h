@@ -8,6 +8,8 @@ FOutputDeviceRedirector* GetGlobalLogSingleton();
 
 #define GLog GetGlobalLogSingleton()
 
+bool IsInGameThread();
+
 inline bool IsRunningDedicatedServer()
 {
     if (FPlatformProperties::IsServerOnly())

@@ -14,6 +14,13 @@ class UChildConnection;
 class UNetDriver;
 class UPackageMap;
 
+enum { RELIABLE_BUFFER = 256 };
+enum { MAX_PACKETID = 16384 };
+enum { MAX_CHSEQUENCE = 1024 };
+enum { MAX_BUNCH_HEADER_BITS = 64 };
+enum { MAX_PACKET_HEADER_BITS = 15 };
+enum { MAX_PACKET_TRAILER_BITS = 1 };
+
 enum EConnectionState
 {
     USOCK_Invalid = 0,
@@ -27,6 +34,8 @@ class UNetConnection : public UPlayer
     DefineUnrealClass(UNetConnection, Engine)
 
 public:
+    enum { MAX_CHANNELS = 10240 };
+
     DefineUProperty(TArray<UChildConnection*>, Children)
     DefineUProperty(UNetDriver*, Driver)
     DefineUProperty(UPackageMap*, PackageMap)
@@ -39,6 +48,7 @@ public:
     DefineNativeMember(int32_t, QueuedBits, UNetConnection_QueuedBits)
     DefineNativeMember(int32_t, TickCount, UNetConnection_TickCount)
     DefineNativeMember(bool, TimeSensitive, UNetConnection_TimeSensitive)
+    DefineNativeArray(UChannel*, Channels, UNetConnection_Channels)
     using FActorChannelMap = TMap<TWeakObjectPtr<AActor>, UActorChannel*>;
     using FDormantReplicatorMap = TMap<TWeakObjectPtr<UObject>, TSharedPtr<FObjectReplicator>>;
     DefineNativeObject(FActorChannelMap, ActorChannels, UNetConnection_ActorChannels)
@@ -48,7 +58,7 @@ public:
     DefineNativeMember(TArray<FName>, ClientVisibleLevelNames, UNetConnection_ClientVisibleLevelNames)
 
     UChannel* CreateChannel(EChannelType Type, bool bOpenedLocally, int32_t ChannelIndex = -1);
-    bool IsNetReady(bool Saturate);
+    int32_t IsNetReady(bool Saturate);
     bool ClientHasInitializedLevelFor(const UObject* TestObject) const;
     void FlushDormancy(AActor* Actor);
 };

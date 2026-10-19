@@ -67,9 +67,14 @@ public:
     DefineUProperty(UWorld*, World)
     DefineUProperty(FName, NetDriverName)
     DefineUProperty(float, Time)
+    DefineNativeMember(bool, bIsPeer, UNetDriver_bIsPeer)
     DefineNativeMember(TSharedPtr<FNetGUIDCache>, GuidCache, UNetDriver_GuidCache)
     DefineNativeMember(int32_t, NetTag, UNetDriver_NetTag)
     DefineNativeMember(bool, DebugRelevantActors, UNetDriver_DebugRelevantActors)
+    DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastPrioritizedActors, UNetDriver_LastPrioritizedActors)
+    DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastRelevantActors, UNetDriver_LastRelevantActors)
+    DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastSentActors, UNetDriver_LastSentActors)
+    DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastNonRelevantActors, UNetDriver_LastNonRelevantActors)
     using FDestroyedActorMap = TMap<FNetworkGUID, FActorDestructionInfo>;
     DefineNativeObject(FDestroyedActorMap, DestroyedStartupOrDormantActors, UNetDriver_DestroyedStartupOrDormantActors)
     DefineNativeMember(uint32_t, ReplicationFrame, UNetDriver_ReplicationFrame)
@@ -80,13 +85,20 @@ public:
     void SetWorld(UWorld* InWorld);
 
     FNetworkObjectList& GetNetworkObjectList() { return *NetworkObjects; }
+    const FNetworkObjectList& GetNetworkObjectList() const { return *NetworkObjects; }
+
+    FString GetDescription()
+    {
+        return FString::Printf(TEXT("%s %s%s"), *NetDriverName.ToString(), *GetName(), bIsPeer ? TEXT("(PEER)") : TEXT(""));
+    }
 
     bool IsServer() const;
     bool IsLevelInitializedForActor(const AActor* InActor, const UNetConnection* InConnection) const;
-    bool IsAdaptiveNetUpdateFrequencyEnabled();
+    static bool IsAdaptiveNetUpdateFrequencyEnabled();
     void TickFlush(float DeltaSeconds);
     int32_t ServerReplicateActors(float DeltaSeconds);
     void FlushActorDormancy(AActor* Actor);
+    void PrintDebugRelevantActors();
 
     static void Hook();
 

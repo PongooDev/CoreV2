@@ -38,5 +38,5 @@ public:
     void Close();
     FPacketIdRange SendBunch(FOutBunch* Bunch, bool Merge);
     void StartBecomingDormant();
-    bool IsNetReady(bool Saturate);
+    int32_t IsNetReady(bool Saturate);
 };

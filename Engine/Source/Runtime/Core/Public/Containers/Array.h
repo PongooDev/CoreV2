@@ -161,22 +161,44 @@ public:
         }
     }
 
-    void RemoveAt(int32_t Index)
+    bool Contains(const T& Item) const
     {
-        Data[Index].~T();
+        for (const T& Element : *this)
+        {
+            if (Element == Item)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void RemoveAt(int32_t Index, int32_t Count = 1)
+    {
+        if (Count <= 0)
+        {
+            return;
+        }
+
+        for (int32_t Removed = Index; Removed < Index + Count; ++Removed)
+        {
+            Data[Removed].~T();
+        }
+
+        const int32_t NumToMove = ArrayNum - Index - Count;
         if constexpr (std::is_trivially_copyable_v<T>)
         {
-            memmove(Data + Index, Data + Index + 1, sizeof(T) * (ArrayNum - Index - 1));
+            memmove(Data + Index, Data + Index + Count, sizeof(T) * NumToMove);
         }
         else
         {
-            for (int32_t Move = Index; Move < ArrayNum - 1; ++Move)
+            for (int32_t Move = 0; Move < NumToMove; ++Move)
             {
-                new (Data + Move) T(std::move(Data[Move + 1]));
-                Data[Move + 1].~T();
+                new (Data + Index + Move) T(std::move(Data[Index + Count + Move]));
+                Data[Index + Count + Move].~T();
             }
         }
-        --ArrayNum;
+        ArrayNum -= Count;
     }
 
     void Reset()
@@ -221,3 +243,15 @@ protected:
     int32_t ArrayNum = 0;
     int32_t ArrayMax = 0;
 };
+
+template <typename T>
+void* operator new(size_t Size, TArray<T>& Array)
+{
+    const int32_t Index = Array.AddUninitialized(1);
+    return &Array[Index];
+}
+
+template <typename T>
+void operator delete(void*, TArray<T>&)
+{
+}

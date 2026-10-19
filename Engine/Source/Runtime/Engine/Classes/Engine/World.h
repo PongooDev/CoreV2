@@ -62,6 +62,9 @@ public:
     ENetMode AttemptDeriveFromURL() const;
 
     FLevelCollection* FindCollectionByType(const ELevelCollectionType InType);
+    UNetDriver* GetNetDriver() const { return NetDriver; }
+    void SetNetDriver(UNetDriver* NewDriver) { NetDriver = NewDriver; }
+    float GetTimeSeconds() const { return TimeSeconds; }
     AGameModeBase* GetAuthGameMode() const { return AuthorityGameMode; }
     AWorldSettings* GetWorldSettings(bool bCheckStreamingPersistent = false, bool bChecked = true) const;
     void AddNetworkActor(AActor* Actor);

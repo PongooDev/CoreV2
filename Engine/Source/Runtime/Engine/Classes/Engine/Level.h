@@ -13,4 +13,6 @@ public:
     DefineUProperty(UWorld*, OwningWorld)
     DefineBitfieldUProperty(bIsVisible)
     DefineNativeBitfield(bIsAssociatingLevel, ULevel_bIsAssociatingLevel, Natives::ULevel_bIsAssociatingLevelMask)
+
+    bool HasVisibilityChangeRequestPending() const;
 };

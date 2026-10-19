@@ -67,6 +67,12 @@ bool UObjectBaseUtility::IsPendingKill() const
     return Item && Item->IsPendingKill();
 }
 
+bool UObjectBaseUtility::IsUnreachable() const
+{
+    const FUObjectItem* Item = GetObjectItem(this);
+    return Item && Item->IsUnreachable();
+}
+
 void UObjectBaseUtility::AddToRoot()
 {
     if (FUObjectItem* Item = GetObjectItem(this))

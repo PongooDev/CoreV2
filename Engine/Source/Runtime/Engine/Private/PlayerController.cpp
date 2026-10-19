@@ -22,6 +22,11 @@ void APlayerController::ConsoleKey(FKey Key)
 #endif
 }
 
+void APlayerController::SendClientAdjustment()
+{
+    CallVirtual<void>(this, Natives::APlayerController_SendClientAdjustmentIndex);
+}
+
 void APlayerController::SendToConsole(const FString& Command)
 {
 #if ALLOW_CONSOLE

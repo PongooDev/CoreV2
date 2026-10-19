@@ -13,6 +13,7 @@ public:
 
     void MarkPendingKill();
     bool IsPendingKill() const;
+    bool IsUnreachable() const;
     void AddToRoot();
     void RemoveFromRoot();
     bool IsRooted() const;

@@ -1383,7 +1383,9 @@ bool Finder::ResolveConsoleManager()
         Log::Error(L"Finder: IConsoleManager::ForEachConsoleObjectThatStartsWith not found");
         return false;
     }
+    Natives::IConsoleManager_FindConsoleVariableIndex = LastRegister + 2;
     Natives::IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = LastRegister + 4;
+    Log::Info(L"Finder: IConsoleManager::FindConsoleVariable is slot 0x{:X}", Natives::IConsoleManager_FindConsoleVariableIndex);
     Log::Info(L"Finder: IConsoleManager::ForEachConsoleObjectThatStartsWith is slot 0x{:X}", Natives::IConsoleManager_ForEachConsoleObjectThatStartsWithIndex);
     return true;
 }

@@ -14,4 +14,11 @@ public:
     void ProcessEvent(UFunction* Function, void* Parms);
     UFunction* FindFunction(FName InName) const;
     UFunction* FindFunctionChecked(FName InName) const;
+
+    static UObject* GetArchetypeFromRequiredInfo(UClass* Class, UObject* Outer, FName Name, EObjectFlags ObjectFlags);
+
+    UObject* GetArchetype() const
+    {
+        return GetArchetypeFromRequiredInfo(GetClass(), GetOuter(), GetFName(), GetFlags());
+    }
 };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/SparseArray.h"
+#include "Templates/Sorting.h"
 #include "HAL/UnrealMemory.h"
 #include "Templates/TypeHash.h"
 
@@ -277,6 +278,43 @@ public:
 
     using TIterator = TBaseIterator<false>;
     using TConstIterator = TBaseIterator<true>;
+
+    void Empty()
+    {
+        Elements.Empty();
+        if (Hash.SecondaryData)
+        {
+            FMemory::Free(Hash.SecondaryData);
+            Hash.SecondaryData = nullptr;
+        }
+        HashSize = 0;
+    }
+
+    template <typename PREDICATE_CLASS>
+    void Sort(const PREDICATE_CLASS& Predicate)
+    {
+        if (Elements.Num() == 0)
+        {
+            return;
+        }
+
+        TArray<InElementType> Sorted;
+        Sorted.Reserve(Elements.Num());
+        for (const InElementType& Element : *this)
+        {
+            Sorted.Add(Element);
+        }
+        ::Sort(Sorted.GetData(), Sorted.Num(), Predicate);
+
+        Empty();
+        for (const InElementType& Element : Sorted)
+        {
+            Add(Element);
+        }
+    }
+
+    TIterator CreateIterator() { return TIterator(Elements, 0); }
+    TConstIterator CreateConstIterator() const { return TConstIterator(Elements, 0); }
 
     TIterator begin() { return TIterator(Elements, 0); }
     TIterator end() { return TIterator(Elements, Elements.GetMaxIndex()); }

@@ -18,6 +18,11 @@ UNetDriver* UEngine::FindNamedNetDriver(const UWorld* InWorld, FName NetDriverNa
     return Natives::UEngine_FindNamedNetDriver(this, InWorld, NetDriverName);
 }
 
+float UEngine::GetMaxTickRate(float DeltaTime, bool bAllowFrameRateSmoothing) const
+{
+    return CallVirtual<float>(this, Natives::UEngine_GetMaxTickRateIndex, DeltaTime, bAllowFrameRateSmoothing);
+}
+
 void UEngine::Hook()
 {
     for (uint8_t* Check : Sites::EngineInitDedicatedServerChecks)

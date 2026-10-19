@@ -82,10 +82,90 @@ public:
         return Pairs[PairId].Value;
     }
 
+    ValueType& FindOrAdd(const KeyType& Key)
+    {
+        if (ElementType* Pair = Pairs.Find(Key))
+        {
+            return Pair->Value;
+        }
+        return Add(Key, ValueType());
+    }
+
     int32_t Remove(const KeyType& InKey)
     {
         return Pairs.Remove(InKey);
     }
+
+    void Empty()
+    {
+        Pairs.Empty();
+    }
+
+    template <typename PREDICATE_CLASS>
+    void KeySort(const PREDICATE_CLASS& Predicate)
+    {
+        Pairs.Sort([&Predicate](const ElementType& A, const ElementType& B) { return Predicate(A.Key, B.Key); });
+    }
+
+    template <typename PREDICATE_CLASS>
+    void ValueSort(const PREDICATE_CLASS& Predicate)
+    {
+        Pairs.Sort([&Predicate](const ElementType& A, const ElementType& B) { return Predicate(A.Value, B.Value); });
+    }
+
+    template <bool bConst>
+    class TBaseIterator
+    {
+        using PairIteratorType = std::conditional_t<bConst, typename ElementSetType::TConstIterator, typename ElementSetType::TIterator>;
+        using ItElementType = std::conditional_t<bConst, const ElementType, ElementType>;
+        using ItValueType = std::conditional_t<bConst, const ValueType, ValueType>;
+
+    public:
+        explicit TBaseIterator(const PairIteratorType& InPairIt)
+            : PairIt(InPairIt)
+        {
+        }
+
+        TBaseIterator& operator++()
+        {
+            ++PairIt;
+            return *this;
+        }
+
+        explicit operator bool() const
+        {
+            return static_cast<bool>(PairIt);
+        }
+
+        const KeyType& Key() const
+        {
+            return PairIt->Key;
+        }
+
+        ItValueType& Value() const
+        {
+            return PairIt->Value;
+        }
+
+        ItElementType& operator*() const
+        {
+            return *PairIt;
+        }
+
+        ItElementType* operator->() const
+        {
+            return &*PairIt;
+        }
+
+    private:
+        PairIteratorType PairIt;
+    };
+
+    using TIterator = TBaseIterator<false>;
+    using TConstIterator = TBaseIterator<true>;
+
+    TIterator CreateIterator() { return TIterator(Pairs.CreateIterator()); }
+    TConstIterator CreateConstIterator() const { return TConstIterator(Pairs.CreateConstIterator()); }
 
     typename ElementSetType::TIterator begin() { return Pairs.begin(); }
     typename ElementSetType::TIterator end() { return Pairs.end(); }

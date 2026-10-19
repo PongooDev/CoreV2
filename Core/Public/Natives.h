@@ -118,6 +118,7 @@ namespace Natives
     inline AWorldSettings* (*UWorld_GetWorldSettings)(const UWorld* This, bool bCheckStreamingPersistent, bool bChecked) = nullptr;
     inline void (*UWorld_AddNetworkActor)(UWorld* This, AActor* Actor) = nullptr;
     inline bool (*UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled)() = nullptr;
+    inline void (*UNetDriver_TickFlush)(UNetDriver* This, float DeltaSeconds) = nullptr;
     inline FOutBunch* (*FOutBunch_FOutBunch)(FOutBunch* This, UChannel* InChannel, bool bClose) = nullptr;
     inline bool (*FObjectReplicator_ValidateAgainstState)(FObjectReplicator* This, const UObject* ObjectState) = nullptr;
 
@@ -163,6 +164,7 @@ namespace Natives
     inline int32_t APlayerController_ConsoleKeyIndex = -1;
     inline int32_t APlayerController_SendToConsoleIndex = -1;
     inline int32_t IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = -1;
+    inline int32_t IConsoleManager_FindConsoleVariableIndex = -1;
     inline int32_t UProperty_GetCPPTypeIndex = -1;
 
     inline ptrdiff_t UEngine_WorldList = -1;
@@ -170,8 +172,13 @@ namespace Natives
     inline ptrdiff_t UWorld_NextSwitchCountdown = -1;
     inline ptrdiff_t FWorldContext_ThisCurrentWorld = -1;
     inline ptrdiff_t UNetDriver_GuidCache = -1;
+    inline ptrdiff_t UNetDriver_bIsPeer = -1;
     inline ptrdiff_t UNetDriver_NetTag = -1;
     inline ptrdiff_t UNetDriver_DebugRelevantActors = -1;
+    inline ptrdiff_t UNetDriver_LastPrioritizedActors = -1;
+    inline ptrdiff_t UNetDriver_LastRelevantActors = -1;
+    inline ptrdiff_t UNetDriver_LastSentActors = -1;
+    inline ptrdiff_t UNetDriver_LastNonRelevantActors = -1;
     inline ptrdiff_t UNetDriver_DestroyedStartupOrDormantActors = -1;
     inline ptrdiff_t UNetDriver_ReplicationFrame = -1;
     inline ptrdiff_t UNetDriver_NetworkObjects = -1;
@@ -179,6 +186,7 @@ namespace Natives
     inline ptrdiff_t UNetConnection_QueuedBits = -1;
     inline ptrdiff_t UNetConnection_TickCount = -1;
     inline ptrdiff_t UNetConnection_TimeSensitive = -1;
+    inline ptrdiff_t UNetConnection_Channels = -1;
     inline ptrdiff_t UNetConnection_ActorChannels = -1;
     inline ptrdiff_t UNetConnection_DormantReplicatorMap = -1;
     inline ptrdiff_t UNetConnection_DestroyedStartupOrDormantActors = -1;
@@ -190,6 +198,7 @@ namespace Natives
     inline ptrdiff_t UActorChannel_RelevantTime = -1;
     inline ptrdiff_t UActorChannel_LastUpdateTime = -1;
     inline ptrdiff_t UActorChannel_Bits = -1;
+    inline ptrdiff_t FObjectReplicator_OwningChannel = -1;
     inline ptrdiff_t AActor_NetDormancy = -1;
     inline ptrdiff_t AActor_bActorInitialized = -1;
     inline uint32_t AActor_bActorInitializedMask = 0;

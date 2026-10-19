@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "FortGameModeZone.h"
+#include "AI/FortAIGoalManager.h"
 #include "Finder.h"
 #include "Hooks.h"
 #include "Natives.h"
@@ -30,6 +31,11 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
 void AFortGameModeZone::Hook()
 {
     Hooks::Detour(L"AFortGameModeZone::SpawnDefaultPawnFor_Implementation", reinterpret_cast<void*>(Natives::AFortGameModeZone_SpawnDefaultPawnFor), &SpawnDefaultPawnFor_ImplementationHK, nullptr);
+
+    for (uint8_t* Call : Sites::ChoosePlayerStartGoalManagerCalls)
+    {
+        Hooks::RedirectCall(L"AFortGameModeZone::ChoosePlayerStart AFortAIGoalManager::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrent));
+    }
 }
 
 void AFortGameModeZone::HookVTables()

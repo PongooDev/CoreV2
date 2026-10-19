@@ -2,11 +2,15 @@
 
 #include "FortGameMode.h"
 
+class AFortAIGoalManager;
+
 class AFortGameModeZone : public AFortGameMode
 {
     DefineUnrealClass(AFortGameModeZone, FortniteGame)
 
 public:
+    DefineUProperty(AFortAIGoalManager*, AIGoalManager)
+
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
 

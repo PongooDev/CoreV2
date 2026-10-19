@@ -47,6 +47,11 @@ UObject* UObject::GetArchetypeFromRequiredInfo(UClass* Class, UObject* Outer, FN
     return Natives::UObject_GetArchetypeFromRequiredInfo(Class, Outer, Name, static_cast<int32_t>(ObjectFlags));
 }
 
+UWorld* UObject::GetWorld() const
+{
+    return CallVirtual<UWorld*>(this, Natives::UObject_GetWorldIndex);
+}
+
 bool UObject::NeedsLoadForClient() const
 {
     return CallVirtual<bool>(this, Natives::UObject_NeedsLoadForClientIndex);

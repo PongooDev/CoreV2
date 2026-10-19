@@ -5,6 +5,7 @@
 
 class UFunction;
 class UStruct;
+class UWorld;
 
 class UObject : public UObjectBaseUtility
 {
@@ -14,6 +15,8 @@ public:
     void ProcessEvent(UFunction* Function, void* Parms);
     UFunction* FindFunction(FName InName) const;
     UFunction* FindFunctionChecked(FName InName) const;
+
+    UWorld* GetWorld() const;
 
     bool NeedsLoadForClient() const;
     bool NeedsLoadForServer() const;

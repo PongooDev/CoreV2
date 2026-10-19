@@ -2109,6 +2109,37 @@ namespace
 
         Require(L"AFortWorldManager::OnWorldRecordQueryComplete", Natives::AFortWorldManager_OnWorldRecordQueryComplete, FunctionOf(L"Invalid world record when transition to world query complete state!"));
 
+        Sites::ChoosePlayerStartGoalManagerCalls.clear();
+        const uintptr_t ChoosePlayerStart = FunctionOf(L"ChoosePlayerStart: Could not find spot for Player! Spawning at engine PlayerStart!");
+        const uintptr_t ChoosePlayerStartEnd = ChoosePlayerStart ? Finder::FunctionEnd(ChoosePlayerStart) : 0;
+        const std::initializer_list<int32_t> GetCurrentOfWorld = { 0xFF, -1, -1, -1, -1, -1, 0x48, 0x8B, 0xC8, 0xE8 };
+        std::vector<uint8_t*> GoalManagerCalls;
+        uintptr_t GetCurrentStub = 0;
+        int32_t GetWorldSlot = -1;
+        for (uintptr_t Site = ChoosePlayerStartEnd ? FindInstruction(ChoosePlayerStart, ChoosePlayerStartEnd, GetCurrentOfWorld) : 0; Site; Site = FindInstruction(Site + 1, ChoosePlayerStartEnd, GetCurrentOfWorld))
+        {
+            const uintptr_t Call = Site + 9;
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            const int32_t Slot = (Byte(Site + 1) & 0xF8) == 0x90 && (Byte(Site + 1) & 0x07) != 0x04 ? VirtualSlot(Site) : -1;
+            const bool bReturnsNull = Byte(Target) == 0x33 && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3;
+            if (Slot >= 0 && bReturnsNull && (!GetCurrentStub || (Target == GetCurrentStub && Slot == GetWorldSlot)))
+            {
+                GetCurrentStub = Target;
+                GetWorldSlot = Slot;
+                GoalManagerCalls.push_back(reinterpret_cast<uint8_t*>(Call));
+            }
+        }
+        RequireSlot(L"UObject::GetWorld", Natives::UObject_GetWorldIndex, GetWorldSlot);
+        if (GoalManagerCalls.size() == 3)
+        {
+            Sites::ChoosePlayerStartGoalManagerCalls = std::move(GoalManagerCalls);
+        }
+        else
+        {
+            Log::Error(L"Finder: AFortGameModeZone::ChoosePlayerStart has {} AFortAIGoalManager::GetCurrent calls, expected 3", GoalManagerCalls.size());
+            ++MissingCount;
+        }
+
         const uintptr_t RecordLoaded = UniqueFunction({ 0x83, 0xA1, 0xE0, 0x03, 0x00, 0x00, 0xFD, 0x0F, 0xB6, 0xC2, 0x83, 0xE0, 0x01, 0x03, 0xC0, 0x09, 0x81, 0xE0, 0x03, 0x00, 0x00 });
         Require(L"AFortLobbyBeaconHost::SetWorldRecordLoaded", Natives::AFortLobbyBeaconHost_SetWorldRecordLoaded, IsFunctionEntry(RecordLoaded) ? RecordLoaded : 0);
 

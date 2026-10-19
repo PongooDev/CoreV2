@@ -172,6 +172,7 @@ namespace Natives
     inline int32_t UEngine_LoadMapIndex = -1;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
     inline int32_t UObject_NeedsLoadForClientIndex = -1;
+    inline int32_t UObject_GetWorldIndex = -1;
     inline int32_t AFortGameMode_FinishWorldInitializationIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;
@@ -278,6 +279,7 @@ namespace Sites
     inline uint8_t* ActorTickReceiveTick = nullptr;
     inline uint8_t* ShouldUseThreadingForPerformanceDedicatedCheck = nullptr;
     inline uint8_t* LinkerFilterClientButNotServer = nullptr;
+    inline std::vector<uint8_t*> ChoosePlayerStartGoalManagerCalls;
     inline uint8_t* ShouldUseIdleModeCheck = nullptr;
     inline uint8_t* ShouldUseIdleModeFalse = nullptr;
 

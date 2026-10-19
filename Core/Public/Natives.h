@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "Templates/SharedPointerInternals.h"
+
 class FOutputDevice;
 class FOutputDeviceRedirector;
 class AActor;
@@ -19,7 +21,14 @@ class AFortGameModeZone;
 class AFortLobbyBeaconHost;
 class AFortWorldManager;
 class APawn;
+class FGameServiceMcp;
 class FOnlineSubsystemImpl;
+class FOnlineSubsystemMcp;
+class FUniqueNetId;
+class IHttpRequest;
+class UMcpProfileGroup;
+struct FMcpServiceConfig;
+struct FProfileHttpRequest;
 class FString;
 class UActorChannel;
 class UChannel;
@@ -111,7 +120,10 @@ namespace Natives
     inline void (*AFortWorldManager_OnWorldRecordQueryComplete)(AFortWorldManager* This) = nullptr;
     inline void (*AFortLobbyBeaconHost_SetWorldRecordLoaded)(AFortLobbyBeaconHost* This, bool bInWorldRecordLoaded) = nullptr;
     inline void* SharedEmptyFunction = nullptr;
-    inline void (*FortMcpConfig_UpdateServicePermissions)(void* Environment, void* Context, uint8_t* ServiceConfig, void* Extra) = nullptr;
+    inline void (*FortMcpConfig_UpdateServicePermissions)(void* Environment, void* Context, FMcpServiceConfig* ServiceConfig, void* Extra) = nullptr;
+    inline void (*UMcpProfileGroup_SendRequestNow)(UMcpProfileGroup* This, FProfileHttpRequest& Request) = nullptr;
+    inline bool (*FOnlineSubsystemMcp_QueueRequestForUser)(FOnlineSubsystemMcp* This, FGameServiceMcp& Service, const FUniqueNetId& UserId, const TSharedRef<IHttpRequest>& HttpRequest, FString& OutError) = nullptr;
+    inline bool (*FOnlineSubsystemMcp_QueueRequestForClient)(FOnlineSubsystemMcp* This, FGameServiceMcp& Service, const FString& ClientId, const TSharedRef<IHttpRequest>& HttpRequest, FString& OutError) = nullptr;
     inline bool (*FOnlineSubsystemImpl_IsDedicated)(const FOnlineSubsystemImpl* This) = nullptr;
     inline void (*UGameEngine_Tick)(UGameEngine* This, float DeltaSeconds, bool bIdleMode) = nullptr;
     inline bool (*UEngine_LoadMap)(UEngine* This, FWorldContext& WorldContext, FURL* URL, void* Pending, FString& Error) = nullptr;
@@ -189,6 +201,8 @@ namespace Natives
     inline int32_t IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = -1;
     inline int32_t IConsoleManager_FindConsoleVariableIndex = -1;
     inline int32_t UProperty_GetCPPTypeIndex = -1;
+    inline int32_t UMcpProfile_PrepareRequestIndex = -1;
+    inline int32_t FUniqueNetId_IsValidIndex = -1;
 
     inline ptrdiff_t UEngine_WorldList = -1;
     inline ptrdiff_t UEngine_NetworkFailureEvent = -1;
@@ -196,6 +210,14 @@ namespace Natives
     inline ptrdiff_t FWorldContext_ThisCurrentWorld = -1;
     inline ptrdiff_t UGameInstance_WorldContext = -1;
     inline ptrdiff_t FMcpServiceConfig_ServicePermissions = -1;
+    inline ptrdiff_t FGameServiceMcp_ServiceConfig = -1;
+    inline ptrdiff_t FOnlineSubsystemMcp_McpGameService = -1;
+    inline ptrdiff_t UMcpProfileGroup_McpSubsystem = -1;
+    inline ptrdiff_t UMcpProfileGroup_CredentialsAccountId = -1;
+    inline ptrdiff_t FProfileHttpRequest_Profile = -1;
+    inline ptrdiff_t FProfileHttpRequest_HttpRequest = -1;
+    inline ptrdiff_t FProfileHttpRequest_ContextCredentials = -1;
+    inline ptrdiff_t FProfileHttpRequest_ResponseType = -1;
     inline ptrdiff_t FWorldContext_RunAsDedicated = -1;
     inline ptrdiff_t FOnlineSubsystemImpl_bForceDedicated = -1;
     inline ptrdiff_t UNetDriver_GuidCache = -1;

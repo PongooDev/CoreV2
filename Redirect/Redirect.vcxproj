@@ -58,7 +58,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -79,7 +79,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization>MaxSpeed</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -157,6 +157,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Templates\Casts.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Templates\SubclassOf.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Class.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\CoreOnline.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Linker.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h" />
@@ -194,6 +195,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameNetworkManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameSession.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Info.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\OnlineReplStructs.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Pawn.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\PlayerController.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\WorldSettings.h" />
@@ -210,6 +212,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Online\HTTP\Public\Interfaces\IHttpRequest.h" />
     <ClInclude Include="..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public\OnlineSubsystemImpl.h" />
     <ClInclude Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public\McpServiceConfig.h" />
+    <ClInclude Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public\OnlineSubsystemMcp.h" />
+    <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public\McpProfile.h" />
+    <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public\McpProfileGroup.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameInstance.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameMode.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameModeZone.h" />
@@ -281,6 +286,9 @@
     <ClCompile Include="..\Engine\Source\Runtime\EngineSettings\Private\EngineSettingsModule.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Launch\Private\LaunchEngineLoop.cpp" />
     <ClCompile Include="..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Private\OnlineSubsystemImpl.cpp" />
+    <ClCompile Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Private\McpServiceConfig.cpp" />
+    <ClCompile Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Private\OnlineSubsystemMcp.cpp" />
+    <ClCompile Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Private\McpProfileGroup.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameInstance.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameMode.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameModeZone.cpp" />

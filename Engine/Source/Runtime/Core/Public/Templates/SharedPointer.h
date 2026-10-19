@@ -124,9 +124,67 @@ public:
         return *Object;
     }
 
+    TSharedRef<ObjectType, Mode> ToSharedRef() const
+    {
+        return TSharedRef<ObjectType, Mode>(Object, ReferenceController);
+    }
+
 private:
     ObjectType* Object = nullptr;
     SharedPointerInternals::FReferenceControllerBase* ReferenceController = nullptr;
 };
 
+template <class ObjectType, ESPMode Mode>
+class TSharedRef
+{
+    using FOps = SharedPointerInternals::FReferenceControllerOps<Mode>;
+
+public:
+    TSharedRef(const TSharedRef& Other)
+        : Object(Other.Object), ReferenceController(Other.ReferenceController)
+    {
+        FOps::AddSharedReference(ReferenceController);
+    }
+
+    ~TSharedRef()
+    {
+        FOps::ReleaseSharedReference(ReferenceController);
+    }
+
+    TSharedRef& operator=(TSharedRef Other) noexcept
+    {
+        std::swap(Object, Other.Object);
+        std::swap(ReferenceController, Other.ReferenceController);
+        return *this;
+    }
+
+    ObjectType& Get() const
+    {
+        return *Object;
+    }
+
+    ObjectType* operator->() const
+    {
+        return Object;
+    }
+
+    ObjectType& operator*() const
+    {
+        return *Object;
+    }
+
+private:
+    friend class TSharedPtr<ObjectType, Mode>;
+
+    TSharedRef(ObjectType* InObject, SharedPointerInternals::FReferenceControllerBase* InReferenceController)
+        : Object(InObject), ReferenceController(InReferenceController)
+    {
+        FOps::AddSharedReference(ReferenceController);
+    }
+
+    ObjectType* Object;
+    SharedPointerInternals::FReferenceControllerBase* ReferenceController;
+};
+
 static_assert(sizeof(TSharedPtr<int, ESPMode::Fast>) == 0x10);
+static_assert(sizeof(TSharedRef<int, ESPMode::Fast>) == 0x10);

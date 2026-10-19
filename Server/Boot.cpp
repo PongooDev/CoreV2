@@ -20,6 +20,7 @@
 #include "FortGameModeZone.h"
 #include "FortWorldManager.h"
 #include "GameThread.h"
+#include "McpProfileGroup.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
 
@@ -54,6 +55,7 @@ void Boot::Initialize()
     UFortGameInstance::Hook();
     FOnlineSubsystemImpl::Hook();
     FFortMcpConfig::Hook();
+    UMcpProfileGroup::Hook();
     AFortGameMode::Hook();
     AFortGameModeZone::Hook();
     AFortWorldManager::Hook();

@@ -2139,6 +2139,66 @@ namespace
         RequireOffset(L"FMcpServiceConfig::ServicePermissions", Natives::FMcpServiceConfig_ServicePermissions, PermissionAdds >= 2 ? PermissionsArray : 0);
     }
 
+    void ResolveMcpProfile()
+    {
+        const uintptr_t SendRequestNow = FunctionOf(L"FATAL: Should not be possible to issue dedicated server commands without WITH_SERVER_CODE");
+        const uintptr_t SendRequestNowEnd = SendRequestNow ? Finder::FunctionEnd(SendRequestNow) : 0;
+        Require(L"UMcpProfileGroup::SendRequestNow", Natives::UMcpProfileGroup_SendRequestNow, SendRequestNowEnd ? SendRequestNow : 0);
+        const auto Scan = [&](std::initializer_list<int32_t> Pattern)
+        {
+            return SendRequestNowEnd ? FindInstruction(SendRequestNow, SendRequestNowEnd, Pattern) : 0;
+        };
+
+        if (Scan({ 0x48, 0x83, 0x3A, 0x00 }))
+        {
+            Natives::FProfileHttpRequest_Profile = 0;
+        }
+        else
+        {
+            Log::Error(L"Finder: FProfileHttpRequest::Profile not found");
+            ++MissingCount;
+        }
+
+        const uintptr_t HttpRequestCopy = Scan({ 0x48, 0x8B, 0x42, -1, 0x48, 0x89, 0x45, -1, 0x48, 0x8B, 0x42, -1 });
+        const bool bHttpRequest = HttpRequestCopy && Byte(HttpRequestCopy + 11) == Byte(HttpRequestCopy + 3) + 8;
+        RequireOffset(L"FProfileHttpRequest::HttpRequest", Natives::FProfileHttpRequest_HttpRequest, bHttpRequest ? Byte(HttpRequestCopy + 3) : 0);
+
+        const uintptr_t PrepareCall = bHttpRequest ? FindVirtualCall(HttpRequestCopy, HttpRequestCopy + 0x40) : 0;
+        RequireSlot(L"UMcpProfile::PrepareRequest", Natives::UMcpProfile_PrepareRequestIndex, VirtualSlot(PrepareCall));
+        const uintptr_t ResponseTypeLoad = PrepareCall ? FindInstruction(HttpRequestCopy, PrepareCall, { 0x44, 0x8B, 0x42, -1 }) : 0;
+        RequireOffset(L"FProfileHttpRequest::ResponseType", Natives::FProfileHttpRequest_ResponseType, ResponseTypeLoad ? Byte(ResponseTypeLoad + 3) : 0);
+
+        const uintptr_t ServiceCopy = Scan({ 0x49, 0x8B, 0x46, -1, -1, -1, -1, 0x48, 0x8B, 0xB0, -1, -1, -1, -1, 0x4C, 0x8B, 0xB8, -1, -1, -1, -1 });
+        const int32_t ServiceObject = ServiceCopy ? *reinterpret_cast<const int32_t*>(ServiceCopy + 17) : 0;
+        const bool bService = ServiceCopy && *reinterpret_cast<const int32_t*>(ServiceCopy + 10) == ServiceObject + 8;
+        RequireOffset(L"UMcpProfileGroup::McpSubsystem", Natives::UMcpProfileGroup_McpSubsystem, bService ? Byte(ServiceCopy + 3) : 0);
+        RequireOffset(L"FOnlineSubsystemMcp::McpGameService", Natives::FOnlineSubsystemMcp_McpGameService, bService ? ServiceObject : 0);
+
+        const uintptr_t ContextSwitch = Scan({ 0x8B, 0x4F, -1, 0x33, 0xDB, 0x48, 0x89, 0x5D, -1, 0x8B, 0xD3, 0x48, 0x89, 0x5D, -1, 0x85, 0xC9, 0x0F, 0x84 });
+        RequireOffset(L"FProfileHttpRequest::ContextCredentials", Natives::FProfileHttpRequest_ContextCredentials, ContextSwitch ? Byte(ContextSwitch + 2) : 0);
+
+        const uintptr_t CredentialsCheck = Scan({ 0x49, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 });
+        const ptrdiff_t CredentialsNetId = CredentialsCheck ? *reinterpret_cast<const int32_t*>(CredentialsCheck + 3) : 0;
+        RequireOffset(L"UMcpProfileGroup::CredentialsAccountId", Natives::UMcpProfileGroup_CredentialsAccountId, CredentialsNetId > static_cast<ptrdiff_t>(sizeof(void*)) ? CredentialsNetId - static_cast<ptrdiff_t>(sizeof(void*)) : 0);
+        RequireSlot(L"FUniqueNetId::IsValid", Natives::FUniqueNetId_IsValidIndex, CredentialsCheck && Byte(CredentialsCheck + 21) % 8 == 0 ? Byte(CredentialsCheck + 21) / 8 : -1);
+        const uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + 24, CredentialsCheck + 0x60) : 0;
+        Require(L"FOnlineSubsystemMcp::QueueRequest (user)", Natives::FOnlineSubsystemMcp_QueueRequestForUser, QueueForUser ? Finder::RelativeTarget(QueueForUser, 1, 5) : 0);
+
+        const uintptr_t QueueForClient = FunctionOf(L"Queuing Mcp request for client=%s url=%s");
+        Require(L"FOnlineSubsystemMcp::QueueRequest (client)", Natives::FOnlineSubsystemMcp_QueueRequestForClient, QueueForClient);
+
+        const uintptr_t Dispatch = FunctionOf(L"UFortMcpResource: Failed to start mcp resource request. Error: %s");
+        const uintptr_t DispatchEnd = Dispatch ? Finder::FunctionEnd(Dispatch) : 0;
+        uintptr_t ClientCall = 0;
+        for (uintptr_t Call = QueueForClient && DispatchEnd ? FindRawCall(Dispatch, DispatchEnd) : 0; Call && !ClientCall; Call = FindRawCall(Call + 1, DispatchEnd))
+        {
+            ClientCall = Finder::RelativeTarget(Call, 1, 5) == QueueForClient ? Call : 0;
+        }
+        const uintptr_t ConfigLea = ClientCall ? FindInstruction(Dispatch, ClientCall, { -1, 0x8D, -1, -1, 0x48, 0x8D, 0x15, -1, -1, -1, -1, 0xE8 }) : 0;
+        const bool bConfigLea = ConfigLea && (Byte(ConfigLea + 2) & 0xF8) == 0x48 && (Byte(ConfigLea + 2) & 0x07) != 0x04;
+        RequireOffset(L"FGameServiceMcp::ServiceConfig", Natives::FGameServiceMcp_ServiceConfig, bConfigLea ? Byte(ConfigLea + 3) : 0);
+    }
+
     void ResolveThreadingForPerformance()
     {
         Sites::ShouldUseThreadingForPerformanceDedicatedCheck = nullptr;
@@ -2379,6 +2439,7 @@ bool Finder::ResolveServer()
     ResolveLinkerFilter();
     ResolveThreadingForPerformance();
     ResolveZone();
+    ResolveMcpProfile();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;

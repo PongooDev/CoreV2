@@ -1121,6 +1121,16 @@ namespace
         return Found;
     }
 
+    void ResolveConsoleManagerGlobals()
+    {
+        const uintptr_t SetupSingleton = FunctionOf(L"r.DumpingMovie");
+        const bool bSingletonCompare = SetupSingleton && Byte(SetupSingleton + 4) == 0x48 && Byte(SetupSingleton + 5) == 0x83 && Byte(SetupSingleton + 6) == 0x3D && Byte(SetupSingleton + 11) == 0x00;
+        Require(L"IConsoleManager::SetupSingleton", Natives::IConsoleManager_SetupSingleton, bSingletonCompare ? SetupSingleton : 0);
+        RequireAddress(L"IConsoleManager::Singleton", reinterpret_cast<uintptr_t&>(Natives::IConsoleManager_Singleton), bSingletonCompare ? Finder::RelativeTarget(SetupSingleton + 4, 3, 8) : 0);
+        AddConsoleObject = FunctionOf(L"Console object named '%s' already exists but is being registered again, but we weren't expected it to be! (FConsoleManager::AddConsoleObject)");
+        RequireAddress(L"FConsoleManager::AddConsoleObject", AddConsoleObject, AddConsoleObject);
+    }
+
     void ResolveAutoCompleteSources()
     {
         uintptr_t Entries = 0;
@@ -1137,12 +1147,6 @@ namespace
         }
         RequireAddress(L"UConsole::RegisterConsoleAutoCompleteEntries", reinterpret_cast<uintptr_t&>(Natives::UConsole_RegisterConsoleAutoCompleteEntries), Entries);
 
-        const uintptr_t SetupSingleton = FunctionOf(L"r.DumpingMovie");
-        const bool bSingletonCompare = SetupSingleton && Byte(SetupSingleton + 4) == 0x48 && Byte(SetupSingleton + 5) == 0x83 && Byte(SetupSingleton + 6) == 0x3D && Byte(SetupSingleton + 11) == 0x00;
-        Require(L"IConsoleManager::SetupSingleton", Natives::IConsoleManager_SetupSingleton, bSingletonCompare ? SetupSingleton : 0);
-        RequireAddress(L"IConsoleManager::Singleton", reinterpret_cast<uintptr_t&>(Natives::IConsoleManager_Singleton), bSingletonCompare ? Finder::RelativeTarget(SetupSingleton + 4, 3, 8) : 0);
-        AddConsoleObject = FunctionOf(L"Console object named '%s' already exists but is being registered again, but we weren't expected it to be! (FConsoleManager::AddConsoleObject)");
-        RequireAddress(L"FConsoleManager::AddConsoleObject", AddConsoleObject, AddConsoleObject);
 
         uintptr_t GameDir = 0;
         const std::vector<uintptr_t> GameDirRefs = Finder::StringRefs(L"../../");
@@ -2445,6 +2449,7 @@ bool Finder::ResolveClient()
     MissingCount = 0;
 
     ResolveConsole();
+    ResolveConsoleManagerGlobals();
     ResolveAutoCompleteSources();
     ResolveViewportClient();
 
@@ -2456,6 +2461,7 @@ bool Finder::ResolveServer()
 {
     MissingCount = 0;
 
+    ResolveConsoleManagerGlobals();
     ResolveEngineNet();
     ResolveNetMode();
     ResolveWorldTravel();

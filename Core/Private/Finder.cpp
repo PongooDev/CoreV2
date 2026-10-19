@@ -2,11 +2,82 @@
 #include "Finder.h"
 #include "Log.h"
 
+#include <cstring>
+#include <cwchar>
+
 namespace
 {
     Memcury::PE::Section TextSection()
     {
         return Memcury::PE::Section::GetSection(".text");
+    }
+
+    struct FStringReference
+    {
+        uint32_t Target;
+        uint32_t Site;
+    };
+
+    const std::vector<FStringReference>& StringReferences()
+    {
+        static const std::vector<FStringReference> References = []
+        {
+            std::vector<FStringReference> Found;
+            Memcury::PE::Section Text = TextSection();
+            Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+            const uintptr_t Base = Memcury::PE::GetModuleBase();
+            const uintptr_t ReadOnlyBegin = ReadOnly.GetSectionStart().Get();
+            const uintptr_t ReadOnlyEnd = ReadOnly.GetSectionEnd().Get();
+            const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Text.GetSectionStart().Get());
+            const size_t Size = Text.GetSectionSize();
+            for (size_t Index = 0; Index + 7 <= Size; ++Index)
+            {
+                if ((Bytes[Index] != 0x48 && Bytes[Index] != 0x4C) || Bytes[Index + 1] != 0x8D || (Bytes[Index + 2] & 0xC7) != 0x05)
+                {
+                    continue;
+                }
+
+                const uintptr_t Site = reinterpret_cast<uintptr_t>(Bytes + Index);
+                const uintptr_t Target = Site + 7 + *reinterpret_cast<const int32_t*>(Bytes + Index + 3);
+                if (Target >= ReadOnlyBegin && Target < ReadOnlyEnd)
+                {
+                    Found.push_back({ static_cast<uint32_t>(Target - Base), static_cast<uint32_t>(Site - Base) });
+                }
+            }
+            return Found;
+        }();
+        return References;
+    }
+
+    template <typename TChar>
+    std::vector<uintptr_t> FindStringReferences(const TChar* Text)
+    {
+        std::vector<uintptr_t> Result;
+        const uintptr_t Base = Memcury::PE::GetModuleBase();
+        for (const FStringReference& Reference : StringReferences())
+        {
+            const TChar* Candidate = reinterpret_cast<const TChar*>(Base + Reference.Target);
+            if (Candidate[0] != Text[0])
+            {
+                continue;
+            }
+
+            bool bMatch = false;
+            if constexpr (sizeof(TChar) == sizeof(wchar_t))
+            {
+                bMatch = wcscmp(Candidate, Text) == 0;
+            }
+            else
+            {
+                bMatch = strcmp(Candidate, Text) == 0;
+            }
+
+            if (bMatch)
+            {
+                Result.push_back(Base + Reference.Site);
+            }
+        }
+        return Result;
     }
 }
 
@@ -27,22 +98,12 @@ uintptr_t Finder::TextEnd()
 
 std::vector<uintptr_t> Finder::StringRefs(const wchar_t* Text)
 {
-    std::vector<uintptr_t> Result;
-    for (Memcury::Scanner& Scan : Memcury::Scanner::FindStringRefs<const wchar_t*>(Text))
-    {
-        Result.push_back(Scan.Get());
-    }
-    return Result;
+    return FindStringReferences(Text);
 }
 
 std::vector<uintptr_t> Finder::StringRefs(const char* Text)
 {
-    std::vector<uintptr_t> Result;
-    for (Memcury::Scanner& Scan : Memcury::Scanner::FindStringRefs<const char*>(Text))
-    {
-        Result.push_back(Scan.Get());
-    }
-    return Result;
+    return FindStringReferences(Text);
 }
 
 uintptr_t Finder::FunctionStart(uintptr_t Address)

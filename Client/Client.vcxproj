@@ -111,11 +111,13 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Logging\LogCategory.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Logging\LogMacros.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Logging\LogVerbosity.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Color.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\AssertionMacros.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Build.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CommandLine.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMiscDefines.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\OutputDevice.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Parse.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Templates\SharedPointerInternals.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\UObject\NameTypes.h" />
@@ -140,6 +142,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\NetDriver.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\PendingNetGame.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\World.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\EngineSettings\Classes\ConsoleSettings.h" />
     <ClInclude Include="..\Engine\Source\Runtime\EngineSettings\Classes\GameMapsSettings.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Launch\Public\LaunchEngineLoop.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Online\HTTP\Public\Interfaces\IHttpBase.h" />

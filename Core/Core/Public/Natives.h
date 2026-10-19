@@ -14,6 +14,7 @@ class UNetDriver;
 class UObject;
 class UWorld;
 struct FLevelCollection;
+enum class ELevelCollectionType;
 struct FName;
 struct FURL;
 struct FWorldContext;
@@ -30,6 +31,7 @@ namespace Natives
     inline bool* GIsClient = nullptr;
     inline bool* GIsServer = nullptr;
     inline bool* GIsRunning = nullptr;
+    inline bool* GIsRequestingExit = nullptr;
     inline uint32_t* GGameThreadId = nullptr;
     inline bool* GIsGameThreadIdInitialized = nullptr;
 
@@ -37,7 +39,7 @@ namespace Natives
     inline void (*FName_AppendString)(const FName* This, FString& Out) = nullptr;
     inline FString* (*FName_ToString)(const FName* This, FString* Out) = nullptr;
 
-    inline void (*FMsg_Logf_Internal)(const char* File, int32_t Line, const FName& Category, uint8_t Verbosity, const wchar_t* Format, ...) = nullptr;
+    inline void (*FMsg_Logf_Internal)(const char* File, int32_t Line, const FName& Category, int32_t Verbosity, const wchar_t* Format, ...) = nullptr;
 
     inline UObject* (*StaticFindObject)(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass) = nullptr;
     inline UObject* (*StaticLoadObject)(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename, uint32_t LoadFlags, void* Sandbox, bool bAllowObjectReconciliation) = nullptr;
@@ -62,7 +64,7 @@ namespace Natives
 
     inline int32_t (*UWorld_InternalGetNetMode)(const UWorld* This) = nullptr;
     inline int32_t (*UWorld_AttemptDeriveFromURL)(const UWorld* This) = nullptr;
-    inline FLevelCollection* (*UWorld_FindCollectionByType)(UWorld* This, int32_t InType) = nullptr;
+    inline FLevelCollection* (*UWorld_FindCollectionByType)(UWorld* This, ELevelCollectionType InType) = nullptr;
     inline int32_t (*UNetDriver_GetNetMode)(const UNetDriver* This) = nullptr;
     inline void (*UNetDriver_SetWorld)(UNetDriver* This, UWorld* InWorld) = nullptr;
 
@@ -70,6 +72,7 @@ namespace Natives
     inline FString* (*FURL_ToString)(const FURL* This, FString* Result, bool FullyQualified) = nullptr;
 
     inline int32_t ProcessEventIndex = -1;
+    inline int32_t UClass_CreateDefaultObjectIndex = -1;
     inline int32_t UNetDriver_InitListenIndex = -1;
     inline int32_t UNetDriver_TickFlushIndex = -1;
     inline int32_t UNetDriver_IsServerIndex = -1;

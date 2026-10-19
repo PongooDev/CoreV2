@@ -219,7 +219,7 @@ namespace
     {
         if (!LiveResolved.exchange(true))
         {
-            Finder::ResolveLive();
+            Finder::ResolveInitListen();
 
             if (Sites::LoadMapListenCall)
             {

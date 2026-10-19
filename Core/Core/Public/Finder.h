@@ -7,7 +7,8 @@
 namespace Finder
 {
     uintptr_t ImageBase();
-    uintptr_t ImageEnd();
+    uintptr_t TextBegin();
+    uintptr_t TextEnd();
 
     std::vector<uintptr_t> StringRefs(const wchar_t* Text);
     std::vector<uintptr_t> StringRefs(const char* Text);
@@ -25,5 +26,6 @@ namespace Finder
     bool IsReadable(const void* Pointer, size_t Size);
 
     bool ResolveAll();
-    bool ResolveLive();
+    bool ResolveProcessEvent();
+    bool ResolveInitListen();
 }

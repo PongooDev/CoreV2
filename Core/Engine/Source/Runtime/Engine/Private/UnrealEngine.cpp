@@ -1,0 +1,18 @@
+#include "pch.h"
+#include "Engine/Engine.h"
+#include "Natives.h"
+
+void FOnNetworkFailure::Broadcast(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString) const
+{
+    Natives::FOnNetworkFailure_Broadcast(const_cast<FOnNetworkFailure*>(this), World, NetDriver, FailureType, ErrorString);
+}
+
+bool UEngine::CreateNamedNetDriver(UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition)
+{
+    return Natives::UEngine_CreateNamedNetDriver(this, InWorld, NetDriverName, NetDriverDefinition);
+}
+
+UNetDriver* UEngine::FindNamedNetDriver(const UWorld* InWorld, FName NetDriverName)
+{
+    return Natives::UEngine_FindNamedNetDriver(this, InWorld, NetDriverName);
+}

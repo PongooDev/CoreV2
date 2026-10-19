@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Natives.h"
+
 #include <cstdint>
 
 struct FObjectLayout
@@ -38,3 +40,9 @@ public: \
     Type& GetLayout_##Name() const { return *reinterpret_cast<Type*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.LayoutField); } \
     void SetLayout_##Name(Type const& Value) { GetLayout_##Name() = Value; } \
     __declspec(property(get = GetLayout_##Name, put = SetLayout_##Name)) Type Name;
+
+#define DefineNativeMember(Type, Name, Offset) \
+public: \
+    Type& GetNative_##Name() const { return *reinterpret_cast<Type*>(reinterpret_cast<uintptr_t>(this) + Natives::Offset); } \
+    void SetNative_##Name(Type const& Value) { GetNative_##Name() = Value; } \
+    __declspec(property(get = GetNative_##Name, put = SetNative_##Name)) Type Name;

@@ -4,8 +4,8 @@
 
 namespace GameThread
 {
-    void Enqueue(std::function<void()> Task);
-    void RunAndWait(std::function<void()> Task);
+    bool Enqueue(std::function<void()> Task);
+    bool RunAndWait(std::function<void()> Task);
     void Tick();
     bool IsInGameThread();
 }

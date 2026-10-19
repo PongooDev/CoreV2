@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "UObject/Class.h"
+#include "Finder.h"
 #include "Log.h"
 #include "Natives.h"
 
@@ -8,6 +9,11 @@ void UObject::ProcessEvent(UFunction* Function, void* Parms)
     if (!Function)
     {
         Log::Error(L"ProcessEvent on {} with no function", *GetName());
+        return;
+    }
+
+    if (Natives::ProcessEventIndex < 0 && !Finder::ResolveProcessEvent())
+    {
         return;
     }
 

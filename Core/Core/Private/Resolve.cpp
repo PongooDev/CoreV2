@@ -2,10 +2,14 @@
 #include "Finder.h"
 #include "Natives.h"
 #include "Log.h"
+#include "ObjectLayout.h"
+#include "Engine/EngineBaseTypes.h"
+#include "Engine/World.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace
 {
@@ -194,15 +198,24 @@ namespace
     {
         uintptr_t GMalloc = 0;
         const uintptr_t PurgatoryRef = First(Finder::StringRefs(L"Purgatory proxy is now on."));
-        if (PurgatoryRef)
+        const uintptr_t PurgatoryFunction = Finder::FunctionStart(PurgatoryRef);
+        const uintptr_t PurgatoryEnd = Finder::FunctionEnd(PurgatoryFunction);
+        if (PurgatoryRef && PurgatoryFunction && PurgatoryEnd)
         {
-            for (uintptr_t Scan = PurgatoryRef - 0x200; Scan + 9 <= PurgatoryRef; ++Scan)
+            int32_t Exchanges = 0;
+            for (uintptr_t Scan = PurgatoryFunction; Scan + 9 <= PurgatoryEnd; ++Scan)
             {
                 const uint8_t Rex = Byte(Scan + 1);
                 if (Byte(Scan) == 0xF0 && (Rex == 0x48 || Rex == 0x49 || Rex == 0x4C || Rex == 0x4D) && Byte(Scan + 2) == 0x0F && Byte(Scan + 3) == 0xB1 && (Byte(Scan + 4) & 0xC7) == 0x05)
                 {
                     GMalloc = Finder::RelativeTarget(Scan, 5, 9);
+                    ++Exchanges;
                 }
+            }
+            if (Exchanges != 1)
+            {
+                Log::Error(L"Finder: expected 1 GMalloc exchange, found {}", Exchanges);
+                GMalloc = 0;
             }
         }
         RequireAddress(L"GMalloc", reinterpret_cast<uintptr_t&>(Natives::GMalloc), GMalloc);
@@ -380,15 +393,121 @@ namespace
         return 0;
     }
 
+    uintptr_t FirstCall(uintptr_t Function)
+    {
+        const uintptr_t End = Finder::FunctionEnd(Function);
+        if (!Function || !End)
+        {
+            return 0;
+        }
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Function, End);
+        return Calls.empty() ? 0 : Calls.front().second;
+    }
+
+    bool IsInText(uintptr_t Address)
+    {
+        return Address >= Finder::TextBegin() && Address < Finder::TextEnd();
+    }
+
+    bool IsListenCall(uintptr_t Call)
+    {
+        const uintptr_t World = Call - 10;
+        const bool bWorld = (Byte(World) == 0x48 || Byte(World) == 0x49) && Byte(World + 1) == 0x8B && (Byte(World + 2) & 0xF8) == 0x88 && (Byte(World + 2) & 0x07) != 0x04;
+
+        const uintptr_t Url = Call - 3;
+        const bool bUrl = (Byte(Url) == 0x48 || Byte(Url) == 0x49) && Byte(Url + 1) == 0x8B && (Byte(Url + 2) & 0xF8) == 0xD0;
+
+        bool bOption = false;
+        for (uintptr_t Lea = FindInstruction(Call - 0x30, Call, { 0x48, 0x8D, 0x15 }); Lea && !bOption; Lea = FindInstruction(Lea + 1, Call, { 0x48, 0x8D, 0x15 }))
+        {
+            const auto* Text = reinterpret_cast<const wchar_t*>(Finder::RelativeTarget(Lea, 3, 7));
+            bOption = Finder::IsReadable(Text, sizeof(L"Listen")) && wcscmp(Text, L"Listen") == 0;
+        }
+
+        const bool bTarget = IsInText(Finder::RelativeTarget(Call, 1, 5));
+        if (!bWorld || !bUrl || !bOption || !bTarget)
+        {
+            Log::Error(L"Finder: Listen call site checks failed (world {}, url {}, option {}, target {})", bWorld, bUrl, bOption, bTarget);
+            return false;
+        }
+        return true;
+    }
+
+    constexpr int32_t WorldNetDriver = 0x38;
+    constexpr int32_t WorldDemoNetDriver = 0xB8;
+
+    uint8_t BaseRegister(uint8_t Rex, uint8_t ModRm)
+    {
+        return static_cast<uint8_t>(((Rex & 0x01) << 3) | (ModRm & 0x07));
+    }
+
+    bool FindInlinedNetMode(uintptr_t Call, uintptr_t GetNetMode, Sites::FInlinedNetMode& Out)
+    {
+        uintptr_t DemoLoad = 0;
+        for (uintptr_t Scan = Call - 0x40; Scan + 7 <= Call; ++Scan)
+        {
+            if ((Byte(Scan) & 0xF8) == 0x48 && Byte(Scan + 1) == 0x8B && (Byte(Scan + 2) & 0xC0) == 0x80 && (Byte(Scan + 2) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Scan + 3) == WorldDemoNetDriver)
+            {
+                DemoLoad = Scan;
+            }
+        }
+        if (!DemoLoad)
+        {
+            return false;
+        }
+
+        uintptr_t Jcc = 0;
+        uint8_t TestBase = 0xFF;
+        for (uintptr_t Scan = DemoLoad - 0x18; Scan < DemoLoad; ++Scan)
+        {
+            const uint8_t Rex = Byte(Scan);
+            const uint8_t ModRm = Byte(Scan + 2);
+            if ((Rex & 0xF8) != 0x48 || (ModRm & 0xC0) != 0x40 || Byte(Scan + 3) != WorldNetDriver)
+            {
+                continue;
+            }
+            if (Byte(Scan + 1) == 0x83 && (ModRm & 0x38) == 0x38 && Byte(Scan + 4) == 0x00)
+            {
+                Jcc = Scan + 5;
+                TestBase = BaseRegister(Rex, ModRm);
+            }
+            else if (Byte(Scan + 1) == 0x39)
+            {
+                Jcc = Scan + 4;
+                TestBase = BaseRegister(Rex, ModRm);
+            }
+        }
+        if (!Jcc || TestBase != BaseRegister(Byte(DemoLoad), Byte(DemoLoad + 2)))
+        {
+            return false;
+        }
+
+        const bool bTaken = Byte(Jcc) == 0x74 && Jcc + 2 + static_cast<int8_t>(Byte(Jcc + 1)) == DemoLoad;
+        const bool bFallThrough = Byte(Jcc) == 0x75 && Jcc + 2 == DemoLoad;
+        if (!bTaken && !bFallThrough)
+        {
+            return false;
+        }
+
+        if (!CallWithin(DemoLoad + 7, Call - (DemoLoad + 7), GetNetMode))
+        {
+            return false;
+        }
+
+        Out.Branch = reinterpret_cast<uint8_t*>(Jcc);
+        Out.DemoNetDriverDisplacement = reinterpret_cast<uint8_t*>(DemoLoad + 3);
+        return true;
+    }
+
     void ResolveEngineNet()
     {
         Require(L"UEngine::LoadMap", Natives::UEngine_LoadMap, FunctionOf(L"LoadMap: %s"));
         Require(L"UGameInstance::StartGameInstance", Natives::UGameInstance_StartGameInstance, FunctionOf(L"Failed to enter %s: %s. Please check the log for errors."));
         Require(L"GetSourceIniHierarchyFilenames", Natives::GetSourceIniHierarchyFilenames, FunctionOf(L"%sNotForLicensees/Default%s.ini"));
 
-        const uintptr_t ListenLog = First(Finder::StringRefs(L"LoadMap: failed to Listen(%s)"));
+        const uintptr_t ListenLog = OnlyRef(L"LoadMap: failed to Listen(%s)");
         const uintptr_t ListenCall = ListenLog ? CallBeforeJccPastRef(ListenLog, 0x100) : 0;
-        if (ListenCall)
+        if (ListenCall && IsListenCall(ListenCall))
         {
             Sites::LoadMapListenCall = reinterpret_cast<uint8_t*>(ListenCall);
         }
@@ -420,6 +539,7 @@ namespace
 
         uintptr_t FindNamed = 0;
         uintptr_t SetWorld = 0;
+        uintptr_t FindCollection = 0;
         if (CreateCall)
         {
             uintptr_t Jcc = CreateCall + 7;
@@ -443,11 +563,290 @@ namespace
                 {
                     const uintptr_t SetCall = FindRawCall(DemoStore + 7, DemoStore + 0x20);
                     SetWorld = SetCall ? Finder::RelativeTarget(SetCall, 1, 5) : 0;
+
+                    for (uintptr_t Call = SetCall ? FindRawCall(SetCall + 5, SetCall + 0x30) : 0; Call; Call = FindRawCall(Call + 1, SetCall + 0x30))
+                    {
+                        if (FindInstruction(Call - 8, Call, { 0x33, 0xD2 }))
+                        {
+                            FindCollection = Finder::RelativeTarget(Call, 1, 5);
+                            break;
+                        }
+                    }
                 }
             }
         }
         Require(L"UEngine::FindNamedNetDriver", Natives::UEngine_FindNamedNetDriver, FindNamed);
         Require(L"UNetDriver::SetWorld", Natives::UNetDriver_SetWorld, SetWorld);
+        Require(L"UWorld::FindCollectionByType", Natives::UWorld_FindCollectionByType, FindCollection);
+
+        uintptr_t Notify = 0;
+        const uintptr_t SetWorldEnd = Finder::FunctionEnd(SetWorld);
+        for (uintptr_t Lea = SetWorld && SetWorldEnd ? FindInstruction(SetWorld, SetWorldEnd, { 0x48, 0x8D, 0x47 }) : 0; Lea; Lea = FindInstruction(Lea + 1, SetWorldEnd, { 0x48, 0x8D, 0x47 }))
+        {
+            if (FindInstruction(Lea + 4, Lea + 0x14, { 0x48, 0x89, 0x83, 0xE8, 0x00, 0x00, 0x00 }))
+            {
+                Notify = Byte(Lea + 3);
+                break;
+            }
+        }
+        const uintptr_t NotifyBase = 0x10000;
+        const uintptr_t CoreNotify = reinterpret_cast<uintptr_t>(static_cast<FNetworkNotify*>(reinterpret_cast<UWorld*>(NotifyBase))) - NotifyBase;
+        if (!Notify || Notify != CoreNotify)
+        {
+            Log::Error(L"Finder: UWorld FNetworkNotify base is 0x{:X} in the game, 0x{:X} in Core", Notify, CoreNotify);
+            ++MissingCount;
+        }
+    }
+
+    void ResolveNetMode()
+    {
+        const uintptr_t Derive = reinterpret_cast<uintptr_t>(Natives::UWorld_AttemptDeriveFromURL);
+        if (!Derive)
+        {
+            return;
+        }
+
+        std::vector<uintptr_t> Jumps;
+        std::vector<uintptr_t> Calls;
+        for (uintptr_t Site : Finder::CallsTo(Derive, true))
+        {
+            (Byte(Site) == 0xE9 ? Jumps : Calls).push_back(Site);
+        }
+
+        uintptr_t InternalGetNetMode = 0;
+        uintptr_t GetNetMode = 0;
+        if (Jumps.size() == 1)
+        {
+            for (uintptr_t Start = Jumps[0] & ~static_cast<uintptr_t>(0xF); Start + 0x40 > Jumps[0]; Start -= 0x10)
+            {
+                if (Byte(Start - 1) == 0xCC && Byte(Start) == 0x48 && Byte(Start + 1) == 0x83 && Byte(Start + 2) == 0x79 && Byte(Start + 4) == 0x00)
+                {
+                    InternalGetNetMode = Start;
+                    break;
+                }
+            }
+
+            const uintptr_t FirstJump = InternalGetNetMode ? FindInstruction(InternalGetNetMode, Jumps[0], { 0xE9 }) : 0;
+            const uintptr_t Target = FirstJump ? Finder::RelativeTarget(FirstJump, 1, 5) : 0;
+            if (Target >= Finder::TextBegin() && Target < Finder::TextEnd())
+            {
+                GetNetMode = Target;
+            }
+        }
+        Require(L"UWorld::InternalGetNetMode", Natives::UWorld_InternalGetNetMode, InternalGetNetMode);
+        Require(L"UNetDriver::GetNetMode", Natives::UNetDriver_GetNetMode, GetNetMode);
+
+        int32_t Found = 0;
+        for (uintptr_t Site : Calls)
+        {
+            Sites::FInlinedNetMode NetMode;
+            if (GetNetMode && Found < static_cast<int32_t>(std::size(Sites::InlinedNetMode)) && FindInlinedNetMode(Site, GetNetMode, NetMode))
+            {
+                Sites::InlinedNetMode[Found++] = NetMode;
+            }
+        }
+        if (Calls.size() != std::size(Sites::InlinedNetMode) || Found != static_cast<int32_t>(Calls.size()))
+        {
+            Log::Error(L"Finder: inlined net mode copies: {} calls, {} matched", Calls.size(), Found);
+            std::fill(std::begin(Sites::InlinedNetMode), std::end(Sites::InlinedNetMode), Sites::FInlinedNetMode{});
+            ++MissingCount;
+        }
+    }
+
+    void ResolveWorldTravel()
+    {
+        const uintptr_t Travel = FunctionOf(L"Server switch level: %s");
+        const uintptr_t TravelEnd = Finder::FunctionEnd(Travel);
+        if (!Travel || !TravelEnd)
+        {
+            Require(L"UEngine::TickWorldTravel", Natives::FOnNetworkFailure_Broadcast, 0);
+            return;
+        }
+
+        int32_t Countdowns = 0;
+        for (uintptr_t Load = FindInstruction(Travel, TravelEnd, { 0xF3, 0x0F, 0x10 }); Load; Load = FindInstruction(Load + 1, TravelEnd, { 0xF3, 0x0F, 0x10 }))
+        {
+            const uint8_t ModRm = Byte(Load + 3);
+            const int32_t Displacement = *reinterpret_cast<const int32_t*>(Load + 4);
+            const uintptr_t Store = Load + 12;
+            if ((ModRm & 0xC0) == 0x80 && Byte(Load + 8) == 0xF3 && Byte(Load + 9) == 0x0F && Byte(Load + 10) == 0x5C
+                && Byte(Store) == 0xF3 && Byte(Store + 1) == 0x0F && Byte(Store + 2) == 0x11 && Byte(Store + 3) == ModRm && *reinterpret_cast<const int32_t*>(Store + 4) == Displacement)
+            {
+                Natives::UWorld_NextSwitchCountdown = Displacement;
+                ++Countdowns;
+            }
+        }
+        if (Countdowns != 1)
+        {
+            Log::Error(L"Finder: expected 1 NextSwitchCountdown update, found {}", Countdowns);
+            Natives::UWorld_NextSwitchCountdown = -1;
+            ++MissingCount;
+        }
+
+        uintptr_t Broadcast = 0;
+        for (uintptr_t Type = FindInstruction(Travel, TravelEnd, { 0x41, 0xB9, ENetworkFailure::PendingConnectionFailure, 0x00, 0x00, 0x00 }); Type; Type = FindInstruction(Type + 1, TravelEnd, { 0x41, 0xB9, ENetworkFailure::PendingConnectionFailure, 0x00, 0x00, 0x00 }))
+        {
+            const uintptr_t Call = FindRawCall(Type + 6, Type + 0x10);
+            for (uintptr_t Lea = Type - 0x18; Call && Lea < Type; ++Lea)
+            {
+                if ((Byte(Lea) & 0xFC) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04)
+                {
+                    Natives::UEngine_NetworkFailureEvent = *reinterpret_cast<const int32_t*>(Lea + 3);
+                    Broadcast = Finder::RelativeTarget(Call, 1, 5);
+                }
+            }
+            if (Broadcast)
+            {
+                break;
+            }
+        }
+
+        int32_t Agreeing = 0;
+        for (uintptr_t Site : Broadcast ? Finder::CallsTo(Broadcast, false) : std::vector<uintptr_t>())
+        {
+            const uintptr_t Add = FindInstruction(Site - 0x20, Site, { 0x48, 0x81, 0xC1 });
+            if (Add && *reinterpret_cast<const int32_t*>(Add + 3) == Natives::UEngine_NetworkFailureEvent)
+            {
+                ++Agreeing;
+            }
+        }
+        if (Agreeing == 0)
+        {
+            Broadcast = 0;
+            Natives::UEngine_NetworkFailureEvent = -1;
+        }
+        Require(L"FOnNetworkFailure::Broadcast", Natives::FOnNetworkFailure_Broadcast, Broadcast);
+    }
+
+    void ResolveGameMapsSettings()
+    {
+        const uintptr_t Start = reinterpret_cast<uintptr_t>(Natives::UGameInstance_StartGameInstance);
+        const std::vector<std::pair<uintptr_t, uintptr_t>> StartCalls = Finder::DirectCalls(Start, Finder::FunctionEnd(Start));
+
+        uintptr_t StaticClass = 0;
+        uintptr_t GameDefaultMap = 0;
+        int32_t Matches = 0;
+        for (const auto& [Site, Target] : StartCalls)
+        {
+            const uintptr_t TargetFirst = FirstCall(Target);
+            const bool bAfterStaticClass = TargetFirst && std::any_of(StartCalls.begin(), StartCalls.end(), [&](const auto& Other)
+            {
+                return Other.first < Site && Other.first + 0x40 >= Site && Other.second == TargetFirst;
+            });
+            if (bAfterStaticClass && Target != GameDefaultMap)
+            {
+                StaticClass = TargetFirst;
+                GameDefaultMap = Target;
+                ++Matches;
+            }
+        }
+        if (Matches != 1)
+        {
+            GameDefaultMap = 0;
+            StaticClass = 0;
+        }
+        Require(L"UGameMapsSettings::GetGameDefaultMap", Natives::UGameMapsSettings_GetGameDefaultMap, GameDefaultMap);
+
+        uintptr_t GlobalDefaultGameMode = 0;
+        const uintptr_t PrefixRef = OnlyRef(L"Failed to load game mode '%s' specified by prefixed map name %s.");
+        const uintptr_t CreateGameMode = Finder::FunctionStart(PrefixRef);
+        Matches = 0;
+        for (const auto& [Site, Target] : StaticClass && CreateGameMode ? Finder::DirectCalls(PrefixRef, Finder::FunctionEnd(CreateGameMode)) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (Target != GlobalDefaultGameMode && FirstCall(Target) == StaticClass)
+            {
+                GlobalDefaultGameMode = Target;
+                ++Matches;
+            }
+        }
+        if (Matches != 1)
+        {
+            GlobalDefaultGameMode = 0;
+        }
+        Require(L"UGameMapsSettings::GetGlobalDefaultGameMode", Natives::UGameMapsSettings_GetGlobalDefaultGameMode, GlobalDefaultGameMode);
+    }
+
+    void ResolveCreateDefaultObject()
+    {
+        const int32_t DefaultObject = ObjectLayout::Current.UClass_ClassDefaultObject;
+        const uintptr_t Begin = Finder::TextBegin();
+        const uintptr_t End = Finder::TextEnd();
+
+        std::unordered_map<int32_t, int32_t> Votes;
+        int32_t Total = 0;
+        for (uintptr_t At = Begin; At + 8 <= End; ++At)
+        {
+            if ((Byte(At) & 0xF8) != 0x48 || (Byte(At + 2) & 0xC0) != 0x80 || (Byte(At + 2) & 0x07) == 0x04 || *reinterpret_cast<const int32_t*>(At + 3) != DefaultObject)
+            {
+                continue;
+            }
+
+            size_t Length = 0;
+            if (Byte(At + 1) == 0x39)
+            {
+                Length = 7;
+            }
+            else if (Byte(At + 1) == 0x83 && (Byte(At + 2) & 0x38) == 0x38 && Byte(At + 7) == 0x00)
+            {
+                Length = 8;
+            }
+            if (!Length)
+            {
+                continue;
+            }
+
+            for (uintptr_t Call = At + Length; Call + 6 <= At + Length + 0x18 && Call + 6 <= End; ++Call)
+            {
+                if (Byte(Call) == 0xFF && (Byte(Call + 1) & 0xF8) == 0x90 && (Byte(Call + 1) & 0x07) != 0x04)
+                {
+                    ++Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
+                    ++Total;
+                    break;
+                }
+            }
+        }
+
+        int32_t Winner = -1;
+        int32_t WinnerVotes = 0;
+        for (const auto& [Displacement, Count] : Votes)
+        {
+            if (Count > WinnerVotes)
+            {
+                Winner = Displacement;
+                WinnerVotes = Count;
+            }
+        }
+
+        if (Winner > 0 && Winner % 8 == 0 && WinnerVotes * 10 >= Total * 9)
+        {
+            Natives::UClass_CreateDefaultObjectIndex = Winner / 8;
+            Log::Info(L"Finder: UClass::CreateDefaultObject is slot 0x{:X} ({} of {} sites)", Winner / 8, WinnerVotes, Total);
+        }
+        else
+        {
+            Log::Error(L"Finder: UClass::CreateDefaultObject vote failed ({} of {} sites)", WinnerVotes, Total);
+            ++MissingCount;
+        }
+    }
+
+    void ResolveRequestingExit()
+    {
+        uintptr_t RequestingExit = 0;
+        bool bAgree = true;
+        const std::vector<uintptr_t> Refs = Finder::StringRefs(L"FPlatformMisc::RequestExit(%i)");
+        for (uintptr_t Ref : Refs)
+        {
+            const uintptr_t Function = Finder::FunctionStart(Ref);
+            std::vector<std::pair<uintptr_t, uintptr_t>> Stores = MovStores(Function, Finder::FunctionEnd(Function), { 0xC6, 0x05 }, 2, 7);
+            Stores.erase(std::remove_if(Stores.begin(), Stores.end(), [](const auto& Store) { return Byte(Store.first + 6) != 0x01; }), Stores.end());
+            if (Stores.size() != 1 || (RequestingExit && RequestingExit != Stores.front().second))
+            {
+                bAgree = false;
+                break;
+            }
+            RequestingExit = Stores.front().second;
+        }
+        RequireAddress(L"GIsRequestingExit", reinterpret_cast<uintptr_t&>(Natives::GIsRequestingExit), bAgree && Refs.size() >= 2 ? RequestingExit : 0);
     }
 
     void ResolvePreInitServerPatch()
@@ -512,7 +911,12 @@ bool Finder::ResolveAll()
     ResolvePreInitGlobals();
     ResolveEngineReadiness();
     ResolveGameThreadTick();
+    ResolveRequestingExit();
     ResolveEngineNet();
+    ResolveNetMode();
+    ResolveWorldTravel();
+    ResolveGameMapsSettings();
+    ResolveCreateDefaultObject();
     ResolvePreInitServerPatch();
 
     Log::Info(L"Finder: static resolution complete, {} missing", MissingCount);
@@ -529,10 +933,8 @@ namespace
     }
 }
 
-bool Finder::ResolveLive()
+bool Finder::ResolveProcessEvent()
 {
-    int32_t Missing = 0;
-
     if (void** ObjectVTable = CdoVTable(L"/Script/CoreUObject.Object"))
     {
         for (int32_t Index = 0; Index < 0x80; ++Index)
@@ -549,23 +951,29 @@ bool Finder::ResolveLive()
             }
         }
     }
+
     if (Natives::ProcessEventIndex < 0)
     {
         Log::Error(L"Finder: ProcessEvent index not found");
-        ++Missing;
+        return false;
     }
+    Log::Info(L"Finder: ProcessEvent is slot 0x{:X}", Natives::ProcessEventIndex);
+    return true;
+}
 
+bool Finder::ResolveInitListen()
+{
     const uintptr_t InitListen = FunctionOf(L"UNetDriver::InitListen");
     if (void** NetDriverVTable = CdoVTable(L"/Script/Engine.NetDriver"))
     {
         Natives::UNetDriver_InitListenIndex = VTableIndex(NetDriverVTable, reinterpret_cast<void*>(InitListen), 0x6A);
     }
+
     if (Natives::UNetDriver_InitListenIndex < 0)
     {
         Log::Error(L"Finder: UNetDriver::InitListen index not found");
-        ++Missing;
+        return false;
     }
-
-    Log::Info(L"Finder: live resolution complete, {} missing", Missing);
-    return Missing == 0;
+    Log::Info(L"Finder: UNetDriver::InitListen is slot 0x{:X}", Natives::UNetDriver_InitListenIndex);
+    return true;
 }

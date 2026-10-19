@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/UnrealString.h"
+#include "UObject/UnrealNames.h"
 
 #include <functional>
 #include <string>
@@ -18,6 +19,12 @@ struct FName
     int32_t Number = 0;
 
     FName() = default;
+
+    FName(EName N)
+        : ComparisonIndex(N)
+    {
+    }
+
     FName(const wchar_t* Name, EFindName FindType = FNAME_Add);
 
     FString ToString() const;

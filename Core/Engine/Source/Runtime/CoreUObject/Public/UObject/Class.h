@@ -55,7 +55,18 @@ public:
     UClass* GetSuperClass() const { return static_cast<UClass*>(GetSuperStruct()); }
     bool HasAnyCastFlag(EClassCastFlags FlagToCheck) const { return (ClassCastFlags & FlagToCheck) != 0; }
     bool HasAllCastFlags(EClassCastFlags FlagsToCheck) const { return (ClassCastFlags & FlagsToCheck) == FlagsToCheck; }
-    UObject* GetDefaultObject() const { return ClassDefaultObject; }
+
+    UObject* GetDefaultObject(bool bCreateIfNeeded = true) const
+    {
+        if (ClassDefaultObject == nullptr && bCreateIfNeeded)
+        {
+            const_cast<UClass*>(this)->CreateDefaultObject();
+        }
+
+        return ClassDefaultObject;
+    }
+
+    UObject* CreateDefaultObject();
 
     UFunction* FindFunctionByName(FName InName, EIncludeSuperFlag::Type IncludeSuper = EIncludeSuperFlag::IncludeSuper) const;
 };

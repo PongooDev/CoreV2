@@ -15,7 +15,12 @@ uintptr_t Finder::ImageBase()
     return Memcury::PE::GetModuleBase();
 }
 
-uintptr_t Finder::ImageEnd()
+uintptr_t Finder::TextBegin()
+{
+    return TextSection().GetSectionStart().Get();
+}
+
+uintptr_t Finder::TextEnd()
 {
     return TextSection().GetSectionEnd().Get();
 }

@@ -92,3 +92,15 @@ UFunction* UClass::FindFunctionByName(FName InName, EIncludeSuperFlag::Type Incl
 {
     return static_cast<UFunction*>(FindField(this, InName, CASTCLASS_UFunction, IncludeSuper == EIncludeSuperFlag::IncludeSuper));
 }
+
+UObject* UClass::CreateDefaultObject()
+{
+    if (Natives::UClass_CreateDefaultObjectIndex < 0)
+    {
+        return ClassDefaultObject;
+    }
+
+    using FCreateDefaultObject = UObject* (*)(UClass*);
+    void** VTable = *reinterpret_cast<void***>(this);
+    return reinterpret_cast<FCreateDefaultObject>(VTable[Natives::UClass_CreateDefaultObjectIndex])(this);
+}

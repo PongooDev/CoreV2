@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "GameThread.h"
 #include "Log.h"
+#include "Natives.h"
 
 #include <atomic>
 #include <future>
@@ -55,5 +56,9 @@ void GameThread::Tick()
 
 bool GameThread::IsInGameThread()
 {
+    if (Natives::GIsGameThreadIdInitialized && *Natives::GIsGameThreadIdInitialized && Natives::GGameThreadId)
+    {
+        return GetCurrentThreadId() == *Natives::GGameThreadId;
+    }
     return GameThreadId != 0 && GameThreadId == GetCurrentThreadId();
 }

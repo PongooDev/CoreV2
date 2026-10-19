@@ -87,6 +87,7 @@
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="Core\Public\Configuration.h" />
+    <ClInclude Include="Core\Public\Finder.h" />
     <ClInclude Include="Core\Public\GameThread.h" />
     <ClInclude Include="Core\Public\Hooks.h" />
     <ClInclude Include="Core\Public\Log.h" />
@@ -122,10 +123,12 @@
     </ClCompile>
     <ClCompile Include="Core\dllmain.cpp" />
     <ClCompile Include="Core\Private\Configuration.cpp" />
+    <ClCompile Include="Core\Private\Finder.cpp" />
     <ClCompile Include="Core\Private\GameThread.cpp" />
     <ClCompile Include="Core\Private\Hooks.cpp" />
     <ClCompile Include="Core\Private\Log.cpp" />
     <ClCompile Include="Core\Private\Reflection.cpp" />
+    <ClCompile Include="Core\Private\Resolve.cpp" />
     <ClCompile Include="Engine\Source\Runtime\Core\Private\HAL\UnrealMemory.cpp" />
     <ClCompile Include="Engine\Source\Runtime\Core\Private\UObject\UnrealNames.cpp" />
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Class.cpp" />

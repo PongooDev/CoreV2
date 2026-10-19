@@ -33,10 +33,6 @@ namespace Natives
     inline uint32_t* GGameThreadId = nullptr;
     inline bool* GIsGameThreadIdInitialized = nullptr;
 
-    inline void* (*FMemory_Malloc)(size_t Count, uint32_t Alignment) = nullptr;
-    inline void* (*FMemory_Realloc)(void* Original, size_t Count, uint32_t Alignment) = nullptr;
-    inline void (*FMemory_Free)(void* Original) = nullptr;
-
     inline FName* (*FName_Construct)(FName* This, const wchar_t* Name, int32_t FindType) = nullptr;
     inline void (*FName_AppendString)(const FName* This, FString& Out) = nullptr;
     inline FString* (*FName_ToString)(const FName* This, FString* Out) = nullptr;

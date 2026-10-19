@@ -100,6 +100,9 @@
     <ClInclude Include="Core\Public\Configuration.h">
       <Filter>Core\Public</Filter>
     </ClInclude>
+    <ClInclude Include="Core\Public\Finder.h">
+      <Filter>Core\Public</Filter>
+    </ClInclude>
     <ClInclude Include="Core\Public\GameThread.h">
       <Filter>Core\Public</Filter>
     </ClInclude>
@@ -193,6 +196,9 @@
     <ClCompile Include="Core\Private\Configuration.cpp">
       <Filter>Core\Private</Filter>
     </ClCompile>
+    <ClCompile Include="Core\Private\Finder.cpp">
+      <Filter>Core\Private</Filter>
+    </ClCompile>
     <ClCompile Include="Core\Private\GameThread.cpp">
       <Filter>Core\Private</Filter>
     </ClCompile>
@@ -203,6 +209,9 @@
       <Filter>Core\Private</Filter>
     </ClCompile>
     <ClCompile Include="Core\Private\Reflection.cpp">
+      <Filter>Core\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Private\Resolve.cpp">
       <Filter>Core\Private</Filter>
     </ClCompile>
     <ClCompile Include="Engine\Source\Runtime\Core\Private\HAL\UnrealMemory.cpp">

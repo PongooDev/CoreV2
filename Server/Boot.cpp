@@ -5,6 +5,7 @@
 #include "GameMapsSettings.h"
 #include "Hooks.h"
 #include "LaunchEngineLoop.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Log.h"
 #include "Engine/GameEngine.h"
 #include "Engine/GameInstance.h"
@@ -32,6 +33,7 @@ void Boot::Initialize()
         return;
     }
 
+    FConfigCacheIni::Hook();
     FEngineLoop::Hook();
     UGameMapsSettings::Hook();
     UWorld::Hook();

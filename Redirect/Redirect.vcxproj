@@ -133,6 +133,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Build.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CommandLine.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\ConfigCacheIni.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMiscDefines.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\DefaultValueHelper.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\MemStack.h" />
@@ -234,6 +235,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Logging\LogCategory.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Math\UnrealMath.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\CommandLine.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\ConfigCacheIni.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\DefaultValueHelper.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\MemStack.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\OutputDeviceRedirector.cpp" />

@@ -57,6 +57,8 @@ Looking for the original Core? Core V1 is still available at [PongooDev/Core](ht
 3. Select **Release** and **x64** in the solution toolbar.
 4. Build it
 
+The build writes three DLLs to `x64\Release`: `Core.dll` (the server), `CoreClient.dll` (the client) and `CoreRedirect.dll` (points the game's HTTP traffic at Core-Backend).
+
 ## Contributing
 
 Contributions are welcome, whether it is code or an issue report.

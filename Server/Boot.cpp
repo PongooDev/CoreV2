@@ -12,7 +12,7 @@
 void Boot::Initialize()
 {
     Configuration::Load();
-    Log::Initialize(Configuration::Get().bConsole);
+    Log::Initialize(L"Server", Configuration::Get().bConsole);
     Log::Info(L"Core V2 starting");
 
     if (MH_Initialize() != MH_OK)

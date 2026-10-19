@@ -36,17 +36,17 @@ namespace
     }
 }
 
-void Log::Initialize(bool bAllocateConsole)
+void Log::Initialize(const wchar_t* Name, bool bAllocateConsole)
 {
     std::scoped_lock Lock(LogMutex);
 
     if (bAllocateConsole && AllocConsole())
     {
         ConsoleOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-        SetConsoleTitleW(L"Core");
+        SetConsoleTitleW(std::format(L"Core {}", Name).c_str());
     }
 
-    _wfopen_s(&LogFile, (ExecutableDirectory() + L"Server_log.txt").c_str(), L"w, ccs=UTF-8");
+    _wfopen_s(&LogFile, std::format(L"{}{}_log_{}.txt", ExecutableDirectory(), Name, GetCurrentProcessId()).c_str(), L"w, ccs=UTF-8");
 }
 
 void Log::Write(ELogLevel Level, std::wstring_view Message)

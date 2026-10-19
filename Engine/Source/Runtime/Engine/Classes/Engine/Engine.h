@@ -17,6 +17,7 @@ class UEngine : public UObject
 {
     DefineUnrealClass(UEngine, Engine)
     DefineUProperty(UClass*, ConsoleClass)
+    DefineUProperty(float, NetClientTicksPerSecond)
     DefineNativeMember(FOnNetworkFailure, NetworkFailureEvent, UEngine_NetworkFailureEvent)
 
 public:
@@ -29,6 +30,8 @@ public:
 
     bool CreateNamedNetDriver(UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition);
     UNetDriver* FindNamedNetDriver(const UWorld* InWorld, FName NetDriverName);
+
+    float GetMaxTickRate(float DeltaTime, bool bAllowFrameRateSmoothing = true) const;
 
     static void Hook();
 };

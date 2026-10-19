@@ -6,7 +6,17 @@
 
 class FOutputDevice;
 class FOutputDeviceRedirector;
+class AActor;
+class AWorldSettings;
+class FNetGUIDCache;
+class FNetworkObjectList;
+class FObjectReplicator;
+class FOutBunch;
 class FString;
+class UActorChannel;
+class UChannel;
+class UNetConnection;
+struct FNetViewer;
 class FTextLocalizationManager;
 class IConsoleManager;
 template <typename T>
@@ -94,6 +104,23 @@ namespace Natives
 
     inline ULocalPlayer* (*UGameViewportClient_SetupInitialLocalPlayer)(UGameViewportClient* This, FString& OutError) = nullptr;
 
+    inline bool (*UActorChannel_ReplicateActor)(UActorChannel* This) = nullptr;
+    inline void (*UActorChannel_SetChannelActor)(UActorChannel* This, AActor* InActor) = nullptr;
+    inline UChannel* (*UNetConnection_CreateChannel)(UNetConnection* This, int32_t Type, bool bOpenedLocally, int32_t ChannelIndex) = nullptr;
+    inline FNetViewer* (*FNetViewer_FNetViewer)(FNetViewer* This, UNetConnection* InConnection, float DeltaSeconds) = nullptr;
+    inline void (*AActor_CallPreReplication)(AActor* This, UNetDriver* NetDriver) = nullptr;
+    inline UNetDriver* (*AActor_GetNetDriver)(const AActor* This) = nullptr;
+    inline void (*AActor_FlushNetDormancy)(AActor* This) = nullptr;
+    inline void (*AActor_SetNetDormancy)(AActor* This, int32_t NewDormancy) = nullptr;
+    inline void (*FNetworkObjectList_Remove)(FNetworkObjectList* This, AActor* Actor) = nullptr;
+    inline bool (*FNetGUIDCache_SupportsObject)(const FNetGUIDCache* This, const UObject* Object) = nullptr;
+    inline UObject* (*UObject_GetArchetypeFromRequiredInfo)(UClass* Class, UObject* Outer, FName Name, int32_t ObjectFlags) = nullptr;
+    inline AWorldSettings* (*UWorld_GetWorldSettings)(const UWorld* This, bool bCheckStreamingPersistent, bool bChecked) = nullptr;
+    inline void (*UWorld_AddNetworkActor)(UWorld* This, AActor* Actor) = nullptr;
+    inline bool (*UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled)() = nullptr;
+    inline FOutBunch* (*FOutBunch_FOutBunch)(FOutBunch* This, UChannel* InChannel, bool bClose) = nullptr;
+    inline bool (*FObjectReplicator_ValidateAgainstState)(FObjectReplicator* This, const UObject* ObjectState) = nullptr;
+
     inline int32_t (*UWorld_InternalGetNetMode)(const UWorld* This) = nullptr;
     inline int32_t (*UWorld_AttemptDeriveFromURL)(const UWorld* This) = nullptr;
     inline FLevelCollection* (*UWorld_FindCollectionByType)(UWorld* This, ELevelCollectionType InType) = nullptr;
@@ -111,6 +138,26 @@ namespace Natives
     inline int32_t UNetDriver_ServerReplicateActorsIndex = -1;
     inline int32_t UEngine_LoadMapIndex = -1;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
+    inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;
+    inline int32_t UNetConnection_TickIndex = -1;
+    inline int32_t UNetConnection_IsNetReadyIndex = -1;
+    inline int32_t UNetConnection_ClientHasInitializedLevelForIndex = -1;
+    inline int32_t UNetConnection_FlushDormancyIndex = -1;
+    inline int32_t UChannel_CloseIndex = -1;
+    inline int32_t UChannel_SendBunchIndex = -1;
+    inline int32_t UChannel_StartBecomingDormantIndex = -1;
+    inline int32_t UPackageMap_WriteObjectIndex = -1;
+    inline int32_t AActor_GetVelocityIndex = -1;
+    inline int32_t AActor_GetNetPriorityIndex = -1;
+    inline int32_t AActor_GetNetDormancyIndex = -1;
+    inline int32_t AActor_IsNetRelevantForIndex = -1;
+    inline int32_t AActor_IsRelevancyOwnerForIndex = -1;
+    inline int32_t AActor_GetNetOwnerIndex = -1;
+    inline int32_t AActor_ForceNetUpdateIndex = -1;
+    inline int32_t AController_GetViewTargetIndex = -1;
+    inline int32_t APlayerController_SendClientAdjustmentIndex = -1;
+    inline int32_t AGameNetworkManager_IsInLowBandwidthModeIndex = -1;
+    inline int32_t UEngine_GetMaxTickRateIndex = -1;
     inline int32_t UConsole_ConsoleCommandIndex = -1;
     inline int32_t UConsole_InputKeyIndex = -1;
     inline int32_t APlayerController_ConsoleKeyIndex = -1;
@@ -122,6 +169,33 @@ namespace Natives
     inline ptrdiff_t UEngine_NetworkFailureEvent = -1;
     inline ptrdiff_t UWorld_NextSwitchCountdown = -1;
     inline ptrdiff_t FWorldContext_ThisCurrentWorld = -1;
+    inline ptrdiff_t UNetDriver_GuidCache = -1;
+    inline ptrdiff_t UNetDriver_NetTag = -1;
+    inline ptrdiff_t UNetDriver_DebugRelevantActors = -1;
+    inline ptrdiff_t UNetDriver_DestroyedStartupOrDormantActors = -1;
+    inline ptrdiff_t UNetDriver_ReplicationFrame = -1;
+    inline ptrdiff_t UNetDriver_NetworkObjects = -1;
+    inline ptrdiff_t UNetConnection_State = -1;
+    inline ptrdiff_t UNetConnection_QueuedBits = -1;
+    inline ptrdiff_t UNetConnection_TickCount = -1;
+    inline ptrdiff_t UNetConnection_TimeSensitive = -1;
+    inline ptrdiff_t UNetConnection_ActorChannels = -1;
+    inline ptrdiff_t UNetConnection_DormantReplicatorMap = -1;
+    inline ptrdiff_t UNetConnection_DestroyedStartupOrDormantActors = -1;
+    inline ptrdiff_t UNetConnection_ClientWorldPackageName = -1;
+    inline ptrdiff_t UNetConnection_ClientVisibleLevelNames = -1;
+    inline ptrdiff_t UChannel_Bits = -1;
+    inline ptrdiff_t UChannel_ChIndex = -1;
+    inline ptrdiff_t UChannel_NumOutRec = -1;
+    inline ptrdiff_t UActorChannel_RelevantTime = -1;
+    inline ptrdiff_t UActorChannel_LastUpdateTime = -1;
+    inline ptrdiff_t UActorChannel_Bits = -1;
+    inline ptrdiff_t AActor_NetDormancy = -1;
+    inline ptrdiff_t AActor_bActorInitialized = -1;
+    inline uint32_t AActor_bActorInitializedMask = 0;
+    inline ptrdiff_t ULevel_bIsAssociatingLevel = -1;
+    inline uint32_t ULevel_bIsAssociatingLevelMask = 0;
+    inline ptrdiff_t UWorld_TimeSeconds = -1;
     inline ptrdiff_t UConsole_AutoCompleteList = -1;
     inline ptrdiff_t UConsole_bIsRuntimeAutoCompleteUpToDate = -1;
     inline ptrdiff_t UConsole_AutoCompleteTree = -1;
@@ -142,6 +216,7 @@ namespace Sites
     inline std::vector<uint8_t*> EngineInitDedicatedServerChecks;
     inline std::vector<uint8_t*> GameEngineTickDedicatedServerChecks;
     inline std::vector<void**> ConsoleVTables;
+    inline std::vector<void**> NetDriverVTables;
 
     struct FShowFlag
     {

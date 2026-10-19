@@ -7,8 +7,12 @@
 #include "Engine/PendingNetGame.h"
 #include "UObject/Object.h"
 
+class AActor;
 class AGameModeBase;
+class AGameNetworkManager;
+class AWorldSettings;
 class UDemoNetDriver;
+class ULevel;
 class UNetDriver;
 
 struct FLevelCollection
@@ -43,7 +47,11 @@ class UWorld final : public UObject, public FNetworkNotify
     DefineUProperty(UNetDriver*, NetDriver)
     DefineUProperty(UDemoNetDriver*, DemoNetDriver)
     DefineUProperty(AGameModeBase*, AuthorityGameMode)
+    DefineUProperty(AGameNetworkManager*, NetworkManager)
+    DefineUProperty(ULevel*, CurrentLevelPendingVisibility)
+    DefineUProperty(ULevel*, CurrentLevelPendingInvisibility)
     DefineNativeMember(float, NextSwitchCountdown, UWorld_NextSwitchCountdown)
+    DefineNativeMember(float, TimeSeconds, UWorld_TimeSeconds)
 
 public:
     bool Listen(FURL& InURL);
@@ -55,6 +63,8 @@ public:
 
     FLevelCollection* FindCollectionByType(const ELevelCollectionType InType);
     AGameModeBase* GetAuthGameMode() const { return AuthorityGameMode; }
+    AWorldSettings* GetWorldSettings(bool bCheckStreamingPersistent = false, bool bChecked = true) const;
+    void AddNetworkActor(AActor* Actor);
 
     static void Hook();
 

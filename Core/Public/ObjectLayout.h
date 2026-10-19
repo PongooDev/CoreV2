@@ -47,8 +47,20 @@ public: \
     void SetNative_##Name(Type const& Value) { GetNative_##Name() = Value; } \
     __declspec(property(get = GetNative_##Name, put = SetNative_##Name)) Type Name;
 
+#define DefineNativeObject(Type, Name, Offset) \
+public: \
+    Type& GetNative_##Name() const { return *reinterpret_cast<Type*>(reinterpret_cast<uintptr_t>(this) + Natives::Offset); } \
+    __declspec(property(get = GetNative_##Name)) Type Name;
+
 #define DefineNativeBitfield(Name, Offset, Mask) \
 public: \
     bool GetNative_##Name() const { return (*reinterpret_cast<const uint32_t*>(reinterpret_cast<uintptr_t>(this) + Natives::Offset) & (Mask)) != 0; } \
     void SetNative_##Name(bool bValue) { uint32_t& Bits = *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(this) + Natives::Offset); Bits = bValue ? (Bits | (Mask)) : (Bits & ~(Mask)); } \
     __declspec(property(get = GetNative_##Name, put = SetNative_##Name)) bool Name;
+
+template <typename ReturnType, typename ObjectType, typename... ArgTypes>
+ReturnType CallVirtual(ObjectType* Object, int32_t Index, ArgTypes... Args)
+{
+    using FFunction = ReturnType (*)(ObjectType*, ArgTypes...);
+    return reinterpret_cast<FFunction>((*reinterpret_cast<void* const* const*>(Object))[Index])(Object, Args...);
+}

@@ -3,6 +3,7 @@
 #include "GameFramework/Controller.h"
 #include "InputCoreTypes.h"
 
+class APlayerCameraManager;
 class UPlayer;
 
 class APlayerController : public AController
@@ -11,9 +12,12 @@ class APlayerController : public AController
 
 public:
     DefineUProperty(UPlayer*, Player)
+    DefineUProperty(APawn*, AcknowledgedPawn)
+    DefineUProperty(APlayerCameraManager*, PlayerCameraManager)
 
     void ConsoleKey(FKey Key);
     void SendToConsole(const FString& Command);
+    void SendClientAdjustment();
 
     static void Hook();
 

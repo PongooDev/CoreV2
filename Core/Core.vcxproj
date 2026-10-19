@@ -47,12 +47,12 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;CORE_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;CORE_EXPORTS;_WINDOWS;_USRDLL;UE_SERVER=1;WITH_SERVER_CODE=1;WITH_EDITORONLY_DATA=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Core\Public;$(ProjectDir)Engine\Source\Runtime\Core\Public;$(ProjectDir)Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)ThirdParty\MinHook\include;$(ProjectDir)ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Core\Public;$(ProjectDir)Engine\Source\Runtime\Core\Public;$(ProjectDir)Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)ThirdParty\MinHook\include;$(ProjectDir)ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -67,12 +67,12 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;CORE_EXPORTS;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;CORE_EXPORTS;_WINDOWS;_USRDLL;UE_SERVER=1;WITH_SERVER_CODE=1;WITH_EDITORONLY_DATA=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Core\Public;$(ProjectDir)Engine\Source\Runtime\Core\Public;$(ProjectDir)Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)ThirdParty\MinHook\include;$(ProjectDir)ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)Core\Public;$(ProjectDir)Engine\Source\Runtime\Core\Public;$(ProjectDir)Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)ThirdParty\MinHook\include;$(ProjectDir)ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization>MaxSpeed</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -93,10 +93,17 @@
     <ClInclude Include="Core\Public\Natives.h" />
     <ClInclude Include="Core\Public\ObjectLayout.h" />
     <ClInclude Include="Core\Public\Reflection.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\CoreGlobals.h" />
     <ClInclude Include="Engine\Source\Runtime\Core\Public\Containers\Array.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\Containers\EnumAsByte.h" />
     <ClInclude Include="Engine\Source\Runtime\Core\Public\Containers\UnrealString.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\HAL\PlatformProperties.h" />
     <ClInclude Include="Engine\Source\Runtime\Core\Public\HAL\UnrealMemory.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\Misc\CString.h" />
     <ClInclude Include="Engine\Source\Runtime\Core\Public\UObject\NameTypes.h" />
+    <ClInclude Include="Engine\Source\Runtime\Core\Public\Windows\WindowsPlatformProperties.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\Misc\StringAssetReference.h" />
+    <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\Misc\StringClassReference.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\Templates\Casts.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\Class.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h" />
@@ -106,6 +113,7 @@
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBaseUtility.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectGlobals.h" />
     <ClInclude Include="Engine\Source\Runtime\CoreUObject\Public\UObject\UnrealType.h" />
+    <ClInclude Include="Engine\Source\Runtime\EngineSettings\Classes\GameMapsSettings.h" />
     <ClInclude Include="ThirdParty\Memcury\memcury.h" />
   </ItemGroup>
   <ItemGroup>
@@ -124,6 +132,7 @@
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Obj.cpp" />
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectBaseUtility.cpp" />
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectGlobals.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\EngineSettings\Private\EngineSettingsModule.cpp" />
     <ClCompile Include="ThirdParty\MinHook\src\buffer.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <SDLCheck>false</SDLCheck>

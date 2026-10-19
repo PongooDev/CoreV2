@@ -14,7 +14,7 @@ enum class ELogLevel : uint8_t
 
 namespace Log
 {
-    void Initialize(const wchar_t* Name, bool bAllocateConsole);
+    void Initialize(const wchar_t* Name);
     void Write(ELogLevel Level, std::wstring_view Message);
 
     template <typename... TArgs>

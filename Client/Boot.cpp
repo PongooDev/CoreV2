@@ -4,7 +4,7 @@
 
 void Boot::Initialize()
 {
-    Log::Initialize(L"Client", false);
+    Log::Initialize(L"Client");
     Log::Info(L"Core Client starting");
 
     if (MH_Initialize() != MH_OK)

@@ -10,7 +10,6 @@ namespace
 {
     std::mutex LogMutex;
     FILE* LogFile = nullptr;
-    HANDLE ConsoleOutput = nullptr;
 
     std::wstring ExecutableDirectory()
     {
@@ -36,16 +35,9 @@ namespace
     }
 }
 
-void Log::Initialize(const wchar_t* Name, bool bAllocateConsole)
+void Log::Initialize(const wchar_t* Name)
 {
     std::scoped_lock Lock(LogMutex);
-
-    if (bAllocateConsole && AllocConsole())
-    {
-        ConsoleOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-        SetConsoleTitleW(std::format(L"Core {}", Name).c_str());
-    }
-
     _wfopen_s(&LogFile, std::format(L"{}{}_log_{}.txt", ExecutableDirectory(), Name, GetCurrentProcessId()).c_str(), L"w, ccs=UTF-8");
 }
 
@@ -62,12 +54,6 @@ void Log::Write(ELogLevel Level, std::wstring_view Message)
     {
         fputws(Line.c_str(), LogFile);
         fflush(LogFile);
-    }
-
-    if (ConsoleOutput)
-    {
-        DWORD Written = 0;
-        WriteConsoleW(ConsoleOutput, Line.c_str(), static_cast<DWORD>(Line.size()), &Written, nullptr);
     }
 
     OutputDebugStringW(Line.c_str());

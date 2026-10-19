@@ -8,7 +8,7 @@
 void Boot::Initialize()
 {
     Configuration::Load();
-    Log::Initialize(L"Redirect", false);
+    Log::Initialize(L"Redirect");
     Log::Info(L"Core Redirect starting");
 
     if (!Finder::ResolveRuntime())

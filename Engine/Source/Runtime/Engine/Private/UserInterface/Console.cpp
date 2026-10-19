@@ -22,6 +22,18 @@ void UConsole::FRegisterConsoleAutoCompleteEntriesGlobal::Broadcast(TArray<FAuto
     static_cast<const TMulticastDelegate<TArray<FAutoCompleteCommand>&>*>(Natives::UConsole_RegisterConsoleAutoCompleteEntries)->Broadcast(AutoCompleteList);
 }
 
+void UConsole::ConsoleCommand(const FString& Command)
+{
+    using FConsoleCommand = void (*)(UConsole* This, const FString& Command);
+    reinterpret_cast<FConsoleCommand>((*reinterpret_cast<void* const* const*>(this))[Natives::UConsole_ConsoleCommandIndex])(this, Command);
+}
+
+bool UConsole::InputKey(int32_t ControllerId, FKey Key, EInputEvent Event, float AmountDepressed, bool bGamepad)
+{
+    using FInputKey = bool (*)(UConsole* This, int32_t ControllerId, FKey Key, EInputEvent Event, float AmountDepressed, bool bGamepad);
+    return reinterpret_cast<FInputKey>((*reinterpret_cast<void* const* const*>(this))[Natives::UConsole_InputKeyIndex])(this, ControllerId, Key, Event, AmountDepressed, bGamepad);
+}
+
 class FConsoleVariableAutoCompleteVisitor
 {
 public:

@@ -1045,6 +1045,7 @@ namespace
             {
                 Natives::UConsole_bIsRuntimeAutoCompleteUpToDate = *reinterpret_cast<const int32_t*>(Test + 2);
                 Natives::UConsole_BuildRuntimeAutoCompleteListIndex = *reinterpret_cast<const int32_t*>(Call + 4) / static_cast<int32_t>(sizeof(void*));
+                Natives::UConsole_InputKeyIndex = Index + 10;
             }
         }
 
@@ -1060,6 +1061,14 @@ namespace
         if (!bSettingsStored)
         {
             Log::Error(L"Finder: UConsole::UpdateCompleteIndices not found or the console layout differs from 4.16");
+            ++MissingCount;
+            return;
+        }
+
+        Natives::UConsole_ConsoleCommandIndex = Finder::VTableIndex(ConsoleVTable, reinterpret_cast<void*>(FunctionOf(L"\n>>> %s <<<")), 0x60);
+        if (Natives::UConsole_ConsoleCommandIndex < 0)
+        {
+            Log::Error(L"Finder: UConsole::ConsoleCommand not found");
             ++MissingCount;
             return;
         }
@@ -1398,5 +1407,25 @@ bool Finder::ResolveTextLocalizationManager()
 
     Natives::GTextLocalizationManager = reinterpret_cast<FTextLocalizationManager**>(Finder::RelativeTarget(ManagerLoad, 3, 7));
     Natives::FTextLocalizationManager_FindDisplayString = reinterpret_cast<decltype(Natives::FTextLocalizationManager_FindDisplayString)>(Finder::RelativeTarget(DisplayCall + 18, 1, 5));
+    return true;
+}
+
+bool Finder::ResolvePlayerControllerConsole()
+{
+    for (const auto& [Name, Index] : { std::pair<const wchar_t*, int32_t*>{ L"/Script/Engine.PlayerController:ConsoleKey", &Natives::APlayerController_ConsoleKeyIndex }, std::pair<const wchar_t*, int32_t*>{ L"/Script/Engine.PlayerController:SendToConsole", &Natives::APlayerController_SendToConsoleIndex } })
+    {
+        const UFunction* Function = FindObject<UFunction>(nullptr, Name);
+        const uintptr_t Thunk = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+        const uintptr_t ThunkEnd = Finder::FunctionEnd(Thunk);
+        const uintptr_t Call = Thunk && ThunkEnd ? FindInstruction(Thunk, ThunkEnd, { 0xFF, 0x90 }) : 0;
+        *Index = Call ? *reinterpret_cast<const int32_t*>(Call + 2) / static_cast<int32_t>(sizeof(void*)) : -1;
+        if (*Index < 0)
+        {
+            Log::Error(L"Finder: the virtual behind {} was not found", Name);
+            return false;
+        }
+    }
+
+    Log::Info(L"Finder: APlayerController::ConsoleKey is slot 0x{:X}, SendToConsole 0x{:X}", Natives::APlayerController_ConsoleKeyIndex, Natives::APlayerController_SendToConsoleIndex);
     return true;
 }

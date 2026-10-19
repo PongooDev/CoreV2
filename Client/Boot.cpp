@@ -1,10 +1,13 @@
 #include "pch.h"
 #include "Boot.h"
 #include "Finder.h"
+#include "GameThread.h"
 #include "Hooks.h"
 #include "Log.h"
 #include "Engine/Console.h"
+#include "Engine/GameEngine.h"
 #include "Engine/GameViewportClient.h"
+#include "GameFramework/PlayerController.h"
 
 void Boot::Initialize()
 {
@@ -25,7 +28,13 @@ void Boot::Initialize()
 
     UGameViewportClient::Hook();
     UConsole::Hook();
+    UGameEngine::Hook();
     Hooks::EnableAll();
+
+    GameThread::Enqueue([]
+    {
+        APlayerController::Hook();
+    });
 
     Log::Info(L"Core Client startup complete");
 }

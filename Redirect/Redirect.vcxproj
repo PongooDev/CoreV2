@@ -58,7 +58,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -79,7 +79,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization>MaxSpeed</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -132,6 +132,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\OutputDeviceRedirector.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Parse.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Paths.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Templates\SharedPointer.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Templates\SharedPointerInternals.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\UObject\NameTypes.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\UObject\UnrealNames.h" />
@@ -157,13 +158,18 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\GameEngine.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\GameViewportClient.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\LevelScriptActor.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\LocalPlayer.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\NetDriver.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\PendingNetGame.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Player.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\World.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Controller.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\PlayerController.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\ShowFlags.h" />
     <ClInclude Include="..\Engine\Source\Runtime\EngineSettings\Classes\ConsoleSettings.h" />
     <ClInclude Include="..\Engine\Source\Runtime\EngineSettings\Classes\GameMapsSettings.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\InputCore\Classes\InputCoreTypes.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Launch\Public\LaunchEngineLoop.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Online\HTTP\Public\Interfaces\IHttpBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Online\HTTP\Public\Interfaces\IHttpRequest.h" />
@@ -204,6 +210,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameViewportClient.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetworkDriver.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PlayerController.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp" />

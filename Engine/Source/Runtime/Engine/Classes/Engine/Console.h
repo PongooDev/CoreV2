@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ConsoleSettings.h"
+#include "Engine/EngineBaseTypes.h"
+#include "InputCoreTypes.h"
 #include "HAL/UnrealMemory.h"
 #include "Misc/CoreMiscDefines.h"
 #include "Misc/OutputDevice.h"
@@ -62,7 +64,9 @@ public:
     DefineNativeMember(FAutoCompleteNode, AutoCompleteTree, UConsole_AutoCompleteTree)
     DefineNativeMember(const UConsoleSettings*, ConsoleSettings, UConsole_ConsoleSettings)
 
+    void ConsoleCommand(const FString& Command);
     void BuildRuntimeAutoCompleteList(bool bForce = false);
+    bool InputKey(int32_t ControllerId, FKey Key, EInputEvent Event, float AmountDepressed = 1.f, bool bGamepad = false);
 
     struct FRegisterConsoleAutoCompleteEntriesGlobal
     {

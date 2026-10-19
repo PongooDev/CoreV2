@@ -30,6 +30,7 @@ namespace
         return Natives::GIsRequestingExit && *Natives::GIsRequestingExit;
     }
 
+#if WITH_SERVER_CODE
     void LogReady()
     {
         UWorld* World = GWorld;
@@ -48,6 +49,7 @@ namespace
             NetDriver ? NetDriver->GetFullName().ToStdString() : L"none",
             World->AuthorityGameMode ? reinterpret_cast<UObject*>(World->AuthorityGameMode)->GetFullName().ToStdString() : L"none");
     }
+#endif
 }
 
 bool GameThread::Enqueue(std::function<void()> Task)
@@ -104,11 +106,13 @@ void GameThread::Tick()
 {
     GameThreadId = GetCurrentThreadId();
 
+#if WITH_SERVER_CODE
     if (!bReadyLogged)
     {
         bReadyLogged = true;
         LogReady();
     }
+#endif
 
     std::vector<std::function<void()>> Tasks;
     {

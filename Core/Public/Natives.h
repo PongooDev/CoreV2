@@ -108,6 +108,10 @@ namespace Natives
     inline int32_t UNetDriver_ServerReplicateActorsIndex = -1;
     inline int32_t UEngine_LoadMapIndex = -1;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
+    inline int32_t UConsole_ConsoleCommandIndex = -1;
+    inline int32_t UConsole_InputKeyIndex = -1;
+    inline int32_t APlayerController_ConsoleKeyIndex = -1;
+    inline int32_t APlayerController_SendToConsoleIndex = -1;
     inline int32_t IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = -1;
     inline int32_t UProperty_GetCPPTypeIndex = -1;
 

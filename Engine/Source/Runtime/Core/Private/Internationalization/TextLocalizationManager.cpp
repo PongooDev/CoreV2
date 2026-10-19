@@ -2,34 +2,7 @@
 #include "Internationalization/TextLocalizationManager.h"
 #include "Finder.h"
 #include "Natives.h"
-
-namespace
-{
-    struct FSharedDisplayString
-    {
-        FString* Object = nullptr;
-        void** ReferenceController = nullptr;
-
-        ~FSharedDisplayString()
-        {
-            if (!ReferenceController)
-            {
-                return;
-            }
-
-            void** VTable = *reinterpret_cast<void***>(ReferenceController);
-            auto* Counts = reinterpret_cast<volatile long*>(reinterpret_cast<uintptr_t>(ReferenceController) + 8);
-            if (_InterlockedDecrement(&Counts[0]) == 0)
-            {
-                reinterpret_cast<void (*)(void**)>(VTable[0])(ReferenceController);
-                if (_InterlockedDecrement(&Counts[1]) == 0)
-                {
-                    reinterpret_cast<void (*)(void**, uint32_t)>(VTable[1])(ReferenceController, 1);
-                }
-            }
-        }
-    };
-}
+#include "Templates/SharedPointer.h"
 
 FTextLocalizationManager& FTextLocalizationManager::Get()
 {
@@ -47,13 +20,13 @@ bool FTextLocalizationManager::FindDisplayString(const FString& Namespace, const
         return false;
     }
 
-    FSharedDisplayString DisplayString;
+    TSharedPtr<FString, ESPMode::ThreadSafe> DisplayString;
     Natives::FTextLocalizationManager_FindDisplayString(this, &DisplayString, &Namespace, &Key, SourceString);
-    if (!DisplayString.Object)
+    if (!DisplayString.IsValid())
     {
         return false;
     }
 
-    OutDisplayString = *DisplayString.Object;
+    OutDisplayString = *DisplayString;
     return true;
 }

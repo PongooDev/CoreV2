@@ -243,6 +243,13 @@ namespace Natives
     inline ptrdiff_t UNetConnection_ClientWorldPackageName = -1;
     inline ptrdiff_t UNetConnection_ClientVisibleLevelNames = -1;
     inline ptrdiff_t UChannel_Bits = -1;
+    inline ptrdiff_t FArchive_ArIsError = -1;
+    inline uint32_t FArchive_ArIsErrorMask = 0;
+    inline ptrdiff_t FBitWriter_Num = -1;
+    inline ptrdiff_t FOutBunch_Size = -1;
+    inline ptrdiff_t FOutBunch_bClose = -1;
+    inline ptrdiff_t FOutBunch_bDormant = -1;
+    inline ptrdiff_t FOutBunch_bReliable = -1;
     inline ptrdiff_t UChannel_ChIndex = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;
     inline ptrdiff_t UActorChannel_RelevantTime = -1;

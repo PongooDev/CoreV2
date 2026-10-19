@@ -22,28 +22,17 @@ public:
     FOutBunch(const FOutBunch&) = delete;
     FOutBunch& operator=(const FOutBunch&) = delete;
 
-    bool IsError() const { return (Field<uint8_t>(0x28) & 0x40) != 0; }
-    int64_t GetNumBits() const { return Field<int64_t>(0x98); }
+    DefineNativeBitfield(ArIsError, FArchive_ArIsError, Natives::FArchive_ArIsErrorMask)
+    DefineNativeMember(int64_t, Num, FBitWriter_Num)
+    DefineNativeMember(uint8_t, bClose, FOutBunch_bClose)
+    DefineNativeMember(uint8_t, bDormant, FOutBunch_bDormant)
+    DefineNativeMember(uint8_t, bReliable, FOutBunch_bReliable)
 
-    uint8_t GetClose() const { return Field<uint8_t>(0xE5); }
-    void SetClose(uint8_t Value) { Field<uint8_t>(0xE5) = Value; }
-    uint8_t GetDormant() const { return Field<uint8_t>(0xE6); }
-    void SetDormant(uint8_t Value) { Field<uint8_t>(0xE6) = Value; }
-    uint8_t GetReliable() const { return Field<uint8_t>(0xE8); }
-    void SetReliable(uint8_t Value) { Field<uint8_t>(0xE8) = Value; }
+    bool IsError() const { return ArIsError; }
+    int64_t GetNumBits() const { return Num; }
 
-    __declspec(property(get = GetClose, put = SetClose)) uint8_t bClose;
-    __declspec(property(get = GetDormant, put = SetDormant)) uint8_t bDormant;
-    __declspec(property(get = GetReliable, put = SetReliable)) uint8_t bReliable;
+    static constexpr size_t StorageSize = 0x200;
 
 private:
-    template <typename T>
-    T& Field(size_t Offset) const
-    {
-        return *reinterpret_cast<T*>(const_cast<uint8_t*>(Storage) + Offset);
-    }
-
-    alignas(8) uint8_t Storage[0x110];
+    alignas(16) uint8_t Storage[StorageSize];
 };
-
-static_assert(sizeof(FOutBunch) == 0x110);

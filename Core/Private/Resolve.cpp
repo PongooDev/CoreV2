@@ -6,6 +6,7 @@
 #include "Engine/EngineBaseTypes.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
+#include "Net/DataBunch.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
@@ -1527,14 +1528,103 @@ namespace
         RequireSlot(L"UChannel::SendBunch", Natives::UChannel_SendBunchIndex, VTableEntry(ActorChannelVTable, SendBunch) ? SendBunch : -1);
 
         ptrdiff_t ChIndex = 0;
-        for (uintptr_t Copy = IsInText(OutBunch) ? FindInstruction(OutBunch, OutBunch + 0x80, { 0x8B, -1, -1, 0x89, -1, 0xD4, 0x00, 0x00, 0x00 }) : 0; Copy && !ChIndex; Copy = FindInstruction(Copy + 1, OutBunch + 0x80, { 0x8B, -1, -1, 0x89, -1, 0xD4, 0x00, 0x00, 0x00 }))
+        for (uintptr_t Copy = IsInText(OutBunch) ? FindInstruction(OutBunch, OutBunch + 0x80, { 0x8B, -1, -1, 0x89, -1, -1, -1, 0x00, 0x00 }) : 0; Copy && !ChIndex; Copy = FindInstruction(Copy + 1, OutBunch + 0x80, { 0x8B, -1, -1, 0x89, -1, -1, -1, 0x00, 0x00 }))
         {
-            if ((Byte(Copy + 1) & 0xC0) == 0x40 && (Byte(Copy + 1) & 0x07) != 0x04)
+            const bool bLoadsChannel = (Byte(Copy + 1) & 0xC0) == 0x40 && (Byte(Copy + 1) & 0x07) != 0x04;
+            const bool bStoresBunch = (Byte(Copy + 4) & 0xC0) == 0x80 && (Byte(Copy + 4) & 0x07) != 0x04 && (Byte(Copy + 4) & 0x38) == (Byte(Copy + 1) & 0x38);
+            if (bLoadsChannel && bStoresBunch)
             {
                 ChIndex = Byte(Copy + 2);
             }
         }
         RequireOffset(L"UChannel::ChIndex", Natives::UChannel_ChIndex, ChIndex);
+
+        ptrdiff_t BunchClose = 0;
+        const uintptr_t OutBunchEnd = IsInText(OutBunch) ? Finder::FunctionEnd(OutBunch) : 0;
+        const uintptr_t CloseArgument = OutBunchEnd ? FindInstruction(OutBunch, OutBunchEnd, { 0x41, 0x0F, 0xB6, -1 }) : 0;
+        if (CloseArgument && (Byte(CloseArgument + 3) & 0xC7) == 0xC0)
+        {
+            const uint8_t Register = (Byte(CloseArgument + 3) >> 3) & 0x07;
+            for (uintptr_t Store = CloseArgument + 4; Store + 6 <= OutBunchEnd && !BunchClose; ++Store)
+            {
+                const uint8_t ModRm = Byte(Store + 1);
+                const bool bNeedsRex = Register >= 4;
+                if (Byte(Store) == 0x88 && (ModRm & 0xC0) == 0x80 && ((ModRm >> 3) & 0x07) == Register && (ModRm & 0x07) != 0x04 && (!bNeedsRex || Byte(Store - 1) == 0x40))
+                {
+                    BunchClose = *reinterpret_cast<const int32_t*>(Store + 2);
+                }
+            }
+        }
+
+        ptrdiff_t BunchDormant = 0;
+        ptrdiff_t BunchReliable = 0;
+        const ptrdiff_t CloseBunchLocal = CloseBunch ? Byte(CloseBunch + 7) : 0;
+        if (const uintptr_t Store = CloseBunch ? FindInstruction(CloseBunch + 16, CloseBunch + 0x60, { 0xC6, 0x84, 0x24, -1, -1, -1, -1, 0x01 }) : 0)
+        {
+            BunchReliable = *reinterpret_cast<const int32_t*>(Store + 3) - CloseBunchLocal;
+        }
+        if (const uintptr_t Store = CloseBunch ? FindInstruction(CloseBunch + 16, CloseBunch + 0x60, { 0x88, 0x84, 0x24 }) : 0)
+        {
+            BunchDormant = *reinterpret_cast<const int32_t*>(Store + 3) - CloseBunchLocal;
+        }
+        const bool bBunchFlags = BunchClose > 0 && BunchDormant == BunchClose + 1 && BunchReliable == BunchClose + 3;
+        RequireOffset(L"FOutBunch::bClose", Natives::FOutBunch_bClose, bBunchFlags ? BunchClose : 0);
+        RequireOffset(L"FOutBunch::bDormant", Natives::FOutBunch_bDormant, bBunchFlags ? BunchDormant : 0);
+        RequireOffset(L"FOutBunch::bReliable", Natives::FOutBunch_bReliable, bBunchFlags ? BunchReliable : 0);
+
+        ptrdiff_t BunchSize = 0;
+        for (uintptr_t Lea = OutBunchEnd ? FindInstruction(OutBunch, OutBunchEnd, { 0x48, 0x8D, 0x05 }) : 0; Lea && !BunchSize; Lea = FindInstruction(Lea + 1, OutBunchEnd, { 0x48, 0x8D, 0x05 }))
+        {
+            void** VTable = reinterpret_cast<void**>(Finder::RelativeTarget(Lea, 3, 7));
+            const uintptr_t Destructor = !IsInText(reinterpret_cast<uintptr_t>(VTable)) ? reinterpret_cast<uintptr_t>(VTable[0]) : 0;
+            const uintptr_t DestructorEnd = IsInText(Destructor) ? Finder::FunctionEnd(Destructor) : 0;
+            for (uintptr_t Size = DestructorEnd ? FindInstruction(Destructor, DestructorEnd, { 0xBA, -1, -1, 0x00, 0x00 }) : 0; Size && !BunchSize; Size = FindInstruction(Size + 1, DestructorEnd, { 0xBA, -1, -1, 0x00, 0x00 }))
+            {
+                if (FindRawCall(Size + 5, Size + 0x10))
+                {
+                    BunchSize = *reinterpret_cast<const int32_t*>(Size + 1);
+                }
+            }
+        }
+        RequireOffset(L"sizeof(FOutBunch)", Natives::FOutBunch_Size, BunchSize > BunchReliable && BunchSize <= static_cast<ptrdiff_t>(FOutBunch::StorageSize) ? BunchSize : 0);
+
+        const uintptr_t Overflowed = FunctionOf(L"FBitWriter overflowed! (WriteLen: %i, Remaining: %i, Max: %i)");
+        const uintptr_t OverflowedEnd = Overflowed ? Finder::FunctionEnd(Overflowed) : 0;
+        ptrdiff_t ErrorByte = 0;
+        uint32_t ErrorMask = 0;
+        for (uintptr_t Or = OverflowedEnd ? FindInstruction(Overflowed, OverflowedEnd, { 0x80, -1, -1, -1 }) : 0; Or && !ErrorMask; Or = FindInstruction(Or + 1, OverflowedEnd, { 0x80, -1, -1, -1 }))
+        {
+            if ((Byte(Or + 1) & 0xF8) == 0x48 && (Byte(Or + 1) & 0x07) != 0x04 && Byte(Or + 3) && (Byte(Or + 3) & (Byte(Or + 3) - 1)) == 0)
+            {
+                ErrorByte = Byte(Or + 2);
+                ErrorMask = Byte(Or + 3);
+            }
+        }
+        RequireOffset(L"FArchive::ArIsError", Natives::FArchive_ArIsError, ErrorByte);
+        Natives::FArchive_ArIsErrorMask = ErrorMask;
+
+        ptrdiff_t WriterNum = 0;
+        const std::initializer_list<int32_t> SubtractNum = { -1, 0x2B, -1, -1, -1, -1, -1 };
+        const std::initializer_list<int32_t> LoadMax = { 0x48, 0x8B, -1, -1, -1, -1, -1 };
+        for (uintptr_t Sub = OverflowedEnd ? FindInstruction(Overflowed, OverflowedEnd, SubtractNum) : 0; Sub && !WriterNum; Sub = FindInstruction(Sub + 1, OverflowedEnd, SubtractNum))
+        {
+            const uint8_t ModRm = Byte(Sub + 2);
+            if ((Byte(Sub) & 0xF8) != 0x48 || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const ptrdiff_t Num = *reinterpret_cast<const int32_t*>(Sub + 3);
+            const uintptr_t From = Sub > Overflowed + 0x20 ? Sub - 0x20 : Overflowed;
+            for (uintptr_t Load = FindInstruction(From, Sub, LoadMax); Load && !WriterNum; Load = FindInstruction(Load + 1, Sub, LoadMax))
+            {
+                if ((Byte(Load + 2) & 0xC7) == (0x80 | (ModRm & 0x07)) && *reinterpret_cast<const int32_t*>(Load + 3) == Num + 8)
+                {
+                    WriterNum = Num;
+                }
+            }
+        }
+        RequireOffset(L"FBitWriter::Num", Natives::FBitWriter_Num, WriterNum);
+        Log::Info(L"Finder: FOutBunch is 0x{:X} bytes, bClose +0x{:X}, bDormant +0x{:X}, bReliable +0x{:X}, Num +0x{:X}, ArIsError +0x{:X} & 0x{:X}, UChannel::ChIndex +0x{:X}", BunchSize, BunchClose, BunchDormant, BunchReliable, WriterNum, ErrorByte, ErrorMask, ChIndex);
 
         ptrdiff_t NumOutRec = 0;
         const uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x80, { 0x0F, 0xBA, -1, 0x08 }) : 0;

@@ -91,6 +91,7 @@ namespace Sites
     {
         uint8_t* Branch = nullptr;
         uint8_t* DemoNetDriverDisplacement = nullptr;
+        uint8_t NetDriverDisplacement = 0;
     };
 
     inline uint8_t* PreInitRegularClient = nullptr;

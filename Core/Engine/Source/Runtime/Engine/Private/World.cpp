@@ -3,6 +3,7 @@
 #include "Engine/DemoNetDriver.h"
 #include "Engine/Engine.h"
 #include "Engine/NetDriver.h"
+#include "Hooks.h"
 #include "Log.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -95,4 +96,34 @@ ENetMode UWorld::AttemptDeriveFromURL() const
 FLevelCollection* UWorld::FindCollectionByType(const ELevelCollectionType InType)
 {
     return Natives::UWorld_FindCollectionByType(this, InType);
+}
+
+bool UWorld::ListenHK(UWorld* World, FURL& InURL)
+{
+    return World->Listen(InURL);
+}
+
+ENetMode UWorld::InternalGetNetModeHK(const UWorld* World)
+{
+    return World->InternalGetNetMode();
+}
+
+void UWorld::Hook()
+{
+    Hooks::Detour(L"UWorld::InternalGetNetMode", reinterpret_cast<void*>(Natives::UWorld_InternalGetNetMode), reinterpret_cast<void*>(&InternalGetNetModeHK), nullptr);
+
+    for (const Sites::FInlinedNetMode& NetMode : Sites::InlinedNetMode)
+    {
+        if (!NetMode.Branch || !NetMode.DemoNetDriverDisplacement)
+        {
+            continue;
+        }
+
+        const uint8_t Branch[] = { NetMode.Branch[0] == 0x74 ? static_cast<uint8_t>(0xEB) : static_cast<uint8_t>(0x90), NetMode.Branch[0] == 0x74 ? NetMode.Branch[1] : static_cast<uint8_t>(0x90) };
+        const uint8_t Displacement[] = { NetMode.NetDriverDisplacement };
+        Hooks::WriteBytes(L"UWorld::InternalGetNetMode inlined branch", NetMode.Branch, Branch);
+        Hooks::WriteBytes(L"UWorld::InternalGetNetMode inlined driver", NetMode.DemoNetDriverDisplacement, Displacement);
+    }
+
+    Hooks::RedirectCall(L"UWorld::Listen", Sites::LoadMapListenCall, reinterpret_cast<void*>(&ListenHK));
 }

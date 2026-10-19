@@ -97,6 +97,9 @@
     <Filter Include="Engine\Source\Runtime\Launch">
       <UniqueIdentifier>{ee8a0cbc-1462-40c7-9fdb-65fe2d18da39}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\Launch\Private">
+      <UniqueIdentifier>{322b77ca-6582-4cde-8cac-25121e45f0ab}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Source\Runtime\Launch\Public">
       <UniqueIdentifier>{409c0160-c167-4dce-8dd6-8861743d0501}</UniqueIdentifier>
     </Filter>
@@ -304,6 +307,9 @@
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectGlobals.cpp">
       <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
     </ClCompile>
+    <ClCompile Include="Engine\Source\Runtime\Engine\Private\GameEngine.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
     <ClCompile Include="Engine\Source\Runtime\Engine\Private\NetworkDriver.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
@@ -315,6 +321,9 @@
     </ClCompile>
     <ClCompile Include="Engine\Source\Runtime\EngineSettings\Private\EngineSettingsModule.cpp">
       <Filter>Engine\Source\Runtime\EngineSettings\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="Engine\Source\Runtime\Launch\Private\LaunchEngineLoop.cpp">
+      <Filter>Engine\Source\Runtime\Launch\Private</Filter>
     </ClCompile>
     <ClCompile Include="ThirdParty\MinHook\src\buffer.c">
       <Filter>ThirdParty\MinHook\src</Filter>

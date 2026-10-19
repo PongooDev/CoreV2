@@ -37,6 +37,8 @@ public:
     static const FString GetGameDefaultMap();
     static const FString& GetGlobalDefaultGameMode();
 
+    static void Hook();
+
     DefineUProperty(FStringAssetReference, EditorStartupMap)
     DefineUProperty(FString, LocalMapOptions)
     DefineUProperty(FStringAssetReference, TransitionMap)

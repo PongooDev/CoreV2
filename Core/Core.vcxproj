@@ -152,10 +152,12 @@
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\Obj.cpp" />
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectBaseUtility.cpp" />
     <ClCompile Include="Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectGlobals.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\Engine\Private\GameEngine.cpp" />
     <ClCompile Include="Engine\Source\Runtime\Engine\Private\NetworkDriver.cpp" />
     <ClCompile Include="Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp" />
     <ClCompile Include="Engine\Source\Runtime\Engine\Private\World.cpp" />
     <ClCompile Include="Engine\Source\Runtime\EngineSettings\Private\EngineSettingsModule.cpp" />
+    <ClCompile Include="Engine\Source\Runtime\Launch\Private\LaunchEngineLoop.cpp" />
     <ClCompile Include="ThirdParty\MinHook\src\buffer.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <SDLCheck>false</SDLCheck>

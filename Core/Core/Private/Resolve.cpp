@@ -496,6 +496,7 @@ namespace
 
         Out.Branch = reinterpret_cast<uint8_t*>(Jcc);
         Out.DemoNetDriverDisplacement = reinterpret_cast<uint8_t*>(DemoLoad + 3);
+        Out.NetDriverDisplacement = static_cast<uint8_t>(WorldNetDriver);
         return true;
     }
 

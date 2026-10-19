@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "GameThread.h"
+#include "GameMapsSettings.h"
 #include "Log.h"
 #include "Natives.h"
 #include "Engine/NetDriver.h"
@@ -37,6 +38,8 @@ namespace
             Log::Error(L"No world after the first engine tick");
             return;
         }
+
+        Log::Info(L"Game default map {}, global default game mode {}", UGameMapsSettings::GetGameDefaultMap().ToStdString(), UGameMapsSettings::GetGlobalDefaultGameMode().ToStdString());
 
         UNetDriver* NetDriver = World->NetDriver;
         Log::Info(L"Server ready: {}, net mode {}, net driver {}, game mode {}",

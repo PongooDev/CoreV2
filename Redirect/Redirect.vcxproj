@@ -52,7 +52,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;CORE_EXPORTS;_WINDOWS;_USRDLL;UE_SERVER=0;WITH_SERVER_CODE=0;WITH_EDITORONLY_DATA=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;CORE_EXPORTS;_WINDOWS;_USRDLL;UE_BUILD_SHIPPING=1;USE_LOGGING_IN_SHIPPING=1;UE_SERVER=0;WITH_SERVER_CODE=0;WITH_EDITORONLY_DATA=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -73,7 +73,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;CORE_EXPORTS;_WINDOWS;_USRDLL;UE_SERVER=0;WITH_SERVER_CODE=0;WITH_EDITORONLY_DATA=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;CORE_EXPORTS;_WINDOWS;_USRDLL;UE_BUILD_SHIPPING=1;USE_LOGGING_IN_SHIPPING=1;UE_SERVER=0;WITH_SERVER_CODE=0;WITH_EDITORONLY_DATA=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -109,6 +109,11 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\UnrealString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformProperties.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\UnrealMemory.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Logging\LogCategory.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Logging\LogMacros.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Logging\LogVerbosity.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\AssertionMacros.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Build.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CommandLine.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMiscDefines.h" />
@@ -157,6 +162,7 @@
       <PrecompiledHeader>Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\UnrealMemory.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Logging\LogCategory.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\CommandLine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\Parse.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\UObject\UnrealNames.cpp" />

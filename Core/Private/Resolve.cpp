@@ -162,6 +162,7 @@ namespace
         const uintptr_t CategoryCtor = Finder::NextCall(LogInit, 0x40);
         const uintptr_t Construct = Finder::NextCall(CategoryCtor, 0x40);
         Require(L"FName::FName", Natives::FName_Construct, Construct);
+        Require(L"FLogCategoryBase::FLogCategoryBase", Natives::FLogCategoryBase_FLogCategoryBase, CategoryCtor);
     }
 
     void ResolveObjectGlobals()
@@ -948,6 +949,8 @@ namespace
             Logf = Target;
         }
         Require(L"FMsg::Logf_Internal", Natives::FMsg_Logf_Internal, Logf);
+        Require(L"FDebug::AssertFailed", Natives::FDebug_AssertFailed, FunctionOf(L"Assertion failed: %s"));
+        Require(L"LowLevelFatalErrorHandler", Natives::LowLevelFatalErrorHandler, FunctionOf(L"LowLevelFatalError"));
     }
 }
 
@@ -1039,4 +1042,21 @@ bool Finder::ResolveInitListen()
     }
     Log::Info(L"Finder: UNetDriver::InitListen is slot 0x{:X}", Natives::UNetDriver_InitListenIndex);
     return true;
+}
+
+uintptr_t Finder::LogCategory(const wchar_t* CategoryName)
+{
+    const uintptr_t Constructor = reinterpret_cast<uintptr_t>(Natives::FLogCategoryBase_FLogCategoryBase);
+    for (const uintptr_t Ref : Finder::StringRefs(CategoryName))
+    {
+        if (!Constructor || Finder::NextCall(Ref, 0x20) != Constructor)
+        {
+            continue;
+        }
+        if (const uintptr_t Lea = FindInstruction(Ref - 0x10, Ref + 0x10, { 0x48, 0x8D, 0x0D }))
+        {
+            return Finder::RelativeTarget(Lea, 3, 7);
+        }
+    }
+    return 0;
 }

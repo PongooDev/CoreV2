@@ -25,6 +25,7 @@ namespace Finder
     void** VTableContaining(uintptr_t Function, int32_t Slot, int32_t Slots);
     uintptr_t ImportSlot(const char* Module, const char* Symbol);
     bool IsReadable(const void* Pointer, size_t Size);
+    uintptr_t LogCategory(const wchar_t* CategoryName);
 
     bool ResolveRuntime();
     bool ResolveServer();

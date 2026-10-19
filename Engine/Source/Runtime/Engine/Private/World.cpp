@@ -4,10 +4,12 @@
 #include "Engine/Engine.h"
 #include "Engine/NetDriver.h"
 #include "Hooks.h"
-#include "Log.h"
+#include "Logging/LogMacros.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Natives.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogWorld, Log, All);
 
 bool UWorld::Listen(FURL& InURL)
 {
@@ -44,7 +46,7 @@ bool UWorld::Listen(FURL& InURL)
     if (!NetDriver->InitListen(this, InURL, false, Error))
     {
         GEngine->BroadcastNetworkFailure(this, NetDriver, ENetworkFailure::NetDriverListenFailure, Error);
-        Log::Info(L"Failed to listen: {}", Error.ToStdString());
+        UE_LOG(LogWorld, Log, TEXT("Failed to listen: %s"), *Error);
         NetDriver->SetWorld(nullptr);
         NetDriver = nullptr;
         FLevelCollection* SourceCollection = FindCollectionByType(ELevelCollectionType::DynamicSourceLevels);

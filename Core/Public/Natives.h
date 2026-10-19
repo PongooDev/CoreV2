@@ -15,6 +15,7 @@ class UNetDriver;
 class UObject;
 class UWorld;
 struct FLevelCollection;
+struct FLogCategoryBase;
 enum class ELevelCollectionType;
 struct FName;
 struct FURL;
@@ -42,6 +43,9 @@ namespace Natives
     inline FString* (*FName_ToString)(const FName* This, FString* Out) = nullptr;
 
     inline void (*FMsg_Logf_Internal)(const char* File, int32_t Line, const FName& Category, int32_t Verbosity, const wchar_t* Format, ...) = nullptr;
+    inline void (*FLogCategoryBase_FLogCategoryBase)(FLogCategoryBase* This, const wchar_t* CategoryName, uint8_t InDefaultVerbosity, uint8_t InCompileTimeVerbosity) = nullptr;
+    inline void (*FDebug_AssertFailed)(const char* Expr, const char* File, int32_t Line, const wchar_t* Format, ...) = nullptr;
+    inline void (*LowLevelFatalErrorHandler)(const char* File, int32_t Line, const wchar_t* Format, ...) = nullptr;
 
     inline UObject* (*StaticFindObject)(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass) = nullptr;
     inline UObject* (*StaticLoadObject)(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename, uint32_t LoadFlags, void* Sandbox, bool bAllowObjectReconciliation) = nullptr;

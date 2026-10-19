@@ -13,7 +13,7 @@ enum EFindName
     FNAME_Replace_Not_Safe_For_Threading,
 };
 
-struct FName
+struct alignas(8) FName
 {
     int32_t ComparisonIndex = 0;
     int32_t Number = 0;

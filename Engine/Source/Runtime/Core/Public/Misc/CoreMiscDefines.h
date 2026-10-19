@@ -1,5 +1,5 @@
 #pragma once
 
-#include "Log.h"
+#include "Misc/AssertionMacros.h"
 
-#define PURE_VIRTUAL(func, extra) { Log::Fatal(L"Pure virtual not implemented ({})", TEXT(#func)); extra }
+#define PURE_VIRTUAL(func, extra) { LowLevelFatalError(TEXT("Pure virtual not implemented (%s)"), TEXT(#func)); extra }

@@ -104,7 +104,11 @@
     <ClInclude Include="..\Core\Public\pch.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\CoreGlobals.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\Array.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\BitArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\EnumAsByte.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\Map.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\Set.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\SparseArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\UnrealString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\Delegate.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateBase.h" />
@@ -132,6 +136,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\Paths.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Templates\SharedPointer.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Templates\SharedPointerInternals.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Templates\TypeHash.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\UObject\NameTypes.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\UObject\UnrealNames.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Windows\WindowsPlatformProperties.h" />

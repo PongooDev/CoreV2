@@ -40,6 +40,11 @@ struct alignas(8) FName
     bool operator==(const FName& Other) const = default;
 };
 
+inline uint32_t GetTypeHash(const FName& Name)
+{
+    return static_cast<uint32_t>(Name.ComparisonIndex + Name.Number);
+}
+
 template <>
 struct std::hash<FName>
 {

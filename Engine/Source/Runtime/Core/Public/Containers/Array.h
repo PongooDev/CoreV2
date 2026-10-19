@@ -109,6 +109,18 @@ public:
         return ArrayNum++;
     }
 
+    int32_t AddUninitialized(int32_t Count = 1)
+    {
+        const int32_t Index = ArrayNum;
+        if (ArrayNum + Count > ArrayMax)
+        {
+            const int32_t Grown = ArrayMax ? ArrayMax * 2 : 4;
+            ResizeTo(ArrayNum + Count > Grown ? ArrayNum + Count : Grown);
+        }
+        ArrayNum += Count;
+        return Index;
+    }
+
     int32_t AddDefaulted(int32_t Count = 1)
     {
         const int32_t Index = ArrayNum;

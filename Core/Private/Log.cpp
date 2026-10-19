@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <share.h>
 #include <string>
 
 namespace
@@ -38,7 +39,7 @@ namespace
 void Log::Initialize(const wchar_t* Name)
 {
     std::scoped_lock Lock(LogMutex);
-    _wfopen_s(&LogFile, std::format(L"{}{}_log_{}.txt", ExecutableDirectory(), Name, GetCurrentProcessId()).c_str(), L"w, ccs=UTF-8");
+    LogFile = _wfsopen(std::format(L"{}{}_log_{}.txt", ExecutableDirectory(), Name, GetCurrentProcessId()).c_str(), L"w, ccs=UTF-8", _SH_DENYWR);
 }
 
 void Log::Write(ELogLevel Level, std::wstring_view Message)

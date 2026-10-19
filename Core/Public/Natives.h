@@ -12,6 +12,8 @@ class FNetGUIDCache;
 class FNetworkObjectList;
 class FObjectReplicator;
 class FOutBunch;
+class AFortGameMode;
+class FOnlineSubsystemImpl;
 class FString;
 class UActorChannel;
 class UChannel;
@@ -94,6 +96,9 @@ namespace Natives
     inline const FString* (*UGameMapsSettings_GetGlobalDefaultGameMode)() = nullptr;
 
     inline void (*UGameInstance_StartGameInstance)(UGameInstance* This) = nullptr;
+    inline bool (*UGameInstance_IsDedicatedServerInstance)(const UGameInstance* This) = nullptr;
+    inline UClass** (*AFortGameMode_GetGameSessionClass)(const AFortGameMode* This, UClass** Result) = nullptr;
+    inline bool (*FOnlineSubsystemImpl_IsDedicated)(const FOnlineSubsystemImpl* This) = nullptr;
     inline void (*UGameEngine_Tick)(UGameEngine* This, float DeltaSeconds, bool bIdleMode) = nullptr;
     inline bool (*UEngine_LoadMap)(UEngine* This, FWorldContext& WorldContext, FURL* URL, void* Pending, FString& Error) = nullptr;
     inline bool (*UEngine_CreateNamedNetDriver)(UEngine* This, UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition) = nullptr;
@@ -171,6 +176,9 @@ namespace Natives
     inline ptrdiff_t UEngine_NetworkFailureEvent = -1;
     inline ptrdiff_t UWorld_NextSwitchCountdown = -1;
     inline ptrdiff_t FWorldContext_ThisCurrentWorld = -1;
+    inline ptrdiff_t UGameInstance_WorldContext = -1;
+    inline ptrdiff_t FWorldContext_RunAsDedicated = -1;
+    inline ptrdiff_t FOnlineSubsystemImpl_bForceDedicated = -1;
     inline ptrdiff_t UNetDriver_GuidCache = -1;
     inline ptrdiff_t UNetDriver_bIsPeer = -1;
     inline ptrdiff_t UNetDriver_NetTag = -1;
@@ -227,6 +235,8 @@ namespace Sites
     inline std::vector<void**> ConsoleVTables;
     inline std::vector<void**> NetDriverVTables;
     inline std::vector<uint8_t*> FlushActorDormancyCalls;
+    inline uint8_t* FortGameInstanceStartDedicatedCheck = nullptr;
+    inline uint8_t* FortGameInstanceStartDedicatedTarget = nullptr;
 
     struct FShowFlag
     {

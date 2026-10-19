@@ -13,6 +13,11 @@ public:
     void Broadcast(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString) const;
 };
 
+struct FWorldContext
+{
+    DefineNativeMember(bool, RunAsDedicated, FWorldContext_RunAsDedicated)
+};
+
 class UEngine : public UObject
 {
     DefineUnrealClass(UEngine, Engine)

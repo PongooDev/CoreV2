@@ -7,8 +7,12 @@
 #include "LaunchEngineLoop.h"
 #include "Log.h"
 #include "Engine/GameEngine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
+#include "FortGameInstance.h"
+#include "FortGameMode.h"
+#include "OnlineSubsystemImpl.h"
 
 void Boot::Initialize()
 {
@@ -32,6 +36,10 @@ void Boot::Initialize()
     UGameMapsSettings::Hook();
     UWorld::Hook();
     UNetDriver::Hook();
+    UGameInstance::Hook();
+    UFortGameInstance::Hook();
+    FOnlineSubsystemImpl::Hook();
+    AFortGameMode::Hook();
     UEngine::Hook();
     UGameEngine::Hook();
     Hooks::EnableAll();

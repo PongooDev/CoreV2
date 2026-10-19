@@ -2058,6 +2058,105 @@ namespace
     }
 }
 
+namespace
+{
+    std::vector<void**> VTablesWithEntry(uintptr_t Function)
+    {
+        std::vector<void**> Entries;
+        Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+        const uintptr_t Begin = ReadOnly.GetSectionStart().Get();
+        const uintptr_t End = ReadOnly.GetSectionEnd().Get();
+        for (uintptr_t At = (Begin + 7) & ~static_cast<uintptr_t>(7); Function && At + sizeof(uintptr_t) <= End; At += sizeof(uintptr_t))
+        {
+            if (*reinterpret_cast<const uintptr_t*>(At) == Function)
+            {
+                Entries.push_back(reinterpret_cast<void**>(At));
+            }
+        }
+        return Entries;
+    }
+
+    void ResolveSession()
+    {
+        const uintptr_t FortInitGame = FunctionOf(L"playlistId");
+        uintptr_t SessionClass = 0;
+        size_t SessionClassEntries = 0;
+        for (void** Entry : VTablesWithEntry(FortInitGame))
+        {
+            const uintptr_t Candidate = reinterpret_cast<uintptr_t>(Entry[2]);
+            const bool bStaticClassGetter = IsInText(Candidate)
+                && FindInstruction(Candidate, Candidate + 0x1A, { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0xE8, -1, -1, -1, -1, 0x48, 0x89, 0x03, 0x48, 0x8B, 0xC3, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3 }) == Candidate;
+            if (!bStaticClassGetter || (SessionClass && Candidate != SessionClass))
+            {
+                SessionClassEntries = 0;
+                break;
+            }
+            SessionClass = Candidate;
+            ++SessionClassEntries;
+        }
+        Require(L"AFortGameMode::GetGameSessionClass", Natives::AFortGameMode_GetGameSessionClass, SessionClassEntries ? SessionClass : 0);
+
+        const uintptr_t PatchCheck = FunctionOf(L"No local player to perform check!");
+        const uintptr_t PatchCheckEnd = Finder::FunctionEnd(PatchCheck);
+        uintptr_t DedicatedInstance = 0;
+        for (uintptr_t Call = PatchCheckEnd ? FindRawCall(PatchCheck, PatchCheckEnd) : 0; Call && !DedicatedInstance; Call = FindRawCall(Call + 5, PatchCheckEnd))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            if (FindInstruction(Target, Target + 0x11, { 0x48, 0x8B, 0x41, -1, 0x48, 0x85, 0xC0, 0x74, -1, 0x0F, 0xB6, 0x80, -1, -1, 0x00, 0x00, 0xC3 }) == Target)
+            {
+                DedicatedInstance = Target;
+            }
+        }
+        Require(L"UGameInstance::IsDedicatedServerInstance", Natives::UGameInstance_IsDedicatedServerInstance, DedicatedInstance);
+        const ptrdiff_t WorldContext = DedicatedInstance ? Byte(DedicatedInstance + 3) : 0;
+        const ptrdiff_t RunAsDedicated = DedicatedInstance ? *reinterpret_cast<const int32_t*>(DedicatedInstance + 12) : 0;
+        RequireOffset(L"UGameInstance::WorldContext", Natives::UGameInstance_WorldContext, WorldContext);
+        RequireOffset(L"FWorldContext::RunAsDedicated", Natives::FWorldContext_RunAsDedicated, RunAsDedicated);
+
+        uintptr_t StartCheck = 0;
+        int32_t StartChecks = 0;
+        const std::initializer_list<int32_t> StartPattern = { 0x48, 0x8B, 0x41, static_cast<int32_t>(WorldContext), 0x48, 0x8B, 0xD9, 0x48, 0x85, 0xC0, 0x74, -1, 0x80, 0xB8,
+            static_cast<int32_t>(RunAsDedicated & 0xFF), static_cast<int32_t>((RunAsDedicated >> 8) & 0xFF), 0x00, 0x00, 0x00, 0x75, -1 };
+        for (uintptr_t Site = RunAsDedicated ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), StartPattern) : 0; Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), StartPattern))
+        {
+            StartCheck = Site;
+            ++StartChecks;
+        }
+        const uintptr_t StartBranch = StartChecks == 1 ? StartCheck + 10 : 0;
+        const uintptr_t StartTarget = StartBranch ? StartBranch + 11 + static_cast<int8_t>(Byte(StartBranch + 10)) : 0;
+        const bool bStartCheck = StartTarget && StartBranch + 2 + static_cast<int8_t>(Byte(StartBranch + 1)) < StartTarget && StartTarget - (StartBranch + 2) <= 0x7F;
+        Sites::FortGameInstanceStartDedicatedCheck = bStartCheck ? reinterpret_cast<uint8_t*>(StartBranch) : nullptr;
+        Sites::FortGameInstanceStartDedicatedTarget = bStartCheck ? reinterpret_cast<uint8_t*>(StartTarget) : nullptr;
+        if (!bStartCheck)
+        {
+            Log::Error(L"Finder: UFortGameInstance::StartGameInstance dedicated check not found ({} matches)", StartChecks);
+            ++MissingCount;
+        }
+
+        uintptr_t IsDedicated = 0;
+        int32_t IsDedicatedMatches = 0;
+        const std::initializer_list<int32_t> IsDedicatedPattern = { 0x33, 0xC0, 0x38, 0x81, -1, -1, -1, -1, 0x0F, 0x95, 0xC0, 0xC3 };
+        for (uintptr_t Getter = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), IsDedicatedPattern); Getter; Getter = FindInstruction(Getter + 1, Finder::TextEnd(), IsDedicatedPattern))
+        {
+            const int32_t Offset = *reinterpret_cast<const int32_t*>(Getter + 4);
+            for (void** Entry : VTablesWithEntry(Getter))
+            {
+                const uintptr_t Setter = reinterpret_cast<uintptr_t>(Entry[2]);
+                if (IsInText(Setter) && Byte(Setter) == 0x88 && Byte(Setter + 1) == 0x91 && *reinterpret_cast<const int32_t*>(Setter + 2) == Offset && Byte(Setter + 6) == 0xC3)
+                {
+                    if (Getter != IsDedicated)
+                    {
+                        ++IsDedicatedMatches;
+                    }
+                    IsDedicated = Getter;
+                }
+            }
+        }
+        Require(L"FOnlineSubsystemImpl::IsDedicated", Natives::FOnlineSubsystemImpl_IsDedicated, IsDedicatedMatches == 1 ? IsDedicated : 0);
+        RequireOffset(L"FOnlineSubsystemImpl::bForceDedicated", Natives::FOnlineSubsystemImpl_bForceDedicated, IsDedicatedMatches == 1 ? *reinterpret_cast<const int32_t*>(IsDedicated + 4) : 0);
+    }
+}
+
 bool Finder::ResolveClient()
 {
     MissingCount = 0;
@@ -2081,6 +2180,7 @@ bool Finder::ResolveServer()
     ResolvePreInitServerPatch();
     ResolveDedicatedServerChecks();
     ResolveReplication();
+    ResolveSession();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;

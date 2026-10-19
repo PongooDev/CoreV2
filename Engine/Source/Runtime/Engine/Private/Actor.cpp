@@ -5,6 +5,7 @@
 #include "Engine/Level.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
+#include "Hooks.h"
 #include "Natives.h"
 #include "Templates/Casts.h"
 
@@ -86,4 +87,25 @@ ENetMode AActor::InternalGetNetMode() const
 UNetDriver* AActor::GetNetDriver() const
 {
     return GetNetDriver_Internal(GetWorld(), NetDriverName);
+}
+
+void AActor::ReceiveTick(float DeltaSeconds)
+{
+    Natives::AActor_ReceiveTick(this, DeltaSeconds);
+}
+
+void AActor::Hook()
+{
+    if (Sites::ActorTickReceiveTick)
+    {
+        Hooks::RedirectCall(L"AActor::Tick IsRunningDedicatedServer", Sites::ActorTickReceiveTick, reinterpret_cast<void*>(&TickReceiveTickHK));
+    }
+}
+
+void AActor::TickReceiveTickHK(AActor* This, float DeltaSeconds)
+{
+    if (This->bAllowReceiveTickEventOnDedicatedServer || !IsRunningDedicatedServer())
+    {
+        This->ReceiveTick(DeltaSeconds);
+    }
 }

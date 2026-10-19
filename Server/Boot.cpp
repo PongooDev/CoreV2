@@ -10,6 +10,7 @@
 #include "Engine/GameEngine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/NetDriver.h"
+#include "GameFramework/Actor.h"
 #include "Engine/World.h"
 #include "UObject/Object.h"
 #include "FortGameInstance.h"
@@ -40,6 +41,7 @@ void Boot::Initialize()
     UGameMapsSettings::Hook();
     UWorld::Hook();
     UNetDriver::Hook();
+    AActor::Hook();
     UGameInstance::Hook();
     UFortGameInstance::Hook();
     FOnlineSubsystemImpl::Hook();

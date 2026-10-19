@@ -2076,6 +2076,27 @@ namespace
         return Entries;
     }
 
+    void ResolveActorTick()
+    {
+        const uintptr_t GetWorldSettings = reinterpret_cast<uintptr_t>(Natives::UWorld_GetWorldSettings);
+        const std::initializer_list<int32_t> TickPattern = { 0x41, 0xB0, 0x01, 0x33, 0xD2, 0x48, 0x8B, 0xC8, 0xE8, -1, -1, -1, -1, 0x48, 0x85, 0xC0, 0x74, -1, 0x0F, 0x28, -1, 0x48, 0x8B, -1, 0xE8 };
+        uintptr_t ReceiveTickCall = 0;
+        int32_t ReceiveTickCalls = 0;
+        for (uintptr_t Site = GetWorldSettings ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), TickPattern) : 0; Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), TickPattern))
+        {
+            const uintptr_t Call = Site + 24;
+            const uintptr_t ReceiveTick = Finder::RelativeTarget(Call, 1, 5);
+            const bool bFloatThunk = FindInstruction(ReceiveTick, ReceiveTick + 6, { 0xF3, 0x0F, 0x11, 0x4C, 0x24, 0x10 }) == ReceiveTick;
+            if (Finder::RelativeTarget(Site + 8, 1, 5) == GetWorldSettings && Byte(Site + 20) == 0xCE && bFloatThunk && Site - Finder::FunctionStart(Site) <= 0x40)
+            {
+                ReceiveTickCall = Call;
+                ++ReceiveTickCalls;
+            }
+        }
+        Sites::ActorTickReceiveTick = ReceiveTickCalls == 1 ? reinterpret_cast<uint8_t*>(ReceiveTickCall) : nullptr;
+        Require(L"AActor::ReceiveTick", Natives::AActor_ReceiveTick, ReceiveTickCalls == 1 ? Finder::RelativeTarget(ReceiveTickCall, 1, 5) : 0);
+    }
+
     void ResolveSpawnContext()
     {
         const uintptr_t SpawnRefusal = OnlyRef(L"Unable to spawn class '%s' due to client/server context.");
@@ -2248,6 +2269,7 @@ bool Finder::ResolveServer()
     ResolveSession();
     ResolveEngineLoopTicks();
     ResolveSpawnContext();
+    ResolveActorTick();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;

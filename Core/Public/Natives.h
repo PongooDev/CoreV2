@@ -115,6 +115,7 @@ namespace Natives
     inline UChannel* (*UNetConnection_CreateChannel)(UNetConnection* This, int32_t Type, bool bOpenedLocally, int32_t ChannelIndex) = nullptr;
     inline FNetViewer* (*FNetViewer_FNetViewer)(FNetViewer* This, UNetConnection* InConnection, float DeltaSeconds) = nullptr;
     inline void (*AActor_CallPreReplication)(AActor* This, UNetDriver* NetDriver) = nullptr;
+    inline void (*AActor_ReceiveTick)(AActor* This, float DeltaSeconds) = nullptr;
     inline UNetDriver* (*AActor_GetNetDriver)(const AActor* This) = nullptr;
     inline void (*AActor_FlushNetDormancy)(AActor* This) = nullptr;
     inline void (*AActor_SetNetDormancy)(AActor* This, int32_t NewDormancy) = nullptr;
@@ -237,6 +238,7 @@ namespace Sites
     inline std::vector<uint8_t*> GameEngineTickDedicatedServerChecks;
     inline std::vector<void**> ConsoleVTables;
     inline std::vector<void**> NetDriverVTables;
+    inline uint8_t* ActorTickReceiveTick = nullptr;
     inline uint8_t* ShouldUseIdleModeCheck = nullptr;
     inline uint8_t* ShouldUseIdleModeFalse = nullptr;
 

@@ -44,6 +44,7 @@ public:
     DefineBitfieldUProperty(bAlwaysRelevant)
     DefineBitfieldUProperty(bTearOff)
     DefineBitfieldUProperty(bReplicates)
+    DefineBitfieldUProperty(bAllowReceiveTickEventOnDedicatedServer)
     DefineUProperty(FName, NetDriverName)
     DefineUProperty(TEnumAsByte<ENetRole>, Role)
     DefineUProperty(TEnumAsByte<ENetRole>, RemoteRole)
@@ -79,8 +80,14 @@ public:
     void FlushNetDormancy();
     void SetNetDormancy(ENetDormancy NewDormancy);
 
+    void ReceiveTick(float DeltaSeconds);
+
+    static void Hook();
+
 private:
     ENetMode InternalGetNetMode() const;
+
+    static void TickReceiveTickHK(AActor* This, float DeltaSeconds);
 };
 
 inline ENetMode AActor::GetNetMode() const

@@ -123,6 +123,52 @@ int32_t Finder::VTableIndex(void** VTable, void* Function, int32_t MaxSlots)
     return Found;
 }
 
+void** Finder::VTableContaining(uintptr_t Function, int32_t Slot, int32_t Slots)
+{
+    if (!Function)
+    {
+        return nullptr;
+    }
+
+    Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+    const uintptr_t Begin = ReadOnly.GetSectionStart().Get();
+    const uintptr_t End = ReadOnly.GetSectionEnd().Get();
+    const uintptr_t CodeBegin = TextBegin();
+    const uintptr_t CodeEnd = TextEnd();
+
+    void** Found = nullptr;
+    for (uintptr_t At = (Begin + 7) & ~static_cast<uintptr_t>(7); At + sizeof(uintptr_t) <= End; At += sizeof(uintptr_t))
+    {
+        if (*reinterpret_cast<const uintptr_t*>(At) != Function || At < Begin + Slot * sizeof(uintptr_t))
+        {
+            continue;
+        }
+
+        void** VTable = reinterpret_cast<void**>(At - Slot * sizeof(uintptr_t));
+        if (reinterpret_cast<uintptr_t>(VTable + Slots) > End)
+        {
+            continue;
+        }
+
+        bool bCode = true;
+        for (int32_t Index = 0; Index < Slots && bCode; ++Index)
+        {
+            const uintptr_t Entry = reinterpret_cast<uintptr_t>(VTable[Index]);
+            bCode = Entry >= CodeBegin && Entry < CodeEnd;
+        }
+        if (!bCode)
+        {
+            continue;
+        }
+        if (Found)
+        {
+            return nullptr;
+        }
+        Found = VTable;
+    }
+    return Found;
+}
+
 uintptr_t Finder::ImportSlot(const char* Module, const char* Symbol)
 {
     const uintptr_t Base = ImageBase();

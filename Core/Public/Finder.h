@@ -22,10 +22,12 @@ namespace Finder
     std::vector<uintptr_t> CallsTo(uintptr_t Target, bool bIncludeJumps);
 
     int32_t VTableIndex(void** VTable, void* Function, int32_t MaxSlots);
+    void** VTableContaining(uintptr_t Function, int32_t Slot, int32_t Slots);
     uintptr_t ImportSlot(const char* Module, const char* Symbol);
     bool IsReadable(const void* Pointer, size_t Size);
 
-    bool ResolveAll();
+    bool ResolveRuntime();
+    bool ResolveServer();
     bool ResolveProcessEvent();
     bool ResolveInitListen();
 }

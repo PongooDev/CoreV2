@@ -899,7 +899,7 @@ namespace
     }
 }
 
-bool Finder::ResolveAll()
+bool Finder::ResolveRuntime()
 {
     MissingCount = 0;
     Memcury::Scanner::SetTargetModule(nullptr);
@@ -913,14 +913,23 @@ bool Finder::ResolveAll()
     ResolveEngineReadiness();
     ResolveGameThreadTick();
     ResolveRequestingExit();
+    ResolveCreateDefaultObject();
+
+    Log::Info(L"Finder: runtime resolved, {} missing", MissingCount);
+    return MissingCount == 0;
+}
+
+bool Finder::ResolveServer()
+{
+    MissingCount = 0;
+
     ResolveEngineNet();
     ResolveNetMode();
     ResolveWorldTravel();
     ResolveGameMapsSettings();
-    ResolveCreateDefaultObject();
     ResolvePreInitServerPatch();
 
-    Log::Info(L"Finder: static resolution complete, {} missing", MissingCount);
+    Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;
 }
 

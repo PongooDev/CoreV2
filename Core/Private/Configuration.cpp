@@ -25,9 +25,19 @@ void Configuration::Load()
 
     for (int32_t Index = 1; Index < ArgumentCount; ++Index)
     {
-        if (EqualsNoCase(Arguments[Index], L"-bNoConsole"))
+        const std::wstring_view Argument = Arguments[Index];
+        constexpr std::wstring_view BackendOption = L"-CoreBackend=";
+        if (EqualsNoCase(Argument, L"-bNoConsole"))
         {
             Current.bConsole = false;
+        }
+        else if (Argument.size() > BackendOption.size() && EqualsNoCase(Argument.substr(0, BackendOption.size()), BackendOption))
+        {
+            Current.Backend = Argument.substr(BackendOption.size());
+            while (!Current.Backend.empty() && Current.Backend.back() == L'/')
+            {
+                Current.Backend.pop_back();
+            }
         }
     }
 

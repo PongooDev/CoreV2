@@ -21,7 +21,7 @@ void Boot::Initialize()
         return;
     }
 
-    if (!Finder::ResolveAll())
+    if (!Finder::ResolveRuntime() || !Finder::ResolveServer())
     {
         Log::Error(L"Startup aborted: required addresses are missing");
         return;

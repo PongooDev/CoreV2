@@ -50,6 +50,9 @@ namespace Natives
     inline void (*FName_AppendString)(const FName* This, FString& Out) = nullptr;
     inline FString* (*FName_ToString)(const FName* This, FString* Out) = nullptr;
 
+    inline int (*CRT_rand)() = nullptr;
+    inline float (*FMath_SRand)() = nullptr;
+    inline int32_t (*FUObjectArray_AllocateSerialNumber)(FUObjectArray* This, int32_t Index) = nullptr;
     inline FOutputDeviceRedirector* (*GetGlobalLogSingleton)() = nullptr;
     inline void (*FOutputDeviceRedirector_AddOutputDevice)(FOutputDeviceRedirector* This, FOutputDevice* OutputDevice) = nullptr;
 

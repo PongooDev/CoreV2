@@ -830,6 +830,28 @@ namespace
         }
     }
 
+    void ResolveCoreUtilities()
+    {
+        const uintptr_t RandSlot = Finder::ImportSlot("api-ms-win-crt-utility-l1-1-0.dll", "rand");
+        Require(L"rand", Natives::CRT_rand, RandSlot ? *reinterpret_cast<const uintptr_t*>(RandSlot) : 0);
+
+        uintptr_t SRand = 0;
+        int32_t Matches = 0;
+        for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0x69, 0x0D, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B }); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), { 0x69, 0x0D, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B }))
+        {
+            const uintptr_t Start = Finder::FunctionStart(Site);
+            const bool bFunctionStart = Start ? Start == Site : Byte(Site - 1) == 0xCC;
+            if (bFunctionStart && FindInstruction(Site + 10, Site + 0x20, { 0x81, 0xC1, 0x6B, 0x63, 0x19, 0x36 }))
+            {
+                SRand = Site;
+                ++Matches;
+            }
+        }
+        Require(L"FMath::SRand", Natives::FMath_SRand, Matches == 1 ? SRand : 0);
+
+        Require(L"FUObjectArray::AllocateSerialNumber", Natives::FUObjectArray_AllocateSerialNumber, FunctionOf(L"UObject serial numbers overflowed (trying to allocate serial number %d)."));
+    }
+
     void ResolveRequestingExit()
     {
         uintptr_t RequestingExit = 0;
@@ -979,6 +1001,7 @@ bool Finder::ResolveRuntime()
     ResolveMemory();
     ResolveLogging();
     ResolveOutputDevices();
+    ResolveCoreUtilities();
     ResolvePreInitGlobals();
     ResolveEngineReadiness();
     ResolveGameThreadTick();

@@ -30,6 +30,7 @@ void Boot::Initialize()
     FEngineLoop::Hook();
     UGameMapsSettings::Hook();
     UWorld::Hook();
+    UEngine::Hook();
     UGameEngine::Hook();
     Hooks::EnableAll();
 

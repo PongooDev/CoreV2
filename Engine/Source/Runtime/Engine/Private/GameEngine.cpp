@@ -12,5 +12,9 @@ void UGameEngine::TickHK(UGameEngine* This, float DeltaSeconds, bool bIdleMode)
 
 void UGameEngine::Hook()
 {
+    for (uint8_t* Check : Sites::GameEngineTickDedicatedServerChecks)
+    {
+        Hooks::SkipBranch(L"UGameEngine::Tick IsRunningDedicatedServer", Check);
+    }
     Hooks::Detour(L"UGameEngine::Tick", reinterpret_cast<void*>(Natives::UGameEngine_Tick), &TickHK, &TickOG);
 }

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Engine/Engine.h"
+#include "Hooks.h"
 #include "Natives.h"
 
 void FOnNetworkFailure::Broadcast(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString) const
@@ -15,4 +16,12 @@ bool UEngine::CreateNamedNetDriver(UWorld* InWorld, FName NetDriverName, FName N
 UNetDriver* UEngine::FindNamedNetDriver(const UWorld* InWorld, FName NetDriverName)
 {
     return Natives::UEngine_FindNamedNetDriver(this, InWorld, NetDriverName);
+}
+
+void UEngine::Hook()
+{
+    for (uint8_t* Check : Sites::EngineInitDedicatedServerChecks)
+    {
+        Hooks::SkipBranch(L"UEngine::Init IsRunningDedicatedServer", Check);
+    }
 }

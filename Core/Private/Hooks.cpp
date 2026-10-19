@@ -161,6 +161,22 @@ bool Hooks::WriteBytes(std::wstring_view Name, void* Address, std::span<const ui
     return true;
 }
 
+bool Hooks::SkipBranch(std::wstring_view Name, uint8_t* Branch)
+{
+    if (Branch && (Branch[0] & 0xF0) == 0x70)
+    {
+        const uint8_t Jump[] = { 0xEB };
+        return WriteBytes(Name, Branch, Jump);
+    }
+    if (Branch && Branch[0] == 0x0F && (Branch[1] & 0xF0) == 0x80)
+    {
+        const uint8_t Jump[] = { 0x90, 0xE9 };
+        return WriteBytes(Name, Branch, Jump);
+    }
+    Log::Error(L"Hook {}: no conditional jump at 0x{:X}", Name, reinterpret_cast<uintptr_t>(Branch));
+    return false;
+}
+
 bool Hooks::EnableAll()
 {
     const MH_STATUS Status = MH_EnableHook(MH_ALL_HOOKS);

@@ -85,11 +85,16 @@ namespace
         return 0;
     }
 
+    bool IsInText(uintptr_t Address)
+    {
+        return Address >= Finder::TextBegin() && Address < Finder::TextEnd();
+    }
+
     uintptr_t FindRawCall(uintptr_t Begin, uintptr_t End)
     {
         for (uintptr_t Address = Begin; Address + 5 <= End; ++Address)
         {
-            if (Byte(Address) == 0xE8)
+            if (Byte(Address) == 0xE8 && IsInText(Finder::RelativeTarget(Address, 1, 5)))
             {
                 return Address;
             }
@@ -166,12 +171,10 @@ namespace
 
         const uintptr_t StaticAllocate = FunctionOf(L"Objects have the same fully qualified name but different paths.\n\tNew Object: %s %s.%s\n\tExisting Object: %s");
         uintptr_t Construct = 0;
-        const uintptr_t Ref = First(Finder::StringRefs(L"UGameplayStatics::SpawnObject null outer"));
+        const uintptr_t Ref = First(Finder::StringRefs(L"NewObject with empty name can't be used to create default subobjects (inside of UObject derived class constructor) as it produces inconsistent object names. Use ObjectInitializer.CreateDefaultSuobject<> instead."));
         if (StaticAllocate && Ref)
         {
-            const uintptr_t Function = Finder::FunctionStart(Ref);
-            const uintptr_t End = Finder::FunctionEnd(Function);
-            for (uintptr_t Site = FindRawCall(Function, End); Site; Site = FindRawCall(Site + 5, End))
+            for (uintptr_t Site = FindRawCall(Ref, Ref + 0x80); Site && !Construct; Site = FindRawCall(Site + 5, Ref + 0x80))
             {
                 const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
                 if (CallWithin(Target, 0x200, StaticAllocate))
@@ -261,10 +264,11 @@ namespace
         std::vector<std::pair<uintptr_t, uintptr_t>> Flags = MovStores(Ref - 0x40, Ref, { 0xC6, 0x05 }, 2, 7);
         Flags.erase(std::remove_if(Flags.begin(), Flags.end(), [](const auto& Store) { return Byte(Store.first + 6) != 0x01; }), Flags.end());
         std::sort(Flags.begin(), Flags.end());
-        if (Flags.size() >= 2)
+        if (Flags.size() >= 3)
         {
             RequireAddress(L"GIsClient", reinterpret_cast<uintptr_t&>(Natives::GIsClient), Flags[0].second);
             RequireAddress(L"GIsServer", reinterpret_cast<uintptr_t&>(Natives::GIsServer), Flags[1].second);
+            RequireAddress(L"PRIVATE_GIsRunningCommandlet", reinterpret_cast<uintptr_t&>(Natives::PRIVATE_GIsRunningCommandlet), Flags[2].second);
         }
         else
         {
@@ -402,11 +406,6 @@ namespace
         }
         const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Function, End);
         return Calls.empty() ? 0 : Calls.front().second;
-    }
-
-    bool IsInText(uintptr_t Address)
-    {
-        return Address >= Finder::TextBegin() && Address < Finder::TextEnd();
     }
 
     bool IsListenCall(uintptr_t Call)
@@ -584,7 +583,7 @@ namespace
         const uintptr_t SetWorldEnd = Finder::FunctionEnd(SetWorld);
         for (uintptr_t Lea = SetWorld && SetWorldEnd ? FindInstruction(SetWorld, SetWorldEnd, { 0x48, 0x8D, 0x47 }) : 0; Lea; Lea = FindInstruction(Lea + 1, SetWorldEnd, { 0x48, 0x8D, 0x47 }))
         {
-            if (FindInstruction(Lea + 4, Lea + 0x14, { 0x48, 0x89, 0x83, 0xE8, 0x00, 0x00, 0x00 }))
+            if (FindInstruction(Lea + 4, Lea + 0x20, { 0x48, 0x89, 0x83, 0xE8, 0x00, 0x00, 0x00 }))
             {
                 Notify = Byte(Lea + 3);
                 break;
@@ -869,12 +868,65 @@ namespace
             if (Byte(ClientStore) == 0x44 && Byte(ClientStore + 1) == 0x88 && Byte(ClientStore + 2) == 0x2D && Finder::RelativeTarget(ClientStore, 3, 7) == GIsClient)
             {
                 Sites::PreInitRegularClient = reinterpret_cast<uint8_t*>(Site);
-                return;
+                break;
             }
         }
+        if (!Sites::PreInitRegularClient)
+        {
+            Log::Error(L"Finder: PreInit regular-client block not found");
+            ++MissingCount;
+        }
+    }
 
-        Log::Error(L"Finder: PreInit regular-client block not found");
-        ++MissingCount;
+    std::vector<uint8_t*> CommandletChecks(uintptr_t Function)
+    {
+        std::vector<uint8_t*> Checks;
+        const uintptr_t End = Finder::FunctionEnd(Function);
+        const uintptr_t Commandlet = reinterpret_cast<uintptr_t>(Natives::PRIVATE_GIsRunningCommandlet);
+        for (uintptr_t Compare = Function; Function && End && Compare + 6 <= End; ++Compare)
+        {
+            if (Byte(Compare) != 0x38 || (Byte(Compare + 1) & 0xC7) != 0x05 || Finder::RelativeTarget(Compare, 2, 6) != Commandlet)
+            {
+                continue;
+            }
+            for (uintptr_t Jump = Compare + 6; Jump < Compare + 0x12; ++Jump)
+            {
+                if (Byte(Jump) == 0x75 || (Byte(Jump) == 0x0F && Byte(Jump + 1) == 0x85))
+                {
+                    Checks.push_back(reinterpret_cast<uint8_t*>(Jump));
+                    break;
+                }
+            }
+        }
+        return Checks;
+    }
+
+    void RequireChecks(const wchar_t* Name, std::vector<uint8_t*>& Destination, std::vector<uint8_t*> Checks, size_t Expected)
+    {
+        if (Checks.size() != Expected)
+        {
+            Log::Error(L"Finder: {} has {} dedicated-server checks, expected {}", Name, Checks.size(), Expected);
+            ++MissingCount;
+            return;
+        }
+        Destination = std::move(Checks);
+    }
+
+    void ResolveDedicatedServerChecks()
+    {
+        const uintptr_t PreInit = FunctionOf(L"AllowCommandletRendering");
+        std::vector<uint8_t*> PreInitChecks = CommandletChecks(PreInit);
+        if (Sites::PreInitRegularClient)
+        {
+            const uintptr_t PreInitEnd = Finder::FunctionEnd(PreInit);
+            for (uintptr_t Test = FindInstruction(reinterpret_cast<uintptr_t>(Sites::PreInitRegularClient), PreInitEnd, { 0x45, 0x84, 0xED, 0x0F, 0x84 }); Test; Test = FindInstruction(Test + 1, PreInitEnd, { 0x45, 0x84, 0xED, 0x0F, 0x84 }))
+            {
+                PreInitChecks.push_back(reinterpret_cast<uint8_t*>(Test + 3));
+            }
+        }
+        RequireChecks(L"FEngineLoop::PreInit", Sites::PreInitDedicatedServerChecks, std::move(PreInitChecks), 5);
+        RequireChecks(L"UEngine::Init", Sites::EngineInitDedicatedServerChecks, CommandletChecks(FunctionOf(L"Initializing Engine...")), 2);
+        RequireChecks(L"UGameEngine::Tick", Sites::GameEngineTickDedicatedServerChecks, CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick)), 2);
     }
 
     void ResolveLogging()
@@ -928,6 +980,7 @@ bool Finder::ResolveServer()
     ResolveWorldTravel();
     ResolveGameMapsSettings();
     ResolvePreInitServerPatch();
+    ResolveDedicatedServerChecks();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;

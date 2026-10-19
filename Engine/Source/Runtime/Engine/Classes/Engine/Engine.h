@@ -28,6 +28,8 @@ public:
 
     bool CreateNamedNetDriver(UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition);
     UNetDriver* FindNamedNetDriver(const UWorld* InWorld, FName NetDriverName);
+
+    static void Hook();
 };
 
 class FEngineGlobal

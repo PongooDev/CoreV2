@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 class FString;
 class FUObjectArray;
@@ -30,6 +31,7 @@ namespace Natives
     inline UWorld** GWorld = nullptr;
     inline bool* GIsClient = nullptr;
     inline bool* GIsServer = nullptr;
+    inline bool* PRIVATE_GIsRunningCommandlet = nullptr;
     inline bool* GIsRunning = nullptr;
     inline bool* GIsRequestingExit = nullptr;
     inline uint32_t* GGameThreadId = nullptr;
@@ -95,6 +97,9 @@ namespace Sites
     };
 
     inline uint8_t* PreInitRegularClient = nullptr;
+    inline std::vector<uint8_t*> PreInitDedicatedServerChecks;
+    inline std::vector<uint8_t*> EngineInitDedicatedServerChecks;
+    inline std::vector<uint8_t*> GameEngineTickDedicatedServerChecks;
     inline uint8_t* LoadMapListenCall = nullptr;
     inline FInlinedNetMode InlinedNetMode[4] = {};
 }

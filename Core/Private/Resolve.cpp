@@ -1263,6 +1263,712 @@ namespace
         }
         Require(L"UGameViewportClient::SetupInitialLocalPlayer", Natives::UGameViewportClient_SetupInitialLocalPlayer, Setup);
     }
+
+    void RequireSlot(const wchar_t* Name, int32_t& Destination, int32_t Index)
+    {
+        if (Index < 0)
+        {
+            Log::Error(L"Finder: {} not found", Name);
+            ++MissingCount;
+            return;
+        }
+        Destination = Index;
+    }
+
+    void RequireOffset(const wchar_t* Name, ptrdiff_t& Destination, ptrdiff_t Offset)
+    {
+        if (Offset <= 0)
+        {
+            Log::Error(L"Finder: {} not found", Name);
+            ++MissingCount;
+            return;
+        }
+        Destination = Offset;
+    }
+
+    uintptr_t FindVirtualCall(uintptr_t Begin, uintptr_t End)
+    {
+        for (uintptr_t Site = Begin; Site + 6 <= End; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 1);
+            if (Byte(Site) == 0xFF && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && ((ModRm & 0x38) == 0x10 || (ModRm & 0x38) == 0x20))
+            {
+                return Site;
+            }
+        }
+        return 0;
+    }
+
+    int32_t VirtualSlot(uintptr_t Site)
+    {
+        const int32_t Displacement = Site ? *reinterpret_cast<const int32_t*>(Site + 2) : 0;
+        return Displacement > 0 && Displacement % 8 == 0 ? Displacement / 8 : -1;
+    }
+
+    uintptr_t VTableEntry(void** VTable, int32_t Index)
+    {
+        if (!VTable || Index < 0 || Index >= 0x400)
+        {
+            return 0;
+        }
+        const uintptr_t Entry = reinterpret_cast<uintptr_t>(VTable[Index]);
+        return IsInText(Entry) ? Entry : 0;
+    }
+
+    struct FCalledSlot
+    {
+        int32_t Index = -1;
+        void** VTable = nullptr;
+        uintptr_t Reference = 0;
+    };
+
+    FCalledSlot CalledSlot(uintptr_t Begin, uintptr_t End, uintptr_t Function)
+    {
+        const uintptr_t Entry = reinterpret_cast<uintptr_t>(Finder::VTableContaining(Function, 0, 1));
+        std::vector<std::pair<int32_t, uintptr_t>> Candidates;
+        for (uintptr_t Site = Entry && Begin ? FindVirtualCall(Begin, End) : 0; Site; Site = FindVirtualCall(Site + 1, End))
+        {
+            const int32_t Index = VirtualSlot(Site);
+            if (Index >= 0)
+            {
+                Candidates.emplace_back(Index, Entry - Index * sizeof(void*));
+            }
+        }
+
+        FCalledSlot Result;
+        if (Candidates.empty())
+        {
+            return Result;
+        }
+
+        const uintptr_t TextEnd = Finder::TextEnd();
+        for (uintptr_t Lea = Finder::TextBegin(); Lea + 7 <= TextEnd; ++Lea)
+        {
+            if ((Byte(Lea) & 0xFB) != 0x48 || Byte(Lea + 1) != 0x8D || (Byte(Lea + 2) & 0xC7) != 0x05)
+            {
+                continue;
+            }
+            const uintptr_t Target = Finder::RelativeTarget(Lea, 3, 7);
+            for (const auto& [Index, VTable] : Candidates)
+            {
+                if (VTable != Target)
+                {
+                    continue;
+                }
+                if (Result.VTable && Result.VTable != reinterpret_cast<void**>(VTable))
+                {
+                    return {};
+                }
+                Result = { Index, reinterpret_cast<void**>(VTable), Lea };
+            }
+        }
+        return Result;
+    }
+
+    std::vector<std::pair<uintptr_t, uintptr_t>> NativeThunks(const char* Name)
+    {
+        std::vector<std::pair<uintptr_t, uintptr_t>> Thunks;
+        for (const uintptr_t Ref : Finder::StringRefs(Name))
+        {
+            if (Byte(Ref - 7) == 0x4C && Byte(Ref - 6) == 0x8D && Byte(Ref - 5) == 0x05)
+            {
+                Thunks.emplace_back(Finder::FunctionStart(Ref), Finder::RelativeTarget(Ref - 7, 3, 7));
+            }
+        }
+        return Thunks;
+    }
+
+    void ResolveReplication()
+    {
+        const uintptr_t ReplicateActor = FunctionOf(L"ReplicateActor: bPausedUntilReliableACK is ending now that reliables have been ACK'd. %s");
+        const uintptr_t ReplicateActorEnd = Finder::FunctionEnd(ReplicateActor);
+        const uintptr_t SetChannelActor = FunctionOf(L"SetChannelActor: ChIndex: %i, Actor: %s, NetGUID: %s");
+        const uintptr_t NetViewer = Finder::FunctionStart(First(Finder::StringRefs("ServerForwardView")));
+        const uintptr_t NetViewerEnd = Finder::FunctionEnd(NetViewer);
+        Require(L"UActorChannel::ReplicateActor", Natives::UActorChannel_ReplicateActor, ReplicateActor);
+        Require(L"UActorChannel::SetChannelActor", Natives::UActorChannel_SetChannelActor, SetChannelActor);
+        Require(L"FNetViewer::FNetViewer", Natives::FNetViewer_FNetViewer, NetViewer);
+        Require(L"FNetGUIDCache::SupportsObject", Natives::FNetGUIDCache_SupportsObject, FunctionOf(L"FNetGUIDCache::SupportsObject: %s NOT Supported."));
+        Require(L"FObjectReplicator::ValidateAgainstState", Natives::FObjectReplicator_ValidateAgainstState, FunctionOf(L"ValidateAgainstState: Properties changed for %s"));
+
+        uintptr_t CreateChannel = 0;
+        const uintptr_t BunchCreate = OnlyRef(L"      Bunch Create %i: ChType %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
+        for (uintptr_t Site = BunchCreate ? FindRawCall(BunchCreate, BunchCreate + 0x40) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, BunchCreate + 0x40))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+            if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }))
+            {
+                CreateChannel = Target;
+            }
+        }
+        Require(L"UNetConnection::CreateChannel", Natives::UNetConnection_CreateChannel, CreateChannel);
+
+        const uintptr_t DemoReplicate = FunctionOf(L"DemoReplicateActor: bMustReplicate is true but nothing was sent: %s");
+        uintptr_t PreReplication = 0;
+        size_t PreReplicationSites = 0;
+        for (const uintptr_t Site : DemoReplicate ? Finder::CallsTo(DemoReplicate, false) : std::vector<uintptr_t>())
+        {
+            uintptr_t Nearest = 0;
+            for (uintptr_t Call = FindRawCall(Site - 0x20, Site); Call; Call = FindRawCall(Call + 1, Site))
+            {
+                Nearest = Call;
+            }
+            const uintptr_t Target = Nearest ? Finder::RelativeTarget(Nearest, 1, 5) : 0;
+            if (!Target || (PreReplication && PreReplication != Target))
+            {
+                PreReplicationSites = 0;
+                break;
+            }
+            PreReplication = Target;
+            ++PreReplicationSites;
+        }
+        Require(L"AActor::CallPreReplication", Natives::AActor_CallPreReplication, PreReplicationSites >= 2 ? PreReplication : 0);
+
+        const uintptr_t NotifyDestroyed = FunctionOf(L"NotifyActorDestroyed %s - StartupActor");
+        const uintptr_t NotifyDestroyedEnd = Finder::FunctionEnd(NotifyDestroyed);
+        const std::vector<std::pair<uintptr_t, uintptr_t>> NotifyCalls = NotifyDestroyed && NotifyDestroyedEnd ? Finder::DirectCalls(NotifyDestroyed, NotifyDestroyedEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+
+        uintptr_t ObjectListRemove = 0;
+        ptrdiff_t NetworkObjects = 0;
+        if (!NotifyCalls.empty())
+        {
+            const uintptr_t Load = NotifyCalls.back().first - 7;
+            if ((Byte(Load) & 0xFE) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04)
+            {
+                ObjectListRemove = NotifyCalls.back().second;
+                NetworkObjects = *reinterpret_cast<const int32_t*>(Load + 3);
+            }
+        }
+        Require(L"FNetworkObjectList::Remove", Natives::FNetworkObjectList_Remove, ObjectListRemove);
+        RequireOffset(L"UNetDriver::NetworkObjects", Natives::UNetDriver_NetworkObjects, NetworkObjects);
+
+        ptrdiff_t ActorChannels = 0;
+        int32_t ActorChannelLookups = 0;
+        for (uintptr_t Load = NotifyDestroyed; NotifyDestroyedEnd && Load + 12 <= NotifyDestroyedEnd; ++Load)
+        {
+            if (Byte(Load) == 0x8B && (Byte(Load + 1) & 0xC0) == 0x80 && (Byte(Load + 1) & 0x07) != 0x04 && Byte(Load + 6) == 0x2B && (Byte(Load + 7) & 0xC0) == 0x80 && (Byte(Load + 7) & 0x07) != 0x04
+                && *reinterpret_cast<const int32_t*>(Load + 8) - *reinterpret_cast<const int32_t*>(Load + 2) == 0x2C)
+            {
+                ActorChannels = *reinterpret_cast<const int32_t*>(Load + 2) - 8;
+                ++ActorChannelLookups;
+            }
+        }
+        RequireOffset(L"UNetConnection::ActorChannels", Natives::UNetConnection_ActorChannels, ActorChannelLookups == 1 ? ActorChannels : 0);
+
+        uintptr_t CreateDestructionInfo = 0;
+        ptrdiff_t ConnectionDestroyedActors = 0;
+        int32_t DestroyedActorAdds = 0;
+        for (const auto& [Site, Target] : NotifyCalls)
+        {
+            const uintptr_t Lea = Site + 5;
+            if (Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04 && FindInstruction(Lea + 7, Lea + 0x18, { 0x4C, 0x8D, 0x40 }))
+            {
+                CreateDestructionInfo = Target;
+                ConnectionDestroyedActors = *reinterpret_cast<const int32_t*>(Lea + 3);
+                ++DestroyedActorAdds;
+            }
+        }
+        RequireOffset(L"UNetConnection::DestroyedStartupOrDormantActors", Natives::UNetConnection_DestroyedStartupOrDormantActors, DestroyedActorAdds == 1 ? ConnectionDestroyedActors : 0);
+
+        ptrdiff_t DormantReplicators = 0;
+        int32_t DormantReplicatorRemoves = 0;
+        for (uintptr_t Lea = NotifyDestroyed; ActorChannels > 0 && DestroyedActorAdds == 1 && Lea + 7 <= NotifyDestroyedEnd; ++Lea)
+        {
+            const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Lea + 3);
+            if (Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04 && Offset > ActorChannels && Offset < ConnectionDestroyedActors)
+            {
+                DormantReplicators = Offset;
+                ++DormantReplicatorRemoves;
+            }
+        }
+        RequireOffset(L"UNetConnection::DormantReplicatorMap", Natives::UNetConnection_DormantReplicatorMap, DormantReplicatorRemoves == 1 ? DormantReplicators : 0);
+
+        const uintptr_t ActorChannelClose = FunctionOf(L"UActorChannel::Close: ChIndex: %d, Actor: %s");
+        ptrdiff_t ActorChannelBits = 0;
+        FCalledSlot ChannelClose;
+        for (uintptr_t And = NotifyDestroyedEnd ? FindInstruction(NotifyDestroyed, NotifyDestroyedEnd, { 0x83, -1, -1, -1, 0x00, 0x00, 0xF7 }) : 0; And && !ChannelClose.VTable; And = FindInstruction(And + 1, NotifyDestroyedEnd, { 0x83, -1, -1, -1, 0x00, 0x00, 0xF7 }))
+        {
+            if ((Byte(And + 1) & 0xF8) == 0xA0 && (Byte(And + 1) & 0x07) != 0x04)
+            {
+                ChannelClose = CalledSlot(And + 7, And + 0x10, ActorChannelClose);
+                ActorChannelBits = *reinterpret_cast<const int32_t*>(And + 2);
+            }
+        }
+        void** ActorChannelVTable = ChannelClose.VTable;
+        RequireOffset(L"UActorChannel::Bits", Natives::UActorChannel_Bits, ActorChannelVTable ? ActorChannelBits : 0);
+        RequireSlot(L"UChannel::Close", Natives::UChannel_CloseIndex, ChannelClose.Index);
+        RequireSlot(L"UChannel::StartBecomingDormant", Natives::UChannel_StartBecomingDormantIndex, Finder::VTableIndex(ActorChannelVTable, reinterpret_cast<void*>(FunctionOf(L"StartBecomingDormant: %s")), 0x400));
+
+        const uintptr_t Close = FunctionOf(L"UChannel::Close: Sending CloseBunch. Dormant: %d, %s");
+        const uintptr_t CloseEnd = Finder::FunctionEnd(Close);
+        const uintptr_t ClosingTest = Close ? FindInstruction(Close, Close + 0x20, { 0xF6, 0x41, -1, 0x02 }) : 0;
+        RequireOffset(L"UChannel::Bits", Natives::UChannel_Bits, ClosingTest ? Byte(ClosingTest + 2) : 0);
+
+        ptrdiff_t State = 0;
+        for (uintptr_t Load = CloseEnd ? FindInstruction(Close, CloseEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x83, -1, 0x02, 0x83, -1, 0x01 }) : 0; Load && !State; Load = FindInstruction(Load + 1, CloseEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x83, -1, 0x02, 0x83, -1, 0x01 }))
+        {
+            if ((Byte(Load + 1) & 0xC0) == 0x80 && (Byte(Load + 1) & 0x07) != 0x04)
+            {
+                State = *reinterpret_cast<const int32_t*>(Load + 2);
+            }
+        }
+        RequireOffset(L"UNetConnection::State", Natives::UNetConnection_State, State);
+
+        const uintptr_t CloseBunch = CloseEnd ? FindInstruction(Close, CloseEnd, { 0x41, 0xB0, 0x01, 0x48, 0x8D, 0x4C, 0x24, -1, 0x48, 0x8B, 0xD3, 0xE8 }) : 0;
+        const uintptr_t OutBunch = CloseBunch ? Finder::RelativeTarget(CloseBunch + 11, 1, 5) : 0;
+        Require(L"FOutBunch::FOutBunch", Natives::FOutBunch_FOutBunch, IsInText(OutBunch) ? OutBunch : 0);
+        const int32_t SendBunch = CloseBunch ? VirtualSlot(FindVirtualCall(CloseBunch + 16, CloseBunch + 0x60)) : -1;
+        RequireSlot(L"UChannel::SendBunch", Natives::UChannel_SendBunchIndex, VTableEntry(ActorChannelVTable, SendBunch) ? SendBunch : -1);
+
+        ptrdiff_t ChIndex = 0;
+        for (uintptr_t Copy = IsInText(OutBunch) ? FindInstruction(OutBunch, OutBunch + 0x80, { 0x8B, -1, -1, 0x89, -1, 0xD4, 0x00, 0x00, 0x00 }) : 0; Copy && !ChIndex; Copy = FindInstruction(Copy + 1, OutBunch + 0x80, { 0x8B, -1, -1, 0x89, -1, 0xD4, 0x00, 0x00, 0x00 }))
+        {
+            if ((Byte(Copy + 1) & 0xC0) == 0x40 && (Byte(Copy + 1) & 0x07) != 0x04)
+            {
+                ChIndex = Byte(Copy + 2);
+            }
+        }
+        RequireOffset(L"UChannel::ChIndex", Natives::UChannel_ChIndex, ChIndex);
+
+        ptrdiff_t NumOutRec = 0;
+        const uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x80, { 0x0F, 0xBA, -1, 0x08 }) : 0;
+        for (uintptr_t Compare = PausedTest && (Byte(PausedTest + 2) & 0x38) == 0x20 ? FindInstruction(PausedTest + 4, PausedTest + 0x14, { 0x83, -1, -1, 0x00 }) : 0; Compare && !NumOutRec; Compare = FindInstruction(Compare + 1, PausedTest + 0x14, { 0x83, -1, -1, 0x00 }))
+        {
+            if ((Byte(Compare + 1) & 0xF8) == 0x78 && (Byte(Compare + 1) & 0x07) != 0x04)
+            {
+                NumOutRec = Byte(Compare + 2);
+            }
+        }
+        RequireOffset(L"UChannel::NumOutRec", Natives::UChannel_NumOutRec, NumOutRec);
+
+        ptrdiff_t LastUpdateTime = 0;
+        int32_t LastUpdateStores = 0;
+        for (uintptr_t Store = ReplicateActorEnd ? FindInstruction(ReplicateActor, ReplicateActorEnd, { 0x0F, 0x5A, 0xC0, 0xF2, -1, 0x0F, 0x11, -1 }) : 0; Store; Store = FindInstruction(Store + 1, ReplicateActorEnd, { 0x0F, 0x5A, 0xC0, 0xF2, -1, 0x0F, 0x11, -1 }))
+        {
+            if ((Byte(Store + 4) & 0xF0) == 0x40 && (Byte(Store + 7) & 0xC0) == 0x80 && (Byte(Store + 7) & 0x07) != 0x04)
+            {
+                LastUpdateTime = *reinterpret_cast<const int32_t*>(Store + 8);
+                ++LastUpdateStores;
+            }
+        }
+        RequireOffset(L"UActorChannel::LastUpdateTime", Natives::UActorChannel_LastUpdateTime, LastUpdateStores == 1 ? LastUpdateTime : 0);
+        RequireOffset(L"UActorChannel::RelevantTime", Natives::UActorChannel_RelevantTime, LastUpdateStores == 1 ? LastUpdateTime - static_cast<ptrdiff_t>(sizeof(double)) : 0);
+
+        uintptr_t WorldSettings = 0;
+        int32_t WorldSettingsCalls = 0;
+        for (uintptr_t Call = ReplicateActorEnd ? FindInstruction(ReplicateActor, ReplicateActorEnd, { 0x41, 0xB0, 0x01, 0x33, 0xD2, 0x48, 0x8B, 0xC8, 0xE8 }) : 0; Call; Call = FindInstruction(Call + 1, ReplicateActorEnd, { 0x41, 0xB0, 0x01, 0x33, 0xD2, 0x48, 0x8B, 0xC8, 0xE8 }))
+        {
+            WorldSettings = Finder::RelativeTarget(Call + 8, 1, 5);
+            ++WorldSettingsCalls;
+        }
+        Require(L"UWorld::GetWorldSettings", Natives::UWorld_GetWorldSettings, WorldSettingsCalls == 1 && IsInText(WorldSettings) ? WorldSettings : 0);
+
+        const uintptr_t SerializeNewActor = FunctionOf(L"SerializeNewActor START");
+        const uintptr_t SerializeNewActorEnd = Finder::FunctionEnd(SerializeNewActor);
+        uintptr_t Archetype = 0;
+        int32_t ArchetypeCalls = 0;
+        for (uintptr_t Call = SerializeNewActorEnd ? FindInstruction(SerializeNewActor, SerializeNewActorEnd, { 0x49, 0x8B, 0x50, 0x20, 0x49, 0x8B, 0x48, 0x10, 0x45, 0x8B, 0x48, 0x08, 0x4D, 0x8B, 0x40, 0x18, 0xE8 }) : 0; Call; Call = FindInstruction(Call + 1, SerializeNewActorEnd, { 0x49, 0x8B, 0x50, 0x20, 0x49, 0x8B, 0x48, 0x10, 0x45, 0x8B, 0x48, 0x08, 0x4D, 0x8B, 0x40, 0x18, 0xE8 }))
+        {
+            Archetype = Finder::RelativeTarget(Call + 16, 1, 5);
+            ++ArchetypeCalls;
+        }
+        Require(L"UObject::GetArchetypeFromRequiredInfo", Natives::UObject_GetArchetypeFromRequiredInfo, ArchetypeCalls == 1 && IsInText(Archetype) ? Archetype : 0);
+
+        const FCalledSlot NewActor = ReplicateActorEnd ? CalledSlot(ReplicateActor, ReplicateActorEnd, SerializeNewActor) : FCalledSlot();
+        const int32_t WriteObject = Finder::VTableIndex(NewActor.VTable, reinterpret_cast<void*>(FunctionOf(L"WroteObject %s NetGUID <%s>")), 0x400);
+        RequireSlot(L"UPackageMap::WriteObject", Natives::UPackageMap_WriteObjectIndex, WriteObject >= 0 && WriteObject == NewActor.Index - 4 ? WriteObject : -1);
+
+        const uintptr_t PlayReplay = FunctionOf(L"PlayReplay: failed to create demo net driver!");
+        const uintptr_t PlayReplayEnd = Finder::FunctionEnd(PlayReplay);
+        const FCalledSlot InitConnect = PlayReplayEnd ? CalledSlot(PlayReplay, PlayReplayEnd, FunctionOf(L"UNetDriver::InitConnect")) : FCalledSlot();
+        void** NetDriverVTable = InitConnect.VTable;
+
+        const int32_t ProcessRemoteFunction = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(FunctionOf(L"UNetDriver::ProcessRemoteFunction")), 0x400);
+        const int32_t LowLevelGetNetworkNumber = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(FunctionOf(L"UNetDriver::LowLevelGetNetworkNumber")), 0x400);
+        const int32_t ServerReplicateActors = ProcessRemoteFunction - 1;
+        const uintptr_t StrippedReplicate = ProcessRemoteFunction > 0 && ServerReplicateActors == LowLevelGetNetworkNumber + 2 ? VTableEntry(NetDriverVTable, ServerReplicateActors) : 0;
+        const bool bServerReplicateActors = StrippedReplicate && Byte(StrippedReplicate) == 0x33 && Byte(StrippedReplicate + 1) == 0xC0 && Byte(StrippedReplicate + 2) == 0xC3;
+        RequireSlot(L"UNetDriver::ServerReplicateActors", Natives::UNetDriver_ServerReplicateActorsIndex, bServerReplicateActors ? ServerReplicateActors : -1);
+
+        Sites::NetDriverVTables.clear();
+        if (bServerReplicateActors && InitConnect.Reference)
+        {
+            std::vector<void**> VTables = { NetDriverVTable };
+            CollectDerivedVTables(Finder::FunctionStart(InitConnect.Reference), VTables, 0);
+            for (void** VTable : VTables)
+            {
+                if (VTable[ServerReplicateActors] == NetDriverVTable[ServerReplicateActors])
+                {
+                    Sites::NetDriverVTables.push_back(VTable);
+                }
+            }
+        }
+        if (Sites::NetDriverVTables.empty())
+        {
+            Log::Error(L"Finder: net driver vtables with the stripped ServerReplicateActors not found");
+            ++MissingCount;
+        }
+
+        const int32_t TickDispatch = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(FunctionOf(L"UNetDriver::TickDispatch: Very long time between ticks. DeltaTime: %2.2f, Realtime: %2.2f. %s")), 0x400);
+        const uintptr_t TickFlush = TickDispatch >= 0 ? VTableEntry(NetDriverVTable, TickDispatch + 1) : 0;
+        const uintptr_t TickFlushEnd = Finder::FunctionEnd(TickFlush);
+        const uintptr_t DemoTickFlush = FunctionOf(L"UDemoNetDriver::TickFlush: ReplayStreamer ERROR: %s");
+        bool bDemoTickFlush = false;
+        for (const uintptr_t Site : TickFlush && DemoTickFlush ? Finder::CallsTo(TickFlush, false) : std::vector<uintptr_t>())
+        {
+            bDemoTickFlush = bDemoTickFlush || Finder::FunctionStart(Site) == DemoTickFlush;
+        }
+        RequireSlot(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlushIndex, bDemoTickFlush ? TickDispatch + 1 : -1);
+
+        const int32_t IsServer = TickFlush ? VirtualSlot(FindVirtualCall(TickFlush, TickFlush + 0x60)) : -1;
+        const uintptr_t IsServerBody = VTableEntry(NetDriverVTable, IsServer);
+        const uintptr_t GetNetMode = reinterpret_cast<uintptr_t>(Natives::UNetDriver_GetNetMode);
+        const bool bIsServer = IsServerBody && FindInstruction(IsServerBody, IsServerBody + 9, { 0x48, 0x83, 0x79, -1, 0x00, 0x0F, 0x94, 0xC0, 0xC3 }) == IsServerBody && GetNetMode && VirtualSlot(FindVirtualCall(GetNetMode, GetNetMode + 0x10)) == IsServer;
+        RequireSlot(L"UNetDriver::IsServer", Natives::UNetDriver_IsServerIndex, bIsServer ? IsServer : -1);
+
+        int32_t LevelInitialized = -1;
+        int32_t LevelInitializedSites = 0;
+        for (const uintptr_t Site : CreateChannel && SetChannelActor ? Finder::CallsTo(CreateChannel, false) : std::vector<uintptr_t>())
+        {
+            const uintptr_t Function = Finder::FunctionStart(Site);
+            const uintptr_t FunctionEnd = Finder::FunctionEnd(Function);
+            if (!Function || Function == DemoReplicate || FunctionEnd <= Function || !CallWithin(Function, FunctionEnd - Function, SetChannelActor))
+            {
+                continue;
+            }
+            uintptr_t Nearest = 0;
+            for (uintptr_t Call = FindVirtualCall(Site - 0x20, Site); Call; Call = FindVirtualCall(Call + 1, Site))
+            {
+                Nearest = Call;
+            }
+            if (Nearest)
+            {
+                LevelInitialized = VirtualSlot(Nearest);
+                ++LevelInitializedSites;
+            }
+        }
+        const uintptr_t LevelInitializedBody = LevelInitializedSites == 1 ? VTableEntry(NetDriverVTable, LevelInitialized) : 0;
+        RequireSlot(L"UNetDriver::IsLevelInitializedForActor", Natives::UNetDriver_IsLevelInitializedForActorIndex, LevelInitializedBody ? LevelInitialized : -1);
+
+        const int32_t ClientHasInitializedLevelFor = LevelInitializedBody ? VirtualSlot(FindVirtualCall(LevelInitializedBody, LevelInitializedBody + 0x40)) : -1;
+        ptrdiff_t ClientWorldPackageName = 0;
+        for (uintptr_t Compare = LevelInitializedBody ? FindInstruction(LevelInitializedBody, LevelInitializedBody + 0x40, { 0x48, 0x39 }) : 0; Compare && !ClientWorldPackageName; Compare = FindInstruction(Compare + 1, LevelInitializedBody + 0x40, { 0x48, 0x39 }))
+        {
+            if ((Byte(Compare + 2) & 0xC0) == 0x80 && (Byte(Compare + 2) & 0x07) != 0x04)
+            {
+                ClientWorldPackageName = *reinterpret_cast<const int32_t*>(Compare + 3);
+            }
+        }
+        RequireOffset(L"UNetConnection::ClientWorldPackageName", Natives::UNetConnection_ClientWorldPackageName, ClientWorldPackageName);
+
+        const uintptr_t Describe = FunctionOf(L"[UNetConnection] RemoteAddr: %s, Name: %s, Driver: %s, IsServer: %s, PC: %s, Owner: %s");
+        const uintptr_t DescribeEnd = Finder::FunctionEnd(Describe);
+        void** ConnectionVTable = DescribeEnd ? CalledSlot(Describe, DescribeEnd, FunctionOf(L"UNetConnection::LowLevelGetRemoteAddress")).VTable : nullptr;
+
+        int32_t ConnectionTick = -1;
+        int32_t ConnectionTicks = 0;
+        for (uintptr_t Call = TickFlushEnd ? FindInstruction(TickFlush, TickFlushEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0; Call; Call = FindInstruction(Call + 1, TickFlushEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }))
+        {
+            const int32_t Slot = VirtualSlot(Call + 3);
+            if (Slot < 0 || (ConnectionTicks && Slot != ConnectionTick))
+            {
+                ConnectionTicks = 0;
+                break;
+            }
+            ConnectionTick = Slot;
+            ++ConnectionTicks;
+        }
+        const uintptr_t ConnectionTickBody = ConnectionTicks >= 2 ? VTableEntry(ConnectionVTable, ConnectionTick) : 0;
+        RequireSlot(L"UNetConnection::Tick", Natives::UNetConnection_TickIndex, ConnectionTickBody ? ConnectionTick : -1);
+
+        const int32_t InitRemoteConnection = Finder::VTableIndex(ConnectionVTable, reinterpret_cast<void*>(FunctionOf(L"UNetConnection::InitRemoteConnection")), 0x400);
+        const int32_t IsNetReady = InitRemoteConnection - 6;
+        const uintptr_t IsNetReadyBody = InitRemoteConnection >= 6 && IsNetReady == ConnectionTick + 1 ? VTableEntry(ConnectionVTable, IsNetReady) : 0;
+        const bool bIsNetReady = IsNetReadyBody && FindInstruction(IsNetReadyBody, IsNetReadyBody + 18, { 0x84, 0xD2, 0x74, -1, 0x8B, 0x81, -1, -1, 0x00, 0x00, 0xF7, 0xD8, 0x89, 0x81, -1, -1, 0x00, 0x00 }) == IsNetReadyBody;
+        RequireSlot(L"UNetConnection::IsNetReady", Natives::UNetConnection_IsNetReadyIndex, bIsNetReady ? IsNetReady : -1);
+        RequireOffset(L"UNetConnection::QueuedBits", Natives::UNetConnection_QueuedBits, bIsNetReady ? *reinterpret_cast<const int32_t*>(IsNetReadyBody + 14) : 0);
+        RequireSlot(L"UNetConnection::FlushDormancy", Natives::UNetConnection_FlushDormancyIndex, Finder::VTableIndex(ConnectionVTable, reinterpret_cast<void*>(FunctionOf(L"FlushDormancy: %s. Connection: %s")), 0x400));
+
+        const uintptr_t LevelFor = VTableEntry(ConnectionVTable, ClientHasInitializedLevelFor);
+        const uintptr_t LevelForEnd = Finder::FunctionEnd(LevelFor);
+        const ptrdiff_t VisibleLevelNames = ClientWorldPackageName + 8;
+        bool bVisibleLevelData = false;
+        bool bVisibleLevelCount = false;
+        for (uintptr_t Load = LevelFor; ClientWorldPackageName && LevelForEnd && Load + 7 <= LevelForEnd; ++Load)
+        {
+            if ((Byte(Load) & 0xF8) != 0x48 || (Byte(Load + 2) & 0xC0) != 0x80 || (Byte(Load + 2) & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Load + 3);
+            bVisibleLevelData = bVisibleLevelData || (Byte(Load + 1) == 0x8B && Offset == VisibleLevelNames);
+            bVisibleLevelCount = bVisibleLevelCount || (Byte(Load + 1) == 0x63 && Offset == VisibleLevelNames + 8);
+        }
+        RequireSlot(L"UNetConnection::ClientHasInitializedLevelFor", Natives::UNetConnection_ClientHasInitializedLevelForIndex, bVisibleLevelData && bVisibleLevelCount ? ClientHasInitializedLevelFor : -1);
+        RequireOffset(L"UNetConnection::ClientVisibleLevelNames", Natives::UNetConnection_ClientVisibleLevelNames, bVisibleLevelData && bVisibleLevelCount ? VisibleLevelNames : 0);
+
+        const uintptr_t ConnectionTickEnd = Finder::FunctionEnd(ConnectionTickBody);
+        ptrdiff_t TimeSensitive = 0;
+        int32_t TimeSensitiveTests = 0;
+        for (uintptr_t Test = ConnectionTickEnd ? FindInstruction(ConnectionTickBody, ConnectionTickEnd, { 0x80, -1, -1, -1, 0x00, 0x00, 0x00, 0x75, -1, 0x48, 0x8B, -1, -1, 0xF3, 0x0F, 0x10 }) : 0; Test; Test = FindInstruction(Test + 1, ConnectionTickEnd, { 0x80, -1, -1, -1, 0x00, 0x00, 0x00, 0x75, -1, 0x48, 0x8B, -1, -1, 0xF3, 0x0F, 0x10 }))
+        {
+            if ((Byte(Test + 1) & 0xF8) == 0xB8 && (Byte(Test + 1) & 0x07) != 0x04)
+            {
+                TimeSensitive = *reinterpret_cast<const int32_t*>(Test + 2);
+                ++TimeSensitiveTests;
+            }
+        }
+        RequireOffset(L"UNetConnection::TimeSensitive", Natives::UNetConnection_TimeSensitive, TimeSensitiveTests == 1 ? TimeSensitive : 0);
+
+        uintptr_t TickCountTest = 0;
+        int32_t TickCountTests = 0;
+        for (uintptr_t Load = NetViewerEnd ? FindInstruction(NetViewer, NetViewerEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0xA8, 0x01 }) : 0; Load; Load = FindInstruction(Load + 1, NetViewerEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0xA8, 0x01 }))
+        {
+            if ((Byte(Load + 1) & 0xC0) == 0x80 && (Byte(Load + 1) & 0x07) != 0x04)
+            {
+                TickCountTest = Load;
+                ++TickCountTests;
+            }
+        }
+        RequireOffset(L"UNetConnection::TickCount", Natives::UNetConnection_TickCount, TickCountTests == 1 ? *reinterpret_cast<const int32_t*>(TickCountTest + 2) : 0);
+
+        const uintptr_t GuidCacheLoad = CreateDestructionInfo ? FindInstruction(CreateDestructionInfo, CreateDestructionInfo + 0x40, { 0x48, 0x8B, 0x89 }) : 0;
+        const uintptr_t AssignGuid = GuidCacheLoad ? FindRawCall(GuidCacheLoad + 7, GuidCacheLoad + 0x20) : 0;
+        const uintptr_t DestroyedActorsBase = AssignGuid ? FindInstruction(AssignGuid + 5, AssignGuid + 0x10, { 0x48, 0x81 }) : 0;
+        RequireOffset(L"UNetDriver::GuidCache", Natives::UNetDriver_GuidCache, GuidCacheLoad ? *reinterpret_cast<const int32_t*>(GuidCacheLoad + 3) : 0);
+        RequireOffset(L"UNetDriver::DestroyedStartupOrDormantActors", Natives::UNetDriver_DestroyedStartupOrDormantActors, DestroyedActorsBase && (Byte(DestroyedActorsBase + 2) & 0xF8) == 0xC0 ? *reinterpret_cast<const int32_t*>(DestroyedActorsBase + 3) : 0);
+
+        const uintptr_t ReplicateProperties = FunctionOf(L"ReplicateProperties: Object == NULL");
+        const uintptr_t ReplicatePropertiesEnd = Finder::FunctionEnd(ReplicateProperties);
+        ptrdiff_t ReplicationFrame = 0;
+        int32_t ReplicationFrameReads = 0;
+        for (uintptr_t Load = ReplicatePropertiesEnd ? FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, { 0x44, 0x8B }) : 0; Load; Load = FindInstruction(Load + 1, ReplicatePropertiesEnd, { 0x44, 0x8B }))
+        {
+            if ((Byte(Load + 2) & 0xF8) == 0x80 && (Byte(Load + 2) & 0x07) != 0x04 && FindRawCall(Load + 7, Load + 0x10))
+            {
+                ReplicationFrame = *reinterpret_cast<const int32_t*>(Load + 3);
+                ++ReplicationFrameReads;
+            }
+        }
+        RequireOffset(L"UNetDriver::ReplicationFrame", Natives::UNetDriver_ReplicationFrame, ReplicationFrameReads == 1 ? ReplicationFrame : 0);
+
+        const uintptr_t DumpRelevantRef = OnlyRef(L"net.DumpRelevantActors");
+        const uintptr_t DumpRelevantInit = Finder::FunctionStart(DumpRelevantRef);
+        ptrdiff_t DebugRelevantActors = 0;
+        for (uintptr_t Lea = DumpRelevantInit ? FindInstruction(DumpRelevantInit, DumpRelevantRef, { 0x48, 0x8D, 0x05 }) : 0; Lea; Lea = FindInstruction(Lea + 1, DumpRelevantRef, { 0x48, 0x8D, 0x05 }))
+        {
+            const uintptr_t Handler = Finder::RelativeTarget(Lea, 3, 7);
+            const uintptr_t Store = IsInText(Handler) ? FindInstruction(Handler, Handler + 0x20, { 0xC6, 0x80, -1, -1, 0x00, 0x00, 0x01 }) : 0;
+            if (Store)
+            {
+                DebugRelevantActors = *reinterpret_cast<const int32_t*>(Store + 2);
+            }
+        }
+        RequireOffset(L"UNetDriver::DebugRelevantActors", Natives::UNetDriver_DebugRelevantActors, DebugRelevantActors);
+
+        const uintptr_t Standby = FunctionOf(L"Standby check is %s with RxTime (%f), TxTime (%f), PingThreshold (%d), JoinInProgressStandbyWaitTime (%f)");
+        const uintptr_t StandbyEnd = Finder::FunctionEnd(Standby);
+        ptrdiff_t LastStandbyField = 0;
+        for (uintptr_t Copy = StandbyEnd ? FindInstruction(Standby, StandbyEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x89, -1, -1, -1, 0x00, 0x00 }) : 0; Copy; Copy = FindInstruction(Copy + 1, StandbyEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x89, -1, -1, -1, 0x00, 0x00 }))
+        {
+            if ((Byte(Copy + 1) & 0xC0) == 0x80 && (Byte(Copy + 7) & 0xC0) == 0x80 && (Byte(Copy + 7) & 0x07) != 0x04)
+            {
+                LastStandbyField = (std::max)(LastStandbyField, static_cast<ptrdiff_t>(*reinterpret_cast<const int32_t*>(Copy + 8)));
+            }
+        }
+        const ptrdiff_t NetTag = DebugRelevantActors - static_cast<ptrdiff_t>(sizeof(int32_t));
+        RequireOffset(L"UNetDriver::NetTag", Natives::UNetDriver_NetTag, LastStandbyField && NetTag == LastStandbyField + static_cast<ptrdiff_t>(sizeof(float)) ? NetTag : 0);
+
+        const std::vector<std::pair<uintptr_t, uintptr_t>> VelocityThunks = NativeThunks("GetVelocity");
+        const std::vector<std::pair<uintptr_t, uintptr_t>> ForceUpdateThunks = NativeThunks("ForceNetUpdate");
+        const std::vector<std::pair<uintptr_t, uintptr_t>> FlushDormancyThunks = NativeThunks("FlushNetDormancy");
+        const bool bActorThunks = VelocityThunks.size() == 1 && ForceUpdateThunks.size() == 1 && FlushDormancyThunks.size() == 1 && VelocityThunks[0].first
+            && VelocityThunks[0].first == ForceUpdateThunks[0].first && VelocityThunks[0].first == FlushDormancyThunks[0].first;
+
+        const int32_t Velocity = bActorThunks ? VirtualSlot(FindVirtualCall(VelocityThunks[0].second, VelocityThunks[0].second + 0x40)) : -1;
+        const int32_t ViewerVelocity = TickCountTests == 1 ? VirtualSlot(FindVirtualCall(TickCountTest + 8, TickCountTest + 0x80)) : -1;
+        RequireSlot(L"AActor::GetVelocity", Natives::AActor_GetVelocityIndex, Velocity == ViewerVelocity ? Velocity : -1);
+        RequireSlot(L"AActor::ForceNetUpdate", Natives::AActor_ForceNetUpdateIndex, bActorThunks ? VirtualSlot(FindVirtualCall(ForceUpdateThunks[0].second, ForceUpdateThunks[0].second + 0x40)) : -1);
+
+        uintptr_t FlushDormancy = 0;
+        for (uintptr_t Jump = bActorThunks ? FlushDormancyThunks[0].second : 0; Jump && Jump + 5 <= FlushDormancyThunks[0].second + 0x30 && !FlushDormancy; ++Jump)
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Jump, 1, 5);
+            if ((Byte(Jump) == 0xE8 || Byte(Jump) == 0xE9) && IsInText(Target) && Finder::FunctionStart(Target) == Target)
+            {
+                FlushDormancy = Target;
+            }
+        }
+        Require(L"AActor::FlushNetDormancy", Natives::AActor_FlushNetDormancy, FlushDormancy);
+
+        const std::vector<std::pair<uintptr_t, uintptr_t>> PossessThunks = NativeThunks("Possess");
+        uintptr_t ViewTargetThunk = 0;
+        int32_t ViewTargetThunkCount = 0;
+        for (const auto& [Registrar, Thunk] : PossessThunks.size() == 1 ? NativeThunks("GetViewTarget") : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (Registrar && Registrar == PossessThunks[0].first)
+            {
+                ViewTargetThunk = Thunk;
+                ++ViewTargetThunkCount;
+            }
+        }
+        RequireSlot(L"AController::GetViewTarget", Natives::AController_GetViewTargetIndex, ViewTargetThunkCount == 1 ? VirtualSlot(FindVirtualCall(ViewTargetThunk, ViewTargetThunk + 0x40)) : -1);
+
+        int32_t NetRelevant = -1;
+        size_t NetRelevantSites = 0;
+        for (const uintptr_t Site : NetViewer ? Finder::CallsTo(NetViewer, false) : std::vector<uintptr_t>())
+        {
+            const int32_t Slot = VirtualSlot(FindVirtualCall(Site + 5, Site + 0x40));
+            if (Slot < 0 || (NetRelevantSites && Slot != NetRelevant))
+            {
+                NetRelevantSites = 0;
+                break;
+            }
+            NetRelevant = Slot;
+            ++NetRelevantSites;
+        }
+        RequireSlot(L"AActor::IsNetRelevantFor", Natives::AActor_IsNetRelevantForIndex, NetRelevantSites ? NetRelevant : -1);
+
+        const uintptr_t FlushDormancyEnd = Finder::FunctionEnd(FlushDormancy);
+        const uintptr_t ClientCheck = FlushDormancy ? FindInstruction(FlushDormancy, FlushDormancy + 0x60, { 0x83, 0xF8, 0x03 }) : 0;
+        const uintptr_t DormancyLoad = ClientCheck ? FindInstruction(ClientCheck, ClientCheck + 0x10, { 0x0F, 0xB6 }) : 0;
+        const ptrdiff_t NetDormancy = DormancyLoad && (Byte(DormancyLoad + 2) & 0xC0) == 0x80 && (Byte(DormancyLoad + 2) & 0x07) != 0x04 ? *reinterpret_cast<const int32_t*>(DormancyLoad + 3) : 0;
+        RequireOffset(L"AActor::NetDormancy", Natives::AActor_NetDormancy, NetDormancy);
+
+        const uintptr_t WorldCall = FlushDormancyEnd ? FindVirtualCall(FlushDormancy, FlushDormancyEnd) : 0;
+        const uintptr_t AddActorCall = WorldCall ? FindRawCall(WorldCall + 6, FlushDormancyEnd) : 0;
+        const uintptr_t AddNetworkActor = AddActorCall ? Finder::RelativeTarget(AddActorCall, 1, 5) : 0;
+        const uintptr_t NetDriverCall = AddActorCall ? FindRawCall(AddActorCall + 5, FlushDormancyEnd) : 0;
+        const uintptr_t GetNetDriver = NetDriverCall ? Finder::RelativeTarget(NetDriverCall, 1, 5) : 0;
+        const uintptr_t FindNamedNetDriver = reinterpret_cast<uintptr_t>(Natives::UEngine_FindNamedNetDriver);
+        bool bGetNetDriver = false;
+        for (uintptr_t Jump = GetNetDriver; GetNetDriver && FindNamedNetDriver && Jump + 5 <= GetNetDriver + 0x60 && !bGetNetDriver; ++Jump)
+        {
+            bGetNetDriver = (Byte(Jump) == 0xE8 || Byte(Jump) == 0xE9) && Finder::RelativeTarget(Jump, 1, 5) == FindNamedNetDriver;
+        }
+        Require(L"UWorld::AddNetworkActor", Natives::UWorld_AddNetworkActor, AddNetworkActor);
+        Require(L"AActor::GetNetDriver", Natives::AActor_GetNetDriver, bGetNetDriver ? GetNetDriver : 0);
+
+        uintptr_t SetDormancy = 0;
+        int32_t SetDormancyFunctions = 0;
+        for (const uintptr_t Site : AddNetworkActor && FindNamedNetDriver && NetDormancy ? Finder::CallsTo(AddNetworkActor, false) : std::vector<uintptr_t>())
+        {
+            const uintptr_t Function = Finder::FunctionStart(Site);
+            const uintptr_t FunctionEnd = Finder::FunctionEnd(Function);
+            if (!Function || FunctionEnd <= Function || Function == SetDormancy || !CallWithin(Function, FunctionEnd - Function, FindNamedNetDriver))
+            {
+                continue;
+            }
+            for (uintptr_t Store = Function; Store + 6 <= FunctionEnd; ++Store)
+            {
+                if (Byte(Store) == 0x88 && (Byte(Store + 1) & 0xC0) == 0x80 && (Byte(Store + 1) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Store + 2) == NetDormancy)
+                {
+                    SetDormancy = Function;
+                    ++SetDormancyFunctions;
+                    break;
+                }
+            }
+        }
+        Require(L"AActor::SetNetDormancy", Natives::AActor_SetNetDormancy, SetDormancyFunctions == 1 ? SetDormancy : 0);
+
+        ptrdiff_t TimeSeconds = 0;
+        int32_t TimeSecondsReads = 0;
+        for (const uintptr_t Site : FlushDormancy && NetDormancy ? Finder::CallsTo(FlushDormancy, false) : std::vector<uintptr_t>())
+        {
+            const uintptr_t Function = Finder::FunctionStart(Site);
+            const uintptr_t DormancyTest = Function && Site - Function <= 0x20 ? FindInstruction(Function, Site, { 0x80, -1, static_cast<int32_t>(NetDormancy & 0xFF), static_cast<int32_t>((NetDormancy >> 8) & 0xFF), 0x00, 0x00, 0x01 }) : 0;
+            if (!DormancyTest || (Byte(DormancyTest + 1) & 0xF8) != 0xB8)
+            {
+                continue;
+            }
+            const uintptr_t Load = FindInstruction(Site, Site + 0x30, { 0xF3, 0x0F, 0x10 });
+            if (Load && (Byte(Load + 3) & 0xC0) == 0x80 && (Byte(Load + 3) & 0x07) != 0x04 && FindInstruction(Load + 8, Load + 0x18, { 0xF3, 0x0F, 0x5C }))
+            {
+                TimeSeconds = *reinterpret_cast<const int32_t*>(Load + 4);
+                ++TimeSecondsReads;
+            }
+        }
+        RequireOffset(L"UWorld::TimeSeconds", Natives::UWorld_TimeSeconds, TimeSecondsReads == 1 ? TimeSeconds : 0);
+
+        ptrdiff_t ActorInitialized = 0;
+        uint32_t ActorInitializedMask = 0;
+        bool bActorInitializedAgree = true;
+        for (const uintptr_t Ref : Finder::StringRefs(L"%s failed to route PostInitializeComponents.  Please call Super::PostInitializeComponents() in your <className>::PostInitializeComponents() function. "))
+        {
+            const uintptr_t Test = FindBackward(Ref, 0x60, { 0xF6, -1, -1, -1, 0x00, 0x00, -1, 0x0F, 0x85 });
+            if (!Test || (Byte(Test + 1) & 0xF8) != 0x80 || (Byte(Test + 1) & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Test + 2);
+            bActorInitializedAgree = bActorInitializedAgree && (!ActorInitialized || (ActorInitialized == Offset && ActorInitializedMask == Byte(Test + 6)));
+            ActorInitialized = Offset;
+            ActorInitializedMask = Byte(Test + 6);
+        }
+        RequireOffset(L"AActor::bActorInitialized", Natives::AActor_bActorInitialized, bActorInitializedAgree ? ActorInitialized : 0);
+        Natives::AActor_bActorInitializedMask = Natives::AActor_bActorInitialized > 0 ? ActorInitializedMask : 0;
+
+        ptrdiff_t AssociatingLevel = 0;
+        uint32_t AssociatingLevelMask = 0;
+        int32_t AssociatingLevelTests = 0;
+        const uintptr_t TextEnd = Finder::TextEnd();
+        for (uintptr_t Test = FindInstruction(Finder::TextBegin(), TextEnd, { 0xF6, -1, -1, -1, 0x00, 0x00, -1, 0x75, -1, 0xF6 }); Test; Test = FindInstruction(Test + 1, TextEnd, { 0xF6, -1, -1, -1, 0x00, 0x00, -1, 0x75, -1, 0xF6 }))
+        {
+            if ((Byte(Test + 1) & 0xF8) == 0x80 && (Byte(Test + 1) & 0x07) != 0x04 && Byte(Test + 10) == Byte(Test + 1) && Byte(Test + 16) == 0x75
+                && *reinterpret_cast<const int32_t*>(Test + 11) == *reinterpret_cast<const int32_t*>(Test + 2) + 1)
+            {
+                AssociatingLevel = *reinterpret_cast<const int32_t*>(Test + 11);
+                AssociatingLevelMask = Byte(Test + 15);
+                ++AssociatingLevelTests;
+            }
+        }
+        RequireOffset(L"ULevel::bIsAssociatingLevel", Natives::ULevel_bIsAssociatingLevel, AssociatingLevelTests == 1 ? AssociatingLevel : 0);
+        Natives::ULevel_bIsAssociatingLevelMask = Natives::ULevel_bIsAssociatingLevel > 0 ? AssociatingLevelMask : 0;
+
+        const uintptr_t AdaptiveRef = OnlyRef(L"net.UseAdaptiveNetUpdateFrequency");
+        const uintptr_t AsVariableInt = AdaptiveRef ? FindInstruction(AdaptiveRef, AdaptiveRef + 0x40, { 0xFF, 0x52, 0x30 }) : 0;
+        const uintptr_t RefStore = AsVariableInt ? FindInstruction(AsVariableInt, AsVariableInt + 0x10, { 0x48, 0x89, 0x05 }) : 0;
+        const uintptr_t AdaptiveValue = RefStore ? Finder::RelativeTarget(RefStore, 3, 7) : 0;
+        uintptr_t Adaptive = 0;
+        int32_t AdaptiveReaders = 0;
+        for (uintptr_t Load = Finder::TextBegin(); AdaptiveValue && Load + 7 <= TextEnd; ++Load)
+        {
+            if ((Byte(Load) & 0xFB) != 0x48 || Byte(Load + 1) != 0x8B || (Byte(Load + 2) & 0xC7) != 0x05 || Finder::RelativeTarget(Load, 3, 7) != AdaptiveValue)
+            {
+                continue;
+            }
+            const uintptr_t Function = Finder::FunctionStart(Load);
+            const uintptr_t FunctionEnd = Finder::FunctionEnd(Function);
+            if (Function && FunctionEnd > Function && FunctionEnd - Function <= 0x50 && Function != Adaptive)
+            {
+                Adaptive = Function;
+                ++AdaptiveReaders;
+            }
+        }
+        Require(L"UNetDriver::IsAdaptiveNetUpdateFrequencyEnabled", Natives::UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled, AdaptiveReaders == 1 ? Adaptive : 0);
+
+        const uintptr_t Engine = reinterpret_cast<uintptr_t>(Natives::GEngine);
+        int32_t MaxTickRate = -1;
+        int32_t MaxTickRateSites = 0;
+        bool bMaxTickRateAgree = true;
+        for (const wchar_t* Anchor : { L"Bringing %s up for play (max tick rate %i) at %s", L"Bringing preview %s up for play (max tick rate %i) at %s" })
+        {
+            for (const uintptr_t Ref : Finder::StringRefs(Anchor))
+            {
+                const uintptr_t Call = FindBackward(Ref, 0x80, { 0x48, 0x8B, 0x01, 0xFF, 0x90 });
+                const uintptr_t EngineLoad = Call ? FindBackward(Call, 0x18, { 0x48, 0x8B, 0x0D }) : 0;
+                if (!Engine || !EngineLoad || Finder::RelativeTarget(EngineLoad, 3, 7) != Engine)
+                {
+                    continue;
+                }
+                const int32_t Slot = VirtualSlot(Call + 3);
+                bMaxTickRateAgree = bMaxTickRateAgree && (!MaxTickRateSites || Slot == MaxTickRate);
+                MaxTickRate = Slot;
+                ++MaxTickRateSites;
+            }
+        }
+        RequireSlot(L"UEngine::GetMaxTickRate", Natives::UEngine_GetMaxTickRateIndex, bMaxTickRateAgree && MaxTickRateSites >= 2 ? MaxTickRate : -1);
+    }
 }
 
 bool Finder::ResolveClient()
@@ -1287,6 +1993,7 @@ bool Finder::ResolveServer()
     ResolveGameMapsSettings();
     ResolvePreInitServerPatch();
     ResolveDedicatedServerChecks();
+    ResolveReplication();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
     return MissingCount == 0;
@@ -1451,4 +2158,108 @@ bool Finder::ResolvePlayerControllerConsole()
 
     Log::Info(L"Finder: APlayerController::ConsoleKey is slot 0x{:X}, SendToConsole 0x{:X}", Natives::APlayerController_ConsoleKeyIndex, Natives::APlayerController_SendToConsoleIndex);
     return true;
+}
+
+bool Finder::ResolveReplicationLive()
+{
+    MissingCount = 0;
+
+    void** ActorVTable = CdoVTable(L"/Script/Engine.Actor");
+    void** PlayerControllerVTable = CdoVTable(L"/Script/Engine.PlayerController");
+    void** NetworkManagerVTable = CdoVTable(L"/Script/Engine.GameNetworkManager");
+    const int32_t Velocity = Natives::AActor_GetVelocityIndex;
+    const int32_t NetRelevant = Natives::AActor_IsNetRelevantForIndex;
+
+    int32_t NetPriority = -1;
+    int32_t NetPriorities = 0;
+    for (int32_t Index = Velocity; ActorVTable && Velocity >= 0 && Index < NetRelevant; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(ActorVTable, Index);
+        const uintptr_t End = Finder::FunctionEnd(Function);
+        for (uintptr_t Call = End ? FindVirtualCall(Function, End) : 0; Call; Call = FindVirtualCall(Call + 1, End))
+        {
+            if (VirtualSlot(Call) == Index)
+            {
+                NetPriority = Index;
+                ++NetPriorities;
+                break;
+            }
+        }
+    }
+    RequireSlot(L"AActor::GetNetPriority", Natives::AActor_GetNetPriorityIndex, NetPriorities == 1 ? NetPriority : -1);
+
+    int32_t NetDormancy = -1;
+    int32_t NetDormancies = 0;
+    for (int32_t Index = NetPriority + 1; NetPriorities == 1 && Index < NetPriority + 8; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(ActorVTable, Index);
+        const uintptr_t End = Finder::FunctionEnd(Function);
+        for (uintptr_t Jump = End ? FindVirtualCall(Function, End) : 0; Jump; Jump = FindVirtualCall(Jump + 1, End))
+        {
+            if ((Byte(Jump + 1) & 0x38) == 0x20 && VirtualSlot(Jump) == Index + 1)
+            {
+                NetDormancy = Index + 1;
+                ++NetDormancies;
+                break;
+            }
+        }
+    }
+    RequireSlot(L"AActor::GetNetDormancy", Natives::AActor_GetNetDormancyIndex, NetDormancies == 1 ? NetDormancy : -1);
+
+    const uintptr_t NetRelevantFunction = FunctionOf(L"Actor %s / %s has no root component in AActor::IsNetRelevantFor. (Make bAlwaysRelevant=true?)");
+    const uintptr_t RelevancyOwner = NetRelevant >= 0 && NetRelevantFunction && VTableEntry(ActorVTable, NetRelevant) == NetRelevantFunction ? VTableEntry(ActorVTable, NetRelevant + 2) : 0;
+    const bool bRelevancyOwner = RelevancyOwner && FindInstruction(RelevancyOwner, RelevancyOwner + 7, { 0x4C, 0x3B, 0xC1, 0x0F, 0x94, 0xC0, 0xC3 }) == RelevancyOwner;
+    RequireSlot(L"AActor::IsRelevancyOwnerFor", Natives::AActor_IsRelevancyOwnerForIndex, bRelevancyOwner ? NetRelevant + 2 : -1);
+
+    int32_t NetOwner = -1;
+    int32_t NetOwners = 0;
+    for (int32_t Index = NetRelevant + 3; bRelevancyOwner && Index < NetRelevant + 0x10; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(ActorVTable, Index);
+        if (Function && FindInstruction(Function, Function + 8, { 0x48, 0x8B, 0x81, -1, -1, 0x00, 0x00, 0xC3 }) == Function)
+        {
+            NetOwner = Index;
+            ++NetOwners;
+        }
+    }
+    RequireSlot(L"AActor::GetNetOwner", Natives::AActor_GetNetOwnerIndex, NetOwners == 1 ? NetOwner : -1);
+
+    const uintptr_t FlushDormancy = reinterpret_cast<uintptr_t>(Natives::AActor_FlushNetDormancy);
+    const uintptr_t ModeCall = FlushDormancy ? FindRawCall(FlushDormancy, FlushDormancy + 0x40) : 0;
+    const uintptr_t ActorNetMode = ModeCall && Byte(ModeCall + 5) == 0x83 && Byte(ModeCall + 6) == 0xF8 && Byte(ModeCall + 7) == 0x03 ? Finder::RelativeTarget(ModeCall, 1, 5) : 0;
+    int32_t ClientAdjustment = -1;
+    int32_t ClientAdjustments = 0;
+    for (int32_t Index = Natives::AController_GetViewTargetIndex; ActorNetMode && Index > 0 && VTableEntry(PlayerControllerVTable, Index + 1); ++Index)
+    {
+        const uintptr_t CameraMode = VTableEntry(PlayerControllerVTable, Index);
+        bool bCameraMode = false;
+        for (uintptr_t Call = CameraMode ? FindVirtualCall(CameraMode, CameraMode + 0x40) : 0; Call && !bCameraMode; Call = FindVirtualCall(Call + 1, CameraMode + 0x40))
+        {
+            bCameraMode = VirtualSlot(Call) == Index - 1;
+        }
+
+        const uintptr_t Adjustment = VTableEntry(PlayerControllerVTable, Index + 1);
+        bool bAutonomousProxy = false;
+        for (uintptr_t Test = bCameraMode ? FindInstruction(Adjustment, Adjustment + 0x100, { 0x80, -1, -1, 0x00, 0x00, 0x00, 0x02 }) : 0; Test && !bAutonomousProxy; Test = FindInstruction(Test + 1, Adjustment + 0x100, { 0x80, -1, -1, 0x00, 0x00, 0x00, 0x02 }))
+        {
+            bAutonomousProxy = (Byte(Test + 1) & 0xF8) == 0xB8 && (Byte(Test + 1) & 0x07) != 0x04;
+        }
+        bool bNotClient = false;
+        for (uintptr_t Call = bAutonomousProxy ? FindRawCall(Adjustment, Adjustment + 0x100) : 0; Call && !bNotClient; Call = FindRawCall(Call + 1, Adjustment + 0x100))
+        {
+            bNotClient = Finder::RelativeTarget(Call, 1, 5) == ActorNetMode && Byte(Call + 5) == 0x83 && Byte(Call + 6) == 0xF8 && Byte(Call + 7) == 0x03;
+        }
+        if (bNotClient)
+        {
+            ClientAdjustment = Index + 1;
+            ++ClientAdjustments;
+        }
+    }
+    RequireSlot(L"APlayerController::SendClientAdjustment", Natives::APlayerController_SendClientAdjustmentIndex, ClientAdjustments == 1 ? ClientAdjustment : -1);
+
+    const int32_t Standby = Finder::VTableIndex(NetworkManagerVTable, reinterpret_cast<void*>(FunctionOf(L"Standby check is %s with RxTime (%f), TxTime (%f), PingThreshold (%d), JoinInProgressStandbyWaitTime (%f)")), 0x400);
+    RequireSlot(L"AGameNetworkManager::IsInLowBandwidthMode", Natives::AGameNetworkManager_IsInLowBandwidthModeIndex, Standby >= 5 && VTableEntry(NetworkManagerVTable, Standby - 5) ? Standby - 5 : -1);
+
+    Log::Info(L"Finder: replication live slots resolved, {} missing", MissingCount);
+    return MissingCount == 0;
 }

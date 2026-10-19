@@ -36,4 +36,5 @@ namespace Finder
     bool ResolvePlayerControllerConsole();
     bool ResolveProcessEvent();
     bool ResolveInitListen();
+    bool ResolveReplicationLive();
 }

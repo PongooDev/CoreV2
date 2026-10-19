@@ -23,6 +23,7 @@ namespace Reflection
     {
         Value,
         Bool,
+        Struct,
     };
 
     using FOwnerGetter = UStruct* (*)();
@@ -48,7 +49,7 @@ namespace Reflection
     class FMemberInfo
     {
     public:
-        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind);
+        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct = nullptr);
 
         int32_t GetOffsetChecked();
         uint8_t GetFieldMask() const { return FieldMask; }
@@ -62,6 +63,7 @@ namespace Reflection
         const wchar_t* Name;
         size_t Size;
         EMemberKind Kind;
+        FOwnerGetter StructType;
         int32_t Offset = UnresolvedOffset;
         uint8_t FieldMask = 0;
     };
@@ -123,6 +125,13 @@ public: \
     void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \
     __declspec(property(get = GetMember_##Name, put = SetMember_##Name)) Type Name;
 
+#define DefineUStructProperty(Type, Name) \
+private: \
+    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), 0, Reflection::EMemberKind::Struct, &Type::StaticReflectionOwner }; \
+public: \
+    Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
+    __declspec(property(get = GetMember_##Name)) Type Name;
+
 #define DefineBitfieldUProperty(Name) \
 private: \
     static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(uint8_t), Reflection::EMemberKind::Bool }; \
@@ -134,4 +143,5 @@ public: \
 #define DefineUFunction(Name) \
 private: \
     static inline Reflection::FFunctionInfo Function_##Name{ &StaticReflectionOwner, TEXT(#Name) }; \
-public:
+public: \
+    static UFunction* StaticFunction_##Name() { return Function_##Name.Get(); }

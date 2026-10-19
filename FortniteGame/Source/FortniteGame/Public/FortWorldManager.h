@@ -1,8 +1,10 @@
 #pragma once
 
 #include "GameFramework/Info.h"
+#include "Math/Transform.h"
 
 class UFortWorldRecord;
+struct FFortPlayerSpawnPadPlacementData;
 
 enum class EFortWorldManagerState : uint8_t
 {
@@ -25,6 +27,7 @@ public:
     DefineUProperty(UFortWorldRecord*, CurrentWorldRecord)
 
     void OnWorldRecordQueryComplete();
+    AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);
 
     static void Hook();
 

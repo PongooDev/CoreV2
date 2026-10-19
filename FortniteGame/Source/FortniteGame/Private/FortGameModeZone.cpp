@@ -1,6 +1,16 @@
 #include "pch.h"
 #include "FortGameModeZone.h"
 #include "AI/FortAIGoalManager.h"
+#include "BlueprintGameplayTagLibrary.h"
+#include "EnvironmentQuery/EnvQueryInstanceBlueprintWrapper.h"
+#include "EnvironmentQuery/EnvQueryManager.h"
+#include "FortGameData.h"
+#include "FortWorldManager.h"
+#include "GameThread.h"
+#include "Logging/LogMacros.h"
+#include "Building/BuildingActor.h"
+#include "Templates/Casts.h"
+#include "UObject/WeakObjectPtr.h"
 #include "Finder.h"
 #include "Hooks.h"
 #include "Natives.h"
@@ -21,10 +31,88 @@ APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPla
 #endif
 }
 
+DEFINE_LOG_CATEGORY_STATIC(LogFortPlacement, Log, All);
+
+namespace
+{
+    constexpr int32_t SpawnPadQueryTicks = 600;
+
+    UFortGameData* FindGameData()
+    {
+        for (TObjectIterator<UFortGameData> It; It; ++It)
+        {
+            return *It;
+        }
+        return nullptr;
+    }
+
+    void WaitForQuery(FWeakObjectPtr GameMode, FWeakObjectPtr WorldManager, FWeakObjectPtr Query, int32_t TicksLeft)
+    {
+        GameThread::Enqueue([GameMode, WorldManager, Query, TicksLeft]()
+        {
+            AFortGameModeZone* Zone = static_cast<AFortGameModeZone*>(GameMode.Get());
+            UEnvQueryInstanceBlueprintWrapper* PlacementQuery = static_cast<UEnvQueryInstanceBlueprintWrapper*>(Query.Get());
+            if (!Zone)
+            {
+                return;
+            }
+
+            if (PlacementQuery && PlacementQuery->GetResultsAsActors().Num() == 0 && TicksLeft > 0)
+            {
+                WaitForQuery(GameMode, WorldManager, Query, TicksLeft - 1);
+                return;
+            }
+
+            Zone->OnPlayerSpawnPadQueryFinished(static_cast<AFortWorldManager*>(WorldManager.Get()), PlacementQuery);
+        });
+    }
+}
+
 void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManager)
 {
 #if WITH_SERVER_CODE
+    PlacePlayerSpawnPad(WorldManager);
     AFortGameMode::FinishWorldInitialization(WorldManager);
+#endif
+}
+
+void AFortGameModeZone::PlacePlayerSpawnPad(AFortWorldManager* WorldManager)
+{
+#if WITH_SERVER_CODE
+    UFortGameData* GameData = FindGameData();
+    UEnvQuery* PlacementQuery = GameData ? GameData->DefaultPlayerSpawnPadPlacementData.PlacementQuery : nullptr;
+    UEnvQueryInstanceBlueprintWrapper* Query = PlacementQuery ? UEnvQueryManager::RunEQSQuery(this, PlacementQuery, this, EEnvQueryRunMode::SingleResult, nullptr) : nullptr;
+    if (!Query)
+    {
+        UE_LOG(LogFortPlacement, Error, TEXT("PlacePlayerSpawnPad: No valid placement actor could be found!  Failed to spawn player spawn pad."));
+        return;
+    }
+
+    WaitForQuery(FWeakObjectPtr(this), FWeakObjectPtr(WorldManager), FWeakObjectPtr(Query), SpawnPadQueryTicks);
+#endif
+}
+
+void AFortGameModeZone::OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldManager, UEnvQueryInstanceBlueprintWrapper* PlacementQuery)
+{
+#if WITH_SERVER_CODE
+    const TArray<AActor*> Results = PlacementQuery ? PlacementQuery->GetResultsAsActors() : TArray<AActor*>();
+    ABuildingActor* PlacementActor = Results.Num() > 0 ? Cast<ABuildingActor>(Results[0]) : nullptr;
+    UFortGameData* GameData = FindGameData();
+    if (!PlacementActor || !WorldManager || !GameData)
+    {
+        UE_LOG(LogFortPlacement, Error, TEXT("PlacePlayerSpawnPad: No valid placement actor could be found!  Failed to spawn player spawn pad."));
+        return;
+    }
+
+    UE_LOG(LogFortPlacement, Log, TEXT("PlacePlayerSpawnPad: Found spot %s with initial tags"), *PlacementActor->GetName());
+
+    FFortPlayerSpawnPadPlacementData& PlacementData = GameData->DefaultPlayerSpawnPadPlacementData;
+    if (AActor* SpawnPad = WorldManager->SpawnPlayerSpawnPad(PlacementData, PlacementActor->GetTransform()))
+    {
+        FGameplayTagContainer& PlacementTags = PlacementActor->StaticGameplayTags;
+        UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(PlacementTags, PlacementData.TagsToAddToChosenPlacementActor);
+        ActiveSpawnPad = SpawnPad;
+    }
 #endif
 }
 

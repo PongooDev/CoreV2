@@ -66,8 +66,8 @@ UScriptStruct* Reflection::FTypeInfo::GetScriptStruct()
     return Kind == ETypeKind::ScriptStruct ? static_cast<UScriptStruct*>(Get()) : nullptr;
 }
 
-Reflection::FMemberInfo::FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind)
-    : Owner(InOwner), Name(InName), Size(InSize), Kind(InKind)
+Reflection::FMemberInfo::FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct)
+    : Owner(InOwner), Name(InName), Size(InSize), Kind(InKind), StructType(InStruct)
 {
     Members().push_back(this);
 }
@@ -98,6 +98,19 @@ bool Reflection::FMemberInfo::Resolve()
         const UBoolProperty* BoolProperty = static_cast<const UBoolProperty*>(Property);
         Offset = Property->GetOffset_ForInternal() + BoolProperty->ByteOffset;
         FieldMask = BoolProperty->FieldMask;
+        return true;
+    }
+
+    if (Kind == EMemberKind::Struct)
+    {
+        const bool bStructProperty = Property->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty);
+        if (!bStructProperty || !StructType || reinterpret_cast<const UStruct*>(static_cast<const UStructProperty*>(Property)->Struct) != StructType())
+        {
+            Offset = MissingOffset;
+            return false;
+        }
+
+        Offset = Property->GetOffset_ForInternal();
         return true;
     }
 

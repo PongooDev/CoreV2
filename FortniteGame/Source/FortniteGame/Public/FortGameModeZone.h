@@ -3,6 +3,7 @@
 #include "FortGameMode.h"
 
 class AFortAIGoalManager;
+class UEnvQueryInstanceBlueprintWrapper;
 
 class AFortGameModeZone : public AFortGameMode
 {
@@ -10,9 +11,12 @@ class AFortGameModeZone : public AFortGameMode
 
 public:
     DefineUProperty(AFortAIGoalManager*, AIGoalManager)
+    DefineUProperty(AActor*, ActiveSpawnPad)
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
+    void PlacePlayerSpawnPad(AFortWorldManager* WorldManager);
+    void OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldManager, UEnvQueryInstanceBlueprintWrapper* PlacementQuery);
 
     static void Hook();
     static void HookVTables();

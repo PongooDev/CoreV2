@@ -1,12 +1,43 @@
 #include "pch.h"
 #include "FortWorldManager.h"
 #include "Engine/World.h"
+#include "FortGameData.h"
 #include "FortGameMode.h"
+#include "Kismet/GameplayStatics.h"
+#include "Logging/LogMacros.h"
 #include "Hooks.h"
 #include "Natives.h"
 #include "Online/FortGameSession.h"
 #include "Online/FortLobbyBeaconHost.h"
 #include "Templates/Casts.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogFortWorld, Log, All);
+
+AActor* AFortWorldManager::SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform)
+{
+#if WITH_SERVER_CODE
+    UClass* ActorToPlace = PlacementData.ActorToPlace.LoadSynchronous();
+    if (!ActorToPlace || !ActorToPlace->GetDefaultObject())
+    {
+        UE_LOG(LogFortWorld, Error, TEXT("SpawnPlayerSpawnPad: 'Actor To Place' has null CDO!  (I.E. Actor To Place is apparently unspecified.)  Cannot spawn player spawn pad."));
+        return nullptr;
+    }
+
+    AActor* SpawnPad = UGameplayStatics::BeginDeferredActorSpawnFromClass(this, ActorToPlace, SpawnTransform, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+    if (SpawnPad)
+    {
+        SpawnPad = UGameplayStatics::FinishSpawningActor(SpawnPad, SpawnTransform);
+    }
+
+    if (!SpawnPad)
+    {
+        UE_LOG(LogFortWorld, Error, TEXT("SpawnPlayerSpawnPad: Failed to spawn actor %s."), *ActorToPlace->GetName());
+    }
+    return SpawnPad;
+#else
+    return nullptr;
+#endif
+}
 
 void AFortWorldManager::OnWorldRecordQueryComplete()
 {

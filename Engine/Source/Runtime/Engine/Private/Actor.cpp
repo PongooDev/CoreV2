@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "ReflectionParams.h"
 #include "GameFramework/Actor.h"
 #include "Engine/DemoNetDriver.h"
 #include "Engine/Engine.h"
@@ -24,6 +25,12 @@ UWorld* AActor::GetWorld() const
         }
     }
     return nullptr;
+}
+
+FTransform AActor::GetTransform() const
+{
+    Reflection::FParams Params(StaticFunction_GetTransform());
+    return Params.Call(const_cast<AActor*>(this)) ? Params.Take<FTransform>(L"ReturnValue") : FTransform();
 }
 
 FVector AActor::GetVelocity() const

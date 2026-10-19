@@ -3,6 +3,7 @@
 #include "Containers/EnumAsByte.h"
 #include "CoreGlobals.h"
 #include "Engine/EngineBaseTypes.h"
+#include "Math/Transform.h"
 #include "Math/Vector.h"
 #include "ObjectLayout.h"
 #include "UObject/NameTypes.h"
@@ -54,6 +55,7 @@ public:
     DefineUProperty(float, MinNetUpdateFrequency)
     DefineNativeMember(TEnumAsByte<ENetDormancy>, NetDormancy, AActor_NetDormancy)
     DefineNativeBitfield(bActorInitialized, AActor_bActorInitialized, Natives::AActor_bActorInitializedMask)
+    DefineUFunction(GetTransform)
 
     ENetRole GetRemoteRole() const { return RemoteRole; }
     AActor* GetOwner() const { return Owner; }
@@ -68,6 +70,7 @@ public:
     ENetMode GetNetMode() const;
     bool IsNetMode(ENetMode Mode) const;
 
+    FTransform GetTransform() const;
     FVector GetVelocity() const;
     float GetNetPriority(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);
     bool GetNetDormancy(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);

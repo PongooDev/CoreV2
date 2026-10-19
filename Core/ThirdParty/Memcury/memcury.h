@@ -983,6 +983,157 @@ namespace Memcury
 
             return Scanner(PE::Address());
         }
+
+        static auto GetRuntimeFunctions() -> std::pair<const RUNTIME_FUNCTION*, size_t>
+        {
+            const auto& directory = PE::GetNTHeaders()->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+            return { reinterpret_cast<const RUNTIME_FUNCTION*>(PE::GetModuleBase() + directory.VirtualAddress), directory.Size / sizeof(RUNTIME_FUNCTION) };
+        }
+
+        static auto FindRuntimeFunction(uintptr_t address) -> const RUNTIME_FUNCTION*
+        {
+            const auto [functions, count] = GetRuntimeFunctions();
+            const auto rva = static_cast<DWORD>(address - PE::GetModuleBase());
+
+            size_t low = 0;
+            size_t high = count;
+            while (low < high)
+            {
+                const auto middle = (low + high) / 2;
+                if (functions[middle].EndAddress <= rva)
+                {
+                    low = middle + 1;
+                }
+                else if (functions[middle].BeginAddress > rva)
+                {
+                    high = middle;
+                }
+                else
+                {
+                    return &functions[middle];
+                }
+            }
+
+            return nullptr;
+        }
+
+        static auto GetChainRoot(const RUNTIME_FUNCTION* entry) -> DWORD
+        {
+            const auto imageBase = PE::GetModuleBase();
+
+            while (entry)
+            {
+                const auto unwindInfo = reinterpret_cast<const std::uint8_t*>(imageBase + entry->UnwindData);
+                if (((unwindInfo[0] >> 3) & UNW_FLAG_CHAININFO) == 0)
+                {
+                    return entry->BeginAddress;
+                }
+
+                const auto countOfCodes = unwindInfo[2];
+                entry = reinterpret_cast<const RUNTIME_FUNCTION*>(unwindInfo + 4 + ((countOfCodes + 1) & ~1) * 2);
+            }
+
+            return 0;
+        }
+
+        auto IsFunctionStart() -> bool
+        {
+            const auto entry = FindRuntimeFunction(_address.Get());
+            return entry && entry->BeginAddress == static_cast<DWORD>(_address.Get() - PE::GetModuleBase());
+        }
+
+        auto FindFunctionEnd() -> Scanner
+        {
+            const auto [functions, count] = GetRuntimeFunctions();
+            const auto entry = FindRuntimeFunction(_address.Get());
+            const auto rva = static_cast<DWORD>(_address.Get() - PE::GetModuleBase());
+
+            if (!entry || entry->BeginAddress != rva)
+            {
+                return Scanner(PE::Address());
+            }
+
+            auto end = entry->EndAddress;
+            for (auto next = entry + 1; next < functions + count && next->BeginAddress == end && GetChainRoot(next) == rva; ++next)
+            {
+                end = next->EndAddress;
+            }
+
+            return Scanner(PE::Address(PE::GetModuleBase() + end));
+        }
+
+        auto GetRelativeTarget(uint32_t offset, uint32_t length) -> Scanner
+        {
+            const auto instruction = _address.Get();
+            return Scanner(PE::Address(instruction + length + *reinterpret_cast<const int32_t*>(instruction + offset)));
+        }
+
+        auto FindNextCall(size_t maxDistance) -> Scanner
+        {
+            auto textSection = PE::Section::GetSection(".text");
+
+            for (auto current = _address.Get() + 1; current + 5 <= _address.Get() + maxDistance; current++)
+            {
+                if (*reinterpret_cast<const std::uint8_t*>(current) != 0xE8)
+                {
+                    continue;
+                }
+
+                auto target = Scanner(PE::Address(current)).GetRelativeTarget(1, 5);
+                if (textSection.isInSection(PE::Address(target.Get())) && target.IsFunctionStart())
+                {
+                    return Scanner(PE::Address(current));
+                }
+            }
+
+            return Scanner(PE::Address());
+        }
+
+        static auto FindDirectCalls(uintptr_t begin, uintptr_t end) -> std::vector<std::pair<uintptr_t, uintptr_t>>
+        {
+            std::vector<std::pair<uintptr_t, uintptr_t>> calls;
+            auto textSection = PE::Section::GetSection(".text");
+
+            for (auto current = begin; current + 5 <= end; current++)
+            {
+                if (*reinterpret_cast<const std::uint8_t*>(current) != 0xE8)
+                {
+                    continue;
+                }
+
+                const auto target = Scanner(PE::Address(current)).GetRelativeTarget(1, 5).Get();
+                if (textSection.isInSection(PE::Address(target)))
+                {
+                    calls.emplace_back(current, target);
+                }
+            }
+
+            return calls;
+        }
+
+        static auto FindCallsTo(uintptr_t target, bool bIncludeJumps) -> std::vector<Scanner>
+        {
+            std::vector<Scanner> sites;
+            auto textSection = PE::Section::GetSection(".text");
+            const auto begin = textSection.GetSectionStart().Get();
+            const auto end = textSection.GetSectionEnd().Get();
+
+            for (auto current = begin; current + 5 <= end; current++)
+            {
+                const auto opcode = *reinterpret_cast<const std::uint8_t*>(current);
+                if (opcode != 0xE8 && (!bIncludeJumps || opcode != 0xE9))
+                {
+                    continue;
+                }
+
+                if (current + 5 + *reinterpret_cast<const int32_t*>(current + 1) == target)
+                {
+                    sites.push_back(Scanner(PE::Address(current)));
+                }
+            }
+
+            return sites;
+        }
     };
 
     /* Bad don't use it tbh... */

@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        run: msbuild Core.sln /m /nologo /v:minimal /p:Configuration=Release /p:Platform=x64
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "build-${{ github.run_number }}" \
+            x64/Release/Core.dll x64/Release/CoreClient.dll x64/Release/CoreRedirect.dll \
+            --target "${{ github.sha }}" \
+            --title "Build ${{ github.run_number }}" \
+            --notes "$(git log -1 --format='%s (%h)')" \
+            --latest

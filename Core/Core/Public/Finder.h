@@ -25,4 +25,5 @@ namespace Finder
     bool IsReadable(const void* Pointer, size_t Size);
 
     bool ResolveAll();
+    bool ResolveLive();
 }

@@ -97,6 +97,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="pch.h" />
+    <ClInclude Include="Core\Public\Boot.h">
+      <Filter>Core\Public</Filter>
+    </ClInclude>
     <ClInclude Include="Core\Public\Configuration.h">
       <Filter>Core\Public</Filter>
     </ClInclude>
@@ -192,6 +195,9 @@
     <ClCompile Include="pch.cpp" />
     <ClCompile Include="Core\dllmain.cpp">
       <Filter>Core</Filter>
+    </ClCompile>
+    <ClCompile Include="Core\Private\Boot.cpp">
+      <Filter>Core\Private</Filter>
     </ClCompile>
     <ClCompile Include="Core\Private\Configuration.cpp">
       <Filter>Core\Private</Filter>

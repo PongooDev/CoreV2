@@ -2,6 +2,8 @@
 #include "Finder.h"
 #include "Natives.h"
 #include "Log.h"
+#include "UObject/Class.h"
+#include "UObject/UObjectGlobals.h"
 
 #include <algorithm>
 
@@ -415,6 +417,37 @@ namespace
         const uintptr_t RecordRef = First(Finder::StringRefs(L"RecordReplay: failed to create demo net driver!"));
         const uintptr_t CreateCall = RecordRef ? CallBeforeJccPastRef(RecordRef, 0x60) : 0;
         Require(L"UEngine::CreateNamedNetDriver", Natives::UEngine_CreateNamedNetDriver, CreateCall ? Finder::RelativeTarget(CreateCall, 1, 5) : 0);
+
+        uintptr_t FindNamed = 0;
+        uintptr_t SetWorld = 0;
+        if (CreateCall)
+        {
+            uintptr_t Jcc = CreateCall + 7;
+            uintptr_t JumpTarget = 0;
+            if (Byte(Jcc) == 0x75)
+            {
+                JumpTarget = Jcc + 2 + static_cast<int8_t>(Byte(Jcc + 1));
+            }
+            else if (Byte(Jcc) == 0x0F && Byte(Jcc + 1) == 0x85)
+            {
+                JumpTarget = Jcc + 6 + *reinterpret_cast<const int32_t*>(Jcc + 2);
+            }
+
+            if (JumpTarget)
+            {
+                const uintptr_t FindCall = FindRawCall(JumpTarget, JumpTarget + 0x30);
+                FindNamed = FindCall ? Finder::RelativeTarget(FindCall, 1, 5) : 0;
+
+                const uintptr_t DemoStore = FindNamed ? FindInstruction(FindCall, FindCall + 0x40, { -1, 0x89, -1, 0xB8, 0x00, 0x00, 0x00 }) : 0;
+                if (DemoStore && (Byte(DemoStore) & 0xF8) == 0x48)
+                {
+                    const uintptr_t SetCall = FindRawCall(DemoStore + 7, DemoStore + 0x20);
+                    SetWorld = SetCall ? Finder::RelativeTarget(SetCall, 1, 5) : 0;
+                }
+            }
+        }
+        Require(L"UEngine::FindNamedNetDriver", Natives::UEngine_FindNamedNetDriver, FindNamed);
+        Require(L"UNetDriver::SetWorld", Natives::UNetDriver_SetWorld, SetWorld);
     }
 
     void ResolvePreInitServerPatch()
@@ -479,7 +512,60 @@ bool Finder::ResolveAll()
     ResolvePreInitGlobals();
     ResolveEngineReadiness();
     ResolveGameThreadTick();
+    ResolveEngineNet();
+    ResolvePreInitServerPatch();
 
     Log::Info(L"Finder: static resolution complete, {} missing", MissingCount);
     return MissingCount == 0;
+}
+
+namespace
+{
+    void** CdoVTable(const wchar_t* ClassPath)
+    {
+        UClass* Class = FindObject<UClass>(nullptr, ClassPath);
+        UObject* Default = Class ? Class->GetDefaultObject() : nullptr;
+        return Default ? *reinterpret_cast<void***>(Default) : nullptr;
+    }
+}
+
+bool Finder::ResolveLive()
+{
+    int32_t Missing = 0;
+
+    if (void** ObjectVTable = CdoVTable(L"/Script/CoreUObject.Object"))
+    {
+        for (int32_t Index = 0; Index < 0x80; ++Index)
+        {
+            const uintptr_t Function = reinterpret_cast<uintptr_t>(ObjectVTable[Index]);
+            if (!IsReadable(reinterpret_cast<void*>(Function), 0x200))
+            {
+                break;
+            }
+            if (FindInstruction(Function, Function + 0x200, { 0xF7, -1, 0x88, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00 }))
+            {
+                Natives::ProcessEventIndex = Index;
+                break;
+            }
+        }
+    }
+    if (Natives::ProcessEventIndex < 0)
+    {
+        Log::Error(L"Finder: ProcessEvent index not found");
+        ++Missing;
+    }
+
+    const uintptr_t InitListen = FunctionOf(L"UNetDriver::InitListen");
+    if (void** NetDriverVTable = CdoVTable(L"/Script/Engine.NetDriver"))
+    {
+        Natives::UNetDriver_InitListenIndex = VTableIndex(NetDriverVTable, reinterpret_cast<void*>(InitListen), 0x6A);
+    }
+    if (Natives::UNetDriver_InitListenIndex < 0)
+    {
+        Log::Error(L"Finder: UNetDriver::InitListen index not found");
+        ++Missing;
+    }
+
+    Log::Info(L"Finder: live resolution complete, {} missing", Missing);
+    return Missing == 0;
 }

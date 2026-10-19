@@ -1,11 +1,9 @@
 #include "pch.h"
+#include "Boot.h"
 
 static DWORD WINAPI MainThread(LPVOID)
 {
-    if (MH_Initialize() != MH_OK)
-    {
-        return 1;
-    }
+    Boot::Initialize();
     return 0;
 }
 

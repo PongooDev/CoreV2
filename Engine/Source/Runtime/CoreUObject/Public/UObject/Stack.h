@@ -7,6 +7,8 @@
 #include <cstdint>
 
 class UBoolProperty;
+class UByteProperty;
+class UFloatProperty;
 class UIntProperty;
 class UInterfaceProperty;
 class UObject;
@@ -20,6 +22,18 @@ template <>
 struct TPropertyCppType<UIntProperty>
 {
     using Type = int32_t;
+};
+
+template <>
+struct TPropertyCppType<UByteProperty>
+{
+    using Type = uint8_t;
+};
+
+template <>
+struct TPropertyCppType<UFloatProperty>
+{
+    using Type = float;
 };
 
 #define RESULT_PARAM Z_Param__Result

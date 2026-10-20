@@ -257,6 +257,12 @@ void AFortPlayerController::HookVTables()
     {
         Log::Error(L"Finder: AFortPlayerController::Possess slot not found");
     }
+    if (UFunction* ActivateSlotFunction = StaticFunction_ActivateSlot(); ActivateSlotFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        ActivateSlotFunction->SetNativeFunc(&execActivateSlot);
+        Log::Info(L"Hook AFortPlayerController::ActivateSlot: native");
+    }
+
     if (Finder::ResolveInventoryOwnerLive(StaticFunction_ServerRemoveInventoryItem(), PlayerControllerVTable))
     {
         const ptrdiff_t InterfaceOffset = Natives::AFortPlayerController_InventoryOwnerInterface;
@@ -329,6 +335,26 @@ UFortSchematicItem* AFortPlayerController::GetSchematicForItem(const UFortItemDe
         return nullptr;
     }
     return Natives::AFortPlayerController_GetSchematicForItem(this, ItemDefinition);
+}
+
+void AFortPlayerController::ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot)
+{
+    if (AFortQuickBars* Bars = QuickBars)
+    {
+        Bars->ServerActivateSlotInternal(InQuickBar, Slot, ActivateDelay, bUpdatePreviousFocusedSlot);
+    }
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execActivateSlot)
+{
+    P_GET_PROPERTY(UByteProperty, Z_Param_InQuickBar);
+    P_GET_PROPERTY(UIntProperty, Z_Param_Slot);
+    P_GET_PROPERTY(UFloatProperty, Z_Param_ActivateDelay);
+    P_GET_UBOOL(Z_Param_bUpdatePreviousFocusedSlot);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerController*>(Context)->ActivateSlot(static_cast<EFortQuickBars>(Z_Param_InQuickBar), Z_Param_Slot, Z_Param_ActivateDelay, Z_Param_bUpdatePreviousFocusedSlot);
+    P_NATIVE_END;
 }
 
 AFortPlayerController* AFortPlayerController::FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner)

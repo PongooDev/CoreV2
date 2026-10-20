@@ -1,6 +1,8 @@
 #pragma once
 
 #include "GameFramework/PlayerController.h"
+#include "Items/FortQuickBars.h"
+#include "UObject/Stack.h"
 #include "Misc/Guid.h"
 #include "StructArray.h"
 
@@ -26,8 +28,10 @@ public:
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
+    DefineUFunction(ActivateSlot)
 
     bool InitializeMcpProfile(const void* OnComplete);
+    void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
     void Possess(APawn* InPawn);
     void SpawnQuickBars();
     void SetupQuickBars();
@@ -43,6 +47,8 @@ public:
 
     static void Hook();
     static void HookVTables();
+
+    DECLARE_FUNCTION(execActivateSlot);
 
 private:
     static inline bool (*InitializeMcpProfileOG)(AFortPlayerController* This, const void* OnComplete) = nullptr;

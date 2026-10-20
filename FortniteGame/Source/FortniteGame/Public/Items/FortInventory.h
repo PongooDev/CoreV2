@@ -29,5 +29,6 @@ public:
     UFortWorldItem* FindWorldItem(const FGuid& ItemGuid);
     void AddWorldItem(UFortWorldItem* WorldItem);
     void UpdateWorldItemCount(UFortWorldItem* WorldItem, int32_t NewCount);
+    void UpdateWorldItemLoadedAmmo(UFortWorldItem* WorldItem, int32_t NewLoadedAmmo);
     void RemoveWorldItem(UFortWorldItem* WorldItem);
 };

@@ -229,6 +229,7 @@ namespace Natives
     inline bool (*UFortSchematicItem_CanCraftSchematic)(UFortSchematicItem* This, AFortPlayerController* PlayerController, uint8_t* OutFailCause, bool bConsiderReservedItems, int32_t Count) = nullptr;
     inline UFortSchematicItem* (*AFortPlayerController_GetSchematicForItem)(AFortPlayerController* This, const UFortItemDefinition* ItemDefinition) = nullptr;
     inline int32_t UFortSchematicItem_ServerCraftSchematicIndex = -1;
+    inline int32_t UFortWorldItem_SetLoadedAmmoIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;

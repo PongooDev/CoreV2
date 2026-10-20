@@ -3245,6 +3245,38 @@ bool Finder::ResolveMissionGenerationLive()
     return true;
 }
 
+bool Finder::ResolveWorldItemLive(void** InventoryOwnerVTable)
+{
+    int32_t LoadedAmmoIndex = -1;
+    for (int32_t Index = 0; InventoryOwnerVTable && Index < 0x40 && LoadedAmmoIndex < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(InventoryOwnerVTable, Index);
+        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
+        if (!FunctionEnd || FunctionEnd - Function > 0x100 || !FindInstruction(Function, FunctionEnd, { 0x80, 0xB9, -1, -1, -1, -1, 0x03 }))
+        {
+            continue;
+        }
+
+        for (uintptr_t Site = FindVirtualCall(Function, FunctionEnd); Site; Site = FindVirtualCall(Site + 1, FunctionEnd))
+        {
+            if ((Byte(Site + 1) & 0x38) == 0x20)
+            {
+                LoadedAmmoIndex = VirtualSlot(Site);
+                break;
+            }
+        }
+    }
+
+    if (LoadedAmmoIndex < 0)
+    {
+        Log::Error(L"Finder: UFortWorldItem::SetLoadedAmmo slot not found");
+        return false;
+    }
+    Natives::UFortWorldItem_SetLoadedAmmoIndex = LoadedAmmoIndex;
+    Log::Info(L"Finder: UFortWorldItem::SetLoadedAmmo is slot 0x{:X}", LoadedAmmoIndex);
+    return true;
+}
+
 bool Finder::ResolveCraftingLive()
 {
     if (Natives::UFortSchematicItem_CanCraftSchematic && Natives::AFortPlayerController_GetSchematicForItem && Natives::UFortSchematicItem_ServerCraftSchematicIndex >= 0)

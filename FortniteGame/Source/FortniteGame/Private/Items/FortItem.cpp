@@ -2,6 +2,13 @@
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Finder.h"
+#include "Hooks.h"
+#include "Items/FortInventory.h"
+#include "Log.h"
+#include "Player/FortPlayerController.h"
+#include "Templates/Casts.h"
+#include "UObject/Class.h"
+#include "UObject/UObjectIterator.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
 
@@ -51,4 +58,59 @@ void UFortWorldItem::SetOwningControllerForTemporaryItem(AFortPlayerController* 
     Reflection::FParams Params(StaticFunction_SetOwningControllerForTemporaryItem());
     Params.Set(L"InController", InController);
     Params.Call(this);
+}
+
+bool UFortWorldItem::SetLoadedAmmo(int32_t NewLoadedAmmo)
+{
+#if WITH_SERVER_CODE
+    FFortItemEntry& Entry = ItemEntry;
+    if (Entry.LoadedAmmo == NewLoadedAmmo)
+    {
+        return false;
+    }
+
+    const FWeakObjectPtr& ParentInventory = Entry.ParentInventory;
+    if (AFortInventory* Inventory = Cast<AFortInventory>(ParentInventory.Get()))
+    {
+        Inventory->UpdateWorldItemLoadedAmmo(this, NewLoadedAmmo);
+    }
+    else
+    {
+        Entry.LoadedAmmo = NewLoadedAmmo;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+void UFortWorldItem::HookVTables()
+{
+    UObject* WorldItemDefault = StaticClass()->GetDefaultObject(false);
+    void** WorldItemVTable = WorldItemDefault ? *reinterpret_cast<void***>(WorldItemDefault) : nullptr;
+    UObject* PlayerControllerDefault = AFortPlayerController::StaticClass()->GetDefaultObject(false);
+    const ptrdiff_t InterfaceOffset = Natives::AFortPlayerController_InventoryOwnerInterface;
+    void** InventoryOwnerVTable = PlayerControllerDefault && InterfaceOffset > 0 ? *reinterpret_cast<void***>(reinterpret_cast<uint8_t*>(PlayerControllerDefault) + InterfaceOffset) : nullptr;
+    if (!WorldItemVTable || !Finder::ResolveWorldItemLive(InventoryOwnerVTable))
+    {
+        return;
+    }
+
+    const int32_t Index = Natives::UFortWorldItem_SetLoadedAmmoIndex;
+    void* const Stripped = WorldItemVTable[Index];
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[Index] == Stripped)
+        {
+            Hooks::SwapVTable(L"UFortWorldItem::SetLoadedAmmo", VTable, Index, reinterpret_cast<void*>(&SetLoadedAmmoHK));
+        }
+    }
+}
+
+bool UFortWorldItem::SetLoadedAmmoHK(UFortWorldItem* This, int32_t NewLoadedAmmo)
+{
+    return This->SetLoadedAmmo(NewLoadedAmmo);
 }

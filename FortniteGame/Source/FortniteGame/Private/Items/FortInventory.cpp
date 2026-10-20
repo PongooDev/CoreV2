@@ -88,6 +88,27 @@ void AFortInventory::UpdateWorldItemCount(UFortWorldItem* WorldItem, int32_t New
 #endif
 }
 
+void AFortInventory::UpdateWorldItemLoadedAmmo(UFortWorldItem* WorldItem, int32_t NewLoadedAmmo)
+{
+#if WITH_SERVER_CODE
+    if (!WorldItem)
+    {
+        return;
+    }
+
+    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+    ItemEntry.LoadedAmmo = NewLoadedAmmo;
+
+    FFortItemList& ItemList = Inventory;
+    if (FFortItemEntry* ReplicatedEntry = ItemList.FindReplicatedEntry(ItemEntry.ItemGuid))
+    {
+        ReplicatedEntry->LoadedAmmo = NewLoadedAmmo;
+        ItemList.MarkItemDirty(*ReplicatedEntry);
+    }
+    HandleInventoryLocalUpdate();
+#endif
+}
+
 void AFortInventory::RemoveWorldItem(UFortWorldItem* WorldItem)
 {
 #if WITH_SERVER_CODE

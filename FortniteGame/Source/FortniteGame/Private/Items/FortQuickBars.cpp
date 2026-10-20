@@ -76,9 +76,11 @@ void AFortQuickBars::ServerRemoveItemInternal(const FGuid& Item, bool bFindRepla
 void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, bool bFindReplacement, bool bForce)
 {
 #if WITH_SERVER_CODE
+    bool bRemovedFocusedItem = false;
     for (EFortQuickBars Bar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
     {
-        const int32_t NumSlots = GetQuickBar(Bar).Slots.Num();
+        FQuickBar& QuickBar = GetQuickBar(Bar);
+        const int32_t NumSlots = QuickBar.Slots.Num();
         for (int32_t SlotIndex = 0; SlotIndex < NumSlots; ++SlotIndex)
         {
             TArray<FGuid>& Items = GetSlot(Bar, SlotIndex).Items;
@@ -87,9 +89,18 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
                 if (Items[Index] == Item)
                 {
                     Items.RemoveAt(Index);
+                    bRemovedFocusedItem |= SlotIndex == QuickBar.CurrentFocusedSlot && Items.Num() == 0;
                 }
             }
         }
+    }
+
+    if (bRemovedFocusedItem)
+    {
+        FQuickBar& PrimaryBar = PrimaryQuickBar;
+        const int32_t PreviousSlot = PrimaryBar.PreviousFocusedSlot;
+        const bool bUsePrevious = PreviousSlot >= 0 && PreviousSlot < PrimaryBar.Slots.Num() && PreviousSlot != PrimaryBar.CurrentFocusedSlot && GetSlot(EFortQuickBars::Primary, PreviousSlot).Items.Num() > 0;
+        ServerActivateSlotInternal(EFortQuickBars::Primary, bUsePrevious ? PreviousSlot : 0, 0.0f, false);
     }
 #endif
 }

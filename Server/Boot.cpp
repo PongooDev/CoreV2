@@ -87,6 +87,7 @@ void Boot::Initialize()
         AFortPickup::HookVTables();
         AFortObjectiveBase::HookVTables();
         UFortSchematicItem::HookVTables();
+        UFortWorldItem::HookVTables();
     });
 
     Log::Info(L"Core V2 startup complete");

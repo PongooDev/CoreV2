@@ -17,6 +17,7 @@ public:
 
     DefineUProperty(int32_t, Count)
     DefineUProperty(UFortItemDefinition*, ItemDefinition)
+    DefineUProperty(int32_t, LoadedAmmo)
     DefineUProperty(FGuid, ItemGuid)
     DefineUProperty(FWeakObjectPtr, ParentInventory)
 };
@@ -41,4 +42,10 @@ public:
     DefineUFunction(SetOwningControllerForTemporaryItem)
 
     void SetOwningControllerForTemporaryItem(AFortPlayerController* InController);
+    bool SetLoadedAmmo(int32_t NewLoadedAmmo);
+
+    static void HookVTables();
+
+private:
+    static bool SetLoadedAmmoHK(UFortWorldItem* This, int32_t NewLoadedAmmo);
 };

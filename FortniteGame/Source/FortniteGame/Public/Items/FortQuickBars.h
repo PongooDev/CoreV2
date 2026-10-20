@@ -34,6 +34,7 @@ struct FQuickBar
 {
     DefineUnrealStruct(FQuickBar, FortniteGame)
     DefineUProperty(int32_t, CurrentFocusedSlot)
+    DefineUProperty(int32_t, PreviousFocusedSlot)
     DefineUStructArrayProperty(FQuickBarSlot, Slots)
     DefineUStructProperty(FQuickBarData, DataDefinition)
 };

@@ -38,6 +38,9 @@ public:
 
     bool IsChildOf(const UStruct* SomeBase) const;
     UProperty* FindPropertyByName(FName InName) const;
+
+    void InitializeStruct(void* Dest, int32_t ArrayDim = 1) const;
+    void DestroyStruct(void* Dest, int32_t ArrayDim = 1) const;
 };
 
 class UScriptStruct : public UStruct

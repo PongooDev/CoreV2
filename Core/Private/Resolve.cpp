@@ -2452,6 +2452,12 @@ namespace
         }
         Require(L"UAbilitySystemComponent::MarkAbilitySpecDirty", Natives::UAbilitySystemComponent_MarkAbilitySpecDirty, MarkDirty);
 
+        const uintptr_t MarkDirtyEnd = MarkDirty ? Finder::FunctionEnd(MarkDirty) : 0;
+        const uintptr_t IncrementId = MarkDirtyEnd ? FindInstruction(MarkDirty, MarkDirtyEnd, { 0xFF, 0x41, -1 }) : 0;
+        RequireOffset(L"FFastArraySerializer::IDCounter", Natives::FFastArraySerializer_IDCounter, IncrementId ? Byte(IncrementId + 2) : 0);
+        const uintptr_t MarkArrayDirty = IncrementId ? FindRawCall(IncrementId, MarkDirtyEnd) : 0;
+        Require(L"FFastArraySerializer::MarkArrayDirty", Natives::FFastArraySerializer_MarkArrayDirty, MarkArrayDirty ? Finder::RelativeTarget(MarkArrayDirty, 1, 5) : 0);
+
         const uint8_t* Count = reinterpret_cast<const uint8_t*>(&LockCount);
         const uintptr_t Increment = LockCount > 0 ? UniqueFunction({ 0xFF, 0x81, Count[0], Count[1], Count[2], Count[3], 0xC3 }) : 0;
         Require(L"UAbilitySystemComponent::IncrementAbilityListLock", Natives::UAbilitySystemComponent_IncrementAbilityListLock, IsFunctionEntry(Increment) ? Increment : 0);
@@ -2757,6 +2763,22 @@ bool Finder::ResolveScriptStructCopy()
     };
 
     void** VTable = CdoVTable(L"/Script/CoreUObject.StructProperty");
+    std::vector<int32_t> StructSlots;
+    const int32_t ArrayDimOffset = ObjectLayout::Current.UProperty_ArrayDim;
+    for (int32_t Index = 0; VTable && Index < 0x100; ++Index)
+    {
+        const uintptr_t Thunk = reinterpret_cast<uintptr_t>(VTable[Index]);
+        if (IsInText(Thunk) && FindInstruction(Thunk, Thunk + 0x14, { 0x48, 0x8B, 0x41, StructOffset, 0x44, 0x8B, 0x41, ArrayDimOffset, 0x48, 0x8B, 0xC8, 0x4C, 0x8B, 0x08, 0x49, 0xFF, 0xA1 }) == Thunk)
+        {
+            StructSlots.push_back(*reinterpret_cast<const int32_t*>(Thunk + 17) / static_cast<int32_t>(sizeof(void*)));
+        }
+    }
+    if (StructSlots.size() == 2)
+    {
+        Natives::UStruct_InitializeStructIndex = std::min(StructSlots[0], StructSlots[1]);
+        Natives::UStruct_DestroyStructIndex = std::max(StructSlots[0], StructSlots[1]);
+    }
+
     for (int32_t Index = 0; VTable && Index < 0x100 && !Natives::UScriptStruct_CopyScriptStruct; ++Index)
     {
         const uintptr_t Thunk = reinterpret_cast<uintptr_t>(VTable[Index]);
@@ -2772,12 +2794,12 @@ bool Finder::ResolveScriptStructCopy()
         }
     }
 
-    if (!Natives::UScriptStruct_CopyScriptStruct)
+    if (!Natives::UScriptStruct_CopyScriptStruct || Natives::UStruct_InitializeStructIndex < 0)
     {
-        Log::Error(L"Finder: UScriptStruct::CopyScriptStruct not found");
+        Log::Error(L"Finder: UScriptStruct::CopyScriptStruct / UStruct::InitializeStruct / DestroyStruct not found");
         return false;
     }
-    Log::Info(L"Finder: UScriptStruct::CopyScriptStruct found");
+    Log::Info(L"Finder: UScriptStruct::CopyScriptStruct found, UStruct::InitializeStruct slot 0x{:X}, DestroyStruct slot 0x{:X}", Natives::UStruct_InitializeStructIndex, Natives::UStruct_DestroyStructIndex);
     return true;
 }
 

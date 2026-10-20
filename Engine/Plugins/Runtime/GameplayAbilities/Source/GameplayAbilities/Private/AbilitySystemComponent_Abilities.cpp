@@ -17,15 +17,14 @@ DEFINE_LOG_CATEGORY_STATIC(LogAbilitySystem, Log, All);
 
 FGameplayAbilitySpec* UAbilitySystemComponent::FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle Handle)
 {
-    FScriptArray& Items = ActivatableAbilities.Items;
-    const int32_t SpecSize = FGameplayAbilitySpec::StaticStruct()->GetStructureSize();
-    uint8_t* Data = static_cast<uint8_t*>(Items.GetData());
+    FGameplayAbilitySpecContainer& Container = ActivatableAbilities;
+    TStructArray<FGameplayAbilitySpec>& Items = Container.Items;
     for (int32_t Index = 0; Index < Items.Num(); ++Index)
     {
-        FGameplayAbilitySpec* Spec = reinterpret_cast<FGameplayAbilitySpec*>(Data + static_cast<size_t>(Index) * SpecSize);
-        if (Spec->Handle == Handle)
+        FGameplayAbilitySpec& Spec = Items[Index];
+        if (Spec.Handle == Handle)
         {
-            return Spec;
+            return &Spec;
         }
     }
 

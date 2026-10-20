@@ -63,6 +63,7 @@ struct FGameplayEventData;
 class UWorld;
 struct FActorSpawnParameters;
 struct FFrame;
+struct FFastArraySerializer;
 class UProperty;
 struct FTransform;
 struct FLevelCollection;
@@ -175,6 +176,7 @@ namespace Natives
     inline AActor* (*UWorld_SpawnActor)(UWorld* This, UClass* Class, const FTransform* UserTransformPtr, const FActorSpawnParameters& SpawnParameters) = nullptr;
     inline void (*UScriptStruct_CopyScriptStruct)(const UScriptStruct* This, void* Dest, const void* Src, int32_t ArrayDim) = nullptr;
     inline void (*FFrame_Step)(FFrame* This, UObject* Context, void* const Result) = nullptr;
+    inline void (*FFastArraySerializer_MarkArrayDirty)(FFastArraySerializer* This) = nullptr;
     inline void (*FFrame_StepExplicitProperty)(FFrame* This, void* const Result, UProperty* Property) = nullptr;
     inline bool (*UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled)() = nullptr;
     inline void (*UNetDriver_TickFlush)(UNetDriver* This, float DeltaSeconds) = nullptr;
@@ -230,6 +232,8 @@ namespace Natives
     inline int32_t IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = -1;
     inline int32_t IConsoleManager_FindConsoleVariableIndex = -1;
     inline int32_t UProperty_GetCPPTypeIndex = -1;
+    inline int32_t UStruct_InitializeStructIndex = -1;
+    inline int32_t UStruct_DestroyStructIndex = -1;
     inline int32_t UMcpProfile_PrepareRequestIndex = -1;
     inline int32_t FUniqueNetId_IsValidIndex = -1;
 
@@ -280,6 +284,7 @@ namespace Natives
     inline ptrdiff_t FOutBunch_bReliable = -1;
     inline ptrdiff_t UChannel_ChIndex = -1;
     inline ptrdiff_t FFrame_Object = -1;
+    inline ptrdiff_t FFastArraySerializer_IDCounter = -1;
     inline ptrdiff_t FFrame_Code = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;

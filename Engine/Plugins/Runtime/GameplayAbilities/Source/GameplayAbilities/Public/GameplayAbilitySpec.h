@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Containers/ScriptArray.h"
+#include "StructArray.h"
 #include "Misc/CoreMiscDefines.h"
 #include "Reflection.h"
 
@@ -29,5 +29,5 @@ struct FGameplayAbilitySpec
 struct FGameplayAbilitySpecContainer
 {
     DefineUnrealStruct(FGameplayAbilitySpecContainer, GameplayAbilities)
-    DefineUProperty(FScriptArray, Items)
+    DefineUStructArrayProperty(FGameplayAbilitySpec, Items)
 };

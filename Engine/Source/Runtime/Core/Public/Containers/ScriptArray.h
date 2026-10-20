@@ -25,6 +25,17 @@ public:
         return OldNum;
     }
 
+    void Remove(int32_t Index, int32_t Count, int32_t NumBytesPerElement)
+    {
+        const int32_t NumToMove = ArrayNum - Index - Count;
+        if (NumToMove > 0)
+        {
+            uint8_t* Base = static_cast<uint8_t*>(Data);
+            std::memmove(Base + static_cast<size_t>(Index) * NumBytesPerElement, Base + static_cast<size_t>(Index + Count) * NumBytesPerElement, static_cast<size_t>(NumToMove) * NumBytesPerElement);
+        }
+        ArrayNum -= Count;
+    }
+
     int32_t AddZeroed(int32_t Count, int32_t NumBytesPerElement)
     {
         const int32_t Index = Add(Count, NumBytesPerElement);

@@ -2,12 +2,21 @@
 
 #include "GameplayTagContainer.h"
 #include "Items/FortQuickBars.h"
+#include "StructArray.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
 
 class AActor;
 class UEnvQuery;
 class UFortAbilitySet;
+class UFortItemDefinition;
+
+struct FItemDefinitionAndCount
+{
+    DefineUnrealStruct(FItemDefinitionAndCount, FortniteGame)
+    DefineUProperty(int32_t, Count)
+    DefineUProperty(TAssetPtr<UFortItemDefinition>, ItemDefinition)
+};
 
 struct FFortPlayerSpawnPadPlacementData
 {
@@ -27,6 +36,7 @@ public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
+    DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
 
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
     {

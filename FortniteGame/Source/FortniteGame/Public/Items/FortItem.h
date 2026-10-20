@@ -1,0 +1,34 @@
+#pragma once
+
+#include "Engine/NetSerialization.h"
+#include "Misc/Guid.h"
+#include "UObject/Object.h"
+#include "UObject/WeakObjectPtr.h"
+
+class AFortPlayerController;
+class UFortItemDefinition;
+
+struct FFortItemEntry : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FFortItemEntry, FortniteGame)
+    DefineUProperty(int32_t, Count)
+    DefineUProperty(UFortItemDefinition*, ItemDefinition)
+    DefineUProperty(FGuid, ItemGuid)
+    DefineUProperty(FWeakObjectPtr, ParentInventory)
+};
+
+class UFortItem : public UObject
+{
+    DefineUnrealClass(UFortItem, FortniteGame)
+};
+
+class UFortWorldItem : public UFortItem
+{
+    DefineUnrealClass(UFortWorldItem, FortniteGame)
+
+public:
+    DefineUStructProperty(FFortItemEntry, ItemEntry)
+    DefineUFunction(SetOwningControllerForTemporaryItem)
+
+    void SetOwningControllerForTemporaryItem(AFortPlayerController* InController);
+};

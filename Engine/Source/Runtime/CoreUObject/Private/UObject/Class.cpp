@@ -89,6 +89,28 @@ UProperty* UStruct::FindPropertyByName(FName InName) const
     return static_cast<UProperty*>(FindField(this, InName, CASTCLASS_UProperty, true));
 }
 
+void UStruct::InitializeStruct(void* Dest, int32_t ArrayDim) const
+{
+    if (Natives::UStruct_InitializeStructIndex < 0)
+    {
+        Finder::ResolveScriptStructCopy();
+    }
+
+    using FInitializeStruct = void (*)(const UStruct* This, void* Dest, int32_t ArrayDim);
+    reinterpret_cast<FInitializeStruct>((*reinterpret_cast<void* const* const*>(this))[Natives::UStruct_InitializeStructIndex])(this, Dest, ArrayDim);
+}
+
+void UStruct::DestroyStruct(void* Dest, int32_t ArrayDim) const
+{
+    if (Natives::UStruct_DestroyStructIndex < 0)
+    {
+        Finder::ResolveScriptStructCopy();
+    }
+
+    using FDestroyStruct = void (*)(const UStruct* This, void* Dest, int32_t ArrayDim);
+    reinterpret_cast<FDestroyStruct>((*reinterpret_cast<void* const* const*>(this))[Natives::UStruct_DestroyStructIndex])(this, Dest, ArrayDim);
+}
+
 int32_t UScriptStruct::GetStructureSize() const
 {
     const int32_t Alignment = GetMinAlignment();

@@ -24,6 +24,7 @@ namespace Reflection
         Value,
         Bool,
         Struct,
+        StructArray,
     };
 
     using FOwnerGetter = UStruct* (*)();
@@ -131,6 +132,13 @@ private: \
 public: \
     Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
     __declspec(property(get = GetMember_##Name)) Type Name;
+
+#define DefineUStructArrayProperty(Type, Name) \
+private: \
+    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), 0, Reflection::EMemberKind::StructArray, &Type::StaticReflectionOwner }; \
+public: \
+    TStructArray<Type>& GetMember_##Name() const { return Reflection::AccessMember<TStructArray<Type>>(this, Member_##Name); } \
+    __declspec(property(get = GetMember_##Name)) TStructArray<Type> Name;
 
 #define DefineBitfieldUProperty(Name) \
 private: \

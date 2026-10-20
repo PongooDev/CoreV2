@@ -101,6 +101,20 @@ bool Reflection::FMemberInfo::Resolve()
         return true;
     }
 
+    if (Kind == EMemberKind::StructArray)
+    {
+        const UProperty* Inner = Property->GetClass()->HasAnyCastFlag(CASTCLASS_UArrayProperty) ? static_cast<const UArrayProperty*>(Property)->Inner : nullptr;
+        const bool bStructInner = Inner && Inner->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty);
+        if (!bStructInner || !StructType || reinterpret_cast<const UStruct*>(static_cast<const UStructProperty*>(Inner)->Struct) != StructType())
+        {
+            Offset = MissingOffset;
+            return false;
+        }
+
+        Offset = Property->GetOffset_ForInternal();
+        return true;
+    }
+
     if (Kind == EMemberKind::Struct)
     {
         const bool bStructProperty = Property->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty);

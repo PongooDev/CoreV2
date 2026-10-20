@@ -2,7 +2,9 @@
 
 #include "GameFramework/PlayerController.h"
 
+class AFortInventory;
 class AFortQuickBars;
+class UFortWorldItem;
 
 class AFortPlayerController : public APlayerController
 {
@@ -10,10 +12,13 @@ class AFortPlayerController : public APlayerController
 
 public:
     DefineUProperty(AFortQuickBars*, QuickBars)
+    DefineUProperty(AFortInventory*, WorldInventory)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void SpawnQuickBars();
     void SetupQuickBars();
+    void AddDefaultInventory();
+    void TryAddToQuickBar(UFortWorldItem* Item);
 
     static void Hook();
 

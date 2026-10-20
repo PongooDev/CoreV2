@@ -2,9 +2,24 @@
 
 #include "ObjectLayout.h"
 #include "UObject/Class.h"
+#include "UObject/ScriptInterface.h"
 
+#include <cstdint>
+
+class UBoolProperty;
+class UIntProperty;
+class UInterfaceProperty;
 class UObject;
 class UProperty;
+
+template <class PropertyType>
+struct TPropertyCppType;
+
+template <>
+struct TPropertyCppType<UIntProperty>
+{
+    using Type = int32_t;
+};
 
 #define RESULT_PARAM Z_Param__Result
 #define RESULT_DECL void* const RESULT_PARAM
@@ -39,6 +54,9 @@ public:
 #define DEFINE_FUNCTION(func) void func(UObject* Context, void* TheStack, RESULT_DECL)
 #define P_STACK (*static_cast<FFrame*>(TheStack))
 #define P_GET_OBJECT(ObjectType, ParamName) ObjectType* ParamName = nullptr; P_STACK.StepCompiledIn<UObjectPropertyBase>(&ParamName);
+#define P_GET_PROPERTY(PropertyType, ParamName) typename TPropertyCppType<PropertyType>::Type ParamName{}; P_STACK.StepCompiledIn<PropertyType>(&ParamName);
+#define P_GET_UBOOL(ParamName) uint32_t ParamName##32 = 0; P_STACK.StepCompiledIn<UBoolProperty>(&ParamName##32); bool ParamName = !!ParamName##32;
+#define P_GET_TINTERFACE(InterfaceType, ParamName) TScriptInterface<InterfaceType> ParamName; P_STACK.StepCompiledIn<UInterfaceProperty>(&ParamName);
 #define P_FINISH P_STACK.Code += !!P_STACK.Code;
 #define P_NATIVE_BEGIN
 #define P_NATIVE_END

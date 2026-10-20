@@ -17,6 +17,8 @@ class FOutBunch;
 class AActor;
 class AController;
 class AFortGameMode;
+class AFortGameState;
+struct FFortMissionManagerRecord;
 class AFortGameModeZone;
 class AFortLobbyBeaconHost;
 class AFortPlayerController;
@@ -213,6 +215,9 @@ namespace Natives
     inline int32_t UAbilitySystemComponent_InternalServerTryActiveAbilityIndex = -1;
     inline int32_t UFortWorldItemDefinition_ServerExecuteIndex = -1;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
+    inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;
+    inline FFortMissionManagerRecord* (*FFortMissionManagerRecord_FFortMissionManagerRecord)(FFortMissionManagerRecord* This, UClass* InMissionManagerClass) = nullptr;
+    inline void (*AFortGameState_SpawnMissionManager)(AFortGameState* This, const FFortMissionManagerRecord& MissionManagerRecord) = nullptr;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;

@@ -1,10 +1,19 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "GameFramework/Info.h"
 #include "Math/Transform.h"
+#include "Missions/FortMissionManager.h"
 
+class UFortMissionInfo;
 class UFortWorldRecord;
 struct FFortPlayerSpawnPadPlacementData;
+
+struct FFortStartingMissionInfo
+{
+    DefineUnrealStruct(FFortStartingMissionInfo, FortniteGame)
+    DefineUProperty(TArray<UFortMissionInfo*>, StartingMissions)
+};
 
 enum class EFortWorldManagerState : uint8_t
 {
@@ -25,8 +34,15 @@ class AFortWorldManager : public AInfo
 public:
     DefineUProperty(EFortWorldManagerState, WorldManagerState)
     DefineUProperty(UFortWorldRecord*, CurrentWorldRecord)
+    DefineUStructProperty(FFortStartingMissionInfo, StartingMissionInfo)
+    DefineUStructProperty(FFortMissionManagerRecord, MissionManagerRecord)
+    DefineBitfieldUProperty(bHasCreatedMissions)
+    DefineBitfieldUProperty(bCreatedMissionRecord)
 
     void OnWorldRecordQueryComplete();
+    void ServerTickLoadingOrCreatingWorld();
+    void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions);
+    void CreateMissionManager();
     AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);
 
     static void Hook();
@@ -34,4 +50,6 @@ public:
 private:
     static inline void (*OnWorldRecordQueryCompleteOG)(AFortWorldManager* This) = nullptr;
     static void OnWorldRecordQueryCompleteHK(AFortWorldManager* This);
+    static inline void (*ServerTickLoadingOrCreatingWorldOG)(AFortWorldManager* This) = nullptr;
+    static void ServerTickLoadingOrCreatingWorldHK(AFortWorldManager* This);
 };

@@ -47,5 +47,6 @@ namespace Finder
     bool ResolveWorldItemDefinitionLive();
     bool ResolvePickupLive();
     bool ResolvePickupGiveLive();
+    bool ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset);
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable);
 }

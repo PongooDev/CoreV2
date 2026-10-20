@@ -11,6 +11,7 @@
 
 class AActor;
 class AGameModeBase;
+class AGameStateBase;
 class AGameNetworkManager;
 class APawn;
 class AWorldSettings;
@@ -79,6 +80,7 @@ class UWorld final : public UObject, public FNetworkNotify
     DefineUProperty(UNetDriver*, NetDriver)
     DefineUProperty(UDemoNetDriver*, DemoNetDriver)
     DefineUProperty(AGameModeBase*, AuthorityGameMode)
+    DefineUProperty(AGameStateBase*, GameState)
     DefineUProperty(AGameNetworkManager*, NetworkManager)
     DefineUProperty(ULevel*, CurrentLevelPendingVisibility)
     DefineUProperty(ULevel*, CurrentLevelPendingInvisibility)
@@ -98,6 +100,7 @@ public:
     void SetNetDriver(UNetDriver* NewDriver) { NetDriver = NewDriver; }
     float GetTimeSeconds() const { return TimeSeconds; }
     AGameModeBase* GetAuthGameMode() const { return AuthorityGameMode; }
+    AGameStateBase* GetGameState() const { return GameState; }
     AWorldSettings* GetWorldSettings(bool bCheckStreamingPersistent = false, bool bChecked = true) const;
     void AddNetworkActor(AActor* Actor);
 

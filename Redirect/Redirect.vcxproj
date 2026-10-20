@@ -217,6 +217,8 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameModeBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameNetworkManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameSession.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameState.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameStateBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Info.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\OnlineReplStructs.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Pawn.h" />
@@ -244,10 +246,12 @@
     <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public\McpProfile.h" />
     <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public\McpProfileGroup.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortAssetManager.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortFastLoadConfig.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameData.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameInstance.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameMode.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameModeZone.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameState.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGlobals.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortKismetLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortWorldManager.h" />
@@ -262,6 +266,8 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortPickup.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortQuickBars.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionInfo.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSession.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSessionDedicated.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortLobbyBeaconHost.h" />
@@ -301,6 +307,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\CommandLine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\ConfigCacheIni.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\DefaultValueHelper.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\Guid.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\MemStack.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\OutputDeviceRedirector.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Misc\Parse.cpp" />
@@ -347,6 +354,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameInstance.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameMode.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameModeZone.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameState.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGlobals.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortKismetLibrary.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortWorldManager.cpp" />
@@ -356,6 +364,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortItem.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortPickup.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortQuickBars.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortLobbyBeaconHost.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\NotForLicensees\FortMcpConfig.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp" />

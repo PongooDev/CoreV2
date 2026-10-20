@@ -2203,6 +2203,7 @@ namespace
         Require(L"AFortGameMode::FinishWorldInitialization", Natives::AFortGameMode_FinishWorldInitialization, WorldIsReady ? Finder::FunctionStart(WorldIsReady) : 0);
 
         Require(L"AFortWorldManager::OnWorldRecordQueryComplete", Natives::AFortWorldManager_OnWorldRecordQueryComplete, FunctionOf(L"Invalid world record when transition to world query complete state!"));
+        Require(L"AFortWorldManager::ServerTickLoadingOrCreatingWorld", Natives::AFortWorldManager_ServerTickLoadingOrCreatingWorld, FunctionOf(L"Skipping loading of level %s, LevelStreaming does not exist"));
 
         const uintptr_t ProfileFailed = OnlyRef(L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]");
         uintptr_t InitializeMcpProfile = 0;
@@ -3146,6 +3147,51 @@ bool Finder::ResolvePickupGiveLive()
     }
     Natives::AFortPickup_GivePickupToIndex = GiveIndex;
     Log::Info(L"Finder: AFortPickup::GivePickupTo is slot 0x{:X}", GiveIndex);
+    return true;
+}
+
+bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
+{
+    const uintptr_t GameModeHandleMatchHasStarted = FunctionOf(L"BugLoc");
+    void** GameModeVTable = CdoVTable(L"/Script/Engine.GameMode");
+    void** FortGameModeVTable = CdoVTable(L"/Script/FortniteGame.FortGameMode");
+    const int32_t HandleMatchHasStartedIndex = GameModeVTable && GameModeHandleMatchHasStarted ? Finder::VTableIndex(GameModeVTable, reinterpret_cast<void*>(GameModeHandleMatchHasStarted), 0x400) : -1;
+    const uintptr_t FortHandleMatchHasStarted = VTableEntry(FortGameModeVTable, HandleMatchHasStartedIndex);
+    const uintptr_t FortHandleMatchHasStartedEnd = FortHandleMatchHasStarted ? Finder::FunctionEnd(FortHandleMatchHasStarted) : 0;
+
+    uintptr_t RecordConstructor = 0;
+    uintptr_t SpawnMissionManager = 0;
+    uintptr_t PreviousCallee = 0;
+    for (uintptr_t Call = FortHandleMatchHasStartedEnd && GameStateMissionManagerOffset > 0 ? FindRawCall(FortHandleMatchHasStarted, FortHandleMatchHasStartedEnd) : 0; Call && !SpawnMissionManager; Call = FindRawCall(Call + 1, FortHandleMatchHasStartedEnd))
+    {
+        const uintptr_t Callee = Finder::RelativeTarget(Call, 1, 5);
+        if (Callee == GameModeHandleMatchHasStarted)
+        {
+            break;
+        }
+
+        const uintptr_t CalleeEnd = Finder::FunctionEnd(Callee);
+        for (uintptr_t Store = CalleeEnd ? FindInstruction(Callee, CalleeEnd, { 0x48, 0x89 }) : 0; Store; Store = FindInstruction(Store + 1, CalleeEnd, { 0x48, 0x89 }))
+        {
+            const uint8_t ModRm = Byte(Store + 2);
+            if ((ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Store + 3) == GameStateMissionManagerOffset)
+            {
+                SpawnMissionManager = Callee;
+                RecordConstructor = PreviousCallee;
+                break;
+            }
+        }
+        PreviousCallee = Callee;
+    }
+
+    if (!SpawnMissionManager || !RecordConstructor)
+    {
+        Log::Error(L"Finder: AFortGameState::SpawnMissionManager / FFortMissionManagerRecord::FFortMissionManagerRecord not found");
+        return false;
+    }
+    Natives::AFortGameState_SpawnMissionManager = reinterpret_cast<decltype(Natives::AFortGameState_SpawnMissionManager)>(SpawnMissionManager);
+    Natives::FFortMissionManagerRecord_FFortMissionManagerRecord = reinterpret_cast<decltype(Natives::FFortMissionManagerRecord_FFortMissionManagerRecord)>(RecordConstructor);
+    Log::Info(L"Finder: AFortGameState::SpawnMissionManager and FFortMissionManagerRecord::FFortMissionManagerRecord found");
     return true;
 }
 

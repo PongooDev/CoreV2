@@ -64,6 +64,10 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
 {
 #if WITH_SERVER_CODE
     PlacePlayerSpawnPad(WorldManager);
+    if (WorldManager)
+    {
+        WorldManager->CreateMissionManager();
+    }
     AFortGameMode::FinishWorldInitialization(WorldManager);
 #endif
 }

@@ -4,6 +4,8 @@
 
 struct FGuid
 {
+    static FGuid NewGuid();
+
     uint32_t A = 0;
     uint32_t B = 0;
     uint32_t C = 0;

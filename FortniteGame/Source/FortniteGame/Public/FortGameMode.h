@@ -15,6 +15,7 @@ class AFortGameMode : public AGameMode
 public:
     DefineUProperty(AFortGameSession*, FortGameSession)
     DefineBitfieldUProperty(bWorldIsReady)
+    DefineUProperty(UClass*, MissionManagerClass)
 
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);

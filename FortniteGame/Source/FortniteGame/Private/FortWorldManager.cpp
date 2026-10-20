@@ -1,8 +1,10 @@
 #include "pch.h"
 #include "FortWorldManager.h"
 #include "Engine/World.h"
+#include "FortFastLoadConfig.h"
 #include "FortGameData.h"
 #include "FortGameMode.h"
+#include "FortGameState.h"
 #include "Kismet/GameplayStatics.h"
 #include "Logging/LogMacros.h"
 #include "Hooks.h"
@@ -59,12 +61,95 @@ void AFortWorldManager::OnWorldRecordQueryComplete()
 #endif
 }
 
+void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
+{
+#if WITH_SERVER_CODE
+    if (!bHasCreatedMissions)
+    {
+        if (!bCreatedMissionRecord)
+        {
+            UWorld* World = GetWorld();
+            AFortGameMode* GameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+
+            UScriptStruct* RecordStruct = FFortMissionManagerRecord::StaticStruct();
+            std::vector<uint8_t> RecordStorage(RecordStruct->GetStructureSize(), 0);
+            FFortMissionManagerRecord* Record = reinterpret_cast<FFortMissionManagerRecord*>(RecordStorage.data());
+            FFortMissionManagerRecord::Construct(Record, GameMode ? static_cast<UClass*>(GameMode->MissionManagerClass) : nullptr);
+            RecordStruct->CopyScriptStruct(&static_cast<FFortMissionManagerRecord&>(MissionManagerRecord), Record);
+            RecordStruct->DestroyStruct(Record);
+            bCreatedMissionRecord = true;
+
+            UFortFastLoadConfig* FastLoadConfig = static_cast<UFortFastLoadConfig*>(UFortFastLoadConfig::StaticClass()->GetDefaultObject());
+            if (!FastLoadConfig || !FastLoadConfig->bDisableStartingMissions)
+            {
+                FFortStartingMissionInfo& StartingMissions = StartingMissionInfo;
+                AddMissionsToMissionManagerRecord(StartingMissions.StartingMissions);
+            }
+        }
+        bHasCreatedMissions = true;
+    }
+#endif
+
+    ServerTickLoadingOrCreatingWorldOG(this);
+}
+
+void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions)
+{
+#if WITH_SERVER_CODE
+    if (!bCreatedMissionRecord)
+    {
+        UE_LOG(LogFortWorld, Error, TEXT("Trying to add mission manager records before the mission manager record has been created."));
+        return;
+    }
+
+    FFortMissionManagerRecord& Record = MissionManagerRecord;
+    TStructArray<FFortMissionRecord>& MissionRecords = Record.MissionRecords;
+    for (int32_t Index = 0; Index < Missions.Num(); ++Index)
+    {
+        UFortMissionInfo* MissionInfo = Missions[Index];
+        if (!MissionInfo)
+        {
+            continue;
+        }
+
+        FFortMissionRecord& MissionRecord = MissionRecords.AddDefaulted();
+        FFortMissionEntry& MissionEntry = MissionRecord.MissionEntry;
+        MissionEntry.Weight = 1.0f;
+        MissionEntry.WorldMinLevel = -1;
+        MissionEntry.WorldMaxLevel = -1;
+        MissionEntry.MissionInfo = MissionInfo;
+        MissionEntry.GenerationCategory = EMissionGenerationCategory::Max_None;
+        MissionRecord.MissionGuid = FGuid::NewGuid();
+    }
+#endif
+}
+
+void AFortWorldManager::CreateMissionManager()
+{
+#if WITH_SERVER_CODE
+    UWorld* World = GetWorld();
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!GameState || !bCreatedMissionRecord || GameState->MissionManager)
+    {
+        return;
+    }
+
+    GameState->SpawnMissionManager(MissionManagerRecord);
+#endif
+}
+
 void AFortWorldManager::Hook()
 {
     Hooks::Detour(L"AFortWorldManager::OnWorldRecordQueryComplete", reinterpret_cast<void*>(Natives::AFortWorldManager_OnWorldRecordQueryComplete), &OnWorldRecordQueryCompleteHK, &OnWorldRecordQueryCompleteOG);
+    Hooks::Detour(L"AFortWorldManager::ServerTickLoadingOrCreatingWorld", reinterpret_cast<void*>(Natives::AFortWorldManager_ServerTickLoadingOrCreatingWorld), &ServerTickLoadingOrCreatingWorldHK, &ServerTickLoadingOrCreatingWorldOG);
 }
 
 void AFortWorldManager::OnWorldRecordQueryCompleteHK(AFortWorldManager* This)
 {
     This->OnWorldRecordQueryComplete();
+}
+
+void AFortWorldManager::ServerTickLoadingOrCreatingWorldHK(AFortWorldManager* This)
+{
+    This->ServerTickLoadingOrCreatingWorld();
 }

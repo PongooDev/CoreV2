@@ -55,6 +55,7 @@ namespace Finder
     bool ResolveMissionObjectivesLive();
     bool ResolveObjectiveActivationLive(ptrdiff_t MissionActiveObjectivesOffset);
     bool ResolveCraftingLive();
+    uint8_t* NullGetCurrentCall(UFunction* Function);
     bool ResolveWorldItemLive(void** InventoryOwnerVTable);
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable);
 }

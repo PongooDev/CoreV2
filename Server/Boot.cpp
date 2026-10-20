@@ -25,6 +25,7 @@
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
 #include "Items/FortPickup.h"
+#include "Missions/FortMission.h"
 #include "Missions/FortObjectiveBase.h"
 #include "Items/FortSchematicItem.h"
 #include "Items/FortQuickBars.h"
@@ -88,6 +89,7 @@ void Boot::Initialize()
         AFortObjectiveBase::HookVTables();
         UFortSchematicItem::HookVTables();
         UFortWorldItem::HookVTables();
+        AFortMission::HookCallSites();
     });
 
     Log::Info(L"Core V2 startup complete");

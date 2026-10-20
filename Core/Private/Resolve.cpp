@@ -3277,6 +3277,28 @@ bool Finder::ResolveWorldItemLive(void** InventoryOwnerVTable)
     return true;
 }
 
+uint8_t* Finder::NullGetCurrentCall(UFunction* Function)
+{
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    uintptr_t Implementation = 0;
+    for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+    {
+        Implementation = Finder::RelativeTarget(Call, 1, 5);
+    }
+
+    const uintptr_t ImplementationEnd = Implementation ? Finder::FunctionEnd(Implementation) : 0;
+    for (uintptr_t Call = ImplementationEnd ? FindRawCall(Implementation, ImplementationEnd) : 0; Call; Call = FindRawCall(Call + 1, ImplementationEnd))
+    {
+        const uintptr_t Callee = Finder::RelativeTarget(Call, 1, 5);
+        if (Byte(Callee) == 0x33 && Byte(Callee + 1) == 0xC0 && Byte(Callee + 2) == 0xC3 && Call >= 6 && (Byte(Call - 6) == 0xFF || Byte(Call - 9) == 0xFF))
+        {
+            return reinterpret_cast<uint8_t*>(Call);
+        }
+    }
+    return nullptr;
+}
+
 bool Finder::ResolveCraftingLive()
 {
     if (Natives::UFortSchematicItem_CanCraftSchematic && Natives::AFortPlayerController_GetSchematicForItem && Natives::UFortSchematicItem_ServerCraftSchematicIndex >= 0)

@@ -172,6 +172,11 @@ void AFortGameModeZone::HookVTables()
         }
     }
 
+    if (!Finder::ResolveAIDirectorLive())
+    {
+        return;
+    }
+
     const int32_t DirectorIndex = Natives::AFortGameModeZone_CreateAIDirectorIndex;
     for (TObjectIterator<UClass> It; It; ++It)
     {

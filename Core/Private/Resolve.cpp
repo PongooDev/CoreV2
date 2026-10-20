@@ -3175,6 +3175,38 @@ bool Finder::ResolvePickupGiveLive()
     return true;
 }
 
+bool Finder::ResolveAIDirectorLive()
+{
+    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
+    const uintptr_t CreateAIGoalManager = FunctionOf(L"nullptr AI Goal Manager class specified by Game Data; created default AI Goal manager anyway, but some settings may be missing.");
+    int32_t DirectorIndex = -1;
+    for (int32_t Index = 0; ZoneVTable && CreateAIGoalManager && Index < 0x400 && DirectorIndex < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(ZoneVTable, Index);
+        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
+        int32_t PreviousSlot = -1;
+        for (uintptr_t Site = FunctionEnd > Function && FunctionEnd - Function < 0x100 ? FindVirtualCall(Function, FunctionEnd) : 0; Site; Site = FindVirtualCall(Site + 1, FunctionEnd))
+        {
+            const int32_t Slot = VirtualSlot(Site);
+            if (Slot >= 0 && VTableEntry(ZoneVTable, Slot) == CreateAIGoalManager && PreviousSlot >= 0 && reinterpret_cast<void*>(VTableEntry(ZoneVTable, PreviousSlot)) == Natives::SharedEmptyFunction)
+            {
+                DirectorIndex = PreviousSlot;
+                break;
+            }
+            PreviousSlot = Slot;
+        }
+    }
+
+    if (DirectorIndex < 0)
+    {
+        Log::Error(L"Finder: AFortGameModeZone::CreateAIDirector slot not found");
+        return false;
+    }
+    Natives::AFortGameModeZone_CreateAIDirectorIndex = DirectorIndex;
+    Log::Info(L"Finder: AFortGameModeZone::CreateAIDirector is slot 0x{:X}", DirectorIndex);
+    return true;
+}
+
 bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
 {
     const uintptr_t GameModeHandleMatchHasStarted = FunctionOf(L"BugLoc");
@@ -3282,27 +3314,6 @@ bool Finder::ResolveGameModeZoneLive()
     const int32_t FinishIndex = Finder::VTableIndex(FortVTable, reinterpret_cast<void*>(Natives::AFortGameMode_FinishWorldInitialization), 0x400);
     RequireSlot(L"AFortGameMode::FinishWorldInitialization", Natives::AFortGameMode_FinishWorldInitializationIndex, FinishIndex);
 
-    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
-    const uintptr_t CreateAIGoalManager = FunctionOf(L"nullptr AI Goal Manager class specified by Game Data; created default AI Goal manager anyway, but some settings may be missing.");
-    const int32_t GoalManagerIndex = ZoneVTable && CreateAIGoalManager ? Finder::VTableIndex(ZoneVTable, reinterpret_cast<void*>(CreateAIGoalManager), 0x400) : -1;
-    int32_t DirectorIndex = -1;
-    for (int32_t Index = 0; GoalManagerIndex > 0 && Index < 0x400 && DirectorIndex < 0; ++Index)
-    {
-        const uintptr_t Function = VTableEntry(ZoneVTable, Index);
-        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
-        int32_t PreviousSlot = -1;
-        for (uintptr_t Site = FunctionEnd > Function && FunctionEnd - Function < 0x100 ? FindVirtualCall(Function, FunctionEnd) : 0; Site; Site = FindVirtualCall(Site + 1, FunctionEnd))
-        {
-            const int32_t Slot = VirtualSlot(Site);
-            if (Slot == GoalManagerIndex && PreviousSlot >= 0)
-            {
-                DirectorIndex = PreviousSlot;
-                break;
-            }
-            PreviousSlot = Slot;
-        }
-    }
-    RequireSlot(L"AFortGameModeZone::CreateAIDirector", Natives::AFortGameModeZone_CreateAIDirectorIndex, DirectorIndex);
 
     Log::Info(L"Finder: zone game mode live slots resolved, {} missing", MissingCount);
     return MissingCount == 0;

@@ -2,6 +2,7 @@
 
 #include "UObject/Object.h"
 
+class AFortPlayerController;
 class UFortItem;
 
 class UFortItemDefinition : public UObject
@@ -19,4 +20,7 @@ public:
 class UFortWorldItemDefinition : public UFortItemDefinition
 {
     DefineUnrealClass(UFortWorldItemDefinition, FortniteGame)
+
+public:
+    bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
 };

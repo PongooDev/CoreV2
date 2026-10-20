@@ -4,7 +4,6 @@
 #include "Misc/Guid.h"
 
 class AFortInventory;
-class AFortPawn;
 class AFortQuickBars;
 class UFortWorldItem;
 
@@ -15,7 +14,6 @@ class AFortPlayerController : public APlayerController
 public:
     DefineUProperty(AFortQuickBars*, QuickBars)
     DefineUProperty(AFortInventory*, WorldInventory)
-    DefineUProperty(AFortPawn*, MyFortPawn)
     DefineUFunction(ServerExecuteInventoryItem)
 
     bool InitializeMcpProfile(const void* OnComplete);

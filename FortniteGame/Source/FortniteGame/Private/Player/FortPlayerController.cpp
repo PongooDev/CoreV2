@@ -8,12 +8,10 @@
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortQuickBars.h"
-#include "Items/FortWeaponItemDefinition.h"
 #include "Finder.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
-#include "Pawns/FortPawn.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -127,17 +125,16 @@ void AFortPlayerController::ServerExecuteInventoryItem_Implementation(const FGui
 {
 #if WITH_SERVER_CODE
     AFortInventory* Inventory = WorldInventory;
-    AFortPawn* Pawn = MyFortPawn;
     UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
-    if (!WorldItem || !Pawn)
+    if (!WorldItem)
     {
         return;
     }
 
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
-    if (UFortWeaponItemDefinition* WeaponDefinition = Cast<UFortWeaponItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition)))
+    if (UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition)))
     {
-        Pawn->EquipWeaponDefinition(WeaponDefinition, ItemGuid);
+        ItemDefinition->ServerExecute(WorldItem, this);
     }
 #endif
 }

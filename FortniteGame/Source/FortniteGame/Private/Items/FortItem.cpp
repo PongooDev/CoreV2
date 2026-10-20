@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
+#include "Finder.h"
+#include "Natives.h"
 #include "ReflectionParams.h"
 
 UFortItem* UFortItemDefinition::CreateTemporaryItemInstanceBP(int32_t Count, int32_t Level) const
@@ -9,6 +11,17 @@ UFortItem* UFortItemDefinition::CreateTemporaryItemInstanceBP(int32_t Count, int
     Params.Set(L"Count", Count);
     Params.Set(L"Level", Level);
     return Params.Call(const_cast<UFortItemDefinition*>(this)) ? Params.Take<UFortItem*>(L"ReturnValue") : nullptr;
+}
+
+bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerController* Controller)
+{
+    if (Natives::UFortWorldItemDefinition_ServerExecuteIndex < 0 && !Finder::ResolveWorldItemDefinitionLive())
+    {
+        return false;
+    }
+
+    using FServerExecute = bool (*)(UFortWorldItemDefinition* This, const UFortItem* Item, AFortPlayerController* Controller);
+    return reinterpret_cast<FServerExecute>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItemDefinition_ServerExecuteIndex])(this, Item, Controller);
 }
 
 void UFortWorldItem::SetOwningControllerForTemporaryItem(AFortPlayerController* InController)

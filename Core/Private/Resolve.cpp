@@ -3031,6 +3031,39 @@ int32_t Finder::ImplementationIndex(UFunction* Function)
     return Index;
 }
 
+bool Finder::ResolveWorldItemDefinitionLive()
+{
+    UFunction* EquipWeaponDefinition = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPawn:EquipWeaponDefinition");
+    const uintptr_t Exec = EquipWeaponDefinition ? reinterpret_cast<uintptr_t>(EquipWeaponDefinition->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    uintptr_t Equip = 0;
+    for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+    {
+        Equip = Finder::RelativeTarget(Call, 1, 5);
+    }
+
+    int32_t ServerExecuteIndex = -1;
+    void** VTable = CdoVTable(L"/Script/FortniteGame.FortWeaponItemDefinition");
+    for (int32_t Index = 0; VTable && Equip && Index < 0x100 && ServerExecuteIndex < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(VTable, Index);
+        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
+        if (FunctionEnd > Function && FunctionEnd - Function < 0x400 && CallWithin(Function, FunctionEnd - Function, Equip))
+        {
+            ServerExecuteIndex = Index;
+        }
+    }
+
+    if (ServerExecuteIndex < 0)
+    {
+        Log::Error(L"Finder: UFortWorldItemDefinition::ServerExecute slot not found");
+        return false;
+    }
+    Natives::UFortWorldItemDefinition_ServerExecuteIndex = ServerExecuteIndex;
+    Log::Info(L"Finder: UFortWorldItemDefinition::ServerExecute is slot 0x{:X}", ServerExecuteIndex);
+    return true;
+}
+
 bool Finder::ResolveAbilitySystemLive()
 {
     MissingCount = 0;

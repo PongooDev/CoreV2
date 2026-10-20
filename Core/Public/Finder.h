@@ -44,4 +44,5 @@ namespace Finder
     bool ResolveGameModeZoneLive();
     bool ResolveAbilitySystemLive();
     int32_t ImplementationIndex(UFunction* Function);
+    bool ResolveWorldItemDefinitionLive();
 }

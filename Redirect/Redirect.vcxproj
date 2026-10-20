@@ -259,12 +259,10 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItem.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortQuickBars.h" />
-    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortWeaponItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSession.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSessionDedicated.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortLobbyBeaconHost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
-    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerController.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerState.h" />
     <ClInclude Include="..\ThirdParty\Memcury\memcury.h" />
@@ -354,7 +352,6 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortQuickBars.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortLobbyBeaconHost.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\NotForLicensees\FortMcpConfig.cpp" />
-    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerState.cpp" />
     <ClCompile Include="..\ThirdParty\MinHook\src\buffer.c">

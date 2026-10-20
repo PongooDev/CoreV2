@@ -18,6 +18,7 @@ class AActor;
 class AController;
 class AFortGameMode;
 class AFortGameState;
+class UFortMissionInfo;
 struct FFortMissionManagerRecord;
 class AFortGameModeZone;
 class AFortLobbyBeaconHost;
@@ -219,6 +220,9 @@ namespace Natives
     inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;
     inline FFortMissionManagerRecord* (*FFortMissionManagerRecord_FFortMissionManagerRecord)(FFortMissionManagerRecord* This, UClass* InMissionManagerClass) = nullptr;
     inline void (*AFortGameState_SpawnMissionManager)(AFortGameState* This, const FFortMissionManagerRecord& MissionManagerRecord) = nullptr;
+    inline void* (*UFortMissionInfo_GenerateMissionDifficultyOptions)(UFortMissionInfo* This, void* Result, void* RandomStream, const void* GenerationParams) = nullptr;
+    inline ptrdiff_t AFortWorldManager_MissionGenerationRandomStream = -1;
+    inline ptrdiff_t UFortGameData_MissionGenerationData = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;

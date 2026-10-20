@@ -3182,6 +3182,51 @@ bool Finder::ResolvePickupGiveLive()
     return true;
 }
 
+bool Finder::ResolveMissionGenerationLive()
+{
+    UFunction* LoadMissionFunction = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortMissionLibrary:LoadMission");
+    const uintptr_t Exec = LoadMissionFunction ? reinterpret_cast<uintptr_t>(LoadMissionFunction->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    uintptr_t LoadMission = 0;
+    for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+    {
+        LoadMission = Finder::RelativeTarget(Call, 1, 5);
+    }
+
+    const uintptr_t Generate = FunctionOf(L"%s did not spend enough difficulty option points to reach the minimum cost bar!");
+    const uintptr_t LoadMissionEnd = LoadMission ? Finder::FunctionEnd(LoadMission) : 0;
+    uintptr_t GenerateCall = 0;
+    for (uintptr_t Call = LoadMissionEnd && Generate ? FindRawCall(LoadMission, LoadMissionEnd) : 0; Call && !GenerateCall; Call = FindRawCall(Call + 1, LoadMissionEnd))
+    {
+        if (Finder::RelativeTarget(Call, 1, 5) == Generate)
+        {
+            GenerateCall = Call;
+        }
+    }
+
+    ptrdiff_t StreamOffset = -1;
+    for (uintptr_t Site = GenerateCall ? GenerateCall - 0x30 : 0; Site && Site + 7 <= GenerateCall; ++Site)
+    {
+        if ((Byte(Site) == 0x4C || Byte(Site) == 0x4D) && Byte(Site + 1) == 0x8D && (Byte(Site + 2) & 0xF8) == 0x80 && (Byte(Site + 2) & 0x07) != 0x04)
+        {
+            StreamOffset = *reinterpret_cast<const int32_t*>(Site + 3);
+        }
+    }
+
+    const uintptr_t TableLea = LoadMission && GenerateCall ? FindInstruction(LoadMission, GenerateCall, { 0x48, 0x8D, 0x88 }) : 0;
+
+    if (!Generate || StreamOffset <= 0 || !TableLea)
+    {
+        Log::Error(L"Finder: UFortMissionInfo::GenerateMissionDifficultyOptions inputs not found");
+        return false;
+    }
+    Natives::UFortMissionInfo_GenerateMissionDifficultyOptions = reinterpret_cast<decltype(Natives::UFortMissionInfo_GenerateMissionDifficultyOptions)>(Generate);
+    Natives::AFortWorldManager_MissionGenerationRandomStream = StreamOffset;
+    Natives::UFortGameData_MissionGenerationData = *reinterpret_cast<const int32_t*>(TableLea + 3);
+    Log::Info(L"Finder: UFortMissionInfo::GenerateMissionDifficultyOptions found, world manager stream +0x{:X}, game data table +0x{:X}", StreamOffset, Natives::UFortGameData_MissionGenerationData);
+    return true;
+}
+
 bool Finder::ResolveLoginLive()
 {
     const uintptr_t GameModeBaseLogin = FunctionOf(L"Login: Couldn't spawn player controller of class %s");

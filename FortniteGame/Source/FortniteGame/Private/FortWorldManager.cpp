@@ -3,7 +3,9 @@
 #include "Engine/World.h"
 #include "FortGameData.h"
 #include "FortGameMode.h"
+#include "FortAssetManager.h"
 #include "FortGameState.h"
+#include "Finder.h"
 #include "FortWorldRecord.h"
 #include "Kismet/GameplayStatics.h"
 #include "Logging/LogMacros.h"
@@ -98,6 +100,19 @@ void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMiss
         return;
     }
 
+    UWorld* World = GetWorld();
+    AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    const float GameDifficulty = GameState ? static_cast<float>(GameState->GameDifficulty) : 0.0f;
+    AGameModeBase* GameMode = World ? World->GetAuthGameMode() : nullptr;
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    if (Natives::UFortGameData_MissionGenerationData < 0)
+    {
+        Finder::ResolveMissionGenerationLive();
+    }
+    const TAssetPtr<UObject>* GenerationDataPtr = GameData && Natives::UFortGameData_MissionGenerationData > 0 ? reinterpret_cast<const TAssetPtr<UObject>*>(reinterpret_cast<uint8_t*>(GameData) + Natives::UFortGameData_MissionGenerationData) : nullptr;
+    UObject* GenerationData = GenerationDataPtr ? GenerationDataPtr->LoadSynchronous() : nullptr;
+    void* RandomStream = Natives::AFortWorldManager_MissionGenerationRandomStream > 0 ? reinterpret_cast<uint8_t*>(this) + Natives::AFortWorldManager_MissionGenerationRandomStream : nullptr;
+
     FFortMissionManagerRecord& Record = MissionManagerRecord;
     TStructArray<FFortMissionRecord>& MissionRecords = Record.MissionRecords;
     for (int32_t Index = 0; Index < Missions.Num(); ++Index)
@@ -115,6 +130,11 @@ void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMiss
         MissionEntry.WorldMaxLevel = -1;
         MissionEntry.MissionInfo = MissionInfo;
         MissionEntry.GenerationCategory = EMissionGenerationCategory::Max_None;
+        if (GenerationData && RandomStream)
+        {
+            FFortGeneratedDifficultyOptions& GeneratedDifficultyOptions = MissionEntry.GeneratedDifficultyOptions;
+            MissionInfo->GenerateMissionDifficultyOptions(GeneratedDifficultyOptions, RandomStream, GameDifficulty, GameMode, GenerationData);
+        }
         MissionRecord.MissionGuid = FGuid::NewGuid();
     }
 #endif

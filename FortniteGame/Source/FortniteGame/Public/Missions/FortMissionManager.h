@@ -2,9 +2,9 @@
 
 #include "GameFramework/Actor.h"
 #include "Misc/Guid.h"
+#include "Missions/FortMissionInfo.h"
 #include "StructArray.h"
 
-class UFortMissionInfo;
 
 enum class EMissionGenerationCategory : uint8_t
 {
@@ -23,6 +23,7 @@ struct FFortMissionEntry
     DefineUProperty(int32_t, WorldMaxLevel)
     DefineUProperty(UFortMissionInfo*, MissionInfo)
     DefineUProperty(EMissionGenerationCategory, GenerationCategory)
+    DefineUStructProperty(FFortGeneratedDifficultyOptions, GeneratedDifficultyOptions)
 };
 
 struct FFortMissionRecord

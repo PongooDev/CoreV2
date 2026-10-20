@@ -18,3 +18,11 @@ public:
 
     static ptrdiff_t MissionManagerOffset();
 };
+
+class AFortGameStateZone : public AFortGameState
+{
+    DefineUnrealClass(AFortGameStateZone, FortniteGame)
+
+public:
+    DefineUProperty(float, GameDifficulty)
+};

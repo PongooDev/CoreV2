@@ -7,6 +7,8 @@
 #include "Finder.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
+#include "Items/FortPickup.h"
+#include "Math/Rotator.h"
 #include "Items/FortQuickBars.h"
 #include "Log.h"
 #include "Natives.h"
@@ -158,6 +160,34 @@ void UFortKismetLibrary::K2_RemoveItemFromAllPlayers(UObject* WorldContextObject
 #endif
 }
 
+AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount)
+{
+#if WITH_SERVER_CODE
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    if (!World || !ItemDefinition || NumberToSpawn <= 0)
+    {
+        return nullptr;
+    }
+
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToSpawn, 0);
+
+    const FRotator SpawnRotation = Direction.Rotation();
+    AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation);
+    EntryStruct->DestroyStruct(ItemEntry);
+
+    if (Pickup)
+    {
+        Pickup->TossPickup(Position, nullptr, OverrideMaxStackCount);
+    }
+    return Pickup;
+#else
+    return nullptr;
+#endif
+}
+
 DEFINE_FUNCTION(UFortKismetLibrary::execGetAIDirector)
 {
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
@@ -222,6 +252,20 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromAllPlayers)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorld)
+{
+    P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
+    P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
+    P_GET_PROPERTY(UIntProperty, Z_Param_NumberToSpawn);
+    P_GET_STRUCT(FVector, Z_Param_Position);
+    P_GET_STRUCT(FVector, Z_Param_Direction);
+    P_GET_PROPERTY(UIntProperty, Z_Param_OverrideMaxStackCount);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    *static_cast<AFortPickup**>(RESULT_PARAM) = K2_SpawnPickupInWorld(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction, Z_Param_OverrideMaxStackCount);
+    P_NATIVE_END;
+}
+
 void UFortKismetLibrary::HookNatives()
 {
     if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
@@ -235,7 +279,8 @@ void UFortKismetLibrary::HookNatives()
              std::tuple{ StaticFunction_GiveItemToInventoryOwner(), &execGiveItemToInventoryOwner, L"UFortKismetLibrary::GiveItemToInventoryOwner" },
              std::tuple{ StaticFunction_K2_GiveItemToPlayer(), &execK2_GiveItemToPlayer, L"UFortKismetLibrary::K2_GiveItemToPlayer" },
              std::tuple{ StaticFunction_K2_RemoveItemFromPlayer(), &execK2_RemoveItemFromPlayer, L"UFortKismetLibrary::K2_RemoveItemFromPlayer" },
-             std::tuple{ StaticFunction_K2_RemoveItemFromAllPlayers(), &execK2_RemoveItemFromAllPlayers, L"UFortKismetLibrary::K2_RemoveItemFromAllPlayers" } })
+             std::tuple{ StaticFunction_K2_RemoveItemFromAllPlayers(), &execK2_RemoveItemFromAllPlayers, L"UFortKismetLibrary::K2_RemoveItemFromAllPlayers" },
+             std::tuple{ StaticFunction_K2_SpawnPickupInWorld(), &execK2_SpawnPickupInWorld, L"UFortKismetLibrary::K2_SpawnPickupInWorld" } })
     {
         if (Function)
         {

@@ -141,6 +141,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Color.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\NumericLimits.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Quat.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Rotator.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Transform.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\UnrealMathUtility.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Math\Vector.h" />
@@ -259,6 +260,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortInventory.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItem.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItemDefinition.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortPickup.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortQuickBars.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSession.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSessionDedicated.h" />
@@ -351,6 +353,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIGoalManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortInventory.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortItem.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortPickup.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortQuickBars.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortLobbyBeaconHost.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\NotForLicensees\FortMcpConfig.cpp" />

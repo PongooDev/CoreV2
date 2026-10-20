@@ -13,6 +13,16 @@ UFortItem* UFortItemDefinition::CreateTemporaryItemInstanceBP(int32_t Count, int
     return Params.Call(const_cast<UFortItemDefinition*>(this)) ? Params.Take<UFortItem*>(L"ReturnValue") : nullptr;
 }
 
+void FFortItemEntry::Construct(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel)
+{
+    if (!Natives::FFortItemEntry_FFortItemEntry && !Finder::ResolvePickupLive())
+    {
+        StaticStruct()->InitializeStruct(This);
+        return;
+    }
+    Natives::FFortItemEntry_FFortItemEntry(This, InItemDefinition, InCount, InLevel, nullptr);
+}
+
 bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerController* Controller)
 {
     if (Natives::UFortWorldItemDefinition_ServerExecuteIndex < 0 && !Finder::ResolveWorldItemDefinitionLive())

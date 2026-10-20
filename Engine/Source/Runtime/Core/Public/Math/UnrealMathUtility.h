@@ -56,6 +56,11 @@ struct FMath
         return FloorToInt(F + 0.5f);
     }
 
+    static float Atan2(float Y, float X)
+    {
+        return std::atan2(Y, X);
+    }
+
     static float Sqrt(float Value)
     {
         return std::sqrt(Value);

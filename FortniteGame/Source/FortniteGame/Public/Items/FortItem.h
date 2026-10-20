@@ -11,6 +11,10 @@ class UFortItemDefinition;
 struct FFortItemEntry : public FFastArraySerializerItem
 {
     DefineUnrealStruct(FFortItemEntry, FortniteGame)
+
+public:
+    static void Construct(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel);
+
     DefineUProperty(int32_t, Count)
     DefineUProperty(UFortItemDefinition*, ItemDefinition)
     DefineUProperty(FGuid, ItemGuid)

@@ -3048,6 +3048,48 @@ bool Finder::ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, voi
     return true;
 }
 
+bool Finder::ResolvePickupLive()
+{
+    const auto LastCall = [](const wchar_t* FunctionPath)
+    {
+        UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
+        const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+        const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+        uintptr_t Native = 0;
+        for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+        {
+            Native = Finder::RelativeTarget(Call, 1, 5);
+        }
+        return Native;
+    };
+
+    const uintptr_t CreateTemporaryItemInstance = LastCall(L"/Script/FortniteGame.FortItemDefinition:CreateTemporaryItemInstanceBP");
+    const uintptr_t EntryCall = CreateTemporaryItemInstance ? FindRawCall(CreateTemporaryItemInstance, Finder::FunctionEnd(CreateTemporaryItemInstance)) : 0;
+    const uintptr_t EntryConstructor = EntryCall ? Finder::RelativeTarget(EntryCall, 1, 5) : 0;
+
+    const uintptr_t SpawnMissionItemPickup = LastCall(L"/Script/FortniteGame.FortMissionLibrary:SpawnMissionItemPickup");
+    const uintptr_t SpawnMissionItemPickupEnd = SpawnMissionItemPickup ? Finder::FunctionEnd(SpawnMissionItemPickup) : 0;
+    uintptr_t CreatePickup = 0;
+    for (uintptr_t Call = SpawnMissionItemPickupEnd && EntryConstructor ? FindRawCall(SpawnMissionItemPickup, SpawnMissionItemPickupEnd) : 0; Call && !CreatePickup; Call = FindRawCall(Call + 1, SpawnMissionItemPickupEnd))
+    {
+        if (Finder::RelativeTarget(Call, 1, 5) == EntryConstructor)
+        {
+            const uintptr_t Next = FindRawCall(Call + 5, SpawnMissionItemPickupEnd);
+            CreatePickup = Next ? Finder::RelativeTarget(Next, 1, 5) : 0;
+        }
+    }
+
+    if (!EntryConstructor || !CreatePickup)
+    {
+        Log::Error(L"Finder: FFortItemEntry::FFortItemEntry / AFortPickup::CreatePickup not found");
+        return false;
+    }
+    Natives::FFortItemEntry_FFortItemEntry = reinterpret_cast<decltype(Natives::FFortItemEntry_FFortItemEntry)>(EntryConstructor);
+    Natives::AFortPickup_CreatePickup = reinterpret_cast<decltype(Natives::AFortPickup_CreatePickup)>(CreatePickup);
+    Log::Info(L"Finder: FFortItemEntry::FFortItemEntry and AFortPickup::CreatePickup found");
+    return true;
+}
+
 bool Finder::ResolveWorldItemDefinitionLive()
 {
     UFunction* EquipWeaponDefinition = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPawn:EquipWeaponDefinition");

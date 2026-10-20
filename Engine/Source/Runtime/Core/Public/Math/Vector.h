@@ -2,6 +2,8 @@
 
 #include "Math/UnrealMathUtility.h"
 
+struct FRotator;
+
 struct FVector
 {
     float X = 0.0f;
@@ -19,6 +21,8 @@ struct FVector
     FVector operator-(const FVector& V) const { return FVector(X - V.X, Y - V.Y, Z - V.Z); }
     FVector operator*(float Scale) const { return FVector(X * Scale, Y * Scale, Z * Scale); }
     float operator|(const FVector& V) const { return X * V.X + Y * V.Y + Z * V.Z; }
+
+    FRotator Rotation() const;
 
     float SizeSquared() const { return X * X + Y * Y + Z * Z; }
     float Size() const { return FMath::Sqrt(SizeSquared()); }

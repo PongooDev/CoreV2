@@ -6,7 +6,9 @@
 
 class AFortAIDirector;
 class AFortAIGoalManager;
+class AFortPickup;
 class AFortPlayerController;
+struct FVector;
 class IAbilitySystemInterface;
 class IFortInventoryOwnerInterface;
 class UFortWorldItemDefinition;
@@ -23,6 +25,7 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(K2_GiveItemToPlayer)
     DefineUFunction(K2_RemoveItemFromPlayer)
     DefineUFunction(K2_RemoveItemFromAllPlayers)
+    DefineUFunction(K2_SpawnPickupInWorld)
 
 public:
     static void EquipFortAbilitySet(TScriptInterface<IAbilitySystemInterface> AbilitySystemInterfaceActor, UFortAbilitySet* AbilitySet, UObject* OverrideSourceObject, FFortAbilitySetHandle& OutHandle);
@@ -33,6 +36,7 @@ public:
     static void K2_GiveItemToPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer);
     static int32_t K2_RemoveItemFromPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove);
     static void K2_RemoveItemFromAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove);
+    static AFortPickup* K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount);
 
     DECLARE_FUNCTION(execGetAIDirector);
     DECLARE_FUNCTION(execGetAIGoalManager);
@@ -40,6 +44,7 @@ public:
     DECLARE_FUNCTION(execK2_GiveItemToPlayer);
     DECLARE_FUNCTION(execK2_RemoveItemFromPlayer);
     DECLARE_FUNCTION(execK2_RemoveItemFromAllPlayers);
+    DECLARE_FUNCTION(execK2_SpawnPickupInWorld);
 
     static void HookNatives();
 };

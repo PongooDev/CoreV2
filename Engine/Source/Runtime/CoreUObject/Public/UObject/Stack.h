@@ -11,6 +11,7 @@ class UIntProperty;
 class UInterfaceProperty;
 class UObject;
 class UProperty;
+class UStructProperty;
 
 template <class PropertyType>
 struct TPropertyCppType;
@@ -55,6 +56,7 @@ public:
 #define P_STACK (*static_cast<FFrame*>(TheStack))
 #define P_GET_OBJECT(ObjectType, ParamName) ObjectType* ParamName = nullptr; P_STACK.StepCompiledIn<UObjectPropertyBase>(&ParamName);
 #define P_GET_PROPERTY(PropertyType, ParamName) typename TPropertyCppType<PropertyType>::Type ParamName{}; P_STACK.StepCompiledIn<PropertyType>(&ParamName);
+#define P_GET_STRUCT(StructType, ParamName) StructType ParamName{}; P_STACK.StepCompiledIn<UStructProperty>(&ParamName);
 #define P_GET_UBOOL(ParamName) uint32_t ParamName##32 = 0; P_STACK.StepCompiledIn<UBoolProperty>(&ParamName##32); bool ParamName = !!ParamName##32;
 #define P_GET_TINTERFACE(InterfaceType, ParamName) TScriptInterface<InterfaceType> ParamName; P_STACK.StepCompiledIn<UInterfaceProperty>(&ParamName);
 #define P_FINISH P_STACK.Code += !!P_STACK.Code;

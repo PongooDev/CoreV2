@@ -57,5 +57,6 @@ namespace Finder
     bool ResolveCraftingLive();
     uint8_t* NullGetCurrentCall(UFunction* Function);
     bool ResolveWorldItemLive(void** InventoryOwnerVTable);
+    bool ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset);
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable);
 }

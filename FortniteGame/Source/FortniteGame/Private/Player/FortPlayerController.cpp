@@ -14,6 +14,7 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
+#include "Quests/FortQuestManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -326,6 +327,12 @@ int32_t AFortPlayerController::GetItemQuantity(const UFortItemDefinition* ItemDe
         }
     }
     return Quantity;
+}
+
+UFortQuestManager* AFortPlayerController::GetQuestManager() const
+{
+    UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
+    return PlayerInfo ? static_cast<UFortQuestManager*>(PlayerInfo->QuestManager) : nullptr;
 }
 
 UFortSchematicItem* AFortPlayerController::GetSchematicForItem(const UFortItemDefinition* ItemDefinition)

@@ -17,6 +17,7 @@ public:
     DefineUProperty(AFortAIDirector*, AIDirector)
     DefineUProperty(AFortAIGoalManager*, AIGoalManager)
     DefineUProperty(AActor*, ActiveSpawnPad)
+    DefineUProperty(int32_t, EndOfZoneRemainTime)
     DefineUProperty(int32_t, OverrideAIDirectorIndex)
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
@@ -26,6 +27,11 @@ public:
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
     void PlacePlayerSpawnPad(AFortWorldManager* WorldManager);
     void OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldManager, UEnvQueryInstanceBlueprintWrapper* PlacementQuery);
+
+    void OnZoneEnd();
+
+    static ptrdiff_t EndOfZoneRemainTimeOffset();
+    static ptrdiff_t ActiveSpawnPadOffset();
 
     static void Hook();
     static void HookVTables();

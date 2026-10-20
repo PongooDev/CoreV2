@@ -3245,6 +3245,211 @@ bool Finder::ResolveMissionGenerationLive()
     return true;
 }
 
+bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset)
+{
+    if (Natives::AFortMissionManager_OnZoneEndIndex >= 0 && Natives::AFortGameModeZone_OnZoneEndIndex >= 0 && Natives::AFortGameStateZone_SetGameplayStateIndex >= 0 && Natives::UFortQuestManager_SendStatEvent && Natives::UFortQuestManager_SendEndPrimaryMission && Natives::UGameInstance_GetGameSessionId && Natives::UEnum_GetEnumName)
+    {
+        return true;
+    }
+
+    const auto ExecOf = [](const wchar_t* FunctionPath)
+    {
+        UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
+        return Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    };
+    const auto Calls = [](uintptr_t Function)
+    {
+        std::vector<std::pair<uintptr_t, uintptr_t>> Result;
+        const uintptr_t End = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        for (uintptr_t Call = End ? FindRawCall(Function, End) : 0; Call; Call = FindRawCall(Call + 1, End))
+        {
+            Result.emplace_back(Call, Finder::RelativeTarget(Call, 1, 5));
+        }
+        return Result;
+    };
+    const auto Bytes32 = [](ptrdiff_t Value)
+    {
+        const int32_t V = static_cast<int32_t>(Value);
+        return std::vector<int32_t>{ V & 0xFF, (V >> 8) & 0xFF, (V >> 16) & 0xFF, (V >> 24) & 0xFF };
+    };
+    const auto Contains = [](uintptr_t Begin, uintptr_t End, const std::vector<int32_t>& Pattern)
+    {
+        for (uintptr_t Address = Begin; Address + Pattern.size() <= End; ++Address)
+        {
+            size_t Index = 0;
+            while (Index < Pattern.size() && (Pattern[Index] < 0 || Byte(Address + Index) == static_cast<uint8_t>(Pattern[Index])))
+            {
+                ++Index;
+            }
+            if (Index == Pattern.size())
+            {
+                return Address;
+            }
+        }
+        return uintptr_t{ 0 };
+    };
+
+    const auto Step = reinterpret_cast<uintptr_t>(Natives::FFrame_Step);
+    const auto StepExplicit = reinterpret_cast<uintptr_t>(Natives::FFrame_StepExplicitProperty);
+    uintptr_t SourceAndContextTags = 0;
+    for (const auto& [Call, Target] : Calls(ExecOf(L"/Script/FortniteGame.FortQuestManager:GetSourceAndContextTags")))
+    {
+        if (!SourceAndContextTags && Target != Step && Target != StepExplicit)
+        {
+            SourceAndContextTags = Target;
+        }
+    }
+
+    const auto WaveCalls = Calls(ExecOf(L"/Script/FortniteGame.FortMission:OnWaveCompleted"));
+    const uintptr_t WaveCompleted = WaveCalls.empty() ? 0 : WaveCalls.back().second;
+    uintptr_t SendStatEvent = 0;
+    bool bAfterTags = false;
+    for (const auto& [Call, Target] : WaveCompleted && SourceAndContextTags ? Calls(WaveCompleted) : decltype(Calls(0)){})
+    {
+        if (bAfterTags && !SendStatEvent)
+        {
+            SendStatEvent = Target;
+        }
+        bAfterTags |= Target == SourceAndContextTags;
+    }
+
+    const auto RemoveCalls = Calls(ExecOf(L"/Script/FortniteGame.FortMission:RemoveParticipantAccount"));
+    const uintptr_t RemoveParticipant = RemoveCalls.empty() ? 0 : RemoveCalls.back().second;
+    const uintptr_t RemoveEnd = RemoveParticipant ? Finder::FunctionEnd(RemoveParticipant) : 0;
+    const uintptr_t FirstVirtual = RemoveEnd ? FindVirtualCall(RemoveParticipant, RemoveEnd) : 0;
+
+    std::vector<uintptr_t> DedicatedServerCommands;
+    for (uintptr_t Reference : Finder::StringRefs(L"McpDedicatedServerCommandUrl"))
+    {
+        DedicatedServerCommands.push_back(Finder::FunctionStart(Reference));
+    }
+
+    const auto FindObjectNative = reinterpret_cast<uintptr_t>(Natives::StaticFindObject);
+    uintptr_t GameSessionId = 0;
+    uintptr_t SendEndPrimaryMission = 0;
+    uintptr_t GetEnumName = 0;
+    uintptr_t FindObjectCall = 0;
+    uintptr_t PreviousTarget = 0;
+    const auto RemoveParticipantCalls = RemoveParticipant ? Calls(RemoveParticipant) : decltype(Calls(0)){};
+    for (const auto& [Call, Target] : RemoveParticipantCalls)
+    {
+        if (FirstVirtual && Call < FirstVirtual)
+        {
+            GameSessionId = Target;
+        }
+        if (!SendEndPrimaryMission && std::find(DedicatedServerCommands.begin(), DedicatedServerCommands.end(), Target) != DedicatedServerCommands.end())
+        {
+            SendEndPrimaryMission = Target;
+        }
+        if (!FindObjectCall && Target == FindObjectNative)
+        {
+            FindObjectCall = Call;
+        }
+    }
+    std::vector<int32_t> InfoLoad{ 0x48, 0x8B, -1 };
+    for (int32_t Value : Bytes32(MissionInfoOffset))
+    {
+        InfoLoad.push_back(Value);
+    }
+    const uintptr_t Load = FindObjectCall ? Contains(FindObjectCall, RemoveEnd, InfoLoad) : 0;
+    for (const auto& [Call, Target] : RemoveParticipantCalls)
+    {
+        if (Load && Call > FindObjectCall && Call < Load)
+        {
+            GetEnumName = Target;
+        }
+    }
+
+    int32_t MissionManagerIndex = -1;
+    const auto Finished = Bytes32(ZoneFinishedOffset);
+    const auto Completed = Bytes32(ZoneCompletedOffset);
+    for (const auto& [First, Second] : { std::pair{ Finished, Completed }, std::pair{ Completed, Finished } })
+    {
+        std::vector<int32_t> Pattern{ 0xC6, 0x81 };
+        Pattern.insert(Pattern.end(), First.begin(), First.end());
+        Pattern.insert(Pattern.end(), { 0x01, 0x88, 0x91 });
+        Pattern.insert(Pattern.end(), Second.begin(), Second.end());
+        Pattern.push_back(0xC3);
+        const uintptr_t Setter = Contains(Finder::TextBegin(), Finder::TextEnd(), Pattern);
+        if (!Setter || MissionManagerIndex >= 0)
+        {
+            continue;
+        }
+
+        for (uintptr_t Site = Finder::TextBegin(); Site + 5 <= Finder::TextEnd() && MissionManagerIndex < 0; ++Site)
+        {
+            if (Byte(Site) != 0xE8 || Finder::RelativeTarget(Site, 1, 5) != Setter)
+            {
+                continue;
+            }
+            const uintptr_t Timer = Finder::FunctionStart(Site);
+            const uintptr_t TimerEnd = Timer ? Finder::FunctionEnd(Timer) : 0;
+            const uintptr_t Tail = TimerEnd ? FindVirtualCall(Site + 5, TimerEnd) : 0;
+            MissionManagerIndex = Tail ? VirtualSlot(Tail) : -1;
+        }
+    }
+
+    const auto FirstEntryContaining = [](void** VTable, const std::vector<std::vector<int32_t>>& Patterns, const auto& ContainsFn)
+    {
+        for (int32_t Index = 0; VTable && Index < 0x400; ++Index)
+        {
+            const uintptr_t Function = VTableEntry(VTable, Index);
+            if (!Function)
+            {
+                break;
+            }
+            const uintptr_t FunctionEnd = Finder::FunctionEnd(Function);
+            bool bAll = FunctionEnd > Function && FunctionEnd - Function < 0x2000;
+            for (const auto& Pattern : Patterns)
+            {
+                bAll = bAll && ContainsFn(Function, FunctionEnd, Pattern);
+            }
+            if (bAll)
+            {
+                return Index;
+            }
+        }
+        return -1;
+    };
+
+    const int32_t GameModeIndex = FirstEntryContaining(CdoVTable(L"/Script/FortniteGame.FortGameModeZone"), { Bytes32(EndOfZoneRemainTimeOffset), Bytes32(ActiveSpawnPadOffset) }, Contains);
+
+    void** GameStateVTable = CdoVTable(L"/Script/FortniteGame.FortGameStateZone");
+    const uintptr_t OnRepGameplayState = FunctionOf(L"Zone has been completed, OnZoneCompleteEvent event triggering HUD EndOfZone");
+    int32_t OnRepIndex = -1;
+    for (int32_t Index = 0; GameStateVTable && OnRepGameplayState && Index < 0x400 && OnRepIndex < 0; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(GameStateVTable, Index);
+        if (!Entry)
+        {
+            break;
+        }
+        OnRepIndex = Entry == OnRepGameplayState ? Index : -1;
+    }
+    std::vector<int32_t> OnRepCall{ 0xFF, 0x90 };
+    for (int32_t Value : Bytes32(OnRepIndex * 8))
+    {
+        OnRepCall.push_back(Value);
+    }
+    const int32_t GameStateIndex = OnRepIndex >= 0 ? FirstEntryContaining(GameStateVTable, { OnRepCall }, Contains) : -1;
+
+    if (!SendStatEvent || !SendEndPrimaryMission || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
+    {
+        Log::Error(L"Finder: zone end not found (stat {}, end mission {}, session {}, enum {}, mission manager {}, game mode {}, game state {})", SendStatEvent != 0, SendEndPrimaryMission != 0, GameSessionId != 0, GetEnumName != 0, MissionManagerIndex, GameModeIndex, GameStateIndex);
+        return false;
+    }
+
+    Natives::UFortQuestManager_SendStatEvent = reinterpret_cast<decltype(Natives::UFortQuestManager_SendStatEvent)>(SendStatEvent);
+    Natives::UFortQuestManager_SendEndPrimaryMission = reinterpret_cast<decltype(Natives::UFortQuestManager_SendEndPrimaryMission)>(SendEndPrimaryMission);
+    Natives::UGameInstance_GetGameSessionId = reinterpret_cast<decltype(Natives::UGameInstance_GetGameSessionId)>(GameSessionId);
+    Natives::UEnum_GetEnumName = reinterpret_cast<decltype(Natives::UEnum_GetEnumName)>(GetEnumName);
+    Natives::AFortMissionManager_OnZoneEndIndex = MissionManagerIndex;
+    Natives::AFortGameModeZone_OnZoneEndIndex = GameModeIndex;
+    Natives::AFortGameStateZone_SetGameplayStateIndex = GameStateIndex;
+    Log::Info(L"Finder: zone end resolved: AFortMissionManager::OnZoneEnd slot 0x{:X}, AFortGameModeZone::OnZoneEnd slot 0x{:X}, AFortGameStateZone::SetGameplayState slot 0x{:X}", MissionManagerIndex, GameModeIndex, GameStateIndex);
+    return true;
+}
+
 bool Finder::ResolveWorldItemLive(void** InventoryOwnerVTable)
 {
     int32_t LoadedAmmoIndex = -1;

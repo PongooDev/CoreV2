@@ -161,6 +161,24 @@ void AFortGameModeZone::OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldMa
 #endif
 }
 
+void AFortGameModeZone::OnZoneEnd()
+{
+    if (Natives::AFortGameModeZone_OnZoneEndIndex >= 0)
+    {
+        CallVirtual<void>(this, Natives::AFortGameModeZone_OnZoneEndIndex);
+    }
+}
+
+ptrdiff_t AFortGameModeZone::EndOfZoneRemainTimeOffset()
+{
+    return Member_EndOfZoneRemainTime.GetOffsetChecked();
+}
+
+ptrdiff_t AFortGameModeZone::ActiveSpawnPadOffset()
+{
+    return Member_ActiveSpawnPad.GetOffsetChecked();
+}
+
 void AFortGameModeZone::Hook()
 {
     Hooks::Detour(L"AFortGameModeZone::SpawnDefaultPawnFor_Implementation", reinterpret_cast<void*>(Natives::AFortGameModeZone_SpawnDefaultPawnFor), &SpawnDefaultPawnFor_ImplementationHK, nullptr);

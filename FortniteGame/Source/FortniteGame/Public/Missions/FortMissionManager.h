@@ -45,7 +45,19 @@ struct FFortMissionManagerRecord
     static void Construct(FFortMissionManagerRecord* This, UClass* InMissionManagerClass);
 };
 
+class AFortMission;
+
 class AFortMissionManager : public AActor
 {
     DefineUnrealClass(AFortMissionManager, FortniteGame)
+
+public:
+    DefineUProperty(TArray<AFortMission*>, Missions)
+
+    void OnZoneEnd(bool bZoneCompleted);
+
+    static void HookVTables();
+
+private:
+    static void OnZoneEndHK(AFortMissionManager* This, bool bZoneCompleted);
 };

@@ -171,6 +171,16 @@ void AFortWorldManager::CreateMissionManager()
 #endif
 }
 
+ptrdiff_t AFortWorldManager::ZoneFinishedOffset()
+{
+    return Member_bZoneFinished.GetOffsetChecked();
+}
+
+ptrdiff_t AFortWorldManager::ZoneCompletedOffset()
+{
+    return Member_bZoneCompleted.GetOffsetChecked();
+}
+
 int32_t AFortWorldManager::GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName)
 {
 #if WITH_SERVER_CODE

@@ -17,6 +17,7 @@ class APawn;
 class AWorldSettings;
 class UDemoNetDriver;
 class ULevel;
+class UGameInstance;
 class UNetDriver;
 struct FTransform;
 
@@ -81,6 +82,7 @@ class UWorld final : public UObject, public FNetworkNotify
     DefineUProperty(UDemoNetDriver*, DemoNetDriver)
     DefineUProperty(AGameModeBase*, AuthorityGameMode)
     DefineUProperty(AGameStateBase*, GameState)
+    DefineUProperty(UGameInstance*, OwningGameInstance)
     DefineUProperty(AGameNetworkManager*, NetworkManager)
     DefineUProperty(ULevel*, CurrentLevelPendingVisibility)
     DefineUProperty(ULevel*, CurrentLevelPendingInvisibility)

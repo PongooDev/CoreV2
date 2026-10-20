@@ -39,6 +39,11 @@ public:
     DefineUStructProperty(FFortMissionManagerRecord, MissionManagerRecord)
     DefineBitfieldUProperty(bHasCreatedMissions)
     DefineBitfieldUProperty(bCreatedMissionRecord)
+    DefineUProperty(bool, bZoneFinished)
+    DefineUProperty(bool, bZoneCompleted)
+
+    static ptrdiff_t ZoneFinishedOffset();
+    static ptrdiff_t ZoneCompletedOffset();
 
     void OnWorldRecordQueryComplete();
     void ServerTickLoadingOrCreatingWorld();

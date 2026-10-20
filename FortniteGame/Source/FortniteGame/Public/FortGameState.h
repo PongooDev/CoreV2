@@ -30,4 +30,5 @@ public:
     DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
 
     UFortMissionGenerator* GetMissionGenerator() const;
+    void SetGameplayState(uint8_t NewGameplayState);
 };

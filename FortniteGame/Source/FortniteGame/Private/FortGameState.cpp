@@ -2,6 +2,7 @@
 #include "FortGameState.h"
 #include "Finder.h"
 #include "Natives.h"
+#include "ObjectLayout.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
 
 void AFortGameState::SpawnMissionManager(const FFortMissionManagerRecord& MissionManagerRecord)
@@ -21,6 +22,14 @@ UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const
         return nullptr;
     }
     return static_cast<UFortMissionGenerator*>(LoadedClass->GetDefaultObject());
+}
+
+void AFortGameStateZone::SetGameplayState(uint8_t NewGameplayState)
+{
+    if (Natives::AFortGameStateZone_SetGameplayStateIndex >= 0)
+    {
+        CallVirtual<void>(this, Natives::AFortGameStateZone_SetGameplayStateIndex, NewGameplayState);
+    }
 }
 
 ptrdiff_t AFortGameState::MissionManagerOffset()

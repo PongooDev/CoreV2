@@ -5,7 +5,6 @@
 #include "GameThread.h"
 #include "Hooks.h"
 #include "Log.h"
-#include "Logging/LogVerbosity.h"
 #include "UObject/UObjectIterator.h"
 
 #include <string>
@@ -95,22 +94,6 @@ void Diagnostics::HookLobbyServer()
     if (ServerSetHeroType)
     {
         Hooks::Detour(L"Diagnostics AFortLobbyBeaconClient::ServerSetHeroType_Implementation", reinterpret_cast<void*>(ServerSetHeroType), &ServerSetHeroTypeHK, &ServerSetHeroTypeOG);
-    }
-}
-
-void Diagnostics::RaiseMissionLogging()
-{
-    for (const wchar_t* CategoryName : { L"LogFortMission", L"LogFortAIDirector" })
-    {
-        if (uint8_t* Verbosity = reinterpret_cast<uint8_t*>(Finder::LogCategory(CategoryName)))
-        {
-            Log::Info(L"Diagnostics: {} verbosity {} -> VeryVerbose", CategoryName, *Verbosity);
-            *Verbosity = ELogVerbosity::VeryVerbose;
-        }
-        else
-        {
-            Log::Error(L"Diagnostics: log category {} not found", CategoryName);
-        }
     }
 }
 

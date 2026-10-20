@@ -45,4 +45,5 @@ namespace Finder
     bool ResolveAbilitySystemLive();
     int32_t ImplementationIndex(UFunction* Function);
     bool ResolveWorldItemDefinitionLive();
+    bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable);
 }

@@ -1,6 +1,11 @@
 #include "pch.h"
 #include "Items/FortQuickBars.h"
+#include "Finder.h"
+#include "Hooks.h"
+#include "Log.h"
+#include "Natives.h"
 #include "ReflectionParams.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/Class.h"
 
 void AFortQuickBars::EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex)
@@ -49,7 +54,16 @@ bool AFortQuickBars::ContainsItem(const FGuid& Item)
     return false;
 }
 
-void AFortQuickBars::RemoveItem(const FGuid& Item)
+void AFortQuickBars::ServerRemoveItemInternal(const FGuid& Item, bool bFindReplacement, bool bForce)
+{
+    Reflection::FParams Params(StaticFunction_ServerRemoveItemInternal());
+    Params.Set(L"Item", Item);
+    Params.Set(L"bFindReplacement", bFindReplacement);
+    Params.Set(L"bForce", bForce);
+    Params.Call(this);
+}
+
+void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, bool bFindReplacement, bool bForce)
 {
 #if WITH_SERVER_CODE
     for (EFortQuickBars Bar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
@@ -68,6 +82,32 @@ void AFortQuickBars::RemoveItem(const FGuid& Item)
         }
     }
 #endif
+}
+
+void AFortQuickBars::HookVTables()
+{
+    const int32_t RemoveIndex = Finder::ImplementationIndex(StaticFunction_ServerRemoveItemInternal());
+    if (RemoveIndex < 0)
+    {
+        Log::Error(L"Finder: AFortQuickBars::ServerRemoveItemInternal_Implementation slot not found");
+        return;
+    }
+
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[RemoveIndex] == Natives::SharedEmptyFunction)
+        {
+            Hooks::SwapVTable(L"AFortQuickBars::ServerRemoveItemInternal_Implementation", VTable, RemoveIndex, reinterpret_cast<void*>(&ServerRemoveItemInternal_ImplementationHK));
+        }
+    }
+}
+
+void AFortQuickBars::ServerRemoveItemInternal_ImplementationHK(AFortQuickBars* This, const FGuid& Item, bool bFindReplacement, bool bForce)
+{
+    This->ServerRemoveItemInternal_Implementation(Item, bFindReplacement, bForce);
 }
 
 void AFortQuickBars::SetupQuickbar(EFortQuickBars InQuickBar, const FQuickBarData& QuickBarData)

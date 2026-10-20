@@ -3031,6 +3031,23 @@ int32_t Finder::ImplementationIndex(UFunction* Function)
     return Index;
 }
 
+bool Finder::ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable)
+{
+    const uintptr_t Implementation = VTableEntry(PlayerControllerVTable, ImplementationIndex(ServerRemoveInventoryItem));
+    const uintptr_t InterfaceAdjust = Implementation ? FindInstruction(Implementation, Implementation + 0x20, { 0x48, 0x81, 0xC1 }) : 0;
+    const int32_t RemoveIndex = InterfaceAdjust ? VirtualSlot(FindVirtualCall(InterfaceAdjust, InterfaceAdjust + 0x20)) : -1;
+    if (!InterfaceAdjust || RemoveIndex < 0)
+    {
+        Log::Error(L"Finder: IFortInventoryOwnerInterface::RemoveInventoryItem not found");
+        return false;
+    }
+
+    Natives::AFortPlayerController_InventoryOwnerInterface = *reinterpret_cast<const int32_t*>(InterfaceAdjust + 3);
+    Natives::IFortInventoryOwnerInterface_RemoveInventoryItemIndex = RemoveIndex;
+    Log::Info(L"Finder: IFortInventoryOwnerInterface is AFortPlayerController +0x{:X}, RemoveInventoryItem slot 0x{:X}", Natives::AFortPlayerController_InventoryOwnerInterface, RemoveIndex);
+    return true;
+}
+
 bool Finder::ResolveWorldItemDefinitionLive()
 {
     UFunction* EquipWeaponDefinition = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPawn:EquipWeaponDefinition");

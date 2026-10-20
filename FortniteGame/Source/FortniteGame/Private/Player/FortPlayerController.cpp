@@ -139,8 +139,66 @@ void AFortPlayerController::ServerExecuteInventoryItem_Implementation(const FGui
 #endif
 }
 
+bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
+{
+    void* InventoryOwner = reinterpret_cast<uint8_t*>(this) + Natives::AFortPlayerController_InventoryOwnerInterface;
+    const bool bRemoved = RemoveInventoryItemOG(InventoryOwner, ItemGuid, Count, bForceRemoveFromQuickBars);
+
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority)
+    {
+        return bRemoved;
+    }
+
+    AFortInventory* Inventory = WorldInventory;
+    UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+    if (!WorldItem)
+    {
+        return false;
+    }
+
+    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+    const int32_t Remaining = ItemEntry.Count - Count;
+    if (Count < 0 || Remaining <= 0)
+    {
+        if (AFortQuickBars* Bars = QuickBars)
+        {
+            Bars->ServerRemoveItemInternal(ItemGuid, false, bForceRemoveFromQuickBars);
+        }
+        Inventory->RemoveWorldItem(WorldItem);
+    }
+    else
+    {
+        Inventory->UpdateWorldItemCount(WorldItem, Remaining);
+    }
+    return true;
+#else
+    return bRemoved;
+#endif
+}
+
 void AFortPlayerController::HookVTables()
 {
+    UObject* PlayerControllerDefault = StaticClass()->GetDefaultObject(false);
+    void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
+    if (Finder::ResolveInventoryOwnerLive(StaticFunction_ServerRemoveInventoryItem(), PlayerControllerVTable))
+    {
+        const ptrdiff_t InterfaceOffset = Natives::AFortPlayerController_InventoryOwnerInterface;
+        const int32_t RemoveIndex = Natives::IFortInventoryOwnerInterface_RemoveInventoryItemIndex;
+        void* const PlayerControllerRemove = (*reinterpret_cast<void***>(reinterpret_cast<uint8_t*>(PlayerControllerDefault) + InterfaceOffset))[RemoveIndex];
+        RemoveInventoryItemOG = reinterpret_cast<decltype(RemoveInventoryItemOG)>(PlayerControllerRemove);
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** InterfaceVTable = ClassDefault ? *reinterpret_cast<void***>(reinterpret_cast<uint8_t*>(ClassDefault) + InterfaceOffset) : nullptr;
+            if (InterfaceVTable && InterfaceVTable[RemoveIndex] == PlayerControllerRemove)
+            {
+                Hooks::SwapVTable(L"AFortPlayerController::RemoveInventoryItem", InterfaceVTable, RemoveIndex, reinterpret_cast<void*>(&RemoveInventoryItemHK));
+            }
+        }
+    }
+
     const int32_t ExecuteIndex = Finder::ImplementationIndex(StaticFunction_ServerExecuteInventoryItem());
     if (ExecuteIndex < 0)
     {
@@ -158,6 +216,12 @@ void AFortPlayerController::HookVTables()
             Hooks::SwapVTable(L"AFortPlayerController::ServerExecuteInventoryItem_Implementation", VTable, ExecuteIndex, reinterpret_cast<void*>(&ServerExecuteInventoryItem_ImplementationHK));
         }
     }
+}
+
+bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
+{
+    AFortPlayerController* PlayerController = reinterpret_cast<AFortPlayerController*>(static_cast<uint8_t*>(InventoryOwner) - Natives::AFortPlayerController_InventoryOwnerInterface);
+    return PlayerController->RemoveInventoryItem(ItemGuid, Count, bForceRemoveFromQuickBars);
 }
 
 void AFortPlayerController::ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid)

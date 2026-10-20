@@ -205,6 +205,7 @@ namespace Natives
     inline int32_t AFortGameMode_FinishWorldInitializationIndex = -1;
     inline int32_t UAbilitySystemComponent_InternalServerTryActiveAbilityIndex = -1;
     inline int32_t UFortWorldItemDefinition_ServerExecuteIndex = -1;
+    inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;
     inline int32_t UNetConnection_TickIndex = -1;
@@ -286,6 +287,7 @@ namespace Natives
     inline ptrdiff_t UChannel_ChIndex = -1;
     inline ptrdiff_t FFrame_Object = -1;
     inline ptrdiff_t FFastArraySerializer_IDCounter = -1;
+    inline ptrdiff_t AFortPlayerController_InventoryOwnerInterface = -1;
     inline ptrdiff_t FFrame_Code = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;

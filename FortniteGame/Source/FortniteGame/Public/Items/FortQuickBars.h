@@ -46,6 +46,7 @@ public:
     DefineUStructProperty(FQuickBar, SecondaryQuickBar)
     DefineUFunction(EnableSlot)
     DefineUFunction(ServerAddItemInternal)
+    DefineUFunction(ServerRemoveItemInternal)
 
     FQuickBar& GetQuickBar(EFortQuickBars InQuickBar) { return InQuickBar == EFortQuickBars::Primary ? PrimaryQuickBar : SecondaryQuickBar; }
 
@@ -54,6 +55,12 @@ public:
     FQuickBarSlot& GetSlot(EFortQuickBars InQuickBar, int32_t SlotIndex);
     const FQuickBarSlotData& GetSlotData(EFortQuickBars InQuickBar, int32_t SlotIndex);
     bool ContainsItem(const FGuid& Item);
-    void RemoveItem(const FGuid& Item);
+    void ServerRemoveItemInternal(const FGuid& Item, bool bFindReplacement, bool bForce);
+    void ServerRemoveItemInternal_Implementation(const FGuid& Item, bool bFindReplacement, bool bForce);
     void SetupQuickbar(EFortQuickBars InQuickBar, const FQuickBarData& QuickBarData);
+
+    static void HookVTables();
+
+private:
+    static void ServerRemoveItemInternal_ImplementationHK(AFortQuickBars* This, const FGuid& Item, bool bFindReplacement, bool bForce);
 };

@@ -127,19 +127,11 @@ int32_t UFortKismetLibrary::K2_RemoveItemFromPlayer(AFortPlayerController* Playe
         FFortItemEntry& Entry = Item->ItemEntry;
         const int32_t Count = Entry.Count;
         const int32_t Taken = AmountToRemove < 0 ? Count : std::min(Count, AmountToRemove - Removed);
-        if (Taken >= Count)
+        const FGuid ItemGuid = Entry.ItemGuid;
+        if (PlayerController->RemoveInventoryItem(ItemGuid, Taken, true))
         {
-            if (AFortQuickBars* Bars = PlayerController->QuickBars)
-            {
-                Bars->RemoveItem(Entry.ItemGuid);
-            }
-            Inventory->RemoveWorldItem(Item);
+            Removed += Taken;
         }
-        else
-        {
-            Inventory->UpdateWorldItemCount(Item, Count - Taken);
-        }
-        Removed += Taken;
     }
     return Removed;
 #else

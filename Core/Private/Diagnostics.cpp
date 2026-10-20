@@ -27,6 +27,7 @@ namespace
     public:
         DefineUProperty(FString, HeroId)
         DefineUProperty(UObject*, HeroType)
+        DefineUProperty(uint8_t, CharacterGender)
     };
 
     std::wstring NameOf(const UObject* Object)
@@ -42,7 +43,7 @@ namespace
             return L"no FortLobbyBeaconPlayerState (" + NameOf(PlayerState) + L")";
         }
         FString& HeroId = FortPlayerState->HeroId;
-        return FortPlayerState->GetName().ToStdString() + L" HeroId '" + HeroId.ToStdString() + L"' HeroType " + NameOf(FortPlayerState->HeroType);
+        return FortPlayerState->GetName().ToStdString() + L" HeroId '" + HeroId.ToStdString() + L"' HeroType " + NameOf(FortPlayerState->HeroType) + L" CharacterGender " + std::to_wstring(static_cast<uint8_t>(FortPlayerState->CharacterGender));
     }
 
     void (*ServerSetHeroTypeOG)(ALobbyBeaconClient* This, const void* InUniqueId, UObject* InHeroType) = nullptr;

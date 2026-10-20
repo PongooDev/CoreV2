@@ -3396,7 +3396,7 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
             const uintptr_t Function = VTableEntry(VTable, Index);
             if (!Function)
             {
-                break;
+                continue;
             }
             const uintptr_t FunctionEnd = Finder::FunctionEnd(Function);
             bool bAll = FunctionEnd > Function && FunctionEnd - Function < 0x2000;
@@ -3420,10 +3420,6 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     for (int32_t Index = 0; GameStateVTable && OnRepGameplayState && Index < 0x400 && OnRepIndex < 0; ++Index)
     {
         const uintptr_t Entry = VTableEntry(GameStateVTable, Index);
-        if (!Entry)
-        {
-            break;
-        }
         OnRepIndex = Entry == OnRepGameplayState ? Index : -1;
     }
     std::vector<int32_t> OnRepCall{ 0xFF, 0x90 };

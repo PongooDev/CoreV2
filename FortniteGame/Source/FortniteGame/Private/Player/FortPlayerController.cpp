@@ -8,9 +8,14 @@
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortQuickBars.h"
+#include "Items/FortWeaponItemDefinition.h"
+#include "Finder.h"
+#include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
+#include "Pawns/FortPawn.h"
 #include "UObject/Class.h"
+#include "UObject/UObjectIterator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
@@ -116,6 +121,51 @@ void AFortPlayerController::TryAddToQuickBar(UFortWorldItem* Item)
         }
     }
 #endif
+}
+
+void AFortPlayerController::ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = WorldInventory;
+    AFortPawn* Pawn = MyFortPawn;
+    UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+    if (!WorldItem || !Pawn)
+    {
+        return;
+    }
+
+    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+    if (UFortWeaponItemDefinition* WeaponDefinition = Cast<UFortWeaponItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition)))
+    {
+        Pawn->EquipWeaponDefinition(WeaponDefinition, ItemGuid);
+    }
+#endif
+}
+
+void AFortPlayerController::HookVTables()
+{
+    const int32_t ExecuteIndex = Finder::ImplementationIndex(StaticFunction_ServerExecuteInventoryItem());
+    if (ExecuteIndex < 0)
+    {
+        Log::Error(L"Finder: AFortPlayerController::ServerExecuteInventoryItem_Implementation slot not found");
+        return;
+    }
+
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[ExecuteIndex] == Natives::SharedEmptyFunction)
+        {
+            Hooks::SwapVTable(L"AFortPlayerController::ServerExecuteInventoryItem_Implementation", VTable, ExecuteIndex, reinterpret_cast<void*>(&ServerExecuteInventoryItem_ImplementationHK));
+        }
+    }
+}
+
+void AFortPlayerController::ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid)
+{
+    This->ServerExecuteInventoryItem_Implementation(ItemGuid);
 }
 
 void AFortPlayerController::Hook()

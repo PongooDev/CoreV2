@@ -26,6 +26,7 @@ public:
     DefineUFunction(HandleInventoryLocalUpdate)
 
     void HandleInventoryLocalUpdate();
+    UFortWorldItem* FindWorldItem(const FGuid& ItemGuid);
     void AddWorldItem(UFortWorldItem* WorldItem);
     void UpdateWorldItemCount(UFortWorldItem* WorldItem, int32_t NewCount);
     void RemoveWorldItem(UFortWorldItem* WorldItem);

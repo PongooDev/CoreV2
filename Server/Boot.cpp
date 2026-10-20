@@ -76,6 +76,7 @@ void Boot::Initialize()
         AFortGameModeZone::HookVTables();
         UAbilitySystemComponent::HookVTables();
         UFortKismetLibrary::HookNatives();
+        AFortPlayerController::HookVTables();
     });
 
     Log::Info(L"Core V2 startup complete");

@@ -22,6 +22,27 @@ void AFortInventory::HandleInventoryLocalUpdate()
     Params.Call(this);
 }
 
+UFortWorldItem* AFortInventory::FindWorldItem(const FGuid& ItemGuid)
+{
+    FFortItemList& ItemList = Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        UFortWorldItem* WorldItem = Instances[Index];
+        if (!WorldItem)
+        {
+            continue;
+        }
+
+        FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+        if (ItemEntry.ItemGuid == ItemGuid)
+        {
+            return WorldItem;
+        }
+    }
+    return nullptr;
+}
+
 void AFortInventory::AddWorldItem(UFortWorldItem* WorldItem)
 {
 #if WITH_SERVER_CODE

@@ -3019,6 +3019,18 @@ bool Finder::ResolveReplicationLive()
     return MissingCount == 0;
 }
 
+int32_t Finder::ImplementationIndex(UFunction* Function)
+{
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    int32_t Index = -1;
+    for (uintptr_t Site = ExecEnd ? FindVirtualCall(Exec, ExecEnd) : 0; Site; Site = FindVirtualCall(Site + 1, ExecEnd))
+    {
+        Index = VirtualSlot(Site);
+    }
+    return Index;
+}
+
 bool Finder::ResolveAbilitySystemLive()
 {
     MissingCount = 0;

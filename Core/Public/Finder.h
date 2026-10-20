@@ -4,6 +4,8 @@
 #include <string_view>
 #include <vector>
 
+class UFunction;
+
 namespace Finder
 {
     uintptr_t ImageBase();
@@ -41,4 +43,5 @@ namespace Finder
     bool ResolveReplicationLive();
     bool ResolveGameModeZoneLive();
     bool ResolveAbilitySystemLive();
+    int32_t ImplementationIndex(UFunction* Function);
 }

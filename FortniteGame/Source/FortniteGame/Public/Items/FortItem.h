@@ -24,6 +24,12 @@ public:
 class UFortItem : public UObject
 {
     DefineUnrealClass(UFortItem, FortniteGame)
+    DefineUFunction(GetItemDefinitionBP)
+    DefineUFunction(GetLevel)
+
+public:
+    UFortItemDefinition* GetItemDefinitionBP() const;
+    int32_t GetLevel() const;
 };
 
 class UFortWorldItem : public UFortItem

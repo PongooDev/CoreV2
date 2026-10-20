@@ -34,6 +34,18 @@ bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerC
     return reinterpret_cast<FServerExecute>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItemDefinition_ServerExecuteIndex])(this, Item, Controller);
 }
 
+UFortItemDefinition* UFortItem::GetItemDefinitionBP() const
+{
+    Reflection::FParams Params(StaticFunction_GetItemDefinitionBP());
+    return Params.Call(const_cast<UFortItem*>(this)) ? Params.Take<UFortItemDefinition*>(L"ReturnValue") : nullptr;
+}
+
+int32_t UFortItem::GetLevel() const
+{
+    Reflection::FParams Params(StaticFunction_GetLevel());
+    return Params.Call(const_cast<UFortItem*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : 0;
+}
+
 void UFortWorldItem::SetOwningControllerForTemporaryItem(AFortPlayerController* InController)
 {
     Reflection::FParams Params(StaticFunction_SetOwningControllerForTemporaryItem());

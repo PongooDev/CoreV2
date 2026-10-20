@@ -3245,6 +3245,62 @@ bool Finder::ResolveMissionGenerationLive()
     return true;
 }
 
+bool Finder::ResolveCraftingLive()
+{
+    if (Natives::UFortSchematicItem_CanCraftSchematic && Natives::AFortPlayerController_GetSchematicForItem && Natives::UFortSchematicItem_ServerCraftSchematicIndex >= 0)
+    {
+        return true;
+    }
+
+    const auto LastCall = [](uintptr_t Function)
+    {
+        const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        uintptr_t Target = 0;
+        for (uintptr_t Call = FunctionEnd ? FindRawCall(Function, FunctionEnd) : 0; Call; Call = FindRawCall(Call + 1, FunctionEnd))
+        {
+            Target = Finder::RelativeTarget(Call, 1, 5);
+        }
+        return Target;
+    };
+    const auto ExecOf = [](const wchar_t* FunctionPath)
+    {
+        UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
+        return Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    };
+
+    const uintptr_t ServerCraft = FunctionOf(L"Cannot get SchematicItem for schematic crafting");
+    const uintptr_t ServerCraftEnd = ServerCraft ? Finder::FunctionEnd(ServerCraft) : 0;
+    const int32_t CraftIndex = ServerCraftEnd ? VirtualSlot(FindVirtualCall(ServerCraft, ServerCraftEnd)) : -1;
+
+    const uintptr_t InventoryContextCanCraft = LastCall(ExecOf(L"/Script/FortniteUI.FortInventoryContext:CanCraftSchematic"));
+    const uintptr_t CanCraft = InventoryContextCanCraft ? LastCall(InventoryContextCanCraft) : 0;
+    const uintptr_t QuantityProduced = LastCall(ExecOf(L"/Script/FortniteGame.FortSchematicItem:GetSchematicQuantityProduced"));
+
+    const uintptr_t CanCraftEnd = CanCraft && QuantityProduced ? Finder::FunctionEnd(CanCraft) : 0;
+    uintptr_t Previous = 0;
+    uintptr_t GetSchematicForItem = 0;
+    for (uintptr_t Call = CanCraftEnd ? FindRawCall(CanCraft, CanCraftEnd) : 0; Call && !GetSchematicForItem; Call = FindRawCall(Call + 1, CanCraftEnd))
+    {
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        if (Target == QuantityProduced)
+        {
+            GetSchematicForItem = Previous;
+        }
+        Previous = Target;
+    }
+
+    if (CraftIndex < 0 || !CanCraft || !GetSchematicForItem)
+    {
+        Log::Error(L"Finder: schematic crafting not found");
+        return false;
+    }
+    Natives::UFortSchematicItem_ServerCraftSchematicIndex = CraftIndex;
+    Natives::UFortSchematicItem_CanCraftSchematic = reinterpret_cast<decltype(Natives::UFortSchematicItem_CanCraftSchematic)>(CanCraft);
+    Natives::AFortPlayerController_GetSchematicForItem = reinterpret_cast<decltype(Natives::AFortPlayerController_GetSchematicForItem)>(GetSchematicForItem);
+    Log::Info(L"Finder: UFortSchematicItem::ServerCraftSchematic is slot 0x{:X}", CraftIndex);
+    return true;
+}
+
 bool Finder::ResolveMissionObjectivesLive()
 {
     const uintptr_t ObjectiveStatusUpdated = FunctionOf(L"Mission %s: Objective %s status is now %s");

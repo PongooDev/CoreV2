@@ -9,6 +9,8 @@ class AFortPawn;
 class APawn;
 class IFortInventoryOwnerInterface;
 class AFortQuickBars;
+class UFortItemDefinition;
+class UFortSchematicItem;
 class UFortWorldItem;
 struct FItemDefinitionAndCount;
 
@@ -20,6 +22,7 @@ public:
     DefineUProperty(AFortQuickBars*, QuickBars)
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
+    DefineBitfieldUProperty(bCraftFree)
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
@@ -33,6 +36,8 @@ public:
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
+    int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
+    UFortSchematicItem* GetSchematicForItem(const UFortItemDefinition* ItemDefinition);
 
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
 

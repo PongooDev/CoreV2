@@ -300,6 +300,37 @@ void AFortPlayerController::HookVTables()
     }
 }
 
+int32_t AFortPlayerController::GetItemQuantity(const UFortItemDefinition* ItemDefinition)
+{
+    AFortInventory* Inventory = WorldInventory;
+    if (!Inventory || !ItemDefinition)
+    {
+        return 0;
+    }
+
+    int32_t Quantity = 0;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry& Entry = Instances[Index]->ItemEntry;
+        if (static_cast<UFortItemDefinition*>(Entry.ItemDefinition) == ItemDefinition)
+        {
+            Quantity += Entry.Count;
+        }
+    }
+    return Quantity;
+}
+
+UFortSchematicItem* AFortPlayerController::GetSchematicForItem(const UFortItemDefinition* ItemDefinition)
+{
+    if (!Natives::AFortPlayerController_GetSchematicForItem && !Finder::ResolveCraftingLive())
+    {
+        return nullptr;
+    }
+    return Natives::AFortPlayerController_GetSchematicForItem(this, ItemDefinition);
+}
+
 AFortPlayerController* AFortPlayerController::FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner)
 {
     if (!InventoryOwner || Natives::AFortPlayerController_InventoryOwnerInterface < 0)

@@ -53,5 +53,6 @@ namespace Finder
     bool ResolveLoginLive();
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();
+    bool ResolveCraftingLive();
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable);
 }

@@ -264,6 +264,8 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortPickup.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortQuickBars.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortSchematicItem.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortSchematicItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMission.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionInfo.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionManager.h" />
@@ -363,6 +365,8 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortItem.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortPickup.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortQuickBars.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortSchematicItem.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortSchematicItemDefinition.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMission.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortMissionManager.cpp" />

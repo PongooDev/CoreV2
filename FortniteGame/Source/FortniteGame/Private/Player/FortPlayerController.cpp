@@ -7,11 +7,13 @@
 #include "FortKismetLibrary.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
+#include "Items/FortPickup.h"
 #include "Items/FortQuickBars.h"
 #include "Finder.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
+#include "Pawns/FortPawn.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -140,6 +142,44 @@ void AFortPlayerController::ServerExecuteInventoryItem_Implementation(const FGui
 #endif
 }
 
+void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = WorldInventory;
+    UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+    AFortPawn* Pawn = MyFortPawn;
+    if (!WorldItem || !Pawn || Count <= 0)
+    {
+        return;
+    }
+
+    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+    UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+    if (!ItemDefinition || !ItemDefinition->bCanBeDropped)
+    {
+        return;
+    }
+
+    const int32_t DropCount = std::min(Count, static_cast<int32_t>(ItemEntry.Count));
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    EntryStruct->InitializeStruct(DropEntry);
+    EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
+    DropEntry->Count = DropCount;
+
+    if (RemoveInventoryItem(ItemGuid, DropCount, false))
+    {
+        const FVector Location = Pawn->GetTransform().GetLocation();
+        if (AFortPickup* Pickup = AFortPickup::CreatePickup(GetWorld(), *DropEntry, &Location, nullptr, this))
+        {
+            Pickup->TossPickup(Location, Pawn, 0);
+        }
+    }
+    EntryStruct->DestroyStruct(DropEntry);
+#endif
+}
+
 bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
 {
     void* InventoryOwner = reinterpret_cast<uint8_t*>(this) + Natives::AFortPlayerController_InventoryOwnerInterface;
@@ -200,21 +240,27 @@ void AFortPlayerController::HookVTables()
         }
     }
 
-    const int32_t ExecuteIndex = Finder::ImplementationIndex(StaticFunction_ServerExecuteInventoryItem());
-    if (ExecuteIndex < 0)
+    for (const auto& [Function, Implementation, Name] : {
+             std::tuple{ StaticFunction_ServerExecuteInventoryItem(), reinterpret_cast<void*>(&ServerExecuteInventoryItem_ImplementationHK), L"AFortPlayerController::ServerExecuteInventoryItem_Implementation" },
+             std::tuple{ StaticFunction_ServerSpawnInventoryDrop(), reinterpret_cast<void*>(&ServerSpawnInventoryDrop_ImplementationHK), L"AFortPlayerController::ServerSpawnInventoryDrop_Implementation" },
+         })
     {
-        Log::Error(L"Finder: AFortPlayerController::ServerExecuteInventoryItem_Implementation slot not found");
-        return;
-    }
-
-    for (TObjectIterator<UClass> It; It; ++It)
-    {
-        UClass* Class = *It;
-        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
-        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-        if (VTable && VTable[ExecuteIndex] == Natives::SharedEmptyFunction)
+        const int32_t Index = Finder::ImplementationIndex(Function);
+        if (Index < 0)
         {
-            Hooks::SwapVTable(L"AFortPlayerController::ServerExecuteInventoryItem_Implementation", VTable, ExecuteIndex, reinterpret_cast<void*>(&ServerExecuteInventoryItem_ImplementationHK));
+            Log::Error(L"Finder: {} slot not found", Name);
+            continue;
+        }
+
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[Index] == Natives::SharedEmptyFunction)
+            {
+                Hooks::SwapVTable(Name, VTable, Index, Implementation);
+            }
         }
     }
 }
@@ -228,6 +274,11 @@ bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FG
 void AFortPlayerController::ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid)
 {
     This->ServerExecuteInventoryItem_Implementation(ItemGuid);
+}
+
+void AFortPlayerController::ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count)
+{
+    This->ServerSpawnInventoryDrop_Implementation(ItemGuid, Count);
 }
 
 void AFortPlayerController::Hook()

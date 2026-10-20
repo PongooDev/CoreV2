@@ -22,5 +22,7 @@ class UFortWorldItemDefinition : public UFortItemDefinition
     DefineUnrealClass(UFortWorldItemDefinition, FortniteGame)
 
 public:
+    DefineBitfieldUProperty(bCanBeDropped)
+
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
 };

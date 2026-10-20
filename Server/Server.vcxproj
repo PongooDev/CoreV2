@@ -264,6 +264,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSessionDedicated.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortLobbyBeaconHost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerController.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerState.h" />
     <ClInclude Include="..\ThirdParty\Memcury\memcury.h" />

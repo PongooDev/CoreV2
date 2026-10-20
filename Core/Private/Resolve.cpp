@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "AbilitySystemComponent.h"
 #include "Finder.h"
 #include "Natives.h"
 #include "Log.h"
@@ -2214,6 +2215,8 @@ namespace
         }
         Require(L"AFortPlayerController::InitializeMcpProfile", Natives::AFortPlayerController_InitializeMcpProfile, InitializeMcpProfile);
 
+        Require(L"AFortPlayerState::SetHeroType", Natives::AFortPlayerState_SetHeroType, FunctionOf(L"Hero gender does not match gender of HeroType %s!  Hero Gender is %d instead."));
+
         Sites::ChoosePlayerStartGoalManagerCalls.clear();
         const uintptr_t ChoosePlayerStart = FunctionOf(L"ChoosePlayerStart: Could not find spot for Player! Spawning at engine PlayerStart!");
         const uintptr_t ChoosePlayerStartEnd = ChoosePlayerStart ? Finder::FunctionEnd(ChoosePlayerStart) : 0;
@@ -2419,6 +2422,42 @@ namespace
         Require(L"UWorld::SpawnActor", Natives::UWorld_SpawnActor, FunctionOf(L"SpawnActor failed because no class was specified"));
     }
 
+    void ResolveAbilitySystem()
+    {
+        Require(L"UAbilitySystemComponent::InternalTryActivateAbility", Natives::UAbilitySystemComponent_InternalTryActivateAbility, FunctionOf(L"InternalTryActivateAbility called with invalid Handle! ASC: %s. AvatarActor: %s"));
+
+        const uintptr_t ActivateOnce = FunctionOf(L"GiveAbilityAndActivateOnce called on ability %s on the client, not allowed!");
+        const uintptr_t ActivateOnceEnd = ActivateOnce ? Finder::FunctionEnd(ActivateOnce) : 0;
+        uintptr_t GiveAbility = 0;
+        int32_t LockCount = 0;
+        for (uintptr_t Call = ActivateOnceEnd ? FindRawCall(ActivateOnce, ActivateOnceEnd) : 0; Call && !GiveAbility; Call = FindRawCall(Call + 1, ActivateOnceEnd))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            if (const uintptr_t Compare = FindInstruction(Target, Target + 0x20, { 0x83, 0xB9, -1, -1, -1, -1, 0x00 }))
+            {
+                GiveAbility = Target;
+                LockCount = *reinterpret_cast<const int32_t*>(Compare + 2);
+            }
+        }
+
+        uintptr_t MarkDirty = 0;
+        const uintptr_t GiveAbilityEnd = GiveAbility ? Finder::FunctionEnd(GiveAbility) : 0;
+        for (uintptr_t Site = GiveAbilityEnd ? FindVirtualCall(GiveAbility, GiveAbilityEnd) : 0; Site && !MarkDirty; Site = FindVirtualCall(Site + 1, GiveAbilityEnd))
+        {
+            if (const uintptr_t Call = FindRawCall(Site + 6, Site + 0x18))
+            {
+                MarkDirty = Finder::RelativeTarget(Call, 1, 5);
+            }
+        }
+        Require(L"UAbilitySystemComponent::MarkAbilitySpecDirty", Natives::UAbilitySystemComponent_MarkAbilitySpecDirty, MarkDirty);
+
+        const uint8_t* Count = reinterpret_cast<const uint8_t*>(&LockCount);
+        const uintptr_t Increment = LockCount > 0 ? UniqueFunction({ 0xFF, 0x81, Count[0], Count[1], Count[2], Count[3], 0xC3 }) : 0;
+        Require(L"UAbilitySystemComponent::IncrementAbilityListLock", Natives::UAbilitySystemComponent_IncrementAbilityListLock, IsFunctionEntry(Increment) ? Increment : 0);
+        const uintptr_t Decrement = LockCount > 0 ? UniqueFunction({ 0x83, 0xA9, Count[0], Count[1], Count[2], Count[3], 0x01 }) : 0;
+        Require(L"UAbilitySystemComponent::DecrementAbilityListLock", Natives::UAbilitySystemComponent_DecrementAbilityListLock, Decrement ? Finder::FunctionStart(Decrement) : 0);
+    }
+
     void ResolveEngineLoopTicks()
     {
         Sites::ShouldUseIdleModeCheck = nullptr;
@@ -2579,6 +2618,7 @@ bool Finder::ResolveServer()
     ResolveLinkerFilter();
     ResolveThreadingForPerformance();
     ResolveZone();
+    ResolveAbilitySystem();
     ResolveMcpProfile();
 
     Log::Info(L"Finder: server sites resolved, {} missing", MissingCount);
@@ -2908,6 +2948,27 @@ bool Finder::ResolveReplicationLive()
     }
 
     Log::Info(L"Finder: replication live slots resolved, {} missing", MissingCount);
+    return MissingCount == 0;
+}
+
+bool Finder::ResolveAbilitySystemLive()
+{
+    MissingCount = 0;
+
+    UFunction* ServerTryActivate = UAbilitySystemComponent::StaticFunction_ServerTryActivateAbility();
+    const uintptr_t Exec = ServerTryActivate ? reinterpret_cast<uintptr_t>(ServerTryActivate->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    int32_t ImplementationIndex = -1;
+    for (uintptr_t Site = ExecEnd ? FindVirtualCall(Exec, ExecEnd) : 0; Site; Site = FindVirtualCall(Site + 1, ExecEnd))
+    {
+        ImplementationIndex = VirtualSlot(Site);
+    }
+
+    const uintptr_t Implementation = VTableEntry(CdoVTable(L"/Script/GameplayAbilities.AbilitySystemComponent"), ImplementationIndex);
+    const int32_t ActivateIndex = Implementation ? VirtualSlot(FindVirtualCall(Implementation, Implementation + 0x20)) : -1;
+    RequireSlot(L"UAbilitySystemComponent::InternalServerTryActiveAbility", Natives::UAbilitySystemComponent_InternalServerTryActiveAbilityIndex, ActivateIndex);
+
+    Log::Info(L"Finder: ability system live slots resolved, {} missing", MissingCount);
     return MissingCount == 0;
 }
 

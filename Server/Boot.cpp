@@ -24,6 +24,8 @@
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
+#include "AbilitySystemComponent.h"
 
 void Boot::Initialize()
 {
@@ -61,6 +63,7 @@ void Boot::Initialize()
     AFortGameModeZone::Hook();
     AFortWorldManager::Hook();
     AFortPlayerController::Hook();
+    AFortPlayerState::Hook();
     UEngine::Hook();
     UGameEngine::Hook();
     Hooks::EnableAll();
@@ -68,6 +71,7 @@ void Boot::Initialize()
     GameThread::Enqueue([]
     {
         AFortGameModeZone::HookVTables();
+        UAbilitySystemComponent::HookVTables();
     });
 
     Log::Info(L"Core V2 startup complete");

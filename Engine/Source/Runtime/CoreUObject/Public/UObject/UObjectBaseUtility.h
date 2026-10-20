@@ -31,3 +31,8 @@ public:
         return IsA(T::StaticClass());
     }
 };
+
+inline FString GetNameSafe(const UObjectBaseUtility* Object)
+{
+    return Object ? Object->GetName() : FString(TEXT("None"));
+}

@@ -39,4 +39,5 @@ namespace Finder
     bool ResolveInitListen();
     bool ResolveReplicationLive();
     bool ResolveGameModeZoneLive();
+    bool ResolveAbilitySystemLive();
 }

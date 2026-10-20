@@ -5,6 +5,7 @@
 #include "Missions/FortMissionInfo.h"
 #include "StructArray.h"
 
+class UFortMissionGenerator;
 
 enum class EMissionGenerationCategory : uint8_t
 {
@@ -21,6 +22,7 @@ struct FFortMissionEntry
     DefineUProperty(float, Weight)
     DefineUProperty(int32_t, WorldMinLevel)
     DefineUProperty(int32_t, WorldMaxLevel)
+    DefineUProperty(UFortMissionGenerator*, MissionGenerator)
     DefineUProperty(UFortMissionInfo*, MissionInfo)
     DefineUProperty(EMissionGenerationCategory, GenerationCategory)
     DefineUStructProperty(FFortGeneratedDifficultyOptions, GeneratedDifficultyOptions)
@@ -30,6 +32,7 @@ struct FFortMissionRecord
 {
     DefineUnrealStruct(FFortMissionRecord, FortniteGame)
     DefineUStructProperty(FFortMissionEntry, MissionEntry)
+    DefineUProperty(UFortMissionGenerator*, MissionGenerator)
     DefineUProperty(FGuid, MissionGuid)
 };
 

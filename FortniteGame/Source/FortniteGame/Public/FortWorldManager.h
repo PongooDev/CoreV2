@@ -5,6 +5,7 @@
 #include "Math/Transform.h"
 #include "Missions/FortMissionManager.h"
 
+class UFortMissionGenerator;
 class UFortMissionInfo;
 class UFortWorldRecord;
 struct FFortPlayerSpawnPadPlacementData;
@@ -41,7 +42,7 @@ public:
 
     void OnWorldRecordQueryComplete();
     void ServerTickLoadingOrCreatingWorld();
-    void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions);
+    void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory = EMissionGenerationCategory::Max_None, UFortMissionGenerator* MissionGenerator = nullptr);
     void CreateMissionManager();
     int32_t GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName);
     AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);

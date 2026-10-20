@@ -14,6 +14,7 @@
 #include "Online/FortGameSession.h"
 #include "Online/FortLobbyBeaconHost.h"
 #include "Templates/Casts.h"
+#include "UI/FrontEnd/FortMissionGenerator.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortWorld, Log, All);
 
@@ -82,7 +83,21 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
             bCreatedMissionRecord = true;
 
             FFortStartingMissionInfo& StartingMissions = StartingMissionInfo;
-            AddMissionsToMissionManagerRecord(StartingMissions.StartingMissions);
+            TArray<UFortMissionInfo*>& StartingMissionList = StartingMissions.StartingMissions;
+            AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+            UFortMissionGenerator* MissionGenerator = GameState ? GameState->GetMissionGenerator() : nullptr;
+            if (StartingMissionList.Num() > 0 || !MissionGenerator)
+            {
+                AddMissionsToMissionManagerRecord(StartingMissionList);
+            }
+            else
+            {
+                const TAssetPtr<UFortMissionInfo>& PrimaryMissionInfo = MissionGenerator->PrimaryMissionInfo;
+                if (UFortMissionInfo* PrimaryMission = PrimaryMissionInfo.LoadSynchronous())
+                {
+                    AddMissionsToMissionManagerRecord({ PrimaryMission }, EMissionGenerationCategory::Primary, MissionGenerator);
+                }
+            }
         }
         bHasCreatedMissions = true;
     }
@@ -91,7 +106,7 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
     ServerTickLoadingOrCreatingWorldOG(this);
 }
 
-void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions)
+void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory, UFortMissionGenerator* MissionGenerator)
 {
 #if WITH_SERVER_CODE
     if (!bCreatedMissionRecord)
@@ -128,13 +143,15 @@ void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMiss
         MissionEntry.Weight = 1.0f;
         MissionEntry.WorldMinLevel = -1;
         MissionEntry.WorldMaxLevel = -1;
+        MissionEntry.MissionGenerator = MissionGenerator;
         MissionEntry.MissionInfo = MissionInfo;
-        MissionEntry.GenerationCategory = EMissionGenerationCategory::Max_None;
+        MissionEntry.GenerationCategory = GenerationCategory;
         if (GenerationData && RandomStream)
         {
             FFortGeneratedDifficultyOptions& GeneratedDifficultyOptions = MissionEntry.GeneratedDifficultyOptions;
             MissionInfo->GenerateMissionDifficultyOptions(GeneratedDifficultyOptions, RandomStream, GameDifficulty, GameMode, GenerationData);
         }
+        MissionRecord.MissionGenerator = MissionGenerator;
         MissionRecord.MissionGuid = FGuid::NewGuid();
     }
 #endif

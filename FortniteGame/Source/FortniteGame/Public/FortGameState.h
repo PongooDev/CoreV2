@@ -1,9 +1,11 @@
 #pragma once
 
 #include "GameFramework/GameState.h"
+#include "UObject/AssetPtr.h"
 
 class AFortMissionManager;
 class AFortWorldManager;
+class UFortMissionGenerator;
 struct FFortMissionManagerRecord;
 
 class AFortGameState : public AGameState
@@ -25,4 +27,7 @@ class AFortGameStateZone : public AFortGameState
 
 public:
     DefineUProperty(float, GameDifficulty)
+    DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
+
+    UFortMissionGenerator* GetMissionGenerator() const;
 };

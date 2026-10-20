@@ -1,9 +1,11 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "GameFramework/Actor.h"
 
 class AFortMission;
 class FText;
+class UFortWorldItemDefinition;
 
 enum class EFortObjectiveStatus : uint8_t
 {
@@ -22,19 +24,27 @@ class AFortObjectiveBase : public AActor
     DefineUFunction(StopObjective)
     DefineUFunction(ClearObjectiveTimer)
     DefineUFunction(OnRep_ObjectiveStatus)
+    DefineUFunction(BlueprintOnStartPlaying)
+    DefineUFunction(BlueprintOnObjectiveEnd)
 
 public:
+    DefineUProperty(TArray<UFortWorldItemDefinition*>, ItemsToGiveOnObjectiveStart)
+    DefineBitfieldUProperty(bStartPlayingOnMissionStart)
     DefineUProperty(EFortObjectiveStatus, ObjectiveStatus)
 
     AFortMission* GetMission() const;
     void SetObjectiveStatus(EFortObjectiveStatus NewStatus);
+    bool ActivateObjective();
     bool StartPlayingObjective();
     void StopObjective(EFortObjectiveStatus Status, const FText& Description, UObject* ExtraBadgeToGrant);
     void ClearObjectiveTimer();
+    void BlueprintOnStartPlaying();
+    void BlueprintOnObjectiveEnd(EFortObjectiveStatus Status);
 
     static void HookVTables();
 
 private:
+    static bool ActivateObjectiveHK(AFortObjectiveBase* This);
     static bool StartPlayingObjectiveHK(AFortObjectiveBase* This);
     static void StopObjectiveHK(AFortObjectiveBase* This, EFortObjectiveStatus Status, const FText& Description, UObject* ExtraBadgeToGrant);
 };

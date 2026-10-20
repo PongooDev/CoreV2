@@ -3333,6 +3333,38 @@ bool Finder::ResolveCraftingLive()
     return true;
 }
 
+bool Finder::ResolveObjectiveActivationLive(ptrdiff_t MissionActiveObjectivesOffset)
+{
+    const uintptr_t StartPlaying = FunctionOf(L"Mission %s has no Active Objectives! Did you set up the Mission Info correctly? Set to Silent Destroy!");
+    const uintptr_t StartPlayingEnd = StartPlaying ? Finder::FunctionEnd(StartPlaying) : 0;
+    const int32_t Offset = static_cast<int32_t>(MissionActiveObjectivesOffset);
+    int32_t ActivateIndex = -1;
+    for (uintptr_t Call = StartPlayingEnd && Offset > 0 ? FindRawCall(StartPlaying, StartPlayingEnd) : 0; Call && ActivateIndex < 0; Call = FindRawCall(Call + 1, StartPlayingEnd))
+    {
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
+        if (!TargetEnd || TargetEnd - Target > 0x100 || !FindInstruction(Target, TargetEnd, { Offset & 0xFF, (Offset >> 8) & 0xFF, (Offset >> 16) & 0xFF, (Offset >> 24) & 0xFF }))
+        {
+            continue;
+        }
+
+        const uintptr_t Site = FindVirtualCall(Target, TargetEnd);
+        if (Site && !FindVirtualCall(Site + 1, TargetEnd))
+        {
+            ActivateIndex = VirtualSlot(Site);
+        }
+    }
+
+    if (ActivateIndex < 0)
+    {
+        Log::Error(L"Finder: AFortObjectiveBase::ActivateObjective slot not found");
+        return false;
+    }
+    Natives::AFortObjectiveBase_ActivateObjectiveIndex = ActivateIndex;
+    Log::Info(L"Finder: AFortObjectiveBase::ActivateObjective is slot 0x{:X}", ActivateIndex);
+    return true;
+}
+
 bool Finder::ResolveMissionObjectivesLive()
 {
     const uintptr_t ObjectiveStatusUpdated = FunctionOf(L"Mission %s: Objective %s status is now %s");

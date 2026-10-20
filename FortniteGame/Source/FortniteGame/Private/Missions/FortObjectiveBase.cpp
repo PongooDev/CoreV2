@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Missions/FortObjectiveBase.h"
 #include "Finder.h"
+#include "FortKismetLibrary.h"
+#include "Items/FortItemDefinition.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
 #include "Missions/FortMission.h"
@@ -56,12 +58,18 @@ void AFortObjectiveBase::SetObjectiveStatus(EFortObjectiveStatus NewStatus)
         Reflection::FParams Params(StaticFunction_OnRep_ObjectiveStatus());
         Params.Call(this);
     }
+#endif
+}
 
-    if (AFortMission* Mission = GetMission())
+bool AFortObjectiveBase::ActivateObjective()
+{
+#if WITH_SERVER_CODE
+    if (bStartPlayingOnMissionStart)
     {
-        Mission->ObjectiveStatusUpdated(this, NewStatus);
+        return StartPlayingObjective();
     }
 #endif
+    return true;
 }
 
 bool AFortObjectiveBase::StartPlayingObjective()
@@ -73,6 +81,18 @@ bool AFortObjectiveBase::StartPlayingObjective()
     }
 
     SetObjectiveStatus(EFortObjectiveStatus::InProgress);
+    BlueprintOnStartPlaying();
+
+    TArray<UFortWorldItemDefinition*>& ItemsToGive = ItemsToGiveOnObjectiveStart;
+    for (UFortWorldItemDefinition* ItemDefinition : ItemsToGive)
+    {
+        UFortKismetLibrary::K2_GiveItemToAllPlayers(this, ItemDefinition, 1, true);
+    }
+
+    if (AFortMission* Mission = GetMission())
+    {
+        Mission->ObjectiveStatusUpdated(this, EFortObjectiveStatus::InProgress);
+    }
     return true;
 #else
     return false;
@@ -82,14 +102,34 @@ bool AFortObjectiveBase::StartPlayingObjective()
 void AFortObjectiveBase::StopObjective(EFortObjectiveStatus Status, const FText& Description, UObject* ExtraBadgeToGrant)
 {
 #if WITH_SERVER_CODE
-    if (Role != ROLE_Authority || ObjectiveStatus != EFortObjectiveStatus::InProgress)
+    const EFortObjectiveStatus CurrentStatus = ObjectiveStatus;
+    if (Role != ROLE_Authority || CurrentStatus == EFortObjectiveStatus::Succeeded || CurrentStatus == EFortObjectiveStatus::Failed || CurrentStatus == EFortObjectiveStatus::NeutralCompletion)
     {
         return;
     }
 
     ClearObjectiveTimer();
     SetObjectiveStatus(Status);
+    BlueprintOnObjectiveEnd(Status);
+
+    if (AFortMission* Mission = GetMission())
+    {
+        Mission->ObjectiveStatusUpdated(this, Status);
+    }
 #endif
+}
+
+void AFortObjectiveBase::BlueprintOnStartPlaying()
+{
+    Reflection::FParams Params(FindFunction(StaticFunction_BlueprintOnStartPlaying()->GetFName()));
+    Params.Call(this);
+}
+
+void AFortObjectiveBase::BlueprintOnObjectiveEnd(EFortObjectiveStatus Status)
+{
+    Reflection::FParams Params(FindFunction(StaticFunction_BlueprintOnObjectiveEnd()->GetFName()));
+    Params.Set(L"Status", Status);
+    Params.Call(this);
 }
 
 void AFortObjectiveBase::ClearObjectiveTimer()
@@ -126,6 +166,24 @@ void AFortObjectiveBase::HookVTables()
             }
         }
     }
+
+    const int32_t ActivateIndex = Finder::ResolveObjectiveActivationLive(AFortMission::ActiveObjectivesOffset()) ? Natives::AFortObjectiveBase_ActivateObjectiveIndex : -1;
+    void* const StrippedActivate = ObjectiveVTable && ActivateIndex >= 0 ? ObjectiveVTable[ActivateIndex] : nullptr;
+    for (TObjectIterator<UClass> It; StrippedActivate && It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[ActivateIndex] == StrippedActivate)
+        {
+            Hooks::SwapVTable(L"AFortObjectiveBase::ActivateObjective", VTable, ActivateIndex, reinterpret_cast<void*>(&ActivateObjectiveHK));
+        }
+    }
+}
+
+bool AFortObjectiveBase::ActivateObjectiveHK(AFortObjectiveBase* This)
+{
+    return This->ActivateObjective();
 }
 
 bool AFortObjectiveBase::StartPlayingObjectiveHK(AFortObjectiveBase* This)

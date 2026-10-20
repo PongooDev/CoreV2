@@ -225,6 +225,7 @@ namespace Natives
     inline void* (*UFortMissionInfo_GenerateMissionDifficultyOptions)(UFortMissionInfo* This, void* Result, void* RandomStream, const void* GenerationParams) = nullptr;
     inline ptrdiff_t AFortWorldManager_MissionGenerationRandomStream = -1;
     inline int32_t AFortMission_ObjectiveStatusUpdatedIndex = -1;
+    inline int32_t AFortObjectiveBase_ActivateObjectiveIndex = -1;
     inline ptrdiff_t UFortGameData_MissionGenerationData = -1;
     inline bool (*UFortSchematicItem_CanCraftSchematic)(UFortSchematicItem* This, AFortPlayerController* PlayerController, uint8_t* OutFailCause, bool bConsiderReservedItems, int32_t Count) = nullptr;
     inline UFortSchematicItem* (*AFortPlayerController_GetSchematicForItem)(AFortPlayerController* This, const UFortItemDefinition* ItemDefinition) = nullptr;

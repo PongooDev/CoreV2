@@ -1,7 +1,6 @@
 #include "pch.h"
 #include "FortWorldManager.h"
 #include "Engine/World.h"
-#include "FortFastLoadConfig.h"
 #include "FortGameData.h"
 #include "FortGameMode.h"
 #include "FortGameState.h"
@@ -80,12 +79,8 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
             RecordStruct->DestroyStruct(Record);
             bCreatedMissionRecord = true;
 
-            UFortFastLoadConfig* FastLoadConfig = static_cast<UFortFastLoadConfig*>(UFortFastLoadConfig::StaticClass()->GetDefaultObject());
-            if (!FastLoadConfig || !FastLoadConfig->bDisableStartingMissions)
-            {
-                FFortStartingMissionInfo& StartingMissions = StartingMissionInfo;
-                AddMissionsToMissionManagerRecord(StartingMissions.StartingMissions);
-            }
+            FFortStartingMissionInfo& StartingMissions = StartingMissionInfo;
+            AddMissionsToMissionManagerRecord(StartingMissions.StartingMissions);
         }
         bHasCreatedMissions = true;
     }

@@ -235,6 +235,9 @@ namespace Natives
     inline int32_t UFortSchematicItem_ServerCraftSchematicIndex = -1;
     inline int32_t UFortWorldItem_SetLoadedAmmoIndex = -1;
     inline int32_t AFortMissionManager_OnZoneEndIndex = -1;
+    inline int32_t UFortMcpProfileWorld_BindToPlayerControllerIndex = -1;
+    inline ptrdiff_t UFortMcpProfileWorld_Inventory = -1;
+    inline ptrdiff_t UFortMcpProfileWorld_bIsInventoryInitialized = -1;
     inline int32_t AFortGameModeZone_OnZoneEndIndex = -1;
     inline int32_t AFortGameStateZone_SetGameplayStateIndex = -1;
     inline void (*UFortQuestManager_SendStatEvent)(UFortQuestManager* This, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush) = nullptr;

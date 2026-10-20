@@ -3446,6 +3446,56 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     return true;
 }
 
+bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
+{
+    const uintptr_t Bind = FunctionOf(L"ProfileWorld::BindToPlayerController: Called with existing inventory for %s, reinitializing inventory");
+    const uintptr_t BindEnd = Bind ? Finder::FunctionEnd(Bind) : 0;
+    int32_t BindIndex = -1;
+    for (int32_t Index = 0; Bind && Index < 0x400 && BindIndex < 0; ++Index)
+    {
+        BindIndex = VTableEntry(ProfileVTable, Index) == Bind ? Index : -1;
+    }
+
+    int32_t InventoryOffset = -1;
+    for (uintptr_t Site = Bind; Site && Site + 7 <= BindEnd && InventoryOffset < 0; ++Site)
+    {
+        const uint8_t ModRm = Byte(Site + 2);
+        if ((Byte(Site) == 0x48 || Byte(Site) == 0x4C) && Byte(Site + 1) == 0x89 && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04)
+        {
+            InventoryOffset = *reinterpret_cast<const int32_t*>(Site + 3);
+        }
+    }
+
+    int32_t InitializedOffset = -1;
+    for (int32_t Index = 0; InventoryOffset > 0 && Index < 0x100 && InitializedOffset < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(ProfileVTable, Index);
+        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
+        for (uintptr_t Site = Function; Site && FunctionEnd - Function < 0x4000 && Site + 14 <= FunctionEnd && InitializedOffset < 0; ++Site)
+        {
+            const uint8_t ClearModRm = Byte(Site + 1);
+            const uint8_t StoreModRm = Byte(Site + 9);
+            if (Byte(Site) == 0xC6 && (ClearModRm & 0xF8) == 0x80 && (ClearModRm & 0x07) != 0x04 && Byte(Site + 6) == 0x00
+                && (Byte(Site + 7) == 0x48 || Byte(Site + 7) == 0x4C) && Byte(Site + 8) == 0x89 && (StoreModRm & 0xC0) == 0x80
+                && *reinterpret_cast<const int32_t*>(Site + 10) == InventoryOffset)
+            {
+                InitializedOffset = *reinterpret_cast<const int32_t*>(Site + 2);
+            }
+        }
+    }
+
+    if (BindIndex < 0 || InventoryOffset <= 0 || InitializedOffset <= 0)
+    {
+        Log::Error(L"Finder: UFortMcpProfileWorld inventory binding not found (bind slot {}, inventory {}, initialized {})", BindIndex, InventoryOffset, InitializedOffset);
+        return false;
+    }
+    Natives::UFortMcpProfileWorld_BindToPlayerControllerIndex = BindIndex;
+    Natives::UFortMcpProfileWorld_Inventory = InventoryOffset;
+    Natives::UFortMcpProfileWorld_bIsInventoryInitialized = InitializedOffset;
+    Log::Info(L"Finder: UFortMcpProfileWorld::BindToPlayerController is slot 0x{:X}, inventory +0x{:X}, bIsInventoryInitialized +0x{:X}", BindIndex, InventoryOffset, InitializedOffset);
+    return true;
+}
+
 bool Finder::ResolveWorldItemLive(void** InventoryOwnerVTable)
 {
     int32_t LoadedAmmoIndex = -1;

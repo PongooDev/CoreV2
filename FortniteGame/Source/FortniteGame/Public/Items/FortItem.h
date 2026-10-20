@@ -5,6 +5,7 @@
 #include "UObject/Object.h"
 #include "UObject/WeakObjectPtr.h"
 
+class AFortInventory;
 class AFortPlayerController;
 class UFortItemDefinition;
 
@@ -38,7 +39,10 @@ class UFortWorldItem : public UFortItem
     DefineUnrealClass(UFortWorldItem, FortniteGame)
 
 public:
+    DefineUProperty(AFortInventory*, OwnerInventory)
     DefineUStructProperty(FFortItemEntry, ItemEntry)
+    DefineBitfieldUProperty(bNeedsPersistentUpdate)
+    DefineBitfieldUProperty(bIsTemporaryItem)
     DefineUFunction(SetOwningControllerForTemporaryItem)
 
     void SetOwningControllerForTemporaryItem(AFortPlayerController* InController);

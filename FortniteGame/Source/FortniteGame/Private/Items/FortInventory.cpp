@@ -51,6 +51,10 @@ void AFortInventory::AddWorldItem(UFortWorldItem* WorldItem)
         return;
     }
 
+    WorldItem->OwnerInventory = this;
+    WorldItem->bIsTemporaryItem = false;
+    WorldItem->bNeedsPersistentUpdate = true;
+
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     ItemEntry.ParentInventory = FWeakObjectPtr(this);
 
@@ -77,6 +81,7 @@ void AFortInventory::UpdateWorldItemCount(UFortWorldItem* WorldItem, int32_t New
 
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     ItemEntry.Count = NewCount;
+    WorldItem->bNeedsPersistentUpdate = true;
 
     FFortItemList& ItemList = Inventory;
     if (FFortItemEntry* ReplicatedEntry = ItemList.FindReplicatedEntry(ItemEntry.ItemGuid))
@@ -98,6 +103,7 @@ void AFortInventory::UpdateWorldItemLoadedAmmo(UFortWorldItem* WorldItem, int32_
 
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     ItemEntry.LoadedAmmo = NewLoadedAmmo;
+    WorldItem->bNeedsPersistentUpdate = true;
 
     FFortItemList& ItemList = Inventory;
     if (FFortItemEntry* ReplicatedEntry = ItemList.FindReplicatedEntry(ItemEntry.ItemGuid))

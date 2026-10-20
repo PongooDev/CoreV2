@@ -84,12 +84,20 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
         return;
     }
 
+    AFortInventory* Inventory = WorldInventory;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        TryAddToQuickBar(Instances[Index]);
+    }
+
     for (int32_t Index = 0; Index < Items.Num(); ++Index)
     {
         const FItemDefinitionAndCount& Entry = Items[Index];
         const TAssetPtr<UFortItemDefinition>& EntryDefinition = Entry.ItemDefinition;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(EntryDefinition.LoadSynchronous());
-        if (ItemDefinition)
+        if (ItemDefinition && GetItemQuantity(ItemDefinition) <= 0)
         {
             UFortKismetLibrary::K2_GiveItemToPlayer(this, ItemDefinition, Entry.Count, false);
         }

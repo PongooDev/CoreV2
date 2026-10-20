@@ -97,6 +97,25 @@ void UFortKismetLibrary::K2_GiveItemToPlayer(AFortPlayerController* PlayerContro
 #endif
 }
 
+void UFortKismetLibrary::K2_GiveItemToAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer)
+{
+#if WITH_SERVER_CODE
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    if (!World || !ItemDefinition)
+    {
+        return;
+    }
+
+    for (TObjectIterator<AFortPlayerController> It; It; ++It)
+    {
+        if (It->GetWorld() == World)
+        {
+            K2_GiveItemToPlayer(*It, ItemDefinition, NumberToGive, bNotifyPlayer);
+        }
+    }
+#endif
+}
+
 int32_t UFortKismetLibrary::K2_RemoveItemFromPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove)
 {
 #if WITH_SERVER_CODE
@@ -230,6 +249,18 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_GiveItemToPlayer)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(UFortKismetLibrary::execK2_GiveItemToAllPlayers)
+{
+    P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
+    P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
+    P_GET_PROPERTY(UIntProperty, Z_Param_NumberToGive);
+    P_GET_UBOOL(Z_Param_bNotifyPlayer);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    K2_GiveItemToAllPlayers(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_NumberToGive, Z_Param_bNotifyPlayer);
+    P_NATIVE_END;
+}
+
 DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromPlayer)
 {
     P_GET_OBJECT(AFortPlayerController, Z_Param_PlayerController);
@@ -278,6 +309,7 @@ void UFortKismetLibrary::HookNatives()
              std::tuple{ StaticFunction_GetAIGoalManager(), &execGetAIGoalManager, L"UFortKismetLibrary::GetAIGoalManager" },
              std::tuple{ StaticFunction_GiveItemToInventoryOwner(), &execGiveItemToInventoryOwner, L"UFortKismetLibrary::GiveItemToInventoryOwner" },
              std::tuple{ StaticFunction_K2_GiveItemToPlayer(), &execK2_GiveItemToPlayer, L"UFortKismetLibrary::K2_GiveItemToPlayer" },
+             std::tuple{ StaticFunction_K2_GiveItemToAllPlayers(), &execK2_GiveItemToAllPlayers, L"UFortKismetLibrary::K2_GiveItemToAllPlayers" },
              std::tuple{ StaticFunction_K2_RemoveItemFromPlayer(), &execK2_RemoveItemFromPlayer, L"UFortKismetLibrary::K2_RemoveItemFromPlayer" },
              std::tuple{ StaticFunction_K2_RemoveItemFromAllPlayers(), &execK2_RemoveItemFromAllPlayers, L"UFortKismetLibrary::K2_RemoveItemFromAllPlayers" },
              std::tuple{ StaticFunction_K2_SpawnPickupInWorld(), &execK2_SpawnPickupInWorld, L"UFortKismetLibrary::K2_SpawnPickupInWorld" } })

@@ -23,6 +23,7 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(GetAIGoalManager)
     DefineUFunction(GiveItemToInventoryOwner)
     DefineUFunction(K2_GiveItemToPlayer)
+    DefineUFunction(K2_GiveItemToAllPlayers)
     DefineUFunction(K2_RemoveItemFromPlayer)
     DefineUFunction(K2_RemoveItemFromAllPlayers)
     DefineUFunction(K2_SpawnPickupInWorld)
@@ -34,6 +35,7 @@ public:
 
     static void GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer);
     static void K2_GiveItemToPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer);
+    static void K2_GiveItemToAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer);
     static int32_t K2_RemoveItemFromPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove);
     static void K2_RemoveItemFromAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove);
     static AFortPickup* K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount);
@@ -42,6 +44,7 @@ public:
     DECLARE_FUNCTION(execGetAIGoalManager);
     DECLARE_FUNCTION(execGiveItemToInventoryOwner);
     DECLARE_FUNCTION(execK2_GiveItemToPlayer);
+    DECLARE_FUNCTION(execK2_GiveItemToAllPlayers);
     DECLARE_FUNCTION(execK2_RemoveItemFromPlayer);
     DECLARE_FUNCTION(execK2_RemoveItemFromAllPlayers);
     DECLARE_FUNCTION(execK2_SpawnPickupInWorld);

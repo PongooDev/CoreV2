@@ -83,6 +83,7 @@ void Boot::Initialize()
         AFortPlayerController::HookVTables();
         AFortQuickBars::HookVTables();
         AFortPickup::HookVTables();
+        Diagnostics::RaiseMissionLogging();
     });
 
     Log::Info(L"Core V2 startup complete");

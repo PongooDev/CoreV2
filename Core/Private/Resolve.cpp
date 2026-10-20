@@ -2193,6 +2193,29 @@ namespace
         return Matches == 1 ? Found : 0;
     }
 
+    int32_t DecodeGetWorldSlot(std::vector<uint8_t*>& GoalManagerCalls)
+    {
+        const uintptr_t ChoosePlayerStart = FunctionOf(L"ChoosePlayerStart: Could not find spot for Player! Spawning at engine PlayerStart!");
+        const uintptr_t ChoosePlayerStartEnd = ChoosePlayerStart ? Finder::FunctionEnd(ChoosePlayerStart) : 0;
+        const std::initializer_list<int32_t> GetCurrentOfWorld = { 0xFF, -1, -1, -1, -1, -1, 0x48, 0x8B, 0xC8, 0xE8 };
+        uintptr_t GetCurrentStub = 0;
+        int32_t GetWorldSlot = -1;
+        for (uintptr_t Site = ChoosePlayerStartEnd ? FindInstruction(ChoosePlayerStart, ChoosePlayerStartEnd, GetCurrentOfWorld) : 0; Site; Site = FindInstruction(Site + 1, ChoosePlayerStartEnd, GetCurrentOfWorld))
+        {
+            const uintptr_t Call = Site + 9;
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            const int32_t Slot = (Byte(Site + 1) & 0xF8) == 0x90 && (Byte(Site + 1) & 0x07) != 0x04 ? VirtualSlot(Site) : -1;
+            const bool bReturnsNull = Byte(Target) == 0x33 && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3;
+            if (Slot >= 0 && bReturnsNull && (!GetCurrentStub || (Target == GetCurrentStub && Slot == GetWorldSlot)))
+            {
+                GetCurrentStub = Target;
+                GetWorldSlot = Slot;
+                GoalManagerCalls.push_back(reinterpret_cast<uint8_t*>(Call));
+            }
+        }
+        return GetWorldSlot;
+    }
+
     void ResolveZone()
     {
         const uintptr_t ZoneSpawnPawn = UniqueFunction({ 0x4D, 0x85, 0xC0, 0x74, 0x47, 0x48, 0x85, 0xD2, 0x74, 0x42, 0xE8 });
@@ -2252,26 +2275,8 @@ namespace
         Require(L"UFortGlobals::ApplyHeroEffectsAndAbilities", Natives::UFortGlobals_ApplyHeroEffectsAndAbilities, FunctionOf(L"ApplyHeroEffectsAndAbilities succeeded"));
 
         Sites::ChoosePlayerStartGoalManagerCalls.clear();
-        const uintptr_t ChoosePlayerStart = FunctionOf(L"ChoosePlayerStart: Could not find spot for Player! Spawning at engine PlayerStart!");
-        const uintptr_t ChoosePlayerStartEnd = ChoosePlayerStart ? Finder::FunctionEnd(ChoosePlayerStart) : 0;
-        const std::initializer_list<int32_t> GetCurrentOfWorld = { 0xFF, -1, -1, -1, -1, -1, 0x48, 0x8B, 0xC8, 0xE8 };
         std::vector<uint8_t*> GoalManagerCalls;
-        uintptr_t GetCurrentStub = 0;
-        int32_t GetWorldSlot = -1;
-        for (uintptr_t Site = ChoosePlayerStartEnd ? FindInstruction(ChoosePlayerStart, ChoosePlayerStartEnd, GetCurrentOfWorld) : 0; Site; Site = FindInstruction(Site + 1, ChoosePlayerStartEnd, GetCurrentOfWorld))
-        {
-            const uintptr_t Call = Site + 9;
-            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
-            const int32_t Slot = (Byte(Site + 1) & 0xF8) == 0x90 && (Byte(Site + 1) & 0x07) != 0x04 ? VirtualSlot(Site) : -1;
-            const bool bReturnsNull = Byte(Target) == 0x33 && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3;
-            if (Slot >= 0 && bReturnsNull && (!GetCurrentStub || (Target == GetCurrentStub && Slot == GetWorldSlot)))
-            {
-                GetCurrentStub = Target;
-                GetWorldSlot = Slot;
-                GoalManagerCalls.push_back(reinterpret_cast<uint8_t*>(Call));
-            }
-        }
-        RequireSlot(L"UObject::GetWorld", Natives::UObject_GetWorldIndex, GetWorldSlot);
+        RequireSlot(L"UObject::GetWorld", Natives::UObject_GetWorldIndex, DecodeGetWorldSlot(GoalManagerCalls));
         if (GoalManagerCalls.size() == 3)
         {
             Sites::ChoosePlayerStartGoalManagerCalls = std::move(GoalManagerCalls);
@@ -2637,6 +2642,19 @@ bool Finder::ResolveClient()
 
     Log::Info(L"Finder: client sites resolved, {} missing", MissingCount);
     return MissingCount == 0;
+}
+
+bool Finder::ResolveObjectGetWorld()
+{
+    std::vector<uint8_t*> GoalManagerCalls;
+    const int32_t GetWorldSlot = DecodeGetWorldSlot(GoalManagerCalls);
+    if (GetWorldSlot < 0)
+    {
+        Log::Error(L"Finder: UObject::GetWorld slot not found");
+        return false;
+    }
+    Natives::UObject_GetWorldIndex = GetWorldSlot;
+    return true;
 }
 
 bool Finder::ResolveServer()

@@ -49,6 +49,10 @@ UObject* UObject::GetArchetypeFromRequiredInfo(UClass* Class, UObject* Outer, FN
 
 UWorld* UObject::GetWorld() const
 {
+    if (Natives::UObject_GetWorldIndex < 0 && !Finder::ResolveObjectGetWorld())
+    {
+        return nullptr;
+    }
     return CallVirtual<UWorld*>(this, Natives::UObject_GetWorldIndex);
 }
 

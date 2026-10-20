@@ -31,6 +31,7 @@ namespace Finder
 
     bool ResolveRuntime();
     bool ResolveServer();
+    bool ResolveObjectGetWorld();
     bool ResolveClient();
     bool ResolveConsoleManager();
     bool ResolvePropertyCPPType();

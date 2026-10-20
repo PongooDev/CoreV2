@@ -4,6 +4,7 @@
 #include "GameplayPrediction.h"
 #include "GameplayTasksComponent.h"
 
+class AActor;
 class UGameplayAbility;
 struct FGameplayEventData;
 
@@ -13,6 +14,7 @@ class UAbilitySystemComponent : public UGameplayTasksComponent
 
 public:
     DefineUStructProperty(FGameplayAbilitySpecContainer, ActivatableAbilities)
+    DefineUProperty(AActor*, OwnerActor)
     DefineUFunction(ClientActivateAbilityFailed)
     DefineUFunction(ServerTryActivateAbility)
 

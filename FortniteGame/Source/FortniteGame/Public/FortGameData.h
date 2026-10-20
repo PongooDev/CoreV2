@@ -7,6 +7,7 @@
 
 class AActor;
 class UEnvQuery;
+class UFortAbilitySet;
 
 struct FFortPlayerSpawnPadPlacementData
 {
@@ -25,6 +26,7 @@ class UFortGameData : public UObject
 public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
+    DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
 
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
     {

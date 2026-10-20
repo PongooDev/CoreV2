@@ -104,6 +104,7 @@
     <ClInclude Include="..\Core\Public\ReflectionParams.h" />
     <ClInclude Include="..\Core\Public\pch.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AbilitySystemComponent.h" />
+    <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AbilitySystemInterface.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayAbilitySpec.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayPrediction.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\Abilities\GameplayAbility.h" />
@@ -172,6 +173,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Linker.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ScriptInterface.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBaseUtility.h" />
@@ -238,8 +240,11 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameInstance.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameMode.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameModeZone.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGlobals.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortKismetLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortWorldManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIGoalManager.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Customization\CustomCharacterPart.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Heroes\FortHero.h" />
@@ -323,6 +328,8 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameInstance.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameMode.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameModeZone.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGlobals.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortKismetLibrary.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortWorldManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIGoalManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortQuickBars.cpp" />

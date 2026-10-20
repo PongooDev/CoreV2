@@ -25,6 +25,7 @@
 #include "OnlineSubsystemImpl.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
+#include "FortGlobals.h"
 #include "AbilitySystemComponent.h"
 
 void Boot::Initialize()
@@ -64,6 +65,7 @@ void Boot::Initialize()
     AFortWorldManager::Hook();
     AFortPlayerController::Hook();
     AFortPlayerState::Hook();
+    UFortGlobals::Hook();
     UEngine::Hook();
     UGameEngine::Hook();
     Hooks::EnableAll();

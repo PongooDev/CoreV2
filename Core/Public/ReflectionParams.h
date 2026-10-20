@@ -6,6 +6,7 @@
 #include "UObject/UnrealType.h"
 
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <new>
@@ -54,6 +55,18 @@ namespace Reflection
         {
             T* Slot = Find<T>(Name);
             return Slot ? T(std::move(*Slot)) : T();
+        }
+
+        bool Relocate(const wchar_t* Name, void* Destination, size_t Size)
+        {
+            UProperty* Property = Function ? Function->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+            if (!Property || static_cast<size_t>(Property->ElementSize) != Size)
+            {
+                Log::Error(L"Reflection: parameter {} of {} was not found or has a different size", Name, Function ? Function->GetName().ToStdString() : std::wstring(L"(none)"));
+                return false;
+            }
+            std::memcpy(Destination, Buffer.data() + Property->GetOffset_ForInternal(), Size);
+            return true;
         }
 
         bool Call(UObject* Object)

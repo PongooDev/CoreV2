@@ -2216,6 +2216,7 @@ namespace
         Require(L"AFortPlayerController::InitializeMcpProfile", Natives::AFortPlayerController_InitializeMcpProfile, InitializeMcpProfile);
 
         Require(L"AFortPlayerState::SetHeroType", Natives::AFortPlayerState_SetHeroType, FunctionOf(L"Hero gender does not match gender of HeroType %s!  Hero Gender is %d instead."));
+        Require(L"UFortGlobals::ApplyHeroEffectsAndAbilities", Natives::UFortGlobals_ApplyHeroEffectsAndAbilities, FunctionOf(L"ApplyHeroEffectsAndAbilities succeeded"));
 
         Sites::ChoosePlayerStartGoalManagerCalls.clear();
         const uintptr_t ChoosePlayerStart = FunctionOf(L"ChoosePlayerStart: Could not find spot for Player! Spawning at engine PlayerStart!");

@@ -35,3 +35,30 @@ public:
 private:
     FAssetPtr AssetPtr;
 };
+
+template <class T>
+class TAssetPtr
+{
+public:
+    const FStringAssetReference& ToStringReference() const { return AssetPtr.GetUniqueID(); }
+
+    T* Get() const
+    {
+        return static_cast<T*>(AssetPtr.WeakPtr.Get());
+    }
+
+    T* LoadSynchronous() const
+    {
+        if (T* Loaded = Get())
+        {
+            return Loaded;
+        }
+        const FStringAssetReference& Reference = ToStringReference();
+        return Reference.IsValid() ? LoadObject<T>(nullptr, *Reference.ToString()) : nullptr;
+    }
+
+private:
+    FAssetPtr AssetPtr;
+};
+
+static_assert(sizeof(TAssetPtr<UObject>) == sizeof(FAssetPtr));

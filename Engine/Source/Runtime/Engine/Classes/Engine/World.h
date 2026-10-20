@@ -5,15 +5,47 @@
 #include "Engine/EngineBaseTypes.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/PendingNetGame.h"
+#include "Templates/Casts.h"
 #include "UObject/Object.h"
+#include "UObject/UnrealNames.h"
 
 class AActor;
 class AGameModeBase;
 class AGameNetworkManager;
+class APawn;
 class AWorldSettings;
 class UDemoNetDriver;
 class ULevel;
 class UNetDriver;
+struct FTransform;
+
+struct FActorSpawnParameters
+{
+    FActorSpawnParameters()
+        : Name(NAME_None), Template(nullptr), Owner(nullptr), Instigator(nullptr), OverrideLevel(nullptr), SpawnCollisionHandlingOverride(ESpawnActorCollisionHandlingMethod::Undefined), bRemoteOwned(false), bNoFail(false), bDeferConstruction(false), bAllowDuringConstructionScript(false), ObjectFlags(RF_Transactional)
+    {
+    }
+
+    FName Name;
+    AActor* Template;
+    AActor* Owner;
+    APawn* Instigator;
+    ULevel* OverrideLevel;
+    ESpawnActorCollisionHandlingMethod SpawnCollisionHandlingOverride;
+
+private:
+    uint16_t bRemoteOwned : 1;
+
+public:
+    bool IsRemoteOwned() const { return bRemoteOwned; }
+
+    uint16_t bNoFail : 1;
+    uint16_t bDeferConstruction : 1;
+    uint16_t bAllowDuringConstructionScript : 1;
+    EObjectFlags ObjectFlags;
+};
+
+static_assert(sizeof(FActorSpawnParameters) == 0x30);
 
 struct FLevelCollection
 {
@@ -68,6 +100,14 @@ public:
     AGameModeBase* GetAuthGameMode() const { return AuthorityGameMode; }
     AWorldSettings* GetWorldSettings(bool bCheckStreamingPersistent = false, bool bChecked = true) const;
     void AddNetworkActor(AActor* Actor);
+
+    AActor* SpawnActor(UClass* InClass, FTransform const* UserTransformPtr, const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters());
+
+    template <class T>
+    T* SpawnActor(UClass* Class, const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters())
+    {
+        return Cast<T>(SpawnActor(Class, nullptr, SpawnParameters));
+    }
 
     static void Hook();
 

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectArray.h"
+#include "Finder.h"
 #include "Natives.h"
 
 #include <shared_mutex>
@@ -86,6 +87,22 @@ bool UStruct::IsChildOf(const UStruct* SomeBase) const
 UProperty* UStruct::FindPropertyByName(FName InName) const
 {
     return static_cast<UProperty*>(FindField(this, InName, CASTCLASS_UProperty, true));
+}
+
+int32_t UScriptStruct::GetStructureSize() const
+{
+    const int32_t Alignment = GetMinAlignment();
+    return (GetPropertiesSize() + Alignment - 1) & ~(Alignment - 1);
+}
+
+void UScriptStruct::CopyScriptStruct(void* Dest, void const* Src, int32_t ArrayDim) const
+{
+    if (!Natives::UScriptStruct_CopyScriptStruct)
+    {
+        Finder::ResolveScriptStructCopy();
+    }
+
+    Natives::UScriptStruct_CopyScriptStruct(this, Dest, Src, ArrayDim);
 }
 
 UFunction* UClass::FindFunctionByName(FName InName, EIncludeSuperFlag::Type IncludeSuper) const

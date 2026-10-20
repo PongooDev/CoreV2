@@ -43,6 +43,10 @@ public:
 class UScriptStruct : public UStruct
 {
     DefineUnrealClass(UScriptStruct, CoreUObject)
+
+public:
+    int32_t GetStructureSize() const;
+    void CopyScriptStruct(void* Dest, void const* Src, int32_t ArrayDim = 1) const;
 };
 
 class UClass : public UStruct

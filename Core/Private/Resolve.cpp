@@ -2203,6 +2203,17 @@ namespace
 
         Require(L"AFortWorldManager::OnWorldRecordQueryComplete", Natives::AFortWorldManager_OnWorldRecordQueryComplete, FunctionOf(L"Invalid world record when transition to world query complete state!"));
 
+        const uintptr_t ProfileFailed = OnlyRef(L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]");
+        uintptr_t InitializeMcpProfile = 0;
+        for (uintptr_t Call = ProfileFailed ? FindRawCall(ProfileFailed - 0x140, ProfileFailed) : 0; Call; Call = FindRawCall(Call + 1, ProfileFailed))
+        {
+            if (FindInstruction(Call + 5, Call + 0x10, { 0x84, 0xC0 }))
+            {
+                InitializeMcpProfile = Finder::RelativeTarget(Call, 1, 5);
+            }
+        }
+        Require(L"AFortPlayerController::InitializeMcpProfile", Natives::AFortPlayerController_InitializeMcpProfile, InitializeMcpProfile);
+
         Sites::ChoosePlayerStartGoalManagerCalls.clear();
         const uintptr_t ChoosePlayerStart = FunctionOf(L"ChoosePlayerStart: Could not find spot for Player! Spawning at engine PlayerStart!");
         const uintptr_t ChoosePlayerStartEnd = ChoosePlayerStart ? Finder::FunctionEnd(ChoosePlayerStart) : 0;
@@ -2404,6 +2415,8 @@ namespace
         const int32_t ClientSlot = CanCreate ? *reinterpret_cast<const int32_t*>(CanCreate + 6) / static_cast<int32_t>(sizeof(void*)) : -1;
         RequireSlot(L"UObject::NeedsLoadForClient", Natives::UObject_NeedsLoadForClientIndex, ClientSlot);
         RequireSlot(L"UObject::NeedsLoadForServer", Natives::UObject_NeedsLoadForServerIndex, ClientSlot >= 0 ? ClientSlot + 1 : -1);
+
+        Require(L"UWorld::SpawnActor", Natives::UWorld_SpawnActor, FunctionOf(L"SpawnActor failed because no class was specified"));
     }
 
     void ResolveEngineLoopTicks()
@@ -2684,6 +2697,46 @@ bool Finder::ResolvePropertyCPPType()
         return false;
     }
     Log::Info(L"Finder: UProperty::GetCPPType is slot 0x{:X}", Natives::UProperty_GetCPPTypeIndex);
+    return true;
+}
+
+bool Finder::ResolveScriptStructCopy()
+{
+    const int32_t StructOffset = ObjectLayout::Current.UStructProperty_Struct;
+    const auto ReadsStruct = [](uintptr_t Begin, uintptr_t End, int32_t Displacement)
+    {
+        for (uintptr_t Load = FindInstruction(Begin, End, { 0x8B, -1, Displacement }); Load; Load = FindInstruction(Load + 1, End, { 0x8B, -1, Displacement }))
+        {
+            if ((Byte(Load + 1) & 0xC7) == 0x41)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    void** VTable = CdoVTable(L"/Script/CoreUObject.StructProperty");
+    for (int32_t Index = 0; VTable && Index < 0x100 && !Natives::UScriptStruct_CopyScriptStruct; ++Index)
+    {
+        const uintptr_t Thunk = reinterpret_cast<uintptr_t>(VTable[Index]);
+        if (!IsInText(Thunk) || FindInstruction(Thunk, Thunk + 9, { 0x48, 0x8B, 0x49, StructOffset, 0xE9 }) != Thunk)
+        {
+            continue;
+        }
+
+        const uintptr_t Target = Finder::RelativeTarget(Thunk + 4, 1, 5);
+        if (IsInText(Target) && ReadsStruct(Target, Target + 0x30, ObjectLayout::Current.UStruct_MinAlignment) && ReadsStruct(Target, Target + 0x30, ObjectLayout::Current.UStruct_PropertiesSize))
+        {
+            Natives::UScriptStruct_CopyScriptStruct = reinterpret_cast<decltype(Natives::UScriptStruct_CopyScriptStruct)>(Target);
+        }
+    }
+
+    if (!Natives::UScriptStruct_CopyScriptStruct)
+    {
+        Log::Error(L"Finder: UScriptStruct::CopyScriptStruct not found");
+        return false;
+    }
+    Log::Info(L"Finder: UScriptStruct::CopyScriptStruct found");
     return true;
 }
 

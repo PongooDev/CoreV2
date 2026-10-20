@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GameplayTagContainer.h"
+#include "Items/FortQuickBars.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
 
@@ -22,5 +23,13 @@ class UFortGameData : public UObject
     DefineUnrealClass(UFortGameData, FortniteGame)
 
 public:
+    DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
+
+    const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
+    {
+        const FQuickBarData& Definitions = QuickBarDefinitions;
+        const uint8_t* Definition = reinterpret_cast<const uint8_t*>(&Definitions) + static_cast<size_t>(InQuickBar) * FQuickBarData::StaticStruct()->GetStructureSize();
+        return *reinterpret_cast<const FQuickBarData*>(Definition);
+    }
 };

@@ -114,6 +114,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\BitArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\EnumAsByte.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\Map.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\ScriptArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\Set.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\SparseArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\UnrealString.h" />
@@ -177,6 +178,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UnrealType.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\WeakObjectPtr.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\ActorChannel.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\AssetManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Channel.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Console.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\DemoNetDriver.h" />
@@ -226,6 +228,7 @@
     <ClInclude Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public\OnlineSubsystemMcp.h" />
     <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public\McpProfile.h" />
     <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public\McpProfileGroup.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortAssetManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameData.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameInstance.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameMode.h" />
@@ -233,10 +236,12 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortWorldManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIGoalManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortQuickBars.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSession.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSessionDedicated.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortLobbyBeaconHost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerController.h" />
     <ClInclude Include="..\ThirdParty\Memcury\memcury.h" />
   </ItemGroup>
   <ItemGroup>
@@ -307,13 +312,16 @@
     <ClCompile Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Private\McpServiceConfig.cpp" />
     <ClCompile Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Private\OnlineSubsystemMcp.cpp" />
     <ClCompile Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Private\McpProfileGroup.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortAssetManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameInstance.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameMode.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameModeZone.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortWorldManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIGoalManager.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortQuickBars.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortLobbyBeaconHost.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\NotForLicensees\FortMcpConfig.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp" />
     <ClCompile Include="..\ThirdParty\MinHook\src\buffer.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <SDLCheck>false</SDLCheck>

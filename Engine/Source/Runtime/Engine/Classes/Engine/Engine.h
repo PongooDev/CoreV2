@@ -4,6 +4,7 @@
 #include "Engine/EngineBaseTypes.h"
 #include "UObject/Object.h"
 
+class UAssetManager;
 class UNetDriver;
 class UWorld;
 
@@ -23,6 +24,7 @@ class UEngine : public UObject
     DefineUnrealClass(UEngine, Engine)
     DefineUProperty(UClass*, ConsoleClass)
     DefineUProperty(float, NetClientTicksPerSecond)
+    DefineUProperty(UAssetManager*, AssetManager)
     DefineNativeMember(FOnNetworkFailure, NetworkFailureEvent, UEngine_NetworkFailureEvent)
 
 public:

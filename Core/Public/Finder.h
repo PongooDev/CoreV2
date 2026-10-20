@@ -32,6 +32,7 @@ namespace Finder
     bool ResolveClient();
     bool ResolveConsoleManager();
     bool ResolvePropertyCPPType();
+    bool ResolveScriptStructCopy();
     bool ResolveTextLocalizationManager();
     bool ResolvePlayerControllerConsole();
     bool ResolveProcessEvent();

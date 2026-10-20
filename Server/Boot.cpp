@@ -23,6 +23,7 @@
 #include "McpProfileGroup.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
+#include "Player/FortPlayerController.h"
 
 void Boot::Initialize()
 {
@@ -59,6 +60,7 @@ void Boot::Initialize()
     AFortGameMode::Hook();
     AFortGameModeZone::Hook();
     AFortWorldManager::Hook();
+    AFortPlayerController::Hook();
     UEngine::Hook();
     UGameEngine::Hook();
     Hooks::EnableAll();

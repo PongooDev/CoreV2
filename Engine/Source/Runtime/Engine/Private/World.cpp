@@ -74,6 +74,11 @@ bool UWorld::Listen(FURL& InURL)
 #endif
 }
 
+AActor* UWorld::SpawnActor(UClass* InClass, FTransform const* UserTransformPtr, const FActorSpawnParameters& SpawnParameters)
+{
+    return Natives::UWorld_SpawnActor(this, InClass, UserTransformPtr, SpawnParameters);
+}
+
 AWorldSettings* UWorld::GetWorldSettings(bool bCheckStreamingPersistent, bool bChecked) const
 {
     return Natives::UWorld_GetWorldSettings(this, bCheckStreamingPersistent, bChecked);

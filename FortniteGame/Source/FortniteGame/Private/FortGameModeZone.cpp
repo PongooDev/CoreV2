@@ -4,6 +4,7 @@
 #include "BlueprintGameplayTagLibrary.h"
 #include "EnvironmentQuery/EnvQueryInstanceBlueprintWrapper.h"
 #include "EnvironmentQuery/EnvQueryManager.h"
+#include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "FortWorldManager.h"
 #include "GameThread.h"
@@ -36,15 +37,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogFortPlacement, Log, All);
 namespace
 {
     constexpr int32_t SpawnPadQueryTicks = 600;
-
-    UFortGameData* FindGameData()
-    {
-        for (TObjectIterator<UFortGameData> It; It; ++It)
-        {
-            return *It;
-        }
-        return nullptr;
-    }
 
     void WaitForQuery(FWeakObjectPtr GameMode, FWeakObjectPtr WorldManager, FWeakObjectPtr Query, int32_t TicksLeft)
     {
@@ -79,7 +71,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
 void AFortGameModeZone::PlacePlayerSpawnPad(AFortWorldManager* WorldManager)
 {
 #if WITH_SERVER_CODE
-    UFortGameData* GameData = FindGameData();
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
     UEnvQuery* PlacementQuery = GameData ? GameData->DefaultPlayerSpawnPadPlacementData.PlacementQuery : nullptr;
     UEnvQueryInstanceBlueprintWrapper* Query = PlacementQuery ? UEnvQueryManager::RunEQSQuery(this, PlacementQuery, this, EEnvQueryRunMode::SingleResult, nullptr) : nullptr;
     if (!Query)
@@ -97,7 +89,7 @@ void AFortGameModeZone::OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldMa
 #if WITH_SERVER_CODE
     const TArray<AActor*> Results = PlacementQuery ? PlacementQuery->GetResultsAsActors() : TArray<AActor*>();
     ABuildingActor* PlacementActor = Results.Num() > 0 ? Cast<ABuildingActor>(Results[0]) : nullptr;
-    UFortGameData* GameData = FindGameData();
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
     if (!PlacementActor || !WorldManager || !GameData)
     {
         UE_LOG(LogFortPlacement, Error, TEXT("PlacePlayerSpawnPad: No valid placement actor could be found!  Failed to spawn player spawn pad."));

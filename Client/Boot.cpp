@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Boot.h"
+#include "Diagnostics.h"
 #include "Finder.h"
 #include "GameThread.h"
 #include "Hooks.h"
@@ -29,6 +30,7 @@ void Boot::Initialize()
     UGameViewportClient::Hook();
     UConsole::Hook();
     UGameEngine::Hook();
+    Diagnostics::HookLobbyClient();
     Hooks::EnableAll();
 
     GameThread::Enqueue([]

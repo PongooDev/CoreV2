@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Boot.h"
 #include "Configuration.h"
+#include "Diagnostics.h"
 #include "Finder.h"
 #include "GameMapsSettings.h"
 #include "Hooks.h"
@@ -70,6 +71,7 @@ void Boot::Initialize()
     UFortGlobals::Hook();
     UEngine::Hook();
     UGameEngine::Hook();
+    Diagnostics::HookLobbyServer();
     Hooks::EnableAll();
 
     GameThread::Enqueue([]

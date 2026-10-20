@@ -94,6 +94,7 @@
   <ItemGroup>
     <ClInclude Include="Boot.h" />
     <ClInclude Include="..\Core\Public\Configuration.h" />
+    <ClInclude Include="..\Core\Public\Diagnostics.h" />
     <ClInclude Include="..\Core\Public\Finder.h" />
     <ClInclude Include="..\Core\Public\GameThread.h" />
     <ClInclude Include="..\Core\Public\Hooks.h" />
@@ -269,6 +270,7 @@
     <ClCompile Include="Boot.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="..\Core\Private\Configuration.cpp" />
+    <ClCompile Include="..\Core\Private\Diagnostics.cpp" />
     <ClCompile Include="..\Core\Private\Finder.cpp" />
     <ClCompile Include="..\Core\Private\GameThread.cpp" />
     <ClCompile Include="..\Core\Private\Hooks.cpp" />

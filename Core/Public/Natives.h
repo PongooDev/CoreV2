@@ -222,6 +222,7 @@ namespace Natives
     inline void (*AFortGameState_SpawnMissionManager)(AFortGameState* This, const FFortMissionManagerRecord& MissionManagerRecord) = nullptr;
     inline void* (*UFortMissionInfo_GenerateMissionDifficultyOptions)(UFortMissionInfo* This, void* Result, void* RandomStream, const void* GenerationParams) = nullptr;
     inline ptrdiff_t AFortWorldManager_MissionGenerationRandomStream = -1;
+    inline int32_t AFortMission_ObjectiveStatusUpdatedIndex = -1;
     inline ptrdiff_t UFortGameData_MissionGenerationData = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;

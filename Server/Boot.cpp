@@ -25,6 +25,7 @@
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
 #include "Items/FortPickup.h"
+#include "Missions/FortObjectiveBase.h"
 #include "Items/FortQuickBars.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
@@ -83,6 +84,7 @@ void Boot::Initialize()
         AFortPlayerController::HookVTables();
         AFortQuickBars::HookVTables();
         AFortPickup::HookVTables();
+        AFortObjectiveBase::HookVTables();
     });
 
     Log::Info(L"Core V2 startup complete");

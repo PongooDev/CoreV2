@@ -3245,6 +3245,34 @@ bool Finder::ResolveMissionGenerationLive()
     return true;
 }
 
+bool Finder::ResolveMissionObjectivesLive()
+{
+    const uintptr_t ObjectiveStatusUpdated = FunctionOf(L"Mission %s: Objective %s status is now %s");
+    void** MissionVTable = CdoVTable(L"/Script/FortniteGame.FortMission");
+    int32_t StatusUpdatedIndex = -1;
+    for (int32_t Index = 0; MissionVTable && ObjectiveStatusUpdated && Index < 0x400 && StatusUpdatedIndex < 0; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(MissionVTable, Index);
+        if (!Entry)
+        {
+            break;
+        }
+        if (Entry == ObjectiveStatusUpdated)
+        {
+            StatusUpdatedIndex = Index;
+        }
+    }
+
+    if (StatusUpdatedIndex < 0)
+    {
+        Log::Error(L"Finder: AFortMission::ObjectiveStatusUpdated slot not found");
+        return false;
+    }
+    Natives::AFortMission_ObjectiveStatusUpdatedIndex = StatusUpdatedIndex;
+    Log::Info(L"Finder: AFortMission::ObjectiveStatusUpdated is slot 0x{:X}", StatusUpdatedIndex);
+    return true;
+}
+
 bool Finder::ResolveLoginLive()
 {
     const uintptr_t GameModeBaseLogin = FunctionOf(L"Login: Couldn't spawn player controller of class %s");

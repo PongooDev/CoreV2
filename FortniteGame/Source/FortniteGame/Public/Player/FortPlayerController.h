@@ -6,6 +6,7 @@
 
 class AFortInventory;
 class AFortPawn;
+class APawn;
 class IFortInventoryOwnerInterface;
 class AFortQuickBars;
 class UFortWorldItem;
@@ -24,6 +25,7 @@ public:
     DefineUFunction(ServerRemoveInventoryItem)
 
     bool InitializeMcpProfile(const void* OnComplete);
+    void Possess(APawn* InPawn);
     void SpawnQuickBars();
     void SetupQuickBars();
     void InitializeInventory(const TStructArray<FItemDefinitionAndCount>& Items);
@@ -40,6 +42,8 @@ public:
 private:
     static inline bool (*InitializeMcpProfileOG)(AFortPlayerController* This, const void* OnComplete) = nullptr;
     static bool InitializeMcpProfileHK(AFortPlayerController* This, const void* OnComplete);
+    static inline void (*PossessOG)(AFortPlayerController* This, APawn* InPawn) = nullptr;
+    static void PossessHK(AFortPlayerController* This, APawn* InPawn);
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count);
     static bool RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);

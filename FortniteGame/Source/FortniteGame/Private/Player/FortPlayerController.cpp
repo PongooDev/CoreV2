@@ -37,6 +37,20 @@ bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
     return bInitialized;
 }
 
+void AFortPlayerController::Possess(APawn* InPawn)
+{
+    PossessOG(this, InPawn);
+
+#if WITH_SERVER_CODE
+    AFortQuickBars* Bars = QuickBars;
+    if (Role == ROLE_Authority && Bars && MyFortPawn)
+    {
+        FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
+        Bars->ServerActivateSlotInternal(EFortQuickBars::Primary, PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
+    }
+#endif
+}
+
 void AFortPlayerController::SpawnQuickBars()
 {
 #if WITH_SERVER_CODE
@@ -222,6 +236,27 @@ void AFortPlayerController::HookVTables()
 {
     UObject* PlayerControllerDefault = StaticClass()->GetDefaultObject(false);
     void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
+
+    const int32_t PossessIndex = Finder::ImplementationIndex(AController::StaticFunction_Possess());
+    void* const PlayerControllerPossess = PlayerControllerVTable && PossessIndex >= 0 ? PlayerControllerVTable[PossessIndex] : nullptr;
+    if (PlayerControllerPossess)
+    {
+        PossessOG = reinterpret_cast<decltype(PossessOG)>(PlayerControllerPossess);
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[PossessIndex] == PlayerControllerPossess)
+            {
+                Hooks::SwapVTable(L"AFortPlayerController::Possess", VTable, PossessIndex, reinterpret_cast<void*>(&PossessHK));
+            }
+        }
+    }
+    else
+    {
+        Log::Error(L"Finder: AFortPlayerController::Possess slot not found");
+    }
     if (Finder::ResolveInventoryOwnerLive(StaticFunction_ServerRemoveInventoryItem(), PlayerControllerVTable))
     {
         const ptrdiff_t InterfaceOffset = Natives::AFortPlayerController_InventoryOwnerInterface;
@@ -278,6 +313,11 @@ bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FG
 {
     AFortPlayerController* PlayerController = FromInventoryOwner(static_cast<IFortInventoryOwnerInterface*>(InventoryOwner));
     return PlayerController->RemoveInventoryItem(ItemGuid, Count, bForceRemoveFromQuickBars);
+}
+
+void AFortPlayerController::PossessHK(AFortPlayerController* This, APawn* InPawn)
+{
+    This->Possess(InPawn);
 }
 
 void AFortPlayerController::ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid)

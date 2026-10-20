@@ -16,6 +16,16 @@ void AFortQuickBars::EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex)
     Params.Call(this);
 }
 
+void AFortQuickBars::ServerActivateSlotInternal(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot)
+{
+    Reflection::FParams Params(StaticFunction_ServerActivateSlotInternal());
+    Params.Set(L"InQuickBar", static_cast<uint8_t>(InQuickBar));
+    Params.Set(L"Slot", Slot);
+    Params.Set(L"ActivateDelay", ActivateDelay);
+    Params.Set(L"bUpdatePreviousFocusedSlot", bUpdatePreviousFocusedSlot);
+    Params.Call(this);
+}
+
 void AFortQuickBars::ServerAddItemInternal(const FGuid& Item, EFortQuickBars InQuickBar, int32_t Slot)
 {
     Reflection::FParams Params(StaticFunction_ServerAddItemInternal());

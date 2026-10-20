@@ -33,6 +33,7 @@ struct FQuickBarData
 struct FQuickBar
 {
     DefineUnrealStruct(FQuickBar, FortniteGame)
+    DefineUProperty(int32_t, CurrentFocusedSlot)
     DefineUStructArrayProperty(FQuickBarSlot, Slots)
     DefineUStructProperty(FQuickBarData, DataDefinition)
 };
@@ -45,12 +46,14 @@ public:
     DefineUStructProperty(FQuickBar, PrimaryQuickBar)
     DefineUStructProperty(FQuickBar, SecondaryQuickBar)
     DefineUFunction(EnableSlot)
+    DefineUFunction(ServerActivateSlotInternal)
     DefineUFunction(ServerAddItemInternal)
     DefineUFunction(ServerRemoveItemInternal)
 
     FQuickBar& GetQuickBar(EFortQuickBars InQuickBar) { return InQuickBar == EFortQuickBars::Primary ? PrimaryQuickBar : SecondaryQuickBar; }
 
     void EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex);
+    void ServerActivateSlotInternal(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
     void ServerAddItemInternal(const FGuid& Item, EFortQuickBars InQuickBar, int32_t Slot);
     FQuickBarSlot& GetSlot(EFortQuickBars InQuickBar, int32_t SlotIndex);
     const FQuickBarSlotData& GetSlotData(EFortQuickBars InQuickBar, int32_t SlotIndex);

@@ -7,6 +7,7 @@ class APawn;
 class AController : public AActor
 {
     DefineUnrealClass(AController, Engine)
+    DefineUFunction(Possess)
 
 public:
     DefineUProperty(APawn*, Pawn)

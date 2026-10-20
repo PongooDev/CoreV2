@@ -5,4 +5,8 @@
 class AFortPawn : public APawn
 {
     DefineUnrealClass(AFortPawn, FortniteGame)
+    DefineUFunction(IsDead)
+
+public:
+    bool IsDead() const;
 };

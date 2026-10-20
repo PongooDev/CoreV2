@@ -28,6 +28,8 @@
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionManager.h"
 #include "Online/FortMcpProfileWorld.h"
+#include "AI/FortAIGoalManager.h"
+#include "AI/FortQueryGenerators.h"
 #include "Missions/FortObjectiveBase.h"
 #include "Items/FortSchematicItem.h"
 #include "Items/FortQuickBars.h"
@@ -94,6 +96,8 @@ void Boot::Initialize()
         AFortMission::HookCallSites();
         AFortMissionManager::HookVTables();
         UFortMcpProfileWorld::HookVTables();
+        AFortAIGoalManager::HookCallSites();
+        UFortQueryGenerator_Enemies::HookVTables();
     });
 
     Log::Info(L"Core V2 startup complete");

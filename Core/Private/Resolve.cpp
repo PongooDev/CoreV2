@@ -3446,6 +3446,147 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     return true;
 }
 
+namespace
+{
+    uintptr_t ExecImplementation(const wchar_t* FunctionPath)
+    {
+        UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
+        const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+        const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+        const auto Step = reinterpret_cast<uintptr_t>(Natives::FFrame_Step);
+        const auto StepExplicit = reinterpret_cast<uintptr_t>(Natives::FFrame_StepExplicitProperty);
+        uintptr_t Implementation = 0;
+        bool bAfterStep = false;
+        for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            if (Target == Step || Target == StepExplicit)
+            {
+                bAfterStep = true;
+                Implementation = 0;
+            }
+            else if (bAfterStep && !Implementation)
+            {
+                Implementation = Target;
+            }
+        }
+        return Implementation;
+    }
+}
+
+uint8_t* Finder::FirstCallInImplementation(UFunction* Function, uintptr_t Target)
+{
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+    {
+        const uintptr_t Implementation = Finder::RelativeTarget(Call, 1, 5);
+        const uintptr_t ImplementationEnd = Finder::FunctionStart(Implementation) == Implementation ? Finder::FunctionEnd(Implementation) : 0;
+        const uintptr_t First = ImplementationEnd ? FindRawCall(Implementation, ImplementationEnd) : 0;
+        if (First && Finder::RelativeTarget(First, 1, 5) == Target)
+        {
+            return reinterpret_cast<uint8_t*>(First);
+        }
+    }
+    return nullptr;
+}
+
+bool Finder::ResolveGoalManagerLive()
+{
+    const uintptr_t AddGoal = ExecImplementation(L"/Script/FortniteGame.FortAIGoalManager:AddGoalToWorldAssignment");
+    const uintptr_t AddGoalEnd = AddGoal ? Finder::FunctionEnd(AddGoal) : 0;
+    uintptr_t FindInList = 0;
+    uintptr_t AssignmentAddGoal = 0;
+    for (uintptr_t Call = AddGoalEnd ? FindRawCall(AddGoal, AddGoalEnd) : 0; Call; Call = FindRawCall(Call + 1, AddGoalEnd))
+    {
+        FindInList = AssignmentAddGoal;
+        AssignmentAddGoal = Finder::RelativeTarget(Call, 1, 5);
+    }
+
+    int32_t GoalsOffset = -1;
+    const uintptr_t AssignmentAddGoalEnd = AssignmentAddGoal ? Finder::FunctionEnd(AssignmentAddGoal) : 0;
+    for (uintptr_t Site = AssignmentAddGoal; Site && Site + 7 <= AssignmentAddGoalEnd && GoalsOffset < 0; ++Site)
+    {
+        const uint8_t ModRm = Byte(Site + 2);
+        const int32_t Displacement = *reinterpret_cast<const int32_t*>(Site + 3);
+        if ((Byte(Site) == 0x48 || Byte(Site) == 0x4C) && Byte(Site + 1) == 0x8D && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && Displacement > 0 && Displacement < 0x1000)
+        {
+            GoalsOffset = Displacement;
+        }
+    }
+
+    if (!FindInList || GoalsOffset < 0)
+    {
+        Log::Error(L"Finder: AFortAIGoalManager assignment lookup not found");
+        return false;
+    }
+    Natives::AFortAIGoalManager_FindAssignmentInList = reinterpret_cast<decltype(Natives::AFortAIGoalManager_FindAssignmentInList)>(FindInList);
+    Natives::UFortAIAssignment_Goals = GoalsOffset;
+    Log::Info(L"Finder: UFortAIAssignment goals +0x{:X}", GoalsOffset);
+    return true;
+}
+
+bool Finder::ResolveQueryGeneratorsLive(void** EnemiesVTable)
+{
+    const uintptr_t Enemies = FunctionOf(L"NULL AIOwner (controller) of Enemies generator.  Cannot generate enemies.");
+    int32_t GenerateIndex = -1;
+    for (int32_t Index = 0; Enemies && Index < 0x200 && GenerateIndex < 0; ++Index)
+    {
+        GenerateIndex = VTableEntry(EnemiesVTable, Index) == Enemies ? Index : -1;
+    }
+
+    int32_t OwnerOffset = -1;
+    for (uintptr_t Site = Enemies; Site && Site + 4 <= Enemies + 0x20 && OwnerOffset < 0; ++Site)
+    {
+        if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x4A)
+        {
+            OwnerOffset = Byte(Site + 3);
+        }
+    }
+
+    const uintptr_t AddActor = ExecImplementation(L"/Script/AIModule.EnvQueryGenerator_BlueprintBase:AddGeneratedActor");
+    const uintptr_t AddActorEnd = AddActor ? Finder::FunctionEnd(AddActor) : 0;
+    uintptr_t AddItem = 0;
+    for (uintptr_t Call = AddActorEnd ? FindRawCall(AddActor, AddActorEnd) : 0; Call && !AddItem; Call = FindRawCall(Call + 1, AddActorEnd))
+    {
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        for (uintptr_t Site = Target; Site + 7 <= Target + 0x40 && !AddItem; ++Site)
+        {
+            if (Byte(Site) == 0x0F && Byte(Site + 1) == 0xB7 && (Byte(Site + 2) & 0xC7) == 0x81)
+            {
+                AddItem = Target;
+            }
+        }
+    }
+
+    int32_t ValueSizeOffset = -1;
+    int32_t RawDataOffset = -1;
+    for (uintptr_t Site = AddItem; Site && Site + 7 <= AddItem + 0x60; ++Site)
+    {
+        if (ValueSizeOffset < 0 && Byte(Site) == 0x0F && Byte(Site + 1) == 0xB7 && (Byte(Site + 2) & 0xC0) == 0x80 && (Byte(Site + 2) & 0x07) == 0x01)
+        {
+            ValueSizeOffset = *reinterpret_cast<const int32_t*>(Site + 3);
+        }
+        if (RawDataOffset < 0 && Byte(Site) == 0x48 && Byte(Site + 1) == 0x83 && Byte(Site + 2) == 0xC1)
+        {
+            RawDataOffset = Byte(Site + 3);
+        }
+    }
+
+    if (GenerateIndex < 0 || OwnerOffset < 0 || !AddItem || ValueSizeOffset < 0 || RawDataOffset < 0)
+    {
+        Log::Error(L"Finder: EQS goal generators not found (slot {}, owner {}, add {}, value size {}, raw data {})", GenerateIndex, OwnerOffset, AddItem != 0, ValueSizeOffset, RawDataOffset);
+        return false;
+    }
+    Natives::UEnvQueryGenerator_GenerateItemsIndex = GenerateIndex;
+    Natives::FEnvQueryInstance_Owner = OwnerOffset;
+    Natives::FEnvQueryInstance_AddItemData = reinterpret_cast<decltype(Natives::FEnvQueryInstance_AddItemData)>(AddItem);
+    Natives::FEnvQueryInstance_ValueSize = ValueSizeOffset;
+    Natives::FEnvQueryInstance_RawData = RawDataOffset;
+    Log::Info(L"Finder: UEnvQueryGenerator::GenerateItems is slot 0x{:X}, query owner +0x{:X}, raw data +0x{:X}, value size +0x{:X}", GenerateIndex, OwnerOffset, RawDataOffset, ValueSizeOffset);
+    return true;
+}
+
 bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
 {
     const uintptr_t Bind = FunctionOf(L"ProfileWorld::BindToPlayerController: Called with existing inventory for %s, reinitializing inventory");

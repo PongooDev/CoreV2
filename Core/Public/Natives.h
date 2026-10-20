@@ -236,6 +236,13 @@ namespace Natives
     inline int32_t UFortWorldItem_SetLoadedAmmoIndex = -1;
     inline int32_t AFortMissionManager_OnZoneEndIndex = -1;
     inline int32_t UFortMcpProfileWorld_BindToPlayerControllerIndex = -1;
+    inline UObject* (*AFortAIGoalManager_FindAssignmentInList)(UObject* This, const void* Identifier, void* Assignments, int32_t Kind) = nullptr;
+    inline uint64_t (*FEnvQueryInstance_AddItemData)(void* This, UObject* Actor) = nullptr;
+    inline ptrdiff_t FEnvQueryInstance_RawData = -1;
+    inline ptrdiff_t FEnvQueryInstance_ValueSize = -1;
+    inline ptrdiff_t FEnvQueryInstance_Owner = -1;
+    inline ptrdiff_t UFortAIAssignment_Goals = -1;
+    inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;
     inline ptrdiff_t UFortMcpProfileWorld_Inventory = -1;
     inline ptrdiff_t UFortMcpProfileWorld_bIsInventoryInitialized = -1;
     inline int32_t AFortGameModeZone_OnZoneEndIndex = -1;

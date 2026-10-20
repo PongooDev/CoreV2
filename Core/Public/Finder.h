@@ -58,6 +58,10 @@ namespace Finder
     uint8_t* NullGetCurrentCall(UFunction* Function);
     bool ResolveWorldItemLive(void** InventoryOwnerVTable);
     bool ResolveMcpProfileWorldLive(void** ProfileVTable);
+    bool ResolveGoalManagerLive();
+    bool ResolveQueryGeneratorsLive(void** EnemiesVTable);
+    std::vector<uint8_t*> GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t ActorSize, uintptr_t& OutStub);
+    uint8_t* FirstCallInImplementation(UFunction* Function, uintptr_t Target);
     bool ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset);
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable);
 }

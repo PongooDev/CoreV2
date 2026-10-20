@@ -5,4 +5,7 @@
 class APawn : public AActor
 {
     DefineUnrealClass(APawn, Engine)
+
+public:
+    DefineUProperty(AController*, Controller)
 };

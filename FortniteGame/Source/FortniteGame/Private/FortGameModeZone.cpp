@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "FortGameModeZone.h"
+#include "AI/FortAIDirector.h"
 #include "AI/FortAIGoalManager.h"
+#include "Engine/World.h"
 #include "BlueprintGameplayTagLibrary.h"
 #include "EnvironmentQuery/EnvQueryInstanceBlueprintWrapper.h"
 #include "EnvironmentQuery/EnvQueryManager.h"
@@ -72,6 +74,30 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
 #endif
 }
 
+UClass* AFortGameModeZone::DetermineAIDirectorClass() const
+{
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UClass* AIDirectorClass = nullptr;
+    if (GameData)
+    {
+        const TArray<TAssetSubclassOf<AFortAIDirector>>& AIDirectors = GameData->AIDirectors;
+        const int32_t Index = OverrideAIDirectorIndex;
+        AIDirectorClass = Index >= 0 && Index < AIDirectors.Num() ? AIDirectors[Index].LoadSynchronous() : nullptr;
+    }
+    return AIDirectorClass && AIDirectorClass->IsChildOf(AFortAIDirector::StaticClass()) ? AIDirectorClass : AFortAIDirector::StaticClass();
+}
+
+void AFortGameModeZone::CreateAIDirector()
+{
+#if WITH_SERVER_CODE
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        AIDirector = World->SpawnActor<AFortAIDirector>(DetermineAIDirectorClass(), FActorSpawnParameters());
+    }
+#endif
+}
+
 void AFortGameModeZone::PlacePlayerSpawnPad(AFortWorldManager* WorldManager)
 {
 #if WITH_SERVER_CODE
@@ -120,6 +146,11 @@ void AFortGameModeZone::Hook()
     {
         Hooks::RedirectCall(L"AFortGameModeZone::ChoosePlayerStart AFortAIGoalManager::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrent));
     }
+
+    for (uint8_t* Call : Sites::AIDirectorGetCurrentCalls)
+    {
+        Hooks::RedirectCall(L"AFortAIDirector::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIDirector::GetCurrent));
+    }
 }
 
 void AFortGameModeZone::HookVTables()
@@ -140,6 +171,23 @@ void AFortGameModeZone::HookVTables()
             Hooks::SwapVTable(L"AFortGameModeZone::FinishWorldInitialization", VTable, FinishIndex, reinterpret_cast<void*>(&FinishWorldInitializationHK));
         }
     }
+
+    const int32_t DirectorIndex = Natives::AFortGameModeZone_CreateAIDirectorIndex;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[DirectorIndex] == Natives::SharedEmptyFunction)
+        {
+            Hooks::SwapVTable(L"AFortGameModeZone::CreateAIDirector", VTable, DirectorIndex, reinterpret_cast<void*>(&CreateAIDirectorHK));
+        }
+    }
+}
+
+void AFortGameModeZone::CreateAIDirectorHK(AFortGameModeZone* This)
+{
+    This->CreateAIDirector();
 }
 
 APawn* AFortGameModeZone::SpawnDefaultPawnFor_ImplementationHK(AFortGameModeZone* This, AController* NewPlayer, AActor* StartSpot)

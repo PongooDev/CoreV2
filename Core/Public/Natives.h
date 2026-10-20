@@ -215,6 +215,7 @@ namespace Natives
     inline int32_t UAbilitySystemComponent_InternalServerTryActiveAbilityIndex = -1;
     inline int32_t UFortWorldItemDefinition_ServerExecuteIndex = -1;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
+    inline int32_t AFortGameModeZone_CreateAIDirectorIndex = -1;
     inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;
     inline FFortMissionManagerRecord* (*FFortMissionManagerRecord_FFortMissionManagerRecord)(FFortMissionManagerRecord* This, UClass* InMissionManagerClass) = nullptr;
     inline void (*AFortGameState_SpawnMissionManager)(AFortGameState* This, const FFortMissionManagerRecord& MissionManagerRecord) = nullptr;
@@ -339,6 +340,7 @@ namespace Sites
     inline uint8_t* ShouldUseThreadingForPerformanceDedicatedCheck = nullptr;
     inline uint8_t* LinkerFilterClientButNotServer = nullptr;
     inline std::vector<uint8_t*> ChoosePlayerStartGoalManagerCalls;
+    inline std::vector<uint8_t*> AIDirectorGetCurrentCalls;
     inline uint8_t* ShouldUseIdleModeCheck = nullptr;
     inline uint8_t* ShouldUseIdleModeFalse = nullptr;
 

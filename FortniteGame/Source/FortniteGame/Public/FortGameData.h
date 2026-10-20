@@ -7,6 +7,7 @@
 #include "UObject/Object.h"
 
 class AActor;
+class AFortAIDirector;
 class UEnvQuery;
 class UFortAbilitySet;
 class UFortItemDefinition;
@@ -37,6 +38,7 @@ public:
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
+    DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)
 
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
     {

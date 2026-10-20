@@ -5,6 +5,7 @@
 #include "FortGameData.h"
 #include "FortGameMode.h"
 #include "FortGameState.h"
+#include "FortWorldRecord.h"
 #include "Kismet/GameplayStatics.h"
 #include "Logging/LogMacros.h"
 #include "Hooks.h"
@@ -135,6 +136,35 @@ void AFortWorldManager::CreateMissionManager()
     }
 
     GameState->SpawnMissionManager(MissionManagerRecord);
+#endif
+}
+
+int32_t AFortWorldManager::GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName)
+{
+#if WITH_SERVER_CODE
+    UFortWorldRecord* WorldRecord = CurrentWorldRecord;
+    if (!WorldRecord || UniqueId.IsEmpty())
+    {
+        return -1;
+    }
+
+    TStructArray<FFortPlayerRecord>& SavedPlayers = WorldRecord->SavedPlayers;
+    for (int32_t Index = 0; Index < SavedPlayers.Num(); ++Index)
+    {
+        FString& SavedUniqueId = SavedPlayers[Index].UniqueId;
+        if (_wcsicmp(*SavedUniqueId, *UniqueId) == 0)
+        {
+            return Index;
+        }
+    }
+
+    FFortPlayerRecord& PlayerRecord = SavedPlayers.AddDefaulted();
+    PlayerRecord.UniqueId = UniqueId;
+    PlayerRecord.DisplayName = DisplayName;
+    PlayerRecord.bPlayerIsNew = true;
+    return SavedPlayers.Num() - 1;
+#else
+    return -1;
 #endif
 }
 

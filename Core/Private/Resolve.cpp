@@ -2241,6 +2241,13 @@ namespace
         }
         Require(L"AFortPlayerController::InitializeMcpProfile", Natives::AFortPlayerController_InitializeMcpProfile, InitializeMcpProfile);
 
+        const uintptr_t UniqueIdToString = ProfileFailed ? FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 }) : 0;
+        Natives::FUniqueNetId_ToStringIndex = UniqueIdToString && Byte(UniqueIdToString + 2) % 8 == 0 ? Byte(UniqueIdToString + 2) / 8 : -1;
+        if (Natives::FUniqueNetId_ToStringIndex < 0)
+        {
+            Log::Error(L"Finder: FUniqueNetId::ToString slot not found");
+        }
+
         Require(L"AFortPlayerState::SetHeroType", Natives::AFortPlayerState_SetHeroType, FunctionOf(L"Hero gender does not match gender of HeroType %s!  Hero Gender is %d instead."));
         Require(L"UFortGlobals::ApplyHeroEffectsAndAbilities", Natives::UFortGlobals_ApplyHeroEffectsAndAbilities, FunctionOf(L"ApplyHeroEffectsAndAbilities succeeded"));
 
@@ -3172,6 +3179,33 @@ bool Finder::ResolvePickupGiveLive()
     }
     Natives::AFortPickup_GivePickupToIndex = GiveIndex;
     Log::Info(L"Finder: AFortPickup::GivePickupTo is slot 0x{:X}", GiveIndex);
+    return true;
+}
+
+bool Finder::ResolveLoginLive()
+{
+    const uintptr_t GameModeBaseLogin = FunctionOf(L"Login: Couldn't spawn player controller of class %s");
+    void** GameModeBaseVTable = CdoVTable(L"/Script/Engine.GameModeBase");
+    int32_t LoginIndex = -1;
+    for (int32_t Index = 0; GameModeBaseVTable && GameModeBaseLogin && Index < 0x400 && LoginIndex < 0; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(GameModeBaseVTable, Index);
+        if (!Entry)
+        {
+            break;
+        }
+        if (Entry == GameModeBaseLogin)
+        {
+            LoginIndex = Index;
+        }
+    }
+    if (LoginIndex < 0)
+    {
+        Log::Error(L"Finder: AGameModeBase::Login slot not found");
+        return false;
+    }
+    Natives::AGameModeBase_LoginIndex = LoginIndex;
+    Log::Info(L"Finder: AGameModeBase::Login is slot 0x{:X}", LoginIndex);
     return true;
 }
 

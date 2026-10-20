@@ -43,6 +43,7 @@ public:
     void ServerTickLoadingOrCreatingWorld();
     void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions);
     void CreateMissionManager();
+    int32_t GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName);
     AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);
 
     static void Hook();

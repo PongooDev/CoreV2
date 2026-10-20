@@ -3,6 +3,7 @@
 #include "GameFramework/Actor.h"
 
 class APawn;
+class APlayerState;
 
 class AController : public AActor
 {
@@ -11,6 +12,7 @@ class AController : public AActor
 
 public:
     DefineUProperty(APawn*, Pawn)
+    DefineUProperty(APlayerState*, PlayerState)
 
     APawn* GetPawn() const { return Pawn; }
     AActor* GetViewTarget() const;

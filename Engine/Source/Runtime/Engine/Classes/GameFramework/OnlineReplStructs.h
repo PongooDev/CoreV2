@@ -17,6 +17,11 @@ struct FUniqueNetIdWrapper
         return *UniqueNetId;
     }
 
+    FString ToString() const
+    {
+        return IsValid() ? UniqueNetId->ToString() : FString(L"INVALID");
+    }
+
 protected:
     TSharedPtr<const FUniqueNetId> UniqueNetId;
 };

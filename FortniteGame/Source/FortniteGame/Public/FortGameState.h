@@ -3,6 +3,7 @@
 #include "GameFramework/GameState.h"
 
 class AFortMissionManager;
+class AFortWorldManager;
 struct FFortMissionManagerRecord;
 
 class AFortGameState : public AGameState
@@ -11,6 +12,7 @@ class AFortGameState : public AGameState
 
 public:
     DefineUProperty(AFortMissionManager*, MissionManager)
+    DefineUProperty(AFortWorldManager*, WorldManager)
 
     void SpawnMissionManager(const FFortMissionManagerRecord& MissionManagerRecord);
 

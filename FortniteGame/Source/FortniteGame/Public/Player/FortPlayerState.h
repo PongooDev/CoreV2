@@ -11,6 +11,7 @@ class AFortPlayerState : public APlayerState
 
 public:
     DefineUProperty(UCustomCharacterPart*, CharacterParts)
+    DefineUProperty(int32_t, WorldPlayerId)
     DefineUFunction(OnRep_CharacterParts)
 
     UCustomCharacterPart*& GetCharacterPart(EFortCustomPartType PartType)

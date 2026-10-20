@@ -8,6 +8,10 @@
 #include "EnvironmentQuery/EnvQueryManager.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortGameState.h"
+#include "GameFramework/OnlineReplStructs.h"
+#include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
 #include "FortWorldManager.h"
 #include "GameThread.h"
 #include "Logging/LogMacros.h"
@@ -98,6 +102,25 @@ void AFortGameModeZone::CreateAIDirector()
 #endif
 }
 
+APlayerController* AFortGameModeZone::Login(UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+    APlayerController* NewPlayerController = LoginOG(this, NewPlayer, InRemoteRole, Portal, Options, UniqueId, ErrorMessage);
+
+#if WITH_SERVER_CODE
+    AFortPlayerController* FortPlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(NewPlayerController));
+    AFortPlayerState* PlayerState = FortPlayerController ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(FortPlayerController->PlayerState))) : nullptr;
+    UWorld* World = GetWorld();
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    AFortWorldManager* WorldManager = GameState ? static_cast<AFortWorldManager*>(GameState->WorldManager) : nullptr;
+    if (PlayerState && WorldManager)
+    {
+        FString& PlayerName = PlayerState->PlayerName;
+        PlayerState->WorldPlayerId = WorldManager->GetOrAllocatePlayerID(UniqueId.ToString(), PlayerName);
+    }
+#endif
+    return NewPlayerController;
+}
+
 void AFortGameModeZone::PlacePlayerSpawnPad(AFortWorldManager* WorldManager)
 {
 #if WITH_SERVER_CODE
@@ -172,6 +195,24 @@ void AFortGameModeZone::HookVTables()
         }
     }
 
+    if (Finder::ResolveLoginLive())
+    {
+        const int32_t LoginIndex = Natives::AGameModeBase_LoginIndex;
+        UObject* ZoneDefault = StaticClass()->GetDefaultObject(false);
+        void* const ZoneLogin = ZoneDefault ? (*reinterpret_cast<void***>(ZoneDefault))[LoginIndex] : nullptr;
+        LoginOG = reinterpret_cast<decltype(LoginOG)>(ZoneLogin);
+        for (TObjectIterator<UClass> It; ZoneLogin && It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[LoginIndex] == ZoneLogin)
+            {
+                Hooks::SwapVTable(L"AFortGameModeZone::Login", VTable, LoginIndex, reinterpret_cast<void*>(&LoginHK));
+            }
+        }
+    }
+
     if (!Finder::ResolveAIDirectorLive())
     {
         return;
@@ -193,6 +234,11 @@ void AFortGameModeZone::HookVTables()
 void AFortGameModeZone::CreateAIDirectorHK(AFortGameModeZone* This)
 {
     This->CreateAIDirector();
+}
+
+APlayerController* AFortGameModeZone::LoginHK(AFortGameModeZone* This, UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+    return This->Login(NewPlayer, InRemoteRole, Portal, Options, UniqueId, ErrorMessage);
 }
 
 APawn* AFortGameModeZone::SpawnDefaultPawnFor_ImplementationHK(AFortGameModeZone* This, AController* NewPlayer, AActor* StartSpot)

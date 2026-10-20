@@ -3090,6 +3090,65 @@ bool Finder::ResolvePickupLive()
     return true;
 }
 
+bool Finder::ResolvePickupGiveLive()
+{
+    const auto LastCall = [](uintptr_t Function)
+    {
+        const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        uintptr_t Target = 0;
+        for (uintptr_t Call = FunctionEnd ? FindRawCall(Function, FunctionEnd) : 0; Call; Call = FindRawCall(Call + 1, FunctionEnd))
+        {
+            Target = Finder::RelativeTarget(Call, 1, 5);
+        }
+        return Target;
+    };
+
+    UFunction* SpawnMissionItemPickupFunction = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortMissionLibrary:SpawnMissionItemPickup");
+    const uintptr_t SpawnMissionItemPickup = SpawnMissionItemPickupFunction ? LastCall(reinterpret_cast<uintptr_t>(SpawnMissionItemPickupFunction->GetNativeFunc())) : 0;
+    const uintptr_t SetPickupTarget = SpawnMissionItemPickup ? LastCall(SpawnMissionItemPickup) : 0;
+    const uintptr_t SetPickupTargetEnd = SetPickupTarget ? Finder::FunctionEnd(SetPickupTarget) : 0;
+    void** PickupVTable = CdoVTable(L"/Script/FortniteGame.FortPickup");
+
+    int32_t GiveIndex = -1;
+    for (uintptr_t Call = SetPickupTargetEnd && PickupVTable ? FindRawCall(SetPickupTarget, SetPickupTargetEnd) : 0; Call && GiveIndex < 0; Call = FindRawCall(Call + 1, SetPickupTargetEnd))
+    {
+        const uintptr_t Callee = Finder::RelativeTarget(Call, 1, 5);
+        const uintptr_t CalleeEnd = Finder::FunctionEnd(Callee);
+        for (uintptr_t Lea = CalleeEnd ? FindInstruction(Callee, CalleeEnd, { 0x48, 0x8D, 0x05 }) : 0; Lea && GiveIndex < 0; Lea = FindInstruction(Lea + 1, CalleeEnd, { 0x48, 0x8D, 0x05 }))
+        {
+            const uintptr_t Delegate = Finder::RelativeTarget(Lea, 3, 7);
+            if (!IsInText(Delegate) || Delegate == reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction) || Finder::FunctionStart(Delegate) != Delegate)
+            {
+                continue;
+            }
+
+            const uintptr_t DelegateEnd = Finder::FunctionEnd(Delegate);
+            uintptr_t LastVirtualCall = 0;
+            int32_t VirtualCalls = 0;
+            for (uintptr_t Site = DelegateEnd ? FindVirtualCall(Delegate, DelegateEnd) : 0; Site; Site = FindVirtualCall(Site + 1, DelegateEnd))
+            {
+                LastVirtualCall = Site;
+                ++VirtualCalls;
+            }
+
+            const int32_t Slot = VirtualCalls >= 2 ? VirtualSlot(LastVirtualCall) : -1;
+            if (Slot >= 0 && reinterpret_cast<void*>(VTableEntry(PickupVTable, Slot)) == Natives::SharedEmptyFunction)
+            {
+                GiveIndex = Slot;
+            }
+        }
+    }
+
+    if (GiveIndex < 0)
+    {
+        Log::Error(L"Finder: AFortPickup::GivePickupTo slot not found");
+        return false;
+    }
+    Natives::AFortPickup_GivePickupToIndex = GiveIndex;
+    Log::Info(L"Finder: AFortPickup::GivePickupTo is slot 0x{:X}", GiveIndex);
+    return true;
+}
+
 bool Finder::ResolveWorldItemDefinitionLive()
 {
     UFunction* EquipWeaponDefinition = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPawn:EquipWeaponDefinition");

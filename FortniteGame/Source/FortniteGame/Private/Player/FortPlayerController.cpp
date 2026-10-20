@@ -265,9 +265,18 @@ void AFortPlayerController::HookVTables()
     }
 }
 
+AFortPlayerController* AFortPlayerController::FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner)
+{
+    if (!InventoryOwner || Natives::AFortPlayerController_InventoryOwnerInterface < 0)
+    {
+        return nullptr;
+    }
+    return reinterpret_cast<AFortPlayerController*>(reinterpret_cast<uint8_t*>(InventoryOwner) - Natives::AFortPlayerController_InventoryOwnerInterface);
+}
+
 bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
 {
-    AFortPlayerController* PlayerController = reinterpret_cast<AFortPlayerController*>(static_cast<uint8_t*>(InventoryOwner) - Natives::AFortPlayerController_InventoryOwnerInterface);
+    AFortPlayerController* PlayerController = FromInventoryOwner(static_cast<IFortInventoryOwnerInterface*>(InventoryOwner));
     return PlayerController->RemoveInventoryItem(ItemGuid, Count, bForceRemoveFromQuickBars);
 }
 

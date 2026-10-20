@@ -46,5 +46,6 @@ namespace Finder
     int32_t ImplementationIndex(UFunction* Function);
     bool ResolveWorldItemDefinitionLive();
     bool ResolvePickupLive();
+    bool ResolvePickupGiveLive();
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable);
 }

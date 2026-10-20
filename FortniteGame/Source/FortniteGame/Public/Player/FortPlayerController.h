@@ -6,6 +6,7 @@
 
 class AFortInventory;
 class AFortPawn;
+class IFortInventoryOwnerInterface;
 class AFortQuickBars;
 class UFortWorldItem;
 struct FItemDefinitionAndCount;
@@ -30,6 +31,8 @@ public:
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
+
+    static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
 
     static void Hook();
     static void HookVTables();

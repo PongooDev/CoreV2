@@ -2,10 +2,12 @@
 
 #include "GameFramework/PlayerController.h"
 #include "Misc/Guid.h"
+#include "StructArray.h"
 
 class AFortInventory;
 class AFortQuickBars;
 class UFortWorldItem;
+struct FItemDefinitionAndCount;
 
 class AFortPlayerController : public APlayerController
 {
@@ -20,7 +22,7 @@ public:
     bool InitializeMcpProfile(const void* OnComplete);
     void SpawnQuickBars();
     void SetupQuickBars();
-    void AddDefaultInventory();
+    void InitializeInventory(const TStructArray<FItemDefinitionAndCount>& Items);
     void TryAddToQuickBar(UFortWorldItem* Item);
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);

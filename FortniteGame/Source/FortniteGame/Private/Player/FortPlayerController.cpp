@@ -25,7 +25,10 @@ bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
     if (Role == ROLE_Authority && !QuickBars)
     {
         SpawnQuickBars();
-        AddDefaultInventory();
+        if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+        {
+            InitializeInventory(GameData->DefaultInventoryList);
+        }
     }
 #endif
 
@@ -56,19 +59,17 @@ void AFortPlayerController::SetupQuickBars()
 #endif
 }
 
-void AFortPlayerController::AddDefaultInventory()
+void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefinitionAndCount>& Items)
 {
 #if WITH_SERVER_CODE
-    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    if (!GameData || !WorldInventory)
+    if (!WorldInventory)
     {
         return;
     }
 
-    TStructArray<FItemDefinitionAndCount>& DefaultInventoryList = GameData->DefaultInventoryList;
-    for (int32_t Index = 0; Index < DefaultInventoryList.Num(); ++Index)
+    for (int32_t Index = 0; Index < Items.Num(); ++Index)
     {
-        const FItemDefinitionAndCount& Entry = DefaultInventoryList[Index];
+        const FItemDefinitionAndCount& Entry = Items[Index];
         const TAssetPtr<UFortItemDefinition>& EntryDefinition = Entry.ItemDefinition;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(EntryDefinition.LoadSynchronous());
         if (ItemDefinition)

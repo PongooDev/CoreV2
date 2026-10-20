@@ -17,12 +17,17 @@ namespace Reflection
     class FParams
     {
     public:
-        explicit FParams(UFunction* InFunction)
+        explicit FParams(UFunction* InFunction, bool bInitializeParms = false)
             : Function(InFunction)
+            , bInitialized(InFunction && bInitializeParms)
         {
             if (Function)
             {
                 Buffer.assign(Function->ParmsSize, 0);
+            }
+            if (bInitialized)
+            {
+                Function->InitializeStruct(Buffer.data());
             }
         }
 
@@ -35,6 +40,10 @@ namespace Reflection
             {
                 Destroy();
             }
+            if (bInitialized)
+            {
+                Function->DestroyStruct(Buffer.data());
+            }
         }
 
         template <typename T>
@@ -44,6 +53,11 @@ namespace Reflection
             if (!Slot)
             {
                 return false;
+            }
+            if (bInitialized)
+            {
+                *Slot = Value;
+                return true;
             }
             new (Slot) T(Value);
             Destructors.push_back([Slot] { std::destroy_at(Slot); });
@@ -93,6 +107,7 @@ namespace Reflection
         }
 
         UFunction* Function;
+        bool bInitialized = false;
         std::vector<uint8_t> Buffer;
         std::vector<std::function<void()>> Destructors;
     };

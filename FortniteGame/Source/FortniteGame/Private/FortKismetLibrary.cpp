@@ -9,6 +9,7 @@
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
 #include "Math/Rotator.h"
+#include "Missions/FortItemCollectedParams.h"
 #include "Items/FortQuickBars.h"
 #include "Log.h"
 #include "Natives.h"
@@ -84,6 +85,8 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
         PlayerController->TryAddToQuickBar(WorldItem);
         Remaining -= Count;
     }
+
+    UFortItemCollectedParams::SendItemCollected(PlayerController, ItemDefinition, NumberToGive);
 #endif
 }
 

@@ -5,6 +5,7 @@
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
+#include "Missions/FortItemCollectedParams.h"
 #include "Natives.h"
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
@@ -92,11 +93,15 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
         return;
     }
 
-    GiveItemEntry(PlayerController, PrimaryPickupItemEntry);
+    FFortItemEntry& PrimaryEntry = PrimaryPickupItemEntry;
+    GiveItemEntry(PlayerController, PrimaryEntry);
+    UFortItemCollectedParams::SendItemCollected(PlayerController, Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(PrimaryEntry.ItemDefinition)), PrimaryEntry.Count);
     TStructArray<FFortItemEntry>& MultiItemEntries = MultiItemPickupEntries;
     for (int32_t Index = 0; Index < MultiItemEntries.Num(); ++Index)
     {
-        GiveItemEntry(PlayerController, MultiItemEntries[Index]);
+        FFortItemEntry& Entry = MultiItemEntries[Index];
+        GiveItemEntry(PlayerController, Entry);
+        UFortItemCollectedParams::SendItemCollected(PlayerController, Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition)), Entry.Count);
     }
 #endif
 }

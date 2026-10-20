@@ -26,6 +26,7 @@
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
 #include "FortGlobals.h"
+#include "FortKismetLibrary.h"
 #include "AbilitySystemComponent.h"
 
 void Boot::Initialize()
@@ -74,6 +75,7 @@ void Boot::Initialize()
     {
         AFortGameModeZone::HookVTables();
         UAbilitySystemComponent::HookVTables();
+        UFortKismetLibrary::HookNatives();
     });
 
     Log::Info(L"Core V2 startup complete");

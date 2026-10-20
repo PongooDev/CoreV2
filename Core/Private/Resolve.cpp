@@ -2781,6 +2781,51 @@ bool Finder::ResolveScriptStructCopy()
     return true;
 }
 
+bool Finder::ResolveScriptFrame()
+{
+    UFunction* IsValidClass = FindObject<UFunction>(nullptr, L"/Script/Engine.KismetSystemLibrary:IsValidClass");
+    const uintptr_t Thunk = IsValidClass ? reinterpret_cast<uintptr_t>(IsValidClass->GetNativeFunc()) : 0;
+    const uintptr_t ThunkEnd = IsInText(Thunk) ? Finder::FunctionEnd(Thunk) : 0;
+
+    ptrdiff_t Code = 0;
+    if (const uintptr_t Compare = ThunkEnd ? FindInstruction(Thunk, ThunkEnd, { 0x48, 0x83, 0x7A, -1, 0x00 }) : 0)
+    {
+        Code = Byte(Compare + 3);
+    }
+
+    ptrdiff_t Object = 0;
+    uintptr_t Step = 0;
+    if (const uintptr_t Load = ThunkEnd ? FindInstruction(Thunk, ThunkEnd, { 0x48, 0x8B, 0x52, -1 }) : 0)
+    {
+        Object = Byte(Load + 3);
+        const uintptr_t Call = FindRawCall(Load + 4, Load + 0x14);
+        Step = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    }
+
+    ptrdiff_t PropertyChain = 0;
+    uintptr_t StepExplicitProperty = 0;
+    if (const uintptr_t Load = ThunkEnd ? FindInstruction(Thunk, ThunkEnd, { 0x4C, 0x8B, 0x82, -1, -1, 0x00, 0x00 }) : 0)
+    {
+        PropertyChain = *reinterpret_cast<const int32_t*>(Load + 3);
+        const uintptr_t Call = FindRawCall(Load + 7, Load + 0x24);
+        StepExplicitProperty = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    }
+
+    if (!Code || !Object || !PropertyChain || !Step || !StepExplicitProperty || Step == StepExplicitProperty)
+    {
+        Log::Error(L"Finder: FFrame not resolved from KismetSystemLibrary::IsValidClass");
+        return false;
+    }
+
+    Natives::FFrame_Code = Code;
+    Natives::FFrame_Object = Object;
+    Natives::FFrame_PropertyChainForCompiledIn = PropertyChain;
+    Natives::FFrame_Step = reinterpret_cast<decltype(Natives::FFrame_Step)>(Step);
+    Natives::FFrame_StepExplicitProperty = reinterpret_cast<decltype(Natives::FFrame_StepExplicitProperty)>(StepExplicitProperty);
+    Log::Info(L"Finder: FFrame Object +0x{:X}, Code +0x{:X}, PropertyChainForCompiledIn +0x{:X}", Object, Code, PropertyChain);
+    return true;
+}
+
 bool Finder::ResolveTextLocalizationManager()
 {
     uintptr_t FindText = 0;

@@ -62,6 +62,8 @@ struct FActiveGameplayEffectHandle;
 struct FGameplayEventData;
 class UWorld;
 struct FActorSpawnParameters;
+struct FFrame;
+class UProperty;
 struct FTransform;
 struct FLevelCollection;
 struct FLogCategoryBase;
@@ -172,6 +174,8 @@ namespace Natives
     inline void (*UWorld_AddNetworkActor)(UWorld* This, AActor* Actor) = nullptr;
     inline AActor* (*UWorld_SpawnActor)(UWorld* This, UClass* Class, const FTransform* UserTransformPtr, const FActorSpawnParameters& SpawnParameters) = nullptr;
     inline void (*UScriptStruct_CopyScriptStruct)(const UScriptStruct* This, void* Dest, const void* Src, int32_t ArrayDim) = nullptr;
+    inline void (*FFrame_Step)(FFrame* This, UObject* Context, void* const Result) = nullptr;
+    inline void (*FFrame_StepExplicitProperty)(FFrame* This, void* const Result, UProperty* Property) = nullptr;
     inline bool (*UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled)() = nullptr;
     inline void (*UNetDriver_TickFlush)(UNetDriver* This, float DeltaSeconds) = nullptr;
     inline FOutBunch* (*FOutBunch_FOutBunch)(FOutBunch* This, UChannel* InChannel, bool bClose) = nullptr;
@@ -275,6 +279,9 @@ namespace Natives
     inline ptrdiff_t FOutBunch_bDormant = -1;
     inline ptrdiff_t FOutBunch_bReliable = -1;
     inline ptrdiff_t UChannel_ChIndex = -1;
+    inline ptrdiff_t FFrame_Object = -1;
+    inline ptrdiff_t FFrame_Code = -1;
+    inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;
     inline ptrdiff_t UActorChannel_RelevantTime = -1;
     inline ptrdiff_t UActorChannel_LastUpdateTime = -1;

@@ -2,6 +2,7 @@
 
 #include "FortGameMode.h"
 
+class AFortAIDirector;
 class AFortAIGoalManager;
 class UEnvQueryInstanceBlueprintWrapper;
 
@@ -10,6 +11,7 @@ class AFortGameModeZone : public AFortGameMode
     DefineUnrealClass(AFortGameModeZone, FortniteGame)
 
 public:
+    DefineUProperty(AFortAIDirector*, AIDirector)
     DefineUProperty(AFortAIGoalManager*, AIGoalManager)
     DefineUProperty(AActor*, ActiveSpawnPad)
 

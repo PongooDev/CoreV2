@@ -174,6 +174,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ScriptInterface.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Stack.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectArray.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectBaseUtility.h" />
@@ -243,6 +244,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGlobals.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortKismetLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortWorldManager.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIDirector.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIGoalManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
@@ -294,6 +296,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Linker.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Obj.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\Property.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\ScriptCore.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectBaseUtility.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectGlobals.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\WeakObjectPtr.cpp" />
@@ -331,6 +334,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGlobals.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortKismetLibrary.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortWorldManager.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIDirector.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIGoalManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortQuickBars.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortLobbyBeaconHost.cpp" />

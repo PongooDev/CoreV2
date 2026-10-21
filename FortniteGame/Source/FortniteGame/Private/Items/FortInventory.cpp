@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Items/FortInventory.h"
+#include "Finder.h"
 #include "Items/FortItemDefinition.h"
 #include "Natives.h"
 #include "Player/FortPlayerController.h"
@@ -62,23 +63,12 @@ void AFortInventory::AddWorldItem(UFortWorldItem* WorldItem)
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     ItemEntry.ParentInventory = FWeakObjectPtr(this);
 
-    FFortItemList& ItemList = Inventory;
-    TStructArray<FFortItemEntry>& Entries = ItemList.ReplicatedEntries;
-    FFortItemEntry& ReplicatedEntry = Entries.AddDefaulted();
-    FFortItemEntry::StaticStruct()->CopyScriptStruct(&ReplicatedEntry, &ItemEntry);
-
-    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
-    Instances.Add(WorldItem);
-
-    ItemList.MarkItemDirty(ReplicatedEntry);
-    HandleInventoryLocalUpdate();
-
-    AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(GetOwner()));
-    UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
-    if (PlayerController && ItemDefinition && Natives::AFortPlayerController_InventoryOwnerInterface > 0)
+    if (!Natives::AFortInventory_InitializeExistingItem && !Finder::ResolveInventoryLive())
     {
-        ItemDefinition->OnItemAddedToInventory(reinterpret_cast<uint8_t*>(PlayerController) + Natives::AFortPlayerController_InventoryOwnerInterface, WorldItem, false);
+        return;
     }
+    Natives::AFortInventory_InitializeExistingItem(this, WorldItem);
+    HandleInventoryLocalUpdate();
 #endif
 }
 
@@ -142,16 +132,6 @@ void AFortInventory::RemoveWorldItem(UFortWorldItem* WorldItem)
         if (Entries[Index].ItemGuid == ItemGuid)
         {
             Entries.RemoveAt(Index);
-            break;
-        }
-    }
-
-    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
-    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
-    {
-        if (Instances[Index] == WorldItem)
-        {
-            Instances.RemoveAt(Index);
             break;
         }
     }

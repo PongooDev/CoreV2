@@ -26,5 +26,4 @@ public:
     DefineBitfieldUProperty(bCanBeDropped)
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
-    void OnItemAddedToInventory(void* InventoryOwner, UFortWorldItem* Item, bool bSkipQuickBar);
 };

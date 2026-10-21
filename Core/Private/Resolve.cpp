@@ -3958,26 +3958,6 @@ bool Finder::ResolveWorldItemDefinitionLive()
     }
     Natives::UFortWorldItemDefinition_ServerExecuteIndex = ServerExecuteIndex;
     Log::Info(L"Finder: UFortWorldItemDefinition::ServerExecute is slot 0x{:X}", ServerExecuteIndex);
-
-    void** WorldItemDefinitionVTable = CdoVTable(L"/Script/FortniteGame.FortWorldItemDefinition");
-    void** GadgetVTable = CdoVTable(L"/Script/FortniteGame.FortGadgetItemDefinition");
-    for (int32_t Index = 0; WorldItemDefinitionVTable && GadgetVTable && Natives::UAbilitySystemComponent_GiveAbility && Index < 0x100 && Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex < 0; ++Index)
-    {
-        const uintptr_t Function = VTableEntry(GadgetVTable, Index);
-        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
-        if (WorldItemDefinitionVTable[Index] == Natives::SharedEmptyFunction && FunctionEnd > Function && CallWithin(Function, FunctionEnd - Function, Natives::UAbilitySystemComponent_GiveAbility))
-        {
-            Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex = Index;
-        }
-    }
-    if (Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex < 0)
-    {
-        Log::Error(L"Finder: UFortWorldItemDefinition item added slot not found");
-    }
-    else
-    {
-        Log::Info(L"Finder: UFortWorldItemDefinition item added slot 0x{:X}", Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex);
-    }
     return true;
 }
 
@@ -4174,4 +4154,45 @@ uint8_t* Finder::SharedEmptyCallInImplementation(UFunction* Function)
         }
     }
     return Count == 1 ? reinterpret_cast<uint8_t*>(Found) : nullptr;
+}
+
+bool Finder::ResolveInventoryLive()
+{
+    if (Natives::AFortInventory_InitializeExistingItem)
+    {
+        return true;
+    }
+
+    UFunction* LocalUpdate = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortInventory:HandleInventoryLocalUpdate");
+    const uintptr_t Exec = LocalUpdate ? reinterpret_cast<uintptr_t>(LocalUpdate->GetNativeFunc()) : 0;
+    uintptr_t Update = 0;
+    for (uintptr_t Site = IsInText(Exec) ? Exec : 0; Site && Site < Exec + 0x40 && !Update; ++Site)
+    {
+        if ((Byte(Site) == 0xE8 || Byte(Site) == 0xE9) && IsInText(Finder::RelativeTarget(Site, 1, 5)))
+        {
+            Update = Finder::RelativeTarget(Site, 1, 5);
+        }
+    }
+    const uintptr_t UpdateCall = Update ? FindRawCall(Update, Update + 0x20) : 0;
+    const uintptr_t UpdateItemInstances = UpdateCall ? Finder::RelativeTarget(UpdateCall, 1, 5) : 0;
+    uintptr_t InitializeExistingItem = 0;
+    bool bAmbiguous = false;
+    for (uintptr_t Call : UpdateItemInstances ? Finder::CallsTo(UpdateItemInstances, false) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t Caller = Finder::FunctionStart(Call);
+        if (Caller && Caller != Update)
+        {
+            bAmbiguous |= InitializeExistingItem && InitializeExistingItem != Caller;
+            InitializeExistingItem = Caller;
+        }
+    }
+    if (!InitializeExistingItem || bAmbiguous)
+    {
+        Log::Error(L"Finder: AFortInventory::InitializeExistingItem not found");
+        return false;
+    }
+
+    Natives::AFortInventory_InitializeExistingItem = reinterpret_cast<decltype(Natives::AFortInventory_InitializeExistingItem)>(InitializeExistingItem);
+    Log::Info(L"Finder: AFortInventory::InitializeExistingItem found");
+    return true;
 }

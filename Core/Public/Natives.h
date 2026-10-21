@@ -19,6 +19,8 @@ class FOutBunch;
 class AActor;
 class AController;
 class AFortGameMode;
+class AFortInventory;
+class UFortWorldItem;
 class AFortGameState;
 class UFortMissionInfo;
 struct FFortMissionManagerRecord;
@@ -225,7 +227,7 @@ namespace Natives
     inline int32_t AFortGameMode_FinishWorldInitializationIndex = -1;
     inline int32_t UAbilitySystemComponent_InternalServerTryActiveAbilityIndex = -1;
     inline int32_t UFortWorldItemDefinition_ServerExecuteIndex = -1;
-    inline int32_t UFortWorldItemDefinition_OnItemAddedToInventoryIndex = -1;
+    inline void (*AFortInventory_InitializeExistingItem)(AFortInventory* This, UFortWorldItem* Item) = nullptr;
     inline uintptr_t UAbilitySystemComponent_GiveAbility = 0;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
     inline void (*AFortPickup_SetPickupTarget)(AFortPickup* Pickup, AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound) = nullptr;

@@ -41,21 +41,6 @@ bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerC
     return reinterpret_cast<FServerExecute>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItemDefinition_ServerExecuteIndex])(this, Item, Controller);
 }
 
-void UFortWorldItemDefinition::OnItemAddedToInventory(void* InventoryOwner, UFortWorldItem* Item, bool bSkipQuickBar)
-{
-    if (Natives::UFortWorldItemDefinition_ServerExecuteIndex < 0 && !Finder::ResolveWorldItemDefinitionLive())
-    {
-        return;
-    }
-    if (Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex < 0)
-    {
-        return;
-    }
-
-    using FOnItemAddedToInventory = void (*)(UFortWorldItemDefinition* This, void* InventoryOwner, UFortWorldItem* Item, bool bSkipQuickBar);
-    reinterpret_cast<FOnItemAddedToInventory>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex])(this, InventoryOwner, Item, bSkipQuickBar);
-}
-
 UFortItemDefinition* UFortItem::GetItemDefinitionBP() const
 {
     Reflection::FParams Params(StaticFunction_GetItemDefinitionBP());

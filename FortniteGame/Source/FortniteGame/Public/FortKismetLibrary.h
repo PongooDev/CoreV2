@@ -27,6 +27,7 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(K2_RemoveItemFromPlayer)
     DefineUFunction(K2_RemoveItemFromAllPlayers)
     DefineUFunction(K2_SpawnPickupInWorld)
+    DefineUFunction(PickLootDrops)
 
 public:
     static void EquipFortAbilitySet(TScriptInterface<IAbilitySystemInterface> AbilitySystemInterfaceActor, UFortAbilitySet* AbilitySet, UObject* OverrideSourceObject, FFortAbilitySetHandle& OutHandle);

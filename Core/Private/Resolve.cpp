@@ -3199,7 +3199,8 @@ bool Finder::ResolvePickupGiveLive()
         return false;
     }
     Natives::AFortPickup_GivePickupToIndex = GiveIndex;
-    Log::Info(L"Finder: AFortPickup::GivePickupTo is slot 0x{:X}", GiveIndex);
+    Natives::AFortPickup_SetPickupTarget = reinterpret_cast<decltype(Natives::AFortPickup_SetPickupTarget)>(SetPickupTarget);
+    Log::Info(L"Finder: AFortPickup::GivePickupTo is slot 0x{:X}, SetPickupTarget +0x{:X}", GiveIndex, SetPickupTarget - Finder::ImageBase());
     return true;
 }
 

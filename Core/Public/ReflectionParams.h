@@ -65,6 +65,12 @@ namespace Reflection
         }
 
         template <typename T>
+        T* Get(const wchar_t* Name)
+        {
+            return Find<T>(Name);
+        }
+
+        template <typename T>
         T Take(const wchar_t* Name)
         {
             T* Slot = Find<T>(Name);

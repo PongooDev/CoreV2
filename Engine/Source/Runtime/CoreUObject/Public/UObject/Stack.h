@@ -2,6 +2,7 @@
 
 #include "ObjectLayout.h"
 #include "UObject/Class.h"
+#include "UObject/NameTypes.h"
 #include "UObject/ScriptInterface.h"
 
 #include <cstdint>
@@ -10,6 +11,7 @@ class UBoolProperty;
 class UByteProperty;
 class UFloatProperty;
 class UIntProperty;
+class UNameProperty;
 class UInterfaceProperty;
 class UObject;
 class UProperty;
@@ -34,6 +36,12 @@ template <>
 struct TPropertyCppType<UFloatProperty>
 {
     using Type = float;
+};
+
+template <>
+struct TPropertyCppType<UNameProperty>
+{
+    using Type = FName;
 };
 
 #define RESULT_PARAM Z_Param__Result

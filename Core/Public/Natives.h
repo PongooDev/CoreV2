@@ -77,6 +77,7 @@ struct FFastArraySerializer;
 struct FFortItemEntry;
 struct FRotator;
 struct FVector;
+class AFortPawn;
 class AFortPickup;
 class UFortItemDefinition;
 class UProperty;
@@ -225,6 +226,7 @@ namespace Natives
     inline int32_t UFortWorldItemDefinition_OnItemAddedToInventoryIndex = -1;
     inline uintptr_t UAbilitySystemComponent_GiveAbility = 0;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
+    inline void (*AFortPickup_SetPickupTarget)(AFortPickup* Pickup, AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound) = nullptr;
     inline int32_t AFortGameModeZone_CreateAIDirectorIndex = -1;
     inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;
     inline FFortMissionManagerRecord* (*FFortMissionManagerRecord_FFortMissionManagerRecord)(FFortMissionManagerRecord* This, UClass* InMissionManagerClass) = nullptr;

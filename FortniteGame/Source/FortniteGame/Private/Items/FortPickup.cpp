@@ -84,6 +84,15 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
     Params.Call(this);
 }
 
+void AFortPickup::SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
+{
+    if (!Natives::AFortPickup_SetPickupTarget && !Finder::ResolvePickupGiveLive())
+    {
+        return;
+    }
+    Natives::AFortPickup_SetPickupTarget(this, PickupTarget, InFlyTime, InStartDirection, bPlayPickupSound);
+}
+
 void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
 {
 #if WITH_SERVER_CODE

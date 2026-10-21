@@ -7,6 +7,7 @@
 #include "Templates/SharedPointerInternals.h"
 
 class FOutputDevice;
+struct FWeakObjectPtr;
 class FOutputDeviceRedirector;
 class AActor;
 class AWorldSettings;
@@ -237,7 +238,7 @@ namespace Natives
     inline int32_t AFortMissionManager_OnZoneEndIndex = -1;
     inline int32_t UFortMcpProfileWorld_BindToPlayerControllerIndex = -1;
     inline UObject* (*AFortAIGoalManager_FindAssignmentInList)(UObject* This, const void* Identifier, void* Assignments, int32_t Kind) = nullptr;
-    inline uint64_t (*FEnvQueryInstance_AddItemData)(void* This, UObject* Actor) = nullptr;
+    inline uint64_t (*FEnvQueryInstance_AddItemData)(void* This, const FWeakObjectPtr& Item) = nullptr;
     inline ptrdiff_t FEnvQueryInstance_RawData = -1;
     inline ptrdiff_t FEnvQueryInstance_ValueSize = -1;
     inline ptrdiff_t FEnvQueryInstance_Owner = -1;

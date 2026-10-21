@@ -42,7 +42,7 @@ namespace
             return;
         }
 
-        const uint64_t Item = Natives::FEnvQueryInstance_AddItemData(QueryInstance, reinterpret_cast<UObject*>(Actor));
+        const uint64_t Item = Natives::FEnvQueryInstance_AddItemData(QueryInstance, FWeakObjectPtr(reinterpret_cast<UObject*>(Actor)));
         const uint32_t DataOffset = static_cast<uint32_t>(Item >> 32) & 0x7FFFFFFF;
         uint8_t* Data = *reinterpret_cast<uint8_t**>(Instance + Natives::FEnvQueryInstance_RawData) + DataOffset;
         if (GoalInfo)

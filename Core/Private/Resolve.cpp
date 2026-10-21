@@ -5,6 +5,7 @@
 #include "Log.h"
 #include "ObjectLayout.h"
 #include "Engine/EngineBaseTypes.h"
+#include "AI/Navigation/NavigationSystem.h"
 #include "Engine/World.h"
 #include "GameFramework/WorldSettings.h"
 #include "Net/DataBunch.h"
@@ -3976,4 +3977,48 @@ bool Finder::ResolveGameModeZoneLive()
 
     Log::Info(L"Finder: zone game mode live slots resolved, {} missing", MissingCount);
     return MissingCount == 0;
+}
+
+bool Finder::ResolveNavigationSystemLive()
+{
+    UFunction* RebuildNavigation = FindObject<UFunction>(nullptr, L"/Script/Engine.CheatManager:RebuildNavigation");
+    const uintptr_t Exec = RebuildNavigation ? reinterpret_cast<uintptr_t>(RebuildNavigation->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    const int32_t CheatSlot = ExecEnd ? VirtualSlot(FindVirtualCall(Exec, ExecEnd)) : -1;
+    const uintptr_t CheatRebuild = VTableEntry(CdoVTable(L"/Script/Engine.CheatManager"), CheatSlot);
+    const uintptr_t CheatRebuildEnd = CheatRebuild ? Finder::FunctionEnd(CheatRebuild) : 0;
+
+    int32_t BuildSlot = -1;
+    for (uintptr_t Site = CheatRebuildEnd ? FindVirtualCall(CheatRebuild, CheatRebuildEnd) : 0; Site; Site = FindVirtualCall(Site + 1, CheatRebuildEnd))
+    {
+        BuildSlot = VirtualSlot(Site);
+    }
+    const uintptr_t Build = VTableEntry(CdoVTable(L"/Script/Engine.NavigationSystem"), BuildSlot);
+    const uintptr_t BuildEnd = Build ? Finder::FunctionEnd(Build) : 0;
+
+    uintptr_t LockTest = 0;
+    for (uintptr_t Site = Build; BuildEnd && Site + 7 <= BuildEnd && !LockTest; ++Site)
+    {
+        const uint8_t ModRm = Byte(Site + 1);
+        if (Byte(Site) == 0xF6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && Byte(Site + 6) == static_cast<uint8_t>(~ENavigationBuildLock::NoUpdateInEditor))
+        {
+            LockTest = Site;
+        }
+    }
+    const ptrdiff_t LockFlagsOffset = LockTest ? *reinterpret_cast<const int32_t*>(LockTest + 2) : -1;
+
+    const uintptr_t SpawnMissing = LockTest ? FindVirtualCall(LockTest, BuildEnd) : 0;
+    const uintptr_t ProcessCandidates = SpawnMissing ? FindRawCall(SpawnMissing, BuildEnd) : 0;
+    const uintptr_t RebuildAllCall = ProcessCandidates ? FindRawCall(ProcessCandidates + 5, BuildEnd) : 0;
+    const uintptr_t RebuildAll = RebuildAllCall ? Finder::RelativeTarget(RebuildAllCall, 1, 5) : 0;
+
+    if (LockFlagsOffset <= 0 || !IsInText(RebuildAll))
+    {
+        Log::Error(L"Finder: UNavigationSystem not resolved (cheat slot {}, build slot {}, lock flags {}, rebuild all {})", CheatSlot, BuildSlot, LockFlagsOffset, RebuildAll != 0);
+        return false;
+    }
+    Natives::UNavigationSystem_NavBuildingLockFlags = LockFlagsOffset;
+    Natives::UNavigationSystem_RebuildAll = reinterpret_cast<decltype(Natives::UNavigationSystem_RebuildAll)>(RebuildAll);
+    Log::Info(L"Finder: UNavigationSystem::Build is slot 0x{:X}, NavBuildingLockFlags +0x{:X}, RebuildAll +0x{:X}", BuildSlot, LockFlagsOffset, RebuildAll - Finder::ImageBase());
+    return true;
 }

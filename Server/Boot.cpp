@@ -98,6 +98,7 @@ void Boot::Initialize()
         UFortMcpProfileWorld::HookVTables();
         AFortAIGoalManager::HookCallSites();
         UFortQueryGenerator_Enemies::HookVTables();
+        Finder::ResolveNavigationSystemLive();
     });
 
     Log::Info(L"Core V2 startup complete");

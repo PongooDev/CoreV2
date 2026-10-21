@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "FortWorldManager.h"
+#include "AI/Navigation/NavigationSystem.h"
 #include "Engine/World.h"
 #include "FortGameData.h"
 #include "FortGameMode.h"
@@ -104,6 +105,17 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
 #endif
 
     ServerTickLoadingOrCreatingWorldOG(this);
+
+#if WITH_SERVER_CODE
+    if (WorldManagerState == EFortWorldManagerState::WMS_Running)
+    {
+        UWorld* World = GetWorld();
+        if (UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr)
+        {
+            NavSys->ReleaseInitialBuildingLock();
+        }
+    }
+#endif
 }
 
 void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory, UFortMissionGenerator* MissionGenerator)

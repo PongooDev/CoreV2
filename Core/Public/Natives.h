@@ -8,6 +8,7 @@
 
 class FOutputDevice;
 struct FWeakObjectPtr;
+class UNavigationSystem;
 class FOutputDeviceRedirector;
 class AActor;
 class AWorldSettings;
@@ -244,6 +245,8 @@ namespace Natives
     inline ptrdiff_t FEnvQueryInstance_Owner = -1;
     inline ptrdiff_t UFortAIAssignment_Goals = -1;
     inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;
+    inline ptrdiff_t UNavigationSystem_NavBuildingLockFlags = -1;
+    inline void (*UNavigationSystem_RebuildAll)(UNavigationSystem* This, bool bIsLoadTime) = nullptr;
     inline ptrdiff_t UFortMcpProfileWorld_Inventory = -1;
     inline ptrdiff_t UFortMcpProfileWorld_bIsInventoryInitialized = -1;
     inline int32_t AFortGameModeZone_OnZoneEndIndex = -1;

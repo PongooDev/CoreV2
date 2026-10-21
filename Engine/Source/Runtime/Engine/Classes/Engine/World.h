@@ -19,6 +19,7 @@ class UDemoNetDriver;
 class ULevel;
 class UGameInstance;
 class UNetDriver;
+class UNavigationSystem;
 struct FTransform;
 
 struct FActorSpawnParameters
@@ -86,6 +87,7 @@ class UWorld final : public UObject, public FNetworkNotify
     DefineUProperty(AGameNetworkManager*, NetworkManager)
     DefineUProperty(ULevel*, CurrentLevelPendingVisibility)
     DefineUProperty(ULevel*, CurrentLevelPendingInvisibility)
+    DefineUProperty(UNavigationSystem*, NavigationSystem)
     DefineNativeMember(float, NextSwitchCountdown, UWorld_NextSwitchCountdown)
     DefineNativeMember(float, TimeSeconds, UWorld_TimeSeconds)
 
@@ -103,6 +105,7 @@ public:
     float GetTimeSeconds() const { return TimeSeconds; }
     AGameModeBase* GetAuthGameMode() const { return AuthorityGameMode; }
     AGameStateBase* GetGameState() const { return GameState; }
+    UNavigationSystem* GetNavigationSystem() const { return NavigationSystem; }
     AWorldSettings* GetWorldSettings(bool bCheckStreamingPersistent = false, bool bChecked = true) const;
     void AddNetworkActor(AActor* Actor);
 

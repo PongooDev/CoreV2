@@ -28,6 +28,7 @@
 #include "UObject/UObjectIterator.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
 {
@@ -249,6 +250,12 @@ void AFortGameModeZone::Hook()
     }
 }
 
+namespace
+{
+    using FFinishWorldInitialization = void (*)(AFortGameModeZone* This, AFortWorldManager* WorldManager);
+    std::unordered_map<void**, FFinishWorldInitialization> SubclassFinishWorldInitialization;
+}
+
 void AFortGameModeZone::HookVTables()
 {
     if (!Finder::ResolveGameModeZoneLive())
@@ -265,6 +272,14 @@ void AFortGameModeZone::HookVTables()
         if (VTable && VTable[FinishIndex] == Natives::SharedEmptyFunction)
         {
             Hooks::SwapVTable(L"AFortGameModeZone::FinishWorldInitialization", VTable, FinishIndex, reinterpret_cast<void*>(&FinishWorldInitializationHK));
+        }
+        else if (VTable && VTable[FinishIndex] != reinterpret_cast<void*>(&FinishWorldInitializationHK) && VTable[FinishIndex] != reinterpret_cast<void*>(&SubclassFinishWorldInitializationHK))
+        {
+            void* Original = nullptr;
+            if (Hooks::SwapVTable(L"AFortGameModeZone subclass FinishWorldInitialization", VTable, FinishIndex, reinterpret_cast<void*>(&SubclassFinishWorldInitializationHK), &Original))
+            {
+                SubclassFinishWorldInitialization[VTable] = reinterpret_cast<FFinishWorldInitialization>(Original);
+            }
         }
     }
 
@@ -322,4 +337,14 @@ APawn* AFortGameModeZone::SpawnDefaultPawnFor_ImplementationHK(AFortGameModeZone
 void AFortGameModeZone::FinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager)
 {
     This->FinishWorldInitialization(WorldManager);
+}
+
+void AFortGameModeZone::SubclassFinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager)
+{
+    This->FinishWorldInitialization(WorldManager);
+    const auto Original = SubclassFinishWorldInitialization.find(*reinterpret_cast<void***>(This));
+    if (Original != SubclassFinishWorldInitialization.end())
+    {
+        Original->second(This, WorldManager);
+    }
 }

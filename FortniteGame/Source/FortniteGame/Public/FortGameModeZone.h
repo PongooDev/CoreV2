@@ -39,6 +39,7 @@ public:
 private:
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeZone* This, AController* NewPlayer, AActor* StartSpot);
     static void FinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager);
+    static void SubclassFinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager);
     static void CreateAIDirectorHK(AFortGameModeZone* This);
     static inline APlayerController* (*LoginOG)(AFortGameModeZone* This, UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage) = nullptr;
     static APlayerController* LoginHK(AFortGameModeZone* This, UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage);

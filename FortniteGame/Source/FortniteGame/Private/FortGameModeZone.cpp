@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "FortGameModeZone.h"
+#include "FortGameModeOutpost.h"
+#include "Player/FortPlayerStateOutpost.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIGoalManager.h"
 #include "AI/Navigation/NavigationSystem.h"
@@ -172,6 +174,21 @@ APlayerController* AFortGameModeZone::Login(UPlayer* NewPlayer, ENetRole InRemot
     {
         FString& PlayerName = PlayerState->PlayerName;
         PlayerState->WorldPlayerId = WorldManager->GetOrAllocatePlayerID(UniqueId.ToString(), PlayerName);
+    }
+
+    AFortPlayerStateOutpost* OutpostPlayerState = Cast<AFortPlayerStateOutpost>(reinterpret_cast<UObject*>(PlayerState));
+    if (OutpostPlayerState && Cast<AFortGameModeOutpost>(reinterpret_cast<UObject*>(this)) && (Natives::AFortPlayerStateOutpost_bIsOutpostOwner > 0 || Finder::ResolveOutpostOwnerLive()))
+    {
+        bool bHasOwner = false;
+        for (TObjectIterator<AFortPlayerStateOutpost> It; It && !bHasOwner; ++It)
+        {
+            bHasOwner = *It != OutpostPlayerState && It->GetWorld() == World && It->IsOutpostOwner();
+        }
+        if (!bHasOwner)
+        {
+            OutpostPlayerState->bIsOutpostOwner = true;
+            OutpostPlayerState->bCanEditOutpost = true;
+        }
     }
 #endif
     return NewPlayerController;

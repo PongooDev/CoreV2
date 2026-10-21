@@ -355,6 +355,8 @@ namespace Natives
     inline ptrdiff_t AActor_bActorInitialized = -1;
     inline uint32_t AActor_bActorInitializedMask = 0;
     inline ptrdiff_t ULevel_bIsAssociatingLevel = -1;
+    inline ptrdiff_t AFortPlayerStateOutpost_bIsOutpostOwner = -1;
+    inline uint32_t AFortPlayerStateOutpost_bIsOutpostOwnerMask = 0;
     inline uint32_t ULevel_bIsAssociatingLevelMask = 0;
     inline ptrdiff_t UWorld_TimeSeconds = -1;
     inline ptrdiff_t UConsole_AutoCompleteList = -1;

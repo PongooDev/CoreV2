@@ -4075,3 +4075,22 @@ bool Finder::ResolveNavigationSystemLive()
     Log::Info(L"Finder: UNavigationSystem::Build is slot 0x{:X}, NavBuildingLockFlags +0x{:X}, RebuildAll +0x{:X}, ConditionalPopulateNavOctree +0x{:X}, bNavOctreeLock +0x{:X}", BuildSlot, LockFlagsOffset, RebuildAll - Finder::ImageBase(), PopulateNavOctree - Finder::ImageBase(), OctreeLockOffset);
     return true;
 }
+
+bool Finder::ResolveOutpostOwnerLive()
+{
+    UFunction* IsOutpostOwner = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerStateOutpost:IsOutpostOwner");
+    const uintptr_t Exec = IsOutpostOwner ? reinterpret_cast<uintptr_t>(IsOutpostOwner->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? (Finder::FunctionStart(Exec) == Exec ? Finder::FunctionEnd(Exec) : Exec + 0x40) : 0;
+    const uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0;
+    const uintptr_t Implementation = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    const uintptr_t Load = IsInText(Implementation) ? FindInstruction(Implementation, Implementation + 0x10, { 0x8B, 0x81, -1, -1, -1, -1, 0x83, 0xE0, -1 }) : 0;
+    if (!Load)
+    {
+        Log::Error(L"Finder: AFortPlayerStateOutpost::IsOutpostOwner not decoded");
+        return false;
+    }
+    Natives::AFortPlayerStateOutpost_bIsOutpostOwner = *reinterpret_cast<const int32_t*>(Load + 2);
+    Natives::AFortPlayerStateOutpost_bIsOutpostOwnerMask = Byte(Load + 8);
+    Log::Info(L"Finder: AFortPlayerStateOutpost owner bit +0x{:X} mask 0x{:X}", Natives::AFortPlayerStateOutpost_bIsOutpostOwner, Natives::AFortPlayerStateOutpost_bIsOutpostOwnerMask);
+    return true;
+}

@@ -254,6 +254,8 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameState.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGlobals.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortKismetLibrary.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameModeOutpost.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerStateOutpost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortWorldManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortWorldRecord.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIDirector.h" />

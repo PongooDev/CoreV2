@@ -49,9 +49,10 @@ public:
 
     AFortMissionManager* GetMissionManager() const;
     TArray<UFortWorldItemDefinition*> GetRewardItemsByTag(const FGameplayTag& RewardTag);
-    void GrantRewardsByTag(const FGameplayTag& RewardTag, EFortRewardType RewardType);
+    void GrantRewardsByTag(FGameplayTag RewardTag, EFortRewardType RewardType);
 
     DECLARE_FUNCTION(execGrantRewardsByTag);
+    static void GrantRewardsByTagCall(AFortMission* This, FGameplayTag RewardTag, EFortRewardType RewardType);
 
     static void HookCallSites();
     static void HookNatives();

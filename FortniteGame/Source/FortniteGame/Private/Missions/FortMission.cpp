@@ -28,6 +28,15 @@ void AFortMission::HookCallSites()
             Log::Error(L"Finder: AFortAIDirector::GetCurrent call in {} not found", Function ? Function->GetName().ToStdString() : std::wstring(L"(none)"));
         }
     }
+
+    if (uint8_t* Call = Finder::SharedEmptyCallInImplementation(AFortObjectiveBase::StaticFunction_GrantRewardsByTag()))
+    {
+        Hooks::RedirectCall(L"AFortObjectiveBase::GrantRewardsByTag -> AFortMission::GrantRewardsByTag", Call, reinterpret_cast<void*>(&GrantRewardsByTagCall));
+    }
+    else
+    {
+        Log::Error(L"Finder: AFortMission::GrantRewardsByTag call in AFortObjectiveBase::GrantRewardsByTag not found");
+    }
 }
 
 ptrdiff_t AFortMission::MissionInfoOffset()
@@ -86,7 +95,7 @@ TArray<UFortWorldItemDefinition*> AFortMission::GetRewardItemsByTag(const FGamep
     return Items;
 }
 
-void AFortMission::GrantRewardsByTag(const FGameplayTag& RewardTag, EFortRewardType RewardType)
+void AFortMission::GrantRewardsByTag(FGameplayTag RewardTag, EFortRewardType RewardType)
 {
 #if WITH_SERVER_CODE
     AFortMissionManager* MissionManager = Role == ROLE_Authority ? GetMissionManager() : nullptr;
@@ -104,6 +113,11 @@ void AFortMission::GrantRewardsByTag(const FGameplayTag& RewardTag, EFortRewardT
         }
     }
 #endif
+}
+
+void AFortMission::GrantRewardsByTagCall(AFortMission* This, FGameplayTag RewardTag, EFortRewardType RewardType)
+{
+    This->GrantRewardsByTag(RewardTag, RewardType);
 }
 
 DEFINE_FUNCTION(AFortMission::execGrantRewardsByTag)

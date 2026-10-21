@@ -21,6 +21,7 @@ enum class EFortObjectiveStatus : uint8_t
 class AFortObjectiveBase : public AActor
 {
     DefineUnrealClass(AFortObjectiveBase, FortniteGame)
+    DefineUFunction(GrantRewardsByTag)
     DefineUFunction(StartPlayingObjective)
     DefineUFunction(StopObjective)
     DefineUFunction(ClearObjectiveTimer)

@@ -4152,3 +4152,26 @@ bool Finder::ResolveBadgeScoresLive()
     Log::Info(L"Finder: AFortGameMode::SetBadgeScores found");
     return true;
 }
+
+uint8_t* Finder::SharedEmptyCallInImplementation(UFunction* Function)
+{
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    const auto SharedEmpty = reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
+    uintptr_t Found = 0;
+    int32_t Count = 0;
+    for (uintptr_t Call = ExecEnd && SharedEmpty ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+    {
+        const uintptr_t Implementation = Finder::RelativeTarget(Call, 1, 5);
+        const uintptr_t ImplementationEnd = Finder::FunctionStart(Implementation) == Implementation ? Finder::FunctionEnd(Implementation) : 0;
+        for (uintptr_t Inner = ImplementationEnd ? FindRawCall(Implementation, ImplementationEnd) : 0; Inner; Inner = FindRawCall(Inner + 1, ImplementationEnd))
+        {
+            if (Finder::RelativeTarget(Inner, 1, 5) == SharedEmpty)
+            {
+                Found = Inner;
+                ++Count;
+            }
+        }
+    }
+    return Count == 1 ? reinterpret_cast<uint8_t*>(Found) : nullptr;
+}

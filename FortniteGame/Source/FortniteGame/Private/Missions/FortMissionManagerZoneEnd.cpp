@@ -79,6 +79,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                 continue;
             }
 
+            SyncMissionRewardItems(PlayerController);
             FFortRewardReport& Report = PlayerController->LatestRewardReport;
             Report.bIsFinalized = true;
             PlayerController->ForceNetUpdate();
@@ -130,13 +131,12 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
 #endif
 }
 
-void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission)
+void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission, EFortMissionStatus NewStatus)
 {
-    OnMissionStatusChangeOG(this, Mission);
+    OnMissionStatusChangeOG(this, Mission, NewStatus);
 
 #if WITH_SERVER_CODE
-    const EFortMissionStatus Status = Mission ? static_cast<EFortMissionStatus>(Mission->MissionStatus) : EFortMissionStatus::Max_None;
-    if (Role == ROLE_Authority && Mission && Mission->IsPrimaryMission() && (Status == EFortMissionStatus::Succeeded || Status == EFortMissionStatus::Failed))
+    if (Role == ROLE_Authority && Mission && Mission->IsPrimaryMission() && (NewStatus == EFortMissionStatus::Succeeded || NewStatus == EFortMissionStatus::Failed))
     {
         SetMissionCompletionResult(Mission);
     }
@@ -169,13 +169,13 @@ namespace
         return Activity;
     }
 
-    void AddRewardItem(TStructArray<FFortItemEntry>& Items, UFortItemDefinition* ItemDefinition, int32_t Count)
+    void SetRewardItemCount(TStructArray<FFortItemEntry>& Items, UFortItemDefinition* ItemDefinition, int32_t Count)
     {
         for (int32_t Index = 0; Index < Items.Num(); ++Index)
         {
             if (static_cast<UFortItemDefinition*>(Items[Index].ItemDefinition) == ItemDefinition)
             {
-                Items[Index].Count = Items[Index].Count + Count;
+                Items[Index].Count = Count;
                 return;
             }
         }
@@ -185,6 +185,37 @@ namespace
         std::memset(Entry, 0, ElementSize);
         FFortItemEntry::Construct(Entry, ItemDefinition, Count, 0);
     }
+}
+
+void AFortMissionManager::SyncMissionRewardItems(AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
+    APlayerState* PlayerState = PlayerController ? static_cast<APlayerState*>(PlayerController->PlayerState) : nullptr;
+    if (!PlayerState)
+    {
+        return;
+    }
+
+    FFortRewardActivity& Activity = FindOrAddMissionPrimaryActivity(PlayerController);
+    const FUniqueNetIdRepl& PlayerId = PlayerState->UniqueId;
+    FEarnedBadgeEntryArray& BadgeArray = EarnedBadgesArray;
+    TStructArray<FEarnedBadgeEntry>& Entries = BadgeArray.Items;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        FEarnedBadgeEntry& Entry = Entries[Index];
+        UFortBadgeItemDefinition* Badge = Entry.Badge;
+        TStructArray<FEarnedBadgePlayerData>& PlayerData = Entry.PlayerData;
+        for (int32_t DataIndex = 0; Badge && DataIndex < PlayerData.Num(); ++DataIndex)
+        {
+            if (IsSamePlayer(PlayerData[DataIndex].PlayerID, PlayerId))
+            {
+                const bool bMissed = static_cast<EFortRewardType>(Entry.RewardType) == EFortRewardType::Missed;
+                SetRewardItemCount(bMissed ? static_cast<TStructArray<FFortItemEntry>&>(Activity.MissedRewardItems) : static_cast<TStructArray<FFortItemEntry>&>(Activity.RewardItems), Badge, PlayerData[DataIndex].Count);
+            }
+        }
+    }
+    PlayerController->ForceNetUpdate();
+#endif
 }
 
 void AFortMissionManager::SetMissionCompletionResult(AFortMission* Mission)
@@ -250,12 +281,12 @@ void AFortMissionManager::GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewar
             PlayerIdStruct->CopyScriptStruct(&static_cast<FUniqueNetIdRepl&>(Data->PlayerID), &PlayerId);
         }
         Data->Count = Data->Count + 1;
-
-        FFortRewardActivity& Activity = FindOrAddMissionPrimaryActivity(PlayerController);
-        AddRewardItem(RewardType == EFortRewardType::Missed ? static_cast<TStructArray<FFortItemEntry>&>(Activity.MissedRewardItems) : static_cast<TStructArray<FFortItemEntry>&>(Activity.RewardItems), Badge, 1);
-        PlayerController->ForceNetUpdate();
     }
     BadgeArray.MarkItemDirty(*Entry);
+    for (AFortPlayerController* PlayerController : Players)
+    {
+        SyncMissionRewardItems(PlayerController);
+    }
 #endif
 }
 
@@ -324,7 +355,7 @@ void AFortMissionManager::OnZoneEndHK(AFortMissionManager* This, bool bZoneCompl
     This->OnZoneEnd(bZoneCompleted);
 }
 
-void AFortMissionManager::OnMissionStatusChangeHK(AFortMissionManager* This, AFortMission* Mission)
+void AFortMissionManager::OnMissionStatusChangeHK(AFortMissionManager* This, AFortMission* Mission, EFortMissionStatus NewStatus)
 {
-    This->OnMissionStatusChange(Mission);
+    This->OnMissionStatusChange(Mission, NewStatus);
 }

@@ -8,6 +8,7 @@
 #include "StructArray.h"
 
 class UFortMissionGenerator;
+enum class EFortMissionStatus : uint8_t;
 
 enum class EMissionGenerationCategory : uint8_t
 {
@@ -88,15 +89,16 @@ public:
     DefineUStructProperty(FEarnedBadgeEntryArray, EarnedBadgesArray)
 
     void OnZoneEnd(bool bZoneCompleted);
-    void OnMissionStatusChange(AFortMission* Mission);
+    void OnMissionStatusChange(AFortMission* Mission, EFortMissionStatus NewStatus);
     void GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewardType RewardType, const TArray<AFortPlayerController*>& Players);
     void SetMissionCompletionResult(AFortMission* Mission);
+    void SyncMissionRewardItems(AFortPlayerController* PlayerController);
     int32_t GetMissionPointsForPlayer(AFortPlayerController* PlayerController, int32_t MaxMissionPoints);
 
     static void HookVTables();
 
 private:
     static void OnZoneEndHK(AFortMissionManager* This, bool bZoneCompleted);
-    static inline void (*OnMissionStatusChangeOG)(AFortMissionManager* This, AFortMission* Mission) = nullptr;
-    static void OnMissionStatusChangeHK(AFortMissionManager* This, AFortMission* Mission);
+    static inline void (*OnMissionStatusChangeOG)(AFortMissionManager* This, AFortMission* Mission, EFortMissionStatus NewStatus) = nullptr;
+    static void OnMissionStatusChangeHK(AFortMissionManager* This, AFortMission* Mission, EFortMissionStatus NewStatus);
 };

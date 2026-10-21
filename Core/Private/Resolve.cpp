@@ -3985,6 +3985,25 @@ bool Finder::ResolveAbilitySystemLive()
     const int32_t ActivateIndex = Implementation ? VirtualSlot(FindVirtualCall(Implementation, Implementation + 0x20)) : -1;
     RequireSlot(L"UAbilitySystemComponent::InternalServerTryActiveAbility", Natives::UAbilitySystemComponent_InternalServerTryActiveAbilityIndex, ActivateIndex);
 
+    const auto TryActivate = reinterpret_cast<uintptr_t>(Natives::UAbilitySystemComponent_InternalTryActivateAbility);
+    const uintptr_t TryActivateEnd = IsInText(TryActivate) ? Finder::FunctionEnd(TryActivate) : 0;
+    for (uintptr_t SetKey = TryActivateEnd ? FindInstruction(TryActivate, TryActivateEnd, { 0x41, 0xB1, 0x01 }) : 0; SetKey && !Natives::FScopedPredictionWindow_Destructor; SetKey = FindInstruction(SetKey + 1, TryActivateEnd, { 0x41, 0xB1, 0x01 }))
+    {
+        const uintptr_t Call = FindRawCall(SetKey, std::min(SetKey + 0x30, TryActivateEnd));
+        const uintptr_t WindowLoad = Call ? FindInstruction(SetKey, Call, { 0x48, 0x8D, 0x4D, -1 }) : 0;
+        const int32_t WindowOffset = WindowLoad ? Byte(WindowLoad + 3) : -1;
+        const uintptr_t Destroy = WindowLoad ? FindInstruction(Call + 5, TryActivateEnd, { 0x48, 0x8D, 0x4D, WindowOffset, 0xE8 }) : 0;
+        if (Destroy)
+        {
+            Natives::FScopedPredictionWindow_FScopedPredictionWindow = reinterpret_cast<decltype(Natives::FScopedPredictionWindow_FScopedPredictionWindow)>(Finder::RelativeTarget(Call, 1, 5));
+            Natives::FScopedPredictionWindow_Destructor = reinterpret_cast<decltype(Natives::FScopedPredictionWindow_Destructor)>(Finder::RelativeTarget(Destroy + 4, 1, 5));
+        }
+    }
+    if (!Natives::FScopedPredictionWindow_Destructor)
+    {
+        Log::Error(L"Finder: FScopedPredictionWindow not found in UAbilitySystemComponent::InternalTryActivateAbility");
+    }
+
     Log::Info(L"Finder: ability system live slots resolved, {} missing", MissingCount);
     return MissingCount == 0;
 }

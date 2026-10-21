@@ -15,6 +15,28 @@ DEFINE_LOG_CATEGORY_STATIC(LogAbilitySystem, Log, All);
 
 #define ABILITY_LOG(Verbosity, Format, ...) UE_LOG(LogAbilitySystem, Verbosity, Format, ##__VA_ARGS__)
 
+FScopedPredictionWindow::FScopedPredictionWindow(UAbilitySystemComponent* AbilitySystemComponent, const FPredictionKey& InPredictionKey, bool InSetReplicatedPredictionKey)
+{
+    if (!Natives::FScopedPredictionWindow_FScopedPredictionWindow || !Natives::FScopedPredictionWindow_Destructor)
+    {
+        return;
+    }
+
+    UScriptStruct* PredictionKeyStruct = FPredictionKey::StaticStruct();
+    std::vector<uint8_t> PredictionKeyCopy(PredictionKeyStruct->GetStructureSize(), 0);
+    PredictionKeyStruct->CopyScriptStruct(PredictionKeyCopy.data(), &InPredictionKey);
+    Natives::FScopedPredictionWindow_FScopedPredictionWindow(Storage, AbilitySystemComponent, PredictionKeyCopy.data(), InSetReplicatedPredictionKey);
+    bConstructed = true;
+}
+
+FScopedPredictionWindow::~FScopedPredictionWindow()
+{
+    if (bConstructed)
+    {
+        Natives::FScopedPredictionWindow_Destructor(Storage);
+    }
+}
+
 FGameplayAbilitySpec* UAbilitySystemComponent::FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle Handle)
 {
     FGameplayAbilitySpecContainer& Container = ActivatableAbilities;
@@ -73,6 +95,8 @@ void UAbilitySystemComponent::InternalServerTryActiveAbility(FGameplayAbilitySpe
         ClientActivateAbilityFailed(Handle, PredictionKey.Current);
         return;
     }
+
+    FScopedPredictionWindow ScopedPredictionWindow(this, PredictionKey);
 
     UGameplayAbility* InstancedAbility = nullptr;
     Spec->InputPressed = true;

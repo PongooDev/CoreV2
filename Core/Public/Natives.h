@@ -155,6 +155,8 @@ namespace Natives
     inline bool (*AFortPlayerController_InitializeMcpProfile)(AFortPlayerController* This, const void* OnComplete) = nullptr;
     inline void (*AFortPlayerState_SetHeroType)(AFortPlayerState* This, UFortHero* Hero) = nullptr;
     inline void (*UFortGlobals_ApplyHeroEffectsAndAbilities)(UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles, FScriptArray& OutAbilitySetHandles) = nullptr;
+    inline void* (*FScopedPredictionWindow_FScopedPredictionWindow)(void* This, UAbilitySystemComponent* AbilitySystemComponent, void* InPredictionKey, bool InSetReplicatedPredictionKey) = nullptr;
+    inline void (*FScopedPredictionWindow_Destructor)(void* This) = nullptr;
     inline bool (*UAbilitySystemComponent_InternalTryActivateAbility)(UAbilitySystemComponent* This, FGameplayAbilitySpecHandle AbilityToActivate, const void* InPredictionKey, UGameplayAbility** OutInstancedAbility, void* OnGameplayAbilityEndedDelegate, const FGameplayEventData* TriggerEventData) = nullptr;
     inline void (*UAbilitySystemComponent_MarkAbilitySpecDirty)(UAbilitySystemComponent* This, FGameplayAbilitySpec& Spec) = nullptr;
     inline void (*UAbilitySystemComponent_IncrementAbilityListLock)(UAbilitySystemComponent* This) = nullptr;

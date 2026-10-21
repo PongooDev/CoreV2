@@ -20,6 +20,7 @@ public:
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
+    void SetBadgeScores();
 
     static void Hook();
 

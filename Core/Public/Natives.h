@@ -261,6 +261,7 @@ namespace Natives
     inline void (*UFortQuestManager_SendEndPrimaryMission)(UFortQuestManager* This, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, FScriptArray& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus) = nullptr;
     inline void* (*UGameInstance_GetGameSessionId)(UGameInstance* This, void* Result) = nullptr;
     inline FString* (*UEnum_GetEnumName)(const UObject* This, FString* Result, int32_t Index) = nullptr;
+    inline void (*AFortGameMode_SetBadgeScores)(AFortGameMode* This) = nullptr;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;

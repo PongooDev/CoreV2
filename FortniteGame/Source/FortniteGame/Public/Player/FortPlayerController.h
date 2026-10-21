@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FortRewardReport.h"
 #include "GameFramework/PlayerController.h"
 #include "Items/FortQuickBars.h"
 #include "UObject/Stack.h"
@@ -29,6 +30,7 @@ public:
     DefineBitfieldUProperty(bCraftFree)
     DefineBitfieldUProperty(bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
+    DefineUStructProperty(FFortRewardReport, LatestRewardReport)
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)

@@ -89,6 +89,7 @@ public:
 
     void OnZoneEnd(bool bZoneCompleted);
     void GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewardType RewardType, const TArray<AFortPlayerController*>& Players);
+    void AddMissionRewardActivity(AFortPlayerController* PlayerController, bool bSucceeded);
     int32_t GetMissionPointsForPlayer(AFortPlayerController* PlayerController, int32_t MaxMissionPoints);
 
     static void HookVTables();

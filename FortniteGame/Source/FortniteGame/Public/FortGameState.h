@@ -29,6 +29,7 @@ public:
     DefineUProperty(float, GameDifficulty)
     DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
     DefineUProperty(FString, TheaterUniqueId)
+    DefineUProperty(uint8_t, GameplayState)
 
     UFortMissionGenerator* GetMissionGenerator() const;
     void SetGameplayState(uint8_t NewGameplayState);

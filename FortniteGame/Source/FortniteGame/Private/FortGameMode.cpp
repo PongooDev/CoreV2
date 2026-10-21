@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "FortGameMode.h"
 #include "CoreGlobals.h"
+#include "Finder.h"
 #include "Hooks.h"
 #include "Natives.h"
 #include "Online/FortGameSessionDedicated.h"
@@ -23,6 +24,14 @@ APawn* AFortGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPlayer,
 void AFortGameMode::FinishWorldInitialization(AFortWorldManager* WorldManager)
 {
     Natives::AFortGameMode_FinishWorldInitialization(this, WorldManager);
+}
+
+void AFortGameMode::SetBadgeScores()
+{
+    if (Natives::AFortGameMode_SetBadgeScores || Finder::ResolveBadgeScoresLive())
+    {
+        Natives::AFortGameMode_SetBadgeScores(this);
+    }
 }
 
 void AFortGameMode::Hook()

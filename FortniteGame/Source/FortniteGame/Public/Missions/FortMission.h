@@ -38,6 +38,7 @@ public:
     DefineUProperty(TArray<AFortObjectiveBase*>, ActiveObjectives)
     DefineUProperty(EFortMissionStatus, MissionStatus)
     DefineUProperty(FGuid, MissionGuid)
+    DefineUProperty(FGameplayTagContainer, MissionCompletionTags)
 
     bool IsPrimaryMission() const;
     static ptrdiff_t MissionInfoOffset();

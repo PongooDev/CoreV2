@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Missions/FortMissionManager.h"
+#include "BlueprintGameplayTagLibrary.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameModeZone.h"
@@ -10,8 +11,10 @@
 #include "Items/FortBadgeItemDefinition.h"
 #include "Log.h"
 #include "Missions/FortMission.h"
+#include "Missions/FortMissionLibrary.h"
 #include "Natives.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
 #include "Templates/Casts.h"
 #include "Templates/SharedPointer.h"
@@ -70,7 +73,21 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
         const FString StatusName = GetMissionStatusName(Status);
         for (AFortPlayerController* PlayerController : Mission->GetParticipatingMissionControllers())
         {
-            UFortQuestManager* QuestManager = PlayerController ? PlayerController->GetQuestManager() : nullptr;
+            if (!PlayerController)
+            {
+                continue;
+            }
+
+            AddMissionRewardActivity(PlayerController, Status == EFortMissionStatus::Succeeded);
+            if (AFortPlayerState* PlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))))
+            {
+                PlayerState->bAreZoneStatsFinalized = true;
+                PlayerState->bIsFinalizingExperience = true;
+                PlayerState->ForceNetUpdate();
+            }
+            PlayerController->ForceNetUpdate();
+
+            UFortQuestManager* QuestManager = PlayerController->GetQuestManager();
             if (!QuestManager)
             {
                 continue;
@@ -81,8 +98,9 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                 FGameplayTagContainer SourceTags;
                 FGameplayTagContainer ContextTags;
                 QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
-                const FGameplayTagContainer& MissionTags = Info->MissionTags;
-                QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::Complete, Mission, MissionTags, SourceTags, ContextTags, 1, true);
+                FGameplayTagContainer TargetTags = Info->MissionTags;
+                UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(TargetTags, Mission->MissionCompletionTags);
+                QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::Complete, Mission, TargetTags, SourceTags, ContextTags, 1, true);
             }
 
             if (!SessionId.IsEmpty())
@@ -91,6 +109,12 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
             }
         }
     }
+
+    if (AFortGameMode* FortGameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr)
+    {
+        FortGameMode->SetBadgeScores();
+    }
+    UFortMissionLibrary::ExecuteMissionEvent(this, FName(L"EndOfZone", FNAME_Find), nullptr);
 
     if (AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr)
     {
@@ -109,6 +133,60 @@ namespace
     {
         return A.IsValid() && B.IsValid() && A.ToString().ToStdString() == B.ToString().ToStdString();
     }
+
+    void AddRewardItem(TStructArray<FFortItemEntry>& Items, UFortItemDefinition* ItemDefinition, int32_t Count)
+    {
+        const int32_t ElementSize = TStructArray<FFortItemEntry>::ElementSize();
+        FFortItemEntry* Entry = &Items[Items.Add(1, ElementSize)];
+        std::memset(Entry, 0, ElementSize);
+        FFortItemEntry::Construct(Entry, ItemDefinition, Count, 0);
+    }
+}
+
+void AFortMissionManager::AddMissionRewardActivity(AFortPlayerController* PlayerController, bool bSucceeded)
+{
+#if WITH_SERVER_CODE
+    APlayerState* PlayerState = PlayerController->PlayerState;
+    if (!PlayerState)
+    {
+        return;
+    }
+
+    FFortRewardReport& Report = PlayerController->LatestRewardReport;
+    TStructArray<FFortRewardActivity>& Activities = Report.RewardActivities;
+    FFortRewardActivity* Activity = nullptr;
+    for (int32_t Index = 0; Index < Activities.Num() && !Activity; ++Index)
+    {
+        Activity = static_cast<EFortRewardActivityType>(Activities[Index].ActivityType) == EFortRewardActivityType::MissionPrimary ? &Activities[Index] : nullptr;
+    }
+    if (!Activity)
+    {
+        Activity = &Activities.AddDefaulted();
+        Activity->ActivityType = EFortRewardActivityType::MissionPrimary;
+        Activity->ActivityGuid = FGuid::NewGuid();
+        Activity->RewardDisplayTime = -1.0f;
+    }
+    Activity->ActivityCompletionResult = bSucceeded ? EFortCompletionResult::Win : EFortCompletionResult::Loss;
+
+    const FUniqueNetIdRepl& PlayerId = PlayerState->UniqueId;
+    FEarnedBadgeEntryArray& BadgeArray = EarnedBadgesArray;
+    TStructArray<FEarnedBadgeEntry>& Entries = BadgeArray.Items;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        FEarnedBadgeEntry& Entry = Entries[Index];
+        UFortBadgeItemDefinition* Badge = Entry.Badge;
+        TStructArray<FEarnedBadgePlayerData>& PlayerData = Entry.PlayerData;
+        for (int32_t DataIndex = 0; Badge && DataIndex < PlayerData.Num(); ++DataIndex)
+        {
+            if (IsSamePlayer(PlayerData[DataIndex].PlayerID, PlayerId))
+            {
+                const bool bMissed = static_cast<EFortRewardType>(Entry.RewardType) == EFortRewardType::Missed;
+                AddRewardItem(bMissed ? static_cast<TStructArray<FFortItemEntry>&>(Activity->MissedRewardItems) : static_cast<TStructArray<FFortItemEntry>&>(Activity->RewardItems), Badge, PlayerData[DataIndex].Count);
+            }
+        }
+    }
+    Report.bIsFinalized = true;
+#endif
 }
 
 void AFortMissionManager::GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewardType RewardType, const TArray<AFortPlayerController*>& Players)

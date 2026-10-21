@@ -4095,3 +4095,28 @@ bool Finder::ResolveOutpostOwnerLive()
     Log::Info(L"Finder: AFortPlayerStateOutpost owner bit +0x{:X} mask 0x{:X}", Natives::AFortPlayerStateOutpost_bIsOutpostOwner, Natives::AFortPlayerStateOutpost_bIsOutpostOwnerMask);
     return true;
 }
+
+bool Finder::ResolveBadgeScoresLive()
+{
+    if (Natives::AFortGameMode_SetBadgeScores)
+    {
+        return true;
+    }
+
+    uintptr_t Function = 0;
+    bool bAmbiguous = false;
+    for (uintptr_t Reference : Finder::StringRefs(L"Badges score was %d"))
+    {
+        const uintptr_t Start = Finder::FunctionStart(Reference);
+        bAmbiguous |= Function && Start != Function;
+        Function = Start;
+    }
+    if (!Function || bAmbiguous)
+    {
+        Log::Error(L"Finder: AFortGameMode::SetBadgeScores not found");
+        return false;
+    }
+    Natives::AFortGameMode_SetBadgeScores = reinterpret_cast<decltype(Natives::AFortGameMode_SetBadgeScores)>(Function);
+    Log::Info(L"Finder: AFortGameMode::SetBadgeScores found");
+    return true;
+}

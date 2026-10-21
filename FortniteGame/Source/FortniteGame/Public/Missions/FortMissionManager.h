@@ -3,7 +3,6 @@
 #include "Engine/NetSerialization.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/OnlineReplStructs.h"
-#include "Math/Rotator.h"
 #include "Misc/Guid.h"
 #include "Missions/FortMissionInfo.h"
 #include "StructArray.h"
@@ -19,18 +18,6 @@ enum class EMissionGenerationCategory : uint8_t
     Max_None,
 };
 
-struct FFortMissionPlacementItemLookupData
-{
-    DefineUnrealStruct(FFortMissionPlacementItemLookupData, FortniteGame)
-    DefineUProperty(FGameplayTagContainer, ItemIdentifyingTags)
-    DefineUProperty(FGameplayTagContainer, TagsAddedToPlacementActors)
-    DefineUProperty(UClass*, ActorToPlace)
-    DefineUProperty(AActor*, ActorToUseForSpawnLocation)
-    DefineUProperty(AActor*, SpawnedActor)
-    DefineUProperty(FVector, SpawnLocation)
-    DefineUProperty(FRotator, SpawnRotation)
-};
-
 struct FFortMissionEntry
 {
     DefineUnrealStruct(FFortMissionEntry, FortniteGame)
@@ -41,7 +28,6 @@ struct FFortMissionEntry
     DefineUProperty(UFortMissionInfo*, MissionInfo)
     DefineUProperty(EMissionGenerationCategory, GenerationCategory)
     DefineUStructProperty(FFortGeneratedDifficultyOptions, GeneratedDifficultyOptions)
-    DefineUStructArrayProperty(FFortMissionPlacementItemLookupData, BlueprintLookupData)
 };
 
 struct FFortMissionRecord

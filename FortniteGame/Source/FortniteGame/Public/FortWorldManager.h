@@ -49,8 +49,6 @@ public:
     void ServerTickLoadingOrCreatingWorld();
     void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory = EMissionGenerationCategory::Max_None, UFortMissionGenerator* MissionGenerator = nullptr);
     void CreateMissionManager();
-    void PlaceMissionItems(const FGuid& MissionGuid, UFortMissionInfo* MissionInfo);
-    void OnMissionPlacementQueryFinished(const FGuid& MissionGuid, UFortMissionInfo* MissionInfo, int32_t ItemIndex, const TArray<AActor*>& PlacementActors);
     int32_t GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName);
     AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);
 

@@ -3983,7 +3983,7 @@ bool Finder::ResolveNavigationSystemLive()
 {
     UFunction* RebuildNavigation = FindObject<UFunction>(nullptr, L"/Script/Engine.CheatManager:RebuildNavigation");
     const uintptr_t Exec = RebuildNavigation ? reinterpret_cast<uintptr_t>(RebuildNavigation->GetNativeFunc()) : 0;
-    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? (Finder::FunctionStart(Exec) == Exec ? Finder::FunctionEnd(Exec) : Exec + 0x40) : 0;
     const int32_t CheatSlot = ExecEnd ? VirtualSlot(FindVirtualCall(Exec, ExecEnd)) : -1;
     const uintptr_t CheatRebuild = VTableEntry(CdoVTable(L"/Script/Engine.CheatManager"), CheatSlot);
     const uintptr_t CheatRebuildEnd = CheatRebuild ? Finder::FunctionEnd(CheatRebuild) : 0;

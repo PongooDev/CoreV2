@@ -85,6 +85,9 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
     if (NavSys)
     {
+        NavSys->SetNavigationOctreeLock(false);
+        NavSys->ConditionalPopulateNavOctree();
+
         bool bHasWorldBounds = false;
         FVector WorldMin(0, 0, 0);
         FVector WorldMax(0, 0, 0);

@@ -20,6 +20,7 @@ class UNavigationSystem : public UObject
 {
     DefineUnrealClass(UNavigationSystem, Engine)
     DefineNativeMember(uint8_t, NavBuildingLockFlags, UNavigationSystem_NavBuildingLockFlags)
+    DefineNativeMember(uint8_t, NavOctreeLockFlags, UNavigationSystem_bNavOctreeLock)
     DefineUFunction(OnNavigationBoundsUpdated)
 
 public:
@@ -27,5 +28,8 @@ public:
     void RemoveNavigationBuildLock(uint8_t Flags);
     void ReleaseInitialBuildingLock();
     void RebuildAll(bool bIsLoadTime = false);
+    bool IsNavigationOctreeLocked() const { return (NavOctreeLockFlags & 1) != 0; }
+    void SetNavigationOctreeLock(bool bLock) { NavOctreeLockFlags = static_cast<uint8_t>((NavOctreeLockFlags & ~1) | (bLock ? 1 : 0)); }
+    void ConditionalPopulateNavOctree();
     void OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolume);
 };

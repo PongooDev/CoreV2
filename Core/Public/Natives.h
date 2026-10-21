@@ -247,6 +247,8 @@ namespace Natives
     inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;
     inline ptrdiff_t UNavigationSystem_NavBuildingLockFlags = -1;
     inline void (*UNavigationSystem_RebuildAll)(UNavigationSystem* This, bool bIsLoadTime) = nullptr;
+    inline void (*UNavigationSystem_ConditionalPopulateNavOctree)(UNavigationSystem* This) = nullptr;
+    inline ptrdiff_t UNavigationSystem_bNavOctreeLock = -1;
     inline ptrdiff_t UFortMcpProfileWorld_Inventory = -1;
     inline ptrdiff_t UFortMcpProfileWorld_bIsInventoryInitialized = -1;
     inline int32_t AFortGameModeZone_OnZoneEndIndex = -1;

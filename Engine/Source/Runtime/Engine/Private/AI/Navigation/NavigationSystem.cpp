@@ -29,6 +29,14 @@ void UNavigationSystem::RebuildAll(bool bIsLoadTime)
     }
 }
 
+void UNavigationSystem::ConditionalPopulateNavOctree()
+{
+    if (Natives::UNavigationSystem_ConditionalPopulateNavOctree)
+    {
+        Natives::UNavigationSystem_ConditionalPopulateNavOctree(this);
+    }
+}
+
 void UNavigationSystem::OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolume)
 {
     Reflection::FParams Params(StaticFunction_OnNavigationBoundsUpdated());

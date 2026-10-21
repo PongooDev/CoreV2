@@ -4012,13 +4012,44 @@ bool Finder::ResolveNavigationSystemLive()
     const uintptr_t RebuildAllCall = ProcessCandidates ? FindRawCall(ProcessCandidates + 5, BuildEnd) : 0;
     const uintptr_t RebuildAll = RebuildAllCall ? Finder::RelativeTarget(RebuildAllCall, 1, 5) : 0;
 
-    if (LockFlagsOffset <= 0 || !IsInText(RebuildAll))
+    const int32_t SpawnMissingSlot = VirtualSlot(SpawnMissing);
+    const uintptr_t ProcessCandidatesTarget = ProcessCandidates ? Finder::RelativeTarget(ProcessCandidates, 1, 5) : 0;
+    uintptr_t PopulateNavOctree = 0;
+    int32_t PopulateCandidates = 0;
+    for (uintptr_t Call = ProcessCandidatesTarget ? FindRawCall(Finder::TextBegin(), Finder::TextEnd()) : 0; Call; Call = FindRawCall(Call + 1, Finder::TextEnd()))
     {
-        Log::Error(L"Finder: UNavigationSystem not resolved (cheat slot {}, build slot {}, lock flags {}, rebuild all {})", CheatSlot, BuildSlot, LockFlagsOffset, RebuildAll != 0);
+        if (Finder::RelativeTarget(Call, 1, 5) != ProcessCandidatesTarget || Call == ProcessCandidates || VirtualSlot(FindVirtualCall(Call - 12, Call)) != SpawnMissingSlot)
+        {
+            continue;
+        }
+        const uintptr_t Next = FindRawCall(Call + 5, Call + 17);
+        const uintptr_t Target = Next ? Finder::RelativeTarget(Next, 1, 5) : 0;
+        if (Target && Target != RebuildAll && Target != PopulateNavOctree)
+        {
+            PopulateNavOctree = Target;
+            ++PopulateCandidates;
+        }
+    }
+    const uintptr_t PopulateEnd = PopulateCandidates == 1 ? Finder::FunctionEnd(PopulateNavOctree) : 0;
+    ptrdiff_t OctreeLockOffset = -1;
+    for (uintptr_t Site = PopulateNavOctree; PopulateEnd && Site + 7 <= PopulateEnd && OctreeLockOffset < 0; ++Site)
+    {
+        const uint8_t ModRm = Byte(Site + 1);
+        if (Byte(Site) == 0xF6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && Byte(Site + 6) == 0x01)
+        {
+            OctreeLockOffset = *reinterpret_cast<const int32_t*>(Site + 2);
+        }
+    }
+
+    if (LockFlagsOffset <= 0 || !IsInText(RebuildAll) || OctreeLockOffset <= 0)
+    {
+        Log::Error(L"Finder: UNavigationSystem not resolved (cheat slot {}, build slot {}, lock flags {}, rebuild all {}, populate candidates {}, octree lock {})", CheatSlot, BuildSlot, LockFlagsOffset, RebuildAll != 0, PopulateCandidates, OctreeLockOffset);
         return false;
     }
     Natives::UNavigationSystem_NavBuildingLockFlags = LockFlagsOffset;
     Natives::UNavigationSystem_RebuildAll = reinterpret_cast<decltype(Natives::UNavigationSystem_RebuildAll)>(RebuildAll);
-    Log::Info(L"Finder: UNavigationSystem::Build is slot 0x{:X}, NavBuildingLockFlags +0x{:X}, RebuildAll +0x{:X}", BuildSlot, LockFlagsOffset, RebuildAll - Finder::ImageBase());
+    Natives::UNavigationSystem_ConditionalPopulateNavOctree = reinterpret_cast<decltype(Natives::UNavigationSystem_ConditionalPopulateNavOctree)>(PopulateNavOctree);
+    Natives::UNavigationSystem_bNavOctreeLock = OctreeLockOffset;
+    Log::Info(L"Finder: UNavigationSystem::Build is slot 0x{:X}, NavBuildingLockFlags +0x{:X}, RebuildAll +0x{:X}, ConditionalPopulateNavOctree +0x{:X}, bNavOctreeLock +0x{:X}", BuildSlot, LockFlagsOffset, RebuildAll - Finder::ImageBase(), PopulateNavOctree - Finder::ImageBase(), OctreeLockOffset);
     return true;
 }

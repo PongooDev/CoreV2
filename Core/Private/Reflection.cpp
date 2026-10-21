@@ -98,6 +98,7 @@ bool Reflection::FMemberInfo::Resolve()
         const UBoolProperty* BoolProperty = static_cast<const UBoolProperty*>(Property);
         Offset = Property->GetOffset_ForInternal() + BoolProperty->ByteOffset;
         FieldMask = BoolProperty->FieldMask;
+        ByteMask = BoolProperty->ByteMask;
         return true;
     }
 

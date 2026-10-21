@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/EnumAsByte.h"
 #include "GameFramework/GameState.h"
 #include "UObject/AssetPtr.h"
 
@@ -8,6 +9,19 @@ class AFortWorldManager;
 class UFortMissionGenerator;
 struct FFortMissionManagerRecord;
 
+namespace EFortGameplayState
+{
+    enum Type
+    {
+        NormalGameplay,
+        WaitingToStart,
+        EndOfZone,
+        EnteringZone,
+        LeavingZone,
+        Invalid,
+    };
+}
+
 class AFortGameState : public AGameState
 {
     DefineUnrealClass(AFortGameState, FortniteGame)
@@ -15,6 +29,7 @@ class AFortGameState : public AGameState
 public:
     DefineUProperty(AFortMissionManager*, MissionManager)
     DefineUProperty(AFortWorldManager*, WorldManager)
+    DefineUProperty(TEnumAsByte<EFortGameplayState::Type>, GameplayState)
 
     void SpawnMissionManager(const FFortMissionManagerRecord& MissionManagerRecord);
 
@@ -29,8 +44,7 @@ public:
     DefineUProperty(float, GameDifficulty)
     DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
     DefineUProperty(FString, TheaterUniqueId)
-    DefineUProperty(uint8_t, GameplayState)
 
     UFortMissionGenerator* GetMissionGenerator() const;
-    void SetGameplayState(uint8_t NewGameplayState);
+    void SetGameplayState(EFortGameplayState::Type NewGameplayState);
 };

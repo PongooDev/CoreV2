@@ -28,7 +28,7 @@ public:
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
     DefineBitfieldUProperty(bCraftFree)
-    DefineBitfieldUProperty(bShouldReceiveCriticalMatchBonus)
+    DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
     DefineUFunction(ServerExecuteInventoryItem)

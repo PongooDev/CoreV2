@@ -54,6 +54,7 @@ namespace Reflection
 
         int32_t GetOffsetChecked();
         uint8_t GetFieldMask() const { return FieldMask; }
+        uint8_t GetByteMask() const { return ByteMask; }
         bool Resolve();
         const wchar_t* GetName() const { return Name; }
 
@@ -67,6 +68,7 @@ namespace Reflection
         FOwnerGetter StructType;
         int32_t Offset = UnresolvedOffset;
         uint8_t FieldMask = 0;
+        uint8_t ByteMask = 0;
     };
 
     class FFunctionInfo
@@ -100,7 +102,7 @@ namespace Reflection
     inline void SetBoolMember(void* Object, FMemberInfo& Member, bool bValue)
     {
         uint8_t& Byte = AccessMember<uint8_t>(Object, Member);
-        Byte = bValue ? (Byte | Member.GetFieldMask()) : (Byte & ~Member.GetFieldMask());
+        Byte = static_cast<uint8_t>((Byte & ~Member.GetFieldMask()) | (bValue ? Member.GetByteMask() : 0));
     }
 }
 

@@ -3251,7 +3251,7 @@ bool Finder::ResolveMissionGenerationLive()
 
 bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset)
 {
-    if (Natives::AFortMissionManager_OnZoneEndIndex >= 0 && Natives::AFortGameModeZone_OnZoneEndIndex >= 0 && Natives::AFortGameStateZone_SetGameplayStateIndex >= 0 && Natives::UFortQuestManager_SendStatEvent && Natives::UFortQuestManager_SendEndPrimaryMission && Natives::UGameInstance_GetGameSessionId && Natives::UEnum_GetEnumName)
+    if (Natives::AFortMissionManager_OnZoneEndIndex >= 0 && Natives::AFortMissionManager_OnMissionStatusChangeIndex >= 0 && Natives::AFortGameModeZone_OnZoneEndIndex >= 0 && Natives::AFortGameStateZone_SetGameplayStateIndex >= 0 && Natives::UFortQuestManager_SendStatEvent && Natives::UFortQuestManager_SendEndPrimaryMission && Natives::UGameInstance_GetGameSessionId && Natives::UEnum_GetEnumName)
     {
         return true;
     }
@@ -3365,6 +3365,7 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     }
 
     int32_t MissionManagerIndex = -1;
+    uintptr_t ZoneEndTimer = 0;
     const auto Finished = Bytes32(ZoneFinishedOffset);
     const auto Completed = Bytes32(ZoneCompletedOffset);
     for (const auto& [First, Second] : { std::pair{ Finished, Completed }, std::pair{ Completed, Finished } })
@@ -3390,6 +3391,17 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
             const uintptr_t TimerEnd = Timer ? Finder::FunctionEnd(Timer) : 0;
             const uintptr_t Tail = TimerEnd ? FindVirtualCall(Site + 5, TimerEnd) : 0;
             MissionManagerIndex = Tail ? VirtualSlot(Tail) : -1;
+            ZoneEndTimer = MissionManagerIndex >= 0 ? Timer : 0;
+        }
+    }
+
+    int32_t StatusChangeIndex = -1;
+    void** MissionManagerVTable = CdoVTable(L"/Script/FortniteGame.FortMissionManager");
+    for (uintptr_t Site = ZoneEndTimer ? Finder::TextBegin() : 0; Site && Site + 7 <= Finder::TextEnd() && StatusChangeIndex < 0; ++Site)
+    {
+        if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && (Byte(Site + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Site, 3, 7) == ZoneEndTimer)
+        {
+            StatusChangeIndex = Finder::VTableIndex(MissionManagerVTable, reinterpret_cast<void*>(Finder::FunctionStart(Site)), 0x400);
         }
     }
 
@@ -3433,9 +3445,9 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     }
     const int32_t GameStateIndex = OnRepIndex >= 0 ? FirstEntryContaining(GameStateVTable, { OnRepCall }, Contains) : -1;
 
-    if (!SendStatEvent || !SendEndPrimaryMission || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
+    if (!SendStatEvent || !SendEndPrimaryMission || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
     {
-        Log::Error(L"Finder: zone end not found (stat {}, end mission {}, session {}, enum {}, mission manager {}, game mode {}, game state {})", SendStatEvent != 0, SendEndPrimaryMission != 0, GameSessionId != 0, GetEnumName != 0, MissionManagerIndex, GameModeIndex, GameStateIndex);
+        Log::Error(L"Finder: zone end not found (stat {}, end mission {}, session {}, enum {}, mission manager {}, status change {}, game mode {}, game state {})", SendStatEvent != 0, SendEndPrimaryMission != 0, GameSessionId != 0, GetEnumName != 0, MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
         return false;
     }
 
@@ -3444,9 +3456,10 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     Natives::UGameInstance_GetGameSessionId = reinterpret_cast<decltype(Natives::UGameInstance_GetGameSessionId)>(GameSessionId);
     Natives::UEnum_GetEnumName = reinterpret_cast<decltype(Natives::UEnum_GetEnumName)>(GetEnumName);
     Natives::AFortMissionManager_OnZoneEndIndex = MissionManagerIndex;
+    Natives::AFortMissionManager_OnMissionStatusChangeIndex = StatusChangeIndex;
     Natives::AFortGameModeZone_OnZoneEndIndex = GameModeIndex;
     Natives::AFortGameStateZone_SetGameplayStateIndex = GameStateIndex;
-    Log::Info(L"Finder: zone end resolved: AFortMissionManager::OnZoneEnd slot 0x{:X}, AFortGameModeZone::OnZoneEnd slot 0x{:X}, AFortGameStateZone::SetGameplayState slot 0x{:X}", MissionManagerIndex, GameModeIndex, GameStateIndex);
+    Log::Info(L"Finder: zone end resolved: AFortMissionManager::OnZoneEnd slot 0x{:X}, OnMissionStatusChange slot 0x{:X}, AFortGameModeZone::OnZoneEnd slot 0x{:X}, AFortGameStateZone::SetGameplayState slot 0x{:X}", MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
     return true;
 }
 

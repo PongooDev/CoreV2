@@ -67,6 +67,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
             continue;
         }
 
+        SetMissionCompletionResult(Mission);
         UFortMissionInfo* Info = Mission->MissionInfo;
         const int32_t MaxMissionPoints = Info ? static_cast<int32_t>(Info->MaxMissionPoints) : 0;
         const FString MissionName = Info ? Info->GetName() : FString(L"None");
@@ -78,22 +79,18 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                 continue;
             }
 
-            AddMissionRewardActivity(PlayerController, Status == EFortMissionStatus::Succeeded);
-            if (AFortPlayerState* PlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))))
+            FFortRewardReport& Report = PlayerController->LatestRewardReport;
+            Report.bIsFinalized = true;
+            PlayerController->ForceNetUpdate();
+            AFortPlayerState* PlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState)));
+            if (PlayerState)
             {
                 PlayerState->bAreZoneStatsFinalized = true;
-                PlayerState->bIsFinalizingExperience = true;
                 PlayerState->ForceNetUpdate();
             }
-            PlayerController->ForceNetUpdate();
 
             UFortQuestManager* QuestManager = PlayerController->GetQuestManager();
-            if (!QuestManager)
-            {
-                continue;
-            }
-
-            if (Status == EFortMissionStatus::Succeeded && Info)
+            if (QuestManager && Status == EFortMissionStatus::Succeeded && Info)
             {
                 FGameplayTagContainer SourceTags;
                 FGameplayTagContainer ContextTags;
@@ -103,10 +100,16 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                 QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::Complete, Mission, TargetTags, SourceTags, ContextTags, 1, true);
             }
 
-            if (!SessionId.IsEmpty())
+            if (!QuestManager || SessionId.IsEmpty())
             {
-                QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, GetMissionPointsForPlayer(PlayerController, MaxMissionPoints), PlayerController->bShouldReceiveCriticalMatchBonus);
+                Log::Error(L"OnZoneEnd: no EndPrimaryMission for {} (quest manager {}, session {}), so its experience is never finalized", PlayerController->GetName().ToStdString(), QuestManager != nullptr, SessionId.ToStdString());
+                continue;
             }
+            if (PlayerState)
+            {
+                PlayerState->bIsFinalizingExperience = true;
+            }
+            QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, GetMissionPointsForPlayer(PlayerController, MaxMissionPoints), PlayerController->bShouldReceiveCriticalMatchBonus);
         }
     }
 
@@ -118,11 +121,24 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
 
     if (AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr)
     {
-        GameState->SetGameplayState(2);
+        GameState->SetGameplayState(EFortGameplayState::EndOfZone);
     }
     if (AFortGameModeZone* GameMode = World ? Cast<AFortGameModeZone>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr)
     {
         GameMode->OnZoneEnd();
+    }
+#endif
+}
+
+void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission)
+{
+    OnMissionStatusChangeOG(this, Mission);
+
+#if WITH_SERVER_CODE
+    const EFortMissionStatus Status = Mission ? static_cast<EFortMissionStatus>(Mission->MissionStatus) : EFortMissionStatus::Max_None;
+    if (Role == ROLE_Authority && Mission && Mission->IsPrimaryMission() && (Status == EFortMissionStatus::Succeeded || Status == EFortMissionStatus::Failed))
+    {
+        SetMissionCompletionResult(Mission);
     }
 #endif
 }
@@ -134,8 +150,36 @@ namespace
         return A.IsValid() && B.IsValid() && A.ToString().ToStdString() == B.ToString().ToStdString();
     }
 
+    FFortRewardActivity& FindOrAddMissionPrimaryActivity(AFortPlayerController* PlayerController)
+    {
+        FFortRewardReport& Report = PlayerController->LatestRewardReport;
+        TStructArray<FFortRewardActivity>& Activities = Report.RewardActivities;
+        for (int32_t Index = 0; Index < Activities.Num(); ++Index)
+        {
+            if (Activities[Index].ActivityType == EFortRewardActivityType::MissionPrimary)
+            {
+                return Activities[Index];
+            }
+        }
+
+        FFortRewardActivity& Activity = Activities.AddDefaulted();
+        Activity.ActivityType = EFortRewardActivityType::MissionPrimary;
+        Activity.ActivityGuid = FGuid::NewGuid();
+        Activity.RewardDisplayTime = -1.0f;
+        return Activity;
+    }
+
     void AddRewardItem(TStructArray<FFortItemEntry>& Items, UFortItemDefinition* ItemDefinition, int32_t Count)
     {
+        for (int32_t Index = 0; Index < Items.Num(); ++Index)
+        {
+            if (static_cast<UFortItemDefinition*>(Items[Index].ItemDefinition) == ItemDefinition)
+            {
+                Items[Index].Count = Items[Index].Count + Count;
+                return;
+            }
+        }
+
         const int32_t ElementSize = TStructArray<FFortItemEntry>::ElementSize();
         FFortItemEntry* Entry = &Items[Items.Add(1, ElementSize)];
         std::memset(Entry, 0, ElementSize);
@@ -143,49 +187,21 @@ namespace
     }
 }
 
-void AFortMissionManager::AddMissionRewardActivity(AFortPlayerController* PlayerController, bool bSucceeded)
+void AFortMissionManager::SetMissionCompletionResult(AFortMission* Mission)
 {
 #if WITH_SERVER_CODE
-    APlayerState* PlayerState = PlayerController->PlayerState;
-    if (!PlayerState)
+    const bool bSucceeded = static_cast<EFortMissionStatus>(Mission->MissionStatus) == EFortMissionStatus::Succeeded;
+    for (AFortPlayerController* PlayerController : Mission->GetParticipatingMissionControllers())
     {
-        return;
-    }
-
-    FFortRewardReport& Report = PlayerController->LatestRewardReport;
-    TStructArray<FFortRewardActivity>& Activities = Report.RewardActivities;
-    FFortRewardActivity* Activity = nullptr;
-    for (int32_t Index = 0; Index < Activities.Num() && !Activity; ++Index)
-    {
-        Activity = static_cast<EFortRewardActivityType>(Activities[Index].ActivityType) == EFortRewardActivityType::MissionPrimary ? &Activities[Index] : nullptr;
-    }
-    if (!Activity)
-    {
-        Activity = &Activities.AddDefaulted();
-        Activity->ActivityType = EFortRewardActivityType::MissionPrimary;
-        Activity->ActivityGuid = FGuid::NewGuid();
-        Activity->RewardDisplayTime = -1.0f;
-    }
-    Activity->ActivityCompletionResult = bSucceeded ? EFortCompletionResult::Win : EFortCompletionResult::Loss;
-
-    const FUniqueNetIdRepl& PlayerId = PlayerState->UniqueId;
-    FEarnedBadgeEntryArray& BadgeArray = EarnedBadgesArray;
-    TStructArray<FEarnedBadgeEntry>& Entries = BadgeArray.Items;
-    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
-    {
-        FEarnedBadgeEntry& Entry = Entries[Index];
-        UFortBadgeItemDefinition* Badge = Entry.Badge;
-        TStructArray<FEarnedBadgePlayerData>& PlayerData = Entry.PlayerData;
-        for (int32_t DataIndex = 0; Badge && DataIndex < PlayerData.Num(); ++DataIndex)
+        if (!PlayerController)
         {
-            if (IsSamePlayer(PlayerData[DataIndex].PlayerID, PlayerId))
-            {
-                const bool bMissed = static_cast<EFortRewardType>(Entry.RewardType) == EFortRewardType::Missed;
-                AddRewardItem(bMissed ? static_cast<TStructArray<FFortItemEntry>&>(Activity->MissedRewardItems) : static_cast<TStructArray<FFortItemEntry>&>(Activity->RewardItems), Badge, PlayerData[DataIndex].Count);
-            }
+            continue;
         }
+
+        FFortRewardActivity& Activity = FindOrAddMissionPrimaryActivity(PlayerController);
+        Activity.ActivityCompletionResult = bSucceeded ? EFortCompletionResult::Win : EFortCompletionResult::Loss;
+        PlayerController->ForceNetUpdate();
     }
-    Report.bIsFinalized = true;
 #endif
 }
 
@@ -234,6 +250,10 @@ void AFortMissionManager::GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewar
             PlayerIdStruct->CopyScriptStruct(&static_cast<FUniqueNetIdRepl&>(Data->PlayerID), &PlayerId);
         }
         Data->Count = Data->Count + 1;
+
+        FFortRewardActivity& Activity = FindOrAddMissionPrimaryActivity(PlayerController);
+        AddRewardItem(RewardType == EFortRewardType::Missed ? static_cast<TStructArray<FFortItemEntry>&>(Activity.MissedRewardItems) : static_cast<TStructArray<FFortItemEntry>&>(Activity.RewardItems), Badge, 1);
+        PlayerController->ForceNetUpdate();
     }
     BadgeArray.MarkItemDirty(*Entry);
 #endif
@@ -279,6 +299,10 @@ void AFortMissionManager::HookVTables()
     }
 
     const int32_t Index = Natives::AFortMissionManager_OnZoneEndIndex;
+    const int32_t StatusChangeIndex = Natives::AFortMissionManager_OnMissionStatusChangeIndex;
+    UObject* MissionManagerDefault = StaticClass()->GetDefaultObject(false);
+    void* const StatusChange = MissionManagerDefault ? (*reinterpret_cast<void***>(MissionManagerDefault))[StatusChangeIndex] : nullptr;
+    OnMissionStatusChangeOG = reinterpret_cast<decltype(OnMissionStatusChangeOG)>(StatusChange);
     for (TObjectIterator<UClass> It; It; ++It)
     {
         UClass* Class = *It;
@@ -288,10 +312,19 @@ void AFortMissionManager::HookVTables()
         {
             Hooks::SwapVTable(L"AFortMissionManager::OnZoneEnd", VTable, Index, reinterpret_cast<void*>(&OnZoneEndHK));
         }
+        if (VTable && StatusChange && VTable[StatusChangeIndex] == StatusChange)
+        {
+            Hooks::SwapVTable(L"AFortMissionManager::OnMissionStatusChange", VTable, StatusChangeIndex, reinterpret_cast<void*>(&OnMissionStatusChangeHK));
+        }
     }
 }
 
 void AFortMissionManager::OnZoneEndHK(AFortMissionManager* This, bool bZoneCompleted)
 {
     This->OnZoneEnd(bZoneCompleted);
+}
+
+void AFortMissionManager::OnMissionStatusChangeHK(AFortMissionManager* This, AFortMission* Mission)
+{
+    This->OnMissionStatusChange(Mission);
 }

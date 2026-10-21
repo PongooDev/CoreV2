@@ -1,17 +1,21 @@
 #pragma once
 
+#include "Containers/EnumAsByte.h"
 #include "Items/FortItem.h"
 #include "Misc/Guid.h"
 #include "StructArray.h"
 
-enum class EFortRewardActivityType : uint8_t
+namespace EFortRewardActivityType
 {
-    General,
-    MissionPrimary,
-    MissionSecondary,
-    AccountLevelUp,
-    Max_None,
-};
+    enum Type
+    {
+        General,
+        MissionPrimary,
+        MissionSecondary,
+        AccountLevelUp,
+        Max_None,
+    };
+}
 
 enum class EFortCompletionResult : uint8_t
 {
@@ -19,13 +23,12 @@ enum class EFortCompletionResult : uint8_t
     Loss,
     Draw,
     Undefined,
-    Max_None,
 };
 
 struct FFortRewardActivity
 {
     DefineUnrealStruct(FFortRewardActivity, FortniteGame)
-    DefineUProperty(EFortRewardActivityType, ActivityType)
+    DefineUProperty(TEnumAsByte<EFortRewardActivityType::Type>, ActivityType)
     DefineUProperty(FGuid, ActivityGuid)
     DefineUProperty(float, RewardDisplayTime)
     DefineUStructArrayProperty(FFortItemEntry, RewardItems)
@@ -38,5 +41,5 @@ struct FFortRewardReport
 {
     DefineUnrealStruct(FFortRewardReport, FortniteGame)
     DefineUStructArrayProperty(FFortRewardActivity, RewardActivities)
-    DefineBitfieldUProperty(bIsFinalized)
+    DefineUProperty(bool, bIsFinalized)
 };

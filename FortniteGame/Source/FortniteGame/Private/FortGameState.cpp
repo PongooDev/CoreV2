@@ -24,11 +24,11 @@ UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const
     return static_cast<UFortMissionGenerator*>(LoadedClass->GetDefaultObject());
 }
 
-void AFortGameStateZone::SetGameplayState(uint8_t NewGameplayState)
+void AFortGameStateZone::SetGameplayState(EFortGameplayState::Type NewGameplayState)
 {
     if (Natives::AFortGameStateZone_SetGameplayStateIndex >= 0)
     {
-        CallVirtual<void>(this, Natives::AFortGameStateZone_SetGameplayStateIndex, NewGameplayState);
+        CallVirtual<void>(this, Natives::AFortGameStateZone_SetGameplayStateIndex, static_cast<uint8_t>(NewGameplayState));
     }
 }
 

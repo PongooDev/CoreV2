@@ -258,6 +258,7 @@ namespace Natives
     inline ptrdiff_t UFortMcpProfileWorld_Inventory = -1;
     inline ptrdiff_t UFortMcpProfileWorld_bIsInventoryInitialized = -1;
     inline int32_t AFortGameModeZone_OnZoneEndIndex = -1;
+    inline int32_t AFortMissionManager_OnMissionStatusChangeIndex = -1;
     inline int32_t AFortGameStateZone_SetGameplayStateIndex = -1;
     inline void (*UFortQuestManager_SendStatEvent)(UFortQuestManager* This, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush) = nullptr;
     inline void (*UFortQuestManager_SendEndPrimaryMission)(UFortQuestManager* This, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, FScriptArray& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus) = nullptr;

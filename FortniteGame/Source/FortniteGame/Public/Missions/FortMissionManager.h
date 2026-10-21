@@ -88,12 +88,15 @@ public:
     DefineUStructProperty(FEarnedBadgeEntryArray, EarnedBadgesArray)
 
     void OnZoneEnd(bool bZoneCompleted);
+    void OnMissionStatusChange(AFortMission* Mission);
     void GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewardType RewardType, const TArray<AFortPlayerController*>& Players);
-    void AddMissionRewardActivity(AFortPlayerController* PlayerController, bool bSucceeded);
+    void SetMissionCompletionResult(AFortMission* Mission);
     int32_t GetMissionPointsForPlayer(AFortPlayerController* PlayerController, int32_t MaxMissionPoints);
 
     static void HookVTables();
 
 private:
     static void OnZoneEndHK(AFortMissionManager* This, bool bZoneCompleted);
+    static inline void (*OnMissionStatusChangeOG)(AFortMissionManager* This, AFortMission* Mission) = nullptr;
+    static void OnMissionStatusChangeHK(AFortMissionManager* This, AFortMission* Mission);
 };

@@ -16,7 +16,7 @@ void AFortPlayerControllerZone::ServerTriggerSetupTeleportCameraEvent_Implementa
 #if WITH_SERVER_CODE
     UWorld* World = GetWorld();
     AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-    if (!GameState || GameState->GameplayState != 2 || SetupTeleportOutCameraGameState.Get() == GameState)
+    if (!GameState || GameState->GameplayState != EFortGameplayState::EndOfZone || SetupTeleportOutCameraGameState.Get() == GameState)
     {
         return;
     }

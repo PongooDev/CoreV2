@@ -2,6 +2,7 @@
 
 #include "Containers/Array.h"
 #include "GameFramework/Actor.h"
+#include "Misc/Guid.h"
 #include "Missions/FortObjectiveBase.h"
 
 class AFortPlayerController;
@@ -29,6 +30,7 @@ public:
     DefineUProperty(UFortMissionInfo*, MissionInfo)
     DefineUProperty(TArray<AFortObjectiveBase*>, ActiveObjectives)
     DefineUProperty(EFortMissionStatus, MissionStatus)
+    DefineUProperty(FGuid, MissionGuid)
 
     bool IsPrimaryMission() const;
     static ptrdiff_t MissionInfoOffset();

@@ -2,6 +2,7 @@
 
 #include "Containers/Array.h"
 #include "GameFramework/Actor.h"
+#include "GameplayTagContainer.h"
 
 class AFortMission;
 class FText;
@@ -31,6 +32,7 @@ public:
     DefineUProperty(TArray<UFortWorldItemDefinition*>, ItemsToGiveOnObjectiveStart)
     DefineBitfieldUProperty(bStartPlayingOnMissionStart)
     DefineUProperty(EFortObjectiveStatus, ObjectiveStatus)
+    DefineUProperty(FGameplayTagContainer, ObjectiveHandle)
 
     AFortMission* GetMission() const;
     void SetObjectiveStatus(EFortObjectiveStatus NewStatus);
@@ -40,6 +42,7 @@ public:
     void ClearObjectiveTimer();
     void BlueprintOnStartPlaying();
     void BlueprintOnObjectiveEnd(EFortObjectiveStatus Status);
+    void SendObjectiveEndedEvent(EFortObjectiveStatus Status);
 
     static void HookVTables();
 

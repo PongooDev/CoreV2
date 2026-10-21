@@ -1,5 +1,14 @@
 #include "pch.h"
 #include "FortWorldManager.h"
+#include "BlueprintGameplayTagLibrary.h"
+#include "Building/BuildingActor.h"
+#include "EnvironmentQuery/EnvQueryInstanceBlueprintWrapper.h"
+#include "EnvironmentQuery/EnvQueryManager.h"
+#include "GameThread.h"
+#include "Math/Rotator.h"
+#include "Missions/FortMissionManager.h"
+
+#include <algorithm>
 #include "Engine/World.h"
 #include "FortGameData.h"
 #include "FortGameMode.h"
@@ -42,6 +51,34 @@ AActor* AFortWorldManager::SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacemen
 #else
     return nullptr;
 #endif
+}
+
+namespace
+{
+    constexpr int32_t MissionPlacementQueryTicks = 600;
+
+    void WaitForMissionPlacementQuery(FWeakObjectPtr WorldManager, FGuid MissionGuid, FWeakObjectPtr MissionInfo, int32_t ItemIndex, FWeakObjectPtr Query, int32_t TicksLeft)
+    {
+        GameThread::Enqueue([WorldManager, MissionGuid, MissionInfo, ItemIndex, Query, TicksLeft]()
+        {
+            AFortWorldManager* Manager = static_cast<AFortWorldManager*>(WorldManager.Get());
+            UFortMissionInfo* Info = static_cast<UFortMissionInfo*>(MissionInfo.Get());
+            UEnvQueryInstanceBlueprintWrapper* PlacementQuery = static_cast<UEnvQueryInstanceBlueprintWrapper*>(Query.Get());
+            if (!Manager || !Info)
+            {
+                return;
+            }
+
+            const TArray<AActor*> Results = PlacementQuery ? PlacementQuery->GetResultsAsActors() : TArray<AActor*>();
+            if (Results.Num() == 0 && TicksLeft > 0)
+            {
+                WaitForMissionPlacementQuery(WorldManager, MissionGuid, MissionInfo, ItemIndex, Query, TicksLeft - 1);
+                return;
+            }
+
+            Manager->OnMissionPlacementQueryFinished(MissionGuid, Info, ItemIndex, Results);
+        });
+    }
 }
 
 void AFortWorldManager::OnWorldRecordQueryComplete()
@@ -153,7 +190,85 @@ void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMiss
         }
         MissionRecord.MissionGenerator = MissionGenerator;
         MissionRecord.MissionGuid = FGuid::NewGuid();
+        PlaceMissionItems(MissionRecord.MissionGuid, MissionInfo);
     }
+#endif
+}
+
+void AFortWorldManager::PlaceMissionItems(const FGuid& MissionGuid, UFortMissionInfo* MissionInfo)
+{
+#if WITH_SERVER_CODE
+    FFortMissionPlacementItems& PlacementInfo = MissionInfo->MissionPlacementInfo;
+    TStructArray<FFortMissionPlacementActorItem>& ActorItems = PlacementInfo.ActorsAndLocations;
+    for (int32_t ItemIndex = 0; ItemIndex < ActorItems.Num(); ++ItemIndex)
+    {
+        UEnvQuery* PlacementQuery = ActorItems[ItemIndex].PlacementQuery;
+        UEnvQueryInstanceBlueprintWrapper* Query = PlacementQuery ? UEnvQueryManager::RunEQSQuery(this, PlacementQuery, this, EEnvQueryRunMode::AllMatching, nullptr) : nullptr;
+        if (!Query)
+        {
+            UE_LOG(LogFortWorld, Warning, TEXT("PlaceMissionItems: no placement query for item %d of mission %s"), ItemIndex, *MissionInfo->GetName());
+            continue;
+        }
+        WaitForMissionPlacementQuery(FWeakObjectPtr(this), MissionGuid, FWeakObjectPtr(MissionInfo), ItemIndex, FWeakObjectPtr(Query), MissionPlacementQueryTicks);
+    }
+#endif
+}
+
+void AFortWorldManager::OnMissionPlacementQueryFinished(const FGuid& MissionGuid, UFortMissionInfo* MissionInfo, int32_t ItemIndex, const TArray<AActor*>& PlacementActors)
+{
+#if WITH_SERVER_CODE
+    FFortMissionRecord* MissionRecord = nullptr;
+    TStructArray<FFortMissionRecord>& MissionRecords = static_cast<FFortMissionManagerRecord&>(MissionManagerRecord).MissionRecords;
+    for (int32_t Index = 0; Index < MissionRecords.Num() && !MissionRecord; ++Index)
+    {
+        MissionRecord = static_cast<const FGuid&>(MissionRecords[Index].MissionGuid) == MissionGuid ? &MissionRecords[Index] : nullptr;
+    }
+    FFortMissionPlacementItems& PlacementInfo = MissionInfo->MissionPlacementInfo;
+    TStructArray<FFortMissionPlacementActorItem>& ActorItems = PlacementInfo.ActorsAndLocations;
+    if (!MissionRecord || ItemIndex >= ActorItems.Num())
+    {
+        return;
+    }
+
+    FFortMissionPlacementActorItem& Item = ActorItems[ItemIndex];
+    const int32_t NumLocations = std::max(static_cast<int32_t>(Item.NumLocationsToFind), 1);
+    UClass* ActorClass = static_cast<TAssetSubclassOf<AActor>&>(Item.ActorToPlace).LoadSynchronous();
+    if (PlacementActors.Num() < NumLocations)
+    {
+        UE_LOG(LogFortWorld, Warning, TEXT("PlaceMissionItems: mission %s item %d found %d of %d locations"), *MissionInfo->GetName(), ItemIndex, PlacementActors.Num(), NumLocations);
+    }
+
+    FFortMissionEntry& MissionEntry = MissionRecord->MissionEntry;
+    TStructArray<FFortMissionPlacementItemLookupData>& LookupData = MissionEntry.BlueprintLookupData;
+    UWorld* World = GetWorld();
+    for (int32_t Index = 0; Index < PlacementActors.Num() && Index < NumLocations; ++Index)
+    {
+        AActor* PlacementActor = PlacementActors[Index];
+        if (!PlacementActor)
+        {
+            continue;
+        }
+        if (ABuildingActor* PlacementBuilding = Cast<ABuildingActor>(reinterpret_cast<UObject*>(PlacementActor)))
+        {
+            FGameplayTagContainer& PlacementTags = PlacementBuilding->StaticGameplayTags;
+            UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(PlacementTags, PlacementInfo.TagsToAddToChosenPlacementActors);
+            UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(PlacementTags, Item.TagsToAddToChosenPlacementActor);
+        }
+
+        const FTransform SpawnTransform = PlacementActor->GetTransform();
+        FFortMissionPlacementItemLookupData& Data = LookupData.AddDefaulted();
+        UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(Data.ItemIdentifyingTags, Item.ItemIdentifyingTags);
+        UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(Data.TagsAddedToPlacementActors, Item.TagsToAddToChosenPlacementActor);
+        Data.ActorToPlace = ActorClass;
+        Data.ActorToUseForSpawnLocation = PlacementActor;
+        Data.SpawnLocation = SpawnTransform.GetLocation();
+        Data.SpawnRotation = SpawnTransform.Rotation.Rotator();
+        if (Item.bSpawnActorAutomatically && ActorClass && World)
+        {
+            Data.SpawnedActor = World->SpawnActor(ActorClass, &SpawnTransform, FActorSpawnParameters());
+        }
+    }
+    UE_LOG(LogFortWorld, Log, TEXT("PlaceMissionItems: mission %s item %d placed %d"), *MissionInfo->GetName(), ItemIndex, std::min(PlacementActors.Num(), NumLocations));
 #endif
 }
 

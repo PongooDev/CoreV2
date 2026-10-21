@@ -2480,6 +2480,8 @@ namespace
             }
         }
 
+        Natives::UAbilitySystemComponent_GiveAbility = GiveAbility;
+
         uintptr_t MarkDirty = 0;
         const uintptr_t GiveAbilityEnd = GiveAbility ? Finder::FunctionEnd(GiveAbility) : 0;
         for (uintptr_t Site = GiveAbilityEnd ? FindVirtualCall(GiveAbility, GiveAbilityEnd) : 0; Site && !MarkDirty; Site = FindVirtualCall(Site + 1, GiveAbilityEnd))
@@ -3942,6 +3944,26 @@ bool Finder::ResolveWorldItemDefinitionLive()
     }
     Natives::UFortWorldItemDefinition_ServerExecuteIndex = ServerExecuteIndex;
     Log::Info(L"Finder: UFortWorldItemDefinition::ServerExecute is slot 0x{:X}", ServerExecuteIndex);
+
+    void** WorldItemDefinitionVTable = CdoVTable(L"/Script/FortniteGame.FortWorldItemDefinition");
+    void** GadgetVTable = CdoVTable(L"/Script/FortniteGame.FortGadgetItemDefinition");
+    for (int32_t Index = 0; WorldItemDefinitionVTable && GadgetVTable && Natives::UAbilitySystemComponent_GiveAbility && Index < 0x100 && Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(GadgetVTable, Index);
+        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
+        if (WorldItemDefinitionVTable[Index] == Natives::SharedEmptyFunction && FunctionEnd > Function && CallWithin(Function, FunctionEnd - Function, Natives::UAbilitySystemComponent_GiveAbility))
+        {
+            Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex = Index;
+        }
+    }
+    if (Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex < 0)
+    {
+        Log::Error(L"Finder: UFortWorldItemDefinition item added slot not found");
+    }
+    else
+    {
+        Log::Info(L"Finder: UFortWorldItemDefinition item added slot 0x{:X}", Natives::UFortWorldItemDefinition_OnItemAddedToInventoryIndex);
+    }
     return true;
 }
 

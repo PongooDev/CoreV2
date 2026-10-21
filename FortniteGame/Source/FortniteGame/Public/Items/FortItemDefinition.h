@@ -4,6 +4,7 @@
 
 class AFortPlayerController;
 class UFortItem;
+class UFortWorldItem;
 
 class UFortItemDefinition : public UObject
 {
@@ -25,4 +26,5 @@ public:
     DefineBitfieldUProperty(bCanBeDropped)
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
+    void OnItemAddedToInventory(void* InventoryOwner, UFortWorldItem* Item, bool bSkipQuickBar);
 };

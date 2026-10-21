@@ -222,6 +222,8 @@ namespace Natives
     inline int32_t AFortGameMode_FinishWorldInitializationIndex = -1;
     inline int32_t UAbilitySystemComponent_InternalServerTryActiveAbilityIndex = -1;
     inline int32_t UFortWorldItemDefinition_ServerExecuteIndex = -1;
+    inline int32_t UFortWorldItemDefinition_OnItemAddedToInventoryIndex = -1;
+    inline uintptr_t UAbilitySystemComponent_GiveAbility = 0;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
     inline int32_t AFortGameModeZone_CreateAIDirectorIndex = -1;
     inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;

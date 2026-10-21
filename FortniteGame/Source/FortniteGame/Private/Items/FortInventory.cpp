@@ -1,5 +1,9 @@
 #include "pch.h"
 #include "Items/FortInventory.h"
+#include "Items/FortItemDefinition.h"
+#include "Natives.h"
+#include "Player/FortPlayerController.h"
+#include "Templates/Casts.h"
 #include "ReflectionParams.h"
 #include "UObject/Class.h"
 
@@ -68,6 +72,13 @@ void AFortInventory::AddWorldItem(UFortWorldItem* WorldItem)
 
     ItemList.MarkItemDirty(ReplicatedEntry);
     HandleInventoryLocalUpdate();
+
+    AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(GetOwner()));
+    UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+    if (PlayerController && ItemDefinition && Natives::AFortPlayerController_InventoryOwnerInterface > 0)
+    {
+        ItemDefinition->OnItemAddedToInventory(reinterpret_cast<uint8_t*>(PlayerController) + Natives::AFortPlayerController_InventoryOwnerInterface, WorldItem, false);
+    }
 #endif
 }
 

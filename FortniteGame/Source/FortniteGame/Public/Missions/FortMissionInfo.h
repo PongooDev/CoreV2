@@ -24,6 +24,7 @@ struct FFortMissionPlacementActorItem
     DefineUProperty(TAssetSubclassOf<AActor>, ActorToPlace)
     DefineUProperty(int32_t, NumLocationsToFind)
     DefineBitfieldUProperty(bSpawnActorAutomatically)
+    DefineBitfieldUProperty(bSnapToGrid)
 };
 
 struct FFortMissionPlacementItems

@@ -255,14 +255,20 @@ void AFortWorldManager::OnMissionPlacementQueryFinished(const FGuid& MissionGuid
             UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(PlacementTags, Item.TagsToAddToChosenPlacementActor);
         }
 
-        const FTransform SpawnTransform = PlacementActor->GetTransform();
+        FTransform SpawnTransform = PlacementActor->GetTransform();
+        FRotator SpawnRotation = SpawnTransform.Rotation.Rotator();
+        if (Item.bSnapToGrid)
+        {
+            SpawnRotation = FRotator(0.0f, std::round(SpawnRotation.Yaw / 90.0f) * 90.0f, 0.0f);
+            SpawnTransform.Rotation = SpawnRotation.Quaternion();
+        }
         FFortMissionPlacementItemLookupData& Data = LookupData.AddDefaulted();
         UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(Data.ItemIdentifyingTags, Item.ItemIdentifyingTags);
         UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(Data.TagsAddedToPlacementActors, Item.TagsToAddToChosenPlacementActor);
         Data.ActorToPlace = ActorClass;
         Data.ActorToUseForSpawnLocation = PlacementActor;
         Data.SpawnLocation = SpawnTransform.GetLocation();
-        Data.SpawnRotation = SpawnTransform.Rotation.Rotator();
+        Data.SpawnRotation = SpawnRotation;
         if (Item.bSpawnActorAutomatically && ActorClass && World)
         {
             Data.SpawnedActor = World->SpawnActor(ActorClass, &SpawnTransform, FActorSpawnParameters());

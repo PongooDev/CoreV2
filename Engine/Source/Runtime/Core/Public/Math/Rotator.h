@@ -17,6 +17,20 @@ struct FRotator
         : Pitch(InPitch), Yaw(InYaw), Roll(InRoll)
     {
     }
+
+    FQuat Quaternion() const
+    {
+        constexpr float DivideBy2 = 3.1415926535897932f / 180.0f / 2.0f;
+        const float SP = std::sin(Pitch * DivideBy2), CP = std::cos(Pitch * DivideBy2);
+        const float SY = std::sin(Yaw * DivideBy2), CY = std::cos(Yaw * DivideBy2);
+        const float SR = std::sin(Roll * DivideBy2), CR = std::cos(Roll * DivideBy2);
+        FQuat Result;
+        Result.X = CR * SP * SY - SR * CP * CY;
+        Result.Y = -CR * SP * CY - SR * CP * SY;
+        Result.Z = CR * CP * SY - SR * SP * CY;
+        Result.W = CR * CP * CY + SR * SP * SY;
+        return Result;
+    }
 };
 
 static_assert(sizeof(FRotator) == 0xC);

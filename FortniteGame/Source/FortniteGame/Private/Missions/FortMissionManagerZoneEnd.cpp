@@ -5,7 +5,9 @@
 #include "FortGameModeZone.h"
 #include "FortGameState.h"
 #include "FortWorldManager.h"
+#include "GameFramework/PlayerState.h"
 #include "Hooks.h"
+#include "Items/FortBadgeItemDefinition.h"
 #include "Log.h"
 #include "Missions/FortMission.h"
 #include "Natives.h"
@@ -16,6 +18,7 @@
 #include "UObject/Class.h"
 #include "UObject/CoreOnline.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
 
 namespace
 {
@@ -62,6 +65,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
         }
 
         UFortMissionInfo* Info = Mission->MissionInfo;
+        const int32_t MaxMissionPoints = Info ? static_cast<int32_t>(Info->MaxMissionPoints) : 0;
         const FString MissionName = Info ? Info->GetName() : FString(L"None");
         const FString StatusName = GetMissionStatusName(Status);
         for (AFortPlayerController* PlayerController : Mission->GetParticipatingMissionControllers())
@@ -83,7 +87,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
 
             if (!SessionId.IsEmpty())
             {
-                QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, 0, PlayerController->bShouldReceiveCriticalMatchBonus);
+                QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, GetMissionPointsForPlayer(PlayerController, MaxMissionPoints), PlayerController->bShouldReceiveCriticalMatchBonus);
             }
         }
     }
@@ -97,6 +101,96 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
         GameMode->OnZoneEnd();
     }
 #endif
+}
+
+namespace
+{
+    bool IsSamePlayer(const FUniqueNetIdRepl& A, const FUniqueNetIdRepl& B)
+    {
+        return A.IsValid() && B.IsValid() && A.ToString().ToStdString() == B.ToString().ToStdString();
+    }
+}
+
+void AFortMissionManager::GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewardType RewardType, const TArray<AFortPlayerController*>& Players)
+{
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority || !Badge)
+    {
+        return;
+    }
+
+    FEarnedBadgeEntryArray& BadgeArray = EarnedBadgesArray;
+    TStructArray<FEarnedBadgeEntry>& Entries = BadgeArray.Items;
+    FEarnedBadgeEntry* Entry = nullptr;
+    for (int32_t Index = 0; Index < Entries.Num() && !Entry; ++Index)
+    {
+        FEarnedBadgeEntry& Candidate = Entries[Index];
+        Entry = static_cast<UFortBadgeItemDefinition*>(Candidate.Badge) == Badge && static_cast<EFortRewardType>(Candidate.RewardType) == RewardType ? &Candidate : nullptr;
+    }
+    if (!Entry)
+    {
+        Entry = &Entries.AddDefaulted();
+        Entry->Badge = Badge;
+        Entry->RewardType = RewardType;
+    }
+
+    UScriptStruct* PlayerIdStruct = static_cast<UStructProperty*>(FEarnedBadgePlayerData::StaticStruct()->FindPropertyByName(FName(L"PlayerID", FNAME_Find)))->Struct;
+    TStructArray<FEarnedBadgePlayerData>& PlayerData = Entry->PlayerData;
+    for (AFortPlayerController* PlayerController : Players)
+    {
+        APlayerState* PlayerState = PlayerController ? static_cast<APlayerState*>(PlayerController->PlayerState) : nullptr;
+        if (!PlayerState)
+        {
+            continue;
+        }
+
+        const FUniqueNetIdRepl& PlayerId = PlayerState->UniqueId;
+        FEarnedBadgePlayerData* Data = nullptr;
+        for (int32_t Index = 0; Index < PlayerData.Num() && !Data; ++Index)
+        {
+            Data = IsSamePlayer(PlayerData[Index].PlayerID, PlayerId) ? &PlayerData[Index] : nullptr;
+        }
+        if (!Data)
+        {
+            Data = &PlayerData.AddDefaulted();
+            PlayerIdStruct->CopyScriptStruct(&static_cast<FUniqueNetIdRepl&>(Data->PlayerID), &PlayerId);
+        }
+        Data->Count = Data->Count + 1;
+    }
+    BadgeArray.MarkItemDirty(*Entry);
+#endif
+}
+
+int32_t AFortMissionManager::GetMissionPointsForPlayer(AFortPlayerController* PlayerController, int32_t MaxMissionPoints)
+{
+    APlayerState* PlayerState = PlayerController ? static_cast<APlayerState*>(PlayerController->PlayerState) : nullptr;
+    if (!PlayerState)
+    {
+        return 0;
+    }
+
+    int32_t Points = 0;
+    const FUniqueNetIdRepl& PlayerId = PlayerState->UniqueId;
+    FEarnedBadgeEntryArray& BadgeArray = EarnedBadgesArray;
+    TStructArray<FEarnedBadgeEntry>& Entries = BadgeArray.Items;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        FEarnedBadgeEntry& Entry = Entries[Index];
+        UFortBadgeItemDefinition* Badge = Entry.Badge;
+        if (!Badge || static_cast<EFortRewardType>(Entry.RewardType) != EFortRewardType::Default)
+        {
+            continue;
+        }
+        TStructArray<FEarnedBadgePlayerData>& PlayerData = Entry.PlayerData;
+        for (int32_t DataIndex = 0; DataIndex < PlayerData.Num(); ++DataIndex)
+        {
+            if (IsSamePlayer(PlayerData[DataIndex].PlayerID, PlayerId))
+            {
+                Points += Badge->GetMissionPoints() * PlayerData[DataIndex].Count;
+            }
+        }
+    }
+    return MaxMissionPoints > 0 ? std::min(Points, MaxMissionPoints) : Points;
 }
 
 void AFortMissionManager::HookVTables()

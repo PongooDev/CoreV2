@@ -89,6 +89,7 @@ void Boot::Initialize()
         UAbilitySystemComponent::HookVTables();
         UFortKismetLibrary::HookNatives();
         UFortMissionLibrary::HookNatives();
+        AFortMission::HookNatives();
         AFortPlayerController::HookVTables();
         AFortQuickBars::HookVTables();
         AFortPickup::HookVTables();

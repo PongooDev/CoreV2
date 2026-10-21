@@ -876,6 +876,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItemDefinition.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Items</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortBadgeItemDefinition.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Items</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortPickup.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Items</Filter>
     </ClInclude>
@@ -1183,6 +1186,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortItem.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortBadgeItemDefinition.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortPickup.cpp">

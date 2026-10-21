@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Engine/NetSerialization.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "Math/Rotator.h"
 #include "Misc/Guid.h"
 #include "Missions/FortMissionInfo.h"
@@ -60,6 +62,36 @@ struct FFortMissionManagerRecord
 };
 
 class AFortMission;
+class AFortPlayerController;
+class UFortBadgeItemDefinition;
+
+enum class EFortRewardType : uint8_t
+{
+    Default,
+    Missed,
+    Max_None,
+};
+
+struct FEarnedBadgePlayerData
+{
+    DefineUnrealStruct(FEarnedBadgePlayerData, FortniteGame)
+    DefineUProperty(FUniqueNetIdRepl, PlayerID)
+    DefineUProperty(int32_t, Count)
+};
+
+struct FEarnedBadgeEntry : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FEarnedBadgeEntry, FortniteGame)
+    DefineUProperty(UFortBadgeItemDefinition*, Badge)
+    DefineUStructArrayProperty(FEarnedBadgePlayerData, PlayerData)
+    DefineUProperty(EFortRewardType, RewardType)
+};
+
+struct FEarnedBadgeEntryArray : public FFastArraySerializer
+{
+    DefineUnrealStruct(FEarnedBadgeEntryArray, FortniteGame)
+    DefineUStructArrayProperty(FEarnedBadgeEntry, Items)
+};
 
 class AFortMissionManager : public AActor
 {
@@ -67,8 +99,11 @@ class AFortMissionManager : public AActor
 
 public:
     DefineUProperty(TArray<AFortMission*>, Missions)
+    DefineUStructProperty(FEarnedBadgeEntryArray, EarnedBadgesArray)
 
     void OnZoneEnd(bool bZoneCompleted);
+    void GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewardType RewardType, const TArray<AFortPlayerController*>& Players);
+    int32_t GetMissionPointsForPlayer(AFortPlayerController* PlayerController, int32_t MaxMissionPoints);
 
     static void HookVTables();
 

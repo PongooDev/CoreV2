@@ -6,7 +6,9 @@
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
 #include "Missions/FortMission.h"
+#include "Items/FortBadgeItemDefinition.h"
 #include "Missions/FortMissionLibrary.h"
+#include "Missions/FortMissionManager.h"
 #include "Missions/FortObjectiveFailedParams.h"
 #include "Missions/FortObjectiveSucceededParams.h"
 #include "Natives.h"
@@ -115,7 +117,14 @@ void AFortObjectiveBase::StopObjective(EFortObjectiveStatus Status, const FText&
     SetObjectiveStatus(Status);
     BlueprintOnObjectiveEnd(Status);
 
-    if (AFortMission* Mission = GetMission())
+    AFortMission* Mission = GetMission();
+    UFortBadgeItemDefinition* ExtraBadge = Cast<UFortBadgeItemDefinition>(ExtraBadgeToGrant);
+    AFortMissionManager* MissionManager = Mission && ExtraBadge && Status == EFortObjectiveStatus::Succeeded ? Mission->GetMissionManager() : nullptr;
+    if (MissionManager)
+    {
+        MissionManager->GrantBadge(ExtraBadge, EFortRewardType::Default, Mission->GetParticipatingMissionControllers());
+    }
+    if (Mission)
     {
         Mission->ObjectiveStatusUpdated(this, Status);
     }

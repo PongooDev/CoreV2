@@ -41,6 +41,7 @@ public:
     DefineUProperty(uint8_t, MissionType)
     DefineUProperty(FGameplayTagContainer, MissionTags)
     DefineUStructProperty(FFortMissionPlacementItems, MissionPlacementInfo)
+    DefineUProperty(int32_t, MaxMissionPoints)
 
     void GenerateMissionDifficultyOptions(FFortGeneratedDifficultyOptions& OutOptions, void* RandomStream, float GameDifficulty, AGameModeBase* GameMode, UObject* GenerationData);
 };

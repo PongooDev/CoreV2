@@ -134,6 +134,30 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                 {
                     AddMissionsToMissionManagerRecord({ PrimaryMission }, EMissionGenerationCategory::Primary, MissionGenerator);
                 }
+
+                const std::pair<TStructArray<FFortPossibleMission>*, EMissionGenerationCategory> Lists[] = {
+                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SecondaryMissionList), EMissionGenerationCategory::Secondary },
+                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->TertiaryMissionList), EMissionGenerationCategory::Tertiary },
+                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SurvivorMissionList), EMissionGenerationCategory::Survivor },
+                };
+                for (const auto& [PossibleMissions, Category] : Lists)
+                {
+                    TArray<UFortMissionInfo*> Generated;
+                    for (int32_t Index = 0; Index < PossibleMissions->Num(); ++Index)
+                    {
+                        FFortPossibleMission& Possible = (*PossibleMissions)[Index];
+                        const TAssetPtr<UFortMissionInfo>& PossibleInfo = Possible.MissionInfo;
+                        UFortMissionInfo* Info = Possible.bIsPrototype ? nullptr : PossibleInfo.LoadSynchronous();
+                        for (int32_t Count = 0; Info && Count < Possible.MinAlwaysGenerated; ++Count)
+                        {
+                            Generated.Add(Info);
+                        }
+                    }
+                    if (Generated.Num() > 0)
+                    {
+                        AddMissionsToMissionManagerRecord(Generated, Category, MissionGenerator);
+                    }
+                }
             }
         }
         bHasCreatedMissions = true;

@@ -28,6 +28,7 @@ class AFortGameStateZone : public AFortGameState
 public:
     DefineUProperty(float, GameDifficulty)
     DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
+    DefineUProperty(FString, TheaterUniqueId)
 
     UFortMissionGenerator* GetMissionGenerator() const;
     void SetGameplayState(uint8_t NewGameplayState);

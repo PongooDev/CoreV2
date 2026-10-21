@@ -1,6 +1,11 @@
 #include "pch.h"
 #include "Online/FortMcpProfileWorld.h"
+#include "Engine/World.h"
 #include "Finder.h"
+#include "FortGameState.h"
+#include "Player/FortPlayerController.h"
+#include "ReflectionParams.h"
+#include "Templates/Casts.h"
 #include "Hooks.h"
 #include "Natives.h"
 #include "UObject/Class.h"
@@ -16,8 +21,24 @@ void* UFortMcpProfileWorld::BindToPlayerController(AFortPlayerController* Player
     {
         Profile[Natives::UFortMcpProfileWorld_bIsInventoryInitialized] = 1;
     }
+
+    FFortWorldPlayerLoadout& Loadout = CachedPlayerLoadout;
+    const FString& Id = ProfileId;
+    if (Loadout.bPlayerIsNew && Id.ToStdString().rfind(L"theater", 0) == 0)
+    {
+        UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+        AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        InitializeTheater(GameState ? static_cast<const FString&>(GameState->TheaterUniqueId) : FString());
+    }
 #endif
     return Result;
+}
+
+void UFortMcpProfileWorld::InitializeTheater(const FString& TheaterGuid)
+{
+    Reflection::FParams Params(StaticFunction_InitializeTheater(), true);
+    Params.Set(L"TheaterGuid", TheaterGuid);
+    Params.Call(this);
 }
 
 void UFortMcpProfileWorld::HookVTables()

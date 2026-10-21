@@ -118,7 +118,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
             }
             if (USceneComponent* Root = NavBounds->GetRootComponent())
             {
-                Root->SetMobility(EComponentMobility::Movable);
+                Root->Mobility = EComponentMobility::Movable;
             }
             NavBounds->SetActorScale3D(WorldMax - WorldMin);
             NavBounds->SetActorLocation((WorldMin + WorldMax) * 0.5f);

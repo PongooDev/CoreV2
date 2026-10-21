@@ -352,7 +352,6 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AI\Navigation\NavigationSystem.cpp" />
-    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Components\SceneComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UserInterface\Console.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\EngineSettings\Private\EngineSettingsModule.cpp" />

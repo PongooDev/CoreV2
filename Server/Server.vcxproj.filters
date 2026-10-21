@@ -1142,9 +1142,6 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AI\Navigation\NavigationSystem.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private\AI\Navigation</Filter>
     </ClCompile>
-    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Components\SceneComponent.cpp">
-      <Filter>Engine\Source\Runtime\Engine\Private\Components</Filter>
-    </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>

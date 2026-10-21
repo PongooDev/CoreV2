@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Components/ActorComponent.h"
+#include "Containers/EnumAsByte.h"
 #include "Reflection.h"
 
 namespace EComponentMobility
@@ -16,8 +17,7 @@ namespace EComponentMobility
 class USceneComponent : public UActorComponent
 {
     DefineUnrealClass(USceneComponent, Engine)
-    DefineUFunction(SetMobility)
 
 public:
-    void SetMobility(EComponentMobility::Type NewMobility);
+    DefineUProperty(TEnumAsByte<EComponentMobility::Type>, Mobility)
 };

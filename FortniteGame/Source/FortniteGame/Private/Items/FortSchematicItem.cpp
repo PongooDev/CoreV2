@@ -47,7 +47,8 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
 {
 #if WITH_SERVER_CODE
     uint8_t FailCause = 0;
-    if (!PlayerController || Count <= 0 || !CanCraftSchematic(PlayerController, FailCause, false, Count))
+    Count = Count > 0 ? Count : 1;
+    if (!PlayerController || !CanCraftSchematic(PlayerController, FailCause, false, Count))
     {
         UE_LOG(LogFort, Warning, TEXT("ServerCraftSchematic: cannot craft %s x%d (fail cause %d)"), *GetName(), Count, static_cast<int32_t>(FailCause));
         return 0;

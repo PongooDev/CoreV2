@@ -33,6 +33,31 @@ FTransform AActor::GetTransform() const
     return Params.Call(const_cast<AActor*>(this)) ? Params.Take<FTransform>(L"ReturnValue") : FTransform();
 }
 
+void AActor::GetActorBounds(bool bOnlyCollidingComponents, FVector& Origin, FVector& BoxExtent) const
+{
+    Reflection::FParams Params(StaticFunction_GetActorBounds());
+    Params.Set(L"bOnlyCollidingComponents", bOnlyCollidingComponents);
+    const bool bCalled = Params.Call(const_cast<AActor*>(this));
+    Origin = bCalled ? Params.Take<FVector>(L"Origin") : FVector(0, 0, 0);
+    BoxExtent = bCalled ? Params.Take<FVector>(L"BoxExtent") : FVector(0, 0, 0);
+}
+
+bool AActor::SetActorLocation(const FVector& NewLocation, bool bSweep, bool bTeleport)
+{
+    Reflection::FParams Params(StaticFunction_K2_SetActorLocation(), true);
+    Params.Set(L"NewLocation", NewLocation);
+    Params.Set(L"bSweep", bSweep);
+    Params.Set(L"bTeleport", bTeleport);
+    return Params.Call(this) && Params.Take<bool>(L"ReturnValue");
+}
+
+void AActor::SetActorScale3D(const FVector& NewScale3D)
+{
+    Reflection::FParams Params(StaticFunction_SetActorScale3D());
+    Params.Set(L"NewScale3D", NewScale3D);
+    Params.Call(this);
+}
+
 FVector AActor::GetVelocity() const
 {
     FVector Velocity;

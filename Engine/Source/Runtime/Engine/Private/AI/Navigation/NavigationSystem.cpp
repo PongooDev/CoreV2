@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "AI/Navigation/NavigationSystem.h"
 #include "Natives.h"
+#include "ReflectionParams.h"
 
 void UNavigationSystem::RemoveNavigationBuildLock(uint8_t Flags)
 {
@@ -26,4 +27,11 @@ void UNavigationSystem::RebuildAll(bool bIsLoadTime)
     {
         Natives::UNavigationSystem_RebuildAll(this, bIsLoadTime);
     }
+}
+
+void UNavigationSystem::OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolume)
+{
+    Reflection::FParams Params(StaticFunction_OnNavigationBoundsUpdated());
+    Params.Set(L"NavVolume", reinterpret_cast<UObject*>(NavVolume));
+    Params.Call(this);
 }

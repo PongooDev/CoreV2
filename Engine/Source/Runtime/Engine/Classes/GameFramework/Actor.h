@@ -14,6 +14,7 @@ class ULevel;
 class UNetDriver;
 class UActorChannel;
 class UWorld;
+class USceneComponent;
 
 enum ENetRole
 {
@@ -55,7 +56,11 @@ public:
     DefineUProperty(float, MinNetUpdateFrequency)
     DefineNativeMember(TEnumAsByte<ENetDormancy>, NetDormancy, AActor_NetDormancy)
     DefineNativeBitfield(bActorInitialized, AActor_bActorInitialized, Natives::AActor_bActorInitializedMask)
+    DefineUProperty(USceneComponent*, RootComponent)
     DefineUFunction(GetTransform)
+    DefineUFunction(GetActorBounds)
+    DefineUFunction(K2_SetActorLocation)
+    DefineUFunction(SetActorScale3D)
 
     ENetRole GetRemoteRole() const { return RemoteRole; }
     AActor* GetOwner() const { return Owner; }
@@ -71,6 +76,10 @@ public:
     bool IsNetMode(ENetMode Mode) const;
 
     FTransform GetTransform() const;
+    USceneComponent* GetRootComponent() const { return RootComponent; }
+    void GetActorBounds(bool bOnlyCollidingComponents, FVector& Origin, FVector& BoxExtent) const;
+    bool SetActorLocation(const FVector& NewLocation, bool bSweep = false, bool bTeleport = false);
+    void SetActorScale3D(const FVector& NewScale3D);
     FVector GetVelocity() const;
     float GetNetPriority(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);
     bool GetNetDormancy(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);

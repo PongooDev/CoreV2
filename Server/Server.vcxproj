@@ -209,6 +209,8 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\PendingNetGame.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Player.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\NavigationSystem.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\NavMeshBoundsVolume.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\SceneComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\World.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Controller.h" />
@@ -350,6 +352,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AI\Navigation\NavigationSystem.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Components\SceneComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UserInterface\Console.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\EngineSettings\Private\EngineSettingsModule.cpp" />

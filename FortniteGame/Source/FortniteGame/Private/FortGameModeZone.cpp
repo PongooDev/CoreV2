@@ -2,6 +2,9 @@
 #include "FortGameModeZone.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIGoalManager.h"
+#include "AI/Navigation/NavigationSystem.h"
+#include "AI/Navigation/NavMeshBoundsVolume.h"
+#include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "BlueprintGameplayTagLibrary.h"
 #include "EnvironmentQuery/EnvQueryInstanceBlueprintWrapper.h"
@@ -23,6 +26,8 @@
 #include "Natives.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+
+#include <algorithm>
 
 APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
 {
@@ -75,6 +80,53 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         WorldManager->CreateMissionManager();
     }
     AFortGameMode::FinishWorldInitialization(WorldManager);
+
+    UWorld* World = GetWorld();
+    UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
+    if (NavSys)
+    {
+        bool bHasWorldBounds = false;
+        FVector WorldMin(0, 0, 0);
+        FVector WorldMax(0, 0, 0);
+        for (TObjectIterator<ABuildingActor> It; It; ++It)
+        {
+            ABuildingActor* Building = *It;
+            if (Building->GetWorld() != World || Building->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+            {
+                continue;
+            }
+            FVector Origin;
+            FVector Extent;
+            Building->GetActorBounds(true, Origin, Extent);
+            if (Extent.X <= 0.0f && Extent.Y <= 0.0f && Extent.Z <= 0.0f)
+            {
+                continue;
+            }
+            const FVector Min = Origin - Extent;
+            const FVector Max = Origin + Extent;
+            WorldMin = bHasWorldBounds ? FVector(std::min(WorldMin.X, Min.X), std::min(WorldMin.Y, Min.Y), std::min(WorldMin.Z, Min.Z)) : Min;
+            WorldMax = bHasWorldBounds ? FVector(std::max(WorldMax.X, Max.X), std::max(WorldMax.Y, Max.Y), std::max(WorldMax.Z, Max.Z)) : Max;
+            bHasWorldBounds = true;
+        }
+
+        for (TObjectIterator<ANavMeshBoundsVolume> It; It && bHasWorldBounds; ++It)
+        {
+            ANavMeshBoundsVolume* NavBounds = *It;
+            if (NavBounds->GetWorld() != World || NavBounds->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+            {
+                continue;
+            }
+            if (USceneComponent* Root = NavBounds->GetRootComponent())
+            {
+                Root->SetMobility(EComponentMobility::Movable);
+            }
+            NavBounds->SetActorScale3D(WorldMax - WorldMin);
+            NavBounds->SetActorLocation((WorldMin + WorldMax) * 0.5f);
+            NavSys->OnNavigationBoundsUpdated(NavBounds);
+        }
+
+        NavSys->ReleaseInitialBuildingLock();
+    }
 #endif
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FortGameData.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
 
@@ -11,4 +12,6 @@ class UFortMissionGenerator : public UObject
 
 public:
     DefineUProperty(TAssetPtr<UFortMissionInfo>, PrimaryMissionInfo)
+    DefineBitfieldUProperty(bUseOverridePlayerSpawnPadPlacementData)
+    DefineUStructProperty(FFortPlayerSpawnPadPlacementData, OverridePlayerSpawnPadPlacementData)
 };

@@ -8,6 +8,7 @@ class UPlayer;
 struct FUniqueNetIdRepl;
 class AFortAIGoalManager;
 class UEnvQueryInstanceBlueprintWrapper;
+struct FFortPlayerSpawnPadPlacementData;
 
 class AFortGameModeZone : public AFortGameMode
 {
@@ -25,6 +26,7 @@ public:
     void CreateAIDirector();
     APlayerController* Login(UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage);
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
+    FFortPlayerSpawnPadPlacementData* GetPlayerSpawnPadPlacementData();
     void PlacePlayerSpawnPad(AFortWorldManager* WorldManager);
     void OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldManager, UEnvQueryInstanceBlueprintWrapper* PlacementQuery);
 

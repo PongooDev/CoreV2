@@ -14,6 +14,7 @@
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "FortGameState.h"
+#include "UI/FrontEnd/FortMissionGenerator.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
@@ -194,11 +195,24 @@ APlayerController* AFortGameModeZone::Login(UPlayer* NewPlayer, ENetRole InRemot
     return NewPlayerController;
 }
 
+FFortPlayerSpawnPadPlacementData* AFortGameModeZone::GetPlayerSpawnPadPlacementData()
+{
+    UWorld* World = GetWorld();
+    AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    UFortMissionGenerator* MissionGenerator = GameState ? GameState->GetMissionGenerator() : nullptr;
+    if (MissionGenerator && MissionGenerator->bUseOverridePlayerSpawnPadPlacementData)
+    {
+        return &static_cast<FFortPlayerSpawnPadPlacementData&>(MissionGenerator->OverridePlayerSpawnPadPlacementData);
+    }
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    return GameData ? &static_cast<FFortPlayerSpawnPadPlacementData&>(GameData->DefaultPlayerSpawnPadPlacementData) : nullptr;
+}
+
 void AFortGameModeZone::PlacePlayerSpawnPad(AFortWorldManager* WorldManager)
 {
 #if WITH_SERVER_CODE
-    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    UEnvQuery* PlacementQuery = GameData ? GameData->DefaultPlayerSpawnPadPlacementData.PlacementQuery : nullptr;
+    FFortPlayerSpawnPadPlacementData* PlacementData = GetPlayerSpawnPadPlacementData();
+    UEnvQuery* PlacementQuery = PlacementData ? static_cast<UEnvQuery*>(PlacementData->PlacementQuery) : nullptr;
     UEnvQueryInstanceBlueprintWrapper* Query = PlacementQuery ? UEnvQueryManager::RunEQSQuery(this, PlacementQuery, this, EEnvQueryRunMode::SingleResult, nullptr) : nullptr;
     if (!Query)
     {
@@ -215,8 +229,8 @@ void AFortGameModeZone::OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldMa
 #if WITH_SERVER_CODE
     const TArray<AActor*> Results = PlacementQuery ? PlacementQuery->GetResultsAsActors() : TArray<AActor*>();
     ABuildingActor* PlacementActor = Results.Num() > 0 ? Cast<ABuildingActor>(Results[0]) : nullptr;
-    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    if (!PlacementActor || !WorldManager || !GameData)
+    FFortPlayerSpawnPadPlacementData* PlacementData = GetPlayerSpawnPadPlacementData();
+    if (!PlacementActor || !WorldManager || !PlacementData)
     {
         UE_LOG(LogFortPlacement, Error, TEXT("PlacePlayerSpawnPad: No valid placement actor could be found!  Failed to spawn player spawn pad."));
         return;
@@ -224,11 +238,10 @@ void AFortGameModeZone::OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldMa
 
     UE_LOG(LogFortPlacement, Log, TEXT("PlacePlayerSpawnPad: Found spot %s with initial tags"), *PlacementActor->GetName());
 
-    FFortPlayerSpawnPadPlacementData& PlacementData = GameData->DefaultPlayerSpawnPadPlacementData;
-    if (AActor* SpawnPad = WorldManager->SpawnPlayerSpawnPad(PlacementData, PlacementActor->GetTransform()))
+    if (AActor* SpawnPad = WorldManager->SpawnPlayerSpawnPad(*PlacementData, PlacementActor->GetTransform()))
     {
         FGameplayTagContainer& PlacementTags = PlacementActor->StaticGameplayTags;
-        UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(PlacementTags, PlacementData.TagsToAddToChosenPlacementActor);
+        UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(PlacementTags, PlacementData->TagsToAddToChosenPlacementActor);
         ActiveSpawnPad = SpawnPad;
     }
 #endif

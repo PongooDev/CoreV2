@@ -364,11 +364,12 @@ namespace
             return Found->second;
         }
         Context.Footprints[Function] = { 0, 0 };
-        if (Finder::FunctionStart(Function) != Function)
+        if (Function < Finder::TextBegin() || Function >= Finder::TextEnd())
         {
             return { 0, 0 };
         }
-        const auto Result = Vote(Context, Walk(Function, Function, Finder::FunctionEnd(Function), Rcx), Depth);
+        const uintptr_t End = Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : Function + 0x400;
+        const auto Result = Vote(Context, Walk(Function, Function, End, Rcx), Depth);
         Context.Footprints[Function] = Result;
         return Result;
     }
@@ -429,9 +430,11 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
         {
             ++GoalManager;
         }
+        const uintptr_t ImageBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
         if (GoalManager && !Director)
         {
             Result.push_back(reinterpret_cast<uint8_t*>(Site));
+            Log::Info(L"Finder: AFortAIGoalManager::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);
         }
     }
     Log::Info(L"Finder: {} AFortAIGoalManager::GetCurrent call sites classified", Result.size());

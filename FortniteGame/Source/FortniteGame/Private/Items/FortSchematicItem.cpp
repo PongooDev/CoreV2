@@ -7,6 +7,7 @@
 #include "Items/FortItemDefinition.h"
 #include "Items/FortSchematicItemDefinition.h"
 #include "Log.h"
+#include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
@@ -15,6 +16,8 @@
 #include "UObject/UObjectIterator.h"
 
 #include <algorithm>
+
+DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 void UFortSchematicItem::GetSchematicRequirements(TStructArray<FSchematicRequirement>& Requirements) const
 {
@@ -46,6 +49,7 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
     uint8_t FailCause = 0;
     if (!PlayerController || Count <= 0 || !CanCraftSchematic(PlayerController, FailCause, false, Count))
     {
+        UE_LOG(LogFort, Warning, TEXT("ServerCraftSchematic: cannot craft %s x%d (fail cause %d)"), *GetName(), Count, static_cast<int32_t>(FailCause));
         return 0;
     }
 
@@ -54,6 +58,7 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
     const int32_t QuantityProduced = GetSchematicQuantityProduced() * Count;
     if (!ResultDefinition || QuantityProduced <= 0)
     {
+        UE_LOG(LogFort, Warning, TEXT("ServerCraftSchematic: %s has no result item (definition %s, quantity %d)"), *GetName(), *GetNameSafe(Definition), QuantityProduced);
         return 0;
     }
 

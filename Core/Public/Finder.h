@@ -69,6 +69,7 @@ namespace Finder
     bool ResolveWorldItemLive(void** InventoryOwnerVTable);
     bool ResolveMcpProfileWorldLive(void** ProfileVTable);
     bool ResolveGoalManagerLive();
+    bool ResolveGoalDiscouragementLive();
     bool ResolveQueryGeneratorsLive(void** EnemiesVTable);
     bool ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTable, UClass* GoalItemType);
     bool ResolveNavigationSystemLive();

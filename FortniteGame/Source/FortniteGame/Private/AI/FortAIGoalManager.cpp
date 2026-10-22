@@ -12,6 +12,8 @@
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 
+#include <cstring>
+
 AFortAIGoalManager* AFortAIGoalManager::GetCurrent(const UObject* WorldContextObject)
 {
 #if WITH_SERVER_CODE
@@ -21,6 +23,97 @@ AFortAIGoalManager* AFortAIGoalManager::GetCurrent(const UObject* WorldContextOb
 #else
     return nullptr;
 #endif
+}
+
+TStructArray<FAIDiscouragedGoalTimer>& FAIAssignmentInfo::GetDiscouragedGoalTimers() const
+{
+    return *reinterpret_cast<TStructArray<FAIDiscouragedGoalTimer>*>(reinterpret_cast<uintptr_t>(this) + Natives::FAIAssignmentInfo_DiscouragedGoalTimers);
+}
+
+void FAIAssignmentInfo::ClearExpiredFrustrationDiscouragements(double CurrentTime)
+{
+    TStructArray<FAIDiscouragedGoalTimer>& Timers = GetDiscouragedGoalTimers();
+    for (int32_t Index = Timers.Num() - 1; Index >= 0; --Index)
+    {
+        if (Timers[Index].ExpirationTime <= CurrentTime)
+        {
+            Timers.RemoveAt(Index);
+        }
+    }
+}
+
+FAIAssignmentInfo* AFortAIGoalManager::GetAssignmentInfo(AFortAIController* AI)
+{
+    if (!AI || !Finder::ResolveGoalDiscouragementLive())
+    {
+        return nullptr;
+    }
+    return static_cast<FAIAssignmentInfo*>(Natives::AFortAIGoalManager_GetAssignmentInfo(this, AI));
+}
+
+void AFortAIGoalManager::SetFrustrationDiscouragement(AFortAIController* AI, float DiscouragementDuration)
+{
+#if WITH_SERVER_CODE
+    FAIAssignmentInfo* AssignmentInfo = GetAssignmentInfo(AI);
+    UWorld* World = AssignmentInfo ? GetWorld() : nullptr;
+    if (!World)
+    {
+        return;
+    }
+
+    const double CurrentTime = World->GetTimeSeconds();
+    AssignmentInfo->ClearExpiredFrustrationDiscouragements(CurrentTime);
+
+    FFortAIGoalInfo& CurrentGoal = AssignmentInfo->CurrentGoal;
+    TStructArray<FAIDiscouragedGoalTimer>& Timers = AssignmentInfo->GetDiscouragedGoalTimers();
+    for (int32_t Index = 0; Index < Timers.Num(); ++Index)
+    {
+        FAIDiscouragedGoalTimer& Timer = Timers[Index];
+        FFortAIGoalInfo& DiscouragedGoalInfo = Timer.DiscouragedGoalInfo;
+        if (DiscouragedGoalInfo.Actor == CurrentGoal.Actor)
+        {
+            Timer.ExpirationTime = CurrentTime + DiscouragementDuration;
+            Timer.NumberOfTimesMarkedForDiscouragement = Timer.NumberOfTimesMarkedForDiscouragement + 1;
+            return;
+        }
+    }
+
+    FAIDiscouragedGoalTimer& Timer = Timers.AddDefaulted();
+    FFortAIGoalInfo& DiscouragedGoalInfo = Timer.DiscouragedGoalInfo;
+    std::memcpy(&DiscouragedGoalInfo, &CurrentGoal, FFortAIGoalInfo::StaticStruct()->GetStructureSize());
+    Timer.ExpirationTime = CurrentTime + DiscouragementDuration;
+    Timer.NumberOfTimesMarkedForDiscouragement = 1;
+#endif
+}
+
+void AFortAIGoalManager::SetCurrentGoalDiscouragement(UObject* WorldContext, AFortAIController* AI)
+{
+#if WITH_SERVER_CODE
+    constexpr float DefaultDiscouragementDuration = 60.f;
+    if (AFortAIGoalManager* GoalManager = GetCurrent(WorldContext))
+    {
+        GoalManager->SetFrustrationDiscouragement(AI, DefaultDiscouragementDuration);
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortAIGoalManager::execSetCurrentGoalDiscouragement)
+{
+    P_GET_OBJECT(UObject, Z_Param_WorldContext);
+    P_GET_OBJECT(AFortAIController, Z_Param_AI);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    AFortAIGoalManager::SetCurrentGoalDiscouragement(Z_Param_WorldContext, Z_Param_AI);
+    P_NATIVE_END;
+}
+
+void AFortAIGoalManager::HookNatives()
+{
+    if (UFunction* Function = StaticFunction_SetCurrentGoalDiscouragement(); Function && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        Function->SetNativeFunc(&execSetCurrentGoalDiscouragement);
+        Log::Info(L"Hook AFortAIGoalManager::SetCurrentGoalDiscouragement: native");
+    }
 }
 
 UObject* AFortAIController::GetEncounterInfo()

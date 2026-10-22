@@ -3,6 +3,9 @@
 #include "Containers/Array.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Controller.h"
+#include "StructArray.h"
+#include "UObject/Stack.h"
+#include "UObject/WeakObjectPtr.h"
 
 class UObject;
 
@@ -24,6 +27,29 @@ struct FFortAIAssignmentIdentifier
 struct FFortAIGoal
 {
     DefineUnrealStruct(FFortAIGoal, FortniteGame)
+};
+
+struct FFortAIGoalInfo
+{
+    DefineUnrealStruct(FFortAIGoalInfo, FortniteGame)
+    DefineUProperty(FWeakObjectPtr, Actor)
+};
+
+struct FAIDiscouragedGoalTimer
+{
+    DefineUnrealStruct(FAIDiscouragedGoalTimer, FortniteGame)
+    DefineUStructProperty(FFortAIGoalInfo, DiscouragedGoalInfo)
+    DefineUProperty(double, ExpirationTime)
+    DefineUProperty(uint32_t, NumberOfTimesMarkedForDiscouragement)
+};
+
+struct FAIAssignmentInfo
+{
+    DefineUnrealStruct(FAIAssignmentInfo, FortniteGame)
+    DefineUStructProperty(FFortAIGoalInfo, CurrentGoal)
+
+    TStructArray<FAIDiscouragedGoalTimer>& GetDiscouragedGoalTimers() const;
+    void ClearExpiredFrustrationDiscouragements(double CurrentTime);
 };
 
 class AAIController : public AController
@@ -74,13 +100,20 @@ public:
 class AFortAIGoalManager : public AActor
 {
     DefineUnrealClass(AFortAIGoalManager, FortniteGame)
+    DefineUFunction(SetCurrentGoalDiscouragement)
 
 public:
     DefineUProperty(TArray<UObject*>, WorldAssignments)
     DefineUProperty(TArray<UObject*>, WorldEnemyAssignments)
 
     UObject* FindAssignment(const FFortAIAssignmentIdentifier& Identifier, UObject* EncounterInfo);
+    FAIAssignmentInfo* GetAssignmentInfo(AFortAIController* AI);
+    void SetFrustrationDiscouragement(AFortAIController* AI, float DiscouragementDuration);
 
     static AFortAIGoalManager* GetCurrent(const UObject* WorldContextObject);
+    static void SetCurrentGoalDiscouragement(UObject* WorldContext, AFortAIController* AI);
     static void HookCallSites();
+    static void HookNatives();
+
+    DECLARE_FUNCTION(execSetCurrentGoalDiscouragement);
 };

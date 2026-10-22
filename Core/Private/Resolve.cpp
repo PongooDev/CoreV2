@@ -3581,6 +3581,67 @@ bool Finder::ResolveGoalManagerLive()
     return true;
 }
 
+bool Finder::ResolveGoalDiscouragementLive()
+{
+    if (Natives::AFortAIGoalManager_GetAssignmentInfo && Natives::FAIAssignmentInfo_DiscouragedGoalTimers >= 0 && Natives::UBTTaskNode_ExecuteTaskIndex >= 0)
+    {
+        return true;
+    }
+
+    void** TestVTable = CdoVTable(L"/Script/FortniteGame.FortQueryTest_GoalFrustrationDiscouragement");
+    void** TestBaseVTable = CdoVTable(L"/Script/AIModule.EnvQueryTest");
+    uintptr_t Lookup = 0;
+    int32_t TimersOffset = -1;
+    for (int32_t Index = 1; TestVTable && TestBaseVTable && Index < 0x80 && TimersOffset < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(TestVTable, Index);
+        const uintptr_t FunctionEnd = Function && Function != VTableEntry(TestBaseVTable, Index) ? Finder::FunctionEnd(Function) : 0;
+        for (const auto& [Call, Target] : FunctionEnd > Function ? Finder::DirectCalls(Function, FunctionEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            const uintptr_t First = TargetEnd > Target && TargetEnd - Target < 0x80 ? FindRawCall(Target, TargetEnd) : 0;
+            const uintptr_t Reader = First && Byte(TargetEnd - 5) == 0xE9 ? Finder::RelativeTarget(TargetEnd - 5, 1, 5) : 0;
+            for (uintptr_t Site = Reader; Site && Site + 4 <= Reader + 0x20 && TimersOffset < 0; ++Site)
+            {
+                const uint8_t Displacement = Byte(Site + 3);
+                const bool bLoadsData = (Byte(Site) == 0x48 || Byte(Site) == 0x4C) && Byte(Site + 1) == 0x8B && (Byte(Site + 2) & 0xC7) == 0x41;
+                if (bLoadsData && FindInstruction(Reader, Reader + 0x30, { 0x48, 0x63, 0x41, Displacement + 8 }))
+                {
+                    TimersOffset = Displacement;
+                    Lookup = Finder::RelativeTarget(First, 1, 5);
+                }
+            }
+            if (TimersOffset >= 0)
+            {
+                break;
+            }
+        }
+    }
+
+    void** TaskVTable = CdoVTable(L"/Script/FortniteGame.FortBTTask_SetFrustrationDiscouragement");
+    void** TaskNodeVTable = CdoVTable(L"/Script/AIModule.BTTaskNode");
+    int32_t ExecuteTaskIndex = -1;
+    for (int32_t Index = 1; TaskVTable && TaskNodeVTable && Index < 0x80 && ExecuteTaskIndex < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(TaskVTable, Index);
+        if (Function && Function != VTableEntry(TaskNodeVTable, Index))
+        {
+            ExecuteTaskIndex = Index;
+        }
+    }
+
+    if (!Lookup || TimersOffset < 0 || ExecuteTaskIndex < 0)
+    {
+        Log::Error(L"Finder: goal discouragement not found (assignment info {}, timers {}, ExecuteTask slot {})", Lookup != 0, TimersOffset, ExecuteTaskIndex);
+        return false;
+    }
+    Natives::AFortAIGoalManager_GetAssignmentInfo = reinterpret_cast<decltype(Natives::AFortAIGoalManager_GetAssignmentInfo)>(Lookup);
+    Natives::FAIAssignmentInfo_DiscouragedGoalTimers = TimersOffset;
+    Natives::UBTTaskNode_ExecuteTaskIndex = ExecuteTaskIndex;
+    Log::Info(L"Finder: AFortAIGoalManager assignment info lookup at 0x{:X}, FAIAssignmentInfo discouraged goal timers +0x{:X}, UBTTaskNode::ExecuteTask slot 0x{:X}", Lookup - Finder::ImageBase(), TimersOffset, ExecuteTaskIndex);
+    return true;
+}
+
 bool Finder::ResolveQueryGeneratorsLive(void** EnemiesVTable)
 {
     const uintptr_t Enemies = FunctionOf(L"NULL AIOwner (controller) of Enemies generator.  Cannot generate enemies.");

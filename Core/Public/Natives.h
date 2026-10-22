@@ -255,6 +255,9 @@ namespace Natives
     inline ptrdiff_t FEnvQueryInstance_ValueSize = -1;
     inline ptrdiff_t FEnvQueryInstance_Owner = -1;
     inline ptrdiff_t UFortAIAssignment_Goals = -1;
+    inline void* (*AFortAIGoalManager_GetAssignmentInfo)(UObject* This, UObject* AI) = nullptr;
+    inline ptrdiff_t FAIAssignmentInfo_DiscouragedGoalTimers = -1;
+    inline int32_t UBTTaskNode_ExecuteTaskIndex = -1;
     inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;
     inline int32_t UEnvQueryContext_ProvideContextIndex = -1;
     inline void* (*UObject_GetInterfaceAddress)(UObject* This, UClass* InterfaceClass) = nullptr;

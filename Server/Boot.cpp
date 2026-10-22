@@ -29,6 +29,7 @@
 #include "Missions/FortMissionManager.h"
 #include "Online/FortMcpProfileWorld.h"
 #include "AI/FortAIGoalManager.h"
+#include "AI/FortBTTask_SetFrustrationDiscouragement.h"
 #include "AI/FortQueryContexts.h"
 #include "AI/FortQueryGenerators.h"
 #include "Missions/FortObjectiveBase.h"
@@ -110,6 +111,8 @@ void Boot::Initialize()
         AFortWorldManager::HookCallSites();
         UFortMcpProfileWorld::HookVTables();
         AFortAIGoalManager::HookCallSites();
+        AFortAIGoalManager::HookNatives();
+        UFortBTTask_SetFrustrationDiscouragement::HookVTables();
         UFortQueryGenerator_Enemies::HookVTables();
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
         Finder::ResolveNavigationSystemLive();

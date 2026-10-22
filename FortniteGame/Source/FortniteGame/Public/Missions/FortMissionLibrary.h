@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GameplayTagContainer.h"
+#include "Missions/FortObjectiveBase.h"
 #include "Misc/Guid.h"
 #include "Math/Vector.h"
 #include "UObject/NameTypes.h"
@@ -9,6 +10,7 @@
 
 class AFortPickup;
 class AFortPlayerController;
+class UFortAIEncounterInfo;
 class UFortSchematicItemDefinition;
 class UFortWorldItemDefinition;
 
@@ -20,6 +22,7 @@ class UFortMissionLibrary : public UObject
     DefineUFunction(GiveMissionRewardsToPlayerAsPickups)
     DefineUFunction(SpawnMissionItemPickupInWorld)
     DefineUFunction(GiveMissionSchematicItemDirectlyToPlayer)
+    DefineUFunction(StopAIEncounter)
 
 public:
     static void ExecuteMissionEvent(UObject* WorldContextObject, FName EventType, UObject* Params);
@@ -29,11 +32,13 @@ public:
     static void GiveMissionRewardsToPlayerAsPickups(UObject* WorldContextObject, const FGuid& MissionGUID, AFortPlayerController* PlayerController, const FVector& StartPosition, float Radius, FName LootTierGroup, int32_t LootTier);
     static AFortPickup* SpawnMissionItemPickupInWorld(UObject* WorldContextObject, const FGuid& MissionGuid, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount);
     static bool GiveMissionSchematicItemDirectlyToPlayer(UObject* WorldContextObject, AFortPlayerController* TargetPlayer, const FGuid& MissionGuid, UFortSchematicItemDefinition* SchematicDefinition);
+    static void StopAIEncounter(UObject* WorldContextObject, UFortAIEncounterInfo* ActiveEncounter, EFortObjectiveStatus EncounterStopReason);
 
     DECLARE_FUNCTION(execSpawnAndCollectPlayerPickups);
     DECLARE_FUNCTION(execGiveMissionRewardsToPlayerAsPickups);
     DECLARE_FUNCTION(execSpawnMissionItemPickupInWorld);
     DECLARE_FUNCTION(execGiveMissionSchematicItemDirectlyToPlayer);
+    DECLARE_FUNCTION(execStopAIEncounter);
 
     static void HookNatives();
 };

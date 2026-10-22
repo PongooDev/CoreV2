@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Missions/FortMissionLibrary.h"
+#include "AI/FortAIDirector.h"
+#include "AI/FortAIGoalManager.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
@@ -7,6 +9,7 @@
 #include "Items/FortPickup.h"
 #include "Items/FortSchematicItemDefinition.h"
 #include "Log.h"
+#include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
@@ -16,6 +19,8 @@
 #include "UObject/UObjectGlobals.h"
 
 #include <vector>
+
+DEFINE_LOG_CATEGORY_STATIC(LogFortAIDirector, Log, All);
 
 namespace
 {
@@ -212,6 +217,35 @@ DEFINE_FUNCTION(UFortMissionLibrary::execGiveMissionSchematicItemDirectlyToPlaye
     P_NATIVE_END;
 }
 
+void UFortMissionLibrary::StopAIEncounter(UObject* WorldContextObject, UFortAIEncounterInfo* ActiveEncounter, EFortObjectiveStatus EncounterStopReason)
+{
+#if WITH_SERVER_CODE
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    if (World && ActiveEncounter)
+    {
+        if (AFortAIDirector* AIDirector = AFortAIDirector::GetCurrent(World))
+        {
+            AIDirector->StopEncounter(ActiveEncounter, EncounterStopReason);
+        }
+    }
+    else
+    {
+        UE_LOG(LogFortAIDirector, Warning, TEXT("UFortMissionLibrary::StopAIEncounter: No ActiveEncounter or WorldContext!"));
+    }
+#endif
+}
+
+DEFINE_FUNCTION(UFortMissionLibrary::execStopAIEncounter)
+{
+    P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
+    P_GET_OBJECT(UFortAIEncounterInfo, Z_Param_ActiveEncounter);
+    P_GET_PROPERTY(UByteProperty, Z_Param_EncounterStopReason);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    StopAIEncounter(Z_Param_WorldContextObject, Z_Param_ActiveEncounter, EFortObjectiveStatus{ Z_Param_EncounterStopReason });
+    P_NATIVE_END;
+}
+
 void UFortMissionLibrary::HookNatives()
 {
     if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
@@ -233,6 +267,11 @@ void UFortMissionLibrary::HookNatives()
     {
         Function->SetNativeFunc(&execSpawnMissionItemPickupInWorld);
         Log::Info(L"Hook UFortMissionLibrary::SpawnMissionItemPickupInWorld: native");
+    }
+    if (UFunction* Function = StaticFunction_StopAIEncounter())
+    {
+        Function->SetNativeFunc(&execStopAIEncounter);
+        Log::Info(L"Hook UFortMissionLibrary::StopAIEncounter: native");
     }
 
     ClientGivePlayerLocalAccountItemFunction = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerController:ClientGivePlayerLocalAccountItem");

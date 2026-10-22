@@ -90,6 +90,22 @@ namespace
         }
         P_FINISH;
     }
+
+    // StopMissionAIEncounter hands the encounter to the director right after the folded GetCurrent:
+    // AIDirector->StopEncounter(Encounter, EFortObjectiveStatus::Max_None, false, true), the reason loaded with
+    // lea r8d, [r9+imm8] (r9d = 0) just before the call. That callee is AFortAIDirector::StopEncounter.
+    void ResolveStopEncounter(uintptr_t GetCurrentCall)
+    {
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(GetCurrentCall + 5, GetCurrentCall + 0x40);
+        const uint8_t* Load = Calls.empty() ? nullptr : reinterpret_cast<const uint8_t*>(Calls.front().first - 4);
+        if (!Load || Load[0] != 0x45 || Load[1] != 0x8D || Load[2] != 0x41)
+        {
+            Log::Error(L"Finder: AFortAIDirector::StopEncounter call in AFortMission::StopMissionAIEncounter not found");
+            return;
+        }
+        Natives::AFortAIDirector_StopEncounter = reinterpret_cast<decltype(Natives::AFortAIDirector_StopEncounter)>(Calls.front().second);
+        Log::Info(L"Finder: AFortAIDirector::StopEncounter +0x{:X}", Calls.front().second - Finder::ImageBase());
+    }
 }
 
 void AFortMission::HookCallSites()
@@ -98,6 +114,10 @@ void AFortMission::HookCallSites()
     {
         if (uint8_t* Call = Finder::NullGetCurrentCall(Function))
         {
+            if (Function == StaticFunction_StopMissionAIEncounter())
+            {
+                ResolveStopEncounter(reinterpret_cast<uintptr_t>(Call));
+            }
             Hooks::RedirectCall(L"AFortAIDirector::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIDirector::GetCurrent));
         }
         else

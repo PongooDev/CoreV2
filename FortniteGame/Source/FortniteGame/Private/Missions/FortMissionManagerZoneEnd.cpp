@@ -46,6 +46,21 @@ namespace
         }
         return Name;
     }
+
+    // "<badge> x<count> (<mission points> MP)" for each badge in a report activity's items. The results screen's chest
+    // (Results_BadgeLoot) shows only badges whose BadgeScoring MissionPoints are above 0, and its loot level is the
+    // rewarded badges' MissionPoints / 5 + 1 (Results_Summary).
+    std::wstring DescribeBadges(TStructArray<FFortItemEntry>& Items)
+    {
+        std::wstring Text;
+        for (int32_t Index = 0; Index < Items.Num(); ++Index)
+        {
+            UFortItemDefinition* Definition = Items[Index].ItemDefinition;
+            UFortBadgeItemDefinition* Badge = Cast<UFortBadgeItemDefinition>(reinterpret_cast<UObject*>(Definition));
+            Text += std::format(L"{}{} x{} ({} MP)", Text.empty() ? L"" : L", ", Definition ? Definition->GetName().ToStdString() : std::wstring(L"None"), static_cast<int32_t>(Items[Index].Count), Badge ? Badge->GetMissionPoints() : 0);
+        }
+        return Text.empty() ? std::wstring(L"none") : Text;
+    }
 }
 
 void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
@@ -111,7 +126,17 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
             {
                 PlayerState->bIsFinalizingExperience = true;
             }
-            QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, GetMissionPointsForPlayer(PlayerController, MaxMissionPoints), PlayerController->bShouldReceiveCriticalMatchBonus);
+            const int32_t MissionPoints = GetMissionPointsForPlayer(PlayerController, MaxMissionPoints);
+            TStructArray<FFortRewardActivity>& Activities = Report.RewardActivities;
+            for (int32_t Index = 0; Index < Activities.Num(); ++Index)
+            {
+                FFortRewardActivity& Activity = Activities[Index];
+                if (Activity.ActivityType == EFortRewardActivityType::GetMissionPrimary())
+                {
+                    Log::Info(L"OnZoneEnd: {} badges {}; missed {}; mission points {}", PlayerController->GetName().ToStdString(), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.RewardItems)), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.MissedRewardItems)), MissionPoints);
+                }
+            }
+            QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus);
         }
     }
 
@@ -322,6 +347,7 @@ void AFortMissionManager::GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewar
         Data->Count = Data->Count + 1;
     }
     BadgeArray.MarkItemDirty(*Entry);
+    Log::Info(L"AFortMissionManager::GrantBadge: {} ({}, {} MP) to {} player(s)", Badge->GetName().ToStdString(), RewardType.ToString(), Badge->GetMissionPoints(), Players.Num());
     for (AFortPlayerController* PlayerController : Players)
     {
         SyncMissionRewardItems(PlayerController);

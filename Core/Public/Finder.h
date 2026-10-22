@@ -9,6 +9,14 @@ class UFunction;
 
 namespace Finder
 {
+    struct FEarnScoreCallSites
+    {
+        uint8_t* GateCall = nullptr;
+        uint8_t* ScoreCall = nullptr;
+        uint8_t* GrowCall = nullptr;
+        uint8_t* ContextCall = nullptr;
+    };
+
     uintptr_t ImageBase();
     uintptr_t TextBegin();
     uintptr_t TextEnd();
@@ -65,6 +73,7 @@ namespace Finder
     bool ResolveNavigationSystemLive();
     bool ResolveOutpostOwnerLive();
     bool ResolveBadgeScoresLive();
+    bool ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, ptrdiff_t FinalizingExperienceOffset, FEarnScoreCallSites& OutSites);
     bool ResolveLeaveOutpostLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();

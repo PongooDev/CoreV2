@@ -117,6 +117,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
     if (AFortGameMode* FortGameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr)
     {
         FortGameMode->SetBadgeScores();
+        FortGameMode->SendEarnScore();
     }
     UFortMissionLibrary::ExecuteMissionEvent(this, FName(L"EndOfZone", FNAME_Find), nullptr);
 

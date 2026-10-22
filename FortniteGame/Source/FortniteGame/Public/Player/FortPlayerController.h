@@ -55,6 +55,7 @@ public:
     UFortSchematicItem* GetSchematicForItem(const UFortItemDefinition* ItemDefinition);
 
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
+    static ptrdiff_t CriticalMatchBonusOffset();
 
     static void Hook();
     static void HookVTables();

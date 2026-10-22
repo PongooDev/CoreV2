@@ -616,6 +616,11 @@ int32_t AFortPlayerController::GetItemQuantity(const UFortItemDefinition* ItemDe
     return Quantity;
 }
 
+ptrdiff_t AFortPlayerController::CriticalMatchBonusOffset()
+{
+    return Member_bShouldReceiveCriticalMatchBonus.GetOffsetChecked();
+}
+
 UFortQuestManager* AFortPlayerController::GetQuestManager() const
 {
     UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;

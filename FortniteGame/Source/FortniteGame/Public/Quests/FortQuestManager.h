@@ -9,6 +9,8 @@ enum class EFortQuestObjectiveStatEvent : uint8_t
     Complete = 6,
 };
 
+class UFortMcpProfileAccount;
+
 class UFortQuestManager : public UObject
 {
     DefineUnrealClass(UFortQuestManager, FortniteGame)
@@ -25,5 +27,6 @@ class UFortRegisteredPlayerInfo : public UObject
     DefineUnrealClass(UFortRegisteredPlayerInfo, FortniteGame)
 
 public:
+    DefineUProperty(UFortMcpProfileAccount*, AccountProfile)
     DefineUProperty(UFortQuestManager*, QuestManager)
 };

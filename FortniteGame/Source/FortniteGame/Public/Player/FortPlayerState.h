@@ -6,6 +6,48 @@
 class UAbilitySystemComponent;
 class UFortHero;
 
+namespace EFortReplicatedStat
+{
+    enum Type
+    {
+        MonsterKills,
+        MonsterDamagePoints,
+        PlayerKills,
+        WoodGathered,
+        StoneGathered,
+        MetalGathered,
+        Deaths,
+        BuildingsBuilt,
+        BuildingsBuilt_Wood,
+        BuildingsBuilt_Stone,
+        BuildingsBuilt_Metal,
+        BuildingsUpgraded_Wood2,
+        BuildingsUpgraded_Wood3,
+        BuildingsUpgraded_Stone2,
+        BuildingsUpgraded_Stone3,
+        BuildingsUpgraded_Metal2,
+        BuildingsUpgraded_Metal3,
+        BuildingsDestroyed,
+        Repair_Wood,
+        Repair_Stone,
+        Repair_Metal,
+        FlagsCaptured,
+        FlagsReturned,
+        ContainersLooted,
+        CraftingPoints,
+        TrapPlacementPoints,
+        TrapActivationPoints,
+        TotalScore,
+        OldTotalScore,
+        CombatScore,
+        BuildingScore,
+        UtilityScore,
+        BadgesScore,
+        None,
+        MAX,
+    };
+}
+
 class AFortPlayerState : public APlayerState
 {
     DefineUnrealClass(AFortPlayerState, FortniteGame)
@@ -27,6 +69,9 @@ public:
 
     void SetHeroType(UFortHero* Hero);
     void OnRep_CharacterParts();
+    int32_t GetStat(EFortReplicatedStat::Type StatType, bool bCampaign);
+
+    static ptrdiff_t FinalizingExperienceOffset();
 
     static void Hook();
 

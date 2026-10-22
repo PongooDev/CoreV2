@@ -4221,6 +4221,98 @@ bool Finder::ResolveBadgeScoresLive()
     return true;
 }
 
+bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, ptrdiff_t FinalizingExperienceOffset, FEarnScoreCallSites& OutSites)
+{
+    uintptr_t Function = 0;
+    bool bAmbiguous = false;
+    for (uintptr_t Reference : Finder::StringRefs(L"Sending EarnScore command via account %s for %d players"))
+    {
+        const uintptr_t Start = Finder::FunctionStart(Reference);
+        bAmbiguous |= Function && Start != Function;
+        Function = Start;
+    }
+    const uintptr_t End = Function && !bAmbiguous ? Finder::FunctionEnd(Function) : 0;
+    const int32_t Index = End ? Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameMode"), reinterpret_cast<void*>(Function), 0x400) : -1;
+
+    const auto IsStub = [](uintptr_t Target, uint8_t Opcode)
+    {
+        return Byte(Target) == Opcode && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3;
+    };
+    uintptr_t GateCall = 0;
+    uintptr_t ScoreCall = 0;
+    int32_t GateCount = 0;
+    int32_t ScoreCount = 0;
+    const auto Calls = End ? Finder::DirectCalls(Function, End) : decltype(Finder::DirectCalls(0, 0)){};
+    for (const auto& [Call, Target] : Calls)
+    {
+        if (IsStub(Target, 0x32))
+        {
+            GateCall = Call;
+            ++GateCount;
+        }
+        if (IsStub(Target, 0x33))
+        {
+            ScoreCall = Call;
+            ++ScoreCount;
+        }
+    }
+
+    const int32_t Critical = static_cast<int32_t>(CriticalMatchBonusOffset);
+    const int32_t Finalizing = static_cast<int32_t>(FinalizingExperienceOffset);
+    uintptr_t CriticalLoad = 0;
+    uintptr_t FinalizingStore = 0;
+    for (uintptr_t Address = ScoreCall; Address && Address + 7 <= End; ++Address)
+    {
+        const bool bDisp32 = (Byte(Address + 2) & 0xC0) == 0x80 && (Byte(Address + 2) & 0x07) != 0x04;
+        if (!CriticalLoad && Byte(Address) == 0x0F && Byte(Address + 1) == 0xB6 && bDisp32 && *reinterpret_cast<const int32_t*>(Address + 3) == Critical)
+        {
+            CriticalLoad = Address;
+        }
+        if (!FinalizingStore && Byte(Address) == 0xC6 && (Byte(Address + 1) & 0xC0) == 0x80 && (Byte(Address + 1) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Address + 2) == Finalizing && Byte(Address + 6) == 0x01)
+        {
+            FinalizingStore = Address;
+        }
+    }
+
+    uintptr_t GrowCall = 0;
+    uintptr_t GrowTarget = 0;
+    uintptr_t ContextCall = 0;
+    uintptr_t ContextTarget = 0;
+    for (const auto& [Call, Target] : Calls)
+    {
+        if (CriticalLoad && Call > ScoreCall && Call < CriticalLoad)
+        {
+            GrowCall = Call;
+            GrowTarget = Target;
+        }
+        if (FinalizingStore && !ContextCall && Call > FinalizingStore)
+        {
+            ContextCall = Call;
+            ContextTarget = Target;
+        }
+    }
+
+    const uintptr_t TotalScoreLoad = End ? FindInstruction(Function, End, { 0x41, 0x8D, 0x50, 0x1B }) : 0;
+    const int32_t GetStatIndex = TotalScoreLoad ? VirtualSlot(FindVirtualCall(TotalScoreLoad + 4, TotalScoreLoad + 0x10)) : -1;
+
+    if (Index < 0 || GateCount != 1 || ScoreCount != 1 || !GrowCall || !ContextCall || GetStatIndex < 0)
+    {
+        Log::Error(L"Finder: AFortGameMode EarnScore sender not decoded (slot {}, gate calls {}, score calls {}, grow {}, context {}, GetStat slot {})", Index, GateCount, ScoreCount, GrowCall != 0, ContextCall != 0, GetStatIndex);
+        return false;
+    }
+
+    OutSites.GateCall = reinterpret_cast<uint8_t*>(GateCall);
+    OutSites.ScoreCall = reinterpret_cast<uint8_t*>(ScoreCall);
+    OutSites.GrowCall = reinterpret_cast<uint8_t*>(GrowCall);
+    OutSites.ContextCall = reinterpret_cast<uint8_t*>(ContextCall);
+    Natives::AFortGameMode_SendEarnScoreIndex = Index;
+    Natives::AFortGameMode_MakeEarnScoreContext = reinterpret_cast<decltype(Natives::AFortGameMode_MakeEarnScoreContext)>(ContextTarget);
+    Natives::TArray_FAccountIdAndScore_ResizeGrow = reinterpret_cast<decltype(Natives::TArray_FAccountIdAndScore_ResizeGrow)>(GrowTarget);
+    Natives::AFortPlayerState_GetStatIndex = GetStatIndex;
+    Log::Info(L"Finder: AFortGameMode EarnScore sender is slot 0x{:X}, AFortPlayerState::GetStat slot 0x{:X}", Index, GetStatIndex);
+    return true;
+}
+
 uint8_t* Finder::SharedEmptyCallInImplementation(UFunction* Function)
 {
     const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;

@@ -273,6 +273,10 @@ namespace Natives
     inline void* (*UGameInstance_GetGameSessionId)(UGameInstance* This, void* Result) = nullptr;
     inline FString* (*UEnum_GetEnumName)(const UObject* This, FString* Result, int32_t Index) = nullptr;
     inline void (*AFortGameMode_SetBadgeScores)(AFortGameMode* This) = nullptr;
+    inline int32_t AFortGameMode_SendEarnScoreIndex = -1;
+    inline void* (*AFortGameMode_MakeEarnScoreContext)(void* Result, void* Players) = nullptr;
+    inline void (*TArray_FAccountIdAndScore_ResizeGrow)(FScriptArray* Array, int32_t OldNum) = nullptr;
+    inline int32_t AFortPlayerState_GetStatIndex = -1;
     inline void (*AFortGameMode_SendStayWithParty)(AFortGameMode* This) = nullptr;
     inline int32_t AGameMode_ReturnToMainMenuHostIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;

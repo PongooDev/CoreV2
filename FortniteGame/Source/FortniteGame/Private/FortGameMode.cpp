@@ -4,9 +4,12 @@
 #include "CoreGlobals.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "FortAssetManager.h"
+#include "FortGameData.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
 #include "Log.h"
+#include "Missions/FortSharedMissionLists.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Online/FortGameSessionDedicated.h"
@@ -17,6 +20,7 @@
 #include "Templates/Casts.h"
 #include "Templates/SharedPointer.h"
 #include "UObject/CoreOnline.h"
+#include "UObject/UObjectGlobals.h"
 
 #include <utility>
 
@@ -58,6 +62,25 @@ APawn* AFortGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPlayer,
 void AFortGameMode::FinishWorldInitialization(AFortWorldManager* WorldManager)
 {
     Natives::AFortGameMode_FinishWorldInitialization(this, WorldManager);
+}
+
+UFortSharedMissionLists* AFortGameMode::GetSharedMissionLists()
+{
+    if (!SharedMissionLists)
+    {
+        UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+        UClass* SharedMissionListsClass = GameData ? static_cast<UClass*>(GameData->SharedMissionListsClass) : nullptr;
+        if (SharedMissionListsClass && SharedMissionListsClass->IsChildOf(UFortSharedMissionLists::StaticClass()))
+        {
+            SharedMissionLists = static_cast<UFortSharedMissionLists*>(SharedMissionListsClass->GetDefaultObject());
+        }
+        else
+        {
+            SharedMissionLists = NewObject<UFortSharedMissionLists>(StaticFindObject(nullptr, nullptr, L"/Engine/Transient"), UFortSharedMissionLists::StaticClass());
+            Log::Warning(L"nullptr Shared Missions Lists class specified by Game Data; created default Shared Mission Lists anyway, but some settings may be missing.");
+        }
+    }
+    return SharedMissionLists;
 }
 
 void AFortGameMode::SetBadgeScores()

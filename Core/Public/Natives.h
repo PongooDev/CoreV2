@@ -240,6 +240,8 @@ namespace Natives
     inline ptrdiff_t AFortWorldManager_MissionGenerationRandomStream = -1;
     inline int32_t AFortMission_ObjectiveStatusUpdatedIndex = -1;
     inline int32_t AFortMission_CustomHandleMissionEventIndex = -1;
+    inline int32_t AFortMission_HandleDeferredMissionEventIndex = -1;
+    inline void* (*AFortWorldManager_GetTheaterMapData)(AFortWorldManager* This) = nullptr;
     inline int32_t AFortObjectiveBase_ActivateObjectiveIndex = -1;
     inline ptrdiff_t UFortGameData_MissionGenerationData = -1;
     inline bool (*UFortSchematicItem_CanCraftSchematic)(UFortSchematicItem* This, AFortPlayerController* PlayerController, uint8_t* OutFailCause, bool bConsiderReservedItems, int32_t Count) = nullptr;

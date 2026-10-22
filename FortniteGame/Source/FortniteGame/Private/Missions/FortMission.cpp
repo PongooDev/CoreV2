@@ -7,6 +7,7 @@
 #include "Engine/World.h"
 #include "Items/FortBadgeItemDefinition.h"
 #include "Missions/FortMissionInfo.h"
+#include "Missions/FortMissionLibrary.h"
 #include "Missions/FortMissionManager.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectIterator.h"
@@ -282,6 +283,46 @@ void AFortMission::CustomHandleMissionEventHK(AFortMission* This, const FFortMis
     This->CustomHandleMissionEvent(MissionEvent);
 }
 
+int32_t AFortMission::GetDaysRemainingBeforeOverPar()
+{
+    Reflection::FParams Params(StaticFunction_GetDaysRemainingBeforeOverPar());
+    return Params.Call(this) ? Params.Take<int32_t>(L"ReturnValue") : -1;
+}
+
+bool AFortMission::IsUnderPar()
+{
+    return !bFiredParTimeEvent && GetDaysRemainingBeforeOverPar() > 0;
+}
+
+void AFortMission::HandleDeferredMissionEvent(const FFortMissionEvent& MissionEvent)
+{
+    HandleDeferredMissionEventOG(this, MissionEvent);
+
+#if WITH_SERVER_CODE
+    UFortMissionInfo* Info = MissionInfo;
+    if (Role != ROLE_Authority || !Info || !Info->UnderParBadge || Info->ParTime <= 0 || bFiredParTimeEvent)
+    {
+        return;
+    }
+    if (MissionEvent.EventType != FName(L"DayPhaseChange", FNAME_Find) || static_cast<EFortMissionStatus>(MissionStatus) != EFortMissionStatus::InProgress)
+    {
+        return;
+    }
+    if (GetDaysRemainingBeforeOverPar() > 0)
+    {
+        return;
+    }
+
+    bFiredParTimeEvent = true;
+    UFortMissionLibrary::ExecuteMissionEvent(this, FName(L"MissionParTimeHit", FNAME_Find), MissionGuid, FGameplayTagContainer(), nullptr);
+#endif
+}
+
+void AFortMission::HandleDeferredMissionEventHK(AFortMission* This, const FFortMissionEvent& MissionEvent)
+{
+    This->HandleDeferredMissionEvent(MissionEvent);
+}
+
 DEFINE_FUNCTION(AFortMission::execGetAdditionalMissionSuccessBadges)
 {
     StepEventParms(TheStack, StaticFunction_GetAdditionalMissionSuccessBadges());
@@ -343,6 +384,10 @@ void AFortMission::HookVTables()
     UObject* MissionDefault = StaticClass()->GetDefaultObject(false);
     void* const Original = MissionDefault ? (*reinterpret_cast<void***>(MissionDefault))[Index] : nullptr;
     CustomHandleMissionEventOG = reinterpret_cast<decltype(CustomHandleMissionEventOG)>(Original);
+    const bool bHasDeferred = Finder::ResolveMissionParTimeLive(reinterpret_cast<uintptr_t>(Original));
+    const int32_t DeferredIndex = Natives::AFortMission_HandleDeferredMissionEventIndex;
+    void* const DeferredOriginal = bHasDeferred && MissionDefault ? (*reinterpret_cast<void***>(MissionDefault))[DeferredIndex] : nullptr;
+    HandleDeferredMissionEventOG = reinterpret_cast<decltype(HandleDeferredMissionEventOG)>(DeferredOriginal);
     for (TObjectIterator<UClass> It; Original && It; ++It)
     {
         UClass* Class = *It;
@@ -351,6 +396,10 @@ void AFortMission::HookVTables()
         if (VTable && VTable[Index] == Original)
         {
             Hooks::SwapVTable(L"AFortMission::CustomHandleMissionEvent", VTable, Index, reinterpret_cast<void*>(&CustomHandleMissionEventHK));
+        }
+        if (VTable && DeferredOriginal && VTable[DeferredIndex] == DeferredOriginal)
+        {
+            Hooks::SwapVTable(L"AFortMission::HandleDeferredMissionEvent", VTable, DeferredIndex, reinterpret_cast<void*>(&HandleDeferredMissionEventHK));
         }
     }
 }

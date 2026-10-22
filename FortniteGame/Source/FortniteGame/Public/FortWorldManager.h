@@ -16,6 +16,7 @@ struct FFortStartingMissionInfo
 {
     DefineUnrealStruct(FFortStartingMissionInfo, FortniteGame)
     DefineUProperty(TArray<UFortMissionInfo*>, StartingMissions)
+    DefineBitfieldUProperty(bDisableSharedMissionLoading)
 };
 
 enum class EFortWorldManagerState : uint8_t
@@ -49,6 +50,7 @@ public:
 
     void OnWorldRecordQueryComplete();
     void ServerTickLoadingOrCreatingWorld();
+    void AddSharedMissionsToMissionManagerRecord();
     void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory = EMissionGenerationCategory::Max_None, UFortMissionGenerator* MissionGenerator = nullptr);
     void CreateMissionManager();
     int32_t GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName);

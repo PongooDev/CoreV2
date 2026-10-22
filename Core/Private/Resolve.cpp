@@ -4036,6 +4036,59 @@ bool Finder::ResolveMissionEventLive()
     return true;
 }
 
+bool Finder::ResolveMissionParTimeLive(uintptr_t CustomHandleMissionEvent)
+{
+    if (Natives::AFortMission_HandleDeferredMissionEventIndex >= 0)
+    {
+        return true;
+    }
+
+    const uintptr_t End = CustomHandleMissionEvent ? Finder::FunctionEnd(CustomHandleMissionEvent) : 0;
+    int32_t DeferredIndex = -1;
+    int32_t Matches = 0;
+    for (uintptr_t Site = CustomHandleMissionEvent; End && Site + 7 <= End; ++Site)
+    {
+        if (Byte(Site) != 0x48 || Byte(Site + 1) != 0x8D || (Byte(Site + 2) & 0xC7) != 0x05)
+        {
+            continue;
+        }
+        const uintptr_t Thunk = Finder::RelativeTarget(Site, 3, 7);
+        if (IsInText(Thunk) && Byte(Thunk) == 0x48 && Byte(Thunk + 1) == 0x8B && Byte(Thunk + 2) == 0x01 && Byte(Thunk + 3) == 0xFF && Byte(Thunk + 4) == 0xA0)
+        {
+            const int32_t Displacement = *reinterpret_cast<const int32_t*>(Thunk + 5);
+            DeferredIndex = Displacement % 8 == 0 ? Displacement / 8 : -1;
+            ++Matches;
+        }
+    }
+
+    if (Matches != 1 || DeferredIndex < 0)
+    {
+        Log::Error(L"Finder: AFortMission deferred mission event slot not found ({} matches)", Matches);
+        return false;
+    }
+    Natives::AFortMission_HandleDeferredMissionEventIndex = DeferredIndex;
+    Log::Info(L"Finder: AFortMission deferred mission event handler is slot 0x{:X}", DeferredIndex);
+    return true;
+}
+
+bool Finder::ResolveTheaterMapDataLive()
+{
+    if (Natives::AFortWorldManager_GetTheaterMapData)
+    {
+        return true;
+    }
+
+    const uintptr_t Function = FunctionOf(L"ZoneInfo Invalid!");
+    if (!Function)
+    {
+        Log::Error(L"Finder: AFortWorldManager::GetTheaterMapData not found");
+        return false;
+    }
+    Natives::AFortWorldManager_GetTheaterMapData = reinterpret_cast<decltype(Natives::AFortWorldManager_GetTheaterMapData)>(Function);
+    Log::Info(L"Finder: AFortWorldManager::GetTheaterMapData found");
+    return true;
+}
+
 bool Finder::ResolveLoginLive()
 {
     const uintptr_t GameModeBaseLogin = FunctionOf(L"Login: Couldn't spawn player controller of class %s");

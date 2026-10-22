@@ -1,12 +1,14 @@
 #pragma once
 
 #include "GameFramework/GameMode.h"
+#include "GameplayTagContainer.h"
 
 class AActor;
 class AController;
 class AFortGameSession;
 class AFortPlayerController;
 class AFortWorldManager;
+class UFortSharedMissionLists;
 class APawn;
 class FScriptArray;
 struct FAccountIdAndScore;
@@ -21,12 +23,15 @@ public:
     DefineUProperty(AFortGameSession*, FortGameSession)
     DefineBitfieldUProperty(bWorldIsReady)
     DefineUProperty(UClass*, MissionManagerClass)
+    DefineUProperty(FGameplayTagContainer, GameContextTags)
+    DefineUProperty(UFortSharedMissionLists*, SharedMissionLists)
 
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
     void SetBadgeScores();
     void SendEarnScore();
+    UFortSharedMissionLists* GetSharedMissionLists();
 
     static bool ShouldPlayerEarnScore(AFortPlayerController* PlayerController);
     static int32_t GetPlayerBadgesScore(AFortPlayerController* PlayerController);

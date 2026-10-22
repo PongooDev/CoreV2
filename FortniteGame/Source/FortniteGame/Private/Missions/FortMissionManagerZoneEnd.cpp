@@ -137,6 +137,21 @@ void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission, EFortMiss
     OnMissionStatusChangeOG(this, Mission, NewStatus);
 
 #if WITH_SERVER_CODE
+    UFortMissionInfo* Info = Mission ? static_cast<UFortMissionInfo*>(Mission->MissionInfo) : nullptr;
+    if (Role == ROLE_Authority && Info && (NewStatus == EFortMissionStatus::Succeeded || (NewStatus == EFortMissionStatus::Failed && Mission->IsPrimaryMission())))
+    {
+        const bool bSucceeded = NewStatus == EFortMissionStatus::Succeeded;
+        const TArray<AFortPlayerController*> Players = Mission->GetParticipatingMissionControllers();
+        if (UFortBadgeItemDefinition* RewardBadge = Info->MissionRewardBadge)
+        {
+            GrantBadge(RewardBadge, bSucceeded ? EFortRewardType::Default : EFortRewardType::Missed, Players);
+        }
+        UFortBadgeItemDefinition* UnderParBadge = Info->UnderParBadge;
+        if (UnderParBadge && Info->ParTime > 0)
+        {
+            GrantBadge(UnderParBadge, bSucceeded && Mission->IsUnderPar() ? EFortRewardType::Default : EFortRewardType::Missed, Players);
+        }
+    }
     if (Role == ROLE_Authority && Mission && NewStatus == EFortMissionStatus::Succeeded)
     {
         TArray<UFortWorldItemDefinition*> SuccessItems;

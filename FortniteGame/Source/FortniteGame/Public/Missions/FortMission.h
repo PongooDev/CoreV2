@@ -27,6 +27,7 @@ enum class EFortMissionStatus : uint8_t
 struct FFortMissionEvent
 {
     DefineUnrealStruct(FFortMissionEvent, FortniteGame)
+    DefineUProperty(FName, EventType)
 };
 
 class AFortMission : public AActor
@@ -40,9 +41,11 @@ class AFortMission : public AActor
     DefineUFunction(GetAdditionalMissionSuccessBadges)
     DefineUFunction(GetAdditionalMissionCompletionMissionPoints)
     DefineUFunction(BlueprintCustomHandleMissionEvent)
+    DefineUFunction(GetDaysRemainingBeforeOverPar)
 
 public:
     DefineUProperty(UFortMissionInfo*, MissionInfo)
+    DefineBitfieldUProperty(bFiredParTimeEvent)
     DefineUProperty(TArray<AFortObjectiveBase*>, ActiveObjectives)
     DefineUProperty(EFortMissionStatus, MissionStatus)
     DefineUProperty(FGuid, MissionGuid)
@@ -66,6 +69,9 @@ public:
     int32_t GetAdditionalMissionCompletionMissionPoints(EFortMissionStatus CompletionStatus);
     void BlueprintCustomHandleMissionEvent(const FFortMissionEvent& MissionEvent);
     void CustomHandleMissionEvent(const FFortMissionEvent& MissionEvent);
+    void HandleDeferredMissionEvent(const FFortMissionEvent& MissionEvent);
+    int32_t GetDaysRemainingBeforeOverPar();
+    bool IsUnderPar();
 
     DECLARE_FUNCTION(execGetAdditionalMissionSuccessBadges);
     DECLARE_FUNCTION(execGetAdditionalMissionCompletionMissionPoints);
@@ -78,4 +84,6 @@ public:
 private:
     static inline void (*CustomHandleMissionEventOG)(AFortMission* This, const FFortMissionEvent& MissionEvent) = nullptr;
     static void CustomHandleMissionEventHK(AFortMission* This, const FFortMissionEvent& MissionEvent);
+    static inline void (*HandleDeferredMissionEventOG)(AFortMission* This, const FFortMissionEvent& MissionEvent) = nullptr;
+    static void HandleDeferredMissionEventHK(AFortMission* This, const FFortMissionEvent& MissionEvent);
 };

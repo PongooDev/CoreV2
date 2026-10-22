@@ -14,6 +14,7 @@
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "FortGameState.h"
+#include "FortVisibilityManager.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "Player/FortPlayerController.h"
@@ -26,6 +27,7 @@
 #include "UObject/WeakObjectPtr.h"
 #include "Finder.h"
 #include "Hooks.h"
+#include "Log.h"
 #include "Natives.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
@@ -157,6 +159,21 @@ void AFortGameModeZone::CreateAIDirector()
     if (World)
     {
         AIDirector = World->SpawnActor<AFortAIDirector>(DetermineAIDirectorClass(), FActorSpawnParameters());
+    }
+#endif
+}
+
+void AFortGameModeZone::PostInitializeComponents()
+{
+    PostInitializeComponentsOG(this);
+
+#if WITH_SERVER_CODE
+    UWorld* World = GetWorld();
+    AFortGameState* FortGameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    const TSubclassOf<AFortVisibilityManager>& ManagerClass = VisibilityManagerClass;
+    if (FortGameState && ManagerClass.Get() && !FortGameState->VisibilityManager)
+    {
+        FortGameState->VisibilityManager = World->SpawnActor<AFortVisibilityManager>(ManagerClass.Get(), FActorSpawnParameters());
     }
 #endif
 }
@@ -347,11 +364,56 @@ void AFortGameModeZone::HookVTables()
             Hooks::SwapVTable(L"AFortGameModeZone::CreateAIDirector", VTable, DirectorIndex, reinterpret_cast<void*>(&CreateAIDirectorHK));
         }
     }
+
+    UObject* ZoneDefault = StaticClass()->GetDefaultObject(false);
+    void** ZoneVTable = ZoneDefault ? *reinterpret_cast<void***>(ZoneDefault) : nullptr;
+    int32_t PostInitializeIndex = -1;
+    for (int32_t Index = 0; ZoneVTable && Index < 0x400 && PostInitializeIndex < 0; ++Index)
+    {
+        const uintptr_t Function = reinterpret_cast<uintptr_t>(ZoneVTable[Index]);
+        if (Function < Finder::TextBegin() || Function >= Finder::TextEnd())
+        {
+            break;
+        }
+        const uintptr_t FunctionEnd = Finder::FunctionEnd(Function);
+        for (uintptr_t Site = Function; FunctionEnd > Function && FunctionEnd - Function < 0x100 && Site + 6 <= FunctionEnd; ++Site)
+        {
+            const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Site);
+            if (Bytes[0] == 0xFF && Bytes[1] == 0x90 && *reinterpret_cast<const int32_t*>(Bytes + 2) == DirectorIndex * static_cast<int32_t>(sizeof(void*)))
+            {
+                PostInitializeIndex = Index;
+                break;
+            }
+        }
+    }
+
+    void* const ZonePostInitialize = PostInitializeIndex >= 0 ? ZoneVTable[PostInitializeIndex] : nullptr;
+    if (!ZonePostInitialize)
+    {
+        Log::Error(L"Finder: AFortGameModeZone::PostInitializeComponents slot not found");
+        return;
+    }
+    PostInitializeComponentsOG = reinterpret_cast<decltype(PostInitializeComponentsOG)>(ZonePostInitialize);
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[PostInitializeIndex] == ZonePostInitialize)
+        {
+            Hooks::SwapVTable(L"AFortGameModeZone::PostInitializeComponents", VTable, PostInitializeIndex, reinterpret_cast<void*>(&PostInitializeComponentsHK));
+        }
+    }
 }
 
 void AFortGameModeZone::CreateAIDirectorHK(AFortGameModeZone* This)
 {
     This->CreateAIDirector();
+}
+
+void AFortGameModeZone::PostInitializeComponentsHK(AFortGameModeZone* This)
+{
+    This->PostInitializeComponents();
 }
 
 APlayerController* AFortGameModeZone::LoginHK(AFortGameModeZone* This, UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)

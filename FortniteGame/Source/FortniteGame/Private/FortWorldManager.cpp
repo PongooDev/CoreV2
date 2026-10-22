@@ -1,11 +1,14 @@
 #include "pch.h"
 #include "FortWorldManager.h"
 #include "Missions/FortMissionManager.h"
+#include "BlueprintGameplayTagLibrary.h"
 #include "Engine/World.h"
 #include "FortGameData.h"
 #include "FortGameMode.h"
 #include "FortAssetManager.h"
 #include "FortGameState.h"
+#include "FortTheaterInfo.h"
+#include "FortZoneTheme.h"
 #include "Finder.h"
 #include "FortWorldRecord.h"
 #include "Kismet/GameplayStatics.h"
@@ -14,6 +17,7 @@
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortQuickBars.h"
+#include "Missions/FortSharedMissionLists.h"
 #include "Natives.h"
 #include "Online/FortGameSession.h"
 #include "Online/FortLobbyBeaconHost.h"
@@ -42,6 +46,11 @@ namespace
         float Result;
         std::memcpy(&Result, &Bits, sizeof(Result));
         return Result - 1.0f;
+    }
+
+    bool MatchesQuery(const FGameplayTagContainer& Tags, const FGameplayTagQuery& Query)
+    {
+        return Query.IsEmpty() || UBlueprintGameplayTagLibrary::DoesContainerMatchTagQuery(Tags, Query);
     }
 }
 
@@ -183,12 +192,113 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                     }
                 }
             }
+
+            if (!StartingMissions.bDisableSharedMissionLoading)
+            {
+                AddSharedMissionsToMissionManagerRecord();
+            }
         }
         bHasCreatedMissions = true;
     }
 #endif
 
     ServerTickLoadingOrCreatingWorldOG(this);
+}
+
+void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
+{
+#if WITH_SERVER_CODE
+    UWorld* World = GetWorld();
+    AFortGameMode* GameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+    UFortSharedMissionLists* SharedMissionLists = GameMode ? GameMode->GetSharedMissionLists() : nullptr;
+    if (!SharedMissionLists)
+    {
+        return;
+    }
+
+    AFortGameStateZone* GameState = Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState()));
+    const float GameDifficulty = GameState ? static_cast<float>(GameState->GameDifficulty) : 0.0f;
+    UFortZoneTheme* ZoneTheme = GameState ? static_cast<UFortZoneTheme*>(GameState->ZoneTheme) : nullptr;
+    const FGameplayTagContainer& GameContextTags = GameMode->GameContextTags;
+
+    if (!Natives::AFortWorldManager_GetTheaterMapData)
+    {
+        Finder::ResolveTheaterMapDataLive();
+    }
+    FFortTheaterMapData* TheaterMapData = Natives::AFortWorldManager_GetTheaterMapData ? static_cast<FFortTheaterMapData*>(Natives::AFortWorldManager_GetTheaterMapData(this)) : nullptr;
+    const bool bIsTestMap = !TheaterMapData;
+    const EFortTheaterType TheaterType = TheaterMapData ? static_cast<EFortTheaterType>(TheaterMapData->RuntimeInfo.TheaterType) : EFortTheaterType::Max_None;
+
+    FFortMissionManagerRecord& Record = MissionManagerRecord;
+    TStructArray<FFortMissionRecord>& MissionRecords = Record.MissionRecords;
+    const int32_t NumGeneratedRecords = MissionRecords.Num();
+    FGameplayTagContainer PrimaryMissionTags;
+    for (int32_t Index = 0; Index < NumGeneratedRecords; ++Index)
+    {
+        FFortMissionEntry& MissionEntry = MissionRecords[Index].MissionEntry;
+        UFortMissionInfo* MissionInfo = MissionEntry.MissionInfo;
+        if (MissionInfo && MissionInfo->MissionType == 0)
+        {
+            UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(PrimaryMissionTags, MissionInfo->MissionTags);
+        }
+    }
+
+    TArray<UFortMissionInfo*> SharedMissions;
+    TStructArray<FFortGlobalMission>& SharedMissionList = SharedMissionLists->SharedMissionList;
+    for (int32_t Index = 0; Index < SharedMissionList.Num(); ++Index)
+    {
+        FFortGlobalMission& SharedMission = SharedMissionList[Index];
+        if (SharedMission.bIsPrototype || (bIsTestMap && !SharedMission.bAllowInTestMaps))
+        {
+            continue;
+        }
+
+        const TArray<uint8_t>& AllowedTheaterTypes = SharedMission.AllowedTheaterTypes;
+        if (AllowedTheaterTypes.Num() > 0 && !AllowedTheaterTypes.Contains(static_cast<uint8_t>(TheaterType)))
+        {
+            continue;
+        }
+        const TArray<uint8_t>& AllowedZoneTypes = SharedMission.AllowedZoneTypes;
+        if (AllowedZoneTypes.Num() > 0 && (!ZoneTheme || !AllowedZoneTypes.Contains(static_cast<uint8_t>(static_cast<EFortZoneType>(ZoneTheme->ZoneType)))))
+        {
+            continue;
+        }
+
+        const float MinDifficultyLevel = SharedMission.MinDifficultyLevel;
+        const float MaxDifficultyLevel = SharedMission.MaxDifficultyLevel;
+        if ((MinDifficultyLevel >= 0.0f && GameDifficulty < MinDifficultyLevel) || (MaxDifficultyLevel >= 0.0f && GameDifficulty > MaxDifficultyLevel))
+        {
+            continue;
+        }
+
+        if (!MatchesQuery(GameContextTags, SharedMission.TheaterTagQuery) || !MatchesQuery(GameContextTags, SharedMission.RegionTagQuery) || !MatchesQuery(GameContextTags, SharedMission.ZoneTagQuery) || !MatchesQuery(PrimaryMissionTags, SharedMission.PrimaryMissionTagQuery))
+        {
+            continue;
+        }
+
+        const TAssetPtr<UFortMissionInfo>& SharedMissionInfo = SharedMission.MissionInfo;
+        UFortMissionInfo* MissionInfo = SharedMissionInfo.LoadSynchronous();
+        bool bAlreadyGenerated = false;
+        for (int32_t RecordIndex = 0; MissionInfo && RecordIndex < NumGeneratedRecords && !bAlreadyGenerated; ++RecordIndex)
+        {
+            FFortMissionEntry& MissionEntry = MissionRecords[RecordIndex].MissionEntry;
+            bAlreadyGenerated = static_cast<UFortMissionInfo*>(MissionEntry.MissionInfo) == MissionInfo;
+        }
+        if (MissionInfo && !bAlreadyGenerated)
+        {
+            SharedMissions.Add(MissionInfo);
+        }
+    }
+
+    for (UFortMissionInfo* MissionInfo : SharedMissions)
+    {
+        UE_LOG(LogFortWorld, Log, TEXT("Adding shared mission %s (theater map data %s)"), *MissionInfo->GetName(), bIsTestMap ? TEXT("missing") : TEXT("found"));
+    }
+    if (SharedMissions.Num() > 0)
+    {
+        AddMissionsToMissionManagerRecord(SharedMissions);
+    }
+#endif
 }
 
 void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory, UFortMissionGenerator* MissionGenerator)

@@ -4,6 +4,7 @@
 #include "UObject/Object.h"
 
 class AGameModeBase;
+class UFortBadgeItemDefinition;
 class UObject;
 
 struct FFortGeneratedDifficultyOptions
@@ -19,6 +20,9 @@ public:
     DefineUProperty(uint8_t, MissionType)
     DefineUProperty(FGameplayTagContainer, MissionTags)
     DefineUProperty(int32_t, MaxMissionPoints)
+    DefineUProperty(UFortBadgeItemDefinition*, MissionRewardBadge)
+    DefineUProperty(int32_t, ParTime)
+    DefineUProperty(UFortBadgeItemDefinition*, UnderParBadge)
 
     void GenerateMissionDifficultyOptions(FFortGeneratedDifficultyOptions& OutOptions, void* RandomStream, float GameDifficulty, AGameModeBase* GameMode, UObject* GenerationData);
 };

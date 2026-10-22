@@ -19,6 +19,7 @@
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
 #include "FortGameModeZone.h"
+#include "FortVisibilityComponent.h"
 #include "FortWorldManager.h"
 #include "GameThread.h"
 #include "McpProfileGroup.h"
@@ -91,6 +92,7 @@ void Boot::Initialize()
     GameThread::Enqueue([]
     {
         AFortGameModeZone::HookVTables();
+        UFortVisibilityComponent::HookVTables();
         UAbilitySystemComponent::HookVTables();
         UFortKismetLibrary::HookNatives();
         UFortMissionLibrary::HookNatives();

@@ -6,6 +6,7 @@
 
 class AFortMission;
 class FText;
+class UFortBadgeItemDefinition;
 class UFortWorldItemDefinition;
 
 enum class EFortObjectiveStatus : uint8_t
@@ -34,6 +35,7 @@ public:
     DefineBitfieldUProperty(bStartPlayingOnMissionStart)
     DefineUProperty(EFortObjectiveStatus, ObjectiveStatus)
     DefineUProperty(FGameplayTagContainer, ObjectiveHandle)
+    DefineUProperty(UFortBadgeItemDefinition*, ObjectiveRewardBadge)
 
     AFortMission* GetMission() const;
     void SetObjectiveStatus(EFortObjectiveStatus NewStatus);

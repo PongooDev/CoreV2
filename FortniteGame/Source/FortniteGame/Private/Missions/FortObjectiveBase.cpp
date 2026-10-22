@@ -115,11 +115,20 @@ void AFortObjectiveBase::StopObjective(EFortObjectiveStatus Status, const FText&
     BlueprintOnObjectiveEnd(Status);
 
     AFortMission* Mission = GetMission();
+    UFortBadgeItemDefinition* RewardBadge = ObjectiveRewardBadge;
     UFortBadgeItemDefinition* ExtraBadge = Cast<UFortBadgeItemDefinition>(ExtraBadgeToGrant);
-    AFortMissionManager* MissionManager = Mission && ExtraBadge && Status == EFortObjectiveStatus::Succeeded ? Mission->GetMissionManager() : nullptr;
+    AFortMissionManager* MissionManager = Mission && (RewardBadge || ExtraBadge) && Status == EFortObjectiveStatus::Succeeded ? Mission->GetMissionManager() : nullptr;
     if (MissionManager)
     {
-        MissionManager->GrantBadge(ExtraBadge, EFortRewardType::Default, Mission->GetParticipatingMissionControllers());
+        const TArray<AFortPlayerController*> Players = Mission->GetParticipatingMissionControllers();
+        if (RewardBadge)
+        {
+            MissionManager->GrantBadge(RewardBadge, EFortRewardType::Default, Players);
+        }
+        if (ExtraBadge)
+        {
+            MissionManager->GrantBadge(ExtraBadge, EFortRewardType::Default, Players);
+        }
     }
     SendObjectiveEndedEvent(Status);
     if (Mission)

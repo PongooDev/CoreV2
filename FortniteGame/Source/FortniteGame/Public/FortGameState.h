@@ -5,7 +5,9 @@
 #include "UObject/AssetPtr.h"
 
 class AFortMissionManager;
+class AFortVisibilityManager;
 class AFortWorldManager;
+class UFortZoneTheme;
 class UFortMissionGenerator;
 struct FFortMissionManagerRecord;
 
@@ -29,6 +31,7 @@ class AFortGameState : public AGameState
 public:
     DefineUProperty(AFortMissionManager*, MissionManager)
     DefineUProperty(AFortWorldManager*, WorldManager)
+    DefineUProperty(AFortVisibilityManager*, VisibilityManager)
     DefineUProperty(TEnumAsByte<EFortGameplayState::Type>, GameplayState)
 
     void SpawnMissionManager(const FFortMissionManagerRecord& MissionManagerRecord);
@@ -42,6 +45,7 @@ class AFortGameStateZone : public AFortGameState
 
 public:
     DefineUProperty(float, GameDifficulty)
+    DefineUProperty(UFortZoneTheme*, ZoneTheme)
     DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
     DefineUProperty(FString, TheaterUniqueId)
 

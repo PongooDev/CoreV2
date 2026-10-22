@@ -41,6 +41,7 @@ public:
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
     DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)
+    DefineUProperty(UClass*, SharedMissionListsClass)
 
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
     {

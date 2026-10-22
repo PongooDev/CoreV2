@@ -7,6 +7,7 @@ class APlayerController;
 class UPlayer;
 struct FUniqueNetIdRepl;
 class AFortAIGoalManager;
+class AFortVisibilityManager;
 class UEnvQueryInstanceBlueprintWrapper;
 struct FFortPlayerSpawnPadPlacementData;
 
@@ -20,10 +21,12 @@ public:
     DefineUProperty(AActor*, ActiveSpawnPad)
     DefineUProperty(int32_t, EndOfZoneRemainTime)
     DefineUProperty(int32_t, OverrideAIDirectorIndex)
+    DefineUProperty(TSubclassOf<AFortVisibilityManager>, VisibilityManagerClass)
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     UClass* DetermineAIDirectorClass() const;
     void CreateAIDirector();
+    void PostInitializeComponents();
     APlayerController* Login(UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage);
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
     FFortPlayerSpawnPadPlacementData* GetPlayerSpawnPadPlacementData();
@@ -43,6 +46,8 @@ private:
     static void FinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager);
     static void SubclassFinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager);
     static void CreateAIDirectorHK(AFortGameModeZone* This);
+    static inline void (*PostInitializeComponentsOG)(AFortGameModeZone* This) = nullptr;
+    static void PostInitializeComponentsHK(AFortGameModeZone* This);
     static inline APlayerController* (*LoginOG)(AFortGameModeZone* This, UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage) = nullptr;
     static APlayerController* LoginHK(AFortGameModeZone* This, UPlayer* NewPlayer, ENetRole InRemoteRole, const FString& Portal, const FString& Options, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage);
 };

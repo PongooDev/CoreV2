@@ -124,11 +124,11 @@ void AFortObjectiveBase::StopObjective(EFortObjectiveStatus Status, const FText&
     {
         MissionManager->GrantBadge(ExtraBadge, EFortRewardType::Default, Mission->GetParticipatingMissionControllers());
     }
+    SendObjectiveEndedEvent(Status);
     if (Mission)
     {
         Mission->ObjectiveStatusUpdated(this, Status);
     }
-    SendObjectiveEndedEvent(Status);
 #endif
 }
 

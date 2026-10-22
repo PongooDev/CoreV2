@@ -281,6 +281,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Heroes\FortHeroType.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortBadgeItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortInventory.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortInventoryOwnerInterface.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItem.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortPickup.h" />
@@ -302,6 +303,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileAccount.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileWorld.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortAIPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPlayerPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerController.h" />
@@ -432,6 +434,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileAccount.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileWorld.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\NotForLicensees\FortMcpConfig.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortAIPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPlayerPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp" />

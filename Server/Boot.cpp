@@ -37,6 +37,7 @@
 #include "Missions/FortObjectiveBase.h"
 #include "Items/FortSchematicItem.h"
 #include "Items/FortQuickBars.h"
+#include "Pawns/FortAIPawn.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerControllerDeployableBase.h"
 #include "Player/FortPlayerControllerOutpost.h"
@@ -122,6 +123,7 @@ void Boot::Initialize()
         UFortBTTask_SetFrustrationDiscouragement::HookVTables();
         UFortQueryGenerator_Enemies::HookVTables();
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
+        AFortAIPawn::HookVTables();
         Finder::ResolveNavigationSystemLive();
     });
 

@@ -720,7 +720,7 @@ void AFortPlayerController::HookVTables()
         Log::Info(L"Hook AFortPlayerController::SwapQuickBarFocus: native");
     }
 
-    if (Finder::ResolveInventoryOwnerLive(StaticFunction_ServerRemoveInventoryItem(), PlayerControllerVTable))
+    if (Finder::ResolveInventoryOwnerLive(StaticFunction_ServerRemoveInventoryItem(), PlayerControllerDefault, Member_WorldInventory.GetOffsetChecked()))
     {
         const ptrdiff_t InterfaceOffset = Natives::AFortPlayerController_InventoryOwnerInterface;
         const int32_t RemoveIndex = Natives::IFortInventoryOwnerInterface_RemoveInventoryItemIndex;

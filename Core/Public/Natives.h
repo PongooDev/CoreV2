@@ -317,6 +317,7 @@ namespace Natives
     inline int32_t AFortPlayerPawn_EquipLastWeaponIndex = -1;
     inline int32_t AFortPawn_EquipDefaultWeaponIndex = -1;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
+    inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;

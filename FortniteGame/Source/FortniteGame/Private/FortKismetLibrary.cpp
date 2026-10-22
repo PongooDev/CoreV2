@@ -6,6 +6,7 @@
 #include "Engine/World.h"
 #include "Finder.h"
 #include "Items/FortInventory.h"
+#include "Items/FortInventoryOwnerInterface.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
 #include "Math/Rotator.h"
@@ -49,6 +50,10 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
 #if WITH_SERVER_CODE
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(InventoryOwner.GetObject());
     AFortInventory* Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+    if (!PlayerController && InventoryOwner.GetInterface() && Natives::IFortInventoryOwnerInterface_GetWorldInventoryIndex >= 0)
+    {
+        Inventory = InventoryOwner->GetWorldInventory();
+    }
     if (!Inventory || !ItemDefinition || NumberToGive <= 0)
     {
         return;
@@ -80,13 +85,22 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
             return;
         }
 
-        WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
+        if (PlayerController)
+        {
+            WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
+        }
         Inventory->AddWorldItem(WorldItem);
-        PlayerController->TryAddToQuickBar(WorldItem);
+        if (PlayerController)
+        {
+            PlayerController->TryAddToQuickBar(WorldItem);
+        }
         Remaining -= Count;
     }
 
-    UFortItemCollectedParams::SendItemCollected(PlayerController, ItemDefinition, NumberToGive);
+    if (PlayerController)
+    {
+        UFortItemCollectedParams::SendItemCollected(PlayerController, ItemDefinition, NumberToGive);
+    }
 #endif
 }
 

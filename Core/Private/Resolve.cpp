@@ -3125,8 +3125,9 @@ int32_t Finder::ImplementationIndex(UFunction* Function)
     return Index;
 }
 
-bool Finder::ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable)
+bool Finder::ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, UObject* PlayerControllerDefault, ptrdiff_t WorldInventoryOffset)
 {
+    void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
     const uintptr_t Implementation = VTableEntry(PlayerControllerVTable, ImplementationIndex(ServerRemoveInventoryItem));
     const uintptr_t InterfaceAdjust = Implementation ? FindInstruction(Implementation, Implementation + 0x20, { 0x48, 0x81, 0xC1 }) : 0;
     const int32_t RemoveIndex = InterfaceAdjust ? VirtualSlot(FindVirtualCall(InterfaceAdjust, InterfaceAdjust + 0x20)) : -1;
@@ -3136,9 +3137,28 @@ bool Finder::ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, voi
         return false;
     }
 
-    Natives::AFortPlayerController_InventoryOwnerInterface = *reinterpret_cast<const int32_t*>(InterfaceAdjust + 3);
+    const int32_t InterfaceOffset = *reinterpret_cast<const int32_t*>(InterfaceAdjust + 3);
+    void** InterfaceVTable = *reinterpret_cast<void***>(reinterpret_cast<uint8_t*>(PlayerControllerDefault) + InterfaceOffset);
+    int32_t GetWorldInventoryIndex = -1;
+    for (int32_t Index = 0; Index < RemoveIndex && GetWorldInventoryIndex < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(InterfaceVTable, Index);
+        if (Function && Byte(Function) == 0x48 && Byte(Function + 1) == 0x8B && Byte(Function + 2) == 0x81 && Byte(Function + 7) == 0xC3
+            && InterfaceOffset + *reinterpret_cast<const int32_t*>(Function + 3) == WorldInventoryOffset)
+        {
+            GetWorldInventoryIndex = Index;
+        }
+    }
+    if (GetWorldInventoryIndex < 0)
+    {
+        Log::Error(L"Finder: IFortInventoryOwnerInterface::GetWorldInventory not found");
+        return false;
+    }
+
+    Natives::AFortPlayerController_InventoryOwnerInterface = InterfaceOffset;
     Natives::IFortInventoryOwnerInterface_RemoveInventoryItemIndex = RemoveIndex;
-    Log::Info(L"Finder: IFortInventoryOwnerInterface is AFortPlayerController +0x{:X}, RemoveInventoryItem slot 0x{:X}", Natives::AFortPlayerController_InventoryOwnerInterface, RemoveIndex);
+    Natives::IFortInventoryOwnerInterface_GetWorldInventoryIndex = GetWorldInventoryIndex;
+    Log::Info(L"Finder: IFortInventoryOwnerInterface is AFortPlayerController +0x{:X}, GetWorldInventory slot 0x{:X}, RemoveInventoryItem slot 0x{:X}", InterfaceOffset, GetWorldInventoryIndex, RemoveIndex);
     return true;
 }
 

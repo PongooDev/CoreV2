@@ -88,12 +88,14 @@ uintptr_t Finder::ImageBase()
 
 uintptr_t Finder::TextBegin()
 {
-    return TextSection().GetSectionStart().Get();
+    static const uintptr_t Begin = TextSection().GetSectionStart().Get();
+    return Begin;
 }
 
 uintptr_t Finder::TextEnd()
 {
-    return TextSection().GetSectionEnd().Get();
+    static const uintptr_t End = TextSection().GetSectionEnd().Get();
+    return End;
 }
 
 std::vector<uintptr_t> Finder::StringRefs(const wchar_t* Text)

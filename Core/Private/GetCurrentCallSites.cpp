@@ -3,6 +3,7 @@
 #include "Log.h"
 
 #include <algorithm>
+#include <chrono>
 #include <map>
 #include <set>
 #include <string>
@@ -410,6 +411,7 @@ namespace
 
 std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t DirectorSize, int32_t ActorSize, int32_t GetWorldIndex, uintptr_t& OutStub, std::vector<uint8_t*>& OutDirectorCalls)
 {
+    const auto StartTime = std::chrono::steady_clock::now();
     OutStub = 0;
     OutDirectorCalls.clear();
     std::vector<uint8_t*> Result;
@@ -451,7 +453,9 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
         }
     }
 
-    for (uintptr_t Site = Finder::TextBegin(); Site + 5 <= Finder::TextEnd(); ++Site)
+    const uintptr_t ImageBase = Finder::ImageBase();
+    const uintptr_t TextEnd = Finder::TextEnd();
+    for (uintptr_t Site = Finder::TextBegin(); Site + 5 <= TextEnd; ++Site)
     {
         if (*reinterpret_cast<const uint8_t*>(Site) != 0xE8 || Finder::RelativeTarget(Site, 1, 5) != Context.Stub)
         {
@@ -469,7 +473,6 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
         {
             ++Votes.GoalManager;
         }
-        const uintptr_t ImageBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
         if (Votes.GoalManager && !Votes.Director && !Votes.Other)
         {
             Result.push_back(reinterpret_cast<uint8_t*>(Site));
@@ -481,6 +484,7 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
             Log::Info(L"Finder: AFortAIDirector::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);
         }
     }
-    Log::Info(L"Finder: {} AFortAIGoalManager::GetCurrent and {} AFortAIDirector::GetCurrent call sites classified", Result.size(), OutDirectorCalls.size());
+    const auto Milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - StartTime).count();
+    Log::Info(L"Finder: {} AFortAIGoalManager::GetCurrent and {} AFortAIDirector::GetCurrent call sites classified in {} ms", Result.size(), OutDirectorCalls.size(), Milliseconds);
     return Result;
 }

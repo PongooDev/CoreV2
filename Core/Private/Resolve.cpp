@@ -3642,6 +3642,41 @@ bool Finder::ResolveGoalDiscouragementLive()
     return true;
 }
 
+bool Finder::ResolveQuickBarFocusLive()
+{
+    const uintptr_t Ref = OnlyRef(L"SwitchQuickbar");
+    uintptr_t Handler = 0;
+    for (uintptr_t Site = Ref ? Ref - 1 : 0; Site && Site + 0x20 > Ref && !Handler; --Site)
+    {
+        if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x05)
+        {
+            Handler = Finder::RelativeTarget(Site, 3, 7);
+        }
+    }
+
+    const uintptr_t HandlerEnd = IsInText(Handler) ? Finder::FunctionEnd(Handler) : 0;
+    std::vector<uintptr_t> Targets;
+    uintptr_t Swap = 0;
+    for (const auto& [Call, Target] : HandlerEnd > Handler ? Finder::DirectCalls(Handler, HandlerEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        if (std::find(Targets.begin(), Targets.end(), Target) != Targets.end())
+        {
+            Swap = Target;
+            break;
+        }
+        Targets.push_back(Target);
+    }
+
+    if (!Swap)
+    {
+        Log::Error(L"Finder: AFortQuickBars quickbar focus swap not found (handler {})", Handler != 0);
+        return false;
+    }
+    Natives::AFortQuickBars_SwapQuickBarFocus = reinterpret_cast<decltype(Natives::AFortQuickBars_SwapQuickBarFocus)>(Swap);
+    Log::Info(L"Finder: AFortQuickBars quickbar focus swap at 0x{:X}", Swap - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveQueryGeneratorsLive(void** EnemiesVTable)
 {
     const uintptr_t Enemies = FunctionOf(L"NULL AIOwner (controller) of Enemies generator.  Cannot generate enemies.");

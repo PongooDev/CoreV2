@@ -8,6 +8,27 @@
 #include "UObject/UObjectIterator.h"
 #include "UObject/Class.h"
 
+EFortQuickBars AFortQuickBars::GetCurrentQuickBar()
+{
+    for (EFortQuickBars InQuickBar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
+    {
+        FQuickBar& QuickBar = GetQuickBar(InQuickBar);
+        if (QuickBar.CurrentFocusedSlot != -1)
+        {
+            return InQuickBar;
+        }
+    }
+    return EFortQuickBars::Max_None;
+}
+
+void AFortQuickBars::SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride)
+{
+    if (Natives::AFortQuickBars_SwapQuickBarFocus || Finder::ResolveQuickBarFocusLive())
+    {
+        Natives::AFortQuickBars_SwapQuickBarFocus(this, static_cast<int32_t>(InQuickBar), SlotOverride);
+    }
+}
+
 void AFortQuickBars::EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex)
 {
     Reflection::FParams Params(StaticFunction_EnableSlot());

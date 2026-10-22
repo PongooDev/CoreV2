@@ -52,6 +52,8 @@ public:
     DefineUFunction(ServerRemoveItemInternal)
 
     FQuickBar& GetQuickBar(EFortQuickBars InQuickBar) { return InQuickBar == EFortQuickBars::Primary ? PrimaryQuickBar : SecondaryQuickBar; }
+    EFortQuickBars GetCurrentQuickBar();
+    void SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride);
 
     void EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex);
     void ServerActivateSlotInternal(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);

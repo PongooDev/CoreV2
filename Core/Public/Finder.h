@@ -72,6 +72,7 @@ namespace Finder
     bool ResolveGoalDiscouragementLive();
     bool ResolveQueryGeneratorsLive(void** EnemiesVTable);
     bool ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTable, UClass* GoalItemType);
+    bool ResolveQuickBarFocusLive();
     bool ResolveNavigationSystemLive();
     bool ResolveOutpostOwnerLive();
     bool ResolveBadgeScoresLive();

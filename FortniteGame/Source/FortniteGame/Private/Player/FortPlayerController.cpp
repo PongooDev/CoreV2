@@ -682,6 +682,11 @@ void AFortPlayerController::HookVTables()
         GivePlayerAmmoFunction->SetNativeFunc(&execGivePlayerAmmo);
         Log::Info(L"Hook AFortPlayerController::GivePlayerAmmo: native");
     }
+    if (UFunction* SwapQuickBarFocusFunction = StaticFunction_SwapQuickBarFocus(); SwapQuickBarFocusFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        SwapQuickBarFocusFunction->SetNativeFunc(&execSwapQuickBarFocus);
+        Log::Info(L"Hook AFortPlayerController::SwapQuickBarFocus: native");
+    }
 
     if (Finder::ResolveInventoryOwnerLive(StaticFunction_ServerRemoveInventoryItem(), PlayerControllerVTable))
     {
@@ -813,6 +818,26 @@ DEFINE_FUNCTION(AFortPlayerController::execGivePlayerAmmo)
     P_FINISH;
     P_NATIVE_BEGIN;
     static_cast<AFortPlayerController*>(Context)->GivePlayerAmmo(Z_Param_AmmoCount);
+    P_NATIVE_END;
+}
+
+void AFortPlayerController::SwapQuickBarFocus(EFortQuickBars InQuickBar)
+{
+#if WITH_SERVER_CODE
+    AFortQuickBars* Bars = QuickBars;
+    if (Bars && Bars->GetCurrentQuickBar() != InQuickBar)
+    {
+        Bars->SwapQuickBarFocus(InQuickBar, -1);
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)
+{
+    P_GET_PROPERTY(UByteProperty, Z_Param_InQuickBar);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerController*>(Context)->SwapQuickBarFocus(static_cast<EFortQuickBars>(Z_Param_InQuickBar));
     P_NATIVE_END;
 }
 

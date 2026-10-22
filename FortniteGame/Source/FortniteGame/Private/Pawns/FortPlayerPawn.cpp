@@ -11,3 +11,17 @@ void AFortPlayerPawn::ResetGameplayAttributes()
         CallVirtual<void>(this, Natives::AFortPlayerPawn_ResetGameplayAttributesIndex);
     }
 }
+
+bool AFortPlayerPawn::EquipLastWeapon()
+{
+    if (!Finder::ResolveAbilityWeaponLive(CurrentWeaponListOffset(), LastEquippedWeaponGUIDOffset()))
+    {
+        return false;
+    }
+    return CallVirtual<bool>(this, Natives::AFortPlayerPawn_EquipLastWeaponIndex);
+}
+
+ptrdiff_t AFortPlayerPawn::LastEquippedWeaponGUIDOffset()
+{
+    return Member_LastEquippedWeaponGUID.GetOffsetChecked();
+}

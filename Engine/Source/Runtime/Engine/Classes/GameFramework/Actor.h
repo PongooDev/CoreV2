@@ -61,6 +61,7 @@ public:
     DefineUFunction(GetActorBounds)
     DefineUFunction(K2_SetActorLocation)
     DefineUFunction(SetActorScale3D)
+    DefineUFunction(K2_DestroyActor)
 
     ENetRole GetRemoteRole() const { return RemoteRole; }
     AActor* GetOwner() const { return Owner; }
@@ -80,6 +81,7 @@ public:
     void GetActorBounds(bool bOnlyCollidingComponents, FVector& Origin, FVector& BoxExtent) const;
     bool SetActorLocation(const FVector& NewLocation, bool bSweep = false, bool bTeleport = false);
     void SetActorScale3D(const FVector& NewScale3D);
+    void K2_DestroyActor();
     FVector GetVelocity() const;
     float GetNetPriority(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);
     bool GetNetDormancy(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);

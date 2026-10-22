@@ -4511,3 +4511,113 @@ uint8_t* Finder::QuickBarChangedWorldManagerCall()
     Log::Info(L"Finder: AFortQuickBars change handler's world manager call is at 0x{:X}", Found - Finder::ImageBase());
     return reinterpret_cast<uint8_t*>(Found);
 }
+
+namespace
+{
+    bool ContainsDisp32(uintptr_t Begin, uintptr_t End, int32_t Displacement)
+    {
+        for (uintptr_t Address = Begin; Address + 4 <= End; ++Address)
+        {
+            if (*reinterpret_cast<const int32_t*>(Address) == Displacement)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    int32_t UniqueSlotReferencing(void** VTable, size_t MaxSize, std::initializer_list<ptrdiff_t> Offsets, bool bNeedsCall)
+    {
+        int32_t Found = -1;
+        uintptr_t FoundFunction = 0;
+        for (int32_t Index = 0; Index < 0x200; ++Index)
+        {
+            const uintptr_t Function = VTableEntry(VTable, Index);
+            if (!Function)
+            {
+                break;
+            }
+            const uintptr_t End = Finder::FunctionEnd(Function);
+            if (End <= Function || End - Function >= MaxSize || Function == FoundFunction)
+            {
+                continue;
+            }
+            const bool bReferencesAll = std::all_of(Offsets.begin(), Offsets.end(), [&](ptrdiff_t Offset) { return ContainsDisp32(Function, End, static_cast<int32_t>(Offset)); });
+            if (bReferencesAll && (!bNeedsCall || FindRawCall(Function, End)))
+            {
+                if (FoundFunction)
+                {
+                    return -1;
+                }
+                Found = Index;
+                FoundFunction = Function;
+            }
+        }
+        return Found;
+    }
+}
+
+uint8_t* Finder::AbilityEndCleanupCall(ptrdiff_t AbilityGrantedWeaponItemOffset)
+{
+    const uintptr_t EndAbility = Finder::FunctionStart(OnlyRef(L"%s EndAbility"));
+    const uintptr_t EndAbilityEnd = EndAbility ? Finder::FunctionEnd(EndAbility) : 0;
+    uintptr_t Found = 0;
+    int32_t Count = 0;
+    for (const auto& [Call, Target] : EndAbilityEnd ? Finder::DirectCalls(EndAbility, EndAbilityEnd) : decltype(Finder::DirectCalls(0, 0)){})
+    {
+        const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        if (TargetEnd > Target && TargetEnd - Target < 0x400 && ContainsDisp32(Target, TargetEnd, static_cast<int32_t>(AbilityGrantedWeaponItemOffset)))
+        {
+            Found = Call;
+            ++Count;
+        }
+    }
+
+    if (Count != 1)
+    {
+        Log::Error(L"Finder: UFortGameplayAbility::EndAbility's ability weapon cleanup call not found ({} candidates)", Count);
+        return nullptr;
+    }
+    Log::Info(L"Finder: UFortGameplayAbility::EndAbility's ability weapon cleanup call is at 0x{:X}", Found - Finder::ImageBase());
+    return reinterpret_cast<uint8_t*>(Found);
+}
+
+bool Finder::ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff_t LastEquippedWeaponGuidOffset)
+{
+    if (Natives::AFortPlayerPawn_EquipLastWeaponIndex >= 0 && Natives::AFortPawn_EquipDefaultWeaponIndex >= 0)
+    {
+        return true;
+    }
+
+    const int32_t EquipLastIndex = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortPlayerPawn"), 0x200, { LastEquippedWeaponGuidOffset }, true);
+    const int32_t EquipDefaultIndex = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortPawn"), 0x40, { CurrentWeaponListOffset, CurrentWeaponListOffset + 8 }, true);
+    if (EquipLastIndex < 0 || EquipDefaultIndex < 0)
+    {
+        Log::Error(L"Finder: AFortPlayerPawn::EquipLastWeapon (slot {}) / AFortPawn::EquipDefaultWeapon (slot {}) not found", EquipLastIndex, EquipDefaultIndex);
+        return false;
+    }
+
+    Natives::AFortPlayerPawn_EquipLastWeaponIndex = EquipLastIndex;
+    Natives::AFortPawn_EquipDefaultWeaponIndex = EquipDefaultIndex;
+    Log::Info(L"Finder: AFortPlayerPawn::EquipLastWeapon is slot 0x{:X}, AFortPawn::EquipDefaultWeapon is slot 0x{:X}", EquipLastIndex, EquipDefaultIndex);
+    return true;
+}
+
+bool Finder::ResolveWeaponAmmoLive(ptrdiff_t AmmoCountOffset, ptrdiff_t ItemEntryGuidOffset)
+{
+    if (Natives::AFortWeapon_ModAmmoIndex >= 0)
+    {
+        return true;
+    }
+
+    const int32_t Index = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortWeapon"), 0x80, { AmmoCountOffset, ItemEntryGuidOffset }, true);
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortWeapon::ModAmmo slot not found");
+        return false;
+    }
+
+    Natives::AFortWeapon_ModAmmoIndex = Index;
+    Log::Info(L"Finder: AFortWeapon::ModAmmo is slot 0x{:X}", Index);
+    return true;
+}

@@ -58,6 +58,12 @@ void AActor::SetActorScale3D(const FVector& NewScale3D)
     Params.Call(this);
 }
 
+void AActor::K2_DestroyActor()
+{
+    Reflection::FParams Params(StaticFunction_K2_DestroyActor());
+    Params.Call(this);
+}
+
 FVector AActor::GetVelocity() const
 {
     FVector Velocity;

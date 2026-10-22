@@ -36,9 +36,11 @@ public:
     DefineUFunction(ServerSpawnInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
     DefineUFunction(ActivateSlot)
+    DefineUFunction(GivePlayerAmmo)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
+    void GivePlayerAmmo(int32_t AmmoCount);
     void Possess(APawn* InPawn);
     void SpawnQuickBars();
     void SetupQuickBars();
@@ -61,6 +63,7 @@ public:
     static void HookVTables();
 
     DECLARE_FUNCTION(execActivateSlot);
+    DECLARE_FUNCTION(execGivePlayerAmmo);
 
 private:
     static inline bool (*InitializeMcpProfileOG)(AFortPlayerController* This, const void* OnComplete) = nullptr;

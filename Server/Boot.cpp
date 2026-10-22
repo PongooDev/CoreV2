@@ -40,6 +40,7 @@
 #include "Player/FortPlayerState.h"
 #include "FortGlobals.h"
 #include "FortKismetLibrary.h"
+#include "Abilities/FortGameplayAbility.h"
 #include "Missions/FortMissionLibrary.h"
 #include "AbilitySystemComponent.h"
 
@@ -93,6 +94,7 @@ void Boot::Initialize()
         UFortKismetLibrary::HookNatives();
         UFortMissionLibrary::HookNatives();
         AFortMission::HookNatives();
+        UFortGameplayAbility::HookNatives();
         AFortPlayerController::HookVTables();
         AFortPlayerControllerZone::HookVTables();
         AFortPlayerControllerOutpost::HookVTables();

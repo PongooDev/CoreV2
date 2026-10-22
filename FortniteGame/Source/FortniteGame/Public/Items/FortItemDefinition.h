@@ -91,6 +91,11 @@ class UFortGadgetItemDefinition : public UFortWorldItemDefinition
     DefineUnrealClass(UFortGadgetItemDefinition, FortniteGame)
 };
 
+class UFortWeaponItemDefinition : public UFortWorldItemDefinition
+{
+    DefineUnrealClass(UFortWeaponItemDefinition, FortniteGame)
+};
+
 class UFortAmmoItemDefinition : public UFortWorldItemDefinition
 {
     DefineUnrealClass(UFortAmmoItemDefinition, FortniteGame)

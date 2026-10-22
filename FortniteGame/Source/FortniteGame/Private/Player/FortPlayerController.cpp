@@ -26,6 +26,7 @@
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "Weapons/FortWeapon.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -565,6 +566,11 @@ void AFortPlayerController::HookVTables()
         ActivateSlotFunction->SetNativeFunc(&execActivateSlot);
         Log::Info(L"Hook AFortPlayerController::ActivateSlot: native");
     }
+    if (UFunction* GivePlayerAmmoFunction = StaticFunction_GivePlayerAmmo(); GivePlayerAmmoFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        GivePlayerAmmoFunction->SetNativeFunc(&execGivePlayerAmmo);
+        Log::Info(L"Hook AFortPlayerController::GivePlayerAmmo: native");
+    }
 
     if (Finder::ResolveInventoryOwnerLive(StaticFunction_ServerRemoveInventoryItem(), PlayerControllerVTable))
     {
@@ -668,6 +674,34 @@ DEFINE_FUNCTION(AFortPlayerController::execActivateSlot)
     P_FINISH;
     P_NATIVE_BEGIN;
     static_cast<AFortPlayerController*>(Context)->ActivateSlot(static_cast<EFortQuickBars>(Z_Param_InQuickBar), Z_Param_Slot, Z_Param_ActivateDelay, Z_Param_bUpdatePreviousFocusedSlot);
+    P_NATIVE_END;
+}
+
+void AFortPlayerController::GivePlayerAmmo(int32_t AmmoCount)
+{
+#if WITH_SERVER_CODE
+    AFortPawn* Pawn = MyFortPawn;
+    AFortWeapon* Weapon = Role == ROLE_Authority && Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+    if (!Weapon || AmmoCount <= 0)
+    {
+        return;
+    }
+
+    const int32_t BulletsPerClip = Weapon->GetBulletsPerClip();
+    const int32_t Refunded = std::min(AmmoCount, BulletsPerClip - static_cast<int32_t>(Weapon->AmmoCount));
+    if (Refunded > 0)
+    {
+        Weapon->ModAmmo(Refunded);
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execGivePlayerAmmo)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_AmmoCount);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerController*>(Context)->GivePlayerAmmo(Z_Param_AmmoCount);
     P_NATIVE_END;
 }
 

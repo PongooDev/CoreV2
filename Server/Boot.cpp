@@ -30,6 +30,7 @@
 #include "Missions/FortMissionManager.h"
 #include "Online/FortMcpProfileWorld.h"
 #include "AI/FortAIGoalManager.h"
+#include "Building/BuildingStructuralSupportSystem.h"
 #include "AI/FortBTTask_SetFrustrationDiscouragement.h"
 #include "AI/FortQueryContexts.h"
 #include "AI/FortQueryGenerators.h"
@@ -86,6 +87,7 @@ void Boot::Initialize()
     UFortGlobals::Hook();
     UEngine::Hook();
     UGameEngine::Hook();
+    UBuildingStructuralSupportSystem::Hook();
     Diagnostics::HookLobbyServer();
     Hooks::EnableAll();
 

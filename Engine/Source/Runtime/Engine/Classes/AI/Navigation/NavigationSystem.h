@@ -1,7 +1,9 @@
 #pragma once
 
+#include "AI/Navigation/NavigationData.h"
 #include "ObjectLayout.h"
 #include "Reflection.h"
+#include "StructArray.h"
 #include "UObject/Object.h"
 
 namespace ENavigationBuildLock
@@ -22,6 +24,7 @@ class UNavigationSystem : public UObject
     DefineNativeMember(uint8_t, NavBuildingLockFlags, UNavigationSystem_NavBuildingLockFlags)
     DefineNativeMember(uint8_t, NavOctreeLockFlags, UNavigationSystem_bNavOctreeLock)
     DefineUFunction(OnNavigationBoundsUpdated)
+    DefineUStructArrayProperty(FNavDataConfig, SupportedAgents)
 
 public:
     bool IsNavigationBuildingLocked() const { return NavBuildingLockFlags != 0; }
@@ -32,4 +35,5 @@ public:
     void SetNavigationOctreeLock(bool bLock) { NavOctreeLockFlags = static_cast<uint8_t>((NavOctreeLockFlags & ~1) | (bLock ? 1 : 0)); }
     void ConditionalPopulateNavOctree();
     void OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolume);
+    void RequestRegistration(ANavigationData* NavData, bool bTriggerRegistrationProcessing = true);
 };

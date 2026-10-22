@@ -4,6 +4,7 @@
 #include "Player/FortPlayerStateOutpost.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIGoalManager.h"
+#include "AI/Navigation/FortNavigationGraph.h"
 #include "AI/Navigation/NavigationSystem.h"
 #include "AI/Navigation/NavMeshBoundsVolume.h"
 #include "Components/SceneComponent.h"
@@ -135,6 +136,11 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         }
 
         NavSys->ReleaseInitialBuildingLock();
+    }
+
+    if (AFortNavigationGraph* NavGraph = AFortNavigationGraph::GetCurrent(World))
+    {
+        NavGraph->OnWorldInitialized();
     }
 #endif
 }

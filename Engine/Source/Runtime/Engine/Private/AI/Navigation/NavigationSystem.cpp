@@ -43,3 +43,11 @@ void UNavigationSystem::OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolum
     Params.Set(L"NavVolume", reinterpret_cast<UObject*>(NavVolume));
     Params.Call(this);
 }
+
+void UNavigationSystem::RequestRegistration(ANavigationData* NavData, bool bTriggerRegistrationProcessing)
+{
+    if (Natives::UNavigationSystem_RequestRegistration)
+    {
+        Natives::UNavigationSystem_RequestRegistration(this, NavData, bTriggerRegistrationProcessing);
+    }
+}

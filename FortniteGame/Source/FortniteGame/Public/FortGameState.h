@@ -7,8 +7,8 @@
 class AFortMissionManager;
 class AFortVisibilityManager;
 class AFortWorldManager;
-class UFortZoneTheme;
 class UFortMissionGenerator;
+class UFortZoneTheme;
 struct FFortMissionManagerRecord;
 
 namespace EFortGameplayState
@@ -45,9 +45,9 @@ class AFortGameStateZone : public AFortGameState
 
 public:
     DefineUProperty(float, GameDifficulty)
-    DefineUProperty(UFortZoneTheme*, ZoneTheme)
     DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
     DefineUProperty(FString, TheaterUniqueId)
+    DefineUProperty(UFortZoneTheme*, ZoneTheme)
 
     UFortMissionGenerator* GetMissionGenerator() const;
     void SetGameplayState(EFortGameplayState::Type NewGameplayState);

@@ -59,11 +59,8 @@ void AFortObjectiveBase::SetObjectiveStatus(EFortObjectiveStatus NewStatus)
     ObjectiveStatus = NewStatus;
     UE_LOG(LogFortMission, Log, TEXT("Objective %s: New Objective status is %s"), *GetName(), ObjectiveStatusName(NewStatus));
 
-    if (GetNetMode() != NM_DedicatedServer)
-    {
-        Reflection::FParams Params(StaticFunction_OnRep_ObjectiveStatus());
-        Params.Call(this);
-    }
+    Reflection::FParams Params(StaticFunction_OnRep_ObjectiveStatus());
+    Params.Call(this);
 #endif
 }
 

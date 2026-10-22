@@ -5,6 +5,7 @@
 #include "Abilities/FortAbilitySet.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "Hooks.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
 #include "Items/FortItemDefinition.h"
@@ -328,6 +329,26 @@ void UFortKismetLibrary::HookNatives()
     {
         return;
     }
+
+#if WITH_SERVER_CODE
+    // ABuildingItemCollectorActor's deposit calls the folded native directly instead of the UFunction.
+    UFunction* RemoveItemFromPlayer = StaticFunction_K2_RemoveItemFromPlayer();
+    const uintptr_t RemoveItemFromPlayerExec = RemoveItemFromPlayer ? reinterpret_cast<uintptr_t>(RemoveItemFromPlayer->GetNativeFunc()) : 0;
+    const uintptr_t RemoveItemFromPlayerExecEnd = RemoveItemFromPlayerExec ? Finder::FunctionEnd(RemoveItemFromPlayerExec) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> RemoveItemFromPlayerExecCalls = RemoveItemFromPlayerExecEnd > RemoveItemFromPlayerExec ? Finder::DirectCalls(RemoveItemFromPlayerExec, RemoveItemFromPlayerExecEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    const uintptr_t RemoveItemFromPlayerNative = RemoveItemFromPlayerExecCalls.empty() ? 0 : RemoveItemFromPlayerExecCalls.back().second;
+    if (!RemoveItemFromPlayerNative || RemoveItemFromPlayerNative == reinterpret_cast<uintptr_t>(Natives::FFrame_Step) || RemoveItemFromPlayerNative == reinterpret_cast<uintptr_t>(Natives::FFrame_StepExplicitProperty))
+    {
+        Log::Error(L"Finder: UFortKismetLibrary::K2_RemoveItemFromPlayer native not found");
+    }
+    else
+    {
+        for (const uintptr_t Site : Finder::CallsTo(RemoveItemFromPlayerNative, false))
+        {
+            Hooks::RedirectCall(L"UFortKismetLibrary::K2_RemoveItemFromPlayer", reinterpret_cast<uint8_t*>(Site), reinterpret_cast<void*>(&K2_RemoveItemFromPlayer));
+        }
+    }
+#endif
 
     for (const auto& [Function, Native, Name] : {
              std::tuple{ StaticFunction_GetAIDirector(), &execGetAIDirector, L"UFortKismetLibrary::GetAIDirector" },

@@ -34,6 +34,7 @@
 #include "Items/FortSchematicItem.h"
 #include "Items/FortQuickBars.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerControllerOutpost.h"
 #include "Player/FortPlayerControllerZone.h"
 #include "Player/FortPlayerState.h"
 #include "FortGlobals.h"
@@ -93,6 +94,7 @@ void Boot::Initialize()
         AFortMission::HookNatives();
         AFortPlayerController::HookVTables();
         AFortPlayerControllerZone::HookVTables();
+        AFortPlayerControllerOutpost::HookVTables();
         AFortQuickBars::HookVTables();
         AFortPickup::HookVTables();
         AFortObjectiveBase::HookVTables();

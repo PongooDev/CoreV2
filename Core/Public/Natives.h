@@ -269,6 +269,8 @@ namespace Natives
     inline void* (*UGameInstance_GetGameSessionId)(UGameInstance* This, void* Result) = nullptr;
     inline FString* (*UEnum_GetEnumName)(const UObject* This, FString* Result, int32_t Index) = nullptr;
     inline void (*AFortGameMode_SetBadgeScores)(AFortGameMode* This) = nullptr;
+    inline void (*AFortGameMode_SendStayWithParty)(AFortGameMode* This) = nullptr;
+    inline int32_t AGameMode_ReturnToMainMenuHostIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;

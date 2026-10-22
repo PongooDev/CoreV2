@@ -4289,3 +4289,31 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
     Log::Info(L"Finder: UFortWorldItem::SetItemCount is slot 0x{:X}", SetItemCountIndex);
     return true;
 }
+
+bool Finder::ResolveLeaveOutpostLive()
+{
+    if (Natives::AFortGameMode_SendStayWithParty && Natives::AGameMode_ReturnToMainMenuHostIndex >= 0)
+    {
+        return true;
+    }
+
+    const int32_t ReturnIndex = Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameMode"), reinterpret_cast<void*>(FunctionOf(L"Ignoring ReturnToMainMenuHost, already in a level travel")), 0x400);
+    const uintptr_t OnZoneEnd = Natives::AFortGameModeZone_OnZoneEndIndex >= 0 ? VTableEntry(CdoVTable(L"/Script/FortniteGame.FortGameModeZone"), Natives::AFortGameModeZone_OnZoneEndIndex) : 0;
+    uintptr_t StayWithParty = 0;
+    for (uintptr_t Call = OnZoneEnd ? FindRawCall(OnZoneEnd, OnZoneEnd + 0x200) : 0; Call && !StayWithParty; Call = FindRawCall(Call + 1, OnZoneEnd + 0x200))
+    {
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        StayWithParty = TargetEnd && FindInstruction(Target, TargetEnd, { 0xFF, 0x90, 0xF8, 0x14, 0x00, 0x00 }) ? Target : 0;
+    }
+    if (ReturnIndex < 0 || !StayWithParty)
+    {
+        Log::Error(L"Finder: leave outpost not found (return to main menu host slot {}, stay with party {})", ReturnIndex, StayWithParty != 0);
+        return false;
+    }
+
+    Natives::AGameMode_ReturnToMainMenuHostIndex = ReturnIndex;
+    Natives::AFortGameMode_SendStayWithParty = reinterpret_cast<decltype(Natives::AFortGameMode_SendStayWithParty)>(StayWithParty);
+    Log::Info(L"Finder: AGameMode::ReturnToMainMenuHost is slot 0x{:X}", ReturnIndex);
+    return true;
+}

@@ -63,6 +63,7 @@ namespace Finder
     bool ResolveNavigationSystemLive();
     bool ResolveOutpostOwnerLive();
     bool ResolveBadgeScoresLive();
+    bool ResolveLeaveOutpostLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();
     bool ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t ItemEntryOffset);

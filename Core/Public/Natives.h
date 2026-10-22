@@ -263,6 +263,7 @@ namespace Natives
     inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;
     inline int32_t UEnvQueryContext_ProvideContextIndex = -1;
     inline void (*AFortQuickBars_SwapQuickBarFocus)(UObject* This, int32_t InQuickBar, int32_t SlotOverride) = nullptr;
+    inline int32_t IFortSpottableActorInterface_CanBeSpottedByIndex = -1;
     inline void* (*UObject_GetInterfaceAddress)(UObject* This, UClass* InterfaceClass) = nullptr;
     inline int32_t IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex = -1;
     inline void (*UFortQueryItemType_Goal_SetContextHelper)(void* ContextData, const FScriptArray& Goals) = nullptr;

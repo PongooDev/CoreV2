@@ -178,6 +178,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Linker.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Object.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ScriptDelegates.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ScriptInterface.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Stack.h" />
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\UObjectArray.h" />
@@ -257,6 +258,8 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGlobals.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortKismetLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRewardReport.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpottableActorInterface.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortTeamInfo.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortTheaterInfo.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortVisibilityComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortVisibilityManager.h" />
@@ -391,6 +394,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameState.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGlobals.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortKismetLibrary.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortTeamInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortWorldManager.cpp" />

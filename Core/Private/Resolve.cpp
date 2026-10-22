@@ -3677,6 +3677,46 @@ bool Finder::ResolveQuickBarFocusLive()
     return true;
 }
 
+bool Finder::ResolveSpottingLive(UClass* SpottableActorInterface)
+{
+    if (Natives::IFortSpottableActorInterface_CanBeSpottedByIndex >= 0 && Natives::UObject_GetInterfaceAddress)
+    {
+        return true;
+    }
+
+    const uintptr_t Ref = OnlyRef(L"SpotActorTrace");
+    uintptr_t InterfaceCall = 0;
+    for (uintptr_t Site = Ref ? Ref - 3 : 0; Site && Site + 0x200 > Ref && !InterfaceCall; --Site)
+    {
+        if (Byte(Site) == 0x41 && Byte(Site + 1) == 0xFF && (Byte(Site + 2) & 0xF8) == 0x50 && Byte(Site + 3) % 8 == 0)
+        {
+            InterfaceCall = Site;
+        }
+    }
+
+    uintptr_t GetInterfaceAddress = 0;
+    uintptr_t InterfaceClassGetter = 0;
+    for (uintptr_t Call = InterfaceCall ? FindRawCall(InterfaceCall - 0x20, InterfaceCall) : 0; Call; Call = FindRawCall(Call + 1, InterfaceCall))
+    {
+        InterfaceClassGetter = GetInterfaceAddress;
+        GetInterfaceAddress = Finder::RelativeTarget(Call, 1, 5);
+    }
+
+    const bool bSpottable = IsInText(InterfaceClassGetter) && SpottableActorInterface && reinterpret_cast<UClass* (*)()>(InterfaceClassGetter)() == SpottableActorInterface;
+    if (!bSpottable || !GetInterfaceAddress)
+    {
+        Log::Error(L"Finder: IFortSpottableActorInterface::CanBeSpottedBy not found (call {}, interface {})", InterfaceCall != 0, bSpottable);
+        return false;
+    }
+    if (!Natives::UObject_GetInterfaceAddress)
+    {
+        Natives::UObject_GetInterfaceAddress = reinterpret_cast<decltype(Natives::UObject_GetInterfaceAddress)>(GetInterfaceAddress);
+    }
+    Natives::IFortSpottableActorInterface_CanBeSpottedByIndex = Byte(InterfaceCall + 3) / 8;
+    Log::Info(L"Finder: IFortSpottableActorInterface::CanBeSpottedBy is slot {}", Natives::IFortSpottableActorInterface_CanBeSpottedByIndex);
+    return true;
+}
+
 bool Finder::ResolveQueryGeneratorsLive(void** EnemiesVTable)
 {
     const uintptr_t Enemies = FunctionOf(L"NULL AIOwner (controller) of Enemies generator.  Cannot generate enemies.");

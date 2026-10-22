@@ -12,6 +12,8 @@
 #include "Heroes/FortHeroType.h"
 #include "Hooks.h"
 #include "FortKismetLibrary.h"
+#include "FortSpottableActorInterface.h"
+#include "FortTeamInfo.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
@@ -604,6 +606,36 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
 #endif
 }
 
+void AFortPlayerController::ServerSpotActor_Implementation(AActor* NewlySpottedActor)
+{
+#if WITH_SERVER_CODE
+    UClass* const SpottableActorInterface = UFortSpottableActorInterface::StaticClass();
+    if (!NewlySpottedActor || !Finder::ResolveSpottingLive(SpottableActorInterface))
+    {
+        return;
+    }
+
+    IFortSpottableActorInterface* Spottable = static_cast<IFortSpottableActorInterface*>(Natives::UObject_GetInterfaceAddress(NewlySpottedActor, SpottableActorInterface));
+    if (!Spottable || !Spottable->CanBeSpottedBy(this))
+    {
+        return;
+    }
+
+    AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState)));
+    if (AFortTeamInfo* Team = FortPlayerState ? static_cast<AFortTeamInfo*>(FortPlayerState->PlayerTeam) : nullptr)
+    {
+        Team->AddSpottedActor(this, NewlySpottedActor);
+    }
+
+    AFortPawn* SpotterPawn = MyFortPawn;
+    AFortPawn* SpottedPawn = Cast<AFortPawn>(NewlySpottedActor);
+    if (SpotterPawn && SpottedPawn)
+    {
+        SpotterPawn->TriggerFeedbackEvent(SpottedPawn->SpottedEvent, SpotterPawn, SpottedPawn, 0.f);
+    }
+#endif
+}
+
 bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
 {
     void* InventoryOwner = reinterpret_cast<uint8_t*>(this) + Natives::AFortPlayerController_InventoryOwnerInterface;
@@ -709,6 +741,7 @@ void AFortPlayerController::HookVTables()
     for (const auto& [Function, Implementation, Name] : {
              std::tuple{ StaticFunction_ServerExecuteInventoryItem(), reinterpret_cast<void*>(&ServerExecuteInventoryItem_ImplementationHK), L"AFortPlayerController::ServerExecuteInventoryItem_Implementation" },
              std::tuple{ StaticFunction_ServerSpawnInventoryDrop(), reinterpret_cast<void*>(&ServerSpawnInventoryDrop_ImplementationHK), L"AFortPlayerController::ServerSpawnInventoryDrop_Implementation" },
+             std::tuple{ StaticFunction_ServerSpotActor(), reinterpret_cast<void*>(&ServerSpotActor_ImplementationHK), L"AFortPlayerController::ServerSpotActor_Implementation" },
          })
     {
         const int32_t Index = Finder::ImplementationIndex(Function);
@@ -869,6 +902,11 @@ void AFortPlayerController::TrySetHeroImplementationHK(AFortPlayerController* Th
 void AFortPlayerController::ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid)
 {
     This->ServerExecuteInventoryItem_Implementation(ItemGuid);
+}
+
+void AFortPlayerController::ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor)
+{
+    This->ServerSpotActor_Implementation(NewlySpottedActor);
 }
 
 void AFortPlayerController::ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count)

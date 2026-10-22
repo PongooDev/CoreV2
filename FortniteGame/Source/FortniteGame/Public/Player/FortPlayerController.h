@@ -35,6 +35,7 @@ public:
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
+    DefineUFunction(ServerSpotActor)
     DefineUFunction(ActivateSlot)
     DefineUFunction(GivePlayerAmmo)
     DefineUFunction(SwapQuickBarFocus)
@@ -54,6 +55,7 @@ public:
     void ApplyHarvestingTool();
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
+    void ServerSpotActor_Implementation(AActor* NewlySpottedActor);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
     UFortQuestManager* GetQuestManager() const;
@@ -78,6 +80,7 @@ private:
     static void TrySetHeroImplementationHK(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused);
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count);
+    static void ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor);
     static bool RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     static inline bool (*RemoveInventoryItemOG)(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars) = nullptr;
 };

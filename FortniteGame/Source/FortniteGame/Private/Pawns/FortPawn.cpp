@@ -23,6 +23,16 @@ AFortWeapon* AFortPawn::EquipWeaponDefinition(const UFortWeaponItemDefinition* W
     return Params.Call(this) ? Params.Take<AFortWeapon*>(L"ReturnValue") : nullptr;
 }
 
+void AFortPawn::TriggerFeedbackEvent(FName EventName, AFortPawn* InstigatorPawn, AFortPawn* Recipient, float OverriddenDelay)
+{
+    Reflection::FParams Params(StaticFunction_TriggerFeedbackEvent());
+    Params.Set(L"EventName", EventName);
+    Params.Set(L"InstigatorPawn", InstigatorPawn);
+    Params.Set(L"Recipient", Recipient);
+    Params.Set(L"OverriddenDelay", OverriddenDelay);
+    Params.Call(this);
+}
+
 bool AFortPawn::EquipDefaultWeapon()
 {
     if (!Finder::ResolveAbilityWeaponLive(CurrentWeaponListOffset(), AFortPlayerPawn::LastEquippedWeaponGUIDOffset()))

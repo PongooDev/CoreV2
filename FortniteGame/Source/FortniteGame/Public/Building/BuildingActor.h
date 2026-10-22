@@ -2,6 +2,7 @@
 
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "UObject/ScriptDelegates.h"
 
 class ABuildingActor : public AActor
 {
@@ -9,4 +10,5 @@ class ABuildingActor : public AActor
 
 public:
     DefineUProperty(FGameplayTagContainer, StaticGameplayTags)
+    DefineUProperty(FMulticastScriptDelegate, OnDied)
 };

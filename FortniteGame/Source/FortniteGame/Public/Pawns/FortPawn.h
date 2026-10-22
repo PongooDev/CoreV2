@@ -3,6 +3,7 @@
 #include "Containers/Array.h"
 #include "GameFramework/Pawn.h"
 #include "Misc/Guid.h"
+#include "UObject/ScriptDelegates.h"
 
 class AFortWeapon;
 class UFortWeaponItemDefinition;
@@ -12,15 +13,19 @@ class AFortPawn : public APawn
     DefineUnrealClass(AFortPawn, FortniteGame)
     DefineUFunction(IsDead)
     DefineUFunction(EquipWeaponDefinition)
+    DefineUFunction(TriggerFeedbackEvent)
 
 public:
     DefineUProperty(AFortWeapon*, CurrentWeapon)
     DefineUProperty(TArray<AFortWeapon*>, CurrentWeaponList)
+    DefineUProperty(FMulticastScriptDelegate, OnDied)
+    DefineUProperty(FName, SpottedEvent)
 
     bool IsDead() const;
     AFortWeapon* EquipWeaponDefinition(const UFortWeaponItemDefinition* WeaponData, const FGuid& ItemEntryGuid);
     bool EquipDefaultWeapon();
     void RemoveAbilityWeapon(AFortWeapon* Weapon);
+    void TriggerFeedbackEvent(FName EventName, AFortPawn* InstigatorPawn, AFortPawn* Recipient, float OverriddenDelay);
 
     static ptrdiff_t CurrentWeaponListOffset();
 };

@@ -3,6 +3,7 @@
 #include "Customization/CustomCharacterPart.h"
 #include "GameFramework/PlayerState.h"
 
+class AFortTeamInfo;
 class UAbilitySystemComponent;
 class UFortHero;
 
@@ -58,6 +59,7 @@ public:
     DefineUProperty(int32_t, WorldPlayerId)
     DefineUProperty(bool, bIsFinalizingExperience)
     DefineUProperty(bool, bAreZoneStatsFinalized)
+    DefineUProperty(AFortTeamInfo*, PlayerTeam)
     DefineBitfieldUProperty(bHasStartedPlaying)
     DefineUFunction(OnRep_CharacterParts)
 

@@ -81,7 +81,7 @@ bool AFortObjectiveBase::ActivateObjective()
 bool AFortObjectiveBase::StartPlayingObjective()
 {
 #if WITH_SERVER_CODE
-    if (Role != ROLE_Authority || ObjectiveStatus != EFortObjectiveStatus::Created)
+    if (Role != ROLE_Authority || ObjectiveStatus == EFortObjectiveStatus::InProgress)
     {
         return false;
     }

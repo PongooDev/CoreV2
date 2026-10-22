@@ -24,7 +24,7 @@ UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const
     return static_cast<UFortMissionGenerator*>(LoadedClass->GetDefaultObject());
 }
 
-void AFortGameStateZone::SetGameplayState(EFortGameplayState::Type NewGameplayState)
+void AFortGameStateZone::SetGameplayState(EFortGameplayState NewGameplayState)
 {
     if (Natives::AFortGameStateZone_SetGameplayStateIndex >= 0)
     {

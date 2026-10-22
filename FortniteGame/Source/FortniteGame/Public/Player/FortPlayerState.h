@@ -7,47 +7,45 @@ class AFortTeamInfo;
 class UAbilitySystemComponent;
 class UFortHero;
 
-namespace EFortReplicatedStat
+class EFortReplicatedStat
 {
-    enum Type
-    {
-        MonsterKills,
-        MonsterDamagePoints,
-        PlayerKills,
-        WoodGathered,
-        StoneGathered,
-        MetalGathered,
-        Deaths,
-        BuildingsBuilt,
-        BuildingsBuilt_Wood,
-        BuildingsBuilt_Stone,
-        BuildingsBuilt_Metal,
-        BuildingsUpgraded_Wood2,
-        BuildingsUpgraded_Wood3,
-        BuildingsUpgraded_Stone2,
-        BuildingsUpgraded_Stone3,
-        BuildingsUpgraded_Metal2,
-        BuildingsUpgraded_Metal3,
-        BuildingsDestroyed,
-        Repair_Wood,
-        Repair_Stone,
-        Repair_Metal,
-        FlagsCaptured,
-        FlagsReturned,
-        ContainersLooted,
-        CraftingPoints,
-        TrapPlacementPoints,
-        TrapActivationPoints,
-        TotalScore,
-        OldTotalScore,
-        CombatScore,
-        BuildingScore,
-        UtilityScore,
-        BadgesScore,
-        None,
-        MAX,
-    };
-}
+    DefineUnrealEnum(EFortReplicatedStat, FortniteGame)
+    DefineUEnumValue(MonsterKills)
+    DefineUEnumValue(MonsterDamagePoints)
+    DefineUEnumValue(PlayerKills)
+    DefineUEnumValue(WoodGathered)
+    DefineUEnumValue(StoneGathered)
+    DefineUEnumValue(MetalGathered)
+    DefineUEnumValue(Deaths)
+    DefineUEnumValue(BuildingsBuilt)
+    DefineUEnumValue(BuildingsBuilt_Wood)
+    DefineUEnumValue(BuildingsBuilt_Stone)
+    DefineUEnumValue(BuildingsBuilt_Metal)
+    DefineUEnumValue(BuildingsUpgraded_Wood2)
+    DefineUEnumValue(BuildingsUpgraded_Wood3)
+    DefineUEnumValue(BuildingsUpgraded_Stone2)
+    DefineUEnumValue(BuildingsUpgraded_Stone3)
+    DefineUEnumValue(BuildingsUpgraded_Metal2)
+    DefineUEnumValue(BuildingsUpgraded_Metal3)
+    DefineUEnumValue(BuildingsDestroyed)
+    DefineUEnumValue(Repair_Wood)
+    DefineUEnumValue(Repair_Stone)
+    DefineUEnumValue(Repair_Metal)
+    DefineUEnumValue(FlagsCaptured)
+    DefineUEnumValue(FlagsReturned)
+    DefineUEnumValue(ContainersLooted)
+    DefineUEnumValue(CraftingPoints)
+    DefineUEnumValue(TrapPlacementPoints)
+    DefineUEnumValue(TrapActivationPoints)
+    DefineUEnumValue(TotalScore)
+    DefineUEnumValue(OldTotalScore)
+    DefineUEnumValue(CombatScore)
+    DefineUEnumValue(BuildingScore)
+    DefineUEnumValue(UtilityScore)
+    DefineUEnumValue(BadgesScore)
+    DefineUEnumValue(None)
+    DefineUEnumValue(MAX)
+};
 
 class AFortPlayerState : public APlayerState
 {
@@ -71,7 +69,7 @@ public:
 
     void SetHeroType(UFortHero* Hero);
     void OnRep_CharacterParts();
-    int32_t GetStat(EFortReplicatedStat::Type StatType, bool bCampaign);
+    int32_t GetStat(EFortReplicatedStat StatType, bool bCampaign);
 
     static ptrdiff_t FinalizingExperienceOffset();
 

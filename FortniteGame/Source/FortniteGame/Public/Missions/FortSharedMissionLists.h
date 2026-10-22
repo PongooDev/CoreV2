@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Containers/Array.h"
+#include "FortTheaterInfo.h"
+#include "FortZoneTheme.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
 #include "UObject/AssetPtr.h"
@@ -12,10 +14,10 @@ struct FFortGlobalMission
 {
     DefineUnrealStruct(FFortGlobalMission, FortniteGame)
     DefineUProperty(TAssetPtr<UFortMissionInfo>, MissionInfo)
-    DefineUProperty(TArray<uint8_t>, AllowedTheaterTypes)
+    DefineUProperty(TArray<EFortTheaterType>, AllowedTheaterTypes)
     DefineUProperty(FGameplayTagQuery, TheaterTagQuery)
     DefineUProperty(FGameplayTagQuery, RegionTagQuery)
-    DefineUProperty(TArray<uint8_t>, AllowedZoneTypes)
+    DefineUProperty(TArray<EFortZoneType>, AllowedZoneTypes)
     DefineUProperty(FGameplayTagQuery, ZoneTagQuery)
     DefineUProperty(FGameplayTagQuery, PrimaryMissionTagQuery)
     DefineUProperty(float, MaxDifficultyLevel)

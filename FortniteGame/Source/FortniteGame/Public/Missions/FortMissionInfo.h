@@ -7,6 +7,14 @@ class AGameModeBase;
 class UFortBadgeItemDefinition;
 class UObject;
 
+class EFortMissionType
+{
+    DefineUnrealEnum(EFortMissionType, FortniteGame)
+    DefineUEnumValue(Primary)
+    DefineUEnumValue(Secondary)
+    DefineUEnumValue(Max_None)
+};
+
 struct FFortGeneratedDifficultyOptions
 {
     DefineUnrealStruct(FFortGeneratedDifficultyOptions, FortniteGame)
@@ -17,7 +25,7 @@ class UFortMissionInfo : public UObject
     DefineUnrealClass(UFortMissionInfo, FortniteGame)
 
 public:
-    DefineUProperty(uint8_t, MissionType)
+    DefineUProperty(EFortMissionType, MissionType)
     DefineUProperty(FGameplayTagContainer, MissionTags)
     DefineUProperty(int32_t, MaxMissionPoints)
     DefineUProperty(UFortBadgeItemDefinition*, MissionRewardBadge)

@@ -19,16 +19,17 @@ struct FFortStartingMissionInfo
     DefineBitfieldUProperty(bDisableSharedMissionLoading)
 };
 
-enum class EFortWorldManagerState : uint8_t
+class EFortWorldManagerState
 {
-    WMS_Created,
-    WMS_QueryingWorld,
-    WMS_WorldQueryComplete,
-    WMS_CreatingNewWorld,
-    WMS_LoadingExistingWorld,
-    WMS_Running,
-    WMS_Failed,
-    WMS_MAX,
+    DefineUnrealEnum(EFortWorldManagerState, FortniteGame)
+    DefineUEnumValue(WMS_Created)
+    DefineUEnumValue(WMS_QueryingWorld)
+    DefineUEnumValue(WMS_WorldQueryComplete)
+    DefineUEnumValue(WMS_CreatingNewWorld)
+    DefineUEnumValue(WMS_LoadingExistingWorld)
+    DefineUEnumValue(WMS_Running)
+    DefineUEnumValue(WMS_Failed)
+    DefineUEnumValue(WMS_MAX)
 };
 
 class AFortWorldManager : public AInfo
@@ -51,7 +52,7 @@ public:
     void OnWorldRecordQueryComplete();
     void ServerTickLoadingOrCreatingWorld();
     void AddSharedMissionsToMissionManagerRecord();
-    void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory = EMissionGenerationCategory::Max_None, UFortMissionGenerator* MissionGenerator = nullptr);
+    void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory = EMissionGenerationCategory::GetMax_None(), UFortMissionGenerator* MissionGenerator = nullptr);
     void CreateMissionManager();
     int32_t GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName);
     AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);

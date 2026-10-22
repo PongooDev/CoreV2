@@ -2,15 +2,16 @@
 
 #include "UObject/Object.h"
 
-enum class EFortCustomPartType : uint8_t
+class EFortCustomPartType
 {
-    Head,
-    Body,
-    Hat,
-    Backpack,
-    Charm,
-    Face,
-    NumTypes,
+    DefineUnrealEnum(EFortCustomPartType, FortniteGame)
+    DefineUEnumValue(Head)
+    DefineUEnumValue(Body)
+    DefineUEnumValue(Hat)
+    DefineUEnumValue(Backpack)
+    DefineUEnumValue(Charm)
+    DefineUEnumValue(Face)
+    DefineUEnumValue(NumTypes)
 };
 
 class UCustomCharacterPart : public UObject

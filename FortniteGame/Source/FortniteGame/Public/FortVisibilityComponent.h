@@ -2,11 +2,12 @@
 
 #include "Components/ActorComponent.h"
 
-enum class EFortVisibilityBehavior : uint8_t
+class EFortVisibilityBehavior
 {
-    Proximity,
-    OnceSeenAlwaysSeen,
-    Invalid,
+    DefineUnrealEnum(EFortVisibilityBehavior, FortniteGame)
+    DefineUEnumValue(Proximity)
+    DefineUEnumValue(OnceSeenAlwaysSeen)
+    DefineUEnumValue(Invalid)
 };
 
 class UFortVisibilityComponent : public UActorComponent

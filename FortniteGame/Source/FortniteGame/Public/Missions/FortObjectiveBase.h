@@ -9,14 +9,15 @@ class FText;
 class UFortBadgeItemDefinition;
 class UFortWorldItemDefinition;
 
-enum class EFortObjectiveStatus : uint8_t
+class EFortObjectiveStatus
 {
-    Created,
-    InProgress,
-    Succeeded,
-    Failed,
-    NeutralCompletion,
-    Max_None,
+    DefineUnrealEnum(EFortObjectiveStatus, FortniteGame)
+    DefineUEnumValue(Created)
+    DefineUEnumValue(InProgress)
+    DefineUEnumValue(Succeeded)
+    DefineUEnumValue(Failed)
+    DefineUEnumValue(NeutralCompletion)
+    DefineUEnumValue(Max_None)
 };
 
 class AFortObjectiveBase : public AActor

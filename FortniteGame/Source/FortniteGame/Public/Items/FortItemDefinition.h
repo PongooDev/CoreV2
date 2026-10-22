@@ -7,61 +7,84 @@ class AFortPlayerController;
 class UFortItem;
 class UFortWorldItem;
 
-enum class EFortItemType : uint8_t
+class EFortInventoryFilter
 {
-    WorldItem,
-    Ammo,
-    Badge,
-    BackpackPickup,
-    BuildingPiece,
-    CharacterPart,
-    Deco,
-    EditTool,
-    Ingredient,
-    Food,
-    Gadget,
-    HomebaseGadget,
-    HeroAbility,
-    MissionItem,
-    Trap,
-    Weapon,
-    WeaponMelee,
-    WeaponRanged,
-    WeaponHarvest,
-    WorldResource,
-    AccountItem,
-    AccountResource,
-    CollectedResource,
-    Alteration,
-    CardPack,
-    CharacterCosmetic,
-    Currency,
-    Hero,
-    Schematic,
-    Worker,
-    Token,
-    DailyRewardScheduleToken,
-    CodeToken,
-    Buff,
-    BuffCredit,
-    Quest,
-    GameplayModifier,
-    Outpost,
-    HomebaseNode,
-    Defender,
-    ConversionControl,
-    DeployableBaseCloudSave,
-    ConsumableAccountItem,
-    Quota,
-    Expedition,
-    HomebaseBannerIcon,
-    HomebaseBannerColor,
-    SpecialItem,
-    Emote,
-    Stack,
-    CollectionBookPage,
-    Profile,
-    Max_None,
+    DefineUnrealEnum(EFortInventoryFilter, FortniteGame)
+    DefineUEnumValue(WeaponMelee)
+    DefineUEnumValue(WeaponRanged)
+    DefineUEnumValue(Ammo)
+    DefineUEnumValue(Traps)
+    DefineUEnumValue(Consumables)
+    DefineUEnumValue(Ingredients)
+    DefineUEnumValue(Gadget)
+    DefineUEnumValue(Decorations)
+    DefineUEnumValue(Badges)
+    DefineUEnumValue(Heroes)
+    DefineUEnumValue(LeadSurvivors)
+    DefineUEnumValue(Survivors)
+    DefineUEnumValue(Defenders)
+    DefineUEnumValue(Resources)
+    DefineUEnumValue(ConversionControl)
+    DefineUEnumValue(Invisible)
+    DefineUEnumValue(Max_None)
+};
+
+class EFortItemType
+{
+    DefineUnrealEnum(EFortItemType, FortniteGame)
+    DefineUEnumValue(WorldItem)
+    DefineUEnumValue(Ammo)
+    DefineUEnumValue(Badge)
+    DefineUEnumValue(BackpackPickup)
+    DefineUEnumValue(BuildingPiece)
+    DefineUEnumValue(CharacterPart)
+    DefineUEnumValue(Deco)
+    DefineUEnumValue(EditTool)
+    DefineUEnumValue(Ingredient)
+    DefineUEnumValue(Food)
+    DefineUEnumValue(Gadget)
+    DefineUEnumValue(HomebaseGadget)
+    DefineUEnumValue(HeroAbility)
+    DefineUEnumValue(MissionItem)
+    DefineUEnumValue(Trap)
+    DefineUEnumValue(Weapon)
+    DefineUEnumValue(WeaponMelee)
+    DefineUEnumValue(WeaponRanged)
+    DefineUEnumValue(WeaponHarvest)
+    DefineUEnumValue(WorldResource)
+    DefineUEnumValue(AccountItem)
+    DefineUEnumValue(AccountResource)
+    DefineUEnumValue(CollectedResource)
+    DefineUEnumValue(Alteration)
+    DefineUEnumValue(CardPack)
+    DefineUEnumValue(CharacterCosmetic)
+    DefineUEnumValue(Currency)
+    DefineUEnumValue(Hero)
+    DefineUEnumValue(Schematic)
+    DefineUEnumValue(Worker)
+    DefineUEnumValue(Token)
+    DefineUEnumValue(DailyRewardScheduleToken)
+    DefineUEnumValue(CodeToken)
+    DefineUEnumValue(Buff)
+    DefineUEnumValue(BuffCredit)
+    DefineUEnumValue(Quest)
+    DefineUEnumValue(GameplayModifier)
+    DefineUEnumValue(Outpost)
+    DefineUEnumValue(HomebaseNode)
+    DefineUEnumValue(Defender)
+    DefineUEnumValue(ConversionControl)
+    DefineUEnumValue(DeployableBaseCloudSave)
+    DefineUEnumValue(ConsumableAccountItem)
+    DefineUEnumValue(Quota)
+    DefineUEnumValue(Expedition)
+    DefineUEnumValue(HomebaseBannerIcon)
+    DefineUEnumValue(HomebaseBannerColor)
+    DefineUEnumValue(SpecialItem)
+    DefineUEnumValue(Emote)
+    DefineUEnumValue(Stack)
+    DefineUEnumValue(CollectionBookPage)
+    DefineUEnumValue(Profile)
+    DefineUEnumValue(Max_None)
 };
 
 class UFortItemDefinition : public UObject
@@ -69,7 +92,7 @@ class UFortItemDefinition : public UObject
     DefineUnrealClass(UFortItemDefinition, FortniteGame)
 
 public:
-    DefineUProperty(uint8_t, ItemType)
+    DefineUProperty(EFortItemType, ItemType)
     DefineUProperty(int32_t, MaxStackSize)
     DefineUFunction(CreateTemporaryItemInstanceBP)
     DefineUFunction(GetPersistentName)
@@ -77,7 +100,7 @@ public:
 
     UFortItem* CreateTemporaryItemInstanceBP(int32_t Count, int32_t Level) const;
     FString GetPersistentName() const;
-    uint8_t GetFilterCategory() const;
+    EFortInventoryFilter GetFilterCategory() const;
 };
 
 class UFortWorldItemDefinition : public UFortItemDefinition

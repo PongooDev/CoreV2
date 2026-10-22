@@ -133,8 +133,8 @@ void UFortQueryGenerator_SpecificAssignmentGoals::GenerateItems(void* QueryInsta
     }
 
     const FFortAIAssignmentIdentifier& Identifier = AssignmentIdentifier;
-    const EFortAIAssignmentType Type = Identifier.AssignmentType;
-    UObject* Encounter = Type == EFortAIAssignmentType::Encounter ? Controller->GetEncounterInfo() : nullptr;
+    const EAssignmentType Type = Identifier.AssignmentType;
+    UObject* Encounter = Type == EAssignmentType::GetEncounter() ? Controller->GetEncounterInfo() : nullptr;
     UObject* Assignment = GoalManager->FindAssignment(Identifier, Encounter);
     if (!Assignment)
     {

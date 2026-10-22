@@ -92,7 +92,7 @@ void AFortWorldManager::OnWorldRecordQueryComplete()
     OnWorldRecordQueryCompleteOG(this);
 
 #if WITH_SERVER_CODE
-    if (WorldManagerState != EFortWorldManagerState::WMS_WorldQueryComplete)
+    if (WorldManagerState != EFortWorldManagerState::GetWMS_WorldQueryComplete())
     {
         return;
     }
@@ -131,20 +131,20 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
             UFortMissionGenerator* MissionGenerator = GameState ? GameState->GetMissionGenerator() : nullptr;
             if (!MissionGenerator)
             {
-                AddMissionsToMissionManagerRecord(StartingMissionList, EMissionGenerationCategory::Primary);
+                AddMissionsToMissionManagerRecord(StartingMissionList, EMissionGenerationCategory::GetPrimary());
             }
             else
             {
                 const TAssetPtr<UFortMissionInfo>& PrimaryMissionInfo = MissionGenerator->PrimaryMissionInfo;
                 if (UFortMissionInfo* PrimaryMission = PrimaryMissionInfo.LoadSynchronous())
                 {
-                    AddMissionsToMissionManagerRecord({ PrimaryMission }, EMissionGenerationCategory::Primary, MissionGenerator);
+                    AddMissionsToMissionManagerRecord({ PrimaryMission }, EMissionGenerationCategory::GetPrimary(), MissionGenerator);
                 }
 
                 const std::pair<TStructArray<FFortPossibleMission>*, EMissionGenerationCategory> Lists[] = {
-                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SecondaryMissionList), EMissionGenerationCategory::Secondary },
-                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->TertiaryMissionList), EMissionGenerationCategory::Tertiary },
-                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SurvivorMissionList), EMissionGenerationCategory::Survivor },
+                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SecondaryMissionList), EMissionGenerationCategory::GetSecondary() },
+                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->TertiaryMissionList), EMissionGenerationCategory::GetTertiary() },
+                    { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SurvivorMissionList), EMissionGenerationCategory::GetSurvivor() },
                 };
                 void* RandomStream = Natives::AFortWorldManager_MissionGenerationRandomStream > 0 ? reinterpret_cast<uint8_t*>(this) + Natives::AFortWorldManager_MissionGenerationRandomStream : nullptr;
                 FFortMissionManagerRecord& ManagerRecord = MissionManagerRecord;
@@ -233,8 +233,8 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
         Finder::ResolveTheaterMapDataLive();
     }
     FFortTheaterMapData* TheaterMapData = Natives::AFortWorldManager_GetTheaterMapData ? static_cast<FFortTheaterMapData*>(Natives::AFortWorldManager_GetTheaterMapData(this)) : nullptr;
-    const EFortTheaterType TheaterType = TheaterMapData ? static_cast<EFortTheaterType>(TheaterMapData->RuntimeInfo.TheaterType) : EFortTheaterType::Max_None;
-    const bool bIsTestMap = TheaterType == EFortTheaterType::Test || TheaterType == EFortTheaterType::Max_None;
+    const EFortTheaterType TheaterType = TheaterMapData ? TheaterMapData->RuntimeInfo.TheaterType : EFortTheaterType::GetMax_None();
+    const bool bIsTestMap = TheaterType == EFortTheaterType::GetTest() || TheaterType == EFortTheaterType::GetMax_None();
 
     FFortMissionManagerRecord& Record = MissionManagerRecord;
     TStructArray<FFortMissionRecord>& MissionRecords = Record.MissionRecords;
@@ -244,7 +244,7 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
     {
         FFortMissionEntry& MissionEntry = MissionRecords[Index].MissionEntry;
         UFortMissionInfo* MissionInfo = MissionEntry.MissionInfo;
-        if (MissionInfo && MissionInfo->MissionType == 0)
+        if (MissionInfo && MissionInfo->MissionType == EFortMissionType::GetPrimary())
         {
             UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(PrimaryMissionTags, MissionInfo->MissionTags);
         }
@@ -267,15 +267,15 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             continue;
         }
 
-        if ((SharedMission.bIsPrototype && TheaterType != EFortTheaterType::Test) || (bIsTestMap && !SharedMission.bAllowInTestMaps))
+        if ((SharedMission.bIsPrototype && TheaterType != EFortTheaterType::GetTest()) || (bIsTestMap && !SharedMission.bAllowInTestMaps))
         {
             continue;
         }
 
         if (TheaterMapData)
         {
-            const TArray<uint8_t>& AllowedTheaterTypes = SharedMission.AllowedTheaterTypes;
-            if ((AllowedTheaterTypes.Num() > 0 && !AllowedTheaterTypes.Contains(static_cast<uint8_t>(TheaterType))) || !MatchesQuery(TheaterMapData->RuntimeInfo.TheaterTags, SharedMission.TheaterTagQuery))
+            const TArray<EFortTheaterType>& AllowedTheaterTypes = SharedMission.AllowedTheaterTypes;
+            if ((AllowedTheaterTypes.Num() > 0 && !AllowedTheaterTypes.Contains(TheaterType)) || !MatchesQuery(TheaterMapData->RuntimeInfo.TheaterTags, SharedMission.TheaterTagQuery))
             {
                 continue;
             }
@@ -283,8 +283,8 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
 
         if (ZoneTheme)
         {
-            const TArray<uint8_t>& AllowedZoneTypes = SharedMission.AllowedZoneTypes;
-            if ((AllowedZoneTypes.Num() > 0 && !AllowedZoneTypes.Contains(static_cast<uint8_t>(static_cast<EFortZoneType>(ZoneTheme->ZoneType)))) || !MatchesQuery(ZoneTheme->ZoneTags, SharedMission.ZoneTagQuery))
+            const TArray<EFortZoneType>& AllowedZoneTypes = SharedMission.AllowedZoneTypes;
+            if ((AllowedZoneTypes.Num() > 0 && !AllowedZoneTypes.Contains(ZoneTheme->ZoneType)) || !MatchesQuery(ZoneTheme->ZoneTags, SharedMission.ZoneTagQuery))
             {
                 continue;
             }
@@ -471,8 +471,8 @@ bool AFortWorldManager::UpdatePlayerQuickBarRecords(AFortPlayerController* Playe
     }
 
     UScriptStruct* QuickBarStruct = FQuickBar::StaticStruct();
-    QuickBarStruct->CopyScriptStruct(PrimaryRecord, &QuickBars->GetQuickBar(EFortQuickBars::Primary));
-    QuickBarStruct->CopyScriptStruct(SecondaryRecord, &QuickBars->GetQuickBar(EFortQuickBars::Secondary));
+    QuickBarStruct->CopyScriptStruct(PrimaryRecord, &QuickBars->GetQuickBar(EFortQuickBars::GetPrimary()));
+    QuickBarStruct->CopyScriptStruct(SecondaryRecord, &QuickBars->GetQuickBar(EFortQuickBars::GetSecondary()));
 #endif
     return true;
 }
@@ -495,7 +495,7 @@ bool AFortWorldManager::RestorePlayerQuickBars(AFortPlayerController* PlayerCont
         FGuid Item;
     };
     std::vector<FSlottedItem> SlottedItems;
-    for (EFortQuickBars Bar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
+    for (EFortQuickBars Bar : { EFortQuickBars::GetPrimary(), EFortQuickBars::GetSecondary() })
     {
         TStructArray<FQuickBarSlot>& Slots = Records[static_cast<int32_t>(Bar)]->Slots;
         for (int32_t SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)

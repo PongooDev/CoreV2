@@ -3,16 +3,17 @@
 #include "GameplayTagContainer.h"
 #include "UObject/Object.h"
 
-enum class EFortTheaterType : uint8_t
+class EFortTheaterType
 {
-    Standard,
-    Elder,
-    PvP,
-    PvP2,
-    Tutorial,
-    TutorialGate,
-    Test,
-    Max_None,
+    DefineUnrealEnum(EFortTheaterType, FortniteGame)
+    DefineUEnumValue(Standard)
+    DefineUEnumValue(Elder)
+    DefineUEnumValue(PvP)
+    DefineUEnumValue(PvP2)
+    DefineUEnumValue(Tutorial)
+    DefineUEnumValue(TutorialGate)
+    DefineUEnumValue(Test)
+    DefineUEnumValue(Max_None)
 };
 
 struct FFortTheaterRuntimeData

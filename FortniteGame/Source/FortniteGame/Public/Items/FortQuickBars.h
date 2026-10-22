@@ -3,13 +3,15 @@
 #include "Containers/Array.h"
 #include "StructArray.h"
 #include "GameFramework/Actor.h"
+#include "Items/FortItemDefinition.h"
 #include "Misc/Guid.h"
 
-enum class EFortQuickBars : uint8_t
+class EFortQuickBars
 {
-    Primary,
-    Secondary,
-    Max_None,
+    DefineUnrealEnum(EFortQuickBars, FortniteGame)
+    DefineUEnumValue(Primary)
+    DefineUEnumValue(Secondary)
+    DefineUEnumValue(Max_None)
 };
 
 struct FQuickBarSlot
@@ -21,7 +23,7 @@ struct FQuickBarSlot
 struct FQuickBarSlotData
 {
     DefineUnrealStruct(FQuickBarSlotData, FortniteGame)
-    DefineUProperty(TArray<uint8_t>, AcceptedItemTypes)
+    DefineUProperty(TArray<EFortItemType>, AcceptedItemTypes)
 };
 
 struct FQuickBarData
@@ -51,7 +53,7 @@ public:
     DefineUFunction(ServerAddItemInternal)
     DefineUFunction(ServerRemoveItemInternal)
 
-    FQuickBar& GetQuickBar(EFortQuickBars InQuickBar) { return InQuickBar == EFortQuickBars::Primary ? PrimaryQuickBar : SecondaryQuickBar; }
+    FQuickBar& GetQuickBar(EFortQuickBars InQuickBar) { return InQuickBar == EFortQuickBars::GetPrimary() ? PrimaryQuickBar : SecondaryQuickBar; }
     EFortQuickBars GetCurrentQuickBar();
     void SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride);
 

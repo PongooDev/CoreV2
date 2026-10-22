@@ -124,7 +124,7 @@ ptrdiff_t AFortMission::MissionInfoOffset()
 bool AFortMission::IsPrimaryMission() const
 {
     UFortMissionInfo* Info = MissionInfo;
-    return Info && Info->MissionType == 0;
+    return Info && Info->MissionType == EFortMissionType::GetPrimary();
 }
 
 TArray<AFortPlayerController*> AFortMission::GetParticipatingMissionControllers()
@@ -203,7 +203,7 @@ DEFINE_FUNCTION(AFortMission::execGrantRewardsByTag)
     P_GET_PROPERTY(UByteProperty, Z_Param_RewardType);
     P_FINISH;
     P_NATIVE_BEGIN;
-    static_cast<AFortMission*>(Context)->GrantRewardsByTag(Z_Param_RewardTag, static_cast<EFortRewardType>(Z_Param_RewardType));
+    static_cast<AFortMission*>(Context)->GrantRewardsByTag(Z_Param_RewardTag, EFortRewardType{ Z_Param_RewardType });
     P_NATIVE_END;
 }
 
@@ -304,7 +304,7 @@ void AFortMission::HandleDeferredMissionEvent(const FFortMissionEvent& MissionEv
     {
         return;
     }
-    if (MissionEvent.EventType != FName(L"DayPhaseChange", FNAME_Find) || static_cast<EFortMissionStatus>(MissionStatus) != EFortMissionStatus::InProgress)
+    if (MissionEvent.EventType != FName(L"DayPhaseChange", FNAME_Find) || MissionStatus != EFortMissionStatus::GetInProgress())
     {
         return;
     }

@@ -11,6 +11,22 @@ class AFortInventory;
 class AFortPlayerController;
 class UFortItemDefinition;
 
+class EFortItemEntryState
+{
+    DefineUnrealEnum(EFortItemEntryState, FortniteGame)
+    DefineUEnumValue(NoneState)
+    DefineUEnumValue(NewItemCount)
+    DefineUEnumValue(ShouldShowItemToast)
+    DefineUEnumValue(DurabilityInitialized)
+    DefineUEnumValue(DoNotShowSpawnParticles)
+    DefineUEnumValue(FromRecoveredBackpack)
+    DefineUEnumValue(FromGift)
+    DefineUEnumValue(PendingUpgradeCriteriaProgress)
+    DefineUEnumValue(OwnerBuildingHandle)
+    DefineUEnumValue(FromDroppedPickup)
+    DefineUEnumValue(CraftAndSlotTarget)
+};
+
 struct FFortItemEntryStateValue
 {
     DefineUnrealStruct(FFortItemEntryStateValue, FortniteGame)
@@ -18,7 +34,7 @@ struct FFortItemEntryStateValue
 public:
     DefineUProperty(int32_t, IntValue)
     DefineUProperty(FName, NameValue)
-    DefineUProperty(uint8_t, StateType)
+    DefineUProperty(EFortItemEntryState, StateType)
 };
 
 struct FFortItemEntry : public FFastArraySerializerItem
@@ -27,12 +43,11 @@ struct FFortItemEntry : public FFastArraySerializerItem
 
 public:
     static void Construct(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel);
-    static uint8_t GetStateType(const wchar_t* StateName);
     static ptrdiff_t DurabilityOffset();
 
-    int32_t GetIntValue(uint8_t StateType) const;
-    void SetStateValue(uint8_t StateType, int32_t IntValue);
-    bool RemoveStateValue(uint8_t StateType);
+    int32_t GetIntValue(EFortItemEntryState StateType) const;
+    void SetStateValue(EFortItemEntryState StateType, int32_t IntValue);
+    bool RemoveStateValue(EFortItemEntryState StateType);
     bool ShouldShowItemToast() const;
     void SetNewItemCount(int32_t NewItemCount, bool bShouldShowItemToast);
     void AddNewItemCount(int32_t Count, bool bShouldShowItemToast);

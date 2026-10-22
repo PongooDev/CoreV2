@@ -20,28 +20,6 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortMission, Log, All);
 
-namespace
-{
-    const wchar_t* ObjectiveStatusName(EFortObjectiveStatus Status)
-    {
-        switch (Status)
-        {
-        case EFortObjectiveStatus::Created:
-            return TEXT("Created");
-        case EFortObjectiveStatus::InProgress:
-            return TEXT("InProgress");
-        case EFortObjectiveStatus::Succeeded:
-            return TEXT("Succeeded");
-        case EFortObjectiveStatus::Failed:
-            return TEXT("Failed");
-        case EFortObjectiveStatus::NeutralCompletion:
-            return TEXT("NeutralCompletion");
-        default:
-            return TEXT("Max_None");
-        }
-    }
-}
-
 AFortMission* AFortObjectiveBase::GetMission() const
 {
     return Cast<AFortMission>(GetOwner());
@@ -57,7 +35,7 @@ void AFortObjectiveBase::SetObjectiveStatus(EFortObjectiveStatus NewStatus)
 
     ForceNetUpdate();
     ObjectiveStatus = NewStatus;
-    UE_LOG(LogFortMission, Log, TEXT("Objective %s: New Objective status is %s"), *GetName(), ObjectiveStatusName(NewStatus));
+    UE_LOG(LogFortMission, Log, TEXT("Objective %s: New Objective status is %s"), *GetName(), NewStatus.ToString().c_str());
 
     Reflection::FParams Params(StaticFunction_OnRep_ObjectiveStatus());
     Params.Call(this);
@@ -78,12 +56,12 @@ bool AFortObjectiveBase::ActivateObjective()
 bool AFortObjectiveBase::StartPlayingObjective()
 {
 #if WITH_SERVER_CODE
-    if (Role != ROLE_Authority || ObjectiveStatus == EFortObjectiveStatus::InProgress)
+    if (Role != ROLE_Authority || ObjectiveStatus == EFortObjectiveStatus::GetInProgress())
     {
         return false;
     }
 
-    SetObjectiveStatus(EFortObjectiveStatus::InProgress);
+    SetObjectiveStatus(EFortObjectiveStatus::GetInProgress());
     BlueprintOnStartPlaying();
 
     TArray<UFortWorldItemDefinition*>& ItemsToGive = ItemsToGiveOnObjectiveStart;
@@ -94,7 +72,7 @@ bool AFortObjectiveBase::StartPlayingObjective()
 
     if (AFortMission* Mission = GetMission())
     {
-        Mission->ObjectiveStatusUpdated(this, EFortObjectiveStatus::InProgress);
+        Mission->ObjectiveStatusUpdated(this, EFortObjectiveStatus::GetInProgress());
     }
     return true;
 #else
@@ -105,7 +83,7 @@ bool AFortObjectiveBase::StartPlayingObjective()
 void AFortObjectiveBase::StopObjective(EFortObjectiveStatus Status, const FText& Description, UObject* ExtraBadgeToGrant)
 {
 #if WITH_SERVER_CODE
-    if (Role != ROLE_Authority || ObjectiveStatus != EFortObjectiveStatus::InProgress)
+    if (Role != ROLE_Authority || ObjectiveStatus != EFortObjectiveStatus::GetInProgress())
     {
         return;
     }
@@ -117,17 +95,17 @@ void AFortObjectiveBase::StopObjective(EFortObjectiveStatus Status, const FText&
     AFortMission* Mission = GetMission();
     UFortBadgeItemDefinition* RewardBadge = ObjectiveRewardBadge;
     UFortBadgeItemDefinition* ExtraBadge = Cast<UFortBadgeItemDefinition>(ExtraBadgeToGrant);
-    AFortMissionManager* MissionManager = Mission && (RewardBadge || ExtraBadge) && Status == EFortObjectiveStatus::Succeeded ? Mission->GetMissionManager() : nullptr;
+    AFortMissionManager* MissionManager = Mission && (RewardBadge || ExtraBadge) && Status == EFortObjectiveStatus::GetSucceeded() ? Mission->GetMissionManager() : nullptr;
     if (MissionManager)
     {
         const TArray<AFortPlayerController*> Players = Mission->GetParticipatingMissionControllers();
         if (RewardBadge)
         {
-            MissionManager->GrantBadge(RewardBadge, EFortRewardType::Default, Players);
+            MissionManager->GrantBadge(RewardBadge, EFortRewardType::GetDefault(), Players);
         }
         if (ExtraBadge)
         {
-            MissionManager->GrantBadge(ExtraBadge, EFortRewardType::Default, Players);
+            MissionManager->GrantBadge(ExtraBadge, EFortRewardType::GetDefault(), Players);
         }
     }
     SendObjectiveEndedEvent(Status);
@@ -142,14 +120,14 @@ void AFortObjectiveBase::SendObjectiveEndedEvent(EFortObjectiveStatus Status)
 {
 #if WITH_SERVER_CODE
     AFortMission* Mission = GetMission();
-    if (!Mission || (Status != EFortObjectiveStatus::Succeeded && Status != EFortObjectiveStatus::Failed))
+    if (!Mission || (Status != EFortObjectiveStatus::GetSucceeded() && Status != EFortObjectiveStatus::GetFailed()))
     {
         return;
     }
 
     UObject* TransientPackage = StaticFindObject(nullptr, nullptr, L"/Engine/Transient");
     UObject* Params = nullptr;
-    if (Status == EFortObjectiveStatus::Succeeded)
+    if (Status == EFortObjectiveStatus::GetSucceeded())
     {
         UFortObjectiveSucceededParams* SucceededParams = NewObject<UFortObjectiveSucceededParams>(TransientPackage, UFortObjectiveSucceededParams::StaticClass());
         Params = SucceededParams ? SucceededParams->SetParams(this) : nullptr;
@@ -160,7 +138,7 @@ void AFortObjectiveBase::SendObjectiveEndedEvent(EFortObjectiveStatus Status)
         Params = FailedParams ? FailedParams->SetParams(this) : nullptr;
     }
 
-    const FName EventType(Status == EFortObjectiveStatus::Succeeded ? L"ObjectiveSucceeded" : L"ObjectiveFailed", FNAME_Find);
+    const FName EventType(Status == EFortObjectiveStatus::GetSucceeded() ? L"ObjectiveSucceeded" : L"ObjectiveFailed", FNAME_Find);
     UFortMissionLibrary::ExecuteMissionEvent(this, EventType, Mission->MissionGuid, ObjectiveHandle, Params);
 #endif
 }

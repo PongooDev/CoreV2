@@ -4,9 +4,43 @@
 #include "GameplayTagContainer.h"
 #include "UObject/Object.h"
 
-enum class EFortQuestObjectiveStatEvent : uint8_t
+class EFortQuestObjectiveStatEvent
 {
-    Complete = 6,
+    DefineUnrealEnum(EFortQuestObjectiveStatEvent, FortniteGame)
+    DefineUEnumValue(Kill)
+    DefineUEnumValue(KillContribution)
+    DefineUEnumValue(Build)
+    DefineUEnumValue(BuildingEdit)
+    DefineUEnumValue(BuildingRepair)
+    DefineUEnumValue(BuildingUpgrade)
+    DefineUEnumValue(Complete)
+    DefineUEnumValue(Craft)
+    DefineUEnumValue(Collect)
+    DefineUEnumValue(Win)
+    DefineUEnumValue(Interact)
+    DefineUEnumValue(Destroy)
+    DefineUEnumValue(Ability)
+    DefineUEnumValue(WaveComplete)
+    DefineUEnumValue(Custom)
+    DefineUEnumValue(Client)
+    DefineUEnumValue(NumGameplayEvents)
+    DefineUEnumValue(Acquire)
+    DefineUEnumValue(Consume)
+    DefineUEnumValue(OpenCardPack)
+    DefineUEnumValue(PurchaseCardPack)
+    DefineUEnumValue(Convert)
+    DefineUEnumValue(Upgrade)
+    DefineUEnumValue(QuestComplete)
+    DefineUEnumValue(AssignWorker)
+    DefineUEnumValue(CollectExpedition)
+    DefineUEnumValue(CollectSuccessfulExpedition)
+    DefineUEnumValue(HasItem)
+    DefineUEnumValue(SlotInCollection)
+    DefineUEnumValue(HasCompletedQuest)
+    DefineUEnumValue(HasAssignedWorker)
+    DefineUEnumValue(HasUpgraded)
+    DefineUEnumValue(HasConverted)
+    DefineUEnumValue(Max_None)
 };
 
 class UFortMcpProfileAccount;

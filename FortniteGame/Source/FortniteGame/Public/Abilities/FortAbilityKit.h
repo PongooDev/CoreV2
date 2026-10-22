@@ -7,12 +7,13 @@
 class UFortGadgetItemDefinition;
 class UFortItemDefinition;
 
-enum class EFortReplenishmentType : uint8_t
+class EFortReplenishmentType
 {
-    Restricted,
-    ClampMin,
-    Add,
-    Ability,
+    DefineUnrealEnum(EFortReplenishmentType, FortniteGame)
+    DefineUEnumValue(Restricted)
+    DefineUEnumValue(ClampMin)
+    DefineUEnumValue(Add)
+    DefineUEnumValue(Ability)
 };
 
 struct FAbilityKitItem

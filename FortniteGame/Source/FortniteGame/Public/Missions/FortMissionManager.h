@@ -8,15 +8,16 @@
 #include "StructArray.h"
 
 class UFortMissionGenerator;
-enum class EFortMissionStatus : uint8_t;
+class EFortMissionStatus;
 
-enum class EMissionGenerationCategory : uint8_t
+class EMissionGenerationCategory
 {
-    Primary,
-    Secondary,
-    Tertiary,
-    Survivor,
-    Max_None,
+    DefineUnrealEnum(EMissionGenerationCategory, FortniteGame)
+    DefineUEnumValue(Primary)
+    DefineUEnumValue(Secondary)
+    DefineUEnumValue(Tertiary)
+    DefineUEnumValue(Survivor)
+    DefineUEnumValue(Max_None)
 };
 
 struct FFortMissionEntry
@@ -53,11 +54,12 @@ class AFortMission;
 class AFortPlayerController;
 class UFortBadgeItemDefinition;
 
-enum class EFortRewardType : uint8_t
+class EFortRewardType
 {
-    Default,
-    Missed,
-    Max_None,
+    DefineUnrealEnum(EFortRewardType, FortniteGame)
+    DefineUEnumValue(Default)
+    DefineUEnumValue(Missed)
+    DefineUEnumValue(Max_None)
 };
 
 struct FEarnedBadgePlayerData

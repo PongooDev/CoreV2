@@ -139,7 +139,7 @@ void AFortPlayerController::Possess(APawn* InPawn)
         ApplyHarvestingTool();
 
         FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
-        Bars->ServerActivateSlotInternal(EFortQuickBars::Primary, PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
+        Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
     }
 #endif
 }
@@ -163,8 +163,8 @@ void AFortPlayerController::SetupQuickBars()
         return;
     }
 
-    QuickBars->SetupQuickbar(EFortQuickBars::Primary, GameData->GetQuickBarDefinition(EFortQuickBars::Primary));
-    QuickBars->SetupQuickbar(EFortQuickBars::Secondary, GameData->GetQuickBarDefinition(EFortQuickBars::Secondary));
+    QuickBars->SetupQuickbar(EFortQuickBars::GetPrimary(), GameData->GetQuickBarDefinition(EFortQuickBars::GetPrimary()));
+    QuickBars->SetupQuickbar(EFortQuickBars::GetSecondary(), GameData->GetQuickBarDefinition(EFortQuickBars::GetSecondary()));
 #endif
 }
 
@@ -196,7 +196,7 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
         const FItemDefinitionAndCount& Entry = Items[Index];
         const TAssetPtr<UFortItemDefinition>& EntryDefinition = Entry.ItemDefinition;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(EntryDefinition.LoadSynchronous());
-        if (ItemDefinition && ItemDefinition->ItemType == static_cast<uint8_t>(EFortItemType::WeaponHarvest))
+        if (ItemDefinition && ItemDefinition->ItemType == EFortItemType::GetWeaponHarvest())
         {
             continue;
         }
@@ -233,13 +233,13 @@ void AFortPlayerController::TryAddToQuickBar(UFortWorldItem* Item)
         return;
     }
 
-    const uint8_t ItemType = ItemDefinition->ItemType;
-    for (EFortQuickBars Bar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
+    const EFortItemType ItemType = ItemDefinition->ItemType;
+    for (EFortQuickBars Bar : { EFortQuickBars::GetPrimary(), EFortQuickBars::GetSecondary() })
     {
         const int32_t NumSlots = Bars->GetQuickBar(Bar).Slots.Num();
         for (int32_t SlotIndex = 0; SlotIndex < NumSlots; ++SlotIndex)
         {
-            const TArray<uint8_t>& AcceptedItemTypes = Bars->GetSlotData(Bar, SlotIndex).AcceptedItemTypes;
+            const TArray<EFortItemType>& AcceptedItemTypes = Bars->GetSlotData(Bar, SlotIndex).AcceptedItemTypes;
             if (AcceptedItemTypes.Contains(ItemType) && Bars->GetSlot(Bar, SlotIndex).Items.Num() == 0)
             {
                 Bars->ServerAddItemInternal(ItemGuid, Bar, SlotIndex);
@@ -324,7 +324,7 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
         {
             const FAbilityKitItem& KitItem = Items[Index];
             UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(KitItem.Item));
-            if (ItemDefinition && ItemDefinition->ItemType != static_cast<uint8_t>(EFortItemType::WeaponHarvest) && AddDefinition(ItemDefinition))
+            if (ItemDefinition && ItemDefinition->ItemType != EFortItemType::GetWeaponHarvest() && AddDefinition(ItemDefinition))
             {
                 KitItems.push_back(&KitItem);
             }
@@ -388,17 +388,18 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
         const int32_t Quantity = KitItem->Quantity;
         const int32_t Owned = GetItemQuantity(ItemDefinition);
         int32_t Count = 0;
-        switch (KitItem->Replenishment)
+        const EFortReplenishmentType Replenishment = KitItem->Replenishment;
+        if (Replenishment == EFortReplenishmentType::GetClampMin())
         {
-        case EFortReplenishmentType::ClampMin:
             Count = Quantity - Owned;
-            break;
-        case EFortReplenishmentType::Add:
+        }
+        else if (Replenishment == EFortReplenishmentType::GetAdd())
+        {
             Count = Quantity;
-            break;
-        default:
+        }
+        else
+        {
             Count = Owned > 0 ? 0 : Quantity;
-            break;
         }
         if (Count > 0)
         {
@@ -459,7 +460,7 @@ void AFortPlayerController::ApplyHarvestingTool()
     {
         FFortItemEntry* Entry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
         UFortItemDefinition* Definition = Entry ? static_cast<UFortItemDefinition*>(Entry->ItemDefinition) : nullptr;
-        if (!Definition || Definition->ItemType != static_cast<uint8_t>(EFortItemType::WeaponHarvest))
+        if (!Definition || Definition->ItemType != EFortItemType::GetWeaponHarvest())
         {
             continue;
         }
@@ -515,7 +516,7 @@ void AFortPlayerController::ApplyHarvestingTool()
     FFortItemEntry& WorldItemEntry = WorldItem->ItemEntry;
     if (QuickBarSlot >= 0)
     {
-        Bars->ServerAddItemInternal(WorldItemEntry.ItemGuid, EFortQuickBars::Primary, QuickBarSlot);
+        Bars->ServerAddItemInternal(WorldItemEntry.ItemGuid, EFortQuickBars::GetPrimary(), QuickBarSlot);
     }
     else
     {
@@ -545,7 +546,7 @@ void AFortPlayerController::AddHeroAbilityKitGadgetsToQuickBars()
         FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
         const int32_t PreferredSlot = Gadget ? static_cast<int32_t>(Gadget->PreferredQuickbarSlot) : -1;
         const TStructArray<FQuickBarSlot>& Slots = PrimaryQuickBar.Slots;
-        Bars->ServerAddItemInternal(ItemGuid, EFortQuickBars::Primary, PreferredSlot >= 0 && PreferredSlot < Slots.Num() ? PreferredSlot : -1);
+        Bars->ServerAddItemInternal(ItemGuid, EFortQuickBars::GetPrimary(), PreferredSlot >= 0 && PreferredSlot < Slots.Num() ? PreferredSlot : -1);
     }
 #endif
 }
@@ -637,7 +638,7 @@ void AFortPlayerController::ServerSpotActor_Implementation(AActor* NewlySpottedA
 #endif
 }
 
-void AFortPlayerController::ServerRemoveInventoryStateValue_Implementation(const FGuid& ItemGuid, uint8_t StateType)
+void AFortPlayerController::ServerRemoveInventoryStateValue_Implementation(const FGuid& ItemGuid, EFortItemEntryState StateType)
 {
     ServerRemoveInventoryStateValue_ImplementationOG(this, ItemGuid, StateType);
 
@@ -930,7 +931,7 @@ DEFINE_FUNCTION(AFortPlayerController::execActivateSlot)
     P_GET_UBOOL(Z_Param_bUpdatePreviousFocusedSlot);
     P_FINISH;
     P_NATIVE_BEGIN;
-    static_cast<AFortPlayerController*>(Context)->ActivateSlot(static_cast<EFortQuickBars>(Z_Param_InQuickBar), Z_Param_Slot, Z_Param_ActivateDelay, Z_Param_bUpdatePreviousFocusedSlot);
+    static_cast<AFortPlayerController*>(Context)->ActivateSlot(EFortQuickBars{ Z_Param_InQuickBar }, Z_Param_Slot, Z_Param_ActivateDelay, Z_Param_bUpdatePreviousFocusedSlot);
     P_NATIVE_END;
 }
 
@@ -978,7 +979,7 @@ DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)
     P_GET_PROPERTY(UByteProperty, Z_Param_InQuickBar);
     P_FINISH;
     P_NATIVE_BEGIN;
-    static_cast<AFortPlayerController*>(Context)->SwapQuickBarFocus(static_cast<EFortQuickBars>(Z_Param_InQuickBar));
+    static_cast<AFortPlayerController*>(Context)->SwapQuickBarFocus(EFortQuickBars{ Z_Param_InQuickBar });
     P_NATIVE_END;
 }
 
@@ -1023,7 +1024,7 @@ void AFortPlayerController::ServerSpotActor_ImplementationHK(AFortPlayerControll
     This->ServerSpotActor_Implementation(NewlySpottedActor);
 }
 
-void AFortPlayerController::ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, uint8_t StateType)
+void AFortPlayerController::ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType)
 {
     This->ServerRemoveInventoryStateValue_Implementation(ItemGuid, StateType);
 }

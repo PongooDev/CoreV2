@@ -3,13 +3,14 @@
 #include "GameplayTagContainer.h"
 #include "UObject/Object.h"
 
-enum class EFortZoneType : uint8_t
+class EFortZoneType
 {
-    PVE,
-    PVP,
-    Keep,
-    SingleZone,
-    Max_None,
+    DefineUnrealEnum(EFortZoneType, FortniteGame)
+    DefineUEnumValue(PVE)
+    DefineUEnumValue(PVP)
+    DefineUEnumValue(Keep)
+    DefineUEnumValue(SingleZone)
+    DefineUEnumValue(Max_None)
 };
 
 class UFortZoneTheme : public UObject

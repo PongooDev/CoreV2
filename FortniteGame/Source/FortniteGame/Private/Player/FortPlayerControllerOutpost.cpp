@@ -27,6 +27,17 @@ DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 namespace
 {
+    class EOutpostBuildings
+    {
+        DefineUnrealEnum(EOutpostBuildings, FortniteGame)
+        DefineUEnumValue(StormShield)
+        DefineUEnumValue(CraftingTable)
+        DefineUEnumValue(Fabricator)
+        DefineUEnumValue(HarvestingOptimizer)
+        DefineUEnumValue(StorageVault)
+        DefineUEnumValue(POST)
+    };
+
     class UFortOutpostFunctionLibrary : public UObject
     {
         DefineUnrealClass(UFortOutpostFunctionLibrary, FortniteGame)
@@ -80,11 +91,11 @@ namespace
         {
             Reflection::FParams Params(StaticFunction_GetFabricatorRecipes(), true);
             Params.Set(L"FortPC", FortPC);
-            Params.Set(L"InventoryFilter", static_cast<uint8_t>(16));
+            Params.Set(L"InventoryFilter", EFortInventoryFilter::GetMax_None());
             return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<TArray<UFortItem*>>(L"ReturnValue") : TArray<UFortItem*>();
         }
 
-        static UObject* GetOutpostBuildingItemDefinition(UObject* WorldContextObject, uint8_t Building)
+        static UObject* GetOutpostBuildingItemDefinition(UObject* WorldContextObject, EOutpostBuildings Building)
         {
             Reflection::FParams Params(StaticFunction_GetOutpostBuildingItemDefinition());
             Params.Set(L"WorldContextObject", WorldContextObject);
@@ -92,8 +103,6 @@ namespace
             return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<UObject*>(L"ReturnValue") : nullptr;
         }
     };
-
-    constexpr uint8_t OutpostBuildingPOST = 5;
 
     FString McpItemId(const FGuid& Guid)
     {
@@ -272,7 +281,7 @@ void AFortPlayerControllerOutpost::ServerDepositPOSTResource_Implementation(cons
 void AFortPlayerControllerOutpost::ServerUpgradePOST_Implementation()
 {
 #if WITH_SERVER_CODE
-    UObject* POST = IsOutpostOwner() ? UFortOutpostFunctionLibrary::GetOutpostBuildingItemDefinition(this, OutpostBuildingPOST) : nullptr;
+    UObject* POST = IsOutpostOwner() ? UFortOutpostFunctionLibrary::GetOutpostBuildingItemDefinition(this, EOutpostBuildings::GetPOST()) : nullptr;
     if (POST)
     {
         UpgradeBuildingByDefinition(POST);

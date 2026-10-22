@@ -129,9 +129,9 @@ UObject* AFortAIGoalManager::FindAssignment(const FFortAIAssignmentIdentifier& I
         return nullptr;
     }
 
-    const EFortAIAssignmentType Type = Identifier.AssignmentType;
+    const EAssignmentType Type = Identifier.AssignmentType;
     const uint8_t TypeValue = static_cast<uint8_t>(Type);
-    if (Type == EFortAIAssignmentType::Encounter)
+    if (Type == EAssignmentType::GetEncounter())
     {
         UFortAIEncounterInfo* Encounter = Cast<UFortAIEncounterInfo>(EncounterInfo);
         if (!Encounter)
@@ -141,12 +141,12 @@ UObject* AFortAIGoalManager::FindAssignment(const FFortAIAssignmentIdentifier& I
         TArray<UObject*>& Assignments = Encounter->EncounterAssignments;
         return Natives::AFortAIGoalManager_FindAssignmentInList(this, &Identifier, &Assignments, TypeValue - 1);
     }
-    if (Type == EFortAIAssignmentType::World)
+    if (Type == EAssignmentType::GetWorld())
     {
         TArray<UObject*>& Assignments = WorldAssignments;
         return Natives::AFortAIGoalManager_FindAssignmentInList(this, &Identifier, &Assignments, TypeValue - 2);
     }
-    if (Type == EFortAIAssignmentType::WorldEnemy)
+    if (Type == EAssignmentType::GetEnemy())
     {
         TArray<UObject*>& Assignments = WorldEnemyAssignments;
         return Natives::AFortAIGoalManager_FindAssignmentInList(this, &Identifier, &Assignments, TypeValue - 2);

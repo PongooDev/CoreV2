@@ -189,7 +189,7 @@ int32_t AFortInventory::AddWorldItemCopy(AFortPlayerController* Owner, const FFo
         }
 
         FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
-        if (Source.GetIntValue(FFortItemEntry::GetStateType(L"DurabilityInitialized")) != 0)
+        if (Source.GetIntValue(EFortItemEntryState::GetDurabilityInitialized()) != 0)
         {
             WorldItem->SetDurability(Source.Durability);
         }

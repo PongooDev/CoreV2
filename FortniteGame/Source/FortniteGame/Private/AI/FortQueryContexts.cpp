@@ -80,8 +80,8 @@ void UFortQueryContext_EncounterPrimaryAssignmentGoals::ProvideContext(void* Que
                 std::vector<uint8_t> IdentifierStorage(IdentifierStruct->GetStructureSize(), 0);
                 FFortAIAssignmentIdentifier* PrimaryIdentifier = reinterpret_cast<FFortAIAssignmentIdentifier*>(IdentifierStorage.data());
                 IdentifierStruct->InitializeStruct(PrimaryIdentifier);
-                PrimaryIdentifier->AssignmentType = EFortAIAssignmentType::Encounter;
-                PrimaryIdentifier->AssignmentTeam = 1;
+                PrimaryIdentifier->AssignmentType = EAssignmentType::GetEncounter();
+                PrimaryIdentifier->AssignmentTeam = EFortTeam::GetMonster();
                 AddAssignmentGoals(Goals, GoalManager->FindAssignment(*PrimaryIdentifier, EncounterInfo));
                 IdentifierStruct->DestroyStruct(PrimaryIdentifier);
             }

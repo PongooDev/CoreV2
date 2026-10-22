@@ -11,17 +11,18 @@ class AFortPlayerController;
 class UFortWorldItemDefinition;
 class AFortMissionManager;
 class UFortMissionInfo;
-enum class EFortRewardType : uint8_t;
+class EFortRewardType;
 
-enum class EFortMissionStatus : uint8_t
+class EFortMissionStatus
 {
-    Created,
-    InProgress,
-    Succeeded,
-    Failed,
-    NeutralCompletion,
-    Quit,
-    Max_None,
+    DefineUnrealEnum(EFortMissionStatus, FortniteGame)
+    DefineUEnumValue(Created)
+    DefineUEnumValue(InProgress)
+    DefineUEnumValue(Succeeded)
+    DefineUEnumValue(Failed)
+    DefineUEnumValue(NeutralCompletion)
+    DefineUEnumValue(Quit)
+    DefineUEnumValue(Max_None)
 };
 
 struct FFortMissionEvent

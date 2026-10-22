@@ -71,14 +71,12 @@ namespace
         }
     };
 
-    constexpr uint8_t InventoryFilterInvisible = 15;
-
     bool CanMoveToPlot(UFortWorldItem* WorldItem)
     {
         FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
         return ItemDefinition && !UFortDeployableBaseLibrary::IsWorldItemDefValidToPersistForDeployableBasePlayerInventory(ItemDefinition)
-            && ItemDefinition->GetFilterCategory() != InventoryFilterInvisible;
+            && ItemDefinition->GetFilterCategory() != EFortInventoryFilter::GetInvisible();
     }
 
     std::vector<UFortWorldItem*> ItemsOf(AFortInventory* Inventory)

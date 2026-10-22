@@ -14,7 +14,7 @@
 
 EFortQuickBars AFortQuickBars::GetCurrentQuickBar()
 {
-    for (EFortQuickBars InQuickBar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
+    for (EFortQuickBars InQuickBar : { EFortQuickBars::GetPrimary(), EFortQuickBars::GetSecondary() })
     {
         FQuickBar& QuickBar = GetQuickBar(InQuickBar);
         if (QuickBar.CurrentFocusedSlot != -1)
@@ -22,7 +22,7 @@ EFortQuickBars AFortQuickBars::GetCurrentQuickBar()
             return InQuickBar;
         }
     }
-    return EFortQuickBars::Max_None;
+    return EFortQuickBars::GetMax_None();
 }
 
 void AFortQuickBars::SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride)
@@ -75,7 +75,7 @@ const FQuickBarSlotData& AFortQuickBars::GetSlotData(EFortQuickBars InQuickBar, 
 
 bool AFortQuickBars::ContainsItem(const FGuid& Item)
 {
-    for (EFortQuickBars Bar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
+    for (EFortQuickBars Bar : { EFortQuickBars::GetPrimary(), EFortQuickBars::GetSecondary() })
     {
         const int32_t NumSlots = GetQuickBar(Bar).Slots.Num();
         for (int32_t SlotIndex = 0; SlotIndex < NumSlots; ++SlotIndex)
@@ -102,7 +102,7 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
 {
 #if WITH_SERVER_CODE
     bool bRemovedFocusedItem = false;
-    for (EFortQuickBars Bar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
+    for (EFortQuickBars Bar : { EFortQuickBars::GetPrimary(), EFortQuickBars::GetSecondary() })
     {
         FQuickBar& QuickBar = GetQuickBar(Bar);
         const int32_t NumSlots = QuickBar.Slots.Num();
@@ -128,8 +128,8 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
     {
         FQuickBar& PrimaryBar = PrimaryQuickBar;
         const int32_t PreviousSlot = PrimaryBar.PreviousFocusedSlot;
-        const bool bUsePrevious = PreviousSlot >= 0 && PreviousSlot < PrimaryBar.Slots.Num() && PreviousSlot != PrimaryBar.CurrentFocusedSlot && GetSlot(EFortQuickBars::Primary, PreviousSlot).Items.Num() > 0;
-        ServerActivateSlotInternal(EFortQuickBars::Primary, bUsePrevious ? PreviousSlot : 0, 0.0f, false);
+        const bool bUsePrevious = PreviousSlot >= 0 && PreviousSlot < PrimaryBar.Slots.Num() && PreviousSlot != PrimaryBar.CurrentFocusedSlot && GetSlot(EFortQuickBars::GetPrimary(), PreviousSlot).Items.Num() > 0;
+        ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), bUsePrevious ? PreviousSlot : 0, 0.0f, false);
     }
 #endif
 }

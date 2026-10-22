@@ -118,7 +118,7 @@ int32_t AFortGameMode::GetPlayerBadgesScore(AFortPlayerController* PlayerControl
 {
 #if WITH_SERVER_CODE
     AFortPlayerState* PlayerState = PlayerController ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
-    return PlayerState ? PlayerState->GetStat(EFortReplicatedStat::BadgesScore, false) : 0;
+    return PlayerState ? PlayerState->GetStat(EFortReplicatedStat::GetBadgesScore(), false) : 0;
 #else
     return 0;
 #endif

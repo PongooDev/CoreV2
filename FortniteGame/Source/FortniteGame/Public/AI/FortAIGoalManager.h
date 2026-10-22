@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/Array.h"
+#include "FortTeamInfo.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Controller.h"
 #include "StructArray.h"
@@ -9,19 +10,21 @@
 
 class UObject;
 
-enum class EFortAIAssignmentType : uint8_t
+class EAssignmentType
 {
-    None,
-    Encounter,
-    World,
-    WorldEnemy,
+    DefineUnrealEnum(EAssignmentType, FortniteGame)
+    DefineUEnumValue(Invalid)
+    DefineUEnumValue(Encounter)
+    DefineUEnumValue(World)
+    DefineUEnumValue(Enemy)
+    DefineUEnumValue(NumAssignmentTypes)
 };
 
 struct FFortAIAssignmentIdentifier
 {
     DefineUnrealStruct(FFortAIAssignmentIdentifier, FortniteGame)
-    DefineUProperty(EFortAIAssignmentType, AssignmentType)
-    DefineUProperty(uint8_t, AssignmentTeam)
+    DefineUProperty(EAssignmentType, AssignmentType)
+    DefineUProperty(EFortTeam, AssignmentTeam)
 };
 
 struct FFortAIGoal

@@ -3642,6 +3642,56 @@ bool Finder::ResolveQueryGeneratorsLive(void** EnemiesVTable)
     return true;
 }
 
+bool Finder::ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTable, UClass* GoalItemType)
+{
+    const uintptr_t ProvideContext = FunctionOf(L"Unable to find encounter info for UFortQueryContext_EncounterPrimaryAssignmentGoals.  Owner is %s");
+    const uintptr_t ProvideContextEnd = ProvideContext ? Finder::FunctionEnd(ProvideContext) : 0;
+    int32_t ProvideContextIndex = -1;
+    for (int32_t Index = 0; ProvideContext && Index < 0x200 && ProvideContextIndex < 0; ++Index)
+    {
+        ProvideContextIndex = VTableEntry(EncounterPrimaryAssignmentGoalsVTable, Index) == ProvideContext ? Index : -1;
+    }
+
+    uintptr_t GetInterfaceAddress = 0;
+    int32_t GetEncounterInfoIndex = -1;
+    uintptr_t SetContextHelper = 0;
+    for (const auto& [Call, Target] : ProvideContextEnd ? Finder::DirectCalls(ProvideContext, ProvideContextEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        if (!GetInterfaceAddress && FindInstruction(Target, Target + 0x40, { 0x8B, -1, 0xB4, 0x00, 0x00, 0x00, 0xC1, 0xE8, 0x0E }))
+        {
+            GetInterfaceAddress = Target;
+            for (uintptr_t Site = Call + 5; Site < Call + 0x18 && GetEncounterInfoIndex < 0; ++Site)
+            {
+                const uint8_t ModRm = Byte(Site + 1);
+                if (Byte(Site) == 0xFF && (ModRm & 0xF8) == 0x50 && (ModRm & 0x07) != 0x04 && Byte(Site + 2) % 8 == 0)
+                {
+                    GetEncounterInfoIndex = Byte(Site + 2) / 8;
+                }
+            }
+        }
+
+        const uintptr_t TypeCall = SetContextHelper ? 0 : FindRawCall(Target, Target + 0x20);
+        const uintptr_t TypeGetter = TypeCall ? Finder::RelativeTarget(TypeCall, 1, 5) : 0;
+        const uintptr_t CachedType = TypeGetter ? FindInstruction(TypeGetter, TypeGetter + 0x10, { 0x48, 0x83, 0x3D, -1, -1, -1, -1, 0x00 }) : 0;
+        if (CachedType && GoalItemType && *reinterpret_cast<UClass* const*>(Finder::RelativeTarget(CachedType, 3, 8)) == GoalItemType)
+        {
+            SetContextHelper = Target;
+        }
+    }
+
+    if (ProvideContextIndex < 0 || !GetInterfaceAddress || GetEncounterInfoIndex < 0 || !SetContextHelper)
+    {
+        Log::Error(L"Finder: EQS goal contexts not found (slot {}, interface {}, encounter info slot {}, context helper {})", ProvideContextIndex, GetInterfaceAddress != 0, GetEncounterInfoIndex, SetContextHelper != 0);
+        return false;
+    }
+    Natives::UEnvQueryContext_ProvideContextIndex = ProvideContextIndex;
+    Natives::UObject_GetInterfaceAddress = reinterpret_cast<decltype(Natives::UObject_GetInterfaceAddress)>(GetInterfaceAddress);
+    Natives::IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex = GetEncounterInfoIndex;
+    Natives::UFortQueryItemType_Goal_SetContextHelper = reinterpret_cast<decltype(Natives::UFortQueryItemType_Goal_SetContextHelper)>(SetContextHelper);
+    Log::Info(L"Finder: UEnvQueryContext::ProvideContext is slot 0x{:X}, IFortAIEncounterInfoOwnerInterface::GetEncounterInfo slot 0x{:X}", ProvideContextIndex, GetEncounterInfoIndex);
+    return true;
+}
+
 bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
 {
     const uintptr_t Bind = FunctionOf(L"ProfileWorld::BindToPlayerController: Called with existing inventory for %s, reinitializing inventory");

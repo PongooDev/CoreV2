@@ -255,6 +255,10 @@ namespace Natives
     inline ptrdiff_t FEnvQueryInstance_Owner = -1;
     inline ptrdiff_t UFortAIAssignment_Goals = -1;
     inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;
+    inline int32_t UEnvQueryContext_ProvideContextIndex = -1;
+    inline void* (*UObject_GetInterfaceAddress)(UObject* This, UClass* InterfaceClass) = nullptr;
+    inline int32_t IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex = -1;
+    inline void (*UFortQueryItemType_Goal_SetContextHelper)(void* ContextData, const FScriptArray& Goals) = nullptr;
     inline ptrdiff_t UNavigationSystem_NavBuildingLockFlags = -1;
     inline void (*UNavigationSystem_RebuildAll)(UNavigationSystem* This, bool bIsLoadTime) = nullptr;
     inline void (*UNavigationSystem_ConditionalPopulateNavOctree)(UNavigationSystem* This) = nullptr;

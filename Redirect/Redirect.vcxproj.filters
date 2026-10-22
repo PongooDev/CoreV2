@@ -2,379 +2,379 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Core">
-      <UniqueIdentifier>{52b020ad-8dba-4570-94dc-69f651b9798a}</UniqueIdentifier>
+      <UniqueIdentifier>{30349f74-c7d3-4c50-9b56-f2f9400fd988}</UniqueIdentifier>
     </Filter>
     <Filter Include="Core\Private">
-      <UniqueIdentifier>{641a2210-8859-4ded-a901-848a9fb8777b}</UniqueIdentifier>
+      <UniqueIdentifier>{396d8c33-caa3-4ba9-b20b-a6410fc03270}</UniqueIdentifier>
     </Filter>
     <Filter Include="Core\Public">
-      <UniqueIdentifier>{9e150c84-acd8-428e-8b9b-95195e9d3bfc}</UniqueIdentifier>
+      <UniqueIdentifier>{43787214-9fe1-44dd-bd4c-5f65af34bf0f}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine">
-      <UniqueIdentifier>{93ed1171-7426-4c09-abe9-9524d85e5022}</UniqueIdentifier>
+      <UniqueIdentifier>{7e5be537-2f73-4e95-a7c7-c65ede0d387a}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Plugins">
-      <UniqueIdentifier>{e4e58c79-0c8b-4264-916d-4fcd352af7b7}</UniqueIdentifier>
+      <UniqueIdentifier>{21acfe27-d89b-408b-9a84-a591ae7d124b}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Plugins\Runtime">
-      <UniqueIdentifier>{788ef872-6974-4118-8788-8dad84bbbfc9}</UniqueIdentifier>
+      <UniqueIdentifier>{b9d6744c-04ab-4fd7-93dc-af3cd1c216f1}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Plugins\Runtime\GameplayAbilities">
-      <UniqueIdentifier>{2d8ff71f-4223-4610-b97b-370a3bac2621}</UniqueIdentifier>
+      <UniqueIdentifier>{f2f8c865-ac11-4874-afa0-b98f1c69ebef}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Plugins\Runtime\GameplayAbilities\Source">
-      <UniqueIdentifier>{21c1f4b1-1c85-47e4-a7d6-8d317c5443d9}</UniqueIdentifier>
+      <UniqueIdentifier>{cdb57cea-46d4-4a10-9ec4-2adffee42f74}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities">
-      <UniqueIdentifier>{79c24966-cc5d-4536-9b04-efd8f849be7a}</UniqueIdentifier>
+      <UniqueIdentifier>{523c3292-bb90-4d2b-81aa-bae29e0e95e3}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private">
-      <UniqueIdentifier>{0d0cf724-30da-4aff-af6e-004fa18bf5ab}</UniqueIdentifier>
+      <UniqueIdentifier>{282f3cb3-c8d9-409e-a790-fabf67a7c9f5}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public">
-      <UniqueIdentifier>{beb24260-dc12-4a8b-b9c5-a9416fb5cc65}</UniqueIdentifier>
+      <UniqueIdentifier>{426a97c2-7b89-4010-8c38-93c582cabb5a}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\Abilities">
-      <UniqueIdentifier>{24f6b974-0bce-4581-ba36-cfcb35d030a9}</UniqueIdentifier>
+      <UniqueIdentifier>{26a5d496-09a4-452a-811a-b65a24e8f8f5}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source">
-      <UniqueIdentifier>{295e9161-8f9c-4355-aecb-e9b5104b66a5}</UniqueIdentifier>
+      <UniqueIdentifier>{6dafe9e4-a259-4a1f-90d6-c135580392f3}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime">
-      <UniqueIdentifier>{c253011c-6044-406d-bf4a-876395ab86c3}</UniqueIdentifier>
+      <UniqueIdentifier>{7b050bc6-d51f-45d4-b9e8-78f74ab1755b}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\AIModule">
-      <UniqueIdentifier>{b4694f94-4ff2-4cc9-b1a8-648a2b0dcb13}</UniqueIdentifier>
+      <UniqueIdentifier>{5bfe5b64-9f35-458e-adbb-db591fb4718c}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\AIModule\Classes">
-      <UniqueIdentifier>{17356d4d-4c72-4ae7-bf61-6432473b2e48}</UniqueIdentifier>
+      <UniqueIdentifier>{f1c58225-c58b-453b-a00d-df021ea13796}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\AIModule\Classes\EnvironmentQuery">
-      <UniqueIdentifier>{43838a90-d20a-46bd-9354-969b7c4eac4b}</UniqueIdentifier>
+      <UniqueIdentifier>{e92e7538-25a2-453a-abee-a0fa2538bcc7}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\AIModule\Private">
-      <UniqueIdentifier>{3d0ed3d8-87bc-4208-8d68-0d61704d19f8}</UniqueIdentifier>
+      <UniqueIdentifier>{cb3ae6b5-df90-4f5b-bb99-dcf1a2b92cb2}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\AIModule\Private\EnvironmentQuery">
-      <UniqueIdentifier>{bab1fb15-2f33-44e2-a040-950d67c025f1}</UniqueIdentifier>
+      <UniqueIdentifier>{294ea5a4-da9e-433a-a7f7-4146c5ae620f}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core">
-      <UniqueIdentifier>{5fdce531-6ffa-495c-8ad2-051d76989be4}</UniqueIdentifier>
+      <UniqueIdentifier>{45dc476b-5d4b-437a-94ae-869fecfbfef4}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject">
-      <UniqueIdentifier>{d0bc85ac-eb7d-49ed-a01e-96764dd50896}</UniqueIdentifier>
+      <UniqueIdentifier>{eaa330af-37ba-4501-9a5b-c23f4e25fb70}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Private">
-      <UniqueIdentifier>{0475926a-5ba2-4c0e-9e6d-473a1deaf82a}</UniqueIdentifier>
+      <UniqueIdentifier>{7122030e-99de-4106-af35-10f9fd94a2cd}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Private\Misc">
-      <UniqueIdentifier>{ba0858f5-9061-4113-a14d-451d9144f7bd}</UniqueIdentifier>
+      <UniqueIdentifier>{dba1bcbf-f021-4341-aeca-e195db9f78be}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Private\UObject">
-      <UniqueIdentifier>{f3a99f61-2ba8-4a03-9835-9c1f9ab4cfb9}</UniqueIdentifier>
+      <UniqueIdentifier>{3629986d-e116-44ac-abdd-c0c144be2a8c}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public">
-      <UniqueIdentifier>{781c445f-bb1a-4107-b24f-078255c6669a}</UniqueIdentifier>
+      <UniqueIdentifier>{21068810-9d11-457a-b270-076c34b9f08e}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public\Misc">
-      <UniqueIdentifier>{e98e118e-b742-4ddc-a4a0-ca475c634ccb}</UniqueIdentifier>
+      <UniqueIdentifier>{b575f10b-a53b-4e45-acb0-c344262f27bd}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public\Templates">
-      <UniqueIdentifier>{f56a999a-a046-4f8a-87a1-a887a77bc580}</UniqueIdentifier>
+      <UniqueIdentifier>{36252560-4258-496e-813d-eec3411ebdd8}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\CoreUObject\Public\UObject">
-      <UniqueIdentifier>{52e11693-461a-414a-a274-8c96faafd049}</UniqueIdentifier>
+      <UniqueIdentifier>{50828d64-bb44-42df-b523-9defbad6f5db}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private">
-      <UniqueIdentifier>{ff3a2ddd-bb95-4376-9638-e281b74b4270}</UniqueIdentifier>
+      <UniqueIdentifier>{d3002fa0-5da5-43ee-9644-4e4e2c066662}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\HAL">
-      <UniqueIdentifier>{d5b64baa-a19d-4d00-9c2d-f284f93daa4c}</UniqueIdentifier>
+      <UniqueIdentifier>{79bd1d45-9f80-43b4-b277-95b6b5ca5121}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\Internationalization">
-      <UniqueIdentifier>{1a1e3073-0797-4058-b771-430550d715e9}</UniqueIdentifier>
+      <UniqueIdentifier>{eff39893-2035-4991-9317-4fff7417b3f9}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\Logging">
-      <UniqueIdentifier>{9a1ec6ff-d60e-4395-9055-b8338bb91a87}</UniqueIdentifier>
+      <UniqueIdentifier>{3d4add57-0323-4504-a4e4-6106f61be734}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\Math">
-      <UniqueIdentifier>{077a1ee7-c0cd-4bf6-971e-841b05d45992}</UniqueIdentifier>
+      <UniqueIdentifier>{59faa73f-9163-41ab-a2bb-de1389be796a}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\Misc">
-      <UniqueIdentifier>{81b9e7d3-edf0-4387-ac3e-0138fb8c51d1}</UniqueIdentifier>
+      <UniqueIdentifier>{367c0a82-7fc3-441d-8eeb-d7de9c1b5f54}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\UObject">
-      <UniqueIdentifier>{476c9207-fa7d-45e2-a132-dc2ff7c3c52a}</UniqueIdentifier>
+      <UniqueIdentifier>{04b67c2e-0a90-4cb4-9a48-fe8231576a00}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public">
-      <UniqueIdentifier>{c8819901-50c2-43bd-bb6d-a13cc0ad8248}</UniqueIdentifier>
+      <UniqueIdentifier>{4c105c50-a0b1-4a68-8ff3-80cbca385806}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Containers">
-      <UniqueIdentifier>{0b7f0a07-1ed6-421f-95e2-2f0ec879d0ac}</UniqueIdentifier>
+      <UniqueIdentifier>{8a544099-3a98-42d9-85cc-6931435b74fe}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Delegates">
-      <UniqueIdentifier>{526f6cfe-83fa-418c-8f1e-d3d39e0fa1a2}</UniqueIdentifier>
+      <UniqueIdentifier>{77937c82-4338-4a2f-aa2c-83193183c877}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\HAL">
-      <UniqueIdentifier>{5c3e2536-5d72-4b62-8fdb-dd1a540004f4}</UniqueIdentifier>
+      <UniqueIdentifier>{e744dc2f-a0a0-4263-b6ba-d24da7c82421}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Internationalization">
-      <UniqueIdentifier>{d7cedd5a-a8d2-4b51-9069-517fa239a08c}</UniqueIdentifier>
+      <UniqueIdentifier>{372340ca-4684-4ed2-be7e-83e734ad9952}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Logging">
-      <UniqueIdentifier>{a948235f-b7f7-469e-bb86-396983595e8f}</UniqueIdentifier>
+      <UniqueIdentifier>{94dfdbfa-1e17-461e-ad6e-d9f950855054}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Math">
-      <UniqueIdentifier>{52359ed8-0461-4212-b757-ba93857cbfb7}</UniqueIdentifier>
+      <UniqueIdentifier>{fef6494e-c776-43ff-b87d-c16e24df3897}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Misc">
-      <UniqueIdentifier>{b14bb81c-c905-4cfc-a340-0e48560f4f86}</UniqueIdentifier>
+      <UniqueIdentifier>{1269d657-d376-4768-93cc-e85f80d6fd40}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Templates">
-      <UniqueIdentifier>{3c3d904a-3077-4d23-ac6b-15abd8d1e59b}</UniqueIdentifier>
+      <UniqueIdentifier>{157d82c2-8fa1-40fc-8c1e-915a5e60cf0d}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\UObject">
-      <UniqueIdentifier>{70b63ba6-1f5b-446a-bd78-3d6cb1daa1b4}</UniqueIdentifier>
+      <UniqueIdentifier>{1985923b-29dc-4ae8-811e-759616ab35a7}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Windows">
-      <UniqueIdentifier>{764c0526-c1ea-42a5-8683-e182d891c94d}</UniqueIdentifier>
+      <UniqueIdentifier>{e8abfbbb-67c9-4bb5-9090-1f8837171d08}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine">
-      <UniqueIdentifier>{c628bb46-938b-43e2-a90c-b97c084fc86b}</UniqueIdentifier>
+      <UniqueIdentifier>{fba0aa26-9242-484a-ada4-f4c4fba2e357}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\EngineSettings">
-      <UniqueIdentifier>{890a42c4-c7ae-481d-a227-2286b6a5a51b}</UniqueIdentifier>
+      <UniqueIdentifier>{9b20bd87-dc9f-43b6-8396-9eb9df41aa84}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\EngineSettings\Classes">
-      <UniqueIdentifier>{ccae2fe4-ed65-4aaa-a269-a27e2024076e}</UniqueIdentifier>
+      <UniqueIdentifier>{6894be4f-7740-462c-9c94-f0bbe192f14c}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\EngineSettings\Private">
-      <UniqueIdentifier>{4177e413-4df2-40b1-9ee9-77fddfec5b30}</UniqueIdentifier>
+      <UniqueIdentifier>{229e6370-2dd9-4d04-88ce-52a5b675335c}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes">
-      <UniqueIdentifier>{03dc442e-9f00-484b-9114-38b3408d57d7}</UniqueIdentifier>
+      <UniqueIdentifier>{6b2cbd5a-3932-435e-aef8-d31794601fd6}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes\AI">
-      <UniqueIdentifier>{8694fad9-d08a-4dc4-91a1-453f8b208774}</UniqueIdentifier>
+      <UniqueIdentifier>{f344f135-40b8-446f-a74a-ce5a2d28f015}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes\AI\Navigation">
-      <UniqueIdentifier>{dd004bbe-224e-4f07-9b85-46467f8cc0a7}</UniqueIdentifier>
+      <UniqueIdentifier>{3842d5dc-8c61-4e8d-a7ae-18898af98a09}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes\Components">
-      <UniqueIdentifier>{eb52c79f-cc28-4dbd-bfe0-84d1a63b3c47}</UniqueIdentifier>
+      <UniqueIdentifier>{e6cb74bf-2479-4208-9841-ae800f24b180}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes\Engine">
-      <UniqueIdentifier>{5d9aa6b7-46f7-4a0a-ba19-97f88af0a650}</UniqueIdentifier>
+      <UniqueIdentifier>{92fae568-dfd6-4140-b9fa-d9dae6709f02}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes\GameFramework">
-      <UniqueIdentifier>{1569c1de-439b-4cde-8509-d5372c952977}</UniqueIdentifier>
+      <UniqueIdentifier>{fb803ae8-075e-443f-b8a0-ec7cb76b7de7}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes\Kismet">
-      <UniqueIdentifier>{102d82ee-4c20-417f-a638-38be5631db0d}</UniqueIdentifier>
+      <UniqueIdentifier>{1bb74720-1fe8-4626-923b-28b3543a4ddb}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Private">
-      <UniqueIdentifier>{8a9f93b7-96c4-4773-a466-fed818ec1378}</UniqueIdentifier>
+      <UniqueIdentifier>{43d0b566-b9b7-4417-bae8-d0d1d11be0d3}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Private\AI">
-      <UniqueIdentifier>{dd4ebb89-4371-4847-8de3-691f8fee444c}</UniqueIdentifier>
+      <UniqueIdentifier>{fb8f2a64-c5d0-46dd-8ca1-cfdca4beb33f}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Private\AI\Navigation">
-      <UniqueIdentifier>{2dd54326-d30d-4014-892f-06c76f6c2d97}</UniqueIdentifier>
+      <UniqueIdentifier>{f3668038-afd4-4d2c-b851-f0c688e88396}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Private\UserInterface">
-      <UniqueIdentifier>{ab146230-1df7-492b-b50e-9fa0f74e6ff4}</UniqueIdentifier>
+      <UniqueIdentifier>{a38fd3fd-60dd-44c2-a57c-acd3797bc540}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Public">
-      <UniqueIdentifier>{253f71f2-c7b7-4dc7-857d-2b6f968e4e46}</UniqueIdentifier>
+      <UniqueIdentifier>{ca582f08-cd96-4255-9403-017d97a065af}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Public\Net">
-      <UniqueIdentifier>{84c6b899-ba6e-4454-a70e-6b0bf541049c}</UniqueIdentifier>
+      <UniqueIdentifier>{fc4f035d-6e2d-42d6-8a21-cd0df2910d24}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\GameplayTags">
-      <UniqueIdentifier>{cdc45f7c-0832-4cf3-ad83-81b3df135b47}</UniqueIdentifier>
+      <UniqueIdentifier>{0798b71c-c986-4e0c-bec5-6fe61a1701e6}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\GameplayTags\Classes">
-      <UniqueIdentifier>{2fc65bcd-f55f-4af2-abfc-7535135a1e65}</UniqueIdentifier>
+      <UniqueIdentifier>{3f8b3ef6-763b-44db-893d-938a6249fa8f}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\GameplayTags\Private">
-      <UniqueIdentifier>{fa21d53a-5a7b-4804-8569-89f000b79874}</UniqueIdentifier>
+      <UniqueIdentifier>{b8883728-14fe-4c75-b4d2-2ad2418c756f}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\GameplayTasks">
-      <UniqueIdentifier>{db5c86ca-4fda-4de9-a706-6e9384c5ca0c}</UniqueIdentifier>
+      <UniqueIdentifier>{d6166346-9ff4-4b14-959b-fd54c8436fa2}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\GameplayTasks\Classes">
-      <UniqueIdentifier>{3dde2d7d-175e-433a-ad45-587340678817}</UniqueIdentifier>
+      <UniqueIdentifier>{21df22e9-1e50-47e9-8401-87c9fd00617c}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\InputCore">
-      <UniqueIdentifier>{6193da32-84b2-49e6-905e-04fcce6712be}</UniqueIdentifier>
+      <UniqueIdentifier>{3cd22cf0-d3a8-4bf0-abbc-402b232f6052}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\InputCore\Classes">
-      <UniqueIdentifier>{8e6ac316-cf44-4df9-a898-a8c280fb5e83}</UniqueIdentifier>
+      <UniqueIdentifier>{e9cc6aba-60f7-4add-b64c-77f550044708}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Launch">
-      <UniqueIdentifier>{5c09ab83-5215-4ea8-90a5-393dad92b44d}</UniqueIdentifier>
+      <UniqueIdentifier>{1ffb3c44-6af5-4136-b5ee-c468b3c2f89c}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Launch\Private">
-      <UniqueIdentifier>{fcc5fa06-4ee5-4160-8bae-a6f4c2af0e85}</UniqueIdentifier>
+      <UniqueIdentifier>{1cbced0c-c176-4fee-ac15-acc620bb994c}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Launch\Public">
-      <UniqueIdentifier>{88b30a35-9726-49c1-a8a9-11b5bdfed2f7}</UniqueIdentifier>
+      <UniqueIdentifier>{39db74c8-2191-4771-959a-698597f28156}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Online">
-      <UniqueIdentifier>{e45f185a-74bc-454b-af65-d89d238fabbb}</UniqueIdentifier>
+      <UniqueIdentifier>{3ee6da9b-d719-4a9a-8f88-844b1fd61a7e}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Online\HTTP">
-      <UniqueIdentifier>{af3d7d36-721c-4b25-9d37-1cee1230a68d}</UniqueIdentifier>
+      <UniqueIdentifier>{c88c881b-fccd-43ce-a788-5546c5c89105}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Online\HTTP\Public">
-      <UniqueIdentifier>{991e1aae-efce-459f-a1c2-575878c46497}</UniqueIdentifier>
+      <UniqueIdentifier>{34d6ccc3-1b62-405e-9197-3a0f299f8e25}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Online\HTTP\Public\Interfaces">
-      <UniqueIdentifier>{e86c481a-7f62-4244-b1a0-28132e26d231}</UniqueIdentifier>
+      <UniqueIdentifier>{d1c5016a-92b2-4049-adf9-85d0ee576bb0}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame">
-      <UniqueIdentifier>{b747e813-1dab-4ae2-80d9-3b564142e7b5}</UniqueIdentifier>
+      <UniqueIdentifier>{ac729ab3-65c5-4d06-b1ef-b220e33c6315}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins">
-      <UniqueIdentifier>{c680a8ee-6a6d-4a33-a919-f6d4efaf6668}</UniqueIdentifier>
+      <UniqueIdentifier>{257a9264-ec18-44c3-ad62-fa575145cbbd}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online">
-      <UniqueIdentifier>{c929e17e-180c-4470-95de-cfe8e8b48846}</UniqueIdentifier>
+      <UniqueIdentifier>{39cf0b1e-cc73-4c0a-8b18-990e79c1d29f}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\OnlineGameplayFramework">
-      <UniqueIdentifier>{7b6c6e8f-4400-41a3-9b83-eef57109c55e}</UniqueIdentifier>
+      <UniqueIdentifier>{df9b4499-e1f6-4992-9f10-21e413c93c3b}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\OnlineGameplayFramework\Source">
-      <UniqueIdentifier>{60e3c9fe-c083-4e38-96bc-7521386a1b58}</UniqueIdentifier>
+      <UniqueIdentifier>{b8141536-46ff-49fe-9b0d-146abae46af6}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys">
-      <UniqueIdentifier>{859c771b-33b8-4b04-adc7-8e1247e42f8b}</UniqueIdentifier>
+      <UniqueIdentifier>{636c2970-5373-42be-8b03-4b3255532422}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Private">
-      <UniqueIdentifier>{46c906ef-8183-4aae-b024-672849d129b1}</UniqueIdentifier>
+      <UniqueIdentifier>{3f3621c4-0bba-478d-9997-e305c40431df}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public">
-      <UniqueIdentifier>{b00cadd3-51cb-4597-a0d1-971396d91252}</UniqueIdentifier>
+      <UniqueIdentifier>{9a885669-e7e1-40d9-b8b3-30f7a82ffec6}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystem">
-      <UniqueIdentifier>{f9fb8c1b-c48e-4e86-99d5-4f275b2dbfd1}</UniqueIdentifier>
+      <UniqueIdentifier>{1232b855-1baa-4e18-a9c4-a97c8f446a87}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystemMcp">
-      <UniqueIdentifier>{7a71656c-69b2-4a1f-a6d7-dea1fbe2f15f}</UniqueIdentifier>
+      <UniqueIdentifier>{34460f33-9850-4700-b31d-488ed28eae9b}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source">
-      <UniqueIdentifier>{833c886c-646f-43c6-b50b-086f557ca4a2}</UniqueIdentifier>
+      <UniqueIdentifier>{b0e132f2-9e92-4cd9-9bb0-780b4105b471}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Private">
-      <UniqueIdentifier>{b13ab9f1-d96a-4de3-bec0-afd8bbbf53c8}</UniqueIdentifier>
+      <UniqueIdentifier>{8713fba0-50e4-4d65-a76f-554c86b239a1}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public">
-      <UniqueIdentifier>{5c080885-2cdd-4c3b-aa41-9173357f3117}</UniqueIdentifier>
+      <UniqueIdentifier>{e1bf279d-5a84-4cd4-9a15-119aa77c2504}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystem\Source">
-      <UniqueIdentifier>{c7859ed1-2076-4b5c-9286-743690786243}</UniqueIdentifier>
+      <UniqueIdentifier>{7466c92c-4c6a-469b-bea6-42dfd8f327e8}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystem\Source\Private">
-      <UniqueIdentifier>{55892004-de46-4804-8a6b-cc64678d5167}</UniqueIdentifier>
+      <UniqueIdentifier>{e1bd4fed-0c7d-4ab4-8e4a-56eacf4f17ea}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public">
-      <UniqueIdentifier>{8174d75a-6172-4a0e-8369-1ef550503fdc}</UniqueIdentifier>
+      <UniqueIdentifier>{c0ec9b0a-9527-4670-926a-aa0f92621df7}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source">
-      <UniqueIdentifier>{82bdd899-60f9-4a73-b8db-be0944b94c6b}</UniqueIdentifier>
+      <UniqueIdentifier>{3412c393-0976-486e-b7ed-1dd41471e8b2}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame">
-      <UniqueIdentifier>{063d3e3f-01ff-4dea-ad46-c562028bebb9}</UniqueIdentifier>
+      <UniqueIdentifier>{b689d015-6046-4db9-9a27-958bbf8a36e8}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private">
-      <UniqueIdentifier>{646aebce-9a19-434d-a009-fbdd854acf02}</UniqueIdentifier>
+      <UniqueIdentifier>{995691c8-8a71-416e-99c4-6c9c5c222d31}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\AI">
-      <UniqueIdentifier>{84976cc8-fbbd-4825-bf6f-e80325617071}</UniqueIdentifier>
+      <UniqueIdentifier>{7835b038-7d94-43ca-89f6-d68216b19b56}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Heroes">
-      <UniqueIdentifier>{10dde0a7-7f3c-46a6-83b4-b98c06f4aeac}</UniqueIdentifier>
+      <UniqueIdentifier>{6e77e175-ba43-4a7a-a60e-41b1c3ff3736}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Items">
-      <UniqueIdentifier>{508e9dbc-586d-4241-88ac-aca8cc606ba4}</UniqueIdentifier>
+      <UniqueIdentifier>{cbec88d0-764d-4475-876e-8616db61b727}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Missions">
-      <UniqueIdentifier>{be872e8c-18a5-4565-b69c-869e043ade66}</UniqueIdentifier>
+      <UniqueIdentifier>{41397ec3-dc9f-4ce7-a217-1242dff48f02}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Online">
-      <UniqueIdentifier>{c60b285b-ef60-4c41-8787-a672ef283e04}</UniqueIdentifier>
+      <UniqueIdentifier>{c72b937c-9915-47de-839f-e8a438f8a243}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Online\NotForLicensees">
-      <UniqueIdentifier>{1a3980b9-9943-4abc-8584-62e9c37639aa}</UniqueIdentifier>
+      <UniqueIdentifier>{7b8255eb-ad2f-4433-b9e8-4dfdd3c38409}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Pawns">
-      <UniqueIdentifier>{2ec5d483-f1ac-4059-9fbe-681356ea5dcf}</UniqueIdentifier>
+      <UniqueIdentifier>{9fd4f198-db1a-445f-a8d3-701fe617157c}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Player">
-      <UniqueIdentifier>{6843f5ac-b772-4d80-95d3-751c3ba394b1}</UniqueIdentifier>
+      <UniqueIdentifier>{75d9f31a-88df-4ba8-9d12-259fd54647a7}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Quests">
-      <UniqueIdentifier>{9556de33-2511-486e-b906-c1f7fadf1db3}</UniqueIdentifier>
+      <UniqueIdentifier>{5ed1d8e0-74c4-48db-a114-4765175dd93f}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public">
-      <UniqueIdentifier>{cf0ef980-66f1-4ed7-896a-a76186540e12}</UniqueIdentifier>
+      <UniqueIdentifier>{5d266a2d-245f-4049-b165-0e7701b3bce1}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\AI">
-      <UniqueIdentifier>{1d9cb31d-7095-4b66-88b8-47e61d07f79d}</UniqueIdentifier>
+      <UniqueIdentifier>{e9fe3109-91d1-4053-a2a9-774f58718838}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Abilities">
-      <UniqueIdentifier>{9e5675d3-9f00-44c4-a066-b7cf80d12e94}</UniqueIdentifier>
+      <UniqueIdentifier>{5b711156-8789-4dfe-b6c6-c02000d59af1}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Building">
-      <UniqueIdentifier>{dd04066c-98db-49ff-921d-79984d78ddc9}</UniqueIdentifier>
+      <UniqueIdentifier>{20182644-9cd0-4fae-aad6-21c84e93512e}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Customization">
-      <UniqueIdentifier>{7aaab2fe-23cb-4504-a680-7517a85ee271}</UniqueIdentifier>
+      <UniqueIdentifier>{32f2f9b3-0f12-4a7b-aae7-d84955f24860}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Heroes">
-      <UniqueIdentifier>{001f8309-cbf7-4342-bfe6-6ff740e579b5}</UniqueIdentifier>
+      <UniqueIdentifier>{48186754-d622-4998-b295-3ee450c40880}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Items">
-      <UniqueIdentifier>{b7897e8a-8a8d-49b1-95c5-3e06cbcebd59}</UniqueIdentifier>
+      <UniqueIdentifier>{5d8fcbbc-002a-4a9d-9278-3f22d94302dc}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Missions">
-      <UniqueIdentifier>{f0f1b865-cf17-4f0c-9d81-b8120ffa16a9}</UniqueIdentifier>
+      <UniqueIdentifier>{e55a731c-8f8b-4853-a135-45c8138c8abb}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Online">
-      <UniqueIdentifier>{19f05364-4b67-437b-963d-aa991e8e9de2}</UniqueIdentifier>
+      <UniqueIdentifier>{25cedf09-024f-47f6-94da-7198894e7b67}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees">
-      <UniqueIdentifier>{fac03292-52bc-4c99-bbf3-32c352cc1032}</UniqueIdentifier>
+      <UniqueIdentifier>{93ca8c4b-e569-410c-98cb-5027dec97a3c}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Pawns">
-      <UniqueIdentifier>{f8b92e13-b666-476a-aa89-9c75c60cdd80}</UniqueIdentifier>
+      <UniqueIdentifier>{dade2bd1-845b-4e28-a54f-2bd2db3c5f6a}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Player">
-      <UniqueIdentifier>{de5b8274-3c25-4cbd-a250-59281c425c70}</UniqueIdentifier>
+      <UniqueIdentifier>{4461b3a3-520d-4d11-984c-df317e654469}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Quests">
-      <UniqueIdentifier>{d46f1f04-7879-4ae4-9795-5c459b6457ae}</UniqueIdentifier>
+      <UniqueIdentifier>{6a7b84f4-05d2-4db4-9f7d-d0538e70e1bf}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\UI">
-      <UniqueIdentifier>{3a31f182-52cd-434e-982b-559087a590f1}</UniqueIdentifier>
+      <UniqueIdentifier>{39550dc8-65fb-4a75-9a9b-841907f89549}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\UI\FrontEnd">
-      <UniqueIdentifier>{f7b58f49-607b-4509-8bf2-1245b4a59090}</UniqueIdentifier>
+      <UniqueIdentifier>{97b871ac-0286-401a-b80b-164d8ab5f287}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty">
-      <UniqueIdentifier>{8090c1ba-feff-4109-bc34-4cf2da07ae48}</UniqueIdentifier>
+      <UniqueIdentifier>{7cdca635-23b5-4540-a67c-2247550dd7ab}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty\Memcury">
-      <UniqueIdentifier>{e5613d44-008b-4728-81f8-d51839ae79b9}</UniqueIdentifier>
+      <UniqueIdentifier>{cc232023-16d5-40fd-a15a-58b26f52da88}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty\MinHook">
-      <UniqueIdentifier>{d74cec72-bc2d-4ed3-8ad6-79ab7bb61b10}</UniqueIdentifier>
+      <UniqueIdentifier>{943cfbf8-0c2a-424e-b17b-59dd3fb044c2}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty\MinHook\src">
-      <UniqueIdentifier>{b2d5f1f5-d35a-48f1-ac8c-e98b01129afe}</UniqueIdentifier>
+      <UniqueIdentifier>{5e54246f-b602-4909-b831-790da8bbe82b}</UniqueIdentifier>
     </Filter>
     <Filter Include="ThirdParty\MinHook\src\hde">
-      <UniqueIdentifier>{cef4242d-591d-4744-ba3f-6eaa53ba62b1}</UniqueIdentifier>
+      <UniqueIdentifier>{23bc12ea-7e72-4e27-9ca9-d451ab50a148}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -882,6 +882,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIGoalManager.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\AI</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortQueryContexts.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\AI</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortQueryGenerators.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\AI</Filter>
     </ClInclude>
@@ -1231,6 +1234,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\AI</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIGoalManager.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\AI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortQueryContexts.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\AI</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortQueryGenerators.cpp">

@@ -18,6 +18,7 @@ struct FFortAIAssignmentIdentifier
 {
     DefineUnrealStruct(FFortAIAssignmentIdentifier, FortniteGame)
     DefineUProperty(EFortAIAssignmentType, AssignmentType)
+    DefineUProperty(uint8_t, AssignmentTeam)
 };
 
 struct FFortAIGoal
@@ -48,6 +49,26 @@ class UFortAIEncounterInfo : public UObject
 
 public:
     DefineUProperty(TArray<UObject*>, EncounterAssignments)
+};
+
+class UFortAIGoalProvider : public UObject
+{
+    DefineUnrealClass(UFortAIGoalProvider, FortniteGame)
+
+public:
+    DefineUProperty(UObject*, EncounterInfo)
+
+    UObject* GetEncounterInfo() const { return EncounterInfo; }
+};
+
+class UFortAIGoalProvider_EnvQuery : public UFortAIGoalProvider
+{
+    DefineUnrealClass(UFortAIGoalProvider_EnvQuery, FortniteGame)
+
+public:
+    DefineUStructProperty(FFortAIAssignmentIdentifier, SpecificAssignmentContext)
+
+    const FFortAIAssignmentIdentifier& GetRootAssignmentIdentifier() const { return SpecificAssignmentContext; }
 };
 
 class AFortAIGoalManager : public AActor

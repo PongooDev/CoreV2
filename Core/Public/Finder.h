@@ -4,6 +4,7 @@
 #include <string_view>
 #include <vector>
 
+class UClass;
 class UFunction;
 
 namespace Finder
@@ -60,6 +61,7 @@ namespace Finder
     bool ResolveMcpProfileWorldLive(void** ProfileVTable);
     bool ResolveGoalManagerLive();
     bool ResolveQueryGeneratorsLive(void** EnemiesVTable);
+    bool ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTable, UClass* GoalItemType);
     bool ResolveNavigationSystemLive();
     bool ResolveOutpostOwnerLive();
     bool ResolveBadgeScoresLive();

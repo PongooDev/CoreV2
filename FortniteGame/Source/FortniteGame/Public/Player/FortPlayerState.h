@@ -3,6 +3,7 @@
 #include "Customization/CustomCharacterPart.h"
 #include "GameFramework/PlayerState.h"
 
+class UAbilitySystemComponent;
 class UFortHero;
 
 class AFortPlayerState : public APlayerState
@@ -10,6 +11,7 @@ class AFortPlayerState : public APlayerState
     DefineUnrealClass(AFortPlayerState, FortniteGame)
 
 public:
+    DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
     DefineUProperty(UCustomCharacterPart*, CharacterParts)
     DefineUProperty(int32_t, WorldPlayerId)
     DefineUProperty(bool, bIsFinalizingExperience)

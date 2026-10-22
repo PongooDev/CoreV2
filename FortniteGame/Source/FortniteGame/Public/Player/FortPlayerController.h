@@ -12,6 +12,7 @@ class AFortPawn;
 class APawn;
 class IFortInventoryOwnerInterface;
 class AFortQuickBars;
+class UFortHero;
 class UFortItemDefinition;
 class UFortQuestManager;
 class UFortRegisteredPlayerInfo;
@@ -43,6 +44,8 @@ public:
     void SetupQuickBars();
     void InitializeInventory(const TStructArray<FItemDefinitionAndCount>& Items);
     void TryAddToQuickBar(UFortWorldItem* Item);
+    void TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused);
+    void ApplyHeroAbilityKitItems(UFortHero* Hero);
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
@@ -62,6 +65,8 @@ private:
     static bool InitializeMcpProfileHK(AFortPlayerController* This, const void* OnComplete);
     static inline void (*PossessOG)(AFortPlayerController* This, APawn* InPawn) = nullptr;
     static void PossessHK(AFortPlayerController* This, APawn* InPawn);
+    static inline void (*TrySetHeroImplementationOG)(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused) = nullptr;
+    static void TrySetHeroImplementationHK(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused);
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count);
     static bool RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);

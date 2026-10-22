@@ -7,6 +7,7 @@
 class AActor;
 class UGameplayAbility;
 struct FGameplayEventData;
+struct FGameplayTagContainer;
 
 class UAbilitySystemComponent : public UGameplayTasksComponent
 {
@@ -18,6 +19,7 @@ public:
     DefineUFunction(ClientActivateAbilityFailed)
     DefineUFunction(ServerTryActivateAbility)
 
+    bool HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const;
     FGameplayAbilitySpec* FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle Handle);
     void MarkAbilitySpecDirty(FGameplayAbilitySpec& Spec);
     bool InternalTryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate, const FPredictionKey& InPredictionKey, UGameplayAbility** OutInstancedAbility = nullptr, void* OnGameplayAbilityEndedDelegate = nullptr, const FGameplayEventData* TriggerEventData = nullptr);

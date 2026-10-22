@@ -2275,6 +2275,44 @@ namespace
         Require(L"AFortPlayerState::SetHeroType", Natives::AFortPlayerState_SetHeroType, FunctionOf(L"Hero gender does not match gender of HeroType %s!  Hero Gender is %d instead."));
         Require(L"UFortGlobals::ApplyHeroEffectsAndAbilities", Natives::UFortGlobals_ApplyHeroEffectsAndAbilities, FunctionOf(L"ApplyHeroEffectsAndAbilities succeeded"));
 
+        const auto OnlyCaller = [](uintptr_t Function)
+        {
+            uintptr_t Caller = 0;
+            for (uintptr_t Call : Function ? Finder::CallsTo(Function, false) : std::vector<uintptr_t>{})
+            {
+                const uintptr_t CallStart = Finder::FunctionStart(Call);
+                if (!CallStart || (Caller && Caller != CallStart))
+                {
+                    return uintptr_t{ 0 };
+                }
+                Caller = CallStart;
+            }
+            return Caller;
+        };
+        const uintptr_t SetHero = OnlyCaller(reinterpret_cast<uintptr_t>(Natives::AFortPlayerState_SetHeroType));
+        Require(L"AFortPlayerController::TrySetHeroImplementation", Natives::AFortPlayerController_TrySetHeroImplementation, OnlyCaller(SetHero));
+
+        const uintptr_t ApplyHero = reinterpret_cast<uintptr_t>(Natives::UFortGlobals_ApplyHeroEffectsAndAbilities);
+        const uintptr_t ApplyHeroEnd = ApplyHero ? Finder::FunctionEnd(ApplyHero) : 0;
+        const std::initializer_list<int32_t> HasAllCall = { 0x49, 0x8B, 0xCE, 0xFF, 0x50 };
+        uintptr_t TagAssetInterface = 0;
+        uintptr_t HasAll = 0;
+        for (uintptr_t Call = ApplyHeroEnd ? FindInstruction(ApplyHero, ApplyHeroEnd, HasAllCall) : 0; Call && !TagAssetInterface; Call = FindInstruction(Call + 1, ApplyHeroEnd, HasAllCall))
+        {
+            TagAssetInterface = FindBackward(Call, 0x20, { 0x4C, 0x8D, 0xB6 });
+            HasAll = Call + 3;
+        }
+        const int32_t HasAllDisplacement = TagAssetInterface ? static_cast<int8_t>(Byte(HasAll + 2)) : 0;
+        if (HasAllDisplacement > 0 && HasAllDisplacement % 8 == 0)
+        {
+            Natives::UAbilitySystemComponent_GameplayTagAssetInterface = *reinterpret_cast<const int32_t*>(TagAssetInterface + 3);
+            Natives::IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex = HasAllDisplacement / 8;
+        }
+        else
+        {
+            Log::Error(L"Finder: IGameplayTagAssetInterface::HasAllMatchingGameplayTags not found");
+        }
+
         Sites::ChoosePlayerStartGoalManagerCalls.clear();
         std::vector<uint8_t*> GoalManagerCalls;
         RequireSlot(L"UObject::GetWorld", Natives::UObject_GetWorldIndex, DecodeGetWorldSlot(GoalManagerCalls));

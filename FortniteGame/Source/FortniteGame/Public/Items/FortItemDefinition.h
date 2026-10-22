@@ -6,6 +6,63 @@ class AFortPlayerController;
 class UFortItem;
 class UFortWorldItem;
 
+enum class EFortItemType : uint8_t
+{
+    WorldItem,
+    Ammo,
+    Badge,
+    BackpackPickup,
+    BuildingPiece,
+    CharacterPart,
+    Deco,
+    EditTool,
+    Ingredient,
+    Food,
+    Gadget,
+    HomebaseGadget,
+    HeroAbility,
+    MissionItem,
+    Trap,
+    Weapon,
+    WeaponMelee,
+    WeaponRanged,
+    WeaponHarvest,
+    WorldResource,
+    AccountItem,
+    AccountResource,
+    CollectedResource,
+    Alteration,
+    CardPack,
+    CharacterCosmetic,
+    Currency,
+    Hero,
+    Schematic,
+    Worker,
+    Token,
+    DailyRewardScheduleToken,
+    CodeToken,
+    Buff,
+    BuffCredit,
+    Quest,
+    GameplayModifier,
+    Outpost,
+    HomebaseNode,
+    Defender,
+    ConversionControl,
+    DeployableBaseCloudSave,
+    ConsumableAccountItem,
+    Quota,
+    Expedition,
+    HomebaseBannerIcon,
+    HomebaseBannerColor,
+    SpecialItem,
+    Emote,
+    Stack,
+    CollectionBookPage,
+    Profile,
+    Max_None,
+};
+
 class UFortItemDefinition : public UObject
 {
     DefineUnrealClass(UFortItemDefinition, FortniteGame)
@@ -26,6 +83,11 @@ public:
     DefineBitfieldUProperty(bCanBeDropped)
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
+};
+
+class UFortGadgetItemDefinition : public UFortWorldItemDefinition
+{
+    DefineUnrealClass(UFortGadgetItemDefinition, FortniteGame)
 };
 
 class UFortAmmoItemDefinition : public UFortWorldItemDefinition

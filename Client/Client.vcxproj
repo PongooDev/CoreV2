@@ -261,10 +261,12 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIDirector.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIGoalManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortQueryGenerators.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilityKit.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Customization\CustomCharacterPart.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Heroes\FortHero.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Heroes\FortHeroType.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortBadgeItemDefinition.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortInventory.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortItem.h" />
@@ -379,6 +381,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIDirector.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIGoalManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortQueryGenerators.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Heroes\FortHero.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortBadgeItemDefinition.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortInventory.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortItem.cpp" />

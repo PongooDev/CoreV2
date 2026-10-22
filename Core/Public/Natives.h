@@ -155,6 +155,7 @@ namespace Natives
     inline void (*AFortWorldManager_OnWorldRecordQueryComplete)(AFortWorldManager* This) = nullptr;
     inline void (*AFortLobbyBeaconHost_SetWorldRecordLoaded)(AFortLobbyBeaconHost* This, bool bInWorldRecordLoaded) = nullptr;
     inline bool (*AFortPlayerController_InitializeMcpProfile)(AFortPlayerController* This, const void* OnComplete) = nullptr;
+    inline void (*AFortPlayerController_TrySetHeroImplementation)(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused) = nullptr;
     inline void (*AFortPlayerState_SetHeroType)(AFortPlayerState* This, UFortHero* Hero) = nullptr;
     inline void (*UFortGlobals_ApplyHeroEffectsAndAbilities)(UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles, FScriptArray& OutAbilitySetHandles) = nullptr;
     inline void* (*FScopedPredictionWindow_FScopedPredictionWindow)(void* This, UAbilitySystemComponent* AbilitySystemComponent, void* InPredictionKey, bool InSetReplicatedPredictionKey) = nullptr;
@@ -353,6 +354,8 @@ namespace Natives
     inline ptrdiff_t FFrame_Object = -1;
     inline ptrdiff_t FFastArraySerializer_IDCounter = -1;
     inline ptrdiff_t AFortPlayerController_InventoryOwnerInterface = -1;
+    inline ptrdiff_t UAbilitySystemComponent_GameplayTagAssetInterface = -1;
+    inline int32_t IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex = -1;
     inline ptrdiff_t FFrame_Code = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;

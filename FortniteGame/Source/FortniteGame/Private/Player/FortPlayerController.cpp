@@ -1,8 +1,12 @@
 #include "pch.h"
 #include "Player/FortPlayerController.h"
+#include "Abilities/FortAbilityKit.h"
+#include "AbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "Heroes/FortHero.h"
+#include "Heroes/FortHeroType.h"
 #include "Hooks.h"
 #include "FortKismetLibrary.h"
 #include "Items/FortInventory.h"
@@ -14,11 +18,76 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
+#include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
+#include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
+#include <algorithm>
+#include <unordered_map>
+#include <vector>
+
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
+
+namespace
+{
+    struct FHeroAbilityKitItems
+    {
+        TWeakObjectPtr<AFortPlayerController> PlayerController;
+        std::vector<TWeakObjectPtr<UFortItemDefinition>> GrantedDefinitions;
+    };
+
+    std::unordered_map<const AFortPlayerController*, FHeroAbilityKitItems> HeroAbilityKitItems;
+
+    FHeroAbilityKitItems& GetHeroAbilityKitItems(AFortPlayerController* PlayerController)
+    {
+        FHeroAbilityKitItems& Items = HeroAbilityKitItems[PlayerController];
+        if (Items.PlayerController.Get() != PlayerController)
+        {
+            std::erase_if(HeroAbilityKitItems, [PlayerController](const auto& Entry) { return Entry.first != PlayerController && !Entry.second.PlayerController.Get(); });
+            Items = FHeroAbilityKitItems{ TWeakObjectPtr<AFortPlayerController>(PlayerController) };
+        }
+        return Items;
+    }
+
+    std::vector<UFortWorldItem*> AddHeroAbilityKitItem(AFortPlayerController* PlayerController, AFortInventory* Inventory, UFortWorldItemDefinition* ItemDefinition, int32_t Count, int32_t Level)
+    {
+        std::vector<UFortWorldItem*> Added;
+        const int32_t MaxStackSize = std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
+        int32_t Remaining = Count;
+
+        FFortItemList& ItemList = Inventory->Inventory;
+        TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+        for (int32_t Index = 0; Index < Instances.Num() && Remaining > 0; ++Index)
+        {
+            UFortWorldItem* Existing = Instances[Index];
+            FFortItemEntry* ExistingEntry = Existing ? &static_cast<FFortItemEntry&>(Existing->ItemEntry) : nullptr;
+            if (ExistingEntry && static_cast<UFortItemDefinition*>(ExistingEntry->ItemDefinition) == ItemDefinition && ExistingEntry->Count < MaxStackSize)
+            {
+                const int32_t Merged = std::min(Remaining, MaxStackSize - ExistingEntry->Count);
+                Inventory->UpdateWorldItemCount(Existing, ExistingEntry->Count + Merged);
+                Remaining -= Merged;
+            }
+        }
+
+        while (Remaining > 0)
+        {
+            const int32_t StackCount = std::min(Remaining, MaxStackSize);
+            UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(StackCount, Level));
+            if (!WorldItem)
+            {
+                break;
+            }
+
+            WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
+            Inventory->AddWorldItem(WorldItem);
+            Added.push_back(WorldItem);
+            Remaining -= StackCount;
+        }
+        return Added;
+    }
+}
 
 bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
 {
@@ -143,6 +212,155 @@ void AFortPlayerController::TryAddToQuickBar(UFortWorldItem* Item)
                 return;
             }
         }
+    }
+#endif
+}
+
+void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused)
+{
+    TrySetHeroImplementationOG(this, NewHero, bSendToServer, bUnused);
+
+#if WITH_SERVER_CODE
+    ApplyHeroAbilityKitItems(NewHero);
+#endif
+}
+
+void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = WorldInventory;
+    AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(static_cast<APlayerState*>(PlayerState));
+    if (Role != ROLE_Authority || !Inventory || !Hero || !FortPlayerState)
+    {
+        return;
+    }
+
+    std::vector<UFortAbilityKit*> Kits;
+    const auto AddKit = [&Kits](UFortAbilityKit* Kit)
+    {
+        if (Kit && std::find(Kits.begin(), Kits.end(), Kit) == Kits.end())
+        {
+            Kits.push_back(Kit);
+        }
+    };
+
+    UAbilitySystemComponent* AbilitySystemComponent = FortPlayerState->AbilitySystemComponent;
+    if (UFortHeroType* HeroType = Hero->GetHeroTypeBP(); HeroType && AbilitySystemComponent)
+    {
+        TStructArray<FHeroAbilityKit>& HeroTypeKits = HeroType->AbilityKits;
+        for (int32_t Index = 0; Index < HeroTypeKits.Num(); ++Index)
+        {
+            FHeroAbilityKit& HeroTypeKit = HeroTypeKits[Index];
+            if (AbilitySystemComponent->HasAllMatchingGameplayTags(HeroTypeKit.RequiredGPTags))
+            {
+                const TAssetPtr<UFortAbilityKit>& InherentAbilityKit = HeroTypeKit.InherentAbilityKit;
+                AddKit(InherentAbilityKit.LoadSynchronous());
+            }
+        }
+    }
+    for (UFortAbilityKit* Kit : Hero->SpecializationAbilityKits)
+    {
+        AddKit(Kit);
+    }
+
+    std::vector<UFortItemDefinition*> Definitions;
+    std::vector<UFortWorldItemDefinition*> Gadgets;
+    std::vector<const FAbilityKitItem*> KitItems;
+    const auto AddDefinition = [&Definitions](UFortItemDefinition* Definition)
+    {
+        if (!Definition || std::find(Definitions.begin(), Definitions.end(), Definition) != Definitions.end())
+        {
+            return false;
+        }
+        Definitions.push_back(Definition);
+        return true;
+    };
+    for (UFortAbilityKit* Kit : Kits)
+    {
+        for (UFortGadgetItemDefinition* Gadget : Kit->Gadgets)
+        {
+            if (AddDefinition(Gadget))
+            {
+                Gadgets.push_back(Gadget);
+            }
+        }
+
+        TStructArray<FAbilityKitItem>& Items = Kit->Items;
+        for (int32_t Index = 0; Index < Items.Num(); ++Index)
+        {
+            const FAbilityKitItem& KitItem = Items[Index];
+            UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(KitItem.Item));
+            if (ItemDefinition && ItemDefinition->ItemType != static_cast<uint8_t>(EFortItemType::WeaponHarvest) && AddDefinition(ItemDefinition))
+            {
+                KitItems.push_back(&KitItem);
+            }
+        }
+    }
+
+    FHeroAbilityKitItems& Granted = GetHeroAbilityKitItems(this);
+    std::vector<UFortItemDefinition*> PreviousDefinitions;
+    for (const TWeakObjectPtr<UFortItemDefinition>& GrantedDefinition : Granted.GrantedDefinitions)
+    {
+        if (UFortItemDefinition* Definition = GrantedDefinition.Get())
+        {
+            PreviousDefinitions.push_back(Definition);
+        }
+    }
+
+    std::vector<FGuid> StaleItems;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* Entry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        UFortItemDefinition* Definition = Entry ? static_cast<UFortItemDefinition*>(Entry->ItemDefinition) : nullptr;
+        if (Definition && std::find(PreviousDefinitions.begin(), PreviousDefinitions.end(), Definition) != PreviousDefinitions.end() && std::find(Definitions.begin(), Definitions.end(), Definition) == Definitions.end())
+        {
+            StaleItems.push_back(Entry->ItemGuid);
+        }
+    }
+    for (const FGuid& ItemGuid : StaleItems)
+    {
+        RemoveInventoryItem(ItemGuid, -1, true);
+    }
+
+    const int32_t Level = std::max(Hero->GetLevel(), 1);
+    for (UFortWorldItemDefinition* Gadget : Gadgets)
+    {
+        if (GetItemQuantity(Gadget) <= 0)
+        {
+            AddHeroAbilityKitItem(this, Inventory, Gadget, 1, Level);
+        }
+    }
+
+    for (const FAbilityKitItem* KitItem : KitItems)
+    {
+        UFortWorldItemDefinition* ItemDefinition = static_cast<UFortWorldItemDefinition*>(static_cast<UFortItemDefinition*>(KitItem->Item));
+        const int32_t Quantity = KitItem->Quantity;
+        const int32_t Owned = GetItemQuantity(ItemDefinition);
+        int32_t Count = 0;
+        switch (KitItem->Replenishment)
+        {
+        case EFortReplenishmentType::ClampMin:
+            Count = Quantity - Owned;
+            break;
+        case EFortReplenishmentType::Add:
+            Count = std::find(PreviousDefinitions.begin(), PreviousDefinitions.end(), ItemDefinition) == PreviousDefinitions.end() ? Quantity : 0;
+            break;
+        default:
+            Count = Owned > 0 ? 0 : Quantity;
+            break;
+        }
+        if (Count > 0)
+        {
+            AddHeroAbilityKitItem(this, Inventory, ItemDefinition, Count, Level);
+        }
+    }
+
+    Granted.GrantedDefinitions.clear();
+    for (UFortItemDefinition* Definition : Definitions)
+    {
+        Granted.GrantedDefinitions.emplace_back(Definition);
     }
 #endif
 }
@@ -392,6 +610,11 @@ void AFortPlayerController::PossessHK(AFortPlayerController* This, APawn* InPawn
     This->Possess(InPawn);
 }
 
+void AFortPlayerController::TrySetHeroImplementationHK(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused)
+{
+    This->TrySetHeroImplementation(NewHero, bSendToServer, bUnused);
+}
+
 void AFortPlayerController::ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid)
 {
     This->ServerExecuteInventoryItem_Implementation(ItemGuid);
@@ -405,6 +628,7 @@ void AFortPlayerController::ServerSpawnInventoryDrop_ImplementationHK(AFortPlaye
 void AFortPlayerController::Hook()
 {
     Hooks::Detour(L"AFortPlayerController::InitializeMcpProfile", reinterpret_cast<void*>(Natives::AFortPlayerController_InitializeMcpProfile), &InitializeMcpProfileHK, &InitializeMcpProfileOG);
+    Hooks::Detour(L"AFortPlayerController::TrySetHeroImplementation", reinterpret_cast<void*>(Natives::AFortPlayerController_TrySetHeroImplementation), &TrySetHeroImplementationHK, &TrySetHeroImplementationOG);
 }
 
 bool AFortPlayerController::InitializeMcpProfileHK(AFortPlayerController* This, const void* OnComplete)

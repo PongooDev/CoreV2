@@ -37,6 +37,18 @@ FScopedPredictionWindow::~FScopedPredictionWindow()
     }
 }
 
+bool UAbilitySystemComponent::HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const
+{
+    if (Natives::UAbilitySystemComponent_GameplayTagAssetInterface < 0 || Natives::IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex < 0)
+    {
+        return false;
+    }
+
+    const void* const TagAssetInterface = reinterpret_cast<const uint8_t*>(this) + Natives::UAbilitySystemComponent_GameplayTagAssetInterface;
+    using FHasAllMatchingGameplayTags = bool (*)(const void* This, const FGameplayTagContainer& TagContainer);
+    return reinterpret_cast<FHasAllMatchingGameplayTags>((*reinterpret_cast<void* const* const*>(TagAssetInterface))[Natives::IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex])(TagAssetInterface, TagContainer);
+}
+
 FGameplayAbilitySpec* UAbilitySystemComponent::FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle Handle)
 {
     FGameplayAbilitySpecContainer& Container = ActivatableAbilities;

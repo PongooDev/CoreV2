@@ -104,7 +104,7 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
             TArray<UFortMissionInfo*>& StartingMissionList = StartingMissions.StartingMissions;
             AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
             UFortMissionGenerator* MissionGenerator = GameState ? GameState->GetMissionGenerator() : nullptr;
-            if (StartingMissionList.Num() > 0 || !MissionGenerator)
+            if (!MissionGenerator)
             {
                 AddMissionsToMissionManagerRecord(StartingMissionList, EMissionGenerationCategory::Primary);
             }

@@ -41,6 +41,11 @@ bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerC
     return reinterpret_cast<FServerExecute>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItemDefinition_ServerExecuteIndex])(this, Item, Controller);
 }
 
+ptrdiff_t UFortAmmoItemDefinition::RegenCooldownOffset()
+{
+    return Member_RegenCooldown.GetOffsetChecked();
+}
+
 UFortItemDefinition* UFortItem::GetItemDefinitionBP() const
 {
     Reflection::FParams Params(StaticFunction_GetItemDefinitionBP());
@@ -58,6 +63,22 @@ void UFortWorldItem::SetOwningControllerForTemporaryItem(AFortPlayerController* 
     Reflection::FParams Params(StaticFunction_SetOwningControllerForTemporaryItem());
     Params.Set(L"InController", InController);
     Params.Call(this);
+}
+
+bool UFortWorldItem::SetItemCount(int32_t NewCount)
+{
+    if (Natives::UFortWorldItem_SetItemCountIndex < 0 && !Finder::ResolveWorldItemCountLive(UFortAmmoItemDefinition::RegenCooldownOffset(), ItemEntryOffset()))
+    {
+        return false;
+    }
+
+    using FSetItemCount = bool (*)(UFortWorldItem* This, int32_t NewCount);
+    return reinterpret_cast<FSetItemCount>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItem_SetItemCountIndex])(this, NewCount);
+}
+
+ptrdiff_t UFortWorldItem::ItemEntryOffset()
+{
+    return Member_ItemEntry.GetOffsetChecked();
 }
 
 bool UFortWorldItem::SetLoadedAmmo(int32_t NewLoadedAmmo)

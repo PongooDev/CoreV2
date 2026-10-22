@@ -80,16 +80,7 @@ void AFortInventory::UpdateWorldItemCount(UFortWorldItem* WorldItem, int32_t New
         return;
     }
 
-    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
-    ItemEntry.Count = NewCount;
-    WorldItem->bNeedsPersistentUpdate = true;
-
-    FFortItemList& ItemList = Inventory;
-    if (FFortItemEntry* ReplicatedEntry = ItemList.FindReplicatedEntry(ItemEntry.ItemGuid))
-    {
-        ReplicatedEntry->Count = NewCount;
-        ItemList.MarkItemDirty(*ReplicatedEntry);
-    }
+    WorldItem->SetItemCount(NewCount);
     HandleInventoryLocalUpdate();
 #endif
 }

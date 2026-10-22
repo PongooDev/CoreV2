@@ -4196,3 +4196,58 @@ bool Finder::ResolveInventoryLive()
     Log::Info(L"Finder: AFortInventory::InitializeExistingItem found");
     return true;
 }
+
+bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t ItemEntryOffset)
+{
+    if (Natives::UFortWorldItem_SetItemCountIndex >= 0)
+    {
+        return true;
+    }
+
+    const auto FindDisplacement = [](uintptr_t Begin, uintptr_t End, std::initializer_list<int32_t> Opcode, ptrdiff_t Displacement)
+    {
+        for (uintptr_t Site = FindInstruction(Begin, End, Opcode); Site; Site = FindInstruction(Site + 1, End, Opcode))
+        {
+            if (Site + Opcode.size() + sizeof(int32_t) <= End && *reinterpret_cast<const int32_t*>(Site + Opcode.size()) == Displacement)
+            {
+                return Site;
+            }
+        }
+        return uintptr_t{ 0 };
+    };
+
+    void** AmmoVTable = CdoVTable(L"/Script/FortniteGame.FortAmmoItemDefinition");
+    uintptr_t RegenCompare = 0;
+    uintptr_t RegenFunctionEnd = 0;
+    bool bAmbiguous = false;
+    for (int32_t Index = 0; AmmoVTable && RegenCooldownOffset > 0 && Index < 0x100; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(AmmoVTable, Index);
+        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
+        const uintptr_t Compare = FunctionEnd > Function ? FindDisplacement(Function, FunctionEnd, { 0x0F, 0x2F, 0x82 }, RegenCooldownOffset) : 0;
+        if (Compare)
+        {
+            bAmbiguous |= RegenCompare && RegenCompare != Compare;
+            RegenCompare = Compare;
+            RegenFunctionEnd = FunctionEnd;
+        }
+    }
+
+    const uintptr_t CountCall = RegenCompare ? FindInstruction(RegenCompare, RegenFunctionEnd, { 0xFF, 0x93 }) : 0;
+    const int32_t Displacement = CountCall ? *reinterpret_cast<const int32_t*>(CountCall + 2) : 0;
+    const int32_t SetItemCountIndex = Displacement > 0 && Displacement % 8 == 0 ? Displacement / 8 : -1;
+    const uintptr_t SetItemCount = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortWorldItem"), SetItemCountIndex);
+    const uintptr_t SetItemCountEnd = SetItemCount ? Finder::FunctionEnd(SetItemCount) : 0;
+    const bool bSetItemCount = SetItemCountEnd > SetItemCount
+        && FindDisplacement(SetItemCount, SetItemCountEnd, { 0x48, 0x8D, 0xBB }, ItemEntryOffset)
+        && FindInstruction(SetItemCount, SetItemCountEnd, { 0x80, 0x38, 0x03 });
+    if (bAmbiguous || !bSetItemCount)
+    {
+        Log::Error(L"Finder: UFortWorldItem::SetItemCount slot not found");
+        return false;
+    }
+
+    Natives::UFortWorldItem_SetItemCountIndex = SetItemCountIndex;
+    Log::Info(L"Finder: UFortWorldItem::SetItemCount is slot 0x{:X}", SetItemCountIndex);
+    return true;
+}

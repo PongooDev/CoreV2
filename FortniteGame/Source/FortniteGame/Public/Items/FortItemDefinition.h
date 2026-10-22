@@ -27,3 +27,13 @@ public:
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
 };
+
+class UFortAmmoItemDefinition : public UFortWorldItemDefinition
+{
+    DefineUnrealClass(UFortAmmoItemDefinition, FortniteGame)
+
+public:
+    DefineUProperty(float, RegenCooldown)
+
+    static ptrdiff_t RegenCooldownOffset();
+};

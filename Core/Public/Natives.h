@@ -244,6 +244,7 @@ namespace Natives
     inline UFortSchematicItem* (*AFortPlayerController_GetSchematicForItem)(AFortPlayerController* This, const UFortItemDefinition* ItemDefinition) = nullptr;
     inline int32_t UFortSchematicItem_ServerCraftSchematicIndex = -1;
     inline int32_t UFortWorldItem_SetLoadedAmmoIndex = -1;
+    inline int32_t UFortWorldItem_SetItemCountIndex = -1;
     inline int32_t AFortMissionManager_OnZoneEndIndex = -1;
     inline int32_t UFortMcpProfileWorld_BindToPlayerControllerIndex = -1;
     inline UObject* (*AFortAIGoalManager_FindAssignmentInList)(UObject* This, const void* Identifier, void* Assignments, int32_t Kind) = nullptr;

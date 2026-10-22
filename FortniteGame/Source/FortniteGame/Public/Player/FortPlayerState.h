@@ -16,6 +16,7 @@ public:
     DefineUProperty(int32_t, WorldPlayerId)
     DefineUProperty(bool, bIsFinalizingExperience)
     DefineUProperty(bool, bAreZoneStatsFinalized)
+    DefineBitfieldUProperty(bHasStartedPlaying)
     DefineUFunction(OnRep_CharacterParts)
 
     UCustomCharacterPart*& GetCharacterPart(EFortCustomPartType PartType)

@@ -113,6 +113,13 @@ void AFortPlayerController::Possess(APawn* InPawn)
     PossessOG(this, InPawn);
 
 #if WITH_SERVER_CODE
+    AFortPlayerState* FortPlayerState = Role == ROLE_Authority && MyFortPawn ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
+    if (FortPlayerState && !FortPlayerState->bHasStartedPlaying)
+    {
+        FortPlayerState->bHasStartedPlaying = true;
+        FortPlayerState->ForceNetUpdate();
+    }
+
     AFortQuickBars* Bars = QuickBars;
     if (Role == ROLE_Authority && Bars && MyFortPawn)
     {

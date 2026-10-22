@@ -43,8 +43,6 @@ class AFortMission : public AActor
     DefineUFunction(GetAdditionalMissionCompletionMissionPoints)
     DefineUFunction(BlueprintCustomHandleMissionEvent)
     DefineUFunction(GetDaysRemainingBeforeOverPar)
-    DefineUFunction(InitializeActorsForMission)
-    DefineUFunction(SpawnAtPlacementActorsAsArray)
 
 public:
     DefineUProperty(UFortMissionInfo*, MissionInfo)
@@ -67,7 +65,6 @@ public:
 
     DECLARE_FUNCTION(execGrantRewardsByTag);
     static void GrantRewardsByTagCall(AFortMission* This, FGameplayTag RewardTag, EFortRewardType RewardType);
-    static TArray<AActor*>* SpawnAtPlacementActorsAsArrayCall(TArray<AActor*>* Result, AFortMission* Mission, bool* bSucceeded);
 
     bool GetAdditionalMissionSuccessBadges(TArray<UFortWorldItemDefinition*>& SuccessItems);
     int32_t GetAdditionalMissionCompletionMissionPoints(EFortMissionStatus CompletionStatus);

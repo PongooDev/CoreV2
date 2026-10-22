@@ -134,34 +134,6 @@ void AFortMission::HookCallSites()
     {
         Log::Error(L"Finder: AFortMission::GrantRewardsByTag call in AFortObjectiveBase::GrantRewardsByTag not found");
     }
-
-    if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
-    {
-        return;
-    }
-    uint8_t* InitializeCall = Finder::ImplementationCall(StaticFunction_InitializeActorsForMission());
-    uint8_t* SpawnCall = Finder::ImplementationCall(StaticFunction_SpawnAtPlacementActorsAsArray());
-    if (InitializeCall && SpawnCall)
-    {
-        Natives::AFortMission_InitializeActorsForMission = reinterpret_cast<decltype(Natives::AFortMission_InitializeActorsForMission)>(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(InitializeCall), 1, 5));
-        Log::Info(L"Finder: AFortMission::InitializeActorsForMission +0x{:X}", reinterpret_cast<uintptr_t>(Natives::AFortMission_InitializeActorsForMission) - Finder::ImageBase());
-        Hooks::RedirectCall(L"AFortMission::SpawnAtPlacementActorsAsArray", SpawnCall, reinterpret_cast<void*>(&SpawnAtPlacementActorsAsArrayCall));
-    }
-    else
-    {
-        Log::Error(L"Finder: AFortMission::SpawnAtPlacementActorsAsArray / InitializeActorsForMission implementation call not found");
-    }
-}
-
-TArray<AActor*>* AFortMission::SpawnAtPlacementActorsAsArrayCall(TArray<AActor*>* Result, AFortMission* Mission, bool* bSucceeded)
-{
-    new (Result) TArray<AActor*>();
-#if WITH_SERVER_CODE
-    *bSucceeded = Mission && Natives::AFortMission_InitializeActorsForMission(Mission, Mission, Result);
-#else
-    *bSucceeded = false;
-#endif
-    return Result;
 }
 
 ptrdiff_t AFortMission::MissionInfoOffset()

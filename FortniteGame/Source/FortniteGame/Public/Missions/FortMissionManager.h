@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/ScriptArray.h"
 #include "Engine/NetSerialization.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/OnlineReplStructs.h"
@@ -30,6 +31,7 @@ struct FFortMissionEntry
     DefineUProperty(UFortMissionInfo*, MissionInfo)
     DefineUProperty(EMissionGenerationCategory, GenerationCategory)
     DefineUStructProperty(FFortGeneratedDifficultyOptions, GeneratedDifficultyOptions)
+    DefineUProperty(FScriptArray, BlueprintLookupData)
 };
 
 struct FFortMissionRecord

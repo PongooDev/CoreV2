@@ -138,8 +138,16 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                 const TAssetPtr<UFortMissionInfo>& PrimaryMissionInfo = MissionGenerator->PrimaryMissionInfo;
                 if (UFortMissionInfo* PrimaryMission = PrimaryMissionInfo.LoadSynchronous())
                 {
+                    UE_LOG(LogFortWorld, Log, TEXT("Mission Generator %s adds Primary mission %s"), *MissionGenerator->GetName(), *PrimaryMission->GetName());
                     AddMissionsToMissionManagerRecord({ PrimaryMission }, EMissionGenerationCategory::GetPrimary(), MissionGenerator);
                 }
+
+                if (!Natives::AFortWorldManager_GetTheaterMapData)
+                {
+                    Finder::ResolveTheaterMapDataLive();
+                }
+                FFortTheaterMapData* TheaterMapData = Natives::AFortWorldManager_GetTheaterMapData ? static_cast<FFortTheaterMapData*>(Natives::AFortWorldManager_GetTheaterMapData(this)) : nullptr;
+                const bool bAllowPrototypes = TheaterMapData && TheaterMapData->RuntimeInfo.TheaterType == EFortTheaterType::GetTest();
 
                 const std::pair<TStructArray<FFortPossibleMission>*, EMissionGenerationCategory> Lists[] = {
                     { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SecondaryMissionList), EMissionGenerationCategory::GetSecondary() },
@@ -156,12 +164,13 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                     {
                         FFortPossibleMission& Possible = (*PossibleMissions)[Index];
                         const TAssetPtr<UFortMissionInfo>& PossibleInfo = Possible.MissionInfo;
-                        UFortMissionInfo* Info = Possible.bIsPrototype ? nullptr : PossibleInfo.LoadSynchronous();
+                        const bool bExcluded = Possible.bIsPrototype && !bAllowPrototypes;
+                        UFortMissionInfo* Info = bExcluded ? nullptr : PossibleInfo.LoadSynchronous();
                         for (int32_t Count = 0; Info && Count < Possible.MinAlwaysGenerated; ++Count)
                         {
                             Generated.Add(Info);
                         }
-                        TotalWeight += !Possible.bIsPrototype && Possible.Weight > 0.0f ? static_cast<float>(Possible.Weight) : 0.0f;
+                        TotalWeight += !bExcluded && Possible.Weight > 0.0f ? static_cast<float>(Possible.Weight) : 0.0f;
                     }
                     (&static_cast<int32_t&>(ManagerRecord.NumRequiredMissionsOfType))[static_cast<int32_t>(Category)] = Generated.Num();
 
@@ -179,7 +188,7 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                         for (int32_t Index = 0; Index < PossibleMissions->Num() && Selected < 0; ++Index)
                         {
                             FFortPossibleMission& Possible = (*PossibleMissions)[Index];
-                            const float Weight = !Possible.bIsPrototype && Possible.Weight > 0.0f ? static_cast<float>(Possible.Weight) : 0.0f;
+                            const float Weight = !(Possible.bIsPrototype && !bAllowPrototypes) && Possible.Weight > 0.0f ? static_cast<float>(Possible.Weight) : 0.0f;
                             Selected = Weight > 0.0f && Roll < Weight ? Index : -1;
                             Roll -= Weight;
                         }
@@ -192,6 +201,10 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                         {
                             UE_LOG(LogFortWorld, Warning, TEXT("Mission Generator %s group %d selected invalid mission index %d"), *MissionGenerator->GetName(), static_cast<int32_t>(Category), Selected);
                         }
+                    }
+                    for (UFortMissionInfo* Info : Generated)
+                    {
+                        UE_LOG(LogFortWorld, Log, TEXT("Mission Generator %s adds %s mission %s"), *MissionGenerator->GetName(), Category.ToString().c_str(), *Info->GetName());
                     }
                     if (Generated.Num() > 0)
                     {
@@ -250,26 +263,23 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
         }
     }
 
-    TArray<UFortMissionInfo*> SharedMissions;
-    TStructArray<FFortGlobalMission>& SharedMissionList = SharedMissionLists->SharedMissionList;
-    for (int32_t Index = 0; Index < SharedMissionList.Num(); ++Index)
+    auto AllowedGlobalMission = [&](FFortGlobalMission& SharedMission) -> UFortMissionInfo*
     {
-        FFortGlobalMission& SharedMission = SharedMissionList[Index];
         if (!MatchesQuery(PrimaryMissionTags, SharedMission.PrimaryMissionTagQuery))
         {
-            continue;
+            return nullptr;
         }
 
         const float MinDifficultyLevel = SharedMission.MinDifficultyLevel;
         const float MaxDifficultyLevel = SharedMission.MaxDifficultyLevel;
         if ((MinDifficultyLevel >= 0.0f && GameDifficulty < MinDifficultyLevel) || (MaxDifficultyLevel >= 0.0f && GameDifficulty > MaxDifficultyLevel))
         {
-            continue;
+            return nullptr;
         }
 
         if ((SharedMission.bIsPrototype && TheaterType != EFortTheaterType::GetTest()) || (bIsTestMap && !SharedMission.bAllowInTestMaps))
         {
-            continue;
+            return nullptr;
         }
 
         if (TheaterMapData)
@@ -277,7 +287,7 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             const TArray<EFortTheaterType>& AllowedTheaterTypes = SharedMission.AllowedTheaterTypes;
             if ((AllowedTheaterTypes.Num() > 0 && !AllowedTheaterTypes.Contains(TheaterType)) || !MatchesQuery(TheaterMapData->RuntimeInfo.TheaterTags, SharedMission.TheaterTagQuery))
             {
-                continue;
+                return nullptr;
             }
         }
 
@@ -286,13 +296,13 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             const TArray<EFortZoneType>& AllowedZoneTypes = SharedMission.AllowedZoneTypes;
             if ((AllowedZoneTypes.Num() > 0 && !AllowedZoneTypes.Contains(ZoneTheme->ZoneType)) || !MatchesQuery(ZoneTheme->ZoneTags, SharedMission.ZoneTagQuery))
             {
-                continue;
+                return nullptr;
             }
         }
 
         if (!MatchesQuery(GameContextTags, SharedMission.RegionTagQuery))
         {
-            continue;
+            return nullptr;
         }
 
         const TAssetPtr<UFortMissionInfo>& SharedMissionInfo = SharedMission.MissionInfo;
@@ -303,8 +313,41 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             FFortMissionEntry& MissionEntry = MissionRecords[RecordIndex].MissionEntry;
             bAlreadyGenerated = static_cast<UFortMissionInfo*>(MissionEntry.MissionInfo) == MissionInfo;
         }
-        if (MissionInfo && !bAlreadyGenerated)
+        return MissionInfo && !bAlreadyGenerated ? MissionInfo : nullptr;
+    };
+
+    TArray<UFortMissionInfo*> SharedMissions;
+    TStructArray<FFortGlobalMission>& SharedMissionList = SharedMissionLists->SharedMissionList;
+    for (int32_t Index = 0; Index < SharedMissionList.Num(); ++Index)
+    {
+        if (UFortMissionInfo* MissionInfo = AllowedGlobalMission(SharedMissionList[Index]))
         {
+            SharedMissions.Add(MissionInfo);
+        }
+    }
+
+    UFortGameInstance* GameInstance = Cast<UFortGameInstance>(reinterpret_cast<UObject*>(World->OwningGameInstance));
+    TArray<UFortRegisteredPlayerInfo*> RegisteredPlayers;
+    if (GameInstance)
+    {
+        RegisteredPlayers = GameInstance->RegisteredPlayers;
+    }
+    TStructArray<FFortQuestDrivenMission>& QuestDrivenMissionList = SharedMissionLists->QuestDrivenMissionList;
+    for (int32_t Index = 0; Index < QuestDrivenMissionList.Num(); ++Index)
+    {
+        FFortQuestDrivenMission& QuestDrivenMission = QuestDrivenMissionList[Index];
+        UFortQuestItemDefinition* RequiredQuest = QuestDrivenMission.RequiredQuest;
+        bool bQuestActive = !RequiredQuest;
+        for (int32_t PlayerIndex = 0; PlayerIndex < RegisteredPlayers.Num() && !bQuestActive; ++PlayerIndex)
+        {
+            UFortRegisteredPlayerInfo* PlayerInfo = RegisteredPlayers[PlayerIndex];
+            UFortQuestManager* QuestManager = PlayerInfo ? static_cast<UFortQuestManager*>(PlayerInfo->QuestManager) : nullptr;
+            bQuestActive = QuestManager && QuestManager->HasActiveQuest(RequiredQuest);
+        }
+        UFortMissionInfo* MissionInfo = bQuestActive ? AllowedGlobalMission(QuestDrivenMission) : nullptr;
+        if (MissionInfo && !SharedMissions.Contains(MissionInfo))
+        {
+            UE_LOG(LogFortWorld, Log, TEXT("Adding quest-driven mission %s for %s"), *MissionInfo->GetName(), RequiredQuest ? *RequiredQuest->GetName() : TEXT("no quest"));
             SharedMissions.Add(MissionInfo);
         }
     }
@@ -379,6 +422,17 @@ void AFortWorldManager::CreateMissionManager()
     if (!GameState || !bCreatedMissionRecord || GameState->MissionManager)
     {
         return;
+    }
+
+    FFortMissionManagerRecord& Record = MissionManagerRecord;
+    TStructArray<FFortMissionRecord>& MissionRecords = Record.MissionRecords;
+    for (int32_t Index = 0; Index < MissionRecords.Num(); ++Index)
+    {
+        FFortMissionEntry& MissionEntry = MissionRecords[Index].MissionEntry;
+        UFortMissionInfo* MissionInfo = MissionEntry.MissionInfo;
+        const EMissionGenerationCategory Category = MissionEntry.GenerationCategory;
+        const FScriptArray& LookupData = MissionEntry.BlueprintLookupData;
+        UE_LOG(LogFortWorld, Log, TEXT("Mission record %s (%s): %d placed actors and reserved locations"), MissionInfo ? *MissionInfo->GetName() : TEXT("None"), Category.ToString().c_str(), LookupData.Num());
     }
 
     GameState->SpawnMissionManager(MissionManagerRecord);

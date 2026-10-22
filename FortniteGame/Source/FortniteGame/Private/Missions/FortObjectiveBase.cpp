@@ -94,9 +94,9 @@ void AFortObjectiveBase::StopObjective(EFortObjectiveStatus Status, const FText&
     BlueprintOnObjectiveEnd(Status);
 
     AFortMission* Mission = GetMission();
-    UFortBadgeItemDefinition* RewardBadge = ObjectiveRewardBadge;
+    UFortBadgeItemDefinition* RewardBadge = Status == EFortObjectiveStatus::GetSucceeded() ? static_cast<UFortBadgeItemDefinition*>(ObjectiveRewardBadge) : nullptr;
     UFortBadgeItemDefinition* ExtraBadge = Cast<UFortBadgeItemDefinition>(ExtraBadgeToGrant);
-    AFortMissionManager* MissionManager = Mission && (RewardBadge || ExtraBadge) && Status == EFortObjectiveStatus::GetSucceeded() ? Mission->GetMissionManager() : nullptr;
+    AFortMissionManager* MissionManager = Mission && (RewardBadge || ExtraBadge) ? Mission->GetMissionManager() : nullptr;
     if (MissionManager)
     {
         const TArray<AFortPlayerController*> Players = Mission->GetParticipatingMissionControllers();

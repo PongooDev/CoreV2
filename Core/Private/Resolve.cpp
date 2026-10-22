@@ -3551,6 +3551,30 @@ namespace
     }
 }
 
+uint8_t* Finder::ImplementationCall(UFunction* Function)
+{
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    const auto Step = reinterpret_cast<uintptr_t>(Natives::FFrame_Step);
+    const auto StepExplicit = reinterpret_cast<uintptr_t>(Natives::FFrame_StepExplicitProperty);
+    uintptr_t Implementation = 0;
+    bool bAfterStep = false;
+    for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+    {
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        if (Target == Step || Target == StepExplicit)
+        {
+            bAfterStep = true;
+            Implementation = 0;
+        }
+        else if (bAfterStep && !Implementation)
+        {
+            Implementation = Call;
+        }
+    }
+    return reinterpret_cast<uint8_t*>(Implementation);
+}
+
 uint8_t* Finder::FirstCallInImplementation(UFunction* Function, uintptr_t Target)
 {
     const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;

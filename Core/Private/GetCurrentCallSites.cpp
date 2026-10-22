@@ -54,15 +54,24 @@ namespace
         uintptr_t Value;
     };
 
+    struct FVotes
+    {
+        int32_t GoalManager = 0;
+        int32_t Director = 0;
+        int32_t Other = 0;
+    };
+
     struct FContext
     {
         uintptr_t Stub = 0;
         void** GoalManagerVTable = nullptr;
         void** DirectorVTable = nullptr;
         int32_t GoalManagerSize = 0;
+        int32_t DirectorSize = 0;
         int32_t ActorSize = 0;
         int32_t ActorSlots = 0;
-        std::map<uintptr_t, std::pair<int32_t, int32_t>> Footprints;
+        int32_t DirectorSlots = 0;
+        std::map<uintptr_t, FVotes> Footprints;
     };
 
     FOperand RmOperand(const hde64s& Instruction)
@@ -120,6 +129,15 @@ namespace
             || (Bytes[0] == 0xB0 && Bytes[1] == 0x01 && Bytes[2] == 0xC3)
             || (Bytes[0] == 0xC2 && Bytes[1] == 0x00 && Bytes[2] == 0x00)
             || (Bytes[0] == 0x48 && Bytes[1] == 0x33 && Bytes[2] == 0xC0 && Bytes[3] == 0xC3);
+    }
+
+    bool IsGetCurrentOfWorld(uintptr_t Site, int32_t GetWorldIndex)
+    {
+        const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Site - 9);
+        return GetWorldIndex >= 0
+            && Bytes[0] == 0xFF && (Bytes[1] & 0xF8) == 0x90 && (Bytes[1] & 0x07) != 0x04
+            && *reinterpret_cast<const int32_t*>(Bytes + 2) == GetWorldIndex * 8
+            && Bytes[6] == 0x48 && Bytes[7] == 0x8B && Bytes[8] == 0xC8;
     }
 
     uintptr_t VTableAt(void** VTable, int32_t Index)
@@ -293,23 +311,26 @@ namespace
         return Uses;
     }
 
-    std::pair<int32_t, int32_t> Footprint(FContext& Context, uintptr_t Function, int32_t Depth);
+    FVotes Footprint(FContext& Context, uintptr_t Function, int32_t Depth);
 
-    std::pair<int32_t, int32_t> Vote(FContext& Context, const std::vector<FUse>& Uses, int32_t Depth)
+    FVotes Vote(FContext& Context, const std::vector<FUse>& Uses, int32_t Depth)
     {
-        int32_t GoalManager = 0;
-        int32_t Director = 0;
+        FVotes Votes;
         for (const FUse& Use : Uses)
         {
             if (Use.Kind == FUse::Offset)
             {
-                if (Use.Value >= static_cast<uintptr_t>(Context.GoalManagerSize) && Use.Value < 0x2000)
+                if (Use.Value >= static_cast<uintptr_t>(Context.DirectorSize) && Use.Value < 0x2000)
                 {
-                    ++Director;
+                    ++Votes.Other;
+                }
+                else if (Use.Value >= static_cast<uintptr_t>(Context.GoalManagerSize) && Use.Value < 0x2000)
+                {
+                    ++Votes.Director;
                 }
                 else if (Use.Value >= static_cast<uintptr_t>(Context.ActorSize) && Use.Value < static_cast<uintptr_t>(Context.GoalManagerSize))
                 {
-                    ++GoalManager;
+                    ++Votes.GoalManager;
                 }
             }
             else if (Use.Kind == FUse::VirtualCall)
@@ -317,7 +338,15 @@ namespace
                 const int32_t Slot = static_cast<int32_t>(Use.Value);
                 if (Slot >= Context.ActorSlots && Slot < 0x200)
                 {
-                    ++Director;
+                    const uintptr_t DirectorEntry = Slot < Context.DirectorSlots ? VTableAt(Context.DirectorVTable, Slot) : 0;
+                    if (DirectorEntry && !IsTrivial(DirectorEntry))
+                    {
+                        ++Votes.Director;
+                    }
+                    else
+                    {
+                        ++Votes.Other;
+                    }
                     continue;
                 }
                 if (Slot >= 0x200 || Depth >= 3)
@@ -330,43 +359,47 @@ namespace
                 {
                     continue;
                 }
-                const auto GoalManagerFoot = IsTrivial(GoalManagerEntry) ? std::pair{ 0, 0 } : Footprint(Context, GoalManagerEntry, Depth + 1);
-                const auto DirectorFoot = IsTrivial(DirectorEntry) ? std::pair{ 0, 0 } : Footprint(Context, DirectorEntry, Depth + 1);
-                if (DirectorFoot.second && !DirectorFoot.first && !GoalManagerFoot.first)
+                const FVotes GoalManagerFoot = IsTrivial(GoalManagerEntry) ? FVotes{} : Footprint(Context, GoalManagerEntry, Depth + 1);
+                const FVotes DirectorFoot = IsTrivial(DirectorEntry) ? FVotes{} : Footprint(Context, DirectorEntry, Depth + 1);
+                if ((DirectorFoot.Director || DirectorFoot.Other) && !DirectorFoot.GoalManager && !GoalManagerFoot.GoalManager)
                 {
-                    ++Director;
+                    ++(DirectorFoot.Other ? Votes.Other : Votes.Director);
                 }
-                else if (GoalManagerFoot.first && !GoalManagerFoot.second && !DirectorFoot.second)
+                else if (GoalManagerFoot.GoalManager && !GoalManagerFoot.Director && !GoalManagerFoot.Other && !DirectorFoot.Director && !DirectorFoot.Other)
                 {
-                    ++GoalManager;
+                    ++Votes.GoalManager;
                 }
             }
             else if (Use.Value != Context.Stub && Depth < 3)
             {
-                const auto [CalleeGoalManager, CalleeDirector] = Footprint(Context, Use.Value, Depth + 1);
-                if (CalleeGoalManager && !CalleeDirector)
+                const FVotes Callee = Footprint(Context, Use.Value, Depth + 1);
+                if (Callee.GoalManager && !Callee.Director && !Callee.Other)
                 {
-                    ++GoalManager;
+                    ++Votes.GoalManager;
                 }
-                else if (CalleeDirector && !CalleeGoalManager)
+                else if (Callee.Director && !Callee.GoalManager && !Callee.Other)
                 {
-                    ++Director;
+                    ++Votes.Director;
+                }
+                else if (Callee.Other && !Callee.GoalManager)
+                {
+                    ++Votes.Other;
                 }
             }
         }
-        return { GoalManager, Director };
+        return Votes;
     }
 
-    std::pair<int32_t, int32_t> Footprint(FContext& Context, uintptr_t Function, int32_t Depth)
+    FVotes Footprint(FContext& Context, uintptr_t Function, int32_t Depth)
     {
         if (const auto Found = Context.Footprints.find(Function); Found != Context.Footprints.end())
         {
             return Found->second;
         }
-        Context.Footprints[Function] = { 0, 0 };
+        Context.Footprints[Function] = {};
         if (Function < Finder::TextBegin() || Function >= Finder::TextEnd())
         {
-            return { 0, 0 };
+            return {};
         }
         const uintptr_t End = Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : Function + 0x400;
         const auto Result = Vote(Context, Walk(Function, Function, End, Rcx), Depth);
@@ -375,9 +408,10 @@ namespace
     }
 }
 
-std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t ActorSize, uintptr_t& OutStub)
+std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t DirectorSize, int32_t ActorSize, int32_t GetWorldIndex, uintptr_t& OutStub, std::vector<uint8_t*>& OutDirectorCalls)
 {
     OutStub = 0;
+    OutDirectorCalls.clear();
     std::vector<uint8_t*> Result;
     const auto AnchorReferences = Finder::StringRefs(L"%s failed due to NULL WorldContextObject.  Without WorldContextObject, cannot find Goal Manager!  Assignment Identifier: %s.");
     const uintptr_t Anchor = AnchorReferences.empty() ? 0 : Finder::FunctionStart(AnchorReferences.front());
@@ -392,7 +426,7 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
             Context.Stub = Target;
         }
     }
-    if (!Context.Stub || !GoalManagerVTable || !DirectorVTable || GoalManagerSize <= ActorSize)
+    if (!Context.Stub || !GoalManagerVTable || !DirectorVTable || GoalManagerSize <= ActorSize || DirectorSize <= GoalManagerSize)
     {
         Log::Error(L"Finder: AFortAIGoalManager::GetCurrent call sites: inputs not found");
         return Result;
@@ -402,7 +436,12 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
     Context.GoalManagerVTable = GoalManagerVTable;
     Context.DirectorVTable = DirectorVTable;
     Context.GoalManagerSize = GoalManagerSize;
+    Context.DirectorSize = DirectorSize;
     Context.ActorSize = ActorSize;
+    while (Context.DirectorSlots < 0x200 && VTableAt(DirectorVTable, Context.DirectorSlots))
+    {
+        ++Context.DirectorSlots;
+    }
     for (int32_t Slot = 0; Slot < 0x200; ++Slot)
     {
         const uintptr_t Entry = VTableAt(GoalManagerVTable, Slot);
@@ -425,18 +464,23 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
             continue;
         }
 
-        auto [GoalManager, Director] = Vote(Context, Walk(Site + 5, Begin, End, 0), 0);
+        FVotes Votes = Vote(Context, Walk(Site + 5, Begin, End, 0), 0);
         if (Begin == Anchor)
         {
-            ++GoalManager;
+            ++Votes.GoalManager;
         }
         const uintptr_t ImageBase = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
-        if (GoalManager && !Director)
+        if (Votes.GoalManager && !Votes.Director && !Votes.Other)
         {
             Result.push_back(reinterpret_cast<uint8_t*>(Site));
             Log::Info(L"Finder: AFortAIGoalManager::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);
         }
+        else if (Votes.Director && !Votes.GoalManager && !Votes.Other && IsGetCurrentOfWorld(Site, GetWorldIndex))
+        {
+            OutDirectorCalls.push_back(reinterpret_cast<uint8_t*>(Site));
+            Log::Info(L"Finder: AFortAIDirector::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);
+        }
     }
-    Log::Info(L"Finder: {} AFortAIGoalManager::GetCurrent call sites classified", Result.size());
+    Log::Info(L"Finder: {} AFortAIGoalManager::GetCurrent and {} AFortAIDirector::GetCurrent call sites classified", Result.size(), OutDirectorCalls.size());
     return Result;
 }

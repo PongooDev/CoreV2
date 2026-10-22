@@ -69,9 +69,14 @@ void AFortAIGoalManager::HookCallSites()
     void** DirectorVTable = DirectorDefault ? *reinterpret_cast<void***>(DirectorDefault) : nullptr;
 
     uintptr_t Stub = 0;
-    for (uint8_t* Call : Finder::GoalManagerGetCurrentCalls(GoalManagerVTable, DirectorVTable, StaticClass()->GetPropertiesSize(), AActor::StaticClass()->GetPropertiesSize(), Stub))
+    std::vector<uint8_t*> DirectorCalls;
+    for (uint8_t* Call : Finder::GoalManagerGetCurrentCalls(GoalManagerVTable, DirectorVTable, StaticClass()->GetPropertiesSize(), AFortAIDirector::StaticClass()->GetPropertiesSize(), AActor::StaticClass()->GetPropertiesSize(), Natives::UObject_GetWorldIndex, Stub, DirectorCalls))
     {
         Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrent));
+    }
+    for (uint8_t* Call : DirectorCalls)
+    {
+        Hooks::RedirectCall(L"AFortAIDirector::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIDirector::GetCurrent));
     }
 
     for (const wchar_t* FunctionPath : {

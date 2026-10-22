@@ -44,6 +44,7 @@ struct FFortMissionManagerRecord
     DefineUnrealStruct(FFortMissionManagerRecord, FortniteGame)
     DefineUProperty(UClass*, MissionManagerClass)
     DefineUStructArrayProperty(FFortMissionRecord, MissionRecords)
+    DefineUProperty(int32_t, NumRequiredMissionsOfType)
 
     static void Construct(FFortMissionManagerRecord* This, UClass* InMissionManagerClass);
 };

@@ -19,6 +19,23 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortWorld, Log, All);
 
+namespace
+{
+    float RandomStreamFraction(void* RandomStream)
+    {
+        if (!RandomStream)
+        {
+            return Natives::FMath_SRand();
+        }
+        int32_t& Seed = reinterpret_cast<int32_t*>(RandomStream)[1];
+        Seed = Seed * 196314165 + 907633515;
+        const uint32_t Bits = 0x3F800000u | (static_cast<uint32_t>(Seed) >> 9);
+        float Result;
+        std::memcpy(&Result, &Bits, sizeof(Result));
+        return Result - 1.0f;
+    }
+}
+
 AActor* AFortWorldManager::SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform)
 {
 #if WITH_SERVER_CODE
@@ -104,9 +121,12 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                     { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->TertiaryMissionList), EMissionGenerationCategory::Tertiary },
                     { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SurvivorMissionList), EMissionGenerationCategory::Survivor },
                 };
+                void* RandomStream = Natives::AFortWorldManager_MissionGenerationRandomStream > 0 ? reinterpret_cast<uint8_t*>(this) + Natives::AFortWorldManager_MissionGenerationRandomStream : nullptr;
+                FFortMissionManagerRecord& ManagerRecord = MissionManagerRecord;
                 for (const auto& [PossibleMissions, Category] : Lists)
                 {
                     TArray<UFortMissionInfo*> Generated;
+                    float TotalWeight = 0.0f;
                     for (int32_t Index = 0; Index < PossibleMissions->Num(); ++Index)
                     {
                         FFortPossibleMission& Possible = (*PossibleMissions)[Index];
@@ -115,6 +135,37 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                         for (int32_t Count = 0; Info && Count < Possible.MinAlwaysGenerated; ++Count)
                         {
                             Generated.Add(Info);
+                        }
+                        TotalWeight += !Possible.bIsPrototype && Possible.Weight > 0.0f ? static_cast<float>(Possible.Weight) : 0.0f;
+                    }
+                    (&static_cast<int32_t&>(ManagerRecord.NumRequiredMissionsOfType))[static_cast<int32_t>(Category)] = Generated.Num();
+
+                    const float Chance = (&static_cast<float&>(MissionGenerator->MissionGenerationChance))[static_cast<int32_t>(Category)];
+                    const int32_t WholePicks = static_cast<int32_t>(Chance);
+                    const int32_t Picks = Chance > 0.0f ? WholePicks + (RandomStreamFraction(RandomStream) < Chance - static_cast<float>(WholePicks) ? 1 : 0) : 0;
+                    if (Picks > 0 && TotalWeight <= 0.0f)
+                    {
+                        UE_LOG(LogFortWorld, Warning, TEXT("Mission Generator %s group %d has no valid weights "), *MissionGenerator->GetName(), static_cast<int32_t>(Category));
+                    }
+                    for (int32_t Pick = 0; Pick < Picks && TotalWeight > 0.0f; ++Pick)
+                    {
+                        float Roll = RandomStreamFraction(RandomStream) * TotalWeight;
+                        int32_t Selected = -1;
+                        for (int32_t Index = 0; Index < PossibleMissions->Num() && Selected < 0; ++Index)
+                        {
+                            FFortPossibleMission& Possible = (*PossibleMissions)[Index];
+                            const float Weight = !Possible.bIsPrototype && Possible.Weight > 0.0f ? static_cast<float>(Possible.Weight) : 0.0f;
+                            Selected = Weight > 0.0f && Roll < Weight ? Index : -1;
+                            Roll -= Weight;
+                        }
+                        const TAssetPtr<UFortMissionInfo>& SelectedInfo = Selected >= 0 ? static_cast<const TAssetPtr<UFortMissionInfo>&>((*PossibleMissions)[Selected].MissionInfo) : TAssetPtr<UFortMissionInfo>();
+                        if (UFortMissionInfo* Info = Selected >= 0 ? SelectedInfo.LoadSynchronous() : nullptr)
+                        {
+                            Generated.Add(Info);
+                        }
+                        else
+                        {
+                            UE_LOG(LogFortWorld, Warning, TEXT("Mission Generator %s group %d selected invalid mission index %d"), *MissionGenerator->GetName(), static_cast<int32_t>(Category), Selected);
                         }
                     }
                     if (Generated.Num() > 0)

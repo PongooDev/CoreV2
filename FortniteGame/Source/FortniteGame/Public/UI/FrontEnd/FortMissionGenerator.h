@@ -22,6 +22,7 @@ class UFortMissionGenerator : public UObject
 
 public:
     DefineUProperty(TAssetPtr<UFortMissionInfo>, PrimaryMissionInfo)
+    DefineUProperty(float, MissionGenerationChance)
     DefineUStructArrayProperty(FFortPossibleMission, SecondaryMissionList)
     DefineUStructArrayProperty(FFortPossibleMission, TertiaryMissionList)
     DefineUStructArrayProperty(FFortPossibleMission, SurvivorMissionList)

@@ -72,6 +72,10 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
         {
             const int32_t Added = std::min(Remaining, MaxStackSize - ExistingEntry.Count);
             Inventory->UpdateWorldItemCount(Existing, ExistingEntry.Count + Added);
+            if (PlayerController && bNotifyPlayer)
+            {
+                ExistingEntry.AddNewItemCount(Added, true);
+            }
             Remaining -= Added;
         }
     }
@@ -92,6 +96,10 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
         Inventory->AddWorldItem(WorldItem);
         if (PlayerController)
         {
+            if (bNotifyPlayer)
+            {
+                static_cast<FFortItemEntry&>(WorldItem->ItemEntry).SetNewItemCount(Count, true);
+            }
             PlayerController->TryAddToQuickBar(WorldItem);
         }
         Remaining -= Count;

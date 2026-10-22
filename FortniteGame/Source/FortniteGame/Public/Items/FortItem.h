@@ -3,6 +3,7 @@
 #include "Engine/NetSerialization.h"
 #include "Containers/Array.h"
 #include "Misc/Guid.h"
+#include "StructArray.h"
 #include "UObject/Object.h"
 #include "UObject/WeakObjectPtr.h"
 
@@ -10,12 +11,30 @@ class AFortInventory;
 class AFortPlayerController;
 class UFortItemDefinition;
 
+struct FFortItemEntryStateValue
+{
+    DefineUnrealStruct(FFortItemEntryStateValue, FortniteGame)
+
+public:
+    DefineUProperty(int32_t, IntValue)
+    DefineUProperty(FName, NameValue)
+    DefineUProperty(uint8_t, StateType)
+};
+
 struct FFortItemEntry : public FFastArraySerializerItem
 {
     DefineUnrealStruct(FFortItemEntry, FortniteGame)
 
 public:
     static void Construct(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel);
+    static uint8_t GetStateType(const wchar_t* StateName);
+
+    int32_t GetIntValue(uint8_t StateType) const;
+    void SetStateValue(uint8_t StateType, int32_t IntValue);
+    bool RemoveStateValue(uint8_t StateType);
+    bool ShouldShowItemToast() const;
+    void SetNewItemCount(int32_t NewItemCount, bool bShouldShowItemToast);
+    void AddNewItemCount(int32_t Count, bool bShouldShowItemToast);
 
     DefineUProperty(int32_t, Count)
     DefineUProperty(UFortItemDefinition*, ItemDefinition)
@@ -25,6 +44,7 @@ public:
     DefineUProperty(TArray<UObject*>, AlterationDefinitions)
     DefineUProperty(FGuid, ItemGuid)
     DefineUProperty(FWeakObjectPtr, ParentInventory)
+    DefineUStructArrayProperty(FFortItemEntryStateValue, StateValues)
 };
 
 class UFortItem : public UObject

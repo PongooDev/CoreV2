@@ -204,6 +204,8 @@ namespace Natives
     inline void (*FFrame_Step)(FFrame* This, UObject* Context, void* const Result) = nullptr;
     inline void (*FFastArraySerializer_MarkArrayDirty)(FFastArraySerializer* This) = nullptr;
     inline FFortItemEntry* (*FFortItemEntry_FFortItemEntry)(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel, const void* InAlterations) = nullptr;
+    inline void (*FFortItemEntry_SetStateValue)(FFortItemEntry* This, uint8_t StateType, int32_t IntValue) = nullptr;
+    inline void (*FFortItemEntry_MarkDirty)(FFortItemEntry* This) = nullptr;
     inline AFortPickup* (*AFortPickup_CreatePickup)(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation, AFortPlayerController* OptionalOwner, UClass* OverrideClass) = nullptr;
     inline void (*FFrame_StepExplicitProperty)(FFrame* This, void* const Result, UProperty* Property) = nullptr;
     inline bool (*UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled)() = nullptr;

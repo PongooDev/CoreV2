@@ -636,6 +636,27 @@ void AFortPlayerController::ServerSpotActor_Implementation(AActor* NewlySpottedA
 #endif
 }
 
+void AFortPlayerController::ServerRemoveInventoryStateValue_Implementation(const FGuid& ItemGuid, uint8_t StateType)
+{
+    ServerRemoveInventoryStateValue_ImplementationOG(this, ItemGuid, StateType);
+
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+
+    for (AFortInventory* Inventory : { static_cast<AFortInventory*>(WorldInventory), static_cast<AFortInventory*>(OutpostInventory) })
+    {
+        if (UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr)
+        {
+            static_cast<FFortItemEntry&>(WorldItem->ItemEntry).RemoveStateValue(StateType);
+            return;
+        }
+    }
+#endif
+}
+
 bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
 {
     void* InventoryOwner = reinterpret_cast<uint8_t*>(this) + Natives::AFortPlayerController_InventoryOwnerInterface;
@@ -736,6 +757,26 @@ void AFortPlayerController::HookVTables()
                 Hooks::SwapVTable(L"AFortPlayerController::RemoveInventoryItem", InterfaceVTable, RemoveIndex, reinterpret_cast<void*>(&RemoveInventoryItemHK));
             }
         }
+    }
+
+    if (const int32_t StateValueIndex = Finder::ImplementationIndex(StaticFunction_ServerRemoveInventoryStateValue()); PlayerControllerVTable && StateValueIndex >= 0)
+    {
+        void* const PlayerControllerRemoveStateValue = PlayerControllerVTable[StateValueIndex];
+        ServerRemoveInventoryStateValue_ImplementationOG = reinterpret_cast<decltype(ServerRemoveInventoryStateValue_ImplementationOG)>(PlayerControllerRemoveStateValue);
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[StateValueIndex] == PlayerControllerRemoveStateValue)
+            {
+                Hooks::SwapVTable(L"AFortPlayerController::ServerRemoveInventoryStateValue_Implementation", VTable, StateValueIndex, reinterpret_cast<void*>(&ServerRemoveInventoryStateValue_ImplementationHK));
+            }
+        }
+    }
+    else
+    {
+        Log::Error(L"Finder: AFortPlayerController::ServerRemoveInventoryStateValue_Implementation slot not found");
     }
 
     for (const auto& [Function, Implementation, Name] : {
@@ -907,6 +948,11 @@ void AFortPlayerController::ServerExecuteInventoryItem_ImplementationHK(AFortPla
 void AFortPlayerController::ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor)
 {
     This->ServerSpotActor_Implementation(NewlySpottedActor);
+}
+
+void AFortPlayerController::ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, uint8_t StateType)
+{
+    This->ServerRemoveInventoryStateValue_Implementation(ItemGuid, StateType);
 }
 
 void AFortPlayerController::ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count)

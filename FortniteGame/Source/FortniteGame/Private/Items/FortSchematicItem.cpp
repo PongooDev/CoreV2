@@ -113,6 +113,7 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
 
         WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
         Inventory->AddWorldItem(WorldItem);
+        static_cast<FFortItemEntry&>(WorldItem->ItemEntry).SetNewItemCount(1, true);
         PlayerController->TryAddToQuickBar(WorldItem);
     }
     return QuantityProduced;

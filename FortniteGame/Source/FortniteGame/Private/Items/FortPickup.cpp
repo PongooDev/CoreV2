@@ -27,6 +27,7 @@ namespace
         }
 
         const int32_t MaxStackSize = std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
+        const bool bShouldShowItemToast = ItemEntry.ShouldShowItemToast();
         int32_t Remaining = ItemEntry.Count;
 
         FFortItemList& ItemList = Inventory->Inventory;
@@ -39,6 +40,7 @@ namespace
             {
                 const int32_t Added = std::min(Remaining, MaxStackSize - ExistingEntry.Count);
                 Inventory->UpdateWorldItemCount(Existing, ExistingEntry.Count + Added);
+                ExistingEntry.AddNewItemCount(Added, bShouldShowItemToast);
                 Remaining -= Added;
             }
         }
@@ -60,6 +62,7 @@ namespace
 
             WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
             Inventory->AddWorldItem(WorldItem);
+            NewEntry.SetNewItemCount(Count, bShouldShowItemToast);
             PlayerController->TryAddToQuickBar(WorldItem);
             Remaining -= Count;
         }

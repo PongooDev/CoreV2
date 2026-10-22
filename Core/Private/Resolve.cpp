@@ -4671,6 +4671,47 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
     return true;
 }
 
+bool Finder::ResolveItemEntryStateLive()
+{
+    if (Natives::FFortItemEntry_SetStateValue && Natives::FFortItemEntry_MarkDirty)
+    {
+        return true;
+    }
+
+    UFunction* NotifyFabrication = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerControllerOutpost:ServerNotifyPendingFabricationCompleted");
+    const uintptr_t Implementation = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortPlayerControllerOutpost"), ImplementationIndex(NotifyFabrication));
+    const uintptr_t ImplementationEnd = Implementation ? Finder::FunctionEnd(Implementation) : 0;
+    std::vector<uintptr_t> Targets;
+    for (const auto& [Call, Target] : ImplementationEnd > Implementation ? Finder::DirectCalls(Implementation, ImplementationEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        Targets.push_back(Target);
+    }
+    const uintptr_t SetStateValue = Targets.size() == 4 && Targets[0] == Targets[2] && Targets[1] == Targets[3] && Targets[0] != Targets[1] ? Targets[1] : 0;
+
+    const uintptr_t SetStateValueEnd = SetStateValue ? Finder::FunctionEnd(SetStateValue) : 0;
+    uintptr_t MarkDirty = 0;
+    bool bAmbiguous = false;
+    for (uintptr_t Site = SetStateValue; Site && Site + 5 <= SetStateValueEnd; ++Site)
+    {
+        const uintptr_t Target = Byte(Site) == 0xE9 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+        if (IsInText(Target) && Finder::FunctionStart(Target) == Target)
+        {
+            bAmbiguous |= MarkDirty && MarkDirty != Target;
+            MarkDirty = Target;
+        }
+    }
+    if (!SetStateValue || !MarkDirty || bAmbiguous)
+    {
+        Log::Error(L"Finder: FFortItemEntry::SetStateValue not found (calls {}, mark dirty {})", Targets.size(), MarkDirty != 0);
+        return false;
+    }
+
+    Natives::FFortItemEntry_SetStateValue = reinterpret_cast<decltype(Natives::FFortItemEntry_SetStateValue)>(SetStateValue);
+    Natives::FFortItemEntry_MarkDirty = reinterpret_cast<decltype(Natives::FFortItemEntry_MarkDirty)>(MarkDirty);
+    Log::Info(L"Finder: FFortItemEntry::SetStateValue and MarkDirty found");
+    return true;
+}
+
 bool Finder::ResolveLeaveOutpostLive()
 {
     if (Natives::AFortGameMode_SendStayWithParty && Natives::AGameMode_ReturnToMainMenuHostIndex >= 0)

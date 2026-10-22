@@ -3,7 +3,9 @@
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
+#include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
+#include "Items/FortSchematicItemDefinition.h"
 #include "Log.h"
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
@@ -11,6 +13,15 @@
 #include "ReflectionParams.h"
 #include "StructArray.h"
 #include "UObject/Class.h"
+#include "UObject/UObjectGlobals.h"
+
+#include <vector>
+
+namespace
+{
+    UFunction* ClientGivePlayerLocalAccountItemFunction = nullptr;
+    void (*ClientGivePlayerLocalAccountItem_Implementation)(AFortPlayerController* This, UFortItemDefinition* ItemDefinition, int32_t Count) = nullptr;
+}
 
 void UFortMissionLibrary::ExecuteMissionEvent(UObject* WorldContextObject, FName EventType, UObject* Params)
 {
@@ -125,6 +136,82 @@ DEFINE_FUNCTION(UFortMissionLibrary::execGiveMissionRewardsToPlayerAsPickups)
     P_NATIVE_END;
 }
 
+AFortPickup* UFortMissionLibrary::SpawnMissionItemPickupInWorld(UObject* WorldContextObject, const FGuid& MissionGuid, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount)
+{
+#if WITH_SERVER_CODE
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    if (!World || !ItemDefinition || NumberToSpawn <= 0)
+    {
+        return nullptr;
+    }
+
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToSpawn, 0);
+
+    const FRotator SpawnRotation = Direction.Rotation();
+    AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation);
+    EntryStruct->DestroyStruct(ItemEntry);
+
+    if (Pickup)
+    {
+        Pickup->SetOptionalMissionGuid(MissionGuid);
+        Pickup->TossPickup(Position, nullptr, OverrideMaxStackCount);
+    }
+    return Pickup;
+#else
+    return nullptr;
+#endif
+}
+
+DEFINE_FUNCTION(UFortMissionLibrary::execSpawnMissionItemPickupInWorld)
+{
+    P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
+    P_GET_STRUCT(FGuid, Z_Param_MissionGuid);
+    P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
+    P_GET_PROPERTY(UIntProperty, Z_Param_NumberToSpawn);
+    P_GET_STRUCT(FVector, Z_Param_Position);
+    P_GET_STRUCT(FVector, Z_Param_Direction);
+    P_GET_PROPERTY(UIntProperty, Z_Param_OverrideMaxStackCount);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    *static_cast<AFortPickup**>(RESULT_PARAM) = SpawnMissionItemPickupInWorld(Z_Param_WorldContextObject, Z_Param_MissionGuid, Z_Param_ItemDefinition, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction, Z_Param_OverrideMaxStackCount);
+    P_NATIVE_END;
+}
+
+bool UFortMissionLibrary::GiveMissionSchematicItemDirectlyToPlayer(UObject* WorldContextObject, AFortPlayerController* TargetPlayer, const FGuid& MissionGuid, UFortSchematicItemDefinition* SchematicDefinition)
+{
+#if WITH_SERVER_CODE
+    if (!TargetPlayer || !SchematicDefinition || TargetPlayer->Role != ROLE_Authority || !ClientGivePlayerLocalAccountItem_Implementation)
+    {
+        return false;
+    }
+
+    ClientGivePlayerLocalAccountItem_Implementation(TargetPlayer, SchematicDefinition, 1);
+
+    Reflection::FParams Params(ClientGivePlayerLocalAccountItemFunction, true);
+    Params.Set(L"ItemDefinition", static_cast<UFortItemDefinition*>(SchematicDefinition));
+    Params.Set(L"Count", 1);
+    Params.Call(TargetPlayer);
+    return true;
+#else
+    return false;
+#endif
+}
+
+DEFINE_FUNCTION(UFortMissionLibrary::execGiveMissionSchematicItemDirectlyToPlayer)
+{
+    P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
+    P_GET_OBJECT(AFortPlayerController, Z_Param_TargetPlayer);
+    P_GET_STRUCT(FGuid, Z_Param_MissionGuid);
+    P_GET_OBJECT(UFortSchematicItemDefinition, Z_Param_SchematicDefinition);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    *static_cast<bool*>(RESULT_PARAM) = GiveMissionSchematicItemDirectlyToPlayer(Z_Param_WorldContextObject, Z_Param_TargetPlayer, Z_Param_MissionGuid, Z_Param_SchematicDefinition);
+    P_NATIVE_END;
+}
+
 void UFortMissionLibrary::HookNatives()
 {
     if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
@@ -141,5 +228,26 @@ void UFortMissionLibrary::HookNatives()
     {
         Function->SetNativeFunc(&execGiveMissionRewardsToPlayerAsPickups);
         Log::Info(L"Hook UFortMissionLibrary::GiveMissionRewardsToPlayerAsPickups: native");
+    }
+    if (UFunction* Function = StaticFunction_SpawnMissionItemPickupInWorld())
+    {
+        Function->SetNativeFunc(&execSpawnMissionItemPickupInWorld);
+        Log::Info(L"Hook UFortMissionLibrary::SpawnMissionItemPickupInWorld: native");
+    }
+
+    ClientGivePlayerLocalAccountItemFunction = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerController:ClientGivePlayerLocalAccountItem");
+    const int32_t LocalAccountItemIndex = Finder::ImplementationIndex(ClientGivePlayerLocalAccountItemFunction);
+    UObject* PlayerControllerDefault = LocalAccountItemIndex >= 0 ? AFortPlayerController::StaticClass()->GetDefaultObject(false) : nullptr;
+    if (!PlayerControllerDefault)
+    {
+        Log::Error(L"Finder: AFortPlayerController::ClientGivePlayerLocalAccountItem_Implementation slot not found");
+        return;
+    }
+    ClientGivePlayerLocalAccountItem_Implementation = reinterpret_cast<decltype(ClientGivePlayerLocalAccountItem_Implementation)>((*reinterpret_cast<void***>(PlayerControllerDefault))[LocalAccountItemIndex]);
+
+    if (UFunction* Function = StaticFunction_GiveMissionSchematicItemDirectlyToPlayer())
+    {
+        Function->SetNativeFunc(&execGiveMissionSchematicItemDirectlyToPlayer);
+        Log::Info(L"Hook UFortMissionLibrary::GiveMissionSchematicItemDirectlyToPlayer: native");
     }
 }

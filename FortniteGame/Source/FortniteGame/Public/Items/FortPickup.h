@@ -4,6 +4,7 @@
 #include "Items/FortItem.h"
 #include "Math/Rotator.h"
 #include "Math/Vector.h"
+#include "Misc/Guid.h"
 #include "StructArray.h"
 
 class AFortPawn;
@@ -19,11 +20,13 @@ class AFortPickup : public AActor
 public:
     DefineUStructProperty(FFortItemEntry, PrimaryPickupItemEntry)
     DefineUStructArrayProperty(FFortItemEntry, MultiItemPickupEntries)
+    DefineUProperty(FGuid, OptionalMissionGuid)
 
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
     void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount);
     void SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime = -1.0f, const FVector& InStartDirection = FVector(0.0f, 0.0f, 1.0f), bool bPlayPickupSound = true);
     void GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner);
+    void SetOptionalMissionGuid(const FGuid& InMissionGuid);
 
     static void HookVTables();
 

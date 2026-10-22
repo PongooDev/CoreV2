@@ -7,7 +7,10 @@
 #include "UObject/Object.h"
 #include "UObject/Stack.h"
 
+class AFortPickup;
 class AFortPlayerController;
+class UFortSchematicItemDefinition;
+class UFortWorldItemDefinition;
 
 class UFortMissionLibrary : public UObject
 {
@@ -15,6 +18,8 @@ class UFortMissionLibrary : public UObject
     DefineUFunction(ExecuteMissionEvent)
     DefineUFunction(SpawnAndCollectPlayerPickups)
     DefineUFunction(GiveMissionRewardsToPlayerAsPickups)
+    DefineUFunction(SpawnMissionItemPickupInWorld)
+    DefineUFunction(GiveMissionSchematicItemDirectlyToPlayer)
 
 public:
     static void ExecuteMissionEvent(UObject* WorldContextObject, FName EventType, UObject* Params);
@@ -22,9 +27,13 @@ public:
     static void SpawnAndCollectPlayerPickups(UObject* WorldContextObject, AFortPlayerController* PlayerController, const FVector& StartPosition, FName LootTierGroup, int32_t LootTier);
 
     static void GiveMissionRewardsToPlayerAsPickups(UObject* WorldContextObject, const FGuid& MissionGUID, AFortPlayerController* PlayerController, const FVector& StartPosition, float Radius, FName LootTierGroup, int32_t LootTier);
+    static AFortPickup* SpawnMissionItemPickupInWorld(UObject* WorldContextObject, const FGuid& MissionGuid, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount);
+    static bool GiveMissionSchematicItemDirectlyToPlayer(UObject* WorldContextObject, AFortPlayerController* TargetPlayer, const FGuid& MissionGuid, UFortSchematicItemDefinition* SchematicDefinition);
 
     DECLARE_FUNCTION(execSpawnAndCollectPlayerPickups);
     DECLARE_FUNCTION(execGiveMissionRewardsToPlayerAsPickups);
+    DECLARE_FUNCTION(execSpawnMissionItemPickupInWorld);
+    DECLARE_FUNCTION(execGiveMissionSchematicItemDirectlyToPlayer);
 
     static void HookNatives();
 };

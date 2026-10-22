@@ -93,6 +93,14 @@ void AFortPickup::SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime, cons
     Natives::AFortPickup_SetPickupTarget(this, PickupTarget, InFlyTime, InStartDirection, bPlayPickupSound);
 }
 
+void AFortPickup::SetOptionalMissionGuid(const FGuid& InMissionGuid)
+{
+    if (Role == ROLE_Authority)
+    {
+        OptionalMissionGuid = InMissionGuid;
+    }
+}
+
 void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
 {
 #if WITH_SERVER_CODE

@@ -46,6 +46,7 @@ public:
     void TryAddToQuickBar(UFortWorldItem* Item);
     void TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused);
     void ApplyHeroAbilityKitItems(UFortHero* Hero);
+    void AddHeroAbilityKitGadgetsToQuickBars();
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);

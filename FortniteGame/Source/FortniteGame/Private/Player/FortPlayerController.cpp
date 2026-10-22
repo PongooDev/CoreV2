@@ -36,6 +36,7 @@ namespace
     {
         TWeakObjectPtr<AFortPlayerController> PlayerController;
         std::vector<TWeakObjectPtr<UFortItemDefinition>> GrantedDefinitions;
+        std::vector<FGuid> PendingQuickBarItems;
     };
 
     std::unordered_map<const AFortPlayerController*, FHeroAbilityKitItems> HeroAbilityKitItems;
@@ -115,6 +116,8 @@ void AFortPlayerController::Possess(APawn* InPawn)
     AFortQuickBars* Bars = QuickBars;
     if (Role == ROLE_Authority && Bars && MyFortPawn)
     {
+        AddHeroAbilityKitGadgetsToQuickBars();
+
         FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
         Bars->ServerActivateSlotInternal(EFortQuickBars::Primary, PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
     }
@@ -327,9 +330,14 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
     const int32_t Level = std::max(Hero->GetLevel(), 1);
     for (UFortWorldItemDefinition* Gadget : Gadgets)
     {
-        if (GetItemQuantity(Gadget) <= 0)
+        if (GetItemQuantity(Gadget) > 0)
         {
-            AddHeroAbilityKitItem(this, Inventory, Gadget, 1, Level);
+            continue;
+        }
+        for (UFortWorldItem* GadgetItem : AddHeroAbilityKitItem(this, Inventory, Gadget, 1, Level))
+        {
+            FFortItemEntry& GadgetEntry = GadgetItem->ItemEntry;
+            Granted.PendingQuickBarItems.push_back(GadgetEntry.ItemGuid);
         }
     }
 
@@ -361,6 +369,29 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
     for (UFortItemDefinition* Definition : Definitions)
     {
         Granted.GrantedDefinitions.emplace_back(Definition);
+    }
+
+    if (QuickBars && GetPawn())
+    {
+        AddHeroAbilityKitGadgetsToQuickBars();
+    }
+#endif
+}
+
+void AFortPlayerController::AddHeroAbilityKitGadgetsToQuickBars()
+{
+#if WITH_SERVER_CODE
+    AFortQuickBars* Bars = QuickBars;
+    AFortInventory* Inventory = WorldInventory;
+    FHeroAbilityKitItems& Granted = GetHeroAbilityKitItems(this);
+    const std::vector<FGuid> Pending = std::move(Granted.PendingQuickBarItems);
+    Granted.PendingQuickBarItems.clear();
+    for (const FGuid& ItemGuid : Pending)
+    {
+        if (Bars && Inventory && Inventory->FindWorldItem(ItemGuid) && !Bars->ContainsItem(ItemGuid))
+        {
+            Bars->ServerAddItemInternal(ItemGuid, EFortQuickBars::Primary, -1);
+        }
     }
 #endif
 }

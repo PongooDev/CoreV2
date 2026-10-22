@@ -56,6 +56,7 @@ public:
     FQuickBar& GetQuickBar(EFortQuickBars InQuickBar) { return InQuickBar == EFortQuickBars::GetPrimary() ? PrimaryQuickBar : SecondaryQuickBar; }
     EFortQuickBars GetCurrentQuickBar();
     void SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride);
+    int32_t FocusSlot(EFortQuickBars InQuickBar, int32_t Slot, bool bUpdatePreviousFocusedSlot);
 
     void EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex);
     void ServerActivateSlotInternal(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);

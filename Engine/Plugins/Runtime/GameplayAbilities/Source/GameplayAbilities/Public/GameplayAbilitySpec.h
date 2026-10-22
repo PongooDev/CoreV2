@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "StructArray.h"
 #include "Misc/CoreMiscDefines.h"
 #include "Reflection.h"
@@ -7,6 +8,7 @@
 #include <cstdint>
 
 class UGameplayAbility;
+class UObject;
 
 struct FGameplayAbilitySpecHandle
 {
@@ -23,7 +25,11 @@ struct FGameplayAbilitySpec
     DefineUnrealStruct(FGameplayAbilitySpec, GameplayAbilities)
     DefineUProperty(FGameplayAbilitySpecHandle, Handle)
     DefineUProperty(UGameplayAbility*, Ability)
+    DefineUProperty(UObject*, SourceObject)
+    DefineUProperty(uint8_t, ActiveCount)
     DefineBitfieldUProperty(InputPressed)
+    DefineUProperty(TArray<UGameplayAbility*>, ReplicatedInstances)
+    DefineUProperty(TArray<UGameplayAbility*>, NonReplicatedInstances)
 };
 
 struct FGameplayAbilitySpecContainer

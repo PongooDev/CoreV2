@@ -3689,13 +3689,17 @@ bool Finder::ResolveQuickBarFocusLive()
         Targets.push_back(Target);
     }
 
-    if (!Swap)
+    const uintptr_t SwapEnd = Swap ? Finder::FunctionEnd(Swap) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> SwapCalls = SwapEnd > Swap ? Finder::DirectCalls(Swap, SwapEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+    const uintptr_t Focus = SwapCalls.size() >= 3 && SwapCalls[0].second == SwapCalls[1].second && SwapCalls[1].second == SwapCalls[2].second ? SwapCalls[0].second : 0;
+    if (!Swap || !Focus)
     {
-        Log::Error(L"Finder: AFortQuickBars quickbar focus swap not found (handler {})", Handler != 0);
+        Log::Error(L"Finder: AFortQuickBars quickbar focus swap not found (handler {}, swap {})", Handler != 0, Swap != 0);
         return false;
     }
     Natives::AFortQuickBars_SwapQuickBarFocus = reinterpret_cast<decltype(Natives::AFortQuickBars_SwapQuickBarFocus)>(Swap);
-    Log::Info(L"Finder: AFortQuickBars quickbar focus swap at 0x{:X}", Swap - Finder::ImageBase());
+    Natives::AFortQuickBars_FocusSlot = reinterpret_cast<decltype(Natives::AFortQuickBars_FocusSlot)>(Focus);
+    Log::Info(L"Finder: AFortQuickBars quickbar focus swap at 0x{:X}, slot focus at 0x{:X}", Swap - Finder::ImageBase(), Focus - Finder::ImageBase());
     return true;
 }
 

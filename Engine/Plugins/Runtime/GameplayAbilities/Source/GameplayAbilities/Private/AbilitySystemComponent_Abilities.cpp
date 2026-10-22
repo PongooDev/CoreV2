@@ -37,6 +37,12 @@ FScopedPredictionWindow::~FScopedPredictionWindow()
     }
 }
 
+void UGameplayAbility::K2_EndAbility()
+{
+    Reflection::FParams Params(StaticFunction_K2_EndAbility());
+    Params.Call(this);
+}
+
 bool UAbilitySystemComponent::HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const
 {
     if (Natives::UAbilitySystemComponent_GameplayTagAssetInterface < 0 || Natives::IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex < 0)

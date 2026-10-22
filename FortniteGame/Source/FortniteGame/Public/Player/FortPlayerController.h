@@ -9,6 +9,7 @@
 
 class AFortInventory;
 class AFortPawn;
+class AFortWeapon;
 class APawn;
 class IFortInventoryOwnerInterface;
 class AFortQuickBars;
@@ -64,6 +65,7 @@ public:
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
     bool HandleItemZeroDurability(const FGuid& ItemGuid);
+    void EndWeaponAbilities(AFortWeapon* Weapon);
     int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
     UFortQuestManager* GetQuestManager() const;
     UFortSchematicItem* GetSchematicForItem(const UFortItemDefinition* ItemDefinition);

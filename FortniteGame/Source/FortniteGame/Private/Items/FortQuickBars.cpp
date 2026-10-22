@@ -33,6 +33,15 @@ void AFortQuickBars::SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOv
     }
 }
 
+int32_t AFortQuickBars::FocusSlot(EFortQuickBars InQuickBar, int32_t Slot, bool bUpdatePreviousFocusedSlot)
+{
+    if (Natives::AFortQuickBars_FocusSlot || Finder::ResolveQuickBarFocusLive())
+    {
+        return Natives::AFortQuickBars_FocusSlot(this, static_cast<int32_t>(InQuickBar), Slot, bUpdatePreviousFocusedSlot);
+    }
+    return -1;
+}
+
 void AFortQuickBars::EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex)
 {
     Reflection::FParams Params(StaticFunction_EnableSlot());
@@ -102,6 +111,7 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
 {
 #if WITH_SERVER_CODE
     bool bRemovedFocusedItem = false;
+    EFortQuickBars FocusedBar = EFortQuickBars::GetPrimary();
     for (EFortQuickBars Bar : { EFortQuickBars::GetPrimary(), EFortQuickBars::GetSecondary() })
     {
         FQuickBar& QuickBar = GetQuickBar(Bar);
@@ -114,7 +124,11 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
                 if (Items[Index] == Item)
                 {
                     Items.RemoveAt(Index);
-                    bRemovedFocusedItem |= SlotIndex == QuickBar.CurrentFocusedSlot && Items.Num() == 0;
+                    if (SlotIndex == QuickBar.CurrentFocusedSlot && Items.Num() == 0)
+                    {
+                        bRemovedFocusedItem = true;
+                        FocusedBar = Bar;
+                    }
                 }
             }
         }
@@ -124,7 +138,20 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
     AFortPawn* Pawn = Controller ? static_cast<AFortPawn*>(Controller->MyFortPawn) : nullptr;
     AFortWeapon* CurrentWeapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
     const bool bWeaponReactivatesSlot = CurrentWeapon && CurrentWeapon->bPendingDestroyDueToDurability && static_cast<FGuid&>(CurrentWeapon->ItemEntryGuid) == Item;
-    if (bRemovedFocusedItem && !bWeaponReactivatesSlot)
+    if (bRemovedFocusedItem && bWeaponReactivatesSlot)
+    {
+        FQuickBar& QuickBar = GetQuickBar(FocusedBar);
+        const int32_t NumSlots = QuickBar.Slots.Num();
+        const int32_t EmptiedSlot = QuickBar.CurrentFocusedSlot;
+        for (int32_t Step = 1; Step < NumSlots; ++Step)
+        {
+            if (FocusSlot(FocusedBar, (EmptiedSlot + Step) % NumSlots, true) != -1)
+            {
+                break;
+            }
+        }
+    }
+    else if (bRemovedFocusedItem)
     {
         FQuickBar& PrimaryBar = PrimaryQuickBar;
         const int32_t PreviousSlot = PrimaryBar.PreviousFocusedSlot;

@@ -2,12 +2,14 @@
 #include "Player/FortPlayerController.h"
 #include "Abilities/FortAbilityKit.h"
 #include "Abilities/FortPlayerAttrSet.h"
+#include "Abilities/GameplayAbility.h"
 #include "AbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "FortGameState.h"
 #include "FortWorldManager.h"
+#include "GameThread.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
 #include "Hooks.h"
@@ -735,13 +737,74 @@ bool AFortPlayerController::HandleItemZeroDurability(const FGuid& ItemGuid)
 #if WITH_SERVER_CODE
     AFortPawn* Pawn = MyFortPawn;
     AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
-    if (Weapon && static_cast<FGuid&>(Weapon->ItemEntryGuid) == ItemGuid)
+    const bool bEquipped = Weapon && static_cast<FGuid&>(Weapon->ItemEntryGuid) == ItemGuid;
+    if (bEquipped)
     {
         Weapon->DestroyedDueToDurability();
     }
-    return RemoveInventoryItem(ItemGuid, -1, true);
+    const bool bRemoved = RemoveInventoryItem(ItemGuid, -1, true);
+    if (bEquipped && Weapon->IsA(AFortWeaponRanged::StaticClass()))
+    {
+        GameThread::Enqueue([PlayerController = TWeakObjectPtr<AFortPlayerController>(this), BrokenWeapon = TWeakObjectPtr<AFortWeapon>(Weapon)]()
+        {
+            AFortPlayerController* Controller = PlayerController.Get();
+            AFortWeapon* Broken = BrokenWeapon.Get();
+            AFortPawn* ControllerPawn = Controller ? static_cast<AFortPawn*>(Controller->MyFortPawn) : nullptr;
+            if (Broken && ControllerPawn && static_cast<AFortWeapon*>(ControllerPawn->CurrentWeapon) == Broken)
+            {
+                Controller->EndWeaponAbilities(Broken);
+            }
+        });
+    }
+    return bRemoved;
 #else
     return false;
+#endif
+}
+
+void AFortPlayerController::EndWeaponAbilities(AFortWeapon* Weapon)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState)));
+    UAbilitySystemComponent* AbilitySystemComponent = FortPlayerState ? static_cast<UAbilitySystemComponent*>(FortPlayerState->AbilitySystemComponent) : nullptr;
+    if (!AbilitySystemComponent || !Weapon)
+    {
+        return;
+    }
+
+    std::vector<TWeakObjectPtr<UGameplayAbility>> ActiveInstances;
+    FGameplayAbilitySpecContainer& Container = AbilitySystemComponent->ActivatableAbilities;
+    TStructArray<FGameplayAbilitySpec>& Specs = Container.Items;
+    for (int32_t Index = 0; Index < Specs.Num(); ++Index)
+    {
+        FGameplayAbilitySpec& Spec = Specs[Index];
+        UObject* SourceObject = Spec.SourceObject;
+        const uint8_t ActiveCount = Spec.ActiveCount;
+        if (SourceObject != Weapon || ActiveCount == 0)
+        {
+            continue;
+        }
+        TArray<UGameplayAbility*>& ReplicatedInstances = Spec.ReplicatedInstances;
+        TArray<UGameplayAbility*>& NonReplicatedInstances = Spec.NonReplicatedInstances;
+        for (TArray<UGameplayAbility*>* Instances : { &ReplicatedInstances, &NonReplicatedInstances })
+        {
+            for (UGameplayAbility* Instance : *Instances)
+            {
+                if (Instance)
+                {
+                    ActiveInstances.emplace_back(Instance);
+                }
+            }
+        }
+    }
+
+    for (const TWeakObjectPtr<UGameplayAbility>& Instance : ActiveInstances)
+    {
+        if (UGameplayAbility* Ability = Instance.Get())
+        {
+            Ability->K2_EndAbility();
+        }
+    }
 #endif
 }
 

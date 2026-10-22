@@ -23,3 +23,8 @@ public:
     static ptrdiff_t PendingDestroyDueToDurabilityOffset();
     static uint8_t PendingDestroyDueToDurabilityMask();
 };
+
+class AFortWeaponRanged : public AFortWeapon
+{
+    DefineUnrealClass(AFortWeaponRanged, FortniteGame)
+};

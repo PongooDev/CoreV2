@@ -233,8 +233,8 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
         Finder::ResolveTheaterMapDataLive();
     }
     FFortTheaterMapData* TheaterMapData = Natives::AFortWorldManager_GetTheaterMapData ? static_cast<FFortTheaterMapData*>(Natives::AFortWorldManager_GetTheaterMapData(this)) : nullptr;
-    const bool bIsTestMap = !TheaterMapData;
     const EFortTheaterType TheaterType = TheaterMapData ? static_cast<EFortTheaterType>(TheaterMapData->RuntimeInfo.TheaterType) : EFortTheaterType::Max_None;
+    const bool bIsTestMap = TheaterType == EFortTheaterType::Test || TheaterType == EFortTheaterType::Max_None;
 
     FFortMissionManagerRecord& Record = MissionManagerRecord;
     TStructArray<FFortMissionRecord>& MissionRecords = Record.MissionRecords;
@@ -255,18 +255,7 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
     for (int32_t Index = 0; Index < SharedMissionList.Num(); ++Index)
     {
         FFortGlobalMission& SharedMission = SharedMissionList[Index];
-        if (SharedMission.bIsPrototype || (bIsTestMap && !SharedMission.bAllowInTestMaps))
-        {
-            continue;
-        }
-
-        const TArray<uint8_t>& AllowedTheaterTypes = SharedMission.AllowedTheaterTypes;
-        if (AllowedTheaterTypes.Num() > 0 && !AllowedTheaterTypes.Contains(static_cast<uint8_t>(TheaterType)))
-        {
-            continue;
-        }
-        const TArray<uint8_t>& AllowedZoneTypes = SharedMission.AllowedZoneTypes;
-        if (AllowedZoneTypes.Num() > 0 && (!ZoneTheme || !AllowedZoneTypes.Contains(static_cast<uint8_t>(static_cast<EFortZoneType>(ZoneTheme->ZoneType)))))
+        if (!MatchesQuery(PrimaryMissionTags, SharedMission.PrimaryMissionTagQuery))
         {
             continue;
         }
@@ -278,7 +267,30 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             continue;
         }
 
-        if (!MatchesQuery(GameContextTags, SharedMission.TheaterTagQuery) || !MatchesQuery(GameContextTags, SharedMission.RegionTagQuery) || !MatchesQuery(GameContextTags, SharedMission.ZoneTagQuery) || !MatchesQuery(PrimaryMissionTags, SharedMission.PrimaryMissionTagQuery))
+        if ((SharedMission.bIsPrototype && TheaterType != EFortTheaterType::Test) || (bIsTestMap && !SharedMission.bAllowInTestMaps))
+        {
+            continue;
+        }
+
+        if (TheaterMapData)
+        {
+            const TArray<uint8_t>& AllowedTheaterTypes = SharedMission.AllowedTheaterTypes;
+            if ((AllowedTheaterTypes.Num() > 0 && !AllowedTheaterTypes.Contains(static_cast<uint8_t>(TheaterType))) || !MatchesQuery(TheaterMapData->RuntimeInfo.TheaterTags, SharedMission.TheaterTagQuery))
+            {
+                continue;
+            }
+        }
+
+        if (ZoneTheme)
+        {
+            const TArray<uint8_t>& AllowedZoneTypes = SharedMission.AllowedZoneTypes;
+            if ((AllowedZoneTypes.Num() > 0 && !AllowedZoneTypes.Contains(static_cast<uint8_t>(static_cast<EFortZoneType>(ZoneTheme->ZoneType)))) || !MatchesQuery(ZoneTheme->ZoneTags, SharedMission.ZoneTagQuery))
+            {
+                continue;
+            }
+        }
+
+        if (!MatchesQuery(GameContextTags, SharedMission.RegionTagQuery))
         {
             continue;
         }
@@ -299,7 +311,7 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
 
     for (UFortMissionInfo* MissionInfo : SharedMissions)
     {
-        UE_LOG(LogFortWorld, Log, TEXT("Adding shared mission %s (theater map data %s)"), *MissionInfo->GetName(), bIsTestMap ? TEXT("missing") : TEXT("found"));
+        UE_LOG(LogFortWorld, Log, TEXT("Adding shared mission %s (theater map data %s)"), *MissionInfo->GetName(), TheaterMapData ? TEXT("found") : TEXT("missing"));
     }
     if (SharedMissions.Num() > 0)
     {

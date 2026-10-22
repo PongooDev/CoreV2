@@ -40,12 +40,19 @@ namespace
         {
             return Natives::FMath_SRand();
         }
-        int32_t& Seed = reinterpret_cast<int32_t*>(RandomStream)[1];
-        Seed = Seed * 196314165 + 907633515;
-        const uint32_t Bits = 0x3F800000u | (static_cast<uint32_t>(Seed) >> 9);
-        float Result;
-        std::memcpy(&Result, &Bits, sizeof(Result));
-        return Result - 1.0f;
+        uint8_t* Stream = static_cast<uint8_t*>(RandomStream);
+        const float* Values = *reinterpret_cast<float**>(Stream);
+        int32_t& Index = *reinterpret_cast<int32_t*>(Stream + 0x10);
+        const int32_t Num = *reinterpret_cast<int32_t*>(Stream + 0x14);
+        if (Num <= 0 || !Values)
+        {
+            return 0.0f;
+        }
+        if (Index >= Num)
+        {
+            Index = 0;
+        }
+        return Values[Index++];
     }
 
     bool MatchesQuery(const FGameplayTagContainer& Tags, const FGameplayTagQuery& Query)

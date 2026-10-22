@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Player/FortPlayerController.h"
 #include "Abilities/FortAbilityKit.h"
+#include "Abilities/FortPlayerAttrSet.h"
 #include "AbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
@@ -133,6 +134,7 @@ void AFortPlayerController::Possess(APawn* InPawn)
     if (Role == ROLE_Authority && Bars && MyFortPawn)
     {
         AddHeroAbilityKitGadgetsToQuickBars();
+        ApplyHarvestingTool();
 
         FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
         Bars->ServerActivateSlotInternal(EFortQuickBars::Primary, PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
@@ -192,6 +194,10 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
         const FItemDefinitionAndCount& Entry = Items[Index];
         const TAssetPtr<UFortItemDefinition>& EntryDefinition = Entry.ItemDefinition;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(EntryDefinition.LoadSynchronous());
+        if (ItemDefinition && ItemDefinition->ItemType == static_cast<uint8_t>(EFortItemType::WeaponHarvest))
+        {
+            continue;
+        }
         if (ItemDefinition && GetItemQuantity(ItemDefinition) <= 0)
         {
             UFortKismetLibrary::K2_GiveItemToPlayer(this, ItemDefinition, Entry.Count, false);
@@ -407,6 +413,111 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
     if (QuickBars && GetPawn())
     {
         AddHeroAbilityKitGadgetsToQuickBars();
+    }
+#endif
+}
+
+void AFortPlayerController::ApplyHarvestingTool()
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = WorldInventory;
+    AFortQuickBars* Bars = QuickBars;
+    AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState)));
+    UAbilitySystemComponent* AbilitySystemComponent = FortPlayerState ? static_cast<UAbilitySystemComponent*>(FortPlayerState->AbilitySystemComponent) : nullptr;
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    if (Role != ROLE_Authority || !Inventory || !Bars || !GameData)
+    {
+        return;
+    }
+
+    TArray<TAssetPtr<UFortWorldItemDefinition>>& HarvestingTools = GameData->HarvestingTools;
+    if (HarvestingTools.Num() == 0)
+    {
+        return;
+    }
+
+    int32_t Level = 0;
+    if (const UFortPlayerAttrSet* PlayerAttrSet = AbilitySystemComponent ? AbilitySystemComponent->GetSet<UFortPlayerAttrSet>() : nullptr)
+    {
+        const FFortGameplayAttributeData& HarvestingToolAttribute = PlayerAttrSet->HarvestingTool;
+        Level = std::clamp(static_cast<int32_t>(HarvestingToolAttribute.GetCurrentValue()), 0, HarvestingTools.Num() - 1);
+    }
+    UFortWorldItemDefinition* HarvestingTool = HarvestingTools[Level].LoadSynchronous();
+    if (!HarvestingTool)
+    {
+        UE_LOG(LogFort, Warning, TEXT("ApplyHarvestingTool: no harvesting tool for level %d"), Level);
+        return;
+    }
+
+    bool bHasHarvestingTool = false;
+    std::vector<FGuid> ReplacedItems;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* Entry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        UFortItemDefinition* Definition = Entry ? static_cast<UFortItemDefinition*>(Entry->ItemDefinition) : nullptr;
+        if (!Definition || Definition->ItemType != static_cast<uint8_t>(EFortItemType::WeaponHarvest))
+        {
+            continue;
+        }
+
+        if (Definition == HarvestingTool)
+        {
+            bHasHarvestingTool = true;
+        }
+        else
+        {
+            ReplacedItems.push_back(Entry->ItemGuid);
+        }
+    }
+    if (ReplacedItems.empty() && bHasHarvestingTool)
+    {
+        return;
+    }
+
+    int32_t QuickBarSlot = -1;
+    FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
+    TStructArray<FQuickBarSlot>& Slots = PrimaryQuickBar.Slots;
+    for (int32_t SlotIndex = 0; SlotIndex < Slots.Num() && QuickBarSlot < 0 && !ReplacedItems.empty(); ++SlotIndex)
+    {
+        TArray<FGuid>& SlotItems = Slots[SlotIndex].Items;
+        for (const FGuid& SlotItem : SlotItems)
+        {
+            if (SlotItem == ReplacedItems.front())
+            {
+                QuickBarSlot = SlotIndex;
+                break;
+            }
+        }
+    }
+
+    for (const FGuid& ItemGuid : ReplacedItems)
+    {
+        RemoveInventoryItem(ItemGuid, -1, true);
+    }
+
+    if (bHasHarvestingTool)
+    {
+        return;
+    }
+
+    UFortWorldItem* WorldItem = Cast<UFortWorldItem>(HarvestingTool->CreateTemporaryItemInstanceBP(1, 1));
+    if (!WorldItem)
+    {
+        return;
+    }
+
+    WorldItem->SetOwningControllerForTemporaryItem(this);
+    Inventory->AddWorldItem(WorldItem);
+    FFortItemEntry& WorldItemEntry = WorldItem->ItemEntry;
+    if (QuickBarSlot >= 0)
+    {
+        Bars->ServerAddItemInternal(WorldItemEntry.ItemGuid, EFortQuickBars::Primary, QuickBarSlot);
+    }
+    else
+    {
+        TryAddToQuickBar(WorldItem);
     }
 #endif
 }

@@ -11,6 +11,7 @@ class AFortAIDirector;
 class UEnvQuery;
 class UFortAbilitySet;
 class UFortItemDefinition;
+class UFortWorldItemDefinition;
 
 struct FItemDefinitionAndCount
 {
@@ -35,6 +36,7 @@ class UFortGameData : public UObject
 
 public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
+    DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, HarvestingTools)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)

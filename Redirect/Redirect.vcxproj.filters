@@ -429,6 +429,9 @@
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AbilitySystemComponent.h">
       <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AttributeSet.h">
+      <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AbilitySystemInterface.h">
       <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public</Filter>
     </ClInclude>
@@ -907,6 +910,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h">

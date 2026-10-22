@@ -108,6 +108,7 @@
     <ClInclude Include="..\Core\Public\StructArray.h" />
     <ClInclude Include="..\Core\Public\pch.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AbilitySystemComponent.h" />
+    <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AttributeSet.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AbilitySystemInterface.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayAbilitySpec.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayPrediction.h" />
@@ -268,6 +269,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilityKit.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Customization\CustomCharacterPart.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Heroes\FortHero.h" />

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AttributeSet.h"
 #include "GameplayAbilitySpec.h"
 #include "GameplayPrediction.h"
 #include "GameplayTasksComponent.h"
@@ -16,8 +17,22 @@ class UAbilitySystemComponent : public UGameplayTasksComponent
 public:
     DefineUStructProperty(FGameplayAbilitySpecContainer, ActivatableAbilities)
     DefineUProperty(AActor*, OwnerActor)
+    DefineUProperty(TArray<UAttributeSet*>, SpawnedAttributes)
     DefineUFunction(ClientActivateAbilityFailed)
     DefineUFunction(ServerTryActivateAbility)
+
+    template <class T>
+    const T* GetSet() const
+    {
+        for (UAttributeSet* Set : SpawnedAttributes)
+        {
+            if (Set && Set->IsA(T::StaticClass()))
+            {
+                return static_cast<const T*>(Set);
+            }
+        }
+        return nullptr;
+    }
 
     bool HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const;
     FGameplayAbilitySpec* FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle Handle);

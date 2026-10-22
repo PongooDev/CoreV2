@@ -9,6 +9,7 @@
 #include "UObject/Object.h"
 
 class UFortMissionInfo;
+class UFortQuestItemDefinition;
 
 struct FFortGlobalMission
 {
@@ -26,10 +27,17 @@ struct FFortGlobalMission
     DefineBitfieldUProperty(bAllowInTestMaps)
 };
 
+struct FFortQuestDrivenMission : public FFortGlobalMission
+{
+    DefineUnrealStruct(FFortQuestDrivenMission, FortniteGame)
+    DefineUProperty(UFortQuestItemDefinition*, RequiredQuest)
+};
+
 class UFortSharedMissionLists : public UObject
 {
     DefineUnrealClass(UFortSharedMissionLists, FortniteGame)
 
 public:
     DefineUStructArrayProperty(FFortGlobalMission, SharedMissionList)
+    DefineUStructArrayProperty(FFortQuestDrivenMission, QuestDrivenMissionList)
 };

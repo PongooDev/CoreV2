@@ -16,6 +16,19 @@ void UFortQuestManager::GetSourceAndContextTags(FGameplayTagContainer& OutSource
     }
 }
 
+UFortQuestItem* UFortQuestManager::GetQuestWithDefinition(UFortQuestItemDefinition* Definition)
+{
+    Reflection::FParams Params(StaticFunction_GetQuestWithDefinition());
+    Params.Set(L"Definition", Definition);
+    return Params.Call(this) ? Params.Take<UFortQuestItem*>(L"ReturnValue") : nullptr;
+}
+
+bool UFortQuestManager::HasActiveQuest(UFortQuestItemDefinition* Definition)
+{
+    UFortQuestItem* Quest = Definition ? GetQuestWithDefinition(Definition) : nullptr;
+    return Quest && Quest->quest_state == EFortQuestState::GetActive();
+}
+
 void UFortQuestManager::SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush)
 {
     if (Natives::UFortQuestManager_SendStatEvent)

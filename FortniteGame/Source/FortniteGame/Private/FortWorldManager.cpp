@@ -4,6 +4,7 @@
 #include "BlueprintGameplayTagLibrary.h"
 #include "Engine/World.h"
 #include "FortGameData.h"
+#include "FortGameInstance.h"
 #include "FortGameMode.h"
 #include "FortAssetManager.h"
 #include "FortGameState.h"
@@ -263,26 +264,23 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
         }
     }
 
-    TArray<UFortMissionInfo*> SharedMissions;
-    TStructArray<FFortGlobalMission>& SharedMissionList = SharedMissionLists->SharedMissionList;
-    for (int32_t Index = 0; Index < SharedMissionList.Num(); ++Index)
+    auto AllowedGlobalMission = [&](FFortGlobalMission& SharedMission) -> UFortMissionInfo*
     {
-        FFortGlobalMission& SharedMission = SharedMissionList[Index];
         if (!MatchesQuery(PrimaryMissionTags, SharedMission.PrimaryMissionTagQuery))
         {
-            continue;
+            return nullptr;
         }
 
         const float MinDifficultyLevel = SharedMission.MinDifficultyLevel;
         const float MaxDifficultyLevel = SharedMission.MaxDifficultyLevel;
         if ((MinDifficultyLevel >= 0.0f && GameDifficulty < MinDifficultyLevel) || (MaxDifficultyLevel >= 0.0f && GameDifficulty > MaxDifficultyLevel))
         {
-            continue;
+            return nullptr;
         }
 
         if ((SharedMission.bIsPrototype && TheaterType != EFortTheaterType::GetTest()) || (bIsTestMap && !SharedMission.bAllowInTestMaps))
         {
-            continue;
+            return nullptr;
         }
 
         if (TheaterMapData)
@@ -290,7 +288,7 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             const TArray<EFortTheaterType>& AllowedTheaterTypes = SharedMission.AllowedTheaterTypes;
             if ((AllowedTheaterTypes.Num() > 0 && !AllowedTheaterTypes.Contains(TheaterType)) || !MatchesQuery(TheaterMapData->RuntimeInfo.TheaterTags, SharedMission.TheaterTagQuery))
             {
-                continue;
+                return nullptr;
             }
         }
 
@@ -299,13 +297,13 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             const TArray<EFortZoneType>& AllowedZoneTypes = SharedMission.AllowedZoneTypes;
             if ((AllowedZoneTypes.Num() > 0 && !AllowedZoneTypes.Contains(ZoneTheme->ZoneType)) || !MatchesQuery(ZoneTheme->ZoneTags, SharedMission.ZoneTagQuery))
             {
-                continue;
+                return nullptr;
             }
         }
 
         if (!MatchesQuery(GameContextTags, SharedMission.RegionTagQuery))
         {
-            continue;
+            return nullptr;
         }
 
         const TAssetPtr<UFortMissionInfo>& SharedMissionInfo = SharedMission.MissionInfo;
@@ -316,8 +314,41 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             FFortMissionEntry& MissionEntry = MissionRecords[RecordIndex].MissionEntry;
             bAlreadyGenerated = static_cast<UFortMissionInfo*>(MissionEntry.MissionInfo) == MissionInfo;
         }
-        if (MissionInfo && !bAlreadyGenerated)
+        return MissionInfo && !bAlreadyGenerated ? MissionInfo : nullptr;
+    };
+
+    TArray<UFortMissionInfo*> SharedMissions;
+    TStructArray<FFortGlobalMission>& SharedMissionList = SharedMissionLists->SharedMissionList;
+    for (int32_t Index = 0; Index < SharedMissionList.Num(); ++Index)
+    {
+        if (UFortMissionInfo* MissionInfo = AllowedGlobalMission(SharedMissionList[Index]))
         {
+            SharedMissions.Add(MissionInfo);
+        }
+    }
+
+    UFortGameInstance* GameInstance = Cast<UFortGameInstance>(reinterpret_cast<UObject*>(World->OwningGameInstance));
+    TArray<UFortRegisteredPlayerInfo*> RegisteredPlayers;
+    if (GameInstance)
+    {
+        RegisteredPlayers = GameInstance->RegisteredPlayers;
+    }
+    TStructArray<FFortQuestDrivenMission>& QuestDrivenMissionList = SharedMissionLists->QuestDrivenMissionList;
+    for (int32_t Index = 0; Index < QuestDrivenMissionList.Num(); ++Index)
+    {
+        FFortQuestDrivenMission& QuestDrivenMission = QuestDrivenMissionList[Index];
+        UFortQuestItemDefinition* RequiredQuest = QuestDrivenMission.RequiredQuest;
+        bool bQuestActive = !RequiredQuest;
+        for (int32_t PlayerIndex = 0; PlayerIndex < RegisteredPlayers.Num() && !bQuestActive; ++PlayerIndex)
+        {
+            UFortRegisteredPlayerInfo* PlayerInfo = RegisteredPlayers[PlayerIndex];
+            UFortQuestManager* QuestManager = PlayerInfo ? static_cast<UFortQuestManager*>(PlayerInfo->QuestManager) : nullptr;
+            bQuestActive = QuestManager && QuestManager->HasActiveQuest(RequiredQuest);
+        }
+        UFortMissionInfo* MissionInfo = bQuestActive ? AllowedGlobalMission(QuestDrivenMission) : nullptr;
+        if (MissionInfo && !SharedMissions.Contains(MissionInfo))
+        {
+            UE_LOG(LogFortWorld, Log, TEXT("Adding quest-driven mission %s for %s"), *MissionInfo->GetName(), RequiredQuest ? *reinterpret_cast<UObject*>(RequiredQuest)->GetName() : TEXT("no quest"));
             SharedMissions.Add(MissionInfo);
         }
     }

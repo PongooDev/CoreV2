@@ -43,16 +43,37 @@ class EFortQuestObjectiveStatEvent
     DefineUEnumValue(Max_None)
 };
 
+class EFortQuestState
+{
+    DefineUnrealEnum(EFortQuestState, FortniteGame)
+    DefineUEnumValue(Inactive)
+    DefineUEnumValue(Active)
+    DefineUEnumValue(Completed)
+    DefineUEnumValue(Claimed)
+};
+
 class UFortMcpProfileAccount;
 class UFortMcpProfileWorld;
+class UFortQuestItemDefinition;
+
+class UFortQuestItem : public UObject
+{
+    DefineUnrealClass(UFortQuestItem, FortniteGame)
+
+public:
+    DefineUProperty(EFortQuestState, quest_state)
+};
 
 class UFortQuestManager : public UObject
 {
     DefineUnrealClass(UFortQuestManager, FortniteGame)
     DefineUFunction(GetSourceAndContextTags)
+    DefineUFunction(GetQuestWithDefinition)
 
 public:
     void GetSourceAndContextTags(FGameplayTagContainer& OutSourceTags, FGameplayTagContainer& OutContextTags);
+    UFortQuestItem* GetQuestWithDefinition(UFortQuestItemDefinition* Definition);
+    bool HasActiveQuest(UFortQuestItemDefinition* Definition);
     void SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
     void SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, int32_t NumMissionPoints, bool bCriticalMatchBonus);
 };

@@ -1,6 +1,9 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "Engine/GameInstance.h"
+
+class UFortRegisteredPlayerInfo;
 
 class UFortGameInstance : public UGameInstance
 {
@@ -8,6 +11,7 @@ class UFortGameInstance : public UGameInstance
 
 public:
     DefineUProperty(UObject*, TooltipManager)
+    DefineUProperty(TArray<UFortRegisteredPlayerInfo*>, RegisteredPlayers)
 
     void Init();
 

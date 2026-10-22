@@ -10,6 +10,7 @@
 #include "Missions/FortMissionLibrary.h"
 #include "Missions/FortMissionManager.h"
 #include "Missions/FortObjectiveFailedParams.h"
+#include "Missions/FortObjectiveNeutralCompleteParams.h"
 #include "Missions/FortObjectiveSucceededParams.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
@@ -120,25 +121,34 @@ void AFortObjectiveBase::SendObjectiveEndedEvent(EFortObjectiveStatus Status)
 {
 #if WITH_SERVER_CODE
     AFortMission* Mission = GetMission();
-    if (!Mission || (Status != EFortObjectiveStatus::GetSucceeded() && Status != EFortObjectiveStatus::GetFailed()))
+    if (!Mission || (Status != EFortObjectiveStatus::GetSucceeded() && Status != EFortObjectiveStatus::GetFailed() && Status != EFortObjectiveStatus::GetNeutralCompletion()))
     {
         return;
     }
 
     UObject* TransientPackage = StaticFindObject(nullptr, nullptr, L"/Engine/Transient");
     UObject* Params = nullptr;
+    const wchar_t* EventName = nullptr;
     if (Status == EFortObjectiveStatus::GetSucceeded())
     {
         UFortObjectiveSucceededParams* SucceededParams = NewObject<UFortObjectiveSucceededParams>(TransientPackage, UFortObjectiveSucceededParams::StaticClass());
         Params = SucceededParams ? SucceededParams->SetParams(this) : nullptr;
+        EventName = L"ObjectiveSucceeded";
     }
-    else
+    else if (Status == EFortObjectiveStatus::GetFailed())
     {
         UFortObjectiveFailedParams* FailedParams = NewObject<UFortObjectiveFailedParams>(TransientPackage, UFortObjectiveFailedParams::StaticClass());
         Params = FailedParams ? FailedParams->SetParams(this) : nullptr;
+        EventName = L"ObjectiveFailed";
+    }
+    else
+    {
+        UFortObjectiveNeutralCompleteParams* NeutralParams = NewObject<UFortObjectiveNeutralCompleteParams>(TransientPackage, UFortObjectiveNeutralCompleteParams::StaticClass());
+        Params = NeutralParams ? NeutralParams->SetParams(this) : nullptr;
+        EventName = L"ObjectiveNeutralCompletion";
     }
 
-    const FName EventType(Status == EFortObjectiveStatus::GetSucceeded() ? L"ObjectiveSucceeded" : L"ObjectiveFailed", FNAME_Find);
+    const FName EventType(EventName, FNAME_Find);
     UFortMissionLibrary::ExecuteMissionEvent(this, EventType, Mission->MissionGuid, ObjectiveHandle, Params);
 #endif
 }

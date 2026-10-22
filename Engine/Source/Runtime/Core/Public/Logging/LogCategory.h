@@ -39,6 +39,7 @@ public:
     }
 
     const FLogCategoryBase* Get() const;
+    void WriteToCoreLog(ELogVerbosity::Type Verbosity, const wchar_t* Format, ...) const;
 
 private:
     const wchar_t* CategoryName;

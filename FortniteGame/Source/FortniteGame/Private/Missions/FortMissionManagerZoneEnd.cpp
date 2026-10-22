@@ -40,7 +40,7 @@ namespace
     {
         UObject* StatusEnum = Natives::StaticFindObject(nullptr, nullptr, L"/Script/FortniteGame.EFortMissionStatus", false);
         FString Name;
-        if (StatusEnum)
+        if (StatusEnum && Natives::UEnum_GetEnumName)
         {
             Natives::UEnum_GetEnumName(StatusEnum, &Name, static_cast<int32_t>(Status));
         }
@@ -56,6 +56,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
         return;
     }
 
+    Log::Info(L"AFortMissionManager::OnZoneEnd: zone completed {}", bZoneCompleted);
     UWorld* World = GetWorld();
     const FString SessionId = GetGameSessionId(World);
     TArray<AFortMission*>& MissionList = Missions;
@@ -137,6 +138,10 @@ void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission, EFortMiss
     OnMissionStatusChangeOG(this, Mission, NewStatus);
 
 #if WITH_SERVER_CODE
+    if (Role == ROLE_Authority && Mission)
+    {
+        Log::Info(L"AFortMissionManager::OnMissionStatusChange: {} is now {}", Mission->GetName().ToStdString(), GetMissionStatusName(NewStatus).ToStdString());
+    }
     UFortMissionInfo* Info = Mission ? static_cast<UFortMissionInfo*>(Mission->MissionInfo) : nullptr;
     if (Role == ROLE_Authority && Info && (NewStatus == EFortMissionStatus::Succeeded || (NewStatus == EFortMissionStatus::Failed && Mission->IsPrimaryMission())))
     {

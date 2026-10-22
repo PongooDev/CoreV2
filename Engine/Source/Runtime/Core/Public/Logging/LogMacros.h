@@ -69,6 +69,10 @@ struct FMsg
         static_assert((ELogVerbosity::Verbosity & ELogVerbosity::VerbosityMask) < ELogVerbosity::NumVerbosity && ELogVerbosity::Verbosity > 0, "Verbosity must be constant and in range."); \
         if constexpr ((ELogVerbosity::Verbosity & ELogVerbosity::VerbosityMask) <= ELogVerbosity::COMPILED_IN_MINIMUM_VERBOSITY && (ELogVerbosity::Warning & ELogVerbosity::VerbosityMask) <= FLogCategory##CategoryName::CompileTimeVerbosity) \
         { \
+            if constexpr ((ELogVerbosity::Verbosity & ELogVerbosity::VerbosityMask) <= ELogVerbosity::Log) \
+            { \
+                CategoryName.WriteToCoreLog(ELogVerbosity::Verbosity, Format, ##__VA_ARGS__); \
+            } \
             UE_LOG_EXPAND_IS_FATAL(Verbosity, , if (!CategoryName.IsSuppressed(ELogVerbosity::Verbosity))) \
             { \
                 FMsg::Logf_Internal(__FILE__, __LINE__, CategoryName.GetCategoryName(), ELogVerbosity::Verbosity, Format, ##__VA_ARGS__); \
@@ -88,6 +92,13 @@ struct FMsg
         static_assert((ELogVerbosity::Verbosity & ELogVerbosity::VerbosityMask) < ELogVerbosity::NumVerbosity && ELogVerbosity::Verbosity > 0, "Verbosity must be constant and in range."); \
         if constexpr ((ELogVerbosity::Verbosity & ELogVerbosity::VerbosityMask) <= ELogVerbosity::COMPILED_IN_MINIMUM_VERBOSITY && (ELogVerbosity::Warning & ELogVerbosity::VerbosityMask) <= FLogCategory##CategoryName::CompileTimeVerbosity) \
         { \
+            if constexpr ((ELogVerbosity::Verbosity & ELogVerbosity::VerbosityMask) <= ELogVerbosity::Log) \
+            { \
+                if (Condition) \
+                { \
+                    CategoryName.WriteToCoreLog(ELogVerbosity::Verbosity, Format, ##__VA_ARGS__); \
+                } \
+            } \
             UE_LOG_EXPAND_IS_FATAL(Verbosity, , if (!CategoryName.IsSuppressed(ELogVerbosity::Verbosity))) \
             { \
                 if (Condition) \

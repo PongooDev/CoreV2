@@ -137,6 +137,21 @@ void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission, EFortMiss
     OnMissionStatusChangeOG(this, Mission, NewStatus);
 
 #if WITH_SERVER_CODE
+    if (Role == ROLE_Authority && Mission && NewStatus == EFortMissionStatus::Succeeded)
+    {
+        TArray<UFortWorldItemDefinition*> SuccessItems;
+        if (Mission->GetAdditionalMissionSuccessBadges(SuccessItems))
+        {
+            const TArray<AFortPlayerController*> Players = Mission->GetParticipatingMissionControllers();
+            for (UFortWorldItemDefinition* Item : SuccessItems)
+            {
+                if (UFortBadgeItemDefinition* Badge = Cast<UFortBadgeItemDefinition>(reinterpret_cast<UObject*>(Item)))
+                {
+                    GrantBadge(Badge, EFortRewardType::Default, Players);
+                }
+            }
+        }
+    }
     if (Role == ROLE_Authority && Mission && Mission->IsPrimaryMission() && (NewStatus == EFortMissionStatus::Succeeded || NewStatus == EFortMissionStatus::Failed))
     {
         SetMissionCompletionResult(Mission);
@@ -222,7 +237,9 @@ void AFortMissionManager::SyncMissionRewardItems(AFortPlayerController* PlayerCo
 void AFortMissionManager::SetMissionCompletionResult(AFortMission* Mission)
 {
 #if WITH_SERVER_CODE
-    const bool bSucceeded = static_cast<EFortMissionStatus>(Mission->MissionStatus) == EFortMissionStatus::Succeeded;
+    const EFortMissionStatus Status = static_cast<EFortMissionStatus>(Mission->MissionStatus);
+    const bool bSucceeded = Status == EFortMissionStatus::Succeeded;
+    const int32_t AdditionalMissionPoints = Mission->GetAdditionalMissionCompletionMissionPoints(Status);
     for (AFortPlayerController* PlayerController : Mission->GetParticipatingMissionControllers())
     {
         if (!PlayerController)
@@ -232,6 +249,7 @@ void AFortMissionManager::SetMissionCompletionResult(AFortMission* Mission)
 
         FFortRewardActivity& Activity = FindOrAddMissionPrimaryActivity(PlayerController);
         Activity.ActivityCompletionResult = bSucceeded ? EFortCompletionResult::Win : EFortCompletionResult::Loss;
+        Activity.AdditionalCompletionMissionPoints = AdditionalMissionPoints;
         PlayerController->ForceNetUpdate();
     }
 #endif
@@ -320,6 +338,7 @@ int32_t AFortMissionManager::GetMissionPointsForPlayer(AFortPlayerController* Pl
             }
         }
     }
+    Points += FindOrAddMissionPrimaryActivity(PlayerController).AdditionalCompletionMissionPoints;
     return MaxMissionPoints > 0 ? std::min(Points, MaxMissionPoints) : Points;
 }
 

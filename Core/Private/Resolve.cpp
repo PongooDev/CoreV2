@@ -3912,6 +3912,34 @@ bool Finder::ResolveMissionObjectivesLive()
     return true;
 }
 
+bool Finder::ResolveMissionEventLive()
+{
+    const uintptr_t CallHandleMissionEventFunction = FunctionOf(L"HandleMissionEvent_%s");
+    void** MissionVTable = CdoVTable(L"/Script/FortniteGame.FortMission");
+    int32_t CustomHandleIndex = -1;
+    int32_t Matches = 0;
+    for (const uintptr_t Site : CallHandleMissionEventFunction && MissionVTable ? Finder::CallsTo(CallHandleMissionEventFunction, false) : std::vector<uintptr_t>())
+    {
+        const uintptr_t VirtualCall = FindVirtualCall(Site - 0x10, Site);
+        const int32_t Slot = VirtualCall && Byte(VirtualCall + 1) == 0x90 ? VirtualSlot(VirtualCall) : -1;
+        const uintptr_t Entry = VTableEntry(MissionVTable, Slot);
+        if (Entry && reinterpret_cast<void*>(Entry) != Natives::SharedEmptyFunction)
+        {
+            CustomHandleIndex = Slot;
+            ++Matches;
+        }
+    }
+
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: AFortMission::CustomHandleMissionEvent slot not found ({} matches)", Matches);
+        return false;
+    }
+    Natives::AFortMission_CustomHandleMissionEventIndex = CustomHandleIndex;
+    Log::Info(L"Finder: AFortMission::CustomHandleMissionEvent is slot 0x{:X}", CustomHandleIndex);
+    return true;
+}
+
 bool Finder::ResolveLoginLive()
 {
     const uintptr_t GameModeBaseLogin = FunctionOf(L"Login: Couldn't spawn player controller of class %s");

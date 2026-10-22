@@ -62,6 +62,7 @@ namespace Finder
     bool ResolveLoginLive();
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();
+    bool ResolveMissionEventLive();
     bool ResolveObjectiveActivationLive(ptrdiff_t MissionActiveObjectivesOffset);
     bool ResolveCraftingLive();
     uint8_t* NullGetCurrentCall(UFunction* Function);

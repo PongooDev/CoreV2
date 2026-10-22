@@ -24,6 +24,11 @@ enum class EFortMissionStatus : uint8_t
     Max_None,
 };
 
+struct FFortMissionEvent
+{
+    DefineUnrealStruct(FFortMissionEvent, FortniteGame)
+};
+
 class AFortMission : public AActor
 {
     DefineUnrealClass(AFortMission, FortniteGame)
@@ -32,6 +37,9 @@ class AFortMission : public AActor
     DefineUFunction(GetParticipatingMissionControllers)
     DefineUFunction(GetRewardItemsByTag)
     DefineUFunction(GrantRewardsByTag)
+    DefineUFunction(GetAdditionalMissionSuccessBadges)
+    DefineUFunction(GetAdditionalMissionCompletionMissionPoints)
+    DefineUFunction(BlueprintCustomHandleMissionEvent)
 
 public:
     DefineUProperty(UFortMissionInfo*, MissionInfo)
@@ -54,6 +62,20 @@ public:
     DECLARE_FUNCTION(execGrantRewardsByTag);
     static void GrantRewardsByTagCall(AFortMission* This, FGameplayTag RewardTag, EFortRewardType RewardType);
 
+    bool GetAdditionalMissionSuccessBadges(TArray<UFortWorldItemDefinition*>& SuccessItems);
+    int32_t GetAdditionalMissionCompletionMissionPoints(EFortMissionStatus CompletionStatus);
+    void BlueprintCustomHandleMissionEvent(const FFortMissionEvent& MissionEvent);
+    void CustomHandleMissionEvent(const FFortMissionEvent& MissionEvent);
+
+    DECLARE_FUNCTION(execGetAdditionalMissionSuccessBadges);
+    DECLARE_FUNCTION(execGetAdditionalMissionCompletionMissionPoints);
+    DECLARE_FUNCTION(execBlueprintCustomHandleMissionEvent);
+
     static void HookCallSites();
     static void HookNatives();
+    static void HookVTables();
+
+private:
+    static inline void (*CustomHandleMissionEventOG)(AFortMission* This, const FFortMissionEvent& MissionEvent) = nullptr;
+    static void CustomHandleMissionEventHK(AFortMission* This, const FFortMissionEvent& MissionEvent);
 };

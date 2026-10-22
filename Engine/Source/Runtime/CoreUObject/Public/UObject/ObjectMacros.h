@@ -145,3 +145,4 @@ enum EClassCastFlags : uint64_t
 };
 
 #define CPF_Parm 0x0000000000000080ull
+#define CPF_ReturnParm 0x0000000000000400ull

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/NetSerialization.h"
+#include "Containers/Array.h"
 #include "Misc/Guid.h"
 #include "UObject/Object.h"
 #include "UObject/WeakObjectPtr.h"
@@ -18,7 +19,10 @@ public:
 
     DefineUProperty(int32_t, Count)
     DefineUProperty(UFortItemDefinition*, ItemDefinition)
+    DefineUProperty(float, Durability)
+    DefineUProperty(int32_t, Level)
     DefineUProperty(int32_t, LoadedAmmo)
+    DefineUProperty(TArray<UObject*>, AlterationDefinitions)
     DefineUProperty(FGuid, ItemGuid)
     DefineUProperty(FWeakObjectPtr, ParentInventory)
 };

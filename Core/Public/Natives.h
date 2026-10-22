@@ -303,6 +303,14 @@ namespace Natives
     inline int32_t AFortPlayerState_GetStatIndex = -1;
     inline void (*AFortGameMode_SendStayWithParty)(AFortGameMode* This) = nullptr;
     inline int32_t AGameMode_ReturnToMainMenuHostIndex = -1;
+    inline void* (*FDelegateBase_Allocate)(void* Delegate, int32_t Size) = nullptr;
+    inline uint64_t (*FDelegateHandle_GenerateNewID)() = nullptr;
+    inline void* McpRequestDelegateInstanceVTable = nullptr;
+    inline ptrdiff_t FBaseUrlContext_Delegate = -1;
+    inline ptrdiff_t FBaseUrlContext_UrlConfigName = -1;
+    inline ptrdiff_t FBaseUrlContext_ContextCredentials = -1;
+    inline void* (*FDateTime_UtcNow)(int64_t* Result) = nullptr;
+    inline bool (*AFortPlayerControllerOutpost_GetFabricatorProgress)(AFortPlayerController* This, int64_t* DisintegrationStartTime, int32_t* QuantumGooCompleted, int32_t* QuantumGooIncoming) = nullptr;
     inline int32_t AFortPlayerPawn_ResetGameplayAttributesIndex = -1;
     inline int32_t AFortPlayerPawn_EquipLastWeaponIndex = -1;
     inline int32_t AFortPawn_EquipDefaultWeaponIndex = -1;

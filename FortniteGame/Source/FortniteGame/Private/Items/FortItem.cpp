@@ -20,6 +20,18 @@ UFortItem* UFortItemDefinition::CreateTemporaryItemInstanceBP(int32_t Count, int
     return Params.Call(const_cast<UFortItemDefinition*>(this)) ? Params.Take<UFortItem*>(L"ReturnValue") : nullptr;
 }
 
+FString UFortItemDefinition::GetPersistentName() const
+{
+    Reflection::FParams Params(StaticFunction_GetPersistentName(), true);
+    return Params.Call(const_cast<UFortItemDefinition*>(this)) ? Params.Take<FString>(L"ReturnValue") : FString();
+}
+
+uint8_t UFortItemDefinition::GetFilterCategory() const
+{
+    Reflection::FParams Params(StaticFunction_GetFilterCategory());
+    return Params.Call(const_cast<UFortItemDefinition*>(this)) ? Params.Take<uint8_t>(L"ReturnValue") : 0;
+}
+
 void FFortItemEntry::Construct(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel)
 {
     if (!Natives::FFortItemEntry_FFortItemEntry && !Finder::ResolvePickupLive())

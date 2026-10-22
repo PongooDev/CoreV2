@@ -5,6 +5,9 @@
 #include "GameFramework/Actor.h"
 #include "Items/FortItem.h"
 
+#include <vector>
+
+class AFortPlayerController;
 class UFortWorldItem;
 
 struct FFortItemList : public FFastArraySerializer
@@ -31,4 +34,6 @@ public:
     void UpdateWorldItemCount(UFortWorldItem* WorldItem, int32_t NewCount);
     void UpdateWorldItemLoadedAmmo(UFortWorldItem* WorldItem, int32_t NewLoadedAmmo);
     void RemoveWorldItem(UFortWorldItem* WorldItem);
+    void RemoveWorldItemCount(UFortWorldItem* WorldItem, int32_t Count);
+    int32_t AddWorldItemCopy(AFortPlayerController* Owner, const FFortItemEntry& Source, int32_t Count, int32_t MaxNewItems, std::vector<UFortWorldItem*>* OutNewItems = nullptr);
 };

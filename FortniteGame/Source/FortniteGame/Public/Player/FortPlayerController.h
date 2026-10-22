@@ -27,6 +27,7 @@ class AFortPlayerController : public APlayerController
 public:
     DefineUProperty(AFortQuickBars*, QuickBars)
     DefineUProperty(AFortInventory*, WorldInventory)
+    DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
     DefineBitfieldUProperty(bCraftFree)
     DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)

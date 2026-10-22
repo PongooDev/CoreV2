@@ -10,6 +10,9 @@
 #include "Natives.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/WeakObjectPtr.h"
+
+#include <cstring>
 
 void* UFortMcpProfileWorld::BindToPlayerController(AFortPlayerController* PlayerController, bool bUseOutpostInventory)
 {
@@ -39,6 +42,60 @@ void UFortMcpProfileWorld::InitializeTheater(const FString& TheaterGuid)
     Reflection::FParams Params(StaticFunction_InitializeTheater(), true);
     Params.Set(L"TheaterGuid", TheaterGuid);
     Params.Call(this);
+}
+
+void FDedicatedServerUrlContext::Bind(UObject* Object, void (*Completed)(UObject* Object, const void* Result))
+{
+    *reinterpret_cast<FString*>(Bytes + Natives::FBaseUrlContext_UrlConfigName) = FString(L"McpDedicatedServerCommandUrl");
+    *reinterpret_cast<int32_t*>(Bytes + Natives::FBaseUrlContext_ContextCredentials) = 1;
+    if (!Object || !Completed)
+    {
+        return;
+    }
+
+    uint8_t* Instance = static_cast<uint8_t*>(Natives::FDelegateBase_Allocate(Bytes + Natives::FBaseUrlContext_Delegate, 0x30));
+    std::memset(Instance, 0, 0x30);
+    *reinterpret_cast<void**>(Instance) = Natives::McpRequestDelegateInstanceVTable;
+    *reinterpret_cast<FWeakObjectPtr*>(Instance + 0x08) = Object;
+    *reinterpret_cast<void**>(Instance + 0x10) = reinterpret_cast<void*>(Completed);
+    *reinterpret_cast<uint64_t*>(Instance + 0x28) = Natives::FDelegateHandle_GenerateNewID();
+}
+
+namespace
+{
+    bool SendCommand(UFortMcpProfileWorld* Profile, Reflection::FParams& Params, UObject* Object, void (*Completed)(UObject* Object, const void* Result))
+    {
+        FDedicatedServerUrlContext* Context = Params.Get<FDedicatedServerUrlContext>(L"Context");
+        if (!Context || !Finder::ResolveOutpostMcpRequestLive())
+        {
+            return false;
+        }
+        Context->Bind(Object, Completed);
+        return Params.Call(Profile);
+    }
+}
+
+bool UFortMcpProfileWorld::DisintegrateItems(const TArray<FString>& ItemIds, const TArray<int32_t>& ItemCounts, UObject* Object, void (*Completed)(UObject* Object, const void* Result))
+{
+    Reflection::FParams Params(StaticFunction_DisintegrateItems(), true);
+    Params.Set(L"itemsToDisintegrateIds", ItemIds);
+    Params.Set(L"itemCountsToDisintegrate", ItemCounts);
+    return SendCommand(this, Params, Object, Completed);
+}
+
+bool UFortMcpProfileWorld::DepositPostResources(const TArray<FString>& ItemIds, const TArray<int32_t>& ItemCounts, UObject* Object, void (*Completed)(UObject* Object, const void* Result))
+{
+    Reflection::FParams Params(StaticFunction_DepositPostResources(), true);
+    Params.Set(L"itemsToDepositIds", ItemIds);
+    Params.Set(L"itemCountsToDeposit", ItemCounts);
+    return SendCommand(this, Params, Object, Completed);
+}
+
+bool UFortMcpProfileWorld::FabricateItem(const FString& TemplateId, UObject* Object, void (*Completed)(UObject* Object, const void* Result))
+{
+    Reflection::FParams Params(StaticFunction_FabricateItem(), true);
+    Params.Set(L"TemplateId", TemplateId);
+    return SendCommand(this, Params, Object, Completed);
 }
 
 void UFortMcpProfileWorld::HookVTables()

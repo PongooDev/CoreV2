@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/UnrealString.h"
 #include "UObject/Object.h"
 
 class AFortPlayerController;
@@ -71,8 +72,12 @@ public:
     DefineUProperty(uint8_t, ItemType)
     DefineUProperty(int32_t, MaxStackSize)
     DefineUFunction(CreateTemporaryItemInstanceBP)
+    DefineUFunction(GetPersistentName)
+    DefineUFunction(GetFilterCategory)
 
     UFortItem* CreateTemporaryItemInstanceBP(int32_t Count, int32_t Level) const;
+    FString GetPersistentName() const;
+    uint8_t GetFilterCategory() const;
 };
 
 class UFortWorldItemDefinition : public UFortItemDefinition
@@ -81,6 +86,7 @@ class UFortWorldItemDefinition : public UFortItemDefinition
 
 public:
     DefineBitfieldUProperty(bCanBeDropped)
+    DefineBitfieldUProperty(bCanBeDepositedInStorageVault)
     DefineUProperty(int32_t, PreferredQuickbarSlot)
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);

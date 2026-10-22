@@ -4838,3 +4838,75 @@ bool Finder::ResolveWeaponAmmoLive(ptrdiff_t AmmoCountOffset, ptrdiff_t ItemEntr
     Log::Info(L"Finder: AFortWeapon::ModAmmo is slot 0x{:X}", Index);
     return true;
 }
+
+bool Finder::ResolveOutpostMcpRequestLive()
+{
+    if (Natives::FDelegateBase_Allocate && Natives::AFortPlayerControllerOutpost_GetFabricatorProgress)
+    {
+        return true;
+    }
+
+    const uintptr_t Abort = FunctionOf(L"AFortPlayerControllerOutpost::ServerAbortDisintegration");
+    const uintptr_t AbortEnd = Abort ? Finder::FunctionEnd(Abort) : 0;
+    uintptr_t Completed = 0;
+    uintptr_t VTable = 0;
+    int32_t DataLoads = 0;
+    for (uintptr_t Site = Abort; Site && Site + 7 <= AbortEnd && !VTable; ++Site)
+    {
+        if (Byte(Site) != 0x48 || Byte(Site + 1) != 0x8D || Byte(Site + 2) != 0x05)
+        {
+            continue;
+        }
+        const uintptr_t Target = Finder::RelativeTarget(Site, 3, 7);
+        if (IsInText(Target))
+        {
+            Completed = Completed ? Completed : Target;
+        }
+        else if (Completed && ++DataLoads == 2)
+        {
+            VTable = Target;
+        }
+    }
+
+    const uintptr_t HandleStore = Abort ? FindInstruction(Abort, AbortEnd, { 0x0F, 0x11, -1, 0x10, 0xE8 }) : 0;
+    const uintptr_t Copy = Abort ? FindInstruction(Abort, AbortEnd, { 0x48, 0x8D, 0x55, -1, 0xFF, 0x50, -1 }) : 0;
+    uintptr_t UrlLoad = 0;
+    for (uintptr_t Reference : Finder::StringRefs(L"McpDedicatedServerCommandUrl"))
+    {
+        UrlLoad = Reference >= Abort && Reference < AbortEnd ? Reference : UrlLoad;
+    }
+    uintptr_t UrlName = 0;
+    for (uintptr_t Site = UrlLoad ? UrlLoad - 0x30 : 0; Site && Site < UrlLoad; ++Site)
+    {
+        UrlName = Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x4D ? Site : UrlName;
+    }
+    const uintptr_t Credentials = UrlLoad ? FindInstruction(UrlLoad, AbortEnd, { 0xC7, 0x45, -1, 0x01, 0x00, 0x00, 0x00 }) : 0;
+    uintptr_t Context = 0;
+    for (uintptr_t Site = Credentials; Site && (Site = FindInstruction(Site + 1, AbortEnd, { 0x48, 0x8D, 0x55, -1, 0x48, 0x8B, -1, 0xE8 })) != 0;)
+    {
+        Context = Site;
+    }
+
+    const uintptr_t CreateCopy = VTable && Copy ? VTableEntry(reinterpret_cast<void**>(VTable), Byte(Copy + 6) / 8) : 0;
+    const uintptr_t AllocateCall = CreateCopy ? FindRawCall(CreateCopy, CreateCopy + 0x40) : 0;
+    const uintptr_t CompletedEnd = Completed ? Finder::FunctionEnd(Completed) : 0;
+    const auto CompletedCalls = CompletedEnd ? Finder::DirectCalls(Completed, CompletedEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    if (!Completed || !VTable || !HandleStore || !Copy || !UrlName || !Credentials || !Context || !AllocateCall || CompletedCalls.size() < 3)
+    {
+        Log::Error(L"Finder: outpost MCP request not decoded (completed {}, vtable {}, handle {}, copy {}, url {}, credentials {}, context {}, allocate {}, completed calls {})",
+            Completed != 0, VTable != 0, HandleStore != 0, Copy != 0, UrlName != 0, Credentials != 0, Context != 0, AllocateCall != 0, CompletedCalls.size());
+        return false;
+    }
+
+    const int32_t Base = static_cast<int8_t>(Byte(Context + 3));
+    Natives::FBaseUrlContext_Delegate = static_cast<int8_t>(Byte(Copy + 3)) - Base;
+    Natives::FBaseUrlContext_UrlConfigName = static_cast<int8_t>(Byte(UrlName + 3)) - Base;
+    Natives::FBaseUrlContext_ContextCredentials = static_cast<int8_t>(Byte(Credentials + 2)) - Base;
+    Natives::McpRequestDelegateInstanceVTable = reinterpret_cast<void*>(VTable);
+    Natives::FDelegateBase_Allocate = reinterpret_cast<decltype(Natives::FDelegateBase_Allocate)>(Finder::RelativeTarget(AllocateCall, 1, 5));
+    Natives::FDelegateHandle_GenerateNewID = reinterpret_cast<decltype(Natives::FDelegateHandle_GenerateNewID)>(Finder::RelativeTarget(HandleStore + 4, 1, 5));
+    Natives::FDateTime_UtcNow = reinterpret_cast<decltype(Natives::FDateTime_UtcNow)>(CompletedCalls[CompletedCalls.size() - 2].second);
+    Natives::AFortPlayerControllerOutpost_GetFabricatorProgress = reinterpret_cast<decltype(Natives::AFortPlayerControllerOutpost_GetFabricatorProgress)>(CompletedCalls.back().second);
+    Log::Info(L"Finder: FBaseUrlContext delegate +0x{:X}, url config +0x{:X}, credentials +0x{:X}", Natives::FBaseUrlContext_Delegate, Natives::FBaseUrlContext_UrlConfigName, Natives::FBaseUrlContext_ContextCredentials);
+    return true;
+}

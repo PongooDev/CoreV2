@@ -8,6 +8,8 @@
 #include "ReflectionParams.h"
 #include "UObject/Class.h"
 
+#include <algorithm>
+
 FFortItemEntry* FFortItemList::FindReplicatedEntry(const FGuid& ItemGuid)
 {
     TStructArray<FFortItemEntry>& Entries = ReplicatedEntries;
@@ -129,5 +131,80 @@ void AFortInventory::RemoveWorldItem(UFortWorldItem* WorldItem)
 
     ItemList.MarkArrayDirty();
     HandleInventoryLocalUpdate();
+#endif
+}
+
+void AFortInventory::RemoveWorldItemCount(UFortWorldItem* WorldItem, int32_t Count)
+{
+#if WITH_SERVER_CODE
+    if (!WorldItem || Count <= 0)
+    {
+        return;
+    }
+
+    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+    if (Count >= ItemEntry.Count)
+    {
+        RemoveWorldItem(WorldItem);
+    }
+    else
+    {
+        UpdateWorldItemCount(WorldItem, ItemEntry.Count - Count);
+    }
+#endif
+}
+
+int32_t AFortInventory::AddWorldItemCopy(AFortPlayerController* Owner, const FFortItemEntry& Source, int32_t Count, int32_t MaxNewItems, std::vector<UFortWorldItem*>* OutNewItems)
+{
+#if WITH_SERVER_CODE
+    UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Source.ItemDefinition));
+    if (!ItemDefinition || Count <= 0)
+    {
+        return 0;
+    }
+
+    const int32_t MaxStackSize = std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
+    int32_t Remaining = Count;
+    FFortItemList& ItemList = Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num() && Remaining > 0; ++Index)
+    {
+        UFortWorldItem* Existing = Instances[Index];
+        FFortItemEntry* ExistingEntry = Existing ? &static_cast<FFortItemEntry&>(Existing->ItemEntry) : nullptr;
+        if (ExistingEntry && static_cast<UFortItemDefinition*>(ExistingEntry->ItemDefinition) == ItemDefinition && ExistingEntry->Count < MaxStackSize)
+        {
+            const int32_t Merged = std::min(Remaining, MaxStackSize - ExistingEntry->Count);
+            UpdateWorldItemCount(Existing, ExistingEntry->Count + Merged);
+            Remaining -= Merged;
+        }
+    }
+
+    for (int32_t NewItems = 0; Remaining > 0 && (MaxNewItems < 0 || NewItems < MaxNewItems); ++NewItems)
+    {
+        const int32_t StackCount = std::min(Remaining, MaxStackSize);
+        UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(StackCount, Source.Level));
+        if (!WorldItem)
+        {
+            break;
+        }
+
+        FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+        ItemEntry.Durability = Source.Durability;
+        ItemEntry.LoadedAmmo = Source.LoadedAmmo;
+        ItemEntry.AlterationDefinitions = Source.AlterationDefinitions;
+        if (Owner)
+        {
+            WorldItem->SetOwningControllerForTemporaryItem(Owner);
+        }
+        AddWorldItem(WorldItem);
+        if (OutNewItems)
+        {
+            OutNewItems->push_back(WorldItem);
+        }
+        Remaining -= StackCount;
+    }
+    return Count - Remaining;
+#else
+    return 0;
 #endif
 }

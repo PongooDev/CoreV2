@@ -81,6 +81,7 @@ class UFortWorldItemDefinition : public UFortItemDefinition
 
 public:
     DefineBitfieldUProperty(bCanBeDropped)
+    DefineUProperty(int32_t, PreferredQuickbarSlot)
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
 };

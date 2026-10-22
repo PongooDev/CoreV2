@@ -327,10 +327,15 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
         RemoveInventoryItem(ItemGuid, -1, true);
     }
 
+    const auto WasGranted = [&PreviousDefinitions](UFortItemDefinition* Definition)
+    {
+        return std::find(PreviousDefinitions.begin(), PreviousDefinitions.end(), Definition) != PreviousDefinitions.end();
+    };
+
     const int32_t Level = std::max(Hero->GetLevel(), 1);
     for (UFortWorldItemDefinition* Gadget : Gadgets)
     {
-        if (GetItemQuantity(Gadget) > 0)
+        if (WasGranted(Gadget) || GetItemQuantity(Gadget) > 0)
         {
             continue;
         }
@@ -344,6 +349,11 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
     for (const FAbilityKitItem* KitItem : KitItems)
     {
         UFortWorldItemDefinition* ItemDefinition = static_cast<UFortWorldItemDefinition*>(static_cast<UFortItemDefinition*>(KitItem->Item));
+        if (WasGranted(ItemDefinition))
+        {
+            continue;
+        }
+
         const int32_t Quantity = KitItem->Quantity;
         const int32_t Owned = GetItemQuantity(ItemDefinition);
         int32_t Count = 0;
@@ -353,7 +363,7 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
             Count = Quantity - Owned;
             break;
         case EFortReplenishmentType::Add:
-            Count = std::find(PreviousDefinitions.begin(), PreviousDefinitions.end(), ItemDefinition) == PreviousDefinitions.end() ? Quantity : 0;
+            Count = Quantity;
             break;
         default:
             Count = Owned > 0 ? 0 : Quantity;
@@ -388,10 +398,18 @@ void AFortPlayerController::AddHeroAbilityKitGadgetsToQuickBars()
     Granted.PendingQuickBarItems.clear();
     for (const FGuid& ItemGuid : Pending)
     {
-        if (Bars && Inventory && Inventory->FindWorldItem(ItemGuid) && !Bars->ContainsItem(ItemGuid))
+        UFortWorldItem* GadgetItem = Bars && Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+        if (!GadgetItem || Bars->ContainsItem(ItemGuid))
         {
-            Bars->ServerAddItemInternal(ItemGuid, EFortQuickBars::Primary, -1);
+            continue;
         }
+
+        FFortItemEntry& GadgetEntry = GadgetItem->ItemEntry;
+        UFortWorldItemDefinition* Gadget = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(GadgetEntry.ItemDefinition));
+        FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
+        const int32_t PreferredSlot = Gadget ? static_cast<int32_t>(Gadget->PreferredQuickbarSlot) : -1;
+        const TStructArray<FQuickBarSlot>& Slots = PrimaryQuickBar.Slots;
+        Bars->ServerAddItemInternal(ItemGuid, EFortQuickBars::Primary, PreferredSlot >= 0 && PreferredSlot < Slots.Num() ? PreferredSlot : -1);
     }
 #endif
 }
@@ -472,7 +490,12 @@ bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t C
 
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     const int32_t Remaining = ItemEntry.Count - Count;
-    if (Count < 0 || Remaining <= 0)
+    UFortAmmoItemDefinition* AmmoDefinition = Cast<UFortAmmoItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+    if (Count >= 0 && Remaining <= 0 && AmmoDefinition && AmmoDefinition->RegenCooldown > 0.0f)
+    {
+        Inventory->UpdateWorldItemCount(WorldItem, 0);
+    }
+    else if (Count < 0 || Remaining <= 0)
     {
         if (AFortQuickBars* Bars = QuickBars)
         {

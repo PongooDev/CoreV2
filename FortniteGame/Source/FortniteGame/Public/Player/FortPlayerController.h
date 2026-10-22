@@ -30,6 +30,7 @@ public:
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
     DefineBitfieldUProperty(bCraftFree)
+    DefineBitfieldUProperty(bInfiniteDurability)
     DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
@@ -38,6 +39,7 @@ public:
     DefineUFunction(ServerRemoveInventoryItem)
     DefineUFunction(ServerRemoveInventoryStateValue)
     DefineUFunction(ServerSpotActor)
+    DefineUFunction(ServerModDurability)
     DefineUFunction(ActivateSlot)
     DefineUFunction(GivePlayerAmmo)
     DefineUFunction(SwapQuickBarFocus)
@@ -60,12 +62,15 @@ public:
     void ServerSpotActor_Implementation(AActor* NewlySpottedActor);
     void ServerRemoveInventoryStateValue_Implementation(const FGuid& ItemGuid, uint8_t StateType);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
+    bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
+    bool HandleItemZeroDurability(const FGuid& ItemGuid);
     int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
     UFortQuestManager* GetQuestManager() const;
     UFortSchematicItem* GetSchematicForItem(const UFortItemDefinition* ItemDefinition);
 
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
     static ptrdiff_t CriticalMatchBonusOffset();
+    static bool ResolveDurability();
 
     static void Hook();
     static void HookVTables();
@@ -88,4 +93,6 @@ private:
     static inline void (*ServerRemoveInventoryStateValue_ImplementationOG)(AFortPlayerController* This, const FGuid& ItemGuid, uint8_t StateType) = nullptr;
     static bool RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     static inline bool (*RemoveInventoryItemOG)(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars) = nullptr;
+    static bool ModDurabilityHK(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
+    static inline bool (*ModDurabilityOG)(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet) = nullptr;
 };

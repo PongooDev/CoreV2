@@ -78,6 +78,11 @@ uint8_t FFortItemEntry::GetStateType(const wchar_t* StateName)
     return StateType;
 }
 
+ptrdiff_t FFortItemEntry::DurabilityOffset()
+{
+    return Member_Durability.GetOffsetChecked();
+}
+
 int32_t FFortItemEntry::GetIntValue(uint8_t StateType) const
 {
     const TStructArray<FFortItemEntryStateValue>& Values = StateValues;
@@ -169,6 +174,19 @@ int32_t UFortItem::GetLevel() const
     return Params.Call(const_cast<UFortItem*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : 0;
 }
 
+bool UFortItem::HasDurability() const
+{
+    Reflection::FParams Params(StaticFunction_HasDurability());
+    return Params.Call(const_cast<UFortItem*>(this)) && Params.Take<bool>(L"ReturnValue");
+}
+
+float UFortWorldItemDefinition::GetMaxDurability(int32_t ItemLevel) const
+{
+    Reflection::FParams Params(StaticFunction_GetMaxDurability());
+    Params.Set(L"ItemLevel", ItemLevel);
+    return Params.Call(const_cast<UFortWorldItemDefinition*>(this)) ? Params.Take<float>(L"ReturnValue") : 1.0f;
+}
+
 void UFortWorldItem::SetOwningControllerForTemporaryItem(AFortPlayerController* InController)
 {
     Reflection::FParams Params(StaticFunction_SetOwningControllerForTemporaryItem());
@@ -216,6 +234,39 @@ bool UFortWorldItem::SetLoadedAmmo(int32_t NewLoadedAmmo)
 #endif
 }
 
+bool UFortWorldItem::SetDurability(float NewDurability)
+{
+#if WITH_SERVER_CODE
+    if (!HasDurability())
+    {
+        return false;
+    }
+
+    FFortItemEntry& Entry = ItemEntry;
+    if (Entry.Durability != NewDurability)
+    {
+        Entry.Durability = NewDurability;
+        if (OwnerInventory)
+        {
+            bNeedsPersistentUpdate = true;
+        }
+        if (Natives::FFortItemEntry_MarkDirty || Finder::ResolveItemEntryStateLive())
+        {
+            Natives::FFortItemEntry_MarkDirty(&Entry);
+        }
+    }
+
+    const uint8_t DurabilityInitialized = FFortItemEntry::GetStateType(L"DurabilityInitialized");
+    if (Entry.GetIntValue(DurabilityInitialized) == 0)
+    {
+        Entry.SetStateValue(DurabilityInitialized, 1);
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
 void UFortWorldItem::HookVTables()
 {
     UObject* WorldItemDefault = StaticClass()->GetDefaultObject(false);
@@ -240,9 +291,32 @@ void UFortWorldItem::HookVTables()
             Hooks::SwapVTable(L"UFortWorldItem::SetLoadedAmmo", VTable, Index, reinterpret_cast<void*>(&SetLoadedAmmoHK));
         }
     }
+
+    if (!AFortPlayerController::ResolveDurability())
+    {
+        return;
+    }
+
+    const int32_t DurabilityIndex = Natives::UFortWorldItem_SetDurabilityIndex;
+    void* const StrippedDurability = WorldItemVTable[DurabilityIndex];
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[DurabilityIndex] == StrippedDurability)
+        {
+            Hooks::SwapVTable(L"UFortWorldItem::SetDurability", VTable, DurabilityIndex, reinterpret_cast<void*>(&SetDurabilityHK));
+        }
+    }
 }
 
 bool UFortWorldItem::SetLoadedAmmoHK(UFortWorldItem* This, int32_t NewLoadedAmmo)
 {
     return This->SetLoadedAmmo(NewLoadedAmmo);
+}
+
+bool UFortWorldItem::SetDurabilityHK(UFortWorldItem* This, float NewDurability)
+{
+    return This->SetDurability(NewDurability);
 }

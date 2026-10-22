@@ -88,8 +88,10 @@ public:
     DefineBitfieldUProperty(bCanBeDropped)
     DefineBitfieldUProperty(bCanBeDepositedInStorageVault)
     DefineUProperty(int32_t, PreferredQuickbarSlot)
+    DefineUFunction(GetMaxDurability)
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
+    float GetMaxDurability(int32_t ItemLevel) const;
 };
 
 class UFortGadgetItemDefinition : public UFortWorldItemDefinition

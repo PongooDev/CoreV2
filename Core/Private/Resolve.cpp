@@ -4902,6 +4902,107 @@ bool Finder::ResolveWeaponAmmoLive(ptrdiff_t AmmoCountOffset, ptrdiff_t ItemEntr
     return true;
 }
 
+bool Finder::ResolveDurabilityLive(UFunction* ServerModDurability, UObject* PlayerControllerDefault, ptrdiff_t EntryDurabilityOffset, ptrdiff_t PendingDestroyDueToDurabilityOffset, uint8_t PendingDestroyDueToDurabilityMask)
+{
+    if (Natives::IFortInventoryOwnerInterface_ModDurabilityIndex >= 0 && Natives::UFortWorldItem_SetDurabilityIndex >= 0 && Natives::AFortWeapon_DestroyedDueToDurabilityIndex >= 0)
+    {
+        return true;
+    }
+
+    void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
+    const uintptr_t ModImplementation = VTableEntry(PlayerControllerVTable, ImplementationIndex(ServerModDurability));
+    const uintptr_t InterfaceAdjust = ModImplementation ? FindInstruction(ModImplementation, ModImplementation + 0x20, { 0x48, 0x81, 0xC1 }) : 0;
+    int32_t ModIndex = -1;
+    if (InterfaceAdjust && *reinterpret_cast<const int32_t*>(InterfaceAdjust + 3) == Natives::AFortPlayerController_InventoryOwnerInterface)
+    {
+        if (const uintptr_t ShortCall = FindInstruction(InterfaceAdjust, InterfaceAdjust + 0x20, { 0xFF, 0x50 }))
+        {
+            ModIndex = Byte(ShortCall + 2) % 8 == 0 ? Byte(ShortCall + 2) / 8 : -1;
+        }
+        else
+        {
+            ModIndex = VirtualSlot(FindVirtualCall(InterfaceAdjust, InterfaceAdjust + 0x20));
+        }
+    }
+
+    UFunction* CreateTemporaryItemInstanceFunction = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortItemDefinition:CreateTemporaryItemInstanceBP");
+    const uintptr_t Exec = CreateTemporaryItemInstanceFunction ? reinterpret_cast<uintptr_t>(CreateTemporaryItemInstanceFunction->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    uintptr_t CreateTemporaryItemInstance = 0;
+    for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+    {
+        CreateTemporaryItemInstance = Finder::RelativeTarget(Call, 1, 5);
+    }
+    const uintptr_t CreateTemporaryItemInstanceEnd = IsInText(CreateTemporaryItemInstance) ? Finder::FunctionEnd(CreateTemporaryItemInstance) : 0;
+    const int32_t CreateItemIndex = CreateTemporaryItemInstanceEnd ? VirtualSlot(FindVirtualCall(CreateTemporaryItemInstance, CreateTemporaryItemInstanceEnd)) : -1;
+    const uintptr_t CreateItem = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortWorldItemDefinition"), CreateItemIndex);
+    const uintptr_t CreateItemEnd = CreateItem ? Finder::FunctionEnd(CreateItem) : 0;
+    int32_t SetDurabilityIndex = -1;
+    bool bSetDurabilityAmbiguous = false;
+    for (const auto& [Call, Target] : CreateItemEnd > CreateItem ? Finder::DirectCalls(CreateItem, CreateItemEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        for (uintptr_t Site = Target; TargetEnd > Target && TargetEnd - Target < 0x200 && Site + 5 <= TargetEnd; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 3);
+            if (Byte(Site) != 0xF3 || Byte(Site + 1) != 0x0F || Byte(Site + 2) != 0x10 || (ModRm & 0xF8) != 0x48 || ModRm == 0x4C || Byte(Site + 4) != EntryDurabilityOffset)
+            {
+                continue;
+            }
+            const int32_t Index = VirtualSlot(FindVirtualCall(Site + 5, std::min(Site + 0x18, TargetEnd)));
+            if (Index >= 0)
+            {
+                bSetDurabilityAmbiguous |= SetDurabilityIndex >= 0 && SetDurabilityIndex != Index;
+                SetDurabilityIndex = Index;
+            }
+        }
+    }
+
+    const uintptr_t SetDurability = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortWorldItem"), SetDurabilityIndex);
+    const bool bSetDurabilityStripped = SetDurability && (Byte(SetDurability) == 0x32 || Byte(SetDurability) == 0x33) && Byte(SetDurability + 1) == 0xC0 && Byte(SetDurability + 2) == 0xC3;
+
+    void** WeaponVTable = CdoVTable(L"/Script/FortniteGame.FortWeapon");
+    int32_t DestroyedIndex = -1;
+    uintptr_t DestroyedFunction = 0;
+    bool bDestroyedAmbiguous = false;
+    for (int32_t Index = 0; Index < 0x200; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(WeaponVTable, Index);
+        if (!Function)
+        {
+            break;
+        }
+        const uintptr_t End = Function + 0x18;
+        if (Function == DestroyedFunction || Byte(Function) != 0x48 || Byte(Function + 1) != 0x8B || Byte(Function + 2) != 0x01)
+        {
+            continue;
+        }
+        for (uintptr_t Site = Function + 3; Site + 7 <= Function + 0x0A; ++Site)
+        {
+            if ((Byte(Site) == 0x83 || Byte(Site) == 0x80) && Byte(Site + 1) == 0x89 && *reinterpret_cast<const int32_t*>(Site + 2) == PendingDestroyDueToDurabilityOffset
+                && Byte(Site + 6) == PendingDestroyDueToDurabilityMask && FindVirtualCall(Site + 7, End))
+            {
+                bDestroyedAmbiguous |= DestroyedFunction != 0;
+                DestroyedIndex = Index;
+                DestroyedFunction = Function;
+                break;
+            }
+        }
+    }
+
+    if (ModIndex < 0 || SetDurabilityIndex < 0 || bSetDurabilityAmbiguous || !bSetDurabilityStripped || DestroyedIndex < 0 || bDestroyedAmbiguous)
+    {
+        Log::Error(L"Finder: durability natives not found (ModDurability {}, SetDurability {} stripped {}, DestroyedDueToDurability {})", ModIndex, SetDurabilityIndex, bSetDurabilityStripped, DestroyedIndex);
+        return false;
+    }
+
+    Natives::IFortInventoryOwnerInterface_ModDurabilityIndex = ModIndex;
+    Natives::UFortWorldItem_SetDurabilityIndex = SetDurabilityIndex;
+    Natives::AFortWeapon_DestroyedDueToDurabilityIndex = DestroyedIndex;
+    Log::Info(L"Finder: IFortInventoryOwnerInterface::ModDurability slot 0x{:X}, UFortWorldItem::SetDurability slot 0x{:X}, AFortWeapon::DestroyedDueToDurability slot 0x{:X}", ModIndex, SetDurabilityIndex, DestroyedIndex);
+    return true;
+}
+
 bool Finder::ResolveOutpostMcpRequestLive()
 {
     if (Natives::FDelegateBase_Allocate && Natives::AFortPlayerControllerOutpost_GetFabricatorProgress)

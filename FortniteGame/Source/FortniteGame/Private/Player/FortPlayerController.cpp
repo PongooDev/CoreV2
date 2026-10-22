@@ -587,6 +587,7 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
     }
 
     const int32_t DropCount = std::min(Count, static_cast<int32_t>(ItemEntry.Count));
+    WorldItem->SetDurability(ItemEntry.Durability);
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
     FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
@@ -700,6 +701,49 @@ bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t C
 #endif
 }
 
+bool AFortPlayerController::ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet)
+{
+#if WITH_SERVER_CODE
+    if (Role == ROLE_Authority && !(DurabilityMod < 0.0f && CheatManager && bInfiniteDurability))
+    {
+        AFortInventory* Inventory = WorldInventory;
+        UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+        UFortWorldItemDefinition* ItemDefinition = WorldItem ? Cast<UFortWorldItemDefinition>(WorldItem->GetItemDefinitionBP()) : nullptr;
+        if (!ItemDefinition || !WorldItem->HasDurability())
+        {
+            return false;
+        }
+
+        FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+        const float MaxDurability = ItemDefinition->GetMaxDurability(WorldItem->GetLevel());
+        const float NewDurability = std::clamp(bForceSet ? DurabilityMod : ItemEntry.Durability + DurabilityMod, 0.0f, std::max(MaxDurability, 0.0f));
+        WorldItem->SetDurability(NewDurability);
+        if (NewDurability <= 0.0f)
+        {
+            HandleItemZeroDurability(ItemGuid);
+        }
+        return true;
+    }
+#endif
+    void* InventoryOwner = reinterpret_cast<uint8_t*>(this) + Natives::AFortPlayerController_InventoryOwnerInterface;
+    return ModDurabilityOG(InventoryOwner, ItemGuid, DurabilityMod, bForceSet);
+}
+
+bool AFortPlayerController::HandleItemZeroDurability(const FGuid& ItemGuid)
+{
+#if WITH_SERVER_CODE
+    AFortPawn* Pawn = MyFortPawn;
+    AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+    if (Weapon && static_cast<FGuid&>(Weapon->ItemEntryGuid) == ItemGuid)
+    {
+        Weapon->DestroyedDueToDurability();
+    }
+    return RemoveInventoryItem(ItemGuid, -1, true);
+#else
+    return false;
+#endif
+}
+
 void AFortPlayerController::HookVTables()
 {
     UObject* PlayerControllerDefault = StaticClass()->GetDefaultObject(false);
@@ -755,6 +799,23 @@ void AFortPlayerController::HookVTables()
             if (InterfaceVTable && InterfaceVTable[RemoveIndex] == PlayerControllerRemove)
             {
                 Hooks::SwapVTable(L"AFortPlayerController::RemoveInventoryItem", InterfaceVTable, RemoveIndex, reinterpret_cast<void*>(&RemoveInventoryItemHK));
+            }
+        }
+
+        if (ResolveDurability())
+        {
+            const int32_t ModIndex = Natives::IFortInventoryOwnerInterface_ModDurabilityIndex;
+            void* const PlayerControllerMod = (*reinterpret_cast<void***>(reinterpret_cast<uint8_t*>(PlayerControllerDefault) + InterfaceOffset))[ModIndex];
+            ModDurabilityOG = reinterpret_cast<decltype(ModDurabilityOG)>(PlayerControllerMod);
+            for (TObjectIterator<UClass> It; It; ++It)
+            {
+                UClass* Class = *It;
+                UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+                void** InterfaceVTable = ClassDefault ? *reinterpret_cast<void***>(reinterpret_cast<uint8_t*>(ClassDefault) + InterfaceOffset) : nullptr;
+                if (InterfaceVTable && InterfaceVTable[ModIndex] == PlayerControllerMod)
+                {
+                    Hooks::SwapVTable(L"AFortPlayerController::ModDurability", InterfaceVTable, ModIndex, reinterpret_cast<void*>(&ModDurabilityHK));
+                }
             }
         }
     }
@@ -830,6 +891,12 @@ int32_t AFortPlayerController::GetItemQuantity(const UFortItemDefinition* ItemDe
 ptrdiff_t AFortPlayerController::CriticalMatchBonusOffset()
 {
     return Member_bShouldReceiveCriticalMatchBonus.GetOffsetChecked();
+}
+
+bool AFortPlayerController::ResolveDurability()
+{
+    return Finder::ResolveDurabilityLive(StaticFunction_ServerModDurability(), StaticClass()->GetDefaultObject(false), FFortItemEntry::DurabilityOffset(),
+        AFortWeapon::PendingDestroyDueToDurabilityOffset(), AFortWeapon::PendingDestroyDueToDurabilityMask());
 }
 
 UFortQuestManager* AFortPlayerController::GetQuestManager() const
@@ -928,6 +995,12 @@ bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FG
 {
     AFortPlayerController* PlayerController = FromInventoryOwner(static_cast<IFortInventoryOwnerInterface*>(InventoryOwner));
     return PlayerController->RemoveInventoryItem(ItemGuid, Count, bForceRemoveFromQuickBars);
+}
+
+bool AFortPlayerController::ModDurabilityHK(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet)
+{
+    AFortPlayerController* PlayerController = FromInventoryOwner(static_cast<IFortInventoryOwnerInterface*>(InventoryOwner));
+    return PlayerController->ModDurability(ItemGuid, DurabilityMod, bForceSet);
 }
 
 void AFortPlayerController::PossessHK(AFortPlayerController* This, APawn* InPawn)

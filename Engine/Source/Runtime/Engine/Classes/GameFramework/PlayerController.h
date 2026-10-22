@@ -14,6 +14,7 @@ public:
     DefineUProperty(UPlayer*, Player)
     DefineUProperty(APawn*, AcknowledgedPawn)
     DefineUProperty(APlayerCameraManager*, PlayerCameraManager)
+    DefineUProperty(UObject*, CheatManager)
 
     void ConsoleKey(FKey Key);
     void SendToConsole(const FString& Command);

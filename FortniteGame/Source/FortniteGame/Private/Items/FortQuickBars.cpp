@@ -4,7 +4,11 @@
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Pawns/FortPawn.h"
+#include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
+#include "Templates/Casts.h"
+#include "Weapons/FortWeapon.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/Class.h"
 
@@ -116,7 +120,11 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
         }
     }
 
-    if (bRemovedFocusedItem)
+    AFortPlayerController* Controller = Cast<AFortPlayerController>(GetOwner());
+    AFortPawn* Pawn = Controller ? static_cast<AFortPawn*>(Controller->MyFortPawn) : nullptr;
+    AFortWeapon* CurrentWeapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+    const bool bWeaponReactivatesSlot = CurrentWeapon && CurrentWeapon->bPendingDestroyDueToDurability && static_cast<FGuid&>(CurrentWeapon->ItemEntryGuid) == Item;
+    if (bRemovedFocusedItem && !bWeaponReactivatesSlot)
     {
         FQuickBar& PrimaryBar = PrimaryQuickBar;
         const int32_t PreviousSlot = PrimaryBar.PreviousFocusedSlot;

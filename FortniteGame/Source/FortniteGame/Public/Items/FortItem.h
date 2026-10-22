@@ -28,6 +28,7 @@ struct FFortItemEntry : public FFastArraySerializerItem
 public:
     static void Construct(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel);
     static uint8_t GetStateType(const wchar_t* StateName);
+    static ptrdiff_t DurabilityOffset();
 
     int32_t GetIntValue(uint8_t StateType) const;
     void SetStateValue(uint8_t StateType, int32_t IntValue);
@@ -52,10 +53,12 @@ class UFortItem : public UObject
     DefineUnrealClass(UFortItem, FortniteGame)
     DefineUFunction(GetItemDefinitionBP)
     DefineUFunction(GetLevel)
+    DefineUFunction(HasDurability)
 
 public:
     UFortItemDefinition* GetItemDefinitionBP() const;
     int32_t GetLevel() const;
+    bool HasDurability() const;
 };
 
 class UFortWorldItem : public UFortItem
@@ -72,10 +75,12 @@ public:
     void SetOwningControllerForTemporaryItem(AFortPlayerController* InController);
     bool SetItemCount(int32_t NewCount);
     bool SetLoadedAmmo(int32_t NewLoadedAmmo);
+    bool SetDurability(float NewDurability);
 
     static ptrdiff_t ItemEntryOffset();
     static void HookVTables();
 
 private:
     static bool SetLoadedAmmoHK(UFortWorldItem* This, int32_t NewLoadedAmmo);
+    static bool SetDurabilityHK(UFortWorldItem* This, float NewDurability);
 };

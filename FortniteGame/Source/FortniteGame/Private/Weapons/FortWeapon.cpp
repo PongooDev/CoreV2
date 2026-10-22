@@ -19,3 +19,22 @@ void AFortWeapon::ModAmmo(int32_t AmmoDelta)
         CallVirtual<void>(this, Natives::AFortWeapon_ModAmmoIndex, AmmoDelta);
     }
 }
+
+void AFortWeapon::DestroyedDueToDurability()
+{
+    if (Natives::AFortWeapon_DestroyedDueToDurabilityIndex >= 0)
+    {
+        CallVirtual<void>(this, Natives::AFortWeapon_DestroyedDueToDurabilityIndex);
+    }
+}
+
+ptrdiff_t AFortWeapon::PendingDestroyDueToDurabilityOffset()
+{
+    return Member_bPendingDestroyDueToDurability.GetOffsetChecked();
+}
+
+uint8_t AFortWeapon::PendingDestroyDueToDurabilityMask()
+{
+    Member_bPendingDestroyDueToDurability.GetOffsetChecked();
+    return Member_bPendingDestroyDueToDurability.GetFieldMask();
+}

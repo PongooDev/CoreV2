@@ -256,6 +256,7 @@ namespace Natives
     inline int32_t UFortSchematicItem_ServerCraftSchematicIndex = -1;
     inline int32_t UFortWorldItem_SetLoadedAmmoIndex = -1;
     inline int32_t UFortWorldItem_SetItemCountIndex = -1;
+    inline int32_t UFortWorldItem_SetDurabilityIndex = -1;
     inline int32_t AFortMissionManager_OnZoneEndIndex = -1;
     inline int32_t UFortMcpProfileWorld_BindToPlayerControllerIndex = -1;
     inline UObject* (*AFortAIGoalManager_FindAssignmentInList)(UObject* This, const void* Identifier, void* Assignments, int32_t Kind) = nullptr;
@@ -319,8 +320,10 @@ namespace Natives
     inline int32_t AFortPlayerPawn_EquipLastWeaponIndex = -1;
     inline int32_t AFortPawn_EquipDefaultWeaponIndex = -1;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
+    inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_RemoveInventoryItemIndex = -1;
+    inline int32_t IFortInventoryOwnerInterface_ModDurabilityIndex = -1;
     inline int32_t UObject_NeedsLoadForServerIndex = -1;
     inline int32_t UNetDriver_IsLevelInitializedForActorIndex = -1;
     inline int32_t UNetConnection_TickIndex = -1;

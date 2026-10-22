@@ -5,6 +5,8 @@
 #include "Engine/World.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortGameState.h"
+#include "FortWorldManager.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
 #include "Hooks.h"
@@ -167,6 +169,13 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
     if (!WorldInventory)
     {
         return;
+    }
+
+    UWorld* World = GetWorld();
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (AFortWorldManager* WorldManager = GameState ? static_cast<AFortWorldManager*>(GameState->WorldManager) : nullptr)
+    {
+        WorldManager->RestorePlayerQuickBars(this);
     }
 
     AFortInventory* Inventory = WorldInventory;

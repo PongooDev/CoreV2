@@ -5,10 +5,12 @@
 #include "Math/Transform.h"
 #include "Missions/FortMissionManager.h"
 
+class AFortPlayerController;
 class UFortMissionGenerator;
 class UFortMissionInfo;
 class UFortWorldRecord;
 struct FFortPlayerSpawnPadPlacementData;
+struct FQuickBar;
 
 struct FFortStartingMissionInfo
 {
@@ -51,12 +53,18 @@ public:
     void CreateMissionManager();
     int32_t GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName);
     AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);
+    bool UpdatePlayerQuickBarRecords(AFortPlayerController* PlayerController);
+    bool RestorePlayerQuickBars(AFortPlayerController* PlayerController);
 
     static void Hook();
+    static void HookCallSites();
 
 private:
     static inline void (*OnWorldRecordQueryCompleteOG)(AFortWorldManager* This) = nullptr;
     static void OnWorldRecordQueryCompleteHK(AFortWorldManager* This);
     static inline void (*ServerTickLoadingOrCreatingWorldOG)(AFortWorldManager* This) = nullptr;
     static void ServerTickLoadingOrCreatingWorldHK(AFortWorldManager* This);
+    static bool UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This, AFortPlayerController* PlayerController);
+
+    bool GetPlayerQuickBarRecords(AFortPlayerController* PlayerController, FQuickBar*& OutPrimary, FQuickBar*& OutSecondary);
 };

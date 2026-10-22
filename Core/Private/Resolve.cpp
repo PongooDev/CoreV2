@@ -4478,3 +4478,36 @@ bool Finder::ResolveResetGameplayAttributesLive()
     Log::Info(L"Finder: AFortPlayerPawn::ResetGameplayAttributes is slot 0x{:X}", Index);
     return true;
 }
+
+uint8_t* Finder::QuickBarChangedWorldManagerCall()
+{
+    const uintptr_t SwapItems = FunctionOf(L"Bad call to AFortQuickBars::SwapItems with index %d %d!");
+    const uintptr_t SwapItemsEnd = SwapItems ? Finder::FunctionEnd(SwapItems) : 0;
+    std::vector<uintptr_t> Checked;
+    uintptr_t Found = 0;
+    int32_t Count = 0;
+    for (const auto& [Call, Target] : SwapItemsEnd ? Finder::DirectCalls(SwapItems, SwapItemsEnd) : decltype(Finder::DirectCalls(0, 0)){})
+    {
+        if (std::find(Checked.begin(), Checked.end(), Target) != Checked.end() || Finder::FunctionStart(Target) != Target)
+        {
+            continue;
+        }
+        Checked.push_back(Target);
+        for (const auto& [Inner, InnerTarget] : Finder::DirectCalls(Target, Finder::FunctionEnd(Target)))
+        {
+            if (Byte(InnerTarget) == 0xB0 && Byte(InnerTarget + 1) == 0x01 && Byte(InnerTarget + 2) == 0xC3)
+            {
+                Found = Inner;
+                ++Count;
+            }
+        }
+    }
+
+    if (Count != 1)
+    {
+        Log::Error(L"Finder: AFortQuickBars change handler's world manager call not found ({} candidates)", Count);
+        return nullptr;
+    }
+    Log::Info(L"Finder: AFortQuickBars change handler's world manager call is at 0x{:X}", Found - Finder::ImageBase());
+    return reinterpret_cast<uint8_t*>(Found);
+}

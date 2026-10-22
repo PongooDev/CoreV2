@@ -11,11 +11,20 @@
 #include "Kismet/GameplayStatics.h"
 #include "Logging/LogMacros.h"
 #include "Hooks.h"
+#include "Items/FortInventory.h"
+#include "Items/FortItemDefinition.h"
+#include "Items/FortQuickBars.h"
 #include "Natives.h"
 #include "Online/FortGameSession.h"
 #include "Online/FortLobbyBeaconHost.h"
+#include "Online/FortMcpProfileWorld.h"
+#include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
+#include "Quests/FortQuestManager.h"
 #include "Templates/Casts.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
+
+#include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortWorld, Log, All);
 
@@ -286,10 +295,118 @@ int32_t AFortWorldManager::GetOrAllocatePlayerID(const FString& UniqueId, const 
 #endif
 }
 
+bool AFortWorldManager::GetPlayerQuickBarRecords(AFortPlayerController* PlayerController, FQuickBar*& OutPrimary, FQuickBar*& OutSecondary)
+{
+#if WITH_SERVER_CODE
+    UFortRegisteredPlayerInfo* PlayerInfo = PlayerController ? static_cast<UFortRegisteredPlayerInfo*>(PlayerController->MyPlayerInfo) : nullptr;
+    if (UFortMcpProfileWorld* WorldProfile = PlayerInfo ? static_cast<UFortMcpProfileWorld*>(PlayerInfo->WorldProfile) : nullptr)
+    {
+        FFortWorldPlayerLoadout& Loadout = WorldProfile->CachedPlayerLoadout;
+        OutPrimary = &static_cast<FQuickBar&>(Loadout.PrimaryQuickBarRecord);
+        OutSecondary = &static_cast<FQuickBar&>(Loadout.SecondaryQuickBarRecord);
+        return true;
+    }
+
+    AFortPlayerState* PlayerState = PlayerController ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
+    UFortWorldRecord* WorldRecord = CurrentWorldRecord;
+    const int32_t WorldPlayerId = PlayerState ? static_cast<int32_t>(PlayerState->WorldPlayerId) : -1;
+    if (!WorldRecord || WorldPlayerId < 0)
+    {
+        return false;
+    }
+
+    TStructArray<FFortPlayerRecord>& SavedPlayers = WorldRecord->SavedPlayers;
+    if (WorldPlayerId >= SavedPlayers.Num())
+    {
+        return false;
+    }
+
+    FFortPlayerRecord& PlayerRecord = SavedPlayers[WorldPlayerId];
+    OutPrimary = &static_cast<FQuickBar&>(PlayerRecord.PrimaryQuickBarRecord);
+    OutSecondary = &static_cast<FQuickBar&>(PlayerRecord.SecondaryQuickBarRecord);
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool AFortWorldManager::UpdatePlayerQuickBarRecords(AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
+    AFortQuickBars* QuickBars = PlayerController ? static_cast<AFortQuickBars*>(PlayerController->QuickBars) : nullptr;
+    FQuickBar* PrimaryRecord = nullptr;
+    FQuickBar* SecondaryRecord = nullptr;
+    if (!QuickBars || !GetPlayerQuickBarRecords(PlayerController, PrimaryRecord, SecondaryRecord))
+    {
+        return false;
+    }
+
+    UScriptStruct* QuickBarStruct = FQuickBar::StaticStruct();
+    QuickBarStruct->CopyScriptStruct(PrimaryRecord, &QuickBars->GetQuickBar(EFortQuickBars::Primary));
+    QuickBarStruct->CopyScriptStruct(SecondaryRecord, &QuickBars->GetQuickBar(EFortQuickBars::Secondary));
+#endif
+    return true;
+}
+
+bool AFortWorldManager::RestorePlayerQuickBars(AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
+    AFortQuickBars* QuickBars = PlayerController ? static_cast<AFortQuickBars*>(PlayerController->QuickBars) : nullptr;
+    AFortInventory* Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+    FQuickBar* Records[2] = {};
+    if (!QuickBars || !Inventory || !GetPlayerQuickBarRecords(PlayerController, Records[0], Records[1]))
+    {
+        return false;
+    }
+
+    struct FSlottedItem
+    {
+        EFortQuickBars QuickBar;
+        int32_t Slot;
+        FGuid Item;
+    };
+    std::vector<FSlottedItem> SlottedItems;
+    for (EFortQuickBars Bar : { EFortQuickBars::Primary, EFortQuickBars::Secondary })
+    {
+        TStructArray<FQuickBarSlot>& Slots = Records[static_cast<int32_t>(Bar)]->Slots;
+        for (int32_t SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
+        {
+            const TArray<FGuid>& Items = Slots[SlotIndex].Items;
+            for (int32_t Index = 0; Index < Items.Num(); ++Index)
+            {
+                SlottedItems.push_back({ Bar, SlotIndex, Items[Index] });
+            }
+        }
+    }
+
+    for (const FSlottedItem& Slotted : SlottedItems)
+    {
+        UFortWorldItem* Item = Slotted.Slot < QuickBars->GetQuickBar(Slotted.QuickBar).Slots.Num() && !QuickBars->ContainsItem(Slotted.Item) ? Inventory->FindWorldItem(Slotted.Item) : nullptr;
+        FFortItemEntry* ItemEntry = Item ? &static_cast<FFortItemEntry&>(Item->ItemEntry) : nullptr;
+        UFortItemDefinition* ItemDefinition = ItemEntry ? static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition) : nullptr;
+        if (ItemDefinition && QuickBars->GetSlotData(Slotted.QuickBar, Slotted.Slot).AcceptedItemTypes.Contains(ItemDefinition->ItemType))
+        {
+            QuickBars->ServerAddItemInternal(Slotted.Item, Slotted.QuickBar, Slotted.Slot);
+        }
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
 void AFortWorldManager::Hook()
 {
     Hooks::Detour(L"AFortWorldManager::OnWorldRecordQueryComplete", reinterpret_cast<void*>(Natives::AFortWorldManager_OnWorldRecordQueryComplete), &OnWorldRecordQueryCompleteHK, &OnWorldRecordQueryCompleteOG);
     Hooks::Detour(L"AFortWorldManager::ServerTickLoadingOrCreatingWorld", reinterpret_cast<void*>(Natives::AFortWorldManager_ServerTickLoadingOrCreatingWorld), &ServerTickLoadingOrCreatingWorldHK, &ServerTickLoadingOrCreatingWorldOG);
+}
+
+void AFortWorldManager::HookCallSites()
+{
+    if (uint8_t* Call = Finder::QuickBarChangedWorldManagerCall())
+    {
+        Hooks::RedirectCall(L"AFortQuickBars quickbar changed -> AFortWorldManager::UpdatePlayerQuickBarRecords", Call, reinterpret_cast<void*>(&UpdatePlayerQuickBarRecordsCall));
+    }
 }
 
 void AFortWorldManager::OnWorldRecordQueryCompleteHK(AFortWorldManager* This)
@@ -300,4 +417,9 @@ void AFortWorldManager::OnWorldRecordQueryCompleteHK(AFortWorldManager* This)
 void AFortWorldManager::ServerTickLoadingOrCreatingWorldHK(AFortWorldManager* This)
 {
     This->ServerTickLoadingOrCreatingWorld();
+}
+
+bool AFortWorldManager::UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This, AFortPlayerController* PlayerController)
+{
+    return This->UpdatePlayerQuickBarRecords(PlayerController);
 }

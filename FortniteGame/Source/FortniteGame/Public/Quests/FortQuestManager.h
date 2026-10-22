@@ -10,6 +10,7 @@ enum class EFortQuestObjectiveStatEvent : uint8_t
 };
 
 class UFortMcpProfileAccount;
+class UFortMcpProfileWorld;
 
 class UFortQuestManager : public UObject
 {
@@ -28,5 +29,6 @@ class UFortRegisteredPlayerInfo : public UObject
 
 public:
     DefineUProperty(UFortMcpProfileAccount*, AccountProfile)
+    DefineUProperty(UFortMcpProfileWorld*, WorldProfile)
     DefineUProperty(UFortQuestManager*, QuestManager)
 };

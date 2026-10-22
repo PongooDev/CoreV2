@@ -104,6 +104,7 @@ void Boot::Initialize()
         AFortMission::HookCallSites();
         AFortMissionManager::HookVTables();
         AFortGameMode::HookCallSites();
+        AFortWorldManager::HookCallSites();
         UFortMcpProfileWorld::HookVTables();
         AFortAIGoalManager::HookCallSites();
         UFortQueryGenerator_Enemies::HookVTables();

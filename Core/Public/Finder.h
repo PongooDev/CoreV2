@@ -83,4 +83,5 @@ namespace Finder
     uint8_t* FirstCallInImplementation(UFunction* Function, uintptr_t Target);
     bool ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset);
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, void** PlayerControllerVTable);
+    uint8_t* QuickBarChangedWorldManagerCall();
 }

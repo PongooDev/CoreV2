@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/UnrealString.h"
+#include "Items/FortQuickBars.h"
 #include "UObject/Object.h"
 
 class AFortPlayerController;
@@ -9,6 +10,8 @@ struct FFortWorldPlayerLoadout
 {
     DefineUnrealStruct(FFortWorldPlayerLoadout, FortniteGame)
     DefineBitfieldUProperty(bPlayerIsNew)
+    DefineUStructProperty(FQuickBar, PrimaryQuickBarRecord)
+    DefineUStructProperty(FQuickBar, SecondaryQuickBarRecord)
 };
 
 class UFortMcpProfileWorld : public UObject

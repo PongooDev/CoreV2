@@ -293,6 +293,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileWorld.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPawn.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPlayerPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerController.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerControllerOutpost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerControllerZone.h" />
@@ -411,6 +412,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileWorld.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\NotForLicensees\FortMcpConfig.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPawn.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPlayerPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerOutpost.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerZone.cpp" />

@@ -4459,3 +4459,22 @@ bool Finder::ResolveLeaveOutpostLive()
     Log::Info(L"Finder: AGameMode::ReturnToMainMenuHost is slot 0x{:X}", ReturnIndex);
     return true;
 }
+
+bool Finder::ResolveResetGameplayAttributesLive()
+{
+    if (Natives::AFortPlayerPawn_ResetGameplayAttributesIndex >= 0)
+    {
+        return true;
+    }
+
+    const int32_t Index = Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortPlayerPawn"), reinterpret_cast<void*>(FunctionOf(L"ResetGameplayAttributes called with valid state")), 0x400);
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortPlayerPawn::ResetGameplayAttributes slot not found");
+        return false;
+    }
+
+    Natives::AFortPlayerPawn_ResetGameplayAttributesIndex = Index;
+    Log::Info(L"Finder: AFortPlayerPawn::ResetGameplayAttributes is slot 0x{:X}", Index);
+    return true;
+}

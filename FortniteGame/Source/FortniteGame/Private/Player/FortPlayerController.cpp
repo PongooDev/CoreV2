@@ -18,6 +18,7 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
+#include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
 #include "Templates/Casts.h"
@@ -118,6 +119,11 @@ void AFortPlayerController::Possess(APawn* InPawn)
     {
         FortPlayerState->bHasStartedPlaying = true;
         FortPlayerState->ForceNetUpdate();
+    }
+
+    if (AFortPlayerPawn* PlayerPawn = Role == ROLE_Authority ? Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))) : nullptr)
+    {
+        PlayerPawn->ResetGameplayAttributes();
     }
 
     AFortQuickBars* Bars = QuickBars;

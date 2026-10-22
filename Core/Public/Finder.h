@@ -75,6 +75,7 @@ namespace Finder
     bool ResolveBadgeScoresLive();
     bool ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, ptrdiff_t FinalizingExperienceOffset, FEarnScoreCallSites& OutSites);
     bool ResolveLeaveOutpostLive();
+    bool ResolveResetGameplayAttributesLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();
     bool ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t ItemEntryOffset);

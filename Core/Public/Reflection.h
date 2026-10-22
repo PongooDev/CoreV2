@@ -2,8 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 class UClass;
+class UEnum;
 class UFunction;
 class UScriptStruct;
 class UStruct;
@@ -12,6 +15,7 @@ namespace Reflection
 {
     inline constexpr int32_t UnresolvedOffset = -2;
     inline constexpr int32_t MissingOffset = -1;
+    inline constexpr uint8_t InvalidEnumValue = 0xFF;
 
     enum class ETypeKind : uint8_t
     {
@@ -86,6 +90,42 @@ namespace Reflection
         UFunction* Function = nullptr;
     };
 
+    class FEnumInfo
+    {
+    public:
+        FEnumInfo(const wchar_t* InPackage, const wchar_t* InName);
+
+        UEnum* Get();
+        uint8_t FindValue(const wchar_t* EnumeratorName);
+        std::wstring GetValueName(uint8_t Value);
+        const wchar_t* GetName() const { return Name; }
+        const wchar_t* GetPackage() const { return Package; }
+
+    private:
+        const wchar_t* Package;
+        const wchar_t* Name;
+        UEnum* Enum = nullptr;
+        bool bReportedMissing = false;
+        std::vector<std::wstring> ValueNames;
+    };
+
+    using FEnumGetter = FEnumInfo& (*)();
+
+    class FEnumValueInfo
+    {
+    public:
+        FEnumValueInfo(FEnumGetter InOwner, const wchar_t* InName);
+
+        uint8_t Get();
+        bool Resolve();
+
+    private:
+        FEnumGetter Owner;
+        const wchar_t* Name;
+        uint8_t Value = InvalidEnumValue;
+        bool bResolved = false;
+    };
+
     bool ResolveAll();
 
     template <typename T>
@@ -155,3 +195,7 @@ private: \
     static inline Reflection::FFunctionInfo Function_##Name{ &StaticReflectionOwner, TEXT(#Name) }; \
 public: \
     static UFunction* StaticFunction_##Name() { return Function_##Name.Get(); }
+
+#define DefineUnrealEnum(EnumName, Package) private:     static inline Reflection::FEnumInfo EnumInfo_##EnumName{ TEXT(#Package), TEXT(#EnumName) }; public:     using FEnumType = EnumName;     uint8_t Value;     static UEnum* StaticEnum() { return EnumInfo_##EnumName.Get(); }     static Reflection::FEnumInfo& StaticEnumInfo() { return EnumInfo_##EnumName; }     constexpr operator uint8_t() const { return Value; }     std::wstring ToString() const { return EnumInfo_##EnumName.GetValueName(Value); }
+
+#define DefineUEnumValue(Name) private:     static inline Reflection::FEnumValueInfo EnumValue_##Name{ &StaticEnumInfo, TEXT(#Name) }; public:     static FEnumType Get##Name() { return FEnumType{ EnumValue_##Name.Get() }; }

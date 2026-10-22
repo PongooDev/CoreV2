@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Reflection.h"
+#include "Kismet/KismetNodeHelperLibrary.h"
+#include "UObject/Class.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "Log.h"
@@ -23,6 +25,12 @@ namespace
     std::vector<Reflection::FFunctionInfo*>& Functions()
     {
         static std::vector<Reflection::FFunctionInfo*> Registered;
+        return Registered;
+    }
+
+    std::vector<Reflection::FEnumValueInfo*>& EnumValues()
+    {
+        static std::vector<Reflection::FEnumValueInfo*> Registered;
         return Registered;
     }
 
@@ -178,6 +186,99 @@ UFunction* Reflection::FFunctionInfo::Get()
     return Function;
 }
 
+Reflection::FEnumInfo::FEnumInfo(const wchar_t* InPackage, const wchar_t* InName)
+    : Package(InPackage), Name(InName)
+{
+}
+
+UEnum* Reflection::FEnumInfo::Get()
+{
+    if (!Enum)
+    {
+        const std::wstring Path = std::format(L"/Script/{}.{}", Package, Name);
+        UEnum* Found = FindObject<UEnum>(nullptr, Path.c_str());
+        if (!Found)
+        {
+            if (!bReportedMissing)
+            {
+                Log::Error(L"Enum {} was not found", Path);
+                bReportedMissing = true;
+            }
+            return nullptr;
+        }
+
+        ValueNames.assign(InvalidEnumValue + 1, std::wstring());
+        for (int32_t EnumValue = 0; EnumValue <= InvalidEnumValue; ++EnumValue)
+        {
+            const FName EnumeratorName = UKismetNodeHelperLibrary::GetEnumeratorName(Found, static_cast<uint8_t>(EnumValue));
+            if (!EnumeratorName.IsNone())
+            {
+                const std::wstring FullName = EnumeratorName.ToStdString();
+                const size_t Scope = FullName.find(L"::");
+                ValueNames[EnumValue] = Scope == std::wstring::npos ? FullName : FullName.substr(Scope + 2);
+            }
+        }
+        Enum = Found;
+    }
+
+    return Enum;
+}
+
+uint8_t Reflection::FEnumInfo::FindValue(const wchar_t* EnumeratorName)
+{
+    if (!Get())
+    {
+        return InvalidEnumValue;
+    }
+
+    for (size_t EnumValue = 0; EnumValue < ValueNames.size(); ++EnumValue)
+    {
+        if (ValueNames[EnumValue] == EnumeratorName)
+        {
+            return static_cast<uint8_t>(EnumValue);
+        }
+    }
+    return InvalidEnumValue;
+}
+
+std::wstring Reflection::FEnumInfo::GetValueName(uint8_t Value)
+{
+    return Get() ? ValueNames[Value] : std::wstring();
+}
+
+Reflection::FEnumValueInfo::FEnumValueInfo(FEnumGetter InOwner, const wchar_t* InName)
+    : Owner(InOwner), Name(InName)
+{
+    EnumValues().push_back(this);
+}
+
+bool Reflection::FEnumValueInfo::Resolve()
+{
+    FEnumInfo& EnumInfo = Owner();
+    if (!EnumInfo.Get())
+    {
+        return false;
+    }
+
+    bResolved = true;
+    Value = EnumInfo.FindValue(Name);
+    if (Value == InvalidEnumValue)
+    {
+        Log::Error(L"Enum value {}::{} was not found", EnumInfo.GetName(), Name);
+        return false;
+    }
+    return true;
+}
+
+uint8_t Reflection::FEnumValueInfo::Get()
+{
+    if (!bResolved)
+    {
+        Resolve();
+    }
+    return Value;
+}
+
 bool Reflection::ResolveAll()
 {
     int32_t Missing = 0;
@@ -215,6 +316,14 @@ bool Reflection::ResolveAll()
         }
     }
 
-    Log::Info(L"Reflection: {} types, {} members, {} functions, {} missing", Types().size(), Members().size(), Functions().size(), Missing);
+    for (FEnumValueInfo* EnumValue : EnumValues())
+    {
+        if (EnumValue->Get() == InvalidEnumValue)
+        {
+            ++Missing;
+        }
+    }
+
+    Log::Info(L"Reflection: {} types, {} members, {} functions, {} enum values, {} missing", Types().size(), Members().size(), Functions().size(), EnumValues().size(), Missing);
     return Missing == 0;
 }

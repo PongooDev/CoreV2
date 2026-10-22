@@ -229,6 +229,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\PlayerState.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\WorldSettings.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\GameplayStatics.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetNodeHelperLibrary.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\EngineLogs.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\NetworkingDistanceConstants.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\ShowFlags.h" />
@@ -377,6 +378,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameNetworkManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameViewportClient.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameplayStatics.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\KismetNodeHelperLibrary.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Level.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetConnection.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetSerialization.cpp" />

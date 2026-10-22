@@ -102,3 +102,8 @@ public:
 
     UFunction* GetSuperFunction() const { return static_cast<UFunction*>(GetSuperStruct()); }
 };
+
+class UEnum : public UField
+{
+    DefineUnrealClass(UEnum, CoreUObject)
+};

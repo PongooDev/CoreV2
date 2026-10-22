@@ -375,6 +375,11 @@ void AFortMission::HookNatives()
 
 void AFortMission::HookVTables()
 {
+    if (Natives::AFortMission_ObjectiveStatusUpdatedIndex < 0)
+    {
+        Finder::ResolveMissionObjectivesLive();
+    }
+
     if (Natives::AFortMission_CustomHandleMissionEventIndex < 0 && !Finder::ResolveMissionEventLive())
     {
         return;

@@ -103,6 +103,7 @@ namespace
     }
 
     std::unordered_map<const UObject*, std::vector<std::pair<FString, int32_t>>> PendingPOSTDeposits;
+    void (*OnAccountInventoryChangedOG)(UFortRegisteredPlayerInfo* This, const void* ChangedItemTypes) = nullptr;
 
     UFortMcpProfileWorld* WorldProfileOf(AFortPlayerController* PlayerController)
     {
@@ -292,6 +293,37 @@ void AFortPlayerControllerOutpost::UpgradeBuildingByDefinition(UObject* OutpostB
     Params.Call(this);
 }
 
+int32_t AFortPlayerControllerOutpost::GetBuildingLevelFromDefinition(UObject* OutpostBuilding) const
+{
+    Reflection::FParams Params(StaticFunction_GetBuildingLevelFromDefinition());
+    Params.Set(L"OutpostBuilding", OutpostBuilding);
+    return Params.Call(const_cast<AFortPlayerControllerOutpost*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : 0;
+}
+
+void AFortPlayerControllerOutpost::ClientOnBuildingLevelChanged(UObject* UpgradedBuilding, int32_t InLevelBeforeUpgrade)
+{
+    Reflection::FParams Params(StaticFunction_ClientOnBuildingLevelChanged());
+    Params.Set(L"UpgradedBuilding", UpgradedBuilding);
+    Params.Set(L"InLevelBeforeUpgrade", InLevelBeforeUpgrade);
+    Params.Call(this);
+}
+
+void AFortPlayerControllerOutpost::OnAccountInventoryChanged()
+{
+#if WITH_SERVER_CODE
+    UObject* UpgradedBuilding = BuildingBeingUpgraded;
+    const int32_t PreviousLevel = LevelBeforeUpgrade;
+    if (Role != ROLE_Authority || !UpgradedBuilding || GetBuildingLevelFromDefinition(UpgradedBuilding) <= PreviousLevel)
+    {
+        return;
+    }
+
+    BuildingBeingUpgraded = nullptr;
+    UE_LOG(LogFort, Log, TEXT("AFortPlayerControllerOutpost::OnAccountInventoryChanged: %s upgraded from level %d"), *GetNameSafe(UpgradedBuilding), PreviousLevel);
+    ClientOnBuildingLevelChanged(UpgradedBuilding, PreviousLevel);
+#endif
+}
+
 void AFortPlayerControllerOutpost::UpdateFabricatorProgress()
 {
 #if WITH_SERVER_CODE
@@ -375,6 +407,26 @@ void AFortPlayerControllerOutpost::DepositPOSTResource_Completed(UObject* Object
     }
     Resources[Index].Quantity += Deposited;
     This->ForceNetUpdate();
+}
+
+void AFortPlayerControllerOutpost::Hook()
+{
+    Hooks::Detour(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged", reinterpret_cast<void*>(Natives::UFortRegisteredPlayerInfo_OnAccountInventoryChanged), &OnAccountInventoryChangedHK, &OnAccountInventoryChangedOG);
+}
+
+void AFortPlayerControllerOutpost::OnAccountInventoryChangedHK(UFortRegisteredPlayerInfo* PlayerInfo, const void* ChangedItemTypes)
+{
+    OnAccountInventoryChangedOG(PlayerInfo, ChangedItemTypes);
+
+#if WITH_SERVER_CODE
+    for (TObjectIterator<AFortPlayerControllerOutpost> It; It; ++It)
+    {
+        if (static_cast<UFortRegisteredPlayerInfo*>(It->MyPlayerInfo) == PlayerInfo)
+        {
+            It->OnAccountInventoryChanged();
+        }
+    }
+#endif
 }
 
 void AFortPlayerControllerOutpost::HookVTables()

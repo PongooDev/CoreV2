@@ -2401,6 +2401,8 @@ namespace
         const uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + 24, CredentialsCheck + 0x60) : 0;
         Require(L"FOnlineSubsystemMcp::QueueRequest (user)", Natives::FOnlineSubsystemMcp_QueueRequestForUser, QueueForUser ? Finder::RelativeTarget(QueueForUser, 1, 5) : 0);
 
+        Require(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged", Natives::UFortRegisteredPlayerInfo_OnAccountInventoryChanged, FunctionOf(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged trying to initialize ability system actor"));
+
         const uintptr_t QueueForClient = FunctionOf(L"Queuing Mcp request for client=%s url=%s");
         Require(L"FOnlineSubsystemMcp::QueueRequest (client)", Natives::FOnlineSubsystemMcp_QueueRequestForClient, QueueForClient);
 

@@ -4,6 +4,7 @@
 #include "Containers/UnrealString.h"
 #include "Player/FortPlayerControllerZone.h"
 
+class UFortRegisteredPlayerInfo;
 class UFortWorldItem;
 class UFortWorldItemDefinition;
 
@@ -27,8 +28,12 @@ class AFortPlayerControllerOutpost : public AFortPlayerControllerZone
     DefineUFunction(ServerUpgradePOST)
     DefineUFunction(IsOutpostOwner)
     DefineUFunction(UpgradeBuildingByDefinition)
+    DefineUFunction(GetBuildingLevelFromDefinition)
+    DefineUFunction(ClientOnBuildingLevelChanged)
 
 public:
+    DefineUProperty(UObject*, BuildingBeingUpgraded)
+    DefineUProperty(int32_t, LevelBeforeUpgrade)
     DefineUProperty(UFortWorldItemDefinition*, ItemPendingToFabricate)
     DefineUProperty(UFortWorldItem*, FabricatedItemPendingForNotification)
     DefineUProperty(int64_t, DisintegrationStartTime)
@@ -45,11 +50,16 @@ public:
     void ServerUpgradePOST_Implementation();
     bool IsOutpostOwner() const;
     void UpgradeBuildingByDefinition(UObject* OutpostBuilding);
+    int32_t GetBuildingLevelFromDefinition(UObject* OutpostBuilding) const;
+    void ClientOnBuildingLevelChanged(UObject* UpgradedBuilding, int32_t InLevelBeforeUpgrade);
+    void OnAccountInventoryChanged();
     void UpdateFabricatorProgress();
 
+    static void Hook();
     static void HookVTables();
 
 private:
+    static void OnAccountInventoryChangedHK(UFortRegisteredPlayerInfo* PlayerInfo, const void* ChangedItemTypes);
     static void DisintegrateItems_Completed(UObject* Object, const void* Result);
     static void FabricateItem_Completed(UObject* Object, const void* Result);
     static void DepositPOSTResource_Completed(UObject* Object, const void* Result);

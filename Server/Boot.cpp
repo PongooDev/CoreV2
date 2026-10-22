@@ -85,6 +85,7 @@ void Boot::Initialize()
     AFortWorldManager::Hook();
     AFortPlayerController::Hook();
     AFortPlayerState::Hook();
+    AFortPlayerControllerOutpost::Hook();
     UFortGlobals::Hook();
     UEngine::Hook();
     UGameEngine::Hook();

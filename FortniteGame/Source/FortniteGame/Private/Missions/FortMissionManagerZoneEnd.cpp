@@ -168,6 +168,10 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
     // so when it came first the player state could replicate finalized with only that delta and the results screen
     // showed "Total XP Gained 0" (issue #34; the client's LogXPData had every Delta at 0 while the server got the real
     // delta about 100 ms later). EarnScore's own notification now finalizes the sending player with the XP in it.
+    // A response's notifications only reach the player whose profile sent the command (the MCP parser 0x3903DB0
+    // addresses them to the profile group's account, and the handler is bound per player), so every other player's XP
+    // notification comes in the response to their own EndPrimaryMission below (Core-Backend holds it from EarnScore and
+    // waits for EarnScore if an EndPrimaryMission gets there first).
     if (AFortGameMode* FortGameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr)
     {
         FortGameMode->SetBadgeScores();

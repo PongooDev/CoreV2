@@ -66,27 +66,6 @@ namespace
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
     }
 
-    constexpr int32_t NavigationBuildMaxTicks = 36000;
-
-    void WaitForNavigationBuild(FWeakObjectPtr World, FWeakObjectPtr NavSys, double Started, double RebuildAllMs, int32_t Ticks)
-    {
-        GameThread::Enqueue([World, NavSys, Started, RebuildAllMs, Ticks]()
-        {
-            UWorld* WorldObject = static_cast<UWorld*>(World.Get());
-            UObject* NavSysObject = NavSys.Get();
-            if (!WorldObject || !NavSysObject || reinterpret_cast<UObject*>(WorldObject->GetNavigationSystem()) != NavSysObject || Ticks >= NavigationBuildMaxTicks)
-            {
-                return;
-            }
-            if (UNavigationSystem::IsNavigationBeingBuilt(WorldObject))
-            {
-                WaitForNavigationBuild(World, NavSys, Started, RebuildAllMs, Ticks + 1);
-                return;
-            }
-            UE_LOG(LogNavigation, Log, TEXT("Navmesh build time:%.3fms (RebuildAll %.3fms, %d ticks)"), NowMs() - Started, RebuildAllMs, Ticks);
-        });
-    }
-
     void WaitForQuery(FWeakObjectPtr GameMode, FWeakObjectPtr WorldManager, FWeakObjectPtr Query, int32_t TicksLeft)
     {
         GameThread::Enqueue([GameMode, WorldManager, Query, TicksLeft]()
@@ -214,7 +193,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
 
         const double Started = NowMs();
         NavSys->ReleaseInitialBuildingLock();
-        WaitForNavigationBuild(FWeakObjectPtr(reinterpret_cast<UObject*>(World)), FWeakObjectPtr(reinterpret_cast<UObject*>(NavSys)), Started, NowMs() - Started, 0);
+        UE_LOG(LogNavigation, Log, TEXT("Navmesh RebuildAll time:%.3fms"), NowMs() - Started);
     }
 
     if (AFortNavigationGraph* NavGraph = AFortNavigationGraph::GetCurrent(World))

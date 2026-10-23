@@ -52,6 +52,7 @@ public:
     void OnWorldRecordQueryComplete();
     void ServerTickLoadingOrCreatingWorld();
     void AddSharedMissionsToMissionManagerRecord();
+    void LoadQuestDrivenMissionsForPlayer(AFortPlayerController* PlayerController);
     void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory = EMissionGenerationCategory::GetMax_None(), UFortMissionGenerator* MissionGenerator = nullptr);
     void CreateMissionManager();
     int32_t GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName);
@@ -67,6 +68,8 @@ private:
     static void OnWorldRecordQueryCompleteHK(AFortWorldManager* This);
     static inline void (*ServerTickLoadingOrCreatingWorldOG)(AFortWorldManager* This) = nullptr;
     static void ServerTickLoadingOrCreatingWorldHK(AFortWorldManager* This);
+    static inline void (*SendNewPlayerEventOG)(AFortPlayerController* PlayerController) = nullptr;
+    static void SendNewPlayerEventHK(AFortPlayerController* PlayerController);
     static bool UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This, AFortPlayerController* PlayerController);
 
     bool GetPlayerQuickBarRecords(AFortPlayerController* PlayerController, FQuickBar*& OutPrimary, FQuickBar*& OutSecondary);

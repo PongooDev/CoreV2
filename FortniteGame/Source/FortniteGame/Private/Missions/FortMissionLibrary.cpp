@@ -48,6 +48,14 @@ void UFortMissionLibrary::ExecuteMissionEvent(UObject* WorldContextObject, FName
     Parms.Call(StaticClass()->GetDefaultObject());
 }
 
+void UFortMissionLibrary::LoadMission(UObject* WorldContextObject, UFortMissionInfo* MissionInfo)
+{
+    Reflection::FParams Parms(StaticFunction_LoadMission(), true);
+    Parms.Set(L"WorldContextObject", WorldContextObject);
+    Parms.Set(L"MissionInfo", MissionInfo);
+    Parms.Call(StaticClass()->GetDefaultObject());
+}
+
 void UFortMissionLibrary::SpawnAndCollectPlayerPickups(UObject* WorldContextObject, AFortPlayerController* PlayerController, const FVector& StartPosition, FName LootTierGroup, int32_t LootTier)
 {
 #if WITH_SERVER_CODE

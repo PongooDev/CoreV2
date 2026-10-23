@@ -3264,6 +3264,36 @@ bool Finder::ResolvePickupGiveLive()
     return true;
 }
 
+bool Finder::ResolvePlayerDropPickupLive()
+{
+    if (!Natives::AFortPickup_CreatePickup && !ResolvePickupLive())
+    {
+        return false;
+    }
+
+    const uintptr_t CreatePickup = reinterpret_cast<uintptr_t>(Natives::AFortPickup_CreatePickup);
+    void** VTable = CdoVTable(L"/Script/FortniteGame.FortPlayerController");
+    int32_t DropPickupIndex = -1;
+    for (int32_t Index = 0; VTable && Index < 0x400 && DropPickupIndex < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(VTable, Index);
+        const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
+        if (FunctionEnd > Function && FunctionEnd - Function < 0x100 && CallWithin(Function, FunctionEnd - Function, CreatePickup))
+        {
+            DropPickupIndex = Index;
+        }
+    }
+
+    if (DropPickupIndex < 0)
+    {
+        Log::Error(L"Finder: AFortPlayerController::SpawnDropPickup slot not found");
+        return false;
+    }
+    Natives::AFortPlayerController_SpawnDropPickupIndex = DropPickupIndex;
+    Log::Info(L"Finder: AFortPlayerController::SpawnDropPickup is slot 0x{:X}", DropPickupIndex);
+    return true;
+}
+
 bool Finder::ResolveMissionGenerationLive()
 {
     UFunction* LoadMissionFunction = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortMissionLibrary:LoadMission");

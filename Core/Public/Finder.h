@@ -58,6 +58,7 @@ namespace Finder
     bool ResolveWorldItemDefinitionLive();
     bool ResolvePickupLive();
     bool ResolvePickupGiveLive();
+    bool ResolvePlayerDropPickupLive();
     bool ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset);
     bool ResolveAIDirectorLive();
     bool ResolveLoginLive();

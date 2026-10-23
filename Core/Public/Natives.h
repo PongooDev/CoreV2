@@ -253,6 +253,7 @@ namespace Natives
     inline int32_t IFortInventoryInterface_GetNumItemsIndex = -1;
     inline uintptr_t UAbilitySystemComponent_GiveAbility = 0;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
+    inline int32_t AFortPlayerController_SpawnDropPickupIndex = -1;
     inline void (*AFortPickup_SetPickupTarget)(AFortPickup* Pickup, AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound) = nullptr;
     inline int32_t AFortGameModeZone_CreateAIDirectorIndex = -1;
     inline void (*AFortAIDirector_StopEncounter)(UObject* This, UObject* EncounterToStop, uint8_t EncounterStopReason, bool bForceKillAI, bool bBroadcastStop) = nullptr;

@@ -9,6 +9,7 @@
 
 class AFortInventory;
 class AFortPawn;
+class AFortPickup;
 class AFortWeapon;
 class APawn;
 class IFortInventoryOwnerInterface;
@@ -19,7 +20,10 @@ class UFortQuestManager;
 class UFortRegisteredPlayerInfo;
 class UFortSchematicItem;
 class UFortWorldItem;
+struct FFortItemEntry;
 struct FItemDefinitionAndCount;
+struct FRotator;
+struct FVector;
 
 class AFortPlayerController : public APlayerController
 {
@@ -64,6 +68,7 @@ public:
     void ServerSpotActor_Implementation(AActor* NewlySpottedActor);
     void ServerRemoveInventoryStateValue_Implementation(const FGuid& ItemGuid, EFortItemEntryState StateType);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
+    AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
     bool HandleItemZeroDurability(const FGuid& ItemGuid);
     void EndWeaponAbilities(AFortWeapon* Weapon);

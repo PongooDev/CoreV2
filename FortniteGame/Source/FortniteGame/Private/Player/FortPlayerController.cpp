@@ -714,7 +714,7 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
     if (RemoveInventoryItem(ItemGuid, DropCount, false))
     {
         const FVector Location = Pawn->GetTransform().GetLocation();
-        if (AFortPickup* Pickup = AFortPickup::CreatePickup(GetWorld(), *DropEntry, &Location, nullptr, this))
+        if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &Location, nullptr))
         {
             Pickup->PawnWhoDroppedPickup = Pawn;
             Pickup->TossPickup(Location, Pawn, 0);
@@ -773,6 +773,15 @@ void AFortPlayerController::ServerRemoveInventoryStateValue_Implementation(const
         }
     }
 #endif
+}
+
+AFortPickup* AFortPlayerController::SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation)
+{
+    if (Natives::AFortPlayerController_SpawnDropPickupIndex < 0 && !Finder::ResolvePlayerDropPickupLive())
+    {
+        return nullptr;
+    }
+    return CallVirtual<AFortPickup*>(this, Natives::AFortPlayerController_SpawnDropPickupIndex, &ItemEntry, SpawnLocation, SpawnRotation);
 }
 
 bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)

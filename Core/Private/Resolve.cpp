@@ -4970,6 +4970,41 @@ bool Finder::ResolveItemEntryStateLive()
     return true;
 }
 
+bool Finder::ResolveNeverPersistItemDefinitionLive()
+{
+    if (Natives::UFortNeverPersistItemDefinition_OnItemCountAddedIndex >= 0)
+    {
+        return true;
+    }
+
+    void** NeverPersistVTable = CdoVTable(L"/Script/FortniteGame.FortNeverPersistItemDefinition");
+    void** WorldItemDefinitionVTable = CdoVTable(L"/Script/FortniteGame.FortWorldItemDefinition");
+    std::vector<int32_t> Overrides;
+    for (int32_t Index = 1; NeverPersistVTable && WorldItemDefinitionVTable && Index < 0x100; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(NeverPersistVTable, Index);
+        const uintptr_t Parent = VTableEntry(WorldItemDefinitionVTable, Index);
+        if (Function && Parent && Function != Parent && Byte(Function) == 0xE9 && Finder::RelativeTarget(Function, 1, 5) == Parent)
+        {
+            Overrides.push_back(Index);
+        }
+    }
+
+    const uintptr_t Removed = Overrides.size() == 2 ? VTableEntry(WorldItemDefinitionVTable, Overrides[1]) : 0;
+    const uintptr_t RemovedEnd = Removed ? Finder::FunctionEnd(Removed) : 0;
+    const bool bNegatesCount = RemovedEnd > Removed && FindInstruction(Removed, RemovedEnd, { 0x41, 0xF7, 0xD8 });
+    if (Overrides.size() != 2 || Overrides[1] != Overrides[0] + 1 || !bNegatesCount)
+    {
+        Log::Error(L"Finder: UFortNeverPersistItemDefinition item count slots not found ({} overrides)", Overrides.size());
+        return false;
+    }
+
+    Natives::UFortNeverPersistItemDefinition_OnItemCountAddedIndex = Overrides[0];
+    Natives::UFortNeverPersistItemDefinition_OnItemCountRemovedIndex = Overrides[1];
+    Log::Info(L"Finder: UFortNeverPersistItemDefinition::OnItemCountAdded is slot 0x{:X}, OnItemCountRemoved slot 0x{:X}", Overrides[0], Overrides[1]);
+    return true;
+}
+
 bool Finder::ResolveLeaveOutpostLive()
 {
     if (Natives::AFortGameMode_SendStayWithParty && Natives::AGameMode_ReturnToMainMenuHostIndex >= 0)

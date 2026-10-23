@@ -25,6 +25,7 @@
 #include "McpProfileGroup.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
+#include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionManager.h"
@@ -112,6 +113,7 @@ void Boot::Initialize()
         AFortObjectiveBase::HookVTables();
         UFortSchematicItem::HookVTables();
         UFortWorldItem::HookVTables();
+        UFortNeverPersistItemDefinition::HookVTables();
         AFortMission::HookCallSites();
         AFortMission::HookVTables();
         AFortMissionManager::HookVTables();

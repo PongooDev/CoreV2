@@ -2,10 +2,12 @@
 
 #include "Customization/CustomCharacterPart.h"
 #include "GameFramework/PlayerState.h"
+#include "StructArray.h"
 
 class AFortTeamInfo;
 class UAbilitySystemComponent;
 class UFortHero;
+class UFortItemDefinition;
 
 class EFortReplicatedStat
 {
@@ -78,4 +80,23 @@ public:
 private:
     static inline void (*SetHeroTypeOG)(AFortPlayerState* This, UFortHero* Hero) = nullptr;
     static void SetHeroTypeHK(AFortPlayerState* This, UFortHero* Hero);
+};
+
+struct FAccumulatedItemEntry
+{
+    DefineUnrealStruct(FAccumulatedItemEntry, FortniteGame)
+    DefineUProperty(UFortItemDefinition*, ItemDefinition)
+    DefineUProperty(int32_t, Quantity)
+};
+
+class AFortPlayerStateZone : public AFortPlayerState
+{
+    DefineUnrealClass(AFortPlayerStateZone, FortniteGame)
+
+public:
+    DefineUStructArrayProperty(FAccumulatedItemEntry, AccumulatedItems)
+    DefineUFunction(OnRep_AccumulatedItems)
+
+    void AddAccumulatedItem(UFortItemDefinition* ItemDefinition, int32_t Delta);
+    void OnRep_AccumulatedItems();
 };

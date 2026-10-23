@@ -5,6 +5,7 @@
 #include "UObject/Object.h"
 
 class AFortPlayerController;
+class IFortInventoryOwnerInterface;
 class UFortItem;
 class UFortWorldItem;
 
@@ -119,6 +120,27 @@ public:
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
     float GetMaxDurability(int32_t ItemLevel) const;
+};
+
+class UFortNeverPersistItemDefinition : public UFortWorldItemDefinition
+{
+    DefineUnrealClass(UFortNeverPersistItemDefinition, FortniteGame)
+
+public:
+    DefineBitfieldUProperty(bAccumulateOnPlayerState)
+
+    void OnItemCountAdded(IFortInventoryOwnerInterface* InventoryOwner, int32_t Count, bool bUnused);
+    void OnItemCountRemoved(IFortInventoryOwnerInterface* InventoryOwner, int32_t Count);
+
+    static void HookVTables();
+
+private:
+    void AccumulateOnPlayerState(IFortInventoryOwnerInterface* InventoryOwner, int32_t Delta);
+
+    static inline void (*OnItemCountAddedOG)(UFortNeverPersistItemDefinition* This, IFortInventoryOwnerInterface* InventoryOwner, int32_t Count, bool bUnused) = nullptr;
+    static inline void (*OnItemCountRemovedOG)(UFortNeverPersistItemDefinition* This, IFortInventoryOwnerInterface* InventoryOwner, int32_t Count) = nullptr;
+    static void OnItemCountAddedHK(UFortNeverPersistItemDefinition* This, IFortInventoryOwnerInterface* InventoryOwner, int32_t Count, bool bUnused);
+    static void OnItemCountRemovedHK(UFortNeverPersistItemDefinition* This, IFortInventoryOwnerInterface* InventoryOwner, int32_t Count);
 };
 
 class UFortGadgetItemDefinition : public UFortWorldItemDefinition

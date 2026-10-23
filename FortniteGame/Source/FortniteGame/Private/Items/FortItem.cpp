@@ -4,7 +4,9 @@
 #include "Finder.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
+#include "Items/FortInventoryOwnerInterface.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -149,6 +151,73 @@ float UFortWorldItemDefinition::GetMaxDurability(int32_t ItemLevel) const
     Reflection::FParams Params(StaticFunction_GetMaxDurability());
     Params.Set(L"ItemLevel", ItemLevel);
     return Params.Call(const_cast<UFortWorldItemDefinition*>(this)) ? Params.Take<float>(L"ReturnValue") : 1.0f;
+}
+
+void UFortNeverPersistItemDefinition::OnItemCountAdded(IFortInventoryOwnerInterface* InventoryOwner, int32_t Count, bool bUnused)
+{
+    OnItemCountAddedOG(this, InventoryOwner, Count, bUnused);
+    AccumulateOnPlayerState(InventoryOwner, Count);
+}
+
+void UFortNeverPersistItemDefinition::OnItemCountRemoved(IFortInventoryOwnerInterface* InventoryOwner, int32_t Count)
+{
+    OnItemCountRemovedOG(this, InventoryOwner, Count);
+    AccumulateOnPlayerState(InventoryOwner, -Count);
+}
+
+void UFortNeverPersistItemDefinition::AccumulateOnPlayerState(IFortInventoryOwnerInterface* InventoryOwner, int32_t Delta)
+{
+#if WITH_SERVER_CODE
+    if (!bAccumulateOnPlayerState || !InventoryOwner)
+    {
+        return;
+    }
+
+    AFortPlayerController* PlayerController = Cast<AFortPlayerController>(InventoryOwner->_getUObject());
+    AFortPlayerStateZone* PlayerState = PlayerController && PlayerController->Role == ROLE_Authority ? Cast<AFortPlayerStateZone>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
+    if (PlayerState)
+    {
+        PlayerState->AddAccumulatedItem(this, Delta);
+    }
+#endif
+}
+
+void UFortNeverPersistItemDefinition::HookVTables()
+{
+    UObject* NeverPersistDefault = StaticClass() ? StaticClass()->GetDefaultObject(false) : nullptr;
+    void** NeverPersistVTable = NeverPersistDefault ? *reinterpret_cast<void***>(NeverPersistDefault) : nullptr;
+    if (!NeverPersistVTable || !Finder::ResolveNeverPersistItemDefinitionLive())
+    {
+        return;
+    }
+
+    const int32_t AddedIndex = Natives::UFortNeverPersistItemDefinition_OnItemCountAddedIndex;
+    const int32_t RemovedIndex = Natives::UFortNeverPersistItemDefinition_OnItemCountRemovedIndex;
+    void* const Added = NeverPersistVTable[AddedIndex];
+    void* const Removed = NeverPersistVTable[RemovedIndex];
+    OnItemCountAddedOG = reinterpret_cast<decltype(OnItemCountAddedOG)>(Added);
+    OnItemCountRemovedOG = reinterpret_cast<decltype(OnItemCountRemovedOG)>(Removed);
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[AddedIndex] == Added && VTable[RemovedIndex] == Removed)
+        {
+            Hooks::SwapVTable(L"UFortNeverPersistItemDefinition::OnItemCountAdded", VTable, AddedIndex, reinterpret_cast<void*>(&OnItemCountAddedHK));
+            Hooks::SwapVTable(L"UFortNeverPersistItemDefinition::OnItemCountRemoved", VTable, RemovedIndex, reinterpret_cast<void*>(&OnItemCountRemovedHK));
+        }
+    }
+}
+
+void UFortNeverPersistItemDefinition::OnItemCountAddedHK(UFortNeverPersistItemDefinition* This, IFortInventoryOwnerInterface* InventoryOwner, int32_t Count, bool bUnused)
+{
+    This->OnItemCountAdded(InventoryOwner, Count, bUnused);
+}
+
+void UFortNeverPersistItemDefinition::OnItemCountRemovedHK(UFortNeverPersistItemDefinition* This, IFortInventoryOwnerInterface* InventoryOwner, int32_t Count)
+{
+    This->OnItemCountRemoved(InventoryOwner, Count);
 }
 
 void UFortWorldItem::SetOwningControllerForTemporaryItem(AFortPlayerController* InController)

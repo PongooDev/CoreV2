@@ -885,6 +885,90 @@ bool AFortPlayerController::HandleItemZeroDurability(const FGuid& ItemGuid)
 #endif
 }
 
+void AFortPlayerController::ServerDisassembleInventoryItem_Implementation(const FGuid& ItemGuid)
+{
+    DisassembleInventoryItem(ItemGuid);
+}
+
+bool AFortPlayerController::DisassembleInventoryItem(const FGuid& ItemGuid)
+{
+    if (!Natives::AFortPlayerController_DisassembleInventoryItem(this, ItemGuid))
+    {
+        return false;
+    }
+
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = Role == ROLE_Authority ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+    UFortWorldItemDefinition* ItemDefinition = WorldItem ? Cast<UFortWorldItemDefinition>(WorldItem->GetItemDefinitionBP()) : nullptr;
+    if (!ItemDefinition)
+    {
+        return true;
+    }
+
+    TStructArray<FFortItemEntry> Results;
+    ItemDefinition->GetDisassemblyResults(Results, WorldItem->GetNormalizedDurability());
+    if (RemoveInventoryItem(ItemGuid, 1, false))
+    {
+        AFortPawn* Pawn = MyFortPawn;
+        for (int32_t Index = 0; Index < Results.Num(); ++Index)
+        {
+            FFortItemEntry& Result = Results[Index];
+            UFortWorldItemDefinition* ResultDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Result.ItemDefinition));
+            const int32_t Count = Result.Count;
+            if (!ResultDefinition || Count <= 0)
+            {
+                continue;
+            }
+
+            const int32_t Given = Inventory->AddItemStacks(Result, Count - Inventory->GetOverflowAmount(Result, false), -1, true, true,
+                [Inventory](UFortWorldItem* Existing, int32_t Added)
+                {
+                    FFortItemEntry& ExistingEntry = Existing->ItemEntry;
+                    Inventory->UpdateWorldItemCount(Existing, ExistingEntry.Count + Added);
+                    ExistingEntry.AddNewItemCount(Added, false);
+                },
+                [&](int32_t StackCount, bool bOverflow) -> UFortWorldItem*
+                {
+                    UFortWorldItem* NewItem = Cast<UFortWorldItem>(ResultDefinition->CreateTemporaryItemInstanceBP(StackCount, Result.Level));
+                    if (!NewItem)
+                    {
+                        return nullptr;
+                    }
+
+                    FFortItemEntry& NewEntry = NewItem->ItemEntry;
+                    NewEntry.inventory_overflow_date = bOverflow;
+                    NewItem->SetOwningControllerForTemporaryItem(this);
+                    Inventory->AddWorldItem(NewItem);
+                    NewEntry.SetNewItemCount(StackCount, false);
+                    if (!bOverflow)
+                    {
+                        TryAddToQuickBar(NewItem);
+                    }
+                    return NewItem;
+                });
+
+            if (Given < Count && Pawn)
+            {
+                Result.Count = Count - Given;
+                const FVector Location = Pawn->GetTransform().GetLocation();
+                if (AFortPickup* Pickup = AFortPickup::CreatePickup(GetWorld(), Result, &Location, nullptr, this))
+                {
+                    Pickup->TossPickup(Location, Pawn, 0);
+                }
+            }
+        }
+    }
+
+    for (int32_t Index = 0; Index < Results.Num(); ++Index)
+    {
+        FFortItemEntry::StaticStruct()->DestroyStruct(&Results[Index]);
+    }
+    FMemory::Free(Results.GetData());
+#endif
+    return true;
+}
+
 void AFortPlayerController::EndWeaponAbilities(AFortWeapon* Weapon)
 {
 #if WITH_SERVER_CODE
@@ -1003,6 +1087,22 @@ void AFortPlayerController::HookVTables()
                 {
                     Hooks::SwapVTable(L"AFortPlayerController::ModDurability", InterfaceVTable, ModIndex, reinterpret_cast<void*>(&ModDurabilityHK));
                 }
+            }
+        }
+    }
+
+    if (const int32_t DisassembleIndex = Finder::ImplementationIndex(StaticFunction_ServerDisassembleInventoryItem());
+        PlayerControllerVTable && DisassembleIndex >= 0 && Finder::ResolveDisassemblyLive(StaticFunction_ServerDisassembleInventoryItem(), PlayerControllerDefault))
+    {
+        void* const PlayerControllerDisassemble = PlayerControllerVTable[DisassembleIndex];
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[DisassembleIndex] == PlayerControllerDisassemble)
+            {
+                Hooks::SwapVTable(L"AFortPlayerController::ServerDisassembleInventoryItem_Implementation", VTable, DisassembleIndex, reinterpret_cast<void*>(&ServerDisassembleInventoryItem_ImplementationHK));
             }
         }
     }
@@ -1188,6 +1288,11 @@ bool AFortPlayerController::ModDurabilityHK(void* InventoryOwner, const FGuid& I
 {
     AFortPlayerController* PlayerController = FromInventoryOwner(static_cast<IFortInventoryOwnerInterface*>(InventoryOwner));
     return PlayerController->ModDurability(ItemGuid, DurabilityMod, bForceSet);
+}
+
+void AFortPlayerController::ServerDisassembleInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid)
+{
+    This->ServerDisassembleInventoryItem_Implementation(ItemGuid);
 }
 
 void AFortPlayerController::PossessHK(AFortPlayerController* This, APawn* InPawn)

@@ -44,6 +44,7 @@ public:
     DefineUFunction(ServerRemoveInventoryItem)
     DefineUFunction(ServerRemoveInventoryStateValue)
     DefineUFunction(ServerSpotActor)
+    DefineUFunction(ServerDisassembleInventoryItem)
     DefineUFunction(ServerModDurability)
     DefineUFunction(ActivateSlot)
     DefineUFunction(GivePlayerAmmo)
@@ -66,11 +67,13 @@ public:
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
     void ServerSpotActor_Implementation(AActor* NewlySpottedActor);
+    void ServerDisassembleInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerRemoveInventoryStateValue_Implementation(const FGuid& ItemGuid, EFortItemEntryState StateType);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
     bool HandleItemZeroDurability(const FGuid& ItemGuid);
+    bool DisassembleInventoryItem(const FGuid& ItemGuid);
     void EndWeaponAbilities(AFortWeapon* Weapon);
     int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
     UFortQuestManager* GetQuestManager() const;
@@ -102,5 +105,6 @@ private:
     static bool RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     static inline bool (*RemoveInventoryItemOG)(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars) = nullptr;
     static bool ModDurabilityHK(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
+    static void ServerDisassembleInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static inline bool (*ModDurabilityOG)(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet) = nullptr;
 };

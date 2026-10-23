@@ -5035,6 +5035,40 @@ bool Finder::ResolveNeverPersistItemDefinitionLive()
     return true;
 }
 
+bool Finder::ResolveDisassemblyLive(UFunction* ServerDisassembleInventoryItem, UObject* PlayerControllerDefault)
+{
+    if (Natives::AFortPlayerController_DisassembleInventoryItem && Natives::UFortWorldItemDefinition_GetDisassemblyResults)
+    {
+        return true;
+    }
+
+    const auto FirstCall = [](uintptr_t Function)
+    {
+        const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        const uintptr_t Call = FunctionEnd ? FindRawCall(Function, FunctionEnd) : 0;
+        return Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    };
+
+    UFunction* CanBeDisassembledFunction = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortWorldItemDefinition:CanBeDisassembled");
+    const uintptr_t CanBeDisassembled = FirstCall(CanBeDisassembledFunction ? reinterpret_cast<uintptr_t>(CanBeDisassembledFunction->GetNativeFunc()) : 0);
+
+    void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
+    const uintptr_t Disassemble = FirstCall(VTableEntry(PlayerControllerVTable, ImplementationIndex(ServerDisassembleInventoryItem)));
+    const uintptr_t DisassembleEnd = Disassemble ? Finder::FunctionEnd(Disassemble) : 0;
+    const uintptr_t Results = FunctionOf(L"UFortWorldItemDefinition::GetDisassemblyResults");
+
+    if (!CanBeDisassembled || !DisassembleEnd || !CallWithin(Disassemble, DisassembleEnd - Disassemble, CanBeDisassembled) || FirstCall(Results) != CanBeDisassembled)
+    {
+        Log::Error(L"Finder: item disassembly not found");
+        return false;
+    }
+
+    Natives::AFortPlayerController_DisassembleInventoryItem = reinterpret_cast<decltype(Natives::AFortPlayerController_DisassembleInventoryItem)>(Disassemble);
+    Natives::UFortWorldItemDefinition_GetDisassemblyResults = reinterpret_cast<decltype(Natives::UFortWorldItemDefinition_GetDisassemblyResults)>(Results);
+    Log::Info(L"Finder: AFortPlayerController::DisassembleInventoryItem +0x{:X}, UFortWorldItemDefinition::GetDisassemblyResults +0x{:X}", Disassemble - Finder::ImageBase(), Results - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveLeaveOutpostLive()
 {
     if (Natives::AFortGameMode_SendStayWithParty && Natives::AGameMode_ReturnToMainMenuHostIndex >= 0)

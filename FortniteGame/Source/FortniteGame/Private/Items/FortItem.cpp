@@ -146,11 +146,25 @@ bool UFortItem::HasDurability() const
     return Params.Call(const_cast<UFortItem*>(this)) && Params.Take<bool>(L"ReturnValue");
 }
 
+float UFortItem::GetNormalizedDurability() const
+{
+    Reflection::FParams Params(StaticFunction_GetNormalizedDurability());
+    return Params.Call(const_cast<UFortItem*>(this)) ? Params.Take<float>(L"ReturnValue") : 1.0f;
+}
+
 float UFortWorldItemDefinition::GetMaxDurability(int32_t ItemLevel) const
 {
     Reflection::FParams Params(StaticFunction_GetMaxDurability());
     Params.Set(L"ItemLevel", ItemLevel);
     return Params.Call(const_cast<UFortWorldItemDefinition*>(this)) ? Params.Take<float>(L"ReturnValue") : 1.0f;
+}
+
+void UFortWorldItemDefinition::GetDisassemblyResults(TStructArray<FFortItemEntry>& OutResults, float NormalizedDurability) const
+{
+    if (Natives::UFortWorldItemDefinition_GetDisassemblyResults)
+    {
+        Natives::UFortWorldItemDefinition_GetDisassemblyResults(this, &OutResults, 0, NormalizedDurability);
+    }
 }
 
 void UFortNeverPersistItemDefinition::OnItemCountAdded(IFortInventoryOwnerInterface* InventoryOwner, int32_t Count, bool bUnused)

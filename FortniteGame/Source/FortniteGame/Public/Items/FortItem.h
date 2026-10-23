@@ -70,11 +70,13 @@ class UFortItem : public UObject
     DefineUFunction(GetItemDefinitionBP)
     DefineUFunction(GetLevel)
     DefineUFunction(HasDurability)
+    DefineUFunction(GetNormalizedDurability)
 
 public:
     UFortItemDefinition* GetItemDefinitionBP() const;
     int32_t GetLevel() const;
     bool HasDurability() const;
+    float GetNormalizedDurability() const;
 };
 
 class UFortWorldItem : public UFortItem

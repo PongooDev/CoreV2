@@ -2,9 +2,11 @@
 
 #include "Containers/UnrealString.h"
 #include "GameplayTagContainer.h"
+#include "StructArray.h"
 #include "UObject/Object.h"
 
 class AFortPlayerController;
+struct FFortItemEntry;
 class IFortInventoryOwnerInterface;
 class UFortItem;
 class UFortWorldItem;
@@ -120,6 +122,7 @@ public:
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
     float GetMaxDurability(int32_t ItemLevel) const;
+    void GetDisassemblyResults(TStructArray<FFortItemEntry>& OutResults, float NormalizedDurability) const;
 };
 
 class UFortNeverPersistItemDefinition : public UFortWorldItemDefinition

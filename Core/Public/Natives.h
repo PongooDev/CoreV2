@@ -25,6 +25,8 @@ class AController;
 class AFortGameMode;
 class AFortInventory;
 class UFortWorldItem;
+class UFortWorldItemDefinition;
+struct FGuid;
 class AFortGameState;
 class UFortMissionInfo;
 struct FFortMissionManagerRecord;
@@ -273,6 +275,8 @@ namespace Natives
     inline bool (*UFortSchematicItem_CanCraftSchematic)(UFortSchematicItem* This, AFortPlayerController* PlayerController, uint8_t* OutFailCause, bool bConsiderReservedItems, int32_t Count) = nullptr;
     inline UFortSchematicItem* (*AFortPlayerController_GetSchematicForItem)(AFortPlayerController* This, const UFortItemDefinition* ItemDefinition) = nullptr;
     inline int32_t UFortSchematicItem_ServerCraftSchematicIndex = -1;
+    inline bool (*AFortPlayerController_DisassembleInventoryItem)(AFortPlayerController* This, const FGuid& ItemGuid) = nullptr;
+    inline FScriptArray* (*UFortWorldItemDefinition_GetDisassemblyResults)(const UFortWorldItemDefinition* This, FScriptArray* OutResults, int32_t Unused, float NormalizedDurability) = nullptr;
     inline int32_t UFortWorldItem_SetLoadedAmmoIndex = -1;
     inline int32_t UFortWorldItem_SetItemCountIndex = -1;
     inline int32_t UFortWorldItem_SetDurabilityIndex = -1;

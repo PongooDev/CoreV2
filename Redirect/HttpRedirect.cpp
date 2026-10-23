@@ -7,6 +7,7 @@
 #include "Interfaces/IHttpRequest.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cwctype>
 #include <string>
 #include <string_view>
@@ -100,6 +101,50 @@ namespace
         void** VTable = RequestVTable(ProcessRequestText);
         return Hooks::SwapVTable(Name, VTable, SetURLSlot, reinterpret_cast<void*>(Replacement), reinterpret_cast<void**>(Original));
     }
+
+    using FCreateWebSocket = void* (*)(void* Module, void* OutWebSocket, const FString& Url, const void* Protocols);
+    FCreateWebSocket CreateWebSocketOG = nullptr;
+
+    void* CreateWebSocketHK(void* Module, void* OutWebSocket, const FString& Url, const void* Protocols)
+    {
+        std::wstring Target = RedirectedURL(Url.ToStdString());
+        if (Target.empty())
+        {
+            return CreateWebSocketOG(Module, OutWebSocket, Url, Protocols);
+        }
+        if (Target.starts_with(L"https://"))
+        {
+            Target.replace(0, 5, L"wss");
+        }
+        else if (Target.starts_with(L"http://"))
+        {
+            Target.replace(0, 4, L"ws");
+        }
+
+        Log::Info(L"Redirect: {} -> {}", Url.ToStdString(), Target);
+        return CreateWebSocketOG(Module, OutWebSocket, FString(Target), Protocols);
+    }
+
+    // FWebSocketsModule::CreateWebSocket: the call in FStompClient's constructor (the function besides
+    // FStompModule::StartupModule that names the v12.stomp subprotocol) to `mov rcx, [rcx+8]; mov rax, [rcx];
+    // call [rax+10h]` (the module's WebSocketsManager->CreateWebSocket).
+    uintptr_t FindCreateWebSocket()
+    {
+        static constexpr uint8_t Body[] = { 0x48, 0x8B, 0x49, 0x08, 0x48, 0x8B, 0xDA, 0x48, 0x8B, 0x01, 0xFF, 0x50, 0x10 };
+        for (const uintptr_t Ref : Finder::StringRefs(L"v12.stomp"))
+        {
+            const uintptr_t Function = Finder::FunctionStart(Ref);
+            const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+            for (const auto& [Call, Target] : End ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+            {
+                if (Finder::IsReadable(reinterpret_cast<const void*>(Target + 6), sizeof(Body)) && std::memcmp(reinterpret_cast<const void*>(Target + 6), Body, sizeof(Body)) == 0)
+                {
+                    return Target;
+                }
+            }
+        }
+        return 0;
+    }
 }
 
 bool HttpRedirect::Hook()
@@ -112,5 +157,15 @@ bool HttpRedirect::Hook()
     const bool bWinInet = HookRequest(L"FHttpRequestWinInet::SetURL",
         L"ProcessRequest failed. Could not initialize Internet connection.",
         &WinInetSetURLOG, &SetURL<&WinInetSetURLOG>);
+    // The client's STOMP notifications (StompClientMcp) connect through libwebsockets, which doesn't use the HTTP proxy,
+    // to the service config's URL, read before the hotfix can change it (Backend-Evidence "STOMP").
+    if (const uintptr_t CreateWebSocket = FindCreateWebSocket())
+    {
+        Hooks::Detour(L"FWebSocketsModule::CreateWebSocket", reinterpret_cast<void*>(CreateWebSocket), &CreateWebSocketHK, &CreateWebSocketOG);
+    }
+    else
+    {
+        Log::Error(L"Redirect: FWebSocketsModule::CreateWebSocket not found, STOMP notifications stay on Epic's host");
+    }
     return bCurl && bWinInet;
 }

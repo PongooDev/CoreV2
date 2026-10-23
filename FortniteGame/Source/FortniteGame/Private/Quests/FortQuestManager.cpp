@@ -37,11 +37,10 @@ void UFortQuestManager::SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject
     }
 }
 
-void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, int32_t NumMissionPoints, bool bCriticalMatchBonus)
+void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus)
 {
     if (Natives::UFortQuestManager_SendEndPrimaryMission)
     {
-        FScriptArray EarnedBadges;
         Natives::UFortQuestManager_SendEndPrimaryMission(this, MatchmakingSessionId, MissionName, MissionStatus, EarnedBadges, NumMissionPoints, bCriticalMatchBonus);
     }
 }

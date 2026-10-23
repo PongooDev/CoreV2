@@ -9,6 +9,7 @@
 #include "StructArray.h"
 
 class UFortMissionGenerator;
+struct FFortQuestEarnedBadgeData;
 class EFortMissionStatus;
 
 class EMissionGenerationCategory
@@ -99,6 +100,7 @@ public:
     void SetMissionCompletionResult(AFortMission* Mission);
     void SyncMissionRewardItems(AFortPlayerController* PlayerController);
     int32_t GetMissionPointsForPlayer(AFortPlayerController* PlayerController, int32_t MaxMissionPoints);
+    void CollectEarnedBadgeData(AFortPlayerController* PlayerController, TStructArray<FFortQuestEarnedBadgeData>& OutBadges);
 
     static void HookVTables();
 

@@ -5,10 +5,12 @@
 #include "Finder.h"
 #include "FortGameModeZone.h"
 #include "FortGameState.h"
+#include "FortKismetLibrary.h"
 #include "FortWorldManager.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
 #include "Items/FortBadgeItemDefinition.h"
+#include "Items/FortInventory.h"
 #include "Log.h"
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionLibrary.h"
@@ -136,7 +138,14 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                     Log::Info(L"OnZoneEnd: {} badges {}; missed {}; mission points {}", PlayerController->GetName().ToStdString(), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.RewardItems)), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.MissedRewardItems)), MissionPoints);
                 }
             }
-            QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus);
+            TStructArray<FFortQuestEarnedBadgeData> EarnedBadges;
+            CollectEarnedBadgeData(PlayerController, EarnedBadges);
+            QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, EarnedBadges, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus);
+            for (int32_t Index = 0; Index < EarnedBadges.Num(); ++Index)
+            {
+                FFortQuestEarnedBadgeData::StaticStruct()->DestroyStruct(&EarnedBadges[Index]);
+            }
+            FMemory::Free(EarnedBadges.GetData());
         }
     }
 
@@ -386,6 +395,85 @@ int32_t AFortMissionManager::GetMissionPointsForPlayer(AFortPlayerController* Pl
     }
     Points += FindOrAddMissionPrimaryActivity(PlayerController).AdditionalCompletionMissionPoints;
     return MaxMissionPoints > 0 ? std::min(Points, MaxMissionPoints) : Points;
+}
+
+// EndPrimaryMission's earnedBadgeData: the player's Default badges in EarnedBadgesArray plus the badges in their world
+// inventory (the survivor missions' GrantSurvivorBadge gives them with K2_GiveItemToAllPlayers), which are taken out
+// so the theater0 save doesn't keep them.
+void AFortMissionManager::CollectEarnedBadgeData(AFortPlayerController* PlayerController, TStructArray<FFortQuestEarnedBadgeData>& OutBadges)
+{
+#if WITH_SERVER_CODE
+    APlayerState* PlayerState = PlayerController ? static_cast<APlayerState*>(PlayerController->PlayerState) : nullptr;
+    if (!PlayerState)
+    {
+        return;
+    }
+
+    std::vector<std::pair<UFortBadgeItemDefinition*, int32_t>> Counts;
+    auto AddCount = [&Counts](UFortBadgeItemDefinition* Badge, int32_t Count)
+    {
+        auto It = std::find_if(Counts.begin(), Counts.end(), [Badge](const auto& Pair) { return Pair.first == Badge; });
+        if (It == Counts.end())
+        {
+            Counts.emplace_back(Badge, Count);
+        }
+        else
+        {
+            It->second += Count;
+        }
+    };
+
+    const FUniqueNetIdRepl& PlayerId = PlayerState->UniqueId;
+    FEarnedBadgeEntryArray& BadgeArray = EarnedBadgesArray;
+    TStructArray<FEarnedBadgeEntry>& Entries = BadgeArray.Items;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        FEarnedBadgeEntry& Entry = Entries[Index];
+        UFortBadgeItemDefinition* Badge = Entry.Badge;
+        TStructArray<FEarnedBadgePlayerData>& PlayerData = Entry.PlayerData;
+        for (int32_t DataIndex = 0; Badge && Entry.RewardType == EFortRewardType::GetDefault() && DataIndex < PlayerData.Num(); ++DataIndex)
+        {
+            if (IsSamePlayer(PlayerData[DataIndex].PlayerID, PlayerId) && PlayerData[DataIndex].Count > 0)
+            {
+                AddCount(Badge, PlayerData[DataIndex].Count);
+            }
+        }
+    }
+
+    std::vector<UFortBadgeItemDefinition*> InventoryBadges;
+    if (AFortInventory* Inventory = PlayerController->WorldInventory)
+    {
+        FFortItemList& ItemList = Inventory->Inventory;
+        TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+        for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+        {
+            FFortItemEntry& ItemEntry = Instances[Index]->ItemEntry;
+            UFortBadgeItemDefinition* Badge = Cast<UFortBadgeItemDefinition>(reinterpret_cast<UObject*>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition)));
+            if (Badge && ItemEntry.Count > 0)
+            {
+                AddCount(Badge, ItemEntry.Count);
+                if (std::find(InventoryBadges.begin(), InventoryBadges.end(), Badge) == InventoryBadges.end())
+                {
+                    InventoryBadges.push_back(Badge);
+                }
+            }
+        }
+    }
+    for (UFortBadgeItemDefinition* Badge : InventoryBadges)
+    {
+        UFortKismetLibrary::K2_RemoveItemFromPlayer(PlayerController, Badge, -1);
+    }
+
+    std::wstring Text;
+    for (const auto& [Badge, Count] : Counts)
+    {
+        FFortQuestEarnedBadgeData& Data = OutBadges.AddDefaulted();
+        Data.TemplateId = Badge->GetPersistentName();
+        Data.Count = Count;
+        Text += std::format(L"{}{} x{}", Text.empty() ? L"" : L", ", Data.TemplateId.ToStdString(), Count);
+    }
+    Log::Info(L"OnZoneEnd: {} earnedBadgeData {} ({} badge type(s) from the inventory)", PlayerController->GetName().ToStdString(), Text.empty() ? std::wstring(L"none") : Text, InventoryBadges.size());
+#endif
 }
 
 void AFortMissionManager::HookVTables()

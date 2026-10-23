@@ -2,6 +2,7 @@
 
 #include "Containers/UnrealString.h"
 #include "GameplayTagContainer.h"
+#include "StructArray.h"
 #include "UObject/Object.h"
 
 class EFortQuestObjectiveStatEvent
@@ -52,6 +53,13 @@ class EFortQuestState
     DefineUEnumValue(Claimed)
 };
 
+struct FFortQuestEarnedBadgeData
+{
+    DefineUnrealStruct(FFortQuestEarnedBadgeData, FortniteGame)
+    DefineUProperty(FString, TemplateId)
+    DefineUProperty(int32_t, Count)
+};
+
 class UFortMcpProfileAccount;
 class UFortMcpProfileWorld;
 class UFortQuestItemDefinition;
@@ -75,7 +83,7 @@ public:
     UFortQuestItem* GetQuestWithDefinition(UFortQuestItemDefinition* Definition);
     bool HasActiveQuest(UFortQuestItemDefinition* Definition);
     void SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
-    void SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, int32_t NumMissionPoints, bool bCriticalMatchBonus);
+    void SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus);
 };
 
 class UFortRegisteredPlayerInfo : public UObject

@@ -66,18 +66,21 @@ namespace
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
     }
 
-    void WaitForNavigationBuild(FWeakObjectPtr World, double Started, double RebuildAllMs, int32_t Ticks)
+    constexpr int32_t NavigationBuildMaxTicks = 36000;
+
+    void WaitForNavigationBuild(FWeakObjectPtr World, FWeakObjectPtr NavSys, double Started, double RebuildAllMs, int32_t Ticks)
     {
-        GameThread::Enqueue([World, Started, RebuildAllMs, Ticks]()
+        GameThread::Enqueue([World, NavSys, Started, RebuildAllMs, Ticks]()
         {
-            UObject* WorldObject = World.Get();
-            if (!WorldObject)
+            UWorld* WorldObject = static_cast<UWorld*>(World.Get());
+            UObject* NavSysObject = NavSys.Get();
+            if (!WorldObject || !NavSysObject || reinterpret_cast<UObject*>(WorldObject->GetNavigationSystem()) != NavSysObject || Ticks >= NavigationBuildMaxTicks)
             {
                 return;
             }
             if (UNavigationSystem::IsNavigationBeingBuilt(WorldObject))
             {
-                WaitForNavigationBuild(World, Started, RebuildAllMs, Ticks + 1);
+                WaitForNavigationBuild(World, NavSys, Started, RebuildAllMs, Ticks + 1);
                 return;
             }
             UE_LOG(LogNavigation, Log, TEXT("Navmesh build time:%.3fms (RebuildAll %.3fms, %d ticks)"), NowMs() - Started, RebuildAllMs, Ticks);
@@ -211,7 +214,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
 
         const double Started = NowMs();
         NavSys->ReleaseInitialBuildingLock();
-        WaitForNavigationBuild(FWeakObjectPtr(reinterpret_cast<UObject*>(World)), Started, NowMs() - Started, 0);
+        WaitForNavigationBuild(FWeakObjectPtr(reinterpret_cast<UObject*>(World)), FWeakObjectPtr(reinterpret_cast<UObject*>(NavSys)), Started, NowMs() - Started, 0);
     }
 
     if (AFortNavigationGraph* NavGraph = AFortNavigationGraph::GetCurrent(World))

@@ -6,6 +6,7 @@
 class AFortMissionManager;
 class AFortVisibilityManager;
 class AFortWorldManager;
+class UBuildingStructuralSupportSystem;
 class UFortMissionGenerator;
 class UFortZoneTheme;
 struct FFortMissionManagerRecord;
@@ -45,6 +46,7 @@ public:
     DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
     DefineUProperty(FString, TheaterUniqueId)
     DefineUProperty(UFortZoneTheme*, ZoneTheme)
+    DefineUProperty(UBuildingStructuralSupportSystem*, StructuralSupportSystem)
 
     UFortMissionGenerator* GetMissionGenerator() const;
     void SetGameplayState(EFortGameplayState NewGameplayState);

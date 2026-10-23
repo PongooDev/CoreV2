@@ -51,3 +51,10 @@ void UNavigationSystem::RequestRegistration(ANavigationData* NavData, bool bTrig
         Natives::UNavigationSystem_RequestRegistration(this, NavData, bTriggerRegistrationProcessing);
     }
 }
+
+bool UNavigationSystem::IsNavigationBeingBuilt(UObject* WorldContextObject)
+{
+    Reflection::FParams Params(StaticFunction_IsNavigationBeingBuilt());
+    Params.Set(L"WorldContextObject", WorldContextObject);
+    return Params.Call(StaticClass()->GetDefaultObject()) && Params.Take<bool>(L"ReturnValue");
+}

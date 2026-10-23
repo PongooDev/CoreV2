@@ -24,6 +24,7 @@
 #include "GameThread.h"
 #include "Logging/LogMacros.h"
 #include "Building/BuildingActor.h"
+#include "Building/BuildingStructuralSupportSystem.h"
 #include "Templates/Casts.h"
 #include "UObject/WeakObjectPtr.h"
 #include "Finder.h"
@@ -34,6 +35,7 @@
 #include "UObject/UObjectIterator.h"
 
 #include <algorithm>
+#include <chrono>
 #include <unordered_map>
 
 APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
@@ -51,10 +53,36 @@ APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPla
 }
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortPlacement, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogNavigation, Log, All);
 
 namespace
 {
     constexpr int32_t SpawnPadQueryTicks = 600;
+    constexpr float BuildingCellSizeXY = 512.0f;
+    constexpr float BuildingCellSizeZ = 384.0f;
+
+    double NowMs()
+    {
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    void WaitForNavigationBuild(FWeakObjectPtr World, double Started, double RebuildAllMs, int32_t Ticks)
+    {
+        GameThread::Enqueue([World, Started, RebuildAllMs, Ticks]()
+        {
+            UObject* WorldObject = World.Get();
+            if (!WorldObject)
+            {
+                return;
+            }
+            if (UNavigationSystem::IsNavigationBeingBuilt(WorldObject))
+            {
+                WaitForNavigationBuild(World, Started, RebuildAllMs, Ticks + 1);
+                return;
+            }
+            UE_LOG(LogNavigation, Log, TEXT("Navmesh build time:%.3fms (RebuildAll %.3fms, %d ticks)"), NowMs() - Started, RebuildAllMs, Ticks);
+        });
+    }
 
     void WaitForQuery(FWeakObjectPtr GameMode, FWeakObjectPtr WorldManager, FWeakObjectPtr Query, int32_t TicksLeft)
     {
@@ -95,9 +123,22 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         NavSys->SetNavigationOctreeLock(false);
         NavSys->ConditionalPopulateNavOctree();
 
+        AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        UBuildingStructuralSupportSystem* SupportSystem = GameState ? static_cast<UBuildingStructuralSupportSystem*>(GameState->StructuralSupportSystem) : nullptr;
+        FVector GridMin(0, 0, 0);
+        int32_t GridSize[3] = {};
+        const bool bHasGrid = SupportSystem && SupportSystem->GetGrid(GridMin, GridSize);
+        const FVector GridMax = GridMin + FVector(GridSize[0] * BuildingCellSizeXY, GridSize[1] * BuildingCellSizeXY, GridSize[2] * BuildingCellSizeZ);
+
         bool bHasWorldBounds = false;
         FVector WorldMin(0, 0, 0);
         FVector WorldMax(0, 0, 0);
+        int32_t NumBuildings = 0;
+        int32_t NumOutsideGrid = 0;
+        float FarthestOutside = 0.0f;
+        ABuildingActor* FarthestBuilding = nullptr;
+        FVector FarthestOrigin(0, 0, 0);
+        FVector FarthestExtent(0, 0, 0);
         for (TObjectIterator<ABuildingActor> It; It; ++It)
         {
             ABuildingActor* Building = *It;
@@ -112,11 +153,44 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
             {
                 continue;
             }
-            const FVector Min = Origin - Extent;
-            const FVector Max = Origin + Extent;
+            FVector Min = Origin - Extent;
+            FVector Max = Origin + Extent;
+            if (bHasGrid)
+            {
+                const float Outside = std::max({ GridMin.X - Min.X, GridMin.Y - Min.Y, GridMin.Z - Min.Z, Max.X - GridMax.X, Max.Y - GridMax.Y, Max.Z - GridMax.Z });
+                if (Outside > 0.0f)
+                {
+                    ++NumOutsideGrid;
+                    if (Outside > FarthestOutside)
+                    {
+                        FarthestOutside = Outside;
+                        FarthestBuilding = Building;
+                        FarthestOrigin = Origin;
+                        FarthestExtent = Extent;
+                    }
+                }
+                Min = FVector(std::max(Min.X, GridMin.X), std::max(Min.Y, GridMin.Y), std::max(Min.Z, GridMin.Z));
+                Max = FVector(std::min(Max.X, GridMax.X), std::min(Max.Y, GridMax.Y), std::min(Max.Z, GridMax.Z));
+                if (Min.X > Max.X || Min.Y > Max.Y || Min.Z > Max.Z)
+                {
+                    continue;
+                }
+            }
             WorldMin = bHasWorldBounds ? FVector(std::min(WorldMin.X, Min.X), std::min(WorldMin.Y, Min.Y), std::min(WorldMin.Z, Min.Z)) : Min;
             WorldMax = bHasWorldBounds ? FVector(std::max(WorldMax.X, Max.X), std::max(WorldMax.Y, Max.Y), std::max(WorldMax.Z, Max.Z)) : Max;
             bHasWorldBounds = true;
+            ++NumBuildings;
+        }
+
+        if (FarthestBuilding)
+        {
+            UE_LOG(LogNavigation, Warning, TEXT("%d building actors extend past the building grid (%.0f, %.0f, %.0f) - (%.0f, %.0f, %.0f); farthest %s (%s) at (%.0f, %.0f, %.0f) extent (%.0f, %.0f, %.0f), clamped to the grid"),
+                NumOutsideGrid, GridMin.X, GridMin.Y, GridMin.Z, GridMax.X, GridMax.Y, GridMax.Z, *FarthestBuilding->GetName(), *FarthestBuilding->GetClass()->GetName(),
+                FarthestOrigin.X, FarthestOrigin.Y, FarthestOrigin.Z, FarthestExtent.X, FarthestExtent.Y, FarthestExtent.Z);
+        }
+        if (bHasWorldBounds)
+        {
+            UE_LOG(LogNavigation, Log, TEXT("Navigation bounds (%.0f, %.0f, %.0f) - (%.0f, %.0f, %.0f) from %d building actors"), WorldMin.X, WorldMin.Y, WorldMin.Z, WorldMax.X, WorldMax.Y, WorldMax.Z, NumBuildings);
         }
 
         for (TObjectIterator<ANavMeshBoundsVolume> It; It && bHasWorldBounds; ++It)
@@ -135,7 +209,9 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
             NavSys->OnNavigationBoundsUpdated(NavBounds);
         }
 
+        const double Started = NowMs();
         NavSys->ReleaseInitialBuildingLock();
+        WaitForNavigationBuild(FWeakObjectPtr(reinterpret_cast<UObject*>(World)), Started, NowMs() - Started, 0);
     }
 
     if (AFortNavigationGraph* NavGraph = AFortNavigationGraph::GetCurrent(World))

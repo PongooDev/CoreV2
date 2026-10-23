@@ -24,6 +24,7 @@ class UNavigationSystem : public UObject
     DefineNativeMember(uint8_t, NavBuildingLockFlags, UNavigationSystem_NavBuildingLockFlags)
     DefineNativeMember(uint8_t, NavOctreeLockFlags, UNavigationSystem_bNavOctreeLock)
     DefineUFunction(OnNavigationBoundsUpdated)
+    DefineUFunction(IsNavigationBeingBuilt)
     DefineUStructArrayProperty(FNavDataConfig, SupportedAgents)
 
 public:
@@ -36,4 +37,6 @@ public:
     void ConditionalPopulateNavOctree();
     void OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolume);
     void RequestRegistration(ANavigationData* NavData, bool bTriggerRegistrationProcessing = true);
+
+    static bool IsNavigationBeingBuilt(UObject* WorldContextObject);
 };

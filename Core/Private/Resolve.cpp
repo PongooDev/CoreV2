@@ -4644,6 +4644,105 @@ bool Finder::ResolveInventoryLive()
     return true;
 }
 
+bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
+{
+    if (Natives::AFortInventory_CanStackWith)
+    {
+        return true;
+    }
+
+    const auto Targets = [](uintptr_t Function)
+    {
+        std::vector<uintptr_t> Result;
+        const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        for (const auto& [Call, Target] : FunctionEnd > Function ? Finder::DirectCalls(Function, FunctionEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            Result.push_back(Target);
+        }
+        return Result;
+    };
+
+    const uintptr_t ErrorText = Finder::FunctionStart(OnlyRef(L"Backpack full!"));
+    const uintptr_t ErrorTextEnd = ErrorText ? Finder::FunctionEnd(ErrorText) : 0;
+    uintptr_t OverflowReason = 0;
+    for (uintptr_t Site = ErrorTextEnd ? FindInstruction(ErrorText, ErrorTextEnd, { 0x48, 0x8D, -1 }) : 0; Site && !OverflowReason; Site = FindInstruction(Site + 1, ErrorTextEnd, { 0x48, 0x8D, -1 }))
+    {
+        if ((Byte(Site + 2) & 0xF8) == 0x90 && Byte(Site + 2) != 0x94 && *reinterpret_cast<const int32_t*>(Site + 3) == PrimaryPickupItemEntryOffset)
+        {
+            const uintptr_t Call = FindRawCall(Site + 7, std::min(Site + 0x20, ErrorTextEnd));
+            OverflowReason = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+        }
+    }
+
+    const std::vector<uintptr_t> ReasonCalls = Targets(OverflowReason);
+    const uintptr_t StackLimit = ReasonCalls.size() >= 2 ? ReasonCalls[ReasonCalls.size() - 2] : 0;
+    const uintptr_t BackpackLimit = ReasonCalls.size() >= 2 ? ReasonCalls.back() : 0;
+    const uintptr_t StackLimitEnd = IsInText(StackLimit) ? Finder::FunctionEnd(StackLimit) : 0;
+    const uintptr_t BackpackLimitEnd = IsInText(BackpackLimit) ? Finder::FunctionEnd(BackpackLimit) : 0;
+    const bool bStackCap = BackpackLimitEnd > BackpackLimit && FindInstruction(BackpackLimit, BackpackLimitEnd, { 0x3D, 0x00, 0x02, 0x00, 0x00 });
+
+    const std::vector<uintptr_t> StackLimitCalls = Targets(StackLimit);
+    uintptr_t MaxStackSize = 0;
+    for (const uintptr_t Target : Targets(BackpackLimit))
+    {
+        if (std::find(StackLimitCalls.begin(), StackLimitCalls.end(), Target) != StackLimitCalls.end())
+        {
+            MaxStackSize = Target;
+        }
+    }
+
+    uintptr_t CanStackWith = 0;
+    bool bAmbiguous = false;
+    for (const auto& [Call, Target] : StackLimitEnd > StackLimit ? Finder::DirectCalls(StackLimit, StackLimitEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        if (Call + 7 <= StackLimitEnd && Byte(Call + 5) == 0x84 && Byte(Call + 6) == 0xC0)
+        {
+            bAmbiguous |= CanStackWith && CanStackWith != Target;
+            CanStackWith = Target;
+        }
+    }
+
+    ptrdiff_t InterfaceOffset = -1;
+    int32_t NumItemsSlot = -1;
+    int32_t MaxItemsSlot = -1;
+    for (uintptr_t Site = BackpackLimit; Site && Site + 3 <= BackpackLimitEnd && MaxItemsSlot < 0; ++Site)
+    {
+        if ((Byte(Site) & 0xF8) == 0x48 && Byte(Site + 1) == 0x8D && (Byte(Site + 2) & 0xC0) == 0x80 && (Byte(Site + 2) & 0x07) != 0x04 && InterfaceOffset < 0)
+        {
+            const int32_t Displacement = *reinterpret_cast<const int32_t*>(Site + 3);
+            InterfaceOffset = Displacement > 0 && Displacement < 0x2000 ? Displacement : -1;
+        }
+        else if (InterfaceOffset > 0 && Byte(Site) == 0xFF && (Byte(Site + 1) & 0xF8) == 0x50 && Byte(Site + 1) != 0x54 && Byte(Site + 2) % 8 == 0)
+        {
+            const int32_t Slot = Byte(Site + 2) / 8;
+            if (NumItemsSlot < 0)
+            {
+                NumItemsSlot = Slot;
+            }
+            else if (Slot != NumItemsSlot)
+            {
+                MaxItemsSlot = Slot;
+            }
+        }
+    }
+
+    if (!OverflowReason || !StackLimit || !bStackCap || !MaxStackSize || !CanStackWith || bAmbiguous || MaxItemsSlot < 0)
+    {
+        Log::Error(L"Finder: AFortInventory overflow checks not found (reason {}, stack cap {}, max stack {}, can stack {}, slots {}/{})", OverflowReason != 0, bStackCap, MaxStackSize != 0, CanStackWith != 0, NumItemsSlot, MaxItemsSlot);
+        return false;
+    }
+
+    Natives::AFortInventory_GetItemStackLimitOverflow = reinterpret_cast<decltype(Natives::AFortInventory_GetItemStackLimitOverflow)>(StackLimit);
+    Natives::AFortInventory_GetBackpackStackLimitOverflow = reinterpret_cast<decltype(Natives::AFortInventory_GetBackpackStackLimitOverflow)>(BackpackLimit);
+    Natives::AFortInventory_GetMaxStackSize = reinterpret_cast<decltype(Natives::AFortInventory_GetMaxStackSize)>(MaxStackSize);
+    Natives::AFortInventory_InventoryInterfaceOffset = InterfaceOffset;
+    Natives::IFortInventoryInterface_GetNumItemsIndex = NumItemsSlot;
+    Natives::IFortInventoryInterface_GetMaxItemsIndex = MaxItemsSlot;
+    Natives::AFortInventory_CanStackWith = reinterpret_cast<decltype(Natives::AFortInventory_CanStackWith)>(CanStackWith);
+    Log::Info(L"Finder: AFortInventory overflow checks found (stack limit +0x{:X}, backpack limit +0x{:X}, interface +0x{:X} slots {}/{})", StackLimit - Finder::ImageBase(), BackpackLimit - Finder::ImageBase(), InterfaceOffset, NumItemsSlot, MaxItemsSlot);
+    return true;
+}
+
 bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t ItemEntryOffset)
 {
     if (Natives::UFortWorldItem_SetItemCountIndex >= 0)

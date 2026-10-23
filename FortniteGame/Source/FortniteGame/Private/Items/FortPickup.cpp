@@ -7,65 +7,55 @@
 #include "Log.h"
 #include "Missions/FortItemCollectedParams.h"
 #include "Natives.h"
+#include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
-#include <algorithm>
+#include <vector>
 
 namespace
 {
-    void GiveItemEntry(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry)
+    int32_t GiveItemEntry(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry)
     {
         AFortInventory* Inventory = PlayerController->WorldInventory;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
         if (!Inventory || !ItemDefinition || ItemEntry.Count <= 0)
         {
-            return;
+            return 0;
         }
 
-        const int32_t MaxStackSize = std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
         const bool bShouldShowItemToast = ItemEntry.ShouldShowItemToast();
-        int32_t Remaining = ItemEntry.Count;
-
-        FFortItemList& ItemList = Inventory->Inventory;
-        TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
-        for (int32_t Index = 0; Index < Instances.Num() && Remaining > 0; ++Index)
-        {
-            UFortWorldItem* Existing = Instances[Index];
-            FFortItemEntry& ExistingEntry = Existing->ItemEntry;
-            if (static_cast<UFortItemDefinition*>(ExistingEntry.ItemDefinition) == ItemDefinition && ExistingEntry.Count < MaxStackSize)
+        const int32_t Count = ItemEntry.Count - Inventory->GetOverflowAmount(ItemEntry, true);
+        return Inventory->AddItemStacks(ItemEntry, Count, -1, true, false,
+            [&](UFortWorldItem* Existing, int32_t Added)
             {
-                const int32_t Added = std::min(Remaining, MaxStackSize - ExistingEntry.Count);
+                FFortItemEntry& ExistingEntry = Existing->ItemEntry;
                 Inventory->UpdateWorldItemCount(Existing, ExistingEntry.Count + Added);
                 ExistingEntry.AddNewItemCount(Added, bShouldShowItemToast);
-                Remaining -= Added;
-            }
-        }
-
-        while (Remaining > 0)
-        {
-            const int32_t Count = std::min(Remaining, MaxStackSize);
-            UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(Count, 1));
-            if (!WorldItem)
+            },
+            [&](int32_t StackCount, bool) -> UFortWorldItem*
             {
-                return;
-            }
+                UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(StackCount, 1));
+                if (!WorldItem)
+                {
+                    return nullptr;
+                }
 
-            FFortItemEntry& NewEntry = WorldItem->ItemEntry;
-            const FGuid ItemGuid = NewEntry.ItemGuid;
-            FFortItemEntry::StaticStruct()->CopyScriptStruct(&NewEntry, &ItemEntry);
-            NewEntry.ItemGuid = ItemGuid;
-            NewEntry.Count = Count;
+                FFortItemEntry& NewEntry = WorldItem->ItemEntry;
+                const FGuid ItemGuid = NewEntry.ItemGuid;
+                FFortItemEntry::StaticStruct()->CopyScriptStruct(&NewEntry, &ItemEntry);
+                NewEntry.ItemGuid = ItemGuid;
+                NewEntry.Count = StackCount;
 
-            WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
-            Inventory->AddWorldItem(WorldItem);
-            NewEntry.SetNewItemCount(Count, bShouldShowItemToast);
-            PlayerController->TryAddToQuickBar(WorldItem);
-            Remaining -= Count;
-        }
+                WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
+                Inventory->AddWorldItem(WorldItem);
+                NewEntry.SetNewItemCount(StackCount, bShouldShowItemToast);
+                PlayerController->TryAddToQuickBar(WorldItem);
+                return WorldItem;
+            });
     }
 }
 
@@ -113,17 +103,47 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
         return;
     }
 
-    FFortItemEntry& PrimaryEntry = PrimaryPickupItemEntry;
-    GiveItemEntry(PlayerController, PrimaryEntry);
-    UFortItemCollectedParams::SendItemCollected(PlayerController, Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(PrimaryEntry.ItemDefinition)), PrimaryEntry.Count);
+    std::vector<FFortItemEntry*> Entries{ &static_cast<FFortItemEntry&>(PrimaryPickupItemEntry) };
     TStructArray<FFortItemEntry>& MultiItemEntries = MultiItemPickupEntries;
     for (int32_t Index = 0; Index < MultiItemEntries.Num(); ++Index)
     {
-        FFortItemEntry& Entry = MultiItemEntries[Index];
-        GiveItemEntry(PlayerController, Entry);
-        UFortItemCollectedParams::SendItemCollected(PlayerController, Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition)), Entry.Count);
+        Entries.push_back(&MultiItemEntries[Index]);
+    }
+
+    AFortPawn* Pawn = PlayerController->MyFortPawn;
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    for (FFortItemEntry* Entry : Entries)
+    {
+        const int32_t Given = GiveItemEntry(PlayerController, *Entry);
+        if (Given > 0)
+        {
+            UFortItemCollectedParams::SendItemCollected(PlayerController, Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)), Given);
+        }
+        if (Given >= Entry->Count || !Pawn)
+        {
+            continue;
+        }
+
+        std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+        FFortItemEntry* Leftover = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+        EntryStruct->InitializeStruct(Leftover);
+        EntryStruct->CopyScriptStruct(Leftover, Entry);
+        Leftover->Count = Entry->Count - Given;
+
+        const FVector Location = Pawn->GetTransform().GetLocation();
+        if (AFortPickup* Pickup = CreatePickup(GetWorld(), *Leftover, &Location, nullptr, OptionalOwnerID != -1 ? PlayerController : nullptr))
+        {
+            Pickup->SetOptionalMissionGuid(OptionalMissionGuid);
+            Pickup->TossPickup(Location, Pawn, 0);
+        }
+        EntryStruct->DestroyStruct(Leftover);
     }
 #endif
+}
+
+ptrdiff_t AFortPickup::PrimaryPickupItemEntryOffset()
+{
+    return Member_PrimaryPickupItemEntry.GetOffsetChecked();
 }
 
 void AFortPickup::HookVTables()

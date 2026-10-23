@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h"
 #include "Items/FortItem.h"
 
+#include <functional>
 #include <vector>
 
 class AFortPlayerController;
@@ -36,4 +37,12 @@ public:
     void RemoveWorldItem(UFortWorldItem* WorldItem);
     void RemoveWorldItemCount(UFortWorldItem* WorldItem, int32_t Count);
     int32_t AddWorldItemCopy(AFortPlayerController* Owner, const FFortItemEntry& Source, int32_t Count, int32_t MaxNewItems, std::vector<UFortWorldItem*>* OutNewItems = nullptr);
+
+    int32_t GetMaxStackSize(const UFortItemDefinition* ItemDefinition);
+    int32_t GetOverflowAmount(const FFortItemEntry& ItemEntry, bool bForce);
+    bool IsBackpackFull();
+    int32_t AddItemStacks(const FFortItemEntry& ItemEntry, int32_t Count, int32_t MaxNewItems, bool bBackpack, bool bKeepOverflow,
+        const std::function<void(UFortWorldItem* Item, int32_t Added)>& TopUp, const std::function<UFortWorldItem*(int32_t StackCount, bool bOverflow)>& NewStack);
+
+    static constexpr int32_t MaxWorldItemStacks = 512;
 };

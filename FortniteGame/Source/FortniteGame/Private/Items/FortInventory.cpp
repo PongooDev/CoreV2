@@ -2,6 +2,7 @@
 #include "Items/FortInventory.h"
 #include "Finder.h"
 #include "Items/FortItemDefinition.h"
+#include "Items/FortPickup.h"
 #include "Natives.h"
 #include "Player/FortPlayerController.h"
 #include "Templates/Casts.h"
@@ -163,47 +164,159 @@ int32_t AFortInventory::AddWorldItemCopy(AFortPlayerController* Owner, const FFo
         return 0;
     }
 
-    const int32_t MaxStackSize = std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
+    const bool bBackpack = Owner && static_cast<AFortInventory*>(Owner->WorldInventory) == this;
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    EntryStruct->InitializeStruct(ItemEntry);
+    EntryStruct->CopyScriptStruct(ItemEntry, &Source);
+    ItemEntry->Count = Count;
+    if (bBackpack)
+    {
+        ItemEntry->Count = Count - GetOverflowAmount(*ItemEntry, true);
+    }
+
+    const int32_t Added = AddItemStacks(*ItemEntry, ItemEntry->Count, MaxNewItems, bBackpack, false,
+        [this](UFortWorldItem* Existing, int32_t StackAdded)
+        {
+            UpdateWorldItemCount(Existing, static_cast<FFortItemEntry&>(Existing->ItemEntry).Count + StackAdded);
+        },
+        [&](int32_t StackCount, bool) -> UFortWorldItem*
+        {
+            UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(StackCount, Source.Level));
+            if (!WorldItem)
+            {
+                return nullptr;
+            }
+
+            FFortItemEntry& NewEntry = WorldItem->ItemEntry;
+            if (Source.GetIntValue(EFortItemEntryState::GetDurabilityInitialized()) != 0)
+            {
+                WorldItem->SetDurability(Source.Durability);
+            }
+            NewEntry.LoadedAmmo = Source.LoadedAmmo;
+            NewEntry.AlterationDefinitions = Source.AlterationDefinitions;
+            if (Owner)
+            {
+                WorldItem->SetOwningControllerForTemporaryItem(Owner);
+            }
+            AddWorldItem(WorldItem);
+            if (OutNewItems)
+            {
+                OutNewItems->push_back(WorldItem);
+            }
+            return WorldItem;
+        });
+    EntryStruct->DestroyStruct(ItemEntry);
+    return Added;
+#else
+    return 0;
+#endif
+}
+
+int32_t AFortInventory::GetMaxStackSize(const UFortItemDefinition* ItemDefinition)
+{
+    if (!ItemDefinition)
+    {
+        return 1;
+    }
+    if (!Natives::AFortInventory_GetMaxStackSize && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset()))
+    {
+        return std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
+    }
+    return std::max(Natives::AFortInventory_GetMaxStackSize(this, ItemDefinition), 1);
+}
+
+int32_t AFortInventory::GetOverflowAmount(const FFortItemEntry& ItemEntry, bool bForce)
+{
+#if WITH_SERVER_CODE
+    UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+    const int32_t Count = ItemEntry.Count;
+    if (!ItemDefinition || Count <= 0 || (!bForce && ItemDefinition->bInventorySizeLimited))
+    {
+        return 0;
+    }
+    if (!Natives::AFortInventory_GetItemStackLimitOverflow && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset()))
+    {
+        return 0;
+    }
+
+    int32_t Overflow = Natives::AFortInventory_GetItemStackLimitOverflow(this, ItemEntry, ItemDefinition);
+    if (Overflow == -1)
+    {
+        Overflow = Natives::AFortInventory_GetBackpackStackLimitOverflow(this, ItemEntry, ItemDefinition);
+    }
+    return std::clamp(Overflow, 0, Count);
+#else
+    return 0;
+#endif
+}
+
+bool AFortInventory::IsBackpackFull()
+{
+    if (Natives::AFortInventory_InventoryInterfaceOffset < 0 && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset()))
+    {
+        return false;
+    }
+
+    using FGetItems = int32_t (*)(void* This);
+    void* Interface = reinterpret_cast<uint8_t*>(this) + Natives::AFortInventory_InventoryInterfaceOffset;
+    void* const* VTable = *reinterpret_cast<void* const* const*>(Interface);
+    const int32_t NumItems = reinterpret_cast<FGetItems>(VTable[Natives::IFortInventoryInterface_GetNumItemsIndex])(Interface);
+    return NumItems >= reinterpret_cast<FGetItems>(VTable[Natives::IFortInventoryInterface_GetMaxItemsIndex])(Interface);
+}
+
+int32_t AFortInventory::AddItemStacks(const FFortItemEntry& ItemEntry, int32_t Count, int32_t MaxNewItems, bool bBackpack, bool bKeepOverflow,
+    const std::function<void(UFortWorldItem* Item, int32_t Added)>& TopUp, const std::function<UFortWorldItem*(int32_t StackCount, bool bOverflow)>& NewStack)
+{
+#if WITH_SERVER_CODE
+    UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+    if (!ItemDefinition || Count <= 0 || (!Natives::AFortInventory_CanStackWith && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset())))
+    {
+        return 0;
+    }
+
+    const int32_t MaxStackSize = GetMaxStackSize(ItemDefinition);
+    const float MaxDurability = ItemDefinition->GetMaxDurability(ItemEntry.Level);
     int32_t Remaining = Count;
+    bool bHasStack = false;
+
     FFortItemList& ItemList = Inventory;
     TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
-    for (int32_t Index = 0; Index < Instances.Num() && Remaining > 0; ++Index)
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
     {
         UFortWorldItem* Existing = Instances[Index];
         FFortItemEntry* ExistingEntry = Existing ? &static_cast<FFortItemEntry&>(Existing->ItemEntry) : nullptr;
-        if (ExistingEntry && static_cast<UFortItemDefinition*>(ExistingEntry->ItemDefinition) == ItemDefinition && ExistingEntry->Count < MaxStackSize)
+        if (!ExistingEntry || static_cast<UFortItemDefinition*>(ExistingEntry->ItemDefinition) != ItemDefinition || !Natives::AFortInventory_CanStackWith(this, Existing, ItemEntry, MaxDurability))
         {
-            const int32_t Merged = std::min(Remaining, MaxStackSize - ExistingEntry->Count);
-            UpdateWorldItemCount(Existing, ExistingEntry->Count + Merged);
-            Remaining -= Merged;
+            continue;
+        }
+
+        bHasStack = true;
+        if (Remaining > 0 && ExistingEntry->Count < MaxStackSize)
+        {
+            const int32_t Added = std::min(Remaining, MaxStackSize - ExistingEntry->Count);
+            TopUp(Existing, Added);
+            Remaining -= Added;
         }
     }
 
-    for (int32_t NewItems = 0; Remaining > 0 && (MaxNewItems < 0 || NewItems < MaxNewItems); ++NewItems)
+    const bool bLimited = bBackpack && ItemDefinition->bInventorySizeLimited;
+    const bool bAllowMultipleStacks = ItemDefinition->bAllowMultipleStacks;
+    for (int32_t NewItems = 0; Remaining > 0 && (MaxNewItems < 0 || NewItems < MaxNewItems) && Instances.Num() < MaxWorldItemStacks && (bAllowMultipleStacks || !bHasStack); ++NewItems)
     {
-        const int32_t StackCount = std::min(Remaining, MaxStackSize);
-        UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(StackCount, Source.Level));
-        if (!WorldItem)
+        const bool bOverflow = bLimited && IsBackpackFull();
+        if (bOverflow && !bKeepOverflow)
         {
             break;
         }
 
-        FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
-        if (Source.GetIntValue(EFortItemEntryState::GetDurabilityInitialized()) != 0)
+        const int32_t StackCount = std::min(Remaining, MaxStackSize);
+        if (!NewStack(StackCount, bOverflow))
         {
-            WorldItem->SetDurability(Source.Durability);
+            break;
         }
-        ItemEntry.LoadedAmmo = Source.LoadedAmmo;
-        ItemEntry.AlterationDefinitions = Source.AlterationDefinitions;
-        if (Owner)
-        {
-            WorldItem->SetOwningControllerForTemporaryItem(Owner);
-        }
-        AddWorldItem(WorldItem);
-        if (OutNewItems)
-        {
-            OutNewItems->push_back(WorldItem);
-        }
+        bHasStack = true;
         Remaining -= StackCount;
     }
     return Count - Remaining;

@@ -21,6 +21,7 @@ public:
     DefineUStructProperty(FFortItemEntry, PrimaryPickupItemEntry)
     DefineUStructArrayProperty(FFortItemEntry, MultiItemPickupEntries)
     DefineUProperty(FGuid, OptionalMissionGuid)
+    DefineUProperty(int32_t, OptionalOwnerID)
 
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
     void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount);
@@ -28,6 +29,7 @@ public:
     void GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner);
     void SetOptionalMissionGuid(const FGuid& InMissionGuid);
 
+    static ptrdiff_t PrimaryPickupItemEntryOffset();
     static void HookVTables();
 
 private:

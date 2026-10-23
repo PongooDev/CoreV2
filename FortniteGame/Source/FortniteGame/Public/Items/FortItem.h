@@ -59,6 +59,7 @@ public:
     DefineUProperty(int32_t, LoadedAmmo)
     DefineUProperty(TArray<UObject*>, AlterationDefinitions)
     DefineUProperty(FGuid, ItemGuid)
+    DefineBitfieldUProperty(inventory_overflow_date)
     DefineUProperty(FWeakObjectPtr, ParentInventory)
     DefineUStructArrayProperty(FFortItemEntryStateValue, StateValues)
 };

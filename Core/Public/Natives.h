@@ -236,6 +236,13 @@ namespace Natives
     inline int32_t UAbilitySystemComponent_InternalServerTryActiveAbilityIndex = -1;
     inline int32_t UFortWorldItemDefinition_ServerExecuteIndex = -1;
     inline void (*AFortInventory_InitializeExistingItem)(AFortInventory* This, UFortWorldItem* Item) = nullptr;
+    inline int32_t (*AFortInventory_GetItemStackLimitOverflow)(AFortInventory* This, const FFortItemEntry& ItemEntry, const UFortItemDefinition* ItemDefinition) = nullptr;
+    inline int32_t (*AFortInventory_GetBackpackStackLimitOverflow)(AFortInventory* This, const FFortItemEntry& ItemEntry, const UFortItemDefinition* ItemDefinition) = nullptr;
+    inline int32_t (*AFortInventory_GetMaxStackSize)(AFortInventory* This, const UFortItemDefinition* ItemDefinition) = nullptr;
+    inline bool (*AFortInventory_CanStackWith)(AFortInventory* This, UFortWorldItem* Item, const FFortItemEntry& ItemEntry, float MaxDurability) = nullptr;
+    inline ptrdiff_t AFortInventory_InventoryInterfaceOffset = -1;
+    inline int32_t IFortInventoryInterface_GetMaxItemsIndex = -1;
+    inline int32_t IFortInventoryInterface_GetNumItemsIndex = -1;
     inline uintptr_t UAbilitySystemComponent_GiveAbility = 0;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
     inline void (*AFortPickup_SetPickupTarget)(AFortPickup* Pickup, AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound) = nullptr;

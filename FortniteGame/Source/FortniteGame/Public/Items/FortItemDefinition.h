@@ -95,6 +95,8 @@ class UFortItemDefinition : public UObject
 public:
     DefineUProperty(EFortItemType, ItemType)
     DefineUProperty(int32_t, MaxStackSize)
+    DefineBitfieldUProperty(bAllowMultipleStacks)
+    DefineBitfieldUProperty(bInventorySizeLimited)
     DefineUProperty(FGameplayTagContainer, GameplayTags)
     DefineUFunction(CreateTemporaryItemInstanceBP)
     DefineUFunction(GetPersistentName)

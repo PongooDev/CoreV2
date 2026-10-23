@@ -15,6 +15,7 @@
 #include "Items/FortQuickBars.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectIterator.h"
@@ -60,55 +61,67 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
         return;
     }
 
-    const int32_t MaxStackSize = std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
-    int32_t Remaining = NumberToGive;
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToGive, 1);
 
-    FFortItemList& ItemList = Inventory->Inventory;
-    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
-    for (int32_t Index = 0; Index < Instances.Num() && Remaining > 0; ++Index)
-    {
-        UFortWorldItem* Existing = Instances[Index];
-        FFortItemEntry& ExistingEntry = Existing->ItemEntry;
-        if (static_cast<UFortItemDefinition*>(ExistingEntry.ItemDefinition) == ItemDefinition && ExistingEntry.Count < MaxStackSize)
+    const bool bBackpack = PlayerController && static_cast<AFortInventory*>(PlayerController->WorldInventory) == Inventory;
+    const int32_t Count = NumberToGive - Inventory->GetOverflowAmount(*ItemEntry, false);
+    const int32_t Given = Inventory->AddItemStacks(*ItemEntry, Count, -1, bBackpack, true,
+        [&](UFortWorldItem* Existing, int32_t Added)
         {
-            const int32_t Added = std::min(Remaining, MaxStackSize - ExistingEntry.Count);
+            FFortItemEntry& ExistingEntry = Existing->ItemEntry;
             Inventory->UpdateWorldItemCount(Existing, ExistingEntry.Count + Added);
             if (PlayerController && bNotifyPlayer)
             {
                 ExistingEntry.AddNewItemCount(Added, true);
             }
-            Remaining -= Added;
-        }
-    }
-
-    while (Remaining > 0)
-    {
-        const int32_t Count = std::min(Remaining, MaxStackSize);
-        UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(Count, 1));
-        if (!WorldItem)
+        },
+        [&](int32_t StackCount, bool bOverflow) -> UFortWorldItem*
         {
-            return;
-        }
-
-        if (PlayerController)
-        {
-            WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
-        }
-        Inventory->AddWorldItem(WorldItem);
-        if (PlayerController)
-        {
-            if (bNotifyPlayer)
+            UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(StackCount, 1));
+            if (!WorldItem)
             {
-                static_cast<FFortItemEntry&>(WorldItem->ItemEntry).SetNewItemCount(Count, true);
+                return nullptr;
             }
-            PlayerController->TryAddToQuickBar(WorldItem);
-        }
-        Remaining -= Count;
-    }
 
-    if (PlayerController)
+            FFortItemEntry& NewEntry = WorldItem->ItemEntry;
+            NewEntry.inventory_overflow_date = bOverflow;
+            if (PlayerController)
+            {
+                WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
+            }
+            Inventory->AddWorldItem(WorldItem);
+            if (PlayerController)
+            {
+                if (bNotifyPlayer)
+                {
+                    NewEntry.SetNewItemCount(StackCount, true);
+                }
+                if (!bOverflow)
+                {
+                    PlayerController->TryAddToQuickBar(WorldItem);
+                }
+            }
+            return WorldItem;
+        });
+
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (Given < NumberToGive && Pawn)
     {
-        UFortItemCollectedParams::SendItemCollected(PlayerController, ItemDefinition, NumberToGive);
+        ItemEntry->Count = NumberToGive - Given;
+        const FVector Location = Pawn->GetTransform().GetLocation();
+        if (AFortPickup* Pickup = AFortPickup::CreatePickup(PlayerController->GetWorld(), *ItemEntry, &Location, nullptr, PlayerController))
+        {
+            Pickup->TossPickup(Location, Pawn, 0);
+        }
+    }
+    EntryStruct->DestroyStruct(ItemEntry);
+
+    if (PlayerController && Given > 0)
+    {
+        UFortItemCollectedParams::SendItemCollected(PlayerController, ItemDefinition, Given);
     }
 #endif
 }

@@ -88,6 +88,17 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
     Log::Info(L"AFortMissionManager::OnZoneEnd: zone completed {}", bZoneCompleted);
     UWorld* World = GetWorld();
     const FString SessionId = GetGameSessionId(World);
+    // EndPrimaryMission is sent after EarnScore (see below), so the players' commands wait here.
+    struct FPendingEndPrimaryMission
+    {
+        UFortQuestManager* QuestManager;
+        FString MissionName;
+        FString StatusName;
+        TStructArray<FFortQuestEarnedBadgeData> EarnedBadges;
+        int32_t MissionPoints;
+        bool bCriticalMatchBonus;
+    };
+    std::vector<FPendingEndPrimaryMission> PendingEndPrimaryMissions;
     TArray<AFortMission*>& MissionList = Missions;
     for (AFortMission* Mission : MissionList)
     {
@@ -145,21 +156,31 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                     Log::Info(L"OnZoneEnd: {} badges {}; missed {}; mission points {}", PlayerController->GetName().ToStdString(), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.RewardItems)), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.MissedRewardItems)), MissionPoints);
                 }
             }
-            TStructArray<FFortQuestEarnedBadgeData> EarnedBadges;
-            CollectEarnedBadgeData(PlayerController, EarnedBadges);
-            QuestManager->SendEndPrimaryMission(SessionId, MissionName, StatusName, EarnedBadges, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus);
-            for (int32_t Index = 0; Index < EarnedBadges.Num(); ++Index)
-            {
-                FFortQuestEarnedBadgeData::StaticStruct()->DestroyStruct(&EarnedBadges[Index]);
-            }
-            FMemory::Free(EarnedBadges.GetData());
+            FPendingEndPrimaryMission& Pending = PendingEndPrimaryMissions.emplace_back(FPendingEndPrimaryMission{ QuestManager, MissionName, StatusName, {}, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus });
+            CollectEarnedBadgeData(PlayerController, Pending.EarnedBadges);
         }
     }
 
+    // EarnScore goes out before the EndPrimaryMissions, on the same MCP queue as the sending player's. Each
+    // earnScore notification adds an ExperienceDelta and, once bIsFinalizingExperience is set, sets
+    // bIsExperienceFinalized (0x762AE0); Results_Widget polls IsDataFinalized and reads the score report's XP once
+    // (Results_CommanderXP.Initialize -> GetXpInfo, the sum of the deltas). EndPrimaryMission's earnScore carries no XP,
+    // so when it came first the player state could replicate finalized with only that delta and the results screen
+    // showed "Total XP Gained 0" (issue #34; the client's LogXPData had every Delta at 0 while the server got the real
+    // delta about 100 ms later). EarnScore's own notification now finalizes the sending player with the XP in it.
     if (AFortGameMode* FortGameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr)
     {
         FortGameMode->SetBadgeScores();
         FortGameMode->SendEarnScore();
+    }
+    for (FPendingEndPrimaryMission& Pending : PendingEndPrimaryMissions)
+    {
+        Pending.QuestManager->SendEndPrimaryMission(SessionId, Pending.MissionName, Pending.StatusName, Pending.EarnedBadges, Pending.MissionPoints, Pending.bCriticalMatchBonus);
+        for (int32_t Index = 0; Index < Pending.EarnedBadges.Num(); ++Index)
+        {
+            FFortQuestEarnedBadgeData::StaticStruct()->DestroyStruct(&Pending.EarnedBadges[Index]);
+        }
+        FMemory::Free(Pending.EarnedBadges.GetData());
     }
     UFortMissionLibrary::ExecuteMissionEvent(this, FName(L"EndOfZone", FNAME_Find), nullptr);
 

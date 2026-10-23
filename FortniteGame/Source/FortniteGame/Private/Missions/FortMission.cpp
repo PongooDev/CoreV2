@@ -9,6 +9,7 @@
 #include "Missions/FortMissionInfo.h"
 #include "Missions/FortMissionLibrary.h"
 #include "Missions/FortMissionManager.h"
+#include "Player/FortPlayerController.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectIterator.h"
 #include "ReflectionParams.h"
@@ -223,20 +224,50 @@ TArray<UFortWorldItemDefinition*> AFortMission::GetRewardItemsByTag(const FGamep
 void AFortMission::GrantRewardsByTag(FGameplayTag RewardTag, EFortRewardType RewardType)
 {
 #if WITH_SERVER_CODE
-    AFortMissionManager* MissionManager = Role == ROLE_Authority ? GetMissionManager() : nullptr;
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+
+    for (UFortWorldItemDefinition* Item : GetRewardItemsByTag(RewardTag))
+    {
+        if (UFortBadgeItemDefinition* Badge = Cast<UFortBadgeItemDefinition>(reinterpret_cast<UObject*>(Item)))
+        {
+            GrantBadge(Badge, RewardType);
+        }
+    }
+#endif
+}
+
+// The intact native slot gives the badge to every player (count 1, capped, through the mission manager's
+// EarnedBadgesArray) and spawns an AFortClientAnnouncement_Basic: the mission name, the badge's name and icon, 3 s.
+void AFortMission::GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewardType RewardType)
+{
+#if WITH_SERVER_CODE
+    AFortMissionManager* MissionManager = Role == ROLE_Authority && Badge ? GetMissionManager() : nullptr;
     if (!MissionManager)
     {
         return;
     }
 
-    const TArray<AFortPlayerController*> Players = GetParticipatingMissionControllers();
-    for (UFortWorldItemDefinition* Item : GetRewardItemsByTag(RewardTag))
+    if (Natives::AFortMission_GrantBadgeIndex < 0 && !Finder::ResolveMissionBadgeLive(AFortMissionManager::EarnedBadgesArrayOffset()))
     {
-        if (UFortBadgeItemDefinition* Badge = Cast<UFortBadgeItemDefinition>(reinterpret_cast<UObject*>(Item)))
+        MissionManager->GrantBadge(Badge, RewardType, GetParticipatingMissionControllers());
+        return;
+    }
+
+    CallVirtual<void>(this, Natives::AFortMission_GrantBadgeIndex, Badge, static_cast<uint8_t>(RewardType));
+    UWorld* World = GetWorld();
+    int32_t NumPlayers = 0;
+    for (TObjectIterator<AFortPlayerController> It; It; ++It)
+    {
+        if (It->GetWorld() == World)
         {
-            MissionManager->GrantBadge(Badge, RewardType, Players);
+            MissionManager->SyncMissionRewardItems(*It);
+            ++NumPlayers;
         }
     }
+    Log::Info(L"AFortMission::GrantBadge: {} {} ({}, {} MP) to {} player(s), announced", GetName().ToStdString(), Badge->GetName().ToStdString(), RewardType.ToString(), Badge->GetMissionPoints(), NumPlayers);
 #endif
 }
 
@@ -426,6 +457,10 @@ void AFortMission::HookVTables()
     if (Natives::AFortMission_ObjectiveStatusUpdatedIndex < 0)
     {
         Finder::ResolveMissionObjectivesLive();
+    }
+    if (Natives::AFortMission_GrantBadgeIndex < 0)
+    {
+        Finder::ResolveMissionBadgeLive(AFortMissionManager::EarnedBadgesArrayOffset());
     }
 
     if (Natives::AFortMission_CustomHandleMissionEventIndex < 0 && !Finder::ResolveMissionEventLive())

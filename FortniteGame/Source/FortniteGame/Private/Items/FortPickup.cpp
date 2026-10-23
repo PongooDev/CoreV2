@@ -3,21 +3,35 @@
 #include "Finder.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
+#include "Items/FortInventoryOwnerInterface.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Missions/FortItemCollectedParams.h"
 #include "Natives.h"
+#include "Pawns/FortAIPawn.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "Weapons/FortWeapon.h"
 
 #include <vector>
 
 namespace
 {
+    std::vector<FFortItemEntry*> GetPickupEntries(AFortPickup* Pickup)
+    {
+        std::vector<FFortItemEntry*> Entries{ &static_cast<FFortItemEntry&>(Pickup->PrimaryPickupItemEntry) };
+        TStructArray<FFortItemEntry>& MultiItemEntries = Pickup->MultiItemPickupEntries;
+        for (int32_t Index = 0; Index < MultiItemEntries.Num(); ++Index)
+        {
+            Entries.push_back(&MultiItemEntries[Index]);
+        }
+        return Entries;
+    }
+
     int32_t GiveItemEntry(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry)
     {
         AFortInventory* Inventory = PlayerController->WorldInventory;
@@ -97,19 +111,23 @@ void AFortPickup::SetOptionalMissionGuid(const FGuid& InMissionGuid)
 void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
 {
 #if WITH_SERVER_CODE
-    AFortPlayerController* PlayerController = AFortPlayerController::FromInventoryOwner(InventoryOwner);
-    if (Role != ROLE_Authority || !PlayerController)
+    UObject* OwnerObject = InventoryOwner ? InventoryOwner->_getUObject() : nullptr;
+    if (Role != ROLE_Authority || !OwnerObject)
+    {
+        return;
+    }
+    if (AFortAIPawn* AIPawn = Cast<AFortAIPawn>(OwnerObject))
+    {
+        GivePickupToAI(AIPawn, InventoryOwner);
+        return;
+    }
+    AFortPlayerController* PlayerController = Cast<AFortPlayerController>(OwnerObject);
+    if (!PlayerController)
     {
         return;
     }
 
-    std::vector<FFortItemEntry*> Entries{ &static_cast<FFortItemEntry&>(PrimaryPickupItemEntry) };
-    TStructArray<FFortItemEntry>& MultiItemEntries = MultiItemPickupEntries;
-    for (int32_t Index = 0; Index < MultiItemEntries.Num(); ++Index)
-    {
-        Entries.push_back(&MultiItemEntries[Index]);
-    }
-
+    std::vector<FFortItemEntry*> Entries = GetPickupEntries(this);
     AFortPawn* Pawn = PlayerController->MyFortPawn;
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     for (FFortItemEntry* Entry : Entries)
@@ -138,6 +156,75 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
         }
         EntryStruct->DestroyStruct(Leftover);
     }
+#endif
+}
+
+void AFortPickup::GivePickupToAI(AFortAIPawn* AIPawn, IFortInventoryOwnerInterface* InventoryOwner)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = Natives::IFortInventoryOwnerInterface_GetWorldInventoryIndex >= 0 ? InventoryOwner->GetWorldInventory() : nullptr;
+    if (!Inventory)
+    {
+        return;
+    }
+
+    AFortWeapon* OldWeapon = AIPawn->CurrentWeapon;
+    const FVector Location = AIPawn->GetTransform().GetLocation();
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    const auto TossEntry = [&](const FFortItemEntry& Entry, int32_t Count)
+    {
+        EntryStruct->InitializeStruct(DropEntry);
+        EntryStruct->CopyScriptStruct(DropEntry, &Entry);
+        DropEntry->Count = Count;
+        if (AFortPickup* Pickup = CreatePickup(GetWorld(), *DropEntry, &Location))
+        {
+            Pickup->SetOptionalMissionGuid(OptionalMissionGuid);
+            Pickup->TossPickup(Location, AIPawn, 0);
+        }
+        EntryStruct->DestroyStruct(DropEntry);
+    };
+
+    UFortWeaponItemDefinition* WeaponDefinition = nullptr;
+    UFortWorldItem* WeaponItem = nullptr;
+    for (FFortItemEntry* Entry : GetPickupEntries(this))
+    {
+        std::vector<UFortWorldItem*> NewItems;
+        const int32_t Given = Inventory->AddWorldItemCopy(nullptr, *Entry, Entry->Count, -1, &NewItems);
+        if (Given < Entry->Count)
+        {
+            TossEntry(*Entry, Entry->Count - Given);
+        }
+        UFortWeaponItemDefinition* Definition = Cast<UFortWeaponItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition));
+        if (!WeaponItem && Definition && !NewItems.empty())
+        {
+            WeaponDefinition = Definition;
+            WeaponItem = NewItems.front();
+        }
+    }
+    if (!WeaponItem)
+    {
+        return;
+    }
+
+    const FGuid OldGuid = OldWeapon ? static_cast<FGuid>(OldWeapon->ItemEntryGuid) : FGuid();
+    AFortWeapon* NewWeapon = AIPawn->EquipWeaponDefinition(WeaponDefinition, static_cast<FFortItemEntry&>(WeaponItem->ItemEntry).ItemGuid);
+    if (!NewWeapon || !OldWeapon || NewWeapon == OldWeapon)
+    {
+        return;
+    }
+    AIPawn->RemoveAbilityWeapon(OldWeapon);
+
+    UFortWorldItem* OldItem = OldGuid.IsValid() ? Inventory->FindWorldItem(OldGuid) : nullptr;
+    if (!OldItem || OldItem == WeaponItem)
+    {
+        return;
+    }
+
+    FFortItemEntry& OldEntry = OldItem->ItemEntry;
+    TossEntry(OldEntry, OldEntry.Count);
+    Inventory->RemoveWorldItem(OldItem);
 #endif
 }
 

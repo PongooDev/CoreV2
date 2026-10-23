@@ -257,6 +257,7 @@ namespace Natives
     inline bool (*AFortMission_InitializeActorsForMission)(UObject* Context, UObject* Mission, void* OutActorsInitialized) = nullptr;
     inline int32_t AFortMission_CustomHandleMissionEventIndex = -1;
     inline int32_t AFortMission_HandleDeferredMissionEventIndex = -1;
+    inline int32_t AFortMission_GrantBadgeIndex = -1;
     inline void* (*AFortWorldManager_GetTheaterMapData)(AFortWorldManager* This) = nullptr;
     inline int32_t AFortObjectiveBase_ActivateObjectiveIndex = -1;
     inline ptrdiff_t UFortGameData_MissionGenerationData = -1;

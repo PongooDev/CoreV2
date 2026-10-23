@@ -188,14 +188,25 @@ void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission, EFortMiss
     {
         const bool bSucceeded = NewStatus == EFortMissionStatus::GetSucceeded();
         const TArray<AFortPlayerController*> Players = Mission->GetParticipatingMissionControllers();
+        auto GrantMissionBadge = [this, Mission, &Players](UFortBadgeItemDefinition* Badge, bool bEarned)
+        {
+            if (bEarned)
+            {
+                Mission->GrantBadge(Badge, EFortRewardType::GetDefault());
+            }
+            else
+            {
+                GrantBadge(Badge, EFortRewardType::GetMissed(), Players);
+            }
+        };
         if (UFortBadgeItemDefinition* RewardBadge = Info->MissionRewardBadge)
         {
-            GrantBadge(RewardBadge, bSucceeded ? EFortRewardType::GetDefault() : EFortRewardType::GetMissed(), Players);
+            GrantMissionBadge(RewardBadge, bSucceeded);
         }
         UFortBadgeItemDefinition* UnderParBadge = Info->UnderParBadge;
         if (UnderParBadge && Info->ParTime > 0)
         {
-            GrantBadge(UnderParBadge, bSucceeded && Mission->IsUnderPar() ? EFortRewardType::GetDefault() : EFortRewardType::GetMissed(), Players);
+            GrantMissionBadge(UnderParBadge, bSucceeded && Mission->IsUnderPar());
         }
     }
     if (Role == ROLE_Authority && Info && NewStatus == EFortMissionStatus::GetSucceeded() && !Mission->IsPrimaryMission())
@@ -213,12 +224,11 @@ void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission, EFortMiss
         TArray<UFortWorldItemDefinition*> SuccessItems;
         if (Mission->GetAdditionalMissionSuccessBadges(SuccessItems))
         {
-            const TArray<AFortPlayerController*> Players = Mission->GetParticipatingMissionControllers();
             for (UFortWorldItemDefinition* Item : SuccessItems)
             {
                 if (UFortBadgeItemDefinition* Badge = Cast<UFortBadgeItemDefinition>(reinterpret_cast<UObject*>(Item)))
                 {
-                    GrantBadge(Badge, EFortRewardType::GetDefault(), Players);
+                    Mission->GrantBadge(Badge, EFortRewardType::GetDefault());
                 }
             }
         }
@@ -379,6 +389,11 @@ void AFortMissionManager::GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewar
         SyncMissionRewardItems(PlayerController);
     }
 #endif
+}
+
+ptrdiff_t AFortMissionManager::EarnedBadgesArrayOffset()
+{
+    return Member_EarnedBadgesArray.GetOffsetChecked();
 }
 
 int32_t AFortMissionManager::GetMissionPointsForPlayer(AFortPlayerController* PlayerController, int32_t MaxMissionPoints)

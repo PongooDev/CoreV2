@@ -101,6 +101,7 @@ public:
     void SyncMissionRewardItems(AFortPlayerController* PlayerController);
     int32_t GetMissionPointsForPlayer(AFortPlayerController* PlayerController, int32_t MaxMissionPoints);
     void CollectEarnedBadgeData(AFortPlayerController* PlayerController, TStructArray<FFortQuestEarnedBadgeData>& OutBadges);
+    static ptrdiff_t EarnedBadgesArrayOffset();
 
     static void HookVTables();
 

@@ -4161,6 +4161,73 @@ bool Finder::ResolveMissionParTimeLive(uintptr_t CustomHandleMissionEvent)
     return true;
 }
 
+// AFortMission's badge grant (grants the badge to every player through the mission manager's EarnedBadgesArray add,
+// then spawns a basic client announcement): the only AFortMission slot not inherited from AActor whose callee's callee
+// passes the mission manager's EarnedBadgesArray in rcx.
+bool Finder::ResolveMissionBadgeLive(ptrdiff_t EarnedBadgesArrayOffset)
+{
+    if (Natives::AFortMission_GrantBadgeIndex >= 0)
+    {
+        return true;
+    }
+
+    const int32_t Offset = static_cast<int32_t>(EarnedBadgesArrayOffset);
+    auto PassesBadgeArray = [Offset](uintptr_t Function)
+    {
+        const uintptr_t End = Finder::FunctionEnd(Function);
+        for (uintptr_t Site = Function; End && End - Function < 0x1000 && Site + 7 <= End; ++Site)
+        {
+            if ((Byte(Site) == 0x48 || Byte(Site) == 0x49) && Byte(Site + 1) == 0x8D && (Byte(Site + 2) & 0xF8) == 0x88 && (Byte(Site + 2) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 3) == Offset)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    void** MissionVTable = CdoVTable(L"/Script/FortniteGame.FortMission");
+    void** ActorVTable = CdoVTable(L"/Script/Engine.Actor");
+    int32_t BadgeIndex = -1;
+    int32_t Matches = 0;
+    for (int32_t Index = 0; MissionVTable && ActorVTable && Offset > 0 && Index < 0x400; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(MissionVTable, Index);
+        if (!Entry)
+        {
+            break;
+        }
+        if (Entry == VTableEntry(ActorVTable, Index) || reinterpret_cast<void*>(Entry) == Natives::SharedEmptyFunction)
+        {
+            continue;
+        }
+
+        const uintptr_t EntryEnd = Finder::FunctionEnd(Entry);
+        bool bMatch = false;
+        for (const auto& [Site, Target] : EntryEnd && EntryEnd - Entry < 0x1000 ? Finder::DirectCalls(Entry, EntryEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            const uintptr_t TargetEnd = IsInText(Target) ? Finder::FunctionEnd(Target) : 0;
+            for (const auto& [InnerSite, Inner] : TargetEnd && TargetEnd - Target < 0x1000 ? Finder::DirectCalls(Target, TargetEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                bMatch = bMatch || (IsInText(Inner) && PassesBadgeArray(Inner));
+            }
+        }
+        if (bMatch)
+        {
+            BadgeIndex = Index;
+            ++Matches;
+        }
+    }
+
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: AFortMission badge grant slot not found ({} matches)", Matches);
+        return false;
+    }
+    Natives::AFortMission_GrantBadgeIndex = BadgeIndex;
+    Log::Info(L"Finder: AFortMission badge grant is slot 0x{:X}", BadgeIndex);
+    return true;
+}
+
 bool Finder::ResolveTheaterMapDataLive()
 {
     if (Natives::AFortWorldManager_GetTheaterMapData)

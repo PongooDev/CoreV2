@@ -603,6 +603,7 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
         const FVector Location = Pawn->GetTransform().GetLocation();
         if (AFortPickup* Pickup = AFortPickup::CreatePickup(GetWorld(), *DropEntry, &Location, nullptr, this))
         {
+            Pickup->PawnWhoDroppedPickup = Pawn;
             Pickup->TossPickup(Location, Pawn, 0);
         }
     }

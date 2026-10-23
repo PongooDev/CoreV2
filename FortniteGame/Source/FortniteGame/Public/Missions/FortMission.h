@@ -8,6 +8,7 @@
 #include "UObject/Stack.h"
 
 class AFortPlayerController;
+class UFortBadgeItemDefinition;
 class UFortWorldItemDefinition;
 class AFortMissionManager;
 class UFortMissionInfo;
@@ -64,6 +65,7 @@ public:
     AFortMissionManager* GetMissionManager() const;
     TArray<UFortWorldItemDefinition*> GetRewardItemsByTag(const FGameplayTag& RewardTag);
     void GrantRewardsByTag(FGameplayTag RewardTag, EFortRewardType RewardType);
+    void GrantBadge(UFortBadgeItemDefinition* Badge, EFortRewardType RewardType);
 
     DECLARE_FUNCTION(execGrantRewardsByTag);
     static void GrantRewardsByTagCall(AFortMission* This, FGameplayTag RewardTag, EFortRewardType RewardType);

@@ -7,6 +7,7 @@
 #include "Misc/Guid.h"
 #include "StructArray.h"
 
+class AFortAIPawn;
 class AFortPawn;
 class AFortPlayerController;
 class IFortInventoryOwnerInterface;
@@ -22,6 +23,7 @@ public:
     DefineUStructArrayProperty(FFortItemEntry, MultiItemPickupEntries)
     DefineUProperty(FGuid, OptionalMissionGuid)
     DefineUProperty(int32_t, OptionalOwnerID)
+    DefineUProperty(AFortPawn*, PawnWhoDroppedPickup)
 
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
     void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount);
@@ -33,5 +35,6 @@ public:
     static void HookVTables();
 
 private:
+    void GivePickupToAI(AFortAIPawn* AIPawn, IFortInventoryOwnerInterface* InventoryOwner);
     static void GivePickupToHK(AFortPickup* This, IFortInventoryOwnerInterface* InventoryOwner);
 };

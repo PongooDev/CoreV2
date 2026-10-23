@@ -15,6 +15,9 @@ class UFortInventoryOwnerInterface : public UObject
 class IFortInventoryOwnerInterface
 {
 public:
+    virtual ~IFortInventoryOwnerInterface() = default;
+    virtual UObject* _getUObject() const = 0;
+
     AFortInventory* GetWorldInventory()
     {
         return CallVirtual<AFortInventory*>(this, Natives::IFortInventoryOwnerInterface_GetWorldInventoryIndex);

@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "Missions/FortItemCollectedParams.h"
 #include "Missions/FortMissionLibrary.h"
+#include "Items/FortItemDefinition.h"
 #include "Player/FortPlayerController.h"
+#include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -29,6 +31,10 @@ void UFortItemCollectedParams::SendItemCollected(AFortPlayerController* Collecte
     {
         Params->SetParams(CollectedItemDefinition, CollectedBy, AmountCollected);
         UFortMissionLibrary::ExecuteMissionEvent(CollectedBy, FName(L"ItemCollected", FNAME_Find), Params);
+    }
+    if (UFortQuestManager* QuestManager = CollectedBy->GetQuestManager())
+    {
+        QuestManager->SendItemStatEvent(EFortQuestObjectiveStatEvent::GetCollect(), CollectedItemDefinition, AmountCollected);
     }
 #endif
 }

@@ -2,6 +2,7 @@
 #include "Quests/FortQuestManager.h"
 #include "Containers/ScriptArray.h"
 #include "Finder.h"
+#include "Items/FortItemDefinition.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
 #include "UObject/Class.h"
@@ -35,6 +36,23 @@ void UFortQuestManager::SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject
     {
         Natives::UFortQuestManager_SendStatEvent(this, static_cast<uint8_t>(Type), TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
     }
+}
+
+// Collect and Craft events name the item definition, which item-event objectives (ItemReference) and stat rows with
+// Item.* conditions are matched against.
+void UFortQuestManager::SendItemStatEvent(EFortQuestObjectiveStatEvent Type, UFortItemDefinition* ItemDefinition, int32_t Count)
+{
+#if WITH_SERVER_CODE
+    if (!ItemDefinition || Count <= 0)
+    {
+        return;
+    }
+
+    FGameplayTagContainer SourceTags;
+    FGameplayTagContainer ContextTags;
+    GetSourceAndContextTags(SourceTags, ContextTags);
+    SendStatEvent(Type, ItemDefinition, ItemDefinition->GameplayTags, SourceTags, ContextTags, Count, false);
+#endif
 }
 
 void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus)

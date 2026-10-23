@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/UnrealString.h"
+#include "GameplayTagContainer.h"
 #include "UObject/Object.h"
 
 class AFortPlayerController;
@@ -94,6 +95,7 @@ class UFortItemDefinition : public UObject
 public:
     DefineUProperty(EFortItemType, ItemType)
     DefineUProperty(int32_t, MaxStackSize)
+    DefineUProperty(FGameplayTagContainer, GameplayTags)
     DefineUFunction(CreateTemporaryItemInstanceBP)
     DefineUFunction(GetPersistentName)
     DefineUFunction(GetFilterCategory)

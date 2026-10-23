@@ -63,6 +63,18 @@ namespace
         }
         return Text.empty() ? std::wstring(L"none") : Text;
     }
+
+    // The Complete stat for a won mission: its MissionTags plus the completion tags its objectives added
+    // (e.g. Stat.Mission.Primary.Outpost.Leg1), which the ObjectiveStatTable's Complete rows target.
+    void SendMissionCompleteStat(UFortQuestManager* QuestManager, AFortMission* Mission, UFortMissionInfo* Info)
+    {
+        FGameplayTagContainer SourceTags;
+        FGameplayTagContainer ContextTags;
+        QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
+        FGameplayTagContainer TargetTags = Info->MissionTags;
+        UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(TargetTags, Mission->MissionCompletionTags);
+        QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetComplete(), Mission, TargetTags, SourceTags, ContextTags, 1, true);
+    }
 }
 
 void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
@@ -111,12 +123,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
             UFortQuestManager* QuestManager = PlayerController->GetQuestManager();
             if (QuestManager && Status == EFortMissionStatus::GetSucceeded() && Info)
             {
-                FGameplayTagContainer SourceTags;
-                FGameplayTagContainer ContextTags;
-                QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
-                FGameplayTagContainer TargetTags = Info->MissionTags;
-                UBlueprintGameplayTagLibrary::AppendGameplayTagContainers(TargetTags, Mission->MissionCompletionTags);
-                QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetComplete(), Mission, TargetTags, SourceTags, ContextTags, 1, true);
+                SendMissionCompleteStat(QuestManager, Mission, Info);
             }
 
             if (!QuestManager || SessionId.IsEmpty())
@@ -189,6 +196,16 @@ void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission, EFortMiss
         if (UnderParBadge && Info->ParTime > 0)
         {
             GrantBadge(UnderParBadge, bSucceeded && Mission->IsUnderPar() ? EFortRewardType::GetDefault() : EFortRewardType::GetMissed(), Players);
+        }
+    }
+    if (Role == ROLE_Authority && Info && NewStatus == EFortMissionStatus::GetSucceeded() && !Mission->IsPrimaryMission())
+    {
+        for (AFortPlayerController* PlayerController : Mission->GetParticipatingMissionControllers())
+        {
+            if (UFortQuestManager* QuestManager = PlayerController ? PlayerController->GetQuestManager() : nullptr)
+            {
+                SendMissionCompleteStat(QuestManager, Mission, Info);
+            }
         }
     }
     if (Role == ROLE_Authority && Mission && NewStatus == EFortMissionStatus::GetSucceeded())

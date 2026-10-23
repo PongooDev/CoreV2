@@ -10,6 +10,7 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Player/FortPlayerController.h"
+#include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -95,9 +96,14 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
         FMemory::Free(Requirements.GetData());
     }
 
+    UFortQuestManager* QuestManager = PlayerController->GetQuestManager();
     if (ResultDefinition->MaxStackSize > 1)
     {
         UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, ResultDefinition, QuantityProduced, true);
+        if (QuestManager)
+        {
+            QuestManager->SendItemStatEvent(EFortQuestObjectiveStatEvent::GetCraft(), ResultDefinition, QuantityProduced);
+        }
         return QuantityProduced;
     }
 
@@ -115,6 +121,10 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
         Inventory->AddWorldItem(WorldItem);
         static_cast<FFortItemEntry&>(WorldItem->ItemEntry).SetNewItemCount(1, true);
         PlayerController->TryAddToQuickBar(WorldItem);
+    }
+    if (QuestManager)
+    {
+        QuestManager->SendItemStatEvent(EFortQuestObjectiveStatEvent::GetCraft(), ResultDefinition, QuantityProduced);
     }
     return QuantityProduced;
 #else

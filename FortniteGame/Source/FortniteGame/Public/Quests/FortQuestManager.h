@@ -60,6 +60,7 @@ struct FFortQuestEarnedBadgeData
     DefineUProperty(int32_t, Count)
 };
 
+class UFortItemDefinition;
 class UFortMcpProfileAccount;
 class UFortMcpProfileWorld;
 class UFortQuestItemDefinition;
@@ -83,6 +84,7 @@ public:
     UFortQuestItem* GetQuestWithDefinition(UFortQuestItemDefinition* Definition);
     bool HasActiveQuest(UFortQuestItemDefinition* Definition);
     void SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
+    void SendItemStatEvent(EFortQuestObjectiveStatEvent Type, UFortItemDefinition* ItemDefinition, int32_t Count);
     void SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus);
 };
 

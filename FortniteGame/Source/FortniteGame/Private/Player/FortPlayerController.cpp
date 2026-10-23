@@ -12,6 +12,7 @@
 #include "GameThread.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
+#include "Homebase/FortHomebaseManager.h"
 #include "Hooks.h"
 #include "FortKismetLibrary.h"
 #include "FortSpottableActorInterface.h"
@@ -24,6 +25,7 @@
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
+#include "Online/FortMcpProfileAccount.h"
 #include "Pawns/FortPawn.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerState.h"
@@ -46,6 +48,7 @@ namespace
         TWeakObjectPtr<AFortPlayerController> PlayerController;
         std::vector<TWeakObjectPtr<UFortItemDefinition>> GrantedDefinitions;
         std::vector<FGuid> PendingQuickBarItems;
+        std::vector<TWeakObjectPtr<UFortItemDefinition>> GrantedHomebaseGadgets;
     };
 
     std::unordered_map<const AFortPlayerController*, FHeroAbilityKitItems> HeroAbilityKitItems;
@@ -59,6 +62,21 @@ namespace
             Items = FHeroAbilityKitItems{ TWeakObjectPtr<AFortPlayerController>(PlayerController) };
         }
         return Items;
+    }
+
+    int32_t AbilityKitItemCount(const FAbilityKitItem& KitItem, int32_t Owned)
+    {
+        const int32_t Quantity = KitItem.Quantity;
+        const EFortReplenishmentType Replenishment = KitItem.Replenishment;
+        if (Replenishment == EFortReplenishmentType::GetClampMin())
+        {
+            return Quantity - Owned;
+        }
+        if (Replenishment == EFortReplenishmentType::GetAdd())
+        {
+            return Quantity;
+        }
+        return Owned > 0 ? 0 : Quantity;
     }
 
     std::vector<UFortWorldItem*> AddHeroAbilityKitItem(AFortPlayerController* PlayerController, AFortInventory* Inventory, UFortWorldItemDefinition* ItemDefinition, int32_t Count, int32_t Level)
@@ -139,6 +157,7 @@ void AFortPlayerController::Possess(APawn* InPawn)
     {
         AddHeroAbilityKitGadgetsToQuickBars();
         ApplyHarvestingTool();
+        ApplyHomebaseGadgets();
 
         FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
         Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
@@ -387,22 +406,7 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
             continue;
         }
 
-        const int32_t Quantity = KitItem->Quantity;
-        const int32_t Owned = GetItemQuantity(ItemDefinition);
-        int32_t Count = 0;
-        const EFortReplenishmentType Replenishment = KitItem->Replenishment;
-        if (Replenishment == EFortReplenishmentType::GetClampMin())
-        {
-            Count = Quantity - Owned;
-        }
-        else if (Replenishment == EFortReplenishmentType::GetAdd())
-        {
-            Count = Quantity;
-        }
-        else
-        {
-            Count = Owned > 0 ? 0 : Quantity;
-        }
+        const int32_t Count = AbilityKitItemCount(*KitItem, GetItemQuantity(ItemDefinition));
         if (Count > 0)
         {
             AddHeroAbilityKitItem(this, Inventory, ItemDefinition, Count, Level);
@@ -524,6 +528,115 @@ void AFortPlayerController::ApplyHarvestingTool()
     {
         TryAddToQuickBar(WorldItem);
     }
+#endif
+}
+
+void AFortPlayerController::ApplyHomebaseGadgets()
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = WorldInventory;
+    AFortQuickBars* Bars = QuickBars;
+    UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
+    UFortMcpProfileAccount* AccountProfile = PlayerInfo ? static_cast<UFortMcpProfileAccount*>(PlayerInfo->AccountProfile) : nullptr;
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    if (Role != ROLE_Authority || !Inventory || !Bars || !AccountProfile || !GameData || !Finder::ResolveHomebaseGadgetsLive())
+    {
+        return;
+    }
+
+    const FFortSavedModeLoadout ModeLoadout = AccountProfile->GetModeLoadout(FString(L"Default"));
+    const TArray<FString>& SelectedGadgets = ModeLoadout.SelectedGadgets;
+    const TAssetPtr<UFortHomebaseManager>& HomebaseManagerPtr = GameData->HomebaseManager;
+    UFortHomebaseManager* HomebaseManager = SelectedGadgets.Num() > 0 ? HomebaseManagerPtr.LoadSynchronous() : nullptr;
+    if (!HomebaseManager)
+    {
+        return;
+    }
+
+    TStructArray<FFortItemEntry> SelectableGadgets;
+    HomebaseManager->GetSelectableGadgetItems(AccountProfile, Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface(PlayerInfo), SelectableGadgets);
+    TArray<UFortAbilityKit*> Kits;
+    HomebaseManager->GetOwnedNodeAbilityKits(AccountProfile, Kits);
+
+    std::vector<int32_t> GadgetSlots;
+    const int32_t NumSlots = Bars->GetQuickBar(EFortQuickBars::GetPrimary()).Slots.Num();
+    for (int32_t SlotIndex = 0; SlotIndex < NumSlots; ++SlotIndex)
+    {
+        const TArray<EFortItemType>& AcceptedItemTypes = Bars->GetSlotData(EFortQuickBars::GetPrimary(), SlotIndex).AcceptedItemTypes;
+        if (AcceptedItemTypes.Contains(EFortItemType::GetHomebaseGadget()))
+        {
+            GadgetSlots.push_back(SlotIndex);
+        }
+    }
+
+    FHeroAbilityKitItems& Granted = GetHeroAbilityKitItems(this);
+    for (int32_t Index = 0; Index < SelectedGadgets.Num(); ++Index)
+    {
+        const FString& Selected = SelectedGadgets[Index];
+        if (Selected.IsEmpty())
+        {
+            continue;
+        }
+
+        const FFortItemEntry* GadgetEntry = nullptr;
+        for (int32_t EntryIndex = 0; EntryIndex < SelectableGadgets.Num() && !GadgetEntry; ++EntryIndex)
+        {
+            const UFortItemDefinition* Definition = SelectableGadgets[EntryIndex].ItemDefinition;
+            if (Definition && _wcsicmp(*Definition->GetPersistentName(), *Selected) == 0)
+            {
+                GadgetEntry = &SelectableGadgets[EntryIndex];
+            }
+        }
+        UFortWorldItemDefinition* Gadget = GadgetEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(GadgetEntry->ItemDefinition)) : nullptr;
+        if (!Gadget)
+        {
+            UE_LOG(LogFort, Warning, TEXT("ApplyHomebaseGadgets: %s selected gadget '%s' is not unlocked"), *GetName(), *Selected);
+            continue;
+        }
+
+        const bool bWasGranted = std::any_of(Granted.GrantedHomebaseGadgets.begin(), Granted.GrantedHomebaseGadgets.end(), [Gadget](const TWeakObjectPtr<UFortItemDefinition>& Definition) { return Definition.Get() == Gadget; });
+        if (bWasGranted || GetItemQuantity(Gadget) > 0)
+        {
+            continue;
+        }
+        Granted.GrantedHomebaseGadgets.emplace_back(Gadget);
+
+        const int32_t Level = GadgetEntry->Level;
+        const int32_t Slot = Index < static_cast<int32_t>(GadgetSlots.size()) && Bars->GetSlot(EFortQuickBars::GetPrimary(), GadgetSlots[Index]).Items.Num() == 0 ? GadgetSlots[Index] : -1;
+        for (UFortWorldItem* GadgetItem : AddHeroAbilityKitItem(this, Inventory, Gadget, 1, Level))
+        {
+            FFortItemEntry& ItemEntry = GadgetItem->ItemEntry;
+            Bars->ServerAddItemInternal(ItemEntry.ItemGuid, EFortQuickBars::GetPrimary(), Slot);
+        }
+
+        for (UFortAbilityKit* Kit : Kits)
+        {
+            const TArray<UFortGadgetItemDefinition*>* KitGadgets = Kit ? &static_cast<TArray<UFortGadgetItemDefinition*>&>(Kit->Gadgets) : nullptr;
+            if (!KitGadgets || std::none_of(KitGadgets->begin(), KitGadgets->end(), [Gadget](UFortGadgetItemDefinition* KitGadget) { return static_cast<UFortItemDefinition*>(KitGadget) == Gadget; }))
+            {
+                continue;
+            }
+
+            TStructArray<FAbilityKitItem>& Items = Kit->Items;
+            for (int32_t ItemIndex = 0; ItemIndex < Items.Num(); ++ItemIndex)
+            {
+                const FAbilityKitItem& KitItem = Items[ItemIndex];
+                UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(KitItem.Item));
+                const int32_t Count = ItemDefinition && ItemDefinition->ItemType != EFortItemType::GetWeaponHarvest() ? AbilityKitItemCount(KitItem, GetItemQuantity(ItemDefinition)) : 0;
+                if (Count > 0)
+                {
+                    AddHeroAbilityKitItem(this, Inventory, ItemDefinition, Count, Level);
+                }
+            }
+        }
+        UE_LOG(LogFort, Log, TEXT("ApplyHomebaseGadgets: %s gets '%s' at level %d, quickbar slot %d"), *GetName(), *Selected, Level, Slot);
+    }
+
+    for (int32_t Index = 0; Index < SelectableGadgets.Num(); ++Index)
+    {
+        FFortItemEntry::StaticStruct()->DestroyStruct(&SelectableGadgets[Index]);
+    }
+    FMemory::Free(SelectableGadgets.GetData());
 #endif
 }
 

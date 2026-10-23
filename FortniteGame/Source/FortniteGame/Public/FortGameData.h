@@ -10,6 +10,7 @@ class AActor;
 class AFortAIDirector;
 class UEnvQuery;
 class UFortAbilitySet;
+class UFortHomebaseManager;
 class UFortItemDefinition;
 class UFortWorldItemDefinition;
 
@@ -42,6 +43,7 @@ public:
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
     DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)
     DefineUProperty(UClass*, SharedMissionListsClass)
+    DefineUProperty(TAssetPtr<UFortHomebaseManager>, HomebaseManager)
 
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
     {

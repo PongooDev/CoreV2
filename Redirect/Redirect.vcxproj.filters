@@ -295,6 +295,9 @@
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Abilities">
       <UniqueIdentifier>{4dc6fb45-dccf-41dc-a6cb-fbeba1cbfb0e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Private\Homebase">
+      <UniqueIdentifier>{e03f2788-1d86-44fa-9bef-e0c89533e81a}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Heroes">
       <UniqueIdentifier>{82eab6ed-7522-49e8-a385-73b0b64ae4a8}</UniqueIdentifier>
     </Filter>
@@ -336,6 +339,9 @@
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Customization">
       <UniqueIdentifier>{f779055e-d6c3-4e32-873c-440dffa25e1a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Public\Homebase">
+      <UniqueIdentifier>{8231ad08-fc9a-4f37-8d8e-81a25e020552}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Heroes">
       <UniqueIdentifier>{4d7f98e5-12f2-48ca-81af-c7dd60c40be8}</UniqueIdentifier>
@@ -960,6 +966,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Heroes\FortHeroType.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Heroes</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Homebase\FortHomebaseManager.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Homebase</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortBadgeItemDefinition.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Items</Filter>
     </ClInclude>
@@ -1358,6 +1367,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Heroes\FortHero.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Heroes</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Homebase\FortHomebaseManager.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Homebase</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortBadgeItemDefinition.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>

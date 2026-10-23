@@ -58,6 +58,7 @@ public:
     void ApplyHeroAbilityKitItems(UFortHero* Hero);
     void AddHeroAbilityKitGadgetsToQuickBars();
     void ApplyHarvestingTool();
+    void ApplyHomebaseGadgets();
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
     void ServerSpotActor_Implementation(AActor* NewlySpottedActor);

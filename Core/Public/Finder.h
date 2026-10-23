@@ -67,6 +67,7 @@ namespace Finder
     bool ResolveMissionParTimeLive(uintptr_t CustomHandleMissionEvent);
     bool ResolveMissionBadgeLive(ptrdiff_t EarnedBadgesArrayOffset);
     bool ResolveTheaterMapDataLive();
+    bool ResolveHomebaseGadgetsLive();
     bool ResolveObjectiveActivationLive(ptrdiff_t MissionActiveObjectivesOffset);
     bool ResolveCraftingLive();
     uint8_t* NullGetCurrentCall(UFunction* Function);

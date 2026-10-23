@@ -4246,6 +4246,70 @@ bool Finder::ResolveTheaterMapDataLive()
     return true;
 }
 
+bool Finder::ResolveHomebaseGadgetsLive()
+{
+    if (Natives::UFortMcpProfileAccount_GetModeLoadout && Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface && Natives::UFortHomebaseManager_GetSelectableGadgetItems && Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits)
+    {
+        return true;
+    }
+    if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
+    {
+        return false;
+    }
+
+    const auto ImplementationOf = [](const wchar_t* FunctionPath)
+    {
+        const uintptr_t Call = reinterpret_cast<uintptr_t>(Finder::ImplementationCall(FindObject<UFunction>(nullptr, FunctionPath)));
+        return Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    };
+    const uintptr_t OwnedNodes = ImplementationOf(L"/Script/FortniteGame.FortHomebaseManager:GetOwnedNodes");
+    const uintptr_t SelectableGadgets = ImplementationOf(L"/Script/FortniteUI.FortFrontEndContext:GetSelectableGadgets");
+    const uintptr_t SelectableGadgetsEnd = OwnedNodes && IsInText(SelectableGadgets) ? Finder::FunctionEnd(SelectableGadgets) : 0;
+
+    uintptr_t AbilitySystemInterface = 0;
+    uintptr_t GadgetItems = 0;
+    uintptr_t OwnedNodeKits = 0;
+    uintptr_t Previous = 0;
+    for (uintptr_t Call = SelectableGadgetsEnd ? FindRawCall(SelectableGadgets, SelectableGadgetsEnd) : 0; Call && !GadgetItems; Call = FindRawCall(Call + 1, SelectableGadgetsEnd))
+    {
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        const uintptr_t First = FindRawCall(Target, Target + 0x80);
+        const uintptr_t FirstTarget = First ? Finder::RelativeTarget(First, 1, 5) : 0;
+        if (FirstTarget && CallWithin(FirstTarget, 0x40, OwnedNodes))
+        {
+            AbilitySystemInterface = Previous;
+            GadgetItems = Target;
+            OwnedNodeKits = FirstTarget;
+        }
+        Previous = Target;
+    }
+
+    const std::vector<uintptr_t> SettingGadgetRefs = Finder::StringRefs(L"Setting Gadget %d for local player. Gadget Name: %s");
+    const uintptr_t SettingGadget = SettingGadgetRefs.empty() ? 0 : *std::min_element(SettingGadgetRefs.begin(), SettingGadgetRefs.end());
+    const uintptr_t SyncGadgets = Finder::FunctionStart(SettingGadget);
+    uintptr_t ModeLoadout = 0;
+    for (uintptr_t Call = SyncGadgets ? FindRawCall(SyncGadgets, SettingGadget) : 0; Call; Call = FindRawCall(Call + 1, SettingGadget))
+    {
+        ModeLoadout = Finder::RelativeTarget(Call, 1, 5);
+    }
+    if (ModeLoadout && !(SelectableGadgetsEnd && CallWithin(SelectableGadgets, SelectableGadgetsEnd - SelectableGadgets, ModeLoadout)))
+    {
+        ModeLoadout = 0;
+    }
+
+    if (!AbilitySystemInterface || !GadgetItems || !ModeLoadout)
+    {
+        Log::Error(L"Finder: homebase gadgets not found (owned nodes {}, selectable gadgets {}, gadget items {}, mode loadout {})", OwnedNodes != 0, SelectableGadgets != 0, GadgetItems != 0, ModeLoadout != 0);
+        return false;
+    }
+    Natives::UFortMcpProfileAccount_GetModeLoadout = reinterpret_cast<decltype(Natives::UFortMcpProfileAccount_GetModeLoadout)>(ModeLoadout);
+    Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface = reinterpret_cast<decltype(Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface)>(AbilitySystemInterface);
+    Natives::UFortHomebaseManager_GetSelectableGadgetItems = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetSelectableGadgetItems)>(GadgetItems);
+    Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits)>(OwnedNodeKits);
+    Log::Info(L"Finder: homebase gadgets found");
+    return true;
+}
+
 bool Finder::ResolveLoginLive()
 {
     const uintptr_t GameModeBaseLogin = FunctionOf(L"Login: Couldn't spawn player controller of class %s");

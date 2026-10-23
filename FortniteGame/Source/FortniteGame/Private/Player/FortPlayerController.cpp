@@ -36,6 +36,7 @@
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
+#include <cmath>
 #include <unordered_map>
 #include <vector>
 
@@ -713,11 +714,15 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
 
     if (RemoveInventoryItem(ItemGuid, DropCount, false))
     {
-        const FVector Location = Pawn->GetTransform().GetLocation();
+        const FTransform PawnTransform = Pawn->GetTransform();
+        const FVector Location = PawnTransform.GetLocation();
         if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &Location, nullptr))
         {
+            constexpr float TossDistance = 512.0f;
+            const float Yaw = PawnTransform.Rotation.Rotator().Yaw * (3.1415926535897932f / 180.0f);
+            const FVector TossLocation(Location.X + std::cos(Yaw) * TossDistance, Location.Y + std::sin(Yaw) * TossDistance, Location.Z);
             Pickup->PawnWhoDroppedPickup = Pawn;
-            Pickup->TossPickup(Location, Pawn, 0);
+            Pickup->TossPickup(TossLocation, Pawn, 0);
         }
     }
     EntryStruct->DestroyStruct(DropEntry);

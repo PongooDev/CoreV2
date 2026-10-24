@@ -20,4 +20,6 @@ class UFortZoneTheme : public UObject
 public:
     DefineUProperty(EFortZoneType, ZoneType)
     DefineUProperty(FGameplayTagContainer, ZoneTags)
+    DefineUProperty(FGameplayTagContainer, InitialPlayerSpawnTags)
+    DefineUProperty(FGameplayTagContainer, BackupPlayerSpawnTags)
 };

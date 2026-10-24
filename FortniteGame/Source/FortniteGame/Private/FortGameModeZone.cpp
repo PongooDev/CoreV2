@@ -16,6 +16,7 @@
 #include "FortGameData.h"
 #include "FortGameState.h"
 #include "FortVisibilityManager.h"
+#include "FortZoneTheme.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "Player/FortPlayerController.h"
@@ -31,12 +32,15 @@
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
+#include "ObjectLayout.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <unordered_map>
+#include <vector>
 
 APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
 {
@@ -61,6 +65,12 @@ namespace
     constexpr float BuildingCellSizeXY = 512.0f;
     constexpr float BuildingCellSizeZ = 384.0f;
     constexpr float UnitNavBoundsExtent = 1.0f;
+
+    bool HasPlacementTag(const FGameplayTagContainer& Container, FName Tag)
+    {
+        const auto Matches = [Tag](const FGameplayTag& Owned) { return Owned.TagName == Tag; };
+        return std::any_of(Container.GameplayTags.begin(), Container.GameplayTags.end(), Matches) || std::any_of(Container.ParentTags.begin(), Container.ParentTags.end(), Matches);
+    }
 
     double NowMs()
     {
@@ -369,6 +379,134 @@ void AFortGameModeZone::Hook()
     {
         Hooks::RedirectCall(L"AFortAIDirector::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIDirector::GetCurrent));
     }
+
+    Finder::FPlayerSpawnQuerySites SpawnSites;
+    if (Finder::ResolvePlayerSpawnQueriesLive(SpawnSites))
+    {
+        Natives::AFortGameMode_PickPlayerSpawnActor = reinterpret_cast<decltype(Natives::AFortGameMode_PickPlayerSpawnActor)>(SpawnSites.PickSpawnActor);
+        Natives::AFortGameMode_GetFriendlyPlayerPawnsIndex = SpawnSites.FriendlyPawnsIndex;
+        for (uint8_t* Call : SpawnSites.FriendlyCalls)
+        {
+            Hooks::RedirectCall(L"AFortGameModeZone::ChoosePlayerStart friendly player spawn query", Call, reinterpret_cast<void*>(&PickFriendlyPlayerSpawnActorCall));
+        }
+        Hooks::RedirectCall(L"AFortGameModeZone::ChoosePlayerStart initial spawn query", SpawnSites.InitialCall, reinterpret_cast<void*>(&PickInitialPlayerSpawnActorCall));
+        Hooks::RedirectCall(L"AFortGameModeZone::ChoosePlayerStart backup spawn query", SpawnSites.BackupCall, reinterpret_cast<void*>(&PickBackupPlayerSpawnActorCall));
+    }
+}
+
+void AFortGameModeZone::GatherPlayerSpawnActors(AController* Player, bool bInitialTags, bool bNearFriendlyPlayers, TArray<AActor*>& OutCandidates)
+{
+#if WITH_SERVER_CODE
+    OutCandidates.Reset();
+    UWorld* World = GetWorld();
+    AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!GameState)
+    {
+        return;
+    }
+    AFortWorldManager* WorldManager = static_cast<AFortWorldManager*>(GameState->WorldManager);
+    UFortZoneTheme* ZoneTheme = static_cast<UFortZoneTheme*>(GameState->ZoneTheme);
+
+    std::vector<FName> RequiredTags;
+    const FGameplayTagContainer* SourceTags = ZoneTheme ? &(bInitialTags ? ZoneTheme->InitialPlayerSpawnTags : ZoneTheme->BackupPlayerSpawnTags) : nullptr;
+    const FGameplayTagContainer* OverrideTags = WorldManager ? &(bInitialTags ? WorldManager->OverrideInitialPlayerSpawnTags : WorldManager->OverrideBackupPlayerSpawnTags) : nullptr;
+    if (OverrideTags && OverrideTags->Num() > 0)
+    {
+        SourceTags = OverrideTags;
+    }
+    if (SourceTags)
+    {
+        for (const FGameplayTag& Tag : SourceTags->GameplayTags)
+        {
+            RequiredTags.push_back(Tag.TagName);
+        }
+    }
+    else if (bInitialTags)
+    {
+        RequiredTags.push_back(FName(L"PlacementActor.PlayerSpawn"));
+    }
+    else
+    {
+        RequiredTags.push_back(FName(L"Activities.Placement.OnGround"));
+        RequiredTags.push_back(FName(L"Activities.Placement.Outside"));
+    }
+
+    std::vector<FVector> FriendlyLocations;
+    if (bNearFriendlyPlayers && Natives::AFortGameMode_GetFriendlyPlayerPawnsIndex >= 0)
+    {
+        TArray<AActor*> FriendlyPawns;
+        CallVirtual<void>(this, Natives::AFortGameMode_GetFriendlyPlayerPawnsIndex, Player, &FriendlyPawns);
+        for (AActor* Pawn : FriendlyPawns)
+        {
+            if (Pawn)
+            {
+                FriendlyLocations.push_back(Pawn->GetTransform().GetLocation());
+            }
+        }
+    }
+    const FVector FriendlyExtent = WorldManager ? static_cast<FVector>(WorldManager->FriendlyPlayerSpawnExtent) : FVector(0, 0, 0);
+    if (bNearFriendlyPlayers && FriendlyLocations.empty())
+    {
+        return;
+    }
+
+    for (TObjectIterator<AFortPlacementActor> It; It; ++It)
+    {
+        AFortPlacementActor* PlacementActor = *It;
+        if (PlacementActor->GetWorld() != World || PlacementActor->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+        {
+            continue;
+        }
+        const FGameplayTagContainer& StaticTags = PlacementActor->StaticGameplayTags;
+        const FGameplayTagContainer& DefaultTags = PlacementActor->DefaultTags;
+        if (!std::all_of(RequiredTags.begin(), RequiredTags.end(), [&](FName Tag) { return HasPlacementTag(StaticTags, Tag) || HasPlacementTag(DefaultTags, Tag); }))
+        {
+            continue;
+        }
+        if (bNearFriendlyPlayers)
+        {
+            const FVector Location = PlacementActor->GetTransform().GetLocation();
+            const bool bNearFriendly = std::any_of(FriendlyLocations.begin(), FriendlyLocations.end(), [&](const FVector& Friendly)
+            {
+                return std::abs(Location.X - Friendly.X) <= FriendlyExtent.X && std::abs(Location.Y - Friendly.Y) <= FriendlyExtent.Y && std::abs(Location.Z - Friendly.Z) <= FriendlyExtent.Z;
+            });
+            if (!bNearFriendly)
+            {
+                continue;
+            }
+        }
+        OutCandidates.Add(PlacementActor);
+    }
+
+    UE_LOG(LogFortPlacement, Log, TEXT("ChoosePlayerStart: %d %s spawn candidates for %s"), OutCandidates.Num(), bNearFriendlyPlayers ? TEXT("friendly player") : bInitialTags ? TEXT("initial") : TEXT("backup"), Player ? *Player->GetName() : TEXT("None"));
+#endif
+}
+
+AActor* AFortGameModeZone::PickFriendlyPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius)
+{
+    if (This && Candidates)
+    {
+        This->GatherPlayerSpawnActors(Player, false, true, *Candidates);
+    }
+    return Natives::AFortGameMode_PickPlayerSpawnActor(This, Player, PawnClass, Candidates, DangerExclusionRadius, ObjectiveExclusionRadius);
+}
+
+AActor* AFortGameModeZone::PickInitialPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius)
+{
+    if (This && Candidates)
+    {
+        This->GatherPlayerSpawnActors(Player, true, false, *Candidates);
+    }
+    return Natives::AFortGameMode_PickPlayerSpawnActor(This, Player, PawnClass, Candidates, DangerExclusionRadius, ObjectiveExclusionRadius);
+}
+
+AActor* AFortGameModeZone::PickBackupPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius)
+{
+    if (This && Candidates)
+    {
+        This->GatherPlayerSpawnActors(Player, false, false, *Candidates);
+    }
+    return Natives::AFortGameMode_PickPlayerSpawnActor(This, Player, PawnClass, Candidates, DangerExclusionRadius, ObjectiveExclusionRadius);
 }
 
 namespace

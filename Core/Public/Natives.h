@@ -162,6 +162,8 @@ namespace Natives
     inline UClass** (*AFortGameMode_GetGameSessionClass)(const AFortGameMode* This, UClass** Result) = nullptr;
     inline APawn* (*AFortGameMode_SpawnDefaultPawnFor)(AFortGameMode* This, AController* NewPlayer, AActor* StartSpot) = nullptr;
     inline APawn* (*AFortGameModeZone_SpawnDefaultPawnFor)(AFortGameModeZone* This, AController* NewPlayer, AActor* StartSpot) = nullptr;
+    inline AActor* (*AFortGameMode_PickPlayerSpawnActor)(AFortGameMode* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius) = nullptr;
+    inline int32_t AFortGameMode_GetFriendlyPlayerPawnsIndex = -1;
     inline void (*AFortGameMode_FinishWorldInitialization)(AFortGameMode* This, AFortWorldManager* WorldManager) = nullptr;
     inline void (*AFortWorldManager_OnWorldRecordQueryComplete)(AFortWorldManager* This) = nullptr;
     inline void (*AFortLobbyBeaconHost_SetWorldRecordLoaded)(AFortLobbyBeaconHost* This, bool bInWorldRecordLoaded) = nullptr;

@@ -5291,6 +5291,58 @@ bool Finder::ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FCondi
     return true;
 }
 
+bool Finder::ResolvePlayerSpawnQueriesLive(FPlayerSpawnQuerySites& OutSites)
+{
+    const uintptr_t ChoosePlayerStart = FunctionOf(L"ChoosePlayerStart: Could not find spot for Player! Spawning at engine PlayerStart!");
+    const uintptr_t ChoosePlayerStartEnd = ChoosePlayerStart ? Finder::FunctionEnd(ChoosePlayerStart) : 0;
+    std::unordered_map<uintptr_t, std::vector<uintptr_t>> CandidateCalls;
+    for (const auto& [Call, Target] : ChoosePlayerStartEnd ? Finder::DirectCalls(ChoosePlayerStart, ChoosePlayerStartEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (Finder::FunctionStart(Target) == Target && FindBackward(Call, 0x30, { 0x4C, 0x8D, 0x4C, 0x24 }))
+        {
+            CandidateCalls[Target].push_back(Call);
+        }
+    }
+
+    uintptr_t PickSpawnActor = 0;
+    for (const auto& [Target, Calls] : CandidateCalls)
+    {
+        if (Calls.size() == 4)
+        {
+            PickSpawnActor = PickSpawnActor ? UINTPTR_MAX : Target;
+        }
+    }
+
+    std::vector<uintptr_t> PickCalls = PickSpawnActor && PickSpawnActor != UINTPTR_MAX ? CandidateCalls[PickSpawnActor] : std::vector<uintptr_t>();
+    std::sort(PickCalls.begin(), PickCalls.end());
+    int32_t FriendlyPawnsIndex = -1;
+    int32_t FriendlyPawnsCalls = 0;
+    const std::initializer_list<int32_t> VirtualCall = { 0xFF, 0x90, -1, -1, -1, -1 };
+    for (uintptr_t Site = PickCalls.size() == 4 ? FindInstruction(ChoosePlayerStart, PickCalls[0], VirtualCall) : 0; Site; Site = FindInstruction(Site + 1, PickCalls[0], VirtualCall))
+    {
+        if (FindBackward(Site, 0x30, { 0x4C, 0x8D, 0x44, 0x24 }))
+        {
+            FriendlyPawnsIndex = VirtualSlot(Site);
+            ++FriendlyPawnsCalls;
+        }
+    }
+
+    if (PickCalls.size() != 4 || FriendlyPawnsCalls != 1 || FriendlyPawnsIndex < 0)
+    {
+        Log::Error(L"Finder: AFortGameModeZone::ChoosePlayerStart spawn queries not found ({} spawn actor calls, {} friendly pawn calls)", PickCalls.size(), FriendlyPawnsCalls);
+        return false;
+    }
+
+    OutSites.PickSpawnActor = PickSpawnActor;
+    OutSites.FriendlyCalls[0] = reinterpret_cast<uint8_t*>(PickCalls[0]);
+    OutSites.FriendlyCalls[1] = reinterpret_cast<uint8_t*>(PickCalls[1]);
+    OutSites.InitialCall = reinterpret_cast<uint8_t*>(PickCalls[2]);
+    OutSites.BackupCall = reinterpret_cast<uint8_t*>(PickCalls[3]);
+    OutSites.FriendlyPawnsIndex = FriendlyPawnsIndex;
+    Log::Info(L"Finder: AFortGameModeZone::ChoosePlayerStart spawn queries (spawn actor 0x{:X}, calls 0x{:X} 0x{:X} 0x{:X} 0x{:X}, friendly pawns slot 0x{:X})", PickSpawnActor - Finder::ImageBase(), PickCalls[0] - Finder::ImageBase(), PickCalls[1] - Finder::ImageBase(), PickCalls[2] - Finder::ImageBase(), PickCalls[3] - Finder::ImageBase(), FriendlyPawnsIndex);
+    return true;
+}
+
 bool Finder::ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff_t LastEquippedWeaponGuidOffset)
 {
     if (Natives::AFortPlayerPawn_EquipLastWeaponIndex >= 0 && Natives::AFortPawn_EquipDefaultWeaponIndex >= 0)

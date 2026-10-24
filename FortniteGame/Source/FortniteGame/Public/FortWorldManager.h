@@ -2,6 +2,7 @@
 
 #include "Containers/Array.h"
 #include "GameFramework/Info.h"
+#include "GameplayTagContainer.h"
 #include "Math/Transform.h"
 #include "Missions/FortMissionManager.h"
 
@@ -46,6 +47,9 @@ public:
     DefineBitfieldUProperty(bCreatedMissionRecord)
     DefineUProperty(bool, bZoneFinished)
     DefineUProperty(bool, bZoneCompleted)
+    DefineUProperty(FVector, FriendlyPlayerSpawnExtent)
+    DefineUProperty(FGameplayTagContainer, OverrideInitialPlayerSpawnTags)
+    DefineUProperty(FGameplayTagContainer, OverrideBackupPlayerSpawnTags)
 
     static ptrdiff_t ZoneFinishedOffset();
     static ptrdiff_t ZoneCompletedOffset();

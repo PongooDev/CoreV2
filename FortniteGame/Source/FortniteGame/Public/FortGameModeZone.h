@@ -43,6 +43,11 @@ public:
 
 private:
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeZone* This, AController* NewPlayer, AActor* StartSpot);
+    static AActor* PickFriendlyPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius);
+    static AActor* PickInitialPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius);
+    static AActor* PickBackupPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius);
+
+    void GatherPlayerSpawnActors(AController* Player, bool bInitialTags, bool bNearFriendlyPlayers, TArray<AActor*>& OutCandidates);
     static void FinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager);
     static void SubclassFinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager);
     static void CreateAIDirectorHK(AFortGameModeZone* This);

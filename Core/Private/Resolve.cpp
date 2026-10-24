@@ -5226,6 +5226,71 @@ uint8_t* Finder::AbilityEndCleanupCall(ptrdiff_t AbilityGrantedWeaponItemOffset)
     return reinterpret_cast<uint8_t*>(Found);
 }
 
+bool Finder::ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FConditionalFoundationQuotaSites& OutSites)
+{
+    const uintptr_t Tick = reinterpret_cast<uintptr_t>(Natives::AFortWorldManager_ServerTickLoadingOrCreatingWorld);
+    const uintptr_t TickEnd = Tick ? Finder::FunctionEnd(Tick) : 0;
+    std::vector<uintptr_t> Checked;
+    uintptr_t Quota = 0;
+    int32_t Count = 0;
+    for (const auto& [Call, Target] : TickEnd && QuotaOffset > 0 ? Finder::DirectCalls(Tick, TickEnd) : decltype(Finder::DirectCalls(0, 0)){})
+    {
+        if (std::find(Checked.begin(), Checked.end(), Target) != Checked.end() || Finder::FunctionStart(Target) != Target)
+        {
+            continue;
+        }
+        Checked.push_back(Target);
+        if (ContainsDisp32(Target, Target + 0x60, static_cast<int32_t>(QuotaOffset + 8)))
+        {
+            Quota = Target;
+            ++Count;
+        }
+    }
+
+    const uintptr_t QuotaEnd = Count == 1 ? Finder::FunctionEnd(Quota) : 0;
+    uintptr_t ContextCall = 0;
+    uintptr_t SelectCall = 0;
+    std::vector<uintptr_t> FrameLeaCalls;
+    for (const auto& [Call, Target] : QuotaEnd ? Finder::DirectCalls(Quota, QuotaEnd) : decltype(Finder::DirectCalls(0, 0)){})
+    {
+        if (Byte(Target) == 0x33 && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3)
+        {
+            ContextCall = ContextCall ? UINTPTR_MAX : Call;
+        }
+        else if (Byte(Target) == 0x32 && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3)
+        {
+            SelectCall = SelectCall ? UINTPTR_MAX : Call;
+        }
+        else if (ContextCall && !SelectCall && Byte(Call - 4) == 0x48 && Byte(Call - 3) == 0x8D && Byte(Call - 2) == 0x4D)
+        {
+            FrameLeaCalls.push_back(Call);
+        }
+    }
+
+    int32_t RequestSize = 0;
+    for (uintptr_t Site = FrameLeaCalls.size() >= 2 && SelectCall != UINTPTR_MAX ? FrameLeaCalls[1] : 0; Site && Site + 7 <= SelectCall && !RequestSize; ++Site)
+    {
+        if ((Byte(Site) == 0x48 || Byte(Site) == 0x4C) && Byte(Site + 1) == 0x69 && (Byte(Site + 2) & 0xC0) == 0xC0)
+        {
+            RequestSize = *reinterpret_cast<const int32_t*>(Site + 3);
+        }
+    }
+
+    const ptrdiff_t ClassesOffset = FrameLeaCalls.size() >= 2 ? static_cast<ptrdiff_t>(static_cast<int8_t>(Byte(FrameLeaCalls[1] - 1))) - static_cast<int8_t>(Byte(FrameLeaCalls[0] - 1)) : -1;
+    if (Count != 1 || !ContextCall || ContextCall == UINTPTR_MAX || !SelectCall || SelectCall == UINTPTR_MAX || ClassesOffset <= 0 || RequestSize <= ClassesOffset)
+    {
+        Log::Error(L"Finder: AFortWorldManager conditional foundation quota calls not found ({} candidates)", Count);
+        return false;
+    }
+
+    OutSites.ContextCall = reinterpret_cast<uint8_t*>(ContextCall);
+    OutSites.SelectCall = reinterpret_cast<uint8_t*>(SelectCall);
+    OutSites.RequestSize = RequestSize;
+    OutSites.RequestClassesOffset = ClassesOffset;
+    Log::Info(L"Finder: AFortWorldManager conditional foundation quota at 0x{:X} (context call 0x{:X}, selection call 0x{:X}, request 0x{:X} bytes, classes +0x{:X})", Quota - Finder::ImageBase(), ContextCall - Finder::ImageBase(), SelectCall - Finder::ImageBase(), RequestSize, ClassesOffset);
+    return true;
+}
+
 bool Finder::ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff_t LastEquippedWeaponGuidOffset)
 {
     if (Natives::AFortPlayerPawn_EquipLastWeaponIndex >= 0 && Natives::AFortPawn_EquipDefaultWeaponIndex >= 0)

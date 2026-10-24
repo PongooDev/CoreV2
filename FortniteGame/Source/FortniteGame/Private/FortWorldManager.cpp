@@ -31,7 +31,9 @@
 #include "Quests/FortQuestManager.h"
 #include "Templates/Casts.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
+#include "UObject/UObjectIterator.h"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -729,6 +731,15 @@ void AFortWorldManager::HookCallSites()
     {
         Hooks::RedirectCall(L"AFortQuickBars quickbar changed -> AFortWorldManager::UpdatePlayerQuickBarRecords", Call, reinterpret_cast<void*>(&UpdatePlayerQuickBarRecordsCall));
     }
+
+    Finder::FConditionalFoundationQuotaSites QuotaSites;
+    if (Finder::ResolveConditionalFoundationQuotaLive(UFortGameData::ConditionalFoundationQuotaOffset(), QuotaSites))
+    {
+        Natives::AFortWorldManager_ConditionalFoundationRequestSize = QuotaSites.RequestSize;
+        Natives::AFortWorldManager_ConditionalFoundationRequestClasses = QuotaSites.RequestClassesOffset;
+        Hooks::RedirectCall(L"AFortWorldManager conditional foundation quota context", QuotaSites.ContextCall, reinterpret_cast<void*>(&ConditionalFoundationContextCall));
+        Hooks::RedirectCall(L"AFortWorldManager conditional foundation quota selection", QuotaSites.SelectCall, reinterpret_cast<void*>(&SelectConditionalFoundationsCall));
+    }
 }
 
 void AFortWorldManager::OnWorldRecordQueryCompleteHK(AFortWorldManager* This)
@@ -757,4 +768,58 @@ void AFortWorldManager::SendNewPlayerEventHK(AFortPlayerController* PlayerContro
 bool AFortWorldManager::UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This, AFortPlayerController* PlayerController)
 {
     return This->UpdatePlayerQuickBarRecords(PlayerController);
+}
+
+AFortWorldManager* AFortWorldManager::ConditionalFoundationContextCall(AFortWorldManager* This)
+{
+#if WITH_SERVER_CODE
+    return This;
+#else
+    return nullptr;
+#endif
+}
+
+bool AFortWorldManager::SelectConditionalFoundationsCall(AFortWorldManager* This, const FScriptArray& Requests, TArray<AActor*>& OutSelected, void*, void* RandomStream, float, bool)
+{
+    return This && This->SelectConditionalFoundations(Requests, OutSelected, RandomStream);
+}
+
+bool AFortWorldManager::SelectConditionalFoundations(const FScriptArray& Requests, TArray<AActor*>& OutSelected, void* RandomStream)
+{
+#if WITH_SERVER_CODE
+    const int32_t RequestSize = Natives::AFortWorldManager_ConditionalFoundationRequestSize;
+    const ptrdiff_t ClassesOffset = Natives::AFortWorldManager_ConditionalFoundationRequestClasses;
+    UWorld* World = GetWorld();
+    if (!World || RequestSize <= 0 || ClassesOffset < 0)
+    {
+        return false;
+    }
+
+    for (int32_t Index = 0; Index < Requests.Num(); ++Index)
+    {
+        const TArray<UClass*>& Classes = *reinterpret_cast<const TArray<UClass*>*>(static_cast<const uint8_t*>(Requests.GetData()) + static_cast<size_t>(Index) * RequestSize + ClassesOffset);
+        std::vector<AActor*> Candidates;
+        for (TObjectIterator<AActor> It; It; ++It)
+        {
+            AActor* Actor = *It;
+            if (Actor->GetWorld() == World && !OutSelected.Contains(Actor) && std::any_of(Classes.begin(), Classes.end(), [Actor](UClass* Class) { return Class && Actor->IsA(Class); }))
+            {
+                Candidates.push_back(Actor);
+            }
+        }
+        if (Candidates.empty())
+        {
+            UE_LOG(LogFortWorld, Warning, TEXT("Conditional foundation quota: no foundation left for request %d of %d"), Index + 1, Requests.Num());
+            break;
+        }
+
+        const int32_t NumCandidates = static_cast<int32_t>(Candidates.size());
+        AActor* Selected = Candidates[std::min(static_cast<int32_t>(RandomStreamFraction(RandomStream) * NumCandidates), NumCandidates - 1)];
+        OutSelected.Add(Selected);
+        UE_LOG(LogFortWorld, Log, TEXT("Conditional foundation quota selects %s (%d candidates)"), *Selected->GetName(), NumCandidates);
+    }
+    return OutSelected.Num() == Requests.Num();
+#else
+    return false;
+#endif
 }

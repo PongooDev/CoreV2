@@ -264,6 +264,8 @@ namespace Natives
     inline void (*AFortGameState_SpawnMissionManager)(AFortGameState* This, const FFortMissionManagerRecord& MissionManagerRecord) = nullptr;
     inline void* (*UFortMissionInfo_GenerateMissionDifficultyOptions)(UFortMissionInfo* This, void* Result, void* RandomStream, const void* GenerationParams) = nullptr;
     inline ptrdiff_t AFortWorldManager_MissionGenerationRandomStream = -1;
+    inline int32_t AFortWorldManager_ConditionalFoundationRequestSize = 0;
+    inline ptrdiff_t AFortWorldManager_ConditionalFoundationRequestClasses = -1;
     inline int32_t AFortMission_ObjectiveStatusUpdatedIndex = -1;
     inline bool (*AFortMission_InitializeActorsForMission)(UObject* Context, UObject* Mission, void* OutActorsInitialized) = nullptr;
     inline int32_t AFortMission_CustomHandleMissionEventIndex = -1;

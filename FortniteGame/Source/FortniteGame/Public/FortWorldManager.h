@@ -6,6 +6,7 @@
 #include "Missions/FortMissionManager.h"
 
 class AFortPlayerController;
+class FScriptArray;
 class UFortMissionGenerator;
 class UFortMissionInfo;
 class UFortWorldRecord;
@@ -71,6 +72,10 @@ private:
     static inline void (*SendNewPlayerEventOG)(AFortPlayerController* PlayerController) = nullptr;
     static void SendNewPlayerEventHK(AFortPlayerController* PlayerController);
     static bool UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This, AFortPlayerController* PlayerController);
+    static AFortWorldManager* ConditionalFoundationContextCall(AFortWorldManager* This);
+    static bool SelectConditionalFoundationsCall(AFortWorldManager* This, const FScriptArray& Requests, TArray<AActor*>& OutSelected, void* OutUnselected, void* RandomStream, float MinDistance, bool bFlag);
+
+    bool SelectConditionalFoundations(const FScriptArray& Requests, TArray<AActor*>& OutSelected, void* RandomStream);
 
     bool GetPlayerQuickBarRecords(AFortPlayerController* PlayerController, FQuickBar*& OutPrimary, FQuickBar*& OutSecondary);
 };

@@ -18,6 +18,14 @@ namespace Finder
         uint8_t* ContextCall = nullptr;
     };
 
+    struct FConditionalFoundationQuotaSites
+    {
+        uint8_t* ContextCall = nullptr;
+        uint8_t* SelectCall = nullptr;
+        int32_t RequestSize = 0;
+        ptrdiff_t RequestClassesOffset = -1;
+    };
+
     uintptr_t ImageBase();
     uintptr_t TextBegin();
     uintptr_t TextEnd();
@@ -101,6 +109,7 @@ namespace Finder
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, UObject* PlayerControllerDefault, ptrdiff_t WorldInventoryOffset);
     uint8_t* QuickBarChangedWorldManagerCall();
     uint8_t* AbilityEndCleanupCall(ptrdiff_t AbilityGrantedWeaponItemOffset);
+    bool ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FConditionalFoundationQuotaSites& OutSites);
     bool ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff_t LastEquippedWeaponGuidOffset);
     bool ResolveWeaponAmmoLive(ptrdiff_t AmmoCountOffset, ptrdiff_t ItemEntryGuidOffset);
     bool ResolveDurabilityLive(UFunction* ServerModDurability, UObject* PlayerControllerDefault, ptrdiff_t EntryDurabilityOffset, ptrdiff_t PendingDestroyDueToDurabilityOffset, uint8_t PendingDestroyDueToDurabilityMask);

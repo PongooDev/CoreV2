@@ -31,6 +31,11 @@ struct FFortPlayerSpawnPadPlacementData
     DefineUProperty(FGameplayTagContainer, TagsToAddToChosenPlacementActor)
 };
 
+struct FConditionalFoundationQuota
+{
+    DefineUnrealStruct(FConditionalFoundationQuota, FortniteGame)
+};
+
 class UFortGameData : public UObject
 {
     DefineUnrealClass(UFortGameData, FortniteGame)
@@ -44,6 +49,9 @@ public:
     DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)
     DefineUProperty(UClass*, SharedMissionListsClass)
     DefineUProperty(TAssetPtr<UFortHomebaseManager>, HomebaseManager)
+    DefineUStructProperty(FConditionalFoundationQuota, ConditionalFoundationQuota)
+
+    static ptrdiff_t ConditionalFoundationQuotaOffset() { return Member_ConditionalFoundationQuota.GetOffsetChecked(); }
 
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
     {

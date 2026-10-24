@@ -5283,11 +5283,32 @@ bool Finder::ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FCondi
         return false;
     }
 
+    uintptr_t QuotaCall = 0;
+    for (const auto& [Call, Target] : Finder::DirectCalls(Tick, TickEnd))
+    {
+        if (Target == Quota)
+        {
+            QuotaCall = QuotaCall ? UINTPTR_MAX : Call;
+        }
+    }
+
+    ptrdiff_t TierIndexOffset = -1;
+    for (uintptr_t Site = Quota; Site + 7 <= Quota + 0x40 && TierIndexOffset < 0; ++Site)
+    {
+        if ((Byte(Site) & 0xF8) == 0x48 && Byte(Site + 1) == 0x63 && (Byte(Site + 2) & 0xC0) == 0x80)
+        {
+            TierIndexOffset = *reinterpret_cast<const int32_t*>(Site + 3);
+        }
+    }
+
+    OutSites.Quota = Quota;
+    OutSites.QuotaCall = QuotaCall != UINTPTR_MAX ? reinterpret_cast<uint8_t*>(QuotaCall) : nullptr;
+    OutSites.TierIndexOffset = TierIndexOffset;
     OutSites.ContextCall = reinterpret_cast<uint8_t*>(ContextCall);
     OutSites.SelectCall = reinterpret_cast<uint8_t*>(SelectCall);
     OutSites.RequestSize = RequestSize;
     OutSites.RequestClassesOffset = ClassesOffset;
-    Log::Info(L"Finder: AFortWorldManager conditional foundation quota at 0x{:X} (context call 0x{:X}, selection call 0x{:X}, request 0x{:X} bytes, classes +0x{:X})", Quota - Finder::ImageBase(), ContextCall - Finder::ImageBase(), SelectCall - Finder::ImageBase(), RequestSize, ClassesOffset);
+    Log::Info(L"Finder: AFortWorldManager conditional foundation quota at 0x{:X} (context call 0x{:X}, selection call 0x{:X}, request 0x{:X} bytes, classes +0x{:X}, tick call 0x{:X}, tier index +0x{:X})", Quota - Finder::ImageBase(), ContextCall - Finder::ImageBase(), SelectCall - Finder::ImageBase(), RequestSize, ClassesOffset, OutSites.QuotaCall ? QuotaCall - Finder::ImageBase() : 0, TierIndexOffset);
     return true;
 }
 

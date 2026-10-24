@@ -737,8 +737,14 @@ void AFortWorldManager::HookCallSites()
     {
         Natives::AFortWorldManager_ConditionalFoundationRequestSize = QuotaSites.RequestSize;
         Natives::AFortWorldManager_ConditionalFoundationRequestClasses = QuotaSites.RequestClassesOffset;
+        Natives::AFortWorldManager_ConditionalFoundationQuota = reinterpret_cast<decltype(Natives::AFortWorldManager_ConditionalFoundationQuota)>(QuotaSites.Quota);
+        Natives::AFortWorldManager_ConditionalFoundationTierIndex = QuotaSites.TierIndexOffset;
         Hooks::RedirectCall(L"AFortWorldManager conditional foundation quota context", QuotaSites.ContextCall, reinterpret_cast<void*>(&ConditionalFoundationContextCall));
         Hooks::RedirectCall(L"AFortWorldManager conditional foundation quota selection", QuotaSites.SelectCall, reinterpret_cast<void*>(&SelectConditionalFoundationsCall));
+        if (QuotaSites.QuotaCall)
+        {
+            Hooks::RedirectCall(L"AFortWorldManager conditional foundation quota pass", QuotaSites.QuotaCall, reinterpret_cast<void*>(&ConditionalFoundationQuotaCall));
+        }
     }
 }
 
@@ -770,9 +776,38 @@ bool AFortWorldManager::UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This,
     return This->UpdatePlayerQuickBarRecords(PlayerController);
 }
 
+int32_t AFortWorldManager::GetConditionalFoundationTierIndex() const
+{
+    const ptrdiff_t Offset = Natives::AFortWorldManager_ConditionalFoundationTierIndex;
+    return Offset > 0 ? *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(this) + Offset) : -1;
+}
+
+void AFortWorldManager::ConditionalFoundationQuotaCall(AFortWorldManager* This)
+{
+#if WITH_SERVER_CODE
+    static const AFortWorldManager* LastWorldManager = nullptr;
+    static uint8_t LastState = 0xFF;
+    static int32_t LastTier = -2;
+    const uint8_t State = This ? static_cast<uint8_t>(This->WorldManagerState) : 0xFF;
+    const int32_t Tier = This ? This->GetConditionalFoundationTierIndex() : -1;
+    if (This && (This != LastWorldManager || State != LastState || Tier != LastTier))
+    {
+        LastWorldManager = This;
+        LastState = State;
+        LastTier = Tier;
+        UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+        const FScriptArray* Tiers = GameData ? reinterpret_cast<const FScriptArray*>(reinterpret_cast<const uint8_t*>(GameData) + UFortGameData::ConditionalFoundationQuotaOffset()) : nullptr;
+        const EFortWorldManagerState WorldState = This->WorldManagerState;
+        UE_LOG(LogFortWorld, Log, TEXT("Conditional foundation quota pass: %s, tier %d of %d"), WorldState.ToString().c_str(), Tier, Tiers ? Tiers->Num() : -1);
+    }
+#endif
+    Natives::AFortWorldManager_ConditionalFoundationQuota(This);
+}
+
 AFortWorldManager* AFortWorldManager::ConditionalFoundationContextCall(AFortWorldManager* This)
 {
 #if WITH_SERVER_CODE
+    UE_LOG(LogFortWorld, Log, TEXT("Conditional foundation quota: tier %d context"), This ? This->GetConditionalFoundationTierIndex() : -1);
     return This;
 #else
     return nullptr;
@@ -790,6 +825,7 @@ bool AFortWorldManager::SelectConditionalFoundations(const FScriptArray& Request
     const int32_t RequestSize = Natives::AFortWorldManager_ConditionalFoundationRequestSize;
     const ptrdiff_t ClassesOffset = Natives::AFortWorldManager_ConditionalFoundationRequestClasses;
     UWorld* World = GetWorld();
+    UE_LOG(LogFortWorld, Log, TEXT("Conditional foundation quota: %d requests for tier %d"), Requests.Num(), GetConditionalFoundationTierIndex());
     if (!World || RequestSize <= 0 || ClassesOffset < 0)
     {
         return false;

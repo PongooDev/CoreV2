@@ -20,6 +20,9 @@ namespace Finder
 
     struct FConditionalFoundationQuotaSites
     {
+        uintptr_t Quota = 0;
+        uint8_t* QuotaCall = nullptr;
+        ptrdiff_t TierIndexOffset = -1;
         uint8_t* ContextCall = nullptr;
         uint8_t* SelectCall = nullptr;
         int32_t RequestSize = 0;

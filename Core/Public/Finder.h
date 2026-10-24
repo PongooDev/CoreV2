@@ -27,6 +27,7 @@ namespace Finder
         uint8_t* SelectCall = nullptr;
         int32_t RequestSize = 0;
         ptrdiff_t RequestClassesOffset = -1;
+        ptrdiff_t RequestsArrayOffset = -1;
     };
 
     struct FPlayerSpawnQuerySites

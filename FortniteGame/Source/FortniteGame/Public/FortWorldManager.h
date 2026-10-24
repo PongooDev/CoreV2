@@ -78,7 +78,7 @@ private:
     static bool UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This, AFortPlayerController* PlayerController);
     static void ConditionalFoundationQuotaCall(AFortWorldManager* This);
     static AFortWorldManager* ConditionalFoundationContextCall(AFortWorldManager* This);
-    static bool SelectConditionalFoundationsCall(AFortWorldManager* This, const FScriptArray& Requests, TArray<AActor*>& OutSelected, void* OutUnselected, void* RandomStream, float MinDistance, bool bFlag);
+    static bool SelectConditionalFoundationsCall(AFortWorldManager* This, const void* Query, TArray<AActor*>& OutSelected, void* OutUnselected, void* RandomStream, float MinDistance, bool bFlag);
 
     bool SelectConditionalFoundations(const FScriptArray& Requests, TArray<AActor*>& OutSelected, void* RandomStream);
     int32_t GetConditionalFoundationTierIndex() const;

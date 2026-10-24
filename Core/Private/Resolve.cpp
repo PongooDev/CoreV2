@@ -5268,16 +5268,38 @@ bool Finder::ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FCondi
     }
 
     int32_t RequestSize = 0;
+    uintptr_t RequestSizeSite = 0;
     for (uintptr_t Site = FrameLeaCalls.size() >= 2 && SelectCall != UINTPTR_MAX ? FrameLeaCalls[1] : 0; Site && Site + 7 <= SelectCall && !RequestSize; ++Site)
     {
         if ((Byte(Site) == 0x48 || Byte(Site) == 0x4C) && Byte(Site + 1) == 0x69 && (Byte(Site + 2) & 0xC0) == 0xC0)
         {
             RequestSize = *reinterpret_cast<const int32_t*>(Site + 3);
+            RequestSizeSite = Site;
         }
     }
 
+    // The selection takes the address of a struct whose request array follows an 8-byte field: the array element's
+    // "add rcx, [rsp+X]" after the imul and the selection's "lea rdx, [rsp+Y]" give the array at +(X - Y).
+    ptrdiff_t RequestsOffset = -1;
+    for (uintptr_t Site = RequestSizeSite; Site && Site + 5 <= RequestSizeSite + 0x10 && RequestsOffset < 0; ++Site)
+    {
+        if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x03 && Byte(Site + 2) == 0x4C && Byte(Site + 3) == 0x24)
+        {
+            RequestsOffset = Byte(Site + 4);
+        }
+    }
+    ptrdiff_t RequestsArgument = -1;
+    for (uintptr_t Site = SelectCall && SelectCall != UINTPTR_MAX ? SelectCall - 5 : 0; Site && Site > SelectCall - 0x90 && RequestsArgument < 0; --Site)
+    {
+        if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x54 && Byte(Site + 3) == 0x24)
+        {
+            RequestsArgument = Byte(Site + 4);
+        }
+    }
+    const ptrdiff_t RequestsArrayOffset = RequestsOffset >= 0 && RequestsArgument >= 0 ? RequestsOffset - RequestsArgument : -1;
+
     const ptrdiff_t ClassesOffset = FrameLeaCalls.size() >= 2 ? static_cast<ptrdiff_t>(static_cast<int8_t>(Byte(FrameLeaCalls[1] - 1))) - static_cast<int8_t>(Byte(FrameLeaCalls[0] - 1)) : -1;
-    if (Count != 1 || !ContextCall || ContextCall == UINTPTR_MAX || !SelectCall || SelectCall == UINTPTR_MAX || ClassesOffset <= 0 || RequestSize <= ClassesOffset)
+    if (Count != 1 || !ContextCall || ContextCall == UINTPTR_MAX || !SelectCall || SelectCall == UINTPTR_MAX || ClassesOffset <= 0 || RequestSize <= ClassesOffset || RequestsArrayOffset < 0)
     {
         Log::Error(L"Finder: AFortWorldManager conditional foundation quota calls not found ({} candidates)", Count);
         return false;
@@ -5308,7 +5330,8 @@ bool Finder::ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FCondi
     OutSites.SelectCall = reinterpret_cast<uint8_t*>(SelectCall);
     OutSites.RequestSize = RequestSize;
     OutSites.RequestClassesOffset = ClassesOffset;
-    Log::Info(L"Finder: AFortWorldManager conditional foundation quota at 0x{:X} (context call 0x{:X}, selection call 0x{:X}, request 0x{:X} bytes, classes +0x{:X}, tick call 0x{:X}, tier index +0x{:X})", Quota - Finder::ImageBase(), ContextCall - Finder::ImageBase(), SelectCall - Finder::ImageBase(), RequestSize, ClassesOffset, OutSites.QuotaCall ? QuotaCall - Finder::ImageBase() : 0, TierIndexOffset);
+    OutSites.RequestsArrayOffset = RequestsArrayOffset;
+    Log::Info(L"Finder: AFortWorldManager conditional foundation quota at 0x{:X} (context call 0x{:X}, selection call 0x{:X}, request 0x{:X} bytes, classes +0x{:X}, requests +0x{:X}, tick call 0x{:X}, tier index +0x{:X})", Quota - Finder::ImageBase(), ContextCall - Finder::ImageBase(), SelectCall - Finder::ImageBase(), RequestSize, ClassesOffset, RequestsArrayOffset, OutSites.QuotaCall ? QuotaCall - Finder::ImageBase() : 0, TierIndexOffset);
     return true;
 }
 

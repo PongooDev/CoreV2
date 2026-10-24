@@ -268,6 +268,7 @@ namespace Natives
     inline ptrdiff_t AFortWorldManager_MissionGenerationRandomStream = -1;
     inline int32_t AFortWorldManager_ConditionalFoundationRequestSize = 0;
     inline ptrdiff_t AFortWorldManager_ConditionalFoundationRequestClasses = -1;
+    inline ptrdiff_t AFortWorldManager_ConditionalFoundationRequestsArray = -1;
     inline void (*AFortWorldManager_ConditionalFoundationQuota)(AFortWorldManager* This) = nullptr;
     inline ptrdiff_t AFortWorldManager_ConditionalFoundationTierIndex = -1;
     inline int32_t AFortMission_ObjectiveStatusUpdatedIndex = -1;

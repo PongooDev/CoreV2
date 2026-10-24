@@ -737,6 +737,7 @@ void AFortWorldManager::HookCallSites()
     {
         Natives::AFortWorldManager_ConditionalFoundationRequestSize = QuotaSites.RequestSize;
         Natives::AFortWorldManager_ConditionalFoundationRequestClasses = QuotaSites.RequestClassesOffset;
+        Natives::AFortWorldManager_ConditionalFoundationRequestsArray = QuotaSites.RequestsArrayOffset;
         Natives::AFortWorldManager_ConditionalFoundationQuota = reinterpret_cast<decltype(Natives::AFortWorldManager_ConditionalFoundationQuota)>(QuotaSites.Quota);
         Natives::AFortWorldManager_ConditionalFoundationTierIndex = QuotaSites.TierIndexOffset;
         Hooks::RedirectCall(L"AFortWorldManager conditional foundation quota context", QuotaSites.ContextCall, reinterpret_cast<void*>(&ConditionalFoundationContextCall));
@@ -814,9 +815,10 @@ AFortWorldManager* AFortWorldManager::ConditionalFoundationContextCall(AFortWorl
 #endif
 }
 
-bool AFortWorldManager::SelectConditionalFoundationsCall(AFortWorldManager* This, const FScriptArray& Requests, TArray<AActor*>& OutSelected, void*, void* RandomStream, float, bool)
+bool AFortWorldManager::SelectConditionalFoundationsCall(AFortWorldManager* This, const void* Query, TArray<AActor*>& OutSelected, void*, void* RandomStream, float, bool)
 {
-    return This && This->SelectConditionalFoundations(Requests, OutSelected, RandomStream);
+    const ptrdiff_t RequestsOffset = Natives::AFortWorldManager_ConditionalFoundationRequestsArray;
+    return This && Query && RequestsOffset >= 0 && This->SelectConditionalFoundations(*reinterpret_cast<const FScriptArray*>(static_cast<const uint8_t*>(Query) + RequestsOffset), OutSelected, RandomStream);
 }
 
 bool AFortWorldManager::SelectConditionalFoundations(const FScriptArray& Requests, TArray<AActor*>& OutSelected, void* RandomStream)

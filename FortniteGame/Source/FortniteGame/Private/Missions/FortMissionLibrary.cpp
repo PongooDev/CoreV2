@@ -125,10 +125,11 @@ void UFortMissionLibrary::GiveMissionRewardsToPlayerAsPickups(UObject* WorldCont
     {
         const float Angle = Natives::FMath_SRand() * 6.2831853f;
         const float Distance = Natives::FMath_SRand() * Radius;
-        const FVector Location(StartPosition.X + std::cos(Angle) * Distance, StartPosition.Y + std::sin(Angle) * Distance, StartPosition.Z);
-        if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, (*LootToDrop)[Index], &Location, &SpawnRotation, PlayerController))
+        const FVector FinalLocation(StartPosition.X + std::cos(Angle) * Distance, StartPosition.Y + std::sin(Angle) * Distance, StartPosition.Z);
+        if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, (*LootToDrop)[Index], &StartPosition, &SpawnRotation, PlayerController))
         {
-            Pickup->TossPickup(Location, TargetPawn, 0);
+            Pickup->SetOptionalMissionGuid(MissionGUID);
+            Pickup->TossPickup(FinalLocation, TargetPawn, 0);
         }
     }
 #endif

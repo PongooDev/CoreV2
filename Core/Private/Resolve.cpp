@@ -3958,6 +3958,52 @@ bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
     return true;
 }
 
+// RequestBatchUpdate's two calls to the per-profile change request builder (the function with the "statValue" key).
+bool Finder::ResolveMcpProfileWorldSave()
+{
+    const uintptr_t RequestBatchUpdate = FunctionOf(L"UFortMcpProfileWorld::RequestBatchUpdate: Called without valid profile!");
+    const uintptr_t RequestBatchUpdateEnd = RequestBatchUpdate ? Finder::FunctionEnd(RequestBatchUpdate) : 0;
+    std::vector<uintptr_t> StatValueFunctions;
+    for (const uintptr_t Ref : Finder::StringRefs(L"statValue"))
+    {
+        StatValueFunctions.push_back(Finder::FunctionStart(Ref));
+    }
+
+    uintptr_t Builder = 0;
+    int32_t Calls = 0;
+    bool bAmbiguous = false;
+    for (const auto& [Site, Target] : RequestBatchUpdateEnd > RequestBatchUpdate ? Finder::DirectCalls(RequestBatchUpdate, RequestBatchUpdateEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (std::find(StatValueFunctions.begin(), StatValueFunctions.end(), Target) != StatValueFunctions.end())
+        {
+            bAmbiguous |= Builder && Builder != Target;
+            Builder = Target;
+            ++Calls;
+        }
+    }
+
+    if (!RequestBatchUpdate || !Builder || bAmbiguous)
+    {
+        Log::Error(L"Finder: UFortMcpProfileWorld save not found (request batch update {}, change request builder {}, ambiguous {})", RequestBatchUpdate != 0, Builder != 0, bAmbiguous);
+        return false;
+    }
+    Natives::UFortMcpProfileWorld_RequestBatchUpdate = RequestBatchUpdate;
+    Natives::UFortMcpProfileWorld_BuildChangeRequest = Builder;
+    Log::Info(L"Finder: UFortMcpProfileWorld::RequestBatchUpdate +0x{:X}, change request builder +0x{:X} ({} calls)", RequestBatchUpdate - Finder::ImageBase(), Builder - Finder::ImageBase(), Calls);
+    return true;
+}
+
+int32_t Finder::McpProfileWorldCreateItemInstanceIndex(void** ProfileVTable)
+{
+    const uintptr_t CreateItemInstance = FunctionOf(L"UFortMcpProfileWorld::CreateItemInstance: Invalid Instance Id %s!");
+    const int32_t Index = CreateItemInstance ? Finder::VTableIndex(ProfileVTable, reinterpret_cast<void*>(CreateItemInstance), 0x100) : -1;
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: UFortMcpProfileWorld::CreateItemInstance slot not found");
+    }
+    return Index;
+}
+
 bool Finder::ResolveWorldItemLive(void** InventoryOwnerVTable)
 {
     int32_t LoadedAmmoIndex = -1;

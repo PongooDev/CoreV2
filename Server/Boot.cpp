@@ -85,6 +85,7 @@ void Boot::Initialize()
     AFortGameMode::Hook();
     AFortGameModeZone::Hook();
     AFortWorldManager::Hook();
+    UFortMcpProfileWorld::Hook();
     AFortPlayerController::Hook();
     AFortPlayerState::Hook();
     AFortPlayerControllerOutpost::Hook();

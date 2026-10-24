@@ -13,6 +13,9 @@
 #include "UObject/UObjectIterator.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
+#include "Logging/LogMacros.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 UFortItem* UFortItemDefinition::CreateTemporaryItemInstanceBP(int32_t Count, int32_t Level) const
 {
@@ -121,6 +124,24 @@ bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerC
 
     using FServerExecute = bool (*)(UFortWorldItemDefinition* This, const UFortItem* Item, AFortPlayerController* Controller);
     return reinterpret_cast<FServerExecute>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItemDefinition_ServerExecuteIndex])(this, Item, Controller);
+}
+
+// Cert marks every Tier 6 weapon (and the hydraulic set) bNeverPersisted although their schematics are profile items, so the
+// world profile's save (definition slot 0x64, 0x5C53E0) leaves crafted ones out. Weapons and traps a profile can own are kept.
+bool UFortWorldItemDefinition::KeepPersisted()
+{
+#if WITH_SERVER_CODE
+    const EFortItemType Type = ItemType;
+    if (!bNeverPersisted || (Type != EFortItemType::GetWeaponRanged() && Type != EFortItemType::GetWeaponMelee() && Type != EFortItemType::GetWeapon() && Type != EFortItemType::GetTrap()))
+    {
+        return false;
+    }
+    bNeverPersisted = false;
+    UE_LOG(LogFort, Log, TEXT("%s is bNeverPersisted in this build; saving it like other weapons and traps"), *GetName());
+    return true;
+#else
+    return false;
+#endif
 }
 
 ptrdiff_t UFortAmmoItemDefinition::RegenCooldownOffset()

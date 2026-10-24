@@ -96,6 +96,7 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
         FMemory::Free(Requirements.GetData());
     }
 
+    ResultDefinition->KeepPersisted();
     UFortQuestManager* QuestManager = PlayerController->GetQuestManager();
     if (ResultDefinition->MaxStackSize > 1)
     {

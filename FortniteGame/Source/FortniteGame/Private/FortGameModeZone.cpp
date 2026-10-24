@@ -60,6 +60,7 @@ namespace
     constexpr int32_t SpawnPadQueryTicks = 600;
     constexpr float BuildingCellSizeXY = 512.0f;
     constexpr float BuildingCellSizeZ = 384.0f;
+    constexpr float UnitNavBoundsExtent = 1.0f;
 
     double NowMs()
     {
@@ -180,6 +181,15 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
             ANavMeshBoundsVolume* NavBounds = *It;
             if (NavBounds->GetWorld() != World || NavBounds->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
             {
+                continue;
+            }
+            FVector Origin;
+            FVector Extent;
+            NavBounds->GetActorBounds(false, Origin, Extent);
+            if (Extent.X > UnitNavBoundsExtent || Extent.Y > UnitNavBoundsExtent || Extent.Z > UnitNavBoundsExtent)
+            {
+                UE_LOG(LogNavigation, Log, TEXT("Keeping %s's own navigation bounds (%.0f, %.0f, %.0f) - (%.0f, %.0f, %.0f)"), *NavBounds->GetFullName(),
+                    Origin.X - Extent.X, Origin.Y - Extent.Y, Origin.Z - Extent.Z, Origin.X + Extent.X, Origin.Y + Extent.Y, Origin.Z + Extent.Z);
                 continue;
             }
             if (USceneComponent* Root = NavBounds->GetRootComponent())

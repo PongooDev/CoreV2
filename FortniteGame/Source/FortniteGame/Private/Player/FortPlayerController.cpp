@@ -957,7 +957,7 @@ bool AFortPlayerController::DisassembleInventoryItem(const FGuid& ItemGuid)
             {
                 Result.Count = Count - Given;
                 const FVector Location = Pawn->GetTransform().GetLocation();
-                if (AFortPickup* Pickup = AFortPickup::CreatePickup(GetWorld(), Result, &Location, nullptr, this))
+                if (AFortPickup* Pickup = AFortPickup::CreatePickup(GetWorld(), Result, &Location))
                 {
                     Pickup->TossPickup(Location, Pawn, 0);
                 }

@@ -112,7 +112,7 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
     {
         ItemEntry->Count = NumberToGive - Given;
         const FVector Location = Pawn->GetTransform().GetLocation();
-        if (AFortPickup* Pickup = AFortPickup::CreatePickup(PlayerController->GetWorld(), *ItemEntry, &Location, nullptr, PlayerController))
+        if (AFortPickup* Pickup = AFortPickup::CreatePickup(PlayerController->GetWorld(), *ItemEntry, &Location))
         {
             Pickup->TossPickup(Location, Pawn, 0);
         }

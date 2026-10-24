@@ -5,11 +5,7 @@
 #include "Items/FortQuickBars.h"
 #include "UObject/Object.h"
 
-#include <string>
-
 class AFortPlayerController;
-class UFortWorldItem;
-struct FMcpProfileChangeRequest;
 
 struct FFortWorldPlayerLoadout
 {
@@ -46,22 +42,9 @@ public:
     bool DepositPostResources(const TArray<FString>& ItemIds, const TArray<int32_t>& ItemCounts, UObject* Object, void (*Completed)(UObject* Object, const void* Result));
     bool FabricateItem(const FString& TemplateId, UObject* Object, void (*Completed)(UObject* Object, const void* Result));
 
-    UObject* CreateItemInstance(UClass* ItemClass, void* InstanceId);
-    void RequestBatchUpdate(TArray<UFortWorldItem*>* TheaterItems, TArray<UFortWorldItem*>* OutpostItems);
-    bool BuildChangeRequest(FMcpProfileChangeRequest* Request, void* Items, void* Stats);
-
-    static void Hook();
     static void HookVTables();
 
 private:
-    std::wstring OwnerName();
-
     static inline void* (*BindToPlayerControllerOG)(UFortMcpProfileWorld* This, AFortPlayerController* PlayerController, bool bUseOutpostInventory) = nullptr;
     static void* BindToPlayerControllerHK(UFortMcpProfileWorld* This, AFortPlayerController* PlayerController, bool bUseOutpostInventory);
-    static inline UObject* (*CreateItemInstanceOG)(UFortMcpProfileWorld* This, UClass* ItemClass, void* InstanceId) = nullptr;
-    static UObject* CreateItemInstanceHK(UFortMcpProfileWorld* This, UClass* ItemClass, void* InstanceId);
-    static inline void (*RequestBatchUpdateOG)(UFortMcpProfileWorld* This, TArray<UFortWorldItem*>* TheaterItems, TArray<UFortWorldItem*>* OutpostItems) = nullptr;
-    static void RequestBatchUpdateHK(UFortMcpProfileWorld* This, TArray<UFortWorldItem*>* TheaterItems, TArray<UFortWorldItem*>* OutpostItems);
-    static inline bool (*BuildChangeRequestOG)(UFortMcpProfileWorld* This, FMcpProfileChangeRequest* Request, void* Items, void* Stats) = nullptr;
-    static bool BuildChangeRequestHK(UFortMcpProfileWorld* This, FMcpProfileChangeRequest* Request, void* Items, void* Stats);
 };

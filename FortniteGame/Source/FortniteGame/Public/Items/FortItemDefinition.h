@@ -100,7 +100,6 @@ public:
     DefineUProperty(int32_t, MaxStackSize)
     DefineBitfieldUProperty(bAllowMultipleStacks)
     DefineBitfieldUProperty(bInventorySizeLimited)
-    DefineBitfieldUProperty(bNeverPersisted)
     DefineUProperty(FGameplayTagContainer, GameplayTags)
     DefineUFunction(CreateTemporaryItemInstanceBP)
     DefineUFunction(GetPersistentName)
@@ -122,7 +121,6 @@ public:
     DefineUFunction(GetMaxDurability)
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
-    bool KeepPersisted();
     float GetMaxDurability(int32_t ItemLevel) const;
     void GetDisassemblyResults(TStructArray<FFortItemEntry>& OutResults, float NormalizedDurability) const;
 };

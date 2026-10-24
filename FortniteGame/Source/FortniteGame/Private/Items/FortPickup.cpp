@@ -41,7 +41,6 @@ namespace
             return 0;
         }
 
-        ItemDefinition->KeepPersisted();
         const bool bShouldShowItemToast = ItemEntry.ShouldShowItemToast();
         const int32_t Count = ItemEntry.Count - Inventory->GetOverflowAmount(ItemEntry, true);
         return Inventory->AddItemStacks(ItemEntry, Count, -1, true, false,

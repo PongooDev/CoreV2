@@ -74,8 +74,6 @@ namespace Finder
     uint8_t* NullGetCurrentCall(UFunction* Function);
     bool ResolveWorldItemLive(void** InventoryOwnerVTable);
     bool ResolveMcpProfileWorldLive(void** ProfileVTable);
-    bool ResolveMcpProfileWorldSave();
-    int32_t McpProfileWorldCreateItemInstanceIndex(void** ProfileVTable);
     bool ResolveGoalManagerLive();
     bool ResolveGoalDiscouragementLive();
     bool ResolveQueryGeneratorsLive(void** EnemiesVTable);

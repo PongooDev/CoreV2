@@ -3720,13 +3720,20 @@ bool Finder::ResolveGoalDiscouragementLive()
 
 bool Finder::ResolveQuickBarFocusLive()
 {
-    const uintptr_t Ref = OnlyRef(L"SwitchQuickbar");
+    // The input binding names the action with a narrow string; the wide "SwitchQuickbar" copies are input-options text.
     uintptr_t Handler = 0;
-    for (uintptr_t Site = Ref ? Ref - 1 : 0; Site && Site + 0x20 > Ref && !Handler; --Site)
+    for (const uintptr_t Ref : Finder::StringRefs("SwitchQuickbar"))
     {
-        if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x05)
+        for (uintptr_t Site = Ref - 1; Site + 0x20 > Ref && !Handler; --Site)
         {
-            Handler = Finder::RelativeTarget(Site, 3, 7);
+            if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x05)
+            {
+                Handler = Finder::RelativeTarget(Site, 3, 7);
+            }
+        }
+        if (Handler)
+        {
+            break;
         }
     }
 

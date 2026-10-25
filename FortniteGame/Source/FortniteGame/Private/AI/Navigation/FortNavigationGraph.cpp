@@ -151,8 +151,17 @@ bool AFortNavigationGraph::ResolveNatives()
     const uintptr_t CellIndexBody = FindUnique({ 0x8B, 0x52, 0x08, 0x8B, 0x49, 0x38, 0xD3, 0xFA, 0x0F, 0xAF, 0x53, 0x1C });
     const uintptr_t PathSearchBody = FindUnique({ 0x48, 0x8D, 0x59, 0x08, 0x48, 0x89, 0x11, 0x33, 0xF6, 0x48, 0x8B, 0xF9, 0x48, 0x89, 0x33 });
     const uintptr_t FloodFill = FindUnique({ 0x40, 0x57, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x48, 0x48, 0x8B, 0xF9, 0x4D, 0x8B, 0xF0, 0x48, 0x8B, 0x89 });
-    const std::vector<uintptr_t> QueueFull = Finder::StringRefs(L"Navigation System: registration queue full!");
-    const uintptr_t RequestRegistration = QueueFull.empty() ? 0 : Finder::FunctionStart(QueueFull.front());
+    // Two functions log the full queue; RequestRegistration(this, NavData, bTriggerRegistrationProcessing) is the one that
+    // spills NavData (mov [rsp+10h], rdx) in its prologue, the other registers every nav data actor in the world.
+    uintptr_t RequestRegistration = 0;
+    for (const uintptr_t Ref : Finder::StringRefs(L"Navigation System: registration queue full!"))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        if (Function && !RequestRegistration && FindPattern(Function, Function + 0x10, { 0x48, 0x89, 0x54, 0x24, 0x10 }))
+        {
+            RequestRegistration = Function;
+        }
+    }
 
     if (!InitializeGrid || !GridOriginStore || !UpdateDirtyBlocksEnd || !ClearDirtyFlag || !BlockLinksAdd || !BlockCellsLoad || !CellIndexBody || !PathSearchBody || !FloodFill || !RequestRegistration)
     {

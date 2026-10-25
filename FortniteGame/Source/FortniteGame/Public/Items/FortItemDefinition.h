@@ -103,11 +103,9 @@ public:
     DefineUProperty(FGameplayTagContainer, GameplayTags)
     DefineUFunction(CreateTemporaryItemInstanceBP)
     DefineUFunction(GetPersistentName)
-    DefineUFunction(GetFilterCategory)
 
     UFortItem* CreateTemporaryItemInstanceBP(int32_t Count, int32_t Level) const;
     FString GetPersistentName() const;
-    EFortInventoryFilter GetFilterCategory() const;
 };
 
 class UFortWorldItemDefinition : public UFortItemDefinition

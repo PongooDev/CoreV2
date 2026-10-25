@@ -76,7 +76,7 @@ namespace
         FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
         return ItemDefinition && !UFortDeployableBaseLibrary::IsWorldItemDefValidToPersistForDeployableBasePlayerInventory(ItemDefinition)
-            && ItemDefinition->GetFilterCategory() != EFortInventoryFilter::GetInvisible();
+            && WorldItem->GetFilterCategory() != EFortInventoryFilter::GetInvisible();
     }
 
     std::vector<UFortWorldItem*> ItemsOf(AFortInventory* Inventory)

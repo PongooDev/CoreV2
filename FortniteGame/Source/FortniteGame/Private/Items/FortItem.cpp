@@ -28,12 +28,6 @@ FString UFortItemDefinition::GetPersistentName() const
     return Params.Call(const_cast<UFortItemDefinition*>(this)) ? Params.Take<FString>(L"ReturnValue") : FString();
 }
 
-EFortInventoryFilter UFortItemDefinition::GetFilterCategory() const
-{
-    Reflection::FParams Params(StaticFunction_GetFilterCategory());
-    return Params.Call(const_cast<UFortItemDefinition*>(this)) ? Params.Take<EFortInventoryFilter>(L"ReturnValue") : EFortInventoryFilter{};
-}
-
 void FFortItemEntry::Construct(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel)
 {
     if (!Natives::FFortItemEntry_FFortItemEntry && !Finder::ResolvePickupLive())
@@ -138,6 +132,12 @@ int32_t UFortItem::GetLevel() const
 {
     Reflection::FParams Params(StaticFunction_GetLevel());
     return Params.Call(const_cast<UFortItem*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : 0;
+}
+
+EFortInventoryFilter UFortItem::GetFilterCategory() const
+{
+    Reflection::FParams Params(StaticFunction_GetFilterCategory());
+    return Params.Call(const_cast<UFortItem*>(this)) ? Params.Take<EFortInventoryFilter>(L"ReturnValue") : EFortInventoryFilter{};
 }
 
 bool UFortItem::HasDurability() const

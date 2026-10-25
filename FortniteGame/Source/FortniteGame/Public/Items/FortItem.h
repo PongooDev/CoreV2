@@ -9,6 +9,7 @@
 
 class AFortInventory;
 class AFortPlayerController;
+class EFortInventoryFilter;
 class UFortItemDefinition;
 
 class EFortItemEntryState
@@ -71,12 +72,14 @@ class UFortItem : public UObject
     DefineUFunction(GetLevel)
     DefineUFunction(HasDurability)
     DefineUFunction(GetNormalizedDurability)
+    DefineUFunction(GetFilterCategory)
 
 public:
     UFortItemDefinition* GetItemDefinitionBP() const;
     int32_t GetLevel() const;
     bool HasDurability() const;
     float GetNormalizedDurability() const;
+    EFortInventoryFilter GetFilterCategory() const;
 };
 
 class UFortWorldItem : public UFortItem

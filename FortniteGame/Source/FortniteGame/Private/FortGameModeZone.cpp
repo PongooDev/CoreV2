@@ -645,9 +645,16 @@ void AFortGameModeZone::FinishWorldInitializationHK(AFortGameModeZone* This, AFo
 
 void AFortGameModeZone::SubclassFinishWorldInitializationHK(AFortGameModeZone* This, AFortWorldManager* WorldManager)
 {
-    This->FinishWorldInitialization(WorldManager);
     const auto Original = SubclassFinishWorldInitialization.find(*reinterpret_cast<void***>(This));
-    if (Original != SubclassFinishWorldInitialization.end())
+    const bool bHasOriginal = Original != SubclassFinishWorldInitialization.end();
+    // The outpost loads the core's placed buildings before the missions activate (Mission_Outpost.InitMission reads them back)
+    const bool bOriginalFirst = Cast<AFortGameModeOutpost>(reinterpret_cast<UObject*>(This)) != nullptr;
+    if (bHasOriginal && bOriginalFirst)
+    {
+        Original->second(This, WorldManager);
+    }
+    This->FinishWorldInitialization(WorldManager);
+    if (bHasOriginal && !bOriginalFirst)
     {
         Original->second(This, WorldManager);
     }

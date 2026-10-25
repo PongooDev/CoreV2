@@ -25,7 +25,8 @@ namespace
         return Items.empty() ? 0 : Items.front();
     }
 
-    uintptr_t OnlyRef(const wchar_t* Text)
+    template <typename CharType>
+    uintptr_t OnlyRef(const CharType* Text)
     {
         const std::vector<uintptr_t> Refs = Finder::StringRefs(Text);
         if (Refs.size() != 1)
@@ -3771,7 +3772,7 @@ bool Finder::ResolveSpottingLive(UClass* SpottableActorInterface)
         return true;
     }
 
-    const uintptr_t Ref = OnlyRef(L"SpotActorTrace");
+    const uintptr_t Ref = OnlyRef("SpotActorTrace");
     uintptr_t InterfaceCall = 0;
     for (uintptr_t Site = Ref ? Ref - 3 : 0; Site && Site + 0x200 > Ref && !InterfaceCall; --Site)
     {

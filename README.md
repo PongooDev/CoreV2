@@ -3,13 +3,13 @@
   &nbsp;Core V2
 </h1>
 
-**Core V2** is a community made Fortnite gameserver focused on recreating original behavior as accurately as possible, starting from the earliest x64 Fortnite builds and moving forward one build at a time. It is a full rewrite of [Core](https://github.com/PongooDev/Core), built to be more accurate and more maintainable across many builds.
+**Core V2** is a community-made Fortnite gameserver focused on recreating original behavior as accurately as possible, starting from the earliest x64 Fortnite builds and moving forward one build at a time. It is a full rewrite of [Core](https://github.com/PongooDev/Core), built to be more accurate and more maintainable across many builds.
 
 Core runs inside Fortnite to provide server-side systems to load maps, accept players, run matches, and support gameplay. This repository does NOT include Fortnite game files or a launcher. The backend is a separate project: [Core-Backend](https://github.com/PongooDev/Core-Backend).
 
 > Core is an independent community project. It is not affiliated with, endorsed by, or supported by Epic Games.
 
-**Please refer to the [Contributing](#contributing) section before posting an issue, Thank you!**
+**Please refer to the [Contributing](#contributing) section before posting an issue. Thank you!**
 
 [Join the Core Discord](https://discord.gg/auzEaKs7AS) · [Report an issue](https://github.com/PongooDev/CoreV2/issues)
 
@@ -85,7 +85,7 @@ Before submitting code:
 1. Keep unrelated fixes in separate pull requests
 2. Keep your code clean and readable. You may create helper functions if needed for better readability.
 3. Test your code and include the versions you tested it on.
-4. Necessary or helpful logging is encouraged however remove excessive or temporary logging from the final change.
+4. Necessary or helpful logging is encouraged; however, remove excessive or temporary logging from the final change.
 5. Avoid broad version gates unless the compatibility boundary is understood and supported by testing or other evidence.
 
 **Pull requests may be declined when they are inaccurate, untested, overly broad, unrelated to the reported issue, or harmful to other supported versions.**

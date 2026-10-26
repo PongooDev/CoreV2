@@ -248,8 +248,7 @@ namespace Natives
     inline int32_t UAbilitySystemComponent_InternalServerTryActiveAbilityIndex = -1;
     inline int32_t UFortWorldItemDefinition_ServerExecuteIndex = -1;
     inline void (*AFortInventory_InitializeExistingItem)(AFortInventory* This, UFortWorldItem* Item) = nullptr;
-    inline int32_t (*AFortInventory_GetItemStackLimitOverflow)(AFortInventory* This, const FFortItemEntry& ItemEntry, const UFortItemDefinition* ItemDefinition) = nullptr;
-    inline int32_t (*AFortInventory_GetBackpackStackLimitOverflow)(AFortInventory* This, const FFortItemEntry& ItemEntry, const UFortItemDefinition* ItemDefinition) = nullptr;
+    inline int32_t (*AFortInventory_GetOverflowAmount)(AFortInventory* This, const FFortItemEntry& ItemEntry) = nullptr;
     inline int32_t (*AFortInventory_GetMaxStackSize)(AFortInventory* This, const UFortItemDefinition* ItemDefinition) = nullptr;
     inline bool (*AFortInventory_CanStackWith)(AFortInventory* This, UFortWorldItem* Item, const FFortItemEntry& ItemEntry, float MaxDurability) = nullptr;
     inline ptrdiff_t AFortInventory_InventoryInterfaceOffset = -1;

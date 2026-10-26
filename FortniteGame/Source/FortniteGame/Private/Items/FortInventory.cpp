@@ -236,17 +236,12 @@ int32_t AFortInventory::GetOverflowAmount(const FFortItemEntry& ItemEntry, bool 
     {
         return 0;
     }
-    if (!Natives::AFortInventory_GetItemStackLimitOverflow && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset()))
+    if (!Natives::AFortInventory_GetOverflowAmount && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset()))
     {
         return 0;
     }
 
-    int32_t Overflow = Natives::AFortInventory_GetItemStackLimitOverflow(this, ItemEntry, ItemDefinition);
-    if (Overflow == -1)
-    {
-        Overflow = Natives::AFortInventory_GetBackpackStackLimitOverflow(this, ItemEntry, ItemDefinition);
-    }
-    return std::clamp(Overflow, 0, Count);
+    return std::clamp(Natives::AFortInventory_GetOverflowAmount(this, ItemEntry), 0, Count);
 #else
     return 0;
 #endif

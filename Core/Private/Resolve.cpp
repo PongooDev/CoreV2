@@ -5087,20 +5087,36 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
         }
     }
 
-    if (!OverflowReason || !StackLimit || !bStackCap || !MaxStackSize || !CanStackWith || bAmbiguous || MaxItemsSlot < 0)
+    // The inventory's overflow amount (Inventory, ItemEntry): the other function that calls both limits. 1.1 and 1.2's
+    // (0x1405AAB60) takes the stack limit unless it is -1, else the backpack limit. 1.7.2's (0x630E80) checks the
+    // stack limit only when the item already has a stack, which then returns the count that doesn't fit in the existing
+    // stacks (never -1), and applies the backpack limit to what is left; the old pairing called on 1.7.2 overflows
+    // every item that has no stack yet.
+    uintptr_t Overflow = 0;
+    for (const uintptr_t Call : StackLimit && BackpackLimit && OverflowReason ? Finder::CallsTo(StackLimit, false) : std::vector<uintptr_t>{})
     {
-        Log::Error(L"Finder: AFortInventory overflow checks not found (reason {}, stack cap {}, max stack {}, can stack {}, slots {}/{})", OverflowReason != 0, bStackCap, MaxStackSize != 0, CanStackWith != 0, NumItemsSlot, MaxItemsSlot);
+        const uintptr_t Caller = Finder::FunctionStart(Call);
+        const std::vector<uintptr_t> CallerCalls = Caller && Caller != OverflowReason ? Targets(Caller) : std::vector<uintptr_t>{};
+        if (std::find(CallerCalls.begin(), CallerCalls.end(), BackpackLimit) != CallerCalls.end())
+        {
+            bAmbiguous |= Overflow && Overflow != Caller;
+            Overflow = Caller;
+        }
+    }
+
+    if (!OverflowReason || !StackLimit || !bStackCap || !MaxStackSize || !CanStackWith || !Overflow || bAmbiguous || MaxItemsSlot < 0)
+    {
+        Log::Error(L"Finder: AFortInventory overflow checks not found (reason {}, stack cap {}, max stack {}, can stack {}, overflow {}, ambiguous {}, slots {}/{})", OverflowReason != 0, bStackCap, MaxStackSize != 0, CanStackWith != 0, Overflow != 0, bAmbiguous, NumItemsSlot, MaxItemsSlot);
         return false;
     }
 
-    Natives::AFortInventory_GetItemStackLimitOverflow = reinterpret_cast<decltype(Natives::AFortInventory_GetItemStackLimitOverflow)>(StackLimit);
-    Natives::AFortInventory_GetBackpackStackLimitOverflow = reinterpret_cast<decltype(Natives::AFortInventory_GetBackpackStackLimitOverflow)>(BackpackLimit);
+    Natives::AFortInventory_GetOverflowAmount = reinterpret_cast<decltype(Natives::AFortInventory_GetOverflowAmount)>(Overflow);
     Natives::AFortInventory_GetMaxStackSize = reinterpret_cast<decltype(Natives::AFortInventory_GetMaxStackSize)>(MaxStackSize);
     Natives::AFortInventory_InventoryInterfaceOffset = InterfaceOffset;
     Natives::IFortInventoryInterface_GetNumItemsIndex = NumItemsSlot;
     Natives::IFortInventoryInterface_GetMaxItemsIndex = MaxItemsSlot;
     Natives::AFortInventory_CanStackWith = reinterpret_cast<decltype(Natives::AFortInventory_CanStackWith)>(CanStackWith);
-    Log::Info(L"Finder: AFortInventory overflow checks found (stack limit +0x{:X}, backpack limit +0x{:X}, interface +0x{:X} slots {}/{})", StackLimit - Finder::ImageBase(), BackpackLimit - Finder::ImageBase(), InterfaceOffset, NumItemsSlot, MaxItemsSlot);
+    Log::Info(L"Finder: AFortInventory overflow checks found (overflow +0x{:X}, stack limit +0x{:X}, backpack limit +0x{:X}, interface +0x{:X} slots {}/{})", Overflow - Finder::ImageBase(), StackLimit - Finder::ImageBase(), BackpackLimit - Finder::ImageBase(), InterfaceOffset, NumItemsSlot, MaxItemsSlot);
     return true;
 }
 

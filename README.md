@@ -19,12 +19,13 @@ Looking for the original Core? Core V1 is still available at [PongooDev/Core](ht
 
 ## Version support
 
-| Fortnite version | Status |
-| --- | --- |
-| Cert (CL-3532353) | In development 🚧 |
+| Fortnite version | Build | Status |
+| --- | --- | --- |
+| 1.1 | Cert CL-3532353 | Full support ✅ |
+| 1.2 | Release-Cert CL-3541083 | In development 🚧 |
 
 - **Full support** means that a version is actively supported. We prioritize fixes and missing functionality for fully supported versions before adding support for other versions.
-- **In development** means work on the version has started but it is not playable yet.
+- **In development** means work on the version has started, but it is not fully working yet.
 - **Unsupported** means the build may start and have some gameplay features, but it may be unfinished, untested, or have game-breaking bugs.
 - When work begins on a new Fortnite version, we aim to make it fully functional before moving on to another version.
 

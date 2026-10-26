@@ -9,6 +9,9 @@
 #include "ObjectLayout.h"
 #include "UObject/Object.h"
 
+#include <utility>
+#include <vector>
+
 class ULocalPlayer;
 class UTexture2D;
 
@@ -79,4 +82,8 @@ public:
 
 private:
     static void BuildRuntimeAutoCompleteListHK(UConsole* This, bool bForce);
+    static void ConsoleCommandHK(UConsole* This, const FString& Command);
+
+    // Each console vtable's own ConsoleCommand, as it was before the swap.
+    static inline std::vector<std::pair<void* const*, void*>> ConsoleCommandOriginals;
 };

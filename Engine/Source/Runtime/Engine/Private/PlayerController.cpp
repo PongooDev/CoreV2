@@ -27,6 +27,14 @@ void APlayerController::SendClientAdjustment()
     CallVirtual<void>(this, Natives::APlayerController_SendClientAdjustmentIndex);
 }
 
+void APlayerController::AddCheats(bool bForce)
+{
+    if (Natives::APlayerController_AddCheatsIndex >= 0 || Finder::ResolvePlayerControllerCheats())
+    {
+        CallVirtual<void>(this, Natives::APlayerController_AddCheatsIndex, bForce);
+    }
+}
+
 void APlayerController::SendToConsole(const FString& Command)
 {
 #if ALLOW_CONSOLE

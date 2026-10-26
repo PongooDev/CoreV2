@@ -165,6 +165,14 @@ void AFortPlayerController::Possess(APawn* InPawn)
         UE_LOG(LogFort, Log, TEXT("Possess: %s had pawn-to-camera rotation off on the server, turned it back on"), *GetNameSafe(this));
     }
 
+    // Cheats are on for every player (#65): ServerCheat_Implementation runs the client's "cheat <command>" on this
+    // controller's cheat manager, which the game mode never allows on a dedicated server.
+    if (Role == ROLE_Authority && !CheatManager)
+    {
+        AddCheats(true);
+        UE_LOG(LogFort, Log, TEXT("Possess: %s has cheat manager %s"), *GetNameSafe(this), *GetNameSafe(static_cast<UObject*>(CheatManager)));
+    }
+
     AFortPlayerState* FortPlayerState = Role == ROLE_Authority && MyFortPawn ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
     if (FortPlayerState && !FortPlayerState->bHasStartedPlaying)
     {

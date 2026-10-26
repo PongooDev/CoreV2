@@ -19,6 +19,7 @@ public:
     void ConsoleKey(FKey Key);
     void SendToConsole(const FString& Command);
     void SendClientAdjustment();
+    void AddCheats(bool bForce);
 
     static void Hook();
 

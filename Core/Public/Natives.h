@@ -382,6 +382,7 @@ namespace Natives
     inline int32_t UConsole_InputKeyIndex = -1;
     inline int32_t APlayerController_ConsoleKeyIndex = -1;
     inline int32_t APlayerController_SendToConsoleIndex = -1;
+    inline int32_t APlayerController_AddCheatsIndex = -1;
     inline int32_t IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = -1;
     inline int32_t IConsoleManager_FindConsoleVariableIndex = -1;
     inline int32_t UProperty_GetCPPTypeIndex = -1;

@@ -3029,6 +3029,31 @@ bool Finder::ResolvePlayerControllerConsole()
     return true;
 }
 
+bool Finder::ResolvePlayerControllerCheats()
+{
+    if (Natives::APlayerController_AddCheatsIndex >= 0)
+    {
+        return true;
+    }
+
+    // execEnableCheats tail-jumps to the EnableCheats virtual, whose body is AddCheats(false): mov rax, [rcx]; xor edx, edx; jmp [rax+disp32].
+    const UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/Engine.PlayerController:EnableCheats");
+    const uintptr_t Thunk = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t Jump = IsInText(Thunk) ? FindInstruction(Thunk, Thunk + 0x30, { 0x48, 0xFF, 0xA0 }) : 0;
+    const int32_t EnableCheats = Jump ? *reinterpret_cast<const int32_t*>(Jump + 3) / static_cast<int32_t>(sizeof(void*)) : -1;
+    const uintptr_t Body = EnableCheats >= 0 ? VTableEntry(CdoVTable(L"/Script/Engine.PlayerController"), EnableCheats) : 0;
+    const bool bAddCheats = Body && FindInstruction(Body, Body + 8, { 0x48, 0x8B, 0x01, 0x33, 0xD2, 0x48, 0xFF, 0xA0 }) == Body;
+    if (!bAddCheats)
+    {
+        Log::Error(L"Finder: APlayerController::AddCheats not found (EnableCheats slot {})", EnableCheats);
+        return false;
+    }
+
+    Natives::APlayerController_AddCheatsIndex = *reinterpret_cast<const int32_t*>(Body + 8) / static_cast<int32_t>(sizeof(void*));
+    Log::Info(L"Finder: APlayerController::EnableCheats is slot 0x{:X}, AddCheats slot 0x{:X}", EnableCheats, Natives::APlayerController_AddCheatsIndex);
+    return true;
+}
+
 bool Finder::ResolveReplicationLive()
 {
     MissingCount = 0;

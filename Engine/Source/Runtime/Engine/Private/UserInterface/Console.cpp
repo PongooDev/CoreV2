@@ -2,6 +2,8 @@
 #include "Engine/Console.h"
 #include "Delegates/Delegate.h"
 #include "Engine/LevelScriptActor.h"
+#include "Engine/LocalPlayer.h"
+#include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
 #include "Hooks.h"
 #include "Math/NumericLimits.h"
@@ -262,6 +264,28 @@ void UConsole::BuildRuntimeAutoCompleteListHK(UConsole* This, bool bForce)
     This->BuildRuntimeAutoCompleteList(bForce);
 }
 
+void UConsole::ConsoleCommandHK(UConsole* This, const FString& Command)
+{
+    // Cheats are on for every player (#65): the player's controller gets a cheat manager before the command runs, so its
+    // commands work here and AFortPlayerController::Cheat, which needs one, sends "cheat <command>" to the server.
+    ULocalPlayer* const Player = This->ConsoleTargetPlayer;
+    APlayerController* const PlayerController = Player ? static_cast<APlayerController*>(Player->PlayerController) : nullptr;
+    if (PlayerController && !PlayerController->CheatManager)
+    {
+        PlayerController->AddCheats(true);
+    }
+
+    void* const* const VTable = *reinterpret_cast<void* const* const*>(This);
+    for (const auto& [ConsoleVTable, Original] : ConsoleCommandOriginals)
+    {
+        if (ConsoleVTable == VTable)
+        {
+            reinterpret_cast<void (*)(UConsole*, const FString&)>(Original)(This, Command);
+            return;
+        }
+    }
+}
+
 void UConsole::Hook()
 {
     const int32_t Index = Natives::UConsole_BuildRuntimeAutoCompleteListIndex;
@@ -276,6 +300,13 @@ void UConsole::Hook()
         if (VTable[Index] == StrippedBody)
         {
             Hooks::SwapVTable(L"UConsole::BuildRuntimeAutoCompleteList", VTable, Index, reinterpret_cast<void*>(&BuildRuntimeAutoCompleteListHK));
+        }
+
+        void* Original = nullptr;
+        const int32_t CommandIndex = Natives::UConsole_ConsoleCommandIndex;
+        if (CommandIndex >= 0 && Hooks::SwapVTable(L"UConsole::ConsoleCommand", VTable, CommandIndex, reinterpret_cast<void*>(&ConsoleCommandHK), &Original) && Original)
+        {
+            ConsoleCommandOriginals.emplace_back(VTable, Original);
         }
     }
 }

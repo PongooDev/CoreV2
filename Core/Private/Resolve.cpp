@@ -1325,6 +1325,20 @@ namespace
         return IsInText(Entry) ? Entry : 0;
     }
 
+    // Without RTTI the vtables sit back to back, so a scan runs on into the subclasses' vtables and meets the same
+    // function again: the class's own slot is the first match.
+    int32_t FirstVTableIndex(void** VTable, uintptr_t Function)
+    {
+        for (int32_t Index = 0; Function && VTableEntry(VTable, Index); ++Index)
+        {
+            if (VTableEntry(VTable, Index) == Function)
+            {
+                return Index;
+            }
+        }
+        return -1;
+    }
+
     struct FCalledSlot
     {
         int32_t Index = -1;
@@ -5684,7 +5698,7 @@ bool Finder::ResolveBuildingLootLive()
     // ABuildingSMActor::PostUpdate: Cert selects the alternate mesh set in it, 1.2 only logs.
     const uintptr_t PostUpdate = FunctionOf(L"ABuildingSMActor::PostUpdate() Building: %s, AltMeshIdx: %d");
     void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
-    const int32_t PostUpdateIndex = PostUpdate && SMActorVTable ? Finder::VTableIndex(SMActorVTable, reinterpret_cast<void*>(PostUpdate), 0x300) : -1;
+    const int32_t PostUpdateIndex = FirstVTableIndex(SMActorVTable, PostUpdate);
     bool bPostUpdateSelectsMeshSet = false;
     for (const auto& [Site, Target] : Calls(PostUpdate))
     {
@@ -5733,7 +5747,7 @@ bool Finder::ResolveBuildingLootLive()
     int32_t ModifyStatIndex = -1;
     for (const uintptr_t Ref : Finder::StringRefs(L"INVALID STAT TYPE! %d"))
     {
-        const int32_t Index = Finder::VTableIndex(PlayerStateZoneVTable, reinterpret_cast<void*>(Finder::FunctionStart(Ref)), 0x200);
+        const int32_t Index = FirstVTableIndex(PlayerStateZoneVTable, Finder::FunctionStart(Ref));
         ModifyStatIndex = Index >= 0 ? Index : ModifyStatIndex;
     }
 
@@ -5778,7 +5792,7 @@ bool Finder::ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t Allow
     // ABuildingSMActor::DetermineMaxResourcesToSpawn survives in 1.2.
     const uintptr_t DetermineMaxResourcesToSpawn = FunctionOf(L"ABuildingSMActor::DetermineMaxResourcesToSpawn");
     void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
-    const int32_t DetermineMaxResourcesToSpawnIndex = DetermineMaxResourcesToSpawn ? Finder::VTableIndex(SMActorVTable, reinterpret_cast<void*>(DetermineMaxResourcesToSpawn), 0x300) : -1;
+    const int32_t DetermineMaxResourcesToSpawnIndex = FirstVTableIndex(SMActorVTable, DetermineMaxResourcesToSpawn);
 
     if (AttemptSpawnResourcesIndex < 0 || DetermineMaxResourcesToSpawnIndex < 0)
     {
@@ -5799,22 +5813,21 @@ bool Finder::ResolveLootQuotaLive(ptrdiff_t MaximumQuotaLevelBoundOffset)
     }
 
     // ABuildingSMActor::GetMaximumQuotaLevelBound returns the byte through the hidden return pointer: movzx eax, byte ptr [rcx+X]; mov [rdx], al.
+    // The first such slot: the subclasses' vtables that follow repeat it.
     void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
     int32_t BoundIndex = -1;
-    int32_t Count = 0;
-    for (int32_t Index = 0; SMActorVTable && MaximumQuotaLevelBoundOffset > 0 && VTableEntry(SMActorVTable, Index); ++Index)
+    for (int32_t Index = 0; SMActorVTable && MaximumQuotaLevelBoundOffset > 0 && BoundIndex < 0 && VTableEntry(SMActorVTable, Index); ++Index)
     {
         const uintptr_t Function = VTableEntry(SMActorVTable, Index);
         if (Byte(Function) == 0x0F && Byte(Function + 1) == 0xB6 && Byte(Function + 2) == 0x81 && *reinterpret_cast<const int32_t*>(Function + 3) == static_cast<int32_t>(MaximumQuotaLevelBoundOffset) && Byte(Function + 7) == 0x88 && Byte(Function + 8) == 0x02)
         {
             BoundIndex = Index;
-            ++Count;
         }
     }
 
-    if (Count != 1 || BoundIndex < 2)
+    if (BoundIndex < 2)
     {
-        Log::Error(L"Finder: ABuildingSMActor loot quota slots not found ({} candidates)", Count);
+        Log::Error(L"Finder: ABuildingSMActor loot quota slots not found (GetMaximumQuotaLevelBound {})", BoundIndex);
         return false;
     }
     Natives::ABuildingSMActor_GetMaximumQuotaLevelBoundIndex = BoundIndex;

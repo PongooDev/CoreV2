@@ -907,8 +907,10 @@ void AFortWorldManager::HookCallSites()
 
 void AFortWorldManager::HookWorldLoot()
 {
+    // The mask is only set once the offset resolves, and the arguments are evaluated right to left.
+    const ptrdiff_t ConstructTileWorldOffset = Member_bConstructTileWorld.GetOffsetChecked();
     Finder::FWorldLootSites LootSites;
-    if (!Finder::ResolveWorldLootLive(Member_DefaultLootQuotaCategory.GetOffsetChecked(), Member_LootData.GetOffsetChecked(), Member_bConstructTileWorld.GetOffsetChecked(), Member_bConstructTileWorld.GetFieldMask(), LootSites))
+    if (!Finder::ResolveWorldLootLive(Member_DefaultLootQuotaCategory.GetOffsetChecked(), Member_LootData.GetOffsetChecked(), ConstructTileWorldOffset, Member_bConstructTileWorld.GetFieldMask(), LootSites))
     {
         return;
     }

@@ -155,7 +155,9 @@ float& ABuildingSMActor::ResourceRemainder()
 
 bool ABuildingSMActor::ResolveHarvest()
 {
-    return Finder::ResolveHarvestLive(Member_bAllowResourceDrop.GetOffsetChecked(), Member_bAllowResourceDrop.GetFieldMask());
+    // The mask is only set once the offset resolves, and the arguments are evaluated right to left.
+    const ptrdiff_t AllowResourceDropOffset = Member_bAllowResourceDrop.GetOffsetChecked();
+    return Finder::ResolveHarvestLive(AllowResourceDropOffset, Member_bAllowResourceDrop.GetFieldMask());
 }
 
 float ABuildingSMActor::DetermineMaxResourcesToSpawn(bool bRandomize)

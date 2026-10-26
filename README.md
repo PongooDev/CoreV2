@@ -19,10 +19,23 @@ Looking for the original Core? Core V1 is still available at [PongooDev/Core](ht
 
 ## Version support
 
+| Status | Fortnite versions |
+| --- | --- |
+| Full support ✅ | 1.1 – 1.2 |
+| In development 🚧 | 1.7.2 |
+
+Core moves forward one build at a time and skips builds nobody has a copy of, so full support is always one range: every build from the first version to the last one listed.
+
+<details>
+<summary>Every build by changelist</summary>
+
 | Fortnite version | Build | Status |
 | --- | --- | --- |
 | 1.1 | Cert CL-3532353 | Full support ✅ |
-| 1.2 | Release-Cert CL-3541083 | In development 🚧 |
+| 1.2 | Release-Cert CL-3541083 | Full support ✅ |
+| 1.7.2 | Release-1.7.2 CL-3700114 | In development 🚧 |
+
+</details>
 
 - **Full support** means that a version is actively supported. We prioritize fixes and missing functionality for fully supported versions before adding support for other versions.
 - **In development** means work on the version has started, but it is not fully working yet.

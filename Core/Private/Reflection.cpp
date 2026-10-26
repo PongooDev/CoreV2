@@ -147,6 +147,15 @@ bool Reflection::FMemberInfo::Resolve()
     return true;
 }
 
+bool Reflection::FMemberInfo::IsAvailable()
+{
+    if (Offset == UnresolvedOffset)
+    {
+        Resolve();
+    }
+    return Offset >= 0;
+}
+
 int32_t Reflection::FMemberInfo::GetOffsetChecked()
 {
     if (Offset == UnresolvedOffset)

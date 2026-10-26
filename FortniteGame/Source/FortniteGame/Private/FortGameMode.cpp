@@ -99,7 +99,8 @@ void AFortGameMode::SendEarnScore()
     }
 
     PendingPlayersAndScores = nullptr;
-    CallVirtual<void>(this, Natives::AFortGameMode_SendEarnScoreIndex);
+    // bIsFinal: 1.7.2's SendEarnScore(bool) only builds the EarnScore context when it is set; 1.1 and 1.2 ignore it.
+    CallVirtual<void>(this, Natives::AFortGameMode_SendEarnScoreIndex, true);
     PendingPlayersAndScores = nullptr;
 }
 
@@ -151,7 +152,7 @@ void AFortGameMode::Hook()
 void AFortGameMode::HookCallSites()
 {
     Finder::FEarnScoreCallSites Sites;
-    if (!Finder::ResolveEarnScoreLive(AFortPlayerController::CriticalMatchBonusOffset(), AFortPlayerState::FinalizingExperienceOffset(), Sites))
+    if (!Finder::ResolveEarnScoreLive(AFortPlayerController::CriticalMatchBonusOffset(), Sites))
     {
         return;
     }

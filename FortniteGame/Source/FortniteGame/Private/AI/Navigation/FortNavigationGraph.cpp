@@ -44,6 +44,28 @@ namespace
         return *reinterpret_cast<const int32_t*>(Address);
     }
 
+    // The disp32 of `Opcode Reg, [this+disp32]` where BuildBlockLinks keeps `this` in r13 (1.1, 1.2) or r12 (1.7.2,
+    // whose base takes a SIB byte).
+    uintptr_t ThisDisplacement(uintptr_t Begin, uintptr_t End, uint8_t Opcode, uint8_t Reg)
+    {
+        for (uintptr_t Site = Begin; Site + 8 <= End; ++Site)
+        {
+            if (Byte(Site) != 0x49 || Byte(Site + 1) != Opcode)
+            {
+                continue;
+            }
+            if (Byte(Site + 2) == (0x80 | (Reg << 3) | 5) && Byte(Site + 5) == 0x00 && Byte(Site + 6) == 0x00)
+            {
+                return Site + 3;
+            }
+            if (Byte(Site + 2) == (0x80 | (Reg << 3) | 4) && Byte(Site + 3) == 0x24 && Byte(Site + 6) == 0x00 && Byte(Site + 7) == 0x00)
+            {
+                return Site + 4;
+            }
+        }
+        return 0;
+    }
+
     uintptr_t FindPattern(uintptr_t Begin, uintptr_t End, std::initializer_list<int32_t> Pattern)
     {
         const size_t Length = Pattern.size();
@@ -145,8 +167,9 @@ bool AFortNavigationGraph::ResolveNatives()
     const int32_t DirtyBlocks = UpdateDirtyBlocks ? Displacement(UpdateDirtyBlocks + 28) - 8 : -1;
     const uintptr_t ClearDirtyFlag = UpdateDirtyBlocksEnd ? FindPattern(UpdateDirtyBlocks, UpdateDirtyBlocksEnd, { 0x83, 0xA3, -1, -1, 0x00, 0x00, 0xFD }) : 0;
     const uintptr_t BuildBlockLinks = UpdateDirtyBlocks ? FirstCallTarget(UpdateDirtyBlocks, 0x60) : 0;
-    const uintptr_t BlockLinksAdd = BuildBlockLinks ? FindPattern(BuildBlockLinks, BuildBlockLinks + 0x80, { 0x49, 0x03, 0x8D, -1, -1, 0x00, 0x00 }) : 0;
-    const uintptr_t BlockCellsLoad = BuildBlockLinks ? FindPattern(BuildBlockLinks, BuildBlockLinks + 0x100, { 0x49, 0x8B, 0x85, -1, -1, 0x00, 0x00 }) : 0;
+    // add rcx, [this+BlockLinks]; mov rax, [this+Cells.BlockCells].
+    const uintptr_t BlockLinksAdd = BuildBlockLinks ? ThisDisplacement(BuildBlockLinks, BuildBlockLinks + 0x80, 0x03, 1) : 0;
+    const uintptr_t BlockCellsLoad = BuildBlockLinks ? ThisDisplacement(BuildBlockLinks, BuildBlockLinks + 0x100, 0x8B, 0) : 0;
 
     const uintptr_t CellIndexBody = FindUnique({ 0x8B, 0x52, 0x08, 0x8B, 0x49, 0x38, 0xD3, 0xFA, 0x0F, 0xAF, 0x53, 0x1C });
     const uintptr_t PathSearchBody = FindUnique({ 0x48, 0x8D, 0x59, 0x08, 0x48, 0x89, 0x11, 0x33, 0xF6, 0x48, 0x8B, 0xF9, 0x48, 0x89, 0x33 });
@@ -175,8 +198,8 @@ bool AFortNavigationGraph::ResolveNatives()
     Natives::UBuildingStructuralSupportSystem_GridSize = GridOrigin - 12;
     Natives::AFortNavigationGraph_DirtyBlocks = DirtyBlocks;
     Natives::AFortNavigationGraph_Flags = Displacement(ClearDirtyFlag + 2);
-    Natives::AFortNavigationGraph_BlockLinks = Displacement(BlockLinksAdd + 3);
-    Natives::AFortNavigationGraph_Cells = Displacement(BlockCellsLoad + 3) - static_cast<int32_t>(offsetof(FNavGraphCells, BlockCells));
+    Natives::AFortNavigationGraph_BlockLinks = Displacement(BlockLinksAdd);
+    Natives::AFortNavigationGraph_Cells = Displacement(BlockCellsLoad) - static_cast<int32_t>(offsetof(FNavGraphCells, BlockCells));
     Natives::AFortNavigationGraph_PathSearch = Displacement(FloodFill + 17);
     Natives::AFortNavigationGraph_UpdateDirtyBlocks = reinterpret_cast<decltype(Natives::AFortNavigationGraph_UpdateDirtyBlocks)>(UpdateDirtyBlocks);
     Natives::FNavGraphCells_GetCellIndex = reinterpret_cast<decltype(Natives::FNavGraphCells_GetCellIndex)>(Finder::FunctionStart(CellIndexBody));

@@ -137,7 +137,7 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
     AFortPlayerController* Controller = Cast<AFortPlayerController>(GetOwner());
     AFortPawn* Pawn = Controller ? static_cast<AFortPawn*>(Controller->MyFortPawn) : nullptr;
     AFortWeapon* CurrentWeapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
-    const bool bWeaponReactivatesSlot = CurrentWeapon && CurrentWeapon->bPendingDestroyDueToDurability && static_cast<FGuid&>(CurrentWeapon->ItemEntryGuid) == Item;
+    const bool bWeaponReactivatesSlot = CurrentWeapon && CurrentWeapon->IsPendingDestroyDueToDurability() && static_cast<FGuid&>(CurrentWeapon->ItemEntryGuid) == Item;
     if (bRemovedFocusedItem && bWeaponReactivatesSlot)
     {
         FQuickBar& QuickBar = GetQuickBar(FocusedBar);

@@ -94,12 +94,18 @@ namespace
 
     // StopMissionAIEncounter hands the encounter to the director right after the folded GetCurrent:
     // AIDirector->StopEncounter(Encounter, EFortObjectiveStatus::Max_None, false, true), the reason loaded with
-    // lea r8d, [r9+imm8] (r9d = 0) just before the call. That callee is AFortAIDirector::StopEncounter.
+    // lea r8d, [r9+imm8] (r9d = 0) just before the call on 1.1 and 1.2, mov r8b, imm8 a few instructions before it on
+    // 1.7.2 (0x682D76). That callee is AFortAIDirector::StopEncounter.
     void ResolveStopEncounter(uintptr_t GetCurrentCall)
     {
         const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(GetCurrentCall + 5, GetCurrentCall + 0x40);
         const uint8_t* Load = Calls.empty() ? nullptr : reinterpret_cast<const uint8_t*>(Calls.front().first - 4);
-        if (!Load || Load[0] != 0x45 || Load[1] != 0x8D || Load[2] != 0x41)
+        bool bReasonLoad = Load && Load[0] == 0x45 && Load[1] == 0x8D && Load[2] == 0x41;
+        for (const uint8_t* Move = Load ? Load - 0xC : nullptr; Move && !bReasonLoad && Move + 3 <= Load + 4; ++Move)
+        {
+            bReasonLoad = Move[0] == 0x41 && Move[1] == 0xB0;
+        }
+        if (!bReasonLoad)
         {
             Log::Error(L"Finder: AFortAIDirector::StopEncounter call in AFortMission::StopMissionAIEncounter not found");
             return;

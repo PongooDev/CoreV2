@@ -24,9 +24,9 @@ public:
 
     DefineNativeBitfield(ArIsError, FArchive_ArIsError, Natives::FArchive_ArIsErrorMask)
     DefineNativeMember(int64_t, Num, FBitWriter_Num)
-    DefineNativeMember(uint8_t, bClose, FOutBunch_bClose)
-    DefineNativeMember(uint8_t, bDormant, FOutBunch_bDormant)
-    DefineNativeMember(uint8_t, bReliable, FOutBunch_bReliable)
+    DefineNativeBitfield(bClose, FOutBunch_bClose, Natives::FOutBunch_bCloseMask)
+    DefineNativeBitfield(bDormant, FOutBunch_bDormant, Natives::FOutBunch_bDormantMask)
+    DefineNativeBitfield(bReliable, FOutBunch_bReliable, Natives::FOutBunch_bReliableMask)
 
     bool IsError() const { return ArIsError; }
     int64_t GetNumBits() const { return Num; }

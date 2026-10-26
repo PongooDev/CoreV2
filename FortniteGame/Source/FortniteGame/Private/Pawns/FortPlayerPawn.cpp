@@ -18,7 +18,8 @@ bool AFortPlayerPawn::EquipLastWeapon()
     {
         return false;
     }
-    return CallVirtual<bool>(this, Natives::AFortPlayerPawn_EquipLastWeaponIndex);
+    // 1.7.2 added a bool the game's own callers pass as false; 1.1 and 1.2 ignore it.
+    return CallVirtual<bool>(this, Natives::AFortPlayerPawn_EquipLastWeaponIndex, false);
 }
 
 ptrdiff_t AFortPlayerPawn::LastEquippedWeaponGUIDOffset()

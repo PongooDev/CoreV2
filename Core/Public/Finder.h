@@ -123,7 +123,7 @@ namespace Finder
     bool ResolveNavigationSystemLive();
     bool ResolveOutpostOwnerLive();
     bool ResolveBadgeScoresLive();
-    bool ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, ptrdiff_t FinalizingExperienceOffset, FEarnScoreCallSites& OutSites);
+    bool ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, FEarnScoreCallSites& OutSites);
     bool ResolveLeaveOutpostLive();
     bool ResolveOutpostMcpRequestLive();
     bool ResolveResetGameplayAttributesLive();

@@ -142,7 +142,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                 Log::Error(L"OnZoneEnd: no EndPrimaryMission for {} (quest manager {}, session {}), so its experience is never finalized", PlayerController->GetName().ToStdString(), QuestManager != nullptr, SessionId.ToStdString());
                 continue;
             }
-            if (PlayerState)
+            if (PlayerState && AFortPlayerState::HasFinalizingExperience())
             {
                 PlayerState->bIsFinalizingExperience = true;
             }

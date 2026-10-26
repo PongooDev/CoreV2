@@ -74,7 +74,8 @@ public:
     void OnRep_CharacterParts();
     int32_t GetStat(EFortReplicatedStat StatType, bool bCampaign);
 
-    static ptrdiff_t FinalizingExperienceOffset();
+    // bIsFinalizingExperience is gone from 1.7.2, which finalizes through FFortExperienceDelta::IsFinalXpUpdate.
+    static bool HasFinalizingExperience();
 
     static void Hook();
 

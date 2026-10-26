@@ -28,13 +28,25 @@ void AFortWeapon::DestroyedDueToDurability()
     }
 }
 
+// 1.7.2 renamed bPendingDestroyDueToDurability to bPendingDestroyDueToDurabilityOrStackCount (same place and bit).
+Reflection::FMemberInfo& AFortWeapon::PendingDestroyDueToDurabilityMember()
+{
+    return Member_bPendingDestroyDueToDurability.IsAvailable() ? Member_bPendingDestroyDueToDurability : Member_bPendingDestroyDueToDurabilityOrStackCount;
+}
+
+bool AFortWeapon::IsPendingDestroyDueToDurability() const
+{
+    return Reflection::GetBoolMember(this, PendingDestroyDueToDurabilityMember());
+}
+
 ptrdiff_t AFortWeapon::PendingDestroyDueToDurabilityOffset()
 {
-    return Member_bPendingDestroyDueToDurability.GetOffsetChecked();
+    return PendingDestroyDueToDurabilityMember().GetOffsetChecked();
 }
 
 uint8_t AFortWeapon::PendingDestroyDueToDurabilityMask()
 {
-    Member_bPendingDestroyDueToDurability.GetOffsetChecked();
-    return Member_bPendingDestroyDueToDurability.GetFieldMask();
+    Reflection::FMemberInfo& Member = PendingDestroyDueToDurabilityMember();
+    Member.GetOffsetChecked();
+    return Member.GetFieldMask();
 }

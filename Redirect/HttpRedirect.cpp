@@ -102,15 +102,19 @@ namespace
         return Hooks::SwapVTable(Name, VTable, SetURLSlot, reinterpret_cast<void*>(Replacement), reinterpret_cast<void**>(Original));
     }
 
-    using FCreateWebSocket = void* (*)(void* Module, void* OutWebSocket, const FString& Url, const void* Protocols);
-    FCreateWebSocket CreateWebSocketOG = nullptr;
+    // 1.1 and 1.2: CreateWebSocket(Url, Protocols). 1.7.2: CreateWebSocket(Url, Protocol, UpgradeHeaders) and
+    // CreateWebSocket(Url, Protocols, UpgradeHeaders). The fifth (stack) argument is passed through; 1.1 and 1.2 never
+    // read it.
+    using FCreateWebSocket = void* (*)(void* Module, void* OutWebSocket, const FString& Url, const void* Protocols, const void* UpgradeHeaders);
+    FCreateWebSocket CreateWebSocketOG[2] = {};
 
-    void* CreateWebSocketHK(void* Module, void* OutWebSocket, const FString& Url, const void* Protocols)
+    template <int32_t Index>
+    void* CreateWebSocketHK(void* Module, void* OutWebSocket, const FString& Url, const void* Protocols, const void* UpgradeHeaders)
     {
         std::wstring Target = RedirectedURL(Url.ToStdString());
         if (Target.empty())
         {
-            return CreateWebSocketOG(Module, OutWebSocket, Url, Protocols);
+            return CreateWebSocketOG[Index](Module, OutWebSocket, Url, Protocols, UpgradeHeaders);
         }
         if (Target.starts_with(L"https://"))
         {
@@ -122,28 +126,70 @@ namespace
         }
 
         Log::Info(L"Redirect: {} -> {}", Url.ToStdString(), Target);
-        return CreateWebSocketOG(Module, OutWebSocket, FString(Target), Protocols);
+        return CreateWebSocketOG[Index](Module, OutWebSocket, FString(Target), Protocols, UpgradeHeaders);
     }
 
-    // FWebSocketsModule::CreateWebSocket: the call in FStompClient's constructor (the function besides
-    // FStompModule::StartupModule that names the v12.stomp subprotocol) to `mov rcx, [rcx+8]; mov rax, [rcx];
-    // call [rax+10h]` (the module's WebSocketsManager->CreateWebSocket).
-    uintptr_t FindCreateWebSocket()
+    // A CreateWebSocket body: mov rcx, [reg+8] (the module's WebSocketsManager), then call [reg+10h] (its
+    // CreateWebSocket), within the first 0x80 bytes.
+    bool ForwardsToManager(uintptr_t Function)
     {
-        static constexpr uint8_t Body[] = { 0x48, 0x8B, 0x49, 0x08, 0x48, 0x8B, 0xDA, 0x48, 0x8B, 0x01, 0xFF, 0x50, 0x10 };
+        const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+        bool bManager = false;
+        for (uintptr_t Site = Function; End && Site + 4 <= End && Site < Function + 0x80; ++Site)
+        {
+            const auto* Code = reinterpret_cast<const uint8_t*>(Site);
+            bManager |= Code[0] == 0x48 && Code[1] == 0x8B && (Code[2] & 0xF8) == 0x48 && (Code[2] & 0x07) != 0x04 && Code[3] == 0x08;
+            if (bManager && Code[0] == 0xFF && (Code[1] & 0xF8) == 0x50 && (Code[1] & 0x07) != 0x04 && Code[2] == 0x10)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // FWebSocketsModule::CreateWebSocket, from the two functions that name the v12.stomp subprotocol. On 1.1 and 1.2 it
+    // is non-virtual, called directly by FStompClient's constructor. On 1.7.2 the STOMP and matchmaking clients reach
+    // two virtuals (slots 8 and 9) through the module's vtable, taken from FStompModule::StartupModule's (slot 1): the
+    // module singleton is still null when Redirect hooks.
+    std::vector<uintptr_t> FindCreateWebSockets()
+    {
+        std::vector<uintptr_t> Found;
+        const auto Add = [&Found](uintptr_t Function)
+        {
+            if (std::find(Found.begin(), Found.end(), Function) == Found.end())
+            {
+                Found.push_back(Function);
+            }
+        };
         for (const uintptr_t Ref : Finder::StringRefs(L"v12.stomp"))
         {
             const uintptr_t Function = Finder::FunctionStart(Ref);
             const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+            if (void** Module = End ? Finder::VTableContaining(Function, 1, 8) : nullptr)
+            {
+                for (int32_t Slot = 8; Slot < 12; ++Slot)
+                {
+                    const uintptr_t Entry = reinterpret_cast<uintptr_t>(Module[Slot]);
+                    if (Entry < Finder::TextBegin() || Entry >= Finder::TextEnd())
+                    {
+                        break;
+                    }
+                    if (ForwardsToManager(Entry))
+                    {
+                        Add(Entry);
+                    }
+                }
+                continue;
+            }
             for (const auto& [Call, Target] : End ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
             {
-                if (Finder::IsReadable(reinterpret_cast<const void*>(Target + 6), sizeof(Body)) && std::memcmp(reinterpret_cast<const void*>(Target + 6), Body, sizeof(Body)) == 0)
+                if (ForwardsToManager(Target))
                 {
-                    return Target;
+                    Add(Target);
                 }
             }
         }
-        return 0;
+        return Found;
     }
 }
 
@@ -159,13 +205,18 @@ bool HttpRedirect::Hook()
         &WinInetSetURLOG, &SetURL<&WinInetSetURLOG>);
     // The client's STOMP notifications (StompClientMcp) connect through libwebsockets, which doesn't use the HTTP proxy,
     // to the service config's URL, read before the hotfix can change it (Backend-Evidence "STOMP").
-    if (const uintptr_t CreateWebSocket = FindCreateWebSocket())
+    const std::vector<uintptr_t> CreateWebSockets = FindCreateWebSockets();
+    if (CreateWebSockets.empty() || CreateWebSockets.size() > 2)
     {
-        Hooks::Detour(L"FWebSocketsModule::CreateWebSocket", reinterpret_cast<void*>(CreateWebSocket), &CreateWebSocketHK, &CreateWebSocketOG);
+        Log::Error(L"Redirect: FWebSocketsModule::CreateWebSocket not found ({} candidates), STOMP notifications stay on Epic's host", CreateWebSockets.size());
     }
-    else
+    if (CreateWebSockets.size() >= 1 && CreateWebSockets.size() <= 2)
     {
-        Log::Error(L"Redirect: FWebSocketsModule::CreateWebSocket not found, STOMP notifications stay on Epic's host");
+        Hooks::Detour(L"FWebSocketsModule::CreateWebSocket", reinterpret_cast<void*>(CreateWebSockets[0]), &CreateWebSocketHK<0>, &CreateWebSocketOG[0]);
+    }
+    if (CreateWebSockets.size() == 2)
+    {
+        Hooks::Detour(L"FWebSocketsModule::CreateWebSocket (protocols)", reinterpret_cast<void*>(CreateWebSockets[1]), &CreateWebSocketHK<1>, &CreateWebSocketOG[1]);
     }
     return bCurl && bWinInet;
 }

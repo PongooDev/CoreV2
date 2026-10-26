@@ -34,6 +34,8 @@
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/AssetPtr.h"
+#include "UObject/UnrealType.h"
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
@@ -45,6 +47,29 @@ DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 namespace
 {
+    // UFortAbilityKit::Gadgets holds object pointers on 1.1 and 1.2 and TAssetPtrs (0x20-byte entries) on 1.7.2.
+    std::vector<UFortGadgetItemDefinition*> KitGadgets(UFortAbilityKit* Kit)
+    {
+        static const int32_t EntrySize = []
+        {
+            UClass* KitClass = UFortAbilityKit::StaticClass();
+            const UProperty* Property = KitClass ? KitClass->FindPropertyByName(FName(L"Gadgets", FNAME_Find)) : nullptr;
+            const UProperty* Inner = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UArrayProperty) ? static_cast<const UArrayProperty*>(Property)->Inner : nullptr;
+            return Inner ? static_cast<int32_t>(Inner->ElementSize) : static_cast<int32_t>(sizeof(void*));
+        }();
+
+        std::vector<UFortGadgetItemDefinition*> Gadgets;
+        const TArray<UFortGadgetItemDefinition*>& Entries = Kit->Gadgets;
+        for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+        {
+            const uintptr_t Entry = reinterpret_cast<uintptr_t>(Entries.GetData()) + static_cast<uintptr_t>(Index) * EntrySize;
+            Gadgets.push_back(EntrySize == sizeof(FAssetPtr)
+                ? reinterpret_cast<const TAssetPtr<UFortGadgetItemDefinition>*>(Entry)->LoadSynchronous()
+                : *reinterpret_cast<UFortGadgetItemDefinition* const*>(Entry));
+        }
+        return Gadgets;
+    }
+
     struct FHeroAbilityKitItems
     {
         TWeakObjectPtr<AFortPlayerController> PlayerController;
@@ -365,7 +390,7 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
     };
     for (UFortAbilityKit* Kit : Kits)
     {
-        for (UFortGadgetItemDefinition* Gadget : Kit->Gadgets)
+        for (UFortGadgetItemDefinition* Gadget : KitGadgets(Kit))
         {
             if (AddDefinition(Gadget))
             {
@@ -644,8 +669,8 @@ void AFortPlayerController::ApplyHomebaseGadgets()
 
         for (UFortAbilityKit* Kit : Kits)
         {
-            const TArray<UFortGadgetItemDefinition*>* KitGadgets = Kit ? &static_cast<TArray<UFortGadgetItemDefinition*>&>(Kit->Gadgets) : nullptr;
-            if (!KitGadgets || std::none_of(KitGadgets->begin(), KitGadgets->end(), [Gadget](UFortGadgetItemDefinition* KitGadget) { return static_cast<UFortItemDefinition*>(KitGadget) == Gadget; }))
+            const std::vector<UFortGadgetItemDefinition*> KitGadgetDefinitions = Kit ? KitGadgets(Kit) : std::vector<UFortGadgetItemDefinition*>{};
+            if (std::none_of(KitGadgetDefinitions.begin(), KitGadgetDefinitions.end(), [Gadget](UFortGadgetItemDefinition* KitGadget) { return static_cast<UFortItemDefinition*>(KitGadget) == Gadget; }))
             {
                 continue;
             }

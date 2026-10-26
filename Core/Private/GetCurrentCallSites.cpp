@@ -447,7 +447,13 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
     for (int32_t Slot = 0; Slot < 0x200; ++Slot)
     {
         const uintptr_t Entry = VTableAt(GoalManagerVTable, Slot);
-        if (Entry && Entry == VTableAt(DirectorVTable, Slot) && !IsTrivial(Entry))
+        const uintptr_t DirectorEntry = VTableAt(DirectorVTable, Slot);
+        if (!Entry || !DirectorEntry)
+        {
+            // The end of either vtable: what follows belongs to other classes (1.7.2 matches again at 0x1E0-0x1FD).
+            break;
+        }
+        if (Entry == DirectorEntry && !IsTrivial(Entry))
         {
             Context.ActorSlots = Slot + 1;
         }

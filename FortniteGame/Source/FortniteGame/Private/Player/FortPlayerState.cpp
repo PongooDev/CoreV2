@@ -103,9 +103,9 @@ int32_t AFortPlayerState::GetStat(EFortReplicatedStat StatType, bool bCampaign)
     return Natives::AFortPlayerState_GetStatIndex >= 0 ? CallVirtual<int32_t>(this, Natives::AFortPlayerState_GetStatIndex, static_cast<int32_t>(StatType), bCampaign) : 0;
 }
 
-ptrdiff_t AFortPlayerState::FinalizingExperienceOffset()
+bool AFortPlayerState::HasFinalizingExperience()
 {
-    return Member_bIsFinalizingExperience.GetOffsetChecked();
+    return Member_bIsFinalizingExperience.IsAvailable();
 }
 
 void AFortPlayerState::Hook()

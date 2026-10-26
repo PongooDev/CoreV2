@@ -508,7 +508,7 @@ int32_t UNetDriver::ServerReplicateActors_ProcessPrioritizedActors(UNetConnectio
         if (!Entry.ActorInfo && Entry.DestructionInfo)
         {
             FActorDestructionInfo& DestructionInfo = *Entry.DestructionInfo;
-            if (DestructionInfo.StreamingLevelName != NAME_None && !Connection->ClientVisibleLevelNames.Contains(DestructionInfo.StreamingLevelName))
+            if (DestructionInfo.StreamingLevelName != NAME_None && !Connection->IsClientLevelVisible(DestructionInfo.StreamingLevelName))
             {
                 continue;
             }

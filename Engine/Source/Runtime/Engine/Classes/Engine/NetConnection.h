@@ -55,7 +55,16 @@ public:
     DefineNativeObject(FDormantReplicatorMap, DormantReplicatorMap, UNetConnection_DormantReplicatorMap)
     DefineNativeObject(TSet<FNetworkGUID>, DestroyedStartupOrDormantActors, UNetConnection_DestroyedStartupOrDormantActors)
     DefineNativeMember(FName, ClientWorldPackageName, UNetConnection_ClientWorldPackageName)
-    DefineNativeMember(TArray<FName>, ClientVisibleLevelNames, UNetConnection_ClientVisibleLevelNames)
+
+    // ClientVisibleLevelNames: a TArray<FName> on 1.1 and 1.2, a TSet<FName> on 1.7.2
+    // (Natives::UNetConnection_ClientVisibleLevelNamesIsSet).
+    bool IsClientLevelVisible(FName LevelName) const
+    {
+        const void* VisibleLevelNames = reinterpret_cast<const uint8_t*>(this) + Natives::UNetConnection_ClientVisibleLevelNames;
+        return Natives::UNetConnection_ClientVisibleLevelNamesIsSet
+            ? static_cast<const TSet<FName>*>(VisibleLevelNames)->Contains(LevelName)
+            : static_cast<const TArray<FName>*>(VisibleLevelNames)->Contains(LevelName);
+    }
 
     UChannel* CreateChannel(EChannelType Type, bool bOpenedLocally, int32_t ChannelIndex = -1);
     int32_t IsNetReady(bool Saturate);

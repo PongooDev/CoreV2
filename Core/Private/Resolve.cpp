@@ -600,7 +600,8 @@ namespace
         const uintptr_t SetWorldEnd = Finder::FunctionEnd(SetWorld);
         for (uintptr_t Lea = SetWorld && SetWorldEnd ? FindInstruction(SetWorld, SetWorldEnd, { 0x48, 0x8D, 0x47 }) : 0; Lea; Lea = FindInstruction(Lea + 1, SetWorldEnd, { 0x48, 0x8D, 0x47 }))
         {
-            if (FindInstruction(Lea + 4, Lea + 0x20, { 0x48, 0x89, 0x83, 0xE8, 0x00, 0x00, 0x00 }))
+            // The store into UNetDriver::Notify: +0xE8 on 1.1 and 1.2, +0xF0 on 1.7.2 (its new WorldPackage at +0xA8).
+            if (FindInstruction(Lea + 4, Lea + 0x20, { 0x48, 0x89, 0x83, -1, -1, 0x00, 0x00 }))
             {
                 Notify = Byte(Lea + 3);
                 break;
@@ -1580,38 +1581,78 @@ namespace
         }
         RequireOffset(L"UChannel::ChIndex", Natives::UChannel_ChIndex, ChIndex);
 
+        // The bunch flags are bool bytes on 1.1 and 1.2 (bClose +0xE5, bDormant +0xE6, bReliable +0xE8) and uint8 :1 bits
+        // of +0xE0 on 1.7.2 (bClose 0x04, bDormant 0x08, bReliable 0x20): the constructor (0x20A4210) shifts bInClose
+        // into place before the store, and UChannel::Close (0x20A8690) sets bDormant and bReliable in one
+        // read-modify-write of the flag byte.
         ptrdiff_t BunchClose = 0;
+        uint32_t CloseMask = 0;
         const uintptr_t OutBunchEnd = IsInText(OutBunch) ? Finder::FunctionEnd(OutBunch) : 0;
         const uintptr_t CloseArgument = OutBunchEnd ? FindInstruction(OutBunch, OutBunchEnd, { 0x41, 0x0F, 0xB6, -1 }) : 0;
         if (CloseArgument && (Byte(CloseArgument + 3) & 0xC7) == 0xC0)
         {
             const uint8_t Register = (Byte(CloseArgument + 3) >> 3) & 0x07;
+            uint32_t Shift = 0;
             for (uintptr_t Store = CloseArgument + 4; Store + 6 <= OutBunchEnd && !BunchClose; ++Store)
             {
                 const uint8_t ModRm = Byte(Store + 1);
                 const bool bNeedsRex = Register >= 4;
-                if (Byte(Store) == 0x88 && (ModRm & 0xC0) == 0x80 && ((ModRm >> 3) & 0x07) == Register && (ModRm & 0x07) != 0x04 && (!bNeedsRex || Byte(Store - 1) == 0x40))
+                if (Byte(Store) == 0xC0 && ModRm == (0xE0 | Register) && Byte(Store + 2) < 8)
+                {
+                    Shift = Byte(Store + 2);
+                }
+                else if (Byte(Store) == 0x88 && (ModRm & 0xC0) == 0x80 && ((ModRm >> 3) & 0x07) == Register && (ModRm & 0x07) != 0x04 && (!bNeedsRex || Byte(Store - 1) == 0x40))
                 {
                     BunchClose = *reinterpret_cast<const int32_t*>(Store + 2);
+                    CloseMask = 1u << Shift;
                 }
             }
         }
 
         ptrdiff_t BunchDormant = 0;
         ptrdiff_t BunchReliable = 0;
+        uint32_t DormantMask = 0;
+        uint32_t ReliableMask = 0;
         const ptrdiff_t CloseBunchLocal = CloseBunch ? Byte(CloseBunch + 7) : 0;
-        if (const uintptr_t Store = CloseBunch ? FindInstruction(CloseBunch + 16, CloseBunch + 0x60, { 0xC6, 0x84, 0x24, -1, -1, -1, -1, 0x01 }) : 0)
+        if (CloseBunch && CloseMask == 1)
         {
-            BunchReliable = *reinterpret_cast<const int32_t*>(Store + 3) - CloseBunchLocal;
+            if (const uintptr_t Store = FindInstruction(CloseBunch + 16, CloseBunch + 0x60, { 0xC6, 0x84, 0x24, -1, -1, -1, -1, 0x01 }))
+            {
+                BunchReliable = *reinterpret_cast<const int32_t*>(Store + 3) - CloseBunchLocal;
+            }
+            if (const uintptr_t Store = FindInstruction(CloseBunch + 16, CloseBunch + 0x60, { 0x88, 0x84, 0x24 }))
+            {
+                BunchDormant = *reinterpret_cast<const int32_t*>(Store + 3) - CloseBunchLocal;
+            }
+            DormantMask = ReliableMask = 1;
         }
-        if (const uintptr_t Store = CloseBunch ? FindInstruction(CloseBunch + 16, CloseBunch + 0x60, { 0x88, 0x84, 0x24 }) : 0)
+        else if (CloseBunch && CloseMask)
         {
-            BunchDormant = *reinterpret_cast<const int32_t*>(Store + 3) - CloseBunchLocal;
+            // movzx eax, byte [rsp+Flags]; and al, ~Dormant; or cl, R; shl cl, N; mov [rsp+Flags], cl
+            const int32_t Flags = static_cast<int32_t>(CloseBunchLocal + BunchClose);
+            const int32_t F0 = Flags & 0xFF, F1 = (Flags >> 8) & 0xFF, F2 = (Flags >> 16) & 0xFF, F3 = (Flags >> 24) & 0xFF;
+            const uintptr_t Load = FindInstruction(CloseBunch + 16, CloseBunch + 0x60, { 0x0F, 0xB6, 0x84, 0x24, F0, F1, F2, F3 });
+            const uintptr_t Store = Load ? FindInstruction(Load + 8, CloseBunch + 0x60, { 0x88, -1, 0x24, F0, F1, F2, F3 }) : 0;
+            const uintptr_t Clear = Store ? FindInstruction(Load + 8, Store, { 0x24, static_cast<int32_t>(~(CloseMask << 1) & 0xFF) }) : 0;
+            const uintptr_t Shl = Store ? FindInstruction(Load + 8, Store, { 0xC0, 0xE1, -1 }) : 0;
+            const uintptr_t Or = Shl ? FindInstruction(Load + 8, Shl, { 0x80, 0xC9, -1 }) : 0;
+            if (Clear && Or && (Byte(Store + 1) & 0xC7) == 0x84)
+            {
+                BunchDormant = BunchReliable = BunchClose;
+                DormantMask = 1u << Byte(Shl + 2);
+                ReliableMask = static_cast<uint32_t>(Byte(Or + 2)) << Byte(Shl + 2);
+            }
         }
-        const bool bBunchFlags = BunchClose > 0 && BunchDormant == BunchClose + 1 && BunchReliable == BunchClose + 3;
+        // UE 4.16 declares bOpen, bClose, bDormant, bIsReplicationPaused, bReliable in this order, as bytes or as bits.
+        const bool bBunchFlags = BunchClose > 0 && (CloseMask == 1
+            ? BunchDormant == BunchClose + 1 && BunchReliable == BunchClose + 3
+            : CloseMask && BunchDormant == BunchClose && BunchReliable == BunchClose && DormantMask == CloseMask << 1 && ReliableMask == CloseMask << 3);
         RequireOffset(L"FOutBunch::bClose", Natives::FOutBunch_bClose, bBunchFlags ? BunchClose : 0);
         RequireOffset(L"FOutBunch::bDormant", Natives::FOutBunch_bDormant, bBunchFlags ? BunchDormant : 0);
         RequireOffset(L"FOutBunch::bReliable", Natives::FOutBunch_bReliable, bBunchFlags ? BunchReliable : 0);
+        Natives::FOutBunch_bCloseMask = bBunchFlags ? CloseMask : 0;
+        Natives::FOutBunch_bDormantMask = bBunchFlags ? DormantMask : 0;
+        Natives::FOutBunch_bReliableMask = bBunchFlags ? ReliableMask : 0;
 
         ptrdiff_t BunchSize = 0;
         for (uintptr_t Lea = OutBunchEnd ? FindInstruction(OutBunch, OutBunchEnd, { 0x48, 0x8D, 0x05 }) : 0; Lea && !BunchSize; Lea = FindInstruction(Lea + 1, OutBunchEnd, { 0x48, 0x8D, 0x05 }))
@@ -1665,7 +1706,7 @@ namespace
             }
         }
         RequireOffset(L"FBitWriter::Num", Natives::FBitWriter_Num, WriterNum);
-        Log::Info(L"Finder: FOutBunch is 0x{:X} bytes, bClose +0x{:X}, bDormant +0x{:X}, bReliable +0x{:X}, Num +0x{:X}, ArIsError +0x{:X} & 0x{:X}, UChannel::ChIndex +0x{:X}", BunchSize, BunchClose, BunchDormant, BunchReliable, WriterNum, ErrorByte, ErrorMask, ChIndex);
+        Log::Info(L"Finder: FOutBunch is 0x{:X} bytes, bClose +0x{:X} & 0x{:X}, bDormant +0x{:X} & 0x{:X}, bReliable +0x{:X} & 0x{:X}, Num +0x{:X}, ArIsError +0x{:X} & 0x{:X}, UChannel::ChIndex +0x{:X}", BunchSize, BunchClose, CloseMask, BunchDormant, DormantMask, BunchReliable, ReliableMask, WriterNum, ErrorByte, ErrorMask, ChIndex);
 
         ptrdiff_t NumOutRec = 0;
         const uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x80, { 0x0F, 0xBA, -1, 0x08 }) : 0;
@@ -1789,38 +1830,41 @@ namespace
         RequireSlot(L"UNetDriver::IsLevelInitializedForActor", Natives::UNetDriver_IsLevelInitializedForActorIndex, LevelInitializedBody ? LevelInitialized : -1);
 
         const int32_t ClientHasInitializedLevelFor = LevelInitializedBody ? VirtualSlot(FindVirtualCall(LevelInitializedBody, LevelInitializedBody + 0x40)) : -1;
+        // cmp [Connection+ClientWorldPackageName], reg: 48 39 on 1.1 and 1.2, 49 39 on 1.7.2 (through r8).
         ptrdiff_t ClientWorldPackageName = 0;
-        for (uintptr_t Compare = LevelInitializedBody ? FindInstruction(LevelInitializedBody, LevelInitializedBody + 0x40, { 0x48, 0x39 }) : 0; Compare && !ClientWorldPackageName; Compare = FindInstruction(Compare + 1, LevelInitializedBody + 0x40, { 0x48, 0x39 }))
+        for (uintptr_t Compare = LevelInitializedBody ? FindInstruction(LevelInitializedBody, LevelInitializedBody + 0x40, { -1, 0x39 }) : 0; Compare && !ClientWorldPackageName; Compare = FindInstruction(Compare + 1, LevelInitializedBody + 0x40, { -1, 0x39 }))
         {
-            if ((Byte(Compare + 2) & 0xC0) == 0x80 && (Byte(Compare + 2) & 0x07) != 0x04)
+            if ((Byte(Compare) & 0xF8) == 0x48 && (Byte(Compare + 2) & 0xC0) == 0x80 && (Byte(Compare + 2) & 0x07) != 0x04)
             {
                 ClientWorldPackageName = *reinterpret_cast<const int32_t*>(Compare + 3);
             }
         }
         RequireOffset(L"UNetConnection::ClientWorldPackageName", Natives::UNetConnection_ClientWorldPackageName, ClientWorldPackageName);
 
-        const uintptr_t Describe = FunctionOf(L"[UNetConnection] RemoteAddr: %s, Name: %s, Driver: %s, IsServer: %s, PC: %s, Owner: %s");
+        // 1.7.2's Describe adds ", UniqueId: %s"; each spelling exists in one build family only.
+        uintptr_t Describe = 0;
+        for (const wchar_t* Anchor : { L"[UNetConnection] RemoteAddr: %s, Name: %s, Driver: %s, IsServer: %s, PC: %s, Owner: %s",
+                                       L"[UNetConnection] RemoteAddr: %s, Name: %s, Driver: %s, IsServer: %s, PC: %s, Owner: %s, UniqueId: %s" })
+        {
+            Describe = Describe ? Describe : FunctionOf(Anchor);
+        }
         const uintptr_t DescribeEnd = Finder::FunctionEnd(Describe);
         void** ConnectionVTable = DescribeEnd ? CalledSlot(Describe, DescribeEnd, FunctionOf(L"UNetConnection::LowLevelGetRemoteAddress")).VTable : nullptr;
 
-        int32_t ConnectionTick = -1;
+        // IsNetReady is the slot six before InitRemoteConnection and Tick the one before it; UNetDriver::TickFlush ticks
+        // the server connection and each client connection through Tick. 1.7.2's TickFlush also calls IsNetReady(false)
+        // on each first (slot 0x51, then Tick 0x50), so the calls aren't all one slot.
+        const int32_t InitRemoteConnection = Finder::VTableIndex(ConnectionVTable, reinterpret_cast<void*>(FunctionOf(L"UNetConnection::InitRemoteConnection")), 0x400);
+        const int32_t IsNetReady = InitRemoteConnection - 6;
+        const int32_t ConnectionTick = IsNetReady - 1;
         int32_t ConnectionTicks = 0;
-        for (uintptr_t Call = TickFlushEnd ? FindInstruction(TickFlush, TickFlushEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0; Call; Call = FindInstruction(Call + 1, TickFlushEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }))
+        for (uintptr_t Call = TickFlushEnd && ConnectionTick >= 0 ? FindInstruction(TickFlush, TickFlushEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0; Call; Call = FindInstruction(Call + 1, TickFlushEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }))
         {
-            const int32_t Slot = VirtualSlot(Call + 3);
-            if (Slot < 0 || (ConnectionTicks && Slot != ConnectionTick))
-            {
-                ConnectionTicks = 0;
-                break;
-            }
-            ConnectionTick = Slot;
-            ++ConnectionTicks;
+            ConnectionTicks += VirtualSlot(Call + 3) == ConnectionTick ? 1 : 0;
         }
         const uintptr_t ConnectionTickBody = ConnectionTicks >= 2 ? VTableEntry(ConnectionVTable, ConnectionTick) : 0;
         RequireSlot(L"UNetConnection::Tick", Natives::UNetConnection_TickIndex, ConnectionTickBody ? ConnectionTick : -1);
 
-        const int32_t InitRemoteConnection = Finder::VTableIndex(ConnectionVTable, reinterpret_cast<void*>(FunctionOf(L"UNetConnection::InitRemoteConnection")), 0x400);
-        const int32_t IsNetReady = InitRemoteConnection - 6;
         const uintptr_t IsNetReadyBody = InitRemoteConnection >= 6 && IsNetReady == ConnectionTick + 1 ? VTableEntry(ConnectionVTable, IsNetReady) : 0;
         const bool bIsNetReady = IsNetReadyBody && FindInstruction(IsNetReadyBody, IsNetReadyBody + 18, { 0x84, 0xD2, 0x74, -1, 0x8B, 0x81, -1, -1, 0x00, 0x00, 0xF7, 0xD8, 0x89, 0x81, -1, -1, 0x00, 0x00 }) == IsNetReadyBody;
         RequireSlot(L"UNetConnection::IsNetReady", Natives::UNetConnection_IsNetReadyIndex, bIsNetReady ? IsNetReady : -1);
@@ -1842,8 +1886,17 @@ namespace
             bVisibleLevelData = bVisibleLevelData || (Byte(Load + 1) == 0x8B && Offset == VisibleLevelNames);
             bVisibleLevelCount = bVisibleLevelCount || (Byte(Load + 1) == 0x63 && Offset == VisibleLevelNames + 8);
         }
-        RequireSlot(L"UNetConnection::ClientHasInitializedLevelFor", Natives::UNetConnection_ClientHasInitializedLevelForIndex, bVisibleLevelData && bVisibleLevelCount ? ClientHasInitializedLevelFor : -1);
-        RequireOffset(L"UNetConnection::ClientVisibleLevelNames", Natives::UNetConnection_ClientVisibleLevelNames, bVisibleLevelData && bVisibleLevelCount ? VisibleLevelNames : 0);
+        // 1.7.2 keeps ClientVisibleLevelNames as a TSet<FName>: the count is Elements.Num (+0x08) minus NumFreeIndices
+        // (+0x34), read as mov eax, [conn+VLN+8]; sub eax, [conn+VLN+0x34] (connection slot 0x5E, 0x22243C0).
+        const int32_t SetNum = static_cast<int32_t>(VisibleLevelNames + 0x08);
+        const int32_t SetFree = static_cast<int32_t>(VisibleLevelNames + 0x34);
+        const bool bVisibleLevelSet = ClientWorldPackageName && LevelForEnd && FindInstruction(LevelFor, LevelForEnd,
+            { 0x8B, -1, SetNum & 0xFF, (SetNum >> 8) & 0xFF, (SetNum >> 16) & 0xFF, (SetNum >> 24) & 0xFF,
+              0x2B, -1, SetFree & 0xFF, (SetFree >> 8) & 0xFF, (SetFree >> 16) & 0xFF, (SetFree >> 24) & 0xFF });
+        const bool bVisibleLevels = bVisibleLevelData && (bVisibleLevelCount || bVisibleLevelSet);
+        Natives::UNetConnection_ClientVisibleLevelNamesIsSet = bVisibleLevels && !bVisibleLevelCount;
+        RequireSlot(L"UNetConnection::ClientHasInitializedLevelFor", Natives::UNetConnection_ClientHasInitializedLevelForIndex, bVisibleLevels ? ClientHasInitializedLevelFor : -1);
+        RequireOffset(L"UNetConnection::ClientVisibleLevelNames", Natives::UNetConnection_ClientVisibleLevelNames, bVisibleLevels ? VisibleLevelNames : 0);
 
         const uintptr_t ConnectionTickEnd = Finder::FunctionEnd(ConnectionTickBody);
         ptrdiff_t TimeSensitive = 0;
@@ -2262,7 +2315,9 @@ namespace
         Require(L"AFortGameModeZone::SpawnDefaultPawnFor_Implementation", Natives::AFortGameModeZone_SpawnDefaultPawnFor, ZoneSpawnPawn ? Finder::FunctionStart(ZoneSpawnPawn) : 0);
         Require(L"AFortGameMode::SpawnDefaultPawnFor_Implementation", Natives::AFortGameMode_SpawnDefaultPawnFor, FunctionOf(L"Couldn't spawn player pawn of type %s due to no start spot"));
 
-        const uintptr_t WorldIsReady = UniqueFunction({ 0x83, 0x8F, 0x30, 0x05, 0x00, 0x00, 0x01 });
+        // or dword ptr [rdi+bWorldIsReady], 1; call [rax+GetWorld]; mov rcx, rax (bWorldIsReady +0x530 on 1.1 and 1.2,
+        // +0x568 on 1.7.2; the plain or has dozens of matches, the call after it makes it unique).
+        const uintptr_t WorldIsReady = UniqueFunction({ 0x83, 0x8F, -1, -1, 0x00, 0x00, 0x01, 0xFF, 0x90, -1, -1, 0x00, 0x00, 0x48, 0x8B, 0xC8 });
         Require(L"AFortGameMode::FinishWorldInitialization", Natives::AFortGameMode_FinishWorldInitialization, WorldIsReady ? Finder::FunctionStart(WorldIsReady) : 0);
 
         Require(L"AFortWorldManager::OnWorldRecordQueryComplete", Natives::AFortWorldManager_OnWorldRecordQueryComplete, FunctionOf(L"Invalid world record when transition to world query complete state!"));
@@ -2678,9 +2733,29 @@ namespace
             StartCheck = Site;
             ++StartChecks;
         }
-        const uintptr_t StartBranch = StartChecks == 1 ? StartCheck + 10 : 0;
-        const uintptr_t StartTarget = StartBranch ? StartBranch + 11 + static_cast<int8_t>(Byte(StartBranch + 10)) : 0;
-        const bool bStartCheck = StartTarget && StartBranch + 2 + static_cast<int8_t>(Byte(StartBranch + 1)) < StartTarget && StartTarget - (StartBranch + 2) <= 0x7F;
+        uintptr_t StartBranch = StartChecks == 1 ? StartCheck + 10 : 0;
+        uintptr_t StartTarget = StartBranch ? StartBranch + 11 + static_cast<int8_t>(Byte(StartBranch + 10)) : 0;
+        bool bStartCheck = StartTarget && StartBranch + 2 + static_cast<int8_t>(Byte(StartBranch + 1)) < StartTarget && StartTarget - (StartBranch + 2) <= 0x7F;
+        if (StartChecks == 0 && DedicatedInstance)
+        {
+            // 1.7.2 (0x593180) calls IsDedicatedServerInstance instead of inlining it, so the branch to skip is the jnz
+            // after the call: call IsDedicatedServerInstance; test al, al; jnz Skip; mov rcx, [rbx+UpdateManager];
+            // test rcx, rcx; jz Skip; mov rax, [rcx]; xor edx, edx; call [rax+...].
+            const std::initializer_list<int32_t> CallPattern = { 0xE8, -1, -1, -1, -1, 0x84, 0xC0, 0x75, -1, 0x48, 0x8B, 0x8B, -1, -1, 0x00, 0x00,
+                0x48, 0x85, 0xC9, 0x74, -1, 0x48, 0x8B, 0x01, 0x33, 0xD2, 0xFF, 0x90 };
+            for (const uintptr_t Call : Finder::CallsTo(DedicatedInstance, false))
+            {
+                const uintptr_t Branch = Call + 7;
+                const uintptr_t Target = Branch + 2 + static_cast<int8_t>(Byte(Branch + 1));
+                if (FindInstruction(Call, Call + 28, CallPattern) == Call && Call + 21 + static_cast<int8_t>(Byte(Call + 20)) == Target)
+                {
+                    StartBranch = Branch;
+                    StartTarget = Target;
+                    ++StartChecks;
+                }
+            }
+            bStartCheck = StartChecks == 1 && StartTarget > StartBranch + 2 && StartTarget - (StartBranch + 2) <= 0x7F;
+        }
         Sites::FortGameInstanceStartDedicatedCheck = bStartCheck ? reinterpret_cast<uint8_t*>(StartBranch) : nullptr;
         Sites::FortGameInstanceStartDedicatedTarget = bStartCheck ? reinterpret_cast<uint8_t*>(StartTarget) : nullptr;
         if (!bStartCheck)
@@ -3241,21 +3316,16 @@ bool Finder::ResolvePickupLive()
         return Native;
     };
 
-    const uintptr_t CreateTemporaryItemInstance = LastCall(L"/Script/FortniteGame.FortItemDefinition:CreateTemporaryItemInstanceBP");
-    const uintptr_t EntryCall = CreateTemporaryItemInstance ? FindRawCall(CreateTemporaryItemInstance, Finder::FunctionEnd(CreateTemporaryItemInstance)) : 0;
-    const uintptr_t EntryConstructor = EntryCall ? Finder::RelativeTarget(EntryCall, 1, 5) : 0;
-
+    // SpawnMissionItemPickup builds FFortItemEntry(Entry, ItemDefinition, Count, Level, nullptr) and passes it straight on
+    // to CreatePickup, in every build (1.7.2 inlines the constructor into CreateTemporaryItemInstance, so that function no
+    // longer leads to it).
     const uintptr_t SpawnMissionItemPickup = LastCall(L"/Script/FortniteGame.FortMissionLibrary:SpawnMissionItemPickup");
     const uintptr_t SpawnMissionItemPickupEnd = SpawnMissionItemPickup ? Finder::FunctionEnd(SpawnMissionItemPickup) : 0;
-    uintptr_t CreatePickup = 0;
-    for (uintptr_t Call = SpawnMissionItemPickupEnd && EntryConstructor ? FindRawCall(SpawnMissionItemPickup, SpawnMissionItemPickupEnd) : 0; Call && !CreatePickup; Call = FindRawCall(Call + 1, SpawnMissionItemPickupEnd))
-    {
-        if (Finder::RelativeTarget(Call, 1, 5) == EntryConstructor)
-        {
-            const uintptr_t Next = FindRawCall(Call + 5, SpawnMissionItemPickupEnd);
-            CreatePickup = Next ? Finder::RelativeTarget(Next, 1, 5) : 0;
-        }
-    }
+    const uintptr_t EntrySetup = SpawnMissionItemPickupEnd ? FindInstruction(SpawnMissionItemPickup, SpawnMissionItemPickupEnd,
+        { 0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00, 0x45, 0x8D, 0x41, 0x01, 0xE8, -1, -1, -1, -1, 0x48, 0x8B, 0xD0 }) : 0;
+    const uintptr_t EntryConstructor = EntrySetup ? Finder::RelativeTarget(EntrySetup + 13, 1, 5) : 0;
+    const uintptr_t Next = EntrySetup ? FindRawCall(EntrySetup + 18, SpawnMissionItemPickupEnd) : 0;
+    const uintptr_t CreatePickup = Next ? Finder::RelativeTarget(Next, 1, 5) : 0;
 
     if (!EntryConstructor || !CreatePickup)
     {
@@ -3597,7 +3667,13 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     {
         OnRepCall.push_back(Value);
     }
-    const int32_t GameStateIndex = OnRepIndex >= 0 ? FirstEntryContaining(GameStateVTable, { OnRepCall }, Contains) : -1;
+    // AFortGameState::SetGameplayState sets the state and calls OnRep_GameplayState. 1.1's and 1.2's zone override inlines
+    // it; 1.7.2's (0x5C6400) calls it as Super, so the base class's vtable is searched then (same slot in the zone class).
+    int32_t GameStateIndex = OnRepIndex >= 0 ? FirstEntryContaining(GameStateVTable, { OnRepCall }, Contains) : -1;
+    if (OnRepIndex >= 0 && GameStateIndex < 0)
+    {
+        GameStateIndex = FirstEntryContaining(CdoVTable(L"/Script/FortniteGame.FortGameState"), { OnRepCall }, Contains);
+    }
 
     if (!SendStatEvent || !SendEndPrimaryMission || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
     {
@@ -3802,21 +3878,21 @@ bool Finder::ResolveQuickBarFocusLive()
     }
 
     const uintptr_t HandlerEnd = IsInText(Handler) ? Finder::FunctionEnd(Handler) : 0;
-    std::vector<uintptr_t> Targets;
+    // The handler's callee whose first three direct calls go to one function: AFortQuickBars::SwapQuickBarFocus, which
+    // focuses through FocusSlot three times before anything else. (1.1 and 1.2 call the swap twice; 1.7.2 once.)
     uintptr_t Swap = 0;
+    uintptr_t Focus = 0;
     for (const auto& [Call, Target] : HandlerEnd > Handler ? Finder::DirectCalls(Handler, HandlerEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
     {
-        if (std::find(Targets.begin(), Targets.end(), Target) != Targets.end())
+        const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        const auto TargetCalls = TargetEnd > Target ? Finder::DirectCalls(Target, TargetEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+        if (TargetCalls.size() >= 3 && TargetCalls[0].second == TargetCalls[1].second && TargetCalls[1].second == TargetCalls[2].second)
         {
             Swap = Target;
+            Focus = TargetCalls[0].second;
             break;
         }
-        Targets.push_back(Target);
     }
-
-    const uintptr_t SwapEnd = Swap ? Finder::FunctionEnd(Swap) : 0;
-    const std::vector<std::pair<uintptr_t, uintptr_t>> SwapCalls = SwapEnd > Swap ? Finder::DirectCalls(Swap, SwapEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
-    const uintptr_t Focus = SwapCalls.size() >= 3 && SwapCalls[0].second == SwapCalls[1].second && SwapCalls[1].second == SwapCalls[2].second ? SwapCalls[0].second : 0;
     if (!Swap || !Focus)
     {
         Log::Error(L"Finder: AFortQuickBars quickbar focus swap not found (handler {}, swap {})", Handler != 0, Swap != 0);
@@ -4479,6 +4555,23 @@ bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
     const uintptr_t FortHandleMatchHasStarted = VTableEntry(FortGameModeVTable, HandleMatchHasStartedIndex);
     const uintptr_t FortHandleMatchHasStartedEnd = FortHandleMatchHasStarted ? Finder::FunctionEnd(FortHandleMatchHasStarted) : 0;
 
+    const auto StoresMissionManager = [GameStateMissionManagerOffset](uintptr_t Function)
+    {
+        const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        for (uintptr_t Store = FunctionEnd ? FindInstruction(Function, FunctionEnd, { 0x48, 0x89 }) : 0; Store; Store = FindInstruction(Store + 1, FunctionEnd, { 0x48, 0x89 }))
+        {
+            const uint8_t ModRm = Byte(Store + 2);
+            if ((ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Store + 3) == GameStateMissionManagerOffset)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // The record constructor, then AFortGameState::SpawnMissionManager: a direct call on 1.1 and 1.2, a virtual one on
+    // 1.7.2 (0x57BA13, AFortGameState slot 0xDE), resolved through the game state's vtable.
+    void** GameStateVTable = CdoVTable(L"/Script/FortniteGame.FortGameState");
     uintptr_t RecordConstructor = 0;
     uintptr_t SpawnMissionManager = 0;
     uintptr_t PreviousCallee = 0;
@@ -4489,17 +4582,21 @@ bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
         {
             break;
         }
-
-        const uintptr_t CalleeEnd = Finder::FunctionEnd(Callee);
-        for (uintptr_t Store = CalleeEnd ? FindInstruction(Callee, CalleeEnd, { 0x48, 0x89 }) : 0; Store; Store = FindInstruction(Store + 1, CalleeEnd, { 0x48, 0x89 }))
+        if (StoresMissionManager(Callee))
         {
-            const uint8_t ModRm = Byte(Store + 2);
-            if ((ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Store + 3) == GameStateMissionManagerOffset)
-            {
-                SpawnMissionManager = Callee;
-                RecordConstructor = PreviousCallee;
-                break;
-            }
+            SpawnMissionManager = Callee;
+            RecordConstructor = PreviousCallee;
+            break;
+        }
+
+        const uintptr_t Next = FindRawCall(Call + 5, FortHandleMatchHasStartedEnd);
+        const uintptr_t Virtual = FindVirtualCall(Call + 5, Next ? Next : FortHandleMatchHasStartedEnd);
+        const uintptr_t Slot = Virtual && Byte(Virtual + 1) == 0x90 ? VTableEntry(GameStateVTable, VirtualSlot(Virtual)) : 0;
+        if (Slot && StoresMissionManager(Slot))
+        {
+            SpawnMissionManager = Slot;
+            RecordConstructor = Callee;
+            break;
         }
         PreviousCallee = Callee;
     }
@@ -4720,23 +4817,35 @@ bool Finder::ResolveBadgeScoresLive()
     return true;
 }
 
-bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, ptrdiff_t FinalizingExperienceOffset, FEarnScoreCallSites& OutSites)
+bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, FEarnScoreCallSites& OutSites)
 {
-    uintptr_t Function = 0;
-    bool bAmbiguous = false;
-    for (uintptr_t Reference : Finder::StringRefs(L"Sending EarnScore command via account %s for %d players"))
-    {
-        const uintptr_t Start = Finder::FunctionStart(Reference);
-        bAmbiguous |= Function && Start != Function;
-        Function = Start;
-    }
-    const uintptr_t End = Function && !bAmbiguous ? Finder::FunctionEnd(Function) : 0;
-    const int32_t Index = End ? Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameMode"), reinterpret_cast<void*>(Function), 0x400) : -1;
-
     const auto IsStub = [](uintptr_t Target, uint8_t Opcode)
     {
         return Byte(Target) == Opcode && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3;
     };
+
+    // AFortGameMode::SendEarnScore: the first AFortGameMode slot whose body reads the total score stat (lea edx, [r8+1Bh],
+    // GetStat 27) and calls one 32 C0 C3 stub (the earn gate) and one 33 C0 C3 stub (the badges score). 0x135 on 1.1 and
+    // 1.2, 0x139 on 1.7.2, which has no "Sending EarnScore command via account" log line to anchor on.
+    void** GameModeVTable = CdoVTable(L"/Script/FortniteGame.FortGameMode");
+    const int32_t Index = FirstVTableIndexWhere(GameModeVTable, [&IsStub](uintptr_t Entry)
+    {
+        const uintptr_t EntryEnd = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        if (EntryEnd <= Entry || EntryEnd - Entry > 0x2000 || !FindInstruction(Entry, EntryEnd, { 0x41, 0x8D, 0x50, 0x1B }))
+        {
+            return false;
+        }
+        int32_t Gates = 0;
+        int32_t Scores = 0;
+        for (const auto& [Call, Target] : Finder::DirectCalls(Entry, EntryEnd))
+        {
+            Gates += IsStub(Target, 0x32) ? 1 : 0;
+            Scores += IsStub(Target, 0x33) ? 1 : 0;
+        }
+        return Gates == 1 && Scores == 1;
+    });
+    const uintptr_t Function = VTableEntry(GameModeVTable, Index);
+    const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
     uintptr_t GateCall = 0;
     uintptr_t ScoreCall = 0;
     int32_t GateCount = 0;
@@ -4757,22 +4866,24 @@ bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, ptrdiff_t 
     }
 
     const int32_t Critical = static_cast<int32_t>(CriticalMatchBonusOffset);
-    const int32_t Finalizing = static_cast<int32_t>(FinalizingExperienceOffset);
     uintptr_t CriticalLoad = 0;
-    uintptr_t FinalizingStore = 0;
-    for (uintptr_t Address = ScoreCall; Address && Address + 7 <= End; ++Address)
+    for (uintptr_t Address = ScoreCall; Address && !CriticalLoad && Address + 7 <= End; ++Address)
     {
         const bool bDisp32 = (Byte(Address + 2) & 0xC0) == 0x80 && (Byte(Address + 2) & 0x07) != 0x04;
-        if (!CriticalLoad && Byte(Address) == 0x0F && Byte(Address + 1) == 0xB6 && bDisp32 && *reinterpret_cast<const int32_t*>(Address + 3) == Critical)
+        if (Byte(Address) == 0x0F && Byte(Address + 1) == 0xB6 && bDisp32 && *reinterpret_cast<const int32_t*>(Address + 3) == Critical)
         {
             CriticalLoad = Address;
         }
-        if (!FinalizingStore && Byte(Address) == 0xC6 && (Byte(Address + 1) & 0xC0) == 0x80 && (Byte(Address + 1) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Address + 2) == Finalizing && Byte(Address + 6) == 0x01)
-        {
-            FinalizingStore = Address;
-        }
     }
 
+    // The EarnScore context maker: a small function that allocates the shared-ref controller (mov ecx, 20h; call). It is
+    // the first such call after the critical match bonus load in SendEarnScore (1.1, 1.2), or in the callee 1.7.2 moved
+    // it to (GrantScoreReward 0x57B4A0, which builds the context only when bIsFinal is set).
+    const auto IsContextMaker = [](uintptr_t Target)
+    {
+        const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        return TargetEnd > Target && TargetEnd - Target < 0x80 && FindInstruction(Target, TargetEnd, { 0xB9, 0x20, 0x00, 0x00, 0x00, 0xE8 }) != 0;
+    };
     uintptr_t GrowCall = 0;
     uintptr_t GrowTarget = 0;
     uintptr_t ContextCall = 0;
@@ -4784,10 +4895,27 @@ bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, ptrdiff_t 
             GrowCall = Call;
             GrowTarget = Target;
         }
-        if (FinalizingStore && !ContextCall && Call > FinalizingStore)
+        if (CriticalLoad && !ContextCall && Call > CriticalLoad && IsContextMaker(Target))
         {
             ContextCall = Call;
             ContextTarget = Target;
+        }
+    }
+    for (const auto& [Call, Target] : Calls)
+    {
+        if (!CriticalLoad || ContextCall || Call < CriticalLoad || Finder::FunctionStart(Target) != Target)
+        {
+            continue;
+        }
+        const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
+        for (const auto& [InnerCall, InnerTarget] : TargetEnd > Target ? Finder::DirectCalls(Target, TargetEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            if (IsContextMaker(InnerTarget))
+            {
+                ContextCall = InnerCall;
+                ContextTarget = InnerTarget;
+                break;
+            }
         }
     }
 
@@ -4917,7 +5045,8 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     uintptr_t MaxStackSize = 0;
     for (const uintptr_t Target : Targets(BackpackLimit))
     {
-        if (std::find(StackLimitCalls.begin(), StackLimitCalls.end(), Target) != StackLimitCalls.end())
+        // 1.7.2's limits both also call a leaf getter (0x219A8F0, no .pdata entry) after GetMaxStackSize.
+        if (Finder::FunctionStart(Target) == Target && std::find(StackLimitCalls.begin(), StackLimitCalls.end(), Target) != StackLimitCalls.end())
         {
             MaxStackSize = Target;
         }
@@ -5078,31 +5207,41 @@ bool Finder::ResolveNeverPersistItemDefinitionLive()
         return true;
     }
 
-    void** NeverPersistVTable = CdoVTable(L"/Script/FortniteGame.FortNeverPersistItemDefinition");
+    // UFortWorldItemDefinition::OnItemCountAdded and OnItemCountRemoved: adjacent small slots that broadcast the item
+    // count delegate through the same function, with Count and -Count (neg r8d only in Removed). 1.1 and 1.2's
+    // UFortNeverPersistItemDefinition overrides both with stripped jmp-to-Super thunks; 1.7.2's doesn't override them.
+    // The first pair on the world item definition's vtable is the one (subclass vtables after it repeat it).
     void** WorldItemDefinitionVTable = CdoVTable(L"/Script/FortniteGame.FortWorldItemDefinition");
-    std::vector<int32_t> Overrides;
-    for (int32_t Index = 1; NeverPersistVTable && WorldItemDefinitionVTable && Index < 0x100; ++Index)
+    const auto SingleCallTarget = [](uintptr_t Entry)
     {
-        const uintptr_t Function = VTableEntry(NeverPersistVTable, Index);
-        const uintptr_t Parent = VTableEntry(WorldItemDefinitionVTable, Index);
-        if (Function && Parent && Function != Parent && Byte(Function) == 0xE9 && Finder::RelativeTarget(Function, 1, 5) == Parent)
+        const uintptr_t EntryEnd = Entry && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        const auto Calls = EntryEnd > Entry && EntryEnd - Entry < 0x40 ? Finder::DirectCalls(Entry, EntryEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+        return Calls.size() == 1 ? Calls[0].second : 0;
+    };
+    const auto NegatesCount = [](uintptr_t Entry)
+    {
+        return FindInstruction(Entry, Finder::FunctionEnd(Entry), { 0x41, 0xF7, 0xD8 }) != 0;
+    };
+    int32_t AddedIndex = -1;
+    for (int32_t Index = 1; WorldItemDefinitionVTable && Index < 0x100 && AddedIndex < 0; ++Index)
+    {
+        const uintptr_t Added = VTableEntry(WorldItemDefinitionVTable, Index);
+        const uintptr_t Removed = VTableEntry(WorldItemDefinitionVTable, Index + 1);
+        const uintptr_t Target = SingleCallTarget(Added);
+        if (Target && SingleCallTarget(Removed) == Target && !NegatesCount(Added) && NegatesCount(Removed))
         {
-            Overrides.push_back(Index);
+            AddedIndex = Index;
         }
     }
-
-    const uintptr_t Removed = Overrides.size() == 2 ? VTableEntry(WorldItemDefinitionVTable, Overrides[1]) : 0;
-    const uintptr_t RemovedEnd = Removed ? Finder::FunctionEnd(Removed) : 0;
-    const bool bNegatesCount = RemovedEnd > Removed && FindInstruction(Removed, RemovedEnd, { 0x41, 0xF7, 0xD8 });
-    if (Overrides.size() != 2 || Overrides[1] != Overrides[0] + 1 || !bNegatesCount)
+    if (AddedIndex < 0)
     {
-        Log::Error(L"Finder: UFortNeverPersistItemDefinition item count slots not found ({} overrides)", Overrides.size());
+        Log::Error(L"Finder: UFortNeverPersistItemDefinition item count slots not found");
         return false;
     }
 
-    Natives::UFortNeverPersistItemDefinition_OnItemCountAddedIndex = Overrides[0];
-    Natives::UFortNeverPersistItemDefinition_OnItemCountRemovedIndex = Overrides[1];
-    Log::Info(L"Finder: UFortNeverPersistItemDefinition::OnItemCountAdded is slot 0x{:X}, OnItemCountRemoved slot 0x{:X}", Overrides[0], Overrides[1]);
+    Natives::UFortNeverPersistItemDefinition_OnItemCountAddedIndex = AddedIndex;
+    Natives::UFortNeverPersistItemDefinition_OnItemCountRemovedIndex = AddedIndex + 1;
+    Log::Info(L"Finder: UFortNeverPersistItemDefinition::OnItemCountAdded is slot 0x{:X}, OnItemCountRemoved slot 0x{:X}", AddedIndex, AddedIndex + 1);
     return true;
 }
 
@@ -5149,12 +5288,31 @@ bool Finder::ResolveLeaveOutpostLive()
 
     const int32_t ReturnIndex = Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameMode"), reinterpret_cast<void*>(FunctionOf(L"Ignoring ReturnToMainMenuHost, already in a level travel")), 0x400);
     const uintptr_t OnZoneEnd = Natives::AFortGameModeZone_OnZoneEndIndex >= 0 ? VTableEntry(CdoVTable(L"/Script/FortniteGame.FortGameModeZone"), Natives::AFortGameModeZone_OnZoneEndIndex) : 0;
+    // The ClientStayWithParty RPC stub: the AFortPlayerController slot whose small body loads the function's name global
+    // (mov rdx, [rip+Name]), which its static FName initializer fills (lea rdx, L"ClientStayWithParty"; lea rcx, Name).
+    // Slot 0x29F on 1.1 and 1.2, 0x2D0 on 1.7.2.
+    const uintptr_t NameInit = First(Finder::StringRefs(L"ClientStayWithParty"));
+    const uintptr_t NameStore = NameInit ? FindInstruction(NameInit + 7, NameInit + 0x20, { 0x48, 0x8D, 0x0D }) : 0;
+    const uintptr_t NameGlobal = NameStore ? Finder::RelativeTarget(NameStore, 3, 7) : 0;
+    const int32_t StaySlot = NameGlobal ? FirstVTableIndexWhere(CdoVTable(L"/Script/FortniteGame.FortPlayerController"), [NameGlobal](uintptr_t Entry)
+    {
+        const uintptr_t EntryEnd = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        for (uintptr_t Load = EntryEnd > Entry && EntryEnd - Entry < 0x200 ? FindInstruction(Entry, EntryEnd, { 0x48, 0x8B, 0x15 }) : 0; Load; Load = FindInstruction(Load + 1, EntryEnd, { 0x48, 0x8B, 0x15 }))
+        {
+            if (Finder::RelativeTarget(Load, 3, 7) == NameGlobal)
+            {
+                return true;
+            }
+        }
+        return false;
+    }) : -1;
+    const int32_t StayCall = StaySlot * 8;
     uintptr_t StayWithParty = 0;
-    for (uintptr_t Call = OnZoneEnd ? FindRawCall(OnZoneEnd, OnZoneEnd + 0x200) : 0; Call && !StayWithParty; Call = FindRawCall(Call + 1, OnZoneEnd + 0x200))
+    for (uintptr_t Call = OnZoneEnd && StaySlot >= 0 ? FindRawCall(OnZoneEnd, OnZoneEnd + 0x200) : 0; Call && !StayWithParty; Call = FindRawCall(Call + 1, OnZoneEnd + 0x200))
     {
         const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
         const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
-        StayWithParty = TargetEnd && FindInstruction(Target, TargetEnd, { 0xFF, 0x90, 0xF8, 0x14, 0x00, 0x00 }) ? Target : 0;
+        StayWithParty = TargetEnd && FindInstruction(Target, TargetEnd, { 0xFF, 0x90, StayCall & 0xFF, (StayCall >> 8) & 0xFF, (StayCall >> 16) & 0xFF, 0x00 }) ? Target : 0;
     }
     if (ReturnIndex < 0 || !StayWithParty)
     {
@@ -5523,7 +5681,12 @@ bool Finder::ResolveDurabilityLive(UFunction* ServerModDurability, UObject* Play
         CreateTemporaryItemInstance = Finder::RelativeTarget(Call, 1, 5);
     }
     const uintptr_t CreateTemporaryItemInstanceEnd = IsInText(CreateTemporaryItemInstance) ? Finder::FunctionEnd(CreateTemporaryItemInstance) : 0;
-    const int32_t CreateItemIndex = CreateTemporaryItemInstanceEnd ? VirtualSlot(FindVirtualCall(CreateTemporaryItemInstance, CreateTemporaryItemInstanceEnd)) : -1;
+    // CreateItem is the last virtual call: 1.7.2 also calls slot 0x53 on the level first.
+    int32_t CreateItemIndex = -1;
+    for (uintptr_t Call = CreateTemporaryItemInstanceEnd ? FindVirtualCall(CreateTemporaryItemInstance, CreateTemporaryItemInstanceEnd) : 0; Call; Call = FindVirtualCall(Call + 1, CreateTemporaryItemInstanceEnd))
+    {
+        CreateItemIndex = VirtualSlot(Call);
+    }
     const uintptr_t CreateItem = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortWorldItemDefinition"), CreateItemIndex);
     const uintptr_t CreateItemEnd = CreateItem ? Finder::FunctionEnd(CreateItem) : 0;
     int32_t SetDurabilityIndex = -1;
@@ -5863,11 +6026,20 @@ bool Finder::ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t Allow
     const uint32_t Offset = static_cast<uint32_t>(AllowResourceDropOffset);
     const std::initializer_list<int32_t> AllowResourceDropTest = { 0xF6, -1, static_cast<int32_t>(Offset & 0xFF), static_cast<int32_t>((Offset >> 8) & 0xFF), static_cast<int32_t>((Offset >> 16) & 0xFF), static_cast<int32_t>(Offset >> 24), AllowResourceDropMask };
     const uintptr_t Test = OnDamageServerEnd && AllowResourceDropOffset > 0 ? FindInstruction(OnDamageServer, OnDamageServerEnd, AllowResourceDropTest) : 0;
-    const int32_t AttemptSpawnResourcesIndex = Test ? VirtualSlot(FindVirtualCall(Test, Test + 0x40)) : -1;
+
+    // 1.7.2 moved the test into a virtual gate (slot 0x19F, 0x483350) that OnDamageServer calls right before the spawn.
+    void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
+    uintptr_t After = Test;
+    for (uintptr_t Site = !Test && OnDamageServerEnd && AllowResourceDropOffset > 0 ? FindVirtualCall(OnDamageServer, OnDamageServerEnd) : 0; Site && !After; Site = FindVirtualCall(Site + 1, OnDamageServerEnd))
+    {
+        const uintptr_t Gate = Byte(Site + 1) == 0x90 ? VTableEntry(SMActorVTable, VirtualSlot(Site)) : 0;
+        const uintptr_t GateEnd = Gate && Finder::FunctionStart(Gate) == Gate ? Finder::FunctionEnd(Gate) : 0;
+        After = GateEnd && FindInstruction(Gate, GateEnd, AllowResourceDropTest) ? Site + 6 : 0;
+    }
+    const int32_t AttemptSpawnResourcesIndex = After ? VirtualSlot(FindVirtualCall(After, After + 0x40)) : -1;
 
     // ABuildingSMActor::DetermineMaxResourcesToSpawn survives in 1.2.
     const uintptr_t DetermineMaxResourcesToSpawn = FunctionOf(L"ABuildingSMActor::DetermineMaxResourcesToSpawn");
-    void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
     const int32_t DetermineMaxResourcesToSpawnIndex = FirstVTableIndex(SMActorVTable, DetermineMaxResourcesToSpawn);
 
     if (AttemptSpawnResourcesIndex < 0 || DetermineMaxResourcesToSpawnIndex < 0)

@@ -57,6 +57,8 @@ namespace Reflection
         FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct = nullptr);
 
         int32_t GetOffsetChecked();
+        // Whether the build reflects this member, for members a build may not have (no error once checked).
+        bool IsAvailable();
         uint8_t GetFieldMask() const { return FieldMask; }
         uint8_t GetByteMask() const { return ByteMask; }
         bool Resolve();

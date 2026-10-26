@@ -430,6 +430,7 @@ namespace Natives
     inline ptrdiff_t UNetConnection_DestroyedStartupOrDormantActors = -1;
     inline ptrdiff_t UNetConnection_ClientWorldPackageName = -1;
     inline ptrdiff_t UNetConnection_ClientVisibleLevelNames = -1;
+    inline bool UNetConnection_ClientVisibleLevelNamesIsSet = false;
     inline ptrdiff_t UChannel_Bits = -1;
     inline ptrdiff_t FArchive_ArIsError = -1;
     inline uint32_t FArchive_ArIsErrorMask = 0;
@@ -438,6 +439,10 @@ namespace Natives
     inline ptrdiff_t FOutBunch_bClose = -1;
     inline ptrdiff_t FOutBunch_bDormant = -1;
     inline ptrdiff_t FOutBunch_bReliable = -1;
+    // The flags' bits: 1 where they are bool bytes (1.1, 1.2), their bits in the shared flag byte on 1.7.2.
+    inline uint32_t FOutBunch_bCloseMask = 0;
+    inline uint32_t FOutBunch_bDormantMask = 0;
+    inline uint32_t FOutBunch_bReliableMask = 0;
     inline ptrdiff_t UChannel_ChIndex = -1;
     inline ptrdiff_t FFrame_Object = -1;
     inline ptrdiff_t FFastArraySerializer_IDCounter = -1;

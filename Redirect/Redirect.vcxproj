@@ -338,6 +338,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetMathLibrary.h" />
     <ClInclude Include="..\Engine\Source\Runtime\AIModule\Classes\Perception\AISense_Hearing.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetSystemLibrary.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AI\FortAIEncounterInfo.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Boot.cpp" />
@@ -501,6 +502,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\Perception\AISense_Hearing.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Kismet\KismetSystemLibrary.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\LevelStreaming.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortAIEncounterInfo.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

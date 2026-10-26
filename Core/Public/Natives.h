@@ -461,6 +461,9 @@ namespace Natives
     inline int32_t ABuildingSMActor_GetMaximumQuotaLevelBoundIndex = -1;
     inline void* (*AFortWorldManager_GetTileRecord)(AFortWorldManager* This, void* TileInfo, int32_t TileIndex, void* OutLevelIndices) = nullptr;
     inline ptrdiff_t AFortWorldManager_LootRandomList = -1;
+    inline void (*UFortAIEncounterInfo_TryUpgradeSpawnGroup)(void* This, const void* GroupGuid, bool bForEnemySpawner) = nullptr;
+    inline int32_t (*UFortAISpawnGroup_GetSpawnGroupCost)(void* SpawnGroup, const void* Upgrade, float DifficultyLevel, int32_t NumPlayers) = nullptr;
+    inline void (*FFortAISpawnGroupUpgrade_PickPawnUpgrade)(const void* Upgrade, const void* EnemyTags, int32_t NumPlayers, void* OutPawnUpgrade) = nullptr;
     inline ptrdiff_t FFrame_Code = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;

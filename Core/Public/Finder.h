@@ -39,6 +39,15 @@ namespace Finder
         bool bSpawnsTileLoot = false;
     };
 
+    struct FSpawnGroupUpgradeSites
+    {
+        uintptr_t TryUpgrade = 0;
+        uint8_t* TryUpgradeCall = nullptr;
+        uint8_t* GroupCostCall = nullptr;
+        uint8_t* PawnUpgradeCall = nullptr;
+        bool bRollsModifiers = false;
+    };
+
     struct FPlayerSpawnQuerySites
     {
         uintptr_t PickSpawnActor = 0;
@@ -141,5 +150,6 @@ namespace Finder
     bool ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t AllowResourceDropMask);
     bool ResolveLootQuotaLive(ptrdiff_t MaximumQuotaLevelBoundOffset);
     bool ResolveWorldLootLive(ptrdiff_t DefaultLootQuotaCategoryOffset, ptrdiff_t LootDataOffset, ptrdiff_t ConstructTileWorldOffset, uint8_t ConstructTileWorldMask, FWorldLootSites& OutSites);
+    bool ResolveSpawnGroupUpgradeLive(ptrdiff_t AvailableUpgradesOffset, ptrdiff_t ActiveSpawnGroupsOffset, ptrdiff_t TotalGroupCostOffset, ptrdiff_t PawnUpgradesOffset, ptrdiff_t ModifiersForAllPawnsOffset, FSpawnGroupUpgradeSites& OutSites);
     bool ResolveDurabilityLive(UFunction* ServerModDurability, UObject* PlayerControllerDefault, ptrdiff_t EntryDurabilityOffset, ptrdiff_t PendingDestroyDueToDurabilityOffset, uint8_t PendingDestroyDueToDurabilityMask);
 }

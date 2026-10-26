@@ -125,6 +125,7 @@ void Boot::Initialize()
         UFortMcpProfileWorld::HookVTables();
         AFortAIGoalManager::HookCallSites();
         AFortAIGoalManager::HookNatives();
+        UFortAIEncounterInfo::HookCallSites();
         UFortBTTask_SetFrustrationDiscouragement::HookVTables();
         UFortQueryGenerator_Enemies::HookVTables();
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();

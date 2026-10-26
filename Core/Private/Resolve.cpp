@@ -5923,3 +5923,98 @@ bool Finder::ResolveWorldLootLive(ptrdiff_t DefaultLootQuotaCategoryOffset, ptrd
     Log::Info(L"Finder: world loot: quota fill 0x{:X} ({}), zone call 0x{:X}, tile call 0x{:X}, tile record call 0x{:X}, tile loot {}, loot random list +0x{:X}", Quota - Finder::ImageBase(), Finder::IsStubFunction(Quota) ? L"stripped" : L"native", ZoneQuotaCall - Finder::ImageBase(), OutSites.TileQuotaCall ? TileQuotaCall - Finder::ImageBase() : 0, OutSites.TileRecordCall ? TileRecordCall - Finder::ImageBase() : 0, bSpawnsTileLoot ? L"native" : L"stripped", LootRandomList);
     return true;
 }
+
+bool Finder::ResolveSpawnGroupUpgradeLive(ptrdiff_t AvailableUpgradesOffset, ptrdiff_t ActiveSpawnGroupsOffset, ptrdiff_t TotalGroupCostOffset, ptrdiff_t PawnUpgradesOffset, ptrdiff_t ModifiersForAllPawnsOffset, FSpawnGroupUpgradeSites& OutSites)
+{
+    using FCalls = std::vector<std::pair<uintptr_t, uintptr_t>>;
+
+    // The group's cost is stored right after its call: mov [reg+TotalGroupCost], eax.
+    const auto FindGroupCostCall = [TotalGroupCostOffset](uintptr_t Function, uintptr_t End)
+    {
+        uintptr_t Found = 0;
+        for (const auto& [Call, Target] : Finder::DirectCalls(Function, End))
+        {
+            for (uintptr_t Site = Call + 5; Site < Call + 0x10 && Site + 3 <= End; ++Site)
+            {
+                if (Byte(Site) == 0x89 && (Byte(Site + 1) & 0xF8) == 0x40 && (Byte(Site + 1) & 0x07) != 0x04 && Byte(Site + 2) == static_cast<uint8_t>(TotalGroupCostOffset))
+                {
+                    Found = Found ? UINTPTR_MAX : Call;
+                    break;
+                }
+            }
+        }
+        return Found;
+    };
+
+    // Each enemy's pawn upgrade is written into the instance's PawnUpgrades: mov r9, [reg+PawnUpgrades] before the call.
+    const auto FindPawnUpgradeCall = [PawnUpgradesOffset](uintptr_t Function, uintptr_t End)
+    {
+        uintptr_t Found = 0;
+        for (const auto& [Call, Target] : Finder::DirectCalls(Function, End))
+        {
+            for (uintptr_t Site = Call >= Function + 0x18 ? Call - 0x18 : Function; Site + 7 <= Call; ++Site)
+            {
+                if (Byte(Site) == 0x4C && Byte(Site + 1) == 0x8B && (Byte(Site + 2) & 0xF8) == 0x88 && (Byte(Site + 2) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 3) == static_cast<int32_t>(PawnUpgradesOffset))
+                {
+                    Found = Found ? UINTPTR_MAX : Call;
+                    break;
+                }
+            }
+        }
+        return Found;
+    };
+
+    // The spawning tick creates the next group's instance, and the creation tries the upgrade: the one callee that reads
+    // AvailableUpgrades and ActiveSpawnGroups and holds both call sites.
+    const uintptr_t SpawningTick = FunctionOf(L"\nEncounter %s current group spawning has invalid GUID, resetting the current group spawning to select another");
+    const uintptr_t SpawningTickEnd = SpawningTick ? Finder::FunctionEnd(SpawningTick) : 0;
+    std::vector<uintptr_t> Checked;
+    uintptr_t TryUpgrade = 0;
+    uintptr_t TryUpgradeCall = 0;
+    uintptr_t GroupCostCall = 0;
+    uintptr_t PawnUpgradeCall = 0;
+    for (const auto& [Call, Creation] : SpawningTickEnd && AvailableUpgradesOffset > 0 && ActiveSpawnGroupsOffset > 0 ? Finder::DirectCalls(SpawningTick, SpawningTickEnd) : FCalls{})
+    {
+        if (std::find(Checked.begin(), Checked.end(), Creation) != Checked.end() || Finder::FunctionStart(Creation) != Creation)
+        {
+            continue;
+        }
+        Checked.push_back(Creation);
+        const uintptr_t CreationEnd = Finder::FunctionEnd(Creation);
+        for (const auto& [CreationCall, Target] : CreationEnd > Creation ? Finder::DirectCalls(Creation, CreationEnd) : FCalls{})
+        {
+            const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            if (TargetEnd <= Target || TargetEnd - Target > 0x1000 || !ContainsDisp32(Target, TargetEnd, static_cast<int32_t>(AvailableUpgradesOffset)) || !ContainsDisp32(Target, TargetEnd, static_cast<int32_t>(ActiveSpawnGroupsOffset)))
+            {
+                continue;
+            }
+            const uintptr_t CostCall = FindGroupCostCall(Target, TargetEnd);
+            const uintptr_t UpgradeCall = FindPawnUpgradeCall(Target, TargetEnd);
+            if (!CostCall || CostCall == UINTPTR_MAX || !UpgradeCall || UpgradeCall == UINTPTR_MAX)
+            {
+                continue;
+            }
+            TryUpgradeCall = TryUpgradeCall || (TryUpgrade && TryUpgrade != Target) ? UINTPTR_MAX : CreationCall;
+            TryUpgrade = Target;
+            GroupCostCall = CostCall;
+            PawnUpgradeCall = UpgradeCall;
+        }
+    }
+
+    if (!TryUpgrade || !TryUpgradeCall || TryUpgradeCall == UINTPTR_MAX)
+    {
+        Log::Error(L"Finder: spawn group upgrade not found (spawning tick 0x{:X}, upgrade 0x{:X}, {})", SpawningTick ? SpawningTick - Finder::ImageBase() : 0, TryUpgrade ? TryUpgrade - Finder::ImageBase() : 0, TryUpgradeCall == UINTPTR_MAX ? L"ambiguous" : L"no call");
+        return false;
+    }
+
+    OutSites.TryUpgrade = TryUpgrade;
+    OutSites.TryUpgradeCall = reinterpret_cast<uint8_t*>(TryUpgradeCall);
+    OutSites.GroupCostCall = reinterpret_cast<uint8_t*>(GroupCostCall);
+    OutSites.PawnUpgradeCall = reinterpret_cast<uint8_t*>(PawnUpgradeCall);
+    OutSites.bRollsModifiers = ContainsDisp32(TryUpgrade, Finder::FunctionEnd(TryUpgrade), static_cast<int32_t>(ModifiersForAllPawnsOffset));
+    Natives::UFortAIEncounterInfo_TryUpgradeSpawnGroup = reinterpret_cast<decltype(Natives::UFortAIEncounterInfo_TryUpgradeSpawnGroup)>(TryUpgrade);
+    Natives::UFortAISpawnGroup_GetSpawnGroupCost = reinterpret_cast<decltype(Natives::UFortAISpawnGroup_GetSpawnGroupCost)>(Finder::RelativeTarget(GroupCostCall, 1, 5));
+    Natives::FFortAISpawnGroupUpgrade_PickPawnUpgrade = reinterpret_cast<decltype(Natives::FFortAISpawnGroupUpgrade_PickPawnUpgrade)>(Finder::RelativeTarget(PawnUpgradeCall, 1, 5));
+    Log::Info(L"Finder: spawn group upgrade 0x{:X} ({}), call 0x{:X}, group cost call 0x{:X}, pawn upgrade call 0x{:X}", TryUpgrade - Finder::ImageBase(), OutSites.bRollsModifiers ? L"native" : L"stripped", TryUpgradeCall - Finder::ImageBase(), GroupCostCall - Finder::ImageBase(), PawnUpgradeCall - Finder::ImageBase());
+    return true;
+}

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AI/FortAIEncounterInfo.h"
 #include "Containers/Array.h"
 #include "FortTeamInfo.h"
 #include "GameFramework/Actor.h"
@@ -70,14 +71,6 @@ class AFortAIController : public AAIController
 
 public:
     UObject* GetEncounterInfo();
-};
-
-class UFortAIEncounterInfo : public UObject
-{
-    DefineUnrealClass(UFortAIEncounterInfo, FortniteGame)
-
-public:
-    DefineUProperty(TArray<UObject*>, EncounterAssignments)
 };
 
 class UFortAIGoalProvider : public UObject

@@ -52,12 +52,16 @@ public:
     DefineUFunction(GivePlayerAmmo)
     DefineUFunction(SwapQuickBarFocus)
     DefineUFunction(ClientReportDamagedResourceBuilding)
+    DefineUFunction(SetRotatePawnToCamera)
+    DefineUFunction(GetRotatePawnToCamera)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
     void GivePlayerAmmo(int32_t AmmoCount);
     void SwapQuickBarFocus(EFortQuickBars InQuickBar);
     void ClientReportDamagedResourceBuilding(ABuildingSMActor* BuildingSMActor, uint8_t PotentialResourceType, int32_t PotentialResourceCount, bool bDestroyed, bool bJustHitWeakspot);
+    void SetRotatePawnToCamera(bool bNewRotatePawnToCamera);
+    bool GetRotatePawnToCamera();
     void Possess(APawn* InPawn);
     void SpawnQuickBars();
     void SetupQuickBars();

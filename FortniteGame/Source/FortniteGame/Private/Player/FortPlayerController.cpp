@@ -137,11 +137,34 @@ bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
     return bInitialized;
 }
 
+void AFortPlayerController::SetRotatePawnToCamera(bool bNewRotatePawnToCamera)
+{
+    Reflection::FParams Params(StaticFunction_SetRotatePawnToCamera());
+    Params.Set(L"bNewRotatePawnToCamera", bNewRotatePawnToCamera);
+    Params.Call(this);
+}
+
+bool AFortPlayerController::GetRotatePawnToCamera()
+{
+    Reflection::FParams Params(StaticFunction_GetRotatePawnToCamera());
+    return Params.Call(this) ? Params.Take<bool>(L"ReturnValue") : true;
+}
+
 void AFortPlayerController::Possess(APawn* InPawn)
 {
     PossessOG(this, InPawn);
 
 #if WITH_SERVER_CODE
+    // UpdateRotation only turns the pawn to the camera (FaceRotation) while this is on. The DBNO death montage's
+    // AnimNotifyState_DisablePawnRotation turns it off and can't turn it back on once the dying pawn has lost its
+    // controller; only ClientRestart_Implementation re-arms it, and that runs on the owning client. Without this the
+    // respawned pawn keeps its spawn facing on the server, so moving any other way is backpedalling there (#64).
+    if (Role == ROLE_Authority && MyFortPawn && !GetRotatePawnToCamera())
+    {
+        SetRotatePawnToCamera(true);
+        UE_LOG(LogFort, Log, TEXT("Possess: %s had pawn-to-camera rotation off on the server, turned it back on"), *GetNameSafe(this));
+    }
+
     AFortPlayerState* FortPlayerState = Role == ROLE_Authority && MyFortPawn ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
     if (FortPlayerState && !FortPlayerState->bHasStartedPlaying)
     {

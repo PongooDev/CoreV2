@@ -15,7 +15,7 @@ class EFortReplenishmentType
     DefineUEnumValue(Add)
     DefineUEnumValue(Ability)
 };
-
+// does something
 struct FAbilityKitItem
 {
     DefineUnrealStruct(FAbilityKitItem, FortniteGame)

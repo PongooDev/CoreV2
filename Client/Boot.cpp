@@ -31,6 +31,7 @@ void Boot::Initialize()
     UConsole::Hook();
     UGameEngine::Hook();
     Diagnostics::HookLobbyClient();
+    Diagnostics::HookQuestTiles();
     Hooks::EnableAll();
 
     GameThread::Enqueue([]

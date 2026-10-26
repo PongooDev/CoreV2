@@ -443,6 +443,8 @@ namespace Natives
     inline ptrdiff_t AFortPlayerController_InventoryOwnerInterface = -1;
     inline ptrdiff_t UAbilitySystemComponent_GameplayTagAssetInterface = -1;
     inline int32_t IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex = -1;
+    inline int32_t IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex = -1;
+    inline int32_t (*UFortLootLevel_GetItemLevel)(const void* LootLevelData, int32_t WorldLevel) = nullptr;
     inline ptrdiff_t FFrame_Code = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;

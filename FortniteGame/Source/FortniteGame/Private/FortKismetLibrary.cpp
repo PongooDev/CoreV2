@@ -9,8 +9,13 @@
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
 #include "Items/FortItemDefinition.h"
+#include "Items/FortLootPackage.h"
+#include "Engine/DataTable.h"
+#include "FortAssetManager.h"
+#include "FortGameData.h"
 #include "Items/FortPickup.h"
 #include "Math/Rotator.h"
+#include "Math/UnrealMathUtility.h"
 #include "Missions/FortItemCollectedParams.h"
 #include "Items/FortQuickBars.h"
 #include "Log.h"
@@ -21,6 +26,7 @@
 #include "UObject/UObjectIterator.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 #include "ReflectionParams.h"
 #include "UObject/Class.h"
@@ -246,6 +252,146 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
 #endif
 }
 
+bool UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(FName& OutLootTierKey, int32_t& OutLootTier, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier, const FGameplayTagContainer& ContextTags)
+{
+    struct FTierRow
+    {
+        FName Key;
+        FFortLootTierData* Row;
+    };
+
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    if (!GameData)
+    {
+        return false;
+    }
+
+    const uint8_t UnlimitedQuota = ELootQuotaLevel::GetUnlimited();
+    const uint8_t NumQuotaLevels = ELootQuotaLevel::GetNumLevels();
+    const auto Matches = [&](const FFortLootTierData& Row)
+    {
+        if (Row.TierGroup != TierGroupName)
+        {
+            return false;
+        }
+        if (UnlimitedQuota < NumQuotaLevels && UnlimitedQuota != Row.QuotaLevel)
+        {
+            return false;
+        }
+        const FGameplayTag& RequiredTag = Row.RequiredGameplayTag;
+        if (RequiredTag.IsValid() && !ContextTags.HasTag(RequiredTag))
+        {
+            return false;
+        }
+        if (WorldLevel >= 0)
+        {
+            if (Row.MaxWorldLevel >= 0 && WorldLevel > Row.MaxWorldLevel)
+            {
+                return false;
+            }
+            if (Row.MinWorldLevel >= 0 && WorldLevel < Row.MinWorldLevel)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    std::vector<FTierRow> Rows;
+    float TotalWeight = 0.0f;
+    for (UDataTable* Table : GameData->GetLootTierDataTables())
+    {
+        UScriptStruct* RowStruct = Table->RowStruct;
+        if (!RowStruct || !RowStruct->IsChildOf(FFortLootTierData::StaticStruct()))
+        {
+            continue;
+        }
+        for (auto& Pair : Table->GetRowMap())
+        {
+            FFortLootTierData* Row = reinterpret_cast<FFortLootTierData*>(Pair.Value);
+            if (Row && Matches(*Row))
+            {
+                Rows.push_back({ Pair.Key, Row });
+                TotalWeight += Row->Weight;
+            }
+        }
+    }
+
+    if (ForcedLootTier != -1)
+    {
+        struct FTierGroup
+        {
+            int32_t LootTier;
+            std::vector<FTierRow> Rows;
+            float Weight;
+        };
+        std::vector<FTierGroup> Groups;
+        for (const FTierRow& Row : Rows)
+        {
+            const int32_t LootTier = Row.Row->LootTier;
+            auto Group = std::find_if(Groups.begin(), Groups.end(), [LootTier](const FTierGroup& Existing) { return Existing.LootTier == LootTier; });
+            if (Group == Groups.end())
+            {
+                Groups.push_back({ LootTier, { Row }, Row.Row->Weight });
+            }
+            else
+            {
+                Group->Rows.push_back(Row);
+                Group->Weight += Row.Row->Weight;
+            }
+        }
+
+        Rows.clear();
+        TotalWeight = 0.0f;
+        int32_t LootTier = ForcedLootTier;
+        do
+        {
+            auto Group = std::find_if(Groups.begin(), Groups.end(), [LootTier](const FTierGroup& Existing) { return Existing.LootTier == LootTier; });
+            if (Group != Groups.end() && !Group->Rows.empty())
+            {
+                Rows = Group->Rows;
+                TotalWeight = Group->Weight;
+            }
+            --LootTier;
+        } while (LootTier >= 0 && Rows.empty());
+    }
+
+    if (std::fabs(TotalWeight) <= 0.00000001f)
+    {
+        return false;
+    }
+
+    float Roll = FMath::FRand() * TotalWeight;
+    for (const FTierRow& Row : Rows)
+    {
+        const float Weight = Row.Row->Weight;
+        if (Roll <= Weight)
+        {
+            OutLootTier = Row.Row->LootTier;
+            OutLootTierKey = Row.Key;
+            return true;
+        }
+        Roll -= Weight;
+    }
+    return false;
+}
+
+bool UFortKismetLibrary::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier)
+{
+#if WITH_SERVER_CODE
+    FName LootTierKey;
+    int32_t LootTier = -1;
+    const FGameplayTagContainer ContextTags;
+    if (!PickLootTierKeyAndLootTierFromTierGroup(LootTierKey, LootTier, TierGroupName, WorldLevel, ForcedLootTier, ContextTags))
+    {
+        return false;
+    }
+    return UFortLootPackage::PickLootDrops(OutLootToDrop, WorldLevel, LootTierKey, nullptr, ContextTags, false, false);
+#else
+    return false;
+#endif
+}
+
 DEFINE_FUNCTION(UFortKismetLibrary::execGetAIDirector)
 {
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
@@ -344,6 +490,12 @@ void UFortKismetLibrary::HookNatives()
     }
 
 #if WITH_SERVER_CODE
+    // 1.2 cut the loot roll: the exec calls a shared return-false stub instead of the native.
+    if (uint8_t* PickLootDropsCall = Finder::ImplementationCall(StaticFunction_PickLootDrops()); PickLootDropsCall && Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(PickLootDropsCall), 1, 5)))
+    {
+        Hooks::RedirectCall(L"UFortKismetLibrary::PickLootDrops", PickLootDropsCall, reinterpret_cast<void*>(&PickLootDrops));
+    }
+
     // ABuildingItemCollectorActor's deposit calls the folded native directly instead of the UFunction.
     UFunction* RemoveItemFromPlayer = StaticFunction_K2_RemoveItemFromPlayer();
     const uintptr_t RemoveItemFromPlayerExec = RemoveItemFromPlayer ? reinterpret_cast<uintptr_t>(RemoveItemFromPlayer->GetNativeFunc()) : 0;

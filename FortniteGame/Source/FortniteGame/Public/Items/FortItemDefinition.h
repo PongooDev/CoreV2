@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/UnrealString.h"
+#include "Engine/DataTable.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
 #include "UObject/Object.h"
@@ -101,11 +102,16 @@ public:
     DefineBitfieldUProperty(bAllowMultipleStacks)
     DefineBitfieldUProperty(bInventorySizeLimited)
     DefineUProperty(FGameplayTagContainer, GameplayTags)
+    DefineUProperty(bool, bCalculateRarityFromQualityAndTier)
+    DefineUProperty(uint8_t, Quality)
+    DefineUProperty(uint8_t, Tier)
+    DefineUProperty(uint8_t, Rarity)
     DefineUFunction(CreateTemporaryItemInstanceBP)
     DefineUFunction(GetPersistentName)
 
     UFortItem* CreateTemporaryItemInstanceBP(int32_t Count, int32_t Level) const;
     FString GetPersistentName() const;
+    uint8_t GetRarity() const;
 };
 
 class UFortWorldItemDefinition : public UFortItemDefinition
@@ -116,7 +122,10 @@ public:
     DefineBitfieldUProperty(bCanBeDropped)
     DefineBitfieldUProperty(bCanBeDepositedInStorageVault)
     DefineUProperty(int32_t, PreferredQuickbarSlot)
+    DefineUStructProperty(FDataTableCategoryHandle, LootLevelData)
     DefineUFunction(GetMaxDurability)
+
+    const FDataTableCategoryHandle* GetLootLevelData() const { return &LootLevelData; }
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
     float GetMaxDurability(int32_t ItemLevel) const;

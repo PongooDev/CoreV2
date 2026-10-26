@@ -5600,3 +5600,51 @@ bool Finder::ResolveOutpostMcpRequestLive()
     Log::Info(L"Finder: FBaseUrlContext delegate +0x{:X}, url config +0x{:X}, credentials +0x{:X}", Natives::FBaseUrlContext_Delegate, Natives::FBaseUrlContext_UrlConfigName, Natives::FBaseUrlContext_ContextCredentials);
     return true;
 }
+
+bool Finder::IsStubFunction(uintptr_t Function)
+{
+    if (!IsInText(Function))
+    {
+        return false;
+    }
+    if (reinterpret_cast<void*>(Function) == Natives::SharedEmptyFunction)
+    {
+        return true;
+    }
+
+    // ret / ret 0 / xor al,al / xor eax,eax / mov al,1 / xorps xmm0,xmm0, each followed by ret
+    const uint8_t B0 = Byte(Function);
+    const uint8_t B1 = Byte(Function + 1);
+    const uint8_t B2 = Byte(Function + 2);
+    return B0 == 0xC3
+        || (B0 == 0xC2 && B1 == 0x00 && B2 == 0x00)
+        || (B0 == 0x32 && B1 == 0xC0 && B2 == 0xC3)
+        || (B0 == 0x33 && B1 == 0xC0 && B2 == 0xC3)
+        || (B0 == 0xB0 && B1 == 0x01 && B2 == 0xC3)
+        || (B0 == 0x0F && B1 == 0x57 && B2 == 0xC0 && Byte(Function + 3) == 0xC3);
+}
+
+bool Finder::ResolveLootLive()
+{
+    const uintptr_t GetItemLevel = FunctionOf(L"UFortLootLevel::GetItemLevel");
+
+    // The interface exec ends in `call [rax+disp8]` on the interface vtable.
+    UFunction* GetOwnedGameplayTagsFunction = FindObject<UFunction>(nullptr, L"/Script/GameplayTags.GameplayTagAssetInterface:GetOwnedGameplayTags");
+    const uintptr_t Exec = GetOwnedGameplayTagsFunction ? reinterpret_cast<uintptr_t>(GetOwnedGameplayTagsFunction->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    int32_t GetOwnedGameplayTagsIndex = -1;
+    for (uintptr_t Site = ExecEnd ? FindInstruction(Exec, ExecEnd, { 0xFF, 0x50, -1 }) : 0; Site; Site = FindInstruction(Site + 1, ExecEnd, { 0xFF, 0x50, -1 }))
+    {
+        GetOwnedGameplayTagsIndex = Byte(Site + 2) % 8 == 0 ? Byte(Site + 2) / 8 : -1;
+    }
+
+    if (!GetItemLevel || GetOwnedGameplayTagsIndex < 0)
+    {
+        Log::Error(L"Finder: loot natives not found (UFortLootLevel::GetItemLevel {}, IGameplayTagAssetInterface::GetOwnedGameplayTags {})", GetItemLevel != 0, GetOwnedGameplayTagsIndex);
+        return false;
+    }
+    Natives::UFortLootLevel_GetItemLevel = reinterpret_cast<decltype(Natives::UFortLootLevel_GetItemLevel)>(GetItemLevel);
+    Natives::IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex = GetOwnedGameplayTagsIndex;
+    Log::Info(L"Finder: UFortLootLevel::GetItemLevel +0x{:X}, IGameplayTagAssetInterface::GetOwnedGameplayTags slot 0x{:X}", GetItemLevel - Finder::ImageBase(), GetOwnedGameplayTagsIndex);
+    return true;
+}

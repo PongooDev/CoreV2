@@ -55,6 +55,18 @@ bool UAbilitySystemComponent::HasAllMatchingGameplayTags(const FGameplayTagConta
     return reinterpret_cast<FHasAllMatchingGameplayTags>((*reinterpret_cast<void* const* const*>(TagAssetInterface))[Natives::IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex])(TagAssetInterface, TagContainer);
 }
 
+void UAbilitySystemComponent::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
+{
+    if (Natives::UAbilitySystemComponent_GameplayTagAssetInterface < 0 || (Natives::IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex < 0 && !Finder::ResolveLootLive()))
+    {
+        return;
+    }
+
+    const void* const TagAssetInterface = reinterpret_cast<const uint8_t*>(this) + Natives::UAbilitySystemComponent_GameplayTagAssetInterface;
+    using FGetOwnedGameplayTags = void (*)(const void* This, FGameplayTagContainer& TagContainer);
+    reinterpret_cast<FGetOwnedGameplayTags>((*reinterpret_cast<void* const* const*>(TagAssetInterface))[Natives::IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex])(TagAssetInterface, TagContainer);
+}
+
 FGameplayAbilitySpec* UAbilitySystemComponent::FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle Handle)
 {
     FGameplayAbilitySpecContainer& Container = ActivatableAbilities;

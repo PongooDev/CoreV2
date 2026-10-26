@@ -61,6 +61,7 @@ public:
     DefineUProperty(TArray<UObject*>, AlterationDefinitions)
     DefineUProperty(FGuid, ItemGuid)
     DefineBitfieldUProperty(inventory_overflow_date)
+    DefineUProperty(bool, bIsDirty)
     DefineUProperty(FWeakObjectPtr, ParentInventory)
     DefineUStructArrayProperty(FFortItemEntryStateValue, StateValues)
 };

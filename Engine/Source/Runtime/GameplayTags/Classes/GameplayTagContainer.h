@@ -6,12 +6,39 @@
 
 struct FGameplayTag
 {
+    bool IsValid() const { return !TagName.IsNone(); }
+    bool operator==(const FGameplayTag& Other) const { return TagName == Other.TagName; }
+
     FName TagName;
 };
 
 struct FGameplayTagContainer
 {
     int32_t Num() const { return GameplayTags.Num(); }
+
+    void AppendTags(const FGameplayTagContainer& Other)
+    {
+        for (const FGameplayTag& OtherTag : Other.GameplayTags)
+        {
+            if (!GameplayTags.Contains(OtherTag))
+            {
+                GameplayTags.Add(OtherTag);
+            }
+        }
+        for (const FGameplayTag& OtherTag : Other.ParentTags)
+        {
+            if (!ParentTags.Contains(OtherTag))
+            {
+                ParentTags.Add(OtherTag);
+            }
+        }
+    }
+
+    // Matches the tag itself or one of its parents, as the native loot filters compare the container's two arrays.
+    bool HasTag(const FGameplayTag& Tag) const
+    {
+        return GameplayTags.Contains(Tag) || ParentTags.Contains(Tag);
+    }
 
     TArray<FGameplayTag> GameplayTags;
     TArray<FGameplayTag> ParentTags;

@@ -28,6 +28,21 @@ FString UFortItemDefinition::GetPersistentName() const
     return Params.Call(const_cast<UFortItemDefinition*>(this)) ? Params.Take<FString>(L"ReturnValue") : FString();
 }
 
+uint8_t UFortItemDefinition::GetRarity() const
+{
+    if (!bCalculateRarityFromQualityAndTier)
+    {
+        return Rarity;
+    }
+    int32_t CalculatedRarity = Quality;
+    const int32_t ItemTier = Tier;
+    if (ItemTier)
+    {
+        CalculatedRarity += (ItemTier - 1) / 2;
+    }
+    return static_cast<uint8_t>(CalculatedRarity <= 9 ? CalculatedRarity : 9);
+}
+
 void FFortItemEntry::Construct(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel)
 {
     if (!Natives::FFortItemEntry_FFortItemEntry && !Finder::ResolvePickupLive())

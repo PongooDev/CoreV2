@@ -35,6 +35,7 @@ public:
     }
 
     bool HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const;
+    void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const;
     FGameplayAbilitySpec* FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle Handle);
     void MarkAbilitySpecDirty(FGameplayAbilitySpec& Spec);
     bool InternalTryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate, const FPredictionKey& InPredictionKey, UGameplayAbility** OutInstancedAbility = nullptr, void* OnGameplayAbilityEndedDelegate = nullptr, const FGameplayEventData* TriggerEventData = nullptr);

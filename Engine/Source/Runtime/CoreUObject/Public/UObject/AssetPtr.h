@@ -40,6 +40,13 @@ template <class T>
 class TAssetPtr
 {
 public:
+    TAssetPtr() = default;
+
+    explicit TAssetPtr(const FStringAssetReference& ObjectPath)
+    {
+        AssetPtr.ObjectID = ObjectPath;
+    }
+
     const FStringAssetReference& ToStringReference() const { return AssetPtr.GetUniqueID(); }
 
     T* Get() const

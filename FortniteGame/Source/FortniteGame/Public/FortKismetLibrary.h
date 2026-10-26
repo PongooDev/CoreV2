@@ -1,5 +1,7 @@
 #pragma once
 
+#include "GameplayTagContainer.h"
+#include "StructArray.h"
 #include "UObject/Object.h"
 #include "UObject/ScriptInterface.h"
 #include "UObject/Stack.h"
@@ -14,6 +16,7 @@ class IFortInventoryOwnerInterface;
 class UFortWorldItemDefinition;
 class UFortAbilitySet;
 struct FFortAbilitySetHandle;
+struct FFortItemEntry;
 
 class UFortKismetLibrary : public UObject
 {
@@ -40,6 +43,8 @@ public:
     static int32_t K2_RemoveItemFromPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove);
     static void K2_RemoveItemFromAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove);
     static AFortPickup* K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount);
+    static bool PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier);
+    static bool PickLootTierKeyAndLootTierFromTierGroup(FName& OutLootTierKey, int32_t& OutLootTier, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier, const FGameplayTagContainer& ContextTags);
 
     DECLARE_FUNCTION(execGetAIDirector);
     DECLARE_FUNCTION(execGetAIGoalManager);

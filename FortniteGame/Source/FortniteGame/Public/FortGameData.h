@@ -6,8 +6,14 @@
 #include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
 
+#include <vector>
+
 class AActor;
 class AFortAIDirector;
+class UCurveVector;
+class UDataTable;
+class UFortResourceItemDefinition;
+struct FFortLootTierData;
 class UEnvQuery;
 class UFortAbilitySet;
 class UFortHomebaseManager;
@@ -50,6 +56,17 @@ public:
     DefineUProperty(UClass*, SharedMissionListsClass)
     DefineUProperty(TAssetPtr<UFortHomebaseManager>, HomebaseManager)
     DefineUStructProperty(FConditionalFoundationQuota, ConditionalFoundationQuota)
+    DefineUProperty(TArray<TAssetPtr<UDataTable>>, LootTierDataTables)
+    DefineUProperty(TArray<TAssetPtr<UDataTable>>, LootPackageDataTables)
+    DefineUProperty(UDataTable*, LootQuotaData)
+    DefineUProperty(float, PickupSplineRandomMax)
+    DefineUProperty(UCurveVector*, PickupSplineCurve)
+
+    std::vector<UDataTable*> GetLootTierDataTables();
+    std::vector<UDataTable*> GetLootPackageDataTables();
+    bool HasLootPackageDataTables();
+    UDataTable* GetLootQuotaData();
+    FFortLootTierData* FindLootTierDataRow(FName LootTierKey, const wchar_t* ContextString);
 
     static ptrdiff_t ConditionalFoundationQuotaOffset() { return Member_ConditionalFoundationQuota.GetOffsetChecked(); }
 

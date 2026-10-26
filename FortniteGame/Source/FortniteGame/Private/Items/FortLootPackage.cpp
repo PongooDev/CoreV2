@@ -125,11 +125,11 @@ void FFortLootQuotaData::GetLootQuotasForCategory(const FName& QuotaCategory, FF
 
 int32_t UFortLootLevel::GetItemLevel(const void* LootLevelData, int32_t WorldLevel)
 {
-    if (!Natives::UFortLootLevel_GetItemLevel && !Finder::ResolveLootLive())
+    if (!Natives::UFortLootLevel_GetItemLevel)
     {
-        return 0;
+        Finder::ResolveLootLive();
     }
-    return Natives::UFortLootLevel_GetItemLevel(LootLevelData, WorldLevel);
+    return Natives::UFortLootLevel_GetItemLevel ? Natives::UFortLootLevel_GetItemLevel(LootLevelData, WorldLevel) : 0;
 }
 
 int32_t UFortLootTier::FindLootTierFromKey(FName LootTierKey)

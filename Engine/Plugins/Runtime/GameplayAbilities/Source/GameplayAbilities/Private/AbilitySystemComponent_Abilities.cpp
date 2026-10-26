@@ -57,7 +57,11 @@ bool UAbilitySystemComponent::HasAllMatchingGameplayTags(const FGameplayTagConta
 
 void UAbilitySystemComponent::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
 {
-    if (Natives::UAbilitySystemComponent_GameplayTagAssetInterface < 0 || (Natives::IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex < 0 && !Finder::ResolveLootLive()))
+    if (Natives::IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex < 0)
+    {
+        Finder::ResolveLootLive();
+    }
+    if (Natives::UAbilitySystemComponent_GameplayTagAssetInterface < 0 || Natives::IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex < 0)
     {
         return;
     }

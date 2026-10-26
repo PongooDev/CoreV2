@@ -5676,13 +5676,20 @@ bool Finder::ResolveLootLive()
         GetOwnedGameplayTagsIndex = Byte(Site + 2) % 8 == 0 ? Byte(Site + 2) / 8 : -1;
     }
 
+    // Each is kept on its own, so the item levels don't depend on the tag slot.
+    if (GetItemLevel)
+    {
+        Natives::UFortLootLevel_GetItemLevel = reinterpret_cast<decltype(Natives::UFortLootLevel_GetItemLevel)>(GetItemLevel);
+    }
+    if (GetOwnedGameplayTagsIndex >= 0)
+    {
+        Natives::IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex = GetOwnedGameplayTagsIndex;
+    }
     if (!GetItemLevel || GetOwnedGameplayTagsIndex < 0)
     {
         Log::Error(L"Finder: loot natives not found (UFortLootLevel::GetItemLevel {}, IGameplayTagAssetInterface::GetOwnedGameplayTags {})", GetItemLevel != 0, GetOwnedGameplayTagsIndex);
         return false;
     }
-    Natives::UFortLootLevel_GetItemLevel = reinterpret_cast<decltype(Natives::UFortLootLevel_GetItemLevel)>(GetItemLevel);
-    Natives::IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex = GetOwnedGameplayTagsIndex;
     Log::Info(L"Finder: UFortLootLevel::GetItemLevel +0x{:X}, IGameplayTagAssetInterface::GetOwnedGameplayTags slot 0x{:X}", GetItemLevel - Finder::ImageBase(), GetOwnedGameplayTagsIndex);
     return true;
 }

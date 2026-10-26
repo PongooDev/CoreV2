@@ -5,6 +5,8 @@
 #include "Misc/StringClassReference.h"
 #include "UObject/Object.h"
 
+#include <functional>
+
 namespace ETwoPlayerSplitScreenType
 {
     enum Type
@@ -38,6 +40,9 @@ public:
     static const FString& GetGlobalDefaultGameMode();
 
     static void Hook();
+
+    // The map URL a server of Core's -CoreMode starts on (its game's own data names it), set at boot; -CoreMap wins.
+    static inline std::function<FString()> ModeDefaultMap;
 
     DefineUProperty(FStringAssetReference, EditorStartupMap)
     DefineUProperty(FString, LocalMapOptions)

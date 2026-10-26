@@ -13,6 +13,10 @@ class AFortGameModeAthena : public AFortGameModeZone
     DefineUnrealClass(AFortGameModeAthena, FortniteGame)
 
 public:
+    // Where a Battle Royale server starts: the Battle Royale zone theme's map and playlist
+    // ("/Game/Athena/Maps/Athena_Terrain?playlistId=2" on 1.7.2), or empty when the build has none.
+    static FString DefaultMatchURL();
+
     static void HookVTables();
 
 private:

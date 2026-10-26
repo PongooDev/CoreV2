@@ -9,10 +9,18 @@
 
 const FString UGameMapsSettings::GetGameDefaultMap()
 {
-    // StartGameInstance parses the default map with its options (FURL), so -CoreMap's URL carries them.
+    // StartGameInstance parses the default map with its options (FURL), so the URL carries them.
     if (IsRunningDedicatedServer() && !Configuration::Get().Map.empty())
     {
         return FString(Configuration::Get().Map.c_str());
+    }
+    if (IsRunningDedicatedServer() && ModeDefaultMap)
+    {
+        const FString ModeMap = ModeDefaultMap();
+        if (ModeMap.Len() > 0)
+        {
+            return ModeMap;
+        }
     }
     return IsRunningDedicatedServer()
         ? GetDefault<UGameMapsSettings>()->ServerDefaultMap.GetLongPackageName()

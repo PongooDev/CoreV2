@@ -26,6 +26,11 @@ void Configuration::Load()
     for (int32_t Index = 1; Index < ArgumentCount; ++Index)
     {
         const std::wstring_view Argument = Arguments[Index];
+        constexpr std::wstring_view ModeOption = L"-CoreMode=";
+        if (Argument.size() > ModeOption.size() && EqualsNoCase(Argument.substr(0, ModeOption.size()), ModeOption))
+        {
+            Current.Mode = Argument.substr(ModeOption.size());
+        }
         constexpr std::wstring_view MapOption = L"-CoreMap=";
         if (Argument.size() > MapOption.size() && EqualsNoCase(Argument.substr(0, MapOption.size()), MapOption))
         {
@@ -43,6 +48,11 @@ void Configuration::Load()
     }
 
     LocalFree(Arguments);
+}
+
+bool FCoreConfiguration::IsBattleRoyale() const
+{
+    return EqualsNoCase(Mode, L"BattleRoyale");
 }
 
 const FCoreConfiguration& Configuration::Get()

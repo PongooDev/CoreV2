@@ -96,12 +96,20 @@ void Boot::Initialize()
     UGameEngine::Hook();
     UBuildingStructuralSupportSystem::Hook();
     Diagnostics::HookLobbyServer();
+    if (Configuration::Get().IsBattleRoyale())
+    {
+        UGameMapsSettings::ModeDefaultMap = &AFortGameModeAthena::DefaultMatchURL;
+    }
     Hooks::EnableAll();
 
     GameThread::Enqueue([]
     {
         // Battle Royale servers register with the matchmaking service after "Dedicated Server Ready!" (Core-Docs
         // Athena-Boot-1.7.2.md §1 B7).
+        if (Configuration::Get().IsBattleRoyale())
+        {
+            FCommandLine::AddSwitch(L"EnableMMS");
+        }
         FCommandLine::RestoreSwitch(L"EnableMMS");
         AFortGameModeZone::HookVTables();
         AFortGameModeAthena::HookVTables();

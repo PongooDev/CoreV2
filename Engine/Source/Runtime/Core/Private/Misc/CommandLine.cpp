@@ -35,8 +35,16 @@ void FCommandLine::RestoreSwitch(const wchar_t* Switch)
 {
     // The shipping client exe keeps only whitelisted switches in FCommandLine (FCommandLine::Set → WhitelistCommandLines),
     // so a server switch such as -EnableMMS never reaches FParse::Param although the log's command line shows it.
+    if (HasSwitch(GetCommandLineW(), Switch))
+    {
+        AddSwitch(Switch);
+    }
+}
+
+void FCommandLine::AddSwitch(const wchar_t* Switch)
+{
     wchar_t* CommandLine = const_cast<wchar_t*>(Get());
-    if (!CommandLine || !HasSwitch(GetCommandLineW(), Switch) || HasSwitch(CommandLine, Switch))
+    if (!CommandLine || HasSwitch(CommandLine, Switch))
     {
         return;
     }
@@ -49,5 +57,5 @@ void FCommandLine::RestoreSwitch(const wchar_t* Switch)
         return;
     }
     swprintf(CommandLine + Length, CommandLineCapacity - Length, L" -%s", Switch);
-    Log::Info(L"FCommandLine: restored -{}, which the command line whitelist dropped", Switch);
+    Log::Info(L"FCommandLine: added -{}", Switch);
 }

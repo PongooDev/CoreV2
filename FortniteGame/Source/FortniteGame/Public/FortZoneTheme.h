@@ -1,7 +1,10 @@
 #pragma once
 
 #include "GameplayTagContainer.h"
+#include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
+
+class UWorld;
 
 class EFortZoneType
 {
@@ -22,4 +25,6 @@ public:
     DefineUProperty(FGameplayTagContainer, ZoneTags)
     DefineUProperty(FGameplayTagContainer, InitialPlayerSpawnTags)
     DefineUProperty(FGameplayTagContainer, BackupPlayerSpawnTags)
+    DefineUProperty(TAssetPtr<UWorld>, ZoneToUse)
+    DefineUProperty(int32_t, PlaylistId)
 };

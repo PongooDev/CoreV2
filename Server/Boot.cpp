@@ -57,16 +57,16 @@ void Boot::Initialize()
     Log::Initialize(L"Server");
     Log::Info(L"Core V2 starting");
 
+    // Without its hooks the process would carry on as a game client (a window and a front end, Core-Launcher #4), which
+    // the launcher would keep counting as a server: a server that can't start stops.
     if (MH_Initialize() != MH_OK)
     {
-        Log::Error(L"MinHook failed to initialize");
-        return;
+        Log::Fatal(L"MinHook failed to initialize");
     }
 
     if (!Finder::ResolveRuntime() || !Finder::ResolveServer())
     {
-        Log::Error(L"Startup aborted: required addresses are missing");
-        return;
+        Log::Fatal(L"Startup aborted: required addresses are missing");
     }
 
     FApp::Hook();

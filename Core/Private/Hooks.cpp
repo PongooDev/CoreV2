@@ -122,9 +122,10 @@ bool Hooks::SwapVTable(std::wstring_view Name, void** VTable, int32_t Index, voi
 
 bool Hooks::RedirectCall(std::wstring_view Name, uint8_t* CallSite, void* Destination)
 {
-    if (!CallSite || CallSite[0] != 0xE8)
+    // A rel32 call, or a rel32 tail jump (kept as a jump).
+    if (!CallSite || (CallSite[0] != 0xE8 && CallSite[0] != 0xE9))
     {
-        Log::Error(L"Hook {}: call site 0x{:X} is not a rel32 call", Name, reinterpret_cast<uintptr_t>(CallSite));
+        Log::Error(L"Hook {}: call site 0x{:X} is not a rel32 call or jump", Name, reinterpret_cast<uintptr_t>(CallSite));
         return false;
     }
 
@@ -139,7 +140,7 @@ bool Hooks::RedirectCall(std::wstring_view Name, uint8_t* CallSite, void* Destin
         }
     }
 
-    uint8_t Bytes[5] = { 0xE8 };
+    uint8_t Bytes[5] = { CallSite[0] };
     *reinterpret_cast<int32_t*>(Bytes + 1) = static_cast<int32_t>(reinterpret_cast<uint8_t*>(Target) - (CallSite + 5));
     return WriteBytes(Name, CallSite, Bytes);
 }

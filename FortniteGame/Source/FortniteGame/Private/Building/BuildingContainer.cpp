@@ -343,9 +343,15 @@ void ABuildingContainer::HookVTables()
         }
 
         // 1.2 stubs SpawnLoot (return false) and turns the PostUpdate override into a jump to the logging-only parent.
-        if (Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[SpawnLootIndex])))
+        const uintptr_t SpawnLoot = reinterpret_cast<uintptr_t>(VTable[SpawnLootIndex]);
+        if (Finder::IsStubFunction(SpawnLoot))
         {
             Hooks::SwapVTable(L"ABuildingContainer::SpawnLoot", VTable, SpawnLootIndex, reinterpret_cast<void*>(&SpawnLootHK));
+        }
+        // AKeepItemCoreContainer's override tail-jumps to the stubbed parent.
+        else if (const uintptr_t SpawnLootEnd = SpawnLoot >= Finder::TextBegin() && SpawnLoot < Finder::TextEnd() ? Finder::FunctionEnd(SpawnLoot) : 0; SpawnLootEnd > SpawnLoot + 5 && *reinterpret_cast<const uint8_t*>(SpawnLootEnd - 5) == 0xE9 && Finder::IsStubFunction(Finder::RelativeTarget(SpawnLootEnd - 5, 1, 5)))
+        {
+            Hooks::RedirectCall(L"ABuildingContainer::SpawnLoot (Super)", reinterpret_cast<uint8_t*>(SpawnLootEnd - 5), reinterpret_cast<void*>(&SpawnLootHK));
         }
 
         const uintptr_t PostUpdate = reinterpret_cast<uintptr_t>(VTable[PostUpdateIndex]);

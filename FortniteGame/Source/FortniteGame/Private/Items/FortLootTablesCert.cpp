@@ -193,19 +193,17 @@ namespace
         return Table;
     }
 
-    void CreateMissing(TArray<TAssetPtr<UDataTable>>& Tables, const wchar_t* Path, UDataTable* (*Create)())
+    // True when the game data names the table and it does not load (1.2's pak ships neither of Cert's two tables).
+    bool IsMissing(TArray<TAssetPtr<UDataTable>>& Tables, const wchar_t* Path)
     {
         for (TAssetPtr<UDataTable>& Table : Tables)
         {
-            const FString& TablePath = Table.ToStringReference().ToString();
-            if (_wcsicmp(*TablePath, Path) == 0 && !Table.LoadSynchronous())
+            if (_wcsicmp(*Table.ToStringReference().ToString(), Path) == 0)
             {
-                if (UDataTable* Created = Create())
-                {
-                    Log::Info(L"Created {} from Cert's table ({} rows): the pak doesn't ship it", Path, Created->GetRowMap().Num());
-                }
+                return !Table.LoadSynchronous();
             }
         }
+        return false;
     }
 }
 
@@ -218,14 +216,18 @@ void FortLootTablesCert::CreateMissingTables(UFortGameData* GameData)
     }
     bChecked = true;
 
-    CreateMissing(GameData->LootTierDataTables, LootTierDataPath, &CreateTierTable);
-    CreateMissing(GameData->LootPackageDataTables, LootPackagesPath, &CreatePackageTable);
-    if (!GameData->LootQuotaData)
+    // All three must be missing: on Cert the real assets load and the embedded rows are never read.
+    if (GameData->LootQuotaData || !IsMissing(GameData->LootTierDataTables, LootTierDataPath) || !IsMissing(GameData->LootPackageDataTables, LootPackagesPath))
     {
-        if (UDataTable* Created = CreateQuotaTable())
-        {
-            GameData->LootQuotaData = Created;
-            Log::Info(L"Created {} from Cert's table ({} rows): the game data has no LootQuotaData", LootQuotaDataPath, Created->GetRowMap().Num());
-        }
+        return;
     }
+
+    Log::Info(L"Loot tables missing from this build's pak: using the embedded Cert tables (3532353)");
+    UDataTable* TierTable = CreateTierTable();
+    UDataTable* PackageTable = CreatePackageTable();
+    GameData->LootQuotaData = CreateQuotaTable();
+    Log::Info(L"Embedded Cert tables: {} ({} rows), {} ({} rows), {} ({} rows)",
+        LootTierDataPath, TierTable ? TierTable->GetRowMap().Num() : 0,
+        LootPackagesPath, PackageTable ? PackageTable->GetRowMap().Num() : 0,
+        LootQuotaDataPath, GameData->LootQuotaData ? static_cast<UDataTable*>(GameData->LootQuotaData)->GetRowMap().Num() : 0);
 }

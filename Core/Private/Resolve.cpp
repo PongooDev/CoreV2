@@ -5743,10 +5743,21 @@ bool Finder::ResolveBuildingLootLive()
     const uintptr_t AttemptInteractEnd = AttemptInteract ? Finder::FunctionEnd(AttemptInteract) : 0;
     const int32_t SpawnLootIndex = AttemptInteractEnd ? VirtualSlot(FindVirtualCall(AttemptInteract, AttemptInteractEnd)) : -1;
 
-    // Three slots after SpawnLoot the container hides itself; its second direct call is AFortWorldManager::UpdateActorRecord.
+    // Three slots after SpawnLoot the container hides itself and records it as searched: lea r8d, [r9+4], then a tail jmp
+    // (or call) to AFortWorldManager::UpdateActorRecord.
     void** ContainerVTable = ContainerDefault ? *reinterpret_cast<void***>(ContainerDefault) : nullptr;
-    const auto HideCalls = Calls(SpawnLootIndex >= 0 ? VTableEntry(ContainerVTable, SpawnLootIndex + 3) : 0);
-    const uintptr_t UpdateActorRecord = HideCalls.size() >= 2 ? HideCalls[1].second : 0;
+    const uintptr_t HideContainer = SpawnLootIndex >= 0 ? VTableEntry(ContainerVTable, SpawnLootIndex + 3) : 0;
+    const uintptr_t HideContainerEnd = HideContainer ? Finder::FunctionEnd(HideContainer) : 0;
+    const uintptr_t SearchedState = HideContainerEnd ? FindInstruction(HideContainer, HideContainerEnd, { 0x45, 0x8D, 0x41, 0x04 }) : 0;
+    uintptr_t UpdateActorRecord = 0;
+    for (uintptr_t Site = SearchedState ? SearchedState + 4 : 0; Site && !UpdateActorRecord && Site < SearchedState + 0x10 && Site + 5 <= HideContainerEnd; ++Site)
+    {
+        if (Byte(Site) == 0xE8 || Byte(Site) == 0xE9)
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+            UpdateActorRecord = IsInText(Target) && Finder::FunctionStart(Target) == Target ? Target : 0;
+        }
+    }
 
     // ABuildingContainer::PostLoad: Cert selects the mesh set of the saved loot tier key in it, 1.2 does not.
     uintptr_t PostLoad = FunctionOf(L"ABuildingContainer::PostLoad() Container: %s, ContainerLootTierKey: %s, AltMeshIdx: %d");
@@ -5754,7 +5765,7 @@ bool Finder::ResolveBuildingLootLive()
     {
         PostLoad = FunctionOf(L"ABuildingContainer::PostLoad() Container: %s, ContainerLootTierKey: %s, ReplicatedLootTier: %d, AltMeshIdx: %d");
     }
-    const int32_t PostLoadIndex = PostLoad && ContainerVTable ? Finder::VTableIndex(ContainerVTable, reinterpret_cast<void*>(PostLoad), 0x100) : -1;
+    const int32_t PostLoadIndex = FirstVTableIndex(ContainerVTable, PostLoad);
     std::vector<uintptr_t> MeshSetSelectors;
     for (const uintptr_t Ref : Finder::StringRefs(L"No alternative meshes on %s for tier %d"))
     {
@@ -5802,8 +5813,8 @@ bool Finder::ResolveBuildingLootLive()
     Natives::AFortWorldManager_UpdateActorRecord = reinterpret_cast<decltype(Natives::AFortWorldManager_UpdateActorRecord)>(UpdateActorRecord);
     Natives::AFortPlayerStateZone_ModifyStatIndex = ModifyStatIndex;
     Natives::ABuildingContainer_SpawnLootIndex = SpawnLootIndex;
-    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, SpawnLoot slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}",
-        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex);
+    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, SpawnLoot slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
+        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
     return true;
 }
 

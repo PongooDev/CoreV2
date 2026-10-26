@@ -337,7 +337,9 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
                 if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &Location, &SpawnRotation))
                 {
                     const FVector Direction = UKismetMathLibrary::RandomUnitVectorInCone(FVector(0.0f, 0.0f, 1.0f), 0.2617994f);
-                    Pickup->SetPickupTarget(InstigatorPawn, AFortPickup::GetRandomFlyTime(), Direction, true);
+                    // Staggered by 0.3 s per drop from the first, computed in double as the native does.
+                    const float FlyTime = static_cast<float>(static_cast<double>(AFortPickup::GetRandomFlyTime()) + static_cast<double>(Index + 1) * 0.3);
+                    Pickup->SetPickupTarget(InstigatorPawn, FlyTime, Direction, true);
                 }
                 EntryStruct->DestroyStruct(Entry);
             }

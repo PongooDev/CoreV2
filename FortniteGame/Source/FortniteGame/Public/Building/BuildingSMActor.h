@@ -31,7 +31,7 @@ public:
     DefineUStructArrayProperty(FMeshSet, MeshSets)
 };
 
-// What callers pass to PostUpdate (inferred from its use): a list of rolls read round-robin, 0 when empty.
+// The world manager's pre-rolled lists (filled from its world generation stream), read round-robin, 0 when empty.
 struct FFortBuildingRandomList
 {
     float Next()
@@ -62,6 +62,8 @@ public:
     DefineUStructArrayProperty(FTierMeshSets, AlternateMeshes)
     DefineUProperty(int32_t, AltMeshIdx)
     DefineUProperty(EFortResourceType, ResourceType)
+    DefineUProperty(ELootQuotaLevel, MaximumQuotaLevelBound)
+    DefineBitfieldUProperty(bCanSpawnAtLowerQuotaLevels)
     DefineUProperty(FName, DestructionLootTierGroup)
     DefineUStructProperty(FChosenQuotaInfo, DestructionLootTierChosenQuotaInfo)
     DefineUProperty(FName, DestructionLootTierKey)
@@ -74,7 +76,13 @@ public:
     void SetMeshSet(const FMeshSet& MeshSet);
     void AttemptSpawnResources(AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot);
     float DetermineMaxResourcesToSpawn(bool bRandomize);
+    const FName& GetQuotaLootTierGroup();
+    bool CanSpawnAtLowerQuotaLevels();
+    ELootQuotaLevel GetMaximumQuotaLevelBound();
+    void SetChosenQuotaInfo(const FName& LootTierKey, int32_t LootTier);
+    void OnQuotaNotChosen();
 
+    static bool ResolveLootQuota();
     static void HookVTables();
 
 protected:
@@ -85,6 +93,7 @@ protected:
 private:
     float& ResourceRemainder();
     static bool ResolveHarvest();
+    void* GetQuotaFunction(int32_t SlotFromBound);
     static void PostUpdateHK(ABuildingSMActor* This, uint8_t State, FFortBuildingRandomList* RandomList);
     static void AttemptSpawnResourcesHK(ABuildingSMActor* This, AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot);
 };

@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "ObjectLayout.h"
 #include "UObject/Object.h"
 
+class AActor;
 class UWorld;
 
 class ULevel : public UObject
@@ -15,4 +17,5 @@ public:
     DefineNativeBitfield(bIsAssociatingLevel, ULevel_bIsAssociatingLevel, Natives::ULevel_bIsAssociatingLevelMask)
 
     bool HasVisibilityChangeRequestPending() const;
+    TArray<AActor*>& GetActors() const;
 };

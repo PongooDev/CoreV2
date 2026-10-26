@@ -458,6 +458,9 @@ namespace Natives
     inline int32_t AFortPlayerStateZone_ModifyStatIndex = -1;
     inline int32_t ABuildingSMActor_AttemptSpawnResourcesIndex = -1;
     inline int32_t ABuildingSMActor_DetermineMaxResourcesToSpawnIndex = -1;
+    inline int32_t ABuildingSMActor_GetMaximumQuotaLevelBoundIndex = -1;
+    inline void* (*AFortWorldManager_GetTileRecord)(AFortWorldManager* This, void* TileInfo, int32_t TileIndex, void* OutLevelIndices) = nullptr;
+    inline ptrdiff_t AFortWorldManager_LootRandomList = -1;
     inline ptrdiff_t FFrame_Code = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;

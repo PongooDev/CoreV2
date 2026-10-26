@@ -30,6 +30,15 @@ namespace Finder
         ptrdiff_t RequestsArrayOffset = -1;
     };
 
+    struct FWorldLootSites
+    {
+        uintptr_t Quota = 0;
+        uint8_t* ZoneQuotaCall = nullptr;
+        uint8_t* TileQuotaCall = nullptr;
+        uint8_t* TileRecordCall = nullptr;
+        bool bSpawnsTileLoot = false;
+    };
+
     struct FPlayerSpawnQuerySites
     {
         uintptr_t PickSpawnActor = 0;
@@ -130,5 +139,7 @@ namespace Finder
     bool ResolveLootLive();
     bool ResolveBuildingLootLive();
     bool ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t AllowResourceDropMask);
+    bool ResolveLootQuotaLive(ptrdiff_t MaximumQuotaLevelBoundOffset);
+    bool ResolveWorldLootLive(ptrdiff_t DefaultLootQuotaCategoryOffset, ptrdiff_t LootDataOffset, ptrdiff_t ConstructTileWorldOffset, uint8_t ConstructTileWorldMask, FWorldLootSites& OutSites);
     bool ResolveDurabilityLive(UFunction* ServerModDurability, UObject* PlayerControllerDefault, ptrdiff_t EntryDurabilityOffset, ptrdiff_t PendingDestroyDueToDurabilityOffset, uint8_t PendingDestroyDueToDurabilityMask);
 }

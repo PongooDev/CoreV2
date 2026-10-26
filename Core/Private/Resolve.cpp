@@ -5790,3 +5790,136 @@ bool Finder::ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t Allow
     Log::Info(L"Finder: ABuildingSMActor::AttemptSpawnResources is slot 0x{:X}, DetermineMaxResourcesToSpawn slot 0x{:X}", AttemptSpawnResourcesIndex, DetermineMaxResourcesToSpawnIndex);
     return true;
 }
+
+bool Finder::ResolveLootQuotaLive(ptrdiff_t MaximumQuotaLevelBoundOffset)
+{
+    if (Natives::ABuildingSMActor_GetMaximumQuotaLevelBoundIndex >= 0)
+    {
+        return true;
+    }
+
+    // ABuildingSMActor::GetMaximumQuotaLevelBound returns the byte through the hidden return pointer: movzx eax, byte ptr [rcx+X]; mov [rdx], al.
+    void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
+    int32_t BoundIndex = -1;
+    int32_t Count = 0;
+    for (int32_t Index = 0; SMActorVTable && MaximumQuotaLevelBoundOffset > 0 && VTableEntry(SMActorVTable, Index); ++Index)
+    {
+        const uintptr_t Function = VTableEntry(SMActorVTable, Index);
+        if (Byte(Function) == 0x0F && Byte(Function + 1) == 0xB6 && Byte(Function + 2) == 0x81 && *reinterpret_cast<const int32_t*>(Function + 3) == static_cast<int32_t>(MaximumQuotaLevelBoundOffset) && Byte(Function + 7) == 0x88 && Byte(Function + 8) == 0x02)
+        {
+            BoundIndex = Index;
+            ++Count;
+        }
+    }
+
+    if (Count != 1 || BoundIndex < 2)
+    {
+        Log::Error(L"Finder: ABuildingSMActor loot quota slots not found ({} candidates)", Count);
+        return false;
+    }
+    Natives::ABuildingSMActor_GetMaximumQuotaLevelBoundIndex = BoundIndex;
+    Log::Info(L"Finder: ABuildingSMActor loot quota slots 0x{:X}-0x{:X} (GetMaximumQuotaLevelBound 0x{:X})", BoundIndex - 2, BoundIndex + 3, BoundIndex);
+    return true;
+}
+
+bool Finder::ResolveWorldLootLive(ptrdiff_t DefaultLootQuotaCategoryOffset, ptrdiff_t LootDataOffset, ptrdiff_t ConstructTileWorldOffset, uint8_t ConstructTileWorldMask, FWorldLootSites& OutSites)
+{
+    using FCalls = std::vector<std::pair<uintptr_t, uintptr_t>>;
+
+    // HandleWorldQueryComplete fills the zone's quotas: lea rcx, [reg+DefaultLootQuotaCategory] right before the call.
+    const uintptr_t HandleWorldQuery = FunctionOf(L"HandleWorldQueryComplete: Creating brand new zone data for %s. Current Zones = %d");
+    const uintptr_t HandleWorldQueryEnd = HandleWorldQuery ? Finder::FunctionEnd(HandleWorldQuery) : 0;
+    uintptr_t ZoneQuotaCall = 0;
+    for (const auto& [Call, Target] : HandleWorldQueryEnd && DefaultLootQuotaCategoryOffset > 0 ? Finder::DirectCalls(HandleWorldQuery, HandleWorldQueryEnd) : FCalls{})
+    {
+        if ((Byte(Call - 7) & 0xFE) == 0x48 && Byte(Call - 6) == 0x8D && (Byte(Call - 5) & 0xF8) == 0x88 && (Byte(Call - 5) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Call - 4) == static_cast<int32_t>(DefaultLootQuotaCategoryOffset))
+        {
+            ZoneQuotaCall = ZoneQuotaCall ? UINTPTR_MAX : Call;
+        }
+    }
+    const uintptr_t Quota = ZoneQuotaCall && ZoneQuotaCall != UINTPTR_MAX ? Finder::RelativeTarget(ZoneQuotaCall, 1, 5) : 0;
+
+    // UWorldTileManager's map pick fills each tile's quotas through the same function.
+    const uintptr_t TileMapPick = FunctionOf(L"Not all tiles have loot quota categories and the default category hasn't been set.");
+    const uintptr_t TileMapPickEnd = TileMapPick ? Finder::FunctionEnd(TileMapPick) : 0;
+    uintptr_t TileQuotaCall = 0;
+    for (const auto& [Call, Target] : TileMapPickEnd && Quota ? Finder::DirectCalls(TileMapPick, TileMapPickEnd) : FCalls{})
+    {
+        if (Target == Quota)
+        {
+            TileQuotaCall = TileQuotaCall ? UINTPTR_MAX : Call;
+        }
+    }
+
+    // The tick asks for each new tile's loot record (tests bConstructTileWorld, falls back to LootData). Cert then hands the
+    // buildings their quota tiers from a function that checks -SpawnAllLoot; 1.2 still asks for the record but drops the rest.
+    std::vector<uintptr_t> SpawnAllLootFunctions;
+    for (const uintptr_t Ref : Finder::StringRefs(L"SpawnAllLoot"))
+    {
+        SpawnAllLootFunctions.push_back(Finder::FunctionStart(Ref));
+    }
+    const uint32_t Offset = static_cast<uint32_t>(ConstructTileWorldOffset);
+    const std::initializer_list<int32_t> ConstructTileWorldTest = { 0xF6, -1, static_cast<int32_t>(Offset & 0xFF), static_cast<int32_t>((Offset >> 8) & 0xFF), static_cast<int32_t>((Offset >> 16) & 0xFF), static_cast<int32_t>(Offset >> 24), ConstructTileWorldMask };
+    const uintptr_t Tick = reinterpret_cast<uintptr_t>(Natives::AFortWorldManager_ServerTickLoadingOrCreatingWorld);
+    const uintptr_t TickEnd = Tick ? Finder::FunctionEnd(Tick) : 0;
+    const FCalls TickCalls = TickEnd ? Finder::DirectCalls(Tick, TickEnd) : FCalls{};
+    std::vector<uintptr_t> Checked;
+    std::vector<uintptr_t> TileRecords;
+    bool bSpawnsTileLoot = false;
+    for (const auto& [Call, Target] : ConstructTileWorldOffset > 0 && LootDataOffset > 0 ? TickCalls : FCalls{})
+    {
+        if (std::find(SpawnAllLootFunctions.begin(), SpawnAllLootFunctions.end(), Target) != SpawnAllLootFunctions.end())
+        {
+            bSpawnsTileLoot = true;
+        }
+        if (std::find(Checked.begin(), Checked.end(), Target) != Checked.end() || Finder::FunctionStart(Target) != Target)
+        {
+            continue;
+        }
+        Checked.push_back(Target);
+        const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
+        if (TargetEnd > Target && TargetEnd - Target < 0x400 && FindInstruction(Target, TargetEnd, ConstructTileWorldTest) && ContainsDisp32(Target, TargetEnd, static_cast<int32_t>(LootDataOffset)))
+        {
+            TileRecords.push_back(Target);
+        }
+    }
+    uintptr_t TileRecordCall = 0;
+    for (const auto& [Call, Target] : TileRecords.size() == 1 ? TickCalls : FCalls{})
+    {
+        if (Target == TileRecords.front())
+        {
+            TileRecordCall = TileRecordCall ? UINTPTR_MAX : Call;
+        }
+    }
+
+    // The world manager fills its random lists from the world generation stream; the 2000-entry one is the loot list.
+    const uintptr_t InitRandomLists = FunctionOf(L"World Generation random stream initialized using seed %d");
+    const uintptr_t LootListSize = InitRandomLists ? FindInstruction(InitRandomLists, InitRandomLists + 0x200, { 0xC7, 0x41, 0x14, 0xD0, 0x07, 0x00, 0x00 }) : 0;
+    ptrdiff_t LootRandomList = -1;
+    for (uintptr_t Site = LootListSize ? LootListSize - 0x20 : 0; Site && Site + 7 <= LootListSize; ++Site)
+    {
+        if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && (Byte(Site + 2) & 0xF8) == 0x88 && (Byte(Site + 2) & 0x07) != 0x04)
+        {
+            LootRandomList = *reinterpret_cast<const int32_t*>(Site + 3);
+        }
+    }
+
+    if (!Quota || (!bSpawnsTileLoot && (!TileRecordCall || TileRecordCall == UINTPTR_MAX || LootRandomList <= 0)))
+    {
+        Log::Error(L"Finder: world loot not found (quota fill 0x{:X}, {} tile record candidates, loot random list +0x{:X})", Quota ? Quota - Finder::ImageBase() : 0, TileRecords.size(), LootRandomList);
+        return false;
+    }
+
+    OutSites.Quota = Quota;
+    OutSites.ZoneQuotaCall = reinterpret_cast<uint8_t*>(ZoneQuotaCall);
+    OutSites.TileQuotaCall = TileQuotaCall && TileQuotaCall != UINTPTR_MAX ? reinterpret_cast<uint8_t*>(TileQuotaCall) : nullptr;
+    OutSites.TileRecordCall = TileRecordCall && TileRecordCall != UINTPTR_MAX ? reinterpret_cast<uint8_t*>(TileRecordCall) : nullptr;
+    OutSites.bSpawnsTileLoot = bSpawnsTileLoot;
+    if (OutSites.TileRecordCall)
+    {
+        Natives::AFortWorldManager_GetTileRecord = reinterpret_cast<decltype(Natives::AFortWorldManager_GetTileRecord)>(Finder::RelativeTarget(TileRecordCall, 1, 5));
+    }
+    Natives::AFortWorldManager_LootRandomList = LootRandomList;
+    Log::Info(L"Finder: world loot: quota fill 0x{:X} ({}), zone call 0x{:X}, tile call 0x{:X}, tile record call 0x{:X}, tile loot {}, loot random list +0x{:X}", Quota - Finder::ImageBase(), Finder::IsStubFunction(Quota) ? L"stripped" : L"native", ZoneQuotaCall - Finder::ImageBase(), OutSites.TileQuotaCall ? TileQuotaCall - Finder::ImageBase() : 0, OutSites.TileRecordCall ? TileRecordCall - Finder::ImageBase() : 0, bSpawnsTileLoot ? L"native" : L"stripped", LootRandomList);
+    return true;
+}

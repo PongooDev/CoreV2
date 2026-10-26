@@ -17,6 +17,7 @@ class APawn;
 class AWorldSettings;
 class UDemoNetDriver;
 class ULevel;
+class ULevelStreaming;
 class UGameInstance;
 class UNetDriver;
 class UNavigationSystem;
@@ -79,10 +80,12 @@ inline UWorldProxy GWorld;
 class UWorld final : public UObject, public FNetworkNotify
 {
     DefineUnrealClass(UWorld, Engine)
+    DefineUProperty(ULevel*, PersistentLevel)
     DefineUProperty(UNetDriver*, NetDriver)
     DefineUProperty(UDemoNetDriver*, DemoNetDriver)
     DefineUProperty(AGameModeBase*, AuthorityGameMode)
     DefineUProperty(AGameStateBase*, GameState)
+    DefineUProperty(TArray<ULevelStreaming*>, StreamingLevels)
     DefineUProperty(UGameInstance*, OwningGameInstance)
     DefineUProperty(AGameNetworkManager*, NetworkManager)
     DefineUProperty(ULevel*, CurrentLevelPendingVisibility)
@@ -108,6 +111,7 @@ public:
     UNavigationSystem* GetNavigationSystem() const { return NavigationSystem; }
     AWorldSettings* GetWorldSettings(bool bCheckStreamingPersistent = false, bool bChecked = true) const;
     void AddNetworkActor(AActor* Actor);
+    ULevelStreaming* GetLevelStreamingForPackageName(FName InPackageName);
 
     AActor* SpawnActor(UClass* InClass, FTransform const* UserTransformPtr, const FActorSpawnParameters& SpawnParameters = FActorSpawnParameters());
 

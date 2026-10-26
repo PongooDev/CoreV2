@@ -3,10 +3,12 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/FortPlayerAttrSet.h"
+#include "Building/BuildingSMActor.h"
 #include "Engine/DataTable.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortWorldManager.h"
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Logging/LogMacros.h"
@@ -21,6 +23,7 @@
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortLoot, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogFortLootQuota, Log, All);
 
 namespace
 {
@@ -77,6 +80,49 @@ namespace
     }
 }
 
+void FFortLootQuotaData::GetLootQuotasForCategory(const FName& QuotaCategory, FFortTileLootData& OutLootData, int32_t WorldLevel)
+{
+    UFortGameData* GameData = GetGameData();
+    UDataTable* LootQuotaData = GameData ? GameData->GetLootQuotaData() : nullptr;
+    if (!LootQuotaData || QuotaCategory.IsNone())
+    {
+        return;
+    }
+
+    for (auto& Pair : LootQuotaData->GetRowMap())
+    {
+        const FFortLootQuotaData* Row = reinterpret_cast<const FFortLootQuotaData*>(Pair.Value);
+        if (!Row || QuotaCategory != Row->QuotaCategory)
+        {
+            continue;
+        }
+        const int32_t MinWorldLevel = Row->MinWorldLevel;
+        const int32_t MaxWorldLevel = Row->MaxWorldLevel;
+        if ((MinWorldLevel != -1 && WorldLevel < MinWorldLevel) || (MaxWorldLevel != -1 && WorldLevel > MaxWorldLevel))
+        {
+            continue;
+        }
+
+        const uint8_t QuotaLevel = Row->QuotaLevel;
+        if (QuotaLevel >= ELootQuotaLevel::GetNumLevels())
+        {
+            continue;
+        }
+        FFortLootQuotaData& Quota = OutLootData.GetLootQuota(QuotaLevel);
+        if (!Quota.QuotaCategory.IsNone())
+        {
+            UE_LOG(LogFortLootQuota, Warning, TEXT("Loot quota table contains multiple entries for category %s, quota level %d, and world level %d."), *QuotaCategory.ToString(), QuotaLevel, WorldLevel);
+        }
+        Quota.QuotaCategory = Row->QuotaCategory;
+        Quota.QuotaLevel = Row->QuotaLevel;
+        Quota.Min = Row->Min;
+        Quota.Max = Row->Max;
+        Quota.Quota = Row->Quota;
+        Quota.MinWorldLevel = MinWorldLevel;
+        Quota.MaxWorldLevel = MaxWorldLevel;
+    }
+}
+
 int32_t UFortLootLevel::GetItemLevel(const void* LootLevelData, int32_t WorldLevel)
 {
     if (!Natives::UFortLootLevel_GetItemLevel && !Finder::ResolveLootLive())
@@ -91,6 +137,105 @@ int32_t UFortLootTier::FindLootTierFromKey(FName LootTierKey)
     UFortGameData* GameData = GetGameData();
     const FFortLootTierData* TierData = GameData ? GameData->FindLootTierDataRow(LootTierKey, L"UFortLootTier::FindLootTierFromKey") : nullptr;
     return TierData ? static_cast<int32_t>(TierData->LootTier) : -1;
+}
+
+void UFortLootTier::GetLootTierRows(std::vector<FFortLootTierRow>& OutRows, float& OutTotalWeight, FName TierGroupName, int32_t WorldLevel, int32_t LootTier, const FGameplayTagContainer& ContextTags, uint8_t QuotaLevel)
+{
+    OutTotalWeight = 0.0f;
+    UFortGameData* GameData = GetGameData();
+    if (!GameData)
+    {
+        return;
+    }
+
+    const uint8_t NumQuotaLevels = ELootQuotaLevel::GetNumLevels();
+    const auto Matches = [&](const FFortLootTierData& Row)
+    {
+        if (Row.TierGroup != TierGroupName)
+        {
+            return false;
+        }
+        if (LootTier != -1 && LootTier != Row.LootTier)
+        {
+            return false;
+        }
+        if (QuotaLevel < NumQuotaLevels && QuotaLevel != Row.QuotaLevel)
+        {
+            return false;
+        }
+        const FGameplayTag& RequiredTag = Row.RequiredGameplayTag;
+        if (RequiredTag.IsValid() && !ContextTags.HasTag(RequiredTag))
+        {
+            return false;
+        }
+        if (WorldLevel >= 0)
+        {
+            if (Row.MaxWorldLevel >= 0 && WorldLevel > Row.MaxWorldLevel)
+            {
+                return false;
+            }
+            if (Row.MinWorldLevel >= 0 && WorldLevel < Row.MinWorldLevel)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    for (UDataTable* Table : GameData->GetLootTierDataTables())
+    {
+        UScriptStruct* RowStruct = Table->RowStruct;
+        if (!RowStruct || !RowStruct->IsChildOf(FFortLootTierData::StaticStruct()))
+        {
+            continue;
+        }
+        for (auto& Pair : Table->GetRowMap())
+        {
+            FFortLootTierData* Row = reinterpret_cast<FFortLootTierData*>(Pair.Value);
+            if (Row && Matches(*Row))
+            {
+                OutRows.push_back({ Pair.Key, Row });
+                OutTotalWeight += Row->Weight;
+            }
+        }
+    }
+}
+
+bool UFortLootTier::PickLootTierFromRows(FName& OutLootTierKey, int32_t& OutLootTier, float TotalWeight, const std::vector<FFortLootTierRow>& Rows, FFortBuildingRandomList* RandomList)
+{
+    if (std::fabs(TotalWeight) <= 0.00000001f)
+    {
+        return false;
+    }
+
+    float Roll = (RandomList ? RandomList->Next() : FMath::FRand()) * TotalWeight;
+    for (const FFortLootTierRow& Row : Rows)
+    {
+        const float Weight = Row.LootTierData->Weight;
+        if (Roll <= Weight)
+        {
+            OutLootTier = Row.LootTierData->LootTier;
+            OutLootTierKey = Row.LootTierKey;
+            return true;
+        }
+        Roll -= Weight;
+    }
+    return false;
+}
+
+bool UFortLootTier::PickLootTierForQuotaLevel(FName& OutLootTierKey, int32_t& OutLootTier, const std::vector<FFortLootTierRow>& Rows, uint8_t QuotaLevel, FFortBuildingRandomList* RandomList)
+{
+    std::vector<FFortLootTierRow> QuotaRows;
+    float TotalWeight = 0.0f;
+    for (const FFortLootTierRow& Row : Rows)
+    {
+        if (Row.LootTierData && Row.LootTierData->QuotaLevel == QuotaLevel)
+        {
+            QuotaRows.push_back(Row);
+            TotalWeight += Row.LootTierData->Weight;
+        }
+    }
+    return PickLootTierFromRows(OutLootTierKey, OutLootTier, TotalWeight, QuotaRows, RandomList);
 }
 
 bool UFortLootTier::ShouldDropLoot(FName LootTierKey, const wchar_t* ContextString)

@@ -254,90 +254,31 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
 
 bool UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(FName& OutLootTierKey, int32_t& OutLootTier, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier, const FGameplayTagContainer& ContextTags)
 {
-    struct FTierRow
-    {
-        FName Key;
-        FFortLootTierData* Row;
-    };
-
-    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    if (!GameData)
-    {
-        return false;
-    }
-
-    const uint8_t UnlimitedQuota = ELootQuotaLevel::GetUnlimited();
-    const uint8_t NumQuotaLevels = ELootQuotaLevel::GetNumLevels();
-    const auto Matches = [&](const FFortLootTierData& Row)
-    {
-        if (Row.TierGroup != TierGroupName)
-        {
-            return false;
-        }
-        if (UnlimitedQuota < NumQuotaLevels && UnlimitedQuota != Row.QuotaLevel)
-        {
-            return false;
-        }
-        const FGameplayTag& RequiredTag = Row.RequiredGameplayTag;
-        if (RequiredTag.IsValid() && !ContextTags.HasTag(RequiredTag))
-        {
-            return false;
-        }
-        if (WorldLevel >= 0)
-        {
-            if (Row.MaxWorldLevel >= 0 && WorldLevel > Row.MaxWorldLevel)
-            {
-                return false;
-            }
-            if (Row.MinWorldLevel >= 0 && WorldLevel < Row.MinWorldLevel)
-            {
-                return false;
-            }
-        }
-        return true;
-    };
-
-    std::vector<FTierRow> Rows;
+    std::vector<FFortLootTierRow> Rows;
     float TotalWeight = 0.0f;
-    for (UDataTable* Table : GameData->GetLootTierDataTables())
-    {
-        UScriptStruct* RowStruct = Table->RowStruct;
-        if (!RowStruct || !RowStruct->IsChildOf(FFortLootTierData::StaticStruct()))
-        {
-            continue;
-        }
-        for (auto& Pair : Table->GetRowMap())
-        {
-            FFortLootTierData* Row = reinterpret_cast<FFortLootTierData*>(Pair.Value);
-            if (Row && Matches(*Row))
-            {
-                Rows.push_back({ Pair.Key, Row });
-                TotalWeight += Row->Weight;
-            }
-        }
-    }
+    UFortLootTier::GetLootTierRows(Rows, TotalWeight, TierGroupName, WorldLevel, -1, ContextTags, ELootQuotaLevel::GetUnlimited());
 
     if (ForcedLootTier != -1)
     {
         struct FTierGroup
         {
             int32_t LootTier;
-            std::vector<FTierRow> Rows;
+            std::vector<FFortLootTierRow> Rows;
             float Weight;
         };
         std::vector<FTierGroup> Groups;
-        for (const FTierRow& Row : Rows)
+        for (const FFortLootTierRow& Row : Rows)
         {
-            const int32_t LootTier = Row.Row->LootTier;
+            const int32_t LootTier = Row.LootTierData->LootTier;
             auto Group = std::find_if(Groups.begin(), Groups.end(), [LootTier](const FTierGroup& Existing) { return Existing.LootTier == LootTier; });
             if (Group == Groups.end())
             {
-                Groups.push_back({ LootTier, { Row }, Row.Row->Weight });
+                Groups.push_back({ LootTier, { Row }, Row.LootTierData->Weight });
             }
             else
             {
                 Group->Rows.push_back(Row);
-                Group->Weight += Row.Row->Weight;
+                Group->Weight += Row.LootTierData->Weight;
             }
         }
 
@@ -356,24 +297,7 @@ bool UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(FName& OutLootT
         } while (LootTier >= 0 && Rows.empty());
     }
 
-    if (std::fabs(TotalWeight) <= 0.00000001f)
-    {
-        return false;
-    }
-
-    float Roll = FMath::FRand() * TotalWeight;
-    for (const FTierRow& Row : Rows)
-    {
-        const float Weight = Row.Row->Weight;
-        if (Roll <= Weight)
-        {
-            OutLootTier = Row.Row->LootTier;
-            OutLootTierKey = Row.Key;
-            return true;
-        }
-        Roll -= Weight;
-    }
-    return false;
+    return UFortLootTier::PickLootTierFromRows(OutLootTierKey, OutLootTier, TotalWeight, Rows, nullptr);
 }
 
 bool UFortKismetLibrary::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier)

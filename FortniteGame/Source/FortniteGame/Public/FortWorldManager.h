@@ -3,6 +3,7 @@
 #include "Containers/Array.h"
 #include "GameFramework/Info.h"
 #include "GameplayTagContainer.h"
+#include "Items/FortLootPackage.h"
 #include "Math/Transform.h"
 #include "Missions/FortMissionManager.h"
 
@@ -11,6 +12,8 @@ class FScriptArray;
 class UFortMissionGenerator;
 class UFortMissionInfo;
 class UFortWorldRecord;
+class UWorldTileManager;
+struct FFortBuildingRandomList;
 struct FFortPlayerSpawnPadPlacementData;
 struct FQuickBar;
 
@@ -19,6 +22,26 @@ struct FFortStartingMissionInfo
     DefineUnrealStruct(FFortStartingMissionInfo, FortniteGame)
     DefineUProperty(TArray<UFortMissionInfo*>, StartingMissions)
     DefineBitfieldUProperty(bDisableSharedMissionLoading)
+};
+
+struct FFortLevelStreamingInfo
+{
+    DefineUnrealStruct(FFortLevelStreamingInfo, FortniteGame)
+
+public:
+    DefineUProperty(FName, PackageName)
+};
+
+struct FFortTileLootData
+{
+    DefineUnrealStruct(FFortTileLootData, FortniteGame)
+
+public:
+    DefineUStructProperty(FFortLootQuotaData, LootQuotas)
+    DefineUProperty(int32_t, LootDrops)
+
+    FFortLootQuotaData& GetLootQuota(uint8_t QuotaLevel) const;
+    int32_t& GetLootDrops(uint8_t QuotaLevel) const;
 };
 
 class EFortWorldManagerState
@@ -39,7 +62,12 @@ class AFortWorldManager : public AInfo
     DefineUnrealClass(AFortWorldManager, FortniteGame)
 
 public:
+    DefineUStructArrayProperty(FFortLevelStreamingInfo, StreamedLevels)
+    DefineBitfieldUProperty(bConstructTileWorld)
     DefineUProperty(EFortWorldManagerState, WorldManagerState)
+    DefineUProperty(UWorldTileManager*, TileManager)
+    DefineUProperty(FName, DefaultLootQuotaCategory)
+    DefineUStructProperty(FFortTileLootData, LootData)
     DefineUProperty(UFortWorldRecord*, CurrentWorldRecord)
     DefineUStructProperty(FFortStartingMissionInfo, StartingMissionInfo)
     DefineUStructProperty(FFortMissionManagerRecord, MissionManagerRecord)
@@ -61,6 +89,8 @@ public:
     void AddMissionsToMissionManagerRecord(const TArray<UFortMissionInfo*>& Missions, EMissionGenerationCategory GenerationCategory = EMissionGenerationCategory::GetMax_None(), UFortMissionGenerator* MissionGenerator = nullptr);
     void CreateMissionManager();
     int32_t GetOrAllocatePlayerID(const FString& UniqueId, const FString& DisplayName);
+    int32_t GetWorldLevel() const;
+    void SpawnTileLoot(FFortTileLootData* TileLootData, const TArray<int32_t>& LevelIndices);
     AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);
     bool UpdatePlayerQuickBarRecords(AFortPlayerController* PlayerController);
     bool RestorePlayerQuickBars(AFortPlayerController* PlayerController);
@@ -77,11 +107,15 @@ private:
     static void SendNewPlayerEventHK(AFortPlayerController* PlayerController);
     static bool UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This, AFortPlayerController* PlayerController);
     static void ConditionalFoundationQuotaCall(AFortWorldManager* This);
+    static void GetLootQuotasForCategoryCall(const FName* QuotaCategory, FFortTileLootData* OutLootData, int32_t WorldLevel);
+    static FFortTileLootData* GetTileRecordCall(AFortWorldManager* This, void* TileInfo, int32_t TileIndex, TArray<int32_t>& OutLevelIndices);
+    static void HookWorldLoot();
     static AFortWorldManager* ConditionalFoundationContextCall(AFortWorldManager* This);
     static bool SelectConditionalFoundationsCall(AFortWorldManager* This, const void* Query, TArray<AActor*>& OutSelected, void* OutUnselected, void* RandomStream, float MinDistance, bool bFlag);
 
     bool SelectConditionalFoundations(const FScriptArray& Requests, TArray<AActor*>& OutSelected, void* RandomStream);
     int32_t GetConditionalFoundationTierIndex() const;
+    FFortBuildingRandomList* GetLootRandomList();
 
     bool GetPlayerQuickBarRecords(AFortPlayerController* PlayerController, FQuickBar*& OutPrimary, FQuickBar*& OutSecondary);
 };

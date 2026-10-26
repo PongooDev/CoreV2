@@ -35,6 +35,11 @@ std::vector<UDataTable*> UFortGameData::GetLootPackageDataTables()
     return LoadTables(LootPackageDataTables);
 }
 
+bool UFortGameData::HasLootTierDataTables()
+{
+    return !GetLootTierDataTables().empty();
+}
+
 bool UFortGameData::HasLootPackageDataTables()
 {
     return !GetLootPackageDataTables().empty();

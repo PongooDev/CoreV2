@@ -168,6 +168,64 @@ float ABuildingSMActor::DetermineMaxResourcesToSpawn(bool bRandomize)
     return reinterpret_cast<FDetermineMaxResourcesToSpawn>((*reinterpret_cast<void***>(this))[Natives::ABuildingSMActor_DetermineMaxResourcesToSpawnIndex])(this, bRandomize);
 }
 
+bool ABuildingSMActor::ResolveLootQuota()
+{
+    return Natives::ABuildingSMActor_GetMaximumQuotaLevelBoundIndex >= 0 || Finder::ResolveLootQuotaLive(Member_MaximumQuotaLevelBound.GetOffsetChecked());
+}
+
+void* ABuildingSMActor::GetQuotaFunction(int32_t SlotFromBound)
+{
+    if (!ResolveLootQuota())
+    {
+        return nullptr;
+    }
+    return (*reinterpret_cast<void***>(this))[Natives::ABuildingSMActor_GetMaximumQuotaLevelBoundIndex + SlotFromBound];
+}
+
+const FName& ABuildingSMActor::GetQuotaLootTierGroup()
+{
+    using FGetQuotaLootTierGroup = const FName* (*)(ABuildingSMActor* This);
+    void* Function = GetQuotaFunction(-2);
+    return Function ? *reinterpret_cast<FGetQuotaLootTierGroup>(Function)(this) : DestructionLootTierGroup;
+}
+
+bool ABuildingSMActor::CanSpawnAtLowerQuotaLevels()
+{
+    using FCanSpawnAtLowerQuotaLevels = bool (*)(ABuildingSMActor* This);
+    void* Function = GetQuotaFunction(-1);
+    return Function ? reinterpret_cast<FCanSpawnAtLowerQuotaLevels>(Function)(this) : bCanSpawnAtLowerQuotaLevels;
+}
+
+ELootQuotaLevel ABuildingSMActor::GetMaximumQuotaLevelBound()
+{
+    using FGetMaximumQuotaLevelBound = uint8_t* (*)(ABuildingSMActor* This, uint8_t* OutLevel);
+    void* Function = GetQuotaFunction(0);
+    uint8_t Level = MaximumQuotaLevelBound;
+    if (Function)
+    {
+        reinterpret_cast<FGetMaximumQuotaLevelBound>(Function)(this, &Level);
+    }
+    return ELootQuotaLevel{ Level };
+}
+
+void ABuildingSMActor::SetChosenQuotaInfo(const FName& LootTierKey, int32_t LootTier)
+{
+    using FSetChosenQuotaInfo = void (*)(ABuildingSMActor* This, const FName* LootTierKey, int32_t LootTier);
+    if (void* Function = GetQuotaFunction(1))
+    {
+        reinterpret_cast<FSetChosenQuotaInfo>(Function)(this, &LootTierKey, LootTier);
+    }
+}
+
+void ABuildingSMActor::OnQuotaNotChosen()
+{
+    using FOnQuotaNotChosen = void (*)(ABuildingSMActor* This);
+    if (void* Function = GetQuotaFunction(3))
+    {
+        reinterpret_cast<FOnQuotaNotChosen>(Function)(this);
+    }
+}
+
 void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot)
 {
 #if WITH_SERVER_CODE

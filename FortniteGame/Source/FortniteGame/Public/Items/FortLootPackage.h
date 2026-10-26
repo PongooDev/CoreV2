@@ -11,7 +11,9 @@
 
 class UAbilitySystemComponent;
 class UFortItemDefinition;
+struct FFortBuildingRandomList;
 struct FFortItemEntry;
+struct FFortTileLootData;
 
 class ELootQuotaLevel
 {
@@ -75,6 +77,8 @@ public:
     DefineUProperty(float, Quota)
     DefineUProperty(int32_t, MinWorldLevel)
     DefineUProperty(int32_t, MaxWorldLevel)
+
+    static void GetLootQuotasForCategory(const FName& QuotaCategory, FFortTileLootData& OutLootData, int32_t WorldLevel);
 };
 
 // Transient and without reflected members; the layout is read from the code that fills and reads it.
@@ -92,6 +96,12 @@ public:
 
 static_assert(sizeof(FChosenQuotaInfo) == 0x10);
 
+struct FFortLootTierRow
+{
+    FName LootTierKey;
+    FFortLootTierData* LootTierData = nullptr;
+};
+
 class UFortLootPackage
 {
 public:
@@ -103,6 +113,9 @@ class UFortLootTier
 {
 public:
     static int32_t FindLootTierFromKey(FName LootTierKey);
+    static void GetLootTierRows(std::vector<FFortLootTierRow>& OutRows, float& OutTotalWeight, FName TierGroupName, int32_t WorldLevel, int32_t LootTier, const FGameplayTagContainer& ContextTags, uint8_t QuotaLevel);
+    static bool PickLootTierFromRows(FName& OutLootTierKey, int32_t& OutLootTier, float TotalWeight, const std::vector<FFortLootTierRow>& Rows, FFortBuildingRandomList* RandomList);
+    static bool PickLootTierForQuotaLevel(FName& OutLootTierKey, int32_t& OutLootTier, const std::vector<FFortLootTierRow>& Rows, uint8_t QuotaLevel, FFortBuildingRandomList* RandomList);
     static bool ShouldDropLoot(FName LootTierKey, const wchar_t* ContextString);
     static bool GetLootPackageCategoryCounts(const FFortLootTierData& TierData, int32_t NumLootDrops, std::vector<std::pair<int32_t, int32_t>>& OutCategoryCounts);
 };

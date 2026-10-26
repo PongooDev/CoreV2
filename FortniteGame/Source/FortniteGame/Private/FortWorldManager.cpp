@@ -2,6 +2,9 @@
 #include "FortWorldManager.h"
 #include "Missions/FortMissionManager.h"
 #include "BlueprintGameplayTagLibrary.h"
+#include "Building/BuildingSMActor.h"
+#include "Engine/Level.h"
+#include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "FortGameData.h"
 #include "FortGameInstance.h"
@@ -16,6 +19,8 @@
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Hooks.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortQuickBars.h"
@@ -38,6 +43,7 @@
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortWorld, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogFortLootQuota, Log, All);
 
 namespace
 {
@@ -571,6 +577,154 @@ void AFortWorldManager::CreateMissionManager()
 #endif
 }
 
+FFortLootQuotaData& FFortTileLootData::GetLootQuota(uint8_t QuotaLevel) const
+{
+    uint8_t* LootQuotas = reinterpret_cast<uint8_t*>(&GetMember_LootQuotas());
+    return *reinterpret_cast<FFortLootQuotaData*>(LootQuotas + static_cast<size_t>(QuotaLevel) * FFortLootQuotaData::StaticStruct()->GetStructureSize());
+}
+
+int32_t& FFortTileLootData::GetLootDrops(uint8_t QuotaLevel) const
+{
+    return (&GetMember_LootDrops())[QuotaLevel];
+}
+
+int32_t AFortWorldManager::GetWorldLevel() const
+{
+    UWorld* World = GetWorld();
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    return GameState ? static_cast<int32_t>(GameState->WorldLevel) : 0;
+}
+
+FFortBuildingRandomList* AFortWorldManager::GetLootRandomList()
+{
+    const ptrdiff_t Offset = Natives::AFortWorldManager_LootRandomList;
+    return Offset > 0 ? reinterpret_cast<FFortBuildingRandomList*>(reinterpret_cast<uint8_t*>(this) + Offset) : nullptr;
+}
+
+void AFortWorldManager::SpawnTileLoot(FFortTileLootData* TileLootData, const TArray<int32_t>& LevelIndices)
+{
+#if WITH_SERVER_CODE
+    struct FQuotaBuilding
+    {
+        ABuildingSMActor* Building = nullptr;
+        std::vector<FFortLootTierRow> LootTierRows;
+    };
+
+    UWorld* World = GetWorld();
+    const bool bSpawnAllLoot = FParse::Param(FCommandLine::Get(), L"SpawnAllLoot");
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    if (!TileManager || !GameData || !GameData->HasLootTierDataTables() || !TileLootData || bSpawnAllLoot || !World || WorldManagerState != EFortWorldManagerState::GetWMS_CreatingNewWorld())
+    {
+        return;
+    }
+
+    const uint8_t UnlimitedQuota = ELootQuotaLevel::GetUnlimited();
+    const uint8_t NumQuotaLevels = ELootQuotaLevel::GetNumLevels();
+    std::vector<std::vector<FQuotaBuilding>> Buildings(NumQuotaLevels);
+    TStructArray<FFortLevelStreamingInfo>& Levels = StreamedLevels;
+    for (const int32_t LevelIndex : LevelIndices)
+    {
+        if (LevelIndex < 0 || LevelIndex >= Levels.Num())
+        {
+            continue;
+        }
+        ULevelStreaming* LevelStreaming = World->GetLevelStreamingForPackageName(Levels[LevelIndex].PackageName);
+        ULevel* Level = LevelStreaming ? static_cast<ULevel*>(LevelStreaming->LoadedLevel) : LevelIndex == 0 ? static_cast<ULevel*>(World->PersistentLevel) : nullptr;
+        if (!Level)
+        {
+            continue;
+        }
+        for (AActor* Actor : Level->GetActors())
+        {
+            ABuildingSMActor* Building = Actor ? Cast<ABuildingSMActor>(reinterpret_cast<UObject*>(Actor)) : nullptr;
+            if (!Building)
+            {
+                continue;
+            }
+            uint8_t QuotaLevel = Building->GetMaximumQuotaLevelBound();
+            if (QuotaLevel != UnlimitedQuota && QuotaLevel <= NumQuotaLevels)
+            {
+                Buildings[QuotaLevel == NumQuotaLevels ? NumQuotaLevels - 1 : QuotaLevel].push_back({ Building, {} });
+            }
+        }
+    }
+
+    const int32_t WorldLevel = GetWorldLevel();
+    FFortBuildingRandomList* RandomList = GetLootRandomList();
+    for (int32_t QuotaLevel = NumQuotaLevels - 1; QuotaLevel >= 1; --QuotaLevel)
+    {
+        std::vector<FQuotaBuilding>& Candidates = Buildings[QuotaLevel];
+        int32_t& LootDrops = TileLootData->GetLootDrops(static_cast<uint8_t>(QuotaLevel));
+        while (LootDrops > 0 && !Candidates.empty())
+        {
+            const float Roll = RandomList ? RandomList->Next() : 0.0f;
+            const int32_t Index = static_cast<int32_t>((static_cast<float>(Candidates.size()) - 0.0000099999997f) * Roll);
+            FQuotaBuilding& Candidate = Candidates[Index];
+            ABuildingSMActor* Building = Candidate.Building;
+            if (Candidate.LootTierRows.empty())
+            {
+                float TotalWeight = 0.0f;
+                UFortLootTier::GetLootTierRows(Candidate.LootTierRows, TotalWeight, Building->GetQuotaLootTierGroup(), WorldLevel, -1, Building->StaticGameplayTags, NumQuotaLevels);
+            }
+
+            FName LootTierKey;
+            int32_t LootTier = 0;
+            if (Candidate.LootTierRows.empty())
+            {
+                Building->OnQuotaNotChosen();
+            }
+            else if (UFortLootTier::PickLootTierForQuotaLevel(LootTierKey, LootTier, Candidate.LootTierRows, static_cast<uint8_t>(QuotaLevel), nullptr))
+            {
+                --LootDrops;
+                Building->SetChosenQuotaInfo(LootTierKey, LootTier);
+            }
+            else if (Building->CanSpawnAtLowerQuotaLevels())
+            {
+                uint8_t LowerQuotaLevel = 0;
+                for (const FFortLootTierRow& Row : Candidate.LootTierRows)
+                {
+                    const uint8_t RowQuotaLevel = Row.LootTierData->QuotaLevel;
+                    if (RowQuotaLevel > LowerQuotaLevel && RowQuotaLevel < QuotaLevel)
+                    {
+                        LowerQuotaLevel = RowQuotaLevel;
+                    }
+                }
+                if (LowerQuotaLevel)
+                {
+                    Buildings[LowerQuotaLevel].push_back({ Building, Candidate.LootTierRows });
+                }
+            }
+            else
+            {
+                Building->OnQuotaNotChosen();
+            }
+
+            if (Index != static_cast<int32_t>(Candidates.size()) - 1)
+            {
+                Candidates[Index] = std::move(Candidates.back());
+            }
+            Candidates.pop_back();
+        }
+
+        if (Candidates.empty() && LootDrops > 0)
+        {
+            UE_LOG(LogFortLootQuota, Log, TEXT("Attempted to give a tile more loot drops than it has valid locations for. Check quota max."));
+        }
+        for (FQuotaBuilding& Remaining : Candidates)
+        {
+            if (!Remaining.Building->CanSpawnAtLowerQuotaLevels())
+            {
+                Remaining.Building->OnQuotaNotChosen();
+            }
+            else if (QuotaLevel - 1 > 0)
+            {
+                Buildings[QuotaLevel - 1].push_back(Remaining);
+            }
+        }
+    }
+#endif
+}
+
 ptrdiff_t AFortWorldManager::ZoneFinishedOffset()
 {
     return Member_bZoneFinished.GetOffsetChecked();
@@ -747,6 +901,48 @@ void AFortWorldManager::HookCallSites()
             Hooks::RedirectCall(L"AFortWorldManager conditional foundation quota pass", QuotaSites.QuotaCall, reinterpret_cast<void*>(&ConditionalFoundationQuotaCall));
         }
     }
+
+    HookWorldLoot();
+}
+
+void AFortWorldManager::HookWorldLoot()
+{
+    Finder::FWorldLootSites LootSites;
+    if (!Finder::ResolveWorldLootLive(Member_DefaultLootQuotaCategory.GetOffsetChecked(), Member_LootData.GetOffsetChecked(), Member_bConstructTileWorld.GetOffsetChecked(), Member_bConstructTileWorld.GetFieldMask(), LootSites))
+    {
+        return;
+    }
+
+    // 1.2: the quota fill the zone and tile setups call is the shared empty function.
+    if (Finder::IsStubFunction(LootSites.Quota))
+    {
+        Hooks::RedirectCall(L"FFortLootQuotaData::GetLootQuotasForCategory (zone)", LootSites.ZoneQuotaCall, reinterpret_cast<void*>(&GetLootQuotasForCategoryCall));
+        if (LootSites.TileQuotaCall)
+        {
+            Hooks::RedirectCall(L"FFortLootQuotaData::GetLootQuotasForCategory (tiles)", LootSites.TileQuotaCall, reinterpret_cast<void*>(&GetLootQuotasForCategoryCall));
+        }
+    }
+
+    // 1.2: the tick still fetches each new tile's loot record but no longer hands its quota-bound buildings their tiers.
+    if (!LootSites.bSpawnsTileLoot && LootSites.TileRecordCall && ABuildingSMActor::ResolveLootQuota())
+    {
+        Hooks::RedirectCall(L"AFortWorldManager::SpawnTileLoot", LootSites.TileRecordCall, reinterpret_cast<void*>(&GetTileRecordCall));
+    }
+}
+
+void AFortWorldManager::GetLootQuotasForCategoryCall(const FName* QuotaCategory, FFortTileLootData* OutLootData, int32_t WorldLevel)
+{
+    FFortLootQuotaData::GetLootQuotasForCategory(*QuotaCategory, *OutLootData, WorldLevel);
+}
+
+FFortTileLootData* AFortWorldManager::GetTileRecordCall(AFortWorldManager* This, void* TileInfo, int32_t TileIndex, TArray<int32_t>& OutLevelIndices)
+{
+    FFortTileLootData* TileLootData = static_cast<FFortTileLootData*>(Natives::AFortWorldManager_GetTileRecord(This, TileInfo, TileIndex, &OutLevelIndices));
+    if (TileLootData)
+    {
+        This->SpawnTileLoot(TileLootData, OutLevelIndices);
+    }
+    return TileLootData;
 }
 
 void AFortWorldManager::OnWorldRecordQueryCompleteHK(AFortWorldManager* This)

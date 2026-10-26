@@ -68,6 +68,7 @@ public:
 
     std::vector<UDataTable*> GetLootTierDataTables();
     std::vector<UDataTable*> GetLootPackageDataTables();
+    bool HasLootTierDataTables();
     bool HasLootPackageDataTables();
     UDataTable* GetLootQuotaData();
     FFortLootTierData* FindLootTierDataRow(FName LootTierKey, const wchar_t* ContextString);

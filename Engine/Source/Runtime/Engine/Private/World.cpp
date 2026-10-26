@@ -2,6 +2,7 @@
 #include "Engine/World.h"
 #include "Engine/DemoNetDriver.h"
 #include "Engine/Engine.h"
+#include "Engine/LevelStreaming.h"
 #include "Engine/NetDriver.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
@@ -87,6 +88,18 @@ AWorldSettings* UWorld::GetWorldSettings(bool bCheckStreamingPersistent, bool bC
 void UWorld::AddNetworkActor(AActor* Actor)
 {
     Natives::UWorld_AddNetworkActor(this, Actor);
+}
+
+ULevelStreaming* UWorld::GetLevelStreamingForPackageName(FName InPackageName)
+{
+    for (ULevelStreaming* LevelStreaming : StreamingLevels)
+    {
+        if (LevelStreaming && LevelStreaming->GetWorldAssetPackageFName() == InPackageName)
+        {
+            return LevelStreaming;
+        }
+    }
+    return nullptr;
 }
 
 ENetMode UWorld::InternalGetNetMode() const

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Building/BuildingSMActor.h"
+#include "Math/Rotator.h"
 #include "Math/Vector.h"
 
 class AFortPawn;
@@ -36,6 +37,11 @@ public:
     DefineBitfieldUProperty(bDestroyContainerOnSearch)
     DefineUProperty(float, LootedWeaponsDurabilityModifier)
     DefineUStructProperty(FFortSearchBounceData, SearchBounceData)
+    // From 1.7.2 (Battle Royale): loot is tossed onto the ground, and floor loot is out from the start.
+    DefineUProperty(FRotator, LootTossDirection_Athena)
+    DefineUProperty(float, LootTossSpeed_Athena)
+    DefineUProperty(float, LootTossConeHalfAngle_Athena)
+    DefineBitfieldUProperty(bStartAlreadySearched_Athena)
 
     void PostLoad();
     void PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList);
@@ -52,6 +58,10 @@ private:
     void HideContainer();
     void SetSearched(AFortPawn* Searcher);
     void UpdateReplicatedLootTier();
+    FName GetSearchLootTierGroup();
+    bool StartsAlreadySearched();
+    void SpawnFloorLoot();
+    void TossLoot(AFortPickup* Pickup, const FVector& SpawnLocation);
 
     static void PostLoadHK(ABuildingContainer* This);
     static void PostUpdateHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList);

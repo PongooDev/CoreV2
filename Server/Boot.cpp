@@ -145,6 +145,11 @@ void Boot::Initialize()
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
         AFortAIPawn::HookVTables();
         Finder::ResolveNavigationSystemLive();
+        if (Configuration::Get().IsBattleRoyale())
+        {
+            Finder::ResolveLootTierRedirectLive();
+            Finder::ResolveAthenaHeroLive();
+        }
     });
 
     Log::Info(L"Core V2 startup complete");

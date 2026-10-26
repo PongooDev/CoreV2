@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Building/BuildingSMActor.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Abilities/FortPlayerAttrSet.h"
@@ -309,6 +310,11 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
     };
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
 
+    // Battle Royale's redirect (AFortGameModeAthena, 1.7.2 0x3FA190) maps every building's destruction tier group to None,
+    // so a tree or rock drops no Save the World ingredients, and the materials go straight into the inventory.
+    AFortGameModeAthena* AthenaGameMode = AFortGameModeAthena::GetCurrent(this);
+    const bool bDropDestructionLoot = !AthenaGameMode || !AthenaGameMode->RedirectLootTierGroup(DestructionLootTierGroup).IsNone();
+
     bool bDestroyed = false;
     if (GetHealth() <= 0.0f)
     {
@@ -316,7 +322,7 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
         ResourceCount = FMath::Max(ResourceCount, ResourceItem && ResourcesPerHealth != 0.0f ? 1 : 0);
 
         const FName LootTierKey = DestructionLootTierKey;
-        if (!LootTierKey.IsNone())
+        if (!LootTierKey.IsNone() && bDropDestructionLoot)
         {
             TStructArray<FFortItemEntry> LootDrops{};
             UFortLootPackage::PickLootDrops(LootDrops, GetWorldManager() ? GetWorldLevel() : -1, LootTierKey, AbilitySystemComponent, StaticGameplayTags, true, false);
@@ -347,7 +353,18 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
         }
     }
 
-    if (ResourceCount > 0)
+    if (ResourceCount > 0 && AthenaGameMode)
+    {
+        UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, ResourceItem, ResourceCount, false);
+        AFortPlayerStateZone* PlayerState = Cast<AFortPlayerStateZone>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState)));
+        const uint8_t StatType = ResourceItem->AccumulatingStatType;
+        if (OwnerPersistentID == -1 && PlayerState && StatType != EFortReplicatedStat::GetNone())
+        {
+            PlayerState->ModifyStat(EFortReplicatedStat{ StatType }, ResourceCount, ResourceCount, GetCentroid());
+        }
+        PlayerController->ClientReportDamagedResourceBuilding(this, Resource, ResourceCount, bDestroyed, bJustHitWeakspot);
+    }
+    else if (ResourceCount > 0)
     {
         std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
         FFortItemEntry* Entry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());

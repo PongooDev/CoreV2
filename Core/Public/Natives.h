@@ -349,6 +349,8 @@ namespace Natives
     inline bool (*AFortPlayerControllerOutpost_GetFabricatorProgress)(AFortPlayerController* This, int64_t* DisintegrationStartTime, int32_t* QuantumGooCompleted, int32_t* QuantumGooIncoming) = nullptr;
     inline void (*UFortRegisteredPlayerInfo_OnAccountInventoryChanged)(UFortRegisteredPlayerInfo* This, const void* ChangedItemTypes) = nullptr;
     inline int32_t AFortPlayerPawn_ResetGameplayAttributesIndex = -1;
+    inline int32_t AFortGameMode_RedirectLootTierGroupIndex = -1;
+    inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerPawn_EquipLastWeaponIndex = -1;
     inline int32_t AFortPawn_EquipDefaultWeaponIndex = -1;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;

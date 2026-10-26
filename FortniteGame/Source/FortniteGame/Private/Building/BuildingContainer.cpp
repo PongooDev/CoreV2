@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -55,6 +56,9 @@ namespace
         }
         Entry.SetStateValue(EFortItemEntryState::GetDurabilityInitialized(), 1);
     }
+
+    int32_t FloorLootContainers = 0;
+    int32_t FloorLootPickups = 0;
 }
 
 bool ABuildingContainer::IsAlreadySearched(AFortPawn* Looter)
@@ -103,6 +107,74 @@ void ABuildingContainer::UpdateReplicatedLootTier()
     }
 }
 
+FName ABuildingContainer::GetSearchLootTierGroup()
+{
+    const FName TierGroup = SearchLootTierGroup;
+    AFortGameModeAthena* AthenaGameMode = AFortGameModeAthena::GetCurrent(this);
+    return AthenaGameMode ? AthenaGameMode->RedirectLootTierGroup(TierGroup) : TierGroup;
+}
+
+bool ABuildingContainer::StartsAlreadySearched()
+{
+    // Nothing in 1.7.2 reads bStartAlreadySearched_Athena (+0x1078 bit 6) any more; only the constructor (0x457940) sets
+    // the toss defaults.
+    return Member_bStartAlreadySearched_Athena.IsAvailable() && bStartAlreadySearched_Athena && AFortGameModeAthena::GetCurrent(this);
+}
+
+void ABuildingContainer::TossLoot(AFortPickup* Pickup, const FVector& SpawnLocation)
+{
+    // Battle Royale's containers toss their loot onto the ground in a cone around LootTossDirection_Athena (relative to the
+    // container) instead of flying it to the looter. The pickups land where they would be after a quarter second at
+    // LootTossSpeed_Athena (Tiered_Athena_FloorLoot_01: 350, cone 180 degrees; the defaults 550 and 60 degrees).
+    constexpr float DegreesToRadians = 3.1415926535897932f / 180.0f;
+    constexpr float TossTime = 0.25f;
+    const FRotator TossDirection = LootTossDirection_Athena;
+    const float Pitch = TossDirection.Pitch * DegreesToRadians;
+    const float Yaw = TossDirection.Yaw * DegreesToRadians;
+    const FVector LocalDirection(std::cos(Pitch) * std::cos(Yaw), std::cos(Pitch) * std::sin(Yaw), std::sin(Pitch));
+    const FVector Direction = UKismetMathLibrary::RandomUnitVectorInCone(GetTransform().Rotation.RotateVector(LocalDirection), LootTossConeHalfAngle_Athena * DegreesToRadians);
+    const float Distance = LootTossSpeed_Athena * TossTime;
+    const FVector FinalLocation(SpawnLocation.X + Direction.X * Distance, SpawnLocation.Y + Direction.Y * Distance, SpawnLocation.Z);
+    Pickup->TossPickup(FinalLocation, nullptr, 0);
+}
+
+void ABuildingContainer::SpawnFloorLoot()
+{
+    // Battle Royale's floor loot (Tiered_Athena_FloorLoot_01: Loot_AthenaFloorLoot, bStartAlreadySearched_Athena,
+    // bDestroyContainerOnSearch) is never searched: its roll lies on the ground from the start, without the container.
+    const int32_t WorldLevel = GetWorldManager() ? GetWorldLevel() : -1;
+    FName LootTierKey;
+    int32_t LootTier = -1;
+    UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(LootTierKey, LootTier, GetSearchLootTierGroup(), WorldLevel, -1, StaticGameplayTags);
+    ++FloorLootContainers;
+    if (!UFortLootTier::ShouldDropLoot(LootTierKey, L"ABuildingContainer::PostUpdate"))
+    {
+        return;
+    }
+
+    TStructArray<FFortItemEntry> LootDrops{};
+    UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, nullptr, StaticGameplayTags, true, false);
+    UWorld* World = GetWorld();
+    const FVector SpawnLocation = GetTransform().TransformPosition(LootSpawnLocation);
+    const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
+    for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
+    {
+        FFortItemEntry& Entry = LootDrops[Index];
+        UFortWorldItemDefinition* WorldItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition));
+        if (!WorldItemDefinition)
+        {
+            continue;
+        }
+        ApplyLootedDurability(Entry, WorldItemDefinition, LootedWeaponsDurabilityModifier);
+        if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
+        {
+            TossLoot(Pickup, SpawnLocation);
+            ++FloorLootPickups;
+        }
+    }
+    LootDrops.Empty();
+}
+
 void ABuildingContainer::PostLoad()
 {
     PostLoadOG(this);
@@ -125,6 +197,28 @@ void ABuildingContainer::PostUpdate(EFortBuildingPersistentState State, FFortBui
 #if WITH_SERVER_CODE
     ABuildingSMActor::PostUpdate(State, RandomList);
 
+    if (StartsAlreadySearched())
+    {
+        if (State == EFortBuildingPersistentState::GetNew())
+        {
+            SpawnFloorLoot();
+        }
+        ContainerLootTierKey = FName();
+        SetSearched(nullptr);
+        AFortWorldManager* WorldManager = GetWorldManager();
+        if (bPersistToWorld && WorldManager)
+        {
+            UpdateActorRecord(WorldManager, EFortBuildingPersistentState::GetSearched(), false);
+        }
+        // With bDestroyContainerOnSearch set, HideContainer takes its destroy branch.
+        HideContainer();
+        return;
+    }
+
+    // Battle Royale rolls its own groups (Loot_Treasure -> Loot_AthenaTreasure, Loot_Ammo -> Loot_AthenaAmmoLarge). With
+    // Save the World's, the roll gave no loot tier in a Battle Royale match and every chest and ammo box started searched.
+    const FName TierGroup = GetSearchLootTierGroup();
+    const bool bAthena = AFortGameModeAthena::GetCurrent(this) != nullptr;
     if (State == EFortBuildingPersistentState::GetNew())
     {
         float ShowChance = 0.0f;
@@ -139,8 +233,9 @@ void ABuildingContainer::PostUpdate(EFortBuildingPersistentState State, FFortBui
             ShowChance = 1.0f;
             AFortWorldManager* WorldManager = GetWorldManager();
             int32_t LootTier = -1;
+            // The world loot quota picks from Save the World's groups.
             const FChosenQuotaInfo& ChosenQuota = SearchLootTierChosenQuotaInfo;
-            if (ChosenQuota.IsSet())
+            if (ChosenQuota.IsSet() && !bAthena)
             {
                 ContainerLootTierKey = ChosenQuota.LootTierKey;
                 LootTier = ChosenQuota.LootTier;
@@ -148,7 +243,7 @@ void ABuildingContainer::PostUpdate(EFortBuildingPersistentState State, FFortBui
             else
             {
                 FName PickedKey = ContainerLootTierKey;
-                UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(PickedKey, LootTier, SearchLootTierGroup, WorldManager ? GetWorldLevel() : -1, -1, StaticGameplayTags);
+                UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(PickedKey, LootTier, TierGroup, WorldManager ? GetWorldLevel() : -1, -1, StaticGameplayTags);
                 ContainerLootTierKey = PickedKey;
             }
             SelectMeshSet(LootTier);
@@ -197,7 +292,7 @@ void ABuildingContainer::PostUpdate(EFortBuildingPersistentState State, FFortBui
         {
             int32_t LootTier = -1;
             FName PickedKey = ContainerLootTierKey;
-            UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(PickedKey, LootTier, SearchLootTierGroup, GetWorldLevel(), -1, StaticGameplayTags);
+            UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(PickedKey, LootTier, TierGroup, GetWorldLevel(), -1, StaticGameplayTags);
             ContainerLootTierKey = PickedKey;
             SelectMeshSet(LootTier);
         }
@@ -222,9 +317,18 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
     bool bSpawnedLoot = false;
     ForceNetUpdate();
     const FTransform ContainerTransform = GetTransform();
+    const bool bAthena = AFortGameModeAthena::GetCurrent(this) != nullptr;
     if (!IsAlreadySearched(Looter))
     {
         AFortWorldManager* WorldManager = GetWorldManager();
+        // A Battle Royale container whose tier was never rolled (no PostUpdate) rolls its redirected group now.
+        if (bAthena && !LootTestingData && static_cast<FName>(ContainerLootTierKey).IsNone())
+        {
+            FName PickedKey;
+            int32_t LootTier = -1;
+            UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(PickedKey, LootTier, GetSearchLootTierGroup(), WorldManager ? GetWorldLevel() : -1, -1, StaticGameplayTags);
+            ContainerLootTierKey = PickedKey;
+        }
         const FVector SpawnLocation = ContainerTransform.TransformPosition(LootSpawnLocation);
         const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
         UWorld* World = GetWorld();
@@ -266,9 +370,16 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
                 ApplyLootedDurability(Entry, WorldItemDefinition, LootedWeaponsDurabilityModifier);
                 if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
                 {
-                    const FVector Direction = UKismetMathLibrary::RandomUnitVectorInCone(FVector(0.0f, 0.0f, 1.0f), 0.2617994f);
-                    const float FlyTime = AFortPickup::GetRandomFlyTime() + static_cast<float>(Index) * 0.3f;
-                    Pickup->SetPickupTarget(Looter, FlyTime, Direction, true);
+                    if (bAthena)
+                    {
+                        TossLoot(Pickup, SpawnLocation);
+                    }
+                    else
+                    {
+                        const FVector Direction = UKismetMathLibrary::RandomUnitVectorInCone(FVector(0.0f, 0.0f, 1.0f), 0.2617994f);
+                        const float FlyTime = AFortPickup::GetRandomFlyTime() + static_cast<float>(Index) * 0.3f;
+                        Pickup->SetPickupTarget(Looter, FlyTime, Direction, true);
+                    }
                     OnPickupSpawn(Pickup, LooterController);
                     bSpawnedLoot = true;
                 }
@@ -411,6 +522,10 @@ void ABuildingContainer::LogWorldContainers(UWorld* World)
     const int32_t DestroyedActors = NetDriver ? NetDriver->DestroyedStartupOrDormantActors.Num() : -1;
     UE_LOG(LogFortBuilding, Log, TEXT("World containers: %d (%d with a loot tier); tiered %d: %d with a mesh, %d initially dormant, first without a mesh %s in %s; %d destroyed startup or dormant actors to send"),
         Containers, WithLootTier, Tiered, TieredWithMesh, TieredDormant, *GetNameSafe(FirstWithoutMesh), FirstWithoutMesh ? *GetNameSafe(FirstWithoutMesh->GetOutermost()) : TEXT("-"), DestroyedActors);
+    if (FloorLootContainers > 0)
+    {
+        UE_LOG(LogFortBuilding, Log, TEXT("Floor loot: %d containers spawned %d pickups"), FloorLootContainers, FloorLootPickups);
+    }
 }
 
 void ABuildingContainer::PostLoadHK(ABuildingContainer* This)

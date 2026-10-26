@@ -127,6 +127,8 @@ namespace Finder
     bool ResolveLeaveOutpostLive();
     bool ResolveOutpostMcpRequestLive();
     bool ResolveResetGameplayAttributesLive();
+    bool ResolveLootTierRedirectLive();
+    bool ResolveAthenaHeroLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();
     bool ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset);

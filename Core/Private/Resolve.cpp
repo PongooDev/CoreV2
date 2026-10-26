@@ -5361,6 +5361,62 @@ bool Finder::ResolveResetGameplayAttributesLive()
     return true;
 }
 
+bool Finder::ResolveLootTierRedirectLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortGameMode_RedirectLootTierGroupIndex >= 0 || bSearched)
+    {
+        return Natives::AFortGameMode_RedirectLootTierGroupIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortGameModeAthena's override of the game mode's loot tier group redirect (1.7.2 0x3FA190, slot 0x156) is the only
+    // reader of "Loot_AthenaTreasure": Loot_Treasure -> Loot_AthenaTreasure, Loot_Ammo -> Loot_AthenaAmmoLarge, the Athena
+    // floor loot, ammo and supply drop groups unchanged, every other group None. AFortGameMode's (0x212F110) returns its
+    // argument, so the slot is found through the Athena override.
+    const uintptr_t Redirect = Finder::FunctionStart(First(Finder::StringRefs("Loot_AthenaTreasure")));
+    const int32_t Index = FirstVTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameModeAthena"), Redirect);
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortGameMode::RedirectLootTierGroup slot not found");
+        return false;
+    }
+
+    Natives::AFortGameMode_RedirectLootTierGroupIndex = Index;
+    Log::Info(L"Finder: AFortGameMode::RedirectLootTierGroup is slot 0x{:X}", Index);
+    return true;
+}
+
+bool Finder::ResolveAthenaHeroLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortPlayerController_GetOrInitializeHeroIndex >= 0 || bSearched)
+    {
+        return Natives::AFortPlayerController_GetOrInitializeHeroIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortPlayerController::GetOrInitializeHero (1.7.2 0x80BA00, the account's hero) and AFortPlayerControllerAthena's
+    // override (0x42E5E0, the next of the controller's DefaultHeroes, slot 0x2C8) both log this string. The walk can run
+    // into the vtables after the Athena controller's, where the base function sits further on: the lowest slot is it.
+    void** VTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerAthena");
+    int32_t Index = -1;
+    for (const uintptr_t Ref : Finder::StringRefs(L"GetOrInitializeHero called with valid player info"))
+    {
+        const int32_t Found = FirstVTableIndex(VTable, Finder::FunctionStart(Ref));
+        Index = Found >= 0 && (Index < 0 || Found < Index) ? Found : Index;
+    }
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortPlayerController::GetOrInitializeHero slot not found");
+        return false;
+    }
+
+    Natives::AFortPlayerController_GetOrInitializeHeroIndex = Index;
+    Log::Info(L"Finder: AFortPlayerController::GetOrInitializeHero is slot 0x{:X}", Index);
+    return true;
+}
+
 uint8_t* Finder::QuickBarChangedWorldManagerCall()
 {
     const uintptr_t SwapItems = FunctionOf(L"Bad call to AFortQuickBars::SwapItems with index %d %d!");

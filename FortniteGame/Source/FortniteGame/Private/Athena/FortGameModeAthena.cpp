@@ -1,10 +1,12 @@
 #include "pch.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Engine/World.h"
 #include "Finder.h"
 #include "FortZoneTheme.h"
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
+#include "ObjectLayout.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Class.h"
@@ -37,6 +39,26 @@ FString AFortGameModeAthena::DefaultMatchURL()
     Log::Info(L"Battle Royale: the server starts on {}", URL);
     Cached = FString(URL.c_str());
     return Cached;
+}
+
+AFortGameModeAthena* AFortGameModeAthena::GetCurrent(const UObject* WorldContextObject)
+{
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    return World ? Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+}
+
+FName AFortGameModeAthena::RedirectLootTierGroup(FName TierGroup)
+{
+    // The override (1.7.2 0x3FA190) is intact, but its caller went with the stripped container and building code, so
+    // Battle Royale's chests and ammo boxes rolled Save the World's Loot_Treasure and Loot_Ammo.
+    // FName* RedirectLootTierGroup(FName* OutResult, FName InGroup), the name passed by value in r8.
+    if (!Finder::ResolveLootTierRedirectLive())
+    {
+        return TierGroup;
+    }
+    FName Redirected;
+    CallVirtual<FName*>(this, Natives::AFortGameMode_RedirectLootTierGroupIndex, &Redirected, TierGroup);
+    return Redirected;
 }
 
 void AFortGameModeAthena::HookVTables()

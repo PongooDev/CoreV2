@@ -3,6 +3,7 @@
 #include "ReflectionParams.h"
 #include "Abilities/FortAbilityKit.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortPlayerControllerAthena.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystemComponent.h"
@@ -228,9 +229,15 @@ void AFortPlayerController::Possess(APawn* InPawn)
     AFortQuickBars* Bars = QuickBars;
     if (Role == ROLE_Authority && Bars && MyFortPawn)
     {
-        AddHeroAbilityKitGadgetsToQuickBars();
-        ApplyHarvestingTool();
-        ApplyHomebaseGadgets();
+        // Battle Royale's inventory is the game mode's StartingItems (with its own pickaxe) and what the player loots: no
+        // hero gadgets, harvesting tool from the account's attribute or homebase gadgets. The native homebase effects skip
+        // Athena too (UFortRegisteredPlayerInfo 0x5DC040, through the Athena check 0x5EAF90).
+        if (!AFortGameModeAthena::GetCurrent(this))
+        {
+            AddHeroAbilityKitGadgetsToQuickBars();
+            ApplyHarvestingTool();
+            ApplyHomebaseGadgets();
+        }
 
         FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
         Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
@@ -371,10 +378,30 @@ void AFortPlayerController::TryAddToQuickBar(UFortWorldItem* Item)
 
 void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused)
 {
+#if WITH_SERVER_CODE
+    // Battle Royale plays one of the controller's DefaultHeroes (HID_Commando_Athena_*), which its GetOrInitializeHero
+    // (1.7.2 0x42E5E0, called by the game mode when the player joins, 0x587C70) makes: their GE_Map_Athena_Vitality_Health
+    // overrides MaxHealth and the shield cap to 100 and GE_Map_Athena_StartingShields the shield to 0. The account's Save
+    // the World hero, which the MCP profile (0x5CAB40) and ServerSetHero (0x827E30) also set here, brought its level,
+    // survivor and homebase stats into the match instead (440 health, 172 shield).
+    AFortGameModeAthena* AthenaGameMode = Role == ROLE_Authority ? AFortGameModeAthena::GetCurrent(this) : nullptr;
+    AFortPlayerControllerAthena* AthenaController = AthenaGameMode && NewHero ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;
+    if (AthenaController && AthenaController->DefaultHeroes.Num() > 0 && !AthenaController->IsDefaultHero(NewHero))
+    {
+        UE_LOG(LogFort, Log, TEXT("TrySetHeroImplementation: %s plays a Battle Royale hero, not %s"), *GetName(), *NewHero->GetName());
+        AthenaController->GetOrInitializeHero();
+        return;
+    }
+#endif
+
     TrySetHeroImplementationOG(this, NewHero, bSendToServer, bUnused);
 
 #if WITH_SERVER_CODE
-    ApplyHeroAbilityKitItems(NewHero);
+    // Hero ability kit items are Save the World gadgets and kit items.
+    if (!AthenaGameMode)
+    {
+        ApplyHeroAbilityKitItems(NewHero);
+    }
 #endif
 }
 

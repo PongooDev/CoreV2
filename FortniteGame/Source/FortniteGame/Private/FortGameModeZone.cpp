@@ -110,6 +110,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     if (Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(this)))
     {
         AFortGameMode::FinishWorldInitialization(WorldManager);
+        ABuildingContainer::LogWorldContainers(GetWorld());
         return;
     }
 

@@ -2,7 +2,6 @@
 #include "FortGameData.h"
 #include "Engine/DataTable.h"
 #include "Items/FortLootPackage.h"
-#include "Items/FortLootTablesCert.h"
 #include "Logging/LogMacros.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortLoot, Log, All);
@@ -25,13 +24,11 @@ namespace
 
 std::vector<UDataTable*> UFortGameData::GetLootTierDataTables()
 {
-    FortLootTablesCert::CreateMissingTables(this);
     return LoadTables(LootTierDataTables);
 }
 
 std::vector<UDataTable*> UFortGameData::GetLootPackageDataTables()
 {
-    FortLootTablesCert::CreateMissingTables(this);
     return LoadTables(LootPackageDataTables);
 }
 
@@ -42,7 +39,6 @@ bool UFortGameData::HasLootPackageDataTables()
 
 UDataTable* UFortGameData::GetLootQuotaData()
 {
-    FortLootTablesCert::CreateMissingTables(this);
     return LootQuotaData;
 }
 

@@ -1114,13 +1114,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\DataTable.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
     </ClInclude>
-    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCertData.inl">
-      <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
-    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortLootPackage.h">
-      <Filter>FortniteGame\Source\FortniteGame\Public\Items</Filter>
-    </ClInclude>
-    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortLootTablesCert.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Items</Filter>
     </ClInclude>
   </ItemGroup>
@@ -1518,9 +1512,6 @@
       <Filter>FortniteGame\Source\FortniteGame\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootPackage.cpp">
-      <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
-    </ClCompile>
-    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCert.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
     </ClCompile>
   </ItemGroup>

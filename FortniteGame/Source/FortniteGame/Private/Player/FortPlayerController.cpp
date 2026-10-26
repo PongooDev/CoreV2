@@ -150,6 +150,14 @@ bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
     const bool bInitialized = InitializeMcpProfileOG(this, OnComplete);
 
 #if WITH_SERVER_CODE
+    // Cheats are on for every player from the moment they join (#65, #69), pawn or not: Possess grants it too, but a
+    // player without a pawn (Battle Royale before its spawn was restored) never got one, and every "cheat" was dropped.
+    if (Role == ROLE_Authority && !CheatManager)
+    {
+        AddCheats(true);
+        UE_LOG(LogFort, Log, TEXT("InitializeMcpProfile: %s has cheat manager %s"), *GetNameSafe(this), *GetNameSafe(static_cast<UObject*>(CheatManager)));
+    }
+
     if (Role == ROLE_Authority && !QuickBars)
     {
         SpawnQuickBars();

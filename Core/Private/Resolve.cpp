@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <unordered_map>
 
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
 namespace
 {
     int32_t MissingCount = 0;
@@ -94,6 +96,14 @@ namespace
     bool IsInText(uintptr_t Address)
     {
         return Address >= Finder::TextBegin() && Address < Finder::TextEnd();
+    }
+
+    // A vtable slot Core has swapped holds one of this module's functions.
+    bool IsCoreFunction(uintptr_t Address)
+    {
+        const uintptr_t Base = reinterpret_cast<uintptr_t>(&__ImageBase);
+        const IMAGE_NT_HEADERS* Headers = reinterpret_cast<const IMAGE_NT_HEADERS*>(Base + __ImageBase.e_lfanew);
+        return Address >= Base && Address < Base + Headers->OptionalHeader.SizeOfImage;
     }
 
     uintptr_t FindRawCall(uintptr_t Begin, uintptr_t End)
@@ -1326,17 +1336,31 @@ namespace
     }
 
     // Without RTTI the vtables sit back to back, so a scan runs on into the subclasses' vtables and meets the same
-    // function again: the class's own slot is the first match.
-    int32_t FirstVTableIndex(void** VTable, uintptr_t Function)
+    // function again: the class's own slot is the first match. Slots Core has already swapped are stepped over.
+    template <typename TPredicate>
+    int32_t FirstVTableIndexWhere(void** VTable, TPredicate&& Predicate)
     {
-        for (int32_t Index = 0; Function && VTableEntry(VTable, Index); ++Index)
+        for (int32_t Index = 0; VTable && Index < 0x400; ++Index)
         {
-            if (VTableEntry(VTable, Index) == Function)
+            const uintptr_t Entry = reinterpret_cast<uintptr_t>(VTable[Index]);
+            if (IsInText(Entry))
             {
-                return Index;
+                if (Predicate(Entry))
+                {
+                    return Index;
+                }
+            }
+            else if (!IsCoreFunction(Entry))
+            {
+                break;
             }
         }
         return -1;
+    }
+
+    int32_t FirstVTableIndex(void** VTable, uintptr_t Function)
+    {
+        return Function ? FirstVTableIndexWhere(VTable, [Function](uintptr_t Entry) { return Entry == Function; }) : -1;
     }
 
     struct FCalledSlot
@@ -5742,14 +5766,23 @@ bool Finder::ResolveBuildingLootLive()
         bPostLoadSelectsMeshSet |= std::find(MeshSetSelectors.begin(), MeshSetSelectors.end(), Target) != MeshSetSelectors.end();
     }
 
-    // AFortPlayerStateZone::ModifyStat: the "INVALID STAT TYPE! %d" reference whose function is in the vtable.
+    // AFortPlayerStateZone::ModifyStat: of the two "INVALID STAT TYPE! %d" functions, the one FortPlayerStateZone overrides.
+    // The other is AFortPlayerState's own stat setter (1.2 0xCE), the same in both vtables.
     void** PlayerStateZoneVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerStateZone");
+    void** PlayerStateVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerState");
     int32_t ModifyStatIndex = -1;
-    for (const uintptr_t Ref : Finder::StringRefs(L"INVALID STAT TYPE! %d"))
+    int32_t ModifyStatCount = 0;
+    for (const uintptr_t Ref : PlayerStateVTable ? Finder::StringRefs(L"INVALID STAT TYPE! %d") : std::vector<uintptr_t>{})
     {
-        const int32_t Index = FirstVTableIndex(PlayerStateZoneVTable, Finder::FunctionStart(Ref));
-        ModifyStatIndex = Index >= 0 ? Index : ModifyStatIndex;
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const int32_t Index = FirstVTableIndex(PlayerStateZoneVTable, Function);
+        if (Index >= 0 && VTableEntry(PlayerStateVTable, Index) != Function)
+        {
+            ModifyStatIndex = Index;
+            ++ModifyStatCount;
+        }
     }
+    ModifyStatIndex = ModifyStatCount == 1 ? ModifyStatIndex : -1;
 
     if (!SelectMeshSet || SetMeshSetIndex < 0 || PostUpdateIndex < 0 || SpawnLootIndex < 0 || !UpdateActorRecord || PostLoadIndex < 0 || ModifyStatIndex < 0)
     {
@@ -5813,17 +5846,11 @@ bool Finder::ResolveLootQuotaLive(ptrdiff_t MaximumQuotaLevelBoundOffset)
     }
 
     // ABuildingSMActor::GetMaximumQuotaLevelBound returns the byte through the hidden return pointer: movzx eax, byte ptr [rcx+X]; mov [rdx], al.
-    // The first such slot: the subclasses' vtables that follow repeat it.
     void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
-    int32_t BoundIndex = -1;
-    for (int32_t Index = 0; SMActorVTable && MaximumQuotaLevelBoundOffset > 0 && BoundIndex < 0 && VTableEntry(SMActorVTable, Index); ++Index)
+    const int32_t BoundIndex = MaximumQuotaLevelBoundOffset > 0 ? FirstVTableIndexWhere(SMActorVTable, [MaximumQuotaLevelBoundOffset](uintptr_t Function)
     {
-        const uintptr_t Function = VTableEntry(SMActorVTable, Index);
-        if (Byte(Function) == 0x0F && Byte(Function + 1) == 0xB6 && Byte(Function + 2) == 0x81 && *reinterpret_cast<const int32_t*>(Function + 3) == static_cast<int32_t>(MaximumQuotaLevelBoundOffset) && Byte(Function + 7) == 0x88 && Byte(Function + 8) == 0x02)
-        {
-            BoundIndex = Index;
-        }
-    }
+        return Byte(Function) == 0x0F && Byte(Function + 1) == 0xB6 && Byte(Function + 2) == 0x81 && *reinterpret_cast<const int32_t*>(Function + 3) == static_cast<int32_t>(MaximumQuotaLevelBoundOffset) && Byte(Function + 7) == 0x88 && Byte(Function + 8) == 0x02;
+    }) : -1;
 
     if (BoundIndex < 2)
     {

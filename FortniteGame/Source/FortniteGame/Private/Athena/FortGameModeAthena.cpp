@@ -53,7 +53,18 @@ void AFortGameModeAthena::HookVTables()
     // Failed due to no ..." checks and returns null where it spawned the pawn, so nothing spawns: not on the warmup island,
     // not on a warmup respawn, not when jumping from the aircraft or at its forced drop (all RestartPlayer). Its slot is the
     // Zone mode's; the Zone mode's restoration (the checks, then AFortGameMode's spawn at the start spot) is the same.
-    const int32_t SpawnIndex = Finder::VTableIndex(ZoneVTable, reinterpret_cast<void*>(Natives::AFortGameModeZone_SpawnDefaultPawnFor), 0x200);
+    // The first slot holding it: vtables sit back to back (no RTTI), so the next class's repeats it, which
+    // Finder::VTableIndex counts as ambiguous.
+    int32_t SpawnIndex = -1;
+    for (int32_t Index = 0; Index < 0x200 && SpawnIndex < 0; ++Index)
+    {
+        SpawnIndex = ZoneVTable[Index] == reinterpret_cast<void*>(Natives::AFortGameModeZone_SpawnDefaultPawnFor) ? Index : -1;
+    }
+    if (SpawnIndex < 0)
+    {
+        Log::Error(L"Finder: AFortGameModeZone::SpawnDefaultPawnFor_Implementation's slot not found, Battle Royale players won't spawn");
+        return;
+    }
     for (TObjectIterator<UClass> It; SpawnIndex >= 0 && It; ++It)
     {
         UClass* Class = *It;

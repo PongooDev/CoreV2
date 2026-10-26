@@ -22,6 +22,7 @@ class UFortSchematicItem;
 class UFortWorldItem;
 struct FFortItemEntry;
 struct FItemDefinitionAndCount;
+struct FItemAndCount;
 struct FRotator;
 struct FVector;
 
@@ -66,6 +67,7 @@ public:
     void SpawnQuickBars();
     void SetupQuickBars();
     void InitializeInventory(const TStructArray<FItemDefinitionAndCount>& Items);
+    void GiveStartingItems(const TStructArray<FItemAndCount>& Items);
     void TryAddToQuickBar(UFortWorldItem* Item);
     void TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused);
     void ApplyHeroAbilityKitItems(UFortHero* Hero);

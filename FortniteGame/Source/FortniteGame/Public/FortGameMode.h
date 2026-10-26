@@ -2,6 +2,7 @@
 
 #include "GameFramework/GameMode.h"
 #include "GameplayTagContainer.h"
+#include "Items/FortQuickBars.h"
 
 class AActor;
 class AController;
@@ -25,6 +26,9 @@ public:
     DefineUProperty(UClass*, MissionManagerClass)
     DefineUProperty(FGameplayTagContainer, GameContextTags)
     DefineUProperty(UFortSharedMissionLists*, SharedMissionLists)
+    // From 1.7.2 (Battle Royale's quickbars: one harvest and five weapon slots, then the building pieces).
+    DefineUProperty(bool, bOverrideQuickBars)
+    DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
 
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
@@ -32,6 +36,14 @@ public:
     void SetBadgeScores();
     void SendEarnScore();
     UFortSharedMissionLists* GetSharedMissionLists();
+    // The game mode's own quickbars (1.7.2's native quickbar setup, 0x6813D0, reads them before GameData's).
+    bool OverridesQuickBars();
+    const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
+    {
+        const FQuickBarData& Definitions = QuickBarDefinitions;
+        const uint8_t* Definition = reinterpret_cast<const uint8_t*>(&Definitions) + static_cast<size_t>(InQuickBar) * FQuickBarData::StaticStruct()->GetStructureSize();
+        return *reinterpret_cast<const FQuickBarData*>(Definition);
+    }
 
     static bool ShouldPlayerEarnScore(AFortPlayerController* PlayerController);
     static int32_t GetPlayerBadgesScore(AFortPlayerController* PlayerController);

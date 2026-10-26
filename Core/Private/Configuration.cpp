@@ -26,6 +26,11 @@ void Configuration::Load()
     for (int32_t Index = 1; Index < ArgumentCount; ++Index)
     {
         const std::wstring_view Argument = Arguments[Index];
+        constexpr std::wstring_view MapOption = L"-CoreMap=";
+        if (Argument.size() > MapOption.size() && EqualsNoCase(Argument.substr(0, MapOption.size()), MapOption))
+        {
+            Current.Map = Argument.substr(MapOption.size());
+        }
         constexpr std::wstring_view BackendOption = L"-CoreBackend=";
         if (Argument.size() > BackendOption.size() && EqualsNoCase(Argument.substr(0, BackendOption.size()), BackendOption))
         {

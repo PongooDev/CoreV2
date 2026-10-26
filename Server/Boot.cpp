@@ -19,6 +19,8 @@
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
 #include "FortGameModeZone.h"
+#include "Athena/FortGameModeAthena.h"
+#include "Misc/CommandLine.h"
 #include "FortVisibilityComponent.h"
 #include "FortWorldManager.h"
 #include "GameThread.h"
@@ -98,7 +100,11 @@ void Boot::Initialize()
 
     GameThread::Enqueue([]
     {
+        // Battle Royale servers register with the matchmaking service after "Dedicated Server Ready!" (Core-Docs
+        // Athena-Boot-1.7.2.md §1 B7).
+        FCommandLine::RestoreSwitch(L"EnableMMS");
         AFortGameModeZone::HookVTables();
+        AFortGameModeAthena::HookVTables();
         UFortVisibilityComponent::HookVTables();
         UAbilitySystemComponent::HookVTables();
         UFortKismetLibrary::HookNatives();

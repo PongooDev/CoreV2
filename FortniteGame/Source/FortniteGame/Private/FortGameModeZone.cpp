@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "FortGameModeZone.h"
+#include "Athena/FortGameModeAthena.h"
 #include "FortGameModeOutpost.h"
 #include "Player/FortPlayerStateOutpost.h"
 #include "AI/FortAIDirector.h"
@@ -103,6 +104,15 @@ namespace
 void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManager)
 {
 #if WITH_SERVER_CODE
+    // Battle Royale has no spawn pad, missions or husks: only AFortGameMode's part (bWorldIsReady, which 1.7.2's
+    // AFortGameSessionDedicated waits for before it creates an Athena session, 0x6C65E5). Its own override (MapInfo, the
+    // warmup starts) runs after this one (SubclassFinishWorldInitializationHK).
+    if (Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(this)))
+    {
+        AFortGameMode::FinishWorldInitialization(WorldManager);
+        return;
+    }
+
     PlacePlayerSpawnPad(WorldManager);
     if (WorldManager)
     {

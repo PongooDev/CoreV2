@@ -64,6 +64,11 @@ void AFortGameMode::FinishWorldInitialization(AFortWorldManager* WorldManager)
     Natives::AFortGameMode_FinishWorldInitialization(this, WorldManager);
 }
 
+bool AFortGameMode::OverridesQuickBars()
+{
+    return Member_bOverrideQuickBars.IsAvailable() && bOverrideQuickBars;
+}
+
 UFortSharedMissionLists* AFortGameMode::GetSharedMissionLists()
 {
     if (!SharedMissionLists)

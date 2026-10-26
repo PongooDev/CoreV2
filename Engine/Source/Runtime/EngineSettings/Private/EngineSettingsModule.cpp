@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "GameMapsSettings.h"
+#include "Configuration.h"
 #include "CoreGlobals.h"
 #include "Hooks.h"
 #include "Natives.h"
@@ -8,6 +9,11 @@
 
 const FString UGameMapsSettings::GetGameDefaultMap()
 {
+    // StartGameInstance parses the default map with its options (FURL), so -CoreMap's URL carries them.
+    if (IsRunningDedicatedServer() && !Configuration::Get().Map.empty())
+    {
+        return FString(Configuration::Get().Map.c_str());
+    }
     return IsRunningDedicatedServer()
         ? GetDefault<UGameMapsSettings>()->ServerDefaultMap.GetLongPackageName()
         : GetDefault<UGameMapsSettings>()->GameDefaultMap.GetLongPackageName();

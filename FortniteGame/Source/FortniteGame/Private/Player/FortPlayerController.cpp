@@ -2,6 +2,7 @@
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Abilities/FortAbilityKit.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystemComponent.h"
@@ -152,7 +153,13 @@ bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
     if (Role == ROLE_Authority && !QuickBars)
     {
         SpawnQuickBars();
-        if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+        UWorld* World = GetWorld();
+        AFortGameModeAthena* AthenaGameMode = World ? Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+        if (AthenaGameMode)
+        {
+            GiveStartingItems(AthenaGameMode->StartingItems);
+        }
+        else if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
         {
             InitializeInventory(GameData->DefaultInventoryList);
         }
@@ -237,13 +244,23 @@ void AFortPlayerController::SetupQuickBars()
 {
 #if WITH_SERVER_CODE
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    if (!QuickBars || !GameData)
+    UWorld* World = GetWorld();
+    AFortGameMode* GameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+    if (!QuickBars)
     {
         return;
     }
 
-    QuickBars->SetupQuickbar(EFortQuickBars::GetPrimary(), GameData->GetQuickBarDefinition(EFortQuickBars::GetPrimary()));
-    QuickBars->SetupQuickbar(EFortQuickBars::GetSecondary(), GameData->GetQuickBarDefinition(EFortQuickBars::GetSecondary()));
+    if (GameMode && GameMode->OverridesQuickBars())
+    {
+        QuickBars->SetupQuickbar(EFortQuickBars::GetPrimary(), GameMode->GetQuickBarDefinition(EFortQuickBars::GetPrimary()));
+        QuickBars->SetupQuickbar(EFortQuickBars::GetSecondary(), GameMode->GetQuickBarDefinition(EFortQuickBars::GetSecondary()));
+    }
+    else if (GameData)
+    {
+        QuickBars->SetupQuickbar(EFortQuickBars::GetPrimary(), GameData->GetQuickBarDefinition(EFortQuickBars::GetPrimary()));
+        QuickBars->SetupQuickbar(EFortQuickBars::GetSecondary(), GameData->GetQuickBarDefinition(EFortQuickBars::GetSecondary()));
+    }
 #endif
 }
 
@@ -280,6 +297,21 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
             continue;
         }
         if (ItemDefinition && GetItemQuantity(ItemDefinition) <= 0)
+        {
+            UFortKismetLibrary::K2_GiveItemToPlayer(this, ItemDefinition, Entry.Count, false);
+        }
+    }
+#endif
+}
+
+void AFortPlayerController::GiveStartingItems(const TStructArray<FItemAndCount>& Items)
+{
+#if WITH_SERVER_CODE
+    for (int32_t Index = 0; WorldInventory && Index < Items.Num(); ++Index)
+    {
+        const FItemAndCount& Entry = Items[Index];
+        UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.Item));
+        if (ItemDefinition && Entry.Count > 0 && GetItemQuantity(ItemDefinition) <= 0)
         {
             UFortKismetLibrary::K2_GiveItemToPlayer(this, ItemDefinition, Entry.Count, false);
         }

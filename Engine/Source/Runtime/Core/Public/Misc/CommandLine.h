@@ -3,4 +3,7 @@
 struct FCommandLine
 {
     static const wchar_t* Get();
+    // Puts -Switch back in the engine's command line when the process was started with it but the shipping build's
+    // command line whitelist dropped it.
+    static void RestoreSwitch(const wchar_t* Switch);
 };

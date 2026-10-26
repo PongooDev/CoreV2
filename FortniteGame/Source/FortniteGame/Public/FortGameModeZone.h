@@ -10,6 +10,14 @@ class AFortAIGoalManager;
 class AFortVisibilityManager;
 class UEnvQueryInstanceBlueprintWrapper;
 struct FFortPlayerSpawnPadPlacementData;
+class UFortItemDefinition;
+
+struct FItemAndCount
+{
+    DefineUnrealStruct(FItemAndCount, FortniteGame)
+    DefineUProperty(int32_t, Count)
+    DefineUProperty(UFortItemDefinition*, Item)
+};
 
 class AFortGameModeZone : public AFortGameMode
 {
@@ -22,6 +30,9 @@ public:
     DefineUProperty(int32_t, EndOfZoneRemainTime)
     DefineUProperty(int32_t, OverrideAIDirectorIndex)
     DefineUProperty(TSubclassOf<AFortVisibilityManager>, VisibilityManagerClass)
+    // What a player starts a match with (Battle Royale's: the pickaxe, the building pieces, the edit tool and the
+    // materials, Athena_GameMode). No native code reads it in the shipping exe.
+    DefineUStructArrayProperty(FItemAndCount, StartingItems)
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     UClass* DetermineAIDirectorClass() const;

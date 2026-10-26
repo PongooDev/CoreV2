@@ -4,7 +4,9 @@
 #include "AI/FortAIGoalManager.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "FortGameState.h"
 #include "FortKismetLibrary.h"
+#include "FortWorldManager.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
 #include "Items/FortSchematicItemDefinition.h"
@@ -15,6 +17,7 @@
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "StructArray.h"
+#include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -26,6 +29,15 @@ namespace
 {
     UFunction* ClientGivePlayerLocalAccountItemFunction = nullptr;
     void (*ClientGivePlayerLocalAccountItem_Implementation)(AFortPlayerController* This, UFortItemDefinition* ItemDefinition, int32_t Count) = nullptr;
+
+    // The zone's loot level, as UFortMissionLibrary::GiveMissionRewardsToPlayer (Cert 0x61E660) reads it for its tier
+    // pick (0x61E6DC); -1, which lets every world level's rows drop, only without a world manager (#66).
+    int32_t GetRewardWorldLevel(UWorld* World)
+    {
+        AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        AFortWorldManager* WorldManager = GameState ? static_cast<AFortWorldManager*>(GameState->WorldManager) : nullptr;
+        return WorldManager ? WorldManager->GetWorldLevel() : -1;
+    }
 }
 
 void UFortMissionLibrary::ExecuteMissionEvent(UObject* WorldContextObject, FName EventType, UObject* Params)
@@ -68,7 +80,7 @@ void UFortMissionLibrary::SpawnAndCollectPlayerPickups(UObject* WorldContextObje
 
     Reflection::FParams Params(UFortKismetLibrary::StaticFunction_PickLootDrops(), true);
     Params.Set(L"TierGroupName", LootTierGroup);
-    Params.Set(L"WorldLevel", -1);
+    Params.Set(L"WorldLevel", GetRewardWorldLevel(World));
     Params.Set(L"ForcedLootTier", LootTier);
     if (!Params.Call(UFortKismetLibrary::StaticClass()->GetDefaultObject()) || !Params.Take<bool>(L"ReturnValue"))
     {
@@ -112,7 +124,7 @@ void UFortMissionLibrary::GiveMissionRewardsToPlayerAsPickups(UObject* WorldCont
 
     Reflection::FParams Params(UFortKismetLibrary::StaticFunction_PickLootDrops(), true);
     Params.Set(L"TierGroupName", LootTierGroup);
-    Params.Set(L"WorldLevel", -1);
+    Params.Set(L"WorldLevel", GetRewardWorldLevel(World));
     Params.Set(L"ForcedLootTier", LootTier);
     if (!Params.Call(UFortKismetLibrary::StaticClass()->GetDefaultObject()) || !Params.Take<bool>(L"ReturnValue"))
     {

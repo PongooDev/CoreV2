@@ -25,6 +25,7 @@
 #include "GameThread.h"
 #include "Logging/LogMacros.h"
 #include "Building/BuildingActor.h"
+#include "Building/BuildingContainer.h"
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "Templates/Casts.h"
 #include "UObject/WeakObjectPtr.h"
@@ -110,6 +111,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     AFortGameMode::FinishWorldInitialization(WorldManager);
 
     UWorld* World = GetWorld();
+    ABuildingContainer::LogWorldContainers(World);
     UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
     if (NavSys)
     {

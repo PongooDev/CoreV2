@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
@@ -367,6 +368,49 @@ void ABuildingContainer::HookVTables()
             Hooks::SwapVTable(L"ABuildingContainer::PostLoad", VTable, PostLoadIndex, reinterpret_cast<void*>(&PostLoadHK));
         }
     }
+}
+
+void ABuildingContainer::LogWorldContainers(UWorld* World)
+{
+    // What the world's creation left the containers as. A tiered container that is still there with no mesh index keeps
+    // its placeholder mesh on every client (#61); one that rolled no loot was destroyed and waits in the net driver's
+    // destroyed startup actors until each client has its level.
+    int32_t Containers = 0;
+    int32_t WithLootTier = 0;
+    int32_t Tiered = 0;
+    int32_t TieredWithMesh = 0;
+    int32_t TieredDormant = 0;
+    ABuildingContainer* FirstWithoutMesh = nullptr;
+    for (TObjectIterator<ABuildingContainer> It; It; ++It)
+    {
+        ABuildingContainer* Container = *It;
+        if (Container->GetWorld() != World || Container->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)))
+        {
+            continue;
+        }
+        ++Containers;
+        WithLootTier += static_cast<FName>(Container->ContainerLootTierKey).IsNone() ? 0 : 1;
+        const TStructArray<FTierMeshSets>& TierMeshSets = Container->AlternateMeshes;
+        if (TierMeshSets.Num() <= 0)
+        {
+            continue;
+        }
+        ++Tiered;
+        TieredDormant += Container->NetDormancy == DORM_Initial ? 1 : 0;
+        if (Container->AltMeshIdx != -1)
+        {
+            ++TieredWithMesh;
+        }
+        else if (!FirstWithoutMesh)
+        {
+            FirstWithoutMesh = Container;
+        }
+    }
+
+    UNetDriver* NetDriver = World ? World->GetNetDriver() : nullptr;
+    const int32_t DestroyedActors = NetDriver ? NetDriver->DestroyedStartupOrDormantActors.Num() : -1;
+    UE_LOG(LogFortBuilding, Log, TEXT("World containers: %d (%d with a loot tier); tiered %d: %d with a mesh, %d initially dormant, first without a mesh %s in %s; %d destroyed startup or dormant actors to send"),
+        Containers, WithLootTier, Tiered, TieredWithMesh, TieredDormant, *GetNameSafe(FirstWithoutMesh), FirstWithoutMesh ? *GetNameSafe(FirstWithoutMesh->GetOutermost()) : TEXT("-"), DestroyedActors);
 }
 
 void ABuildingContainer::PostLoadHK(ABuildingContainer* This)

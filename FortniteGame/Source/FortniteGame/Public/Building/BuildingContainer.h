@@ -7,6 +7,7 @@ class AFortPawn;
 class AFortPickup;
 class AFortPlayerController;
 class UFortWorldItemDefinition;
+class UWorld;
 
 struct FFortSearchBounceData
 {
@@ -42,6 +43,7 @@ public:
     void BounceContainer();
 
     static void HookVTables();
+    static void LogWorldContainers(UWorld* World);
 
 private:
     bool IsAlreadySearched(AFortPawn* Looter);

@@ -5759,3 +5759,34 @@ bool Finder::ResolveBuildingLootLive()
         PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex);
     return true;
 }
+
+bool Finder::ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t AllowResourceDropMask)
+{
+    if (Natives::ABuildingSMActor_AttemptSpawnResourcesIndex >= 0)
+    {
+        return true;
+    }
+
+    // ABuildingSMActor::OnDamageServer ("OwnedBuildingDamaged") calls the resource spawn behind `test bAllowResourceDrop`.
+    const uintptr_t OnDamageServer = Finder::FunctionStart(OnlyRef("OwnedBuildingDamaged"));
+    const uintptr_t OnDamageServerEnd = OnDamageServer ? Finder::FunctionEnd(OnDamageServer) : 0;
+    const uint32_t Offset = static_cast<uint32_t>(AllowResourceDropOffset);
+    const std::initializer_list<int32_t> AllowResourceDropTest = { 0xF6, -1, static_cast<int32_t>(Offset & 0xFF), static_cast<int32_t>((Offset >> 8) & 0xFF), static_cast<int32_t>((Offset >> 16) & 0xFF), static_cast<int32_t>(Offset >> 24), AllowResourceDropMask };
+    const uintptr_t Test = OnDamageServerEnd && AllowResourceDropOffset > 0 ? FindInstruction(OnDamageServer, OnDamageServerEnd, AllowResourceDropTest) : 0;
+    const int32_t AttemptSpawnResourcesIndex = Test ? VirtualSlot(FindVirtualCall(Test, Test + 0x40)) : -1;
+
+    // ABuildingSMActor::DetermineMaxResourcesToSpawn survives in 1.2.
+    const uintptr_t DetermineMaxResourcesToSpawn = FunctionOf(L"ABuildingSMActor::DetermineMaxResourcesToSpawn");
+    void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
+    const int32_t DetermineMaxResourcesToSpawnIndex = DetermineMaxResourcesToSpawn ? Finder::VTableIndex(SMActorVTable, reinterpret_cast<void*>(DetermineMaxResourcesToSpawn), 0x300) : -1;
+
+    if (AttemptSpawnResourcesIndex < 0 || DetermineMaxResourcesToSpawnIndex < 0)
+    {
+        Log::Error(L"Finder: harvesting not found (AttemptSpawnResources {}, DetermineMaxResourcesToSpawn {})", AttemptSpawnResourcesIndex, DetermineMaxResourcesToSpawnIndex);
+        return false;
+    }
+    Natives::ABuildingSMActor_DetermineMaxResourcesToSpawnIndex = DetermineMaxResourcesToSpawnIndex;
+    Natives::ABuildingSMActor_AttemptSpawnResourcesIndex = AttemptSpawnResourcesIndex;
+    Log::Info(L"Finder: ABuildingSMActor::AttemptSpawnResources is slot 0x{:X}, DetermineMaxResourcesToSpawn slot 0x{:X}", AttemptSpawnResourcesIndex, DetermineMaxResourcesToSpawnIndex);
+    return true;
+}

@@ -456,6 +456,8 @@ namespace Natives
     inline bool ABuildingContainer_bPostLoadStripped = false;
     inline void (*AFortWorldManager_UpdateActorRecord)(void* This, void* Building, uint8_t State, bool bForce) = nullptr;
     inline int32_t AFortPlayerStateZone_ModifyStatIndex = -1;
+    inline int32_t ABuildingSMActor_AttemptSpawnResourcesIndex = -1;
+    inline int32_t ABuildingSMActor_DetermineMaxResourcesToSpawnIndex = -1;
     inline ptrdiff_t FFrame_Code = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;

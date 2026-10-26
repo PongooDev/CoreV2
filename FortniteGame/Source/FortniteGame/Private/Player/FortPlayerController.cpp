@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Player/FortPlayerController.h"
+#include "ReflectionParams.h"
 #include "Abilities/FortAbilityKit.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
@@ -1263,6 +1264,18 @@ void AFortPlayerController::SwapQuickBarFocus(EFortQuickBars InQuickBar)
         Bars->SwapQuickBarFocus(InQuickBar, -1);
     }
 #endif
+}
+
+void AFortPlayerController::ClientReportDamagedResourceBuilding(ABuildingSMActor* BuildingSMActor, uint8_t PotentialResourceType, int32_t PotentialResourceCount, bool bDestroyed, bool bJustHitWeakspot)
+{
+    // 1.2 has no thunk for this client RPC left; send it through ProcessEvent.
+    Reflection::FParams Params(StaticFunction_ClientReportDamagedResourceBuilding());
+    Params.Set(L"BuildingSMActor", BuildingSMActor);
+    Params.Set(L"PotentialResourceType", PotentialResourceType);
+    Params.Set(L"PotentialResourceCount", PotentialResourceCount);
+    Params.Set(L"bDestroyed", bDestroyed);
+    Params.Set(L"bJustHitWeakspot", bJustHitWeakspot);
+    Params.Call(this);
 }
 
 DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)

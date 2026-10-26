@@ -1146,6 +1146,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\AIModule\Classes\Perception\AISense_Hearing.h">
       <Filter>Engine\Source\Runtime\AIModule\Classes\Perception</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetSystemLibrary.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Kismet</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Boot.cpp" />
@@ -1562,6 +1565,9 @@
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\Perception\AISense_Hearing.cpp">
       <Filter>Engine\Source\Runtime\AIModule\Private\Perception</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Kismet\KismetSystemLibrary.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private\Kismet</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

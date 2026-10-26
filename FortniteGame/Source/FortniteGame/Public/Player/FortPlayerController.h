@@ -25,6 +25,8 @@ struct FItemDefinitionAndCount;
 struct FRotator;
 struct FVector;
 
+class ABuildingSMActor;
+
 class AFortPlayerController : public APlayerController
 {
     DefineUnrealClass(AFortPlayerController, FortniteGame)
@@ -49,11 +51,13 @@ public:
     DefineUFunction(ActivateSlot)
     DefineUFunction(GivePlayerAmmo)
     DefineUFunction(SwapQuickBarFocus)
+    DefineUFunction(ClientReportDamagedResourceBuilding)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
     void GivePlayerAmmo(int32_t AmmoCount);
     void SwapQuickBarFocus(EFortQuickBars InQuickBar);
+    void ClientReportDamagedResourceBuilding(ABuildingSMActor* BuildingSMActor, uint8_t PotentialResourceType, int32_t PotentialResourceCount, bool bDestroyed, bool bJustHitWeakspot);
     void Possess(APawn* InPawn);
     void SpawnQuickBars();
     void SetupQuickBars();

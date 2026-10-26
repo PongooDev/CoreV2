@@ -17,6 +17,7 @@ class ABuildingActor : public AActor
     DefineUnrealClass(ABuildingActor, FortniteGame)
     DefineUFunction(GetHealth)
     DefineUFunction(GetMaxHealth)
+    DefineUFunction(GetCentroid)
 
 public:
     DefineUProperty(int32_t, OwnerPersistentID)
@@ -28,6 +29,7 @@ public:
 
     float GetHealth() const;
     float GetMaxHealth() const;
+    FVector GetCentroid() const;
 };
 
 class AFortPlacementActor : public ABuildingActor

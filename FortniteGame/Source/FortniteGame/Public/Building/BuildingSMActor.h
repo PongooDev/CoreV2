@@ -4,6 +4,7 @@
 #include "Items/FortLootPackage.h"
 #include "StructArray.h"
 
+class AFortPawn;
 class AFortWorldManager;
 
 class EFortResourceType
@@ -64,11 +65,15 @@ public:
     DefineUProperty(FName, DestructionLootTierGroup)
     DefineUStructProperty(FChosenQuotaInfo, DestructionLootTierChosenQuotaInfo)
     DefineUProperty(FName, DestructionLootTierKey)
+    DefineUProperty(int32_t, MaxResourcesToSpawn)
+    DefineBitfieldUProperty(bAllowResourceDrop)
 
     void PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList);
     void SelectMeshSet(int32_t LootTier);
     void SelectMeshSet(FName LootTierKey);
     void SetMeshSet(const FMeshSet& MeshSet);
+    void AttemptSpawnResources(AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot);
+    float DetermineMaxResourcesToSpawn(bool bRandomize);
 
     static void HookVTables();
 
@@ -78,5 +83,8 @@ protected:
     void UpdateActorRecord(AFortWorldManager* WorldManager, EFortBuildingPersistentState State, bool bForce);
 
 private:
+    float& ResourceRemainder();
+    static bool ResolveHarvest();
     static void PostUpdateHK(ABuildingSMActor* This, uint8_t State, FFortBuildingRandomList* RandomList);
+    static void AttemptSpawnResourcesHK(ABuildingSMActor* This, AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot);
 };

@@ -123,6 +123,7 @@ public:
     DefineBitfieldUProperty(bCanBeDepositedInStorageVault)
     DefineUProperty(int32_t, PreferredQuickbarSlot)
     DefineUStructProperty(FDataTableCategoryHandle, LootLevelData)
+    DefineUProperty(uint8_t, AccumulatingStatType)
     DefineUFunction(GetMaxDurability)
 
     const FDataTableCategoryHandle* GetLootLevelData() const { return &LootLevelData; }

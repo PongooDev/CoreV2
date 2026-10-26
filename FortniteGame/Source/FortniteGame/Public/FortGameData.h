@@ -61,6 +61,10 @@ public:
     DefineUProperty(UDataTable*, LootQuotaData)
     DefineUProperty(float, PickupSplineRandomMax)
     DefineUProperty(UCurveVector*, PickupSplineCurve)
+    DefineUProperty(UFortWorldItemDefinition*, StoneItemDefinition)
+    DefineUProperty(UFortWorldItemDefinition*, WoodItemDefinition)
+    DefineUProperty(UFortWorldItemDefinition*, MetalItemDefinition)
+    DefineUProperty(UFortWorldItemDefinition*, PermaniteItemDefinition)
 
     std::vector<UDataTable*> GetLootTierDataTables();
     std::vector<UDataTable*> GetLootPackageDataTables();

@@ -129,5 +129,6 @@ namespace Finder
     bool IsStubFunction(uintptr_t Function);
     bool ResolveLootLive();
     bool ResolveBuildingLootLive();
+    bool ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t AllowResourceDropMask);
     bool ResolveDurabilityLive(UFunction* ServerModDurability, UObject* PlayerControllerDefault, ptrdiff_t EntryDurabilityOffset, ptrdiff_t PendingDestroyDueToDurabilityOffset, uint8_t PendingDestroyDueToDurabilityMask);
 }

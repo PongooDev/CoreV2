@@ -1,6 +1,21 @@
 #include "pch.h"
 #include "Building/BuildingSMActor.h"
 #include "Building/BuildingContainer.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "Abilities/FortPlayerAttrSet.h"
+#include "FortAssetManager.h"
+#include "FortGameData.h"
+#include "Items/FortItem.h"
+#include "Items/FortItemDefinition.h"
+#include "Items/FortPickup.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "Math/Rotator.h"
+#include "Pawns/FortPawn.h"
+#include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
+#include "ReflectionParams.h"
+#include "UObject/UnrealType.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameState.h"
@@ -132,8 +147,189 @@ void ABuildingSMActor::PostUpdate(EFortBuildingPersistentState State, FFortBuild
 #endif
 }
 
+float& ABuildingSMActor::ResourceRemainder()
+{
+    // The fraction of a resource left over from the last hit: the native float after MaxResourcesToSpawn.
+    return *reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(&GetMember_MaxResourcesToSpawn()) + sizeof(int32_t));
+}
+
+bool ABuildingSMActor::ResolveHarvest()
+{
+    return Finder::ResolveHarvestLive(Member_bAllowResourceDrop.GetOffsetChecked(), Member_bAllowResourceDrop.GetFieldMask());
+}
+
+float ABuildingSMActor::DetermineMaxResourcesToSpawn(bool bRandomize)
+{
+    if (Natives::ABuildingSMActor_DetermineMaxResourcesToSpawnIndex < 0 && !ResolveHarvest())
+    {
+        return 0.0f;
+    }
+    using FDetermineMaxResourcesToSpawn = float (*)(ABuildingSMActor* This, bool bRandomize);
+    return reinterpret_cast<FDetermineMaxResourcesToSpawn>((*reinterpret_cast<void***>(this))[Natives::ABuildingSMActor_DetermineMaxResourcesToSpawnIndex])(this, bRandomize);
+}
+
+void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot)
+{
+#if WITH_SERVER_CODE
+    if (!InstigatorPawn || Damage <= 0.0f || Role != ROLE_Authority)
+    {
+        return;
+    }
+    AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(InstigatorPawn->Controller)));
+    if (!PlayerController)
+    {
+        return;
+    }
+
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    const uint8_t Resource = ResourceType;
+    UFortWorldItemDefinition* ResourceItem = nullptr;
+    if (GameData)
+    {
+        if (Resource == EFortResourceType::GetWood())
+        {
+            ResourceItem = GameData->WoodItemDefinition;
+        }
+        else if (Resource == EFortResourceType::GetStone())
+        {
+            ResourceItem = GameData->StoneItemDefinition;
+        }
+        else if (Resource == EFortResourceType::GetMetal())
+        {
+            ResourceItem = GameData->MetalItemDefinition;
+        }
+        else if (Resource == EFortResourceType::GetPermanite())
+        {
+            ResourceItem = GameData->PermaniteItemDefinition;
+        }
+    }
+
+    UAbilitySystemComponent* AbilitySystemComponent = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(InstigatorPawn);
+    int32_t ResourceCount = 0;
+    float ResourcesPerHealth = 0.0f;
+    if (ResourceItem)
+    {
+        if (MaxResourcesToSpawn < 0)
+        {
+            MaxResourcesToSpawn = static_cast<int32_t>(DetermineMaxResourcesToSpawn(true));
+        }
+        FGameplayTagContainer ResourceTags;
+        ResourceTags.AppendTags(ResourceItem->GameplayTags);
+        ResourcesPerHealth = static_cast<float>(MaxResourcesToSpawn) / GetMaxHealth();
+        float Amount = ResourcesPerHealth * Damage;
+        if (AbilitySystemComponent)
+        {
+            static FGameplayAttribute ResourceHarvesting;
+            if (!ResourceHarvesting.IsValid() && UFortPlayerAttrSet::StaticClass())
+            {
+                ResourceHarvesting = FGameplayAttribute(UFortPlayerAttrSet::StaticClass()->FindPropertyByName(FName(L"ResourceHarvesting")));
+            }
+            bool bSuccess = false;
+            const float Harvested = UAbilitySystemBlueprintLibrary::EvaluateAttributeValueWithTagsAndBase(AbilitySystemComponent, ResourceHarvesting, FGameplayTagContainer(), ResourceTags, Amount, bSuccess);
+            if (bSuccess)
+            {
+                Amount = Harvested;
+            }
+        }
+        Amount += ResourceRemainder();
+        ResourceCount = static_cast<int32_t>(Amount);
+        ResourceRemainder() = Amount - static_cast<float>(ResourceCount);
+    }
+
+    UWorld* World = GetWorld();
+    USceneComponent* Root = GetRootComponent();
+    const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
+    const auto SpawnLocation = [Root]()
+    {
+        FVector Origin;
+        FVector BoxExtent;
+        float SphereRadius = 0.0f;
+        UKismetSystemLibrary::GetComponentBounds(Root, Origin, BoxExtent, SphereRadius);
+        return Origin + UKismetMathLibrary::RandomUnitVector() * 200.0f;
+    };
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+
+    bool bDestroyed = false;
+    if (GetHealth() <= 0.0f)
+    {
+        bDestroyed = true;
+        ResourceCount = FMath::Max(ResourceCount, ResourceItem && ResourcesPerHealth != 0.0f ? 1 : 0);
+
+        const FName LootTierKey = DestructionLootTierKey;
+        if (!LootTierKey.IsNone())
+        {
+            TStructArray<FFortItemEntry> LootDrops{};
+            UFortLootPackage::PickLootDrops(LootDrops, GetWorldManager() ? GetWorldLevel() : -1, LootTierKey, AbilitySystemComponent, StaticGameplayTags, true, false);
+            for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
+            {
+                UFortItemDefinition* ItemDefinition = LootDrops[Index].ItemDefinition;
+                if (!Cast<UFortWorldItemDefinition>(ItemDefinition))
+                {
+                    UE_LOG(LogFortBuilding, Error, TEXT("Loot tier %s dropped entry with no item data!"), *LootTierKey.ToString());
+                    continue;
+                }
+
+                const FVector Location = SpawnLocation();
+                std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+                FFortItemEntry* Entry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+                FFortItemEntry::Construct(Entry, ItemDefinition, LootDrops[Index].Count, 0);
+                Entry->SetStateValue(EFortItemEntryState::GetDoNotShowSpawnParticles(), 1);
+                if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &Location, &SpawnRotation))
+                {
+                    const FVector Direction = UKismetMathLibrary::RandomUnitVectorInCone(FVector(0.0f, 0.0f, 1.0f), 0.2617994f);
+                    Pickup->SetPickupTarget(InstigatorPawn, AFortPickup::GetRandomFlyTime(), Direction, true);
+                }
+                EntryStruct->DestroyStruct(Entry);
+            }
+            LootDrops.Empty();
+        }
+    }
+
+    if (ResourceCount > 0)
+    {
+        std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+        FFortItemEntry* Entry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+        FFortItemEntry::Construct(Entry, ResourceItem, ResourceCount, 0);
+        const FVector Location = SpawnLocation();
+        Entry->SetStateValue(EFortItemEntryState::GetDoNotShowSpawnParticles(), 1);
+        if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &Location, &SpawnRotation))
+        {
+            if (OwnerPersistentID == -1)
+            {
+                AFortPlayerStateZone* PlayerState = Cast<AFortPlayerStateZone>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState)));
+                const uint8_t StatType = ResourceItem->AccumulatingStatType;
+                if (PlayerState && StatType != EFortReplicatedStat::GetNone())
+                {
+                    PlayerState->ModifyStat(EFortReplicatedStat{ StatType }, ResourceCount, ResourceCount, GetCentroid());
+                }
+            }
+            const FVector Direction = UKismetMathLibrary::RandomUnitVector();
+            Pickup->SetPickupTarget(InstigatorPawn, AFortPickup::GetRandomFlyTime(), Direction, true);
+            PlayerController->ClientReportDamagedResourceBuilding(this, Resource, ResourceCount, bDestroyed, bJustHitWeakspot);
+        }
+        EntryStruct->DestroyStruct(Entry);
+    }
+#endif
+}
+
 void ABuildingSMActor::HookVTables()
 {
+    // 1.2: the resource spawn every building inherits is the shared empty function.
+    if (Natives::ABuildingSMActor_AttemptSpawnResourcesIndex >= 0 || ResolveHarvest())
+    {
+        const int32_t HarvestIndex = Natives::ABuildingSMActor_AttemptSpawnResourcesIndex;
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[HarvestIndex])))
+            {
+                Hooks::SwapVTable(L"ABuildingSMActor::AttemptSpawnResources", VTable, HarvestIndex, reinterpret_cast<void*>(&AttemptSpawnResourcesHK));
+            }
+        }
+    }
+
     if (Natives::ABuildingSMActor_PostUpdateIndex < 0 && !Finder::ResolveBuildingLootLive())
     {
         return;
@@ -180,6 +376,11 @@ void ABuildingSMActor::HookVTables()
             }
         }
     }
+}
+
+void ABuildingSMActor::AttemptSpawnResourcesHK(ABuildingSMActor* This, AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot)
+{
+    This->AttemptSpawnResources(InstigatorPawn, Damage, bJustHitWeakspot);
 }
 
 void ABuildingSMActor::PostUpdateHK(ABuildingSMActor* This, uint8_t State, FFortBuildingRandomList* RandomList)

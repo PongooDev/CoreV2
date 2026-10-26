@@ -88,6 +88,10 @@ void UFortMissionLibrary::SpawnAndCollectPlayerPickups(UObject* WorldContextObje
     }
 
     TStructArray<FFortItemEntry>* LootToDrop = Params.Get<TStructArray<FFortItemEntry>>(L"OutLootToDrop");
+    if (LootToDrop)
+    {
+        AFortPickup::CombineItemEntries(*LootToDrop, PlayerController->WorldInventory);
+    }
     const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
     for (int32_t Index = 0; LootToDrop && Index < LootToDrop->Num(); ++Index)
     {
@@ -132,6 +136,10 @@ void UFortMissionLibrary::GiveMissionRewardsToPlayerAsPickups(UObject* WorldCont
     }
 
     TStructArray<FFortItemEntry>* LootToDrop = Params.Get<TStructArray<FFortItemEntry>>(L"OutLootToDrop");
+    if (LootToDrop)
+    {
+        AFortPickup::CombineItemEntries(*LootToDrop, PlayerController->WorldInventory);
+    }
     const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
     for (int32_t Index = 0; LootToDrop && Index < LootToDrop->Num(); ++Index)
     {

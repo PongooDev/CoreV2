@@ -8,6 +8,7 @@
 #include "StructArray.h"
 
 class AFortAIPawn;
+class AFortInventory;
 class AFortPawn;
 class AFortPlayerController;
 class IFortInventoryOwnerInterface;
@@ -25,6 +26,9 @@ public:
     DefineUProperty(int32_t, OptionalOwnerID)
     DefineUProperty(AFortPawn*, PawnWhoDroppedPickup)
 
+    // Merges entries of the same item and level up to its stack size, so a drop of five 1-plank rolls is one pickup of
+    // five (CoreV2 #67).
+    static void CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory);
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
     void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount);
     void SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime = -1.0f, const FVector& InStartDirection = FVector(0.0f, 0.0f, 1.0f), bool bPlayPickupSound = true);

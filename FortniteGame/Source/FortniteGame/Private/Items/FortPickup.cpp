@@ -21,6 +21,7 @@
 #include "UObject/UObjectIterator.h"
 #include "Weapons/FortWeapon.h"
 
+#include <algorithm>
 #include <vector>
 
 namespace
@@ -74,6 +75,39 @@ namespace
                 PlayerController->TryAddToQuickBar(WorldItem);
                 return WorldItem;
             });
+    }
+}
+
+void AFortPickup::CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory)
+{
+    // UFortLootPackage::PickLootDrops (as the game's) only merges items that can't take more than one stack (resources,
+    // ammo), so every roll of an ingredient such as planks stays its own entry. The pickups' own combining after the toss
+    // is stripped (its timer is bound to the shared empty function), so Core merges before spawning. Weapons and other
+    // single items keep a stack size of 1 and stay apart.
+    if (!Inventory)
+    {
+        return;
+    }
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        FFortItemEntry& Entry = Entries[Index];
+        const UFortItemDefinition* Definition = Entry.ItemDefinition;
+        const int32_t MaxStackSize = Definition ? std::max(Inventory->GetMaxStackSize(Definition), 1) : 1;
+        for (int32_t Other = Index + 1; Other < Entries.Num() && Entry.Count < MaxStackSize; ++Other)
+        {
+            FFortItemEntry& Candidate = Entries[Other];
+            if (static_cast<UFortItemDefinition*>(Candidate.ItemDefinition) != Definition || Candidate.Level != Entry.Level)
+            {
+                continue;
+            }
+            const int32_t Moved = std::min<int32_t>(Candidate.Count, MaxStackSize - Entry.Count);
+            Entry.Count = Entry.Count + Moved;
+            Candidate.Count = Candidate.Count - Moved;
+            if (Candidate.Count <= 0)
+            {
+                Entries.RemoveAt(Other--);
+            }
+        }
     }
 }
 

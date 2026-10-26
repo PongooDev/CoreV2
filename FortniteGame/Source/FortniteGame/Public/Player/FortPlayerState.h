@@ -8,6 +8,7 @@ class AFortTeamInfo;
 class UAbilitySystemComponent;
 class UFortHero;
 class UFortItemDefinition;
+struct FVector;
 
 class EFortReplicatedStat
 {
@@ -98,5 +99,6 @@ public:
     DefineUFunction(OnRep_AccumulatedItems)
 
     void AddAccumulatedItem(UFortItemDefinition* ItemDefinition, int32_t Delta);
+    void ModifyStat(EFortReplicatedStat StatType, int32_t StatDelta, int32_t ScoreDelta, const FVector& Location);
     void OnRep_AccumulatedItems();
 };

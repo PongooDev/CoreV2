@@ -331,6 +331,10 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCertData.inl" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortLootPackage.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortLootTablesCert.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingSMActor.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingContainer.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetMathLibrary.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\AIModule\Classes\Perception\AISense_Hearing.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Boot.cpp" />
@@ -485,6 +489,11 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameData.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootPackage.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCert.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingActor.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingSMActor.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingContainer.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Kismet\KismetMathLibrary.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\Perception\AISense_Hearing.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

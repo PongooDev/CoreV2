@@ -20,12 +20,18 @@ struct FVector
     FVector operator+(const FVector& V) const { return FVector(X + V.X, Y + V.Y, Z + V.Z); }
     FVector operator-(const FVector& V) const { return FVector(X - V.X, Y - V.Y, Z - V.Z); }
     FVector operator*(float Scale) const { return FVector(X * Scale, Y * Scale, Z * Scale); }
+    FVector operator*(const FVector& V) const { return FVector(X * V.X, Y * V.Y, Z * V.Z); }
     float operator|(const FVector& V) const { return X * V.X + Y * V.Y + Z * V.Z; }
 
     FRotator Rotation() const;
 
     float SizeSquared() const { return X * X + Y * Y + Z * Z; }
     float Size() const { return FMath::Sqrt(SizeSquared()); }
+
+    static FVector CrossProduct(const FVector& A, const FVector& B)
+    {
+        return FVector(A.Y * B.Z - A.Z * B.Y, A.Z * B.X - A.X * B.Z, A.X * B.Y - A.Y * B.X);
+    }
 
     static float DistSquared(const FVector& V1, const FVector& V2)
     {

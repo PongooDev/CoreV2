@@ -445,6 +445,17 @@ namespace Natives
     inline int32_t IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex = -1;
     inline int32_t IGameplayTagAssetInterface_GetOwnedGameplayTagsIndex = -1;
     inline int32_t (*UFortLootLevel_GetItemLevel)(const void* LootLevelData, int32_t WorldLevel) = nullptr;
+    inline uintptr_t ABuildingSMActor_PostUpdate = 0;
+    inline int32_t ABuildingSMActor_PostUpdateIndex = -1;
+    inline bool ABuildingSMActor_bPostUpdateStripped = false;
+    inline void (*ABuildingSMActor_SelectMeshSet)(void* This, int32_t LootTier) = nullptr;
+    inline int32_t ABuildingSMActor_SetMeshSetIndex = -1;
+    inline int32_t ABuildingContainer_SpawnLootIndex = -1;
+    inline uintptr_t ABuildingContainer_PostLoad = 0;
+    inline int32_t ABuildingContainer_PostLoadIndex = -1;
+    inline bool ABuildingContainer_bPostLoadStripped = false;
+    inline void (*AFortWorldManager_UpdateActorRecord)(void* This, void* Building, uint8_t State, bool bForce) = nullptr;
+    inline int32_t AFortPlayerStateZone_ModifyStatIndex = -1;
     inline ptrdiff_t FFrame_Code = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;

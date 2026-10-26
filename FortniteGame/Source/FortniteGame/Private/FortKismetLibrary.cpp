@@ -494,6 +494,12 @@ void UFortKismetLibrary::HookNatives()
     if (uint8_t* PickLootDropsCall = Finder::ImplementationCall(StaticFunction_PickLootDrops()); PickLootDropsCall && Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(PickLootDropsCall), 1, 5)))
     {
         Hooks::RedirectCall(L"UFortKismetLibrary::PickLootDrops", PickLootDropsCall, reinterpret_cast<void*>(&PickLootDrops));
+
+        // Load (or, without them in the pak, create) the loot tables now, not from inside a level's PostLoad.
+        if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+        {
+            GameData->GetLootTierDataTables();
+        }
     }
 
     // ABuildingItemCollectorActor's deposit calls the folded native directly instead of the UFunction.

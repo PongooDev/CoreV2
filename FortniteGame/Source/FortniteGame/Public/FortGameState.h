@@ -29,6 +29,7 @@ class AFortGameState : public AGameState
 public:
     DefineUProperty(AFortMissionManager*, MissionManager)
     DefineUProperty(AFortWorldManager*, WorldManager)
+    DefineUProperty(int32_t, WorldLevel)
     DefineUProperty(AFortVisibilityManager*, VisibilityManager)
     DefineUProperty(EFortGameplayState, GameplayState)
 

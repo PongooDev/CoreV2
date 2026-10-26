@@ -31,6 +31,7 @@ public:
     void GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner);
     void SetOptionalMissionGuid(const FGuid& InMissionGuid);
 
+    static float GetRandomFlyTime();
     static ptrdiff_t PrimaryPickupItemEntryOffset();
     static void HookVTables();
 

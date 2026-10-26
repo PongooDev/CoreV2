@@ -20,6 +20,15 @@ public:
         return Element;
     }
 
+    void Empty()
+    {
+        for (int32_t Index = Num() - 1; Index >= 0; --Index)
+        {
+            T::StaticStruct()->DestroyStruct(&(*this)[Index]);
+        }
+        FScriptArray::Empty();
+    }
+
     void RemoveAt(int32_t Index)
     {
         T::StaticStruct()->DestroyStruct(&(*this)[Index]);

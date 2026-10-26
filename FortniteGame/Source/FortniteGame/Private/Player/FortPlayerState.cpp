@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Player/FortPlayerState.h"
 #include "Heroes/FortHero.h"
+#include "Finder.h"
 #include "Hooks.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
@@ -43,6 +44,16 @@ void AFortPlayerState::OnRep_CharacterParts()
 {
     Reflection::FParams Params(StaticFunction_OnRep_CharacterParts());
     Params.Call(this);
+}
+
+void AFortPlayerStateZone::ModifyStat(EFortReplicatedStat StatType, int32_t StatDelta, int32_t ScoreDelta, const FVector& Location)
+{
+    if (StatType == Reflection::InvalidEnumValue || (Natives::AFortPlayerStateZone_ModifyStatIndex < 0 && !Finder::ResolveBuildingLootLive()))
+    {
+        return;
+    }
+    using FModifyStat = void (*)(AFortPlayerStateZone* This, uint8_t StatType, int32_t StatDelta, int32_t ScoreDelta, const FVector* Location);
+    reinterpret_cast<FModifyStat>((*reinterpret_cast<void***>(this))[Natives::AFortPlayerStateZone_ModifyStatIndex])(this, StatType, StatDelta, ScoreDelta, &Location);
 }
 
 void AFortPlayerStateZone::AddAccumulatedItem(UFortItemDefinition* ItemDefinition, int32_t Delta)

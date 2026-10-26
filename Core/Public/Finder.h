@@ -128,5 +128,6 @@ namespace Finder
     bool ResolveWeaponAmmoLive(ptrdiff_t AmmoCountOffset, ptrdiff_t ItemEntryGuidOffset);
     bool IsStubFunction(uintptr_t Function);
     bool ResolveLootLive();
+    bool ResolveBuildingLootLive();
     bool ResolveDurabilityLive(UFunction* ServerModDurability, UObject* PlayerControllerDefault, ptrdiff_t EntryDurabilityOffset, ptrdiff_t PendingDestroyDueToDurabilityOffset, uint8_t PendingDestroyDueToDurabilityMask);
 }

@@ -406,6 +406,15 @@
     <Filter Include="Engine\Source\Runtime\Engine\Private\Curves">
       <UniqueIdentifier>{7882b35a-5e2a-4baf-b0b4-239a1c68f722}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\AIModule\Classes\Perception">
+      <UniqueIdentifier>{073ee9b4-888a-4b0a-88a3-4b4c10e42307}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Private\Kismet">
+      <UniqueIdentifier>{2ccc5553-7798-4822-ae0e-0717103fb53c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\AIModule\Private\Perception">
+      <UniqueIdentifier>{83d85ad9-21b0-4e06-9164-8bd74f9eb93f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Boot.h" />
@@ -1125,6 +1134,18 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortLootTablesCert.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Items</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingSMActor.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Building</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingContainer.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Building</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetMathLibrary.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Kismet</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\AIModule\Classes\Perception\AISense_Hearing.h">
+      <Filter>Engine\Source\Runtime\AIModule\Classes\Perception</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Boot.cpp" />
@@ -1526,6 +1547,21 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCert.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingActor.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Building</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingSMActor.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Building</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingContainer.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Building</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Kismet\KismetMathLibrary.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private\Kismet</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\Perception\AISense_Hearing.cpp">
+      <Filter>Engine\Source\Runtime\AIModule\Private\Perception</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

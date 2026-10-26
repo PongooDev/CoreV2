@@ -36,6 +36,17 @@ public:
         ArrayNum -= Count;
     }
 
+    void Empty()
+    {
+        if (Data)
+        {
+            FMemory::Free(Data);
+        }
+        Data = nullptr;
+        ArrayNum = 0;
+        ArrayMax = 0;
+    }
+
     int32_t AddZeroed(int32_t Count, int32_t NumBytesPerElement)
     {
         const int32_t Index = Add(Count, NumBytesPerElement);

@@ -1,6 +1,10 @@
 #include "pch.h"
 #include "Items/FortPickup.h"
+#include "Curves/CurveBase.h"
 #include "Finder.h"
+#include "FortAssetManager.h"
+#include "FortGameData.h"
+#include "Math/UnrealMathUtility.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
@@ -226,6 +230,21 @@ void AFortPickup::GivePickupToAI(AFortAIPawn* AIPawn, IFortInventoryOwnerInterfa
     TossEntry(OldEntry, OldEntry.Count);
     Inventory->RemoveWorldItem(OldItem);
 #endif
+}
+
+float AFortPickup::GetRandomFlyTime()
+{
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UCurveVector* SplineCurve = GameData ? static_cast<UCurveVector*>(GameData->PickupSplineCurve) : nullptr;
+    if (!SplineCurve)
+    {
+        return 1.5f;
+    }
+    float MinTime = 0.0f;
+    float MaxTime = 0.0f;
+    SplineCurve->GetTimeRange(MinTime, MaxTime);
+    const float RandomMax = GameData->PickupSplineRandomMax;
+    return (MaxTime - MinTime) * ((FMath::FRand() * (RandomMax - 1.0f)) + 1.0f);
 }
 
 ptrdiff_t AFortPickup::PrimaryPickupItemEntryOffset()

@@ -5648,3 +5648,114 @@ bool Finder::ResolveLootLive()
     Log::Info(L"Finder: UFortLootLevel::GetItemLevel +0x{:X}, IGameplayTagAssetInterface::GetOwnedGameplayTags slot 0x{:X}", GetItemLevel - Finder::ImageBase(), GetOwnedGameplayTagsIndex);
     return true;
 }
+
+bool Finder::ResolveBuildingLootLive()
+{
+    if (Natives::ABuildingContainer_SpawnLootIndex >= 0)
+    {
+        return true;
+    }
+
+    const auto LastByteSlot = [](UFunction* Function)
+    {
+        const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+        const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+        int32_t Slot = -1;
+        for (uintptr_t Site = ExecEnd ? FindInstruction(Exec, ExecEnd, { 0xFF, 0x50, -1 }) : 0; Site; Site = FindInstruction(Site + 1, ExecEnd, { 0xFF, 0x50, -1 }))
+        {
+            Slot = Byte(Site + 2) % 8 == 0 ? Byte(Site + 2) / 8 : -1;
+        }
+        return Slot;
+    };
+    const auto Calls = [](uintptr_t Function)
+    {
+        return Function ? Finder::DirectCalls(Function, Finder::FunctionEnd(Function)) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    };
+
+    // ABuildingSMActor::SelectMeshSet(int32 LootTier) survives in 1.2 and ends in the SetMeshSet virtual.
+    const uintptr_t SelectMeshSet = FunctionOf(L"ABuildingSMActor::SelectMeshSet(int32 LootTier) just set AltMeshIdx Building: %s, AltMeshIdx: %d");
+    const uintptr_t SelectMeshSetEnd = SelectMeshSet ? Finder::FunctionEnd(SelectMeshSet) : 0;
+    int32_t SetMeshSetIndex = -1;
+    for (uintptr_t Site = SelectMeshSetEnd ? FindVirtualCall(SelectMeshSet, SelectMeshSetEnd) : 0; Site; Site = FindVirtualCall(Site + 1, SelectMeshSetEnd))
+    {
+        SetMeshSetIndex = VirtualSlot(Site);
+    }
+
+    // ABuildingSMActor::PostUpdate: Cert selects the alternate mesh set in it, 1.2 only logs.
+    const uintptr_t PostUpdate = FunctionOf(L"ABuildingSMActor::PostUpdate() Building: %s, AltMeshIdx: %d");
+    void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
+    const int32_t PostUpdateIndex = PostUpdate && SMActorVTable ? Finder::VTableIndex(SMActorVTable, reinterpret_cast<void*>(PostUpdate), 0x300) : -1;
+    bool bPostUpdateSelectsMeshSet = false;
+    for (const auto& [Site, Target] : Calls(PostUpdate))
+    {
+        bPostUpdateSelectsMeshSet |= Target == SelectMeshSet;
+    }
+
+    // SpawnLoot: the first virtual call in the container's IFortInteractInterface::ServerOnAttemptInteract.
+    if (!Natives::UObject_GetInterfaceAddress)
+    {
+        ResolveSpottingLive(FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortSpottableActorInterface"));
+    }
+    UClass* InteractInterface = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortInteractInterface");
+    const int32_t InteractSlot = LastByteSlot(FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortInteractInterface:ServerOnAttemptInteract"));
+    UClass* ContainerClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.BuildingContainer");
+    UObject* ContainerDefault = ContainerClass ? ContainerClass->GetDefaultObject() : nullptr;
+    void* InteractAddress = ContainerDefault && InteractInterface && Natives::UObject_GetInterfaceAddress ? Natives::UObject_GetInterfaceAddress(ContainerDefault, InteractInterface) : nullptr;
+    const uintptr_t AttemptInteract = InteractAddress && InteractSlot >= 0 ? VTableEntry(*reinterpret_cast<void***>(InteractAddress), InteractSlot) : 0;
+    const uintptr_t AttemptInteractEnd = AttemptInteract ? Finder::FunctionEnd(AttemptInteract) : 0;
+    const int32_t SpawnLootIndex = AttemptInteractEnd ? VirtualSlot(FindVirtualCall(AttemptInteract, AttemptInteractEnd)) : -1;
+
+    // Three slots after SpawnLoot the container hides itself; its second direct call is AFortWorldManager::UpdateActorRecord.
+    void** ContainerVTable = ContainerDefault ? *reinterpret_cast<void***>(ContainerDefault) : nullptr;
+    const auto HideCalls = Calls(SpawnLootIndex >= 0 ? VTableEntry(ContainerVTable, SpawnLootIndex + 3) : 0);
+    const uintptr_t UpdateActorRecord = HideCalls.size() >= 2 ? HideCalls[1].second : 0;
+
+    // ABuildingContainer::PostLoad: Cert selects the mesh set of the saved loot tier key in it, 1.2 does not.
+    uintptr_t PostLoad = FunctionOf(L"ABuildingContainer::PostLoad() Container: %s, ContainerLootTierKey: %s, AltMeshIdx: %d");
+    if (!PostLoad)
+    {
+        PostLoad = FunctionOf(L"ABuildingContainer::PostLoad() Container: %s, ContainerLootTierKey: %s, ReplicatedLootTier: %d, AltMeshIdx: %d");
+    }
+    const int32_t PostLoadIndex = PostLoad && ContainerVTable ? Finder::VTableIndex(ContainerVTable, reinterpret_cast<void*>(PostLoad), 0x100) : -1;
+    std::vector<uintptr_t> MeshSetSelectors;
+    for (const uintptr_t Ref : Finder::StringRefs(L"No alternative meshes on %s for tier %d"))
+    {
+        MeshSetSelectors.push_back(Finder::FunctionStart(Ref));
+    }
+    bool bPostLoadSelectsMeshSet = false;
+    for (const auto& [Site, Target] : Calls(PostLoad))
+    {
+        bPostLoadSelectsMeshSet |= std::find(MeshSetSelectors.begin(), MeshSetSelectors.end(), Target) != MeshSetSelectors.end();
+    }
+
+    // AFortPlayerStateZone::ModifyStat: the "INVALID STAT TYPE! %d" reference whose function is in the vtable.
+    void** PlayerStateZoneVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerStateZone");
+    int32_t ModifyStatIndex = -1;
+    for (const uintptr_t Ref : Finder::StringRefs(L"INVALID STAT TYPE! %d"))
+    {
+        const int32_t Index = Finder::VTableIndex(PlayerStateZoneVTable, reinterpret_cast<void*>(Finder::FunctionStart(Ref)), 0x200);
+        ModifyStatIndex = Index >= 0 ? Index : ModifyStatIndex;
+    }
+
+    if (!SelectMeshSet || SetMeshSetIndex < 0 || PostUpdateIndex < 0 || SpawnLootIndex < 0 || !UpdateActorRecord || PostLoadIndex < 0 || ModifyStatIndex < 0)
+    {
+        Log::Error(L"Finder: building loot not found (SelectMeshSet {}, SetMeshSet {}, PostUpdate {}, SpawnLoot {}, UpdateActorRecord {}, PostLoad {}, ModifyStat {})",
+            SelectMeshSet != 0, SetMeshSetIndex, PostUpdateIndex, SpawnLootIndex, UpdateActorRecord != 0, PostLoadIndex, ModifyStatIndex);
+        return false;
+    }
+
+    Natives::ABuildingSMActor_SelectMeshSet = reinterpret_cast<decltype(Natives::ABuildingSMActor_SelectMeshSet)>(SelectMeshSet);
+    Natives::ABuildingSMActor_SetMeshSetIndex = SetMeshSetIndex;
+    Natives::ABuildingSMActor_PostUpdate = PostUpdate;
+    Natives::ABuildingSMActor_PostUpdateIndex = PostUpdateIndex;
+    Natives::ABuildingSMActor_bPostUpdateStripped = !bPostUpdateSelectsMeshSet;
+    Natives::ABuildingContainer_PostLoad = PostLoad;
+    Natives::ABuildingContainer_PostLoadIndex = PostLoadIndex;
+    Natives::ABuildingContainer_bPostLoadStripped = !bPostLoadSelectsMeshSet;
+    Natives::AFortWorldManager_UpdateActorRecord = reinterpret_cast<decltype(Natives::AFortWorldManager_UpdateActorRecord)>(UpdateActorRecord);
+    Natives::AFortPlayerStateZone_ModifyStatIndex = ModifyStatIndex;
+    Natives::ABuildingContainer_SpawnLootIndex = SpawnLootIndex;
+    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, SpawnLoot slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}",
+        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex);
+    return true;
+}

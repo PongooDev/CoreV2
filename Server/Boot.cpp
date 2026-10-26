@@ -31,6 +31,7 @@
 #include "Missions/FortMissionManager.h"
 #include "Online/FortMcpProfileWorld.h"
 #include "AI/FortAIGoalManager.h"
+#include "Building/BuildingContainer.h"
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "AI/FortBTTask_SetFrustrationDiscouragement.h"
 #include "AI/FortQueryContexts.h"
@@ -101,6 +102,8 @@ void Boot::Initialize()
         UFortVisibilityComponent::HookVTables();
         UAbilitySystemComponent::HookVTables();
         UFortKismetLibrary::HookNatives();
+        ABuildingSMActor::HookVTables();
+        ABuildingContainer::HookVTables();
         UFortMissionLibrary::HookNatives();
         AFortMission::HookNatives();
         UFortGameplayAbility::HookNatives();

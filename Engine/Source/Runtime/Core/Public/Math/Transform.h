@@ -13,6 +13,7 @@ struct alignas(16) FTransform
 
     FVector GetLocation() const { return Translation; }
     void SetLocation(const FVector& Origin) { Translation = Origin; }
+    FVector TransformPosition(const FVector& V) const { return Rotation.RotateVector(V * Scale3D) + Translation; }
 };
 
 static_assert(sizeof(FTransform) == 0x30);

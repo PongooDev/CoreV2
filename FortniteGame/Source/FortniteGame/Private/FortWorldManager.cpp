@@ -916,17 +916,20 @@ void AFortWorldManager::HookWorldLoot()
     }
 
     // 1.2: the quota fill the zone and tile setups call is the shared empty function.
+    bool bTileQuotasFilled = true;
     if (Finder::IsStubFunction(LootSites.Quota))
     {
         Hooks::RedirectCall(L"FFortLootQuotaData::GetLootQuotasForCategory (zone)", LootSites.ZoneQuotaCall, reinterpret_cast<void*>(&GetLootQuotasForCategoryCall));
-        if (LootSites.TileQuotaCall)
+        bTileQuotasFilled = LootSites.TileQuotaCall && Hooks::RedirectCall(L"FFortLootQuotaData::GetLootQuotasForCategory (tiles)", LootSites.TileQuotaCall, reinterpret_cast<void*>(&GetLootQuotasForCategoryCall));
+        if (!bTileQuotasFilled)
         {
-            Hooks::RedirectCall(L"FFortLootQuotaData::GetLootQuotasForCategory (tiles)", LootSites.TileQuotaCall, reinterpret_cast<void*>(&GetLootQuotasForCategoryCall));
+            Log::Error(L"Finder: the tile loot quota call was not found; the tile loot distribution stays off");
         }
     }
 
     // 1.2: the tick still fetches each new tile's loot record but no longer hands its quota-bound buildings their tiers.
-    if (!LootSites.bSpawnsTileLoot && LootSites.TileRecordCall && ABuildingSMActor::ResolveLootQuota())
+    // Without the tiles' quotas every quota-bound building would be hidden, so it needs the tile fill too.
+    if (!LootSites.bSpawnsTileLoot && bTileQuotasFilled && LootSites.TileRecordCall && ABuildingSMActor::ResolveLootQuota())
     {
         Hooks::RedirectCall(L"AFortWorldManager::SpawnTileLoot", LootSites.TileRecordCall, reinterpret_cast<void*>(&GetTileRecordCall));
     }

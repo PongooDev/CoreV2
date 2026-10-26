@@ -136,7 +136,9 @@ namespace Reflection
 
     inline bool GetBoolMember(const void* Object, FMemberInfo& Member)
     {
-        return (AccessMember<uint8_t>(Object, Member) & Member.GetFieldMask()) != 0;
+        // The mask is only set once the member resolves: read the byte first.
+        const uint8_t Byte = AccessMember<uint8_t>(Object, Member);
+        return (Byte & Member.GetFieldMask()) != 0;
     }
 
     inline void SetBoolMember(void* Object, FMemberInfo& Member, bool bValue)

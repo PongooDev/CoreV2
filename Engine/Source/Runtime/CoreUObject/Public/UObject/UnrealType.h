@@ -5,16 +5,16 @@
 class UProperty : public UField
 {
     DefineUnrealClass(UProperty, CoreUObject)
-    DefineLayoutMember(int32_t, ArrayDim, UProperty_ArrayDim)
-    DefineLayoutMember(int32_t, ElementSize, UProperty_ElementSize)
-    DefineLayoutMember(uint64_t, PropertyFlags, UProperty_PropertyFlags)
+    DefinePropertyLayoutMember(int32_t, ArrayDim, UProperty_ArrayDim)
+    DefinePropertyLayoutMember(int32_t, ElementSize, UProperty_ElementSize)
+    DefinePropertyLayoutMember(uint64_t, PropertyFlags, UProperty_PropertyFlags)
 
 public:
     FString GetCPPType(FString* ExtendedTypeText = nullptr, uint32_t CPPExportFlags = 0) const;
 
     int32_t GetOffset_ForInternal() const
     {
-        return *reinterpret_cast<const int32_t*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.UProperty_Offset_Internal);
+        return *reinterpret_cast<const int32_t*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Properties().UProperty_Offset_Internal);
     }
 
     int32_t GetSize() const { return ArrayDim * ElementSize; }
@@ -29,10 +29,10 @@ public:
 class UBoolProperty : public UProperty
 {
     DefineUnrealClass(UBoolProperty, CoreUObject)
-    DefineLayoutMember(uint8_t, FieldSize, UBoolProperty_FieldSize)
-    DefineLayoutMember(uint8_t, ByteOffset, UBoolProperty_ByteOffset)
-    DefineLayoutMember(uint8_t, ByteMask, UBoolProperty_ByteMask)
-    DefineLayoutMember(uint8_t, FieldMask, UBoolProperty_FieldMask)
+    DefinePropertyLayoutMember(uint8_t, FieldSize, UBoolProperty_FieldSize)
+    DefinePropertyLayoutMember(uint8_t, ByteOffset, UBoolProperty_ByteOffset)
+    DefinePropertyLayoutMember(uint8_t, ByteMask, UBoolProperty_ByteMask)
+    DefinePropertyLayoutMember(uint8_t, FieldMask, UBoolProperty_FieldMask)
 
 public:
     bool GetPropertyValue(const void* A) const
@@ -60,19 +60,19 @@ public:
 class UObjectPropertyBase : public UProperty
 {
     DefineUnrealClass(UObjectPropertyBase, CoreUObject)
-    DefineLayoutMember(UClass*, PropertyClass, UObjectPropertyBase_PropertyClass)
+    DefinePropertyLayoutMember(UClass*, PropertyClass, UObjectPropertyBase_PropertyClass)
 };
 
 class UStructProperty : public UProperty
 {
     DefineUnrealClass(UStructProperty, CoreUObject)
-    DefineLayoutMember(UScriptStruct*, Struct, UStructProperty_Struct)
+    DefinePropertyLayoutMember(UScriptStruct*, Struct, UStructProperty_Struct)
 };
 
 class UArrayProperty : public UProperty
 {
     DefineUnrealClass(UArrayProperty, CoreUObject)
-    DefineLayoutMember(UProperty*, Inner, UArrayProperty_Inner)
+    DefinePropertyLayoutMember(UProperty*, Inner, UArrayProperty_Inner)
 };
 
 template <class T>

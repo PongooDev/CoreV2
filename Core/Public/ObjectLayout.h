@@ -33,11 +33,21 @@ struct FObjectLayout
 namespace ObjectLayout
 {
     inline FObjectLayout Current;
+
+    // Current with the UProperty members read from the build's own reflection data, the first time a property is read
+    // (UProperty is 0x78 bytes with Offset_Internal at +0x50 on 1.1 and 1.2, 0x70 with it at +0x44 on 1.7.2).
+    const FObjectLayout& Properties();
 }
 
 #define DefineLayoutMember(Type, Name, LayoutField) \
 public: \
     Type& GetLayout_##Name() const { return *reinterpret_cast<Type*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Current.LayoutField); } \
+    void SetLayout_##Name(Type const& Value) { GetLayout_##Name() = Value; } \
+    __declspec(property(get = GetLayout_##Name, put = SetLayout_##Name)) Type Name;
+
+#define DefinePropertyLayoutMember(Type, Name, LayoutField) \
+public: \
+    Type& GetLayout_##Name() const { return *reinterpret_cast<Type*>(reinterpret_cast<uintptr_t>(this) + ObjectLayout::Properties().LayoutField); } \
     void SetLayout_##Name(Type const& Value) { GetLayout_##Name() = Value; } \
     __declspec(property(get = GetLayout_##Name, put = SetLayout_##Name)) Type Name;
 

@@ -2882,7 +2882,7 @@ bool Finder::ResolvePropertyCPPType()
 
 bool Finder::ResolveScriptStructCopy()
 {
-    const int32_t StructOffset = ObjectLayout::Current.UStructProperty_Struct;
+    const int32_t StructOffset = ObjectLayout::Properties().UStructProperty_Struct;
     const auto ReadsStruct = [](uintptr_t Begin, uintptr_t End, int32_t Displacement)
     {
         for (uintptr_t Load = FindInstruction(Begin, End, { 0x8B, -1, Displacement }); Load; Load = FindInstruction(Load + 1, End, { 0x8B, -1, Displacement }))
@@ -2897,7 +2897,7 @@ bool Finder::ResolveScriptStructCopy()
 
     void** VTable = CdoVTable(L"/Script/CoreUObject.StructProperty");
     std::vector<int32_t> StructSlots;
-    const int32_t ArrayDimOffset = ObjectLayout::Current.UProperty_ArrayDim;
+    const int32_t ArrayDimOffset = ObjectLayout::Properties().UProperty_ArrayDim;
     for (int32_t Index = 0; VTable && Index < 0x100; ++Index)
     {
         const uintptr_t Thunk = reinterpret_cast<uintptr_t>(VTable[Index]);

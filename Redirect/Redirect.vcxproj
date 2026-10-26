@@ -352,6 +352,7 @@
     <ClCompile Include="..\Core\Private\GetCurrentCallSites.cpp" />
     <ClCompile Include="..\Core\Private\Hooks.cpp" />
     <ClCompile Include="..\Core\Private\Log.cpp" />
+    <ClCompile Include="..\Core\Private\ObjectLayout.cpp" />
     <ClCompile Include="..\Core\Private\Reflection.cpp" />
     <ClCompile Include="..\Core\Private\Resolve.cpp" />
     <ClCompile Include="..\Core\Private\pch.cpp">

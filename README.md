@@ -33,7 +33,7 @@ Core moves forward one build at a time and skips builds nobody has a copy of, so
 | --- | --- | --- |
 | 1.1 | Cert CL-3532353 | Full support ✅ |
 | 1.2 | Release-Cert CL-3541083 | Full support ✅ |
-| 1.7.2 | Release-1.7.2 CL-3700114 | In development 🚧 |
+| 1.7.2 | Release-Cert CL-3700114 | In development 🚧 |
 
 </details>
 

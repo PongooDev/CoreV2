@@ -330,7 +330,9 @@
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AbilitySystemBlueprintLibrary.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Curves\CurveBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\DataTable.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCertData.inl" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortLootPackage.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortLootTablesCert.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Boot.cpp" />
@@ -486,6 +488,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Curves\CurveBase.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameData.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootPackage.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCert.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

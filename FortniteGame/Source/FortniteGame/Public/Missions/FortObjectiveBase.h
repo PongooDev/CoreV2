@@ -29,6 +29,7 @@ class AFortObjectiveBase : public AActor
     DefineUFunction(ClearObjectiveTimer)
     DefineUFunction(OnRep_ObjectiveStatus)
     DefineUFunction(BlueprintOnStartPlaying)
+    DefineUFunction(BlueprintOnActivated)
     DefineUFunction(BlueprintOnObjectiveEnd)
 
 public:
@@ -45,6 +46,7 @@ public:
     void StopObjective(EFortObjectiveStatus Status, const FText& Description, UObject* ExtraBadgeToGrant);
     void ClearObjectiveTimer();
     void BlueprintOnStartPlaying();
+    void BlueprintOnActivated();
     void BlueprintOnObjectiveEnd(EFortObjectiveStatus Status);
     void SendObjectiveEndedEvent(EFortObjectiveStatus Status);
 

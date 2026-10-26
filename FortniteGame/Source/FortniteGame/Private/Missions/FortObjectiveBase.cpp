@@ -46,6 +46,11 @@ void AFortObjectiveBase::SetObjectiveStatus(EFortObjectiveStatus NewStatus)
 bool AFortObjectiveBase::ActivateObjective()
 {
 #if WITH_SERVER_CODE
+    // The objective's blueprint sets itself up here: Repair the Shelter's RtS_Obj_InstallDevice sets its count of parts
+    // to install from NumMissingPartsRequired, and without it every module handed in was dropped (CoreV2 #71). The
+    // shipping exe only fires this event from the mission's own activation (0x65F280 on 1.7.2), the objective's call was
+    // stripped with ActivateObjective.
+    BlueprintOnActivated();
     if (bStartPlayingOnMissionStart)
     {
         return StartPlayingObjective();
@@ -146,6 +151,12 @@ void AFortObjectiveBase::SendObjectiveEndedEvent(EFortObjectiveStatus Status)
     const FName EventType(EventName, FNAME_Find);
     UFortMissionLibrary::ExecuteMissionEvent(this, EventType, Mission->MissionGuid, ObjectiveHandle, Params);
 #endif
+}
+
+void AFortObjectiveBase::BlueprintOnActivated()
+{
+    Reflection::FParams Params(FindFunction(StaticFunction_BlueprintOnActivated()->GetFName()));
+    Params.Call(this);
 }
 
 void AFortObjectiveBase::BlueprintOnStartPlaying()

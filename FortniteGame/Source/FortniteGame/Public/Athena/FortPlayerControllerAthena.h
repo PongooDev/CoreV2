@@ -1,8 +1,12 @@
 #pragma once
 
 #include "Containers/Array.h"
+#include "Math/Vector.h"
 #include "Player/FortPlayerController.h"
 
+#include <vector>
+
+class AActor;
 class AFortPawn;
 class UFortHero;
 class UFortHeroType;
@@ -26,6 +30,9 @@ public:
 
     // An eliminated player's inventory lies around where they died: everything that can be dropped, one pickup each.
     void DropInventoryOnDeath(AFortPawn* DeadPawn);
+    // The spots on the floor around DeathLocation that DropInventoryOnDeath tosses Count pickups to (DeadPawn is the
+    // traces' world context and is ignored by them).
+    static std::vector<FVector> GetInventoryDropSpots(AActor* DeadPawn, const FVector& DeathLocation, int32_t Count);
 
     static void HookCallSites();
 

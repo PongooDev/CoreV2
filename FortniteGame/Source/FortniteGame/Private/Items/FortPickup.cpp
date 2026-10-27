@@ -25,6 +25,7 @@
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace
@@ -253,6 +254,46 @@ void AFortPickup::TossFromContainer(const FVector& FinalLocation, const FVector&
     {
         bTossedFromContainer = true;
     }
+}
+
+void AFortPickup::TossOntoFloor(const FVector& FloorLocation, AFortPawn* ItemOwner)
+{
+    // A toss doesn't reach the location it is given (#89). 0x680570 launches at 45 degrees with a horizontal speed of the
+    // distance over the fly time (about 1.4s) and drops the gravity its solver (0x2A7160) works out for that flight, so the
+    // pickup falls under the world's (2800 in Battle Royale): from a body's height, aimed 1.5 to 2.5m out, it came down
+    // 10 to 35 out, and the items lay in a pile. The launch is replaced with one solved for the movement's own gravity: up
+    // Rise over the higher of the start and the landing, down onto the floor with the pickup's collision resting on it
+    // (its root is 80 above it), with the horizontal speed spread over the flight and the hops that follow (each bounce
+    // keeps Bounciness of the vertical speed and 1 - Friction of the horizontal: 0.6 and 0.5). Measured on a 1.7.2 server,
+    // pickups come to rest within 10 of their spot, after about a second. One aimed past a ledge still lands on the upper
+    // floor, short of it.
+    constexpr float Rise = 70.0f;
+    TossPickup(FloorLocation, ItemOwner, 0);
+    UProjectileMovementComponent* Movement = MovementComponent;
+    const float Gravity = Movement && Role == ROLE_Authority ? -Movement->GetGravityZ() : 0.0f;
+    if (Gravity <= 0.0f)
+    {
+        return;
+    }
+
+    const FVector Start = GetTransform().GetLocation();
+    FVector Origin;
+    FVector Extent;
+    GetActorBounds(true, Origin, Extent);
+    const float RestHeight = FMath::Max(Start.Z - (Origin.Z - Extent.Z), 0.0f);
+    const FVector Target(FloorLocation.X, FloorLocation.Y, FloorLocation.Z + RestHeight);
+    const float Apex = std::max(Start.Z, Target.Z) + Rise;
+    const float UpSpeed = std::sqrt(2.0f * Gravity * (Apex - Start.Z));
+    const float FallSpeed = std::sqrt(2.0f * Gravity * (Apex - Target.Z));
+    const float Restitution = FMath::Clamp(Movement->Bounciness * (1.0f - Movement->Friction), 0.0f, 0.9f);
+    const float HopTime = 2.0f * FallSpeed / Gravity * Restitution / (1.0f - Restitution);
+    const float FlyTime = (UpSpeed + FallSpeed) / Gravity;
+    const float Distance = std::sqrt(FMath::Square(Target.X - Start.X) + FMath::Square(Target.Y - Start.Y));
+    const float Speed = Distance / (FlyTime + HopTime);
+    const FVector Direction = Distance > 1.0f ? FVector((Target.X - Start.X) / Distance, (Target.Y - Start.Y) / Distance, 0.0f) : FVector(0.0f, 0.0f, 0.0f);
+    const FVector LaunchVelocity(Direction.X * Speed, Direction.Y * Speed, UpSpeed);
+    Movement->Velocity = LaunchVelocity;
+    Movement->MaxSpeed = LaunchVelocity.Size();
 }
 
 void AFortPickup::SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)

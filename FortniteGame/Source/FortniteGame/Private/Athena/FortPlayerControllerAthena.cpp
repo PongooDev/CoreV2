@@ -128,6 +128,38 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
         }
     }
 
+    const FVector DeathLocation = DeadPawn->GetTransform().GetLocation();
+    const int32_t DropCount = static_cast<int32_t>(Drops.size());
+    const std::vector<FVector> Spots = GetInventoryDropSpots(DeadPawn, DeathLocation, DropCount);
+
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    int32_t Dropped = 0;
+    for (int32_t Index = 0; Index < DropCount; ++Index)
+    {
+        FFortItemEntry& ItemEntry = Drops[Index]->ItemEntry;
+        const FGuid ItemGuid = ItemEntry.ItemGuid;
+        const int32_t Count = ItemEntry.Count;
+        EntryStruct->InitializeStruct(DropEntry);
+        EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
+        if (RemoveInventoryItem(ItemGuid, Count, false))
+        {
+            if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &DeathLocation, nullptr))
+            {
+                Pickup->PawnWhoDroppedPickup = DeadPawn;
+                Pickup->TossOntoFloor(Spots[Index], DeadPawn);
+                ++Dropped;
+            }
+        }
+        EntryStruct->DestroyStruct(DropEntry);
+    }
+    UE_LOG(LogFort, Log, TEXT("DropInventoryOnDeath: %s dropped %d of %d items"), *GetName(), Dropped, DropCount);
+#endif
+}
+
+std::vector<FVector> AFortPlayerControllerAthena::GetInventoryDropSpots(AActor* DeadPawn, const FVector& DeathLocation, int32_t Count)
+{
     // The pickups are tossed from the body to their own spots around it. A ring 80 out with 50 between them left a pile
     // (#89: pickups are 60 across, AFortPickup's constructor 0x65BA90). They scatter a few meters out instead: rings from
     // 1.5m, a meter apart, with about a meter between neighbours, each ring turned against the last and each spot moved a
@@ -143,13 +175,11 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
     constexpr float PickupRadius = 30.0f;
     constexpr float TraceHeight = 50.0f;
     constexpr float TraceDepth = 100000.0f;
-    const FVector DeathLocation = DeadPawn->GetTransform().GetLocation();
-    const int32_t DropCount = static_cast<int32_t>(Drops.size());
     std::vector<FVector> Spots;
     const float StartAngle = FMath::FRand() * 2.0f * Pi;
-    for (float Radius = FirstRingRadius; static_cast<int32_t>(Spots.size()) < DropCount; Radius += RingSpacing)
+    for (float Radius = FirstRingRadius; static_cast<int32_t>(Spots.size()) < Count; Radius += RingSpacing)
     {
-        const int32_t RingCount = std::min(std::max(static_cast<int32_t>(2.0f * Pi * Radius / PickupSpacing), 1), DropCount - static_cast<int32_t>(Spots.size()));
+        const int32_t RingCount = std::min(std::max(static_cast<int32_t>(2.0f * Pi * Radius / PickupSpacing), 1), Count - static_cast<int32_t>(Spots.size()));
         const float Step = 2.0f * Pi / static_cast<float>(RingCount);
         const float RingStart = StartAngle + Radius / FirstRingRadius;
         for (int32_t Index = 0; Index < RingCount; ++Index)
@@ -169,31 +199,7 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
             Spots.push_back(Floor);
         }
     }
-
-    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
-    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
-    FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
-    int32_t Dropped = 0;
-    for (int32_t Index = 0; Index < DropCount; ++Index)
-    {
-        FFortItemEntry& ItemEntry = Drops[Index]->ItemEntry;
-        const FGuid ItemGuid = ItemEntry.ItemGuid;
-        const int32_t Count = ItemEntry.Count;
-        EntryStruct->InitializeStruct(DropEntry);
-        EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
-        if (RemoveInventoryItem(ItemGuid, Count, false))
-        {
-            if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &DeathLocation, nullptr))
-            {
-                Pickup->PawnWhoDroppedPickup = DeadPawn;
-                Pickup->TossPickup(Spots[Index], DeadPawn, 0);
-                ++Dropped;
-            }
-        }
-        EntryStruct->DestroyStruct(DropEntry);
-    }
-    UE_LOG(LogFort, Log, TEXT("DropInventoryOnDeath: %s dropped %d of %d items"), *GetName(), Dropped, DropCount);
-#endif
+    return Spots;
 }
 
 void AFortPlayerControllerAthena::HookCallSites()

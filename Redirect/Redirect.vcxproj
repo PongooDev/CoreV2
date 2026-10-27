@@ -424,6 +424,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\KismetNodeHelperLibrary.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Level.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\LevelStreaming.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\MovementComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetConnection.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetSerialization.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetworkDriver.cpp" />

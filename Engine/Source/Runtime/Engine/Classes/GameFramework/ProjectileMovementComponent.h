@@ -9,4 +9,6 @@ class UProjectileMovementComponent : public UMovementComponent
 
 public:
     DefineUProperty(float, MaxSpeed)
+    DefineUProperty(float, Bounciness)
+    DefineUProperty(float, Friction)
 };

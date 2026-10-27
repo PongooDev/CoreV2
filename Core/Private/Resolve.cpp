@@ -6345,3 +6345,117 @@ bool Finder::ResolveSpawnGroupUpgradeLive(ptrdiff_t AvailableUpgradesOffset, ptr
     Log::Info(L"Finder: spawn group upgrade 0x{:X} ({}), call 0x{:X}, group cost call 0x{:X}, pawn upgrade call 0x{:X}", TryUpgrade - Finder::ImageBase(), OutSites.bRollsModifiers ? L"native" : L"stripped", TryUpgradeCall - Finder::ImageBase(), GroupCostCall - Finder::ImageBase(), PawnUpgradeCall - Finder::ImageBase());
     return true;
 }
+
+bool Finder::ResolveVoiceConfig()
+{
+    if (Natives::FConfigCacheIni_GetBool)
+    {
+        return true;
+    }
+
+    // Every reader of [OnlineSubsystem] bHasVoiceEnabled (the voice interface's Init, the subsystems' voice checks; 1.7.2
+    // 0x391CCC0, 0x3B42F30, 0x3B43F80) loads the key and calls GConfig->GetBool(Section, Key, Value, GEngineIni) next.
+    std::unordered_map<uintptr_t, int32_t> Targets;
+    for (const uintptr_t Ref : Finder::StringRefs(L"bHasVoiceEnabled"))
+    {
+        const uintptr_t Target = Finder::NextCall(Ref, 0x40);
+        if (IsInText(Target))
+        {
+            ++Targets[Target];
+        }
+    }
+    const auto Best = std::max_element(Targets.begin(), Targets.end(), [](const auto& A, const auto& B) { return A.second < B.second; });
+    if (Best == Targets.end() || Best->second < 2)
+    {
+        Log::Error(L"Finder: FConfigCacheIni::GetBool not found from the voice switch's readers");
+        return false;
+    }
+
+    Natives::FConfigCacheIni_GetBool = reinterpret_cast<decltype(Natives::FConfigCacheIni_GetBool)>(Best->first);
+    Log::Info(L"Finder: FConfigCacheIni::GetBool at 0x{:X} (called by {} voice switch readers)", Best->first - Finder::ImageBase(), Best->second);
+    return true;
+}
+
+bool Finder::ResolvePushToTalk()
+{
+    if (Natives::AFortPlayerController_PushToTalkPressedIndex >= 0)
+    {
+        return true;
+    }
+
+    // AFortPlayerController's input setup (1.7.2 0x44B150) binds the PushToTalk action, pressed then released, to two
+    // virtuals through vcall thunks: lea rax, Thunk shortly before each lea rdx, "PushToTalk", and the thunk is
+    // mov rax, [rcx]; jmp [rax+disp32]. 1.7.2: slots 0x324 and 0x325 (0x438810, 0x4389F0), which only reach Vivox.
+    std::vector<int32_t> Slots;
+    for (const uintptr_t Ref : Finder::StringRefs("PushToTalk"))
+    {
+        for (uintptr_t At = Ref - 7; At + 0x20 > Ref; --At)
+        {
+            if (Byte(At) != 0x48 || Byte(At + 1) != 0x8D || Byte(At + 2) != 0x05)
+            {
+                continue;
+            }
+            const uintptr_t Thunk = Finder::RelativeTarget(At, 3, 7);
+            if (IsInText(Thunk) && FindInstruction(Thunk, Thunk + 5, { 0x48, 0x8B, 0x01, 0xFF, 0xA0 }) == Thunk)
+            {
+                Slots.push_back(*reinterpret_cast<const int32_t*>(Thunk + 5) / static_cast<int32_t>(sizeof(void*)));
+                break;
+            }
+        }
+    }
+    if (Slots.size() != 2 || Slots[0] == Slots[1])
+    {
+        Log::Warning(L"Finder: no PushToTalk bindings found ({} vcall thunks); push to talk stays with Vivox", Slots.size());
+        return false;
+    }
+
+    Natives::AFortPlayerController_PushToTalkPressedIndex = Slots[0];
+    Natives::AFortPlayerController_PushToTalkReleasedIndex = Slots[1];
+    Log::Info(L"Finder: AFortPlayerController push to talk is slot 0x{:X} pressed, 0x{:X} released", Slots[0], Slots[1]);
+    return true;
+}
+
+bool Finder::ResolveOnlineVoice()
+{
+    if (Natives::FOnlineVoiceImpl_VTable)
+    {
+        return true;
+    }
+
+    // FOnlineVoiceImpl (OnlineSubsystemUtils; 1.7.2 vtable 0x4C92CE0): Init at slot 0 (0x391CCC0, which logs a missing
+    // MaxLocalTalkers key; so does the voice Exec's dump), RegisterRemoteTalker a few slots on (0x39294E0), and
+    // SerializeRemotePacket right after UnmuteRemoteTalker (0x3931590, 0x392C690).
+    const uintptr_t Register = FunctionOf(L"RegisterRemoteTalker(%s) returned 0x%08X");
+    const uintptr_t Unmute = FunctionOf(L"Unmuting remote talker (%s)");
+    std::vector<uintptr_t> Inits;
+    for (const uintptr_t Ref : Finder::StringRefs(L"Missing MaxLocalTalkers key in OnlineSubsystem of DefaultEngine.ini"))
+    {
+        Inits.push_back(Finder::FunctionStart(Ref));
+    }
+
+    void** const RegisterEntry = Finder::VTableContaining(Register, 0, 1);
+    void** VTable = nullptr;
+    for (int32_t Back = 0; RegisterEntry && Back < 16 && !VTable; ++Back)
+    {
+        if (std::find(Inits.begin(), Inits.end(), reinterpret_cast<uintptr_t>(RegisterEntry[-Back])) != Inits.end())
+        {
+            VTable = RegisterEntry - Back;
+        }
+    }
+    int32_t UnmuteIndex = -1;
+    for (int32_t Index = 0; VTable && Index < 64 && UnmuteIndex < 0; ++Index)
+    {
+        UnmuteIndex = reinterpret_cast<uintptr_t>(VTable[Index]) == Unmute ? Index : -1;
+    }
+    if (!VTable || UnmuteIndex < 0 || !VTableEntry(VTable, UnmuteIndex + 1))
+    {
+        Log::Warning(L"Finder: FOnlineVoiceImpl vtable not found (RegisterRemoteTalker 0x{:X}, {} Init candidates)", Register ? Register - Finder::ImageBase() : 0, Inits.size());
+        return false;
+    }
+
+    Natives::FOnlineVoiceImpl_VTable = VTable;
+    Natives::FOnlineVoiceImpl_InitIndex = 0;
+    Natives::FOnlineVoiceImpl_SerializeRemotePacketIndex = UnmuteIndex + 1;
+    Log::Info(L"Finder: FOnlineVoiceImpl vtable at 0x{:X}, SerializeRemotePacket slot 0x{:X}", reinterpret_cast<uintptr_t>(VTable) - Finder::ImageBase(), UnmuteIndex + 1);
+    return true;
+}

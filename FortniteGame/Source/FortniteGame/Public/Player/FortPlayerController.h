@@ -95,6 +95,8 @@ public:
 
     static void Hook();
     static void HookVTables();
+    // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox.
+    static void HookVoice();
 
     DECLARE_FUNCTION(execActivateSlot);
     DECLARE_FUNCTION(execGivePlayerAmmo);
@@ -105,6 +107,8 @@ private:
     static bool InitializeMcpProfileHK(AFortPlayerController* This, const void* OnComplete);
     static inline void (*PossessOG)(AFortPlayerController* This, APawn* InPawn) = nullptr;
     static void PossessHK(AFortPlayerController* This, APawn* InPawn);
+    static void PushToTalkPressedHK(AFortPlayerController* This);
+    static void PushToTalkReleasedHK(AFortPlayerController* This);
     static inline void (*TrySetHeroImplementationOG)(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused) = nullptr;
     static void TrySetHeroImplementationHK(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused);
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);

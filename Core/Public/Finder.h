@@ -89,6 +89,9 @@ namespace Finder
     bool ResolveTextLocalizationManager();
     bool ResolvePlayerControllerConsole();
     bool ResolvePlayerControllerCheats();
+    bool ResolveVoiceConfig();
+    bool ResolvePushToTalk();
+    bool ResolveOnlineVoice();
     bool ResolveProcessEvent();
     bool ResolveInitListen();
     bool ResolveReplicationLive();

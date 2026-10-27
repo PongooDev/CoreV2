@@ -27,6 +27,7 @@
 #include "McpProfileGroup.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
+#include "OnlineVoiceImpl.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
 #include "Missions/FortMission.h"
@@ -83,6 +84,7 @@ void Boot::Initialize()
     UGameInstance::Hook();
     UFortGameInstance::Hook();
     FOnlineSubsystemImpl::Hook();
+    FOnlineVoiceImpl::Hook();
     FFortMcpConfig::Hook();
     UMcpProfileGroup::Hook();
     AFortGameMode::Hook();

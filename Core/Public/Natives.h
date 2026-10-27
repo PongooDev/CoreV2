@@ -153,6 +153,10 @@ namespace Natives
     inline bool (*FParse_Param)(const wchar_t* Stream, const wchar_t* Param) = nullptr;
 
     inline void (*GetSourceIniHierarchyFilenames)(const wchar_t* InBaseIniName, const wchar_t* InPlatformName, const wchar_t* EngineConfigDir, const wchar_t* SourceConfigDir, void* OutHierarchy, bool bRequireDefaultIni) = nullptr;
+    inline bool (*FConfigCacheIni_GetBool)(void* This, const wchar_t* Section, const wchar_t* Key, bool& Value, const FString& Filename) = nullptr;
+    inline void** FOnlineVoiceImpl_VTable = nullptr;
+    inline int32_t FOnlineVoiceImpl_InitIndex = -1;
+    inline int32_t FOnlineVoiceImpl_SerializeRemotePacketIndex = -1;
     inline FString* (*UGameMapsSettings_GetGameDefaultMap)(FString* Result) = nullptr;
     inline const FString* (*UGameMapsSettings_GetGlobalDefaultGameMode)() = nullptr;
 
@@ -384,6 +388,8 @@ namespace Natives
     inline int32_t APlayerController_ConsoleKeyIndex = -1;
     inline int32_t APlayerController_SendToConsoleIndex = -1;
     inline int32_t APlayerController_AddCheatsIndex = -1;
+    inline int32_t AFortPlayerController_PushToTalkPressedIndex = -1;
+    inline int32_t AFortPlayerController_PushToTalkReleasedIndex = -1;
     inline int32_t IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = -1;
     inline int32_t IConsoleManager_FindConsoleVariableIndex = -1;
     inline int32_t UProperty_GetCPPTypeIndex = -1;

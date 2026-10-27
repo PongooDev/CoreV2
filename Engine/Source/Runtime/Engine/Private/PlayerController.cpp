@@ -5,7 +5,9 @@
 #include "Engine/LocalPlayer.h"
 #include "Finder.h"
 #include "Hooks.h"
+#include "Log.h"
 #include "Natives.h"
+#include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectIterator.h"
 
@@ -46,6 +48,33 @@ void APlayerController::SendToConsole(const FString& Command)
         }
     }
 #endif
+}
+
+void APlayerController::ToggleSpeaking(bool bInSpeaking)
+{
+    Reflection::FParams Params(StaticFunction_ToggleSpeaking());
+    Params.Set(L"bInSpeaking", bInSpeaking);
+    Params.Call(this);
+}
+
+void APlayerController::HookVoice()
+{
+    UFunction* Function = StaticFunction_ClientEnableNetworkVoice();
+    if (Function && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        Function->SetNativeFunc(&execClientEnableNetworkVoice);
+        Log::Info(L"Hook APlayerController::ClientEnableNetworkVoice: native (push to talk)");
+    }
+}
+
+DEFINE_FUNCTION(APlayerController::execClientEnableNetworkVoice)
+{
+    P_GET_UBOOL(Z_Param_bEnable);
+    P_FINISH;
+    if (Z_Param_bEnable)
+    {
+        Log::Info(L"Voice chat: the server asked for an open microphone; Core keeps push to talk");
+    }
 }
 
 void APlayerController::ConsoleKeyHK(APlayerController* This, FKey Key)

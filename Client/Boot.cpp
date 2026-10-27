@@ -9,6 +9,9 @@
 #include "Engine/GameEngine.h"
 #include "Engine/GameViewportClient.h"
 #include "GameFramework/PlayerController.h"
+#include "Misc/ConfigCacheIni.h"
+#include "OnlineVoiceImpl.h"
+#include "Player/FortPlayerController.h"
 
 void Boot::Initialize()
 {
@@ -32,11 +35,15 @@ void Boot::Initialize()
     UGameEngine::Hook();
     Diagnostics::HookLobbyClient();
     Diagnostics::HookQuestTiles();
+    // Before the engine reads its config: the voice module and the online subsystem's voice interface start with it.
+    FConfigCacheIni::EnableVoice(true);
+    FOnlineVoiceImpl::Hook();
     Hooks::EnableAll();
 
     GameThread::Enqueue([]
     {
         APlayerController::Hook();
+        AFortPlayerController::HookVoice();
     });
 
     Log::Info(L"Core Client startup complete");

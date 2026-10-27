@@ -48,4 +48,9 @@ class FConfigCacheIni
 {
 public:
     static void Hook();
+
+    // Engine voice chat (UE's VOIP through the game server) for builds whose desktop config turns it off: forces
+    // [OnlineSubsystem] bHasVoiceEnabled on, and with bLocalVoice the voice module ([Voice] bEnabled) that captures and
+    // plays it.
+    static void EnableVoice(bool bLocalVoice);
 };

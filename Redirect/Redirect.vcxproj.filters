@@ -477,6 +477,9 @@
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayAbilitySpec.h">
       <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayEffect.h">
+      <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayPrediction.h">
       <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public</Filter>
     </ClInclude>
@@ -1014,6 +1017,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortHomebaseSet.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
@@ -1216,6 +1222,9 @@
       <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private\AbilitySystemComponent_Abilities.cpp">
+      <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private\GameplayEffect.cpp">
       <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\EnvironmentQuery\EnvQueryInstanceBlueprintWrapper.cpp">
@@ -1498,6 +1507,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Building</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Heroes\FortHero.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Heroes</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Heroes\FortHeroType.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Heroes</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Homebase\FortHomebaseManager.cpp">

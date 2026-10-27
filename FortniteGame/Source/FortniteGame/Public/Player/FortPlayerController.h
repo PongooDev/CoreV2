@@ -41,6 +41,7 @@ public:
     DefineBitfieldUProperty(bInfiniteDurability)
     DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
+    DefineUProperty(int32_t, OverriddenBackpackSize)
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)

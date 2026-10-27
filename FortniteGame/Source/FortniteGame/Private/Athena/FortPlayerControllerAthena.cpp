@@ -1,10 +1,15 @@
 #include "pch.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Abilities/FortHomebaseSet.h"
 #include "Finder.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
+#include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
+#include "UObject/Class.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 bool AFortPlayerControllerAthena::IsDefaultHero(UFortHero* Hero)
 {
@@ -46,4 +51,29 @@ UFortHero* AFortPlayerControllerAthena::SetupHero()
         TrySetHeroImplementation(Hero, false, false);
     }
     return Hero;
+}
+
+void AFortPlayerControllerAthena::SetupBackpackSize()
+{
+    // The HUD's backpack showed "0 | 0" instead of "0 | 5" (#77). AthenaPickupManager's RefreshCounts shows
+    // UFortInventoryContext::GetBackpackItemCounts (0x2DB19B0): the world inventory's limited items against its size
+    // (0x63CA40), which is OverriddenBackpackSize when set, else the player info's ability system actor's (the player
+    // state's) FortHomebaseSet.WorldInventorySizeBonus. Battle Royale's +5 to that is GE_Map_Athena_Inventory_StartingSize
+    // in its heroes' CombinedStatGEs, which reach the player state only when Possess resets the attributes (#73, before
+    // that never), after the starting items, and the HUD reads the size only when it's built and when the inventory
+    // changes. The size goes on the controller instead, read from the same effects, before the starting items. It
+    // replicates while the controller has a cheat manager (0x81FBA0), which every player gets when they join.
+    UClass* HomebaseSetClass = UFortHomebaseSet::StaticClass();
+    const UProperty* WorldInventorySizeBonus = HomebaseSetClass ? HomebaseSetClass->FindPropertyByName(FName(L"WorldInventorySizeBonus", FNAME_Find)) : nullptr;
+    for (UFortHeroType* HeroType : DefaultHeroes)
+    {
+        const int32_t BackpackSize = HeroType ? static_cast<int32_t>(HeroType->GetCombinedStatBonus(WorldInventorySizeBonus)) : 0;
+        if (BackpackSize > 0)
+        {
+            OverriddenBackpackSize = BackpackSize;
+            UE_LOG(LogFort, Log, TEXT("SetupBackpackSize: %s has a backpack of %d (%s)"), *GetName(), BackpackSize, *HeroType->GetName());
+            return;
+        }
+    }
+    UE_LOG(LogFort, Warning, TEXT("SetupBackpackSize: %s's heroes give no backpack size, it stays the attribute's"), *GetName());
 }

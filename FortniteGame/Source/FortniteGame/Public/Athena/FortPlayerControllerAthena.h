@@ -18,4 +18,5 @@ public:
     bool IsDefaultHero(UFortHero* Hero);
     UFortHero* GetOrInitializeHero();
     UFortHero* SetupHero();
+    void SetupBackpackSize();
 };

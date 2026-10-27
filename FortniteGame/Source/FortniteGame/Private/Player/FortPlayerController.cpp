@@ -166,6 +166,10 @@ bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
         AFortGameModeAthena* AthenaGameMode = World ? Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
         if (AthenaGameMode)
         {
+            if (AFortPlayerControllerAthena* AthenaController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)))
+            {
+                AthenaController->SetupBackpackSize();
+            }
             GiveStartingItems(AthenaGameMode->StartingItems);
         }
         else if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())

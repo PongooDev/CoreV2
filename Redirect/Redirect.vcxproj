@@ -112,6 +112,7 @@
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AbilitySystemInterface.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\AttributeSet.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayAbilitySpec.h" />
+    <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayEffect.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\GameplayPrediction.h" />
     <ClInclude Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public\Abilities\GameplayAbility.h" />
     <ClInclude Include="..\Engine\Source\Runtime\AIModule\Classes\EnvironmentQuery\EnvQuery.h" />
@@ -291,6 +292,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilityKit.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortHomebaseSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortGameModeAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerControllerAthena.h" />
@@ -365,6 +367,7 @@
     </ClCompile>
     <ClCompile Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private\AbilitySystemBlueprintLibrary.cpp" />
     <ClCompile Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private\AbilitySystemComponent_Abilities.cpp" />
+    <ClCompile Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private\GameplayEffect.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\EnvironmentQuery\EnvQueryInstanceBlueprintWrapper.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\EnvironmentQuery\EnvQueryManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\Perception\AISense_Hearing.cpp" />
@@ -459,6 +462,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingStructuralSupportSystem.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingTrap.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Heroes\FortHero.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Heroes\FortHeroType.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Homebase\FortHomebaseManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortBadgeItemDefinition.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortInventory.cpp" />

@@ -1256,6 +1256,26 @@ void AFortPlayerController::HookVTables()
         Log::Error(L"Finder: AFortPlayerController::ServerRemoveInventoryStateValue_Implementation slot not found");
     }
 
+    if (const int32_t CheatIndex = Finder::ImplementationIndex(StaticFunction_ServerCheat());
+        PlayerControllerVTable && CheatIndex >= 0 && Finder::ResolvePlayerControllerConsoleCommand(reinterpret_cast<uintptr_t>(PlayerControllerVTable[CheatIndex])))
+    {
+        void* const PlayerControllerCheat = PlayerControllerVTable[CheatIndex];
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[CheatIndex] == PlayerControllerCheat)
+            {
+                Hooks::SwapVTable(L"AFortPlayerController::ServerCheat_Implementation", VTable, CheatIndex, reinterpret_cast<void*>(&ServerCheat_ImplementationHK));
+            }
+        }
+    }
+    else
+    {
+        Log::Error(L"Finder: AFortPlayerController::ServerCheat_Implementation slot not found");
+    }
+
     for (const auto& [Function, Implementation, Name] : {
              std::tuple{ StaticFunction_ServerExecuteInventoryItem(), reinterpret_cast<void*>(&ServerExecuteInventoryItem_ImplementationHK), L"AFortPlayerController::ServerExecuteInventoryItem_Implementation" },
              std::tuple{ StaticFunction_ServerSpawnInventoryDrop(), reinterpret_cast<void*>(&ServerSpawnInventoryDrop_ImplementationHK), L"AFortPlayerController::ServerSpawnInventoryDrop_Implementation" },
@@ -1410,6 +1430,57 @@ DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)
     P_NATIVE_END;
 }
 
+void AFortPlayerController::Cheat(const FString& Msg)
+{
+    // The native Cheat (Cert 0x740C20, 1.2 0x140737A00, 1.7.2 0x7F7C40) sends the command through the matchmaking lobby
+    // beacon whenever the client still has one (UFortGameInstance::Matchmaking->LobbyBeaconClient), which a Save the
+    // World player keeps for the whole match. The server's ALobbyBeaconClient::ServerCheat_Implementation is empty in
+    // these builds, so every "cheat" was dropped without a word (#75). It goes to this controller's ServerCheat instead.
+    ServerCheat(Msg);
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execCheat)
+{
+    P_GET_PROPERTY(UStrProperty, Z_Param_Msg);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerController*>(Context)->Cheat(Z_Param_Msg);
+    P_NATIVE_END;
+}
+
+void AFortPlayerController::ServerCheat(const FString& Msg)
+{
+    Reflection::FParams Params(StaticFunction_ServerCheat());
+    Params.Set(L"Msg", Msg);
+    Params.Call(this);
+}
+
+void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
+{
+#if WITH_SERVER_CODE
+    // Cheats are on for every player (#65, #69); a controller that came another way gets its cheat manager here.
+    if (!CheatManager)
+    {
+        AddCheats(true);
+    }
+    UE_LOG(LogFort, Log, TEXT("ServerCheat: %s runs \"%s\" (cheat manager %s)"), *GetNameSafe(this), *Msg, *GetNameSafe(static_cast<UObject*>(CheatManager)));
+
+    // The native body runs ConsoleCommand(Msg, true), which writes the output to the server's log and replies with an
+    // empty ClientMessage. Collecting it instead sends the player what the command printed, "Command not recognized"
+    // included; the cheats' own replies ("God mode on") are ClientMessages of their own.
+    FString Result = ConsoleCommand(Msg, false);
+    while (!Result.IsEmpty() && (Result.EndsWith(L"\n") || Result.EndsWith(L"\r")))
+    {
+        Result = Result.Left(Result.Len() - 1);
+    }
+    if (!Result.IsEmpty())
+    {
+        UE_LOG(LogFort, Log, TEXT("ServerCheat: %s"), *Result);
+        ClientMessage(Result);
+    }
+#endif
+}
+
 AFortPlayerController* AFortPlayerController::FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner)
 {
     if (!InventoryOwner || Natives::AFortPlayerController_InventoryOwnerInterface < 0)
@@ -1456,6 +1527,11 @@ void AFortPlayerController::ServerSpotActor_ImplementationHK(AFortPlayerControll
     This->ServerSpotActor_Implementation(NewlySpottedActor);
 }
 
+void AFortPlayerController::ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg)
+{
+    This->ServerCheat_Implementation(Msg);
+}
+
 void AFortPlayerController::ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType)
 {
     This->ServerRemoveInventoryStateValue_Implementation(ItemGuid, StateType);
@@ -1464,6 +1540,15 @@ void AFortPlayerController::ServerRemoveInventoryStateValue_ImplementationHK(AFo
 void AFortPlayerController::ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count)
 {
     This->ServerSpawnInventoryDrop_Implementation(ItemGuid, Count);
+}
+
+void AFortPlayerController::HookClientNatives()
+{
+    if (UFunction* CheatFunction = StaticFunction_Cheat(); CheatFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        CheatFunction->SetNativeFunc(&execCheat);
+        Log::Info(L"Hook AFortPlayerController::Cheat: native");
+    }
 }
 
 void AFortPlayerController::Hook()

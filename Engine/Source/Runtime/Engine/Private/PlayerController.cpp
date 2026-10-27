@@ -37,6 +37,24 @@ void APlayerController::AddCheats(bool bForce)
     }
 }
 
+FString APlayerController::ConsoleCommand(const FString& Command, bool bWriteToLog)
+{
+    // Returns what the command printed when bWriteToLog is false; with true the engine sends it to the log and returns "".
+    FString Result;
+    if (Natives::APlayerController_ConsoleCommandIndex >= 0)
+    {
+        CallVirtual<FString*>(this, Natives::APlayerController_ConsoleCommandIndex, &Result, &Command, bWriteToLog);
+    }
+    return Result;
+}
+
+void APlayerController::ClientMessage(const FString& S)
+{
+    Reflection::FParams Params(StaticFunction_ClientMessage());
+    Params.Set(L"S", S);
+    Params.Call(this);
+}
+
 void APlayerController::SendToConsole(const FString& Command)
 {
 #if ALLOW_CONSOLE
@@ -87,6 +105,28 @@ void APlayerController::SendToConsoleHK(APlayerController* This, const FString& 
     This->SendToConsole(Command);
 }
 
+void APlayerController::ClientTeamMessage_ImplementationHK(APlayerController* This, APlayerState* SenderPlayerState, const FString& S, FName Type, float MsgLifeTime)
+{
+    using FClientTeamMessage = void (*)(APlayerController*, APlayerState*, const FString&, FName, float);
+    void* const* const VTable = *reinterpret_cast<void* const* const*>(This);
+    for (const auto& [ControllerVTable, Original] : ClientTeamMessageOriginals)
+    {
+        if (ControllerVTable == VTable)
+        {
+            reinterpret_cast<FClientTeamMessage>(Original)(This, SenderPlayerState, S, Type, MsgLifeTime);
+            break;
+        }
+    }
+
+    // AFortPlayerController's override (Cert 0x743050, 1.2 0x140739E20, 1.7.2 0x7FA570) only hands the message to the
+    // HUD's notifications, so cheat replies ("God mode on", the server's "Command not recognized") never reached the
+    // console (#75). The engine's own body writes it to the viewport console.
+    if (EngineClientTeamMessage)
+    {
+        reinterpret_cast<FClientTeamMessage>(EngineClientTeamMessage)(This, SenderPlayerState, S, Type, MsgLifeTime);
+    }
+}
+
 void APlayerController::Hook()
 {
     if (!Finder::ResolvePlayerControllerConsole())
@@ -105,6 +145,12 @@ void APlayerController::Hook()
     const int32_t SendToConsoleIndex = Natives::APlayerController_SendToConsoleIndex;
     void* const StrippedConsoleKey = BaseVTable[ConsoleKeyIndex];
     void* const StrippedSendToConsole = BaseVTable[SendToConsoleIndex];
+    const int32_t ClientTeamMessageIndex = Finder::ImplementationIndex(StaticFunction_ClientTeamMessage());
+    EngineClientTeamMessage = ClientTeamMessageIndex >= 0 ? BaseVTable[ClientTeamMessageIndex] : nullptr;
+    if (!EngineClientTeamMessage)
+    {
+        Log::Error(L"Finder: APlayerController::ClientTeamMessage_Implementation slot not found");
+    }
 
     for (TObjectIterator<UClass> It; It; ++It)
     {
@@ -122,6 +168,13 @@ void APlayerController::Hook()
         if (VTable[SendToConsoleIndex] == StrippedSendToConsole)
         {
             Hooks::SwapVTable(L"APlayerController::SendToConsole", VTable, SendToConsoleIndex, reinterpret_cast<void*>(&SendToConsoleHK));
+        }
+
+        void* Original = nullptr;
+        if (EngineClientTeamMessage && VTable[ClientTeamMessageIndex] != EngineClientTeamMessage && VTable[ClientTeamMessageIndex] != reinterpret_cast<void*>(&ClientTeamMessage_ImplementationHK)
+            && Hooks::SwapVTable(L"APlayerController::ClientTeamMessage_Implementation", VTable, ClientTeamMessageIndex, reinterpret_cast<void*>(&ClientTeamMessage_ImplementationHK), &Original) && Original)
+        {
+            ClientTeamMessageOriginals.emplace_back(VTable, Original);
         }
     }
 }

@@ -55,6 +55,8 @@ public:
     DefineUFunction(ClientReportDamagedResourceBuilding)
     DefineUFunction(SetRotatePawnToCamera)
     DefineUFunction(GetRotatePawnToCamera)
+    DefineUFunction(Cheat)
+    DefineUFunction(ServerCheat)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
@@ -79,6 +81,9 @@ public:
     void ServerSpotActor_Implementation(AActor* NewlySpottedActor);
     void ServerDisassembleInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerRemoveInventoryStateValue_Implementation(const FGuid& ItemGuid, EFortItemEntryState StateType);
+    void Cheat(const FString& Msg);
+    void ServerCheat(const FString& Msg);
+    void ServerCheat_Implementation(const FString& Msg);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
@@ -97,10 +102,12 @@ public:
     static void HookVTables();
     // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox.
     static void HookVoice();
+    static void HookClientNatives();
 
     DECLARE_FUNCTION(execActivateSlot);
     DECLARE_FUNCTION(execGivePlayerAmmo);
     DECLARE_FUNCTION(execSwapQuickBarFocus);
+    DECLARE_FUNCTION(execCheat);
 
 private:
     static inline bool (*InitializeMcpProfileOG)(AFortPlayerController* This, const void* OnComplete) = nullptr;
@@ -114,6 +121,7 @@ private:
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count);
     static void ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor);
+    static void ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg);
     static void ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType);
     static inline void (*ServerRemoveInventoryStateValue_ImplementationOG)(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType) = nullptr;
     static bool RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);

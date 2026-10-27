@@ -15,10 +15,17 @@ class UNameProperty;
 class UInterfaceProperty;
 class UObject;
 class UProperty;
+class UStrProperty;
 class UStructProperty;
 
 template <class PropertyType>
 struct TPropertyCppType;
+
+template <>
+struct TPropertyCppType<UStrProperty>
+{
+    using Type = FString;
+};
 
 template <>
 struct TPropertyCppType<UIntProperty>

@@ -44,6 +44,7 @@ void Boot::Initialize()
     {
         APlayerController::Hook();
         AFortPlayerController::HookVoice();
+        AFortPlayerController::HookClientNatives();
     });
 
     Log::Info(L"Core Client startup complete");

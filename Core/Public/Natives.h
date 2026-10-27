@@ -390,6 +390,7 @@ namespace Natives
     inline int32_t APlayerController_AddCheatsIndex = -1;
     inline int32_t AFortPlayerController_PushToTalkPressedIndex = -1;
     inline int32_t AFortPlayerController_PushToTalkReleasedIndex = -1;
+    inline int32_t APlayerController_ConsoleCommandIndex = -1;
     inline int32_t IConsoleManager_ForEachConsoleObjectThatStartsWithIndex = -1;
     inline int32_t IConsoleManager_FindConsoleVariableIndex = -1;
     inline int32_t UProperty_GetCPPTypeIndex = -1;

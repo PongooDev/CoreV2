@@ -17,7 +17,66 @@
 #include "UObject/UObjectIterator.h"
 #include "UObject/UnrealType.h"
 
+#include <cwchar>
+#include <cwctype>
 #include <utility>
+
+namespace
+{
+    // Cheats that change nothing unless the server runs them (#75), along with every Give* cheat. Typed without "cheat" on
+    // a game client they ran on the client's own cheat manager: God set the flag on the client's copy of the pawn, the give
+    // and build cheats found no inventory to change. Camera, HUD and debug-draw cheats still run locally.
+    constexpr const wchar_t* ServerCheats[] = {
+        L"God", L"Fly", L"Ghost", L"Walk", L"Teleport", L"Summon", L"Slomo", L"PlayersOnly", L"DamageTarget", L"DestroyTarget",
+        L"DestroyAll", L"DestroyPawns", L"DestroyAllPawnsExceptTarget", L"KillPawns", L"MakeGods", L"BuildFree", L"CraftFree",
+        L"ToggleInfiniteAmmo", L"ToggleInfiniteDurability", L"ToggleInfiniteStamina", L"ToggleUnlimitedHealth",
+        L"ToggleNoCoolDown", L"SetHealthPercent", L"SpawnPawn", L"SpawnAIGroup", L"TeleportToLocation", L"TeleportToActor",
+        L"TeleportToMissionActor", L"BackpackSetSize", L"ModItemDurability", L"DBNO",
+    };
+
+    bool IsServerCheat(APlayerController* PlayerController, const FString& Command)
+    {
+        const wchar_t* const Text = *Command;
+        int32_t Begin = 0;
+        while (Begin < Command.Len() && std::iswspace(Text[Begin]))
+        {
+            ++Begin;
+        }
+        int32_t End = Begin;
+        while (End < Command.Len() && !std::iswspace(Text[End]))
+        {
+            ++End;
+        }
+
+        // A line of several commands ("a | b") is left as typed.
+        const FString Name = Command.Mid(Begin, End - Begin);
+        if (Name.IsEmpty() || Command.Contains(L"|") || PlayerController->Role == ROLE_Authority)
+        {
+            return false;
+        }
+
+        // Only the cheat manager's own commands: UPlayer::Exec offers the line to the controller first.
+        UObject* const CheatManager = PlayerController->CheatManager;
+        UFunction* const Function = CheatManager ? CheatManager->GetClass()->FindFunctionByName(FName(*Name, FNAME_Find)) : nullptr;
+        if (!Function || !Function->HasAnyFunctionFlags(FUNC_Exec) || PlayerController->GetClass()->FindFunctionByName(FName(*Name, FNAME_Find)))
+        {
+            return false;
+        }
+
+        if (_wcsnicmp(*Name, L"Give", 4) == 0)
+        {
+            return true;
+        }
+        for (const wchar_t* ServerCheat : ServerCheats)
+        {
+            if (_wcsicmp(*Name, ServerCheat) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}
 
 void UConsole::FRegisterConsoleAutoCompleteEntriesGlobal::Broadcast(TArray<FAutoCompleteCommand>& AutoCompleteList) const
 {
@@ -267,7 +326,7 @@ void UConsole::BuildRuntimeAutoCompleteListHK(UConsole* This, bool bForce)
 void UConsole::ConsoleCommandHK(UConsole* This, const FString& Command)
 {
     // Cheats are on for every player (#65): the player's controller gets a cheat manager before the command runs, so its
-    // commands work here and AFortPlayerController::Cheat, which needs one, sends "cheat <command>" to the server.
+    // commands work here; "cheat <command>" goes to the server through AFortPlayerController::Cheat.
     ULocalPlayer* const Player = This->ConsoleTargetPlayer;
     APlayerController* const PlayerController = Player ? static_cast<APlayerController*>(Player->PlayerController) : nullptr;
     if (PlayerController && !PlayerController->CheatManager)
@@ -275,12 +334,15 @@ void UConsole::ConsoleCommandHK(UConsole* This, const FString& Command)
         PlayerController->AddCheats(true);
     }
 
+    // On a game client the cheats that only work on the server go there, as if typed with "cheat" (#75).
+    const FString ServerCommand = PlayerController && IsServerCheat(PlayerController, Command) ? FString(L"cheat ") + Command : FString();
+
     void* const* const VTable = *reinterpret_cast<void* const* const*>(This);
     for (const auto& [ConsoleVTable, Original] : ConsoleCommandOriginals)
     {
         if (ConsoleVTable == VTable)
         {
-            reinterpret_cast<void (*)(UConsole*, const FString&)>(Original)(This, Command);
+            reinterpret_cast<void (*)(UConsole*, const FString&)>(Original)(This, ServerCommand.IsEmpty() ? Command : ServerCommand);
             return;
         }
     }

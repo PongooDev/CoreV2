@@ -3129,6 +3129,28 @@ bool Finder::ResolvePlayerControllerCheats()
     return true;
 }
 
+bool Finder::ResolvePlayerControllerConsoleCommand(uintptr_t ServerCheatImplementation)
+{
+    if (Natives::APlayerController_ConsoleCommandIndex >= 0)
+    {
+        return true;
+    }
+
+    // The native AFortPlayerController::ServerCheat_Implementation is "if (CheatManager) ClientMessage(ConsoleCommand(Msg,
+    // true))" (Cert 0x767B50, 1.2 0x14075E4A0, 1.7.2 0x825400): its only virtual call is ConsoleCommand.
+    const uintptr_t Call = IsInText(ServerCheatImplementation) ? FindVirtualCall(ServerCheatImplementation, ServerCheatImplementation + 0x40) : 0;
+    const int32_t Index = VirtualSlot(Call);
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: APlayerController::ConsoleCommand not found in ServerCheat_Implementation");
+        return false;
+    }
+
+    Natives::APlayerController_ConsoleCommandIndex = Index;
+    Log::Info(L"Finder: APlayerController::ConsoleCommand is slot 0x{:X}", Index);
+    return true;
+}
+
 bool Finder::ResolveReplicationLive()
 {
     MissingCount = 0;

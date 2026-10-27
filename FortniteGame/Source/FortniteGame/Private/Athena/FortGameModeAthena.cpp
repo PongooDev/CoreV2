@@ -174,7 +174,7 @@ namespace
                 continue;
             }
             Player.Team = AthenaState->TeamIndex;
-            Player.Kills = AthenaState->Kills;
+            Player.Kills = AthenaState->GetKills();
             Player.SecondsAlive = AthenaState->SecondsAlive;
             Player.Place = std::max<int32_t>(AthenaState->Place, 0);
         }

@@ -425,7 +425,7 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
         for (int32_t PlayerIndex = 0; PlayerIndex < RegisteredPlayers.Num() && !bQuestActive; ++PlayerIndex)
         {
             UFortRegisteredPlayerInfo* PlayerInfo = RegisteredPlayers[PlayerIndex];
-            UFortQuestManager* QuestManager = PlayerInfo ? static_cast<UFortQuestManager*>(PlayerInfo->QuestManager) : nullptr;
+            UFortQuestManager* QuestManager = PlayerInfo ? PlayerInfo->GetCampaignQuestManager() : nullptr;
             bQuestActive = QuestManager && QuestManager->HasActiveQuest(RequiredQuest);
         }
         if (const wchar_t* Reason = bQuestActive && RequiredQuest ? Filter.Reject(QuestDrivenMission) : nullptr)

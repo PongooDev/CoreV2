@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/Map.h"
 #include "Containers/UnrealString.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "GameplayTagContainer.h"
@@ -92,6 +93,8 @@ public:
 
 class UFortRegisteredPlayerInfo : public UObject
 {
+    using FQuestManagers = TMap<uint8_t, UFortQuestManager*>;
+
     DefineUnrealClass(UFortRegisteredPlayerInfo, FortniteGame)
 
 public:
@@ -100,4 +103,18 @@ public:
     DefineUProperty(UFortMcpProfileWorld*, WorldProfile)
     DefineUProperty(UFortQuestManager*, QuestManager)
     DefineUProperty(UFortHero*, AthenaMenuHeroDef)
+
+private:
+    // 1.8: a quest manager per sub game (ESubGame: Campaign 0, Athena 1) instead of QuestManager. A TMap can't be copied,
+    // so it has no DefineUProperty accessors.
+    static inline Reflection::FMemberInfo Member_QuestManagers{ &StaticReflectionOwner, TEXT("QuestManagers"), sizeof(FQuestManagers), Reflection::EMemberKind::Value };
+
+public:
+    // Save the World's quest manager (1.8 keeps Battle Royale's apart).
+    UFortQuestManager* GetCampaignQuestManager()
+    {
+        constexpr uint8_t Campaign = 0;
+        return Member_QuestManager.IsAvailable() ? static_cast<UFortQuestManager*>(QuestManager)
+            : Member_QuestManagers.IsAvailable() ? Reflection::AccessMember<FQuestManagers>(this, Member_QuestManagers).FindRef(Campaign) : nullptr;
+    }
 };

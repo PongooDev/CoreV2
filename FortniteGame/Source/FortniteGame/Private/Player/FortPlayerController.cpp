@@ -1407,7 +1407,7 @@ bool AFortPlayerController::ResolveDurability()
 UFortQuestManager* AFortPlayerController::GetQuestManager() const
 {
     UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
-    return PlayerInfo ? static_cast<UFortQuestManager*>(PlayerInfo->QuestManager) : nullptr;
+    return PlayerInfo ? PlayerInfo->GetCampaignQuestManager() : nullptr;
 }
 
 UFortSchematicItem* AFortPlayerController::GetSchematicForItem(const UFortItemDefinition* ItemDefinition)

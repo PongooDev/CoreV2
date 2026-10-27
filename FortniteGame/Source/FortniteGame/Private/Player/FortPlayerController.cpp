@@ -202,6 +202,20 @@ void AFortPlayerController::Possess(APawn* InPawn)
     (bAthenaPossess ? AthenaPossessOG : PossessOG)(this, InPawn);
 
 #if WITH_SERVER_CODE
+    // The server forwards a player's voice only to players whose voice handshake it completed (UNetConnection's
+    // ShouldReplicateVoicePacketFrom, 1.7.2 0x223C880: the receiving controller's MuteList.bHasVoiceHandshakeCompleted),
+    // which AGameModeBase::UpdateGameplayMuteList does on login. Core-Backend #54's testers never got the handshake on
+    // their clients, so it is completed here too if it hasn't been.
+    if (Role == ROLE_Authority && Finder::ResolveVoiceHandshake())
+    {
+        uint8_t& bHandshakeCompleted = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(this) + Natives::APlayerController_VoiceHandshakeCompletedOffset);
+        if (!bHandshakeCompleted)
+        {
+            Log::Info(L"Voice chat: {}'s voice handshake wasn't completed; Core completes it so they hear voice", GetName().ToStdString());
+            bHandshakeCompleted = 1;
+        }
+    }
+
     // UpdateRotation only turns the pawn to the camera (FaceRotation) while this is on. The DBNO death montage's
     // AnimNotifyState_DisablePawnRotation turns it off and can't turn it back on once the dying pawn has lost its
     // controller; only ClientRestart_Implementation re-arms it, and that runs on the owning client. Without this the

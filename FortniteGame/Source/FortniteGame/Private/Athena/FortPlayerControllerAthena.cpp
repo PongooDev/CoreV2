@@ -224,8 +224,8 @@ void AFortPlayerControllerAthena::ResetToStartingItems()
 {
 #if WITH_SERVER_CODE
     // What the warmup island gave stayed for the whole match (#86). The aircraft phase (StartAircraftPhase, 1.7.2 0x3FFB60)
-    // calls a stripped function with each controller after it destroys the warmup pawn (Finder::AircraftPhasePlayerCleanupCall),
-    // which runs this: every item that isn't one of Athena_GameMode's StartingItems goes (weapons, ammo, consumables, traps,
+    // calls a stripped function with each controller after it destroys the warmup pawn (Finder::AircraftPhasePlayerCleanupCall;
+    // on 1.8.1/1.8.2 the one just before, once the pawn's weapon is unequipped), which runs this: every item that isn't one of Athena_GameMode's StartingItems goes (weapons, ammo, consumables, traps,
     // and the materials, which start at 0), the starting items stay at their starting count.
     AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this);
     AFortInventory* Inventory = WorldInventory;

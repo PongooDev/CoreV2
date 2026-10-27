@@ -1378,9 +1378,12 @@ namespace
         for (uintptr_t Site = Entry && Begin ? FindVirtualCall(Begin, End) : 0; Site; Site = FindVirtualCall(Site + 1, End))
         {
             const int32_t Index = VirtualSlot(Site);
-            if (Index >= 0)
+            // A vtable starts with code. 1.8.1's ReplicateActor also calls slot 0x74, which would put a "vtable" on the
+            // L"UNetDriver::InitListen" string (0x487FD10) 0x158 bytes before UPackageMapClient's (0x487FE68).
+            const uintptr_t VTable = Index >= 0 ? Entry - Index * sizeof(void*) : 0;
+            if (VTable && Finder::IsReadable(reinterpret_cast<const void*>(VTable), sizeof(uintptr_t)) && IsInText(*reinterpret_cast<const uintptr_t*>(VTable)))
             {
-                Candidates.emplace_back(Index, Entry - Index * sizeof(void*));
+                Candidates.emplace_back(Index, VTable);
             }
         }
 
@@ -2505,7 +2508,15 @@ namespace
             return SendRequestNowEnd ? FindInstruction(SendRequestNow, SendRequestNowEnd, Pattern) : 0;
         };
 
-        if (Scan({ 0x48, 0x83, 0x3A, 0x00 }))
+        const uintptr_t HttpRequestCopy = Scan({ 0x48, 0x8B, 0x42, -1, 0x48, 0x89, 0x45, -1, 0x48, 0x8B, 0x42, -1 });
+        const bool bHttpRequestCopy = HttpRequestCopy && Byte(HttpRequestCopy + 11) == Byte(HttpRequestCopy + 3) + 8;
+        // 1.8.1 (0x3C53E30) and 1.8.2 (0x3C5D4C0) test the profile with mov rcx, [rdx]; test rcx, rcx; jz and hand
+        // PrepareRequest the request object itself instead of a copy of its TSharedRef: mov rbx, [rdx+50h];
+        // mov r8d, [rdx+64h]; mov rdx, rbx; ...; call [rax+270h] (their PrepareRequest uses rdx as the IHttpRequest).
+        const uintptr_t ObjectPass = bHttpRequestCopy ? 0 : Scan({ 0x48, 0x8B, 0x0A, 0x48, 0x85, 0xC9, 0x74, -1, 0x48, 0x8B, -1, -1, 0x44, 0x8B, 0x42, -1, 0x48, 0x8B, -1 });
+        const bool bObjectPass = ObjectPass && (Byte(ObjectPass + 10) & 0xC7) == 0x42 && Byte(ObjectPass + 18) == (0xD0 | ((Byte(ObjectPass + 10) >> 3) & 0x07));
+
+        if (Scan({ 0x48, 0x83, 0x3A, 0x00 }) || bObjectPass)
         {
             Natives::FProfileHttpRequest_Profile = 0;
         }
@@ -2515,13 +2526,13 @@ namespace
             ++MissingCount;
         }
 
-        const uintptr_t HttpRequestCopy = Scan({ 0x48, 0x8B, 0x42, -1, 0x48, 0x89, 0x45, -1, 0x48, 0x8B, 0x42, -1 });
-        const bool bHttpRequest = HttpRequestCopy && Byte(HttpRequestCopy + 11) == Byte(HttpRequestCopy + 3) + 8;
-        RequireOffset(L"FProfileHttpRequest::HttpRequest", Natives::FProfileHttpRequest_HttpRequest, bHttpRequest ? Byte(HttpRequestCopy + 3) : 0);
+        const uintptr_t HttpRequestLoad = bHttpRequestCopy ? HttpRequestCopy : (bObjectPass ? ObjectPass + 8 : 0);
+        Natives::UMcpProfile_PrepareRequestTakesObject = !bHttpRequestCopy && bObjectPass;
+        RequireOffset(L"FProfileHttpRequest::HttpRequest", Natives::FProfileHttpRequest_HttpRequest, HttpRequestLoad ? Byte(HttpRequestLoad + 3) : 0);
 
-        const uintptr_t PrepareCall = bHttpRequest ? FindVirtualCall(HttpRequestCopy, HttpRequestCopy + 0x40) : 0;
+        const uintptr_t PrepareCall = HttpRequestLoad ? FindVirtualCall(HttpRequestLoad, HttpRequestLoad + 0x40) : 0;
         RequireSlot(L"UMcpProfile::PrepareRequest", Natives::UMcpProfile_PrepareRequestIndex, VirtualSlot(PrepareCall));
-        const uintptr_t ResponseTypeLoad = PrepareCall ? FindInstruction(HttpRequestCopy, PrepareCall, { 0x44, 0x8B, 0x42, -1 }) : 0;
+        const uintptr_t ResponseTypeLoad = PrepareCall ? FindInstruction(HttpRequestLoad, PrepareCall, { 0x44, 0x8B, 0x42, -1 }) : 0;
         RequireOffset(L"FProfileHttpRequest::ResponseType", Natives::FProfileHttpRequest_ResponseType, ResponseTypeLoad ? Byte(ResponseTypeLoad + 3) : 0);
 
         const uintptr_t ServiceCopy = Scan({ 0x49, 0x8B, 0x46, -1, -1, -1, -1, 0x48, 0x8B, 0xB0, -1, -1, -1, -1, 0x4C, 0x8B, 0xB8, -1, -1, -1, -1 });
@@ -5544,7 +5555,11 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall()
     // (0x3F37D0) unbinds them with copies of the same strings and calls nothing stripped. For each player the phase start
     // unequips the pawn's weapon (0x783330), calls a stripped function (0x3FFFA7: the controller, 0, 0, 0.0f, true),
     // destroys the pawn, calls another with only the controller (0x3FFFC1), then UnPossess and ChangeState(Inactive): two
-    // calls to the shared empty function, the second the one wanted.
+    // calls to the shared empty function, the second the one wanted. 1.8.1 (0x437880) and 1.8.2 (0x438B40) dropped the
+    // controller-only call: only the (controller, 0, 0, 0.0f, true) one is left (1.8.1 0x437CD1, 1.8.2 0x438FA1, with
+    // xorps xmm3, xmm3 before it), just before the warmup pawn is destroyed. It gets the controller in rcx too, so it takes
+    // the cleanup when no function has the pair.
+    std::vector<uintptr_t> LoneStubCalls;
     for (const uintptr_t Ref : Finder::StringRefs(L"&AFortGameModeAthena::OnAircraftEnteredDropZone"))
     {
         const uintptr_t Function = Finder::FunctionStart(Ref);
@@ -5562,6 +5577,15 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall()
             Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}", Function - Finder::ImageBase(), StubCalls[1] - Finder::ImageBase());
             return reinterpret_cast<uint8_t*>(StubCalls[1]);
         }
+        if (StubCalls.size() == 1 && FindInstruction(StubCalls[0] - 0x14, StubCalls[0], { 0x0F, 0x57, 0xDB }))
+        {
+            LoneStubCalls.push_back(StubCalls[0]);
+        }
+    }
+    if (LoneStubCalls.size() == 1)
+    {
+        Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}, before the warmup pawn is destroyed", Finder::FunctionStart(LoneStubCalls[0]) - Finder::ImageBase(), LoneStubCalls[0] - Finder::ImageBase());
+        return reinterpret_cast<uint8_t*>(LoneStubCalls[0]);
     }
     Log::Info(L"Finder: no stripped player cleanup in AFortGameModeAthena::StartAircraftPhase in this build");
     return nullptr;

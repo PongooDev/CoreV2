@@ -410,6 +410,7 @@ namespace Natives
     inline int32_t UStruct_InitializeStructIndex = -1;
     inline int32_t UStruct_DestroyStructIndex = -1;
     inline int32_t UMcpProfile_PrepareRequestIndex = -1;
+    inline bool UMcpProfile_PrepareRequestTakesObject = false; // 1.8.1/1.8.2: PrepareRequest(IHttpRequest&, uint32)
     inline int32_t FUniqueNetId_IsValidIndex = -1;
     inline int32_t FUniqueNetId_ToStringIndex = -1;
     inline int32_t AGameModeBase_LoginIndex = -1;

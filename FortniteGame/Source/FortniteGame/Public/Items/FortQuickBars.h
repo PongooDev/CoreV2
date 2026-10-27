@@ -18,6 +18,7 @@ struct FQuickBarSlot
 {
     DefineUnrealStruct(FQuickBarSlot, FortniteGame)
     DefineUProperty(TArray<FGuid>, Items)
+    DefineUProperty(bool, bEnabled)
 };
 
 struct FQuickBarSlotData

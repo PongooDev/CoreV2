@@ -1894,9 +1894,45 @@ namespace
             { 0x8B, -1, SetNum & 0xFF, (SetNum >> 8) & 0xFF, (SetNum >> 16) & 0xFF, (SetNum >> 24) & 0xFF,
               0x2B, -1, SetFree & 0xFF, (SetFree >> 8) & 0xFF, (SetFree >> 16) & 0xFF, (SetFree >> 24) & 0xFF });
         const bool bVisibleLevels = bVisibleLevelData && (bVisibleLevelCount || bVisibleLevelSet);
-        Natives::UNetConnection_ClientVisibleLevelNamesIsSet = bVisibleLevels && !bVisibleLevelCount;
-        RequireSlot(L"UNetConnection::ClientHasInitializedLevelFor", Natives::UNetConnection_ClientHasInitializedLevelForIndex, bVisibleLevels ? ClientHasInitializedLevelFor : -1);
-        RequireOffset(L"UNetConnection::ClientVisibleLevelNames", Natives::UNetConnection_ClientVisibleLevelNames, bVisibleLevels ? VisibleLevelNames : 0);
+
+        // 1.8 caches the answer per outer (a TMap at +0x33738) and tail-jumps to UpdateCachedLevelVisibility (0x22B46D0),
+        // which does the TSet lookup; there ClientVisibleLevelNames is +0x336A8, before ClientWorldPackageName (+0x33788).
+        // Take the set from its Num / NumFreeIndices pair (+0x08 / +0x34) and Elements load (+0x00) in a function
+        // ClientHasInitializedLevelFor jumps to that also reads ClientWorldPackageName.
+        ptrdiff_t VisibleLevelSetOffset = 0;
+        const int32_t PackageName = static_cast<int32_t>(ClientWorldPackageName);
+        for (uintptr_t Jump = !bVisibleLevels && ClientWorldPackageName && LevelForEnd ? FindInstruction(LevelFor, LevelForEnd, { 0xE9 }) : 0; Jump && !VisibleLevelSetOffset; Jump = FindInstruction(Jump + 1, LevelForEnd, { 0xE9 }))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Jump, 1, 5);
+            const uintptr_t TargetEnd = IsInText(Target) && Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            if (!TargetEnd || !FindInstruction(Target, TargetEnd, { -1, 0x8B, -1, PackageName & 0xFF, (PackageName >> 8) & 0xFF, (PackageName >> 16) & 0xFF, (PackageName >> 24) & 0xFF }))
+            {
+                continue;
+            }
+            for (uintptr_t Count = Target; Count + 6 <= TargetEnd && !VisibleLevelSetOffset; ++Count)
+            {
+                const uint8_t ModRm = Byte(Count + 1);
+                if (Byte(Count) != 0x8B || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04)
+                {
+                    continue;
+                }
+                const int32_t Set = *reinterpret_cast<const int32_t*>(Count + 2) - 0x08;
+                const int32_t Free = Set + 0x34;
+                const uintptr_t FreeEnd = std::min(Count + 0x18, TargetEnd);
+                const bool bFree = FindInstruction(Count + 6, FreeEnd, { 0x3B, ModRm, Free & 0xFF, (Free >> 8) & 0xFF, (Free >> 16) & 0xFF, (Free >> 24) & 0xFF })
+                    || FindInstruction(Count + 6, FreeEnd, { 0x2B, ModRm, Free & 0xFF, (Free >> 8) & 0xFF, (Free >> 16) & 0xFF, (Free >> 24) & 0xFF });
+                bool bElements = false;
+                for (uintptr_t Load = bFree ? FindInstruction(Target, TargetEnd, { -1, 0x8B, -1, Set & 0xFF, (Set >> 8) & 0xFF, (Set >> 16) & 0xFF, (Set >> 24) & 0xFF }) : 0; Load && !bElements; Load = FindInstruction(Load + 1, TargetEnd, { -1, 0x8B, -1, Set & 0xFF, (Set >> 8) & 0xFF, (Set >> 16) & 0xFF, (Set >> 24) & 0xFF }))
+                {
+                    bElements = (Byte(Load) & 0xF8) == 0x48 && (Byte(Load + 2) & 0xC0) == 0x80 && (Byte(Load + 2) & 0x07) != 0x04;
+                }
+                VisibleLevelSetOffset = bFree && bElements ? Set : 0;
+            }
+        }
+        const bool bVisibleLevelsFound = bVisibleLevels || VisibleLevelSetOffset;
+        Natives::UNetConnection_ClientVisibleLevelNamesIsSet = bVisibleLevels ? !bVisibleLevelCount : VisibleLevelSetOffset != 0;
+        RequireSlot(L"UNetConnection::ClientHasInitializedLevelFor", Natives::UNetConnection_ClientHasInitializedLevelForIndex, bVisibleLevelsFound ? ClientHasInitializedLevelFor : -1);
+        RequireOffset(L"UNetConnection::ClientVisibleLevelNames", Natives::UNetConnection_ClientVisibleLevelNames, bVisibleLevels ? VisibleLevelNames : VisibleLevelSetOffset);
 
         const uintptr_t ConnectionTickEnd = Finder::FunctionEnd(ConnectionTickBody);
         ptrdiff_t TimeSensitive = 0;
@@ -2364,6 +2400,15 @@ namespace
         if (Natives::FUniqueNetId_ToStringIndex < 0)
         {
             Log::Error(L"Finder: FUniqueNetId::ToString slot not found");
+        }
+        // IsValid is the `call [rax+18h]; test al, al` just before it (slot 3, ToString 4, on 1.1, 1.2, 1.7.2 and 1.8);
+        // AFortGameMode::ShouldPlayerEarnScore and the game session id ask it on the server.
+        const uintptr_t UniqueIdIsValid = UniqueIdToString ? FindBackward(UniqueIdToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
+        const int32_t UniqueIdIsValidIndex = UniqueIdIsValid && Byte(UniqueIdIsValid + 2) % 8 == 0 ? Byte(UniqueIdIsValid + 2) / 8 : -1;
+        Natives::FUniqueNetId_IsValidIndex = UniqueIdIsValidIndex >= 0 && UniqueIdIsValidIndex < Natives::FUniqueNetId_ToStringIndex ? UniqueIdIsValidIndex : -1;
+        if (Natives::FUniqueNetId_IsValidIndex < 0)
+        {
+            Log::Error(L"Finder: FUniqueNetId::IsValid slot not found");
         }
 
         Require(L"AFortPlayerState::SetHeroType", Natives::AFortPlayerState_SetHeroType, FunctionOf(L"Hero gender does not match gender of HeroType %s!  Hero Gender is %d instead."));
@@ -5056,9 +5101,21 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
         }
     }
 
+    // 1.8 moved both limits into functions taking (AFortPlayerController*, EFortInventoryType, ItemEntry); the two
+    // callees are now small wrappers (Owner cast, InventoryType byte) that tail-jump to them (0x68A2B0 -> 0x68A320,
+    // 0x68A730 -> 0x68A7A0). Look through such a wrapper.
+    const auto Unwrap = [](uintptr_t Function)
+    {
+        const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        const uintptr_t Target = FunctionEnd > Function && FunctionEnd - Function < 0x80 && Byte(FunctionEnd - 5) == 0xE9 ? Finder::RelativeTarget(FunctionEnd - 5, 1, 5) : 0;
+        return IsInText(Target) && Finder::FunctionStart(Target) == Target ? Target : Function;
+    };
     const std::vector<uintptr_t> ReasonCalls = Targets(OverflowReason);
-    const uintptr_t StackLimit = ReasonCalls.size() >= 2 ? ReasonCalls[ReasonCalls.size() - 2] : 0;
-    const uintptr_t BackpackLimit = ReasonCalls.size() >= 2 ? ReasonCalls.back() : 0;
+    const uintptr_t StackLimitCall = ReasonCalls.size() >= 2 ? ReasonCalls[ReasonCalls.size() - 2] : 0;
+    const uintptr_t BackpackLimitCall = ReasonCalls.size() >= 2 ? ReasonCalls.back() : 0;
+    const uintptr_t StackLimit = Unwrap(StackLimitCall);
+    const uintptr_t BackpackLimit = Unwrap(BackpackLimitCall);
+    const bool bControllerLimits = StackLimit != StackLimitCall;
     const uintptr_t StackLimitEnd = IsInText(StackLimit) ? Finder::FunctionEnd(StackLimit) : 0;
     const uintptr_t BackpackLimitEnd = IsInText(BackpackLimit) ? Finder::FunctionEnd(BackpackLimit) : 0;
     const bool bStackCap = BackpackLimitEnd > BackpackLimit && FindInstruction(BackpackLimit, BackpackLimitEnd, { 0x3D, 0x00, 0x02, 0x00, 0x00 });
@@ -5088,7 +5145,7 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     ptrdiff_t InterfaceOffset = -1;
     int32_t NumItemsSlot = -1;
     int32_t MaxItemsSlot = -1;
-    for (uintptr_t Site = BackpackLimit; Site && Site + 3 <= BackpackLimitEnd && MaxItemsSlot < 0; ++Site)
+    for (uintptr_t Site = bControllerLimits ? 0 : BackpackLimit; Site && Site + 3 <= BackpackLimitEnd && MaxItemsSlot < 0; ++Site)
     {
         if ((Byte(Site) & 0xF8) == 0x48 && Byte(Site + 1) == 0x8D && (Byte(Site + 2) & 0xC0) == 0x80 && (Byte(Site + 2) & 0x07) != 0x04 && InterfaceOffset < 0)
         {
@@ -5108,6 +5165,40 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
             }
         }
     }
+    // 1.8: the counts are read in BackpackLimit's helpers, through the inventory's interface:
+    // lea rcx, [rax+388h]; mov rax, [rcx]; call [rax+30h] (NumItems, 0x687530) / call [rax+28h] (MaxItems, 0x686F0A).
+    // The first displacement seen with two different slots is the interface.
+    std::vector<std::pair<int32_t, int32_t>> InterfaceCalls;
+    for (const uintptr_t Helper : bControllerLimits ? Targets(BackpackLimit) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t HelperEnd = Finder::FunctionStart(Helper) == Helper ? Finder::FunctionEnd(Helper) : 0;
+        for (uintptr_t Site = Helper; HelperEnd && Site + 13 <= HelperEnd && MaxItemsSlot < 0; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 2);
+            const int32_t Displacement = *reinterpret_cast<const int32_t*>(Site + 3);
+            if (Byte(Site) != 0x48 || Byte(Site + 1) != 0x8D || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04 || (ModRm & 0x38) != 0x08
+                || Displacement <= 0 || Displacement >= 0x2000
+                || Byte(Site + 7) != 0x48 || Byte(Site + 8) != 0x8B || Byte(Site + 9) != 0x01 || Byte(Site + 10) != 0xFF || Byte(Site + 11) != 0x50 || Byte(Site + 12) % 8 != 0)
+            {
+                continue;
+            }
+            const int32_t Slot = Byte(Site + 12) / 8;
+            for (const auto& [SeenDisplacement, SeenSlot] : InterfaceCalls)
+            {
+                if (MaxItemsSlot < 0 && SeenDisplacement == Displacement && SeenSlot != Slot)
+                {
+                    InterfaceOffset = Displacement;
+                    NumItemsSlot = SeenSlot;
+                    MaxItemsSlot = Slot;
+                }
+            }
+            InterfaceCalls.emplace_back(Displacement, Slot);
+        }
+        if (MaxItemsSlot >= 0)
+        {
+            break;
+        }
+    }
 
     // The inventory's overflow amount (Inventory, ItemEntry): the other function that calls both limits. 1.1 and 1.2's
     // (0x1405AAB60) takes the stack limit unless it is -1, else the backpack limit. 1.7.2's (0x630E80) checks the
@@ -5118,12 +5209,28 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     for (const uintptr_t Call : StackLimit && BackpackLimit && OverflowReason ? Finder::CallsTo(StackLimit, false) : std::vector<uintptr_t>{})
     {
         const uintptr_t Caller = Finder::FunctionStart(Call);
-        const std::vector<uintptr_t> CallerCalls = Caller && Caller != OverflowReason ? Targets(Caller) : std::vector<uintptr_t>{};
+        const std::vector<uintptr_t> CallerCalls = Caller && Caller != OverflowReason && Caller != StackLimitCall ? Targets(Caller) : std::vector<uintptr_t>{};
         if (std::find(CallerCalls.begin(), CallerCalls.end(), BackpackLimit) != CallerCalls.end())
         {
             bAmbiguous |= Overflow && Overflow != Caller;
             Overflow = Caller;
         }
+    }
+    // 1.8: that caller is the (PlayerController, InventoryType, ItemEntry) overflow (0x689FE0); AFortInventory's
+    // (Inventory, ItemEntry) entry point is the wrapper whose last instruction jumps to it (0x689F70).
+    if (bControllerLimits && Overflow)
+    {
+        uintptr_t Wrapper = 0;
+        for (const uintptr_t Jump : Finder::CallsTo(Overflow, true))
+        {
+            const uintptr_t Caller = Byte(Jump) == 0xE9 ? Finder::FunctionStart(Jump) : 0;
+            if (Caller && Finder::FunctionEnd(Caller) == Jump + 5)
+            {
+                bAmbiguous |= Wrapper && Wrapper != Caller;
+                Wrapper = Caller;
+            }
+        }
+        Overflow = Wrapper;
     }
 
     if (!OverflowReason || !StackLimit || !bStackCap || !MaxStackSize || !CanStackWith || !Overflow || bAmbiguous || MaxItemsSlot < 0)
@@ -5138,6 +5245,7 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     Natives::IFortInventoryInterface_GetNumItemsIndex = NumItemsSlot;
     Natives::IFortInventoryInterface_GetMaxItemsIndex = MaxItemsSlot;
     Natives::AFortInventory_CanStackWith = reinterpret_cast<decltype(Natives::AFortInventory_CanStackWith)>(CanStackWith);
+    Natives::AFortInventory_bControllerLimits = bControllerLimits;
     Log::Info(L"Finder: AFortInventory overflow checks found (overflow +0x{:X}, stack limit +0x{:X}, backpack limit +0x{:X}, interface +0x{:X} slots {}/{})", Overflow - Finder::ImageBase(), StackLimit - Finder::ImageBase(), BackpackLimit - Finder::ImageBase(), InterfaceOffset, NumItemsSlot, MaxItemsSlot);
     return true;
 }
@@ -5183,9 +5291,14 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
     const int32_t SetItemCountIndex = Displacement > 0 && Displacement % 8 == 0 ? Displacement / 8 : -1;
     const uintptr_t SetItemCount = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortWorldItem"), SetItemCountIndex);
     const uintptr_t SetItemCountEnd = SetItemCount ? Finder::FunctionEnd(SetItemCount) : 0;
-    const bool bSetItemCount = SetItemCountEnd > SetItemCount
-        && FindDisplacement(SetItemCount, SetItemCountEnd, { 0x48, 0x8D, 0xBB }, ItemEntryOffset)
-        && FindInstruction(SetItemCount, SetItemCountEnd, { 0x80, 0x38, 0x03 });
+    // lea reg, [reg+ItemEntry]: lea rdi, [rbx+...] (48 8D BB) up to 1.7.2, lea rcx, [rdi+...] (48 8D 8F) on 1.8.
+    bool bLoadsItemEntry = false;
+    for (uintptr_t Site = SetItemCountEnd > SetItemCount ? FindInstruction(SetItemCount, SetItemCountEnd, { 0x48, 0x8D }) : 0; Site && !bLoadsItemEntry; Site = FindInstruction(Site + 1, SetItemCountEnd, { 0x48, 0x8D }))
+    {
+        const uint8_t ModRm = Byte(Site + 2);
+        bLoadsItemEntry = Site + 7 <= SetItemCountEnd && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 3) == ItemEntryOffset;
+    }
+    const bool bSetItemCount = bLoadsItemEntry && FindInstruction(SetItemCount, SetItemCountEnd, { 0x80, 0x38, 0x03 });
     if (bAmbiguous || !bSetItemCount)
     {
         Log::Error(L"Finder: UFortWorldItem::SetItemCount slot not found");
@@ -5224,6 +5337,22 @@ bool Finder::ResolveItemEntryStateLive()
         {
             bAmbiguous |= MarkDirty && MarkDirty != Target;
             MarkDirty = Target;
+        }
+    }
+    // 1.8 inlines MarkDirty at SetStateValue's end (its three calls, then bIsDirty). The standalone copy is the small
+    // function making exactly those three calls whose first takes this+disp (mov rbx, rcx; add rcx, imm32; call).
+    const auto StateCalls = !MarkDirty && SetStateValueEnd ? Finder::DirectCalls(SetStateValue, SetStateValueEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+    for (const uintptr_t Call : StateCalls.size() >= 3 ? Finder::CallsTo(StateCalls.back().second, false) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t Caller = Finder::FunctionStart(Call);
+        const uintptr_t CallerEnd = Caller ? Finder::FunctionEnd(Caller) : 0;
+        const auto CallerCalls = CallerEnd > Caller && CallerEnd - Caller < 0x80 ? Finder::DirectCalls(Caller, CallerEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+        if (CallerCalls.size() == 3 && CallerCalls[0].second == StateCalls[StateCalls.size() - 3].second && CallerCalls[1].second == StateCalls[StateCalls.size() - 2].second
+            && CallerCalls[2].second == StateCalls.back().second && CallerCalls[0].first >= Caller + 10
+            && FindInstruction(CallerCalls[0].first - 10, CallerCalls[0].first, { 0x48, 0x8B, 0xD9, 0x48, 0x81, 0xC1 }) == CallerCalls[0].first - 10)
+        {
+            bAmbiguous |= MarkDirty && MarkDirty != Caller;
+            MarkDirty = Caller;
         }
     }
     if (!SetStateValue || !MarkDirty || bAmbiguous)
@@ -5474,6 +5603,28 @@ bool Finder::ResolveAthenaMenuHero()
     // In Battle Royale its HeroItem is the player info's AthenaMenuHeroDef, which while there is none it makes from one of
     // UFortGameData::DefaultAthenaHeroes picked with rand() (the import call at 0x7955DB, its only one). 1.1 and 1.2 have
     // no Battle Royale and call no rand there.
+    // FUniqueNetId's IsValid and ToString slots, which the voice HUD also reads: resolved even when the lobby picks no
+    // random hero (1.8 shows the player's Athena loadout instead, 0x79EB60). Builds without Battle Royale's HUD (1.1, 1.2)
+    // keep leaving them to the pick, as before.
+    const auto ResolveUniqueNetIdSlots = []
+    {
+        // AFortPlayerController::InitializeMcpProfile's failure log prints the player's id: IsValid (`call [rax+18h];
+        // test al, al`), then ToString, the virtual call nearest the string.
+        const uintptr_t ProfileFailed = OnlyRef(L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]");
+        const uintptr_t ToString = ProfileFailed ? FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 }) : 0;
+        const uintptr_t IsValid = ToString ? FindBackward(ToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
+        const int32_t ToStringIndex = ToString && Byte(ToString + 2) % 8 == 0 ? Byte(ToString + 2) / 8 : -1;
+        const int32_t IsValidIndex = IsValid && Byte(IsValid + 2) % 8 == 0 ? Byte(IsValid + 2) / 8 : -1;
+        if (ToStringIndex < 0 || IsValidIndex < 0 || IsValidIndex >= ToStringIndex)
+        {
+            Log::Error(L"Finder: FUniqueNetId::IsValid and ToString slots not found");
+            return false;
+        }
+        Natives::FUniqueNetId_IsValidIndex = IsValidIndex;
+        Natives::FUniqueNetId_ToStringIndex = ToStringIndex;
+        return true;
+    };
+
     const uintptr_t GetTeamMemberInfo = FunctionOf(L"GetTeamMemberInfo: [%s] Team member info was not filled");
     const uintptr_t GetTeamMemberInfoEnd = GetTeamMemberInfo ? Finder::FunctionEnd(GetTeamMemberInfo) : 0;
     const uintptr_t RandSlot = Finder::ImportSlot("api-ms-win-crt-utility-l1-1-0.dll", "rand");
@@ -5488,6 +5639,10 @@ bool Finder::ResolveAthenaMenuHero()
     if (!GetTeamMemberInfo || RandCalls.empty())
     {
         Log::Info(L"Finder: UFortUITeamInfo::GetTeamMemberInfo picks no Battle Royale menu hero in this build");
+        if (!Finder::StringRefs(L"&ThisClass::HandleUIGameplayCue").empty())
+        {
+            ResolveUniqueNetIdSlots();
+        }
         return false;
     }
     if (RandCalls.size() != 1)
@@ -5496,21 +5651,11 @@ bool Finder::ResolveAthenaMenuHero()
         return false;
     }
 
-    // The client resolves neither slot for anything else. AFortPlayerController::InitializeMcpProfile's failure log prints
-    // the player's id: IsValid (`call [rax+18h]; test al, al`), then ToString, the virtual call nearest the string.
-    const uintptr_t ProfileFailed = OnlyRef(L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]");
-    const uintptr_t ToString = ProfileFailed ? FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 }) : 0;
-    const uintptr_t IsValid = ToString ? FindBackward(ToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
-    const int32_t ToStringIndex = ToString && Byte(ToString + 2) % 8 == 0 ? Byte(ToString + 2) / 8 : -1;
-    const int32_t IsValidIndex = IsValid && Byte(IsValid + 2) % 8 == 0 ? Byte(IsValid + 2) / 8 : -1;
-    if (ToStringIndex < 0 || IsValidIndex < 0 || IsValidIndex >= ToStringIndex)
+    if (!ResolveUniqueNetIdSlots())
     {
-        Log::Error(L"Finder: FUniqueNetId::IsValid and ToString slots not found");
         return false;
     }
 
-    Natives::FUniqueNetId_IsValidIndex = IsValidIndex;
-    Natives::FUniqueNetId_ToStringIndex = ToStringIndex;
     Natives::UFortUITeamInfo_GetTeamMemberInfo = reinterpret_cast<decltype(Natives::UFortUITeamInfo_GetTeamMemberInfo)>(GetTeamMemberInfo);
     Sites::TeamMemberInfoAthenaMenuHeroRand = reinterpret_cast<uint8_t*>(RandCalls.front());
     Log::Info(L"Finder: UFortUITeamInfo::GetTeamMemberInfo at 0x{:X} picks the Battle Royale menu hero at 0x{:X}", GetTeamMemberInfo, RandCalls.front());
@@ -5566,24 +5711,31 @@ bool Finder::ResolveDecoSpawnedLive()
         }
         return Site;
     };
-    void** DecoToolVTable = CdoVTable(L"/Script/FortniteGame.FortDecoTool");
-    const int32_t SpawnIndex = InitializeIndex >= 0 ? FirstVTableIndexWhere(DecoToolVTable, [&FindInitializeCall](uintptr_t Entry) { return FindInitializeCall(Entry) != 0; }) : -1;
-    const uintptr_t Spawn = VTableEntry(DecoToolVTable, SpawnIndex);
-    const uintptr_t InitializeCall = Spawn ? FindInitializeCall(Spawn) : 0;
-
-    const uintptr_t SpawnEnd = InitializeCall ? Finder::FunctionEnd(Spawn) : 0;
-    int32_t SpawnedIndex = -1;
-    bool bSpawningCalled = false;
-    for (uintptr_t Site = SpawnEnd ? FindVirtualCall(InitializeCall + 1, SpawnEnd) : 0; Site && SpawnedIndex < 0; Site = FindVirtualCall(Site + 1, SpawnEnd))
-    {
-        SpawnedIndex = VirtualSlot(Site) >= 0x200 ? VirtualSlot(Site) : -1;
-    }
-    for (uintptr_t Site = SpawnedIndex >= 0 ? FindVirtualCall(Spawn, InitializeCall) : 0; Site && !bSpawningCalled; Site = FindVirtualCall(Site + 1, InitializeCall))
-    {
-        bSpawningCalled = VirtualSlot(Site) == SpawnedIndex - 1;
-    }
+    // The spawn is the first DecoTool virtual whose initialize call comes with the controller handoff: the first slot
+    // >= 0x200 called after it, the slot before that called before it, and the shared empty function in the controller's
+    // vtable. 1.8 has other virtuals (slots 0xD2, 0xFB, 0x11A) that call slot 0xF7 on something else; its spawn is 0x127.
     void** ControllerVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerController");
-    if (!bSpawningCalled || reinterpret_cast<void*>(VTableEntry(ControllerVTable, SpawnedIndex)) != Natives::SharedEmptyFunction)
+    const auto FindSpawnedIndex = [&FindInitializeCall, ControllerVTable](uintptr_t Spawn)
+    {
+        const uintptr_t InitializeCall = FindInitializeCall(Spawn);
+        const uintptr_t SpawnEnd = InitializeCall ? Finder::FunctionEnd(Spawn) : 0;
+        int32_t SpawnedIndex = -1;
+        for (uintptr_t Site = SpawnEnd ? FindVirtualCall(InitializeCall + 1, SpawnEnd) : 0; Site && SpawnedIndex < 0; Site = FindVirtualCall(Site + 1, SpawnEnd))
+        {
+            SpawnedIndex = VirtualSlot(Site) >= 0x200 ? VirtualSlot(Site) : -1;
+        }
+        bool bSpawningCalled = false;
+        for (uintptr_t Site = SpawnedIndex >= 0 ? FindVirtualCall(Spawn, InitializeCall) : 0; Site && !bSpawningCalled; Site = FindVirtualCall(Site + 1, InitializeCall))
+        {
+            bSpawningCalled = VirtualSlot(Site) == SpawnedIndex - 1;
+        }
+        return bSpawningCalled && reinterpret_cast<void*>(VTableEntry(ControllerVTable, SpawnedIndex)) == Natives::SharedEmptyFunction ? SpawnedIndex : -1;
+    };
+    void** DecoToolVTable = CdoVTable(L"/Script/FortniteGame.FortDecoTool");
+    const int32_t SpawnIndex = InitializeIndex >= 0 ? FirstVTableIndexWhere(DecoToolVTable, [&FindSpawnedIndex](uintptr_t Entry) { return FindSpawnedIndex(Entry) >= 0; }) : -1;
+    const uintptr_t Spawn = VTableEntry(DecoToolVTable, SpawnIndex);
+    const int32_t SpawnedIndex = Spawn ? FindSpawnedIndex(Spawn) : -1;
+    if (SpawnedIndex < 0)
     {
         Log::Error(L"Finder: AFortDecoTool's spawn hands the placer's controller no empty slot (initialize slot {}, spawn 0x{:X}, slot {})", InitializeIndex, Spawn ? Spawn - Finder::ImageBase() : 0, SpawnedIndex);
         return false;
@@ -6007,7 +6159,11 @@ bool Finder::ResolveDurabilityLive(UFunction* ServerModDurability, UObject* Play
         for (uintptr_t Site = Target; TargetEnd > Target && TargetEnd - Target < 0x200 && Site + 5 <= TargetEnd; ++Site)
         {
             const uint8_t ModRm = Byte(Site + 3);
-            if (Byte(Site) != 0xF3 || Byte(Site + 1) != 0x0F || Byte(Site + 2) != 0x10 || (ModRm & 0xF8) != 0x48 || ModRm == 0x4C || Byte(Site + 4) != EntryDurabilityOffset)
+            const bool bLoadsDurability = Byte(Site) == 0xF3 && Byte(Site + 1) == 0x0F && Byte(Site + 2) == 0x10 && (ModRm & 0xF8) == 0x48 && ModRm != 0x4C && Byte(Site + 4) == EntryDurabilityOffset;
+            // 1.8 reads it through FFortItemEntry's getter (0x3F1F440: movss xmm0, [rcx+Durability]; ret), then movaps xmm1, xmm0.
+            const uintptr_t Getter = Byte(Site) == 0xE8 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+            const bool bCallsGetter = IsInText(Getter) && Byte(Getter) == 0xF3 && Byte(Getter + 1) == 0x0F && Byte(Getter + 2) == 0x10 && Byte(Getter + 3) == 0x41 && Byte(Getter + 4) == EntryDurabilityOffset && Byte(Getter + 5) == 0xC3;
+            if (!bLoadsDurability && !bCallsGetter)
             {
                 continue;
             }

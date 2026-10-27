@@ -56,7 +56,7 @@ public:
     DefineNativeObject(TSet<FNetworkGUID>, DestroyedStartupOrDormantActors, UNetConnection_DestroyedStartupOrDormantActors)
     DefineNativeMember(FName, ClientWorldPackageName, UNetConnection_ClientWorldPackageName)
 
-    // ClientVisibleLevelNames: a TArray<FName> on 1.1 and 1.2, a TSet<FName> on 1.7.2
+    // ClientVisibleLevelNames: a TArray<FName> on 1.1 and 1.2, a TSet<FName> on 1.7.2 and 1.8
     // (Natives::UNetConnection_ClientVisibleLevelNamesIsSet).
     bool IsClientLevelVisible(FName LevelName) const
     {

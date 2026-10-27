@@ -268,6 +268,7 @@ namespace Natives
     inline ptrdiff_t AFortInventory_InventoryInterfaceOffset = -1;
     inline int32_t IFortInventoryInterface_GetMaxItemsIndex = -1;
     inline int32_t IFortInventoryInterface_GetNumItemsIndex = -1;
+    inline bool AFortInventory_bControllerLimits = false;
     inline uintptr_t UAbilitySystemComponent_GiveAbility = 0;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
     inline int32_t AFortPlayerController_SpawnDropPickupIndex = -1;

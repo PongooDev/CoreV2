@@ -224,6 +224,12 @@ int32_t AFortInventory::GetMaxStackSize(const UFortItemDefinition* ItemDefinitio
     {
         return std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
     }
+    if (Natives::AFortInventory_bControllerLimits)
+    {
+        // 1.8: GetMaxStackSize(AFortPlayerController*, const UFortItemDefinition*), given the owner the game's own wrappers pass.
+        using FGetMaxStackSize = int32_t (*)(AFortPlayerController*, const UFortItemDefinition*);
+        return std::max(reinterpret_cast<FGetMaxStackSize>(Natives::AFortInventory_GetMaxStackSize)(Cast<AFortPlayerController>(GetOwner()), ItemDefinition), 1);
+    }
     return std::max(Natives::AFortInventory_GetMaxStackSize(this, ItemDefinition), 1);
 }
 
@@ -275,6 +281,13 @@ int32_t AFortInventory::AddItemStacks(const FFortItemEntry& ItemEntry, int32_t C
     const float MaxDurability = ItemDefinition->GetMaxDurability(ItemEntry.Level);
     int32_t Remaining = Count;
     bool bHasStack = false;
+    const auto CanStack = [&](UFortWorldItem* Existing)
+    {
+        // 1.8: CanStackWith(UFortWorldItem*, const FFortItemEntry&, float MaxDurability), no inventory argument.
+        return Natives::AFortInventory_bControllerLimits
+            ? reinterpret_cast<bool (*)(UFortWorldItem*, const FFortItemEntry&, float)>(Natives::AFortInventory_CanStackWith)(Existing, ItemEntry, MaxDurability)
+            : Natives::AFortInventory_CanStackWith(this, Existing, ItemEntry, MaxDurability);
+    };
 
     FFortItemList& ItemList = Inventory;
     TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
@@ -282,7 +295,7 @@ int32_t AFortInventory::AddItemStacks(const FFortItemEntry& ItemEntry, int32_t C
     {
         UFortWorldItem* Existing = Instances[Index];
         FFortItemEntry* ExistingEntry = Existing ? &static_cast<FFortItemEntry&>(Existing->ItemEntry) : nullptr;
-        if (!ExistingEntry || static_cast<UFortItemDefinition*>(ExistingEntry->ItemDefinition) != ItemDefinition || !Natives::AFortInventory_CanStackWith(this, Existing, ItemEntry, MaxDurability))
+        if (!ExistingEntry || static_cast<UFortItemDefinition*>(ExistingEntry->ItemDefinition) != ItemDefinition || !CanStack(Existing))
         {
             continue;
         }

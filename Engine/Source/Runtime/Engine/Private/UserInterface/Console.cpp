@@ -27,18 +27,36 @@ namespace
 {
     // Cheats that change nothing unless the server runs them (#75), along with every Give* cheat. Typed without "cheat" on
     // a game client they ran on the client's own cheat manager: God set the flag on the client's copy of the pawn, the give
-    // and build cheats found no inventory to change. Camera, HUD and debug-draw cheats still run locally.
+    // cheats found no inventory to change. Camera, HUD and debug-draw cheats still run locally.
     constexpr const wchar_t* ServerCheats[] = {
         L"God", L"Fly", L"Ghost", L"Walk", L"Teleport", L"Summon", L"Slomo", L"PlayersOnly", L"DamageTarget", L"DestroyTarget",
-        L"DestroyAll", L"DestroyPawns", L"DestroyAllPawnsExceptTarget", L"KillPawns", L"MakeGods", L"BuildFree", L"CraftFree",
-        L"ToggleInfiniteAmmo", L"ToggleInfiniteDurability", L"ToggleInfiniteStamina", L"ToggleUnlimitedHealth",
-        L"ToggleNoCoolDown", L"SetHealthPercent", L"SpawnPawn", L"SpawnAIGroup", L"TeleportToLocation", L"TeleportToActor",
+        L"DestroyAll", L"DestroyPawns", L"DestroyAllPawnsExceptTarget", L"KillPawns", L"MakeGods", L"SetHealthPercent", L"SpawnPawn", L"SpawnAIGroup", L"TeleportToLocation", L"TeleportToActor",
         L"TeleportToMissionActor", L"BackpackSetSize", L"ModItemDurability", L"DBNO",
     };
 
     // Cheats that change only the side they run on, so a game client runs them itself and on the server: ChangeSize scales
-    // the pawn's capsule and mesh, neither of which is replicated.
-    constexpr const wchar_t* BothSidesCheats[] = { L"ChangeSize" };
+    // the pawn's capsule and mesh, neither of which is replicated, and the client predicts with its own copy of the
+    // infinite and free flags (sprinting drained the client's stamina with the server's infinite, #75).
+    constexpr const wchar_t* BothSidesCheats[] = {
+        L"ChangeSize", L"BuildFree", L"CraftFree", L"ToggleInfiniteAmmo", L"ToggleInfiniteDurability", L"ToggleInfiniteStamina",
+        L"ToggleUnlimitedHealth", L"ToggleNoCoolDown",
+    };
+
+    // The command after a typed "cheat ", or empty when the line doesn't start with it.
+    FString TypedCheat(const FString& Command)
+    {
+        const wchar_t* const Text = *Command;
+        int32_t Begin = 0;
+        while (Begin < Command.Len() && std::iswspace(Text[Begin]))
+        {
+            ++Begin;
+        }
+        if (Command.Len() - Begin <= 6 || _wcsnicmp(Text + Begin, L"cheat", 5) != 0 || !std::iswspace(Text[Begin + 5]))
+        {
+            return FString();
+        }
+        return Command.Mid(Begin + 6, Command.Len() - Begin - 6);
+    }
 
     enum class ECheatSide
     {
@@ -382,6 +400,19 @@ void UConsole::ConsoleCommandHK(UConsole* This, const FString& Command)
         // On a game client the cheats that only work on the server go there, as if typed with "cheat", and the ones that
         // change both sides run here and there (#75).
         const auto Run = reinterpret_cast<void (*)(UConsole*, const FString&)>(Original);
+
+        // Typed with "cheat", a cheat that changes both sides runs here too.
+        const FString Typed = PlayerController ? TypedCheat(Command) : FString();
+        if (!Typed.IsEmpty())
+        {
+            if (CheatSide(PlayerController, Typed) == ECheatSide::Both)
+            {
+                Run(This, Typed);
+            }
+            Run(This, Command);
+            return;
+        }
+
         const ECheatSide Side = PlayerController ? CheatSide(PlayerController, Command) : ECheatSide::Local;
         if (Side != ECheatSide::Server)
         {

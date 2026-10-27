@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/UnrealString.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
 #include "UObject/Object.h"
@@ -60,6 +61,7 @@ struct FFortQuestEarnedBadgeData
     DefineUProperty(int32_t, Count)
 };
 
+class UFortHero;
 class UFortItemDefinition;
 class UFortMcpProfileAccount;
 class UFortMcpProfileWorld;
@@ -93,7 +95,9 @@ class UFortRegisteredPlayerInfo : public UObject
     DefineUnrealClass(UFortRegisteredPlayerInfo, FortniteGame)
 
 public:
+    DefineUProperty(FUniqueNetIdRepl, PlayerID)
     DefineUProperty(UFortMcpProfileAccount*, AccountProfile)
     DefineUProperty(UFortMcpProfileWorld*, WorldProfile)
     DefineUProperty(UFortQuestManager*, QuestManager)
+    DefineUProperty(UFortHero*, AthenaMenuHeroDef)
 };

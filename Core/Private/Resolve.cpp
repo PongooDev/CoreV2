@@ -5439,6 +5439,55 @@ bool Finder::ResolveAthenaHeroLive()
     return true;
 }
 
+bool Finder::ResolveAthenaMenuHero()
+{
+    // UFortUITeamInfo::GetTeamMemberInfo (1.7.2 0x795300) fills a lobby pad's FFortTeamMemberInfo from a registered player.
+    // In Battle Royale its HeroItem is the player info's AthenaMenuHeroDef, which while there is none it makes from one of
+    // UFortGameData::DefaultAthenaHeroes picked with rand() (the import call at 0x7955DB, its only one). 1.1 and 1.2 have
+    // no Battle Royale and call no rand there.
+    const uintptr_t GetTeamMemberInfo = FunctionOf(L"GetTeamMemberInfo: [%s] Team member info was not filled");
+    const uintptr_t GetTeamMemberInfoEnd = GetTeamMemberInfo ? Finder::FunctionEnd(GetTeamMemberInfo) : 0;
+    const uintptr_t RandSlot = Finder::ImportSlot("api-ms-win-crt-utility-l1-1-0.dll", "rand");
+    std::vector<uintptr_t> RandCalls;
+    for (uintptr_t Call = GetTeamMemberInfoEnd && RandSlot ? FindInstruction(GetTeamMemberInfo, GetTeamMemberInfoEnd, { 0xFF, 0x15 }) : 0; Call; Call = FindInstruction(Call + 1, GetTeamMemberInfoEnd, { 0xFF, 0x15 }))
+    {
+        if (Finder::RelativeTarget(Call, 2, 6) == RandSlot)
+        {
+            RandCalls.push_back(Call);
+        }
+    }
+    if (!GetTeamMemberInfo || RandCalls.empty())
+    {
+        Log::Info(L"Finder: UFortUITeamInfo::GetTeamMemberInfo picks no Battle Royale menu hero in this build");
+        return false;
+    }
+    if (RandCalls.size() != 1)
+    {
+        Log::Error(L"Finder: expected 1 rand call in UFortUITeamInfo::GetTeamMemberInfo, found {}", RandCalls.size());
+        return false;
+    }
+
+    // The client resolves neither slot for anything else. AFortPlayerController::InitializeMcpProfile's failure log prints
+    // the player's id: IsValid (`call [rax+18h]; test al, al`), then ToString, the virtual call nearest the string.
+    const uintptr_t ProfileFailed = OnlyRef(L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]");
+    const uintptr_t ToString = ProfileFailed ? FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 }) : 0;
+    const uintptr_t IsValid = ToString ? FindBackward(ToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
+    const int32_t ToStringIndex = ToString && Byte(ToString + 2) % 8 == 0 ? Byte(ToString + 2) / 8 : -1;
+    const int32_t IsValidIndex = IsValid && Byte(IsValid + 2) % 8 == 0 ? Byte(IsValid + 2) / 8 : -1;
+    if (ToStringIndex < 0 || IsValidIndex < 0 || IsValidIndex >= ToStringIndex)
+    {
+        Log::Error(L"Finder: FUniqueNetId::IsValid and ToString slots not found");
+        return false;
+    }
+
+    Natives::FUniqueNetId_IsValidIndex = IsValidIndex;
+    Natives::FUniqueNetId_ToStringIndex = ToStringIndex;
+    Natives::UFortUITeamInfo_GetTeamMemberInfo = reinterpret_cast<decltype(Natives::UFortUITeamInfo_GetTeamMemberInfo)>(GetTeamMemberInfo);
+    Sites::TeamMemberInfoAthenaMenuHeroRand = reinterpret_cast<uint8_t*>(RandCalls.front());
+    Log::Info(L"Finder: UFortUITeamInfo::GetTeamMemberInfo at 0x{:X} picks the Battle Royale menu hero at 0x{:X}", GetTeamMemberInfo, RandCalls.front());
+    return true;
+}
+
 bool Finder::ResolveTrapInitializeLive()
 {
     static bool bSearched = false;

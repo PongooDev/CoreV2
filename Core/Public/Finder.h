@@ -133,6 +133,7 @@ namespace Finder
     bool ResolveResetGameplayAttributesLive();
     bool ResolveLootTierRedirectLive();
     bool ResolveAthenaHeroLive();
+    bool ResolveAthenaMenuHero();
     bool ResolveTrapInitializeLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();

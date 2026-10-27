@@ -12,6 +12,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "OnlineVoiceImpl.h"
 #include "Player/FortPlayerController.h"
+#include "UI/FortUITeamInfo.h"
 
 void Boot::Initialize()
 {
@@ -38,6 +39,7 @@ void Boot::Initialize()
     // Before the engine reads its config: the voice module and the online subsystem's voice interface start with it.
     FConfigCacheIni::EnableVoice(true);
     FOnlineVoiceImpl::Hook();
+    UFortUITeamInfo::Hook();
     Hooks::EnableAll();
 
     GameThread::Enqueue([]

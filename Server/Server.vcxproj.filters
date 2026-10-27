@@ -346,6 +346,9 @@
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Quests">
       <UniqueIdentifier>{59b62a4a-c70a-4af2-a1a8-fe193691bd6a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Private\UI">
+      <UniqueIdentifier>{d2b63f66-ed78-4009-b022-0b383e1e8d7a}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Weapons">
       <UniqueIdentifier>{3bfc98c5-957a-44d3-9611-e56808e54844}</UniqueIdentifier>
     </Filter>
@@ -1174,6 +1177,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Quests\FortQuestManager.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Quests</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FortUITeamInfo.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FrontEnd\FortMissionGenerator.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\UI\FrontEnd</Filter>
     </ClInclude>
@@ -1618,6 +1624,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Quests\FortQuestManager.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Quests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\FortUITeamInfo.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortWeapon.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Weapons</Filter>

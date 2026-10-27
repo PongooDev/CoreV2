@@ -61,6 +61,8 @@ template <typename T>
 class TArray;
 class FScriptArray;
 class UGameViewportClient;
+class UFortUITeamInfo;
+struct FFortTeamMemberInfo;
 class ULocalPlayer;
 class FUObjectArray;
 class UClass;
@@ -200,6 +202,7 @@ namespace Natives
     inline void (*FOnNetworkFailure_Broadcast)(void* Delegate, UWorld* World, UNetDriver* NetDriver, int32_t FailureType, const FString& ErrorString) = nullptr;
 
     inline ULocalPlayer* (*UGameViewportClient_SetupInitialLocalPlayer)(UGameViewportClient* This, FString& OutError) = nullptr;
+    inline bool (*UFortUITeamInfo_GetTeamMemberInfo)(UFortUITeamInfo* This, UFortRegisteredPlayerInfo* PlayerInfo, FFortTeamMemberInfo& OutInfo) = nullptr;
 
     inline bool (*UActorChannel_ReplicateActor)(UActorChannel* This) = nullptr;
     inline void (*UActorChannel_SetChannelActor)(UActorChannel* This, AActor* InActor) = nullptr;
@@ -523,6 +526,7 @@ namespace Sites
     inline std::vector<uint8_t*> AIDirectorGetCurrentCalls;
     inline uint8_t* ShouldUseIdleModeCheck = nullptr;
     inline uint8_t* ShouldUseIdleModeFalse = nullptr;
+    inline uint8_t* TeamMemberInfoAthenaMenuHeroRand = nullptr;
 
     struct FMaxTickRateWait
     {

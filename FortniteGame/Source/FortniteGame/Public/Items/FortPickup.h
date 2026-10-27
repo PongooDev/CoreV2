@@ -35,7 +35,8 @@ public:
     static void CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory);
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
     void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount);
-    void TossFromContainer(const FVector& FinalLocation, const FVector& LaunchVelocity);
+    // Tosses a container's loot from where it is onto FloorLocation, like TossOntoFloor, marked as tossed from it.
+    void TossFromContainer(const FVector& FloorLocation);
     // Tosses the pickup from where it is in a short arc that lands it on FloorLocation, a point on the floor.
     void TossOntoFloor(const FVector& FloorLocation, AFortPawn* ItemOwner);
     void SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime = -1.0f, const FVector& InStartDirection = FVector(0.0f, 0.0f, 1.0f), bool bPlayPickupSound = true);

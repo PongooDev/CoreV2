@@ -2,6 +2,7 @@
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -12,6 +13,7 @@
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
 #include "Kismet/KismetMathLibrary.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Logging/LogMacros.h"
 #include "Math/Rotator.h"
 #include "Math/Transform.h"
@@ -28,6 +30,7 @@
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -55,6 +58,19 @@ namespace
             Entry.bIsDirty = true;
         }
         Entry.SetStateValue(EFortItemEntryState::GetDurabilityInitialized(), 1);
+    }
+
+    // How far a trace from Start gets across the floor along Direction, up to Distance, past Container. A trace that starts
+    // inside something hits it where it starts, which says nothing about the way ahead.
+    float TraceReach(ABuildingContainer* Container, const FVector& Start, const FVector& Direction, float Distance)
+    {
+        FVector Hit;
+        if (!UKismetSystemLibrary::LineTraceSingle(Container, Start, Start + Direction * Distance, 0, false, true, Hit))
+        {
+            return Distance;
+        }
+        const float Reach = std::sqrt(FMath::Square(Hit.X - Start.X) + FMath::Square(Hit.Y - Start.Y));
+        return Reach < 1.0f ? Distance : Reach;
     }
 
     int32_t FloorLootContainers = 0;
@@ -153,6 +169,30 @@ void ABuildingContainer::GetFloorLootLocations(int32_t Index, int32_t Count, FVe
     OutSpawnLocation = OutFinalLocation - Direction * DropShortfall + FVector(0.0f, 0.0f, Height);
 }
 
+float ABuildingContainer::GetAthenaLootFront()
+{
+    // How far along GetAthenaTossForward the front of the container's collision is. The actor's bounds are a box on the
+    // world's axes, and most containers are turned some way (386 of 553 on Athena_Terrain), so for a chest turned 45
+    // degrees the box's front was 40 past the real one, 30 past the pivot (Tiered_Chest_6_Parent's mesh is 84 x 69). The
+    // front is the middle of those bounds plus half the depth of the mesh's own box (GetLocalBounds) along the toss.
+    constexpr float DegreesToRadians = 3.1415926535897932f / 180.0f;
+    FVector Origin;
+    FVector Extent;
+    GetActorBounds(true, Origin, Extent);
+    const FVector Forward = GetAthenaTossForward();
+    FVector Min;
+    FVector Max;
+    UStaticMeshComponent* Mesh = StaticMeshComponent;
+    if (!Mesh || !Mesh->GetLocalBounds(Min, Max))
+    {
+        return (Origin | Forward) + FMath::Abs(Forward.X) * Extent.X + FMath::Abs(Forward.Y) * Extent.Y;
+    }
+    const float Yaw = static_cast<FRotator>(LootTossDirection_Athena).Yaw * DegreesToRadians;
+    const FVector Scale = GetTransform().Scale3D;
+    const float Depth = FMath::Abs(std::cos(Yaw) * Scale.X) * (Max.X - Min.X) + FMath::Abs(std::sin(Yaw) * Scale.Y) * (Max.Y - Min.Y);
+    return (Origin | Forward) + Depth * 0.5f;
+}
+
 FVector ABuildingContainer::GetAthenaLootSpawnLocation()
 {
     // LootSpawnLocation (a tiered chest's mesh sets: 100 over its pivot) is inside the container's top, and a pickup's
@@ -160,42 +200,69 @@ FVector ABuildingContainer::GetAthenaLootSpawnLocation()
     // launched from there with little forward speed came down on the lid. It leaves at that height from just past the
     // front of the container's collision instead.
     constexpr float PickupRadius = 30.0f;
-    FVector Location = GetTransform().TransformPosition(LootSpawnLocation);
-    FVector Origin;
-    FVector Extent;
-    GetActorBounds(true, Origin, Extent);
+    const FVector Location = GetTransform().TransformPosition(LootSpawnLocation);
     const FVector Forward = GetAthenaTossForward();
-    const float Front = (Origin | Forward) + FMath::Abs(Forward.X) * Extent.X + FMath::Abs(Forward.Y) * Extent.Y + PickupRadius;
-    const float Along = Location | Forward;
-    if (Along < Front)
-    {
-        Location = Location + Forward * (Front - Along);
-    }
-    return Location;
+    return Location + Forward * std::max(GetAthenaLootFront() + PickupRadius - (Location | Forward), 0.0f);
 }
 
-void ABuildingContainer::TossAthenaLoot(AFortPickup* Pickup, const FVector& SpawnLocation, int32_t Index, int32_t Count)
+std::vector<FVector> ABuildingContainer::GetAthenaLootSpots(int32_t Count)
 {
-    // Battle Royale's chests and ammo boxes throw their loot up and out onto the ground in front (#90) instead of flying
-    // it to the looter. The search that did it is stripped; what is left is the container's toss: a launch
-    // LootTossDirection_Athena (the constructor's: pitch 65, yaw 90 = up and out over local +Y) at LootTossSpeed_Athena
-    // (550), within LootTossConeHalfAngle_Athena (60) of it. Each item gets its own heading, fanned across the cone in
-    // front so they land apart (1 to 2m out), and falls and bounces on the pickup's projectile movement (down in about
-    // 0.35s, still within 1s). Dropping them just short of a spot on the floor (#72) showed them already down, hopping in
-    // place.
-    constexpr float DegreesToRadians = 3.1415926535897932f / 180.0f;
-    const FRotator TossDirection = LootTossDirection_Athena;
-    const float ConeHalfAngle = FMath::Clamp(static_cast<float>(LootTossConeHalfAngle_Athena), 0.0f, 90.0f);
-    const float Fan = Count > 1 ? (static_cast<float>(Index) + 0.5f) / static_cast<float>(Count) * 2.0f - 1.0f : 0.0f;
-    const float Spread = Count > 1 ? ConeHalfAngle / static_cast<float>(Count) : ConeHalfAngle * 0.5f;
-    const float Yaw = (TossDirection.Yaw + Fan * ConeHalfAngle * 0.75f + (FMath::FRand() - 0.5f) * Spread) * DegreesToRadians;
-    const float Pitch = FMath::Clamp(TossDirection.Pitch + (FMath::FRand() * 2.0f - 1.0f) * ConeHalfAngle * 0.25f, 15.0f, 80.0f) * DegreesToRadians;
-    const FVector LocalDirection(std::cos(Pitch) * std::cos(Yaw), std::cos(Pitch) * std::sin(Yaw), std::sin(Pitch));
-    const FVector Velocity = GetTransform().Rotation.RotateVector(LocalDirection) * (LootTossSpeed_Athena * (0.85f + 0.15f * FMath::FRand()));
+    // Battle Royale's chests and ammo boxes pop their loot out onto the floor just in front of them (#90, #95). Launched
+    // at the container's own toss settings (LootTossDirection_Athena pitch 65, LootTossSpeed_Athena 550), the items went
+    // where the bounces took them: on a 1.7.2 server, 0.9 to 2.2m past the front of a chest in the open, 12m down off a
+    // ledge, or in a heap where they started with a wall in front. Each item gets its own spot instead, for TossOntoFloor
+    // to land it on: two staggered rows 50 and 90 past the front (pickups are 60 across), side by side across the front,
+    // each moved a little at random. A wall pulls the rows in towards the container (never back over it) and pushes the
+    // row along the front, or closes it up, and each spot is traced down to the floor below it, from a little over the
+    // container's floor. On the same server, items in the open came to rest within 10 of their spots, 50 to 90 past the
+    // front and about 60 apart; on a slope they roll on a little, up to 1.5m out.
+    constexpr float PickupRadius = 30.0f;
+    constexpr float NearRow = 50.0f;
+    constexpr float FarRow = 90.0f;
+    constexpr float PickupSpacing = 70.0f;
+    constexpr float Jitter = 10.0f;
+    constexpr float TraceHeight = 50.0f;
+    constexpr float TraceDepth = 100000.0f;
+    const FVector Base = GetTransform().GetLocation();
+    const FVector Forward = GetAthenaTossForward();
+    const FVector Right(-Forward.Y, Forward.X, 0.0f);
+    const FVector Center(Base.X, Base.Y, Base.Z + TraceHeight);
+    const float Front = GetAthenaLootFront() - (Base | Forward);
 
-    // The toss's LootFinalPosition only records the heading (on the container's floor); the launch decides where it lands.
-    const FVector FinalLocation(SpawnLocation.X + Velocity.X * 0.5f, SpawnLocation.Y + Velocity.Y * 0.5f, GetTransform().GetLocation().Z);
-    Pickup->TossFromContainer(FinalLocation, Velocity);
+    const float Ahead = TraceReach(this, Center, Forward, Front + FarRow + PickupRadius) - Front - PickupRadius;
+    const float Near = FMath::Clamp(Ahead, PickupRadius, NearRow);
+    const float Far = FMath::Clamp(Ahead, Near, FarRow);
+    const float Stagger = Count > 1 ? Far - Near : 0.0f;
+    const float Spacing = std::sqrt(std::max(PickupSpacing * PickupSpacing - Stagger * Stagger, PickupSpacing * PickupSpacing * 0.25f));
+    const float Width = static_cast<float>(std::max(Count - 1, 0)) * Spacing;
+    const FVector Row = Center + Forward * (Front + Near);
+    const float LeftRoom = std::max(TraceReach(this, Row, Right * -1.0f, Width + PickupRadius) - PickupRadius, 0.0f);
+    const float RightRoom = std::max(TraceReach(this, Row, Right, Width + PickupRadius) - PickupRadius, 0.0f);
+    float First = -Width * 0.5f;
+    float Step = Spacing;
+    if (LeftRoom + RightRoom >= Width)
+    {
+        First = FMath::Clamp(First, -LeftRoom, RightRoom - Width);
+    }
+    else
+    {
+        First = -LeftRoom;
+        Step = Count > 1 ? (LeftRoom + RightRoom) / static_cast<float>(Count - 1) : 0.0f;
+    }
+
+    std::vector<FVector> Spots;
+    for (int32_t Index = 0; Index < Count; ++Index)
+    {
+        const float Side = First + Step * static_cast<float>(Index) + (FMath::FRand() - 0.5f) * Jitter;
+        const float RowOut = (Count > 1 ? (Index % 2 ? Far : Near) : (Near + Far) * 0.5f) - Near;
+        const FVector RowSpot = Row + Right * Side;
+        const float Room = std::max(TraceReach(this, RowSpot, Forward, RowOut + Jitter + PickupRadius) - PickupRadius, 0.0f);
+        const FVector Spot = RowSpot + Forward * FMath::Clamp(RowOut + (FMath::FRand() - 0.5f) * Jitter, 0.0f, Room);
+        FVector Floor = Spot;
+        UKismetSystemLibrary::LineTraceSingle(this, Spot, FVector(Spot.X, Spot.Y, Spot.Z - TraceDepth), 0, false, true, Floor);
+        Spots.push_back(Floor);
+    }
+    return Spots;
 }
 
 void ABuildingContainer::SpawnFloorLoot()
@@ -421,6 +488,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
 
             AFortPlayerController* LooterController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Looter->Controller)));
             ModifyLootDrops(LootDrops, LooterController);
+            const std::vector<FVector> LootSpots = bAthena ? GetAthenaLootSpots(LootDrops.Num()) : std::vector<FVector>();
             HighestRarity = 0;
             for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
             {
@@ -444,7 +512,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
                 {
                     if (bAthena)
                     {
-                        TossAthenaLoot(Pickup, SpawnLocation, Index, LootDrops.Num());
+                        Pickup->TossFromContainer(LootSpots[Index]);
                     }
                     else
                     {

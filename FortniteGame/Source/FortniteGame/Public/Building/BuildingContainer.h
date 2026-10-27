@@ -4,6 +4,8 @@
 #include "Math/Rotator.h"
 #include "Math/Vector.h"
 
+#include <vector>
+
 class AFortPawn;
 class AFortPickup;
 class AFortPlayerController;
@@ -62,9 +64,10 @@ private:
     bool StartsAlreadySearched();
     void SpawnFloorLoot();
     FVector GetAthenaTossForward();
+    float GetAthenaLootFront();
     FVector GetAthenaLootSpawnLocation();
+    std::vector<FVector> GetAthenaLootSpots(int32_t Count);
     void GetFloorLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation);
-    void TossAthenaLoot(AFortPickup* Pickup, const FVector& SpawnLocation, int32_t Index, int32_t Count);
 
     static void PostLoadHK(ABuildingContainer* This);
     static void PostUpdateHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList);

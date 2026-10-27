@@ -22,3 +22,16 @@ void UPrimitiveComponent::SetMaterial(int32_t ElementIndex, UMaterialInterface* 
     Params.Set(L"Material", Material);
     Params.Call(this);
 }
+
+bool UStaticMeshComponent::GetLocalBounds(FVector& Min, FVector& Max) const
+{
+    // Without a mesh the function leaves both zero.
+    Reflection::FParams Params(StaticFunction_GetLocalBounds());
+    if (!Params.Call(const_cast<UStaticMeshComponent*>(this)))
+    {
+        return false;
+    }
+    Min = Params.Take<FVector>(L"Min");
+    Max = Params.Take<FVector>(L"Max");
+    return Max.X > Min.X || Max.Y > Min.Y || Max.Z > Min.Z;
+}

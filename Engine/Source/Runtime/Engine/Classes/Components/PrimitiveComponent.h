@@ -27,4 +27,10 @@ class UMeshComponent : public UPrimitiveComponent
 class UStaticMeshComponent : public UMeshComponent
 {
     DefineUnrealClass(UStaticMeshComponent, Engine)
+
+public:
+    DefineUFunction(GetLocalBounds)
+
+    // The mesh's box in the component's own space. False if there is no mesh or no GetLocalBounds.
+    bool GetLocalBounds(FVector& Min, FVector& Max) const;
 };

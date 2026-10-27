@@ -297,6 +297,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaAircraft.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortGameModeAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerControllerAthena.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerPawnAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerStateAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingContainer.h" />

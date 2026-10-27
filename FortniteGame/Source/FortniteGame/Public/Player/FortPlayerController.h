@@ -114,6 +114,7 @@ private:
     static inline bool (*InitializeMcpProfileOG)(AFortPlayerController* This, const void* OnComplete) = nullptr;
     static bool InitializeMcpProfileHK(AFortPlayerController* This, const void* OnComplete);
     static inline void (*PossessOG)(AFortPlayerController* This, APawn* InPawn) = nullptr;
+    static inline void (*AthenaPossessOG)(AFortPlayerController* This, APawn* InPawn) = nullptr;
     static void PossessHK(AFortPlayerController* This, APawn* InPawn);
     static void PushToTalkPressedHK(AFortPlayerController* This);
     static void PushToTalkReleasedHK(AFortPlayerController* This);

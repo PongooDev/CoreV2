@@ -4,6 +4,7 @@
 #include "Abilities/FortAbilityKit.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Athena/FortPlayerPawnAthena.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystemComponent.h"
@@ -197,7 +198,8 @@ bool AFortPlayerController::GetRotatePawnToCamera()
 
 void AFortPlayerController::Possess(APawn* InPawn)
 {
-    PossessOG(this, InPawn);
+    const bool bAthenaPossess = AthenaPossessOG && Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this));
+    (bAthenaPossess ? AthenaPossessOG : PossessOG)(this, InPawn);
 
 #if WITH_SERVER_CODE
     // UpdateRotation only turns the pawn to the camera (FaceRotation) while this is on. The DBNO death montage's
@@ -254,6 +256,24 @@ void AFortPlayerController::Possess(APawn* InPawn)
 
         FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
         Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
+
+        // A pawn leaving the aircraft is already skydiving here (Battle Royale's Possess, 1.7.2 0x441AD0, exits the
+        // aircraft). The activation above only asks the client to equip the slot's item (ClientExecuteInventoryItem,
+        // 0x8058A0), which needs the client to have the new pawn and nothing blocking a change of equipment. Skydiving only
+        // holsters the pawn's current weapon (0x44DDA0) and landing draws it again (0x41AB80), so without one the player
+        // landed empty-handed (#82). Equip the focused item now, as the client's request would.
+        AFortPlayerPawnAthena* AthenaPawn = AthenaController ? Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))) : nullptr;
+        const int32_t FocusedSlot = PrimaryQuickBar.CurrentFocusedSlot;
+        TStructArray<FQuickBarSlot>& Slots = PrimaryQuickBar.Slots;
+        if (AthenaPawn && AthenaPawn->bIsSkydiving && !static_cast<AFortWeapon*>(AthenaPawn->CurrentWeapon) && FocusedSlot >= 0 && FocusedSlot < Slots.Num())
+        {
+            const TArray<FGuid>& SlotItems = Slots[FocusedSlot].Items;
+            if (SlotItems.Num() > 0)
+            {
+                ServerExecuteInventoryItem_Implementation(SlotItems[0]);
+                UE_LOG(LogFort, Log, TEXT("Possess: %s left the aircraft holding %s"), *GetNameSafe(this), *GetNameSafe(static_cast<AFortWeapon*>(AthenaPawn->CurrentWeapon)));
+            }
+        }
     }
 #endif
 }
@@ -1175,6 +1195,28 @@ void AFortPlayerController::HookVTables()
             if (VTable && VTable[PossessIndex] == PlayerControllerPossess)
             {
                 Hooks::SwapVTable(L"AFortPlayerController::Possess", VTable, PossessIndex, reinterpret_cast<void*>(&PossessHK));
+            }
+        }
+
+        // Battle Royale's controller overrides it (1.7.2 0x441AD0: this class's, then the pawn leaves the aircraft if the
+        // player is in it), so the loop above never reached it and nothing here ran on Battle Royale: not the hero's
+        // attributes (#73), not the quickbar's activation (#82). Its classes get the same hook, which calls their own.
+        UClass* AthenaClass = AFortPlayerControllerAthena::StaticClass();
+        UObject* AthenaDefault = AthenaClass ? AthenaClass->GetDefaultObject(false) : nullptr;
+        void** AthenaVTable = AthenaDefault ? *reinterpret_cast<void***>(AthenaDefault) : nullptr;
+        void* const AthenaPossess = AthenaVTable ? AthenaVTable[PossessIndex] : nullptr;
+        if (AthenaPossess && AthenaPossess != PlayerControllerPossess && AthenaPossess != reinterpret_cast<void*>(&PossessHK))
+        {
+            AthenaPossessOG = reinterpret_cast<decltype(AthenaPossessOG)>(AthenaPossess);
+            for (TObjectIterator<UClass> It; It; ++It)
+            {
+                UClass* Class = *It;
+                UObject* ClassDefault = Class->IsChildOf(AthenaClass) ? Class->GetDefaultObject(false) : nullptr;
+                void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+                if (VTable && VTable[PossessIndex] == AthenaPossess)
+                {
+                    Hooks::SwapVTable(L"AFortPlayerControllerAthena::Possess", VTable, PossessIndex, reinterpret_cast<void*>(&PossessHK));
+                }
             }
         }
     }

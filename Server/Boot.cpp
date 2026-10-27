@@ -62,6 +62,7 @@ void Boot::Initialize()
     Configuration::Load();
     Log::Initialize(L"Server");
     Log::Info(L"Core V2 starting");
+    FCommandLine::ApproveServerSwitches();
 
     // Without its hooks the process would carry on as a game client (a window and a front end, Core-Launcher #4), which
     // the launcher would keep counting as a server: a server that can't start stops.

@@ -1,9 +1,11 @@
 #include "pch.h"
 #include "Misc/CommandLine.h"
+#include "Finder.h"
 #include "Log.h"
 #include "Natives.h"
 
 #include <shellapi.h>
+#include <cstring>
 #include <cwchar>
 
 namespace
@@ -39,6 +41,43 @@ void FCommandLine::RestoreSwitch(const wchar_t* Switch)
     {
         AddSwitch(Switch);
     }
+}
+
+void FCommandLine::ApproveServerSwitches()
+{
+    // The whitelist FCommandLine::Set keeps switches from is one space-separated string in .rdata ("... -epicapp -epicenv
+    // -invitesession -invitefrom -party_joininfo_token -replay -purgatorymallocproxy ..."), read when the engine starts.
+    // Without -nullrhi in it a 1.8 server made a D3D11 device and crashed building the Early Access loading screen
+    // (0x1248480, through a null Slate global). Reboot Launcher patches the exe on disk to swap these four client
+    // switches for server ones; Core makes the same swap in memory first (it's loaded before the exe's entry point), so
+    // an unpatched exe works too. An exe Reboot already patched has the swapped string.
+    static constexpr wchar_t Client[] = L"-invitesession -invitefrom -party_joininfo_token -replay";
+    static constexpr wchar_t Server[] = L"-log -nosplash -nosound -nullrhi -useolditemcards       ";
+    static_assert(sizeof(Client) == sizeof(Server), "the swap must keep the whitelist's length");
+    constexpr size_t Size = sizeof(Client) - sizeof(wchar_t);
+
+    wchar_t* const Whitelist = reinterpret_cast<wchar_t*>(Finder::FindReadOnly(Client, Size));
+    if (!Whitelist)
+    {
+        if (Finder::FindReadOnly(Server, Size))
+        {
+            Log::Info(L"FCommandLine: the exe already lets -nullrhi through");
+        }
+        else
+        {
+            Log::Warning(L"FCommandLine: whitelist not found; -nullrhi may be dropped");
+        }
+        return;
+    }
+    DWORD Protection = 0;
+    if (!VirtualProtect(Whitelist, Size, PAGE_READWRITE, &Protection))
+    {
+        Log::Error(L"FCommandLine: can't write the whitelist ({})", GetLastError());
+        return;
+    }
+    std::memcpy(Whitelist, Server, Size);
+    VirtualProtect(Whitelist, Size, Protection, &Protection);
+    Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi");
 }
 
 void FCommandLine::AddSwitch(const wchar_t* Switch)

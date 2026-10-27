@@ -63,6 +63,8 @@ namespace Finder
 
     std::vector<uintptr_t> StringRefs(const wchar_t* Text);
     std::vector<uintptr_t> StringRefs(const char* Text);
+    // The first copy of the bytes in .rdata, or 0.
+    uintptr_t FindReadOnly(const void* Bytes, size_t Size);
 
     uintptr_t FunctionStart(uintptr_t Address);
     uintptr_t FunctionEnd(uintptr_t FunctionStart);

@@ -221,9 +221,18 @@ void AFortPlayerController::Possess(APawn* InPawn)
         FortPlayerState->ForceNetUpdate();
     }
 
+    AFortPlayerControllerAthena* AthenaController = Role == ROLE_Authority && MyFortPawn && AFortGameModeAthena::GetCurrent(this) ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;
+    UFortHero* AthenaHero = AthenaController ? AthenaController->SetupHero() : nullptr;
+
     if (AFortPlayerPawn* PlayerPawn = Role == ROLE_Authority ? Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))) : nullptr)
     {
         PlayerPawn->ResetGameplayAttributes();
+        if (AthenaController)
+        {
+            UFortHeroType* HeroType = AthenaHero ? AthenaHero->GetHeroTypeBP() : nullptr;
+            UE_LOG(LogFort, Log, TEXT("Possess: %s plays %s with health %.0f/%.0f, shield %.0f/%.0f"), *GetNameSafe(this), *GetNameSafe(HeroType),
+                PlayerPawn->GetHealth(), PlayerPawn->GetMaxHealth(), PlayerPawn->GetShield(), PlayerPawn->GetMaxShield());
+        }
     }
 
     AFortQuickBars* Bars = QuickBars;
@@ -382,8 +391,8 @@ void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bS
     // Battle Royale plays one of the controller's DefaultHeroes (HID_Commando_Athena_*), which its GetOrInitializeHero
     // (1.7.2 0x42E5E0, called by the game mode when the player joins, 0x587C70) makes: their GE_Map_Athena_Vitality_Health
     // overrides MaxHealth and the shield cap to 100 and GE_Map_Athena_StartingShields the shield to 0. The account's Save
-    // the World hero, which the MCP profile (0x5CAB40) and ServerSetHero (0x827E30) also set here, brought its level,
-    // survivor and homebase stats into the match instead (440 health, 172 shield).
+    // the World hero, which the MCP profile (0x5CAB40) and ServerSetHero (0x827E30) also set here, would bring its own
+    // stats into the match instead. Possess sets the hero again (AFortPlayerControllerAthena::SetupHero).
     AFortGameModeAthena* AthenaGameMode = Role == ROLE_Authority ? AFortGameModeAthena::GetCurrent(this) : nullptr;
     AFortPlayerControllerAthena* AthenaController = AthenaGameMode && NewHero ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;
     if (AthenaController && AthenaController->DefaultHeroes.Num() > 0 && !AthenaController->IsDefaultHero(NewHero))

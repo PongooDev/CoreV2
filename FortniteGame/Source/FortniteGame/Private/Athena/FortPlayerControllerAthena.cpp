@@ -29,3 +29,21 @@ UFortHero* AFortPlayerControllerAthena::GetOrInitializeHero()
     }
     return CallVirtual<UFortHero*>(this, Natives::AFortPlayerController_GetOrInitializeHeroIndex);
 }
+
+UFortHero* AFortPlayerControllerAthena::SetupHero()
+{
+    // Battle Royale played a level 1 Save the World soldier's stats (#73: Soldier_Balanced_UC_T1 in AttributesHeroScaling,
+    // 440 health and 172 shield) instead of its hero's (GE_Map_Athena_Vitality_Health: 100 health and a 100 shield cap,
+    // GE_Map_Athena_StartingShields: no shield). GetOrInitializeHero binds the player's UFortRegisteredPlayerInfo to the
+    // player state before it makes the hero, and binding initializes the attributes (0x5EA3F0) with the controller's hero
+    // or, while there is none, with UFortGameData::DefaultHero (HID_Commando_GrenadeGun_UC_T01). Setting the hero
+    // afterwards doesn't initialize them again; ResetGameplayAttributes does, with AFortPlayerController::GetHero (0x808A80),
+    // which only returns the hero whose id the player state holds. So with the pawn possessed the hero is set once more,
+    // which puts its id back on the player state, before Possess resets the attributes with it.
+    UFortHero* Hero = GetOrInitializeHero();
+    if (Hero)
+    {
+        TrySetHeroImplementation(Hero, false, false);
+    }
+    return Hero;
+}

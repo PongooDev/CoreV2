@@ -33,6 +33,35 @@ void AFortPawn::TriggerFeedbackEvent(FName EventName, AFortPawn* InstigatorPawn,
     Params.Call(this);
 }
 
+namespace
+{
+    float CallFloatGetter(const AFortPawn* Pawn, UFunction* Function)
+    {
+        Reflection::FParams Params(Function);
+        return Params.Call(const_cast<AFortPawn*>(Pawn)) ? Params.Take<float>(L"ReturnValue") : 0.0f;
+    }
+}
+
+float AFortPawn::GetHealth() const
+{
+    return CallFloatGetter(this, StaticFunction_GetHealth());
+}
+
+float AFortPawn::GetMaxHealth() const
+{
+    return CallFloatGetter(this, StaticFunction_GetMaxHealth());
+}
+
+float AFortPawn::GetShield() const
+{
+    return CallFloatGetter(this, StaticFunction_GetShield());
+}
+
+float AFortPawn::GetMaxShield() const
+{
+    return CallFloatGetter(this, StaticFunction_GetMaxShield());
+}
+
 bool AFortPawn::EquipDefaultWeapon()
 {
     if (!Finder::ResolveAbilityWeaponLive(CurrentWeaponListOffset(), AFortPlayerPawn::LastEquippedWeaponGUIDOffset()))

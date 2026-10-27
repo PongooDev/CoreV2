@@ -5600,6 +5600,37 @@ uint8_t* Finder::PawnDiedInventoryDropCall()
     return nullptr;
 }
 
+bool Finder::ResolveServerMoveLive()
+{
+    static bool bSearched = false;
+    if (Natives::UCharacterMovementComponent_ServerMove_ImplementationIndex >= 0 || bSearched)
+    {
+        return Natives::UCharacterMovementComponent_ServerMove_ImplementationIndex >= 0;
+    }
+    bSearched = true;
+
+    // ACharacter::ServerMove's exec calls ServerMove_Validate, then ACharacter::ServerMove_Implementation (1.7.2 0x1FE7F80,
+    // its last call), whose only virtual call passes the move to the movement component's ServerMove_Implementation (slot
+    // 0x128, 0x20222E0). ServerMoveDual's moves go through the same slot.
+    UFunction* ServerMove = FindObject<UFunction>(nullptr, L"/Script/Engine.Character:ServerMove");
+    const uintptr_t Exec = ServerMove ? reinterpret_cast<uintptr_t>(ServerMove->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = ExecEnd > Exec ? Finder::DirectCalls(Exec, ExecEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    const uintptr_t Implementation = Calls.empty() ? 0 : Calls.back().second;
+    const uintptr_t ImplementationEnd = Implementation && Finder::FunctionStart(Implementation) == Implementation ? Finder::FunctionEnd(Implementation) : 0;
+    const uintptr_t Call = ImplementationEnd ? FindVirtualCall(Implementation, ImplementationEnd) : 0;
+    const int32_t Index = VirtualSlot(Call);
+    if (Index < 0 || FindVirtualCall(Call + 1, ImplementationEnd))
+    {
+        Log::Error(L"Finder: UCharacterMovementComponent::ServerMove_Implementation slot not found");
+        return false;
+    }
+
+    Natives::UCharacterMovementComponent_ServerMove_ImplementationIndex = Index;
+    Log::Info(L"Finder: UCharacterMovementComponent::ServerMove_Implementation is slot 0x{:X}", Index);
+    return true;
+}
+
 uint8_t* Finder::QuickBarChangedWorldManagerCall()
 {
     const uintptr_t SwapItems = FunctionOf(L"Bad call to AFortQuickBars::SwapItems with index %d %d!");

@@ -137,6 +137,7 @@ namespace Finder
     bool ResolveAthenaMenuHero();
     uint8_t* PawnDiedInventoryDropCall();
     bool ResolveDecoSpawnedLive();
+    bool ResolveServerMoveLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();
     bool ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset);

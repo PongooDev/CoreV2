@@ -13,6 +13,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/NetDriver.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "UObject/Linker.h"
 #include "UObject/Object.h"
@@ -156,6 +157,7 @@ void Boot::Initialize()
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
             AFortGameModeAthena::HookCallSites();
+            UCharacterMovementComponent::HookServerMove(L"/Script/FortniteGame.FortMovementComp_CharacterAthena");
         }
     });
 

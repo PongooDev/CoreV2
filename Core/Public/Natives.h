@@ -359,6 +359,7 @@ namespace Natives
     inline int32_t AFortGameMode_RedirectLootTierGroupIndex = -1;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
+    inline int32_t UCharacterMovementComponent_ServerMove_ImplementationIndex = -1;
     inline int32_t AFortPlayerPawn_EquipLastWeaponIndex = -1;
     inline int32_t AFortPawn_EquipDefaultWeaponIndex = -1;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;

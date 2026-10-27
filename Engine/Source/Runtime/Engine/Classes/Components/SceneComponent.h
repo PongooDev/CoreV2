@@ -2,6 +2,7 @@
 
 #include "Components/ActorComponent.h"
 #include "Containers/EnumAsByte.h"
+#include "Math/Vector.h"
 #include "Reflection.h"
 
 namespace EComponentMobility
@@ -20,4 +21,6 @@ class USceneComponent : public UActorComponent
 
 public:
     DefineUProperty(TEnumAsByte<EComponentMobility::Type>, Mobility)
+    DefineUProperty(USceneComponent*, AttachParent)
+    DefineUProperty(FVector, RelativeLocation)
 };

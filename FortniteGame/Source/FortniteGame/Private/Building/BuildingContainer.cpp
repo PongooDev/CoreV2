@@ -121,21 +121,46 @@ bool ABuildingContainer::StartsAlreadySearched()
     return Member_bStartAlreadySearched_Athena.IsAvailable() && bStartAlreadySearched_Athena && AFortGameModeAthena::GetCurrent(this);
 }
 
-void ABuildingContainer::TossLoot(AFortPickup* Pickup, const FVector& SpawnLocation)
+void ABuildingContainer::GetAthenaLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation)
 {
-    // Battle Royale's containers toss their loot onto the ground in a cone around LootTossDirection_Athena (relative to the
-    // container) instead of flying it to the looter. The pickups land where they would be after a quarter second at
-    // LootTossSpeed_Athena (Tiered_Athena_FloorLoot_01: 350, cone 180 degrees; the defaults 550 and 60 degrees).
+    // Battle Royale's containers put their loot on the ground instead of flying it to the looter (#72).
+    // AFortPickup::TossPickup (1.7.2 0x6622F0) aims the pickup's toss at the location it is given and nothing finds the
+    // ground for it, so loot tossed at LootSpawnLocation's height (a chest's: 72 above it) stayed in the air over the chest,
+    // and floor loot tossed from one point lay in one pile. Each item gets its own spot on the container's floor (its
+    // pivot): chests and ammo boxes put theirs in a row in front, along LootTossDirection_Athena's yaw (local +Y, the side
+    // LootSpawnLocation is on), floor loot (Tiered_Athena_FloorLoot_01) around the spot. Each drops from LootSpawnLocation's
+    // height a little short of its spot, never straight above it: TossPickup sends a toss with no distance in a random
+    // direction 512 away.
     constexpr float DegreesToRadians = 3.1415926535897932f / 180.0f;
-    constexpr float TossTime = 0.25f;
-    const FRotator TossDirection = LootTossDirection_Athena;
-    const float Pitch = TossDirection.Pitch * DegreesToRadians;
-    const float Yaw = TossDirection.Yaw * DegreesToRadians;
-    const FVector LocalDirection(std::cos(Pitch) * std::cos(Yaw), std::cos(Pitch) * std::sin(Yaw), std::sin(Pitch));
-    const FVector Direction = UKismetMathLibrary::RandomUnitVectorInCone(GetTransform().Rotation.RotateVector(LocalDirection), LootTossConeHalfAngle_Athena * DegreesToRadians);
-    const float Distance = LootTossSpeed_Athena * TossTime;
-    const FVector FinalLocation(SpawnLocation.X + Direction.X * Distance, SpawnLocation.Y + Direction.Y * Distance, SpawnLocation.Z);
-    Pickup->TossPickup(FinalLocation, nullptr, 0);
+    constexpr float FrontDistance = 90.0f;
+    constexpr float RowSpacing = 45.0f;
+    constexpr float FloorLootRadius = 40.0f;
+    constexpr float DropShortfall = 20.0f;
+    const FTransform ContainerTransform = GetTransform();
+    const FVector Base = ContainerTransform.GetLocation();
+    const float Yaw = static_cast<FRotator>(LootTossDirection_Athena).Yaw * DegreesToRadians;
+    FVector Forward = ContainerTransform.Rotation.RotateVector(FVector(std::cos(Yaw), std::sin(Yaw), 0.0f));
+    Forward.Z = 0.0f;
+    const float ForwardSize = std::sqrt(Forward.X * Forward.X + Forward.Y * Forward.Y);
+    Forward = ForwardSize > 0.0f ? Forward * (1.0f / ForwardSize) : FVector(1.0f, 0.0f, 0.0f);
+    const FVector Right(-Forward.Y, Forward.X, 0.0f);
+    const float Height = FMath::Max(ContainerTransform.TransformPosition(LootSpawnLocation).Z - Base.Z, 30.0f);
+
+    FVector Direction = Forward;
+    float Distance = FrontDistance;
+    if (StartsAlreadySearched())
+    {
+        const float Angle = Count > 1 ? 2.0f * 3.1415926535897932f * static_cast<float>(Index) / static_cast<float>(Count) : 0.0f;
+        Direction = Forward * std::cos(Angle) + Right * std::sin(Angle);
+        Distance = Count > 1 ? FloorLootRadius : DropShortfall;
+        OutFinalLocation = Base + Direction * Distance;
+    }
+    else
+    {
+        const float Offset = (static_cast<float>(Index) - static_cast<float>(Count - 1) * 0.5f) * RowSpacing;
+        OutFinalLocation = Base + Forward * Distance + Right * Offset;
+    }
+    OutSpawnLocation = OutFinalLocation - Direction * DropShortfall + FVector(0.0f, 0.0f, Height);
 }
 
 void ABuildingContainer::SpawnFloorLoot()
@@ -155,7 +180,6 @@ void ABuildingContainer::SpawnFloorLoot()
     TStructArray<FFortItemEntry> LootDrops{};
     UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, nullptr, StaticGameplayTags, true, false);
     UWorld* World = GetWorld();
-    const FVector SpawnLocation = GetTransform().TransformPosition(LootSpawnLocation);
     const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
     for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
     {
@@ -166,9 +190,12 @@ void ABuildingContainer::SpawnFloorLoot()
             continue;
         }
         ApplyLootedDurability(Entry, WorldItemDefinition, LootedWeaponsDurabilityModifier);
+        FVector SpawnLocation;
+        FVector FinalLocation;
+        GetAthenaLootLocations(Index, LootDrops.Num(), SpawnLocation, FinalLocation);
         if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
         {
-            TossLoot(Pickup, SpawnLocation);
+            Pickup->TossPickup(FinalLocation, nullptr, 0);
             ++FloorLootPickups;
         }
     }
@@ -368,11 +395,17 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
 
                 HighestRarity = FMath::Max(static_cast<uint8_t>(HighestRarity), WorldItemDefinition->GetRarity());
                 ApplyLootedDurability(Entry, WorldItemDefinition, LootedWeaponsDurabilityModifier);
-                if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
+                FVector PickupLocation = SpawnLocation;
+                FVector FinalLocation = SpawnLocation;
+                if (bAthena)
+                {
+                    GetAthenaLootLocations(Index, LootDrops.Num(), PickupLocation, FinalLocation);
+                }
+                if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &PickupLocation, &SpawnRotation))
                 {
                     if (bAthena)
                     {
-                        TossLoot(Pickup, SpawnLocation);
+                        Pickup->TossPickup(FinalLocation, nullptr, 0);
                     }
                     else
                     {

@@ -61,7 +61,7 @@ private:
     FName GetSearchLootTierGroup();
     bool StartsAlreadySearched();
     void SpawnFloorLoot();
-    void TossLoot(AFortPickup* Pickup, const FVector& SpawnLocation);
+    void GetAthenaLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation);
 
     static void PostLoadHK(ABuildingContainer* This);
     static void PostUpdateHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList);

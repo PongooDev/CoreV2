@@ -5439,6 +5439,31 @@ bool Finder::ResolveAthenaHeroLive()
     return true;
 }
 
+bool Finder::ResolveTrapInitializeLive()
+{
+    static bool bSearched = false;
+    if (Natives::ABuildingTrap_InitializeKismetSpawnedBuildingActorIndex >= 0 || bSearched)
+    {
+        return Natives::ABuildingTrap_InitializeKismetSpawnedBuildingActorIndex >= 0;
+    }
+    bSearched = true;
+
+    // ABuildingTrap's override of ABuildingActor::InitializeKismetSpawnedBuildingActor (1.7.2 0x4A63C0, slot 0xF7), which
+    // AFortDecoTool's spawn (0x91B370) calls on a placed trap with the placer's WorldPlayerId, is the only reader of this.
+    const uintptr_t Initialize = FunctionOf(L"Trap %s was loaded from a world record with a missing FortTrapItemDefinition. Destroying next frame.");
+    const int32_t Index = FirstVTableIndex(CdoVTable(L"/Script/FortniteGame.BuildingTrap"), Initialize);
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: ABuildingTrap::InitializeKismetSpawnedBuildingActor slot not found");
+        return false;
+    }
+
+    Natives::ABuildingTrap_InitializeKismetSpawnedBuildingActor = Initialize;
+    Natives::ABuildingTrap_InitializeKismetSpawnedBuildingActorIndex = Index;
+    Log::Info(L"Finder: ABuildingTrap::InitializeKismetSpawnedBuildingActor is slot 0x{:X}", Index);
+    return true;
+}
+
 uint8_t* Finder::QuickBarChangedWorldManagerCall()
 {
     const uintptr_t SwapItems = FunctionOf(L"Bad call to AFortQuickBars::SwapItems with index %d %d!");

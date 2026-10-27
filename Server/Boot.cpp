@@ -36,6 +36,7 @@
 #include "AI/FortAIGoalManager.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingStructuralSupportSystem.h"
+#include "Building/BuildingTrap.h"
 #include "AI/FortBTTask_SetFrustrationDiscouragement.h"
 #include "AI/FortQueryContexts.h"
 #include "AI/FortQueryGenerators.h"
@@ -151,6 +152,7 @@ void Boot::Initialize()
         {
             Finder::ResolveLootTierRedirectLive();
             Finder::ResolveAthenaHeroLive();
+            ABuildingTrap::HookVTables();
         }
     });
 

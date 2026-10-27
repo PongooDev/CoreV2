@@ -45,6 +45,7 @@ class AFortTeamInfo : public AInfo
     DefineUFunction(OnSpottedActorDied)
 
 public:
+    DefineUProperty(EFortTeam, Team)
     DefineUStructProperty(FTeamSpottedActorInfoArray, TeamSpottedActors)
 
     void AddSpottedActor(AFortPlayerController* Spotter, AActor* SpottedActor);

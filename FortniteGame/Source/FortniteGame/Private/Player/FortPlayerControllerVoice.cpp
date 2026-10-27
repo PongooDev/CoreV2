@@ -18,6 +18,7 @@
 void AFortPlayerController::HookVoice()
 {
     APlayerController::HookVoice();
+    Finder::ResolveVoiceHandshake();
     if (!Finder::ResolvePushToTalk())
     {
         return;
@@ -64,6 +65,21 @@ void AFortPlayerController::PushToTalkPressedHK(AFortPlayerController* This)
 {
     Log::Info(L"Voice chat: talking");
     FOnlineVoiceImpl::RegisterLocalTalker(0);
+
+    // The client's voice channel sends the microphone's packets only once the controller's voice handshake is complete
+    // (UVoiceChannel's tick, 1.7.2 0x24A74D0, checks the connection's controller's MuteList.bHasVoiceHandshakeCompleted),
+    // which the server's ClientVoiceHandshakeComplete sets. Without it every packet stayed on the client (Core-Backend #54:
+    // packets recorded, none received by the server). The server forwards voice only to players whose handshake it
+    // completed itself, so completing it here only lets this player's voice leave.
+    if (Finder::ResolveVoiceHandshake())
+    {
+        uint8_t& bHandshakeCompleted = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(This) + Natives::APlayerController_VoiceHandshakeCompletedOffset);
+        if (!bHandshakeCompleted)
+        {
+            Log::Info(L"Voice chat: the server's voice handshake hasn't arrived; Core completes it so the voice is sent");
+            bHandshakeCompleted = 1;
+        }
+    }
     This->ToggleSpeaking(true);
 }
 

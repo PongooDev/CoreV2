@@ -6772,3 +6772,31 @@ bool Finder::ResolveOnlineVoice()
     Log::Info(L"Finder: FOnlineVoiceImpl vtable at 0x{:X}, SerializeRemotePacket slot 0x{:X}, RegisterLocalTalker slot 0x{:X}", reinterpret_cast<uintptr_t>(VTable) - Finder::ImageBase(), UnmuteIndex + 1, RegisterLocalIndex);
     return true;
 }
+
+bool Finder::ResolveVoiceHandshake()
+{
+    if (Natives::APlayerController_VoiceHandshakeCompletedOffset >= 0)
+    {
+        return true;
+    }
+
+    // ClientVoiceHandshakeComplete's exec tail-jumps to its _Implementation (mov rax, [rcx]; jmp [rax+disp32]; 1.7.2
+    // 0x25D15D0, slot 0x130), which is mov byte ptr [rcx+MuteList.bHasVoiceHandshakeCompleted], 1 (0x2315920: +0x570).
+    const UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/Engine.PlayerController:ClientVoiceHandshakeComplete");
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    // The jump may carry a REX prefix (48 FF A0).
+    const uintptr_t Load = IsInText(Exec) ? FindInstruction(Exec, Exec + 0x40, { 0x48, 0x8B, 0x01 }) : 0;
+    const uintptr_t Jump = Load ? Load + 3 + (Byte(Load + 3) == 0x48 ? 1 : 0) : 0;
+    const int32_t Slot = Jump && Byte(Jump) == 0xFF && Byte(Jump + 1) == 0xA0 ? *reinterpret_cast<const int32_t*>(Jump + 2) / static_cast<int32_t>(sizeof(void*)) : -1;
+    const uintptr_t Implementation = Slot >= 0 ? VTableEntry(CdoVTable(L"/Script/Engine.PlayerController"), Slot) : 0;
+    const bool bSetsFlag = Implementation && Byte(Implementation) == 0xC6 && Byte(Implementation + 1) == 0x81 && Byte(Implementation + 6) == 0x01;
+    if (!bSetsFlag)
+    {
+        Log::Warning(L"Finder: APlayerController's voice handshake flag not found (ClientVoiceHandshakeComplete slot {})", Slot);
+        return false;
+    }
+
+    Natives::APlayerController_VoiceHandshakeCompletedOffset = *reinterpret_cast<const int32_t*>(Implementation + 2);
+    Log::Info(L"Finder: APlayerController MuteList.bHasVoiceHandshakeCompleted is +0x{:X}", Natives::APlayerController_VoiceHandshakeCompletedOffset);
+    return true;
+}

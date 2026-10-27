@@ -2,17 +2,26 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Abilities/FortHomebaseSet.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortGameStateAthena.h"
+#include "Engine/World.h"
 #include "Finder.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
+#include "Hooks.h"
 #include "Items/FortInventory.h"
+#include "Items/FortItemDefinition.h"
+#include "Items/FortPickup.h"
 #include "Items/FortQuickBars.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
+#include "Pawns/FortPawn.h"
+#include "Templates/Casts.h"
 #include "UObject/Class.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
@@ -82,6 +91,97 @@ void AFortPlayerControllerAthena::SetupBackpackSize()
         }
     }
     UE_LOG(LogFort, Warning, TEXT("SetupBackpackSize: %s's heroes give no backpack size, it stays the attribute's"), *GetName());
+}
+
+void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
+{
+#if WITH_SERVER_CODE
+    // An eliminated player's loot went with them (#89): the pawn-death handler's inventory drop (1.7.2 0x864F55, before
+    // the death report and the elimination) is stripped. The only drop on death left is Save the World's backpack
+    // (AFortPlayerController slot 0x2C0, 0x80DB20, "Removing %d items from inventory on death": one backpack pickup
+    // sized by the game mode's DeathPenaltyData), which nothing calls either, and Battle Royale's Anthem_DeathPenalty
+    // (respawn delays only) would leave it empty. Battle Royale drops each item as its own pickup: whole stacks of what
+    // bCanBeDropped allows, so not the pickaxe or the edit tool, nor the building pieces (UFortBuildingItemDefinition's
+    // constructor 0x6249D0 clears it), with the weapons' loaded ammo. bDropOnDeath is not the rule: in 1.7.2's content
+    // only Athena_Shields sets it. The warmup island respawns the player with what they hold, so nothing drops until the
+    // aircraft, when a death is an elimination (0x437C30 takes the player out of the alive players after Warmup).
+    UWorld* World = DeadPawn && Role == ROLE_Authority ? GetWorld() : nullptr;
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    AFortInventory* Inventory = WorldInventory;
+    if (!GameState || GameState->GamePhase <= EAthenaGamePhase::GetWarmup() || !Inventory)
+    {
+        return;
+    }
+
+    std::vector<UFortWorldItem*> Drops;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        UFortWorldItem* WorldItem = Instances[Index];
+        FFortItemEntry* ItemEntry = WorldItem ? &static_cast<FFortItemEntry&>(WorldItem->ItemEntry) : nullptr;
+        UFortWorldItemDefinition* ItemDefinition = ItemEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition)) : nullptr;
+        if (ItemDefinition && ItemDefinition->bCanBeDropped && ItemEntry->Count > 0)
+        {
+            Drops.push_back(WorldItem);
+        }
+    }
+
+    // The pickups fly from the body to their own spots on a ring around it. AFortPickup::TossPickup (0x6622F0) lands a
+    // pickup where it is aimed and finds no ground (#72), so each spot is traced down to the floor below it.
+    constexpr float Pi = 3.1415926535897932f;
+    constexpr float MinimumRadius = 80.0f;
+    constexpr float Spacing = 50.0f;
+    constexpr float TraceDepth = 100000.0f;
+    const FVector DeathLocation = DeadPawn->GetTransform().GetLocation();
+    const int32_t DropCount = static_cast<int32_t>(Drops.size());
+    const float Radius = std::max(MinimumRadius, Spacing * static_cast<float>(DropCount) / (2.0f * Pi));
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+    int32_t Dropped = 0;
+    for (int32_t Index = 0; Index < DropCount; ++Index)
+    {
+        FFortItemEntry& ItemEntry = Drops[Index]->ItemEntry;
+        const FGuid ItemGuid = ItemEntry.ItemGuid;
+        const int32_t Count = ItemEntry.Count;
+        EntryStruct->InitializeStruct(DropEntry);
+        EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
+        if (RemoveInventoryItem(ItemGuid, Count, false))
+        {
+            const float Angle = 2.0f * Pi * static_cast<float>(Index) / static_cast<float>(DropCount);
+            const FVector Spot(DeathLocation.X + std::cos(Angle) * Radius, DeathLocation.Y + std::sin(Angle) * Radius, DeathLocation.Z);
+            FVector FinalLocation = Spot;
+            UKismetSystemLibrary::LineTraceSingle(DeadPawn, Spot, FVector(Spot.X, Spot.Y, Spot.Z - TraceDepth), 0, false, true, FinalLocation);
+            if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &DeathLocation, nullptr))
+            {
+                Pickup->PawnWhoDroppedPickup = DeadPawn;
+                Pickup->TossPickup(FinalLocation, DeadPawn, 0);
+                ++Dropped;
+            }
+        }
+        EntryStruct->DestroyStruct(DropEntry);
+    }
+    UE_LOG(LogFort, Log, TEXT("DropInventoryOnDeath: %s dropped %d of %d items"), *GetName(), Dropped, DropCount);
+#endif
+}
+
+void AFortPlayerControllerAthena::HookCallSites()
+{
+    if (uint8_t* Call = Finder::PawnDiedInventoryDropCall())
+    {
+        Hooks::RedirectCall(L"AFortPlayerControllerZone pawn-death inventory drop", Call, reinterpret_cast<void*>(&PawnDiedInventoryDropCall));
+    }
+}
+
+void AFortPlayerControllerAthena::PawnDiedInventoryDropCall(AFortPlayerController* Controller, void* Unused, const FGameplayTagContainer* DamageTags, AFortPawn* DeadPawn, bool* bOutDroppedBackpack)
+{
+    // The handler passes the controller's MyFortPawn. Battle Royale drops no backpack, so bDroppedBackpack stays false
+    // and the other controllers keep the stub's nothing.
+    if (AFortPlayerControllerAthena* AthenaController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)))
+    {
+        AthenaController->DropInventoryOnDeath(DeadPawn);
+    }
 }
 
 void AFortPlayerControllerAthena::ResetToStartingItems()

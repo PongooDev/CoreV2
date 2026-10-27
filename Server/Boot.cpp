@@ -20,6 +20,7 @@
 #include "FortGameMode.h"
 #include "FortGameModeZone.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortPlayerControllerAthena.h"
 #include "Misc/CommandLine.h"
 #include "FortVisibilityComponent.h"
 #include "FortWorldManager.h"
@@ -151,6 +152,7 @@ void Boot::Initialize()
         if (Configuration::Get().IsBattleRoyale())
         {
             Finder::ResolveLootTierRedirectLive();
+            AFortPlayerControllerAthena::HookCallSites();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
             AFortGameModeAthena::HookCallSites();

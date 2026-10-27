@@ -5542,6 +5542,36 @@ bool Finder::ResolveTrapInitializeLive()
     return true;
 }
 
+uint8_t* Finder::PawnDiedInventoryDropCall()
+{
+    // AFortPlayerControllerZone's pawn-death handler (1.7.2 0x864E10, slot 0x2F9; the pawn calls it, Athena's override
+    // 0x437C30 calls it first) is the only code reading the "Deaths" stat name. Its one call to the shared empty function
+    // (0x864F55: the controller, 0, the damage tags, MyFortPawn, &bDroppedBackpack, which then goes into the death report)
+    // is the stripped inventory drop. The other "Deaths" reference registers a property.
+    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerZone");
+    for (const uintptr_t Ref : Finder::StringRefs(L"Deaths"))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const int32_t Index = FirstVTableIndex(ZoneVTable, Function);
+        const uintptr_t End = Index >= 0 ? Finder::FunctionEnd(Function) : 0;
+        std::vector<uintptr_t> StubCalls;
+        for (const auto& [Site, Target] : End ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (reinterpret_cast<void*>(Target) == Natives::SharedEmptyFunction)
+            {
+                StubCalls.push_back(Site);
+            }
+        }
+        if (StubCalls.size() == 1)
+        {
+            Log::Info(L"Finder: AFortPlayerControllerZone's pawn-death handler is slot 0x{:X} (0x{:X}), its inventory drop is stripped at 0x{:X}", Index, Function - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase());
+            return reinterpret_cast<uint8_t*>(StubCalls[0]);
+        }
+    }
+    Log::Error(L"Finder: the stripped inventory drop in AFortPlayerControllerZone's pawn-death handler was not found, Battle Royale players drop nothing when they die");
+    return nullptr;
+}
+
 uint8_t* Finder::QuickBarChangedWorldManagerCall()
 {
     const uintptr_t SwapItems = FunctionOf(L"Bad call to AFortQuickBars::SwapItems with index %d %d!");

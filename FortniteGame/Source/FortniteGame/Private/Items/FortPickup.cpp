@@ -207,7 +207,10 @@ namespace
 
     // How close two pickups of the same item must lie to merge, and how long the one flies into the other. The search
     // that picks them is server code no client build has (CombinePickups), so both are chosen: pickups are 60 across.
-    constexpr float CombineRadius = 200.0f;
+    // A player's drop is tossed 512 ahead of the pawn and falls short (TossOntoFloor), coming down 60 to 140 ahead, so two
+    // drops from one spot facing different ways lie up to 280 apart: at 200, a second drop made after turning round
+    // (135 to 180 degrees) came down 230 to 280 from the first and stayed apart. 300 reaches any two drops from one spot.
+    constexpr float CombineRadius = 300.0f;
     constexpr float CombineFlyTime = 0.25f;
 
     struct FPickupCombine
@@ -229,6 +232,18 @@ namespace
         return Definition ? std::max(static_cast<int32_t>(Definition->MaxStackSize), 1) : 1;
     }
 
+    // Whether a pickup's toss is over. The toss (0x6622F0) sets TossState InProgress before it returns, but AtRest only
+    // comes 5s after the pickup stops: outside a pickup target or a combine, the stop (0x662120) is called from the
+    // pickup's tick once its movement has had no velocity for 5s (0x684A70). Measured on a 1.7.2 server, a drop lay still
+    // 0.65s after it was tossed and was AtRest at 5.5s, so a second drop lay apart from the first for 5.5s before it
+    // merged. The projectile stops simulating when it comes to rest (StopSimulating clears its UpdatedComponent) and
+    // doesn't move again, so that ends the toss too: a second drop now merges about 0.9s after it is made.
+    bool IsTossOver(AFortPickup* Pickup)
+    {
+        UProjectileMovementComponent* Movement = Pickup->MovementComponent;
+        return static_cast<FFortPickupLocationData&>(Pickup->PickupLocationData).TossState != EFortPickupTossState::GetInProgress() || (Movement && Movement->HasStoppedSimulating());
+    }
+
     // A pickup that can merge or take another: one item that stacks, short of a full stack, at rest, not picked up and
     // not flying into another.
     bool CanCombine(AFortPickup* Pickup)
@@ -236,7 +251,7 @@ namespace
         FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
         FFortPickupLocationData& LocationData = Pickup->PickupLocationData;
         const int32_t MaxStackSize = GetPickupMaxStackSize(Entry);
-        return Pickup->Role == ROLE_Authority && !Pickup->bPickedUp && !LocationData.CombineTarget && LocationData.TossState != EFortPickupTossState::GetInProgress()
+        return Pickup->Role == ROLE_Authority && !Pickup->bPickedUp && !LocationData.CombineTarget && IsTossOver(Pickup)
             && Pickup->MultiItemPickupEntries.Num() == 0 && MaxStackSize > 1 && Entry.Count > 0 && Entry.Count < MaxStackSize;
     }
 
@@ -429,10 +444,11 @@ void AFortPickup::CombinePickups()
     // FlyTime, and the pickup's tick (0x6832A0 -> 0x684B10) moves it from LootInitialPosition into the target over
     // FlyTime; while it has a target it can't be picked up (0x6783E0). The server half is server code a client build
     // doesn't have: the timer is bound to the shared empty function, and nothing sets a CombineTarget. Core's tossed
-    // pickups are watched until they come to rest (TossState AtRest, set by 0x662120 when the toss stops), then each
-    // flies into the nearest resting pickup of the same stack within CombineRadius with room for it (CanCombine,
-    // IsSameStack), and when FlyTime is up the target takes what fits of its count. What doesn't fit stays in the pickup,
-    // which goes back to where it landed (the toss branch of the same OnRep, with no target).
+    // pickups are watched until their toss is over (IsTossOver), then each flies into the nearest resting pickup of the
+    // same stack within CombineRadius with room for it (CanCombine, IsSameStack), and when FlyTime is up the target takes
+    // what fits of its count. What doesn't fit stays in the pickup, which goes back to where it landed (the toss branch
+    // of the same OnRep, with no target). A landed pickup stays one of the resting ones, so two pickups are compared when
+    // the later of them comes to rest, wherever the earlier one landed.
     bCombinePickupsQueued = false;
     std::unordered_map<AFortPickup*, int32_t> Incoming;
     std::vector<std::pair<AFortPickup*, AFortPickup*>> Finished;
@@ -460,7 +476,7 @@ void AFortPickup::CombinePickups()
     std::erase_if(TossedPickups, [&](const TWeakObjectPtr<AFortPickup>& Tossed)
     {
         AFortPickup* Pickup = Tossed.Get();
-        if (Pickup && !Pickup->bPickedUp && static_cast<FFortPickupLocationData&>(Pickup->PickupLocationData).TossState == EFortPickupTossState::GetInProgress())
+        if (Pickup && !Pickup->bPickedUp && !IsTossOver(Pickup))
         {
             return false;
         }
@@ -512,6 +528,11 @@ void AFortPickup::CombinePickups()
             const FVector Location = GetPickupLocation(Pickup);
             AFortPickup* Nearest = nullptr;
             float NearestDistanceSquared = CombineRadius * CombineRadius;
+            // The closest pickup of the item it passed over, and why, for the line below when a pawn's drop merges with none
+            // (loot lying a little apart from loot of the same item is common, and stays quiet).
+            AFortPickup* Missed = nullptr;
+            float MissedDistanceSquared = 4.0f * CombineRadius * CombineRadius;
+            const wchar_t* MissedReason = nullptr;
             for (int32_t OffsetX = -1; OffsetX <= 1; ++OffsetX)
             {
                 for (int32_t OffsetY = -1; OffsetY <= 1; ++OffsetY)
@@ -523,13 +544,28 @@ void AFortPickup::CombinePickups()
                     }
                     for (const auto& [Other, OtherLocation] : Cell->second)
                     {
+                        if (Other == Pickup)
+                        {
+                            continue;
+                        }
                         const float DistanceSquared = FMath::Square(OtherLocation.X - Location.X) + FMath::Square(OtherLocation.Y - Location.Y) + FMath::Square(OtherLocation.Z - Location.Z);
                         const auto OtherIncoming = Incoming.find(Other);
                         const int32_t OtherCount = static_cast<FFortItemEntry&>(Other->PrimaryPickupItemEntry).Count + (OtherIncoming != Incoming.end() ? OtherIncoming->second : 0);
-                        if (Other != Pickup && DistanceSquared <= NearestDistanceSquared && OtherCount < MaxStackSize && CanCombine(Other) && IsSameStack(Pickup, Other))
+                        const wchar_t* Reason = DistanceSquared > CombineRadius * CombineRadius ? L"out of reach"
+                            : OtherCount >= MaxStackSize ? L"full"
+                            : !CanCombine(Other) ? L"flying into another"
+                            : !IsSameStack(Pickup, Other) ? L"another level, durability, owner or mission"
+                            : nullptr;
+                        if (!Reason && DistanceSquared <= NearestDistanceSquared)
                         {
                             Nearest = Other;
                             NearestDistanceSquared = DistanceSquared;
+                        }
+                        else if (Reason && DistanceSquared < MissedDistanceSquared)
+                        {
+                            Missed = Other;
+                            MissedDistanceSquared = DistanceSquared;
+                            MissedReason = Reason;
                         }
                     }
                 }
@@ -538,6 +574,10 @@ void AFortPickup::CombinePickups()
             {
                 Incoming[Nearest] += Entry.Count;
                 Pickup->StartCombine(Nearest);
+            }
+            else if (Missed && static_cast<AFortPawn*>(Pickup->PawnWhoDroppedPickup))
+            {
+                Log::Info(L"Pickup: {} {} came to rest {:.0f} from {} and stays apart ({})", static_cast<int32_t>(Entry.Count), Definition ? Definition->GetName().ToStdString() : L"None", std::sqrt(MissedDistanceSquared), Missed->GetName().ToStdString(), MissedReason);
             }
         }
     }

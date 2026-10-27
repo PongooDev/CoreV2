@@ -1494,6 +1494,30 @@ namespace
         Require(L"FNetworkObjectList::Remove", Natives::FNetworkObjectList_Remove, ObjectListRemove);
         RequireOffset(L"UNetDriver::NetworkObjects", Natives::UNetDriver_NetworkObjects, NetworkObjects);
 
+        // FNetworkObjectInfo's size: MarkActive (the "no longer dormant on all connections" log) first calls FindOrAdd,
+        // which allocates a new one with mov ecx, size; call (1.7.2 0x22270A0: 0xC8; 1.8 0x229C080: 0xD0). 1.8's extra
+        // 8 bytes are a TWeakObjectPtr<AActor> after Actor (its constructor 0x2292660), which moves every later member;
+        // reading 1.7.2's layout there crashed a 1.8 server in IsActorDormant as soon as a player joined.
+        const uintptr_t MarkActive = FunctionOf(L"FNetworkObjectList::MarkDormant: Actor is no longer dormant on all connections. Actor: %s. Total: %i, Active: %i, Connection: %s");
+        const uintptr_t FindOrAdd = MarkActive ? Finder::NextCall(MarkActive, 0x60) : 0;
+        const uintptr_t FindOrAddEnd = FindOrAdd ? Finder::FunctionEnd(FindOrAdd) : 0;
+        const uintptr_t Allocate = FindOrAddEnd ? FindInstruction(FindOrAdd, FindOrAddEnd, { 0xB9, -1, 0x00, 0x00, 0x00, 0xE8 }) : 0;
+        const int32_t InfoSize = Allocate ? *reinterpret_cast<const int32_t*>(Allocate + 1) : 0;
+        if (InfoSize == 0xD0)
+        {
+            for (ptrdiff_t* Offset : { &Natives::FNetworkObjectInfo_NextUpdateTime, &Natives::FNetworkObjectInfo_LastNetReplicateTime, &Natives::FNetworkObjectInfo_OptimalNetUpdateDelta,
+                                       &Natives::FNetworkObjectInfo_LastNetUpdateTime, &Natives::FNetworkObjectInfo_Flags, &Natives::FNetworkObjectInfo_DormantConnections,
+                                       &Natives::FNetworkObjectInfo_RecentlyDormantConnections })
+            {
+                *Offset += 8;
+            }
+        }
+        else if (InfoSize != 0xC8)
+        {
+            Log::Warning(L"Finder: FNetworkObjectInfo's size not found (0x{:X}); assuming 1.7.2's layout", InfoSize);
+        }
+        Log::Info(L"Finder: FNetworkObjectInfo is 0x{:X} bytes, DormantConnections +0x{:X}", InfoSize, Natives::FNetworkObjectInfo_DormantConnections);
+
         ptrdiff_t ActorChannels = 0;
         int32_t ActorChannelLookups = 0;
         for (uintptr_t Load = NotifyDestroyed; NotifyDestroyedEnd && Load + 12 <= NotifyDestroyedEnd; ++Load)

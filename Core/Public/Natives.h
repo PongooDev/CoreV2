@@ -221,6 +221,14 @@ namespace Natives
     inline void (*AActor_FlushNetDormancy)(AActor* This) = nullptr;
     inline void (*AActor_SetNetDormancy)(AActor* This, int32_t NewDormancy) = nullptr;
     inline void (*FNetworkObjectList_Remove)(FNetworkObjectList* This, AActor* Actor) = nullptr;
+    // FNetworkObjectInfo's members after Actor: 1.8 adds a TWeakObjectPtr<AActor> after it, moving them all by 8.
+    inline ptrdiff_t FNetworkObjectInfo_NextUpdateTime = 0x8;
+    inline ptrdiff_t FNetworkObjectInfo_LastNetReplicateTime = 0x10;
+    inline ptrdiff_t FNetworkObjectInfo_OptimalNetUpdateDelta = 0x18;
+    inline ptrdiff_t FNetworkObjectInfo_LastNetUpdateTime = 0x1C;
+    inline ptrdiff_t FNetworkObjectInfo_Flags = 0x20;
+    inline ptrdiff_t FNetworkObjectInfo_DormantConnections = 0x28;
+    inline ptrdiff_t FNetworkObjectInfo_RecentlyDormantConnections = 0x78;
     inline bool (*FNetGUIDCache_SupportsObject)(const FNetGUIDCache* This, const UObject* Object) = nullptr;
     inline UObject* (*UObject_GetArchetypeFromRequiredInfo)(UClass* Class, UObject* Outer, FName Name, int32_t ObjectFlags) = nullptr;
     inline AWorldSettings* (*UWorld_GetWorldSettings)(const UWorld* This, bool bCheckStreamingPersistent, bool bChecked) = nullptr;

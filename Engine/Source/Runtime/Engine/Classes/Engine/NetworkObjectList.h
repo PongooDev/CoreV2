@@ -8,25 +8,25 @@
 class AActor;
 class UNetConnection;
 
+// The engine allocates these (0xC8 bytes up to 1.7.2, 0xD0 from 1.8); Core only reads and updates them in place. Every
+// member after Actor is at the offset ResolveReplication found: 1.8 puts a TWeakObjectPtr<AActor> right after Actor.
 struct FNetworkObjectInfo
 {
-    AActor* Actor;
-    double NextUpdateTime;
-    double LastNetReplicateTime;
-    float OptimalNetUpdateDelta;
-    float LastNetUpdateTime;
-    uint32_t bPendingNetUpdate : 1;
-    uint32_t bDirtyForReplay : 1;
-    TSet<TWeakObjectPtr<UNetConnection>> DormantConnections;
-    TSet<TWeakObjectPtr<UNetConnection>> RecentlyDormantConnections;
-};
+    using FConnectionSet = TSet<TWeakObjectPtr<UNetConnection>>;
 
-static_assert(offsetof(FNetworkObjectInfo, NextUpdateTime) == 0x8);
-static_assert(offsetof(FNetworkObjectInfo, OptimalNetUpdateDelta) == 0x18);
-static_assert(offsetof(FNetworkObjectInfo, LastNetUpdateTime) == 0x1C);
-static_assert(offsetof(FNetworkObjectInfo, DormantConnections) == 0x28);
-static_assert(offsetof(FNetworkObjectInfo, RecentlyDormantConnections) == 0x78);
-static_assert(sizeof(FNetworkObjectInfo) == 0xC8);
+    AActor* Actor;
+
+    DefineNativeMember(double, NextUpdateTime, FNetworkObjectInfo_NextUpdateTime)
+    DefineNativeMember(double, LastNetReplicateTime, FNetworkObjectInfo_LastNetReplicateTime)
+    DefineNativeMember(float, OptimalNetUpdateDelta, FNetworkObjectInfo_OptimalNetUpdateDelta)
+    DefineNativeMember(float, LastNetUpdateTime, FNetworkObjectInfo_LastNetUpdateTime)
+    DefineNativeBitfield(bPendingNetUpdate, FNetworkObjectInfo_Flags, 0x1)
+    DefineNativeBitfield(bDirtyForReplay, FNetworkObjectInfo_Flags, 0x2)
+    DefineNativeObject(FConnectionSet, DormantConnections, FNetworkObjectInfo_DormantConnections)
+    DefineNativeObject(FConnectionSet, RecentlyDormantConnections, FNetworkObjectInfo_RecentlyDormantConnections)
+
+    FNetworkObjectInfo() = delete;
+};
 
 struct FNetworkObjectKeyFuncs
 {

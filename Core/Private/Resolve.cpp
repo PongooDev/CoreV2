@@ -6755,9 +6755,18 @@ bool Finder::ResolveOnlineVoice()
         return false;
     }
 
+    // RegisterLocalTalker (1.7.2 0x3928930, slot 5) logs its result.
+    const uintptr_t RegisterLocal = FunctionOf(L"RegisterLocalTalker(%d) returned 0x%08X");
+    int32_t RegisterLocalIndex = -1;
+    for (int32_t Index = 0; RegisterLocal && Index < 64 && RegisterLocalIndex < 0; ++Index)
+    {
+        RegisterLocalIndex = reinterpret_cast<uintptr_t>(VTable[Index]) == RegisterLocal ? Index : -1;
+    }
+
     Natives::FOnlineVoiceImpl_VTable = VTable;
     Natives::FOnlineVoiceImpl_InitIndex = 0;
     Natives::FOnlineVoiceImpl_SerializeRemotePacketIndex = UnmuteIndex + 1;
-    Log::Info(L"Finder: FOnlineVoiceImpl vtable at 0x{:X}, SerializeRemotePacket slot 0x{:X}", reinterpret_cast<uintptr_t>(VTable) - Finder::ImageBase(), UnmuteIndex + 1);
+    Natives::FOnlineVoiceImpl_RegisterLocalTalkerIndex = RegisterLocalIndex;
+    Log::Info(L"Finder: FOnlineVoiceImpl vtable at 0x{:X}, SerializeRemotePacket slot 0x{:X}, RegisterLocalTalker slot 0x{:X}", reinterpret_cast<uintptr_t>(VTable) - Finder::ImageBase(), UnmuteIndex + 1, RegisterLocalIndex);
     return true;
 }

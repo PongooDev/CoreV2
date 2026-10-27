@@ -12,6 +12,8 @@ namespace
     bool (*InitOG)(FOnlineVoiceImpl* This) = nullptr;
     void* (*SerializeRemotePacketOG)(FOnlineVoiceImpl* This, void* OutPacket, void* Ar) = nullptr;
     std::atomic<int64_t> RemotePackets = 0;
+    // The voice interface that started with a voice engine (the client's).
+    FOnlineVoiceImpl* LocalVoice = nullptr;
 
     // TSharedPtr<FVoicePacket>: the object, then its reference controller.
     struct FSharedPacket
@@ -38,6 +40,7 @@ bool FOnlineVoiceImpl::InitHK(FOnlineVoiceImpl* This)
     const bool bReady = InitOG(This);
     if (bReady)
     {
+        LocalVoice = This;
         Log::Info(L"Voice chat: voice interface ready");
     }
     else
@@ -59,4 +62,22 @@ void* FOnlineVoiceImpl::SerializeRemotePacketHK(FOnlineVoiceImpl* This, void* Ou
         }
     }
     return Result;
+}
+
+void FOnlineVoiceImpl::RegisterLocalTalker(uint32_t LocalUserNum)
+{
+    // Starting the microphone (FVoiceEngineImpl::StartLocalVoiceProcessing, 1.7.2 0x392D1F0) fails with "Device is
+    // currently owned by another user" until the player is registered as a local talker, which the session interface
+    // does when it creates or joins a session; Battle Royale's matchmaking never did, so pressing push to talk sent
+    // nothing (Core-Backend #54: "talking" on both clients, no voice packets on the server). Registering an already
+    // registered talker does nothing.
+    static bool bRegistered = false;
+    if (bRegistered || !LocalVoice || Natives::FOnlineVoiceImpl_RegisterLocalTalkerIndex < 0)
+    {
+        return;
+    }
+    using FRegisterLocalTalker = bool (*)(FOnlineVoiceImpl*, uint32_t);
+    void** VTable = *reinterpret_cast<void***>(LocalVoice);
+    bRegistered = reinterpret_cast<FRegisterLocalTalker>(VTable[Natives::FOnlineVoiceImpl_RegisterLocalTalkerIndex])(LocalVoice, LocalUserNum);
+    Log::Info(L"Voice chat: local talker {} {}", LocalUserNum, bRegistered ? L"registered" : L"failed to register (no voice engine, or no account id yet)");
 }

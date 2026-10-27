@@ -5,6 +5,7 @@
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
+#include "OnlineVoiceImpl.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -62,6 +63,7 @@ void AFortPlayerController::HookVoice()
 void AFortPlayerController::PushToTalkPressedHK(AFortPlayerController* This)
 {
     Log::Info(L"Voice chat: talking");
+    FOnlineVoiceImpl::RegisterLocalTalker(0);
     This->ToggleSpeaking(true);
 }
 

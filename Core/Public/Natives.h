@@ -160,6 +160,7 @@ namespace Natives
     inline void** FOnlineVoiceImpl_VTable = nullptr;
     inline int32_t FOnlineVoiceImpl_InitIndex = -1;
     inline int32_t FOnlineVoiceImpl_SerializeRemotePacketIndex = -1;
+    inline int32_t FOnlineVoiceImpl_RegisterLocalTalkerIndex = -1;
     inline FString* (*UGameMapsSettings_GetGameDefaultMap)(FString* Result) = nullptr;
     inline const FString* (*UGameMapsSettings_GetGlobalDefaultGameMode)() = nullptr;
 

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Items/FortPickup.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Curves/CurveBase.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
@@ -9,6 +10,7 @@
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
 #include "Items/FortItemDefinition.h"
+#include "Items/FortQuickBars.h"
 #include "Log.h"
 #include "Missions/FortItemCollectedParams.h"
 #include "Natives.h"
@@ -75,6 +77,49 @@ namespace
                 PlayerController->TryAddToQuickBar(WorldItem);
                 return WorldItem;
             });
+    }
+
+    // Battle Royale swaps a weapon picked up with a full backpack for the item in the player's hands (#88). Its controller
+    // lets the client pick one up then (AFortPlayerControllerAthena's override of the overflow bypass, 1.7.2 0x434C20, slot
+    // 0x2B8: a weapon-type item, the backpack's count at its size, and the focused quickbar slot's item, 0x66BF80, one that
+    // bCanBeDropped; the pickaxe can't) and shows "Swap equipped" (0x66C3C0), but the swap was in the stripped give: Core's
+    // tossed the weapon back down. The held item is dropped as the player's own drop would be; returns the primary slot
+    // it emptied, or -1.
+    int32_t DropFocusedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry)
+    {
+        const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
+        const EFortItemType ItemType = ItemDefinition ? static_cast<EFortItemType>(ItemDefinition->ItemType) : EFortItemType::GetMax_None();
+        const bool bWeapon = ItemType == EFortItemType::GetWeapon() || ItemType == EFortItemType::GetWeaponMelee() || ItemType == EFortItemType::GetWeaponRanged();
+        AFortInventory* Inventory = PlayerController->WorldInventory;
+        AFortQuickBars* Bars = PlayerController->QuickBars;
+        if (!bWeapon || !Inventory || !Bars || !AFortGameModeAthena::GetCurrent(PlayerController) || Inventory->GetOverflowAmount(ItemEntry, true) <= 0)
+        {
+            return -1;
+        }
+
+        const EFortQuickBars FocusedBar = Bars->GetCurrentQuickBar();
+        const int32_t FocusedSlot = FocusedBar != EFortQuickBars::GetMax_None() ? static_cast<int32_t>(Bars->GetQuickBar(FocusedBar).CurrentFocusedSlot) : -1;
+        if (FocusedSlot < 0 || FocusedSlot >= Bars->GetQuickBar(FocusedBar).Slots.Num())
+        {
+            return -1;
+        }
+        const TArray<FGuid>& SlotItems = Bars->GetSlot(FocusedBar, FocusedSlot).Items;
+        UFortWorldItem* FocusedItem = SlotItems.Num() > 0 ? Inventory->FindWorldItem(SlotItems[0]) : nullptr;
+        FFortItemEntry* FocusedEntry = FocusedItem ? &static_cast<FFortItemEntry&>(FocusedItem->ItemEntry) : nullptr;
+        UFortWorldItemDefinition* FocusedDefinition = FocusedEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(FocusedEntry->ItemDefinition)) : nullptr;
+        if (!FocusedDefinition || !FocusedDefinition->bCanBeDropped)
+        {
+            return -1;
+        }
+
+        const FGuid FocusedGuid = FocusedEntry->ItemGuid;
+        PlayerController->ServerSpawnInventoryDrop_Implementation(FocusedGuid, FocusedEntry->Count);
+        if (Inventory->FindWorldItem(FocusedGuid))
+        {
+            return -1;
+        }
+        Log::Info(L"Battle Royale: {} swaps {} for {}", PlayerController->GetName().ToStdString(), FocusedDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString());
+        return FocusedBar == EFortQuickBars::GetPrimary() ? FocusedSlot : -1;
     }
 }
 
@@ -168,8 +213,13 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
     std::vector<FFortItemEntry*> Entries = GetPickupEntries(this);
     AFortPawn* Pawn = PlayerController->MyFortPawn;
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    int32_t SwappedSlot = -1;
     for (FFortItemEntry* Entry : Entries)
     {
+        if (SwappedSlot < 0)
+        {
+            SwappedSlot = DropFocusedItemForSwap(PlayerController, *Entry);
+        }
         const int32_t Given = GiveItemEntry(PlayerController, *Entry);
         if (Given > 0)
         {
@@ -193,6 +243,13 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
             Pickup->TossPickup(Location, Pawn, 0);
         }
         EntryStruct->DestroyStruct(Leftover);
+    }
+
+    // The new weapon takes the emptied slot (TryAddToQuickBar's first free one) and goes into the player's hands.
+    AFortQuickBars* Bars = PlayerController->QuickBars;
+    if (SwappedSlot >= 0 && Bars && Bars->GetSlot(EFortQuickBars::GetPrimary(), SwappedSlot).Items.Num() > 0)
+    {
+        Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), SwappedSlot, 0.0f, true);
     }
 #endif
 }

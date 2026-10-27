@@ -14,4 +14,5 @@ public:
 private:
     static bool InitHK(FOnlineVoiceImpl* This);
     static void* SerializeRemotePacketHK(FOnlineVoiceImpl* This, void* OutPacket, void* Ar);
+    static void* GetLocalPacketHK(FOnlineVoiceImpl* This, void* OutPacket, uint32_t LocalUserNum);
 };

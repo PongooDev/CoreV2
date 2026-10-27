@@ -6767,6 +6767,8 @@ bool Finder::ResolveOnlineVoice()
     Natives::FOnlineVoiceImpl_InitIndex = 0;
     Natives::FOnlineVoiceImpl_SerializeRemotePacketIndex = UnmuteIndex + 1;
     Natives::FOnlineVoiceImpl_RegisterLocalTalkerIndex = RegisterLocalIndex;
+    // GetLocalPacket follows SerializeRemotePacket, as in IOnlineVoice (1.7.2 slot 0x16, 0x3919750).
+    Natives::FOnlineVoiceImpl_GetLocalPacketIndex = VTableEntry(VTable, UnmuteIndex + 2) ? UnmuteIndex + 2 : -1;
     Log::Info(L"Finder: FOnlineVoiceImpl vtable at 0x{:X}, SerializeRemotePacket slot 0x{:X}, RegisterLocalTalker slot 0x{:X}", reinterpret_cast<uintptr_t>(VTable) - Finder::ImageBase(), UnmuteIndex + 1, RegisterLocalIndex);
     return true;
 }

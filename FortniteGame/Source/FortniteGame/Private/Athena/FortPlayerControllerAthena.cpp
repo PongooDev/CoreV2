@@ -14,6 +14,7 @@
 #include "Items/FortQuickBars.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Logging/LogMacros.h"
+#include "Math/UnrealMathUtility.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Pawns/FortPawn.h"
@@ -127,15 +128,48 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
         }
     }
 
-    // The pickups fly from the body to their own spots on a ring around it. AFortPickup::TossPickup (0x6622F0) lands a
-    // pickup where it is aimed and finds no ground (#72), so each spot is traced down to the floor below it.
+    // The pickups are tossed from the body to their own spots around it. A ring 80 out with 50 between them left a pile
+    // (#89: pickups are 60 across, AFortPickup's constructor 0x65BA90). They scatter a few meters out instead: rings from
+    // 1.5m, a meter apart, with about a meter between neighbours, each ring turned against the last and each spot moved a
+    // little at random. The stripped death drop leaves nothing to say how far 1.7.2 threw them; the toss itself
+    // (AFortPickup::TossPickup, 0x6622F0) only has a fallback, a pickup aimed at the spot it starts from goes 512 out in a
+    // random direction (VRand, 0x4F4E10), so these distances are chosen. A wall between the body and a spot pulls the spot
+    // in to the wall, and each spot is traced down to the floor below it, from a little over the body's height (the toss
+    // lands a pickup where it is aimed and finds no ground, #72).
     constexpr float Pi = 3.1415926535897932f;
-    constexpr float MinimumRadius = 80.0f;
-    constexpr float Spacing = 50.0f;
+    constexpr float FirstRingRadius = 150.0f;
+    constexpr float RingSpacing = 100.0f;
+    constexpr float PickupSpacing = 110.0f;
+    constexpr float PickupRadius = 30.0f;
+    constexpr float TraceHeight = 50.0f;
     constexpr float TraceDepth = 100000.0f;
     const FVector DeathLocation = DeadPawn->GetTransform().GetLocation();
     const int32_t DropCount = static_cast<int32_t>(Drops.size());
-    const float Radius = std::max(MinimumRadius, Spacing * static_cast<float>(DropCount) / (2.0f * Pi));
+    std::vector<FVector> Spots;
+    const float StartAngle = FMath::FRand() * 2.0f * Pi;
+    for (float Radius = FirstRingRadius; static_cast<int32_t>(Spots.size()) < DropCount; Radius += RingSpacing)
+    {
+        const int32_t RingCount = std::min(std::max(static_cast<int32_t>(2.0f * Pi * Radius / PickupSpacing), 1), DropCount - static_cast<int32_t>(Spots.size()));
+        const float Step = 2.0f * Pi / static_cast<float>(RingCount);
+        const float RingStart = StartAngle + Radius / FirstRingRadius;
+        for (int32_t Index = 0; Index < RingCount; ++Index)
+        {
+            const float Angle = RingStart + Step * (static_cast<float>(Index) + (FMath::FRand() - 0.5f) * 0.4f);
+            const float Distance = Radius + (FMath::FRand() - 0.5f) * RingSpacing * 0.4f;
+            const FVector Start(DeathLocation.X, DeathLocation.Y, DeathLocation.Z + TraceHeight);
+            FVector Spot(Start.X + std::cos(Angle) * Distance, Start.Y + std::sin(Angle) * Distance, Start.Z);
+            FVector WallHit;
+            if (UKismetSystemLibrary::LineTraceSingle(DeadPawn, Start, Spot, 0, false, true, WallHit))
+            {
+                const float Reach = std::max(std::sqrt(FMath::Square(WallHit.X - Start.X) + FMath::Square(WallHit.Y - Start.Y)) - PickupRadius, 1.0f);
+                Spot = FVector(Start.X + std::cos(Angle) * Reach, Start.Y + std::sin(Angle) * Reach, Start.Z);
+            }
+            FVector Floor = Spot;
+            UKismetSystemLibrary::LineTraceSingle(DeadPawn, Spot, FVector(Spot.X, Spot.Y, Spot.Z - TraceDepth), 0, false, true, Floor);
+            Spots.push_back(Floor);
+        }
+    }
+
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
     FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
@@ -149,14 +183,10 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
         EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
         if (RemoveInventoryItem(ItemGuid, Count, false))
         {
-            const float Angle = 2.0f * Pi * static_cast<float>(Index) / static_cast<float>(DropCount);
-            const FVector Spot(DeathLocation.X + std::cos(Angle) * Radius, DeathLocation.Y + std::sin(Angle) * Radius, DeathLocation.Z);
-            FVector FinalLocation = Spot;
-            UKismetSystemLibrary::LineTraceSingle(DeadPawn, Spot, FVector(Spot.X, Spot.Y, Spot.Z - TraceDepth), 0, false, true, FinalLocation);
             if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &DeathLocation, nullptr))
             {
                 Pickup->PawnWhoDroppedPickup = DeadPawn;
-                Pickup->TossPickup(FinalLocation, DeadPawn, 0);
+                Pickup->TossPickup(Spots[Index], DeadPawn, 0);
                 ++Dropped;
             }
         }

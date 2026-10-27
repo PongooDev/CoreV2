@@ -19,5 +19,6 @@ class UCustomCharacterPart : public UObject
     DefineUnrealClass(UCustomCharacterPart, FortniteGame)
 
 public:
+    DefineUProperty(uint8_t, GenderPermitted)
     DefineUProperty(EFortCustomPartType, CharacterPartType)
 };

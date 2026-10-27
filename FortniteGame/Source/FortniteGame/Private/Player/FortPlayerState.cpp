@@ -2,10 +2,15 @@
 #include "Player/FortPlayerState.h"
 #include "Heroes/FortHero.h"
 #include "Finder.h"
+#include "FortAssetManager.h"
+#include "FortGameData.h"
 #include "Hooks.h"
+#include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "ReflectionParams.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 void AFortPlayerState::SetHeroType(UFortHero* Hero)
 {
@@ -33,6 +38,28 @@ void AFortPlayerState::SetHeroType(UFortHero* Hero)
         if (Part && Part->CharacterPartType < NumTypes)
         {
             GetCharacterPart(Part->CharacterPartType) = Part;
+        }
+    }
+
+    // A picked-up item flew down through the player's head (#96). Clients fly it to the backpack part's loot socket
+    // (the pawn's 0x7CC3B0 -> 0x504CC0: the part's UCustomCharacterBackpackData::LootSocketName), coming in along the
+    // socket's direction; with no backpack part it goes to the actor's location instead, along the pawn's down vector,
+    // through a point PickupSplineOffsetRange[1] (175) above it (0x681660). The native fill from the hero (1.7.2
+    // 0x5014B0) gives a hero with no backpack, as every Battle Royale hero is, UFortGameData::DefaultBackpackCharacterPart
+    // (NoBackpack: no mesh, the skeleton's LootEntryPosition socket on spine_04, behind the shoulders) when it permits
+    // the hero's gender; Core's fill above had left the slot empty.
+    const EFortCustomPartType BackpackType = EFortCustomPartType::GetBackpack();
+    UFortGameData* GameData = BackpackType < NumTypes && !GetCharacterPart(BackpackType) ? UFortAssetManager::Get().GetGameData() : nullptr;
+    if (UCustomCharacterPart* DefaultBackpack = GameData ? GameData->DefaultBackpackCharacterPart.LoadSynchronous() : nullptr)
+    {
+        if (DefaultBackpack->CharacterPartType == BackpackType && (DefaultBackpack->GenderPermitted & CharacterGender) != 0)
+        {
+            GetCharacterPart(BackpackType) = DefaultBackpack;
+            UE_LOG(LogFort, Log, TEXT("SetHeroType: %s's hero has no backpack, it takes the default %s"), *GetName(), *DefaultBackpack->GetName());
+        }
+        else
+        {
+            UE_LOG(LogFort, Warning, TEXT("SetHeroType: %s doesn't take the default backpack %s"), *GetName(), *DefaultBackpack->GetName());
         }
     }
 

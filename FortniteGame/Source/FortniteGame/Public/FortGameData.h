@@ -11,6 +11,7 @@
 class AActor;
 class AFortAIDirector;
 class UCurveVector;
+class UCustomCharacterPart;
 class UDataTable;
 class UFortResourceItemDefinition;
 struct FFortLootTierData;
@@ -61,6 +62,7 @@ public:
     DefineUProperty(UDataTable*, LootQuotaData)
     DefineUProperty(float, PickupSplineRandomMax)
     DefineUProperty(UCurveVector*, PickupSplineCurve)
+    DefineUProperty(TAssetPtr<UCustomCharacterPart>, DefaultBackpackCharacterPart)
     DefineUProperty(UFortWorldItemDefinition*, StoneItemDefinition)
     DefineUProperty(UFortWorldItemDefinition*, WoodItemDefinition)
     DefineUProperty(UFortWorldItemDefinition*, MetalItemDefinition)

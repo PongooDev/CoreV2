@@ -56,6 +56,7 @@ class AFortPlayerState : public APlayerState
 
 public:
     DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
+    DefineUProperty(uint8_t, CharacterGender)
     DefineUProperty(UCustomCharacterPart*, CharacterParts)
     DefineUProperty(int32_t, WorldPlayerId)
     DefineUProperty(bool, bIsFinalizingExperience)

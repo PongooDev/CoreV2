@@ -224,6 +224,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Player.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\World.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Character.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\CharacterMovementComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Controller.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameMode.h" />
@@ -407,6 +408,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\WeakObjectPtr.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Actor.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ActorReplication.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Character.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CharacterMovementComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Controller.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\DataChannel.cpp" />

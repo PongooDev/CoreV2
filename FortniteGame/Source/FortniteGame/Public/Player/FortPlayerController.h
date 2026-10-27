@@ -39,6 +39,8 @@ public:
     DefineUProperty(AFortPawn*, MyFortPawn)
     DefineBitfieldUProperty(bCraftFree)
     DefineBitfieldUProperty(bInfiniteDurability)
+    DefineBitfieldUProperty(bCheatGhost)
+    DefineBitfieldUProperty(bCheatFly)
     DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
     DefineUProperty(int32_t, OverriddenBackpackSize)
@@ -58,6 +60,7 @@ public:
     DefineUFunction(GetRotatePawnToCamera)
     DefineUFunction(Cheat)
     DefineUFunction(ServerCheat)
+    DefineUFunction(OnRep_CheatMovement)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
@@ -85,6 +88,7 @@ public:
     void Cheat(const FString& Msg);
     void ServerCheat(const FString& Msg);
     void ServerCheat_Implementation(const FString& Msg);
+    void OnRep_CheatMovement();
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
@@ -109,6 +113,7 @@ public:
     DECLARE_FUNCTION(execGivePlayerAmmo);
     DECLARE_FUNCTION(execSwapQuickBarFocus);
     DECLARE_FUNCTION(execCheat);
+    DECLARE_FUNCTION(execOnRep_CheatMovement);
 
 private:
     static inline bool (*InitializeMcpProfileOG)(AFortPlayerController* This, const void* OnComplete) = nullptr;

@@ -8,6 +8,7 @@
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
+#include "ReflectionParams.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
@@ -43,6 +44,14 @@ namespace
     constexpr uint8_t PackedCustomModeStart = 16;
     constexpr uint8_t PackedModeMask = 0x07;
     constexpr uint8_t MoveCustom = 6;
+}
+
+void UCharacterMovementComponent::SetMovementMode(uint8_t NewMovementMode, uint8_t NewCustomMode)
+{
+    Reflection::FParams Params(StaticFunction_SetMovementMode());
+    Params.Set(L"NewMovementMode", NewMovementMode);
+    Params.Set(L"NewCustomMode", NewCustomMode);
+    Params.Call(this);
 }
 
 void UCharacterMovementComponent::ReportClientError(float TimeStamp, const FVector& ClientLoc, uint8_t CompressedMoveFlags, USceneComponent* ClientMovementBase, FName ClientBaseBoneName, uint8_t ClientMovementMode)

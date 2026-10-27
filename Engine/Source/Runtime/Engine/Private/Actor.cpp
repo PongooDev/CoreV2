@@ -65,6 +65,13 @@ void AActor::SetActorScale3D(const FVector& NewScale3D)
     Params.Call(this);
 }
 
+void AActor::SetActorEnableCollision(bool bNewActorEnableCollision)
+{
+    Reflection::FParams Params(StaticFunction_SetActorEnableCollision());
+    Params.Set(L"bNewActorEnableCollision", bNewActorEnableCollision);
+    Params.Call(this);
+}
+
 void AActor::K2_DestroyActor()
 {
     Reflection::FParams Params(StaticFunction_K2_DestroyActor());

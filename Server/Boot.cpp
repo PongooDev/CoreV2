@@ -13,6 +13,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/NetDriver.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
 #include "UObject/Linker.h"
@@ -150,6 +151,7 @@ void Boot::Initialize()
         UFortQueryGenerator_Enemies::HookVTables();
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
         AFortAIPawn::HookVTables();
+        ACharacter::HookCheatMovement();
         Finder::ResolveNavigationSystemLive();
         if (Configuration::Get().IsBattleRoyale())
         {

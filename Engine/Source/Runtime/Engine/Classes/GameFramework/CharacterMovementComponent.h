@@ -19,6 +19,10 @@ public:
     DefineUProperty(APawn*, CharacterOwner)
     DefineUProperty(uint8_t, MovementMode)
     DefineUProperty(uint8_t, CustomMovementMode)
+    DefineBitfieldUProperty(bCheatFlying)
+    DefineUFunction(SetMovementMode)
+
+    void SetMovementMode(uint8_t NewMovementMode, uint8_t NewCustomMode = 0);
 
     // Logs the moves whose client location the server disagrees with, on the movement class at ClassPath (#78).
     static void HookServerMove(const wchar_t* ClassPath);

@@ -63,6 +63,7 @@ public:
     DefineUFunction(GetActorBounds)
     DefineUFunction(K2_SetActorLocation)
     DefineUFunction(SetActorScale3D)
+    DefineUFunction(SetActorEnableCollision)
     DefineUFunction(K2_DestroyActor)
     DefineUFunction(GetComponentsByClass)
 
@@ -84,6 +85,7 @@ public:
     void GetActorBounds(bool bOnlyCollidingComponents, FVector& Origin, FVector& BoxExtent) const;
     bool SetActorLocation(const FVector& NewLocation, bool bSweep = false, bool bTeleport = false);
     void SetActorScale3D(const FVector& NewScale3D);
+    void SetActorEnableCollision(bool bNewActorEnableCollision);
     void K2_DestroyActor();
     TArray<UActorComponent*> GetComponentsByClass(UClass* ComponentClass) const;
     FVector GetVelocity() const;

@@ -3358,6 +3358,13 @@ int32_t Finder::ImplementationIndex(UFunction* Function)
 {
     const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
     const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    if (!ExecEnd && IsInText(Exec))
+    {
+        // A thunk that only forwards is a leaf without unwind data, so it has no known end (ACharacter::execClientCheatFly,
+        // 1.7.2 0x25CEC50: Code++, then "jmp [rax+0x828]"): its tail jump is within its first 0x20 bytes.
+        const uintptr_t Jump = FindVirtualCall(Exec, Exec + 0x20);
+        return Jump && (Byte(Jump + 1) & 0x38) == 0x20 ? VirtualSlot(Jump) : -1;
+    }
     int32_t Index = -1;
     for (uintptr_t Site = ExecEnd ? FindVirtualCall(Exec, ExecEnd) : 0; Site; Site = FindVirtualCall(Site + 1, ExecEnd))
     {

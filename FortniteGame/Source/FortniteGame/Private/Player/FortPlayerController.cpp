@@ -26,6 +26,7 @@
 #include "Items/FortPickup.h"
 #include "Items/FortQuickBars.h"
 #include "Finder.h"
+#include "GameFramework/Character.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
@@ -1550,6 +1551,25 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
 #endif
 }
 
+void AFortPlayerController::OnRep_CheatMovement()
+{
+    // The native notify (1.7.2 0x81B850) runs this game's own cheat manager's Ghost, Fly or Walk, which answers "You feel
+    // much lighter" a second time (the server's already did) and only calls the pawn's ClientCheat* again, which the
+    // server has already sent. It moves the pawn the same way, without the reply (#100).
+    if (ACharacter* const Character = Cast<ACharacter>(GetPawn()))
+    {
+        Character->ApplyCheatMovement(bCheatGhost ? ECheatMovement::Ghost : bCheatFly ? ECheatMovement::Fly : ECheatMovement::Walk);
+    }
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execOnRep_CheatMovement)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerController*>(Context)->OnRep_CheatMovement();
+    P_NATIVE_END;
+}
+
 AFortPlayerController* AFortPlayerController::FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner)
 {
     if (!InventoryOwner || Natives::AFortPlayerController_InventoryOwnerInterface < 0)
@@ -1617,6 +1637,11 @@ void AFortPlayerController::HookClientNatives()
     {
         CheatFunction->SetNativeFunc(&execCheat);
         Log::Info(L"Hook AFortPlayerController::Cheat: native");
+    }
+    if (UFunction* CheatMovementFunction = StaticFunction_OnRep_CheatMovement(); CheatMovementFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    {
+        CheatMovementFunction->SetNativeFunc(&execOnRep_CheatMovement);
+        Log::Info(L"Hook AFortPlayerController::OnRep_CheatMovement: native");
     }
 }
 

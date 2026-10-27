@@ -9,6 +9,7 @@
 #include "Engine/Console.h"
 #include "Engine/GameEngine.h"
 #include "Engine/GameViewportClient.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "Misc/ConfigCacheIni.h"
 #include "OnlineVoiceImpl.h"
@@ -50,6 +51,7 @@ void Boot::Initialize()
         APlayerController::Hook();
         AFortPlayerController::HookVoice();
         AFortPlayerController::HookClientNatives();
+        ACharacter::HookCheatMovement();
         ABuildingSMActor::HookClientVTables();
     });
 

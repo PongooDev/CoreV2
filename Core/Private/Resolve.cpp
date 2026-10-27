@@ -6221,6 +6221,70 @@ bool Finder::ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t Allow
     return true;
 }
 
+bool Finder::ResolveClearAnimatingMIDsLive(ptrdiff_t ClearMIDOffset, uint8_t ClearMIDMask, ptrdiff_t AnimatingMIDsOffset)
+{
+    if (Natives::ABuildingSMActor_ClearAnimatingMIDsIndex >= 0)
+    {
+        return true;
+    }
+
+    // ABuildingSMActor's damage visuals update (a virtual: 1.7.2 slot 0x140, 0x4894B0; 1.2 0x1404200D0) clears the animating MIDs
+    // when the building is back to full health and bClearMIDWhenReturningToUndamagedState is set:
+    // test dword ptr [rdi+780h], 8000h; jz; mov rax, [rdi]; mov rcx, rdi; call [rax+9F8h] (1.2: 770h, 9E8h).
+    const uint32_t ByteOffset = static_cast<uint32_t>(ClearMIDOffset);
+    const uint32_t DwordOffset = ByteOffset & ~3u;
+    const uint32_t DwordMask = static_cast<uint32_t>(ClearMIDMask) << (8 * (ByteOffset & 3));
+    const std::initializer_list<int32_t> DwordTest = { 0xF7, -1, static_cast<int32_t>(DwordOffset & 0xFF), static_cast<int32_t>((DwordOffset >> 8) & 0xFF), static_cast<int32_t>((DwordOffset >> 16) & 0xFF), static_cast<int32_t>(DwordOffset >> 24), static_cast<int32_t>(DwordMask & 0xFF), static_cast<int32_t>((DwordMask >> 8) & 0xFF), static_cast<int32_t>((DwordMask >> 16) & 0xFF), static_cast<int32_t>(DwordMask >> 24) };
+    const std::initializer_list<int32_t> ByteTest = { 0xF6, -1, static_cast<int32_t>(ByteOffset & 0xFF), static_cast<int32_t>((ByteOffset >> 8) & 0xFF), static_cast<int32_t>((ByteOffset >> 16) & 0xFF), static_cast<int32_t>(ByteOffset >> 24), ClearMIDMask };
+    void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
+    std::vector<uintptr_t> Tests;
+    for (int32_t Index = 0; SMActorVTable && ClearMIDOffset > 0 && Index < 0x400; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(SMActorVTable, Index);
+        const uintptr_t EntryEnd = Entry && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        if (!Entry)
+        {
+            break;
+        }
+        for (const std::initializer_list<int32_t>* Pattern : { &DwordTest, &ByteTest })
+        {
+            for (uintptr_t Test = EntryEnd ? FindInstruction(Entry, EntryEnd, *Pattern) : 0; Test; Test = FindInstruction(Test + 1, EntryEnd, *Pattern))
+            {
+                const uint8_t ModRm = Byte(Test + 1);
+                if ((ModRm & 0xC0) == 0x80 && (ModRm & 0x38) == 0 && (ModRm & 0x07) != 0x04 && std::find(Tests.begin(), Tests.end(), Test) == Tests.end())
+                {
+                    Tests.push_back(Test);
+                }
+            }
+        }
+    }
+
+    // The cleared MIDs: ABuildingSMActor::ClearAnimatingMIDs opens with cmp dword ptr [rcx+AnimatingMIDs.Num], 0.
+    const uint32_t NumOffset = static_cast<uint32_t>(AnimatingMIDsOffset + 8);
+    int32_t ClearIndex = -1;
+    int32_t Matches = 0;
+    for (const uintptr_t Test : Tests)
+    {
+        const int32_t Index = VirtualSlot(FindVirtualCall(Test, Test + 0x20));
+        const uintptr_t Clear = VTableEntry(SMActorVTable, Index);
+        if (Clear && Index != ClearIndex && AnimatingMIDsOffset > 0 && FindInstruction(Clear, Clear + 0x40, { 0x83, -1, static_cast<int32_t>(NumOffset & 0xFF), static_cast<int32_t>((NumOffset >> 8) & 0xFF), static_cast<int32_t>((NumOffset >> 16) & 0xFF), static_cast<int32_t>(NumOffset >> 24), 0x00 }))
+        {
+            ClearIndex = Index;
+            ++Matches;
+        }
+    }
+
+    if (Matches != 1)
+    {
+        Log::Warning(L"Finder: ABuildingSMActor::ClearAnimatingMIDs not found ({} bitfield tests, {} matches)", Tests.size(), Matches);
+        return false;
+    }
+    Natives::ABuildingSMActor_ClearAnimatingMIDsIndex = ClearIndex;
+    Natives::ABuildingSMActor_ClearAnimatingMIDs = VTableEntry(SMActorVTable, ClearIndex);
+    Log::Info(L"Finder: ABuildingSMActor::ClearAnimatingMIDs is slot 0x{:X} (+0x{:X})", ClearIndex, Natives::ABuildingSMActor_ClearAnimatingMIDs - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveLootQuotaLive(ptrdiff_t MaximumQuotaLevelBoundOffset)
 {
     if (Natives::ABuildingSMActor_GetMaximumQuotaLevelBoundIndex >= 0)

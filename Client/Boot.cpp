@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Boot.h"
+#include "Building/BuildingSMActor.h"
 #include "Diagnostics.h"
 #include "Finder.h"
 #include "GameThread.h"
@@ -47,6 +48,7 @@ void Boot::Initialize()
         APlayerController::Hook();
         AFortPlayerController::HookVoice();
         AFortPlayerController::HookClientNatives();
+        ABuildingSMActor::HookClientVTables();
     });
 
     Log::Info(L"Core Client startup complete");

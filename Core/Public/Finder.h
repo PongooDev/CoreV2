@@ -157,6 +157,7 @@ namespace Finder
     bool ResolveLootLive();
     bool ResolveBuildingLootLive();
     bool ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t AllowResourceDropMask);
+    bool ResolveClearAnimatingMIDsLive(ptrdiff_t ClearMIDOffset, uint8_t ClearMIDMask, ptrdiff_t AnimatingMIDsOffset);
     bool ResolveLootQuotaLive(ptrdiff_t MaximumQuotaLevelBoundOffset);
     bool ResolveWorldLootLive(ptrdiff_t DefaultLootQuotaCategoryOffset, ptrdiff_t LootDataOffset, ptrdiff_t ConstructTileWorldOffset, uint8_t ConstructTileWorldMask, FWorldLootSites& OutSites);
     bool ResolveSpawnGroupUpgradeLive(ptrdiff_t AvailableUpgradesOffset, ptrdiff_t ActiveSpawnGroupsOffset, ptrdiff_t TotalGroupCostOffset, ptrdiff_t PawnUpgradesOffset, ptrdiff_t ModifiersForAllPawnsOffset, FSpawnGroupUpgradeSites& OutSites);

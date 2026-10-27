@@ -6,6 +6,8 @@
 
 class AFortPawn;
 class AFortWorldManager;
+class UMaterialInstanceDynamic;
+class UStaticMeshComponent;
 
 class EFortResourceType
 {
@@ -69,6 +71,9 @@ public:
     DefineUProperty(FName, DestructionLootTierKey)
     DefineUProperty(int32_t, MaxResourcesToSpawn)
     DefineBitfieldUProperty(bAllowResourceDrop)
+    DefineBitfieldUProperty(bClearMIDWhenReturningToUndamagedState)
+    DefineUProperty(TArray<UMaterialInstanceDynamic*>, AnimatingMIDs)
+    DefineUProperty(UStaticMeshComponent*, StaticMeshComponent)
 
     void PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList);
     void SelectMeshSet(int32_t LootTier);
@@ -84,6 +89,7 @@ public:
 
     static bool ResolveLootQuota();
     static void HookVTables();
+    static void HookClientVTables();
 
 protected:
     AFortWorldManager* GetWorldManager() const;
@@ -96,4 +102,5 @@ private:
     void* GetQuotaFunction(int32_t SlotFromBound);
     static void PostUpdateHK(ABuildingSMActor* This, uint8_t State, FFortBuildingRandomList* RandomList);
     static void AttemptSpawnResourcesHK(ABuildingSMActor* This, AFortPawn* InstigatorPawn, float Damage, bool bJustHitWeakspot);
+    static void ClearAnimatingMIDsHK(ABuildingSMActor* This);
 };

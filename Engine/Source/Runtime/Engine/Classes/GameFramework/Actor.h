@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "Containers/EnumAsByte.h"
 #include "CoreGlobals.h"
 #include "Engine/EngineBaseTypes.h"
@@ -15,6 +16,7 @@ class UNetDriver;
 class UActorChannel;
 class UWorld;
 class USceneComponent;
+class UActorComponent;
 
 enum ENetRole
 {
@@ -62,6 +64,7 @@ public:
     DefineUFunction(K2_SetActorLocation)
     DefineUFunction(SetActorScale3D)
     DefineUFunction(K2_DestroyActor)
+    DefineUFunction(GetComponentsByClass)
 
     ENetRole GetRemoteRole() const { return RemoteRole; }
     AActor* GetOwner() const { return Owner; }
@@ -82,6 +85,7 @@ public:
     bool SetActorLocation(const FVector& NewLocation, bool bSweep = false, bool bTeleport = false);
     void SetActorScale3D(const FVector& NewScale3D);
     void K2_DestroyActor();
+    TArray<UActorComponent*> GetComponentsByClass(UClass* ComponentClass) const;
     FVector GetVelocity() const;
     float GetNetPriority(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);
     bool GetNetDormancy(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);

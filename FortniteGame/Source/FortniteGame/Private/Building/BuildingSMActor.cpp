@@ -3,6 +3,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
+#include "Components/PrimitiveComponent.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
@@ -24,6 +25,7 @@
 #include "FortWorldManager.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
+#include "Materials/MaterialInstanceDynamic.h"
 #include "Natives.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -453,6 +455,83 @@ void ABuildingSMActor::HookVTables()
             {
                 Hooks::RedirectCall(L"ABuildingSMActor::PostUpdate (Super)", reinterpret_cast<uint8_t*>(Site), reinterpret_cast<void*>(&PostUpdateHK));
             }
+        }
+    }
+}
+
+void ABuildingSMActor::HookClientVTables()
+{
+    // The mask is only set once the offset resolves.
+    const ptrdiff_t ClearMIDOffset = Member_bClearMIDWhenReturningToUndamagedState.IsAvailable() ? Member_bClearMIDWhenReturningToUndamagedState.GetOffsetChecked() : -1;
+    const ptrdiff_t AnimatingMIDsOffset = Member_AnimatingMIDs.IsAvailable() ? Member_AnimatingMIDs.GetOffsetChecked() : -1;
+    if (ClearMIDOffset < 0 || AnimatingMIDsOffset < 0 || !Finder::ResolveClearAnimatingMIDsLive(ClearMIDOffset, Member_bClearMIDWhenReturningToUndamagedState.GetFieldMask(), AnimatingMIDsOffset))
+    {
+        return;
+    }
+
+    const int32_t Index = Natives::ABuildingSMActor_ClearAnimatingMIDsIndex;
+    void* const Clear = reinterpret_cast<void*>(Natives::ABuildingSMActor_ClearAnimatingMIDs);
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[Index] == Clear)
+        {
+            Hooks::SwapVTable(L"ABuildingSMActor::ClearAnimatingMIDs", VTable, Index, reinterpret_cast<void*>(&ClearAnimatingMIDsHK));
+        }
+    }
+}
+
+void ABuildingSMActor::ClearAnimatingMIDsHK(ABuildingSMActor* This)
+{
+    // Client side. A damaged building swaps every material of every static mesh component for an animating MID made
+    // from it; back at full health (bClearMIDWhenReturningToUndamagedState) the game drops them by giving every
+    // component its static mesh's own materials, so a material a blueprint put on a component is lost. Repair the
+    // Shelter's canisters are Survivor_Shelter_Canister meshes, whose own material is Survivor_Shelter_Base (an
+    // installed module); BP_RepairShelter shows the ones still to install with the hologram material, so the first
+    // time the shelter was damaged in a raid and then healed, every canister looked installed (CoreV2 #79). The
+    // building's main mesh keeps the game's reset (it takes its material from the building's texture data); every
+    // other slot still showing one of the actor's animating MIDs gets back the material that MID was made from.
+    struct FRestore
+    {
+        UPrimitiveComponent* Component;
+        int32_t ElementIndex;
+        UMaterialInterface* Material;
+    };
+    std::vector<FRestore> Restores;
+    const TArray<UMaterialInstanceDynamic*>& MIDs = This->AnimatingMIDs;
+    if (MIDs.Num() > 0)
+    {
+        UStaticMeshComponent* MainComponent = This->StaticMeshComponent;
+        for (UActorComponent* Component : This->GetComponentsByClass(UStaticMeshComponent::StaticClass()))
+        {
+            UPrimitiveComponent* Primitive = static_cast<UPrimitiveComponent*>(Component);
+            if (!Primitive || Primitive == MainComponent)
+            {
+                continue;
+            }
+            const int32_t NumMaterials = Primitive->GetNumMaterials();
+            for (int32_t ElementIndex = 0; ElementIndex < NumMaterials; ++ElementIndex)
+            {
+                UMaterialInterface* Material = Primitive->GetMaterial(ElementIndex);
+                UMaterialInterface* Parent = Material && MIDs.Contains(static_cast<UMaterialInstanceDynamic*>(Material)) ? static_cast<UMaterialInstanceDynamic*>(Material)->Parent : nullptr;
+                if (Parent)
+                {
+                    Restores.push_back({ Primitive, ElementIndex, Parent });
+                }
+            }
+        }
+    }
+
+    using FClearAnimatingMIDs = void (*)(ABuildingSMActor* This);
+    reinterpret_cast<FClearAnimatingMIDs>(Natives::ABuildingSMActor_ClearAnimatingMIDs)(This);
+
+    for (const FRestore& Restore : Restores)
+    {
+        if (Restore.Component->GetMaterial(Restore.ElementIndex) != Restore.Material)
+        {
+            Restore.Component->SetMaterial(Restore.ElementIndex, Restore.Material);
         }
     }
 }

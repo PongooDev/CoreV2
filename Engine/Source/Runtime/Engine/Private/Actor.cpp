@@ -42,6 +42,13 @@ void AActor::GetActorBounds(bool bOnlyCollidingComponents, FVector& Origin, FVec
     BoxExtent = bCalled ? Params.Take<FVector>(L"BoxExtent") : FVector(0, 0, 0);
 }
 
+TArray<UActorComponent*> AActor::GetComponentsByClass(UClass* ComponentClass) const
+{
+    Reflection::FParams Params(StaticFunction_GetComponentsByClass());
+    Params.Set(L"ComponentClass", ComponentClass);
+    return Params.Call(const_cast<AActor*>(this)) ? Params.Take<TArray<UActorComponent*>>(L"ReturnValue") : TArray<UActorComponent*>();
+}
+
 bool AActor::SetActorLocation(const FVector& NewLocation, bool bSweep, bool bTeleport)
 {
     Reflection::FParams Params(StaticFunction_K2_SetActorLocation(), true);

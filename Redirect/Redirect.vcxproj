@@ -197,6 +197,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\NavigationData.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\NavigationSystem.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\ActorComponent.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\PrimitiveComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\SceneComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Curves\CurveBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\ActorChannel.h" />
@@ -241,6 +242,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetMathLibrary.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetNodeHelperLibrary.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetSystemLibrary.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Materials\MaterialInstanceDynamic.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\EngineLogs.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\NetworkingDistanceConstants.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\ShowFlags.h" />
@@ -421,6 +423,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetworkObjectList.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PackageMapClient.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PlayerController.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PrimitiveComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp" />

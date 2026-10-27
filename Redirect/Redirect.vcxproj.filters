@@ -181,6 +181,9 @@
     <Filter Include="Engine\Source\Runtime\Engine\Classes\Kismet">
       <UniqueIdentifier>{15bf6e7c-ab3f-400c-aa49-470caf21cbd6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Classes\Materials">
+      <UniqueIdentifier>{f8410157-a379-4951-9a95-141c50e2796e}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Private">
       <UniqueIdentifier>{b39781f1-504c-43a4-9a8b-44339c3f5817}</UniqueIdentifier>
     </Filter>
@@ -735,6 +738,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\ActorComponent.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Components</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\PrimitiveComponent.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Components</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\SceneComponent.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Components</Filter>
     </ClInclude>
@@ -866,6 +872,9 @@
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetSystemLibrary.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Kismet</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Materials\MaterialInstanceDynamic.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Materials</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\EngineLogs.h">
       <Filter>Engine\Source\Runtime\Engine\Public</Filter>
@@ -1387,6 +1396,9 @@
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PlayerController.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PrimitiveComponent.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp">

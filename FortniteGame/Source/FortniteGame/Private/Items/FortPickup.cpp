@@ -331,14 +331,28 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
     if (AFortAIPawn* AIPawn = Cast<AFortAIPawn>(OwnerObject))
     {
         GivePickupToAI(AIPawn, InventoryOwner);
-        return;
     }
-    AFortPlayerController* PlayerController = Cast<AFortPlayerController>(OwnerObject);
-    if (!PlayerController)
+    else if (AFortPlayerController* PlayerController = Cast<AFortPlayerController>(OwnerObject))
     {
-        return;
+        GivePickupToPlayer(PlayerController);
     }
 
+    // Each picked-up item flew in further round to the side than the last (#99). A pickup flying to a pawn adds an entry
+    // to the pawn's PickupDirectionData when its path is built (0x681660 -> 0x779E30), at the last entry's angle plus 40,
+    // and the entries are then spread evenly over plus and minus half their range, at most 90 (0x7AED90); the path comes
+    // into the loot socket along the pawn's down vector rolled by its entry's angle (0x7CC3B0). The entry only goes when
+    // the pickup is destroyed (AFortPickup's Destroyed, 0x6635A0 -> 0x6621E0 -> 0x7A7EC0), on the server and on each
+    // client. Neither SetPickupTarget (0x67FDD0) nor the arrival (FinishedTargetSpline, 0x6685D0, which takes it off the
+    // pawn's IncomingPickups and removes its effect before calling this) destroys it, and Core's give never did, so every
+    // pickup stayed on the list and the next came in 20 degrees further round, up to 90. Pickups taken together still
+    // fan out, as they do natively.
+    K2_DestroyActor();
+#endif
+}
+
+void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
     std::vector<FFortItemEntry*> Entries = GetPickupEntries(this);
     AFortPawn* Pawn = PlayerController->MyFortPawn;
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();

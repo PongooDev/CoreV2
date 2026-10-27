@@ -48,6 +48,7 @@ public:
     static void HookVTables();
 
 private:
+    void GivePickupToPlayer(AFortPlayerController* PlayerController);
     void GivePickupToAI(AFortAIPawn* AIPawn, IFortInventoryOwnerInterface* InventoryOwner);
     static void GivePickupToHK(AFortPickup* This, IFortInventoryOwnerInterface* InventoryOwner);
 };

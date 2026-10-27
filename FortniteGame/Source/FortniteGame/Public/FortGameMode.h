@@ -29,6 +29,8 @@ public:
     // From 1.7.2 (Battle Royale's quickbars: one harvest and five weapon slots, then the building pieces).
     DefineUProperty(bool, bOverrideQuickBars)
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
+    // The match's playlist (Battle Royale: 2 solo, 10 duo, 9 squad), what the game mode records its winners with.
+    DefineUProperty(int32_t, CurrentPlaylistId)
 
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);

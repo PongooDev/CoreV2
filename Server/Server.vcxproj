@@ -93,6 +93,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="Boot.h" />
+    <ClInclude Include="..\Core\Public\BackendRequest.h" />
     <ClInclude Include="..\Core\Public\Configuration.h" />
     <ClInclude Include="..\Core\Public\Diagnostics.h" />
     <ClInclude Include="..\Core\Public\Finder.h" />
@@ -355,6 +356,7 @@
   <ItemGroup>
     <ClCompile Include="Boot.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="..\Core\Private\BackendRequest.cpp" />
     <ClCompile Include="..\Core\Private\Configuration.cpp" />
     <ClCompile Include="..\Core\Private\Diagnostics.cpp" />
     <ClCompile Include="..\Core\Private\Finder.cpp" />

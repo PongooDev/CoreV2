@@ -6,9 +6,6 @@
 
 namespace
 {
-    constexpr const wchar_t* DedicatedServerClientId = L"313dfed3ec3023e52d3be9dda178bdfa";
-    constexpr const wchar_t* DedicatedServerClientSecret = L"111aa434a6780d54f5cf759149639f20";
-
     using FUpdateServicePermissions = void (*)(void*, void*, FMcpServiceConfig*, void*);
     FUpdateServicePermissions UpdateServicePermissionsOG = nullptr;
 
@@ -19,7 +16,7 @@ namespace
 #if WITH_SERVER_CODE
         if (!ServiceConfig->FindServicePermissions(DedicatedServerServicePermissionsName))
         {
-            ServiceConfig->ServicePermissions.Add(FMcpServicePermissions{ DedicatedServerServicePermissionsName, DedicatedServerClientId, DedicatedServerClientSecret });
+            ServiceConfig->ServicePermissions.Add(FMcpServicePermissions{ DedicatedServerServicePermissionsName, FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret });
         }
 #endif
     }

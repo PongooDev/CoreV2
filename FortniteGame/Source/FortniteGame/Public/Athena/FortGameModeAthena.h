@@ -26,6 +26,10 @@ public:
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
 
+    // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,
+    // for Battle Royale's stats (Core-Backend #59), as long as the game mode is there.
+    void WatchMatchResults();
+
     static void HookVTables();
     static void HookCallSites();
 

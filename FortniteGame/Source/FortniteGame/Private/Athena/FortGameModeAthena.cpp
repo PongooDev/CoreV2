@@ -2,10 +2,16 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
+#include "BackendRequest.h"
+#include "Configuration.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerState.h"
+#include "GameThread.h"
 #include "Math/Rotator.h"
 #include "Finder.h"
 #include "FortZoneTheme.h"
@@ -13,12 +19,22 @@
 #include "Log.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
+#include "Online/NotForLicensees/FortMcpConfig.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/WeakObjectPtr.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cwctype>
+#include <format>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <string>
 
 FString AFortGameModeAthena::DefaultMatchURL()
 {
@@ -106,6 +122,131 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
     }
 #endif
     return AFortGameModeZone::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
+}
+
+namespace
+{
+    // A player of the match, kept after they leave it: a team's place comes when its last player is out, by which time
+    // the others may have gone back to the lobby.
+    struct FMatchPlayer
+    {
+        uint8_t Team = 0;
+        int32_t Kills = 0;
+        int32_t SecondsAlive = 0;
+        int32_t Place = 0;
+        bool bReported = false;
+    };
+
+    struct FMatchResults
+    {
+        std::map<std::wstring, FMatchPlayer> Players;
+        std::chrono::steady_clock::time_point NextCheck;
+    };
+
+    // An MCP account id is 32 hex digits (an invalid id's ToString is "INVALID").
+    bool IsAccountId(const std::wstring& Id)
+    {
+        return !Id.empty() && Id.size() <= 64 && std::all_of(Id.begin(), Id.end(), [](wchar_t Character) { return std::iswxdigit(Character) != 0; });
+    }
+
+    // Brings the players up to date from their player states and reports those whose team has a place.
+    void CheckMatchResults(AFortGameModeAthena* GameMode, FMatchResults& Results)
+    {
+        UWorld* World = GameMode->GetWorld();
+        AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
+        if (!GameState)
+        {
+            return;
+        }
+
+        const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
+        for (APlayerState* PlayerState : PlayerArray)
+        {
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            const std::wstring AccountId = AthenaState ? AthenaState->UniqueId.ToString().ToStdString() : std::wstring();
+            if (!IsAccountId(AccountId))
+            {
+                continue;
+            }
+            FMatchPlayer& Player = Results.Players[AccountId];
+            if (Player.bReported)
+            {
+                continue;
+            }
+            Player.Team = AthenaState->TeamIndex;
+            Player.Kills = AthenaState->Kills;
+            Player.SecondsAlive = AthenaState->SecondsAlive;
+            Player.Place = std::max<int32_t>(AthenaState->Place, 0);
+        }
+
+        // The team's place, for its players who left before it was out.
+        for (auto& [AccountId, Player] : Results.Players)
+        {
+            for (const auto& [OtherId, Other] : Results.Players)
+            {
+                if (Player.Place == 0 && Other.Place > 0 && Other.Team == Player.Team)
+                {
+                    Player.Place = Other.Place;
+                }
+            }
+        }
+
+        std::string Body;
+        int32_t Count = 0;
+        for (auto& [AccountId, Player] : Results.Players)
+        {
+            if (Player.bReported || Player.Place == 0)
+            {
+                continue;
+            }
+            Player.bReported = true;
+            std::string Id;
+            std::transform(AccountId.begin(), AccountId.end(), std::back_inserter(Id), [](wchar_t Digit) { return static_cast<char>(Digit); });
+            Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"secondsAlive\":{}}}", Count++ > 0 ? "," : "",
+                Id, Player.Place, std::max(Player.Kills, 0), std::max(Player.SecondsAlive, 0));
+            Log::Info(L"Battle Royale: {} placed {} with {} kills, {} s alive", AccountId, Player.Place, Player.Kills, Player.SecondsAlive);
+        }
+        if (Count > 0)
+        {
+            const int32_t PlaylistId = GameMode->CurrentPlaylistId;
+            BackendRequest::PostJson(std::format(L"Battle Royale results of {} players", Count), L"/fortnite/api/game/v2/battleroyale/recordresults",
+                std::format("{{\"playlistId\":{},\"results\":[{}]}}", PlaylistId, Body), FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret);
+        }
+    }
+
+    void WatchResults(FWeakObjectPtr GameMode, std::shared_ptr<FMatchResults> Results)
+    {
+        GameThread::Enqueue([GameMode, Results]()
+        {
+            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
+            if (!Athena)
+            {
+                return;
+            }
+            const auto Now = std::chrono::steady_clock::now();
+            if (Now >= Results->NextCheck)
+            {
+                Results->NextCheck = Now + std::chrono::seconds(1);
+                CheckMatchResults(Athena, *Results);
+            }
+            WatchResults(GameMode, Results);
+        });
+    }
+}
+
+void AFortGameModeAthena::WatchMatchResults()
+{
+#if WITH_SERVER_CODE
+    // Epic's stats service kept Battle Royale's stats (Balance/DataTables/LeaderboardStats: br_placetop<n>, br_kills,
+    // br_matchesplayed, br_minutesplayed per playlist) from what its servers reported, but the 1.7.2 server reports only
+    // its winners (battleroyale/recordwin, 0x72E130): UFortMcpUtils::RecordUserStatsUrl (/api/stats/bulk?ownertype=1)
+    // has no caller left, so wins were the only stat. The rest comes from the player states: Place is set for every
+    // player of a team when the team is out (TeamsLeft then, 0x44A870, from the death handler 0x437C30) or has won (1,
+    // 0x400490 and 0x4008F0), with SecondsAlive and the player's Kills final by then. They are read once a second and
+    // each player is reported once, with the DedicatedServer client's token; Core-Backend counts the win from recordwin.
+    WatchResults(FWeakObjectPtr(this), std::make_shared<FMatchResults>());
+    Log::Info(L"Battle Royale: reporting the match's results to {}", Configuration::Get().Backend);
+#endif
 }
 
 void AFortGameModeAthena::HookVTables()

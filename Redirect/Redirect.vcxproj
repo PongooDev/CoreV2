@@ -95,6 +95,7 @@
     <ClInclude Include="Boot.h" />
     <ClInclude Include="HttpRedirect.h" />
     <ClInclude Include="XmppClient.h" />
+    <ClInclude Include="..\Core\Public\BackendRequest.h" />
     <ClInclude Include="..\Core\Public\Configuration.h" />
     <ClInclude Include="..\Core\Public\Diagnostics.h" />
     <ClInclude Include="..\Core\Public\Finder.h" />
@@ -358,6 +359,7 @@
     <ClCompile Include="HttpRedirect.cpp" />
     <ClCompile Include="XmppClient.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="..\Core\Private\BackendRequest.cpp" />
     <ClCompile Include="..\Core\Private\Configuration.cpp" />
     <ClCompile Include="..\Core\Private\Diagnostics.cpp" />
     <ClCompile Include="..\Core\Private\Finder.cpp" />

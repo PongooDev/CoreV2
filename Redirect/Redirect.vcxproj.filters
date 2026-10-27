@@ -432,6 +432,9 @@
     <ClInclude Include="Boot.h" />
     <ClInclude Include="HttpRedirect.h" />
     <ClInclude Include="XmppClient.h" />
+    <ClInclude Include="..\Core\Public\BackendRequest.h">
+      <Filter>Core\Public</Filter>
+    </ClInclude>
     <ClInclude Include="..\Core\Public\Configuration.h">
       <Filter>Core\Public</Filter>
     </ClInclude>
@@ -1209,6 +1212,9 @@
     <ClCompile Include="HttpRedirect.cpp" />
     <ClCompile Include="XmppClient.cpp" />
     <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="..\Core\Private\BackendRequest.cpp">
+      <Filter>Core\Private</Filter>
+    </ClCompile>
     <ClCompile Include="..\Core\Private\Configuration.cpp">
       <Filter>Core\Private</Filter>
     </ClCompile>

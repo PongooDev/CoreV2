@@ -107,10 +107,11 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     // Battle Royale has no spawn pad, missions or husks: only AFortGameMode's part (bWorldIsReady, which 1.7.2's
     // AFortGameSessionDedicated waits for before it creates an Athena session, 0x6C65E5). Its own override (MapInfo, the
     // warmup starts) runs after this one (SubclassFinishWorldInitializationHK).
-    if (Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(this)))
+    if (AFortGameModeAthena* Athena = Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(this)))
     {
         AFortGameMode::FinishWorldInitialization(WorldManager);
         ABuildingContainer::LogWorldContainers(GetWorld());
+        Athena->WatchMatchResults();
         return;
     }
 

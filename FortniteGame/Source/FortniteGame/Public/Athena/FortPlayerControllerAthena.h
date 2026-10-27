@@ -8,6 +8,7 @@
 
 class AActor;
 class AFortPawn;
+class AFortPlayerStateAthena;
 class UFortHero;
 class UFortHeroType;
 struct FGameplayTagContainer;
@@ -20,6 +21,9 @@ class AFortPlayerControllerAthena : public AFortPlayerController
 public:
     // The heroes Battle Royale plays (Athena_PlayerController_C: HID_Commando_Athena_*).
     DefineUProperty(TArray<UFortHeroType*>, DefaultHeroes)
+    // Client: the player's team. The HUD's team list takes their talking states in this order (GetTeamTalking, 1.7.2
+    // 0x430440, and the controller's tick, 0x417630, which tells the HUD when they change).
+    DefineUProperty(TArray<AFortPlayerStateAthena*>, TeamMembers)
 
     bool IsDefaultHero(UFortHero* Hero);
     UFortHero* GetOrInitializeHero();

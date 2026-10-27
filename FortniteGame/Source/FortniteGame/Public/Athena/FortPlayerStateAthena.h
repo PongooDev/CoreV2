@@ -17,4 +17,7 @@ public:
     DefineUProperty(int32_t, Kills)
     // Set when the player is eliminated or wins.
     DefineUProperty(int32_t, SecondsAlive)
+    // Client only, not replicated: whether the player is talking in voice chat, which the HUD's team list shows (its
+    // speaker icon). Only Vivox's participant updates set it (1.7.2 0x3C54D20); Core sets it from the engine's voice chat.
+    DefineUProperty(bool, bIsTalking)
 };

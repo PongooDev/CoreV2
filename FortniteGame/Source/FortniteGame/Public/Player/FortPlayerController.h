@@ -118,6 +118,8 @@ private:
     static void PossessHK(AFortPlayerController* This, APawn* InPawn);
     static void PushToTalkPressedHK(AFortPlayerController* This);
     static void PushToTalkReleasedHK(AFortPlayerController* This);
+    // Client, every frame: Battle Royale's team list shows who is talking in the engine's voice chat.
+    static void UpdateTeamTalking();
     static inline void (*TrySetHeroImplementationOG)(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused) = nullptr;
     static void TrySetHeroImplementationHK(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused);
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);

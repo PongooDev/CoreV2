@@ -162,6 +162,8 @@ namespace Natives
     inline int32_t FOnlineVoiceImpl_SerializeRemotePacketIndex = -1;
     inline int32_t FOnlineVoiceImpl_RegisterLocalTalkerIndex = -1;
     inline int32_t FOnlineVoiceImpl_GetLocalPacketIndex = -1;
+    inline int32_t FOnlineVoiceImpl_TickIndex = -1;
+    inline int32_t FVoicePacket_GetSenderIndex = -1;
     inline ptrdiff_t APlayerController_VoiceHandshakeCompletedOffset = -1;
     inline FString* (*UGameMapsSettings_GetGameDefaultMap)(FString* Result) = nullptr;
     inline const FString* (*UGameMapsSettings_GetGlobalDefaultGameMode)() = nullptr;

@@ -1,13 +1,21 @@
 #include "pch.h"
 #include "Player/FortPlayerController.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
+#include "Engine/GameEngine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "Finder.h"
+#include "GameFramework/PlayerState.h"
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
 #include "OnlineVoiceImpl.h"
+#include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+
+#include <unordered_set>
 
 // Voice chat (Core-Backend #54). 1.7.2's own voice chat is Vivox, a third-party service; its push to talk handlers
 // (AFortPlayerController's, and AFortPlayerControllerAthena's overrides 0x438810 pressed, 0x4389F0 released) do
@@ -19,6 +27,7 @@ void AFortPlayerController::HookVoice()
 {
     APlayerController::HookVoice();
     Finder::ResolveVoiceHandshake();
+    FOnlineVoiceImpl::OnTick = &UpdateTeamTalking;
     if (!Finder::ResolvePushToTalk())
     {
         return;
@@ -87,4 +96,44 @@ void AFortPlayerController::PushToTalkReleasedHK(AFortPlayerController* This)
 {
     Log::Info(L"Voice chat: stopped talking");
     This->ToggleSpeaking(false);
+}
+
+void AFortPlayerController::UpdateTeamTalking()
+{
+    // The team list's speaker icons (AthenaTeamMemberInfo's TalkingBrush) follow the team's player states' bIsTalking:
+    // the controller's tick (1.7.2 0x417630) gathers it for TeamMembers and, when it changes, the HUD context
+    // (0x2D55BD0) broadcasts OnTeamMemberTalkingChanged to AthenaTeamInfo's HandleTeamTalkingChanged. Only Vivox's
+    // participant updates set it, so with the engine's voice chat every icon stayed idle (Core-Backend #54).
+    UClass* const AthenaClass = AFortPlayerControllerAthena::StaticClass();
+    UGameEngine* const Engine = AthenaClass && Natives::GEngine ? Cast<UGameEngine>(static_cast<UEngine*>(GEngine)) : nullptr;
+    UGameInstance* const GameInstance = Engine ? static_cast<UGameInstance*>(Engine->GameInstance) : nullptr;
+    const TArray<ULocalPlayer*>* const LocalPlayers = GameInstance ? &static_cast<TArray<ULocalPlayer*>&>(GameInstance->LocalPlayers) : nullptr;
+    ULocalPlayer* const Player = LocalPlayers && LocalPlayers->Num() > 0 ? (*LocalPlayers)[0] : nullptr;
+    AFortPlayerControllerAthena* const Controller = Player ? Cast<AFortPlayerControllerAthena>(static_cast<APlayerController*>(Player->PlayerController)) : nullptr;
+    if (!Controller)
+    {
+        return;
+    }
+
+    static std::unordered_set<const AFortPlayerStateAthena*> Shown;
+    const APlayerState* const LocalState = Controller->PlayerState;
+    const TArray<AFortPlayerStateAthena*>& TeamMembers = Controller->TeamMembers;
+    for (int32_t Index = 0; Index < TeamMembers.Num(); ++Index)
+    {
+        AFortPlayerStateAthena* const Member = TeamMembers[Index];
+        if (!Member)
+        {
+            continue;
+        }
+        // The server doesn't send the player's own voice back: theirs is the microphone recording.
+        const bool bTalking = static_cast<const APlayerState*>(Member) == LocalState ? FOnlineVoiceImpl::IsLocalPlayerTalking() : FOnlineVoiceImpl::IsRemotePlayerTalking(Member->UniqueId);
+        if (Member->bIsTalking != bTalking)
+        {
+            Member->bIsTalking = bTalking;
+            if (bTalking && Shown.insert(Member).second)
+            {
+                Log::Info(L"Voice chat: the team list shows {} ({}) talking", Member->PlayerName.ToStdString(), Member->UniqueId.ToString().ToStdString());
+            }
+        }
+    }
 }

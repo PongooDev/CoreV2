@@ -6769,7 +6769,31 @@ bool Finder::ResolveOnlineVoice()
     Natives::FOnlineVoiceImpl_RegisterLocalTalkerIndex = RegisterLocalIndex;
     // GetLocalPacket follows SerializeRemotePacket, as in IOnlineVoice (1.7.2 slot 0x16, 0x3919750).
     Natives::FOnlineVoiceImpl_GetLocalPacketIndex = VTableEntry(VTable, UnmuteIndex + 2) ? UnmuteIndex + 2 : -1;
-    Log::Info(L"Finder: FOnlineVoiceImpl vtable at 0x{:X}, SerializeRemotePacket slot 0x{:X}, RegisterLocalTalker slot 0x{:X}", reinterpret_cast<uintptr_t>(VTable) - Finder::ImageBase(), UnmuteIndex + 1, RegisterLocalIndex);
+
+    // SerializeRemotePacket (1.7.2 0x392C690) asks the new packet for its sender, its only virtual call with an out
+    // parameter (FVoicePacket::GetSender, slot 3: lea rdx, [rsp+x]; mov rax, [rcx]; call [rax+18h]), once the subsystem's
+    // IsDedicated (mov rax, [rcx]; call [rax+0E8h]) says it's a client. Tick (slot 0x19, 0x392EA40), a few slots after
+    // GetLocalPacket, makes that IsDedicated call first too.
+    const uintptr_t Serialize = VTableEntry(VTable, UnmuteIndex + 1);
+    const uintptr_t SerializeEnd = Serialize ? Finder::FunctionEnd(Serialize) : 0;
+    const uintptr_t GetSenderCall = SerializeEnd > Serialize ? FindInstruction(Serialize, SerializeEnd, { 0x48, 0x8D, 0x54, 0x24, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1 }) : 0;
+    const uintptr_t IsDedicatedCall = SerializeEnd > Serialize ? FindInstruction(Serialize, SerializeEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0;
+    const int32_t IsDedicatedOffset = IsDedicatedCall ? *reinterpret_cast<const int32_t*>(IsDedicatedCall + 5) : 0;
+    int32_t TickIndex = -1;
+    for (int32_t Index = UnmuteIndex + 3; IsDedicatedOffset > 0 && Index <= UnmuteIndex + 6 && TickIndex < 0; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(VTable, Index);
+        const uintptr_t EntryEnd = Entry ? (std::min)(Finder::FunctionEnd(Entry), Entry + 0x30) : 0;
+        const uintptr_t Call = EntryEnd > Entry ? FindInstruction(Entry, EntryEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0;
+        TickIndex = Call && *reinterpret_cast<const int32_t*>(Call + 5) == IsDedicatedOffset ? Index : -1;
+    }
+    Natives::FVoicePacket_GetSenderIndex = GetSenderCall && Byte(GetSenderCall + 10) % 8 == 0 ? Byte(GetSenderCall + 10) / 8 : -1;
+    Natives::FOnlineVoiceImpl_TickIndex = TickIndex;
+    if (Natives::FVoicePacket_GetSenderIndex < 0 || TickIndex < 0)
+    {
+        Log::Warning(L"Finder: FVoicePacket::GetSender slot {} or FOnlineVoiceImpl::Tick slot {} not found; the HUD won't show who's talking", Natives::FVoicePacket_GetSenderIndex, TickIndex);
+    }
+    Log::Info(L"Finder: FOnlineVoiceImpl vtable at 0x{:X}, SerializeRemotePacket slot 0x{:X}, RegisterLocalTalker slot 0x{:X}, Tick slot 0x{:X}, packet GetSender slot {}", reinterpret_cast<uintptr_t>(VTable) - Finder::ImageBase(), UnmuteIndex + 1, RegisterLocalIndex, TickIndex, Natives::FVoicePacket_GetSenderIndex);
     return true;
 }
 

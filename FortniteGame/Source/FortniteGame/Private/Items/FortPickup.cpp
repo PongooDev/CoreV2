@@ -85,6 +85,56 @@ namespace
     // bCanBeDropped; the pickaxe can't) and shows "Swap equipped" (0x66C3C0), but the swap was in the stripped give: Core's
     // tossed the weapon back down. The held item is dropped as the player's own drop would be; returns the primary slot
     // it emptied, or -1.
+    std::vector<FGuid> PrimaryQuickBarItems(AFortQuickBars* Bars)
+    {
+        std::vector<FGuid> Items;
+        const int32_t NumSlots = Bars ? Bars->GetQuickBar(EFortQuickBars::GetPrimary()).Slots.Num() : 0;
+        for (int32_t SlotIndex = 0; SlotIndex < NumSlots; ++SlotIndex)
+        {
+            const TArray<FGuid>& SlotItems = Bars->GetSlot(EFortQuickBars::GetPrimary(), SlotIndex).Items;
+            Items.insert(Items.end(), SlotItems.begin(), SlotItems.end());
+        }
+        return Items;
+    }
+
+    // Moves the one primary quickbar item that isn't in Before into Slot, and what was in Slot to where it was.
+    void PutNewItemInSlot(AFortQuickBars* Bars, const std::vector<FGuid>& Before, int32_t Slot)
+    {
+        const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
+        const int32_t NumSlots = Bars->GetQuickBar(Primary).Slots.Num();
+        int32_t NewSlot = -1;
+        FGuid NewItem;
+        for (int32_t SlotIndex = 0; SlotIndex < NumSlots && NewSlot < 0; ++SlotIndex)
+        {
+            for (const FGuid& Item : Bars->GetSlot(Primary, SlotIndex).Items)
+            {
+                if (std::find(Before.begin(), Before.end(), Item) == Before.end())
+                {
+                    NewSlot = SlotIndex;
+                    NewItem = Item;
+                    break;
+                }
+            }
+        }
+        if (NewSlot < 0 || NewSlot == Slot || Slot >= NumSlots)
+        {
+            return;
+        }
+
+        const TArray<FGuid>& Displaced = Bars->GetSlot(Primary, Slot).Items;
+        const std::vector<FGuid> DisplacedItems(Displaced.begin(), Displaced.end());
+        Bars->ServerRemoveItemInternal(NewItem, false, true);
+        for (const FGuid& Item : DisplacedItems)
+        {
+            Bars->ServerRemoveItemInternal(Item, false, true);
+        }
+        Bars->ServerAddItemInternal(NewItem, Primary, Slot);
+        for (const FGuid& Item : DisplacedItems)
+        {
+            Bars->ServerAddItemInternal(Item, Primary, NewSlot);
+        }
+    }
+
     int32_t DropFocusedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry)
     {
         const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
@@ -214,11 +264,13 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
     AFortPawn* Pawn = PlayerController->MyFortPawn;
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     int32_t SwappedSlot = -1;
+    std::vector<FGuid> QuickBarItemsBeforeSwap;
     for (FFortItemEntry* Entry : Entries)
     {
         if (SwappedSlot < 0)
         {
             SwappedSlot = DropFocusedItemForSwap(PlayerController, *Entry);
+            QuickBarItemsBeforeSwap = SwappedSlot >= 0 ? PrimaryQuickBarItems(PlayerController->QuickBars) : std::vector<FGuid>();
         }
         const int32_t Given = GiveItemEntry(PlayerController, *Entry);
         if (Given > 0)
@@ -245,11 +297,17 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
         EntryStruct->DestroyStruct(Leftover);
     }
 
-    // The new weapon takes the emptied slot (TryAddToQuickBar's first free one) and goes into the player's hands.
+    // The new weapon goes into the emptied slot and the player's hands. TryAddToQuickBar puts it in the first free slot
+    // it finds, which wasn't always the emptied one (#88: it landed one slot along), so it's moved there, and whatever
+    // took the emptied slot gets the new weapon's place.
     AFortQuickBars* Bars = PlayerController->QuickBars;
-    if (SwappedSlot >= 0 && Bars && Bars->GetSlot(EFortQuickBars::GetPrimary(), SwappedSlot).Items.Num() > 0)
+    if (SwappedSlot >= 0 && Bars)
     {
-        Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), SwappedSlot, 0.0f, true);
+        PutNewItemInSlot(Bars, QuickBarItemsBeforeSwap, SwappedSlot);
+        if (Bars->GetSlot(EFortQuickBars::GetPrimary(), SwappedSlot).Items.Num() > 0)
+        {
+            Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), SwappedSlot, 0.0f, true);
+        }
     }
 #endif
 }

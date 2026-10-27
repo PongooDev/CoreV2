@@ -55,7 +55,7 @@ namespace
         const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
         FFortItemEntry& ItemEntry = Item->ItemEntry;
         const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
-        if (!Bars || !Inventory || !ItemDefinition || Slot < 0 || Slot >= Bars->GetQuickBar(Primary).Slots.Num() || !Bars->GetSlotData(Primary, Slot).AcceptedItemTypes.Contains(ItemDefinition->ItemType))
+        if (!Bars || !Inventory || !ItemDefinition || Slot <= 0 || Slot >= Bars->GetQuickBar(Primary).Slots.Num() || !Bars->GetSlotData(Primary, Slot).AcceptedItemTypes.Contains(ItemDefinition->ItemType))
         {
             return false;
         }
@@ -91,6 +91,7 @@ namespace
         Bars->ServerAddItemInternal(ItemGuid, Primary, Slot);
         if (Bars->GetSlot(Primary, Slot).Items.Contains(ItemGuid))
         {
+            Log::Info(L"Battle Royale: {}'s swapped-in {} is in quickbar slot {}", PlayerController->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), Slot);
             return true;
         }
         Log::Warning(L"Battle Royale: the quickbar didn't put {}'s swapped-in weapon in slot {}", PlayerController->GetName().ToStdString(), Slot);
@@ -147,6 +148,15 @@ namespace
     // bCanBeDropped; the pickaxe can't) and shows "Swap equipped" (0x66C3C0), but the swap was in the stripped give: Core's
     // tossed the weapon back down. The held item is dropped as the player's own drop would be; returns the primary slot
     // it emptied, or -1.
+    //
+    // The slot stays focused through the drop. Removing the focused item activates the previous slot, or the harvesting
+    // tool's (slot 0), and that activation sends ClientExecuteInventoryItem for its item (1.7.2 0x67E190 -> 0x67F240 ->
+    // 0x8058A0), which the client equips and focuses on its own quickbar (0x7F8E30 -> 0x683DF0). The new weapon's
+    // activation that follows reaches the client before the inventory and quickbar that hold it (an RPC goes out at
+    // once, the actors replicate at the end of the tick), so the client keeps it pending and runs it again on the next
+    // inventory update (0x82EAB0), when its own quickbar may still lack the weapon: it then can't focus the weapon's
+    // slot, and the server's focus never changed, so nothing corrects it. The player held the new weapon with the
+    // pickaxe slot, or the previous one, focused (#88).
     int32_t DropFocusedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry)
     {
         const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
@@ -159,13 +169,14 @@ namespace
             return -1;
         }
 
-        const EFortQuickBars FocusedBar = Bars->GetCurrentQuickBar();
-        const int32_t FocusedSlot = FocusedBar != EFortQuickBars::GetMax_None() ? static_cast<int32_t>(Bars->GetQuickBar(FocusedBar).CurrentFocusedSlot) : -1;
-        if (FocusedSlot < 0 || FocusedSlot >= Bars->GetQuickBar(FocusedBar).Slots.Num())
+        // Only a primary slot that takes the new weapon is swapped, never the harvesting tool's.
+        const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
+        const int32_t FocusedSlot = Bars->GetCurrentQuickBar() == Primary ? static_cast<int32_t>(Bars->GetQuickBar(Primary).CurrentFocusedSlot) : -1;
+        if (FocusedSlot <= 0 || FocusedSlot >= Bars->GetQuickBar(Primary).Slots.Num() || !Bars->GetSlotData(Primary, FocusedSlot).AcceptedItemTypes.Contains(ItemType))
         {
             return -1;
         }
-        const TArray<FGuid>& SlotItems = Bars->GetSlot(FocusedBar, FocusedSlot).Items;
+        const TArray<FGuid>& SlotItems = Bars->GetSlot(Primary, FocusedSlot).Items;
         UFortWorldItem* FocusedItem = SlotItems.Num() > 0 ? Inventory->FindWorldItem(SlotItems[0]) : nullptr;
         FFortItemEntry* FocusedEntry = FocusedItem ? &static_cast<FFortItemEntry&>(FocusedItem->ItemEntry) : nullptr;
         UFortWorldItemDefinition* FocusedDefinition = FocusedEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(FocusedEntry->ItemDefinition)) : nullptr;
@@ -175,13 +186,16 @@ namespace
         }
 
         const FGuid FocusedGuid = FocusedEntry->ItemGuid;
-        PlayerController->ServerSpawnInventoryDrop_Implementation(FocusedGuid, FocusedEntry->Count);
+        {
+            AFortQuickBars::FKeepFocusOnRemove KeepFocus;
+            PlayerController->ServerSpawnInventoryDrop_Implementation(FocusedGuid, FocusedEntry->Count);
+        }
         if (Inventory->FindWorldItem(FocusedGuid))
         {
             return -1;
         }
-        Log::Info(L"Battle Royale: {} swaps {} for {} in quickbar slot {}", PlayerController->GetName().ToStdString(), FocusedDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), FocusedSlot);
-        return FocusedBar == EFortQuickBars::GetPrimary() ? FocusedSlot : -1;
+        Log::Info(L"Battle Royale: {} swaps {} for {} in quickbar slot {} (slot 0 is the harvesting tool's)", PlayerController->GetName().ToStdString(), FocusedDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), FocusedSlot);
+        return FocusedSlot;
     }
 }
 
@@ -368,11 +382,23 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
         EntryStruct->DestroyStruct(Leftover);
     }
 
-    // The new weapon, in the emptied slot (PutInSwappedSlot), goes into the player's hands.
+    // The new weapon, in the emptied slot (PutInSwappedSlot), goes into the player's hands; the slot kept the focus. If
+    // it went elsewhere, the focus moves on as the drop would have moved it.
     AFortQuickBars* Bars = PlayerController->QuickBars;
-    if (SwappedSlot >= 0 && Bars && Bars->GetSlot(EFortQuickBars::GetPrimary(), SwappedSlot).Items.Num() > 0)
+    if (SwappedSlot >= 0 && Bars)
     {
-        Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), SwappedSlot, 0.0f, true);
+        const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
+        if (Bars->GetSlot(Primary, SwappedSlot).Items.Num() > 0)
+        {
+            Bars->ServerActivateSlotInternal(Primary, SwappedSlot, 0.0f, false);
+        }
+        else
+        {
+            Log::Warning(L"Battle Royale: {}'s quickbar slot {} is empty after the swap", PlayerController->GetName().ToStdString(), SwappedSlot);
+            Bars->ActivateReplacementSlot();
+        }
+        FQuickBar& PrimaryQuickBar = Bars->GetQuickBar(Primary);
+        Log::Info(L"Battle Royale: after {}'s swap, quickbar slot {} is focused (previously {})", PlayerController->GetName().ToStdString(), static_cast<int32_t>(PrimaryQuickBar.CurrentFocusedSlot), static_cast<int32_t>(PrimaryQuickBar.PreviousFocusedSlot));
     }
 #endif
 }

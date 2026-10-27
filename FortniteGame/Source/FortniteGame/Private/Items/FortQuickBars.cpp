@@ -138,7 +138,11 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
     AFortPawn* Pawn = Controller ? static_cast<AFortPawn*>(Controller->MyFortPawn) : nullptr;
     AFortWeapon* CurrentWeapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
     const bool bWeaponReactivatesSlot = CurrentWeapon && CurrentWeapon->IsPendingDestroyDueToDurability() && static_cast<FGuid&>(CurrentWeapon->ItemEntryGuid) == Item;
-    if (bRemovedFocusedItem && bWeaponReactivatesSlot)
+    if (bRemovedFocusedItem && KeepFocusOnRemoveCount > 0)
+    {
+        Log::Info(L"Quickbar: {} keeps slot {} focused while its item is replaced", GetNameSafe(Controller).ToStdString(), static_cast<int32_t>(GetQuickBar(FocusedBar).CurrentFocusedSlot));
+    }
+    else if (bRemovedFocusedItem && bWeaponReactivatesSlot)
     {
         FQuickBar& QuickBar = GetQuickBar(FocusedBar);
         const int32_t NumSlots = QuickBar.Slots.Num();
@@ -153,11 +157,21 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
     }
     else if (bRemovedFocusedItem)
     {
-        FQuickBar& PrimaryBar = PrimaryQuickBar;
-        const int32_t PreviousSlot = PrimaryBar.PreviousFocusedSlot;
-        const bool bUsePrevious = PreviousSlot >= 0 && PreviousSlot < PrimaryBar.Slots.Num() && PreviousSlot != PrimaryBar.CurrentFocusedSlot && GetSlot(EFortQuickBars::GetPrimary(), PreviousSlot).Items.Num() > 0;
-        ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), bUsePrevious ? PreviousSlot : 0, 0.0f, false);
+        ActivateReplacementSlot();
     }
+#endif
+}
+
+void AFortQuickBars::ActivateReplacementSlot()
+{
+#if WITH_SERVER_CODE
+    // The primary bar's previously focused slot if it still holds an item, otherwise the harvesting tool's (slot 0).
+    FQuickBar& PrimaryBar = PrimaryQuickBar;
+    const int32_t PreviousSlot = PrimaryBar.PreviousFocusedSlot;
+    const bool bUsePrevious = PreviousSlot >= 0 && PreviousSlot < PrimaryBar.Slots.Num() && PreviousSlot != PrimaryBar.CurrentFocusedSlot && GetSlot(EFortQuickBars::GetPrimary(), PreviousSlot).Items.Num() > 0;
+    const int32_t Slot = bUsePrevious ? PreviousSlot : 0;
+    Log::Info(L"Quickbar: {} activates slot {} after its focused item was removed", GetNameSafe(GetOwner()).ToStdString(), Slot);
+    ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), Slot, 0.0f, false);
 #endif
 }
 

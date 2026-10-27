@@ -54,6 +54,16 @@ public:
     DefineUFunction(ServerAddItemInternal)
     DefineUFunction(ServerRemoveItemInternal)
 
+    // While one is alive, removing the item of the focused slot leaves the focus on that slot instead of activating
+    // another one (ServerRemoveItemInternal_Implementation), for a slot that is filled again straight away.
+    struct FKeepFocusOnRemove
+    {
+        FKeepFocusOnRemove() { ++KeepFocusOnRemoveCount; }
+        ~FKeepFocusOnRemove() { --KeepFocusOnRemoveCount; }
+        FKeepFocusOnRemove(const FKeepFocusOnRemove&) = delete;
+        FKeepFocusOnRemove& operator=(const FKeepFocusOnRemove&) = delete;
+    };
+
     FQuickBar& GetQuickBar(EFortQuickBars InQuickBar) { return InQuickBar == EFortQuickBars::GetPrimary() ? PrimaryQuickBar : SecondaryQuickBar; }
     EFortQuickBars GetCurrentQuickBar();
     void SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride);
@@ -67,10 +77,13 @@ public:
     bool ContainsItem(const FGuid& Item);
     void ServerRemoveItemInternal(const FGuid& Item, bool bFindReplacement, bool bForce);
     void ServerRemoveItemInternal_Implementation(const FGuid& Item, bool bFindReplacement, bool bForce);
+    void ActivateReplacementSlot();
     void SetupQuickbar(EFortQuickBars InQuickBar, const FQuickBarData& QuickBarData);
 
     static void HookVTables();
 
 private:
+    static inline int32_t KeepFocusOnRemoveCount = 0;
+
     static void ServerRemoveItemInternal_ImplementationHK(AFortQuickBars* This, const FGuid& Item, bool bFindReplacement, bool bForce);
 };

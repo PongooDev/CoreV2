@@ -5517,28 +5517,56 @@ bool Finder::ResolveAthenaMenuHero()
     return true;
 }
 
-bool Finder::ResolveTrapInitializeLive()
+bool Finder::ResolveDecoSpawnedLive()
 {
     static bool bSearched = false;
-    if (Natives::ABuildingTrap_InitializeKismetSpawnedBuildingActorIndex >= 0 || bSearched)
+    if (Natives::AFortPlayerController_DecoSpawnedIndex >= 0 || bSearched)
     {
-        return Natives::ABuildingTrap_InitializeKismetSpawnedBuildingActorIndex >= 0;
+        return Natives::AFortPlayerController_DecoSpawnedIndex >= 0;
     }
     bSearched = true;
 
-    // ABuildingTrap's override of ABuildingActor::InitializeKismetSpawnedBuildingActor (1.7.2 0x4A63C0, slot 0xF7), which
-    // AFortDecoTool's spawn (0x91B370) calls on a placed trap with the placer's WorldPlayerId, is the only reader of this.
+    // AFortDecoTool's spawn (1.7.2 0x91B370, slot 0x124) is its only virtual that initializes what it spawned through
+    // ABuildingTrap's InitializeKismetSpawnedBuildingActor slot (0x4A63C0, slot 0xF7, by its log string). It hands the
+    // new actor to two of the placer's controller slots, 0x29F before the initialize and 0x2A0 after it, both the shared
+    // empty function in 1.7.2: the second is the first virtual call from slot 0x200 up after the initialize.
     const uintptr_t Initialize = FunctionOf(L"Trap %s was loaded from a world record with a missing FortTrapItemDefinition. Destroying next frame.");
-    const int32_t Index = FirstVTableIndex(CdoVTable(L"/Script/FortniteGame.BuildingTrap"), Initialize);
-    if (Index < 0)
+    const int32_t InitializeIndex = FirstVTableIndex(CdoVTable(L"/Script/FortniteGame.BuildingTrap"), Initialize);
+    const auto FindInitializeCall = [InitializeIndex](uintptr_t Function)
     {
-        Log::Error(L"Finder: ABuildingTrap::InitializeKismetSpawnedBuildingActor slot not found");
+        const uintptr_t FunctionEnd = Finder::FunctionEnd(Function);
+        uintptr_t Site = FunctionEnd ? FindVirtualCall(Function, FunctionEnd) : 0;
+        while (Site && VirtualSlot(Site) != InitializeIndex)
+        {
+            Site = FindVirtualCall(Site + 1, FunctionEnd);
+        }
+        return Site;
+    };
+    void** DecoToolVTable = CdoVTable(L"/Script/FortniteGame.FortDecoTool");
+    const int32_t SpawnIndex = InitializeIndex >= 0 ? FirstVTableIndexWhere(DecoToolVTable, [&FindInitializeCall](uintptr_t Entry) { return FindInitializeCall(Entry) != 0; }) : -1;
+    const uintptr_t Spawn = VTableEntry(DecoToolVTable, SpawnIndex);
+    const uintptr_t InitializeCall = Spawn ? FindInitializeCall(Spawn) : 0;
+
+    const uintptr_t SpawnEnd = InitializeCall ? Finder::FunctionEnd(Spawn) : 0;
+    int32_t SpawnedIndex = -1;
+    bool bSpawningCalled = false;
+    for (uintptr_t Site = SpawnEnd ? FindVirtualCall(InitializeCall + 1, SpawnEnd) : 0; Site && SpawnedIndex < 0; Site = FindVirtualCall(Site + 1, SpawnEnd))
+    {
+        SpawnedIndex = VirtualSlot(Site) >= 0x200 ? VirtualSlot(Site) : -1;
+    }
+    for (uintptr_t Site = SpawnedIndex >= 0 ? FindVirtualCall(Spawn, InitializeCall) : 0; Site && !bSpawningCalled; Site = FindVirtualCall(Site + 1, InitializeCall))
+    {
+        bSpawningCalled = VirtualSlot(Site) == SpawnedIndex - 1;
+    }
+    void** ControllerVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerController");
+    if (!bSpawningCalled || reinterpret_cast<void*>(VTableEntry(ControllerVTable, SpawnedIndex)) != Natives::SharedEmptyFunction)
+    {
+        Log::Error(L"Finder: AFortDecoTool's spawn hands the placer's controller no empty slot (initialize slot {}, spawn 0x{:X}, slot {})", InitializeIndex, Spawn ? Spawn - Finder::ImageBase() : 0, SpawnedIndex);
         return false;
     }
 
-    Natives::ABuildingTrap_InitializeKismetSpawnedBuildingActor = Initialize;
-    Natives::ABuildingTrap_InitializeKismetSpawnedBuildingActorIndex = Index;
-    Log::Info(L"Finder: ABuildingTrap::InitializeKismetSpawnedBuildingActor is slot 0x{:X}", Index);
+    Natives::AFortPlayerController_DecoSpawnedIndex = SpawnedIndex;
+    Log::Info(L"Finder: AFortDecoTool's spawn (0x{:X}) hands what it placed to AFortPlayerController slot 0x{:X}", Spawn - Finder::ImageBase(), SpawnedIndex);
     return true;
 }
 

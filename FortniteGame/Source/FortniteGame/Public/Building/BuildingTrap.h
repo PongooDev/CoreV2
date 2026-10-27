@@ -5,6 +5,8 @@
 
 #include <cstdint>
 
+class AFortPlayerController;
+
 // A trap: placed by a player (AFortDecoTool) or loaded from the world record.
 class ABuildingTrap : public ABuildingSMActor
 {
@@ -17,8 +19,8 @@ public:
     static void HookVTables();
 
 private:
-    void TakePlacerTeam();
+    void TakePlacerTeam(AFortPlayerController* Placer);
 
-    static void InitializeKismetSpawnedBuildingActorHK(ABuildingTrap* This, uint64_t InitialState, uint64_t InOwnerPersistentID, uint64_t Arg3, void* Arg4, uint64_t Arg5);
-    static inline void (*InitializeKismetSpawnedBuildingActorOG)(ABuildingTrap* This, uint64_t InitialState, uint64_t InOwnerPersistentID, uint64_t Arg3, void* Arg4, uint64_t Arg5) = nullptr;
+    static void DecoSpawnedHK(AFortPlayerController* Placer, ABuildingSMActor* Spawned, void* Arg);
+    static inline void (*DecoSpawnedOG)(AFortPlayerController* Placer, ABuildingSMActor* Spawned, void* Arg) = nullptr;
 };

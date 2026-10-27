@@ -358,8 +358,7 @@ namespace Natives
     inline int32_t AFortPlayerPawn_ResetGameplayAttributesIndex = -1;
     inline int32_t AFortGameMode_RedirectLootTierGroupIndex = -1;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
-    inline uintptr_t ABuildingTrap_InitializeKismetSpawnedBuildingActor = 0;
-    inline int32_t ABuildingTrap_InitializeKismetSpawnedBuildingActorIndex = -1;
+    inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
     inline int32_t AFortPlayerPawn_EquipLastWeaponIndex = -1;
     inline int32_t AFortPawn_EquipDefaultWeaponIndex = -1;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;

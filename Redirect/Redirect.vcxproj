@@ -351,6 +351,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerState.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerStateOutpost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Quests\FortQuestManager.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\AthenaHUDContext.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FortUITeamInfo.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FrontEnd\FortMissionGenerator.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Weapons\FortWeapon.h" />
@@ -510,6 +511,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerZone.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerState.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Quests\FortQuestManager.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\AthenaHUDContext.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\FortUITeamInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Weapons\FortWeapon.cpp" />
     <ClCompile Include="..\ThirdParty\MinHook\src\buffer.c">

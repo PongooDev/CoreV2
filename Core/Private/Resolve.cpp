@@ -5517,6 +5517,30 @@ bool Finder::ResolveAthenaMenuHero()
     return true;
 }
 
+bool Finder::ResolveAthenaHUDPawnBinding()
+{
+    // UAthenaHUDContext binds HandleUIGameplayCue and HandleLocalPlayerDBNOStateChanged to its player controller's pawn
+    // (AFortPlayerPawnAthena::OnUIGameplayCue, OnDBNOStateChanged) from an event of its local player (1.7.2 0x2D64E70),
+    // the only function that adds either by name. 1.1 and 1.2 have no Battle Royale HUD.
+    const std::vector<uintptr_t> CueRefs = Finder::StringRefs(L"&ThisClass::HandleUIGameplayCue");
+    const std::vector<uintptr_t> DBNORefs = Finder::StringRefs(L"&ThisClass::HandleLocalPlayerDBNOStateChanged");
+    const uintptr_t BindLocalPawn = CueRefs.size() == 1 ? Finder::FunctionStart(CueRefs.front()) : 0;
+    if (CueRefs.empty())
+    {
+        Log::Info(L"Finder: no Battle Royale HUD pawn binding in this build");
+        return false;
+    }
+    if (!BindLocalPawn || DBNORefs.size() != 1 || Finder::FunctionStart(DBNORefs.front()) != BindLocalPawn)
+    {
+        Log::Error(L"Finder: UAthenaHUDContext's pawn binding not found ({} and {} references)", CueRefs.size(), DBNORefs.size());
+        return false;
+    }
+
+    Natives::UAthenaHUDContext_BindLocalPawn = reinterpret_cast<decltype(Natives::UAthenaHUDContext_BindLocalPawn)>(BindLocalPawn);
+    Log::Info(L"Finder: UAthenaHUDContext binds the local pawn at 0x{:X}", BindLocalPawn - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveDecoSpawnedLive()
 {
     static bool bSearched = false;

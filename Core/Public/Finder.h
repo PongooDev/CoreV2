@@ -135,6 +135,7 @@ namespace Finder
     bool ResolveAthenaHeroLive();
     uint8_t* AircraftPhasePlayerCleanupCall();
     bool ResolveAthenaMenuHero();
+    bool ResolveAthenaHUDPawnBinding();
     uint8_t* PawnDiedInventoryDropCall();
     bool ResolveDecoSpawnedLive();
     bool ResolveServerMoveLive();

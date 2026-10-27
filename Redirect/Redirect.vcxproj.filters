@@ -1200,6 +1200,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Quests\FortQuestManager.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Quests</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\AthenaHUDContext.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\UI</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FortUITeamInfo.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\UI</Filter>
     </ClInclude>
@@ -1658,6 +1661,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Quests\FortQuestManager.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Quests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\AthenaHUDContext.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\UI</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\FortUITeamInfo.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\UI</Filter>

@@ -13,6 +13,7 @@
 #include "Misc/ConfigCacheIni.h"
 #include "OnlineVoiceImpl.h"
 #include "Player/FortPlayerController.h"
+#include "UI/AthenaHUDContext.h"
 #include "UI/FortUITeamInfo.h"
 
 void Boot::Initialize()
@@ -41,6 +42,7 @@ void Boot::Initialize()
     FConfigCacheIni::EnableVoice(true);
     FOnlineVoiceImpl::Hook();
     UFortUITeamInfo::Hook();
+    UAthenaHUDContext::Hook();
     Hooks::EnableAll();
 
     GameThread::Enqueue([]

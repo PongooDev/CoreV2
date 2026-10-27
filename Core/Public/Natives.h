@@ -63,6 +63,7 @@ class FScriptArray;
 class UGameViewportClient;
 class UFortUITeamInfo;
 struct FFortTeamMemberInfo;
+class UAthenaHUDContext;
 class ULocalPlayer;
 class FUObjectArray;
 class UClass;
@@ -203,6 +204,7 @@ namespace Natives
 
     inline ULocalPlayer* (*UGameViewportClient_SetupInitialLocalPlayer)(UGameViewportClient* This, FString& OutError) = nullptr;
     inline bool (*UFortUITeamInfo_GetTeamMemberInfo)(UFortUITeamInfo* This, UFortRegisteredPlayerInfo* PlayerInfo, FFortTeamMemberInfo& OutInfo) = nullptr;
+    inline void (*UAthenaHUDContext_BindLocalPawn)(UAthenaHUDContext* This) = nullptr;
 
     inline bool (*UActorChannel_ReplicateActor)(UActorChannel* This) = nullptr;
     inline void (*UActorChannel_SetChannelActor)(UActorChannel* This, AActor* InActor) = nullptr;

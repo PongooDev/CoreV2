@@ -328,6 +328,7 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
         {
             TStructArray<FFortItemEntry> LootDrops{};
             UFortLootPackage::PickLootDrops(LootDrops, GetWorldManager() ? GetWorldLevel() : -1, LootTierKey, AbilitySystemComponent, StaticGameplayTags, true, false);
+            AFortPickup::CombineItemEntries(LootDrops, PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr);
             for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
             {
                 UFortItemDefinition* ItemDefinition = LootDrops[Index].ItemDefinition;

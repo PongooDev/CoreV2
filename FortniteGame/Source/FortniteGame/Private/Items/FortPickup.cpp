@@ -1,11 +1,14 @@
 #include "pch.h"
 #include "Items/FortPickup.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Components/SceneComponent.h"
 #include "Curves/CurveBase.h"
+#include "Engine/World.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "GameFramework/ProjectileMovementComponent.h"
+#include "GameThread.h"
 #include "Math/UnrealMathUtility.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
@@ -22,10 +25,14 @@
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/WeakObjectPtr.h"
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace
@@ -197,23 +204,79 @@ namespace
         Log::Info(L"Battle Royale: {} swaps {} for {} in quickbar slot {} (slot 0 is the harvesting tool's)", PlayerController->GetName().ToStdString(), FocusedDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), FocusedSlot);
         return FocusedSlot;
     }
+
+    // How close two pickups of the same item must lie to merge, and how long the one flies into the other. The search
+    // that picks them is server code no client build has (CombinePickups), so both are chosen: pickups are 60 across.
+    constexpr float CombineRadius = 200.0f;
+    constexpr float CombineFlyTime = 0.25f;
+
+    struct FPickupCombine
+    {
+        TWeakObjectPtr<AFortPickup> Pickup;
+        TWeakObjectPtr<AFortPickup> Target;
+        int32_t Count;
+        float EndTime;
+    };
+
+    std::vector<TWeakObjectPtr<AFortPickup>> TossedPickups;
+    std::vector<TWeakObjectPtr<AFortPickup>> RestingPickups;
+    std::vector<FPickupCombine> PickupCombines;
+    bool bCombinePickupsQueued = false;
+
+    int32_t GetPickupMaxStackSize(const FFortItemEntry& Entry)
+    {
+        const UFortItemDefinition* Definition = Entry.ItemDefinition;
+        return Definition ? std::max(static_cast<int32_t>(Definition->MaxStackSize), 1) : 1;
+    }
+
+    // A pickup that can merge or take another: one item that stacks, short of a full stack, at rest, not picked up and
+    // not flying into another.
+    bool CanCombine(AFortPickup* Pickup)
+    {
+        FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
+        FFortPickupLocationData& LocationData = Pickup->PickupLocationData;
+        const int32_t MaxStackSize = GetPickupMaxStackSize(Entry);
+        return Pickup->Role == ROLE_Authority && !Pickup->bPickedUp && !LocationData.CombineTarget && LocationData.TossState != EFortPickupTossState::GetInProgress()
+            && Pickup->MultiItemPickupEntries.Num() == 0 && MaxStackSize > 1 && Entry.Count > 0 && Entry.Count < MaxStackSize;
+    }
+
+    // Whether two pickups hold the same stack: item, level and durability (AFortInventory::CanStackWith's rules for an
+    // inventory, 1.7.2 0x62E040), for the same owner and mission (Save the World's loot can be for one player).
+    bool IsSameStack(AFortPickup* Pickup, AFortPickup* Other)
+    {
+        FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
+        FFortItemEntry& OtherEntry = Other->PrimaryPickupItemEntry;
+        return static_cast<UFortItemDefinition*>(Entry.ItemDefinition) == static_cast<UFortItemDefinition*>(OtherEntry.ItemDefinition) && Entry.Level == OtherEntry.Level
+            && Entry.Durability == OtherEntry.Durability && Pickup->OptionalOwnerID == Other->OptionalOwnerID && Pickup->OptionalMissionGuid == Other->OptionalMissionGuid;
+    }
+
+    // Where a pickup is: its root component's location, which is the world location for a root with no parent (a
+    // pickup's collision cylinder), without the call GetTransform makes for each of the world's pickups.
+    FVector GetPickupLocation(AFortPickup* Pickup)
+    {
+        USceneComponent* Root = Pickup->GetRootComponent();
+        return Root && !Root->AttachParent ? static_cast<FVector>(Root->RelativeLocation) : Pickup->GetTransform().GetLocation();
+    }
+
+    uint64_t CombineCell(const UFortItemDefinition* Definition, const FVector& Location, int32_t OffsetX, int32_t OffsetY)
+    {
+        const int64_t CellX = static_cast<int64_t>(std::floor(Location.X / CombineRadius)) + OffsetX;
+        const int64_t CellY = static_cast<int64_t>(std::floor(Location.Y / CombineRadius)) + OffsetY;
+        return reinterpret_cast<uintptr_t>(Definition) ^ (static_cast<uint64_t>(CellX) * 0x9E3779B97F4A7C15ull) ^ (static_cast<uint64_t>(CellY) * 0xC2B2AE3D27D4EB4Full);
+    }
 }
 
 void AFortPickup::CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory)
 {
     // UFortLootPackage::PickLootDrops (as the game's) only merges items that can't take more than one stack (resources,
-    // ammo), so every roll of an ingredient such as planks stays its own entry. The pickups' own combining after the toss
-    // is stripped (its timer is bound to the shared empty function), so Core merges before spawning. Weapons and other
-    // single items keep a stack size of 1 and stay apart.
-    if (!Inventory)
-    {
-        return;
-    }
+    // ammo), so every roll of an ingredient such as planks stays its own entry. Core merges them before spawning, so a
+    // drop is one pickup per stack; pickups that land near each other merge afterwards too (CombinePickups). Weapons and
+    // other single items keep a stack size of 1 and stay apart.
     for (int32_t Index = 0; Index < Entries.Num(); ++Index)
     {
         FFortItemEntry& Entry = Entries[Index];
         const UFortItemDefinition* Definition = Entry.ItemDefinition;
-        const int32_t MaxStackSize = Definition ? std::max(Inventory->GetMaxStackSize(Definition), 1) : 1;
+        const int32_t MaxStackSize = Definition && Inventory ? std::max(Inventory->GetMaxStackSize(Definition), 1) : GetPickupMaxStackSize(Entry);
         for (int32_t Other = Index + 1; Other < Entries.Num() && Entry.Count < MaxStackSize; ++Other)
         {
             FFortItemEntry& Candidate = Entries[Other];
@@ -248,6 +311,7 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
     Params.Set(L"ItemOwner", ItemOwner);
     Params.Set(L"OverrideMaxStackCount", OverrideMaxStackCount);
     Params.Call(this);
+    WatchForCombine();
 }
 
 void AFortPickup::TossFromContainer(const FVector& FloorLocation)
@@ -318,6 +382,214 @@ void AFortPickup::SetOptionalMissionGuid(const FGuid& InMissionGuid)
     {
         OptionalMissionGuid = InMissionGuid;
     }
+}
+
+bool FFortPickupLocationData::IsCombineAvailable()
+{
+    return Member_CombineTarget.IsAvailable() && Member_LootInitialPosition.IsAvailable() && Member_FlyTime.IsAvailable() && Member_TossState.IsAvailable();
+}
+
+void AFortPickup::OnRep_PickupLocationData()
+{
+    Reflection::FParams Params(StaticFunction_OnRep_PickupLocationData());
+    Params.Call(this);
+}
+
+void AFortPickup::WatchForCombine()
+{
+#if WITH_SERVER_CODE
+    static const bool bCombineAvailable = []()
+    {
+        const bool bAvailable = Member_PickupLocationData.IsAvailable() && Member_bPickedUp.IsAvailable() && StaticFunction_OnRep_PickupLocationData()
+            && FFortPickupLocationData::IsCombineAvailable() && EFortPickupTossState::GetInProgress() != Reflection::InvalidEnumValue;
+        if (!bAvailable)
+        {
+            Log::Error(L"Pickup: this build doesn't reflect what pickup combining uses (PickupLocationData's CombineTarget, LootInitialPosition, FlyTime, TossState), pickups won't combine");
+        }
+        return bAvailable;
+    }();
+    if (!bCombineAvailable || Role != ROLE_Authority)
+    {
+        return;
+    }
+    TossedPickups.push_back(this);
+    if (!bCombinePickupsQueued)
+    {
+        bCombinePickupsQueued = GameThread::Enqueue(&AFortPickup::CombinePickups);
+    }
+#endif
+}
+
+void AFortPickup::CombinePickups()
+{
+#if WITH_SERVER_CODE
+    // Pickups of the same item that land near each other merge into one (pickup combining did nothing). The client half
+    // is in every build: PickupLocationData's CombineTarget sends OnRep_PickupLocationData (1.7.2 0x67A7A0; 1.2
+    // 0x1405EA760, 1.8 0x690DD0) to its combine branch (0x681C30), which stops the toss (0x662120) and sets a timer for
+    // FlyTime, and the pickup's tick (0x6832A0 -> 0x684B10) moves it from LootInitialPosition into the target over
+    // FlyTime; while it has a target it can't be picked up (0x6783E0). The server half is server code a client build
+    // doesn't have: the timer is bound to the shared empty function, and nothing sets a CombineTarget. Core's tossed
+    // pickups are watched until they come to rest (TossState AtRest, set by 0x662120 when the toss stops), then each
+    // flies into the nearest resting pickup of the same stack within CombineRadius with room for it (CanCombine,
+    // IsSameStack), and when FlyTime is up the target takes what fits of its count. What doesn't fit stays in the pickup,
+    // which goes back to where it landed (the toss branch of the same OnRep, with no target).
+    bCombinePickupsQueued = false;
+    std::unordered_map<AFortPickup*, int32_t> Incoming;
+    std::vector<std::pair<AFortPickup*, AFortPickup*>> Finished;
+    std::erase_if(PickupCombines, [&](const FPickupCombine& Combine)
+    {
+        AFortPickup* Pickup = Combine.Pickup.Get();
+        UWorld* World = Pickup ? Pickup->GetWorld() : nullptr;
+        if (World && World->GetTimeSeconds() < Combine.EndTime)
+        {
+            Incoming[Combine.Target.Get()] += Combine.Count;
+            return false;
+        }
+        if (World)
+        {
+            Finished.emplace_back(Pickup, Combine.Target.Get());
+        }
+        return true;
+    });
+    for (const auto& [Pickup, Target] : Finished)
+    {
+        Pickup->FinishCombine(Target);
+    }
+
+    std::vector<AFortPickup*> Landed;
+    std::erase_if(TossedPickups, [&](const TWeakObjectPtr<AFortPickup>& Tossed)
+    {
+        AFortPickup* Pickup = Tossed.Get();
+        if (Pickup && !Pickup->bPickedUp && static_cast<FFortPickupLocationData&>(Pickup->PickupLocationData).TossState == EFortPickupTossState::GetInProgress())
+        {
+            return false;
+        }
+        if (Pickup && CanCombine(Pickup))
+        {
+            Landed.push_back(Pickup);
+            RestingPickups.push_back(Pickup);
+        }
+        return true;
+    });
+
+    if (!Landed.empty())
+    {
+        // The resting pickups of the landed ones' items that can take more, by cell of CombineRadius, so each landed
+        // pickup looks only at the cells around it.
+        std::unordered_set<const UFortItemDefinition*> Definitions;
+        for (AFortPickup* Pickup : Landed)
+        {
+            Definitions.insert(static_cast<FFortItemEntry&>(Pickup->PrimaryPickupItemEntry).ItemDefinition);
+        }
+        std::unordered_set<AFortPickup*> Seen;
+        std::unordered_map<uint64_t, std::vector<std::pair<AFortPickup*, FVector>>> Cells;
+        std::erase_if(RestingPickups, [&](const TWeakObjectPtr<AFortPickup>& Resting)
+        {
+            AFortPickup* Pickup = Resting.Get();
+            if (!Pickup || !Seen.insert(Pickup).second || !CanCombine(Pickup))
+            {
+                return true;
+            }
+            const UFortItemDefinition* Definition = static_cast<FFortItemEntry&>(Pickup->PrimaryPickupItemEntry).ItemDefinition;
+            if (Definitions.contains(Definition))
+            {
+                const FVector Location = GetPickupLocation(Pickup);
+                Cells[CombineCell(Definition, Location, 0, 0)].emplace_back(Pickup, Location);
+            }
+            return false;
+        });
+
+        for (AFortPickup* Pickup : Landed)
+        {
+            // A pickup that others fly into, or one that is flying, stays.
+            if (Incoming.contains(Pickup) || !CanCombine(Pickup))
+            {
+                continue;
+            }
+            FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
+            const UFortItemDefinition* Definition = Entry.ItemDefinition;
+            const int32_t MaxStackSize = GetPickupMaxStackSize(Entry);
+            const FVector Location = GetPickupLocation(Pickup);
+            AFortPickup* Nearest = nullptr;
+            float NearestDistanceSquared = CombineRadius * CombineRadius;
+            for (int32_t OffsetX = -1; OffsetX <= 1; ++OffsetX)
+            {
+                for (int32_t OffsetY = -1; OffsetY <= 1; ++OffsetY)
+                {
+                    const auto Cell = Cells.find(CombineCell(Definition, Location, OffsetX, OffsetY));
+                    if (Cell == Cells.end())
+                    {
+                        continue;
+                    }
+                    for (const auto& [Other, OtherLocation] : Cell->second)
+                    {
+                        const float DistanceSquared = FMath::Square(OtherLocation.X - Location.X) + FMath::Square(OtherLocation.Y - Location.Y) + FMath::Square(OtherLocation.Z - Location.Z);
+                        const auto OtherIncoming = Incoming.find(Other);
+                        const int32_t OtherCount = static_cast<FFortItemEntry&>(Other->PrimaryPickupItemEntry).Count + (OtherIncoming != Incoming.end() ? OtherIncoming->second : 0);
+                        if (Other != Pickup && DistanceSquared <= NearestDistanceSquared && OtherCount < MaxStackSize && CanCombine(Other) && IsSameStack(Pickup, Other))
+                        {
+                            Nearest = Other;
+                            NearestDistanceSquared = DistanceSquared;
+                        }
+                    }
+                }
+            }
+            if (Nearest)
+            {
+                Incoming[Nearest] += Entry.Count;
+                Pickup->StartCombine(Nearest);
+            }
+        }
+    }
+
+    if (!bCombinePickupsQueued && (!PickupCombines.empty() || !TossedPickups.empty()))
+    {
+        bCombinePickupsQueued = GameThread::Enqueue(&AFortPickup::CombinePickups);
+    }
+#endif
+}
+
+void AFortPickup::StartCombine(AFortPickup* Target)
+{
+    UWorld* World = GetWorld();
+    FFortPickupLocationData& LocationData = PickupLocationData;
+    LocationData.CombineTarget = Target;
+    LocationData.LootInitialPosition = GetTransform().GetLocation();
+    LocationData.FlyTime = CombineFlyTime;
+    OnRep_PickupLocationData();
+    ForceNetUpdate();
+    PickupCombines.push_back({ this, Target, static_cast<FFortItemEntry&>(PrimaryPickupItemEntry).Count, World->GetTimeSeconds() + CombineFlyTime });
+}
+
+void AFortPickup::FinishCombine(AFortPickup* Target)
+{
+    FFortItemEntry& Entry = PrimaryPickupItemEntry;
+    const UFortItemDefinition* Definition = Entry.ItemDefinition;
+    const int32_t Count = Entry.Count;
+    int32_t Moved = 0;
+    if (Target && Target->Role == ROLE_Authority && !Target->bPickedUp && !static_cast<FFortPickupLocationData&>(Target->PickupLocationData).CombineTarget && IsSameStack(this, Target))
+    {
+        FFortItemEntry& TargetEntry = Target->PrimaryPickupItemEntry;
+        Moved = std::clamp(GetPickupMaxStackSize(TargetEntry) - static_cast<int32_t>(TargetEntry.Count), 0, Count);
+        if (Moved > 0)
+        {
+            TargetEntry.Count = TargetEntry.Count + Moved;
+            Target->ForceNetUpdate();
+        }
+    }
+    if (Moved >= Count)
+    {
+        Log::Info(L"Pickup: {} {} combined into {} ({} now)", Count, Definition ? Definition->GetName().ToStdString() : L"None", Target->GetName().ToStdString(), static_cast<int32_t>(static_cast<FFortItemEntry&>(Target->PrimaryPickupItemEntry).Count));
+        K2_DestroyActor();
+        return;
+    }
+
+    Entry.Count = Count - Moved;
+    static_cast<FFortPickupLocationData&>(PickupLocationData).CombineTarget = nullptr;
+    OnRep_PickupLocationData();
+    ForceNetUpdate();
+    Log::Info(L"Pickup: {} of {} {} combined into {}, the rest goes back", Moved, Count, Definition ? Definition->GetName().ToStdString() : L"None", Target ? Target->GetName().ToStdString() : L"a pickup that is gone");
+    WatchForCombine();
 }
 
 void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)

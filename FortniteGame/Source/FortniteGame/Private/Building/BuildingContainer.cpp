@@ -281,6 +281,7 @@ void ABuildingContainer::SpawnFloorLoot()
 
     TStructArray<FFortItemEntry> LootDrops{};
     UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, nullptr, StaticGameplayTags, true, false);
+    AFortPickup::CombineItemEntries(LootDrops, nullptr);
     UWorld* World = GetWorld();
     const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
     for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
@@ -488,6 +489,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
 
             AFortPlayerController* LooterController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Looter->Controller)));
             ModifyLootDrops(LootDrops, LooterController);
+            AFortPickup::CombineItemEntries(LootDrops, LooterController ? static_cast<AFortInventory*>(LooterController->WorldInventory) : nullptr);
             const std::vector<FVector> LootSpots = bAthena ? GetAthenaLootSpots(LootDrops.Num()) : std::vector<FVector>();
             HighestRarity = 0;
             for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)

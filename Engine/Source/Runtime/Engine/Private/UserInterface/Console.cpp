@@ -19,52 +19,10 @@
 #include "UObject/UObjectIterator.h"
 #include "UObject/UnrealType.h"
 
-#include <cwchar>
-#include <cwctype>
 #include <utility>
 
 namespace
 {
-    // Cheats that change nothing unless the server runs them (#75), along with every Give* cheat. Typed without "cheat" on
-    // a game client they ran on the client's own cheat manager: God set the flag on the client's copy of the pawn, the give
-    // cheats found no inventory to change. Camera, HUD and debug-draw cheats still run locally.
-    constexpr const wchar_t* ServerCheats[] = {
-        L"God", L"Fly", L"Ghost", L"Walk", L"Teleport", L"Summon", L"Slomo", L"PlayersOnly", L"DamageTarget", L"DestroyTarget",
-        L"DestroyAll", L"DestroyPawns", L"DestroyAllPawnsExceptTarget", L"KillPawns", L"MakeGods", L"SetHealthPercent", L"SpawnPawn", L"SpawnAIGroup", L"TeleportToLocation", L"TeleportToActor",
-        L"TeleportToMissionActor", L"BackpackSetSize", L"ModItemDurability", L"DBNO",
-    };
-
-    // Cheats that change only the side they run on, so a game client runs them itself and on the server: ChangeSize scales
-    // the pawn's capsule and mesh, neither of which is replicated, and the client predicts with its own copy of the
-    // infinite and free flags (sprinting drained the client's stamina with the server's infinite, #75).
-    constexpr const wchar_t* BothSidesCheats[] = {
-        L"ChangeSize", L"BuildFree", L"CraftFree", L"ToggleInfiniteAmmo", L"ToggleInfiniteDurability", L"ToggleInfiniteStamina",
-        L"ToggleUnlimitedHealth", L"ToggleNoCoolDown",
-    };
-
-    // The command after a typed "cheat ", or empty when the line doesn't start with it.
-    FString TypedCheat(const FString& Command)
-    {
-        const wchar_t* const Text = *Command;
-        int32_t Begin = 0;
-        while (Begin < Command.Len() && std::iswspace(Text[Begin]))
-        {
-            ++Begin;
-        }
-        if (Command.Len() - Begin <= 6 || _wcsnicmp(Text + Begin, L"cheat", 5) != 0 || !std::iswspace(Text[Begin + 5]))
-        {
-            return FString();
-        }
-        return Command.Mid(Begin + 6, Command.Len() - Begin - 6);
-    }
-
-    enum class ECheatSide
-    {
-        Local,
-        Server,
-        Both,
-    };
-
     // UConsole::ConsoleCommand runs a line on ConsoleTargetPlayer's controller or, with none (only splitscreen sets it, so
     // always in Fortnite), on the world's first player controller (Cert 0x22D1B80, 1.7.2 0x24731A0). Core read only the
     // former, so the client never got its cheat manager and every local cheat was "not recognized" (#75).
@@ -79,58 +37,6 @@ namespace
             Player = LocalPlayers && LocalPlayers->Num() > 0 ? (*LocalPlayers)[0] : nullptr;
         }
         return Player ? static_cast<APlayerController*>(Player->PlayerController) : nullptr;
-    }
-
-    ECheatSide CheatSide(APlayerController* PlayerController, const FString& Command)
-    {
-        const wchar_t* const Text = *Command;
-        int32_t Begin = 0;
-        while (Begin < Command.Len() && std::iswspace(Text[Begin]))
-        {
-            ++Begin;
-        }
-        int32_t End = Begin;
-        while (End < Command.Len() && !std::iswspace(Text[End]))
-        {
-            ++End;
-        }
-
-        // A line of several commands ("a | b") is left as typed.
-        const FString Name = Command.Mid(Begin, End - Begin);
-        if (Name.IsEmpty() || Command.Contains(L"|") || PlayerController->Role == ROLE_Authority)
-        {
-            return ECheatSide::Local;
-        }
-
-        // Only the cheat manager's own commands (its class is the controller's CheatClass, UFortCheatManager): UPlayer::Exec
-        // offers the line to the controller first.
-        UObject* const CheatManager = PlayerController->CheatManager;
-        UClass* const CheatClass = CheatManager ? CheatManager->GetClass() : static_cast<UClass*>(PlayerController->CheatClass);
-        UFunction* const Function = CheatClass ? CheatClass->FindFunctionByName(FName(*Name, FNAME_Find)) : nullptr;
-        if (!Function || !Function->HasAnyFunctionFlags(FUNC_Exec) || PlayerController->GetClass()->FindFunctionByName(FName(*Name, FNAME_Find)))
-        {
-            return ECheatSide::Local;
-        }
-
-        for (const wchar_t* BothSidesCheat : BothSidesCheats)
-        {
-            if (_wcsicmp(*Name, BothSidesCheat) == 0)
-            {
-                return ECheatSide::Both;
-            }
-        }
-        if (_wcsnicmp(*Name, L"Give", 4) == 0)
-        {
-            return ECheatSide::Server;
-        }
-        for (const wchar_t* ServerCheat : ServerCheats)
-        {
-            if (_wcsicmp(*Name, ServerCheat) == 0)
-            {
-                return ECheatSide::Server;
-            }
-        }
-        return ECheatSide::Local;
     }
 }
 
@@ -382,7 +288,8 @@ void UConsole::BuildRuntimeAutoCompleteListHK(UConsole* This, bool bForce)
 void UConsole::ConsoleCommandHK(UConsole* This, const FString& Command)
 {
     // Cheats are on for every player (#65): the controller the line runs on gets a cheat manager before the command runs,
-    // so its commands work here; "cheat <command>" goes to the server through AFortPlayerController::Cheat.
+    // so a cheat typed here runs on this player's game, and "cheat <command>" runs it on the server (through
+    // AFortPlayerController::Cheat). A line runs as typed (#75).
     APlayerController* const PlayerController = ConsolePlayerController(This);
     if (PlayerController && !PlayerController->CheatManager)
     {
@@ -392,37 +299,11 @@ void UConsole::ConsoleCommandHK(UConsole* This, const FString& Command)
     void* const* const VTable = *reinterpret_cast<void* const* const*>(This);
     for (const auto& [ConsoleVTable, Original] : ConsoleCommandOriginals)
     {
-        if (ConsoleVTable != VTable)
+        if (ConsoleVTable == VTable)
         {
-            continue;
-        }
-
-        // On a game client the cheats that only work on the server go there, as if typed with "cheat", and the ones that
-        // change both sides run here and there (#75).
-        const auto Run = reinterpret_cast<void (*)(UConsole*, const FString&)>(Original);
-
-        // Typed with "cheat", a cheat that changes both sides runs here too.
-        const FString Typed = PlayerController ? TypedCheat(Command) : FString();
-        if (!Typed.IsEmpty())
-        {
-            if (CheatSide(PlayerController, Typed) == ECheatSide::Both)
-            {
-                Run(This, Typed);
-            }
-            Run(This, Command);
+            reinterpret_cast<void (*)(UConsole*, const FString&)>(Original)(This, Command);
             return;
         }
-
-        const ECheatSide Side = PlayerController ? CheatSide(PlayerController, Command) : ECheatSide::Local;
-        if (Side != ECheatSide::Server)
-        {
-            Run(This, Command);
-        }
-        if (Side != ECheatSide::Local)
-        {
-            Run(This, FString(L"cheat ") + Command);
-        }
-        return;
     }
 }
 

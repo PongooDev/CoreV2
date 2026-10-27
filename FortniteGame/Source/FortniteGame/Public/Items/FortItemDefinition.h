@@ -4,6 +4,7 @@
 #include "Engine/DataTable.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
+#include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
 
 class AFortPlayerController;
@@ -159,9 +160,22 @@ class UFortGadgetItemDefinition : public UFortWorldItemDefinition
     DefineUnrealClass(UFortGadgetItemDefinition, FortniteGame)
 };
 
+struct FFortBaseWeaponStats
+{
+    DefineUnrealStruct(FFortBaseWeaponStats, FortniteGame)
+    DefineUProperty(int32_t, ClipSize)
+};
+
 class UFortWeaponItemDefinition : public UFortWorldItemDefinition
 {
     DefineUnrealClass(UFortWeaponItemDefinition, FortniteGame)
+
+public:
+    DefineUStructProperty(FDataTableRowHandle, WeaponStatHandle)
+    DefineUProperty(TAssetPtr<UFortWorldItemDefinition>, AmmoData)
+
+    // The magazine of the weapon's stats row (FFortBaseWeaponStats::ClipSize), 0 without one.
+    int32_t GetClipSize() const;
 };
 
 class UFortAmmoItemDefinition : public UFortWorldItemDefinition

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "FortKismetLibrary.h"
 #include "AI/FortAIDirector.h"
+#include "Athena/FortGameModeAthena.h"
 #include "AI/FortAIGoalManager.h"
 #include "Abilities/FortAbilitySet.h"
 #include "Engine/World.h"
@@ -237,6 +238,11 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
     std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
     FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
     FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToSpawn, 0);
+    // Battle Royale's supply drop (AthenaSupplyDrop_02) spawns its loot through here: its weapons come loaded (#85).
+    if (AFortGameModeAthena::GetCurrent(World))
+    {
+        ItemEntry->LoadFullClip();
+    }
 
     const FRotator SpawnRotation = Direction.Rotation();
     AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation);

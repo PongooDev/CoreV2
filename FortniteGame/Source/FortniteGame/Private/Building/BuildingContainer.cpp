@@ -59,6 +59,7 @@ namespace
 
     int32_t FloorLootContainers = 0;
     int32_t FloorLootPickups = 0;
+    int32_t FloorLootLoadedWeapons = 0;
 }
 
 bool ABuildingContainer::IsAlreadySearched(AFortPawn* Looter)
@@ -190,6 +191,7 @@ void ABuildingContainer::SpawnFloorLoot()
             continue;
         }
         ApplyLootedDurability(Entry, WorldItemDefinition, LootedWeaponsDurabilityModifier);
+        FloorLootLoadedWeapons += Entry.LoadFullClip() ? 1 : 0;
         FVector SpawnLocation;
         FVector FinalLocation;
         GetAthenaLootLocations(Index, LootDrops.Num(), SpawnLocation, FinalLocation);
@@ -367,6 +369,10 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
             FFortItemEntry* Entry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
             FFortItemEntry::Construct(Entry, TestingData, 1, 0);
             ApplyLootedDurability(*Entry, TestingData, LootedWeaponsDurabilityModifier);
+            if (bAthena)
+            {
+                Entry->LoadFullClip();
+            }
             if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &SpawnLocation, &SpawnRotation))
             {
                 Pickup->SetPickupTarget(Looter, -1.0f, FVector(0.0f, 0.0f, 1.0f), true);
@@ -399,6 +405,8 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
                 FVector FinalLocation = SpawnLocation;
                 if (bAthena)
                 {
+                    // Battle Royale's looted weapons come loaded (#85); the ammo for them is the loot package's own drop.
+                    Entry.LoadFullClip();
                     GetAthenaLootLocations(Index, LootDrops.Num(), PickupLocation, FinalLocation);
                 }
                 if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &PickupLocation, &SpawnRotation))
@@ -557,7 +565,7 @@ void ABuildingContainer::LogWorldContainers(UWorld* World)
         Containers, WithLootTier, Tiered, TieredWithMesh, TieredDormant, *GetNameSafe(FirstWithoutMesh), FirstWithoutMesh ? *GetNameSafe(FirstWithoutMesh->GetOutermost()) : TEXT("-"), DestroyedActors);
     if (FloorLootContainers > 0)
     {
-        UE_LOG(LogFortBuilding, Log, TEXT("Floor loot: %d containers spawned %d pickups"), FloorLootContainers, FloorLootPickups);
+        UE_LOG(LogFortBuilding, Log, TEXT("Floor loot: %d containers spawned %d pickups (%d loaded weapons)"), FloorLootContainers, FloorLootPickups, FloorLootLoadedWeapons);
     }
 }
 

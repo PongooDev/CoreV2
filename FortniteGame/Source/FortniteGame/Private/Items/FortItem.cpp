@@ -121,6 +121,36 @@ void FFortItemEntry::AddNewItemCount(int32_t Count, bool bShouldShowItemToast)
     SetNewItemCount(GetIntValue(EFortItemEntryState::GetNewItemCount()) + Count, bShouldShowItemToast);
 }
 
+bool FFortItemEntry::LoadFullClip()
+{
+    // Every entry starts with an empty magazine (the 1.7.2 constructor, 0x65C010, zeroes LoadedAmmo) and a weapon loads
+    // its magazine only from its item's LoadedAmmo (0x90B510, through the item's getter 0x66F050). Nothing native fills
+    // it for loot any more, so a Battle Royale weapon came out of a chest empty (#85). Weapons that are their own ammo
+    // (Athena_Grenade) fire from their stack instead.
+    UFortWeaponItemDefinition* WeaponDefinition = Cast<UFortWeaponItemDefinition>(static_cast<UFortItemDefinition*>(ItemDefinition));
+    if (!WeaponDefinition || WeaponDefinition->ItemType != EFortItemType::GetWeaponRanged())
+    {
+        return false;
+    }
+    const TAssetPtr<UFortWorldItemDefinition>& Ammo = WeaponDefinition->AmmoData;
+    const int32_t ClipSize = Ammo.LoadSynchronous() != WeaponDefinition ? WeaponDefinition->GetClipSize() : 0;
+    if (ClipSize <= 0 || LoadedAmmo == ClipSize)
+    {
+        return false;
+    }
+    LoadedAmmo = ClipSize;
+    bIsDirty = true;
+    return true;
+}
+
+int32_t UFortWeaponItemDefinition::GetClipSize() const
+{
+    const FDataTableRowHandle& StatHandle = WeaponStatHandle;
+    UDataTable* StatTable = StatHandle.DataTable;
+    const FFortBaseWeaponStats* Stats = StatTable ? StatTable->FindRow<FFortBaseWeaponStats>(StatHandle.RowName, L"UFortWeaponItemDefinition::GetClipSize", false) : nullptr;
+    return Stats ? static_cast<int32_t>(Stats->ClipSize) : 0;
+}
+
 bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerController* Controller)
 {
     if (Natives::UFortWorldItemDefinition_ServerExecuteIndex < 0 && !Finder::ResolveWorldItemDefinitionLive())

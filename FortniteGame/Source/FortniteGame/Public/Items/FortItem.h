@@ -52,6 +52,8 @@ public:
     bool ShouldShowItemToast() const;
     void SetNewItemCount(int32_t NewItemCount, bool bShouldShowItemToast);
     void AddNewItemCount(int32_t Count, bool bShouldShowItemToast);
+    // Loads a ranged weapon's full magazine (Battle Royale's loot). False for anything else.
+    bool LoadFullClip();
 
     DefineUProperty(int32_t, Count)
     DefineUProperty(UFortItemDefinition*, ItemDefinition)

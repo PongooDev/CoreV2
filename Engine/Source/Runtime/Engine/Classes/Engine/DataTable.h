@@ -29,3 +29,10 @@ public:
 private:
     uint8_t* FindRowChecked(UScriptStruct* Type, FName RowName, const wchar_t* ContextString, bool bWarnIfRowMissing) const;
 };
+
+struct FDataTableRowHandle
+{
+    DefineUnrealStruct(FDataTableRowHandle, Engine)
+    DefineUProperty(UDataTable*, DataTable)
+    DefineUProperty(FName, RowName)
+};

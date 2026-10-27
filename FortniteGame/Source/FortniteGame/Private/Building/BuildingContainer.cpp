@@ -122,46 +122,80 @@ bool ABuildingContainer::StartsAlreadySearched()
     return Member_bStartAlreadySearched_Athena.IsAvailable() && bStartAlreadySearched_Athena && AFortGameModeAthena::GetCurrent(this);
 }
 
-void ABuildingContainer::GetAthenaLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation)
+FVector ABuildingContainer::GetAthenaTossForward()
 {
-    // Battle Royale's containers put their loot on the ground instead of flying it to the looter (#72).
-    // AFortPickup::TossPickup (1.7.2 0x6622F0) aims the pickup's toss at the location it is given and nothing finds the
-    // ground for it, so loot tossed at LootSpawnLocation's height (a chest's: 72 above it) stayed in the air over the chest,
-    // and floor loot tossed from one point lay in one pile. Each item gets its own spot on the container's floor (its
-    // pivot): chests and ammo boxes put theirs in a row in front, along LootTossDirection_Athena's yaw (local +Y, the side
-    // LootSpawnLocation is on), floor loot (Tiered_Athena_FloorLoot_01) around the spot. Each drops from LootSpawnLocation's
-    // height a little short of its spot, never straight above it: TossPickup sends a toss with no distance in a random
-    // direction 512 away.
+    // LootTossDirection_Athena's yaw on the ground, relative to the container (the constructor's 90: local +Y, the side
+    // LootSpawnLocation is on).
     constexpr float DegreesToRadians = 3.1415926535897932f / 180.0f;
-    constexpr float FrontDistance = 90.0f;
-    constexpr float RowSpacing = 45.0f;
+    const float Yaw = static_cast<FRotator>(LootTossDirection_Athena).Yaw * DegreesToRadians;
+    FVector Forward = GetTransform().Rotation.RotateVector(FVector(std::cos(Yaw), std::sin(Yaw), 0.0f));
+    Forward.Z = 0.0f;
+    const float ForwardSize = std::sqrt(Forward.X * Forward.X + Forward.Y * Forward.Y);
+    return ForwardSize > 0.0f ? Forward * (1.0f / ForwardSize) : FVector(1.0f, 0.0f, 0.0f);
+}
+
+void ABuildingContainer::GetFloorLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation)
+{
+    // Floor loot (Tiered_Athena_FloorLoot_01) is out before anyone lands, so it is only dropped into place (#72): each item
+    // gets its own spot around the container's pivot (its floor) and drops from LootSpawnLocation's height a little short
+    // of it, never straight above it: AFortPickup::TossPickup (1.7.2 0x6622F0) sends a toss with no distance in a random
+    // direction 512 away.
     constexpr float FloorLootRadius = 40.0f;
     constexpr float DropShortfall = 20.0f;
     const FTransform ContainerTransform = GetTransform();
     const FVector Base = ContainerTransform.GetLocation();
-    const float Yaw = static_cast<FRotator>(LootTossDirection_Athena).Yaw * DegreesToRadians;
-    FVector Forward = ContainerTransform.Rotation.RotateVector(FVector(std::cos(Yaw), std::sin(Yaw), 0.0f));
-    Forward.Z = 0.0f;
-    const float ForwardSize = std::sqrt(Forward.X * Forward.X + Forward.Y * Forward.Y);
-    Forward = ForwardSize > 0.0f ? Forward * (1.0f / ForwardSize) : FVector(1.0f, 0.0f, 0.0f);
+    const FVector Forward = GetAthenaTossForward();
     const FVector Right(-Forward.Y, Forward.X, 0.0f);
     const float Height = FMath::Max(ContainerTransform.TransformPosition(LootSpawnLocation).Z - Base.Z, 30.0f);
-
-    FVector Direction = Forward;
-    float Distance = FrontDistance;
-    if (StartsAlreadySearched())
-    {
-        const float Angle = Count > 1 ? 2.0f * 3.1415926535897932f * static_cast<float>(Index) / static_cast<float>(Count) : 0.0f;
-        Direction = Forward * std::cos(Angle) + Right * std::sin(Angle);
-        Distance = Count > 1 ? FloorLootRadius : DropShortfall;
-        OutFinalLocation = Base + Direction * Distance;
-    }
-    else
-    {
-        const float Offset = (static_cast<float>(Index) - static_cast<float>(Count - 1) * 0.5f) * RowSpacing;
-        OutFinalLocation = Base + Forward * Distance + Right * Offset;
-    }
+    const float Angle = Count > 1 ? 2.0f * 3.1415926535897932f * static_cast<float>(Index) / static_cast<float>(Count) : 0.0f;
+    const FVector Direction = Forward * std::cos(Angle) + Right * std::sin(Angle);
+    OutFinalLocation = Base + Direction * (Count > 1 ? FloorLootRadius : DropShortfall);
     OutSpawnLocation = OutFinalLocation - Direction * DropShortfall + FVector(0.0f, 0.0f, Height);
+}
+
+FVector ABuildingContainer::GetAthenaLootSpawnLocation()
+{
+    // LootSpawnLocation (a tiered chest's mesh sets: 100 over its pivot) is inside the container's top, and a pickup's
+    // collision cylinder (radius 30, half height 80: AFortPickup's constructor, 1.7.2 0x65BA90) sweeps against it, so loot
+    // launched from there with little forward speed came down on the lid. It leaves at that height from just past the
+    // front of the container's collision instead.
+    constexpr float PickupRadius = 30.0f;
+    FVector Location = GetTransform().TransformPosition(LootSpawnLocation);
+    FVector Origin;
+    FVector Extent;
+    GetActorBounds(true, Origin, Extent);
+    const FVector Forward = GetAthenaTossForward();
+    const float Front = (Origin | Forward) + FMath::Abs(Forward.X) * Extent.X + FMath::Abs(Forward.Y) * Extent.Y + PickupRadius;
+    const float Along = Location | Forward;
+    if (Along < Front)
+    {
+        Location = Location + Forward * (Front - Along);
+    }
+    return Location;
+}
+
+void ABuildingContainer::TossAthenaLoot(AFortPickup* Pickup, const FVector& SpawnLocation, int32_t Index, int32_t Count)
+{
+    // Battle Royale's chests and ammo boxes throw their loot up and out onto the ground in front (#90) instead of flying
+    // it to the looter. The search that did it is stripped; what is left is the container's toss: a launch
+    // LootTossDirection_Athena (the constructor's: pitch 65, yaw 90 = up and out over local +Y) at LootTossSpeed_Athena
+    // (550), within LootTossConeHalfAngle_Athena (60) of it. Each item gets its own heading, fanned across the cone in
+    // front so they land apart (1 to 2m out), and falls and bounces on the pickup's projectile movement (down in about
+    // 0.35s, still within 1s). Dropping them just short of a spot on the floor (#72) showed them already down, hopping in
+    // place.
+    constexpr float DegreesToRadians = 3.1415926535897932f / 180.0f;
+    const FRotator TossDirection = LootTossDirection_Athena;
+    const float ConeHalfAngle = FMath::Clamp(static_cast<float>(LootTossConeHalfAngle_Athena), 0.0f, 90.0f);
+    const float Fan = Count > 1 ? (static_cast<float>(Index) + 0.5f) / static_cast<float>(Count) * 2.0f - 1.0f : 0.0f;
+    const float Spread = Count > 1 ? ConeHalfAngle / static_cast<float>(Count) : ConeHalfAngle * 0.5f;
+    const float Yaw = (TossDirection.Yaw + Fan * ConeHalfAngle * 0.75f + (FMath::FRand() - 0.5f) * Spread) * DegreesToRadians;
+    const float Pitch = FMath::Clamp(TossDirection.Pitch + (FMath::FRand() * 2.0f - 1.0f) * ConeHalfAngle * 0.25f, 15.0f, 80.0f) * DegreesToRadians;
+    const FVector LocalDirection(std::cos(Pitch) * std::cos(Yaw), std::cos(Pitch) * std::sin(Yaw), std::sin(Pitch));
+    const FVector Velocity = GetTransform().Rotation.RotateVector(LocalDirection) * (LootTossSpeed_Athena * (0.85f + 0.15f * FMath::FRand()));
+
+    // The toss's LootFinalPosition only records the heading (on the container's floor); the launch decides where it lands.
+    const FVector FinalLocation(SpawnLocation.X + Velocity.X * 0.5f, SpawnLocation.Y + Velocity.Y * 0.5f, GetTransform().GetLocation().Z);
+    Pickup->TossFromContainer(FinalLocation, Velocity);
 }
 
 void ABuildingContainer::SpawnFloorLoot()
@@ -194,7 +228,7 @@ void ABuildingContainer::SpawnFloorLoot()
         FloorLootLoadedWeapons += Entry.LoadFullClip() ? 1 : 0;
         FVector SpawnLocation;
         FVector FinalLocation;
-        GetAthenaLootLocations(Index, LootDrops.Num(), SpawnLocation, FinalLocation);
+        GetFloorLootLocations(Index, LootDrops.Num(), SpawnLocation, FinalLocation);
         if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
         {
             Pickup->TossPickup(FinalLocation, nullptr, 0);
@@ -358,7 +392,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
             UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(PickedKey, LootTier, GetSearchLootTierGroup(), WorldManager ? GetWorldLevel() : -1, -1, StaticGameplayTags);
             ContainerLootTierKey = PickedKey;
         }
-        const FVector SpawnLocation = ContainerTransform.TransformPosition(LootSpawnLocation);
+        const FVector SpawnLocation = bAthena ? GetAthenaLootSpawnLocation() : ContainerTransform.TransformPosition(LootSpawnLocation);
         const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
         UWorld* World = GetWorld();
         UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
@@ -401,19 +435,16 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
 
                 HighestRarity = FMath::Max(static_cast<uint8_t>(HighestRarity), WorldItemDefinition->GetRarity());
                 ApplyLootedDurability(Entry, WorldItemDefinition, LootedWeaponsDurabilityModifier);
-                FVector PickupLocation = SpawnLocation;
-                FVector FinalLocation = SpawnLocation;
                 if (bAthena)
                 {
                     // Battle Royale's looted weapons come loaded (#85); the ammo for them is the loot package's own drop.
                     Entry.LoadFullClip();
-                    GetAthenaLootLocations(Index, LootDrops.Num(), PickupLocation, FinalLocation);
                 }
-                if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &PickupLocation, &SpawnRotation))
+                if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
                 {
                     if (bAthena)
                     {
-                        Pickup->TossPickup(FinalLocation, nullptr, 0);
+                        TossAthenaLoot(Pickup, SpawnLocation, Index, LootDrops.Num());
                     }
                     else
                     {

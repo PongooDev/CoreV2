@@ -235,10 +235,12 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameState.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameStateBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Info.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\MovementComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\OnlineReplStructs.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Pawn.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\PlayerController.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\PlayerState.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\ProjectileMovementComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\WorldSettings.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\GameplayStatics.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetMathLibrary.h" />

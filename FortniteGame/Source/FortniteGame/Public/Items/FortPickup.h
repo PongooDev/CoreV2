@@ -12,6 +12,7 @@ class AFortInventory;
 class AFortPawn;
 class AFortPlayerController;
 class IFortInventoryOwnerInterface;
+class UProjectileMovementComponent;
 class UWorld;
 
 class AFortPickup : public AActor
@@ -25,12 +26,16 @@ public:
     DefineUProperty(FGuid, OptionalMissionGuid)
     DefineUProperty(int32_t, OptionalOwnerID)
     DefineUProperty(AFortPawn*, PawnWhoDroppedPickup)
+    DefineUProperty(UProjectileMovementComponent*, MovementComponent)
+    // From 1.7.2 (Battle Royale): replicated so clients play the toss from a container.
+    DefineUProperty(bool, bTossedFromContainer)
 
     // Merges entries of the same item and level up to its stack size, so a drop of five 1-plank rolls is one pickup of
     // five (CoreV2 #67).
     static void CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory);
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
     void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount);
+    void TossFromContainer(const FVector& FinalLocation, const FVector& LaunchVelocity);
     void SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime = -1.0f, const FVector& InStartDirection = FVector(0.0f, 0.0f, 1.0f), bool bPlayPickupSound = true);
     void GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner);
     void SetOptionalMissionGuid(const FGuid& InMissionGuid);

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/Console.h"
+#include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LocalPlayer.h"
 #include "Finder.h"
@@ -46,6 +47,24 @@ FString APlayerController::ConsoleCommand(const FString& Command, bool bWriteToL
         CallVirtual<FString*>(this, Natives::APlayerController_ConsoleCommandIndex, &Result, &Command, bWriteToLog);
     }
     return Result;
+}
+
+void APlayerController::EnsureLocalCheatManager(UGameInstance* GameInstance)
+{
+    static APlayerController* Checked = nullptr;
+    const TArray<ULocalPlayer*>* const LocalPlayers = GameInstance ? &static_cast<TArray<ULocalPlayer*>&>(GameInstance->LocalPlayers) : nullptr;
+    ULocalPlayer* const Player = LocalPlayers && LocalPlayers->Num() > 0 ? (*LocalPlayers)[0] : nullptr;
+    APlayerController* const PlayerController = Player ? static_cast<APlayerController*>(Player->PlayerController) : nullptr;
+    if (!PlayerController || PlayerController == Checked)
+    {
+        return;
+    }
+    Checked = PlayerController;
+    if (!PlayerController->CheatManager)
+    {
+        PlayerController->AddCheats(true);
+    }
+    Log::Info(L"Cheats: {} has cheat manager {}", PlayerController->GetName().ToStdString(), GetNameSafe(static_cast<UObject*>(PlayerController->CheatManager)).ToStdString());
 }
 
 void APlayerController::ClientMessage(const FString& S)

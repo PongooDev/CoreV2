@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Engine/GameEngine.h"
+#include "GameFramework/PlayerController.h"
 #include "GameThread.h"
 #include "Hooks.h"
 #include "Natives.h"
@@ -7,6 +8,9 @@
 void UGameEngine::TickHK(UGameEngine* This, float DeltaSeconds, bool bIdleMode)
 {
     GameThread::Tick();
+#if !UE_SERVER
+    APlayerController::EnsureLocalCheatManager(This->GameInstance);
+#endif
     TickOG(This, DeltaSeconds, bIdleMode);
 }
 

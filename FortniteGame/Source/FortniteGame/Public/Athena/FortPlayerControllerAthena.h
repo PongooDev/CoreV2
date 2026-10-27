@@ -19,4 +19,6 @@ public:
     UFortHero* GetOrInitializeHero();
     UFortHero* SetupHero();
     void SetupBackpackSize();
+    // Takes back what the player picked up in warmup: the inventory is the game mode's StartingItems again.
+    void ResetToStartingItems();
 };

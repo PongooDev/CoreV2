@@ -1,13 +1,19 @@
 #include "pch.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Abilities/FortHomebaseSet.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Finder.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
+#include "Items/FortInventory.h"
+#include "Items/FortQuickBars.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "UObject/Class.h"
+
+#include <algorithm>
+#include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
@@ -76,4 +82,74 @@ void AFortPlayerControllerAthena::SetupBackpackSize()
         }
     }
     UE_LOG(LogFort, Warning, TEXT("SetupBackpackSize: %s's heroes give no backpack size, it stays the attribute's"), *GetName());
+}
+
+void AFortPlayerControllerAthena::ResetToStartingItems()
+{
+#if WITH_SERVER_CODE
+    // What the warmup island gave stayed for the whole match (#86). The aircraft phase (StartAircraftPhase, 1.7.2 0x3FFB60)
+    // calls a stripped function with each controller after it destroys the warmup pawn (Finder::AircraftPhasePlayerCleanupCall),
+    // which runs this: every item that isn't one of Athena_GameMode's StartingItems goes (weapons, ammo, consumables, traps,
+    // and the materials, which start at 0), the starting items stay at their starting count.
+    AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this);
+    AFortInventory* Inventory = WorldInventory;
+    if (Role != ROLE_Authority || !GameMode || !Inventory)
+    {
+        return;
+    }
+
+    const TStructArray<FItemAndCount>& StartingItems = GameMode->StartingItems;
+    const auto StartingCount = [&StartingItems](const UFortItemDefinition* ItemDefinition)
+    {
+        for (int32_t Index = 0; Index < StartingItems.Num(); ++Index)
+        {
+            const FItemAndCount& Entry = StartingItems[Index];
+            if (static_cast<UFortItemDefinition*>(Entry.Item) == ItemDefinition)
+            {
+                return std::max(static_cast<int32_t>(Entry.Count), 0);
+            }
+        }
+        return 0;
+    };
+
+    // Count -1 takes the whole item.
+    std::vector<std::pair<FGuid, int32_t>> Removals;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* Entry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        const int32_t Keep = Entry ? StartingCount(Entry->ItemDefinition) : 0;
+        if (Entry && Entry->Count > Keep)
+        {
+            Removals.emplace_back(Entry->ItemGuid, Keep > 0 ? Entry->Count - Keep : -1);
+        }
+    }
+
+    // A focused slot that empties would be activated again (ServerRemoveItemInternal), for a pawn that is gone. The
+    // player leaves the aircraft with the harvesting tool (slot 0) instead, which Possess equips.
+    AFortQuickBars* Bars = QuickBars;
+    FQuickBar* PrimaryQuickBar = Bars ? &static_cast<FQuickBar&>(Bars->PrimaryQuickBar) : nullptr;
+    const int32_t FocusedSlot = PrimaryQuickBar ? static_cast<int32_t>(PrimaryQuickBar->CurrentFocusedSlot) : -1;
+    if (FocusedSlot > 0 && FocusedSlot < PrimaryQuickBar->Slots.Num())
+    {
+        const TArray<FGuid>& SlotItems = Bars->GetSlot(EFortQuickBars::GetPrimary(), FocusedSlot).Items;
+        const bool bEmptied = std::all_of(SlotItems.begin(), SlotItems.end(), [&Removals](const FGuid& Guid)
+        {
+            return std::any_of(Removals.begin(), Removals.end(), [&Guid](const auto& Removal) { return Removal.first == Guid && Removal.second < 0; });
+        });
+        if (bEmptied)
+        {
+            PrimaryQuickBar->CurrentFocusedSlot = 0;
+            PrimaryQuickBar->PreviousFocusedSlot = 0;
+        }
+    }
+
+    for (const auto& [ItemGuid, Count] : Removals)
+    {
+        RemoveInventoryItem(ItemGuid, Count, true);
+    }
+    GiveStartingItems(StartingItems);
+    UE_LOG(LogFort, Log, TEXT("ResetToStartingItems: %s boards the aircraft with its starting items, %d warmup items taken"), *GetName(), static_cast<int32_t>(Removals.size()));
+#endif
 }

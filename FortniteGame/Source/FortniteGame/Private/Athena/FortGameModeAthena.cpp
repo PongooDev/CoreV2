@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortAthenaAircraft.h"
+#include "Athena/FortPlayerControllerAthena.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
@@ -149,4 +150,22 @@ void AFortGameModeAthena::HookVTables()
 APawn* AFortGameModeAthena::SpawnDefaultPawnFor_ImplementationHK(AFortGameModeAthena* This, AController* NewPlayer, AActor* StartSpot)
 {
     return This->SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
+}
+
+void AFortGameModeAthena::HookCallSites()
+{
+    // StartAircraftPhase's per-player cleanup after the warmup pawn is destroyed is stripped (a call to the shared empty
+    // function), so the warmup island's loot went onto the aircraft (#86).
+    if (uint8_t* Call = Finder::AircraftPhasePlayerCleanupCall())
+    {
+        Hooks::RedirectCall(L"AFortGameModeAthena::StartAircraftPhase player cleanup", Call, reinterpret_cast<void*>(&AircraftPhasePlayerCleanupCall));
+    }
+}
+
+void AFortGameModeAthena::AircraftPhasePlayerCleanupCall(AController* Controller)
+{
+    if (AFortPlayerControllerAthena* PlayerController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)))
+    {
+        PlayerController->ResetToStartingItems();
+    }
 }

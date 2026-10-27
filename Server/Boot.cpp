@@ -153,6 +153,7 @@ void Boot::Initialize()
             Finder::ResolveLootTierRedirectLive();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
+            AFortGameModeAthena::HookCallSites();
         }
     });
 

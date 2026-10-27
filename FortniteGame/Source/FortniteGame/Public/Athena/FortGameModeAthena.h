@@ -27,7 +27,9 @@ public:
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
 
     static void HookVTables();
+    static void HookCallSites();
 
 private:
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeAthena* This, AController* NewPlayer, AActor* StartSpot);
+    static void AircraftPhasePlayerCleanupCall(AController* Controller);
 };

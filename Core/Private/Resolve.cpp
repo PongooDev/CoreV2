@@ -5409,6 +5409,35 @@ bool Finder::ResolveLootTierRedirectLive()
     return true;
 }
 
+uint8_t* Finder::AircraftPhasePlayerCleanupCall()
+{
+    // AFortGameModeAthena::StartAircraftPhase (1.7.2 0x3FFB60) binds the aircraft's delegates by name; OnAircraftFlightEnded
+    // (0x3F37D0) unbinds them with copies of the same strings and calls nothing stripped. For each player the phase start
+    // unequips the pawn's weapon (0x783330), calls a stripped function (0x3FFFA7: the controller, 0, 0, 0.0f, true),
+    // destroys the pawn, calls another with only the controller (0x3FFFC1), then UnPossess and ChangeState(Inactive): two
+    // calls to the shared empty function, the second the one wanted.
+    for (const uintptr_t Ref : Finder::StringRefs(L"&AFortGameModeAthena::OnAircraftEnteredDropZone"))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+        std::vector<uintptr_t> StubCalls;
+        for (const auto& [Site, Target] : End ? Finder::DirectCalls(Ref, End) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (reinterpret_cast<void*>(Target) == Natives::SharedEmptyFunction)
+            {
+                StubCalls.push_back(Site);
+            }
+        }
+        if (StubCalls.size() == 2)
+        {
+            Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}", Function - Finder::ImageBase(), StubCalls[1] - Finder::ImageBase());
+            return reinterpret_cast<uint8_t*>(StubCalls[1]);
+        }
+    }
+    Log::Info(L"Finder: no stripped player cleanup in AFortGameModeAthena::StartAircraftPhase in this build");
+    return nullptr;
+}
+
 bool Finder::ResolveAthenaHeroLive()
 {
     static bool bSearched = false;

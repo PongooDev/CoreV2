@@ -4,6 +4,7 @@
 #include "UObject/Object.h"
 
 class UEngine;
+class UGameInstance;
 class ULocalPlayer;
 
 class UGameViewportClient : public UObject
@@ -12,6 +13,7 @@ class UGameViewportClient : public UObject
 
 public:
     DefineUProperty(UConsole*, ViewportConsole)
+    DefineUProperty(UGameInstance*, GameInstance)
 
     UEngine* GetOuterUEngine() const;
     ULocalPlayer* SetupInitialLocalPlayer(FString& OutError);

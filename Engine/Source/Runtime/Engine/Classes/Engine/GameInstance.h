@@ -4,6 +4,7 @@
 #include "UObject/Object.h"
 
 struct FWorldContext;
+class ULocalPlayer;
 
 class UGameInstance : public UObject
 {
@@ -11,6 +12,7 @@ class UGameInstance : public UObject
 
 public:
     DefineNativeMember(FWorldContext*, WorldContext, UGameInstance_WorldContext)
+    DefineUProperty(TArray<ULocalPlayer*>, LocalPlayers)
 
     bool IsDedicatedServerInstance() const;
 

@@ -4,11 +4,7 @@
 #include "InputCoreTypes.h"
 #include "UObject/Stack.h"
 
-#include <utility>
-#include <vector>
-
 class APlayerCameraManager;
-class APlayerState;
 class UPlayer;
 
 class APlayerController : public AController
@@ -20,10 +16,10 @@ public:
     DefineUProperty(APawn*, AcknowledgedPawn)
     DefineUProperty(APlayerCameraManager*, PlayerCameraManager)
     DefineUProperty(UObject*, CheatManager)
+    DefineUProperty(UClass*, CheatClass)
     DefineUFunction(ToggleSpeaking)
     DefineUFunction(ClientEnableNetworkVoice)
     DefineUFunction(ClientMessage)
-    DefineUFunction(ClientTeamMessage)
 
     void ConsoleKey(FKey Key);
     void SendToConsole(const FString& Command);
@@ -43,9 +39,4 @@ private:
     static void ConsoleKeyHK(APlayerController* This, FKey Key);
     static void SendToConsoleHK(APlayerController* This, const FString& Command);
     DECLARE_FUNCTION(execClientEnableNetworkVoice);
-    static void ClientTeamMessage_ImplementationHK(APlayerController* This, APlayerState* SenderPlayerState, const FString& S, FName Type, float MsgLifeTime);
-
-    // Each controller vtable's own ClientTeamMessage_Implementation, as it was before the swap, and the engine's.
-    static inline std::vector<std::pair<void* const*, void*>> ClientTeamMessageOriginals;
-    static inline void* EngineClientTeamMessage = nullptr;
 };

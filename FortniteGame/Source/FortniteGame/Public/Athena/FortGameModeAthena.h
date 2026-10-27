@@ -24,6 +24,8 @@ public:
     // The loot tier group Battle Royale rolls in place of a container's or building's own (None: no loot).
     FName RedirectLootTierGroup(FName TierGroup);
 
+    APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
+
     static void HookVTables();
 
 private:

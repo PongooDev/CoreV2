@@ -294,6 +294,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortHomebaseSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaAircraft.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortGameModeAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerControllerAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerStateAthena.h" />
@@ -405,6 +406,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\DataTable.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameInstance.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameModeBase.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameNetworkManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameViewportClient.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameplayStatics.cpp" />

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Diagnostics.h"
 #include "Finder.h"
+#include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "GameThread.h"
 #include "Hooks.h"
@@ -95,6 +96,15 @@ namespace
             if (TicksLeft > 0)
             {
                 WatchLobbyPlayers(TicksLeft - 1);
+                return;
+            }
+
+            // The lobby player states are the front end's. Anywhere else the scan of every object finds none and held the
+            // frame up once a second, 12 to 40ms a time in a Battle Royale match (#109).
+            UWorld* World = GWorld;
+            if (!World || World->GetName().ToStdString() != L"Frontend")
+            {
+                WatchLobbyPlayers(60);
                 return;
             }
 

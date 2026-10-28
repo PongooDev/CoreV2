@@ -4,6 +4,7 @@
 #include "AI/FortAIEncounterInfo.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
+#include "Building/BuildingTrap.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -214,6 +215,27 @@ namespace
         }
     };
 
+    // The player-built pieces CountPlayerBuiltBuildingActors sorts by (the native cheat's four, 1.8 0x7D26D0).
+    class ABuildingWall : public ABuildingSMActor
+    {
+        DefineUnrealClass(ABuildingWall, FortniteGame)
+    };
+
+    class ABuildingFloor : public ABuildingSMActor
+    {
+        DefineUnrealClass(ABuildingFloor, FortniteGame)
+    };
+
+    class ABuildingRoof : public ABuildingSMActor
+    {
+        DefineUnrealClass(ABuildingRoof, FortniteGame)
+    };
+
+    class ABuildingStairs : public ABuildingSMActor
+    {
+        DefineUnrealClass(ABuildingStairs, FortniteGame)
+    };
+
     // Objects of the class in the world, not class defaults or archetypes.
     template <typename T>
     std::vector<T*> WorldObjects(const UWorld* World)
@@ -345,6 +367,7 @@ namespace
         { L"Save the World", L"DumpAllActiveMissions", L"DumpAllActiveMissions", L"the missions and their objectives (ListMissions)", ECheatMode::SaveTheWorld },
         { L"Save the World", L"SetWorldLevel", L"SetWorldLevel <level>", L"(SetWorldDaysElapsed <days>, UnlockAllZones)", ECheatMode::SaveTheWorld },
         { L"Save the World", L"ToggleIndestructibleKeep", L"ToggleIndestructibleKeep", L"the objective can't be destroyed", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"CountPlayerBuiltBuildingActors", L"CountPlayerBuiltBuildingActors", L"the structure count and limit, and the builds and traps it counts", ECheatMode::SaveTheWorld },
         { L"Other", L"CheatScript", L"CheatScript <section>", L"runs a [CheatScript.X] list of cheats", ECheatMode::Both },
         { L"Other", L"ListCheats", L"ListCheats", L"every exec function, working or not", ECheatMode::Both },
         { L"Other", nullptr, L"corecheats [filter or all]", L"this list (a filter keeps the names or categories with it)", ECheatMode::Both },
@@ -1084,6 +1107,54 @@ void UFortCheatManager::SetCapturePercentage(float NewCapturePercentage)
 #endif
 }
 
+void UFortCheatManager::CountPlayerBuiltBuildingActors()
+{
+#if WITH_SERVER_CODE
+    // The native body (1.8 0x7D26D0) counts the player-built walls, floors, roofs and stairs, but only writes them to the
+    // server's log and a local console, so the player saw nothing. This answers them, with the count the limit uses.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+    AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    int32_t Total = 0;
+    int32_t Max = -1;
+    if (!GameState || !GameState->GetPlayerStructures(Total, Max))
+    {
+        Reply(TEXT("No structure count here (Save the World zones only)"));
+        return;
+    }
+
+    int32_t Walls = 0;
+    int32_t Floors = 0;
+    int32_t Roofs = 0;
+    int32_t Stairs = 0;
+    int32_t Traps = 0;
+    int32_t Others = 0;
+    for (ABuildingActor* Building : WorldObjects<ABuildingActor>(World))
+    {
+        if (!Building->CountsTowardStructureLimit())
+        {
+            continue;
+        }
+        UObject* Object = reinterpret_cast<UObject*>(Building);
+        int32_t& Kind = Object->IsA(ABuildingTrap::StaticClass()) ? Traps
+            : ABuildingWall::StaticClass() && Object->IsA(ABuildingWall::StaticClass()) ? Walls
+            : ABuildingFloor::StaticClass() && Object->IsA(ABuildingFloor::StaticClass()) ? Floors
+            : ABuildingRoof::StaticClass() && Object->IsA(ABuildingRoof::StaticClass()) ? Roofs
+            : ABuildingStairs::StaticClass() && Object->IsA(ABuildingStairs::StaticClass()) ? Stairs
+            : Others;
+        ++Kind;
+    }
+    const int32_t Counted = Walls + Floors + Roofs + Stairs + Traps + Others;
+
+    Reply(Max < 0 ? FString::Printf(TEXT("Structures: %d (no limit here)"), Total) : FString::Printf(TEXT("Structures: %d of %d%s"), Total, Max, Total >= Max ? TEXT(", building is blocked") : TEXT("")));
+    Reply(FString::Printf(TEXT("Standing and counted: %d walls, %d floors, %d roofs, %d stairs, %d traps, %d others (%d)"), Walls, Floors, Roofs, Stairs, Traps, Others, Counted));
+    if (Counted != Total)
+    {
+        Reply(FString::Printf(TEXT("The count is %d %s what is standing"), Total > Counted ? Total - Counted : Counted - Total, Total > Counted ? TEXT("more than") : TEXT("less than")));
+    }
+#endif
+}
+
 void UFortCheatManager::ListCoreCheats(const FString& Filter)
 {
     // Core's own: what works, for this mode unless the filter is "all".
@@ -1545,6 +1616,14 @@ DEFINE_FUNCTION(UFortCheatManager::execSetCapturePercentage)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(UFortCheatManager::execCountPlayerBuiltBuildingActors)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->CountPlayerBuiltBuildingActors();
+    P_NATIVE_END;
+}
+
 void UFortCheatManager::HookNatives()
 {
     // Each of these is stripped on 1.2, 1.7.2 and 1.8 alike (Cheats.md): GiveWeapon, GiveAmmo, GiveTrap, GiveGadget(s),
@@ -1556,6 +1635,7 @@ void UFortCheatManager::HookNatives()
     // DumpAllActiveMissions, SimulateLoot, ToggleInvincibleCornerstones, SetCapturePercentage) is empty or only frees or
     // reads its argument the same way. A build without one of them (1.1 and 1.2 have no Battle Royale safe zone cheats,
     // CoreV2 #118; 1.1 no TestInfJumps or DumpAllActiveMissions) skips it instead of stopping the server.
+    // CountPlayerBuiltBuildingActors keeps its body, but it only writes to the server's log, so Core's answers the player.
     if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
     {
         return;
@@ -1599,6 +1679,7 @@ void UFortCheatManager::HookNatives()
              std::tuple{ FindStaticFunction_SimulateLoot(), &execSimulateLoot, L"UFortCheatManager::SimulateLoot" },
              std::tuple{ FindStaticFunction_ToggleInvincibleCornerstones(), &execToggleInvincibleCornerstones, L"UFortCheatManager::ToggleInvincibleCornerstones" },
              std::tuple{ FindStaticFunction_SetCapturePercentage(), &execSetCapturePercentage, L"UFortCheatManager::SetCapturePercentage" },
+             std::tuple{ FindStaticFunction_CountPlayerBuiltBuildingActors(), &execCountPlayerBuiltBuildingActors, L"UFortCheatManager::CountPlayerBuiltBuildingActors" },
          })
     {
         if (Function)

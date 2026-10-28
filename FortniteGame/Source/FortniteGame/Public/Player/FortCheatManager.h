@@ -54,6 +54,7 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(SimulateLoot)
     DefineUFunction(ToggleInvincibleCornerstones)
     DefineUFunction(SetCapturePercentage)
+    DefineUFunction(CountPlayerBuiltBuildingActors)
 
 public:
     AFortPlayerController* GetPlayerController() const;
@@ -105,6 +106,9 @@ public:
     void ToggleInvincibleCornerstones();
     // Every capture point's capture progress (0 to 1).
     void SetCapturePercentage(float NewCapturePercentage);
+    // The zone's structure count and limit, and the pieces in the world it counts (walls, floors, roofs, stairs, traps,
+    // others), so a count that doesn't match what is standing shows (#128, #130).
+    void CountPlayerBuiltBuildingActors();
 
     // Core's own command, "cheat corecheats [filter]": the cheats Core supports, with usage, as chat lines.
     void ListCoreCheats(const FString& Filter);
@@ -156,6 +160,7 @@ public:
     DECLARE_FUNCTION(execSimulateLoot);
     DECLARE_FUNCTION(execToggleInvincibleCornerstones);
     DECLARE_FUNCTION(execSetCapturePercentage);
+    DECLARE_FUNCTION(execCountPlayerBuiltBuildingActors);
 
 private:
     void Reply(const FString& Message) const;

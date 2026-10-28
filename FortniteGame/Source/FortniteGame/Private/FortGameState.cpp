@@ -24,6 +24,17 @@ UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const
     return static_cast<UFortMissionGenerator*>(LoadedClass->GetDefaultObject());
 }
 
+bool AFortGameStateZone::GetPlayerStructures(int32_t& OutTotal, int32_t& OutMax) const
+{
+    if (!Member_TotalPlayerStructures.IsAvailable() || !Member_MaxPlayerStructures.IsAvailable())
+    {
+        return false;
+    }
+    OutTotal = TotalPlayerStructures;
+    OutMax = MaxPlayerStructures;
+    return true;
+}
+
 void AFortGameStateZone::SetGameplayState(EFortGameplayState NewGameplayState)
 {
     if (Natives::AFortGameStateZone_SetGameplayStateIndex >= 0)

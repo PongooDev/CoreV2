@@ -34,8 +34,15 @@ public:
     // Set on props and trees a player's new piece replaces: the piece kills them as it is placed.
     DefineBitfieldUProperty(bDestroyOnPlayerBuildingPlacement)
     DefineUProperty(FMulticastScriptDelegate, OnDied)
+    DefineBitfieldUProperty(bPlayerPlaced)
+    DefineUProperty(bool, bFireBuiltAndDestroyedEvents)
 
     float GetHealth() const;
+    // Whether the zone's structure count includes this piece: one alive, player built (IsPlayerBuilt, 1.8 0x47F850: an
+    // OwnerPersistentID or bPlayerPlaced) and with bFireBuiltAndDestroyedEvents, which every ABuildingActor has by default
+    // (1.8 0x458440), traps included. InitializeBuildingActor counts such a piece (1.8 0x47BED0) and OnDeathServer takes it
+    // off (1.8 0x47AA10).
+    bool CountsTowardStructureLimit() const;
     float GetMaxHealth() const;
     FVector GetCentroid() const;
 };

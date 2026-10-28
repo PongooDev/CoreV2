@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Abilities/FortPlayerAttrSet.h"
 #include "Containers/Array.h"
 #include "GameFramework/Pawn.h"
 #include "Misc/Guid.h"
@@ -24,6 +25,10 @@ public:
     DefineUProperty(TArray<AFortWeapon*>, CurrentWeaponList)
     DefineUProperty(FMulticastScriptDelegate, OnDied)
     DefineUProperty(FName, SpottedEvent)
+    // Down But Not Out: knocked down until a teammate revives the pawn or it bleeds out.
+    DefineUProperty(bool, bIsDBNO)
+    DefineUProperty(bool, bPlayedDying)
+    DefineUProperty(UFortHealthSet*, HealthSet)
 
     bool IsDead() const;
     AFortWeapon* EquipWeaponDefinition(const UFortWeaponItemDefinition* WeaponData, const FGuid& ItemEntryGuid);
@@ -36,4 +41,5 @@ public:
     float GetMaxShield() const;
 
     static ptrdiff_t CurrentWeaponListOffset();
+    static ptrdiff_t IsDBNOOffset();
 };

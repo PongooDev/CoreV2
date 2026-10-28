@@ -14,3 +14,11 @@ class UFortPlayerAttrSet : public UAttributeSet
 public:
     DefineUStructProperty(FFortGameplayAttributeData, HarvestingTool)
 };
+
+class UFortHealthSet : public UAttributeSet
+{
+    DefineUnrealClass(UFortHealthSet, FortniteGame)
+
+public:
+    DefineUStructProperty(FFortGameplayAttributeData, Health)
+};

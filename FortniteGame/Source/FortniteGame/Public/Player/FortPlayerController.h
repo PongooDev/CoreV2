@@ -51,6 +51,8 @@ public:
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
+    // The player's match stats (UStatManager: SelfRevives, RevivesFromTeammate, TeammateRevives, ...).
+    DefineUProperty(UObject*, StatManager)
     DefineBitfieldUProperty(bCraftFree)
     DefineBitfieldUProperty(bInfiniteDurability)
     DefineBitfieldUProperty(bCheatGhost)
@@ -134,6 +136,7 @@ public:
 
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
     static ptrdiff_t CriticalMatchBonusOffset();
+    static ptrdiff_t QuickBarsOffset();
     static bool ResolveDurability();
 
     static void Hook();

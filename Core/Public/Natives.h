@@ -409,6 +409,20 @@ namespace Natives
     inline int32_t UCharacterMovementComponent_ServerMove_ImplementationIndex = -1;
     inline int32_t AFortPlayerPawn_EquipLastWeaponIndex = -1;
     inline int32_t AFortPawn_EquipDefaultWeaponIndex = -1;
+    // The game code a DBNO revive runs (1.8 AFortPlayerPawn::ServerReviveFromDBNO_Implementation, 0x7FF160), for the
+    // builds that strip that implementation (1.8.1): Finder::ResolveDBNOReviveLive.
+    inline int32_t AFortPlayerPawn_CanReviveFromDBNOIndex = -1;
+    inline int32_t AFortPawn_StopNativeActionIndex = -1;
+    inline void (*UAbilitySystemComponent_CancelAbilities)(UAbilitySystemComponent* This, const FGameplayTagContainer* WithTags, const FGameplayTagContainer* WithoutTags, UGameplayAbility* Ignore) = nullptr;
+    inline void (*AFortPlayerPawn_UpdateDBNOInteractCollision)(AFortPawn* This) = nullptr;
+    inline ptrdiff_t AFortPlayerPawn_DBNOTimerHandle = -1;
+    inline void (*AFortPawn_ForgetPawnForAllAI)(AFortPawn* This) = nullptr;
+    inline int32_t AFortPlayerControllerZone_OnPawnRevivedIndex = -1;
+    inline int32_t AFortPlayerControllerZone_ApplyResurrectDurabilityPenaltyIndex = -1;
+    inline void (*AFortPlayerController_RefocusQuickBars)(AFortPlayerController* This) = nullptr;
+    inline void* (*UStatManager_FindStat)(UObject* This, FName StatName, uint8_t Type) = nullptr;
+    inline void (*FStat_Increment)(void* Stat, int32_t Amount, int32_t Flags) = nullptr;
+    inline int32_t AFortPlayerControllerAthena_ServerDBNOReviveInterruptedIndex = -1;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
     inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;

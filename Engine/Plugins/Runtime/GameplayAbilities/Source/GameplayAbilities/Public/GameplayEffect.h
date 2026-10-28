@@ -20,6 +20,7 @@ struct FCurveTableRowHandle
 {
     DefineUnrealStruct(FCurveTableRowHandle, Engine)
     DefineUProperty(UObject*, CurveTable)
+    DefineUProperty(FName, RowName)
 };
 
 // A float, scaled by the curve's row at the effect's level when it has one.

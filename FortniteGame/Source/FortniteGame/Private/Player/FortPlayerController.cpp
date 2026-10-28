@@ -1501,6 +1501,11 @@ ptrdiff_t AFortPlayerController::CriticalMatchBonusOffset()
     return Member_bShouldReceiveCriticalMatchBonus.GetOffsetChecked();
 }
 
+ptrdiff_t AFortPlayerController::QuickBarsOffset()
+{
+    return Member_QuickBars.GetOffsetChecked();
+}
+
 bool AFortPlayerController::ResolveDurability()
 {
     return Finder::ResolveDurabilityLive(StaticFunction_ServerModDurability(), StaticClass()->GetDefaultObject(false), FFortItemEntry::DurabilityOffset(),

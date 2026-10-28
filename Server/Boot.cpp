@@ -48,6 +48,7 @@
 #include "Items/FortSchematicItem.h"
 #include "Items/FortQuickBars.h"
 #include "Pawns/FortAIPawn.h"
+#include "Pawns/FortPlayerPawn.h"
 #include "Quests/FortQuestManager.h"
 #include "Player/FortCheatManager.h"
 #include "Player/FortPlayerController.h"
@@ -176,6 +177,7 @@ void Boot::Initialize()
         UFortQueryGenerator_Enemies::HookVTables();
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
         AFortAIPawn::HookVTables();
+        AFortPlayerPawn::HookVTables();
         ACharacter::HookCheatMovement();
         UFortCheatManager::HookNatives();
         Finder::ResolveNavigationSystemLive();

@@ -104,3 +104,8 @@ ptrdiff_t AFortPawn::CurrentWeaponListOffset()
 {
     return Member_CurrentWeaponList.GetOffsetChecked();
 }
+
+ptrdiff_t AFortPawn::IsDBNOOffset()
+{
+    return Member_bIsDBNO.GetOffsetChecked();
+}

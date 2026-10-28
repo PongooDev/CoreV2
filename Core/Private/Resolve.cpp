@@ -5817,6 +5817,238 @@ bool Finder::ResolveAthenaHUDPawnBinding()
     return true;
 }
 
+bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOffset)
+{
+    static bool bSearched = false;
+    static bool bResolved = false;
+    if (bSearched)
+    {
+        return bResolved;
+    }
+    bSearched = true;
+
+    // The game code 1.8's AFortPlayerPawn::ServerReviveFromDBNO_Implementation (0x7FF160) runs, which 1.8.1 strips with
+    // the implementation (its slot holds the shared empty function). Each piece is still called from code 1.8.1 keeps.
+    void** PawnVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerPawn");
+    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerZone");
+    void** AthenaControllerVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerAthena");
+    void** AbilitySystemVTable = CdoVTable(L"/Script/GameplayAbilities.AbilitySystemComponent");
+
+    // The native an exec thunk ends in, by a call or a tail jump, through a jump thunk (1.8.1's execReviveFromDBNO calls
+    // 0x809950, "jmp 0xA514A0").
+    const auto ExecNative = [](const wchar_t* FunctionPath)
+    {
+        UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
+        const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+        const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+        uintptr_t Native = 0;
+        for (uintptr_t Site = Exec; ExecEnd && Site + 5 <= ExecEnd; ++Site)
+        {
+            if ((Byte(Site) == 0xE8 || Byte(Site) == 0xE9) && IsInText(Finder::RelativeTarget(Site, 1, 5)))
+            {
+                Native = Finder::RelativeTarget(Site, 1, 5);
+            }
+        }
+        return Native && Byte(Native) == 0xE9 ? Finder::RelativeTarget(Native, 1, 5) : Native;
+    };
+
+    // CanReviveFromDBNO (slot 0x199): the interaction that revives a teammate (1.8 0x88DFF0, 1.8.1 0x895ED0) asks it just
+    // before it calls ServerReviveFromDBNO, through the call stub execReviveFromDBNO ends in (1.8 0xA46330).
+    const uintptr_t ServerReviveCall = ExecNative(L"/Script/FortniteGame.FortPlayerPawn:ReviveFromDBNO");
+    int32_t CanReviveIndex = -1;
+    int32_t CanReviveSlots = 0;
+    for (const uintptr_t Site : ServerReviveCall ? Finder::CallsTo(ServerReviveCall, false) : std::vector<uintptr_t>())
+    {
+        const int32_t Slot = VirtualSlot(FindVirtualCall(Site - 0x20, Site));
+        if (Slot >= 0 && Slot != CanReviveIndex)
+        {
+            CanReviveIndex = Slot;
+            ++CanReviveSlots;
+        }
+    }
+    if (CanReviveSlots != 1 || !VTableEntry(PawnVTable, CanReviveIndex))
+    {
+        CanReviveIndex = -1;
+    }
+
+    // StopNativeAction (slot 0x154): the pawn's slot jumps to UFortAbilitySystemComponent's (by its log string, 1.8
+    // 0x2ACEF0) with the pawn's AbilitySystemComponent.
+    const uintptr_t AbilitySystemStop = FunctionOf(L"Can't stop native action %s, not active!");
+    const int32_t StopIndex = AbilitySystemStop ? FirstVTableIndexWhere(PawnVTable, [AbilitySystemStop](uintptr_t Entry)
+    {
+        for (uintptr_t Site = Entry; Site < Entry + 0x10; ++Site)
+        {
+            if ((Byte(Site) == 0x0F && Byte(Site + 1) == 0x85 && Finder::RelativeTarget(Site, 2, 6) == AbilitySystemStop) || (Byte(Site) == 0xE9 && Finder::RelativeTarget(Site, 1, 5) == AbilitySystemStop))
+            {
+                return true;
+            }
+        }
+        return false;
+    }) : -1;
+
+    // CancelAbilities: StopNativeAction's first virtual call is ApplyAbilityBlockAndCancelTags (slot 0xAD), and
+    // UAbilitySystemComponent's (1.8 0x3E21000) ends with CancelAbilities(&CancelTags, nullptr, RequestingAbility).
+    const uintptr_t StopEnd = AbilitySystemStop ? Finder::FunctionEnd(AbilitySystemStop) : 0;
+    const uintptr_t BlockAndCancel = StopEnd ? VTableEntry(AbilitySystemVTable, VirtualSlot(FindVirtualCall(AbilitySystemStop, StopEnd))) : 0;
+    const uintptr_t BlockAndCancelEnd = BlockAndCancel ? Finder::FunctionEnd(BlockAndCancel) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> BlockAndCancelCalls = BlockAndCancelEnd ? Finder::DirectCalls(BlockAndCancel, BlockAndCancelEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    const uintptr_t CancelAbilities = BlockAndCancelCalls.empty() ? 0 : BlockAndCancelCalls.back().second;
+
+    // UpdateDBNOInteractCollision (1.8 0x80CC80): the only reader of "DBNOInteractCollision", the box teammates revive
+    // through, made while DBNO and destroyed otherwise.
+    const std::vector<uintptr_t> CollisionRefs = Finder::StringRefs(L"DBNOInteractCollision");
+    const uintptr_t UpdateCollision = CollisionRefs.size() == 1 ? Finder::FunctionStart(CollisionRefs.front()) : 0;
+
+    // The DBNO timer, which kills the pawn when it runs out: StartDBNO (slot 0x18B, 1.8 0x805D90) sets bIsDBNO, calls
+    // UpdateDBNOInteractCollision, then sets it with "lea rdx, [pawn + handle]" (1.8 +0x1660, 1.8.1 +0x1670).
+    ptrdiff_t TimerOffset = -1;
+    if (UpdateCollision && IsDBNOOffset > 0)
+    {
+        FirstVTableIndexWhere(PawnVTable, [&](uintptr_t Entry)
+        {
+            const uintptr_t End = Finder::FunctionEnd(Entry);
+            for (uintptr_t Site = Entry; End && Site + 7 <= End; ++Site)
+            {
+                const uint8_t SetModRm = Byte(Site + 1);
+                if (Byte(Site) != 0xC6 || (SetModRm & 0xF8) != 0x80 || (SetModRm & 0x07) == 0x04 || *reinterpret_cast<const int32_t*>(Site + 2) != IsDBNOOffset || Byte(Site + 6) != 1)
+                {
+                    continue;
+                }
+                const uintptr_t CallsEnd = std::min(End, Site + 0x40);
+                for (uintptr_t Call = FindRawCall(Site, CallsEnd); Call; Call = FindRawCall(Call + 1, CallsEnd))
+                {
+                    if (Finder::RelativeTarget(Call, 1, 5) != UpdateCollision)
+                    {
+                        continue;
+                    }
+                    const uintptr_t Lea = FindInstruction(Call, std::min(End, Call + 0x200), { 0x48, 0x8D, 0x90 | (SetModRm & 0x07) });
+                    if (Lea)
+                    {
+                        TimerOffset = *reinterpret_cast<const int32_t*>(Lea + 3);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        });
+    }
+
+    // OnPawnRevived (AFortPlayerControllerZone slot 0x2FF, 1.8 0x886050): counts the revive as SelfRevives or
+    // RevivesFromTeammate in the controller's StatManager, finding the stat (0x8A16E0) and adding 1 to it (0x8A9840)
+    // right after the name. The other reader of these names registers the stats.
+    int32_t OnPawnRevivedIndex = -1;
+    uintptr_t FindStat = 0;
+    uintptr_t IncrementStat = 0;
+    for (const uintptr_t Ref : Finder::StringRefs(L"RevivesFromTeammate"))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const int32_t Index = FirstVTableIndex(ZoneVTable, Function);
+        const uintptr_t End = Index >= 0 ? Finder::FunctionEnd(Function) : 0;
+        if (!End)
+        {
+            continue;
+        }
+        OnPawnRevivedIndex = Index;
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Ref, End);
+        if (Calls.size() == 3)
+        {
+            FindStat = Calls[1].second;
+            IncrementStat = Calls[2].second;
+        }
+    }
+
+    // The resurrect durability penalty, the slot after OnPawnRevived (1.8 0x865BE0): it takes the death penalty's amount
+    // off the quickbar weapons, reading QuickBars first.
+    const auto ReadsQuickBars = [QuickBarsOffset](uintptr_t Function, uint8_t Opcode, uint8_t ModRmMask, uint8_t ModRm)
+    {
+        for (uintptr_t Site = Function; Function && QuickBarsOffset > 0 && Site < Function + 0x20; ++Site)
+        {
+            if (Byte(Site) == 0x48 && Byte(Site + 1) == Opcode && (Byte(Site + 2) & ModRmMask) == ModRm && *reinterpret_cast<const int32_t*>(Site + 3) == QuickBarsOffset)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const uintptr_t DurabilityPenalty = OnPawnRevivedIndex >= 0 ? VTableEntry(ZoneVTable, OnPawnRevivedIndex + 1) : 0;
+    const int32_t DurabilityPenaltyIndex = DurabilityPenalty && !Finder::IsStubFunction(DurabilityPenalty) && ReadsQuickBars(DurabilityPenalty, 0x8B, 0xC7, 0x81) ? OnPawnRevivedIndex + 1 : -1;
+
+    // RefocusQuickBars (1.8 0x844170): the call of AFortPlayerControllerZone::ClientOnPawnDied_Implementation (0x86A660)
+    // that starts with "cmp qword ptr [rcx + QuickBars], 0", the quickbar focus a player gets back.
+    UFunction* ClientOnPawnDied = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerControllerZone:ClientOnPawnDied");
+    const uintptr_t PawnDied = ClientOnPawnDied ? VTableEntry(ZoneVTable, Finder::ImplementationIndex(ClientOnPawnDied)) : 0;
+    const uintptr_t PawnDiedEnd = PawnDied ? Finder::FunctionEnd(PawnDied) : 0;
+    uintptr_t RefocusQuickBars = 0;
+    for (const auto& [Site, Target] : PawnDiedEnd ? Finder::DirectCalls(PawnDied, PawnDiedEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (ReadsQuickBars(Target, 0x83, 0xFF, 0xB9))
+        {
+            RefocusQuickBars = Target;
+            break;
+        }
+    }
+
+    // ForgetPawnForAllAI (1.8 0x2FDC20): AFortAIPawn's ReviveFromDBNO (0x7B5620) calls it right before it gets the
+    // gameplay tags, adds the DBNO one to a container and cancels those abilities: the call before those two that it
+    // makes once.
+    const uintptr_t AIRevive = ExecNative(L"/Script/FortniteGame.FortAIPawn:ReviveFromDBNO");
+    const uintptr_t AIReviveEnd = AIRevive ? Finder::FunctionEnd(AIRevive) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> AIReviveCalls = AIReviveEnd ? Finder::DirectCalls(AIRevive, AIReviveEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    uintptr_t ForgetPawn = 0;
+    for (size_t Cancel = 2; CancelAbilities && Cancel < AIReviveCalls.size(); ++Cancel)
+    {
+        if (AIReviveCalls[Cancel].second != CancelAbilities)
+        {
+            continue;
+        }
+        for (size_t Index = Cancel - 2; Index-- > 0;)
+        {
+            const uintptr_t Target = AIReviveCalls[Index].second;
+            if (std::count_if(AIReviveCalls.begin(), AIReviveCalls.end(), [Target](const std::pair<uintptr_t, uintptr_t>& Call) { return Call.second == Target; }) == 1)
+            {
+                ForgetPawn = Target;
+                break;
+            }
+        }
+        break;
+    }
+
+    // AFortPlayerControllerAthena::ServerDBNOReviveInterrupted_Implementation (1.8 0x44AC90), which 1.8.1 keeps: once
+    // the pawn it's given has no reviver left, it ends that pawn's "being revived" tag and cue, as the Athena revive
+    // does after getting up.
+    UFunction* ReviveInterrupted = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerControllerAthena:ServerDBNOReviveInterrupted");
+    const int32_t InterruptedIndex = ReviveInterrupted ? Finder::ImplementationIndex(ReviveInterrupted) : -1;
+    const uintptr_t Interrupted = VTableEntry(AthenaControllerVTable, InterruptedIndex);
+
+    if (CanReviveIndex < 0 || StopIndex < 0 || !CancelAbilities || !UpdateCollision || TimerOffset <= 0 || OnPawnRevivedIndex < 0)
+    {
+        Log::Error(L"Finder: DBNO revive not found (CanReviveFromDBNO slot {} from {} sites, StopNativeAction slot {}, CancelAbilities 0x{:X}, UpdateDBNOInteractCollision 0x{:X}, DBNO timer +0x{:X}, OnPawnRevived slot {})",
+            CanReviveIndex, CanReviveSlots, StopIndex, CancelAbilities ? CancelAbilities - Finder::ImageBase() : 0, UpdateCollision ? UpdateCollision - Finder::ImageBase() : 0, TimerOffset, OnPawnRevivedIndex);
+        return false;
+    }
+
+    Natives::AFortPlayerPawn_CanReviveFromDBNOIndex = CanReviveIndex;
+    Natives::AFortPawn_StopNativeActionIndex = StopIndex;
+    Natives::UAbilitySystemComponent_CancelAbilities = reinterpret_cast<decltype(Natives::UAbilitySystemComponent_CancelAbilities)>(CancelAbilities);
+    Natives::AFortPlayerPawn_UpdateDBNOInteractCollision = reinterpret_cast<decltype(Natives::AFortPlayerPawn_UpdateDBNOInteractCollision)>(UpdateCollision);
+    Natives::AFortPlayerPawn_DBNOTimerHandle = TimerOffset;
+    Natives::AFortPlayerControllerZone_OnPawnRevivedIndex = OnPawnRevivedIndex;
+    Natives::AFortPlayerControllerZone_ApplyResurrectDurabilityPenaltyIndex = DurabilityPenaltyIndex;
+    Natives::AFortPlayerController_RefocusQuickBars = reinterpret_cast<decltype(Natives::AFortPlayerController_RefocusQuickBars)>(RefocusQuickBars);
+    Natives::AFortPawn_ForgetPawnForAllAI = reinterpret_cast<decltype(Natives::AFortPawn_ForgetPawnForAllAI)>(ForgetPawn);
+    Natives::UStatManager_FindStat = reinterpret_cast<decltype(Natives::UStatManager_FindStat)>(FindStat);
+    Natives::FStat_Increment = reinterpret_cast<decltype(Natives::FStat_Increment)>(IncrementStat);
+    Natives::AFortPlayerControllerAthena_ServerDBNOReviveInterruptedIndex = Interrupted && !Finder::IsStubFunction(Interrupted) ? InterruptedIndex : -1;
+    bResolved = true;
+
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+    Log::Info(L"Finder: DBNO revive: CanReviveFromDBNO slot 0x{:X}, StopNativeAction slot 0x{:X}, CancelAbilities 0x{:X}, UpdateDBNOInteractCollision 0x{:X}, DBNO timer +0x{:X}, OnPawnRevived slot 0x{:X}",
+        CanReviveIndex, StopIndex, Rva(CancelAbilities), Rva(UpdateCollision), TimerOffset, OnPawnRevivedIndex);
+    Log::Info(L"Finder: DBNO revive: durability penalty slot {}, RefocusQuickBars 0x{:X}, ForgetPawnForAllAI 0x{:X}, stat find 0x{:X} and add 0x{:X}, ServerDBNOReviveInterrupted slot {}",
+        DurabilityPenaltyIndex, Rva(RefocusQuickBars), Rva(ForgetPawn), Rva(FindStat), Rva(IncrementStat), Natives::AFortPlayerControllerAthena_ServerDBNOReviveInterruptedIndex);
+    return true;
+}
+
 bool Finder::ResolveDecoSpawnedLive()
 {
     static bool bSearched = false;

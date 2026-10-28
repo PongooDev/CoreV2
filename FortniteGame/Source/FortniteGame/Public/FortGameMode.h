@@ -3,6 +3,7 @@
 #include "GameFramework/GameMode.h"
 #include "GameplayTagContainer.h"
 #include "Items/FortQuickBars.h"
+#include "UObject/AssetPtr.h"
 
 class AActor;
 class AController;
@@ -15,6 +16,16 @@ class FScriptArray;
 struct FAccountIdAndScore;
 template <typename T>
 class TArray;
+
+// What dying or being downed costs a player (Save the World: DBNODeathPenalty), the game mode's DeathPenaltyData.
+class UFortGameDeathPenalty : public UObject
+{
+    DefineUnrealClass(UFortGameDeathPenalty, FortniteGame)
+
+public:
+    DefineUProperty(float, SelfResurrectDurabilityPenalty)
+    DefineUProperty(float, TeammateResurrectDurabilityPenalty)
+};
 
 class AFortGameMode : public AGameMode
 {
@@ -31,6 +42,7 @@ public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
     // The match's playlist (Battle Royale: 2 solo, 10 duo, 9 squad), what the game mode records its winners with.
     DefineUProperty(int32_t, CurrentPlaylistId)
+    DefineUProperty(TAssetPtr<UFortGameDeathPenalty>, DeathPenaltyData)
 
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);

@@ -77,6 +77,28 @@ namespace Reflection
             return Slot ? T(std::move(*Slot)) : T();
         }
 
+        // A parameter's storage, whatever its size: for struct values Core only passes between calls (refcounted
+        // handles such as FGameplayEffectSpecHandle), which CopyStruct copies through their script struct.
+        void* GetAddress(const wchar_t* Name)
+        {
+            UProperty* Property = FindProperty(Name);
+            return Property ? Buffer.data() + Property->GetOffset_ForInternal() : nullptr;
+        }
+
+        // Copies Source into a struct parameter with the struct's own copy (the buffer must be initialized).
+        bool CopyStruct(const wchar_t* Name, const void* Source)
+        {
+            UProperty* Property = FindProperty(Name);
+            if (!Property || !bInitialized || !Source || !Property->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty))
+            {
+                Log::Error(L"Reflection: parameter {} of {} is not an initialized struct", Name, Function ? Function->GetName().ToStdString() : std::wstring(L"(none)"));
+                return false;
+            }
+            UScriptStruct* Struct = static_cast<UStructProperty*>(Property)->Struct;
+            Struct->CopyScriptStruct(Buffer.data() + Property->GetOffset_ForInternal(), Source);
+            return true;
+        }
+
         bool Relocate(const wchar_t* Name, void* Destination, size_t Size)
         {
             UProperty* Property = Function ? Function->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
@@ -100,6 +122,16 @@ namespace Reflection
         }
 
     private:
+        UProperty* FindProperty(const wchar_t* Name)
+        {
+            UProperty* Property = Function ? Function->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+            if (!Property)
+            {
+                Log::Error(L"Reflection: parameter {} of {} was not found", Name, Function ? Function->GetName().ToStdString() : std::wstring(L"(none)"));
+            }
+            return Property;
+        }
+
         template <typename T>
         T* Find(const wchar_t* Name)
         {

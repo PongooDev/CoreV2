@@ -279,8 +279,20 @@ void AFortPlayerController::Possess(APawn* InPawn)
             ApplyHomebaseGadgets();
         }
 
+        // A Battle Royale player spawns holding the harvesting tool (slot 0) when the building bar has the focus. Both
+        // bars start focused on slot 0, and adding an item to a bar's focused slot focuses that bar
+        // (ServerAddItemInternal_Implementation, 1.8 0x693DF0), which unfocuses the other one (-1). 1.7.2's first
+        // starting item is the pickaxe; 1.8's are the building pieces, its pickaxe coming later from the loadout, so the
+        // wall was held (#106) and the activation of the primary bar's focused slot (-1) did nothing. A player who died
+        // or boarded the aircraft in build mode spawns with the pickaxe too.
         FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
-        Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), PrimaryQuickBar.CurrentFocusedSlot, 0.0f, false);
+        int32_t ActivatedSlot = PrimaryQuickBar.CurrentFocusedSlot;
+        if (AthenaController && ActivatedSlot < 0)
+        {
+            UE_LOG(LogFort, Log, TEXT("Possess: %s had the building bar focused, it holds the harvesting tool"), *GetNameSafe(this));
+            ActivatedSlot = 0;
+        }
+        Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), ActivatedSlot, 0.0f, false);
 
         // A pawn leaving the aircraft is already skydiving here (Battle Royale's Possess, 1.7.2 0x441AD0, exits the
         // aircraft). The activation above only asks the client to equip the slot's item (ClientExecuteInventoryItem,

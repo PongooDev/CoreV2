@@ -2,6 +2,7 @@
 #include "FortWorldManager.h"
 #include "Missions/FortMissionManager.h"
 #include "BlueprintGameplayTagLibrary.h"
+#include "Building/BuildingActor.h"
 #include "Building/BuildingSMActor.h"
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
@@ -903,6 +904,14 @@ void AFortWorldManager::HookCallSites()
     }
 
     HookWorldLoot();
+
+    // The offsets resolve in their own statements: the arguments are evaluated right to left.
+    const ptrdiff_t DistanceRangeMinOffset = Member_ExplorationActorDistanceRangeMin.GetOffsetChecked();
+    const ptrdiff_t DistanceRangeMaxOffset = Member_ExplorationActorDistanceRangeMax.GetOffsetChecked();
+    if (uint8_t* Call = Finder::ExplorationActorFinderCall(DistanceRangeMinOffset, DistanceRangeMaxOffset))
+    {
+        Hooks::RedirectCall(L"AFortWorldManager::SpawnExplorationActors placement finder", Call, reinterpret_cast<void*>(&SpawnExplorationActorsCall));
+    }
 }
 
 void AFortWorldManager::HookWorldLoot()
@@ -1061,4 +1070,124 @@ bool AFortWorldManager::SelectConditionalFoundations(const FScriptArray& Request
 #else
     return false;
 #endif
+}
+
+// AFortWorldManager::SpawnExplorationActors (world initialization when the game mode's bSpawnExplorationActorsAtWorldInitialization
+// is set, an outpost's storm shield defense, the RespawnOutlanderFragments mission event) asks for NumExplorationActors (16) of
+// ExplorationActorClass, the Outlander fragment container B_Fragment_Container, at placement actors with
+// ExplorationActorRequiredTags (PlacementActor.EnemySpawner, the tiles' DormantSpawnerPlacementActors) with a 6000 to 60000 uu
+// distance range, and keeps what comes back in SpawnedExplorationActors. The client build strips the finder to an empty array, so no fragment machine ever spawned.
+// The finder's rules are a guess: random matching placement actors not used yet, each new one within the distance range of
+// the nearest spot already chosen (the one farthest from the others when none is), spawned at the placement actor.
+TArray<AActor*>* AFortWorldManager::SpawnExplorationActorsCall(TArray<AActor*>* Result, UWorld* World, const FFortPlacementActorFinderInfo* FinderInfo, bool* bOutSucceeded, void* RandomStream)
+{
+    new (Result) TArray<AActor*>();
+#if WITH_SERVER_CODE
+    TStructArray<FFortPlacementActorFinderEntry>* Entries = FinderInfo ? &static_cast<TStructArray<FFortPlacementActorFinderEntry>&>(FinderInfo->BuildingData) : nullptr;
+    if (!World || !Entries)
+    {
+        return Result;
+    }
+
+    const float MinDistance = FinderInfo->DistanceRangeMin;
+    const float MaxDistance = FinderInfo->DistanceRangeMax;
+    std::vector<ABuildingActor*> Used;
+    std::vector<FVector> Chosen;
+    int32_t NumCandidates = 0;
+    UClass* SpawnedClass = nullptr;
+    for (int32_t Index = 0; Index < Entries->Num(); ++Index)
+    {
+        FFortPlacementActorFinderEntry& Entry = (*Entries)[Index];
+        UClass* BuildingToSpawn = Entry.BuildingToSpawn.LoadSynchronous();
+        if (!BuildingToSpawn)
+        {
+            continue;
+        }
+
+        const TArray<UClass*>& ClassesToFind = Entry.BuildingClassesToFind;
+        const FGameplayTagContainer& RequiredTags = Entry.RequiredTags;
+        const FGameplayTagContainer& PreferredTags = Entry.PreferredTags;
+        const FGameplayTagContainer& ExclusionTags = Entry.ExlusionTags;
+        const auto HasTag = [](ABuildingActor* Building, const FGameplayTag& Tag)
+        {
+            const FGameplayTagContainer& StaticTags = Building->StaticGameplayTags;
+            const FGameplayTagContainer& DefaultTags = Building->DefaultTags;
+            return StaticTags.HasTag(Tag) || DefaultTags.HasTag(Tag);
+        };
+
+        std::vector<ABuildingActor*> Candidates;
+        std::vector<ABuildingActor*> Preferred;
+        for (TObjectIterator<ABuildingActor> It; It; ++It)
+        {
+            ABuildingActor* Building = *It;
+            const bool bClass = ClassesToFind.Num() > 0 ? std::any_of(ClassesToFind.begin(), ClassesToFind.end(), [Building](UClass* Class) { return Class && Building->IsA(Class); }) : Building->IsA(AFortPlacementActor::StaticClass());
+            if (!bClass || Building->GetWorld() != World || Building->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) || std::find(Used.begin(), Used.end(), Building) != Used.end()
+                || !std::all_of(RequiredTags.GameplayTags.begin(), RequiredTags.GameplayTags.end(), [&](const FGameplayTag& Tag) { return HasTag(Building, Tag); })
+                || std::any_of(ExclusionTags.GameplayTags.begin(), ExclusionTags.GameplayTags.end(), [&](const FGameplayTag& Tag) { return HasTag(Building, Tag); }))
+            {
+                continue;
+            }
+            Candidates.push_back(Building);
+            if (PreferredTags.Num() > 0 && std::all_of(PreferredTags.GameplayTags.begin(), PreferredTags.GameplayTags.end(), [&](const FGameplayTag& Tag) { return HasTag(Building, Tag); }))
+            {
+                Preferred.push_back(Building);
+            }
+        }
+        NumCandidates = std::max(NumCandidates, static_cast<int32_t>(Candidates.size()));
+        std::vector<ABuildingActor*>& Pool = Preferred.empty() ? Candidates : Preferred;
+        if (Pool.empty())
+        {
+            continue;
+        }
+
+        const auto NearestChosen = [&Chosen](ABuildingActor* Building)
+        {
+            const FVector Location = Building->GetTransform().GetLocation();
+            float Nearest = -1.0f;
+            for (const FVector& Other : Chosen)
+            {
+                const float Distance = FMath::Sqrt(FVector::DistSquared(Location, Other));
+                Nearest = Nearest < 0.0f || Distance < Nearest ? Distance : Nearest;
+            }
+            return Nearest;
+        };
+        std::vector<ABuildingActor*> InRange;
+        for (ABuildingActor* Building : Pool)
+        {
+            const float Nearest = NearestChosen(Building);
+            if (Nearest < 0.0f || (Nearest >= MinDistance && (MaxDistance <= 0.0f || Nearest <= MaxDistance)))
+            {
+                InRange.push_back(Building);
+            }
+        }
+
+        ABuildingActor* Spot = nullptr;
+        if (!InRange.empty())
+        {
+            const int32_t NumInRange = static_cast<int32_t>(InRange.size());
+            Spot = InRange[std::min(static_cast<int32_t>(RandomStreamFraction(RandomStream) * NumInRange), NumInRange - 1)];
+        }
+        else
+        {
+            Spot = *std::max_element(Pool.begin(), Pool.end(), [&](ABuildingActor* A, ABuildingActor* B) { return NearestChosen(A) < NearestChosen(B); });
+        }
+
+        const FTransform SpawnTransform = Spot->GetTransform();
+        AActor* Spawned = UGameplayStatics::BeginDeferredActorSpawnFromClass(Spot, BuildingToSpawn, SpawnTransform, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+        Spawned = Spawned ? UGameplayStatics::FinishSpawningActor(Spawned, SpawnTransform) : nullptr;
+        if (Spawned)
+        {
+            Result->Add(Spawned);
+            Used.push_back(Spot);
+            Chosen.push_back(SpawnTransform.GetLocation());
+            SpawnedClass = BuildingToSpawn;        }
+    }
+
+    if (bOutSucceeded)
+    {
+        *bOutSucceeded = Result->Num() == Entries->Num();
+    }
+    UE_LOG(LogFortWorld, Log, TEXT("Exploration actors: spawned %d of %d %s (%d placement actors to choose from)"), Result->Num(), Entries->Num(), SpawnedClass ? *SpawnedClass->GetName() : TEXT("None"), NumCandidates);
+#endif
+    return Result;
 }

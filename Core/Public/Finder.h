@@ -156,6 +156,7 @@ namespace Finder
     bool ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset);
     bool ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, UObject* PlayerControllerDefault, ptrdiff_t WorldInventoryOffset);
     uint8_t* QuickBarChangedWorldManagerCall();
+    uint8_t* ExplorationActorFinderCall(ptrdiff_t DistanceRangeMinOffset, ptrdiff_t DistanceRangeMaxOffset);
     uint8_t* AbilityEndCleanupCall(ptrdiff_t AbilityGrantedWeaponItemOffset);
     bool ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FConditionalFoundationQuotaSites& OutSites);
     bool ResolvePlayerSpawnQueriesLive(FPlayerSpawnQuerySites& OutSites);

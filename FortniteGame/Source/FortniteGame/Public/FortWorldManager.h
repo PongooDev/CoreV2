@@ -6,12 +6,14 @@
 #include "Items/FortLootPackage.h"
 #include "Math/Transform.h"
 #include "Missions/FortMissionManager.h"
+#include "UObject/AssetPtr.h"
 
 class AFortPlayerController;
 class FScriptArray;
 class UFortMissionGenerator;
 class UFortMissionInfo;
 class UFortWorldRecord;
+class UWorld;
 class UWorldTileManager;
 struct FFortBuildingRandomList;
 struct FFortPlayerSpawnPadPlacementData;
@@ -42,6 +44,28 @@ public:
 
     FFortLootQuotaData& GetLootQuota(uint8_t QuotaLevel) const;
     int32_t& GetLootDrops(uint8_t QuotaLevel) const;
+};
+
+struct FFortPlacementActorFinderEntry
+{
+    DefineUnrealStruct(FFortPlacementActorFinderEntry, FortniteGame)
+
+public:
+    DefineUProperty(TAssetSubclassOf<AActor>, BuildingToSpawn)
+    DefineUProperty(TArray<UClass*>, BuildingClassesToFind)
+    DefineUProperty(FGameplayTagContainer, RequiredTags)
+    DefineUProperty(FGameplayTagContainer, PreferredTags)
+    DefineUProperty(FGameplayTagContainer, ExlusionTags)
+};
+
+struct FFortPlacementActorFinderInfo
+{
+    DefineUnrealStruct(FFortPlacementActorFinderInfo, FortniteGame)
+
+public:
+    DefineUProperty(float, DistanceRangeMin)
+    DefineUProperty(float, DistanceRangeMax)
+    DefineUStructArrayProperty(FFortPlacementActorFinderEntry, BuildingData)
 };
 
 class EFortWorldManagerState
@@ -78,6 +102,8 @@ public:
     DefineUProperty(FVector, FriendlyPlayerSpawnExtent)
     DefineUProperty(FGameplayTagContainer, OverrideInitialPlayerSpawnTags)
     DefineUProperty(FGameplayTagContainer, OverrideBackupPlayerSpawnTags)
+    DefineUProperty(float, ExplorationActorDistanceRangeMin)
+    DefineUProperty(float, ExplorationActorDistanceRangeMax)
 
     static ptrdiff_t ZoneFinishedOffset();
     static ptrdiff_t ZoneCompletedOffset();
@@ -112,6 +138,7 @@ private:
     static void HookWorldLoot();
     static AFortWorldManager* ConditionalFoundationContextCall(AFortWorldManager* This);
     static bool SelectConditionalFoundationsCall(AFortWorldManager* This, const void* Query, TArray<AActor*>& OutSelected, void* OutUnselected, void* RandomStream, float MinDistance, bool bFlag);
+    static TArray<AActor*>* SpawnExplorationActorsCall(TArray<AActor*>* Result, UWorld* World, const FFortPlacementActorFinderInfo* FinderInfo, bool* bOutSucceeded, void* RandomStream);
 
     bool SelectConditionalFoundations(const FScriptArray& Requests, TArray<AActor*>& OutSelected, void* RandomStream);
     int32_t GetConditionalFoundationTierIndex() const;

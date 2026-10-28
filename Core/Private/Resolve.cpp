@@ -14,6 +14,8 @@
 #include "UObject/UObjectGlobals.h"
 
 #include <algorithm>
+#include <cstring>
+#include <iterator>
 #include <unordered_map>
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
@@ -5932,6 +5934,51 @@ uint8_t* Finder::QuickBarChangedWorldManagerCall()
         return nullptr;
     }
     Log::Info(L"Finder: AFortQuickBars change handler's world manager call is at 0x{:X}", Found - Finder::ImageBase());
+    return reinterpret_cast<uint8_t*>(Found);
+}
+
+// AFortWorldManager::SpawnExplorationActors has no strings. It opens by copying ExplorationActorDistanceRangeMin and Max into
+// its FFortPlacementActorFinderInfo: movss xmm0, [rcx+Min] then movss xmm1, [rcx+Max] (1.2 has an xor between them; 1.2
+// 0x140594F90, 1.7.2 0x61910F, 1.8 0x64AC9F). The placement finder it calls with that info is stripped to the empty-TArray
+// return xor eax,eax / mov [rcx],rax / mov [rcx+8],rax / mov rax,rcx / ret.
+uint8_t* Finder::ExplorationActorFinderCall(ptrdiff_t DistanceRangeMinOffset, ptrdiff_t DistanceRangeMaxOffset)
+{
+    const int32_t Min = static_cast<int32_t>(DistanceRangeMinOffset);
+    const int32_t Max = static_cast<int32_t>(DistanceRangeMaxOffset);
+    const uint8_t MinLoad[] = { 0xF3, 0x0F, 0x10, 0x81, static_cast<uint8_t>(Min), static_cast<uint8_t>(Min >> 8), static_cast<uint8_t>(Min >> 16), static_cast<uint8_t>(Min >> 24) };
+    const uint8_t* const TextFirst = reinterpret_cast<const uint8_t*>(Finder::TextBegin());
+    const uint8_t* const TextLast = reinterpret_cast<const uint8_t*>(Finder::TextEnd());
+    uintptr_t Spawn = 0;
+    int32_t Functions = 0;
+    for (const uint8_t* At = std::search(TextFirst, TextLast, std::begin(MinLoad), std::end(MinLoad)); At != TextLast; At = std::search(At + 1, TextLast, std::begin(MinLoad), std::end(MinLoad)))
+    {
+        const uintptr_t Site = reinterpret_cast<uintptr_t>(At);
+        const uintptr_t Start = FindInstruction(Site + sizeof(MinLoad), Site + 0x18, { 0xF3, 0x0F, 0x10, 0x89, Max & 0xFF, (Max >> 8) & 0xFF, (Max >> 16) & 0xFF, (Max >> 24) & 0xFF }) ? Finder::FunctionStart(Site) : 0;
+        if (Start && Site - Start < 0x20 && Start != Spawn)
+        {
+            Spawn = Start;
+            ++Functions;
+        }
+    }
+
+    static const uint8_t EmptyArrayReturn[] = { 0x33, 0xC0, 0x48, 0x89, 0x01, 0x48, 0x89, 0x41, 0x08, 0x48, 0x8B, 0xC1, 0xC3 };
+    uintptr_t Found = 0;
+    int32_t Count = 0;
+    for (const auto& [Call, Target] : Functions == 1 ? Finder::DirectCalls(Spawn, Finder::FunctionEnd(Spawn)) : decltype(Finder::DirectCalls(0, 0)){})
+    {
+        if (std::memcmp(reinterpret_cast<const void*>(Target), EmptyArrayReturn, sizeof(EmptyArrayReturn)) == 0)
+        {
+            Found = Call;
+            ++Count;
+        }
+    }
+
+    if (Count != 1)
+    {
+        Log::Error(L"Finder: AFortWorldManager::SpawnExplorationActors placement finder call not found ({} functions, {} calls)", Functions, Count);
+        return nullptr;
+    }
+    Log::Info(L"Finder: AFortWorldManager::SpawnExplorationActors +0x{:X}, placement finder call at 0x{:X}", Spawn - Finder::ImageBase(), Found - Finder::ImageBase());
     return reinterpret_cast<uint8_t*>(Found);
 }
 

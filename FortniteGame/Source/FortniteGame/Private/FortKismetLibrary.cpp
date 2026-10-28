@@ -225,7 +225,7 @@ void UFortKismetLibrary::K2_RemoveItemFromAllPlayers(UObject* WorldContextObject
 #endif
 }
 
-AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount)
+AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss)
 {
 #if WITH_SERVER_CODE
     UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
@@ -248,7 +248,8 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
     AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation);
     EntryStruct->DestroyStruct(ItemEntry);
 
-    if (Pickup)
+    // Before 1.8 every pickup spawned here is tossed; 1.8 lets the caller choose (bToss).
+    if (Pickup && bToss)
     {
         Pickup->TossPickup(Position, nullptr, OverrideMaxStackCount);
     }
@@ -400,15 +401,27 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromAllPlayers)
 
 DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorld)
 {
+    // 1.8 added bToss (its exec, 0xB16580, reads seven parameters); 1.1 to 1.7.2 have six. Reading six left a 1.8 call's
+    // bytecode on its last parameter: P_FINISH stepped over bToss's EX_True instead of EX_EndFunctionParms, and the
+    // script loop then ran EX_EndFunctionParms as a statement, whose handler (0x1432C00) steps the code back onto itself.
+    // The server's game thread spun there for good: the Save the World supply drop's SpawnTierDrops calls this with bToss
+    // true when it is searched.
+    static const bool bHasToss = StaticFunction_K2_SpawnPickupInWorld()->FindPropertyByName(FName(L"bToss", FNAME_Find)) != nullptr;
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
     P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
     P_GET_PROPERTY(UIntProperty, Z_Param_NumberToSpawn);
     P_GET_STRUCT(FVector, Z_Param_Position);
     P_GET_STRUCT(FVector, Z_Param_Direction);
     P_GET_PROPERTY(UIntProperty, Z_Param_OverrideMaxStackCount);
+    bool Z_Param_bToss = true;
+    if (bHasToss)
+    {
+        P_GET_UBOOL(Z_Param_bTossParam);
+        Z_Param_bToss = Z_Param_bTossParam;
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
-    *static_cast<AFortPickup**>(RESULT_PARAM) = K2_SpawnPickupInWorld(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction, Z_Param_OverrideMaxStackCount);
+    *static_cast<AFortPickup**>(RESULT_PARAM) = K2_SpawnPickupInWorld(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction, Z_Param_OverrideMaxStackCount, Z_Param_bToss);
     P_NATIVE_END;
 }
 

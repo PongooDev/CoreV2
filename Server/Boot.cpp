@@ -142,7 +142,7 @@ void Boot::Initialize()
             FCommandLine::AddSwitch(L"EnableMMS");
         }
         FCommandLine::RestoreSwitch(L"EnableMMS");
-        UGameEngine::HookServerTickRate();
+        UGameEngine::SetServerTickRate();
         AFortGameModeZone::HookVTables();
         AFortGameModeAthena::HookVTables();
         UFortVisibilityComponent::HookVTables();

@@ -17,6 +17,7 @@
 #include "Player/FortPlayerController.h"
 #include "UI/AthenaHUDContext.h"
 #include "UI/FortAsyncAction_ShowPartyDialog.h"
+#include "UI/FortPartyContext.h"
 #include "UI/FortUITeamInfo.h"
 
 void Boot::Initialize()
@@ -55,6 +56,7 @@ void Boot::Initialize()
         AFortPlayerController::HookVoice();
         AFortPlayerController::HookClientNatives();
         UFortAsyncAction_ShowPartyDialog::HookNatives();
+        UFortPartyContext::StartAthenaPartyBar();
         ACharacter::HookCheatMovement();
         ABuildingSMActor::HookClientVTables();
     });

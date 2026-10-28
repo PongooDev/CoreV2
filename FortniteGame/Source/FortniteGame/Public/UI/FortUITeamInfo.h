@@ -8,6 +8,7 @@ struct FFortTeamMemberInfo;
 class UFortUITeamInfo : public UObject
 {
     DefineUnrealClass(UFortUITeamInfo, FortniteGame)
+    DefineUFunction(GetTeamMembers)
 
 public:
     bool GetTeamMemberInfo(UFortRegisteredPlayerInfo* PlayerInfo, FFortTeamMemberInfo& OutInfo);

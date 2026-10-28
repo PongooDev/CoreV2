@@ -60,6 +60,7 @@ public:
     DefineUFunction(GetRotatePawnToCamera)
     DefineUFunction(Cheat)
     DefineUFunction(ServerCheat)
+    DefineUFunction(ServerReturnToMainMenu)
     DefineUFunction(OnRep_CheatMovement)
 
     bool InitializeMcpProfile(const void* OnComplete);

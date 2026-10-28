@@ -1417,6 +1417,29 @@ void AFortPlayerController::HookVTables()
             }
         }
     }
+
+    // Leave Match and Return To Lobby send ServerReturnToMainMenu, and the client waits for the ClientReturnToMainMenu it
+    // answers with. 1.8's Battle Royale controller overrides it with the empty stub (1.8 0x4070898 slot 0x230, where 1.7.2's
+    // has this class's 0x827A10), so the client got no answer and gave up only after its 30 s timeout (#79). Those classes
+    // get this class's, which answers.
+    if (const int32_t ReturnIndex = Finder::ImplementationIndex(StaticFunction_ServerReturnToMainMenu());
+        PlayerControllerVTable && ReturnIndex >= 0 && PlayerControllerVTable[ReturnIndex] != Natives::SharedEmptyFunction)
+    {
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[ReturnIndex] == Natives::SharedEmptyFunction)
+            {
+                Hooks::SwapVTable(L"AFortPlayerController::ServerReturnToMainMenu_Implementation", VTable, ReturnIndex, PlayerControllerVTable[ReturnIndex]);
+            }
+        }
+    }
+    else
+    {
+        Log::Error(L"Finder: AFortPlayerController::ServerReturnToMainMenu_Implementation slot not found");
+    }
 }
 
 int32_t AFortPlayerController::GetItemQuantity(const UFortItemDefinition* ItemDefinition)

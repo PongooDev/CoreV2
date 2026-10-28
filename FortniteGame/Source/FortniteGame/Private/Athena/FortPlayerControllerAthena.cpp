@@ -3,6 +3,7 @@
 #include "Abilities/FortHomebaseSet.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
+#include "Athena/FortPlayerPawnAthena.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
@@ -21,6 +22,7 @@
 #include "Pawns/FortPawn.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
+#include "UObject/UObjectGlobals.h"
 
 #include <algorithm>
 #include <cmath>
@@ -68,6 +70,72 @@ UFortWorldItemDefinition* AFortPlayerControllerAthena::GetLoadoutPickaxe()
         Pickaxe = Default ? static_cast<UAthenaPickaxeItemDefinition*>(Default->CustomizationLoadout.Pickaxe) : nullptr;
     }
     return Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr;
+}
+
+void AFortPlayerControllerAthena::FillEmptyLoadout(AFortPlayerPawnAthena* Pawn)
+{
+#if WITH_SERVER_CODE
+    // One player without a glider crashed every 1.8 client in the match (Core-Backend #74, #80): every client sets up the
+    // parachute of every player's pawn when its loadout replicates (OnRep_CustomizationLoadout, 0x43D4A0) and reads the
+    // glider's mesh without checking it. The pawn's loadout is the controller's, copied by Possess (0x444480), and the
+    // controller's is the athena profile's (GetOrInitializeHero, through GetAthenaLoadoutWithOverrides, 0x827300), which
+    // replaces the whole loadout and fills only an empty character: a profile with no favorite_glider, or one the game
+    // doesn't know, gave none. The class default's loadout has DefaultGlider and DefaultPickaxe in it.
+    if (Role != ROLE_Authority || !Member_CustomizationLoadout.IsAvailable() || !FFortAthenaLoadout::HasGlider())
+    {
+        return;
+    }
+    const AFortPlayerControllerAthena* Default = static_cast<const AFortPlayerControllerAthena*>(GetClass()->GetDefaultObject(false));
+    UAthenaGliderItemDefinition* DefaultGlider = Default ? static_cast<UAthenaGliderItemDefinition*>(Default->CustomizationLoadout.Glider) : nullptr;
+    UAthenaPickaxeItemDefinition* DefaultPickaxe = Default ? static_cast<UAthenaPickaxeItemDefinition*>(Default->CustomizationLoadout.Pickaxe) : nullptr;
+    if (!DefaultGlider)
+    {
+        DefaultGlider = LoadObject<UAthenaGliderItemDefinition>(nullptr, L"/Game/Athena/Items/Cosmetics/Gliders/DefaultGlider.DefaultGlider");
+    }
+    if (!DefaultPickaxe)
+    {
+        DefaultPickaxe = LoadObject<UAthenaPickaxeItemDefinition>(nullptr, L"/Game/Athena/Items/Cosmetics/Pickaxes/DefaultPickaxe.DefaultPickaxe");
+    }
+    if (!DefaultGlider || !DefaultPickaxe)
+    {
+        UE_LOG(LogFort, Error, TEXT("FillEmptyLoadout: DefaultGlider (%s) or DefaultPickaxe (%s) wasn't found"), *GetNameSafe(DefaultGlider), *GetNameSafe(DefaultPickaxe));
+    }
+
+    bool bFilledGlider = false;
+    bool bFilledPickaxe = false;
+    const auto Fill = [&](FFortAthenaLoadout& Loadout)
+    {
+        const bool bGlider = !Loadout.Glider && DefaultGlider;
+        const bool bPickaxe = !Loadout.Pickaxe && DefaultPickaxe;
+        if (bGlider)
+        {
+            Loadout.Glider = DefaultGlider;
+        }
+        if (bPickaxe)
+        {
+            Loadout.Pickaxe = DefaultPickaxe;
+        }
+        bFilledGlider |= bGlider;
+        bFilledPickaxe |= bPickaxe;
+        return bGlider || bPickaxe;
+    };
+
+    // The controller's loadout is filled too, so the pawns it possesses later get its copy whole.
+    Fill(CustomizationLoadout);
+    if (Pawn && Pawn->HasCustomizationLoadout() && Fill(Pawn->CustomizationLoadout))
+    {
+        Pawn->ForceNetUpdate();
+    }
+
+    if (bFilledGlider)
+    {
+        UE_LOG(LogFort, Warning, TEXT("FillEmptyLoadout: %s's loadout had no glider, it has %s"), *GetName(), *DefaultGlider->GetName());
+    }
+    if (bFilledPickaxe)
+    {
+        UE_LOG(LogFort, Warning, TEXT("FillEmptyLoadout: %s's loadout had no pickaxe, it has %s"), *GetName(), *DefaultPickaxe->GetName());
+    }
+#endif
 }
 
 UFortHero* AFortPlayerControllerAthena::GetOrInitializeHero()

@@ -245,6 +245,13 @@ void AFortPlayerController::Possess(APawn* InPawn)
     AFortPlayerControllerAthena* AthenaController = Role == ROLE_Authority && MyFortPawn && AFortGameModeAthena::GetCurrent(this) ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;
     UFortHero* AthenaHero = AthenaController ? AthenaController->SetupHero() : nullptr;
 
+    // 1.8: no player's pawn reaches the clients with an empty glider (#80). Its loadout was copied from the controller's
+    // by the Possess above, and replicates once this returns.
+    if (AthenaController)
+    {
+        AthenaController->FillEmptyLoadout(Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))));
+    }
+
     if (AFortPlayerPawn* PlayerPawn = Role == ROLE_Authority ? Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))) : nullptr)
     {
         // A pawn takes the hero's character parts (its skeletal mesh and anim class) when the player state's parts change

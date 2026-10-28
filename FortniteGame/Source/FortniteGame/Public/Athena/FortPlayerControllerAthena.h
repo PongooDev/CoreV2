@@ -9,6 +9,7 @@
 
 class AActor;
 class AFortPawn;
+class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class UFortHero;
 class UFortHeroType;
@@ -32,12 +33,21 @@ public:
     DefineUProperty(UFortWeaponItemDefinition*, WeaponDefinition)
 };
 
+// A Battle Royale glider (from 1.8; DefaultGlider, Glider_ID_*).
+class UAthenaGliderItemDefinition : public UFortItemDefinition
+{
+    DefineUnrealClass(UAthenaGliderItemDefinition, FortniteGame)
+};
+
 // The cosmetics a player wears in Battle Royale (from 1.8), from their athena profile's favorite_* items.
 struct FFortAthenaLoadout
 {
     DefineUnrealStruct(FFortAthenaLoadout, FortniteGame)
+    DefineUProperty(UAthenaGliderItemDefinition*, Glider)
     DefineUProperty(UAthenaPickaxeItemDefinition*, Pickaxe)
     DefineUProperty(UAthenaCharacterItemDefinition*, Character)
+
+    static bool HasGlider() { return Member_Glider.IsAvailable(); }
 };
 
 // Battle Royale's player controller (from 1.7.2; Athena_PlayerController_C).
@@ -62,6 +72,8 @@ public:
     // 1.8: the harvesting tool of the loadout's pickaxe, or of the class's default loadout's (DefaultPickaxe). 1.7.2
     // has none: its pickaxe is one of the game mode's StartingItems.
     UFortWorldItemDefinition* GetLoadoutPickaxe();
+    // 1.8: puts the class's default loadout's glider and pickaxe where the loadout, and Pawn's copy of it, have none.
+    void FillEmptyLoadout(AFortPlayerPawnAthena* Pawn);
     UFortHero* GetOrInitializeHero();
     UFortHero* SetupHero();
     void SetupBackpackSize();

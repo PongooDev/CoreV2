@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "GameFramework/Actor.h"
 #include "Missions/FortObjectiveBase.h"
 
@@ -10,6 +11,10 @@ class AFortAIDirector : public AActor
     DefineUnrealClass(AFortAIDirector, FortniteGame)
 
 public:
+    DefineUProperty(TArray<UFortAIEncounterInfo*>, ActiveEncounters)
+    DefineUProperty(UFortAIEncounterInfo*, ActiveDefaultEncounter)
+    DefineUProperty(UFortAIEncounterInfo*, ActiveDummyDebugEncounter)
+
     static AFortAIDirector* GetCurrent(const UObject* WorldContextObject);
 
     void StopEncounter(UFortAIEncounterInfo* EncounterToStop, EFortObjectiveStatus EncounterStopReason, bool bForceKillAI = false, bool bBroadcastStop = true);

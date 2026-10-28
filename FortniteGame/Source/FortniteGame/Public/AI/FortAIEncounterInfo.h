@@ -3,6 +3,8 @@
 #include "Containers/Array.h"
 #include "GameplayTagContainer.h"
 #include "Items/FortItemDefinition.h"
+#include "Math/Rotator.h"
+#include "Math/Vector.h"
 #include "Misc/Guid.h"
 #include "StructArray.h"
 #include "UObject/NameTypes.h"
@@ -47,11 +49,16 @@ private:
 class UFortAIEncounterInfo : public UObject
 {
     DefineUnrealClass(UFortAIEncounterInfo, FortniteGame)
+    DefineUFunction(SpawnAIGroup)
 
 public:
     DefineUProperty(TArray<UObject*>, EncounterAssignments)
     DefineUStructArrayProperty(FFortAISpawnGroupUpgrade, AvailableUpgrades)
     DefineUStructArrayProperty(FSpawnGroupInstanceInfo, ActiveSpawnGroups)
+
+    // Queues the group's enemies with the AI director, at SpawnLocation (native, BlueprintCallable). False when the build
+    // has no such function.
+    bool SpawnAIGroup(const UFortAISpawnGroup* SpawnGroupToSpawn, const FVector& SpawnLocation, const FRotator& SpawnRotation, bool bAllowAssigningToExternalSpawners);
 
     void RollSpawnGroupUpgradeModifiers(const FGuid& GroupGuid, const FFortAISpawnGroupUpgrade& Upgrade, float DifficultyLevel, const FGameplayTagContainer& EnemyTags);
 

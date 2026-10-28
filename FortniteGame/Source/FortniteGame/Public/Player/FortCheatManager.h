@@ -43,6 +43,17 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(SetSafeZoneLocationToPlayer)
     DefineUFunction(SetSafeZoneRadius)
     DefineUFunction(RespawnPlayerServer)
+    DefineUFunction(TestInfJumps)
+    DefineUFunction(GiveBluGlo)
+    DefineUFunction(SpawnAIGroup)
+    DefineUFunction(SpawnAIGroupFromExternalSpawner)
+    DefineUFunction(SendMissionEvent)
+    DefineUFunction(LoadMission)
+    DefineUFunction(TeleportToMissionActor)
+    DefineUFunction(DumpAllActiveMissions)
+    DefineUFunction(SimulateLoot)
+    DefineUFunction(ToggleInvincibleCornerstones)
+    DefineUFunction(SetCapturePercentage)
 
 public:
     AFortPlayerController* GetPlayerController() const;
@@ -75,6 +86,35 @@ public:
     // Battle Royale: the storm circle has this radius until the next phase.
     void SetSafeZoneRadius(float NewRadius);
     void RespawnPlayerServer();
+    // The pawn may jump again in the air, any number of times (toggles; until it respawns).
+    void TestInfJumps();
+    // Save the World's BluGlo (UFortGameData::BluGloItemDefinition).
+    void GiveBluGlo(int32_t Amount);
+    // Save the World: an AI spawn group (ListSpawnGroups names them) in front of the player, through an active encounter.
+    void SpawnAIGroup(const FString& SpawnGroupName, bool bFromExternalSpawner);
+    // Save the World: the mission event (UFortMissionLibrary::ExecuteMissionEvent) every mission listens for.
+    void SendMissionEvent(const FString& MissionEventName);
+    // Save the World: loads the mission (a FortMissionInfo by name, ListMissions names them) into the zone.
+    void LoadMission(const FString& MissionName);
+    // Save the World: teleports to the first active objective of the current missions, the primary mission's first.
+    void TeleportToMissionActor();
+    void DumpAllActiveMissions();
+    // Rolls the loot tier group once (at LootTier when it is 0 or more, at LootLevel as the world level) and says what dropped.
+    void SimulateLoot(FName TierGroup, int32_t LootTier, int32_t LootLevel);
+    // Base destruction PvP: every team's cornerstone can't be damaged (toggles).
+    void ToggleInvincibleCornerstones();
+    // Every capture point's capture progress (0 to 1).
+    void SetCapturePercentage(float NewCapturePercentage);
+
+    // Core's own command, "cheat corecheats [filter]": the cheats Core supports, with usage, as chat lines.
+    void ListCoreCheats(const FString& Filter);
+
+    // A final "/Name/" picks the player a cheat runs on (#122): Msg without it in OutCommand, the name in OutTarget.
+    static bool SplitCheatTarget(const FString& Msg, FString& OutCommand, FString& OutTarget);
+    // The player whose display name is Name (case-insensitive) or uniquely starts with it; else null and OutError says why.
+    static AFortPlayerController* FindCheatTarget(const UObject* WorldContextObject, const FString& Name, FString& OutError);
+    // While a cheat runs on another player, Core's replies go to the player who typed it.
+    static inline AFortPlayerController* ReplyTo = nullptr;
 
     // Server: the stripped cheats run Core's bodies.
     static void HookNatives();
@@ -105,6 +145,17 @@ public:
     DECLARE_FUNCTION(execSetSafeZoneLocationToPlayer);
     DECLARE_FUNCTION(execSetSafeZoneRadius);
     DECLARE_FUNCTION(execRespawnPlayerServer);
+    DECLARE_FUNCTION(execTestInfJumps);
+    DECLARE_FUNCTION(execGiveBluGlo);
+    DECLARE_FUNCTION(execSpawnAIGroup);
+    DECLARE_FUNCTION(execSpawnAIGroupFromExternalSpawner);
+    DECLARE_FUNCTION(execSendMissionEvent);
+    DECLARE_FUNCTION(execLoadMission);
+    DECLARE_FUNCTION(execTeleportToMissionActor);
+    DECLARE_FUNCTION(execDumpAllActiveMissions);
+    DECLARE_FUNCTION(execSimulateLoot);
+    DECLARE_FUNCTION(execToggleInvincibleCornerstones);
+    DECLARE_FUNCTION(execSetCapturePercentage);
 
 private:
     void Reply(const FString& Message) const;

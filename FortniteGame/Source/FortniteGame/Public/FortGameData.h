@@ -68,6 +68,8 @@ public:
     DefineUProperty(UFortWorldItemDefinition*, WoodItemDefinition)
     DefineUProperty(UFortWorldItemDefinition*, MetalItemDefinition)
     DefineUProperty(UFortWorldItemDefinition*, PermaniteItemDefinition)
+    // Save the World's BluGlo (BluGloWorldItemData, a never-persist world item).
+    DefineUProperty(UFortWorldItemDefinition*, BluGloItemDefinition)
 
     std::vector<UDataTable*> GetLootTierDataTables();
     std::vector<UDataTable*> GetLootPackageDataTables();

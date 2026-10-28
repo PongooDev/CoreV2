@@ -22,6 +22,8 @@ class ACharacter : public APawn
 
 public:
     DefineUProperty(UCharacterMovementComponent*, CharacterMovement)
+    // How many jumps the character may make before landing (replicated; 1 by default).
+    DefineUProperty(int32_t, JumpMaxCount)
 
     // The body of ClientCheatWalk, ClientCheatFly or ClientCheatGhost.
     void ApplyCheatMovement(ECheatMovement Movement);

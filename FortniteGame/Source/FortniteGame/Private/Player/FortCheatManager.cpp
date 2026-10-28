@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Player/FortCheatManager.h"
+#include "AI/FortAIDirector.h"
+#include "AI/FortAIEncounterInfo.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Engine/AssetManager.h"
@@ -7,20 +9,33 @@
 #include "Engine/World.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortGameState.h"
 #include "FortKismetLibrary.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameFramework/GameStateBase.h"
+#include "GameFramework/PlayerState.h"
+#include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Finder.h"
+#include "Missions/FortMission.h"
+#include "Missions/FortMissionInfo.h"
+#include "Missions/FortMissionLibrary.h"
+#include "Missions/FortMissionManager.h"
+#include "Missions/FortObjectiveBase.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
+#include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cwctype>
 #include <map>
 #include <string>
@@ -138,7 +153,8 @@ namespace
         return Best;
     }
 
-    UFortWorldItemDefinition* LoadItem(std::wstring Path)
+    template <typename T>
+    T* LoadAsset(std::wstring Path)
     {
         // A package path names the asset of the same name: /Game/Items/Ingredients/Ingredient_Planks.Ingredient_Planks.
         const size_t Slash = Path.rfind(L'/');
@@ -146,8 +162,193 @@ namespace
         {
             Path += L"." + Path.substr(Slash + 1);
         }
-        return LoadObject<UFortWorldItemDefinition>(nullptr, Path.c_str());
+        return LoadObject<T>(nullptr, Path.c_str());
     }
+
+    UFortWorldItemDefinition* LoadItem(std::wstring Path)
+    {
+        return LoadAsset<UFortWorldItemDefinition>(std::move(Path));
+    }
+
+    // Base destruction PvP's cornerstone (no playlist of these builds plays the mode).
+    class AFortPvPBaseCornerstone : public AActor
+    {
+        DefineUnrealClass(AFortPvPBaseCornerstone, FortniteGame)
+        DefineUFunction(OnRep_bInvincible)
+
+    public:
+        DefineBitfieldUProperty(bInvincible)
+
+        void SetInvincible(bool bNewInvincible)
+        {
+            bInvincible = bNewInvincible;
+            if (UFunction* Function = FindStaticFunction_OnRep_bInvincible())
+            {
+                Reflection::FParams Params(Function);
+                Params.Call(this);
+            }
+            ForceNetUpdate();
+        }
+    };
+
+    // A building that players capture by standing near it (CapturePercentage, 0 to 1).
+    class ABuildingCapturePointActor : public AActor
+    {
+        DefineUnrealClass(ABuildingCapturePointActor, FortniteGame)
+        DefineUFunction(OnRep_ReplicatedCapturePercentage)
+
+    public:
+        DefineUProperty(float, CapturePercentage)
+        DefineUProperty(float, ReplicatedCapturePercentage)
+
+        void SetCapturePercentage(float NewCapturePercentage)
+        {
+            CapturePercentage = NewCapturePercentage;
+            ReplicatedCapturePercentage = NewCapturePercentage;
+            if (UFunction* Function = FindStaticFunction_OnRep_ReplicatedCapturePercentage())
+            {
+                Reflection::FParams Params(Function);
+                Params.Call(this);
+            }
+            ForceNetUpdate();
+        }
+    };
+
+    // Objects of the class in the world, not class defaults or archetypes.
+    template <typename T>
+    std::vector<T*> WorldObjects(const UWorld* World)
+    {
+        std::vector<T*> Objects;
+        if (!T::StaticClass())
+        {
+            return Objects;
+        }
+        for (TObjectIterator<T> It(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)); It; ++It)
+        {
+            if (It->GetWorld() == World)
+            {
+                Objects.push_back(*It);
+            }
+        }
+        return Objects;
+    }
+
+    std::wstring Trim(std::wstring_view Text)
+    {
+        while (!Text.empty() && std::iswspace(Text.front()))
+        {
+            Text.remove_prefix(1);
+        }
+        while (!Text.empty() && std::iswspace(Text.back()))
+        {
+            Text.remove_suffix(1);
+        }
+        return std::wstring(Text);
+    }
+
+    FString PlayerNameOf(const AController* Controller)
+    {
+        const APlayerState* PlayerState = Controller ? static_cast<APlayerState*>(Controller->PlayerState) : nullptr;
+        return PlayerState ? static_cast<const FString&>(PlayerState->PlayerName) : GetNameSafe(Controller);
+    }
+
+    // The missions of the world's mission manager (Save the World), the primary ones first.
+    std::vector<AFortMission*> CurrentMissions(const UObject* WorldContextObject)
+    {
+        std::vector<AFortMission*> Missions;
+        UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+        AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        AFortMissionManager* MissionManager = GameState ? static_cast<AFortMissionManager*>(GameState->MissionManager) : nullptr;
+        if (!MissionManager)
+        {
+            return Missions;
+        }
+        for (AFortMission* Mission : MissionManager->Missions)
+        {
+            if (Mission)
+            {
+                Missions.push_back(Mission);
+            }
+        }
+        std::stable_partition(Missions.begin(), Missions.end(), [](const AFortMission* Mission) { return Mission->IsPrimaryMission(); });
+        return Missions;
+    }
+
+    // Distance in front of the actor along the ground, the way it faces.
+    FVector InFrontOf(const AActor* Actor, float Distance)
+    {
+        const FVector Location = Actor->GetTransform().GetLocation();
+        const float Yaw = Actor->GetActorRotation().Yaw * 3.14159265f / 180.0f;
+        return FVector(Location.X + std::cos(Yaw) * Distance, Location.Y + std::sin(Yaw) * Distance, Location.Z);
+    }
+
+    enum class ECheatMode : uint8_t
+    {
+        Both,
+        BattleRoyale,
+        SaveTheWorld,
+    };
+
+    // "cheat corecheats": the commands Core supports, by category. Name is the exec function's (left out when the build
+    // has none, null for Core's own); the usage follows "cheat ".
+    struct FCoreCheat
+    {
+        const wchar_t* Category;
+        const wchar_t* Name;
+        const wchar_t* Usage;
+        const wchar_t* Description;
+        ECheatMode Mode;
+    };
+
+    constexpr FCoreCheat CoreCheats[] = {
+        { L"Items", L"GiveWeapon", L"GiveWeapon <name> <level> <count>", L"a weapon (or BR consumable) by its name or part of it", ECheatMode::Both },
+        { L"Items", L"GiveAmmo", L"GiveAmmo <name> [amount]", L"ammo; a full stack without an amount", ECheatMode::Both },
+        { L"Items", L"GiveTrap", L"GiveTrap <name> <level> <count>", L"a trap", ECheatMode::Both },
+        { L"Items", L"GiveGadget", L"GiveGadget <name> <level>", L"a gadget (GiveGadgets <name> <count> <level>)", ECheatMode::Both },
+        { L"Items", L"GiveSpecificItem", L"GiveSpecificItem <path or name> <count> <level>", L"any item", ECheatMode::Both },
+        { L"Items", L"GiveResources", L"GiveResources [amount]", L"wood, stone and metal (GiveWood, GiveStone, GiveMetal [amount])", ECheatMode::Both },
+        { L"Items", L"GiveAllWeapons", L"GiveAllWeapons", L"one of every weapon (GiveAllMelee, GiveAllPistols, GiveAllRifles, GiveAllShotguns, GiveWeapons <tag>)", ECheatMode::Both },
+        { L"Items", L"GiveAllTraps", L"GiveAllTraps <count>", L"every trap", ECheatMode::Both },
+        { L"Items", L"GiveAllConsumables", L"GiveAllConsumables <count>", L"every consumable", ECheatMode::BattleRoyale },
+        { L"Items", L"GiveAllIngredients", L"GiveAllIngredients <count>", L"every crafting ingredient (GiveUsefulThings <count>: the common 15)", ECheatMode::SaveTheWorld },
+        { L"Items", L"GiveBluGlo", L"GiveBluGlo [amount]", L"BluGlo", ECheatMode::SaveTheWorld },
+        { L"Items", L"GiveCheatInventory", L"GiveCheatInventory", L"the TestGod rifle (WannaGun: the WannaGun test gun)", ECheatMode::Both },
+        { L"Items", L"GiveAthenaFullKit", L"GiveAthenaFullKit", L"a BR kit (GiveAthenaWeapons, GiveAthenaAmmo, GiveAthenaConsumables, GiveAthenaTraps)", ECheatMode::BattleRoyale },
+        { L"Items", L"Badass", L"Badass", L"STW weapons with god, build free and infinite ammo (GiveGoodWeapons: the weapons)", ECheatMode::SaveTheWorld },
+        { L"Items", L"ListWeapons", L"ListWeapons", L"the names to give (ListAmmo, ListTraps, ListGadgets)", ECheatMode::Both },
+        { L"Player", L"God", L"God", L"invulnerable (toggles)", ECheatMode::Both },
+        { L"Player", L"Fly", L"Fly", L"fly (Ghost: through walls too; Walk: walk again)", ECheatMode::Both },
+        { L"Player", L"TestInfJumps", L"TestInfJumps", L"jump again in the air, any number of times (toggles)", ECheatMode::Both },
+        { L"Player", L"Teleport", L"Teleport", L"to where you look (TeleportToLocation <x> <y> <z>, TeleportToActor <class or name>)", ECheatMode::Both },
+        { L"Player", L"ChangeSize", L"ChangeSize <scale>", L"your size", ECheatMode::Both },
+        { L"Player", L"BuildFree", L"BuildFree", L"building costs nothing (CraftFree: crafting)", ECheatMode::Both },
+        { L"Player", L"ToggleInfiniteAmmo", L"ToggleInfiniteAmmo", L"(ToggleInfiniteDurability, ToggleInfiniteStamina, ToggleNoCoolDown)", ECheatMode::Both },
+        { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },
+        { L"Player", L"DBNO", L"DBNO", L"knock yourself down (ReviveFromDBNO: get up)", ECheatMode::Both },
+        { L"Player", L"RespawnPlayerServer", L"RespawnPlayerServer", L"respawn when dead", ECheatMode::Both },
+        { L"Player", L"BackpackSetSize", L"BackpackSetSize <slots>", L"your backpack size", ECheatMode::Both },
+        { L"Player", L"BuildWith", L"BuildWith <Wood|Stone|Metal>", L"the building material", ECheatMode::Both },
+        { L"World", L"Summon", L"Summon <class or /Game/.../X.X_C>", L"spawns an actor in front of you", ECheatMode::Both },
+        { L"World", L"Slomo", L"Slomo <speed>", L"the game's speed, for everyone", ECheatMode::Both },
+        { L"World", L"PlayersOnly", L"PlayersOnly", L"freezes everything but the players (toggles)", ECheatMode::Both },
+        { L"World", L"DestroyTarget", L"DestroyTarget", L"destroys what you look at (DamageTarget <damage>, DestroyAll <class>)", ECheatMode::Both },
+        { L"World", L"KillPawns", L"KillPawns [class]", L"kills every pawn (MakeGods, MakeAIsGod: invulnerable)", ECheatMode::Both },
+        { L"World", L"SimulateLoot", L"SimulateLoot <tier group> <tier> <level>", L"rolls a loot tier group and says what dropped (tier -1: any)", ECheatMode::Both },
+        { L"Storm", L"SetSafeZoneLocationToPlayer", L"SetSafeZoneLocationToPlayer", L"the next storm circles close in on you", ECheatMode::BattleRoyale },
+        { L"Storm", L"SetSafeZoneRadius", L"SetSafeZoneRadius <radius>", L"the storm circle's radius until the next phase", ECheatMode::BattleRoyale },
+        { L"Save the World", L"SpawnAIGroup", L"SpawnAIGroup <spawn group>", L"husks in front of you, through a running encounter (ListSpawnGroups names them)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"DisableAI", L"DisableAI", L"(ToggleAISpawning, ToggleAIDespawning)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"MissionForceSuccess", L"MissionForceSuccess", L"(MissionForcePrimarySuccess, MissionForceFailure)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"LoadMission", L"LoadMission <mission info>", L"loads a mission into the zone", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"SendMissionEvent", L"SendMissionEvent <event>", L"sends a mission event to the missions", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"TeleportToMissionActor", L"TeleportToMissionActor", L"to the current objective", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"DumpAllActiveMissions", L"DumpAllActiveMissions", L"the missions and their objectives (ListMissions)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"SetWorldLevel", L"SetWorldLevel <level>", L"(SetWorldDaysElapsed <days>, UnlockAllZones)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"ToggleIndestructibleKeep", L"ToggleIndestructibleKeep", L"the objective can't be destroyed", ECheatMode::SaveTheWorld },
+        { L"Other", L"CheatScript", L"CheatScript <section>", L"runs a [CheatScript.X] list of cheats", ECheatMode::Both },
+        { L"Other", L"ListCheats", L"ListCheats", L"every exec function, working or not", ECheatMode::Both },
+        { L"Other", nullptr, L"corecheats [filter or all]", L"this list (a filter keeps the names or categories with it)", ECheatMode::Both },
+    };
 
     // One asset per item family, the name up to its rarity (WID_Assault_Auto_Athena of WID_Assault_Auto_Athena_R_Ore_T03):
     // the rarest, then the highest tier.
@@ -226,8 +427,14 @@ AFortPlayerController* UFortCheatManager::GetPlayerController() const
 
 void UFortCheatManager::Reply(const FString& Message) const
 {
-    UE_LOG(LogFortCheats, Log, TEXT("%s: %s"), *GetNameSafe(GetPlayerController()), *Message);
-    if (AFortPlayerController* PlayerController = GetPlayerController())
+    AFortPlayerController* PlayerController = GetPlayerController();
+    UE_LOG(LogFortCheats, Log, TEXT("%s: %s"), *GetNameSafe(PlayerController), *Message);
+    // A cheat run on another player (#122) answers the player who typed it, naming whom it ran on.
+    if (ReplyTo && ReplyTo != PlayerController)
+    {
+        ReplyTo->ClientMessage(FString::Printf(TEXT("[%s] %s"), *PlayerNameOf(PlayerController), *Message));
+    }
+    else if (PlayerController)
     {
         PlayerController->ClientMessage(Message);
     }
@@ -616,6 +823,390 @@ void UFortCheatManager::RespawnPlayerServer()
 #endif
 }
 
+void UFortCheatManager::TestInfJumps()
+{
+#if WITH_SERVER_CODE
+    // Empty in shipping builds (it shares a "do nothing" exec with other compiled-out cheats). A character may jump while
+    // in the air as long as JumpCurrentCount < JumpMaxCount (ACharacter::CanJumpInternal, 1.7.2 0x1FCE070, under the Athena
+    // pawn's 0x7C3460); JumpMaxCount replicates, so the owning client predicts the extra jumps too.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    ACharacter* Character = PlayerController ? Cast<ACharacter>(reinterpret_cast<UObject*>(PlayerController->GetPawn())) : nullptr;
+    if (!Character)
+    {
+        Reply(TEXT("No pawn to jump with"));
+        return;
+    }
+    const ACharacter* Default = static_cast<const ACharacter*>(Character->GetClass()->GetDefaultObject(false));
+    const int32_t DefaultJumps = Default ? std::max<int32_t>(Default->JumpMaxCount, 1) : 1;
+    const bool bInfinite = Character->JumpMaxCount <= DefaultJumps;
+    Character->JumpMaxCount = bInfinite ? 100000 : DefaultJumps;
+    Character->ForceNetUpdate();
+    Reply(bInfinite ? TEXT("Infinite jumps on (until you respawn)") : TEXT("Infinite jumps off"));
+#endif
+}
+
+void UFortCheatManager::GiveBluGlo(int32_t Amount)
+{
+    // Empty in shipping builds. The game data names the BluGlo item (BluGloWorldItemData) on every build.
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UFortWorldItemDefinition* BluGlo = GameData ? static_cast<UFortWorldItemDefinition*>(GameData->BluGloItemDefinition) : nullptr;
+    if (!BluGlo)
+    {
+        Reply(TEXT("This build's game data has no BluGlo item"));
+        return;
+    }
+    GiveResource(BluGlo, Amount);
+}
+
+void UFortCheatManager::SpawnAIGroup(const FString& SpawnGroupName, bool bFromExternalSpawner)
+{
+#if WITH_SERVER_CODE
+    // The cheats only free their string in shipping builds. A spawn group spawns through an encounter: the encounter's
+    // native SpawnAIGroup (1.7.2 0x2D74B0) queues its enemies with the director. UFortMissionLibrary::StartAIEncounter is
+    // compiled out (1.7.2 0x6B3D20 returns null), so the group joins an encounter that is already running: the director's
+    // debug one, its default one, or the newest of its active ones (a mission's).
+    AFortPlayerController* PlayerController = GetPlayerController();
+    APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+    AFortAIDirector* Director = AFortAIDirector::GetCurrent(PlayerController);
+    if (!Pawn || !Director)
+    {
+        Reply(TEXT("SpawnAIGroup needs Save the World's AI director and a pawn"));
+        return;
+    }
+
+    const std::vector<FCheatAsset> Assets = ListAssets({ L"FortAISpawnGroup" });
+    const FCheatAsset* Asset = FindAsset(Assets, SpawnGroupName.ToStdString(), false);
+    UFortAISpawnGroup* SpawnGroup = Asset ? LoadAsset<UFortAISpawnGroup>(Asset->Path) : nullptr;
+    if (!SpawnGroup)
+    {
+        Reply(FString::Printf(TEXT("No spawn group called '%s' (ListSpawnGroups lists them)"), *SpawnGroupName));
+        return;
+    }
+
+    UFortAIEncounterInfo* Encounter = Director->ActiveDummyDebugEncounter;
+    if (!Encounter)
+    {
+        Encounter = Director->ActiveDefaultEncounter;
+    }
+    const TArray<UFortAIEncounterInfo*>& ActiveEncounters = Director->ActiveEncounters;
+    for (int32_t Index = ActiveEncounters.Num() - 1; !Encounter && Index >= 0; --Index)
+    {
+        Encounter = ActiveEncounters[Index];
+    }
+    if (!Encounter)
+    {
+        Reply(TEXT("No AI encounter is running to spawn the group through (start a mission's waves first)"));
+        return;
+    }
+
+    const FVector Location = InFrontOf(Pawn, 600.0f);
+    const FRotator Rotation(0.0f, Pawn->GetActorRotation().Yaw + 180.0f, 0.0f);
+    if (!Encounter->SpawnAIGroup(SpawnGroup, Location, Rotation, bFromExternalSpawner))
+    {
+        Reply(TEXT("This build's encounters can't spawn a group"));
+        return;
+    }
+    Reply(FString::Printf(TEXT("Spawning %s through %s"), *SpawnGroup->GetName(), *Encounter->GetName()));
+#endif
+}
+
+void UFortCheatManager::SendMissionEvent(const FString& MissionEventName)
+{
+#if WITH_SERVER_CODE
+    // Only frees its string in shipping builds. Mission events (the mission manager's MissionEventNames: "ItemCollected",
+    // "MissionParTimeHit", the missions' own) go to every mission through the library, as Blueprints send them.
+    const std::wstring EventName = Trim(MissionEventName.ToStdString());
+    if (EventName.empty() || !UFortMissionLibrary::FindStaticFunction_ExecuteMissionEvent() || CurrentMissions(GetPlayerController()).empty())
+    {
+        Reply(TEXT("SendMissionEvent needs Save the World's missions and an event name"));
+        return;
+    }
+    UFortMissionLibrary::ExecuteMissionEvent(GetPlayerController(), FName(EventName.c_str()), nullptr);
+    Reply(FString::Printf(TEXT("Sent mission event %s"), EventName.c_str()));
+#endif
+}
+
+void UFortCheatManager::LoadMission(const FString& MissionName)
+{
+#if WITH_SERVER_CODE
+    // Only frees its string in shipping builds. The zone loads its missions through UFortMissionLibrary::LoadMission
+    // (AFortWorldManager does the same with its mission records).
+    if (CurrentMissions(GetPlayerController()).empty() || !UFortMissionLibrary::FindStaticFunction_LoadMission())
+    {
+        Reply(TEXT("LoadMission needs Save the World's mission manager"));
+        return;
+    }
+    const std::vector<FCheatAsset> Assets = ListAssets({ L"FortMissionInfo" });
+    const FCheatAsset* Asset = FindAsset(Assets, MissionName.ToStdString(), false);
+    UFortMissionInfo* MissionInfo = Asset ? LoadAsset<UFortMissionInfo>(Asset->Path) : nullptr;
+    if (!MissionInfo)
+    {
+        Reply(FString::Printf(TEXT("No mission called '%s'"), *MissionName));
+        return;
+    }
+    UFortMissionLibrary::LoadMission(GetPlayerController(), MissionInfo);
+    Reply(FString::Printf(TEXT("Loading mission %s"), *MissionInfo->GetName()));
+#endif
+}
+
+void UFortCheatManager::TeleportToMissionActor()
+{
+#if WITH_SERVER_CODE
+    // Empty in shipping builds. The mission actors players go to are its active objectives (the primary mission's first).
+    AFortPlayerController* PlayerController = GetPlayerController();
+    APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+    if (!Pawn)
+    {
+        Reply(TEXT("No pawn to teleport"));
+        return;
+    }
+    for (AFortMission* Mission : CurrentMissions(PlayerController))
+    {
+        for (AFortObjectiveBase* Objective : Mission->ActiveObjectives)
+        {
+            const FVector Location = Objective ? Objective->GetTransform().GetLocation() : FVector(0.0f, 0.0f, 0.0f);
+            if (!Objective || (Location.X == 0.0f && Location.Y == 0.0f && Location.Z == 0.0f))
+            {
+                continue;
+            }
+            // Next to it rather than inside it; TeleportTo moves the pawn to a free spot.
+            const FVector Destination(Location.X + 150.0f, Location.Y, Location.Z + 100.0f);
+            if (Pawn->TeleportTo(Destination, Pawn->GetActorRotation()))
+            {
+                Reply(FString::Printf(TEXT("Teleported to %s (%s)"), *Objective->GetName(), *Mission->GetName()));
+                return;
+            }
+        }
+    }
+    Reply(TEXT("No mission has an objective to teleport to"));
+#endif
+}
+
+void UFortCheatManager::DumpAllActiveMissions()
+{
+#if WITH_SERVER_CODE
+    const std::vector<AFortMission*> Missions = CurrentMissions(GetPlayerController());
+    if (Missions.empty())
+    {
+        Reply(TEXT("No missions (Save the World only)"));
+        return;
+    }
+    for (AFortMission* Mission : Missions)
+    {
+        const UFortMissionInfo* MissionInfo = Mission->MissionInfo;
+        const EFortMissionStatus Status = Mission->MissionStatus;
+        Reply(FString::Printf(TEXT("%s %s (%s): %s"), Mission->IsPrimaryMission() ? TEXT("Primary") : TEXT("Secondary"), *GetNameSafe(MissionInfo), *Mission->GetName(), Status.ToString().c_str()));
+        for (AFortObjectiveBase* Objective : Mission->ActiveObjectives)
+        {
+            if (Objective)
+            {
+                const EFortObjectiveStatus ObjectiveStatus = Objective->ObjectiveStatus;
+                Reply(FString::Printf(TEXT("  objective %s: %s"), *Objective->GetName(), ObjectiveStatus.ToString().c_str()));
+            }
+        }
+    }
+#endif
+}
+
+void UFortCheatManager::SimulateLoot(FName TierGroup, int32_t LootTier, int32_t LootLevel)
+{
+#if WITH_SERVER_CODE
+    // Empty in shipping builds. Rolls the tier group the way a container does (Core's loot roll; Battle Royale's redirect
+    // first, as its containers roll Loot_Athena* groups) and lists the drops without spawning them.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    FName Group = TierGroup;
+    if (AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(PlayerController))
+    {
+        const FName Redirected = GameMode->RedirectLootTierGroup(TierGroup);
+        Group = Redirected.IsNone() ? TierGroup : Redirected;
+    }
+    if (LootLevel <= 0)
+    {
+        UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+        AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        LootLevel = GameState ? static_cast<int32_t>(GameState->WorldLevel) : 0;
+    }
+
+    TStructArray<FFortItemEntry> LootDrops{};
+    if (Group.IsNone() || !UFortKismetLibrary::PickLootDrops(LootDrops, Group, LootLevel, LootTier))
+    {
+        Reply(FString::Printf(TEXT("Tier group '%s' dropped nothing (Loot_AthenaTreasure, Loot_AthenaFloorLoot, Loot_Treasure...)"), *TierGroup.ToString()));
+        LootDrops.Empty();
+        return;
+    }
+    Reply(FString::Printf(TEXT("%s (tier %d, level %d) dropped %d:"), *Group.ToString(), LootTier, LootLevel, LootDrops.Num()));
+    for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
+    {
+        const FFortItemEntry& Entry = LootDrops[Index];
+        Reply(FString::Printf(TEXT("  %d %s"), static_cast<int32_t>(Entry.Count), *GetNameSafe(static_cast<UFortItemDefinition*>(Entry.ItemDefinition))));
+    }
+    LootDrops.Empty();
+#endif
+}
+
+void UFortCheatManager::ToggleInvincibleCornerstones()
+{
+#if WITH_SERVER_CODE
+    // Empty in shipping builds. Each team's cornerstone (base destruction PvP) has bInvincible, replicated.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    const std::vector<AFortPvPBaseCornerstone*> Cornerstones = WorldObjects<AFortPvPBaseCornerstone>(PlayerController ? PlayerController->GetWorld() : nullptr);
+    if (Cornerstones.empty())
+    {
+        Reply(TEXT("No cornerstones in this match (base destruction PvP only)"));
+        return;
+    }
+    const bool bInvincible = !Cornerstones.front()->bInvincible;
+    for (AFortPvPBaseCornerstone* Cornerstone : Cornerstones)
+    {
+        Cornerstone->SetInvincible(bInvincible);
+    }
+    Reply(FString::Printf(TEXT("%d cornerstones %s"), static_cast<int32_t>(Cornerstones.size()), bInvincible ? TEXT("invincible") : TEXT("vulnerable")));
+#endif
+}
+
+void UFortCheatManager::SetCapturePercentage(float NewCapturePercentage)
+{
+#if WITH_SERVER_CODE
+    // Only reads its argument in shipping builds. Sets every capture point's progress, which replicates.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    const std::vector<ABuildingCapturePointActor*> CapturePoints = WorldObjects<ABuildingCapturePointActor>(PlayerController ? PlayerController->GetWorld() : nullptr);
+    if (CapturePoints.empty())
+    {
+        Reply(TEXT("No capture points in this match"));
+        return;
+    }
+    const float Percentage = std::clamp(NewCapturePercentage > 1.0f ? NewCapturePercentage / 100.0f : NewCapturePercentage, 0.0f, 1.0f);
+    for (ABuildingCapturePointActor* CapturePoint : CapturePoints)
+    {
+        CapturePoint->SetCapturePercentage(Percentage);
+    }
+    Reply(FString::Printf(TEXT("%d capture points at %.0f%%"), static_cast<int32_t>(CapturePoints.size()), Percentage * 100.0f));
+#endif
+}
+
+void UFortCheatManager::ListCoreCheats(const FString& Filter)
+{
+    // Core's own: what works, for this mode unless the filter is "all".
+    const std::wstring Wanted = Simplified(Trim(Filter.ToStdString()));
+    const bool bAll = Wanted == L"all";
+    AFortPlayerController* PlayerController = GetPlayerController();
+    const bool bBattleRoyale = AFortGameModeAthena::GetCurrent(PlayerController) != nullptr;
+    UClass* Class = GetClass();
+
+    std::vector<const FCoreCheat*> Shown;
+    for (const FCoreCheat& Cheat : CoreCheats)
+    {
+        if (!bAll && Cheat.Mode != ECheatMode::Both && (Cheat.Mode == ECheatMode::BattleRoyale) != bBattleRoyale)
+        {
+            continue;
+        }
+        if (Cheat.Name && (!Class || !Class->FindFunctionByName(FName(Cheat.Name, FNAME_Find))))
+        {
+            continue;
+        }
+        if (!bAll && !Wanted.empty() && Simplified(Cheat.Usage).find(Wanted) == std::wstring::npos && Simplified(Cheat.Category).find(Wanted) == std::wstring::npos &&
+            Simplified(Cheat.Description).find(Wanted) == std::wstring::npos)
+        {
+            continue;
+        }
+        Shown.push_back(&Cheat);
+    }
+
+    Reply(FString::Printf(TEXT("Core cheats%s (%d): type \"cheat <command>\". End any command with /Player/ to run it on that player instead."),
+        bAll ? TEXT("") : bBattleRoyale ? TEXT(" for Battle Royale") : TEXT(" for Save the World"), static_cast<int32_t>(Shown.size())));
+    const wchar_t* Category = nullptr;
+    for (const FCoreCheat* Cheat : Shown)
+    {
+        if (!Category || std::wstring_view(Category) != Cheat->Category)
+        {
+            Category = Cheat->Category;
+            Reply(FString::Printf(TEXT("-- %s --"), Category));
+        }
+        Reply(FString::Printf(TEXT("%s: %s"), Cheat->Usage, Cheat->Description));
+    }
+    if (Shown.empty())
+    {
+        Reply(TEXT("Nothing matches; \"cheat corecheats all\" lists every one"));
+    }
+}
+
+bool UFortCheatManager::SplitCheatTarget(const FString& Msg, FString& OutCommand, FString& OutTarget)
+{
+    // "giveweapon Scar 0 1 /diddy/": a last "/Name/" (it may hold spaces, "/John Doe/") that starts the line or follows a
+    // space, so item paths (/Game/Items/...) aren't taken for one.
+    const std::wstring Line = Trim(Msg.ToStdString());
+    if (Line.size() < 3 || Line.back() != L'/')
+    {
+        return false;
+    }
+    const size_t Close = Line.size() - 1;
+    const size_t Open = Line.rfind(L'/', Close - 1);
+    if (Open == std::wstring::npos || Open + 1 >= Close || (Open > 0 && !std::iswspace(Line[Open - 1])))
+    {
+        return false;
+    }
+    const std::wstring Target = Trim(std::wstring_view(Line).substr(Open + 1, Close - Open - 1));
+    if (Target.empty())
+    {
+        return false;
+    }
+    OutCommand = FString(Trim(std::wstring_view(Line).substr(0, Open)).c_str());
+    OutTarget = FString(Target.c_str());
+    return true;
+}
+
+AFortPlayerController* UFortCheatManager::FindCheatTarget(const UObject* WorldContextObject, const FString& Name, FString& OutError)
+{
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
+    if (!GameState)
+    {
+        OutError = TEXT("No players to pick from");
+        return nullptr;
+    }
+
+    const std::wstring Wanted = Lower(Name.ToStdString());
+    std::vector<std::pair<AFortPlayerController*, FString>> Exact;
+    std::vector<std::pair<AFortPlayerController*, FString>> Prefixed;
+    const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
+    for (APlayerState* PlayerState : PlayerArray)
+    {
+        AFortPlayerController* Controller = PlayerState ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(PlayerState->GetOwner())) : nullptr;
+        if (!Controller)
+        {
+            continue;
+        }
+        const FString& PlayerName = PlayerState->PlayerName;
+        const std::wstring Candidate = Lower(PlayerName.ToStdString());
+        if (Candidate == Wanted)
+        {
+            Exact.emplace_back(Controller, PlayerName);
+        }
+        else if (Candidate.starts_with(Wanted))
+        {
+            Prefixed.emplace_back(Controller, PlayerName);
+        }
+    }
+
+    const std::vector<std::pair<AFortPlayerController*, FString>>& Matches = !Exact.empty() ? Exact : Prefixed;
+    if (Matches.size() == 1)
+    {
+        return Matches.front().first;
+    }
+    if (Matches.empty())
+    {
+        OutError = FString::Printf(TEXT("No player called '%s'"), *Name);
+        return nullptr;
+    }
+    std::wstring Names;
+    for (const auto& [Controller, PlayerName] : Matches)
+    {
+        Names += (Names.empty() ? L"" : L", ") + PlayerName.ToStdString();
+    }
+    OutError = FString::Printf(TEXT("'%s' matches %d players (%s); give more of the name"), *Name, static_cast<int32_t>(Matches.size()), Names.c_str());
+    return nullptr;
+}
+
 DEFINE_FUNCTION(UFortCheatManager::execGiveWeapon)
 {
     P_GET_PROPERTY(UStrProperty, Z_Param_WeaponName);
@@ -857,14 +1448,114 @@ DEFINE_FUNCTION(UFortCheatManager::execRespawnPlayerServer)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(UFortCheatManager::execTestInfJumps)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->TestInfJumps();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execGiveBluGlo)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_Amount);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->GiveBluGlo(Z_Param_Amount);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execSpawnAIGroup)
+{
+    P_GET_PROPERTY(UStrProperty, Z_Param_SpawnGroupName);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->SpawnAIGroup(Z_Param_SpawnGroupName, false);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execSpawnAIGroupFromExternalSpawner)
+{
+    P_GET_PROPERTY(UStrProperty, Z_Param_SpawnGroupName);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->SpawnAIGroup(Z_Param_SpawnGroupName, true);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execSendMissionEvent)
+{
+    P_GET_PROPERTY(UStrProperty, Z_Param_MissionEventName);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->SendMissionEvent(Z_Param_MissionEventName);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execLoadMission)
+{
+    P_GET_PROPERTY(UStrProperty, Z_Param_MissionName);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->LoadMission(Z_Param_MissionName);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execTeleportToMissionActor)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->TeleportToMissionActor();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execDumpAllActiveMissions)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->DumpAllActiveMissions();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execSimulateLoot)
+{
+    P_GET_PROPERTY(UNameProperty, Z_Param_TierGroup);
+    P_GET_PROPERTY(UIntProperty, Z_Param_LootTier);
+    P_GET_PROPERTY(UIntProperty, Z_Param_LootLevel);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->SimulateLoot(Z_Param_TierGroup, Z_Param_LootTier, Z_Param_LootLevel);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execToggleInvincibleCornerstones)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->ToggleInvincibleCornerstones();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execSetCapturePercentage)
+{
+    P_GET_PROPERTY(UFloatProperty, Z_Param_NewCapturePercentage);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->SetCapturePercentage(Z_Param_NewCapturePercentage);
+    P_NATIVE_END;
+}
+
 void UFortCheatManager::HookNatives()
 {
     // Each of these is stripped on 1.2, 1.7.2 and 1.8 alike (Cheats.md): GiveWeapon, GiveAmmo, GiveTrap, GiveGadget(s),
     // GiveSpecificItem only free their string (1.7.2 0x7D01A0), GiveResources/Wood/Stone/Metal, GiveWeapons, GiveAllTraps,
     // GiveAllConsumables, GiveAllIngredients, RespawnPlayerServer and WannaGun are the shared "ret 0", and the rest call one of
     // those or something else compiled out (TeleportToLocation a virtual in Battle Royale, SetSafeZoneLocationToPlayer and
-    // SetSafeZoneRadius the game mode's setters, GiveCheatInventory its load callback). A build without one of them (1.1
-    // and 1.2 have no Battle Royale safe zone cheats, CoreV2 #118) skips it instead of stopping the server.
+    // SetSafeZoneRadius the game mode's setters, GiveCheatInventory its load callback). The second batch (TestInfJumps,
+    // GiveBluGlo, SpawnAIGroup(FromExternalSpawner), SendMissionEvent, LoadMission, TeleportToMissionActor,
+    // DumpAllActiveMissions, SimulateLoot, ToggleInvincibleCornerstones, SetCapturePercentage) is empty or only frees or
+    // reads its argument the same way. A build without one of them (1.1 and 1.2 have no Battle Royale safe zone cheats,
+    // CoreV2 #118; 1.1 no TestInfJumps or DumpAllActiveMissions) skips it instead of stopping the server.
     if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
     {
         return;
@@ -897,6 +1588,17 @@ void UFortCheatManager::HookNatives()
              std::tuple{ FindStaticFunction_SetSafeZoneLocationToPlayer(), &execSetSafeZoneLocationToPlayer, L"UFortCheatManager::SetSafeZoneLocationToPlayer" },
              std::tuple{ FindStaticFunction_SetSafeZoneRadius(), &execSetSafeZoneRadius, L"UFortCheatManager::SetSafeZoneRadius" },
              std::tuple{ FindStaticFunction_RespawnPlayerServer(), &execRespawnPlayerServer, L"UFortCheatManager::RespawnPlayerServer" },
+             std::tuple{ FindStaticFunction_TestInfJumps(), &execTestInfJumps, L"UFortCheatManager::TestInfJumps" },
+             std::tuple{ FindStaticFunction_GiveBluGlo(), &execGiveBluGlo, L"UFortCheatManager::GiveBluGlo" },
+             std::tuple{ FindStaticFunction_SpawnAIGroup(), &execSpawnAIGroup, L"UFortCheatManager::SpawnAIGroup" },
+             std::tuple{ FindStaticFunction_SpawnAIGroupFromExternalSpawner(), &execSpawnAIGroupFromExternalSpawner, L"UFortCheatManager::SpawnAIGroupFromExternalSpawner" },
+             std::tuple{ FindStaticFunction_SendMissionEvent(), &execSendMissionEvent, L"UFortCheatManager::SendMissionEvent" },
+             std::tuple{ FindStaticFunction_LoadMission(), &execLoadMission, L"UFortCheatManager::LoadMission" },
+             std::tuple{ FindStaticFunction_TeleportToMissionActor(), &execTeleportToMissionActor, L"UFortCheatManager::TeleportToMissionActor" },
+             std::tuple{ FindStaticFunction_DumpAllActiveMissions(), &execDumpAllActiveMissions, L"UFortCheatManager::DumpAllActiveMissions" },
+             std::tuple{ FindStaticFunction_SimulateLoot(), &execSimulateLoot, L"UFortCheatManager::SimulateLoot" },
+             std::tuple{ FindStaticFunction_ToggleInvincibleCornerstones(), &execToggleInvincibleCornerstones, L"UFortCheatManager::ToggleInvincibleCornerstones" },
+             std::tuple{ FindStaticFunction_SetCapturePercentage(), &execSetCapturePercentage, L"UFortCheatManager::SetCapturePercentage" },
          })
     {
         if (Function)

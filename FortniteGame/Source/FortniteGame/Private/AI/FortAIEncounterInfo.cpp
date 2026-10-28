@@ -6,6 +6,7 @@
 #include "Items/FortItem.h"
 #include "Items/FortLootPackage.h"
 #include "Natives.h"
+#include "ReflectionParams.h"
 
 namespace
 {
@@ -18,6 +19,25 @@ namespace
     };
 
     FSpawnGroupUpgradeCapture* Capture = nullptr;
+}
+
+bool UFortAIEncounterInfo::SpawnAIGroup(const UFortAISpawnGroup* SpawnGroupToSpawn, const FVector& SpawnLocation, const FRotator& SpawnRotation, bool bAllowAssigningToExternalSpawners)
+{
+    // The native (1.7.2 0x2D74B0) adds the group to ActiveSpawnGroups and queues one pending spawn per enemy with the
+    // director, SecondsBetweenSpawns apart.
+    UFunction* Function = FindStaticFunction_SpawnAIGroup();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
+    Params.Set(L"SpawnGroupToSpawn", SpawnGroupToSpawn);
+    Params.Set(L"SpawnLocation", SpawnLocation);
+    Params.Set(L"SpawnRotation", SpawnRotation);
+    Params.Set(L"SpawnSource", static_cast<UObject*>(nullptr));
+    Params.Set(L"bAllowAssigningToExternalSpawners", bAllowAssigningToExternalSpawners);
+    Params.Set(L"SecondsBetweenSpawns", 0.25f);
+    return Params.Call(this);
 }
 
 void UFortAIEncounterInfo::RollSpawnGroupUpgradeModifiers(const FGuid& GroupGuid, const FFortAISpawnGroupUpgrade& Upgrade, float DifficultyLevel, const FGameplayTagContainer& EnemyTags)

@@ -33,6 +33,7 @@
 #include "Online/FortMcpProfileAccount.h"
 #include "Pawns/FortPawn.h"
 #include "Pawns/FortPlayerPawn.h"
+#include "Player/FortCheatManager.h"
 #include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
 #include "Templates/Casts.h"
@@ -1634,10 +1635,50 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
     }
     UE_LOG(LogFort, Log, TEXT("ServerCheat: %s runs \"%s\" (cheat manager %s)"), *GetNameSafe(this), *Msg, *GetNameSafe(static_cast<UObject*>(CheatManager)));
 
+    // "<command> /Name/" runs the command as another player (#122): their controller's cheat manager runs it, so it gives
+    // them the items, moves their pawn, and so on. The token comes off before the command parses its arguments.
+    FString Command = Msg;
+    FString TargetName;
+    AFortPlayerController* Runner = this;
+    if (UFortCheatManager::SplitCheatTarget(Msg, Command, TargetName))
+    {
+        FString Error;
+        Runner = UFortCheatManager::FindCheatTarget(this, TargetName, Error);
+        if (!Runner)
+        {
+            ClientMessage(Error);
+            return;
+        }
+        if (!Runner->CheatManager)
+        {
+            Runner->AddCheats(true);
+        }
+    }
+
+    // Core's own command lists the cheats it supports (#101).
+    const std::wstring Line = Command.ToStdString();
+    const size_t NameEnd = Line.find_first_of(L" \t");
+    const std::wstring Name = Line.substr(0, NameEnd);
+    if (Name.size() == 10 && _wcsicmp(Name.c_str(), L"corecheats") == 0)
+    {
+        if (UFortCheatManager* FortCheatManager = Cast<UFortCheatManager>(static_cast<UObject*>(CheatManager)))
+        {
+            FortCheatManager->ListCoreCheats(FString(NameEnd == std::wstring::npos ? L"" : Line.c_str() + NameEnd));
+        }
+        return;
+    }
+
     // The native body runs ConsoleCommand(Msg, true), which writes the output to the server's log and replies with an
     // empty ClientMessage. Collecting it instead sends the player what the command printed, "Command not recognized"
-    // included; the cheats' own replies ("God mode on") are ClientMessages of their own.
-    FString Result = ConsoleCommand(Msg, false);
+    // included; the cheats' own replies ("God mode on") are ClientMessages of their own. Core's cheats answer the player
+    // who typed the command when it runs on someone else; the game's own go to the player it ran on.
+    AFortPlayerController* const PreviousReplyTo = UFortCheatManager::ReplyTo;
+    if (Runner != this)
+    {
+        UFortCheatManager::ReplyTo = this;
+    }
+    FString Result = Runner->ConsoleCommand(Command, false);
+    UFortCheatManager::ReplyTo = PreviousReplyTo;
     while (!Result.IsEmpty() && (Result.EndsWith(L"\n") || Result.EndsWith(L"\r")))
     {
         Result = Result.Left(Result.Len() - 1);
@@ -1646,6 +1687,13 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
     {
         UE_LOG(LogFort, Log, TEXT("ServerCheat: %s"), *Result);
         ClientMessage(Result);
+    }
+    if (Runner != this)
+    {
+        APlayerState* TargetState = Runner->PlayerState;
+        const FString RunnerName = TargetState ? static_cast<const FString&>(TargetState->PlayerName) : GetNameSafe(Runner);
+        UE_LOG(LogFort, Log, TEXT("ServerCheat: %s ran \"%s\" on %s"), *GetNameSafe(this), *Command, *RunnerName);
+        ClientMessage(FString::Printf(TEXT("Ran \"%s\" on %s"), *Command, *RunnerName));
     }
 #endif
 }

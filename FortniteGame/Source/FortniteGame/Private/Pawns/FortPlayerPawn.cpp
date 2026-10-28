@@ -52,7 +52,9 @@ namespace
         DefineUProperty(AActor*, Target)
     };
 
-    UFunction* FindFunction(const wchar_t* Path)
+    // Not FindFunction: inside an AFortPlayerPawn member that name is UObject::FindFunction(FName), which takes the
+    // path as a function name of the pawn's class and finds nothing, without a word (#126).
+    UFunction* FindFunctionByPath(const wchar_t* Path)
     {
         UFunction* Function = FindObject<UFunction>(nullptr, Path);
         if (!Function)
@@ -83,7 +85,7 @@ namespace
         {
             return Value;
         }
-        Reflection::FParams Params(FindFunction(L"/Script/Engine.DataTableFunctionLibrary:EvaluateCurveTableRow"), true);
+        Reflection::FParams Params(FindFunctionByPath(L"/Script/Engine.DataTableFunctionLibrary:EvaluateCurveTableRow"), true);
         Params.Set(L"CurveTable", CurveTable);
         Params.Set(L"RowName", static_cast<FName>(Curve.RowName));
         Params.Set(L"InXY", Level);
@@ -148,18 +150,42 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
 
     const bool bSelfRevive = EventInstigator == static_cast<AController*>(Controller);
     UClass* ReviveEffect = bSelfRevive ? static_cast<UClass*>(SelfReviveGameplayEffect) : static_cast<UClass*>(TeammateReviveGameplayEffect);
-    Reflection::FParams Context(FindFunction(L"/Script/GameplayAbilities.AbilitySystemComponent:MakeEffectContext"), true);
-    Reflection::FParams Outgoing(FindFunction(L"/Script/GameplayAbilities.AbilitySystemComponent:MakeOutgoingSpec"), true);
-    if (!Context.Call(AbilitySystem) || !Outgoing.Set(L"GameplayEffectClass", ReviveEffect) || !Outgoing.Set(L"Level", 0.0f)
-        || !Outgoing.CopyStruct(L"Context", Context.GetAddress(L"ReturnValue")) || !Outgoing.Call(AbilitySystem))
+    if (!ReviveEffect)
     {
+        UE_LOG(LogFort, Warning, TEXT("ReviveFromDBNO: %s has no %s revive effect"), *GetNameSafe(this), bSelfRevive ? TEXT("self") : TEXT("teammate"));
+        return;
+    }
+    const auto Failed = [this, EventInstigator](const wchar_t* Step)
+    {
+        UE_LOG(LogFort, Warning, TEXT("ReviveFromDBNO: %s can't revive %s, %s failed"), *GetNameSafe(EventInstigator), *GetNameSafe(this), Step);
+    };
+    Reflection::FParams Context(FindFunctionByPath(L"/Script/GameplayAbilities.AbilitySystemComponent:MakeEffectContext"), true);
+    if (!Context.Call(AbilitySystem))
+    {
+        Failed(TEXT("MakeEffectContext"));
+        return;
+    }
+    Reflection::FParams Outgoing(FindFunctionByPath(L"/Script/GameplayAbilities.AbilitySystemComponent:MakeOutgoingSpec"), true);
+    if (!Outgoing.Set(L"GameplayEffectClass", ReviveEffect) || !Outgoing.Set(L"Level", 0.0f))
+    {
+        Failed(TEXT("MakeOutgoingSpec's GameplayEffectClass or Level"));
+        return;
+    }
+    if (!Outgoing.CopyStruct(L"Context", Context.GetAddress(L"ReturnValue")))
+    {
+        Failed(TEXT("MakeOutgoingSpec's Context"));
+        return;
+    }
+    if (!Outgoing.Call(AbilitySystem))
+    {
+        Failed(TEXT("MakeOutgoingSpec"));
         return;
     }
     // The handle's first member is its spec, null when the effect class is.
     const void* SpecHandle = Outgoing.GetAddress(L"ReturnValue");
     if (!SpecHandle || !*static_cast<void* const*>(SpecHandle))
     {
-        UE_LOG(LogFort, Warning, TEXT("ReviveFromDBNO: %s has no revive effect for %s"), *GetNameSafe(this), *GetNameSafe(EventInstigator));
+        UE_LOG(LogFort, Warning, TEXT("ReviveFromDBNO: %s made no spec of %s for %s"), *GetNameSafe(AbilitySystem), *GetNameSafe(ReviveEffect), *GetNameSafe(this));
         return;
     }
 
@@ -173,20 +199,21 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
     {
         UFortHealthSet* Health = HealthSet;
         const float CurrentHealth = Health ? Health->Health.GetCurrentValue() : 0.0f;
-        Reflection::FParams SetByCaller(FindFunction(L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:AssignSetByCallerMagnitude"), true);
-        if (SetByCaller.CopyStruct(L"SpecHandle", SpecHandle) && SetByCaller.Set(L"DataName", FName(L"ReviveHeal")) && SetByCaller.Set(L"Magnitude", ReviveHealth - CurrentHealth))
+        Reflection::FParams SetByCaller(FindFunctionByPath(L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:AssignSetByCallerMagnitude"), true);
+        if (!SetByCaller.CopyStruct(L"SpecHandle", SpecHandle) || !SetByCaller.Set(L"DataName", FName(L"ReviveHeal")) || !SetByCaller.Set(L"Magnitude", ReviveHealth - CurrentHealth)
+            || !SetByCaller.Call(AbilityLibrary))
         {
-            SetByCaller.Call(AbilityLibrary);
+            Failed(TEXT("AssignSetByCallerMagnitude (ReviveHeal)"));
         }
     }
 
     // No DBNO, so the box teammates revive through goes.
     Natives::AFortPlayerPawn_UpdateDBNOInteractCollision(this);
 
-    Reflection::FParams Apply(FindFunction(L"/Script/GameplayAbilities.AbilitySystemComponent:BP_ApplyGameplayEffectSpecToSelf"), true);
-    if (Apply.CopyStruct(L"SpecHandle", SpecHandle))
+    Reflection::FParams Apply(FindFunctionByPath(L"/Script/GameplayAbilities.AbilitySystemComponent:BP_ApplyGameplayEffectSpecToSelf"), true);
+    if (!Apply.CopyStruct(L"SpecHandle", SpecHandle) || !Apply.Call(AbilitySystem))
     {
-        Apply.Call(AbilitySystem);
+        Failed(TEXT("BP_ApplyGameplayEffectSpecToSelf"));
     }
 
     // The DBNO abilities end (GAB_AthenaDBNO: Gameplay.Action.Player.DBNOAthena), and the AI forget the downed pawn.
@@ -211,23 +238,27 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
     uint64_t& DBNOTimer = *reinterpret_cast<uint64_t*>(reinterpret_cast<uint8_t*>(this) + Natives::AFortPlayerPawn_DBNOTimerHandle);
     if (DBNOTimer)
     {
-        Reflection::FParams ClearTimer(FindFunction(L"/Script/Engine.KismetSystemLibrary:K2_ClearAndInvalidateTimerHandle"), true);
+        Reflection::FParams ClearTimer(FindFunctionByPath(L"/Script/Engine.KismetSystemLibrary:K2_ClearAndInvalidateTimerHandle"), true);
         UObject* SystemLibrary = DefaultOf(L"/Script/Engine.KismetSystemLibrary");
-        if (SystemLibrary && ClearTimer.Set(L"WorldContextObject", static_cast<UObject*>(this)) && ClearTimer.Set(L"Handle", DBNOTimer))
+        if (!SystemLibrary || !ClearTimer.Set(L"WorldContextObject", static_cast<UObject*>(this)) || !ClearTimer.Set(L"Handle", DBNOTimer) || !ClearTimer.Call(SystemLibrary))
         {
-            ClearTimer.Call(SystemLibrary);
+            Failed(TEXT("K2_ClearAndInvalidateTimerHandle (the DBNO timer)"));
         }
         DBNOTimer = 0;
     }
 
     // Getting up (GAB_AthenaDBNORevive triggers on Event.RevivedAthena).
-    Reflection::FParams Event(FindFunction(L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:SendGameplayEventToActor"), true);
+    Reflection::FParams Event(FindFunctionByPath(L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:SendGameplayEventToActor"), true);
     FReviveEventData* Payload = static_cast<FReviveEventData*>(Event.GetAddress(L"Payload"));
     if (AbilityLibrary && Payload && Event.Set(L"Actor", static_cast<AActor*>(this)) && Event.Set(L"EventTag", static_cast<FGameplayTag>(EventReviveTag)))
     {
         Payload->Instigator = EventInstigator;
         Payload->Target = this;
         Event.Call(AbilityLibrary);
+    }
+    else
+    {
+        Failed(TEXT("SendGameplayEventToActor (EventReviveTag)"));
     }
 
     APawn* InstigatorPawn = EventInstigator ? static_cast<APawn*>(EventInstigator->Pawn) : nullptr;

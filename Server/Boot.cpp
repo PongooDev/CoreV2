@@ -48,6 +48,7 @@
 #include "Items/FortSchematicItem.h"
 #include "Items/FortQuickBars.h"
 #include "Pawns/FortAIPawn.h"
+#include "Quests/FortQuestManager.h"
 #include "Player/FortCheatManager.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerControllerDeployableBase.h"
@@ -128,6 +129,7 @@ void Boot::Initialize()
     if (Configuration::Get().IsBattleRoyale())
     {
         UGameMapsSettings::ModeDefaultMap = &AFortGameModeAthena::DefaultMatchURL;
+        UFortQuestManager::Hook();
     }
     Hooks::EnableAll();
 

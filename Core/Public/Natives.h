@@ -352,6 +352,10 @@ namespace Natives
     inline int32_t AFortMissionManager_OnMissionStatusChangeIndex = -1;
     inline int32_t AFortGameStateZone_SetGameplayStateIndex = -1;
     inline void (*UFortQuestManager_SendStatEvent)(UFortQuestManager* This, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush) = nullptr;
+    // SendStatEventWithTags(This, the custom stat name (16 bytes, empty for a typed event), Type, ..., Count, bFlush), and its
+    // flush, which takes the completion delegate by value (0x38 bytes, all zero: unbound) and destroys it.
+    inline void (*UFortQuestManager_SendStatEventWithTags)(UFortQuestManager* This, const void* CustomStatName, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush) = nullptr;
+    inline void (*UFortQuestManager_FlushStatEvents)(UFortQuestManager* This, void* OnComplete) = nullptr;
     inline void (*UFortQuestManager_SendEndPrimaryMission)(UFortQuestManager* This, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, FScriptArray& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus) = nullptr;
     inline void* (*UGameInstance_GetGameSessionId)(UGameInstance* This, void* Result) = nullptr;
     inline FString* (*UEnum_GetEnumName)(const UObject* This, FString* Result, int32_t Index) = nullptr;

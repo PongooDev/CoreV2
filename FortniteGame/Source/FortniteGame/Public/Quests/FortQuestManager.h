@@ -89,6 +89,12 @@ public:
     void SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
     void SendItemStatEvent(EFortQuestObjectiveStatEvent Type, UFortItemDefinition* ItemDefinition, int32_t Count);
     void SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus);
+
+    // Saves Battle Royale's challenge progress (1.8), which the game keeps on the server.
+    static void Hook();
+
+private:
+    static void SendStatEventWithTagsHK(UFortQuestManager* This, const void* CustomStatName, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
 };
 
 class UFortRegisteredPlayerInfo : public UObject
@@ -116,5 +122,12 @@ public:
         constexpr uint8_t Campaign = 0;
         return Member_QuestManager.IsAvailable() ? static_cast<UFortQuestManager*>(QuestManager)
             : Member_QuestManagers.IsAvailable() ? Reflection::AccessMember<FQuestManagers>(this, Member_QuestManagers).FindRef(Campaign) : nullptr;
+    }
+
+    // Battle Royale's quest manager (1.8: the athena profile's challenges), null before 1.8.
+    UFortQuestManager* GetAthenaQuestManager()
+    {
+        constexpr uint8_t Athena = 1;
+        return Member_QuestManagers.IsAvailable() ? Reflection::AccessMember<FQuestManagers>(this, Member_QuestManagers).FindRef(Athena) : nullptr;
     }
 };

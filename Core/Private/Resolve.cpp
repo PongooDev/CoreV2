@@ -5664,6 +5664,38 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall()
     return nullptr;
 }
 
+bool Finder::ResolveQuestStatEvents()
+{
+    // UFortQuestManager::SendStatEventWithTags (1.8 0x890730), which every stat event goes through (SendStatEvent,
+    // 0x8918D0, is its wrapper), logs the client string. When an event asked for a flush it hands the quest manager's
+    // progress to its flush (0x88E060, at 0x891792): with nothing pending that only runs the delegate it is given, else
+    // it calls SaveStatEvents (0x891940, the "SaveStatEvents for" log), which sends UpdateQuests to the quest manager's
+    // profile. The flush is the call in SendStatEventWithTags that calls SaveStatEvents; 1.7.2 has the same three
+    // (0x86F450, 0x86CD60, 0x870690).
+    const uintptr_t SendStatEventWithTags = FunctionOf(L"SendStatEventWithTags: Cannot be called on the client!");
+    const uintptr_t SaveStatEvents = FunctionOf(L"SaveStatEvents for %s: %s");
+    const uintptr_t SendEnd = SendStatEventWithTags ? Finder::FunctionEnd(SendStatEventWithTags) : 0;
+    uintptr_t Flush = 0;
+    for (const auto& [Site, Target] : SendEnd && SaveStatEvents ? Finder::DirectCalls(SendStatEventWithTags, SendEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        const uintptr_t TargetEnd = Flush || !IsInText(Target) ? 0 : Finder::FunctionEnd(Target);
+        if (TargetEnd > Target && TargetEnd - Target < 0x400 && CallWithin(Target, TargetEnd - Target, SaveStatEvents))
+        {
+            Flush = Target;
+        }
+    }
+    if (!Flush)
+    {
+        Log::Error(L"Finder: UFortQuestManager's stat event flush not found (SendStatEventWithTags {}, SaveStatEvents {})", SendStatEventWithTags != 0, SaveStatEvents != 0);
+        return false;
+    }
+
+    Natives::UFortQuestManager_SendStatEventWithTags = reinterpret_cast<decltype(Natives::UFortQuestManager_SendStatEventWithTags)>(SendStatEventWithTags);
+    Natives::UFortQuestManager_FlushStatEvents = reinterpret_cast<decltype(Natives::UFortQuestManager_FlushStatEvents)>(Flush);
+    Log::Info(L"Finder: UFortQuestManager::SendStatEventWithTags at 0x{:X} flushes at 0x{:X}", SendStatEventWithTags - Finder::ImageBase(), Flush - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveAthenaHeroLive()
 {
     static bool bSearched = false;

@@ -85,6 +85,33 @@ FName AFortGameModeAthena::RedirectLootTierGroup(FName TierGroup)
     return Redirected;
 }
 
+bool AFortGameModeAthena::AddPlaylistContextTag(FGameplayTagContainer& Tags)
+{
+    // The game mode's GameContextTags (1.8 +0x5A0) are the context of every quest event (AFortPlayerController's
+    // GetSourceAndContextTags, 0x87DC20, through the game mode's 0x3F2D80), and Battle Royale's objectives ask for the
+    // playlist there (interact_athena_treasurechest, daily_athena_loot_chest's: Athena.Playlist). Only Save the World's
+    // world record fills them (OnInitWorldRecordComplete, 0x591340: theater, zone theme and tile tags; BP_ZT_Athena has
+    // no ZoneTags), and no code names the Athena.Playlist tags (PvPTags rows 21-23), so a Battle Royale event had no
+    // context and matched none of them. The playlist ids are MCP's, as the match's CurrentPlaylistId has them.
+    const int32_t PlaylistId = CurrentPlaylistId;
+    const wchar_t* const Name = PlaylistId == 2 ? L"Athena.Playlist.Solo" : PlaylistId == 10 ? L"Athena.Playlist.Duo" : PlaylistId == 9 ? L"Athena.Playlist.Squad" : L"Athena.Playlist";
+    const FGameplayTag Tag{ FName(Name) };
+    if (Tags.GameplayTags.Contains(Tag))
+    {
+        return false;
+    }
+    Tags.GameplayTags.Add(Tag);
+    for (const wchar_t* const ParentName : { L"Athena.Playlist", L"Athena" })
+    {
+        const FGameplayTag Parent{ FName(ParentName) };
+        if (!(Parent == Tag) && !Tags.ParentTags.Contains(Parent))
+        {
+            Tags.ParentTags.Add(Parent);
+        }
+    }
+    return true;
+}
+
 APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
 {
 #if WITH_SERVER_CODE

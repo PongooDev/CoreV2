@@ -136,6 +136,7 @@ namespace Finder
     bool ResolveOutpostMcpRequestLive();
     bool ResolveResetGameplayAttributesLive();
     bool ResolveLootTierRedirectLive();
+    bool ResolveQuestStatEvents();
     bool ResolveAthenaHeroLive();
     uint8_t* AircraftPhasePlayerCleanupCall();
     bool ResolveAthenaMenuHero();

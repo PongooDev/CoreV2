@@ -66,6 +66,7 @@ private:
     FVector GetAthenaTossForward();
     float GetAthenaLootFront();
     FVector GetAthenaLootSpawnLocation();
+    float GetAthenaLootTossUpSpeed();
     std::vector<FVector> GetAthenaLootSpots(int32_t Count);
     void GetFloorLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation);
 

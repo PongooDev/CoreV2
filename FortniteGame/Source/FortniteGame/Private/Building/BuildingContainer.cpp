@@ -195,14 +195,36 @@ float ABuildingContainer::GetAthenaLootFront()
 
 FVector ABuildingContainer::GetAthenaLootSpawnLocation()
 {
-    // LootSpawnLocation (a tiered chest's mesh sets: 100 over its pivot) is inside the container's top, and a pickup's
-    // collision cylinder (radius 30, half height 80: AFortPickup's constructor, 1.7.2 0x65BA90) sweeps against it, so loot
-    // launched from there with little forward speed came down on the lid. It leaves at that height from just past the
-    // front of the container's collision instead.
+    // Battle Royale's chests and ammo boxes pop their loot out from the edge of their collision (#90). LootSpawnLocation
+    // is no longer the container's own point by then: SetMeshSet (1.7.2 0x45F840, called by SelectMeshSet 0x47E2A0)
+    // copies the chosen mesh set's over it, and every tiered mesh set keeps the FMeshSet default, 100 over the pivot. Loot
+    // started there, 31 above a chest's lid (Tiered_Chest_6_Parent's mesh is 69 high) and 51 above an ammo box's (49).
+    // The class's own point (its default object's) is the one its blueprint sets: a chest's (0, 42, 72) is just past its
+    // front (local +Y, 30 from the pivot) at the top of the lid, an ammo box's (Tiered_Short_Ammo_3_Parent) (0, 0, 32)
+    // is inside it. The loot leaves from that point, moved out to just past the front of the container's collision, and
+    // no lower than where the pickup's own collision (a capsule, radius 30, half height 80: AFortPickup's constructor,
+    // 1.7.2 0x65BA90, 1.8 0x677F80) would sit on the container's floor, as its toss can't start inside the floor. For
+    // both that is 80 over the pivot (where the pickup comes to rest on the floor in front), 11 above a chest's lid.
     constexpr float PickupRadius = 30.0f;
-    const FVector Location = GetTransform().TransformPosition(LootSpawnLocation);
+    constexpr float PickupHalfHeight = 80.0f;
+    ABuildingContainer* Default = static_cast<ABuildingContainer*>(GetClass()->GetDefaultObject());
+    const FVector LocalLocation = Default && Default != this ? static_cast<FVector>(Default->LootSpawnLocation) : static_cast<FVector>(LootSpawnLocation);
+    const FTransform ContainerTransform = GetTransform();
+    FVector Location = ContainerTransform.TransformPosition(LocalLocation);
     const FVector Forward = GetAthenaTossForward();
-    return Location + Forward * std::max(GetAthenaLootFront() + PickupRadius - (Location | Forward), 0.0f);
+    Location = Location + Forward * std::max(GetAthenaLootFront() + PickupRadius - (Location | Forward), 0.0f);
+    Location.Z = std::max(Location.Z, ContainerTransform.GetLocation().Z + PickupHalfHeight);
+    return Location;
+}
+
+float ABuildingContainer::GetAthenaLootTossUpSpeed()
+{
+    // How fast the container's own toss goes up: LootTossSpeed_Athena (550) at LootTossDirection_Athena's pitch (65),
+    // set by the constructor (1.7.2 0x457940). Under Battle Royale's gravity (2800) that lifts the loot 44 over where it
+    // starts, to 124 over the pivot (#95's arc rose 70 over its start, to 170).
+    constexpr float DegreesToRadians = 3.1415926535897932f / 180.0f;
+    const float Pitch = FMath::Clamp(static_cast<FRotator>(LootTossDirection_Athena).Pitch, 0.0f, 90.0f) * DegreesToRadians;
+    return std::max(static_cast<float>(LootTossSpeed_Athena), 0.0f) * std::sin(Pitch);
 }
 
 std::vector<FVector> ABuildingContainer::GetAthenaLootSpots(int32_t Count)
@@ -491,6 +513,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
             ModifyLootDrops(LootDrops, LooterController);
             AFortPickup::CombineItemEntries(LootDrops, LooterController ? static_cast<AFortInventory*>(LooterController->WorldInventory) : nullptr);
             const std::vector<FVector> LootSpots = bAthena ? GetAthenaLootSpots(LootDrops.Num()) : std::vector<FVector>();
+            const float TossUpSpeed = bAthena ? GetAthenaLootTossUpSpeed() : 0.0f;
             HighestRarity = 0;
             for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
             {
@@ -514,7 +537,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
                 {
                     if (bAthena)
                     {
-                        Pickup->TossFromContainer(LootSpots[Index]);
+                        Pickup->TossFromContainer(LootSpots[Index], TossUpSpeed);
                     }
                     else
                     {

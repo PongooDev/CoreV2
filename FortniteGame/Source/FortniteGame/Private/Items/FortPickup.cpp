@@ -339,20 +339,21 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
     WatchForCombine();
 }
 
-void AFortPickup::TossFromContainer(const FVector& FloorLocation)
+void AFortPickup::TossFromContainer(const FVector& FloorLocation, float LaunchUpSpeed)
 {
     // A toss (1.7.2 0x6622F0, run by 0x680570 on the server) launches the pickup's projectile movement, and clients play
     // it from the replicated movement (the pickup's PostNetReceiveVelocity, 0x67BAD0, feeds the projectile). A
     // container's loot is launched onto its spot like a dropped item's (TossOntoFloor), and bTossedFromContainer tells
-    // clients (OnRep_TossedFromContainer, 0x67A830: the pickup effect's OnTossed and the touch collision).
-    TossOntoFloor(FloorLocation, nullptr);
+    // clients (OnRep_TossedFromContainer, 0x67A830: the pickup effect's OnTossed and the touch collision). It goes up at
+    // the container's own toss speed (LaunchUpSpeed), not TossOntoFloor's rise.
+    TossOntoFloor(FloorLocation, nullptr, LaunchUpSpeed);
     if (Member_bTossedFromContainer.IsAvailable())
     {
         bTossedFromContainer = true;
     }
 }
 
-void AFortPickup::TossOntoFloor(const FVector& FloorLocation, AFortPawn* ItemOwner)
+void AFortPickup::TossOntoFloor(const FVector& FloorLocation, AFortPawn* ItemOwner, float LaunchUpSpeed)
 {
     // A toss doesn't reach the location it is given (#89). 0x680570 launches at 45 degrees with a horizontal speed of the
     // distance over the fly time (about 1.4s) and drops the gravity its solver (0x2A7160) works out for that flight, so the
@@ -362,8 +363,8 @@ void AFortPickup::TossOntoFloor(const FVector& FloorLocation, AFortPawn* ItemOwn
     // (its root is 80 above it), with the horizontal speed spread over the flight and the hops that follow (each bounce
     // keeps Bounciness of the vertical speed and 1 - Friction of the horizontal: 0.6 and 0.5). Measured on a 1.7.2 server,
     // pickups come to rest within 10 of their spot, after about a second. One aimed past a ledge still lands on the upper
-    // floor, short of it.
-    constexpr float Rise = 70.0f;
+    // floor, short of it. Given a LaunchUpSpeed, it rises as far as that speed takes it instead of Rise.
+    constexpr float DefaultRise = 70.0f;
     TossPickup(FloorLocation, ItemOwner, 0);
     UProjectileMovementComponent* Movement = MovementComponent;
     const float Gravity = Movement && Role == ROLE_Authority ? -Movement->GetGravityZ() : 0.0f;
@@ -378,6 +379,7 @@ void AFortPickup::TossOntoFloor(const FVector& FloorLocation, AFortPawn* ItemOwn
     GetActorBounds(true, Origin, Extent);
     const float RestHeight = FMath::Max(Start.Z - (Origin.Z - Extent.Z), 0.0f);
     const FVector Target(FloorLocation.X, FloorLocation.Y, FloorLocation.Z + RestHeight);
+    const float Rise = LaunchUpSpeed > 0.0f ? LaunchUpSpeed * LaunchUpSpeed / (2.0f * Gravity) : DefaultRise;
     const float Apex = std::max(Start.Z, Target.Z) + Rise;
     const float UpSpeed = std::sqrt(2.0f * Gravity * (Apex - Start.Z));
     const float FallSpeed = std::sqrt(2.0f * Gravity * (Apex - Target.Z));

@@ -50,6 +50,7 @@ class UFortGameData : public UObject
 public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
     DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, HarvestingTools)
+    DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, CheatInventoryItems)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)

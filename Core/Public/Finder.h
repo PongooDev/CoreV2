@@ -96,6 +96,7 @@ namespace Finder
     bool ResolveOnlineVoice();
     bool ResolveVoiceHandshake();
     bool ResolvePlayerControllerConsoleCommand(uintptr_t ServerCheatImplementation);
+    bool ResolveAssetManagerLive();
     bool ResolveProcessEvent();
     bool ResolveInitListen();
     bool ResolveReplicationLive();

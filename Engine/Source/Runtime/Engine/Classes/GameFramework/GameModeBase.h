@@ -11,10 +11,12 @@ class AGameModeBase : public AInfo
 {
     DefineUnrealClass(AGameModeBase, Engine)
     DefineUFunction(GetDefaultPawnClassForController)
+    DefineUFunction(RestartPlayer)
 
 public:
     DefineUProperty(TSubclassOf<AGameSession>, GameSessionClass)
     DefineUProperty(AGameSession*, GameSession)
 
     UClass* GetDefaultPawnClassForController(AController* InController);
+    void RestartPlayer(AController* NewPlayer);
 };

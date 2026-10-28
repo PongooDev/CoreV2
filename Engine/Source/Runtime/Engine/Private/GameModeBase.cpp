@@ -9,3 +9,10 @@ UClass* AGameModeBase::GetDefaultPawnClassForController(AController* InControlle
     Params.Set(L"InController", InController);
     return Params.Call(this) ? Params.Take<UClass*>(L"ReturnValue") : nullptr;
 }
+
+void AGameModeBase::RestartPlayer(AController* NewPlayer)
+{
+    Reflection::FParams Params(StaticFunction_RestartPlayer());
+    Params.Set(L"NewPlayer", NewPlayer);
+    Params.Call(this);
+}

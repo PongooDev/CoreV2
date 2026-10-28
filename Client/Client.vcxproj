@@ -226,6 +226,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Actor.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Character.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\CharacterMovementComponent.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\CheatManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Controller.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameMode.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameModeBase.h" />
@@ -305,6 +306,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerControllerAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerPawnAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerStateAthena.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortSafeZoneIndicator.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingContainer.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingSMActor.h" />
@@ -344,6 +346,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortAIPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPlayerPawn.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortCheatManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerController.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerControllerDeployableBase.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerControllerOutpost.h" />
@@ -408,8 +411,10 @@
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\WeakObjectPtr.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Actor.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ActorReplication.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AssetManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Character.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CharacterMovementComponent.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CheatManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Controller.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\DataChannel.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\DataReplication.cpp" />
@@ -504,6 +509,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortAIPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPlayerPawn.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortCheatManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerDeployableBase.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerOutpost.cpp" />

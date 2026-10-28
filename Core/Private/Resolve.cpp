@@ -3231,6 +3231,43 @@ bool Finder::ResolvePlayerControllerConsoleCommand(uintptr_t ServerCheatImplemen
     return true;
 }
 
+bool Finder::ResolveAssetManagerLive()
+{
+    if (Natives::UAssetManager_GetPrimaryAssetDataListIndex >= 0)
+    {
+        return true;
+    }
+
+    // UFortCheatManager::ListWeapons (1.7.2 0x7D8750, 1.8 0x7F04D0; its exec tail-jumps to it) is UFortAssetManager::Get()
+    // then the manager's item type lister (0x53EAD0, 0x551C30) for weapons ("mov dl, 0Fh; call"), whose only virtual
+    // call is the asset manager's GetPrimaryAssetDataList: call [reg+0x260] on both.
+    const UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortCheatManager:ListWeapons");
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t Jump = IsInText(Exec) ? FindInstruction(Exec, Exec + 0x20, { 0xE9 }) : 0;
+    const uintptr_t List = Jump ? Finder::RelativeTarget(Jump, 1, 5) : 0;
+    const uintptr_t ListEnd = IsInText(List) && Finder::FunctionStart(List) == List ? Finder::FunctionEnd(List) : 0;
+    uintptr_t ItemsOfType = 0;
+    for (const auto& [Call, Target] : ListEnd ? Finder::DirectCalls(List, std::min(ListEnd, List + 0x80)) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (Byte(Call - 2) == 0xB2)
+        {
+            ItemsOfType = Target;
+            break;
+        }
+    }
+    const uintptr_t ItemsOfTypeEnd = ItemsOfType && Finder::FunctionStart(ItemsOfType) == ItemsOfType ? Finder::FunctionEnd(ItemsOfType) : 0;
+    const int32_t Index = ItemsOfTypeEnd ? VirtualSlot(FindVirtualCall(ItemsOfType, ItemsOfTypeEnd)) : -1;
+    if (Index < 0x20 || Index > 0x100)
+    {
+        Log::Error(L"Finder: UAssetManager::GetPrimaryAssetDataList not found (ListWeapons 0x{:X}, item type lister 0x{:X}, slot {})", List ? List - Finder::ImageBase() : 0, ItemsOfType ? ItemsOfType - Finder::ImageBase() : 0, Index);
+        return false;
+    }
+
+    Natives::UAssetManager_GetPrimaryAssetDataListIndex = Index;
+    Log::Info(L"Finder: UAssetManager::GetPrimaryAssetDataList is slot 0x{:X} (item type lister +0x{:X})", Index, ItemsOfType - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveReplicationLive()
 {
     MissingCount = 0;

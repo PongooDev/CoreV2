@@ -54,7 +54,7 @@ AFortAIGoalManager* UFortKismetLibrary::GetAIGoalManager(UObject* WorldContextOb
     return AFortAIGoalManager::GetCurrent(WorldContextObject);
 }
 
-void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer)
+void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t Level, bool bLoadFullClip)
 {
 #if WITH_SERVER_CODE
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(InventoryOwner.GetObject());
@@ -71,7 +71,7 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
     FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
-    FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToGive, 1);
+    FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToGive, Level);
 
     const bool bBackpack = PlayerController && static_cast<AFortInventory*>(PlayerController->WorldInventory) == Inventory;
     const int32_t Count = NumberToGive - Inventory->GetOverflowAmount(*ItemEntry, false);
@@ -87,7 +87,7 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
         },
         [&](int32_t StackCount, bool bOverflow) -> UFortWorldItem*
         {
-            UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(StackCount, 1));
+            UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ItemDefinition->CreateTemporaryItemInstanceBP(StackCount, Level));
             if (!WorldItem)
             {
                 return nullptr;
@@ -95,6 +95,10 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
 
             FFortItemEntry& NewEntry = WorldItem->ItemEntry;
             NewEntry.inventory_overflow_date = bOverflow;
+            if (bLoadFullClip)
+            {
+                NewEntry.LoadFullClip();
+            }
             if (PlayerController)
             {
                 WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
@@ -118,6 +122,10 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
     if (Given < NumberToGive && Pawn)
     {
         ItemEntry->Count = NumberToGive - Given;
+        if (bLoadFullClip)
+        {
+            ItemEntry->LoadFullClip();
+        }
         const FVector Location = Pawn->GetTransform().GetLocation();
         if (AFortPickup* Pickup = AFortPickup::CreatePickup(PlayerController->GetWorld(), *ItemEntry, &Location))
         {
@@ -133,12 +141,12 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
 #endif
 }
 
-void UFortKismetLibrary::K2_GiveItemToPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer)
+void UFortKismetLibrary::K2_GiveItemToPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t Level, bool bLoadFullClip)
 {
 #if WITH_SERVER_CODE
     if (PlayerController && ItemDefinition)
     {
-        GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(PlayerController, nullptr), ItemDefinition, NumberToGive, bNotifyPlayer);
+        GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(PlayerController, nullptr), ItemDefinition, NumberToGive, bNotifyPlayer, Level, bLoadFullClip);
     }
 #endif
 }

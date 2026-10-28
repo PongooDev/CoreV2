@@ -409,6 +409,7 @@ namespace Natives
     inline int32_t APlayerController_ConsoleKeyIndex = -1;
     inline int32_t APlayerController_SendToConsoleIndex = -1;
     inline int32_t APlayerController_AddCheatsIndex = -1;
+    inline int32_t UAssetManager_GetPrimaryAssetDataListIndex = -1;
     inline int32_t AFortPlayerController_PushToTalkPressedIndex = -1;
     inline int32_t AFortPlayerController_PushToTalkReleasedIndex = -1;
     inline int32_t APlayerController_ConsoleCommandIndex = -1;

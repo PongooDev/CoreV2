@@ -47,6 +47,7 @@
 #include "Items/FortSchematicItem.h"
 #include "Items/FortQuickBars.h"
 #include "Pawns/FortAIPawn.h"
+#include "Player/FortCheatManager.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerControllerDeployableBase.h"
 #include "Player/FortPlayerControllerOutpost.h"
@@ -152,6 +153,7 @@ void Boot::Initialize()
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
         AFortAIPawn::HookVTables();
         ACharacter::HookCheatMovement();
+        UFortCheatManager::HookNatives();
         Finder::ResolveNavigationSystemLive();
         if (Configuration::Get().IsBattleRoyale())
         {

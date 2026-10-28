@@ -829,6 +829,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\CharacterMovementComponent.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\GameFramework</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\CheatManager.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\GameFramework</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Controller.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\GameFramework</Filter>
     </ClInclude>
@@ -1066,6 +1069,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerStateAthena.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortSafeZoneIndicator.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Building</Filter>
     </ClInclude>
@@ -1182,6 +1188,9 @@
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPlayerPawn.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Pawns</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortCheatManager.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Player</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerController.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Player</Filter>
@@ -1361,10 +1370,16 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ActorReplication.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AssetManager.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Character.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CharacterMovementComponent.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CheatManager.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Controller.cpp">
@@ -1648,6 +1663,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPlayerPawn.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Pawns</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortCheatManager.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Player</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Player</Filter>

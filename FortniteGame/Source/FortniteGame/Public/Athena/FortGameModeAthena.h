@@ -3,6 +3,7 @@
 #include "FortGameModeZone.h"
 
 class AController;
+class AFortSafeZoneIndicator;
 class AActor;
 class APawn;
 class UObject;
@@ -14,6 +15,11 @@ class AFortGameModeAthena : public AFortGameModeZone
     DefineUnrealClass(AFortGameModeAthena, FortniteGame)
 
 public:
+    DefineUProperty(int32_t, SafeZonePhase)
+    DefineUProperty(AFortSafeZoneIndicator*, SafeZoneIndicator)
+    // Each safe zone's center, picked when the storm starts (index: the phase).
+    DefineUProperty(TArray<FVector>, SafeZoneLocations)
+
     // Where a Battle Royale server starts: the Battle Royale zone theme's map and playlist
     // ("/Game/Athena/Maps/Athena_Terrain?playlistId=2" on 1.7.2), or empty when the build has none.
     static FString DefaultMatchURL();

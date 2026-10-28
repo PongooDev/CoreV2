@@ -7427,12 +7427,32 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     // GetEditingPlayer, SetEditingPlayer (1.8 and 1.8.1 0x149-0x14E), and OnServerAttemptBuildingUpgrade right before
     // IsBeingPlayerEdited (0xCC, 0xCD). ReplaceBuildingActor spawns the new piece, SetEditingPlayer stores the player
     // state, and the upgrade replaces the piece.
+    // Natives::UWorld_SpawnActor is the FTransform overload (the "no class was specified" one, 1.8.1 0x225B5F0). Game
+    // code calls the location and rotation overload (0x225C530), a short wrapper that builds the transform and calls it.
+    const uintptr_t SpawnActor = reinterpret_cast<uintptr_t>(Natives::UWorld_SpawnActor);
+    const auto IsSpawnActor = [SpawnActor](uintptr_t Target)
+    {
+        const uintptr_t TargetEnd = Target && Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        return SpawnActor && (Target == SpawnActor || (TargetEnd > Target && TargetEnd - Target < 0x100 && CallWithin(Target, TargetEnd - Target, SpawnActor)));
+    };
+    const auto CallsSpawnActor = [&IsSpawnActor](uintptr_t Begin, uintptr_t End)
+    {
+        for (uintptr_t Call = End > Begin ? FindRawCall(Begin, End) : 0; Call; Call = FindRawCall(Call + 1, End))
+        {
+            if (IsSpawnActor(Finder::RelativeTarget(Call, 1, 5)))
+            {
+                return Call;
+            }
+        }
+        return static_cast<uintptr_t>(0);
+    };
+
     const int32_t Replace = GetEditing >= 4 ? GetEditing - 4 : -1;
     const int32_t SetEditing = GetEditing >= 0 ? GetEditing + 1 : -1;
     const int32_t Upgrade = IsBeingEdited >= 1 ? IsBeingEdited - 1 : -1;
     const uintptr_t ReplaceEntry = VTableEntry(BuildingVTable, Replace);
     const uintptr_t ReplaceEnd = ReplaceEntry && Finder::FunctionStart(ReplaceEntry) == ReplaceEntry ? Finder::FunctionEnd(ReplaceEntry) : 0;
-    const bool bReplaceSpawns = ReplaceEnd > ReplaceEntry && CallWithin(ReplaceEntry, ReplaceEnd - ReplaceEntry, reinterpret_cast<uintptr_t>(Natives::UWorld_SpawnActor));
+    const bool bReplaceSpawns = ReplaceEnd > ReplaceEntry && CallsSpawnActor(ReplaceEntry, ReplaceEnd) != 0;
     const uintptr_t SetEditingEntry = VTableEntry(BuildingVTable, SetEditing);
     const bool bSetEditingStores = SetEditingEntry && FindInstruction(SetEditingEntry, SetEditingEntry + 0x60, { 0x48, 0x89, -1, O0, O1, O2, O3 });
     const bool bUpgradeReplaces = Has(Slots(VTableEntry(BuildingVTable, Upgrade)), Replace);
@@ -7442,11 +7462,7 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     const int32_t SetMirrored = ImplementationOf(L"/Script/FortniteGame.BuildingSMActor:SetMirrored");
     const uintptr_t AICreate = ExecImplementation(L"/Script/FortniteGame.FortAIController:CreateBuildingActor");
     const uintptr_t AICreateEnd = AICreate && Finder::FunctionStart(AICreate) == AICreate ? Finder::FunctionEnd(AICreate) : 0;
-    uintptr_t SpawnCall = 0;
-    for (uintptr_t Call = AICreateEnd ? FindRawCall(AICreate, AICreateEnd) : 0; Call && !SpawnCall; Call = FindRawCall(Call + 1, AICreateEnd))
-    {
-        SpawnCall = Finder::RelativeTarget(Call, 1, 5) == reinterpret_cast<uintptr_t>(Natives::UWorld_SpawnActor) ? Call : 0;
-    }
+    const uintptr_t SpawnCall = AICreateEnd ? CallsSpawnActor(AICreate, AICreateEnd) : 0;
     int32_t AfterSpawn[3] = { -1, -1, -1 };
     uintptr_t Site = SpawnCall ? FindVirtualCall(SpawnCall + 5, AICreateEnd) : 0;
     for (int32_t Index = 0; Index < 3 && Site; ++Index, Site = FindVirtualCall(Site + 1, AICreateEnd))

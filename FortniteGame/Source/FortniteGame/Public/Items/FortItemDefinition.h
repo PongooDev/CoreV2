@@ -44,6 +44,7 @@ class EFortItemType
     DefineUEnumValue(BackpackPickup)
     DefineUEnumValue(BuildingPiece)
     DefineUEnumValue(CharacterPart)
+    DefineUEnumValue(Consumable) // 1.8.1 and later; resolves to Reflection::InvalidEnumValue before that
     DefineUEnumValue(Deco)
     DefineUEnumValue(EditTool)
     DefineUEnumValue(Ingredient)

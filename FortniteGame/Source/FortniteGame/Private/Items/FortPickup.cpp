@@ -149,9 +149,10 @@ namespace
             });
     }
 
-    // Battle Royale swaps a weapon picked up with a full backpack for the item in the player's hands (#88). Its controller
-    // lets the client pick one up then (AFortPlayerControllerAthena's override of the overflow bypass, 1.7.2 0x434C20, slot
-    // 0x2B8: a weapon-type item, the backpack's count at its size, and the focused quickbar slot's item, 0x66BF80, one that
+    // Battle Royale swaps a weapon (or consumable) picked up with a full backpack for the item in the player's hands (#88,
+    // #124). Its controller lets the client pick one up then (AFortPlayerControllerAthena's override of the overflow
+    // bypass, 1.7.2 0x434C20, slot 0x2B8, which the pickup's CanInteract 0x6618E0 asks before the overflow: a swappable
+    // item type, the backpack's count at its size, and the focused quickbar slot's item, 0x66BF80, one that
     // bCanBeDropped; the pickaxe can't) and shows "Swap equipped" (0x66C3C0), but the swap was in the stripped give: Core's
     // tossed the weapon back down. The held item is dropped as the player's own drop would be; returns the primary slot
     // it emptied, or -1.
@@ -164,23 +165,51 @@ namespace
     // inventory update (0x82EAB0), when its own quickbar may still lack the weapon: it then can't focus the weapon's
     // slot, and the server's focus never changed, so nothing corrects it. The player held the new weapon with the
     // pickaxe slot, or the previous one, focused (#88).
+    //
+    // The item types are the override's own. 1.1 to 1.8 (1.7.2 0x434C20, 1.8 0x438A30) take Weapon, WeaponMelee and
+    // WeaponRanged, the type consumables had too. 1.8.1 added EFortItemType::Consumable (enum value 6, the weapon types
+    // moved up one) and gave it to the consumables (Athena_Shields, Bandage, Medkit...: ItemType Consumable), and its
+    // override (0x427BD0, AFortPlayerControllerAthena slot 0x2BC) takes Consumable as well (#124). Core's swap only
+    // took the weapon types, so on 1.8.1 a consumable picked up with a full backpack flew in and was tossed straight
+    // back down, the held item staying where it was.
+    //
+    // A stack that part fits, the overflow short of the pickup's count, isn't swapped: what fits tops up the player's
+    // stacks and the rest goes back down, as before. Only an item with no room at all takes the held slot, so ammo,
+    // resources and a consumable that stacks onto the player's own still stack.
+    bool IsSwappableItemType(EFortItemType ItemType)
+    {
+        const EFortItemType Consumable = EFortItemType::GetConsumable();
+        return ItemType == EFortItemType::GetWeapon() || ItemType == EFortItemType::GetWeaponMelee() || ItemType == EFortItemType::GetWeaponRanged()
+            || (Consumable != Reflection::InvalidEnumValue && ItemType == Consumable);
+    }
+
     int32_t DropFocusedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry)
     {
         const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
         const EFortItemType ItemType = ItemDefinition ? static_cast<EFortItemType>(ItemDefinition->ItemType) : EFortItemType::GetMax_None();
-        const bool bWeapon = ItemType == EFortItemType::GetWeapon() || ItemType == EFortItemType::GetWeaponMelee() || ItemType == EFortItemType::GetWeaponRanged();
         AFortInventory* Inventory = PlayerController->WorldInventory;
         AFortQuickBars* Bars = PlayerController->QuickBars;
-        if (!bWeapon || !Inventory || !Bars || !AFortGameModeAthena::GetCurrent(PlayerController) || Inventory->GetOverflowAmount(ItemEntry, true) <= 0)
+        if (!ItemDefinition || !Inventory || !Bars || ItemEntry.Count <= 0 || !AFortGameModeAthena::GetCurrent(PlayerController))
         {
             return -1;
         }
+        const int32_t Overflow = IsSwappableItemType(ItemType) ? Inventory->GetOverflowAmount(ItemEntry, true) : 0;
+        if (Overflow < ItemEntry.Count)
+        {
+            if (Overflow > 0)
+            {
+                Log::Info(L"Battle Royale: {} of {}'s {} {} fit, the rest goes back down instead of a swap", static_cast<int32_t>(ItemEntry.Count) - Overflow,PlayerController->GetName().ToStdString(), static_cast<int32_t>(ItemEntry.Count), ItemDefinition->GetName().ToStdString());
+            }
+            return -1;
+        }
 
-        // Only a primary slot that takes the new weapon is swapped, never the harvesting tool's.
+        // Only a primary slot that takes the new item is swapped, never the harvesting tool's.
         const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
         const int32_t FocusedSlot = Bars->GetCurrentQuickBar() == Primary ? static_cast<int32_t>(Bars->GetQuickBar(Primary).CurrentFocusedSlot) : -1;
         if (FocusedSlot <= 0 || FocusedSlot >= Bars->GetQuickBar(Primary).Slots.Num() || !Bars->GetSlotData(Primary, FocusedSlot).AcceptedItemTypes.Contains(ItemType))
         {
+            Log::Info(L"Battle Royale: {}'s {} isn't swapped: the focused slot is {} on the {} bar", PlayerController->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), FocusedSlot,
+                Bars->GetCurrentQuickBar() == Primary ? L"primary" : L"other");
             return -1;
         }
         const TArray<FGuid>& SlotItems = Bars->GetSlot(Primary, FocusedSlot).Items;
@@ -189,6 +218,8 @@ namespace
         UFortWorldItemDefinition* FocusedDefinition = FocusedEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(FocusedEntry->ItemDefinition)) : nullptr;
         if (!FocusedDefinition || !FocusedDefinition->bCanBeDropped)
         {
+            Log::Info(L"Battle Royale: {}'s {} isn't swapped: quickbar slot {} holds {}", PlayerController->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), FocusedSlot,
+                FocusedDefinition ? L"an item that can't be dropped" : L"no item");
             return -1;
         }
 
@@ -199,6 +230,7 @@ namespace
         }
         if (Inventory->FindWorldItem(FocusedGuid))
         {
+            Log::Warning(L"Battle Royale: {}'s {} in quickbar slot {} wasn't dropped, so {} isn't swapped in", PlayerController->GetName().ToStdString(), FocusedDefinition->GetName().ToStdString(), FocusedSlot, ItemDefinition->GetName().ToStdString());
             return -1;
         }
         Log::Info(L"Battle Royale: {} swaps {} for {} in quickbar slot {} (slot 0 is the harvesting tool's)", PlayerController->GetName().ToStdString(), FocusedDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), FocusedSlot);

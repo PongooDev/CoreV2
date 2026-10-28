@@ -14,6 +14,7 @@
 #include "GameFramework/PlayerState.h"
 #include "GameThread.h"
 #include "Math/Rotator.h"
+#include "Misc/Guid.h"
 #include "Finder.h"
 #include "FortZoneTheme.h"
 #include "Hooks.h"
@@ -174,6 +175,8 @@ namespace
         std::chrono::steady_clock::time_point NextCheck;
         // Whether the backend should count a place 1 as the win: the build doesn't report its winners itself.
         bool bCountWins = false;
+        // The match's own id, new for each match, so the backend pays its V-Bucks rewards once (Core-Backend #100).
+        std::string MatchId;
     };
 
     // An MCP account id is 32 hex digits (an invalid id's ToString is "INVALID").
@@ -275,7 +278,8 @@ namespace
         {
             const int32_t PlaylistId = GameMode->CurrentPlaylistId;
             BackendRequest::PostJson(std::format(L"Battle Royale results of {} players", Count), L"/fortnite/api/game/v2/battleroyale/recordresults",
-                std::format("{{\"playlistId\":{},\"results\":[{}],\"countWins\":{}}}", PlaylistId, Body, Results.bCountWins ? "true" : "false"),
+                std::format("{{\"playlistId\":{},\"results\":[{}],\"countWins\":{},\"matchId\":\"{}\"}}", PlaylistId, Body,
+                    Results.bCountWins ? "true" : "false", Results.MatchId),
                 FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret);
         }
     }
@@ -313,6 +317,8 @@ void AFortGameModeAthena::WatchMatchResults()
     // which 1.8 doesn't have (Core-Backend #81): from a build without it, the report says to count a place 1 as the win.
     auto Results = std::make_shared<FMatchResults>();
     Results->bCountWins = Finder::StringRefs(L"/api/game/v2/battleroyale/recordwin").empty();
+    const FGuid MatchGuid = FGuid::NewGuid();
+    Results->MatchId = std::format("{:08X}{:08X}{:08X}{:08X}", MatchGuid.A, MatchGuid.B, MatchGuid.C, MatchGuid.D);
     WatchResults(FWeakObjectPtr(this), Results);
     Log::Info(L"Battle Royale: reporting the match's results to {} ({}{})", Configuration::Get().Backend,
         Results->bCountWins ? L"with its wins" : L"its wins through the build's recordwin",

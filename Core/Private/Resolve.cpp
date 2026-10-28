@@ -3242,7 +3242,9 @@ bool Finder::ResolveAssetManagerLive()
 
     // UFortCheatManager::ListWeapons (1.7.2 0x7D8750, 1.8 0x7F04D0; its exec tail-jumps to it) is UFortAssetManager::Get()
     // then the manager's item type lister (0x53EAD0, 0x551C30) for weapons ("mov dl, 0Fh; call"), whose only virtual
-    // call is the asset manager's GetPrimaryAssetDataList: call [reg+0x260] on both.
+    // call is the asset manager's GetPrimaryAssetDataList: call [reg+0x260] on both. Only the mov's opcode is matched:
+    // 1.8.1 inserts EFortItemType::Consumable at 6, so its ListWeapons (0x7FF230) passes Weapon as 10h to its lister
+    // (0x535C60), which calls the same slot.
     const UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortCheatManager:ListWeapons");
     const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
     const uintptr_t Jump = IsInText(Exec) ? FindInstruction(Exec, Exec + 0x20, { 0xE9 }) : 0;

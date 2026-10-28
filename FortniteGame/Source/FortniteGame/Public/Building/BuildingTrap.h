@@ -13,9 +13,6 @@ class ABuildingTrap : public ABuildingSMActor
     DefineUnrealClass(ABuildingTrap, FortniteGame)
 
 public:
-    // ABuildingActor's. A trap's targets are filtered by it: a pawn on its team is friendly (AFortGameState 0x583360).
-    DefineUProperty(EFortTeam, Team)
-
     static void HookVTables();
 
 private:

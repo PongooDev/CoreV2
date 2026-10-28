@@ -4,6 +4,7 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "BackendRequest.h"
+#include "Building/BuildingSMActor.h"
 #include "Configuration.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
@@ -379,4 +380,59 @@ void AFortGameModeAthena::AircraftPhasePlayerCleanupCall(AController* Controller
     {
         PlayerController->ResetToStartingItems();
     }
+}
+
+void AFortGameModeAthena::HookBuildingVTables()
+{
+    UClass* AthenaClass = StaticClass();
+    UObject* AthenaDefault = AthenaClass && Finder::ResolveScoreBuildingConstructionLive() ? AthenaClass->GetDefaultObject(false) : nullptr;
+    void** AthenaVTable = AthenaDefault ? *reinterpret_cast<void***>(AthenaDefault) : nullptr;
+    if (!AthenaVTable)
+    {
+        return;
+    }
+
+    // Each Battle Royale game mode class whose slot is the Athena game mode's own (AFortGameMode's, 1.7.2 0x589F50).
+    const int32_t Index = Natives::AFortGameMode_ScoreBuildingConstructionIndex;
+    void* const Score = AthenaVTable[Index];
+    ScoreBuildingConstructionOG = reinterpret_cast<decltype(ScoreBuildingConstructionOG)>(Score);
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(AthenaClass) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[Index] == Score)
+        {
+            Hooks::SwapVTable(L"AFortGameModeAthena::ScoreBuildingConstruction", VTable, Index, reinterpret_cast<void*>(&ScoreBuildingConstructionHK));
+        }
+    }
+}
+
+void AFortGameModeAthena::ScoreBuildingConstructionHK(AFortGameModeAthena* This, AController* Builder, ABuildingSMActor* Building)
+{
+#if WITH_SERVER_CODE
+    // A built piece takes its builder's team through the builder's WorldPlayerId: ServerCreateBuildingActor (1.7.2
+    // 0x825810, 1.8 0x845D70) initializes the piece with it (0x80DAD0, slot 0xF7), and a piece still on its constructor's
+    // Spectator takes the team of the player state with that id (0x4333B0, 1.8 0x47B730: WorldPlayerId +0x540, then
+    // SetTeam, slot 0x117). The id stays -1 for every Battle Royale player (Core gives it in its Zone Login hook, which
+    // Athena's own Login, 0x3F2450, never reaches, and Battle Royale has no world record to give it from), so every piece
+    // stayed Spectator, and CanBePlayerEdited (0x461EF0, 1.8 0x4646F0) only compares the editor's team with a piece's
+    // that isn't: anyone could edit anyone's walls (#120). The game mode scores the piece right after (0x825E72, 1.8
+    // 0x8463D2) with its builder, whose team is the one CanBePlayerEdited reads for the editor (the controller's team is
+    // its player state's, 0x80CE10, Athena's is TeamIndex, 0x42FE70). An edit's new piece copies the old one's team
+    // (ReplaceBuildingActor, 0x47D5D0). Save the World's game modes keep their slot.
+    AFortPlayerStateAthena* PlayerState = Builder ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Builder->PlayerState))) : nullptr;
+    if (Building && Building->Role == ROLE_Authority && Building->Team == EFortTeam::GetSpectator())
+    {
+        if (PlayerState)
+        {
+            Building->Team = PlayerState->TeamIndex;
+        }
+        else
+        {
+            Log::Warning(L"Battle Royale: {} built by {} has no team, anyone can edit it", Building->GetName().ToStdString(), Builder ? Builder->GetName().ToStdString() : L"nobody");
+        }
+    }
+#endif
+    ScoreBuildingConstructionOG(This, Builder, Building);
 }

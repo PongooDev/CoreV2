@@ -185,6 +185,7 @@ void Boot::Initialize()
             AFortPlayerControllerAthena::HookCallSites();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
+            AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
             UCharacterMovementComponent::HookServerMove(L"/Script/FortniteGame.FortMovementComp_CharacterAthena");
         }

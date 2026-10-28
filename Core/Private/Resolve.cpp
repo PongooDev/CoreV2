@@ -5875,6 +5875,55 @@ bool Finder::ResolveDecoSpawnedLive()
     return true;
 }
 
+bool Finder::ResolveScoreBuildingConstructionLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortGameMode_ScoreBuildingConstructionIndex >= 0 || bSearched)
+    {
+        return Natives::AFortGameMode_ScoreBuildingConstructionIndex >= 0;
+    }
+    bSearched = true;
+
+    // The game mode scores a player's building in five slots in a row (21.40's order: ScoreBuildingConstruction,
+    // Destruction, Upgrade, Repair, Edit). ServerEditBuildingActor_Implementation (1.7.2 0x826410, 1.8 0x846A20) ends with
+    // ScoreBuildingEdit (slot 0x133, 1.8 0x132), and ServerCreateBuildingActor_Implementation (0x825810, 1.8 0x845D70)
+    // calls ScoreBuildingConstruction, four slots before it, with the controller and the piece it built (0x825E72, 1.8
+    // 0x8463D2), after initializing the piece.
+    void** ControllerVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerController");
+    const auto ImplementationOf = [ControllerVTable](const wchar_t* FunctionPath)
+    {
+        UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
+        return Function ? VTableEntry(ControllerVTable, ImplementationIndex(Function)) : 0;
+    };
+    const uintptr_t Edit = ImplementationOf(L"/Script/FortniteGame.FortPlayerController:ServerEditBuildingActor");
+    const uintptr_t EditEnd = Edit ? Finder::FunctionEnd(Edit) : 0;
+    int32_t EditIndex = -1;
+    for (uintptr_t Site = EditEnd ? FindVirtualCall(Edit, EditEnd) : 0; Site; Site = FindVirtualCall(Site + 1, EditEnd))
+    {
+        EditIndex = VirtualSlot(Site);
+    }
+    const int32_t Index = EditIndex >= 4 ? EditIndex - 4 : -1;
+
+    const uintptr_t Create = Index >= 0 ? ImplementationOf(L"/Script/FortniteGame.FortPlayerController:ServerCreateBuildingActor") : 0;
+    const uintptr_t CreateEnd = Create ? Finder::FunctionEnd(Create) : 0;
+    bool bCreateScores = false;
+    for (uintptr_t Site = CreateEnd ? FindVirtualCall(Create, CreateEnd) : 0; Site && !bCreateScores; Site = FindVirtualCall(Site + 1, CreateEnd))
+    {
+        bCreateScores = VirtualSlot(Site) == Index;
+    }
+    const uintptr_t Score = bCreateScores ? VTableEntry(CdoVTable(L"/Script/FortniteGame.FortGameModeAthena"), Index) : 0;
+    if (!Score || Finder::IsStubFunction(Score))
+    {
+        Log::Error(L"Finder: AFortGameMode::ScoreBuildingConstruction not found (edit 0x{:X} scores slot {}, create 0x{:X})",
+            Edit ? Edit - Finder::ImageBase() : 0, EditIndex, Create ? Create - Finder::ImageBase() : 0);
+        return false;
+    }
+
+    Natives::AFortGameMode_ScoreBuildingConstructionIndex = Index;
+    Log::Info(L"Finder: AFortGameMode::ScoreBuildingConstruction is slot 0x{:X} (0x{:X}), called by ServerCreateBuildingActor (0x{:X})", Index, Score - Finder::ImageBase(), Create - Finder::ImageBase());
+    return true;
+}
+
 uint8_t* Finder::PawnDiedInventoryDropCall()
 {
     // AFortPlayerControllerZone's pawn-death handler (1.7.2 0x864E10, slot 0x2F9; the pawn calls it, Athena's override

@@ -143,6 +143,7 @@ namespace Finder
     bool ResolveAthenaHUDPawnBinding();
     uint8_t* PawnDiedInventoryDropCall();
     bool ResolveDecoSpawnedLive();
+    bool ResolveScoreBuildingConstructionLive();
     bool ResolveServerMoveLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();

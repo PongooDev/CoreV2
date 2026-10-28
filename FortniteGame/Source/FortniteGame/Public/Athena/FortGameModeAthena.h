@@ -5,6 +5,7 @@
 class AController;
 class AFortSafeZoneIndicator;
 class AActor;
+class ABuildingSMActor;
 class APawn;
 class UObject;
 
@@ -42,8 +43,11 @@ public:
 
     static void HookVTables();
     static void HookCallSites();
+    static void HookBuildingVTables();
 
 private:
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeAthena* This, AController* NewPlayer, AActor* StartSpot);
     static void AircraftPhasePlayerCleanupCall(AController* Controller);
+    static inline void (*ScoreBuildingConstructionOG)(AFortGameModeAthena* This, AController* Builder, ABuildingSMActor* Building) = nullptr;
+    static void ScoreBuildingConstructionHK(AFortGameModeAthena* This, AController* Builder, ABuildingSMActor* Building);
 };

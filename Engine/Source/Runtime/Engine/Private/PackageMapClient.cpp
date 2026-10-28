@@ -16,5 +16,7 @@ bool UPackageMap::WriteObject(FOutBunch& Ar, UObject* InOuter, FNetworkGUID NetG
 
 bool FNetGUIDCache::SupportsObject(const UObject* Object) const
 {
-    return Natives::FNetGUIDCache_SupportsObject(this, Object);
+    // The weak pointer is passed as null, as the engine's callers without one do: 1.8's SupportsObject reads it whenever it
+    // isn't, and a call without it left whatever was in r8, which crashed a 1.8 server reading 0xF4CB at 0x22B20BC (#119).
+    return Natives::FNetGUIDCache_SupportsObject(this, Object, nullptr);
 }

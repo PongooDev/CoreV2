@@ -229,7 +229,9 @@ namespace Natives
     inline ptrdiff_t FNetworkObjectInfo_Flags = 0x20;
     inline ptrdiff_t FNetworkObjectInfo_DormantConnections = 0x28;
     inline ptrdiff_t FNetworkObjectInfo_RecentlyDormantConnections = 0x78;
-    inline bool (*FNetGUIDCache_SupportsObject)(const FNetGUIDCache* This, const UObject* Object) = nullptr;
+    // SupportsObject(Object, const TWeakObjectPtr<UObject>* WeakObjectPtr): 1.8 (0x22B2090) reads WeakObjectPtr when it
+    // isn't null, 1.7.2 (0x223CCA0) takes no such argument.
+    inline bool (*FNetGUIDCache_SupportsObject)(const FNetGUIDCache* This, const UObject* Object, const void* WeakObjectPtr) = nullptr;
     inline UObject* (*UObject_GetArchetypeFromRequiredInfo)(UClass* Class, UObject* Outer, FName Name, int32_t ObjectFlags) = nullptr;
     inline AWorldSettings* (*UWorld_GetWorldSettings)(const UWorld* This, bool bCheckStreamingPersistent, bool bChecked) = nullptr;
     inline void (*UWorld_AddNetworkActor)(UWorld* This, AActor* Actor) = nullptr;

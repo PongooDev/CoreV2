@@ -448,6 +448,9 @@
     <ClInclude Include="..\Core\Public\Hooks.h">
       <Filter>Core\Public</Filter>
     </ClInclude>
+    <ClInclude Include="..\Core\Public\CrashLog.h">
+      <Filter>Core\Public</Filter>
+    </ClInclude>
     <ClInclude Include="..\Core\Public\Log.h">
       <Filter>Core\Public</Filter>
     </ClInclude>
@@ -1251,6 +1254,9 @@
       <Filter>Core\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Core\Private\Hooks.cpp">
+      <Filter>Core\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Core\Private\CrashLog.cpp">
       <Filter>Core\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Core\Private\Log.cpp">

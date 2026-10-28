@@ -99,6 +99,7 @@
     <ClInclude Include="..\Core\Public\Finder.h" />
     <ClInclude Include="..\Core\Public\GameThread.h" />
     <ClInclude Include="..\Core\Public\Hooks.h" />
+    <ClInclude Include="..\Core\Public\CrashLog.h" />
     <ClInclude Include="..\Core\Public\Log.h" />
     <ClInclude Include="..\Core\Public\Natives.h" />
     <ClInclude Include="..\Core\Public\ObjectLayout.h" />
@@ -370,6 +371,7 @@
     <ClCompile Include="..\Core\Private\GameThread.cpp" />
     <ClCompile Include="..\Core\Private\GetCurrentCallSites.cpp" />
     <ClCompile Include="..\Core\Private\Hooks.cpp" />
+    <ClCompile Include="..\Core\Private\CrashLog.cpp" />
     <ClCompile Include="..\Core\Private\Log.cpp" />
     <ClCompile Include="..\Core\Private\ObjectLayout.cpp" />
     <ClCompile Include="..\Core\Private\Reflection.cpp" />

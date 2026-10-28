@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Boot.h"
 #include "Building/BuildingSMActor.h"
+#include "CrashLog.h"
 #include "Diagnostics.h"
 #include "Finder.h"
 #include "GameThread.h"
@@ -21,6 +22,7 @@ void Boot::Initialize()
 {
     Log::Initialize(L"Client");
     Log::Info(L"Core Client starting");
+    CrashLog::Install();
 
     if (MH_Initialize() != MH_OK)
     {

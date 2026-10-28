@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Boot.h"
 #include "Configuration.h"
+#include "CrashLog.h"
 #include "Diagnostics.h"
 #include "Finder.h"
 #include "GameMapsSettings.h"
@@ -82,6 +83,7 @@ void Boot::Initialize()
     Configuration::Load();
     Log::Initialize(L"Server");
     Log::Info(L"Core V2 starting");
+    CrashLog::Install();
     FCommandLine::ApproveServerSwitches();
     HonourTimerResolution();
 

@@ -60,7 +60,8 @@ public:
     // five (CoreV2 #67). Without an inventory the stack size is the item's own.
     static void CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory);
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
-    void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount);
+    // bToss false (1.8 on) puts the pickup at FinalLocation instead of tossing it there; before 1.8 a toss always flies.
+    void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss = true);
     // Tosses a container's loot from where it is onto FloorLocation, like TossOntoFloor, marked as tossed from it.
     void TossFromContainer(const FVector& FloorLocation);
     // Tosses the pickup from where it is in a short arc that lands it on FloorLocation, a point on the floor.

@@ -146,6 +146,29 @@ namespace
         }
         return Added;
     }
+
+    // Where a player's drop is tossed: 512 out from the pawn, level with it, up to 20 degrees to either side of where it
+    // faces. The drop itself (ServerSpawnInventoryDrop_Implementation, AFortPlayerController slot 0xF38 on 1.7.2 and 0xF48
+    // on 1.8) is stripped, so this follows the game's one toss from a player that is left: the death backpack's (1.7.2
+    // 0x80DB20, 1.8 0x82DB00) throws it 512 out along FMath::VRandCone(Dir, 20 degrees, 20 degrees) (0x12A4CF0, 1.8
+    // 0x12F3E60), and the toss (0x6622F0) sends a pickup with nowhere to go 512 out too. The backpack goes up off the
+    // body; a drop goes the way the player faces, along the level part of the same cone. Every drop aimed straight ahead
+    // came down in one spot, 136 to 143 out (#108): the toss falls short (TossOntoFloor), and its random fly time hardly
+    // moves it. The cone's up and down is left out, as a drop aimed higher lands further out (up to 290 when measured),
+    // which would carry two drops made from one spot facing different ways out of each other's CombineRadius.
+    FVector GetDropTossLocation(const FTransform& PawnTransform)
+    {
+        constexpr float Pi = 3.1415926535897932f;
+        constexpr float TossDistance = 512.0f;
+        constexpr float ConeHalfAngle = 20.0f * Pi / 180.0f;
+
+        // VRandCone's direction: Phi from Dir (wrapped into the cone), turned Theta round it; its side part is sin(Theta).
+        const float Theta = 2.0f * Pi * FMath::FRand();
+        const float Phi = std::fmod(std::acos(FMath::Clamp(2.0f * FMath::FRand() - 1.0f, -1.0f, 1.0f)), ConeHalfAngle);
+        const float Yaw = PawnTransform.Rotation.Rotator().Yaw * (Pi / 180.0f) + std::atan2(std::sin(Phi) * std::sin(Theta), std::cos(Phi));
+        const FVector Location = PawnTransform.GetLocation();
+        return FVector(Location.X + std::cos(Yaw) * TossDistance, Location.Y + std::sin(Yaw) * TossDistance, Location.Z);
+    }
 }
 
 bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
@@ -937,11 +960,8 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
         const FVector Location = PawnTransform.GetLocation();
         if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &Location, nullptr))
         {
-            constexpr float TossDistance = 512.0f;
-            const float Yaw = PawnTransform.Rotation.Rotator().Yaw * (3.1415926535897932f / 180.0f);
-            const FVector TossLocation(Location.X + std::cos(Yaw) * TossDistance, Location.Y + std::sin(Yaw) * TossDistance, Location.Z);
             Pickup->PawnWhoDroppedPickup = Pawn;
-            Pickup->TossPickup(TossLocation, Pawn, 0);
+            Pickup->TossPickup(GetDropTossLocation(PawnTransform), Pawn, 0);
         }
     }
     EntryStruct->DestroyStruct(DropEntry);

@@ -209,7 +209,8 @@ namespace
     // that picks them is server code no client build has (CombinePickups), so both are chosen: pickups are 60 across.
     // A player's drop is tossed 512 ahead of the pawn and falls short (TossOntoFloor), coming down 60 to 140 ahead, so two
     // drops from one spot facing different ways lie up to 280 apart: at 200, a second drop made after turning round
-    // (135 to 180 degrees) came down 230 to 280 from the first and stayed apart. 300 reaches any two drops from one spot.
+    // (135 to 180 degrees) came down 230 to 280 from the first and stayed apart. 300 reaches any two drops from one spot,
+    // also with the drop's spread to the side (GetDropTossLocation: up to 40 either way, measured).
     constexpr float CombineRadius = 300.0f;
     constexpr float CombineFlyTime = 0.25f;
 
@@ -319,12 +320,21 @@ AFortPickup* AFortPickup::CreatePickup(UWorld* World, const FFortItemEntry& Item
     return Natives::AFortPickup_CreatePickup(World, ItemEntry, SpawnLocation, SpawnRotation, OptionalOwner, OverrideClass);
 }
 
-void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount)
+void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss)
 {
+    // 1.8 added bToss (execTossPickup, 0xB47C70, reads four parameters and passes the last to 0x698240). Without it the
+    // toss (0x67D9E0, AFortPickup slot 0x678) starts the pickup at FinalLocation instead of where it is, so its launch
+    // covers no distance: every pickup Core tossed on 1.8 appeared on its spot instead of flying there (#108). Core's
+    // tosses left the parameter at zero, as it is a parameter 1.1 to 1.7.2 don't have.
+    static const bool bHasToss = StaticFunction_TossPickup()->FindPropertyByName(FName(L"bToss", FNAME_Find)) != nullptr;
     Reflection::FParams Params(StaticFunction_TossPickup());
     Params.Set(L"FinalLocation", FinalLocation);
     Params.Set(L"ItemOwner", ItemOwner);
     Params.Set(L"OverrideMaxStackCount", OverrideMaxStackCount);
+    if (bHasToss)
+    {
+        Params.Set(L"bToss", bToss);
+    }
     Params.Call(this);
     WatchForCombine();
 }

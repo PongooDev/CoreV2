@@ -83,6 +83,8 @@ namespace Reflection
         FFunctionInfo(FOwnerGetter InOwner, const wchar_t* InName);
 
         UFunction* Get();
+        // The function, or null when the build doesn't reflect it (no error), for functions a build may not have.
+        UFunction* Find();
 
     private:
         friend bool ResolveAll();
@@ -198,7 +200,7 @@ public: \
 private: \
     static inline Reflection::FFunctionInfo Function_##Name{ &StaticReflectionOwner, TEXT(#Name) }; \
 public: \
-    static UFunction* StaticFunction_##Name() { return Function_##Name.Get(); }
+    static UFunction* StaticFunction_##Name() { return Function_##Name.Get(); }     static UFunction* FindStaticFunction_##Name() { return Function_##Name.Find(); }
 
 #define DefineUnrealEnum(EnumName, Package) private:     static inline Reflection::FEnumInfo EnumInfo_##EnumName{ TEXT(#Package), TEXT(#EnumName) }; public:     using FEnumType = EnumName;     uint8_t Value;     static UEnum* StaticEnum() { return EnumInfo_##EnumName.Get(); }     static Reflection::FEnumInfo& StaticEnumInfo() { return EnumInfo_##EnumName; }     constexpr operator uint8_t() const { return Value; }     std::wstring ToString() const { return EnumInfo_##EnumName.GetValueName(Value); }
 

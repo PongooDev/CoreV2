@@ -179,19 +179,22 @@ Reflection::FFunctionInfo::FFunctionInfo(FOwnerGetter InOwner, const wchar_t* In
 
 UFunction* Reflection::FFunctionInfo::Get()
 {
+    if (!Find())
+    {
+        Log::Fatal(L"Function {}::{} is not available", OwnerName(Owner), Name);
+    }
+    return Function;
+}
+
+UFunction* Reflection::FFunctionInfo::Find()
+{
     if (!Function)
     {
         if (const UStruct* Struct = Owner(); Struct && Struct->GetClass()->HasAnyCastFlag(CASTCLASS_UClass))
         {
             Function = static_cast<const UClass*>(Struct)->FindFunctionByName(FName(Name, FNAME_Find));
         }
-
-        if (!Function)
-        {
-            Log::Fatal(L"Function {}::{} is not available", OwnerName(Owner), Name);
-        }
     }
-
     return Function;
 }
 

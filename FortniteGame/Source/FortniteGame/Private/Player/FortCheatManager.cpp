@@ -863,39 +863,40 @@ void UFortCheatManager::HookNatives()
     // GiveSpecificItem only free their string (1.7.2 0x7D01A0), GiveResources/Wood/Stone/Metal, GiveWeapons, GiveAllTraps,
     // GiveAllConsumables, GiveAllIngredients, RespawnPlayerServer and WannaGun are the shared "ret 0", and the rest call one of
     // those or something else compiled out (TeleportToLocation a virtual in Battle Royale, SetSafeZoneLocationToPlayer and
-    // SetSafeZoneRadius the game mode's setters, GiveCheatInventory its load callback).
+    // SetSafeZoneRadius the game mode's setters, GiveCheatInventory its load callback). A build without one of them (1.1
+    // and 1.2 have no Battle Royale safe zone cheats, CoreV2 #118) skips it instead of stopping the server.
     if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
     {
         return;
     }
 
     for (const auto& [Function, Native, Name] : {
-             std::tuple{ StaticFunction_GiveWeapon(), &execGiveWeapon, L"UFortCheatManager::GiveWeapon" },
-             std::tuple{ StaticFunction_GiveAmmo(), &execGiveAmmo, L"UFortCheatManager::GiveAmmo" },
-             std::tuple{ StaticFunction_GiveTrap(), &execGiveTrap, L"UFortCheatManager::GiveTrap" },
-             std::tuple{ StaticFunction_GiveGadget(), &execGiveGadget, L"UFortCheatManager::GiveGadget" },
-             std::tuple{ StaticFunction_GiveGadgets(), &execGiveGadgets, L"UFortCheatManager::GiveGadgets" },
-             std::tuple{ StaticFunction_GiveSpecificItem(), &execGiveSpecificItem, L"UFortCheatManager::GiveSpecificItem" },
-             std::tuple{ StaticFunction_GiveResources(), &execGiveResources, L"UFortCheatManager::GiveResources" },
-             std::tuple{ StaticFunction_GiveWood(), &execGiveWood, L"UFortCheatManager::GiveWood" },
-             std::tuple{ StaticFunction_GiveStone(), &execGiveStone, L"UFortCheatManager::GiveStone" },
-             std::tuple{ StaticFunction_GiveMetal(), &execGiveMetal, L"UFortCheatManager::GiveMetal" },
-             std::tuple{ StaticFunction_GiveWeapons(), &execGiveWeapons, L"UFortCheatManager::GiveWeapons" },
-             std::tuple{ StaticFunction_GiveAllMelee(), &execGiveAllMelee, L"UFortCheatManager::GiveAllMelee" },
-             std::tuple{ StaticFunction_GiveAllPistols(), &execGiveAllPistols, L"UFortCheatManager::GiveAllPistols" },
-             std::tuple{ StaticFunction_GiveAllRifles(), &execGiveAllRifles, L"UFortCheatManager::GiveAllRifles" },
-             std::tuple{ StaticFunction_GiveAllShotguns(), &execGiveAllShotguns, L"UFortCheatManager::GiveAllShotguns" },
-             std::tuple{ StaticFunction_GiveAllWeapons(), &execGiveAllWeapons, L"UFortCheatManager::GiveAllWeapons" },
-             std::tuple{ StaticFunction_GiveAllTraps(), &execGiveAllTraps, L"UFortCheatManager::GiveAllTraps" },
-             std::tuple{ StaticFunction_GiveAllConsumables(), &execGiveAllConsumables, L"UFortCheatManager::GiveAllConsumables" },
-             std::tuple{ StaticFunction_GiveAllIngredients(), &execGiveAllIngredients, L"UFortCheatManager::GiveAllIngredients" },
-             std::tuple{ StaticFunction_GiveUsefulThings(), &execGiveUsefulThings, L"UFortCheatManager::GiveUsefulThings" },
-             std::tuple{ StaticFunction_GiveCheatInventory(), &execGiveCheatInventory, L"UFortCheatManager::GiveCheatInventory" },
-             std::tuple{ StaticFunction_WannaGun(), &execWannaGun, L"UFortCheatManager::WannaGun" },
-             std::tuple{ StaticFunction_TeleportToLocation(), &execTeleportToLocation, L"UFortCheatManager::TeleportToLocation" },
-             std::tuple{ StaticFunction_SetSafeZoneLocationToPlayer(), &execSetSafeZoneLocationToPlayer, L"UFortCheatManager::SetSafeZoneLocationToPlayer" },
-             std::tuple{ StaticFunction_SetSafeZoneRadius(), &execSetSafeZoneRadius, L"UFortCheatManager::SetSafeZoneRadius" },
-             std::tuple{ StaticFunction_RespawnPlayerServer(), &execRespawnPlayerServer, L"UFortCheatManager::RespawnPlayerServer" },
+             std::tuple{ FindStaticFunction_GiveWeapon(), &execGiveWeapon, L"UFortCheatManager::GiveWeapon" },
+             std::tuple{ FindStaticFunction_GiveAmmo(), &execGiveAmmo, L"UFortCheatManager::GiveAmmo" },
+             std::tuple{ FindStaticFunction_GiveTrap(), &execGiveTrap, L"UFortCheatManager::GiveTrap" },
+             std::tuple{ FindStaticFunction_GiveGadget(), &execGiveGadget, L"UFortCheatManager::GiveGadget" },
+             std::tuple{ FindStaticFunction_GiveGadgets(), &execGiveGadgets, L"UFortCheatManager::GiveGadgets" },
+             std::tuple{ FindStaticFunction_GiveSpecificItem(), &execGiveSpecificItem, L"UFortCheatManager::GiveSpecificItem" },
+             std::tuple{ FindStaticFunction_GiveResources(), &execGiveResources, L"UFortCheatManager::GiveResources" },
+             std::tuple{ FindStaticFunction_GiveWood(), &execGiveWood, L"UFortCheatManager::GiveWood" },
+             std::tuple{ FindStaticFunction_GiveStone(), &execGiveStone, L"UFortCheatManager::GiveStone" },
+             std::tuple{ FindStaticFunction_GiveMetal(), &execGiveMetal, L"UFortCheatManager::GiveMetal" },
+             std::tuple{ FindStaticFunction_GiveWeapons(), &execGiveWeapons, L"UFortCheatManager::GiveWeapons" },
+             std::tuple{ FindStaticFunction_GiveAllMelee(), &execGiveAllMelee, L"UFortCheatManager::GiveAllMelee" },
+             std::tuple{ FindStaticFunction_GiveAllPistols(), &execGiveAllPistols, L"UFortCheatManager::GiveAllPistols" },
+             std::tuple{ FindStaticFunction_GiveAllRifles(), &execGiveAllRifles, L"UFortCheatManager::GiveAllRifles" },
+             std::tuple{ FindStaticFunction_GiveAllShotguns(), &execGiveAllShotguns, L"UFortCheatManager::GiveAllShotguns" },
+             std::tuple{ FindStaticFunction_GiveAllWeapons(), &execGiveAllWeapons, L"UFortCheatManager::GiveAllWeapons" },
+             std::tuple{ FindStaticFunction_GiveAllTraps(), &execGiveAllTraps, L"UFortCheatManager::GiveAllTraps" },
+             std::tuple{ FindStaticFunction_GiveAllConsumables(), &execGiveAllConsumables, L"UFortCheatManager::GiveAllConsumables" },
+             std::tuple{ FindStaticFunction_GiveAllIngredients(), &execGiveAllIngredients, L"UFortCheatManager::GiveAllIngredients" },
+             std::tuple{ FindStaticFunction_GiveUsefulThings(), &execGiveUsefulThings, L"UFortCheatManager::GiveUsefulThings" },
+             std::tuple{ FindStaticFunction_GiveCheatInventory(), &execGiveCheatInventory, L"UFortCheatManager::GiveCheatInventory" },
+             std::tuple{ FindStaticFunction_WannaGun(), &execWannaGun, L"UFortCheatManager::WannaGun" },
+             std::tuple{ FindStaticFunction_TeleportToLocation(), &execTeleportToLocation, L"UFortCheatManager::TeleportToLocation" },
+             std::tuple{ FindStaticFunction_SetSafeZoneLocationToPlayer(), &execSetSafeZoneLocationToPlayer, L"UFortCheatManager::SetSafeZoneLocationToPlayer" },
+             std::tuple{ FindStaticFunction_SetSafeZoneRadius(), &execSetSafeZoneRadius, L"UFortCheatManager::SetSafeZoneRadius" },
+             std::tuple{ FindStaticFunction_RespawnPlayerServer(), &execRespawnPlayerServer, L"UFortCheatManager::RespawnPlayerServer" },
          })
     {
         if (Function)

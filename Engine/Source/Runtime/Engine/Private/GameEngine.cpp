@@ -39,7 +39,9 @@ void UGameEngine::SetServerTickRate()
     // FrameRateLimit: the server aimed at 60 frames a second for a 60 FPS limit, more for a higher one, 20 for an
     // unlimited one (#109). The server's own copy of the settings gets ServerTickRate as its frame rate limit, applied
     // the way the settings screen applies one (ApplyNonResolutionSettings sets t.MaxFPS from it) once the engine has
-    // applied the player's, and is never saved, so the player's GameUserSettings.ini keeps their limit.
+    // applied the player's, and is never saved, so the player's GameUserSettings.ini keeps their limit. The launcher's
+    // servers have their own saved folder (-saveddirsuffix, Core-Launcher ServerConfig) and so their own settings, but a
+    // server started without one still reads the player's.
     GameThread::Enqueue([]
     {
         UGameUserSettings* Settings = UGameUserSettings::GetGameUserSettings();

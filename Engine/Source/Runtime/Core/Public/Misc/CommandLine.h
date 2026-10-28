@@ -8,6 +8,7 @@ struct FCommandLine
     static void RestoreSwitch(const wchar_t* Switch);
     // Adds -Switch to the engine's command line unless it has it.
     static void AddSwitch(const wchar_t* Switch);
-    // Before the engine starts: lets -nullrhi, -nosplash, -nosound and -log through the shipping build's whitelist.
+    // Before the engine starts: lets -nullrhi, -nosplash, -nosound, -log and -saveddirsuffix through the shipping build's
+    // whitelist.
     static void ApproveServerSwitches();
 };

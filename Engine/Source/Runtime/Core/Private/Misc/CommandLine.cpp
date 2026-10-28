@@ -46,27 +46,33 @@ void FCommandLine::RestoreSwitch(const wchar_t* Switch)
 void FCommandLine::ApproveServerSwitches()
 {
     // The whitelist FCommandLine::Set keeps switches from is one space-separated string in .rdata ("... -epicapp -epicenv
-    // -invitesession -invitefrom -party_joininfo_token -replay -purgatorymallocproxy ..."), read when the engine starts.
-    // Without -nullrhi in it a 1.8 server made a D3D11 device and crashed building the Early Access loading screen
-    // (0x1248480, through a null Slate global). Reboot Launcher patches the exe on disk to swap these four client
-    // switches for server ones; Core makes the same swap in memory first (it's loaded before the exe's entry point), so
-    // an unpatched exe works too. An exe Reboot already patched has the swapped string.
+    // -invitesession -invitefrom -party_joininfo_token -replay -purgatorymallocproxy ..."), read when the engine starts;
+    // a switch is kept when it starts with one of them. Without -nullrhi in it a 1.8 server made a D3D11 device and
+    // crashed building the Early Access loading screen (0x1248480, through a null Slate global). Reboot Launcher patches
+    // the exe on disk to swap these four client switches for server ones (the launcher does too, ExePatcher); Core makes
+    // the swap in memory first (it's loaded before the exe's entry point), so an unpatched exe works too. Core's swap
+    // also lets -saveddirsuffix= through in place of Reboot's -useolditemcards: the launcher gives servers their own
+    // saved folder with it (FPaths::GameSavedDir, 1.8 0x13058C0: Saved_<suffix>), whose Engine.ini turns XMPP off
+    // (#109). 1.1 and 1.2 have no whitelist.
     static constexpr wchar_t Client[] = L"-invitesession -invitefrom -party_joininfo_token -replay";
-    static constexpr wchar_t Server[] = L"-log -nosplash -nosound -nullrhi -useolditemcards       ";
-    static_assert(sizeof(Client) == sizeof(Server), "the swap must keep the whitelist's length");
-    constexpr size_t Size = sizeof(Client) - sizeof(wchar_t);
+    static constexpr wchar_t Reboot[] = L"-log -nosplash -nosound -nullrhi -useolditemcards       ";
+    static constexpr wchar_t Server[] = L"-log -nosplash -nosound -nullrhi -saveddirsuffix        ";
+    static_assert(sizeof(Client) == sizeof(Server) && sizeof(Reboot) == sizeof(Server), "the swap must keep the whitelist's length");
+    constexpr size_t Size = sizeof(Server) - sizeof(wchar_t);
 
-    wchar_t* const Whitelist = reinterpret_cast<wchar_t*>(Finder::FindReadOnly(Client, Size));
+    if (Finder::FindReadOnly(Server, Size))
+    {
+        Log::Info(L"FCommandLine: the exe already lets the server's switches through");
+        return;
+    }
+    wchar_t* Whitelist = reinterpret_cast<wchar_t*>(Finder::FindReadOnly(Client, Size));
     if (!Whitelist)
     {
-        if (Finder::FindReadOnly(Server, Size))
-        {
-            Log::Info(L"FCommandLine: the exe already lets -nullrhi through");
-        }
-        else
-        {
-            Log::Warning(L"FCommandLine: whitelist not found; -nullrhi may be dropped");
-        }
+        Whitelist = reinterpret_cast<wchar_t*>(Finder::FindReadOnly(Reboot, Size));
+    }
+    if (!Whitelist)
+    {
+        Log::Warning(L"FCommandLine: whitelist not found; -nullrhi and -saveddirsuffix may be dropped");
         return;
     }
     DWORD Protection = 0;
@@ -77,7 +83,7 @@ void FCommandLine::ApproveServerSwitches()
     }
     std::memcpy(Whitelist, Server, Size);
     VirtualProtect(Whitelist, Size, Protection, &Protection);
-    Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi");
+    Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi -saveddirsuffix");
 }
 
 void FCommandLine::AddSwitch(const wchar_t* Switch)

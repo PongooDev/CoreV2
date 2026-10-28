@@ -6,6 +6,7 @@
 #include "UObject/UnrealType.h"
 
 #include <cstdint>
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -23,7 +24,9 @@ namespace Reflection
         {
             if (Function)
             {
-                Buffer.assign(Function->ParmsSize, 0);
+                // The whole frame: InitializeStruct and DestroyStruct cover a function's local variables too
+                // (UStruct::GetStructureSize, 1.8.1 0x13CAB70), and ProcessEvent reads only the first ParmsSize bytes.
+                Buffer.assign(std::max<size_t>(Function->ParmsSize, static_cast<size_t>(Function->GetStructureSize())), 0);
             }
             if (bInitialized)
             {

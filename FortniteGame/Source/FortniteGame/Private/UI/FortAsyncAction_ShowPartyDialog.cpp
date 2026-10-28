@@ -6,6 +6,7 @@
 #include "UObject/UnrealType.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <algorithm>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
@@ -61,7 +62,8 @@ namespace
         {
             return false;
         }
-        std::vector<uint8_t> Parms(Update->ParmsSize, 0);
+        // The whole frame: InitializeStruct writes the Blueprint function's local variables too.
+        std::vector<uint8_t> Parms(std::max<size_t>(Update->ParmsSize, static_cast<size_t>(Update->GetStructureSize())), 0);
         Update->InitializeStruct(Parms.data());
         MemberInfo->Struct->CopyScriptStruct(NewMemberInfo->ContainerPtrToValuePtr<void>(Parms.data()), MemberInfo->ContainerPtrToValuePtr<void>(Card));
         Card->ProcessEvent(Update, Parms.data());

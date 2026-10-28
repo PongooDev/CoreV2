@@ -36,6 +36,10 @@ public:
     int32_t GetPropertiesSize() const { return PropertiesSize; }
     int32_t GetMinAlignment() const { return MinAlignment; }
 
+    // PropertiesSize aligned to MinAlignment: what InitializeStruct, DestroyStruct and CopyScriptStruct touch. A
+    // function's includes its local variables, past ParmsSize.
+    int32_t GetStructureSize() const;
+
     bool IsChildOf(const UStruct* SomeBase) const;
     UProperty* FindPropertyByName(FName InName) const;
 
@@ -48,7 +52,6 @@ class UScriptStruct : public UStruct
     DefineUnrealClass(UScriptStruct, CoreUObject)
 
 public:
-    int32_t GetStructureSize() const;
     void CopyScriptStruct(void* Dest, void const* Src, int32_t ArrayDim = 1) const;
 };
 

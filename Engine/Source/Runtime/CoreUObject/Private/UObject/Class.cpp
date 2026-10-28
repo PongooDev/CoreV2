@@ -111,7 +111,7 @@ void UStruct::DestroyStruct(void* Dest, int32_t ArrayDim) const
     reinterpret_cast<FDestroyStruct>((*reinterpret_cast<void* const* const*>(this))[Natives::UStruct_DestroyStructIndex])(this, Dest, ArrayDim);
 }
 
-int32_t UScriptStruct::GetStructureSize() const
+int32_t UStruct::GetStructureSize() const
 {
     const int32_t Alignment = GetMinAlignment();
     return (GetPropertiesSize() + Alignment - 1) & ~(Alignment - 1);

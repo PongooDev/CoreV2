@@ -103,9 +103,7 @@ namespace
         {
             if (Function)
             {
-                const size_t Alignment = static_cast<size_t>(Function->GetMinAlignment() > 0 ? Function->GetMinAlignment() : 1);
-                const size_t Size = (static_cast<size_t>(Function->GetPropertiesSize()) + Alignment - 1) & ~(Alignment - 1);
-                Parms.assign(Size > Function->ParmsSize ? Size : Function->ParmsSize, 0);
+                Parms.assign(std::max<size_t>(Function->ParmsSize, static_cast<size_t>(Function->GetStructureSize())), 0);
                 Function->InitializeStruct(Parms.data());
             }
         }

@@ -41,6 +41,24 @@ void AFortPlayerState::SetHeroType(UFortHero* Hero)
         }
     }
 
+    // The hero's CharacterParts only holds the parts that were already loaded when the hero was made, and a dedicated
+    // server loads no body or head for anything else: a Ninja such as HID_Ninja_SlashTail_UC_T01 came out with only its
+    // charms. Its pawn class (PlayerPawn_Ninja) has no mesh of its own, so the server's pawn got no skeletal mesh and
+    // no anim instance, played no montage and ran no root motion: reloads ended at once on the server (#102) and Dragon
+    // Slash's movement was corrected away (#103). The specializations name every part; load the missing ones.
+    for (UFortHeroSpecialization* Specialization : Hero->Specializations)
+    {
+        const TArray<TAssetPtr<UCustomCharacterPart>>* SpecializationParts = Specialization ? &static_cast<TArray<TAssetPtr<UCustomCharacterPart>>&>(Specialization->CharacterParts) : nullptr;
+        for (int32_t Index = 0; SpecializationParts && Index < SpecializationParts->Num(); ++Index)
+        {
+            UCustomCharacterPart* Part = (*SpecializationParts)[Index].LoadSynchronous();
+            if (Part && Part->CharacterPartType < NumTypes && !GetCharacterPart(Part->CharacterPartType) && (Part->GenderPermitted & CharacterGender) != 0)
+            {
+                GetCharacterPart(Part->CharacterPartType) = Part;
+            }
+        }
+    }
+
     // A picked-up item flew down through the player's head (#96). Clients fly it to the backpack part's loot socket
     // (the pawn's 0x7CC3B0 -> 0x504CC0: the part's UCustomCharacterBackpackData::LootSocketName), coming in along the
     // socket's direction; with no backpack part it goes to the actor's location instead, along the pawn's down vector,

@@ -247,6 +247,16 @@ void AFortPlayerController::Possess(APawn* InPawn)
 
     if (AFortPlayerPawn* PlayerPawn = Role == ROLE_Authority ? Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))) : nullptr)
     {
+        // A pawn takes the hero's character parts (its skeletal mesh and anim class) when the player state's parts change
+        // (1.8 0x88C280, after OnRep_CharacterParts). Save the World sets the hero before the pawn exists, so the server's
+        // pawn kept its class defaults; PlayerPawn_Ninja's have no mesh or anim class, so without this its montages and
+        // root motion never ran on the server (#102, #103). Battle Royale's SetupHero above already sets them on this pawn.
+        AFortPlayerState* PartsState = !AthenaController ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
+        if (PartsState)
+        {
+            PartsState->OnRep_CharacterParts();
+        }
+
         PlayerPawn->ResetGameplayAttributes();
         if (AthenaController)
         {

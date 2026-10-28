@@ -134,6 +134,9 @@ namespace
         int32_t Kills = 0;
         int32_t SecondsAlive = 0;
         int32_t Place = 0;
+        // Who eliminated the player (their account id), on a build whose server doesn't count kills (1.8): empty while
+        // the player is alive or was out by the storm or a fall.
+        std::wstring EliminatedBy;
         bool bReported = false;
     };
 
@@ -141,6 +144,8 @@ namespace
     {
         std::map<std::wstring, FMatchPlayer> Players;
         std::chrono::steady_clock::time_point NextCheck;
+        // Whether the backend should count a place 1 as the win: the build doesn't report its winners itself.
+        bool bCountWins = false;
     };
 
     // An MCP account id is 32 hex digits (an invalid id's ToString is "INVALID").
@@ -174,9 +179,41 @@ namespace
                 continue;
             }
             Player.Team = AthenaState->TeamIndex;
-            Player.Kills = AthenaState->GetKills();
             Player.SecondsAlive = AthenaState->SecondsAlive;
             Player.Place = std::max<int32_t>(AthenaState->Place, 0);
+            if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty())
+            {
+                AFortPlayerStateAthena* Eliminator = AthenaState->GetEliminator();
+                const std::wstring EliminatorId = Eliminator && Eliminator != AthenaState ? Eliminator->UniqueId.ToString().ToStdString() : std::wstring();
+                if (IsAccountId(EliminatorId))
+                {
+                    Player.EliminatedBy = EliminatorId;
+                }
+            }
+        }
+
+        // The kills, final by the time the player's team has a place. On 1.8 they are the other teams' players the
+        // player eliminated, as 1.7.2's death handler counts them, kept in KillScore for the game's own use 🟡 (the HUD
+        // and scoreboard weren't looked at).
+        for (APlayerState* PlayerState : PlayerArray)
+        {
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            const std::wstring AccountId = AthenaState ? AthenaState->UniqueId.ToString().ToStdString() : std::wstring();
+            const auto Found = IsAccountId(AccountId) ? Results.Players.find(AccountId) : Results.Players.end();
+            if (Found == Results.Players.end() || Found->second.bReported)
+            {
+                continue;
+            }
+            FMatchPlayer& Player = Found->second;
+            if (!AFortPlayerStateAthena::CountsKills())
+            {
+                const int32_t Kills = static_cast<int32_t>(std::count_if(Results.Players.begin(), Results.Players.end(), [&](const auto& Other)
+                {
+                    return Other.second.EliminatedBy == AccountId && Other.second.Team != Player.Team;
+                }));
+                AthenaState->SetKills(Kills);
+            }
+            Player.Kills = AthenaState->GetKills();
         }
 
         // The team's place, for its players who left before it was out.
@@ -210,7 +247,8 @@ namespace
         {
             const int32_t PlaylistId = GameMode->CurrentPlaylistId;
             BackendRequest::PostJson(std::format(L"Battle Royale results of {} players", Count), L"/fortnite/api/game/v2/battleroyale/recordresults",
-                std::format("{{\"playlistId\":{},\"results\":[{}]}}", PlaylistId, Body), FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret);
+                std::format("{{\"playlistId\":{},\"results\":[{}],\"countWins\":{}}}", PlaylistId, Body, Results.bCountWins ? "true" : "false"),
+                FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret);
         }
     }
 
@@ -243,9 +281,14 @@ void AFortGameModeAthena::WatchMatchResults()
     // has no caller left, so wins were the only stat. The rest comes from the player states: Place is set for every
     // player of a team when the team is out (TeamsLeft then, 0x44A870, from the death handler 0x437C30) or has won (1,
     // 0x400490 and 0x4008F0), with SecondsAlive and the player's Kills final by then. They are read once a second and
-    // each player is reported once, with the DedicatedServer client's token; Core-Backend counts the win from recordwin.
-    WatchResults(FWeakObjectPtr(this), std::make_shared<FMatchResults>());
-    Log::Info(L"Battle Royale: reporting the match's results to {}", Configuration::Get().Backend);
+    // each player is reported once, with the DedicatedServer client's token. Core-Backend counts the win from recordwin,
+    // which 1.8 doesn't have (Core-Backend #81): from a build without it, the report says to count a place 1 as the win.
+    auto Results = std::make_shared<FMatchResults>();
+    Results->bCountWins = Finder::StringRefs(L"/api/game/v2/battleroyale/recordwin").empty();
+    WatchResults(FWeakObjectPtr(this), Results);
+    Log::Info(L"Battle Royale: reporting the match's results to {} ({}{})", Configuration::Get().Backend,
+        Results->bCountWins ? L"with its wins" : L"its wins through the build's recordwin",
+        AFortPlayerStateAthena::CountsKills() ? L"" : AFortPlayerStateAthena::HasEliminator() ? L", kills counted by Core" : L", no kills: no DeathInfo");
 #endif
 }
 

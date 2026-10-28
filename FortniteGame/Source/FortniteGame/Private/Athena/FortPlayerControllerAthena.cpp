@@ -16,10 +16,12 @@
 #include "Items/FortQuickBars.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Logging/LogMacros.h"
+#include "Math/Rotator.h"
 #include "Math/UnrealMathUtility.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Pawns/FortPawn.h"
+#include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -331,6 +333,47 @@ std::vector<FVector> AFortPlayerControllerAthena::GetInventoryDropSpots(AActor* 
     return Spots;
 }
 
+void AFortPlayerControllerAthena::PlaceAtDeathLocation(AFortPawn* DeadPawn)
+{
+#if WITH_SERVER_CODE
+    // After falling to their death a player's camera stayed where it was while the minimap's marker jumped across the map
+    // (#117). A death unpossesses the pawn and makes the controller its own view target (both seen on a 1.8 server and
+    // its client), and the camera of a controller viewing itself is the death camera (AFortPlayerCameraBase's
+    // DeathCameraClass, picked at 0x4E1AD0): UFortDeathCameraMode keeps the camera where it was when it became active
+    // (0x4F58F0) and turns it to the killer (the death report's KillerPawn, 0x5028F0), so with no killer it doesn't move.
+    // That is the game's own death camera until SpectateOnDeath (0x44D690, 5 seconds after the death, 0x43BC33) finds a
+    // killer, teammate or anyone alive to watch; a match with no one left has none. What follows the view target then
+    // follows the controller itself, which stood where it was put when the player joined (the warmup island's start spot
+    // on the server, InitNewPlayer) and somewhere else again on the client, as controllers aren't replicated. It goes
+    // where Fortnite puts a dead player's view: 160 over the body (ClientOnPawnDied's PendingSpectatorLocation, 0x86A762),
+    // with the view rotation it has. The client is told through ClientSetSpectatorCamera (0x819040), which puts the
+    // controller and its spawn location there (APlayerController::SetInitialLocationAndRotation, 0x23A6D80) and keeps it
+    // its own view target, so the death camera stays as it is.
+    constexpr float DeathViewHeight = 160.0f;
+    UClass* Class = DeadPawn && Role == ROLE_Authority ? GetClass() : nullptr;
+    UFunction* SetSpectatorCamera = Class ? Class->FindFunctionByName(FName(L"ClientSetSpectatorCamera", FNAME_Find)) : nullptr;
+    UFunction* GetControlRotation = Class ? Class->FindFunctionByName(FName(L"GetControlRotation", FNAME_Find)) : nullptr;
+    if (!SetSpectatorCamera || !GetControlRotation)
+    {
+        return;
+    }
+
+    const FVector Body = DeadPawn->GetTransform().GetLocation();
+    const FVector ViewLocation(Body.X, Body.Y, Body.Z + DeathViewHeight);
+    Reflection::FParams RotationParams(GetControlRotation);
+    RotationParams.Call(this);
+    const FRotator* ControlRotation = RotationParams.Get<FRotator>(L"ReturnValue");
+    const FRotator ViewRotation = ControlRotation ? *ControlRotation : FRotator();
+
+    SetActorLocation(ViewLocation, false, true);
+    Reflection::FParams Params(SetSpectatorCamera);
+    Params.Set(L"CameraLocation", ViewLocation);
+    Params.Set(L"CameraRotation", ViewRotation);
+    Params.Call(this);
+    UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s stands over its body at (%.0f, %.0f, %.0f)"), *GetName(), ViewLocation.X, ViewLocation.Y, ViewLocation.Z);
+#endif
+}
+
 void AFortPlayerControllerAthena::HookCallSites()
 {
     if (uint8_t* Call = Finder::PawnDiedInventoryDropCall())
@@ -342,10 +385,12 @@ void AFortPlayerControllerAthena::HookCallSites()
 void AFortPlayerControllerAthena::PawnDiedInventoryDropCall(AFortPlayerController* Controller, void* Unused, const FGameplayTagContainer* DamageTags, AFortPawn* DeadPawn, bool* bOutDroppedBackpack)
 {
     // The handler passes the controller's MyFortPawn. Battle Royale drops no backpack, so bDroppedBackpack stays false
-    // and the other controllers keep the stub's nothing.
+    // and the other controllers keep the stub's nothing. It is also where the dead player's controller is moved to their
+    // body, before the handler sends ClientOnPawnDied.
     if (AFortPlayerControllerAthena* AthenaController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)))
     {
         AthenaController->DropInventoryOnDeath(DeadPawn);
+        AthenaController->PlaceAtDeathLocation(DeadPawn);
     }
 }
 

@@ -6,7 +6,6 @@
 #include "HttpRedirect.h"
 #include "Log.h"
 #include "XmppClient.h"
-#include "XmppConnectionJingle.h"
 
 void Boot::Initialize()
 {
@@ -33,7 +32,6 @@ void Boot::Initialize()
     }
 
     buzz::XmppClient::Private::Hook();
-    FXmppConnectionJingle::Hook();
     Hooks::EnableAll();
 
     Log::Info(L"Core Redirect startup complete");

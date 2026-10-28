@@ -432,7 +432,6 @@
     <ClInclude Include="Boot.h" />
     <ClInclude Include="HttpRedirect.h" />
     <ClInclude Include="XmppClient.h" />
-    <ClInclude Include="XmppConnectionJingle.h" />
     <ClInclude Include="..\Core\Public\BackendRequest.h">
       <Filter>Core\Public</Filter>
     </ClInclude>
@@ -1239,7 +1238,6 @@
     <ClCompile Include="Boot.cpp" />
     <ClCompile Include="HttpRedirect.cpp" />
     <ClCompile Include="XmppClient.cpp" />
-    <ClCompile Include="XmppConnectionJingle.cpp" />
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="..\Core\Private\BackendRequest.cpp">
       <Filter>Core\Private</Filter>

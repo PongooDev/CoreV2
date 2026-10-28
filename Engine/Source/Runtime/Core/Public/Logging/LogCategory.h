@@ -58,7 +58,10 @@ struct FLogCategory : public FLogCategoryBinding
 
     enum
     {
-        CompileTimeVerbosity = InCompileTimeVerbosity
+        CompileTimeVerbosity = InCompileTimeVerbosity,
+        // The most verbose line WriteToCoreLog writes, known at compile time so UE_LOG only makes the arguments of a
+        // line that is written.
+        CoreLogVerbosity = InDefaultVerbosity
     };
 
     constexpr FLogCategory(const wchar_t* InCategoryName)

@@ -5542,7 +5542,10 @@ bool Finder::ResolveResetGameplayAttributesLive()
         return true;
     }
 
-    const int32_t Index = Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortPlayerPawn"), reinterpret_cast<void*>(FunctionOf(L"ResetGameplayAttributes called with valid state")), 0x400);
+    // Slot 0x155 on 1.7.2 (0x7E2860) and 1.8 (0x7FDEC0). It is resolved on the first possess, after the cheat movement
+    // hooks have put Core's functions in ACharacter's ClientCheatWalk/Fly/Ghost slots (0x104 to 0x106) of every pawn
+    // class: a walk that stops at the first slot outside the game's code never got this far.
+    const int32_t Index = FirstVTableIndex(CdoVTable(L"/Script/FortniteGame.FortPlayerPawn"), FunctionOf(L"ResetGameplayAttributes called with valid state"));
     if (Index < 0)
     {
         Log::Error(L"Finder: AFortPlayerPawn::ResetGameplayAttributes slot not found");

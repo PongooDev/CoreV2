@@ -30,6 +30,9 @@ public:
     DefineUProperty(FGameplayTagContainer, StaticGameplayTags)
     DefineBitfieldUProperty(bDestroyed)
     DefineBitfieldUProperty(bPersistToWorld)
+    DefineUProperty(int32_t, CurrentBuildingLevel)
+    // Set on props and trees a player's new piece replaces: the piece kills them as it is placed.
+    DefineBitfieldUProperty(bDestroyOnPlayerBuildingPlacement)
     DefineUProperty(FMulticastScriptDelegate, OnDied)
 
     float GetHealth() const;

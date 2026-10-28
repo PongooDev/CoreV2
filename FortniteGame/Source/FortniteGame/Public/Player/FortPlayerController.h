@@ -6,6 +6,7 @@
 #include "UObject/Stack.h"
 #include "Misc/Guid.h"
 #include "StructArray.h"
+#include "UObject/AssetPtr.h"
 
 struct FUniqueNetIdRepl;
 
@@ -28,7 +29,18 @@ struct FItemAndCount;
 struct FRotator;
 struct FVector;
 
+class ABuildingActor;
 class ABuildingSMActor;
+
+// The class to build and the levels it is built at (ServerCreateBuildingActor's first parameter).
+struct FBuildingClassData
+{
+    UClass* BuildingClass = nullptr;
+    int32_t PreviousBuildingLevel = -1;
+    int32_t UpgradeLevel = 0;
+};
+
+static_assert(sizeof(FBuildingClassData) == 0x10);
 
 class AFortPlayerController : public APlayerController
 {
@@ -47,6 +59,7 @@ public:
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
     DefineUProperty(int32_t, OverriddenBackpackSize)
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
+    DefineUProperty(TAssetPtr<UObject>, StartRepairSound)
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
@@ -65,6 +78,13 @@ public:
     DefineUFunction(ServerReturnToMainMenu)
     DefineUFunction(ServerSetPartyOwner)
     DefineUFunction(OnRep_CheatMovement)
+    DefineUFunction(ServerCreateBuildingActor)
+    DefineUFunction(ServerEditBuildingActor)
+    DefineUFunction(ServerBeginEditingBuildingActor)
+    DefineUFunction(ServerEndEditingBuildingActor)
+    DefineUFunction(ServerRepairBuildingActor)
+    DefineUFunction(ServerUpgradeBuildingActor)
+    DefineUFunction(FortClientPlaySoundAtLocation)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
@@ -94,6 +114,14 @@ public:
     void ServerCheat(const FString& Msg);
     void ServerCheat_Implementation(const FString& Msg);
     void OnRep_CheatMovement();
+    // Building (FortPlayerControllerBuilding.cpp): 1.8.1 strips these server RPCs' bodies; Core's follow 1.8's.
+    void ServerCreateBuildingActor_Implementation(const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored);
+    void ServerEditBuildingActor_Implementation(ABuildingSMActor* BuildingActorToEdit, UClass* NewBuildingClass, int32_t RotationIterations, bool bMirrored);
+    void ServerBeginEditingBuildingActor_Implementation(ABuildingSMActor* BuildingActorToEdit);
+    void ServerEndEditingBuildingActor_Implementation(ABuildingSMActor* BuildingActorToStopEditing);
+    void ServerRepairBuildingActor_Implementation(ABuildingSMActor* BuildingActorToRepair);
+    void ServerUpgradeBuildingActor_Implementation(ABuildingActor* BuildingActorToUpgrade, int32_t NewUpgradeLevel);
+    void FortClientPlaySoundAtLocation(UObject* Sound, const FVector& Location, float VolumeMultiplier, float PitchMultiplier);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
@@ -110,6 +138,7 @@ public:
 
     static void Hook();
     static void HookVTables();
+    static void HookBuildingVTables();
     // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox.
     static void HookVoice();
     static void HookClientNatives();
@@ -134,6 +163,15 @@ private:
     static void TrySetHeroImplementationHK(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused);
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count);
+    bool ValidateBuildingClassData(FBuildingClassData& BuildingClassData);
+    bool HasRequiredBuildingLevel(const FBuildingClassData& BuildingClassData);
+    void ExecuteEditTool(ABuildingSMActor* EditActor);
+    static void ServerCreateBuildingActor_ImplementationHK(AFortPlayerController* This, const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored);
+    static void ServerEditBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToEdit, UClass* NewBuildingClass, int32_t RotationIterations, bool bMirrored);
+    static void ServerBeginEditingBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToEdit);
+    static void ServerEndEditingBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToStopEditing);
+    static void ServerRepairBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToRepair);
+    static void ServerUpgradeBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingActor* BuildingActorToUpgrade, int32_t NewUpgradeLevel);
     static void ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor);
     static void ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg);
     static void ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType);

@@ -1470,6 +1470,8 @@ void AFortPlayerController::HookVTables()
     {
         Log::Error(L"Finder: AFortPlayerController::ServerReturnToMainMenu_Implementation slot not found");
     }
+
+    HookBuildingVTables();
 }
 
 int32_t AFortPlayerController::GetItemQuantity(const UFortItemDefinition* ItemDefinition)

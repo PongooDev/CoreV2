@@ -50,3 +50,15 @@ uint8_t AFortWeapon::PendingDestroyDueToDurabilityMask()
     Member.GetOffsetChecked();
     return Member.GetFieldMask();
 }
+
+void AFortWeap_EditingTool::SetEditActor(ABuildingSMActor* NewEditActor)
+{
+    // The edit tool's SetEditActor (1.8.1 0x943040, 1.8 0x939510): on the server, the piece it edits, then
+    // OnRep_EditActor, the native its exec jumps to.
+    if (Role == ROLE_Authority)
+    {
+        EditActor = NewEditActor;
+        Reflection::FParams Params(StaticFunction_OnRep_EditActor());
+        Params.Call(this);
+    }
+}

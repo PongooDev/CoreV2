@@ -144,6 +144,7 @@ namespace Finder
     uint8_t* PawnDiedInventoryDropCall();
     bool ResolveDecoSpawnedLive();
     bool ResolveScoreBuildingConstructionLive();
+    bool ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset);
     bool ResolveServerMoveLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();

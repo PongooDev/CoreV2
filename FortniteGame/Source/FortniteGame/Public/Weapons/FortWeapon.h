@@ -29,6 +29,19 @@ private:
     static Reflection::FMemberInfo& PendingDestroyDueToDurabilityMember();
 };
 
+class ABuildingSMActor;
+
+class AFortWeap_EditingTool : public AFortWeapon
+{
+    DefineUnrealClass(AFortWeap_EditingTool, FortniteGame)
+    DefineUFunction(OnRep_EditActor)
+
+public:
+    DefineUProperty(ABuildingSMActor*, EditActor)
+
+    void SetEditActor(ABuildingSMActor* NewEditActor);
+};
+
 class AFortWeaponRanged : public AFortWeapon
 {
     DefineUnrealClass(AFortWeaponRanged, FortniteGame)

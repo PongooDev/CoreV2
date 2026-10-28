@@ -5,6 +5,7 @@
 #include "StructArray.h"
 
 class AFortPawn;
+class AFortPlayerStateZone;
 class AFortWorldManager;
 class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
@@ -74,6 +75,7 @@ public:
     DefineBitfieldUProperty(bClearMIDWhenReturningToUndamagedState)
     DefineUProperty(TArray<UMaterialInstanceDynamic*>, AnimatingMIDs)
     DefineUProperty(UStaticMeshComponent*, StaticMeshComponent)
+    DefineUProperty(AFortPlayerStateZone*, EditingPlayer)
 
     void PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList);
     void SelectMeshSet(int32_t LootTier);
@@ -88,6 +90,7 @@ public:
     void OnQuotaNotChosen();
 
     static bool ResolveLootQuota();
+    static ptrdiff_t EditingPlayerOffset() { return Member_EditingPlayer.GetOffsetChecked(); }
     static void HookVTables();
     static void HookClientVTables();
 

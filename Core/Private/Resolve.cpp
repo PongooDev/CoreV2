@@ -7257,3 +7257,249 @@ bool Finder::ResolveVoiceHandshake()
     Log::Info(L"Finder: APlayerController MuteList.bHasVoiceHandshakeCompleted is +0x{:X}", Natives::APlayerController_VoiceHandshakeCompletedOffset);
     return true;
 }
+
+bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
+{
+    static bool bSearched = false;
+    if (Natives::ABuildingSMActor_RepairBuildingIndex >= 0 || bSearched)
+    {
+        return Natives::ABuildingSMActor_RepairBuildingIndex >= 0;
+    }
+    bSearched = true;
+
+    // 1.8.1 (CL-3729133) strips AFortPlayerController's ServerCreate/Edit/BeginEditing/EndEditing/Repair/Upgrade
+    // BuildingActor _Implementations (the shared empty function), but every helper the 1.8 bodies call is still there.
+    // Their slots come from three client functions that make the same checks before they send the RPCs. Each is the only
+    // caller of its RPC's stub, which loads the RPC's name global (filled by its static FName initializer):
+    // - Place (ServerCreateBuildingActor; 1.8.1 0x83B170, 1.8 0x8336F0): CanPerformAction(InteractBuild),
+    //   IsBuildingRestricted, CanPlaceBuildableClassInStructuralGrid, CanAffordToPlaceBuildableClass, and after the RPC
+    //   GetErrorMessageFromStructuralQuery.
+    // - ABuildingSMActor's improvement interaction (ServerRepairBuildingActor; 0x49E0A0, 1.8 0x482600): NeedsRepair,
+    //   HasPermissionToEditWorld, IsBeingPlayerEdited, CanAffordToRepair, and CanAffordToPlaceBuildableClass for an upgrade.
+    // - Begin editing (ServerBeginEditingBuildingActor; 0x83AFD0, 1.8 0x833550): IsBeingPlayerEdited, HasPermissionToEditWorld.
+    // The controller declares its helpers in runs, as 21.40 still does: CanAffordToPlaceBuildableClass, CanAffordToRepair,
+    // IsBuildingRestricted, HasRequiredBuildingLevel (1.8.1 0x2A6-0x2A9, 1.8 0x2A5-0x2A8), and
+    // CanPlaceBuildableClassInStructuralGrid, PayBuildableClassPlacementCost, PayBuildingRepairCost,
+    // GetErrorMessageFromStructuralQuery (0x2B2-0x2B5, 1.8 0x2B1-0x2B4). On 1.8 these rules give exactly the slots its own
+    // bodies call.
+    const auto RpcStub = [](const wchar_t* Name) -> uintptr_t
+    {
+        for (const uintptr_t Ref : Finder::StringRefs(Name))
+        {
+            const uintptr_t Store = FindInstruction(Ref + 7, Ref + 0x10, { 0x48, 0x8D, 0x0D });
+            const uintptr_t NameGlobal = Store ? Finder::RelativeTarget(Store, 3, 7) : 0;
+            int32_t Matches = 0;
+            const uintptr_t Load = NameGlobal && !IsInText(NameGlobal) ? ScanRipTarget({ 0x48, 0x8B, 0x15 }, 3, 7, NameGlobal, Matches) : 0;
+            if (Load && Matches == 1)
+            {
+                return Finder::FunctionStart(Load);
+            }
+        }
+        return 0;
+    };
+    const auto OnlyCaller = [](uintptr_t Function) -> uintptr_t
+    {
+        uintptr_t Caller = 0;
+        for (const uintptr_t Site : Function ? Finder::CallsTo(Function, false) : std::vector<uintptr_t>())
+        {
+            const uintptr_t Start = Finder::FunctionStart(Site);
+            if (Caller && Start != Caller)
+            {
+                return 0;
+            }
+            Caller = Start;
+        }
+        return Caller;
+    };
+    const auto Slots = [](uintptr_t Function)
+    {
+        std::vector<int32_t> Result;
+        const uintptr_t End = Function && Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : 0;
+        for (uintptr_t Site = End ? FindVirtualCall(Function, End) : 0; Site; Site = FindVirtualCall(Site + 1, End))
+        {
+            if (const int32_t Slot = VirtualSlot(Site); Slot >= 0)
+            {
+                Result.push_back(Slot);
+            }
+        }
+        return Result;
+    };
+    const auto Has = [](const std::vector<int32_t>& Set, int32_t Slot)
+    {
+        return Slot >= 0 && std::find(Set.begin(), Set.end(), Slot) != Set.end();
+    };
+    const auto ImplementationOf = [](const wchar_t* FunctionPath)
+    {
+        return ImplementationIndex(FindObject<UFunction>(nullptr, FunctionPath));
+    };
+
+    const uintptr_t Place = OnlyCaller(RpcStub(L"ServerCreateBuildingActor"));
+    const uintptr_t Improve = OnlyCaller(RpcStub(L"ServerRepairBuildingActor"));
+    const uintptr_t BeginEdit = OnlyCaller(RpcStub(L"ServerBeginEditingBuildingActor"));
+    const std::vector<int32_t> PlaceSlots = Slots(Place);
+    const std::vector<int32_t> ImproveSlots = Slots(Improve);
+    const std::vector<int32_t> BeginEditSlots = Slots(BeginEdit);
+
+    // CanAffordToPlaceBuildableClass is the one slot both ask whose next slot (CanAffordToRepair) the improvement asks
+    // and whose second next (IsBuildingRestricted) the place function asks.
+    int32_t CanAfford = -1;
+    int32_t Candidates = 0;
+    for (const int32_t Slot : PlaceSlots)
+    {
+        if (Slot != CanAfford && Has(ImproveSlots, Slot) && Has(ImproveSlots, Slot + 1) && Has(PlaceSlots, Slot + 2))
+        {
+            CanAfford = Slot;
+            ++Candidates;
+        }
+    }
+    // CanPlaceBuildableClassInStructuralGrid is the place function's slot past that run whose third next slot
+    // (GetErrorMessageFromStructuralQuery) it also asks.
+    int32_t CanPlace = -1;
+    int32_t PlaceCandidates = 0;
+    for (const int32_t Slot : Candidates == 1 ? PlaceSlots : std::vector<int32_t>())
+    {
+        if (Slot != CanPlace && Slot > CanAfford + 3 && Has(PlaceSlots, Slot + 3))
+        {
+            CanPlace = Slot;
+            ++PlaceCandidates;
+        }
+    }
+
+    void** BuildingVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
+
+    // ABuildingActor::SilentDie (its exec calls the slot) is Die with Gameplay.Effect.InstantDeath.Silent: it fetches the
+    // gameplay tag singleton (its one direct call, 1.8.1 0x5B5AA0, 1.8 0x5C94C0) and makes one virtual call (1.8.1
+    // 0x47C060 -> slot 0xF3).
+    const int32_t SilentDie = ImplementationOf(L"/Script/FortniteGame.BuildingActor:SilentDie");
+    const uintptr_t SilentDieEntry = VTableEntry(BuildingVTable, SilentDie);
+    const uintptr_t SilentDieEnd = SilentDieEntry && Finder::FunctionStart(SilentDieEntry) == SilentDieEntry ? Finder::FunctionEnd(SilentDieEntry) : 0;
+    const std::vector<int32_t> SilentDieSlots = Slots(SilentDieEntry);
+    const int32_t Die = SilentDieSlots.size() == 1 && SilentDieSlots.front() != SilentDie ? SilentDieSlots.front() : -1;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> SilentDieCalls = SilentDieEnd ? Finder::DirectCalls(SilentDieEntry, SilentDieEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    const uintptr_t TagsGetter = SilentDieCalls.size() == 1 ? SilentDieCalls.front().second : 0;
+
+    // The place function first asks whether the pawn may build: it fetches the same singleton, then
+    // lea rdx, [rax+Tag]; call [vtable+CanPerformAction] (1.8.1 +0x2C8, 1.8 +0x2C0), and the tag there is
+    // Gameplay.Action.Player.InteractBuild.
+    int32_t CanPerformAction = -1;
+    const FName InteractBuild(L"Gameplay.Action.Player.InteractBuild", FNAME_Find);
+    const uintptr_t PlaceEnd = Place ? Finder::FunctionEnd(Place) : 0;
+    for (uintptr_t Site = PlaceEnd && TagsGetter && !InteractBuild.IsNone() ? FindVirtualCall(Place, PlaceEnd) : 0; Site && CanPerformAction < 0; Site = FindVirtualCall(Site + 1, PlaceEnd))
+    {
+        const uintptr_t Lea = Site - 7;
+        if (Lea < Place || Byte(Lea) != 0x48 || Byte(Lea + 1) != 0x8D || Byte(Lea + 2) != 0x90 || !CallWithin(Lea - 0x10, 0x10, TagsGetter))
+        {
+            continue;
+        }
+        const uintptr_t Tags = reinterpret_cast<uintptr_t (*)()>(TagsGetter)();
+        if (Tags && *reinterpret_cast<const FName*>(Tags + *reinterpret_cast<const int32_t*>(Lea + 3)) == InteractBuild)
+        {
+            CanPerformAction = VirtualSlot(Site);
+        }
+    }
+
+    const auto BodyIs = [](uintptr_t Entry, std::initializer_list<int32_t> Pattern)
+    {
+        return FindInstruction(Entry, Entry + Pattern.size(), Pattern) == Entry;
+    };
+    const int32_t Offset = static_cast<int32_t>(EditingPlayerOffset);
+    const int32_t O0 = Offset & 0xFF;
+    const int32_t O1 = (Offset >> 8) & 0xFF;
+    const int32_t O2 = (Offset >> 16) & 0xFF;
+    const int32_t O3 = (Offset >> 24) & 0xFF;
+    // IsBeingPlayerEdited: cmp qword ptr [rcx+EditingPlayer], 0 (0xCD). GetEditingPlayer: mov rax, [rcx+EditingPlayer]; ret
+    // (0x14D).
+    const int32_t IsBeingEdited = Offset > 0 ? FirstVTableIndexWhere(BuildingVTable, [&](uintptr_t Entry) { return BodyIs(Entry, { 0x48, 0x83, 0xB9, O0, O1, O2, O3, 0x00 }); }) : -1;
+    const int32_t GetEditing = Offset > 0 ? FirstVTableIndexWhere(BuildingVTable, [&](uintptr_t Entry) { return BodyIs(Entry, { 0x48, 0x8B, 0x81, O0, O1, O2, O3, 0xC3 }); }) : -1;
+    // HasPermissionToEditWorld is the other slot both the improvement and begin editing ask (1.8.1 0x2A0, 1.8 0x29F).
+    int32_t HasPermission = -1;
+    int32_t PermissionCandidates = 0;
+    for (const int32_t Slot : Has(ImproveSlots, IsBeingEdited) ? ImproveSlots : std::vector<int32_t>())
+    {
+        if (Slot != IsBeingEdited && Slot != HasPermission && Has(BeginEditSlots, Slot))
+        {
+            HasPermission = Slot;
+            ++PermissionCandidates;
+        }
+    }
+
+    // 21.40's ABuildingSMActor order: ReplaceBuildingActor, SupportsEditing, CanBePlayerEdited, IsBeingEdited,
+    // GetEditingPlayer, SetEditingPlayer (1.8 and 1.8.1 0x149-0x14E), and OnServerAttemptBuildingUpgrade right before
+    // IsBeingPlayerEdited (0xCC, 0xCD). ReplaceBuildingActor spawns the new piece, SetEditingPlayer stores the player
+    // state, and the upgrade replaces the piece.
+    const int32_t Replace = GetEditing >= 4 ? GetEditing - 4 : -1;
+    const int32_t SetEditing = GetEditing >= 0 ? GetEditing + 1 : -1;
+    const int32_t Upgrade = IsBeingEdited >= 1 ? IsBeingEdited - 1 : -1;
+    const uintptr_t ReplaceEntry = VTableEntry(BuildingVTable, Replace);
+    const uintptr_t ReplaceEnd = ReplaceEntry && Finder::FunctionStart(ReplaceEntry) == ReplaceEntry ? Finder::FunctionEnd(ReplaceEntry) : 0;
+    const bool bReplaceSpawns = ReplaceEnd > ReplaceEntry && CallWithin(ReplaceEntry, ReplaceEnd - ReplaceEntry, reinterpret_cast<uintptr_t>(Natives::UWorld_SpawnActor));
+    const uintptr_t SetEditingEntry = VTableEntry(BuildingVTable, SetEditing);
+    const bool bSetEditingStores = SetEditingEntry && FindInstruction(SetEditingEntry, SetEditingEntry + 0x60, { 0x48, 0x89, -1, O0, O1, O2, O3 });
+    const bool bUpgradeReplaces = Has(Slots(VTableEntry(BuildingVTable, Upgrade)), Replace);
+
+    // AFortAIController::CreateBuildingActor (1.8.1 0x2C1470, 1.8 0x2C1120) spawns its piece and makes three virtual calls
+    // on it: SetMirrored, InitializeBuildingActor, PostInitializeSpawnedBuildingActor (0x123, 0xF7, 0xF8).
+    const int32_t SetMirrored = ImplementationOf(L"/Script/FortniteGame.BuildingSMActor:SetMirrored");
+    const uintptr_t AICreate = ExecImplementation(L"/Script/FortniteGame.FortAIController:CreateBuildingActor");
+    const uintptr_t AICreateEnd = AICreate && Finder::FunctionStart(AICreate) == AICreate ? Finder::FunctionEnd(AICreate) : 0;
+    uintptr_t SpawnCall = 0;
+    for (uintptr_t Call = AICreateEnd ? FindRawCall(AICreate, AICreateEnd) : 0; Call && !SpawnCall; Call = FindRawCall(Call + 1, AICreateEnd))
+    {
+        SpawnCall = Finder::RelativeTarget(Call, 1, 5) == reinterpret_cast<uintptr_t>(Natives::UWorld_SpawnActor) ? Call : 0;
+    }
+    int32_t AfterSpawn[3] = { -1, -1, -1 };
+    uintptr_t Site = SpawnCall ? FindVirtualCall(SpawnCall + 5, AICreateEnd) : 0;
+    for (int32_t Index = 0; Index < 3 && Site; ++Index, Site = FindVirtualCall(Site + 1, AICreateEnd))
+    {
+        AfterSpawn[Index] = VirtualSlot(Site);
+    }
+
+    // RepairBuilding (its exec calls the slot, 0x160) comes two after NeedsRepair (21.40: NeedsRepair, GetCostToRepair,
+    // RepairBuilding), which the improvement asks first.
+    const int32_t RepairBuilding = ImplementationOf(L"/Script/FortniteGame.BuildingSMActor:RepairBuilding");
+    const int32_t NeedsRepair = RepairBuilding >= 2 && Has(ImproveSlots, RepairBuilding - 2) ? RepairBuilding - 2 : -1;
+
+    // The game mode scores Construction, Destruction, Upgrade, Repair and Edit in five slots in a row.
+    const int32_t ScoreConstruction = Finder::ResolveScoreBuildingConstructionLive() ? Natives::AFortGameMode_ScoreBuildingConstructionIndex : -1;
+
+    if (Candidates != 1 || PlaceCandidates != 1 || CanPerformAction < 0 || PermissionCandidates != 1 || GetEditing < 0 || !bReplaceSpawns || !bSetEditingStores || !bUpgradeReplaces
+        || Die < 0 || SetMirrored < 0 || AfterSpawn[0] != SetMirrored || AfterSpawn[1] < 0 || AfterSpawn[2] < 0 || NeedsRepair < 0 || ScoreConstruction < 0)
+    {
+        Log::Error(L"Finder: the building RPCs' helpers not found (place 0x{:X}, improve 0x{:X}, begin edit 0x{:X}; afford {} x{}, place {} x{}, action {}, permission {} x{}; "
+            L"edited {}, editing player {}, replace {}, set {}, upgrade {}; die {}, mirrored {}, after spawn {} {} {}, needs repair {}, score {})",
+            Place ? Place - Finder::ImageBase() : 0, Improve ? Improve - Finder::ImageBase() : 0, BeginEdit ? BeginEdit - Finder::ImageBase() : 0, CanAfford, Candidates, CanPlace, PlaceCandidates,
+            CanPerformAction, HasPermission, PermissionCandidates, IsBeingEdited, GetEditing, bReplaceSpawns, bSetEditingStores, bUpgradeReplaces, Die, SetMirrored, AfterSpawn[0], AfterSpawn[1],
+            AfterSpawn[2], NeedsRepair, ScoreConstruction);
+        return false;
+    }
+
+    Natives::AFortGameMode_ScoreBuildingRepairIndex = ScoreConstruction + 3;
+    Natives::AFortGameMode_ScoreBuildingEditIndex = ScoreConstruction + 4;
+    Natives::AFortPlayerController_CanPerformActionIndex = CanPerformAction;
+    Natives::AFortPlayerController_HasPermissionToEditWorldIndex = HasPermission;
+    Natives::AFortPlayerController_CanAffordToPlaceBuildableClassIndex = CanAfford;
+    Natives::AFortPlayerController_CanAffordToRepairIndex = CanAfford + 1;
+    Natives::AFortPlayerController_IsBuildingRestrictedIndex = CanAfford + 2;
+    Natives::AFortPlayerController_HasRequiredBuildingLevelIndex = CanAfford + 3;
+    Natives::AFortPlayerController_CanPlaceBuildableClassInStructuralGridIndex = CanPlace;
+    Natives::AFortPlayerController_PayBuildableClassPlacementCostIndex = CanPlace + 1;
+    Natives::AFortPlayerController_PayBuildingRepairCostIndex = CanPlace + 2;
+    Natives::ABuildingActor_DieIndex = Die;
+    Natives::ABuildingActor_InitializeBuildingActorIndex = AfterSpawn[1];
+    Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex = AfterSpawn[2];
+    Natives::ABuildingSMActor_SetMirroredIndex = SetMirrored;
+    Natives::ABuildingSMActor_OnServerAttemptBuildingUpgradeIndex = Upgrade;
+    Natives::ABuildingSMActor_IsBeingPlayerEditedIndex = IsBeingEdited;
+    Natives::ABuildingSMActor_ReplaceBuildingActorIndex = Replace;
+    Natives::ABuildingSMActor_CanBePlayerEditedIndex = GetEditing - 2;
+    Natives::ABuildingSMActor_GetEditingPlayerIndex = GetEditing;
+    Natives::ABuildingSMActor_SetEditingPlayerIndex = SetEditing;
+    Natives::ABuildingSMActor_NeedsRepairIndex = NeedsRepair;
+    Natives::ABuildingSMActor_RepairBuildingIndex = RepairBuilding;
+    Log::Info(L"Finder: building helpers: AFortPlayerController CanPerformAction 0x{:X}, HasPermissionToEditWorld 0x{:X}, CanAfford..HasRequiredBuildingLevel 0x{:X}-0x{:X}, "
+        L"CanPlace..PayBuildingRepairCost 0x{:X}-0x{:X}; ABuildingSMActor Die 0x{:X}, Initialize 0x{:X} 0x{:X}, SetMirrored 0x{:X}, Upgrade 0x{:X}, IsBeingPlayerEdited 0x{:X}, "
+        L"Replace 0x{:X}, CanBePlayerEdited 0x{:X}, EditingPlayer 0x{:X} 0x{:X}, NeedsRepair 0x{:X}, Repair 0x{:X}; AFortGameMode scores 0x{:X} 0x{:X} 0x{:X}",
+        CanPerformAction, HasPermission, CanAfford, CanAfford + 3, CanPlace, CanPlace + 2, Die, AfterSpawn[1], AfterSpawn[2], SetMirrored, Upgrade, IsBeingEdited, Replace, GetEditing - 2,
+        GetEditing, SetEditing, NeedsRepair, RepairBuilding, ScoreConstruction, ScoreConstruction + 3, ScoreConstruction + 4);
+    return true;
+}

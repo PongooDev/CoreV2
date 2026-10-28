@@ -17,6 +17,8 @@ struct FRotator
         : Pitch(InPitch), Yaw(InYaw), Roll(InRoll)
     {
     }
+
+    FQuat Quaternion() const;
 };
 
 static_assert(sizeof(FRotator) == 0xC);
@@ -25,6 +27,24 @@ inline FRotator FVector::Rotation() const
 {
     constexpr float RadiansToDegrees = 180.0f / 3.1415926535897932f;
     return FRotator(FMath::Atan2(Z, FMath::Sqrt(X * X + Y * Y)) * RadiansToDegrees, FMath::Atan2(Y, X) * RadiansToDegrees, 0.0f);
+}
+
+// 4.16's FRotator::Quaternion.
+inline FQuat FRotator::Quaternion() const
+{
+    constexpr float HalfDegreesToRadians = 3.1415926535897932f / 360.0f;
+    const float SP = std::sin(Pitch * HalfDegreesToRadians);
+    const float CP = std::cos(Pitch * HalfDegreesToRadians);
+    const float SY = std::sin(Yaw * HalfDegreesToRadians);
+    const float CY = std::cos(Yaw * HalfDegreesToRadians);
+    const float SR = std::sin(Roll * HalfDegreesToRadians);
+    const float CR = std::cos(Roll * HalfDegreesToRadians);
+    FQuat Result;
+    Result.X = CR * SP * SY - SR * CP * CY;
+    Result.Y = -CR * SP * CY - SR * CP * SY;
+    Result.Z = CR * CP * SY - SR * SP * CY;
+    Result.W = CR * CP * CY + SR * SP * SY;
+    return Result;
 }
 
 inline float NormalizeRotatorAxis(float Angle)

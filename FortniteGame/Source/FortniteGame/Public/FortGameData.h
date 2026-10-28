@@ -53,6 +53,7 @@ public:
     DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, CheatInventoryItems)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
+    DefineUProperty(TAssetPtr<UFortWorldItemDefinition>, EditToolItem)
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
     DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)
     DefineUProperty(UClass*, SharedMissionListsClass)

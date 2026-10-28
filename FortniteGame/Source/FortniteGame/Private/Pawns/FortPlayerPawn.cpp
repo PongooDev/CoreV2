@@ -124,15 +124,25 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
 {
 #if WITH_SERVER_CODE
     // 1.8's AFortPlayerPawn::ServerReviveFromDBNO_Implementation (0x7FF160), step by step.
+    // The native takes the pawn's IAbilitySystemInterface (+0x7C0), whose GetAbilitySystemComponent returns the
+    // pawn's AbilitySystemComponent (1.8.1 0x62D5E0), and keeps it only as a UFortAbilitySystemComponent.
     static UClass* FortAbilitySystemClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAbilitySystemComponent");
-    UAbilitySystemComponent* AbilitySystem = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(this);
+    UAbilitySystemComponent* AbilitySystem = AbilitySystemComponent;
+    if (!AbilitySystem)
+    {
+        AbilitySystem = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(this);
+    }
     if (AbilitySystem && (!FortAbilitySystemClass || !AbilitySystem->IsA(FortAbilitySystemClass)))
     {
         AbilitySystem = nullptr;
     }
-    // The reviver must be a teammate who isn't down themselves; a self revive passes the pawn's own controller.
-    if (!CallVirtual<bool>(this, Natives::AFortPlayerPawn_CanReviveFromDBNOIndex, EventInstigator) || !AbilitySystem)
+    // The reviver must be a teammate who isn't down themselves; a self revive passes the pawn's own controller. The
+    // interaction asked the same before it got here (the pawn's interact interface, 1.8.1 0x7E9840).
+    const bool bCanRevive = CallVirtual<bool>(this, Natives::AFortPlayerPawn_CanReviveFromDBNOIndex, EventInstigator);
+    if (!bCanRevive || !AbilitySystem)
     {
+        UE_LOG(LogFort, Warning, TEXT("ReviveFromDBNO: %s can't revive %s (CanReviveFromDBNO %s, DBNO %s, ability system %s)"),
+            *GetNameSafe(EventInstigator), *GetNameSafe(this), bCanRevive ? TEXT("yes") : TEXT("no"), bIsDBNO ? TEXT("yes") : TEXT("no"), *GetNameSafe(AbilitySystem));
         return;
     }
 
@@ -273,6 +283,7 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
 
 void AFortPlayerPawn::ServerReviveFromDBNO_Implementation(AController* EventInstigator)
 {
+    UE_LOG(LogFort, Log, TEXT("ServerReviveFromDBNO: %s revives %s"), *GetNameSafe(EventInstigator), *GetNameSafe(this));
     ReviveFromDBNO(EventInstigator);
 
     // AFortPlayerPawnAthena's override (1.8 0x44B4F0) then ends the pawn's "being revived" state once it's up: no

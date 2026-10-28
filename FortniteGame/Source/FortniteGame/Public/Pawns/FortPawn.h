@@ -7,6 +7,7 @@
 #include "UObject/ScriptDelegates.h"
 
 class AFortWeapon;
+class UAbilitySystemComponent;
 class UFortWeaponItemDefinition;
 
 class AFortPawn : public APawn
@@ -29,6 +30,8 @@ public:
     DefineUProperty(bool, bIsDBNO)
     DefineUProperty(bool, bPlayedDying)
     DefineUProperty(UFortHealthSet*, HealthSet)
+    // What the pawn's IAbilitySystemInterface returns (its player state's, for a player).
+    DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
 
     bool IsDead() const;
     AFortWeapon* EquipWeaponDefinition(const UFortWeaponItemDefinition* WeaponData, const FGuid& ItemEntryGuid);

@@ -5911,16 +5911,59 @@ bool Finder::ResolveScoreBuildingConstructionLive()
     {
         bCreateScores = VirtualSlot(Site) == Index;
     }
-    const uintptr_t Score = bCreateScores ? VTableEntry(CdoVTable(L"/Script/FortniteGame.FortGameModeAthena"), Index) : 0;
-    if (!Score || Finder::IsStubFunction(Score))
+    void** AthenaVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeAthena");
+    const uintptr_t Score = bCreateScores ? VTableEntry(AthenaVTable, Index) : 0;
+    if (Score && !Finder::IsStubFunction(Score))
     {
-        Log::Error(L"Finder: AFortGameMode::ScoreBuildingConstruction not found (edit 0x{:X} scores slot {}, create 0x{:X})",
+        Natives::AFortGameMode_ScoreBuildingConstructionIndex = Index;
+        Log::Info(L"Finder: AFortGameMode::ScoreBuildingConstruction is slot 0x{:X} (0x{:X}), called by ServerCreateBuildingActor (0x{:X})", Index, Score - Finder::ImageBase(), Create - Finder::ImageBase());
+        return true;
+    }
+
+    // 1.8.1 (CL-3729133) strips both: AFortPlayerController's ServerCreateBuildingActor and ServerEditBuildingActor
+    // _Implementation slots (0x1F4, 0x1F6) hold the shared empty function. The game mode's own five slots are still there
+    // (0x12E-0x132, as on 1.8): Upgrade, Repair and Edit are thunks to one scorer, mov r9, r8; mov r8, rdx; mov dl, Type;
+    // jmp Scorer (1.8.1 0x58E940, 0x58E930, 0x58E810, all to 0x58E820; 1.8 0x599300.. to 0x5991E0; 1.7.2 slots 0x131-0x133
+    // to 0x58A860), and ScoreBuildingConstruction (1.8.1 0x58E610), two slots before the first of them, calls the scorer
+    // too. The first such run is the Athena game mode's own: the subclasses' vtables that follow repeat it.
+    const auto ScoreThunkTarget = [](uintptr_t Entry) -> uintptr_t
+    {
+        return Entry && FindInstruction(Entry, Entry + 13, { 0x4D, 0x8B, 0xC8, 0x4C, 0x8B, 0xC2, 0xB2, -1, 0xE9 }) == Entry ? Finder::RelativeTarget(Entry + 8, 1, 5) : 0;
+    };
+    int32_t ScorerIndex = -1;
+    for (int32_t Slot = 2; AthenaVTable && Slot + 2 < 0x400 && ScorerIndex < 0; ++Slot)
+    {
+        const uintptr_t Upgrade = VTableEntry(AthenaVTable, Slot);
+        if (!Upgrade)
+        {
+            if (IsCoreFunction(reinterpret_cast<uintptr_t>(AthenaVTable[Slot])))
+            {
+                continue;
+            }
+            break;
+        }
+        const uintptr_t Scorer = ScoreThunkTarget(Upgrade);
+        if (!Scorer || ScoreThunkTarget(VTableEntry(AthenaVTable, Slot + 1)) != Scorer || ScoreThunkTarget(VTableEntry(AthenaVTable, Slot + 2)) != Scorer)
+        {
+            continue;
+        }
+        const uintptr_t Construction = VTableEntry(AthenaVTable, Slot - 2);
+        const uintptr_t ConstructionEnd = Construction && Finder::FunctionStart(Construction) == Construction ? Finder::FunctionEnd(Construction) : 0;
+        if (ConstructionEnd > Construction && ConstructionEnd - Construction < 0x200 && CallWithin(Construction, ConstructionEnd - Construction, Scorer))
+        {
+            ScorerIndex = Slot - 2;
+        }
+    }
+    if (ScorerIndex < 0)
+    {
+        Log::Error(L"Finder: AFortGameMode::ScoreBuildingConstruction not found (edit 0x{:X} scores slot {}, create 0x{:X}, no scorer thunks)",
             Edit ? Edit - Finder::ImageBase() : 0, EditIndex, Create ? Create - Finder::ImageBase() : 0);
         return false;
     }
 
-    Natives::AFortGameMode_ScoreBuildingConstructionIndex = Index;
-    Log::Info(L"Finder: AFortGameMode::ScoreBuildingConstruction is slot 0x{:X} (0x{:X}), called by ServerCreateBuildingActor (0x{:X})", Index, Score - Finder::ImageBase(), Create - Finder::ImageBase());
+    Natives::AFortGameMode_ScoreBuildingConstructionIndex = ScorerIndex;
+    Log::Info(L"Finder: AFortGameMode::ScoreBuildingConstruction is slot 0x{:X} (0x{:X}), from the game mode's scorer thunks (this build's ServerEditBuildingActor_Implementation is 0x{:X} and scores slot {})",
+        ScorerIndex, VTableEntry(AthenaVTable, ScorerIndex) - Finder::ImageBase(), Edit ? Edit - Finder::ImageBase() : 0, EditIndex);
     return true;
 }
 

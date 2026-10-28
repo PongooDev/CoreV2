@@ -6028,15 +6028,24 @@ namespace
         return false;
     }
 
+    // Slots Core has already swapped are stepped over, as in FirstVTableIndexWhere: ACharacter::HookCheatMovement swaps
+    // ClientCheatWalk/Fly/Ghost_Implementation in every character's vtable at boot (1.8 slots 0x104-0x106, 1.7.2
+    // 0x108-0x10A), and a walk that stopped there never reached AFortPawn::EquipDefaultWeapon (1.8 slot 0x133 = 0x7D9370,
+    // 1.7.2 0x137 = 0x783300) or AFortPlayerPawn::EquipLastWeapon (0x18E: 1.8 0x7D93A0, 1.7.2 0x7CA430). Both came back -1,
+    // so the pawn kept no weapon when an ability weapon such as Goin' Commando's minigun went away (#115).
     int32_t UniqueSlotReferencing(void** VTable, size_t MaxSize, std::initializer_list<ptrdiff_t> Offsets, bool bNeedsCall)
     {
         int32_t Found = -1;
         uintptr_t FoundFunction = 0;
-        for (int32_t Index = 0; Index < 0x200; ++Index)
+        for (int32_t Index = 0; VTable && Index < 0x200; ++Index)
         {
             const uintptr_t Function = VTableEntry(VTable, Index);
             if (!Function)
             {
+                if (IsCoreFunction(reinterpret_cast<uintptr_t>(VTable[Index])))
+                {
+                    continue;
+                }
                 break;
             }
             const uintptr_t End = Finder::FunctionEnd(Function);

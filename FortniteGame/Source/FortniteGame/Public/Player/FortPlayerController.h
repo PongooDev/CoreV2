@@ -7,6 +7,8 @@
 #include "Misc/Guid.h"
 #include "StructArray.h"
 
+struct FUniqueNetIdRepl;
+
 class AFortInventory;
 class AFortPawn;
 class AFortPickup;
@@ -61,6 +63,7 @@ public:
     DefineUFunction(Cheat)
     DefineUFunction(ServerCheat)
     DefineUFunction(ServerReturnToMainMenu)
+    DefineUFunction(ServerSetPartyOwner)
     DefineUFunction(OnRep_CheatMovement)
 
     bool InitializeMcpProfile(const void* OnComplete);
@@ -70,6 +73,7 @@ public:
     void ClientReportDamagedResourceBuilding(ABuildingSMActor* BuildingSMActor, uint8_t PotentialResourceType, int32_t PotentialResourceCount, bool bDestroyed, bool bJustHitWeakspot);
     void SetRotatePawnToCamera(bool bNewRotatePawnToCamera);
     bool GetRotatePawnToCamera();
+    void ServerSetPartyOwner(const FUniqueNetIdRepl& PartyOwnerUniqueId);
     void Possess(APawn* InPawn);
     void SpawnQuickBars();
     void SetupQuickBars();

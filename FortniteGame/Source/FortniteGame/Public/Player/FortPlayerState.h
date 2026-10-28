@@ -62,6 +62,7 @@ public:
     DefineUProperty(bool, bIsFinalizingExperience)
     DefineUProperty(bool, bAreZoneStatsFinalized)
     DefineUProperty(AFortTeamInfo*, PlayerTeam)
+    DefineUProperty(FUniqueNetIdRepl, PartyOwnerUniqueId)
     DefineBitfieldUProperty(bHasStartedPlaying)
     DefineUFunction(OnRep_CharacterParts)
 

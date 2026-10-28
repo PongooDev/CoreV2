@@ -20,6 +20,7 @@
 #include "FortZoneTheme.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
 #include "GameFramework/OnlineReplStructs.h"
+#include "Online/FortLobbyBeaconHost.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
 #include "FortWorldManager.h"
@@ -58,6 +59,7 @@ APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPla
 #endif
 }
 
+DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 DEFINE_LOG_CATEGORY_STATIC(LogFortPlacement, Log, All);
 DEFINE_LOG_CATEGORY_STATIC(LogNavigation, Log, All);
 
@@ -290,6 +292,34 @@ APlayerController* AFortGameModeZone::Login(UPlayer* NewPlayer, ENetRole InRemot
     {
         FString& PlayerName = PlayerState->PlayerName;
         PlayerState->WorldPlayerId = WorldManager->GetOrAllocatePlayerID(UniqueId.ToString(), PlayerName);
+    }
+
+    // The escape menu's team (UFortPartyContext::GetLocalTeamTeamMemberInfo, UFortUITeamInfo::GetTeamMembers) lists the
+    // players by party, and a player state without a PartyOwnerUniqueId is in none: the menu showed an empty slot, with no
+    // name, banner, power or stats (CoreV2 #111; a 1.7.2 client listed nobody until its player state had one). PostLogin
+    // (1.7.2 0x574580) asks the client for it (ClientRegisterWithParty, 0x7F9A30), which answers ServerSetPartyOwner only
+    // when its persistent party has a leader ("Failed to get persistent party leader", 0x80BDE0). A player left without
+    // one gets the party owner the client gave the lobby beacon, else leads its own party. Battle Royale keeps the game's.
+    if (FortPlayerController && PlayerState && !Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(this)))
+    {
+        const FUniqueNetIdRepl& PartyOwnerUniqueId = PlayerState->PartyOwnerUniqueId;
+        if (!PartyOwnerUniqueId.IsValid() && UniqueId.IsValid())
+        {
+            const FUniqueNetIdRepl* PartyOwner = &UniqueId;
+            for (TObjectIterator<ALobbyBeaconPlayerState> It; It; ++It)
+            {
+                const FUniqueNetIdRepl& BeaconId = It->UniqueId;
+                const FUniqueNetIdRepl& BeaconPartyOwner = It->PartyOwnerUniqueId;
+                if (It->GetWorld() == World && BeaconPartyOwner.IsValid() && BeaconId.ToString().ToStdString() == UniqueId.ToString().ToStdString())
+                {
+                    PartyOwner = &BeaconPartyOwner;
+                    break;
+                }
+            }
+            FortPlayerController->ServerSetPartyOwner(*PartyOwner);
+            const FUniqueNetIdRepl& NewPartyOwner = PlayerState->PartyOwnerUniqueId;
+            UE_LOG(LogFort, Log, TEXT("Login: %s is in the party of %s"), *UniqueId.ToString(), *NewPartyOwner.ToString());
+        }
     }
 
     AFortPlayerStateOutpost* OutpostPlayerState = Cast<AFortPlayerStateOutpost>(reinterpret_cast<UObject*>(PlayerState));

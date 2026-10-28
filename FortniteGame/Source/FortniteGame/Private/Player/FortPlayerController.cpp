@@ -220,6 +220,15 @@ bool AFortPlayerController::GetRotatePawnToCamera()
     return Params.Call(this) ? Params.Take<bool>(L"ReturnValue") : true;
 }
 
+void AFortPlayerController::ServerSetPartyOwner(const FUniqueNetIdRepl& PartyOwnerUniqueId)
+{
+    // Called on the server, the RPC runs its own _Implementation (1.7.2 0x828360): the player state's
+    // PartyOwnerUniqueId, then the game session's lobby beacon (0x6E8360).
+    Reflection::FParams Params(StaticFunction_ServerSetPartyOwner());
+    Params.Set(L"PartyOwnerUniqueId", PartyOwnerUniqueId);
+    Params.Call(this);
+}
+
 void AFortPlayerController::Possess(APawn* InPawn)
 {
     const bool bAthenaPossess = AthenaPossessOG && Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this));

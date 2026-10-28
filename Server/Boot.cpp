@@ -179,6 +179,7 @@ void Boot::Initialize()
         AFortAIPawn::HookVTables();
         AFortPlayerPawn::HookVTables();
         ACharacter::HookCheatMovement();
+        ACharacter::OnCheatMovement = &UFortCheatManager::OnCheatMovement;
         UFortCheatManager::HookNatives();
         Finder::ResolveNavigationSystemLive();
         if (Configuration::Get().IsBattleRoyale())

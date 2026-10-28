@@ -14,6 +14,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Misc/ConfigCacheIni.h"
 #include "OnlineVoiceImpl.h"
+#include "Player/FortCheatManager.h"
 #include "Player/FortPlayerController.h"
 #include "UI/AthenaHUDContext.h"
 #include "UI/FortAsyncAction_ShowPartyDialog.h"
@@ -58,6 +59,7 @@ void Boot::Initialize()
         UFortAsyncAction_ShowPartyDialog::HookNatives();
         UFortPartyContext::StartAthenaPartyBar();
         ACharacter::HookCheatMovement();
+        ACharacter::OnCheatMovement = &UFortCheatManager::OnCheatMovement;
         ABuildingSMActor::HookClientVTables();
     });
 

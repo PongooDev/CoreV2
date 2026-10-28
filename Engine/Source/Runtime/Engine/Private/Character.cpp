@@ -90,14 +90,26 @@ void ACharacter::HookCheatMovement()
 void ACharacter::ClientCheatWalk_ImplementationHK(ACharacter* This)
 {
     This->ApplyCheatMovement(ECheatMovement::Walk);
+    if (OnCheatMovement)
+    {
+        OnCheatMovement(This, ECheatMovement::Walk);
+    }
 }
 
 void ACharacter::ClientCheatFly_ImplementationHK(ACharacter* This)
 {
     This->ApplyCheatMovement(ECheatMovement::Fly);
+    if (OnCheatMovement)
+    {
+        OnCheatMovement(This, ECheatMovement::Fly);
+    }
 }
 
 void ACharacter::ClientCheatGhost_ImplementationHK(ACharacter* This)
 {
     This->ApplyCheatMovement(ECheatMovement::Ghost);
+    if (OnCheatMovement)
+    {
+        OnCheatMovement(This, ECheatMovement::Ghost);
+    }
 }

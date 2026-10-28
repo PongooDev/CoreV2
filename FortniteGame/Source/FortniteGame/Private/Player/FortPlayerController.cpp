@@ -1613,6 +1613,21 @@ void AFortPlayerController::Cheat(const FString& Msg)
     // beacon whenever the client still has one (UFortGameInstance::Matchmaking->LobbyBeaconClient), which a Save the
     // World player keeps for the whole match. The server's ALobbyBeaconClient::ServerCheat_Implementation is empty in
     // these builds, so every "cheat" was dropped without a word (#75). It goes to this controller's ServerCheat instead.
+    //
+    // "fly 3000" (#129): this game predicts the pawn's movement, so it moves at the speed the server will. Nothing the
+    // server could replicate holds the speed, so the speed this player sends waits here for the server's ClientCheatFly
+    // or ClientCheatGhost (UFortCheatManager::OnCheatMovement). The server refuses a speed for another player
+    // ("/Name/"), so none is kept for one.
+    FString Command;
+    FString TargetName;
+    FString MovementCommand;
+    FString MovementError;
+    float MoveSpeed = 0.0f;
+    const bool bTargeted = UFortCheatManager::SplitCheatTarget(Msg, Command, TargetName);
+    if (UFortCheatManager::ParseCheatMovement(bTargeted ? Command : Msg, MovementCommand, MoveSpeed, MovementError))
+    {
+        UFortCheatManager::CheatMoveSpeed = bTargeted || !MovementError.IsEmpty() ? 0.0f : MoveSpeed;
+    }
     ServerCheat(Msg);
 }
 
@@ -1675,6 +1690,28 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
         return;
     }
 
+    // "fly 3000" and "ghost 3000" (#129): the speed comes off before the console parses the command, and the pawn's Fly
+    // or Ghost body moves it at that speed (UFortCheatManager::OnCheatMovement). The pawn's own client predicts its
+    // movement at the speed its player typed, so a speed only goes with the player's own pawn.
+    FString MovementCommand;
+    FString MovementError;
+    float MoveSpeed = 0.0f;
+    if (UFortCheatManager::ParseCheatMovement(Command, MovementCommand, MoveSpeed, MovementError))
+    {
+        if (!MovementError.IsEmpty())
+        {
+            ClientMessage(MovementError);
+            return;
+        }
+        if (MoveSpeed > 0.0f && !TargetName.IsEmpty())
+        {
+            ClientMessage(FString::Printf(TEXT("A speed only works on your own pawn: %s's game wouldn't know it (\"cheat %s /%s/\" works at their own speed)"),
+                *TargetName, *MovementCommand, *TargetName));
+            return;
+        }
+        Command = MovementCommand;
+    }
+
     // The native body runs ConsoleCommand(Msg, true), which writes the output to the server's log and replies with an
     // empty ClientMessage. Collecting it instead sends the player what the command printed, "Command not recognized"
     // included; the cheats' own replies ("God mode on") are ClientMessages of their own. Core's cheats answer the player
@@ -1684,7 +1721,9 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
     {
         UFortCheatManager::ReplyTo = this;
     }
+    UFortCheatManager::CheatMoveSpeed = MoveSpeed;
     FString Result = Runner->ConsoleCommand(Command, false);
+    UFortCheatManager::CheatMoveSpeed = 0.0f;
     UFortCheatManager::ReplyTo = PreviousReplyTo;
     while (!Result.IsEmpty() && (Result.EndsWith(L"\n") || Result.EndsWith(L"\r")))
     {

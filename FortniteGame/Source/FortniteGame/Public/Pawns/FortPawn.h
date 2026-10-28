@@ -2,6 +2,7 @@
 
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Containers/Array.h"
+#include "Engine/DataTable.h"
 #include "GameFramework/Pawn.h"
 #include "Misc/Guid.h"
 #include "UObject/ScriptDelegates.h"
@@ -9,6 +10,23 @@
 class AFortWeapon;
 class UAbilitySystemComponent;
 class UFortWeaponItemDefinition;
+
+// A row of a pawn's stats table (AFortPawn::PawnStatHandle). Battle Royale's pawn moves at its speeds
+// (AFortPlayerPawnAthena::GetMovementSpeed, 1.7.2 0x41E9D0, 1.8 0x428410, 1.8.1 0x41EF10), flying included.
+struct FFortPawnStats
+{
+    DefineUnrealStruct(FFortPawnStats, FortniteGame)
+    DefineUProperty(float, SpeedWalk)
+    DefineUProperty(float, SpeedRun)
+    DefineUProperty(float, SpeedSprint)
+
+    // Every speed the row moves a pawn at, times Scale (the crouched ones from 1.7.2).
+    void ScaleSpeeds(float Scale);
+
+private:
+    DefineUProperty(float, SpeedCrouchedRun)
+    DefineUProperty(float, SpeedCrouchedSprint)
+};
 
 class AFortPawn : public APawn
 {
@@ -32,6 +50,10 @@ public:
     DefineUProperty(UFortHealthSet*, HealthSet)
     // What the pawn's IAbilitySystemInterface returns (its player state's, for a player).
     DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
+    // The pawn's FFortPawnStats row. Not replicated: each machine reads its own copy.
+    DefineUStructProperty(FDataTableRowHandle, PawnStatHandle)
+    // Its player state's movement attributes, for a player (replicated with the player state).
+    DefineUProperty(UFortMovementSet*, MovementSet)
 
     bool IsDead() const;
     AFortWeapon* EquipWeaponDefinition(const UFortWeaponItemDefinition* WeaponData, const FGuid& ItemEntryGuid);
@@ -42,6 +64,11 @@ public:
     float GetMaxHealth() const;
     float GetShield() const;
     float GetMaxShield() const;
+
+    // "cheat fly 3000" (#129): the pawn runs at Speed (and walks and sprints faster by as much), 0 gives it its own
+    // speeds back. Character movement is predicted, so the server and the owning client both run this with the same
+    // speed, or the server corrects the client. Returns the pawn's own running speed, 0 when it has none.
+    float SetCheatMoveSpeed(float Speed);
 
     static ptrdiff_t CurrentWeaponListOffset();
     static ptrdiff_t IsDBNOOffset();

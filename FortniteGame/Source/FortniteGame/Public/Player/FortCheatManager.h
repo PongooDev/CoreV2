@@ -8,8 +8,10 @@
 #include <cstdint>
 #include <initializer_list>
 
+class ACharacter;
 class AFortPlayerController;
 class UFortWorldItemDefinition;
+enum class ECheatMovement : uint8_t;
 
 // Fortnite's cheats ("cheat <command>" runs them on the server, AFortPlayerController::ServerCheat_Implementation).
 // Shipping builds keep every exec function but compile many bodies out, so those cheats answered nothing and did
@@ -119,6 +121,15 @@ public:
     static AFortPlayerController* FindCheatTarget(const UObject* WorldContextObject, const FString& Name, FString& OutError);
     // While a cheat runs on another player, Core's replies go to the player who typed it.
     static inline AFortPlayerController* ReplyTo = nullptr;
+
+    // "fly [speed]", "ghost [speed]" and "walk" (#129): true for those, with OutCommand the command without the speed
+    // and OutSpeed the speed (0: the pawn's own), or OutError saying why the speed isn't one.
+    static bool ParseCheatMovement(const FString& Command, FString& OutCommand, float& OutSpeed, FString& OutError);
+    // The speed the next Fly or Ghost moves the pawn at (0: its own). The server sets it while the command runs; the
+    // client from the command its player sends, until the server's ClientCheatFly or ClientCheatGhost comes back.
+    static inline float CheatMoveSpeed = 0.0f;
+    // ACharacter::OnCheatMovement, on the server and the client: Fly and Ghost take CheatMoveSpeed, Walk the pawn's own.
+    static void OnCheatMovement(ACharacter* Character, ECheatMovement Movement);
 
     // Server: the stripped cheats run Core's bodies.
     static void HookNatives();

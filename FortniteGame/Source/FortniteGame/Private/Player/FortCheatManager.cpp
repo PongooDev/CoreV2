@@ -13,6 +13,7 @@
 #include "FortGameState.h"
 #include "FortKismetLibrary.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
@@ -37,6 +38,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <cwctype>
 #include <map>
 #include <string>
@@ -339,7 +341,7 @@ namespace
         { L"Items", L"Badass", L"Badass", L"STW weapons with god, build free and infinite ammo (GiveGoodWeapons: the weapons)", ECheatMode::SaveTheWorld },
         { L"Items", L"ListWeapons", L"ListWeapons", L"the names to give (ListAmmo, ListTraps, ListGadgets)", ECheatMode::Both },
         { L"Player", L"God", L"God", L"invulnerable (toggles)", ECheatMode::Both },
-        { L"Player", L"Fly", L"Fly", L"fly (Ghost: through walls too; Walk: walk again)", ECheatMode::Both },
+        { L"Player", L"Fly", L"Fly [speed]", L"fly, at the speed if you give one (\"fly 3000\"; Ghost [speed]: through walls too; Walk: walk again at your own speed)", ECheatMode::Both },
         { L"Player", L"TestInfJumps", L"TestInfJumps", L"jump again in the air, any number of times (toggles)", ECheatMode::Both },
         { L"Player", L"Teleport", L"Teleport", L"to where you look (TeleportToLocation <x> <y> <z>, TeleportToActor <class or name>)", ECheatMode::Both },
         { L"Player", L"ChangeSize", L"ChangeSize <scale>", L"your size", ECheatMode::Both },
@@ -1224,6 +1226,86 @@ bool UFortCheatManager::SplitCheatTarget(const FString& Msg, FString& OutCommand
     OutCommand = FString(Trim(std::wstring_view(Line).substr(0, Open)).c_str());
     OutTarget = FString(Target.c_str());
     return true;
+}
+
+bool UFortCheatManager::ParseCheatMovement(const FString& Command, FString& OutCommand, float& OutSpeed, FString& OutError)
+{
+    // The speed is how fast the pawn runs while it flies, in cm/s; it walks and sprints faster by as much.
+    constexpr float MaxSpeed = 100000.0f;
+    std::vector<std::wstring> Words;
+    const std::wstring Line = Command.ToStdString();
+    for (size_t Start = 0; Start < Line.size();)
+    {
+        while (Start < Line.size() && std::iswspace(Line[Start]))
+        {
+            ++Start;
+        }
+        size_t End = Start;
+        while (End < Line.size() && !std::iswspace(Line[End]))
+        {
+            ++End;
+        }
+        if (End > Start)
+        {
+            Words.emplace_back(Line.substr(Start, End - Start));
+        }
+        Start = End;
+    }
+    if (Words.empty())
+    {
+        return false;
+    }
+    const std::wstring Name = Lower(Words[0]);
+    if (Name != L"fly" && Name != L"ghost" && Name != L"walk")
+    {
+        return false;
+    }
+
+    OutCommand = Command;
+    OutSpeed = 0.0f;
+    OutError = FString();
+    if (Name == L"walk" || Words.size() == 1)
+    {
+        return true;
+    }
+
+    wchar_t* End = nullptr;
+    const float Speed = std::wcstof(Words[1].c_str(), &End);
+    if (Words.size() > 2 || !End || *End != L'\0' || !std::isfinite(Speed) || Speed < 1.0f || Speed > MaxSpeed)
+    {
+        OutError = FString::Printf(TEXT("Usage: %s [speed], a speed from 1 to %d (\"cheat %s 3000\")"), Name.c_str(), static_cast<int32_t>(MaxSpeed), Name.c_str());
+        return true;
+    }
+    OutCommand = FString(Words[0].c_str());
+    OutSpeed = Speed;
+    return true;
+}
+
+void UFortCheatManager::OnCheatMovement(ACharacter* Character, ECheatMovement Movement)
+{
+    const float Speed = Movement == ECheatMovement::Walk ? 0.0f : CheatMoveSpeed;
+    CheatMoveSpeed = 0.0f;
+    AFortPawn* const Pawn = Cast<AFortPawn>(static_cast<UObject*>(Character));
+    if (!Pawn)
+    {
+        return;
+    }
+    const float OwnSpeed = Pawn->SetCheatMoveSpeed(Speed);
+    if (Speed > 0.0f)
+    {
+        UE_LOG(LogFortCheats, Log, TEXT("%s runs at %.0f while it flies (its own speed %.0f)"), *GetNameSafe(Pawn), Speed, OwnSpeed);
+    }
+
+#if WITH_SERVER_CODE
+    AController* const Controller = Pawn->Controller;
+    AFortPlayerController* const PlayerController = Cast<AFortPlayerController>(static_cast<UObject*>(Controller));
+    if (PlayerController && Speed > 0.0f)
+    {
+        PlayerController->ClientMessage(OwnSpeed > 0.0f
+            ? FString::Printf(TEXT("Flying at speed %d (your own: %d); \"cheat %s\" without a speed for your own"), static_cast<int32_t>(Speed), static_cast<int32_t>(OwnSpeed), Movement == ECheatMovement::Ghost ? TEXT("ghost") : TEXT("fly"))
+            : FString(TEXT("This pawn has no speed to change; it moves at its own")));
+    }
+#endif
 }
 
 AFortPlayerController* UFortCheatManager::FindCheatTarget(const UObject* WorldContextObject, const FString& Name, FString& OutError)

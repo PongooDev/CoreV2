@@ -21,6 +21,7 @@
 #include "Templates/SharedPointer.h"
 #include "UObject/CoreOnline.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
 
 #include <utility>
 
@@ -102,6 +103,30 @@ void AFortGameMode::SendEarnScore()
     {
         return;
     }
+
+#if WITH_SERVER_CODE
+    // From 1.7.2 every score grant (GrantScoreReward, 1.8 0x58A960) first gives each player in the world a placeholder
+    // ExperienceDelta (-1s, NotFinal or Final), and each earnScore notification fills the player's first unfilled one
+    // (0x840910); the results screen waits until the last delta is a filled Final one (IsDataFinalized, 0x2F1A940).
+    // AFortGameMode::OnEndOfDay (slot 0x137, bound to the time of day manager's end of day by SetTimeOfDayManager,
+    // 0x5E8F50) grants non-final, but its per-player check is the same stripped stub (32 C0 C3) as SendEarnScore's and
+    // the grant's EarnScore send (the call at its end, 0x58AD88) is an empty function, so those placeholders are never
+    // filled. A mission that ran past the end of a day left each player a NotFinal placeholder in front of the Final one,
+    // and the zone end's earnScore filled that instead. The player the EarnScore went through also gets an empty
+    // earnScore in their EndPrimaryMission response (Core-Backend), which filled their Final delta, but every other
+    // player got only theirs and their results screen never showed (issue #121). Nothing will fill those placeholders,
+    // so take them out first and the zone end's notification fills the Final one.
+    UWorld* World = GetWorld();
+    for (TObjectIterator<AFortPlayerController> It; It; ++It)
+    {
+        APlayerState* PlayerState = It->GetWorld() == World ? static_cast<APlayerState*>(It->PlayerState) : nullptr;
+        AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(PlayerState));
+        if (const int32_t Removed = FortPlayerState ? FortPlayerState->RemoveUnscoredExperienceDeltas() : 0)
+        {
+            Log::Info(L"SendEarnScore: took out {} experience delta(s) of {} that no EarnScore was sent for", Removed, It->GetName().ToStdString());
+        }
+    }
+#endif
 
     PendingPlayersAndScores = nullptr;
     // bIsFinal: 1.7.2's SendEarnScore(bool) only builds the EarnScore context when it is set; 1.1 and 1.2 ignore it.

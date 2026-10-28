@@ -50,6 +50,39 @@ class EFortReplicatedStat
     DefineUEnumValue(MAX)
 };
 
+// From 1.7.2.
+class EFortIsFinalXpUpdate
+{
+    DefineUnrealEnum(EFortIsFinalXpUpdate, FortniteGame)
+    DefineUEnumValue(Uninitialized)
+    DefineUEnumValue(NotFinal)
+    DefineUEnumValue(Final)
+};
+
+struct FFortExperienceDelta
+{
+    DefineUnrealStruct(FFortExperienceDelta, FortniteGame)
+    DefineUProperty(int32_t, Level)
+    DefineUProperty(int32_t, Xp)
+    DefineUProperty(int32_t, BaseXPEarned)
+    DefineUProperty(int32_t, BonusXPEarned)
+    DefineUProperty(int32_t, BoostXPEarned)
+    DefineUProperty(int32_t, BoostXPMissed)
+    DefineUProperty(int32_t, RestXPEarned)
+    DefineUProperty(int32_t, GroupBoostXPEarned)
+    DefineUProperty(EFortIsFinalXpUpdate, IsFinalXpUpdate)
+
+    // Whether deltas are placeholders that an earnScore notification fills in (1.7.2 on), not added by it (1.1, 1.2).
+    static bool HasFinalXpUpdate() { return Member_IsFinalXpUpdate.IsAvailable(); }
+
+    // What the results screen and the earnScore handler call a fully initialized delta (1.8 0x2F1AD90): every
+    // number set (a placeholder starts at -1) and its finality known.
+    bool IsInitialized() const
+    {
+        return Level >= 0 && Xp >= 0 && BaseXPEarned >= 0 && BonusXPEarned >= 0 && BoostXPEarned >= 0 && BoostXPMissed >= 0 && RestXPEarned >= 0 && GroupBoostXPEarned >= 0 && IsFinalXpUpdate != EFortIsFinalXpUpdate::GetUninitialized();
+    }
+};
+
 class AFortPlayerState : public APlayerState
 {
     DefineUnrealClass(AFortPlayerState, FortniteGame)
@@ -60,6 +93,7 @@ public:
     DefineUProperty(UCustomCharacterPart*, CharacterParts)
     DefineUProperty(int32_t, WorldPlayerId)
     DefineUProperty(bool, bIsFinalizingExperience)
+    DefineUStructArrayProperty(FFortExperienceDelta, ExperienceDeltas)
     DefineUProperty(bool, bAreZoneStatsFinalized)
     DefineUProperty(AFortTeamInfo*, PlayerTeam)
     DefineUProperty(FUniqueNetIdRepl, PartyOwnerUniqueId)
@@ -78,6 +112,8 @@ public:
 
     // bIsFinalizingExperience is gone from 1.7.2, which finalizes through FFortExperienceDelta::IsFinalXpUpdate.
     static bool HasFinalizingExperience();
+    // Takes out the experience deltas still waiting for an earnScore notification, returning how many there were.
+    int32_t RemoveUnscoredExperienceDeltas();
 
     static void Hook();
 

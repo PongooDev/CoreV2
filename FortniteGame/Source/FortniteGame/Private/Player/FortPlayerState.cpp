@@ -153,6 +153,32 @@ bool AFortPlayerState::HasFinalizingExperience()
     return Member_bIsFinalizingExperience.IsAvailable();
 }
 
+int32_t AFortPlayerState::RemoveUnscoredExperienceDeltas()
+{
+    int32_t Removed = 0;
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority || !FFortExperienceDelta::HasFinalXpUpdate())
+    {
+        return 0;
+    }
+
+    TStructArray<FFortExperienceDelta>& Deltas = ExperienceDeltas;
+    for (int32_t Index = Deltas.Num() - 1; Index >= 0; --Index)
+    {
+        if (!Deltas[Index].IsInitialized())
+        {
+            Deltas.RemoveAt(Index);
+            ++Removed;
+        }
+    }
+    if (Removed > 0)
+    {
+        ForceNetUpdate();
+    }
+#endif
+    return Removed;
+}
+
 void AFortPlayerState::Hook()
 {
     Hooks::Detour(L"AFortPlayerState::SetHeroType", reinterpret_cast<void*>(Natives::AFortPlayerState_SetHeroType), &SetHeroTypeHK, &SetHeroTypeOG);

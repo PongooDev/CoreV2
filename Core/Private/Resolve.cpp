@@ -5834,8 +5834,10 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
     void** AthenaControllerVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerAthena");
     void** AbilitySystemVTable = CdoVTable(L"/Script/GameplayAbilities.AbilitySystemComponent");
 
-    // The native an exec thunk ends in, by a call or a tail jump, through a jump thunk (1.8.1's execReviveFromDBNO calls
-    // 0x809950, "jmp 0xA514A0").
+    // The native an exec thunk ends in, by a call or a tail jump, through a jump thunk (1.8.1's
+    // AFortPlayerPawn::execReviveFromDBNO calls 0x809950, "jmp 0xA514A0"). A thunk that only forwards is a leaf without
+    // unwind data, so it has no known end: 1.8.1's AFortAIPawn::execReviveFromDBNO (0xB36A40) steps the frame's code and
+    // ends 0x15 bytes in with "jmp 0x7D0B70", the padding right after it.
     const auto ExecNative = [](const wchar_t* FunctionPath)
     {
         UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
@@ -5849,7 +5851,39 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
                 Native = Finder::RelativeTarget(Site, 1, 5);
             }
         }
+        for (uintptr_t Site = Exec; !ExecEnd && IsInText(Exec) && Site < Exec + 0x40 && !Native; ++Site)
+        {
+            if (Byte(Site) == 0xE9 && Byte(Site + 5) == 0xCC && IsInText(Finder::RelativeTarget(Site, 1, 5)))
+            {
+                Native = Finder::RelativeTarget(Site, 1, 5);
+            }
+        }
         return Native && Byte(Native) == 0xE9 ? Finder::RelativeTarget(Native, 1, 5) : Native;
+    };
+
+    // A function's end, past the chained unwind fragments that continue it: FunctionEnd only joins fragments that start
+    // where the last ends, and 1.8.1's AFortAIPawn::ReviveFromDBNO (0x7D0B70-0x7D0BA5) goes on in one 4 bytes later
+    // (0x7D0BA9-0x7D0E60), which holds all its calls.
+    const auto FunctionAndFragmentsEnd = [](uintptr_t Function)
+    {
+        uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+        while (End)
+        {
+            uintptr_t Fragment = 0;
+            for (uintptr_t Probe = End; Probe < End + 0x10 && !Fragment; ++Probe)
+            {
+                if (Finder::FunctionStart(Probe) == Function && Finder::FunctionEnd(Probe))
+                {
+                    Fragment = Probe;
+                }
+            }
+            if (!Fragment)
+            {
+                break;
+            }
+            End = Finder::FunctionEnd(Fragment);
+        }
+        return End;
     };
 
     // CanReviveFromDBNO (slot 0x199): the interaction that revives a teammate (1.8 0x88DFF0, 1.8.1 0x895ED0) asks it just
@@ -5992,7 +6026,7 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
     // gameplay tags, adds the DBNO one to a container and cancels those abilities: the call before those two that it
     // makes once.
     const uintptr_t AIRevive = ExecNative(L"/Script/FortniteGame.FortAIPawn:ReviveFromDBNO");
-    const uintptr_t AIReviveEnd = AIRevive ? Finder::FunctionEnd(AIRevive) : 0;
+    const uintptr_t AIReviveEnd = FunctionAndFragmentsEnd(AIRevive);
     const std::vector<std::pair<uintptr_t, uintptr_t>> AIReviveCalls = AIReviveEnd ? Finder::DirectCalls(AIRevive, AIReviveEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
     uintptr_t ForgetPawn = 0;
     for (size_t Cancel = 2; CancelAbilities && Cancel < AIReviveCalls.size(); ++Cancel)

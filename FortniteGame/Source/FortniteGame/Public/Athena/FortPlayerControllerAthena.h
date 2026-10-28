@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/Array.h"
+#include "Items/FortItemDefinition.h"
 #include "Math/Vector.h"
 #include "Player/FortPlayerController.h"
 
@@ -13,22 +14,58 @@ class UFortHero;
 class UFortHeroType;
 struct FGameplayTagContainer;
 
+// A Battle Royale outfit (from 1.8; CID_*): the hero it plays (HID_*_Athena_Commando_*).
+class UAthenaCharacterItemDefinition : public UFortItemDefinition
+{
+    DefineUnrealClass(UAthenaCharacterItemDefinition, FortniteGame)
+
+public:
+    DefineUProperty(UFortHeroType*, HeroDefinition)
+};
+
+// A Battle Royale pickaxe (from 1.8; DefaultPickaxe, Pickaxe_ID_*): the harvesting tool it gives.
+class UAthenaPickaxeItemDefinition : public UFortItemDefinition
+{
+    DefineUnrealClass(UAthenaPickaxeItemDefinition, FortniteGame)
+
+public:
+    DefineUProperty(UFortWeaponItemDefinition*, WeaponDefinition)
+};
+
+// The cosmetics a player wears in Battle Royale (from 1.8), from their athena profile's favorite_* items.
+struct FFortAthenaLoadout
+{
+    DefineUnrealStruct(FFortAthenaLoadout, FortniteGame)
+    DefineUProperty(UAthenaPickaxeItemDefinition*, Pickaxe)
+    DefineUProperty(UAthenaCharacterItemDefinition*, Character)
+};
+
 // Battle Royale's player controller (from 1.7.2; Athena_PlayerController_C).
 class AFortPlayerControllerAthena : public AFortPlayerController
 {
     DefineUnrealClass(AFortPlayerControllerAthena, FortniteGame)
 
 public:
-    // The heroes Battle Royale plays (Athena_PlayerController_C: HID_Commando_Athena_*).
+    // The heroes 1.7.2's Battle Royale plays (Athena_PlayerController_C: HID_Commando_Athena_*). 1.8 leaves it empty.
     DefineUProperty(TArray<UFortHeroType*>, DefaultHeroes)
+    // 1.8: the player's loadout. Athena_PlayerController_C's default has DefaultGlider and DefaultPickaxe in it.
+    DefineUStructProperty(FFortAthenaLoadout, CustomizationLoadout)
     // Client: the player's team. The HUD's team list takes their talking states in this order (GetTeamTalking, 1.7.2
     // 0x430440, and the controller's tick, 0x417630, which tells the HUD when they change).
     DefineUProperty(TArray<AFortPlayerStateAthena*>, TeamMembers)
 
+    // Whether the controller plays Battle Royale heroes only: 1.7.2's DefaultHeroes, or 1.8's loadout's.
+    bool PlaysBattleRoyaleHeroes();
     bool IsDefaultHero(UFortHero* Hero);
+    // 1.8: the hero of the loadout's character, once GetOrInitializeHero has made the loadout.
+    UFortHeroType* GetLoadoutHero();
+    // 1.8: the harvesting tool of the loadout's pickaxe, or of the class's default loadout's (DefaultPickaxe). 1.7.2
+    // has none: its pickaxe is one of the game mode's StartingItems.
+    UFortWorldItemDefinition* GetLoadoutPickaxe();
     UFortHero* GetOrInitializeHero();
     UFortHero* SetupHero();
     void SetupBackpackSize();
+    void GiveLoadoutPickaxe();
     // Takes back what the player picked up in warmup: the inventory is the game mode's StartingItems again.
     void ResetToStartingItems();
 

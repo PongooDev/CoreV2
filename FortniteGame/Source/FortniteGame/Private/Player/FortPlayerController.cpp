@@ -256,6 +256,16 @@ void AFortPlayerController::Possess(APawn* InPawn)
         }
     }
 
+    // 1.8: the backpack size and the pickaxe come with the loadout, made when the pawn first spawns.
+    if (AthenaController && OverriddenBackpackSize <= 0)
+    {
+        AthenaController->SetupBackpackSize();
+    }
+    if (AthenaController)
+    {
+        AthenaController->GiveLoadoutPickaxe();
+    }
+
     AFortQuickBars* Bars = QuickBars;
     if (Role == ROLE_Authority && Bars && MyFortPawn)
     {
@@ -432,12 +442,20 @@ void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bS
     // overrides MaxHealth and the shield cap to 100 and GE_Map_Athena_StartingShields the shield to 0. The account's Save
     // the World hero, which the MCP profile (0x5CAB40) and ServerSetHero (0x827E30) also set here, would bring its own
     // stats into the match instead. Possess sets the hero again (AFortPlayerControllerAthena::SetupHero).
+    // 1.8 plays the hero of the loadout's character (#106), which its GetOrInitializeHero (0x4347F0) makes only while
+    // the controller has no hero (0x2144), so a Save the World hero set first would also keep the loadout from being
+    // made. The loadout is made when the pawn first spawns (AFortGameMode::RestartPlayer, 0x5965F0, under Athena's
+    // 0x4044C0, before the pawn is spawned and possessed), once the athena profile the player's join requested has
+    // loaded: made now, without it, the player would wear a random character for the whole match.
     AFortGameModeAthena* AthenaGameMode = Role == ROLE_Authority ? AFortGameModeAthena::GetCurrent(this) : nullptr;
     AFortPlayerControllerAthena* AthenaController = AthenaGameMode && NewHero ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;
-    if (AthenaController && AthenaController->DefaultHeroes.Num() > 0 && !AthenaController->IsDefaultHero(NewHero))
+    if (AthenaController && AthenaController->PlaysBattleRoyaleHeroes() && !AthenaController->IsDefaultHero(NewHero))
     {
         UE_LOG(LogFort, Log, TEXT("TrySetHeroImplementation: %s plays a Battle Royale hero, not %s"), *GetName(), *NewHero->GetName());
-        AthenaController->GetOrInitializeHero();
+        if (AthenaController->DefaultHeroes.Num() > 0)
+        {
+            AthenaController->GetOrInitializeHero();
+        }
         return;
     }
 #endif

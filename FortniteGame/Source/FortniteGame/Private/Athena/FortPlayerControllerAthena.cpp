@@ -5,6 +5,7 @@
 #include "Athena/FortGameStateAthena.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "FortKismetLibrary.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
 #include "Hooks.h"
@@ -27,6 +28,11 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
+bool AFortPlayerControllerAthena::PlaysBattleRoyaleHeroes()
+{
+    return DefaultHeroes.Num() > 0 || Member_CustomizationLoadout.IsAvailable();
+}
+
 bool AFortPlayerControllerAthena::IsDefaultHero(UFortHero* Hero)
 {
     UFortHeroType* HeroType = Hero ? Hero->GetHeroTypeBP() : nullptr;
@@ -37,14 +43,40 @@ bool AFortPlayerControllerAthena::IsDefaultHero(UFortHero* Hero)
             return true;
         }
     }
-    return false;
+    return HeroType && HeroType == GetLoadoutHero();
+}
+
+UFortHeroType* AFortPlayerControllerAthena::GetLoadoutHero()
+{
+    UAthenaCharacterItemDefinition* Character = Member_CustomizationLoadout.IsAvailable() ? static_cast<UAthenaCharacterItemDefinition*>(CustomizationLoadout.Character) : nullptr;
+    return Character ? static_cast<UFortHeroType*>(Character->HeroDefinition) : nullptr;
+}
+
+UFortWorldItemDefinition* AFortPlayerControllerAthena::GetLoadoutPickaxe()
+{
+    // The loadout is the athena profile's favorite_* items, and nothing fills an empty favorite_pickaxe in: the
+    // profile's loadout (0x41B610) replaces the whole loadout (0x41B2A0), and only an empty dance gets a fallback. The
+    // pickaxe is then the one Athena_PlayerController_C's default loadout has.
+    if (!Member_CustomizationLoadout.IsAvailable())
+    {
+        return nullptr;
+    }
+    UAthenaPickaxeItemDefinition* Pickaxe = CustomizationLoadout.Pickaxe;
+    if (!Pickaxe)
+    {
+        const AFortPlayerControllerAthena* Default = static_cast<const AFortPlayerControllerAthena*>(GetClass()->GetDefaultObject(false));
+        Pickaxe = Default ? static_cast<UAthenaPickaxeItemDefinition*>(Default->CustomizationLoadout.Pickaxe) : nullptr;
+    }
+    return Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr;
 }
 
 UFortHero* AFortPlayerControllerAthena::GetOrInitializeHero()
 {
     // The override (1.7.2 0x42E5E0) keeps the controller's hero, or makes a hero of the next of its DefaultHeroes (a
-    // counter over every controller, divided by their number) and sets it through TrySetHeroImplementation.
-    if (DefaultHeroes.Num() <= 0 || !Finder::ResolveAthenaHeroLive())
+    // counter over every controller, divided by their number) and sets it through TrySetHeroImplementation. 1.8's
+    // (0x4347F0) has no DefaultHeroes: it first makes the loadout from the athena profile (GetAthenaLoadoutWithOverrides,
+    // 0x827300; a random character of AthenaGameData's when it has none) and then the hero of its character.
+    if (!PlaysBattleRoyaleHeroes() || !Finder::ResolveAthenaHeroLive())
     {
         return nullptr;
     }
@@ -79,9 +111,22 @@ void AFortPlayerControllerAthena::SetupBackpackSize()
     // that never), after the starting items, and the HUD reads the size only when it's built and when the inventory
     // changes. The size goes on the controller instead, read from the same effects, before the starting items. It
     // replicates while the controller has a cheat manager (0x81FBA0), which every player gets when they join.
+    // 1.8 showed "0 | 0" again (#106): its Athena_PlayerController_C has no DefaultHeroes. Its heroes are the loadout
+    // characters' (HID_*_Athena_Commando_*, with the same effect), and the loadout is made when the pawn first spawns
+    // (GetOrInitializeHero), so the size is set by Possess then, before it gives the loadout's pickaxe.
+    std::vector<UFortHeroType*> Heroes(DefaultHeroes.begin(), DefaultHeroes.end());
+    if (UFortHeroType* LoadoutHero = GetLoadoutHero())
+    {
+        Heroes.push_back(LoadoutHero);
+    }
+    if (Heroes.empty() && Member_CustomizationLoadout.IsAvailable())
+    {
+        return;
+    }
+
     UClass* HomebaseSetClass = UFortHomebaseSet::StaticClass();
     const UProperty* WorldInventorySizeBonus = HomebaseSetClass ? HomebaseSetClass->FindPropertyByName(FName(L"WorldInventorySizeBonus", FNAME_Find)) : nullptr;
-    for (UFortHeroType* HeroType : DefaultHeroes)
+    for (UFortHeroType* HeroType : Heroes)
     {
         const int32_t BackpackSize = HeroType ? static_cast<int32_t>(HeroType->GetCombinedStatBonus(WorldInventorySizeBonus)) : 0;
         if (BackpackSize > 0)
@@ -92,6 +137,22 @@ void AFortPlayerControllerAthena::SetupBackpackSize()
         }
     }
     UE_LOG(LogFort, Warning, TEXT("SetupBackpackSize: %s's heroes give no backpack size, it stays the attribute's"), *GetName());
+}
+
+void AFortPlayerControllerAthena::GiveLoadoutPickaxe()
+{
+#if WITH_SERVER_CODE
+    // 1.8 players had no pickaxe (#106): 1.8's Athena_GameMode StartingItems are only the building pieces, the edit tool
+    // and wood, the pickaxe being the loadout's (DefaultPickaxe: WID_Harvest_Pickaxe_Athena_C_T01), and nothing in the
+    // shipping exe gives it (the controller's loadout pickaxe, +0x2900, is touched only by constructors). It goes in the
+    // harvesting tool's slot, primary 0, before Possess activates the focused slot.
+    UFortWorldItemDefinition* Pickaxe = Role == ROLE_Authority && WorldInventory ? GetLoadoutPickaxe() : nullptr;
+    if (Pickaxe && GetItemQuantity(Pickaxe) <= 0)
+    {
+        UFortKismetLibrary::K2_GiveItemToPlayer(this, Pickaxe, 1, false);
+        UE_LOG(LogFort, Log, TEXT("GiveLoadoutPickaxe: %s gets %s"), *GetName(), *Pickaxe->GetName());
+    }
+#endif
 }
 
 void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
@@ -234,9 +295,15 @@ void AFortPlayerControllerAthena::ResetToStartingItems()
         return;
     }
 
+    // 1.8's pickaxe is the loadout's, not a starting item: it stays too.
     const TStructArray<FItemAndCount>& StartingItems = GameMode->StartingItems;
-    const auto StartingCount = [&StartingItems](const UFortItemDefinition* ItemDefinition)
+    const UFortWorldItemDefinition* Pickaxe = GetLoadoutPickaxe();
+    const auto StartingCount = [&StartingItems, Pickaxe](const UFortItemDefinition* ItemDefinition)
     {
+        if (Pickaxe && ItemDefinition == Pickaxe)
+        {
+            return 1;
+        }
         for (int32_t Index = 0; Index < StartingItems.Num(); ++Index)
         {
             const FItemAndCount& Entry = StartingItems[Index];

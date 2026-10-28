@@ -155,7 +155,14 @@ void UCharacterMovementComponent::HookServerMove(const wchar_t* ClassPath)
 
 void UCharacterMovementComponent::ServerMove_ImplementationHK(UCharacterMovementComponent* This, float TimeStamp, const FVector& InAccel, const FVector& ClientLoc, uint8_t CompressedMoveFlags, uint8_t ClientRoll, uint32_t View, USceneComponent* ClientMovementBase, FName ClientBaseBoneName, uint8_t ClientMovementMode)
 {
-    ServerMove_ImplementationOG(This, TimeStamp, InAccel, ClientLoc, CompressedMoveFlags, ClientRoll, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
+    // Spectating a player shook the camera (#107): it rolled up to 90 degrees one way, then the other. 1.8's
+    // UFortMovementComp_Character sends no roll in ClientRoll (its ServerMove and ServerMoveDual, 0x6E7020 and 0x6E7110):
+    // the byte is the client's real time in milliseconds xored with a key, with the low bit cleared. Its
+    // ServerMove_Implementation (0x6E7340) only passes the move on, and the engine's (0x20951F0) makes the byte the
+    // controller's control rotation roll. A spectator's controller copies its view target's view rotation, that control
+    // rotation, into the replicated TargetViewRotation (APlayerController::TickActor, 0x23A94F0), and the spectator's camera
+    // turns to it. 1.7.2 sends the engine's roll, which Fortnite always leaves at 0, so the roll is 0 for both.
+    ServerMove_ImplementationOG(This, TimeStamp, InAccel, ClientLoc, CompressedMoveFlags, 0, View, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);
 
 #if WITH_SERVER_CODE
     This->ReportClientError(TimeStamp, ClientLoc, CompressedMoveFlags, ClientMovementBase, ClientBaseBoneName, ClientMovementMode);

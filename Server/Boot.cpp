@@ -59,12 +59,31 @@
 #include "Missions/FortMissionLibrary.h"
 #include "AbilitySystemComponent.h"
 
+namespace
+{
+    // A server has no window to show, and Windows 11 doesn't honour the 1ms timer resolution the engine asks for in a
+    // process whose windows are hidden: its frame wait (Sleep, UEngine::UpdateTimeAndHandleMaxTickRate) ended on the
+    // 15.6ms system tick, so frames came 15.6, 31.2 or 46.9ms apart (#109). Opting out of that keeps its waits to the ms.
+    void HonourTimerResolution()
+    {
+        PROCESS_POWER_THROTTLING_STATE State = {};
+        State.Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION;
+        State.ControlMask = PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION;
+        State.StateMask = 0;
+        if (!SetProcessInformation(GetCurrentProcess(), ProcessPowerThrottling, &State, sizeof(State)))
+        {
+            Log::Warning(L"Timer resolution: SetProcessInformation failed ({}), frame waits may end on the system tick", GetLastError());
+        }
+    }
+}
+
 void Boot::Initialize()
 {
     Configuration::Load();
     Log::Initialize(L"Server");
     Log::Info(L"Core V2 starting");
     FCommandLine::ApproveServerSwitches();
+    HonourTimerResolution();
 
     // Without its hooks the process would carry on as a game client (a window and a front end, Core-Launcher #4), which
     // the launcher would keep counting as a server: a server that can't start stops.
@@ -119,6 +138,7 @@ void Boot::Initialize()
             FCommandLine::AddSwitch(L"EnableMMS");
         }
         FCommandLine::RestoreSwitch(L"EnableMMS");
+        UGameEngine::HookServerTickRate();
         AFortGameModeZone::HookVTables();
         AFortGameModeAthena::HookVTables();
         UFortVisibilityComponent::HookVTables();

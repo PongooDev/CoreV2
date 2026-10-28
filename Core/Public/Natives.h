@@ -47,6 +47,7 @@ class FOnlineSubsystemImpl;
 class FOnlineSubsystemMcp;
 class FUniqueNetId;
 class IHttpRequest;
+class UMcpProfile;
 class UMcpProfileGroup;
 struct FMcpServiceConfig;
 struct FProfileHttpRequest;
@@ -196,6 +197,9 @@ namespace Natives
     inline void* SharedEmptyFunction = nullptr;
     inline void (*FortMcpConfig_UpdateServicePermissions)(void* Environment, void* Context, FMcpServiceConfig* ServiceConfig, void* Extra) = nullptr;
     inline void (*UMcpProfileGroup_SendRequestNow)(UMcpProfileGroup* This, FProfileHttpRequest& Request) = nullptr;
+    // UMcpProfile::QueryProfile(const FMcpQueryComplete& OnComplete): the profile's whole query, by whichever URL its group
+    // needs (another account's: the public one).
+    inline void (*UMcpProfile_QueryProfile)(UMcpProfile* This, const void* OnComplete) = nullptr;
     inline bool (*FOnlineSubsystemMcp_QueueRequestForUser)(FOnlineSubsystemMcp* This, FGameServiceMcp& Service, const FUniqueNetId& UserId, const TSharedRef<IHttpRequest>& HttpRequest, FString& OutError) = nullptr;
     inline bool (*FOnlineSubsystemMcp_QueueRequestForClient)(FOnlineSubsystemMcp* This, FGameServiceMcp& Service, const FString& ClientId, const TSharedRef<IHttpRequest>& HttpRequest, FString& OutError) = nullptr;
     inline bool (*FOnlineSubsystemImpl_IsDedicated)(const FOnlineSubsystemImpl* This) = nullptr;

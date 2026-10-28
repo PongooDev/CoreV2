@@ -2,11 +2,17 @@
 #include "UI/FortPartyContext.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Containers/ScriptArray.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
+#include "Finder.h"
+#include "FortGameInstance.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "GameThread.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "McpProfile.h"
+#include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "UI/FortUITeamInfo.h"
 #include "UObject/UObjectArray.h"
@@ -47,6 +53,35 @@ namespace PartyBarTypes
         DefineUnrealClass(UTextBlock, UMG)
         DefineUFunction(SetText)
     };
+
+    class UImage : public UObject
+    {
+        DefineUnrealClass(UImage, UMG)
+        DefineUFunction(SetBrushFromMaterial)
+        DefineUFunction(GetDynamicMaterial)
+        DefineUFunction(SetBrushFromTexture)
+    };
+
+    class UMaterialInstanceDynamic : public UObject
+    {
+        DefineUnrealClass(UMaterialInstanceDynamic, Engine)
+        DefineUFunction(SetTextureParameterValue)
+        DefineUFunction(SetVectorParameterValue)
+    };
+
+    class UFortMcpContext : public UObject
+    {
+        DefineUnrealClass(UFortMcpContext, FortniteGame)
+        DefineUFunction(GetLoadoutForPlayer)
+    };
+
+    class UFortBannerUtilities : public UObject
+    {
+        DefineUnrealClass(UFortBannerUtilities, FortniteGame)
+        DefineUFunction(LoadAndGetBannerLargeIconFromRowName)
+        DefineUFunction(GetBannerColorPrimaryColorFromRowName)
+        DefineUFunction(GetBannerColorSecondaryColorFromRowName)
+    };
 }
 
 namespace
@@ -61,15 +96,37 @@ namespace
     constexpr ULONGLONG RescanMs = 5000;
 
     constexpr const wchar_t* AthenaPartyMemberClassPath = L"/Game/Athena/UI/Frontend/Parties/FullPartyMemberAthena.FullPartyMemberAthena_C";
+    // PlayerBanner's brush: the banner material its SetBannerIconId and SetBannerColorId fill.
+    constexpr const wchar_t* BannerMaterialPath = L"/Game/UI/Banner/BannerIcon.BannerIcon";
+    // What FullPartyMemberAthena's connected banner (Image_3) shows of itself.
+    constexpr const wchar_t* DefaultBannerPath = L"/Game/Athena/HUD/Art/T-Slot-FNBR-Banner-Empty-L.T-Slot-FNBR-Banner-Empty-L";
+
+    // A party member's profile0 the game left unqueried: how long the game gets to query it itself (where it still
+    // does, well within this), how long a query gets before another, and how many are sent.
+    constexpr ULONGLONG ProfileGraceMs = 5000;
+    constexpr ULONGLONG ProfileRetryMs = 15000;
+    constexpr int32_t MaxProfileQueries = 3;
 
     struct FTrackedMember
     {
         TWeakObjectPtr<UObject> Widget;
         std::wstring Shown;
+        // The Battle Royale banner drawn on the connected banner, "member|icon|color", empty for the bar's own.
+        std::wstring Banner;
         bool bLogged = false;
     };
 
+    struct FMemberProfile
+    {
+        TWeakObjectPtr<UObject> Profile;
+        ULONGLONG FirstSeen = 0;
+        ULONGLONG LastQuery = 0;
+        int32_t Queries = 0;
+        bool bLoaded = false;
+    };
+
     std::vector<FTrackedMember> Tracked;
+    std::vector<FMemberProfile> MemberProfiles;
     TWeakObjectPtr<UObject> AthenaPartyMemberClass;
     ULONGLONG NextRefresh = 0;
     ULONGLONG NextRescan = 0;
@@ -145,6 +202,24 @@ namespace
         UFunction* Function;
         std::vector<uint8_t> Parms;
     };
+
+    // The UI context of a class the widget's local player has (UBlueprintContextLibrary::GetContext).
+    UObject* ContextOf(UObject* ContextObject, UClass* Class)
+    {
+        UClass* Library = PartyBarTypes::UBlueprintContextLibrary::StaticClass();
+        if (!ContextObject || !Library || !Class)
+        {
+            return nullptr;
+        }
+        Reflection::FParams Params(PartyBarTypes::UBlueprintContextLibrary::StaticFunction_GetContext());
+        if (!Params.Set(L"ContextObject", ContextObject) || !Params.Set(L"Class", Class))
+        {
+            return nullptr;
+        }
+        Params.Call(Library->GetDefaultObject());
+        UObject** Context = Params.Get<UObject*>(L"ReturnValue");
+        return Context && *Context && (*Context)->IsA(Class) ? *Context : nullptr;
+    }
 
     UObject* OwningPlayerOf(UObject* Widget)
     {
@@ -284,10 +359,125 @@ namespace
         return Update.Call(Member);
     }
 
+    // A function of one object parameter (Name, or none), and its object return value if it has one.
+    UObject* CallForObject(UFunction* Function, UObject* Target, const wchar_t* Name, UObject* Value)
+    {
+        Reflection::FParams Params(Function);
+        if (!Target || (Name && !Params.Set(Name, Value)) || !Params.Call(Target))
+        {
+            return nullptr;
+        }
+        UObject** Result = PropertyOf<UProperty>(Function, L"ReturnValue") ? Params.Get<UObject*>(L"ReturnValue") : nullptr;
+        return Result ? *Result : nullptr;
+    }
+
+    // A UFortBannerUtilities colour row's FLinearColor (four floats).
+    bool BannerColor(UFunction* Function, FName Row, float (&Color)[4])
+    {
+        Reflection::FParams Params(Function);
+        return Params.Set(L"BannerColorRowName", Row) && Params.Call(PartyBarTypes::UFortBannerUtilities::StaticClass()->GetDefaultObject())
+            && Params.Relocate(L"ReturnValue", Color, sizeof(Color));
+    }
+
+    void SetMaterialColor(UObject* Material, FName Parameter, const float (&Color)[4])
+    {
+        Reflection::FParams Params(PartyBarTypes::UMaterialInstanceDynamic::StaticFunction_SetVectorParameterValue());
+        void* Value = Params.Set(L"ParameterName", Parameter) ? Params.GetAddress(L"Value") : nullptr;
+        if (Value)
+        {
+            std::memcpy(Value, Color, sizeof(Color));
+            Params.Call(Material);
+        }
+    }
+
+    // The member's Battle Royale banner, their athena loadout's (UFortMcpContext::GetLoadoutForPlayer), on the connected
+    // banner. FullPartyMemberAthena has no PlayerBanner: its connected state's Image_3 shows a fixed texture,
+    // T-Slot-FNBR-Banner-Empty-L (the dog tags), whoever the member is. The image takes PlayerBanner's material and the
+    // loadout's icon and colours, as PlayerBanner's SetBannerIconAndColorFromProfile draws them (BannerLibrary's
+    // UpdateBannerIconOnMaterial and UpdateBannerColorOnMaterial: BannerIcon, RGBA0 and RGBA1). A loadout without a
+    // banner (the member's athena not loaded yet) shows the bar's own. Returns the banner drawn, "member|icon|color".
+    std::wstring DrawBanner(UObject* Member, const FUniqueNetIdRepl& MemberId, const std::wstring& Drawn)
+    {
+        UFunction* GetLoadout = PartyBarTypes::UFortMcpContext::StaticFunction_GetLoadoutForPlayer();
+        UObject* Image = WidgetOf(Member, L"Image_3");
+        UObject* McpContext = ContextOf(Member, PartyBarTypes::UFortMcpContext::StaticClass());
+        if (!GetLoadout || !Image || !McpContext || !Image->IsA(PartyBarTypes::UImage::StaticClass()))
+        {
+            return Drawn;
+        }
+
+        Reflection::FParams Loadout(GetLoadout, true);
+        UStructProperty* LoadoutValue = PropertyOf<UStructProperty>(GetLoadout, L"ReturnValue");
+        UProperty* IconId = LoadoutValue ? PropertyOf<UProperty>(LoadoutValue->Struct, L"BannerIconId") : nullptr;
+        UProperty* ColorId = LoadoutValue ? PropertyOf<UProperty>(LoadoutValue->Struct, L"BannerColorId") : nullptr;
+        const void* Value = Loadout.GetAddress(L"ReturnValue");
+        if (!IconId || !ColorId || !Value || !Loadout.CopyStruct(L"MemberUniqueId", &MemberId) || !Loadout.Call(McpContext))
+        {
+            return Drawn;
+        }
+        const FString& Icon = *IconId->ContainerPtrToValuePtr<FString>(Value);
+        const FString& Color = *ColorId->ContainerPtrToValuePtr<FString>(Value);
+        std::wstring Banner = Icon.IsEmpty() ? std::wstring() : MemberId.ToString().ToStdString() + L"|" + Icon.ToStdString() + L"|" + Color.ToStdString();
+        if (Banner == Drawn)
+        {
+            return Drawn;
+        }
+        if (Banner.empty())
+        {
+            // No banner to draw (the member's athena not loaded yet): the bar's own, not the banner drawn for whoever
+            // had the slot before.
+            UObject* Default = Drawn.empty() ? nullptr : StaticFindObject(nullptr, nullptr, DefaultBannerPath, false);
+            Reflection::FParams SetTexture(PartyBarTypes::UImage::StaticFunction_SetBrushFromTexture());
+            if (Default && SetTexture.Set(L"Texture", Default))
+            {
+                SetTexture.Call(Image);
+                return Banner;
+            }
+            return Drawn;
+        }
+
+        UObject* Material = StaticFindObject(nullptr, nullptr, BannerMaterialPath, false);
+        if (!Material)
+        {
+            Material = StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, BannerMaterialPath);
+        }
+        UObject* Utilities = PartyBarTypes::UFortBannerUtilities::StaticClass()->GetDefaultObject();
+        Reflection::FParams IconLoad(PartyBarTypes::UFortBannerUtilities::StaticFunction_LoadAndGetBannerLargeIconFromRowName());
+        if (!Material || !Utilities || !IconLoad.Set(L"BannerIconRowName", FName(*Icon, FNAME_Find)) || !IconLoad.Call(Utilities))
+        {
+            return Drawn;
+        }
+        UObject** Texture = IconLoad.Get<UObject*>(L"ReturnValue");
+        float Primary[4] = {};
+        float Secondary[4] = {};
+        const FName ColorRow(*Color, FNAME_Find);
+        if (!Texture || !*Texture
+            || !BannerColor(PartyBarTypes::UFortBannerUtilities::StaticFunction_GetBannerColorPrimaryColorFromRowName(), ColorRow, Primary)
+            || !BannerColor(PartyBarTypes::UFortBannerUtilities::StaticFunction_GetBannerColorSecondaryColorFromRowName(), ColorRow, Secondary))
+        {
+            return Drawn;
+        }
+
+        CallForObject(PartyBarTypes::UImage::StaticFunction_SetBrushFromMaterial(), Image, L"Material", Material);
+        UObject* Dynamic = CallForObject(PartyBarTypes::UImage::StaticFunction_GetDynamicMaterial(), Image, nullptr, nullptr);
+        if (!Dynamic || !Dynamic->IsA(PartyBarTypes::UMaterialInstanceDynamic::StaticClass()))
+        {
+            return Drawn;
+        }
+        Reflection::FParams SetIcon(PartyBarTypes::UMaterialInstanceDynamic::StaticFunction_SetTextureParameterValue());
+        if (SetIcon.Set(L"ParameterName", FName(L"BannerIcon")) && SetIcon.Set(L"Value", *Texture))
+        {
+            SetIcon.Call(Dynamic);
+        }
+        SetMaterialColor(Dynamic, FName(L"RGBA0"), Primary);
+        SetMaterialColor(Dynamic, FName(L"RGBA1"), Secondary);
+        return Banner;
+    }
+
     // One banner of the bar. UpdateMemberInfo picks open, connecting or connected from the party context's
     // GetPartyMemberDisplayState, as the Save the World bar does; its ShowConnected gives up on the name (it reads the
-    // match's TeamMembers), so the name is set here. The kill count is the match's and stays hidden.
-    std::wstring Show(UObject* Member, const FPartySlots& Party)
+    // match's TeamMembers), so the name is set here, and the banner. The kill count is the match's and stays hidden.
+    std::wstring Show(FTrackedMember& Entry, UObject* Member, const FPartySlots& Party)
     {
         const int32_t* Index = ValueOf<int32_t>(Member, L"TeamMemberIndex");
         const uint8_t* Info = Index ? Party.Slot(*Index) : nullptr;
@@ -297,6 +487,7 @@ namespace
         {
             SetText(WidgetOf(Member, L"PlayerName"), Party.PlayerNameOf(Info));
             SetVisibility(WidgetOf(Member, L"LeaderImageOverlay"), Party.ShowsLeader(Info) ? SelfHitTestInvisible : Collapsed);
+            Entry.Banner = DrawBanner(Member, Party.MemberIdOf(Info), Entry.Banner);
             Shown = Party.MemberIdOf(Info).ToString().ToStdString();
         }
         else
@@ -347,9 +538,76 @@ namespace
         }
     }
 
+    // 1.8.1's UFortRegisteredPlayerInfo (its profile query, 0x638D00) queries no profile of another player while the sub
+    // game is Battle Royale (UFortAssetManager's, +0x508, is 1): only its own player's, or on a server. 1.8 queried a
+    // party member's profile0 (Core-Backend a4ecf92 sends their athena with it). The party member's profile0 so stays at
+    // revision -1, and everything the lobby shows of them comes out empty: UHomeBaseContext::GetTotalHomebaseRating's
+    // rating of 0 points (power 1 in Manage Party Member), their banner ids (PlayerBanner keeps the banner it drew last,
+    // the viewer's own), and their HomeBaseInfo, whose ValidData UFortPartyContext::GetPartyMemberDisplayState needs
+    // for connected (the Battle Royale bar's endless "connecting"). A world whose own sub game is unset keeps the one it
+    // was reached from (0x5C7700 sets it only from a valid one), so a Save the World zone's teammates' profile0 may stay
+    // unqueried too (CoreV2 #127's escape menu, unconfirmed). Core queries such a profile0 as the game did: after a grace
+    // period in which the game's own query (where it still makes one) lands, and again if no answer came. Not in a
+    // Battle Royale match, whose hundred registered players need no profile0.
+    void LoadPartyMemberProfiles(UWorld* World)
+    {
+        std::erase_if(MemberProfiles, [](const FMemberProfile& Member) { return !Member.Profile.Get(); });
+        UFortGameInstance* GameInstance = World ? Cast<UFortGameInstance>(reinterpret_cast<UObject*>(World->OwningGameInstance)) : nullptr;
+        if (!GameInstance || !Natives::UMcpProfile_QueryProfile)
+        {
+            return;
+        }
+        const TArray<ULocalPlayer*>& LocalPlayers = GameInstance->LocalPlayers;
+        UObject* Controller = LocalPlayers.Num() > 0 && LocalPlayers[0] ? reinterpret_cast<UObject*>(LocalPlayers[0]->PlayerController) : nullptr;
+        if (!Controller || Controller->IsA(AFortPlayerControllerAthena::StaticClass()))
+        {
+            return;
+        }
+
+        const ULONGLONG Now = GetTickCount64();
+        const TArray<UFortRegisteredPlayerInfo*>& Players = GameInstance->GetMember_RegisteredPlayers();
+        for (int32_t Index = 0; Index < Players.Num(); ++Index)
+        {
+            UFortRegisteredPlayerInfo* Player = Players[Index];
+            UMcpProfile* Profile = Player ? reinterpret_cast<UMcpProfile*>(Player->AccountProfile) : nullptr;
+            if (!Profile)
+            {
+                continue;
+            }
+            auto Known = std::find_if(MemberProfiles.begin(), MemberProfiles.end(), [Profile](const FMemberProfile& Member) { return Member.Profile.Get() == Profile; });
+            if (Known == MemberProfiles.end())
+            {
+                MemberProfiles.push_back(FMemberProfile{ TWeakObjectPtr<UObject>(Profile), Now });
+                Known = std::prev(MemberProfiles.end());
+            }
+
+            const std::wstring PlayerId = Player->PlayerID.ToString().ToStdString();
+            if (Profile->ProfileRevision >= 0)
+            {
+                if (Known->Queries > 0 && !Known->bLoaded)
+                {
+                    UE_LOG(LogFort, Log, TEXT("FortPartyContext: %s's profile0 is loaded (revision %lld)"), PlayerId.c_str(), static_cast<long long>(Profile->ProfileRevision));
+                }
+                Known->bLoaded = true;
+                continue;
+            }
+            if (Now - Known->FirstSeen < ProfileGraceMs || Known->Queries >= MaxProfileQueries || (Known->Queries > 0 && Now - Known->LastQuery < ProfileRetryMs))
+            {
+                continue;
+            }
+            if (Profile->QueryProfile())
+            {
+                ++Known->Queries;
+                Known->LastQuery = Now;
+                UE_LOG(LogFort, Log, TEXT("FortPartyContext: queries %s's profile0, which the game left unqueried (attempt %d)"), PlayerId.c_str(), Known->Queries);
+            }
+        }
+    }
+
     void Refresh()
     {
         std::erase_if(Tracked, [](const FTrackedMember& Member) { return !Member.Widget.Get(); });
+        LoadPartyMemberProfiles(Natives::GWorld ? static_cast<UWorld*>(GWorld) : nullptr);
         if (!IsFrontEndWorld())
         {
             return;
@@ -374,7 +632,7 @@ namespace
                 Party = std::make_unique<FPartySlots>(Widget);
             }
 
-            std::wstring Shown = Show(Widget, *Party);
+            std::wstring Shown = Show(Member, Widget, *Party);
             if (!Member.bLogged || Shown != Member.Shown)
             {
                 const int32_t* Index = ValueOf<int32_t>(Widget, L"TeamMemberIndex");
@@ -400,20 +658,7 @@ namespace
 
 UFortPartyContext* UFortPartyContext::Get(UObject* ContextObject)
 {
-    UClass* Library = PartyBarTypes::UBlueprintContextLibrary::StaticClass();
-    UClass* Class = StaticClass();
-    if (!ContextObject || !Library || !Class)
-    {
-        return nullptr;
-    }
-    Reflection::FParams Params(PartyBarTypes::UBlueprintContextLibrary::StaticFunction_GetContext());
-    if (!Params.Set(L"ContextObject", ContextObject) || !Params.Set(L"Class", Class))
-    {
-        return nullptr;
-    }
-    Params.Call(Library->GetDefaultObject());
-    UObject** Context = Params.Get<UObject*>(L"ReturnValue");
-    return Context && *Context && (*Context)->IsA(Class) ? reinterpret_cast<UFortPartyContext*>(*Context) : nullptr;
+    return reinterpret_cast<UFortPartyContext*>(ContextOf(ContextObject, StaticClass()));
 }
 
 UFortUITeamInfo* UFortPartyContext::GetLocalPlayerTeam()
@@ -430,12 +675,14 @@ UFortUITeamInfo* UFortPartyContext::GetLocalPlayerTeam()
 // an AFortPlayerControllerFrontEnd, so every banner's cast fails and it shows open ("+"), the local player's too
 // (Core-Backend #104). In the front end each banner shows the party instead, slot by slot as the Save the World bar
 // (FullPartyBar) does. No engine function is hooked: once a second, in the front end's world, Core finds the banners in
-// the object array and fills them.
+// the object array and fills them. The same refresh, outside Battle Royale matches, queries the other players' profile0
+// that 1.8.1 leaves unqueried while the sub game is Battle Royale (LoadPartyMemberProfiles).
 void UFortPartyContext::StartAthenaPartyBar()
 {
     static bool bStarted = false;
     if (!bStarted)
     {
+        Finder::ResolveMcpProfileQuery();
         bStarted = GameThread::Enqueue(&Tick);
     }
 }

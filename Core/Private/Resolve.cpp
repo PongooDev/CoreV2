@@ -5817,6 +5817,36 @@ bool Finder::ResolveAthenaHUDPawnBinding()
     return true;
 }
 
+bool Finder::ResolveMcpProfileQuery()
+{
+    // UMcpProfile::QueryProfile(const FMcpQueryComplete&) (1.8.1 0x3C48DD0, 1.8 0x3C34980, 1.7.2 0x3B4A5E0) picks the
+    // request's URL context, McpDedicatedServerCommandUrl, McpClientCommandUrl or (another account's profile)
+    // McpPublicCommandUrl, and calls QueryProfile(FBaseUrlContext&) (1.8.1 0x3C48A80), the only function that logs an
+    // overlapping query. Two other functions name McpPublicCommandUrl; only this one calls it.
+    const uintptr_t QueryWithContext = FunctionOf(L"Caught overlapping attempts to query same user's profile, will be called when previous call completes. User %s");
+    std::vector<uintptr_t> Candidates;
+    for (const uintptr_t Ref : QueryWithContext ? Finder::StringRefs(L"McpPublicCommandUrl") : std::vector<uintptr_t>{})
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = End ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+        const bool bCallsQuery = std::any_of(Calls.begin(), Calls.end(), [QueryWithContext](const auto& Call) { return Call.second == QueryWithContext; });
+        if (bCallsQuery && std::find(Candidates.begin(), Candidates.end(), Function) == Candidates.end())
+        {
+            Candidates.push_back(Function);
+        }
+    }
+    if (Candidates.size() != 1)
+    {
+        Log::Error(L"Finder: UMcpProfile::QueryProfile not found ({} candidates)", Candidates.size());
+        return false;
+    }
+
+    Natives::UMcpProfile_QueryProfile = reinterpret_cast<decltype(Natives::UMcpProfile_QueryProfile)>(Candidates.front());
+    Log::Info(L"Finder: UMcpProfile::QueryProfile at 0x{:X}", Candidates.front() - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOffset)
 {
     static bool bSearched = false;

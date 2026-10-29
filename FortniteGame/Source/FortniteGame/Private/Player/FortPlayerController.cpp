@@ -1844,7 +1844,7 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
     {
         AccountId.clear();
     }
-    const std::wstring DisplayName = State ? static_cast<const FString&>(State->PlayerName).ToStdString() : std::wstring();
+    const std::wstring DisplayName = State ? State->GetPlayerName().ToStdString() : std::wstring();
     std::wstring Key = AccountId;
     if (Key.empty())
     {
@@ -2003,7 +2003,7 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     if (Runner != this)
     {
         APlayerState* TargetState = Runner->PlayerState;
-        const FString RunnerName = TargetState ? static_cast<const FString&>(TargetState->PlayerName) : GetNameSafe(Runner);
+        const FString RunnerName = TargetState ? TargetState->GetPlayerName() : GetNameSafe(Runner);
         UE_LOG(LogFort, Log, TEXT("ServerCheat: %s ran \"%s\" on %s"), *GetNameSafe(this), *Command, *RunnerName);
         ClientMessage(FString::Printf(TEXT("Ran \"%s\" on %s"), *Command, *RunnerName));
     }

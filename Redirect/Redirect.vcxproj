@@ -442,6 +442,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetworkObjectList.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PackageMapClient.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PlayerController.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PlayerState.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PrimitiveComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp" />

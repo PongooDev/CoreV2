@@ -295,7 +295,7 @@ APlayerController* AFortGameModeZone::Login(UPlayer* NewPlayer, ENetRole InRemot
     AFortWorldManager* WorldManager = GameState ? static_cast<AFortWorldManager*>(GameState->WorldManager) : nullptr;
     if (PlayerState && WorldManager)
     {
-        FString& PlayerName = PlayerState->PlayerName;
+        const FString PlayerName = PlayerState->GetPlayerName();
         PlayerState->WorldPlayerId = WorldManager->GetOrAllocatePlayerID(UniqueId.ToString(), PlayerName);
     }
 

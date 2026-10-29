@@ -399,7 +399,7 @@ namespace
     FString PlayerNameOf(const AController* Controller)
     {
         const APlayerState* PlayerState = Controller ? static_cast<APlayerState*>(Controller->PlayerState) : nullptr;
-        return PlayerState ? static_cast<const FString&>(PlayerState->PlayerName) : GetNameSafe(Controller);
+        return PlayerState ? PlayerState->GetPlayerName() : GetNameSafe(Controller);
     }
 
     // The missions of the world's mission manager (Save the World), the primary ones first.
@@ -1579,7 +1579,7 @@ AFortPlayerController* UFortCheatManager::FindCheatTarget(const UObject* WorldCo
         {
             continue;
         }
-        const FString& PlayerName = PlayerState->PlayerName;
+        const FString PlayerName = PlayerState->GetPlayerName();
         const std::wstring Candidate = Lower(PlayerName.ToStdString());
         if (Candidate == Wanted)
         {

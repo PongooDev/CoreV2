@@ -132,7 +132,7 @@ void AFortPlayerController::UpdateTeamTalking()
             Member->bIsTalking = bTalking;
             if (bTalking && Shown.insert(Member).second)
             {
-                Log::Info(L"Voice chat: the team list shows {} ({}) talking", Member->PlayerName.ToStdString(), Member->UniqueId.ToString().ToStdString());
+                Log::Info(L"Voice chat: the team list shows {} ({}) talking", Member->GetPlayerName().ToStdString(), Member->UniqueId.ToString().ToStdString());
             }
         }
     }

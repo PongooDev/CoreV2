@@ -114,6 +114,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         AFortGameMode::FinishWorldInitialization(WorldManager);
         ABuildingContainer::LogWorldContainers(GetWorld());
         Athena->WatchMatchResults();
+        Athena->WatchWarmup();
         return;
     }
 

@@ -23,6 +23,16 @@ public:
     DefineUProperty(bool, bSquadPlay)
     // Whether a dead player goes on to spectate (SpectateOnDeath).
     DefineUProperty(bool, bAllowSpectateAfterDeath)
+    // Who PreLogin lets in ("Match is full" at it, 1.9 0x4319F0): the assigned players (OnGivenMatchAssignment,
+    // 0x42D2B0).
+    DefineUProperty(int32_t, MaxPlayerCount)
+    // The warmup's length, and the shorter one it changes to once enough of MaxPlayerCount is in (UpdateWarmupPhase,
+    // 1.9 0x43D9A0). Config values; no match option sets them.
+    DefineUProperty(float, WarmupCountdownDuration)
+    DefineUProperty(float, WarmupEarlyCountdownDuration)
+
+    static bool HasMaxPlayerCount() { return Member_MaxPlayerCount.IsAvailable(); }
+    static bool HasWarmupLength() { return Member_WarmupCountdownDuration.IsAvailable() && Member_WarmupEarlyCountdownDuration.IsAvailable(); }
 
     // Where a Battle Royale server starts: the Battle Royale zone theme's map and playlist
     // ("/Game/Athena/Maps/Athena_Terrain?playlistId=2" on 1.7.2), or empty when the build has none.
@@ -43,6 +53,10 @@ public:
     // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,
     // for Battle Royale's stats (Core-Backend #59), as long as the game mode is there.
     void WatchMatchResults();
+
+    // Keeps the warmup at the admin panel's length and, with late joining on, takes more players during it
+    // (Core-Backend #122), as long as the game mode is there.
+    void WatchWarmup();
 
     static void HookVTables();
     static void HookCallSites();

@@ -24,4 +24,10 @@ public:
     DefineUProperty(EAthenaGamePhase, GamePhase)
     DefineUProperty(int32_t, PlayersLeft)
     DefineUProperty(int32_t, TeamsLeft)
+    // The warmup's countdown in the world's time, replicated for the clients' timer: set when the warmup starts
+    // (UpdateWarmupPhase, 1.9 0x43D9A0, the end -1 until then), and the bus leaves at the end.
+    DefineUProperty(float, WarmupCountdownStartTime)
+    DefineUProperty(float, WarmupCountdownEndTime)
+
+    static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
 };

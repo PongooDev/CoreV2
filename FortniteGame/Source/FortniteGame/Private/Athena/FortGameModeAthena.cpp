@@ -1,14 +1,18 @@
 #include "pch.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortAthenaAircraft.h"
+#include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "BackendRequest.h"
 #include "Building/BuildingSMActor.h"
 #include "Configuration.h"
 #include "Engine/EngineTypes.h"
+#include "Engine/NetConnection.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/GameSession.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
@@ -22,6 +26,8 @@
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
+#include "Online/FortGameSession.h"
+#include "Online/FortPartyBeaconHost.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Class.h"
@@ -29,14 +35,18 @@
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cwctype>
 #include <format>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
+#include <vector>
 
 FString AFortGameModeAthena::DefaultMatchURL()
 {
@@ -323,6 +333,453 @@ void AFortGameModeAthena::WatchMatchResults()
     Log::Info(L"Battle Royale: reporting the match's results to {} ({}{})", Configuration::Get().Backend,
         Results->bCountWins ? L"with its wins" : L"its wins through the build's recordwin",
         AFortPlayerStateAthena::CountsKills() ? L"" : AFortPlayerStateAthena::HasEliminator() ? L", kills counted by Core" : L", no kills: no DeathInfo");
+#endif
+}
+
+namespace
+{
+    // How often the server asks for the admin panel's settings before its warmup, and reports during it.
+    constexpr auto WarmupAskInterval = std::chrono::seconds(30);
+    constexpr auto WarmupReportInterval = std::chrono::seconds(1);
+    constexpr auto ReserveInterval = std::chrono::milliseconds(100);
+
+    struct FWarmupWatch
+    {
+        std::chrono::steady_clock::time_point NextAsk{};
+        std::chrono::steady_clock::time_point NextReserve{};
+        bool bAsking = false;
+        // The backend has no such route (one from before Core-Backend #122): it isn't asked again.
+        bool bUnsupported = false;
+        // The bus has left and the backend has heard so.
+        bool bReportedEnd = false;
+        // The phase the last check saw: a new one is reported at once.
+        uint8_t LastPhase = 0xFF;
+
+        // The backend's answer: the warmup's length (0: the game's own), whether the matchmaking service sends parties
+        // here, the match's room, and the late parties it sent (their account ids).
+        int32_t WarmupSeconds = 0;
+        bool bOpen = false;
+        int32_t MaxPlayers = 0;
+        std::vector<std::vector<std::wstring>> Parties;
+
+        // The game's own warmup lengths, from before Core first changed them (-1 until then), and the length the game
+        // mode has now (0: the game's).
+        float GameDuration = -1.0f;
+        float GameEarly = -1.0f;
+        int32_t AppliedSeconds = 0;
+        // The running countdown was set to AppliedSeconds.
+        bool bCountdownSet = false;
+        bool bWarnedNoWarmupLength = false;
+
+        // Late joining: the match was opened (MaxPlayerCount raised), the players who connected during the warmup
+        // without a reservation, and those known to have their team (a reservation, and a player controller: PickTeam
+        // has run).
+        bool bOpened = false;
+        bool bWarnedNoReservations = false;
+        bool bWarnedNoTeam = false;
+        std::set<std::wstring> LateIds;
+        std::set<std::wstring> Settled;
+    };
+
+    std::string NarrowId(const std::wstring& Id)
+    {
+        std::string Result;
+        std::transform(Id.begin(), Id.end(), std::back_inserter(Result), [](wchar_t Character) { return static_cast<char>(Character); });
+        return Result;
+    }
+
+    std::wstring WidenId(const std::string& Id)
+    {
+        return std::wstring(Id.begin(), Id.end());
+    }
+
+    // The answer's "parties": [["<accountId>", ...], ...].
+    std::vector<std::vector<std::wstring>> JsonParties(const std::string& Json)
+    {
+        std::vector<std::vector<std::wstring>> Parties;
+        const size_t Key = Json.find("\"parties\"");
+        size_t Index = Key == std::string::npos ? std::string::npos : Json.find('[', Key);
+        int32_t Depth = 0;
+        for (; Index != std::string::npos && Index < Json.size(); ++Index)
+        {
+            const char Character = Json[Index];
+            if (Character == '[')
+            {
+                if (++Depth == 2)
+                {
+                    Parties.emplace_back();
+                }
+            }
+            else if (Character == ']')
+            {
+                if (--Depth == 0)
+                {
+                    break;
+                }
+            }
+            else if (Character == '"' && Depth == 2)
+            {
+                const size_t End = Json.find('"', Index + 1);
+                if (End == std::string::npos)
+                {
+                    break;
+                }
+                Parties.back().push_back(WidenId(Json.substr(Index + 1, End - Index - 1)));
+                Index = End;
+            }
+        }
+        return Parties;
+    }
+
+    AFortGameStateAthena* AthenaGameStateOf(AFortGameModeAthena* GameMode)
+    {
+        UWorld* World = GameMode->GetWorld();
+        return World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    }
+
+    // The reservation beacon's state (AFortGameSession's ReservationBeaconHost), or null.
+    UPartyBeaconState* BeaconStateOf(AFortGameModeAthena* GameMode)
+    {
+        AFortGameSession* Session = AFortGameSession::HasReservationBeacon() ? Cast<AFortGameSession>(reinterpret_cast<UObject*>(static_cast<AGameSession*>(GameMode->GameSession))) : nullptr;
+        APartyBeaconHost* Beacon = Session && APartyBeaconHost::IsReflected() ? static_cast<APartyBeaconHost*>(Session->ReservationBeaconHost) : nullptr;
+        return Beacon ? static_cast<UPartyBeaconState*>(Beacon->State) : nullptr;
+    }
+
+    // The account ids of the players connected (from their login on, so those still loading the map count).
+    std::vector<std::wstring> ConnectedAccounts(AFortGameModeAthena* GameMode)
+    {
+        std::vector<std::wstring> Ids;
+        UWorld* World = GameMode->GetWorld();
+        UNetDriver* Driver = World && UNetConnection::HasPlayerID() ? World->GetNetDriver() : nullptr;
+        if (!Driver)
+        {
+            return Ids;
+        }
+        for (UNetConnection* Connection : static_cast<TArray<UNetConnection*>&>(Driver->ClientConnections))
+        {
+            const std::wstring Id = Connection && Connection->PlayerID.IsValid() ? Connection->PlayerID.ToString().ToStdString() : std::wstring();
+            if (IsAccountId(Id))
+            {
+                Ids.push_back(Id);
+            }
+        }
+        return Ids;
+    }
+
+    void ReportWarmup(const std::shared_ptr<FWarmupWatch>& Watch, const std::wstring& Phase, const std::vector<std::wstring>& AccountIds, float SecondsLeft)
+    {
+        std::string Ids;
+        for (const std::wstring& Id : AccountIds)
+        {
+            Ids += std::format("{}\"{}\"", Ids.empty() ? "" : ",", NarrowId(Id));
+        }
+        Watch->bAsking = true;
+        BackendRequest::PostJson(L"Battle Royale warmup report", L"/fortnite/api/game/v2/matchmakingservice/warmup",
+            std::format("{{\"phase\":\"{}\",\"accountIds\":[{}],\"secondsLeft\":{:.1f}}}", NarrowId(Phase), Ids, std::max(SecondsLeft, 0.0f)),
+            FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [Watch](uint32_t Status, const std::string& Body)
+        {
+            // {warmupSeconds: a number or null, lateJoin, sessionId, open, maxPlayers, parties}. Anything else (no
+            // answer) keeps what the server has.
+            const std::string Seconds = Status == 200 ? BackendRequest::JsonField(Body, "warmupSeconds") : std::string();
+            const bool bAnswered = Seconds == "null" || (!Seconds.empty() && std::isdigit(static_cast<unsigned char>(Seconds[0])));
+            const int32_t WarmupSeconds = bAnswered && Seconds != "null" ? std::clamp(std::atoi(Seconds.c_str()), 0, 3600) : 0;
+            const bool bOpen = bAnswered && BackendRequest::JsonField(Body, "open") == "true";
+            const int32_t MaxPlayers = bAnswered ? std::clamp(std::atoi(BackendRequest::JsonField(Body, "maxPlayers").c_str()), 0, 1000) : 0;
+            auto Parties = bAnswered ? JsonParties(Body) : std::vector<std::vector<std::wstring>>();
+            GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bOpen, MaxPlayers, Parties = std::move(Parties)]() mutable
+            {
+                Watch->bAsking = false;
+                if (Status == 404 && !Watch->bUnsupported)
+                {
+                    Watch->bUnsupported = true;
+                    Log::Warning(L"Battle Royale: the backend has no warmup settings (Core-Backend #122), so the match keeps the game's warmup and takes no late players");
+                }
+                if (!bAnswered)
+                {
+                    return;
+                }
+                Watch->WarmupSeconds = WarmupSeconds;
+                Watch->bOpen = bOpen;
+                Watch->MaxPlayers = MaxPlayers;
+                Watch->Parties = std::move(Parties);
+            });
+        });
+    }
+
+    // The game mode's warmup lengths at the backend's (both, so the countdown never shortens below it once enough of
+    // MaxPlayerCount is in), or the game's own again, and a countdown already running moved to it.
+    void ApplyWarmupLength(AFortGameModeAthena* GameMode, AFortGameStateAthena* GameState, FWarmupWatch& Watch, float Now)
+    {
+        if (!AFortGameModeAthena::HasWarmupLength())
+        {
+            if (Watch.WarmupSeconds > 0 && !Watch.bWarnedNoWarmupLength)
+            {
+                Watch.bWarnedNoWarmupLength = true;
+                Log::Warning(L"Battle Royale: this build reflects no WarmupCountdownDuration, so the warmup keeps the game's length");
+            }
+            return;
+        }
+
+        if (Watch.WarmupSeconds != Watch.AppliedSeconds)
+        {
+            if (Watch.GameDuration < 0.0f)
+            {
+                Watch.GameDuration = GameMode->WarmupCountdownDuration;
+                Watch.GameEarly = GameMode->WarmupEarlyCountdownDuration;
+            }
+            const bool bGame = Watch.WarmupSeconds <= 0;
+            GameMode->WarmupCountdownDuration = bGame ? Watch.GameDuration : static_cast<float>(Watch.WarmupSeconds);
+            GameMode->WarmupEarlyCountdownDuration = bGame ? Watch.GameEarly : static_cast<float>(Watch.WarmupSeconds);
+            Watch.AppliedSeconds = Watch.WarmupSeconds;
+            Watch.bCountdownSet = bGame;
+            if (bGame)
+            {
+                Log::Info(L"Battle Royale: the warmup is the game's again: {:.0f} s, {:.0f} s once enough players are in", Watch.GameDuration, Watch.GameEarly);
+            }
+            else
+            {
+                Log::Info(L"Battle Royale: the warmup lasts {} s (the backend's; the game's is {:.0f} s, {:.0f} s once enough players are in)", Watch.WarmupSeconds, Watch.GameDuration, Watch.GameEarly);
+            }
+        }
+
+        // UpdateWarmupPhase (1.9 0x43D9A0) sets the countdown once, when the warmup starts: one that started before the
+        // backend answered takes the backend's length from its start.
+        if (!Watch.bCountdownSet && Watch.AppliedSeconds > 0 && GameState->GamePhase == EAthenaGamePhase::GetWarmup() && AFortGameStateAthena::HasWarmupCountdown() && GameState->WarmupCountdownEndTime >= 0.0f)
+        {
+            Watch.bCountdownSet = true;
+            const float End = std::max(GameState->WarmupCountdownStartTime + static_cast<float>(Watch.AppliedSeconds), Now + 1.0f);
+            Log::Info(L"Battle Royale: the warmup's countdown ends in {:.0f} s (was {:.0f} s)", End - Now, GameState->WarmupCountdownEndTime - Now);
+            GameState->WarmupCountdownEndTime = End;
+        }
+    }
+
+    // Late joining: the match lets in as many players as the backend gives it room for. The game mode lets in only the
+    // assigned players (OnGivenMatchAssignment, 1.9 0x42D2B0, sets MaxPlayerCount and the game session's MaxPlayers
+    // from the beacon's reservations), PreLogin turning anyone else away ("Match is full", 0x4319F0) until the bus
+    // leaves ("Match has started": StartAircraftPhase sets the flag, 0x4388CB). Raised during the warmup only: the
+    // match has started then (HandleMatchHasStarted, 0x427D90, clears the failed assignment timer, which kicks everyone
+    // when it fires, 0x42D100). The playlist's teams cap it.
+    void OpenMatch(AFortGameModeAthena* GameMode, FWarmupWatch& Watch)
+    {
+        UPartyBeaconState* State = BeaconStateOf(GameMode);
+        AGameSession* Session = static_cast<AGameSession*>(GameMode->GameSession);
+        if (!State || !Session || !AFortGameModeAthena::HasMaxPlayerCount() || !AGameSession::HasMaxPlayers() || !UNetConnection::HasPlayerID())
+        {
+            if (!Watch.bWarnedNoReservations)
+            {
+                Watch.bWarnedNoReservations = true;
+                Log::Warning(L"Battle Royale: no reservation beacon, MaxPlayerCount or connection player id on this build, so the match takes no late players");
+            }
+            return;
+        }
+        const int32_t Room = std::min(Watch.MaxPlayers, State->NumTeams * State->NumPlayersPerTeam);
+        if (Room <= 0)
+        {
+            return;
+        }
+        if (Room > GameMode->MaxPlayerCount || Room > Session->MaxPlayers)
+        {
+            Log::Info(L"Battle Royale: the match takes late players during its warmup, up to {} (MaxPlayerCount was {}, the session's MaxPlayers {})", Room, GameMode->MaxPlayerCount, Session->MaxPlayers);
+            GameMode->MaxPlayerCount = std::max(GameMode->MaxPlayerCount, Room);
+            Session->MaxPlayers = std::max(Session->MaxPlayers, Room);
+        }
+        Watch.bOpened = true;
+    }
+
+    // Gives each player who joined during the warmup a team. Battle Royale's clients never talk to the beacon, so only
+    // the assigned players have a reservation, and PickTeam (1.9 0x430A50) gives the beacon's team to anyone on a
+    // dedicated session's match: for a player without one that is Spectator (0x6FF3D0 answers 103), which has no
+    // place in the match. So each such player gets a reservation of their own between their login and their joining
+    // the game (map load, then Login and PickTeam): on their party's reservation when the backend sent their party
+    // and a member already holds one, else on the first team no reservation has. The beacon's reservations are its
+    // state's reflected array (UPartyBeaconState::Reservations), the ids copied from the connection with the game's
+    // own struct copy, and a player is looked at again until they have a player controller, in case the beacon dropped
+    // one that took too long to load (APartyBeaconHost's session timeout).
+    void ReserveLatePlayers(AFortGameModeAthena* GameMode, FWarmupWatch& Watch, bool bWarmup)
+    {
+        UPartyBeaconState* State = BeaconStateOf(GameMode);
+        UWorld* World = GameMode->GetWorld();
+        UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
+        static UScriptStruct* const IdStruct = FindObject<UScriptStruct>(nullptr, L"/Script/Engine.UniqueNetIdRepl");
+        if (!State || !Driver || !IdStruct)
+        {
+            return;
+        }
+
+        std::vector<std::pair<std::wstring, UNetConnection*>> Unsettled;
+        for (UNetConnection* Connection : static_cast<TArray<UNetConnection*>&>(Driver->ClientConnections))
+        {
+            const std::wstring Id = Connection && Connection->PlayerID.IsValid() ? Connection->PlayerID.ToString().ToStdString() : std::wstring();
+            // After the bus has left a new player is turned away ("Match has started"): only those who came before.
+            if (IsAccountId(Id) && !Watch.Settled.contains(Id) && (bWarmup || Watch.LateIds.contains(Id)))
+            {
+                Unsettled.emplace_back(Id, Connection);
+            }
+        }
+        if (Unsettled.empty())
+        {
+            return;
+        }
+
+        TStructArray<FPartyReservation>& Reservations = State->GetMember_Reservations();
+        std::map<std::wstring, int32_t> ReservationOf;
+        std::set<int32_t> Teams;
+        for (int32_t Index = 0; Index < Reservations.Num(); ++Index)
+        {
+            FPartyReservation& Reservation = Reservations[Index];
+            Teams.insert(Reservation.TeamNum);
+            TStructArray<FPlayerReservation>& Members = Reservation.GetMember_PartyMembers();
+            for (int32_t Member = 0; Member < Members.Num(); ++Member)
+            {
+                ReservationOf[Members[Member].UniqueId.ToString().ToStdString()] = Index;
+            }
+        }
+
+        for (const auto& [Id, Connection] : Unsettled)
+        {
+            const bool bJoined = static_cast<APlayerController*>(Connection->PlayerController) != nullptr;
+            if (ReservationOf.contains(Id))
+            {
+                if (bJoined)
+                {
+                    Watch.Settled.insert(Id);
+                }
+                continue;
+            }
+            if (bJoined)
+            {
+                // In the game before Core saw them: PickTeam has run.
+                Watch.Settled.insert(Id);
+                Log::Warning(L"Battle Royale: {} joined without a reservation, so PickTeam made them a Spectator", Id);
+                continue;
+            }
+            Watch.LateIds.insert(Id);
+
+            int32_t Index = -1;
+            const auto Party = std::find_if(Watch.Parties.begin(), Watch.Parties.end(), [&](const std::vector<std::wstring>& Members) { return std::find(Members.begin(), Members.end(), Id) != Members.end(); });
+            for (const std::wstring& Member : Party != Watch.Parties.end() ? *Party : std::vector<std::wstring>())
+            {
+                const auto Found = ReservationOf.find(Member);
+                if (Found != ReservationOf.end() && Reservations[Found->second].GetMember_PartyMembers().Num() < State->NumPlayersPerTeam)
+                {
+                    Index = Found->second;
+                    break;
+                }
+            }
+            if (Index < 0)
+            {
+                int32_t Team = 0;
+                while (Team < State->NumTeams && Teams.contains(Team))
+                {
+                    ++Team;
+                }
+                if (Team >= State->NumTeams)
+                {
+                    if (!Watch.bWarnedNoTeam)
+                    {
+                        Watch.bWarnedNoTeam = true;
+                        Log::Warning(L"Battle Royale: all {} teams are taken, so {} has no team", State->NumTeams, Id);
+                    }
+                    continue;
+                }
+                Index = Reservations.Num();
+                FPartyReservation& Reservation = Reservations.AddDefaulted();
+                Reservation.TeamNum = Team;
+                IdStruct->CopyScriptStruct(&Reservation.GetMember_PartyLeader(), &Connection->GetMember_PlayerID());
+                Teams.insert(Team);
+            }
+            FPartyReservation& Reservation = Reservations[Index];
+            FPlayerReservation& Member = Reservation.GetMember_PartyMembers().AddDefaulted();
+            IdStruct->CopyScriptStruct(&Member.GetMember_UniqueId(), &Connection->GetMember_PlayerID());
+            ReservationOf[Id] = Index;
+            Log::Info(L"Battle Royale: {} joins in the warmup on HumanPvP_Team{} (beacon team {}, {} of its party there)", Id, Reservation.TeamNum + 1, Reservation.TeamNum,
+                Reservation.GetMember_PartyMembers().Num());
+        }
+    }
+
+    void CheckWarmup(AFortGameModeAthena* GameMode, const std::shared_ptr<FWarmupWatch>& Watch, std::chrono::steady_clock::time_point Now)
+    {
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        UWorld* World = GameMode->GetWorld();
+        if (!GameState || !World)
+        {
+            return;
+        }
+        const uint8_t Phase = GameState->GamePhase;
+        const bool bWarmup = Phase == EAthenaGamePhase::GetWarmup();
+        const float WorldNow = World->GetTimeSeconds();
+        if (Phase != Watch->LastPhase)
+        {
+            Watch->LastPhase = Phase;
+            Watch->NextAsk = Now;
+        }
+
+        if (Phase <= EAthenaGamePhase::GetWarmup())
+        {
+            ApplyWarmupLength(GameMode, GameState, *Watch, WorldNow);
+        }
+        if (bWarmup && Watch->bOpen)
+        {
+            OpenMatch(GameMode, *Watch);
+        }
+        if (Watch->bOpened && Now >= Watch->NextReserve)
+        {
+            Watch->NextReserve = Now + ReserveInterval;
+            ReserveLatePlayers(GameMode, *Watch, bWarmup);
+        }
+
+        // Every 30 seconds before the warmup (the settings), every second during it (the match's players and time left),
+        // once after.
+        if (Watch->bAsking || Watch->bUnsupported || Watch->bReportedEnd || Now < Watch->NextAsk)
+        {
+            return;
+        }
+        const bool bAfter = Phase > EAthenaGamePhase::GetWarmup();
+        Watch->NextAsk = Now + (bWarmup ? WarmupReportInterval : WarmupAskInterval);
+        Watch->bReportedEnd = bAfter;
+        float SecondsLeft = 0.0f;
+        if (bWarmup && AFortGameStateAthena::HasWarmupCountdown())
+        {
+            SecondsLeft = GameState->WarmupCountdownEndTime >= 0.0f ? GameState->WarmupCountdownEndTime - WorldNow
+                : AFortGameModeAthena::HasWarmupLength() ? GameMode->WarmupCountdownDuration : 0.0f;
+        }
+        if (bAfter)
+        {
+            Watch->bOpen = false;
+        }
+        ReportWarmup(Watch, GameState->GamePhase.ToString(), ConnectedAccounts(GameMode), SecondsLeft);
+    }
+
+    void WatchWarmupOf(FWeakObjectPtr GameMode, std::shared_ptr<FWarmupWatch> Watch)
+    {
+        GameThread::Enqueue([GameMode, Watch]()
+        {
+            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
+            AFortGameStateAthena* GameState = Athena ? AthenaGameStateOf(Athena) : nullptr;
+            // Ends with the match, or once the storm is up: everyone who came during the warmup is in the game by then.
+            if (!Athena || (GameState && GameState->GamePhase > EAthenaGamePhase::GetAircraft() && Watch->bReportedEnd))
+            {
+                return;
+            }
+            CheckWarmup(Athena, Watch, std::chrono::steady_clock::now());
+            WatchWarmupOf(GameMode, Watch);
+        });
+    }
+}
+
+void AFortGameModeAthena::WatchWarmup()
+{
+#if WITH_SERVER_CODE
+    // Core-Backend #122: the admin panel's warmup length and late joining. The warmup lasts the game mode's
+    // WarmupCountdownDuration, a config value no match option sets (1.9's OnGivenMatchAssignment, 0x42D2B0, reads only
+    // match.option.warmupRequiredPlayerCount; 1.9.1's, 0x42CF40, adds customKey, isMatchStatsDisabled and
+    // isProgressionDisabled). And the matchmaking service can't add players to a match: the server's MMS client knows
+    // only Registered, AssignMatch and UnassignMatch (0x3BF2730), takes an AssignMatch only while Registered, and
+    // leaves the service once its match is assigned (0x709370). So the server asks the backend (POST
+    // matchmakingservice/warmup) from its world's start and sets the warmup's length; with late joining on it opens
+    // its match during the warmup, reports its players and time left every second so the backend sends it the parties
+    // that queue, and gives each of them a team.
+    WatchWarmupOf(FWeakObjectPtr(this), std::make_shared<FWarmupWatch>());
 #endif
 }
 

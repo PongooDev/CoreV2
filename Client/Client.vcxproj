@@ -344,6 +344,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortLobbyBeaconHost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileAccount.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileWorld.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortPartyBeaconHost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortAIPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPawn.h" />

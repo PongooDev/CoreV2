@@ -23,8 +23,9 @@ namespace
         std::string Body;
         std::wstring ClientId;
         std::wstring Secret;
-        // Set for a GET, which answers through it; a POST's answer is only logged.
+        // Set for a GET, which answers through it; a POST's answer is only logged, unless it is set too (bPost).
         std::function<void(uint32_t Status, const std::string& Body)> OnAnswer;
+        bool bPost = false;
     };
 
     struct FResponse
@@ -187,7 +188,8 @@ namespace
             {
                 break;
             }
-            const bool bGet = static_cast<bool>(Request.OnAnswer);
+            const bool bAnswered = static_cast<bool>(Request.OnAnswer);
+            const bool bGet = bAnswered && !Request.bPost;
             const std::wstring Headers = std::wstring(bGet ? L"Accept: application/json" : L"Content-Type: application/json") + L"\r\nAuthorization: bearer " + Widen(Token);
             const FResponse Response = Exchange(bGet ? L"GET" : L"POST", Request.Path, Headers, Request.Body);
             if (Response.Status == 401)
@@ -196,7 +198,7 @@ namespace
                 Token.clear();
                 continue;
             }
-            if (bGet)
+            if (bAnswered)
             {
                 if (Response.Status != 200)
                 {
@@ -255,6 +257,13 @@ namespace
 void BackendRequest::PostJson(std::wstring What, std::wstring Path, std::string Body, std::wstring ClientId, std::wstring Secret)
 {
     Enqueue(FRequest{ std::move(What), std::move(Path), std::move(Body), std::move(ClientId), std::move(Secret), nullptr });
+}
+
+void BackendRequest::PostJson(std::wstring What, std::wstring Path, std::string Body, std::wstring ClientId, std::wstring Secret, std::function<void(uint32_t Status, const std::string& Body)> OnAnswer)
+{
+    FRequest Request{ std::move(What), std::move(Path), std::move(Body), std::move(ClientId), std::move(Secret), std::move(OnAnswer) };
+    Request.bPost = true;
+    Enqueue(std::move(Request));
 }
 
 void BackendRequest::GetJson(std::wstring What, std::wstring Path, std::wstring ClientId, std::wstring Secret, std::function<void(uint32_t Status, const std::string& Body)> OnAnswer)

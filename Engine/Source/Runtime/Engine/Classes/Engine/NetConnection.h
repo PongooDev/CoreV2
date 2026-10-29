@@ -3,6 +3,7 @@
 #include "Containers/Map.h"
 #include "Engine/Channel.h"
 #include "Engine/Player.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "Misc/NetworkGuid.h"
 #include "Templates/SharedPointer.h"
 #include "UObject/WeakObjectPtr.h"
@@ -44,6 +45,9 @@ public:
     DefineUProperty(AActor*, OwningActor)
     DefineBitfieldUProperty(InternalAck)
     DefineUProperty(double, LastReceiveTime)
+    // The player's id, from their login (NMT_Login), before they have a player controller.
+    DefineUProperty(FUniqueNetIdRepl, PlayerID)
+    static bool HasPlayerID() { return Member_PlayerID.IsAvailable(); }
     DefineNativeMember(EConnectionState, State, UNetConnection_State)
     DefineNativeMember(int32_t, QueuedBits, UNetConnection_QueuedBits)
     DefineNativeMember(int32_t, TickCount, UNetConnection_TickCount)

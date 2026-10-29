@@ -53,10 +53,12 @@ void FCommandLine::ApproveServerSwitches()
     // the swap in memory first (it's loaded before the exe's entry point), so an unpatched exe works too. Core's swap
     // also lets -saveddirsuffix= through in place of Reboot's -useolditemcards: the launcher gives servers their own
     // saved folder with it (FPaths::GameSavedDir, 1.8 0x13058C0: Saved_<suffix>), whose Engine.ini turns XMPP off
-    // (#109). 1.1 and 1.2 have no whitelist.
+    // (#109). The last place, "-unatt", lets -unattended through (a switch is kept when it starts with a whitelisted
+    // one): without it a server shows the engine's message boxes, such as "Default Property warnings and errors", on the
+    // host's desktop and waits for someone to close them. 1.1 and 1.2 have no whitelist.
     static constexpr wchar_t Client[] = L"-invitesession -invitefrom -party_joininfo_token -replay";
     static constexpr wchar_t Reboot[] = L"-log -nosplash -nosound -nullrhi -useolditemcards       ";
-    static constexpr wchar_t Server[] = L"-log -nosplash -nosound -nullrhi -saveddirsuffix        ";
+    static constexpr wchar_t Server[] = L"-log -nosplash -nosound -nullrhi -saveddirsuffix -unatt ";
     static_assert(sizeof(Client) == sizeof(Server) && sizeof(Reboot) == sizeof(Server), "the swap must keep the whitelist's length");
     constexpr size_t Size = sizeof(Server) - sizeof(wchar_t);
 
@@ -83,7 +85,7 @@ void FCommandLine::ApproveServerSwitches()
     }
     std::memcpy(Whitelist, Server, Size);
     VirtualProtect(Whitelist, Size, Protection, &Protection);
-    Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi -saveddirsuffix");
+    Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi -saveddirsuffix -unattended");
 }
 
 void FCommandLine::AddSwitch(const wchar_t* Switch)

@@ -141,12 +141,23 @@ void UFortQueryGenerator_SpecificAssignmentGoals::GenerateItems(void* QueryInsta
         return;
     }
 
+    // As the game's generator (1.9 0x30B8C0) does: only an assignment this pawn can use, and only the goals this AI can
+    // take. The goal loop rejects the others anyway, and a query option with only rejected goals keeps the query from
+    // falling through to its next option, such as AllEnemiesAndDefaultWorld's enemies after a world assignment of
+    // placement actors (#143: a mimic spawned with no perceived enemy got no target and turned back into a chest).
+    const bool bChecksGoals = Natives::UFortAIAssignment_CanPawnUse && Natives::FFortAIGoal_CanAIUse;
+    if (bChecksGoals && !Natives::UFortAIAssignment_CanPawnUse(Assignment, Pawn))
+    {
+        return;
+    }
+    UObject* Settings = static_cast<UFortAIAssignment*>(Assignment)->GetAssignmentSettings();
+
     const FScriptArray& Goals = *reinterpret_cast<const FScriptArray*>(reinterpret_cast<uint8_t*>(Assignment) + Natives::UFortAIAssignment_Goals);
     const int32_t GoalSize = FFortAIGoal::StaticStruct()->GetStructureSize();
     for (int32_t Index = 0; Index < Goals.Num(); ++Index)
     {
         const uint8_t* Goal = static_cast<const uint8_t*>(Goals.GetData()) + static_cast<size_t>(Index) * GoalSize;
-        if (HasValidGoal(Goal))
+        if (HasValidGoal(Goal) && (!bChecksGoals || Natives::FFortAIGoal_CanAIUse(Goal, Controller, Settings)))
         {
             AddGoalItem(QueryInstance, reinterpret_cast<AActor*>(reinterpret_cast<const FWeakObjectPtr*>(Goal)->Get()), Assignment, Goal);
         }
@@ -164,6 +175,8 @@ void UFortQueryGenerator_Enemies::HookVTables()
     {
         return;
     }
+
+    Finder::ResolveAssignmentGoalChecksLive(UFortAIAssignmentSettings::MaxAIAllowedForAssignmentOffset(), UFortAIAssignmentSettings::MaxAIAllowedPerGoalOffset());
 
     const int32_t Index = Natives::UEnvQueryGenerator_GenerateItemsIndex;
     Hooks::SwapVTable(L"UFortQueryGenerator_Enemies::GenerateItems", EnemiesVTable, Index, reinterpret_cast<void*>(&GenerateItemsHK));

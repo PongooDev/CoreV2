@@ -73,6 +73,28 @@ public:
     UObject* GetEncounterInfo();
 };
 
+class UFortAIAssignmentSettings : public UObject
+{
+    DefineUnrealClass(UFortAIAssignmentSettings, FortniteGame)
+
+public:
+    DefineUProperty(float, MaxAIAllowedForAssignment)
+    DefineUProperty(float, MaxAIAllowedPerGoal)
+
+    static ptrdiff_t MaxAIAllowedForAssignmentOffset() { return Member_MaxAIAllowedForAssignment.IsAvailable() ? Member_MaxAIAllowedForAssignment.GetOffsetChecked() : -1; }
+    static ptrdiff_t MaxAIAllowedPerGoalOffset() { return Member_MaxAIAllowedPerGoal.IsAvailable() ? Member_MaxAIAllowedPerGoal.GetOffsetChecked() : -1; }
+};
+
+class UFortAIAssignment : public UObject
+{
+    DefineUnrealClass(UFortAIAssignment, FortniteGame)
+
+public:
+    DefineUProperty(UObject*, AssignmentSettings)
+
+    UObject* GetAssignmentSettings() const { return Member_AssignmentSettings.IsAvailable() ? AssignmentSettings : nullptr; }
+};
+
 class UFortAIGoalProvider : public UObject
 {
     DefineUnrealClass(UFortAIGoalProvider, FortniteGame)

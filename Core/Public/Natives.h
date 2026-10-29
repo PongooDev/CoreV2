@@ -333,6 +333,8 @@ namespace Natives
     inline ptrdiff_t FEnvQueryInstance_ValueSize = -1;
     inline ptrdiff_t FEnvQueryInstance_Owner = -1;
     inline ptrdiff_t UFortAIAssignment_Goals = -1;
+    inline bool (*UFortAIAssignment_CanPawnUse)(UObject* This, APawn* Pawn) = nullptr;
+    inline bool (*FFortAIGoal_CanAIUse)(const void* Goal, UObject* AI, UObject* Settings) = nullptr;
     inline void* (*AFortAIGoalManager_GetAssignmentInfo)(UObject* This, UObject* AI) = nullptr;
     inline ptrdiff_t FAIAssignmentInfo_DiscouragedGoalTimers = -1;
     inline int32_t UBTTaskNode_ExecuteTaskIndex = -1;

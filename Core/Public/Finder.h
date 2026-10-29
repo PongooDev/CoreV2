@@ -146,6 +146,7 @@ namespace Finder
     bool ResolveGoalManagerLive();
     bool ResolveGoalDiscouragementLive();
     bool ResolveQueryGeneratorsLive(void** EnemiesVTable);
+    bool ResolveAssignmentGoalChecksLive(ptrdiff_t MaxAIForAssignmentOffset, ptrdiff_t MaxAIPerGoalOffset);
     bool ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTable, UClass* GoalItemType);
     bool ResolveQuickBarFocusLive();
     bool ResolveSpottingLive(UClass* SpottableActorInterface);

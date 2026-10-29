@@ -4438,6 +4438,58 @@ bool Finder::ResolveQueryGeneratorsLive(void** EnemiesVTable)
     return true;
 }
 
+bool Finder::ResolveAssignmentGoalChecksLive(ptrdiff_t MaxAIForAssignmentOffset, ptrdiff_t MaxAIPerGoalOffset)
+{
+    if (Natives::UFortAIAssignment_CanPawnUse && Natives::FFortAIGoal_CanAIUse)
+    {
+        return true;
+    }
+
+    // Whether a function loads a float from [reg+Offset] with movss (F3 [REX] 0F 10, disp32, no SIB).
+    const auto LoadsFloatAt = [](uintptr_t Function, ptrdiff_t Offset)
+    {
+        const uintptr_t End = Offset > 0 && Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : 0;
+        for (uintptr_t Site = Function; End && Site + 8 <= End; ++Site)
+        {
+            const uintptr_t Opcode = Site + 1 + (Byte(Site + 1) >= 0x40 && Byte(Site + 1) <= 0x4F ? 1 : 0);
+            const uint8_t ModRm = Byte(Opcode + 2);
+            if (Byte(Site) == 0xF3 && Byte(Opcode) == 0x0F && Byte(Opcode + 1) == 0x10 && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Opcode + 3) == Offset)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // The goal loop (1.9 0x315C20) rejects a query result's assignment through its pawn check (1.9 0x2D5C80, reads
+    // MaxAIAllowedForAssignment) and the goal through its AI check (1.9 0x3679B0, reads MaxAIAllowedPerGoal).
+    const uintptr_t Loop = FunctionOf(L"Found only invalid goal(s).  Pawn: %s");
+    const uintptr_t LoopEnd = Loop ? Finder::FunctionEnd(Loop) : 0;
+    uintptr_t PawnCheck = 0;
+    uintptr_t GoalCheck = 0;
+    for (const auto& [Call, Target] : LoopEnd > Loop ? Finder::DirectCalls(Loop, LoopEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        if (!PawnCheck && LoadsFloatAt(Target, MaxAIForAssignmentOffset))
+        {
+            PawnCheck = Target;
+        }
+        else if (!GoalCheck && Target != PawnCheck && LoadsFloatAt(Target, MaxAIPerGoalOffset))
+        {
+            GoalCheck = Target;
+        }
+    }
+
+    if (!PawnCheck || !GoalCheck)
+    {
+        Log::Error(L"Finder: assignment goal checks not found (goal loop {}, pawn check {}, goal check {})", Loop != 0, PawnCheck != 0, GoalCheck != 0);
+        return false;
+    }
+    Natives::UFortAIAssignment_CanPawnUse = reinterpret_cast<decltype(Natives::UFortAIAssignment_CanPawnUse)>(PawnCheck);
+    Natives::FFortAIGoal_CanAIUse = reinterpret_cast<decltype(Natives::FFortAIGoal_CanAIUse)>(GoalCheck);
+    Log::Info(L"Finder: assignment pawn check at 0x{:X}, goal AI check at 0x{:X}", PawnCheck - Finder::ImageBase(), GoalCheck - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTable, UClass* GoalItemType)
 {
     const uintptr_t ProvideContext = FunctionOf(L"Unable to find encounter info for UFortQueryContext_EncounterPrimaryAssignmentGoals.  Owner is %s");

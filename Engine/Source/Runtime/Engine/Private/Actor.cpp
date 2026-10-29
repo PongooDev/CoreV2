@@ -79,6 +79,19 @@ void AActor::SetActorScale3D(const FVector& NewScale3D)
     Params.Call(this);
 }
 
+FVector AActor::GetActorScale3D() const
+{
+    Reflection::FParams Params(StaticFunction_GetActorScale3D());
+    return Params.Call(const_cast<AActor*>(this)) ? Params.Take<FVector>(L"ReturnValue") : FVector(1.0f, 1.0f, 1.0f);
+}
+
+void AActor::SetReplicates(bool bInReplicates)
+{
+    Reflection::FParams Params(StaticFunction_SetReplicates());
+    Params.Set(L"bInReplicates", bInReplicates);
+    Params.Call(this);
+}
+
 void AActor::SetActorEnableCollision(bool bNewActorEnableCollision)
 {
     Reflection::FParams Params(StaticFunction_SetActorEnableCollision());

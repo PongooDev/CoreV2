@@ -1690,6 +1690,27 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
         return;
     }
 
+    // "spawnactor <class or path> [scale | x y z]" (#132): no exec function of these builds spawns an actor at a scale,
+    // so Core runs it, in front of the player it runs on.
+    if (Name.size() == 10 && _wcsicmp(Name.c_str(), L"spawnactor") == 0)
+    {
+        if (UFortCheatManager* FortCheatManager = Cast<UFortCheatManager>(static_cast<UObject*>(Runner->CheatManager)))
+        {
+            AFortPlayerController* const PreviousReplyTo = UFortCheatManager::ReplyTo;
+            if (Runner != this)
+            {
+                UFortCheatManager::ReplyTo = this;
+            }
+            FortCheatManager->SpawnActor(FString(NameEnd == std::wstring::npos ? L"" : Line.c_str() + NameEnd));
+            UFortCheatManager::ReplyTo = PreviousReplyTo;
+        }
+        else
+        {
+            ClientMessage(TEXT("SpawnActor needs Fortnite's cheat manager"));
+        }
+        return;
+    }
+
     // "fly 3000" and "ghost 3000" (#129): the speed comes off before the console parses the command, and the pawn's Fly
     // or Ghost body moves it at that speed (UFortCheatManager::OnCheatMovement). The pawn's own client predicts its
     // movement at the speed its player typed, so a speed only goes with the player's own pawn.

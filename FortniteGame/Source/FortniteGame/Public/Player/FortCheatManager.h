@@ -114,6 +114,9 @@ public:
 
     // Core's own command, "cheat corecheats [filter]": the cheats Core supports, with usage, as chat lines.
     void ListCoreCheats(const FString& Filter);
+    // Core's own command, "cheat spawnactor <class or path> [scale | x y z]" (#132): an actor of the class in front of the
+    // player, at the scale (uniform, or per axis), replicated to every client.
+    void SpawnActor(const FString& Arguments);
 
     // A final "/Name/" picks the player a cheat runs on (#122): Msg without it in OutCommand, the name in OutTarget.
     static bool SplitCheatTarget(const FString& Msg, FString& OutCommand, FString& OutTarget);

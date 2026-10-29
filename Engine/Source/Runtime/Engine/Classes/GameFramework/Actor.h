@@ -66,6 +66,8 @@ public:
     DefineUFunction(K2_GetActorRotation)
     DefineUFunction(K2_TeleportTo)
     DefineUFunction(SetActorScale3D)
+    DefineUFunction(GetActorScale3D)
+    DefineUFunction(SetReplicates)
     DefineUFunction(SetActorEnableCollision)
     DefineUFunction(K2_DestroyActor)
     DefineUFunction(GetComponentsByClass)
@@ -90,6 +92,9 @@ public:
     FRotator GetActorRotation() const;
     bool TeleportTo(const FVector& DestLocation, const FRotator& DestRotation);
     void SetActorScale3D(const FVector& NewScale3D);
+    FVector GetActorScale3D() const;
+    // Server: replicates from now on (an actor that didn't joins the net driver's list), or stops.
+    void SetReplicates(bool bInReplicates);
     void SetActorEnableCollision(bool bNewActorEnableCollision);
     void K2_DestroyActor();
     TArray<UActorComponent*> GetComponentsByClass(UClass* ComponentClass) const;

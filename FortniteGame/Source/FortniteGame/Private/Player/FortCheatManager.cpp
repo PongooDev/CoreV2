@@ -17,7 +17,9 @@
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/Pawn.h"
 #include "Items/FortItem.h"
+#include "Kismet/GameplayStatics.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
@@ -270,6 +272,130 @@ namespace
         return std::wstring(Text);
     }
 
+    // The line's words, split at spaces and tabs.
+    std::vector<std::wstring> SplitWords(std::wstring_view Line)
+    {
+        std::vector<std::wstring> Words;
+        for (size_t Start = 0; Start < Line.size();)
+        {
+            while (Start < Line.size() && std::iswspace(Line[Start]))
+            {
+                ++Start;
+            }
+            size_t End = Start;
+            while (End < Line.size() && !std::iswspace(Line[End]))
+            {
+                ++End;
+            }
+            if (End > Start)
+            {
+                Words.emplace_back(Line.substr(Start, End - Start));
+            }
+            Start = End;
+        }
+        return Words;
+    }
+
+    // Classes the editor and blueprint compiler leave behind, which nothing spawns.
+    bool IsLeftoverClass(const std::wstring& Name)
+    {
+        return Name.starts_with(L"SKEL_") || Name.starts_with(L"REINST_") || Name.starts_with(L"TRASHCLASS_") || Name.starts_with(L"PLACEHOLDER-CLASS");
+    }
+
+    // The actor class SpawnActor names, the way the native Summon finds one (1.7.2 0x1FE9A90, FindObject<UClass>), and
+    // loading it when it isn't yet:
+    // - a path, "/Script/Engine.StaticMeshActor", "/Game/Building/ActorBlueprints/Containers/Tiered_Chest_6_Parent.Tiered_Chest_6_Parent_C",
+    //   or the package alone (".../Tiered_Chest_6_Parent", its _C class), loaded if it isn't;
+    // - a loaded class's name, with or without its _C ("StaticMeshActor", "Tiered_Chest_6_Parent");
+    // - else part of a loaded actor class's name, the shortest that has it.
+    UClass* FindActorClass(std::wstring Query)
+    {
+        while (!Query.empty() && (Query.front() == L'"' || Query.front() == L'\''))
+        {
+            Query.erase(Query.begin());
+        }
+        while (!Query.empty() && (Query.back() == L'"' || Query.back() == L'\''))
+        {
+            Query.pop_back();
+        }
+        if (Query.empty())
+        {
+            return nullptr;
+        }
+
+        if (Query.front() == L'/')
+        {
+            std::vector<std::wstring> Paths;
+            const size_t Slash = Query.rfind(L'/');
+            if (Query.find(L'.', Slash) == std::wstring::npos)
+            {
+                const std::wstring AssetName = Query.substr(Slash + 1);
+                Paths = { Query + L"." + AssetName + L"_C", Query + L"." + AssetName };
+            }
+            else
+            {
+                Paths.push_back(Query);
+                if (!Lower(Query).ends_with(L"_c"))
+                {
+                    Paths.push_back(Query + L"_C");
+                }
+            }
+            for (const std::wstring& Path : Paths)
+            {
+                if (UClass* Class = FindObject<UClass>(nullptr, Path.c_str()))
+                {
+                    return Class;
+                }
+            }
+            for (const std::wstring& Path : Paths)
+            {
+                if (UClass* Class = LoadObject<UClass>(nullptr, Path.c_str(), nullptr, static_cast<uint32_t>(LOAD_NoWarn | LOAD_Quiet)))
+                {
+                    return Class;
+                }
+            }
+            return nullptr;
+        }
+
+        // A short name has no package: "Engine.StaticMeshActor" is StaticMeshActor.
+        const size_t Dot = Query.rfind(L'.');
+        const std::wstring Name = Dot == std::wstring::npos ? Query : Query.substr(Dot + 1);
+        if (Name.empty())
+        {
+            return nullptr;
+        }
+        for (const std::wstring& Candidate : { Name, Name + L"_C" })
+        {
+            if (UClass* Class = FindObject<UClass>(ANY_PACKAGE, Candidate.c_str()))
+            {
+                return Class;
+            }
+        }
+
+        const std::wstring Wanted = Simplified(Name);
+        UClass* Best = nullptr;
+        size_t BestLength = 0;
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            if (!Class->IsChildOf(AActor::StaticClass()))
+            {
+                continue;
+            }
+            const std::wstring ClassName = Class->GetName().ToStdString();
+            if (IsLeftoverClass(ClassName) || Simplified(ClassName).find(Wanted) == std::wstring::npos)
+            {
+                continue;
+            }
+            if (!Best || ClassName.size() < BestLength)
+            {
+                Best = Class;
+                BestLength = ClassName.size();
+            }
+        }
+        return Best;
+    }
+
     FString PlayerNameOf(const AController* Controller)
     {
         const APlayerState* PlayerState = Controller ? static_cast<APlayerState*>(Controller->PlayerState) : nullptr;
@@ -353,6 +479,7 @@ namespace
         { L"Player", L"BackpackSetSize", L"BackpackSetSize <slots>", L"your backpack size", ECheatMode::Both },
         { L"Player", L"BuildWith", L"BuildWith <Wood|Stone|Metal>", L"the building material", ECheatMode::Both },
         { L"World", L"Summon", L"Summon <class or /Game/.../X.X_C>", L"spawns an actor in front of you", ECheatMode::Both },
+        { L"World", nullptr, L"SpawnActor <class or path> [scale | x y z]", L"spawns an actor in front of you at a scale (\"spawnactor Tiered_Chest_6_Parent 3\"), loading its class if it must", ECheatMode::Both },
         { L"World", L"Slomo", L"Slomo <speed>", L"the game's speed, for everyone", ECheatMode::Both },
         { L"World", L"PlayersOnly", L"PlayersOnly", L"freezes everything but the players (toggles)", ECheatMode::Both },
         { L"World", L"DestroyTarget", L"DestroyTarget", L"destroys what you look at (DamageTarget <damage>, DestroyAll <class>)", ECheatMode::Both },
@@ -1203,6 +1330,139 @@ void UFortCheatManager::ListCoreCheats(const FString& Filter)
     }
 }
 
+void UFortCheatManager::SpawnActor(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // PongooDev/Core's SpawnActor, with a scale (#132). The scale goes on the spawn transform, so a blueprint's
+    // construction script builds the actor at that size, and on the root component after (SetActorScale3D). The actor's
+    // first bunch carries its scale to the clients (UPackageMapClient::SerializeNewActor, 1.7.2 0x223ABE0), so they spawn
+    // it at that size too.
+    constexpr float MinScale = 0.01f;
+    constexpr float MaxScale = 100.0f;
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const FString Usage = TEXT("Usage: spawnactor <class or path> [scale | x y z], a scale from 0.01 to 100 (\"spawnactor Tiered_Chest_6_Parent 3\", \"spawnactor Tiered_Chest_6_Parent 1 1 4\")");
+    if (Words.empty() || Words.size() == 3 || Words.size() > 4)
+    {
+        Reply(Usage);
+        return;
+    }
+    float Scale[3] = { 1.0f, 1.0f, 1.0f };
+    for (size_t Index = 1; Index < Words.size(); ++Index)
+    {
+        wchar_t* End = nullptr;
+        const float Value = std::wcstof(Words[Index].c_str(), &End);
+        if (!End || *End != L'\0' || !std::isfinite(Value) || Value < MinScale || Value > MaxScale)
+        {
+            Reply(Usage);
+            return;
+        }
+        Scale[Index - 1] = Value;
+    }
+    if (Words.size() == 2)
+    {
+        Scale[1] = Scale[0];
+        Scale[2] = Scale[0];
+    }
+    const FVector Scale3D(Scale[0], Scale[1], Scale[2]);
+    const FString ScaleText = Words.size() == 2 ? FString::Printf(TEXT("%g"), Scale[0]) : FString::Printf(TEXT("%g x %g x %g"), Scale[0], Scale[1], Scale[2]);
+
+    AFortPlayerController* PlayerController = GetPlayerController();
+    APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+    if (!Pawn)
+    {
+        Reply(TEXT("SpawnActor needs a pawn to spawn the actor in front of"));
+        return;
+    }
+    UClass* Class = FindActorClass(Words[0]);
+    if (!Class)
+    {
+        Reply(FString::Printf(TEXT("No class called '%s' (give its path, /Game/.../X.X_C, to load one that isn't yet)"), Words[0].c_str()));
+        return;
+    }
+    if (!Class->IsChildOf(AActor::StaticClass()))
+    {
+        Reply(FString::Printf(TEXT("%s isn't an actor class"), *Class->GetPathName()));
+        return;
+    }
+
+    // In front of the player, a pawn standing as they do and anything else on the ground at their feet, facing the way
+    // they face. A pawn moves up out of what it would stand in.
+    const bool bPawn = Class->IsChildOf(APawn::StaticClass());
+    FVector PawnOrigin;
+    FVector PawnExtent;
+    Pawn->GetActorBounds(true, PawnOrigin, PawnExtent);
+    FVector Location = InFrontOf(Pawn, 300.0f);
+    if (!bPawn && PawnExtent.Z > 0.0f)
+    {
+        Location.Z = PawnOrigin.Z - PawnExtent.Z;
+    }
+    const FQuat Rotation = FRotator(0.0f, Pawn->GetActorRotation().Yaw, 0.0f).Quaternion();
+    const ESpawnActorCollisionHandlingMethod Collision = bPawn ? ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn : ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    const auto Spawn = [&](const FVector& At) -> AActor*
+    {
+        FTransform SpawnTransform;
+        SpawnTransform.Rotation = Rotation;
+        SpawnTransform.Translation = At;
+        SpawnTransform.Scale3D = Scale3D;
+        AActor* Spawned = UGameplayStatics::BeginDeferredActorSpawnFromClass(Pawn, Class, SpawnTransform, Collision);
+        Spawned = Spawned ? UGameplayStatics::FinishSpawningActor(Spawned, SpawnTransform) : nullptr;
+        if (Spawned && Spawned->GetRootComponent())
+        {
+            Spawned->SetActorScale3D(Scale3D);
+        }
+        return Spawned;
+    };
+    AActor* Actor = Spawn(Location);
+    if (!Actor)
+    {
+        Reply(FString::Printf(TEXT("Couldn't spawn %s (an abstract class, or one that can't be spawned here)"), *Class->GetPathName()));
+        return;
+    }
+
+    const bool bScaled = Actor->GetRootComponent() != nullptr;
+    if (bScaled)
+    {
+        // Something bigger than the 300 units in front moves out until it clears the player. A root that can't move
+        // (static mobility) is spawned again there instead; nothing has replicated it yet.
+        FVector Origin;
+        FVector Extent;
+        Actor->GetActorBounds(false, Origin, Extent);
+        const float Radius = std::sqrt(Extent.X * Extent.X + Extent.Y * Extent.Y);
+        const float Distance = Radius + 150.0f;
+        if (Distance > 300.0f && Radius < 50000.0f)
+        {
+            const FVector Center = InFrontOf(Pawn, Distance);
+            const FVector ActorLocation = Actor->GetTransform().GetLocation();
+            const FVector Clear(Center.X - (Origin.X - ActorLocation.X), Center.Y - (Origin.Y - ActorLocation.Y), ActorLocation.Z);
+            if (!Actor->SetActorLocation(Clear, false, true))
+            {
+                if (AActor* Moved = Spawn(Clear))
+                {
+                    Actor->K2_DestroyActor();
+                    Actor = Moved;
+                }
+            }
+        }
+    }
+
+    // The clients only see an actor that replicates; most objects (a StaticMeshActor, a prop) don't by default.
+    const bool bReplicatedByDefault = Actor->bReplicates;
+    if (!bReplicatedByDefault)
+    {
+        Actor->SetReplicates(true);
+    }
+    const bool bReplicates = Actor->bReplicates;
+    Actor->ForceNetUpdate();
+
+    const FVector Actual = Actor->GetActorScale3D();
+    UE_LOG(LogFortCheats, Log, TEXT("SpawnActor: %s spawned %s (%s) at scale %g %g %g, replicates %d (by default %d)"), *GetNameSafe(PlayerController),
+        *Actor->GetName(), *Class->GetPathName(), Actual.X, Actual.Y, Actual.Z, bReplicates ? 1 : 0, bReplicatedByDefault ? 1 : 0);
+    Reply(FString::Printf(TEXT("Spawned %s (%s)%s%s"), *Actor->GetName(), *Class->GetPathName(),
+        bScaled ? *FString::Printf(TEXT(" at scale %s"), *ScaleText) : TEXT(", which has no root component to scale"),
+        !bReplicates ? TEXT("; it doesn't replicate, so only the server has it") : bReplicatedByDefault ? TEXT("") : TEXT("; Core made it replicate, as it didn't")));
+#endif
+}
+
 bool UFortCheatManager::SplitCheatTarget(const FString& Msg, FString& OutCommand, FString& OutTarget)
 {
     // "giveweapon Scar 0 1 /diddy/": a last "/Name/" (it may hold spaces, "/John Doe/") that starts the line or follows a
@@ -1232,25 +1492,7 @@ bool UFortCheatManager::ParseCheatMovement(const FString& Command, FString& OutC
 {
     // The speed is how fast the pawn runs while it flies, in cm/s; it walks and sprints faster by as much.
     constexpr float MaxSpeed = 100000.0f;
-    std::vector<std::wstring> Words;
-    const std::wstring Line = Command.ToStdString();
-    for (size_t Start = 0; Start < Line.size();)
-    {
-        while (Start < Line.size() && std::iswspace(Line[Start]))
-        {
-            ++Start;
-        }
-        size_t End = Start;
-        while (End < Line.size() && !std::iswspace(Line[End]))
-        {
-            ++End;
-        }
-        if (End > Start)
-        {
-            Words.emplace_back(Line.substr(Start, End - Start));
-        }
-        Start = End;
-    }
+    const std::vector<std::wstring> Words = SplitWords(Command.ToStdString());
     if (Words.empty())
     {
         return false;

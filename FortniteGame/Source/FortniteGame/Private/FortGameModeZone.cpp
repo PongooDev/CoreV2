@@ -40,9 +40,11 @@
 #include "UObject/UObjectIterator.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
@@ -552,11 +554,71 @@ AActor* AFortGameModeZone::PickInitialPlayerSpawnActorCall(AFortGameModeZone* Th
 
 AActor* AFortGameModeZone::PickBackupPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius)
 {
-    if (This && Candidates)
+    if (!This || !Candidates)
     {
-        This->GatherPlayerSpawnActors(Player, false, false, *Candidates);
+        return Natives::AFortGameMode_PickPlayerSpawnActor(This, Player, PawnClass, Candidates, DangerExclusionRadius, ObjectiveExclusionRadius);
     }
-    return Natives::AFortGameMode_PickPlayerSpawnActor(This, Player, PawnClass, Candidates, DangerExclusionRadius, ObjectiveExclusionRadius);
+    This->GatherPlayerSpawnActors(Player, false, false, *Candidates);
+
+    // The backup spots are every outside spot on the map and the native picks one at random, so a player whose pad
+    // and friendly spot were taken (a friend still standing where they spawned) could land anywhere, on the outpost
+    // outside the Storm Shield (#144). The pad and the friends are where the game wants them, so the backup spots are
+    // tried nearest to those first, each through the native's own checks; with neither, the random pick stays.
+    std::vector<FVector> Anchors;
+    AActor* SpawnPad = Member_ActiveSpawnPad.IsAvailable() ? static_cast<AActor*>(This->ActiveSpawnPad) : nullptr;
+    if (SpawnPad)
+    {
+        Anchors.push_back(SpawnPad->GetTransform().GetLocation());
+    }
+    if (Natives::AFortGameMode_GetFriendlyPlayerPawnsIndex >= 0)
+    {
+        TArray<AActor*> FriendlyPawns;
+        CallVirtual<void>(This, Natives::AFortGameMode_GetFriendlyPlayerPawnsIndex, Player, &FriendlyPawns);
+        for (AActor* Pawn : FriendlyPawns)
+        {
+            if (Pawn)
+            {
+                Anchors.push_back(Pawn->GetTransform().GetLocation());
+            }
+        }
+    }
+    if (Anchors.empty())
+    {
+        return Natives::AFortGameMode_PickPlayerSpawnActor(This, Player, PawnClass, Candidates, DangerExclusionRadius, ObjectiveExclusionRadius);
+    }
+
+    std::vector<std::pair<float, AActor*>> ByDistance;
+    for (AActor* Candidate : *Candidates)
+    {
+        if (!Candidate)
+        {
+            continue;
+        }
+        const FVector Location = Candidate->GetTransform().GetLocation();
+        float Nearest = FLT_MAX;
+        for (const FVector& Anchor : Anchors)
+        {
+            const float DX = Location.X - Anchor.X;
+            const float DY = Location.Y - Anchor.Y;
+            const float DZ = Location.Z - Anchor.Z;
+            Nearest = std::min(Nearest, DX * DX + DY * DY + DZ * DZ);
+        }
+        ByDistance.emplace_back(Nearest, Candidate);
+    }
+    std::sort(ByDistance.begin(), ByDistance.end(), [](const auto& A, const auto& B) { return A.first < B.first; });
+
+    TArray<AActor*> Single;
+    for (const auto& [DistanceSquared, Candidate] : ByDistance)
+    {
+        Single.Reset();
+        Single.Add(Candidate);
+        if (AActor* Picked = Natives::AFortGameMode_PickPlayerSpawnActor(This, Player, PawnClass, &Single, DangerExclusionRadius, ObjectiveExclusionRadius))
+        {
+            UE_LOG(LogFortPlacement, Log, TEXT("ChoosePlayerStart: backup spawn %s for %s, %.0f from the spawn pad or a friendly player"), *Picked->GetName(), Player ? *Player->GetName() : TEXT("None"), std::sqrt(DistanceSquared));
+            return Picked;
+        }
+    }
+    return nullptr;
 }
 
 namespace

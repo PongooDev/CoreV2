@@ -86,8 +86,9 @@ public:
     // The spots on the floor around DeathLocation that DropInventoryOnDeath tosses Count pickups to (DeadPawn is the
     // traces' world context and is ignored by them).
     static std::vector<FVector> GetInventoryDropSpots(AActor* DeadPawn, const FVector& DeathLocation, int32_t Count);
-    // Server: the controller of a player who just died stands over their body. Their client isn't told: it keeps the
-    // game's own death camera (#125).
+    // Server: the controller of a player who just died stands over their body, and a couple of frames later, once the
+    // game's own death handling is done, their client's does too (the minimap follows it, #139). The camera stays the
+    // game's death camera (#125).
     void PlaceAtDeathLocation(AFortPawn* DeadPawn);
 
     static void HookCallSites();

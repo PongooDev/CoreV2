@@ -21,8 +21,8 @@ Looking for the original Core? Core V1 is still available at [PongooDev/Core](ht
 
 | Status | Fortnite versions |
 | --- | --- |
-| Full support ✅ | 1.1 – 1.8.1 |
-| In development 🚧 | 1.8.2 |
+| Full support ✅ | 1.1 – 1.8.2 |
+| In development 🚧 | 1.9 |
 
 Core moves forward one build at a time and skips builds nobody has a copy of, so full support is always one range: every build from the first version to the last one listed.
 
@@ -36,7 +36,8 @@ Core moves forward one build at a time and skips builds nobody has a copy of, so
 | 1.7.2 | Release-Cert CL-3700114 | Full support ✅ |
 | 1.8 | Release-Live CL-3724489 | Full support ✅ |
 | 1.8.1 | Release-Cert CL-3729133 | Full support ✅ |
-| 1.8.2 | Release-Cert CL-3741772 | In development 🚧 |
+| 1.8.2 | Release-Cert CL-3741772 | Full support ✅ |
+| 1.9 | Release-Live CL-3757339 | In development 🚧 |
 
 </details>
 

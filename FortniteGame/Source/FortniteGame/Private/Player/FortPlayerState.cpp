@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Player/FortPlayerState.h"
+#include "Athena/FortPlayerStateAthena.h"
 #include "Heroes/FortHero.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
@@ -187,4 +188,21 @@ void AFortPlayerState::Hook()
 void AFortPlayerState::SetHeroTypeHK(AFortPlayerState* This, UFortHero* Hero)
 {
     This->SetHeroType(Hero);
+}
+
+AFortPlayerPawn* AFortPlayerState::GetCurrentPawn()
+{
+    UFunction* Function = FindStaticFunction_GetCurrentPawn();
+    Reflection::FParams Params(Function);
+    return Function && Params.Call(this) ? Params.Take<AFortPlayerPawn*>(L"ReturnValue") : nullptr;
+}
+
+void AFortPlayerStateAthena::ClientReportKill(const FString& KilledPlayersName)
+{
+    UFunction* Function = FindStaticFunction_ClientReportKill();
+    Reflection::FParams Params(Function);
+    if (Function && Params.Set(L"KilledPlayersName", KilledPlayersName))
+    {
+        Params.Call(this);
+    }
 }

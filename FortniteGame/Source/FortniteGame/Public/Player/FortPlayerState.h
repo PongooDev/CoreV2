@@ -4,6 +4,7 @@
 #include "GameFramework/PlayerState.h"
 #include "StructArray.h"
 
+class AFortPlayerPawn;
 class AFortTeamInfo;
 class UAbilitySystemComponent;
 class UFortHero;
@@ -99,6 +100,7 @@ public:
     DefineUProperty(FUniqueNetIdRepl, PartyOwnerUniqueId)
     DefineBitfieldUProperty(bHasStartedPlaying)
     DefineUFunction(OnRep_CharacterParts)
+    DefineUFunction(GetCurrentPawn)
 
     UCustomCharacterPart*& GetCharacterPart(EFortCustomPartType PartType)
     {
@@ -110,6 +112,8 @@ public:
     // Whether SetHeroType can run here (the server found the native).
     static bool CanSetHeroType() { return SetHeroTypeOG != nullptr; }
     void OnRep_CharacterParts();
+    // The player pawn whose player state this is (1.9: AFortPlayerState::GetCurrentPawn), or null.
+    AFortPlayerPawn* GetCurrentPawn();
     int32_t GetStat(EFortReplicatedStat StatType, bool bCampaign);
 
     // bIsFinalizingExperience is gone from 1.7.2, which finalizes through FFortExperienceDelta::IsFinalXpUpdate.

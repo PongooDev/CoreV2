@@ -22,4 +22,6 @@ public:
     // Set by AFortGameModeAthena's phase changes. After Warmup a dead player is out of the match: the pawn-death handler
     // (1.7.2 0x437C30) only takes a player out of the alive players from Aircraft on.
     DefineUProperty(EAthenaGamePhase, GamePhase)
+    DefineUProperty(int32_t, PlayersLeft)
+    DefineUProperty(int32_t, TeamsLeft)
 };

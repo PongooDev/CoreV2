@@ -14,12 +14,17 @@ struct FDeathInfo
     DefineUnrealStruct(FDeathInfo, FortniteGame)
     DefineUProperty(AFortPlayerStateAthena*, FinisherOrDowner)
     DefineUProperty(bool, bDBNO)
+    // EDeathCause (from 1.8): OutsideSafeZone, FallDamage, Pistol, ... Trap, DBNOTimeout, ..., Unspecified.
+    DefineUProperty(uint8_t, DeathCause)
 
 public:
     static bool IsReadable()
     {
         return Member_FinisherOrDowner.IsAvailable() && Member_bDBNO.IsAvailable();
     }
+
+    static ptrdiff_t DeathCauseOffset() { return Member_DeathCause.GetOffsetChecked(); }
+    static ptrdiff_t DBNOOffset() { return Member_bDBNO.GetOffsetChecked(); }
 };
 
 // Battle Royale's player state (from 1.7.2).
@@ -40,6 +45,15 @@ public:
     DefineUStructProperty(FDeathInfo, DeathInfo)
     // Set when the player is eliminated or wins.
     DefineUProperty(int32_t, SecondsAlive)
+    DefineUFunction(ClientReportKill)
+
+    // The kill feed line on the eliminator's client ("You eliminated <name>").
+    void ClientReportKill(const FString& KilledPlayersName);
+
+    static ptrdiff_t PlaceOffset() { return Member_Place.GetOffsetChecked(); }
+    static ptrdiff_t SecondsAliveOffset() { return Member_SecondsAlive.GetOffsetChecked(); }
+    static ptrdiff_t DeathInfoOffset() { return Member_DeathInfo.GetOffsetChecked(); }
+
     // Client only, not replicated: whether the player is talking in voice chat, which the HUD's team list shows (its
     // speaker icon). Only Vivox's participant updates set it (1.7.2 0x3C54D20); Core sets it from the engine's voice chat.
     DefineUProperty(bool, bIsTalking)

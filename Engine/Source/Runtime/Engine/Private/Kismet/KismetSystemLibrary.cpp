@@ -46,3 +46,24 @@ bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FV
     OutImpactPoint = *reinterpret_cast<const FVector*>(Hit.data() + ImpactPointProperty->GetOffset_ForInternal());
     return true;
 }
+
+bool UKismetSystemLibrary::K2_SetTimer(UObject* Object, const wchar_t* FunctionName, float Time, bool bLooping)
+{
+    UFunction* Function = FindStaticFunction_K2_SetTimer();
+    Reflection::FParams Params(Function, true);
+    if (!Function || !Object || !Params.Set(L"Object", Object) || !Params.Set(L"FunctionName", FString(FunctionName)) || !Params.Set(L"Time", Time) || !Params.Set(L"bLooping", bLooping))
+    {
+        return false;
+    }
+    return Params.Call(StaticClass()->GetDefaultObject());
+}
+
+void UKismetSystemLibrary::K2_ClearTimer(UObject* Object, const wchar_t* FunctionName)
+{
+    UFunction* Function = FindStaticFunction_K2_ClearTimer();
+    Reflection::FParams Params(Function, true);
+    if (Function && Object && Params.Set(L"Object", Object) && Params.Set(L"FunctionName", FString(FunctionName)))
+    {
+        Params.Call(StaticClass()->GetDefaultObject());
+    }
+}

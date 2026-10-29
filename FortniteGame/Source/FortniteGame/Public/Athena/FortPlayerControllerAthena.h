@@ -8,6 +8,8 @@
 #include <vector>
 
 class AActor;
+class AController;
+class APawn;
 class AFortPawn;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
@@ -63,6 +65,11 @@ public:
     // Client: the player's team. The HUD's team list takes their talking states in this order (GetTeamTalking, 1.7.2
     // 0x430440, and the controller's tick, 0x417630, which tells the HUD when they change).
     DefineUProperty(TArray<AFortPlayerStateAthena*>, TeamMembers)
+    // Server: the player is in the game mode's AlivePlayers (AddToAlivePlayers sets it, RemoveFromAlivePlayers clears it).
+    DefineUProperty(bool, bMarkedAlive)
+    // Server: who SpectateOnDeath watches first after a death, the eliminator's pawn.
+    DefineUProperty(APawn*, PlayerToSpectateOnDeath)
+    DefineUFunction(SpectateOnDeath)
 
     // Whether the controller plays Battle Royale heroes only: 1.7.2's DefaultHeroes, or 1.8's loadout's.
     bool PlaysBattleRoyaleHeroes();
@@ -92,7 +99,15 @@ public:
     void PlaceAtDeathLocation(AFortPawn* DeadPawn);
 
     static void HookCallSites();
+    // Restores the pawn-death handler (OnPawnDied) where the build strips it (1.9.1).
+    static void HookVTables();
+    static ptrdiff_t TeamMembersOffset() { return Member_TeamMembers.GetOffsetChecked(); }
 
 private:
     static void PawnDiedInventoryDropCall(AFortPlayerController* Controller, void* Unused, const FGameplayTagContainer* DamageTags, AFortPawn* DeadPawn, bool* bOutDroppedBackpack);
+
+    // FortPlayerControllerAthenaDeath.cpp: 1.9's AFortPlayerControllerAthena::OnPawnDied (0x42DB20), which 1.9.1 strips.
+    void OnPawnDied(float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer);
+    bool IsTeamOut();
+    static void OnPawnDiedHK(AFortPlayerControllerAthena* This, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer);
 };

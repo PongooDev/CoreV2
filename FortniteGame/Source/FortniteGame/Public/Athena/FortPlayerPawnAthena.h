@@ -21,6 +21,8 @@ public:
     DefineUStructProperty(FFortAthenaLoadout, CustomizationLoadout)
     // How many teammates are reviving the pawn (AFortPlayerControllerAthena::ServerDBNOReviveStarted and Interrupted).
     DefineUProperty(uint8_t, DBNORevivalStacking)
+    // The pawn the death camera turns to (the eliminator's), set by the controller's pawn-death handler.
+    DefineUProperty(APawn*, KillerForSpectatorRotation)
 
     bool HasCustomizationLoadout() { return Member_CustomizationLoadout.IsAvailable(); }
 

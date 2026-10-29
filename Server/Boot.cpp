@@ -188,6 +188,7 @@ void Boot::Initialize()
         {
             Finder::ResolveLootTierRedirectLive();
             AFortPlayerControllerAthena::HookCallSites();
+            AFortPlayerControllerAthena::HookVTables();
             AFortPlayerPawnAthena::HookNatives();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();

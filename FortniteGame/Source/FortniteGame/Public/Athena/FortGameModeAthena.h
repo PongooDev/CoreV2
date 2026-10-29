@@ -20,6 +20,9 @@ public:
     DefineUProperty(AFortSafeZoneIndicator*, SafeZoneIndicator)
     // Each safe zone's center, picked when the storm starts (index: the phase).
     DefineUProperty(TArray<FVector>, SafeZoneLocations)
+    DefineUProperty(bool, bSquadPlay)
+    // Whether a dead player goes on to spectate (SpectateOnDeath).
+    DefineUProperty(bool, bAllowSpectateAfterDeath)
 
     // Where a Battle Royale server starts: the Battle Royale zone theme's map and playlist
     // ("/Game/Athena/Maps/Athena_Terrain?playlistId=2" on 1.7.2), or empty when the build has none.

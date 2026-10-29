@@ -33,6 +33,10 @@ struct FFortMissionManagerRecord;
 class AFortGameModeZone;
 class AFortLobbyBeaconHost;
 class AFortPlayerController;
+class AFortPlayerControllerAthena;
+class AFortPlayerStateAthena;
+class AFortGameModeAthena;
+class APlayerState;
 class AFortPlayerState;
 class UFortItemDefinition;
 class UFortSchematicItem;
@@ -433,6 +437,18 @@ namespace Natives
     inline void* (*UStatManager_FindStat)(UObject* This, FName StatName, uint8_t Type) = nullptr;
     inline void (*FStat_Increment)(void* Stat, int32_t Amount, int32_t Flags) = nullptr;
     inline int32_t AFortPlayerControllerAthena_ServerDBNOReviveInterruptedIndex = -1;
+    // What 1.9's AFortPlayerControllerAthena pawn-death handler (OnPawnDied, 0x42DB20) calls, for the builds that strip
+    // it to a jump to AFortPlayerControllerZone's (1.9.1): Finder::StrippedAthenaPawnDiedIndex and
+    // Finder::ResolveAthenaPawnDiedLive. The outlived count's pieces are 1.9.1's own (its wins').
+    inline void (*AFortPlayerControllerZone_OnPawnDied)(AFortPlayerControllerAthena* This, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer) = nullptr;
+    inline void (*AFortGameModeAthena_RemoveFromAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState) = nullptr;
+    inline void (*AFortPlayerControllerAthena_SetTeamPlace)(AFortPlayerControllerAthena* This, int32_t Place) = nullptr;
+    inline int32_t (*AFortPlayerStateAthena_GetSecondsAlive)(AFortPlayerStateAthena* This) = nullptr;
+    inline uint8_t (*AFortPlayerPawn_GetDeathCause)(AFortPawn* This, const FGameplayTagContainer& DamageTags, bool bWasDBNO) = nullptr;
+    inline int32_t AFortPlayerControllerAthena_UpdateTeamMembersIndex = -1;
+    inline int32_t (*AFortPlayerControllerAthena_CountTeammatesOut)(AFortPlayerControllerAthena* This) = nullptr;
+    inline ptrdiff_t AFortGameStateAthena_StartingPlayers = -1;
+    inline ptrdiff_t AFortPlayerStateAthena_PlayersOutlived = -1;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
     inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;

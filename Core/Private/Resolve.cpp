@@ -8097,3 +8097,251 @@ bool Finder::ResolvePickupCanInteractLive(ptrdiff_t PickedUpOffset)
     Log::Info(L"Finder: IFortInteractInterface::CanInteract is slot {} (AFortPickup's interface at +0x{:X})", CanInteractIndex, Interface - reinterpret_cast<uint8_t*>(PickupDefault));
     return true;
 }
+
+namespace
+{
+    // "Opcode ModRM disp32" at Site, addressing [base + disp32] (ModRM mod 10, no SIB byte), with ModRM's reg field Reg
+    // (any when Reg < 0) and the displacement Displacement (any when it is < 0).
+    bool IsDisp32Access(uintptr_t Site, uint8_t Opcode, int32_t Reg, ptrdiff_t Displacement)
+    {
+        const uint8_t ModRm = Byte(Site + 1);
+        return Byte(Site) == Opcode && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && (Reg < 0 || ((ModRm >> 3) & 0x07) == Reg)
+            && (Displacement < 0 || *reinterpret_cast<const int32_t*>(Site + 2) == Displacement);
+    }
+
+    // The same, or its form with a base that needs a SIB byte (rsp, r12: "41 89 84 24 disp32" is mov [r12 + disp32], eax).
+    bool IsDisp32AccessAnyBase(uintptr_t Site, uint8_t Opcode, int32_t Reg, ptrdiff_t Displacement)
+    {
+        const uint8_t ModRm = Byte(Site + 1);
+        const bool bSib = Byte(Site) == Opcode && (ModRm & 0xC7) == 0x84 && Byte(Site + 2) == 0x24 && (Reg < 0 || ((ModRm >> 3) & 0x07) == Reg)
+            && (Displacement < 0 || *reinterpret_cast<const int32_t*>(Site + 3) == Displacement);
+        return bSib || IsDisp32Access(Site, Opcode, Reg, Displacement);
+    }
+
+    const wchar_t* const RemoveFromAlivePlayersLog = L"FortGameModeAthena: RemoveFromAlivePlayers called for Player [%s] who wasn't in the AlivePlayers list.";
+}
+
+int32_t Finder::StrippedAthenaPawnDiedIndex()
+{
+    static bool bSearched = false;
+    static int32_t StrippedIndex = -1;
+    if (bSearched)
+    {
+        return StrippedIndex;
+    }
+    bSearched = true;
+
+    // AFortPlayerControllerAthena's pawn-death handler overrides AFortPlayerControllerZone's (the only code reading the
+    // "Deaths" stat name; 1.9 slot 0x305, 1.9.1 0x308) and calls it first. 1.9's (0x42DB20) then sets the death report
+    // (DeathInfo), the time alive and the team's place, and takes the player out of the match with
+    // AFortGameModeAthena::RemoveFromAlivePlayers. 1.9.1 (CL-3775276) strips all of it: its slot (0x42DA80) is
+    // "jmp 0x895F90", Zone's handler, so RemoveFromAlivePlayers is left with one caller, Logout (0x42A7A0), and nobody
+    // who dies is out of the match. 1.8.2 (slot 0x2FF, 0x42C460) and 1.9 keep their bodies.
+    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerZone");
+    void** AthenaVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerAthena");
+    if (!ZoneVTable || !AthenaVTable)
+    {
+        return -1;
+    }
+    uintptr_t Zone = 0;
+    int32_t Index = -1;
+    for (const uintptr_t Ref : Finder::StringRefs(L"Deaths"))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        Index = FirstVTableIndex(ZoneVTable, Function);
+        if (Index >= 0)
+        {
+            Zone = Function;
+            break;
+        }
+    }
+    const uintptr_t Athena = VTableEntry(AthenaVTable, Index);
+    if (!Zone || !Athena)
+    {
+        Log::Error(L"Finder: AFortPlayerControllerAthena's pawn-death handler not found (AFortPlayerControllerZone's 0x{:X}, slot {})", Zone ? Zone - Finder::ImageBase() : 0, Index);
+        return -1;
+    }
+
+    // Stripped: the slot holds Zone's handler, a stub or a jump to Zone's, none of which calls RemoveFromAlivePlayers.
+    const bool bJumpsToZone = Byte(Athena) == 0xE9 && Finder::RelativeTarget(Athena, 1, 5) == Zone;
+    const bool bStripped = Athena == Zone || bJumpsToZone || Finder::IsStubFunction(Athena);
+    if (!bStripped)
+    {
+        const uintptr_t Remove = FunctionOf(RemoveFromAlivePlayersLog);
+        const uintptr_t AthenaEnd = Remove && Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
+        bool bCallsRemove = false;
+        for (const auto& [Site, Target] : AthenaEnd > Athena ? Finder::DirectCalls(Athena, AthenaEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            bCallsRemove = bCallsRemove || Target == Remove;
+        }
+        Log::Info(L"Finder: AFortPlayerControllerAthena's pawn-death handler is the build's own (slot 0x{:X}, 0x{:X}{})", Index, Athena - Finder::ImageBase(), bCallsRemove ? L", calls RemoveFromAlivePlayers" : L"");
+        return -1;
+    }
+
+    Natives::AFortPlayerControllerZone_OnPawnDied = reinterpret_cast<decltype(Natives::AFortPlayerControllerZone_OnPawnDied)>(Zone);
+    StrippedIndex = Index;
+    Log::Info(L"Finder: AFortPlayerControllerAthena's pawn-death handler is stripped: slot 0x{:X} holds 0x{:X} ({}AFortPlayerControllerZone's 0x{:X}), which never calls RemoveFromAlivePlayers",
+        Index, Athena - Finder::ImageBase(), bJumpsToZone ? L"a jump to " : Athena == Zone ? L"" : L"a stub, not ", Zone - Finder::ImageBase());
+    return StrippedIndex;
+}
+
+bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsAliveOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t DeathInfoDBNOOffset, ptrdiff_t TeamMembersOffset)
+{
+    static bool bSearched = false;
+    static bool bResolved = false;
+    if (bSearched)
+    {
+        return bResolved;
+    }
+    bSearched = true;
+
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+    const auto CallsOf = [](uintptr_t Function)
+    {
+        const uintptr_t End = Function && Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : 0;
+        return End > Function ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    };
+
+    // AFortGameModeAthena::RemoveFromAlivePlayers (1.9.1 0x4325C0, 1.9 0x433200) logs this, and its last call is the solo
+    // win (1.9.1 0x438B50, after "is the last player alive.  Starting end game.").
+    const uintptr_t Remove = FunctionOf(RemoveFromAlivePlayersLog);
+    const std::vector<std::pair<uintptr_t, uintptr_t>> RemoveCalls = CallsOf(Remove);
+    const uintptr_t SoloWin = RemoveCalls.empty() ? 0 : RemoveCalls.back().second;
+    const uintptr_t SoloWinEnd = SoloWin && Finder::FunctionStart(SoloWin) == SoloWin ? Finder::FunctionEnd(SoloWin) : 0;
+
+    // The team's place setter (1.9.1 0x435C20, 1.9 0x436600): the win's "mov edx, 1" call (place 1 for the winners). It
+    // sets Place on each of TeamMembers and on the controller's player state through the player state's setter (1.9.1
+    // 0x47AAD0: "mov [rcx + Place], edx").
+    const auto WritesPlace = [PlaceOffset](uintptr_t Function)
+    {
+        for (uintptr_t Site = Function; Site < Function + 0x20; ++Site)
+        {
+            if (IsDisp32Access(Site, 0x89, -1, PlaceOffset))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    uintptr_t SetTeamPlace = 0;
+    for (uintptr_t Site = SoloWinEnd ? FindInstruction(SoloWin, SoloWinEnd, { 0xBA, 0x01, 0x00, 0x00, 0x00 }) : 0; Site && !SetTeamPlace; Site = FindInstruction(Site + 1, SoloWinEnd, { 0xBA, 0x01, 0x00, 0x00, 0x00 }))
+    {
+        const uintptr_t Call = FindRawCall(Site + 5, std::min(SoloWinEnd, Site + 0x10));
+        const uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+        for (const auto& [CalleeSite, Callee] : CallsOf(Target))
+        {
+            if (WritesPlace(Callee))
+            {
+                SetTeamPlace = Target;
+                break;
+            }
+        }
+    }
+
+    // The time alive (1.9.1 0x4634D0, 1.9 0x464250): the win stores what it returns in SecondsAlive. 1.9.1 then counts
+    // what the winner outlived (the native +0xE10, which the player state's constructor sets to -1): the match's starting
+    // player count (the game state's +0x13D8, copied from PlayersLeft as the aircraft starts) less the winner's teammates
+    // who are out (0x424C40: the team's size at the start, +0xE14, less those still standing, less 1) and 1:
+    // "call 0x424C40; mov ecx, [rbx + 13D8h]; sub ecx, eax; dec ecx; mov [rsi + 0E10h], ecx". 1.9 counts no teammates.
+    uintptr_t SecondsAliveStore = 0;
+    for (uintptr_t Site = SoloWin; SoloWinEnd && Site + 6 <= SoloWinEnd && !SecondsAliveStore; ++Site)
+    {
+        SecondsAliveStore = IsDisp32Access(Site, 0x89, 0, SecondsAliveOffset) ? Site : 0;
+    }
+    uintptr_t GetSecondsAlive = 0;
+    for (uintptr_t Call = SecondsAliveStore ? FindRawCall(SecondsAliveStore - 0x10, SecondsAliveStore) : 0; Call; Call = FindRawCall(Call + 1, SecondsAliveStore))
+    {
+        GetSecondsAlive = Finder::RelativeTarget(Call, 1, 5);
+    }
+    const uintptr_t CountCall = SecondsAliveStore ? FindRawCall(SecondsAliveStore + 6, SecondsAliveStore + 0xC) : 0;
+    uintptr_t StartingPlayersLoad = 0;
+    for (uintptr_t Site = CountCall ? CountCall + 5 : 0; Site && Site < CountCall + 0xC && !StartingPlayersLoad; ++Site)
+    {
+        StartingPlayersLoad = IsDisp32Access(Site, 0x8B, -1, -1) ? Site : 0;
+    }
+    uintptr_t OutlivedStore = 0;
+    for (uintptr_t Site = StartingPlayersLoad ? StartingPlayersLoad + 6 : 0; Site && Site < StartingPlayersLoad + 0x14 && !OutlivedStore; ++Site)
+    {
+        OutlivedStore = IsDisp32Access(Site, 0x89, -1, -1) ? Site : 0;
+    }
+
+    // The death cause (1.9.1 0x43AE20, on the pawn): 1.9 matched the damage tags in the handler itself, 1.9.1 has a
+    // function for it, which its DBNO handling (AFortPlayerPawnAthena's 0x438640) calls with the damage tags and false,
+    // then stores with bDBNO: "call 0x43AE20; mov [rbp + DeathInfo.DeathCause], al; mov byte ptr [rbp + DeathInfo.bDBNO],
+    // 1". It returns FallDamage or OutsideSafeZone (DBNOTimeout for those when the pawn was DBNO), DBNOTimeout for a
+    // bleed-out, the weapon's or the trap's cause, else Unspecified.
+    void** PawnVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena");
+    uintptr_t GetDeathCause = 0;
+    FirstVTableIndexWhere(PawnVTable, [&](uintptr_t Entry)
+    {
+        const uintptr_t End = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        for (uintptr_t Site = Entry; End && Site + 0x18 <= End; ++Site)
+        {
+            if (Byte(Site) != 0xE8 || !IsInText(Finder::RelativeTarget(Site, 1, 5)))
+            {
+                continue;
+            }
+            const uintptr_t Store = IsDisp32Access(Site + 5, 0x88, 0, DeathCauseOffset) ? Site + 5 : IsDisp32Access(Site + 6, 0x88, 0, DeathCauseOffset) ? Site + 6 : 0;
+            if (Store && (IsDisp32Access(Store + 6, 0xC6, 0, DeathInfoDBNOOffset) || IsDisp32Access(Store + 7, 0xC6, 0, DeathInfoDBNOOffset)))
+            {
+                GetDeathCause = Finder::RelativeTarget(Site, 1, 5);
+                return true;
+            }
+        }
+        return false;
+    });
+
+    // The controller's TeamMembers fill (1.9.1 slot 0x331, 0x41F270; 1.9 0x32E), which the handler calls first in squads:
+    // when TeamMembers is empty ("cmp dword ptr [rcx + TeamMembers.Num], 0"), it adds the game state's player states and
+    // the game mode's inactive ones that are on the controller's team.
+    void** AthenaVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerAthena");
+    const ptrdiff_t TeamMembersNumOffset = TeamMembersOffset + 8;
+    const int32_t UpdateTeamMembersIndex = TeamMembersOffset > 0 ? FirstVTableIndexWhere(AthenaVTable, [TeamMembersNumOffset](uintptr_t Entry)
+    {
+        bool bChecksEmpty = false;
+        for (uintptr_t Site = Entry; Site < Entry + 0x20 && !bChecksEmpty; ++Site)
+        {
+            bChecksEmpty = IsDisp32Access(Site, 0x83, 7, TeamMembersNumOffset) && Byte(Site + 6) == 0;
+        }
+        const uintptr_t End = bChecksEmpty && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        for (uintptr_t Site = Entry; End && Site + 6 <= End; ++Site)
+        {
+            if (IsDisp32AccessAnyBase(Site, 0x89, -1, TeamMembersNumOffset))
+            {
+                return true;
+            }
+        }
+        return false;
+    }) : -1;
+
+    if (!Remove || !SetTeamPlace || !GetSecondsAlive)
+    {
+        Log::Error(L"Finder: the pawn-death handler's pieces not found (RemoveFromAlivePlayers 0x{:X}, solo win 0x{:X}, team place 0x{:X}, seconds alive 0x{:X})",
+            Rva(Remove), Rva(SoloWin), Rva(SetTeamPlace), Rva(GetSecondsAlive));
+        return false;
+    }
+
+    Natives::AFortGameModeAthena_RemoveFromAlivePlayers = reinterpret_cast<decltype(Natives::AFortGameModeAthena_RemoveFromAlivePlayers)>(Remove);
+    Natives::AFortPlayerControllerAthena_SetTeamPlace = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_SetTeamPlace)>(SetTeamPlace);
+    Natives::AFortPlayerStateAthena_GetSecondsAlive = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_GetSecondsAlive)>(GetSecondsAlive);
+    Natives::AFortPlayerPawn_GetDeathCause = reinterpret_cast<decltype(Natives::AFortPlayerPawn_GetDeathCause)>(GetDeathCause);
+    Natives::AFortPlayerControllerAthena_UpdateTeamMembersIndex = UpdateTeamMembersIndex;
+    if (OutlivedStore)
+    {
+        Natives::AFortPlayerControllerAthena_CountTeammatesOut = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_CountTeammatesOut)>(Finder::RelativeTarget(CountCall, 1, 5));
+        Natives::AFortGameStateAthena_StartingPlayers = *reinterpret_cast<const int32_t*>(StartingPlayersLoad + 2);
+        Natives::AFortPlayerStateAthena_PlayersOutlived = *reinterpret_cast<const int32_t*>(OutlivedStore + 2);
+    }
+    bResolved = true;
+
+    Log::Info(L"Finder: pawn-death handler: RemoveFromAlivePlayers 0x{:X}, team place 0x{:X} (solo win 0x{:X}), seconds alive 0x{:X}, death cause 0x{:X}, TeamMembers fill slot 0x{:X}",
+        Rva(Remove), Rva(SetTeamPlace), Rva(SoloWin), Rva(GetSecondsAlive), Rva(GetDeathCause), UpdateTeamMembersIndex);
+    Log::Info(L"Finder: pawn-death handler: teammates out 0x{:X}, starting players +0x{:X}, players outlived +0x{:X}",
+        Rva(reinterpret_cast<uintptr_t>(Natives::AFortPlayerControllerAthena_CountTeammatesOut)), Natives::AFortGameStateAthena_StartingPlayers, Natives::AFortPlayerStateAthena_PlayersOutlived);
+    if (!GetDeathCause || UpdateTeamMembersIndex < 0 || !OutlivedStore)
+    {
+        Log::Warning(L"Finder: pawn-death handler: {}{}{}not found, the restored handler goes without",
+            GetDeathCause ? L"" : L"the death cause, ", UpdateTeamMembersIndex >= 0 ? L"" : L"the TeamMembers fill, ", OutlivedStore ? L"" : L"the outlived count, ");
+    }
+    return true;
+}

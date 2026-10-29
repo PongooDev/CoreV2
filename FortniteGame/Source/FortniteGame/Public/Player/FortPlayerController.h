@@ -80,6 +80,7 @@ public:
     DefineUFunction(ServerCheat)
     DefineUFunction(ServerReturnToMainMenu)
     DefineUFunction(ServerSetPartyOwner)
+    DefineUFunction(ClientFinishedInteractionInZone)
     DefineUFunction(OnRep_CheatMovement)
     DefineUFunction(ServerCreateBuildingActor)
     DefineUFunction(ServerEditBuildingActor)

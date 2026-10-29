@@ -7980,7 +7980,7 @@ bool Finder::OnlyLoadsEmoteAnimation(uintptr_t Implementation, ptrdiff_t Animati
     // from rcx before the tail jump, so nothing after the load can reach it. 1.8.2 (0x84F000) keeps the controller and
     // calls the play body (0x82CD40) after the load.
     return AnimationOffset > 0 && IsInText(Implementation)
-        && FindInstruction(Implementation, Implementation + 1, { 0x48, 0x85, 0xD2, 0x74, -1, 0x48, 0x8D, 0x8A, -1, -1, -1, -1, 0xB2, 0x01, 0xE9 }) == Implementation
+        && FindInstruction(Implementation, Implementation + 15, { 0x48, 0x85, 0xD2, 0x74, -1, 0x48, 0x8D, 0x8A, -1, -1, -1, -1, 0xB2, 0x01, 0xE9 }) == Implementation
         && *reinterpret_cast<const int32_t*>(Implementation + 8) == AnimationOffset;
 }
 

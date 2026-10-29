@@ -48,22 +48,27 @@ void ABuildingTrap::LetEnemiesUse()
     // Trap_Floor_Player_Jump_Pad and Trap_Floor_Player_Jump_Free_Direction_Pad, which only trigger for their team
     // (TriggerFilter bExcludePawnEnemies), and whose ability (GA_Trap_FloorJumpPad, GA_Trap_FloorJumpPadDirectional) only
     // launches its team (its effect container's TargetFilter). Friendly means on the trap's team (FFortTargetFilter), so
-    // on the placer's team only that team could use them (#87). Battle Royale's own Launch Pad (TID_Floor_Player_Launch_Pad_Athena, 1.8.1 on, not yet in the loot
-    // list) shows the intent: its blueprint's TriggerFilter leaves no team out, and AFortLauncherAthena's trigger slot
-    // (1.8.2 0x43C650) launches every player pawn it finds, without any ability. Both filters here leave enemies in too;
-    // the trap keeps its placer's team, so its own team is still friendly.
+    // on the placer's team only that team could use them (#87). Battle Royale's own Launch Pad (TID_Floor_Player_Launch_Pad_Athena,
+    // 1.8.1 on, in the loot list from 1.9: AthenaTraps weight 0.5, 0 in 1.8.2) shows the intent. Its blueprint's
+    // TriggerFilter leaves no team out (ABuildingTrap's constructor, 1.9 0x487A50, excludes only friends, and the blueprint
+    // turns that off), and AFortLauncherAthena's trigger slot (1.8.2 0x43C650 slot 0x1B8, 1.9 0x43C290 slot 0x1B9) launches
+    // every player pawn it finds that isn't down, without any ability. That's also why it never runs out: its ability set
+    // (GAS_Trap_FloorJumpPad) is granted but never activated, so GE_TrapCost is never applied. Both filters here leave enemies in too;
+    // the trap keeps its placer's team, so its own team is still friendly. A trap whose trigger already lets enemies in
+    // is left as it is: that's the Launch Pad, and opening its ability set would only change the jump pads' shared class default.
     FFortTargetFilter& Filter = TriggerFilter;
     if (Filter.bExcludePawnFriends)
     {
         return;
     }
-
-    int32_t Changed = 0;
-    if (Filter.bExcludePawnEnemies)
+    if (!Filter.bExcludePawnEnemies)
     {
-        Filter.bExcludePawnEnemies = false;
-        ++Changed;
+        UE_LOG(LogFortTrap, Log, TEXT("%s already lets everyone use it (team %d)"), *GetName(), static_cast<uint8_t>(Team));
+        return;
     }
+
+    Filter.bExcludePawnEnemies = false;
+    int32_t Changed = 1;
 
     // The ability's class default, for the instance granted from it later, and the instances granted already: an
     // InstancedPerActor ability (GA_TrapGeneric) is copied from its class default when the trap's AbilitySet is granted.

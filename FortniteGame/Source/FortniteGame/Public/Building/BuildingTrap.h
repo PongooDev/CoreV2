@@ -24,7 +24,8 @@ public:
 
 private:
     void TakePlacerTeam(AFortPlayerController* Placer);
-    // A trap set off by its own team (a jump or launch pad) helps whoever steps on it in Battle Royale, enemies included.
+    // A trap set off by its own team (a jump pad) helps whoever steps on it in Battle Royale, enemies included. The launch
+    // pad's trigger lets everyone in already.
     void LetEnemiesUse();
 
     static void DecoSpawnedHK(AFortPlayerController* Placer, ABuildingSMActor* Spawned, void* Arg);

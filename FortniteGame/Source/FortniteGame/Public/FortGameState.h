@@ -55,5 +55,8 @@ public:
     // The zone's structure count and limit (-1: none). Building is refused once the count reaches the limit
     // (AFortPlayerController::CanPlaceBuildableClassInStructuralGrid, 1.8 0x816430); traps never ask.
     bool GetPlayerStructures(int32_t& OutTotal, int32_t& OutMax) const;
+    // Sets the limit (MaxPlayerStructures, replicated: the HUD's "structures left" follows), as the game's own
+    // AFortGameModeOutpost::ApplyStructureLimit does (1.8 0x57C440, a plain store). False without the property.
+    bool SetMaxPlayerStructures(int32_t NewMax);
     void SetGameplayState(EFortGameplayState NewGameplayState);
 };

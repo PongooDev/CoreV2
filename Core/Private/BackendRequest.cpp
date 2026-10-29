@@ -23,6 +23,8 @@ namespace
         std::string Body;
         std::wstring ClientId;
         std::wstring Secret;
+        // Set for a GET, which answers through it; a POST's answer is only logged.
+        std::function<void(uint32_t Status, const std::string& Body)> OnAnswer;
     };
 
     struct FResponse
@@ -78,30 +80,7 @@ namespace
         return Result;
     }
 
-    // The value of a top-level "Name": "..." or "Name": number in a JSON object, as text (the token answer only).
-    std::string JsonField(const std::string& Json, const std::string& Name)
-    {
-        const size_t Key = Json.find("\"" + Name + "\"");
-        size_t Start = Key == std::string::npos ? std::string::npos : Json.find(':', Key);
-        if (Start == std::string::npos)
-        {
-            return {};
-        }
-        Start = Json.find_first_not_of(" \t\r\n", Start + 1);
-        if (Start == std::string::npos)
-        {
-            return {};
-        }
-        if (Json[Start] == '"')
-        {
-            const size_t End = Json.find('"', Start + 1);
-            return End == std::string::npos ? std::string() : Json.substr(Start + 1, End - Start - 1);
-        }
-        const size_t End = Json.find_first_of(",} \t\r\n", Start);
-        return Json.substr(Start, End == std::string::npos ? std::string::npos : End - Start);
-    }
-
-    FResponse Post(const std::wstring& Path, const std::wstring& Headers, const std::string& Body)
+    FResponse Exchange(const wchar_t* Verb, const std::wstring& Path, const std::wstring& Headers, const std::string& Body)
     {
         FResponse Response;
         const std::wstring Url = Configuration::Get().Backend + Path;
@@ -133,7 +112,7 @@ namespace
         HINTERNET Connection = Session ? WinHttpConnect(Session, Host, Parts.nPort, 0) : nullptr;
         const bool bSecure = Parts.nScheme == INTERNET_SCHEME_HTTPS;
         const std::wstring Target = std::wstring(UrlPath) + Extra;
-        HINTERNET Request = Connection ? WinHttpOpenRequest(Connection, L"POST", Target.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, bSecure ? WINHTTP_FLAG_SECURE : 0) : nullptr;
+        HINTERNET Request = Connection ? WinHttpOpenRequest(Connection, Verb, Target.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, bSecure ? WINHTTP_FLAG_SECURE : 0) : nullptr;
         if (Request && bSecure)
         {
             // The backend's own certificate is self-signed.
@@ -186,15 +165,15 @@ namespace
 
         Token.clear();
         const std::wstring Headers = L"Content-Type: application/x-www-form-urlencoded\r\nAuthorization: basic " + Widen(Base64(Narrow(Request.ClientId + L":" + Request.Secret)));
-        const FResponse Response = Post(L"/account/api/oauth/token", Headers, "grant_type=client_credentials");
-        Token = Response.Status == 200 ? JsonField(Response.Body, "access_token") : std::string();
+        const FResponse Response = Exchange(L"POST", L"/account/api/oauth/token", Headers, "grant_type=client_credentials");
+        Token = Response.Status == 200 ? BackendRequest::JsonField(Response.Body, "access_token") : std::string();
         if (Token.empty())
         {
             Log::Warning(L"Backend: no token for client {} (HTTP {})", Request.ClientId, Response.Status);
             return false;
         }
         // A minute early, so it never runs out on the way.
-        const int32_t ExpiresIn = std::atoi(JsonField(Response.Body, "expires_in").c_str());
+        const int32_t ExpiresIn = std::atoi(BackendRequest::JsonField(Response.Body, "expires_in").c_str());
         TokenClient = Request.ClientId;
         TokenExpires = std::chrono::steady_clock::now() + std::chrono::seconds(std::max(ExpiresIn - 60, 0));
         return true;
@@ -208,13 +187,23 @@ namespace
             {
                 break;
             }
-            const std::wstring Headers = L"Content-Type: application/json\r\nAuthorization: bearer " + Widen(Token);
-            const FResponse Response = Post(Request.Path, Headers, Request.Body);
+            const bool bGet = static_cast<bool>(Request.OnAnswer);
+            const std::wstring Headers = std::wstring(bGet ? L"Accept: application/json" : L"Content-Type: application/json") + L"\r\nAuthorization: bearer " + Widen(Token);
+            const FResponse Response = Exchange(bGet ? L"GET" : L"POST", Request.Path, Headers, Request.Body);
             if (Response.Status == 401)
             {
                 // The backend restarted with its tokens gone, or revoked this one: once more with a new one.
                 Token.clear();
                 continue;
+            }
+            if (bGet)
+            {
+                if (Response.Status != 200)
+                {
+                    Log::Warning(L"Backend: {} failed (HTTP {}): {}", Request.What, Response.Status, Widen(Response.Body.substr(0, 300)));
+                }
+                Request.OnAnswer(Response.Status, Response.Body);
+                return;
             }
             if (Response.Status >= 200 && Response.Status < 300)
             {
@@ -227,6 +216,10 @@ namespace
             return;
         }
         Log::Warning(L"Backend: {} not sent", Request.What);
+        if (Request.OnAnswer)
+        {
+            Request.OnAnswer(0, std::string());
+        }
     }
 
     void Work()
@@ -243,18 +236,51 @@ namespace
             Send(Request);
         }
     }
+
+    void Enqueue(FRequest Request)
+    {
+        {
+            std::scoped_lock Lock(QueueMutex);
+            Queue.push_back(std::move(Request));
+            if (!bWorkerStarted)
+            {
+                bWorkerStarted = true;
+                std::thread(Work).detach();
+            }
+        }
+        QueueReady.notify_one();
+    }
 }
 
 void BackendRequest::PostJson(std::wstring What, std::wstring Path, std::string Body, std::wstring ClientId, std::wstring Secret)
 {
-    {
-        std::scoped_lock Lock(QueueMutex);
-        Queue.push_back(FRequest{ std::move(What), std::move(Path), std::move(Body), std::move(ClientId), std::move(Secret) });
-        if (!bWorkerStarted)
-        {
-            bWorkerStarted = true;
-            std::thread(Work).detach();
-        }
-    }
-    QueueReady.notify_one();
+    Enqueue(FRequest{ std::move(What), std::move(Path), std::move(Body), std::move(ClientId), std::move(Secret), nullptr });
 }
+
+void BackendRequest::GetJson(std::wstring What, std::wstring Path, std::wstring ClientId, std::wstring Secret, std::function<void(uint32_t Status, const std::string& Body)> OnAnswer)
+{
+    Enqueue(FRequest{ std::move(What), std::move(Path), std::string(), std::move(ClientId), std::move(Secret), std::move(OnAnswer) });
+}
+
+std::string BackendRequest::JsonField(const std::string& Json, const std::string& Name)
+{
+    const size_t Key = Json.find("\"" + Name + "\"");
+    size_t Start = Key == std::string::npos ? std::string::npos : Json.find(':', Key);
+    if (Start == std::string::npos)
+    {
+        return {};
+    }
+    Start = Json.find_first_not_of(" \t\r\n", Start + 1);
+    if (Start == std::string::npos)
+    {
+        return {};
+    }
+    if (Json[Start] == '"')
+    {
+        const size_t End = Json.find('"', Start + 1);
+        return End == std::string::npos ? std::string() : Json.substr(Start + 1, End - Start - 1);
+    }
+    const size_t End = Json.find_first_of(",} \t\r\n", Start);
+    return Json.substr(Start, End == std::string::npos ? std::string::npos : End - Start);
+}
+

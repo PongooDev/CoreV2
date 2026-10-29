@@ -236,6 +236,11 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     {
         NavGraph->OnWorldInitialized();
     }
+
+    if (AFortGameModeOutpost* Outpost = Cast<AFortGameModeOutpost>(reinterpret_cast<UObject*>(this)))
+    {
+        Outpost->KeepStructureLimit();
+    }
 #endif
 }
 

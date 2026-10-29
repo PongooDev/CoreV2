@@ -35,6 +35,16 @@ bool AFortGameStateZone::GetPlayerStructures(int32_t& OutTotal, int32_t& OutMax)
     return true;
 }
 
+bool AFortGameStateZone::SetMaxPlayerStructures(int32_t NewMax)
+{
+    if (!Member_MaxPlayerStructures.IsAvailable())
+    {
+        return false;
+    }
+    MaxPlayerStructures = NewMax;
+    return true;
+}
+
 void AFortGameStateZone::SetGameplayState(EFortGameplayState NewGameplayState)
 {
     if (Natives::AFortGameStateZone_SetGameplayStateIndex >= 0)

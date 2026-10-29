@@ -27,4 +27,12 @@ public:
     DefineUProperty(FGameplayTagContainer, BackupPlayerSpawnTags)
     DefineUProperty(TAssetPtr<UWorld>, ZoneToUse)
     DefineUProperty(int32_t, PlaylistId)
+    // The account item a Storm Shield's zone theme saves into (UFortCloudSaveItemDefinition: OutpostCore_PvE_01..04).
+    DefineUProperty(TAssetPtr<UObject>, CloudSaveItemDefinition)
+
+    // That item's asset name (OutpostCore_PvE_03), empty when the theme has none.
+    FString GetCloudSaveItemName() const
+    {
+        return Member_CloudSaveItemDefinition.IsAvailable() ? CloudSaveItemDefinition.ToStringReference().GetAssetName() : FString();
+    }
 };

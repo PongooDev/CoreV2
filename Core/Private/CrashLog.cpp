@@ -62,6 +62,11 @@ namespace
         {
             const ULONG_PTR Operation = Record->ExceptionInformation[0];
             Text += std::format(L", {} 0x{:X}", Operation == 0 ? L"reading" : Operation == 8 ? L"executing" : L"writing", Record->ExceptionInformation[1]);
+            MEMORY_BASIC_INFORMATION Page = {};
+            if (VirtualQuery(reinterpret_cast<const void*>(Record->ExceptionInformation[1]), &Page, sizeof(Page)))
+            {
+                Text += std::format(L" (page protection 0x{:X}, state 0x{:X})", Page.Protect, Page.State);
+            }
         }
 
         // The stack from the faulting frame, unwound with the modules' unwind data (RtlVirtualUnwind); a frame without
@@ -86,6 +91,26 @@ namespace
                 }
                 Context.Rip = *reinterpret_cast<const DWORD64*>(Context.Rsp);
                 Context.Rsp += sizeof(DWORD64);
+            }
+        }
+
+        // A packed exe's (1.9.1) moved code has no unwind data and jumps through the stack, so the walk above can stop
+        // at its first frame: the module addresses near the top of the stack show where the fault came from.
+        const CONTEXT& Fault = *Pointers->ContextRecord;
+        Text += std::format(L"\n    rax {:X} rcx {:X} rdx {:X} r8 {:X} r9 {:X} rsp {:X}", Fault.Rax, Fault.Rcx, Fault.Rdx, Fault.R8, Fault.R9, Fault.Rsp);
+        int32_t Listed = 0;
+        for (int32_t Slot = 0; Slot < 96 && Listed < 12; ++Slot)
+        {
+            const auto* Value = reinterpret_cast<const DWORD64*>(Fault.Rsp) + Slot;
+            if (IsBadReadPtr(Value, sizeof(DWORD64)))
+            {
+                break;
+            }
+            HMODULE Module = nullptr;
+            if (*Value && GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(*Value), &Module))
+            {
+                Text += std::format(L"\n    [rsp+{:X}] {}", Slot * 8, Describe(*Value));
+                ++Listed;
             }
         }
 

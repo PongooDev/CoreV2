@@ -1640,6 +1640,12 @@ void AFortPlayerController::Cheat(const FString& Msg)
     // server could replicate holds the speed, so the speed this player sends waits here for the server's ClientCheatFly
     // or ClientCheatGhost (UFortCheatManager::OnCheatMovement). The server refuses a speed for another player
     // ("/Name/"), so none is kept for one.
+    //
+    // "disguiseview" (#137) is how this player sees their own disguise, which only their game knows: it stays here.
+    if (UFortCheatManager::RunDisguiseViewCommand(this, Msg))
+    {
+        return;
+    }
     FString Command;
     FString TargetName;
     FString MovementCommand;

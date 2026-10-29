@@ -137,6 +137,13 @@ public:
     static inline bool bDisguisePossess = false;
     // From Possess once the controller's hero is set again (a respawn): the skin "cheat skin" chose.
     static void ReapplySkin(AFortPlayerController* PlayerController);
+    // Client (#137): every frame, the player's own puppet sits on their pawn (the server sends this client none of its
+    // movement), every disguise loses its collision here, and the camera pulls back for a disguise bigger than the
+    // player. Nothing is hooked: Core's game thread tick, reflected properties and UFunctions.
+    static void StartDisguiseView();
+    // Client: "cheat disguiseview <back | hide | normal>" (how the player sees their own disguise) runs here, not on the
+    // server; true when Msg was it.
+    static bool RunDisguiseViewCommand(class APlayerController* PlayerController, const FString& Msg);
 
     // A final "/Name/" picks the player a cheat runs on (#122): Msg without it in OutCommand, the name in OutTarget.
     static bool SplitCheatTarget(const FString& Msg, FString& OutCommand, FString& OutTarget);

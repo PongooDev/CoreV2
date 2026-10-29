@@ -60,6 +60,7 @@ void Boot::Initialize()
         UFortPartyContext::StartAthenaPartyBar();
         ACharacter::HookCheatMovement();
         ACharacter::OnCheatMovement = &UFortCheatManager::OnCheatMovement;
+        UFortCheatManager::StartDisguiseView();
         ABuildingSMActor::HookClientVTables();
     });
 

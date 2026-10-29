@@ -9,6 +9,8 @@
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
 #include "Engine/EngineTypes.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "FortKismetLibrary.h"
 #include "GameFramework/Character.h"
@@ -39,6 +41,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -509,6 +512,7 @@ namespace
     {
         DefineUnrealClass(USceneComponent, Engine)
         DefineUFunction(SetRelativeScale3D)
+        DefineUFunction(K2_SetRelativeLocationAndRotation)
 
     public:
         void SetRelativeScale3D(const FVector& NewScale3D)
@@ -516,6 +520,22 @@ namespace
             Reflection::FParams Params(FindStaticFunction_SetRelativeScale3D());
             Params.Set(L"NewScale3D", NewScale3D);
             Params.Call(this);
+        }
+
+        // Teleports, without a sweep: where the component sits on its parent.
+        bool SetRelativeLocationAndRotation(const FVector& NewLocation, const FRotator& NewRotation)
+        {
+            UFunction* Function = FindStaticFunction_K2_SetRelativeLocationAndRotation();
+            if (!Function)
+            {
+                return false;
+            }
+            Reflection::FParams Params(Function, true);
+            Params.Set(L"NewLocation", NewLocation);
+            Params.Set(L"NewRotation", NewRotation);
+            Params.Set(L"bSweep", false);
+            Params.Set(L"bTeleport", true);
+            return Params.Call(this);
         }
     };
 
@@ -532,6 +552,77 @@ namespace
             Params.Call(this);
         }
     };
+
+    // A character's capsule: its half height puts a puppet's feet where the player's are.
+    class UCapsuleComponentFunctions : public UObject
+    {
+        DefineUnrealClass(UCapsuleComponent, Engine)
+        DefineUFunction(GetScaledCapsuleHalfHeight)
+
+    public:
+        float GetScaledCapsuleHalfHeight()
+        {
+            Reflection::FParams Params(FindStaticFunction_GetScaledCapsuleHalfHeight());
+            return Params.Call(this) ? Params.Take<float>(L"ReturnValue") : 0.0f;
+        }
+    };
+
+    class ACharacterCapsule : public UObject
+    {
+        DefineUnrealClass(ACharacter, Engine)
+
+    public:
+        DefineUProperty(UObject*, CapsuleComponent)
+
+        static bool HasCapsuleComponent() { return Member_CapsuleComponent.IsAvailable(); }
+    };
+
+    class AControllerFunctions : public UObject
+    {
+        DefineUnrealClass(AController, Engine)
+        DefineUFunction(GetControlRotation)
+
+    public:
+        FRotator GetControlRotation()
+        {
+            Reflection::FParams Params(FindStaticFunction_GetControlRotation());
+            return Params.Call(this) ? Params.Take<FRotator>(L"ReturnValue") : FRotator();
+        }
+    };
+
+    // The half height of the actor's capsule (a character's), else of its colliding bounds.
+    float HalfHeightOf(const AActor* Actor)
+    {
+        UObject* AsObject = reinterpret_cast<UObject*>(const_cast<AActor*>(Actor));
+        if (ACharacterCapsule::StaticClass() && ACharacterCapsule::HasCapsuleComponent() && AsObject->IsA(ACharacterCapsule::StaticClass()))
+        {
+            if (UObject* Capsule = static_cast<ACharacterCapsule*>(AsObject)->CapsuleComponent; Capsule && UCapsuleComponentFunctions::FindStaticFunction_GetScaledCapsuleHalfHeight())
+            {
+                return static_cast<UCapsuleComponentFunctions*>(Capsule)->GetScaledCapsuleHalfHeight();
+            }
+        }
+        float HalfHeight = 0.0f;
+        FeetOf(Actor, &HalfHeight);
+        if (HalfHeight <= 0.0f)
+        {
+            // Nothing of it collides (a client turned its collision off): all of it.
+            FVector Origin;
+            FVector Extent;
+            Actor->GetActorBounds(false, Origin, Extent);
+            HalfHeight = Extent.Z;
+        }
+        return HalfHeight;
+    }
+
+    // The way the player looks (their camera's yaw), else the way their pawn faces.
+    float FacingYaw(AController* Controller, const AActor* Pawn)
+    {
+        if (Controller && AControllerFunctions::FindStaticFunction_GetControlRotation())
+        {
+            return reinterpret_cast<AControllerFunctions*>(Controller)->GetControlRotation().Yaw;
+        }
+        return Pawn->GetActorRotation().Yaw;
+    }
 
     // A building (a world prop: a toilet, a barrel, a tree...): its mesh is its StaticMesh. Its StaticMeshComponent is
     // static (ABuildingSMActor's constructor, 1.7.2 0x45A620, sets the component's Mobility to Static), so it can't be
@@ -585,6 +676,8 @@ namespace
         uint8_t OriginalMovementMode = MOVE_Walking;
         uint8_t OriginalCustomMovementMode = 0;
         bool bOriginalCanBeDamaged = true;
+        // Possessed: the player's own pawn's role on their client (theirs: autonomous), simulated while it is parked.
+        ENetRole OriginalRemoteRole = ROLE_AutonomousProxy;
         // Possessed: the hero kits equipped on the player state, and in Save the World the player's own hero, whose
         // gadgets come back at the end.
         std::vector<std::vector<uint8_t>> KitHandles;
@@ -737,6 +830,7 @@ namespace
         }
         const FVector Back(Disguise.LastLocation.X, Disguise.LastLocation.Y, Disguise.LastFeet + Disguise.OriginalHalfHeight + 2.0f);
         Original->SetActorLocation(Back, false, true);
+        Original->RemoteRole = TEnumAsByte<ENetRole>(Disguise.OriginalRemoteRole);
         PossessForDisguise(PlayerController, Original);
         if (DisguisePawn)
         {
@@ -746,13 +840,15 @@ namespace
         return true;
     }
 
-    // A puppet stands where the player's hidden pawn stands, faces its way, and moves at its velocity: on every client it
-    // is a simulated pawn moving at that speed, so its own animation Blueprint plays its walk, run and fall.
+    // A puppet stands exactly where the player's hidden pawn stands (its feet on the pawn's), faces the way the player
+    // looks, and moves at the pawn's velocity: on other clients it is a simulated character moving at that speed, which
+    // the character movement smooths between the server's updates, so its own animation Blueprint plays its walk, run
+    // and fall. The player's own client places it on their pawn every frame instead (TickDisguiseView, below).
     void MovePuppet(FDisguise& Disguise, APawn* Original, AActor* Puppet)
     {
         const FVector Location = ActorLocation(Original);
-        const FVector Placed(Location.X, Location.Y, FeetOf(Original) + Disguise.PuppetHalfHeight);
-        Puppet->SetActorLocationAndRotation(Placed, FRotator(0.0f, Original->GetActorRotation().Yaw, 0.0f), false, true);
+        const FVector Placed(Location.X, Location.Y, Location.Z - HalfHeightOf(Original) + Disguise.PuppetHalfHeight);
+        Puppet->SetActorLocationAndRotation(Placed, FRotator(0.0f, FacingYaw(Disguise.Controller.Get(), Original), 0.0f), false, true);
 
         UCharacterMovementComponent* PuppetMovement = MovementOf(static_cast<APawn*>(Puppet));
         if (!PuppetMovement)
@@ -990,13 +1086,38 @@ namespace
         return nullptr;
     }
 
-    AActor* SpawnDisguiseActor(APawn* Owner, UClass* Class, const FVector& Location, float Yaw, float Scale, ESpawnActorCollisionHandlingMethod Collision, bool bWithoutAI)
+    class AActorFunctions : public UObject
+    {
+        DefineUnrealClass(AActor, Engine)
+        DefineUFunction(SetOwner)
+
+    public:
+        void SetOwner(AActor* NewOwner)
+        {
+            Reflection::FParams Params(FindStaticFunction_SetOwner());
+            Params.Set(L"NewOwner", NewOwner);
+            Params.Call(this);
+        }
+    };
+
+    // The spawn gives the owner already; AActor::SetOwner when it didn't.
+    void OwnByPawn(AActor* Actor, APawn* Original)
+    {
+        if (Actor->GetOwner() != Original && AActorFunctions::FindStaticFunction_SetOwner())
+        {
+            reinterpret_cast<AActorFunctions*>(Actor)->SetOwner(Original);
+        }
+    }
+
+    // A puppet or a prop is owned by the player's hidden pawn (bOwnedByPawn): Owner replicates, so every client can tell
+    // a disguise and whose it is (ScanDisguises, below), and the owner's connection is the player's.
+    AActor* SpawnDisguiseActor(APawn* Original, UClass* Class, const FVector& Location, float Yaw, float Scale, ESpawnActorCollisionHandlingMethod Collision, bool bWithoutAI, bool bOwnedByPawn = false)
     {
         FTransform SpawnTransform;
         SpawnTransform.Rotation = FRotator(0.0f, Yaw, 0.0f).Quaternion();
         SpawnTransform.Translation = Location;
         SpawnTransform.Scale3D = FVector(Scale, Scale, Scale);
-        AActor* Spawned = UGameplayStatics::BeginDeferredActorSpawnFromClass(Owner, Class, SpawnTransform, Collision);
+        AActor* Spawned = UGameplayStatics::BeginDeferredActorSpawnFromClass(Original, Class, SpawnTransform, Collision, bOwnedByPawn ? static_cast<AActor*>(Original) : nullptr);
         // A puppet gets no AI controller: FinishSpawning gives a pawn one when AutoPossessAI says so.
         if (Spawned && bWithoutAI && reinterpret_cast<UObject*>(Spawned)->IsA(APawn::StaticClass()))
         {
@@ -1019,7 +1140,7 @@ namespace
         {
             return nullptr;
         }
-        AActor* Carrier = SpawnDisguiseActor(Owner, CarrierClass, Location, Yaw, 1.0f, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true);
+        AActor* Carrier = SpawnDisguiseActor(Owner, CarrierClass, Location, Yaw, 1.0f, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true, true);
         UObject* MeshComponent = Carrier ? static_cast<UObject*>(static_cast<ADefaultPawnType*>(Carrier)->MeshComponent) : nullptr;
         if (!MeshComponent || !static_cast<UStaticMeshComponentFunctions*>(MeshComponent)->SetStaticMesh(Mesh))
         {
@@ -1263,6 +1384,13 @@ void UFortCheatManager::Disguise(const FString& Arguments)
         {
             PreviousController->K2_DestroyActor();
         }
+        // The player's own pawn, parked, is owned by the disguise (#137): every client can tell it (ScanDisguises) and
+        // turn its collision off there too, where the disguise the server drags it along with bumped into it. It is
+        // simulated on every client, the player's too, until Possess makes it theirs again.
+        OwnByPawn(Original, DisguisePawn);
+        Disguise.OriginalRemoteRole = Original->RemoteRole;
+        Original->RemoteRole = TEnumAsByte<ENetRole>(ROLE_SimulatedProxy);
+        Original->ForceNetUpdate();
         Disguise.Actor = TWeakObjectPtr<AActor>(DisguisePawn);
 
         // The hero's kits: its perks and abilities (Mantis Leap's double jump, ...) on the player state's ability system.
@@ -1311,8 +1439,15 @@ void UFortCheatManager::Disguise(const FString& Arguments)
         // turned on its own (#136). The player keeps their own pawn (hidden, still theirs: input, camera, weapons and
         // health), and the puppet, with no AI controller and no collision, stands where it stands and moves at its
         // velocity: every client sees it walk, run and fall with its own animations. It can't attack.
+        //
+        // The player's own client doesn't take the puppet's position from the server (#137): it arrived a round trip
+        // behind the pawn the client predicts, so the puppet trailed and jumped after it, and its capsule, which the
+        // client still collided with, pushed the player's pawn about. Owned by the hidden pawn, the puppet is the
+        // player's autonomous proxy: the engine sends its movement (ReplicatedMovement, ReplicatedMovementMode:
+        // COND_SimulatedOrPhysics and COND_SimulatedOnly, 1.7.2 0x1EC7050) only to the clients it is simulated on, and the
+        // player's client sets it on their pawn every frame (FollowPawn).
         Disguise.Kind = EDisguiseKind::Puppet;
-        AActor* Puppet = SpawnDisguiseActor(Original, Class, Location, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true);
+        AActor* Puppet = SpawnDisguiseActor(Original, Class, Location, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true, true);
         if (!Puppet)
         {
             Reply(FString::Printf(TEXT("Couldn't spawn %s (an abstract class, or one that can't be spawned here)"), *Class->GetPathName()));
@@ -1324,7 +1459,8 @@ void UFortCheatManager::Disguise(const FString& Arguments)
             AIController->UnPossess();
             AIController->K2_DestroyActor();
         }
-        FeetOf(Puppet, &Disguise.PuppetHalfHeight);
+        OwnByPawn(Puppet, Original);
+        Disguise.PuppetHalfHeight = HalfHeightOf(Puppet);
         Puppet->SetActorEnableCollision(false);
         Puppet->bCanBeDamaged = false;
         if (UCharacterMovementComponent* Movement = MovementOf(PuppetPawn))
@@ -1336,6 +1472,7 @@ void UFortCheatManager::Disguise(const FString& Arguments)
         {
             Puppet->NetUpdateFrequency = 30.0f;
         }
+        Puppet->RemoteRole = TEnumAsByte<ENetRole>(ROLE_AutonomousProxy);
         Original->SetActorHiddenInGame(true);
         HideWeapon(Disguise, Original);
         Original->ForceNetUpdate();
@@ -1358,7 +1495,7 @@ void UFortCheatManager::Disguise(const FString& Arguments)
     bool bCarried = false;
     if (Class && !ClassMesh)
     {
-        Prop = SpawnDisguiseActor(Original, Class, AtFeet, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true);
+        Prop = SpawnDisguiseActor(Original, Class, AtFeet, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true, true);
         USceneComponent* Root = Prop ? Prop->GetRootComponent() : nullptr;
         if (Prop && (!Root || Root->Mobility == EComponentMobility::Static))
         {
@@ -1377,6 +1514,7 @@ void UFortCheatManager::Disguise(const FString& Arguments)
         Reply(FString::Printf(TEXT("Couldn't spawn %s (%s)"), Name.c_str(), Class && !ClassMesh ? TEXT("an abstract class, or one that can't be spawned here") : TEXT("no carrier for its mesh")));
         return;
     }
+    OwnByPawn(Prop, Original);
     Prop->SetActorEnableCollision(false);
     if (!Prop->bReplicates)
     {
@@ -1424,5 +1562,613 @@ void UFortCheatManager::Undisguise(const FString& Arguments)
     Disguises.erase(Disguises.begin() + (Disguise - Disguises.data()));
     Reply(bEnded ? FString::Printf(TEXT("You are no longer disguised as %s"), Name.c_str())
                  : FString::Printf(TEXT("Your own pawn is gone, so you stay %s"), Name.c_str()));
+#endif
+}
+
+// ----------------------------------------------------------------------------------------------------------------------
+// The disguise as the clients show it (#137)
+// ----------------------------------------------------------------------------------------------------------------------
+
+#if !UE_SERVER
+namespace
+{
+    class UGameplayStaticsActors : public UObject
+    {
+        DefineUnrealClass(UGameplayStatics, Engine)
+        DefineUFunction(GetAllActorsOfClass)
+
+    public:
+        static TArray<AActor*> GetAllActorsOfClass(UObject* WorldContextObject, UClass* ActorClass)
+        {
+            UFunction* Function = FindStaticFunction_GetAllActorsOfClass();
+            if (!Function || !StaticClass() || !ActorClass)
+            {
+                return TArray<AActor*>();
+            }
+            Reflection::FParams Params(Function);
+            Params.Set(L"WorldContextObject", WorldContextObject);
+            Params.Set(L"ActorClass", ActorClass);
+            return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<TArray<AActor*>>(L"OutActors") : TArray<AActor*>();
+        }
+    };
+
+    class AActorAttachments : public UObject
+    {
+        DefineUnrealClass(AActor, Engine)
+        DefineUFunction(GetAttachedActors)
+
+    public:
+        TArray<AActor*> GetAttachedActors()
+        {
+            UFunction* Function = FindStaticFunction_GetAttachedActors();
+            if (!Function)
+            {
+                return TArray<AActor*>();
+            }
+            Reflection::FParams Params(Function);
+            return Params.Call(this) ? Params.Take<TArray<AActor*>>(L"OutActors") : TArray<AActor*>();
+        }
+    };
+
+    // The Fortnite camera: the camera modes it blends (Athena_PlayerCameraModeBase and the other third person modes,
+    // Default3PCamera and the older ones), each an object of its own that keeps its offsets.
+    struct FActiveFortCamera
+    {
+        DefineUnrealStruct(FActiveFortCamera, FortniteGame)
+        DefineUProperty(UObject*, Camera)
+    };
+
+    class AFortPlayerCameraBaseStack : public UObject
+    {
+        DefineUnrealClass(AFortPlayerCameraBase, FortniteGame)
+
+    public:
+        DefineUStructArrayProperty(FActiveFortCamera, CameraBlendStack)
+
+        static bool HasCameraBlendStack() { return Member_CameraBlendStack.IsAvailable(); }
+    };
+
+    struct FInterpOffsetData
+    {
+        DefineUnrealStruct(FInterpOffsetData, FortniteGame)
+        DefineUProperty(FVector, ViewOffset)
+    };
+
+    struct FInterpOffset
+    {
+        DefineUnrealStruct(FInterpOffset, FortniteGame)
+        DefineUStructArrayProperty(FInterpOffsetData, SamplePoints)
+    };
+
+    // UFortCameraMode_ThirdPerson: the camera sits CameraSpaceForwardDistance along the view (-280 in
+    // Athena_PlayerCameraModeBase and v3_PlayerCameraModeBase: behind) from its origin, ViewTargetSpaceViewOffset (45 to
+    // the right, 75 up) off the pawn.
+    class UFortCameraModeThirdPerson : public UObject
+    {
+        DefineUnrealClass(UFortCameraMode_ThirdPerson, FortniteGame)
+
+    public:
+        DefineUProperty(float, CameraSpaceForwardDistance)
+        DefineUStructProperty(FInterpOffset, ViewTargetSpaceViewOffset)
+        DefineUStructProperty(FInterpOffset, ViewTargetSpaceViewOffset_Crouch)
+
+        static bool HasOffsets() { return Member_CameraSpaceForwardDistance.IsAvailable() && Member_ViewTargetSpaceViewOffset.IsAvailable() && FInterpOffsetData::StaticStruct(); }
+        // 1.1 and 1.2 have no crouching offset.
+        static bool HasCrouchOffset() { return Member_ViewTargetSpaceViewOffset_Crouch.IsAvailable(); }
+    };
+
+    struct FViewOffsetData
+    {
+        DefineUnrealStruct(FViewOffsetData, FortniteGame)
+        DefineUProperty(FVector, OffsetHigh)
+        DefineUProperty(FVector, OffsetMid)
+        DefineUProperty(FVector, OffsetLow)
+    };
+
+    // UFort3PCameraMode (Default3PCamera...): the camera sits ViewOffsets off its pivot, by the view's pitch (X -200 to
+    // -300: behind).
+    class UFort3PCameraModeOffsets : public UObject
+    {
+        DefineUnrealClass(UFort3PCameraMode, FortniteGame)
+
+    public:
+        DefineUStructProperty(FViewOffsetData, ViewOffsets)
+
+        static bool HasOffsets() { return Member_ViewOffsets.IsAvailable(); }
+    };
+
+    // "cheat disguiseview": how the player sees their own disguise.
+    enum class EDisguiseView : uint8_t
+    {
+        // The camera pulls back (and up) for a disguise bigger than the player.
+        Back,
+        // The disguise is hidden from its own player (everyone else still sees it).
+        Hide,
+        // As it is, at the usual camera distance.
+        Normal,
+    };
+    EDisguiseView DisguiseView = EDisguiseView::Back;
+
+    const wchar_t* DisguiseViewName(EDisguiseView View)
+    {
+        return View == EDisguiseView::Back ? L"back" : View == EDisguiseView::Hide ? L"hide" : L"normal";
+    }
+
+    // The local player's own disguise.
+    struct FOwnDisguise
+    {
+        TWeakObjectPtr<AActor> Actor;
+        TWeakObjectPtr<APawn> Pawn;
+        // A puppet (the pawn the server makes this player's autonomous proxy) follows the pawn here; a prop is attached
+        // by the server.
+        bool bPuppet = false;
+        bool bAttached = false;
+        bool bHiddenHere = false;
+        float PuppetHalfHeight = 0.0f;
+        // How far the camera pulls back and up for it.
+        float Back = 0.0f;
+        float Up = 0.0f;
+    };
+    FOwnDisguise Own;
+
+    // Every disguise this client turned the collision of off.
+    std::vector<TWeakObjectPtr<AActor>> Quieted;
+    // The parked pawns of players playing a player pawn disguise, whose collision comes back when they do.
+    std::vector<TWeakObjectPtr<AActor>> Parked;
+
+    // A camera mode Core moved back, as it was.
+    struct FCameraAdjustment
+    {
+        TWeakObjectPtr<UObject> Mode;
+        bool bThirdPerson = false;
+        bool bAdjusted = false;
+        float ForwardDistance = 0.0f;
+        std::vector<float> OffsetZ;
+        FVector High;
+        FVector Mid;
+        FVector Low;
+    };
+    std::vector<FCameraAdjustment> CameraAdjustments;
+    float AppliedBack = 0.0f;
+    float AppliedUp = 0.0f;
+
+    ULONGLONG NextScan = 0;
+    constexpr ULONGLONG ScanMs = 250;
+
+    bool IsA(const void* Object, UClass* Class)
+    {
+        return Object && Class && reinterpret_cast<const UObject*>(Object)->IsA(Class);
+    }
+
+    template <typename FVisit>
+    void ForEachSample(FInterpOffset& Offset, FVisit&& Visit)
+    {
+        TStructArray<FInterpOffsetData>& Samples = Offset.SamplePoints;
+        for (int32_t Index = 0; Index < Samples.Num(); ++Index)
+        {
+            Visit(Samples[Index]);
+        }
+    }
+
+    void RestoreCamera()
+    {
+        for (FCameraAdjustment& Adjustment : CameraAdjustments)
+        {
+            UObject* Mode = Adjustment.Mode.Get();
+            if (!Mode || !Adjustment.bAdjusted)
+            {
+                continue;
+            }
+            if (Adjustment.bThirdPerson)
+            {
+                UFortCameraModeThirdPerson* ThirdPerson = static_cast<UFortCameraModeThirdPerson*>(Mode);
+                ThirdPerson->CameraSpaceForwardDistance = Adjustment.ForwardDistance;
+                size_t Next = 0;
+                const auto Restore = [&Adjustment, &Next](FInterpOffsetData& Sample)
+                {
+                    if (Next < Adjustment.OffsetZ.size())
+                    {
+                        FVector Offset = Sample.ViewOffset;
+                        Offset.Z = Adjustment.OffsetZ[Next++];
+                        Sample.ViewOffset = Offset;
+                    }
+                };
+                ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset, Restore);
+                if (UFortCameraModeThirdPerson::HasCrouchOffset())
+                {
+                    ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset_Crouch, Restore);
+                }
+            }
+            else
+            {
+                FViewOffsetData& Offsets = static_cast<UFort3PCameraModeOffsets*>(Mode)->ViewOffsets;
+                Offsets.OffsetHigh = Adjustment.High;
+                Offsets.OffsetMid = Adjustment.Mid;
+                Offsets.OffsetLow = Adjustment.Low;
+            }
+        }
+        CameraAdjustments.clear();
+        AppliedBack = 0.0f;
+        AppliedUp = 0.0f;
+    }
+
+    // Moves a camera mode Back further behind the player and Up higher, keeping it as it was.
+    void AdjustCameraMode(UObject* Mode, float Back, float Up)
+    {
+        FCameraAdjustment Adjustment;
+        Adjustment.Mode = TWeakObjectPtr<UObject>(Mode);
+        if (IsA(Mode, UFortCameraModeThirdPerson::StaticClass()) && UFortCameraModeThirdPerson::HasOffsets())
+        {
+            UFortCameraModeThirdPerson* ThirdPerson = static_cast<UFortCameraModeThirdPerson*>(Mode);
+            Adjustment.bThirdPerson = true;
+            Adjustment.bAdjusted = true;
+            Adjustment.ForwardDistance = ThirdPerson->CameraSpaceForwardDistance;
+            ThirdPerson->CameraSpaceForwardDistance = Adjustment.ForwardDistance - Back;
+            const auto Raise = [&Adjustment, Up](FInterpOffsetData& Sample)
+            {
+                FVector Offset = Sample.ViewOffset;
+                Adjustment.OffsetZ.push_back(Offset.Z);
+                Offset.Z += Up;
+                Sample.ViewOffset = Offset;
+            };
+            ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset, Raise);
+            if (UFortCameraModeThirdPerson::HasCrouchOffset())
+            {
+                ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset_Crouch, Raise);
+            }
+        }
+        else if (IsA(Mode, UFort3PCameraModeOffsets::StaticClass()) && UFort3PCameraModeOffsets::HasOffsets() && FViewOffsetData::StaticStruct())
+        {
+            FViewOffsetData& Offsets = static_cast<UFort3PCameraModeOffsets*>(Mode)->ViewOffsets;
+            Adjustment.bAdjusted = true;
+            Adjustment.High = Offsets.OffsetHigh;
+            Adjustment.Mid = Offsets.OffsetMid;
+            Adjustment.Low = Offsets.OffsetLow;
+            Offsets.OffsetHigh = FVector(Adjustment.High.X - Back, Adjustment.High.Y, Adjustment.High.Z + Up);
+            Offsets.OffsetMid = FVector(Adjustment.Mid.X - Back, Adjustment.Mid.Y, Adjustment.Mid.Z + Up);
+            Offsets.OffsetLow = FVector(Adjustment.Low.X - Back, Adjustment.Low.Y, Adjustment.Low.Z + Up);
+        }
+        // A mode with neither (the death camera...) is kept as it is, and remembered so it isn't looked at again.
+        CameraAdjustments.push_back(std::move(Adjustment));
+    }
+
+    // Every camera mode the player's camera blends is moved back and up, the ones it starts blending later (aiming,
+    // building...) as they come; a different distance puts them back first.
+    void ApplyCamera(APlayerController* PlayerController, float Back, float Up)
+    {
+        if (std::fabs(Back - AppliedBack) > 1.0f || std::fabs(Up - AppliedUp) > 1.0f)
+        {
+            RestoreCamera();
+            AppliedBack = Back;
+            AppliedUp = Up;
+        }
+        UObject* CameraManager = reinterpret_cast<UObject*>(static_cast<APlayerCameraManager*>(PlayerController->PlayerCameraManager));
+        if ((Back <= 0.0f && Up <= 0.0f) || !IsA(CameraManager, AFortPlayerCameraBaseStack::StaticClass()) || !AFortPlayerCameraBaseStack::HasCameraBlendStack() || !FActiveFortCamera::StaticStruct())
+        {
+            return;
+        }
+        TStructArray<FActiveFortCamera>& Stack = static_cast<AFortPlayerCameraBaseStack*>(CameraManager)->CameraBlendStack;
+        for (int32_t Index = 0; Index < Stack.Num(); ++Index)
+        {
+            UObject* Mode = Stack[Index].Camera;
+            const bool bSeen = std::any_of(CameraAdjustments.begin(), CameraAdjustments.end(), [Mode](const FCameraAdjustment& Adjustment) { return Adjustment.Mode.Get() == Mode; });
+            if (Mode && !bSeen)
+            {
+                AdjustCameraMode(Mode, Back, Up);
+            }
+        }
+    }
+
+    // The player's own disguise changed (or ended): the last one's view is undone, the new one's measured.
+    void SetOwnDisguise(AActor* Actor, APawn* Pawn)
+    {
+        RestoreCamera();
+        if (AActor* Previous = Own.Actor.Get(); Previous && Own.bHiddenHere)
+        {
+            Previous->SetActorHiddenInGame(false);
+        }
+        Own = FOwnDisguise();
+        if (!Actor || !Pawn)
+        {
+            return;
+        }
+
+        Own.Actor = TWeakObjectPtr<AActor>(Actor);
+        Own.Pawn = TWeakObjectPtr<APawn>(Pawn);
+        const ENetRole Role = Actor->Role;
+        Own.bPuppet = IsA(Actor, APawn::StaticClass()) && Role == ROLE_AutonomousProxy;
+        Own.PuppetHalfHeight = Own.bPuppet ? HalfHeightOf(Actor) : 0.0f;
+        if (IsA(Actor, ACharacter::StaticClass()) && !Own.bPuppet)
+        {
+            // A server without #137 sends this client the puppet's movement: it is left to it, as before.
+            UE_LOG(LogFortDisguise, Warning, TEXT("DisguiseView: %s is role %d here, not this player's autonomous proxy: it moves with the server's updates"), *Actor->GetName(), static_cast<int32_t>(Role));
+        }
+
+        // The camera pulls back by twice what the disguise is bigger than the player (its largest half size over the
+        // player's half height) and up by one and a half times what it is taller, so a Smasher or a toilet at scale 5
+        // fits in the view and its top doesn't fill it.
+        FVector Origin;
+        FVector Extent;
+        Actor->GetActorBounds(false, Origin, Extent);
+        const float PlayerHalfHeight = std::max(HalfHeightOf(Pawn), 1.0f);
+        const float Size = std::max({ Extent.X, Extent.Y, Extent.Z });
+        Own.Back = std::clamp(2.0f * (Size - PlayerHalfHeight), 0.0f, 3000.0f);
+        Own.Up = std::clamp(1.5f * (Extent.Z - PlayerHalfHeight), 0.0f, 1000.0f);
+        UE_LOG(LogFortDisguise, Log, TEXT("DisguiseView: you are %s (%s, half size %.0f x %.0f x %.0f): the camera pulls back %.0f and up %.0f (\"cheat disguiseview %s\")"),
+            *Actor->GetName(), Own.bPuppet ? TEXT("a puppet that follows your pawn here") : TEXT("a prop on your pawn"), Extent.X, Extent.Y, Extent.Z, Own.Back, Own.Up, DisguiseViewName(DisguiseView));
+    }
+
+    // A player pawn that is hidden: a disguised player's (the server hides it while the disguise shows).
+    bool IsDisguisedPawn(const AActor* Actor)
+    {
+        return Actor && AFortPlayerPawn::StaticClass() && IsA(Actor, AFortPlayerPawn::StaticClass()) && Actor->bHidden;
+    }
+
+    // A parked pawn: a hidden player pawn the player's player pawn disguise owns.
+    bool IsParkedPawn(const AActor* Actor)
+    {
+        AActor* Owner = Actor ? Actor->GetOwner() : nullptr;
+        return IsDisguisedPawn(Actor) && Owner && Owner != Actor && IsA(Owner, APawn::StaticClass());
+    }
+
+    // A parked pawn played again (its player undisguised) collides again here.
+    void UnparkCollision(AActor* LocalPawn)
+    {
+        std::erase_if(Parked, [LocalPawn](const TWeakObjectPtr<AActor>& Weak)
+        {
+            AActor* Pawn = Weak.Get();
+            if (!Pawn)
+            {
+                return true;
+            }
+            if (Pawn != LocalPawn && IsParkedPawn(Pawn))
+            {
+                return false;
+            }
+            Pawn->SetActorEnableCollision(true);
+            UE_LOG(LogFortDisguise, Log, TEXT("DisguiseView: %s is played again; it collides here again"), *Pawn->GetName());
+            return true;
+        });
+    }
+
+    // A disguise is a puppet or a prop carrier (pawns the server spawns owned by the player's hidden pawn), or a prop
+    // attached to that pawn (its weapon, hidden too, isn't one). On every client it loses its collision: the server's
+    // copy has none, so the pawns walking into it here, the player's own first, were stopped and pushed back by the
+    // server, and the camera, which keeps out of whatever collides, was pushed into a big one. The player's own one is
+    // shown the way they chose.
+    void ScanDisguises(UWorld* World, APawn* LocalPawn)
+    {
+        std::erase_if(Quieted, [](const TWeakObjectPtr<AActor>& Actor) { return !Actor.IsValid(); });
+        AActor* OwnFound = nullptr;
+        const auto Consider = [&OwnFound, LocalPawn](AActor* Actor, AActor* Owner)
+        {
+            const bool bKnown = std::any_of(Quieted.begin(), Quieted.end(), [Actor](const TWeakObjectPtr<AActor>& Known) { return Known.Get() == Actor; });
+            if (!bKnown)
+            {
+                Actor->SetActorEnableCollision(false);
+                Quieted.emplace_back(Actor);
+                UE_LOG(LogFortDisguise, Log, TEXT("DisguiseView: %s is %s's disguise; no collision here"), *Actor->GetName(), *Owner->GetName());
+            }
+            if (Owner == static_cast<AActor*>(LocalPawn) && (!OwnFound || IsA(Actor, APawn::StaticClass())))
+            {
+                OwnFound = Actor;
+            }
+        };
+
+        const TArray<AActor*> Pawns = UGameplayStaticsActors::GetAllActorsOfClass(World, APawn::StaticClass());
+        for (int32_t Index = 0; Index < Pawns.Num(); ++Index)
+        {
+            AActor* Pawn = Pawns[Index];
+            AActor* Owner = Pawn ? Pawn->GetOwner() : nullptr;
+            // The pawn a player pawn disguise parks follows it on the server, without collision there; here it stood in
+            // the disguise's way.
+            if (Pawn && Pawn != static_cast<AActor*>(LocalPawn) && IsParkedPawn(Pawn))
+            {
+                if (std::none_of(Parked.begin(), Parked.end(), [Pawn](const TWeakObjectPtr<AActor>& Known) { return Known.Get() == Pawn; }))
+                {
+                    Pawn->SetActorEnableCollision(false);
+                    Parked.emplace_back(Pawn);
+                    UE_LOG(LogFortDisguise, Log, TEXT("DisguiseView: %s waits parked under %s, its player's disguise; no collision here"), *Pawn->GetName(), *Owner->GetName());
+                }
+                continue;
+            }
+            if (Owner && Owner != Pawn && IsDisguisedPawn(Owner))
+            {
+                Consider(Pawn, Owner);
+            }
+            if (!IsDisguisedPawn(Pawn) || !AActorAttachments::StaticClass())
+            {
+                continue;
+            }
+            const TArray<AActor*> Attached = reinterpret_cast<AActorAttachments*>(Pawn)->GetAttachedActors();
+            for (int32_t AttachedIndex = 0; AttachedIndex < Attached.Num(); ++AttachedIndex)
+            {
+                AActor* Child = Attached[AttachedIndex];
+                if (Child && Child->GetOwner() == Pawn && !Child->bHidden && !IsA(Child, APawn::StaticClass()) && !IsA(Child, AFortWeapon::StaticClass()))
+                {
+                    Consider(Child, Pawn);
+                }
+            }
+        }
+
+        if (OwnFound != Own.Actor.Get())
+        {
+            SetOwnDisguise(OwnFound, OwnFound ? LocalPawn : nullptr);
+        }
+    }
+
+    // The puppet sits on the player's pawn: attached to it here, so it moves in the same frame the pawn does, its feet
+    // on the pawn's, facing the way the player looks, at the pawn's velocity and falling when it falls (the puppet's
+    // animations play from those). The server sends this client none of the puppet's movement to fight it.
+    void FollowPawn(APlayerController* PlayerController, APawn* Pawn, AActor* Puppet)
+    {
+        UCharacterMovementComponent* PuppetMovement = MovementOf(static_cast<APawn*>(Puppet));
+        if (!Own.bAttached)
+        {
+            if (PuppetMovement)
+            {
+                PuppetMovement->bRunPhysicsWithNoController = false;
+            }
+            Puppet->AttachToActor(Pawn, EAttachmentRule::SnapToTarget, EAttachmentRule::SnapToTarget, EAttachmentRule::KeepWorld);
+            Own.bAttached = true;
+        }
+
+        const float RelativeZ = Own.PuppetHalfHeight - HalfHeightOf(Pawn);
+        const float RelativeYaw = NormalizeRotatorAxis(FacingYaw(PlayerController, Pawn) - Pawn->GetActorRotation().Yaw);
+        if (USceneComponent* Root = Puppet->GetRootComponent())
+        {
+            reinterpret_cast<USceneComponentFunctions*>(Root)->SetRelativeLocationAndRotation(FVector(0.0f, 0.0f, RelativeZ), FRotator(0.0f, RelativeYaw, 0.0f));
+        }
+
+        UCharacterMovementComponent* OwnMovement = MovementOf(Pawn);
+        if (PuppetMovement && OwnMovement)
+        {
+            PuppetMovement->Velocity = OwnMovement->Velocity;
+            const uint8_t Mode = static_cast<uint8_t>(OwnMovement->MovementMode) == MOVE_Falling ? MOVE_Falling : MOVE_Walking;
+            if (static_cast<uint8_t>(PuppetMovement->MovementMode) != Mode)
+            {
+                PuppetMovement->SetMovementMode(Mode);
+            }
+        }
+    }
+
+    void ShowOwnDisguise(APlayerController* PlayerController, AActor* Actor)
+    {
+        const bool bHide = DisguiseView == EDisguiseView::Hide;
+        if (bHide != Own.bHiddenHere)
+        {
+            Actor->SetActorHiddenInGame(bHide);
+            Own.bHiddenHere = bHide;
+        }
+        if (DisguiseView == EDisguiseView::Back)
+        {
+            ApplyCamera(PlayerController, Own.Back, Own.Up);
+        }
+        else if (!CameraAdjustments.empty())
+        {
+            RestoreCamera();
+        }
+    }
+
+    APlayerController* LocalPlayerController(UWorld* World)
+    {
+        UGameInstance* GameInstance = World ? static_cast<UGameInstance*>(World->OwningGameInstance) : nullptr;
+        const TArray<ULocalPlayer*>* LocalPlayers = GameInstance ? &static_cast<TArray<ULocalPlayer*>&>(GameInstance->LocalPlayers) : nullptr;
+        ULocalPlayer* Player = LocalPlayers && LocalPlayers->Num() > 0 ? (*LocalPlayers)[0] : nullptr;
+        return Player ? static_cast<APlayerController*>(Player->PlayerController) : nullptr;
+    }
+
+    // Every frame on the game thread, before the world ticks: a scan for disguises four times a second, and the player's
+    // own one followed every frame.
+    void TickDisguiseView()
+    {
+        UWorld* World = Natives::GWorld ? static_cast<UWorld*>(GWorld) : nullptr;
+        APlayerController* PlayerController = LocalPlayerController(World);
+        APawn* LocalPawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+        // Only a client of a server: its own pawn is its autonomous proxy.
+        if (LocalPawn && static_cast<ENetRole>(LocalPawn->Role) != ROLE_AutonomousProxy)
+        {
+            LocalPawn = nullptr;
+        }
+
+        // A parked pawn played again collides again, the player's own from its first frame.
+        const ULONGLONG Now = GetTickCount64();
+        AActor* Played = PlayerController ? static_cast<AActor*>(PlayerController->GetPawn()) : nullptr;
+        const bool bOwnParked = Played && std::any_of(Parked.begin(), Parked.end(), [Played](const TWeakObjectPtr<AActor>& Known) { return Known.Get() == Played; });
+        if (!Parked.empty() && (bOwnParked || Now >= NextScan))
+        {
+            UnparkCollision(Played);
+        }
+
+        if (LocalPawn && Now >= NextScan)
+        {
+            NextScan = Now + ScanMs;
+            ScanDisguises(World, LocalPawn);
+        }
+
+        AActor* Actor = Own.Actor.Get();
+        if (Actor && (!LocalPawn || Own.Pawn.Get() != LocalPawn))
+        {
+            SetOwnDisguise(nullptr, nullptr);
+            Actor = nullptr;
+        }
+        else if (!Actor && (Own.Pawn.IsValid() || !CameraAdjustments.empty()))
+        {
+            SetOwnDisguise(nullptr, nullptr);
+        }
+        if (Actor)
+        {
+            if (Own.bPuppet)
+            {
+                FollowPawn(PlayerController, LocalPawn, Actor);
+            }
+            ShowOwnDisguise(PlayerController, Actor);
+        }
+        GameThread::Enqueue(&TickDisguiseView);
+    }
+}
+#endif
+
+void UFortCheatManager::StartDisguiseView()
+{
+#if !UE_SERVER
+    static bool bStarted = false;
+    if (!bStarted)
+    {
+        bStarted = GameThread::Enqueue(&TickDisguiseView);
+    }
+#endif
+}
+
+bool UFortCheatManager::RunDisguiseViewCommand(APlayerController* PlayerController, const FString& Msg)
+{
+#if !UE_SERVER
+    const std::vector<std::wstring> Words = SplitWords(Msg.ToStdString());
+    if (Words.empty() || Lower(Words[0]) != L"disguiseview")
+    {
+        return false;
+    }
+
+    std::optional<EDisguiseView> Chosen;
+    if (Words.size() == 2)
+    {
+        const std::wstring Wanted = Lower(Words[1]);
+        if (Wanted == L"back")
+        {
+            Chosen = EDisguiseView::Back;
+        }
+        else if (Wanted == L"hide")
+        {
+            Chosen = EDisguiseView::Hide;
+        }
+        else if (Wanted == L"normal")
+        {
+            Chosen = EDisguiseView::Normal;
+        }
+    }
+    FString Message;
+    if (!Chosen)
+    {
+        Message = FString::Printf(TEXT("Your disguise view is \"%s\". Usage: disguiseview <back | hide | normal>: the camera pulls back for a disguise bigger than you, it is hidden from you (others still see it), or neither"),
+            DisguiseViewName(DisguiseView));
+    }
+    else
+    {
+        DisguiseView = *Chosen;
+        Message = DisguiseView == EDisguiseView::Back ? FString(TEXT("Your camera pulls back for a disguise bigger than you"))
+                : DisguiseView == EDisguiseView::Hide ? FString(TEXT("Your disguise is hidden from you; everyone else still sees it"))
+                                                      : FString(TEXT("You see your disguise as it is, from the usual distance"));
+    }
+    UE_LOG(LogFortDisguise, Log, TEXT("DisguiseView: %s"), *Message);
+    if (PlayerController)
+    {
+        // A client function called on its own client runs here.
+        PlayerController->ClientMessage(Message);
+    }
+    return true;
+#else
+    (void)PlayerController;
+    (void)Msg;
+    return false;
 #endif
 }

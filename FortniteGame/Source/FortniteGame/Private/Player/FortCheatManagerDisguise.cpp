@@ -1572,26 +1572,6 @@ void UFortCheatManager::Undisguise(const FString& Arguments)
 #if !UE_SERVER
 namespace
 {
-    class UGameplayStaticsActors : public UObject
-    {
-        DefineUnrealClass(UGameplayStatics, Engine)
-        DefineUFunction(GetAllActorsOfClass)
-
-    public:
-        static TArray<AActor*> GetAllActorsOfClass(UObject* WorldContextObject, UClass* ActorClass)
-        {
-            UFunction* Function = FindStaticFunction_GetAllActorsOfClass();
-            if (!Function || !StaticClass() || !ActorClass)
-            {
-                return TArray<AActor*>();
-            }
-            Reflection::FParams Params(Function);
-            Params.Set(L"WorldContextObject", WorldContextObject);
-            Params.Set(L"ActorClass", ActorClass);
-            return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<TArray<AActor*>>(L"OutActors") : TArray<AActor*>();
-        }
-    };
-
     class AActorAttachments : public UObject
     {
         DefineUnrealClass(AActor, Engine)
@@ -1961,7 +1941,7 @@ namespace
             }
         };
 
-        const TArray<AActor*> Pawns = UGameplayStaticsActors::GetAllActorsOfClass(World, APawn::StaticClass());
+        const TArray<AActor*> Pawns = UGameplayStatics::GetAllActorsOfClass(World, APawn::StaticClass());
         for (int32_t Index = 0; Index < Pawns.Num(); ++Index)
         {
             AActor* Pawn = Pawns[Index];

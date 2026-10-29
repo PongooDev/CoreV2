@@ -1925,10 +1925,11 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // Core's own commands, which no exec function of these builds has, run on the player they run on:
     // "spawnactor <class or path> [scale | x y z]" (#132) spawns an actor in front of them at a scale, "skin <HID or CID>"
     // (or "hero"; #134, #136) gives them a hero's look, "disguise <class> [scale]" and "undisguise" (#134, #136) turn them
-    // into a prop or a pawn.
+    // into a prop or a pawn, "tpactor <class, name or path> [n]" (#146) puts them on top of the nearest actor that matches.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
+        { L"tpactor", &UFortCheatManager::TpActor },
         { L"skin", &UFortCheatManager::Skin },
         { L"hero", &UFortCheatManager::Skin },
         { L"disguise", &UFortCheatManager::Disguise },

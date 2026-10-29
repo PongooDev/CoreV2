@@ -20,6 +20,7 @@
 #include "GameFramework/Pawn.h"
 #include "Items/FortItem.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
@@ -470,6 +471,7 @@ namespace
         { L"Player", L"Fly", L"Fly [speed]", L"fly, at the speed if you give one (\"fly 3000\"; Ghost [speed]: through walls too; Walk: walk again at your own speed)", ECheatMode::Both },
         { L"Player", L"TestInfJumps", L"TestInfJumps", L"jump again in the air, any number of times (toggles)", ECheatMode::Both },
         { L"Player", L"Teleport", L"Teleport", L"to where you look (TeleportToLocation <x> <y> <z>, TeleportToActor <class or name>)", ECheatMode::Both },
+        { L"Player", nullptr, L"TpActor <class, name or path> [n]", L"onto the nearest actor that matches, on top of it or the floor under it, never under the map (n: the nth nearest; \"tpactor Tiered_Chest 2\")", ECheatMode::Both },
         { L"Player", L"ChangeSize", L"ChangeSize <scale>", L"your size", ECheatMode::Both },
         { L"Player", nullptr, L"Skin <HID or CID | reset>", L"wear a hero's or outfit's look, seen by everyone, cosmetic only (\"skin HID_Ninja_007_R_T01\", \"skin CID_005_Athena_Commando_M_Default\"; Hero: the same)", ECheatMode::Both },
         { L"Player", nullptr, L"Disguise <class, path or mesh> [scale | HID]", L"turn into a prop (\"disguise Bathroom_ToiletBowl01\"), walk around as a husk (\"disguise HuskPawn\") or play a hero class's pawn with its abilities (\"disguise PlayerPawn_Ninja\"); Undisguise: be yourself again", ECheatMode::Both },
@@ -1468,6 +1470,181 @@ void UFortCheatManager::SpawnActor(const FString& Arguments)
     Reply(FString::Printf(TEXT("Spawned %s (%s)%s%s"), *Actor->GetName(), *Class->GetPathName(),
         bScaled ? *FString::Printf(TEXT(" at scale %s"), *ScaleText) : TEXT(", which has no root component to scale"),
         !bReplicates ? TEXT("; it doesn't replicate, so only the server has it") : bReplicatedByDefault ? TEXT("") : TEXT("; Core made it replicate, as it didn't")));
+#endif
+}
+
+void UFortCheatManager::TpActor(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // #146. The actors are those whose class (or a parent class) has the name or part of it, or whose own name has it;
+    // a path means that class and its subclasses. Index 1 is the nearest, 2 the next, and so on.
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const FString Usage = TEXT("Usage: tpactor <class, name or path> [n], n 1 for the nearest (the default), 2 for the next (\"tpactor Tiered_Chest\", \"tpactor BuildingContainer 3\")");
+    if (Words.empty() || Words.size() > 2)
+    {
+        Reply(Usage);
+        return;
+    }
+    int32_t Wanted = 1;
+    if (Words.size() == 2)
+    {
+        wchar_t* End = nullptr;
+        const long Value = std::wcstol(Words[1].c_str(), &End, 10);
+        if (!End || *End != L'\0' || Value < 1 || Value > 1000000)
+        {
+            Reply(Usage);
+            return;
+        }
+        Wanted = static_cast<int32_t>(Value);
+    }
+
+    AFortPlayerController* PlayerController = GetPlayerController();
+    APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+    if (!Pawn)
+    {
+        Reply(TEXT("No pawn to teleport"));
+        return;
+    }
+    if (!UGameplayStatics::FindStaticFunction_GetAllActorsOfClass())
+    {
+        Reply(TEXT("TpActor needs GameplayStatics.GetAllActorsOfClass, which this build doesn't have"));
+        return;
+    }
+
+    const std::wstring& Query = Words[0];
+    std::vector<AActor*> Matches;
+    const auto IsCandidate = [&](const AActor* Actor)
+    {
+        // Not the player's own pawn or what it carries, nor what has no place in the world (infos, controllers).
+        return Actor && Actor != Pawn && Actor->GetRootComponent() && Actor->GetOwner() != Pawn && Actor->GetOwner() != PlayerController;
+    };
+    if (Query.find(L'/') != std::wstring::npos)
+    {
+        UClass* Class = FindActorClass(Query);
+        if (!Class || !Class->IsChildOf(AActor::StaticClass()))
+        {
+            Reply(FString::Printf(TEXT("No actor class at '%s'"), Query.c_str()));
+            return;
+        }
+        for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(Pawn, Class))
+        {
+            if (IsCandidate(Actor))
+            {
+                Matches.push_back(Actor);
+            }
+        }
+    }
+    else
+    {
+        const std::wstring Term = Simplified(Query);
+        if (Term.empty())
+        {
+            Reply(Usage);
+            return;
+        }
+        // Each class is checked once: its name or a parent's, up to AActor.
+        std::map<UClass*, bool> ClassMatches;
+        const auto ClassMatch = [&](UClass* Class)
+        {
+            const auto Found = ClassMatches.find(Class);
+            if (Found != ClassMatches.end())
+            {
+                return Found->second;
+            }
+            bool bMatch = false;
+            for (UClass* Super = Class; Super && !bMatch; Super = Super == AActor::StaticClass() ? nullptr : Super->GetSuperClass())
+            {
+                bMatch = Simplified(Super->GetName().ToStdString()).find(Term) != std::wstring::npos;
+            }
+            ClassMatches.emplace(Class, bMatch);
+            return bMatch;
+        };
+        for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(Pawn, AActor::StaticClass()))
+        {
+            if (IsCandidate(Actor) && (ClassMatch(Actor->GetClass()) || Simplified(Actor->GetName().ToStdString()).find(Term) != std::wstring::npos))
+            {
+                Matches.push_back(Actor);
+            }
+        }
+    }
+    if (Matches.empty())
+    {
+        Reply(FString::Printf(TEXT("No actor in the world matches '%s' (give part of its class or its name)"), Query.c_str()));
+        return;
+    }
+    if (Wanted > static_cast<int32_t>(Matches.size()))
+    {
+        Reply(FString::Printf(TEXT("Only %d actors match '%s'"), static_cast<int32_t>(Matches.size()), Query.c_str()));
+        return;
+    }
+
+    const FVector PawnLocation = Pawn->GetTransform().GetLocation();
+    const auto DistanceSquared = [&](const FVector& Location)
+    {
+        return FMath::Square(Location.X - PawnLocation.X) + FMath::Square(Location.Y - PawnLocation.Y) + FMath::Square(Location.Z - PawnLocation.Z);
+    };
+    std::vector<std::pair<float, AActor*>> ByDistance;
+    ByDistance.reserve(Matches.size());
+    for (AActor* Actor : Matches)
+    {
+        ByDistance.emplace_back(DistanceSquared(Actor->GetTransform().GetLocation()), Actor);
+    }
+    std::nth_element(ByDistance.begin(), ByDistance.begin() + (Wanted - 1), ByDistance.end(),
+        [](const auto& A, const auto& B) { return A.first < B.first; });
+    AActor* Target = ByDistance[Wanted - 1].second;
+
+    // On top of it: its bounds (what collides, else all of it) give its top, and a trace down from just over that lands
+    // the pawn on what is there, the actor itself or the floor under one that doesn't collide. An actor under the map
+    // finds nothing below it, so the trace goes again from high above, down to the ground over it. The pawn's feet go on
+    // the hit, and the engine's TeleportTo moves it out of anything it would stand in.
+    constexpr float TraceClearance = 100.0f;
+    constexpr float TraceHeight = 50000.0f;
+    constexpr float TraceDepth = 100000.0f;
+    FVector Origin;
+    FVector Extent;
+    Target->GetActorBounds(true, Origin, Extent);
+    if (Extent.X <= 0.0f && Extent.Y <= 0.0f && Extent.Z <= 0.0f)
+    {
+        Target->GetActorBounds(false, Origin, Extent);
+    }
+    if ((Extent.X <= 0.0f && Extent.Y <= 0.0f && Extent.Z <= 0.0f) || Extent.Z > TraceHeight)
+    {
+        Origin = Target->GetTransform().GetLocation();
+        Extent = FVector(0.0f, 0.0f, 0.0f);
+    }
+    FVector PawnOrigin;
+    FVector PawnExtent;
+    Pawn->GetActorBounds(true, PawnOrigin, PawnExtent);
+    // How far the pawn's location is over its feet (its capsule's half height; a standing player's 90 if it has none).
+    const float FeetOffset = PawnExtent.Z > 0.0f ? PawnLocation.Z - (PawnOrigin.Z - PawnExtent.Z) : 90.0f;
+    const float Top = Origin.Z + Extent.Z;
+    const float Bottom = Origin.Z - Extent.Z;
+    FVector Floor;
+    bool bFloor = UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Origin.X, Origin.Y, Top + TraceClearance), FVector(Origin.X, Origin.Y, Bottom - TraceDepth), 0, false, true, Floor);
+    bool bAboveMap = false;
+    if (!bFloor)
+    {
+        bFloor = UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Origin.X, Origin.Y, Top + TraceHeight), FVector(Origin.X, Origin.Y, Bottom - TraceDepth), 0, false, true, Floor);
+        bAboveMap = bFloor && Floor.Z > Top;
+    }
+    const FVector Destination = bFloor ? FVector(Floor.X, Floor.Y, Floor.Z + FeetOffset + 2.0f) : FVector(Origin.X, Origin.Y, Top + FeetOffset + TraceClearance);
+    const FRotator Rotation = Pawn->GetActorRotation();
+    bool bTeleported = false;
+    for (int32_t Attempt = 0; Attempt < 4 && !bTeleported; ++Attempt)
+    {
+        bTeleported = Pawn->TeleportTo(FVector(Destination.X, Destination.Y, Destination.Z + 100.0f * static_cast<float>(Attempt)), Rotation);
+    }
+    const FString What = FString::Printf(TEXT("%s (%s), %d of %d matching"), *Target->GetName(), *Target->GetClass()->GetName(), Wanted, static_cast<int32_t>(Matches.size()));
+    if (!bTeleported)
+    {
+        Reply(FString::Printf(TEXT("Can't teleport on top of %s: there's no room there"), *What));
+        return;
+    }
+    const float Distance = std::sqrt(ByDistance[Wanted - 1].first) / 100.0f;
+    UE_LOG(LogFortCheats, Log, TEXT("TpActor: %s to %s at X=%.1f Y=%.1f Z=%.1f (floor %d, above the map %d)"), *GetNameSafe(PlayerController), *What,
+        Destination.X, Destination.Y, Destination.Z, bFloor ? 1 : 0, bAboveMap ? 1 : 0);
+    Reply(FString::Printf(TEXT("Teleported to %s, %.0fm away%s"), *What, Distance,
+        bAboveMap ? TEXT("; it's under the map, so onto the ground over it") : bFloor ? TEXT("") : TEXT("; no floor found under it, so just over it")));
 #endif
 }
 

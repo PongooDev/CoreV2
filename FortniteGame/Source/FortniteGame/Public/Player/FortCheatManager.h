@@ -120,6 +120,9 @@ public:
     void SpawnActor(const FString& Arguments);
     // The actor class a name or path means (SpawnActor's lookup, loading the class when a path names one not loaded).
     static UClass* FindActorClass(const std::wstring& Query);
+    // Core's own command, "cheat tpactor <class, name or path> [n]" (#146): the player's pawn goes on top of the nearest
+    // (or nth nearest) actor that matches, traced down to what is there so it doesn't land inside it or under the map.
+    void TpActor(const FString& Arguments);
 
     // Core's own command, "cheat skin <HID or CID | reset>" ("cheat hero" too; #134, #136): the player wears that hero's
     // look (a Save the World HID_*, a Battle Royale HID_*_Athena_*, or a CID_* outfit's hero), replicated to everyone.

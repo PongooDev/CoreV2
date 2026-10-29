@@ -58,6 +58,16 @@ bool AActor::SetActorLocation(const FVector& NewLocation, bool bSweep, bool bTel
     return Params.Call(this) && Params.Take<bool>(L"ReturnValue");
 }
 
+bool AActor::SetActorLocationAndRotation(const FVector& NewLocation, const FRotator& NewRotation, bool bSweep, bool bTeleport)
+{
+    Reflection::FParams Params(StaticFunction_K2_SetActorLocationAndRotation(), true);
+    Params.Set(L"NewLocation", NewLocation);
+    Params.Set(L"NewRotation", NewRotation);
+    Params.Set(L"bSweep", bSweep);
+    Params.Set(L"bTeleport", bTeleport);
+    return Params.Call(this) && Params.Take<bool>(L"ReturnValue");
+}
+
 FRotator AActor::GetActorRotation() const
 {
     Reflection::FParams Params(StaticFunction_K2_GetActorRotation());

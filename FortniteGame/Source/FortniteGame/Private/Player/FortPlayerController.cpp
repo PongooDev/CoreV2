@@ -321,11 +321,11 @@ void AFortPlayerController::Possess(APawn* InPawn)
         }
     }
 
-    // "cheat hero" (#134): after a respawn, the hero the player chose instead of the one SetupHero put back. Only its
-    // look: the attributes above stay the Battle Royale hero's.
-    if (AthenaController)
+    // "cheat skin" (#134, #136): after a respawn, the look the player chose instead of the one the hero (Battle Royale's
+    // SetupHero above) put back. Only its look: the attributes above stay the player's own hero's.
+    if (PossessedPlayerPawn && !bDisguisePossess)
     {
-        UFortCheatManager::ReapplyHeroSwap(this);
+        UFortCheatManager::ReapplySkin(this);
     }
 
     // 1.8: the backpack size and the pickaxe come with the loadout, made when the pawn first spawns.
@@ -1713,12 +1713,14 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
     }
 
     // Core's own commands, which no exec function of these builds has, run on the player they run on:
-    // "spawnactor <class or path> [scale | x y z]" (#132) spawns an actor in front of them at a scale, "hero <HID or CID>"
-    // (#134) dresses them as a hero, "disguise <class> [scale]" and "undisguise" (#134) turn them into a prop or a pawn.
+    // "spawnactor <class or path> [scale | x y z]" (#132) spawns an actor in front of them at a scale, "skin <HID or CID>"
+    // (or "hero"; #134, #136) gives them a hero's look, "disguise <class> [scale]" and "undisguise" (#134, #136) turn them
+    // into a prop or a pawn.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
-        { L"hero", &UFortCheatManager::HeroSwap },
+        { L"skin", &UFortCheatManager::Skin },
+        { L"hero", &UFortCheatManager::Skin },
         { L"disguise", &UFortCheatManager::Disguise },
         { L"undisguise", &UFortCheatManager::Undisguise },
     };

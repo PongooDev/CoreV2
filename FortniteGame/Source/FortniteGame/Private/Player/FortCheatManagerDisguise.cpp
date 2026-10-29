@@ -44,8 +44,9 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortDisguise, Log, All);
 
-// "cheat hero" and "cheat disguise" / "cheat undisguise" (#134). Everything here goes through the game's and the engine's
-// own functions (UFunctions through reflection, and Core's existing SetHeroType and Possess wrappers); nothing is hooked.
+// "cheat skin" ("cheat hero") and "cheat disguise" / "cheat undisguise" (#134, #136). Everything here goes through the
+// game's and the engine's own functions (UFunctions through reflection, and Core's existing SetHeroType, Possess and
+// ApplyHeroAbilityKitItems); nothing is hooked.
 
 namespace
 {
@@ -313,14 +314,6 @@ namespace
         return Best;
     }
 
-    // Battle Royale's own heroes (1.8's HID_*_Athena_Commando_* under /Game/Athena, 1.7.2's HID_Commando_Athena_*) are
-    // only looks: their kits are Save the World's soldier perks.
-    bool IsBattleRoyaleHero(const UFortHeroType* HeroType)
-    {
-        const std::wstring Path = Lower(HeroType->GetPathName().ToStdString());
-        return Path.find(L"/athena/") != std::wstring::npos || Lower(HeroType->GetName().ToStdString()).find(L"athena") != std::wstring::npos;
-    }
-
     // The kits of every slot of the hero's specializations (its perks, abilities and their upgrades), as at its highest
     // level: a slot's kit replaces the one it names as removed.
     std::vector<UFortAbilityKit*> SpecializationKits(const TArray<UFortHeroSpecialization*>& Specializations)
@@ -449,57 +442,36 @@ namespace
         Handle.clear();
     }
 
-    // Battle Royale: the hero a player chose, worn again after each respawn, and the kits Core equipped for it.
-    struct FHeroSwap
+    // Every kit a hero brings (its specializations' perks and abilities, and its class's own): what "cheat disguise" gives
+    // a player pawn's disguise.
+    std::vector<UFortAbilityKit*> HeroKits(UFortHeroType* HeroType, UFortHero* Hero)
+    {
+        std::vector<UFortAbilityKit*> Kits = SpecializationKits(Hero->Specializations);
+        const TStructArray<FHeroAbilityKit>& ClassKits = HeroType->AbilityKits;
+        for (int32_t Index = 0; Index < ClassKits.Num(); ++Index)
+        {
+            const TAssetPtr<UFortAbilityKit>& InherentKit = ClassKits[Index].InherentAbilityKit;
+            if (UFortAbilityKit* Kit = InherentKit.LoadSynchronous(); Kit && std::find(Kits.begin(), Kits.end(), Kit) == Kits.end())
+            {
+                Kits.push_back(Kit);
+            }
+        }
+        return Kits;
+    }
+
+    // The skin a player chose, worn again after each respawn.
+    struct FSkin
     {
         TWeakObjectPtr<AFortPlayerController> Controller;
         std::wstring HeroTypePath;
-        std::vector<std::vector<uint8_t>> KitHandles;
     };
-    std::vector<FHeroSwap> HeroSwaps;
+    std::vector<FSkin> Skins;
 
-    // Save the World: the hero the player had before the first "cheat hero", for "cheat hero reset".
-    struct FOriginalHero
+    FSkin* FindSkin(const AFortPlayerController* PlayerController)
     {
-        TWeakObjectPtr<AFortPlayerController> Controller;
-        TWeakObjectPtr<UFortHero> Hero;
-    };
-    std::vector<FOriginalHero> OriginalHeroes;
-
-    void ForgetDepartedPlayers()
-    {
-        std::erase_if(HeroSwaps, [](FHeroSwap& Swap)
-        {
-            if (Swap.Controller.IsValid())
-            {
-                return false;
-            }
-            for (std::vector<uint8_t>& Handle : Swap.KitHandles)
-            {
-                UnequipKit(Handle);
-            }
-            return true;
-        });
-        std::erase_if(OriginalHeroes, [](const FOriginalHero& Original) { return !Original.Controller.IsValid(); });
-    }
-
-    FHeroSwap* FindHeroSwap(const AFortPlayerController* PlayerController)
-    {
-        auto Found = std::find_if(HeroSwaps.begin(), HeroSwaps.end(), [PlayerController](const FHeroSwap& Swap) { return Swap.Controller.Get() == PlayerController; });
-        return Found != HeroSwaps.end() ? &*Found : nullptr;
-    }
-
-    // Takes the kits of the player's last swap off and forgets it.
-    void ForgetHeroSwap(const AFortPlayerController* PlayerController)
-    {
-        if (FHeroSwap* Swap = FindHeroSwap(PlayerController))
-        {
-            for (std::vector<uint8_t>& Handle : Swap->KitHandles)
-            {
-                UnequipKit(Handle);
-            }
-            HeroSwaps.erase(HeroSwaps.begin() + (Swap - HeroSwaps.data()));
-        }
+        std::erase_if(Skins, [](const FSkin& Skin) { return !Skin.Controller.IsValid(); });
+        auto Found = std::find_if(Skins.begin(), Skins.end(), [PlayerController](const FSkin& Skin) { return Skin.Controller.Get() == PlayerController; });
+        return Found != Skins.end() ? &*Found : nullptr;
     }
 
     // ------------------------------------------------------------------------------------------------------------------
@@ -511,7 +483,7 @@ namespace
     constexpr uint8_t MOVE_Walking = 1;
     constexpr uint8_t MOVE_Falling = 3;
 
-    // A static mesh (for a prop made of any mesh) and the components and props that show one.
+    // A static mesh (for a prop made of any mesh) and the components that show one.
     class UStaticMeshType : public UObject
     {
         DefineUnrealClass(UStaticMesh, Engine)
@@ -523,11 +495,27 @@ namespace
         DefineUFunction(SetStaticMesh)
 
     public:
+        DefineUProperty(UObject*, StaticMesh)
+
         bool SetStaticMesh(UObject* NewMesh)
         {
             Reflection::FParams Params(FindStaticFunction_SetStaticMesh());
             Params.Set(L"NewMesh", NewMesh);
             return Params.Call(this) && Params.Take<bool>(L"ReturnValue");
+        }
+    };
+
+    class USceneComponentFunctions : public UObject
+    {
+        DefineUnrealClass(USceneComponent, Engine)
+        DefineUFunction(SetRelativeScale3D)
+
+    public:
+        void SetRelativeScale3D(const FVector& NewScale3D)
+        {
+            Reflection::FParams Params(FindStaticFunction_SetRelativeScale3D());
+            Params.Set(L"NewScale3D", NewScale3D);
+            Params.Call(this);
         }
     };
 
@@ -545,43 +533,66 @@ namespace
         }
     };
 
-    // A world prop (a toilet, a barrel, a tree...): a building actor whose mesh (StaticMesh, replicated) any mesh can be.
-    class ABuildingPropType : public AActor
-    {
-        DefineUnrealClass(ABuildingProp, FortniteGame)
-    };
-
+    // A building (a world prop: a toilet, a barrel, a tree...): its mesh is its StaticMesh. Its StaticMeshComponent is
+    // static (ABuildingSMActor's constructor, 1.7.2 0x45A620, sets the component's Mobility to Static), so it can't be
+    // attached to anything that moves: a client refuses (USceneComponent::AttachToComponent, 1.7.2 0x2058350,
+    // "NoStaticToDynamicWarning"), and SetStaticMesh refuses a static component after play has begun.
     class ABuildingSMActorMesh : public AActor
     {
         DefineUnrealClass(ABuildingSMActor, FortniteGame)
 
     public:
         DefineUProperty(UObject*, StaticMesh)
-        DefineUProperty(UObject*, StaticMeshComponent)
+    };
 
-        static bool HasMesh() { return Member_StaticMesh.IsAvailable() && Member_StaticMeshComponent.IsAvailable(); }
+    // The engine's default pawn: a movable sphere root and a movable mesh component, replicated. It carries a prop's mesh
+    // on the player's back: its mesh component replicates the mesh (StaticMesh) and its scale, its root the attachment.
+    class ADefaultPawnType : public APawn
+    {
+        DefineUnrealClass(ADefaultPawn, Engine)
+
+    public:
+        DefineUProperty(UObject*, MeshComponent)
+
+        static bool HasMeshComponent() { return Member_MeshComponent.IsAvailable(); }
+    };
+
+    enum class EDisguiseKind : uint8_t
+    {
+        // A prop riding on the hidden pawn: the actor itself, or a carrier with its mesh.
+        Prop,
+        // A pawn (a husk) that walks where the hidden pawn walks, with its own animations; the player keeps their pawn.
+        Puppet,
+        // A player pawn class the player possesses, with its hero's abilities; their own pawn waits hidden.
+        Possessed,
     };
 
     struct FDisguise
     {
         TWeakObjectPtr<AFortPlayerController> Controller;
-        // The player's own pawn: hidden (with its weapon), out of the way and invulnerable meanwhile, following the
-        // disguise pawn.
+        EDisguiseKind Kind = EDisguiseKind::Prop;
+        // The player's own pawn: hidden (with its weapon) meanwhile. While possessing, also out of the way, invulnerable
+        // and following the disguise.
         TWeakObjectPtr<APawn> Original;
-        // A pawn disguise: the pawn the player plays meanwhile.
-        TWeakObjectPtr<APawn> Pawn;
-        // A prop disguise: the prop riding on the hidden pawn.
-        TWeakObjectPtr<AActor> Prop;
-        bool bProp = false;
-        bool bPlayerPawn = false;
+        // The prop, the carrier, the puppet or the possessed pawn.
+        TWeakObjectPtr<AActor> Actor;
         std::wstring Name;
         std::vector<TWeakObjectPtr<AActor>> HiddenWeapons;
+        // Possessed: where the disguise last stood, and the player's own pawn as it was.
         FVector LastLocation;
         float LastFeet = 0.0f;
         float OriginalHalfHeight = 0.0f;
         uint8_t OriginalMovementMode = MOVE_Walking;
         uint8_t OriginalCustomMovementMode = 0;
         bool bOriginalCanBeDamaged = true;
+        // Possessed: the hero kits equipped on the player state, and in Save the World the player's own hero, whose
+        // gadgets come back at the end.
+        std::vector<std::vector<uint8_t>> KitHandles;
+        bool bGaveGadgets = false;
+        TWeakObjectPtr<UFortHero> OwnHero;
+        // Puppet: its half height (its capsule centre over the player's feet) and the movement mode it shows.
+        float PuppetHalfHeight = 0.0f;
+        uint8_t PuppetMovementMode = MOVE_Walking;
     };
     std::vector<FDisguise> Disguises;
     bool bWatchingDisguises = false;
@@ -605,7 +616,7 @@ namespace
     void HideWeapon(FDisguise& Disguise, APawn* Pawn)
     {
         AFortPawn* FortPawn = Pawn ? Cast<AFortPawn>(reinterpret_cast<UObject*>(Pawn)) : nullptr;
-        AActor* Weapon = FortPawn ? reinterpret_cast<AActor*>(static_cast<AFortWeapon*>(FortPawn->CurrentWeapon)) : nullptr;
+        AActor* Weapon = FortPawn ? static_cast<AActor*>(static_cast<AFortWeapon*>(FortPawn->CurrentWeapon)) : nullptr;
         if (Weapon && !Weapon->bHidden)
         {
             Weapon->SetActorHiddenInGame(true);
@@ -631,7 +642,7 @@ namespace
         return Character ? static_cast<UCharacterMovementComponent*>(Character->CharacterMovement) : nullptr;
     }
 
-    // The player's own pawn while a pawn disguise is played: hidden, without collision or movement (it follows the
+    // The player's own pawn while they possess a disguise: hidden, without collision or movement (it follows the
     // disguise instead of falling through the floor) and out of harm's way.
     void ParkOriginal(FDisguise& Disguise, APawn* Original)
     {
@@ -674,12 +685,29 @@ namespace
         UFortCheatManager::bDisguisePossess = false;
     }
 
-    // Ends a prop disguise: the prop goes, the pawn shows again.
-    void EndPropDisguise(FDisguise& Disguise)
+    // Takes a possessed disguise's hero kits off, and in Save the World gives the player's own hero's gadgets back.
+    void TakeHeroKitsOff(FDisguise& Disguise)
     {
-        if (AActor* Prop = Disguise.Prop.Get())
+        for (std::vector<uint8_t>& Handle : Disguise.KitHandles)
         {
-            Prop->K2_DestroyActor();
+            UnequipKit(Handle);
+        }
+        Disguise.KitHandles.clear();
+        AFortPlayerController* PlayerController = Disguise.Controller.Get();
+        UFortHero* OwnHero = Disguise.OwnHero.Get();
+        if (PlayerController && Disguise.bGaveGadgets && OwnHero)
+        {
+            PlayerController->ApplyHeroAbilityKitItems(OwnHero);
+        }
+        Disguise.bGaveGadgets = false;
+    }
+
+    // Ends a prop or puppet disguise: the actor goes, the player's pawn shows again.
+    void EndShownDisguise(FDisguise& Disguise)
+    {
+        if (AActor* Actor = Disguise.Actor.Get())
+        {
+            Actor->K2_DestroyActor();
         }
         if (APawn* Original = Disguise.Original.Get())
         {
@@ -689,13 +717,14 @@ namespace
         }
     }
 
-    // Ends a pawn disguise: the player's own pawn comes back where the disguise stands and is possessed again, and the
-    // disguise pawn goes. Returns false when the player's own pawn is gone (they stay in the disguise).
-    bool EndPawnDisguise(FDisguise& Disguise)
+    // Ends a possessed disguise: the player's own pawn comes back where the disguise stands and is possessed again, the
+    // disguise pawn and its hero's kits go. Returns false when the player's own pawn is gone (they stay in the disguise).
+    bool EndPossessedDisguise(FDisguise& Disguise)
     {
+        TakeHeroKitsOff(Disguise);
         AFortPlayerController* PlayerController = Disguise.Controller.Get();
         APawn* Original = Disguise.Original.Get();
-        APawn* DisguisePawn = Disguise.Pawn.Get();
+        AActor* DisguisePawn = Disguise.Actor.Get();
         if (!Original || !PlayerController)
         {
             return false;
@@ -717,24 +746,46 @@ namespace
         return true;
     }
 
-    // Once a tick while anyone is disguised: the hidden pawn follows its disguise and stays hidden, and a disguise that
-    // died, lost its player or was replaced (a respawn) ends without leaving anything behind. Returns false when it ended.
+    // A puppet stands where the player's hidden pawn stands, faces its way, and moves at its velocity: on every client it
+    // is a simulated pawn moving at that speed, so its own animation Blueprint plays its walk, run and fall.
+    void MovePuppet(FDisguise& Disguise, APawn* Original, AActor* Puppet)
+    {
+        const FVector Location = ActorLocation(Original);
+        const FVector Placed(Location.X, Location.Y, FeetOf(Original) + Disguise.PuppetHalfHeight);
+        Puppet->SetActorLocationAndRotation(Placed, FRotator(0.0f, Original->GetActorRotation().Yaw, 0.0f), false, true);
+
+        UCharacterMovementComponent* PuppetMovement = MovementOf(static_cast<APawn*>(Puppet));
+        if (!PuppetMovement)
+        {
+            return;
+        }
+        PuppetMovement->Velocity = Original->GetVelocity();
+        UCharacterMovementComponent* OwnMovement = MovementOf(Original);
+        const uint8_t Mode = OwnMovement && static_cast<uint8_t>(OwnMovement->MovementMode) == MOVE_Falling ? MOVE_Falling : MOVE_Walking;
+        if (Mode != Disguise.PuppetMovementMode)
+        {
+            PuppetMovement->SetMovementMode(Mode);
+            Disguise.PuppetMovementMode = Mode;
+        }
+    }
+
+    // Once a tick while anyone is disguised: the hidden pawn stays hidden, a puppet follows it, a possessed disguise is
+    // followed by it, and a disguise that died, lost its player or was replaced (a respawn) ends without leaving anything
+    // behind. Returns false when it ended.
     bool TickDisguise(FDisguise& Disguise)
     {
         AFortPlayerController* PlayerController = Disguise.Controller.Get();
         APawn* Original = Disguise.Original.Get();
+        AActor* Actor = Disguise.Actor.Get();
         if (!PlayerController)
         {
-            // The player left: the game took their pawn (the disguise) with them, and the hidden one goes too.
-            if (AActor* Prop = Disguise.Prop.Get())
+            // The player left: the game took their pawn with them, and what Core spawned goes too.
+            TakeHeroKitsOff(Disguise);
+            if (Actor && (Disguise.Kind != EDisguiseKind::Possessed || !static_cast<APawn*>(Actor)->Controller))
             {
-                Prop->K2_DestroyActor();
+                Actor->K2_DestroyActor();
             }
-            if (APawn* DisguisePawn = Disguise.Pawn.Get(); DisguisePawn && !DisguisePawn->Controller)
-            {
-                DisguisePawn->K2_DestroyActor();
-            }
-            if (Original && !Original->Controller)
+            if (Disguise.Kind == EDisguiseKind::Possessed && Original && !Original->Controller)
             {
                 Original->K2_DestroyActor();
             }
@@ -742,17 +793,17 @@ namespace
         }
         APawn* Current = PlayerController->GetPawn();
 
-        if (Disguise.bProp)
+        if (Disguise.Kind != EDisguiseKind::Possessed)
         {
             if (!Original || Current != Original || IsDeadPawn(Original))
             {
-                EndPropDisguise(Disguise);
+                EndShownDisguise(Disguise);
                 Tell(PlayerController, FString::Printf(TEXT("You are no longer disguised as %s"), Disguise.Name.c_str()));
                 return false;
             }
-            if (!Disguise.Prop.IsValid())
+            if (!Actor || (Disguise.Kind == EDisguiseKind::Puppet && IsDeadPawn(static_cast<APawn*>(Actor))))
             {
-                EndPropDisguise(Disguise);
+                EndShownDisguise(Disguise);
                 Tell(PlayerController, FString::Printf(TEXT("Your %s is gone: you can be seen again"), Disguise.Name.c_str()));
                 return false;
             }
@@ -761,10 +812,14 @@ namespace
                 Original->SetActorHiddenInGame(true);
             }
             HideWeapon(Disguise, Original);
+            if (Disguise.Kind == EDisguiseKind::Puppet)
+            {
+                MovePuppet(Disguise, Original, Actor);
+            }
             return true;
         }
 
-        APawn* DisguisePawn = Disguise.Pawn.Get();
+        APawn* DisguisePawn = static_cast<APawn*>(Actor);
         const bool bDisguiseDied = DisguisePawn && IsDeadPawn(DisguisePawn);
         if (DisguisePawn && !bDisguiseDied && Current == DisguisePawn)
         {
@@ -777,10 +832,11 @@ namespace
             return true;
         }
 
-        // A player pawn's death was the player's own (the game eliminated them, knocked them out for good or respawns
-        // them), and a respawn possesses a new pawn: their hidden pawn isn't coming back.
-        if ((bDisguiseDied && Disguise.bPlayerPawn) || (Current && Current != DisguisePawn && Current != Original))
+        // A player pawn's death is the player's own (the game eliminates them, or downs and respawns them), and a respawn
+        // possesses a new pawn: their hidden pawn isn't coming back.
+        if (bDisguiseDied || (Current && Current != DisguisePawn && Current != Original))
         {
+            TakeHeroKitsOff(Disguise);
             if (Original && !Original->Controller)
             {
                 Original->K2_DestroyActor();
@@ -793,6 +849,7 @@ namespace
         // a new one, so the hidden one goes too.
         if (!DisguisePawn && !Current && IsInAircraftPhase(PlayerController))
         {
+            TakeHeroKitsOff(Disguise);
             if (Original && !Original->Controller)
             {
                 Original->K2_DestroyActor();
@@ -801,10 +858,9 @@ namespace
             return false;
         }
 
-        // A husk (or anything else that isn't a player) dying, or going away, only ends the disguise.
-        if (EndPawnDisguise(Disguise))
+        if (EndPossessedDisguise(Disguise))
         {
-            Tell(PlayerController, FString::Printf(TEXT("Your %s %s: you are yourself again"), Disguise.Name.c_str(), bDisguiseDied ? TEXT("died") : TEXT("is gone")));
+            Tell(PlayerController, FString::Printf(TEXT("Your %s is gone: you are yourself again"), Disguise.Name.c_str()));
         }
         return false;
     }
@@ -884,13 +940,68 @@ namespace
         return Query.front() == L'/' ? LoadQuietly<UStaticMeshType>(Query) : FindObject<UStaticMeshType>(ANY_PACKAGE, Query.c_str());
     }
 
-    AActor* SpawnDisguiseActor(APawn* Owner, UClass* Class, const FVector& Location, float Yaw, float Scale, ESpawnActorCollisionHandlingMethod Collision)
+    // The mesh an actor class shows, from its class default: a building's StaticMesh, else its root's when that is a
+    // static mesh component.
+    UObject* MeshOfClass(UClass* Class)
+    {
+        AActor* Default = static_cast<AActor*>(Class->GetDefaultObject());
+        if (!Default)
+        {
+            return nullptr;
+        }
+        if (ABuildingSMActorMesh::StaticClass() && reinterpret_cast<UObject*>(Default)->IsA(ABuildingSMActorMesh::StaticClass()))
+        {
+            if (UObject* Mesh = static_cast<ABuildingSMActorMesh*>(Default)->StaticMesh)
+            {
+                return Mesh;
+            }
+        }
+        UObject* Root = reinterpret_cast<UObject*>(Default->GetRootComponent());
+        if (Root && UStaticMeshComponentFunctions::StaticClass() && Root->IsA(UStaticMeshComponentFunctions::StaticClass()))
+        {
+            return static_cast<UStaticMeshComponentFunctions*>(Root)->StaticMesh;
+        }
+        return nullptr;
+    }
+
+    // The hero whose abilities a player pawn class's disguise brings: the one the player named, else the class's usual
+    // one (PlayerPawn_Ninja: a Ninja, ...).
+    UFortHeroType* HeroForPawnClass(UClass* Class, const std::wstring& Named, std::wstring& OutFound)
+    {
+        if (!Named.empty())
+        {
+            return FindHeroType(Named, OutFound);
+        }
+        const std::wstring ClassName = Lower(Class->GetName().ToStdString());
+        constexpr std::pair<const wchar_t*, const wchar_t*> ClassHeroes[] = {
+            { L"ninja", L"HID_Ninja_SlashTail_UC_T01" },
+            { L"constructor", L"HID_Constructor_HammerTank_UC_T01" },
+            { L"outlander", L"HID_Outlander_PunchPhase_UC_T01" },
+            { L"commando", L"HID_Commando_GrenadeGun_UC_T01" },
+            { L"soldier", L"HID_Commando_GrenadeGun_UC_T01" },
+        };
+        for (const auto& [Token, Hero] : ClassHeroes)
+        {
+            if (ClassName.find(Token) != std::wstring::npos)
+            {
+                return FindHeroType(Hero, OutFound);
+            }
+        }
+        return nullptr;
+    }
+
+    AActor* SpawnDisguiseActor(APawn* Owner, UClass* Class, const FVector& Location, float Yaw, float Scale, ESpawnActorCollisionHandlingMethod Collision, bool bWithoutAI)
     {
         FTransform SpawnTransform;
         SpawnTransform.Rotation = FRotator(0.0f, Yaw, 0.0f).Quaternion();
         SpawnTransform.Translation = Location;
         SpawnTransform.Scale3D = FVector(Scale, Scale, Scale);
         AActor* Spawned = UGameplayStatics::BeginDeferredActorSpawnFromClass(Owner, Class, SpawnTransform, Collision);
+        // A puppet gets no AI controller: FinishSpawning gives a pawn one when AutoPossessAI says so.
+        if (Spawned && bWithoutAI && reinterpret_cast<UObject*>(Spawned)->IsA(APawn::StaticClass()))
+        {
+            static_cast<APawn*>(Spawned)->AutoPossessAI = 0;
+        }
         Spawned = Spawned ? UGameplayStatics::FinishSpawningActor(Spawned, SpawnTransform) : nullptr;
         if (Spawned && Spawned->GetRootComponent() && Scale != 1.0f)
         {
@@ -898,50 +1009,77 @@ namespace
         }
         return Spawned;
     }
+
+    // A carrier for a mesh: the engine's default pawn, without collision, its mesh component showing the mesh at the
+    // scale and replicating both.
+    AActor* SpawnMeshCarrier(APawn* Owner, UObject* Mesh, const FVector& Location, float Yaw, float Scale)
+    {
+        UClass* CarrierClass = ADefaultPawnType::StaticClass();
+        if (!CarrierClass || !ADefaultPawnType::HasMeshComponent() || !UStaticMeshComponentFunctions::FindStaticFunction_SetStaticMesh())
+        {
+            return nullptr;
+        }
+        AActor* Carrier = SpawnDisguiseActor(Owner, CarrierClass, Location, Yaw, 1.0f, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true);
+        UObject* MeshComponent = Carrier ? static_cast<UObject*>(static_cast<ADefaultPawnType*>(Carrier)->MeshComponent) : nullptr;
+        if (!MeshComponent || !static_cast<UStaticMeshComponentFunctions*>(MeshComponent)->SetStaticMesh(Mesh))
+        {
+            if (Carrier)
+            {
+                Carrier->K2_DestroyActor();
+            }
+            return nullptr;
+        }
+        // The default pawn shows its sphere at 35/160 of its size.
+        static_cast<USceneComponentFunctions*>(MeshComponent)->SetRelativeScale3D(FVector(Scale, Scale, Scale));
+        static_cast<UActorComponentFunctions*>(MeshComponent)->SetIsReplicated(true);
+        return Carrier;
+    }
 }
 
-void UFortCheatManager::HeroSwap(const FString& Arguments)
+void UFortCheatManager::Skin(const FString& Arguments)
 {
 #if WITH_SERVER_CODE
     const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
     if (Words.size() != 1)
     {
-        Reply(TEXT("Usage: hero <HID or CID | reset> (\"hero HID_Ninja_007_R_T01\", \"hero CID_005_Athena_Commando_M_Default\", or its path)"));
+        Reply(TEXT("Usage: skin <HID or CID | reset> (\"skin HID_Ninja_007_R_T01\", \"skin CID_005_Athena_Commando_M_Default\", or its path)"));
         return;
     }
     AFortPlayerController* PlayerController = GetPlayerController();
     AFortPlayerState* PlayerState = FortPlayerStateOf(PlayerController);
     if (!PlayerController || !PlayerState)
     {
-        Reply(TEXT("Hero needs a player with a player state"));
+        Reply(TEXT("Skin needs a player with a player state"));
         return;
     }
-    ForgetDepartedPlayers();
-    const bool bBattleRoyale = AFortGameModeAthena::GetCurrent(PlayerController) != nullptr;
+    if (!AFortPlayerState::CanSetHeroType())
+    {
+        Reply(TEXT("This server can't set a look (AFortPlayerState::SetHeroType wasn't found)"));
+        return;
+    }
     const std::wstring Query = Words[0];
 
     if (Lower(Query) == L"reset" || Lower(Query) == L"default" || Lower(Query) == L"off")
     {
-        if (bBattleRoyale)
+        // The player's own look: Battle Royale's hero (SetupHero sets it again), else the hero their pawn plays.
+        std::erase_if(Skins, [PlayerController](const FSkin& Skin) { return Skin.Controller.Get() == PlayerController; });
+        AFortPlayerControllerAthena* AthenaController = AFortGameModeAthena::GetCurrent(PlayerController) ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(PlayerController)) : nullptr;
+        UFortHero* Hero = nullptr;
+        if (AthenaController && AthenaController->PlaysBattleRoyaleHeroes())
         {
-            ForgetHeroSwap(PlayerController);
-            AFortPlayerControllerAthena* AthenaController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(PlayerController));
-            UFortHero* Hero = AthenaController && AthenaController->PlaysBattleRoyaleHeroes() ? AthenaController->SetupHero() : nullptr;
-            PlayerState->ForceNetUpdate();
-            Reply(Hero ? FString::Printf(TEXT("You wear %s again"), *GetNameSafe(Hero->GetHeroTypeBP())) : FString(TEXT("Your own hero isn't known yet; you wear it again when you respawn")));
-            return;
+            Hero = AthenaController->SetupHero();
         }
-        auto Original = std::find_if(OriginalHeroes.begin(), OriginalHeroes.end(), [PlayerController](const FOriginalHero& Entry) { return Entry.Controller.Get() == PlayerController; });
-        UFortHero* Hero = Original != OriginalHeroes.end() ? Original->Hero.Get() : nullptr;
-        if (!Hero || !AFortPlayerController::CanTrySetHero())
+        else if (AFortPlayerPawn* PlayerPawn = Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(PlayerController->GetPawn())))
         {
-            Reply(TEXT("No hero to go back to (you haven't changed hero since you joined)"));
-            return;
+            const TWeakObjectPtr<UFortHero>& OwnHero = PlayerPawn->Hero;
+            Hero = OwnHero.Get();
+            if (Hero)
+            {
+                PlayerState->SetHeroType(Hero);
+            }
         }
-        PlayerController->TrySetHeroImplementation(Hero, false, false);
-        OriginalHeroes.erase(Original);
         PlayerState->ForceNetUpdate();
-        Reply(FString::Printf(TEXT("You play %s again"), *GetNameSafe(Hero->GetHeroTypeBP())));
+        Reply(Hero ? FString::Printf(TEXT("You wear %s again"), *GetNameSafe(Hero->GetHeroTypeBP())) : FString(TEXT("Your own look comes back when you respawn")));
         return;
     }
 
@@ -952,98 +1090,44 @@ void UFortCheatManager::HeroSwap(const FString& Arguments)
         Reply(FString::Printf(TEXT("No hero or outfit called '%s' (an HID_* or CID_* name, or its path: /Game/Heroes/Ninja/ItemDefinition/HID_Ninja_007_R_T01)"), Query.c_str()));
         return;
     }
-    if (!AFortPlayerState::CanSetHeroType())
-    {
-        Reply(TEXT("This server can't set a hero (AFortPlayerState::SetHeroType wasn't found)"));
-        return;
-    }
     UFortHero* Hero = CreateHero(HeroType);
     if (!Hero)
     {
         Reply(FString::Printf(TEXT("Couldn't make a hero of %s"), *HeroType->GetName()));
         return;
     }
-    const FString Shown = Found.empty() || Lower(Found) == Lower(HeroType->GetName().ToStdString()) ? HeroType->GetName() : FString::Printf(TEXT("%s (%s)"), Found.c_str(), *HeroType->GetName());
 
-    if (!bBattleRoyale)
-    {
-        // Save the World plays the hero: TrySetHeroImplementation sets its look and its effects, abilities and perks,
-        // and Core gives its gadgets (ApplyHeroAbilityKitItems). Its pawn class (a Ninja's) comes with the next pawn.
-        if (!AFortPlayerController::CanTrySetHero())
-        {
-            Reply(TEXT("This server can't set a hero (AFortPlayerController::TrySetHeroImplementation wasn't found)"));
-            return;
-        }
-        AFortPlayerPawn* PlayerPawn = Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(PlayerController->GetPawn()));
-        const bool bRemembered = std::any_of(OriginalHeroes.begin(), OriginalHeroes.end(), [PlayerController](const FOriginalHero& Entry) { return Entry.Controller.Get() == PlayerController; });
-        if (!bRemembered && PlayerPawn)
-        {
-            const TWeakObjectPtr<UFortHero>& OwnHero = PlayerPawn->Hero;
-            OriginalHeroes.push_back({ TWeakObjectPtr<AFortPlayerController>(PlayerController), OwnHero });
-        }
-        PlayerController->TrySetHeroImplementation(Hero, false, false);
-        PlayerState->ForceNetUpdate();
-        Reply(FString::Printf(TEXT("You play %s, with %d perk and ability kits; its own pawn (and its animations) comes with your next respawn. \"cheat hero reset\" goes back"),
-            *Shown, static_cast<int32_t>(static_cast<TArray<UFortAbilityKit*>&>(Hero->SpecializationAbilityKits).Num())));
-        return;
-    }
-
-    // Battle Royale: the player keeps their Battle Royale hero (its health, shield and backpack, #73), and wears this one:
-    // SetHeroType gives the player state its character parts and gender, which replicate to every client
-    // (OnRep_CharacterParts puts them on the pawn). A Save the World hero's perks and abilities go on the player state's
-    // ability system as the kits of its specializations and class (Mantis Leap's double jump, ...).
-    ForgetHeroSwap(PlayerController);
+    // Only the look (#136): SetHeroType gives the player state the hero's character parts and gender, which replicate to
+    // every client (OnRep_CharacterParts puts them on the pawn). The player keeps playing their own hero: its health,
+    // shield, perks and abilities.
     PlayerState->SetHeroType(Hero);
     PlayerState->ForceNetUpdate();
-
-    FHeroSwap Swap;
-    Swap.Controller = TWeakObjectPtr<AFortPlayerController>(PlayerController);
-    Swap.HeroTypePath = HeroType->GetPathName().ToStdString();
-    int32_t Equipped = 0;
-    std::wstring KitNames;
-    if (!IsBattleRoyaleHero(HeroType))
+    FSkin* Skin = FindSkin(PlayerController);
+    if (!Skin)
     {
-        std::vector<UFortAbilityKit*> Kits = SpecializationKits(Hero->Specializations);
-        const TStructArray<FHeroAbilityKit>& ClassKits = HeroType->AbilityKits;
-        for (int32_t Index = 0; Index < ClassKits.Num(); ++Index)
-        {
-            const TAssetPtr<UFortAbilityKit>& InherentKit = ClassKits[Index].InherentAbilityKit;
-            if (UFortAbilityKit* Kit = InherentKit.LoadSynchronous(); Kit && std::find(Kits.begin(), Kits.end(), Kit) == Kits.end())
-            {
-                Kits.push_back(Kit);
-            }
-        }
-        for (UFortAbilityKit* Kit : Kits)
-        {
-            std::vector<uint8_t> Handle;
-            if (EquipKit(PlayerState, Kit, Handle))
-            {
-                Swap.KitHandles.push_back(std::move(Handle));
-                KitNames += (KitNames.empty() ? L"" : L", ") + Kit->GetName().ToStdString();
-                ++Equipped;
-            }
-        }
+        Skin = &Skins.emplace_back();
+        Skin->Controller = TWeakObjectPtr<AFortPlayerController>(PlayerController);
     }
-    HeroSwaps.push_back(std::move(Swap));
+    Skin->HeroTypePath = HeroType->GetPathName().ToStdString();
 
-    UE_LOG(LogFortDisguise, Log, TEXT("HeroSwap: %s wears %s (%s), %d kits equipped: %s"), *GetNameSafe(PlayerController), *Shown, *HeroType->GetPathName(), Equipped, KitNames.c_str());
-    Reply(FString::Printf(TEXT("You wear %s%s. \"cheat hero reset\" goes back"), *Shown,
-        Equipped > 0 ? *FString::Printf(TEXT(", with %d of its perk and ability kits (passives and triggered abilities; its gadgets need Save the World's gadget slots)"), Equipped) : TEXT("")));
+    const FString Shown = Found.empty() || Lower(Found) == Lower(HeroType->GetName().ToStdString()) ? HeroType->GetName() : FString::Printf(TEXT("%s (%s)"), Found.c_str(), *HeroType->GetName());
+    UE_LOG(LogFortDisguise, Log, TEXT("Skin: %s wears %s (%s)"), *GetNameSafe(PlayerController), *Shown, *HeroType->GetPathName());
+    Reply(FString::Printf(TEXT("You wear %s. \"cheat skin reset\" goes back"), *Shown));
 #endif
 }
 
-void UFortCheatManager::ReapplyHeroSwap(AFortPlayerController* PlayerController)
+void UFortCheatManager::ReapplySkin(AFortPlayerController* PlayerController)
 {
 #if WITH_SERVER_CODE
-    FHeroSwap* Swap = PlayerController ? FindHeroSwap(PlayerController) : nullptr;
-    AFortPlayerState* PlayerState = Swap ? FortPlayerStateOf(PlayerController) : nullptr;
-    UFortHeroType* HeroType = PlayerState ? LoadQuietly<UFortHeroType>(Swap->HeroTypePath) : nullptr;
+    FSkin* Skin = PlayerController ? FindSkin(PlayerController) : nullptr;
+    AFortPlayerState* PlayerState = Skin ? FortPlayerStateOf(PlayerController) : nullptr;
+    UFortHeroType* HeroType = PlayerState ? LoadQuietly<UFortHeroType>(Skin->HeroTypePath) : nullptr;
     UFortHero* Hero = HeroType && AFortPlayerState::CanSetHeroType() ? CreateHero(HeroType) : nullptr;
     if (Hero)
     {
         PlayerState->SetHeroType(Hero);
         PlayerState->ForceNetUpdate();
-        UE_LOG(LogFortDisguise, Log, TEXT("ReapplyHeroSwap: %s wears %s again"), *GetNameSafe(PlayerController), *HeroType->GetName());
+        UE_LOG(LogFortDisguise, Log, TEXT("ReapplySkin: %s wears %s again"), *GetNameSafe(PlayerController), *HeroType->GetName());
     }
 #endif
 }
@@ -1053,7 +1137,7 @@ void UFortCheatManager::Disguise(const FString& Arguments)
 #if WITH_SERVER_CODE
     constexpr float MinScale = 0.05f;
     constexpr float MaxScale = 20.0f;
-    const FString Usage = TEXT("Usage: disguise <class, path or static mesh> [scale], a scale from 0.05 to 20 (\"disguise Bathroom_ToiletBowl01\", \"disguise HuskPawn\", \"disguise PlayerPawn_Ninja\"); \"undisguise\" ends it");
+    const FString Usage = TEXT("Usage: disguise <class, path or static mesh> [scale], a scale from 0.05 to 20 (\"disguise Bathroom_ToiletBowl01\", \"disguise HuskPawn\", \"disguise PlayerPawn_Ninja [HID]\"); \"undisguise\" ends it");
     const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
     if (Words.empty() || Words.size() > 2)
     {
@@ -1065,15 +1149,25 @@ void UFortCheatManager::Disguise(const FString& Arguments)
         Undisguise(FString());
         return;
     }
+    // The second word is a scale, or (a player pawn class) the hero whose abilities it brings.
     float Scale = 1.0f;
+    std::wstring NamedHero;
     if (Words.size() == 2)
     {
         wchar_t* End = nullptr;
-        Scale = std::wcstof(Words[1].c_str(), &End);
-        if (!End || *End != L'\0' || !std::isfinite(Scale) || Scale < MinScale || Scale > MaxScale)
+        const float Number = std::wcstof(Words[1].c_str(), &End);
+        if (End && *End == L'\0')
         {
-            Reply(Usage);
-            return;
+            if (!std::isfinite(Number) || Number < MinScale || Number > MaxScale)
+            {
+                Reply(Usage);
+                return;
+            }
+            Scale = Number;
+        }
+        else
+        {
+            NamedHero = Words[1];
         }
     }
 
@@ -1087,15 +1181,9 @@ void UFortCheatManager::Disguise(const FString& Arguments)
     // Find what to become first, so a name nothing matches leaves a disguise as it is.
     UClass* Class = FindDisguiseClass(Words[0]);
     UObject* Mesh = Class ? nullptr : FindStaticMesh(Words[0]);
-    UClass* PropBase = Mesh ? ABuildingPropType::StaticClass() : nullptr;
     if (!Class && !Mesh)
     {
         Reply(FString::Printf(TEXT("No class or static mesh called '%s' (give its path, /Game/.../X, to load one that isn't yet)"), Words[0].c_str()));
-        return;
-    }
-    if (Mesh && (!PropBase || !ABuildingSMActorMesh::HasMesh()))
-    {
-        Reply(FString::Printf(TEXT("%s is a static mesh, and this build has no building prop to show it on; give a prop class instead"), *Mesh->GetName()));
         return;
     }
     if (Class && !Class->IsChildOf(AActor::StaticClass()))
@@ -1103,10 +1191,23 @@ void UFortCheatManager::Disguise(const FString& Arguments)
         Reply(FString::Printf(TEXT("%s isn't an actor class"), *Class->GetPathName()));
         return;
     }
-    const bool bPawnDisguise = Class && Class->IsChildOf(APawn::StaticClass());
-    if (bPawnDisguise && !AFortPlayerController::CanPossess())
+    const bool bPawnClass = Class && Class->IsChildOf(APawn::StaticClass());
+    const bool bPlayerPawnClass = bPawnClass && AFortPlayerPawn::StaticClass() && Class->IsChildOf(AFortPlayerPawn::StaticClass());
+    if (!NamedHero.empty() && !bPlayerPawnClass)
+    {
+        Reply(Usage);
+        return;
+    }
+    if (bPlayerPawnClass && !AFortPlayerController::CanPossess())
     {
         Reply(TEXT("This server can't possess another pawn (AFortPlayerController::Possess wasn't found)"));
+        return;
+    }
+    std::wstring HeroFound;
+    UFortHeroType* HeroType = bPlayerPawnClass ? HeroForPawnClass(Class, NamedHero, HeroFound) : nullptr;
+    if (!NamedHero.empty() && !HeroType)
+    {
+        Reply(FString::Printf(TEXT("No hero called '%s' to bring the abilities of"), NamedHero.c_str()));
         return;
     }
 
@@ -1123,6 +1224,7 @@ void UFortCheatManager::Disguise(const FString& Arguments)
     }
     const FVector Location = ActorLocation(Original);
     const float Yaw = Original->GetActorRotation().Yaw;
+    const float Feet = FeetOf(Original);
     const std::wstring Name = Mesh ? Mesh->GetName().ToStdString() : WithoutClassSuffix(Class->GetName().ToStdString());
 
     FDisguise Disguise;
@@ -1131,14 +1233,15 @@ void UFortCheatManager::Disguise(const FString& Arguments)
     Disguise.Name = Name;
     Disguise.LastLocation = Location;
 
-    if (bPawnDisguise)
+    if (bPlayerPawnClass)
     {
-        // The pawn takes the player's place and the player plays it, with its own movement, animations and abilities: the
-        // player's controller possesses it (its AI controller lets go of it in APlayerController::Possess, and goes). The
-        // player's own pawn waits hidden and follows it, so "undisguise" puts the player back where the disguise stands.
+        // A player pawn class (the Ninja's...) is played: the player possesses it, with its own input, camera and
+        // animations, and its hero's perks and abilities go on the player state while it lasts. The player's own pawn
+        // waits hidden and follows it, so "undisguise" puts them back where it stands.
+        Disguise.Kind = EDisguiseKind::Possessed;
         ParkOriginal(Disguise, Original);
-        Disguise.LastFeet = Location.Z - Disguise.OriginalHalfHeight;
-        AActor* Spawned = SpawnDisguiseActor(Original, Class, Location, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn);
+        Disguise.LastFeet = Feet;
+        AActor* Spawned = SpawnDisguiseActor(Original, Class, Location, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn, false);
         APawn* DisguisePawn = Spawned ? static_cast<APawn*>(Spawned) : nullptr;
         if (!DisguisePawn)
         {
@@ -1160,49 +1263,119 @@ void UFortCheatManager::Disguise(const FString& Arguments)
         {
             PreviousController->K2_DestroyActor();
         }
-        Disguise.Pawn = TWeakObjectPtr<APawn>(DisguisePawn);
-        Disguise.bPlayerPawn = AFortPlayerPawn::StaticClass() && Class->IsChildOf(AFortPlayerPawn::StaticClass());
+        Disguise.Actor = TWeakObjectPtr<AActor>(DisguisePawn);
+
+        // The hero's kits: its perks and abilities (Mantis Leap's double jump, ...) on the player state's ability system.
+        // Save the World also gets its gadgets (Crescent Kick, Dragon Slash...) on the quickbar, and the player's own
+        // hero's back at the end; Battle Royale's quickbars have no gadget slots.
+        int32_t Equipped = 0;
+        bool bGadgets = false;
+        AFortPlayerState* PlayerState = FortPlayerStateOf(PlayerController);
+        UFortHero* Hero = HeroType ? CreateHero(HeroType) : nullptr;
+        if (Hero && PlayerState)
+        {
+            for (UFortAbilityKit* Kit : HeroKits(HeroType, Hero))
+            {
+                std::vector<uint8_t> Handle;
+                if (EquipKit(PlayerState, Kit, Handle))
+                {
+                    Disguise.KitHandles.push_back(std::move(Handle));
+                    ++Equipped;
+                }
+            }
+            AFortPlayerPawn* OwnPawn = Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Original));
+            const TWeakObjectPtr<UFortHero> OwnHero = OwnPawn ? static_cast<const TWeakObjectPtr<UFortHero>&>(OwnPawn->Hero) : TWeakObjectPtr<UFortHero>();
+            if (!AFortGameModeAthena::GetCurrent(PlayerController) && OwnHero.IsValid())
+            {
+                PlayerController->ApplyHeroAbilityKitItems(Hero);
+                Disguise.bGaveGadgets = true;
+                Disguise.OwnHero = OwnHero;
+                bGadgets = true;
+            }
+        }
         Disguises.push_back(std::move(Disguise));
         StartWatchingDisguises();
 
-        const bool bAI = AFortAIPawn::StaticClass() && Class->IsChildOf(AFortAIPawn::StaticClass());
-        UE_LOG(LogFortDisguise, Log, TEXT("Disguise: %s plays %s (%s), its AI controller %s"), *GetNameSafe(PlayerController), *DisguisePawn->GetName(), *Class->GetPathName(), *GetNameSafe(reinterpret_cast<UObject*>(PreviousController)));
-        Reply(FString::Printf(TEXT("You are %s. %s\"cheat undisguise\" to be yourself again"), Name.c_str(),
-            bAI ? TEXT("You move with its animations; its attacks are its AI's, which nothing triggers now. ")
-                : Disguise.bPlayerPawn ? TEXT("Dying as it is a real death. ") : TEXT("")));
+        UE_LOG(LogFortDisguise, Log, TEXT("Disguise: %s plays %s (%s) with %s's %d kits%s"), *GetNameSafe(PlayerController), *DisguisePawn->GetName(), *Class->GetPathName(),
+            HeroType ? *HeroType->GetName() : TEXT("no hero"), Equipped, bGadgets ? TEXT(" and gadgets") : TEXT(""));
+        Reply(FString::Printf(TEXT("You are %s%s. Dying as it is a real death. \"cheat undisguise\" to be yourself again"), Name.c_str(),
+            HeroType ? *FString::Printf(TEXT(", with %s's perks and abilities (%d kits%s)"), *HeroType->GetName(), Equipped, bGadgets ? TEXT(", and its gadgets") : TEXT("; its gadgets need Save the World's gadget slots")) : TEXT("")));
         return;
     }
 
-    // A prop: spawned at the player's feet, without collision (shots go through to the hidden player), riding on the
-    // player's pawn. It replicates its attachment (bReplicateMovement), so every client sees it follow the player.
-    const FVector Feet(Location.X, Location.Y, FeetOf(Original));
-    AActor* Prop = SpawnDisguiseActor(Original, Mesh ? PropBase : Class, Feet, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+    if (bPawnClass)
+    {
+        // Any other pawn (a husk, a Smasher...) is a puppet. A player playing it through Possess can't move it: a pawn's
+        // input (MoveForward, MoveRight, the look and the actions) is bound by its own SetupPlayerInputComponent, which
+        // only player pawns have (AFortPlayerPawn's, 1.7.2 0x7E74D0), so a possessed husk took no input and the camera
+        // turned on its own (#136). The player keeps their own pawn (hidden, still theirs: input, camera, weapons and
+        // health), and the puppet, with no AI controller and no collision, stands where it stands and moves at its
+        // velocity: every client sees it walk, run and fall with its own animations. It can't attack.
+        Disguise.Kind = EDisguiseKind::Puppet;
+        AActor* Puppet = SpawnDisguiseActor(Original, Class, Location, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true);
+        if (!Puppet)
+        {
+            Reply(FString::Printf(TEXT("Couldn't spawn %s (an abstract class, or one that can't be spawned here)"), *Class->GetPathName()));
+            return;
+        }
+        APawn* PuppetPawn = static_cast<APawn*>(Puppet);
+        if (AController* AIController = PuppetPawn->Controller)
+        {
+            AIController->UnPossess();
+            AIController->K2_DestroyActor();
+        }
+        FeetOf(Puppet, &Disguise.PuppetHalfHeight);
+        Puppet->SetActorEnableCollision(false);
+        Puppet->bCanBeDamaged = false;
+        if (UCharacterMovementComponent* Movement = MovementOf(PuppetPawn))
+        {
+            Movement->bRunPhysicsWithNoController = false;
+            Movement->SetMovementMode(MOVE_Walking);
+        }
+        if (Puppet->NetUpdateFrequency < 30.0f)
+        {
+            Puppet->NetUpdateFrequency = 30.0f;
+        }
+        Original->SetActorHiddenInGame(true);
+        HideWeapon(Disguise, Original);
+        Original->ForceNetUpdate();
+        Disguise.Actor = TWeakObjectPtr<AActor>(Puppet);
+        MovePuppet(Disguise, Original, Puppet);
+        Disguises.push_back(std::move(Disguise));
+        StartWatchingDisguises();
+
+        UE_LOG(LogFortDisguise, Log, TEXT("Disguise: %s walks as the puppet %s (%s)"), *GetNameSafe(PlayerController), *Puppet->GetName(), *Class->GetPathName());
+        Reply(FString::Printf(TEXT("You are %s: it walks where you walk, with its animations (it can't attack). \"cheat undisguise\" to be seen again"), Name.c_str()));
+        return;
+    }
+
+    // A prop rides on the player's pawn, hidden with its weapon. A class whose root can move (and so follow the player on
+    // every client) is spawned as it is; a building prop (a toilet, a tree...) and a plain mesh can't (their roots are
+    // static), so their mesh goes on a carrier whose root can. Without collision, so shots go through to the player.
+    const FVector AtFeet(Location.X, Location.Y, Feet);
+    UObject* ClassMesh = Class ? MeshOfClass(Class) : nullptr;
+    AActor* Prop = nullptr;
+    bool bCarried = false;
+    if (Class && !ClassMesh)
+    {
+        Prop = SpawnDisguiseActor(Original, Class, AtFeet, Yaw, Scale, ESpawnActorCollisionHandlingMethod::AlwaysSpawn, true);
+        USceneComponent* Root = Prop ? Prop->GetRootComponent() : nullptr;
+        if (Prop && (!Root || Root->Mobility == EComponentMobility::Static))
+        {
+            Prop->K2_DestroyActor();
+            Reply(FString::Printf(TEXT("%s can't move (%s) and shows no mesh Core can carry; pick another (\"disguise Bathroom_ToiletBowl01\")"), Name.c_str(), Root ? TEXT("its root is static") : TEXT("it has no root")));
+            return;
+        }
+    }
+    else
+    {
+        Prop = SpawnMeshCarrier(Original, Mesh ? Mesh : ClassMesh, AtFeet, Yaw, Scale);
+        bCarried = Prop != nullptr;
+    }
     if (!Prop)
     {
-        Reply(FString::Printf(TEXT("Couldn't spawn %s (an abstract class, or one that can't be spawned here)"), Mesh ? *PropBase->GetPathName() : *Class->GetPathName()));
+        Reply(FString::Printf(TEXT("Couldn't spawn %s (%s)"), Name.c_str(), Class && !ClassMesh ? TEXT("an abstract class, or one that can't be spawned here") : TEXT("no carrier for its mesh")));
         return;
-    }
-    USceneComponent* Root = Prop->GetRootComponent();
-    if (!Root || Root->Mobility == EComponentMobility::Static)
-    {
-        Prop->K2_DestroyActor();
-        Reply(FString::Printf(TEXT("%s can't move (%s), so it can't follow you; pick a prop that can (a building prop, \"disguise Bathroom_ToiletBowl01\")"), Name.c_str(), Root ? TEXT("its root is static") : TEXT("it has no root")));
-        return;
-    }
-    if (Mesh)
-    {
-        // The building's StaticMesh replicates, and so does its mesh component's, once it replicates.
-        ABuildingSMActorMesh* Building = Cast<ABuildingSMActorMesh>(reinterpret_cast<UObject*>(Prop));
-        UObject* Component = Building ? static_cast<UObject*>(Building->StaticMeshComponent) : nullptr;
-        if (Building)
-        {
-            Building->StaticMesh = Mesh;
-        }
-        if (Component && UStaticMeshComponentFunctions::StaticClass() && Component->IsA(UStaticMeshComponentFunctions::StaticClass()))
-        {
-            static_cast<UStaticMeshComponentFunctions*>(Component)->SetStaticMesh(Mesh);
-            static_cast<UActorComponentFunctions*>(Component)->SetIsReplicated(true);
-        }
     }
     Prop->SetActorEnableCollision(false);
     if (!Prop->bReplicates)
@@ -1216,12 +1389,13 @@ void UFortCheatManager::Disguise(const FString& Arguments)
     Original->SetActorHiddenInGame(true);
     HideWeapon(Disguise, Original);
     Original->ForceNetUpdate();
-    Disguise.Prop = TWeakObjectPtr<AActor>(Prop);
-    Disguise.bProp = true;
+    Disguise.Kind = EDisguiseKind::Prop;
+    Disguise.Actor = TWeakObjectPtr<AActor>(Prop);
     Disguises.push_back(std::move(Disguise));
     StartWatchingDisguises();
 
-    UE_LOG(LogFortDisguise, Log, TEXT("Disguise: %s is the prop %s (%s), attached to %s"), *GetNameSafe(PlayerController), *Prop->GetName(), Mesh ? *Mesh->GetPathName() : *Class->GetPathName(), *Original->GetName());
+    UE_LOG(LogFortDisguise, Log, TEXT("Disguise: %s is the prop %s (%s%s), attached to %s"), *GetNameSafe(PlayerController), *Prop->GetName(),
+        Mesh ? *Mesh->GetPathName() : *Class->GetPathName(), bCarried ? *FString::Printf(TEXT(", its mesh %s on a carrier"), *GetNameSafe(Mesh ? Mesh : ClassMesh)) : TEXT(""), *Original->GetName());
     Reply(FString::Printf(TEXT("You are a %s: you are hidden and it follows you. \"cheat undisguise\" to be seen again"), Name.c_str()));
 #endif
 }
@@ -1239,13 +1413,13 @@ void UFortCheatManager::Undisguise(const FString& Arguments)
 
     const std::wstring Name = Disguise->Name;
     bool bEnded = true;
-    if (Disguise->bProp)
+    if (Disguise->Kind == EDisguiseKind::Possessed)
     {
-        EndPropDisguise(*Disguise);
+        bEnded = EndPossessedDisguise(*Disguise);
     }
     else
     {
-        bEnded = EndPawnDisguise(*Disguise);
+        EndShownDisguise(*Disguise);
     }
     Disguises.erase(Disguises.begin() + (Disguise - Disguises.data()));
     Reply(bEnded ? FString::Printf(TEXT("You are no longer disguised as %s"), Name.c_str())

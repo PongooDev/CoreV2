@@ -73,6 +73,7 @@ public:
     DefineUFunction(GetTransform)
     DefineUFunction(GetActorBounds)
     DefineUFunction(K2_SetActorLocation)
+    DefineUFunction(K2_SetActorLocationAndRotation)
     DefineUFunction(K2_GetActorRotation)
     DefineUFunction(K2_TeleportTo)
     DefineUFunction(SetActorScale3D)
@@ -101,6 +102,7 @@ public:
     USceneComponent* GetRootComponent() const { return RootComponent; }
     void GetActorBounds(bool bOnlyCollidingComponents, FVector& Origin, FVector& BoxExtent) const;
     bool SetActorLocation(const FVector& NewLocation, bool bSweep = false, bool bTeleport = false);
+    bool SetActorLocationAndRotation(const FVector& NewLocation, const FRotator& NewRotation, bool bSweep = false, bool bTeleport = false);
     FRotator GetActorRotation() const;
     bool TeleportTo(const FVector& DestLocation, const FRotator& DestRotation);
     void SetActorScale3D(const FVector& NewScale3D);

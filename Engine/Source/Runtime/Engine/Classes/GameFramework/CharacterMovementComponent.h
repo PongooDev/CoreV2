@@ -20,6 +20,8 @@ public:
     DefineUProperty(uint8_t, MovementMode)
     DefineUProperty(uint8_t, CustomMovementMode)
     DefineBitfieldUProperty(bCheatFlying)
+    // Whether the movement simulates (gravity, walking) for a character no controller has.
+    DefineBitfieldUProperty(bRunPhysicsWithNoController)
     DefineUFunction(SetMovementMode)
 
     void SetMovementMode(uint8_t NewMovementMode, uint8_t NewCustomMode = 0);

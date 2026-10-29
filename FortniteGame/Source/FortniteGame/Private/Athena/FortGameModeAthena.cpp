@@ -367,6 +367,9 @@ namespace
         float GameDuration = -1.0f;
         float GameEarly = -1.0f;
         int32_t AppliedSeconds = 0;
+        // The game's warmup keeps its shorter countdown for a nearly full match: the match is of full size (MatchCapacity).
+        bool bEarlyCountdown = false;
+        bool bLoggedLength = false;
         // The running countdown was set to AppliedSeconds.
         bool bCountdownSet = false;
         bool bWarnedNoWarmupLength = false;
@@ -445,6 +448,25 @@ namespace
         return Beacon ? static_cast<UPartyBeaconState*>(Beacon->State) : nullptr;
     }
 
+    // The most players a match on this server can have: its game session's own MaxPlayers, from its config (the class
+    // default: OnGivenMatchAssignment, 1.9 0x42D2B0, overwrites the session's with the match's reservations), capped by
+    // the playlist's teams (the beacon's NumTeams x NumPlayersPerTeam, once the match is assigned). 0 when unknown.
+    int32_t MatchCapacity(AFortGameModeAthena* GameMode)
+    {
+        AGameSession* Session = static_cast<AGameSession*>(GameMode->GameSession);
+        const UObject* Default = Session && AGameSession::HasMaxPlayers() ? Session->GetClass()->GetDefaultObject(false) : nullptr;
+        int32_t Capacity = Default ? static_cast<const AGameSession*>(Default)->MaxPlayers : 0;
+        if (UPartyBeaconState* State = BeaconStateOf(GameMode))
+        {
+            const int32_t Teams = State->NumTeams * State->NumPlayersPerTeam;
+            if (Teams > 0)
+            {
+                Capacity = Capacity > 0 ? std::min(Capacity, Teams) : Teams;
+            }
+        }
+        return Capacity;
+    }
+
     // The account ids of the players connected (from their login on, so those still loading the map count).
     std::vector<std::wstring> ConnectedAccounts(AFortGameModeAthena* GameMode)
     {
@@ -506,8 +528,15 @@ namespace
         });
     }
 
-    // The game mode's warmup lengths at the backend's (both, so the countdown never shortens below it once enough of
-    // MaxPlayerCount is in), or the game's own again, and a countdown already running moved to it.
+    // The game mode's warmup lengths: the backend's for both (so the countdown never shortens below it), or the game's
+    // own, and a countdown already running moved to the backend's. The game shortens its warmup to
+    // WarmupEarlyCountdownDuration (15 s) once enough of MaxPlayerCount is in (UpdateWarmupPhase, 1.9 0x43D9A0:
+    // NumPlayers >= MaxPlayerCount times a percent at +0xABC, which isn't reflected), and OnGivenMatchAssignment
+    // (0x42D2B0) sets MaxPlayerCount to the players the match was assigned. So every Core match counted as full and
+    // its bus left 15 s into the game's 90 s warmup (Core-Backend #122). With the game's length the shorter countdown is
+    // the full one until MaxPlayerCount is the most a match here can have (MatchCapacity), as when the match was
+    // assigned that many or late joining opened it to them; the game's percent then counts a match of full size, as on
+    // Epic's servers.
     void ApplyWarmupLength(AFortGameModeAthena* GameMode, AFortGameStateAthena* GameState, FWarmupWatch& Watch, float Now)
     {
         if (!AFortGameModeAthena::HasWarmupLength())
@@ -520,25 +549,38 @@ namespace
             return;
         }
 
-        if (Watch.WarmupSeconds != Watch.AppliedSeconds)
+        if (Watch.GameDuration < 0.0f)
         {
-            if (Watch.GameDuration < 0.0f)
+            Watch.GameDuration = GameMode->WarmupCountdownDuration;
+            Watch.GameEarly = GameMode->WarmupEarlyCountdownDuration;
+        }
+        const bool bGame = Watch.WarmupSeconds <= 0;
+        const float Duration = bGame ? Watch.GameDuration : static_cast<float>(Watch.WarmupSeconds);
+        const int32_t Capacity = MatchCapacity(GameMode);
+        const bool bEarly = bGame && AFortGameModeAthena::HasMaxPlayerCount() && Capacity > 0 && GameMode->MaxPlayerCount >= Capacity;
+        GameMode->WarmupCountdownDuration = Duration;
+        GameMode->WarmupEarlyCountdownDuration = bEarly ? Watch.GameEarly : Duration;
+
+        if (!Watch.bLoggedLength || Watch.WarmupSeconds != Watch.AppliedSeconds || bEarly != Watch.bEarlyCountdown)
+        {
+            if (Watch.WarmupSeconds != Watch.AppliedSeconds)
             {
-                Watch.GameDuration = GameMode->WarmupCountdownDuration;
-                Watch.GameEarly = GameMode->WarmupEarlyCountdownDuration;
+                Watch.bCountdownSet = bGame;
             }
-            const bool bGame = Watch.WarmupSeconds <= 0;
-            GameMode->WarmupCountdownDuration = bGame ? Watch.GameDuration : static_cast<float>(Watch.WarmupSeconds);
-            GameMode->WarmupEarlyCountdownDuration = bGame ? Watch.GameEarly : static_cast<float>(Watch.WarmupSeconds);
+            Watch.bLoggedLength = true;
             Watch.AppliedSeconds = Watch.WarmupSeconds;
-            Watch.bCountdownSet = bGame;
-            if (bGame)
+            Watch.bEarlyCountdown = bEarly;
+            if (!bGame)
             {
-                Log::Info(L"Battle Royale: the warmup is the game's again: {:.0f} s, {:.0f} s once enough players are in", Watch.GameDuration, Watch.GameEarly);
+                Log::Info(L"Battle Royale: the warmup lasts {} s (the backend's; the game's is {:.0f} s, {:.0f} s once enough players are in)", Watch.WarmupSeconds, Watch.GameDuration, Watch.GameEarly);
+            }
+            else if (bEarly)
+            {
+                Log::Info(L"Battle Royale: the warmup is the game's: {:.0f} s, {:.0f} s once enough of the match's {} players are in", Watch.GameDuration, Watch.GameEarly, GameMode->MaxPlayerCount);
             }
             else
             {
-                Log::Info(L"Battle Royale: the warmup lasts {} s (the backend's; the game's is {:.0f} s, {:.0f} s once enough players are in)", Watch.WarmupSeconds, Watch.GameDuration, Watch.GameEarly);
+                Log::Info(L"Battle Royale: the warmup is the game's {:.0f} s in full (its {:.0f} s countdown once enough players are in is for a match of {} players)", Watch.GameDuration, Watch.GameEarly, Capacity);
             }
         }
 

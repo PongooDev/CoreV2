@@ -18,8 +18,10 @@
 #include "Log.h"
 #include "Missions/FortItemCollectedParams.h"
 #include "Natives.h"
+#include "ObjectLayout.h"
 #include "Pawns/FortAIPawn.h"
 #include "Pawns/FortPawn.h"
+#include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -312,6 +314,27 @@ namespace
         const int64_t CellY = static_cast<int64_t>(std::floor(Location.Y / CombineRadius)) + OffsetY;
         return reinterpret_cast<uintptr_t>(Definition) ^ (static_cast<uint64_t>(CellX) * 0x9E3779B97F4A7C15ull) ^ (static_cast<uint64_t>(CellY) * 0xC2B2AE3D27D4EB4Full);
     }
+
+    class ETInteractionType
+    {
+        DefineUnrealEnum(ETInteractionType, FortniteGame)
+        DefineUEnumValue(IT_Simple)
+    };
+
+    // What an interaction asks an IFortInteractInterface about (0x20 bytes in 1.1 and 1.2, 0x28 from 1.7.2).
+    struct FInteractionType
+    {
+        DefineUnrealStruct(FInteractionType, FortniteGame)
+
+    public:
+        DefineUProperty(uint8_t, InteractionType)
+        DefineUProperty(FWeakObjectPtr, RequestingPawn)
+        DefineUProperty(FWeakObjectPtr, InteractComponent)
+        DefineUProperty(FVector, InteractPoint)
+
+        static ptrdiff_t RequestingPawnOffset() { return Member_RequestingPawn.GetOffsetChecked(); }
+        static ptrdiff_t InteractComponentOffset() { return Member_InteractComponent.GetOffsetChecked(); }
+    };
 }
 
 void AFortPickup::CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory)
@@ -433,6 +456,40 @@ void AFortPickup::SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime, cons
         return;
     }
     Natives::AFortPickup_SetPickupTarget(this, PickupTarget, InFlyTime, InStartDirection, bPlayPickupSound);
+}
+
+bool AFortPickup::CanInteract(AFortPlayerPawn* RequestingPawn)
+{
+    static UClass* InteractInterface = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortInteractInterface");
+    if (!RequestingPawn || !InteractInterface || !Finder::ResolvePickupCanInteractLive(PickedUpOffset()))
+    {
+        return false;
+    }
+    void* Interface = Natives::UObject_GetInterfaceAddress(this, InteractInterface);
+    UScriptStruct* InteractionStruct = FInteractionType::StaticStruct();
+    if (!Interface || !InteractionStruct)
+    {
+        return false;
+    }
+
+    // As FInteractionType's constructor builds it for AFortPlayerPawnAthena's overlap (1.8.1 0x5DC180): the type, the
+    // pawn, no component and no point. From 1.7.2 an unreflected weak pointer sits between the pawn and the component,
+    // and the constructor points it at the pawn too.
+    std::vector<uint8_t> Storage(InteractionStruct->GetStructureSize(), 0);
+    FInteractionType* Interaction = reinterpret_cast<FInteractionType*>(Storage.data());
+    InteractionStruct->InitializeStruct(Interaction);
+    Interaction->InteractionType = ETInteractionType::GetIT_Simple();
+    Interaction->RequestingPawn = FWeakObjectPtr(RequestingPawn);
+    Interaction->InteractComponent = FWeakObjectPtr();
+    Interaction->InteractPoint = FVector(0.0f, 0.0f, 0.0f);
+    const ptrdiff_t SecondPawn = FInteractionType::RequestingPawnOffset() + static_cast<ptrdiff_t>(sizeof(FWeakObjectPtr));
+    if (FInteractionType::InteractComponentOffset() - SecondPawn == static_cast<ptrdiff_t>(sizeof(FWeakObjectPtr)))
+    {
+        *reinterpret_cast<FWeakObjectPtr*>(Storage.data() + SecondPawn) = FWeakObjectPtr(RequestingPawn);
+    }
+    const bool bCanInteract = CallVirtual<bool>(Interface, Natives::IFortInteractInterface_CanInteractIndex, static_cast<const void*>(Interaction));
+    InteractionStruct->DestroyStruct(Interaction);
+    return bCanInteract;
 }
 
 void AFortPickup::SetOptionalMissionGuid(const FGuid& InMissionGuid)
@@ -853,6 +910,11 @@ float AFortPickup::GetRandomFlyTime()
 ptrdiff_t AFortPickup::PrimaryPickupItemEntryOffset()
 {
     return Member_PrimaryPickupItemEntry.GetOffsetChecked();
+}
+
+ptrdiff_t AFortPickup::PickedUpOffset()
+{
+    return Member_bPickedUp.GetOffsetChecked();
 }
 
 void AFortPickup::HookVTables()

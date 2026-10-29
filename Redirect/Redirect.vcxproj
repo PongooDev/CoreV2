@@ -517,6 +517,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortAIPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPawn.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPlayerPawn.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPlayerPawnPickup.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortCheatManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerBuilding.cpp" />

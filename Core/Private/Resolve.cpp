@@ -7815,3 +7815,61 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
         GetEditing, SetEditing, NeedsRepair, RepairBuilding, ScoreConstruction, ScoreConstruction + 3, ScoreConstruction + 4);
     return true;
 }
+
+bool Finder::ResolvePickupCanInteractLive(ptrdiff_t PickedUpOffset)
+{
+    if (Natives::IFortInteractInterface_CanInteractIndex >= 0)
+    {
+        return true;
+    }
+
+    // AFortPickup's IFortInteractInterface::CanInteract(const FInteractionType&) (1.8.1 0x69D9B0, 1.8.2 0x69DA10, and
+    // AFortPickupAthena's 0x69DB30 / 0x69DB90) refuses anything but an IT_Simple interaction (cmp byte ptr [rdx], 1,
+    // or the copy of rdx it keeps) and a pickup that is bPickedUp (cmp [this + bPickedUp - the interface's offset],
+    // reg8) at its top. It is the first slot of the pickup's interface vtable to do both: slot 2 in 1.8.1 and 1.8.2,
+    // after the destructor and _getUObject.
+    if (!Natives::UObject_GetInterfaceAddress)
+    {
+        ResolveSpottingLive(FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortSpottableActorInterface"));
+    }
+    UClass* InteractInterface = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortInteractInterface");
+    UClass* PickupClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortPickup");
+    UObject* PickupDefault = PickupClass ? PickupClass->GetDefaultObject() : nullptr;
+    uint8_t* Interface = PickupDefault && InteractInterface && Natives::UObject_GetInterfaceAddress ? static_cast<uint8_t*>(Natives::UObject_GetInterfaceAddress(PickupDefault, InteractInterface)) : nullptr;
+    void** InterfaceVTable = Interface ? *reinterpret_cast<void***>(Interface) : nullptr;
+    const ptrdiff_t PickedUpDisplacement = Interface ? PickedUpOffset - (Interface - reinterpret_cast<uint8_t*>(PickupDefault)) : 0;
+
+    int32_t CanInteractIndex = -1;
+    for (int32_t Index = 2; InterfaceVTable && PickedUpDisplacement > 0 && Index < 0x10 && CanInteractIndex < 0; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(InterfaceVTable, Index);
+        if (!Entry || Finder::IsStubFunction(Entry))
+        {
+            continue;
+        }
+        const uintptr_t EntryEnd = Finder::FunctionEnd(Entry);
+        const uintptr_t ScanEnd = EntryEnd > Entry ? std::min(EntryEnd, Entry + 0x60) : Entry + 0x60;
+        bool bChecksType = false;
+        bool bChecksPickedUp = false;
+        for (uintptr_t Site = Entry; Site + 6 <= ScanEnd; ++Site)
+        {
+            const uint8_t Opcode = Byte(Site);
+            const uint8_t ModRm = Byte(Site + 1);
+            const uint8_t Base = ModRm & 0x07;
+            // cmp byte ptr [reg], 1
+            bChecksType |= Opcode == 0x80 && (ModRm & 0xF8) == 0x38 && Base != 0x04 && Base != 0x05 && Byte(Site + 2) == 0x01;
+            // cmp [reg + disp32], reg8 (or an imm8)
+            bChecksPickedUp |= (Opcode == 0x38 || Opcode == 0x80) && (ModRm & 0xC0) == 0x80 && Base != 0x04 && *reinterpret_cast<const int32_t*>(Site + 2) == static_cast<int32_t>(PickedUpDisplacement);
+        }
+        CanInteractIndex = bChecksType && bChecksPickedUp ? Index : -1;
+    }
+
+    if (CanInteractIndex < 0)
+    {
+        Log::Error(L"Finder: AFortPickup's IFortInteractInterface::CanInteract not found (interface {}, bPickedUp at +0x{:X} from it)", Interface != nullptr, PickedUpDisplacement);
+        return false;
+    }
+    Natives::IFortInteractInterface_CanInteractIndex = CanInteractIndex;
+    Log::Info(L"Finder: IFortInteractInterface::CanInteract is slot {} (AFortPickup's interface at +0x{:X})", CanInteractIndex, Interface - reinterpret_cast<uint8_t*>(PickupDefault));
+    return true;
+}

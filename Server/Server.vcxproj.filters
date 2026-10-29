@@ -1682,6 +1682,9 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPlayerPawn.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Pawns</Filter>
     </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortPlayerPawnPickup.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Pawns</Filter>
+    </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortCheatManager.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Player</Filter>
     </ClCompile>

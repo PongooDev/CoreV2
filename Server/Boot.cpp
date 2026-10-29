@@ -24,6 +24,7 @@
 #include "FortGameModeZone.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Athena/FortPlayerPawnAthena.h"
 #include "Misc/CommandLine.h"
 #include "FortVisibilityComponent.h"
 #include "FortWorldManager.h"
@@ -178,6 +179,7 @@ void Boot::Initialize()
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
         AFortAIPawn::HookVTables();
         AFortPlayerPawn::HookVTables();
+        AFortPlayerPawn::HookPickupVTables();
         ACharacter::HookCheatMovement();
         ACharacter::OnCheatMovement = &UFortCheatManager::OnCheatMovement;
         UFortCheatManager::HookNatives();
@@ -186,6 +188,7 @@ void Boot::Initialize()
         {
             Finder::ResolveLootTierRedirectLive();
             AFortPlayerControllerAthena::HookCallSites();
+            AFortPlayerPawnAthena::HookNatives();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
             AFortGameModeAthena::HookBuildingVTables();

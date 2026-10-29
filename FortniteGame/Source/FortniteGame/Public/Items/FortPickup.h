@@ -12,6 +12,7 @@ class AFortInventory;
 class AFortPawn;
 class AFortPickup;
 class AFortPlayerController;
+class AFortPlayerPawn;
 class IFortInventoryOwnerInterface;
 class UProjectileMovementComponent;
 class UWorld;
@@ -68,12 +69,16 @@ public:
     // over its start (or the landing, if higher), or as far as LaunchUpSpeed takes it when one is given.
     void TossOntoFloor(const FVector& FloorLocation, AFortPawn* ItemOwner, float LaunchUpSpeed = 0.0f);
     void SetPickupTarget(AFortPawn* PickupTarget, float InFlyTime = -1.0f, const FVector& InStartDirection = FVector(0.0f, 0.0f, 1.0f), bool bPlayPickupSound = true);
+    // The pickup's own IFortInteractInterface::CanInteract for a simple interaction (a press, or walking over it) by
+    // RequestingPawn: false once it is picked up or flying into another pickup, and whatever its class adds.
+    bool CanInteract(AFortPlayerPawn* RequestingPawn);
     void GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner);
     void SetOptionalMissionGuid(const FGuid& InMissionGuid);
     void OnRep_PickupLocationData();
 
     static float GetRandomFlyTime();
     static ptrdiff_t PrimaryPickupItemEntryOffset();
+    static ptrdiff_t PickedUpOffset();
     static void HookVTables();
 
 private:

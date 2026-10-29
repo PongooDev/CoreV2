@@ -118,6 +118,8 @@ public:
     void Cheat(const FString& Msg);
     void ServerCheat(const FString& Msg);
     void ServerCheat_Implementation(const FString& Msg);
+    // Runs a cheat this player may use (CoreV2 #138: ServerCheat_Implementation asks the backend first).
+    void RunServerCheat(const FString& Msg);
     void OnRep_CheatMovement();
     // Building (FortPlayerControllerBuilding.cpp): 1.8.1 strips these server RPCs' bodies; Core's follow 1.8's.
     void ServerCreateBuildingActor_Implementation(const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored);

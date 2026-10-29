@@ -8,6 +8,7 @@
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystemComponent.h"
+#include "BackendRequest.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
@@ -31,6 +32,7 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Online/FortMcpProfileAccount.h"
+#include "Online/NotForLicensees/FortMcpConfig.h"
 #include "Pawns/FortPawn.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortCheatManager.h"
@@ -44,8 +46,13 @@
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <cmath>
+#include <cwctype>
+#include <format>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
@@ -169,6 +176,150 @@ namespace
         const float Yaw = PawnTransform.Rotation.Rotator().Yaw * (Pi / 180.0f) + std::atan2(std::sin(Phi) * std::sin(Theta), std::cos(Phi));
         const FVector Location = PawnTransform.GetLocation();
         return FVector(Location.X + std::cos(Yaw) * TossDistance, Location.Y + std::sin(Yaw) * TossDistance, Location.Z);
+    }
+
+    // Who may cheat (CoreV2 #138): the admin panel's Settings say "everyone", "admins" (the accounts it lists) or "off",
+    // and the backend answers for one account at a time (Core-Backend's GET /fortnite/api/game/v2/cheats). An answer is
+    // used for 30 seconds after it came, so a change in the panel reaches a running match within that; a cheat sent
+    // after that waits for a new one, which takes a moment.
+    constexpr auto CheatAnswerLifetime = std::chrono::seconds(30);
+    // How many cheats one account can have waiting for an answer: more are refused until it comes.
+    constexpr size_t MaxWaitingCheats = 16;
+
+    struct FCheatPermission
+    {
+        // Until when the answer holds: a cheat after it asks again.
+        std::chrono::steady_clock::time_point Expires{};
+        bool bAsking = false;
+        // Whether the backend has ever answered for this account, and its last answer.
+        bool bKnown = false;
+        bool bAllowed = false;
+        // The backend's mode, "off" or "admins", for what a player who may not cheat is told.
+        std::string Mode;
+        // The cheats that came while it was being asked, run or refused once it answers.
+        std::vector<std::pair<TWeakObjectPtr<AFortPlayerController>, std::wstring>> Waiting;
+    };
+
+    // By account id (or "name:" and the player's name when the player state has no account id).
+    std::unordered_map<std::wstring, FCheatPermission> CheatPermissions;
+    // The backend has no such route (one from before CoreV2 #138): every player may cheat, as before, and it isn't asked
+    // again.
+    bool bCheatPermissionsUnsupported = false;
+
+    // An MCP account id is 32 hex digits (an invalid id's ToString is "INVALID").
+    bool IsCheatAccountId(const std::wstring& Id)
+    {
+        return !Id.empty() && Id.size() <= 64 && std::all_of(Id.begin(), Id.end(), [](wchar_t Character) { return std::iswxdigit(Character) != 0; });
+    }
+
+    // Text for a URL's query: UTF-8, with everything but letters, digits and -_.~ %-escaped.
+    std::wstring QueryEscape(const std::wstring& Text)
+    {
+        const int32_t Wide = static_cast<int32_t>(Text.size());
+        std::string Utf8(static_cast<size_t>(std::max(WideCharToMultiByte(CP_UTF8, 0, Text.c_str(), Wide, nullptr, 0, nullptr, nullptr), 0)), '\0');
+        if (!Utf8.empty())
+        {
+            WideCharToMultiByte(CP_UTF8, 0, Text.c_str(), Wide, Utf8.data(), static_cast<int32_t>(Utf8.size()), nullptr, nullptr);
+        }
+        constexpr const wchar_t* Hex = L"0123456789ABCDEF";
+        std::wstring Result;
+        for (const char Character : Utf8)
+        {
+            const unsigned char Byte = static_cast<unsigned char>(Character);
+            if (Byte < 0x80 && (std::isalnum(Byte) || Byte == '-' || Byte == '_' || Byte == '.' || Byte == '~'))
+            {
+                Result.push_back(static_cast<wchar_t>(Byte));
+                continue;
+            }
+            Result.push_back(L'%');
+            Result.push_back(Hex[Byte >> 4]);
+            Result.push_back(Hex[Byte & 0xF]);
+        }
+        return Result;
+    }
+
+    FString CheatsRefused(const std::string& Mode)
+    {
+        return FString(Mode == "admins" ? L"Cheats are only for this server's admins" : L"Cheats are turned off on this server");
+    }
+
+    // Runs the account's waiting cheats, or tells each player Refusal and runs none.
+    void SettleWaitingCheats(FCheatPermission& Permission, bool bRun, const FString& Refusal)
+    {
+        std::vector<std::pair<TWeakObjectPtr<AFortPlayerController>, std::wstring>> Waiting = std::exchange(Permission.Waiting, {});
+        for (const auto& [WeakPlayerController, Msg] : Waiting)
+        {
+            AFortPlayerController* PlayerController = WeakPlayerController.Get();
+            if (!PlayerController)
+            {
+                continue;
+            }
+            if (bRun)
+            {
+                PlayerController->RunServerCheat(FString(Msg.c_str()));
+            }
+            else
+            {
+                UE_LOG(LogFort, Log, TEXT("ServerCheat: %s may not cheat, \"%s\" not run"), *GetNameSafe(PlayerController), Msg.c_str());
+                PlayerController->ClientMessage(Refusal);
+            }
+        }
+    }
+
+    void AskCheatPermission(const std::wstring& Key, const std::wstring& AccountId, const std::wstring& DisplayName)
+    {
+        CheatPermissions[Key].bAsking = true;
+        BackendRequest::GetJson(std::format(L"cheat permission of {}", DisplayName.empty() ? Key : DisplayName),
+            L"/fortnite/api/game/v2/cheats?accountId=" + QueryEscape(AccountId) + L"&displayName=" + QueryEscape(DisplayName),
+            FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [Key](uint32_t Status, const std::string& Body)
+        {
+            // {accountId, displayName, mode, allowed}: allowed is true or false. Anything else (no answer, an error)
+            // keeps the last answer, if there was one.
+            const std::string Allowed = Status == 200 ? BackendRequest::JsonField(Body, "allowed") : std::string();
+            const std::string Mode = Status == 200 ? BackendRequest::JsonField(Body, "mode") : std::string();
+            GameThread::Enqueue([Key, Status, Allowed, Mode]()
+            {
+                FCheatPermission& Permission = CheatPermissions[Key];
+                Permission.bAsking = false;
+                if (Status == 404)
+                {
+                    if (!bCheatPermissionsUnsupported)
+                    {
+                        bCheatPermissionsUnsupported = true;
+                        UE_LOG(LogFort, Warning, TEXT("ServerCheat: the backend doesn't say who may cheat (CoreV2 #138), so every player may"));
+                    }
+                    for (auto& Entry : CheatPermissions)
+                    {
+                        SettleWaitingCheats(Entry.second, true, FString());
+                    }
+                    return;
+                }
+                if (Allowed == "true" || Allowed == "false")
+                {
+                    const bool bAllowed = Allowed == "true";
+                    if (!Permission.bKnown || Permission.bAllowed != bAllowed || Permission.Mode != Mode)
+                    {
+                        const std::wstring ModeText(Mode.begin(), Mode.end());
+                        UE_LOG(LogFort, Log, TEXT("ServerCheat: %s %s (cheats: %s)"), Key.c_str(), bAllowed ? TEXT("may cheat") : TEXT("may not cheat"), ModeText.c_str());
+                    }
+                    Permission.bKnown = true;
+                    Permission.bAllowed = bAllowed;
+                    Permission.Mode = Mode;
+                    Permission.Expires = std::chrono::steady_clock::now() + CheatAnswerLifetime;
+                    SettleWaitingCheats(Permission, bAllowed, CheatsRefused(Mode));
+                    return;
+                }
+                if (Permission.bKnown)
+                {
+                    // The last answer holds a while longer.
+                    Permission.Expires = std::chrono::steady_clock::now() + CheatAnswerLifetime;
+                    SettleWaitingCheats(Permission, Permission.bAllowed, CheatsRefused(Permission.Mode));
+                    return;
+                }
+                // Never answered: nothing runs, and the next cheat asks again.
+                SettleWaitingCheats(Permission, false, FString(L"Couldn't ask the backend whether you may cheat: try again in a moment"));
+            });
+        });
     }
 }
 
@@ -1678,7 +1829,59 @@ void AFortPlayerController::ServerCheat(const FString& Msg)
 void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
 {
 #if WITH_SERVER_CODE
-    // Cheats are on for every player (#65, #69); a controller that came another way gets its cheat manager here.
+    // Who may cheat is the backend's (CoreV2 #138): its admin panel lets every player, only the accounts it lists, or
+    // nobody. It is asked for the player who typed the command, so "<command> /Name/" on another player needs the one
+    // who typed it to be allowed. A player who may not is told so and nothing runs, Core's own commands included. A
+    // backend from before it (404) leaves cheats on for every player, as they were.
+    if (bCheatPermissionsUnsupported)
+    {
+        RunServerCheat(Msg);
+        return;
+    }
+    APlayerState* const State = PlayerState;
+    std::wstring AccountId = State ? State->UniqueId.ToString().ToStdString() : std::wstring();
+    if (!IsCheatAccountId(AccountId))
+    {
+        AccountId.clear();
+    }
+    const std::wstring DisplayName = State ? static_cast<const FString&>(State->PlayerName).ToStdString() : std::wstring();
+    std::wstring Key = AccountId;
+    if (Key.empty())
+    {
+        Key = L"name:" + DisplayName;
+        std::transform(Key.begin(), Key.end(), Key.begin(), [](wchar_t Character) { return static_cast<wchar_t>(std::towlower(Character)); });
+    }
+
+    FCheatPermission& Permission = CheatPermissions[Key];
+    if (Permission.bKnown && !Permission.bAsking && std::chrono::steady_clock::now() < Permission.Expires)
+    {
+        if (!Permission.bAllowed)
+        {
+            UE_LOG(LogFort, Log, TEXT("ServerCheat: %s may not cheat, \"%s\" not run"), *GetNameSafe(this), *Msg);
+            ClientMessage(CheatsRefused(Permission.Mode));
+            return;
+        }
+        RunServerCheat(Msg);
+        return;
+    }
+    if (Permission.Waiting.size() >= MaxWaitingCheats)
+    {
+        ClientMessage(FString(L"Still asking the backend whether you may cheat: try again in a moment"));
+        return;
+    }
+    Permission.Waiting.emplace_back(TWeakObjectPtr<AFortPlayerController>(this), Msg.ToStdString());
+    if (!Permission.bAsking)
+    {
+        AskCheatPermission(Key, AccountId, DisplayName);
+    }
+#endif
+}
+
+void AFortPlayerController::RunServerCheat(const FString& Msg)
+{
+#if WITH_SERVER_CODE
+    // Cheats are on for every player the backend allows (#65, #69, #138); a controller that came another way gets its
+    // cheat manager here.
     if (!CheatManager)
     {
         AddCheats(true);

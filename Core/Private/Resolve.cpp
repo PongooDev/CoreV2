@@ -518,6 +518,58 @@ namespace
         return Ties == 1 ? Found : 0;
     }
 
+    // On a packed exe (Finder::HasMovedCode) the "LoadMap: failed to Listen(%s)" reference and LoadMap's world/url
+    // setup for the Listen call sit in moved code that can still be ciphertext when Core resolves, so the log anchor
+    // finds nothing. The call instruction itself is in the first .text: UWorld::Listen is stripped to xor al, al; ret,
+    // so LoadMap's call to it is a call; nop; jmp whose target is that stub, reached right after the
+    // FURL::HasOption("Listen") test (the previous call; nop; jmp, whose result is tested with test al, al; jcc). That
+    // pair is unique in the first .text, so it names the same call Core hooks on 1.9 without reading any moved code.
+    uintptr_t PackedListenCall()
+    {
+        const uintptr_t Begin = Finder::TextBegin();
+        const uintptr_t End = Finder::TextEnd();
+        uintptr_t Found = 0;
+        int32_t Count = 0;
+        for (uintptr_t Site = Begin; Site + 8 <= End; ++Site)
+        {
+            if (Byte(Site) != 0xE8 || Byte(Site + 5) != 0x90 || (Byte(Site + 6) != 0xE9 && Byte(Site + 6) != 0xEB))
+            {
+                continue;
+            }
+            const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+            if (!IsInText(Target) || !Finder::BodyIs(Target, { 0x32, 0xC0, 0xC3 }))
+            {
+                continue;
+            }
+            uintptr_t Previous = 0;
+            for (uintptr_t Scan = Site - 1; Scan + 0x40 >= Site && !Previous; --Scan)
+            {
+                if (Byte(Scan) == 0xE8 && Byte(Scan + 5) == 0x90 && (Byte(Scan + 6) == 0xE9 || Byte(Scan + 6) == 0xEB))
+                {
+                    Previous = Scan;
+                }
+            }
+            if (!Previous)
+            {
+                continue;
+            }
+            const uintptr_t Jump = Previous + 6;
+            const uintptr_t Test = Byte(Jump) == 0xE9 ? Finder::RelativeTarget(Jump, 1, 5) : Jump + 2 + static_cast<int8_t>(Byte(Jump + 1));
+            const bool bTest = IsInText(Test) && Byte(Test) == 0x84 && Byte(Test + 1) == 0xC0
+                && (Byte(Test + 2) == 0x74 || Byte(Test + 2) == 0x75 || (Byte(Test + 2) == 0x0F && (Byte(Test + 3) == 0x84 || Byte(Test + 3) == 0x85)));
+            if (bTest)
+            {
+                Found = Site;
+                ++Count;
+            }
+        }
+        if (Count != 1)
+        {
+            Log::Error(L"Finder: expected 1 first-.text LoadMap Listen call, found {}", Count);
+        }
+        return Count == 1 ? Found : 0;
+    }
+
     constexpr int32_t WorldNetDriver = 0x38;
     constexpr int32_t WorldDemoNetDriver = 0xB8;
 
@@ -594,8 +646,20 @@ namespace
         // other pieces, so there only the call's target is checked.
         const uintptr_t ListenLog = OnlyRef(L"LoadMap: failed to Listen(%s)");
         const bool bMovedListen = ListenLog && !IsInText(ListenLog);
-        const uintptr_t ListenCall = ListenLog ? (bMovedListen ? MovedCallBeforeJccPastRef(ListenLog) : CallBeforeJccPastRef(ListenLog, 0x100)) : 0;
-        if (ListenCall && (bMovedListen || IsListenCall(ListenCall)))
+        uintptr_t ListenCall = ListenLog ? (bMovedListen ? MovedCallBeforeJccPastRef(ListenLog) : CallBeforeJccPastRef(ListenLog, 0x100)) : 0;
+        bool bListen = ListenCall && (bMovedListen || IsListenCall(ListenCall));
+        if (!bListen && Finder::HasMovedCode())
+        {
+            // The log reference and the call's register setup can be ciphertext when Core resolves; find the call in
+            // the first .text instead.
+            const uintptr_t Packed = PackedListenCall();
+            if (Packed)
+            {
+                ListenCall = Packed;
+                bListen = true;
+            }
+        }
+        if (bListen)
         {
             Sites::LoadMapListenCall = reinterpret_cast<uint8_t*>(ListenCall);
         }
@@ -1520,6 +1584,89 @@ namespace
         return Thunks;
     }
 
+    // The server pass runs before any class default object exists, so it has no Actor vtable to read a slot from, and
+    // on a packed exe the virtual call to AActor::IsNetRelevantFor is in moved code that can be ciphertext when Core
+    // resolves. Derive the slot from the first .text instead: IsNetRelevantFor sits at the same vtable slot in AActor
+    // and in every subclass that doesn't override it, so the slot those vtables agree on most is it. A vtable's base is
+    // the first .text address a lea in code loads; the function's own slot is its offset from that base.
+    int32_t NetRelevantSlotFromVTables(uintptr_t Function)
+    {
+        if (!Function)
+        {
+            return -1;
+        }
+        const uintptr_t TextBegin = Finder::TextBegin();
+        const uintptr_t TextEnd = Finder::TextEnd();
+        Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+        const uintptr_t ReadOnlyBegin = ReadOnly.GetSectionStart().Get();
+        const uintptr_t ReadOnlyEnd = ReadOnly.GetSectionEnd().Get();
+
+        std::vector<uintptr_t> Bases;
+        for (uintptr_t Lea = TextBegin; Lea + 7 <= TextEnd; ++Lea)
+        {
+            if ((Byte(Lea) & 0xFB) != 0x48 || Byte(Lea + 1) != 0x8D || (Byte(Lea + 2) & 0xC7) != 0x05)
+            {
+                continue;
+            }
+            const uintptr_t Target = Finder::RelativeTarget(Lea, 3, 7);
+            if (Target >= ReadOnlyBegin && Target < ReadOnlyEnd && (Target & 7) == 0)
+            {
+                Bases.push_back(Target);
+            }
+        }
+        std::sort(Bases.begin(), Bases.end());
+        Bases.erase(std::unique(Bases.begin(), Bases.end()), Bases.end());
+
+        std::unordered_map<int32_t, int32_t> Votes;
+        for (uintptr_t At = (ReadOnlyBegin + 7) & ~static_cast<uintptr_t>(7); At + sizeof(uintptr_t) <= ReadOnlyEnd; At += sizeof(uintptr_t))
+        {
+            if (*reinterpret_cast<const uintptr_t*>(At) != Function)
+            {
+                continue;
+            }
+            uintptr_t Base = 0;
+            for (uintptr_t Walk = At; Walk >= ReadOnlyBegin && At - Walk < 0x1600 * sizeof(uintptr_t); Walk -= sizeof(uintptr_t))
+            {
+                if (std::binary_search(Bases.begin(), Bases.end(), Walk))
+                {
+                    Base = Walk;
+                    break;
+                }
+                if (Walk == ReadOnlyBegin)
+                {
+                    break;
+                }
+                const uintptr_t Entry = *reinterpret_cast<const uintptr_t*>(Walk - sizeof(uintptr_t));
+                if (Entry < TextBegin || Entry >= TextEnd)
+                {
+                    break;
+                }
+            }
+            if (Base)
+            {
+                ++Votes[static_cast<int32_t>((At - Base) / sizeof(uintptr_t))];
+            }
+        }
+
+        int32_t Best = -1;
+        int32_t BestVotes = 0;
+        int32_t Ties = 0;
+        for (const auto& [Slot, Count] : Votes)
+        {
+            if (Count > BestVotes)
+            {
+                BestVotes = Count;
+                Best = Slot;
+                Ties = 1;
+            }
+            else if (Count == BestVotes)
+            {
+                ++Ties;
+            }
+        }
+        return BestVotes > 0 && Ties == 1 ? Best : -1;
+    }
+
     void ResolveReplication()
     {
         const uintptr_t ReplicateActor = FunctionOf(L"ReplicateActor: bPausedUntilReliableACK is ending now that reliables have been ACK'd. %s");
@@ -2198,6 +2345,17 @@ namespace
             }
             NetRelevant = Slot;
             ++NetRelevantSites;
+        }
+        if (!NetRelevantSites)
+        {
+            // The FNetViewer call and the virtual call after it can be ciphertext when Core resolves (1.9.1): derive
+            // the slot from the Actor vtable family in .rdata instead, the way ResolveReplicationLive compares it.
+            const int32_t Slot = NetRelevantSlotFromVTables(FunctionOf(L"Actor %s / %s has no root component in AActor::IsNetRelevantFor. (Make bAlwaysRelevant=true?)"));
+            if (Slot >= 0)
+            {
+                NetRelevant = Slot;
+                NetRelevantSites = 1;
+            }
         }
         RequireSlot(L"AActor::IsNetRelevantFor", Natives::AActor_IsNetRelevantForIndex, NetRelevantSites ? NetRelevant : -1);
 

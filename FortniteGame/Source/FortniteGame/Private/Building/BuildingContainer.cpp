@@ -76,6 +76,27 @@ namespace
     int32_t FloorLootContainers = 0;
     int32_t FloorLootPickups = 0;
     int32_t FloorLootLoadedWeapons = 0;
+
+    // Battle Royale's loot packages have some rows for one loot level only (from 1.8.2: the medium ammo of
+    // WorldList.AthenaAmmoLarge and WorldList.AthenaLoot.Ammo(.Medium), MinWorldLevel = MaxWorldLevel = 1, 2 and 3). The
+    // loot level is the game state's WorldLevel (UFortKismetLibrary::GetLootLevel reads it too, for the supply drop), which
+    // AFortGameStateAthena's constructor sets to 1. 1.9's Per Playlist Loot sets it from the playlist with a new
+    // AFortGameState virtual (1.9 slot 0xE5, empty in the base). AFortGameStateAthena's override (0x430920) gives
+    // playlist -1 to 2 level 1, 10 (Duo) level 2, and 9 (Squad) and 11 level 3. AFortGameModeAthena::OnGivenMatchAssignment
+    // (0x42D2B0) calls it, after it copies the match's playlist to the game state, and so does the world manager when it
+    // sets the world level (0x667A50). Before the match is assigned, the floor loot is rolled at level 1. Logged when a roll
+    // uses a level other than the last one logged, so a server log shows which level each playlist's loot got.
+    void LogAthenaLootLevel(ABuildingContainer* Container, int32_t LootLevel)
+    {
+        static int32_t LastLogged = -2;
+        if (LootLevel == LastLogged)
+        {
+            return;
+        }
+        LastLogged = LootLevel;
+        AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(Container);
+        UE_LOG(LogFortBuilding, Log, TEXT("Battle Royale loot level %d (playlist %d), first rolled for %s"), LootLevel, GameMode ? static_cast<int32_t>(GameMode->CurrentPlaylistId) : -1, *Container->GetName());
+    }
 }
 
 bool ABuildingContainer::IsAlreadySearched(AFortPawn* Looter)
@@ -300,6 +321,7 @@ void ABuildingContainer::SpawnFloorLoot()
     {
         return;
     }
+    LogAthenaLootLevel(this, WorldLevel);
 
     TStructArray<FFortItemEntry> LootDrops{};
     UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, nullptr, StaticGameplayTags, true, false);
@@ -507,7 +529,12 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
         else if (!static_cast<FName>(ContainerLootTierKey).IsNone())
         {
             TStructArray<FFortItemEntry> LootDrops{};
-            UFortLootPackage::PickLootDrops(LootDrops, WorldManager ? GetWorldLevel() : -1, ContainerLootTierKey, UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Looter), StaticGameplayTags, true, false);
+            const int32_t LootLevel = WorldManager ? GetWorldLevel() : -1;
+            if (bAthena)
+            {
+                LogAthenaLootLevel(this, LootLevel);
+            }
+            UFortLootPackage::PickLootDrops(LootDrops, LootLevel, ContainerLootTierKey, UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Looter), StaticGameplayTags, true, false);
 
             AFortPlayerController* LooterController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Looter->Controller)));
             ModifyLootDrops(LootDrops, LooterController);

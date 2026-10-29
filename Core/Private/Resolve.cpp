@@ -5822,7 +5822,8 @@ bool Finder::ResolveMcpProfileQuery()
     // UMcpProfile::QueryProfile(const FMcpQueryComplete&) (1.8.1 0x3C48DD0, 1.8 0x3C34980, 1.7.2 0x3B4A5E0) picks the
     // request's URL context, McpDedicatedServerCommandUrl, McpClientCommandUrl or (another account's profile)
     // McpPublicCommandUrl, and calls QueryProfile(FBaseUrlContext&) (1.8.1 0x3C48A80), the only function that logs an
-    // overlapping query. Two other functions name McpPublicCommandUrl; only this one calls it.
+    // overlapping query. Two other functions name McpPublicCommandUrl; only this one calls it (1.8.2: 0x3C52470, calling
+    // 0x3C52120).
     const uintptr_t QueryWithContext = FunctionOf(L"Caught overlapping attempts to query same user's profile, will be called when previous call completes. User %s");
     std::vector<uintptr_t> Candidates;
     for (const uintptr_t Ref : QueryWithContext ? Finder::StringRefs(L"McpPublicCommandUrl") : std::vector<uintptr_t>{})
@@ -5859,6 +5860,8 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
 
     // The game code 1.8's AFortPlayerPawn::ServerReviveFromDBNO_Implementation (0x7FF160) runs, which 1.8.1 strips with
     // the implementation (its slot holds the shared empty function). Each piece is still called from code 1.8.1 keeps.
+    // 1.8.2 (CL-3741772) strips it too, and gives the same slots apart from the controller's: OnPawnRevived is 0x300
+    // there (1.8.1 0x301), and the DBNO timer is +0x1678.
     void** PawnVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerPawn");
     void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerZone");
     void** AthenaControllerVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerAthena");
@@ -6223,7 +6226,8 @@ bool Finder::ResolveScoreBuildingConstructionLive()
     // (0x12E-0x132, as on 1.8): Upgrade, Repair and Edit are thunks to one scorer, mov r9, r8; mov r8, rdx; mov dl, Type;
     // jmp Scorer (1.8.1 0x58E940, 0x58E930, 0x58E810, all to 0x58E820; 1.8 0x599300.. to 0x5991E0; 1.7.2 slots 0x131-0x133
     // to 0x58A860), and ScoreBuildingConstruction (1.8.1 0x58E610), two slots before the first of them, calls the scorer
-    // too. The first such run is the Athena game mode's own: the subclasses' vtables that follow repeat it.
+    // too. The first such run is the Athena game mode's own: the subclasses' vtables that follow repeat it. 1.8.2
+    // (CL-3741772) strips the RPCs too (0x1F5, 0x1F7) and keeps the run: ScoreBuildingConstruction 0x12E is 0x58F630.
     const auto ScoreThunkTarget = [](uintptr_t Entry) -> uintptr_t
     {
         return Entry && FindInstruction(Entry, Entry + 13, { 0x4D, 0x8B, 0xC8, 0x4C, 0x8B, 0xC2, 0xB2, -1, 0xE9 }) == Entry ? Finder::RelativeTarget(Entry + 8, 1, 5) : 0;
@@ -7577,7 +7581,8 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     // IsBuildingRestricted, HasRequiredBuildingLevel (1.8.1 0x2A6-0x2A9, 1.8 0x2A5-0x2A8), and
     // CanPlaceBuildableClassInStructuralGrid, PayBuildableClassPlacementCost, PayBuildingRepairCost,
     // GetErrorMessageFromStructuralQuery (0x2B2-0x2B5, 1.8 0x2B1-0x2B4). On 1.8 these rules give exactly the slots its own
-    // bodies call.
+    // bodies call. 1.8.2 (CL-3741772) strips the same six bodies. APlayerController gains a slot there and
+    // AFortPlayerController loses ServerSetTimeOfDay's two, so the helper runs are at 1.8's slots again (0x2A5-0x2A8, 0x2B1-0x2B4; place 0x83AEB0, improve 0x4A0580, begin edit 0x83AD10).
     const auto RpcStub = [](const wchar_t* Name) -> uintptr_t
     {
         for (const uintptr_t Ref : Finder::StringRefs(Name))

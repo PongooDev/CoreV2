@@ -143,6 +143,10 @@ uintptr_t Finder::RelativeTarget(uintptr_t Instruction, uint32_t OperandOffset, 
 
 uintptr_t Finder::NextCall(uintptr_t From, size_t MaxDistance)
 {
+    if (!From)
+    {
+        return 0;
+    }
     Memcury::Scanner Call = Memcury::Scanner(Memcury::PE::Address(From)).FindNextCall(MaxDistance);
     if (!Call.IsValid())
     {

@@ -1437,7 +1437,18 @@ namespace
         const uintptr_t ReplicateActor = FunctionOf(L"ReplicateActor: bPausedUntilReliableACK is ending now that reliables have been ACK'd. %s");
         const uintptr_t ReplicateActorEnd = Finder::FunctionEnd(ReplicateActor);
         const uintptr_t SetChannelActor = FunctionOf(L"SetChannelActor: ChIndex: %i, Actor: %s, NetGUID: %s");
-        const uintptr_t NetViewer = Finder::FunctionStart(First(Finder::StringRefs("ServerForwardView")));
+        uintptr_t NetViewer = Finder::FunctionStart(First(Finder::StringRefs("ServerForwardView")));
+        // 1.9 (CL-3757339) drops FNetViewer's ahead prediction, the code that named ServerForwardView and read the
+        // connection's TickCount and the view target's velocity: its constructor (0x22BC640) only fills in the viewer,
+        // and DeltaSeconds is unused. Its one caller, UIpNetDriver::ProcessRemoteFunction (0x3A52490; 1.8.2 0x3A22AA0
+        // calls the old constructor 0x22A2E70 the same way), builds a viewer with its first call.
+        const bool bNetViewerPredicts = NetViewer != 0;
+        if (!NetViewer)
+        {
+            const uintptr_t RemoteFunction = FunctionOf(L"UIpNetDriver::ProcesRemoteFunction: No owning connection for actor %s. Function %s will not be processed.");
+            const uintptr_t Constructor = RemoteFunction ? Finder::NextCall(RemoteFunction, 0x100) : 0;
+            NetViewer = Constructor && FindInstruction(Constructor, Constructor + 0x40, { 0x48, 0x89, 0x11 }) ? Constructor : 0;
+        }
         const uintptr_t NetViewerEnd = Finder::FunctionEnd(NetViewer);
         Require(L"UActorChannel::ReplicateActor", Natives::UActorChannel_ReplicateActor, ReplicateActor);
         Require(L"UActorChannel::SetChannelActor", Natives::UActorChannel_SetChannelActor, SetChannelActor);
@@ -1986,7 +1997,12 @@ namespace
                 ++TickCountTests;
             }
         }
-        RequireOffset(L"UNetConnection::TickCount", Natives::UNetConnection_TickCount, TickCountTests == 1 ? *reinterpret_cast<const int32_t*>(TickCountTest + 2) : 0);
+        // Only the ahead prediction reads TickCount (and ServerReplicateActors, which Core restores, counts it up): a
+        // viewer without it needs no TickCount.
+        if (bNetViewerPredicts)
+        {
+            RequireOffset(L"UNetConnection::TickCount", Natives::UNetConnection_TickCount, TickCountTests == 1 ? *reinterpret_cast<const int32_t*>(TickCountTest + 2) : 0);
+        }
 
         const uintptr_t GuidCacheLoad = CreateDestructionInfo ? FindInstruction(CreateDestructionInfo, CreateDestructionInfo + 0x40, { 0x48, 0x8B, 0x89 }) : 0;
         const uintptr_t AssignGuid = GuidCacheLoad ? FindRawCall(GuidCacheLoad + 7, GuidCacheLoad + 0x20) : 0;
@@ -2043,7 +2059,8 @@ namespace
 
         const int32_t Velocity = bActorThunks ? VirtualSlot(FindVirtualCall(VelocityThunks[0].second, VelocityThunks[0].second + 0x40)) : -1;
         const int32_t ViewerVelocity = TickCountTests == 1 ? VirtualSlot(FindVirtualCall(TickCountTest + 8, TickCountTest + 0x80)) : -1;
-        RequireSlot(L"AActor::GetVelocity", Natives::AActor_GetVelocityIndex, Velocity == ViewerVelocity ? Velocity : -1);
+        // Without the prediction (1.9) the viewer has no velocity call to compare: take the GetVelocity exec's alone.
+        RequireSlot(L"AActor::GetVelocity", Natives::AActor_GetVelocityIndex, Velocity == ViewerVelocity || (!bNetViewerPredicts && TickCountTests == 0) ? Velocity : -1);
         RequireSlot(L"AActor::ForceNetUpdate", Natives::AActor_ForceNetUpdateIndex, bActorThunks ? VirtualSlot(FindVirtualCall(ForceUpdateThunks[0].second, ForceUpdateThunks[0].second + 0x40)) : -1);
 
         uintptr_t FlushDormancy = 0;
@@ -2750,9 +2767,17 @@ namespace
         const uintptr_t UpdateTime = Finder::FunctionStart(First(Finder::StringRefs(L"Detected negative delta time - on AMD systems please install http://files.aoaforums.com/I3199-setup.zip.html")));
         const uintptr_t UpdateTimeEnd = Finder::FunctionEnd(UpdateTime);
         const std::initializer_list<int32_t> SleepPattern = { 0x76, 0x10, 0xF3, 0x0F, 0x5C, -1, -1, -1, -1, -1, 0x0F, 0x28, -1, 0xE8 };
-        const uintptr_t Sleep = UpdateTimeEnd ? FindInstruction(UpdateTime, UpdateTimeEnd, SleepPattern) : 0;
+        uintptr_t Sleep = UpdateTimeEnd ? FindInstruction(UpdateTime, UpdateTimeEnd, SleepPattern) : 0;
+        uintptr_t Slack = Sleep ? Sleep + 2 : 0;
+        // 1.9 (CL-3757339, 0x2512664) moves the wait into xmm0 before it takes the slack off: jbe; movaps xmm0, xmm6;
+        // subss xmm0, [0.002f]; call. The call is still 13 bytes in, and without the subss xmm0 is the whole wait.
+        if (!Sleep && UpdateTimeEnd)
+        {
+            Sleep = FindInstruction(UpdateTime, UpdateTimeEnd, { 0x76, 0x10, 0x0F, 0x28, -1, 0xF3, 0x0F, 0x5C, -1, -1, -1, -1, -1, 0xE8 });
+            Slack = Sleep ? Sleep + 5 : 0;
+        }
         const uintptr_t SleepTarget = Sleep ? Finder::RelativeTarget(Sleep + 13, 1, 5) : 0;
-        const bool bSlack = Sleep && (Byte(Sleep + 5) & 0xC7) == 0x05 && *reinterpret_cast<const float*>(Finder::RelativeTarget(Sleep + 2, 4, 8)) == 0.002f;
+        const bool bSlack = Slack && (Byte(Slack + 3) & 0xC7) == 0x05 && *reinterpret_cast<const float*>(Finder::RelativeTarget(Slack, 4, 8)) == 0.002f;
         uintptr_t Spin = 0;
         for (uintptr_t Exit = bSlack ? FindInstruction(Sleep + 18, Sleep + 0x60, { 0x73, -1, 0x0F, 0x28, -1, 0xE8 }) : 0; Exit && !Spin; Exit = FindInstruction(Exit + 1, Sleep + 0x60, { 0x73, -1, 0x0F, 0x28, -1, 0xE8 }))
         {
@@ -2760,7 +2785,7 @@ namespace
         }
         if (Spin)
         {
-            Sites::MaxTickRateWait = { reinterpret_cast<uint8_t*>(Sleep), reinterpret_cast<uint8_t*>(Sleep + 2), reinterpret_cast<uint8_t*>(Spin) };
+            Sites::MaxTickRateWait = { reinterpret_cast<uint8_t*>(Sleep), reinterpret_cast<uint8_t*>(Slack), reinterpret_cast<uint8_t*>(Spin) };
         }
         else
         {
@@ -5196,9 +5221,59 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     const std::vector<uintptr_t> ReasonCalls = Targets(OverflowReason);
     const uintptr_t StackLimitCall = ReasonCalls.size() >= 2 ? ReasonCalls[ReasonCalls.size() - 2] : 0;
     const uintptr_t BackpackLimitCall = ReasonCalls.size() >= 2 ? ReasonCalls.back() : 0;
-    const uintptr_t StackLimit = Unwrap(StackLimitCall);
-    const uintptr_t BackpackLimit = Unwrap(BackpackLimitCall);
-    const bool bControllerLimits = StackLimit != StackLimitCall;
+
+    // 1.9 (CL-3757339) gives "Backpack full!" (0x6AF4D0) without an overflow reason: the reason and the limit wrappers
+    // are gone, and the limits take (ItemEntry, the owner's inventory owner interface, InventoryType). Its new capacity
+    // function (0x684300) is the only one to log an overridden capacity; the backpack limit (0x6874E0) is the one
+    // function calling it that caps at 512, and the overflow (0x686E80) the backpack limit's one caller. Of the
+    // overflow's callees the stack limit (0x687080) is the one that tests a call's bool and shares a callee
+    // (GetMaxStackSize) with the backpack limit. GetMaxStackSize and CanStackWith keep 1.8's shapes.
+    const uintptr_t Capacity = OverflowReason ? 0 : FunctionOf(L"GetInventoryCapacity is returning an overridden value of %i");
+    uintptr_t CapacityStackLimit = 0;
+    uintptr_t CapacityBackpackLimit = 0;
+    bool bCapacityLimitsAmbiguous = false;
+    for (const uintptr_t Call : Capacity ? Finder::CallsTo(Capacity, false) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t Caller = Finder::FunctionStart(Call);
+        const uintptr_t CallerEnd = Caller ? Finder::FunctionEnd(Caller) : 0;
+        if (CallerEnd > Caller && Caller != CapacityBackpackLimit && FindInstruction(Caller, CallerEnd, { 0x3D, 0x00, 0x02, 0x00, 0x00 }))
+        {
+            bCapacityLimitsAmbiguous |= CapacityBackpackLimit != 0;
+            CapacityBackpackLimit = Caller;
+        }
+    }
+    const std::vector<uintptr_t> CapacityBackpackCalls = CapacityBackpackLimit && !bCapacityLimitsAmbiguous ? Targets(CapacityBackpackLimit) : std::vector<uintptr_t>{};
+    uintptr_t CapacityOverflow = 0;
+    for (const uintptr_t Call : CapacityBackpackCalls.empty() ? std::vector<uintptr_t>{} : Finder::CallsTo(CapacityBackpackLimit, false))
+    {
+        const uintptr_t Caller = Finder::FunctionStart(Call);
+        bCapacityLimitsAmbiguous |= CapacityOverflow && CapacityOverflow != Caller;
+        CapacityOverflow = Caller;
+    }
+    for (const uintptr_t Callee : CapacityOverflow && !bCapacityLimitsAmbiguous ? Targets(CapacityOverflow) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t CalleeEnd = Callee != CapacityBackpackLimit && Callee != CapacityStackLimit && Finder::FunctionStart(Callee) == Callee ? Finder::FunctionEnd(Callee) : 0;
+        bool bTestsBool = false;
+        bool bSharesCallee = false;
+        for (const auto& [Call, Target] : CalleeEnd > Callee ? Finder::DirectCalls(Callee, CalleeEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            bTestsBool |= Call + 7 <= CalleeEnd && Byte(Call + 5) == 0x84 && Byte(Call + 6) == 0xC0;
+            bSharesCallee |= Finder::FunctionStart(Target) == Target && std::find(CapacityBackpackCalls.begin(), CapacityBackpackCalls.end(), Target) != CapacityBackpackCalls.end();
+        }
+        if (bTestsBool && bSharesCallee)
+        {
+            bCapacityLimitsAmbiguous |= CapacityStackLimit != 0;
+            CapacityStackLimit = Callee;
+        }
+    }
+    if (bCapacityLimitsAmbiguous || !CapacityStackLimit)
+    {
+        CapacityStackLimit = CapacityBackpackLimit = 0;
+    }
+
+    const uintptr_t StackLimit = OverflowReason ? Unwrap(StackLimitCall) : CapacityStackLimit;
+    const uintptr_t BackpackLimit = OverflowReason ? Unwrap(BackpackLimitCall) : CapacityBackpackLimit;
+    const bool bControllerLimits = OverflowReason ? StackLimit != StackLimitCall : StackLimit != 0;
     const uintptr_t StackLimitEnd = IsInText(StackLimit) ? Finder::FunctionEnd(StackLimit) : 0;
     const uintptr_t BackpackLimitEnd = IsInText(BackpackLimit) ? Finder::FunctionEnd(BackpackLimit) : 0;
     const bool bStackCap = BackpackLimitEnd > BackpackLimit && FindInstruction(BackpackLimit, BackpackLimitEnd, { 0x3D, 0x00, 0x02, 0x00, 0x00 });
@@ -5282,6 +5357,47 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
             break;
         }
     }
+    // 1.9: only the count goes through the interface there (0x684960: lea rcx, [rax+388h]; mov rax, [rcx];
+    // call [rax+30h]; GetMaxStackSize's call through the controller's interface has the same shape); the capacity function
+    // is called directly. The interface's MaxItems (slot 5, 0x6845B0) is the first entry of AFortInventory's interface
+    // vtable that tail-jumps to it.
+    std::vector<std::pair<int32_t, int32_t>> CountCalls;
+    for (const uintptr_t Helper : Capacity && bControllerLimits && MaxItemsSlot < 0 ? Targets(BackpackLimit) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t HelperEnd = Helper != MaxStackSize && Helper != Capacity && Finder::FunctionStart(Helper) == Helper ? Finder::FunctionEnd(Helper) : 0;
+        for (uintptr_t Site = Helper; HelperEnd && Site + 13 <= HelperEnd; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 2);
+            const int32_t Displacement = *reinterpret_cast<const int32_t*>(Site + 3);
+            if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && (ModRm & 0x38) == 0x08 && Displacement > 0 && Displacement < 0x2000
+                && Byte(Site + 7) == 0x48 && Byte(Site + 8) == 0x8B && Byte(Site + 9) == 0x01 && Byte(Site + 10) == 0xFF && Byte(Site + 11) == 0x50 && Byte(Site + 12) % 8 == 0
+                && std::find(CountCalls.begin(), CountCalls.end(), std::make_pair(Displacement, static_cast<int32_t>(Byte(Site + 12) / 8))) == CountCalls.end())
+            {
+                CountCalls.emplace_back(Displacement, Byte(Site + 12) / 8);
+            }
+        }
+    }
+    if (CountCalls.size() == 1)
+    {
+        UClass* InventoryClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortInventory");
+        UObject* InventoryDefault = InventoryClass ? InventoryClass->GetDefaultObject() : nullptr;
+        void** InterfaceVTable = InventoryDefault ? *reinterpret_cast<void***>(reinterpret_cast<uint8_t*>(InventoryDefault) + CountCalls[0].first) : nullptr;
+        for (int32_t Slot = 0; InterfaceVTable && Slot < 0x40 && MaxItemsSlot < 0; ++Slot)
+        {
+            const uintptr_t Entry = VTableEntry(InterfaceVTable, Slot);
+            if (!Entry)
+            {
+                break;
+            }
+            const uintptr_t EntryEnd = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+            if (Slot != CountCalls[0].second && EntryEnd > Entry + 5 && EntryEnd - Entry < 0x80 && Byte(EntryEnd - 5) == 0xE9 && Finder::RelativeTarget(EntryEnd - 5, 1, 5) == Capacity)
+            {
+                InterfaceOffset = CountCalls[0].first;
+                NumItemsSlot = CountCalls[0].second;
+                MaxItemsSlot = Slot;
+            }
+        }
+    }
 
     // The inventory's overflow amount (Inventory, ItemEntry): the other function that calls both limits. 1.1 and 1.2's
     // (0x1405AAB60) takes the stack limit unless it is -1, else the backpack limit. 1.7.2's (0x630E80) checks the
@@ -5289,7 +5405,7 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     // stacks (never -1), and applies the backpack limit to what is left; the old pairing called on 1.7.2 overflows
     // every item that has no stack yet.
     uintptr_t Overflow = 0;
-    for (const uintptr_t Call : StackLimit && BackpackLimit && OverflowReason ? Finder::CallsTo(StackLimit, false) : std::vector<uintptr_t>{})
+    for (const uintptr_t Call : StackLimit && BackpackLimit ? Finder::CallsTo(StackLimit, false) : std::vector<uintptr_t>{})
     {
         const uintptr_t Caller = Finder::FunctionStart(Call);
         const std::vector<uintptr_t> CallerCalls = Caller && Caller != OverflowReason && Caller != StackLimitCall ? Targets(Caller) : std::vector<uintptr_t>{};
@@ -5316,9 +5432,9 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
         Overflow = Wrapper;
     }
 
-    if (!OverflowReason || !StackLimit || !bStackCap || !MaxStackSize || !CanStackWith || !Overflow || bAmbiguous || MaxItemsSlot < 0)
+    if (!BackpackLimit || !StackLimit || !bStackCap || !MaxStackSize || !CanStackWith || !Overflow || bAmbiguous || MaxItemsSlot < 0)
     {
-        Log::Error(L"Finder: AFortInventory overflow checks not found (reason {}, stack cap {}, max stack {}, can stack {}, overflow {}, ambiguous {}, slots {}/{})", OverflowReason != 0, bStackCap, MaxStackSize != 0, CanStackWith != 0, Overflow != 0, bAmbiguous, NumItemsSlot, MaxItemsSlot);
+        Log::Error(L"Finder: AFortInventory overflow checks not found (reason {}, capacity {}, stack cap {}, max stack {}, can stack {}, overflow {}, ambiguous {}, slots {}/{})", OverflowReason != 0, Capacity != 0, bStackCap, MaxStackSize != 0, CanStackWith != 0, Overflow != 0, bAmbiguous, NumItemsSlot, MaxItemsSlot);
         return false;
     }
 
@@ -6676,7 +6792,14 @@ bool Finder::ResolveWeaponAmmoLive(ptrdiff_t AmmoCountOffset, ptrdiff_t ItemEntr
         return true;
     }
 
-    const int32_t Index = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortWeapon"), 0x80, { AmmoCountOffset, ItemEntryGuidOffset }, true);
+    void** WeaponVTable = CdoVTable(L"/Script/FortniteGame.FortWeapon");
+    int32_t Index = UniqueSlotReferencing(WeaponVTable, 0x80, { AmmoCountOffset, ItemEntryGuidOffset }, true);
+    // 1.9's (CL-3757339, slot 0xF0, 0x94B3F0) is 0x8B bytes (1.8.2's 0x9379A0 is 0x7F); the only other weapon virtual
+    // reading both members is 0x1DB bytes (slot 0xE0).
+    if (Index < 0)
+    {
+        Index = UniqueSlotReferencing(WeaponVTable, 0x100, { AmmoCountOffset, ItemEntryGuidOffset }, true);
+    }
     if (Index < 0)
     {
         Log::Error(L"Finder: AFortWeapon::ModAmmo slot not found");
@@ -6776,6 +6899,34 @@ bool Finder::ResolveDurabilityLive(UFunction* ServerModDurability, UObject* Play
         {
             if ((Byte(Site) == 0x83 || Byte(Site) == 0x80) && Byte(Site + 1) == 0x89 && *reinterpret_cast<const int32_t*>(Site + 2) == PendingDestroyDueToDurabilityOffset
                 && Byte(Site + 6) == PendingDestroyDueToDurabilityMask && FindVirtualCall(Site + 7, End))
+            {
+                bDestroyedAmbiguous |= DestroyedFunction != 0;
+                DestroyedIndex = Index;
+                DestroyedFunction = Function;
+                break;
+            }
+        }
+    }
+    // 1.9 (CL-3757339, slot 0xC6, 0x93AB70) sets the flag first and tail-jumps to the destroy it used to call through
+    // the vtable (0x94E620, now OnRep_EquippedWeaponDestroyWrapper's body): or dword [rcx+9E0h], 8;
+    // cmp byte [rcx+118h], 3; jnz; inc byte [rcx+3E8h]; jmp.
+    const bool bDestroyedFound = DestroyedIndex >= 0;
+    for (int32_t Index = 0; !bDestroyedFound && Index < 0x200; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(WeaponVTable, Index);
+        if (!Function)
+        {
+            break;
+        }
+        if (Function == DestroyedFunction || (Byte(Function) != 0x83 && Byte(Function) != 0x80) || Byte(Function + 1) != 0x89
+            || *reinterpret_cast<const int32_t*>(Function + 2) != PendingDestroyDueToDurabilityOffset || Byte(Function + 6) != PendingDestroyDueToDurabilityMask)
+        {
+            continue;
+        }
+        for (uintptr_t Jump = Function + 7; Jump + 5 <= Function + 0x20; ++Jump)
+        {
+            const uintptr_t Target = Byte(Jump) == 0xE9 ? Finder::RelativeTarget(Jump, 1, 5) : 0;
+            if (IsInText(Target) && Finder::FunctionStart(Target) == Target)
             {
                 bDestroyedAmbiguous |= DestroyedFunction != 0;
                 DestroyedIndex = Index;

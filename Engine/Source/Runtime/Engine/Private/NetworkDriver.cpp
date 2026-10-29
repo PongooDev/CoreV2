@@ -397,7 +397,11 @@ static bool ShouldActorGoDormant(AActor* Actor, const TArray<FNetViewer>& Connec
 int32_t UNetDriver::ServerReplicateActors_PrioritizeActors(UNetConnection* Connection, const TArray<FNetViewer>& ConnectionViewers, const TArray<FNetworkObjectInfo*>& ConsiderList, const bool bCPUSaturated, FActorPriority*& OutPriorityList, FActorPriority**& OutPriorityActors)
 {
     NetTag++;
-    Connection->TickCount++;
+    // 1.9's FNetViewer no longer reads TickCount, and Core doesn't look for it there.
+    if (Natives::UNetConnection_TickCount >= 0)
+    {
+        Connection->TickCount++;
+    }
 
     for (AActor* Temporary : Connection->SentTemporaries)
     {

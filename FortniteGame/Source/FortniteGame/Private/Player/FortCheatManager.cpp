@@ -473,7 +473,7 @@ namespace
         { L"Player", L"ChangeSize", L"ChangeSize <scale>", L"your size", ECheatMode::Both },
         { L"Player", nullptr, L"Skin <HID or CID | reset>", L"wear a hero's or outfit's look, seen by everyone, cosmetic only (\"skin HID_Ninja_007_R_T01\", \"skin CID_005_Athena_Commando_M_Default\"; Hero: the same)", ECheatMode::Both },
         { L"Player", nullptr, L"Disguise <class, path or mesh> [scale | HID]", L"turn into a prop (\"disguise Bathroom_ToiletBowl01\"), walk around as a husk (\"disguise HuskPawn\") or play a hero class's pawn with its abilities (\"disguise PlayerPawn_Ninja\"); Undisguise: be yourself again", ECheatMode::Both },
-        { L"Player", nullptr, L"DisguiseView <back | hide | normal>", L"how you see your own disguise: your camera pulls back for one bigger than you (the default), it's hidden from you only, or neither", ECheatMode::Both },
+        { L"Player", nullptr, L"DisguiseView <back [distance] [up] | hide | normal>", L"how you see your own disguise: your camera pulls back for one bigger than you (the default; give distance and up to set how far), it's hidden from you only, or neither", ECheatMode::Both },
         { L"Player", L"BuildFree", L"BuildFree", L"building costs nothing (CraftFree: crafting)", ECheatMode::Both },
         { L"Player", L"ToggleInfiniteAmmo", L"ToggleInfiniteAmmo", L"(ToggleInfiniteDurability, ToggleInfiniteStamina, ToggleNoCoolDown: no ability or gadget cooldowns)", ECheatMode::Both },
         { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },

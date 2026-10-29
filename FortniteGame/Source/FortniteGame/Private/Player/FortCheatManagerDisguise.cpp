@@ -1688,6 +1688,12 @@ namespace
         Normal,
     };
     EDisguiseView DisguiseView = EDisguiseView::Back;
+    // "cheat disguiseview back <distance> [up]" (#142): how far back and up the camera pulls, in place of the distance
+    // measured from the disguise's size. "cheat disguiseview back" measures it again.
+    std::optional<float> ChosenBack;
+    std::optional<float> ChosenUp;
+    constexpr float MaxChosenBack = 5000.0f;
+    constexpr float MaxChosenUp = 2000.0f;
 
     const wchar_t* DisguiseViewName(EDisguiseView View)
     {
@@ -2042,7 +2048,7 @@ namespace
         }
         if (DisguiseView == EDisguiseView::Back)
         {
-            ApplyCamera(PlayerController, Own.Back, Own.Up);
+            ApplyCamera(PlayerController, ChosenBack.value_or(Own.Back), ChosenUp.value_or(Own.Up));
         }
         else if (!CameraAdjustments.empty())
         {
@@ -2129,33 +2135,63 @@ bool UFortCheatManager::RunDisguiseViewCommand(APlayerController* PlayerControll
         return false;
     }
 
+    const auto Number = [](const std::wstring& Word, float Max) -> std::optional<float>
+    {
+        wchar_t* End = nullptr;
+        const float Value = std::wcstof(Word.c_str(), &End);
+        if (!End || *End != L'\0' || End == Word.c_str() || !std::isfinite(Value) || Value < 0.0f || Value > Max)
+        {
+            return std::nullopt;
+        }
+        return Value;
+    };
+
     std::optional<EDisguiseView> Chosen;
+    std::optional<float> Back;
+    std::optional<float> Up;
+    bool bValid = false;
     if (Words.size() == 2)
     {
         const std::wstring Wanted = Lower(Words[1]);
         if (Wanted == L"back")
         {
             Chosen = EDisguiseView::Back;
+            bValid = true;
         }
         else if (Wanted == L"hide")
         {
             Chosen = EDisguiseView::Hide;
+            bValid = true;
         }
         else if (Wanted == L"normal")
         {
             Chosen = EDisguiseView::Normal;
+            bValid = true;
         }
     }
-    FString Message;
-    if (!Chosen)
+    else if ((Words.size() == 3 || Words.size() == 4) && Lower(Words[1]) == L"back")
     {
-        Message = FString::Printf(TEXT("Your disguise view is \"%s\". Usage: disguiseview <back | hide | normal>: the camera pulls back for a disguise bigger than you, it is hidden from you (others still see it), or neither"),
-            DisguiseViewName(DisguiseView));
+        Chosen = EDisguiseView::Back;
+        Back = Number(Words[2], MaxChosenBack);
+        Up = Words.size() == 4 ? Number(Words[3], MaxChosenUp) : ChosenUp;
+        bValid = Back && (Words.size() == 3 || Up);
+    }
+    FString Message;
+    if (!bValid)
+    {
+        Message = FString::Printf(TEXT("Your disguise view is \"%s\". Usage: disguiseview <back [distance] [up] | hide | normal>: the camera pulls back for a disguise bigger than you (by distance 0-%.0f and up 0-%.0f if you give them, measured from its size if not), it is hidden from you (others still see it), or neither"),
+            DisguiseViewName(DisguiseView), MaxChosenBack, MaxChosenUp);
     }
     else
     {
         DisguiseView = *Chosen;
-        Message = DisguiseView == EDisguiseView::Back ? FString(TEXT("Your camera pulls back for a disguise bigger than you"))
+        if (DisguiseView == EDisguiseView::Back)
+        {
+            ChosenBack = Back;
+            ChosenUp = Back ? Up : std::nullopt;
+        }
+        Message = DisguiseView == EDisguiseView::Back && ChosenBack ? FString::Printf(TEXT("Your camera pulls back %.0f and up %.0f%s"), *ChosenBack, ChosenUp.value_or(Own.Up), ChosenUp ? TEXT("") : TEXT(" (up measured from your disguise)"))
+                : DisguiseView == EDisguiseView::Back ? FString(TEXT("Your camera pulls back for a disguise bigger than you"))
                 : DisguiseView == EDisguiseView::Hide ? FString(TEXT("Your disguise is hidden from you; everyone else still sees it"))
                                                       : FString(TEXT("You see your disguise as it is, from the usual distance"));
     }

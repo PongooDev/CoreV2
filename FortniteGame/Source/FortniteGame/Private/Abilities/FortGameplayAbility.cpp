@@ -12,12 +12,40 @@
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "Weapons/FortWeapon.h"
 
 AFortPawn* UFortGameplayAbility::GetActivatingPawn() const
 {
     Reflection::FParams Params(StaticFunction_GetActivatingPawn());
     return Params.Call(const_cast<UFortGameplayAbility*>(this)) ? Params.Take<AFortPawn*>(L"ReturnValue") : nullptr;
+}
+
+int32_t UFortGameplayAbility::IncludeEnemyTargets()
+{
+    // EffectContainers is a fixed array: its property says how many there are and how far apart.
+    const UProperty* Property = StaticClass()->FindPropertyByName(FName(L"EffectContainers", FNAME_Find));
+    if (!Property)
+    {
+        return 0;
+    }
+
+    int32_t Changed = 0;
+    for (int32_t ContainerIndex = 0; ContainerIndex < Property->ArrayDim; ++ContainerIndex)
+    {
+        FFortGameplayEffectContainer& Container = *Property->ContainerPtrToValuePtr<FFortGameplayEffectContainer>(this, ContainerIndex);
+        TStructArray<FFortAbilityTargetSelection>& Selections = Container.TargetSelection.List;
+        for (int32_t SelectionIndex = 0; SelectionIndex < Selections.Num(); ++SelectionIndex)
+        {
+            FFortTargetFilter& Filter = Selections[SelectionIndex].TargetFilter;
+            if (Filter.bExcludePawnEnemies)
+            {
+                Filter.bExcludePawnEnemies = false;
+                ++Changed;
+            }
+        }
+    }
+    return Changed;
 }
 
 TWeakObjectPtr<UFortWorldItem>& UFortGameplayAbility::GetAbilityGrantedWeaponItem() const

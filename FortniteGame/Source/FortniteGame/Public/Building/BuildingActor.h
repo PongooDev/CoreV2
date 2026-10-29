@@ -5,6 +5,8 @@
 #include "GameplayTagContainer.h"
 #include "UObject/ScriptDelegates.h"
 
+class UAbilitySystemComponent;
+
 class EFortBuildingPersistentState
 {
     DefineUnrealEnum(EFortBuildingPersistentState, FortniteGame)
@@ -24,8 +26,11 @@ public:
     DefineUProperty(int32_t, OwnerPersistentID)
     // Spectator (the constructor's, 1.7.2 0x40B548) until the building gets one. A piece's team decides who may edit it:
     // ABuildingSMActor's CanBePlayerEdited (1.7.2 0x461EF0, 1.8 0x4646F0) lets only the editor's own team edit it, anyone
-    // when it is Spectator. A trap's targets are filtered by it: a pawn on its team is friendly (AFortGameState 0x583360).
+    // when it is Spectator. A trap's targets are filtered by it: a pawn on its team is friendly (AFortGameState 0x583360),
+    // any other an enemy; no team is friendly to everyone (see FFortTargetFilter).
     DefineUProperty(EFortTeam, Team)
+    // UFortAbilitySystemComponent: a trap's holds the abilities its AbilitySet grants.
+    DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
     DefineUProperty(FGameplayTagContainer, DefaultTags)
     DefineUProperty(FGameplayTagContainer, StaticGameplayTags)
     DefineBitfieldUProperty(bDestroyed)

@@ -11,4 +11,8 @@ struct FFortAbilitySetHandle
 class UFortAbilitySet : public UObject
 {
     DefineUnrealClass(UFortAbilitySet, FortniteGame)
+
+public:
+    // TSubclassOf<UFortGameplayAbility>
+    DefineUProperty(TArray<UClass*>, GameplayAbilities)
 };

@@ -324,14 +324,15 @@ namespace
 
     void ResolveEngineReadiness()
     {
+        uintptr_t Engine = 0;
+        std::vector<uintptr_t> InitOnes;
         const uintptr_t Init = FunctionOf(L"Failed to load UnrealEd Engine class '%s'.");
         const uintptr_t InitEnd = Finder::FunctionEnd(Init);
         if (Init && InitEnd)
         {
             const std::vector<std::pair<uintptr_t, uintptr_t>> Stores = MovStores(Init, InitEnd, { 0x48, 0x89, 0x05 }, 3, 7);
-            RequireAddress(L"GEngine", reinterpret_cast<uintptr_t&>(Natives::GEngine), Stores.empty() ? 0 : Stores.front().second);
+            Engine = Stores.empty() ? 0 : Stores.front().second;
 
-            std::vector<uintptr_t> InitOnes;
             for (const auto& Store : MovStores(Init, InitEnd, { 0xC6, 0x05 }, 2, 7))
             {
                 if (Byte(Store.first + 6) == 0x01)
@@ -339,30 +340,52 @@ namespace
                     InitOnes.push_back(Store.second);
                 }
             }
-
-            const uintptr_t HandleError = FunctionOf(L"HandleError re-entered.");
-            const uintptr_t HandleErrorEnd = Finder::FunctionEnd(HandleError);
-            uintptr_t Running = 0;
-            if (HandleError && HandleErrorEnd)
-            {
-                for (const auto& Store : MovStores(HandleError, HandleErrorEnd, { 0xC6, 0x05 }, 2, 7))
-                {
-                    if (Byte(Store.first + 6) != 0x00)
-                    {
-                        continue;
-                    }
-                    if (std::find(InitOnes.begin(), InitOnes.end(), Store.second) != InitOnes.end())
-                    {
-                        Running = Store.second;
-                    }
-                }
-            }
-            RequireAddress(L"GIsRunning", reinterpret_cast<uintptr_t&>(Natives::GIsRunning), Running);
         }
         else
         {
-            RequireAddress(L"GEngine", reinterpret_cast<uintptr_t&>(Natives::GEngine), 0);
+            // 1.9.1's FEngineLoop::Init sits outside .text, in pieces with no .pdata entry. GEngine is also the global the
+            // PIE online-subsystem check loads first.
+            const uintptr_t Check = FunctionOf(L"Failed to determine if OSS is server in PIE, OSS requests will fail");
+            const uintptr_t Load = Check ? FindInstruction(Check, Check + 0x10, { 0x48, 0x8B, 0x1D }) : 0;
+            Engine = Load ? Finder::RelativeTarget(Load, 3, 7) : 0;
         }
+        RequireAddress(L"GEngine", reinterpret_cast<uintptr_t&>(Natives::GEngine), Engine);
+
+        const uintptr_t HandleError = FunctionOf(L"HandleError re-entered.");
+        const uintptr_t HandleErrorEnd = Finder::FunctionEnd(HandleError);
+        std::vector<uintptr_t> ErrorZeros;
+        if (HandleError && HandleErrorEnd)
+        {
+            for (const auto& Store : MovStores(HandleError, HandleErrorEnd, { 0xC6, 0x05 }, 2, 7))
+            {
+                if (Byte(Store.first + 6) == 0x00)
+                {
+                    ErrorZeros.push_back(Store.second);
+                }
+            }
+        }
+
+        uintptr_t Running = 0;
+        for (const uintptr_t Zero : ErrorZeros)
+        {
+            if (std::find(InitOnes.begin(), InitOnes.end(), Zero) != InitOnes.end())
+            {
+                Running = Zero;
+            }
+        }
+        if (!Running && InitOnes.empty())
+        {
+            // Without FEngineLoop::Init: GIsRunning is the flag the pure virtual call handler tests just before it names
+            // "PureVirtualFunctionCalledWhileRunningApp", and one HandleError clears.
+            const uintptr_t Ref = First(Finder::StringRefs(L"PureVirtualFunctionCalledWhileRunningApp"));
+            const uintptr_t Test = FindBackward(Ref, 0x20, { 0x80, 0x3D, -1, -1, -1, -1, 0x00 });
+            const uintptr_t Flag = Test ? Finder::RelativeTarget(Test, 2, 7) : 0;
+            if (Flag && std::find(ErrorZeros.begin(), ErrorZeros.end(), Flag) != ErrorZeros.end())
+            {
+                Running = Flag;
+            }
+        }
+        RequireAddress(L"GIsRunning", reinterpret_cast<uintptr_t&>(Natives::GIsRunning), Running);
     }
 
     void ResolveGameThreadTick()
@@ -864,6 +887,18 @@ namespace
             {
                 SRand = Site;
                 ++Matches;
+            }
+        }
+        if (!Matches)
+        {
+            // 1.9.1's SRand is a leaf with no .pdata entry and nop padding before it.
+            for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0x69, 0x0D, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B }); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), { 0x69, 0x0D, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B }))
+            {
+                if (!Finder::FunctionStart(Site) && Byte(Site - 1) == 0x90 && FindInstruction(Site + 10, Site + 0x20, { 0x81, 0xC1, 0x6B, 0x63, 0x19, 0x36 }))
+                {
+                    SRand = Site;
+                    ++Matches;
+                }
             }
         }
         Require(L"FMath::SRand", Natives::FMath_SRand, Matches == 1 ? SRand : 0);

@@ -76,7 +76,7 @@ namespace
     uintptr_t FindInstruction(uintptr_t Begin, uintptr_t End, std::initializer_list<int32_t> Pattern)
     {
         const size_t Length = Pattern.size();
-        for (uintptr_t Address = Begin; Address + Length <= End; ++Address)
+        for (uintptr_t Address = Begin; Begin && Address + Length <= End; ++Address)
         {
             size_t Index = 0;
             for (int32_t Expected : Pattern)
@@ -100,6 +100,15 @@ namespace
         return Address >= Finder::TextBegin() && Address < Finder::TextEnd();
     }
 
+    // The shared empty function is ret 0. 1.9.1's (Finder::HasMovedCode) jumps into the second section's guard code, so
+    // there it is known as the function most vtable slots hold.
+    bool IsSharedEmptyBody(uintptr_t Function)
+    {
+        return Finder::BodyIs(Function, { 0xC2, 0x00, 0x00 }) || (Finder::HasMovedCode() && Function && Function == Finder::MostReferencedFunction());
+    }
+
+    uintptr_t UniqueFunction(std::initializer_list<int32_t> Pattern);
+
     // A vtable slot Core has swapped holds one of this module's functions.
     bool IsCoreFunction(uintptr_t Address)
     {
@@ -110,7 +119,7 @@ namespace
 
     uintptr_t FindRawCall(uintptr_t Begin, uintptr_t End)
     {
-        for (uintptr_t Address = Begin; Address + 5 <= End; ++Address)
+        for (uintptr_t Address = Begin; Begin && Address + 5 <= End; ++Address)
         {
             if (Byte(Address) == 0xE8 && IsInText(Finder::RelativeTarget(Address, 1, 5)))
             {
@@ -474,6 +483,41 @@ namespace
         return true;
     }
 
+    // CallBeforeJccPastRef for moved code (Finder::HasMovedCode), where a function's pieces sit apart, joined by jumps,
+    // and its calls are call; nop; jmp. Of the calls whose result is tested (test al, al; jnz) with Reference on the
+    // side that isn't taken, the one that runs into it in the fewest instructions.
+    uintptr_t MovedCallBeforeJccPastRef(uintptr_t Reference)
+    {
+        uintptr_t Found = 0;
+        int32_t FoundSteps = -1;
+        int32_t Ties = 0;
+        for (const auto& [Begin, End] : Finder::ExecutableSections())
+        {
+            for (uintptr_t Call = Begin; Call + 7 <= End; ++Call)
+            {
+                if (Byte(Call) != 0xE8 || Byte(Call + 5) != 0x90 || (Byte(Call + 6) != 0xE9 && Byte(Call + 6) != 0xEB) || !IsInText(Finder::RelativeTarget(Call, 1, 5)))
+                {
+                    continue;
+                }
+                const uintptr_t Test = Finder::Unthunk(Call + 6);
+                if (Byte(Test) != 0x84 || Byte(Test + 1) != 0xC0)
+                {
+                    continue;
+                }
+                const uintptr_t NotTaken = Byte(Test + 2) == 0x75 ? Test + 4 : Byte(Test + 2) == 0x0F && Byte(Test + 3) == 0x85 ? Test + 8 : 0;
+                const int32_t Steps = NotTaken ? Finder::RunsInto(NotTaken, Reference, 512) : -1;
+                if (Steps < 0 || (FoundSteps >= 0 && Steps > FoundSteps))
+                {
+                    continue;
+                }
+                Ties = Steps == FoundSteps ? Ties + 1 : 1;
+                Found = Call;
+                FoundSteps = Steps;
+            }
+        }
+        return Ties == 1 ? Found : 0;
+    }
+
     constexpr int32_t WorldNetDriver = 0x38;
     constexpr int32_t WorldDemoNetDriver = 0xB8;
 
@@ -543,13 +587,15 @@ namespace
 
     void ResolveEngineNet()
     {
-        Require(L"UEngine::LoadMap", Natives::UEngine_LoadMap, FunctionOf(L"LoadMap: %s"));
         Require(L"UGameInstance::StartGameInstance", Natives::UGameInstance_StartGameInstance, FunctionOf(L"Failed to enter %s: %s. Please check the log for errors."));
         Require(L"GetSourceIniHierarchyFilenames", Natives::GetSourceIniHierarchyFilenames, FunctionOf(L"%sNotForLicensees/Default%s.ini"));
 
+        // On 1.9.1 UEngine::LoadMap is moved code, its log reference too: the registers for its Listen call are set in
+        // other pieces, so there only the call's target is checked.
         const uintptr_t ListenLog = OnlyRef(L"LoadMap: failed to Listen(%s)");
-        const uintptr_t ListenCall = ListenLog ? CallBeforeJccPastRef(ListenLog, 0x100) : 0;
-        if (ListenCall && IsListenCall(ListenCall))
+        const bool bMovedListen = ListenLog && !IsInText(ListenLog);
+        const uintptr_t ListenCall = ListenLog ? (bMovedListen ? MovedCallBeforeJccPastRef(ListenLog) : CallBeforeJccPastRef(ListenLog, 0x100)) : 0;
+        if (ListenCall && (bMovedListen || IsListenCall(ListenCall)))
         {
             Sites::LoadMapListenCall = reinterpret_cast<uint8_t*>(ListenCall);
         }
@@ -662,7 +708,8 @@ namespace
         {
             for (uintptr_t Start = Jumps[0] & ~static_cast<uintptr_t>(0xF); Start + 0x40 > Jumps[0]; Start -= 0x10)
             {
-                if (Byte(Start - 1) == 0xCC && Byte(Start) == 0x48 && Byte(Start + 1) == 0x83 && Byte(Start + 2) == 0x79 && Byte(Start + 4) == 0x00)
+                // On 1.9.1 (Finder::HasMovedCode) junk replaced the function before it, which was moved: no int3 padding.
+                if ((Byte(Start - 1) == 0xCC || Finder::HasMovedCode()) && Byte(Start) == 0x48 && Byte(Start + 1) == 0x83 && Byte(Start + 2) == 0x79 && Byte(Start + 4) == 0x00)
                 {
                     InternalGetNetMode = Start;
                     break;
@@ -1050,6 +1097,12 @@ bool Finder::ResolveRuntime()
     Memcury::Scanner::SetTargetModule(nullptr);
 
     ResolveGUObjectArray();
+    if (!Natives::GUObjectArray)
+    {
+        // The other runtime finders start from code this one reads too: past it they'd scan from address 0 and crash.
+        Log::Error(L"Finder: runtime resolution stopped at GUObjectArray; the exe's code isn't one Core can read");
+        return false;
+    }
     ResolveNames();
     ResolveObjectGlobals();
     ResolveMemory();
@@ -1484,6 +1537,15 @@ namespace
             const uintptr_t Constructor = RemoteFunction ? Finder::NextCall(RemoteFunction, 0x100) : 0;
             NetViewer = Constructor && FindInstruction(Constructor, Constructor + 0x40, { 0x48, 0x89, 0x11 }) ? Constructor : 0;
         }
+        if (!NetViewer)
+        {
+            // On 1.9.1 ProcessRemoteFunction is moved code. The constructor (0x22CFA40) is known by how it
+            // fills in the viewer: Connection, then InViewer (the connection's PlayerController, else its OwningActor),
+            // then ViewTarget.
+            const uintptr_t Fill = UniqueFunction({ 0x48, 0x89, 0x11, 0x48, 0x8B, 0xD9, 0x48, 0x8B, 0x42, -1, 0x48, 0x85, 0xC0, 0x75, -1, 0x48, 0x8B, 0x82, -1, -1, 0x00, 0x00, 0x48, 0x89, 0x41, 0x08, 0x48, 0x8B, 0x82, -1, -1, 0x00, 0x00, 0x48, 0x89, 0x41, 0x10 });
+            const uintptr_t Constructor = Finder::FunctionStart(Fill);
+            NetViewer = Constructor && Fill - Constructor < 0x20 ? Constructor : 0;
+        }
         const uintptr_t NetViewerEnd = Finder::FunctionEnd(NetViewer);
         Require(L"UActorChannel::ReplicateActor", Natives::UActorChannel_ReplicateActor, ReplicateActor);
         Require(L"UActorChannel::SetChannelActor", Natives::UActorChannel_SetChannelActor, SetChannelActor);
@@ -1840,7 +1902,7 @@ namespace
         const int32_t LowLevelGetNetworkNumber = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(FunctionOf(L"UNetDriver::LowLevelGetNetworkNumber")), 0x400);
         const int32_t ServerReplicateActors = ProcessRemoteFunction - 1;
         const uintptr_t StrippedReplicate = ProcessRemoteFunction > 0 && ServerReplicateActors == LowLevelGetNetworkNumber + 2 ? VTableEntry(NetDriverVTable, ServerReplicateActors) : 0;
-        const bool bServerReplicateActors = StrippedReplicate && Byte(StrippedReplicate) == 0x33 && Byte(StrippedReplicate + 1) == 0xC0 && Byte(StrippedReplicate + 2) == 0xC3;
+        const bool bServerReplicateActors = Finder::BodyIs(StrippedReplicate, { 0x33, 0xC0, 0xC3 });
         RequireSlot(L"UNetDriver::ServerReplicateActors", Natives::UNetDriver_ServerReplicateActorsIndex, bServerReplicateActors ? ServerReplicateActors : -1);
 
         Sites::NetDriverVTables.clear();
@@ -2126,7 +2188,9 @@ namespace
         size_t NetRelevantSites = 0;
         for (const uintptr_t Site : NetViewer ? Finder::CallsTo(NetViewer, false) : std::vector<uintptr_t>())
         {
-            const int32_t Slot = VirtualSlot(FindVirtualCall(Site + 5, Site + 0x40));
+            // On 1.9.1 ProcessRemoteFunction, the caller, is moved code in pieces: read it in the order it runs.
+            const uintptr_t Call = Finder::HasMovedCode() ? Finder::TraceFind(Site + 5, 16, [](uintptr_t Instruction) { return FindVirtualCall(Instruction, Instruction + 6) == Instruction; }) : FindVirtualCall(Site + 5, Site + 0x40);
+            const int32_t Slot = VirtualSlot(Call);
             if (Slot < 0 || (NetRelevantSites && Slot != NetRelevant))
             {
                 NetRelevantSites = 0;
@@ -2345,7 +2409,7 @@ namespace
             for (uintptr_t Call = AddActorCall ? FindRawCall(AddActorCall + 5, End) : 0; Call; Call = FindRawCall(Call + 5, End))
             {
                 const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
-                if (Byte(Target) == 0xC2 && Byte(Target + 1) == 0x00 && Byte(Target + 2) == 0x00 && (!StrippedFlushDormancy || Target == StrippedFlushDormancy))
+                if (IsSharedEmptyBody(Target) && (!StrippedFlushDormancy || Target == StrippedFlushDormancy))
                 {
                     StrippedFlushDormancy = Target;
                     Sites::FlushActorDormancyCalls.push_back(reinterpret_cast<uint8_t*>(Call));
@@ -2388,7 +2452,8 @@ namespace
             return false;
         }
         const uintptr_t Start = Finder::FunctionStart(Address);
-        return Start == Address || (!Start && (Address & 0xF) == 0 && (Byte(Address - 1) == 0xCC || Byte(Address - 1) == 0xC3));
+        // On 1.9.1 (Finder::HasMovedCode) junk replaced the int3 padding between functions.
+        return Start == Address || (!Start && (Address & 0xF) == 0 && (Byte(Address - 1) == 0xCC || Byte(Address - 1) == 0xC3 || Finder::HasMovedCode()));
     }
 
     uintptr_t UniqueFunction(std::initializer_list<int32_t> Pattern)
@@ -2415,7 +2480,7 @@ namespace
             const uintptr_t Call = Site + 9;
             const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
             const int32_t Slot = (Byte(Site + 1) & 0xF8) == 0x90 && (Byte(Site + 1) & 0x07) != 0x04 ? VirtualSlot(Site) : -1;
-            const bool bReturnsNull = Byte(Target) == 0x33 && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3;
+            const bool bReturnsNull = Finder::BodyIs(Target, { 0x33, 0xC0, 0xC3 });
             if (Slot >= 0 && bReturnsNull && (!GetCurrentStub || (Target == GetCurrentStub && Slot == GetWorldSlot)))
             {
                 GetCurrentStub = Target;
@@ -2449,7 +2514,7 @@ namespace
             for (uintptr_t Call = FunctionEnd ? FindRawCall(Function, FunctionEnd) : 0; Call && !GetCurrentCall; Call = FindRawCall(Call + 1, FunctionEnd))
             {
                 const uintptr_t Callee = Finder::RelativeTarget(Call, 1, 5);
-                if (Byte(Callee) == 0x33 && Byte(Callee + 1) == 0xC0 && Byte(Callee + 2) == 0xC3)
+                if (Finder::BodyIs(Callee, { 0x33, 0xC0, 0xC3 }))
                 {
                     GetCurrentCall = Call;
                 }
@@ -2554,7 +2619,7 @@ namespace
         for (uintptr_t Call = FlushDormancy ? FindRawCall(FlushDormancy, Finder::FunctionEnd(FlushDormancy)) : 0; Call && !SharedEmpty; Call = FindRawCall(Call + 5, Finder::FunctionEnd(FlushDormancy)))
         {
             const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
-            SharedEmpty = Byte(Target) == 0xC2 && Byte(Target + 1) == 0x00 && Byte(Target + 2) == 0x00 ? Target : 0;
+            SharedEmpty = IsSharedEmptyBody(Target) ? Target : 0;
         }
         Require(L"Shared empty function", Natives::SharedEmptyFunction, SharedEmpty);
 
@@ -4361,7 +4426,7 @@ uint8_t* Finder::NullGetCurrentCall(UFunction* Function)
     for (uintptr_t Call = ImplementationEnd ? FindRawCall(Implementation, ImplementationEnd) : 0; Call; Call = FindRawCall(Call + 1, ImplementationEnd))
     {
         const uintptr_t Callee = Finder::RelativeTarget(Call, 1, 5);
-        if (Byte(Callee) == 0x33 && Byte(Callee + 1) == 0xC0 && Byte(Callee + 2) == 0xC3 && Call >= 6 && (Byte(Call - 6) == 0xFF || Byte(Call - 9) == 0xFF))
+        if (Finder::BodyIs(Callee, { 0x33, 0xC0, 0xC3 }) && Call >= 6 && (Byte(Call - 6) == 0xFF || Byte(Call - 9) == 0xFF))
         {
             return reinterpret_cast<uint8_t*>(Call);
         }
@@ -5031,7 +5096,7 @@ bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, FEarnScore
 {
     const auto IsStub = [](uintptr_t Target, uint8_t Opcode)
     {
-        return Byte(Target) == Opcode && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3;
+        return Finder::BodyIs(Target, { Opcode, 0xC0, 0xC3 });
     };
 
     // AFortGameMode::SendEarnScore: the first AFortGameMode slot whose body reads the total score stat (lea edx, [r8+1Bh],
@@ -6497,7 +6562,7 @@ uint8_t* Finder::QuickBarChangedWorldManagerCall()
         Checked.push_back(Target);
         for (const auto& [Inner, InnerTarget] : Finder::DirectCalls(Target, Finder::FunctionEnd(Target)))
         {
-            if (Byte(InnerTarget) == 0xB0 && Byte(InnerTarget + 1) == 0x01 && Byte(InnerTarget + 2) == 0xC3)
+            if (Finder::BodyIs(InnerTarget, { 0xB0, 0x01, 0xC3 }))
             {
                 Found = Inner;
                 ++Count;
@@ -6665,11 +6730,11 @@ bool Finder::ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FCondi
     std::vector<uintptr_t> FrameLeaCalls;
     for (const auto& [Call, Target] : QuotaEnd ? Finder::DirectCalls(Quota, QuotaEnd) : decltype(Finder::DirectCalls(0, 0)){})
     {
-        if (Byte(Target) == 0x33 && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3)
+        if (Finder::BodyIs(Target, { 0x33, 0xC0, 0xC3 }))
         {
             ContextCall = ContextCall ? UINTPTR_MAX : Call;
         }
-        else if (Byte(Target) == 0x32 && Byte(Target + 1) == 0xC0 && Byte(Target + 2) == 0xC3)
+        else if (Finder::BodyIs(Target, { 0x32, 0xC0, 0xC3 }))
         {
             SelectCall = SelectCall ? UINTPTR_MAX : Call;
         }
@@ -6912,7 +6977,7 @@ bool Finder::ResolveDurabilityLive(UFunction* ServerModDurability, UObject* Play
     }
 
     const uintptr_t SetDurability = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortWorldItem"), SetDurabilityIndex);
-    const bool bSetDurabilityStripped = SetDurability && (Byte(SetDurability) == 0x32 || Byte(SetDurability) == 0x33) && Byte(SetDurability + 1) == 0xC0 && Byte(SetDurability + 2) == 0xC3;
+    const bool bSetDurabilityStripped = Finder::BodyIs(SetDurability, { 0x32, 0xC0, 0xC3 }) || Finder::BodyIs(SetDurability, { 0x33, 0xC0, 0xC3 });
 
     void** WeaponVTable = CdoVTable(L"/Script/FortniteGame.FortWeapon");
     int32_t DestroyedIndex = -1;
@@ -7068,15 +7133,12 @@ bool Finder::IsStubFunction(uintptr_t Function)
     }
 
     // ret / ret 0 / xor al,al / xor eax,eax / mov al,1 / xorps xmm0,xmm0, each followed by ret
-    const uint8_t B0 = Byte(Function);
-    const uint8_t B1 = Byte(Function + 1);
-    const uint8_t B2 = Byte(Function + 2);
-    return B0 == 0xC3
-        || (B0 == 0xC2 && B1 == 0x00 && B2 == 0x00)
-        || (B0 == 0x32 && B1 == 0xC0 && B2 == 0xC3)
-        || (B0 == 0x33 && B1 == 0xC0 && B2 == 0xC3)
-        || (B0 == 0xB0 && B1 == 0x01 && B2 == 0xC3)
-        || (B0 == 0x0F && B1 == 0x57 && B2 == 0xC0 && Byte(Function + 3) == 0xC3);
+    return Finder::BodyIs(Function, { 0xC3 })
+        || Finder::BodyIs(Function, { 0xC2, 0x00, 0x00 })
+        || Finder::BodyIs(Function, { 0x32, 0xC0, 0xC3 })
+        || Finder::BodyIs(Function, { 0x33, 0xC0, 0xC3 })
+        || Finder::BodyIs(Function, { 0xB0, 0x01, 0xC3 })
+        || Finder::BodyIs(Function, { 0x0F, 0x57, 0xC0, 0xC3 });
 }
 
 bool Finder::ResolveLootLive()

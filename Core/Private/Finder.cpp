@@ -1,10 +1,13 @@
 #include "pch.h"
 #include "Finder.h"
 #include "Log.h"
+#include "../../ThirdParty/MinHook/src/hde/hde64.h"
 
 #include <algorithm>
 #include <cstring>
 #include <cwchar>
+#include <iterator>
+#include <unordered_map>
 
 namespace
 {
@@ -24,25 +27,28 @@ namespace
         static const std::vector<FStringReference> References = []
         {
             std::vector<FStringReference> Found;
-            Memcury::PE::Section Text = TextSection();
             Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
             const uintptr_t Base = Memcury::PE::GetModuleBase();
             const uintptr_t ReadOnlyBegin = ReadOnly.GetSectionStart().Get();
             const uintptr_t ReadOnlyEnd = ReadOnly.GetSectionEnd().Get();
-            const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Text.GetSectionStart().Get());
-            const size_t Size = Text.GetSectionSize();
-            for (size_t Index = 0; Index + 7 <= Size; ++Index)
+            // .text's references come first; 1.9.1's moved code holds others (Finder::HasMovedCode).
+            for (const auto& [Begin, End] : Finder::ExecutableSections())
             {
-                if ((Bytes[Index] != 0x48 && Bytes[Index] != 0x4C) || Bytes[Index + 1] != 0x8D || (Bytes[Index + 2] & 0xC7) != 0x05)
+                const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Begin);
+                const size_t Size = End - Begin;
+                for (size_t Index = 0; Index + 7 <= Size; ++Index)
                 {
-                    continue;
-                }
+                    if ((Bytes[Index] != 0x48 && Bytes[Index] != 0x4C) || Bytes[Index + 1] != 0x8D || (Bytes[Index + 2] & 0xC7) != 0x05)
+                    {
+                        continue;
+                    }
 
-                const uintptr_t Site = reinterpret_cast<uintptr_t>(Bytes + Index);
-                const uintptr_t Target = Site + 7 + *reinterpret_cast<const int32_t*>(Bytes + Index + 3);
-                if (Target >= ReadOnlyBegin && Target < ReadOnlyEnd)
-                {
-                    Found.push_back({ static_cast<uint32_t>(Target - Base), static_cast<uint32_t>(Site - Base) });
+                    const uintptr_t Site = reinterpret_cast<uintptr_t>(Bytes + Index);
+                    const uintptr_t Target = Site + 7 + *reinterpret_cast<const int32_t*>(Bytes + Index + 3);
+                    if (Target >= ReadOnlyBegin && Target < ReadOnlyEnd)
+                    {
+                        Found.push_back({ static_cast<uint32_t>(Target - Base), static_cast<uint32_t>(Site - Base) });
+                    }
                 }
             }
             return Found;
@@ -80,6 +86,267 @@ namespace
         }
         return Result;
     }
+}
+
+const std::vector<std::pair<uintptr_t, uintptr_t>>& Finder::ExecutableSections()
+{
+    static const std::vector<std::pair<uintptr_t, uintptr_t>> Sections = []
+    {
+        Memcury::PE::Section Text = TextSection();
+        std::vector<std::pair<uintptr_t, uintptr_t>> Found = { { Text.GetSectionStart().Get(), Text.GetSectionEnd().Get() } };
+        const uintptr_t Base = Memcury::PE::GetModuleBase();
+        const IMAGE_NT_HEADERS* Headers = reinterpret_cast<const IMAGE_NT_HEADERS*>(Base + reinterpret_cast<const IMAGE_DOS_HEADER*>(Base)->e_lfanew);
+        const IMAGE_SECTION_HEADER* Section = IMAGE_FIRST_SECTION(Headers);
+        for (WORD Index = 0; Index < Headers->FileHeader.NumberOfSections; ++Index, ++Section)
+        {
+            const uintptr_t Begin = Base + Section->VirtualAddress;
+            if ((Section->Characteristics & IMAGE_SCN_MEM_EXECUTE) && Begin != Found.front().first)
+            {
+                Found.push_back({ Begin, Begin + Section->Misc.VirtualSize });
+            }
+        }
+        return Found;
+    }();
+    return Sections;
+}
+
+bool Finder::HasMovedCode()
+{
+    // 1.1 to 1.9 have one executable section. 1.9.1's exe has a second one (also named .text) that holds the bodies of
+    // about 1,300 functions moved out of the first: their starts there jump to bodies split into pieces joined by jumps,
+    // with no .pdata, whose calls, branches and returns are rewritten (Core-Docs/Build-1.9.1-Audit.md).
+    return ExecutableSections().size() > 1;
+}
+
+namespace
+{
+    bool IsExecutable(uintptr_t Address)
+    {
+        for (const auto& [Begin, End] : Finder::ExecutableSections())
+        {
+            if (Address >= Begin && Address + 16 <= End)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // push r64; lea r64, [rip+X]; xchg r64, [rsp]; ret: a moved function's jump to X.
+    uintptr_t PushReturnTarget(const uint8_t* Code)
+    {
+        size_t At = 0;
+        const bool bHighPush = Code[At] == 0x41;
+        At += bHighPush ? 1 : 0;
+        if (Code[At] < 0x50 || Code[At] > 0x57)
+        {
+            return 0;
+        }
+        const uint8_t Register = static_cast<uint8_t>((Code[At] - 0x50) | (bHighPush ? 8 : 0));
+        ++At;
+        const uint8_t Rex = static_cast<uint8_t>(0x48 | (Register >= 8 ? 0x04 : 0x00));
+        const uint8_t ModRm = static_cast<uint8_t>(0x05 | ((Register & 7) << 3));
+        if (Code[At] != Rex || Code[At + 1] != 0x8D || Code[At + 2] != ModRm)
+        {
+            return 0;
+        }
+        const uintptr_t Target = reinterpret_cast<uintptr_t>(Code + At) + 7 + *reinterpret_cast<const int32_t*>(Code + At + 3);
+        At += 7;
+        if (Code[At] != Rex || Code[At + 1] != 0x87 || Code[At + 2] != static_cast<uint8_t>(0x04 | ((Register & 7) << 3)) || Code[At + 3] != 0x24 || Code[At + 4] != 0xC3)
+        {
+            return 0;
+        }
+        return Target;
+    }
+
+    // ret, ret 0, or moved code's lea rsp, [rsp+8]; jmp qword ptr [rsp-8].
+    bool IsReturn(const uint8_t* Code)
+    {
+        static constexpr uint8_t Moved[] = { 0x48, 0x8D, 0x64, 0x24, 0x08, 0xFF, 0x64, 0x24, 0xF8 };
+        return Code[0] == 0xC3 || (Code[0] == 0xC2 && Code[1] == 0x00 && Code[2] == 0x00) || std::equal(std::begin(Moved), std::end(Moved), Code);
+    }
+}
+
+uintptr_t Finder::Unthunk(uintptr_t Address)
+{
+    for (int32_t Hop = 0; HasMovedCode() && Hop < 32 && IsExecutable(Address); ++Hop)
+    {
+        const uint8_t* Code = reinterpret_cast<const uint8_t*>(Address);
+        uintptr_t Next = 0;
+        if (Code[0] == 0xE9)
+        {
+            Next = Address + 5 + *reinterpret_cast<const int32_t*>(Code + 1);
+        }
+        else if (Code[0] == 0xEB)
+        {
+            Next = Address + 2 + static_cast<int8_t>(Code[1]);
+        }
+        else
+        {
+            Next = PushReturnTarget(Code);
+        }
+        if (!Next || !IsExecutable(Next))
+        {
+            break;
+        }
+        Address = Next;
+    }
+    return Address;
+}
+
+bool Finder::BodyIs(uintptr_t Function, std::initializer_list<uint8_t> Bytes)
+{
+    const bool bInText = Function >= TextBegin() && Function + Bytes.size() <= TextEnd();
+    if (!Function || !Bytes.size() || (!bInText && !IsReadable(reinterpret_cast<const void*>(Function), Bytes.size())))
+    {
+        return false;
+    }
+    if (std::equal(Bytes.begin(), Bytes.end(), reinterpret_cast<const uint8_t*>(Function)))
+    {
+        return true;
+    }
+    if (!HasMovedCode())
+    {
+        return false;
+    }
+
+    // Moved code rewrites a stub's return and puts its body behind jumps: compare what comes before the return.
+    size_t Length = Bytes.size();
+    if (Bytes.end()[-1] == 0xC3)
+    {
+        Length -= 1;
+    }
+    else if (Length >= 3 && Bytes.end()[-3] == 0xC2 && Bytes.end()[-2] == 0x00 && Bytes.end()[-1] == 0x00)
+    {
+        Length -= 3;
+    }
+    else
+    {
+        return false;
+    }
+    const uintptr_t Body = Unthunk(Function);
+    if (!IsExecutable(Body) || !std::equal(Bytes.begin(), Bytes.begin() + Length, reinterpret_cast<const uint8_t*>(Body)))
+    {
+        return false;
+    }
+    const uintptr_t Return = Unthunk(Body + Length);
+    return IsExecutable(Return) && IsReturn(reinterpret_cast<const uint8_t*>(Return));
+}
+
+uintptr_t Finder::TraceFind(uintptr_t From, size_t MaxInstructions, const std::function<bool(uintptr_t Instruction)>& Match)
+{
+    uintptr_t Address = From;
+    for (size_t Count = 0; Address && Count < MaxInstructions && IsExecutable(Address); ++Count)
+    {
+        const uint8_t* Code = reinterpret_cast<const uint8_t*>(Address);
+        if (Code[0] == 0xE9 || Code[0] == 0xEB || PushReturnTarget(Code))
+        {
+            const uintptr_t Next = Unthunk(Address);
+            if (Next == Address)
+            {
+                return 0;
+            }
+            Address = Next;
+            continue;
+        }
+        if (Match(Address))
+        {
+            return Address;
+        }
+        hde64s Instruction{};
+        const uint32_t Length = hde64_disasm(Code, &Instruction);
+        if (!Length || (Instruction.flags & F_ERROR) || Code[0] == 0xC3 || Code[0] == 0xC2 || Code[0] == 0xCC || (Code[0] == 0xFF && (Instruction.modrm_reg == 4 || Instruction.modrm_reg == 5)))
+        {
+            return 0;
+        }
+        Address += Length;
+    }
+    return 0;
+}
+
+int32_t Finder::RunsInto(uintptr_t From, uintptr_t Goal, size_t MaxInstructions)
+{
+    // Every way on from each instruction: both sides of a branch, and the code addresses moved code loads (mov r64,
+    // imm64 or lea r64, [rip+X]) to branch or jump through the stack. Calls return to the next instruction.
+    std::unordered_map<uintptr_t, int32_t> Steps = { { From, 0 } };
+    std::vector<uintptr_t> Queue = { From };
+    for (size_t Next = 0; Next < Queue.size() && Next < MaxInstructions; ++Next)
+    {
+        const uintptr_t Address = Queue[Next];
+        const int32_t Step = Steps[Address];
+        if (Address == Goal)
+        {
+            return Step;
+        }
+        const uint8_t* Code = reinterpret_cast<const uint8_t*>(Address);
+        hde64s Instruction{};
+        const uint32_t Length = IsExecutable(Address) ? hde64_disasm(Code, &Instruction) : 0;
+        if (!Length || (Instruction.flags & F_ERROR))
+        {
+            continue;
+        }
+
+        const uintptr_t After = Address + Length;
+        const uint8_t Opcode = static_cast<uint8_t>(Instruction.opcode);
+        const bool bShortBranch = Opcode == 0xEB || (Opcode >= 0x70 && Opcode <= 0x7F);
+        const bool bNearBranch = Opcode == 0xE9 || (Opcode == 0x0F && Instruction.opcode2 >= 0x80 && Instruction.opcode2 <= 0x8F);
+        const bool bEnd = Opcode == 0xC3 || Opcode == 0xC2 || Opcode == 0xCC || (Opcode == 0xFF && (Instruction.modrm_reg == 4 || Instruction.modrm_reg == 5));
+        uintptr_t Ways[2] = { bEnd || Opcode == 0xE9 || Opcode == 0xEB ? 0 : After, 0 };
+        if (bShortBranch)
+        {
+            Ways[1] = After + static_cast<int8_t>(Instruction.imm.imm8);
+        }
+        else if (bNearBranch)
+        {
+            Ways[1] = After + static_cast<int32_t>(Instruction.imm.imm32);
+        }
+        else if (Instruction.rex_w && Opcode >= 0xB8 && Opcode <= 0xBF)
+        {
+            Ways[1] = static_cast<uintptr_t>(Instruction.imm.imm64);
+        }
+        else if (Instruction.rex_w && Opcode == 0x8D && Instruction.modrm_mod == 0 && Instruction.modrm_rm == 5)
+        {
+            Ways[1] = After + static_cast<int32_t>(Instruction.disp.disp32);
+        }
+        for (const uintptr_t Way : Ways)
+        {
+            if (Way && IsExecutable(Way) && Steps.emplace(Way, Step + 1).second)
+            {
+                Queue.push_back(Way);
+            }
+        }
+    }
+    return -1;
+}
+
+uintptr_t Finder::MostReferencedFunction()
+{
+    // The shared empty function is what most vtable slots hold: on 1.9.1 76,716 .rdata pointers (the next, a
+    // return-zero stub, 26,127). Its body there is a jump into the second section's guard code.
+    static const uintptr_t Most = []
+    {
+        Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+        const auto* Begin = reinterpret_cast<const uintptr_t*>(ReadOnly.GetSectionStart().Get());
+        const auto* End = reinterpret_cast<const uintptr_t*>(ReadOnly.GetSectionEnd().Get() & ~static_cast<uintptr_t>(7));
+        std::unordered_map<uintptr_t, uint32_t> Counts;
+        Counts.reserve(1 << 18);
+        uintptr_t Best = 0;
+        uint32_t BestCount = 0;
+        for (const uintptr_t* Slot = Begin; Slot < End; ++Slot)
+        {
+            if (*Slot >= TextBegin() && *Slot < TextEnd())
+            {
+                const uint32_t Count = ++Counts[*Slot];
+                if (Count > BestCount)
+                {
+                    Best = *Slot;
+                    BestCount = Count;
+                }
+            }
+        }
+        return Best;
+    }();
+    return Most;
 }
 
 uintptr_t Finder::ImageBase()

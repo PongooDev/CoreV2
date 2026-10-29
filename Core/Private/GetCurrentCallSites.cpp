@@ -123,13 +123,12 @@ namespace
 
     bool IsTrivial(uintptr_t Function)
     {
-        const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Function);
-        return Bytes[0] == 0xC3
-            || (Bytes[0] == 0x33 && Bytes[1] == 0xC0 && Bytes[2] == 0xC3)
-            || (Bytes[0] == 0x32 && Bytes[1] == 0xC0 && Bytes[2] == 0xC3)
-            || (Bytes[0] == 0xB0 && Bytes[1] == 0x01 && Bytes[2] == 0xC3)
-            || (Bytes[0] == 0xC2 && Bytes[1] == 0x00 && Bytes[2] == 0x00)
-            || (Bytes[0] == 0x48 && Bytes[1] == 0x33 && Bytes[2] == 0xC0 && Bytes[3] == 0xC3);
+        return Finder::BodyIs(Function, { 0xC3 })
+            || Finder::BodyIs(Function, { 0x33, 0xC0, 0xC3 })
+            || Finder::BodyIs(Function, { 0x32, 0xC0, 0xC3 })
+            || Finder::BodyIs(Function, { 0xB0, 0x01, 0xC3 })
+            || Finder::BodyIs(Function, { 0xC2, 0x00, 0x00 })
+            || Finder::BodyIs(Function, { 0x48, 0x33, 0xC0, 0xC3 });
     }
 
     bool IsGetCurrentOfWorld(uintptr_t Site, int32_t GetWorldIndex)
@@ -422,8 +421,7 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
     FContext Context;
     for (const auto& [Call, Target] : Anchor ? Finder::DirectCalls(Anchor, AnchorEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
     {
-        const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Target);
-        if (!Context.Stub && Bytes[0] == 0x33 && Bytes[1] == 0xC0 && Bytes[2] == 0xC3)
+        if (!Context.Stub && Finder::BodyIs(Target, { 0x33, 0xC0, 0xC3 }))
         {
             Context.Stub = Target;
         }

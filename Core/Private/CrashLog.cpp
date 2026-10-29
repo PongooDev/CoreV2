@@ -94,8 +94,8 @@ namespace
             }
         }
 
-        // A packed exe's (1.9.1) moved code has no unwind data and jumps through the stack, so the walk above can stop
-        // at its first frame: the module addresses near the top of the stack show where the fault came from.
+        // 1.9.1's moved code (Finder::HasMovedCode) has no unwind data and jumps through the stack, so the walk above
+        // can stop at its first frame: the module addresses near the top of the stack show where the fault came from.
         const CONTEXT& Fault = *Pointers->ContextRecord;
         Text += std::format(L"\n    rax {:X} rcx {:X} rdx {:X} r8 {:X} r9 {:X} rsp {:X}", Fault.Rax, Fault.Rcx, Fault.Rdx, Fault.R8, Fault.R9, Fault.Rsp);
         int32_t Listed = 0;

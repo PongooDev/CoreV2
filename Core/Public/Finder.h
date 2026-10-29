@@ -1,7 +1,10 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
+#include <initializer_list>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 class UClass;
@@ -56,6 +59,24 @@ namespace Finder
         uint8_t* BackupCall = nullptr;
         int32_t FriendlyPawnsIndex = -1;
     };
+
+    // Whether the exe has more than one executable section, as 1.9.1's does: its moved functions start with jumps, and
+    // their bodies replace ret with lea rsp, [rsp+8]; jmp qword ptr [rsp-8]. False for 1.1 to 1.9.
+    bool HasMovedCode();
+    // The exe's executable sections as [begin, end), .text first.
+    const std::vector<std::pair<uintptr_t, uintptr_t>>& ExecutableSections();
+    // Where the jumps at Address lead (jmp, and moved code's push/lea/xchg/ret) on an exe with moved code; Address elsewhere.
+    uintptr_t Unthunk(uintptr_t Address);
+    // Whether Function's code is Bytes (ending in ret or ret 0), including moved code's rewritten copy of it.
+    bool BodyIs(uintptr_t Function, std::initializer_list<uint8_t> Bytes);
+    // The code pointer .rdata holds most often: the shared empty function every stripped void virtual points at.
+    uintptr_t MostReferencedFunction();
+    // The first of up to MaxInstructions instructions run from From that Match accepts, following jumps (Unthunk), so it
+    // reads moved code (split into pieces joined by jumps) in the order it runs. 0 at a return.
+    uintptr_t TraceFind(uintptr_t From, size_t MaxInstructions, const std::function<bool(uintptr_t Instruction)>& Match);
+    // The fewest instructions from From to Goal over every path the code can take (both sides of each branch, and
+    // moved code's branches through the stack), looking at up to MaxInstructions of them; -1 if Goal isn't reached.
+    int32_t RunsInto(uintptr_t From, uintptr_t Goal, size_t MaxInstructions);
 
     uintptr_t ImageBase();
     uintptr_t TextBegin();

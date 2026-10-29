@@ -212,7 +212,6 @@ namespace Natives
     inline bool (*FOnlineSubsystemMcp_QueueRequestForClient)(FOnlineSubsystemMcp* This, FGameServiceMcp& Service, const FString& ClientId, const TSharedRef<IHttpRequest>& HttpRequest, FString& OutError) = nullptr;
     inline bool (*FOnlineSubsystemImpl_IsDedicated)(const FOnlineSubsystemImpl* This) = nullptr;
     inline void (*UGameEngine_Tick)(UGameEngine* This, float DeltaSeconds, bool bIdleMode) = nullptr;
-    inline bool (*UEngine_LoadMap)(UEngine* This, FWorldContext& WorldContext, FURL* URL, void* Pending, FString& Error) = nullptr;
     inline bool (*UEngine_CreateNamedNetDriver)(UEngine* This, UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition) = nullptr;
     inline UNetDriver* (*UEngine_FindNamedNetDriver)(UEngine* This, const UWorld* InWorld, FName NetDriverName) = nullptr;
     inline void (*UEngine_DestroyNamedNetDriver)(UEngine* This, UWorld* InWorld, FName NetDriverName) = nullptr;
@@ -276,7 +275,6 @@ namespace Natives
     inline int32_t UNetDriver_TickFlushIndex = -1;
     inline int32_t UNetDriver_IsServerIndex = -1;
     inline int32_t UNetDriver_ServerReplicateActorsIndex = -1;
-    inline int32_t UEngine_LoadMapIndex = -1;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
     inline int32_t UObject_NeedsLoadForClientIndex = -1;
     inline int32_t UObject_GetWorldIndex = -1;

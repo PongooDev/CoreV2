@@ -3,9 +3,11 @@
 #include "GameplayEffect.h"
 #include "GameplayTagContainer.h"
 #include "Pawns/FortPawn.h"
+#include "UObject/WeakObjectPtr.h"
 
 class AController;
 class AFortPickup;
+class UFortHero;
 
 class AFortPlayerPawn : public AFortPawn
 {
@@ -21,6 +23,8 @@ public:
     DefineUProperty(UClass*, TeammateReviveGameplayEffect)
     DefineUStructProperty(FScalableFloat, SetByCallerReviveHealth)
     DefineUProperty(FGameplayTag, EventReviveTag)
+    // The hero the pawn plays (set with the controller's hero; not replicated).
+    DefineUProperty(TWeakObjectPtr<UFortHero>, Hero)
 
     void ResetGameplayAttributes();
     bool EquipLastWeapon();

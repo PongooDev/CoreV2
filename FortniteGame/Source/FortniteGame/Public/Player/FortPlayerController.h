@@ -97,6 +97,9 @@ public:
     bool GetRotatePawnToCamera();
     void ServerSetPartyOwner(const FUniqueNetIdRepl& PartyOwnerUniqueId);
     void Possess(APawn* InPawn);
+    // Whether Possess and TrySetHeroImplementation can run here (the server found and hooked the natives).
+    static bool CanPossess() { return PossessOG != nullptr; }
+    static bool CanTrySetHero() { return TrySetHeroImplementationOG != nullptr; }
     void SpawnQuickBars();
     void SetupQuickBars();
     void InitializeInventory(const TStructArray<FItemDefinitionAndCount>& Items);

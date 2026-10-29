@@ -275,7 +275,18 @@ void AFortPlayerController::Possess(APawn* InPawn)
         FortPlayerState->ForceNetUpdate();
     }
 
-    AFortPlayerControllerAthena* AthenaController = Role == ROLE_Authority && MyFortPawn && AFortGameModeAthena::GetCurrent(this) ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;
+    // A disguise (#134, "cheat disguise") possesses a pawn of another kind, a husk or another player pawn class, and gives
+    // the player's own pawn back after: the player keeps their hero, attributes and items through it, so only what the
+    // possessed pawn needs to be played runs (its character parts, and a player pawn's equipped item).
+    const bool bDisguisePossess = UFortCheatManager::bDisguisePossess;
+    AFortPlayerPawn* const PossessedPlayerPawn = Role == ROLE_Authority ? Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))) : nullptr;
+    if (Role == ROLE_Authority && InPawn && !PossessedPlayerPawn)
+    {
+        UE_LOG(LogFort, Log, TEXT("Possess: %s plays %s, not a player pawn"), *GetNameSafe(this), *GetNameSafe(InPawn));
+        return;
+    }
+
+    AFortPlayerControllerAthena* AthenaController = !bDisguisePossess && Role == ROLE_Authority && MyFortPawn && AFortGameModeAthena::GetCurrent(this) ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;
     UFortHero* AthenaHero = AthenaController ? AthenaController->SetupHero() : nullptr;
 
     // 1.8: no player's pawn reaches the clients with an empty glider (#80). Its loadout was copied from the controller's
@@ -285,7 +296,7 @@ void AFortPlayerController::Possess(APawn* InPawn)
         AthenaController->FillEmptyLoadout(Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))));
     }
 
-    if (AFortPlayerPawn* PlayerPawn = Role == ROLE_Authority ? Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))) : nullptr)
+    if (AFortPlayerPawn* PlayerPawn = PossessedPlayerPawn)
     {
         // A pawn takes the hero's character parts (its skeletal mesh and anim class) when the player state's parts change
         // (1.8 0x88C280, after OnRep_CharacterParts). Save the World sets the hero before the pawn exists, so the server's
@@ -297,13 +308,24 @@ void AFortPlayerController::Possess(APawn* InPawn)
             PartsState->OnRep_CharacterParts();
         }
 
-        PlayerPawn->ResetGameplayAttributes();
+        // A disguise keeps the player's health and shield (the player state's attributes) as they were.
+        if (!bDisguisePossess)
+        {
+            PlayerPawn->ResetGameplayAttributes();
+        }
         if (AthenaController)
         {
             UFortHeroType* HeroType = AthenaHero ? AthenaHero->GetHeroTypeBP() : nullptr;
             UE_LOG(LogFort, Log, TEXT("Possess: %s plays %s with health %.0f/%.0f, shield %.0f/%.0f"), *GetNameSafe(this), *GetNameSafe(HeroType),
                 PlayerPawn->GetHealth(), PlayerPawn->GetMaxHealth(), PlayerPawn->GetShield(), PlayerPawn->GetMaxShield());
         }
+    }
+
+    // "cheat hero" (#134): after a respawn, the hero the player chose instead of the one SetupHero put back. Only its
+    // look: the attributes above stay the Battle Royale hero's.
+    if (AthenaController)
+    {
+        UFortCheatManager::ReapplyHeroSwap(this);
     }
 
     // 1.8: the backpack size and the pickaxe come with the loadout, made when the pawn first spawns.
@@ -322,7 +344,7 @@ void AFortPlayerController::Possess(APawn* InPawn)
         // Battle Royale's inventory is the game mode's StartingItems (with its own pickaxe) and what the player loots: no
         // hero gadgets, harvesting tool from the account's attribute or homebase gadgets. The native homebase effects skip
         // Athena too (UFortRegisteredPlayerInfo 0x5DC040, through the Athena check 0x5EAF90).
-        if (!AFortGameModeAthena::GetCurrent(this))
+        if (!bDisguisePossess && !AFortGameModeAthena::GetCurrent(this))
         {
             AddHeroAbilityKitGadgetsToQuickBars();
             ApplyHarvestingTool();
@@ -1690,10 +1712,22 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
         return;
     }
 
-    // "spawnactor <class or path> [scale | x y z]" (#132): no exec function of these builds spawns an actor at a scale,
-    // so Core runs it, in front of the player it runs on.
-    if (Name.size() == 10 && _wcsicmp(Name.c_str(), L"spawnactor") == 0)
+    // Core's own commands, which no exec function of these builds has, run on the player they run on:
+    // "spawnactor <class or path> [scale | x y z]" (#132) spawns an actor in front of them at a scale, "hero <HID or CID>"
+    // (#134) dresses them as a hero, "disguise <class> [scale]" and "undisguise" (#134) turn them into a prop or a pawn.
+    using FCoreCommand = void (UFortCheatManager::*)(const FString&);
+    static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
+        { L"spawnactor", &UFortCheatManager::SpawnActor },
+        { L"hero", &UFortCheatManager::HeroSwap },
+        { L"disguise", &UFortCheatManager::Disguise },
+        { L"undisguise", &UFortCheatManager::Undisguise },
+    };
+    for (const auto& [CommandName, Run] : CoreCommands)
     {
+        if (_wcsicmp(Name.c_str(), CommandName) != 0)
+        {
+            continue;
+        }
         if (UFortCheatManager* FortCheatManager = Cast<UFortCheatManager>(static_cast<UObject*>(Runner->CheatManager)))
         {
             AFortPlayerController* const PreviousReplyTo = UFortCheatManager::ReplyTo;
@@ -1701,12 +1735,12 @@ void AFortPlayerController::ServerCheat_Implementation(const FString& Msg)
             {
                 UFortCheatManager::ReplyTo = this;
             }
-            FortCheatManager->SpawnActor(FString(NameEnd == std::wstring::npos ? L"" : Line.c_str() + NameEnd));
+            (FortCheatManager->*Run)(FString(NameEnd == std::wstring::npos ? L"" : Line.c_str() + NameEnd));
             UFortCheatManager::ReplyTo = PreviousReplyTo;
         }
         else
         {
-            ClientMessage(TEXT("SpawnActor needs Fortnite's cheat manager"));
+            ClientMessage(FString::Printf(TEXT("%s needs Fortnite's cheat manager"), CommandName));
         }
         return;
     }

@@ -28,6 +28,13 @@ enum ENetRole
     ROLE_MAX,
 };
 
+enum class EAttachmentRule : uint8_t
+{
+    KeepRelative,
+    KeepWorld,
+    SnapToTarget,
+};
+
 enum ENetDormancy
 {
     DORM_Never,
@@ -49,6 +56,9 @@ public:
     DefineBitfieldUProperty(bAlwaysRelevant)
     DefineBitfieldUProperty(bTearOff)
     DefineBitfieldUProperty(bReplicates)
+    DefineBitfieldUProperty(bReplicateMovement)
+    DefineBitfieldUProperty(bHidden)
+    DefineBitfieldUProperty(bCanBeDamaged)
     DefineBitfieldUProperty(bAllowReceiveTickEventOnDedicatedServer)
     DefineUProperty(FName, NetDriverName)
     DefineUProperty(TEnumAsByte<ENetRole>, Role)
@@ -69,6 +79,8 @@ public:
     DefineUFunction(GetActorScale3D)
     DefineUFunction(SetReplicates)
     DefineUFunction(SetActorEnableCollision)
+    DefineUFunction(SetActorHiddenInGame)
+    DefineUFunction(K2_AttachToActor)
     DefineUFunction(K2_DestroyActor)
     DefineUFunction(GetComponentsByClass)
 
@@ -96,6 +108,10 @@ public:
     // Server: replicates from now on (an actor that didn't joins the net driver's list), or stops.
     void SetReplicates(bool bInReplicates);
     void SetActorEnableCollision(bool bNewActorEnableCollision);
+    // Server: hides the actor (its components, not the actors attached to it) for everyone; bHidden replicates.
+    void SetActorHiddenInGame(bool bNewHidden);
+    // The actor's root follows Parent's root from now on. Clients attach it too when the actor replicates its movement.
+    void AttachToActor(AActor* Parent, EAttachmentRule LocationRule, EAttachmentRule RotationRule, EAttachmentRule ScaleRule);
     void K2_DestroyActor();
     TArray<UActorComponent*> GetComponentsByClass(UClass* ComponentClass) const;
     FVector GetVelocity() const;

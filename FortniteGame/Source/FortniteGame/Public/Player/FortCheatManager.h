@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <initializer_list>
+#include <string>
 
 class ACharacter;
 class AFortPlayerController;
@@ -117,6 +118,25 @@ public:
     // Core's own command, "cheat spawnactor <class or path> [scale | x y z]" (#132): an actor of the class in front of the
     // player, at the scale (uniform, or per axis), replicated to every client.
     void SpawnActor(const FString& Arguments);
+    // The actor class a name or path means (SpawnActor's lookup, loading the class when a path names one not loaded).
+    static UClass* FindActorClass(const std::wstring& Query);
+
+    // Core's own command, "cheat hero <HID or CID | reset>" (#134): the player wears that hero (a Save the World HID_*,
+    // a Battle Royale HID_*_Athena_*, or a CID_* outfit's hero), replicated to everyone. Battle Royale also gets the
+    // kits of a Save the World hero's perks and abilities; Save the World plays the hero (TrySetHeroImplementation).
+    // FortCheatManagerDisguise.cpp.
+    void HeroSwap(const FString& Arguments);
+    // Core's own commands, "cheat disguise <class, path or static mesh> [scale]" and "cheat undisguise" (#134): a pawn
+    // class is spawned and possessed in the player's place (a husk, PlayerPawn_Ninja_C, ...), anything else is a prop
+    // that hides the player's pawn and follows it. FortCheatManagerDisguise.cpp.
+    void Disguise(const FString& Arguments);
+    void Undisguise(const FString& Arguments);
+
+    // Set while a disguise possesses a pawn or gives the player's own back: AFortPlayerController::Possess then only does
+    // what the new pawn needs to be played (no hero, attribute reset, starting items or gadgets).
+    static inline bool bDisguisePossess = false;
+    // Battle Royale, from Possess once the controller's hero is set again (a respawn): the hero "cheat hero" chose.
+    static void ReapplyHeroSwap(AFortPlayerController* PlayerController);
 
     // A final "/Name/" picks the player a cheat runs on (#122): Msg without it in OutCommand, the name in OutTarget.
     static bool SplitCheatTarget(const FString& Msg, FString& OutCommand, FString& OutTarget);

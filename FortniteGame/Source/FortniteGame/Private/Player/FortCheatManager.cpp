@@ -308,7 +308,7 @@ namespace
     //   or the package alone (".../Tiered_Chest_6_Parent", its _C class), loaded if it isn't;
     // - a loaded class's name, with or without its _C ("StaticMeshActor", "Tiered_Chest_6_Parent");
     // - else part of a loaded actor class's name, the shortest that has it.
-    UClass* FindActorClass(std::wstring Query)
+    UClass* ResolveActorClass(std::wstring Query)
     {
         while (!Query.empty() && (Query.front() == L'"' || Query.front() == L'\''))
         {
@@ -471,6 +471,8 @@ namespace
         { L"Player", L"TestInfJumps", L"TestInfJumps", L"jump again in the air, any number of times (toggles)", ECheatMode::Both },
         { L"Player", L"Teleport", L"Teleport", L"to where you look (TeleportToLocation <x> <y> <z>, TeleportToActor <class or name>)", ECheatMode::Both },
         { L"Player", L"ChangeSize", L"ChangeSize <scale>", L"your size", ECheatMode::Both },
+        { L"Player", nullptr, L"Hero <HID or CID | reset>", L"wear a hero or outfit, seen by everyone (\"hero HID_Ninja_007_R_T01\", \"hero CID_005_Athena_Commando_M_Default\"); a Save the World hero brings its perks and abilities", ECheatMode::Both },
+        { L"Player", nullptr, L"Disguise <class, path or mesh> [scale]", L"turn into a prop (\"disguise Bathroom_ToiletBowl01\") or walk around as a pawn (\"disguise HuskPawn\"); Undisguise: be yourself again", ECheatMode::Both },
         { L"Player", L"BuildFree", L"BuildFree", L"building costs nothing (CraftFree: crafting)", ECheatMode::Both },
         { L"Player", L"ToggleInfiniteAmmo", L"ToggleInfiniteAmmo", L"(ToggleInfiniteDurability, ToggleInfiniteStamina, ToggleNoCoolDown)", ECheatMode::Both },
         { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },
@@ -570,6 +572,11 @@ namespace
         L"/Game/Items/Ingredients/Ingredient_Duct_Tape", L"/Game/Items/Ingredients/Ingredient_Ore_Copper",
         L"/Game/Items/Ingredients/Ingredient_Powder_T01",
     };
+}
+
+UClass* UFortCheatManager::FindActorClass(const std::wstring& Query)
+{
+    return ResolveActorClass(Query);
 }
 
 AFortPlayerController* UFortCheatManager::GetPlayerController() const

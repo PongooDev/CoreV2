@@ -107,6 +107,8 @@ public:
     }
 
     void SetHeroType(UFortHero* Hero);
+    // Whether SetHeroType can run here (the server found the native).
+    static bool CanSetHeroType() { return SetHeroTypeOG != nullptr; }
     void OnRep_CharacterParts();
     int32_t GetStat(EFortReplicatedStat StatType, bool bCampaign);
 

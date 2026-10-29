@@ -22,6 +22,7 @@ class UFortKismetLibrary : public UObject
 {
     DefineUnrealClass(UFortKismetLibrary, FortniteGame)
     DefineUFunction(EquipFortAbilitySet)
+    DefineUFunction(UnequipFortAbilitySet)
     DefineUFunction(GetAIDirector)
     DefineUFunction(GetAIGoalManager)
     DefineUFunction(GiveItemToInventoryOwner)

@@ -99,6 +99,25 @@ void AActor::SetActorEnableCollision(bool bNewActorEnableCollision)
     Params.Call(this);
 }
 
+void AActor::SetActorHiddenInGame(bool bNewHidden)
+{
+    Reflection::FParams Params(StaticFunction_SetActorHiddenInGame());
+    Params.Set(L"bNewHidden", bNewHidden);
+    Params.Call(this);
+}
+
+void AActor::AttachToActor(AActor* Parent, EAttachmentRule LocationRule, EAttachmentRule RotationRule, EAttachmentRule ScaleRule)
+{
+    Reflection::FParams Params(StaticFunction_K2_AttachToActor(), true);
+    Params.Set(L"ParentActor", Parent);
+    Params.Set(L"SocketName", FName());
+    Params.Set(L"LocationRule", LocationRule);
+    Params.Set(L"RotationRule", RotationRule);
+    Params.Set(L"ScaleRule", ScaleRule);
+    Params.Set(L"bWeldSimulatedBodies", false);
+    Params.Call(this);
+}
+
 void AActor::K2_DestroyActor()
 {
     Reflection::FParams Params(StaticFunction_K2_DestroyActor());

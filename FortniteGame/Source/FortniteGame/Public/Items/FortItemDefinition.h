@@ -161,6 +161,18 @@ class UFortGadgetItemDefinition : public UFortWorldItemDefinition
     DefineUnrealClass(UFortGadgetItemDefinition, FortniteGame)
 };
 
+// An emote or a dance (an account item): the montage it plays (TSoftObjectPtr<UAnimMontage>).
+class UFortMontageItemDefinitionBase : public UFortItemDefinition
+{
+    DefineUnrealClass(UFortMontageItemDefinitionBase, FortniteGame)
+
+public:
+    DefineUProperty(TAssetPtr<UObject>, Animation)
+
+    // -1 where the build has no such property.
+    static ptrdiff_t AnimationOffset() { return Member_Animation.IsAvailable() ? Member_Animation.GetOffsetChecked() : -1; }
+};
+
 struct FFortBaseWeaponStats
 {
     DefineUnrealStruct(FFortBaseWeaponStats, FortniteGame)

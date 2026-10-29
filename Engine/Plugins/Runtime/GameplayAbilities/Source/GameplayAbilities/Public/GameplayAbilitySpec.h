@@ -16,6 +16,9 @@ struct FGameplayAbilitySpecHandle
 
     bool IsValid() const { return Handle != INDEX_NONE; }
     bool operator==(const FGameplayAbilitySpecHandle& Other) const { return Handle == Other.Handle; }
+
+    // The next handle from the engine's own counter (Natives::FGameplayAbilitySpecHandle_GHandleID).
+    void GenerateNewHandle();
 };
 
 static_assert(sizeof(FGameplayAbilitySpecHandle) == sizeof(int32_t));
@@ -25,6 +28,8 @@ struct FGameplayAbilitySpec
     DefineUnrealStruct(FGameplayAbilitySpec, GameplayAbilities)
     DefineUProperty(FGameplayAbilitySpecHandle, Handle)
     DefineUProperty(UGameplayAbility*, Ability)
+    DefineUProperty(int32_t, Level)
+    DefineUProperty(int32_t, InputID)
     DefineUProperty(UObject*, SourceObject)
     DefineUProperty(uint8_t, ActiveCount)
     DefineBitfieldUProperty(InputPressed)

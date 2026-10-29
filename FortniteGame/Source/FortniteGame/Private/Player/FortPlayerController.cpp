@@ -1645,6 +1645,7 @@ void AFortPlayerController::HookVTables()
     }
 
     HookBuildingVTables();
+    HookEmoteVTables();
 }
 
 int32_t AFortPlayerController::GetItemQuantity(const UFortItemDefinition* ItemDefinition)

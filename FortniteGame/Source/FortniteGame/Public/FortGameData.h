@@ -18,6 +18,7 @@ struct FFortLootTierData;
 class UEnvQuery;
 class UFortAbilitySet;
 class UFortHomebaseManager;
+class UGameplayAbility;
 class UFortItemDefinition;
 class UFortWorldItemDefinition;
 
@@ -53,6 +54,8 @@ public:
     DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, CheatInventoryItems)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
+    // The ability an emote plays through (its montage comes from the spec's source object, the emote item).
+    DefineUProperty(TAssetSubclassOf<UGameplayAbility>, EmoteGameplayAbility)
     DefineUProperty(TAssetPtr<UFortWorldItemDefinition>, EditToolItem)
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
     DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)

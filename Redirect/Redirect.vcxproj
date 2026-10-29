@@ -525,6 +525,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerController.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerBuilding.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerDeployableBase.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerEmote.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerOutpost.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerVoice.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerZone.cpp" />

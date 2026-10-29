@@ -25,6 +25,8 @@ public:
     DefineUProperty(FGameplayTag, EventReviveTag)
     // The hero the pawn plays (set with the controller's hero; not replicated).
     DefineUProperty(TWeakObjectPtr<UFortHero>, Hero)
+    // EFortPawnStasisMode: the pawn may not act while it is anything but None.
+    DefineUProperty(uint8_t, StasisMode)
 
     void ResetGameplayAttributes();
     bool EquipLastWeapon();
@@ -37,6 +39,7 @@ public:
     void ServerHandlePickup_Implementation(AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
 
     static ptrdiff_t LastEquippedWeaponGUIDOffset();
+    static ptrdiff_t StasisModeOffset() { return Member_StasisMode.GetOffsetChecked(); }
     static void HookVTables();
     static void HookPickupVTables();
 

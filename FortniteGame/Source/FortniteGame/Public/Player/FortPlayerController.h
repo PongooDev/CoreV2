@@ -19,6 +19,7 @@ class IFortInventoryOwnerInterface;
 class AFortQuickBars;
 class UFortHero;
 class UFortItemDefinition;
+class UFortMontageItemDefinitionBase;
 class UFortQuestManager;
 class UFortRegisteredPlayerInfo;
 class UFortSchematicItem;
@@ -87,6 +88,7 @@ public:
     DefineUFunction(ServerRepairBuildingActor)
     DefineUFunction(ServerUpgradeBuildingActor)
     DefineUFunction(FortClientPlaySoundAtLocation)
+    DefineUFunction(ServerPlayEmoteItem)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
@@ -129,6 +131,8 @@ public:
     void ServerRepairBuildingActor_Implementation(ABuildingSMActor* BuildingActorToRepair);
     void ServerUpgradeBuildingActor_Implementation(ABuildingActor* BuildingActorToUpgrade, int32_t NewUpgradeLevel);
     void FortClientPlaySoundAtLocation(UObject* Sound, const FVector& Location, float VolumeMultiplier, float PitchMultiplier);
+    // Emotes (FortPlayerControllerEmote.cpp): 1.9 strips the emote RPC's play body; Core's follows 1.8.2's.
+    void ServerPlayEmoteItem_Implementation(UFortMontageItemDefinitionBase* EmoteAsset);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
@@ -142,11 +146,13 @@ public:
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
     static ptrdiff_t CriticalMatchBonusOffset();
     static ptrdiff_t QuickBarsOffset();
+    static ptrdiff_t MyFortPawnOffset() { return Member_MyFortPawn.GetOffsetChecked(); }
     static bool ResolveDurability();
 
     static void Hook();
     static void HookVTables();
     static void HookBuildingVTables();
+    static void HookEmoteVTables();
     // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox.
     static void HookVoice();
     static void HookClientNatives();
@@ -180,6 +186,8 @@ private:
     static void ServerEndEditingBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToStopEditing);
     static void ServerRepairBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToRepair);
     static void ServerUpgradeBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingActor* BuildingActorToUpgrade, int32_t NewUpgradeLevel);
+    static inline void (*ServerPlayEmoteItem_ImplementationOG)(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset) = nullptr;
+    static void ServerPlayEmoteItem_ImplementationHK(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset);
     static void ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor);
     static void ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg);
     static void ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType);

@@ -92,6 +92,18 @@ void UAbilitySystemComponent::MarkAbilitySpecDirty(FGameplayAbilitySpec& Spec)
     Natives::UAbilitySystemComponent_MarkAbilitySpecDirty(this, Spec);
 }
 
+void FGameplayAbilitySpecHandle::GenerateNewHandle()
+{
+    Handle = (*Natives::FGameplayAbilitySpecHandle_GHandleID)++;
+}
+
+FGameplayAbilitySpecHandle UAbilitySystemComponent::GiveAbilityAndActivateOnce(const FGameplayAbilitySpec& Spec)
+{
+    FGameplayAbilitySpecHandle Handle;
+    Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce(this, &Handle, Spec);
+    return Handle;
+}
+
 bool UAbilitySystemComponent::InternalTryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate, const FPredictionKey& InPredictionKey, UGameplayAbility** OutInstancedAbility, void* OnGameplayAbilityEndedDelegate, const FGameplayEventData* TriggerEventData)
 {
     UScriptStruct* PredictionKeyStruct = FPredictionKey::StaticStruct();

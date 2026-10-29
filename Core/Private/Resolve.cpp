@@ -7972,6 +7972,74 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     return true;
 }
 
+bool Finder::OnlyLoadsEmoteAnimation(uintptr_t Implementation, ptrdiff_t AnimationOffset)
+{
+    // 1.9 (CL-3757339) and 1.9.1 (CL-3775276) keep only the first step of AFortPlayerController::
+    // ServerPlayEmoteItem_Implementation, loading the emote's montage (EmoteAsset->Animation.LoadSynchronous()):
+    // test rdx, rdx; jz; lea rcx, [rdx+Animation]; mov dl, 1; jmp (1.9 0x85B400, 1.9.1 0x85D9F0). The controller is gone
+    // from rcx before the tail jump, so nothing after the load can reach it. 1.8.2 (0x84F000) keeps the controller and
+    // calls the play body (0x82CD40) after the load.
+    return AnimationOffset > 0 && IsInText(Implementation)
+        && FindInstruction(Implementation, Implementation + 1, { 0x48, 0x85, 0xD2, 0x74, -1, 0x48, 0x8D, 0x8A, -1, -1, -1, -1, 0xB2, 0x01, 0xE9 }) == Implementation
+        && *reinterpret_cast<const int32_t*>(Implementation + 8) == AnimationOffset;
+}
+
+bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOffset)
+{
+    static bool bSearched = false;
+    static bool bResolved = false;
+    if (bSearched)
+    {
+        return bResolved;
+    }
+    bSearched = true;
+    MissingCount = 0;
+
+    // 1.8.2's play body gives the pawn's ability system the emote ability with GiveAbilityAndActivateOnce (1.8.2
+    // 0x3E58D50, 1.9 0x3E882C0, 1.9.1 0x3EA93F0), which the engine keeps.
+    Require(L"UAbilitySystemComponent::GiveAbilityAndActivateOnce", Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce, FunctionOf(L"GiveAbilityAndActivateOnce called on ability %s on the client, not allowed!"));
+
+    // The spec it builds takes a new handle inline (FGameplayAbilitySpecHandle::GenerateNewHandle: Handle = GHandleID++).
+    // The constructor from a spec def does the same: mov eax, [GHandleID] ... inc [GHandleID] (1.8.2 0x3D8A2C6,
+    // 1.9 0x3DB9D56, 1.9.1 0x3DDA616).
+    const uintptr_t SpecFromDef = FunctionOf(L"FGameplayAbilitySpec::FGameplayAbilitySpec for %s from %s");
+    const uintptr_t SpecFromDefEnd = SpecFromDef ? Finder::FunctionEnd(SpecFromDef) : 0;
+    uintptr_t HandleID = 0;
+    for (uintptr_t Load = SpecFromDefEnd ? FindInstruction(SpecFromDef, SpecFromDefEnd, { 0x8B, 0x05 }) : 0; Load && !HandleID; Load = FindInstruction(Load + 1, SpecFromDefEnd, { 0x8B, 0x05 }))
+    {
+        const uintptr_t Counter = Finder::RelativeTarget(Load, 2, 6);
+        const uintptr_t Increment = FindInstruction(Load + 6, std::min(Load + 0x20, SpecFromDefEnd), { 0xFF, 0x05 });
+        if (Increment && !IsInText(Counter) && Finder::RelativeTarget(Increment, 2, 6) == Counter)
+        {
+            HandleID = Counter;
+        }
+    }
+    Require(L"FGameplayAbilitySpecHandle::GenerateNewHandle's counter", Natives::FGameplayAbilitySpecHandle_GHandleID, HandleID);
+
+    // The play body first asks CanPerformAction(Gameplay.Action.Player.InteractUse). AFortPlayerController's (1.8.2 slot
+    // 0x26C 0x81D9E0, 1.9 0x26D 0x8297D0, 1.9.1 0x270 0x82BB30) asks the pawn, unless there is none or it is in stasis:
+    // mov rcx, [rcx+MyFortPawn]; test rcx, rcx; jz; cmp byte [rcx+StasisMode], 0. It is the controller's only slot that
+    // begins so (AFortPlayerControllerAthena overrides it for aiming down sights). The building restoration finds the
+    // same slot another way where the build strips building.
+    if (Natives::AFortPlayerController_CanPerformActionIndex < 0)
+    {
+        const int32_t P = static_cast<int32_t>(MyFortPawnOffset);
+        const int32_t S = static_cast<int32_t>(StasisModeOffset);
+        const int32_t CanPerformAction = MyFortPawnOffset > 0 && StasisModeOffset > 0 ? FirstVTableIndexWhere(CdoVTable(L"/Script/FortniteGame.FortPlayerController"), [P, S](uintptr_t Entry)
+        {
+            return FindInstruction(Entry, Entry + 1, { 0x48, 0x8B, 0x89, P & 0xFF, (P >> 8) & 0xFF, (P >> 16) & 0xFF, (P >> 24) & 0xFF, 0x48, 0x85, 0xC9, 0x74, -1,
+                0x80, 0xB9, S & 0xFF, (S >> 8) & 0xFF, (S >> 16) & 0xFF, (S >> 24) & 0xFF, 0x00 }) == Entry;
+        }) : -1;
+        RequireSlot(L"AFortPlayerController::CanPerformAction", Natives::AFortPlayerController_CanPerformActionIndex, CanPerformAction);
+    }
+
+    Log::Info(L"Finder: emote helpers: GiveAbilityAndActivateOnce 0x{:X}, spec handle counter 0x{:X}, AFortPlayerController CanPerformAction 0x{:X}, {} missing",
+        Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce ? reinterpret_cast<uintptr_t>(Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce) - Finder::ImageBase() : 0,
+        HandleID ? HandleID - Finder::ImageBase() : 0, Natives::AFortPlayerController_CanPerformActionIndex, MissingCount);
+    bResolved = MissingCount == 0;
+    return bResolved;
+}
+
 bool Finder::ResolvePickupCanInteractLive(ptrdiff_t PickedUpOffset)
 {
     if (Natives::IFortInteractInterface_CanInteractIndex >= 0)

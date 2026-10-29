@@ -194,6 +194,10 @@ namespace Natives
     inline void (*UAbilitySystemComponent_MarkAbilitySpecDirty)(UAbilitySystemComponent* This, FGameplayAbilitySpec& Spec) = nullptr;
     inline void (*UAbilitySystemComponent_IncrementAbilityListLock)(UAbilitySystemComponent* This) = nullptr;
     inline void (*UAbilitySystemComponent_DecrementAbilityListLock)(UAbilitySystemComponent* This) = nullptr;
+    // GiveAbilityAndActivateOnce(const FGameplayAbilitySpec&) returns its handle through Result, and the static counter
+    // FGameplayAbilitySpecHandle::GenerateNewHandle takes handles from (Finder::ResolveEmoteLive).
+    inline FGameplayAbilitySpecHandle* (*UAbilitySystemComponent_GiveAbilityAndActivateOnce)(UAbilitySystemComponent* This, FGameplayAbilitySpecHandle* Result, const FGameplayAbilitySpec& Spec) = nullptr;
+    inline int32_t* FGameplayAbilitySpecHandle_GHandleID = nullptr;
     inline void* SharedEmptyFunction = nullptr;
     inline void (*FortMcpConfig_UpdateServicePermissions)(void* Environment, void* Context, FMcpServiceConfig* ServiceConfig, void* Extra) = nullptr;
     inline void (*UMcpProfileGroup_SendRequestNow)(UMcpProfileGroup* This, FProfileHttpRequest& Request) = nullptr;

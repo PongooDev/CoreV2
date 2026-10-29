@@ -15,7 +15,9 @@
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
+#include <algorithm>
 #include <unordered_set>
+#include <vector>
 
 // Voice chat (Core-Backend #54). 1.7.2's own voice chat is Vivox, a third-party service; its push to talk handlers
 // (AFortPlayerController's, and AFortPlayerControllerAthena's overrides 0x438810 pressed, 0x4389F0 released) do
@@ -44,11 +46,35 @@ void AFortPlayerController::HookVoice()
     // too: matched on the base controller's alone, push to talk never reached voice chat in Battle Royale.
     const int32_t PressedIndex = Natives::AFortPlayerController_PushToTalkPressedIndex;
     const int32_t ReleasedIndex = Natives::AFortPlayerController_PushToTalkReleasedIndex;
+
+    // The bindings' virtuals can be the Battle Royale controller's own (1.8.2 0x32F/0x330, 1.9 0x335/0x336): the base
+    // controller's vtable (1.9 0x31A slots) and the other modes' end before them, and their entries there are the next
+    // class's vtable. Swapping those swapped other classes' functions (1.9: UFortLocalPlayer's and AFortPlayerState's
+    // UObject slots 0x1B/0x1C). Without RTTI the classes' vtables sit back to back, so a vtable holds a slot when no
+    // other class's vtable starts before it.
+    std::vector<uintptr_t> VTableStarts;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        const UObject* ClassDefault = Class ? Class->GetDefaultObject(false) : nullptr;
+        if (ClassDefault)
+        {
+            VTableStarts.push_back(*reinterpret_cast<const uintptr_t*>(ClassDefault));
+        }
+    }
+    std::sort(VTableStarts.begin(), VTableStarts.end());
+    const auto HasSlot = [&VTableStarts](void* const* VTable, int32_t Index)
+    {
+        const uintptr_t Start = reinterpret_cast<uintptr_t>(VTable);
+        const auto Next = std::upper_bound(VTableStarts.begin(), VTableStarts.end(), Start);
+        return VTable && (Next == VTableStarts.end() || *Next > Start + Index * sizeof(void*));
+    };
+
     UClass* const AthenaClass = AFortPlayerControllerAthena::StaticClass();
     const UObject* const AthenaDefault = AthenaClass ? AthenaClass->GetDefaultObject() : nullptr;
     void* const* const AthenaVTable = AthenaDefault ? *reinterpret_cast<void* const* const*>(AthenaDefault) : nullptr;
-    void* const Pressed[] = { BaseVTable[PressedIndex], AthenaVTable ? AthenaVTable[PressedIndex] : nullptr };
-    void* const Released[] = { BaseVTable[ReleasedIndex], AthenaVTable ? AthenaVTable[ReleasedIndex] : nullptr };
+    void* const Pressed[] = { HasSlot(BaseVTable, PressedIndex) ? BaseVTable[PressedIndex] : nullptr, HasSlot(AthenaVTable, PressedIndex) ? AthenaVTable[PressedIndex] : nullptr };
+    void* const Released[] = { HasSlot(BaseVTable, ReleasedIndex) ? BaseVTable[ReleasedIndex] : nullptr, HasSlot(AthenaVTable, ReleasedIndex) ? AthenaVTable[ReleasedIndex] : nullptr };
     const auto IsOneOf = [](void* Entry, void* const (&Handlers)[2]) { return Entry && (Entry == Handlers[0] || Entry == Handlers[1]); };
     for (TObjectIterator<UClass> It; It; ++It)
     {
@@ -59,11 +85,11 @@ void AFortPlayerController::HookVoice()
         {
             continue;
         }
-        if (IsOneOf(VTable[PressedIndex], Pressed))
+        if (HasSlot(VTable, PressedIndex) && IsOneOf(VTable[PressedIndex], Pressed))
         {
             Hooks::SwapVTable(L"AFortPlayerController::PushToTalk pressed", VTable, PressedIndex, reinterpret_cast<void*>(&PushToTalkPressedHK));
         }
-        if (IsOneOf(VTable[ReleasedIndex], Released))
+        if (HasSlot(VTable, ReleasedIndex) && IsOneOf(VTable[ReleasedIndex], Released))
         {
             Hooks::SwapVTable(L"AFortPlayerController::PushToTalk released", VTable, ReleasedIndex, reinterpret_cast<void*>(&PushToTalkReleasedHK));
         }

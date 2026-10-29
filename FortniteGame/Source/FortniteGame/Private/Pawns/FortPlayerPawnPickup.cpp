@@ -10,6 +10,7 @@
 #include "Items/FortPickup.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -17,6 +18,9 @@
 #include "UObject/UObjectIterator.h"
 
 #include <cmath>
+#include <format>
+#include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -126,8 +130,8 @@ void AFortPlayerPawn::ServerHandlePickup_ImplementationHK(AFortPlayerPawn* This,
 
 namespace
 {
-    // Why an overlap didn't pick anything up, each said once in the server log (an overlap fires for every actor the
-    // capsule touches, so the reasons themselves would flood it).
+    // Why an overlap didn't pick anything up. Each reason is said once per pickup, at most MaxRefusalLines times in all
+    // (an overlap fires for every actor the capsule touches); "not a pickup" is said once in all.
     enum class EAutoPickupRefusal : uint8_t
     {
         Disabled,
@@ -143,15 +147,22 @@ namespace
         Count,
     };
 
-    void LogRefusalOnce(EAutoPickupRefusal Refusal, AFortPlayerPawnAthena* Pawn, AActor* OtherActor, const wchar_t* Why)
+    constexpr int32_t MaxRefusalLines = 200;
+
+    void LogRefusal(EAutoPickupRefusal Refusal, AFortPlayerPawnAthena* Pawn, AActor* OtherActor, const std::wstring& Why)
     {
-        static bool bLogged[static_cast<size_t>(EAutoPickupRefusal::Count)] = {};
-        bool& bThisLogged = bLogged[static_cast<size_t>(Refusal)];
-        if (!bThisLogged)
+        static std::unordered_set<uint64_t> Logged;
+        static int32_t Lines = 0;
+        const uint64_t Actor = Refusal == EAutoPickupRefusal::NotPickup ? 0 : static_cast<uint64_t>(reinterpret_cast<uintptr_t>(OtherActor));
+        if (Lines >= MaxRefusalLines || !Logged.insert((Actor << 8) | static_cast<uint64_t>(Refusal)).second)
         {
-            bThisLogged = true;
-            Log::Info(L"Pickup: auto pickup: {} overlapped {} and didn't pick it up: {} (said once)", Pawn->GetName().ToStdString(), OtherActor ? OtherActor->GetName().ToStdString() : L"None", Why);
+            return;
         }
+        if (++Lines == MaxRefusalLines)
+        {
+            Log::Info(L"Pickup: auto pickup: {} refusals said, no more will be", MaxRefusalLines);
+        }
+        Log::Info(L"Pickup: auto pickup: {} overlapped {} and didn't pick it up: {}", Pawn->GetName().ToStdString(), OtherActor ? OtherActor->GetName().ToStdString() : L"None", Why);
     }
 
     // Where the exec steps the SweepResult (a const FHitResult&, 0x88 bytes in 4.16) when it isn't passed by address.
@@ -172,17 +183,17 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap(UPrimitiveComponent* Overlappe
     static IConsoleVariable* AutoResourceGathering = IConsoleManager::Get().FindConsoleVariable(L"Athena.AutoResourceGathering");
     if (!AutoResourceGathering || AutoResourceGathering->GetInt() == 0)
     {
-        LogRefusalOnce(EAutoPickupRefusal::Disabled, this, OtherActor, AutoResourceGathering ? L"Athena.AutoResourceGathering is 0" : L"Athena.AutoResourceGathering isn't registered");
+        LogRefusal(EAutoPickupRefusal::Disabled, this, OtherActor, AutoResourceGathering ? L"Athena.AutoResourceGathering is 0" : L"Athena.AutoResourceGathering isn't registered");
         return;
     }
     if (Role != ROLE_Authority)
     {
-        LogRefusalOnce(EAutoPickupRefusal::NotAuthority, this, OtherActor, L"the pawn isn't the authority");
+        LogRefusal(EAutoPickupRefusal::NotAuthority, this, OtherActor, L"the pawn isn't the authority");
         return;
     }
     if (bIsDBNO)
     {
-        LogRefusalOnce(EAutoPickupRefusal::DBNO, this, OtherActor, L"the pawn is down (DBNO)");
+        LogRefusal(EAutoPickupRefusal::DBNO, this, OtherActor, L"the pawn is down (DBNO)");
         return;
     }
 
@@ -190,12 +201,12 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap(UPrimitiveComponent* Overlappe
     AFortPickup* Pickup = Cast<AFortPickup>(OtherActor);
     if (!Pickup)
     {
-        LogRefusalOnce(EAutoPickupRefusal::NotPickup, this, OtherActor, L"not a pickup");
+        LogRefusal(EAutoPickupRefusal::NotPickup, this, OtherActor, L"not a pickup");
         return;
     }
     if (static_cast<AFortPawn*>(Pickup->PawnWhoDroppedPickup) == this)
     {
-        LogRefusalOnce(EAutoPickupRefusal::OwnDrop, this, OtherActor, L"the pawn dropped it");
+        LogRefusal(EAutoPickupRefusal::OwnDrop, this, OtherActor, L"the pawn dropped it");
         return;
     }
 
@@ -204,14 +215,14 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap(UPrimitiveComponent* Overlappe
     UCharacterMovementComponent* Movement = Character ? static_cast<UCharacterMovementComponent*>(Character->CharacterMovement) : nullptr;
     if (!Movement)
     {
-        LogRefusalOnce(EAutoPickupRefusal::NoMovement, this, OtherActor, L"the pawn has no CharacterMovement");
+        LogRefusal(EAutoPickupRefusal::NoMovement, this, OtherActor, L"the pawn has no CharacterMovement");
         return;
     }
     const FVector Velocity = Movement->Velocity;
     constexpr float KindaSmallNumber = 1.e-4f;
     if (std::fabs(Velocity.X) <= KindaSmallNumber && std::fabs(Velocity.Y) <= KindaSmallNumber && std::fabs(Velocity.Z) <= KindaSmallNumber)
     {
-        LogRefusalOnce(EAutoPickupRefusal::Standing, this, OtherActor, L"the pawn isn't moving");
+        LogRefusal(EAutoPickupRefusal::Standing, this, OtherActor, std::format(L"the pawn isn't moving (velocity {:.1f}, {:.1f}, {:.1f})", Velocity.X, Velocity.Y, Velocity.Z));
         return;
     }
 
@@ -223,20 +234,25 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap(UPrimitiveComponent* Overlappe
     const UFortItemDefinition* ItemDefinition = Entry.ItemDefinition;
     if (!ItemDefinition)
     {
-        LogRefusalOnce(EAutoPickupRefusal::NoItem, this, OtherActor, L"the pickup has no item");
+        LogRefusal(EAutoPickupRefusal::NoItem, this, OtherActor, L"the pickup has no item");
         return;
     }
     const EFortItemType ItemType = static_cast<EFortItemType>(ItemDefinition->ItemType);
     if (ItemType != EFortItemType::GetAmmo() && ItemType != EFortItemType::GetTrap() && ItemType != EFortItemType::GetWorldResource())
     {
-        LogRefusalOnce(EAutoPickupRefusal::ItemType, this, OtherActor, L"its item isn't ammo, a trap or a resource");
+        LogRefusal(EAutoPickupRefusal::ItemType, this, OtherActor, std::format(L"its {} (item type {}) isn't ammo, a trap or a resource", ItemDefinition->GetName().ToStdString(), static_cast<int32_t>(static_cast<uint8_t>(ItemType))));
         return;
     }
 
     // As a press of interact would (IT_Simple), and on the pickup's own terms (its class's CanInteract).
     if (!Pickup->CanInteract(this))
     {
-        LogRefusalOnce(EAutoPickupRefusal::CannotInteract, this, OtherActor, L"the pickup's CanInteract refused");
+        // The Athena pickup's CanInteract (1.8.2 0x69DB90) wants IT_Simple, a pickup not picked up and not in its short
+        // interaction lock, and its OptionalOwnerID equal to the requester's WorldPlayerId (-1 for both in Battle Royale).
+        AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(static_cast<APlayerState*>(PlayerState));
+        LogRefusal(EAutoPickupRefusal::CannotInteract, this, OtherActor, std::format(L"the pickup's CanInteract refused ({} {}, picked up {}, OptionalOwnerID {}, the pawn's WorldPlayerId {})",
+            static_cast<int32_t>(Entry.Count), ItemDefinition->GetName().ToStdString(), static_cast<bool>(Pickup->bPickedUp), static_cast<int32_t>(Pickup->OptionalOwnerID),
+            FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -2));
         return;
     }
 

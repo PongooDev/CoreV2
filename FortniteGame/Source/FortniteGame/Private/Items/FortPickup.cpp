@@ -315,9 +315,12 @@ namespace
         return reinterpret_cast<uintptr_t>(Definition) ^ (static_cast<uint64_t>(CellX) * 0x9E3779B97F4A7C15ull) ^ (static_cast<uint64_t>(CellY) * 0xC2B2AE3D27D4EB4Full);
     }
 
-    class ETInteractionType
+    // ETInteractionType, a namespaced enum: its UEnum is /Script/FortniteGame.TInteractionType in every build (1.1 to
+    // 1.8.2). Looked up as ETInteractionType it wasn't found, IT_Simple came out as 0xFF and every pickup's CanInteract,
+    // which refuses anything but IT_Simple (1), said no: on 1.8.2 walking over ammo picked nothing up (#135).
+    class TInteractionType
     {
-        DefineUnrealEnum(ETInteractionType, FortniteGame)
+        DefineUnrealEnum(TInteractionType, FortniteGame)
         DefineUEnumValue(IT_Simple)
     };
 
@@ -467,8 +470,15 @@ bool AFortPickup::CanInteract(AFortPlayerPawn* RequestingPawn)
     }
     void* Interface = Natives::UObject_GetInterfaceAddress(this, InteractInterface);
     UScriptStruct* InteractionStruct = FInteractionType::StaticStruct();
-    if (!Interface || !InteractionStruct)
+    const uint8_t Simple = TInteractionType::GetIT_Simple();
+    if (!Interface || !InteractionStruct || Simple == Reflection::InvalidEnumValue)
     {
+        static bool bReported = false;
+        if (!bReported)
+        {
+            bReported = true;
+            Log::Error(L"Pickup: can't ask {} whether it can be picked up (interface {}, FInteractionType {}, IT_Simple {})", GetName().ToStdString(), Interface != nullptr, InteractionStruct != nullptr, Simple);
+        }
         return false;
     }
 
@@ -478,7 +488,7 @@ bool AFortPickup::CanInteract(AFortPlayerPawn* RequestingPawn)
     std::vector<uint8_t> Storage(InteractionStruct->GetStructureSize(), 0);
     FInteractionType* Interaction = reinterpret_cast<FInteractionType*>(Storage.data());
     InteractionStruct->InitializeStruct(Interaction);
-    Interaction->InteractionType = ETInteractionType::GetIT_Simple();
+    Interaction->InteractionType = Simple;
     Interaction->RequestingPawn = FWeakObjectPtr(RequestingPawn);
     Interaction->InteractComponent = FWeakObjectPtr();
     Interaction->InteractPoint = FVector(0.0f, 0.0f, 0.0f);

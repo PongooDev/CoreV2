@@ -2,6 +2,7 @@
 
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Pawns/FortPlayerPawn.h"
+#include "UObject/Stack.h"
 
 class AActor;
 class UPrimitiveComponent;
@@ -30,5 +31,5 @@ public:
     static void HookNatives();
 
 private:
-    static void OnCapsuleBeginOverlapHK(AFortPlayerPawnAthena* This, UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32_t OtherBodyIndex, bool bFromSweep, const void* SweepResult);
+    DECLARE_FUNCTION(execOnCapsuleBeginOverlap);
 };

@@ -2163,9 +2163,11 @@ namespace
     constexpr FBoostKind WeaponDamageBoost{ L"weapon damage", WeaponDamageStages, std::size(WeaponDamageStages) };
 
     // "cheat speed" in Battle Royale (#155): the game's own move speed alteration multiplies FortMovementSet's RunSpeed
-    // (by GE.Character.Move.Run), for no weapon in particular. Battle Royale's pawn moves at its stats row's speeds, not
-    // its movement set's, so the effect alone moves nothing; it is how the multiplier reaches the owning client, whose
-    // ability system the effect replicates to, and the server and that client both scale the row by it.
+    // (by GE.Character.Move.Run), for no weapon in particular. Battle Royale's pawn moves at its stats row's speeds up to
+    // 1.8.x, not its movement set's, so there the effect alone moves nothing; it is how the multiplier reaches the owning
+    // client, whose ability system the effect replicates to, and the server and that client both scale the row by it.
+    // 1.9's pawn moves at its movement set's speeds, of which the effect scales only the run: the server scales the
+    // others (walk, sprint, crouched) with the pawn's multiplier (AFortPawn::SetCheatSpeedMultiplier, #155).
     constexpr FBoostStage MoveSpeedStages[] = {
         { L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_MoveSpeed.GE_Alteration_Attribute_MoveSpeed_C",
             L"/Script/FortniteGame.FortMovementSet", L"RunSpeed", nullptr, nullptr, L"running speed" },
@@ -2631,7 +2633,9 @@ namespace
 
     // Brings the pawn's MaxHealth to Wanted through its SetMaxHealth, which sets the attribute's base value. Effects on it
     // (Save the World's hero and perks add to it) make its value Scale * base + Add: a second base measures them, and
-    // the base that gives Wanted goes on. The maximum it has afterwards (the health set may clamp it), or nullopt.
+    // the base that gives Wanted goes on. An effect that overrides it (Battle Royale's GE_Map_Athena_Vitality_Health
+    // holds it at 100, #155) leaves no base that gets there: its current value is then set outright, and kept so
+    // (KeepMaxHealth). The maximum it has afterwards, or nullopt.
     std::optional<float> ApplyMaxHealth(AFortPawn* Pawn, float Wanted)
     {
         if (!Pawn->SetMaxHealth(Wanted))
@@ -2647,16 +2651,27 @@ namespace
             Pawn->SetMaxHealth(Scale > 0.01f ? std::max(1.0f, Wanted + (Wanted - Got) / Scale) : Wanted);
             Got = Pawn->GetMaxHealth();
         }
+        if (std::fabs(Got - Wanted) > 0.5f && Pawn->ForceMaxHealth(Wanted))
+        {
+            Got = Pawn->GetMaxHealth();
+        }
         return Got;
     }
 
-    // A respawned (or new) pawn gets the maximum again, and its health with it.
+    // A respawned (or new) pawn gets the maximum again, and its health with it. The pawn that has it keeps it: an effect
+    // on MaxHealth that changes (or an override that held it) works its value out again, which goes back to the one asked.
     void KeepMaxHealth(FMaxHealth& Entry)
     {
         AFortPlayerController* PlayerController = Entry.Player.Get();
         AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
-        if (!Pawn || Pawn == Entry.Pawn.Get() || Pawn->IsDead())
+        // The pawn a possession has them play is another player's: it keeps its own maximum.
+        if (!Pawn || Pawn->IsDead() || UFortCheatManager::IsInPossession(PlayerController))
         {
+            return;
+        }
+        if (Pawn == Entry.Pawn.Get())
+        {
+            Pawn->ForceMaxHealth(Entry.Wanted);
             return;
         }
         Entry.Pawn = Pawn;

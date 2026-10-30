@@ -5,6 +5,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Athena/FortPlayerPawnAthena.h"
 #include "Components/SceneComponent.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
@@ -42,6 +43,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cwctype>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -1704,11 +1706,19 @@ void UFortCheatManager::Undisguise(const FString& Arguments)
 #if WITH_SERVER_CODE
 namespace
 {
+    // The look a player state gives the pawn it plays (SetHeroType's): its character parts and gender.
+    struct FLook
+    {
+        std::vector<UCustomCharacterPart*> Parts;
+        uint8_t Gender = 0;
+    };
+
     // One player (the possessor) playing another's (the owner's) pawn. The possessor's own pawn is parked the way a
     // player pawn disguise parks it (hidden, without collision or movement, invulnerable, simulated on its client), but
-    // where it stood: "unpossess" puts them back there. The owner's controller lets go of its pawn and views it (its
-    // camera's view target), so they watch what the possessor does with it. The possessed pawn can't be damaged
-    // meanwhile: its death would be the possessor's (the game ends whoever controls a dying pawn), not its owner's.
+    // where it stood: "unpossess" puts them back there. The owner's controller lets go of its pawn and spectates it the
+    // way the game spectates a teammate, so they watch what the possessor does with it. The possessed pawn can't be
+    // damaged meanwhile: its death would be the possessor's (the game ends whoever controls a dying pawn), not its
+    // owner's.
     struct FPossession
     {
         TWeakObjectPtr<AFortPlayerController> Possessor;
@@ -1722,10 +1732,77 @@ namespace
         FString OwnerName;
         FString PossessorName;
         ULONGLONG NextViewCheck = 0;
+        // The possessor's own look, given back when the possession ends: meanwhile their player state (which the pawn
+        // takes) wears the owner's.
+        std::optional<FLook> PossessorLook;
+        bool bOwnerSpectating = false;
     };
     std::vector<FPossession> Possessions;
     bool bWatchingPossessions = false;
     constexpr ULONGLONG PossessionViewCheckMs = 1000;
+
+    FLook LookOf(AFortPlayerState* PlayerState)
+    {
+        FLook Look;
+        const EFortCustomPartType NumTypes = EFortCustomPartType::GetNumTypes();
+        for (uint8_t PartType = 0; NumTypes != Reflection::InvalidEnumValue && PartType < NumTypes; ++PartType)
+        {
+            Look.Parts.push_back(PlayerState->GetCharacterPart(EFortCustomPartType{ PartType }));
+        }
+        Look.Gender = PlayerState->CharacterGender;
+        return Look;
+    }
+
+    // The player state's parts replicate to every client, whose OnRep_CharacterParts dresses the pawn it plays; the
+    // server dresses its own copy of the pawn the same way (its mesh and anim class).
+    void Wear(AFortPlayerState* PlayerState, const FLook& Look)
+    {
+        for (size_t PartType = 0; PartType < Look.Parts.size(); ++PartType)
+        {
+            PlayerState->GetCharacterPart(EFortCustomPartType{ static_cast<uint8_t>(PartType) }) = Look.Parts[PartType];
+        }
+        PlayerState->CharacterGender = Look.Gender;
+        PlayerState->OnRep_CharacterParts();
+        PlayerState->ForceNetUpdate();
+    }
+
+    // A copy of a UStruct value (its own copy and destruction, so FStrings and arrays in it are kept right).
+    std::shared_ptr<uint8_t> CopyStructValue(UScriptStruct* Struct, const void* Source)
+    {
+        if (!Struct || !Source)
+        {
+            return nullptr;
+        }
+        uint8_t* Data = new uint8_t[static_cast<size_t>(Struct->GetStructureSize())];
+        Struct->InitializeStruct(Data);
+        Struct->CopyScriptStruct(Data, Source);
+        return std::shared_ptr<uint8_t>(Data, [Struct](uint8_t* Value)
+        {
+            Struct->DestroyStruct(Value);
+            delete[] Value;
+        });
+    }
+
+    // AController::StateName (NAME_Playing, NAME_Spectating, ...), which APlayerController's ChangeState sets.
+    FName* StateNameOf(AController* Controller)
+    {
+        static const int32_t Offset = []
+        {
+            const UProperty* Property = AController::StaticClass() ? AController::StaticClass()->FindPropertyByName(FName(L"StateName", FNAME_Find)) : nullptr;
+            return Property ? Property->GetOffset_ForInternal() : -1;
+        }();
+        return Controller && Offset >= 0 ? reinterpret_cast<FName*>(reinterpret_cast<uint8_t*>(Controller) + Offset) : nullptr;
+    }
+
+    // The client's controller goes to that state (APlayerController::ClientGotoState).
+    void ClientGotoState(AFortPlayerController* PlayerController, const wchar_t* State)
+    {
+        Reflection::FParams Params(FindObject<UFunction>(nullptr, L"/Script/Engine.PlayerController:ClientGotoState"), true);
+        if (Params.Set(L"NewState", FName(State)))
+        {
+            Params.Call(PlayerController);
+        }
+    }
 
     FString PlayerNameOf(AController* Controller)
     {
@@ -1757,6 +1834,47 @@ namespace
     {
         Reflection::FParams Params(FindObject<UFunction>(nullptr, L"/Script/Engine.Controller:GetViewTarget"), true);
         return Params.Call(PlayerController) ? Params.Take<AActor*>(L"ReturnValue") : nullptr;
+    }
+
+    // The client's camera views the actor (APlayerController::ClientSetViewTarget). The server's camera manager sends it
+    // only when its own view target changes; the same target again changes nothing on the client.
+    void ClientSetViewTarget(AFortPlayerController* PlayerController, AActor* Target)
+    {
+        Reflection::FParams Params(FindObject<UFunction>(nullptr, L"/Script/Engine.PlayerController:ClientSetViewTarget"), true);
+        if (Params.Set(L"A", Target))
+        {
+            Params.Call(PlayerController);
+        }
+    }
+
+    // #155: the owner watched their pawn from where they stood. They spectate it now the way Battle Royale spectates a
+    // teammate (AFortPlayerControllerAthena::SpectateOnDeath, 1.9 0x438550): the controller goes to the Spectating
+    // state on the server and its client, then views the pawn (SetViewTarget and ClientSetViewTarget). A client still
+    // "Playing" without a pawn kept its camera where it was. The server's state is the controller's StateName (what
+    // ChangeState sets; a remote controller's BeginSpectatingState spawns nothing on the server), so the spectator
+    // location its client sends is taken and the client isn't sent back to Playing; Possess puts both back to Playing.
+    void SpectatePawn(AFortPlayerController* PlayerController, APawn* Pawn)
+    {
+        if (FName* StateName = StateNameOf(PlayerController))
+        {
+            *StateName = FName(L"Spectating");
+        }
+        ClientGotoState(PlayerController, L"Spectating");
+        SetViewTarget(PlayerController, Pawn);
+        ClientSetViewTarget(PlayerController, Pawn);
+    }
+
+    // A spectating owner left without a pawn (none to give back, none restarted) plays again.
+    void StopSpectating(AFortPlayerController* PlayerController)
+    {
+        FName* StateName = StateNameOf(PlayerController);
+        if (!PlayerController || PlayerController->GetPawn() || !StateName || *StateName != FName(L"Spectating"))
+        {
+            return;
+        }
+        *StateName = FName(L"Playing");
+        ClientGotoState(PlayerController, L"Playing");
+        SetViewTarget(PlayerController, PlayerController);
     }
 
     // A player left without a pawn by a possession that couldn't give theirs back gets a new one, the way the game mode
@@ -1827,6 +1945,18 @@ namespace
             }
             RestartWithoutPawn(Owner);
         }
+        // Possess put the owner back to Playing; one left without a pawn stops spectating here.
+        if (Possession.bOwnerSpectating)
+        {
+            StopSpectating(Owner);
+        }
+
+        // The possessor's player state wears their own look again (their pawn, and any they get later, takes it).
+        AFortPlayerState* PossessorState = Possession.PossessorLook ? FortPlayerStateOf(Possessor) : nullptr;
+        if (PossessorState)
+        {
+            Wear(PossessorState, *Possession.PossessorLook);
+        }
         UE_LOG(LogFortDisguise, Log, TEXT("PossessPlayer: %s gave %s's pawn %s back (own pawn %s)"), *Possession.PossessorName, *Possession.OwnerName,
             *GetNameSafe(Possessed), *GetNameSafe(OwnPawn));
     }
@@ -1843,6 +1973,9 @@ namespace
         {
             Possession.Parking.LastLocation = ActorLocation(Possessed);
             const ULONGLONG Now = GetTickCount64();
+            // The server's view target back on the pawn if anything moved it, and the client's told again: a client that
+            // already views the pawn ignores it, one that lost it (it took the pawn before the pawn's new state reached
+            // it, or a spectator input moved it) views it again.
             if (Now >= Possession.NextViewCheck)
             {
                 Possession.NextViewCheck = Now + PossessionViewCheckMs;
@@ -1850,6 +1983,7 @@ namespace
                 {
                     SetViewTarget(Owner, Possessed);
                 }
+                ClientSetViewTarget(Owner, Possessed);
             }
             return true;
         }
@@ -1998,6 +2132,17 @@ void UFortCheatManager::PossessPlayer(const FString& Arguments)
     Possession.Parking.LastLocation = ActorLocation(Target);
     Possession.bPossessedCanBeDamaged = Target->bCanBeDamaged;
 
+    // #155: the pawn keeps its owner's look. It takes the possessor's player state, whose character parts dress it
+    // (Save the World's hero and Battle Royale's outfit alike), so that player state wears the owner's parts meanwhile;
+    // Battle Royale's Possess also copies the possessor's cosmetic loadout (glider, pickaxe, contrail...) onto the pawn,
+    // which gets the owner's back. The items and quickbars stay the possessor's: they belong to their controller.
+    AFortPlayerState* const OwnerState = FortPlayerStateOf(Owner);
+    AFortPlayerState* const PossessorState = FortPlayerStateOf(PlayerController);
+    const std::optional<FLook> OwnerLook = OwnerState && PossessorState ? std::optional<FLook>(LookOf(OwnerState)) : std::nullopt;
+    AFortPlayerPawnAthena* const AthenaTarget = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Target));
+    const std::shared_ptr<uint8_t> OwnerLoadout = AthenaTarget && AthenaTarget->HasCustomizationLoadout()
+        ? CopyStructValue(FFortAthenaLoadout::StaticStruct(), &static_cast<FFortAthenaLoadout&>(AthenaTarget->CustomizationLoadout)) : nullptr;
+
     ParkOriginal(Possession.Parking, OwnPawn);
     Owner->UnPossess();
     PossessForDisguise(PlayerController, Target);
@@ -2023,7 +2168,25 @@ void UFortCheatManager::PossessPlayer(const FString& Arguments)
     Possession.OwnRemoteRole = OwnPawn->RemoteRole;
     OwnPawn->RemoteRole = TEnumAsByte<ENetRole>(ROLE_SimulatedProxy);
     OwnPawn->ForceNetUpdate();
-    SetViewTarget(Owner, Target);
+
+    if (OwnerLook)
+    {
+        Possession.PossessorLook = LookOf(PossessorState);
+        Wear(PossessorState, *OwnerLook);
+    }
+    if (OwnerLoadout)
+    {
+        FFortAthenaLoadout::StaticStruct()->CopyScriptStruct(&static_cast<FFortAthenaLoadout&>(AthenaTarget->CustomizationLoadout), OwnerLoadout.get());
+        if (UFunction* OnRepLoadout = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:OnRep_CustomizationLoadout"))
+        {
+            Reflection::FParams Params(OnRepLoadout);
+            Params.Call(AthenaTarget);
+        }
+    }
+    Target->ForceNetUpdate();
+
+    SpectatePawn(Owner, Target);
+    Possession.bOwnerSpectating = true;
     Possessions.push_back(std::move(Possession));
     if (!bWatchingPossessions)
     {

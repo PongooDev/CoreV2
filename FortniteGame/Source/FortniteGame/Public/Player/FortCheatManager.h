@@ -163,7 +163,8 @@ public:
     void TeleportTo(const FString& Arguments);
     void Bring(const FString& Arguments);
     // Core's own commands, "cheat possessplayer <player>" and "cheat unpossess" (#155): the player takes control of the
-    // named player's pawn while that player watches it, and gives it back. FortCheatManagerDisguise.cpp.
+    // named player's pawn while that player spectates it, and gives it back. The pawn keeps its owner's look (character
+    // parts and Battle Royale cosmetics); its items are the possessor's. FortCheatManagerDisguise.cpp.
     void PossessPlayer(const FString& Arguments);
     void Unpossess(const FString& Arguments);
     // A player another player's possessplayer controls, or who controls another's: their own pawn isn't theirs to play.

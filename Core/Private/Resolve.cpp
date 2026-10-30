@@ -1348,7 +1348,44 @@ namespace
             }
             UserName = Caller;
         }
-        Require(L"FPlatformProcess::UserName", Natives::FPlatformProcess_UserName, UserName);
+        if (UserName)
+        {
+            Require(L"FPlatformProcess::UserName", Natives::FPlatformProcess_UserName, UserName);
+        }
+        else
+        {
+            // The engine function could not be located (its calls to GetUserNameW may be
+            // inlined or routed differently in this build).  Fall back to a local
+            // implementation that calls GetUserNameW directly through its import slot.
+            Natives::FPlatformProcess_UserName = [](bool bOnlyAlphaNumeric) -> const wchar_t*
+            {
+                static wchar_t Full[256];
+                static wchar_t AlphaNumeric[256];
+                static bool Ready = false;
+                if (!Ready)
+                {
+                    DWORD Length = static_cast<DWORD>(std::size(Full));
+                    if (!::GetUserNameW(Full, &Length))
+                    {
+                        Full[0] = L'\0';
+                    }
+                    wchar_t* Write = AlphaNumeric;
+                    for (const wchar_t* Read = Full; *Read; ++Read)
+                    {
+                        if ((*Read >= L'0' && *Read <= L'9') ||
+                            (*Read >= L'A' && *Read <= L'Z') ||
+                            (*Read >= L'a' && *Read <= L'z'))
+                        {
+                            *Write++ = *Read;
+                        }
+                    }
+                    *Write = L'\0';
+                    Ready = true;
+                }
+                return bOnlyAlphaNumeric ? AlphaNumeric : Full;
+            };
+            Log::Info(L"Finder: FPlatformProcess::UserName fell back to GetUserNameW");
+        }
 
         uintptr_t MapExtension = 0;
         for (const uintptr_t Ref : Finder::StringRefs(L".umap"))

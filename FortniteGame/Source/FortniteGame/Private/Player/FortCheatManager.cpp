@@ -52,10 +52,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <cwchar>
 #include <cwctype>
 #include <map>
 #include <optional>
+#include <random>
+#include <span>
 #include <string>
 #include <tuple>
 #include <variant>
@@ -494,6 +497,10 @@ namespace
         { L"Player", L"ToggleInfiniteDurability", L"ToggleInfiniteDurability", L"your items don't wear out (ToggleInfiniteStamina)", ECheatMode::Both },
         { L"Player", nullptr, L"Repair [all]", L"your weapon back to full durability (all: everything you carry that wears out)", ECheatMode::Both },
         { L"Player", nullptr, L"FireRate <multiplier | reset>", L"your guns fire that many times as fast (\"firerate 2\", \"firerate 0.5\"); reset: their own rate again", ECheatMode::Both },
+        { L"Player", nullptr, L"WeaponDamage <multiplier | reset>", L"your guns and melee weapons do that many times the damage (\"weapondamage 3\"); reset: their own damage again", ECheatMode::Both },
+        { L"Player", nullptr, L"ToggleBloom [on | off]", L"your guns don't spread: every shot goes where you aim (only your game: no /Name/)", ECheatMode::Both },
+        { L"Player", nullptr, L"ToggleRecoil [on | off]", L"your guns don't kick your aim when you fire (only your game: no /Name/)", ECheatMode::Both },
+        { L"Player", nullptr, L"Dance [EID or path]", L"play an emote (\"dance EID_DanceMoves\"); a random one without a name (\"dance /Name/\" makes them dance)", ECheatMode::Both },
         { L"Player", nullptr, L"NoCooldown [on | off]", L"no cooldown on your hero abilities and gadgets, and used gadgets recharge at once, until you turn it off (toggles without on or off; ToggleNoCoolDown: the same)", ECheatMode::Both },
         { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },
         { L"Player", L"DBNO", L"DBNO", L"knock yourself down (ReviveFromDBNO: get up)", ECheatMode::Both },
@@ -502,6 +509,7 @@ namespace
         { L"Player", L"BuildWith", L"BuildWith <Wood|Stone|Metal>", L"the building material", ECheatMode::Both },
         { L"World", L"Summon", L"Summon <class or /Game/.../X.X_C>", L"spawns an actor in front of you", ECheatMode::Both },
         { L"World", nullptr, L"SpawnActor <class or path> [scale | x y z]", L"spawns an actor in front of you at a scale (\"spawnactor Tiered_Chest_6_Parent 3\"), loading its class if it must", ECheatMode::Both },
+        { L"World", nullptr, L"CopyTargetPath [class | mesh | name]", L"copies the class path (or mesh) of what you look at to your clipboard and says its name, class and mesh", ECheatMode::Both },
         { L"World", L"Slomo", L"Slomo <speed>", L"the game's speed, for everyone", ECheatMode::Both },
         { L"World", L"PlayersOnly", L"PlayersOnly", L"freezes everything but the players (toggles)", ECheatMode::Both },
         { L"World", L"DestroyTarget", L"DestroyTarget", L"destroys what you look at (DamageTarget <damage>, DestroyAll <class>)", ECheatMode::Both },
@@ -1861,17 +1869,6 @@ namespace
     // "cheat infinitemag" (#149): the players whose magazine never empties.
     std::vector<TWeakObjectPtr<AFortPlayerController>> InfiniteMagPlayers;
 
-    // "cheat firerate" (#150): the fire rate effects Core put on a player's ability system, kept through respawns.
-    struct FFireRateBoost
-    {
-        TWeakObjectPtr<AFortPlayerController> Player;
-        TWeakObjectPtr<UAbilitySystemComponent> AbilitySystem;
-        TWeakObjectPtr<AFortPawn> Pawn;
-        float Multiplier = 1.0f;
-        // FActiveGameplayEffectHandle (an int32 handle and a bool, 8 bytes) of each effect Core applied.
-        std::vector<uint64_t> Handles;
-    };
-    std::vector<FFireRateBoost> FireRateBoosts;
     bool bTickingWeaponCheats = false;
 
     bool HasInfiniteMag(const AFortPlayerController* PlayerController)
@@ -1894,39 +1891,110 @@ namespace
         }
     }
 
-    // ---- Fire rate ----------------------------------------------------------------------------------------------------
+    // ---- Weapon attribute boosts: fire rate and damage -------------------------------------------------------------
 
-    // The game's fire rate alteration (a weapon perk's): an infinite effect multiplying UFortWeaponAttrSet's
-    // WeaponRateOfFire for ranged weapons ("weapon.ranged" source tag), by its CombatEffects row at the effect's level.
-    // AFortWeaponRanged's fire rate is its stats' FiringRate run through that attribute's aggregator on the pawn's ability
-    // system, on the server and on the owning client alike, and multiplicative modifiers add up: 1 + sum(magnitude - 1).
-    constexpr const wchar_t* FireRateEffectPath = L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_FireRate.GE_Alteration_Attribute_FireRate_C";
-    constexpr int32_t FireRateCurveLevels = 100;
-    constexpr int32_t MaxFireRateEffects = 100;
+    // "cheat firerate" (#150) and "cheat weapondamage" (#152) apply the game's own weapon perk effects (infinite
+    // GE_Alteration_Attribute_* effects whose multiplicative modifier scales an attribute by a CombatEffects row at the
+    // effect's level) at the level that gives the magnitude wanted. A stage is one attribute for one kind of weapon (the
+    // modifier's required source tag) and the effect Core uses for it.
+    struct FBoostStage
+    {
+        const wchar_t* EffectPath;
+        const wchar_t* AttributeSetPath;
+        const wchar_t* Attribute;
+        // The tag the modifier requires on the source (the weapon's), and its parent, both passed to the evaluation.
+        const wchar_t* SourceTag;
+        const wchar_t* SourceParentTag;
+        // "guns", "melee weapons".
+        const wchar_t* What;
+    };
+
+    struct FBoostKind
+    {
+        // "fire rate", "weapon damage": for replies and logs.
+        const wchar_t* Name;
+        const FBoostStage* Stages;
+        size_t NumStages;
+    };
+
+    // AFortWeaponRanged's fire rate is its stats' FiringRate run through UFortWeaponAttrSet's WeaponRateOfFire aggregator
+    // on the pawn's ability system (1.9 0x9412D0), on the server and the owning client alike.
+    constexpr FBoostStage FireRateStages[] = {
+        { L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_FireRate.GE_Alteration_Attribute_FireRate_C",
+            L"/Script/FortniteGame.FortWeaponAttrSet", L"WeaponRateOfFire", L"weapon.ranged", L"weapon", L"guns" },
+    };
+    constexpr FBoostKind FireRateBoost{ L"fire rate", FireRateStages, std::size(FireRateStages) };
+
+    // Weapon damage goes through UFortDamageSet's OutgoingAbilityDamage, captured from the shooter by the damage
+    // execution on the server (1.9 0x686AB0). GE_Alteration_Attribute_WeaponDamage multiplies it for "weapon.ranged" by
+    // GE.Guns.All.Damage and for "weapon.melee" by GE.Melee.All.Damage, so its level is chosen for the guns, and
+    // GE_Alteration_Attribute_WeaponDamage_Melee (melee only) then brings the melee weapons to the same multiplier when
+    // the two rows differ.
+    constexpr FBoostStage WeaponDamageStages[] = {
+        { L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_WeaponDamage.GE_Alteration_Attribute_WeaponDamage_C",
+            L"/Script/FortniteGame.FortDamageSet", L"OutgoingAbilityDamage", L"weapon.ranged", L"weapon", L"guns" },
+        { L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_WeaponDamage_Melee.GE_Alteration_Attribute_WeaponDamage_Melee_C",
+            L"/Script/FortniteGame.FortDamageSet", L"OutgoingAbilityDamage", L"weapon.melee", L"weapon", L"melee weapons" },
+    };
+    constexpr FBoostKind WeaponDamageBoost{ L"weapon damage", WeaponDamageStages, std::size(WeaponDamageStages) };
+
+    // The effects Core put on a player's ability system for one kind, kept through respawns.
+    struct FAttributeBoost
+    {
+        const FBoostKind* Kind = nullptr;
+        TWeakObjectPtr<AFortPlayerController> Player;
+        TWeakObjectPtr<UAbilitySystemComponent> AbilitySystem;
+        TWeakObjectPtr<AFortPawn> Pawn;
+        float Multiplier = 1.0f;
+        // FActiveGameplayEffectHandle (an int32 handle and a bool, 8 bytes) of each effect Core applied.
+        std::vector<uint64_t> Handles;
+    };
+    std::vector<FAttributeBoost> AttributeBoosts;
+
+    constexpr int32_t BoostCurveLevels = 100;
+    constexpr int32_t MaxBoostEffects = 100;
 
     // Not kept: nothing roots the class once no effect of it is applied, so it may be collected and loaded again.
-    UClass* FireRateEffectClass()
+    UClass* BoostEffectClass(const FBoostStage& Stage)
     {
-        UClass* Class = FindObject<UClass>(nullptr, FireRateEffectPath);
-        return Class ? Class : LoadObject<UClass>(nullptr, FireRateEffectPath);
+        UClass* Class = FindObject<UClass>(nullptr, Stage.EffectPath);
+        return Class ? Class : LoadObject<UClass>(nullptr, Stage.EffectPath, nullptr, static_cast<uint32_t>(LOAD_NoWarn | LOAD_Quiet));
     }
 
-    UProperty* WeaponRateOfFireProperty()
+    UClass* BoostAttributeSet(const FBoostStage& Stage)
     {
-        static UProperty* Property = nullptr;
-        if (!Property)
+        return FindObject<UClass>(nullptr, Stage.AttributeSetPath);
+    }
+
+    UProperty* BoostAttribute(const FBoostStage& Stage)
+    {
+        UClass* AttributeSet = BoostAttributeSet(Stage);
+        return AttributeSet ? AttributeSet->FindPropertyByName(FName(Stage.Attribute, FNAME_Find)) : nullptr;
+    }
+
+    // The modifier's source tag requirements let the stage's weapons through: none, or the stage's tag among them.
+    bool ModifierAppliesTo(FGameplayModifierInfo& Modifier, const FBoostStage& Stage)
+    {
+        const FGameplayTagContainer& Required = static_cast<FGameplayTagRequirements&>(Modifier.SourceTags).RequireTags;
+        if (Required.GameplayTags.Num() == 0)
         {
-            UClass* WeaponAttrSet = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortWeaponAttrSet");
-            Property = WeaponAttrSet ? WeaponAttrSet->FindPropertyByName(FName(L"WeaponRateOfFire", FNAME_Find)) : nullptr;
+            return true;
         }
-        return Property;
+        for (const FGameplayTag& Tag : Required.GameplayTags)
+        {
+            if (_wcsicmp(Tag.TagName.ToString().ToStdString().c_str(), Stage.SourceTag) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
-    // The effect's multiplicative WeaponRateOfFire modifier magnitude (a scalable float), or null.
-    const FScalableFloat* FireRateMagnitude(UClass* EffectClass)
+    // The effect's multiplicative modifier on the stage's attribute for the stage's weapons (a scalable float), or null.
+    const FScalableFloat* BoostMagnitude(UClass* EffectClass, const FBoostStage& Stage)
     {
         UGameplayEffect* Effect = EffectClass ? Cast<UGameplayEffect>(EffectClass->GetDefaultObject()) : nullptr;
-        UProperty* Attribute = WeaponRateOfFireProperty();
+        UProperty* Attribute = BoostAttribute(Stage);
         if (!Effect || !Attribute)
         {
             return nullptr;
@@ -1938,7 +2006,7 @@ namespace
             const FGameplayAttribute& ModifiedAttribute = Modifier.Attribute;
             const FGameplayEffectModifierMagnitude& Magnitude = Modifier.ModifierMagnitude;
             if (ModifiedAttribute.Attribute == Attribute && Modifier.ModifierOp == EGameplayModOp::GetMultiplicitive()
-                && Magnitude.MagnitudeCalculationType == EGameplayEffectMagnitudeCalculation::GetScalableFloat())
+                && Magnitude.MagnitudeCalculationType == EGameplayEffectMagnitudeCalculation::GetScalableFloat() && ModifierAppliesTo(Modifier, Stage))
             {
                 return &static_cast<const FScalableFloat&>(Magnitude.ScalableFloatMagnitude);
             }
@@ -1976,9 +2044,9 @@ namespace
         return ScalableFloat.Value * Params.Take<float>(L"OutXY");
     }
 
-    // The magnitudes one effect can have: its curve at levels 0 to FireRateCurveLevels, and the level that gives a
+    // The magnitudes one effect can have: its curve at levels 0 to BoostCurveLevels, and the level that gives a
     // magnitude (the curve is piecewise linear, so a bisection inside the step that spans it finds it).
-    struct FFireRateCurve
+    struct FBoostCurve
     {
         const FScalableFloat* Magnitude = nullptr;
         std::vector<float> Values;
@@ -1989,7 +2057,7 @@ namespace
         {
             Magnitude = InMagnitude;
             Values.clear();
-            for (int32_t Level = 0; Level <= FireRateCurveLevels; ++Level)
+            for (int32_t Level = 0; Level <= BoostCurveLevels; ++Level)
             {
                 const std::optional<float> Value = ValueAtLevel(*Magnitude, static_cast<float>(Level));
                 if (!Value)
@@ -2040,9 +2108,9 @@ namespace
         }
     };
 
-    // The ability system AFortWeaponRanged takes its fire rate from: the pawn's (its IAbilitySystemInterface), when it has
-    // the weapon attribute set.
-    UAbilitySystemComponent* WeaponAbilitySystem(AFortPlayerController* PlayerController)
+    // The ability system the stage's attribute is evaluated on: the pawn's (its IAbilitySystemInterface), when it has the
+    // stage's attribute set.
+    UAbilitySystemComponent* BoostAbilitySystem(AFortPlayerController* PlayerController, const FBoostStage& Stage)
     {
         AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
         UAbilitySystemComponent* AbilitySystem = Pawn ? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Pawn) : nullptr;
@@ -2050,29 +2118,29 @@ namespace
         {
             return nullptr;
         }
-        UClass* WeaponAttrSet = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortWeaponAttrSet");
+        UClass* AttributeSet = BoostAttributeSet(Stage);
         const TArray<UAttributeSet*>& Sets = AbilitySystem->SpawnedAttributes;
-        const bool bHasSet = WeaponAttrSet && std::any_of(Sets.begin(), Sets.end(), [WeaponAttrSet](UAttributeSet* Set) { return Set && Set->IsA(WeaponAttrSet); });
+        const bool bHasSet = AttributeSet && std::any_of(Sets.begin(), Sets.end(), [AttributeSet](UAttributeSet* Set) { return Set && Set->IsA(AttributeSet); });
         return bHasSet ? AbilitySystem : nullptr;
     }
 
-    // How many times its stats' rate the player's guns fire at, from every effect on WeaponRateOfFire (perks included).
-    std::optional<float> CurrentFireRateMultiplier(UAbilitySystemComponent* AbilitySystem)
+    // The multiplier the stage's attribute has for its weapons, from every effect on it (perks included).
+    std::optional<float> CurrentBoostMultiplier(UAbilitySystemComponent* AbilitySystem, const FBoostStage& Stage)
     {
-        UProperty* Property = WeaponRateOfFireProperty();
-        if (!Property || !UAbilitySystemBlueprintLibrary::FindStaticFunction_EvaluateAttributeValueWithTagsAndBase())
+        UProperty* Property = BoostAttribute(Stage);
+        if (!AbilitySystem || !Property || !UAbilitySystemBlueprintLibrary::FindStaticFunction_EvaluateAttributeValueWithTagsAndBase())
         {
             return std::nullopt;
         }
         FGameplayTagContainer SourceTags;
-        SourceTags.GameplayTags.Add(FGameplayTag{ FName(L"weapon.ranged", FNAME_Find) });
-        SourceTags.ParentTags.Add(FGameplayTag{ FName(L"weapon", FNAME_Find) });
+        SourceTags.GameplayTags.Add(FGameplayTag{ FName(Stage.SourceTag, FNAME_Find) });
+        SourceTags.ParentTags.Add(FGameplayTag{ FName(Stage.SourceParentTag, FNAME_Find) });
         bool bSuccess = false;
         const float Multiplier = UAbilitySystemBlueprintLibrary::EvaluateAttributeValueWithTagsAndBase(AbilitySystem, FGameplayAttribute(Property), SourceTags, FGameplayTagContainer(), 1.0f, bSuccess);
         return bSuccess ? std::optional<float>(Multiplier) : std::nullopt;
     }
 
-    void RemoveFireRateEffects(FFireRateBoost& Boost)
+    void RemoveBoostEffects(FAttributeBoost& Boost)
     {
         UAbilitySystemComponent* AbilitySystem = Boost.AbilitySystem.Get();
         UFunction* Remove = FunctionAt(L"/Script/GameplayAbilities.AbilitySystemComponent:RemoveActiveGameplayEffect");
@@ -2087,8 +2155,8 @@ namespace
         Boost.Handles.clear();
     }
 
-    // Applies one fire rate effect at the level to the ability system; the handle of the active effect, or nullopt.
-    std::optional<uint64_t> ApplyFireRateEffect(UAbilitySystemComponent* AbilitySystem, UClass* EffectClass, float Level)
+    // Applies one effect at the level to the ability system; the handle of the active effect, or nullopt.
+    std::optional<uint64_t> ApplyBoostEffect(UAbilitySystemComponent* AbilitySystem, UClass* EffectClass, float Level)
     {
         Reflection::FParams Context(FunctionAt(L"/Script/GameplayAbilities.AbilitySystemComponent:MakeEffectContext"), true);
         if (!Context.Call(AbilitySystem))
@@ -2116,69 +2184,115 @@ namespace
         return Handle ? std::optional<uint64_t>(*Handle) : std::nullopt;
     }
 
-    // Puts the boost's effects on the player's ability system so their guns fire Multiplier times as fast as they would
-    // without Core's effects: the effects' magnitudes have to add up to Before * (Multiplier - 1), as a few effects of the
-    // same magnitude when one alone can't reach it. The multiplier the guns have afterwards, or an error.
-    std::variant<float, FString> ApplyFireRate(FFireRateBoost& Boost)
+    // Brings one stage's attribute from Current to Target (multipliers, 1 + the sum of every modifier's magnitude - 1)
+    // with effects of the stage's: the effects' magnitudes have to add up to Target - Current, as a few effects of the
+    // same magnitude when one alone can't reach it. Nothing, or why it couldn't.
+    std::optional<FString> ApplyBoostStage(FAttributeBoost& Boost, UAbilitySystemComponent* AbilitySystem, const FBoostStage& Stage, float Current, float Target)
     {
-        RemoveFireRateEffects(Boost);
-        AFortPlayerController* PlayerController = Boost.Player.Get();
-        UAbilitySystemComponent* AbilitySystem = WeaponAbilitySystem(PlayerController);
-        Boost.AbilitySystem = AbilitySystem;
-        Boost.Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
-        if (!AbilitySystem)
-        {
-            return FString(TEXT("you have no pawn with the weapon attributes (UFortWeaponAttrSet) yet"));
-        }
-        UClass* EffectClass = FireRateEffectClass();
-        const FScalableFloat* Magnitude = FireRateMagnitude(EffectClass);
-        FFireRateCurve Curve;
+        const wchar_t* const Name = Boost.Kind->Name;
+        UClass* EffectClass = BoostEffectClass(Stage);
+        const FScalableFloat* Magnitude = BoostMagnitude(EffectClass, Stage);
+        FBoostCurve Curve;
         if (!Magnitude || !Curve.Load(Magnitude))
         {
-            return FString(TEXT("this build has no fire rate alteration effect (GE_Alteration_Attribute_FireRate on WeaponRateOfFire) to use"));
+            return FString::Printf(TEXT("this build has no %s effect for %s (%s on %s)"), Name, Stage.What, Stage.EffectPath, Stage.Attribute);
         }
-        const float Before = CurrentFireRateMultiplier(AbilitySystem).value_or(1.0f);
-        const float Wanted = Before * (Boost.Multiplier - 1.0f);
+        const float Wanted = Target - Current;
         if (std::fabs(Wanted) < 0.0001f)
         {
-            return Before;
+            return std::nullopt;
         }
         // The furthest one effect goes the way it has to.
         const float Reach = Wanted > 0.0f ? Curve.Max - 1.0f : Curve.Min - 1.0f;
         if (Wanted * Reach <= 0.0f)
         {
-            return FString::Printf(TEXT("the fire rate effect only goes from %.2fx to %.2fx a stack, so it can't make your guns %s"), Curve.Min, Curve.Max,
-                Wanted > 0.0f ? TEXT("faster") : TEXT("slower"));
+            return FString::Printf(TEXT("the %s effect for %s only goes from %.2fx to %.2fx a stack, so it can't make them %s"), Name, Stage.What, Curve.Min, Curve.Max,
+                Wanted > 0.0f ? TEXT("higher") : TEXT("lower"));
         }
         const int32_t Count = static_cast<int32_t>(std::ceil(Wanted / Reach - 0.0001f));
-        if (Count > MaxFireRateEffects)
+        if (Count > MaxBoostEffects)
         {
-            return FString::Printf(TEXT("that needs %d stacks of the fire rate effect (at most %.2fx each); up to %.1fx works"), Count, Curve.Max,
-                1.0f + MaxFireRateEffects * Reach / std::max(Before, 0.0001f));
+            return FString::Printf(TEXT("that needs %d stacks of the %s effect for %s (at most %.2fx each); up to %.1fx works"), Count, Name, Stage.What, Curve.Max,
+                1.0f + MaxBoostEffects * Reach / std::max(Current, 0.0001f));
         }
         // Each one's magnitude, kept inside what the curve has.
         const float Each = std::clamp(1.0f + Wanted / static_cast<float>(Count), Curve.Min, Curve.Max);
         const std::optional<float> Level = Curve.LevelFor(Each);
         if (!Level)
         {
-            return FString::Printf(TEXT("no level of the fire rate effect gives %.3f"), Each);
+            return FString::Printf(TEXT("no level of the %s effect gives %.3f"), Name, Each);
         }
         for (int32_t Index = 0; Index < Count; ++Index)
         {
-            const std::optional<uint64_t> Handle = ApplyFireRateEffect(AbilitySystem, EffectClass, *Level);
+            const std::optional<uint64_t> Handle = ApplyBoostEffect(AbilitySystem, EffectClass, *Level);
             if (!Handle)
             {
-                RemoveFireRateEffects(Boost);
-                return FString(TEXT("the ability system wouldn't apply the fire rate effect"));
+                return FString::Printf(TEXT("the ability system wouldn't apply the %s effect"), Name);
             }
             Boost.Handles.push_back(*Handle);
         }
-        UE_LOG(LogFortCheats, Log, TEXT("FireRate: %s, %d effects at level %.3f (%.3f each), %.3fx before"), *GetNameSafe(PlayerController), Count, *Level, Each, Before);
-        return CurrentFireRateMultiplier(AbilitySystem).value_or(Before * Boost.Multiplier);
+        UE_LOG(LogFortCheats, Log, TEXT("%s: %s, %s: %d effects at level %.3f (%.3f each), %.3fx before"), Name, *GetNameSafe(Boost.Player.Get()), Stage.What, Count, *Level, Each, Current);
+        return std::nullopt;
+    }
+
+    // Puts the boost's effects on the player's ability system so the attribute is Multiplier times what it is without
+    // Core's effects, stage by stage. The first stage has to work; a later one that can't is left out and said so. The
+    // multiplier each stage's weapons have afterwards (to what they had without Core's effects), or an error.
+    struct FBoostResult
+    {
+        std::vector<float> Multipliers;
+        std::vector<FString> Notes;
+    };
+
+    std::variant<FBoostResult, FString> ApplyBoost(FAttributeBoost& Boost)
+    {
+        RemoveBoostEffects(Boost);
+        AFortPlayerController* PlayerController = Boost.Player.Get();
+        const FBoostKind& Kind = *Boost.Kind;
+        UAbilitySystemComponent* AbilitySystem = BoostAbilitySystem(PlayerController, Kind.Stages[0]);
+        Boost.AbilitySystem = AbilitySystem;
+        Boost.Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        if (!AbilitySystem)
+        {
+            return FString::Printf(TEXT("you have no pawn with the attributes it needs (%s) yet"), Kind.Stages[0].AttributeSetPath);
+        }
+
+        // What each stage has without Core's effects, before any stage changes it (a stage's effect may move another's).
+        std::vector<std::optional<float>> Originals;
+        for (size_t Index = 0; Index < Kind.NumStages; ++Index)
+        {
+            Originals.push_back(CurrentBoostMultiplier(BoostAbilitySystem(PlayerController, Kind.Stages[Index]), Kind.Stages[Index]));
+        }
+
+        FBoostResult Result;
+        for (size_t Index = 0; Index < Kind.NumStages; ++Index)
+        {
+            const FBoostStage& Stage = Kind.Stages[Index];
+            const std::optional<float> Current = Originals[Index] ? CurrentBoostMultiplier(AbilitySystem, Stage) : std::nullopt;
+            std::optional<FString> Error = Current ? ApplyBoostStage(Boost, AbilitySystem, Stage, *Current, *Originals[Index] * Boost.Multiplier)
+                                                   : std::optional<FString>(FString::Printf(TEXT("%s can't be measured on your ability system"), Stage.Attribute));
+            if (Error && Index == 0)
+            {
+                RemoveBoostEffects(Boost);
+                return *Error;
+            }
+            if (Error)
+            {
+                UE_LOG(LogFortCheats, Warning, TEXT("%s: %s: %s"), Kind.Name, *GetNameSafe(PlayerController), **Error);
+                Result.Notes.push_back(*Error);
+            }
+        }
+        for (size_t Index = 0; Index < Kind.NumStages; ++Index)
+        {
+            const std::optional<float> After = CurrentBoostMultiplier(AbilitySystem, Kind.Stages[Index]);
+            const float Original = Originals[Index].value_or(1.0f);
+            Result.Multipliers.push_back(After && Original > 0.0001f ? *After / Original : (Index == 0 ? Boost.Multiplier : 1.0f));
+        }
+        return Result;
     }
 
     // After a respawn the pawn (and maybe its ability system) is new, and the effects may be gone with the old one.
-    void KeepFireRate(FFireRateBoost& Boost)
+    void KeepBoost(FAttributeBoost& Boost)
     {
         AFortPlayerController* PlayerController = Boost.Player.Get();
         AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
@@ -2186,7 +2300,7 @@ namespace
         {
             return;
         }
-        bool bStillApplied = Boost.AbilitySystem.Get() && Boost.AbilitySystem.Get() == WeaponAbilitySystem(PlayerController) && !Boost.Handles.empty();
+        bool bStillApplied = Boost.AbilitySystem.Get() && Boost.AbilitySystem.Get() == BoostAbilitySystem(PlayerController, Boost.Kind->Stages[0]) && !Boost.Handles.empty();
         // The library's (static) one: the handle knows its ability system.
         UFunction* StackCount = FunctionAt(L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:GetActiveGameplayEffectStackCount");
         UObject* Library = DefaultObjectOf(L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
@@ -2201,28 +2315,80 @@ namespace
             return;
         }
         Boost.Handles.clear();
-        const std::variant<float, FString> Result = ApplyFireRate(Boost);
+        const std::variant<FBoostResult, FString> Result = ApplyBoost(Boost);
         if (const FString* Error = std::get_if<FString>(&Result))
         {
-            UE_LOG(LogFortCheats, Warning, TEXT("FireRate: %s's new pawn %s: %s"), *GetNameSafe(PlayerController), *GetNameSafe(Pawn), **Error);
+            UE_LOG(LogFortCheats, Warning, TEXT("%s: %s's new pawn %s: %s"), Boost.Kind->Name, *GetNameSafe(PlayerController), *GetNameSafe(Pawn), **Error);
         }
     }
 
-    // Every frame on the game thread while a player has infinitemag or a fire rate: the magazine is topped up as soon as a
-    // shot takes from it, and a respawned pawn gets the fire rate again. Nothing is hooked.
+    FAttributeBoost* FindBoost(const AFortPlayerController* PlayerController, const FBoostKind& Kind)
+    {
+        auto Found = std::find_if(AttributeBoosts.begin(), AttributeBoosts.end(),
+            [PlayerController, &Kind](const FAttributeBoost& Boost) { return Boost.Kind == &Kind && Boost.Player.Get() == PlayerController; });
+        return Found != AttributeBoosts.end() ? &*Found : nullptr;
+    }
+
+    // "2", "0.5", "2x": a multiplier from 0.05 to Max.
+    std::optional<float> ParseMultiplier(std::wstring Word, float Max)
+    {
+        if (!Word.empty() && Word.back() == L'x')
+        {
+            Word.pop_back();
+        }
+        wchar_t* End = nullptr;
+        const float Value = std::wcstof(Word.c_str(), &End);
+        if (End && End != Word.c_str() && *End == L'\0' && std::isfinite(Value) && Value >= 0.05f && Value <= Max)
+        {
+            return Value;
+        }
+        return std::nullopt;
+    }
+
+    // ---- Dance ------------------------------------------------------------------------------------------------------
+
+    // "cheat dance" (#152): the folders these builds keep their emotes in (AthenaDanceItemDefinition, EID_*).
+    constexpr const wchar_t* EmoteFolders[] = {
+        L"/Game/Athena/Items/Cosmetics/Dances/",
+        L"/Game/Athena/Items/Cosmetics/VictoryPoses/",
+        L"/Game/Athena/Items/Cosmetics/ConsumableEmotes/",
+    };
+
+    // The emotes the asset manager lists ("AthenaDance"), and those already loaded (any a player has played) it doesn't.
+    std::vector<FCheatAsset> EmoteAssets()
+    {
+        std::vector<FCheatAsset> Emotes = ListAssets({ L"AthenaDance" });
+        if (!UFortMontageItemDefinitionBase::StaticClass())
+        {
+            return Emotes;
+        }
+        for (TObjectIterator<UFortMontageItemDefinitionBase> It(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)); It; ++It)
+        {
+            const std::wstring Path = It->GetPathName().ToStdString();
+            const bool bListed = std::any_of(Emotes.begin(), Emotes.end(), [&Path](const FCheatAsset& Asset) { return _wcsicmp(Asset.Path.c_str(), Path.c_str()) == 0; });
+            if (!bListed && Path.starts_with(L"/Game/"))
+            {
+                Emotes.push_back({ Path, It->GetName().ToStdString() });
+            }
+        }
+        return Emotes;
+    }
+
+    // Every frame on the game thread while a player has infinitemag, a fire rate or a weapon damage: the magazine is
+    // topped up as soon as a shot takes from it, and a respawned pawn gets the effects again. Nothing is hooked.
     void TickWeaponCheats()
     {
         std::erase_if(InfiniteMagPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
-        std::erase_if(FireRateBoosts, [](const FFireRateBoost& Boost) { return !Boost.Player.Get(); });
+        std::erase_if(AttributeBoosts, [](const FAttributeBoost& Boost) { return !Boost.Player.Get(); });
         for (const TWeakObjectPtr<AFortPlayerController>& Known : InfiniteMagPlayers)
         {
             FillMagazine(Known.Get());
         }
-        for (FFireRateBoost& Boost : FireRateBoosts)
+        for (FAttributeBoost& Boost : AttributeBoosts)
         {
-            KeepFireRate(Boost);
+            KeepBoost(Boost);
         }
-        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !FireRateBoosts.empty()) && GameThread::Enqueue(&TickWeaponCheats);
+        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !AttributeBoosts.empty()) && GameThread::Enqueue(&TickWeaponCheats);
     }
 
     void StartWeaponCheatTick()
@@ -2367,64 +2533,170 @@ void UFortCheatManager::Repair(const FString& Arguments)
 #endif
 }
 
+#if WITH_SERVER_CODE
+namespace
+{
+    // "firerate" and "weapondamage": a multiplier (Max at most) or reset for the player, as the reply to send.
+    FString RunBoostCommand(AFortPlayerController* PlayerController, const FBoostKind& Kind, const std::wstring& Command, const FString& Arguments, float Max,
+        const wchar_t* Example, const wchar_t* ResetReply)
+    {
+        const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+        const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
+        const bool bReset = Word == L"reset" || Word == L"off";
+        const std::optional<float> Multiplier = !Word.empty() && !bReset ? ParseMultiplier(Word, Max) : std::nullopt;
+        FAttributeBoost* Existing = FindBoost(PlayerController, Kind);
+        const FString Usage = FString::Printf(TEXT("Usage: %s <multiplier 0.05-%.0f | reset>, %s; reset puts it back"), Command.c_str(), Max, Example);
+        if (!bReset && !Multiplier)
+        {
+            return Existing ? FString::Printf(TEXT("Your %s is %.2fx. %s"), Kind.Name, Existing->Multiplier, *Usage) : Usage;
+        }
+        if (!PlayerController)
+        {
+            return FString();
+        }
+
+        if (Existing)
+        {
+            RemoveBoostEffects(*Existing);
+            std::erase_if(AttributeBoosts, [Existing](const FAttributeBoost& Boost) { return &Boost == Existing; });
+        }
+        if (bReset || *Multiplier == 1.0f)
+        {
+            return FString(ResetReply);
+        }
+
+        FAttributeBoost Boost;
+        Boost.Kind = &Kind;
+        Boost.Player = PlayerController;
+        Boost.Multiplier = *Multiplier;
+        const std::variant<FBoostResult, FString> Result = ApplyBoost(Boost);
+        if (const FString* Error = std::get_if<FString>(&Result))
+        {
+            return FString::Printf(TEXT("Can't change your %s: %s"), Kind.Name, **Error);
+        }
+        AttributeBoosts.push_back(std::move(Boost));
+        StartWeaponCheatTick();
+
+        const FBoostResult& Applied = std::get<FBoostResult>(Result);
+        std::wstring Reply;
+        for (size_t Index = 0; Index < Kind.NumStages && Index < Applied.Multipliers.size(); ++Index)
+        {
+            Reply += (Index == 0 ? L"" : L", ") + std::wstring(Kind.Stages[Index].What) + L" " + std::to_wstring(std::lround(Applied.Multipliers[Index] * 100.0f)) + L"%";
+        }
+        for (const FString& Note : Applied.Notes)
+        {
+            Reply += L" (" + Note.ToStdString() + L")";
+        }
+        return FString::Printf(TEXT("Your %s is %.2fx what it was: %s of before (%s reset: back to normal)"), Kind.Name, *Multiplier, Reply.c_str(), Command.c_str());
+    }
+}
+#endif
+
 void UFortCheatManager::FireRate(const FString& Arguments)
 {
 #if WITH_SERVER_CODE
-    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
-    const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
-    const bool bReset = Word == L"reset" || Word == L"off";
-    std::optional<float> Multiplier;
-    if (!Word.empty() && !bReset)
+    const FString Message = RunBoostCommand(GetPlayerController(), FireRateBoost, L"firerate", Arguments, 100.0f,
+        L"\"firerate 2\" fires twice as fast as your guns do on their own", L"Your guns fire at their own rate again");
+    if (!Message.IsEmpty())
     {
-        std::wstring Number = Word;
-        if (!Number.empty() && Number.back() == L'x')
-        {
-            Number.pop_back();
-        }
-        wchar_t* End = nullptr;
-        const float Value = std::wcstof(Number.c_str(), &End);
-        if (End && End != Number.c_str() && *End == L'\0' && std::isfinite(Value) && Value >= 0.05f && Value <= 100.0f)
-        {
-            Multiplier = Value;
-        }
+        Reply(Message);
+    }
+#endif
+}
+
+void UFortCheatManager::WeaponDamage(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const FString Message = RunBoostCommand(GetPlayerController(), WeaponDamageBoost, L"weapondamage", Arguments, 100.0f,
+        L"\"weapondamage 2\" makes your guns and melee weapons do twice the damage they do on their own", L"Your weapons do their own damage again");
+    if (!Message.IsEmpty())
+    {
+        Reply(Message);
+    }
+#endif
+}
+
+void UFortCheatManager::Dance(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    if (Words.size() > 1)
+    {
+        Reply(TEXT("Usage: dance [EID], plays the emote (\"dance EID_DanceMoves\", or its path); without one, a random emote"));
+        return;
     }
     AFortPlayerController* PlayerController = GetPlayerController();
-    auto Existing = std::find_if(FireRateBoosts.begin(), FireRateBoosts.end(), [PlayerController](const FFireRateBoost& Boost) { return Boost.Player.Get() == PlayerController; });
-    if (!bReset && !Multiplier)
+    if (!PlayerController || !PlayerController->MyFortPawn)
     {
-        Reply(Existing != FireRateBoosts.end()
-            ? FString::Printf(TEXT("Your guns fire at %.2fx. Usage: firerate <multiplier 0.05-100 | reset>, \"firerate 2\" fires twice as fast as your guns do on their own"), Existing->Multiplier)
-            : FString(TEXT("Usage: firerate <multiplier 0.05-100 | reset>, \"firerate 2\" fires twice as fast as your guns do on their own; reset puts it back")));
+        Reply(TEXT("Dance needs a pawn to dance"));
         return;
     }
-    if (!PlayerController)
+    UFunction* PlayEmote = AFortPlayerController::FindStaticFunction_ServerPlayEmoteItem();
+    if (!PlayEmote)
     {
-        return;
-    }
-
-    if (Existing != FireRateBoosts.end())
-    {
-        RemoveFireRateEffects(*Existing);
-        FireRateBoosts.erase(Existing);
-    }
-    if (bReset || *Multiplier == 1.0f)
-    {
-        Reply(TEXT("Your guns fire at their own rate again"));
+        Reply(TEXT("This build has no emotes (AFortPlayerController::ServerPlayEmoteItem wasn't found)"));
         return;
     }
 
-    FFireRateBoost Boost;
-    Boost.Player = PlayerController;
-    Boost.Multiplier = *Multiplier;
-    const std::variant<float, FString> Result = ApplyFireRate(Boost);
-    if (const FString* Error = std::get_if<FString>(&Result))
+    UFortMontageItemDefinitionBase* Emote = nullptr;
+    const std::wstring Query = Words.empty() ? std::wstring() : Words[0];
+    if (!Query.empty() && Query.front() == L'/')
     {
-        Reply(FString::Printf(TEXT("Can't change your fire rate: %s"), **Error));
+        Emote = LoadAsset<UFortMontageItemDefinitionBase>(Query);
+    }
+    else
+    {
+        const std::vector<FCheatAsset> Emotes = EmoteAssets();
+        const FCheatAsset* Found = nullptr;
+        if (Query.empty() && !Emotes.empty())
+        {
+            static std::mt19937 Random{ std::random_device{}() };
+            Found = &Emotes[std::uniform_int_distribution<size_t>(0, Emotes.size() - 1)(Random)];
+        }
+        else if (!Query.empty())
+        {
+            Found = FindAsset(Emotes, Query, AFortGameModeAthena::GetCurrent(PlayerController) != nullptr);
+        }
+        if (Found)
+        {
+            Emote = LoadAsset<UFortMontageItemDefinitionBase>(Found->Path);
+        }
+        else if (!Query.empty())
+        {
+            // Not listed: the folders these builds keep their emotes in.
+            for (const wchar_t* Folder : EmoteFolders)
+            {
+                const std::wstring Name = Lower(Query).starts_with(L"eid_") ? Query : L"EID_" + Query;
+                Emote = LoadObject<UFortMontageItemDefinitionBase>(nullptr, (std::wstring(Folder) + Name + L"." + Name).c_str(), nullptr, static_cast<uint32_t>(LOAD_NoWarn | LOAD_Quiet));
+                if (Emote)
+                {
+                    break;
+                }
+            }
+        }
+        if (!Emote)
+        {
+            Reply(Query.empty() ? FString(TEXT("This build lists no emotes to pick from (\"dance <EID or path>\" plays one by name)"))
+                                : FString::Printf(TEXT("No emote called '%s' (an EID_* name, or its path: /Game/Athena/Items/Cosmetics/Dances/EID_DanceMoves)"), Query.c_str()));
+            return;
+        }
+    }
+    if (!Emote || !Emote->IsA(UFortMontageItemDefinitionBase::StaticClass()))
+    {
+        Reply(FString::Printf(TEXT("%s isn't an emote"), Query.c_str()));
         return;
     }
-    FireRateBoosts.push_back(std::move(Boost));
-    StartWeaponCheatTick();
-    Reply(FString::Printf(TEXT("Your guns fire %.2fx as fast (%.2fx their base rate with your perks; firerate reset: back to normal)"), *Multiplier, std::get<float>(Result)));
+
+    // The emote wheel's own RPC, run here on the server: the build's body (or Core's, where 1.9 strips it) gives the pawn
+    // the emote ability with the emote and activates it, and the montage replicates to everyone.
+    Reflection::FParams Params(PlayEmote);
+    if (!Params.Set(L"EmoteAsset", Emote) || !Params.Call(PlayerController))
+    {
+        Reply(TEXT("Couldn't play the emote"));
+        return;
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("Dance: %s plays %s"), *GetNameSafe(PlayerController), *Emote->GetName());
+    Reply(FString::Printf(TEXT("Dancing %s (moving or using an item stops it)"), *Emote->GetName()));
 #endif
 }
 
@@ -2469,6 +2741,337 @@ void UFortCheatManager::StartInfiniteMagazineView()
     {
         bStarted = GameThread::Enqueue(&TickInfiniteMagazineView);
     }
+#endif
+}
+
+#if !UE_SERVER
+namespace
+{
+    // ---- "cheat togglebloom" and "cheat togglerecoil" (#152), on the client ------------------------------------------
+
+    // A ranged weapon's spread and recoil are this game's own: its shots are traced here, with the spread and recoil of
+    // its stats row (FFortRangedWeaponStats in the item definition's WeaponStatHandle table, read again for every shot,
+    // 1.9 0x3CF110), and only the hits go to the server. Spread is Spread times the aiming, crouching and moving
+    // multipliers, and every shot heats it up by Spread again (1.9 0x933ED0); aiming down sights lerps it by
+    // SpreadDownsights (0x95C590). Recoil is RecoilVert and RecoilHoriz (times their keyboard or gamepad scales) through
+    // UFortWeaponAttrSet's recoil attributes, clamped at 0 (0x948070, 0x9419E0), or in Battle Royale, when the game's
+    // console variable asks for it, a random magnitude and roll between AthenaRecoilMagnitudeMin/Max and
+    // AthenaRecoilRollMagnitudeMin/Max (0x9339C0). Core sets those to 0 in the rows of the weapons this player holds, and
+    // puts them back when the toggle goes off. The rows are shared by every weapon of the same stats here, which on this
+    // client only this player shoots.
+    enum class EWeaponStatCheat : uint8_t
+    {
+        Bloom,
+        Recoil,
+    };
+
+    constexpr const wchar_t* BloomFields[] = { L"Spread", L"SpreadDownsights" };
+    constexpr const wchar_t* RecoilFields[] = { L"RecoilVert", L"RecoilHoriz", L"AthenaRecoilMagnitudeMin", L"AthenaRecoilMagnitudeMax", L"AthenaRecoilRollMagnitudeMin", L"AthenaRecoilRollMagnitudeMax" };
+
+    // A stats row field Core zeroed, and the value it had.
+    struct FWeaponStatEdit
+    {
+        EWeaponStatCheat Cheat;
+        TWeakObjectPtr<UDataTable> Table;
+        FName RowName;
+        int32_t Offset = 0;
+        float Original = 0.0f;
+    };
+    std::vector<FWeaponStatEdit> WeaponStatEdits;
+    bool bNoBloom = false;
+    bool bNoRecoil = false;
+    bool bTickingWeaponStats = false;
+
+    AFortPlayerController* LocalFortPlayerController()
+    {
+        UWorld* World = Natives::GWorld ? static_cast<UWorld*>(GWorld) : nullptr;
+        UGameInstance* GameInstance = World ? static_cast<UGameInstance*>(World->OwningGameInstance) : nullptr;
+        const TArray<ULocalPlayer*>* LocalPlayers = GameInstance ? &static_cast<TArray<ULocalPlayer*>&>(GameInstance->LocalPlayers) : nullptr;
+        ULocalPlayer* Player = LocalPlayers && LocalPlayers->Num() > 0 ? (*LocalPlayers)[0] : nullptr;
+        return Player ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<APlayerController*>(Player->PlayerController))) : nullptr;
+    }
+
+    void ZeroWeaponStats(UDataTable* Table, FName RowName, EWeaponStatCheat Cheat)
+    {
+        UScriptStruct* RowStruct = Table->RowStruct;
+        uint8_t* Row = RowStruct ? Table->FindRowUnchecked(RowName) : nullptr;
+        if (!Row)
+        {
+            return;
+        }
+        const auto Fields = Cheat == EWeaponStatCheat::Bloom ? std::span<const wchar_t* const>(BloomFields) : std::span<const wchar_t* const>(RecoilFields);
+        for (const wchar_t* Field : Fields)
+        {
+            // A melee row has none of them, and an early build may lack the Athena ones.
+            const UProperty* Property = RowStruct->FindPropertyByName(FName(Field, FNAME_Find));
+            if (!Property || Property->ElementSize != sizeof(float))
+            {
+                continue;
+            }
+            const int32_t Offset = Property->GetOffset_ForInternal();
+            const bool bEdited = std::any_of(WeaponStatEdits.begin(), WeaponStatEdits.end(), [Table, RowName, Offset](const FWeaponStatEdit& Edit)
+                { return Edit.Table.Get() == Table && Edit.RowName == RowName && Edit.Offset == Offset; });
+            float& Value = *reinterpret_cast<float*>(Row + Offset);
+            if (bEdited || Value == 0.0f)
+            {
+                continue;
+            }
+            WeaponStatEdits.push_back({ Cheat, TWeakObjectPtr<UDataTable>(Table), RowName, Offset, Value });
+            Value = 0.0f;
+        }
+    }
+
+    void RestoreWeaponStats(EWeaponStatCheat Cheat)
+    {
+        for (const FWeaponStatEdit& Edit : WeaponStatEdits)
+        {
+            UDataTable* Table = Edit.Cheat == Cheat ? Edit.Table.Get() : nullptr;
+            if (uint8_t* Row = Table ? Table->FindRowUnchecked(Edit.RowName) : nullptr)
+            {
+                *reinterpret_cast<float*>(Row + Edit.Offset) = Edit.Original;
+            }
+        }
+        std::erase_if(WeaponStatEdits, [Cheat](const FWeaponStatEdit& Edit) { return Edit.Cheat == Cheat; });
+    }
+
+    // Every frame while either is on: the weapon in the player's hands gets its row's fields zeroed as soon as it is
+    // equipped. Nothing is hooked.
+    void TickWeaponStatsView()
+    {
+        if (!bNoBloom && !bNoRecoil)
+        {
+            bTickingWeaponStats = false;
+            return;
+        }
+        AFortPlayerController* PlayerController = LocalFortPlayerController();
+        AFortPawn* Pawn = PlayerController ? Cast<AFortPawn>(reinterpret_cast<UObject*>(PlayerController->GetPawn())) : nullptr;
+        AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        UFortWeaponItemDefinition* WeaponData = Weapon ? static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData) : nullptr;
+        if (WeaponData)
+        {
+            const FDataTableRowHandle& StatHandle = WeaponData->WeaponStatHandle;
+            UDataTable* Table = StatHandle.DataTable;
+            const FName RowName = StatHandle.RowName;
+            if (Table && !RowName.IsNone())
+            {
+                if (bNoBloom)
+                {
+                    ZeroWeaponStats(Table, RowName, EWeaponStatCheat::Bloom);
+                }
+                if (bNoRecoil)
+                {
+                    ZeroWeaponStats(Table, RowName, EWeaponStatCheat::Recoil);
+                }
+            }
+        }
+        bTickingWeaponStats = GameThread::Enqueue(&TickWeaponStatsView);
+    }
+
+    FString ToggleWeaponStats(EWeaponStatCheat Cheat, const std::wstring& Word)
+    {
+        bool& bOn = Cheat == EWeaponStatCheat::Bloom ? bNoBloom : bNoRecoil;
+        bOn = Word.empty() ? !bOn : Word == L"on";
+        if (!bOn)
+        {
+            RestoreWeaponStats(Cheat);
+        }
+        else if (!bTickingWeaponStats)
+        {
+            bTickingWeaponStats = GameThread::Enqueue(&TickWeaponStatsView);
+        }
+        if (Cheat == EWeaponStatCheat::Bloom)
+        {
+            return bOn ? FString(TEXT("No bloom: your guns shoot dead on where you aim, however you move or fire (togglebloom again: normal)"))
+                       : FString(TEXT("Bloom back: your guns spread as they do on their own"));
+        }
+        return bOn ? FString(TEXT("No recoil: your aim stays where it is when you fire (togglerecoil again: normal)"))
+                   : FString(TEXT("Recoil back: your guns kick as they do on their own"));
+    }
+
+    // ---- "cheat copytargetpath" (#152), on the client ---------------------------------------------------------------
+
+    class APlayerCameraManagerFunctions : public UObject
+    {
+        DefineUnrealClass(APlayerCameraManager, Engine)
+        DefineUFunction(GetCameraLocation)
+        DefineUFunction(GetCameraRotation)
+
+    public:
+        FVector GetCameraLocation()
+        {
+            Reflection::FParams Params(FindStaticFunction_GetCameraLocation());
+            return Params.Call(this) ? Params.Take<FVector>(L"ReturnValue") : FVector();
+        }
+
+        FRotator GetCameraRotation()
+        {
+            Reflection::FParams Params(FindStaticFunction_GetCameraRotation());
+            return Params.Call(this) ? Params.Take<FRotator>(L"ReturnValue") : FRotator();
+        }
+    };
+
+    // The object property Name of Object's class (a component's StaticMesh or SkeletalMesh), or null.
+    UObject* ObjectPropertyOf(UObject* Object, const wchar_t* Name)
+    {
+        UClass* Class = Object ? Object->GetClass() : nullptr;
+        const UProperty* Property = Class ? Class->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        if (!Property || !Property->IsA(UObjectPropertyBase::StaticClass()) || Property->ElementSize != sizeof(UObject*))
+        {
+            return nullptr;
+        }
+        return *Property->ContainerPtrToValuePtr<UObject*>(Object);
+    }
+
+    // The clipboard, through Windows' own API (FPlatformApplicationMisc::ClipboardCopy isn't exported by these builds).
+    bool CopyToClipboard(const std::wstring& Text)
+    {
+        if (!OpenClipboard(nullptr))
+        {
+            return false;
+        }
+        bool bCopied = false;
+        const size_t Bytes = (Text.size() + 1) * sizeof(wchar_t);
+        if (EmptyClipboard())
+        {
+            if (HGLOBAL Memory = GlobalAlloc(GMEM_MOVEABLE, Bytes))
+            {
+                if (void* Destination = GlobalLock(Memory))
+                {
+                    std::memcpy(Destination, Text.c_str(), Bytes);
+                    GlobalUnlock(Memory);
+                    bCopied = SetClipboardData(CF_UNICODETEXT, Memory) != nullptr;
+                }
+                if (!bCopied)
+                {
+                    GlobalFree(Memory);
+                }
+            }
+        }
+        CloseClipboard();
+        return bCopied;
+    }
+
+    // What the player looks at: a trace from the camera along its view, past the player's own pawn. The hit actor's
+    // name and class path, and the mesh its hit component shows; the class path is copied (spawnactor, tpactor and
+    // disguise take it), or the mesh for an actor of a native class (a StaticMeshActor), unless Which picks one.
+    FString CopyTargetPath(APlayerController* PlayerController, const std::wstring& Which)
+    {
+        if (!Which.empty() && Which != L"class" && Which != L"mesh" && Which != L"name")
+        {
+            return FString(TEXT("Usage: copytargetpath [class | mesh | name], copies the path of what you look at (the class, or the mesh of a mesh actor, without one)"));
+        }
+        UObject* CameraManager = reinterpret_cast<UObject*>(static_cast<APlayerCameraManager*>(PlayerController->PlayerCameraManager));
+        if (!CameraManager || !APlayerCameraManagerFunctions::FindStaticFunction_GetCameraLocation() || !APlayerCameraManagerFunctions::FindStaticFunction_GetCameraRotation())
+        {
+            return FString(TEXT("Copytargetpath needs your camera"));
+        }
+        APlayerCameraManagerFunctions* Camera = static_cast<APlayerCameraManagerFunctions*>(CameraManager);
+        const FVector Start = Camera->GetCameraLocation();
+        const FRotator Rotation = Camera->GetCameraRotation();
+        constexpr float DegreesToRadians = 3.1415926535897932f / 180.0f;
+        const float Pitch = Rotation.Pitch * DegreesToRadians;
+        const float Yaw = Rotation.Yaw * DegreesToRadians;
+        const FVector Direction(std::cos(Pitch) * std::cos(Yaw), std::cos(Pitch) * std::sin(Yaw), std::sin(Pitch));
+        const FVector End = Start + Direction * 100000.0f;
+
+        // The pawn as the world context, so the trace goes through it (third person).
+        APawn* Pawn = PlayerController->GetPawn();
+        UObject* Context = Pawn ? reinterpret_cast<UObject*>(Pawn) : reinterpret_cast<UObject*>(PlayerController);
+        FVector Impact;
+        UObject* HitActor = nullptr;
+        UObject* HitComponent = nullptr;
+        // Visibility, then Camera for what only blocks the camera.
+        if (!UKismetSystemLibrary::LineTraceSingle(Context, Start, End, 0, true, true, Impact, HitActor, HitComponent) || !HitActor)
+        {
+            UKismetSystemLibrary::LineTraceSingle(Context, Start, End, 1, true, true, Impact, HitActor, HitComponent);
+        }
+        if (!HitActor)
+        {
+            return FString(TEXT("You aren't looking at anything (nothing within 1000 m blocks your view)"));
+        }
+
+        const std::wstring Name = HitActor->GetName().ToStdString();
+        UClass* Class = HitActor->GetClass();
+        const std::wstring ClassPath = Class ? Class->GetPathName().ToStdString() : std::wstring();
+        UObject* Mesh = ObjectPropertyOf(HitComponent, L"StaticMesh");
+        if (!Mesh)
+        {
+            Mesh = ObjectPropertyOf(HitComponent, L"SkeletalMesh");
+        }
+        const std::wstring MeshPath = Mesh ? Mesh->GetPathName().ToStdString() : std::wstring();
+
+        std::wstring Copied;
+        if (Which == L"name")
+        {
+            Copied = Name;
+        }
+        else if (Which == L"mesh")
+        {
+            Copied = MeshPath;
+        }
+        else if (Which == L"class")
+        {
+            Copied = ClassPath;
+        }
+        else
+        {
+            Copied = !MeshPath.empty() && !ClassPath.starts_with(L"/Game/") ? MeshPath : ClassPath;
+        }
+        if (Copied.empty())
+        {
+            return FString::Printf(TEXT("%s (%s) has no %s to copy"), Name.c_str(), ClassPath.c_str(), Which.c_str());
+        }
+        const bool bCopied = CopyToClipboard(Copied);
+        const float Distance = (Impact - Start).Size() / 100.0f;
+        Log::Info(L"CopyTargetPath: {} ({}), mesh {}, {:.1f} m", Name, ClassPath, MeshPath.empty() ? std::wstring(L"none") : MeshPath, Distance);
+        return FString::Printf(TEXT("%s %s%s. %.1f m away: %s, class %s%s%s"), bCopied ? TEXT("Copied") : TEXT("Couldn't copy"), Copied.c_str(),
+            bCopied ? TEXT("") : TEXT(" (the clipboard is busy)"), Distance, Name.c_str(), ClassPath.c_str(), MeshPath.empty() ? TEXT("") : TEXT(", mesh "), MeshPath.c_str());
+    }
+}
+#endif
+
+bool UFortCheatManager::RunClientCheatCommand(APlayerController* PlayerController, const FString& Msg)
+{
+#if !UE_SERVER
+    FString Command = Msg;
+    FString TargetName;
+    const bool bTargeted = SplitCheatTarget(Msg, Command, TargetName);
+    const std::vector<std::wstring> Words = SplitWords(Command.ToStdString());
+    const std::wstring Name = Words.empty() ? std::wstring() : Lower(Words[0]);
+    if (Name != L"togglebloom" && Name != L"togglerecoil" && Name != L"copytargetpath")
+    {
+        return false;
+    }
+
+    FString Message;
+    const std::wstring Word = Words.size() > 1 ? Lower(Words[1]) : std::wstring();
+    if (bTargeted)
+    {
+        Message = FString::Printf(TEXT("%s only works on your own game: %s's game would have to run it"), Words[0].c_str(), *TargetName);
+    }
+    else if (Name == L"copytargetpath")
+    {
+        Message = Words.size() > 2 ? FString(TEXT("Usage: copytargetpath [class | mesh | name]")) : CopyTargetPath(PlayerController, Word);
+    }
+    else if (Words.size() > 2 || (!Word.empty() && Word != L"on" && Word != L"off"))
+    {
+        Message = FString::Printf(TEXT("Usage: %s [on | off]; without on or off it toggles"), Words[0].c_str());
+    }
+    else
+    {
+        Message = ToggleWeaponStats(Name == L"togglebloom" ? EWeaponStatCheat::Bloom : EWeaponStatCheat::Recoil, Word);
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("%s: %s"), *Msg, *Message);
+    if (PlayerController)
+    {
+        // A client function called on its own client runs here.
+        PlayerController->ClientMessage(Message);
+    }
+    return true;
+#else
+    (void)PlayerController;
+    (void)Msg;
+    return false;
 #endif
 }
 

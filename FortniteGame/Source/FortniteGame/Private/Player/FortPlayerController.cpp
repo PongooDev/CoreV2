@@ -1793,8 +1793,10 @@ void AFortPlayerController::Cheat(const FString& Msg)
     // or ClientCheatGhost (UFortCheatManager::OnCheatMovement). The server refuses a speed for another player
     // ("/Name/"), so none is kept for one.
     //
-    // "disguiseview" (#137) is how this player sees their own disguise, which only their game knows: it stays here.
-    if (UFortCheatManager::RunDisguiseViewCommand(this, Msg))
+    // "disguiseview" (#137) is how this player sees their own disguise, which only their game knows: it stays here. So do
+    // "togglebloom" and "togglerecoil" (#152), the spread and recoil of this player's shots, which only their game
+    // simulates, and "copytargetpath" (#152), which puts what they look at on their clipboard.
+    if (UFortCheatManager::RunDisguiseViewCommand(this, Msg) || UFortCheatManager::RunClientCheatCommand(this, Msg))
     {
         return;
     }
@@ -1928,8 +1930,9 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // into a prop or a pawn, "tpactor <class, name or path> [n]" (#146) puts them on top of the nearest actor that matches,
     // "nocooldown [on | off]" (#148; also for the game's ToggleNoCoolDown, which sets a flag nothing reads) ends their
     // ability and gadget cooldowns, "infinitemag [on | off]" (#149; also for ToggleInfiniteAmmo, whose flag it sets) keeps
-    // their magazine full, "repair [all]" (#150) restores their weapon's durability and "firerate <multiplier | reset>"
-    // (#150) changes how fast their guns fire.
+    // their magazine full, "repair [all]" (#150) restores their weapon's durability, "firerate <multiplier | reset>"
+    // (#150) changes how fast their guns fire, "weapondamage <multiplier | reset>" (#152) how much damage their weapons
+    // do, and "dance [EID]" (#152) plays an emote.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
@@ -1940,6 +1943,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"toggleinfiniteammo", &UFortCheatManager::InfiniteMag },
         { L"repair", &UFortCheatManager::Repair },
         { L"firerate", &UFortCheatManager::FireRate },
+        { L"weapondamage", &UFortCheatManager::WeaponDamage },
+        { L"dance", &UFortCheatManager::Dance },
         { L"skin", &UFortCheatManager::Skin },
         { L"hero", &UFortCheatManager::Skin },
         { L"disguise", &UFortCheatManager::Disguise },

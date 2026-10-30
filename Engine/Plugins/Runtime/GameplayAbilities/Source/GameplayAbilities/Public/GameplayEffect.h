@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AttributeSet.h"
+#include "GameplayTagContainer.h"
 #include "StructArray.h"
 #include "UObject/Object.h"
 
@@ -39,12 +40,20 @@ struct FGameplayEffectModifierMagnitude
     DefineUStructProperty(FScalableFloat, ScalableFloatMagnitude)
 };
 
+// The tags a modifier needs on the source (or target) for it to count: a weapon perk's "weapon.ranged" or "weapon.melee".
+struct FGameplayTagRequirements
+{
+    DefineUnrealStruct(FGameplayTagRequirements, GameplayAbilities)
+    DefineUProperty(FGameplayTagContainer, RequireTags)
+};
+
 struct FGameplayModifierInfo
 {
     DefineUnrealStruct(FGameplayModifierInfo, GameplayAbilities)
     DefineUProperty(FGameplayAttribute, Attribute)
     DefineUProperty(EGameplayModOp, ModifierOp)
     DefineUStructProperty(FGameplayEffectModifierMagnitude, ModifierMagnitude)
+    DefineUStructProperty(FGameplayTagRequirements, SourceTags)
 
     // The fixed amount this modifier adds to Attribute: an additive, curveless scalable float, else 0.
     float GetAdditiveConstant(const UProperty* InAttribute) const;

@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "ReflectionParams.h"
+#include "UObject/WeakObjectPtr.h"
 
+#include <cstring>
 #include <vector>
 
 void UKismetSystemLibrary::GetComponentBounds(const USceneComponent* Component, FVector& Origin, FVector& BoxExtent, float& SphereRadius)
@@ -21,6 +23,15 @@ void UKismetSystemLibrary::GetComponentBounds(const USceneComponent* Component, 
 
 bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FVector& Start, const FVector& End, uint8_t TraceChannel, bool bTraceComplex, bool bIgnoreSelf, FVector& OutImpactPoint)
 {
+    UObject* Actor = nullptr;
+    UObject* Component = nullptr;
+    return LineTraceSingle(WorldContextObject, Start, End, TraceChannel, bTraceComplex, bIgnoreSelf, OutImpactPoint, Actor, Component);
+}
+
+bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FVector& Start, const FVector& End, uint8_t TraceChannel, bool bTraceComplex, bool bIgnoreSelf, FVector& OutImpactPoint, UObject*& OutActor, UObject*& OutComponent)
+{
+    OutActor = nullptr;
+    OutComponent = nullptr;
     // OutHit is an FHitResult, read through its own reflection (ImpactPoint is an FVector_NetQuantize, an FVector).
     UFunction* Function = StaticFunction_LineTraceSingle();
     const UStructProperty* OutHitProperty = Function ? static_cast<const UStructProperty*>(Function->FindPropertyByName(FName(L"OutHit", FNAME_Find))) : nullptr;
@@ -44,6 +55,20 @@ bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FV
         return false;
     }
     OutImpactPoint = *reinterpret_cast<const FVector*>(Hit.data() + ImpactPointProperty->GetOffset_ForInternal());
+    // Actor and Component are weak pointers (8 bytes), not always 8-aligned in the hit (Actor is at 0x64 in 4.16).
+    const auto ReadWeak = [&Hit, HitStruct](const wchar_t* Name) -> UObject*
+    {
+        const UProperty* Property = HitStruct->FindPropertyByName(FName(Name, FNAME_Find));
+        if (!Property || Property->ElementSize != sizeof(FWeakObjectPtr))
+        {
+            return nullptr;
+        }
+        FWeakObjectPtr Weak;
+        std::memcpy(&Weak, Hit.data() + Property->GetOffset_ForInternal(), sizeof(Weak));
+        return Weak.Get();
+    };
+    OutActor = ReadWeak(L"Actor");
+    OutComponent = ReadWeak(L"Component");
     return true;
 }
 

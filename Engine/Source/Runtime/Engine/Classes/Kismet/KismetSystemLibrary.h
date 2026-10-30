@@ -18,6 +18,8 @@ public:
     // The first blocking hit's impact point from Start to End on a trace channel (ETraceTypeQuery: 0 is Visibility), no
     // actors ignored but the world context object when bIgnoreSelf. False when nothing blocks.
     static bool LineTraceSingle(UObject* WorldContextObject, const FVector& Start, const FVector& End, uint8_t TraceChannel, bool bTraceComplex, bool bIgnoreSelf, FVector& OutImpactPoint);
+    // The same, with the hit's actor and component (FHitResult's weak Actor and Component; null when the hit has none).
+    static bool LineTraceSingle(UObject* WorldContextObject, const FVector& Start, const FVector& End, uint8_t TraceChannel, bool bTraceComplex, bool bIgnoreSelf, FVector& OutImpactPoint, UObject*& OutActor, UObject*& OutComponent);
     // Runs Object's UFunction FunctionName (no parameters) every Time seconds when bLooping, else once after Time, on
     // Object's world's timer manager. K2_ClearTimer clears the timers set for it so.
     static bool K2_SetTimer(UObject* Object, const wchar_t* FunctionName, float Time, bool bLooping);

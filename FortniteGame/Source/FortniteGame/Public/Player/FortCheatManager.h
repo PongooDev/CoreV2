@@ -138,6 +138,17 @@ public:
     // they do now, through the game's own fire rate alteration effect (GE_Alteration_Attribute_FireRate, WeaponRateOfFire)
     // on their ability system, which replicates; reset takes Core's effects off again.
     void FireRate(const FString& Arguments);
+    // Core's own command, "cheat weapondamage <multiplier | reset>" (#152): the player's guns and melee weapons do that
+    // many times the damage they do now, through the game's own weapon damage perk effects (GE_Alteration_Attribute_
+    // WeaponDamage and its melee one, OutgoingAbilityDamage) on their ability system; reset takes Core's effects off.
+    void WeaponDamage(const FString& Arguments);
+    // Core's own command, "cheat dance [EID or path]" (#152): the player plays the emote (a random one without a name)
+    // through the emote wheel's own ServerPlayEmoteItem, run on the server.
+    void Dance(const FString& Arguments);
+    // Client (#152): "cheat togglebloom [on | off]", "cheat togglerecoil [on | off]" (this player's guns' spread and
+    // recoil, which only their game simulates) and "cheat copytargetpath [class | mesh | name]" (what they look at, to
+    // their clipboard) run here, not on the server; true when Msg was one of them.
+    static bool RunClientCheatCommand(class APlayerController* PlayerController, const FString& Msg);
     // Client (#149): every frame, while the server has bInfiniteAmmo on for this player, the equipped weapon's magazine as
     // this client counts it stays full, so its own shots never empty it and start a reload. Nothing is hooked.
     static void StartInfiniteMagazineView();

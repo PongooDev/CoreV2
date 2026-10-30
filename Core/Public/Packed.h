@@ -12,4 +12,12 @@ namespace Packed
     /// </para>
     /// </summary>
     bool RunAfterStub(void (*Start)());
+
+    /// <summary>
+    /// On a packed build, blocks until the packer has run the one-time check it makes over the code its stub
+    /// decrypted, which it does as the engine finishes its initial load. Patching .text before that point leaves the
+    /// game spinning in the packer's VM and it never reaches the login screen, so hooks must be enabled after it.
+    /// <para>Returns straight away on an ordinary build, where nothing checks the code.</para>
+    /// </summary>
+    void WaitForCodeCheck();
 }

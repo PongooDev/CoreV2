@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Packed.h"
 #include "Log.h"
+#include "Natives.h"
 
 namespace
 {
@@ -19,6 +20,7 @@ namespace
     constexpr size_t HandoverOffset = 9;
 
     constexpr DWORD TimeoutMs = 60000;
+    constexpr DWORD CheckTimeoutMs = 300000;
     constexpr DWORD PollMs = 2;
 
     struct FImage
@@ -149,4 +151,36 @@ bool Packed::RunAfterStub(void (*Start)())
 
     CloseHandle(Thread);
     return true;
+}
+
+void Packed::WaitForCodeCheck()
+{
+    if (Describe().TextSections < 2)
+    {
+        return;
+    }
+
+    // GEngine is set in FEngineLoop::Init, the step after the initial load whose end the packer checks at, so the
+    // engine existing means the check has been and gone. Waiting on a timer instead would be guesswork: the window
+    // is a phase of start-up, and how long the phase takes moves around between runs.
+    if (!Natives::GEngine)
+    {
+        Log::Error(L"Packed exe: GEngine was never resolved, so enabling hooks without waiting for the packer");
+        return;
+    }
+
+    Log::Info(L"Packed exe: holding the hooks until the engine has loaded, so the packer's check sees clean code");
+
+    const DWORD Deadline = GetTickCount() + CheckTimeoutMs;
+    while (!*Natives::GEngine)
+    {
+        if (GetTickCount() > Deadline)
+        {
+            Log::Error(L"Packed exe: no engine after {}s, enabling hooks anyway", CheckTimeoutMs / 1000);
+            return;
+        }
+        Sleep(PollMs);
+    }
+
+    Log::Info(L"Packed exe: the engine is up, so the packer has finished checking; enabling hooks now");
 }

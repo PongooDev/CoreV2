@@ -1400,16 +1400,31 @@ void UFortCheatManager::SpawnActor(const FString& Arguments)
         return;
     }
 
-    // In front of the player, a pawn standing as they do and anything else on the ground at their feet, facing the way
-    // they face. A pawn moves up out of what it would stand in.
+    // In front of the player, a pawn standing as they do and anything else on the floor there (#147: at the player's
+    // feet it hung in the air past a ramp or a cliff edge), facing the way they face. A pawn moves up out of what it
+    // would stand in.
     const bool bPawn = Class->IsChildOf(APawn::StaticClass());
     FVector PawnOrigin;
     FVector PawnExtent;
     Pawn->GetActorBounds(true, PawnOrigin, PawnExtent);
-    FVector Location = InFrontOf(Pawn, 300.0f);
-    if (!bPawn && PawnExtent.Z > 0.0f)
+    // The floor under a point, traced down from the player's head height; their feet's height if there is none.
+    const auto OnFloor = [&](FVector At)
     {
-        Location.Z = PawnOrigin.Z - PawnExtent.Z;
+        if (PawnExtent.Z > 0.0f)
+        {
+            At.Z = PawnOrigin.Z - PawnExtent.Z;
+        }
+        FVector Floor;
+        if (UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(At.X, At.Y, PawnOrigin.Z + PawnExtent.Z), FVector(At.X, At.Y, At.Z - 100000.0f), 0, false, true, Floor))
+        {
+            At.Z = Floor.Z;
+        }
+        return At;
+    };
+    FVector Location = InFrontOf(Pawn, 300.0f);
+    if (!bPawn)
+    {
+        Location = OnFloor(Location);
     }
     const FQuat Rotation = FRotator(0.0f, Pawn->GetActorRotation().Yaw, 0.0f).Quaternion();
     const ESpawnActorCollisionHandlingMethod Collision = bPawn ? ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn : ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -1576,6 +1591,20 @@ void UFortCheatManager::TpActor(const FString& Arguments)
     {
         Reply(FString::Printf(TEXT("No actor in the world matches '%s' (give part of its class or its name)"), Query.c_str()));
         return;
+    }
+    // Something you can see comes before what has no bounds at all, a mission's or a manager's logic actor at the
+    // world's origin (#147: "tpactor StormChest_C" went to Mission_StormChest_C_0, not a chest). Only those, if that's
+    // all there is.
+    const auto HasBounds = [](AActor* Actor)
+    {
+        FVector Origin;
+        FVector Extent;
+        Actor->GetActorBounds(false, Origin, Extent);
+        return Extent.X > 0.0f || Extent.Y > 0.0f || Extent.Z > 0.0f;
+    };
+    if (std::any_of(Matches.begin(), Matches.end(), HasBounds))
+    {
+        std::erase_if(Matches, [&HasBounds](AActor* Actor) { return !HasBounds(Actor); });
     }
     if (Wanted > static_cast<int32_t>(Matches.size()))
     {

@@ -524,7 +524,10 @@ uintptr_t Finder::ImportSlot(const char* Module, const char* Symbol)
         return 0;
     }
 
-    for (auto* Import = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(Base + Directory.VirtualAddress); Import->Name; ++Import)
+    const auto* First = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(Base + Directory.VirtualAddress);
+
+    bool FoundModule = false;
+    for (auto* Import = First; Import->Name; ++Import)
     {
         const char* Name = reinterpret_cast<const char*>(Base + Import->Name);
         if (_stricmp(Name, Module) != 0)
@@ -532,6 +535,8 @@ uintptr_t Finder::ImportSlot(const char* Module, const char* Symbol)
             continue;
         }
 
+        FoundModule = true;
+        if (!Import->OriginalFirstThunk) continue;
         const auto* Thunk = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->OriginalFirstThunk);
         auto* Entry = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->FirstThunk);
         for (; Thunk->u1.AddressOfData; ++Thunk, ++Entry)
@@ -547,6 +552,29 @@ uintptr_t Finder::ImportSlot(const char* Module, const char* Symbol)
             }
         }
     }
+
+    if (!FoundModule)
+    {
+        for (auto* Import = First; Import->Name; ++Import)
+        {
+            if (!Import->OriginalFirstThunk) continue;
+            const auto* Thunk = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->OriginalFirstThunk);
+            auto* Entry = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->FirstThunk);
+            for (; Thunk->u1.AddressOfData; ++Thunk, ++Entry)
+            {
+                if (Thunk->u1.Ordinal & IMAGE_ORDINAL_FLAG)
+                {
+                    continue;
+                }
+                const auto* ByName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(Base + Thunk->u1.AddressOfData);
+                if (strcmp(ByName->Name, Symbol) == 0)
+                {
+                    return reinterpret_cast<uintptr_t>(Entry);
+                }
+            }
+        }
+    }
+
     return 0;
 }
 

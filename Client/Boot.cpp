@@ -24,18 +24,20 @@
 
 static void Start();
 
+namespace
+{
+    // Packed builds: what FConfigCacheIni::EnableVoice's GetBool detour answers on the others, merged into the engine's
+    // loaded Engine.ini (these shipping builds don't read a saved Engine.ini back into their config).
+    void CombineVoiceConfig()
+    {
+        FConfigCacheIni::CombineIntoEngineIni(L"Voice chat", L"[OnlineSubsystem]\r\nbHasVoiceEnabled=true\r\n[Voice]\r\nbEnabled=true\r\n");
+    }
+}
+
 void Boot::Initialize()
 {
     Log::Initialize(L"Client");
     Log::Info(L"Core Client starting");
-
-    // Packed builds only: the GetBool detour that turns voice on for the others is held until the packer has checked its
-    // code, which is after the engine has read its voice switches, so they go into the saved config instead. The engine
-    // hasn't started yet (the stub hasn't even run), so it reads them.
-    if (Packed::IsPacked())
-    {
-        FConfigCacheIni::WriteVoiceSettings(true);
-    }
 
     // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched
     // into it, so hand the rest over to a watcher that runs once the stub has finished.
@@ -57,6 +59,19 @@ static void Start()
         return;
     }
 
+    // Packed builds only: the GetBool detour that turns voice on for the others can't go in before the packer has checked
+    // its code, which is after the online subsystem has started its voice interface. That interface's Init is a vtable
+    // slot, data the check doesn't look at, and the engine's own thread calls it before reading either switch, so the
+    // switches are merged into the engine's config from there. First, before the longer finders, to be in before Init.
+    if (Packed::IsPacked())
+    {
+        if (Finder::ResolveConfigCombine())
+        {
+            FOnlineVoiceImpl::BeforeInit = &CombineVoiceConfig;
+        }
+        FOnlineVoiceImpl::Hook();
+    }
+
     if (!Finder::ResolveRuntime() || !Finder::ResolveClient())
     {
         Log::Error(L"Startup aborted: required addresses are missing");
@@ -68,9 +83,12 @@ static void Start()
     UGameEngine::Hook();
     Diagnostics::HookLobbyClient();
     Diagnostics::HookQuestTiles();
-    // Before the engine reads its config: the voice module and the online subsystem's voice interface start with it. On a
-    // packed build the detour only goes in once the engine is up (see WriteVoiceSettings above).
-    FConfigCacheIni::EnableVoice(true);
+    // Before the engine reads its config: the voice module and the online subsystem's voice interface start with it. A
+    // packed build merges the switches instead (above).
+    if (!Packed::IsPacked())
+    {
+        FConfigCacheIni::EnableVoice(true);
+    }
     FOnlineVoiceImpl::Hook();
     UFortUITeamInfo::Hook();
     UAthenaHUDContext::Hook();

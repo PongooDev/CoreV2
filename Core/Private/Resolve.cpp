@@ -3166,28 +3166,56 @@ namespace
             ++MissingCount;
         }
 
-        uintptr_t IsDedicated = 0;
-        int32_t IsDedicatedMatches = 0;
-        const std::initializer_list<int32_t> IsDedicatedPattern = { 0x33, 0xC0, 0x38, 0x81, -1, -1, -1, -1, 0x0F, 0x95, 0xC0, 0xC3 };
-        for (uintptr_t Getter = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), IsDedicatedPattern); Getter; Getter = FindInstruction(Getter + 1, Finder::TextEnd(), IsDedicatedPattern))
-        {
-            const int32_t Offset = *reinterpret_cast<const int32_t*>(Getter + 4);
-            for (void** Entry : VTablesWithEntry(Getter))
-            {
-                const uintptr_t Setter = reinterpret_cast<uintptr_t>(Entry[2]);
-                if (IsInText(Setter) && Byte(Setter) == 0x88 && Byte(Setter + 1) == 0x91 && *reinterpret_cast<const int32_t*>(Setter + 2) == Offset && Byte(Setter + 6) == 0xC3)
-                {
-                    if (Getter != IsDedicated)
-                    {
-                        ++IsDedicatedMatches;
-                    }
-                    IsDedicated = Getter;
-                }
-            }
-        }
+        // A packed build resolves it first and swaps it out of the vtables this search goes by (Server Boot.cpp).
+        int32_t IsDedicatedMatches = Natives::FOnlineSubsystemImpl_IsDedicated ? 1 : 0;
+        const uintptr_t IsDedicated = Natives::FOnlineSubsystemImpl_IsDedicated ? reinterpret_cast<uintptr_t>(Natives::FOnlineSubsystemImpl_IsDedicated) : Finder::FindOnlineSubsystemIsDedicated(IsDedicatedMatches);
         Require(L"FOnlineSubsystemImpl::IsDedicated", Natives::FOnlineSubsystemImpl_IsDedicated, IsDedicatedMatches == 1 ? IsDedicated : 0);
         RequireOffset(L"FOnlineSubsystemImpl::bForceDedicated", Natives::FOnlineSubsystemImpl_bForceDedicated, IsDedicatedMatches == 1 ? *reinterpret_cast<const int32_t*>(IsDedicated + 4) : 0);
     }
+}
+
+uintptr_t Finder::FindOnlineSubsystemIsDedicated(int32_t& OutMatches)
+{
+    // FOnlineSubsystemImpl::IsDedicated: xor eax, eax; cmp [rcx+bForceDedicated], al; setnz al; ret, with SetForceDedicated
+    // (mov [rcx+bForceDedicated], dl; ret) two slots on in the same vtables.
+    uintptr_t IsDedicated = 0;
+    OutMatches = 0;
+    const std::initializer_list<int32_t> IsDedicatedPattern = { 0x33, 0xC0, 0x38, 0x81, -1, -1, -1, -1, 0x0F, 0x95, 0xC0, 0xC3 };
+    for (uintptr_t Getter = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), IsDedicatedPattern); Getter; Getter = FindInstruction(Getter + 1, Finder::TextEnd(), IsDedicatedPattern))
+    {
+        const int32_t Offset = *reinterpret_cast<const int32_t*>(Getter + 4);
+        for (void** Entry : VTablesWithEntry(Getter))
+        {
+            const uintptr_t Setter = reinterpret_cast<uintptr_t>(Entry[2]);
+            if (IsInText(Setter) && Byte(Setter) == 0x88 && Byte(Setter + 1) == 0x91 && *reinterpret_cast<const int32_t*>(Setter + 2) == Offset && Byte(Setter + 6) == 0xC3)
+            {
+                if (Getter != IsDedicated)
+                {
+                    ++OutMatches;
+                }
+                IsDedicated = Getter;
+            }
+        }
+    }
+    return IsDedicated;
+}
+
+bool Finder::ResolveOnlineSubsystemIsDedicated()
+{
+    if (Natives::FOnlineSubsystemImpl_IsDedicated && Natives::FOnlineSubsystemImpl_bForceDedicated >= 0)
+    {
+        return true;
+    }
+    int32_t Matches = 0;
+    const uintptr_t IsDedicated = FindOnlineSubsystemIsDedicated(Matches);
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: FOnlineSubsystemImpl::IsDedicated not found ({} matches)", Matches);
+        return false;
+    }
+    Natives::FOnlineSubsystemImpl_IsDedicated = reinterpret_cast<decltype(Natives::FOnlineSubsystemImpl_IsDedicated)>(IsDedicated);
+    Natives::FOnlineSubsystemImpl_bForceDedicated = *reinterpret_cast<const int32_t*>(IsDedicated + 4);
+    return true;
 }
 
 bool Finder::ResolveClient()

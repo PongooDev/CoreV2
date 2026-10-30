@@ -117,6 +117,10 @@ namespace Finder
     bool ResolveVoiceConfig();
     // GConfig, GEngineIni, FConfigCacheIni::Find and FConfigFile::CombineFromBuffer (the online hotfix's ini merge).
     bool ResolveConfigCombine();
+    // FOnlineSubsystemImpl::IsDedicated and the number of candidates (one when found); ResolveServer requires it.
+    uintptr_t FindOnlineSubsystemIsDedicated(int32_t& OutMatches);
+    // The same, setting Natives::FOnlineSubsystemImpl_IsDedicated and bForceDedicated, for use before ResolveServer.
+    bool ResolveOnlineSubsystemIsDedicated();
     bool ResolvePushToTalk();
     bool ResolveOnlineVoice();
     // UEngine::Init's vtable slot, from FEngineLoop::Init's GEngine->Init call (needs GEngine).

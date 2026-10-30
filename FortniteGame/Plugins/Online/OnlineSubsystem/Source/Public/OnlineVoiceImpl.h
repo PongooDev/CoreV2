@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 struct FUniqueNetIdRepl;
@@ -10,6 +11,10 @@ class FOnlineVoiceImpl
 {
 public:
     static void Hook();
+    // Run once, on the engine's thread, as the online subsystem starts its voice interface (FOnlineVoiceImpl::Init),
+    // before Init reads [OnlineSubsystem] bHasVoiceEnabled and the voice engine it makes loads the voice module, which
+    // reads [Voice] bEnabled. Packed builds set it to merge those switches into the engine's config.
+    static inline std::atomic<void (*)()> BeforeInit = nullptr;
     // Client: registers the local player as a talker, which starting the microphone needs; once is enough.
     static void RegisterLocalTalker(uint32_t LocalUserNum);
 

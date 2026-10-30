@@ -133,6 +133,24 @@ static void Start()
         Log::Fatal(L"MinHook failed to initialize");
     }
 
+    // Packed builds only: vtable slots, not code, so they can go in before the packer's check, and first, before the
+    // longer finders: the online subsystem starts during PreInit, a second or two after the stub hands over, and makes
+    // its voice interface there, as a dedicated server's only when IsDedicated already says so and the config has voice
+    // on. The config part goes in on the engine's thread as the subsystem first asks whether it is dedicated. (The
+    // config finder reads FOnlineVoiceImpl::Init, so before its slot is swapped.)
+    if (Packed::IsPacked())
+    {
+        if (Finder::ResolveConfigCombine())
+        {
+            FOnlineSubsystemImpl::BeforeFirstDedicatedCheck = &CombineServerConfig;
+        }
+        FOnlineVoiceImpl::Hook();
+        if (Finder::ResolveOnlineSubsystemIsDedicated())
+        {
+            FOnlineSubsystemImpl::HookVTables();
+        }
+    }
+
     if (!Finder::ResolveRuntime() || !Finder::ResolveServer())
     {
         Log::Fatal(L"Startup aborted: required addresses are missing");
@@ -144,16 +162,6 @@ static void Start()
     // on (its game instance, the default map, Listen) then runs with Core's hooks in place, as on the other builds.
     if (Packed::IsPacked())
     {
-        // Vtable slots, not code, so they can go in now: the online subsystem starts during PreInit and makes its voice
-        // interface there, as a dedicated server's only when IsDedicated already says so and the config has voice on.
-        // The config part goes in on the engine's thread as the subsystem first asks whether it is dedicated.
-        // (The config finder reads FOnlineVoiceImpl::Init, so before its slot is swapped.)
-        if (Finder::ResolveConfigCombine())
-        {
-            FOnlineSubsystemImpl::BeforeFirstDedicatedCheck = &CombineServerConfig;
-        }
-        FOnlineVoiceImpl::Hook();
-        FOnlineSubsystemImpl::HookVTables();
         if (!Finder::ResolveEngineInit() || !Packed::RunBeforeEngineInit(L"Default__GameEngine", &InstallHooks))
         {
             Log::Error(L"Packed exe: making the engine a server once it is up instead, which may be too late for UEngine::Init");
@@ -198,10 +206,7 @@ static void InstallHooks()
     UGameInstance::Hook();
     UFortGameInstance::Hook();
     FOnlineSubsystemImpl::Hook();
-    if (!bAfterPreInit)
-    {
-        FOnlineVoiceImpl::Hook();
-    }
+    FOnlineVoiceImpl::Hook();
     FFortMcpConfig::Hook();
     UMcpProfileGroup::Hook();
     AFortGameMode::Hook();

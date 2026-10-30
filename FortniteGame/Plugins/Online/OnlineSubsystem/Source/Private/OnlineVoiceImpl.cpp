@@ -61,10 +61,13 @@ namespace
 
 void FOnlineVoiceImpl::Hook()
 {
-    if (!Finder::ResolveOnlineVoice())
+    // Packed builds swap these slots as soon as the stub hands over, and a second swap would make Init call itself.
+    static bool bHooked = false;
+    if (bHooked || !Finder::ResolveOnlineVoice())
     {
         return;
     }
+    bHooked = true;
     Hooks::SwapVTable(L"FOnlineVoiceImpl::Init", Natives::FOnlineVoiceImpl_VTable, Natives::FOnlineVoiceImpl_InitIndex, reinterpret_cast<void*>(&InitHK), reinterpret_cast<void**>(&InitOG));
     Hooks::SwapVTable(L"FOnlineVoiceImpl::SerializeRemotePacket", Natives::FOnlineVoiceImpl_VTable, Natives::FOnlineVoiceImpl_SerializeRemotePacketIndex, reinterpret_cast<void*>(&SerializeRemotePacketHK), reinterpret_cast<void**>(&SerializeRemotePacketOG));
     if (Natives::FOnlineVoiceImpl_GetLocalPacketIndex >= 0)
@@ -83,6 +86,10 @@ bool FOnlineVoiceImpl::InitHK(FOnlineVoiceImpl* This)
 {
     // A server (dedicated: Core's IsDedicated) only forwards voice and succeeds without a voice engine; a client needs the
     // voice module's capture and Opus encoder ([Voice] bEnabled, a recording device).
+    if (void (*Callback)() = BeforeInit.exchange(nullptr))
+    {
+        Callback();
+    }
     const bool bReady = InitOG(This);
     bInitSeen = true;
     if (bReady)

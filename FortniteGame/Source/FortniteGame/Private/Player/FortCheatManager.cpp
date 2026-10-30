@@ -20,6 +20,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
+#include "Items/FortInventory.h"
 #include "Items/FortItem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -482,7 +483,7 @@ namespace
         { L"Player", nullptr, L"DisguiseView <back [distance] [up] | hide | normal>", L"how you see your own disguise: your camera pulls back for one bigger than you (the default; give distance and up to set how far), it's hidden from you only, or neither", ECheatMode::Both },
         { L"Player", L"BuildFree", L"BuildFree", L"building costs nothing (CraftFree: crafting)", ECheatMode::Both },
         { L"Player", L"ToggleInfiniteAmmo", L"ToggleInfiniteAmmo", L"(ToggleInfiniteDurability, ToggleInfiniteStamina)", ECheatMode::Both },
-        { L"Player", nullptr, L"NoCooldown [on | off]", L"no cooldown on your hero abilities and gadgets until you turn it off (toggles without on or off; ToggleNoCoolDown: the same)", ECheatMode::Both },
+        { L"Player", nullptr, L"NoCooldown [on | off]", L"no cooldown on your hero abilities and gadgets, and used gadgets recharge at once, until you turn it off (toggles without on or off; ToggleNoCoolDown: the same)", ECheatMode::Both },
         { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },
         { L"Player", L"DBNO", L"DBNO", L"knock yourself down (ReviveFromDBNO: get up)", ECheatMode::Both },
         { L"Player", L"RespawnPlayerServer", L"RespawnPlayerServer", L"respawn when dead", ECheatMode::Both },
@@ -1742,14 +1743,52 @@ namespace
         return static_cast<int32_t>(AbilitySystems.size());
     }
 
-    // Every frame on the game thread while a player has no cooldowns: a cooldown applied since the last frame comes off.
-    // Nothing is hooked: the abilities commit their cooldowns as ever, and the engine's own removal takes them off.
+    // Recharges the player's gadgets. A gadget's uses are an ammo item its ability spends as its cost (GA_Generic_BotTurret:
+    // one AmmoDataBotTurret), and an ammo item with a RegenCooldown (AmmoDataBotTurret: 240 s) comes back by itself: the
+    // world item keeps a timer while its count is under the regen stack that adds one each time it fires. Every such item
+    // under its stack size is set full through the inventory, as the timer itself does: the world item's own SetItemCount
+    // clears the timer once the count is full, and the count replicates, so the client's slot shows the gadget ready.
+    // How many items it refilled.
+    int32_t RechargeGadgets(AFortPlayerController* PlayerController)
+    {
+        AFortInventory* Inventory = PlayerController->WorldInventory;
+        if (!Inventory)
+        {
+            return 0;
+        }
+
+        int32_t Recharged = 0;
+        FFortItemList& ItemList = Inventory->Inventory;
+        TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+        for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+        {
+            UFortWorldItem* WorldItem = Instances[Index];
+            FFortItemEntry* Entry = WorldItem ? &static_cast<FFortItemEntry&>(WorldItem->ItemEntry) : nullptr;
+            UFortAmmoItemDefinition* AmmoDefinition = Entry ? Cast<UFortAmmoItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)) : nullptr;
+            if (!AmmoDefinition || !(AmmoDefinition->RegenCooldown > 0.0f))
+            {
+                continue;
+            }
+            const int32_t Full = Inventory->GetMaxStackSize(AmmoDefinition);
+            if (Entry->Count < Full)
+            {
+                Inventory->UpdateWorldItemCount(WorldItem, Full);
+                ++Recharged;
+            }
+        }
+        return Recharged;
+    }
+
+    // Every frame on the game thread while a player has no cooldowns: a cooldown applied since the last frame comes off,
+    // and a gadget used since then is recharged. Nothing is hooked: the abilities commit their cooldowns and spend their
+    // gadget ammo as ever, and the engine's own removal and the inventory's own count update undo them.
     void TickNoCooldown()
     {
         std::erase_if(NoCooldownPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
         for (const TWeakObjectPtr<AFortPlayerController>& Known : NoCooldownPlayers)
         {
             ClearCooldowns(Known.Get());
+            RechargeGadgets(Known.Get());
         }
         bClearingCooldowns = !NoCooldownPlayers.empty() && GameThread::Enqueue(&TickNoCooldown);
     }
@@ -1794,11 +1833,12 @@ void UFortCheatManager::NoCooldown(const FString& Arguments)
         return;
     }
     const int32_t AbilitySystems = ClearCooldowns(PlayerController);
+    const int32_t Recharged = RechargeGadgets(PlayerController);
     if (!bClearingCooldowns)
     {
         bClearingCooldowns = GameThread::Enqueue(&TickNoCooldown);
     }
-    UE_LOG(LogFortCheats, Log, TEXT("NoCooldown: %s on, %d ability systems"), *GetNameSafe(PlayerController), AbilitySystems);
+    UE_LOG(LogFortCheats, Log, TEXT("NoCooldown: %s on, %d ability systems, %d gadgets recharged"), *GetNameSafe(PlayerController), AbilitySystems, Recharged);
     Reply(AbilitySystems > 0 ? TEXT("No cooldowns: your abilities and gadgets are ready again as soon as you use them (nocooldown off: cooldowns again)")
                              : TEXT("No cooldowns (nocooldown off: cooldowns again); you have no abilities yet, and they'll have none once you do"));
 #endif

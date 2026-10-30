@@ -14,11 +14,16 @@ namespace
         UpdateServicePermissionsOG(Environment, Context, ServiceConfig, Extra);
 
 #if WITH_SERVER_CODE
-        if (!ServiceConfig->FindServicePermissions(DedicatedServerServicePermissionsName))
-        {
-            ServiceConfig->ServicePermissions.Add(FMcpServicePermissions{ DedicatedServerServicePermissionsName, FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret });
-        }
+        FFortMcpConfig::AddDedicatedServerPermissions(*ServiceConfig);
 #endif
+    }
+}
+
+void FFortMcpConfig::AddDedicatedServerPermissions(FMcpServiceConfig& ServiceConfig)
+{
+    if (!ServiceConfig.FindServicePermissions(DedicatedServerServicePermissionsName))
+    {
+        ServiceConfig.ServicePermissions.Add(FMcpServicePermissions{ DedicatedServerServicePermissionsName, DedicatedServerClientId, DedicatedServerClientSecret });
     }
 }
 

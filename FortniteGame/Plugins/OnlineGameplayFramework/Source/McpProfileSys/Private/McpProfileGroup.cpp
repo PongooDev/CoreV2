@@ -6,6 +6,7 @@
 #include "McpServiceConfig.h"
 #include "Natives.h"
 #include "OnlineSubsystemMcp.h"
+#include "Online/NotForLicensees/FortMcpConfig.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogProfileSys, Log, All);
 
@@ -41,6 +42,13 @@ void UMcpProfileGroup::SendRequestNow(FProfileHttpRequest& Request)
     {
 #if WITH_SERVER_CODE
         const FMcpServicePermissions* Permissions = McpService->ServiceConfig.FindServicePermissions(DedicatedServerServicePermissionsName);
+        if (!Permissions)
+        {
+            // On a packed exe the service config is read during PreInit, before Core's FortMcpConfig hook is enabled
+            // (it waits for the packer's code check), so the server's permissions were never added: add them now.
+            FFortMcpConfig::AddDedicatedServerPermissions(McpService->ServiceConfig);
+            Permissions = McpService->ServiceConfig.FindServicePermissions(DedicatedServerServicePermissionsName);
+        }
         if (Permissions)
         {
             bStarted = McpSubsystem->QueueRequest(*McpService, Permissions->Id, Request.HttpRequest.ToSharedRef(), ErrorStr);

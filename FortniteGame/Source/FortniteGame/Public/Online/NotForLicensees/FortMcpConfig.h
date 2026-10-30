@@ -9,4 +9,6 @@ public:
     static constexpr const wchar_t* DedicatedServerClientSecret = L"111aa434a6780d54f5cf759149639f20";
 
     static void Hook();
+    // Adds the "DedicatedServer" service permission above unless the config already has it.
+    static void AddDedicatedServerPermissions(struct FMcpServiceConfig& ServiceConfig);
 };

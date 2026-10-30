@@ -173,7 +173,12 @@ namespace
         {
             const uintptr_t Candidate = Finder::RelativeTarget(Site, 1, 5);
             const uintptr_t GetNames = Finder::NextCall(Candidate, 0x20);
-            const uintptr_t Mov = GetNames ? FindInstruction(GetNames, GetNames + 0x20, { 0x48, 0x8B, 0x05 }) : 0;
+            uintptr_t Mov = GetNames ? FindInstruction(GetNames, GetNames + 0x20, { 0x48, 0x8B, 0x05 }) : 0;
+            if (GetNames && !Mov)
+            {
+                // 1.10's lookup (FName::GetDisplayNameEntry, 0xC38C30) loads GNames into r9.
+                Mov = FindInstruction(GetNames, GetNames + 0x20, { 0x4C, 0x8B, 0x0D });
+            }
             if (Mov)
             {
                 AppendString = Candidate;
@@ -920,9 +925,9 @@ namespace
         Require(L"UGameMapsSettings::GetGlobalDefaultGameMode", Natives::UGameMapsSettings_GetGlobalDefaultGameMode, GlobalDefaultGameMode);
     }
 
-    void ResolveCreateDefaultObject()
+    // Votes on the vtable slot called right after the inlined UClass::GetDefaultObject's null check of the CDO at DefaultObject.
+    bool VoteCreateDefaultObject(int32_t DefaultObject, int32_t& OutWinner, int32_t& OutWinnerVotes, int32_t& OutTotal)
     {
-        const int32_t DefaultObject = ObjectLayout::Current.UClass_ClassDefaultObject;
         const uintptr_t Begin = Finder::TextBegin();
         const uintptr_t End = Finder::TextEnd();
 
@@ -971,7 +976,43 @@ namespace
             }
         }
 
-        if (Winner > 0 && Winner % 8 == 0 && WinnerVotes * 10 >= Total * 9)
+        OutWinner = Winner;
+        OutWinnerVotes = WinnerVotes;
+        OutTotal = Total;
+        return Winner > 0 && Winner % 8 == 0 && WinnerVotes * 10 >= Total * 9;
+    }
+
+    void ResolveCreateDefaultObject()
+    {
+        int32_t Winner = -1;
+        int32_t WinnerVotes = 0;
+        int32_t Total = 0;
+        bool bPassed = VoteCreateDefaultObject(ObjectLayout::Current.UClass_ClassDefaultObject, Winner, WinnerVotes, Total);
+        if (!bPassed)
+        {
+            // 1.10's UClass holds the CDO at +0xF8: the true offset carries hundreds of agreeing sites, every other a handful.
+            const int32_t Default = ObjectLayout::Current.UClass_ClassDefaultObject;
+            for (int32_t Offset = Default - 0x20; Offset <= Default + 0x20; Offset += static_cast<int32_t>(sizeof(void*)))
+            {
+                int32_t OffsetWinner = -1;
+                int32_t OffsetVotes = 0;
+                int32_t OffsetTotal = 0;
+                if (Offset != Default && VoteCreateDefaultObject(Offset, OffsetWinner, OffsetVotes, OffsetTotal) && OffsetVotes >= 100 && OffsetVotes > WinnerVotes)
+                {
+                    ObjectLayout::Current.UClass_ClassDefaultObject = Offset;
+                    Winner = OffsetWinner;
+                    WinnerVotes = OffsetVotes;
+                    Total = OffsetTotal;
+                    bPassed = true;
+                }
+            }
+            if (bPassed)
+            {
+                Log::Info(L"Object layout: UClass::ClassDefaultObject at +0x{:X}", ObjectLayout::Current.UClass_ClassDefaultObject);
+            }
+        }
+
+        if (bPassed)
         {
             Natives::UClass_CreateDefaultObjectIndex = Winner / 8;
             Log::Info(L"Finder: UClass::CreateDefaultObject is slot 0x{:X} ({} of {} sites)", Winner / 8, WinnerVotes, Total);
@@ -1006,6 +1047,18 @@ namespace
             for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0x69, 0x0D, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B }); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), { 0x69, 0x0D, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B }))
             {
                 if (!Finder::FunctionStart(Site) && Byte(Site - 1) == 0x90 && FindInstruction(Site + 10, Site + 0x20, { 0x81, 0xC1, 0x6B, 0x63, 0x19, 0x36 }))
+                {
+                    SRand = Site;
+                    ++Matches;
+                }
+            }
+        }
+        if (!Matches)
+        {
+            // 1.10's has no .pdata entry either, and its padding is filler bytes, so it is known by being called.
+            for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0x69, 0x0D, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B }); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), { 0x69, 0x0D, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B }))
+            {
+                if (!Finder::FunctionStart(Site) && FindInstruction(Site + 10, Site + 0x20, { 0x81, 0xC1, 0x6B, 0x63, 0x19, 0x36 }) && !Finder::CallsTo(Site, false).empty())
                 {
                     SRand = Site;
                     ++Matches;
@@ -1050,10 +1103,12 @@ namespace
             return;
         }
 
-        for (uintptr_t Site = FindInstruction(PreInit, PreInitEnd, { 0x41, 0xB5, 0x01, 0x40, 0x88, 0x35 }); Site; Site = FindInstruction(Site + 1, PreInitEnd, { 0x41, 0xB5, 0x01, 0x40, 0x88, 0x35 }))
+        // mov r13b, 1 (r12b on 1.10); mov [GIsServer], sil; mov [GIsClient], r13b.
+        for (uintptr_t Site = FindInstruction(PreInit, PreInitEnd, { 0x41, -1, 0x01, 0x40, 0x88, 0x35 }); Site; Site = FindInstruction(Site + 1, PreInitEnd, { 0x41, -1, 0x01, 0x40, 0x88, 0x35 }))
         {
             const uintptr_t ClientStore = Site + 10;
-            if (Byte(ClientStore) == 0x44 && Byte(ClientStore + 1) == 0x88 && Byte(ClientStore + 2) == 0x2D && Finder::RelativeTarget(ClientStore, 3, 7) == GIsClient)
+            const uint8_t Register = Byte(Site + 1) & 0x07;
+            if ((Byte(Site + 1) & 0xF8) == 0xB0 && Byte(ClientStore) == 0x44 && Byte(ClientStore + 1) == 0x88 && Byte(ClientStore + 2) == (0x05 | Register << 3) && Finder::RelativeTarget(ClientStore, 3, 7) == GIsClient)
             {
                 Sites::PreInitRegularClient = reinterpret_cast<uint8_t*>(Site);
                 break;
@@ -1089,9 +1144,9 @@ namespace
         return Checks;
     }
 
-    void RequireChecks(const wchar_t* Name, std::vector<uint8_t*>& Destination, std::vector<uint8_t*> Checks, size_t Expected)
+    void RequireChecks(const wchar_t* Name, std::vector<uint8_t*>& Destination, std::vector<uint8_t*> Checks, size_t Expected, size_t MaxExpected = 0)
     {
-        if (Checks.size() != Expected)
+        if (Checks.size() < Expected || Checks.size() > std::max(Expected, MaxExpected))
         {
             Log::Error(L"Finder: {} has {} dedicated-server checks, expected {}", Name, Checks.size(), Expected);
             ++MissingCount;
@@ -1107,12 +1162,15 @@ namespace
         if (Sites::PreInitRegularClient)
         {
             const uintptr_t PreInitEnd = Finder::FunctionEnd(PreInit);
-            for (uintptr_t Test = FindInstruction(reinterpret_cast<uintptr_t>(Sites::PreInitRegularClient), PreInitEnd, { 0x45, 0x84, 0xED, 0x0F, 0x84 }); Test; Test = FindInstruction(Test + 1, PreInitEnd, { 0x45, 0x84, 0xED, 0x0F, 0x84 }))
+            const uint8_t Register = Sites::PreInitRegularClient[1] & 0x07;
+            const int32_t Test = 0xC0 | Register << 3 | Register;
+            for (uintptr_t At = FindInstruction(reinterpret_cast<uintptr_t>(Sites::PreInitRegularClient), PreInitEnd, { 0x45, 0x84, Test, 0x0F, 0x84 }); At; At = FindInstruction(At + 1, PreInitEnd, { 0x45, 0x84, Test, 0x0F, 0x84 }))
             {
-                PreInitChecks.push_back(reinterpret_cast<uint8_t*>(Test + 3));
+                PreInitChecks.push_back(reinterpret_cast<uint8_t*>(At + 3));
             }
         }
-        RequireChecks(L"FEngineLoop::PreInit", Sites::PreInitDedicatedServerChecks, std::move(PreInitChecks), 5);
+        // 1.10's PreInit guards a second movie player call (0x291B32) as well.
+        RequireChecks(L"FEngineLoop::PreInit", Sites::PreInitDedicatedServerChecks, std::move(PreInitChecks), 5, 6);
         RequireChecks(L"UEngine::Init", Sites::EngineInitDedicatedServerChecks, CommandletChecks(FunctionOf(L"Initializing Engine...")), 2);
         RequireChecks(L"UGameEngine::Tick", Sites::GameEngineTickDedicatedServerChecks, CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick)), 2);
     }
@@ -1122,7 +1180,17 @@ namespace
         uintptr_t LogSingleton = 0;
         uintptr_t AddOutputDevice = 0;
         const uintptr_t Ref = OnlyRef(L"AllowStdOutLogVerbosity");
-        if (const uintptr_t Tail = Ref ? FindInstruction(Ref, Ref + 0x100, { 0xE8, -1, -1, -1, -1, 0x48, 0x8B, 0xC8, 0x48, 0x8B, 0xD3, 0x48, 0x83, 0xC4, -1, 0x5B, 0xE9 }) : 0)
+        uintptr_t Tail = Ref ? FindInstruction(Ref, Ref + 0x100, { 0xE8, -1, -1, -1, -1, 0x48, 0x8B, 0xC8, 0x48, 0x8B, 0xD3, 0x48, 0x83, 0xC4, -1, 0x5B, 0xE9 }) : 0;
+        if (Ref && !Tail)
+        {
+            // 1.10 calls the FOutputDeviceStdOutput constructor (0x288BC0) instead of inlining it; the tail follows that call.
+            const std::vector<uintptr_t> Calls = Finder::CallsTo(Finder::FunctionStart(Ref), false);
+            if (Calls.size() == 1)
+            {
+                Tail = FindInstruction(Calls.front(), Calls.front() + 0x100, { 0xE8, -1, -1, -1, -1, 0x48, 0x8B, 0xC8, 0x48, 0x8B, 0xD3, 0x48, 0x83, 0xC4, -1, 0x5B, 0xE9 });
+            }
+        }
+        if (Tail)
         {
             LogSingleton = Finder::RelativeTarget(Tail, 1, 5);
             AddOutputDevice = Finder::RelativeTarget(Tail + 16, 1, 5);
@@ -1150,7 +1218,13 @@ namespace
             Logf = Target;
         }
         Require(L"FMsg::Logf_Internal", Natives::FMsg_Logf_Internal, Logf);
-        Require(L"FDebug::AssertFailed", Natives::FDebug_AssertFailed, FunctionOf(L"Assertion failed: %s"));
+        // 1.10's formats the expression with "%s" and only keeps the full message.
+        uintptr_t AssertFailed = FunctionOf(L"Assertion failed: %s");
+        if (!AssertFailed)
+        {
+            AssertFailed = FunctionOf(L"Assertion failed: %s [File:%s] [Line: %i] \n%s\n");
+        }
+        Require(L"FDebug::AssertFailed", Natives::FDebug_AssertFailed, AssertFailed);
         Require(L"LowLevelFatalErrorHandler", Natives::LowLevelFatalErrorHandler, FunctionOf(L"LowLevelFatalError"));
     }
 }

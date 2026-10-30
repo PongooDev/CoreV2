@@ -7,6 +7,7 @@
 #include "GameThread.h"
 #include "Hooks.h"
 #include "Log.h"
+#include "Packed.h"
 #include "Engine/Console.h"
 #include "Engine/GameEngine.h"
 #include "Engine/GameViewportClient.h"
@@ -21,10 +22,25 @@
 #include "UI/FortPartyContext.h"
 #include "UI/FortUITeamInfo.h"
 
+static void Start();
+
 void Boot::Initialize()
 {
     Log::Initialize(L"Client");
     Log::Info(L"Core Client starting");
+
+    // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched
+    // into it, so hand the rest over to a watcher that runs once the stub has finished.
+    if (Packed::RunAfterStub(&Start))
+    {
+        return;
+    }
+
+    Start();
+}
+
+static void Start()
+{
     CrashLog::Install();
 
     if (MH_Initialize() != MH_OK)

@@ -5,7 +5,10 @@
 #include "Hooks.h"
 #include "HttpRedirect.h"
 #include "Log.h"
+#include "Packed.h"
 #include "XmppClient.h"
+
+static void Start();
 
 void Boot::Initialize()
 {
@@ -13,6 +16,18 @@ void Boot::Initialize()
     Log::Initialize(L"Redirect");
     Log::Info(L"Core Redirect starting");
 
+    // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched
+    // into it, so hand the rest over to a watcher that runs once the stub has finished.
+    if (Packed::RunAfterStub(&Start))
+    {
+        return;
+    }
+
+    Start();
+}
+
+static void Start()
+{
     if (MH_Initialize() != MH_OK)
     {
         Log::Error(L"MinHook failed to initialize");

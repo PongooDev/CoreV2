@@ -10,6 +10,7 @@
 #include "Misc/App.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Log.h"
+#include "Packed.h"
 #include "Engine/GameEngine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/NetDriver.h"
@@ -81,11 +82,26 @@ namespace
     }
 }
 
+static void Start();
+
 void Boot::Initialize()
 {
     Configuration::Load();
     Log::Initialize(L"Server");
     Log::Info(L"Core V2 starting");
+
+    // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched
+    // into it, so hand the rest over to a watcher that runs once the stub has finished.
+    if (Packed::RunAfterStub(&Start))
+    {
+        return;
+    }
+
+    Start();
+}
+
+static void Start()
+{
     CrashLog::Install();
     FCommandLine::ApproveServerSwitches();
     HonourTimerResolution();

@@ -97,6 +97,7 @@
     <ClInclude Include="XmppClient.h" />
     <ClInclude Include="..\Core\Public\BackendRequest.h" />
     <ClInclude Include="..\Core\Public\Configuration.h" />
+    <ClInclude Include="..\Core\Public\CrashLog.h" />
     <ClInclude Include="..\Core\Public\Diagnostics.h" />
     <ClInclude Include="..\Core\Public\Finder.h" />
     <ClInclude Include="..\Core\Public\GameThread.h" />
@@ -104,6 +105,7 @@
     <ClInclude Include="..\Core\Public\Log.h" />
     <ClInclude Include="..\Core\Public\Natives.h" />
     <ClInclude Include="..\Core\Public\ObjectLayout.h" />
+    <ClInclude Include="..\Core\Public\Packed.h" />
     <ClInclude Include="..\Core\Public\Reflection.h" />
     <ClInclude Include="..\Core\Public\ReflectionParams.h" />
     <ClInclude Include="..\Core\Public\StructArray.h" />
@@ -236,6 +238,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameSession.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameState.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameStateBase.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameUserSettings.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\Info.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\MovementComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\OnlineReplStructs.h" />
@@ -245,7 +248,6 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\ProjectileMovementComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\WorldSettings.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\GameplayStatics.h" />
-    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\GameFramework\GameUserSettings.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetMathLibrary.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetNodeHelperLibrary.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetSystemLibrary.h" />
@@ -373,6 +375,7 @@
     <ClCompile Include="dllmain.cpp" />
     <ClCompile Include="..\Core\Private\BackendRequest.cpp" />
     <ClCompile Include="..\Core\Private\Configuration.cpp" />
+    <ClCompile Include="..\Core\Private\CrashLog.cpp" />
     <ClCompile Include="..\Core\Private\Diagnostics.cpp" />
     <ClCompile Include="..\Core\Private\Finder.cpp" />
     <ClCompile Include="..\Core\Private\GameThread.cpp" />
@@ -380,6 +383,7 @@
     <ClCompile Include="..\Core\Private\Hooks.cpp" />
     <ClCompile Include="..\Core\Private\Log.cpp" />
     <ClCompile Include="..\Core\Private\ObjectLayout.cpp" />
+    <ClCompile Include="..\Core\Private\Packed.cpp" />
     <ClCompile Include="..\Core\Private\Reflection.cpp" />
     <ClCompile Include="..\Core\Private\Resolve.cpp" />
     <ClCompile Include="..\Core\Private\pch.cpp">
@@ -431,6 +435,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameInstance.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameModeBase.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameNetworkManager.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameUserSettings.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameViewportClient.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameplayStatics.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\KismetNodeHelperLibrary.cpp" />
@@ -450,7 +455,6 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AI\Navigation\NavigationSystem.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Curves\CurveBase.cpp" />
-    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameUserSettings.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Kismet\KismetMathLibrary.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Kismet\KismetSystemLibrary.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UserInterface\Console.cpp" />

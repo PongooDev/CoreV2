@@ -294,17 +294,17 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
 std::vector<FVector> AFortPlayerControllerAthena::GetInventoryDropSpots(AActor* DeadPawn, const FVector& DeathLocation, int32_t Count)
 {
     // The pickups are tossed from the body to their own spots around it. A ring 80 out with 50 between them left a pile
-    // (#89: pickups are 60 across, AFortPickup's constructor 0x65BA90). They scatter a few meters out instead: rings from
-    // 1.5m, a meter apart, with about a meter between neighbours, each ring turned against the last and each spot moved a
-    // little at random. The stripped death drop leaves nothing to say how far 1.7.2 threw them; the toss itself
+    // (#89: pickups are 60 across, AFortPickup's constructor 0x65BA90), and rings from 1.5m a meter apart spread too wide.
+    // They gather close around the body instead: rings from 75 out, 65 apart, with a hand's width between neighbours, each
+    // ring turned against the last and each spot moved a little at random. The stripped death drop leaves nothing to say how far 1.7.2 threw them; the toss itself
     // (AFortPickup::TossPickup, 0x6622F0) only has a fallback, a pickup aimed at the spot it starts from goes 512 out in a
     // random direction (VRand, 0x4F4E10), so these distances are chosen. A wall between the body and a spot pulls the spot
     // in to the wall, and each spot is traced down to the floor below it, from a little over the body's height (the toss
     // lands a pickup where it is aimed and finds no ground, #72).
     constexpr float Pi = 3.1415926535897932f;
-    constexpr float FirstRingRadius = 150.0f;
-    constexpr float RingSpacing = 100.0f;
-    constexpr float PickupSpacing = 110.0f;
+    constexpr float FirstRingRadius = 75.0f;
+    constexpr float RingSpacing = 65.0f;
+    constexpr float PickupSpacing = 70.0f;
     constexpr float PickupRadius = 30.0f;
     constexpr float TraceHeight = 50.0f;
     constexpr float TraceDepth = 100000.0f;

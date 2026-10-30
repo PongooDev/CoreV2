@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Pawns/FortAIPawn.h"
+#include "Finder.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
@@ -53,7 +54,8 @@ void AFortAIPawn::HookVTables()
 
     InventoryOwnerInterfaceOffset = reinterpret_cast<uint8_t*>(InventoryOwner) - reinterpret_cast<uint8_t*>(PawnDefault);
     const uint8_t* PawnRemove = static_cast<const uint8_t*>((*reinterpret_cast<void***>(InventoryOwner))[RemoveIndex]);
-    if (PawnRemove[0] != 0x32 || PawnRemove[1] != 0xC0 || PawnRemove[2] != 0xC3)
+    // The stripped stub is `xor al, al; ret`; on an exe with moved code (1.9.1) its return is rewritten.
+    if (!Finder::BodyIs(reinterpret_cast<uintptr_t>(PawnRemove), { 0x32, 0xC0, 0xC3 }))
     {
         Log::Error(L"Finder: AFortAIPawn::RemoveInventoryItem is not the stripped stub");
         return;

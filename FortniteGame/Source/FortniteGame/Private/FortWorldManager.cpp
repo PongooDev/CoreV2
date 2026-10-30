@@ -37,6 +37,7 @@
 #include "Quests/FortQuestManager.h"
 #include "Templates/Casts.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 
 #include <algorithm>
@@ -94,6 +95,118 @@ namespace
     }
 
 #if WITH_SERVER_CODE
+    // A reflected member of Container (an object or struct of type Owner), or null when the build doesn't have it:
+    // FFortZoneInstanceDetails gained its alert members over the builds (MissionAlertCategoryName from 1.7.2).
+    const UProperty* FindMember(const UStruct* Owner, const wchar_t* Name, EClassCastFlags Kind)
+    {
+        const UProperty* Property = Owner ? Owner->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        return Property && Property->GetClass()->HasAnyCastFlag(Kind) ? Property : nullptr;
+    }
+
+    // The elements of a reflected TArray of structs Container.Name: the inner struct, the array, and its stride.
+    struct FStructArrayView
+    {
+        const UScriptStruct* Struct = nullptr;
+        const FScriptArray* Array = nullptr;
+        int32_t Stride = 0;
+
+        int32_t Num() const { return Array ? Array->Num() : 0; }
+        const uint8_t* operator[](int32_t Index) const { return static_cast<const uint8_t*>(Array->GetData()) + static_cast<size_t>(Index) * Stride; }
+    };
+
+    FStructArrayView StructArrayMember(const UStruct* Owner, const void* Container, const wchar_t* Name)
+    {
+        const UArrayProperty* Property = static_cast<const UArrayProperty*>(FindMember(Owner, Name, CASTCLASS_UArrayProperty));
+        const UProperty* Inner = Property && Container ? static_cast<const UProperty*>(Property->Inner) : nullptr;
+        if (!Inner || !Inner->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty))
+        {
+            return {};
+        }
+        return { static_cast<const UStructProperty*>(Inner)->Struct, Property->ContainerPtrToValuePtr<FScriptArray>(Container), Inner->ElementSize };
+    }
+
+    // Save the World mission alerts (Core-Backend #129). world/validate's reply is the world record's ZoneInstanceInfo
+    // (FFortZoneInstanceDetails): ZoneModifiers (the mission's and the alert's GameplayModifier items), MissionAlertRewards
+    // and MissionAlertCategoryName. The game applies them itself, on the path Core's zone flow takes:
+    // - AFortWorldManager HandleWorldQueryComplete (1.9 0x658980, 1.9.1 0x658810; ticked once the record's query is
+    //   complete) hands the details to the game state's vtable +0x860 (1.9 0x5CCE10, 1.9.1 0x5CCA80) whenever their
+    //   ZoneThemeClass is set, which world/validate always echoes (the same call sets the zone theme and the mission
+    //   generator Core's mission generation reads). That registers each ZoneModifiers item that is a
+    //   UFortGameplayModifierItemDefinition (found by template id through the asset manager, once per quantity) into
+    //   ActiveGameplayModifiers on the authority, and copies MissionAlertRewards' items into MissionAlertRewards.
+    // - AFortGameMode::OnInitWorldRecordComplete (1.9 0x5BF350) looks MissionAlertCategoryName up in MissionAlertCategories
+    //   and adds the row's CategoryTagsContainer (StormCategory/StormLowCategory: Stat.MissionAlert.Storm) to the game
+    //   mode's GameContextTags, the context of every quest stat event (complete_stormzone*).
+    // This only reports the result, once the zone starts loading (before missions, players and AI exist).
+    void LogMissionAlert(AFortWorldManager* WorldManager)
+    {
+        UFortWorldRecord* Record = WorldManager->CurrentWorldRecord;
+        const UStructProperty* DetailsProperty = Record ? static_cast<const UStructProperty*>(FindMember(UFortWorldRecord::StaticClass(), L"ZoneInstanceInfo", CASTCLASS_UStructProperty)) : nullptr;
+        const UScriptStruct* DetailsStruct = DetailsProperty ? static_cast<UScriptStruct*>(DetailsProperty->Struct) : nullptr;
+        if (!DetailsStruct)
+        {
+            return;
+        }
+        const void* Details = DetailsProperty->ContainerPtrToValuePtr<void>(Record);
+
+        const UProperty* CategoryProperty = FindMember(DetailsStruct, L"MissionAlertCategoryName", CASTCLASS_UStrProperty);
+        const std::wstring Category = CategoryProperty ? CategoryProperty->ContainerPtrToValuePtr<FString>(Details)->ToStdString() : std::wstring();
+
+        // An FMcpLootResult member's Items (FMcpLootEntry: ItemType is the template id).
+        const auto LootItems = [&](const wchar_t* Name) -> std::vector<std::pair<std::wstring, int32_t>>
+        {
+            std::vector<std::pair<std::wstring, int32_t>> Items;
+            const UStructProperty* Result = static_cast<const UStructProperty*>(FindMember(DetailsStruct, Name, CASTCLASS_UStructProperty));
+            const UScriptStruct* ResultStruct = Result ? static_cast<UScriptStruct*>(Result->Struct) : nullptr;
+            const FStructArrayView Entries = StructArrayMember(ResultStruct, ResultStruct ? Result->ContainerPtrToValuePtr<void>(Details) : nullptr, L"Items");
+            const UProperty* ItemType = FindMember(Entries.Struct, L"ItemType", CASTCLASS_UStrProperty);
+            const UProperty* Quantity = FindMember(Entries.Struct, L"Quantity", CASTCLASS_UIntProperty);
+            for (int32_t Index = 0; ItemType && Quantity && Index < Entries.Num(); ++Index)
+            {
+                Items.emplace_back(ItemType->ContainerPtrToValuePtr<FString>(Entries[Index])->ToStdString(), *Quantity->ContainerPtrToValuePtr<int32_t>(Entries[Index]));
+            }
+            return Items;
+        };
+        const auto Modifiers = LootItems(L"ZoneModifiers");
+        const auto Rewards = LootItems(L"MissionAlertRewards");
+        if (Category.empty() && Modifiers.empty() && Rewards.empty())
+        {
+            return;
+        }
+
+        int32_t ExpectedModifiers = 0;
+        std::wstring Expected;
+        for (const auto& [TemplateId, Quantity] : Modifiers)
+        {
+            ExpectedModifiers += _wcsnicmp(TemplateId.c_str(), L"GameplayModifier:", 17) == 0 ? Quantity : 0;
+            Expected += (Expected.empty() ? L"" : L", ") + TemplateId + (Quantity != 1 ? std::format(L" x{}", Quantity) : L"");
+        }
+
+        UWorld* World = WorldManager->GetWorld();
+        UObject* GameState = World ? reinterpret_cast<UObject*>(World->GetGameState()) : nullptr;
+        const UClass* GameStateClass = GameState ? GameState->GetClass() : nullptr;
+        const UStructProperty* ActiveProperty = static_cast<const UStructProperty*>(FindMember(GameStateClass, L"ActiveGameplayModifiers", CASTCLASS_UStructProperty));
+        const UScriptStruct* ActiveStruct = ActiveProperty ? static_cast<UScriptStruct*>(ActiveProperty->Struct) : nullptr;
+        const FStructArrayView Active = StructArrayMember(ActiveStruct, ActiveStruct ? ActiveProperty->ContainerPtrToValuePtr<void>(GameState) : nullptr, L"Items");
+        const UProperty* ModifierDef = FindMember(Active.Struct, L"ModifierDef", CASTCLASS_UObjectPropertyBase);
+        std::wstring Registered;
+        for (int32_t Index = 0; ModifierDef && Index < Active.Num(); ++Index)
+        {
+            UObject* Definition = *ModifierDef->ContainerPtrToValuePtr<UObject*>(Active[Index]);
+            Registered += (Registered.empty() ? L"" : L", ") + (Definition ? Definition->GetName().ToStdString() : std::wstring(L"None"));
+        }
+
+        const UArrayProperty* RewardsProperty = static_cast<const UArrayProperty*>(FindMember(GameStateClass, L"MissionAlertRewards", CASTCLASS_UArrayProperty));
+        const int32_t GameStateRewards = RewardsProperty ? RewardsProperty->ContainerPtrToValuePtr<FScriptArray>(GameState)->Num() : -1;
+
+        Log::Info(L"Mission alert: {}, modifiers: {} registered, rewards: {} (record: {} modifier items [{}], {} reward items)", Category.empty() ? L"none" : Category, Registered.empty() ? L"none" : Registered,
+            GameStateRewards, Modifiers.size(), Expected.empty() ? L"none" : Expected, Rewards.size());
+        if (Active.Num() < ExpectedModifiers || (GameStateRewards >= 0 && GameStateRewards < static_cast<int32_t>(Rewards.size())))
+        {
+            Log::Warning(L"Mission alert: the game state has {} of the record's {} gameplay modifiers and {} of its {} alert rewards", Active.Num(), ExpectedModifiers, GameStateRewards, Rewards.size());
+        }
+    }
+
     // The shared-mission rules of the surviving client check (AFortTheaterMapViewer::GetMissionQuestValidity -> 0x611AE0).
     struct FGlobalMissionFilter
     {
@@ -266,6 +379,8 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
     {
         if (!bCreatedMissionRecord)
         {
+            LogMissionAlert(this);
+
             UWorld* World = GetWorld();
             AFortGameMode* GameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
 

@@ -27,6 +27,15 @@ public:
     // starts during PreInit), before it gets the answer.
     static inline std::atomic<void (*)()> BeforeFirstDedicatedCheck = nullptr;
 
+    // Packed builds only (set by HookVTables): the subsystems that have asked whether they are dedicated, the first
+    // MaxSubsystems of them, empty slots null. It's how Core finds the MCP subsystem once its hooks are in, whose
+    // services read their configs during PreInit (FFortMcpConfig::AddDedicatedServerPermissionsToLoadedServices).
+    static constexpr int32_t MaxSubsystems = 8;
+    static inline std::atomic<const FOnlineSubsystemImpl*> Subsystems[MaxSubsystems] = {};
+
 private:
+    static inline bool bRecordSubsystems = false;
+
+    static void Remember(const FOnlineSubsystemImpl* Subsystem);
     static bool IsDedicatedHK(const FOnlineSubsystemImpl* This);
 };

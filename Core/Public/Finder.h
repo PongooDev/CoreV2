@@ -125,6 +125,8 @@ namespace Finder
     bool ResolveOnlineVoice();
     // UEngine::Init's vtable slot, from FEngineLoop::Init's GEngine->Init call (needs GEngine).
     bool ResolveEngineInit();
+    // FBaseServiceMcp::GetBasicAuth, which every MCP service's vtable holds (packed builds, FFortMcpConfig).
+    bool ResolveMcpBasicAuth();
     bool ResolveVoiceHandshake();
     bool ResolvePlayerControllerConsoleCommand(uintptr_t ServerCheatImplementation);
     bool ResolveAssetManagerLive();

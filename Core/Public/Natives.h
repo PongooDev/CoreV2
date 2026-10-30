@@ -208,6 +208,9 @@ namespace Natives
     inline int32_t* FGameplayAbilitySpecHandle_GHandleID = nullptr;
     inline void* SharedEmptyFunction = nullptr;
     inline void (*FortMcpConfig_UpdateServicePermissions)(void* Environment, void* Context, FMcpServiceConfig* ServiceConfig, void* Extra) = nullptr;
+    // FBaseServiceMcp::GetBasicAuth: a service's client credentials, from its config's ServicePermissions. Packed builds
+    // only (Finder::ResolveMcpBasicAuth), where it tells Core which objects are MCP services.
+    inline void* FBaseServiceMcp_GetBasicAuth = nullptr;
     inline void (*UMcpProfileGroup_SendRequestNow)(UMcpProfileGroup* This, FProfileHttpRequest& Request) = nullptr;
     // UMcpProfile::QueryProfile(const FMcpQueryComplete& OnComplete): the profile's whole query, by whichever URL its group
     // needs (another account's: the public one).

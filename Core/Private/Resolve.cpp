@@ -8104,6 +8104,27 @@ bool Finder::ResolveEngineInit()
     return false;
 }
 
+bool Finder::ResolveMcpBasicAuth()
+{
+    if (Natives::FBaseServiceMcp_GetBasicAuth)
+    {
+        return true;
+    }
+
+    // FBaseServiceMcp::GetBasicAuth(ClientId) (1.9.1 0x3AB6F50, BaseServiceMcp.cpp) looks the client up in its service's
+    // ServicePermissions and logs this when it isn't there. It's virtual and no service class overrides it, so the
+    // vtable of every service's FBaseServiceMcp part holds it.
+    const uintptr_t BasicAuth = FunctionOf(L"Missing client permissions. id=%s");
+    if (!BasicAuth || Finder::ReadOnlySlotsHolding(BasicAuth).empty())
+    {
+        Log::Error(L"Finder: FBaseServiceMcp::GetBasicAuth not found");
+        return false;
+    }
+    Natives::FBaseServiceMcp_GetBasicAuth = reinterpret_cast<void*>(BasicAuth);
+    Log::Info(L"Finder: FBaseServiceMcp::GetBasicAuth +0x{:X}", BasicAuth - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveOnlineVoice()
 {
     if (Natives::FOnlineVoiceImpl_VTable)

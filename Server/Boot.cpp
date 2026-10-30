@@ -194,6 +194,9 @@ static void InstallHooks()
             Log::Warning(L"Server config: the online subsystem never asked whether it is dedicated, merging the server settings now");
             Combine();
         }
+        // The MCP services read their configs during PreInit, before the FortMcpConfig hook below, so the server's
+        // client permission goes into them here, before anyone can join.
+        FFortMcpConfig::AddDedicatedServerPermissionsToLoadedServices();
     }
     else
     {

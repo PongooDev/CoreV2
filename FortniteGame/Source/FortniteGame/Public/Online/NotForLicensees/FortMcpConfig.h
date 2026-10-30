@@ -1,5 +1,7 @@
 #pragma once
 
+class FOnlineSubsystemMcp;
+
 class FFortMcpConfig
 {
 public:
@@ -11,4 +13,12 @@ public:
     static void Hook();
     // Adds the "DedicatedServer" service permission above unless the config already has it.
     static void AddDedicatedServerPermissions(struct FMcpServiceConfig& ServiceConfig);
+
+    // Packed builds only. Their hook above comes after PreInit, where every MCP service read its config, so the
+    // permission is added here instead, to each service of the subsystem as the hook would have: the identity's account
+    // service needs it to sign the server's client in (RegisterPlayers, UpdateInternetSession), the game service for
+    // profile and world requests. Returns how many services the subsystem has (0: it isn't an MCP subsystem).
+    static int32_t AddDedicatedServerPermissionsToServices(const FOnlineSubsystemMcp* Subsystem);
+    // The same for the subsystems the engine has asked whether they are dedicated (FOnlineSubsystemImpl::Subsystems).
+    static void AddDedicatedServerPermissionsToLoadedServices();
 };

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "McpProfileGroup.h"
+#include "Finder.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
 #include "McpProfile.h"
@@ -45,7 +46,12 @@ void UMcpProfileGroup::SendRequestNow(FProfileHttpRequest& Request)
         if (!Permissions)
         {
             // On a packed exe the service config is read during PreInit, before Core's FortMcpConfig hook is enabled
-            // (it waits for the packer's code check), so the server's permissions were never added: add them now.
+            // (it waits for the packer's code check), so the server's permissions were never added. Core adds them to
+            // every service once its hooks are in; should that have missed them, add them now, to all of them.
+            if (Finder::ResolveMcpBasicAuth())
+            {
+                FFortMcpConfig::AddDedicatedServerPermissionsToServices(McpSubsystem);
+            }
             FFortMcpConfig::AddDedicatedServerPermissions(McpService->ServiceConfig);
             Permissions = McpService->ServiceConfig.FindServicePermissions(DedicatedServerServicePermissionsName);
         }

@@ -485,6 +485,9 @@ namespace
         { L"Items", L"Badass", L"badass", L"god, build free, STW weapons", ECheatMode::SaveTheWorld },
         { L"Items", L"ListWeapons", L"listweapons", L"item names (listammo, listtraps)", ECheatMode::Both },
         { L"Player", L"God", L"god", L"invulnerable, toggles", ECheatMode::Both },
+        { L"Player", nullptr, L"unlimitedhealth [on | off]", L"take no damage", ECheatMode::Both },
+        { L"Player", L"ToggleInfiniteStamina", L"infinitestamina", L"stamina never runs out, toggles", ECheatMode::SaveTheWorld },
+        { L"Player", L"Pain", L"pain <amount>", L"hurt yourself", ECheatMode::Both },
         { L"Player", L"Fly", L"fly [speed]", L"fly (ghost: through walls; walk: stop)", ECheatMode::Both },
         { L"Player", L"TestInfJumps", L"testinfjumps", L"jump in the air, toggles", ECheatMode::Both },
         { L"Player", nullptr, L"speed <multiplier | reset>", L"move faster or slower", ECheatMode::Both },
@@ -493,7 +496,7 @@ namespace
         { L"Player", L"ChangeSize", L"changesize <scale>", L"your size", ECheatMode::Both },
         { L"Player", L"BuildFree", L"buildfree", L"free building, toggles (craftfree)", ECheatMode::Both },
         { L"Player", nullptr, L"infinitedurability [on | off]", L"items don't wear out", ECheatMode::Both },
-        { L"Player", nullptr, L"nocooldown [on | off]", L"no ability or gadget cooldowns", ECheatMode::Both },
+        { L"Player", nullptr, L"nocooldown [on | off]", L"no ability or gadget cooldowns, charges stay full", ECheatMode::Both },
         { L"Player", L"DBNO", L"dbno", L"knock yourself down (revivefromdbno)", ECheatMode::Both },
         { L"Player", L"RespawnPlayerServer", L"respawnplayerserver", L"respawn when dead", ECheatMode::Both },
         { L"Player", L"BackpackSetSize", L"backpacksetsize <slots>", L"backpack size", ECheatMode::Both },
@@ -518,15 +521,24 @@ namespace
         { L"World", nullptr, L"spawnactor <class or path> [scale]", L"spawn an actor at a scale", ECheatMode::Both },
         { L"World", nullptr, L"copytargetpath [class | mesh | name]", L"copy what you look at", ECheatMode::Both },
         { L"World", L"Slomo", L"slomo <speed>", L"game speed, for everyone", ECheatMode::Both },
-        { L"World", L"PlayersOnly", L"playersonly", L"freeze all but players, toggles", ECheatMode::Both },
         { L"World", L"DestroyTarget", L"destroytarget", L"destroy what you look at", ECheatMode::Both },
+        { L"World", L"DamageTarget", L"damagetarget <amount>", L"damage what you look at", ECheatMode::Both },
+        { L"World", L"DestroyAll", L"destroyall <class>", L"destroy every actor of a class", ECheatMode::Both },
+        { L"World", L"DestroyPawns", L"destroypawns <class>", L"destroy every pawn of a class", ECheatMode::Both },
+        { L"World", L"MakeGods", L"makegods <class>", L"pawns of a class can't be hurt, toggles", ECheatMode::Both },
+        { L"World", L"MakeBuildingActorsGod", L"makebuildingactorsgod", L"buildings can't be damaged, toggles", ECheatMode::Both },
         { L"World", L"KillPawns", L"killpawns [class]", L"kill every pawn", ECheatMode::Both },
         { L"World", L"SimulateLoot", L"simulateloot <group> <tier> <level>", L"roll a loot group", ECheatMode::Both },
         { L"Storm", L"SetSafeZoneLocationToPlayer", L"safezonelocationtoplayer", L"storm closes on you", ECheatMode::BattleRoyale },
         { L"Storm", L"SetSafeZoneRadius", L"safezoneradius <radius>", L"storm circle radius", ECheatMode::BattleRoyale },
         { L"Save the World", L"SpawnAIGroup", L"spawnaigroup <group>", L"spawn husks", ECheatMode::SaveTheWorld },
         { L"Save the World", L"DisableAI", L"disableai", L"stop the AI (toggleaispawning)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"MakeAIsGod", L"makeaisgod", L"husks can't be hurt, toggles", ECheatMode::SaveTheWorld },
         { L"Save the World", L"MissionForceSuccess", L"missionforcesuccess", L"win the mission (missionforcefailure)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"MissionForcePrimarySuccess", L"missionforceprimarysuccess 1", L"complete the main objective", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"ClearRespawnTimer", L"clearrespawntimer", L"respawn without waiting", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"SetWorldDaysElapsed", L"worlddayselapsed <days>", L"time of day", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"SetGameDifficultyOverride", L"gamedifficultyoverride <value>", L"enemy difficulty", ECheatMode::SaveTheWorld },
         { L"Save the World", L"LoadMission", L"loadmission <mission>", L"load a mission", ECheatMode::SaveTheWorld },
         { L"Save the World", L"SendMissionEvent", L"sendmissionevent <event>", L"send a mission event", ECheatMode::SaveTheWorld },
         { L"Save the World", L"TeleportToMissionActor", L"teleporttomissionactor", L"to the objective", ECheatMode::SaveTheWorld },
@@ -1945,13 +1957,9 @@ namespace
             [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; });
     }
 
-    // Ends the player's cooldowns. A cooldown is the effect an ability's CommitAbility applies to its owner (its
-    // CooldownGameplayEffectClass, whose granted tags CheckCooldown refuses an activation on), for a hero ability and a
-    // gadget alike (GA_AirStrike: GE_AirStrike_Cooldown). Every one of those on the player's ability systems comes off:
-    // the player state's (where the hero's, the gadgets' and the player's own abilities are granted) and the pawn's when it
-    // has another. The removal replicates, so the client's cooldown tags and HUD timer clear and its next activation isn't
-    // refused before it reaches the server. How many ability systems it went through.
-    int32_t ClearCooldowns(AFortPlayerController* PlayerController)
+    // The ability systems a player's abilities are granted on: the player state's (the hero's, the gadgets' and the
+    // player's own) and the pawn's when it has another.
+    std::vector<UAbilitySystemComponent*> PlayerAbilitySystems(AFortPlayerController* PlayerController)
     {
         std::vector<UAbilitySystemComponent*> AbilitySystems;
         const auto AddAbilitySystem = [&AbilitySystems](UAbilitySystemComponent* AbilitySystem)
@@ -1969,7 +1977,17 @@ namespace
         {
             AddAbilitySystem(Pawn->AbilitySystemComponent);
         }
+        return AbilitySystems;
+    }
 
+    // Ends the player's cooldowns. A cooldown is the effect an ability's CommitAbility applies to its owner (its
+    // CooldownGameplayEffectClass, whose granted tags CheckCooldown refuses an activation on), for a hero ability and a
+    // gadget alike (GA_AirStrike: GE_AirStrike_Cooldown). Every one of those on the player's ability systems comes off.
+    // The removal replicates, so the client's cooldown tags and HUD timer clear and its next activation isn't refused
+    // before it reaches the server. How many ability systems it went through.
+    int32_t ClearCooldowns(AFortPlayerController* PlayerController)
+    {
+        const std::vector<UAbilitySystemComponent*> AbilitySystems = PlayerAbilitySystems(PlayerController);
         for (UAbilitySystemComponent* AbilitySystem : AbilitySystems)
         {
             // The classes first: removing an effect can change what the ability system grants.
@@ -1992,12 +2010,54 @@ namespace
         return static_cast<int32_t>(AbilitySystems.size());
     }
 
-    // Recharges the player's gadgets. A gadget's uses are an ammo item its ability spends as its cost (GA_Generic_BotTurret:
-    // one AmmoDataBotTurret), and an ammo item with a RegenCooldown (AmmoDataBotTurret: 240 s) comes back by itself: the
-    // world item keeps a timer while its count is under the regen stack that adds one each time it fires. Every such item
-    // under its stack size is set full through the inventory, as the timer itself does: the world item's own SetItemCount
-    // clears the timer once the count is full, and the count replicates, so the client's slot shows the gadget ready.
-    // How many items it refilled.
+    // The items the player's abilities spend as their cost when they commit (#155): an Item cost of a UFortGameplayAbility
+    // that is an ammo item (GA_Generic_BotTurret: one AmmoDataBotTurret). A gadget's or a hero ability's charges are such
+    // an item's count, with or without a RegenCooldown. A consumable spending itself isn't a charge, so it stays out.
+    std::vector<UFortItemDefinition*> AbilityChargeItems(AFortPlayerController* PlayerController)
+    {
+        std::vector<UFortItemDefinition*> Items;
+        if (!UFortGameplayAbility::HasAbilityCosts())
+        {
+            return Items;
+        }
+        const uint8_t ItemCost = EFortAbilityCostSource::GetItem();
+        for (UAbilitySystemComponent* AbilitySystem : PlayerAbilitySystems(PlayerController))
+        {
+            TStructArray<FGameplayAbilitySpec>& Specs = AbilitySystem->ActivatableAbilities.Items;
+            for (int32_t Index = 0; Index < Specs.Num(); ++Index)
+            {
+                UFortGameplayAbility* Ability = Cast<UFortGameplayAbility>(static_cast<UObject*>(static_cast<UGameplayAbility*>(Specs[Index].Ability)));
+                if (!Ability)
+                {
+                    continue;
+                }
+                TStructArray<FFortAbilityCost>& Costs = Ability->AbilityCosts;
+                for (int32_t CostIndex = 0; CostIndex < Costs.Num(); ++CostIndex)
+                {
+                    FFortAbilityCost& Cost = Costs[CostIndex];
+                    UFortItemDefinition* Item = Cost.ItemDefinition;
+                    if (Item && static_cast<uint8_t>(Cost.CostSource) == ItemCost && Cast<UFortAmmoItemDefinition>(Item)
+                        && std::find(Items.begin(), Items.end(), Item) == Items.end())
+                    {
+                        Items.push_back(Item);
+                    }
+                }
+            }
+        }
+        return Items;
+    }
+
+    // The ability charge items each nocooldown player has had (#155), so one whose last charge was spent and that left the
+    // inventory with it comes back.
+    std::vector<std::pair<TWeakObjectPtr<AFortPlayerController>, std::vector<TWeakObjectPtr<UFortWorldItemDefinition>>>> KnownChargeItems;
+
+    // Recharges the player's gadgets and ability charges (#148, #155): every stack of uses an ability spends is kept full,
+    // so it never runs out. Those are the items the player's abilities spend as an Item cost (AbilityChargeItems), and
+    // every ammo item with a RegenCooldown (AmmoDataBotTurret: 240 s), whose world item keeps a timer while its count is
+    // under the regen stack. Each one under its stack size is set full through the inventory, as that timer does: the
+    // world item's own SetItemCount clears the timer once the count is full, and the count replicates, so the client's
+    // slot shows the gadget ready. One the player had that is gone from the inventory is given back. How many items it
+    // refilled.
     int32_t RechargeGadgets(AFortPlayerController* PlayerController)
     {
         AFortInventory* Inventory = PlayerController->WorldInventory;
@@ -2006,6 +2066,16 @@ namespace
             return 0;
         }
 
+        auto Known = std::find_if(KnownChargeItems.begin(), KnownChargeItems.end(), [PlayerController](const auto& Entry) { return Entry.first.Get() == PlayerController; });
+        if (Known == KnownChargeItems.end())
+        {
+            KnownChargeItems.emplace_back(PlayerController, std::vector<TWeakObjectPtr<UFortWorldItemDefinition>>());
+            Known = KnownChargeItems.end() - 1;
+        }
+        std::vector<TWeakObjectPtr<UFortWorldItemDefinition>>& Had = Known->second;
+
+        const std::vector<UFortItemDefinition*> ChargeItems = AbilityChargeItems(PlayerController);
+        std::vector<UFortWorldItemDefinition*> Present;
         int32_t Recharged = 0;
         FFortItemList& ItemList = Inventory->Inventory;
         TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
@@ -2013,15 +2083,43 @@ namespace
         {
             UFortWorldItem* WorldItem = Instances[Index];
             FFortItemEntry* Entry = WorldItem ? &static_cast<FFortItemEntry&>(WorldItem->ItemEntry) : nullptr;
-            UFortAmmoItemDefinition* AmmoDefinition = Entry ? Cast<UFortAmmoItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)) : nullptr;
-            if (!AmmoDefinition || !(AmmoDefinition->RegenCooldown > 0.0f))
+            UFortItemDefinition* Definition = Entry ? static_cast<UFortItemDefinition*>(Entry->ItemDefinition) : nullptr;
+            if (!Definition)
             {
                 continue;
             }
-            const int32_t Full = Inventory->GetMaxStackSize(AmmoDefinition);
+            UFortAmmoItemDefinition* AmmoDefinition = Cast<UFortAmmoItemDefinition>(Definition);
+            const bool bRegenerates = AmmoDefinition && AmmoDefinition->RegenCooldown > 0.0f;
+            const bool bAbilityCharge = std::find(ChargeItems.begin(), ChargeItems.end(), Definition) != ChargeItems.end();
+            if (!bRegenerates && !bAbilityCharge)
+            {
+                continue;
+            }
+            if (UFortWorldItemDefinition* WorldDefinition = Cast<UFortWorldItemDefinition>(Definition))
+            {
+                Present.push_back(WorldDefinition);
+                if (std::none_of(Had.begin(), Had.end(), [WorldDefinition](const TWeakObjectPtr<UFortWorldItemDefinition>& Item) { return Item.Get() == WorldDefinition; }))
+                {
+                    Had.emplace_back(WorldDefinition);
+                }
+            }
+            const int32_t Full = std::max(Inventory->GetMaxStackSize(Definition), 1);
             if (Entry->Count < Full)
             {
                 Inventory->UpdateWorldItemCount(WorldItem, Full);
+                ++Recharged;
+            }
+        }
+
+        // A charge item its last use took out of the inventory comes back as a full stack, while an ability still spends it.
+        std::erase_if(Had, [](const TWeakObjectPtr<UFortWorldItemDefinition>& Item) { return !Item.Get(); });
+        for (const TWeakObjectPtr<UFortWorldItemDefinition>& Item : Had)
+        {
+            UFortWorldItemDefinition* Definition = Item.Get();
+            const bool bSpent = std::find(ChargeItems.begin(), ChargeItems.end(), static_cast<UFortItemDefinition*>(Definition)) != ChargeItems.end();
+            if (bSpent && std::find(Present.begin(), Present.end(), Definition) == Present.end())
+            {
+                UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Definition, std::max(Inventory->GetMaxStackSize(Definition), 1), false);
                 ++Recharged;
             }
         }
@@ -2034,6 +2132,7 @@ namespace
     void TickNoCooldown()
     {
         std::erase_if(NoCooldownPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
+        std::erase_if(KnownChargeItems, [](const auto& Entry) { return !HasNoCooldown(Entry.first.Get()); });
         for (const TWeakObjectPtr<AFortPlayerController>& Known : NoCooldownPlayers)
         {
             ClearCooldowns(Known.Get());
@@ -2078,7 +2177,8 @@ void UFortCheatManager::NoCooldown(const FString& Arguments)
     }
     if (!bEnable)
     {
-        Reply(TEXT("Cooldowns are back: the next ability or gadget you use cools down again"));
+        std::erase_if(KnownChargeItems, [PlayerController](const auto& Entry) { return Entry.first.Get() == PlayerController; });
+        Reply(TEXT("No cooldown OFF: the next ability or gadget you use cools down and spends its charge again"));
         return;
     }
     const int32_t AbilitySystems = ClearCooldowns(PlayerController);
@@ -2088,8 +2188,8 @@ void UFortCheatManager::NoCooldown(const FString& Arguments)
         bClearingCooldowns = GameThread::Enqueue(&TickNoCooldown);
     }
     UE_LOG(LogFortCheats, Log, TEXT("NoCooldown: %s on, %d ability systems, %d gadgets recharged"), *GetNameSafe(PlayerController), AbilitySystems, Recharged);
-    Reply(AbilitySystems > 0 ? TEXT("No cooldowns: your abilities and gadgets are ready again as soon as you use them (nocooldown off: cooldowns again)")
-                             : TEXT("No cooldowns (nocooldown off: cooldowns again); you have no abilities yet, and they'll have none once you do"));
+    Reply(AbilitySystems > 0 ? TEXT("No cooldown ON: your abilities and gadgets are ready again as soon as you use them, their charges always full (nocooldown off: normal again)")
+                             : TEXT("No cooldown ON (nocooldown off: normal again); you have no abilities yet, and they'll have none once you do"));
 #endif
 }
 
@@ -2137,6 +2237,9 @@ namespace
         const wchar_t* SourceParentTag;
         // "guns", "melee weapons".
         const wchar_t* What;
+        // The effect's modifier adds to the attribute instead of multiplying it: the boost's Multiplier is then an amount
+        // added, measured from 0 (infinitemag's chance to not consume ammo).
+        bool bAdditive = false;
     };
 
     struct FBoostKind
@@ -2180,17 +2283,21 @@ namespace
     };
     constexpr FBoostKind MoveSpeedBoost{ L"movement speed", MoveSpeedStages, std::size(MoveSpeedStages) };
 
-    // "cheat infinitemag" (#155): AFortWeapon::GetBulletsPerClip is its stats' ClipSize through UFortWeaponAttrSet's
-    // WeaponAmmoClipSize aggregator (1.9 0x93F060), on the server and the owning client alike. A one-round weapon's
-    // shot empties its magazine, and the client starts a reload before Core's next frame can top it up (sooner with
-    // firerate), so while infinitemag is on its guns' magazines hold twice their rounds: a shot always leaves one.
-    constexpr FBoostStage ClipSizeStages[] = {
-        { L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_ClipSize.GE_Alteration_Attribute_ClipSize_C",
-            L"/Script/FortniteGame.FortWeaponAttrSet", L"WeaponAmmoClipSize", L"weapon.ranged", L"weapon", L"guns" },
+    // "cheat infinitemag" (#155): a shot takes its rounds through the weapon's ammo use (1.9 0x939490), on the server and
+    // on the owning client, which counts its own magazine. Before it takes any, it evaluates UFortWeaponAttrSet's
+    // WeaponChanceToNotConsumeAmmo on the shooter's ability system for the weapon's tags, clamped to 0-1, plus the
+    // AccumulatedWeaponChanceToNotConsumeAmmo left from earlier shots: at 1 or more the shot takes nothing. The game's
+    // own ammo-saving perk, GE_Alteration_Attribute_AmmoSave, adds to that chance for "weapon.ranged" (CombatEffects'
+    // Guns.All.AmmoSave at the effect's level). With effects worth more than 1 on the pawn's ability system, which
+    // replicates them to its owner, neither the server nor the client takes a round: a one-round weapon stays loaded,
+    // no reload starts, and the magazine shows its normal size.
+    constexpr FBoostStage AmmoSaveStages[] = {
+        { L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_AmmoSave.GE_Alteration_Attribute_AmmoSave_C",
+            L"/Script/FortniteGame.FortWeaponAttrSet", L"WeaponChanceToNotConsumeAmmo", L"weapon.ranged", L"weapon", L"guns", true },
     };
-    constexpr FBoostKind ClipSizeBoost{ L"magazine size", ClipSizeStages, std::size(ClipSizeStages) };
-    // A little over 2: the clip size is floored (FMath::FloorToInt), and a magnitude a hair under 2 would leave one round.
-    constexpr float InfiniteMagClipMultiplier = 2.01f;
+    constexpr FBoostKind AmmoSaveBoost{ L"ammo saving", AmmoSaveStages, std::size(AmmoSaveStages) };
+    // Over 1, so the effects' sum can't fall a hair short of it: the shot clamps the chance to 1 anyway.
+    constexpr float InfiniteMagAmmoSaveChance = 1.5f;
 
     // The effects Core put on a player's ability system for one kind, kept through respawns.
     struct FAttributeBoost
@@ -2245,7 +2352,8 @@ namespace
         return false;
     }
 
-    // The effect's multiplicative modifier on the stage's attribute for the stage's weapons (a scalable float), or null.
+    // The effect's multiplicative (an additive stage's: additive) modifier on the stage's attribute for the stage's
+    // weapons (a scalable float), or null.
     const FScalableFloat* BoostMagnitude(UClass* EffectClass, const FBoostStage& Stage)
     {
         UGameplayEffect* Effect = EffectClass ? Cast<UGameplayEffect>(EffectClass->GetDefaultObject()) : nullptr;
@@ -2260,7 +2368,7 @@ namespace
             FGameplayModifierInfo& Modifier = Modifiers[Index];
             const FGameplayAttribute& ModifiedAttribute = Modifier.Attribute;
             const FGameplayEffectModifierMagnitude& Magnitude = Modifier.ModifierMagnitude;
-            if (ModifiedAttribute.Attribute == Attribute && Modifier.ModifierOp == EGameplayModOp::GetMultiplicitive()
+            if (ModifiedAttribute.Attribute == Attribute && Modifier.ModifierOp == (Stage.bAdditive ? EGameplayModOp::GetAdditive() : EGameplayModOp::GetMultiplicitive())
                 && Magnitude.MagnitudeCalculationType == EGameplayEffectMagnitudeCalculation::GetScalableFloat() && ModifierAppliesTo(Modifier, Stage))
             {
                 return &static_cast<const FScalableFloat&>(Magnitude.ScalableFloatMagnitude);
@@ -2379,7 +2487,8 @@ namespace
         return bHasSet ? AbilitySystem : nullptr;
     }
 
-    // The multiplier the stage's attribute has for its weapons, from every effect on it (perks included).
+    // The multiplier the stage's attribute has for its weapons, from every effect on it (perks included); for an additive
+    // stage, what the effects add up to.
     std::optional<float> CurrentBoostMultiplier(UAbilitySystemComponent* AbilitySystem, const FBoostStage& Stage)
     {
         UProperty* Property = BoostAttribute(Stage);
@@ -2394,7 +2503,8 @@ namespace
             SourceTags.ParentTags.Add(FGameplayTag{ FName(Stage.SourceParentTag, FNAME_Find) });
         }
         bool bSuccess = false;
-        const float Multiplier = UAbilitySystemBlueprintLibrary::EvaluateAttributeValueWithTagsAndBase(AbilitySystem, FGameplayAttribute(Property), SourceTags, FGameplayTagContainer(), 1.0f, bSuccess);
+        const float Multiplier = UAbilitySystemBlueprintLibrary::EvaluateAttributeValueWithTagsAndBase(AbilitySystem, FGameplayAttribute(Property), SourceTags, FGameplayTagContainer(),
+            Stage.bAdditive ? 0.0f : 1.0f, bSuccess);
         return bSuccess ? std::optional<float>(Multiplier) : std::nullopt;
     }
 
@@ -2460,8 +2570,9 @@ namespace
         {
             return std::nullopt;
         }
-        // The furthest one effect goes the way it has to.
-        const float Reach = Wanted > 0.0f ? Curve.Max - 1.0f : Curve.Min - 1.0f;
+        // The furthest one effect goes the way it has to: a multiplier from 1, an addition from 0.
+        const float Neutral = Stage.bAdditive ? 0.0f : 1.0f;
+        const float Reach = Wanted > 0.0f ? Curve.Max - Neutral : Curve.Min - Neutral;
         if (Wanted * Reach <= 0.0f)
         {
             return FString::Printf(TEXT("the %s effect for %s only goes from %.2fx to %.2fx a stack, so it can't make them %s"), Name, Stage.What, Curve.Min, Curve.Max,
@@ -2474,7 +2585,7 @@ namespace
                 1.0f + MaxBoostEffects * Reach / std::max(Current, 0.0001f));
         }
         // Each one's magnitude, kept inside what the curve has.
-        const float Each = std::clamp(1.0f + Wanted / static_cast<float>(Count), Curve.Min, Curve.Max);
+        const float Each = std::clamp(Neutral + Wanted / static_cast<float>(Count), Curve.Min, Curve.Max);
         const std::optional<float> Level = Curve.LevelFor(Each);
         if (!Level)
         {
@@ -2527,7 +2638,8 @@ namespace
         {
             const FBoostStage& Stage = Kind.Stages[Index];
             const std::optional<float> Current = Originals[Index] ? CurrentBoostMultiplier(AbilitySystem, Stage) : std::nullopt;
-            std::optional<FString> Error = Current ? ApplyBoostStage(Boost, AbilitySystem, Stage, *Current, *Originals[Index] * Boost.Multiplier)
+            std::optional<FString> Error = Current ? ApplyBoostStage(Boost, AbilitySystem, Stage, *Current,
+                Stage.bAdditive ? *Originals[Index] + Boost.Multiplier : *Originals[Index] * Boost.Multiplier)
                                                    : std::optional<FString>(FString::Printf(TEXT("%s can't be measured on your ability system"), Stage.Attribute));
             if (Error && Index == 0)
             {
@@ -2823,33 +2935,58 @@ void UFortCheatManager::InfiniteMag(const FString& Arguments)
     {
         PlayerController->bInfiniteAmmo = bEnable;
     }
-    // The bigger magazine, so a shot never empties it (#155); kept through respawns like firerate's effects.
-    if (FAttributeBoost* ClipSize = FindBoost(PlayerController, ClipSizeBoost))
+    // The game's own ammo saving, at a chance over 1, so a shot takes no round on the server or the client (#155); kept
+    // through respawns like firerate's effects.
+    if (FAttributeBoost* AmmoSave = FindBoost(PlayerController, AmmoSaveBoost))
     {
-        RemoveBoostEffects(*ClipSize);
-        std::erase_if(AttributeBoosts, [ClipSize](const FAttributeBoost& Boost) { return &Boost == ClipSize; });
+        RemoveBoostEffects(*AmmoSave);
+        std::erase_if(AttributeBoosts, [AmmoSave](const FAttributeBoost& Boost) { return &Boost == AmmoSave; });
     }
     if (!bEnable)
     {
         Reply(TEXT("Infinite magazine OFF: your shots use up the magazine again"));
         return;
     }
-    FAttributeBoost ClipSize;
-    ClipSize.Kind = &ClipSizeBoost;
-    ClipSize.Player = PlayerController;
-    ClipSize.Multiplier = InfiniteMagClipMultiplier;
-    const std::variant<FBoostResult, FString> ClipResult = ApplyBoost(ClipSize);
-    if (const FString* Error = std::get_if<FString>(&ClipResult))
+    FAttributeBoost AmmoSave;
+    AmmoSave.Kind = &AmmoSaveBoost;
+    AmmoSave.Player = PlayerController;
+    AmmoSave.Multiplier = InfiniteMagAmmoSaveChance;
+    const std::variant<FBoostResult, FString> SaveResult = ApplyBoost(AmmoSave);
+    if (const FString* Error = std::get_if<FString>(&SaveResult))
     {
         // Without it (no pawn yet, or a build without the effect) the magazine is still topped up every frame; a new
         // pawn tries again.
-        UE_LOG(LogFortCheats, Warning, TEXT("InfiniteMag: %s's magazine size: %s"), *GetNameSafe(PlayerController), **Error);
+        UE_LOG(LogFortCheats, Warning, TEXT("InfiniteMag: %s's ammo saving: %s"), *GetNameSafe(PlayerController), **Error);
     }
-    AttributeBoosts.push_back(std::move(ClipSize));
+    AttributeBoosts.push_back(std::move(AmmoSave));
     FillMagazine(PlayerController);
     StartWeaponCheatTick();
     UE_LOG(LogFortCheats, Log, TEXT("InfiniteMag: %s on"), *GetNameSafe(PlayerController));
     Reply(TEXT("Infinite magazine ON: your weapon stays loaded and never needs a reload (infinitemag off: normal again)"));
+#endif
+}
+
+void UFortCheatManager::UnlimitedHealth(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // The game's ToggleUnlimitedHealth flips the flag without a word; this sets it and says so (#155).
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.empty() ? std::wstring() : Lower(Words[0]);
+    if (Words.size() > 1 || (!Word.empty() && Word != L"on" && Word != L"off"))
+    {
+        Reply(TEXT("Usage: unlimitedhealth [on | off], nothing can hurt you; without on or off it toggles"));
+        return;
+    }
+    if (!HasUnlimitedHealthFlag())
+    {
+        Reply(TEXT("This build's cheat manager has no bUnlimitedHealth"));
+        return;
+    }
+    const bool bEnable = Word.empty() ? !bUnlimitedHealth : Word == L"on";
+    bUnlimitedHealth = bEnable;
+    UE_LOG(LogFortCheats, Log, TEXT("UnlimitedHealth: %s %s"), *GetNameSafe(GetPlayerController()), bEnable ? TEXT("on") : TEXT("off"));
+    Reply(bEnable ? TEXT("Unlimited health ON: nothing can hurt you (unlimitedhealth off: normal again)")
+                  : TEXT("Unlimited health OFF: you can be hurt again"));
 #endif
 }
 

@@ -1924,7 +1924,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // (#155) move them to another player or another player to them, and "possessplayer <player>" and "unpossess" (#155)
     // have them play another player's pawn while that player watches. Core also takes over two of the game's cheats that
     // answer nothing (#155): "sethealthpercent", which says what it set and takes a percent too, and
-    // "toggleinfinitedurability", whose answer only reached the server's console.
+    // "toggleinfinitedurability", whose answer only reached the server's console, and "unlimitedhealth" (or
+    // "toggleunlimitedhealth"), which the game's flips without a word.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
@@ -1933,6 +1934,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"togglenocooldown", &UFortCheatManager::NoCooldown },
         { L"infinitemag", &UFortCheatManager::InfiniteMag },
         { L"toggleinfiniteammo", &UFortCheatManager::InfiniteMag },
+        { L"unlimitedhealth", &UFortCheatManager::UnlimitedHealth },
+        { L"toggleunlimitedhealth", &UFortCheatManager::UnlimitedHealth },
         { L"repair", &UFortCheatManager::Repair },
         { L"firerate", &UFortCheatManager::FireRate },
         { L"weapondamage", &UFortCheatManager::WeaponDamage },

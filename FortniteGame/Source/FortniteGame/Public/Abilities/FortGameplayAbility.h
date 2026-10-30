@@ -8,6 +8,7 @@
 #include <cstdint>
 
 class AFortPawn;
+class UFortItemDefinition;
 class UFortWeaponItemDefinition;
 class UFortWorldItem;
 class UTexture2D;
@@ -48,6 +49,23 @@ public:
     DefineUStructProperty(FFortAbilityTargetSelectionList, TargetSelection)
 };
 
+class EFortAbilityCostSource
+{
+    DefineUnrealEnum(EFortAbilityCostSource, FortniteGame)
+    DefineUEnumValue(Item)
+};
+
+// One thing an ability spends when it commits: an item's count for an Item cost (GA_Generic_BotTurret: one
+// AmmoDataBotTurret), else stamina, durability or the weapon's ammo.
+struct FFortAbilityCost
+{
+    DefineUnrealStruct(FFortAbilityCost, FortniteGame)
+
+public:
+    DefineUProperty(EFortAbilityCostSource, CostSource)
+    DefineUProperty(UFortItemDefinition*, ItemDefinition)
+};
+
 class UFortGameplayAbility : public UGameplayAbility
 {
     DefineUnrealClass(UFortGameplayAbility, FortniteGame)
@@ -56,6 +74,8 @@ class UFortGameplayAbility : public UGameplayAbility
 
 public:
     DefineUProperty(UTexture2D*, SmallPreviewImageOverride)
+    DefineUStructArrayProperty(FFortAbilityCost, AbilityCosts)
+    static bool HasAbilityCosts() { return Member_AbilityCosts.IsAvailable(); }
     // The first of a fixed array (EffectContainers[5]); an ability's targets come from the one whose ApplicationTag it
     // asks for (GetGameplayEffectContainer, 1.8.2 0x29B420).
     DefineUStructProperty(FFortGameplayEffectContainer, EffectContainers)

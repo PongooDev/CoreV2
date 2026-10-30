@@ -60,6 +60,11 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(CountPlayerBuiltBuildingActors)
 
 public:
+    // ToggleUnlimitedHealth's flag: the player's pawn can't be damaged while its controller's cheat manager has it (1.9
+    // 0x7AE300, the pawn's damage check, reads it).
+    DefineBitfieldUProperty(bUnlimitedHealth)
+    static bool HasUnlimitedHealthFlag() { return Member_bUnlimitedHealth.IsAvailable(); }
+
     AFortPlayerController* GetPlayerController() const;
 
     // WeaponName: the item's name with or without its prefix ("Assault_Auto_Athena_R_Ore_T03" or "WID_..."), or part
@@ -128,9 +133,14 @@ public:
     // nothing in a shipping build reads; Core takes each cooldown effect off as soon as it is applied.
     void NoCooldown(const FString& Arguments);
     // Core's own command, "cheat infinitemag [on | off]" (#149; "cheat ToggleInfiniteAmmo" too): the player never reloads.
-    // The server keeps the equipped weapon's magazine full through the weapon's own ModAmmo, and sets the game's replicated
-    // bInfiniteAmmo (the reserve never runs out), which tells Core's client to keep its own count of the magazine full.
+    // The game's own ammo-saving effect (GE_Alteration_Attribute_AmmoSave) at a chance over 1 goes on their ability system,
+    // so a shot takes no round on the server or on their client (#155); the server also keeps the magazine full through
+    // the weapon's own ModAmmo and sets the game's replicated bInfiniteAmmo (the reserve never runs out), which tells
+    // Core's client to keep its own count of the magazine full.
     void InfiniteMag(const FString& Arguments);
+    // Core's own command, "cheat unlimitedhealth [on | off]" (#155; "cheat ToggleUnlimitedHealth" too): sets the game's
+    // bUnlimitedHealth, as ToggleUnlimitedHealth does, and says whether it is on.
+    void UnlimitedHealth(const FString& Arguments);
     // Core's own command, "cheat repair [all]" (#150): the equipped weapon (or every item that wears out) back to its full
     // durability, through the same durability update the game's wear goes through.
     void Repair(const FString& Arguments);

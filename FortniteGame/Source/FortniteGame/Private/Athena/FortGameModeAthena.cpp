@@ -355,9 +355,12 @@ namespace
         // The phase the last check saw: a new one is reported at once.
         uint8_t LastPhase = 0xFF;
 
-        // The backend's answer: the warmup's length (0: the game's own), whether the matchmaking service sends parties
-        // here, the match's room, and the late parties it sent (their account ids).
+        // The backend's answer: the warmup's length (0: the game's own), whether it answered and has late joining on,
+        // whether the matchmaking service sends parties here, the match's room, and the late parties it sent (their
+        // account ids).
         int32_t WarmupSeconds = 0;
+        bool bAnswered = false;
+        bool bLateJoin = false;
         bool bOpen = false;
         int32_t MaxPlayers = 0;
         std::vector<std::vector<std::wstring>> Parties;
@@ -367,7 +370,8 @@ namespace
         float GameDuration = -1.0f;
         float GameEarly = -1.0f;
         int32_t AppliedSeconds = 0;
-        // The game's warmup keeps its shorter countdown for a nearly full match: the match is of full size (MatchCapacity).
+        // The game's warmup keeps its shorter countdown for a nearly full match: the match can't grow (no late joining)
+        // or is of full size (MatchCapacity).
         bool bEarlyCountdown = false;
         bool bLoggedLength = false;
         // The running countdown was set to AppliedSeconds.
@@ -505,10 +509,11 @@ namespace
             const std::string Seconds = Status == 200 ? BackendRequest::JsonField(Body, "warmupSeconds") : std::string();
             const bool bAnswered = Seconds == "null" || (!Seconds.empty() && std::isdigit(static_cast<unsigned char>(Seconds[0])));
             const int32_t WarmupSeconds = bAnswered && Seconds != "null" ? std::clamp(std::atoi(Seconds.c_str()), 0, 3600) : 0;
+            const bool bLateJoin = bAnswered && BackendRequest::JsonField(Body, "lateJoin") == "true";
             const bool bOpen = bAnswered && BackendRequest::JsonField(Body, "open") == "true";
             const int32_t MaxPlayers = bAnswered ? std::clamp(std::atoi(BackendRequest::JsonField(Body, "maxPlayers").c_str()), 0, 1000) : 0;
             auto Parties = bAnswered ? JsonParties(Body) : std::vector<std::vector<std::wstring>>();
-            GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bOpen, MaxPlayers, Parties = std::move(Parties)]() mutable
+            GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties)]() mutable
             {
                 Watch->bAsking = false;
                 if (Status == 404 && !Watch->bUnsupported)
@@ -521,6 +526,8 @@ namespace
                     return;
                 }
                 Watch->WarmupSeconds = WarmupSeconds;
+                Watch->bAnswered = true;
+                Watch->bLateJoin = bLateJoin;
                 Watch->bOpen = bOpen;
                 Watch->MaxPlayers = MaxPlayers;
                 Watch->Parties = std::move(Parties);
@@ -532,11 +539,12 @@ namespace
     // own, and a countdown already running moved to the backend's. The game shortens its warmup to
     // WarmupEarlyCountdownDuration (15 s) once enough of MaxPlayerCount is in (UpdateWarmupPhase, 1.9 0x43D9A0:
     // NumPlayers >= MaxPlayerCount times a percent at +0xABC, which isn't reflected), and OnGivenMatchAssignment
-    // (0x42D2B0) sets MaxPlayerCount to the players the match was assigned. So every Core match counted as full and
-    // its bus left 15 s into the game's 90 s warmup (Core-Backend #122). With the game's length the shorter countdown is
-    // the full one until MaxPlayerCount is the most a match here can have (MatchCapacity), as when the match was
-    // assigned that many or late joining opened it to them; the game's percent then counts a match of full size, as on
-    // Epic's servers.
+    // (0x42D2B0) sets MaxPlayerCount to the players the match was assigned. So a match taking late players had its bus
+    // leave 15 s into the game's 90 s warmup, before the backend's answer opened it (Core-Backend #122). With the
+    // game's length the shorter countdown is the full one while the match may still grow: until the backend says late
+    // joining is off (or has no warmup settings), when the assigned players are all the match gets and the countdown
+    // shortens once they are in (#153), or until MaxPlayerCount is the most a match here can have (MatchCapacity), as
+    // when late joining opened it to them; the game's percent then counts a match of full size, as on Epic's servers.
     void ApplyWarmupLength(AFortGameModeAthena* GameMode, AFortGameStateAthena* GameState, FWarmupWatch& Watch, float Now)
     {
         if (!AFortGameModeAthena::HasWarmupLength())
@@ -557,7 +565,8 @@ namespace
         const bool bGame = Watch.WarmupSeconds <= 0;
         const float Duration = bGame ? Watch.GameDuration : static_cast<float>(Watch.WarmupSeconds);
         const int32_t Capacity = MatchCapacity(GameMode);
-        const bool bEarly = bGame && AFortGameModeAthena::HasMaxPlayerCount() && Capacity > 0 && GameMode->MaxPlayerCount >= Capacity;
+        const bool bClosed = Watch.bUnsupported || (Watch.bAnswered && !Watch.bLateJoin);
+        const bool bEarly = bGame && (bClosed || (AFortGameModeAthena::HasMaxPlayerCount() && Capacity > 0 && GameMode->MaxPlayerCount >= Capacity));
         GameMode->WarmupCountdownDuration = Duration;
         GameMode->WarmupEarlyCountdownDuration = bEarly ? Watch.GameEarly : Duration;
 
@@ -576,7 +585,8 @@ namespace
             }
             else if (bEarly)
             {
-                Log::Info(L"Battle Royale: the warmup is the game's: {:.0f} s, {:.0f} s once enough of the match's {} players are in", Watch.GameDuration, Watch.GameEarly, GameMode->MaxPlayerCount);
+                Log::Info(L"Battle Royale: the warmup is the game's: {:.0f} s, {:.0f} s once enough of the match's {} players are in{}", Watch.GameDuration, Watch.GameEarly,
+                    AFortGameModeAthena::HasMaxPlayerCount() ? GameMode->MaxPlayerCount : 0, bClosed ? L" (no late joining)" : L"");
             }
             else
             {

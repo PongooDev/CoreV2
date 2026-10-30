@@ -38,6 +38,8 @@ class AFortPawn : public APawn
     DefineUFunction(GetMaxHealth)
     DefineUFunction(GetShield)
     DefineUFunction(GetMaxShield)
+    DefineUFunction(SetHealth)
+    DefineUFunction(SetMaxHealth)
 
 public:
     DefineUProperty(AFortWeapon*, CurrentWeapon)
@@ -64,11 +66,22 @@ public:
     float GetMaxHealth() const;
     float GetShield() const;
     float GetMaxShield() const;
+    // Server: the health set's MaxHealth and Health base values, through the pawn's own setters (they replicate). False
+    // when this build has no setter.
+    bool SetHealth(float NewHealth);
+    bool SetMaxHealth(float NewMaxHealth);
 
     // "cheat fly 3000" (#129): the pawn runs at Speed (and walks and sprints faster by as much), 0 gives it its own
     // speeds back. Character movement is predicted, so the server and the owning client both run this with the same
     // speed, or the server corrects the client. Returns the pawn's own running speed, 0 when it has none.
     float SetCheatMoveSpeed(float Speed);
+    // "cheat speed" (#155): the pawn walks, runs and sprints Multiplier times as fast as it does on its own (1: its own),
+    // also after a "cheat walk"; a flying speed ("fly 3000") goes first while it flies. Returns its own running speed.
+    float SetCheatSpeedMultiplier(float Multiplier);
+    float GetCheatSpeedMultiplier() const;
+    // The pawn's speeds are its movement set's (a Save the World player's: replicated to its client with the player
+    // state), not its stats row's (Battle Royale's, which each machine reads on its own).
+    bool MovesWithMovementSet() const;
 
     static ptrdiff_t CurrentWeaponListOffset();
     static ptrdiff_t IsDBNOOffset();

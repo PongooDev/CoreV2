@@ -487,6 +487,9 @@ namespace
         { L"Player", L"Fly", L"Fly [speed]", L"fly, at the speed if you give one (\"fly 3000\"; Ghost [speed]: through walls too; Walk: walk again at your own speed)", ECheatMode::Both },
         { L"Player", L"TestInfJumps", L"TestInfJumps", L"jump again in the air, any number of times (toggles)", ECheatMode::Both },
         { L"Player", L"Teleport", L"Teleport", L"to where you look (TeleportToLocation <x> <y> <z>, TeleportToActor <class or name>)", ECheatMode::Both },
+        { L"Player", nullptr, L"TeleportTo <player>", L"next to that player, on the floor (their name or its start: \"teleportto Bob\")", ECheatMode::Both },
+        { L"Player", nullptr, L"Bring <player | all>", L"that player (or everyone) in front of you, on the floor", ECheatMode::Both },
+        { L"Player", nullptr, L"PossessPlayer <player>", L"take control of that player's pawn while they watch it, your own waiting hidden where it stood (Unpossess: give it back and be yourself again)", ECheatMode::Both },
         { L"Player", nullptr, L"TpActor <class, name or path> [n]", L"onto the nearest actor that matches, on top of it or the floor under it, never under the map (n: the nth nearest; \"tpactor Tiered_Chest 2\")", ECheatMode::Both },
         { L"Player", L"ChangeSize", L"ChangeSize <scale>", L"your size", ECheatMode::Both },
         { L"Player", nullptr, L"Skin <HID or CID | reset>", L"wear a hero's or outfit's look, seen by everyone, cosmetic only (\"skin HID_Ninja_007_R_T01\", \"skin CID_005_Athena_Commando_M_Default\"; Hero: the same)", ECheatMode::Both },
@@ -503,6 +506,8 @@ namespace
         { L"Player", nullptr, L"Dance [EID or path]", L"play an emote (\"dance EID_DanceMoves\"); a random one without a name (\"dance /Name/\" makes them dance)", ECheatMode::Both },
         { L"Player", nullptr, L"NoCooldown [on | off]", L"no cooldown on your hero abilities and gadgets, and used gadgets recharge at once, until you turn it off (toggles without on or off; ToggleNoCoolDown: the same)", ECheatMode::Both },
         { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },
+        { L"Player", nullptr, L"SetMaxHealth <value | reset>", L"your maximum health, and you're healed to it, kept through respawns (\"setmaxhealth 500\"); reset: your own maximum again", ECheatMode::Both },
+        { L"Player", nullptr, L"Speed <multiplier | reset>", L"you walk, run and sprint that many times as fast (\"speed 2\", \"speed 0.5\"), kept through respawns; reset: your own speed again", ECheatMode::Both },
         { L"Player", L"DBNO", L"DBNO", L"knock yourself down (ReviveFromDBNO: get up)", ECheatMode::Both },
         { L"Player", L"RespawnPlayerServer", L"RespawnPlayerServer", L"respawn when dead", ECheatMode::Both },
         { L"Player", L"BackpackSetSize", L"BackpackSetSize <slots>", L"your backpack size", ECheatMode::Both },
@@ -1705,6 +1710,225 @@ void UFortCheatManager::TpActor(const FString& Arguments)
 #if WITH_SERVER_CODE
 namespace
 {
+    // ---- "cheat teleportto" and "cheat bring" (#155) -------------------------------------------------------------------
+
+    // Puts Pawn on the floor Distance away from Anchor (a pawn) at the yaw Direction, facing Facing. A wall between them
+    // brings the spot back to this side of it, a trace down from the anchor's height finds the floor there, and the
+    // engine's TeleportTo moves the pawn out of anything it would stand in; failing all that, next to the anchor itself.
+    bool TeleportNextTo(APawn* Pawn, const AActor* Anchor, float Distance, float Direction, float Facing)
+    {
+        constexpr float WallClearance = 60.0f;
+        constexpr float TraceUp = 50.0f;
+        constexpr float TraceDown = 3000.0f;
+        const FVector AnchorLocation = Anchor->GetTransform().GetLocation();
+        const float Radians = Direction * 3.14159265f / 180.0f;
+        const FVector Wanted(AnchorLocation.X + std::cos(Radians) * Distance, AnchorLocation.Y + std::sin(Radians) * Distance, AnchorLocation.Z);
+        FVector Spot = Wanted;
+        FVector Wall;
+        if (UKismetSystemLibrary::LineTraceSingle(Pawn, AnchorLocation, Wanted, 0, false, true, Wall))
+        {
+            const float Reach = std::max(0.0f, std::sqrt(FMath::Square(Wall.X - AnchorLocation.X) + FMath::Square(Wall.Y - AnchorLocation.Y)) - WallClearance);
+            Spot = FVector(AnchorLocation.X + std::cos(Radians) * Reach, AnchorLocation.Y + std::sin(Radians) * Reach, AnchorLocation.Z);
+        }
+
+        FVector PawnOrigin;
+        FVector PawnExtent;
+        Pawn->GetActorBounds(true, PawnOrigin, PawnExtent);
+        const float FeetOffset = PawnExtent.Z > 0.0f ? Pawn->GetTransform().GetLocation().Z - (PawnOrigin.Z - PawnExtent.Z) : 90.0f;
+        FVector Floor;
+        const bool bFloor = UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Spot.X, Spot.Y, Spot.Z + TraceUp), FVector(Spot.X, Spot.Y, Spot.Z - TraceDown), 0, false, true, Floor);
+        const FVector Destination = bFloor ? FVector(Floor.X, Floor.Y, Floor.Z + FeetOffset + 2.0f) : Spot;
+        const FRotator Rotation(0.0f, Facing, 0.0f);
+        for (int32_t Attempt = 0; Attempt < 3; ++Attempt)
+        {
+            if (Pawn->TeleportTo(FVector(Destination.X, Destination.Y, Destination.Z + 100.0f * static_cast<float>(Attempt)), Rotation))
+            {
+                return true;
+            }
+        }
+        return Pawn->TeleportTo(FVector(AnchorLocation.X, AnchorLocation.Y, AnchorLocation.Z + 2.0f * FeetOffset), Rotation);
+    }
+
+    // The yaw from one actor to another.
+    float YawTowards(const AActor* From, const AActor* To)
+    {
+        const FVector A = From->GetTransform().GetLocation();
+        const FVector B = To->GetTransform().GetLocation();
+        return std::atan2(B.Y - A.Y, B.X - A.X) * 180.0f / 3.14159265f;
+    }
+
+    // The pawn a player plays now, when it is alive.
+    APawn* LivePawnOf(AFortPlayerController* PlayerController)
+    {
+        APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+        AFortPawn* FortPawn = Pawn ? Cast<AFortPawn>(reinterpret_cast<UObject*>(Pawn)) : nullptr;
+        return Pawn && !(FortPawn && FortPawn->IsDead()) ? Pawn : nullptr;
+    }
+
+    // The words of a command's arguments as one name ("Big Bob").
+    std::wstring JoinedName(const FString& Arguments)
+    {
+        std::wstring Name;
+        for (const std::wstring& Word : SplitWords(Arguments.ToStdString()))
+        {
+            Name += (Name.empty() ? L"" : L" ") + Word;
+        }
+        // "/Bob/" names a player the way a cheat's target does.
+        if (Name.size() > 2 && Name.front() == L'/' && Name.back() == L'/')
+        {
+            Name = Name.substr(1, Name.size() - 2);
+        }
+        return Name;
+    }
+}
+#endif
+
+void UFortCheatManager::TeleportTo(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const std::wstring Name = JoinedName(Arguments);
+    if (Name.empty())
+    {
+        Reply(TEXT("Usage: teleportto <player>, their name or its start (\"teleportto Bob\"): you go next to them"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    APawn* Pawn = LivePawnOf(PlayerController);
+    if (!Pawn)
+    {
+        Reply(TEXT("You have no pawn to teleport"));
+        return;
+    }
+    FString Error;
+    AFortPlayerController* Target = FindCheatTarget(PlayerController, FString(Name.c_str()), Error);
+    if (!Target)
+    {
+        Reply(Error);
+        return;
+    }
+    const FString TargetName = PlayerNameOf(Target);
+    APawn* TargetPawn = Target->GetPawn();
+    if (Target == PlayerController || TargetPawn == Pawn)
+    {
+        Reply(TEXT("That's you"));
+        return;
+    }
+    if (!TargetPawn)
+    {
+        Reply(FString::Printf(TEXT("%s has no pawn to teleport to (dead, or in the aircraft)"), *TargetName));
+        return;
+    }
+
+    // In front of them, facing them.
+    const float TargetYaw = TargetPawn->GetActorRotation().Yaw;
+    if (!TeleportNextTo(Pawn, TargetPawn, 150.0f, TargetYaw, TargetYaw + 180.0f))
+    {
+        Reply(FString::Printf(TEXT("Can't teleport to %s: there's no room there"), *TargetName));
+        return;
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("TeleportTo: %s to %s (%s)"), *GetNameSafe(PlayerController), *TargetName, *GetNameSafe(TargetPawn));
+    Reply(FString::Printf(TEXT("Teleported to %s"), *TargetName));
+#endif
+}
+
+void UFortCheatManager::Bring(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const std::wstring Name = JoinedName(Arguments);
+    if (Name.empty())
+    {
+        Reply(TEXT("Usage: bring <player | all>, their name or its start (\"bring Bob\"): they come to stand in front of you"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    APawn* Pawn = LivePawnOf(PlayerController);
+    if (!Pawn)
+    {
+        Reply(TEXT("You have no pawn to bring anyone to"));
+        return;
+    }
+
+    std::vector<AFortPlayerController*> Targets;
+    if (Lower(Name) == L"all")
+    {
+        UWorld* World = PlayerController->GetWorld();
+        AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
+        const TArray<APlayerState*>* PlayerArray = GameState ? &static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray) : nullptr;
+        for (int32_t Index = 0; PlayerArray && Index < PlayerArray->Num(); ++Index)
+        {
+            APlayerState* PlayerState = (*PlayerArray)[Index];
+            AFortPlayerController* Controller = PlayerState ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(PlayerState->GetOwner())) : nullptr;
+            if (Controller && Controller != PlayerController)
+            {
+                Targets.push_back(Controller);
+            }
+        }
+        if (Targets.empty())
+        {
+            Reply(TEXT("There's nobody else to bring"));
+            return;
+        }
+    }
+    else
+    {
+        FString Error;
+        AFortPlayerController* Target = FindCheatTarget(PlayerController, FString(Name.c_str()), Error);
+        if (!Target)
+        {
+            Reply(Error);
+            return;
+        }
+        if (Target == PlayerController)
+        {
+            Reply(TEXT("That's you"));
+            return;
+        }
+        Targets.push_back(Target);
+    }
+
+    // In front of the player, facing them: one 200 units out, several spread over an arc, more in rows behind.
+    constexpr int32_t PerRow = 7;
+    constexpr float ArcStep = 25.0f;
+    const float Yaw = Pawn->GetActorRotation().Yaw;
+    std::wstring Brought;
+    std::wstring Skipped;
+    int32_t Placed = 0;
+    for (AFortPlayerController* Target : Targets)
+    {
+        const FString TargetName = PlayerNameOf(Target);
+        APawn* TargetPawn = LivePawnOf(Target);
+        if (!TargetPawn || TargetPawn == Pawn)
+        {
+            Skipped += (Skipped.empty() ? L"" : L", ") + TargetName.ToStdString();
+            continue;
+        }
+        const int32_t Row = Placed / PerRow;
+        const int32_t InRow = std::min<int32_t>(PerRow, static_cast<int32_t>(Targets.size()) - Row * PerRow);
+        const float Offset = (static_cast<float>(Placed % PerRow) - static_cast<float>(InRow - 1) * 0.5f) * ArcStep;
+        if (TeleportNextTo(TargetPawn, Pawn, 200.0f + 120.0f * static_cast<float>(Row), Yaw + Offset, Yaw + Offset + 180.0f))
+        {
+            ++Placed;
+            Brought += (Brought.empty() ? L"" : L", ") + TargetName.ToStdString();
+        }
+        else
+        {
+            Skipped += (Skipped.empty() ? L"" : L", ") + TargetName.ToStdString();
+        }
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("Bring: %s brought %s (not: %s)"), *GetNameSafe(PlayerController), Brought.c_str(), Skipped.c_str());
+    if (Brought.empty())
+    {
+        Reply(FString::Printf(TEXT("Brought nobody: %s %s no live pawn or no room by you"), Skipped.c_str(), Targets.size() == 1 ? TEXT("has") : TEXT("have")));
+        return;
+    }
+    Reply(Skipped.empty() ? FString::Printf(TEXT("Brought %s"), Brought.c_str())
+                          : FString::Printf(TEXT("Brought %s (not %s: no live pawn, the aircraft, or no room)"), Brought.c_str(), Skipped.c_str()));
+#endif
+}
+
+#if WITH_SERVER_CODE
+namespace
+{
     // "cheat nocooldown" (#148): the players whose ability and gadget cooldowns end as soon as they start.
     std::vector<TWeakObjectPtr<AFortPlayerController>> NoCooldownPlayers;
     bool bClearingCooldowns = false;
@@ -1938,6 +2162,16 @@ namespace
     };
     constexpr FBoostKind WeaponDamageBoost{ L"weapon damage", WeaponDamageStages, std::size(WeaponDamageStages) };
 
+    // "cheat speed" in Battle Royale (#155): the game's own move speed alteration multiplies FortMovementSet's RunSpeed
+    // (by GE.Character.Move.Run), for no weapon in particular. Battle Royale's pawn moves at its stats row's speeds, not
+    // its movement set's, so the effect alone moves nothing; it is how the multiplier reaches the owning client, whose
+    // ability system the effect replicates to, and the server and that client both scale the row by it.
+    constexpr FBoostStage MoveSpeedStages[] = {
+        { L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_MoveSpeed.GE_Alteration_Attribute_MoveSpeed_C",
+            L"/Script/FortniteGame.FortMovementSet", L"RunSpeed", nullptr, nullptr, L"running speed" },
+    };
+    constexpr FBoostKind MoveSpeedBoost{ L"movement speed", MoveSpeedStages, std::size(MoveSpeedStages) };
+
     // The effects Core put on a player's ability system for one kind, kept through respawns.
     struct FAttributeBoost
     {
@@ -1982,7 +2216,7 @@ namespace
         }
         for (const FGameplayTag& Tag : Required.GameplayTags)
         {
-            if (_wcsicmp(Tag.TagName.ToString().ToStdString().c_str(), Stage.SourceTag) == 0)
+            if (Stage.SourceTag && _wcsicmp(Tag.TagName.ToString().ToStdString().c_str(), Stage.SourceTag) == 0)
             {
                 return true;
             }
@@ -2133,8 +2367,11 @@ namespace
             return std::nullopt;
         }
         FGameplayTagContainer SourceTags;
-        SourceTags.GameplayTags.Add(FGameplayTag{ FName(Stage.SourceTag, FNAME_Find) });
-        SourceTags.ParentTags.Add(FGameplayTag{ FName(Stage.SourceParentTag, FNAME_Find) });
+        if (Stage.SourceTag)
+        {
+            SourceTags.GameplayTags.Add(FGameplayTag{ FName(Stage.SourceTag, FNAME_Find) });
+            SourceTags.ParentTags.Add(FGameplayTag{ FName(Stage.SourceParentTag, FNAME_Find) });
+        }
         bool bSuccess = false;
         const float Multiplier = UAbilitySystemBlueprintLibrary::EvaluateAttributeValueWithTagsAndBase(AbilitySystem, FGameplayAttribute(Property), SourceTags, FGameplayTagContainer(), 1.0f, bSuccess);
         return bSuccess ? std::optional<float>(Multiplier) : std::nullopt;
@@ -2374,12 +2611,120 @@ namespace
         return Emotes;
     }
 
-    // Every frame on the game thread while a player has infinitemag, a fire rate or a weapon damage: the magazine is
-    // topped up as soon as a shot takes from it, and a respawned pawn gets the effects again. Nothing is hooked.
+    // ---- SetMaxHealth and Speed (#155) --------------------------------------------------------------------------------
+
+    // "cheat setmaxhealth": the maximum a player asked for, and the one their pawn had of its own.
+    struct FMaxHealth
+    {
+        TWeakObjectPtr<AFortPlayerController> Player;
+        TWeakObjectPtr<AFortPawn> Pawn;
+        float Wanted = 0.0f;
+        float Own = 0.0f;
+    };
+    std::vector<FMaxHealth> MaxHealths;
+
+    FMaxHealth* FindMaxHealth(const AFortPlayerController* PlayerController)
+    {
+        auto Found = std::find_if(MaxHealths.begin(), MaxHealths.end(), [PlayerController](const FMaxHealth& Entry) { return Entry.Player.Get() == PlayerController; });
+        return Found != MaxHealths.end() ? &*Found : nullptr;
+    }
+
+    // Brings the pawn's MaxHealth to Wanted through its SetMaxHealth, which sets the attribute's base value. Effects on it
+    // (Save the World's hero and perks add to it) make its value Scale * base + Add: a second base measures them, and
+    // the base that gives Wanted goes on. The maximum it has afterwards (the health set may clamp it), or nullopt.
+    std::optional<float> ApplyMaxHealth(AFortPawn* Pawn, float Wanted)
+    {
+        if (!Pawn->SetMaxHealth(Wanted))
+        {
+            return std::nullopt;
+        }
+        float Got = Pawn->GetMaxHealth();
+        if (std::fabs(Got - Wanted) > 0.5f)
+        {
+            const float Probe = Wanted * 2.0f;
+            Pawn->SetMaxHealth(Probe);
+            const float Scale = (Pawn->GetMaxHealth() - Got) / (Probe - Wanted);
+            Pawn->SetMaxHealth(Scale > 0.01f ? std::max(1.0f, Wanted + (Wanted - Got) / Scale) : Wanted);
+            Got = Pawn->GetMaxHealth();
+        }
+        return Got;
+    }
+
+    // A respawned (or new) pawn gets the maximum again, and its health with it.
+    void KeepMaxHealth(FMaxHealth& Entry)
+    {
+        AFortPlayerController* PlayerController = Entry.Player.Get();
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        if (!Pawn || Pawn == Entry.Pawn.Get() || Pawn->IsDead())
+        {
+            return;
+        }
+        Entry.Pawn = Pawn;
+        const float Current = Pawn->GetMaxHealth();
+        if (std::fabs(Current - Entry.Wanted) > 0.5f && Current > 0.0f)
+        {
+            Entry.Own = Current;
+        }
+        if (const std::optional<float> Got = ApplyMaxHealth(Pawn, Entry.Wanted))
+        {
+            Pawn->SetHealth(*Got);
+            UE_LOG(LogFortCheats, Log, TEXT("SetMaxHealth: %s's new pawn %s has %.0f maximum health"), *GetNameSafe(PlayerController), *GetNameSafe(Pawn), *Got);
+        }
+    }
+
+    // "cheat speed" on a pawn that moves at its movement set's speeds (Save the World): the multiplier Core keeps on
+    // whatever pawn the player has.
+    struct FSpeedPlayer
+    {
+        TWeakObjectPtr<AFortPlayerController> Player;
+        TWeakObjectPtr<AFortPawn> Pawn;
+        float Multiplier = 1.0f;
+    };
+    std::vector<FSpeedPlayer> SpeedPlayers;
+
+    void KeepSpeed(FSpeedPlayer& Entry)
+    {
+        AFortPlayerController* PlayerController = Entry.Player.Get();
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        if (Pawn && Pawn != Entry.Pawn.Get() && !Pawn->IsDead() && Pawn->MovesWithMovementSet())
+        {
+            // The set is the player state's, which the old pawn (still dying) scaled: it gives the set back first, so
+            // the new pawn scales the player's own speeds and the old one's end doesn't undo them later.
+            if (AFortPawn* OldPawn = Entry.Pawn.Get())
+            {
+                OldPawn->SetCheatSpeedMultiplier(1.0f);
+            }
+            Entry.Pawn = Pawn;
+            Pawn->SetCheatSpeedMultiplier(Entry.Multiplier);
+        }
+    }
+
+    // A Battle Royale pawn moves at the RunSpeed multiplier its ability system has (Core's move speed effects): the
+    // owning client works it out the same way (StartSpeedView), so the two move it alike.
+    void KeepRowSpeed(FAttributeBoost& Boost)
+    {
+        AFortPlayerController* PlayerController = Boost.Player.Get();
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        if (!Pawn || Pawn->MovesWithMovementSet())
+        {
+            return;
+        }
+        const std::optional<float> Multiplier = CurrentBoostMultiplier(BoostAbilitySystem(PlayerController, MoveSpeedStages[0]), MoveSpeedStages[0]);
+        if (Multiplier && *Multiplier > 0.01f && std::fabs(*Multiplier - Pawn->GetCheatSpeedMultiplier()) > 0.001f)
+        {
+            Pawn->SetCheatSpeedMultiplier(*Multiplier);
+        }
+    }
+
+    // Every frame on the game thread while a player has infinitemag, a fire rate, a weapon damage, a maximum health or
+    // a speed: the magazine is topped up as soon as a shot takes from it, and a respawned pawn gets the effects, the
+    // maximum health and the speed again. Nothing is hooked.
     void TickWeaponCheats()
     {
         std::erase_if(InfiniteMagPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
         std::erase_if(AttributeBoosts, [](const FAttributeBoost& Boost) { return !Boost.Player.Get(); });
+        std::erase_if(MaxHealths, [](const FMaxHealth& Entry) { return !Entry.Player.Get(); });
+        std::erase_if(SpeedPlayers, [](const FSpeedPlayer& Entry) { return !Entry.Player.Get(); });
         for (const TWeakObjectPtr<AFortPlayerController>& Known : InfiniteMagPlayers)
         {
             FillMagazine(Known.Get());
@@ -2387,8 +2732,21 @@ namespace
         for (FAttributeBoost& Boost : AttributeBoosts)
         {
             KeepBoost(Boost);
+            if (Boost.Kind == &MoveSpeedBoost)
+            {
+                KeepRowSpeed(Boost);
+            }
         }
-        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !AttributeBoosts.empty()) && GameThread::Enqueue(&TickWeaponCheats);
+        for (FMaxHealth& Entry : MaxHealths)
+        {
+            KeepMaxHealth(Entry);
+        }
+        for (FSpeedPlayer& Entry : SpeedPlayers)
+        {
+            KeepSpeed(Entry);
+        }
+        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !AttributeBoosts.empty() || !MaxHealths.empty() || !SpeedPlayers.empty())
+            && GameThread::Enqueue(&TickWeaponCheats);
     }
 
     void StartWeaponCheatTick()
@@ -2616,6 +2974,157 @@ void UFortCheatManager::WeaponDamage(const FString& Arguments)
 #endif
 }
 
+void UFortCheatManager::SetMaxHealth(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // #155. Health is UFortHealthSet's Health and MaxHealth on the pawn's ability system; the pawn's own SetMaxHealth
+    // and SetHealth set their base values there, which replicate (the HUD's health bar follows).
+    constexpr float MaxValue = 1000000.0f;
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
+    const bool bReset = Word == L"reset" || Word == L"off";
+    wchar_t* End = nullptr;
+    const float Value = !Word.empty() && !bReset ? std::wcstof(Word.c_str(), &End) : 0.0f;
+    if (!bReset && (Word.empty() || !End || *End != L'\0' || !std::isfinite(Value) || Value < 1.0f || Value > MaxValue))
+    {
+        Reply(FString::Printf(TEXT("Usage: setmaxhealth <value 1-%d | reset>, \"setmaxhealth 500\" makes your maximum health 500 and heals you to it; reset gives your own back"),
+            static_cast<int32_t>(MaxValue)));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (!Pawn || Pawn->IsDead())
+    {
+        Reply(TEXT("You have no pawn that is alive to change the health of"));
+        return;
+    }
+    if (!AFortPawn::FindStaticFunction_SetMaxHealth() || !AFortPawn::FindStaticFunction_SetHealth())
+    {
+        Reply(TEXT("SetMaxHealth needs FortPawn's SetMaxHealth and SetHealth, which this build doesn't have"));
+        return;
+    }
+
+    FMaxHealth* Existing = FindMaxHealth(PlayerController);
+    if (bReset)
+    {
+        if (!Existing)
+        {
+            Reply(FString::Printf(TEXT("Your maximum health is your own already (%.0f)"), Pawn->GetMaxHealth()));
+            return;
+        }
+        const float Own = Existing->Own;
+        MaxHealths.erase(MaxHealths.begin() + (Existing - MaxHealths.data()));
+        const float Health = Pawn->GetHealth();
+        const float Got = ApplyMaxHealth(Pawn, Own).value_or(Pawn->GetMaxHealth());
+        Pawn->SetHealth(std::min(Health, Got));
+        Reply(FString::Printf(TEXT("Your maximum health is your own again: %.0f"), Got));
+        return;
+    }
+
+    const float Own = Existing ? Existing->Own : Pawn->GetMaxHealth();
+    const std::optional<float> Got = ApplyMaxHealth(Pawn, Value);
+    if (!Got)
+    {
+        Reply(TEXT("Your pawn wouldn't take a maximum health"));
+        return;
+    }
+    Pawn->SetHealth(*Got);
+    if (!Existing)
+    {
+        Existing = &MaxHealths.emplace_back();
+        Existing->Player = PlayerController;
+    }
+    Existing->Pawn = Pawn;
+    Existing->Wanted = Value;
+    Existing->Own = Own;
+    StartWeaponCheatTick();
+    UE_LOG(LogFortCheats, Log, TEXT("SetMaxHealth: %s asked for %.0f, has %.0f (own %.0f), health %.0f"), *GetNameSafe(PlayerController), Value, *Got, Own, Pawn->GetHealth());
+    Reply(FString::Printf(TEXT("Your maximum health is %.0f (your own: %.0f), and you're healed to it%s; setmaxhealth reset gives your own back"), *Got, Own,
+        std::fabs(*Got - Value) > 0.5f ? TEXT(" (the game won't let it go further)") : TEXT("")));
+#endif
+}
+
+void UFortCheatManager::Speed(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    constexpr float MaxMultiplier = 10.0f;
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
+    const bool bReset = Word == L"reset" || Word == L"off";
+    const std::optional<float> Multiplier = !Word.empty() && !bReset ? ParseMultiplier(Word, MaxMultiplier) : std::nullopt;
+    AFortPlayerController* PlayerController = GetPlayerController();
+    FSpeedPlayer* const SetSpeed = [PlayerController]() -> FSpeedPlayer*
+    {
+        auto Found = std::find_if(SpeedPlayers.begin(), SpeedPlayers.end(), [PlayerController](const FSpeedPlayer& Entry) { return Entry.Player.Get() == PlayerController; });
+        return Found != SpeedPlayers.end() ? &*Found : nullptr;
+    }();
+    FAttributeBoost* const RowSpeed = FindBoost(PlayerController, MoveSpeedBoost);
+    if (!bReset && !Multiplier)
+    {
+        const float Current = SetSpeed ? SetSpeed->Multiplier : RowSpeed ? RowSpeed->Multiplier : 1.0f;
+        Reply(FString::Printf(TEXT("You move at %.2fx your own speed. Usage: speed <multiplier 0.05-%.0f | reset>, \"speed 2\" walks, runs and sprints twice as fast; reset gives your own speed back"),
+            Current, MaxMultiplier));
+        return;
+    }
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (!Pawn)
+    {
+        Reply(TEXT("You have no pawn to change the speed of"));
+        return;
+    }
+
+    // The last speed goes first.
+    if (SetSpeed)
+    {
+        SpeedPlayers.erase(SpeedPlayers.begin() + (SetSpeed - SpeedPlayers.data()));
+    }
+    if (RowSpeed)
+    {
+        RemoveBoostEffects(*RowSpeed);
+        std::erase_if(AttributeBoosts, [RowSpeed](const FAttributeBoost& Boost) { return &Boost == RowSpeed; });
+    }
+    Pawn->SetCheatSpeedMultiplier(1.0f);
+    if (bReset || *Multiplier == 1.0f)
+    {
+        Reply(TEXT("You move at your own speed again"));
+        return;
+    }
+
+    // Save the World: the movement set's walk, run and sprint speeds, which replicate to the player's client.
+    if (Pawn->MovesWithMovementSet())
+    {
+        FSpeedPlayer& Entry = SpeedPlayers.emplace_back();
+        Entry.Player = PlayerController;
+        Entry.Pawn = Pawn;
+        Entry.Multiplier = *Multiplier;
+        const float OwnSpeed = Pawn->SetCheatSpeedMultiplier(*Multiplier);
+        StartWeaponCheatTick();
+        UE_LOG(LogFortCheats, Log, TEXT("Speed: %s moves at %.2fx (movement set, own run speed %.0f)"), *GetNameSafe(PlayerController), *Multiplier, OwnSpeed);
+        Reply(FString::Printf(TEXT("You walk, run and sprint %.2fx as fast (running at %.0f, your own %.0f); speed reset: your own speed"), *Multiplier, OwnSpeed * *Multiplier, OwnSpeed));
+        return;
+    }
+
+    // Battle Royale: the move speed effect carries the multiplier to the client; both sides scale the stats row by it.
+    FAttributeBoost Boost;
+    Boost.Kind = &MoveSpeedBoost;
+    Boost.Player = PlayerController;
+    Boost.Multiplier = *Multiplier;
+    const std::variant<FBoostResult, FString> Result = ApplyBoost(Boost);
+    if (const FString* Error = std::get_if<FString>(&Result))
+    {
+        Reply(FString::Printf(TEXT("Can't change your speed: %s"), **Error));
+        return;
+    }
+    AttributeBoosts.push_back(std::move(Boost));
+    StartWeaponCheatTick();
+    const std::optional<float> Applied = CurrentBoostMultiplier(BoostAbilitySystem(PlayerController, MoveSpeedStages[0]), MoveSpeedStages[0]);
+    const float Moved = Applied && *Applied > 0.01f ? *Applied : *Multiplier;
+    const float OwnSpeed = Pawn->SetCheatSpeedMultiplier(Moved);
+    UE_LOG(LogFortCheats, Log, TEXT("Speed: %s moves at %.3fx (asked %.2fx; stats row, own run speed %.0f)"), *GetNameSafe(PlayerController), Moved, *Multiplier, OwnSpeed);
+    Reply(FString::Printf(TEXT("You walk, run and sprint %.2fx as fast (running at %.0f, your own %.0f); speed reset: your own speed"), Moved, OwnSpeed * Moved, OwnSpeed));
+#endif
+}
+
 void UFortCheatManager::Dance(const FString& Arguments)
 {
 #if WITH_SERVER_CODE
@@ -2740,6 +3249,64 @@ void UFortCheatManager::StartInfiniteMagazineView()
     if (!bStarted)
     {
         bStarted = GameThread::Enqueue(&TickInfiniteMagazineView);
+    }
+#endif
+}
+
+#if !UE_SERVER
+namespace
+{
+    // The client's half of "cheat speed" in Battle Royale (#155). The pawn moves at its stats row's speeds, which nothing
+    // replicates, and its movement is predicted here, so this client has to move it at the server's speed. The server
+    // puts the game's move speed alteration (RunSpeed) on the pawn's ability system, which replicates here, and scales
+    // the row by the RunSpeed multiplier it gives; four times a second this client does the same. A Save the World pawn
+    // reads its movement set, which the server scales and replicates itself, so it is left alone.
+    constexpr ULONGLONG SpeedViewMs = 250;
+    ULONGLONG NextSpeedView = 0;
+
+    void TickSpeedView()
+    {
+        const ULONGLONG Now = GetTickCount64();
+        if (Now >= NextSpeedView)
+        {
+            NextSpeedView = Now + SpeedViewMs;
+            UWorld* World = Natives::GWorld ? static_cast<UWorld*>(GWorld) : nullptr;
+            UGameInstance* GameInstance = World ? static_cast<UGameInstance*>(World->OwningGameInstance) : nullptr;
+            const TArray<ULocalPlayer*>* LocalPlayers = GameInstance ? &static_cast<TArray<ULocalPlayer*>&>(GameInstance->LocalPlayers) : nullptr;
+            ULocalPlayer* Player = LocalPlayers && LocalPlayers->Num() > 0 ? (*LocalPlayers)[0] : nullptr;
+            APlayerController* PlayerController = Player ? static_cast<APlayerController*>(Player->PlayerController) : nullptr;
+            AFortPawn* Pawn = PlayerController ? Cast<AFortPawn>(reinterpret_cast<UObject*>(PlayerController->GetPawn())) : nullptr;
+            UClass* MovementSetClass = Pawn && static_cast<ENetRole>(Pawn->Role) == ROLE_AutonomousProxy && !Pawn->MovesWithMovementSet()
+                ? FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortMovementSet") : nullptr;
+            UProperty* RunSpeed = MovementSetClass ? MovementSetClass->FindPropertyByName(FName(L"RunSpeed", FNAME_Find)) : nullptr;
+            UAbilitySystemComponent* AbilitySystem = RunSpeed && UAbilitySystemBlueprintLibrary::FindStaticFunction_EvaluateAttributeValueWithTagsAndBase()
+                ? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Pawn) : nullptr;
+            // Only with the set: an attribute of a set the ability system doesn't have can't be evaluated.
+            const TArray<UAttributeSet*>* Sets = AbilitySystem ? &static_cast<const TArray<UAttributeSet*>&>(AbilitySystem->SpawnedAttributes) : nullptr;
+            const bool bHasSet = Sets && std::any_of(Sets->begin(), Sets->end(), [MovementSetClass](UAttributeSet* Set) { return Set && Set->IsA(MovementSetClass); });
+            if (bHasSet)
+            {
+                bool bSuccess = false;
+                const float Multiplier = UAbilitySystemBlueprintLibrary::EvaluateAttributeValueWithTagsAndBase(AbilitySystem, FGameplayAttribute(RunSpeed), FGameplayTagContainer(), FGameplayTagContainer(), 1.0f, bSuccess);
+                if (bSuccess && Multiplier > 0.01f && std::fabs(Multiplier - Pawn->GetCheatSpeedMultiplier()) > 0.001f)
+                {
+                    const float OwnSpeed = Pawn->SetCheatSpeedMultiplier(Multiplier);
+                    UE_LOG(LogFortCheats, Log, TEXT("SpeedView: %s moves at %.3fx (own run speed %.0f)"), *GetNameSafe(Pawn), Multiplier, OwnSpeed);
+                }
+            }
+        }
+        GameThread::Enqueue(&TickSpeedView);
+    }
+}
+#endif
+
+void UFortCheatManager::StartSpeedView()
+{
+#if !UE_SERVER
+    static bool bStarted = false;
+    if (!bStarted)
+    {
+        bStarted = GameThread::Enqueue(&TickSpeedView);
     }
 #endif
 }

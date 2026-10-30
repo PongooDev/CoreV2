@@ -71,6 +71,25 @@ float AFortPawn::GetMaxShield() const
     return CallFloatGetter(this, StaticFunction_GetMaxShield());
 }
 
+namespace
+{
+    bool CallFloatSetter(AFortPawn* Pawn, UFunction* Function, float Value)
+    {
+        Reflection::FParams Params(Function);
+        return Function && Params.Set(L"NewHealthVal", Value) && Params.Call(Pawn);
+    }
+}
+
+bool AFortPawn::SetHealth(float NewHealth)
+{
+    return CallFloatSetter(this, FindStaticFunction_SetHealth(), NewHealth);
+}
+
+bool AFortPawn::SetMaxHealth(float NewMaxHealth)
+{
+    return CallFloatSetter(this, FindStaticFunction_SetMaxHealth(), NewMaxHealth);
+}
+
 bool AFortPawn::EquipDefaultWeapon()
 {
     if (!Finder::ResolveAbilityWeaponLive(CurrentWeaponListOffset(), AFortPlayerPawn::LastEquippedWeaponGUIDOffset()))
@@ -313,6 +332,82 @@ namespace
     }
 }
 
+namespace
+{
+    // "cheat speed" (#155): a pawn's speed multiplier, and the flying speed it has meanwhile (0: none).
+    struct FCheatSpeedMultiplier
+    {
+        TWeakObjectPtr<AFortPawn> Pawn;
+        float Multiplier = 1.0f;
+        float FlySpeed = 0.0f;
+    };
+    std::vector<FCheatSpeedMultiplier> CheatSpeedMultipliers;
+
+    FCheatSpeedMultiplier* FindSpeedMultiplier(const AFortPawn* Pawn)
+    {
+        std::erase_if(CheatSpeedMultipliers, [](const FCheatSpeedMultiplier& Entry) { return !Entry.Pawn.IsValid(); });
+        auto Found = std::find_if(CheatSpeedMultipliers.begin(), CheatSpeedMultipliers.end(), [Pawn](const FCheatSpeedMultiplier& Entry) { return Entry.Pawn.Get() == Pawn; });
+        return Found != CheatSpeedMultipliers.end() ? &*Found : nullptr;
+    }
+
+    // The pawn's speeds at Speed (its running speed; 0: its own), from its own every time.
+    float ApplyCheatMoveSpeed(AFortPawn* Pawn, float Speed)
+    {
+        ForgetDeadPawns();
+        auto Found = std::find_if(CheatMoveSpeeds.begin(), CheatMoveSpeeds.end(), [Pawn](const FCheatMoveSpeed& Entry) { return Entry.Pawn.Get() == Pawn; });
+        FCheatMoveSpeed* const State = Found != CheatMoveSpeeds.end() ? &*Found : nullptr;
+        UFortMovementSet* const Set = Pawn->MovesWithMovementSet() ? static_cast<UFortMovementSet*>(Pawn->MovementSet) : nullptr;
+        return Set ? SetMovementSetSpeed(Pawn, Set, State, Speed) : SetStatsRowSpeed(Pawn, State, Speed);
+    }
+
+    // Its own speeds, then those times its multiplier.
+    float ApplyOwnSpeedTimes(AFortPawn* Pawn, float Multiplier)
+    {
+        const float OwnSpeed = ApplyCheatMoveSpeed(Pawn, 0.0f);
+        if (Multiplier != 1.0f && OwnSpeed > 0.0f)
+        {
+            ApplyCheatMoveSpeed(Pawn, OwnSpeed * Multiplier);
+        }
+        return OwnSpeed;
+    }
+}
+
+bool AFortPawn::MovesWithMovementSet() const
+{
+    return !IsA(AFortPlayerPawnAthena::StaticClass()) && static_cast<UFortMovementSet*>(MovementSet);
+}
+
+float AFortPawn::SetCheatSpeedMultiplier(float Multiplier)
+{
+    FCheatSpeedMultiplier* Entry = FindSpeedMultiplier(this);
+    if (!Entry && Multiplier != 1.0f)
+    {
+        Entry = &CheatSpeedMultipliers.emplace_back();
+        Entry->Pawn = TWeakObjectPtr<AFortPawn>(this);
+    }
+    const float FlySpeed = Entry ? Entry->FlySpeed : 0.0f;
+    if (Entry)
+    {
+        Entry->Multiplier = Multiplier;
+    }
+    if (Entry && Multiplier == 1.0f && FlySpeed <= 0.0f)
+    {
+        CheatSpeedMultipliers.erase(CheatSpeedMultipliers.begin() + (Entry - CheatSpeedMultipliers.data()));
+    }
+    // Flying at a speed of its own: the multiplier waits for the walk.
+    if (FlySpeed > 0.0f)
+    {
+        return ApplyCheatMoveSpeed(this, FlySpeed);
+    }
+    return ApplyOwnSpeedTimes(this, Multiplier);
+}
+
+float AFortPawn::GetCheatSpeedMultiplier() const
+{
+    const FCheatSpeedMultiplier* Entry = FindSpeedMultiplier(this);
+    return Entry ? Entry->Multiplier : 1.0f;
+}
+
 float AFortPawn::SetCheatMoveSpeed(float Speed)
 {
     // UFortMovementComp_Character::GetMaxSpeed (1.7.2 0x6A4250, 1.8 0x6D8FE0, 1.8.1 0x6D1290) never reads MaxFlySpeed
@@ -321,10 +416,27 @@ float AFortPawn::SetCheatMoveSpeed(float Speed)
     // state's); Battle Royale's pawn reads its PawnStatHandle row instead. Nothing in that row replicates, so the
     // server and the owning client each change their own copy: the movement set's speeds, or the row the pawn reads (a
     // copy of its own with the speeds scaled, in a table of the pawn's).
-    ForgetDeadPawns();
-    auto Found = std::find_if(CheatMoveSpeeds.begin(), CheatMoveSpeeds.end(), [this](const FCheatMoveSpeed& Entry) { return Entry.Pawn.Get() == this; });
-    FCheatMoveSpeed* const State = Found != CheatMoveSpeeds.end() ? &*Found : nullptr;
-
-    UFortMovementSet* const Set = IsA(AFortPlayerPawnAthena::StaticClass()) ? nullptr : static_cast<UFortMovementSet*>(MovementSet);
-    return Set ? SetMovementSetSpeed(this, Set, State, Speed) : SetStatsRowSpeed(this, State, Speed);
+    //
+    // "cheat speed" (#155): without a flying speed the pawn moves at its own speeds times its speed multiplier. A flying
+    // speed is kept too, so a multiplier set meanwhile (a Battle Royale client learns it late) doesn't replace it.
+    FCheatSpeedMultiplier* Entry = FindSpeedMultiplier(this);
+    if (!Entry && Speed > 0.0f)
+    {
+        Entry = &CheatSpeedMultipliers.emplace_back();
+        Entry->Pawn = TWeakObjectPtr<AFortPawn>(this);
+    }
+    const float Multiplier = Entry ? Entry->Multiplier : 1.0f;
+    if (Entry)
+    {
+        Entry->FlySpeed = Speed > 0.0f ? Speed : 0.0f;
+    }
+    if (Entry && Speed <= 0.0f && Multiplier == 1.0f)
+    {
+        CheatSpeedMultipliers.erase(CheatSpeedMultipliers.begin() + (Entry - CheatSpeedMultipliers.data()));
+    }
+    if (Speed > 0.0f || Multiplier == 1.0f)
+    {
+        return ApplyCheatMoveSpeed(this, Speed);
+    }
+    return ApplyOwnSpeedTimes(this, Multiplier);
 }

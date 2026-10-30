@@ -62,6 +62,7 @@ void Boot::Initialize()
         ACharacter::OnCheatMovement = &UFortCheatManager::OnCheatMovement;
         UFortCheatManager::StartDisguiseView();
         UFortCheatManager::StartInfiniteMagazineView();
+        UFortCheatManager::StartSpeedView();
         ABuildingSMActor::HookClientVTables();
     });
 

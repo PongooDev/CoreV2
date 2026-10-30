@@ -16,6 +16,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/GameModeBase.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "GameThread.h"
@@ -1421,6 +1422,12 @@ void UFortCheatManager::Disguise(const FString& Arguments)
         Reply(TEXT("Disguise needs a pawn to disguise"));
         return;
     }
+    // #155: the pawn played now is another player's, or this one's own is.
+    if (IsInPossession(PlayerController))
+    {
+        Reply(TEXT("You can't disguise while you control another player's pawn or they control yours (unpossess first)"));
+        return;
+    }
 
     // Find what to become first, so a name nothing matches leaves a disguise as it is.
     UClass* Class = FindDisguiseClass(Words[0]);
@@ -1687,6 +1694,370 @@ void UFortCheatManager::Undisguise(const FString& Arguments)
     Disguises.erase(Disguises.begin() + (Disguise - Disguises.data()));
     Reply(bEnded ? FString::Printf(TEXT("You are no longer disguised as %s"), Name.c_str())
                  : FString::Printf(TEXT("Your own pawn is gone, so you stay %s"), Name.c_str()));
+#endif
+}
+
+// ----------------------------------------------------------------------------------------------------------------------
+// "cheat possessplayer" and "cheat unpossess" (#155)
+// ----------------------------------------------------------------------------------------------------------------------
+
+#if WITH_SERVER_CODE
+namespace
+{
+    // One player (the possessor) playing another's (the owner's) pawn. The possessor's own pawn is parked the way a
+    // player pawn disguise parks it (hidden, without collision or movement, invulnerable, simulated on its client), but
+    // where it stood: "unpossess" puts them back there. The owner's controller lets go of its pawn and views it (its
+    // camera's view target), so they watch what the possessor does with it. The possessed pawn can't be damaged
+    // meanwhile: its death would be the possessor's (the game ends whoever controls a dying pawn), not its owner's.
+    struct FPossession
+    {
+        TWeakObjectPtr<AFortPlayerController> Possessor;
+        TWeakObjectPtr<AFortPlayerController> Owner;
+        TWeakObjectPtr<APawn> OwnPawn;
+        TWeakObjectPtr<APawn> Possessed;
+        // How the possessor's own pawn was before it was parked (ParkOriginal's and UnparkOriginal's).
+        FDisguise Parking;
+        ENetRole OwnRemoteRole = ROLE_AutonomousProxy;
+        bool bPossessedCanBeDamaged = true;
+        FString OwnerName;
+        FString PossessorName;
+        ULONGLONG NextViewCheck = 0;
+    };
+    std::vector<FPossession> Possessions;
+    bool bWatchingPossessions = false;
+    constexpr ULONGLONG PossessionViewCheckMs = 1000;
+
+    FString PlayerNameOf(AController* Controller)
+    {
+        APlayerState* PlayerState = Controller ? static_cast<APlayerState*>(Controller->PlayerState) : nullptr;
+        return PlayerState ? PlayerState->GetPlayerName() : GetNameSafe(Controller);
+    }
+
+    FPossession* FindPossession(const AFortPlayerController* PlayerController, bool bAsPossessor)
+    {
+        auto Found = std::find_if(Possessions.begin(), Possessions.end(), [PlayerController, bAsPossessor](const FPossession& Possession)
+        {
+            return (bAsPossessor ? Possession.Possessor.Get() : Possession.Owner.Get()) == PlayerController;
+        });
+        return Found != Possessions.end() ? &*Found : nullptr;
+    }
+
+    // The controller's view (its camera manager's view target, sent to its client), through
+    // APlayerController::SetViewTargetWithBlend.
+    void SetViewTarget(AFortPlayerController* PlayerController, AActor* Target)
+    {
+        Reflection::FParams Params(FindObject<UFunction>(nullptr, L"/Script/Engine.PlayerController:SetViewTargetWithBlend"), true);
+        if (Params.Set(L"NewViewTarget", Target))
+        {
+            Params.Call(PlayerController);
+        }
+    }
+
+    AActor* ViewTargetOf(AFortPlayerController* PlayerController)
+    {
+        Reflection::FParams Params(FindObject<UFunction>(nullptr, L"/Script/Engine.Controller:GetViewTarget"), true);
+        return Params.Call(PlayerController) ? Params.Take<AActor*>(L"ReturnValue") : nullptr;
+    }
+
+    // A player left without a pawn by a possession that couldn't give theirs back gets a new one, the way the game mode
+    // starts every player (not while the aircraft takes everyone: it gives them their pawn when they jump).
+    void RestartWithoutPawn(AFortPlayerController* PlayerController)
+    {
+        UWorld* World = PlayerController && !PlayerController->GetPawn() && !IsInAircraftPhase(PlayerController) ? PlayerController->GetWorld() : nullptr;
+        AGameModeBase* GameMode = World ? World->GetAuthGameMode() : nullptr;
+        if (GameMode)
+        {
+            GameMode->RestartPlayer(PlayerController);
+        }
+    }
+
+    // Ends the possession: the possessor plays their own pawn again where it waited, and the owner theirs (as it is
+    // now, where the possessor left it). What is gone is dealt with: the possessed pawn without an owner goes, an owner
+    // left without their pawn gets a new one, a parked pawn whose player left goes.
+    void EndPossession(FPossession& Possession)
+    {
+        AFortPlayerController* Possessor = Possession.Possessor.Get();
+        AFortPlayerController* Owner = Possession.Owner.Get();
+        APawn* OwnPawn = Possession.OwnPawn.Get();
+        APawn* Possessed = Possession.Possessed.Get();
+        const bool bPossessedAlive = Possessed && !IsDeadPawn(Possessed);
+        if (Possessed)
+        {
+            Possessed->bCanBeDamaged = Possession.bPossessedCanBeDamaged;
+        }
+
+        // A possessor who has a pawn of another kind now (a respawn) keeps it; their parked one goes.
+        APawn* const PossessorPawn = Possessor ? Possessor->GetPawn() : nullptr;
+        const bool bPossessorElsewhere = PossessorPawn && PossessorPawn != Possessed && PossessorPawn != OwnPawn;
+        if (OwnPawn && Possessor && !IsDeadPawn(OwnPawn) && !bPossessorElsewhere)
+        {
+            OwnPawn->RemoteRole = TEnumAsByte<ENetRole>(Possession.OwnRemoteRole);
+            if (PossessorPawn != OwnPawn)
+            {
+                PossessForDisguise(Possessor, OwnPawn);
+            }
+            UnparkOriginal(Possession.Parking, OwnPawn);
+        }
+        else
+        {
+            if (Possessor && Possessed && Possessor->GetPawn() == Possessed)
+            {
+                Possessor->UnPossess();
+            }
+            if (OwnPawn && (!OwnPawn->Controller || static_cast<AController*>(OwnPawn->Controller) == static_cast<AController*>(Possessor)) && PossessorPawn != OwnPawn)
+            {
+                OwnPawn->K2_DestroyActor();
+            }
+            RestartWithoutPawn(Possessor);
+        }
+
+        if (Owner && bPossessedAlive && !Owner->GetPawn())
+        {
+            if (AController* Holder = Possessed->Controller)
+            {
+                Holder->UnPossess();
+            }
+            PossessForDisguise(Owner, Possessed);
+        }
+        else
+        {
+            if (Possessed && !Possessed->Controller && (!Owner || Owner->GetPawn()))
+            {
+                Possessed->K2_DestroyActor();
+            }
+            RestartWithoutPawn(Owner);
+        }
+        UE_LOG(LogFortDisguise, Log, TEXT("PossessPlayer: %s gave %s's pawn %s back (own pawn %s)"), *Possession.PossessorName, *Possession.OwnerName,
+            *GetNameSafe(Possessed), *GetNameSafe(OwnPawn));
+    }
+
+    // Once a tick while anyone is possessed: the owner keeps watching their pawn, and a possession whose possessor,
+    // owner or pawn went (left the game, died, respawned, the aircraft) ends. Returns false when it ended.
+    bool TickPossession(FPossession& Possession)
+    {
+        AFortPlayerController* Possessor = Possession.Possessor.Get();
+        AFortPlayerController* Owner = Possession.Owner.Get();
+        APawn* Possessed = Possession.Possessed.Get();
+        const bool bPlaying = Possessor && Owner && Possessed && !IsDeadPawn(Possessed) && Possessor->GetPawn() == Possessed && !Owner->GetPawn();
+        if (bPlaying)
+        {
+            Possession.Parking.LastLocation = ActorLocation(Possessed);
+            const ULONGLONG Now = GetTickCount64();
+            if (Now >= Possession.NextViewCheck)
+            {
+                Possession.NextViewCheck = Now + PossessionViewCheckMs;
+                if (ViewTargetOf(Owner) != static_cast<AActor*>(Possessed))
+                {
+                    SetViewTarget(Owner, Possessed);
+                }
+            }
+            return true;
+        }
+
+        const FString Why = !Possessor ? FString::Printf(TEXT("%s left"), *Possession.PossessorName)
+            : !Owner ? FString::Printf(TEXT("%s left"), *Possession.OwnerName)
+            : !Possessed ? FString::Printf(TEXT("%s's pawn is gone"), *Possession.OwnerName)
+            : IsDeadPawn(Possessed) ? FString::Printf(TEXT("%s's pawn died"), *Possession.OwnerName)
+            : FString(TEXT("one of you has another pawn now"));
+        EndPossession(Possession);
+        if (Possessor)
+        {
+            Tell(Possessor, FString::Printf(TEXT("You no longer control %s's pawn: %s"), *Possession.OwnerName, *Why));
+        }
+        if (Owner)
+        {
+            Tell(Owner, FString::Printf(TEXT("%s no longer controls your pawn: %s"), *Possession.PossessorName, *Why));
+        }
+        return false;
+    }
+
+    void WatchPossessions()
+    {
+        for (size_t Index = 0; Index < Possessions.size();)
+        {
+            if (TickPossession(Possessions[Index]))
+            {
+                ++Index;
+            }
+            else
+            {
+                Possessions.erase(Possessions.begin() + static_cast<ptrdiff_t>(Index));
+            }
+        }
+        bWatchingPossessions = !Possessions.empty() && GameThread::Enqueue(&WatchPossessions);
+    }
+}
+#endif
+
+bool UFortCheatManager::IsInPossession(const AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
+    return PlayerController && (FindPossession(PlayerController, true) || FindPossession(PlayerController, false));
+#else
+    return false;
+#endif
+}
+
+void UFortCheatManager::PossessPlayer(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    std::wstring Name;
+    for (const std::wstring& Word : SplitWords(Arguments.ToStdString()))
+    {
+        Name += (Name.empty() ? L"" : L" ") + Word;
+    }
+    if (Name.size() > 2 && Name.front() == L'/' && Name.back() == L'/')
+    {
+        Name = Name.substr(1, Name.size() - 2);
+    }
+    if (Name.empty())
+    {
+        Reply(TEXT("Usage: possessplayer <player>, their name or its start (\"possessplayer Bob\"): you control their pawn while they watch; \"unpossess\" gives it back"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    if (!AFortPlayerController::CanPossess())
+    {
+        Reply(TEXT("This server can't possess another pawn (AFortPlayerController::Possess wasn't found)"));
+        return;
+    }
+    if (FPossession* Possessed = FindPossession(PlayerController, false))
+    {
+        Reply(FString::Printf(TEXT("%s controls your pawn: you can't take another until they give it back"), *Possessed->PossessorName));
+        return;
+    }
+    if (FindDisguise(PlayerController))
+    {
+        Reply(TEXT("You're disguised: undisguise first"));
+        return;
+    }
+    FString Error;
+    AFortPlayerController* Owner = FindCheatTarget(PlayerController, FString(Name.c_str()), Error);
+    if (!Owner)
+    {
+        Reply(Error);
+        return;
+    }
+    const FString OwnerName = PlayerNameOf(Owner);
+    if (Owner == PlayerController)
+    {
+        Reply(TEXT("That's you"));
+        return;
+    }
+    if (FPossession* Current = FindPossession(Owner, true); Current || FindPossession(Owner, false))
+    {
+        Reply(FString::Printf(TEXT("%s is in a possession already (%s); try again once it ends"), *OwnerName,
+            Current ? *FString::Printf(TEXT("they control %s's pawn"), *Current->OwnerName) : TEXT("someone controls their pawn")));
+        return;
+    }
+    if (FindDisguise(Owner))
+    {
+        Reply(FString::Printf(TEXT("%s is disguised: they (or \"undisguise /%s/\") have to undisguise first"), *OwnerName, *OwnerName));
+        return;
+    }
+
+    // Possessing someone else first gives the last one back.
+    if (FPossession* Previous = FindPossession(PlayerController, true))
+    {
+        const FString PreviousName = Previous->OwnerName;
+        AFortPlayerController* PreviousOwner = Previous->Owner.Get();
+        EndPossession(*Previous);
+        Possessions.erase(Possessions.begin() + (Previous - Possessions.data()));
+        if (PreviousOwner)
+        {
+            Tell(PreviousOwner, FString::Printf(TEXT("%s gave your pawn back"), *PlayerNameOf(PlayerController)));
+        }
+        Reply(FString::Printf(TEXT("You gave %s's pawn back"), *PreviousName));
+    }
+
+    APawn* OwnPawn = PlayerController->GetPawn();
+    APawn* Target = Owner->GetPawn();
+    if (!OwnPawn || IsDeadPawn(OwnPawn))
+    {
+        Reply(TEXT("You need a pawn that is alive to leave while you control another"));
+        return;
+    }
+    if (!Target || IsDeadPawn(Target))
+    {
+        Reply(FString::Printf(TEXT("%s has no pawn that is alive to control (dead, or in the aircraft)"), *OwnerName));
+        return;
+    }
+
+    FPossession Possession;
+    Possession.Possessor = TWeakObjectPtr<AFortPlayerController>(PlayerController);
+    Possession.Owner = TWeakObjectPtr<AFortPlayerController>(Owner);
+    Possession.OwnPawn = TWeakObjectPtr<APawn>(OwnPawn);
+    Possession.Possessed = TWeakObjectPtr<APawn>(Target);
+    Possession.OwnerName = OwnerName;
+    Possession.PossessorName = PlayerNameOf(PlayerController);
+    Possession.Parking.Controller = TWeakObjectPtr<AFortPlayerController>(PlayerController);
+    Possession.Parking.LastLocation = ActorLocation(Target);
+    Possession.bPossessedCanBeDamaged = Target->bCanBeDamaged;
+
+    ParkOriginal(Possession.Parking, OwnPawn);
+    Owner->UnPossess();
+    PossessForDisguise(PlayerController, Target);
+    if (PlayerController->GetPawn() != Target)
+    {
+        // Undo: the owner takes their pawn again, the possessor theirs.
+        if (!Target->Controller)
+        {
+            PossessForDisguise(Owner, Target);
+        }
+        if (PlayerController->GetPawn() != OwnPawn)
+        {
+            PossessForDisguise(PlayerController, OwnPawn);
+        }
+        UnparkOriginal(Possession.Parking, OwnPawn);
+        Reply(FString::Printf(TEXT("Couldn't take over %s's pawn"), *OwnerName));
+        return;
+    }
+    Target->bCanBeDamaged = false;
+    // Parked under the possessed pawn, every client turns its collision off (ScanDisguises), and it is simulated on its
+    // own client too until Possess makes it its player's again.
+    OwnByPawn(OwnPawn, Target);
+    Possession.OwnRemoteRole = OwnPawn->RemoteRole;
+    OwnPawn->RemoteRole = TEnumAsByte<ENetRole>(ROLE_SimulatedProxy);
+    OwnPawn->ForceNetUpdate();
+    SetViewTarget(Owner, Target);
+    Possessions.push_back(std::move(Possession));
+    if (!bWatchingPossessions)
+    {
+        bWatchingPossessions = GameThread::Enqueue(&WatchPossessions);
+    }
+
+    UE_LOG(LogFortDisguise, Log, TEXT("PossessPlayer: %s controls %s's pawn %s (own pawn %s parked)"), *GetNameSafe(PlayerController), *OwnerName, *GetNameSafe(Target), *GetNameSafe(OwnPawn));
+    Tell(Owner, FString::Printf(TEXT("%s controls your pawn for now: you watch it until they give it back"), *Possessions.back().PossessorName));
+    Reply(FString::Printf(TEXT("You control %s's pawn while they watch; it can't be hurt meanwhile. \"unpossess\" gives it back and you're yourself again where you stood"), *OwnerName));
+#endif
+}
+
+void UFortCheatManager::Unpossess(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerController* PlayerController = GetPlayerController();
+    FPossession* Possession = PlayerController ? FindPossession(PlayerController, true) : nullptr;
+    if (!Possession)
+    {
+        FPossession* Possessed = PlayerController ? FindPossession(PlayerController, false) : nullptr;
+        Reply(Possessed ? FString::Printf(TEXT("%s controls your pawn; they give it back with \"unpossess\""), *Possessed->PossessorName)
+                        : FString(TEXT("You don't control anyone's pawn")));
+        return;
+    }
+    const FString OwnerName = Possession->OwnerName;
+    const FString PossessorName = Possession->PossessorName;
+    AFortPlayerController* Owner = Possession->Owner.Get();
+    EndPossession(*Possession);
+    Possessions.erase(Possessions.begin() + (Possession - Possessions.data()));
+    if (Owner)
+    {
+        Tell(Owner, FString::Printf(TEXT("%s gave your pawn back"), *PossessorName));
+    }
+    Reply(FString::Printf(TEXT("You gave %s's pawn back and are yourself again"), *OwnerName));
 #endif
 }
 

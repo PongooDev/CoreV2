@@ -145,6 +145,30 @@ public:
     // Core's own command, "cheat dance [EID or path]" (#152): the player plays the emote (a random one without a name)
     // through the emote wheel's own ServerPlayEmoteItem, run on the server.
     void Dance(const FString& Arguments);
+    // Core's own command, "cheat setmaxhealth <value | reset>" (#155): the pawn's maximum health becomes the value, through
+    // its own SetMaxHealth on the health set (replicated: the HUD shows it), and it is healed to it; kept through
+    // respawns until reset, which gives back the maximum it had.
+    void SetMaxHealth(const FString& Arguments);
+    // Core's own command, "cheat speed <multiplier | reset>" (#155): the pawn walks, runs and sprints that many times as
+    // fast. Save the World's pawn moves at its movement set's speeds, which the server scales and replicates to its
+    // client. Battle Royale's moves at its stats row's, which each machine reads on its own: the server applies the
+    // game's own move speed alteration (GE_Alteration_Attribute_MoveSpeed, RunSpeed), which reaches the owning client
+    // with the ability system, and the server and that client (StartSpeedView) both scale the row by the RunSpeed
+    // multiplier it gives.
+    void Speed(const FString& Arguments);
+    // Client (#155): every so often, the local Battle Royale pawn moves at the RunSpeed multiplier its ability system has.
+    static void StartSpeedView();
+    // Core's own commands, "cheat teleportto <player>" and "cheat bring <player | all>" (#155): the player's pawn goes
+    // next to the named player's, or theirs (everyone's) in front of the player's, on the floor there.
+    void TeleportTo(const FString& Arguments);
+    void Bring(const FString& Arguments);
+    // Core's own commands, "cheat possessplayer <player>" and "cheat unpossess" (#155): the player takes control of the
+    // named player's pawn while that player watches it, and gives it back. FortCheatManagerDisguise.cpp.
+    void PossessPlayer(const FString& Arguments);
+    void Unpossess(const FString& Arguments);
+    // A player another player's possessplayer controls, or who controls another's: their own pawn isn't theirs to play.
+    static bool IsInPossession(const AFortPlayerController* PlayerController);
+
     // Client (#152): "cheat togglebloom [on | off]", "cheat togglerecoil [on | off]" (this player's guns' spread and
     // recoil, which only their game simulates) and "cheat copytargetpath [class | mesh | name]" (what they look at, to
     // their clipboard) run here, not on the server; true when Msg was one of them.

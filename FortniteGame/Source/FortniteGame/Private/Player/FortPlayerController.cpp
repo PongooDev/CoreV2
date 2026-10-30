@@ -1932,7 +1932,10 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // ability and gadget cooldowns, "infinitemag [on | off]" (#149; also for ToggleInfiniteAmmo, whose flag it sets) keeps
     // their magazine full, "repair [all]" (#150) restores their weapon's durability, "firerate <multiplier | reset>"
     // (#150) changes how fast their guns fire, "weapondamage <multiplier | reset>" (#152) how much damage their weapons
-    // do, and "dance [EID]" (#152) plays an emote.
+    // do, "dance [EID]" (#152) plays an emote, "setmaxhealth <value | reset>" and "speed <multiplier | reset>" (#155)
+    // change their maximum health and how fast they move, "teleportto <player>" and "bring <player | all>" (#155) move
+    // them to another player or another player to them, and "possessplayer <player>" and "unpossess" (#155) have them
+    // play another player's pawn while that player watches.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
@@ -1945,6 +1948,12 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"firerate", &UFortCheatManager::FireRate },
         { L"weapondamage", &UFortCheatManager::WeaponDamage },
         { L"dance", &UFortCheatManager::Dance },
+        { L"setmaxhealth", &UFortCheatManager::SetMaxHealth },
+        { L"speed", &UFortCheatManager::Speed },
+        { L"teleportto", &UFortCheatManager::TeleportTo },
+        { L"bring", &UFortCheatManager::Bring },
+        { L"possessplayer", &UFortCheatManager::PossessPlayer },
+        { L"unpossess", &UFortCheatManager::Unpossess },
         { L"skin", &UFortCheatManager::Skin },
         { L"hero", &UFortCheatManager::Skin },
         { L"disguise", &UFortCheatManager::Disguise },

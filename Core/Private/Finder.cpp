@@ -526,7 +526,6 @@ uintptr_t Finder::ImportSlot(const char* Module, const char* Symbol)
 
     const auto* First = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(Base + Directory.VirtualAddress);
 
-    bool FoundModule = false;
     for (auto* Import = First; Import->Name; ++Import)
     {
         const char* Name = reinterpret_cast<const char*>(Base + Import->Name);
@@ -535,7 +534,6 @@ uintptr_t Finder::ImportSlot(const char* Module, const char* Symbol)
             continue;
         }
 
-        FoundModule = true;
         if (!Import->OriginalFirstThunk) continue;
         const auto* Thunk = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->OriginalFirstThunk);
         auto* Entry = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->FirstThunk);
@@ -553,24 +551,24 @@ uintptr_t Finder::ImportSlot(const char* Module, const char* Symbol)
         }
     }
 
-    if (!FoundModule)
+    // Fallback: the import directory may name a DLL differently than the caller
+    // (API-set vs. host name, or a function forwarded to another DLL).  Search
+    // every descriptor for the symbol by name.
+    for (auto* Import = First; Import->Name; ++Import)
     {
-        for (auto* Import = First; Import->Name; ++Import)
+        if (!Import->OriginalFirstThunk) continue;
+        const auto* Thunk = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->OriginalFirstThunk);
+        auto* Entry = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->FirstThunk);
+        for (; Thunk->u1.AddressOfData; ++Thunk, ++Entry)
         {
-            if (!Import->OriginalFirstThunk) continue;
-            const auto* Thunk = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->OriginalFirstThunk);
-            auto* Entry = reinterpret_cast<const IMAGE_THUNK_DATA*>(Base + Import->FirstThunk);
-            for (; Thunk->u1.AddressOfData; ++Thunk, ++Entry)
+            if (Thunk->u1.Ordinal & IMAGE_ORDINAL_FLAG)
             {
-                if (Thunk->u1.Ordinal & IMAGE_ORDINAL_FLAG)
-                {
-                    continue;
-                }
-                const auto* ByName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(Base + Thunk->u1.AddressOfData);
-                if (strcmp(ByName->Name, Symbol) == 0)
-                {
-                    return reinterpret_cast<uintptr_t>(Entry);
-                }
+                continue;
+            }
+            const auto* ByName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(Base + Thunk->u1.AddressOfData);
+            if (strcmp(ByName->Name, Symbol) == 0)
+            {
+                return reinterpret_cast<uintptr_t>(Entry);
             }
         }
     }

@@ -162,6 +162,10 @@ namespace Natives
 
     inline void (*GetSourceIniHierarchyFilenames)(const wchar_t* InBaseIniName, const wchar_t* InPlatformName, const wchar_t* EngineConfigDir, const wchar_t* SourceConfigDir, void* OutHierarchy, bool bRequireDefaultIni) = nullptr;
     inline bool (*FConfigCacheIni_GetBool)(void* This, const wchar_t* Section, const wchar_t* Key, bool& Value, const FString& Filename) = nullptr;
+    inline void* (*FConfigCacheIni_Find)(void* This, const FString& Filename, bool bCreateIfNotFound) = nullptr;
+    inline void (*FConfigFile_CombineFromBuffer)(void* This, const FString& Buffer) = nullptr;
+    inline void** GConfig = nullptr;
+    inline const FString* GEngineIni = nullptr;
     inline void** FOnlineVoiceImpl_VTable = nullptr;
     inline int32_t FOnlineVoiceImpl_InitIndex = -1;
     inline int32_t FOnlineVoiceImpl_SerializeRemotePacketIndex = -1;
@@ -475,6 +479,7 @@ namespace Natives
     inline int32_t APlayerController_SendClientAdjustmentIndex = -1;
     inline int32_t AGameNetworkManager_IsInLowBandwidthModeIndex = -1;
     inline int32_t UEngine_GetMaxTickRateIndex = -1;
+    inline int32_t UEngine_InitIndex = -1;
     inline int32_t UConsole_ConsoleCommandIndex = -1;
     inline int32_t UConsole_InputKeyIndex = -1;
     inline int32_t APlayerController_ConsoleKeyIndex = -1;

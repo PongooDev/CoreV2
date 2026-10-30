@@ -54,6 +54,11 @@ public:
     // plays it.
     static void EnableVoice(bool bLocalVoice);
 
+    // Merges Text, ini lines ("[Section]" and "Key=Value"), into the engine's loaded Engine.ini (GEngineIni) through
+    // FConfigFile::CombineFromBuffer, the call the online hotfix makes: later reads of those keys get these values.
+    // Only those keys change. Call it on the thread that reads the config (the engine's).
+    static bool CombineIntoEngineIni(const wchar_t* What, const wchar_t* Text);
+
     // The same switches as EnableVoice, written into the saved Engine.ini the engine layers over the build's config, for
     // packed builds: their packer checks the code once as the initial load ends, so EnableVoice's detour can only go in
     // after the engine has read these keys. Run it before the engine starts; it changes only these keys.

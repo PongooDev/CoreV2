@@ -7945,6 +7945,137 @@ bool Finder::ResolvePushToTalk()
     return true;
 }
 
+bool Finder::ResolveConfigCombine()
+{
+    if (Natives::FConfigFile_CombineFromBuffer)
+    {
+        return true;
+    }
+    if (!Finder::ResolveVoiceConfig() || !Finder::ResolveOnlineVoice())
+    {
+        Log::Error(L"Finder: config merge prerequisites missing (GetBool or FOnlineVoiceImpl)");
+        return false;
+    }
+
+    // FConfigCacheIni::GetBool (1.9.1 0x131A1A0) starts by calling GetString (0x131D1A0), whose first call with a false
+    // third argument (xor r8d, r8d) is FConfigCacheIni::Find(Filename, false) (0x1316B30).
+    uintptr_t GetString = 0;
+    Finder::TraceFind(reinterpret_cast<uintptr_t>(Natives::FConfigCacheIni_GetBool), 16, [&](uintptr_t Instruction)
+    {
+        GetString = Byte(Instruction) == 0xE8 ? Finder::RelativeTarget(Instruction, 1, 5) : 0;
+        return GetString != 0;
+    });
+    bool bNoCreate = false;
+    uintptr_t Find = 0;
+    Finder::TraceFind(GetString, 48, [&](uintptr_t Instruction)
+    {
+        if (Byte(Instruction) == 0x45 && Byte(Instruction + 1) == 0x33 && Byte(Instruction + 2) == 0xC0)
+        {
+            bNoCreate = true;
+            return false;
+        }
+        Find = bNoCreate && Byte(Instruction) == 0xE8 ? Finder::RelativeTarget(Instruction, 1, 5) : 0;
+        return Find != 0;
+    });
+
+    // FOnlineVoiceImpl::Init (1.9.1 0x3A5BAE0) opens with GConfig->GetInt(L"OnlineSubsystem", L"MaxLocalTalkers", ...,
+    // GEngineIni): mov rcx, [GConfig]; lea rsi, [GEngineIni]; ...; mov [rsp+20h], rsi; call.
+    uintptr_t Config = 0;
+    uintptr_t EngineIni = 0;
+    uintptr_t Loaded[16] = {};
+    // The build's own Init: read before FOnlineVoiceImpl::Hook swaps the slot for Core's.
+    const uintptr_t VoiceInit = reinterpret_cast<uintptr_t>(Natives::FOnlineVoiceImpl_VTable[Natives::FOnlineVoiceImpl_InitIndex]);
+    const bool bVoiceInitInExe = std::any_of(Finder::ExecutableSections().begin(), Finder::ExecutableSections().end(), [&](const auto& Section) { return VoiceInit >= Section.first && VoiceInit < Section.second; });
+    Finder::TraceFind(bVoiceInitInExe ? VoiceInit : 0, 32, [&](uintptr_t Instruction)
+    {
+        const uint8_t Rex = Byte(Instruction);
+        if ((Rex == 0x48 || Rex == 0x4C) && Byte(Instruction + 1) == 0x8B && Byte(Instruction + 2) == 0x0D && !Config)
+        {
+            Config = Finder::RelativeTarget(Instruction, 3, 7);
+        }
+        else if ((Rex == 0x48 || Rex == 0x4C) && Byte(Instruction + 1) == 0x8D && (Byte(Instruction + 2) & 0xC7) == 0x05)
+        {
+            Loaded[((Byte(Instruction + 2) >> 3) & 7) + (Rex == 0x4C ? 8 : 0)] = Finder::RelativeTarget(Instruction, 3, 7);
+        }
+        else if ((Rex == 0x48 || Rex == 0x4C) && Byte(Instruction + 1) == 0x89 && (Byte(Instruction + 2) & 0xC7) == 0x44 && Byte(Instruction + 3) == 0x24 && Byte(Instruction + 4) == 0x20)
+        {
+            EngineIni = Loaded[((Byte(Instruction + 2) >> 3) & 7) + (Rex == 0x4C ? 8 : 0)];
+        }
+        return Byte(Instruction) == 0xE8;
+    });
+
+    // UOnlineHotfixManager::HotfixIniFile (1.9.1 0x3C68890, which logs how long the update took): GetConfigFile,
+    // then ConfigFile->CombineFromBuffer(IniData) (0x1310D80) as its third call. CombineFromBuffer reads the buffer a
+    // line at a time, skipping CR and LF first.
+    uintptr_t Combine = 0;
+    int32_t Calls = 0;
+    Finder::TraceFind(FunctionOf(L"Updating config from %s took %f seconds and reloaded %d objects"), 32, [&](uintptr_t Instruction)
+    {
+        Combine = Byte(Instruction) == 0xE8 && ++Calls == 3 ? Finder::RelativeTarget(Instruction, 1, 5) : 0;
+        return Combine != 0;
+    });
+    const bool bCombineReadsLines = Combine
+        && Finder::TraceFind(Combine, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0x66 && Byte(Instruction + 1) == 0x83 && Byte(Instruction + 3) == 0x0D; })
+        && Finder::TraceFind(Combine, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0x66 && Byte(Instruction + 1) == 0x83 && Byte(Instruction + 3) == 0x0A; });
+
+    if (!Find || !Config || !EngineIni || !bCombineReadsLines)
+    {
+        Log::Error(L"Finder: config merge not found (Find 0x{:X}, GConfig 0x{:X}, GEngineIni 0x{:X}, CombineFromBuffer 0x{:X})",
+            Find ? Find - Finder::ImageBase() : 0, Config ? Config - Finder::ImageBase() : 0, EngineIni ? EngineIni - Finder::ImageBase() : 0, Combine ? Combine - Finder::ImageBase() : 0);
+        return false;
+    }
+
+    Natives::FConfigCacheIni_Find = reinterpret_cast<decltype(Natives::FConfigCacheIni_Find)>(Find);
+    Natives::GConfig = reinterpret_cast<void**>(Config);
+    Natives::GEngineIni = reinterpret_cast<const FString*>(EngineIni);
+    Natives::FConfigFile_CombineFromBuffer = reinterpret_cast<decltype(Natives::FConfigFile_CombineFromBuffer)>(Combine);
+    Log::Info(L"Finder: config merge: FConfigCacheIni::Find +0x{:X}, GConfig +0x{:X}, GEngineIni +0x{:X}, FConfigFile::CombineFromBuffer +0x{:X}",
+        Find - Finder::ImageBase(), Config - Finder::ImageBase(), EngineIni - Finder::ImageBase(), Combine - Finder::ImageBase());
+    return true;
+}
+
+bool Finder::ResolveEngineInit()
+{
+    if (Natives::UEngine_InitIndex >= 0)
+    {
+        return true;
+    }
+
+    // FEngineLoop::Init (1.9.1 0x27C4EB): GEngine = NewObject<UEngine>(...), GEngine->ParseCommandline(), the log
+    // "Initializing Game Engine...", then GEngine->Init(this): mov rcx, [GEngine]; mov rdx, ...; mov rax, [rcx];
+    // call [rax+X] (1.9.1 +0x248). The first virtual call on the object loaded from GEngine after the log is Init.
+    const uintptr_t Engine = reinterpret_cast<uintptr_t>(Natives::GEngine);
+    for (const uintptr_t Ref : Finder::StringRefs(L"Initializing Game Engine..."))
+    {
+        bool bLoaded = false;
+        const uintptr_t Call = Finder::TraceFind(Ref, 32, [&](uintptr_t Instruction)
+        {
+            if (Byte(Instruction) == 0x48 && Byte(Instruction + 1) == 0x8B && Byte(Instruction + 2) == 0x0D && Finder::RelativeTarget(Instruction, 3, 7) == Engine)
+            {
+                bLoaded = true;
+                return false;
+            }
+            return bLoaded && Byte(Instruction) == 0xFF && (Byte(Instruction + 1) == 0x90 || Byte(Instruction + 1) == 0x50);
+        });
+        if (!Call)
+        {
+            continue;
+        }
+
+        const int32_t Displacement = Byte(Call + 1) == 0x90 ? *reinterpret_cast<const int32_t*>(Call + 2) : static_cast<int8_t>(Byte(Call + 2));
+        if (Displacement <= 0 || Displacement % sizeof(void*) != 0)
+        {
+            continue;
+        }
+        Natives::UEngine_InitIndex = Displacement / static_cast<int32_t>(sizeof(void*));
+        Log::Info(L"Finder: UEngine::Init is slot 0x{:X}", Natives::UEngine_InitIndex);
+        return true;
+    }
+
+    Log::Error(L"Finder: UEngine::Init's call in FEngineLoop::Init not found");
+    return false;
+}
+
 bool Finder::ResolveOnlineVoice()
 {
     if (Natives::FOnlineVoiceImpl_VTable)

@@ -1,7 +1,21 @@
 #include "pch.h"
 #include "LaunchEngineLoop.h"
 #include "Hooks.h"
+#include "Log.h"
 #include "Natives.h"
+
+namespace
+{
+    void HookIdleMode()
+    {
+        if (uint8_t* IdleCheck = Sites::ShouldUseIdleModeCheck)
+        {
+            uint8_t NotWindowed[7] = { 0xE9, 0, 0, 0, 0, 0x90, 0x90 };
+            *reinterpret_cast<int32_t*>(NotWindowed + 1) = static_cast<int32_t>(Sites::ShouldUseIdleModeFalse - (IdleCheck + 5));
+            Hooks::WriteBytes(L"FEngineLoop::ShouldUseIdleMode SupportsWindowedMode", IdleCheck, NotWindowed);
+        }
+    }
+}
 
 void FEngineLoop::Hook()
 {
@@ -21,10 +35,21 @@ void FEngineLoop::Hook()
         Hooks::SkipBranch(L"FEngineLoop::PreInit IsRunningDedicatedServer", Check);
     }
 
-    if (uint8_t* IdleCheck = Sites::ShouldUseIdleModeCheck)
+    HookIdleMode();
+}
+
+void FEngineLoop::HookAfterPreInit()
+{
+    if (!Natives::GIsServer || !Natives::GIsClient)
     {
-        uint8_t NotWindowed[7] = { 0xE9, 0, 0, 0, 0, 0x90, 0x90 };
-        *reinterpret_cast<int32_t*>(NotWindowed + 1) = static_cast<int32_t>(Sites::ShouldUseIdleModeFalse - (IdleCheck + 5));
-        Hooks::WriteBytes(L"FEngineLoop::ShouldUseIdleMode SupportsWindowedMode", IdleCheck, NotWindowed);
+        Log::Error(L"FEngineLoop: GIsServer or GIsClient not found, the engine stays a client");
     }
+    else
+    {
+        *Natives::GIsServer = true;
+        *Natives::GIsClient = false;
+        Log::Info(L"FEngineLoop: GIsServer on, GIsClient off (after PreInit)");
+    }
+
+    HookIdleMode();
 }

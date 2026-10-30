@@ -2,6 +2,14 @@
 #include "Packed.h"
 #include "Log.h"
 #include "Natives.h"
+#include "ObjectLayout.h"
+#include "Finder.h"
+#include "Hooks.h"
+#include "UObject/NameTypes.h"
+#include "UObject/UObjectArray.h"
+#include "UObject/UObjectBase.h"
+
+#include <atomic>
 
 namespace
 {
@@ -131,6 +139,131 @@ namespace
     }
 }
 
+namespace
+{
+    constexpr DWORD EngineTimeoutMs = 300000;
+
+    using FEngineInit = void (*)(void* Engine, void* EngineLoop);
+
+    // The engine classes whose Init is held: each class's vtable and the Init it had. An entry is complete before the
+    // slot is swapped, and only ever added to, so the engine thread reads it without a lock.
+    struct FHeldInit
+    {
+        void** VTable = nullptr;
+        FEngineInit Original = nullptr;
+    };
+    constexpr int32_t MaxHeldInits = 32;
+    FHeldInit HeldInits[MaxHeldInits];
+    std::atomic<int32_t> HeldInitCount = 0;
+
+    void (*GBeforeEngineInit)() = nullptr;
+    std::atomic<bool> bBeforeEngineInitRan = false;
+
+    void RunBeforeEngineInitOnce(const wchar_t* Where)
+    {
+        if (!bBeforeEngineInitRan.exchange(true))
+        {
+            Log::Info(L"Packed exe: {}", Where);
+            GBeforeEngineInit();
+        }
+    }
+
+    const FHeldInit* FindHeld(void** VTable)
+    {
+        for (int32_t Index = 0; Index < HeldInitCount.load(); ++Index)
+        {
+            if (HeldInits[Index].VTable == VTable)
+            {
+                return &HeldInits[Index];
+            }
+        }
+        return nullptr;
+    }
+
+    // UEngine::Init, entered from FEngineLoop::Init on the engine's own thread just after it set GEngine: the initial
+    // load the packer checks at the end of is over, and nothing of the engine's own start-up has run yet.
+    void EngineInitHK(void* Engine, void* EngineLoop)
+    {
+        RunBeforeEngineInitOnce(L"the engine is about to initialise and the packer has checked its code; Core takes over here");
+
+        const FHeldInit* Held = FindHeld(*reinterpret_cast<void***>(Engine));
+        if (!Held)
+        {
+            Log::Fatal(L"Packed exe: UEngine::Init reached through a vtable Core didn't hold");
+            return;
+        }
+        Held->Original(Engine, EngineLoop);
+    }
+
+    const UObjectBase* ClassOf(const UObjectBase* Object)
+    {
+        return reinterpret_cast<const UObjectBase*>(Object->GetClass());
+    }
+
+    const UObjectBase* SuperOf(const UObjectBase* Class)
+    {
+        return *reinterpret_cast<const UObjectBase* const*>(reinterpret_cast<uintptr_t>(Class) + ObjectLayout::Current.UStruct_SuperStruct);
+    }
+
+    // Visits every class default object there is so far. The engine makes the default objects of its native classes
+    // as their modules load, before FEngineLoop::Init creates GEngine from one of those classes. GUObjectArray is a
+    // fixed block, so reading it while the engine adds to it is safe.
+    template <typename FVisit>
+    void ForEachDefaultObject(FVisit&& Visit)
+    {
+        const FUObjectArray* Array = Natives::GUObjectArray;
+        for (int32_t Index = 0; Array && Index < Array->GetObjectArrayNum(); ++Index)
+        {
+            const FUObjectItem* Item = Array->IndexToObject(Index);
+            UObjectBase* Object = Item ? Item->Object : nullptr;
+            if (Object && (Object->GetFlags() & RF_ClassDefaultObject) && Object->GetClass())
+            {
+                Visit(Object);
+            }
+        }
+    }
+
+    // The class of the default object called Name, once the engine has made it.
+    const UObjectBase* ClassOfDefaultObject(const wchar_t* Name)
+    {
+        const FName Wanted(Name, FNAME_Find);
+        const UObjectBase* Found = nullptr;
+        if (!Wanted.IsNone())
+        {
+            ForEachDefaultObject([&](UObjectBase* Object)
+            {
+                Found = !Found && Object->GetFName() == Wanted ? ClassOf(Object) : Found;
+            });
+        }
+        return Found;
+    }
+
+    // Holds Init in the vtable of every class there is so far that is Base or derives from it.
+    void HoldInits(const UObjectBase* Base)
+    {
+        ForEachDefaultObject([&](UObjectBase* Object)
+        {
+            bool bDerived = false;
+            int32_t Depth = 0;
+            for (const UObjectBase* Class = ClassOf(Object); Class && Depth < 64 && !bDerived; Class = SuperOf(Class), ++Depth)
+            {
+                bDerived = Class == Base;
+            }
+            void** const VTable = *reinterpret_cast<void***>(Object);
+            const int32_t Count = HeldInitCount.load();
+            if (!bDerived || FindHeld(VTable) || Count >= MaxHeldInits)
+            {
+                return;
+            }
+
+            HeldInits[Count] = { VTable, reinterpret_cast<FEngineInit>(VTable[Natives::UEngine_InitIndex]) };
+            HeldInitCount.store(Count + 1);
+            const std::wstring Name = L"UEngine::Init (" + ClassOf(Object)->GetFName().ToStdString() + L")";
+            Hooks::SwapVTable(Name, VTable, Natives::UEngine_InitIndex, reinterpret_cast<void*>(&EngineInitHK));
+        });
+    }
+}
+
 bool Packed::RunAfterStub(void (*Start)())
 {
     const FImage Image = Describe();
@@ -188,4 +321,64 @@ void Packed::WaitForCodeCheck()
     }
 
     Log::Info(L"Packed exe: the engine is up, so the packer has finished checking; enabling hooks now");
+}
+
+bool Packed::RunBeforeEngineInit(const wchar_t* EngineDefaultObject, void (*Callback)())
+{
+    if (!Natives::GEngine || !Natives::GUObjectArray || Natives::UEngine_InitIndex < 0)
+    {
+        Log::Error(L"Packed exe: GEngine, GUObjectArray or UEngine::Init's slot is missing, so Core can't stop the engine before it initialises");
+        return false;
+    }
+    GBeforeEngineInit = Callback;
+
+    // The engine's class and so its vtable exist before the engine does: GEngine is made from the class the config
+    // names (Fortnite's FortEngine), a subclass of the one named here. Its Init slot is data, not code, so swapping it
+    // leaves the code the packer checks as it is, and holds the engine at a fixed point after that check: Init is
+    // FEngineLoop::Init's next virtual call on the engine after it sets GEngine (Finder::ResolveEngineInit). Every
+    // subclass is held, since which one the config names isn't known here, and the scan repeats until the engine
+    // exists, as a module loaded later can add one.
+    const UObjectBase* Base = nullptr;
+    const DWORD Deadline = GetTickCount() + EngineTimeoutMs;
+    while (!(Base = ClassOfDefaultObject(EngineDefaultObject)))
+    {
+        if (*Natives::GEngine || GetTickCount() > Deadline)
+        {
+            Log::Error(L"Packed exe: {} not found before the engine was created", EngineDefaultObject);
+            return false;
+        }
+        Sleep(1);
+    }
+
+    HoldInits(Base);
+    if (*Natives::GEngine)
+    {
+        Log::Error(L"Packed exe: the engine was created before Core could hold its Init");
+        return false;
+    }
+    Log::Info(L"Packed exe: holding the engine at UEngine::Init until the packer has checked its code ({} engine classes so far)", HeldInitCount.load());
+
+    while (!*Natives::GEngine)
+    {
+        if (GetTickCount() > Deadline)
+        {
+            Log::Error(L"Packed exe: no engine after {}s", EngineTimeoutMs / 1000);
+            return true;
+        }
+        HoldInits(Base);
+        Sleep(PollMs);
+    }
+
+    // Should the engine be of a class that appeared between the last scan and its creation, fall back to running as
+    // soon as the engine exists, from this thread, which races the engine's Init but beats leaving the server a client.
+    const UObjectBase* Engine = reinterpret_cast<const UObjectBase*>(*Natives::GEngine);
+    const std::wstring EngineClass = ClassOf(Engine)->GetFName().ToStdString();
+    if (!FindHeld(*reinterpret_cast<void** const*>(Engine)))
+    {
+        Log::Error(L"Packed exe: the engine is a {}, whose Init Core didn't hold, so it initialises without waiting for Core", EngineClass);
+        RunBeforeEngineInitOnce(L"the engine is up, so the packer has checked its code; Core takes over late");
+        return true;
+    }
+    Log::Info(L"Packed exe: the engine is a {}, held at its Init", EngineClass);
+    return true;
 }

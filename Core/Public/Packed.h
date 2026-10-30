@@ -23,4 +23,14 @@ namespace Packed
     /// <para>Returns straight away on an ordinary build, where nothing checks the code.</para>
     /// </summary>
     void WaitForCodeCheck();
+
+    /// <summary>
+    /// On a packed build, has the engine's own thread run <paramref name="Callback"/> as it enters UEngine::Init,
+    /// right after FEngineLoop::Init creates GEngine: after the packer's one-time code check, and before the engine
+    /// initialises, browses to its default map or does anything else Core changes. It swaps the Init slot of the
+    /// engine class's vtable (data, which the check doesn't look at) as soon as the class default object named
+    /// <paramref name="EngineDefaultObject"/> exists. Blocks the caller until the engine exists.
+    /// <para>Returns false, without running <paramref name="Callback"/>, when the engine got there first.</para>
+    /// </summary>
+    bool RunBeforeEngineInit(const wchar_t* EngineDefaultObject, void (*Callback)());
 }

@@ -164,6 +164,32 @@ void FConfigCacheIni::WriteVoiceSettings(bool bLocalVoice)
     Log::Info(L"Voice chat: {} {}", bWrote ? L"turned voice on in" : L"voice already on in", *Path);
 }
 
+bool FConfigCacheIni::CombineIntoEngineIni(const wchar_t* What, const wchar_t* Text)
+{
+    if (!Finder::ResolveConfigCombine() || !*Natives::GConfig)
+    {
+        Log::Error(L"{}: can't merge into the engine's config (not found, or no GConfig yet)", What);
+        return false;
+    }
+
+    const std::wstring_view EngineIni = **Natives::GEngineIni;
+    if (EngineIni.size() < 10 || _wcsicmp(EngineIni.substr(EngineIni.size() - 10).data(), L"Engine.ini") != 0)
+    {
+        Log::Error(L"{}: GEngineIni is \"{}\", not an Engine.ini", What, EngineIni);
+        return false;
+    }
+
+    void* File = Natives::FConfigCacheIni_Find(*Natives::GConfig, *Natives::GEngineIni, false);
+    if (!File)
+    {
+        Log::Error(L"{}: {} isn't loaded", What, EngineIni);
+        return false;
+    }
+    Natives::FConfigFile_CombineFromBuffer(File, FString(Text));
+    Log::Info(L"{}: merged into {}", What, EngineIni);
+    return true;
+}
+
 void FConfigCacheIni::Hook()
 {
     Hooks::Detour(L"GetSourceIniHierarchyFilenames", reinterpret_cast<void*>(Natives::GetSourceIniHierarchyFilenames), &GetSourceIniHierarchyFilenames, &GetSourceIniHierarchyFilenamesOG);

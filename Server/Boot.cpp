@@ -83,6 +83,26 @@ namespace
 }
 
 static void Start();
+static void InstallHooks();
+
+namespace
+{
+    // Packed builds only. On the other builds the GetSourceIniHierarchyFilenames detour layers DedicatedServerEngine.ini
+    // over a server's config while the engine loads it, during PreInit, which on a packed build is over by the time Core
+    // may patch code, and the saved Engine.ini isn't read back into these shipping builds' config (a key written there
+    // reads as the build ships it), so the keys a server needs are merged into the loaded config instead, through the
+    // engine's own FConfigFile::CombineFromBuffer: DedicatedServerEngine.ini's bHasVoiceEnabled (the server forwards its
+    // players' voice) and bEnableDefaultServiceTracker, and the launcher's [XMPP] bEnabled=False (Core-Launcher
+    // ServerConfig). DedicatedServerEngine.ini's map and game mode are in DefaultEngine.ini too, and its [Core.Log] is
+    // only log verbosity.
+    void CombineServerConfig()
+    {
+        FConfigCacheIni::CombineIntoEngineIni(L"Server config",
+            L"[OnlineSubsystem]\r\nbHasVoiceEnabled=true\r\n"
+            L"[OnlineSubsystemMcp]\r\nbEnableDefaultServiceTracker=false\r\n"
+            L"[XMPP]\r\nbEnabled=false\r\n");
+    }
+}
 
 void Boot::Initialize()
 {
@@ -118,11 +138,59 @@ static void Start()
         Log::Fatal(L"Startup aborted: required addresses are missing");
     }
 
-    FApp::Hook();
+    // Packed builds only: the packer checks its decrypted code once as the engine's initial load ends, and a patch in
+    // place by then hangs the game, so the engine starts as the client it is, untouched. Its own thread stops as it
+    // enters UEngine::Init, the step after that check, and Core makes it a server there: everything from UEngine::Init
+    // on (its game instance, the default map, Listen) then runs with Core's hooks in place, as on the other builds.
+    if (Packed::IsPacked())
+    {
+        // Vtable slots, not code, so they can go in now: the online subsystem starts during PreInit and makes its voice
+        // interface there, as a dedicated server's only when IsDedicated already says so and the config has voice on.
+        // The config part goes in on the engine's thread as the subsystem first asks whether it is dedicated.
+        // (The config finder reads FOnlineVoiceImpl::Init, so before its slot is swapped.)
+        if (Finder::ResolveConfigCombine())
+        {
+            FOnlineSubsystemImpl::BeforeFirstDedicatedCheck = &CombineServerConfig;
+        }
+        FOnlineVoiceImpl::Hook();
+        FOnlineSubsystemImpl::HookVTables();
+        if (!Finder::ResolveEngineInit() || !Packed::RunBeforeEngineInit(L"Default__GameEngine", &InstallHooks))
+        {
+            Log::Error(L"Packed exe: making the engine a server once it is up instead, which may be too late for UEngine::Init");
+            Packed::WaitForCodeCheck();
+            InstallHooks();
+        }
+        return;
+    }
+
+    InstallHooks();
+}
+
+static void InstallHooks()
+{
+    // On a packed build this runs once PreInit is over. FApp::ShouldUseThreadingForPerformance only matters to PreInit,
+    // and its GIsServer/GIsClient stores have run, so HookAfterPreInit sets the globals themselves.
+    const bool bAfterPreInit = Packed::IsPacked();
+    if (!bAfterPreInit)
+    {
+        FApp::Hook();
+    }
     FConfigCacheIni::Hook();
     UObject::Hook();
     FLinker::Hook();
-    FEngineLoop::Hook();
+    if (bAfterPreInit)
+    {
+        FEngineLoop::HookAfterPreInit();
+        if (void (*Combine)() = FOnlineSubsystemImpl::BeforeFirstDedicatedCheck.exchange(nullptr))
+        {
+            Log::Warning(L"Server config: the online subsystem never asked whether it is dedicated, merging the server settings now");
+            Combine();
+        }
+    }
+    else
+    {
+        FEngineLoop::Hook();
+    }
     UGameMapsSettings::Hook();
     UWorld::Hook();
     UNetDriver::Hook();
@@ -130,7 +198,10 @@ static void Start()
     UGameInstance::Hook();
     UFortGameInstance::Hook();
     FOnlineSubsystemImpl::Hook();
-    FOnlineVoiceImpl::Hook();
+    if (!bAfterPreInit)
+    {
+        FOnlineVoiceImpl::Hook();
+    }
     FFortMcpConfig::Hook();
     UMcpProfileGroup::Hook();
     AFortGameMode::Hook();

@@ -97,6 +97,8 @@ namespace Finder
 
     int32_t VTableIndex(void** VTable, void* Function, int32_t MaxSlots);
     void** VTableContaining(uintptr_t Function, int32_t Slot, int32_t Slots);
+    // Every .rdata slot that holds Function: its entries in vtables.
+    std::vector<void**> ReadOnlySlotsHolding(uintptr_t Function);
     uintptr_t ImportSlot(const char* Module, const char* Symbol);
     bool IsReadable(const void* Pointer, size_t Size);
     uintptr_t LogCategory(const wchar_t* CategoryName);
@@ -113,8 +115,12 @@ namespace Finder
     bool ResolvePlayerControllerConsole();
     bool ResolvePlayerControllerCheats();
     bool ResolveVoiceConfig();
+    // GConfig, GEngineIni, FConfigCacheIni::Find and FConfigFile::CombineFromBuffer (the online hotfix's ini merge).
+    bool ResolveConfigCombine();
     bool ResolvePushToTalk();
     bool ResolveOnlineVoice();
+    // UEngine::Init's vtable slot, from FEngineLoop::Init's GEngine->Init call (needs GEngine).
+    bool ResolveEngineInit();
     bool ResolveVoiceHandshake();
     bool ResolvePlayerControllerConsoleCommand(uintptr_t ServerCheatImplementation);
     bool ResolveAssetManagerLive();

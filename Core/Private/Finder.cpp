@@ -467,6 +467,27 @@ int32_t Finder::VTableIndex(void** VTable, void* Function, int32_t MaxSlots)
     return Found;
 }
 
+std::vector<void**> Finder::ReadOnlySlotsHolding(uintptr_t Function)
+{
+    std::vector<void**> Slots;
+    if (!Function)
+    {
+        return Slots;
+    }
+
+    Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+    const uintptr_t Begin = ReadOnly.GetSectionStart().Get();
+    const uintptr_t End = ReadOnly.GetSectionEnd().Get();
+    for (uintptr_t At = (Begin + 7) & ~static_cast<uintptr_t>(7); At + sizeof(uintptr_t) <= End; At += sizeof(uintptr_t))
+    {
+        if (*reinterpret_cast<const uintptr_t*>(At) == Function)
+        {
+            Slots.push_back(reinterpret_cast<void**>(At));
+        }
+    }
+    return Slots;
+}
+
 void** Finder::VTableContaining(uintptr_t Function, int32_t Slot, int32_t Slots)
 {
     if (!Function)

@@ -127,6 +127,20 @@ public:
     // and gadgets have no cooldown until it is turned off, respawns included. The game's ToggleNoCoolDown only sets a flag
     // nothing in a shipping build reads; Core takes each cooldown effect off as soon as it is applied.
     void NoCooldown(const FString& Arguments);
+    // Core's own command, "cheat infinitemag [on | off]" (#149; "cheat ToggleInfiniteAmmo" too): the player never reloads.
+    // The server keeps the equipped weapon's magazine full through the weapon's own ModAmmo, and sets the game's replicated
+    // bInfiniteAmmo (the reserve never runs out), which tells Core's client to keep its own count of the magazine full.
+    void InfiniteMag(const FString& Arguments);
+    // Core's own command, "cheat repair [all]" (#150): the equipped weapon (or every item that wears out) back to its full
+    // durability, through the same durability update the game's wear goes through.
+    void Repair(const FString& Arguments);
+    // Core's own command, "cheat firerate <multiplier | reset>" (#150): the player's guns fire that many times as fast as
+    // they do now, through the game's own fire rate alteration effect (GE_Alteration_Attribute_FireRate, WeaponRateOfFire)
+    // on their ability system, which replicates; reset takes Core's effects off again.
+    void FireRate(const FString& Arguments);
+    // Client (#149): every frame, while the server has bInfiniteAmmo on for this player, the equipped weapon's magazine as
+    // this client counts it stays full, so its own shots never empty it and start a reload. Nothing is hooked.
+    static void StartInfiniteMagazineView();
 
     // Core's own command, "cheat skin <HID or CID | reset>" ("cheat hero" too; #134, #136): the player wears that hero's
     // look (a Save the World HID_*, a Battle Royale HID_*_Athena_*, or a CID_* outfit's hero), replicated to everyone.

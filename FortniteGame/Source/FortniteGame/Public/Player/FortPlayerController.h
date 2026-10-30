@@ -56,6 +56,10 @@ public:
     DefineUProperty(UObject*, StatManager)
     DefineBitfieldUProperty(bCraftFree)
     DefineBitfieldUProperty(bInfiniteDurability)
+    // ToggleInfiniteAmmo's flag, replicated to the player's client: GetRemainingAmmo is then unlimited (the reserve never
+    // runs out). "cheat infinitemag" sets it, and it is what tells Core's client to keep the magazine full too.
+    DefineBitfieldUProperty(bInfiniteAmmo)
+    static bool HasInfiniteAmmoFlag() { return Member_bInfiniteAmmo.IsAvailable(); }
     DefineBitfieldUProperty(bCheatGhost)
     DefineBitfieldUProperty(bCheatFly)
     // ToggleNoCoolDown's flag, replicated; nothing in these shipping builds reads it (CheckCooldown's test of it is

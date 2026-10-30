@@ -12,6 +12,17 @@ int32_t AFortWeapon::GetBulletsPerClip() const
     return Params.Call(const_cast<AFortWeapon*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : 0;
 }
 
+int32_t AFortWeapon::GetLocalMagazineAmmoCount() const
+{
+    UFunction* Function = FindStaticFunction_GetLocalMagazineAmmoCount();
+    if (!Function)
+    {
+        return -1;
+    }
+    Reflection::FParams Params(Function);
+    return Params.Call(const_cast<AFortWeapon*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : -1;
+}
+
 void AFortWeapon::ModAmmo(int32_t AmmoDelta)
 {
     if (Finder::ResolveWeaponAmmoLive(Member_AmmoCount.GetOffsetChecked(), Member_ItemEntryGuid.GetOffsetChecked()))

@@ -9,6 +9,7 @@ class AFortWeapon : public AActor
 {
     DefineUnrealClass(AFortWeapon, FortniteGame)
     DefineUFunction(GetBulletsPerClip)
+    DefineUFunction(GetLocalMagazineAmmoCount)
 
 public:
     DefineUProperty(UFortWeaponItemDefinition*, WeaponData)
@@ -18,6 +19,9 @@ public:
     DefineBitfieldUProperty(bPendingDestroyDueToDurabilityOrStackCount)
 
     int32_t GetBulletsPerClip() const;
+    // The magazine as this machine has it: a client's own count, which its shots take from before the server's AmmoCount
+    // comes back (and only replaces it once one of the two is empty). -1 when the build has no such function.
+    int32_t GetLocalMagazineAmmoCount() const;
     void ModAmmo(int32_t AmmoDelta);
     void DestroyedDueToDurability();
     bool IsPendingDestroyDueToDurability() const;

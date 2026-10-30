@@ -1927,13 +1927,19 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // (or "hero"; #134, #136) gives them a hero's look, "disguise <class> [scale]" and "undisguise" (#134, #136) turn them
     // into a prop or a pawn, "tpactor <class, name or path> [n]" (#146) puts them on top of the nearest actor that matches,
     // "nocooldown [on | off]" (#148; also for the game's ToggleNoCoolDown, which sets a flag nothing reads) ends their
-    // ability and gadget cooldowns.
+    // ability and gadget cooldowns, "infinitemag [on | off]" (#149; also for ToggleInfiniteAmmo, whose flag it sets) keeps
+    // their magazine full, "repair [all]" (#150) restores their weapon's durability and "firerate <multiplier | reset>"
+    // (#150) changes how fast their guns fire.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
         { L"tpactor", &UFortCheatManager::TpActor },
         { L"nocooldown", &UFortCheatManager::NoCooldown },
         { L"togglenocooldown", &UFortCheatManager::NoCooldown },
+        { L"infinitemag", &UFortCheatManager::InfiniteMag },
+        { L"toggleinfiniteammo", &UFortCheatManager::InfiniteMag },
+        { L"repair", &UFortCheatManager::Repair },
+        { L"firerate", &UFortCheatManager::FireRate },
         { L"skin", &UFortCheatManager::Skin },
         { L"hero", &UFortCheatManager::Skin },
         { L"disguise", &UFortCheatManager::Disguise },

@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Player/FortCheatManager.h"
 #include "Abilities/GameplayAbility.h"
+#include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIEncounterInfo.h"
@@ -9,6 +10,8 @@
 #include "Building/BuildingTrap.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
@@ -30,6 +33,7 @@
 #include "Natives.h"
 #include "Finder.h"
 #include "GameThread.h"
+#include "GameplayEffect.h"
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionInfo.h"
 #include "Missions/FortMissionLibrary.h"
@@ -43,14 +47,18 @@
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/WeakObjectPtr.h"
+#include "Weapons/FortWeapon.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
 #include <cwctype>
 #include <map>
+#include <optional>
 #include <string>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortCheats, Log, All);
@@ -482,7 +490,10 @@ namespace
         { L"Player", nullptr, L"Disguise <class, path or mesh> [scale | HID]", L"turn into a prop (\"disguise Bathroom_ToiletBowl01\"), walk around as a husk (\"disguise HuskPawn\") or play a hero class's pawn with its abilities (\"disguise PlayerPawn_Ninja\"); Undisguise: be yourself again", ECheatMode::Both },
         { L"Player", nullptr, L"DisguiseView <back [distance] [up] | hide | normal>", L"how you see your own disguise: your camera pulls back for one bigger than you (the default; give distance and up to set how far), it's hidden from you only, or neither", ECheatMode::Both },
         { L"Player", L"BuildFree", L"BuildFree", L"building costs nothing (CraftFree: crafting)", ECheatMode::Both },
-        { L"Player", L"ToggleInfiniteAmmo", L"ToggleInfiniteAmmo", L"(ToggleInfiniteDurability, ToggleInfiniteStamina)", ECheatMode::Both },
+        { L"Player", nullptr, L"InfiniteMag [on | off]", L"your magazine never empties, so you never reload, and your reserve never runs out (toggles without on or off; ToggleInfiniteAmmo: the same)", ECheatMode::Both },
+        { L"Player", L"ToggleInfiniteDurability", L"ToggleInfiniteDurability", L"your items don't wear out (ToggleInfiniteStamina)", ECheatMode::Both },
+        { L"Player", nullptr, L"Repair [all]", L"your weapon back to full durability (all: everything you carry that wears out)", ECheatMode::Both },
+        { L"Player", nullptr, L"FireRate <multiplier | reset>", L"your guns fire that many times as fast (\"firerate 2\", \"firerate 0.5\"); reset: their own rate again", ECheatMode::Both },
         { L"Player", nullptr, L"NoCooldown [on | off]", L"no cooldown on your hero abilities and gadgets, and used gadgets recharge at once, until you turn it off (toggles without on or off; ToggleNoCoolDown: the same)", ECheatMode::Both },
         { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },
         { L"Player", L"DBNO", L"DBNO", L"knock yourself down (ReviveFromDBNO: get up)", ECheatMode::Both },
@@ -1841,6 +1852,623 @@ void UFortCheatManager::NoCooldown(const FString& Arguments)
     UE_LOG(LogFortCheats, Log, TEXT("NoCooldown: %s on, %d ability systems, %d gadgets recharged"), *GetNameSafe(PlayerController), AbilitySystems, Recharged);
     Reply(AbilitySystems > 0 ? TEXT("No cooldowns: your abilities and gadgets are ready again as soon as you use them (nocooldown off: cooldowns again)")
                              : TEXT("No cooldowns (nocooldown off: cooldowns again); you have no abilities yet, and they'll have none once you do"));
+#endif
+}
+
+#if WITH_SERVER_CODE
+namespace
+{
+    // "cheat infinitemag" (#149): the players whose magazine never empties.
+    std::vector<TWeakObjectPtr<AFortPlayerController>> InfiniteMagPlayers;
+
+    // "cheat firerate" (#150): the fire rate effects Core put on a player's ability system, kept through respawns.
+    struct FFireRateBoost
+    {
+        TWeakObjectPtr<AFortPlayerController> Player;
+        TWeakObjectPtr<UAbilitySystemComponent> AbilitySystem;
+        TWeakObjectPtr<AFortPawn> Pawn;
+        float Multiplier = 1.0f;
+        // FActiveGameplayEffectHandle (an int32 handle and a bool, 8 bytes) of each effect Core applied.
+        std::vector<uint64_t> Handles;
+    };
+    std::vector<FFireRateBoost> FireRateBoosts;
+    bool bTickingWeaponCheats = false;
+
+    bool HasInfiniteMag(const AFortPlayerController* PlayerController)
+    {
+        return std::any_of(InfiniteMagPlayers.begin(), InfiniteMagPlayers.end(),
+            [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; });
+    }
+
+    // Tops the equipped weapon's magazine up through its own ModAmmo: on the server that sets the replicated AmmoCount
+    // and the item's LoadedAmmo, as a reload does. Melee weapons and tools (no magazine) are left alone.
+    void FillMagazine(AFortPlayerController* PlayerController)
+    {
+        AFortPawn* Pawn = PlayerController->MyFortPawn;
+        AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        const int32_t BulletsPerClip = Weapon ? Weapon->GetBulletsPerClip() : 0;
+        const int32_t AmmoCount = Weapon ? static_cast<int32_t>(Weapon->AmmoCount) : 0;
+        if (BulletsPerClip > 0 && AmmoCount < BulletsPerClip)
+        {
+            Weapon->ModAmmo(BulletsPerClip - AmmoCount);
+        }
+    }
+
+    // ---- Fire rate ----------------------------------------------------------------------------------------------------
+
+    // The game's fire rate alteration (a weapon perk's): an infinite effect multiplying UFortWeaponAttrSet's
+    // WeaponRateOfFire for ranged weapons ("weapon.ranged" source tag), by its CombatEffects row at the effect's level.
+    // AFortWeaponRanged's fire rate is its stats' FiringRate run through that attribute's aggregator on the pawn's ability
+    // system, on the server and on the owning client alike, and multiplicative modifiers add up: 1 + sum(magnitude - 1).
+    constexpr const wchar_t* FireRateEffectPath = L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_FireRate.GE_Alteration_Attribute_FireRate_C";
+    constexpr int32_t FireRateCurveLevels = 100;
+    constexpr int32_t MaxFireRateEffects = 100;
+
+    // Not kept: nothing roots the class once no effect of it is applied, so it may be collected and loaded again.
+    UClass* FireRateEffectClass()
+    {
+        UClass* Class = FindObject<UClass>(nullptr, FireRateEffectPath);
+        return Class ? Class : LoadObject<UClass>(nullptr, FireRateEffectPath);
+    }
+
+    UProperty* WeaponRateOfFireProperty()
+    {
+        static UProperty* Property = nullptr;
+        if (!Property)
+        {
+            UClass* WeaponAttrSet = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortWeaponAttrSet");
+            Property = WeaponAttrSet ? WeaponAttrSet->FindPropertyByName(FName(L"WeaponRateOfFire", FNAME_Find)) : nullptr;
+        }
+        return Property;
+    }
+
+    // The effect's multiplicative WeaponRateOfFire modifier magnitude (a scalable float), or null.
+    const FScalableFloat* FireRateMagnitude(UClass* EffectClass)
+    {
+        UGameplayEffect* Effect = EffectClass ? Cast<UGameplayEffect>(EffectClass->GetDefaultObject()) : nullptr;
+        UProperty* Attribute = WeaponRateOfFireProperty();
+        if (!Effect || !Attribute)
+        {
+            return nullptr;
+        }
+        TStructArray<FGameplayModifierInfo>& Modifiers = Effect->Modifiers;
+        for (int32_t Index = 0; Index < Modifiers.Num(); ++Index)
+        {
+            FGameplayModifierInfo& Modifier = Modifiers[Index];
+            const FGameplayAttribute& ModifiedAttribute = Modifier.Attribute;
+            const FGameplayEffectModifierMagnitude& Magnitude = Modifier.ModifierMagnitude;
+            if (ModifiedAttribute.Attribute == Attribute && Modifier.ModifierOp == EGameplayModOp::GetMultiplicitive()
+                && Magnitude.MagnitudeCalculationType == EGameplayEffectMagnitudeCalculation::GetScalableFloat())
+            {
+                return &static_cast<const FScalableFloat&>(Magnitude.ScalableFloatMagnitude);
+            }
+        }
+        return nullptr;
+    }
+
+    UFunction* FunctionAt(const wchar_t* Path)
+    {
+        return FindObject<UFunction>(nullptr, Path);
+    }
+
+    UObject* DefaultObjectOf(const wchar_t* ClassPath)
+    {
+        UClass* Class = FindObject<UClass>(nullptr, ClassPath);
+        return Class ? Class->GetDefaultObject() : nullptr;
+    }
+
+    // FScalableFloat::GetValueAtLevel: Value, scaled by its curve table row at Level.
+    std::optional<float> ValueAtLevel(const FScalableFloat& ScalableFloat, float Level)
+    {
+        const FCurveTableRowHandle& Curve = ScalableFloat.Curve;
+        UObject* CurveTable = Curve.CurveTable;
+        if (!CurveTable)
+        {
+            return static_cast<float>(ScalableFloat.Value);
+        }
+        UObject* Library = DefaultObjectOf(L"/Script/Engine.DataTableFunctionLibrary");
+        Reflection::FParams Params(FunctionAt(L"/Script/Engine.DataTableFunctionLibrary:EvaluateCurveTableRow"), true);
+        if (!Library || !Params.Set(L"CurveTable", CurveTable) || !Params.Set(L"RowName", static_cast<FName>(Curve.RowName)) || !Params.Set(L"InXY", Level)
+            || !Params.Call(Library) || Params.Take<uint8_t>(L"OutResult") != 0)
+        {
+            return std::nullopt;
+        }
+        return ScalableFloat.Value * Params.Take<float>(L"OutXY");
+    }
+
+    // The magnitudes one effect can have: its curve at levels 0 to FireRateCurveLevels, and the level that gives a
+    // magnitude (the curve is piecewise linear, so a bisection inside the step that spans it finds it).
+    struct FFireRateCurve
+    {
+        const FScalableFloat* Magnitude = nullptr;
+        std::vector<float> Values;
+        float Min = 1.0f;
+        float Max = 1.0f;
+
+        bool Load(const FScalableFloat* InMagnitude)
+        {
+            Magnitude = InMagnitude;
+            Values.clear();
+            for (int32_t Level = 0; Level <= FireRateCurveLevels; ++Level)
+            {
+                const std::optional<float> Value = ValueAtLevel(*Magnitude, static_cast<float>(Level));
+                if (!Value)
+                {
+                    return false;
+                }
+                Values.push_back(*Value);
+            }
+            Min = *std::min_element(Values.begin(), Values.end());
+            Max = *std::max_element(Values.begin(), Values.end());
+            return true;
+        }
+
+        std::optional<float> LevelFor(float Wanted) const
+        {
+            for (int32_t Level = 0; Level < static_cast<int32_t>(Values.size()) - 1; ++Level)
+            {
+                float Low = Values[Level];
+                float High = Values[Level + 1];
+                if (Low == Wanted)
+                {
+                    return static_cast<float>(Level);
+                }
+                if ((Low - Wanted) * (High - Wanted) > 0.0f || Low == High)
+                {
+                    continue;
+                }
+                float From = static_cast<float>(Level);
+                float To = From + 1.0f;
+                for (int32_t Step = 0; Step < 24; ++Step)
+                {
+                    const float Middle = (From + To) * 0.5f;
+                    const float Value = ValueAtLevel(*Magnitude, Middle).value_or(Low);
+                    if ((Low - Wanted) * (Value - Wanted) <= 0.0f)
+                    {
+                        To = Middle;
+                        High = Value;
+                    }
+                    else
+                    {
+                        From = Middle;
+                        Low = Value;
+                    }
+                }
+                return (From + To) * 0.5f;
+            }
+            return std::nullopt;
+        }
+    };
+
+    // The ability system AFortWeaponRanged takes its fire rate from: the pawn's (its IAbilitySystemInterface), when it has
+    // the weapon attribute set.
+    UAbilitySystemComponent* WeaponAbilitySystem(AFortPlayerController* PlayerController)
+    {
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        UAbilitySystemComponent* AbilitySystem = Pawn ? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Pawn) : nullptr;
+        if (!AbilitySystem)
+        {
+            return nullptr;
+        }
+        UClass* WeaponAttrSet = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortWeaponAttrSet");
+        const TArray<UAttributeSet*>& Sets = AbilitySystem->SpawnedAttributes;
+        const bool bHasSet = WeaponAttrSet && std::any_of(Sets.begin(), Sets.end(), [WeaponAttrSet](UAttributeSet* Set) { return Set && Set->IsA(WeaponAttrSet); });
+        return bHasSet ? AbilitySystem : nullptr;
+    }
+
+    // How many times its stats' rate the player's guns fire at, from every effect on WeaponRateOfFire (perks included).
+    std::optional<float> CurrentFireRateMultiplier(UAbilitySystemComponent* AbilitySystem)
+    {
+        UProperty* Property = WeaponRateOfFireProperty();
+        if (!Property || !UAbilitySystemBlueprintLibrary::FindStaticFunction_EvaluateAttributeValueWithTagsAndBase())
+        {
+            return std::nullopt;
+        }
+        FGameplayTagContainer SourceTags;
+        SourceTags.GameplayTags.Add(FGameplayTag{ FName(L"weapon.ranged", FNAME_Find) });
+        SourceTags.ParentTags.Add(FGameplayTag{ FName(L"weapon", FNAME_Find) });
+        bool bSuccess = false;
+        const float Multiplier = UAbilitySystemBlueprintLibrary::EvaluateAttributeValueWithTagsAndBase(AbilitySystem, FGameplayAttribute(Property), SourceTags, FGameplayTagContainer(), 1.0f, bSuccess);
+        return bSuccess ? std::optional<float>(Multiplier) : std::nullopt;
+    }
+
+    void RemoveFireRateEffects(FFireRateBoost& Boost)
+    {
+        UAbilitySystemComponent* AbilitySystem = Boost.AbilitySystem.Get();
+        UFunction* Remove = FunctionAt(L"/Script/GameplayAbilities.AbilitySystemComponent:RemoveActiveGameplayEffect");
+        for (const uint64_t Handle : Boost.Handles)
+        {
+            Reflection::FParams Params(Remove, true);
+            if (AbilitySystem && Params.Set(L"Handle", Handle) && Params.Set(L"StacksToRemove", -1))
+            {
+                Params.Call(AbilitySystem);
+            }
+        }
+        Boost.Handles.clear();
+    }
+
+    // Applies one fire rate effect at the level to the ability system; the handle of the active effect, or nullopt.
+    std::optional<uint64_t> ApplyFireRateEffect(UAbilitySystemComponent* AbilitySystem, UClass* EffectClass, float Level)
+    {
+        Reflection::FParams Context(FunctionAt(L"/Script/GameplayAbilities.AbilitySystemComponent:MakeEffectContext"), true);
+        if (!Context.Call(AbilitySystem))
+        {
+            return std::nullopt;
+        }
+        Reflection::FParams Outgoing(FunctionAt(L"/Script/GameplayAbilities.AbilitySystemComponent:MakeOutgoingSpec"), true);
+        if (!Outgoing.Set(L"GameplayEffectClass", EffectClass) || !Outgoing.Set(L"Level", Level) || !Outgoing.CopyStruct(L"Context", Context.GetAddress(L"ReturnValue"))
+            || !Outgoing.Call(AbilitySystem))
+        {
+            return std::nullopt;
+        }
+        // The handle's first member is its spec, null when the effect class is.
+        const void* SpecHandle = Outgoing.GetAddress(L"ReturnValue");
+        if (!SpecHandle || !*static_cast<void* const*>(SpecHandle))
+        {
+            return std::nullopt;
+        }
+        Reflection::FParams Apply(FunctionAt(L"/Script/GameplayAbilities.AbilitySystemComponent:BP_ApplyGameplayEffectSpecToSelf"), true);
+        if (!Apply.CopyStruct(L"SpecHandle", SpecHandle) || !Apply.Call(AbilitySystem))
+        {
+            return std::nullopt;
+        }
+        uint64_t* Handle = Apply.Get<uint64_t>(L"ReturnValue");
+        return Handle ? std::optional<uint64_t>(*Handle) : std::nullopt;
+    }
+
+    // Puts the boost's effects on the player's ability system so their guns fire Multiplier times as fast as they would
+    // without Core's effects: the effects' magnitudes have to add up to Before * (Multiplier - 1), as a few effects of the
+    // same magnitude when one alone can't reach it. The multiplier the guns have afterwards, or an error.
+    std::variant<float, FString> ApplyFireRate(FFireRateBoost& Boost)
+    {
+        RemoveFireRateEffects(Boost);
+        AFortPlayerController* PlayerController = Boost.Player.Get();
+        UAbilitySystemComponent* AbilitySystem = WeaponAbilitySystem(PlayerController);
+        Boost.AbilitySystem = AbilitySystem;
+        Boost.Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        if (!AbilitySystem)
+        {
+            return FString(TEXT("you have no pawn with the weapon attributes (UFortWeaponAttrSet) yet"));
+        }
+        UClass* EffectClass = FireRateEffectClass();
+        const FScalableFloat* Magnitude = FireRateMagnitude(EffectClass);
+        FFireRateCurve Curve;
+        if (!Magnitude || !Curve.Load(Magnitude))
+        {
+            return FString(TEXT("this build has no fire rate alteration effect (GE_Alteration_Attribute_FireRate on WeaponRateOfFire) to use"));
+        }
+        const float Before = CurrentFireRateMultiplier(AbilitySystem).value_or(1.0f);
+        const float Wanted = Before * (Boost.Multiplier - 1.0f);
+        if (std::fabs(Wanted) < 0.0001f)
+        {
+            return Before;
+        }
+        // The furthest one effect goes the way it has to.
+        const float Reach = Wanted > 0.0f ? Curve.Max - 1.0f : Curve.Min - 1.0f;
+        if (Wanted * Reach <= 0.0f)
+        {
+            return FString::Printf(TEXT("the fire rate effect only goes from %.2fx to %.2fx a stack, so it can't make your guns %s"), Curve.Min, Curve.Max,
+                Wanted > 0.0f ? TEXT("faster") : TEXT("slower"));
+        }
+        const int32_t Count = static_cast<int32_t>(std::ceil(Wanted / Reach - 0.0001f));
+        if (Count > MaxFireRateEffects)
+        {
+            return FString::Printf(TEXT("that needs %d stacks of the fire rate effect (at most %.2fx each); up to %.1fx works"), Count, Curve.Max,
+                1.0f + MaxFireRateEffects * Reach / std::max(Before, 0.0001f));
+        }
+        // Each one's magnitude, kept inside what the curve has.
+        const float Each = std::clamp(1.0f + Wanted / static_cast<float>(Count), Curve.Min, Curve.Max);
+        const std::optional<float> Level = Curve.LevelFor(Each);
+        if (!Level)
+        {
+            return FString::Printf(TEXT("no level of the fire rate effect gives %.3f"), Each);
+        }
+        for (int32_t Index = 0; Index < Count; ++Index)
+        {
+            const std::optional<uint64_t> Handle = ApplyFireRateEffect(AbilitySystem, EffectClass, *Level);
+            if (!Handle)
+            {
+                RemoveFireRateEffects(Boost);
+                return FString(TEXT("the ability system wouldn't apply the fire rate effect"));
+            }
+            Boost.Handles.push_back(*Handle);
+        }
+        UE_LOG(LogFortCheats, Log, TEXT("FireRate: %s, %d effects at level %.3f (%.3f each), %.3fx before"), *GetNameSafe(PlayerController), Count, *Level, Each, Before);
+        return CurrentFireRateMultiplier(AbilitySystem).value_or(Before * Boost.Multiplier);
+    }
+
+    // After a respawn the pawn (and maybe its ability system) is new, and the effects may be gone with the old one.
+    void KeepFireRate(FFireRateBoost& Boost)
+    {
+        AFortPlayerController* PlayerController = Boost.Player.Get();
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        if (!Pawn || Pawn == Boost.Pawn.Get())
+        {
+            return;
+        }
+        bool bStillApplied = Boost.AbilitySystem.Get() && Boost.AbilitySystem.Get() == WeaponAbilitySystem(PlayerController) && !Boost.Handles.empty();
+        // The library's (static) one: the handle knows its ability system.
+        UFunction* StackCount = FunctionAt(L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:GetActiveGameplayEffectStackCount");
+        UObject* Library = DefaultObjectOf(L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
+        if (bStillApplied && StackCount && Library)
+        {
+            Reflection::FParams Params(StackCount, true);
+            bStillApplied = Params.Set(L"ActiveHandle", Boost.Handles.front()) && Params.Call(Library) && Params.Take<int32_t>(L"ReturnValue") > 0;
+        }
+        if (bStillApplied)
+        {
+            Boost.Pawn = Pawn;
+            return;
+        }
+        Boost.Handles.clear();
+        const std::variant<float, FString> Result = ApplyFireRate(Boost);
+        if (const FString* Error = std::get_if<FString>(&Result))
+        {
+            UE_LOG(LogFortCheats, Warning, TEXT("FireRate: %s's new pawn %s: %s"), *GetNameSafe(PlayerController), *GetNameSafe(Pawn), **Error);
+        }
+    }
+
+    // Every frame on the game thread while a player has infinitemag or a fire rate: the magazine is topped up as soon as a
+    // shot takes from it, and a respawned pawn gets the fire rate again. Nothing is hooked.
+    void TickWeaponCheats()
+    {
+        std::erase_if(InfiniteMagPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
+        std::erase_if(FireRateBoosts, [](const FFireRateBoost& Boost) { return !Boost.Player.Get(); });
+        for (const TWeakObjectPtr<AFortPlayerController>& Known : InfiniteMagPlayers)
+        {
+            FillMagazine(Known.Get());
+        }
+        for (FFireRateBoost& Boost : FireRateBoosts)
+        {
+            KeepFireRate(Boost);
+        }
+        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !FireRateBoosts.empty()) && GameThread::Enqueue(&TickWeaponCheats);
+    }
+
+    void StartWeaponCheatTick()
+    {
+        if (!bTickingWeaponCheats)
+        {
+            bTickingWeaponCheats = GameThread::Enqueue(&TickWeaponCheats);
+        }
+    }
+}
+#endif
+
+void UFortCheatManager::InfiniteMag(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.empty() ? std::wstring() : Lower(Words[0]);
+    if (Words.size() > 1 || (!Word.empty() && Word != L"on" && Word != L"off"))
+    {
+        Reply(TEXT("Usage: infinitemag [on | off], your magazine never empties so you never reload; without on or off it toggles"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+
+    const bool bEnable = Word.empty() ? !HasInfiniteMag(PlayerController) : Word == L"on";
+    std::erase_if(InfiniteMagPlayers, [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get() || Known.Get() == PlayerController; });
+    if (bEnable)
+    {
+        InfiniteMagPlayers.emplace_back(PlayerController);
+    }
+    // The game's own flag (replicated): the reserve never runs out, and the player's client knows to keep its own count
+    // of the magazine full (StartInfiniteMagazineView).
+    if (PlayerController->HasInfiniteAmmoFlag())
+    {
+        PlayerController->bInfiniteAmmo = bEnable;
+    }
+    if (!bEnable)
+    {
+        Reply(TEXT("Infinite magazine off: your shots use up the magazine again"));
+        return;
+    }
+    FillMagazine(PlayerController);
+    StartWeaponCheatTick();
+    UE_LOG(LogFortCheats, Log, TEXT("InfiniteMag: %s on"), *GetNameSafe(PlayerController));
+    Reply(TEXT("Infinite magazine: your weapon stays loaded and never needs a reload (infinitemag off: normal again)"));
+#endif
+}
+
+void UFortCheatManager::Repair(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const bool bAll = Words.size() == 1 && Lower(Words[0]) == L"all";
+    if (Words.size() > 1 || (!Words.empty() && !bAll))
+    {
+        Reply(TEXT("Usage: repair [all], your weapon (or with all, every item that wears out) back to full durability"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortInventory* Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+    if (!Inventory)
+    {
+        Reply(TEXT("Repair needs your inventory, which you don't have yet"));
+        return;
+    }
+
+    std::vector<UFortWorldItem*> Items;
+    if (bAll)
+    {
+        FFortItemList& ItemList = Inventory->Inventory;
+        TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+        for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+        {
+            if (Instances[Index])
+            {
+                Items.push_back(Instances[Index]);
+            }
+        }
+    }
+    else
+    {
+        AFortPawn* Pawn = PlayerController->MyFortPawn;
+        AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        UFortWorldItem* WorldItem = Weapon ? Inventory->FindWorldItem(static_cast<FGuid&>(Weapon->ItemEntryGuid)) : nullptr;
+        if (!WorldItem)
+        {
+            Reply(TEXT("You have no weapon from your inventory in your hands (repair all: everything you carry)"));
+            return;
+        }
+        Items.push_back(WorldItem);
+    }
+
+    // Each one through ModDurability with its full durability forced: the world item's own SetDurability, as the game's
+    // wear does, and the replicated entry the client's inventory shows.
+    int32_t Repaired = 0;
+    int32_t Durable = 0;
+    FFortItemList& ItemList = Inventory->Inventory;
+    for (UFortWorldItem* WorldItem : Items)
+    {
+        UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(WorldItem->GetItemDefinitionBP());
+        if (!ItemDefinition || !WorldItem->HasDurability())
+        {
+            continue;
+        }
+        ++Durable;
+        FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+        const float MaxDurability = ItemDefinition->GetMaxDurability(WorldItem->GetLevel());
+        if (!(MaxDurability > 0.0f) || ItemEntry.Durability >= MaxDurability)
+        {
+            continue;
+        }
+        const FGuid ItemGuid = ItemEntry.ItemGuid;
+        if (!PlayerController->ModDurability(ItemGuid, MaxDurability, true))
+        {
+            continue;
+        }
+        if (FFortItemEntry* ReplicatedEntry = ItemList.FindReplicatedEntry(ItemGuid))
+        {
+            ReplicatedEntry->Durability = static_cast<float>(ItemEntry.Durability);
+            ItemList.MarkItemDirty(*ReplicatedEntry);
+        }
+        ++Repaired;
+    }
+    if (Repaired > 0)
+    {
+        Inventory->HandleInventoryLocalUpdate();
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("Repair: %s, %d of %d items that wear out repaired"), *GetNameSafe(PlayerController), Repaired, Durable);
+    if (!bAll)
+    {
+        Reply(Durable == 0 ? TEXT("Your weapon doesn't wear out")
+            : Repaired > 0 ? TEXT("Your weapon is back to full durability")
+                           : TEXT("Your weapon is already at full durability"));
+        return;
+    }
+    Reply(Durable == 0 ? FString(TEXT("You carry nothing that wears out"))
+                       : FString::Printf(TEXT("Repaired %d item%s to full durability (%d already were)"), Repaired, Repaired == 1 ? TEXT("") : TEXT("s"), Durable - Repaired));
+#endif
+}
+
+void UFortCheatManager::FireRate(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
+    const bool bReset = Word == L"reset" || Word == L"off";
+    std::optional<float> Multiplier;
+    if (!Word.empty() && !bReset)
+    {
+        std::wstring Number = Word;
+        if (!Number.empty() && Number.back() == L'x')
+        {
+            Number.pop_back();
+        }
+        wchar_t* End = nullptr;
+        const float Value = std::wcstof(Number.c_str(), &End);
+        if (End && End != Number.c_str() && *End == L'\0' && std::isfinite(Value) && Value >= 0.05f && Value <= 100.0f)
+        {
+            Multiplier = Value;
+        }
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    auto Existing = std::find_if(FireRateBoosts.begin(), FireRateBoosts.end(), [PlayerController](const FFireRateBoost& Boost) { return Boost.Player.Get() == PlayerController; });
+    if (!bReset && !Multiplier)
+    {
+        Reply(Existing != FireRateBoosts.end()
+            ? FString::Printf(TEXT("Your guns fire at %.2fx. Usage: firerate <multiplier 0.05-100 | reset>, \"firerate 2\" fires twice as fast as your guns do on their own"), Existing->Multiplier)
+            : FString(TEXT("Usage: firerate <multiplier 0.05-100 | reset>, \"firerate 2\" fires twice as fast as your guns do on their own; reset puts it back")));
+        return;
+    }
+    if (!PlayerController)
+    {
+        return;
+    }
+
+    if (Existing != FireRateBoosts.end())
+    {
+        RemoveFireRateEffects(*Existing);
+        FireRateBoosts.erase(Existing);
+    }
+    if (bReset || *Multiplier == 1.0f)
+    {
+        Reply(TEXT("Your guns fire at their own rate again"));
+        return;
+    }
+
+    FFireRateBoost Boost;
+    Boost.Player = PlayerController;
+    Boost.Multiplier = *Multiplier;
+    const std::variant<float, FString> Result = ApplyFireRate(Boost);
+    if (const FString* Error = std::get_if<FString>(&Result))
+    {
+        Reply(FString::Printf(TEXT("Can't change your fire rate: %s"), **Error));
+        return;
+    }
+    FireRateBoosts.push_back(std::move(Boost));
+    StartWeaponCheatTick();
+    Reply(FString::Printf(TEXT("Your guns fire %.2fx as fast (%.2fx their base rate with your perks; firerate reset: back to normal)"), *Multiplier, std::get<float>(Result)));
+#endif
+}
+
+#if !UE_SERVER
+namespace
+{
+    // The client's half of "cheat infinitemag" (#149). A client counts its own magazine: its shots take from that count
+    // at once, and the server's replicated AmmoCount only replaces it once one of the two is empty (AFortWeapon's
+    // OnRep_AmmoCount), so a server that keeps AmmoCount full alone can't stop the client running dry and reloading.
+    // While the server has bInfiniteAmmo on for this player, and its AmmoCount still has rounds, the client's count is
+    // topped up through the weapon's own ModAmmo, which on a client changes only that count.
+    void TickInfiniteMagazineView()
+    {
+        UWorld* World = Natives::GWorld ? static_cast<UWorld*>(GWorld) : nullptr;
+        UGameInstance* GameInstance = World ? static_cast<UGameInstance*>(World->OwningGameInstance) : nullptr;
+        const TArray<ULocalPlayer*>* LocalPlayers = GameInstance ? &static_cast<TArray<ULocalPlayer*>&>(GameInstance->LocalPlayers) : nullptr;
+        ULocalPlayer* Player = LocalPlayers && LocalPlayers->Num() > 0 ? (*LocalPlayers)[0] : nullptr;
+        AFortPlayerController* PlayerController = Player ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<APlayerController*>(Player->PlayerController))) : nullptr;
+        AFortPawn* Pawn = PlayerController && PlayerController->HasInfiniteAmmoFlag() && PlayerController->bInfiniteAmmo
+            ? Cast<AFortPawn>(reinterpret_cast<UObject*>(PlayerController->GetPawn())) : nullptr;
+        AFortWeapon* Weapon = Pawn && static_cast<ENetRole>(Pawn->Role) == ROLE_AutonomousProxy ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        if (Weapon && static_cast<ENetRole>(Weapon->Role) != ROLE_Authority && static_cast<int32_t>(Weapon->AmmoCount) > 0)
+        {
+            const int32_t BulletsPerClip = Weapon->GetBulletsPerClip();
+            const int32_t Local = Weapon->GetLocalMagazineAmmoCount();
+            if (BulletsPerClip > 0 && Local < BulletsPerClip)
+            {
+                // Without the getter (-1), a whole magazine: ModAmmo stops at a full one.
+                Weapon->ModAmmo(Local >= 0 ? BulletsPerClip - Local : BulletsPerClip);
+            }
+        }
+        GameThread::Enqueue(&TickInfiniteMagazineView);
+    }
+}
+#endif
+
+void UFortCheatManager::StartInfiniteMagazineView()
+{
+#if !UE_SERVER
+    static bool bStarted = false;
+    if (!bStarted)
+    {
+        bStarted = GameThread::Enqueue(&TickInfiniteMagazineView);
+    }
 #endif
 }
 

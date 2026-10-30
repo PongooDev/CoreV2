@@ -8,6 +8,7 @@ class EGameplayModOp
 {
     DefineUnrealEnum(EGameplayModOp, GameplayAbilities)
     DefineUEnumValue(Additive)
+    DefineUEnumValue(Multiplicitive)
 };
 
 class EGameplayEffectMagnitudeCalculation

@@ -102,9 +102,30 @@ bool AFortPawn::ForceMaxHealth(float NewMaxHealth)
         return false;
     }
     FFortGameplayAttributeData& MaxHealthData = Set->MaxHealth;
+    // Health is clamped to its own Maximum whenever it changes (1.9 0x476AF0), which only MaxHealth's aggregator moves
+    // (0x44DD70): a maximum set here would leave it at the old one, so SetHealth (and SetHealthPercent) couldn't heal
+    // past it and the HUD's health bar showed 100 of 1000 (#155). It follows the new maximum, and a health above it
+    // comes down to it, as the game's own change of maximum does.
+    FFortGameplayAttributeData& HealthData = Set->Health;
+    bool bChanged = false;
+    if (FFortGameplayAttributeData::HasMaximum() && std::fabs(HealthData.Maximum - NewMaxHealth) > 0.5f)
+    {
+        HealthData.Maximum = NewMaxHealth;
+        bChanged = true;
+    }
+    if (HealthData.CurrentValue > NewMaxHealth || HealthData.BaseValue > NewMaxHealth)
+    {
+        HealthData.CurrentValue = std::min(static_cast<float>(HealthData.CurrentValue), NewMaxHealth);
+        HealthData.BaseValue = std::min(static_cast<float>(HealthData.BaseValue), NewMaxHealth);
+        bChanged = true;
+    }
     if (std::fabs(MaxHealthData.CurrentValue - NewMaxHealth) > 0.5f)
     {
         MaxHealthData.CurrentValue = NewMaxHealth;
+        bChanged = true;
+    }
+    if (bChanged)
+    {
         ForceNetUpdate();
         if (APlayerState* State = PlayerState)
         {

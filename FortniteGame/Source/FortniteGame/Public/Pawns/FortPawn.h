@@ -72,7 +72,8 @@ public:
     bool SetMaxHealth(float NewMaxHealth);
     // Server (#155): MaxHealth's current value made NewMaxHealth whatever its effects say (Battle Royale's
     // GE_Map_Athena_Vitality_Health overrides it to 100, which no base value gets past). The value is the property's
-    // until the effects on MaxHealth or its base change again. False without a health set.
+    // until the effects on MaxHealth or its base change again. Health's clamp follows it, so health can reach it, and a
+    // health above it comes down to it. False without a health set.
     bool ForceMaxHealth(float NewMaxHealth);
 
     // "cheat fly 3000" (#129): the pawn runs at Speed (and walks and sprints faster by as much), 0 gives it its own

@@ -56,6 +56,7 @@ public:
     DefineUProperty(UObject*, StatManager)
     DefineBitfieldUProperty(bCraftFree)
     DefineBitfieldUProperty(bInfiniteDurability)
+    static bool HasInfiniteDurabilityFlag() { return Member_bInfiniteDurability.IsAvailable(); }
     // ToggleInfiniteAmmo's flag, replicated to the player's client: GetRemainingAmmo is then unlimited (the reserve never
     // runs out). "cheat infinitemag" sets it, and it is what tells Core's client to keep the magazine full too.
     DefineBitfieldUProperty(bInfiniteAmmo)

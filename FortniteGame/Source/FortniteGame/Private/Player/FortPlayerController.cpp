@@ -1911,6 +1911,68 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         }
     }
 
+    // Core's own commands, which no exec function of these builds has, run on the player they run on:
+    // "spawnactor <class or path> [scale | x y z]" (#132) spawns an actor in front of them at a scale, "skin <HID or CID>"
+    // (or "hero"; #134, #136) gives them a hero's look, "disguise <class> [scale]" and "undisguise" (#134, #136) turn them
+    // into a prop or a pawn, "tpactor <class, name or path> [n]" (#146) puts them on top of the nearest actor that matches,
+    // "nocooldown [on | off]" (#148; also for the game's ToggleNoCoolDown, which sets a flag nothing reads) ends their
+    // ability and gadget cooldowns, "infinitemag [on | off]" (#149; also for ToggleInfiniteAmmo, whose flag it sets) keeps
+    // their magazine full, "repair [all]" (#150) restores their weapon's durability, "firerate <multiplier | reset>"
+    // (#150) changes how fast their guns fire, "weapondamage <multiplier | reset>" (#152) how much damage their weapons
+    // do, "dance [EID]" (#152) plays an emote, "maxhealth <value | reset>" (or "setmaxhealth") and "speed <multiplier |
+    // reset>" (#155) change their maximum health and how fast they move, "teleportto <player>" and "bring <player | all>"
+    // (#155) move them to another player or another player to them, and "possessplayer <player>" and "unpossess" (#155)
+    // have them play another player's pawn while that player watches. Core also takes over two of the game's cheats that
+    // answer nothing (#155): "sethealthpercent", which says what it set and takes a percent too, and
+    // "toggleinfinitedurability", whose answer only reached the server's console.
+    using FCoreCommand = void (UFortCheatManager::*)(const FString&);
+    static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
+        { L"spawnactor", &UFortCheatManager::SpawnActor },
+        { L"tpactor", &UFortCheatManager::TpActor },
+        { L"nocooldown", &UFortCheatManager::NoCooldown },
+        { L"togglenocooldown", &UFortCheatManager::NoCooldown },
+        { L"infinitemag", &UFortCheatManager::InfiniteMag },
+        { L"toggleinfiniteammo", &UFortCheatManager::InfiniteMag },
+        { L"repair", &UFortCheatManager::Repair },
+        { L"firerate", &UFortCheatManager::FireRate },
+        { L"weapondamage", &UFortCheatManager::WeaponDamage },
+        { L"dance", &UFortCheatManager::Dance },
+        { L"maxhealth", &UFortCheatManager::MaxHealth },
+        { L"setmaxhealth", &UFortCheatManager::MaxHealth },
+        { L"sethealthpercent", &UFortCheatManager::HealthPercent },
+        { L"toggleinfinitedurability", &UFortCheatManager::InfiniteDurability },
+        { L"speed", &UFortCheatManager::Speed },
+        { L"teleportto", &UFortCheatManager::TeleportTo },
+        { L"bring", &UFortCheatManager::Bring },
+        { L"possessplayer", &UFortCheatManager::PossessPlayer },
+        { L"unpossess", &UFortCheatManager::Unpossess },
+        { L"skin", &UFortCheatManager::Skin },
+        { L"hero", &UFortCheatManager::Skin },
+        { L"disguise", &UFortCheatManager::Disguise },
+        { L"undisguise", &UFortCheatManager::Undisguise },
+    };
+    static constexpr auto IsCoreCommand = [](const std::wstring& Candidate)
+    {
+        return Candidate == L"corecheats"
+            || std::any_of(std::begin(CoreCommands), std::end(CoreCommands), [&Candidate](const auto& Entry) { return Candidate == Entry.first; });
+    };
+
+    // "set" and "toggle" may be left out (#155): "healthpercent 50", "infiniteammo", "safezoneradius 500". A name that is
+    // a command itself stays one; the line goes on with the full name.
+    const std::wstring TypedLine = Command.ToStdString();
+    const size_t TypedStart = TypedLine.find_first_not_of(L" \t");
+    const size_t TypedEnd = TypedStart == std::wstring::npos ? std::wstring::npos : TypedLine.find_first_of(L" \t", TypedStart);
+    if (TypedStart != std::wstring::npos)
+    {
+        const std::wstring Typed = TypedLine.substr(TypedStart, TypedEnd == std::wstring::npos ? std::wstring::npos : TypedEnd - TypedStart);
+        const std::wstring Resolved = UFortCheatManager::ResolveCommandName(Runner, Typed, IsCoreCommand);
+        if (_wcsicmp(Resolved.c_str(), Typed.c_str()) != 0)
+        {
+            Command = FString((Resolved + (TypedEnd == std::wstring::npos ? std::wstring() : TypedLine.substr(TypedEnd))).c_str());
+            UE_LOG(LogFort, Log, TEXT("ServerCheat: \"%s\" is \"%s\""), Typed.c_str(), Resolved.c_str());
+        }
+    }
+
     // Core's own command lists the cheats it supports (#101).
     const std::wstring Line = Command.ToStdString();
     const size_t NameEnd = Line.find_first_of(L" \t");
@@ -1924,41 +1986,6 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         return;
     }
 
-    // Core's own commands, which no exec function of these builds has, run on the player they run on:
-    // "spawnactor <class or path> [scale | x y z]" (#132) spawns an actor in front of them at a scale, "skin <HID or CID>"
-    // (or "hero"; #134, #136) gives them a hero's look, "disguise <class> [scale]" and "undisguise" (#134, #136) turn them
-    // into a prop or a pawn, "tpactor <class, name or path> [n]" (#146) puts them on top of the nearest actor that matches,
-    // "nocooldown [on | off]" (#148; also for the game's ToggleNoCoolDown, which sets a flag nothing reads) ends their
-    // ability and gadget cooldowns, "infinitemag [on | off]" (#149; also for ToggleInfiniteAmmo, whose flag it sets) keeps
-    // their magazine full, "repair [all]" (#150) restores their weapon's durability, "firerate <multiplier | reset>"
-    // (#150) changes how fast their guns fire, "weapondamage <multiplier | reset>" (#152) how much damage their weapons
-    // do, "dance [EID]" (#152) plays an emote, "setmaxhealth <value | reset>" and "speed <multiplier | reset>" (#155)
-    // change their maximum health and how fast they move, "teleportto <player>" and "bring <player | all>" (#155) move
-    // them to another player or another player to them, and "possessplayer <player>" and "unpossess" (#155) have them
-    // play another player's pawn while that player watches.
-    using FCoreCommand = void (UFortCheatManager::*)(const FString&);
-    static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
-        { L"spawnactor", &UFortCheatManager::SpawnActor },
-        { L"tpactor", &UFortCheatManager::TpActor },
-        { L"nocooldown", &UFortCheatManager::NoCooldown },
-        { L"togglenocooldown", &UFortCheatManager::NoCooldown },
-        { L"infinitemag", &UFortCheatManager::InfiniteMag },
-        { L"toggleinfiniteammo", &UFortCheatManager::InfiniteMag },
-        { L"repair", &UFortCheatManager::Repair },
-        { L"firerate", &UFortCheatManager::FireRate },
-        { L"weapondamage", &UFortCheatManager::WeaponDamage },
-        { L"dance", &UFortCheatManager::Dance },
-        { L"setmaxhealth", &UFortCheatManager::SetMaxHealth },
-        { L"speed", &UFortCheatManager::Speed },
-        { L"teleportto", &UFortCheatManager::TeleportTo },
-        { L"bring", &UFortCheatManager::Bring },
-        { L"possessplayer", &UFortCheatManager::PossessPlayer },
-        { L"unpossess", &UFortCheatManager::Unpossess },
-        { L"skin", &UFortCheatManager::Skin },
-        { L"hero", &UFortCheatManager::Skin },
-        { L"disguise", &UFortCheatManager::Disguise },
-        { L"undisguise", &UFortCheatManager::Undisguise },
-    };
     for (const auto& [CommandName, Run] : CoreCommands)
     {
         if (_wcsicmp(Name.c_str(), CommandName) != 0)

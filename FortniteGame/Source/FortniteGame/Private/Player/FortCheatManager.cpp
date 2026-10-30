@@ -456,8 +456,9 @@ namespace
         SaveTheWorld,
     };
 
-    // "cheat corecheats": the commands Core supports, by category. Name is the exec function's (left out when the build
-    // has none, null for Core's own); the usage follows "cheat ".
+    // "cheat corecheats": the commands Core supports, by category, one line each (#155: short, so the list reads at a
+    // glance). Name is the exec function's (left out when the build has none, null for Core's own); Usage is the syntax
+    // after "cheat ", Description a few words.
     struct FCoreCheat
     {
         const wchar_t* Category;
@@ -468,73 +469,74 @@ namespace
     };
 
     constexpr FCoreCheat CoreCheats[] = {
-        { L"Items", L"GiveWeapon", L"GiveWeapon <name> <level> <count>", L"a weapon (or BR consumable) by its name or part of it", ECheatMode::Both },
-        { L"Items", L"GiveAmmo", L"GiveAmmo <name> [amount]", L"ammo; a full stack without an amount", ECheatMode::Both },
-        { L"Items", L"GiveTrap", L"GiveTrap <name> <level> <count>", L"a trap", ECheatMode::Both },
-        { L"Items", L"GiveGadget", L"GiveGadget <name> <level>", L"a gadget (GiveGadgets <name> <count> <level>)", ECheatMode::Both },
-        { L"Items", L"GiveSpecificItem", L"GiveSpecificItem <path or name> <count> <level>", L"any item", ECheatMode::Both },
-        { L"Items", L"GiveResources", L"GiveResources [amount]", L"wood, stone and metal (GiveWood, GiveStone, GiveMetal [amount])", ECheatMode::Both },
-        { L"Items", L"GiveAllWeapons", L"GiveAllWeapons", L"one of every weapon (GiveAllMelee, GiveAllPistols, GiveAllRifles, GiveAllShotguns, GiveWeapons <tag>)", ECheatMode::Both },
-        { L"Items", L"GiveAllTraps", L"GiveAllTraps <count>", L"every trap", ECheatMode::Both },
-        { L"Items", L"GiveAllConsumables", L"GiveAllConsumables <count>", L"every consumable", ECheatMode::BattleRoyale },
-        { L"Items", L"GiveAllIngredients", L"GiveAllIngredients <count>", L"every crafting ingredient (GiveUsefulThings <count>: the common 15)", ECheatMode::SaveTheWorld },
-        { L"Items", L"GiveBluGlo", L"GiveBluGlo [amount]", L"BluGlo", ECheatMode::SaveTheWorld },
-        { L"Items", L"GiveCheatInventory", L"GiveCheatInventory", L"the TestGod rifle (WannaGun: the WannaGun test gun)", ECheatMode::Both },
-        { L"Items", L"GiveAthenaFullKit", L"GiveAthenaFullKit", L"a BR kit (GiveAthenaWeapons, GiveAthenaAmmo, GiveAthenaConsumables, GiveAthenaTraps)", ECheatMode::BattleRoyale },
-        { L"Items", L"Badass", L"Badass", L"STW weapons with god, build free and infinite ammo (GiveGoodWeapons: the weapons)", ECheatMode::SaveTheWorld },
-        { L"Items", L"ListWeapons", L"ListWeapons", L"the names to give (ListAmmo, ListTraps, ListGadgets)", ECheatMode::Both },
-        { L"Player", L"God", L"God", L"invulnerable (toggles)", ECheatMode::Both },
-        { L"Player", L"Fly", L"Fly [speed]", L"fly, at the speed if you give one (\"fly 3000\"; Ghost [speed]: through walls too; Walk: walk again at your own speed)", ECheatMode::Both },
-        { L"Player", L"TestInfJumps", L"TestInfJumps", L"jump again in the air, any number of times (toggles)", ECheatMode::Both },
-        { L"Player", L"Teleport", L"Teleport", L"to where you look (TeleportToLocation <x> <y> <z>, TeleportToActor <class or name>)", ECheatMode::Both },
-        { L"Player", nullptr, L"TeleportTo <player>", L"next to that player, on the floor (their name or its start: \"teleportto Bob\")", ECheatMode::Both },
-        { L"Player", nullptr, L"Bring <player | all>", L"that player (or everyone) in front of you, on the floor", ECheatMode::Both },
-        { L"Player", nullptr, L"PossessPlayer <player>", L"take control of that player's pawn while they watch it, your own waiting hidden where it stood (Unpossess: give it back and be yourself again)", ECheatMode::Both },
-        { L"Player", nullptr, L"TpActor <class, name or path> [n]", L"onto the nearest actor that matches, on top of it or the floor under it, never under the map (n: the nth nearest; \"tpactor Tiered_Chest 2\")", ECheatMode::Both },
-        { L"Player", L"ChangeSize", L"ChangeSize <scale>", L"your size", ECheatMode::Both },
-        { L"Player", nullptr, L"Skin <HID or CID | reset>", L"wear a hero's or outfit's look, seen by everyone, cosmetic only (\"skin HID_Ninja_007_R_T01\", \"skin CID_005_Athena_Commando_M_Default\"; Hero: the same)", ECheatMode::Both },
-        { L"Player", nullptr, L"Disguise <class, path or mesh> [scale | HID]", L"turn into a prop (\"disguise Bathroom_ToiletBowl01\"), walk around as a husk (\"disguise HuskPawn\") or play a hero class's pawn with its abilities (\"disguise PlayerPawn_Ninja\"); Undisguise: be yourself again", ECheatMode::Both },
-        { L"Player", nullptr, L"DisguiseView <back [distance] [up] | hide | normal>", L"how you see your own disguise: your camera pulls back for one bigger than you (the default; give distance and up to set how far), it's hidden from you only, or neither", ECheatMode::Both },
-        { L"Player", L"BuildFree", L"BuildFree", L"building costs nothing (CraftFree: crafting)", ECheatMode::Both },
-        { L"Player", nullptr, L"InfiniteMag [on | off]", L"your magazine never empties, so you never reload, and your reserve never runs out (toggles without on or off; ToggleInfiniteAmmo: the same)", ECheatMode::Both },
-        { L"Player", L"ToggleInfiniteDurability", L"ToggleInfiniteDurability", L"your items don't wear out (ToggleInfiniteStamina)", ECheatMode::Both },
-        { L"Player", nullptr, L"Repair [all]", L"your weapon back to full durability (all: everything you carry that wears out)", ECheatMode::Both },
-        { L"Player", nullptr, L"FireRate <multiplier | reset>", L"your guns fire that many times as fast (\"firerate 2\", \"firerate 0.5\"); reset: their own rate again", ECheatMode::Both },
-        { L"Player", nullptr, L"WeaponDamage <multiplier | reset>", L"your guns and melee weapons do that many times the damage (\"weapondamage 3\"); reset: their own damage again", ECheatMode::Both },
-        { L"Player", nullptr, L"ToggleBloom [on | off]", L"your guns don't spread: every shot goes where you aim (only your game: no /Name/)", ECheatMode::Both },
-        { L"Player", nullptr, L"ToggleRecoil [on | off]", L"your guns don't kick your aim when you fire (only your game: no /Name/)", ECheatMode::Both },
-        { L"Player", nullptr, L"Dance [EID or path]", L"play an emote (\"dance EID_DanceMoves\"); a random one without a name (\"dance /Name/\" makes them dance)", ECheatMode::Both },
-        { L"Player", nullptr, L"NoCooldown [on | off]", L"no cooldown on your hero abilities and gadgets, and used gadgets recharge at once, until you turn it off (toggles without on or off; ToggleNoCoolDown: the same)", ECheatMode::Both },
-        { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },
-        { L"Player", nullptr, L"SetMaxHealth <value | reset>", L"your maximum health, and you're healed to it, kept through respawns (\"setmaxhealth 500\"); reset: your own maximum again", ECheatMode::Both },
-        { L"Player", nullptr, L"Speed <multiplier | reset>", L"you walk, run and sprint that many times as fast (\"speed 2\", \"speed 0.5\"), kept through respawns; reset: your own speed again", ECheatMode::Both },
-        { L"Player", L"DBNO", L"DBNO", L"knock yourself down (ReviveFromDBNO: get up)", ECheatMode::Both },
-        { L"Player", L"RespawnPlayerServer", L"RespawnPlayerServer", L"respawn when dead", ECheatMode::Both },
-        { L"Player", L"BackpackSetSize", L"BackpackSetSize <slots>", L"your backpack size", ECheatMode::Both },
-        { L"Player", L"BuildWith", L"BuildWith <Wood|Stone|Metal>", L"the building material", ECheatMode::Both },
-        { L"World", L"Summon", L"Summon <class or /Game/.../X.X_C>", L"spawns an actor in front of you", ECheatMode::Both },
-        { L"World", nullptr, L"SpawnActor <class or path> [scale | x y z]", L"spawns an actor in front of you at a scale (\"spawnactor Tiered_Chest_6_Parent 3\"), loading its class if it must", ECheatMode::Both },
-        { L"World", nullptr, L"CopyTargetPath [class | mesh | name]", L"copies the class path (or mesh) of what you look at to your clipboard and says its name, class and mesh", ECheatMode::Both },
-        { L"World", L"Slomo", L"Slomo <speed>", L"the game's speed, for everyone", ECheatMode::Both },
-        { L"World", L"PlayersOnly", L"PlayersOnly", L"freezes everything but the players (toggles)", ECheatMode::Both },
-        { L"World", L"DestroyTarget", L"DestroyTarget", L"destroys what you look at (DamageTarget <damage>, DestroyAll <class>)", ECheatMode::Both },
-        { L"World", L"KillPawns", L"KillPawns [class]", L"kills every pawn (MakeGods, MakeAIsGod: invulnerable)", ECheatMode::Both },
-        { L"World", L"SimulateLoot", L"SimulateLoot <tier group> <tier> <level>", L"rolls a loot tier group and says what dropped (tier -1: any)", ECheatMode::Both },
-        { L"Storm", L"SetSafeZoneLocationToPlayer", L"SetSafeZoneLocationToPlayer", L"the next storm circles close in on you", ECheatMode::BattleRoyale },
-        { L"Storm", L"SetSafeZoneRadius", L"SetSafeZoneRadius <radius>", L"the storm circle's radius until the next phase", ECheatMode::BattleRoyale },
-        { L"Save the World", L"SpawnAIGroup", L"SpawnAIGroup <spawn group>", L"husks in front of you, through a running encounter (ListSpawnGroups names them)", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"DisableAI", L"DisableAI", L"(ToggleAISpawning, ToggleAIDespawning)", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"MissionForceSuccess", L"MissionForceSuccess", L"(MissionForcePrimarySuccess, MissionForceFailure)", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"LoadMission", L"LoadMission <mission info>", L"loads a mission into the zone", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"SendMissionEvent", L"SendMissionEvent <event>", L"sends a mission event to the missions", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"TeleportToMissionActor", L"TeleportToMissionActor", L"to the current objective", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"DumpAllActiveMissions", L"DumpAllActiveMissions", L"the missions and their objectives (ListMissions)", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"SetWorldLevel", L"SetWorldLevel <level>", L"(SetWorldDaysElapsed <days>, UnlockAllZones)", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"ToggleIndestructibleKeep", L"ToggleIndestructibleKeep", L"the objective can't be destroyed", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"CountPlayerBuiltBuildingActors", L"CountPlayerBuiltBuildingActors", L"the structure count and limit, and the builds and traps it counts", ECheatMode::SaveTheWorld },
-        { L"Other", L"CheatScript", L"CheatScript <section>", L"runs a [CheatScript.X] list of cheats", ECheatMode::Both },
-        { L"Other", L"ListCheats", L"ListCheats", L"every exec function, working or not", ECheatMode::Both },
-        { L"Other", nullptr, L"corecheats [filter or all]", L"this list (a filter keeps the names or categories with it)", ECheatMode::Both },
+        { L"Items", L"GiveWeapon", L"giveweapon <name> [level] [count]", L"a weapon or consumable", ECheatMode::Both },
+        { L"Items", L"GiveAmmo", L"giveammo <name> [amount]", L"ammo", ECheatMode::Both },
+        { L"Items", L"GiveTrap", L"givetrap <name> [level] [count]", L"a trap", ECheatMode::Both },
+        { L"Items", L"GiveGadget", L"givegadget <name> [level]", L"a gadget", ECheatMode::Both },
+        { L"Items", L"GiveSpecificItem", L"givespecificitem <path or name> [count] [level]", L"any item", ECheatMode::Both },
+        { L"Items", L"GiveResources", L"giveresources [amount]", L"wood, stone, metal (givewood...)", ECheatMode::Both },
+        { L"Items", L"GiveAllWeapons", L"giveallweapons", L"every weapon (giveallrifles...)", ECheatMode::Both },
+        { L"Items", L"GiveAllTraps", L"givealltraps [count]", L"every trap", ECheatMode::Both },
+        { L"Items", L"GiveAllConsumables", L"giveallconsumables [count]", L"every consumable", ECheatMode::BattleRoyale },
+        { L"Items", L"GiveAllIngredients", L"giveallingredients [count]", L"every ingredient", ECheatMode::SaveTheWorld },
+        { L"Items", L"GiveBluGlo", L"givebluglo [amount]", L"BluGlo", ECheatMode::SaveTheWorld },
+        { L"Items", L"GiveCheatInventory", L"givecheatinventory", L"the TestGod rifle", ECheatMode::Both },
+        { L"Items", L"GiveAthenaFullKit", L"giveathenafullkit", L"a full BR kit", ECheatMode::BattleRoyale },
+        { L"Items", L"Badass", L"badass", L"god, build free, STW weapons", ECheatMode::SaveTheWorld },
+        { L"Items", L"ListWeapons", L"listweapons", L"item names (listammo, listtraps)", ECheatMode::Both },
+        { L"Player", L"God", L"god", L"invulnerable, toggles", ECheatMode::Both },
+        { L"Player", L"Fly", L"fly [speed]", L"fly (ghost: through walls; walk: stop)", ECheatMode::Both },
+        { L"Player", L"TestInfJumps", L"testinfjumps", L"jump in the air, toggles", ECheatMode::Both },
+        { L"Player", nullptr, L"speed <multiplier | reset>", L"move faster or slower", ECheatMode::Both },
+        { L"Player", nullptr, L"maxhealth <value | reset>", L"maximum health, healed to it", ECheatMode::Both },
+        { L"Player", nullptr, L"healthpercent <0-100>", L"health as a share of the maximum", ECheatMode::Both },
+        { L"Player", L"ChangeSize", L"changesize <scale>", L"your size", ECheatMode::Both },
+        { L"Player", L"BuildFree", L"buildfree", L"free building, toggles (craftfree)", ECheatMode::Both },
+        { L"Player", nullptr, L"infinitedurability [on | off]", L"items don't wear out", ECheatMode::Both },
+        { L"Player", nullptr, L"nocooldown [on | off]", L"no ability or gadget cooldowns", ECheatMode::Both },
+        { L"Player", L"DBNO", L"dbno", L"knock yourself down (revivefromdbno)", ECheatMode::Both },
+        { L"Player", L"RespawnPlayerServer", L"respawnplayerserver", L"respawn when dead", ECheatMode::Both },
+        { L"Player", L"BackpackSetSize", L"backpacksetsize <slots>", L"backpack size", ECheatMode::Both },
+        { L"Player", L"BuildWith", L"buildwith <wood | stone | metal>", L"building material", ECheatMode::Both },
+        { L"Player", nullptr, L"skin <HID or CID | reset>", L"wear a hero's or outfit's look", ECheatMode::Both },
+        { L"Player", nullptr, L"disguise <class, path or mesh> [scale]", L"become a prop or pawn (undisguise)", ECheatMode::Both },
+        { L"Player", nullptr, L"disguiseview <back | hide | normal>", L"how you see your disguise", ECheatMode::Both },
+        { L"Player", nullptr, L"dance [EID]", L"play an emote", ECheatMode::Both },
+        { L"Weapons", nullptr, L"infinitemag [on | off]", L"never reload, never run out", ECheatMode::Both },
+        { L"Weapons", nullptr, L"firerate <multiplier | reset>", L"guns fire faster", ECheatMode::Both },
+        { L"Weapons", nullptr, L"weapondamage <multiplier | reset>", L"weapons hit harder", ECheatMode::Both },
+        { L"Weapons", nullptr, L"bloom [on | off]", L"no spread (your game only)", ECheatMode::Both },
+        { L"Weapons", nullptr, L"recoil [on | off]", L"no recoil (your game only)", ECheatMode::Both },
+        { L"Weapons", nullptr, L"repair [all]", L"full durability", ECheatMode::Both },
+        { L"Movement", L"Teleport", L"teleport", L"to where you look", ECheatMode::Both },
+        { L"Movement", L"TeleportToLocation", L"teleporttolocation <x> <y> <z>", L"to a location", ECheatMode::Both },
+        { L"Movement", nullptr, L"teleportto <player>", L"next to a player", ECheatMode::Both },
+        { L"Movement", nullptr, L"bring <player | all>", L"a player to you", ECheatMode::Both },
+        { L"Movement", nullptr, L"tpactor <class or name> [n]", L"onto the nearest such actor", ECheatMode::Both },
+        { L"Movement", nullptr, L"possessplayer <player>", L"control their pawn (unpossess)", ECheatMode::Both },
+        { L"World", L"Summon", L"summon <class>", L"spawn an actor", ECheatMode::Both },
+        { L"World", nullptr, L"spawnactor <class or path> [scale]", L"spawn an actor at a scale", ECheatMode::Both },
+        { L"World", nullptr, L"copytargetpath [class | mesh | name]", L"copy what you look at", ECheatMode::Both },
+        { L"World", L"Slomo", L"slomo <speed>", L"game speed, for everyone", ECheatMode::Both },
+        { L"World", L"PlayersOnly", L"playersonly", L"freeze all but players, toggles", ECheatMode::Both },
+        { L"World", L"DestroyTarget", L"destroytarget", L"destroy what you look at", ECheatMode::Both },
+        { L"World", L"KillPawns", L"killpawns [class]", L"kill every pawn", ECheatMode::Both },
+        { L"World", L"SimulateLoot", L"simulateloot <group> <tier> <level>", L"roll a loot group", ECheatMode::Both },
+        { L"Storm", L"SetSafeZoneLocationToPlayer", L"safezonelocationtoplayer", L"storm closes on you", ECheatMode::BattleRoyale },
+        { L"Storm", L"SetSafeZoneRadius", L"safezoneradius <radius>", L"storm circle radius", ECheatMode::BattleRoyale },
+        { L"Save the World", L"SpawnAIGroup", L"spawnaigroup <group>", L"spawn husks", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"DisableAI", L"disableai", L"stop the AI (toggleaispawning)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"MissionForceSuccess", L"missionforcesuccess", L"win the mission (missionforcefailure)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"LoadMission", L"loadmission <mission>", L"load a mission", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"SendMissionEvent", L"sendmissionevent <event>", L"send a mission event", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"TeleportToMissionActor", L"teleporttomissionactor", L"to the objective", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"DumpAllActiveMissions", L"dumpallactivemissions", L"list the missions", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"SetWorldLevel", L"worldlevel <level>", L"the world level", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"ToggleIndestructibleKeep", L"indestructiblekeep", L"objective can't break", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"CountPlayerBuiltBuildingActors", L"countplayerbuiltbuildingactors", L"structure count", ECheatMode::SaveTheWorld },
+        { L"Other", L"CheatScript", L"cheatscript <section>", L"run a list of cheats", ECheatMode::Both },
+        { L"Other", L"ListCheats", L"listcheats", L"every exec function", ECheatMode::Both },
+        { L"Other", nullptr, L"corecheats [filter | all]", L"this list", ECheatMode::Both },
     };
 
     // One asset per item family, the name up to its rarity (WID_Assault_Auto_Athena of WID_Assault_Auto_Athena_R_Ore_T03):
@@ -937,7 +939,9 @@ void UFortCheatManager::TeleportToLocation(float X, float Y, float Z)
     if (!Pawn->TeleportTo(Location, Pawn->GetActorRotation()))
     {
         Reply(FString::Printf(TEXT("Can't teleport to X=%.1f Y=%.1f Z=%.1f (blocked)"), X, Y, Z));
+        return;
     }
+    Reply(FString::Printf(TEXT("Teleported to X=%.1f Y=%.1f Z=%.1f"), X, Y, Z));
 #endif
 }
 
@@ -1003,6 +1007,7 @@ void UFortCheatManager::RespawnPlayerServer()
     AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
     if (!GameMode)
     {
+        Reply(TEXT("RespawnPlayerServer needs the server's game mode"));
         return;
     }
     if (Pawn && !Pawn->IsDead())
@@ -1352,21 +1357,22 @@ void UFortCheatManager::ListCoreCheats(const FString& Filter)
         Shown.push_back(&Cheat);
     }
 
-    Reply(FString::Printf(TEXT("Core cheats%s (%d): type \"cheat <command>\". End any command with /Player/ to run it on that player instead."),
-        bAll ? TEXT("") : bBattleRoyale ? TEXT(" for Battle Royale") : TEXT(" for Save the World"), static_cast<int32_t>(Shown.size())));
+    if (Shown.empty())
+    {
+        Reply(TEXT("Nothing matches; \"cheat corecheats all\" lists every one"));
+        return;
+    }
+    Reply(FString::Printf(TEXT("Core cheats (%d): \"cheat <command>\"; \"set\" and \"toggle\" are optional; end with /Player/ to target someone"),
+        static_cast<int32_t>(Shown.size())));
     const wchar_t* Category = nullptr;
     for (const FCoreCheat* Cheat : Shown)
     {
         if (!Category || std::wstring_view(Category) != Cheat->Category)
         {
             Category = Cheat->Category;
-            Reply(FString::Printf(TEXT("-- %s --"), Category));
+            Reply(FString::Printf(TEXT("[%s]"), Category));
         }
-        Reply(FString::Printf(TEXT("%s: %s"), Cheat->Usage, Cheat->Description));
-    }
-    if (Shown.empty())
-    {
-        Reply(TEXT("Nothing matches; \"cheat corecheats all\" lists every one"));
+        Reply(FString::Printf(TEXT("  %s - %s"), Cheat->Usage, Cheat->Description));
     }
 }
 
@@ -2174,6 +2180,18 @@ namespace
     };
     constexpr FBoostKind MoveSpeedBoost{ L"movement speed", MoveSpeedStages, std::size(MoveSpeedStages) };
 
+    // "cheat infinitemag" (#155): AFortWeapon::GetBulletsPerClip is its stats' ClipSize through UFortWeaponAttrSet's
+    // WeaponAmmoClipSize aggregator (1.9 0x93F060), on the server and the owning client alike. A one-round weapon's
+    // shot empties its magazine, and the client starts a reload before Core's next frame can top it up (sooner with
+    // firerate), so while infinitemag is on its guns' magazines hold twice their rounds: a shot always leaves one.
+    constexpr FBoostStage ClipSizeStages[] = {
+        { L"/Game/Abilities/Player/Alterations/GE_Alteration_Attribute_ClipSize.GE_Alteration_Attribute_ClipSize_C",
+            L"/Script/FortniteGame.FortWeaponAttrSet", L"WeaponAmmoClipSize", L"weapon.ranged", L"weapon", L"guns" },
+    };
+    constexpr FBoostKind ClipSizeBoost{ L"magazine size", ClipSizeStages, std::size(ClipSizeStages) };
+    // A little over 2: the clip size is floored (FMath::FloorToInt), and a magnitude a hair under 2 would leave one round.
+    constexpr float InfiniteMagClipMultiplier = 2.01f;
+
     // The effects Core put on a player's ability system for one kind, kept through respawns.
     struct FAttributeBoost
     {
@@ -2188,7 +2206,8 @@ namespace
     std::vector<FAttributeBoost> AttributeBoosts;
 
     constexpr int32_t BoostCurveLevels = 100;
-    constexpr int32_t MaxBoostEffects = 100;
+    // The move speed effect gives at most about 2x a stack, so "speed 1000" (#155) takes about a thousand.
+    constexpr int32_t MaxBoostEffects = 1000;
 
     // Not kept: nothing roots the class once no effect of it is applied, so it may be collected and loaded again.
     UClass* BoostEffectClass(const FBoostStage& Stage)
@@ -2655,6 +2674,8 @@ namespace
         {
             Got = Pawn->GetMaxHealth();
         }
+        // Health's clamp follows the maximum it got either way, so the pawn can be healed to it (#155).
+        Pawn->ForceMaxHealth(Got);
         return Got;
     }
 
@@ -2802,15 +2823,33 @@ void UFortCheatManager::InfiniteMag(const FString& Arguments)
     {
         PlayerController->bInfiniteAmmo = bEnable;
     }
+    // The bigger magazine, so a shot never empties it (#155); kept through respawns like firerate's effects.
+    if (FAttributeBoost* ClipSize = FindBoost(PlayerController, ClipSizeBoost))
+    {
+        RemoveBoostEffects(*ClipSize);
+        std::erase_if(AttributeBoosts, [ClipSize](const FAttributeBoost& Boost) { return &Boost == ClipSize; });
+    }
     if (!bEnable)
     {
-        Reply(TEXT("Infinite magazine off: your shots use up the magazine again"));
+        Reply(TEXT("Infinite magazine OFF: your shots use up the magazine again"));
         return;
     }
+    FAttributeBoost ClipSize;
+    ClipSize.Kind = &ClipSizeBoost;
+    ClipSize.Player = PlayerController;
+    ClipSize.Multiplier = InfiniteMagClipMultiplier;
+    const std::variant<FBoostResult, FString> ClipResult = ApplyBoost(ClipSize);
+    if (const FString* Error = std::get_if<FString>(&ClipResult))
+    {
+        // Without it (no pawn yet, or a build without the effect) the magazine is still topped up every frame; a new
+        // pawn tries again.
+        UE_LOG(LogFortCheats, Warning, TEXT("InfiniteMag: %s's magazine size: %s"), *GetNameSafe(PlayerController), **Error);
+    }
+    AttributeBoosts.push_back(std::move(ClipSize));
     FillMagazine(PlayerController);
     StartWeaponCheatTick();
     UE_LOG(LogFortCheats, Log, TEXT("InfiniteMag: %s on"), *GetNameSafe(PlayerController));
-    Reply(TEXT("Infinite magazine: your weapon stays loaded and never needs a reload (infinitemag off: normal again)"));
+    Reply(TEXT("Infinite magazine ON: your weapon stays loaded and never needs a reload (infinitemag off: normal again)"));
 #endif
 }
 
@@ -2989,7 +3028,7 @@ void UFortCheatManager::WeaponDamage(const FString& Arguments)
 #endif
 }
 
-void UFortCheatManager::SetMaxHealth(const FString& Arguments)
+void UFortCheatManager::MaxHealth(const FString& Arguments)
 {
 #if WITH_SERVER_CODE
     // #155. Health is UFortHealthSet's Health and MaxHealth on the pawn's ability system; the pawn's own SetMaxHealth
@@ -3002,8 +3041,10 @@ void UFortCheatManager::SetMaxHealth(const FString& Arguments)
     const float Value = !Word.empty() && !bReset ? std::wcstof(Word.c_str(), &End) : 0.0f;
     if (!bReset && (Word.empty() || !End || *End != L'\0' || !std::isfinite(Value) || Value < 1.0f || Value > MaxValue))
     {
-        Reply(FString::Printf(TEXT("Usage: setmaxhealth <value 1-%d | reset>, \"setmaxhealth 500\" makes your maximum health 500 and heals you to it; reset gives your own back"),
-            static_cast<int32_t>(MaxValue)));
+        AFortPlayerController* PlayerController = GetPlayerController();
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        Reply(FString::Printf(TEXT("%sUsage: maxhealth <1-%d | reset>, \"maxhealth 500\" makes your maximum health 500 and heals you to it"),
+            Pawn ? *FString::Printf(TEXT("Your maximum health is %.0f. "), Pawn->GetMaxHealth()) : TEXT(""), static_cast<int32_t>(MaxValue)));
         return;
     }
     AFortPlayerController* PlayerController = GetPlayerController();
@@ -3015,7 +3056,7 @@ void UFortCheatManager::SetMaxHealth(const FString& Arguments)
     }
     if (!AFortPawn::FindStaticFunction_SetMaxHealth() || !AFortPawn::FindStaticFunction_SetHealth())
     {
-        Reply(TEXT("SetMaxHealth needs FortPawn's SetMaxHealth and SetHealth, which this build doesn't have"));
+        Reply(TEXT("MaxHealth needs FortPawn's SetMaxHealth and SetHealth, which this build doesn't have"));
         return;
     }
 
@@ -3053,16 +3094,81 @@ void UFortCheatManager::SetMaxHealth(const FString& Arguments)
     Existing->Wanted = Value;
     Existing->Own = Own;
     StartWeaponCheatTick();
-    UE_LOG(LogFortCheats, Log, TEXT("SetMaxHealth: %s asked for %.0f, has %.0f (own %.0f), health %.0f"), *GetNameSafe(PlayerController), Value, *Got, Own, Pawn->GetHealth());
-    Reply(FString::Printf(TEXT("Your maximum health is %.0f (your own: %.0f), and you're healed to it%s; setmaxhealth reset gives your own back"), *Got, Own,
-        std::fabs(*Got - Value) > 0.5f ? TEXT(" (the game won't let it go further)") : TEXT("")));
+    UE_LOG(LogFortCheats, Log, TEXT("MaxHealth: %s asked for %.0f, has %.0f (own %.0f), health %.0f"), *GetNameSafe(PlayerController), Value, *Got, Own, Pawn->GetHealth());
+    Reply(FString::Printf(TEXT("Max health set to %.0f, health %.0f/%.0f%s (your own: %.0f; maxhealth reset gives it back)"), *Got, Pawn->GetHealth(), Pawn->GetMaxHealth(),
+        std::fabs(*Got - Value) > 0.5f ? TEXT(", the game won't let it go further") : TEXT(""), Own));
+#endif
+}
+
+void UFortCheatManager::HealthPercent(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // The game's SetHealthPercent (1.9 0x8179C0) sets the health to the pawn's maximum times the fraction and answers
+    // nothing; this does the same with the maximum the pawn has now (maxhealth's included, #155) and says what it set.
+    // 0 to 1 is a fraction ("0.5"), above 1 a percent ("50").
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    std::wstring Word = Words.size() == 1 ? Words[0] : std::wstring();
+    if (!Word.empty() && Word.back() == L'%')
+    {
+        Word.pop_back();
+    }
+    wchar_t* End = nullptr;
+    const float Value = !Word.empty() ? std::wcstof(Word.c_str(), &End) : -1.0f;
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (Word.empty() || !End || End == Word.c_str() || *End != L'\0' || !std::isfinite(Value) || Value < 0.0f || Value > 100.0f)
+    {
+        Reply(FString::Printf(TEXT("%sUsage: healthpercent <0-100>, \"healthpercent 50\" (or 0.5) puts your health at half your maximum"),
+            Pawn ? *FString::Printf(TEXT("Your health is %.0f/%.0f. "), Pawn->GetHealth(), Pawn->GetMaxHealth()) : TEXT("")));
+        return;
+    }
+    if (!Pawn || Pawn->IsDead())
+    {
+        Reply(TEXT("You have no pawn that is alive to change the health of"));
+        return;
+    }
+    const float Fraction = Value > 1.0f ? Value / 100.0f : Value;
+    const float Max = Pawn->GetMaxHealth();
+    // At least 1: a pawn at 0 health that isn't dead is stuck between the two.
+    if (!Pawn->SetHealth(std::max(1.0f, Max * Fraction)))
+    {
+        Reply(TEXT("HealthPercent needs FortPawn's SetHealth, which this build doesn't have"));
+        return;
+    }
+    Reply(FString::Printf(TEXT("Health set to %.0f/%.0f (%.0f%%)"), Pawn->GetHealth(), Max, Fraction * 100.0f));
+#endif
+}
+
+void UFortCheatManager::InfiniteDurability(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // The game's ToggleInfiniteDurability flips the controller's replicated bInfiniteDurability and writes the result to
+    // the server's own console only (1.9 0x81DD30), so the player saw nothing.
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.empty() ? std::wstring() : Lower(Words[0]);
+    if (Words.size() > 1 || (!Word.empty() && Word != L"on" && Word != L"off"))
+    {
+        Reply(TEXT("Usage: infinitedurability [on | off], your items don't wear out; without on or off it toggles"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController || !AFortPlayerController::HasInfiniteDurabilityFlag())
+    {
+        Reply(TEXT("This build has no infinite durability flag"));
+        return;
+    }
+    const bool bEnable = Word.empty() ? !PlayerController->bInfiniteDurability : Word == L"on";
+    PlayerController->bInfiniteDurability = bEnable;
+    PlayerController->ForceNetUpdate();
+    Reply(bEnable ? TEXT("Infinite durability ON: your items don't wear out") : TEXT("Infinite durability OFF: your items wear out again"));
 #endif
 }
 
 void UFortCheatManager::Speed(const FString& Arguments)
 {
 #if WITH_SERVER_CODE
-    constexpr float MaxMultiplier = 10.0f;
+    // Up to 1000x (#155: 10 was too few); ParseMultiplier turns away anything not finite or under 0.05.
+    constexpr float MaxMultiplier = 1000.0f;
     const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
     const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
     const bool bReset = Word == L"reset" || Word == L"off";
@@ -3077,7 +3183,7 @@ void UFortCheatManager::Speed(const FString& Arguments)
     if (!bReset && !Multiplier)
     {
         const float Current = SetSpeed ? SetSpeed->Multiplier : RowSpeed ? RowSpeed->Multiplier : 1.0f;
-        Reply(FString::Printf(TEXT("You move at %.2fx your own speed. Usage: speed <multiplier 0.05-%.0f | reset>, \"speed 2\" walks, runs and sprints twice as fast; reset gives your own speed back"),
+        Reply(FString::Printf(TEXT("You move at %.2fx your own speed. Usage: speed <0.05-%.0f | reset>, \"speed 2\" walks, runs and sprints twice as fast"),
             Current, MaxMultiplier));
         return;
     }
@@ -3101,7 +3207,7 @@ void UFortCheatManager::Speed(const FString& Arguments)
     Pawn->SetCheatSpeedMultiplier(1.0f);
     if (bReset || *Multiplier == 1.0f)
     {
-        Reply(TEXT("You move at your own speed again"));
+        Reply(TEXT("Speed reset: you move at your own speed again"));
         return;
     }
 
@@ -3115,7 +3221,7 @@ void UFortCheatManager::Speed(const FString& Arguments)
         const float OwnSpeed = Pawn->SetCheatSpeedMultiplier(*Multiplier);
         StartWeaponCheatTick();
         UE_LOG(LogFortCheats, Log, TEXT("Speed: %s moves at %.2fx (movement set, own run speed %.0f)"), *GetNameSafe(PlayerController), *Multiplier, OwnSpeed);
-        Reply(FString::Printf(TEXT("You walk, run and sprint %.2fx as fast (running at %.0f, your own %.0f); speed reset: your own speed"), *Multiplier, OwnSpeed * *Multiplier, OwnSpeed));
+        Reply(FString::Printf(TEXT("Speed set to %.2fx: running at %.0f, your own %.0f (speed reset: your own speed)"), *Multiplier, OwnSpeed * *Multiplier, OwnSpeed));
         return;
     }
 
@@ -3136,7 +3242,7 @@ void UFortCheatManager::Speed(const FString& Arguments)
     const float Moved = Applied && *Applied > 0.01f ? *Applied : *Multiplier;
     const float OwnSpeed = Pawn->SetCheatSpeedMultiplier(Moved);
     UE_LOG(LogFortCheats, Log, TEXT("Speed: %s moves at %.3fx (asked %.2fx; stats row, own run speed %.0f)"), *GetNameSafe(PlayerController), Moved, *Multiplier, OwnSpeed);
-    Reply(FString::Printf(TEXT("You walk, run and sprint %.2fx as fast (running at %.0f, your own %.0f); speed reset: your own speed"), Moved, OwnSpeed * Moved, OwnSpeed));
+    Reply(FString::Printf(TEXT("Speed set to %.2fx: running at %.0f, your own %.0f (speed reset: your own speed)"), Moved, OwnSpeed * Moved, OwnSpeed));
 #endif
 }
 
@@ -3463,11 +3569,11 @@ namespace
         }
         if (Cheat == EWeaponStatCheat::Bloom)
         {
-            return bOn ? FString(TEXT("No bloom: your guns shoot dead on where you aim, however you move or fire (togglebloom again: normal)"))
-                       : FString(TEXT("Bloom back: your guns spread as they do on their own"));
+            return bOn ? FString(TEXT("No bloom ON: your guns shoot dead on where you aim (bloom off: normal)"))
+                       : FString(TEXT("No bloom OFF: your guns spread as they do on their own"));
         }
-        return bOn ? FString(TEXT("No recoil: your aim stays where it is when you fire (togglerecoil again: normal)"))
-                   : FString(TEXT("Recoil back: your guns kick as they do on their own"));
+        return bOn ? FString(TEXT("No recoil ON: your aim stays put when you fire (recoil off: normal)"))
+                   : FString(TEXT("No recoil OFF: your guns kick as they do on their own"));
     }
 
     // ---- "cheat copytargetpath" (#152), on the client ---------------------------------------------------------------
@@ -3619,8 +3725,10 @@ bool UFortCheatManager::RunClientCheatCommand(APlayerController* PlayerControlle
     FString TargetName;
     const bool bTargeted = SplitCheatTarget(Msg, Command, TargetName);
     const std::vector<std::wstring> Words = SplitWords(Command.ToStdString());
-    const std::wstring Name = Words.empty() ? std::wstring() : Lower(Words[0]);
-    if (Name != L"togglebloom" && Name != L"togglerecoil" && Name != L"copytargetpath")
+    // "bloom" and "recoil" too (#155).
+    const auto IsClientCommand = [](const std::wstring& Candidate) { return Candidate == L"togglebloom" || Candidate == L"togglerecoil" || Candidate == L"copytargetpath"; };
+    const std::wstring Name = Words.empty() ? std::wstring() : ResolveCommandName(PlayerController, Words[0], IsClientCommand);
+    if (!IsClientCommand(Name))
     {
         return false;
     }
@@ -3680,6 +3788,50 @@ bool UFortCheatManager::SplitCheatTarget(const FString& Msg, FString& OutCommand
     OutCommand = FString(Trim(std::wstring_view(Line).substr(0, Open)).c_str());
     OutTarget = FString(Target.c_str());
     return true;
+}
+
+std::wstring UFortCheatManager::ResolveCommandName(APlayerController* PlayerController, const std::wstring& Name, bool (*IsKnown)(const std::wstring&))
+{
+    // The exec functions the console runs a command as: the controller's, its cheat manager's (this game's class when the
+    // client has none) and its pawn's.
+    UObject* CheatManagerObject = PlayerController ? static_cast<UObject*>(PlayerController->CheatManager) : nullptr;
+    APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+    const UClass* Classes[] = {
+        PlayerController ? PlayerController->GetClass() : nullptr,
+        CheatManagerObject ? CheatManagerObject->GetClass() : UFortCheatManager::StaticClass(),
+        Pawn ? Pawn->GetClass() : nullptr,
+    };
+    const auto IsCommand = [&](const std::wstring& Candidate)
+    {
+        if (IsKnown && IsKnown(Candidate))
+        {
+            return true;
+        }
+        const FName FunctionName(Candidate.c_str(), FNAME_Find);
+        if (FunctionName.IsNone())
+        {
+            return false;
+        }
+        return std::any_of(std::begin(Classes), std::end(Classes), [&FunctionName](const UClass* Class)
+        {
+            UFunction* Function = Class ? Class->FindFunctionByName(FunctionName) : nullptr;
+            return Function && Function->HasAnyFunctionFlags(FUNC_Exec);
+        });
+    };
+
+    const std::wstring Lowered = Lower(Name);
+    if (Lowered.empty() || IsCommand(Lowered))
+    {
+        return Lowered;
+    }
+    for (const wchar_t* Prefix : { L"set", L"toggle" })
+    {
+        if (IsCommand(Prefix + Lowered))
+        {
+            return Prefix + Lowered;
+        }
+    }
+    return Lowered;
 }
 
 bool UFortCheatManager::ParseCheatMovement(const FString& Command, FString& OutCommand, float& OutSpeed, FString& OutError)

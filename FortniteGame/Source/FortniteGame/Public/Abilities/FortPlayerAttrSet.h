@@ -7,6 +7,12 @@
 struct FFortGameplayAttributeData : public FGameplayAttributeData
 {
     DefineUnrealStruct(FFortGameplayAttributeData, FortniteGame)
+
+public:
+    // The range the attribute set's PreAttributeChange clamps the value to (1.9 0x476AF0). Health's Maximum follows
+    // MaxHealth only when MaxHealth's aggregator changes it (AdjustAttributeForMaxChange, 1.9 0x44DD70).
+    DefineUProperty(float, Maximum)
+    static bool HasMaximum() { return Member_Maximum.IsAvailable(); }
 };
 
 class UFortPlayerAttrSet : public UAttributeSet

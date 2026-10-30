@@ -145,10 +145,16 @@ public:
     // Core's own command, "cheat dance [EID or path]" (#152): the player plays the emote (a random one without a name)
     // through the emote wheel's own ServerPlayEmoteItem, run on the server.
     void Dance(const FString& Arguments);
-    // Core's own command, "cheat setmaxhealth <value | reset>" (#155): the pawn's maximum health becomes the value, through
-    // its own SetMaxHealth on the health set (replicated: the HUD shows it), and it is healed to it; kept through
-    // respawns until reset, which gives back the maximum it had.
-    void SetMaxHealth(const FString& Arguments);
+    // Core's own command, "cheat maxhealth <value | reset>" ("setmaxhealth" too; #155): the pawn's maximum health becomes
+    // the value, through its own SetMaxHealth on the health set (replicated: the HUD shows it), and it is healed to it;
+    // kept through respawns until reset, which gives back the maximum it had.
+    void MaxHealth(const FString& Arguments);
+    // Core's own command, "cheat sethealthpercent <percent>" (#155; the game's takes 0-1 and answers nothing): the pawn's
+    // health becomes that share of its maximum, Core's maximum health included; 0-1 is a fraction, above 1 a percent.
+    void HealthPercent(const FString& Arguments);
+    // Core's own command, "cheat toggleinfinitedurability [on | off]" (#155): the game's flag, whose own cheat answers
+    // only the server's console.
+    void InfiniteDurability(const FString& Arguments);
     // Core's own command, "cheat speed <multiplier | reset>" (#155): the pawn walks, runs and sprints that many times as
     // fast. Save the World's pawn moves at its movement set's speeds, which the server scales and replicates to its
     // client. Battle Royale's moves at its stats row's, which each machine reads on its own: the server applies the
@@ -204,6 +210,10 @@ public:
 
     // A final "/Name/" picks the player a cheat runs on (#122): Msg without it in OutCommand, the name in OutTarget.
     static bool SplitCheatTarget(const FString& Msg, FString& OutCommand, FString& OutTarget);
+    // "healthpercent" for "sethealthpercent", "bloom" for "togglebloom" (#155): the command name Name means. A name that
+    // is a command already (IsKnown, or an exec function of the player's controller, cheat manager or pawn) stays as it
+    // is; else "set" or "toggle" in front of it, when that makes one. Lower case.
+    static std::wstring ResolveCommandName(APlayerController* PlayerController, const std::wstring& Name, bool (*IsKnown)(const std::wstring&));
     // The player whose display name is Name (case-insensitive) or uniquely starts with it; else null and OutError says why.
     static AFortPlayerController* FindCheatTarget(const UObject* WorldContextObject, const FString& Name, FString& OutError);
     // While a cheat runs on another player, Core's replies go to the player who typed it.

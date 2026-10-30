@@ -1925,11 +1925,15 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // Core's own commands, which no exec function of these builds has, run on the player they run on:
     // "spawnactor <class or path> [scale | x y z]" (#132) spawns an actor in front of them at a scale, "skin <HID or CID>"
     // (or "hero"; #134, #136) gives them a hero's look, "disguise <class> [scale]" and "undisguise" (#134, #136) turn them
-    // into a prop or a pawn, "tpactor <class, name or path> [n]" (#146) puts them on top of the nearest actor that matches.
+    // into a prop or a pawn, "tpactor <class, name or path> [n]" (#146) puts them on top of the nearest actor that matches,
+    // "nocooldown [on | off]" (#148; also for the game's ToggleNoCoolDown, which sets a flag nothing reads) ends their
+    // ability and gadget cooldowns.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
         { L"tpactor", &UFortCheatManager::TpActor },
+        { L"nocooldown", &UFortCheatManager::NoCooldown },
+        { L"togglenocooldown", &UFortCheatManager::NoCooldown },
         { L"skin", &UFortCheatManager::Skin },
         { L"hero", &UFortCheatManager::Skin },
         { L"disguise", &UFortCheatManager::Disguise },

@@ -58,6 +58,10 @@ public:
     DefineBitfieldUProperty(bInfiniteDurability)
     DefineBitfieldUProperty(bCheatGhost)
     DefineBitfieldUProperty(bCheatFly)
+    // ToggleNoCoolDown's flag, replicated; nothing in these shipping builds reads it (CheckCooldown's test of it is
+    // compiled out). "cheat nocooldown" sets it along with clearing the cooldowns itself.
+    DefineBitfieldUProperty(bNoCoolDown)
+    static bool HasNoCoolDownFlag() { return Member_bNoCoolDown.IsAvailable(); }
     DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
     DefineUProperty(int32_t, OverriddenBackpackSize)

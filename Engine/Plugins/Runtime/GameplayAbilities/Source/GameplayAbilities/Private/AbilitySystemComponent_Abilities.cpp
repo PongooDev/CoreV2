@@ -120,6 +120,20 @@ void UAbilitySystemComponent::ClientActivateAbilityFailed(FGameplayAbilitySpecHa
     Params.Call(this);
 }
 
+bool UAbilitySystemComponent::RemoveActiveGameplayEffectBySourceEffect(UClass* GameplayEffect, UAbilitySystemComponent* InstigatorAbilitySystemComponent, int32_t StacksToRemove)
+{
+    UFunction* Function = FindStaticFunction_RemoveActiveGameplayEffectBySourceEffect();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function);
+    Params.Set(L"GameplayEffect", GameplayEffect);
+    Params.Set(L"InstigatorAbilitySystemComponent", InstigatorAbilitySystemComponent);
+    Params.Set(L"StacksToRemove", StacksToRemove);
+    return Params.Call(this);
+}
+
 void UAbilitySystemComponent::IncrementAbilityListLock()
 {
     Natives::UAbilitySystemComponent_IncrementAbilityListLock(this);

@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Player/FortCheatManager.h"
+#include "Abilities/GameplayAbility.h"
+#include "AbilitySystemComponent.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIEncounterInfo.h"
 #include "Athena/FortGameModeAthena.h"
@@ -26,6 +28,7 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Finder.h"
+#include "GameThread.h"
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionInfo.h"
 #include "Missions/FortMissionLibrary.h"
@@ -33,6 +36,7 @@
 #include "Missions/FortObjectiveBase.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -477,7 +481,8 @@ namespace
         { L"Player", nullptr, L"Disguise <class, path or mesh> [scale | HID]", L"turn into a prop (\"disguise Bathroom_ToiletBowl01\"), walk around as a husk (\"disguise HuskPawn\") or play a hero class's pawn with its abilities (\"disguise PlayerPawn_Ninja\"); Undisguise: be yourself again", ECheatMode::Both },
         { L"Player", nullptr, L"DisguiseView <back [distance] [up] | hide | normal>", L"how you see your own disguise: your camera pulls back for one bigger than you (the default; give distance and up to set how far), it's hidden from you only, or neither", ECheatMode::Both },
         { L"Player", L"BuildFree", L"BuildFree", L"building costs nothing (CraftFree: crafting)", ECheatMode::Both },
-        { L"Player", L"ToggleInfiniteAmmo", L"ToggleInfiniteAmmo", L"(ToggleInfiniteDurability, ToggleInfiniteStamina, ToggleNoCoolDown: no ability or gadget cooldowns)", ECheatMode::Both },
+        { L"Player", L"ToggleInfiniteAmmo", L"ToggleInfiniteAmmo", L"(ToggleInfiniteDurability, ToggleInfiniteStamina)", ECheatMode::Both },
+        { L"Player", nullptr, L"NoCooldown [on | off]", L"no cooldown on your hero abilities and gadgets until you turn it off (toggles without on or off; ToggleNoCoolDown: the same)", ECheatMode::Both },
         { L"Player", L"SetHealthPercent", L"SetHealthPercent <0-1>", L"your health (Pain: hurt yourself)", ECheatMode::Both },
         { L"Player", L"DBNO", L"DBNO", L"knock yourself down (ReviveFromDBNO: get up)", ECheatMode::Both },
         { L"Player", L"RespawnPlayerServer", L"RespawnPlayerServer", L"respawn when dead", ECheatMode::Both },
@@ -1645,6 +1650,128 @@ void UFortCheatManager::TpActor(const FString& Arguments)
         Destination.X, Destination.Y, Destination.Z, bFloor ? 1 : 0, bAboveMap ? 1 : 0);
     Reply(FString::Printf(TEXT("Teleported to %s, %.0fm away%s"), *What, Distance,
         bAboveMap ? TEXT("; it's under the map, so onto the ground over it") : bFloor ? TEXT("") : TEXT("; no floor found under it, so just over it")));
+#endif
+}
+
+#if WITH_SERVER_CODE
+namespace
+{
+    // "cheat nocooldown" (#148): the players whose ability and gadget cooldowns end as soon as they start.
+    std::vector<TWeakObjectPtr<AFortPlayerController>> NoCooldownPlayers;
+    bool bClearingCooldowns = false;
+
+    bool HasNoCooldown(const AFortPlayerController* PlayerController)
+    {
+        return std::any_of(NoCooldownPlayers.begin(), NoCooldownPlayers.end(),
+            [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; });
+    }
+
+    // Ends the player's cooldowns. A cooldown is the effect an ability's CommitAbility applies to its owner (its
+    // CooldownGameplayEffectClass, whose granted tags CheckCooldown refuses an activation on), for a hero ability and a
+    // gadget alike (GA_AirStrike: GE_AirStrike_Cooldown). Every one of those on the player's ability systems comes off:
+    // the player state's (where the hero's, the gadgets' and the player's own abilities are granted) and the pawn's when it
+    // has another. The removal replicates, so the client's cooldown tags and HUD timer clear and its next activation isn't
+    // refused before it reaches the server. How many ability systems it went through.
+    int32_t ClearCooldowns(AFortPlayerController* PlayerController)
+    {
+        std::vector<UAbilitySystemComponent*> AbilitySystems;
+        const auto AddAbilitySystem = [&AbilitySystems](UAbilitySystemComponent* AbilitySystem)
+        {
+            if (AbilitySystem && std::find(AbilitySystems.begin(), AbilitySystems.end(), AbilitySystem) == AbilitySystems.end())
+            {
+                AbilitySystems.push_back(AbilitySystem);
+            }
+        };
+        if (AFortPlayerState* PlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))))
+        {
+            AddAbilitySystem(PlayerState->AbilitySystemComponent);
+        }
+        if (AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(PlayerController->GetPawn())))
+        {
+            AddAbilitySystem(Pawn->AbilitySystemComponent);
+        }
+
+        for (UAbilitySystemComponent* AbilitySystem : AbilitySystems)
+        {
+            // The classes first: removing an effect can change what the ability system grants.
+            std::vector<UClass*> Cooldowns;
+            TStructArray<FGameplayAbilitySpec>& Specs = AbilitySystem->ActivatableAbilities.Items;
+            for (int32_t Index = 0; Index < Specs.Num(); ++Index)
+            {
+                UGameplayAbility* Ability = Specs[Index].Ability;
+                UClass* Cooldown = Ability ? static_cast<UClass*>(Ability->CooldownGameplayEffectClass) : nullptr;
+                if (Cooldown && std::find(Cooldowns.begin(), Cooldowns.end(), Cooldown) == Cooldowns.end())
+                {
+                    Cooldowns.push_back(Cooldown);
+                }
+            }
+            for (UClass* Cooldown : Cooldowns)
+            {
+                AbilitySystem->RemoveActiveGameplayEffectBySourceEffect(Cooldown);
+            }
+        }
+        return static_cast<int32_t>(AbilitySystems.size());
+    }
+
+    // Every frame on the game thread while a player has no cooldowns: a cooldown applied since the last frame comes off.
+    // Nothing is hooked: the abilities commit their cooldowns as ever, and the engine's own removal takes them off.
+    void TickNoCooldown()
+    {
+        std::erase_if(NoCooldownPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
+        for (const TWeakObjectPtr<AFortPlayerController>& Known : NoCooldownPlayers)
+        {
+            ClearCooldowns(Known.Get());
+        }
+        bClearingCooldowns = !NoCooldownPlayers.empty() && GameThread::Enqueue(&TickNoCooldown);
+    }
+}
+#endif
+
+void UFortCheatManager::NoCooldown(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.empty() ? std::wstring() : Lower(Words[0]);
+    if (Words.size() > 1 || (!Word.empty() && Word != L"on" && Word != L"off"))
+    {
+        Reply(TEXT("Usage: nocooldown [on | off], no cooldown on your abilities and gadgets; without on or off it toggles"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    if (!UAbilitySystemComponent::FindStaticFunction_RemoveActiveGameplayEffectBySourceEffect())
+    {
+        Reply(TEXT("NoCooldown needs AbilitySystemComponent.RemoveActiveGameplayEffectBySourceEffect, which this build doesn't have"));
+        return;
+    }
+
+    const bool bEnable = Word.empty() ? !HasNoCooldown(PlayerController) : Word == L"on";
+    std::erase_if(NoCooldownPlayers, [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get() || Known.Get() == PlayerController; });
+    if (bEnable)
+    {
+        NoCooldownPlayers.emplace_back(PlayerController);
+    }
+    // The game's own flag (replicated), so it says the same as Core.
+    if (PlayerController->HasNoCoolDownFlag())
+    {
+        PlayerController->bNoCoolDown = bEnable;
+    }
+    if (!bEnable)
+    {
+        Reply(TEXT("Cooldowns are back: the next ability or gadget you use cools down again"));
+        return;
+    }
+    const int32_t AbilitySystems = ClearCooldowns(PlayerController);
+    if (!bClearingCooldowns)
+    {
+        bClearingCooldowns = GameThread::Enqueue(&TickNoCooldown);
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("NoCooldown: %s on, %d ability systems"), *GetNameSafe(PlayerController), AbilitySystems);
+    Reply(AbilitySystems > 0 ? TEXT("No cooldowns: your abilities and gadgets are ready again as soon as you use them (nocooldown off: cooldowns again)")
+                             : TEXT("No cooldowns (nocooldown off: cooldowns again); you have no abilities yet, and they'll have none once you do"));
 #endif
 }
 

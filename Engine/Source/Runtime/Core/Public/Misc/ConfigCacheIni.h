@@ -53,4 +53,9 @@ public:
     // [OnlineSubsystem] bHasVoiceEnabled on, and with bLocalVoice the voice module ([Voice] bEnabled) that captures and
     // plays it.
     static void EnableVoice(bool bLocalVoice);
+
+    // The same switches as EnableVoice, written into the saved Engine.ini the engine layers over the build's config, for
+    // packed builds: their packer checks the code once as the initial load ends, so EnableVoice's detour can only go in
+    // after the engine has read these keys. Run it before the engine starts; it changes only these keys.
+    static void WriteVoiceSettings(bool bLocalVoice);
 };

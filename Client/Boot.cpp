@@ -29,6 +29,14 @@ void Boot::Initialize()
     Log::Initialize(L"Client");
     Log::Info(L"Core Client starting");
 
+    // Packed builds only: the GetBool detour that turns voice on for the others is held until the packer has checked its
+    // code, which is after the engine has read its voice switches, so they go into the saved config instead. The engine
+    // hasn't started yet (the stub hasn't even run), so it reads them.
+    if (Packed::IsPacked())
+    {
+        FConfigCacheIni::WriteVoiceSettings(true);
+    }
+
     // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched
     // into it, so hand the rest over to a watcher that runs once the stub has finished.
     if (Packed::RunAfterStub(&Start))
@@ -60,7 +68,8 @@ static void Start()
     UGameEngine::Hook();
     Diagnostics::HookLobbyClient();
     Diagnostics::HookQuestTiles();
-    // Before the engine reads its config: the voice module and the online subsystem's voice interface start with it.
+    // Before the engine reads its config: the voice module and the online subsystem's voice interface start with it. On a
+    // packed build the detour only goes in once the engine is up (see WriteVoiceSettings above).
     FConfigCacheIni::EnableVoice(true);
     FOnlineVoiceImpl::Hook();
     UFortUITeamInfo::Hook();

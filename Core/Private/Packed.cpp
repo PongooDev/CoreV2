@@ -153,6 +153,11 @@ bool Packed::RunAfterStub(void (*Start)())
     return true;
 }
 
+bool Packed::IsPacked()
+{
+    return Describe().TextSections >= 2;
+}
+
 void Packed::WaitForCodeCheck()
 {
     if (Describe().TextSections < 2)

@@ -13,6 +13,9 @@ namespace Packed
     /// </summary>
     bool RunAfterStub(void (*Start)());
 
+    /// <summary>Whether the exe is packed: a second .text section, the stub's own. Ordinary builds have one.</summary>
+    bool IsPacked();
+
     /// <summary>
     /// On a packed build, blocks until the packer has run the one-time check it makes over the code its stub
     /// decrypted, which it does as the engine finishes its initial load. Patching .text before that point leaves the

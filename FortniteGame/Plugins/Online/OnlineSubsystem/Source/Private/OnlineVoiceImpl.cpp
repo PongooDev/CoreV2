@@ -23,6 +23,8 @@ namespace
     std::atomic<int64_t> LocalPackets = 0;
     // The voice interface that started with a voice engine (the client's).
     FOnlineVoiceImpl* LocalVoice = nullptr;
+    // Whether Init ran through the hook. On a packed build it can run before the hook is in (TickHK).
+    bool bInitSeen = false;
 
     // TSharedPtr<FVoicePacket>: the object, then its reference controller.
     struct FSharedPacket
@@ -82,6 +84,7 @@ bool FOnlineVoiceImpl::InitHK(FOnlineVoiceImpl* This)
     // A server (dedicated: Core's IsDedicated) only forwards voice and succeeds without a voice engine; a client needs the
     // voice module's capture and Opus encoder ([Voice] bEnabled, a recording device).
     const bool bReady = InitOG(This);
+    bInitSeen = true;
     if (bReady)
     {
         LocalVoice = This;
@@ -174,6 +177,13 @@ void FOnlineVoiceImpl::TickHK(FOnlineVoiceImpl* This, float DeltaTime)
     {
         bTicked = true;
         Log::Info(L"Voice chat: voice interface ticking");
+    }
+    // Only a voice interface whose Init succeeded is kept and ticked. On a packed build Core's finders can still be
+    // running when the engine starts it, so Init may come before its slot is swapped: take the interface from here then.
+    if (!LocalVoice && !bInitSeen)
+    {
+        LocalVoice = This;
+        Log::Info(L"Voice chat: voice interface ready (started before Core's hook)");
     }
     if (OnTick)
     {

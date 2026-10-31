@@ -6,6 +6,8 @@
 
 struct FObjectLayout
 {
+    int32_t FUObjectArray_Members = 0;
+    bool bSoftObjectPaths = false;
     int32_t UField_Next = 0x28;
     int32_t UStruct_SuperStruct = 0x30;
     int32_t UStruct_Children = 0x38;

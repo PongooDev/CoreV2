@@ -161,6 +161,18 @@ namespace
             }
         }
         RequireAddress(L"GUObjectArray", reinterpret_cast<uintptr_t&>(Natives::GUObjectArray), Array);
+
+        // AllocateObjectPool first stores MaxObjectsNotConsideredByGC, the third member: mov [rcx+8], r8d up to 1.9.1,
+        // mov [rcx+34Ch], r8d on 1.10.
+        if (const uintptr_t Store = AllocatePool ? FindInstruction(AllocatePool, AllocatePool + 0x20, { 0x44, 0x89, 0x81 }) : 0)
+        {
+            const int32_t Members = *reinterpret_cast<const int32_t*>(Store + 3) - 8;
+            if (Members > 0 && Members % 4 == 0 && !FindInstruction(AllocatePool, Store, { 0x44, 0x89, 0x41 }))
+            {
+                ObjectLayout::Current.FUObjectArray_Members = Members;
+                Log::Info(L"Object layout: FUObjectArray's members start at +0x{:X}", Members);
+            }
+        }
     }
 
     void ResolveNames()
@@ -199,7 +211,28 @@ namespace
 
     void ResolveObjectGlobals()
     {
-        Require(L"StaticFindObject", Natives::StaticFindObject, FunctionOf(L"Illegal call to StaticFindObject() while serializing object data!"));
+        // 1.10's MakeUniqueObjectName (0xDE9010, 20 callers) inlines the same check; StaticFindObject (0xDEFCB0) has 218.
+        uintptr_t FindObject = 0;
+        size_t FindObjectCallers = 0;
+        for (const uintptr_t Ref : Finder::StringRefs(L"Illegal call to StaticFindObject() while serializing object data!"))
+        {
+            const uintptr_t Function = Finder::FunctionStart(Ref);
+            if (!FindObject)
+            {
+                FindObject = Function;
+            }
+            else if (Function && Function != FindObject)
+            {
+                FindObjectCallers = FindObjectCallers ? FindObjectCallers : Finder::CallsTo(FindObject, false).size();
+                const size_t Callers = Finder::CallsTo(Function, false).size();
+                if (Callers > FindObjectCallers)
+                {
+                    FindObject = Function;
+                    FindObjectCallers = Callers;
+                }
+            }
+        }
+        Require(L"StaticFindObject", Natives::StaticFindObject, FindObject);
         Require(L"StaticLoadObject", Natives::StaticLoadObject, FunctionOf(L"Calling StaticLoadObject during PostLoad may result in hitches during streaming."));
 
         const uintptr_t StaticAllocate = FunctionOf(L"Objects have the same fully qualified name but different paths.\n\tNew Object: %s %s.%s\n\tExisting Object: %s");
@@ -1243,6 +1276,13 @@ bool Finder::ResolveRuntime()
     }
     ResolveNames();
     ResolveObjectGlobals();
+
+    // UE 4.18's FSoftObjectPath (1.10) replaces FStringAssetReference, whose name 1.1-1.9.1 hold instead.
+    if (Finder::FindReadOnly(L"SoftObjectPath", sizeof(L"SoftObjectPath")))
+    {
+        ObjectLayout::Current.bSoftObjectPaths = true;
+        Log::Info(L"Object layout: asset paths are FSoftObjectPath");
+    }
     ResolveMemory();
     ResolveLogging();
     ResolveOutputDevices();
@@ -1692,6 +1732,56 @@ namespace
                 Thunks.emplace_back(Finder::FunctionStart(Ref), Finder::RelativeTarget(Ref - 7, 3, 7));
             }
         }
+        if (!Thunks.empty())
+        {
+            return Thunks;
+        }
+
+        // 1.10 (UE 4.19) registers natives from a static { name, thunk } table in .rdata instead (AActor's at 0x3904000),
+        // which StaticRegisterNatives passes to FNativeFunctionRegistrar::RegisterFunctions with a lea (0x1D53D1F). The
+        // registrar is the function holding that lea; the FuncInfo tables of { name, constructor } pairs have no code
+        // reference to their start and so drop out.
+        static std::vector<std::pair<uintptr_t, uintptr_t>> ReadOnlyLeas;
+        Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+        const uintptr_t ReadOnlyBegin = ReadOnly.GetSectionStart().Get();
+        const uintptr_t ReadOnlyEnd = ReadOnly.GetSectionEnd().Get();
+        const auto IsName = [&](uintptr_t At) { const uintptr_t Text = *reinterpret_cast<const uintptr_t*>(At); return Text >= ReadOnlyBegin && Text < ReadOnlyEnd; };
+        const auto IsThunk = [](uintptr_t At) { return IsInText(*reinterpret_cast<const uintptr_t*>(At)); };
+        const size_t Length = std::strlen(Name) + 1;
+        for (uintptr_t At = (ReadOnlyBegin + 7) & ~static_cast<uintptr_t>(7); At + 2 * sizeof(uintptr_t) <= ReadOnlyEnd; At += sizeof(uintptr_t))
+        {
+            const uintptr_t Text = *reinterpret_cast<const uintptr_t*>(At);
+            if (Text < ReadOnlyBegin || Text >= ReadOnlyEnd || Length > ReadOnlyEnd - Text || std::memcmp(reinterpret_cast<const void*>(Text), Name, Length) != 0 || !IsThunk(At + sizeof(uintptr_t)))
+            {
+                continue;
+            }
+            uintptr_t Table = At;
+            while (Table - 2 * sizeof(uintptr_t) >= ReadOnlyBegin && IsName(Table - 2 * sizeof(uintptr_t)) && IsThunk(Table - sizeof(uintptr_t)))
+            {
+                Table -= 2 * sizeof(uintptr_t);
+            }
+
+            if (ReadOnlyLeas.empty())
+            {
+                for (uintptr_t Lea = Finder::TextBegin(); Lea + 7 <= Finder::TextEnd(); ++Lea)
+                {
+                    if ((Byte(Lea) & 0xFB) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xC7) == 0x05)
+                    {
+                        const uintptr_t Target = Finder::RelativeTarget(Lea, 3, 7);
+                        if (Target >= ReadOnlyBegin && Target < ReadOnlyEnd)
+                        {
+                            ReadOnlyLeas.emplace_back(Target, Lea);
+                        }
+                    }
+                }
+                std::sort(ReadOnlyLeas.begin(), ReadOnlyLeas.end());
+            }
+            const auto Lea = std::lower_bound(ReadOnlyLeas.begin(), ReadOnlyLeas.end(), std::make_pair(Table, uintptr_t(0)));
+            if (Lea != ReadOnlyLeas.end() && Lea->first == Table)
+            {
+                Thunks.emplace_back(Finder::FunctionStart(Lea->second), *reinterpret_cast<const uintptr_t*>(At + sizeof(uintptr_t)));
+            }
+        }
         return Thunks;
     }
 
@@ -1819,6 +1909,19 @@ namespace
             if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }))
             {
                 CreateChannel = Target;
+            }
+        }
+        if (!BunchCreate)
+        {
+            // 1.10's log adds ChSequence, and its call (0x1ACF7A5 to 0x1ABDCD0) sits 0x61 past the string.
+            const uintptr_t SequencedCreate = OnlyRef(L"      Bunch Create %i: ChType %i, ChSequence: %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
+            for (uintptr_t Site = SequencedCreate ? FindRawCall(SequencedCreate, SequencedCreate + 0x80) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, SequencedCreate + 0x80))
+            {
+                const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+                if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }))
+                {
+                    CreateChannel = Target;
+                }
             }
         }
         Require(L"UNetConnection::CreateChannel", Natives::UNetConnection_CreateChannel, CreateChannel);
@@ -2134,6 +2237,20 @@ namespace
             WorldSettings = Finder::RelativeTarget(Call + 8, 1, 5);
             ++WorldSettingsCalls;
         }
+        if (!WorldSettingsCalls)
+        {
+            // 1.10 schedules a stack store between the arguments and passes the world from r14 (0x195319E, mov rcx, r14;
+            // call 0x1D442E0): take the first call after mov r8b, 1; xor edx, edx that follows a mov rcx, reg.
+            for (uintptr_t Flags = ReplicateActorEnd ? FindInstruction(ReplicateActor, ReplicateActorEnd, { 0x41, 0xB0, 0x01, 0x33, 0xD2 }) : 0; Flags; Flags = FindInstruction(Flags + 1, ReplicateActorEnd, { 0x41, 0xB0, 0x01, 0x33, 0xD2 }))
+            {
+                const uintptr_t Call = FindRawCall(Flags + 5, Flags + 0x20);
+                if (Call && (Byte(Call - 3) & 0xFE) == 0x48 && Byte(Call - 2) == 0x8B && (Byte(Call - 1) & 0xF8) == 0xC8)
+                {
+                    WorldSettings = Finder::RelativeTarget(Call, 1, 5);
+                    ++WorldSettingsCalls;
+                }
+            }
+        }
         Require(L"UWorld::GetWorldSettings", Natives::UWorld_GetWorldSettings, WorldSettingsCalls == 1 && IsInText(WorldSettings) ? WorldSettings : 0);
 
         const uintptr_t SerializeNewActor = FunctionOf(L"SerializeNewActor START");
@@ -2194,10 +2311,17 @@ namespace
         RequireSlot(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlushIndex, bDemoTickFlush ? TickDispatch + 1 : -1);
         Require(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlush, bDemoTickFlush ? TickFlush : 0);
 
-        const int32_t IsServer = TickFlush ? VirtualSlot(FindVirtualCall(TickFlush, TickFlush + 0x60)) : -1;
-        const uintptr_t IsServerBody = VTableEntry(NetDriverVTable, IsServer);
+        int32_t IsServer = TickFlush ? VirtualSlot(FindVirtualCall(TickFlush, TickFlush + 0x60)) : -1;
+        uintptr_t IsServerBody = VTableEntry(NetDriverVTable, IsServer);
         const uintptr_t GetNetMode = reinterpret_cast<uintptr_t>(Natives::UNetDriver_GetNetMode);
-        const bool bIsServer = IsServerBody && FindInstruction(IsServerBody, IsServerBody + 9, { 0x48, 0x83, 0x79, -1, 0x00, 0x0F, 0x94, 0xC0, 0xC3 }) == IsServerBody && GetNetMode && VirtualSlot(FindVirtualCall(GetNetMode, GetNetMode + 0x10)) == IsServer;
+        bool bIsServer = IsServerBody && FindInstruction(IsServerBody, IsServerBody + 9, { 0x48, 0x83, 0x79, -1, 0x00, 0x0F, 0x94, 0xC0, 0xC3 }) == IsServerBody && GetNetMode && VirtualSlot(FindVirtualCall(GetNetMode, GetNetMode + 0x10)) == IsServer;
+        if (!bIsServer && GetNetMode)
+        {
+            // 1.10's TickFlush (0x1AD79B0) no longer starts with IsServer; GetNetMode (0x1AC2BB0) still does (slot 0x60).
+            IsServer = VirtualSlot(FindVirtualCall(GetNetMode, GetNetMode + 0x10));
+            IsServerBody = VTableEntry(NetDriverVTable, IsServer);
+            bIsServer = IsServerBody && FindInstruction(IsServerBody, IsServerBody + 9, { 0x48, 0x83, 0x79, -1, 0x00, 0x0F, 0x94, 0xC0, 0xC3 }) == IsServerBody;
+        }
         RequireSlot(L"UNetDriver::IsServer", Natives::UNetDriver_IsServerIndex, bIsServer ? IsServer : -1);
 
         int32_t LevelInitialized = -1;
@@ -2567,7 +2691,12 @@ namespace
         Natives::ULevel_bIsAssociatingLevelMask = Natives::ULevel_bIsAssociatingLevel > 0 ? AssociatingLevelMask : 0;
 
         const uintptr_t AdaptiveRef = OnlyRef(L"net.UseAdaptiveNetUpdateFrequency");
-        const uintptr_t AsVariableInt = AdaptiveRef ? FindInstruction(AdaptiveRef, AdaptiveRef + 0x40, { 0xFF, 0x52, 0x30 }) : 0;
+        uintptr_t AsVariableInt = AdaptiveRef ? FindInstruction(AdaptiveRef, AdaptiveRef + 0x40, { 0xFF, 0x52, 0x30 }) : 0;
+        if (AdaptiveRef && !AsVariableInt)
+        {
+            // 1.10's IConsoleVariable has AsVariableInt one slot later (call [rdx+38h] at 0x1A46D9), its result stored next.
+            AsVariableInt = FindInstruction(AdaptiveRef, AdaptiveRef + 0x40, { 0xFF, 0x52, -1, 0x48, 0x8D, 0x0D, -1, -1, -1, -1, 0x48, 0x89, 0x05 });
+        }
         const uintptr_t RefStore = AsVariableInt ? FindInstruction(AsVariableInt, AsVariableInt + 0x10, { 0x48, 0x89, 0x05 }) : 0;
         const uintptr_t AdaptiveValue = RefStore ? Finder::RelativeTarget(RefStore, 3, 7) : 0;
         uintptr_t Adaptive = 0;
@@ -2856,6 +2985,17 @@ namespace
             TagAssetInterface = FindBackward(Call, 0x20, { 0x4C, 0x8D, 0xB6 });
             HasAll = Call + 3;
         }
+        // 1.10 (0x5ED969) holds the interface in r12 instead of r14: lea r12, [rsi+170h]; ...; mov rcx, r12; call [rax+20h].
+        const std::initializer_list<int32_t> AnyHasAllCall = { 0x49, 0x8B, -1, 0xFF, 0x50 };
+        for (uintptr_t Call = !TagAssetInterface && ApplyHeroEnd ? FindInstruction(ApplyHero, ApplyHeroEnd, AnyHasAllCall) : 0; Call && !TagAssetInterface; Call = FindInstruction(Call + 1, ApplyHeroEnd, AnyHasAllCall))
+        {
+            const uint8_t Register = Byte(Call + 2) & 0x07;
+            if ((Byte(Call + 2) & 0xF8) == 0xC8)
+            {
+                TagAssetInterface = FindBackward(Call, 0x30, { 0x4C, 0x8D, 0x86 | Register << 3 });
+                HasAll = Call + 3;
+            }
+        }
         const int32_t HasAllDisplacement = TagAssetInterface ? static_cast<int8_t>(Byte(HasAll + 2)) : 0;
         if (HasAllDisplacement > 0 && HasAllDisplacement % 8 == 0)
         {
@@ -2880,7 +3020,24 @@ namespace
             ++MissingCount;
         }
 
-        const uintptr_t RecordLoaded = UniqueFunction({ 0x83, 0xA1, 0xE0, 0x03, 0x00, 0x00, 0xFD, 0x0F, 0xB6, 0xC2, 0x83, 0xE0, 0x01, 0x03, 0xC0, 0x09, 0x81, 0xE0, 0x03, 0x00, 0x00 });
+        uintptr_t RecordLoaded = UniqueFunction({ 0x83, 0xA1, 0xE0, 0x03, 0x00, 0x00, 0xFD, 0x0F, 0xB6, 0xC2, 0x83, 0xE0, 0x01, 0x03, 0xC0, 0x09, 0x81, 0xE0, 0x03, 0x00, 0x00 });
+        if (!RecordLoaded)
+        {
+            // 1.10's beacon host keeps the bitfield at +0x3C8 (0x75C160). Other setters of bit 1 share the shape, but only
+            // this one goes on to test the same bitfield.
+            int32_t Matches = 0;
+            const std::initializer_list<int32_t> SetBit = { 0x83, 0xA1, -1, -1, 0x00, 0x00, 0xFD, 0x0F, 0xB6, 0xC2, 0x83, 0xE0, 0x01, 0x03, 0xC0, 0x09, 0x81, -1, -1, 0x00, 0x00, 0xF6, 0x81 };
+            for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), SetBit); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), SetBit))
+            {
+                const int32_t Bitfield = *reinterpret_cast<const int32_t*>(Site + 2);
+                if (*reinterpret_cast<const int32_t*>(Site + 17) == Bitfield && *reinterpret_cast<const int32_t*>(Site + 23) == Bitfield)
+                {
+                    RecordLoaded = Site;
+                    ++Matches;
+                }
+            }
+            RecordLoaded = Matches == 1 ? RecordLoaded : 0;
+        }
         Require(L"AFortLobbyBeaconHost::SetWorldRecordLoaded", Natives::AFortLobbyBeaconHost_SetWorldRecordLoaded, IsFunctionEntry(RecordLoaded) ? RecordLoaded : 0);
 
         const uintptr_t FlushDormancy = reinterpret_cast<uintptr_t>(Natives::AActor_FlushNetDormancy);
@@ -2948,15 +3105,39 @@ namespace
         RequireOffset(L"FProfileHttpRequest::ResponseType", Natives::FProfileHttpRequest_ResponseType, ResponseTypeLoad ? Byte(ResponseTypeLoad + 3) : 0);
 
         const uintptr_t ServiceCopy = Scan({ 0x49, 0x8B, 0x46, -1, -1, -1, -1, 0x48, 0x8B, 0xB0, -1, -1, -1, -1, 0x4C, 0x8B, 0xB8, -1, -1, -1, -1 });
-        const int32_t ServiceObject = ServiceCopy ? *reinterpret_cast<const int32_t*>(ServiceCopy + 17) : 0;
-        const bool bService = ServiceCopy && *reinterpret_cast<const int32_t*>(ServiceCopy + 10) == ServiceObject + 8;
-        RequireOffset(L"UMcpProfileGroup::McpSubsystem", Natives::UMcpProfileGroup_McpSubsystem, bService ? Byte(ServiceCopy + 3) : 0);
+        int32_t ServiceObject = ServiceCopy ? *reinterpret_cast<const int32_t*>(ServiceCopy + 17) : 0;
+        bool bService = ServiceCopy && *reinterpret_cast<const int32_t*>(ServiceCopy + 10) == ServiceObject + 8;
+        ptrdiff_t McpSubsystem = bService ? Byte(ServiceCopy + 3) : 0;
+        if (!bService)
+        {
+            // 1.10 (0x2E314E0) keeps the profile group in rsi and copies the service through FOnlineSubsystemMcp's getter
+            // (0x2A82120: mov rax, [rcx+378h] ... mov rax, [rcx+380h]): mov rcx, [rsi+110h]; lea rdx, [rbp+x]; ...; call.
+            for (uintptr_t Load = Scan({ 0x48, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x8D, 0x55 }); Load && !bService; Load = FindInstruction(Load + 1, SendRequestNowEnd, { 0x48, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x8D, 0x55 }))
+            {
+                const uintptr_t GetterCall = FindRawCall(Load + 11, Load + 0x18);
+                const uintptr_t Getter = GetterCall ? Finder::RelativeTarget(GetterCall, 1, 5) : 0;
+                const uintptr_t Read = Getter ? FindInstruction(Getter, Getter + 0x10, { 0x48, 0x8B, 0x81 }) : 0;
+                ServiceObject = Read ? *reinterpret_cast<const int32_t*>(Read + 3) : 0;
+                const uintptr_t ReadReference = Read ? FindInstruction(Read + 7, Read + 0x40, { 0x48, 0x8B, 0x81 }) : 0;
+                if (ReadReference && *reinterpret_cast<const int32_t*>(ReadReference + 3) == ServiceObject + 8)
+                {
+                    McpSubsystem = *reinterpret_cast<const int32_t*>(Load + 3);
+                    bService = true;
+                }
+            }
+        }
+        RequireOffset(L"UMcpProfileGroup::McpSubsystem", Natives::UMcpProfileGroup_McpSubsystem, bService ? McpSubsystem : 0);
         RequireOffset(L"FOnlineSubsystemMcp::McpGameService", Natives::FOnlineSubsystemMcp_McpGameService, bService ? ServiceObject : 0);
 
         const uintptr_t ContextSwitch = Scan({ 0x8B, 0x4F, -1, 0x33, 0xDB, 0x48, 0x89, 0x5D, -1, 0x8B, 0xD3, 0x48, 0x89, 0x5D, -1, 0x85, 0xC9, 0x0F, 0x84 });
         RequireOffset(L"FProfileHttpRequest::ContextCredentials", Natives::FProfileHttpRequest_ContextCredentials, ContextSwitch ? Byte(ContextSwitch + 2) : 0);
 
-        const uintptr_t CredentialsCheck = Scan({ 0x49, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 });
+        uintptr_t CredentialsCheck = Scan({ 0x49, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 });
+        if (!CredentialsCheck)
+        {
+            // 1.10's reads the credentials from rsi (mov rcx, [rsi+180h] at 0x2E317D2).
+            CredentialsCheck = Scan({ 0x48, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 });
+        }
         const ptrdiff_t CredentialsNetId = CredentialsCheck ? *reinterpret_cast<const int32_t*>(CredentialsCheck + 3) : 0;
         RequireOffset(L"UMcpProfileGroup::CredentialsAccountId", Natives::UMcpProfileGroup_CredentialsAccountId, CredentialsNetId > static_cast<ptrdiff_t>(sizeof(void*)) ? CredentialsNetId - static_cast<ptrdiff_t>(sizeof(void*)) : 0);
         RequireSlot(L"FUniqueNetId::IsValid", Natives::FUniqueNetId_IsValidIndex, CredentialsCheck && Byte(CredentialsCheck + 21) % 8 == 0 ? Byte(CredentialsCheck + 21) / 8 : -1);
@@ -2977,7 +3158,14 @@ namespace
         }
         const uintptr_t ConfigLea = ClientCall ? FindInstruction(Dispatch, ClientCall, { -1, 0x8D, -1, -1, 0x48, 0x8D, 0x15, -1, -1, -1, -1, 0xE8 }) : 0;
         const bool bConfigLea = ConfigLea && (Byte(ConfigLea + 2) & 0xF8) == 0x48 && (Byte(ConfigLea + 2) & 0x07) != 0x04;
-        RequireOffset(L"FGameServiceMcp::ServiceConfig", Natives::FGameServiceMcp_ServiceConfig, bConfigLea ? Byte(ConfigLea + 3) : 0);
+        ptrdiff_t ServiceConfig = bConfigLea ? Byte(ConfigLea + 3) : 0;
+        if (!bConfigLea && ClientCall)
+        {
+            // 1.10 (0x7C0609) loads the service, then lea rdx, name; add rcx, 18h; call.
+            const uintptr_t ConfigAdd = FindInstruction(Dispatch, ClientCall, { 0x48, 0x8D, 0x15, -1, -1, -1, -1, 0x48, 0x83, 0xC1, -1, 0xE8 });
+            ServiceConfig = ConfigAdd ? Byte(ConfigAdd + 10) : 0;
+        }
+        RequireOffset(L"FGameServiceMcp::ServiceConfig", Natives::FGameServiceMcp_ServiceConfig, ServiceConfig);
     }
 
     void ResolveThreadingForPerformance()
@@ -3034,6 +3222,18 @@ namespace
             const uintptr_t Call = Site + 24;
             const uintptr_t ReceiveTick = Finder::RelativeTarget(Call, 1, 5);
             const bool bFloatThunk = FindInstruction(ReceiveTick, ReceiveTick + 6, { 0xF3, 0x0F, 0x11, 0x4C, 0x24, 0x10 }) == ReceiveTick;
+            if (Finder::RelativeTarget(Site + 8, 1, 5) == GetWorldSettings && Byte(Site + 20) == 0xCE && bFloatThunk && Site - Finder::FunctionStart(Site) <= 0x40)
+            {
+                ReceiveTickCall = Call;
+                ++ReceiveTickCalls;
+            }
+        }
+        // 1.10's event thunk (0x1D53B10) saves rbx and reads the event's name before it stores DeltaSeconds.
+        for (uintptr_t Site = GetWorldSettings && !ReceiveTickCalls ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), TickPattern) : 0; Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), TickPattern))
+        {
+            const uintptr_t Call = Site + 24;
+            const uintptr_t ReceiveTick = Finder::RelativeTarget(Call, 1, 5);
+            const bool bFloatThunk = IsFunctionEntry(ReceiveTick) && FindInstruction(ReceiveTick, ReceiveTick + 0x20, { 0xF3, 0x0F, 0x11, 0x4C, 0x24, -1 });
             if (Finder::RelativeTarget(Site + 8, 1, 5) == GetWorldSettings && Byte(Site + 20) == 0xCE && bFloatThunk && Site - Finder::FunctionStart(Site) <= 0x40)
             {
                 ReceiveTickCall = Call;
@@ -3151,6 +3351,18 @@ namespace
         for (uintptr_t Exit = bSlack ? FindInstruction(Sleep + 18, Sleep + 0x60, { 0x73, -1, 0x0F, 0x28, -1, 0xE8 }) : 0; Exit && !Spin; Exit = FindInstruction(Exit + 1, Sleep + 0x60, { 0x73, -1, 0x0F, 0x28, -1, 0xE8 }))
         {
             Spin = Finder::RelativeTarget(Exit + 5, 1, 5) == SleepTarget ? Exit : 0;
+        }
+        // 1.10 (0x1D0EC1D) aligns the loop with a nop and waits on xmm8: jnb; nop; movaps xmm0, xmm8; call.
+        for (uintptr_t Exit = bSlack && !Spin ? FindInstruction(Sleep + 18, Sleep + 0x60, { 0x73 }) : 0; Exit && !Spin; Exit = FindInstruction(Exit + 1, Sleep + 0x60, { 0x73 }))
+        {
+            uintptr_t Move = Exit + 2;
+            while (Byte(Move) == 0x90 && Move < Exit + 0x12)
+            {
+                ++Move;
+            }
+            Move += (Byte(Move) & 0xF0) == 0x40 ? 1 : 0;
+            const bool bWait = Byte(Move) == 0x0F && Byte(Move + 1) == 0x28 && Byte(Move + 3) == 0xE8;
+            Spin = bWait && Finder::RelativeTarget(Move + 3, 1, 5) == SleepTarget ? Exit : 0;
         }
         if (Spin)
         {

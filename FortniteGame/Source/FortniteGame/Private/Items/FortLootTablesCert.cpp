@@ -163,7 +163,7 @@ namespace
             Row->LootPackageCategory = Source.LootPackageCategory;
             Row->RequiredTag = NameOf(Source.RequiredTag);
             Row->LootPackageCall = FString(Source.LootPackageCall);
-            Row->ItemDefinition = TAssetPtr<UFortItemDefinition>(FStringAssetReference(FString(Source.ItemDefinition)));
+            Row->ItemDefinition.SetPath(FString(Source.ItemDefinition));
             Row->PersistentLevel = FString(Source.PersistentLevel);
             Row->MinWorldLevel = Source.MinWorldLevel;
             Row->MaxWorldLevel = Source.MaxWorldLevel;

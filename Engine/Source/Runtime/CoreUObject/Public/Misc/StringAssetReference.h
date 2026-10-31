@@ -7,15 +7,11 @@
 
 // Up to 1.9.1 (UE 4.16) an asset path is one FString. 1.10 (UE 4.19) has FSoftObjectPath in its place: the path as an
 // FName, then a sub-path FString, 8 bytes longer (ObjectLayout's bSoftObjectPaths). The engine's members are read in
-// either layout; one Core builds itself holds 4.16's.
+// either layout. Core doesn't build one of its own (it would only have room for 4.16's): SetPath writes a path into the
+// engine's member in the build's layout.
 struct FStringAssetReference
 {
     FStringAssetReference() = default;
-
-    FStringAssetReference(const FString& PathString)
-        : AssetLongPathname(PathString)
-    {
-    }
 
     FString ToString() const
     {
@@ -30,6 +26,24 @@ struct FStringAssetReference
 
     // 4.16's path, held in place.
     const FString& ToStringReference() const { return AssetLongPathname; }
+
+    // Points this engine path at Path ("/Game/Package.Asset[:SubPath]").
+    void SetPath(const FString& Path)
+    {
+        if (!ObjectLayout::Current.bSoftObjectPaths)
+        {
+            AssetLongPathname = Path;
+            return;
+        }
+        FString AssetPath;
+        FString SubPath;
+        if (!Path.Split(L":", &AssetPath, &SubPath, ESearchCase::CaseSensitive, ESearchDir::FromStart))
+        {
+            AssetPath = Path;
+        }
+        MutableAssetPathName() = AssetPath.Len() > 0 ? FName(*AssetPath) : FName();
+        MutableSubPathString() = SubPath;
+    }
 
     FString GetLongPackageName() const
     {
@@ -53,6 +67,8 @@ struct FStringAssetReference
 private:
     const FName& AssetPathName() const { return *reinterpret_cast<const FName*>(this); }
     const FString& SubPathString() const { return *reinterpret_cast<const FString*>(reinterpret_cast<uintptr_t>(this) + sizeof(FName)); }
+    FName& MutableAssetPathName() { return *reinterpret_cast<FName*>(this); }
+    FString& MutableSubPathString() { return *reinterpret_cast<FString*>(reinterpret_cast<uintptr_t>(this) + sizeof(FName)); }
 };
 static_assert(sizeof(FStringAssetReference) == 0x10);
 

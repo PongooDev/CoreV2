@@ -42,12 +42,15 @@ class TAssetPtr
 public:
     TAssetPtr() = default;
 
-    explicit TAssetPtr(const FStringAssetReference& ObjectPath)
-    {
-        AssetPtr.ObjectID = ObjectPath;
-    }
-
     const FStringAssetReference& ToStringReference() const { return AssetPtr.GetUniqueID(); }
+
+    // Points this engine member at Path, unloaded, in the build's layout (FStringAssetReference::SetPath).
+    void SetPath(const FString& Path)
+    {
+        AssetPtr.WeakPtr.Reset();
+        AssetPtr.TagAtLastTest = 0;
+        AssetPtr.ObjectID.SetPath(Path);
+    }
 
     T* Get() const
     {

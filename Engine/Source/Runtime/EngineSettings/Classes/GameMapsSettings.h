@@ -31,6 +31,10 @@ struct FGameModeName
     FStringClassReference GameMode;
 };
 
+// The engine's arrays of these are walked with SoftElementAt: GameMode is 8 bytes longer on 1.10.
+template <>
+inline constexpr size_t Reflection::SoftPathGrowth<FGameModeName> = 8;
+
 class UGameMapsSettings : public UObject
 {
     DefineUnrealClass(UGameMapsSettings, EngineSettings)

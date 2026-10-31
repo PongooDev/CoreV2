@@ -1994,6 +1994,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"setshield", &UFortCheatManager::SetShield },
         { L"setmaxshield", &UFortCheatManager::SetMaxShield },
         { L"clearequippeditem", &UFortCheatManager::ClearEquippedItem },
+        { L"giveitem", &UFortCheatManager::GiveItem },
+        { L"spawnpickup", &UFortCheatManager::SpawnPickup },
         { L"setscale", &UFortCheatManager::SetScale },
         { L"progressquest", &UFortCheatManager::ProgressQuest },
         { L"unlimitedhealth", &UFortCheatManager::UnlimitedHealth },

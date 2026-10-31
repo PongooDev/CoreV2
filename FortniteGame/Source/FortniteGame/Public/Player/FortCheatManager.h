@@ -154,6 +154,10 @@ public:
     void SetHealth(const FString& Arguments);
     void SetShield(const FString& Arguments);
     void SetMaxShield(const FString& Arguments);
+    // Core's own commands (#169): "cheat giveitem <name or path> [count] [level]" is GiveSpecificItem, and "cheat
+    // spawnpickup <name or path> [count]" (PongooDev/Core's) puts the item on the ground in front of the player.
+    void GiveItem(const FString& Arguments);
+    void SpawnPickup(const FString& Arguments);
     // Core's own command, "cheat clearequippeditem" (#155): the item the player holds leaves their inventory.
     void ClearEquippedItem(const FString& Arguments);
     // Core's own command, "cheat setscale <x> [y z] | reset" (#155): the player's pawn at that scale, collision included,

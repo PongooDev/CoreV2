@@ -60,6 +60,7 @@
 #include <map>
 #include <optional>
 #include <random>
+#include <set>
 #include <span>
 #include <string>
 #include <tuple>
@@ -159,6 +160,11 @@ namespace
             {
                 Score = 4;
             }
+            else if (Wanted.find(L'/') != std::wstring::npos && Lower(Asset.Path).find(Wanted) != std::wstring::npos)
+            {
+                // Part of a path (#169): "consumables/shields/athena_shields".
+                Score = 3;
+            }
             else if (Simplified(Asset.Name).find(WantedSimplified) != std::wstring::npos)
             {
                 Score = 2;
@@ -192,6 +198,74 @@ namespace
     UFortWorldItemDefinition* LoadItem(std::wstring Path)
     {
         return LoadAsset<UFortWorldItemDefinition>(std::move(Path));
+    }
+
+    // A path as FModel or the file system writes it (#169): "FortniteGame/Content/Athena/Items/.../Athena_Shields.uasset"
+    // is /Game/Athena/Items/.../Athena_Shields. bRooted: a path without a mount point is under /Game.
+    std::wstring GamePath(std::wstring Path, bool bRooted)
+    {
+        std::replace(Path.begin(), Path.end(), L'\\', L'/');
+        for (const wchar_t* Extension : { L".uasset", L".uexp" })
+        {
+            if (Lower(Path).ends_with(Extension))
+            {
+                Path.resize(Path.size() - std::wcslen(Extension));
+            }
+        }
+        const size_t Content = Lower(Path).find(L"fortnitegame/content/");
+        if (Content != std::wstring::npos)
+        {
+            Path = L"/Game/" + Path.substr(Content + std::wcslen(L"fortnitegame/content/"));
+        }
+        else if (bRooted && !Path.empty() && Path.front() != L'/')
+        {
+            Path = L"/Game/" + Path;
+        }
+        return Path;
+    }
+
+    // The item a cheat's name or path means (#169): a path loads; otherwise the primary asset types' items and every item
+    // definition already loaded (PongooDev/Core's lookup), so items the asset manager doesn't list under those types, like
+    // Battle Royale's Athena_Shields on some builds, are found too, and a path's part ("Consumables/Shields") matches.
+    UFortWorldItemDefinition* FindItem(std::initializer_list<const wchar_t*> PrimaryAssetTypes, std::wstring_view Query, bool bBattleRoyale)
+    {
+        while (!Query.empty() && (std::iswspace(Query.front()) || Query.front() == L'"'))
+        {
+            Query.remove_prefix(1);
+        }
+        while (!Query.empty() && (std::iswspace(Query.back()) || Query.back() == L'"'))
+        {
+            Query.remove_suffix(1);
+        }
+        const std::wstring Wanted(Query);
+        const bool bPath = Wanted.find(L'/') != std::wstring::npos || Wanted.find(L'\\') != std::wstring::npos;
+        if (bPath)
+        {
+            if (UFortWorldItemDefinition* ItemDefinition = LoadItem(GamePath(Wanted, true)))
+            {
+                return ItemDefinition;
+            }
+        }
+
+        std::vector<FCheatAsset> Assets = ListAssets(PrimaryAssetTypes);
+        std::set<std::wstring> Listed;
+        for (const FCheatAsset& Asset : Assets)
+        {
+            Listed.insert(Lower(Asset.Path));
+        }
+        if (UFortWorldItemDefinition::StaticClass())
+        {
+            for (TObjectIterator<UFortWorldItemDefinition> It(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)); It; ++It)
+            {
+                std::wstring Path = It->GetPathName().ToStdString();
+                if (Listed.insert(Lower(Path)).second)
+                {
+                    Assets.push_back({ std::move(Path), It->GetName().ToStdString() });
+                }
+            }
+        }
+        const FCheatAsset* Asset = FindAsset(Assets, bPath ? GamePath(Wanted, false) : Wanted, bBattleRoyale);
+        return Asset ? LoadItem(Asset->Path) : nullptr;
     }
 
     // Base destruction PvP's cornerstone (no playlist of these builds plays the mode).
@@ -580,7 +654,8 @@ namespace
         { L"Items", L"GiveAmmo", L"giveammo [name] [amount]", L"ammo, your gun's without a name", ECheatMode::Both },
         { L"Items", L"GiveTrap", L"givetrap <name> [level] [count]", L"a trap", ECheatMode::Both },
         { L"Items", L"GiveGadget", L"givegadget <name> [level]", L"a gadget", ECheatMode::Both },
-        { L"Items", L"GiveSpecificItem", L"givespecificitem <path or name> [count] [level]", L"any item", ECheatMode::Both },
+        { L"Items", L"GiveSpecificItem", L"givespecificitem <path or name> [count] [level]", L"any item (giveitem)", ECheatMode::Both },
+        { L"Items", nullptr, L"spawnpickup <path or name> [count]", L"drop an item in front of you", ECheatMode::Both },
         { L"Items", L"GiveResources", L"giveresources [amount]", L"wood, stone, metal (givewood...)", ECheatMode::Both },
         { L"Items", L"GiveAllWeapons", L"giveallweapons", L"every weapon (giveallrifles...)", ECheatMode::Both },
         { L"Items", L"GiveAllTraps", L"givealltraps [count]", L"every trap", ECheatMode::Both },
@@ -781,20 +856,7 @@ void UFortCheatManager::GiveNamedItem(std::initializer_list<const wchar_t*> Prim
         return;
     }
 
-    UFortWorldItemDefinition* ItemDefinition = nullptr;
-    const std::wstring Query = Name.ToStdString();
-    if (Query.find(L'/') != std::wstring::npos)
-    {
-        ItemDefinition = LoadItem(Query);
-    }
-    else
-    {
-        const std::vector<FCheatAsset> Assets = ListAssets(PrimaryAssetTypes);
-        if (const FCheatAsset* Asset = FindAsset(Assets, Query, AFortGameModeAthena::GetCurrent(PlayerController) != nullptr))
-        {
-            ItemDefinition = LoadItem(Asset->Path);
-        }
-    }
+    UFortWorldItemDefinition* ItemDefinition = FindItem(PrimaryAssetTypes, Name.ToStdString(), AFortGameModeAthena::GetCurrent(PlayerController) != nullptr);
     if (!ItemDefinition)
     {
         Reply(FString::Printf(TEXT("No item called '%s' (ListWeapons, ListAmmo, ListTraps and ListGadgets list them)"), *Name));
@@ -805,15 +867,92 @@ void UFortCheatManager::GiveNamedItem(std::initializer_list<const wchar_t*> Prim
     {
         Count = 1;
     }
-    UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, ItemDefinition, Count, true, std::max(Level, 1), true);
+    UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, ItemDefinition, Count, true, std::max(Level, 0), true);
     Reply(FString::Printf(TEXT("Gave %d %s"), Count, *ItemDefinition->GetName()));
+#endif
+}
+
+namespace
+{
+    // "<name or path> [count] [level]": the trailing numbers come off, the rest is the item (#169).
+    std::tuple<std::wstring, int32_t, int32_t> ParseItemArguments(const FString& Arguments)
+    {
+        std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+        std::vector<int32_t> Numbers;
+        while (Words.size() > 1 && Numbers.size() < 2)
+        {
+            wchar_t* End = nullptr;
+            const long Parsed = std::wcstol(Words.back().c_str(), &End, 10);
+            if (!End || End == Words.back().c_str() || *End != L'\0')
+            {
+                break;
+            }
+            Numbers.insert(Numbers.begin(), static_cast<int32_t>(std::clamp<long>(Parsed, 0, 1000000)));
+            Words.pop_back();
+        }
+        std::wstring Name;
+        for (const std::wstring& Word : Words)
+        {
+            Name += (Name.empty() ? L"" : L" ") + Word;
+        }
+        return { Name, Numbers.size() > 0 ? Numbers[0] : 0, Numbers.size() > 1 ? Numbers[1] : 0 };
+    }
+
+    // Every primary asset type an item is listed under (DefaultGame.ini's PrimaryAssetTypesToScan).
+    const std::initializer_list<const wchar_t*> AnyItemTypes = { L"Weapon", L"Ammo", L"Trap", L"Gadget", L"Ingredient", L"Food", L"WorldItem" };
+}
+
+void UFortCheatManager::GiveItem(const FString& Arguments)
+{
+    const auto [Name, Count, Level] = ParseItemArguments(Arguments);
+    if (Name.empty())
+    {
+        Reply(TEXT("Usage: giveitem <name or path> [count] [level], one at level 0 without them"));
+        return;
+    }
+    GiveSpecificItem(FString(Name.c_str()), Count, Level);
+}
+
+void UFortCheatManager::SpawnPickup(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // PongooDev/Core's SpawnPickup (#169): the item lies on the ground in front of the player, found the way
+    // GiveSpecificItem finds it.
+    const auto [Name, Count, Level] = ParseItemArguments(Arguments);
+    if (Name.empty())
+    {
+        Reply(TEXT("Usage: spawnpickup <name or path> [count], one without a count"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (!Pawn)
+    {
+        Reply(TEXT("You have no pawn to spawn a pickup by"));
+        return;
+    }
+    UFortWorldItemDefinition* ItemDefinition = FindItem(AnyItemTypes, Name, AFortGameModeAthena::GetCurrent(PlayerController) != nullptr);
+    if (!ItemDefinition)
+    {
+        Reply(FString::Printf(TEXT("No item called '%s'"), Name.c_str()));
+        return;
+    }
+    const int32_t NumberToSpawn = Count > 0 ? Count : 1;
+    const FVector Location = InFrontOf(Pawn, 200.0f);
+    const FVector Direction = Location - Pawn->GetTransform().GetLocation();
+    if (!UFortKismetLibrary::K2_SpawnPickupInWorld(PlayerController, ItemDefinition, NumberToSpawn, Location, Direction, -1, true))
+    {
+        Reply(FString::Printf(TEXT("Couldn't spawn %s"), *ItemDefinition->GetName()));
+        return;
+    }
+    Reply(FString::Printf(TEXT("Spawned %d %s"), NumberToSpawn, *ItemDefinition->GetName()));
 #endif
 }
 
 void UFortCheatManager::GiveWeapon(const FString& WeaponName, int32_t RequestedLevel, int32_t Count)
 {
     // Battle Royale's consumables are weapons too (Weapon's directories include /Game/Athena/Items/Consumables).
-    GiveNamedItem({ L"Weapon" }, WeaponName, Count, RequestedLevel);
+    GiveNamedItem({ L"Weapon" }, WeaponName, Count, std::max(RequestedLevel, 1));
 }
 
 void UFortCheatManager::GiveAmmo(const FString& AmmoNameAndAmount)
@@ -880,17 +1019,18 @@ void UFortCheatManager::GiveAmmo(const FString& AmmoNameAndAmount)
 
 void UFortCheatManager::GiveTrap(const FString& TrapName, int32_t RequestedLevel, int32_t NumTrapsToGive)
 {
-    GiveNamedItem({ L"Trap" }, TrapName, NumTrapsToGive, RequestedLevel);
+    GiveNamedItem({ L"Trap" }, TrapName, NumTrapsToGive, std::max(RequestedLevel, 1));
 }
 
 void UFortCheatManager::GiveGadgets(const FString& GadgetName, int32_t Quantity, int32_t ItemLevel)
 {
-    GiveNamedItem({ L"Gadget" }, GadgetName, Quantity, ItemLevel);
+    GiveNamedItem({ L"Gadget" }, GadgetName, Quantity, std::max(ItemLevel, 1));
 }
 
 void UFortCheatManager::GiveSpecificItem(const FString& ItemPath, int32_t ItemAmount, int32_t ItemLevel)
 {
-    GiveNamedItem({ L"Weapon", L"Ammo", L"Trap", L"Gadget", L"Ingredient", L"Food", L"WorldItem" }, ItemPath, ItemAmount, ItemLevel);
+    // Without an amount or a level (#169), one at level 0.
+    GiveNamedItem(AnyItemTypes, ItemPath, ItemAmount, ItemLevel);
 }
 
 void UFortCheatManager::GiveResource(UFortWorldItemDefinition* Resource, int32_t Amount)

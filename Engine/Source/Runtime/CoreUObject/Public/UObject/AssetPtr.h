@@ -69,3 +69,19 @@ private:
 };
 
 static_assert(sizeof(TAssetPtr<UObject>) == sizeof(FAssetPtr));
+
+// FSoftObjectPtr (1.10) holds an FSoftObjectPath, 8 bytes longer, where FAssetPtr holds an FStringAssetReference.
+template <class T>
+inline constexpr size_t Reflection::SoftPathGrowth<TAssetPtr<T>> = 8;
+
+template <class T>
+inline constexpr size_t Reflection::SoftPathGrowth<TAssetSubclassOf<T>> = 8;
+
+// The Index-th element of an engine array of soft pointers or paths, whose elements are SoftPathGrowth bytes longer
+// than Core's on 1.10.
+template <typename TElement>
+TElement& SoftElementAt(const TArray<TElement>& Array, int32_t Index)
+{
+    const size_t Stride = sizeof(TElement) + (ObjectLayout::Current.bSoftObjectPaths ? Reflection::SoftPathGrowth<TElement> : 0);
+    return *reinterpret_cast<TElement*>(reinterpret_cast<uintptr_t>(Array.GetData()) + Index * Stride);
+}

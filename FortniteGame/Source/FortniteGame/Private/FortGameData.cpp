@@ -12,9 +12,9 @@ namespace
     std::vector<UDataTable*> LoadTables(TArray<TAssetPtr<UDataTable>>& Tables)
     {
         std::vector<UDataTable*> Loaded;
-        for (TAssetPtr<UDataTable>& Table : Tables)
+        for (int32_t Index = 0; Index < Tables.Num(); ++Index)
         {
-            if (UDataTable* DataTable = Table.LoadSynchronous())
+            if (UDataTable* DataTable = SoftElementAt(Tables, Index).LoadSynchronous())
             {
                 Loaded.push_back(DataTable);
             }

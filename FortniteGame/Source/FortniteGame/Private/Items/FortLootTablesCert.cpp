@@ -196,8 +196,9 @@ namespace
     // True when the game data names the table and it does not load (1.2's pak ships neither of Cert's two tables).
     bool IsMissing(TArray<TAssetPtr<UDataTable>>& Tables, const wchar_t* Path)
     {
-        for (TAssetPtr<UDataTable>& Table : Tables)
+        for (int32_t Index = 0; Index < Tables.Num(); ++Index)
         {
+            TAssetPtr<UDataTable>& Table = SoftElementAt(Tables, Index);
             if (_wcsicmp(*Table.ToStringReference().ToString(), Path) == 0)
             {
                 return !Table.LoadSynchronous();

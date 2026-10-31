@@ -52,7 +52,7 @@ void AFortPlayerState::SetHeroType(UFortHero* Hero)
         const TArray<TAssetPtr<UCustomCharacterPart>>* SpecializationParts = Specialization ? &static_cast<TArray<TAssetPtr<UCustomCharacterPart>>&>(Specialization->CharacterParts) : nullptr;
         for (int32_t Index = 0; SpecializationParts && Index < SpecializationParts->Num(); ++Index)
         {
-            UCustomCharacterPart* Part = (*SpecializationParts)[Index].LoadSynchronous();
+            UCustomCharacterPart* Part = SoftElementAt(*SpecializationParts, Index).LoadSynchronous();
             if (Part && Part->CharacterPartType < NumTypes && !GetCharacterPart(Part->CharacterPartType) && (Part->GenderPermitted & CharacterGender) != 0)
             {
                 GetCharacterPart(Part->CharacterPartType) = Part;

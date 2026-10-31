@@ -12,3 +12,6 @@ struct FStringClassReference : public FStringAssetReference
     }
 };
 static_assert(sizeof(FStringClassReference) == 0x10);
+
+template <>
+inline constexpr size_t Reflection::SoftPathGrowth<FStringClassReference> = 8;

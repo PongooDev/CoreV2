@@ -925,7 +925,7 @@ void UFortCheatManager::GiveCheatInventory()
     const TArray<TAssetPtr<UFortWorldItemDefinition>>& Items = GameData->CheatInventoryItems;
     for (int32_t Index = 0; Index < Items.Num(); ++Index)
     {
-        if (UFortWorldItemDefinition* Item = Items[Index].LoadSynchronous())
+        if (UFortWorldItemDefinition* Item = SoftElementAt(Items, Index).LoadSynchronous())
         {
             UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Item, 1, true, 1, true);
             Reply(FString::Printf(TEXT("Gave 1 %s"), *Item->GetName()));

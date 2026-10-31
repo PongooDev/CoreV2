@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Reflection.h"
 #include "Kismet/KismetNodeHelperLibrary.h"
+#include "ObjectLayout.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
@@ -74,8 +75,8 @@ UScriptStruct* Reflection::FTypeInfo::GetScriptStruct()
     return Kind == ETypeKind::ScriptStruct ? static_cast<UScriptStruct*>(Get()) : nullptr;
 }
 
-Reflection::FMemberInfo::FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct)
-    : Owner(InOwner), Name(InName), Size(InSize), Kind(InKind), StructType(InStruct)
+Reflection::FMemberInfo::FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct, size_t InSoftPathGrowth)
+    : Owner(InOwner), Name(InName), Size(InSize), Kind(InKind), StructType(InStruct), SoftPathGrowth(InSoftPathGrowth)
 {
     Members().push_back(this);
 }
@@ -137,7 +138,8 @@ bool Reflection::FMemberInfo::Resolve()
         return true;
     }
 
-    if (static_cast<size_t>(Property->ElementSize) != Size)
+    const size_t Expected = Size + (ObjectLayout::Current.bSoftObjectPaths ? SoftPathGrowth : 0);
+    if (static_cast<size_t>(Property->ElementSize) != Expected)
     {
         Offset = MissingOffset;
         return false;

@@ -375,9 +375,9 @@ namespace
         if (Specializations.Num() == 0)
         {
             const TArray<TAssetPtr<UFortHeroSpecialization>>& TypeSpecializations = HeroType->Specializations;
-            for (const TAssetPtr<UFortHeroSpecialization>& Specialization : TypeSpecializations)
+            for (int32_t Index = 0; Index < TypeSpecializations.Num(); ++Index)
             {
-                if (UFortHeroSpecialization* Loaded = Specialization.LoadSynchronous())
+                if (UFortHeroSpecialization* Loaded = SoftElementAt(TypeSpecializations, Index).LoadSynchronous())
                 {
                     Specializations.Add(Loaded);
                 }

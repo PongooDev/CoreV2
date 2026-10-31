@@ -33,6 +33,11 @@ namespace Reflection
 
     using FOwnerGetter = UStruct* (*)();
 
+    // How many bytes a member type grows by on builds with UE 4.18's soft object paths (ObjectLayout's bSoftObjectPaths):
+    // FSoftObjectPath puts an FName before the path string, 8 bytes on top of 4.16's FStringAssetReference.
+    template <typename T>
+    inline constexpr size_t SoftPathGrowth = 0;
+
     class FTypeInfo
     {
     public:
@@ -54,7 +59,7 @@ namespace Reflection
     class FMemberInfo
     {
     public:
-        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct = nullptr);
+        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct = nullptr, size_t InSoftPathGrowth = 0);
 
         int32_t GetOffsetChecked();
         // Whether the build reflects this member, for members a build may not have (no error once checked).
@@ -72,6 +77,7 @@ namespace Reflection
         size_t Size;
         EMemberKind Kind;
         FOwnerGetter StructType;
+        size_t SoftPathGrowth;
         int32_t Offset = UnresolvedOffset;
         uint8_t FieldMask = 0;
         uint8_t ByteMask = 0;
@@ -168,7 +174,7 @@ public: \
 
 #define DefineUProperty(Type, Name) \
 private: \
-    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value }; \
+    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<Type> }; \
 public: \
     Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
     void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \

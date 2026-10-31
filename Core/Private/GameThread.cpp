@@ -40,7 +40,7 @@ namespace
             return;
         }
 
-        Log::Info(L"Game default map {}, global default game mode {}", UGameMapsSettings::GetGameDefaultMap().ToStdString(), UGameMapsSettings::GetGlobalDefaultGameMode().ToStdString());
+        Log::Info(L"Game default map {}, global default game mode {}", UGameMapsSettings::GetGameDefaultMap().ToStdString(), UGameMapsSettings::GlobalDefaultGameModePath().ToStdString());
 
         UNetDriver* NetDriver = World->NetDriver;
         Log::Info(L"Server ready: {}, net mode {}, net driver {}, game mode {}",

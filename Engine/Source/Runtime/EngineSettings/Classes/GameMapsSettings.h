@@ -38,6 +38,10 @@ class UGameMapsSettings : public UObject
 public:
     static const FString GetGameDefaultMap();
     static const FString& GetGlobalDefaultGameMode();
+    // 1.10's (UE 4.19) returns the path by value, built from the FSoftClassPath.
+    static FString* GetGlobalDefaultGameModeByValue(FString* Result);
+    // The global default game mode's path, read in either layout.
+    static FString GlobalDefaultGameModePath();
 
     static void Hook();
 

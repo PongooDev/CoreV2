@@ -28,6 +28,7 @@
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "Online/FortGameSession.h"
 #include "Online/FortPartyBeaconHost.h"
+#include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Class.h"
@@ -39,6 +40,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <cwctype>
 #include <format>
 #include <iterator>
@@ -177,11 +179,15 @@ namespace
         // the player is alive or was out by the storm or a fall.
         std::wstring EliminatedBy;
         bool bReported = false;
+        // The player's client has its end-of-match stats and rewards (SendMatchReport).
+        bool bSentReport = false;
     };
 
     struct FMatchResults
     {
         std::map<std::wstring, FMatchPlayer> Players;
+        // The most players the match had left at once: its players, for the end-of-match screen.
+        int32_t MostPlayersLeft = 0;
         std::chrono::steady_clock::time_point NextCheck;
         // Whether the backend should count a place 1 as the win: the build doesn't report its winners itself.
         bool bCountWins = false;
@@ -195,6 +201,52 @@ namespace
         return !Id.empty() && Id.size() <= 64 && std::all_of(Id.begin(), Id.end(), [](wchar_t Character) { return std::iswxdigit(Character) != 0; });
     }
 
+    // The end-of-match screen (AthenaMatchStatsPartial) shows the stats of the controller's match report, and waits for
+    // its rewards with "Team Still Alive" until they come: the server sends both, with ClientSendMatchStatsForPlayer and
+    // ClientSendEndBattleRoyaleMatchForPlayer. 1.9, 1.9.1 and 1.10 have no caller of either (no code names them), so the
+    // screen showed zeros and kept waiting after the player's team was out (#162). Core sends them once the player has a
+    // place, with what the server knows: the place, the match's players, the time alive and the kills. The screen's other
+    // stats (accuracy, hits, distance, damage, materials) aren't kept by anything on the server and stay 0, and the
+    // rewards it sends are empty: they end the wait, and the screen plays no XP.
+    void SendMatchReport(AFortPlayerStateAthena* AthenaState, const FMatchPlayer& Player, int32_t TotalPlayers)
+    {
+        AFortPlayerControllerAthena* Controller = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(AthenaState->GetOwner()));
+        UFunction* SendStats = AFortPlayerControllerAthena::FindStaticFunction_ClientSendMatchStatsForPlayer();
+        UFunction* SendEnd = AFortPlayerControllerAthena::FindStaticFunction_ClientSendEndBattleRoyaleMatchForPlayer();
+        if (!Controller || !SendStats || !SendEnd)
+        {
+            return;
+        }
+
+        Reflection::FParams Stats(SendStats, true);
+        UProperty* StatsProperty = SendStats->FindPropertyByName(FName(L"Stats", FNAME_Find));
+        UScriptStruct* StatsStruct = StatsProperty && StatsProperty->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty) ? static_cast<UStructProperty*>(StatsProperty)->Struct : nullptr;
+        uint8_t* StatsData = static_cast<uint8_t*>(Stats.GetAddress(L"Stats"));
+        if (!StatsStruct || !StatsData)
+        {
+            return;
+        }
+        const auto SetStat = [StatsStruct, StatsData](const wchar_t* Name, int32_t Value)
+        {
+            UProperty* Field = StatsStruct->FindPropertyByName(FName(Name, FNAME_Find));
+            if (Field && Field->ElementSize == sizeof(Value))
+            {
+                std::memcpy(StatsData + Field->GetOffset_ForInternal(), &Value, sizeof(Value));
+            }
+        };
+        SetStat(L"Place", Player.Place);
+        SetStat(L"TotalPlayers", std::max(TotalPlayers, Player.Place));
+        SetStat(L"SecondsAlive", std::max(Player.SecondsAlive, 0));
+        SetStat(L"Kills", std::max(Player.Kills, 0));
+        Stats.Call(Controller);
+
+        Reflection::FParams End(SendEnd, true);
+        End.Set(L"bSuccess", true);
+        End.Call(Controller);
+        Log::Info(L"Battle Royale: sent {} the end-of-match screen (place {} of {}, {} kills, {} s alive)", Controller->GetName().ToStdString(), Player.Place,
+            std::max(TotalPlayers, Player.Place), std::max(Player.Kills, 0), std::max(Player.SecondsAlive, 0));
+    }
+
     // Brings the players up to date from their player states and reports those whose team has a place.
     void CheckMatchResults(AFortGameModeAthena* GameMode, FMatchResults& Results)
     {
@@ -203,6 +255,10 @@ namespace
         if (!GameState)
         {
             return;
+        }
+        if (AFortGameStateAthena* AthenaGameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(GameState)))
+        {
+            Results.MostPlayersLeft = std::max<int32_t>(Results.MostPlayersLeft, AthenaGameState->PlayersLeft);
         }
 
         const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
@@ -283,6 +339,20 @@ namespace
             Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"secondsAlive\":{}}}", Count++ > 0 ? "," : "",
                 Id, Player.Place, std::max(Player.Kills, 0), std::max(Player.SecondsAlive, 0));
             Log::Info(L"Battle Royale: {} placed {} with {} kills, {} s alive", AccountId, Player.Place, Player.Kills, Player.SecondsAlive);
+        }
+
+        // The end-of-match screen of each player still here whose place is final.
+        const int32_t TotalPlayers = std::max(Results.MostPlayersLeft, static_cast<int32_t>(Results.Players.size()));
+        for (APlayerState* PlayerState : PlayerArray)
+        {
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            const std::wstring AccountId = AthenaState ? AthenaState->UniqueId.ToString().ToStdString() : std::wstring();
+            const auto Found = IsAccountId(AccountId) ? Results.Players.find(AccountId) : Results.Players.end();
+            if (Found != Results.Players.end() && Found->second.bReported && !Found->second.bSentReport)
+            {
+                Found->second.bSentReport = true;
+                SendMatchReport(AthenaState, Found->second, TotalPlayers);
+            }
         }
         if (Count > 0)
         {

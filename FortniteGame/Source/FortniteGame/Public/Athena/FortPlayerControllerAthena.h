@@ -70,6 +70,9 @@ public:
     // Server: who SpectateOnDeath watches first after a death, the eliminator's pawn.
     DefineUProperty(APawn*, PlayerToSpectateOnDeath)
     DefineUFunction(SpectateOnDeath)
+    // The end-of-match screen's stats (FAthenaMatchStats) and its rewards, which end its "Team Still Alive" wait.
+    DefineUFunction(ClientSendMatchStatsForPlayer)
+    DefineUFunction(ClientSendEndBattleRoyaleMatchForPlayer)
 
     // Whether the controller plays Battle Royale heroes only: 1.7.2's DefaultHeroes, or 1.8's loadout's.
     bool PlaysBattleRoyaleHeroes();

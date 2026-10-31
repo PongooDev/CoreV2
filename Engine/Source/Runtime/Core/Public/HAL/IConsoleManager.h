@@ -3,6 +3,7 @@
 #include "Containers/UnrealString.h"
 #include "CoreGlobals.h"
 #include "Delegates/Delegate.h"
+#include "ObjectLayout.h"
 
 #include <cstdint>
 #include <type_traits>
@@ -38,14 +39,35 @@ class TConsoleVariableData;
 
 using FConsoleVariableDelegate = TBaseDelegate<void, IConsoleVariable*>;
 
+// The engine's console objects, called through their vtables. 1.1-1.9.1 lay IConsoleObject out as below; UE 4.19
+// (1.10) adds IsVariableInt after AsVariable, so every slot from AsVariableInt on (IConsoleVariable's too) is one later.
+// Slot() reads which layout the build has from a registered int variable.
 class IConsoleObject
 {
 public:
-    virtual ~IConsoleObject() = default;
-    virtual const wchar_t* GetHelp() const = 0;
-    virtual void SetHelp(const wchar_t* Value) = 0;
-    virtual EConsoleVariableFlags GetFlags() const = 0;
-    virtual void SetFlags(const EConsoleVariableFlags Value) = 0;
+    IConsoleObject() = delete;
+    IConsoleObject(const IConsoleObject&) = delete;
+    IConsoleObject& operator=(const IConsoleObject&) = delete;
+
+    const wchar_t* GetHelp() const
+    {
+        return CallVirtual<const wchar_t*>(const_cast<IConsoleObject*>(this), 1);
+    }
+
+    void SetHelp(const wchar_t* Value)
+    {
+        CallVirtual<void>(this, 2, Value);
+    }
+
+    EConsoleVariableFlags GetFlags() const
+    {
+        return CallVirtual<EConsoleVariableFlags>(const_cast<IConsoleObject*>(this), 3);
+    }
+
+    void SetFlags(const EConsoleVariableFlags Value)
+    {
+        CallVirtual<void>(this, 4, Value);
+    }
 
     void ClearFlags(const EConsoleVariableFlags Value)
     {
@@ -57,43 +79,65 @@ public:
         return (static_cast<uint32_t>(GetFlags()) & static_cast<uint32_t>(Value)) != 0;
     }
 
-    virtual IConsoleVariable* AsVariable()
+    IConsoleVariable* AsVariable()
     {
-        return nullptr;
+        return CallVirtual<IConsoleVariable*>(this, 5);
     }
 
-    virtual TConsoleVariableData<int32_t>* AsVariableInt()
+    TConsoleVariableData<int32_t>* AsVariableInt()
     {
-        return nullptr;
+        return CallVirtual<TConsoleVariableData<int32_t>*>(this, Slot(6));
     }
 
-    virtual TConsoleVariableData<float>* AsVariableFloat()
+    TConsoleVariableData<float>* AsVariableFloat()
     {
-        return nullptr;
+        return CallVirtual<TConsoleVariableData<float>*>(this, Slot(7));
     }
 
-    virtual TConsoleVariableData<FString>* AsVariableString()
+    TConsoleVariableData<FString>* AsVariableString()
     {
-        return nullptr;
+        return CallVirtual<TConsoleVariableData<FString>*>(this, Slot(8));
     }
 
-    virtual IConsoleCommand* AsCommand()
+    IConsoleCommand* AsCommand()
     {
-        return nullptr;
+        return CallVirtual<IConsoleCommand*>(this, Slot(9));
     }
 
-private:
-    virtual void Release() = 0;
+protected:
+    // The build's slot for Index as 1.1-1.9.1 number it.
+    static int32_t Slot(int32_t Index);
 };
 
 class IConsoleVariable : public IConsoleObject
 {
 public:
-    virtual void Set(const wchar_t* InValue, EConsoleVariableFlags SetBy = ECVF_SetByCode) = 0;
-    virtual int32_t GetInt() const = 0;
-    virtual float GetFloat() const = 0;
-    virtual FString GetString() const = 0;
-    virtual void SetOnChangedCallback(const FConsoleVariableDelegate& Callback) = 0;
+    void Set(const wchar_t* InValue, EConsoleVariableFlags SetBy = ECVF_SetByCode)
+    {
+        CallVirtual<void>(this, Slot(11), InValue, SetBy);
+    }
+
+    int32_t GetInt() const
+    {
+        return CallVirtual<int32_t>(const_cast<IConsoleVariable*>(this), Slot(12));
+    }
+
+    float GetFloat() const
+    {
+        return CallVirtual<float>(const_cast<IConsoleVariable*>(this), Slot(13));
+    }
+
+    FString GetString() const
+    {
+        FString Result;
+        CallVirtual<FString*>(const_cast<IConsoleVariable*>(this), Slot(14), &Result);
+        return Result;
+    }
+
+    void SetOnChangedCallback(const FConsoleVariableDelegate& Callback)
+    {
+        CallVirtual<void>(this, Slot(15), &Callback);
+    }
 
     void Set(int32_t InValue, EConsoleVariableFlags SetBy = ECVF_SetByCode)
     {

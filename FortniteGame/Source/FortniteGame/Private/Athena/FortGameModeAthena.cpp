@@ -535,8 +535,9 @@ namespace
         });
     }
 
-    // The game mode's warmup lengths: the backend's for both (so the countdown never shortens below it), or the game's
-    // own, and a countdown already running moved to the backend's. The game shortens its warmup to
+    // The game mode's warmup lengths: the backend's or the game's own, and a countdown already running moved to the
+    // backend's. Either way the countdown still shortens to the game's early countdown once the match's players are all
+    // in, as it did before the panel's setting (the backend's length only replaces the full one). The game shortens its warmup to
     // WarmupEarlyCountdownDuration (15 s) once enough of MaxPlayerCount is in (UpdateWarmupPhase, 1.9 0x43D9A0:
     // NumPlayers >= MaxPlayerCount times a percent at +0xABC, which isn't reflected), and OnGivenMatchAssignment
     // (0x42D2B0) sets MaxPlayerCount to the players the match was assigned. So a match taking late players had its bus
@@ -566,9 +567,9 @@ namespace
         const float Duration = bGame ? Watch.GameDuration : static_cast<float>(Watch.WarmupSeconds);
         const int32_t Capacity = MatchCapacity(GameMode);
         const bool bClosed = Watch.bUnsupported || (Watch.bAnswered && !Watch.bLateJoin);
-        const bool bEarly = bGame && (bClosed || (AFortGameModeAthena::HasMaxPlayerCount() && Capacity > 0 && GameMode->MaxPlayerCount >= Capacity));
+        const bool bEarly = bClosed || (AFortGameModeAthena::HasMaxPlayerCount() && Capacity > 0 && GameMode->MaxPlayerCount >= Capacity);
         GameMode->WarmupCountdownDuration = Duration;
-        GameMode->WarmupEarlyCountdownDuration = bEarly ? Watch.GameEarly : Duration;
+        GameMode->WarmupEarlyCountdownDuration = bEarly ? std::min(Watch.GameEarly, Duration) : Duration;
 
         if (!Watch.bLoggedLength || Watch.WarmupSeconds != Watch.AppliedSeconds || bEarly != Watch.bEarlyCountdown)
         {
@@ -581,7 +582,8 @@ namespace
             Watch.bEarlyCountdown = bEarly;
             if (!bGame)
             {
-                Log::Info(L"Battle Royale: the warmup lasts {} s (the backend's; the game's is {:.0f} s, {:.0f} s once enough players are in)", Watch.WarmupSeconds, Watch.GameDuration, Watch.GameEarly);
+                Log::Info(L"Battle Royale: the warmup lasts {} s (the backend's), {}", Watch.WarmupSeconds,
+                    bEarly ? std::format(L"{:.0f} s once the match's players are all in", std::min(Watch.GameEarly, Duration)) : std::wstring(L"in full while late players can still join"));
             }
             else if (bEarly)
             {

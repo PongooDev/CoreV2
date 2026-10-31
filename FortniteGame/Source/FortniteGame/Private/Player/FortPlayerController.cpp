@@ -1317,11 +1317,38 @@ void AFortPlayerController::ServerDisassembleInventoryItem_Implementation(const 
     DisassembleInventoryItem(ItemGuid);
 }
 
-bool AFortPlayerController::DisassembleInventoryItem(const FGuid& ItemGuid)
+void AFortPlayerController::ServerDisassembleInventoryItems_Implementation(const TArray<FGuid>& ItemGuids, const TArray<int32_t>& ItemCounts)
 {
-    if (!Natives::AFortPlayerController_DisassembleInventoryItem(this, ItemGuid))
+    for (int32_t Index = 0; Index < ItemGuids.Num() && Index < ItemCounts.Num(); ++Index)
     {
-        return false;
+        DisassembleInventoryItem(ItemGuids[Index], ItemCounts[Index]);
+    }
+}
+
+bool AFortPlayerController::DisassembleInventoryItem(const FGuid& ItemGuid, int32_t ItemCount)
+{
+    if (Natives::AFortPlayerController_DisassembleInventoryItem)
+    {
+        if (!Natives::AFortPlayerController_DisassembleInventoryItem(this, ItemGuid))
+        {
+            return false;
+        }
+    }
+    else
+    {
+        // 1.10 checks a batch of { GUID, count } pairs.
+        struct FGuidAndCount
+        {
+            FGuid ItemGuid;
+            int32_t Count;
+        };
+        static_assert(sizeof(FGuidAndCount) == 20);
+        TArray<FGuidAndCount> Pairs;
+        Pairs.Add(FGuidAndCount{ ItemGuid, ItemCount });
+        if (ItemCount <= 0 || !Natives::AFortPlayerController_DisassembleInventoryItems(this, reinterpret_cast<const FScriptArray&>(Pairs)))
+        {
+            return false;
+        }
     }
 
 #if WITH_SERVER_CODE
@@ -1335,7 +1362,14 @@ bool AFortPlayerController::DisassembleInventoryItem(const FGuid& ItemGuid)
 
     TStructArray<FFortItemEntry> Results;
     ItemDefinition->GetDisassemblyResults(Results, WorldItem->GetNormalizedDurability());
-    if (RemoveInventoryItem(ItemGuid, 1, false))
+    // A batch (1.10) names how many of a stack go: the results are per item.
+    const FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+    ItemCount = std::clamp<int32_t>(ItemCount, 1, std::max<int32_t>(ItemEntry.Count, 1));
+    for (int32_t Index = 0; Index < Results.Num() && ItemCount > 1; ++Index)
+    {
+        Results[Index].Count = Results[Index].Count * ItemCount;
+    }
+    if (RemoveInventoryItem(ItemGuid, ItemCount, false))
     {
         AFortPawn* Pawn = MyFortPawn;
         for (int32_t Index = 0; Index < Results.Num(); ++Index)
@@ -1540,11 +1574,13 @@ void AFortPlayerController::HookVTables()
         }
     }
 
-    // 1.10 disassembles a batch instead (ServerDisassembleInventoryItems, item GUIDs and counts), which isn't restored.
-    UFunction* const DisassembleFunction = FindStaticFunction_ServerDisassembleInventoryItem();
+    // 1.10 disassembles a batch instead (ServerDisassembleInventoryItems, item GUIDs and counts), each item as before.
+    UFunction* const SingleDisassembleFunction = FindStaticFunction_ServerDisassembleInventoryItem();
+    UFunction* const DisassembleFunction = SingleDisassembleFunction ? SingleDisassembleFunction : FindStaticFunction_ServerDisassembleInventoryItems();
+    void* const DisassembleHook = SingleDisassembleFunction ? reinterpret_cast<void*>(&ServerDisassembleInventoryItem_ImplementationHK) : reinterpret_cast<void*>(&ServerDisassembleInventoryItems_ImplementationHK);
     if (!DisassembleFunction)
     {
-        Log::Info(L"AFortPlayerController: no ServerDisassembleInventoryItem in this build, disassembly is the game's own");
+        Log::Error(L"AFortPlayerController: no ServerDisassembleInventoryItem(s) in this build, nothing can be disassembled");
     }
     else if (const int32_t DisassembleIndex = Finder::ImplementationIndex(DisassembleFunction);
         PlayerControllerVTable && DisassembleIndex >= 0 && Finder::ResolveDisassemblyLive(DisassembleFunction, PlayerControllerDefault))
@@ -1557,7 +1593,7 @@ void AFortPlayerController::HookVTables()
             void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
             if (VTable && VTable[DisassembleIndex] == PlayerControllerDisassemble)
             {
-                Hooks::SwapVTable(L"AFortPlayerController::ServerDisassembleInventoryItem_Implementation", VTable, DisassembleIndex, reinterpret_cast<void*>(&ServerDisassembleInventoryItem_ImplementationHK));
+                Hooks::SwapVTable(SingleDisassembleFunction ? L"AFortPlayerController::ServerDisassembleInventoryItem_Implementation" : L"AFortPlayerController::ServerDisassembleInventoryItems_Implementation", VTable, DisassembleIndex, DisassembleHook);
             }
         }
     }
@@ -2138,6 +2174,11 @@ bool AFortPlayerController::ModDurabilityHK(void* InventoryOwner, const FGuid& I
 void AFortPlayerController::ServerDisassembleInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid)
 {
     This->ServerDisassembleInventoryItem_Implementation(ItemGuid);
+}
+
+void AFortPlayerController::ServerDisassembleInventoryItems_ImplementationHK(AFortPlayerController* This, const TArray<FGuid>& ItemGuids, const TArray<int32_t>& ItemCounts)
+{
+    This->ServerDisassembleInventoryItems_Implementation(ItemGuids, ItemCounts);
 }
 
 void AFortPlayerController::PossessHK(AFortPlayerController* This, APawn* InPawn)

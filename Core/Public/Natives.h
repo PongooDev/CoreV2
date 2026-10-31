@@ -329,6 +329,8 @@ namespace Natives
     inline UFortSchematicItem* (*AFortPlayerController_GetSchematicForItem)(AFortPlayerController* This, const UFortItemDefinition* ItemDefinition) = nullptr;
     inline int32_t UFortSchematicItem_ServerCraftSchematicIndex = -1;
     inline bool (*AFortPlayerController_DisassembleInventoryItem)(AFortPlayerController* This, const FGuid& ItemGuid) = nullptr;
+    // 1.10's batch check, over { FGuid ItemGuid; int32_t Count; } pairs (20 bytes each).
+    inline bool (*AFortPlayerController_DisassembleInventoryItems)(AFortPlayerController* This, const FScriptArray& GuidsAndCounts) = nullptr;
     inline FScriptArray* (*UFortWorldItemDefinition_GetDisassemblyResults)(const UFortWorldItemDefinition* This, FScriptArray* OutResults, int32_t Unused, float NormalizedDurability) = nullptr;
     inline int32_t UFortWorldItem_SetLoadedAmmoIndex = -1;
     inline int32_t UFortWorldItem_SetItemCountIndex = -1;

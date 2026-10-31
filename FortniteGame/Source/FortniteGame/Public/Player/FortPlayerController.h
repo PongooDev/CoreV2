@@ -79,6 +79,7 @@ public:
     DefineUFunction(ServerRemoveInventoryStateValue)
     DefineUFunction(ServerSpotActor)
     DefineUFunction(ServerDisassembleInventoryItem)
+    DefineUFunction(ServerDisassembleInventoryItems)
     DefineUFunction(ServerModDurability)
     DefineUFunction(ActivateSlot)
     DefineUFunction(GivePlayerAmmo)
@@ -127,6 +128,7 @@ public:
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
     void ServerSpotActor_Implementation(AActor* NewlySpottedActor);
     void ServerDisassembleInventoryItem_Implementation(const FGuid& ItemGuid);
+    void ServerDisassembleInventoryItems_Implementation(const TArray<FGuid>& ItemGuids, const TArray<int32_t>& ItemCounts);
     void ServerRemoveInventoryStateValue_Implementation(const FGuid& ItemGuid, EFortItemEntryState StateType);
     void Cheat(const FString& Msg);
     void ServerCheat(const FString& Msg);
@@ -148,7 +150,7 @@ public:
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
     bool HandleItemZeroDurability(const FGuid& ItemGuid);
-    bool DisassembleInventoryItem(const FGuid& ItemGuid);
+    bool DisassembleInventoryItem(const FGuid& ItemGuid, int32_t Count = 1);
     void EndWeaponAbilities(AFortWeapon* Weapon);
     int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
     UFortQuestManager* GetQuestManager() const;
@@ -209,5 +211,6 @@ private:
     static inline bool (*RemoveInventoryItemOG)(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars) = nullptr;
     static bool ModDurabilityHK(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
     static void ServerDisassembleInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
+    static void ServerDisassembleInventoryItems_ImplementationHK(AFortPlayerController* This, const TArray<FGuid>& ItemGuids, const TArray<int32_t>& ItemCounts);
     static inline bool (*ModDurabilityOG)(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet) = nullptr;
 };

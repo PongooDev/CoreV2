@@ -6377,7 +6377,7 @@ bool Finder::ResolveNeverPersistItemDefinitionLive()
 
 bool Finder::ResolveDisassemblyLive(UFunction* ServerDisassembleInventoryItem, UObject* PlayerControllerDefault)
 {
-    if (Natives::AFortPlayerController_DisassembleInventoryItem && Natives::UFortWorldItemDefinition_GetDisassemblyResults)
+    if ((Natives::AFortPlayerController_DisassembleInventoryItem || Natives::AFortPlayerController_DisassembleInventoryItems) && Natives::UFortWorldItemDefinition_GetDisassemblyResults)
     {
         return true;
     }
@@ -6388,24 +6388,54 @@ bool Finder::ResolveDisassemblyLive(UFunction* ServerDisassembleInventoryItem, U
         const uintptr_t Call = FunctionEnd ? FindRawCall(Function, FunctionEnd) : 0;
         return Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
     };
+    const auto LastCall = [](uintptr_t Function)
+    {
+        const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        uintptr_t Target = 0;
+        for (uintptr_t Call = FunctionEnd ? FindRawCall(Function, FunctionEnd) : 0; Call; Call = FindRawCall(Call + 1, FunctionEnd))
+        {
+            Target = Finder::RelativeTarget(Call, 1, 5);
+        }
+        return Target;
+    };
+    const auto Checks = [](uintptr_t Function, uintptr_t Check)
+    {
+        const uintptr_t FunctionEnd = Function && Check ? Finder::FunctionEnd(Function) : 0;
+        return FunctionEnd > Function && CallWithin(Function, FunctionEnd - Function, Check);
+    };
 
     UFunction* CanBeDisassembledFunction = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortWorldItemDefinition:CanBeDisassembled");
     const uintptr_t CanBeDisassembled = FirstCall(CanBeDisassembledFunction ? reinterpret_cast<uintptr_t>(CanBeDisassembledFunction->GetNativeFunc()) : 0);
 
     void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
-    const uintptr_t Disassemble = FirstCall(VTableEntry(PlayerControllerVTable, ImplementationIndex(ServerDisassembleInventoryItem)));
-    const uintptr_t DisassembleEnd = Disassemble ? Finder::FunctionEnd(Disassemble) : 0;
+    const uintptr_t Implementation = VTableEntry(PlayerControllerVTable, ImplementationIndex(ServerDisassembleInventoryItem));
+    uintptr_t Disassemble = FirstCall(Implementation);
+    bool bBatch = false;
+    if (Disassemble && !Checks(Disassemble, CanBeDisassembled))
+    {
+        // 1.10's ServerDisassembleInventoryItems_Implementation (0x89C730) pairs each GUID with its count (20 bytes)
+        // first; its last call checks them (0x873910) and, off the server, sends them on. The server's part is stripped.
+        Disassemble = LastCall(Implementation);
+        bBatch = true;
+    }
     const uintptr_t Results = FunctionOf(L"UFortWorldItemDefinition::GetDisassemblyResults");
 
-    if (!CanBeDisassembled || !DisassembleEnd || !CallWithin(Disassemble, DisassembleEnd - Disassemble, CanBeDisassembled) || FirstCall(Results) != CanBeDisassembled)
+    if (!CanBeDisassembled || !Checks(Disassemble, CanBeDisassembled) || FirstCall(Results) != CanBeDisassembled)
     {
         Log::Error(L"Finder: item disassembly not found");
         return false;
     }
 
-    Natives::AFortPlayerController_DisassembleInventoryItem = reinterpret_cast<decltype(Natives::AFortPlayerController_DisassembleInventoryItem)>(Disassemble);
+    if (bBatch)
+    {
+        Natives::AFortPlayerController_DisassembleInventoryItems = reinterpret_cast<decltype(Natives::AFortPlayerController_DisassembleInventoryItems)>(Disassemble);
+    }
+    else
+    {
+        Natives::AFortPlayerController_DisassembleInventoryItem = reinterpret_cast<decltype(Natives::AFortPlayerController_DisassembleInventoryItem)>(Disassemble);
+    }
     Natives::UFortWorldItemDefinition_GetDisassemblyResults = reinterpret_cast<decltype(Natives::UFortWorldItemDefinition_GetDisassemblyResults)>(Results);
-    Log::Info(L"Finder: AFortPlayerController::DisassembleInventoryItem +0x{:X}, UFortWorldItemDefinition::GetDisassemblyResults +0x{:X}", Disassemble - Finder::ImageBase(), Results - Finder::ImageBase());
+    Log::Info(L"Finder: AFortPlayerController::DisassembleInventoryItem{} +0x{:X}, UFortWorldItemDefinition::GetDisassemblyResults +0x{:X}", bBatch ? L"s" : L"", Disassemble - Finder::ImageBase(), Results - Finder::ImageBase());
     return true;
 }
 

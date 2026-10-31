@@ -59,7 +59,8 @@ DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 namespace
 {
-    // UFortAbilityKit::Gadgets holds object pointers on 1.1 and 1.2 and TAssetPtrs (0x20-byte entries) on 1.7.2.
+    // UFortAbilityKit::Gadgets holds object pointers on 1.1 and 1.2, TAssetPtrs (0x20-byte entries) from 1.7.2 and
+    // TSoftObjectPtrs (0x28-byte entries, the FSoftObjectPath is 8 bytes longer) on 1.10.
     std::vector<UFortGadgetItemDefinition*> KitGadgets(UFortAbilityKit* Kit)
     {
         static const int32_t EntrySize = []
@@ -75,7 +76,7 @@ namespace
         for (int32_t Index = 0; Index < Entries.Num(); ++Index)
         {
             const uintptr_t Entry = reinterpret_cast<uintptr_t>(Entries.GetData()) + static_cast<uintptr_t>(Index) * EntrySize;
-            Gadgets.push_back(EntrySize == sizeof(FAssetPtr)
+            Gadgets.push_back(EntrySize >= static_cast<int32_t>(sizeof(FAssetPtr))
                 ? reinterpret_cast<const TAssetPtr<UFortGadgetItemDefinition>*>(Entry)->LoadSynchronous()
                 : *reinterpret_cast<UFortGadgetItemDefinition* const*>(Entry));
         }

@@ -14,12 +14,14 @@
 #include "ObjectLayout.h"
 #include "Pawns/FortPawn.h"
 #include "Perception/AISense_Hearing.h"
+#include "Player/FortCheatManager.h"
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectIterator.h"
 #include "Weapons/FortWeapon.h"
 
+#include <algorithm>
 #include <cstring>
 #include <tuple>
 
@@ -146,30 +148,38 @@ void AFortPlayerController::HookBuildingVTables()
 
 bool AFortPlayerController::ValidateBuildingClassData(FBuildingClassData& BuildingClassData)
 {
-    // 1.8's check (0x826370, gone from 1.8.1): a building actor class whose default is at level 0. 1.8 swaps an upgraded
-    // class for its level 0 one from the game state's building class lists; clients place level 0 classes, so one that
-    // isn't is refused.
+    // 1.8's check (0x826370, gone from 1.8.1): a building actor class. A client places the class of its CurrentResourceLevel
+    // (1.9 0x848740), which BuildWith sets ("buildwith metal 3", #155): Save the World has a class per level (PBWA_M1 to
+    // M3...), whose default is at that level, and the client sends UpgradeLevel 0 with it (1.9 0x847480). 1.8 swaps such a
+    // class for its level 0 one from the game state's lists; Core places the class the client previewed, at its level, so
+    // the piece is the one its build preview showed, and HasRequiredBuildingLevel checks that level.
     UClass* BuildingClass = BuildingClassData.BuildingClass;
     ABuildingActor* Default = BuildingClass && BuildingClass->IsChildOf(ABuildingActor::StaticClass()) ? Cast<ABuildingActor>(BuildingClass->GetDefaultObject()) : nullptr;
     if (!Default)
     {
         return false;
     }
-    if (Default->CurrentBuildingLevel > 0)
-    {
-        Log::Warning(L"Building: {} asked to build {}, which is at level {}", GetName().ToStdString(), BuildingClass->GetName().ToStdString(), static_cast<int32_t>(Default->CurrentBuildingLevel));
-        return false;
-    }
+    BuildingClassData.UpgradeLevel = std::max<int32_t>(BuildingClassData.UpgradeLevel, Default->CurrentBuildingLevel);
     return true;
 }
 
 bool AFortPlayerController::HasRequiredBuildingLevel(const FBuildingClassData& BuildingClassData)
 {
-    // 1.8's check (0x82FD70, gone from 1.8.1): HasRequiredBuildingLevel with the class's resource type.
+    // 1.8's check (0x82FD70, gone from 1.8.1): HasRequiredBuildingLevel with the class's resource type, true below the
+    // player's MaxBuildLevel for it (1.9 0x843E00), which Save the World's research raises. A level the player's
+    // "cheat buildwith" chose is theirs to build too (#155).
     UClass* BuildingClass = BuildingClassData.BuildingClass;
     ABuildingSMActor* Default = BuildingClass && BuildingClass->IsChildOf(ABuildingSMActor::StaticClass()) ? Cast<ABuildingSMActor>(BuildingClass->GetDefaultObject()) : nullptr;
     const uint8_t ResourceType = Default ? static_cast<uint8_t>(Default->ResourceType) : 0;
-    return Default && CallVirtual<bool>(this, Natives::AFortPlayerController_HasRequiredBuildingLevelIndex, BuildingClassData.UpgradeLevel, ResourceType);
+    if (!Default)
+    {
+        return false;
+    }
+    if (CallVirtual<bool>(this, Natives::AFortPlayerController_HasRequiredBuildingLevelIndex, BuildingClassData.UpgradeLevel, ResourceType))
+    {
+        return true;
+    }
+    return BuildingClassData.UpgradeLevel > 0 && BuildingClassData.UpgradeLevel <= UFortCheatManager::BuildWithLevel(this);
 }
 
 void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuildingClassData& InBuildingClassData, const FVector& InBuildLoc, const FRotator& InBuildRot, bool bMirrored)

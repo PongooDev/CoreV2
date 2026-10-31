@@ -1842,6 +1842,9 @@ void AFortPlayerController::Cheat(const FString& Msg)
     {
         return;
     }
+    // "buildwith" (#155) sets the material and level this player's build tool places, which only their game knows: it runs
+    // here as well as on the server, which answers.
+    UFortCheatManager::RunClientBuildWith(this, Msg);
     FString Command;
     FString TargetName;
     FString MovementCommand;
@@ -1971,7 +1974,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // have them play another player's pawn while that player watches. Core also takes over two of the game's cheats that
     // answer nothing (#155): "sethealthpercent", which says what it set and takes a percent too, and
     // "toggleinfinitedurability", whose answer only reached the server's console, and "unlimitedhealth" (or
-    // "toggleunlimitedhealth"), which the game's flips without a word.
+    // "toggleunlimitedhealth"), which the game's flips without a word, and "buildwith", whose material and level never
+    // reached the pieces (its client runs it too) and which answered nothing.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
@@ -2000,6 +2004,7 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"sethealthpercent", &UFortCheatManager::HealthPercent },
         { L"toggleinfinitedurability", &UFortCheatManager::InfiniteDurability },
         { L"speed", &UFortCheatManager::Speed },
+        { L"buildwith", &UFortCheatManager::BuildWith },
         { L"teleportto", &UFortCheatManager::TeleportTo },
         { L"bring", &UFortCheatManager::Bring },
         { L"possessplayer", &UFortCheatManager::PossessPlayer },

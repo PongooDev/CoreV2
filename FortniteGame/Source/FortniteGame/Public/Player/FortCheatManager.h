@@ -60,6 +60,7 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(ToggleInvincibleCornerstones)
     DefineUFunction(SetCapturePercentage)
     DefineUFunction(CountPlayerBuiltBuildingActors)
+    DefineUFunction(BuildWith)
 
 public:
     // ToggleUnlimitedHealth's flag: the player's pawn can't be damaged while its controller's cheat manager has it (1.9
@@ -168,6 +169,16 @@ public:
     // the weapon's own ModAmmo and sets the game's replicated bInfiniteAmmo (the reserve never runs out), which tells
     // Core's client to keep its own count of the magazine full.
     void InfiniteMag(const FString& Arguments);
+    // "cheat buildwith <wood | stone | metal> [1-3]" (#155): the game's BuildWith, which sets the material and level the
+    // build tool places and brings it out, run on the server and answered there (the game's answers nothing). The class
+    // a piece is built as is picked on the player's own machine, so their client runs the game's BuildWith too
+    // (RunClientBuildWith); the server builds the level it chose even above their MaxBuildLevel (BuildWithLevel).
+    void BuildWith(const FString& Arguments);
+    // Client: "cheat buildwith ..." for this player also runs the game's BuildWith on their own controller, so their
+    // HUD, build preview and the pieces they send are of that material and level. The server still runs it and answers.
+    static void RunClientBuildWith(class APlayerController* PlayerController, const FString& Msg);
+    // Server: the level (0-based) the player's last buildwith chose, -1 for none.
+    static int32_t BuildWithLevel(const AFortPlayerController* PlayerController);
     // Core's own command, "cheat unlimitedhealth [on | off]" (#155; "cheat ToggleUnlimitedHealth" too): sets the game's
     // bUnlimitedHealth, as ToggleUnlimitedHealth does, and says whether it is on.
     void UnlimitedHealth(const FString& Arguments);

@@ -73,6 +73,13 @@ public:
     DefineUProperty(int32_t, OverriddenBackpackSize)
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
     DefineUProperty(TAssetPtr<UObject>, StartRepairSound)
+    // The building material (EFortResourceType) and level (EFortResourceLevel, 0-based) this machine's build tool places,
+    // and the class it places. Transient and not replicated: the client picks the class it sends in
+    // ServerCreateBuildingActor, so the game's BuildWith only changes the pieces of the machine it runs on.
+    DefineUProperty(uint8_t, CurrentResourceType)
+    DefineUProperty(uint8_t, CurrentResourceLevel)
+    DefineUProperty(UClass*, CurrentBuildableClass)
+    static bool HasBuildResourceSelection() { return Member_CurrentResourceType.IsAvailable() && Member_CurrentResourceLevel.IsAvailable() && Member_CurrentBuildableClass.IsAvailable(); }
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)

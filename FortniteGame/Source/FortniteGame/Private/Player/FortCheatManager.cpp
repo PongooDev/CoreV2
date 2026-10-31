@@ -7,6 +7,7 @@
 #include "AI/FortAIEncounterInfo.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
+#include "Building/BuildingSMActor.h"
 #include "Building/BuildingTrap.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
@@ -320,6 +321,111 @@ namespace
         return Name.starts_with(L"SKEL_") || Name.starts_with(L"REINST_") || Name.starts_with(L"TRASHCLASS_") || Name.starts_with(L"PLACEHOLDER-CLASS");
     }
 
+    // EFortResourceType's building materials, in its order (Wood 0, Stone 1, Metal 2).
+    constexpr const wchar_t* BuildMaterialNames[] = { L"Wood", L"Stone", L"Metal" };
+    // EFortResourceLevel has six, but the game's BuildWith takes 1 to 3 (1.9 0x7FD1F0).
+    constexpr int32_t BuildWithMaxLevel = 3;
+
+    // "buildwith <material> [level]", either one or both, in either order (#155): the game's own parser (1.9 0x7FD1F0,
+    // 1.10 0x82B4B0) reads two words, w/wood, s/stone/b, m/metal or a level 1-3, case-insensitively, and silently ignores
+    // any other word. This one refuses what it can't read, so the player is told. OutMaterial and OutLevel stay -1 when not given (OutLevel is
+    // 0-based, as EFortResourceLevel), and OutArguments is the line in words the game's parser takes.
+    bool ParseBuildWith(const std::wstring& Arguments, int32_t& OutMaterial, int32_t& OutLevel, std::wstring& OutArguments)
+    {
+        OutMaterial = -1;
+        OutLevel = -1;
+        const std::vector<std::wstring> Words = SplitWords(Arguments);
+        if (Words.empty() || Words.size() > 2)
+        {
+            return false;
+        }
+        for (const std::wstring& Word : Words)
+        {
+            const std::wstring Lowered = Lower(Word);
+            int32_t Material = -1;
+            if (Lowered == L"w" || Lowered == L"wood")
+            {
+                Material = 0;
+            }
+            else if (Lowered == L"s" || Lowered == L"stone" || Lowered == L"b" || Lowered == L"brick")
+            {
+                Material = 1;
+            }
+            else if (Lowered == L"m" || Lowered == L"metal")
+            {
+                Material = 2;
+            }
+            if (Material >= 0)
+            {
+                if (OutMaterial >= 0)
+                {
+                    return false;
+                }
+                OutMaterial = Material;
+                continue;
+            }
+            wchar_t* End = nullptr;
+            const long Level = std::wcstol(Lowered.c_str(), &End, 10);
+            if (!End || *End != L'\0' || Level < 1 || Level > BuildWithMaxLevel || OutLevel >= 0)
+            {
+                return false;
+            }
+            OutLevel = static_cast<int32_t>(Level) - 1;
+        }
+        OutArguments.clear();
+        if (OutMaterial >= 0)
+        {
+            OutArguments = BuildMaterialNames[OutMaterial];
+        }
+        if (OutLevel >= 0)
+        {
+            OutArguments += (OutArguments.empty() ? L"" : L" ") + std::to_wstring(OutLevel + 1);
+        }
+        return true;
+    }
+
+    // Runs the game's own BuildWith (1.9 0x7F5020) on the cheat manager's controller with Arguments: it sets the
+    // controller's CurrentResourceType and CurrentResourceLevel, picks the building class of that material and level for
+    // the piece being placed (the game state's building class lists), and brings the build tool out. False when the build
+    // has no BuildWith.
+    bool CallGameBuildWith(UObject* CheatManager, const std::wstring& Arguments)
+    {
+        UFunction* Function = UFortCheatManager::FindStaticFunction_BuildWith();
+        if (!Function || !CheatManager)
+        {
+            return false;
+        }
+        Reflection::FParams Params(Function);
+        Params.Set(L"ResourceTypeAndOrLevel", FString(Arguments.c_str()));
+        return Params.Call(CheatManager);
+    }
+
+    // Whether the class the controller's build tool places is of its CurrentResourceType at its CurrentResourceLevel. The
+    // game's BuildWith picks one from the game state's lists, or keeps the class it had when they have none (Battle
+    // Royale has only level 1 pieces), and the build tool then finds no piece of that level to place at all.
+    bool PlacesSelectedPiece(const AFortPlayerController* PlayerController)
+    {
+        UClass* const Class = PlayerController ? static_cast<UClass*>(PlayerController->CurrentBuildableClass) : nullptr;
+        const ABuildingSMActor* const Default = Class && Class->IsChildOf(ABuildingSMActor::StaticClass()) ? Cast<ABuildingSMActor>(Class->GetDefaultObject()) : nullptr;
+        return Default && static_cast<uint8_t>(Default->ResourceType) == PlayerController->CurrentResourceType && Default->CurrentBuildingLevel == PlayerController->CurrentResourceLevel;
+    }
+
+    // BuildWith with a level this game has no pieces of goes back to the level the controller had (PlacesSelectedPiece):
+    // true when it did.
+    bool KeepBuildableLevel(UObject* CheatManager, AFortPlayerController* PlayerController, int32_t Level, int32_t PreviousLevel)
+    {
+        if (Level < 0 || PreviousLevel < 0 || Level == PreviousLevel || PlacesSelectedPiece(PlayerController))
+        {
+            return false;
+        }
+        return CallGameBuildWith(CheatManager, std::to_wstring(PreviousLevel + 1));
+    }
+
+    // "cheat buildwith" (#155): the level each player's last buildwith chose (0-based). Save the World builds a level only
+    // up to its player's MaxBuildLevel attribute (HasRequiredBuildingLevel, 1.9 0x843E00), which their research raises;
+    // the cheat lets them build up to the level it chose.
+    std::vector<std::pair<TWeakObjectPtr<AFortPlayerController>, int32_t>> BuildWithLevels;
+
     // The actor class SpawnActor names, the way the native Summon finds one (1.7.2 0x1FE9A90, FindObject<UClass>), and
     // loading it when it isn't yet:
     // - a path, "/Script/Engine.StaticMeshActor", "/Game/Building/ActorBlueprints/Containers/Tiered_Chest_6_Parent.Tiered_Chest_6_Parent_C",
@@ -507,7 +613,7 @@ namespace
         { L"Player", L"DBNO", L"dbno", L"knock yourself down (revivefromdbno)", ECheatMode::Both },
         { L"Player", L"RespawnPlayerServer", L"respawnplayerserver", L"respawn when dead", ECheatMode::Both },
         { L"Player", L"BackpackSetSize", L"backpacksetsize <slots>", L"backpack size", ECheatMode::Both },
-        { L"Player", L"BuildWith", L"buildwith <wood | stone | metal>", L"building material", ECheatMode::Both },
+        { L"Player", L"BuildWith", L"buildwith <wood | stone | metal> [1-3]", L"build material and level (levels: STW)", ECheatMode::Both },
         { L"Player", nullptr, L"skin <HID or CID | reset>", L"wear a hero's or outfit's look", ECheatMode::Both },
         { L"Player", nullptr, L"disguise <class, path or mesh> [scale]", L"become a prop or pawn (undisguise)", ECheatMode::Both },
         { L"Player", nullptr, L"disguiseview <back | hide | normal>", L"how you see your disguise", ECheatMode::Both },
@@ -3606,6 +3712,123 @@ bool UFortCheatManager::KeepsConsumable(AFortPlayerController* PlayerController,
     return WorldItem && IsConsumableItem(static_cast<UFortItemDefinition*>(static_cast<FFortItemEntry&>(WorldItem->ItemEntry).ItemDefinition));
 #else
     return false;
+#endif
+}
+
+void UFortCheatManager::BuildWith(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // The game's BuildWith (1.9 0x7F5020) sets CurrentResourceType and CurrentResourceLevel on the controller it runs on,
+    // picks the building class of that material and level, and brings the build tool out. None of that replicates, and the
+    // client sends the class it picked itself in ServerCreateBuildingActor, so run here alone it only brought the build
+    // tool out (the quick bar is the server's) and the pieces stayed as the client had them (#155). The client runs it
+    // too now (RunClientBuildWith); here it keeps the server's state the same and answers.
+    int32_t Material = -1;
+    int32_t Level = -1;
+    std::wstring GameArguments;
+    if (!ParseBuildWith(Arguments.ToStdString(), Material, Level, GameArguments))
+    {
+        Reply(TEXT("Usage: buildwith <wood | stone | metal> [1-3], the material and level you build with, either or both (\"buildwith metal 3\", \"buildwith 2\")"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    const bool bSelection = AFortPlayerController::HasBuildResourceSelection();
+    const int32_t PreviousLevel = bSelection ? static_cast<int32_t>(PlayerController->CurrentResourceLevel) : -1;
+    if (!CallGameBuildWith(this, GameArguments))
+    {
+        Reply(TEXT("This build has no BuildWith cheat"));
+        return;
+    }
+
+    const bool bOtherPlayer = ReplyTo && ReplyTo != PlayerController;
+    const wchar_t* const OwnGame = bOtherPlayer ? TEXT(". Their game picks the pieces they place, so those only change when they type it themselves") : TEXT("");
+    if (!bSelection)
+    {
+        if (Level >= 0)
+        {
+            std::erase_if(BuildWithLevels, [PlayerController](const auto& Entry) { return !Entry.first.Get() || Entry.first.Get() == PlayerController; });
+            BuildWithLevels.emplace_back(TWeakObjectPtr<AFortPlayerController>(PlayerController), Level);
+        }
+        Reply(FString::Printf(TEXT("Building with %s%s"), Lower(GameArguments).c_str(), OwnGame));
+        return;
+    }
+
+    // A level the game state has no pieces of (Battle Royale has only level 1's) goes back to the one before; the
+    // client does the same.
+    const bool bLevelKept = KeepBuildableLevel(this, PlayerController, Level, PreviousLevel);
+    const int32_t NowMaterial = PlayerController->CurrentResourceType;
+    const int32_t NowLevel = PlayerController->CurrentResourceLevel;
+    const std::wstring MaterialName = NowMaterial >= 0 && NowMaterial < static_cast<int32_t>(std::size(BuildMaterialNames)) ? Lower(BuildMaterialNames[NowMaterial]) : std::to_wstring(NowMaterial);
+    UE_LOG(LogFortCheats, Log, TEXT("BuildWith: %s builds with %s at level %d (%s)"), *GetNameSafe(PlayerController), MaterialName.c_str(), NowLevel + 1,
+        *GetNameSafe(static_cast<UClass*>(PlayerController->CurrentBuildableClass)));
+    if (!bLevelKept && Level >= 0)
+    {
+        std::erase_if(BuildWithLevels, [PlayerController](const auto& Entry) { return !Entry.first.Get() || Entry.first.Get() == PlayerController; });
+        BuildWithLevels.emplace_back(TWeakObjectPtr<AFortPlayerController>(PlayerController), NowLevel);
+    }
+    if (bLevelKept)
+    {
+        Reply(FString::Printf(TEXT("This game has no level %d %s pieces: building with %s at level %d%s"), Level + 1, MaterialName.c_str(), MaterialName.c_str(), NowLevel + 1, OwnGame));
+        return;
+    }
+    Reply(FString::Printf(TEXT("Building with %s at level %d%s"), MaterialName.c_str(), NowLevel + 1, OwnGame));
+#endif
+}
+
+int32_t UFortCheatManager::BuildWithLevel(const AFortPlayerController* PlayerController)
+{
+    for (const auto& [Player, Level] : BuildWithLevels)
+    {
+        if (PlayerController && Player.Get() == PlayerController)
+        {
+            return Level;
+        }
+    }
+    return -1;
+}
+
+void UFortCheatManager::RunClientBuildWith(APlayerController* PlayerController, const FString& Msg)
+{
+#if !UE_SERVER
+    // Another player's "/Name/" can't reach their game: the server answers for it.
+    FString Command = Msg;
+    FString TargetName;
+    if (!PlayerController || SplitCheatTarget(Msg, Command, TargetName))
+    {
+        return;
+    }
+    const std::wstring Line = Trim(Command.ToStdString());
+    const size_t NameEnd = Line.find_first_of(L" \t");
+    if (Lower(Line.substr(0, NameEnd)) != L"buildwith")
+    {
+        return;
+    }
+    int32_t Material = -1;
+    int32_t Level = -1;
+    std::wstring GameArguments;
+    if (!ParseBuildWith(NameEnd == std::wstring::npos ? std::wstring() : Line.substr(NameEnd), Material, Level, GameArguments))
+    {
+        return;
+    }
+    if (!PlayerController->CheatManager)
+    {
+        PlayerController->AddCheats(true);
+    }
+    UObject* const CheatManagerObject = static_cast<UObject*>(PlayerController->CheatManager);
+    AFortPlayerController* const FortPlayerController = Cast<AFortPlayerController>(static_cast<UObject*>(PlayerController));
+    const bool bSelection = FortPlayerController && AFortPlayerController::HasBuildResourceSelection();
+    const int32_t PreviousLevel = bSelection ? static_cast<int32_t>(FortPlayerController->CurrentResourceLevel) : -1;
+    const bool bRan = CallGameBuildWith(CheatManagerObject, GameArguments);
+    const bool bLevelKept = bRan && bSelection && KeepBuildableLevel(CheatManagerObject, FortPlayerController, Level, PreviousLevel);
+    UE_LOG(LogFortCheats, Log, TEXT("BuildWith: \"%s\" on this client %s%s (cheat manager %s)"), GameArguments.c_str(), bRan ? TEXT("ran") : TEXT("couldn't run"),
+        bLevelKept ? TEXT(", no pieces of that level") : TEXT(""), *GetNameSafe(CheatManagerObject));
+#else
+    (void)PlayerController;
+    (void)Msg;
 #endif
 }
 

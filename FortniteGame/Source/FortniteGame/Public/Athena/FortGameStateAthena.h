@@ -23,6 +23,9 @@ public:
     // (1.7.2 0x437C30) only takes a player out of the alive players from Aircraft on.
     DefineUProperty(EAthenaGamePhase, GamePhase)
     DefineUProperty(int32_t, PlayersLeft)
+    // The most players the match had: AddToAlivePlayers (1.10 0x42A4A0) raises it to the alive players' count.
+    DefineUProperty(int32_t, TotalPlayers)
+    static bool HasTotalPlayers() { return Member_TotalPlayers.IsAvailable(); }
     DefineUProperty(int32_t, TeamsLeft)
     // The warmup's countdown in the world's time, replicated for the clients' timer: set when the warmup starts
     // (UpdateWarmupPhase, 1.9 0x43D9A0, the end -1 until then), and the bus leaves at the end.

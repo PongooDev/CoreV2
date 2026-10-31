@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/Set.h"
 #include "FortTeamInfo.h"
 #include "Player/FortPlayerState.h"
 
@@ -52,6 +53,18 @@ public:
     DefineUProperty(int32_t, Kills)
     DefineUProperty(int32_t, KillScore)
     DefineUStructProperty(FDeathInfo, DeathInfo)
+    // 1.10: the other teams' players the player knocked down (the DBNO handling adds to it), and those they hit (the
+    // hit's stat, 0x43D8E0, adds each to the set), for the end-of-match screen's Downs and Assists.
+    DefineUProperty(int32_t, DownScore)
+    static bool HasDownScore() { return Member_DownScore.IsAvailable(); }
+
+private:
+    // A set can't be assigned, so it has no DefineUProperty setter: read-only.
+    static inline Reflection::FMemberInfo Member_HostilePlayersDamaged{ &StaticReflectionOwner, TEXT("HostilePlayersDamaged"), sizeof(TSet<AFortPlayerStateAthena*>), Reflection::EMemberKind::Value };
+
+public:
+    const TSet<AFortPlayerStateAthena*>& GetHostilePlayersDamaged() const { return Reflection::AccessMember<TSet<AFortPlayerStateAthena*>>(this, Member_HostilePlayersDamaged); }
+    static bool HasHostilePlayersDamaged() { return Member_HostilePlayersDamaged.IsAvailable(); }
     // Set when the player is eliminated or wins.
     DefineUProperty(int32_t, SecondsAlive)
     // From 1.10, replicated to every client.

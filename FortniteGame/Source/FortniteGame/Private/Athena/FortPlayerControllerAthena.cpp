@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Abilities/FortHomebaseSet.h"
+#include "AthenaPlayerMatchReport.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
@@ -18,6 +19,7 @@
 #include "Items/FortPickup.h"
 #include "Items/FortQuickBars.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Math/Rotator.h"
 #include "Math/UnrealMathUtility.h"
@@ -485,8 +487,54 @@ void AFortPlayerControllerAthena::PlaceAtDeathLocation(AFortPawn* DeadPawn)
 #endif
 }
 
+UAthenaPlayerMatchReport* AFortPlayerControllerAthena::GetMatchReport()
+{
+    // BeginPlay makes it (1.10 0x42B1B0: NewObject<UAthenaPlayerMatchReport>(this)) on the server as on the client; a
+    // controller whose BeginPlay hasn't run yet gets it the same way.
+    if (!HasMatchReport())
+    {
+        return nullptr;
+    }
+    UAthenaPlayerMatchReport* Report = MatchReport;
+    if (!Report && UAthenaPlayerMatchReport::StaticClass())
+    {
+        Report = NewObject<UAthenaPlayerMatchReport>(this, UAthenaPlayerMatchReport::StaticClass());
+        MatchReport = Report;
+    }
+    return Report;
+}
+
+void AFortPlayerControllerAthena::ClientSendMatchStatsForPlayer(const FAthenaMatchStats& Stats)
+{
+    Reflection::FParams Params(FindStaticFunction_ClientSendMatchStatsForPlayer(), true);
+    if (Params.CopyStruct(L"Stats", &Stats))
+    {
+        Params.Call(this);
+    }
+}
+
+void AFortPlayerControllerAthena::ClientSendEndBattleRoyaleMatchForPlayer(bool bSuccess, const FAthenaRewardResult* Result)
+{
+    Reflection::FParams Params(FindStaticFunction_ClientSendEndBattleRoyaleMatchForPlayer(), true);
+    if (Params.Set(L"bSuccess", bSuccess) && (!Result || Params.CopyStruct(L"Result", Result)))
+    {
+        Params.Call(this);
+    }
+}
+
 void AFortPlayerControllerAthena::HookCallSites()
 {
+#if WITH_SERVER_CODE
+    // The end-of-match screen's stats (AFortPlayerController::SendMatchStatsForPlayer) are read with the StatManager's
+    // getter: found now, on a build whose screen takes them, so the log tells at the start.
+    if (FindStaticFunction_ClientSendMatchStatsForPlayer())
+    {
+        Finder::ResolveMatchStatsLive();
+        Log::Info(L"Battle Royale: the end-of-match screen takes FAthenaMatchStats ({}), the match report {}, the player state {}", FAthenaMatchStats::IsReflected() ? L"reflected" : L"not reflected",
+            UAthenaPlayerMatchReport::HasStats() && HasMatchReport() ? L"holds them" : L"is missing", AFortPlayerStateAthena::HasDownScore() ? L"has DownScore" : L"has no DownScore");
+    }
+#endif
+
     if (uint8_t* Call = Finder::PawnDiedInventoryDropCall())
     {
         Hooks::RedirectCall(L"AFortPlayerControllerZone pawn-death inventory drop", Call, reinterpret_cast<void*>(&PawnDiedInventoryDropCall));

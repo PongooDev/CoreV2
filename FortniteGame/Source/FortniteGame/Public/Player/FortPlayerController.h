@@ -24,6 +24,7 @@ class UFortQuestManager;
 class UFortRegisteredPlayerInfo;
 class UFortSchematicItem;
 class UFortWorldItem;
+class UStatManager;
 struct FFortItemEntry;
 struct FItemDefinitionAndCount;
 struct FItemAndCount;
@@ -52,8 +53,9 @@ public:
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
-    // The player's match stats (UStatManager: SelfRevives, RevivesFromTeammate, TeammateRevives, ...).
-    DefineUProperty(UObject*, StatManager)
+    // The player's gameplay stats (SelfRevives, RevivesFromTeammate, TeammateRevives, the damage, shots, distance and
+    // materials the end-of-match screen shows, ...).
+    DefineUProperty(UStatManager*, StatManager)
     DefineBitfieldUProperty(bCraftFree)
     DefineBitfieldUProperty(bInfiniteDurability)
     static bool HasInfiniteDurabilityFlag() { return Member_bInfiniteDurability.IsAvailable(); }
@@ -162,6 +164,9 @@ public:
     int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
     UFortQuestManager* GetQuestManager() const;
     UFortSchematicItem* GetSchematicForItem(const UFortItemDefinition* ItemDefinition);
+    // Match stats (FortPlayerControllerMatchStats.cpp): the player's end-of-match screen gets their stats once their
+    // place is final (21.40's AFortPlayerController::SendMatchStatsForPlayer; 1.10's is stripped).
+    void SendMatchStatsForPlayer();
 
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
     // The game's own removals from a player's inventory (IFortInventoryOwnerInterface::RemoveInventoryItem) reach Core.

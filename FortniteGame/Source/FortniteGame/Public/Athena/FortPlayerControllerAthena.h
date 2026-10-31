@@ -13,8 +13,11 @@ class APawn;
 class AFortPawn;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
+class UAthenaPlayerMatchReport;
 class UFortHero;
 class UFortHeroType;
+struct FAthenaMatchStats;
+struct FAthenaRewardResult;
 struct FGameplayTagContainer;
 
 // A Battle Royale outfit (from 1.8; CID_*): the hero it plays (HID_*_Athena_Commando_*).
@@ -73,9 +76,17 @@ public:
     // Server: who SpectateOnDeath watches first after a death, the eliminator's pawn.
     DefineUProperty(APawn*, PlayerToSpectateOnDeath)
     DefineUFunction(SpectateOnDeath)
+    // 1.10: the player's report of their match (AthenaPlayerMatchReport.h), made in BeginPlay on the server too.
+    DefineUProperty(UAthenaPlayerMatchReport*, MatchReport)
     // The end-of-match screen's stats (FAthenaMatchStats) and its rewards, which end its "Team Still Alive" wait.
     DefineUFunction(ClientSendMatchStatsForPlayer)
     DefineUFunction(ClientSendEndBattleRoyaleMatchForPlayer)
+
+    static bool HasMatchReport() { return Member_MatchReport.IsAvailable(); }
+    UAthenaPlayerMatchReport* GetMatchReport();
+    void ClientSendMatchStatsForPlayer(const FAthenaMatchStats& Stats);
+    // Result null: no rewards (MCP's EndBattleRoyaleGame, which answered with them, has no caller left).
+    void ClientSendEndBattleRoyaleMatchForPlayer(bool bSuccess, const FAthenaRewardResult* Result);
 
     // Whether the controller plays Battle Royale heroes only: 1.7.2's DefaultHeroes, or 1.8's loadout's.
     bool PlaysBattleRoyaleHeroes();

@@ -18,6 +18,7 @@
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerControllerZone.h"
 #include "ReflectionParams.h"
+#include "StatManager.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -302,9 +303,18 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
     UObject* ReviverStats = Reviver ? static_cast<UObject*>(Reviver->StatManager) : nullptr;
     if (ReviverStats && Natives::UStatManager_FindStat && Natives::FStat_Increment)
     {
+        // The end-of-match screen's Revives (AFortPlayerController::SendMatchStatsForPlayer). 1.10's change takes the
+        // amount as a double.
         if (void* Stat = Natives::UStatManager_FindStat(ReviverStats, FName(L"TeammateRevives"), 3))
         {
-            Natives::FStat_Increment(Stat, 1, 0);
+            if (Natives::FStat_bDoubleAmount)
+            {
+                reinterpret_cast<void (*)(void*, double, uint8_t)>(Natives::FStat_Increment)(Stat, 1.0, 0);
+            }
+            else
+            {
+                Natives::FStat_Increment(Stat, 1, 0);
+            }
         }
     }
 

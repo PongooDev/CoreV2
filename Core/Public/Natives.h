@@ -460,6 +460,11 @@ namespace Natives
     inline void (*AFortPlayerController_RefocusQuickBars)(AFortPlayerController* This) = nullptr;
     inline void* (*UStatManager_FindStat)(UObject* This, FName StatName, uint8_t Type) = nullptr;
     inline void (*FStat_Increment)(void* Stat, int32_t Amount, int32_t Flags) = nullptr;
+    // 1.10's stat change (0x904520) takes its amount as a double, in xmm1 (Finder::ResolveDBNOReviveLive sees the movsd
+    // that loads it); 1.8's takes an int32.
+    inline bool FStat_bDoubleAmount = false;
+    // UStatManager::GetStatValue (1.10 0x9006E0): a stat's value in a recording period, rounded; Finder::ResolveMatchStatsLive.
+    inline int32_t (*UStatManager_GetStatValue)(UObject* This, FName StatName, uint8_t Period) = nullptr;
     inline int32_t AFortPlayerControllerAthena_ServerDBNOReviveInterruptedIndex = -1;
     // What 1.9's AFortPlayerControllerAthena pawn-death handler (OnPawnDied, 0x42DB20) calls, for the builds that strip
     // it to a jump to AFortPlayerControllerZone's (1.9.1): Finder::StrippedAthenaPawnDiedIndex and

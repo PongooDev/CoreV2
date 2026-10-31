@@ -7103,6 +7103,15 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
         {
             FindStat = Calls[1].second;
             IncrementStat = Calls[2].second;
+            // 1.10 loads the amount, 1.0, as a double between the two (movsd xmm1, [rip+...]: F2 0F 10 0D).
+            for (uintptr_t Site = Calls[1].first + 5; Site + 4 <= Calls[2].first; ++Site)
+            {
+                if (Byte(Site) == 0xF2 && Byte(Site + 1) == 0x0F && Byte(Site + 2) == 0x10 && Byte(Site + 3) == 0x0D)
+                {
+                    Natives::FStat_bDoubleAmount = true;
+                    break;
+                }
+            }
         }
     }
 
@@ -9236,6 +9245,39 @@ namespace
     }
 
     const wchar_t* const RemoveFromAlivePlayersLog = L"FortGameModeAthena: RemoveFromAlivePlayers called for Player [%s] who wasn't in the AlivePlayers list.";
+}
+
+bool Finder::ResolveMatchStatsLive()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::UStatManager_GetStatValue != nullptr;
+    }
+    bSearched = true;
+
+    // The match stats' analytics reader (1.10 0x39B410): "TotalDamage", "TotalKills", "TotalDowns" and "TotalRevives"
+    // from the player state and from the controller's StatManager, whose values it asks UStatManager::GetStatValue
+    // (0x9006E0: the stat, 0x900650, and its value in the period, rounded) for twice ("TeammateRevives", "DamageDealt",
+    // period Map) before anything else it calls.
+    for (const uintptr_t Ref : Finder::StringRefs(L"TotalRevives"))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = End ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+        if (Calls.size() >= 2 && Calls[0].second == Calls[1].second && !Finder::IsStubFunction(Calls[0].second))
+        {
+            Natives::UStatManager_GetStatValue = reinterpret_cast<decltype(Natives::UStatManager_GetStatValue)>(Calls[0].second);
+            break;
+        }
+    }
+    if (!Natives::UStatManager_GetStatValue)
+    {
+        Log::Error(L"Finder: UStatManager::GetStatValue not found, the end-of-match screen gets no stats from the StatManager");
+        return false;
+    }
+    Log::Info(L"Finder: UStatManager::GetStatValue 0x{:X}", reinterpret_cast<uintptr_t>(Natives::UStatManager_GetStatValue) - Finder::ImageBase());
+    return true;
 }
 
 int32_t Finder::StrippedAthenaPawnDiedIndex()

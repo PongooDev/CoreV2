@@ -4,7 +4,9 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerState.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
 #include "GameThread.h"
@@ -30,6 +32,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
@@ -169,6 +172,28 @@ UFortHero* AFortPlayerControllerAthena::SetupHero()
     if (Hero)
     {
         TrySetHeroImplementation(Hero, false, false);
+    }
+
+    // 1.10's in-match banner (the elimination screen's, #166) is the player state's Banner, which only the call that
+    // makes the hero fills from the loadout (0x43B7D0: IconId and ColorId from BannerIconId and BannerColorId). A hero
+    // made before the player's athena profile had arrived kept the loadout's default banner there, while the loadout
+    // itself came from the profile; every later call returns that hero first. The player state takes the loadout's
+    // banner here as that call does, whenever they differ.
+    AFortPlayerStateAthena* AthenaPlayerState = AFortPlayerStateAthena::HasBanner() && Member_CustomizationLoadout.IsAvailable()
+        ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
+    if (AthenaPlayerState && Role == ROLE_Authority)
+    {
+        const FFortAthenaLoadout& Loadout = CustomizationLoadout;
+        FPlayerBannerInfo& Banner = AthenaPlayerState->Banner;
+        const FString& IconId = Loadout.BannerIconId;
+        const FString& ColorId = Loadout.BannerColorId;
+        if (IconId.Len() > 0 && (std::wcscmp(*Banner.IconId, *IconId) != 0 || std::wcscmp(*Banner.ColorId, *ColorId) != 0))
+        {
+            Banner.IconId = IconId;
+            Banner.ColorId = ColorId;
+            AthenaPlayerState->ForceNetUpdate();
+            UE_LOG(LogFort, Log, TEXT("SetupHero: %s shows the banner %s, %s"), *GetName(), *IconId, *ColorId);
+        }
     }
     return Hero;
 }

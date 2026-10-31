@@ -5,6 +5,15 @@
 
 class AFortPlayerStateAthena;
 
+// The banner a Battle Royale player shows in the match (from 1.10: the elimination screen's), their loadout's.
+struct FPlayerBannerInfo
+{
+    DefineUnrealStruct(FPlayerBannerInfo, FortniteGame)
+    DefineUProperty(FString, IconId)
+    DefineUProperty(FString, ColorId)
+    DefineUProperty(int32_t, Level)
+};
+
 // How a Battle Royale player was last downed or eliminated, which the death screen shows (OnRep_DeathInfo). The death
 // handler (1.7.2 0x437D2F, 1.8 0x43BAFE) sets it when the player is eliminated: not DBNO, and the eliminator's player
 // state, or the player's own when nobody eliminated them (the storm, a fall). Its first member is Killer up to 1.7.2,
@@ -45,6 +54,8 @@ public:
     DefineUStructProperty(FDeathInfo, DeathInfo)
     // Set when the player is eliminated or wins.
     DefineUProperty(int32_t, SecondsAlive)
+    // From 1.10, replicated to every client.
+    DefineUStructProperty(FPlayerBannerInfo, Banner)
     DefineUFunction(ClientReportKill)
 
     // The kill feed line on the eliminator's client ("You eliminated <name>").
@@ -53,6 +64,7 @@ public:
     static ptrdiff_t PlaceOffset() { return Member_Place.GetOffsetChecked(); }
     static ptrdiff_t SecondsAliveOffset() { return Member_SecondsAlive.GetOffsetChecked(); }
     static ptrdiff_t DeathInfoOffset() { return Member_DeathInfo.GetOffsetChecked(); }
+    static bool HasBanner() { return Member_Banner.IsAvailable(); }
 
     // Client only, not replicated: whether the player is talking in voice chat, which the HUD's team list shows (its
     // speaker icon). Only Vivox's participant updates set it (1.7.2 0x3C54D20); Core sets it from the engine's voice chat.

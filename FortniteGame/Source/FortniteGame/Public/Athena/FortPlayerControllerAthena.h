@@ -45,6 +45,9 @@ class UAthenaGliderItemDefinition : public UFortItemDefinition
 struct FFortAthenaLoadout
 {
     DefineUnrealStruct(FFortAthenaLoadout, FortniteGame)
+    // The athena profile's banner_icon and banner_color.
+    DefineUProperty(FString, BannerIconId)
+    DefineUProperty(FString, BannerColorId)
     DefineUProperty(UAthenaGliderItemDefinition*, Glider)
     DefineUProperty(UAthenaPickaxeItemDefinition*, Pickaxe)
     DefineUProperty(UAthenaCharacterItemDefinition*, Character)

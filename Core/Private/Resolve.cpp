@@ -9093,10 +9093,12 @@ bool Finder::OnlyLoadsEmoteAnimation(uintptr_t Implementation, ptrdiff_t Animati
     // ServerPlayEmoteItem_Implementation, loading the emote's montage (EmoteAsset->Animation.LoadSynchronous()):
     // test rdx, rdx; jz; lea rcx, [rdx+Animation]; mov dl, 1; jmp (1.9 0x85B400, 1.9.1 0x85D9F0). The controller is gone
     // from rcx before the tail jump, so nothing after the load can reach it. 1.8.2 (0x84F000) keeps the controller and
-    // calls the play body (0x82CD40) after the load.
+    // calls the play body (0x82CD40) after the load. 1.10 (CL-3790078) strips the load too: its slot (0x1AD) holds the
+    // shared empty function (0x1729B00), so Core loads the montage itself.
     return AnimationOffset > 0 && IsInText(Implementation)
-        && FindInstruction(Implementation, Implementation + 15, { 0x48, 0x85, 0xD2, 0x74, -1, 0x48, 0x8D, 0x8A, -1, -1, -1, -1, 0xB2, 0x01, 0xE9 }) == Implementation
-        && *reinterpret_cast<const int32_t*>(Implementation + 8) == AnimationOffset;
+        && ((FindInstruction(Implementation, Implementation + 15, { 0x48, 0x85, 0xD2, 0x74, -1, 0x48, 0x8D, 0x8A, -1, -1, -1, -1, 0xB2, 0x01, 0xE9 }) == Implementation
+            && *reinterpret_cast<const int32_t*>(Implementation + 8) == AnimationOffset)
+            || IsSharedEmptyBody(Implementation));
 }
 
 bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOffset)

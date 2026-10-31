@@ -23,7 +23,8 @@
 // 0x82CD40), which gives the pawn's ability system UFortGameData::EmoteGameplayAbility with the emote as the spec's
 // source object and activates it once; the ability plays the montage. 1.9 (0x85B400, slot 0x1AF) and 1.9.1 (CL-3775276,
 // 0x85D9F0, slot 0x1B0) only load the montage: the play body is gone, and so is its call from ServerEmote's load
-// callback (1.9 0x839090). The client still sends the RPC and nothing played.
+// callback (1.9 0x839090). The client still sends the RPC and nothing played. 1.10 (CL-3790078, slot 0x1AD) strips the
+// whole body: the slot holds the shared empty function (#161).
 //
 // This follows 1.8.2's body. It leaves out spending a consumable emote (UAthenaConsumableEmoteItemDefinition) from the
 // player's Athena profile through MCP, which 1.8.2 does only when the controller has one (0x41D780): consumable emotes
@@ -32,12 +33,14 @@
 void AFortPlayerController::ServerPlayEmoteItem_Implementation(UFortMontageItemDefinitionBase* EmoteAsset)
 {
 #if WITH_SERVER_CODE
-    // The part the build keeps: EmoteAsset->Animation.LoadSynchronous().
+    // The part 1.9 and 1.9.1 keep: EmoteAsset->Animation.LoadSynchronous(). 1.10's slot is the shared empty function,
+    // so the load is done here too (a loaded montage's is a lookup).
     ServerPlayEmoteItem_ImplementationOG(this, EmoteAsset);
     if (!EmoteAsset)
     {
         return;
     }
+    EmoteAsset->Animation.LoadSynchronous();
 
     // 1.8.2 plays through the pawn's IAbilitySystemInterface, which returns its AbilitySystemComponent.
     AFortPawn* Pawn = MyFortPawn;

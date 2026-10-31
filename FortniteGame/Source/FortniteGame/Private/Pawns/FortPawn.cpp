@@ -135,6 +135,66 @@ bool AFortPawn::ForceMaxHealth(float NewMaxHealth)
     return true;
 }
 
+bool AFortPawn::ForceMaxShield(float NewMaxShield)
+{
+    // As ForceMaxHealth: Shield's current value is the maximum shield (GetMaxShield), and CurrentShield is clamped to its
+    // own Maximum (1.9 0x476AF0), which only Shield's aggregator moves (0x44DD70).
+    UFortHealthSet* Set = HealthSet;
+    if (!Set || !UFortHealthSet::HasShield())
+    {
+        return false;
+    }
+    FFortGameplayAttributeData& MaxShieldData = Set->Shield;
+    FFortGameplayAttributeData& ShieldData = Set->CurrentShield;
+    bool bChanged = false;
+    if (FFortGameplayAttributeData::HasMaximum() && std::fabs(ShieldData.Maximum - NewMaxShield) > 0.5f)
+    {
+        ShieldData.Maximum = NewMaxShield;
+        bChanged = true;
+    }
+    if (ShieldData.CurrentValue > NewMaxShield || ShieldData.BaseValue > NewMaxShield)
+    {
+        ShieldData.CurrentValue = std::min(static_cast<float>(ShieldData.CurrentValue), NewMaxShield);
+        ShieldData.BaseValue = std::min(static_cast<float>(ShieldData.BaseValue), NewMaxShield);
+        bChanged = true;
+    }
+    if (std::fabs(MaxShieldData.CurrentValue - NewMaxShield) > 0.5f)
+    {
+        MaxShieldData.CurrentValue = NewMaxShield;
+        bChanged = true;
+    }
+    if (bChanged)
+    {
+        ForceNetUpdate();
+        if (APlayerState* State = PlayerState)
+        {
+            State->ForceNetUpdate();
+        }
+    }
+    return true;
+}
+
+bool AFortPawn::SetShield(float NewShield)
+{
+    // No pawn function sets the shield (only SetHealth and SetMaxHealth exist); the game's own changes go through the
+    // ability system to CurrentShield's base value, which a later effect on it starts from, so both values are set.
+    UFortHealthSet* Set = HealthSet;
+    if (!Set || !UFortHealthSet::HasShield())
+    {
+        return false;
+    }
+    FFortGameplayAttributeData& ShieldData = Set->CurrentShield;
+    const float Value = std::clamp(NewShield, 0.0f, std::max(0.0f, static_cast<float>(Set->Shield.CurrentValue)));
+    ShieldData.BaseValue = Value;
+    ShieldData.CurrentValue = Value;
+    ForceNetUpdate();
+    if (APlayerState* State = PlayerState)
+    {
+        State->ForceNetUpdate();
+    }
+    return true;
+}
+
 bool AFortPawn::EquipDefaultWeapon()
 {
     if (!Finder::ResolveAbilityWeaponLive(CurrentWeaponListOffset(), AFortPlayerPawn::LastEquippedWeaponGUIDOffset()))

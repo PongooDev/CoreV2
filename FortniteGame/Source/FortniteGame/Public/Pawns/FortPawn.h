@@ -75,6 +75,13 @@ public:
     // until the effects on MaxHealth or its base change again. Health's clamp follows it, so health can reach it, and a
     // health above it comes down to it. False without a health set.
     bool ForceMaxHealth(float NewMaxHealth);
+    // Server (#155): the health set's maximum shield (Shield) made NewMaxShield whatever its effects say, the way
+    // ForceMaxHealth does it (Battle Royale's GE_Map_Athena_Vitality_Health caps it at 100), and the shield's clamp with
+    // it. False without a health set that has shields.
+    bool ForceMaxShield(float NewMaxShield);
+    // Server (#155): the shield (CurrentShield, base and current value), clamped to the maximum shield; it replicates
+    // with the health set. False without a health set that has shields.
+    bool SetShield(float NewShield);
 
     // "cheat fly 3000" (#129): the pawn runs at Speed (and walks and sprints faster by as much), 0 gives it its own
     // speeds back. Character movement is predicted, so the server and the owning client both run this with the same

@@ -1922,8 +1922,11 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // (or "hero"; #134, #136) gives them a hero's look, "disguise <class> [scale]" and "undisguise" (#134, #136) turn them
     // into a prop or a pawn, "tpactor <class, name or path> [n]" (#146) puts them on top of the nearest actor that matches,
     // "nocooldown [on | off]" (#148; also for the game's ToggleNoCoolDown, which sets a flag nothing reads) ends their
-    // ability and gadget cooldowns, "infinitemag [on | off]" (#149; also for ToggleInfiniteAmmo, whose flag it sets) keeps
-    // their magazine full, "repair [all]" (#150) restores their weapon's durability, "firerate <multiplier | reset>"
+    // ability and gadget cooldowns, "infinitemag [on | off]" (#149) keeps their magazine full, "infiniteammo [on | off]"
+    // (#155; also for the game's ToggleInfiniteAmmo, whose flag it sets and answers for) keeps their reserve from running
+    // out, "sethealth", "setshield", "setmaxshield", "clearequippeditem", "setscale" and "progressquest" (#155, from
+    // PongooDev/Core) set their health, shield and size, take away the item they hold and move a quest on, "repair
+    // [all]" (#150) restores their weapon's durability, "firerate <multiplier | reset>"
     // (#150) changes how fast their guns fire, "weapondamage <multiplier | reset>" (#152) how much damage their weapons
     // do, "dance [EID]" (#152) plays an emote, "maxhealth <value | reset>" (or "setmaxhealth") and "speed <multiplier |
     // reset>" (#155) change their maximum health and how fast they move, "teleportto <player>" and "bring <player | all>"
@@ -1939,7 +1942,14 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"nocooldown", &UFortCheatManager::NoCooldown },
         { L"togglenocooldown", &UFortCheatManager::NoCooldown },
         { L"infinitemag", &UFortCheatManager::InfiniteMag },
-        { L"toggleinfiniteammo", &UFortCheatManager::InfiniteMag },
+        { L"infiniteammo", &UFortCheatManager::InfiniteAmmo },
+        { L"toggleinfiniteammo", &UFortCheatManager::InfiniteAmmo },
+        { L"sethealth", &UFortCheatManager::SetHealth },
+        { L"setshield", &UFortCheatManager::SetShield },
+        { L"setmaxshield", &UFortCheatManager::SetMaxShield },
+        { L"clearequippeditem", &UFortCheatManager::ClearEquippedItem },
+        { L"setscale", &UFortCheatManager::SetScale },
+        { L"progressquest", &UFortCheatManager::ProgressQuest },
         { L"unlimitedhealth", &UFortCheatManager::UnlimitedHealth },
         { L"toggleunlimitedhealth", &UFortCheatManager::UnlimitedHealth },
         { L"repair", &UFortCheatManager::Repair },

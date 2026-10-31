@@ -42,6 +42,7 @@
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
+#include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -470,7 +471,7 @@ namespace
 
     constexpr FCoreCheat CoreCheats[] = {
         { L"Items", L"GiveWeapon", L"giveweapon <name> [level] [count]", L"a weapon or consumable", ECheatMode::Both },
-        { L"Items", L"GiveAmmo", L"giveammo <name> [amount]", L"ammo", ECheatMode::Both },
+        { L"Items", L"GiveAmmo", L"giveammo [name] [amount]", L"ammo, your gun's without a name", ECheatMode::Both },
         { L"Items", L"GiveTrap", L"givetrap <name> [level] [count]", L"a trap", ECheatMode::Both },
         { L"Items", L"GiveGadget", L"givegadget <name> [level]", L"a gadget", ECheatMode::Both },
         { L"Items", L"GiveSpecificItem", L"givespecificitem <path or name> [count] [level]", L"any item", ECheatMode::Both },
@@ -484,6 +485,7 @@ namespace
         { L"Items", L"GiveAthenaFullKit", L"giveathenafullkit", L"a full BR kit", ECheatMode::BattleRoyale },
         { L"Items", L"Badass", L"badass", L"god, build free, STW weapons", ECheatMode::SaveTheWorld },
         { L"Items", L"ListWeapons", L"listweapons", L"item names (listammo, listtraps)", ECheatMode::Both },
+        { L"Items", nullptr, L"clearequippeditem", L"remove the item you hold", ECheatMode::Both },
         { L"Player", L"God", L"god", L"invulnerable, toggles", ECheatMode::Both },
         { L"Player", nullptr, L"unlimitedhealth [on | off]", L"take no damage", ECheatMode::Both },
         { L"Player", L"ToggleInfiniteStamina", L"infinitestamina", L"stamina never runs out, toggles", ECheatMode::SaveTheWorld },
@@ -493,6 +495,10 @@ namespace
         { L"Player", nullptr, L"speed <multiplier | reset>", L"move faster or slower", ECheatMode::Both },
         { L"Player", nullptr, L"maxhealth <value | reset>", L"maximum health, healed to it", ECheatMode::Both },
         { L"Player", nullptr, L"healthpercent <0-100>", L"health as a share of the maximum", ECheatMode::Both },
+        { L"Player", nullptr, L"sethealth <value>", L"your health", ECheatMode::Both },
+        { L"Player", nullptr, L"setshield <value>", L"your shield", ECheatMode::Both },
+        { L"Player", nullptr, L"setmaxshield <value | reset>", L"maximum shield", ECheatMode::Both },
+        { L"Player", nullptr, L"setscale <x> [y z] | reset", L"your size, for everyone", ECheatMode::Both },
         { L"Player", L"ChangeSize", L"changesize <scale>", L"your size", ECheatMode::Both },
         { L"Player", L"BuildFree", L"buildfree", L"free building, toggles (craftfree)", ECheatMode::Both },
         { L"Player", nullptr, L"infinitedurability [on | off]", L"items don't wear out", ECheatMode::Both },
@@ -506,6 +512,7 @@ namespace
         { L"Player", nullptr, L"disguiseview <back | hide | normal>", L"how you see your disguise", ECheatMode::Both },
         { L"Player", nullptr, L"dance [EID]", L"play an emote", ECheatMode::Both },
         { L"Weapons", nullptr, L"infinitemag [on | off]", L"never reload, never run out", ECheatMode::Both },
+        { L"Weapons", nullptr, L"infiniteammo [on | off]", L"reloads never use up ammo", ECheatMode::Both },
         { L"Weapons", nullptr, L"firerate <multiplier | reset>", L"guns fire faster", ECheatMode::Both },
         { L"Weapons", nullptr, L"weapondamage <multiplier | reset>", L"weapons hit harder", ECheatMode::Both },
         { L"Weapons", nullptr, L"bloom [on | off]", L"no spread (your game only)", ECheatMode::Both },
@@ -546,6 +553,7 @@ namespace
         { L"Save the World", L"SetWorldLevel", L"worldlevel <level>", L"the world level", ECheatMode::SaveTheWorld },
         { L"Save the World", L"ToggleIndestructibleKeep", L"indestructiblekeep", L"objective can't break", ECheatMode::SaveTheWorld },
         { L"Save the World", L"CountPlayerBuiltBuildingActors", L"countplayerbuiltbuildingactors", L"structure count", ECheatMode::SaveTheWorld },
+        { L"Other", nullptr, L"progressquest [quest] [amount | all]", L"move a quest on (alone: list them)", ECheatMode::Both },
         { L"Other", L"CheatScript", L"cheatscript <section>", L"run a list of cheats", ECheatMode::Both },
         { L"Other", L"ListCheats", L"listcheats", L"every exec function", ECheatMode::Both },
         { L"Other", nullptr, L"corecheats [filter | all]", L"this list", ECheatMode::Both },
@@ -704,19 +712,22 @@ void UFortCheatManager::GiveWeapon(const FString& WeaponName, int32_t RequestedL
 void UFortCheatManager::GiveAmmo(const FString& AmmoNameAndAmount)
 {
 #if WITH_SERVER_CODE
-    // "AmmoDataBulletsHeavy 1000", the CheatScript sections' form.
-    const std::wstring Line = AmmoNameAndAmount.ToStdString();
-    const size_t Space = Line.find_last_of(L' ');
-    std::wstring Name = Line;
+    // "AmmoDataBulletsHeavy 1000", the CheatScript sections' form. Without a name ("giveammo", "giveammo 100"; #155,
+    // PongooDev/Core's form), the ammo the held weapon fires (its definition's AmmoData).
+    const std::vector<std::wstring> Words = SplitWords(AmmoNameAndAmount.ToStdString());
+    std::wstring Name;
     int32_t Amount = 0;
-    if (Space != std::wstring::npos)
+    for (size_t Index = 0; Index < Words.size(); ++Index)
     {
         wchar_t* End = nullptr;
-        const long Parsed = std::wcstol(Line.c_str() + Space + 1, &End, 10);
-        if (End && *End == L'\0' && Space + 1 < Line.size())
+        const long Parsed = std::wcstol(Words[Index].c_str(), &End, 10);
+        if (Index + 1 == Words.size() && End && End != Words[Index].c_str() && *End == L'\0')
         {
-            Name = Line.substr(0, Space);
-            Amount = static_cast<int32_t>(Parsed);
+            Amount = static_cast<int32_t>(std::clamp<long>(Parsed, 0, 1000000));
+        }
+        else
+        {
+            Name += (Name.empty() ? L"" : L" ") + Words[Index];
         }
     }
 
@@ -725,13 +736,34 @@ void UFortCheatManager::GiveAmmo(const FString& AmmoNameAndAmount)
     {
         return;
     }
-    const std::vector<FCheatAsset> Assets = ListAssets({ L"Ammo" });
-    const FCheatAsset* Asset = FindAsset(Assets, Name, AFortGameModeAthena::GetCurrent(PlayerController) != nullptr);
-    UFortWorldItemDefinition* Ammo = Asset ? LoadItem(Asset->Path) : nullptr;
-    if (!Ammo)
+    UFortWorldItemDefinition* Ammo = nullptr;
+    if (Name.empty())
     {
-        Reply(FString::Printf(TEXT("No ammo called '%s' (ListAmmo lists them)"), Name.c_str()));
-        return;
+        AFortPawn* Pawn = PlayerController->MyFortPawn;
+        AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        UFortWeaponItemDefinition* WeaponData = Weapon ? static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData) : nullptr;
+        if (!WeaponData)
+        {
+            Reply(TEXT("Usage: giveammo [name] [amount], without a name the ammo of the gun you hold (ListAmmo lists the names)"));
+            return;
+        }
+        Ammo = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(WeaponData->AmmoData).LoadSynchronous();
+        if (!Ammo)
+        {
+            Reply(FString::Printf(TEXT("%s uses no ammo"), *WeaponData->GetName()));
+            return;
+        }
+    }
+    else
+    {
+        const std::vector<FCheatAsset> Assets = ListAssets({ L"Ammo" });
+        const FCheatAsset* Asset = FindAsset(Assets, Name, AFortGameModeAthena::GetCurrent(PlayerController) != nullptr);
+        Ammo = Asset ? LoadItem(Asset->Path) : nullptr;
+        if (!Ammo)
+        {
+            Reply(FString::Printf(TEXT("No ammo called '%s' (ListAmmo lists them)"), Name.c_str()));
+            return;
+        }
     }
     const int32_t Count = Amount > 0 ? Amount : FullStack(Ammo);
     UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Ammo, Count, true);
@@ -2207,6 +2239,26 @@ namespace
             [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; });
     }
 
+    // "cheat infiniteammo" (#155): the players who asked for the game's bInfiniteAmmo on its own. infinitemag sets the
+    // flag too, so it stays on while either has it.
+    std::vector<TWeakObjectPtr<AFortPlayerController>> InfiniteAmmoPlayers;
+
+    bool HasInfiniteAmmo(const AFortPlayerController* PlayerController)
+    {
+        return std::any_of(InfiniteAmmoPlayers.begin(), InfiniteAmmoPlayers.end(),
+            [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; });
+    }
+
+    // The game's flag (replicated): on while infiniteammo or infinitemag is.
+    void UpdateInfiniteAmmoFlag(AFortPlayerController* PlayerController)
+    {
+        if (PlayerController->HasInfiniteAmmoFlag())
+        {
+            PlayerController->bInfiniteAmmo = HasInfiniteAmmo(PlayerController) || HasInfiniteMag(PlayerController);
+            PlayerController->ForceNetUpdate();
+        }
+    }
+
     // Tops the equipped weapon's magazine up through its own ModAmmo: on the server that sets the replicated AmmoCount
     // and the item's LoadedAmmo, as a reload does. Melee weapons and tools (no magazine) are left alone.
     void FillMagazine(AFortPlayerController* PlayerController)
@@ -2820,6 +2872,47 @@ namespace
         }
     }
 
+    // "cheat setmaxshield" (#155): the maximum shield a player asked for, and the one their pawn had of its own. Shield
+    // has no setter of its own: Battle Royale's GE_Map_Athena_Vitality_Health overrides it to 100 and Save the World's
+    // hero effects add to it, so its current value is set outright, as maxhealth does past the override, and kept so.
+    struct FMaxShield
+    {
+        TWeakObjectPtr<AFortPlayerController> Player;
+        TWeakObjectPtr<AFortPawn> Pawn;
+        float Wanted = 0.0f;
+        float Own = 0.0f;
+    };
+    std::vector<FMaxShield> MaxShields;
+
+    FMaxShield* FindMaxShield(const AFortPlayerController* PlayerController)
+    {
+        auto Found = std::find_if(MaxShields.begin(), MaxShields.end(), [PlayerController](const FMaxShield& Entry) { return Entry.Player.Get() == PlayerController; });
+        return Found != MaxShields.end() ? &*Found : nullptr;
+    }
+
+    // Every frame: an effect on Shield that works its value out again (a respawned pawn's starting effects) is set back
+    // to the maximum asked for. A new pawn's own maximum is what reset gives back.
+    void KeepMaxShield(FMaxShield& Entry)
+    {
+        AFortPlayerController* PlayerController = Entry.Player.Get();
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        if (!Pawn || Pawn->IsDead() || UFortCheatManager::IsInPossession(PlayerController))
+        {
+            return;
+        }
+        if (Pawn != Entry.Pawn.Get())
+        {
+            Entry.Pawn = Pawn;
+            const float Current = Pawn->GetMaxShield();
+            if (std::fabs(Current - Entry.Wanted) > 0.5f)
+            {
+                Entry.Own = Current;
+            }
+            UE_LOG(LogFortCheats, Log, TEXT("SetMaxShield: %s's new pawn %s gets %.0f maximum shield"), *GetNameSafe(PlayerController), *GetNameSafe(Pawn), Entry.Wanted);
+        }
+        Pawn->ForceMaxShield(Entry.Wanted);
+    }
+
     // "cheat speed" on a pawn that moves at its movement set's speeds (Save the World): the multiplier Core keeps on
     // whatever pawn the player has.
     struct FSpeedPlayer
@@ -2865,13 +2958,14 @@ namespace
     }
 
     // Every frame on the game thread while a player has infinitemag, a fire rate, a weapon damage, a maximum health or
-    // a speed: the magazine is topped up as soon as a shot takes from it, and a respawned pawn gets the effects, the
-    // maximum health and the speed again. Nothing is hooked.
+    // shield, or a speed: the magazine is topped up as soon as a shot takes from it, and a respawned pawn gets the
+    // effects, the maximum health and shield and the speed again. Nothing is hooked.
     void TickWeaponCheats()
     {
         std::erase_if(InfiniteMagPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
         std::erase_if(AttributeBoosts, [](const FAttributeBoost& Boost) { return !Boost.Player.Get(); });
         std::erase_if(MaxHealths, [](const FMaxHealth& Entry) { return !Entry.Player.Get(); });
+        std::erase_if(MaxShields, [](const FMaxShield& Entry) { return !Entry.Player.Get(); });
         std::erase_if(SpeedPlayers, [](const FSpeedPlayer& Entry) { return !Entry.Player.Get(); });
         for (const TWeakObjectPtr<AFortPlayerController>& Known : InfiniteMagPlayers)
         {
@@ -2889,11 +2983,15 @@ namespace
         {
             KeepMaxHealth(Entry);
         }
+        for (FMaxShield& Entry : MaxShields)
+        {
+            KeepMaxShield(Entry);
+        }
         for (FSpeedPlayer& Entry : SpeedPlayers)
         {
             KeepSpeed(Entry);
         }
-        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !AttributeBoosts.empty() || !MaxHealths.empty() || !SpeedPlayers.empty())
+        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !AttributeBoosts.empty() || !MaxHealths.empty() || !MaxShields.empty() || !SpeedPlayers.empty())
             && GameThread::Enqueue(&TickWeaponCheats);
     }
 
@@ -2930,11 +3028,8 @@ void UFortCheatManager::InfiniteMag(const FString& Arguments)
         InfiniteMagPlayers.emplace_back(PlayerController);
     }
     // The game's own flag (replicated): the reserve never runs out, and the player's client knows to keep its own count
-    // of the magazine full (StartInfiniteMagazineView).
-    if (PlayerController->HasInfiniteAmmoFlag())
-    {
-        PlayerController->bInfiniteAmmo = bEnable;
-    }
+    // of the magazine full while the server's is (StartInfiniteMagazineView). "infiniteammo" keeps it on by itself.
+    UpdateInfiniteAmmoFlag(PlayerController);
     // The game's own ammo saving, at a chance over 1, so a shot takes no round on the server or the client (#155); kept
     // through respawns like firerate's effects.
     if (FAttributeBoost* AmmoSave = FindBoost(PlayerController, AmmoSaveBoost))
@@ -3301,6 +3396,376 @@ void UFortCheatManager::InfiniteDurability(const FString& Arguments)
 #endif
 }
 
+void UFortCheatManager::InfiniteAmmo(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // The game's ToggleInfiniteAmmo (#155): it flips the controller's replicated bInfiniteAmmo (1.9 0x81DB70, 1.10
+    // 0x85BAF0), which GetRemainingAmmo reads (1.9 0x6B5150, 1.10 0x6F2E60: unlimited while it is on), so reloads never
+    // run the reserve out; the magazine still empties and reloads, unlike infinitemag. This sets the same flag and says
+    // which way it went.
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.empty() ? std::wstring() : Lower(Words[0]);
+    if (Words.size() > 1 || (!Word.empty() && Word != L"on" && Word != L"off"))
+    {
+        Reply(TEXT("Usage: infiniteammo [on | off], reloading never uses up your ammo (the magazine still empties: infinitemag keeps it full); without on or off it toggles"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    if (!AFortPlayerController::HasInfiniteAmmoFlag())
+    {
+        Reply(TEXT("This build's player controller has no bInfiniteAmmo"));
+        return;
+    }
+    const bool bEnable = Word.empty() ? !HasInfiniteAmmo(PlayerController) : Word == L"on";
+    std::erase_if(InfiniteAmmoPlayers, [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get() || Known.Get() == PlayerController; });
+    if (bEnable)
+    {
+        InfiniteAmmoPlayers.emplace_back(PlayerController);
+    }
+    UpdateInfiniteAmmoFlag(PlayerController);
+    UE_LOG(LogFortCheats, Log, TEXT("InfiniteAmmo: %s %s"), *GetNameSafe(PlayerController), bEnable ? TEXT("on") : TEXT("off"));
+    if (bEnable)
+    {
+        Reply(TEXT("Infinite ammo ON: reloading never uses up your ammo (infiniteammo off: normal again)"));
+    }
+    else
+    {
+        Reply(HasInfiniteMag(PlayerController) ? TEXT("Infinite ammo OFF (infinitemag is still on and keeps your magazine full)")
+                                               : TEXT("Infinite ammo OFF: reloading uses up your ammo again"));
+    }
+#endif
+}
+
+void UFortCheatManager::SetHealth(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // PongooDev/Core's SetHealth (#155): the pawn's own SetHealth, which sets Health's base value through its ability
+    // system (1.9 0x7DEAD0) and replicates with the health set. Health is clamped to the maximum health (maxhealth
+    // raises that).
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    wchar_t* End = nullptr;
+    const float Value = Words.size() == 1 ? std::wcstof(Words[0].c_str(), &End) : -1.0f;
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (Words.size() != 1 || !End || End == Words[0].c_str() || *End != L'\0' || !std::isfinite(Value) || Value < 1.0f)
+    {
+        Reply(FString::Printf(TEXT("%sUsage: sethealth <value>, at least 1 and up to your maximum health (\"sethealth 50\")"),
+            Pawn ? *FString::Printf(TEXT("Your health is %.0f/%.0f. "), Pawn->GetHealth(), Pawn->GetMaxHealth()) : TEXT("")));
+        return;
+    }
+    if (!Pawn || Pawn->IsDead())
+    {
+        Reply(TEXT("You have no pawn that is alive to change the health of"));
+        return;
+    }
+    const float Max = Pawn->GetMaxHealth();
+    if (!Pawn->SetHealth(std::min(Value, Max)))
+    {
+        Reply(TEXT("SetHealth needs FortPawn's SetHealth, which this build doesn't have"));
+        return;
+    }
+    Reply(FString::Printf(TEXT("Health set to %.0f/%.0f%s"), Pawn->GetHealth(), Max,
+        Value > Max + 0.5f ? TEXT(" (your maximum; maxhealth raises it)") : TEXT("")));
+#endif
+}
+
+void UFortCheatManager::SetShield(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // PongooDev/Core's SetShield (#155): the health set's CurrentShield (Save the World's and Battle Royale's shield), up
+    // to the maximum shield (setmaxshield raises that).
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    wchar_t* End = nullptr;
+    const float Value = Words.size() == 1 ? std::wcstof(Words[0].c_str(), &End) : -1.0f;
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (Words.size() != 1 || !End || End == Words[0].c_str() || *End != L'\0' || !std::isfinite(Value) || Value < 0.0f)
+    {
+        Reply(FString::Printf(TEXT("%sUsage: setshield <value>, 0 up to your maximum shield (\"setshield 100\")"),
+            Pawn ? *FString::Printf(TEXT("Your shield is %.0f/%.0f. "), Pawn->GetShield(), Pawn->GetMaxShield()) : TEXT("")));
+        return;
+    }
+    if (!Pawn || Pawn->IsDead())
+    {
+        Reply(TEXT("You have no pawn that is alive to change the shield of"));
+        return;
+    }
+    const float Max = Pawn->GetMaxShield();
+    if (!Pawn->SetShield(Value))
+    {
+        Reply(TEXT("This build's health set has no shield"));
+        return;
+    }
+    Reply(FString::Printf(TEXT("Shield set to %.0f/%.0f%s"), Pawn->GetShield(), Max,
+        Value > Max + 0.5f ? TEXT(" (your maximum; setmaxshield raises it)") : TEXT("")));
+#endif
+}
+
+void UFortCheatManager::SetMaxShield(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // PongooDev/Core's SetMaxShield (#155), kept like maxhealth: the health set's Shield is the maximum shield, which
+    // Battle Royale's GE_Map_Athena_Vitality_Health overrides to 100 and Save the World's hero effects add to, so its
+    // value is set outright (replicated: the HUD's OnRep_Shield) and kept every frame and through respawns until reset.
+    constexpr float MaxValue = 1000000.0f;
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
+    const bool bReset = Word == L"reset" || Word == L"off";
+    wchar_t* End = nullptr;
+    const float Value = !Word.empty() && !bReset ? std::wcstof(Word.c_str(), &End) : 0.0f;
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (!bReset && (Word.empty() || !End || End == Word.c_str() || *End != L'\0' || !std::isfinite(Value) || Value < 0.0f || Value > MaxValue))
+    {
+        Reply(FString::Printf(TEXT("%sUsage: setmaxshield <0-%d | reset>, \"setmaxshield 500\" lets your shield go up to 500 (setshield fills it)"),
+            Pawn ? *FString::Printf(TEXT("Your shield is %.0f/%.0f. "), Pawn->GetShield(), Pawn->GetMaxShield()) : TEXT(""), static_cast<int32_t>(MaxValue)));
+        return;
+    }
+    if (!Pawn || Pawn->IsDead())
+    {
+        Reply(TEXT("You have no pawn that is alive to change the shield of"));
+        return;
+    }
+    if (!Pawn->HealthSet || !UFortHealthSet::HasShield())
+    {
+        Reply(TEXT("This build's health set has no shield"));
+        return;
+    }
+
+    FMaxShield* Existing = FindMaxShield(PlayerController);
+    if (bReset)
+    {
+        if (!Existing)
+        {
+            Reply(FString::Printf(TEXT("Your maximum shield is your own already (%.0f)"), Pawn->GetMaxShield()));
+            return;
+        }
+        const float Own = Existing->Own;
+        MaxShields.erase(MaxShields.begin() + (Existing - MaxShields.data()));
+        Pawn->ForceMaxShield(Own);
+        Reply(FString::Printf(TEXT("Your maximum shield is your own again: %.0f, shield %.0f"), Pawn->GetMaxShield(), Pawn->GetShield()));
+        return;
+    }
+
+    const float Own = Existing ? Existing->Own : Pawn->GetMaxShield();
+    Pawn->ForceMaxShield(Value);
+    if (!Existing)
+    {
+        Existing = &MaxShields.emplace_back();
+        Existing->Player = PlayerController;
+    }
+    Existing->Pawn = Pawn;
+    Existing->Wanted = Value;
+    Existing->Own = Own;
+    StartWeaponCheatTick();
+    UE_LOG(LogFortCheats, Log, TEXT("SetMaxShield: %s asked for %.0f, has %.0f (own %.0f)"), *GetNameSafe(PlayerController), Value, Pawn->GetMaxShield(), Own);
+    Reply(FString::Printf(TEXT("Max shield set to %.0f, shield %.0f/%.0f (your own: %.0f; setmaxshield reset gives it back, setshield fills it)"),
+        Value, Pawn->GetShield(), Pawn->GetMaxShield(), Own));
+#endif
+}
+
+void UFortCheatManager::ClearEquippedItem(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // PongooDev/Core's ClearEquippedItem (#155): the item the player holds leaves their inventory, the way an item whose
+    // durability or stack runs out does (AFortPlayerController::HandleItemZeroDurability: the weapon is destroyed as
+    // spent, RemoveInventoryItem takes the item off the quick bars and out of the inventory, which replicates, and the
+    // pawn equips what it held before).
+    if (!SplitWords(Arguments.ToStdString()).empty())
+    {
+        Reply(TEXT("Usage: clearequippeditem, removes the item you are holding from your inventory"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+    AFortInventory* Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+    if (!Weapon || !Inventory)
+    {
+        Reply(TEXT("You aren't holding anything"));
+        return;
+    }
+    const FGuid ItemGuid = Weapon->ItemEntryGuid;
+    UFortWorldItem* WorldItem = Inventory->FindWorldItem(ItemGuid);
+    if (!WorldItem)
+    {
+        // An ability's weapon (a hero ability, a disguise) has no item.
+        Reply(FString::Printf(TEXT("%s isn't an item in your inventory"), *GetNameSafe(reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData)))));
+        return;
+    }
+    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+    const FString ItemName = GetNameSafe(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+    if (!PlayerController->HandleItemZeroDurability(ItemGuid))
+    {
+        Reply(FString::Printf(TEXT("Couldn't remove %s"), *ItemName));
+        return;
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("ClearEquippedItem: %s's %s removed"), *GetNameSafe(PlayerController), *ItemName);
+    Reply(FString::Printf(TEXT("Removed %s from your inventory"), *ItemName));
+#endif
+}
+
+void UFortCheatManager::ProgressQuest(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // PongooDev/Core's ProgressQuest (#155): an objective of one of the player's quests moves on through the quest
+    // manager's own progress (UFortQuestManager::AdvanceObjective): its flush sends UpdateQuests to the player's profile,
+    // as the game's stat events do, and the client is shown the new count. Battle Royale's challenges (1.8 and later)
+    // are the athena quest manager's, Save the World's the campaign's.
+    constexpr size_t MaxListed = 12;
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    AFortPlayerController* PlayerController = GetPlayerController();
+    UFortRegisteredPlayerInfo* PlayerInfo = PlayerController ? static_cast<UFortRegisteredPlayerInfo*>(PlayerController->MyPlayerInfo) : nullptr;
+    const bool bBattleRoyale = AFortGameModeAthena::GetCurrent(PlayerController) != nullptr;
+    UFortQuestManager* QuestManager = !PlayerInfo ? nullptr : bBattleRoyale ? PlayerInfo->GetAthenaQuestManager() : PlayerInfo->GetCampaignQuestManager();
+    if (!QuestManager)
+    {
+        Reply(bBattleRoyale ? TEXT("This build's Battle Royale has no challenges (they came with 1.8), or your quests haven't loaded")
+                            : TEXT("Your quests haven't loaded"));
+        return;
+    }
+    if (!UFortQuestManager::HasCurrentQuests() || !UFortQuestItem::HasObjectives())
+    {
+        Reply(TEXT("This build's quest manager has no quest list Core can read"));
+        return;
+    }
+
+    // "progressquest <quest> [amount | all]": the last word is the amount when it is a number or "all".
+    std::wstring Query;
+    int32_t Amount = 1;
+    bool bAll = false;
+    size_t QueryWords = Words.size();
+    if (QueryWords > 1)
+    {
+        const std::wstring Last = Lower(Words.back());
+        wchar_t* End = nullptr;
+        const long Parsed = std::wcstol(Last.c_str(), &End, 10);
+        if (Last == L"all" || Last == L"max")
+        {
+            bAll = true;
+            --QueryWords;
+        }
+        else if (End && End != Last.c_str() && *End == L'\0')
+        {
+            if (Parsed < 1 || Parsed > 1000000)
+            {
+                Reply(TEXT("The amount is from 1 to 1000000, or all"));
+                return;
+            }
+            Amount = static_cast<int32_t>(Parsed);
+            --QueryWords;
+        }
+    }
+    for (size_t Index = 0; Index < QueryWords; ++Index)
+    {
+        Query += (Index ? L"_" : L"") + Words[Index];
+    }
+    const std::wstring Wanted = Simplified(Query);
+
+    // The quests still open, each with its first objective not done; a query matches a quest's name or an objective's
+    // BackendName, an exact one first.
+    struct FOpenObjective
+    {
+        UFortQuestItem* Quest;
+        UFortQuestObjectiveInfo* Objective;
+        std::wstring QuestName;
+        bool bExact;
+    };
+    std::vector<FOpenObjective> Matches;
+    const TArray<UFortQuestItem*>& Quests = QuestManager->CurrentQuests;
+    for (int32_t QuestIndex = 0; QuestIndex < Quests.Num(); ++QuestIndex)
+    {
+        UFortQuestItem* Quest = Quests[QuestIndex];
+        if (!Quest || Quest->quest_state != EFortQuestState::GetActive())
+        {
+            continue;
+        }
+        UFortItemDefinition* Definition = Quest->GetQuestDefinition();
+        const std::wstring QuestName = (Definition ? Definition->GetName() : Quest->GetName()).ToStdString();
+        const std::wstring QuestSimplified = Simplified(QuestName);
+        const TArray<UFortQuestObjectiveInfo*>& Objectives = Quest->Objectives;
+        UFortQuestObjectiveInfo* First = nullptr;
+        UFortQuestObjectiveInfo* Named = nullptr;
+        bool bExactObjective = false;
+        for (int32_t ObjectiveIndex = 0; ObjectiveIndex < Objectives.Num(); ++ObjectiveIndex)
+        {
+            UFortQuestObjectiveInfo* Objective = Objectives[ObjectiveIndex];
+            if (!Objective || Objective->AchievedCount >= Objective->RequiredCount)
+            {
+                continue;
+            }
+            First = First ? First : Objective;
+            const std::wstring Backend = Simplified(Objective->BackendName.ToString().ToStdString());
+            if (!Wanted.empty() && !Named && Backend.find(Wanted) != std::wstring::npos)
+            {
+                Named = Objective;
+                bExactObjective = Backend == Wanted;
+            }
+        }
+        if (!First)
+        {
+            continue;
+        }
+        if (Wanted.empty() || QuestSimplified.find(Wanted) != std::wstring::npos)
+        {
+            Matches.push_back({ Quest, First, QuestName, QuestSimplified == Wanted });
+        }
+        else if (Named)
+        {
+            Matches.push_back({ Quest, Named, QuestName, bExactObjective });
+        }
+    }
+    const auto Exact = std::find_if(Matches.begin(), Matches.end(), [](const FOpenObjective& Match) { return Match.bExact; });
+    if (Exact != Matches.end())
+    {
+        Matches = { *Exact };
+    }
+
+    const auto Progress = [](const FOpenObjective& Match)
+    {
+        return FString::Printf(TEXT("%s - %s %d/%d"), Match.QuestName.c_str(), *Match.Objective->BackendName.ToString(),
+            static_cast<int32_t>(Match.Objective->AchievedCount), static_cast<int32_t>(Match.Objective->RequiredCount));
+    };
+    if (Matches.size() != 1 || Wanted.empty())
+    {
+        if (Matches.empty())
+        {
+            Reply(Wanted.empty() ? FString(TEXT("You have no open quests"))
+                                 : FString::Printf(TEXT("None of your open quests is called '%s' (progressquest alone lists them)"), Query.c_str()));
+            return;
+        }
+        Reply(FString::Printf(TEXT("%s (progressquest <part of a name> [amount | all]):"),
+            Wanted.empty() ? TEXT("Your open quests") : *FString::Printf(TEXT("%d quests match '%s'"), static_cast<int32_t>(Matches.size()), Query.c_str())));
+        for (size_t Index = 0; Index < Matches.size() && Index < MaxListed; ++Index)
+        {
+            Reply(FString::Printf(TEXT("  %s"), *Progress(Matches[Index])));
+        }
+        if (Matches.size() > MaxListed)
+        {
+            Reply(FString::Printf(TEXT("  and %d more"), static_cast<int32_t>(Matches.size() - MaxListed)));
+        }
+        return;
+    }
+
+    const FOpenObjective& Match = Matches[0];
+    const int32_t Remaining = Match.Objective->RequiredCount - Match.Objective->AchievedCount;
+    const int32_t Count = bAll ? Remaining : std::min(Amount, Remaining);
+    const int32_t NewCount = QuestManager->AdvanceObjective(PlayerController, Match.Quest, Match.Objective, Count);
+    if (NewCount < 0)
+    {
+        Reply(TEXT("ProgressQuest needs the quest manager's stat event flush, which wasn't found in this build"));
+        return;
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("ProgressQuest: %s's %s %s +%d -> %d"), *GetNameSafe(PlayerController), Match.QuestName.c_str(), *Match.Objective->BackendName.ToString(), Count, NewCount);
+    Reply(FString::Printf(TEXT("%s (+%d)%s"), *Progress(Match), Count,
+        NewCount >= Match.Objective->RequiredCount ? TEXT(", objective done") : TEXT("")));
+#endif
+}
+
 void UFortCheatManager::Speed(const FString& Arguments)
 {
 #if WITH_SERVER_CODE
@@ -3474,7 +3939,9 @@ namespace
     // at once, and the server's replicated AmmoCount only replaces it once one of the two is empty (AFortWeapon's
     // OnRep_AmmoCount), so a server that keeps AmmoCount full alone can't stop the client running dry and reloading.
     // While the server has bInfiniteAmmo on for this player, and its AmmoCount still has rounds, the client's count is
-    // topped up through the weapon's own ModAmmo, which on a client changes only that count.
+    // topped up through the weapon's own ModAmmo, which on a client changes only that count. bInfiniteAmmo alone is
+    // "cheat infiniteammo" too (#155), which leaves the magazine to empty: only a server magazine kept full (infinitemag
+    // tops it up every frame) means the client's is to stay full, where the client counts its own.
     void TickInfiniteMagazineView()
     {
         UWorld* World = Natives::GWorld ? static_cast<UWorld*>(GWorld) : nullptr;
@@ -3489,7 +3956,8 @@ namespace
         {
             const int32_t BulletsPerClip = Weapon->GetBulletsPerClip();
             const int32_t Local = Weapon->GetLocalMagazineAmmoCount();
-            if (BulletsPerClip > 0 && Local < BulletsPerClip)
+            const bool bServerFull = Local < 0 || static_cast<int32_t>(Weapon->AmmoCount) >= BulletsPerClip;
+            if (BulletsPerClip > 0 && Local < BulletsPerClip && bServerFull)
             {
                 // Without the getter (-1), a whole magazine: ModAmmo stops at a full one.
                 Weapon->ModAmmo(Local >= 0 ? BulletsPerClip - Local : BulletsPerClip);

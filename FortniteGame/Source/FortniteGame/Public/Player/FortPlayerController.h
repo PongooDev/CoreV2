@@ -58,7 +58,8 @@ public:
     DefineBitfieldUProperty(bInfiniteDurability)
     static bool HasInfiniteDurabilityFlag() { return Member_bInfiniteDurability.IsAvailable(); }
     // ToggleInfiniteAmmo's flag, replicated to the player's client: GetRemainingAmmo is then unlimited (the reserve never
-    // runs out). "cheat infinitemag" sets it, and it is what tells Core's client to keep the magazine full too.
+    // runs out; 1.9 0x6B5150, 1.10 0x6F2E60). "cheat infiniteammo" sets it on its own and "cheat infinitemag" with the
+    // magazine kept full; Core's client keeps its own count of the magazine full only while the server's is (#155).
     DefineBitfieldUProperty(bInfiniteAmmo)
     static bool HasInfiniteAmmoFlag() { return Member_bInfiniteAmmo.IsAvailable(); }
     DefineBitfieldUProperty(bCheatGhost)

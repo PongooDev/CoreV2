@@ -30,6 +30,11 @@ class UFortHealthSet : public UAttributeSet
 public:
     DefineUStructProperty(FFortGameplayAttributeData, Health)
     DefineUStructProperty(FFortGameplayAttributeData, MaxHealth)
+    // The shield the pawn has, and its maximum (AFortPawn::GetShield reads CurrentShield, GetMaxShield Shield: 1.9
+    // 0x7C53D0, 0x7C3030). CurrentShield's Maximum follows Shield the way Health's follows MaxHealth.
+    DefineUStructProperty(FFortGameplayAttributeData, CurrentShield)
+    DefineUStructProperty(FFortGameplayAttributeData, Shield)
+    static bool HasShield() { return Member_CurrentShield.IsAvailable() && Member_Shield.IsAvailable(); }
 };
 
 // A pawn's walk, run and sprint speeds (replicated). AFortPawn::GetMovementSpeed reads them when the pawn has the set

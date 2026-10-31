@@ -41,6 +41,7 @@
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cwctype>
 #include <memory>
@@ -549,6 +550,9 @@ namespace
         DefineUFunction(SetComponentTickEnabled)
 
     public:
+        DefineBitfieldUProperty(bReplicates)
+        static bool HasReplicatesFlag() { return Member_bReplicates.IsAvailable(); }
+
         void SetIsReplicated(bool ShouldReplicate)
         {
             Reflection::FParams Params(FindStaticFunction_SetIsReplicated());
@@ -1696,6 +1700,130 @@ void UFortCheatManager::Undisguise(const FString& Arguments)
     Disguises.erase(Disguises.begin() + (Disguise - Disguises.data()));
     Reply(bEnded ? FString::Printf(TEXT("You are no longer disguised as %s"), Name.c_str())
                  : FString::Printf(TEXT("Your own pawn is gone, so you stay %s"), Name.c_str()));
+#endif
+}
+
+// ----------------------------------------------------------------------------------------------------------------------
+// "cheat setscale" (#155)
+// ----------------------------------------------------------------------------------------------------------------------
+
+#if WITH_SERVER_CODE
+namespace
+{
+    // An actor's scale is its root component's RelativeScale3D, which reaches a client only in the actor's first bunch
+    // (UPackageMapClient::SerializeNewActor, 1.7.2 0x223ABE0) or while the component replicates. A pawn's capsule doesn't,
+    // so its root replicates for a few seconds after a change, long enough for the clients that have the pawn (its
+    // RelativeLocation goes along, the place the pawn is anyway), and stops again; a client that gets the pawn later
+    // spawns it at its scale. Replicating for good would send the owner's own position back to it all the time.
+    struct FScaleReplication
+    {
+        TWeakObjectPtr<USceneComponent> Root;
+        std::chrono::steady_clock::time_point Until;
+    };
+    std::vector<FScaleReplication> ScaleReplications;
+    constexpr auto ScaleReplicationTime = std::chrono::seconds(3);
+
+    void TickScaleReplications()
+    {
+        const auto Now = std::chrono::steady_clock::now();
+        std::erase_if(ScaleReplications, [Now](const FScaleReplication& Entry)
+        {
+            USceneComponent* Root = Entry.Root.Get();
+            if (Root && Entry.Until > Now)
+            {
+                return false;
+            }
+            if (Root)
+            {
+                reinterpret_cast<UActorComponentFunctions*>(Root)->SetIsReplicated(false);
+            }
+            return true;
+        });
+        if (!ScaleReplications.empty())
+        {
+            GameThread::Enqueue(&TickScaleReplications);
+        }
+    }
+
+    void ReplicateScale(AActor* Actor)
+    {
+        USceneComponent* Root = Actor->GetRootComponent();
+        UActorComponentFunctions* Component = reinterpret_cast<UActorComponentFunctions*>(Root);
+        const auto Known = std::find_if(ScaleReplications.begin(), ScaleReplications.end(), [Root](const FScaleReplication& Entry) { return Entry.Root.Get() == Root; });
+        if (Known != ScaleReplications.end())
+        {
+            Known->Until = std::chrono::steady_clock::now() + ScaleReplicationTime;
+        }
+        else if (Root && UActorComponentFunctions::FindStaticFunction_SetIsReplicated() && UActorComponentFunctions::HasReplicatesFlag() && !Component->bReplicates)
+        {
+            Component->SetIsReplicated(true);
+            const bool bIdle = ScaleReplications.empty();
+            ScaleReplications.push_back({ TWeakObjectPtr<USceneComponent>(Root), std::chrono::steady_clock::now() + ScaleReplicationTime });
+            if (bIdle)
+            {
+                GameThread::Enqueue(&TickScaleReplications);
+            }
+        }
+        Actor->ForceNetUpdate();
+    }
+}
+#endif
+
+void UFortCheatManager::SetScale(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // PongooDev/Core's SetScale (#155), per axis too: the pawn's root (its capsule, which the mesh and everything else on
+    // the pawn hang from) takes the scale, so its collision and movement scale with it on the server and, once the root
+    // has replicated (ReplicateScale), on every client; the pawn moves up or down by what its capsule grew or shrank,
+    // so its feet stay on the floor. Until it respawns.
+    constexpr float MinScale = 0.1f;
+    constexpr float MaxScale = 10.0f;
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const bool bReset = Words.size() == 1 && (Lower(Words[0]) == L"reset" || Lower(Words[0]) == L"off");
+    float Scale[3] = { 1.0f, 1.0f, 1.0f };
+    bool bValid = bReset || Words.size() == 1 || Words.size() == 3;
+    for (size_t Index = 0; bValid && !bReset && Index < Words.size(); ++Index)
+    {
+        wchar_t* End = nullptr;
+        const float Value = std::wcstof(Words[Index].c_str(), &End);
+        bValid = End && End != Words[Index].c_str() && *End == L'\0' && std::isfinite(Value) && Value >= MinScale && Value <= MaxScale;
+        Scale[Index] = Value;
+    }
+    if (bValid && !bReset && Words.size() == 1)
+    {
+        Scale[1] = Scale[0];
+        Scale[2] = Scale[0];
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    APawn* Pawn = PlayerController ? PlayerController->GetPawn() : nullptr;
+    if (!bValid)
+    {
+        const FVector Current = Pawn ? Pawn->GetActorScale3D() : FVector(1.0f, 1.0f, 1.0f);
+        Reply(FString::Printf(TEXT("Your scale is %g x %g x %g. Usage: setscale <x> [y z] | reset, 0.1 to 10 (\"setscale 2\" doubles your size, \"setscale 1 1 3\" makes you tall)"),
+            Current.X, Current.Y, Current.Z));
+        return;
+    }
+    if (!Pawn || !Pawn->GetRootComponent())
+    {
+        Reply(TEXT("You have no pawn to scale"));
+        return;
+    }
+
+    const float OldHalfHeight = HalfHeightOf(Pawn);
+    Pawn->SetActorScale3D(FVector(Scale[0], Scale[1], Scale[2]));
+    const float NewHalfHeight = HalfHeightOf(Pawn);
+    // TeleportTo moves it out of anything a bigger capsule now stands in, or leaves it where it is when nothing fits.
+    if (std::fabs(NewHalfHeight - OldHalfHeight) > 0.5f)
+    {
+        FVector Location = Pawn->GetTransform().GetLocation();
+        Location.Z += NewHalfHeight - OldHalfHeight;
+        Pawn->TeleportTo(Location, Pawn->GetActorRotation());
+    }
+    ReplicateScale(Pawn);
+    UE_LOG(LogFortDisguise, Log, TEXT("SetScale: %s's %s at %g x %g x %g"), *GetNameSafe(PlayerController), *GetNameSafe(Pawn), Scale[0], Scale[1], Scale[2]);
+    Reply(bReset ? FString(TEXT("Your size is your own again"))
+                 : Words.size() == 1 ? FString::Printf(TEXT("Scale set to %g (setscale reset: your own size; a respawn resets it too)"), Scale[0])
+                                     : FString::Printf(TEXT("Scale set to %g x %g x %g (setscale reset: your own size; a respawn resets it too)"), Scale[0], Scale[1], Scale[2]));
 #endif
 }
 

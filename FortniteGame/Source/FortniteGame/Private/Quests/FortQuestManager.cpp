@@ -6,8 +6,10 @@
 #include "Finder.h"
 #include "GameThread.h"
 #include "Hooks.h"
+#include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Natives.h"
+#include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -57,6 +59,99 @@ namespace
             }
         });
     }
+}
+
+namespace
+{
+    // An objective's new count for the player's client (AFortPlayerController::UpdatedObjectiveStats, replicated: its
+    // OnRep shows the quest update). Quest is the quest's definition.
+    struct FFortUpdatedObjectiveStat
+    {
+        DefineUnrealStruct(FFortUpdatedObjectiveStat, FortniteGame)
+        DefineUProperty(UFortItemDefinition*, Quest)
+        DefineUProperty(FName, BackendName)
+        DefineUProperty(int32_t, StatValue)
+    };
+
+    class AFortPlayerControllerQuests : public UObject
+    {
+        DefineUnrealClass(AFortPlayerController, FortniteGame)
+
+    public:
+        DefineUStructArrayProperty(FFortUpdatedObjectiveStat, UpdatedObjectiveStats)
+        static bool HasUpdatedObjectiveStats() { return Member_UpdatedObjectiveStats.IsAvailable(); }
+    };
+}
+
+UFortItemDefinition* UFortQuestItem::GetQuestDefinition() const
+{
+    return reinterpret_cast<const UFortItem*>(this)->GetItemDefinitionBP();
+}
+
+int32_t UFortQuestManager::AdvanceObjective(AFortPlayerController* PlayerController, UFortQuestItem* Quest, UFortQuestObjectiveInfo* Objective, int32_t Count)
+{
+#if WITH_SERVER_CODE
+    // The flush is only looked for on Battle Royale servers at startup (Hook); Save the World's is the same function.
+    if (!HasCurrentQuests() || !Quest || !Objective || Count <= 0 || (!Natives::UFortQuestManager_FlushStatEvents && !Finder::ResolveQuestStatEvents()))
+    {
+        return -1;
+    }
+
+    // SendStatEventWithTags adds the event's count to the pending entry of the objective's BackendName, or a new one
+    // (1.9 0x8A69D4-0x8A6A7B); the entry's own list of the quests it moved stays empty here, as the flush reads only
+    // the name and the count.
+    const FString StatName = Objective->BackendName.ToString();
+    const std::wstring StatNameText = StatName.ToStdString();
+    TStructArray<FFortQuestObjectiveCompletion>& Pending = PendingChanges;
+    FFortQuestObjectiveCompletion* Entry = nullptr;
+    for (int32_t Index = 0; Index < Pending.Num() && !Entry; ++Index)
+    {
+        if (static_cast<FString&>(Pending[Index].StatName).ToStdString() == StatNameText)
+        {
+            Entry = &Pending[Index];
+        }
+    }
+    if (!Entry)
+    {
+        Entry = &Pending.AddDefaulted();
+        Entry->StatName = StatName;
+        Entry->Count = 0;
+    }
+    Entry->Count = Entry->Count + Count;
+
+    const int32_t Required = Objective->RequiredCount;
+    const int32_t NewCount = std::min(Objective->AchievedCount + Count, std::max(Required, 0));
+    Objective->AchievedCount = NewCount;
+    SaveProgress(this);
+
+    // The objective's new count for the client, as SendStatEventWithTags gives it (0x866A00: the entry for the quest and
+    // objective, else a new one).
+    if (PlayerController && AFortPlayerControllerQuests::HasUpdatedObjectiveStats())
+    {
+        UFortItemDefinition* Definition = Quest->GetQuestDefinition();
+        const FName BackendName = Objective->BackendName;
+        TStructArray<FFortUpdatedObjectiveStat>& Updated = reinterpret_cast<AFortPlayerControllerQuests*>(PlayerController)->UpdatedObjectiveStats;
+        FFortUpdatedObjectiveStat* Stat = nullptr;
+        for (int32_t Index = 0; Index < Updated.Num() && !Stat; ++Index)
+        {
+            if (Updated[Index].Quest == Definition && Updated[Index].BackendName == BackendName)
+            {
+                Stat = &Updated[Index];
+            }
+        }
+        if (!Stat)
+        {
+            Stat = &Updated.AddDefaulted();
+            Stat->Quest = Definition;
+            Stat->BackendName = BackendName;
+        }
+        Stat->StatValue = NewCount;
+        PlayerController->ForceNetUpdate();
+    }
+    return NewCount;
+#else
+    return -1;
+#endif
 }
 
 void UFortQuestManager::GetSourceAndContextTags(FGameplayTagContainer& OutSourceTags, FGameplayTagContainer& OutContextTags)

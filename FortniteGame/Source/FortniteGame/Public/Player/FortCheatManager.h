@@ -70,7 +70,8 @@ public:
     // WeaponName: the item's name with or without its prefix ("Assault_Auto_Athena_R_Ore_T03" or "WID_..."), or part
     // of it. Count weapons at RequestedLevel, a ranged weapon with a full magazine.
     void GiveWeapon(const FString& WeaponName, int32_t RequestedLevel, int32_t Count);
-    // "AthenaAmmoDataBulletsHeavy 100"; without an amount, a full stack.
+    // "AthenaAmmoDataBulletsHeavy 100"; without an amount, a full stack. Without a name (#155: "giveammo", "giveammo
+    // 100"), the ammo the weapon the player holds fires.
     void GiveAmmo(const FString& AmmoNameAndAmount);
     void GiveTrap(const FString& TrapName, int32_t RequestedLevel, int32_t NumTrapsToGive);
     void GiveGadgets(const FString& GadgetName, int32_t Quantity, int32_t ItemLevel);
@@ -132,7 +133,26 @@ public:
     // and gadgets have no cooldown until it is turned off, respawns included. The game's ToggleNoCoolDown only sets a flag
     // nothing in a shipping build reads; Core takes each cooldown effect off as soon as it is applied.
     void NoCooldown(const FString& Arguments);
-    // Core's own command, "cheat infinitemag [on | off]" (#149; "cheat ToggleInfiniteAmmo" too): the player never reloads.
+    // Core's own command, "cheat infiniteammo [on | off]" ("cheat ToggleInfiniteAmmo" too; #155): the game's
+    // ToggleInfiniteAmmo flag (bInfiniteAmmo, replicated): reloads never use up the reserve, the magazine still empties.
+    // Says whether it is on, where the game's toggle answered nothing the player saw.
+    void InfiniteAmmo(const FString& Arguments);
+    // Core's own commands from PongooDev/Core (#155): "cheat sethealth <value>", "cheat setshield <value>" (the shield,
+    // up to its maximum) and "cheat setmaxshield <value | reset>" (the maximum shield, kept through respawns like
+    // maxhealth), Save the World's and Battle Royale's alike.
+    void SetHealth(const FString& Arguments);
+    void SetShield(const FString& Arguments);
+    void SetMaxShield(const FString& Arguments);
+    // Core's own command, "cheat clearequippeditem" (#155): the item the player holds leaves their inventory.
+    void ClearEquippedItem(const FString& Arguments);
+    // Core's own command, "cheat setscale <x> [y z] | reset" (#155): the player's pawn at that scale, collision included,
+    // replicated to every client, until it respawns. FortCheatManagerDisguise.cpp.
+    void SetScale(const FString& Arguments);
+    // Core's own command, "cheat progressquest [quest] [amount | all]" (#155): an open objective of the player's quest
+    // (Battle Royale's challenges, Save the World's quests) moves on by the amount, saved to their profile through the
+    // quest manager's UpdateQuests; without a quest, the open quests are listed.
+    void ProgressQuest(const FString& Arguments);
+    // Core's own command, "cheat infinitemag [on | off]" (#149): the player never reloads.
     // The game's own ammo-saving effect (GE_Alteration_Attribute_AmmoSave) at a chance over 1 goes on their ability system,
     // so a shot takes no round on the server or on their client (#155); the server also keeps the magazine full through
     // the weapon's own ModAmmo and sets the game's replicated bInfiniteAmmo (the reserve never runs out), which tells

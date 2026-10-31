@@ -10,8 +10,9 @@ FVector UKismetMathLibrary::RandomUnitVector()
 
 FVector UKismetMathLibrary::RandomUnitVectorInCone(const FVector& ConeDir, float ConeHalfAngle)
 {
-    Reflection::FParams Params(StaticFunction_RandomUnitVectorInCone());
+    UFunction* const InCone = FindStaticFunction_RandomUnitVectorInCone();
+    Reflection::FParams Params(InCone ? InCone : StaticFunction_RandomUnitVectorInConeInRadians());
     Params.Set(L"ConeDir", ConeDir);
-    Params.Set(L"ConeHalfAngle", ConeHalfAngle);
+    Params.Set(InCone ? L"ConeHalfAngle" : L"ConeHalfAngleInRadians", ConeHalfAngle);
     return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<FVector>(L"ReturnValue") : FVector();
 }

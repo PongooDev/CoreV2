@@ -22,6 +22,9 @@ class AFortPlayerControllerOutpost : public AFortPlayerControllerZone
     DefineUFunction(ServerLeaveOutpostAsParty)
     DefineUFunction(ServeMoveItemToStorageVault)
     DefineUFunction(ServeMoveItemFromStorageVault)
+    // 1.10 corrects the names' spelling.
+    DefineUFunction(ServerMoveItemToStorageVault)
+    DefineUFunction(ServerMoveItemFromStorageVault)
     DefineUFunction(ServerDisintegrateItem)
     DefineUFunction(ServerFabricateItem)
     DefineUFunction(ServerDepositPOSTResource)

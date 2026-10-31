@@ -87,6 +87,13 @@ void UFortAIEncounterInfo::RollSpawnGroupUpgradeModifiers(const FGuid& GroupGuid
 void UFortAIEncounterInfo::HookCallSites()
 {
 #if WITH_SERVER_CODE
+    // 1.10 holds FFortAISpawnGroupUpgradeData instead; the roll this restores was cut on 1.2 only, so its game keeps its own.
+    if (!Member_AvailableUpgrades.IsAvailable())
+    {
+        Log::Info(L"UFortAIEncounterInfo: AvailableUpgrades isn't FFortAISpawnGroupUpgrade in this build, spawn group upgrades are the game's own");
+        return;
+    }
+
     Finder::FSpawnGroupUpgradeSites Sites;
     if (!Finder::ResolveSpawnGroupUpgradeLive(Member_AvailableUpgrades.GetOffsetChecked(), Member_ActiveSpawnGroups.GetOffsetChecked(), FSpawnGroupInstanceInfo::Member_TotalGroupCost.GetOffsetChecked(), FSpawnGroupInstanceInfo::Member_PawnUpgrades.GetOffsetChecked(), FSpawnGroupInstanceInfo::Member_ModifiersForAllPawns.GetOffsetChecked(), Sites))
     {

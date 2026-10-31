@@ -877,7 +877,7 @@ void AFortPlayerController::ApplyHarvestingTool()
         const FFortGameplayAttributeData& HarvestingToolAttribute = PlayerAttrSet->HarvestingTool;
         Level = std::clamp(static_cast<int32_t>(HarvestingToolAttribute.GetCurrentValue()), 0, HarvestingTools.Num() - 1);
     }
-    UFortWorldItemDefinition* HarvestingTool = HarvestingTools[Level].LoadSynchronous();
+    UFortWorldItemDefinition* HarvestingTool = SoftElementAt(HarvestingTools, Level).LoadSynchronous();
     if (!HarvestingTool)
     {
         UE_LOG(LogFort, Warning, TEXT("ApplyHarvestingTool: no harvesting tool for level %d"), Level);
@@ -1540,8 +1540,14 @@ void AFortPlayerController::HookVTables()
         }
     }
 
-    if (const int32_t DisassembleIndex = Finder::ImplementationIndex(StaticFunction_ServerDisassembleInventoryItem());
-        PlayerControllerVTable && DisassembleIndex >= 0 && Finder::ResolveDisassemblyLive(StaticFunction_ServerDisassembleInventoryItem(), PlayerControllerDefault))
+    // 1.10 disassembles a batch instead (ServerDisassembleInventoryItems, item GUIDs and counts), which isn't restored.
+    UFunction* const DisassembleFunction = FindStaticFunction_ServerDisassembleInventoryItem();
+    if (!DisassembleFunction)
+    {
+        Log::Info(L"AFortPlayerController: no ServerDisassembleInventoryItem in this build, disassembly is the game's own");
+    }
+    else if (const int32_t DisassembleIndex = Finder::ImplementationIndex(DisassembleFunction);
+        PlayerControllerVTable && DisassembleIndex >= 0 && Finder::ResolveDisassemblyLive(DisassembleFunction, PlayerControllerDefault))
     {
         void* const PlayerControllerDisassemble = PlayerControllerVTable[DisassembleIndex];
         for (TObjectIterator<UClass> It; It; ++It)

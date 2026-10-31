@@ -442,8 +442,8 @@ void AFortPlayerControllerOutpost::HookVTables()
 {
     for (const auto& [Function, Implementation, Name] : {
              std::tuple{ StaticFunction_ServerLeaveOutpostAsParty(), reinterpret_cast<void*>(&ServerLeaveOutpostAsParty_ImplementationHK), L"AFortPlayerControllerOutpost::ServerLeaveOutpostAsParty_Implementation" },
-             std::tuple{ StaticFunction_ServeMoveItemToStorageVault(), reinterpret_cast<void*>(&ServeMoveItemToStorageVault_ImplementationHK), L"AFortPlayerControllerOutpost::ServeMoveItemToStorageVault_Implementation" },
-             std::tuple{ StaticFunction_ServeMoveItemFromStorageVault(), reinterpret_cast<void*>(&ServeMoveItemFromStorageVault_ImplementationHK), L"AFortPlayerControllerOutpost::ServeMoveItemFromStorageVault_Implementation" },
+             std::tuple{ FindStaticFunction_ServeMoveItemToStorageVault() ? StaticFunction_ServeMoveItemToStorageVault() : StaticFunction_ServerMoveItemToStorageVault(), reinterpret_cast<void*>(&ServeMoveItemToStorageVault_ImplementationHK), L"AFortPlayerControllerOutpost::ServeMoveItemToStorageVault_Implementation" },
+             std::tuple{ FindStaticFunction_ServeMoveItemFromStorageVault() ? StaticFunction_ServeMoveItemFromStorageVault() : StaticFunction_ServerMoveItemFromStorageVault(), reinterpret_cast<void*>(&ServeMoveItemFromStorageVault_ImplementationHK), L"AFortPlayerControllerOutpost::ServeMoveItemFromStorageVault_Implementation" },
              std::tuple{ StaticFunction_ServerDisintegrateItem(), reinterpret_cast<void*>(&ServerDisintegrateItem_ImplementationHK), L"AFortPlayerControllerOutpost::ServerDisintegrateItem_Implementation" },
              std::tuple{ StaticFunction_ServerFabricateItem(), reinterpret_cast<void*>(&ServerFabricateItem_ImplementationHK), L"AFortPlayerControllerOutpost::ServerFabricateItem_Implementation" },
              std::tuple{ StaticFunction_ServerDepositPOSTResource(), reinterpret_cast<void*>(&ServerDepositPOSTResource_ImplementationHK), L"AFortPlayerControllerOutpost::ServerDepositPOSTResource_Implementation" },

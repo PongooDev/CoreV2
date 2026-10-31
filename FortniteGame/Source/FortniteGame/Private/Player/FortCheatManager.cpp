@@ -513,7 +513,8 @@ namespace
         { L"Player", nullptr, L"disguiseview <back | hide | normal>", L"how you see your disguise", ECheatMode::Both },
         { L"Player", nullptr, L"dance [EID]", L"play an emote", ECheatMode::Both },
         { L"Weapons", nullptr, L"infinitemag [on | off]", L"never reload, never run out", ECheatMode::Both },
-        { L"Weapons", nullptr, L"infiniteammo [on | off]", L"reloads never use up ammo", ECheatMode::Both },        { L"Weapons", nullptr, L"firerate <multiplier | reset>", L"guns fire faster", ECheatMode::Both },
+        { L"Weapons", nullptr, L"infiniteammo [on | off]", L"reloads never use up ammo", ECheatMode::Both },
+        { L"Weapons", nullptr, L"firerate <multiplier | reset>", L"guns fire faster", ECheatMode::Both },
         { L"Weapons", nullptr, L"weapondamage <multiplier | reset>", L"weapons hit harder", ECheatMode::Both },
         { L"Weapons", nullptr, L"bloom [on | off]", L"no spread (your game only)", ECheatMode::Both },
         { L"Weapons", nullptr, L"recoil [on | off]", L"no recoil (your game only)", ECheatMode::Both },
@@ -2283,6 +2284,61 @@ namespace
         return Weapon && static_cast<const TAssetPtr<UFortWorldItemDefinition>&>(Weapon->AmmoData).LoadSynchronous() == Definition;
     }
 
+    // infiniteconsumables' ∞ on the quick bar (#155). The game's item cards (SFortItemCard_StackCountBlock: 1.9 0x3026230,
+    // 1.10 0x2281C60) draw a count of 0x7FFFFFFF as ∞ (FortniteUI's StackCountInfinite). A weapon's card counts the reserve
+    // its ammo item holds, which GetRemainingAmmo answers 0x7FFFFFFF for under bInfiniteAmmo (1.9 0x6B5150, 1.10
+    // 0x6F2E60): toggleinfiniteammo's ∞. A consumable is its own ammo, and its card shows the item's own count
+    // (FFortItemEntry::Count, the client's copy of the replicated entry), so that is what reads 0x7FFFFFFF here, for the
+    // player's consumables only; bInfiniteAmmo and the guns' reserve stay as they are. The equipped item's ammo counter
+    // reads anything over 200000000 as ∞ too (AthenaEquippedItemWidget).
+    constexpr int32_t InfiniteStackCount = 0x7FFFFFFF;
+    constexpr ULONGLONG ConsumableCountViewMs = 250;
+    ULONGLONG NextConsumableCountView = 0;
+
+    // Whether this build's item cards know ∞: elsewhere 0x7FFFFFFF would show as a number, so the counts stay real.
+    bool ShowsInfiniteStackCount()
+    {
+        static const bool bShows = Finder::FindReadOnly(L"StackCountInfinite", sizeof(L"StackCountInfinite")) != 0;
+        return bShows;
+    }
+
+    // The count the player's client sees for each consumable: ∞ while bInfinite, its own count again once not. Only the
+    // replicated entry changes; the world item, which the server's inventory, its drops, pickups and removals read, keeps
+    // the real count. The game rewrites the entry when the count changes (a pickup, a drop), so the cheat's tick sets it
+    // again.
+    void ShowConsumableCounts(AFortPlayerController* PlayerController, bool bInfinite)
+    {
+        AFortInventory* Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+        if (!Inventory || !ShowsInfiniteStackCount())
+        {
+            return;
+        }
+        FFortItemList& ItemList = Inventory->Inventory;
+        TStructArray<FFortItemEntry>& Entries = ItemList.ReplicatedEntries;
+        bool bChanged = false;
+        for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+        {
+            FFortItemEntry& Entry = Entries[Index];
+            const int32_t Shown = Entry.Count;
+            if (bInfinite ? Shown == InfiniteStackCount || Shown <= 0 : Shown != InfiniteStackCount)
+            {
+                continue;
+            }
+            UFortWorldItem* WorldItem = Inventory->FindWorldItem(static_cast<FGuid&>(Entry.ItemGuid));
+            if (!WorldItem || !IsConsumableItem(static_cast<UFortItemDefinition*>(Entry.ItemDefinition)))
+            {
+                continue;
+            }
+            Entry.Count = bInfinite ? InfiniteStackCount : static_cast<int32_t>(static_cast<FFortItemEntry&>(WorldItem->ItemEntry).Count);
+            ItemList.MarkItemDirty(Entry);
+            bChanged = true;
+        }
+        if (bChanged)
+        {
+            Inventory->ForceNetUpdate();
+        }
+    }
+
     // The game's flag (replicated): on while infiniteammo or infinitemag is.
     void UpdateInfiniteAmmoFlag(AFortPlayerController* PlayerController)
     {
@@ -2992,11 +3048,13 @@ namespace
     }
 
     // Every frame on the game thread while a player has infinitemag, a fire rate, a weapon damage, a maximum health or
-    // shield, or a speed: the magazine is topped up as soon as a shot takes from it, and a respawned pawn gets the
-    // effects, the maximum health and shield and the speed again. Nothing is hooked.
+    // shield, a speed or infiniteconsumables: the magazine is topped up as soon as a shot takes from it, a respawned pawn
+    // gets the effects, the maximum health and shield and the speed again, and four times a second the consumables'
+    // counts show ∞ again. Nothing is hooked.
     void TickWeaponCheats()
     {
         std::erase_if(InfiniteMagPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
+        std::erase_if(InfiniteConsumablesPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
         std::erase_if(AttributeBoosts, [](const FAttributeBoost& Boost) { return !Boost.Player.Get(); });
         std::erase_if(MaxHealths, [](const FMaxHealth& Entry) { return !Entry.Player.Get(); });
         std::erase_if(MaxShields, [](const FMaxShield& Entry) { return !Entry.Player.Get(); });
@@ -3025,8 +3083,16 @@ namespace
         {
             KeepSpeed(Entry);
         }
-        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !AttributeBoosts.empty() || !MaxHealths.empty() || !MaxShields.empty() || !SpeedPlayers.empty())
-            && GameThread::Enqueue(&TickWeaponCheats);
+        if (const ULONGLONG Now = GetTickCount64(); !InfiniteConsumablesPlayers.empty() && Now >= NextConsumableCountView)
+        {
+            NextConsumableCountView = Now + ConsumableCountViewMs;
+            for (const TWeakObjectPtr<AFortPlayerController>& Known : InfiniteConsumablesPlayers)
+            {
+                ShowConsumableCounts(Known.Get(), true);
+            }
+        }
+        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !AttributeBoosts.empty() || !MaxHealths.empty() || !MaxShields.empty() || !SpeedPlayers.empty()
+            || (!InfiniteConsumablesPlayers.empty() && ShowsInfiniteStackCount())) && GameThread::Enqueue(&TickWeaponCheats);
     }
 
     void StartWeaponCheatTick()
@@ -3505,6 +3571,13 @@ void UFortCheatManager::InfiniteConsumables(const FString& Arguments)
     if (bEnable)
     {
         InfiniteConsumablesPlayers.emplace_back(PlayerController);
+    }
+    // The quick bar shows ∞ for them meanwhile, as toggleinfiniteammo's does for a gun's reserve (ShowConsumableCounts),
+    // where the build's item cards draw ∞; off, the real counts come back.
+    ShowConsumableCounts(PlayerController, bEnable);
+    if (bEnable && ShowsInfiniteStackCount())
+    {
+        StartWeaponCheatTick();
     }
     UE_LOG(LogFortCheats, Log, TEXT("InfiniteConsumables: %s %s"), *GetNameSafe(PlayerController), bEnable ? TEXT("on") : TEXT("off"));
     Reply(bEnable ? TEXT("Infinite consumables ON: using a consumable doesn't use it up (infiniteconsumables off: normal again)")

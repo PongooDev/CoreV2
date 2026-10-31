@@ -478,6 +478,8 @@ void AFortPlayerController::Possess(APawn* InPawn)
     if (PossessedPlayerPawn && !bDisguisePossess)
     {
         UFortCheatManager::ReapplySkin(this);
+        // "cheat maxhealth" and "cheat setmaxshield" (#165): the attribute reset above gave the pawn its hero's maximums.
+        UFortCheatManager::ReapplyMaxHealthAndShield(this);
     }
 
     // 1.8: the backpack size and the pickaxe come with the loadout, made when the pawn first spawns.

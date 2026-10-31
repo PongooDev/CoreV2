@@ -251,6 +251,9 @@ public:
     static inline bool bDisguisePossess = false;
     // From Possess once the controller's hero is set again (a respawn): the skin "cheat skin" chose.
     static void ReapplySkin(AFortPlayerController* PlayerController);
+    // From Possess once the pawn's attributes are reset to the hero's (a respawn, Battle Royale's drop from the aircraft):
+    // the maximum health and shield "cheat maxhealth" and "cheat setmaxshield" chose.
+    static void ReapplyMaxHealthAndShield(AFortPlayerController* PlayerController);
     // Client (#137): every frame, the player's own puppet sits on their pawn (the server sends this client none of its
     // movement), every disguise loses its collision here, and the camera pulls back for a disguise bigger than the
     // player. Nothing is hooked: Core's game thread tick, reflected properties and UFunctions.

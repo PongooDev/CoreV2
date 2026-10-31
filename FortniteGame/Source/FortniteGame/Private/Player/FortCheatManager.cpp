@@ -3039,22 +3039,11 @@ namespace
         return Got;
     }
 
-    // A respawned (or new) pawn gets the maximum again, and its health with it. The pawn that has it keeps it: an effect
-    // on MaxHealth that changes (or an override that held it) works its value out again, which goes back to the one asked.
-    void KeepMaxHealth(FMaxHealth& Entry)
+    // A possessed pawn gets the maximum again, and its health with it: Possess has just reset its attributes to the hero's
+    // (ResetGameplayAttributes), which puts MaxHealth's base back (CoreV2 #165: Battle Royale's drop from the aircraft
+    // possesses a new pawn, and the maximum was gone after it).
+    void ReapplyMaxHealth(FMaxHealth& Entry, AFortPawn* Pawn)
     {
-        AFortPlayerController* PlayerController = Entry.Player.Get();
-        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
-        // The pawn a possession has them play is another player's: it keeps its own maximum.
-        if (!Pawn || Pawn->IsDead() || UFortCheatManager::IsInPossession(PlayerController))
-        {
-            return;
-        }
-        if (Pawn == Entry.Pawn.Get())
-        {
-            Pawn->ForceMaxHealth(Entry.Wanted);
-            return;
-        }
         Entry.Pawn = Pawn;
         const float Current = Pawn->GetMaxHealth();
         if (std::fabs(Current - Entry.Wanted) > 0.5f && Current > 0.0f)
@@ -3064,7 +3053,20 @@ namespace
         if (const std::optional<float> Got = ApplyMaxHealth(Pawn, Entry.Wanted))
         {
             Pawn->SetHealth(*Got);
-            UE_LOG(LogFortCheats, Log, TEXT("SetMaxHealth: %s's new pawn %s has %.0f maximum health"), *GetNameSafe(PlayerController), *GetNameSafe(Pawn), *Got);
+            UE_LOG(LogFortCheats, Log, TEXT("SetMaxHealth: %s's new pawn %s has %.0f maximum health"), *GetNameSafe(Entry.Player.Get()), *GetNameSafe(Pawn), *Got);
+        }
+    }
+
+    // The pawn that has the maximum keeps it: an effect on MaxHealth that changes (or an override that held it) works its
+    // value out again, which goes back to the one asked. A new pawn gets it when it is possessed (ReapplyMaxHealth).
+    void KeepMaxHealth(FMaxHealth& Entry)
+    {
+        AFortPlayerController* PlayerController = Entry.Player.Get();
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        // The pawn a possession has them play is another player's: it keeps its own maximum.
+        if (Pawn && Pawn == Entry.Pawn.Get() && !Pawn->IsDead() && !UFortCheatManager::IsInPossession(PlayerController))
+        {
+            Pawn->ForceMaxHealth(Entry.Wanted);
         }
     }
 
@@ -3086,27 +3088,30 @@ namespace
         return Found != MaxShields.end() ? &*Found : nullptr;
     }
 
-    // Every frame: an effect on Shield that works its value out again (a respawned pawn's starting effects) is set back
-    // to the maximum asked for. A new pawn's own maximum is what reset gives back.
+    // A possessed pawn gets the maximum shield again, once Possess has reset its attributes to the hero's (#165). A new
+    // pawn's own maximum is what reset gives back.
+    void ReapplyMaxShield(FMaxShield& Entry, AFortPawn* Pawn)
+    {
+        Entry.Pawn = Pawn;
+        const float Current = Pawn->GetMaxShield();
+        if (std::fabs(Current - Entry.Wanted) > 0.5f)
+        {
+            Entry.Own = Current;
+        }
+        Pawn->ForceMaxShield(Entry.Wanted);
+        UE_LOG(LogFortCheats, Log, TEXT("SetMaxShield: %s's new pawn %s gets %.0f maximum shield"), *GetNameSafe(Entry.Player.Get()), *GetNameSafe(Pawn), Entry.Wanted);
+    }
+
+    // Every frame: an effect on Shield that works its value out again (the pawn's starting effects) is set back to the
+    // maximum asked for, on the pawn that was given it.
     void KeepMaxShield(FMaxShield& Entry)
     {
         AFortPlayerController* PlayerController = Entry.Player.Get();
         AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
-        if (!Pawn || Pawn->IsDead() || UFortCheatManager::IsInPossession(PlayerController))
+        if (Pawn && Pawn == Entry.Pawn.Get() && !Pawn->IsDead() && !UFortCheatManager::IsInPossession(PlayerController))
         {
-            return;
+            Pawn->ForceMaxShield(Entry.Wanted);
         }
-        if (Pawn != Entry.Pawn.Get())
-        {
-            Entry.Pawn = Pawn;
-            const float Current = Pawn->GetMaxShield();
-            if (std::fabs(Current - Entry.Wanted) > 0.5f)
-            {
-                Entry.Own = Current;
-            }
-            UE_LOG(LogFortCheats, Log, TEXT("SetMaxShield: %s's new pawn %s gets %.0f maximum shield"), *GetNameSafe(PlayerController), *GetNameSafe(Pawn), Entry.Wanted);
-        }
-        Pawn->ForceMaxShield(Entry.Wanted);
     }
 
     // "cheat speed" on a pawn that moves at its movement set's speeds (Save the World): the multiplier Core keeps on
@@ -3155,8 +3160,9 @@ namespace
 
     // Every frame on the game thread while a player has infinitemag, a fire rate, a weapon damage, a maximum health or
     // shield, a speed or infiniteconsumables: the magazine is topped up as soon as a shot takes from it, a respawned pawn
-    // gets the effects, the maximum health and shield and the speed again, and four times a second the consumables'
-    // counts show ∞ again. Nothing is hooked.
+    // gets the effects and the speed again, the maximum health and shield hold on the pawn Possess gave them to
+    // (UFortCheatManager::ReapplyMaxHealthAndShield), and four times a second the consumables' counts show ∞ again.
+    // Nothing is hooked.
     void TickWeaponCheats()
     {
         std::erase_if(InfiniteMagPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
@@ -3462,6 +3468,28 @@ void UFortCheatManager::WeaponDamage(const FString& Arguments)
     if (!Message.IsEmpty())
     {
         Reply(Message);
+    }
+#endif
+}
+
+void UFortCheatManager::ReapplyMaxHealthAndShield(AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
+    // The maximums are the player's (kept per controller, as the hero the attributes come from is), not the pawn's:
+    // every pawn the player is given takes them once its attributes are its hero's again. The pawn a possession has them
+    // play is another player's and keeps its own.
+    AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+    if (!Pawn || Pawn->IsDead() || IsInPossession(PlayerController))
+    {
+        return;
+    }
+    if (FMaxHealth* Entry = FindMaxHealth(PlayerController))
+    {
+        ReapplyMaxHealth(*Entry, Pawn);
+    }
+    if (FMaxShield* Entry = FindMaxShield(PlayerController))
+    {
+        ReapplyMaxShield(*Entry, Pawn);
     }
 #endif
 }

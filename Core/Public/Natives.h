@@ -247,6 +247,13 @@ namespace Natives
     inline ptrdiff_t FNetworkObjectInfo_Flags = 0x20;
     inline ptrdiff_t FNetworkObjectInfo_DormantConnections = 0x28;
     inline ptrdiff_t FNetworkObjectInfo_RecentlyDormantConnections = 0x78;
+    // FActorDestructionInfo's members and size: 1.10 (UE 4.19) puts a TWeakObjectPtr<ULevel> first, moving them all by 8.
+    inline ptrdiff_t FActorDestructionInfo_ObjOuter = 0x0;
+    inline ptrdiff_t FActorDestructionInfo_DestroyedPosition = 0x8;
+    inline ptrdiff_t FActorDestructionInfo_NetGUID = 0x14;
+    inline ptrdiff_t FActorDestructionInfo_PathName = 0x18;
+    inline ptrdiff_t FActorDestructionInfo_StreamingLevelName = 0x28;
+    inline size_t FActorDestructionInfo_Size = 0x30;
     // SupportsObject(Object, const TWeakObjectPtr<UObject>* WeakObjectPtr): 1.8 (0x22B2090) reads WeakObjectPtr when it
     // isn't null, 1.7.2 (0x223CCA0) takes no such argument.
     inline bool (*FNetGUIDCache_SupportsObject)(const FNetGUIDCache* This, const UObject* Object, const void* WeakObjectPtr) = nullptr;

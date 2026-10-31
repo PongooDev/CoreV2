@@ -1996,18 +1996,41 @@ namespace
 
         uintptr_t CreateDestructionInfo = 0;
         ptrdiff_t ConnectionDestroyedActors = 0;
+        ptrdiff_t DestructionInfoNetGUID = 0;
         int32_t DestroyedActorAdds = 0;
         for (const auto& [Site, Target] : NotifyCalls)
         {
             const uintptr_t Lea = Site + 5;
-            if (Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04 && FindInstruction(Lea + 7, Lea + 0x18, { 0x4C, 0x8D, 0x40 }))
+            const uintptr_t GuidLea = Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04 ? FindInstruction(Lea + 7, Lea + 0x18, { 0x4C, 0x8D, 0x40 }) : 0;
+            if (GuidLea)
             {
                 CreateDestructionInfo = Target;
                 ConnectionDestroyedActors = *reinterpret_cast<const int32_t*>(Lea + 3);
+                DestructionInfoNetGUID = Byte(GuidLea + 3);
                 ++DestroyedActorAdds;
             }
         }
         RequireOffset(L"UNetConnection::DestroyedStartupOrDormantActors", Natives::UNetConnection_DestroyedStartupOrDormantActors, DestroyedActorAdds == 1 ? ConnectionDestroyedActors : 0);
+
+        // The connection's set gets the new destruction info's NetGUID: lea r8, [rax+NetGUID] (1.9.1 0x22E4E99: +0x14;
+        // 1.10 0x1ACBF49: +0x1C). 1.10's extra 8 bytes are a TWeakObjectPtr<ULevel> first (CreateDestructionInfo
+        // 0x1ABE260 fills Level, ObjOuter, DestroyedPosition +0x10, NetGUID +0x1C, PathName +0x20, StreamingLevelName +0x30
+        // in 0x48-byte map elements). Reading 4.16's layout there missed every lookup and crashed a 1.10 server in
+        // FActorPriority once a startup actor was destroyed near a player (#160).
+        if (DestroyedActorAdds == 1 && DestructionInfoNetGUID == 0x1C)
+        {
+            for (ptrdiff_t* Offset : { &Natives::FActorDestructionInfo_ObjOuter, &Natives::FActorDestructionInfo_DestroyedPosition, &Natives::FActorDestructionInfo_NetGUID,
+                                       &Natives::FActorDestructionInfo_PathName, &Natives::FActorDestructionInfo_StreamingLevelName })
+            {
+                *Offset += 8;
+            }
+            Natives::FActorDestructionInfo_Size += 8;
+        }
+        else if (DestroyedActorAdds == 1 && DestructionInfoNetGUID != 0x14)
+        {
+            Log::Warning(L"Finder: FActorDestructionInfo's NetGUID found at +0x{:X}; assuming 1.9.1's layout", DestructionInfoNetGUID);
+        }
+        Log::Info(L"Finder: FActorDestructionInfo is 0x{:X} bytes, NetGUID +0x{:X}", Natives::FActorDestructionInfo_Size, Natives::FActorDestructionInfo_NetGUID);
 
         ptrdiff_t DormantReplicators = 0;
         int32_t DormantReplicatorRemoves = 0;

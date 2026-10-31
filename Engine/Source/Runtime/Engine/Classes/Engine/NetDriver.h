@@ -19,18 +19,25 @@ class UWorld;
 struct FNetViewer;
 struct FNetworkObjectInfo;
 
+// Up to 1.9.1 (UE 4.16) 0x30 bytes from ObjOuter on; 1.10 (UE 4.19) puts a TWeakObjectPtr<ULevel> before it, 0x38
+// bytes. Core only reads the engine's, at the offsets the finder takes from NotifyActorDestroyed.
 struct FActorDestructionInfo
 {
-    TWeakObjectPtr<UObject> ObjOuter;
-    FVector DestroyedPosition;
-    FNetworkGUID NetGUID;
-    FString PathName;
-    FName StreamingLevelName;
+    DefineNativeMember(TWeakObjectPtr<UObject>, ObjOuter, FActorDestructionInfo_ObjOuter)
+    DefineNativeMember(FVector, DestroyedPosition, FActorDestructionInfo_DestroyedPosition)
+    DefineNativeMember(FNetworkGUID, NetGUID, FActorDestructionInfo_NetGUID)
+    DefineNativeObject(FString, PathName, FActorDestructionInfo_PathName)
+    DefineNativeMember(FName, StreamingLevelName, FActorDestructionInfo_StreamingLevelName)
+
+    FActorDestructionInfo() = delete;
 };
 
-static_assert(offsetof(FActorDestructionInfo, NetGUID) == 0x14);
-static_assert(offsetof(FActorDestructionInfo, PathName) == 0x18);
-static_assert(sizeof(FActorDestructionInfo) == 0x30);
+// The engine's map values, FActorDestructionInfo held in place: its TSet's element stride follows the value's size.
+template <size_t Size>
+struct alignas(8) TActorDestructionInfoStorage
+{
+    uint8_t Bytes[Size];
+};
 
 struct FActorPriority
 {
@@ -75,7 +82,9 @@ public:
     DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastRelevantActors, UNetDriver_LastRelevantActors)
     DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastSentActors, UNetDriver_LastSentActors)
     DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastNonRelevantActors, UNetDriver_LastNonRelevantActors)
-    using FDestroyedActorMap = TMap<FNetworkGUID, FActorDestructionInfo>;
+    // TMap<FNetworkGUID, FActorDestructionInfo>, typed with 4.16's value size: Num works on every build, lookups go
+    // through FindDestructionInfo.
+    using FDestroyedActorMap = TMap<FNetworkGUID, TActorDestructionInfoStorage<0x30>>;
     DefineNativeObject(FDestroyedActorMap, DestroyedStartupOrDormantActors, UNetDriver_DestroyedStartupOrDormantActors)
     DefineNativeMember(uint32_t, ReplicationFrame, UNetDriver_ReplicationFrame)
     DefineNativeMember(TSharedPtr<FNetworkObjectList>, NetworkObjects, UNetDriver_NetworkObjects)
@@ -99,6 +108,7 @@ public:
     int32_t ServerReplicateActors(float DeltaSeconds);
     void FlushActorDormancy(AActor* Actor);
     void PrintDebugRelevantActors();
+    FActorDestructionInfo* FindDestructionInfo(const FNetworkGUID& NetGUID);
 
     static void Hook();
 

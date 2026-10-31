@@ -117,6 +117,23 @@ void UNetDriver::FlushActorDormancy(AActor* Actor)
 #endif
 }
 
+namespace
+{
+    template <size_t Size>
+    FActorDestructionInfo* FindDestructionInfoIn(UNetDriver::FDestroyedActorMap& Map, const FNetworkGUID& NetGUID)
+    {
+        using FSizedMap = TMap<FNetworkGUID, TActorDestructionInfoStorage<Size>>;
+        static_assert(sizeof(FSizedMap) == sizeof(UNetDriver::FDestroyedActorMap));
+        return reinterpret_cast<FActorDestructionInfo*>(reinterpret_cast<FSizedMap&>(Map).Find(NetGUID));
+    }
+}
+
+FActorDestructionInfo* UNetDriver::FindDestructionInfo(const FNetworkGUID& NetGUID)
+{
+    // The finder only takes 4.16's 0x30 bytes or 4.19's 0x38.
+    return Natives::FActorDestructionInfo_Size == 0x38 ? FindDestructionInfoIn<0x38>(DestroyedStartupOrDormantActors, NetGUID) : FindDestructionInfoIn<0x30>(DestroyedStartupOrDormantActors, NetGUID);
+}
+
 FNetViewer::FNetViewer(UNetConnection* InConnection, float DeltaSeconds)
 {
     Natives::FNetViewer_FNetViewer(this, InConnection, DeltaSeconds);
@@ -484,8 +501,12 @@ int32_t UNetDriver::ServerReplicateActors_PrioritizeActors(UNetConnection* Conne
 
         for (auto It = Connection->DestroyedStartupOrDormantActors.CreateIterator(); It; ++It)
         {
-            FActorDestructionInfo& DInfo = DestroyedStartupOrDormantActors.FindChecked(*It);
-            OutPriorityList[FinalSortedCount] = FActorPriority(Connection, &DInfo, ConnectionViewers);
+            FActorDestructionInfo* DInfo = FindDestructionInfo(*It);
+            if (!DInfo)
+            {
+                continue;
+            }
+            OutPriorityList[FinalSortedCount] = FActorPriority(Connection, DInfo, ConnectionViewers);
             OutPriorityActors[FinalSortedCount] = OutPriorityList + FinalSortedCount;
             FinalSortedCount++;
         }

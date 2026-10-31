@@ -155,6 +155,8 @@ public:
     UFortSchematicItem* GetSchematicForItem(const UFortItemDefinition* ItemDefinition);
 
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
+    // The game's own removals from a player's inventory (IFortInventoryOwnerInterface::RemoveInventoryItem) reach Core.
+    static bool HasInventoryRemovalHook() { return RemoveInventoryItemOG != nullptr; }
     static ptrdiff_t CriticalMatchBonusOffset();
     static ptrdiff_t QuickBarsOffset();
     static ptrdiff_t MyFortPawnOffset() { return Member_MyFortPawn.GetOffsetChecked(); }

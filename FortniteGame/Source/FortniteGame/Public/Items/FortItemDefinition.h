@@ -161,6 +161,12 @@ class UFortGadgetItemDefinition : public UFortWorldItemDefinition
     DefineUnrealClass(UFortGadgetItemDefinition, FortniteGame)
 };
 
+// An item used up as it is used. StaticClass is null on a build without the class.
+class UFortConsumableItemDefinition : public UFortWorldItemDefinition
+{
+    DefineUnrealClass(UFortConsumableItemDefinition, FortniteGame)
+};
+
 // An emote or a dance (an account item): the montage it plays (TSoftObjectPtr<UAnimMontage>).
 class UFortMontageItemDefinitionBase : public UFortItemDefinition
 {

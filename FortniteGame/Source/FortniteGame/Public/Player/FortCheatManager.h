@@ -11,7 +11,9 @@
 
 class ACharacter;
 class AFortPlayerController;
+class UFortItemDefinition;
 class UFortWorldItemDefinition;
+struct FGuid;
 enum class ECheatMovement : uint8_t;
 
 // Fortnite's cheats ("cheat <command>" runs them on the server, AFortPlayerController::ServerCheat_Implementation).
@@ -137,6 +139,14 @@ public:
     // ToggleInfiniteAmmo flag (bInfiniteAmmo, replicated): reloads never use up the reserve, the magazine still empties.
     // Says whether it is on, where the game's toggle answered nothing the player saw.
     void InfiniteAmmo(const FString& Arguments);
+    // Core's own command, "cheat infiniteconsumables [on | off]" ("cheat toggleinfiniteconsumables" too; #155): until it
+    // is turned off, respawns included, using a consumable (shield potions, medkits, bandages, grenades, smoke
+    // grenades...) doesn't use it up. Says whether it is on.
+    void InfiniteConsumables(const FString& Arguments);
+    // Server: true when the game's removal of this item (by definition, or by the player's item with that guid) is a
+    // consumable's use that infiniteconsumables keeps: the player has it on and the item spends itself when used.
+    static bool KeepsConsumable(AFortPlayerController* PlayerController, const UFortItemDefinition* ItemDefinition);
+    static bool KeepsConsumable(AFortPlayerController* PlayerController, const FGuid& ItemGuid);
     // Core's own commands from PongooDev/Core (#155): "cheat sethealth <value>", "cheat setshield <value>" (the shield,
     // up to its maximum) and "cheat setmaxshield <value | reset>" (the maximum shield, kept through respawns like
     // maxhealth), Save the World's and Battle Royale's alike.

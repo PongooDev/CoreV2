@@ -1924,7 +1924,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // "nocooldown [on | off]" (#148; also for the game's ToggleNoCoolDown, which sets a flag nothing reads) ends their
     // ability and gadget cooldowns, "infinitemag [on | off]" (#149) keeps their magazine full, "infiniteammo [on | off]"
     // (#155; also for the game's ToggleInfiniteAmmo, whose flag it sets and answers for) keeps their reserve from running
-    // out, "sethealth", "setshield", "setmaxshield", "clearequippeditem", "setscale" and "progressquest" (#155, from
+    // out, "infiniteconsumables [on | off]" (#155; or "toggleinfiniteconsumables") keeps their consumables from being
+    // used up, "sethealth", "setshield", "setmaxshield", "clearequippeditem", "setscale" and "progressquest" (#155, from
     // PongooDev/Core) set their health, shield and size, take away the item they hold and move a quest on, "repair
     // [all]" (#150) restores their weapon's durability, "firerate <multiplier | reset>"
     // (#150) changes how fast their guns fire, "weapondamage <multiplier | reset>" (#152) how much damage their weapons
@@ -1944,6 +1945,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"infinitemag", &UFortCheatManager::InfiniteMag },
         { L"infiniteammo", &UFortCheatManager::InfiniteAmmo },
         { L"toggleinfiniteammo", &UFortCheatManager::InfiniteAmmo },
+        { L"infiniteconsumables", &UFortCheatManager::InfiniteConsumables },
+        { L"toggleinfiniteconsumables", &UFortCheatManager::InfiniteConsumables },
         { L"sethealth", &UFortCheatManager::SetHealth },
         { L"setshield", &UFortCheatManager::SetShield },
         { L"setmaxshield", &UFortCheatManager::SetMaxShield },
@@ -2113,6 +2116,16 @@ AFortPlayerController* AFortPlayerController::FromInventoryOwner(IFortInventoryO
 bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
 {
     AFortPlayerController* PlayerController = FromInventoryOwner(static_cast<IFortInventoryOwnerInterface*>(InventoryOwner));
+#if WITH_SERVER_CODE
+    // "cheat infiniteconsumables" (#155): the game spends a consumable it uses through here (a self-ammo weapon's ammo
+    // use, an ability's item cost). For a player with it on, that use takes nothing and counts as done, so the entry,
+    // the quick bar and the HUD keep the count, and the last one stays. Core's own removals (drops, deaths, the
+    // aircraft's reset) call RemoveInventoryItem directly and still take it.
+    if (Count > 0 && PlayerController->Role == ROLE_Authority && UFortCheatManager::KeepsConsumable(PlayerController, ItemGuid))
+    {
+        return true;
+    }
+#endif
     return PlayerController->RemoveInventoryItem(ItemGuid, Count, bForceRemoveFromQuickBars);
 }
 

@@ -22,6 +22,7 @@
 #include "Log.h"
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
+#include "Player/FortCheatManager.h"
 #include "Player/FortPlayerController.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectIterator.h"
@@ -392,7 +393,13 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromPlayer)
     P_GET_PROPERTY(UIntProperty, Z_Param_AmountToRemove);
     P_FINISH;
     P_NATIVE_BEGIN;
-    *static_cast<int32_t*>(RESULT_PARAM) = K2_RemoveItemFromPlayer(Z_Param_PlayerController, Z_Param_ItemDefinition, Z_Param_AmountToRemove);
+#if WITH_SERVER_CODE
+    // A Blueprint spending a consumable it used: "cheat infiniteconsumables" (#155) keeps it, and the use counts as paid.
+    const bool bKeep = Z_Param_AmountToRemove > 0 && UFortCheatManager::KeepsConsumable(Z_Param_PlayerController, Z_Param_ItemDefinition);
+#else
+    const bool bKeep = false;
+#endif
+    *static_cast<int32_t*>(RESULT_PARAM) = bKeep ? Z_Param_AmountToRemove : K2_RemoveItemFromPlayer(Z_Param_PlayerController, Z_Param_ItemDefinition, Z_Param_AmountToRemove);
     P_NATIVE_END;
 }
 

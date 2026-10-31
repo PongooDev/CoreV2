@@ -486,6 +486,7 @@ namespace
         { L"Items", L"Badass", L"badass", L"god, build free, STW weapons", ECheatMode::SaveTheWorld },
         { L"Items", L"ListWeapons", L"listweapons", L"item names (listammo, listtraps)", ECheatMode::Both },
         { L"Items", nullptr, L"clearequippeditem", L"remove the item you hold", ECheatMode::Both },
+        { L"Items", nullptr, L"infiniteconsumables [on | off]", L"potions, medkits, grenades aren't used up", ECheatMode::Both },
         { L"Player", L"God", L"god", L"invulnerable, toggles", ECheatMode::Both },
         { L"Player", nullptr, L"unlimitedhealth [on | off]", L"take no damage", ECheatMode::Both },
         { L"Player", L"ToggleInfiniteStamina", L"infinitestamina", L"stamina never runs out, toggles", ECheatMode::SaveTheWorld },
@@ -512,8 +513,7 @@ namespace
         { L"Player", nullptr, L"disguiseview <back | hide | normal>", L"how you see your disguise", ECheatMode::Both },
         { L"Player", nullptr, L"dance [EID]", L"play an emote", ECheatMode::Both },
         { L"Weapons", nullptr, L"infinitemag [on | off]", L"never reload, never run out", ECheatMode::Both },
-        { L"Weapons", nullptr, L"infiniteammo [on | off]", L"reloads never use up ammo", ECheatMode::Both },
-        { L"Weapons", nullptr, L"firerate <multiplier | reset>", L"guns fire faster", ECheatMode::Both },
+        { L"Weapons", nullptr, L"infiniteammo [on | off]", L"reloads never use up ammo", ECheatMode::Both },        { L"Weapons", nullptr, L"firerate <multiplier | reset>", L"guns fire faster", ECheatMode::Both },
         { L"Weapons", nullptr, L"weapondamage <multiplier | reset>", L"weapons hit harder", ECheatMode::Both },
         { L"Weapons", nullptr, L"bloom [on | off]", L"no spread (your game only)", ECheatMode::Both },
         { L"Weapons", nullptr, L"recoil [on | off]", L"no recoil (your game only)", ECheatMode::Both },
@@ -2249,6 +2249,40 @@ namespace
             [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; });
     }
 
+    // "cheat infiniteconsumables" (#155): the players whose consumables aren't used up, until they turn it off.
+    std::vector<TWeakObjectPtr<AFortPlayerController>> InfiniteConsumablesPlayers;
+
+    bool HasInfiniteConsumables(const AFortPlayerController* PlayerController)
+    {
+        return PlayerController && std::any_of(InfiniteConsumablesPlayers.begin(), InfiniteConsumablesPlayers.end(),
+            [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; });
+    }
+
+    // An item its use spends itself (#155): a UFortConsumableItemDefinition; an item of EFortItemType::Consumable (1.8.1
+    // and later: Athena_Shields, Athena_Medkit, Athena_Bandage...); or a weapon that is its own ammo (AmmoData pointing
+    // at itself), which is what Battle Royale's consumables and throwables are on every build (Athena_SmokeGrenade,
+    // Athena_Grenade, Athena_ShieldSmall, Athena_PurpleStuff...: B_UtilityItem_Generic_Athena weapons whose ability
+    // costs AmmoPrimary, one of the item). Ammo, building materials and traps are none of these, and an ability charge
+    // (nocooldown's) is an ammo item, so they stay out.
+    bool IsConsumableItem(const UFortItemDefinition* Definition)
+    {
+        if (!Definition || Cast<UFortAmmoItemDefinition>(Definition))
+        {
+            return false;
+        }
+        if (UClass* ConsumableClass = UFortConsumableItemDefinition::StaticClass(); ConsumableClass && Definition->IsA(ConsumableClass))
+        {
+            return true;
+        }
+        const EFortItemType Consumable = EFortItemType::GetConsumable();
+        if (Consumable != Reflection::InvalidEnumValue && static_cast<EFortItemType>(Definition->ItemType) == Consumable)
+        {
+            return true;
+        }
+        const UFortWeaponItemDefinition* Weapon = Cast<UFortWeaponItemDefinition>(Definition);
+        return Weapon && static_cast<const TAssetPtr<UFortWorldItemDefinition>&>(Weapon->AmmoData).LoadSynchronous() == Definition;
+    }
+
     // The game's flag (replicated): on while infiniteammo or infinitemag is.
     void UpdateInfiniteAmmoFlag(AFortPlayerController* PlayerController)
     {
@@ -3437,6 +3471,68 @@ void UFortCheatManager::InfiniteAmmo(const FString& Arguments)
         Reply(HasInfiniteMag(PlayerController) ? TEXT("Infinite ammo OFF (infinitemag is still on and keeps your magazine full)")
                                                : TEXT("Infinite ammo OFF: reloading uses up your ammo again"));
     }
+#endif
+}
+
+void UFortCheatManager::InfiniteConsumables(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // infiniteammo for consumables (#155): while it is on, using a consumable leaves its count as it was. The game spends
+    // one through the controller's IFortInventoryOwnerInterface::RemoveInventoryItem (a self-ammo weapon's ammo use, 1.9
+    // 0x9629B0 and 1.10 0x9B3D10; an ability's Item cost, 1.9 0x28D370), which Core already implements, and Core's
+    // KeepsConsumable turns that removal into nothing: the inventory entry never changes, so the quick bar and the HUD keep
+    // the count, and the last one never leaves the inventory or the hand. Drops, deaths and Core's own removals don't go
+    // through the game's call, so they still take the item.
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.empty() ? std::wstring() : Lower(Words[0]);
+    if (Words.size() > 1 || (!Word.empty() && Word != L"on" && Word != L"off"))
+    {
+        Reply(TEXT("Usage: infiniteconsumables [on | off], using a consumable (potions, medkits, bandages, grenades...) doesn't use it up; without on or off it toggles"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    if (!AFortPlayerController::HasInventoryRemovalHook())
+    {
+        Reply(TEXT("Infinite consumables needs the inventory's RemoveInventoryItem, which Core didn't find on this build"));
+        return;
+    }
+    const bool bEnable = Word.empty() ? !HasInfiniteConsumables(PlayerController) : Word == L"on";
+    std::erase_if(InfiniteConsumablesPlayers, [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get() || Known.Get() == PlayerController; });
+    if (bEnable)
+    {
+        InfiniteConsumablesPlayers.emplace_back(PlayerController);
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("InfiniteConsumables: %s %s"), *GetNameSafe(PlayerController), bEnable ? TEXT("on") : TEXT("off"));
+    Reply(bEnable ? TEXT("Infinite consumables ON: using a consumable doesn't use it up (infiniteconsumables off: normal again)")
+                  : TEXT("Infinite consumables OFF: consumables are used up again"));
+#endif
+}
+
+bool UFortCheatManager::KeepsConsumable(AFortPlayerController* PlayerController, const UFortItemDefinition* ItemDefinition)
+{
+#if WITH_SERVER_CODE
+    return HasInfiniteConsumables(PlayerController) && IsConsumableItem(ItemDefinition);
+#else
+    return false;
+#endif
+}
+
+bool UFortCheatManager::KeepsConsumable(AFortPlayerController* PlayerController, const FGuid& ItemGuid)
+{
+#if WITH_SERVER_CODE
+    if (!HasInfiniteConsumables(PlayerController))
+    {
+        return false;
+    }
+    AFortInventory* Inventory = PlayerController->WorldInventory;
+    UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+    return WorldItem && IsConsumableItem(static_cast<UFortItemDefinition*>(static_cast<FFortItemEntry&>(WorldItem->ItemEntry).ItemDefinition));
+#else
+    return false;
 #endif
 }
 

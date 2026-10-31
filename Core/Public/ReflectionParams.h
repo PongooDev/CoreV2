@@ -67,6 +67,13 @@ namespace Reflection
             return true;
         }
 
+        // Whether the function has a parameter by this name, for parameters a later engine renamed (4.19's
+        // WorldContextObject, WorldContext before it); unlike Set it logs nothing.
+        bool Has(const wchar_t* Name) const
+        {
+            return Function && Function->FindPropertyByName(FName(Name, FNAME_Find));
+        }
+
         template <typename T>
         T* Get(const wchar_t* Name)
         {

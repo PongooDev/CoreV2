@@ -5,7 +5,7 @@
 void UAISense_Hearing::ReportNoiseEvent(UObject* WorldContextObject, const FVector& NoiseLocation, float Loudness, AActor* Instigator, float MaxRange, FName Tag)
 {
     Reflection::FParams Params(StaticFunction_ReportNoiseEvent());
-    Params.Set(L"WorldContext", WorldContextObject);
+    Params.Set(Params.Has(L"WorldContextObject") ? L"WorldContextObject" : L"WorldContext", WorldContextObject);
     Params.Set(L"NoiseLocation", NoiseLocation);
     Params.Set(L"Loudness", Loudness);
     Params.Set(L"Instigator", Instigator);

@@ -55,6 +55,6 @@ void UNavigationSystem::RequestRegistration(ANavigationData* NavData, bool bTrig
 bool UNavigationSystem::IsNavigationBeingBuilt(UObject* WorldContextObject)
 {
     Reflection::FParams Params(StaticFunction_IsNavigationBeingBuilt());
-    Params.Set(L"WorldContext", WorldContextObject);
+    Params.Set(Params.Has(L"WorldContextObject") ? L"WorldContextObject" : L"WorldContext", WorldContextObject);
     return Params.Call(StaticClass()->GetDefaultObject()) && Params.Take<bool>(L"ReturnValue");
 }

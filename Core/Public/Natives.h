@@ -260,7 +260,8 @@ namespace Natives
     inline FFortItemEntry* (*FFortItemEntry_FFortItemEntry)(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel, const void* InAlterations) = nullptr;
     inline void (*FFortItemEntry_SetStateValue)(FFortItemEntry* This, uint8_t StateType, int32_t IntValue) = nullptr;
     inline void (*FFortItemEntry_MarkDirty)(FFortItemEntry* This) = nullptr;
-    inline AFortPickup* (*AFortPickup_CreatePickup)(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation, AFortPlayerController* OptionalOwner, UClass* OverrideClass) = nullptr;
+    // 1.10 adds a seventh argument, which its callers pass as 0 (older builds ignore it).
+    inline AFortPickup* (*AFortPickup_CreatePickup)(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation, AFortPlayerController* OptionalOwner, UClass* OverrideClass, uint64_t Unused) = nullptr;
     inline void (*FFrame_StepExplicitProperty)(FFrame* This, void* const Result, UProperty* Property) = nullptr;
     inline bool (*UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled)() = nullptr;
     inline void (*UNetDriver_TickFlush)(UNetDriver* This, float DeltaSeconds) = nullptr;
@@ -298,6 +299,8 @@ namespace Natives
     inline bool AFortInventory_bControllerLimits = false;
     inline uintptr_t UAbilitySystemComponent_GiveAbility = 0;
     inline int32_t AFortPickup_GivePickupToIndex = -1;
+    // What the build left of GivePickupTo: the shared empty function, or (1.10) its authority check and Destroy.
+    inline void* AFortPickup_GivePickupToStripped = nullptr;
     inline int32_t AFortPlayerController_SpawnDropPickupIndex = -1;
     inline void (*AFortPickup_SetPickupTarget)(AFortPickup* Pickup, AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound) = nullptr;
     // The pickup's IFortInteractInterface::CanInteract(const FInteractionType&) slot, in the interface's own vtable.

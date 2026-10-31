@@ -375,7 +375,7 @@ AFortPickup* AFortPickup::CreatePickup(UWorld* World, const FFortItemEntry& Item
     {
         return nullptr;
     }
-    return Natives::AFortPickup_CreatePickup(World, ItemEntry, SpawnLocation, SpawnRotation, OptionalOwner, OverrideClass);
+    return Natives::AFortPickup_CreatePickup(World, ItemEntry, SpawnLocation, SpawnRotation, OptionalOwner, OverrideClass, 0);
 }
 
 void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss)
@@ -940,7 +940,7 @@ void AFortPickup::HookVTables()
         UClass* Class = *It;
         UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
         void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-        if (VTable && VTable[GiveIndex] == Natives::SharedEmptyFunction)
+        if (VTable && VTable[GiveIndex] == Natives::AFortPickup_GivePickupToStripped)
         {
             Hooks::SwapVTable(L"AFortPickup::GivePickupTo", VTable, GiveIndex, reinterpret_cast<void*>(&GivePickupToHK));
         }

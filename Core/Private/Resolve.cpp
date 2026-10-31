@@ -3907,6 +3907,22 @@ bool Finder::ResolveReplicationLive()
     const int32_t Velocity = Natives::AActor_GetVelocityIndex;
     const int32_t NetRelevant = Natives::AActor_IsNetRelevantForIndex;
 
+    // GetNetPriority and GetReplayPriority return Time * NetPriority ("mulss xmm, [reg+NetPriority]").
+    const UProperty* PriorityProperty = AActor::StaticClass() ? AActor::StaticClass()->FindPropertyByName(FName(L"NetPriority", FNAME_Find)) : nullptr;
+    const int32_t PriorityOffset = PriorityProperty ? PriorityProperty->GetOffset_ForInternal() : -1;
+    const auto ScalesByPriority = [PriorityOffset](uintptr_t Function, uintptr_t End)
+    {
+        for (uintptr_t Site = Function; Function && PriorityOffset > 0 && Site + 7 <= End; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 2);
+            if (Byte(Site) == 0x0F && Byte(Site + 1) == 0x59 && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 3) == PriorityOffset)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
     int32_t NetPriority = -1;
     int32_t NetPriorities = 0;
     for (int32_t Index = Velocity; ActorVTable && Velocity >= 0 && Index < NetRelevant; ++Index)
@@ -3920,6 +3936,29 @@ bool Finder::ResolveReplicationLive()
                 NetPriority = Index;
                 ++NetPriorities;
                 break;
+            }
+        }
+    }
+    const uintptr_t FoundPriority = NetPriorities == 1 ? VTableEntry(ActorVTable, NetPriority) : 0;
+    if (FoundPriority && !ScalesByPriority(FoundPriority, Finder::FunctionEnd(FoundPriority)))
+    {
+        // 1.10's GetNetPriority (0x1757820) is a leaf without unwind data, its call on the owner a tail jump, so the scan
+        // above passes over it and meets another recursive function (slot 0x5E). Leaves are read 0x80 bytes in.
+        NetPriorities = 0;
+        for (int32_t Index = Velocity; Index < NetRelevant; ++Index)
+        {
+            const uintptr_t Function = VTableEntry(ActorVTable, Index);
+            const uintptr_t FunctionEnd = Finder::FunctionEnd(Function);
+            const uintptr_t End = FunctionEnd > Function && FunctionEnd - Function < 0x2000 ? FunctionEnd : Function + 0x80;
+            bool bRecursive = false;
+            for (uintptr_t Call = Function ? FindVirtualCall(Function, End) : 0; Call && !bRecursive; Call = FindVirtualCall(Call + 1, End))
+            {
+                bRecursive = VirtualSlot(Call) == Index;
+            }
+            if (bRecursive && ScalesByPriority(Function, End))
+            {
+                NetPriority = Index;
+                ++NetPriorities;
             }
         }
     }
@@ -3940,6 +3979,15 @@ bool Finder::ResolveReplicationLive()
                 break;
             }
         }
+    }
+    if (NetPriorities == 1 && NetDormancies != 1)
+    {
+        // UE 4.19 (1.10) drops the APlayerController* overload that forwarded into GetNetDormancy, so it follows
+        // GetReplayPriority straight away: GetNetPriority 0x70, GetReplayPriority 0x71 (0x17591B0, "mulss xmm0,
+        // [rcx+134h]"), GetNetDormancy 0x72. The slots after it hold shared stubs, which can't be told apart.
+        const uintptr_t ReplayPriority = VTableEntry(ActorVTable, NetPriority + 1);
+        NetDormancies = ScalesByPriority(ReplayPriority, ReplayPriority + 0x40) && VTableEntry(ActorVTable, NetPriority + 2) ? 1 : 0;
+        NetDormancy = NetPriority + 2;
     }
     RequireSlot(L"AActor::GetNetDormancy", Natives::AActor_GetNetDormancyIndex, NetDormancies == 1 ? NetDormancy : -1);
 
@@ -4003,12 +4051,24 @@ bool Finder::ResolveReplicationLive()
     const uintptr_t ViewersNum = WorldSettingsCall ? FindInstruction(WorldSettingsCall + 13, WorldSettingsCall + 0x20, { 0x39, -1 }) : 0;
     const uintptr_t ViewersStride = ViewersNum ? FindInstruction(ViewersNum, ViewersNum + 0x30, { 0x48, 0x8D, -1, 0x52, 0x48, 0xC1, -1, 0x04 }) : 0;
     const uintptr_t ViewersData = ViewersStride ? FindInstruction(ViewersStride, ViewersStride + 0x10, { 0x49, 0x03, -1, 0x24 }) : 0;
+    int32_t ViewersNumOffset = ViewersData && (Byte(ViewersNum + 1) & 0xC0) == 0x80 ? *reinterpret_cast<const int32_t*>(ViewersNum + 2) : -1;
+    int32_t ViewersDataOffset = ViewersData ? *reinterpret_cast<const int32_t*>(ViewersData + 4) : -1;
+    if (!ViewersData && ReplicateActorEnd)
+    {
+        // 1.10 (0x19530C0) stores a register between GetWorldSettings' arguments and its call, then loads the count
+        // ("movsxd rcx, [rax+500h]") and the data ("mov rbx, [rax+4F8h]") before scaling the count by 0x30.
+        const uintptr_t SettingsArguments = FindInstruction(ReplicateActor, ReplicateActorEnd, { 0x41, 0xB0, 0x01, 0x33, 0xD2 });
+        const uintptr_t SettingsCall = SettingsArguments ? FindRawCall(SettingsArguments, SettingsArguments + 0x20) : 0;
+        const uintptr_t NumLoad = SettingsCall ? FindInstruction(SettingsCall + 5, SettingsCall + 0x30, { 0x48, 0x63, -1 }) : 0;
+        const uintptr_t DataLoad = NumLoad && (Byte(NumLoad + 2) & 0xC7) == 0x80 ? FindInstruction(NumLoad + 7, NumLoad + 0x20, { 0x48, 0x8B, -1 }) : 0;
+        const uintptr_t Stride = DataLoad && (Byte(DataLoad + 2) & 0xC7) == 0x80 ? FindInstruction(DataLoad + 7, DataLoad + 0x10, { 0x48, 0x8D, -1, -1, 0x48, 0xC1, -1, 0x04 }) : 0;
+        ViewersNumOffset = Stride ? *reinterpret_cast<const int32_t*>(NumLoad + 3) : -1;
+        ViewersDataOffset = Stride ? *reinterpret_cast<const int32_t*>(DataLoad + 3) : -1;
+    }
     const UProperty* ViewersProperty = AWorldSettings::StaticClass() ? AWorldSettings::StaticClass()->FindPropertyByName(FName(L"ReplicationViewers", FNAME_Find)) : nullptr;
     const UScriptStruct* NetViewerStruct = FindObject<UScriptStruct>(nullptr, L"/Script/Engine.NetViewer");
     const int32_t ReflectedViewers = ViewersProperty ? ViewersProperty->GetOffset_ForInternal() : -1;
-    const bool bViewersLayout = ViewersData && (Byte(ViewersNum + 1) & 0xC0) == 0x80
-        && *reinterpret_cast<const int32_t*>(ViewersData + 4) == ReflectedViewers
-        && *reinterpret_cast<const int32_t*>(ViewersNum + 2) == ReflectedViewers + 8
+    const bool bViewersLayout = ViewersDataOffset == ReflectedViewers && ViewersNumOffset == ReflectedViewers + 8
         && NetViewerStruct && NetViewerStruct->GetPropertiesSize() == static_cast<int32_t>(sizeof(FNetViewer));
     if (!bViewersLayout)
     {
@@ -4098,9 +4158,19 @@ bool Finder::ResolvePickupLive()
     const uintptr_t SpawnMissionItemPickupEnd = SpawnMissionItemPickup ? Finder::FunctionEnd(SpawnMissionItemPickup) : 0;
     const uintptr_t EntrySetup = SpawnMissionItemPickupEnd ? FindInstruction(SpawnMissionItemPickup, SpawnMissionItemPickupEnd,
         { 0x48, 0xC7, 0x44, 0x24, 0x20, 0x00, 0x00, 0x00, 0x00, 0x45, 0x8D, 0x41, 0x01, 0xE8, -1, -1, -1, -1, 0x48, 0x8B, 0xD0 }) : 0;
-    const uintptr_t EntryConstructor = EntrySetup ? Finder::RelativeTarget(EntrySetup + 13, 1, 5) : 0;
+    uintptr_t EntryConstructor = EntrySetup ? Finder::RelativeTarget(EntrySetup + 13, 1, 5) : 0;
     const uintptr_t Next = EntrySetup ? FindRawCall(EntrySetup + 18, SpawnMissionItemPickupEnd) : 0;
-    const uintptr_t CreatePickup = Next ? Finder::RelativeTarget(Next, 1, 5) : 0;
+    uintptr_t CreatePickup = Next ? Finder::RelativeTarget(Next, 1, 5) : 0;
+    if (!EntrySetup && SpawnMissionItemPickupEnd)
+    {
+        // 1.10's constructor (0x6B0A90) takes no alterations, so nothing is stored for them before "lea r8d, [r9+1]"
+        // (0x6FF37C); the entry still goes straight on (mov rdx, rax) to CreatePickup (0x6B6D10).
+        const uintptr_t CountSetup = FindInstruction(SpawnMissionItemPickup, SpawnMissionItemPickupEnd, { 0x45, 0x8D, 0x41, 0x01, 0xE8 });
+        const uintptr_t Pass = CountSetup ? FindInstruction(CountSetup + 9, CountSetup + 0x30, { 0x48, 0x8B, 0xD0 }) : 0;
+        const uintptr_t Create = Pass ? FindRawCall(Pass, SpawnMissionItemPickupEnd) : 0;
+        EntryConstructor = Create ? Finder::RelativeTarget(CountSetup + 4, 1, 5) : 0;
+        CreatePickup = Create ? Finder::RelativeTarget(Create, 1, 5) : 0;
+    }
 
     if (!EntryConstructor || !CreatePickup)
     {
@@ -4154,10 +4224,15 @@ bool Finder::ResolvePickupGiveLive()
                 ++VirtualCalls;
             }
 
+            // 1.10 keeps the authority check and Destroy of the give (0x6C77C0): "cmp byte [rcx+Role], 3; jnz; test rdx,
+            // rdx; jz; mov r8b, 1; xor edx, edx; jmp AActor::Destroy; ret", with the inventory part stripped.
             const int32_t Slot = VirtualCalls >= 2 ? VirtualSlot(LastVirtualCall) : -1;
-            if (Slot >= 0 && reinterpret_cast<void*>(VTableEntry(PickupVTable, Slot)) == Natives::SharedEmptyFunction)
+            const uintptr_t Give = VTableEntry(PickupVTable, Slot);
+            if (Give && (reinterpret_cast<void*>(Give) == Natives::SharedEmptyFunction
+                || FindInstruction(Give, Give + 25, { 0x80, 0xB9, -1, -1, 0x00, 0x00, 0x03, 0x75, -1, 0x48, 0x85, 0xD2, 0x74, -1, 0x41, 0xB0, 0x01, 0x33, 0xD2, 0xE9, -1, -1, -1, -1, 0xC3 }) == Give))
             {
                 GiveIndex = Slot;
+                Natives::AFortPickup_GivePickupToStripped = reinterpret_cast<void*>(Give);
             }
         }
     }
@@ -4862,8 +4937,15 @@ bool Finder::ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTab
 
         const uintptr_t TypeCall = SetContextHelper ? 0 : FindRawCall(Target, Target + 0x20);
         const uintptr_t TypeGetter = TypeCall ? Finder::RelativeTarget(TypeCall, 1, 5) : 0;
-        const uintptr_t CachedType = TypeGetter ? FindInstruction(TypeGetter, TypeGetter + 0x10, { 0x48, 0x83, 0x3D, -1, -1, -1, -1, 0x00 }) : 0;
-        if (CachedType && GoalItemType && *reinterpret_cast<UClass* const*>(Finder::RelativeTarget(CachedType, 3, 8)) == GoalItemType)
+        uintptr_t CachedType = TypeGetter ? FindInstruction(TypeGetter, TypeGetter + 0x10, { 0x48, 0x83, 0x3D, -1, -1, -1, -1, 0x00 }) : 0;
+        uintptr_t CachedTypeSlot = CachedType ? Finder::RelativeTarget(CachedType, 3, 8) : 0;
+        if (TypeGetter && !CachedType)
+        {
+            // 1.10's StaticClass (0xADFC40) loads the cached class instead: "mov rax, [rip+X]; test rax, rax".
+            CachedType = FindInstruction(TypeGetter, TypeGetter + 0x18, { 0x48, 0x8B, 0x05, -1, -1, -1, -1, 0x48, 0x85, 0xC0 });
+            CachedTypeSlot = CachedType ? Finder::RelativeTarget(CachedType, 3, 7) : 0;
+        }
+        if (CachedType && GoalItemType && *reinterpret_cast<UClass* const*>(CachedTypeSlot) == GoalItemType)
         {
             SetContextHelper = Target;
         }
@@ -5586,6 +5668,21 @@ bool Finder::ResolveNavigationSystemLive()
             OctreeLockOffset = *reinterpret_cast<const int32_t*>(Site + 2);
         }
     }
+    if (PopulateEnd && OctreeLockOffset < 0)
+    {
+        // 1.10's ConditionalPopulateNavOctree (0x1777740) leaves the lock to the element registration, which tests it
+        // ("test byte [rcx+3FAh], 1", 0x178FFD7) before logging that it ignores the element.
+        const uintptr_t Ignore = First(Finder::StringRefs(L"IGNORE(RegisterNavOctreeElement) %s"));
+        const uintptr_t Register = Ignore ? Finder::FunctionStart(Ignore) : 0;
+        for (uintptr_t Site = Register; Register && Site + 7 <= Ignore && OctreeLockOffset < 0; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 1);
+            if (Byte(Site) == 0xF6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && Byte(Site + 6) == 0x01)
+            {
+                OctreeLockOffset = *reinterpret_cast<const int32_t*>(Site + 2);
+            }
+        }
+    }
 
     if (LockFlagsOffset <= 0 || !IsInText(RebuildAll) || OctreeLockOffset <= 0)
     {
@@ -6172,11 +6269,18 @@ bool Finder::ResolveItemEntryStateLive()
     const uintptr_t Implementation = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortPlayerControllerOutpost"), ImplementationIndex(NotifyFabrication));
     const uintptr_t ImplementationEnd = Implementation ? Finder::FunctionEnd(Implementation) : 0;
     std::vector<uintptr_t> Targets;
+    uintptr_t LastCall = 0;
     for (const auto& [Call, Target] : ImplementationEnd > Implementation ? Finder::DirectCalls(Implementation, ImplementationEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
     {
         Targets.push_back(Target);
+        LastCall = Call;
     }
-    const uintptr_t SetStateValue = Targets.size() == 4 && Targets[0] == Targets[2] && Targets[1] == Targets[3] && Targets[0] != Targets[1] ? Targets[1] : 0;
+    uintptr_t SetStateValue = Targets.size() == 4 && Targets[0] == Targets[2] && Targets[1] == Targets[3] && Targets[0] != Targets[1] ? Targets[1] : 0;
+    if (!SetStateValue && Targets.size() == 2 && Targets[0] != Targets[1] && FindInstruction(LastCall - 0x10, LastCall, { 0xBA, 0x02, 0x00, 0x00, 0x00 }))
+    {
+        // 1.10 (0x8E0300) keeps one pending fabrication: its entry, then SetStateValue(Entry, 2, 1) (0x6AFFF0).
+        SetStateValue = Targets[1];
+    }
 
     const uintptr_t SetStateValueEnd = SetStateValue ? Finder::FunctionEnd(SetStateValue) : 0;
     uintptr_t MarkDirty = 0;

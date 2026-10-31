@@ -97,6 +97,18 @@ class UFortQuestItem : public UObject
 public:
     DefineUProperty(EFortQuestState, quest_state)
     DefineUProperty(TArray<UFortQuestObjectiveInfo*>, Objectives)
+    // The stage the quest is at: only its objectives of that stage (or of every stage, -1) take stat events.
+    DefineUProperty(int32_t, CurrentStage)
+
+private:
+    // The profile's count of each objective (BackendName). A TMap can't be copied, so it has no DefineUProperty accessors.
+    static inline Reflection::FMemberInfo Member_CompletionCounts{ &StaticReflectionOwner, TEXT("CompletionCounts"), sizeof(TMap<FName, int32_t>), Reflection::EMemberKind::Value };
+
+public:
+    int32_t GetCompletionCount(FName BackendName)
+    {
+        return Member_CompletionCounts.IsAvailable() ? Reflection::AccessMember<TMap<FName, int32_t>>(this, Member_CompletionCounts).FindRef(BackendName) : 0;
+    }
 
     // The quest's UFortQuestItemDefinition (UFortItem::GetItemDefinitionBP).
     UFortItemDefinition* GetQuestDefinition() const;
@@ -130,11 +142,16 @@ public:
     void SendItemStatEvent(EFortQuestObjectiveStatEvent Type, UFortItemDefinition* ItemDefinition, int32_t Count);
     void SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus);
 
-    // Saves Battle Royale's challenge progress (1.8), which the game keeps on the server.
+    // Saves Battle Royale's challenge progress (1.8), which the game keeps on the server, and sends the stat events on
+    // builds that strip them (1.10: Finder::ResolveQuestStatEvents).
     static void Hook();
 
 private:
     static void SendStatEventWithTagsHK(UFortQuestManager* This, const void* CustomStatName, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
+    // Builds that strip the stat events: the calls the game makes in place of SendStatEventWithTags (the typed wrapper's
+    // arguments), and SendCustomStatEvent, which validates the stat and then sends nothing.
+    static void SendStatEventCall(UFortQuestManager* This, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
+    static void SendCustomStatEventHK(UFortQuestManager* This, const void* ObjectiveStat, int32_t Count, bool bForceFlush);
 };
 
 class UFortRegisteredPlayerInfo : public UObject

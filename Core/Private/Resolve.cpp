@@ -11,6 +11,7 @@
 #include "Net/DataBunch.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
+#include "UObject/UObjectArray.h"
 #include "UObject/UObjectGlobals.h"
 
 #include <algorithm>
@@ -6576,8 +6577,152 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall()
     return nullptr;
 }
 
+namespace
+{
+    std::vector<uint8_t*> StrippedStatEventCalls;
+
+    // A call with SendStatEventWithTags' typed wrapper's eight arguments: since the last call before it, four stack
+    // arguments were stored (mov [rsp+20h/28h/30h/38h], of any width), and no fifth. SendEndPrimaryMission's place (7
+    // arguments, 1.10 0x6FDF1B) and the other calls to the shared empty function don't have this.
+    bool IsStatEventCall(uintptr_t Site)
+    {
+        uintptr_t Begin = Site > 0x60 ? Site - 0x60 : Site;
+        for (uintptr_t Call = FindRawCall(Begin, Site); Call; Call = FindRawCall(Call + 1, Site))
+        {
+            Begin = Call + 5;
+        }
+        uint32_t Stored = 0;
+        for (uintptr_t Address = Begin; Address + 4 <= Site; ++Address)
+        {
+            const uint8_t Opcode = Byte(Address);
+            if ((Opcode == 0x88 || Opcode == 0x89 || Opcode == 0xC6 || Opcode == 0xC7) && (Byte(Address + 1) & 0xC7) == 0x44 && Byte(Address + 2) == 0x24)
+            {
+                const uint8_t Displacement = Byte(Address + 3);
+                if (Displacement >= 0x20 && Displacement <= 0x40 && Displacement % 8 == 0)
+                {
+                    Stored |= 1u << ((Displacement - 0x20) / 8);
+                }
+            }
+        }
+        return Stored == 0xF;
+    }
+
+    // The displacement of the last call through a register's vtable (`call [reg+disp32]`) in [Begin, End), or -1.
+    int32_t LastVirtualCallDisplacement(uintptr_t Begin, uintptr_t End)
+    {
+        int32_t Displacement = -1;
+        for (uintptr_t Address = Begin; Address + 6 <= End; ++Address)
+        {
+            const uint8_t ModRm = Byte(Address + 1);
+            if (Byte(Address) == 0xFF && (ModRm & 0xF8) == 0x90 && (ModRm & 0x07) != 0x04)
+            {
+                Displacement = *reinterpret_cast<const int32_t*>(Address + 2);
+            }
+        }
+        return Displacement;
+    }
+
+    // 1.10 strips UFortQuestManager::SendStatEventWithTags and SaveStatEvents (their log strings are gone). Its typed
+    // wrapper became the shared empty function, which the stat events' senders still call with the wrapper's arguments
+    // (WaveComplete 0x6FA7C6, Interact 0x89B962, the game mode's kills 0x5CD7EF/0x5CD99D and team events 0x5CDF3A, the
+    // SendQuestEvent cheat 0x850D59), and SendCustomStatEvent (0x90BEF0) only validates the stat. The senders are found
+    // from the two that ask GetSourceAndContextTags for the event's tags just before (the shape the game's own senders
+    // have, 1.9.1's 0x6BBA24/0x85C102): the quest manager getter they call through (`mov dl, 2; call [rax+1678h]`,
+    // AFortPlayerController::GetQuestManager) is the vtable displacement every sender's function calls through, and every
+    // eight-argument call to the shared empty function in such a function is a sender.
+    bool ResolveStrippedQuestStatEvents()
+    {
+        // GetSourceAndContextTags is looked up by reflection, which needs the objects (a build that boots Core before
+        // the engine has none yet, and such builds keep their stat events).
+        if (!Natives::GUObjectArray || Natives::GUObjectArray->GetObjectArrayNum() == 0)
+        {
+            Log::Info(L"Finder: no objects yet, stripped stat events not looked for");
+            return false;
+        }
+        const uintptr_t SendCustomStatEvent = FunctionOf(L"SendCustomStatEvent: Called with invalid or non custom stat %s!");
+        if (!Natives::FFrame_Step)
+        {
+            Finder::ResolveScriptFrame();
+        }
+        const uintptr_t SourceAndContextTags = ExecImplementation(L"/Script/FortniteGame.FortQuestManager:GetSourceAndContextTags");
+        const auto SharedEmpty = reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
+        if (!SendCustomStatEvent || !SourceAndContextTags || !SharedEmpty)
+        {
+            Log::Error(L"Finder: stripped stat events not found (SendCustomStatEvent {}, GetSourceAndContextTags {}, shared empty function {})", SendCustomStatEvent != 0, SourceAndContextTags != 0, SharedEmpty != 0);
+            return false;
+        }
+
+        int32_t GetterDisplacement = -1;
+        bool bAgree = true;
+        for (const uintptr_t Site : Finder::CallsTo(SourceAndContextTags, false))
+        {
+            const uintptr_t Next = FindRawCall(Site + 5, Site + 0x60);
+            const uintptr_t Function = Next && Finder::RelativeTarget(Next, 1, 5) == SharedEmpty && IsStatEventCall(Next) ? Finder::FunctionStart(Site) : 0;
+            const int32_t Displacement = Function ? LastVirtualCallDisplacement(Function, Site) : -1;
+            if (Displacement > 0)
+            {
+                bAgree &= GetterDisplacement < 0 || GetterDisplacement == Displacement;
+                GetterDisplacement = Displacement;
+            }
+        }
+        if (GetterDisplacement <= 0 || !bAgree)
+        {
+            Log::Error(L"Finder: stripped stat events' quest manager getter not found (displacement 0x{:X}, {})", GetterDisplacement, bAgree ? L"agreed" : L"disagreed");
+            return false;
+        }
+
+        std::vector<uint8_t*> Calls;
+        for (const uintptr_t Site : Finder::CallsTo(SharedEmpty, false))
+        {
+            const uintptr_t Function = Byte(Site) == 0xE8 && IsStatEventCall(Site) ? Finder::FunctionStart(Site) : 0;
+            if (Function && Function < Site)
+            {
+                bool bCallsGetter = false;
+                for (uintptr_t Address = Function; Address + 6 <= Site && !bCallsGetter; ++Address)
+                {
+                    const uint8_t ModRm = Byte(Address + 1);
+                    bCallsGetter = Byte(Address) == 0xFF && (ModRm & 0xF8) == 0x90 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Address + 2) == GetterDisplacement;
+                }
+                if (bCallsGetter)
+                {
+                    Calls.push_back(reinterpret_cast<uint8_t*>(Site));
+                }
+            }
+        }
+        if (Calls.empty())
+        {
+            Log::Error(L"Finder: stripped stat events' sender calls not found (quest manager getter [vtable+0x{:X}])", GetterDisplacement);
+            return false;
+        }
+
+        StrippedStatEventCalls = std::move(Calls);
+        Natives::UFortQuestManager_SendCustomStatEvent = reinterpret_cast<decltype(Natives::UFortQuestManager_SendCustomStatEvent)>(SendCustomStatEvent);
+        Natives::UFortQuestManager_bStatEventsStripped = true;
+        std::wstring Sites;
+        for (const uint8_t* Call : StrippedStatEventCalls)
+        {
+            Sites += std::format(L"{}0x{:X}", Sites.empty() ? L"" : L", ", reinterpret_cast<uintptr_t>(Call) - Finder::ImageBase());
+        }
+        Log::Info(L"Finder: UFortQuestManager::SendStatEventWithTags and SaveStatEvents are stripped, Core sends the stat events: SendCustomStatEvent at 0x{:X}, quest manager getter [vtable+0x{:X}], {} sender call(s): {}",
+            SendCustomStatEvent - Finder::ImageBase(), GetterDisplacement, StrippedStatEventCalls.size(), Sites);
+        return true;
+    }
+}
+
+const std::vector<uint8_t*>& Finder::StrippedQuestStatEventCalls()
+{
+    return StrippedStatEventCalls;
+}
+
 bool Finder::ResolveQuestStatEvents()
 {
+    static bool bSearched = false;
+    if (Natives::UFortQuestManager_FlushStatEvents || Natives::UFortQuestManager_bStatEventsStripped || bSearched)
+    {
+        return Natives::UFortQuestManager_FlushStatEvents || Natives::UFortQuestManager_bStatEventsStripped;
+    }
+    bSearched = true;
+
     // UFortQuestManager::SendStatEventWithTags (1.8 0x890730), which every stat event goes through (SendStatEvent,
     // 0x8918D0, is its wrapper), logs the client string. When an event asked for a flush it hands the quest manager's
     // progress to its flush (0x88E060, at 0x891792): with nothing pending that only runs the delegate it is given, else
@@ -6595,6 +6740,10 @@ bool Finder::ResolveQuestStatEvents()
         {
             Flush = Target;
         }
+    }
+    if (!Flush && !SendStatEventWithTags && !SaveStatEvents && ResolveStrippedQuestStatEvents())
+    {
+        return true;
     }
     if (!Flush)
     {

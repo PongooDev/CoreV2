@@ -171,6 +171,9 @@ namespace Finder
     bool ResolveResetGameplayAttributesLive();
     bool ResolveLootTierRedirectLive();
     bool ResolveQuestStatEvents();
+    // When ResolveQuestStatEvents found the stat events stripped: the call sites that call the shared empty function with
+    // SendStatEventWithTags' typed wrapper's arguments (the quest manager, type, target, three tag containers, count, flush).
+    const std::vector<uint8_t*>& StrippedQuestStatEventCalls();
     bool ResolveAthenaHeroLive();
     uint8_t* AircraftPhasePlayerCleanupCall();
     bool ResolveAthenaMenuHero();

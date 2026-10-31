@@ -226,8 +226,8 @@ static void InstallHooks()
     if (Configuration::Get().IsBattleRoyale())
     {
         UGameMapsSettings::ModeDefaultMap = &AFortGameModeAthena::DefaultMatchURL;
-        UFortQuestManager::Hook();
     }
+    UFortQuestManager::Hook();
     Hooks::EnableAll();
 
     GameThread::Enqueue([]

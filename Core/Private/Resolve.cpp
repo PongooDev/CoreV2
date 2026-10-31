@@ -4325,7 +4325,7 @@ bool Finder::ResolveMissionGenerationLive()
 
 bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset)
 {
-    if (Natives::AFortMissionManager_OnZoneEndIndex >= 0 && Natives::AFortMissionManager_OnMissionStatusChangeIndex >= 0 && Natives::AFortGameModeZone_OnZoneEndIndex >= 0 && Natives::AFortGameStateZone_SetGameplayStateIndex >= 0 && Natives::UFortQuestManager_SendStatEvent && Natives::UFortQuestManager_SendEndPrimaryMission && Natives::UGameInstance_GetGameSessionId && Natives::UEnum_GetEnumName)
+    if (Natives::AFortMissionManager_OnZoneEndIndex >= 0 && Natives::AFortMissionManager_OnMissionStatusChangeIndex >= 0 && Natives::AFortGameModeZone_OnZoneEndIndex >= 0 && Natives::AFortGameStateZone_SetGameplayStateIndex >= 0 && Natives::UFortQuestManager_SendStatEvent && Natives::UGameInstance_GetGameSessionId && Natives::UEnum_GetEnumName)
     {
         return true;
     }
@@ -4424,6 +4424,10 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
             FindObjectCall = Call;
         }
     }
+    // 1.10 strips UFortQuestManager::SendEndPrimaryMission: RemoveParticipantAccount (0x6FDCB0) calls the shared empty
+    // function in its place, and Core sends the command itself (UFortQuestManager::SendEndPrimaryMission).
+    const bool bEndMissionStripped = !SendEndPrimaryMission && std::any_of(RemoveParticipantCalls.begin(), RemoveParticipantCalls.end(),
+        [](const auto& Call) { return reinterpret_cast<void*>(Call.second) == Natives::SharedEmptyFunction; });
     std::vector<int32_t> InfoLoad{ 0x48, 0x8B, -1 };
     for (int32_t Value : Bytes32(MissionInfoOffset))
     {
@@ -4525,7 +4529,7 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
         GameStateIndex = FirstEntryContaining(CdoVTable(L"/Script/FortniteGame.FortGameState"), { OnRepCall }, Contains);
     }
 
-    if (!SendStatEvent || !SendEndPrimaryMission || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
+    if (!SendStatEvent || (!SendEndPrimaryMission && !bEndMissionStripped) || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
     {
         Log::Error(L"Finder: zone end not found (stat {}, end mission {}, session {}, enum {}, mission manager {}, status change {}, game mode {}, game state {})", SendStatEvent != 0, SendEndPrimaryMission != 0, GameSessionId != 0, GetEnumName != 0, MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
         return false;
@@ -4540,6 +4544,10 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     Natives::AFortGameModeZone_OnZoneEndIndex = GameModeIndex;
     Natives::AFortGameStateZone_SetGameplayStateIndex = GameStateIndex;
     Log::Info(L"Finder: zone end resolved: AFortMissionManager::OnZoneEnd slot 0x{:X}, OnMissionStatusChange slot 0x{:X}, AFortGameModeZone::OnZoneEnd slot 0x{:X}, AFortGameStateZone::SetGameplayState slot 0x{:X}", MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
+    if (bEndMissionStripped)
+    {
+        Log::Info(L"Finder: UFortQuestManager::SendEndPrimaryMission is stripped, Core sends EndPrimaryMission itself");
+    }
     return true;
 }
 

@@ -9,6 +9,7 @@
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Natives.h"
+#include "Online/FortMcpProfileAccount.h"
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -207,7 +208,19 @@ void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionI
     if (Natives::UFortQuestManager_SendEndPrimaryMission)
     {
         Natives::UFortQuestManager_SendEndPrimaryMission(this, MatchmakingSessionId, MissionName, MissionStatus, EarnedBadges, NumMissionPoints, bCriticalMatchBonus);
+        return;
     }
+
+#if WITH_SERVER_CODE
+    // 1.10 strips it (Finder::ResolveZoneEndLive). As 1.9.1's does (0x8BA710), the quest manager's bound account profile
+    // sends EndPrimaryMission with the objective progress not yet saved, through the dedicated server's command URL.
+    UFortMcpProfileAccount* Account = Cast<UFortMcpProfileAccount>(static_cast<FWeakObjectPtr&>(BoundProfile).Get());
+    FScriptArray& Pending = PendingChanges;
+    if (!Account || !Account->EndPrimaryMission(Pending, MatchmakingSessionId, MissionName, MissionStatus, EarnedBadges, NumMissionPoints, bCriticalMatchBonus))
+    {
+        Log::Error(L"EndPrimaryMission: {} has no account profile to send it to", GetName().ToStdString());
+    }
+#endif
 }
 
 void UFortQuestManager::Hook()

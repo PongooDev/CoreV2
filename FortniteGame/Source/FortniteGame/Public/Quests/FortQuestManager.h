@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
 #include "UObject/Object.h"
+#include "UObject/WeakObjectPtr.h"
 
 class EFortQuestObjectiveStatEvent
 {
@@ -113,6 +114,8 @@ public:
     DefineUProperty(TArray<UFortQuestItem*>, CurrentQuests)
     // The progress stat events made since the last flush, which the flush sends as UpdateQuests.
     DefineUStructArrayProperty(FFortQuestObjectiveCompletion, PendingChanges)
+    // The account profile the progress goes to.
+    DefineUProperty(FWeakObjectPtr, BoundProfile)
 
     void GetSourceAndContextTags(FGameplayTagContainer& OutSourceTags, FGameplayTagContainer& OutContextTags);
     UFortQuestItem* GetQuestWithDefinition(UFortQuestItemDefinition* Definition);

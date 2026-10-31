@@ -44,8 +44,8 @@ public:
     // The loot tier group Battle Royale rolls in place of a container's or building's own (None: no loot).
     FName RedirectLootTierGroup(FName TierGroup);
 
-    // Adds the match's playlist tag (Athena.Playlist.Solo, Duo or Squad, with its parents) to Tags unless it is there,
-    // and says whether it added it.
+    // Adds the match's playlist tag (Athena.Playlist.Solo, Duo, Squad or FiftyFifty, with its parents) to Tags unless
+    // it is there, and says whether it added it.
     bool AddPlaylistContextTag(FGameplayTagContainer& Tags);
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);

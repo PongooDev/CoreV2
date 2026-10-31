@@ -105,10 +105,12 @@ bool AFortGameModeAthena::AddPlaylistContextTag(FGameplayTagContainer& Tags)
     // GetSourceAndContextTags, 0x87DC20, through the game mode's 0x3F2D80), and Battle Royale's objectives ask for the
     // playlist there (interact_athena_treasurechest, daily_athena_loot_chest's: Athena.Playlist). Only Save the World's
     // world record fills them (OnInitWorldRecordComplete, 0x591340: theater, zone theme and tile tags; BP_ZT_Athena has
-    // no ZoneTags), and no code names the Athena.Playlist tags (PvPTags rows 21-23), so a Battle Royale event had no
-    // context and matched none of them. The playlist ids are MCP's, as the match's CurrentPlaylistId has them.
+    // no ZoneTags), and no code names the Athena.Playlist tags (PvPTags rows 21-23, and 1.10's row 24
+    // Athena.Playlist.FiftyFifty for 50v50), so a Battle Royale event had no context and matched none of them. The
+    // playlist ids are MCP's, as the match's CurrentPlaylistId has them.
     const int32_t PlaylistId = CurrentPlaylistId;
-    const wchar_t* const Name = PlaylistId == 2 ? L"Athena.Playlist.Solo" : PlaylistId == 10 ? L"Athena.Playlist.Duo" : PlaylistId == 9 ? L"Athena.Playlist.Squad" : L"Athena.Playlist";
+    const wchar_t* const Name = PlaylistId == 2 ? L"Athena.Playlist.Solo" : PlaylistId == 10 ? L"Athena.Playlist.Duo" : PlaylistId == 9 ? L"Athena.Playlist.Squad"
+        : PlaylistId == 11 ? L"Athena.Playlist.FiftyFifty" : L"Athena.Playlist";
     const FGameplayTag Tag{ FName(Name) };
     if (Tags.GameplayTags.Contains(Tag))
     {
@@ -470,23 +472,25 @@ namespace
         return Beacon ? static_cast<UPartyBeaconState*>(Beacon->State) : nullptr;
     }
 
-    // The most players a match on this server can have: its game session's own MaxPlayers, from its config (the class
-    // default: OnGivenMatchAssignment, 1.9 0x42D2B0, overwrites the session's with the match's reservations), capped by
-    // the playlist's teams (the beacon's NumTeams x NumPlayersPerTeam, once the match is assigned). 0 when unknown.
+    // The most players a match on this server can have: the playlist's teams, the reservation beacon's NumTeams x
+    // NumPlayersPerTeam (GetMaxTeamInfoForPlaylist's, 1.10 0x7EA1F0: 100 x 1, 2 or 4, and 50v50's 2 x 50; the beacon has
+    // them from the server's start and again when the match is assigned, "Reconfiguring to team count (2), team size
+    // (50)"). Without a beacon, its game session's own MaxPlayers from its config (the class default: OnGivenMatchAssignment,
+    // 1.9 0x42D2B0, overwrites the session's with the match's reservations), which is Save the World's on Battle Royale's
+    // servers too ([/Script/Engine.GameSession] MaxPlayers=4 in 1.9.1's and 1.10's DefaultGame.ini). 0 when unknown.
     int32_t MatchCapacity(AFortGameModeAthena* GameMode)
     {
-        AGameSession* Session = static_cast<AGameSession*>(GameMode->GameSession);
-        const UObject* Default = Session && AGameSession::HasMaxPlayers() ? Session->GetClass()->GetDefaultObject(false) : nullptr;
-        int32_t Capacity = Default ? static_cast<const AGameSession*>(Default)->MaxPlayers : 0;
         if (UPartyBeaconState* State = BeaconStateOf(GameMode))
         {
             const int32_t Teams = State->NumTeams * State->NumPlayersPerTeam;
             if (Teams > 0)
             {
-                Capacity = Capacity > 0 ? std::min(Capacity, Teams) : Teams;
+                return Teams;
             }
         }
-        return Capacity;
+        AGameSession* Session = static_cast<AGameSession*>(GameMode->GameSession);
+        const UObject* Default = Session && AGameSession::HasMaxPlayers() ? Session->GetClass()->GetDefaultObject(false) : nullptr;
+        return Default ? static_cast<const AGameSession*>(Default)->MaxPlayers : 0;
     }
 
     // The account ids of the players connected (from their login on, so those still loading the map count).
@@ -662,11 +666,13 @@ namespace
     // the assigned players have a reservation, and PickTeam (1.9 0x430A50) gives the beacon's team to anyone on a
     // dedicated session's match: for a player without one that is Spectator (0x6FF3D0 answers 103), which has no
     // place in the match. So each such player gets a reservation of their own between their login and their joining
-    // the game (map load, then Login and PickTeam): on their party's reservation when the backend sent their party
-    // and a member already holds one, else on the first team no reservation has. The beacon's reservations are its
-    // state's reflected array (UPartyBeaconState::Reservations), the ids copied from the connection with the game's
-    // own struct copy, and a player is looked at again until they have a player controller, in case the beacon dropped
-    // one that took too long to load (APartyBeaconHost's session timeout).
+    // the game (map load, then Login and PickTeam): on their party's reservation when the backend sent their party, a
+    // member already holds one and its team has room, else on a reservation of their own on the team the beacon state's
+    // GetTeamAssignment (Smallest) picks: the team with the fewest players that has room. A team holds one party on solo,
+    // duo and squad's 100 teams (an empty one is the smallest), and several on 50v50's two teams of 50. The beacon's
+    // reservations are its state's reflected array (UPartyBeaconState::Reservations), the ids copied from the
+    // connection with the game's own struct copy, and a player is looked at again until they have a player controller,
+    // in case the beacon dropped one that took too long to load (APartyBeaconHost's session timeout).
     void ReserveLatePlayers(AFortGameModeAthena* GameMode, FWarmupWatch& Watch, bool bWarmup)
     {
         UPartyBeaconState* State = BeaconStateOf(GameMode);
@@ -695,11 +701,9 @@ namespace
 
         TStructArray<FPartyReservation>& Reservations = State->GetMember_Reservations();
         std::map<std::wstring, int32_t> ReservationOf;
-        std::set<int32_t> Teams;
         for (int32_t Index = 0; Index < Reservations.Num(); ++Index)
         {
             FPartyReservation& Reservation = Reservations[Index];
-            Teams.insert(Reservation.TeamNum);
             TStructArray<FPlayerReservation>& Members = Reservation.GetMember_PartyMembers();
             for (int32_t Member = 0; Member < Members.Num(); ++Member)
             {
@@ -732,7 +736,7 @@ namespace
             for (const std::wstring& Member : Party != Watch.Parties.end() ? *Party : std::vector<std::wstring>())
             {
                 const auto Found = ReservationOf.find(Member);
-                if (Found != ReservationOf.end() && Reservations[Found->second].GetMember_PartyMembers().Num() < State->NumPlayersPerTeam)
+                if (Found != ReservationOf.end() && State->GetNumPlayersOnTeam(Reservations[Found->second].TeamNum) < State->NumPlayersPerTeam)
                 {
                     Index = Found->second;
                     break;
@@ -740,29 +744,32 @@ namespace
             }
             if (Index < 0)
             {
-                int32_t Team = 0;
-                while (Team < State->NumTeams && Teams.contains(Team))
+                // The new reservation is on no team until it has one, so the teams' counts leave it out.
+                Index = Reservations.Num();
+                FPartyReservation& Reservation = Reservations.AddDefaulted();
+                Reservation.TeamNum = INDEX_NONE;
+                IdStruct->CopyScriptStruct(&Reservation.GetMember_PartyLeader(), &Connection->GetMember_PlayerID());
+                FPlayerReservation& Leader = Reservation.GetMember_PartyMembers().AddDefaulted();
+                IdStruct->CopyScriptStruct(&Leader.GetMember_UniqueId(), &Connection->GetMember_PlayerID());
+                const int32_t Team = State->GetTeamAssignment(Reservation);
+                if (Team == INDEX_NONE)
                 {
-                    ++Team;
-                }
-                if (Team >= State->NumTeams)
-                {
+                    Reservations.RemoveAt(Index);
                     if (!Watch.bWarnedNoTeam)
                     {
                         Watch.bWarnedNoTeam = true;
-                        Log::Warning(L"Battle Royale: all {} teams are taken, so {} has no team", State->NumTeams, Id);
+                        Log::Warning(L"Battle Royale: none of the {} teams has room, so {} has no team", State->NumTeams, Id);
                     }
                     continue;
                 }
-                Index = Reservations.Num();
-                FPartyReservation& Reservation = Reservations.AddDefaulted();
                 Reservation.TeamNum = Team;
-                IdStruct->CopyScriptStruct(&Reservation.GetMember_PartyLeader(), &Connection->GetMember_PlayerID());
-                Teams.insert(Team);
+            }
+            else
+            {
+                FPlayerReservation& Member = Reservations[Index].GetMember_PartyMembers().AddDefaulted();
+                IdStruct->CopyScriptStruct(&Member.GetMember_UniqueId(), &Connection->GetMember_PlayerID());
             }
             FPartyReservation& Reservation = Reservations[Index];
-            FPlayerReservation& Member = Reservation.GetMember_PartyMembers().AddDefaulted();
-            IdStruct->CopyScriptStruct(&Member.GetMember_UniqueId(), &Connection->GetMember_PlayerID());
             ReservationOf[Id] = Index;
             Log::Info(L"Battle Royale: {} joins in the warmup on HumanPvP_Team{} (beacon team {}, {} of its party there)", Id, Reservation.TeamNum + 1, Reservation.TeamNum,
                 Reservation.GetMember_PartyMembers().Num());

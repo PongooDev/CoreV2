@@ -126,11 +126,18 @@ namespace
         bool bLoaded = false;
     };
 
+    // A tracker of the local player's own slot, and the member it was last given ("state|rating|modified rating").
+    struct FLocalTracker
+    {
+        TWeakObjectPtr<UObject> Widget;
+        std::wstring Given;
+    };
+
     constexpr const wchar_t* PlayerTrackerClassPath = L"/Script/FortniteUI.FortPlayerTrackerBase";
 
     std::vector<FTrackedMember> Tracked;
     std::vector<FMemberProfile> MemberProfiles;
-    std::vector<TWeakObjectPtr<UObject>> LocalTrackers;
+    std::vector<FLocalTracker> LocalTrackers;
     TWeakObjectPtr<UObject> AthenaPartyMemberClass;
     TWeakObjectPtr<UObject> PlayerTrackerClass;
     ULONGLONG NextRefresh = 0;
@@ -289,6 +296,21 @@ namespace
         const FUniqueNetIdRepl& MemberIdOf(const uint8_t* Info) const
         {
             return *MemberUniqueId->ContainerPtrToValuePtr<FUniqueNetIdRepl>(Info);
+        }
+
+        // The local team's member with this id (GetTeamMembers), or null.
+        const uint8_t* Find(const FUniqueNetIdRepl& Id) const
+        {
+            const std::wstring Wanted = Id.ToString().ToStdString();
+            for (int32_t Index = 0; MemberUniqueId && Index < Num; ++Index)
+            {
+                const uint8_t* Info = Members + static_cast<size_t>(Index) * Stride;
+                if (MemberIdOf(Info).IsValid() && MemberIdOf(Info).ToString().ToStdString() == Wanted)
+                {
+                    return Info;
+                }
+            }
+            return nullptr;
         }
 
         const void* PlayerNameOf(const uint8_t* Info) const
@@ -654,52 +676,92 @@ namespace
             {
                 continue;
             }
-            const bool bTracked = std::any_of(LocalTrackers.begin(), LocalTrackers.end(), [Object](const TWeakObjectPtr<UObject>& Tracker) { return Tracker.Get() == Object; });
+            const bool bTracked = std::any_of(LocalTrackers.begin(), LocalTrackers.end(), [Object](const FLocalTracker& Tracker) { return Tracker.Widget.Get() == Object; });
             if (!bTracked)
             {
-                LocalTrackers.push_back(TWeakObjectPtr<UObject>(Object));
+                LocalTrackers.push_back(FLocalTracker{ TWeakObjectPtr<UObject>(Object) });
             }
         }
     }
 
-    // Whether a tracker shows a member: its MemberInfo (FullPartyMember's) has a MemberUniqueId. True for a tracker
-    // without one, which Core leaves alone.
-    bool ShowsMember(UObject* Tracker)
+    // A tracker's GetHomebaseRating or GetModifiedHomebaseRating: the rating it shows, as "rating+progress", or "-" when
+    // it has none.
+    std::wstring RatingOf(UObject* Tracker, const wchar_t* Name)
     {
-        UStructProperty* MemberInfo = PropertyOf<UStructProperty>(Tracker->GetClass(), L"MemberInfo");
-        UProperty* MemberUniqueId = MemberInfo ? PropertyOf<UProperty>(MemberInfo->Struct, L"MemberUniqueId") : nullptr;
-        return !MemberUniqueId || MemberUniqueId->ContainerPtrToValuePtr<FUniqueNetIdRepl>(MemberInfo->ContainerPtrToValuePtr<void>(Tracker))->IsValid();
+        FCall Rating(Tracker->FindFunction(FName(Name, FNAME_Find)));
+        UBoolProperty* ReturnValue = Rating.Property<UBoolProperty>(L"ReturnValue");
+        const int32_t* Value = static_cast<const int32_t*>(Rating.Param(L"Rating"));
+        const float* Progress = static_cast<const float*>(Rating.Param(L"ProgressFraction"));
+        if (!ReturnValue || !Value || !Progress || !Rating.Call(Tracker) || !ReturnValue->GetPropertyValue(Rating.Param(L"ReturnValue")))
+        {
+            return L"-";
+        }
+        return std::to_wstring(*Value) + L"+" + std::to_wstring(static_cast<int32_t>(*Progress * 100.0f));
+    }
+
+    // The local tracker's member as UpdateBasedOnId reads it, "state|rating|modified rating": the party context's
+    // GetPartyMemberDisplayState of the local team's member with the tracker's UniqueId, and the tracker's own homebase
+    // ratings. Empty while the local team doesn't list the member.
+    std::wstring MemberStateOf(UObject* Tracker, const FPartySlots& Party, UFortPartyContext* Context)
+    {
+        const FUniqueNetIdRepl* Id = ValueOf<FUniqueNetIdRepl>(Tracker, L"UniqueId");
+        const uint8_t* Info = Id && Id->IsValid() ? Party.Find(*Id) : nullptr;
+        FCall DisplayState(UFortPartyContext::StaticFunction_GetPartyMemberDisplayState());
+        UStructProperty* MemberInfo = DisplayState.Property<UStructProperty>(L"PartyMemberInfo");
+        const uint8_t* State = static_cast<const uint8_t*>(DisplayState.Param(L"ReturnValue"));
+        if (!Info || !Context || !MemberInfo || MemberInfo->Struct != Party.Struct || !State)
+        {
+            return std::wstring();
+        }
+        Party.Struct->CopyScriptStruct(DisplayState.Param(L"PartyMemberInfo"), Info);
+        if (!DisplayState.Call(Context))
+        {
+            return std::wstring();
+        }
+        return std::to_wstring(*State) + L"|" + RatingOf(Tracker, L"GetHomebaseRating") + L"|" + RatingOf(Tracker, L"GetModifiedHomebaseRating");
     }
 
     // A mission's escape menu showed the other players' banners, power and stats but the local player's own slot as
-    // open ("+") (CoreV2 #111). The party bar (FullPartyBar) gives slot 0 to the local player: its tracker's
-    // UFortPlayerTrackerBase::SetTeamMember(0) (1.9 0x2F7AA50) keeps the local player's id and shows an empty
-    // FFortTeamMemberInfo, which only a later event replaces (the local team's member added, removed or changed, or a
-    // party member joining or leaving the front end's party). The other slots read the team's GetTeamMembers at once.
-    // The front end's party sends such events; a mission's team, settled by the time the menu is built, sends none, so
-    // the slot stays open although the team lists the local player (GetTeamMembers's first member). Once a second,
-    // outside the front end and Battle Royale matches, every local tracker still showing no member reads its member again
-    // with its own UpdateBasedOnId (the local team's GetTeamMemberInfo for its id), as such an event would.
+    // open ("+") (CoreV2 #111), and the homebase power at its top left (PowerWidget, also the HUD's) stayed at 1. Every
+    // tracker of the local player starts with UFortPlayerTrackerBase::SetTeamMember(0) (1.9 0x2F7AA50): it keeps the
+    // local player's id and shows an empty FFortTeamMemberInfo, which only a later event replaces (the local team's
+    // member added, removed or changed, or the party context's local player info updated). FullPartyMember then shows
+    // "+"; PowerWidget fills its rating only from OnPlayerInfoChanged with a connected member (its Update Rating, which
+    // reads the tracker's GetHomebaseRating, or GetModifiedHomebaseRating with teammates). The front end's party sends
+    // such events; a mission's team, settled by the time the menu and HUD are built, sends none, and no event follows
+    // when the local player's power changes either. Once a second, outside the front end and Battle Royale matches,
+    // every local tracker whose member (its display state and homebase ratings) differs from what it was last given
+    // reads its member again with its own UpdateBasedOnId (the local team's member for its id), as such an event would.
     void RefreshLocalTrackers(UWorld* World)
     {
-        std::erase_if(LocalTrackers, [](const TWeakObjectPtr<UObject>& Tracker) { return !Tracker.Get(); });
+        std::erase_if(LocalTrackers, [](const FLocalTracker& Tracker) { return !Tracker.Widget.Get(); });
         if (IsFrontEndWorld() || !SaveTheWorldController(World))
         {
             return;
         }
         FindLocalTrackers();
-        for (const TWeakObjectPtr<UObject>& Entry : LocalTrackers)
+
+        std::unique_ptr<FPartySlots> Party;
+        for (FLocalTracker& Entry : LocalTrackers)
         {
-            UObject* Tracker = Entry.Get();
-            if (!Tracker || ShowsMember(Tracker))
+            UObject* Tracker = Entry.Widget.Get();
+            if (!Tracker)
+            {
+                continue;
+            }
+            if (!Party)
+            {
+                Party = std::make_unique<FPartySlots>(Tracker);
+            }
+            UFortPartyContext* Context = UFortPartyContext::Get(Tracker);
+            const std::wstring Member = MemberStateOf(Tracker, *Party, Context);
+            if (Member.empty() || Member == Entry.Given)
             {
                 continue;
             }
             CallEvent(Tracker, L"UpdateBasedOnId");
-            if (ShowsMember(Tracker))
-            {
-                UE_LOG(LogFort, Log, TEXT("FortPlayerTracker: %s shows the local player"), *GetNameSafe(Tracker));
-            }
+            Entry.Given = Member;
+            UE_LOG(LogFort, Log, TEXT("FortPlayerTracker: %s shows the local player (state|power|party power %s)"), *GetNameSafe(Tracker), Member.c_str());
         }
     }
 
@@ -778,7 +840,8 @@ UFortUITeamInfo* UFortPartyContext::GetLocalPlayerTeam()
 // (FullPartyBar) does. No engine function is hooked: once a second, in the front end's world, Core finds the banners in
 // the object array and fills them. The same refresh, outside Battle Royale matches, queries the other players' profile0
 // that 1.8.1 leaves unqueried while the sub game is Battle Royale (LoadPartyMemberProfiles), and outside the front end
-// fills a mission's escape menu slot of the local player (RefreshLocalTrackers).
+// fills a mission's escape menu and HUD trackers of the local player, their slot and homebase power
+// (RefreshLocalTrackers).
 void UFortPartyContext::StartAthenaPartyBar()
 {
     static bool bStarted = false;

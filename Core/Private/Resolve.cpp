@@ -1901,27 +1901,18 @@ namespace
         Require(L"FNetGUIDCache::SupportsObject", Natives::FNetGUIDCache_SupportsObject, FunctionOf(L"FNetGUIDCache::SupportsObject: %s NOT Supported."));
         Require(L"FObjectReplicator::ValidateAgainstState", Natives::FObjectReplicator_ValidateAgainstState, FunctionOf(L"ValidateAgainstState: Properties changed for %s"));
 
+        // 1.10's log adds ChSequence, and its call (0x1ACF7A5 to 0x1ABDCD0) sits 0x61 past the string. That string is
+        // tried first so builds with it don't warn about the older one being absent.
         uintptr_t CreateChannel = 0;
-        const uintptr_t BunchCreate = OnlyRef(L"      Bunch Create %i: ChType %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
-        for (uintptr_t Site = BunchCreate ? FindRawCall(BunchCreate, BunchCreate + 0x40) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, BunchCreate + 0x40))
+        const uintptr_t SequencedCreate = First(Finder::StringRefs(L"      Bunch Create %i: ChType %i, ChSequence: %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i"));
+        const uintptr_t BunchCreate = SequencedCreate ? SequencedCreate : OnlyRef(L"      Bunch Create %i: ChType %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
+        const uintptr_t BunchCreateEnd = BunchCreate + (SequencedCreate ? 0x80 : 0x40);
+        for (uintptr_t Site = BunchCreate ? FindRawCall(BunchCreate, BunchCreateEnd) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, BunchCreateEnd))
         {
             const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
             if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }))
             {
                 CreateChannel = Target;
-            }
-        }
-        if (!BunchCreate)
-        {
-            // 1.10's log adds ChSequence, and its call (0x1ACF7A5 to 0x1ABDCD0) sits 0x61 past the string.
-            const uintptr_t SequencedCreate = OnlyRef(L"      Bunch Create %i: ChType %i, ChSequence: %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
-            for (uintptr_t Site = SequencedCreate ? FindRawCall(SequencedCreate, SequencedCreate + 0x80) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, SequencedCreate + 0x80))
-            {
-                const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
-                if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }))
-                {
-                    CreateChannel = Target;
-                }
             }
         }
         Require(L"UNetConnection::CreateChannel", Natives::UNetConnection_CreateChannel, CreateChannel);

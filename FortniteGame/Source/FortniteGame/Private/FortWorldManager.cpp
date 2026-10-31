@@ -402,7 +402,7 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
             }
             else
             {
-                const TSoftObjectPtr<UFortMissionInfo>& PrimaryMissionInfo = MissionGenerator->PrimaryMissionInfo;
+                const TAssetPtr<UFortMissionInfo>& PrimaryMissionInfo = MissionGenerator->PrimaryMissionInfo;
                 if (UFortMissionInfo* PrimaryMission = PrimaryMissionInfo.LoadSynchronous())
                 {
                     UE_LOG(LogFortWorld, Log, TEXT("Mission Generator %s adds Primary mission %s"), *MissionGenerator->GetName(), *PrimaryMission->GetName());
@@ -430,7 +430,7 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                     for (int32_t Index = 0; Index < PossibleMissions->Num(); ++Index)
                     {
                         FFortPossibleMission& Possible = (*PossibleMissions)[Index];
-                        const TSoftObjectPtr<UFortMissionInfo>& PossibleInfo = Possible.MissionInfo;
+                        const TAssetPtr<UFortMissionInfo>& PossibleInfo = Possible.MissionInfo;
                         const bool bExcluded = Possible.bIsPrototype && !bAllowPrototypes;
                         UFortMissionInfo* Info = bExcluded ? nullptr : PossibleInfo.LoadSynchronous();
                         for (int32_t Count = 0; Info && Count < Possible.MinAlwaysGenerated; ++Count)
@@ -459,7 +459,8 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                             Selected = Weight > 0.0f && Roll < Weight ? Index : -1;
                             Roll -= Weight;
                         }
-                        if (UFortMissionInfo* Info = Selected >= 0 ? (*PossibleMissions)[Selected].MissionInfo.LoadSynchronous() : nullptr)
+                        const TAssetPtr<UFortMissionInfo>& SelectedInfo = Selected >= 0 ? static_cast<const TAssetPtr<UFortMissionInfo>&>((*PossibleMissions)[Selected].MissionInfo) : TAssetPtr<UFortMissionInfo>();
+                        if (UFortMissionInfo* Info = Selected >= 0 ? SelectedInfo.LoadSynchronous() : nullptr)
                         {
                             Generated.Add(Info);
                         }
@@ -508,7 +509,7 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
             return nullptr;
         }
 
-        const TSoftObjectPtr<UFortMissionInfo>& SharedMissionInfo = SharedMission.MissionInfo;
+        const TAssetPtr<UFortMissionInfo>& SharedMissionInfo = SharedMission.MissionInfo;
         UFortMissionInfo* MissionInfo = SharedMissionInfo.LoadSynchronous();
         return MissionInfo && !Filter.IsGenerated(MissionInfo) ? MissionInfo : nullptr;
     };
@@ -598,7 +599,7 @@ void AFortWorldManager::LoadQuestDrivenMissionsForPlayer(AFortPlayerController* 
             continue;
         }
 
-        const TSoftObjectPtr<UFortMissionInfo>& QuestMissionInfo = QuestDrivenMission.MissionInfo;
+        const TAssetPtr<UFortMissionInfo>& QuestMissionInfo = QuestDrivenMission.MissionInfo;
         UFortMissionInfo* MissionInfo = QuestMissionInfo.LoadSynchronous();
         const TArray<AFortMission*>& Missions = MissionManager->Missions;
         bool bLoaded = !MissionInfo;
@@ -634,7 +635,7 @@ void AFortWorldManager::AddMissionsToMissionManagerRecord(const TArray<UFortMiss
     {
         Finder::ResolveMissionGenerationLive();
     }
-    const TSoftObjectPtr<UObject>* GenerationDataPtr = GameData && Natives::UFortGameData_MissionGenerationData > 0 ? reinterpret_cast<const TSoftObjectPtr<UObject>*>(reinterpret_cast<uint8_t*>(GameData) + Natives::UFortGameData_MissionGenerationData) : nullptr;
+    const TAssetPtr<UObject>* GenerationDataPtr = GameData && Natives::UFortGameData_MissionGenerationData > 0 ? reinterpret_cast<const TAssetPtr<UObject>*>(reinterpret_cast<uint8_t*>(GameData) + Natives::UFortGameData_MissionGenerationData) : nullptr;
     UObject* GenerationData = GenerationDataPtr ? GenerationDataPtr->LoadSynchronous() : nullptr;
     void* RandomStream = Natives::AFortWorldManager_MissionGenerationRandomStream > 0 ? reinterpret_cast<uint8_t*>(this) + Natives::AFortWorldManager_MissionGenerationRandomStream : nullptr;
 

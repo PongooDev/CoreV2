@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 class UClass;
@@ -35,7 +34,7 @@ namespace Reflection
     using FOwnerGetter = UStruct* (*)();
 
     // How many bytes a member type grows by on builds with UE 4.18's soft object paths (ObjectLayout's bSoftObjectPaths):
-    // FSoftObjectPath puts an FName before the path string, 8 bytes on top of 4.16's one-FString path.
+    // FSoftObjectPath puts an FName before the path string, 8 bytes on top of 4.16's FStringAssetReference.
     template <typename T>
     inline constexpr size_t SoftPathGrowth = 0;
 
@@ -173,16 +172,12 @@ public: \
     static UScriptStruct* StaticStruct() { return TypeInfo_##StructName.GetScriptStruct(); } \
     static UStruct* StaticReflectionOwner() { return TypeInfo_##StructName.Get(); }
 
-// The setter is a template (its argument still converts to Type, ValueType is never deduced) so that only the setters
-// Core calls are compiled: a soft path member's setter would copy the engine's FSoftObjectPath, which Core declares at
-// 4.16's size and so can't be copied.
 #define DefineUProperty(Type, Name) \
 private: \
     static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<Type> }; \
 public: \
     Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
-    template <typename ValueType = Type> \
-    void SetMember_##Name(std::type_identity_t<ValueType> const& Value) { GetMember_##Name() = Value; } \
+    void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \
     __declspec(property(get = GetMember_##Name, put = SetMember_##Name)) Type Name;
 
 #define DefineUStructProperty(Type, Name) \

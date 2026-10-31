@@ -6,7 +6,7 @@
 #include "UObject/Stack.h"
 #include "Misc/Guid.h"
 #include "StructArray.h"
-#include "UObject/SoftObjectPtr.h"
+#include "UObject/AssetPtr.h"
 
 struct FUniqueNetIdRepl;
 
@@ -74,7 +74,7 @@ public:
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
     DefineUProperty(int32_t, OverriddenBackpackSize)
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
-    DefineUProperty(TSoftObjectPtr<UObject>, StartRepairSound)
+    DefineUProperty(TAssetPtr<UObject>, StartRepairSound)
     // The building material (EFortResourceType) and level (EFortResourceLevel, 0-based) this machine's build tool places,
     // and the class it places. Transient and not replicated: the client picks the class it sends in
     // ServerCreateBuildingActor, so the game's BuildWith only changes the pieces of the machine it runs on.

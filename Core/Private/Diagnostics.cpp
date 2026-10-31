@@ -7,7 +7,7 @@
 #include "Hooks.h"
 #include "Log.h"
 #include "ReflectionParams.h"
-#include "UObject/SoftObjectPtr.h"
+#include "UObject/AssetPtr.h"
 #include "UObject/UObjectIterator.h"
 
 #include <mutex>
@@ -42,7 +42,7 @@ namespace
 
     public:
         DefineUProperty(int32_t, TileIndex)
-        DefineUProperty(TSoftClassPtr<UObject>, MissionGenerator)
+        DefineUProperty(TAssetSubclassOf<UObject>, MissionGenerator)
     };
 
     class UFortQuestItem : public UObject
@@ -140,7 +140,7 @@ namespace
         std::lock_guard Lock(Mutex);
         if (Logged.emplace(Quest, TileIndex, Result).second)
         {
-            const std::wstring Generator = Mission ? Mission->MissionGenerator.ToString().ToStdString() : L"";
+            const std::wstring Generator = Mission ? Mission->MissionGenerator.ToStringReference().ToString().ToStdString() : L"";
             UObject* Definition = Quest && Quest->IsA(UFortQuestItem::StaticClass()) ? static_cast<UFortQuestItem*>(Quest)->GetQuestDefinition() : nullptr;
             Log::Info(L"Diagnostics: quest {} tile {} generator {} alert {} -> validity {}", Definition ? Definition->GetName().ToStdString() : NameOf(Quest), TileIndex, Generator, MissionAlert != nullptr, Result);
         }

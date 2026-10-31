@@ -508,7 +508,7 @@ void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>
                 PickLootDropsFromLootPackage(OutLootToDrop, CalledPackage, WorldLevel, -1, AbilitySystemComponent, ContextTags, false);
             }
         }
-        else if (Selected->ItemDefinition.IsNull())
+        else if (Selected->ItemDefinition.ToStringReference().IsNull())
         {
             UE_LOG(LogFortLoot, Warning, TEXT("Loot Package %s does not contain a LootPackageCall or ItemDefinition."), *Selected->LootPackageID.ToString());
         }

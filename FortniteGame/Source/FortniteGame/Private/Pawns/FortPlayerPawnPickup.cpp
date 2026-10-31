@@ -165,7 +165,7 @@ namespace
         Log::Info(L"Pickup: auto pickup: {} overlapped {} and didn't pick it up: {}", Pawn->GetName().ToStdString(), OtherActor ? OtherActor->GetName().ToStdString() : L"None", Why);
     }
 
-    // Where the exec steps the SweepResult (a const FHitResult&, 0x88 bytes in 4.16, 0x80 in 4.19) when it isn't passed by address.
+    // Where the exec steps the SweepResult (a const FHitResult&, 0x88 bytes in 4.16) when it isn't passed by address.
     constexpr size_t SweepResultStorageSize = 0x200;
 }
 

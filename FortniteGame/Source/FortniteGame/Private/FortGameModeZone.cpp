@@ -253,7 +253,7 @@ UClass* AFortGameModeZone::DetermineAIDirectorClass() const
     UClass* AIDirectorClass = nullptr;
     if (GameData)
     {
-        const TArray<TSoftClassPtr<AFortAIDirector>>& AIDirectors = GameData->AIDirectors;
+        const TArray<TAssetSubclassOf<AFortAIDirector>>& AIDirectors = GameData->AIDirectors;
         const int32_t Index = OverrideAIDirectorIndex;
         AIDirectorClass = Index >= 0 && Index < AIDirectors.Num() ? SoftElementAt(AIDirectors, Index).LoadSynchronous() : nullptr;
     }

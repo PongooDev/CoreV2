@@ -3,7 +3,7 @@
 #include "Containers/Array.h"
 #include "Items/FortItem.h"
 #include "StructArray.h"
-#include "UObject/SoftObjectPtr.h"
+#include "UObject/AssetPtr.h"
 
 class UCustomCharacterPart;
 class UFortAbilityKit;
@@ -13,8 +13,8 @@ class UFortHeroType;
 struct FFortSpecializationSlot
 {
     DefineUnrealStruct(FFortSpecializationSlot, FortniteGame)
-    DefineUProperty(TSoftObjectPtr<UFortAbilityKit>, GrantedAbilityKit)
-    DefineUProperty(TSoftObjectPtr<UFortAbilityKit>, RemovedAbilityKit)
+    DefineUProperty(TAssetPtr<UFortAbilityKit>, GrantedAbilityKit)
+    DefineUProperty(TAssetPtr<UFortAbilityKit>, RemovedAbilityKit)
     DefineUProperty(int32_t, MinimumHeroLevel)
 };
 
@@ -23,7 +23,7 @@ class UFortHeroSpecialization : public UObject
     DefineUnrealClass(UFortHeroSpecialization, FortniteGame)
 
 public:
-    DefineUProperty(TArray<TSoftObjectPtr<UCustomCharacterPart>>, CharacterParts)
+    DefineUProperty(TArray<TAssetPtr<UCustomCharacterPart>>, CharacterParts)
     DefineUStructArrayProperty(FFortSpecializationSlot, SpecializationSlots)
     DefineUStructArrayProperty(FFortSpecializationSlot, TacticalAbilitySlots)
 };

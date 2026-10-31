@@ -11,7 +11,7 @@ float UFortHeroType::GetCombinedStatBonus(const UProperty* Attribute) const
     for (int32_t Index = 0; Attribute && Index < Effects.Num(); ++Index)
     {
         // Heroes keep empty entries (every HID_Commando_Athena_* starts with one).
-        const TSoftClassPtr<UGameplayEffect>& EffectClass = Effects[Index].GameplayEffect;
+        const TAssetSubclassOf<UGameplayEffect>& EffectClass = Effects[Index].GameplayEffect;
         UClass* Class = EffectClass.LoadSynchronous();
         UGameplayEffect* Effect = Class ? Cast<UGameplayEffect>(Class->GetDefaultObject()) : nullptr;
         if (!Effect)

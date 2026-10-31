@@ -132,7 +132,7 @@ bool FFortItemEntry::LoadFullClip()
     {
         return false;
     }
-    const TSoftObjectPtr<UFortWorldItemDefinition>& Ammo = WeaponDefinition->AmmoData;
+    const TAssetPtr<UFortWorldItemDefinition>& Ammo = WeaponDefinition->AmmoData;
     const int32_t ClipSize = Ammo.LoadSynchronous() != WeaponDefinition ? WeaponDefinition->GetClipSize() : 0;
     if (ClipSize <= 0 || LoadedAmmo == ClipSize)
     {

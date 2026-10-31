@@ -3,8 +3,8 @@
 #include "GameplayTagContainer.h"
 #include "Items/FortQuickBars.h"
 #include "StructArray.h"
+#include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
-#include "UObject/SoftObjectPtr.h"
 
 #include <vector>
 
@@ -26,14 +26,14 @@ struct FItemDefinitionAndCount
 {
     DefineUnrealStruct(FItemDefinitionAndCount, FortniteGame)
     DefineUProperty(int32_t, Count)
-    DefineUProperty(TSoftObjectPtr<UFortItemDefinition>, ItemDefinition)
+    DefineUProperty(TAssetPtr<UFortItemDefinition>, ItemDefinition)
 };
 
 struct FFortPlayerSpawnPadPlacementData
 {
     DefineUnrealStruct(FFortPlayerSpawnPadPlacementData, FortniteGame)
     DefineUProperty(UEnvQuery*, PlacementQuery)
-    DefineUProperty(TSoftClassPtr<AActor>, ActorToPlace)
+    DefineUProperty(TAssetSubclassOf<AActor>, ActorToPlace)
     DefineBitfieldUProperty(bSnapToGrid)
     DefineBitfieldUProperty(bAdjustPlacementForFloors)
     DefineUProperty(FGameplayTagContainer, TagsToAddToChosenPlacementActor)
@@ -50,24 +50,24 @@ class UFortGameData : public UObject
 
 public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
-    DefineUProperty(TArray<TSoftObjectPtr<UFortWorldItemDefinition>>, HarvestingTools)
-    DefineUProperty(TArray<TSoftObjectPtr<UFortWorldItemDefinition>>, CheatInventoryItems)
+    DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, HarvestingTools)
+    DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, CheatInventoryItems)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
-    DefineUProperty(TSoftObjectPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
+    DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
     // The ability an emote plays through (its montage comes from the spec's source object, the emote item).
-    DefineUProperty(TSoftClassPtr<UGameplayAbility>, EmoteGameplayAbility)
-    DefineUProperty(TSoftObjectPtr<UFortWorldItemDefinition>, EditToolItem)
+    DefineUProperty(TAssetSubclassOf<UGameplayAbility>, EmoteGameplayAbility)
+    DefineUProperty(TAssetPtr<UFortWorldItemDefinition>, EditToolItem)
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
-    DefineUProperty(TArray<TSoftClassPtr<AFortAIDirector>>, AIDirectors)
+    DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)
     DefineUProperty(UClass*, SharedMissionListsClass)
-    DefineUProperty(TSoftObjectPtr<UFortHomebaseManager>, HomebaseManager)
+    DefineUProperty(TAssetPtr<UFortHomebaseManager>, HomebaseManager)
     DefineUStructProperty(FConditionalFoundationQuota, ConditionalFoundationQuota)
-    DefineUProperty(TArray<TSoftObjectPtr<UDataTable>>, LootTierDataTables)
-    DefineUProperty(TArray<TSoftObjectPtr<UDataTable>>, LootPackageDataTables)
+    DefineUProperty(TArray<TAssetPtr<UDataTable>>, LootTierDataTables)
+    DefineUProperty(TArray<TAssetPtr<UDataTable>>, LootPackageDataTables)
     DefineUProperty(UDataTable*, LootQuotaData)
     DefineUProperty(float, PickupSplineRandomMax)
     DefineUProperty(UCurveVector*, PickupSplineCurve)
-    DefineUProperty(TSoftObjectPtr<UCustomCharacterPart>, DefaultBackpackCharacterPart)
+    DefineUProperty(TAssetPtr<UCustomCharacterPart>, DefaultBackpackCharacterPart)
     DefineUProperty(UFortWorldItemDefinition*, StoneItemDefinition)
     DefineUProperty(UFortWorldItemDefinition*, WoodItemDefinition)
     DefineUProperty(UFortWorldItemDefinition*, MetalItemDefinition)

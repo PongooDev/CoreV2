@@ -9,7 +9,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogFortLoot, Log, All);
 
 namespace
 {
-    std::vector<UDataTable*> LoadTables(TArray<TSoftObjectPtr<UDataTable>>& Tables)
+    std::vector<UDataTable*> LoadTables(TArray<TAssetPtr<UDataTable>>& Tables)
     {
         std::vector<UDataTable*> Loaded;
         for (int32_t Index = 0; Index < Tables.Num(); ++Index)

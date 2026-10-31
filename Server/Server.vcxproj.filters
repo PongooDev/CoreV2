@@ -679,11 +679,20 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Misc\PackageName.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\Misc</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Misc\StringAssetReference.h">
+      <Filter>Engine\Source\Runtime\CoreUObject\Public\Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Misc\StringClassReference.h">
+      <Filter>Engine\Source\Runtime\CoreUObject\Public\Misc</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Templates\Casts.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\Templates</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\Templates\SubclassOf.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\Templates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\AssetPtr.h">
+      <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Class.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
@@ -700,19 +709,10 @@
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ObjectMacros.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\PersistentObjectPtr.h">
-      <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
-    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ScriptDelegates.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\ScriptInterface.h">
-      <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\SoftObjectPath.h">
-      <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\SoftObjectPtr.h">
       <Filter>Engine\Source\Runtime\CoreUObject\Public\UObject</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\CoreUObject\Public\UObject\Stack.h">
@@ -1389,9 +1389,6 @@
       <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\ScriptCore.cpp">
-      <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
-    </ClCompile>
-    <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\SoftObjectPath.cpp">
       <Filter>Engine\Source\Runtime\CoreUObject\Private\UObject</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\CoreUObject\Private\UObject\UObjectBaseUtility.cpp">

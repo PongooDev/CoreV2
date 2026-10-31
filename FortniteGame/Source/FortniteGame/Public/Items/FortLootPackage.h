@@ -3,8 +3,8 @@
 #include "Containers/UnrealString.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
+#include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
-#include "UObject/SoftObjectPtr.h"
 
 #include <utility>
 #include <vector>
@@ -58,7 +58,7 @@ public:
     DefineUProperty(int32_t, LootPackageCategory)
     DefineUProperty(FName, RequiredTag)
     DefineUProperty(FString, LootPackageCall)
-    DefineUProperty(TSoftObjectPtr<UFortItemDefinition>, ItemDefinition)
+    DefineUProperty(TAssetPtr<UFortItemDefinition>, ItemDefinition)
     DefineUProperty(FString, PersistentLevel)
     DefineUProperty(int32_t, MinWorldLevel)
     DefineUProperty(int32_t, MaxWorldLevel)

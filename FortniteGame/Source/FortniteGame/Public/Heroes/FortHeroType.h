@@ -3,7 +3,7 @@
 #include "GameplayTagContainer.h"
 #include "Items/FortItemDefinition.h"
 #include "StructArray.h"
-#include "UObject/SoftObjectPtr.h"
+#include "UObject/AssetPtr.h"
 
 class UFortAbilityKit;
 class UFortHeroSpecialization;
@@ -13,14 +13,14 @@ class UProperty;
 struct FHeroAbilityKit
 {
     DefineUnrealStruct(FHeroAbilityKit, FortniteGame)
-    DefineUProperty(TSoftObjectPtr<UFortAbilityKit>, InherentAbilityKit)
+    DefineUProperty(TAssetPtr<UFortAbilityKit>, InherentAbilityKit)
     DefineUProperty(FGameplayTagContainer, RequiredGPTags)
 };
 
 struct FGameplayEffectApplicationInfo
 {
     DefineUnrealStruct(FGameplayEffectApplicationInfo, FortniteGame)
-    DefineUProperty(TSoftClassPtr<UGameplayEffect>, GameplayEffect)
+    DefineUProperty(TAssetSubclassOf<UGameplayEffect>, GameplayEffect)
 };
 
 class UFortHeroType : public UFortItemDefinition
@@ -31,7 +31,7 @@ public:
     DefineUStructArrayProperty(FHeroAbilityKit, AbilityKits)
     DefineUStructArrayProperty(FGameplayEffectApplicationInfo, CombinedStatGEs)
     // The hero's specializations (HS_*): its character parts and its perks' and abilities' kits.
-    DefineUProperty(TArray<TSoftObjectPtr<UFortHeroSpecialization>>, Specializations)
+    DefineUProperty(TArray<TAssetPtr<UFortHeroSpecialization>>, Specializations)
     // UFortWorkerType's EFortCustomGender (1 female, 2 male).
     DefineUProperty(uint8_t, Gender)
     // UFortAccountItemDefinition's: the highest level a hero of this type reaches.

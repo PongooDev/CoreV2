@@ -18,6 +18,7 @@ public:
 
     UFortUITeamInfo* GetLocalPlayerTeam();
 
-    // Fills 1.8.1's Battle Royale party bar (FullPartyBarAthena) in the front end, from the game thread's tick.
+    // Fills 1.8.1's Battle Royale party bar (FullPartyBarAthena) in the front end, and a mission's escape menu slot of
+    // the local player, from the game thread's tick.
     static void StartAthenaPartyBar();
 };

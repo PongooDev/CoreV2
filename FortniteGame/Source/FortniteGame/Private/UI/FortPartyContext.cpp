@@ -24,6 +24,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
@@ -125,9 +126,13 @@ namespace
         bool bLoaded = false;
     };
 
+    constexpr const wchar_t* PlayerTrackerClassPath = L"/Script/FortniteUI.FortPlayerTrackerBase";
+
     std::vector<FTrackedMember> Tracked;
     std::vector<FMemberProfile> MemberProfiles;
+    std::vector<TWeakObjectPtr<UObject>> LocalTrackers;
     TWeakObjectPtr<UObject> AthenaPartyMemberClass;
+    TWeakObjectPtr<UObject> PlayerTrackerClass;
     ULONGLONG NextRefresh = 0;
     ULONGLONG NextRescan = 0;
 
@@ -604,10 +609,106 @@ namespace
         }
     }
 
+    // The local player's controller, unless it is a Battle Royale match's.
+    UObject* SaveTheWorldController(UWorld* World)
+    {
+        UFortGameInstance* GameInstance = World ? Cast<UFortGameInstance>(reinterpret_cast<UObject*>(World->OwningGameInstance)) : nullptr;
+        const TArray<ULocalPlayer*>* LocalPlayers = GameInstance ? &static_cast<TArray<ULocalPlayer*>&>(GameInstance->LocalPlayers) : nullptr;
+        UObject* Controller = LocalPlayers && LocalPlayers->Num() > 0 && (*LocalPlayers)[0] ? reinterpret_cast<UObject*>((*LocalPlayers)[0]->PlayerController) : nullptr;
+        return Controller && !Controller->IsA(AFortPlayerControllerAthena::StaticClass()) ? Controller : nullptr;
+    }
+
+    // Every live player tracker of the local player's own slot (UFortPlayerTrackerBase, IsLocalPlayer).
+    void FindLocalTrackers()
+    {
+        UObject* Class = PlayerTrackerClass.Get();
+        if (!Class)
+        {
+            Class = StaticFindObject(nullptr, nullptr, PlayerTrackerClassPath, false);
+            PlayerTrackerClass = Class;
+        }
+        const FUObjectArray* Array = Natives::GUObjectArray;
+        if (!Class || !Array)
+        {
+            return;
+        }
+
+        // Whether each class seen is a tracker's, so each class is walked once.
+        std::unordered_map<UClass*, bool> Trackers;
+        for (int32_t Index = 0; Index < Array->GetObjectArrayNum(); ++Index)
+        {
+            const FUObjectItem* Item = Array->IndexToObject(Index);
+            UObject* Object = Item ? reinterpret_cast<UObject*>(Item->Object) : nullptr;
+            if (!Object || Item->IsUnreachable() || Item->IsPendingKill())
+            {
+                continue;
+            }
+            UClass* ObjectClass = Object->GetClass();
+            auto Known = Trackers.find(ObjectClass);
+            if (Known == Trackers.end())
+            {
+                Known = Trackers.emplace(ObjectClass, ObjectClass && ObjectClass->IsChildOf(reinterpret_cast<UStruct*>(Class))).first;
+            }
+            const bool* bLocal = Known->second && !Object->IsTemplate() ? ValueOf<bool>(Object, L"IsLocalPlayer") : nullptr;
+            if (!bLocal || !*bLocal)
+            {
+                continue;
+            }
+            const bool bTracked = std::any_of(LocalTrackers.begin(), LocalTrackers.end(), [Object](const TWeakObjectPtr<UObject>& Tracker) { return Tracker.Get() == Object; });
+            if (!bTracked)
+            {
+                LocalTrackers.push_back(TWeakObjectPtr<UObject>(Object));
+            }
+        }
+    }
+
+    // Whether a tracker shows a member: its MemberInfo (FullPartyMember's) has a MemberUniqueId. True for a tracker
+    // without one, which Core leaves alone.
+    bool ShowsMember(UObject* Tracker)
+    {
+        UStructProperty* MemberInfo = PropertyOf<UStructProperty>(Tracker->GetClass(), L"MemberInfo");
+        UProperty* MemberUniqueId = MemberInfo ? PropertyOf<UProperty>(MemberInfo->Struct, L"MemberUniqueId") : nullptr;
+        return !MemberUniqueId || MemberUniqueId->ContainerPtrToValuePtr<FUniqueNetIdRepl>(MemberInfo->ContainerPtrToValuePtr<void>(Tracker))->IsValid();
+    }
+
+    // A mission's escape menu showed the other players' banners, power and stats but the local player's own slot as
+    // open ("+") (CoreV2 #111). The party bar (FullPartyBar) gives slot 0 to the local player: its tracker's
+    // UFortPlayerTrackerBase::SetTeamMember(0) (1.9 0x2F7AA50) keeps the local player's id and shows an empty
+    // FFortTeamMemberInfo, which only a later event replaces (the local team's member added, removed or changed, or a
+    // party member joining or leaving the front end's party). The other slots read the team's GetTeamMembers at once.
+    // The front end's party sends such events; a mission's team, settled by the time the menu is built, sends none, so
+    // the slot stays open although the team lists the local player (GetTeamMembers's first member). Once a second,
+    // outside the front end and Battle Royale matches, every local tracker still showing no member reads its member again
+    // with its own UpdateBasedOnId (the local team's GetTeamMemberInfo for its id), as such an event would.
+    void RefreshLocalTrackers(UWorld* World)
+    {
+        std::erase_if(LocalTrackers, [](const TWeakObjectPtr<UObject>& Tracker) { return !Tracker.Get(); });
+        if (IsFrontEndWorld() || !SaveTheWorldController(World))
+        {
+            return;
+        }
+        FindLocalTrackers();
+        for (const TWeakObjectPtr<UObject>& Entry : LocalTrackers)
+        {
+            UObject* Tracker = Entry.Get();
+            if (!Tracker || ShowsMember(Tracker))
+            {
+                continue;
+            }
+            CallEvent(Tracker, L"UpdateBasedOnId");
+            if (ShowsMember(Tracker))
+            {
+                UE_LOG(LogFort, Log, TEXT("FortPlayerTracker: %s shows the local player"), *GetNameSafe(Tracker));
+            }
+        }
+    }
+
     void Refresh()
     {
         std::erase_if(Tracked, [](const FTrackedMember& Member) { return !Member.Widget.Get(); });
-        LoadPartyMemberProfiles(Natives::GWorld ? static_cast<UWorld*>(GWorld) : nullptr);
+        UWorld* World = Natives::GWorld ? static_cast<UWorld*>(GWorld) : nullptr;
+        LoadPartyMemberProfiles(World);
+        RefreshLocalTrackers(World);
         if (!IsFrontEndWorld())
         {
             return;
@@ -676,7 +777,8 @@ UFortUITeamInfo* UFortPartyContext::GetLocalPlayerTeam()
 // (Core-Backend #104). In the front end each banner shows the party instead, slot by slot as the Save the World bar
 // (FullPartyBar) does. No engine function is hooked: once a second, in the front end's world, Core finds the banners in
 // the object array and fills them. The same refresh, outside Battle Royale matches, queries the other players' profile0
-// that 1.8.1 leaves unqueried while the sub game is Battle Royale (LoadPartyMemberProfiles).
+// that 1.8.1 leaves unqueried while the sub game is Battle Royale (LoadPartyMemberProfiles), and outside the front end
+// fills a mission's escape menu slot of the local player (RefreshLocalTrackers).
 void UFortPartyContext::StartAthenaPartyBar()
 {
     static bool bStarted = false;

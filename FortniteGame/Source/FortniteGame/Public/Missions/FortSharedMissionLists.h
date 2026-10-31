@@ -5,8 +5,8 @@
 #include "FortZoneTheme.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
-#include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
+#include "UObject/SoftObjectPtr.h"
 
 class UFortMissionInfo;
 class UFortQuestItemDefinition;
@@ -14,7 +14,7 @@ class UFortQuestItemDefinition;
 struct FFortGlobalMission
 {
     DefineUnrealStruct(FFortGlobalMission, FortniteGame)
-    DefineUProperty(TAssetPtr<UFortMissionInfo>, MissionInfo)
+    DefineUProperty(TSoftObjectPtr<UFortMissionInfo>, MissionInfo)
     DefineUProperty(TArray<EFortTheaterType>, AllowedTheaterTypes)
     DefineUProperty(FGameplayTagQuery, TheaterTagQuery)
     DefineUProperty(FGameplayTagQuery, RegionTagQuery)

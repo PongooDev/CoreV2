@@ -15,7 +15,7 @@ void AFortGameState::SpawnMissionManager(const FFortMissionManagerRecord& Missio
 
 UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const
 {
-    const TAssetSubclassOf<UFortMissionGenerator>& GeneratorClass = MissionGeneratorClass;
+    const TSoftClassPtr<UFortMissionGenerator>& GeneratorClass = MissionGeneratorClass;
     UClass* LoadedClass = GeneratorClass.LoadSynchronous();
     if (!LoadedClass || !LoadedClass->IsChildOf(UFortMissionGenerator::StaticClass()))
     {

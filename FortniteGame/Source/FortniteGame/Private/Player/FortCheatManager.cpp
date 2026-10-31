@@ -993,7 +993,7 @@ void UFortCheatManager::GiveAmmo(const FString& AmmoNameAndAmount)
             Reply(TEXT("Usage: giveammo [name] [amount], without a name the ammo of the gun you hold (ListAmmo lists the names)"));
             return;
         }
-        Ammo = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(WeaponData->AmmoData).LoadSynchronous();
+        Ammo = static_cast<TSoftObjectPtr<UFortWorldItemDefinition>&>(WeaponData->AmmoData).LoadSynchronous();
         if (!Ammo)
         {
             Reply(FString::Printf(TEXT("%s uses no ammo"), *WeaponData->GetName()));
@@ -1201,7 +1201,7 @@ void UFortCheatManager::GiveCheatInventory()
     {
         return;
     }
-    const TArray<TAssetPtr<UFortWorldItemDefinition>>& Items = GameData->CheatInventoryItems;
+    const TArray<TSoftObjectPtr<UFortWorldItemDefinition>>& Items = GameData->CheatInventoryItems;
     for (int32_t Index = 0; Index < Items.Num(); ++Index)
     {
         if (UFortWorldItemDefinition* Item = SoftElementAt(Items, Index).LoadSynchronous())
@@ -2527,7 +2527,7 @@ namespace
             return true;
         }
         const UFortWeaponItemDefinition* Weapon = Cast<UFortWeaponItemDefinition>(Definition);
-        return Weapon && static_cast<const TAssetPtr<UFortWorldItemDefinition>&>(Weapon->AmmoData).LoadSynchronous() == Definition;
+        return Weapon && static_cast<const TSoftObjectPtr<UFortWorldItemDefinition>&>(Weapon->AmmoData).LoadSynchronous() == Definition;
     }
 
     // infiniteconsumables' ∞ on the quick bar (#155). The game's item cards (SFortItemCard_StackCountBlock: 1.9 0x3026230,

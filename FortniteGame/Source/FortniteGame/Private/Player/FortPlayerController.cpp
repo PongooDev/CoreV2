@@ -41,7 +41,7 @@
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
-#include "UObject/AssetPtr.h"
+#include "UObject/SoftObjectPtr.h"
 #include "UObject/UnrealType.h"
 #include "Weapons/FortWeapon.h"
 
@@ -59,7 +59,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 namespace
 {
-    // UFortAbilityKit::Gadgets holds object pointers on 1.1 and 1.2, TAssetPtrs (0x20-byte entries) from 1.7.2 and
+    // UFortAbilityKit::Gadgets holds object pointers on 1.1 and 1.2, TSoftObjectPtrs (0x20-byte entries) from 1.7.2 and
     // TSoftObjectPtrs (0x28-byte entries, the FSoftObjectPath is 8 bytes longer) on 1.10.
     std::vector<UFortGadgetItemDefinition*> KitGadgets(UFortAbilityKit* Kit)
     {
@@ -76,8 +76,8 @@ namespace
         for (int32_t Index = 0; Index < Entries.Num(); ++Index)
         {
             const uintptr_t Entry = reinterpret_cast<uintptr_t>(Entries.GetData()) + static_cast<uintptr_t>(Index) * EntrySize;
-            Gadgets.push_back(EntrySize >= static_cast<int32_t>(sizeof(FAssetPtr))
-                ? reinterpret_cast<const TAssetPtr<UFortGadgetItemDefinition>*>(Entry)->LoadSynchronous()
+            Gadgets.push_back(EntrySize >= static_cast<int32_t>(sizeof(FSoftObjectPtr))
+                ? reinterpret_cast<const TSoftObjectPtr<UFortGadgetItemDefinition>*>(Entry)->LoadSynchronous()
                 : *reinterpret_cast<UFortGadgetItemDefinition* const*>(Entry));
         }
         return Gadgets;
@@ -601,7 +601,7 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
     for (int32_t Index = 0; Index < Items.Num(); ++Index)
     {
         const FItemDefinitionAndCount& Entry = Items[Index];
-        const TAssetPtr<UFortItemDefinition>& EntryDefinition = Entry.ItemDefinition;
+        const TSoftObjectPtr<UFortItemDefinition>& EntryDefinition = Entry.ItemDefinition;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(EntryDefinition.LoadSynchronous());
         if (ItemDefinition && ItemDefinition->ItemType == EFortItemType::GetWeaponHarvest())
         {
@@ -737,7 +737,7 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
             FHeroAbilityKit& HeroTypeKit = HeroTypeKits[Index];
             if (AbilitySystemComponent->HasAllMatchingGameplayTags(HeroTypeKit.RequiredGPTags))
             {
-                const TAssetPtr<UFortAbilityKit>& InherentAbilityKit = HeroTypeKit.InherentAbilityKit;
+                const TSoftObjectPtr<UFortAbilityKit>& InherentAbilityKit = HeroTypeKit.InherentAbilityKit;
                 AddKit(InherentAbilityKit.LoadSynchronous());
             }
         }
@@ -868,7 +868,7 @@ void AFortPlayerController::ApplyHarvestingTool()
         return;
     }
 
-    TArray<TAssetPtr<UFortWorldItemDefinition>>& HarvestingTools = GameData->HarvestingTools;
+    TArray<TSoftObjectPtr<UFortWorldItemDefinition>>& HarvestingTools = GameData->HarvestingTools;
     if (HarvestingTools.Num() == 0)
     {
         return;
@@ -975,7 +975,7 @@ void AFortPlayerController::ApplyHomebaseGadgets()
 
     const FFortSavedModeLoadout ModeLoadout = AccountProfile->GetModeLoadout(FString(L"Default"));
     const TArray<FString>& SelectedGadgets = ModeLoadout.SelectedGadgets;
-    const TAssetPtr<UFortHomebaseManager>& HomebaseManagerPtr = GameData->HomebaseManager;
+    const TSoftObjectPtr<UFortHomebaseManager>& HomebaseManagerPtr = GameData->HomebaseManager;
     UFortHomebaseManager* HomebaseManager = SelectedGadgets.Num() > 0 ? HomebaseManagerPtr.LoadSynchronous() : nullptr;
     if (!HomebaseManager)
     {

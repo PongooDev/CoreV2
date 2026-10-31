@@ -3,7 +3,7 @@
 
 FName ULevelStreaming::GetWorldAssetPackageFName() const
 {
-    const FString& WorldAssetPath = static_cast<const TAssetPtr<UWorld>&>(WorldAsset).ToStringReference().ToString();
+    const FString WorldAssetPath = WorldAsset.ToString();
     FString PackageName;
     if (!WorldAssetPath.Split(L".", &PackageName, nullptr, ESearchCase::CaseSensitive, ESearchDir::FromStart))
     {

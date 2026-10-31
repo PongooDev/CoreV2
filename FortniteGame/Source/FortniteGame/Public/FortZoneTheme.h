@@ -1,8 +1,8 @@
 #pragma once
 
 #include "GameplayTagContainer.h"
-#include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
+#include "UObject/SoftObjectPtr.h"
 
 class UWorld;
 
@@ -25,14 +25,14 @@ public:
     DefineUProperty(FGameplayTagContainer, ZoneTags)
     DefineUProperty(FGameplayTagContainer, InitialPlayerSpawnTags)
     DefineUProperty(FGameplayTagContainer, BackupPlayerSpawnTags)
-    DefineUProperty(TAssetPtr<UWorld>, ZoneToUse)
+    DefineUProperty(TSoftObjectPtr<UWorld>, ZoneToUse)
     DefineUProperty(int32_t, PlaylistId)
     // The account item a Storm Shield's zone theme saves into (UFortCloudSaveItemDefinition: OutpostCore_PvE_01..04).
-    DefineUProperty(TAssetPtr<UObject>, CloudSaveItemDefinition)
+    DefineUProperty(TSoftObjectPtr<UObject>, CloudSaveItemDefinition)
 
     // That item's asset name (OutpostCore_PvE_03), empty when the theme has none.
     FString GetCloudSaveItemName() const
     {
-        return Member_CloudSaveItemDefinition.IsAvailable() ? CloudSaveItemDefinition.ToStringReference().GetAssetName() : FString();
+        return Member_CloudSaveItemDefinition.IsAvailable() ? CloudSaveItemDefinition.GetAssetName() : FString();
     }
 };

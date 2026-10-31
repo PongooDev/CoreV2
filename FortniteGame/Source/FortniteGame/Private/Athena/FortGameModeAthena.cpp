@@ -65,8 +65,8 @@ FString AFortGameModeAthena::DefaultMatchURL()
     constexpr const wchar_t* ThemeClassPath = L"/Game/World/ZoneThemes/PvP/BP_ZT_Athena.BP_ZT_Athena_C";
     UClass* ThemeClass = LoadObject<UClass>(nullptr, ThemeClassPath);
     UFortZoneTheme* Theme = ThemeClass ? Cast<UFortZoneTheme>(ThemeClass->GetDefaultObject()) : nullptr;
-    const TAssetPtr<UWorld>* Zone = Theme ? &static_cast<TAssetPtr<UWorld>&>(Theme->ZoneToUse) : nullptr;
-    const FString Map = Zone ? Zone->ToStringReference().GetLongPackageName() : FString();
+    const TSoftObjectPtr<UWorld>* Zone = Theme ? &static_cast<TSoftObjectPtr<UWorld>&>(Theme->ZoneToUse) : nullptr;
+    const FString Map = Zone ? Zone->GetLongPackageName() : FString();
     if (Map.Len() == 0)
     {
         Log::Error(L"Battle Royale: no map from {}, the server starts on its default map", ThemeClassPath);

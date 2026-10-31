@@ -1278,7 +1278,7 @@ bool Finder::ResolveRuntime()
     ResolveNames();
     ResolveObjectGlobals();
 
-    // UE 4.18's FSoftObjectPath (1.10) replaces FStringAssetReference, whose name 1.1-1.9.1 hold instead.
+    // UE 4.18 renamed FStringAssetReference to FSoftObjectPath: only 1.10's exe holds the new name.
     if (Finder::FindReadOnly(L"SoftObjectPath", sizeof(L"SoftObjectPath")))
     {
         ObjectLayout::Current.bSoftObjectPaths = true;

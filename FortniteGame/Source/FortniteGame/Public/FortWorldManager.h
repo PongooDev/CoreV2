@@ -6,7 +6,7 @@
 #include "Items/FortLootPackage.h"
 #include "Math/Transform.h"
 #include "Missions/FortMissionManager.h"
-#include "UObject/AssetPtr.h"
+#include "UObject/SoftObjectPtr.h"
 
 class AFortPlayerController;
 class FScriptArray;
@@ -51,7 +51,7 @@ struct FFortPlacementActorFinderEntry
     DefineUnrealStruct(FFortPlacementActorFinderEntry, FortniteGame)
 
 public:
-    DefineUProperty(TAssetSubclassOf<AActor>, BuildingToSpawn)
+    DefineUProperty(TSoftClassPtr<AActor>, BuildingToSpawn)
     DefineUProperty(TArray<UClass*>, BuildingClassesToFind)
     DefineUProperty(FGameplayTagContainer, RequiredTags)
     DefineUProperty(FGameplayTagContainer, PreferredTags)

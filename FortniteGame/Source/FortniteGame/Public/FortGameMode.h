@@ -3,7 +3,7 @@
 #include "GameFramework/GameMode.h"
 #include "GameplayTagContainer.h"
 #include "Items/FortQuickBars.h"
-#include "UObject/AssetPtr.h"
+#include "UObject/SoftObjectPtr.h"
 
 class AActor;
 class AController;
@@ -42,7 +42,7 @@ public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
     // The match's playlist (Battle Royale: 2 solo, 10 duo, 9 squad), what the game mode records its winners with.
     DefineUProperty(int32_t, CurrentPlaylistId)
-    DefineUProperty(TAssetPtr<UFortGameDeathPenalty>, DeathPenaltyData)
+    DefineUProperty(TSoftObjectPtr<UFortGameDeathPenalty>, DeathPenaltyData)
 
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);

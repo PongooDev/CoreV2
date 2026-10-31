@@ -381,7 +381,7 @@ void AFortPlayerController::ServerRepairBuildingActor_Implementation(ABuildingSM
     }
 
     // Every player in the world hears the repair start there (0x5FE470).
-    const TAssetPtr<UObject>& RepairSound = StartRepairSound;
+    const TSoftObjectPtr<UObject>& RepairSound = StartRepairSound;
     if (UObject* Sound = RepairSound.LoadSynchronous())
     {
         for (TObjectIterator<AFortPlayerController> It; It; ++It)

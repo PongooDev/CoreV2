@@ -1,7 +1,7 @@
 #pragma once
 
 #include "GameFramework/GameState.h"
-#include "UObject/AssetPtr.h"
+#include "UObject/SoftObjectPtr.h"
 
 class AFortMissionManager;
 class AFortVisibilityManager;
@@ -44,7 +44,7 @@ class AFortGameStateZone : public AFortGameState
 
 public:
     DefineUProperty(float, GameDifficulty)
-    DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
+    DefineUProperty(TSoftClassPtr<UFortMissionGenerator>, MissionGeneratorClass)
     DefineUProperty(FString, TheaterUniqueId)
     DefineUProperty(UFortZoneTheme*, ZoneTheme)
     DefineUProperty(UBuildingStructuralSupportSystem*, StructuralSupportSystem)

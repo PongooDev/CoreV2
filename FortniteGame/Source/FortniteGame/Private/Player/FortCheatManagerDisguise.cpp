@@ -338,8 +338,8 @@ namespace
                 for (int32_t Index = 0; Index < Slots->Num(); ++Index)
                 {
                     FFortSpecializationSlot& Slot = (*Slots)[Index];
-                    const TAssetPtr<UFortAbilityKit>& GrantedKit = Slot.GrantedAbilityKit;
-                    const TAssetPtr<UFortAbilityKit>& RemovedKit = Slot.RemovedAbilityKit;
+                    const TSoftObjectPtr<UFortAbilityKit>& GrantedKit = Slot.GrantedAbilityKit;
+                    const TSoftObjectPtr<UFortAbilityKit>& RemovedKit = Slot.RemovedAbilityKit;
                     if (UFortAbilityKit* Kit = GrantedKit.LoadSynchronous(); Kit && std::find(Granted.begin(), Granted.end(), Kit) == Granted.end())
                     {
                         Granted.push_back(Kit);
@@ -375,7 +375,7 @@ namespace
         TArray<UFortHeroSpecialization*>& Specializations = Hero->Specializations;
         if (Specializations.Num() == 0)
         {
-            const TArray<TAssetPtr<UFortHeroSpecialization>>& TypeSpecializations = HeroType->Specializations;
+            const TArray<TSoftObjectPtr<UFortHeroSpecialization>>& TypeSpecializations = HeroType->Specializations;
             for (int32_t Index = 0; Index < TypeSpecializations.Num(); ++Index)
             {
                 if (UFortHeroSpecialization* Loaded = SoftElementAt(TypeSpecializations, Index).LoadSynchronous())
@@ -457,7 +457,7 @@ namespace
         const TStructArray<FHeroAbilityKit>& ClassKits = HeroType->AbilityKits;
         for (int32_t Index = 0; Index < ClassKits.Num(); ++Index)
         {
-            const TAssetPtr<UFortAbilityKit>& InherentKit = ClassKits[Index].InherentAbilityKit;
+            const TSoftObjectPtr<UFortAbilityKit>& InherentKit = ClassKits[Index].InherentAbilityKit;
             if (UFortAbilityKit* Kit = InherentKit.LoadSynchronous(); Kit && std::find(Kits.begin(), Kits.end(), Kit) == Kits.end())
             {
                 Kits.push_back(Kit);

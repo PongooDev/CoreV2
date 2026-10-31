@@ -88,6 +88,11 @@ public:
         return *this;
     }
 
+    bool Equals(const FString& Other, ESearchCase::Type SearchCase = ESearchCase::CaseSensitive) const
+    {
+        return SearchCase == ESearchCase::CaseSensitive ? wcscmp(**this, *Other) == 0 : _wcsicmp(**this, *Other) == 0;
+    }
+
     int32_t Find(const wchar_t* SubStr, ESearchCase::Type SearchCase = ESearchCase::IgnoreCase, ESearchDir::Type SearchDir = ESearchDir::FromStart, int32_t StartPosition = -1) const
     {
         const int32_t SubLen = SubStr ? static_cast<int32_t>(wcslen(SubStr)) : 0;

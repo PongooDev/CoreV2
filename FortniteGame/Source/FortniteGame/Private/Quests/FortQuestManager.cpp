@@ -21,8 +21,8 @@
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
-#include "UObject/AssetPtr.h"
 #include "UObject/Class.h"
+#include "UObject/SoftObjectPtr.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
@@ -171,7 +171,7 @@ namespace
         DefineUStructProperty(FDataTableRowHandle, ObjectiveStatHandle)
         DefineUStructArrayProperty(FDataTableRowHandle, AlternativeStatHandles)
         DefineUProperty(uint8_t, ItemEvent)
-        DefineUProperty(TAssetPtr<UFortItemDefinition>, ItemReference)
+        DefineUProperty(TSoftObjectPtr<UFortItemDefinition>, ItemReference)
         // The count that completes the objective.
         DefineUProperty(int32_t, Count)
         DefineUProperty(int32_t, Stage)
@@ -858,13 +858,7 @@ namespace
                     }
                     else if (ItemEvent != NoItemEvent && static_cast<uint8_t>(Objective.ItemEvent) == ItemEvent && TargetItem)
                     {
-                        TAssetPtr<UFortItemDefinition>& Reference = Objective.ItemReference;
-                        UFortItemDefinition* Item = Reference.Get();
-                        if (!Item && Reference.ToStringReference().ToString().Len() > 0)
-                        {
-                            Item = FindObject<UFortItemDefinition>(nullptr, *Reference.ToStringReference().ToString());
-                        }
-                        bMatches = Item == TargetItem;
+                        bMatches = Objective.ItemReference.Get() == TargetItem;
                     }
 
                     // The row's condition is evaluated against the event's target, the player and the zone.

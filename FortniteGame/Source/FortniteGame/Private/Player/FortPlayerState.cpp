@@ -49,7 +49,7 @@ void AFortPlayerState::SetHeroType(UFortHero* Hero)
     // Slash's movement was corrected away (#103). The specializations name every part; load the missing ones.
     for (UFortHeroSpecialization* Specialization : Hero->Specializations)
     {
-        const TArray<TAssetPtr<UCustomCharacterPart>>* SpecializationParts = Specialization ? &static_cast<TArray<TAssetPtr<UCustomCharacterPart>>&>(Specialization->CharacterParts) : nullptr;
+        const TArray<TSoftObjectPtr<UCustomCharacterPart>>* SpecializationParts = Specialization ? &static_cast<TArray<TSoftObjectPtr<UCustomCharacterPart>>&>(Specialization->CharacterParts) : nullptr;
         for (int32_t Index = 0; SpecializationParts && Index < SpecializationParts->Num(); ++Index)
         {
             UCustomCharacterPart* Part = SoftElementAt(*SpecializationParts, Index).LoadSynchronous();

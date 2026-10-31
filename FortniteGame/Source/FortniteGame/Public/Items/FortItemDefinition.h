@@ -4,8 +4,8 @@
 #include "Engine/DataTable.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
-#include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
+#include "UObject/SoftObjectPtr.h"
 
 class AFortPlayerController;
 struct FFortItemEntry;
@@ -173,7 +173,7 @@ class UFortMontageItemDefinitionBase : public UFortItemDefinition
     DefineUnrealClass(UFortMontageItemDefinitionBase, FortniteGame)
 
 public:
-    DefineUProperty(TAssetPtr<UObject>, Animation)
+    DefineUProperty(TSoftObjectPtr<UObject>, Animation)
 
     // -1 where the build has no such property.
     static ptrdiff_t AnimationOffset() { return Member_Animation.IsAvailable() ? Member_Animation.GetOffsetChecked() : -1; }
@@ -191,7 +191,7 @@ class UFortWeaponItemDefinition : public UFortWorldItemDefinition
 
 public:
     DefineUStructProperty(FDataTableRowHandle, WeaponStatHandle)
-    DefineUProperty(TAssetPtr<UFortWorldItemDefinition>, AmmoData)
+    DefineUProperty(TSoftObjectPtr<UFortWorldItemDefinition>, AmmoData)
 
     // The magazine of the weapon's stats row (FFortBaseWeaponStats::ClipSize), 0 without one.
     int32_t GetClipSize() const;

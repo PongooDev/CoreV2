@@ -18,6 +18,7 @@ class UAthenaPlayerMatchReport;
 class UFortHero;
 class UFortHeroType;
 struct FAthenaMatchStats;
+struct FAthenaMatchTeamStats;
 struct FAthenaRewardResult;
 struct FGameplayTagContainer;
 
@@ -83,11 +84,14 @@ public:
     DefineUProperty(UAthenaPlayerMatchReport*, MatchReport)
     // The end-of-match screen's stats (FAthenaMatchStats) and its rewards, which end its "Team Still Alive" wait.
     DefineUFunction(ClientSendMatchStatsForPlayer)
+    // 1.11: the screen's place and total players, out of FAthenaMatchStats.
+    DefineUFunction(ClientSendTeamStatsForPlayer)
     DefineUFunction(ClientSendEndBattleRoyaleMatchForPlayer)
 
     static bool HasMatchReport() { return Member_MatchReport.IsAvailable(); }
     UAthenaPlayerMatchReport* GetMatchReport();
     void ClientSendMatchStatsForPlayer(const FAthenaMatchStats& Stats);
+    void ClientSendTeamStatsForPlayer(const FAthenaMatchTeamStats& TeamStats);
     // Result null: no rewards (MCP's EndBattleRoyaleGame, which answered with them, has no caller left).
     void ClientSendEndBattleRoyaleMatchForPlayer(bool bSuccess, const FAthenaRewardResult* Result);
 

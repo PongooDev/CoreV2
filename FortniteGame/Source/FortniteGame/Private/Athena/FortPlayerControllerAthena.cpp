@@ -513,6 +513,15 @@ void AFortPlayerControllerAthena::ClientSendMatchStatsForPlayer(const FAthenaMat
     }
 }
 
+void AFortPlayerControllerAthena::ClientSendTeamStatsForPlayer(const FAthenaMatchTeamStats& TeamStats)
+{
+    Reflection::FParams Params(FindStaticFunction_ClientSendTeamStatsForPlayer(), true);
+    if (Params.CopyStruct(L"TeamStats", &TeamStats))
+    {
+        Params.Call(this);
+    }
+}
+
 void AFortPlayerControllerAthena::ClientSendEndBattleRoyaleMatchForPlayer(bool bSuccess, const FAthenaRewardResult* Result)
 {
     Reflection::FParams Params(FindStaticFunction_ClientSendEndBattleRoyaleMatchForPlayer(), true);

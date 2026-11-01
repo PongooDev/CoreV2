@@ -5,8 +5,10 @@
 // A Battle Royale player's stats for one match (from 1.10; FortniteGame/Public/AthenaPlayerMatchReport.h), which the
 // end-of-match screen shows (AthenaMatchStatsPartial: placement, Kills, Assists, Revives, Accuracy, Hits, Critical
 // Hits, Distance Traveled, Materials Gathered and Used, Damage To Players, Damage Taken and To Structures). 1.10 names
-// each stat; later builds (21.40) keep them in an int32 Stats[20] beside a StatBucket and the match's id. Members a
-// build doesn't reflect are left out (IsAvailable).
+// each stat; later builds (21.40) keep them in an int32 Stats[20] beside a StatBucket and the match's id. 1.11 moves
+// Place and TotalPlayers out to FAthenaMatchTeamStats, has RangedShots for RangedMiss, splits the materials by type
+// and the damage and hits into normal and critical ones (its screen's Headshots is CriticalHitsToHostiles, where
+// 1.10's is CriticalShots). Members a build doesn't reflect are left out (IsAvailable).
 struct FAthenaMatchStats
 {
     DefineUnrealStruct(FAthenaMatchStats, FortniteGame)
@@ -21,15 +23,24 @@ struct FAthenaMatchStats
     DefineUProperty(int32_t, DamageDealtToFriends)
     DefineUProperty(int32_t, DamageDealtToStructures)
     DefineUProperty(int32_t, DamageTaken)
+    // 1.11: the shots fired.
+    DefineUProperty(int32_t, RangedShots)
     DefineUProperty(int32_t, RangedHit)
     DefineUProperty(int32_t, RangedMiss)
     // RangedHit over the shots fired, 0 to 1: the screen's AccuracyStat is a Percentage.
     DefineUProperty(float, Accuracy)
     // In centimetres: the screen's DistanceStat is a Distance, which shows them as metres or kilometres.
     DefineUProperty(int32_t, TravelDistanceGround)
+    DefineUProperty(int32_t, GatheredWood)
+    DefineUProperty(int32_t, GatheredStone)
+    DefineUProperty(int32_t, GatheredMetal)
     DefineUProperty(int32_t, MaterialsGathered)
+    DefineUProperty(int32_t, UsedWood)
+    DefineUProperty(int32_t, UsedStone)
+    DefineUProperty(int32_t, UsedMetal)
     DefineUProperty(int32_t, MaterialsUsed)
     DefineUProperty(int32_t, CriticalShots)
+    DefineUProperty(int32_t, CriticalHitsToHostiles)
 
 public:
     static bool IsReflected() { return StaticStruct() != nullptr; }
@@ -55,13 +66,34 @@ public:
     static Reflection::FMemberInfo& StatDamageDealtToFriends() { return Member_DamageDealtToFriends; }
     static Reflection::FMemberInfo& StatDamageDealtToStructures() { return Member_DamageDealtToStructures; }
     static Reflection::FMemberInfo& StatDamageTaken() { return Member_DamageTaken; }
+    static Reflection::FMemberInfo& StatRangedShots() { return Member_RangedShots; }
     static Reflection::FMemberInfo& StatRangedHit() { return Member_RangedHit; }
     static Reflection::FMemberInfo& StatRangedMiss() { return Member_RangedMiss; }
     static Reflection::FMemberInfo& StatAccuracy() { return Member_Accuracy; }
     static Reflection::FMemberInfo& StatTravelDistanceGround() { return Member_TravelDistanceGround; }
+    static Reflection::FMemberInfo& StatGatheredWood() { return Member_GatheredWood; }
+    static Reflection::FMemberInfo& StatGatheredStone() { return Member_GatheredStone; }
+    static Reflection::FMemberInfo& StatGatheredMetal() { return Member_GatheredMetal; }
     static Reflection::FMemberInfo& StatMaterialsGathered() { return Member_MaterialsGathered; }
+    static Reflection::FMemberInfo& StatUsedWood() { return Member_UsedWood; }
+    static Reflection::FMemberInfo& StatUsedStone() { return Member_UsedStone; }
+    static Reflection::FMemberInfo& StatUsedMetal() { return Member_UsedMetal; }
     static Reflection::FMemberInfo& StatMaterialsUsed() { return Member_MaterialsUsed; }
     static Reflection::FMemberInfo& StatCriticalShots() { return Member_CriticalShots; }
+    static Reflection::FMemberInfo& StatCriticalHitsToHostiles() { return Member_CriticalHitsToHostiles; }
+};
+
+// The place of the player's team and how many played (from 1.11, which took them out of FAthenaMatchStats). The
+// screen's OnTeamStatsAvailable writes them as "You came in {Place} out of {Players} Players"; its SetMatchReport binds
+// it to the report's OnRewardsAvailable, so the screen writes them when the rewards come.
+struct FAthenaMatchTeamStats
+{
+    DefineUnrealStruct(FAthenaMatchTeamStats, FortniteGame)
+    DefineUProperty(int32_t, Place)
+    DefineUProperty(int32_t, TotalPlayers)
+
+public:
+    static bool IsReflected() { return StaticStruct() != nullptr; }
 };
 
 // The rewards of a match (FAthenaAwardGroups of MCP loot, the season XP among them), which MCP's EndBattleRoyaleGame
@@ -83,6 +115,10 @@ class UAthenaPlayerMatchReport : public UObject
 public:
     DefineUProperty(bool, bHasStats)
     DefineUStructProperty(FAthenaMatchStats, Stats)
+    // 1.11 (ClientSendTeamStatsForPlayer).
+    DefineUProperty(bool, bHasTeamStats)
+    DefineUStructProperty(FAthenaMatchTeamStats, TeamStats)
 
     static bool HasStats() { return Member_bHasStats.IsAvailable() && Member_Stats.IsAvailable(); }
+    static bool HasTeamStats() { return FAthenaMatchTeamStats::IsReflected() && Member_bHasTeamStats.IsAvailable() && Member_TeamStats.IsAvailable(); }
 };

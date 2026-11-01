@@ -29,6 +29,11 @@ void UFortSchematicItem::GetSchematicRequirements(TStructArray<FSchematicRequire
     }
 }
 
+FRecipe* UFortSchematicItem::GetSchematicRecipe(Reflection::FParams& Recipe) const
+{
+    return Recipe.Call(const_cast<UFortSchematicItem*>(this)) ? static_cast<FRecipe*>(Recipe.GetAddress(L"ReturnValue")) : nullptr;
+}
+
 int32_t UFortSchematicItem::GetSchematicQuantityProduced() const
 {
     Reflection::FParams Params(StaticFunction_GetSchematicQuantityProduced());
@@ -66,16 +71,13 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
 
     if (!PlayerController->bCraftFree)
     {
-        TStructArray<FSchematicRequirement> Requirements;
-        GetSchematicRequirements(Requirements);
-        for (int32_t Index = 0; Index < Requirements.Num(); ++Index)
+        // Crafts what's missing of an ingredient from its own schematic, then takes the ingredient if it's consumed.
+        const auto SpendIngredient = [PlayerController, Count](UFortWorldItemDefinition* IngredientDefinition, int32_t PerCraft, bool bIsConsumed)
         {
-            FSchematicRequirement& Requirement = Requirements[Index];
-            UFortWorldItemDefinition* IngredientDefinition = Cast<UFortWorldItemDefinition>(reinterpret_cast<UObject*>(static_cast<UFortItemDefinition*>(Requirement.ItemDefinition)));
-            const int32_t Needed = Requirement.Count * Count;
+            const int32_t Needed = PerCraft * Count;
             if (!IngredientDefinition || Needed <= 0)
             {
-                continue;
+                return;
             }
 
             const int32_t Owned = PlayerController->GetItemQuantity(IngredientDefinition);
@@ -88,12 +90,37 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
                 }
             }
 
-            if (Requirement.bIsConsumed)
+            if (bIsConsumed)
             {
                 UFortKismetLibrary::K2_RemoveItemFromPlayer(PlayerController, IngredientDefinition, Needed);
             }
+        };
+
+        if (UFunction* GetRecipe = FindStaticFunction_GetSchematicRecipe())
+        {
+            // 1.11 has no GetSchematicRequirements: its recipe's costs, read as 1.11's CanCraftSchematic (0x6CEC30) reads
+            // them, each cost's item loaded from its soft pointer and taken if the recipe's bIsConsumed says so.
+            Reflection::FParams RecipeFrame(GetRecipe, true);
+            const FRecipe* Recipe = GetSchematicRecipe(RecipeFrame);
+            TStructArray<FFortItemQuantityPair>* Costs = Recipe ? &Recipe->RecipeCosts : nullptr;
+            for (int32_t Index = 0; Costs && Index < Costs->Num(); ++Index)
+            {
+                FFortItemQuantityPair& Cost = (*Costs)[Index];
+                const TAssetPtr<UFortItemDefinition>& CostItem = Cost.ItemDefinition;
+                SpendIngredient(Cast<UFortWorldItemDefinition>(reinterpret_cast<UObject*>(CostItem.LoadSynchronous())), Cost.Quantity, Recipe->bIsConsumed);
+            }
         }
-        FMemory::Free(Requirements.GetData());
+        else
+        {
+            TStructArray<FSchematicRequirement> Requirements;
+            GetSchematicRequirements(Requirements);
+            for (int32_t Index = 0; Index < Requirements.Num(); ++Index)
+            {
+                FSchematicRequirement& Requirement = Requirements[Index];
+                SpendIngredient(Cast<UFortWorldItemDefinition>(reinterpret_cast<UObject*>(static_cast<UFortItemDefinition*>(Requirement.ItemDefinition))), Requirement.Count, Requirement.bIsConsumed);
+            }
+            FMemory::Free(Requirements.GetData());
+        }
     }
 
     UFortQuestManager* QuestManager = PlayerController->GetQuestManager();

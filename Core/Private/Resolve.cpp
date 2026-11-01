@@ -4415,8 +4415,15 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
         bAfterTags |= Target == SourceAndContextTags;
     }
 
-    const auto RemoveCalls = Calls(ExecOf(L"/Script/FortniteGame.FortMission:RemoveParticipantAccount"));
-    const uintptr_t RemoveParticipant = RemoveCalls.empty() ? 0 : RemoveCalls.back().second;
+    // The thunk's first call past the parameter steps: 1.11's FUniqueNetIdRepl frees its ReplicationBytes after it.
+    uintptr_t RemoveParticipant = 0;
+    for (const auto& [Call, Target] : Calls(ExecOf(L"/Script/FortniteGame.FortMission:RemoveParticipantAccount")))
+    {
+        if (!RemoveParticipant && Target != Step && Target != StepExplicit)
+        {
+            RemoveParticipant = Target;
+        }
+    }
     const uintptr_t RemoveEnd = RemoveParticipant ? Finder::FunctionEnd(RemoveParticipant) : 0;
     const uintptr_t FirstVirtual = RemoveEnd ? FindVirtualCall(RemoveParticipant, RemoveEnd) : 0;
 
@@ -5309,7 +5316,8 @@ bool Finder::ResolveMissionParTimeLive(uintptr_t CustomHandleMissionEvent)
 
 // AFortMission's badge grant (grants the badge to every player through the mission manager's EarnedBadgesArray add,
 // then spawns a basic client announcement): the only AFortMission slot not inherited from AActor whose callee's callee
-// passes the mission manager's EarnedBadgesArray in rcx.
+// passes the mission manager's EarnedBadgesArray in rcx. 1.11's objective blocks reach a shared mission points grant
+// (0x713B20) that passes it too, from three slots, so a callee's callee only one slot reaches decides it.
 bool Finder::ResolveMissionBadgeLive(ptrdiff_t EarnedBadgesArrayOffset)
 {
     if (Natives::AFortMission_GrantBadgeIndex >= 0)
@@ -5333,8 +5341,7 @@ bool Finder::ResolveMissionBadgeLive(ptrdiff_t EarnedBadgesArrayOffset)
 
     void** MissionVTable = CdoVTable(L"/Script/FortniteGame.FortMission");
     void** ActorVTable = CdoVTable(L"/Script/Engine.Actor");
-    int32_t BadgeIndex = -1;
-    int32_t Matches = 0;
+    std::vector<std::pair<int32_t, uintptr_t>> Passing;
     for (int32_t Index = 0; MissionVTable && ActorVTable && Offset > 0 && Index < 0x400; ++Index)
     {
         const uintptr_t Entry = VTableEntry(MissionVTable, Index);
@@ -5348,16 +5355,26 @@ bool Finder::ResolveMissionBadgeLive(ptrdiff_t EarnedBadgesArrayOffset)
         }
 
         const uintptr_t EntryEnd = Finder::FunctionEnd(Entry);
-        bool bMatch = false;
         for (const auto& [Site, Target] : EntryEnd && EntryEnd - Entry < 0x1000 ? Finder::DirectCalls(Entry, EntryEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
         {
             const uintptr_t TargetEnd = IsInText(Target) ? Finder::FunctionEnd(Target) : 0;
             for (const auto& [InnerSite, Inner] : TargetEnd && TargetEnd - Target < 0x1000 ? Finder::DirectCalls(Target, TargetEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
             {
-                bMatch = bMatch || (IsInText(Inner) && PassesBadgeArray(Inner));
+                const bool bKnown = std::find(Passing.begin(), Passing.end(), std::pair{ Index, Inner }) != Passing.end();
+                if (!bKnown && IsInText(Inner) && PassesBadgeArray(Inner))
+                {
+                    Passing.emplace_back(Index, Inner);
+                }
             }
         }
-        if (bMatch)
+    }
+
+    int32_t BadgeIndex = -1;
+    int32_t Matches = 0;
+    for (const auto& [Index, Inner] : Passing)
+    {
+        const auto SameInner = std::count_if(Passing.begin(), Passing.end(), [Inner](const auto& Other) { return Other.second == Inner; });
+        if (SameInner == 1 && Index != BadgeIndex)
         {
             BadgeIndex = Index;
             ++Matches;

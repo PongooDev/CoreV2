@@ -62,8 +62,9 @@ void AFortAthenaSupplyDrop::HookNatives()
 {
     // SpawnPickup is 1.10's (CoreV2 #170). 1.10's exec (0x9FE050) steps its five parameters and calls the shared
     // return-zero stub (UserMathErrorFunction, 0x1AC45D0) instead of the native, so every pickup the crate's SpawnTierDrops
-    // asked for was null and the crate opened onto nothing.
-    UFunction* Function = StaticFunction_SpawnPickup();
+    // asked for was null and the crate opened onto nothing. 1.9.1 and earlier have no SpawnPickup (their crate calls
+    // K2_SpawnPickupInWorld), so it is looked up without failing there.
+    UFunction* Function = FindStaticFunction_SpawnPickup();
     if (!Function || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))
     {
         return;

@@ -205,6 +205,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\AssetManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Channel.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Console.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\CurveTable.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\DataTable.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\DemoNetDriver.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\Engine.h" />

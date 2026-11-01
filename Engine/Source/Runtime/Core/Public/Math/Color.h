@@ -33,3 +33,13 @@ struct FColor
 };
 
 static_assert(sizeof(FColor) == 4);
+
+struct FLinearColor
+{
+    float R;
+    float G;
+    float B;
+    float A;
+};
+
+static_assert(sizeof(FLinearColor) == 0x10);

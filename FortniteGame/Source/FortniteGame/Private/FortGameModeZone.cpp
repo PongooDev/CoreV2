@@ -29,6 +29,7 @@
 #include "Building/BuildingActor.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingStructuralSupportSystem.h"
+#include "Kismet/GameplayStatics.h"
 #include "Templates/Casts.h"
 #include "UObject/WeakObjectPtr.h"
 #include "Finder.h"
@@ -264,10 +265,27 @@ void AFortGameModeZone::CreateAIDirector()
 {
 #if WITH_SERVER_CODE
     UWorld* World = GetWorld();
-    if (World)
+    if (!World)
     {
-        AIDirector = World->SpawnActor<AFortAIDirector>(DetermineAIDirectorClass(), FActorSpawnParameters());
+        return;
     }
+
+    // Every build's DefaultGameData names /Game/AIDirector/AIDirector_Fortnite, so the native class means it didn't load:
+    // 1.10's paks don't ship it. The native director then takes the Blueprint's settings before it finishes spawning.
+    UClass* const AIDirectorClass = DetermineAIDirectorClass();
+    if (AIDirectorClass == AFortAIDirector::StaticClass())
+    {
+        const FTransform SpawnTransform;
+        AFortAIDirector* NewAIDirector = Cast<AFortAIDirector>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, AIDirectorClass, SpawnTransform));
+        if (NewAIDirector)
+        {
+            NewAIDirector->ApplyAIDirectorFortniteDefaults();
+            NewAIDirector = Cast<AFortAIDirector>(UGameplayStatics::FinishSpawningActor(NewAIDirector, SpawnTransform));
+        }
+        AIDirector = NewAIDirector;
+        return;
+    }
+    AIDirector = World->SpawnActor<AFortAIDirector>(AIDirectorClass, FActorSpawnParameters());
 #endif
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AttributeSet.h"
+#include "Engine/CurveTable.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
 #include "UObject/Object.h"
@@ -16,13 +17,6 @@ class EGameplayEffectMagnitudeCalculation
 {
     DefineUnrealEnum(EGameplayEffectMagnitudeCalculation, GameplayAbilities)
     DefineUEnumValue(ScalableFloat)
-};
-
-struct FCurveTableRowHandle
-{
-    DefineUnrealStruct(FCurveTableRowHandle, Engine)
-    DefineUProperty(UObject*, CurveTable)
-    DefineUProperty(FName, RowName)
 };
 
 // A float, scaled by the curve's row at the effect's level when it has one.

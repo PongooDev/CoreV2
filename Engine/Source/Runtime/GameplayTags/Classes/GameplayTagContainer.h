@@ -4,6 +4,8 @@
 #include "Containers/UnrealString.h"
 #include "UObject/NameTypes.h"
 
+#include <string>
+
 struct FGameplayTag
 {
     bool IsValid() const { return !TagName.IsNone(); }
@@ -34,6 +36,25 @@ struct FGameplayTagContainer
         }
     }
 
+    // Adds the tag and its parents (its dotted prefixes, as UGameplayTagsManager registers them).
+    void AddTag(const FGameplayTag& TagToAdd)
+    {
+        if (!TagToAdd.IsValid() || GameplayTags.Contains(TagToAdd))
+        {
+            return;
+        }
+        GameplayTags.Add(TagToAdd);
+        const std::wstring Name = TagToAdd.TagName.ToStdString();
+        for (size_t Dot = Name.rfind(L'.'); Dot != std::wstring::npos && Dot > 0; Dot = Name.rfind(L'.', Dot - 1))
+        {
+            const FGameplayTag Parent{ FName(Name.substr(0, Dot).c_str()) };
+            if (!ParentTags.Contains(Parent))
+            {
+                ParentTags.Add(Parent);
+            }
+        }
+    }
+
     // Matches the tag itself or one of its parents, as the native loot filters compare the container's two arrays.
     bool HasTag(const FGameplayTag& Tag) const
     {
@@ -49,6 +70,24 @@ static_assert(sizeof(FGameplayTagContainer) == 0x20);
 struct FGameplayTagQuery
 {
     bool IsEmpty() const { return QueryTokenStream.Num() == 0; }
+
+    // ALL( InTags ): the stream version, a root expression, EGameplayTagQueryExprType::AllTagsMatch (2), the tag count and
+    // each tag's index in the dictionary.
+    static FGameplayTagQuery MakeQuery_MatchAllTags(const FGameplayTagContainer& InTags)
+    {
+        FGameplayTagQuery Query{};
+        Query.TokenStreamVersion = 0;
+        for (const uint8_t Token : { uint8_t(0), uint8_t(1), uint8_t(2), static_cast<uint8_t>(InTags.GameplayTags.Num()) })
+        {
+            Query.QueryTokenStream.Add(Token);
+        }
+        for (int32_t Index = 0; Index < InTags.GameplayTags.Num(); ++Index)
+        {
+            Query.TagDictionary.Add(InTags.GameplayTags[Index]);
+            Query.QueryTokenStream.Add(static_cast<uint8_t>(Index));
+        }
+        return Query;
+    }
 
     int32_t TokenStreamVersion;
     TArray<FGameplayTag> TagDictionary;

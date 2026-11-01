@@ -102,6 +102,13 @@ void AActor::SetReplicates(bool bInReplicates)
     Params.Call(this);
 }
 
+void AActor::SetOwner(AActor* NewOwner)
+{
+    Reflection::FParams Params(StaticFunction_SetOwner());
+    Params.Set(L"NewOwner", NewOwner);
+    Params.Call(this);
+}
+
 void AActor::SetActorEnableCollision(bool bNewActorEnableCollision)
 {
     Reflection::FParams Params(StaticFunction_SetActorEnableCollision());

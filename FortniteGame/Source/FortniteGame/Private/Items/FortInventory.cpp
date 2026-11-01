@@ -30,6 +30,14 @@ void AFortInventory::HandleInventoryLocalUpdate()
     Params.Call(this);
 }
 
+void AFortInventory::ClearShuttingDown()
+{
+    if (Member_bIsShuttingDown.IsAvailable())
+    {
+        bIsShuttingDown = false;
+    }
+}
+
 UFortWorldItem* AFortInventory::FindWorldItem(const FGuid& ItemGuid)
 {
     FFortItemList& ItemList = Inventory;

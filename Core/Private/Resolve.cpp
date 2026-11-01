@@ -5043,6 +5043,34 @@ bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
     Natives::UFortMcpProfileWorld_Inventory = InventoryOffset;
     Natives::UFortMcpProfileWorld_bIsInventoryInitialized = InitializedOffset;
     Log::Info(L"Finder: UFortMcpProfileWorld::BindToPlayerController is slot 0x{:X}, inventory +0x{:X}, bIsInventoryInitialized +0x{:X}", BindIndex, InventoryOffset, InitializedOffset);
+
+    // With an inventory already bound (a player rejoining the zone) the bind hands it to the controller and returns:
+    // `jmp [rax+disp32]` to ReconnectOutpostInventory or ReconnectWorldInventory (1.10 0x784514 / 0x78452A: +0x15E8 /
+    // +0x15D8; 1.9.1 +0x1600 / +0x15F0). Between them in the vtable is GetOutpostInventory, which the bind's first-bind
+    // branch calls (`call [rax+disp32]`, 1.10 +0x15E0).
+    const uintptr_t GetOutpostInventoryCall = Bind ? FindInstruction(Bind, BindEnd, { 0xFF, 0x90, -1, -1, 0x00, 0x00 }) : 0;
+    const int32_t GetOutpostInventoryDisp = GetOutpostInventoryCall ? *reinterpret_cast<const int32_t*>(GetOutpostInventoryCall + 2) : 0;
+    const auto HasTailCall = [Bind, BindEnd](int32_t Disp)
+    {
+        for (uintptr_t Site = FindInstruction(Bind, BindEnd, { 0x48, 0xFF, 0xA0 }); Site; Site = FindInstruction(Site + 1, BindEnd, { 0x48, 0xFF, 0xA0 }))
+        {
+            if (*reinterpret_cast<const int32_t*>(Site + 3) == Disp)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (GetOutpostInventoryDisp >= 0x1000 && HasTailCall(GetOutpostInventoryDisp - 8) && HasTailCall(GetOutpostInventoryDisp + 8))
+    {
+        Natives::AFortPlayerController_ReconnectWorldInventoryIndex = (GetOutpostInventoryDisp - 8) / 8;
+        Natives::AFortPlayerController_ReconnectOutpostInventoryIndex = (GetOutpostInventoryDisp + 8) / 8;
+        Log::Info(L"Finder: AFortPlayerController::ReconnectWorldInventory is slot 0x{:X}, ReconnectOutpostInventory slot 0x{:X}", Natives::AFortPlayerController_ReconnectWorldInventoryIndex, Natives::AFortPlayerController_ReconnectOutpostInventoryIndex);
+    }
+    else
+    {
+        Log::Info(L"Finder: UFortMcpProfileWorld::BindToPlayerController hands no existing inventory to the controller in this build");
+    }
     return true;
 }
 

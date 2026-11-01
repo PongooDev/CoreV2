@@ -383,6 +383,10 @@ namespace Natives
     inline void* (*FNavGraphPathSearch_Construct)(void* This, AFortNavigationGraph* Graph) = nullptr;
     inline ptrdiff_t UFortMcpProfileWorld_Inventory = -1;
     inline ptrdiff_t UFortMcpProfileWorld_bIsInventoryInitialized = -1;
+    // AFortPlayerController slots BindToPlayerController hands a rejoining player's existing inventory to (-1 when the
+    // bind has no such branch).
+    inline int32_t AFortPlayerController_ReconnectWorldInventoryIndex = -1;
+    inline int32_t AFortPlayerController_ReconnectOutpostInventoryIndex = -1;
     inline int32_t AFortGameModeZone_OnZoneEndIndex = -1;
     inline int32_t AFortMissionManager_OnMissionStatusChangeIndex = -1;
     inline int32_t AFortGameStateZone_SetGameplayStateIndex = -1;

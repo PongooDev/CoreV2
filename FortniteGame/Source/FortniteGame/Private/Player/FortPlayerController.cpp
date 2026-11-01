@@ -615,6 +615,97 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
 #endif
 }
 
+namespace
+{
+    // A controller that leaves with a world profile keeps its inventories (1.10 0x6D23B0, from the controller's teardown
+    // 0x8736B0): each is marked shutting down and loses its owner instead of being destroyed, and the profile still holds
+    // it. On the player's return the new controller drops the empty inventory it was spawned with and takes that one back.
+    AFortInventory* ReconnectInventory(AFortPlayerController* PlayerController, AFortInventory* CurrentInventory, AFortInventory* InInventory)
+    {
+        if (!InInventory || InInventory == CurrentInventory)
+        {
+            return CurrentInventory;
+        }
+        if (CurrentInventory)
+        {
+            CurrentInventory->K2_DestroyActor();
+        }
+        InInventory->ClearShuttingDown();
+        InInventory->SetOwner(PlayerController);
+        InInventory->ForceNetUpdate();
+        return InInventory;
+    }
+}
+
+void AFortPlayerController::ReconnectWorldInventory(AFortInventory* InWorldInventory)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* const PreviousInventory = WorldInventory;
+    WorldInventory = ReconnectInventory(this, PreviousInventory, InWorldInventory);
+    if (static_cast<AFortInventory*>(WorldInventory) != PreviousInventory)
+    {
+        WorldInventory->HandleInventoryLocalUpdate();
+        UE_LOG(LogFort, Log, TEXT("ReconnectWorldInventory: %s gets back its world inventory %s (%d items)"), *GetNameSafe(this), *GetNameSafe(static_cast<AFortInventory*>(WorldInventory)), WorldInventory->Inventory.ItemInstances.Num());
+    }
+#endif
+}
+
+void AFortPlayerController::ReconnectOutpostInventory(AFortInventory* InOutpostInventory)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* const PreviousInventory = OutpostInventory;
+    OutpostInventory = ReconnectInventory(this, PreviousInventory, InOutpostInventory);
+    if (static_cast<AFortInventory*>(OutpostInventory) != PreviousInventory)
+    {
+        OutpostInventory->HandleInventoryLocalUpdate();
+        UE_LOG(LogFort, Log, TEXT("ReconnectOutpostInventory: %s gets back its storm shield storage %s"), *GetNameSafe(this), *GetNameSafe(static_cast<AFortInventory*>(OutpostInventory)));
+    }
+#endif
+}
+
+void AFortPlayerController::ReconnectWorldInventoryHK(AFortPlayerController* This, AFortInventory* InWorldInventory)
+{
+    This->ReconnectWorldInventory(InWorldInventory);
+}
+
+void AFortPlayerController::ReconnectOutpostInventoryHK(AFortPlayerController* This, AFortInventory* InOutpostInventory)
+{
+    This->ReconnectOutpostInventory(InOutpostInventory);
+}
+
+void AFortPlayerController::HookReconnectVTables()
+{
+    // Both are stripped to the shared empty function (1.10 0x1729B00, 1.9.1 0x15C4C00), so a player who rejoined kept the
+    // empty inventory their new controller spawned with and lost everything for the rest of the mission (CoreV2 #171).
+    UObject* PlayerControllerDefault = StaticClass()->GetDefaultObject(false);
+    void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
+    for (const auto& [Index, Hook, Name] : {
+             std::tuple{ Natives::AFortPlayerController_ReconnectWorldInventoryIndex, reinterpret_cast<void*>(&ReconnectWorldInventoryHK), L"AFortPlayerController::ReconnectWorldInventory" },
+             std::tuple{ Natives::AFortPlayerController_ReconnectOutpostInventoryIndex, reinterpret_cast<void*>(&ReconnectOutpostInventoryHK), L"AFortPlayerController::ReconnectOutpostInventory" } })
+    {
+        void* const Native = PlayerControllerVTable && Index >= 0 ? PlayerControllerVTable[Index] : nullptr;
+        if (!Native)
+        {
+            continue;
+        }
+        if (!Finder::IsStubFunction(reinterpret_cast<uintptr_t>(Native)))
+        {
+            Log::Info(L"Finder: {} is native in this build", Name);
+            continue;
+        }
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[Index] == Native)
+            {
+                Hooks::SwapVTable(Name, VTable, Index, Hook);
+            }
+        }
+    }
+}
+
 void AFortPlayerController::GiveStartingItems(const TStructArray<FItemAndCount>& Items)
 {
 #if WITH_SERVER_CODE

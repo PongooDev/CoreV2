@@ -27,9 +27,14 @@ class AFortInventory : public AActor
 
 public:
     DefineUStructProperty(FFortItemList, Inventory)
+    // Set when the owning controller goes (1.10 0x6D23B0): a player with a world profile keeps the inventory, ownerless,
+    // for their return; anyone else's is destroyed.
+    DefineUProperty(bool, bIsShuttingDown)
     DefineUFunction(HandleInventoryLocalUpdate)
 
     void HandleInventoryLocalUpdate();
+    // The inventory is in use again (a rejoining player's): bIsShuttingDown off, where the build reflects it.
+    void ClearShuttingDown();
     UFortWorldItem* FindWorldItem(const FGuid& ItemGuid);
     void AddWorldItem(UFortWorldItem* WorldItem);
     void UpdateWorldItemCount(UFortWorldItem* WorldItem, int32_t NewCount);

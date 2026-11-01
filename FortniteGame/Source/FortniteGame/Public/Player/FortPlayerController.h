@@ -126,6 +126,10 @@ public:
     void SpawnQuickBars();
     void SetupQuickBars();
     void InitializeInventory(const TStructArray<FItemDefinitionAndCount>& Items);
+    // A rejoining player's world (or storm shield) inventory, kept by their world profile since they left, becomes this
+    // controller's again (UFortMcpProfileWorld::BindToPlayerController hands it over).
+    void ReconnectWorldInventory(AFortInventory* InWorldInventory);
+    void ReconnectOutpostInventory(AFortInventory* InOutpostInventory);
     void GiveStartingItems(const TStructArray<FItemAndCount>& Items);
     void TryAddToQuickBar(UFortWorldItem* Item);
     void TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused);
@@ -178,6 +182,8 @@ public:
 
     static void Hook();
     static void HookVTables();
+    // After UFortMcpProfileWorld::HookVTables resolves the bind's reconnect slots.
+    static void HookReconnectVTables();
     static void HookBuildingVTables();
     static void HookEmoteVTables();
     // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox.
@@ -225,4 +231,6 @@ private:
     static void ServerDisassembleInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerDisassembleInventoryItems_ImplementationHK(AFortPlayerController* This, const TArray<FGuid>& ItemGuids, const TArray<int32_t>& ItemCounts);
     static inline bool (*ModDurabilityOG)(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet) = nullptr;
+    static void ReconnectWorldInventoryHK(AFortPlayerController* This, AFortInventory* InWorldInventory);
+    static void ReconnectOutpostInventoryHK(AFortPlayerController* This, AFortInventory* InOutpostInventory);
 };

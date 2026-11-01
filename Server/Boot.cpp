@@ -267,6 +267,7 @@ static void InstallHooks()
         AFortGameMode::HookCallSites();
         AFortWorldManager::HookCallSites();
         UFortMcpProfileWorld::HookVTables();
+        AFortPlayerController::HookReconnectVTables();
         AFortAIGoalManager::HookCallSites();
         AFortAIGoalManager::HookNatives();
         UFortAIEncounterInfo::HookCallSites();

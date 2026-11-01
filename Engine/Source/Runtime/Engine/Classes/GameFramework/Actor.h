@@ -79,6 +79,7 @@ public:
     DefineUFunction(SetActorScale3D)
     DefineUFunction(GetActorScale3D)
     DefineUFunction(SetReplicates)
+    DefineUFunction(SetOwner)
     DefineUFunction(SetActorEnableCollision)
     DefineUFunction(SetActorHiddenInGame)
     DefineUFunction(K2_AttachToActor)
@@ -109,6 +110,7 @@ public:
     FVector GetActorScale3D() const;
     // Server: replicates from now on (an actor that didn't joins the net driver's list), or stops.
     void SetReplicates(bool bInReplicates);
+    void SetOwner(AActor* NewOwner);
     void SetActorEnableCollision(bool bNewActorEnableCollision);
     // Server: hides the actor (its components, not the actors attached to it) for everyone; bHidden replicates.
     void SetActorHiddenInGame(bool bNewHidden);

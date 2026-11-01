@@ -29,10 +29,17 @@ protected:
 
 // UE 4.20's FUniqueNetIdRepl (1.11) adds ReplicationBytes, a TArray<uint8>, after the wrapper: 0x28 bytes, not 0x18.
 // Core declares 4.19's, so the engine's members of this type are found by their struct (DefineUStructProperty), not
-// their size, and only read in place.
+// their size, and only read in place. Core never makes or copies one: a 0x18 copy of a 1.11 id leaves its
+// ReplicationBytes unset (#175). Parameters are copied through the script struct (Reflection::FParams::CopyStruct,
+// UScriptStruct::CopyScriptStruct), which copies the build's whole struct.
 struct FUniqueNetIdRepl : public FUniqueNetIdWrapper
 {
     DefineUnrealStruct(FUniqueNetIdRepl, Engine)
+
+public:
+    FUniqueNetIdRepl() = delete;
+    FUniqueNetIdRepl(const FUniqueNetIdRepl&) = delete;
+    FUniqueNetIdRepl& operator=(const FUniqueNetIdRepl&) = delete;
 };
 
 static_assert(sizeof(FUniqueNetIdRepl) == 0x18);

@@ -27,9 +27,9 @@ public:
 
     bool IsOccupant(const FUniqueNetIdRepl& UserId) const
     {
+        // The id is copied with its script struct, at the build's size (1.11's FUniqueNetIdRepl is 0x28).
         Reflection::FParams Params(StaticFunction_IsOccupant(), true);
-        Params.Set(L"UserId", UserId);
-        return Params.Call(const_cast<ADeployableBasePlot*>(this)) && Params.Take<bool>(L"ReturnValue");
+        return Params.CopyStruct(L"UserId", &UserId) && Params.Call(const_cast<ADeployableBasePlot*>(this)) && Params.Take<bool>(L"ReturnValue");
     }
 };
 

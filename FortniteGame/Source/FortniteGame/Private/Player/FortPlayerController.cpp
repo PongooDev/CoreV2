@@ -376,10 +376,13 @@ bool AFortPlayerController::GetRotatePawnToCamera()
 void AFortPlayerController::ServerSetPartyOwner(const FUniqueNetIdRepl& PartyOwnerUniqueId)
 {
     // Called on the server, the RPC runs its own _Implementation (1.7.2 0x828360): the player state's
-    // PartyOwnerUniqueId, then the game session's lobby beacon (0x6E8360).
-    Reflection::FParams Params(StaticFunction_ServerSetPartyOwner());
-    Params.Set(L"PartyOwnerUniqueId", PartyOwnerUniqueId);
-    Params.Call(this);
+    // PartyOwnerUniqueId, then the game session's lobby beacon (0x6E8360). The id is copied with its script struct:
+    // 1.11's FUniqueNetIdRepl is 4.20's, 0x28 bytes, which Core's 0x18 declaration doesn't cover (#175).
+    Reflection::FParams Params(StaticFunction_ServerSetPartyOwner(), true);
+    if (Params.CopyStruct(L"PartyOwnerUniqueId", &PartyOwnerUniqueId))
+    {
+        Params.Call(this);
+    }
 }
 
 void AFortPlayerController::Possess(APawn* InPawn)

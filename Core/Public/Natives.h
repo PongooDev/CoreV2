@@ -474,6 +474,9 @@ namespace Natives
     // it to a jump to AFortPlayerControllerZone's (1.9.1): Finder::StrippedAthenaPawnDiedIndex and
     // Finder::ResolveAthenaPawnDiedLive. The outlived count's pieces are 1.9.1's own (its wins').
     inline void (*AFortPlayerControllerZone_OnPawnDied)(AFortPlayerControllerAthena* This, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer) = nullptr;
+    // AFortPlayerControllerZone's death report (1.10 0x8DB450), which AFortPlayerControllerAthena's override calls first
+    // where its Athena part is stripped (1.9.1, 1.10): Finder::StrippedAthenaPrepareDeathReportIndex.
+    inline void (*AFortPlayerControllerZone_PrepareDeathReport)(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack) = nullptr;
     inline void (*AFortGameModeAthena_RemoveFromAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState) = nullptr;
     inline void (*AFortPlayerControllerAthena_SetTeamPlace)(AFortPlayerControllerAthena* This, int32_t Place) = nullptr;
     inline int32_t (*AFortPlayerStateAthena_GetSecondsAlive)(AFortPlayerStateAthena* This) = nullptr;

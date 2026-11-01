@@ -184,6 +184,9 @@ namespace Finder
     bool ResolveMatchStatsLive();
     // The slot of AFortPlayerControllerAthena's pawn-death handler when the build strips it (1.9.1), else -1.
     int32_t StrippedAthenaPawnDiedIndex();
+    // The slot of AFortPlayerControllerAthena's PrepareDeathReport override when the build strips its Athena game mode
+    // part (1.9.1, 1.10), else -1. KillerPlayerStateOffset: PlayerDeathReport's KillerPlayerState in the controller.
+    int32_t StrippedAthenaPrepareDeathReportIndex(ptrdiff_t KillerPlayerStateOffset);
     bool ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsAliveOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t DeathInfoDBNOOffset, ptrdiff_t TeamMembersOffset);
     uint8_t* PawnDiedInventoryDropCall();
     bool ResolveDecoSpawnedLive();

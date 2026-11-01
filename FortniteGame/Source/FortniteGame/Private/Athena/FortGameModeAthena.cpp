@@ -167,6 +167,26 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
     return AFortGameModeZone::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
 }
 
+void AFortGameModeAthena::ModifyDeathReport(AFortPlayerControllerAthena* Player, FFortPlayerDeathReport& DeathReport)
+{
+#if WITH_SERVER_CODE
+    // 1.9.1 and 1.10 keep only the Cast<AFortGameModeAthena> of AFortPlayerControllerAthena::PrepareDeathReport's call
+    // (1.10 0x449F80, 1.9.1 0x431090: a jump to AFortGameModeAthena::StaticClass after AFortPlayerControllerZone's
+    // report). The report's killer is the death's instigating controller (1.10 0x8DB450), and a fall or the storm has
+    // none: falling damage is the game state's environment damage (AFortPawn 0x81E980, FallingDamageTemplateGE through
+    // 0x2A4840, "EnvironmentDamage"). The elimination screen takes the eliminator's banner from KillerPlayerState only
+    // (EliminatedOverlay's SetBannerForKiller; its PlayerRankEmblem doesn't bind to the local player) and, with no
+    // killer pawn, says "YOU ELIMINATED YOURSELF" with the player's own name (ProcessDeathReport), so it showed the
+    // empty emblem (#173). A player nobody eliminated is their own eliminator, as the death handler has it for DeathInfo
+    // (1.8 0x43BAFE: FinisherOrDowner is the player's own state); KillerPawn stays empty, so the death camera turns to
+    // nobody and the screen still reads "YOU ELIMINATED YOURSELF".
+    if (Player && !DeathReport.KillerPlayerState)
+    {
+        DeathReport.KillerPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Player->PlayerState)));
+    }
+#endif
+}
+
 namespace
 {
     // A player of the match, kept after they leave it: a team's place comes when its last player is out, by which time

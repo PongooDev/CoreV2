@@ -4,6 +4,7 @@
 #include "Items/FortItemDefinition.h"
 #include "Math/Vector.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerControllerZone.h"
 
 #include <vector>
 
@@ -76,6 +77,8 @@ public:
     // Server: who SpectateOnDeath watches first after a death, the eliminator's pawn.
     DefineUProperty(APawn*, PlayerToSpectateOnDeath)
     DefineUFunction(SpectateOnDeath)
+    // AFortPlayerControllerZone's: the report of the player's last death, which ClientOnPawnDied sends.
+    DefineUStructProperty(FFortPlayerDeathReport, PlayerDeathReport)
     // 1.10: the player's report of their match (AthenaPlayerMatchReport.h), made in BeginPlay on the server too.
     DefineUProperty(UAthenaPlayerMatchReport*, MatchReport)
     // The end-of-match screen's stats (FAthenaMatchStats) and its rewards, which end its "Team Still Alive" wait.
@@ -116,9 +119,11 @@ public:
     void PlaceAtDeathLocation(AFortPawn* DeadPawn);
 
     static void HookCallSites();
-    // Restores the pawn-death handler (OnPawnDied) where the build strips it (1.9.1).
+    // Restores the pawn-death handler (OnPawnDied) and the Athena part of PrepareDeathReport where the build strips them
+    // (1.9.1).
     static void HookVTables();
     static ptrdiff_t TeamMembersOffset() { return Member_TeamMembers.GetOffsetChecked(); }
+    static ptrdiff_t PlayerDeathReportOffset() { return Member_PlayerDeathReport.GetOffsetChecked(); }
 
 private:
     static void PawnDiedInventoryDropCall(AFortPlayerController* Controller, void* Unused, const FGameplayTagContainer* DamageTags, AFortPawn* DeadPawn, bool* bOutDroppedBackpack);
@@ -127,4 +132,8 @@ private:
     void OnPawnDied(float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer);
     bool IsTeamOut();
     static void OnPawnDiedHK(AFortPlayerControllerAthena* This, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer);
+    // FortPlayerControllerAthenaDeath.cpp: the override of AFortPlayerControllerZone::PrepareDeathReport, whose Athena
+    // game mode part 1.9.1 and 1.10 strip.
+    void PrepareDeathReport(float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack);
+    static void PrepareDeathReportHK(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack);
 };

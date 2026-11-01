@@ -6,8 +6,10 @@ class AController;
 class AFortSafeZoneIndicator;
 class AActor;
 class ABuildingSMActor;
+class AFortPlayerControllerAthena;
 class APawn;
 class UObject;
+struct FFortPlayerDeathReport;
 
 // Battle Royale's game mode (from 1.7.2; Athena_GameMode_C on Athena_Terrain). Its flow (warmup, aircraft, safe zones,
 // end game) is native; what the shipping exe stripped from it is restored here (Core-Docs Athena-Gameplay-1.7.2.md).
@@ -49,6 +51,10 @@ public:
     bool AddPlaylistContextTag(FGameplayTagContainer& Tags);
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
+
+    // Battle Royale's changes to a dead player's death report, after AFortPlayerControllerZone::PrepareDeathReport
+    // filled it (AFortPlayerControllerAthena's override calls it; 1.9.1 and 1.10 strip it).
+    void ModifyDeathReport(AFortPlayerControllerAthena* Player, FFortPlayerDeathReport& DeathReport);
 
     // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,
     // for Battle Royale's stats (Core-Backend #59), as long as the game mode is there.

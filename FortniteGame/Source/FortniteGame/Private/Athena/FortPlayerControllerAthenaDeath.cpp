@@ -105,6 +105,32 @@ namespace
 void AFortPlayerControllerAthena::HookVTables()
 {
 #if WITH_SERVER_CODE
+    // Only the slots that hold the stripped function: the class's own vtable and its Blueprint subclasses', which share it.
+    const auto SwapStripped = [](const wchar_t* Name, int32_t Index, void* Replacement)
+    {
+        UObject* AthenaDefault = StaticClass()->GetDefaultObject(false);
+        void* const Stripped = AthenaDefault ? (*reinterpret_cast<void***>(AthenaDefault))[Index] : nullptr;
+        for (TObjectIterator<UClass> It; It && Stripped; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[Index] == Stripped)
+            {
+                Hooks::SwapVTable(Name, VTable, Index, Replacement);
+            }
+        }
+    };
+
+    if (Member_PlayerDeathReport.IsAvailable() && FFortPlayerDeathReport::StaticStruct())
+    {
+        const int32_t ReportIndex = Finder::StrippedAthenaPrepareDeathReportIndex(PlayerDeathReportOffset() + FFortPlayerDeathReport::KillerPlayerStateOffset());
+        if (ReportIndex >= 0)
+        {
+            SwapStripped(L"AFortPlayerControllerAthena::PrepareDeathReport", ReportIndex, reinterpret_cast<void*>(&PrepareDeathReportHK));
+        }
+    }
+
     const int32_t Index = Finder::StrippedAthenaPawnDiedIndex();
     if (Index < 0)
     {
@@ -116,19 +142,23 @@ void AFortPlayerControllerAthena::HookVTables()
         Log::Error(L"Battle Royale: this build strips the pawn-death handler and its pieces were not found, so nobody who dies is out of the match");
         return;
     }
+    SwapStripped(L"AFortPlayerControllerAthena::OnPawnDied", Index, reinterpret_cast<void*>(&OnPawnDiedHK));
+#endif
+}
 
-    // Only the slots that hold the stripped handler: the class's own vtable and its Blueprint subclasses', which share it.
-    UObject* AthenaDefault = StaticClass()->GetDefaultObject(false);
-    void* const Stripped = AthenaDefault ? (*reinterpret_cast<void***>(AthenaDefault))[Index] : nullptr;
-    for (TObjectIterator<UClass> It; It && Stripped; ++It)
+void AFortPlayerControllerAthena::PrepareDeathReportHK(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack)
+{
+    This->PrepareDeathReport(LethalDamage, DamageTags, Momentum, KillerController, DamageCauser, bDroppedBackpack);
+}
+
+void AFortPlayerControllerAthena::PrepareDeathReport(float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack)
+{
+    // 1.10 0x449F80: AFortPlayerControllerZone's report, then the Athena game mode's changes to it (stripped).
+    Natives::AFortPlayerControllerZone_PrepareDeathReport(this, LethalDamage, DamageTags, Momentum, KillerController, DamageCauser, bDroppedBackpack);
+#if WITH_SERVER_CODE
+    if (AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this))
     {
-        UClass* Class = *It;
-        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
-        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-        if (VTable && VTable[Index] == Stripped)
-        {
-            Hooks::SwapVTable(L"AFortPlayerControllerAthena::OnPawnDied", VTable, Index, reinterpret_cast<void*>(&OnPawnDiedHK));
-        }
+        GameMode->ModifyDeathReport(this, PlayerDeathReport);
     }
 #endif
 }

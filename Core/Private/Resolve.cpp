@@ -9372,6 +9372,78 @@ int32_t Finder::StrippedAthenaPawnDiedIndex()
     return StrippedIndex;
 }
 
+int32_t Finder::StrippedAthenaPrepareDeathReportIndex(ptrdiff_t KillerPlayerStateOffset)
+{
+    static bool bSearched = false;
+    static int32_t StrippedIndex = -1;
+    if (bSearched)
+    {
+        return StrippedIndex;
+    }
+    bSearched = true;
+
+    // AFortPlayerControllerZone's pawn-death handler (the "Deaths" reader, 1.10 0x8D6850) fills the death report with a
+    // virtual call, PrepareDeathReport (1.10 slot 0x30C, 0x8DB450: "mov [rdi + PlayerDeathReport.KillerPlayerState],
+    // rbx", the instigator's player state), before ClientOnPawnDied sends it. AFortPlayerControllerAthena overrides it:
+    // Zone's, then the Athena game mode's part, of which 1.9.1 (0x431090) and 1.10 (0x449F80) keep only the cast's
+    // "jmp AFortGameModeAthena::StaticClass" when the world has a game mode.
+    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerZone");
+    void** AthenaVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerAthena");
+    uintptr_t PawnDied = 0;
+    for (const uintptr_t Ref : ZoneVTable && AthenaVTable ? Finder::StringRefs(L"Deaths") : std::vector<uintptr_t>())
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        if (FirstVTableIndex(ZoneVTable, Function) >= 0)
+        {
+            PawnDied = Function;
+            break;
+        }
+    }
+    const uintptr_t PawnDiedEnd = PawnDied ? Finder::FunctionEnd(PawnDied) : 0;
+
+    uintptr_t Zone = 0;
+    uintptr_t Athena = 0;
+    for (uintptr_t Site = PawnDiedEnd > PawnDied ? FindVirtualCall(PawnDied, PawnDiedEnd) : 0; Site && StrippedIndex < 0; Site = FindVirtualCall(Site + 1, PawnDiedEnd))
+    {
+        const int32_t Index = VirtualSlot(Site);
+        Zone = VTableEntry(ZoneVTable, Index);
+        Athena = VTableEntry(AthenaVTable, Index);
+        if (!Zone || !Athena || Zone == Athena)
+        {
+            continue;
+        }
+        const uintptr_t ZoneEnd = Finder::FunctionStart(Zone) == Zone ? Finder::FunctionEnd(Zone) : 0;
+        bool bWritesKiller = false;
+        for (uintptr_t Store = Zone; ZoneEnd && Store + 6 <= ZoneEnd && !bWritesKiller; ++Store)
+        {
+            bWritesKiller = IsDisp32Access(Store, 0x89, -1, KillerPlayerStateOffset);
+        }
+        if (!bWritesKiller)
+        {
+            continue;
+        }
+
+        // Stripped: a short body whose one call is Zone's report, and which ends in the jump.
+        const uintptr_t AthenaEnd = Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
+        const uintptr_t Call = AthenaEnd > Athena && AthenaEnd - Athena <= 0x80 ? FindRawCall(Athena, AthenaEnd) : 0;
+        const bool bCallsZoneOnly = Call && Finder::RelativeTarget(Call, 1, 5) == Zone && !FindRawCall(Call + 5, AthenaEnd);
+        const bool bJumps = bCallsZoneOnly && FindInstruction(Call + 5, AthenaEnd, { 0xE9 });
+        Log::Info(L"Finder: AFortPlayerControllerAthena::PrepareDeathReport is slot 0x{:X}, 0x{:X} (AFortPlayerControllerZone's 0x{:X}){}", Index, Athena - Finder::ImageBase(),
+            Zone - Finder::ImageBase(), bJumps ? L": its Athena game mode part is stripped" : L"");
+        if (!bJumps)
+        {
+            return -1;
+        }
+        StrippedIndex = Index;
+    }
+    if (StrippedIndex < 0)
+    {
+        return -1;
+    }
+    Natives::AFortPlayerControllerZone_PrepareDeathReport = reinterpret_cast<decltype(Natives::AFortPlayerControllerZone_PrepareDeathReport)>(Zone);
+    return StrippedIndex;
+}
+
 bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsAliveOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t DeathInfoDBNOOffset, ptrdiff_t TeamMembersOffset)
 {
     static bool bSearched = false;

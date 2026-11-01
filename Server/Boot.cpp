@@ -23,6 +23,7 @@
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
 #include "FortGameModeZone.h"
+#include "Athena/FortAthenaSupplyDrop.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
@@ -285,6 +286,7 @@ static void InstallHooks()
             AFortPlayerControllerAthena::HookCallSites();
             AFortPlayerControllerAthena::HookVTables();
             AFortPlayerPawnAthena::HookNatives();
+            AFortAthenaSupplyDrop::HookNatives();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
             AFortGameModeAthena::HookBuildingVTables();

@@ -18,6 +18,6 @@ class ALobbyBeaconPlayerState : public AActor
     DefineUnrealClass(ALobbyBeaconPlayerState, Lobby)
 
 public:
-    DefineUProperty(FUniqueNetIdRepl, UniqueId)
-    DefineUProperty(FUniqueNetIdRepl, PartyOwnerUniqueId)
+    DefineUStructProperty(FUniqueNetIdRepl, UniqueId)
+    DefineUStructProperty(FUniqueNetIdRepl, PartyOwnerUniqueId)
 };

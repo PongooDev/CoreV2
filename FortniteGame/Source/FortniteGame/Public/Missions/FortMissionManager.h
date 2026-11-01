@@ -68,7 +68,7 @@ class EFortRewardType
 struct FEarnedBadgePlayerData
 {
     DefineUnrealStruct(FEarnedBadgePlayerData, FortniteGame)
-    DefineUProperty(FUniqueNetIdRepl, PlayerID)
+    DefineUStructProperty(FUniqueNetIdRepl, PlayerID)
     DefineUProperty(int32_t, Count)
 };
 

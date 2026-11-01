@@ -97,7 +97,7 @@ public:
     DefineUStructArrayProperty(FFortExperienceDelta, ExperienceDeltas)
     DefineUProperty(bool, bAreZoneStatsFinalized)
     DefineUProperty(AFortTeamInfo*, PlayerTeam)
-    DefineUProperty(FUniqueNetIdRepl, PartyOwnerUniqueId)
+    DefineUStructProperty(FUniqueNetIdRepl, PartyOwnerUniqueId)
     DefineBitfieldUProperty(bHasStartedPlaying)
     DefineUFunction(OnRep_CharacterParts)
     DefineUFunction(GetCurrentPawn)

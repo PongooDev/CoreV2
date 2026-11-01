@@ -161,7 +161,7 @@ class UFortRegisteredPlayerInfo : public UObject
     DefineUnrealClass(UFortRegisteredPlayerInfo, FortniteGame)
 
 public:
-    DefineUProperty(FUniqueNetIdRepl, PlayerID)
+    DefineUStructProperty(FUniqueNetIdRepl, PlayerID)
     DefineUProperty(UFortMcpProfileAccount*, AccountProfile)
     DefineUProperty(UFortMcpProfileWorld*, WorldProfile)
     DefineUProperty(UFortQuestManager*, QuestManager)

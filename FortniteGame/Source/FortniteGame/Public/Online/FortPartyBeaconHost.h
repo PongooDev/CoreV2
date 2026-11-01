@@ -14,7 +14,7 @@
 struct FPlayerReservation
 {
     DefineUnrealStruct(FPlayerReservation, OnlineSubsystemUtils)
-    DefineUProperty(FUniqueNetIdRepl, UniqueId)
+    DefineUStructProperty(FUniqueNetIdRepl, UniqueId)
 
     static bool IsReflected() { return Member_UniqueId.IsAvailable(); }
 };
@@ -25,7 +25,7 @@ struct FPartyReservation
 {
     DefineUnrealStruct(FPartyReservation, OnlineSubsystemUtils)
     DefineUProperty(int32_t, TeamNum)
-    DefineUProperty(FUniqueNetIdRepl, PartyLeader)
+    DefineUStructProperty(FUniqueNetIdRepl, PartyLeader)
     DefineUStructArrayProperty(FPlayerReservation, PartyMembers)
 
     static bool IsReflected() { return Member_TeamNum.IsAvailable() && Member_PartyLeader.IsAvailable() && Member_PartyMembers.IsAvailable() && FPlayerReservation::IsReflected(); }

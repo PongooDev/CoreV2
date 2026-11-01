@@ -46,7 +46,7 @@ public:
     DefineBitfieldUProperty(InternalAck)
     DefineUProperty(double, LastReceiveTime)
     // The player's id, from their login (NMT_Login), before they have a player controller.
-    DefineUProperty(FUniqueNetIdRepl, PlayerID)
+    DefineUStructProperty(FUniqueNetIdRepl, PlayerID)
     static bool HasPlayerID() { return Member_PlayerID.IsAvailable(); }
     DefineNativeMember(EConnectionState, State, UNetConnection_State)
     DefineNativeMember(int32_t, QueuedBits, UNetConnection_QueuedBits)

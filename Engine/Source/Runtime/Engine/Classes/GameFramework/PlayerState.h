@@ -10,7 +10,7 @@ class APlayerState : public AInfo
 
 public:
     DefineUProperty(FString, PlayerName)
-    DefineUProperty(FUniqueNetIdRepl, UniqueId)
+    DefineUStructProperty(FUniqueNetIdRepl, UniqueId)
     DefineUFunction(GetPlayerName)
 
     // The player's name. From 1.9 (CL-3757339) the game keeps it in PlayerNamePrivate (+0x418), obfuscated (SetPlayerName

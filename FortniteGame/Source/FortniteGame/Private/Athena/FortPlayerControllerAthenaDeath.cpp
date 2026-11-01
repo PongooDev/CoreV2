@@ -215,7 +215,7 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
             DeathInfo.bDBNO = false;
             if (AFortPlayerStateAthena* KillerState = AthenaStateOf(Instigator))
             {
-                KillerState->ClientReportKill(AthenaState->GetPlayerName());
+                KillerState->ClientReportKill(AthenaState);
             }
         }
         else

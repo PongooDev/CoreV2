@@ -210,6 +210,12 @@ public:
     // Core's own command, "cheat toggleinfinitedurability [on | off]" (#155): the game's flag, whose own cheat answers
     // only the server's console.
     void InfiniteDurability(const FString& Arguments);
+    // Core's own command, "cheat killscore <kills>" ("setkillscore" too; Core-Backend #145): the player's kill count,
+    // in the player state the game keeps it in (KillScore and TeamKillScore, or 1.7.2's Kills), replicated at once, so
+    // the HUD, the end-of-match screen and the match results have it; their later kills add to it.
+    void KillScore(const FString& Arguments);
+    // The kills the player's killscore added to the ones they made (negative: took away), for Core's count of them.
+    static int32_t KillScoreOffset(const class AFortPlayerStateAthena* PlayerState);
     // Core's own command, "cheat speed <multiplier | reset>" (#155): the pawn walks, runs and sprints that many times as
     // fast. Save the World's pawn moves at its movement set's speeds, which the server scales and replicates to its
     // client. Battle Royale's moves at its stats row's, which each machine reads on its own: the server applies the

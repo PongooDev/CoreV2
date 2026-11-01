@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Player/FortPlayerState.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
 #include "Heroes/FortHero.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
@@ -10,6 +12,7 @@
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "ReflectionParams.h"
+#include "Templates/Casts.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
@@ -197,12 +200,68 @@ AFortPlayerPawn* AFortPlayerState::GetCurrentPawn()
     return Function && Params.Call(this) ? Params.Take<AFortPlayerPawn*>(L"ReturnValue") : nullptr;
 }
 
-void AFortPlayerStateAthena::ClientReportKill(const FString& KilledPlayersName)
+void AFortPlayerStateAthena::ClientReportKill(AFortPlayerStateAthena* KilledPlayer)
 {
     UFunction* Function = FindStaticFunction_ClientReportKill();
     Reflection::FParams Params(Function);
-    if (Function && Params.Set(L"KilledPlayersName", KilledPlayersName))
+    if (!Function || !KilledPlayer)
+    {
+        return;
+    }
+    // 1.10 and 1.11 take the player state; 1.9.1 and earlier the name. Setting the wrong one sent nothing.
+    const bool bSet = Params.Has(L"Player") ? Params.Set(L"Player", KilledPlayer) : Params.Set(L"KilledPlayersName", KilledPlayer->GetPlayerName());
+    if (bSet)
     {
         Params.Call(this);
+    }
+}
+
+void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
+{
+    if (!Member_KillScore.IsAvailable())
+    {
+        return;
+    }
+    if (KillScore != NewKillScore)
+    {
+        KillScore = NewKillScore;
+        ForceNetUpdate();
+    }
+    if (!Member_TeamKillScore.IsAvailable())
+    {
+        return;
+    }
+
+    // The team's kills, for each of its players (21.40's SetKillScore does the same for the team's player states).
+    UWorld* World = GetWorld();
+    AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
+    if (!GameState)
+    {
+        TeamKillScore = KillScore;
+        return;
+    }
+    const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
+    const uint8_t Team = TeamIndex;
+    const auto IsTeammate = [Team](AFortPlayerStateAthena* Member)
+    {
+        const uint8_t MemberTeam = Member->TeamIndex;
+        return MemberTeam == Team;
+    };
+    int32_t TeamKills = 0;
+    for (APlayerState* PlayerState : PlayerArray)
+    {
+        AFortPlayerStateAthena* Member = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+        if (Member && IsTeammate(Member))
+        {
+            TeamKills += Member->KillScore;
+        }
+    }
+    for (APlayerState* PlayerState : PlayerArray)
+    {
+        AFortPlayerStateAthena* Member = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+        if (Member && IsTeammate(Member))
+        {
+            Member->TeamKillScore = TeamKills;
+        }
     }
 }

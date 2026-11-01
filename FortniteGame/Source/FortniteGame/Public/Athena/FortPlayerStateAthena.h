@@ -52,6 +52,9 @@ public:
     // 0x4216C0), so Core counts 1.8's kills itself (CountsKills; AFortGameModeAthena's results).
     DefineUProperty(int32_t, Kills)
     DefineUProperty(int32_t, KillScore)
+    // The kills of the player's whole team (not replicated): 21.40's AFortPlayerStateAthena::SetKillScore keeps it for
+    // each of the team's players.
+    DefineUProperty(int32_t, TeamKillScore)
     DefineUStructProperty(FDeathInfo, DeathInfo)
     // 1.10: the other teams' players the player knocked down (the DBNO handling adds to it), and those they hit (the
     // hit's stat, 0x43D8E0, adds each to the set), for the end-of-match screen's Downs and Assists.
@@ -71,8 +74,10 @@ public:
     DefineUStructProperty(FPlayerBannerInfo, Banner)
     DefineUFunction(ClientReportKill)
 
-    // The kill feed line on the eliminator's client ("You eliminated <name>").
-    void ClientReportKill(const FString& KilledPlayersName);
+    // The kill feed line on the eliminator's client ("You eliminated <name>"): the killed player's name up to 1.9.1
+    // (KilledPlayersName), their player state from 1.10 (Player; 1.11's client also counts the kill for the replay
+    // highlights and broadcasts it to the HUD, 0x460180).
+    void ClientReportKill(AFortPlayerStateAthena* KilledPlayer);
 
     static ptrdiff_t PlaceOffset() { return Member_Place.GetOffsetChecked(); }
     static ptrdiff_t SecondsAliveOffset() { return Member_SecondsAlive.GetOffsetChecked(); }
@@ -94,6 +99,9 @@ public:
         return Member_Kills.IsAvailable();
     }
 
+    static bool HasKillScore() { return Member_KillScore.IsAvailable(); }
+    static bool HasTeamKillScore() { return Member_TeamKillScore.IsAvailable(); }
+
     static bool HasEliminator()
     {
         return Member_DeathInfo.IsAvailable() && FDeathInfo::IsReadable();
@@ -110,11 +118,8 @@ public:
         return Info.bDBNO ? nullptr : Info.FinisherOrDowner;
     }
 
-    void SetKills(int32_t Count)
-    {
-        if (Member_KillScore.IsAvailable() && KillScore != Count)
-        {
-            KillScore = Count;
-        }
-    }
+    // 21.40's SetKillScore: the player's KillScore, and TeamKillScore for every player of their team (the sum of the
+    // team's KillScore). Replicated at once (ForceNetUpdate), so the HUD's kill count (OnRep_Kills) follows. Builds with
+    // Kills (1.7.2) count their own: nothing is set there.
+    void SetKillScore(int32_t NewKillScore);
 };

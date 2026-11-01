@@ -28,6 +28,7 @@
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "Online/FortGameSession.h"
 #include "Online/FortPartyBeaconHost.h"
+#include "Player/FortCheatManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectGlobals.h"
@@ -276,7 +277,8 @@ namespace
                 {
                     return Other.second.EliminatedBy == AccountId && Other.second.Team != Player.Team;
                 }));
-                AthenaState->SetKills(Kills);
+                // With the kills the player's "cheat killscore" added (Core-Backend #145).
+                AthenaState->SetKillScore(std::max(Kills + UFortCheatManager::KillScoreOffset(AthenaState), 0));
             }
             Player.Kills = AthenaState->GetKills();
         }

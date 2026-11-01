@@ -2072,7 +2072,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // answer nothing (#155): "sethealthpercent", which says what it set and takes a percent too, and
     // "toggleinfinitedurability", whose answer only reached the server's console, and "unlimitedhealth" (or
     // "toggleunlimitedhealth"), which the game's flips without a word, and "buildwith", whose material and level never
-    // reached the pieces (its client runs it too) and which answered nothing.
+    // reached the pieces (its client runs it too) and which answered nothing. "killscore <kills>" (or "setkillscore";
+    // Core-Backend #145) sets their kill count, for trying what reads it.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
@@ -2100,6 +2101,8 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
         { L"dance", &UFortCheatManager::Dance },
         { L"maxhealth", &UFortCheatManager::MaxHealth },
         { L"setmaxhealth", &UFortCheatManager::MaxHealth },
+        { L"killscore", &UFortCheatManager::KillScore },
+        { L"setkillscore", &UFortCheatManager::KillScore },
         { L"sethealthpercent", &UFortCheatManager::HealthPercent },
         { L"toggleinfinitedurability", &UFortCheatManager::InfiniteDurability },
         { L"speed", &UFortCheatManager::Speed },

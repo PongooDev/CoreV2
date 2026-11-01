@@ -6,6 +6,7 @@
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIEncounterInfo.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Building/BuildingSMActor.h"
 #include "Building/BuildingTrap.h"
@@ -681,6 +682,7 @@ namespace
         { L"Player", nullptr, L"setshield <value>", L"your shield", ECheatMode::Both },
         { L"Player", nullptr, L"setmaxshield <value | reset>", L"maximum shield", ECheatMode::Both },
         { L"Player", nullptr, L"setscale <x> [y z] | reset", L"your size, for everyone", ECheatMode::Both },
+        { L"Player", nullptr, L"killscore <kills>", L"your kill count (kill-based cosmetics)", ECheatMode::BattleRoyale },
         { L"Player", L"ChangeSize", L"changesize <scale>", L"your size", ECheatMode::Both },
         { L"Player", L"BuildFree", L"buildfree", L"free building, toggles (craftfree)", ECheatMode::Both },
         { L"Player", nullptr, L"infinitedurability [on | off]", L"items don't wear out", ECheatMode::Both },
@@ -3767,6 +3769,80 @@ void UFortCheatManager::InfiniteDurability(const FString& Arguments)
     PlayerController->bInfiniteDurability = bEnable;
     PlayerController->ForceNetUpdate();
     Reply(bEnable ? TEXT("Infinite durability ON: your items don't wear out") : TEXT("Infinite durability OFF: your items wear out again"));
+#endif
+}
+
+namespace
+{
+    // The kills "cheat killscore" added to (or took from) the ones the player made, kept so Core's count of the
+    // eliminations (AFortGameModeAthena's results, once a second) doesn't put KillScore back.
+    struct FKillScoreOffset
+    {
+        TWeakObjectPtr<AFortPlayerStateAthena> PlayerState;
+        int32_t Offset = 0;
+    };
+    std::vector<FKillScoreOffset> KillScoreOffsets;
+}
+
+int32_t UFortCheatManager::KillScoreOffset(const AFortPlayerStateAthena* PlayerState)
+{
+    std::erase_if(KillScoreOffsets, [](const FKillScoreOffset& Entry) { return !Entry.PlayerState.Get(); });
+    const auto Found = std::find_if(KillScoreOffsets.begin(), KillScoreOffsets.end(), [PlayerState](const FKillScoreOffset& Entry) { return Entry.PlayerState.Get() == PlayerState; });
+    return Found != KillScoreOffsets.end() ? Found->Offset : 0;
+}
+
+void UFortCheatManager::KillScore(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    // Core-Backend #145: the player's kills, set the way the game keeps them, so what reads them can be tried without
+    // eliminating anyone. 1.8 and later keep them in AFortPlayerStateAthena's KillScore (replicated, OnRep_Kills: the
+    // HUD's count), with TeamKillScore for the team (SetKillScore); 1.7.2 in Kills, which its death handler adds to.
+    // The end-of-match screen and the backend's results read them (GetKills), and the player's later kills add on.
+    constexpr int32_t MaxKills = 10000;
+    AFortPlayerController* PlayerController = GetPlayerController();
+    AFortPlayerStateAthena* PlayerState = PlayerController ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
+    if (!PlayerState)
+    {
+        Reply(TEXT("killscore is Battle Royale's: you have no Battle Royale player state"));
+        return;
+    }
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    wchar_t* End = nullptr;
+    const long Value = Words.size() == 1 ? std::wcstol(Words[0].c_str(), &End, 10) : -1;
+    if (Words.size() != 1 || !End || End == Words[0].c_str() || *End != L'\0' || Value < 0 || Value > MaxKills)
+    {
+        Reply(FString::Printf(TEXT("You have %d kills. Usage: killscore <0-%d> (\"killscore 10\")"), PlayerState->GetKills(), MaxKills));
+        return;
+    }
+    const int32_t Kills = static_cast<int32_t>(Value);
+    if (AFortPlayerStateAthena::CountsKills())
+    {
+        PlayerState->Kills = Kills;
+        PlayerState->ForceNetUpdate();
+        Reply(FString::Printf(TEXT("Kills set to %d"), PlayerState->GetKills()));
+        return;
+    }
+    if (!AFortPlayerStateAthena::HasKillScore())
+    {
+        Reply(TEXT("This build's player state has no KillScore"));
+        return;
+    }
+
+    const int32_t Change = Kills - PlayerState->GetKills();
+    auto Found = std::find_if(KillScoreOffsets.begin(), KillScoreOffsets.end(), [PlayerState](const FKillScoreOffset& Entry) { return Entry.PlayerState.Get() == PlayerState; });
+    if (Found == KillScoreOffsets.end())
+    {
+        KillScoreOffsets.push_back({ TWeakObjectPtr<AFortPlayerStateAthena>(PlayerState), Change });
+    }
+    else
+    {
+        Found->Offset += Change;
+    }
+    PlayerState->SetKillScore(Kills);
+    UE_LOG(LogFortCheats, Log, TEXT("KillScore: %s has %d kills (%d from cheats)"), *PlayerState->GetPlayerName(), PlayerState->GetKills(), KillScoreOffset(PlayerState));
+    Reply(AFortPlayerStateAthena::HasTeamKillScore()
+        ? FString::Printf(TEXT("Kills set to %d (your team's: %d)"), PlayerState->GetKills(), static_cast<int32_t>(PlayerState->TeamKillScore))
+        : FString::Printf(TEXT("Kills set to %d"), PlayerState->GetKills()));
 #endif
 }
 

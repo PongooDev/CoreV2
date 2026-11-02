@@ -7012,7 +7012,8 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
     // The native an exec thunk ends in, by a call or a tail jump, through a jump thunk (1.8.1's
     // AFortPlayerPawn::execReviveFromDBNO calls 0x809950, "jmp 0xA514A0"). A thunk that only forwards is a leaf without
     // unwind data, so it has no known end: 1.8.1's AFortAIPawn::execReviveFromDBNO (0xB36A40) steps the frame's code and
-    // ends 0x15 bytes in with "jmp 0x7D0B70", the padding right after it.
+    // ends 0x15 bytes in with "jmp 0x7D0B70", the padding right after it. 2.1's (0xA0A1D0) has a nop after its
+    // "jmp 0x81AE30" instead of padding, so a tail jump to the start of a function with unwind data counts too.
     const auto ExecNative = [](const wchar_t* FunctionPath)
     {
         UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
@@ -7028,7 +7029,7 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
         }
         for (uintptr_t Site = Exec; !ExecEnd && IsInText(Exec) && Site < Exec + 0x40 && !Native; ++Site)
         {
-            if (Byte(Site) == 0xE9 && Byte(Site + 5) == 0xCC && IsInText(Finder::RelativeTarget(Site, 1, 5)))
+            if (Byte(Site) == 0xE9 && IsInText(Finder::RelativeTarget(Site, 1, 5)) && (Byte(Site + 5) == 0xCC || Finder::FunctionEnd(Finder::RelativeTarget(Site, 1, 5))))
             {
                 Native = Finder::RelativeTarget(Site, 1, 5);
             }

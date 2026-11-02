@@ -376,6 +376,35 @@ std::vector<uintptr_t> Finder::StringRefs(const char* Text)
     return FindStringReferences(Text);
 }
 
+std::vector<uintptr_t> Finder::AddressRefs(uintptr_t Target)
+{
+    std::vector<uintptr_t> Result;
+    if (!Target)
+    {
+        return Result;
+    }
+
+    for (const auto& [Begin, End] : ExecutableSections())
+    {
+        const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Begin);
+        const size_t Size = End - Begin;
+        for (size_t Index = 0; Index + 7 <= Size; ++Index)
+        {
+            if ((Bytes[Index] != 0x48 && Bytes[Index] != 0x4C) || Bytes[Index + 1] != 0x8D || (Bytes[Index + 2] & 0xC7) != 0x05)
+            {
+                continue;
+            }
+
+            const uintptr_t Site = reinterpret_cast<uintptr_t>(Bytes + Index);
+            if (Site + 7 + *reinterpret_cast<const int32_t*>(Bytes + Index + 3) == Target)
+            {
+                Result.push_back(Site);
+            }
+        }
+    }
+    return Result;
+}
+
 uintptr_t Finder::FindReadOnly(const void* Bytes, size_t Size)
 {
     Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");

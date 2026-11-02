@@ -6,6 +6,7 @@
 #include "HttpRedirect.h"
 #include "Log.h"
 #include "Packed.h"
+#include "UnsafeEnvironment.h"
 #include "XmppClient.h"
 
 static void Start();
@@ -51,6 +52,7 @@ static void Start()
     // present at that moment hang the game, so the detours go in once the engine is up.
     Packed::WaitForCodeCheck();
     Hooks::EnableAll();
+    UnsafeEnvironment::Null();
 
     Log::Info(L"Core Redirect startup complete");
 }

@@ -84,6 +84,9 @@ namespace Finder
 
     std::vector<uintptr_t> StringRefs(const wchar_t* Text);
     std::vector<uintptr_t> StringRefs(const char* Text);
+    // Every lea r64, [rip+X] in executable code whose X is Target: the sites that take a function's address, which the
+    // ones bound into a delegate have instead of a call.
+    std::vector<uintptr_t> AddressRefs(uintptr_t Target);
     // The first copy of the bytes in .rdata, or 0.
     uintptr_t FindReadOnly(const void* Bytes, size_t Size);
 

@@ -73,6 +73,9 @@ public:
     // Client: the player's team. The HUD's team list takes their talking states in this order (GetTeamTalking, 1.7.2
     // 0x430440, and the controller's tick, 0x417630, which tells the HUD when they change).
     DefineUProperty(TArray<AFortPlayerStateAthena*>, TeamMembers)
+    // 1.11: the player's squad, which the HUD's team list follows instead (GetSquadTalking, 0x43BC20, and the
+    // controller's tick read their talking states from it; TeamMembers stays for the game mode's teams).
+    DefineUProperty(TArray<AFortPlayerStateAthena*>, SquadMembers)
     // Server: the player is in the game mode's AlivePlayers (AddToAlivePlayers sets it, RemoveFromAlivePlayers clears it).
     DefineUProperty(bool, bMarkedAlive)
     // Server: who SpectateOnDeath watches first after a death, the eliminator's pawn.
@@ -89,6 +92,7 @@ public:
     DefineUFunction(ClientSendEndBattleRoyaleMatchForPlayer)
 
     static bool HasMatchReport() { return Member_MatchReport.IsAvailable(); }
+    static bool HasSquadMembers() { return Member_SquadMembers.IsAvailable(); }
     UAthenaPlayerMatchReport* GetMatchReport();
     void ClientSendMatchStatsForPlayer(const FAthenaMatchStats& Stats);
     void ClientSendTeamStatsForPlayer(const FAthenaMatchTeamStats& TeamStats);

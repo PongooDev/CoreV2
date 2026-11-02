@@ -129,7 +129,9 @@ void AFortPlayerController::UpdateTeamTalking()
     // The team list's speaker icons (AthenaTeamMemberInfo's TalkingBrush) follow the team's player states' bIsTalking:
     // the controller's tick (1.7.2 0x417630) gathers it for TeamMembers and, when it changes, the HUD context
     // (0x2D55BD0) broadcasts OnTeamMemberTalkingChanged to AthenaTeamInfo's HandleTeamTalkingChanged. Only Vivox's
-    // participant updates set it, so with the engine's voice chat every icon stayed idle (Core-Backend #54).
+    // participant updates set it, so with the engine's voice chat every icon stayed idle (Core-Backend #54). 1.11's
+    // team list follows SquadMembers instead (the tick's gather, 0x42C968, and GetSquadTalking, 0x43BC20, read
+    // bIsTalking from it; HandleSquadTalkingChanged), so there the squad's states are set (#182).
     UClass* const AthenaClass = AFortPlayerControllerAthena::StaticClass();
     UGameEngine* const Engine = AthenaClass && Natives::GEngine ? Cast<UGameEngine>(static_cast<UEngine*>(GEngine)) : nullptr;
     UGameInstance* const GameInstance = Engine ? static_cast<UGameInstance*>(Engine->GameInstance) : nullptr;
@@ -143,7 +145,7 @@ void AFortPlayerController::UpdateTeamTalking()
 
     static std::unordered_set<const AFortPlayerStateAthena*> Shown;
     const APlayerState* const LocalState = Controller->PlayerState;
-    const TArray<AFortPlayerStateAthena*>& TeamMembers = Controller->TeamMembers;
+    const TArray<AFortPlayerStateAthena*>& TeamMembers = AFortPlayerControllerAthena::HasSquadMembers() ? Controller->GetMember_SquadMembers() : Controller->GetMember_TeamMembers();
     for (int32_t Index = 0; Index < TeamMembers.Num(); ++Index)
     {
         AFortPlayerStateAthena* const Member = TeamMembers[Index];

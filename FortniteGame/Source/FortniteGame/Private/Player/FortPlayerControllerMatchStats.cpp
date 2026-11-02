@@ -4,6 +4,7 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "AthenaPlayerMatchReport.h"
+#include "BackendRequest.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "GameFramework/PlayerState.h"
@@ -13,6 +14,9 @@
 #include "Templates/Casts.h"
 
 #include <algorithm>
+#include <cstdlib>
+#include <string>
+#include <vector>
 
 // The Battle Royale end-of-match screen (AthenaMatchStatsPartial, "Your Results") shows the controller's match report
 // (UAthenaPlayerMatchReport): its stats come with ClientSendMatchStatsForPlayer and its rewards, which end the "Team
@@ -46,6 +50,27 @@ namespace
             }
         }
         return Assists;
+    }
+
+    // The objects of Json's array Name, each as its own text: the backend's are flat ({"source":1,"amount":10}).
+    std::vector<std::string> JsonObjects(const std::string& Json, const std::string& Name)
+    {
+        std::vector<std::string> Objects;
+        const size_t Key = Json.find("\"" + Name + "\"");
+        size_t At = Key == std::string::npos ? std::string::npos : Json.find('[', Key);
+        const size_t End = At == std::string::npos ? std::string::npos : Json.find(']', At);
+        while (At != std::string::npos && End != std::string::npos)
+        {
+            const size_t Open = Json.find('{', At);
+            const size_t Close = Open == std::string::npos ? std::string::npos : Json.find('}', Open);
+            if (Open == std::string::npos || Close == std::string::npos || Close > End)
+            {
+                break;
+            }
+            Objects.push_back(Json.substr(Open, Close - Open + 1));
+            At = Close + 1;
+        }
+        return Objects;
     }
 }
 
@@ -127,8 +152,7 @@ void AFortPlayerController::SendMatchStatsForPlayer()
         Report->bHasTeamStats = true;
         AthenaController->ClientSendTeamStatsForPlayer(TeamStats);
     }
-    // The rewards came from MCP's answer to EndBattleRoyaleGame, which nothing sends any more: none, but bSuccess.
-    AthenaController->ClientSendEndBattleRoyaleMatchForPlayer(true, nullptr);
+    // The rewards follow with the backend's answer to the match's results (SendEndBattleRoyaleMatchForPlayer).
 
     const auto Value = [&Stats](Reflection::FMemberInfo& Member) { return Member.IsAvailable() ? Reflection::AccessMember<int32_t>(&Stats, Member) : 0; };
     UE_LOG(LogFortMatchStats, Log, TEXT("SendMatchStatsForPlayer: %s placed %d of %d, %d s alive, %d kills, %d downs, %d assists, %d revives, damage %d to players, %d to friends, %d to structures, %d taken, %d shots, %d hits, %d misses, %d critical, %d cm on the ground, materials %d gathered and %d used"),
@@ -138,6 +162,65 @@ void AFortPlayerController::SendMatchStatsForPlayer()
         Value(FAthenaMatchStats::StatRangedShots()), Value(FAthenaMatchStats::StatRangedHit()), Value(FAthenaMatchStats::StatRangedMiss()),
         std::max(Value(FAthenaMatchStats::StatCriticalShots()), Value(FAthenaMatchStats::StatCriticalHitsToHostiles())),
         Value(FAthenaMatchStats::StatTravelDistanceGround()), Value(FAthenaMatchStats::StatMaterialsGathered()), Value(FAthenaMatchStats::StatMaterialsUsed()));
+#endif
+}
+
+void AFortPlayerController::SendEndBattleRoyaleMatchForPlayer(const std::string& RewardResultJson)
+{
+#if WITH_SERVER_CODE
+    // The rewards came from MCP's answer to EndBattleRoyaleGame, the command Epic's server sent each player's athena
+    // profile with the match's minutes alive, kills and placement; Core's backend gives the match's XP when the server
+    // reports its results (battleroyale/recordresults) and answers what it gave each player, in FAthenaRewardResult's
+    // form. Without the rewards the screen read "Total XP 0" and its XP bar stood still (#192). A player the backend gave
+    // nothing (no answer, no athena profile) still gets bSuccess and no rewards, which end the screen's wait.
+    AFortPlayerControllerAthena* AthenaController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this));
+    if (!AthenaController || Role != ROLE_Authority || !AFortPlayerControllerAthena::FindStaticFunction_ClientSendEndBattleRoyaleMatchForPlayer())
+    {
+        return;
+    }
+    UScriptStruct* ResultStruct = FAthenaRewardResult::IsReflected() && !RewardResultJson.empty() ? FAthenaRewardResult::StaticStruct() : nullptr;
+    if (!ResultStruct)
+    {
+        AthenaController->ClientSendEndBattleRoyaleMatchForPlayer(true, nullptr);
+        return;
+    }
+
+    std::vector<uint8_t> ResultStorage(ResultStruct->GetStructureSize(), 0);
+    FAthenaRewardResult* Result = reinterpret_cast<FAthenaRewardResult*>(ResultStorage.data());
+    ResultStruct->InitializeStruct(Result);
+    const auto Int = [](const std::string& Json, const char* Name) { return std::atoi(BackendRequest::JsonField(Json, Name).c_str()); };
+    Result->SetReward(FAthenaRewardResult::RewardLevelsGained(), Int(RewardResultJson, "levelsGained"));
+    Result->SetReward(FAthenaRewardResult::RewardBookLevelsGained(), Int(RewardResultJson, "bookLevelsGained"));
+    Result->SetReward(FAthenaRewardResult::RewardTotalSeasonXpGained(), Int(RewardResultJson, "totalSeasonXpGained"));
+    Result->SetReward(FAthenaRewardResult::RewardTotalBookXpGained(), Int(RewardResultJson, "totalBookXpGained"));
+    if (FAthenaRewardResult::HasXpMultipliers())
+    {
+        for (const std::string& Group : JsonObjects(RewardResultJson, "xpMultipliers"))
+        {
+            FAthenaMatchXpMultiplierGroup& Multiplier = Result->GetMember_XpMultipliers().AddDefaulted();
+            Multiplier.Source = static_cast<uint8_t>(Int(Group, "source"));
+            Multiplier.Amount = Int(Group, "amount");
+        }
+    }
+    // 1.10's groups hold MCP loot only, which the backend doesn't answer: its XP isn't listed.
+    if (FAthenaRewardResult::HasRewards() && FAthenaAwardGroup::HasScore())
+    {
+        for (const std::string& Group : JsonObjects(RewardResultJson, "rewards"))
+        {
+            FAthenaAwardGroup& Award = Result->GetMember_Rewards().AddDefaulted();
+            Award.RewardSource = static_cast<uint8_t>(Int(Group, "rewardSource"));
+            Award.Score = Int(Group, "score");
+            Award.SeasonXp = static_cast<float>(Int(Group, "seasonXp"));
+            if (FAthenaAwardGroup::HasBookXp())
+            {
+                Award.BookXp = Int(Group, "bookXp");
+            }
+        }
+    }
+    AthenaController->ClientSendEndBattleRoyaleMatchForPlayer(true, Result);
+    UE_LOG(LogFortMatchStats, Log, TEXT("SendEndBattleRoyaleMatchForPlayer: %s gained %d season XP, %d levels, %d Battle Stars, %d tiers"), *GetName(),
+        Int(RewardResultJson, "totalSeasonXpGained"), Int(RewardResultJson, "levelsGained"), Int(RewardResultJson, "totalBookXpGained"), Int(RewardResultJson, "bookLevelsGained"));
+    ResultStruct->DestroyStruct(Result);
 #endif
 }
 

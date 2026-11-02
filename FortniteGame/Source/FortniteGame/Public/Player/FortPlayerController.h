@@ -172,6 +172,9 @@ public:
     // Match stats (FortPlayerControllerMatchStats.cpp): the player's end-of-match screen gets their stats once their
     // place is final (21.40's AFortPlayerController::SendMatchStatsForPlayer; 1.10's is stripped).
     void SendMatchStatsForPlayer();
+    // Then their rewards, which end the screen's wait: the match's XP as the backend gave it (battleroyale/recordresults'
+    // answer for the player, RewardResultJson), or none when it gave nothing.
+    void SendEndBattleRoyaleMatchForPlayer(const std::string& RewardResultJson);
     // The build's own AFortPlayerController::ServerModifyStat_Implementation (1.11 0x8AF900, 2.1 0x8B4C00): the
     // StatManager's UStatManager::ModifyStat(StatName, Amount, ModType), then a save of the stats if bForceStatSave.
     void ServerModifyStat_Implementation(FName StatName, int32_t Amount, uint8_t ModType, bool bForceStatSave);

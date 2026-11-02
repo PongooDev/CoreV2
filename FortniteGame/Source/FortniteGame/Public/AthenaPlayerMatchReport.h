@@ -1,5 +1,6 @@
 #pragma once
 
+#include "StructArray.h"
 #include "UObject/Object.h"
 
 // A Battle Royale player's stats for one match (from 1.10; FortniteGame/Public/AthenaPlayerMatchReport.h), which the
@@ -96,11 +97,66 @@ public:
     static bool IsReflected() { return StaticStruct() != nullptr; }
 };
 
-// The rewards of a match (FAthenaAwardGroups of MCP loot, the season XP among them), which MCP's EndBattleRoyaleGame
-// answered with; the end-of-match screen's "Team Still Alive" wait ends when they come.
+// A match XP boost (from 1.11): its EAthenaMatchXpMultiplierSource (1 the Battle Pass's "Battle Pass Bonus", 2 Friend,
+// 3 Gear) and its percent.
+struct FAthenaMatchXpMultiplierGroup
+{
+    DefineUnrealStruct(FAthenaMatchXpMultiplierGroup, FortniteGame)
+    DefineUProperty(uint8_t, Source)
+    DefineUProperty(int32_t, Amount)
+};
+
+// What one source gave the player (ERewardSource: 1 MinutesPlayed "Survival Time", 3 TeamKills "Kills", 4 Placement,
+// ...), with its MCP loot. From 1.11 also its Score, SeasonXp and BookXp; 1.10's has the source and loot only.
+struct FAthenaAwardGroup
+{
+    DefineUnrealStruct(FAthenaAwardGroup, FortniteGame)
+    DefineUProperty(uint8_t, RewardSource)
+    DefineUProperty(int32_t, Score)
+    DefineUProperty(float, SeasonXp)
+    DefineUProperty(int32_t, BookXp)
+
+public:
+    static bool HasScore() { return Member_Score.IsAvailable() && Member_SeasonXp.IsAvailable(); }
+    static bool HasBookXp() { return Member_BookXp.IsAvailable(); }
+};
+
+// The rewards of a match, which MCP's EndBattleRoyaleGame answered with (UFortMcpProfileAthena::EndBattleRoyaleGame);
+// the end-of-match screen's "Team Still Alive" wait ends when they come. 1.11's (2.1 sub_45E100 copies it into the
+// client's report, EndOfMatchResults): the levels and Battle Pass tiers gained, the season XP and Battle Stars, the XP
+// boosts and the award groups. The screen's XP bar (XpMatchProgression) plays each group with a Score or SeasonXp as
+// "<source> +<Score>" (2.1 sub_4759C0), then shares the rest of TotalSeasonXpGained among the boosts by their percent;
+// its Total Score is the groups' Scores added up (sub_4748B0), its Total XP TotalSeasonXpGained (sub_474900). 1.10's
+// has LevelsGained and the groups only. Members a build doesn't reflect are left out.
 struct FAthenaRewardResult
 {
     DefineUnrealStruct(FAthenaRewardResult, FortniteGame)
+    DefineUProperty(int32_t, LevelsGained)
+    DefineUProperty(int32_t, BookLevelsGained)
+    DefineUProperty(int32_t, TotalSeasonXpGained)
+    DefineUProperty(int32_t, TotalBookXpGained)
+    DefineUStructArrayProperty(FAthenaMatchXpMultiplierGroup, XpMultipliers)
+    DefineUStructArrayProperty(FAthenaAwardGroup, Rewards)
+
+public:
+    static bool IsReflected() { return StaticStruct() != nullptr; }
+
+    // Sets a member the build reflects; a build without it keeps its struct as it is.
+    template <typename T>
+    void SetReward(Reflection::FMemberInfo& Member, T Value)
+    {
+        if (Member.IsAvailable())
+        {
+            Reflection::AccessMember<T>(this, Member) = Value;
+        }
+    }
+
+    static Reflection::FMemberInfo& RewardLevelsGained() { return Member_LevelsGained; }
+    static Reflection::FMemberInfo& RewardBookLevelsGained() { return Member_BookLevelsGained; }
+    static Reflection::FMemberInfo& RewardTotalSeasonXpGained() { return Member_TotalSeasonXpGained; }
+    static Reflection::FMemberInfo& RewardTotalBookXpGained() { return Member_TotalBookXpGained; }
+    static bool HasXpMultipliers() { return Member_XpMultipliers.IsAvailable() && FAthenaMatchXpMultiplierGroup::StaticStruct() != nullptr; }
+    static bool HasRewards() { return Member_Rewards.IsAvailable() && FAthenaAwardGroup::StaticStruct() != nullptr; }
 };
 
 // A player's report of their match (from 1.10; AFortPlayerControllerAthena::MatchReport, made with the controller in

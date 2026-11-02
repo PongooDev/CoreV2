@@ -220,6 +220,34 @@ namespace
         return !Id.empty() && Id.size() <= 64 && std::all_of(Id.begin(), Id.end(), [](wchar_t Character) { return std::iswxdigit(Character) != 0; });
     }
 
+    // The end-of-match rewards of the players just reported who are still here, from the backend's answer to the report
+    // ({results: [{accountId, ...}]}, one object per player it gave something): each player's own object, or none.
+    void SendMatchRewards(AFortGameModeAthena* GameMode, const std::vector<std::wstring>& Reported, const std::string& Answer)
+    {
+        UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+        AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
+        if (!GameState)
+        {
+            return;
+        }
+        const std::string AccountKey = "{\"accountId\":\"";
+        for (APlayerState* PlayerState : GameState->PlayerArray)
+        {
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            const std::wstring AccountId = AthenaState ? AthenaState->UniqueId.ToString().ToStdString() : std::wstring();
+            AFortPlayerController* Controller = AthenaState ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(AthenaState->GetOwner())) : nullptr;
+            if (!Controller || std::find(Reported.begin(), Reported.end(), AccountId) == Reported.end())
+            {
+                continue;
+            }
+            std::string Id;
+            std::transform(AccountId.begin(), AccountId.end(), std::back_inserter(Id), [](wchar_t Digit) { return static_cast<char>(Digit); });
+            const size_t Start = Answer.find(AccountKey + Id + "\"");
+            const size_t Next = Start == std::string::npos ? std::string::npos : Answer.find(AccountKey, Start + AccountKey.size());
+            Controller->SendEndBattleRoyaleMatchForPlayer(Start == std::string::npos ? std::string() : Answer.substr(Start, Next == std::string::npos ? std::string::npos : Next - Start));
+        }
+    }
+
     // Brings the players up to date from their player states and reports those whose team has a place.
     void CheckMatchResults(AFortGameModeAthena* GameMode, FMatchResults& Results)
     {
@@ -297,6 +325,7 @@ namespace
 
         std::string Body;
         int32_t Count = 0;
+        std::vector<std::wstring> Reported;
         for (auto& [AccountId, Player] : Results.Players)
         {
             if (Player.bReported || Player.Place == 0)
@@ -304,6 +333,7 @@ namespace
                 continue;
             }
             Player.bReported = true;
+            Reported.push_back(AccountId);
             std::string Id;
             std::transform(AccountId.begin(), AccountId.end(), std::back_inserter(Id), [](wchar_t Digit) { return static_cast<char>(Digit); });
             Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"secondsAlive\":{}}}", Count++ > 0 ? "," : "",
@@ -329,10 +359,17 @@ namespace
         if (Count > 0)
         {
             const int32_t PlaylistId = GameMode->CurrentPlaylistId;
+            const FWeakObjectPtr WeakGameMode(GameMode);
             BackendRequest::PostJson(std::format(L"Battle Royale results of {} players", Count), L"/fortnite/api/game/v2/battleroyale/recordresults",
                 std::format("{{\"playlistId\":{},\"results\":[{}],\"countWins\":{},\"matchId\":\"{}\"}}", PlaylistId, Body,
                     Results.bCountWins ? "true" : "false", Results.MatchId),
-                FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret);
+                FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [WeakGameMode, Reported](uint32_t Status, const std::string& Answer)
+            {
+                GameThread::Enqueue([WeakGameMode, Reported, Answer = Status == 200 ? Answer : std::string()]()
+                {
+                    SendMatchRewards(static_cast<AFortGameModeAthena*>(WeakGameMode.Get()), Reported, Answer);
+                });
+            });
         }
     }
 

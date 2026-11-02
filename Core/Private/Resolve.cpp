@@ -2305,6 +2305,28 @@ namespace
             Archetype = Finder::RelativeTarget(Call + 16, 1, 5);
             ++ArchetypeCalls;
         }
+        if (!ArchetypeCalls)
+        {
+            // 2.3 no longer inlines UObject::GetArchetype (0x1B2F526, call 0xDF8110): it checks the archetype cache and
+            // only then loads Class, Outer, Name and Flags from the object (rdi here) to call GetArchetypeFromRequiredInfo
+            // (0xDF8178, call 0xDF81B0). Take that inner call from whichever SerializeNewActor callee makes it.
+            for (uintptr_t Call = FindRawCall(SerializeNewActor, SerializeNewActorEnd); Call; Call = FindRawCall(Call + 1, SerializeNewActorEnd))
+            {
+                const uintptr_t GetArchetype = Finder::RelativeTarget(Call, 1, 5);
+                const uintptr_t Load = FindInstruction(GetArchetype, GetArchetype + 0x80, { 0x44, 0x8B, -1, 0x08, 0x4C, 0x8B, -1, 0x18, 0x48, 0x8B, -1, 0x20, 0x48, 0x8B, -1, 0x10, 0xE8 });
+                // One [base + disp8] for all four loads, the base not rsp.
+                const auto Base = [&](uintptr_t Modrm) { return Byte(Modrm) & 0xC7; };
+                if (Load && (Base(Load + 2) & 0xC0) == 0x40 && (Base(Load + 2) & 0x07) != 0x04 && Base(Load + 6) == Base(Load + 2) && Base(Load + 10) == Base(Load + 2) && Base(Load + 14) == Base(Load + 2))
+                {
+                    const uintptr_t Target = Finder::RelativeTarget(Load + 16, 1, 5);
+                    if (Target != Archetype)
+                    {
+                        Archetype = Target;
+                        ++ArchetypeCalls;
+                    }
+                }
+            }
+        }
         Require(L"UObject::GetArchetypeFromRequiredInfo", Natives::UObject_GetArchetypeFromRequiredInfo, ArchetypeCalls == 1 && IsInText(Archetype) ? Archetype : 0);
 
         const FCalledSlot NewActor = ReplicateActorEnd ? CalledSlot(ReplicateActor, ReplicateActorEnd, SerializeNewActor) : FCalledSlot();

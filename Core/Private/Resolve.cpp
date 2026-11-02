@@ -101,6 +101,13 @@ namespace
         return Address >= Finder::TextBegin() && Address < Finder::TextEnd();
     }
 
+    // In a packed exe's second executable section (Finder::HasMovedCode), which holds the moved functions' pieces.
+    bool IsInMovedCode(uintptr_t Address)
+    {
+        const auto& Sections = Finder::ExecutableSections();
+        return std::any_of(Sections.begin() + 1, Sections.end(), [&](const auto& Section) { return Address >= Section.first && Address + 16 <= Section.second; });
+    }
+
     // The shared empty function is ret 0. 1.9.1's (Finder::HasMovedCode) jumps into the second section's guard code, so
     // there it is known as the function most vtable slots hold.
     bool IsSharedEmptyBody(uintptr_t Function)
@@ -592,10 +599,11 @@ namespace
             {
                 continue;
             }
+            // On 2.2 the test is in the second section, where its jcc is rewritten into a cmov of the address to go to.
             const uintptr_t Jump = Previous + 6;
             const uintptr_t Test = Byte(Jump) == 0xE9 ? Finder::RelativeTarget(Jump, 1, 5) : Jump + 2 + static_cast<int8_t>(Byte(Jump + 1));
-            const bool bTest = IsInText(Test) && Byte(Test) == 0x84 && Byte(Test + 1) == 0xC0
-                && (Byte(Test + 2) == 0x74 || Byte(Test + 2) == 0x75 || (Byte(Test + 2) == 0x0F && (Byte(Test + 3) == 0x84 || Byte(Test + 3) == 0x85)));
+            const bool bJcc = IsInText(Test) && (Byte(Test + 2) == 0x74 || Byte(Test + 2) == 0x75 || (Byte(Test + 2) == 0x0F && (Byte(Test + 3) == 0x84 || Byte(Test + 3) == 0x85)));
+            const bool bTest = (bJcc || IsInMovedCode(Test)) && Byte(Test) == 0x84 && Byte(Test + 1) == 0xC0;
             if (bTest)
             {
                 Found = Site;
@@ -610,7 +618,10 @@ namespace
     }
 
     constexpr int32_t WorldNetDriver = 0x38;
-    constexpr int32_t WorldDemoNetDriver = 0xB8;
+
+    // UWorld::DemoNetDriver: +0xB8 up to 2.1, +0x108 on 2.2, whose UWorld adds StreamingLevelsToConsider (a TSet) before
+    // it. Read from UGameInstance::StartRecordingReplay's store of the driver it found (ResolveEngineNet).
+    int32_t WorldDemoNetDriver = 0;
 
     uint8_t BaseRegister(uint8_t Rex, uint8_t ModRm)
     {
@@ -622,7 +633,7 @@ namespace
         uintptr_t DemoLoad = 0;
         for (uintptr_t Scan = Call - 0x40; Scan + 7 <= Call; ++Scan)
         {
-            if ((Byte(Scan) & 0xF8) == 0x48 && Byte(Scan + 1) == 0x8B && (Byte(Scan + 2) & 0xC0) == 0x80 && (Byte(Scan + 2) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Scan + 3) == WorldDemoNetDriver)
+            if ((Byte(Scan) & 0xF8) == 0x48 && Byte(Scan + 1) == 0x8B && (Byte(Scan + 2) & 0xC0) == 0x80 && (Byte(Scan + 2) & 0x07) != 0x04 && WorldDemoNetDriver && *reinterpret_cast<const int32_t*>(Scan + 3) == WorldDemoNetDriver)
             {
                 DemoLoad = Scan;
             }
@@ -749,8 +760,21 @@ namespace
                 const uintptr_t FindCall = FindRawCall(JumpTarget, JumpTarget + 0x30);
                 FindNamed = FindCall ? Finder::RelativeTarget(FindCall, 1, 5) : 0;
 
-                const uintptr_t DemoStore = FindNamed ? FindInstruction(FindCall, FindCall + 0x40, { -1, 0x89, -1, 0xB8, 0x00, 0x00, 0x00 }) : 0;
-                if (DemoStore && (Byte(DemoStore) & 0xF8) == 0x48)
+                // CurrentWorld->DemoNetDriver = Cast(FindNamedNetDriver(...)), then CurrentWorld->DemoNetDriver->SetWorld:
+                // mov [world+0xB8], reg up to 2.1; 2.2 is known by the load that follows, mov rcx, [world+0x108].
+                uintptr_t DemoStore = 0;
+                for (uintptr_t Store = FindNamed ? FindInstruction(FindCall, FindCall + 0x40, { -1, 0x89 }) : 0; Store && !DemoStore; Store = FindInstruction(Store + 1, FindCall + 0x40, { -1, 0x89 }))
+                {
+                    const int32_t Offset = *reinterpret_cast<const int32_t*>(Store + 3);
+                    const bool bStore = (Byte(Store) & 0xF8) == 0x48 && (Byte(Store + 2) & 0xC0) == 0x80 && (Byte(Store + 2) & 0x07) != 0x04;
+                    const bool bLoad = (Byte(Store + 7) & 0xF8) == 0x48 && Byte(Store + 8) == 0x8B && (Byte(Store + 9) & 0xF8) == 0x88 && (Byte(Store + 9) & 0x07) == (Byte(Store + 2) & 0x07) && *reinterpret_cast<const int32_t*>(Store + 10) == Offset;
+                    if (bStore && (Offset == 0xB8 || (bLoad && Offset > WorldNetDriver && Offset < 0x200)))
+                    {
+                        DemoStore = Store;
+                        WorldDemoNetDriver = Offset;
+                    }
+                }
+                if (DemoStore)
                 {
                     const uintptr_t SetCall = FindRawCall(DemoStore + 7, DemoStore + 0x20);
                     SetWorld = SetCall ? Finder::RelativeTarget(SetCall, 1, 5) : 0;
@@ -1911,7 +1935,9 @@ namespace
         for (uintptr_t Site = BunchCreate ? FindRawCall(BunchCreate, BunchCreateEnd) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, BunchCreateEnd))
         {
             const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
-            if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }))
+            // CreateChannel looks for a free index below MAX_CHANNELS: 10240 (0x2800) up to 2.1, 32767 (0x7FFF) on 2.2.
+            const bool bMaxChannels = FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }) || FindInstruction(Target, Target + 0x80, { 0xFF, 0x7F, 0x00, 0x00 });
+            if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && bMaxChannels)
             {
                 CreateChannel = Target;
             }
@@ -2755,7 +2781,8 @@ namespace
         RequireSlot(L"UEngine::GetMaxTickRate", Natives::UEngine_GetMaxTickRateIndex, bMaxTickRateAgree && MaxTickRateSites >= 2 ? MaxTickRate : -1);
 
         const uintptr_t CreateChannelEnd = Finder::FunctionEnd(CreateChannel);
-        const bool bChannelLoop = CreateChannelEnd && FindInstruction(CreateChannel, CreateChannelEnd, { 0x48, 0x3D, 0x00, 0x28, 0x00, 0x00 });
+        // The free index loop runs to MAX_CHANNELS: 0x2800 up to 2.1, 0x7FFF on 2.2.
+        const bool bChannelLoop = CreateChannelEnd && (FindInstruction(CreateChannel, CreateChannelEnd, { 0x48, 0x3D, 0x00, 0x28, 0x00, 0x00 }) || FindInstruction(CreateChannel, CreateChannelEnd, { 0x48, 0x3D, 0xFF, 0x7F, 0x00, 0x00 }));
         ptrdiff_t Channels = 0;
         for (uintptr_t Store = bChannelLoop ? FindInstruction(CreateChannel, CreateChannelEnd, { 0x48, 0x89 }) : 0; Store && !Channels; Store = FindInstruction(Store + 1, CreateChannelEnd, { 0x48, 0x89 }))
         {
@@ -3008,6 +3035,8 @@ namespace
             if ((Byte(Call + 2) & 0xF8) == 0xC8)
             {
                 TagAssetInterface = FindBackward(Call, 0x30, { 0x4C, 0x8D, 0x86 | Register << 3 });
+                // 2.2 (0x5F8659) bases it on r15: lea r13, [r15+170h].
+                TagAssetInterface = TagAssetInterface ? TagAssetInterface : FindBackward(Call, 0x30, { 0x4D, 0x8D, 0x87 | Register << 3 });
                 HasAll = Call + 3;
             }
         }
@@ -3869,11 +3898,27 @@ bool Finder::ResolvePlayerControllerConsoleCommand(uintptr_t ServerCheatImplemen
 
     // The native AFortPlayerController::ServerCheat_Implementation is "if (CheatManager) ClientMessage(ConsoleCommand(Msg,
     // true))" (Cert 0x767B50, 1.2 0x14075E4A0, 1.7.2 0x825400): its only virtual call is ConsoleCommand.
-    const uintptr_t Call = IsInText(ServerCheatImplementation) ? FindVirtualCall(ServerCheatImplementation, ServerCheatImplementation + 0x40) : 0;
-    const int32_t Index = VirtualSlot(Call);
+    const uintptr_t Call = IsInText(ServerCheatImplementation) && !IsSharedEmptyBody(ServerCheatImplementation) ? FindVirtualCall(ServerCheatImplementation, ServerCheatImplementation + 0x40) : 0;
+    int32_t Index = VirtualSlot(Call);
+
+    // 2.2 strips ServerCheat_Implementation (its slot holds a jump to the shared empty function). There the slot comes
+    // from UKismetSystemLibrary::ExecuteConsoleCommand (0x1A67CF0), which execExecuteConsoleCommand calls:
+    // "TargetPC->ConsoleCommand(Command, true)", mov r9b, 1; ...; call [r10+disp32].
+    const UFunction* Execute = Index < 0 ? FindObject<UFunction>(nullptr, L"/Script/Engine.KismetSystemLibrary:ExecuteConsoleCommand") : nullptr;
+    const uintptr_t Thunk = Execute ? reinterpret_cast<uintptr_t>(Execute->GetNativeFunc()) : 0;
+    const uintptr_t ThunkEnd = IsInText(Thunk) ? Finder::FunctionEnd(Thunk) : 0;
+    for (const auto& [Site, Target] : ThunkEnd ? Finder::DirectCalls(Thunk, ThunkEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        const uintptr_t WriteToLog = IsInText(Target) ? FindInstruction(Target, Target + 0x40, { 0x41, 0xB1, 0x01 }) : 0;
+        Index = WriteToLog ? VirtualSlot(FindVirtualCall(WriteToLog, WriteToLog + 0x10)) : -1;
+        if (Index >= 0)
+        {
+            break;
+        }
+    }
     if (Index < 0)
     {
-        Log::Error(L"Finder: APlayerController::ConsoleCommand not found in ServerCheat_Implementation");
+        Log::Error(L"Finder: APlayerController::ConsoleCommand not found in ServerCheat_Implementation or ExecuteConsoleCommand");
         return false;
     }
 
@@ -9575,7 +9620,9 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
             {
                 continue;
             }
-            const uintptr_t Store = IsDisp32Access(Site + 5, 0x88, 0, DeathCauseOffset) ? Site + 5 : IsDisp32Access(Site + 6, 0x88, 0, DeathCauseOffset) ? Site + 6 : 0;
+            // 2.2 (0x46E3B8) zeroes a register first: call; xor ebx, ebx; mov [r14 + DeathCause], al.
+            const uintptr_t Cleared = Site + 5 + ((Byte(Site + 5) == 0x33 || Byte(Site + 5) == 0x31) && (Byte(Site + 6) & 0xC0) == 0xC0 ? 2 : 0);
+            const uintptr_t Store = IsDisp32Access(Cleared, 0x88, 0, DeathCauseOffset) ? Cleared : IsDisp32Access(Cleared + 1, 0x88, 0, DeathCauseOffset) ? Cleared + 1 : 0;
             if (Store && (IsDisp32Access(Store + 6, 0xC6, 0, DeathInfoDBNOOffset) || IsDisp32Access(Store + 7, 0xC6, 0, DeathInfoDBNOOffset)))
             {
                 GetDeathCause = Finder::RelativeTarget(Site, 1, 5);

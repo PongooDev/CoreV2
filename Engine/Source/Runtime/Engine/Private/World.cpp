@@ -150,7 +150,8 @@ void UWorld::Hook()
         }
 
         const uint8_t Branch[] = { NetMode.Branch[0] == 0x74 ? static_cast<uint8_t>(0xEB) : static_cast<uint8_t>(0x90), NetMode.Branch[0] == 0x74 ? NetMode.Branch[1] : static_cast<uint8_t>(0x90) };
-        const uint8_t Displacement[] = { NetMode.NetDriverDisplacement };
+        // The whole disp32: DemoNetDriver's is +0x108 on 2.2, so its second byte isn't 0 there.
+        const uint8_t Displacement[] = { NetMode.NetDriverDisplacement, 0x00, 0x00, 0x00 };
         Hooks::WriteBytes(L"UWorld::InternalGetNetMode inlined branch", NetMode.Branch, Branch);
         Hooks::WriteBytes(L"UWorld::InternalGetNetMode inlined driver", NetMode.DemoNetDriverDisplacement, Displacement);
     }

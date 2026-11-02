@@ -78,6 +78,8 @@ namespace
     {
         std::wstring Path;
         std::wstring Name;
+        // The asset's class name (AthenaDanceItemDefinition), where the asset registry gave one.
+        std::wstring Class;
     };
 
     std::wstring Lower(std::wstring_view Text)
@@ -122,7 +124,7 @@ namespace
             for (int32_t Index = 0; Index < AssetDataList.Num(); ++Index)
             {
                 const FAssetData& AssetData = AssetDataList[Index];
-                Assets.push_back({ AssetData.ObjectPath.ToString().ToStdString(), AssetData.AssetName.ToString().ToStdString() });
+                Assets.push_back({ AssetData.ObjectPath.ToString().ToStdString(), AssetData.AssetName.ToString().ToStdString(), AssetData.AssetClass.ToString().ToStdString() });
             }
         }
         return Assets;
@@ -871,8 +873,12 @@ void UFortCheatManager::GiveNamedItem(std::initializer_list<const wchar_t*> Prim
     {
         Count = 1;
     }
-    UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, ItemDefinition, Count, true, std::max(Level, 0), true);
-    Reply(FString::Printf(TEXT("Gave %d %s"), Count, *ItemDefinition->GetName()));
+    // What the backpack has no room for drops at the player's feet (#188).
+    const int32_t Before = PlayerController->GetItemQuantity(ItemDefinition);
+    UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, ItemDefinition, Count, true, std::max(Level, 0), true, true);
+    const int32_t Dropped = std::clamp(Count - (PlayerController->GetItemQuantity(ItemDefinition) - Before), 0, Count);
+    Reply(Dropped > 0 ? FString::Printf(TEXT("Gave %d %s, %d dropped at your feet (no room)"), Count - Dropped, *ItemDefinition->GetName(), Dropped)
+                      : FString::Printf(TEXT("Gave %d %s"), Count, *ItemDefinition->GetName()));
 #endif
 }
 
@@ -1016,7 +1022,7 @@ void UFortCheatManager::GiveAmmo(const FString& AmmoNameAndAmount)
         }
     }
     const int32_t Count = Amount > 0 ? Amount : FullStack(Ammo);
-    UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Ammo, Count, true);
+    UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Ammo, Count, true, 1, false, true);
     Reply(FString::Printf(TEXT("Gave %d %s"), Count, *Ammo->GetName()));
 #endif
 }
@@ -1046,7 +1052,7 @@ void UFortCheatManager::GiveResource(UFortWorldItemDefinition* Resource, int32_t
         return;
     }
     const int32_t Count = Amount > 0 ? Amount : FullStack(Resource);
-    UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Resource, Count, true);
+    UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Resource, Count, true, 1, false, true);
     Reply(FString::Printf(TEXT("Gave %d %s"), Count, *Resource->GetName()));
 #endif
 }
@@ -1090,7 +1096,7 @@ void UFortCheatManager::GiveWeapons(FName Tag)
         UFortWorldItemDefinition* Weapon = LoadItem(Asset.Path);
         if (Weapon && Weapon->ItemType != EFortItemType::GetWeaponHarvest() && (WantedTag.empty() || HasTagOrChild(Weapon, WantedTag)))
         {
-            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Weapon, 1, true, 1, true);
+            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Weapon, 1, true, 1, true, true);
             ++Given;
         }
     }
@@ -1121,7 +1127,7 @@ void UFortCheatManager::GiveAllTraps(int32_t NumItems)
     {
         if (UFortWorldItemDefinition* Trap = LoadItem(Asset.Path))
         {
-            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Trap, std::max(NumItems, 1), true);
+            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Trap, std::max(NumItems, 1), true, 1, false, true);
             ++Given;
         }
     }
@@ -1149,7 +1155,7 @@ void UFortCheatManager::GiveAllConsumables(int32_t NumItems)
         }
         if (UFortWorldItemDefinition* Consumable = LoadItem(Asset.Path))
         {
-            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Consumable, std::max(NumItems, 1), true);
+            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Consumable, std::max(NumItems, 1), true, 1, false, true);
             ++Given;
         }
     }
@@ -1171,7 +1177,7 @@ void UFortCheatManager::GiveAllIngredients(int32_t NumIngredients)
     {
         if (UFortWorldItemDefinition* Ingredient = LoadItem(Asset.Path))
         {
-            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Ingredient, std::max(NumIngredients, 1), true);
+            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Ingredient, std::max(NumIngredients, 1), true, 1, false, true);
             ++Given;
         }
     }
@@ -1210,7 +1216,7 @@ void UFortCheatManager::GiveCheatInventory()
     {
         if (UFortWorldItemDefinition* Item = SoftElementAt(Items, Index).LoadSynchronous())
         {
-            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Item, 1, true, 1, true);
+            UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, Item, 1, true, 1, true, true);
             Reply(FString::Printf(TEXT("Gave 1 %s"), *Item->GetName()));
         }
     }
@@ -3284,17 +3290,63 @@ namespace
 
     // ---- Dance ------------------------------------------------------------------------------------------------------
 
+    // The montage items the emote wheel plays (UFortMontageItemDefinitionBase's): dances (EID_*, victory poses too),
+    // 1.11's emoticons, which are dances of their own class (Emoji_*: thrown icons, not an animation of the pawn), and the
+    // consumable emotes (EID_GunShow) a match hands out to spend.
+    class UAthenaDanceItemDefinition : public UFortMontageItemDefinitionBase
+    {
+        DefineUnrealClass(UAthenaDanceItemDefinition, FortniteGame)
+    };
+
+    class UAthenaEmojiItemDefinition : public UAthenaDanceItemDefinition
+    {
+        DefineUnrealClass(UAthenaEmojiItemDefinition, FortniteGame)
+    };
+
+    class UAthenaConsumableEmoteItemDefinition : public UFortMontageItemDefinitionBase
+    {
+        DefineUnrealClass(UAthenaConsumableEmoteItemDefinition, FortniteGame)
+    };
+
     // "cheat dance" (#152): the folders these builds keep their emotes in (AthenaDanceItemDefinition, EID_*).
     constexpr const wchar_t* EmoteFolders[] = {
         L"/Game/Athena/Items/Cosmetics/Dances/",
         L"/Game/Athena/Items/Cosmetics/VictoryPoses/",
-        L"/Game/Athena/Items/Cosmetics/ConsumableEmotes/",
     };
 
-    // The emotes the asset manager lists ("AthenaDance"), and those already loaded (any a player has played) it doesn't.
+    // Whether the asset is a dance the pawn plays (#188), not an emoticon, a consumable emote or a placeholder: by its
+    // class where the registry names it (the emoticons and consumable emotes have their own), and by its name and folder
+    // (Dances/Emoji/Emoji_*, ConsumableEmotes/, Emoji_Placeholder) where it doesn't.
+    bool IsDanceAsset(const FCheatAsset& Asset)
+    {
+        if (!Asset.Class.empty() && Asset.Class != L"None" && Asset.Class != L"AthenaDanceItemDefinition")
+        {
+            return false;
+        }
+        const std::wstring Name = Lower(Asset.Name);
+        const std::wstring Path = Lower(Asset.Path);
+        return !Name.starts_with(L"emoji_") && Name.find(L"placeholder") == std::wstring::npos
+            && Path.find(L"/emoji/") == std::wstring::npos && Path.find(L"/consumableemotes/") == std::wstring::npos;
+    }
+
+    // The same for a loaded emote, by its class: an AthenaDanceItemDefinition that isn't an emoticon.
+    bool IsDance(UFortMontageItemDefinitionBase* Emote)
+    {
+        UClass* DanceClass = UAthenaDanceItemDefinition::StaticClass();
+        UClass* EmojiClass = UAthenaEmojiItemDefinition::StaticClass();
+        if (!Emote || (DanceClass && !Emote->IsA(DanceClass)) || (EmojiClass && Emote->IsA(EmojiClass)))
+        {
+            return false;
+        }
+        return IsDanceAsset({ Emote->GetPathName().ToStdString(), Emote->GetName().ToStdString(), Emote->GetClass()->GetName().ToStdString() });
+    }
+
+    // The dances the asset manager lists ("AthenaDance", which takes the emoticons too), and those already loaded (any a
+    // player has played) it doesn't.
     std::vector<FCheatAsset> EmoteAssets()
     {
         std::vector<FCheatAsset> Emotes = ListAssets({ L"AthenaDance" });
+        std::erase_if(Emotes, [](const FCheatAsset& Asset) { return !IsDanceAsset(Asset); });
         if (!UFortMontageItemDefinitionBase::StaticClass())
         {
             return Emotes;
@@ -3303,7 +3355,7 @@ namespace
         {
             const std::wstring Path = It->GetPathName().ToStdString();
             const bool bListed = std::any_of(Emotes.begin(), Emotes.end(), [&Path](const FCheatAsset& Asset) { return _wcsicmp(Asset.Path.c_str(), Path.c_str()) == 0; });
-            if (!bListed && Path.starts_with(L"/Game/"))
+            if (!bListed && Path.starts_with(L"/Game/") && IsDance(*It))
             {
                 Emotes.push_back({ Path, It->GetName().ToStdString() });
             }
@@ -4729,6 +4781,12 @@ void UFortCheatManager::Dance(const FString& Arguments)
     if (!Emote || !Emote->IsA(UFortMontageItemDefinitionBase::StaticClass()))
     {
         Reply(FString::Printf(TEXT("%s isn't an emote"), Query.c_str()));
+        return;
+    }
+    // Only dances (#188): an emoticon, a consumable emote or a placeholder named by its path isn't played.
+    if (!IsDance(Emote))
+    {
+        Reply(FString::Printf(TEXT("%s isn't a dance (emoticons and consumable emotes aren't played)"), *Emote->GetName()));
         return;
     }
 

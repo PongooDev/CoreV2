@@ -55,7 +55,7 @@ AFortAIGoalManager* UFortKismetLibrary::GetAIGoalManager(UObject* WorldContextOb
     return AFortAIGoalManager::GetCurrent(WorldContextObject);
 }
 
-void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t Level, bool bLoadFullClip)
+void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t Level, bool bLoadFullClip, bool bDropOverflow)
 {
 #if WITH_SERVER_CODE
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(InventoryOwner.GetObject());
@@ -74,9 +74,13 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
     FFortItemEntry* ItemEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
     FFortItemEntry::Construct(ItemEntry, ItemDefinition, NumberToGive, Level);
 
+    // The game's give keeps a backpack-limited item (a weapon, a trap) past the backpack's size, marked as overflow. A
+    // cheat's (#188) gives only what fits, as a pickup does (GiveItemEntry): the overflow is measured for those items
+    // too, existing stacks fill first, no new stack goes in once the backpack is full, and the rest drops below.
     const bool bBackpack = PlayerController && static_cast<AFortInventory*>(PlayerController->WorldInventory) == Inventory;
-    const int32_t Count = NumberToGive - Inventory->GetOverflowAmount(*ItemEntry, false);
-    const int32_t Given = Inventory->AddItemStacks(*ItemEntry, Count, -1, bBackpack, true,
+    const bool bFitOnly = bDropOverflow && bBackpack;
+    const int32_t Count = NumberToGive - Inventory->GetOverflowAmount(*ItemEntry, bFitOnly);
+    const int32_t Given = Inventory->AddItemStacks(*ItemEntry, Count, -1, bBackpack, !bFitOnly,
         [&](UFortWorldItem* Existing, int32_t Added)
         {
             FFortItemEntry& ExistingEntry = Existing->ItemEntry;
@@ -142,12 +146,12 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
 #endif
 }
 
-void UFortKismetLibrary::K2_GiveItemToPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t Level, bool bLoadFullClip)
+void UFortKismetLibrary::K2_GiveItemToPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer, int32_t Level, bool bLoadFullClip, bool bDropOverflow)
 {
 #if WITH_SERVER_CODE
     if (PlayerController && ItemDefinition)
     {
-        GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(PlayerController, nullptr), ItemDefinition, NumberToGive, bNotifyPlayer, Level, bLoadFullClip);
+        GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(PlayerController, nullptr), ItemDefinition, NumberToGive, bNotifyPlayer, Level, bLoadFullClip, bDropOverflow);
     }
 #endif
 }

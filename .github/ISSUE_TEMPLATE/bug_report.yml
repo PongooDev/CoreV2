@@ -1,0 +1,55 @@
+name: Bug report
+description: Something in a match or the game server doesn't work
+body:
+  - type: dropdown
+    id: build
+    attributes:
+      label: Fortnite build
+      options:
+        - "1.1"
+        - "1.2"
+        - "1.7.2"
+        - "1.8"
+        - "1.8.1"
+        - "1.8.2"
+        - "1.9"
+        - "1.9.1"
+        - "1.10"
+        - "1.11"
+        - "2.1"
+        - "2.2"
+        - Other (say which below)
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Battle Royale
+        - Save the World
+        - Lobby / menus
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what should have happened
+      description: Screenshots help.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen
+      placeholder: "1. Join a solo match\n2. ..."
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Drag the files in. Bugs with logs get fixed much faster.
+        - Core's server log: `%LOCALAPPDATA%\Core-Launcher\Logs\Core\Server_log_<number>.txt` (the newest one)
+        - The server's game log: `%LOCALAPPDATA%\FortniteGame\Saved_CoreServer\Logs\FortniteGame.log`
+        - Your game log: `%LOCALAPPDATA%\FortniteGame\Saved\Logs\FortniteGame.log`
+        For a crash, the server log is the important one.

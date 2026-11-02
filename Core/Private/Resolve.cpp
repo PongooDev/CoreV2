@@ -3855,8 +3855,24 @@ bool Finder::ResolveTextLocalizationManager()
         }
     }
 
-    const uintptr_t ManagerLoad = FindText ? FindInstruction(FindText, FindText + 0x40, { 0x48, 0x8B, 0x05 }) : 0;
-    const uintptr_t DisplayCall = FindText ? FindInstruction(FindText, FindText + 0x100, { 0x4C, 0x8B, 0xCF, 0x48, 0x89, 0x5C, 0x24, 0x20, 0x4C, 0x8B, 0xC6, 0x48, 0x8D, 0x55, -1, 0x48, 0x8B, 0xC8, 0xE8 }) : 0;
+    uintptr_t ManagerLoad = FindText ? FindInstruction(FindText, FindText + 0x40, { 0x48, 0x8B, 0x05 }) : 0;
+    const uintptr_t InlinedDisplayCall = FindText ? FindInstruction(FindText, FindText + 0x100, { 0x4C, 0x8B, 0xCF, 0x48, 0x89, 0x5C, 0x24, 0x20, 0x4C, 0x8B, 0xC6, 0x48, 0x8D, 0x55, -1, 0x48, 0x8B, 0xC8, 0xE8 }) : 0;
+    uintptr_t DisplayCall = InlinedDisplayCall ? InlinedDisplayCall + 18 : 0;
+
+    // 2.2 no longer inlines FTextLocalizationManager::Get (2.2 0xBD4470: sub rsp, 28h; mov rax, cs:Manager): FindText calls
+    // it first, moves its result to rcx (mov rcx, rax) and calls FindDisplayString next (2.2 0xB9E868, 0xB9E87F). Before,
+    // with no Get to read, Core's Get dereferenced a null manager and the console crashed listing the show flags (#194).
+    if (FindText && !DisplayCall)
+    {
+        const uintptr_t GetCall = FindRawCall(FindText, FindText + 0x40);
+        const uintptr_t Get = GetCall ? Finder::RelativeTarget(GetCall, 1, 5) : 0;
+        if (Get && Finder::BodyIs(Get, { 0x48, 0x83, 0xEC, 0x28, 0x48, 0x8B, 0x05 }) && Byte(GetCall + 5) == 0x48 && Byte(GetCall + 6) == 0x8B && Byte(GetCall + 7) == 0xC8)
+        {
+            ManagerLoad = Get + 4;
+            DisplayCall = FindRawCall(GetCall + 5, GetCall + 0x40);
+        }
+    }
+
     if (!ManagerLoad || !DisplayCall)
     {
         Log::Error(L"Finder: FTextLocalizationManager::FindDisplayString not found");
@@ -3864,7 +3880,7 @@ bool Finder::ResolveTextLocalizationManager()
     }
 
     Natives::GTextLocalizationManager = reinterpret_cast<FTextLocalizationManager**>(Finder::RelativeTarget(ManagerLoad, 3, 7));
-    Natives::FTextLocalizationManager_FindDisplayString = reinterpret_cast<decltype(Natives::FTextLocalizationManager_FindDisplayString)>(Finder::RelativeTarget(DisplayCall + 18, 1, 5));
+    Natives::FTextLocalizationManager_FindDisplayString = reinterpret_cast<decltype(Natives::FTextLocalizationManager_FindDisplayString)>(Finder::RelativeTarget(DisplayCall, 1, 5));
     return true;
 }
 

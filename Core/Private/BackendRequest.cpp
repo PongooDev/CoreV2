@@ -108,18 +108,22 @@ namespace
             if (Session)
             {
                 WinHttpSetTimeouts(Session, 5000, 5000, 10000, 10000);
+                // An https:// backend (Core #197): TLS 1.2 and 1.3, which WinHTTP doesn't offer by default before
+                // Windows 10. Windows without 1.3 refuses the pair, and takes 1.2 alone.
+                DWORD Protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+                if (!WinHttpSetOption(Session, WINHTTP_OPTION_SECURE_PROTOCOLS, &Protocols, sizeof(Protocols)))
+                {
+                    Protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+                    WinHttpSetOption(Session, WINHTTP_OPTION_SECURE_PROTOCOLS, &Protocols, sizeof(Protocols));
+                }
             }
         }
+        // The URL's own port, else the scheme's (WinHttpCrackUrl: 80 for http, 443 for https). An https backend's
+        // certificate is checked as any other: it has to be valid for its host name.
         HINTERNET Connection = Session ? WinHttpConnect(Session, Host, Parts.nPort, 0) : nullptr;
         const bool bSecure = Parts.nScheme == INTERNET_SCHEME_HTTPS;
         const std::wstring Target = std::wstring(UrlPath) + Extra;
         HINTERNET Request = Connection ? WinHttpOpenRequest(Connection, Verb, Target.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, bSecure ? WINHTTP_FLAG_SECURE : 0) : nullptr;
-        if (Request && bSecure)
-        {
-            // The backend's own certificate is self-signed.
-            DWORD Flags = SECURITY_FLAG_IGNORE_UNKNOWN_CA | SECURITY_FLAG_IGNORE_CERT_CN_INVALID | SECURITY_FLAG_IGNORE_CERT_DATE_INVALID | SECURITY_FLAG_IGNORE_CERT_WRONG_USAGE;
-            WinHttpSetOption(Request, WINHTTP_OPTION_SECURITY_FLAGS, &Flags, sizeof(Flags));
-        }
 
         void* const Data = const_cast<char*>(Body.data());
         const DWORD Length = static_cast<DWORD>(Body.size());
@@ -143,7 +147,9 @@ namespace
         }
         else
         {
-            Log::Warning(L"Backend: no answer from {} (WinHTTP error {})", Url, GetLastError());
+            const DWORD Error = GetLastError();
+            Log::Warning(L"Backend: no answer from {} (WinHTTP error {}{})", Url, Error,
+                Error == ERROR_WINHTTP_SECURE_FAILURE ? L": its certificate isn't valid for this host, or isn't trusted" : L"");
         }
 
         if (Request)

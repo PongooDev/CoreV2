@@ -44,6 +44,16 @@ void Configuration::Load()
             {
                 Current.Backend.pop_back();
             }
+            // http://host[:port] or https://host[:port] (Core #197: a backend behind an https reverse proxy, on 443
+            // unless a port is given). A bare host[:port] is http, as before.
+            if (Current.Backend.find(L"://") == std::wstring::npos)
+            {
+                Current.Backend.insert(0, L"http://");
+            }
+            for (size_t Index = 0, End = Current.Backend.find(L"://"); Index < End; ++Index)
+            {
+                Current.Backend[Index] = static_cast<wchar_t>(towlower(Current.Backend[Index]));
+            }
         }
     }
 

@@ -3,6 +3,8 @@
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
+#include "Engine/AssetManager.h"
+#include "Engine/Engine.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
@@ -14,6 +16,7 @@
 #include "ObjectLayout.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "UObject/Class.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
 
 #include <vector>
@@ -97,6 +100,40 @@ void AFortPlayerController::ServerPlayEmoteItem_Implementation(UFortMontageItemD
 #endif
 }
 
+// Save the World plays its emotes (UFortEmoteItemDefinition, the "Emote" primary asset type: /dance and the emote wheel)
+// through Emote(AssetName), which sends ServerEmote. Its body loads the emote by FPrimaryAssetId(Emote, AssetName)
+// through the asset manager and plays it once loaded. 1.9 and later keep the load but bind the load's callback to the
+// shared empty function (2.1 0x8B4100, 2.2 0x8982D0; AFortPlayerController's own slot 0x1AF is empty), so nothing ever
+// played (#195); Battle Royale's emote wheel sends ServerPlayEmoteItem instead. This loads the emote and plays it with
+// the same play body.
+void AFortPlayerController::ServerEmote_Implementation(const FName& AssetName)
+{
+#if WITH_SERVER_CODE
+    UAssetManager* Manager = GEngine ? static_cast<UAssetManager*>(GEngine->AssetManager) : nullptr;
+    TArray<FAssetData> AssetDataList;
+    if (AssetName.IsNone() || !Manager || !Manager->GetPrimaryAssetDataList(FName(L"Emote"), AssetDataList))
+    {
+        return;
+    }
+
+    UFortMontageItemDefinitionBase* EmoteAsset = nullptr;
+    for (int32_t Index = 0; Index < AssetDataList.Num() && !EmoteAsset; ++Index)
+    {
+        const FAssetData& AssetData = AssetDataList[Index];
+        if (AssetData.AssetName == AssetName)
+        {
+            EmoteAsset = LoadObject<UFortMontageItemDefinitionBase>(nullptr, *AssetData.ObjectPath.ToString(), nullptr, static_cast<uint32_t>(LOAD_NoWarn | LOAD_Quiet));
+        }
+    }
+    if (!EmoteAsset)
+    {
+        Log::Warning(L"Emote: {} asked for emote {}, which isn't an Emote primary asset", GetName().ToStdString(), AssetName.ToString().ToStdString());
+        return;
+    }
+    ServerPlayEmoteItem_Implementation(EmoteAsset);
+#endif
+}
+
 void AFortPlayerController::HookEmoteVTables()
 {
     UFunction* ServerPlayEmoteItem = FindStaticFunction_ServerPlayEmoteItem();
@@ -126,6 +163,11 @@ void AFortPlayerController::HookEmoteVTables()
         return;
     }
 
+    // ServerEmote's load callback goes with the play body (1.9's comment above), so its implementation is Core's too,
+    // in every controller class: AFortPlayerController's own slot is the shared empty function on 2.1 and 2.2.
+    UFunction* ServerEmote = FindStaticFunction_ServerEmote();
+    const int32_t EmoteIndex = ServerEmote ? Finder::ImplementationIndex(ServerEmote) : -1;
+
     ServerPlayEmoteItem_ImplementationOG = reinterpret_cast<decltype(ServerPlayEmoteItem_ImplementationOG)>(Implementation);
     for (TObjectIterator<UClass> It; It; ++It)
     {
@@ -136,7 +178,20 @@ void AFortPlayerController::HookEmoteVTables()
         {
             Hooks::SwapVTable(L"AFortPlayerController::ServerPlayEmoteItem_Implementation", VTable, Index, reinterpret_cast<void*>(&ServerPlayEmoteItem_ImplementationHK));
         }
+        if (VTable && EmoteIndex >= 0 && VTable[EmoteIndex] != reinterpret_cast<void*>(&ServerEmote_ImplementationHK))
+        {
+            Hooks::SwapVTable(L"AFortPlayerController::ServerEmote_Implementation", VTable, EmoteIndex, reinterpret_cast<void*>(&ServerEmote_ImplementationHK));
+        }
     }
+    if (ServerEmote && EmoteIndex < 0)
+    {
+        Log::Error(L"Finder: AFortPlayerController::ServerEmote_Implementation slot not found");
+    }
+}
+
+void AFortPlayerController::ServerEmote_ImplementationHK(AFortPlayerController* This, const FName& AssetName)
+{
+    This->ServerEmote_Implementation(AssetName);
 }
 
 void AFortPlayerController::ServerPlayEmoteItem_ImplementationHK(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset)

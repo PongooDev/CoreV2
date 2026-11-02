@@ -110,6 +110,7 @@ public:
     DefineUFunction(ServerUpgradeBuildingActor)
     DefineUFunction(FortClientPlaySoundAtLocation)
     DefineUFunction(ServerPlayEmoteItem)
+    DefineUFunction(ServerEmote)
     DefineUFunction(ServerModifyStat)
 
     bool InitializeMcpProfile(const void* OnComplete);
@@ -160,6 +161,8 @@ public:
     void FortClientPlaySoundAtLocation(UObject* Sound, const FVector& Location, float VolumeMultiplier, float PitchMultiplier);
     // Emotes (FortPlayerControllerEmote.cpp): 1.9 strips the emote RPC's play body; Core's follows 1.8.2's.
     void ServerPlayEmoteItem_Implementation(UFortMontageItemDefinitionBase* EmoteAsset);
+    // Save the World's emotes (/dance, the emote wheel): 1.9 strips ServerEmote's load callback; Core's plays the emote.
+    void ServerEmote_Implementation(const FName& AssetName);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
@@ -228,6 +231,7 @@ private:
     static void ServerUpgradeBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingActor* BuildingActorToUpgrade, int32_t NewUpgradeLevel);
     static inline void (*ServerPlayEmoteItem_ImplementationOG)(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset) = nullptr;
     static void ServerPlayEmoteItem_ImplementationHK(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset);
+    static void ServerEmote_ImplementationHK(AFortPlayerController* This, const FName& AssetName);
     static void ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor);
     static void ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg);
     static void ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType);

@@ -778,12 +778,22 @@ namespace
         }
         Log::Info(L"SaveStatEvents for {}: {}", QuestManager->GetName().ToStdString(), Text);
 
-        FSaveRequests* Saves = SaveRequestsOf(QuestManager, true);
-        Saves->Requests.push_back(Request);
+        // The request counts as in flight until the profile answers it (OnStatEventsSaved). Without the request's
+        // completion delegate nothing would ever answer it, and its counts would add to the profile's for good once the
+        // profile has them: every later event would show the objective a count ahead (#179).
+        const bool bAnswered = Finder::ResolveOutpostMcpRequestLive();
+        FSaveRequests* Saves = bAnswered ? SaveRequestsOf(QuestManager, true) : nullptr;
+        if (Saves)
+        {
+            Saves->Requests.push_back(Request);
+        }
         FScriptArray& Advance = Pending;
         if (!Profile->UpdateQuests(Advance, QuestManager, &OnStatEventsSaved))
         {
-            Saves->Requests.pop_back();
+            if (Saves)
+            {
+                Saves->Requests.pop_back();
+            }
             Log::Error(L"SaveStatEvents for {}: UpdateQuests couldn't be sent", QuestManager->GetName().ToStdString());
         }
     }

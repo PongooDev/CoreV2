@@ -8026,10 +8026,12 @@ bool Finder::ResolveOutpostMcpRequestLive()
         UrlName = Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x4D ? Site : UrlName;
     }
     const uintptr_t Credentials = UrlLoad ? FindInstruction(UrlLoad, AbortEnd, { 0xC7, 0x45, -1, 0x01, 0x00, 0x00, 0x00 }) : 0;
+    // The request is made from the context: lea rdx, [rbp+Context]; mov rcx, <profile>; call. 1.10 and 1.11 keep the
+    // profile in r14 (mov rcx, r14: 49 8B CE; 1.10 0x8DFF8B, 1.11 0x8F2EDB), earlier builds in a low register (48 8B).
     uintptr_t Context = 0;
-    for (uintptr_t Site = Credentials; Site && (Site = FindInstruction(Site + 1, AbortEnd, { 0x48, 0x8D, 0x55, -1, 0x48, 0x8B, -1, 0xE8 })) != 0;)
+    for (uintptr_t Site = Credentials; Site && (Site = FindInstruction(Site + 1, AbortEnd, { 0x48, 0x8D, 0x55, -1, -1, 0x8B, -1, 0xE8 })) != 0;)
     {
-        Context = Site;
+        Context = Byte(Site + 4) == 0x48 || Byte(Site + 4) == 0x49 ? Site : Context;
     }
 
     const uintptr_t CreateCopy = VTable && Copy ? VTableEntry(reinterpret_cast<void**>(VTable), Byte(Copy + 6) / 8) : 0;

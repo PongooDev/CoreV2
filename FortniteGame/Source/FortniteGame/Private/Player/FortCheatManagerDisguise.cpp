@@ -1751,14 +1751,16 @@ namespace
     }
 
     // Whether every client connection that has the actor has sent it since the change, with time for a lost update to
-    // be sent again, and has had its reliable bunches acknowledged.
-    bool HasEveryConnectionSentScale(AActor* Actor, double ChangedAt)
+    // be sent again, and has had its reliable bunches acknowledged. Viewers and Sent count the connections that have
+    // the actor and those that are done (#200: the log says which players got the change).
+    bool HasEveryConnectionSentScale(AActor* Actor, double ChangedAt, int32_t* Viewers = nullptr, int32_t* Sent = nullptr)
     {
         UNetDriver* NetDriver = GetGameNetDriver(Actor);
         if (!NetDriver || Natives::UNetConnection_ActorChannels < 0 || Natives::UActorChannel_LastUpdateTime < 0 || Natives::UChannel_NumOutRec < 0)
         {
             return true;
         }
+        bool bEvery = true;
         for (UNetConnection* Connection : NetDriver->ClientConnections)
         {
             UActorChannel* Channel = Connection && Connection->State == USOCK_Open ? Connection->ActorChannels.FindRef(Actor) : nullptr;
@@ -1766,12 +1768,18 @@ namespace
             {
                 continue;
             }
-            if (Channel->LastUpdateTime < ChangedAt + ScaleResendTime || Channel->NumOutRec > 0)
+            const bool bSent = Channel->LastUpdateTime >= ChangedAt + ScaleResendTime && Channel->NumOutRec <= 0;
+            if (Viewers)
             {
-                return false;
+                ++*Viewers;
             }
+            if (bSent && Sent)
+            {
+                ++*Sent;
+            }
+            bEvery &= bSent;
         }
-        return true;
+        return bEvery;
     }
 
     void TickScaleReplications()
@@ -1791,12 +1799,17 @@ namespace
                 Actor->ForceNetUpdate();
                 return false;
             }
+            int32_t Viewers = 0;
+            int32_t Sent = 0;
+            HasEveryConnectionSentScale(Actor, Entry.ChangedAt, &Viewers, &Sent);
             if (Entry.bStopReplicating)
             {
                 reinterpret_cast<UActorComponentFunctions*>(Root)->SetIsReplicated(false);
             }
-            UE_LOG(LogFortDisguise, Verbose, TEXT("SetScale: %s's root replicated its scale for %lld ms"), *GetNameSafe(Actor),
-                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(Elapsed).count()));
+            const FVector Scale = Actor->GetActorScale3D();
+            UE_LOG(LogFortDisguise, Log, TEXT("SetScale: %s's root %s replicated its scale (%g x %g x %g) for %lld ms; %d of the %d players who have it were sent it"),
+                *GetNameSafe(Actor), *GetNameSafe(Root), Scale.X, Scale.Y, Scale.Z,
+                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(Elapsed).count()), Sent, Viewers);
             return true;
         });
         if (!ScaleReplications.empty())
@@ -1832,6 +1845,12 @@ namespace
             {
                 GameThread::Enqueue(&TickScaleReplications);
             }
+        }
+        else if (Known == ScaleReplications.end())
+        {
+            UE_LOG(LogFortDisguise, Warning, TEXT("SetScale: %s's root %s can't replicate here (SetIsReplicated %s, bReplicates %s): only a client that gets the pawn anew sees its scale"),
+                *GetNameSafe(Actor), *GetNameSafe(Root), UActorComponentFunctions::FindStaticFunction_SetIsReplicated() ? TEXT("found") : TEXT("missing"),
+                UActorComponentFunctions::HasReplicatesFlag() ? TEXT("found") : TEXT("missing"));
         }
         Actor->ForceNetUpdate();
     }
@@ -2853,6 +2872,32 @@ namespace
     // copy has none, so the pawns walking into it here, the player's own first, were stopped and pushed back by the
     // server, and the camera, which keeps out of whatever collides, was pushed into a big one. The player's own one is
     // shown the way they chose.
+    // Other players' pawns' scales as this client has them ("cheat setscale", #200): a change is logged, so a report
+    // shows whether the server's update reached this client.
+    struct FOtherScale
+    {
+        TWeakObjectPtr<AActor> Pawn;
+        FVector Scale;
+    };
+    std::vector<FOtherScale> OtherScales;
+
+    void NoteOtherScale(AActor* Pawn)
+    {
+        std::erase_if(OtherScales, [](const FOtherScale& Known) { return !Known.Pawn.IsValid(); });
+        const FVector Scale = Pawn->GetActorScale3D();
+        auto Known = std::find_if(OtherScales.begin(), OtherScales.end(), [Pawn](const FOtherScale& Entry) { return Entry.Pawn.Get() == Pawn; });
+        if (Known == OtherScales.end())
+        {
+            OtherScales.push_back({ TWeakObjectPtr<AActor>(Pawn), FVector(1.0f, 1.0f, 1.0f) });
+            Known = OtherScales.end() - 1;
+        }
+        if (std::fabs(Scale.X - Known->Scale.X) > 0.01f || std::fabs(Scale.Y - Known->Scale.Y) > 0.01f || std::fabs(Scale.Z - Known->Scale.Z) > 0.01f)
+        {
+            Known->Scale = Scale;
+            UE_LOG(LogFortDisguise, Log, TEXT("ScaleView: %s (role %d) is at scale %g x %g x %g here"), *Pawn->GetName(), static_cast<int32_t>(Pawn->Role), Scale.X, Scale.Y, Scale.Z);
+        }
+    }
+
     void ScanDisguises(UWorld* World, APawn* LocalPawn)
     {
         std::erase_if(Quieted, [](const TWeakObjectPtr<AActor>& Actor) { return !Actor.IsValid(); });
@@ -2886,6 +2931,10 @@ namespace
         {
             AActor* Pawn = Pawns[Index];
             AActor* Owner = Pawn ? Pawn->GetOwner() : nullptr;
+            if (Pawn && Pawn != static_cast<AActor*>(LocalPawn))
+            {
+                NoteOtherScale(Pawn);
+            }
             // The pawn a player pawn disguise parks follows it on the server, without collision there; here it stood in
             // the disguise's way.
             if (Pawn && Pawn != static_cast<AActor*>(LocalPawn) && IsParkedPawn(Pawn))

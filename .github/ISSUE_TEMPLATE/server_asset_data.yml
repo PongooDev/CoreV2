@@ -33,15 +33,15 @@ body:
     id: assets
     attributes:
       label: Assets included
-      description: The ones Core needs so far. Tick what you exported.
+      description: Any server-only asset is welcome, the more the better. These are the ones Core already knows it needs.
       options:
         - label: "/Game/AIDirector/AIDirector_Fortnite (AIDirector_Fortnite and its Default__AIDirector_Fortnite_C)"
-        - label: Something else server-only (name it below)
+        - label: Other server-only assets (list them below, or just say "everything" if you exported the lot)
   - type: textarea
     id: files
     attributes:
       label: JSON exports
-      description: Drag the .json files in (zip them if there are several).
+      description: Drag the .json files in. For lots of assets, zip the exported folder (keep its folder structure) and drag the zip in.
     validations:
       required: true
   - type: checkboxes

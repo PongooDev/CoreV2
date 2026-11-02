@@ -102,17 +102,25 @@ void AFortPlayerController::SendMatchStatsForPlayer()
     Stats.SetStat(FAthenaMatchStats::StatKills(), std::max(AthenaState->GetKills(), 0));
     Stats.SetStat(FAthenaMatchStats::StatDowns(), AFortPlayerStateAthena::HasDownScore() ? std::max<int32_t>(AthenaState->DownScore, 0) : 0);
     Stats.SetStat(FAthenaMatchStats::StatAssists(), CountAssists(AthenaState));
+    // The materials a player harvests count in the player state's stats (AFortPlayerStateZone::ModifyStat with the
+    // resource's AccumulatingStatType); the StatManager's WoodAcquired ... MetalAcquired are never added to.
+    const int32_t GatheredWood = AthenaState->GetStatValue(EFortReplicatedStat::GetWoodGathered(), false);
+    const int32_t GatheredStone = AthenaState->GetStatValue(EFortReplicatedStat::GetStoneGathered(), false);
+    const int32_t GatheredMetal = AthenaState->GetStatValue(EFortReplicatedStat::GetMetalGathered(), false);
+    Stats.SetStat(FAthenaMatchStats::StatGatheredWood(), GatheredWood);
+    Stats.SetStat(FAthenaMatchStats::StatGatheredStone(), GatheredStone);
+    Stats.SetStat(FAthenaMatchStats::StatGatheredMetal(), GatheredMetal);
+    Stats.SetStat(FAthenaMatchStats::StatMaterialsGathered(), GatheredWood + GatheredStone + GatheredMetal);
 
     UStatManager* Manager = StatManager;
     if (Manager)
     {
         const EStatRecordingPeriod Match = EStatRecordingPeriod::GetMap();
-        const int32_t ShotsFired = Manager->GetStatValueForAllSources(L"Ranged.Fire", Match);
+        // A build records one of the two: 1.10 "Ranged.Fire", 1.11 on "Ranged.Bullets.Fired" (the cartridges times
+        // the bullets in each, 2.1 0x2A35D0).
+        const int32_t ShotsFired = Manager->GetStatValueForAllSources(L"Ranged.Bullets.Fired", Match) + Manager->GetStatValueForAllSources(L"Ranged.Fire", Match);
         const int32_t Hits = Manager->GetStatValueForAllSources(L"Ranged.Hit.Hostile", Match);
         const int32_t Headshots = Manager->GetStatValue(FName(L"Headshots"), Match);
-        const int32_t GatheredWood = Manager->GetStatValue(FName(L"WoodAcquired"), Match);
-        const int32_t GatheredStone = Manager->GetStatValue(FName(L"StoneAcquired"), Match);
-        const int32_t GatheredMetal = Manager->GetStatValue(FName(L"MetalAcquired"), Match);
         const int32_t UsedWood = Manager->GetStatValue(FName(L"WoodExpended"), Match);
         const int32_t UsedStone = Manager->GetStatValue(FName(L"StoneExpended"), Match);
         const int32_t UsedMetal = Manager->GetStatValue(FName(L"MetalExpended"), Match);
@@ -126,10 +134,6 @@ void AFortPlayerController::SendMatchStatsForPlayer()
         Stats.SetStat(FAthenaMatchStats::StatRangedMiss(), std::max(ShotsFired - Hits, 0));
         Stats.SetStat(FAthenaMatchStats::StatAccuracy(), ShotsFired > 0 ? std::clamp(static_cast<float>(Hits) / static_cast<float>(ShotsFired), 0.0f, 1.0f) : 0.0f);
         Stats.SetStat(FAthenaMatchStats::StatTravelDistanceGround(), Manager->GetStatValue(FName(L"Travel.Distance.Ground"), Match));
-        Stats.SetStat(FAthenaMatchStats::StatGatheredWood(), GatheredWood);
-        Stats.SetStat(FAthenaMatchStats::StatGatheredStone(), GatheredStone);
-        Stats.SetStat(FAthenaMatchStats::StatGatheredMetal(), GatheredMetal);
-        Stats.SetStat(FAthenaMatchStats::StatMaterialsGathered(), GatheredWood + GatheredStone + GatheredMetal);
         Stats.SetStat(FAthenaMatchStats::StatUsedWood(), UsedWood);
         Stats.SetStat(FAthenaMatchStats::StatUsedStone(), UsedStone);
         Stats.SetStat(FAthenaMatchStats::StatUsedMetal(), UsedMetal);
@@ -139,7 +143,7 @@ void AFortPlayerController::SendMatchStatsForPlayer()
     }
     else
     {
-        UE_LOG(LogFortMatchStats, Warning, TEXT("SendMatchStatsForPlayer: %s has no StatManager, only its place, time alive, kills, downs and assists are sent"), *GetName());
+        UE_LOG(LogFortMatchStats, Warning, TEXT("SendMatchStatsForPlayer: %s has no StatManager, only its place, time alive, kills, downs, assists and materials gathered are sent"), *GetName());
     }
 
     Report->bHasStats = true;

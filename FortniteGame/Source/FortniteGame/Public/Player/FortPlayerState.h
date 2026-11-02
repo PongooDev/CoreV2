@@ -84,11 +84,22 @@ struct FFortExperienceDelta
     }
 };
 
+// One EFortReplicatedStat's count and the score it earned (AFortPlayerState::ReplicatedStats_Campaign and _Zone, one
+// per stat type).
+struct FReplicatedStatValues
+{
+    DefineUnrealStruct(FReplicatedStatValues, FortniteGame)
+    DefineUProperty(int32_t, StatValue)
+    DefineUProperty(int32_t, ScoreValue)
+};
+
 class AFortPlayerState : public APlayerState
 {
     DefineUnrealClass(AFortPlayerState, FortniteGame)
 
 public:
+    DefineUStructProperty(FReplicatedStatValues, ReplicatedStats_Campaign)
+    DefineUStructProperty(FReplicatedStatValues, ReplicatedStats_Zone)
     DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
     DefineUProperty(uint8_t, CharacterGender)
     DefineUProperty(UCustomCharacterPart*, CharacterParts)
@@ -114,7 +125,11 @@ public:
     void OnRep_CharacterParts();
     // The player pawn whose player state this is (1.9: AFortPlayerState::GetCurrentPawn), or null.
     AFortPlayerPawn* GetCurrentPawn();
+    // The score the stat earned (its ScoreValue: 2.1 0x8E80E0 reads ReplicatedStats_Campaign or _Zone's).
     int32_t GetStat(EFortReplicatedStat StatType, bool bCampaign);
+    // The stat's count (its StatValue), which AFortPlayerStateZone::ModifyStat adds StatDelta to (2.1 0x8ED110), 0 when
+    // the build doesn't reflect the stats.
+    int32_t GetStatValue(EFortReplicatedStat StatType, bool bCampaign);
 
     // bIsFinalizingExperience is gone from 1.7.2, which finalizes through FFortExperienceDelta::IsFinalXpUpdate.
     static bool HasFinalizingExperience();

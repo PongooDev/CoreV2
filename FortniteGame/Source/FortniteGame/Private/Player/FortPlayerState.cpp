@@ -154,6 +154,18 @@ int32_t AFortPlayerState::GetStat(EFortReplicatedStat StatType, bool bCampaign)
     return Natives::AFortPlayerState_GetStatIndex >= 0 ? CallVirtual<int32_t>(this, Natives::AFortPlayerState_GetStatIndex, static_cast<int32_t>(StatType), bCampaign) : 0;
 }
 
+int32_t AFortPlayerState::GetStatValue(EFortReplicatedStat StatType, bool bCampaign)
+{
+    Reflection::FMemberInfo& Stats = bCampaign ? Member_ReplicatedStats_Campaign : Member_ReplicatedStats_Zone;
+    UScriptStruct* const StatStruct = FReplicatedStatValues::StaticStruct();
+    if (StatType == Reflection::InvalidEnumValue || StatType >= EFortReplicatedStat::GetNone() || !Stats.IsAvailable() || !StatStruct)
+    {
+        return 0;
+    }
+    uint8_t* const FirstStat = &Reflection::AccessMember<uint8_t>(this, Stats);
+    return reinterpret_cast<FReplicatedStatValues*>(FirstStat + static_cast<size_t>(StatType) * StatStruct->GetStructureSize())->StatValue;
+}
+
 bool AFortPlayerState::HasFinalizingExperience()
 {
     return Member_bIsFinalizingExperience.IsAvailable();

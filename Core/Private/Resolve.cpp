@@ -396,10 +396,12 @@ namespace
                 }
             }
         }
-        else
+        if (!Engine)
         {
-            // 1.9.1's FEngineLoop::Init sits outside .text, in pieces with no .pdata entry. GEngine is also the global the
-            // PIE online-subsystem check loads first.
+            // 1.9.1's FEngineLoop::Init sits outside .text, in pieces with no .pdata entry, so there is no function to
+            // read the store out of. 2.3 leaves the piece that names the class in .text, which does have one, but the
+            // store is in a piece of its own, so the function is found and holds no store. GEngine is also the global
+            // the PIE online-subsystem check loads first.
             const uintptr_t Check = FunctionOf(L"Failed to determine if OSS is server in PIE, OSS requests will fail");
             const uintptr_t Load = Check ? FindInstruction(Check, Check + 0x10, { 0x48, 0x8B, 0x1D }) : 0;
             Engine = Load ? Finder::RelativeTarget(Load, 3, 7) : 0;

@@ -714,10 +714,16 @@ void ABuildingContainer::LogWorldContainers(UWorld* World)
     const int32_t DestroyedActors = NetDriver ? NetDriver->DestroyedStartupOrDormantActors.Num() : -1;
     UE_LOG(LogFortBuilding, Log, TEXT("World containers: %d (%d with a loot tier); tiered %d: %d with a mesh, %d initially dormant, first without a mesh %s in %s; %d destroyed startup or dormant actors to send"),
         Containers, WithLootTier, Tiered, TieredWithMesh, TieredDormant, *GetNameSafe(FirstWithoutMesh), FirstWithoutMesh ? *GetNameSafe(FirstWithoutMesh->GetOutermost()) : TEXT("-"), DestroyedActors);
+    // The floor loot this world's creation spawned. A Battle Royale server loads its map again for every match
+    // (AFortGameSessionDedicated::Restart after the match, or when the matchmaking service drops it), and each world
+    // spawns its own: the counts start again for the next one.
     if (FloorLootContainers > 0)
     {
         UE_LOG(LogFortBuilding, Log, TEXT("Floor loot: %d containers spawned %d pickups (%d loaded weapons)"), FloorLootContainers, FloorLootPickups, FloorLootLoadedWeapons);
     }
+    FloorLootContainers = 0;
+    FloorLootPickups = 0;
+    FloorLootLoadedWeapons = 0;
 }
 
 void ABuildingContainer::PostLoadHK(ABuildingContainer* This)

@@ -2408,8 +2408,11 @@ namespace
     };
 
     // UFortCameraMode_ThirdPerson: the camera sits CameraSpaceForwardDistance along the view (-280 in
-    // Athena_PlayerCameraModeBase and v3_PlayerCameraModeBase: behind) from its origin, ViewTargetSpaceViewOffset (45 to
-    // the right, 75 up) off the pawn.
+    // Athena_PlayerCameraModeBase and v3_PlayerCameraModeBase: behind) and CameraSpaceViewOffset off its origin, and
+    // ViewTargetSpaceViewOffset (45 to the right, 75 up) off the pawn. Its UpdateCamera (1.10 0x530C00, 2.1 0x5359C0):
+    // the origin is the pawn's location, its capsule's centre (or a bone's, CameraOrigin BoneTransform); the view target
+    // space offset goes through the pawn's transform as a vector (1.10 0x518DB0, 2.1 0x51A4F0: times its Scale3D, then
+    // its rotation), so it grows with the pawn by itself; the camera space ones are rotated with the view only.
     class UFortCameraModeThirdPerson : public UObject
     {
         DefineUnrealClass(UFortCameraMode_ThirdPerson, FortniteGame)
@@ -2418,10 +2421,12 @@ namespace
         DefineUProperty(float, CameraSpaceForwardDistance)
         DefineUStructProperty(FInterpOffset, ViewTargetSpaceViewOffset)
         DefineUStructProperty(FInterpOffset, ViewTargetSpaceViewOffset_Crouch)
+        DefineUStructProperty(FInterpOffset, CameraSpaceViewOffset)
 
         static bool HasOffsets() { return Member_CameraSpaceForwardDistance.IsAvailable() && Member_ViewTargetSpaceViewOffset.IsAvailable() && FInterpOffsetData::StaticStruct(); }
         // 1.1 and 1.2 have no crouching offset.
         static bool HasCrouchOffset() { return Member_ViewTargetSpaceViewOffset_Crouch.IsAvailable(); }
+        static bool HasCameraSpaceOffset() { return Member_CameraSpaceViewOffset.IsAvailable(); }
     };
 
     struct FViewOffsetData
@@ -2569,6 +2574,10 @@ namespace
                 {
                     ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset_Crouch, Restore);
                 }
+                if (UFortCameraModeThirdPerson::HasCameraSpaceOffset())
+                {
+                    ForEachSample(ThirdPerson->CameraSpaceViewOffset, Restore);
+                }
             }
             else
             {
@@ -2585,9 +2594,13 @@ namespace
     }
 
     // Moves a camera mode to the pawn's scale, then Back further behind the player and Up higher, keeping it as it was.
-    // The camera's offsets from the pawn (its distance behind and to the side by the pawn's largest scale, its height by
-    // its height's) grow and shrink with it (#185): the pawn's origin, which the camera looks from, moves up and down
-    // with its capsule, so at any scale the camera frames it as it frames a pawn at 1, closer for a smaller one.
+    // At any scale the camera frames the pawn as it frames one at 1 (#185), closer for a smaller one: the origin it
+    // looks from is the pawn's centre, which rises with its capsule, and every offset from it grows with the pawn, the
+    // ones along the view by its largest scale. The third person mode's view target space offset is scaled by the game
+    // itself (the pawn's transform), so Core scales only its camera space ones, and its Up goes in divided by the
+    // pawn's height scale, so the game's scaling makes it Up again. At scale 3 that puts the camera 225 over the
+    // pawn's centre (75 x 3) and 840 behind (280 x 3); scaling the offset too put it 675 up (75 x 3 x 3). The older 3P
+    // mode adds its offsets to the pawn's view location unscaled, so Core scales all of them.
     void AdjustCameraMode(UObject* Mode, float Back, float Up, const FVector& Scale)
     {
         const float Far = std::max({ Scale.X, Scale.Y, Scale.Z });
@@ -2600,16 +2613,26 @@ namespace
             Adjustment.bAdjusted = true;
             Adjustment.ForwardDistance = ThirdPerson->CameraSpaceForwardDistance;
             ThirdPerson->CameraSpaceForwardDistance = Adjustment.ForwardDistance * Far - Back;
-            const auto Raise = [&Adjustment, Up, Far, &Scale](FInterpOffsetData& Sample)
+            const float PawnUp = Up / std::max(Scale.Z, 0.01f);
+            const auto Raise = [&Adjustment, PawnUp](FInterpOffsetData& Sample)
             {
                 const FVector Offset = Sample.ViewOffset;
                 Adjustment.Offsets.push_back(Offset);
-                Sample.ViewOffset = FVector(Offset.X * Far, Offset.Y * Far, Offset.Z * Scale.Z + Up);
+                Sample.ViewOffset = FVector(Offset.X, Offset.Y, Offset.Z + PawnUp);
             };
             ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset, Raise);
             if (UFortCameraModeThirdPerson::HasCrouchOffset())
             {
                 ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset_Crouch, Raise);
+            }
+            if (UFortCameraModeThirdPerson::HasCameraSpaceOffset())
+            {
+                ForEachSample(ThirdPerson->CameraSpaceViewOffset, [&Adjustment, Far](FInterpOffsetData& Sample)
+                {
+                    const FVector Offset = Sample.ViewOffset;
+                    Adjustment.Offsets.push_back(Offset);
+                    Sample.ViewOffset = FVector(Offset.X * Far, Offset.Y * Far, Offset.Z * Far);
+                });
             }
         }
         else if (IsA(Mode, UFort3PCameraModeOffsets::StaticClass()) && UFort3PCameraModeOffsets::HasOffsets() && FViewOffsetData::StaticStruct())

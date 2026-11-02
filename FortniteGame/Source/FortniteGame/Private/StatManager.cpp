@@ -6,6 +6,19 @@
 #include <cwchar>
 #include <string>
 
+UStat* UStatManager::FindStat(FName StatName)
+{
+    const TArray<UStat*>& AllStats = Stats;
+    for (UStat* Each : AllStats)
+    {
+        if (Each && static_cast<FName>(Each->StatName) == StatName)
+        {
+            return Each;
+        }
+    }
+    return nullptr;
+}
+
 int32_t UStatManager::GetStatValue(FName StatName, EStatRecordingPeriod Period)
 {
     if (!Finder::ResolveMatchStatsLive())

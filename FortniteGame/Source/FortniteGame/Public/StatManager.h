@@ -14,6 +14,16 @@ class EStatRecordingPeriod
     DefineUEnumValue(Map)
 };
 
+// How UStatManager::ModifyStat changes a stat's value in each period it tracks: adds the amount (Delta), sets it (Set)
+// or keeps the larger of the two (Maximum).
+class EStatMod
+{
+    DefineUnrealEnum(EStatMod, FortniteGame)
+    DefineUEnumValue(Delta)
+    DefineUEnumValue(Set)
+    DefineUEnumValue(Maximum)
+};
+
 // One of a player's stats: its name and, natively, a value per recording period (doubles).
 class UStat : public UObject
 {
@@ -39,6 +49,9 @@ class UStatManager : public UObject
 public:
     DefineUProperty(TArray<UStat*>, Stats)
 
+    // The player's stat of that name, nullptr when they have none: UStatManager::ModifyStat (2.1 0x91C510) changes only a
+    // stat that exists ("Attempt to modify stat '%s' failed as it cannot be found!").
+    UStat* FindStat(FName StatName);
     // The stat's value in Period, rounded, 0 when the player has no such stat (1.10 0x9006E0).
     int32_t GetStatValue(FName StatName, EStatRecordingPeriod Period);
     // The sum of "<source>.<Stat>" over every source the player has the stat for: what ModifyStatForAllSources

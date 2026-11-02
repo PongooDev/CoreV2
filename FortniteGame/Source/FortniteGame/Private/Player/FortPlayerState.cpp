@@ -11,7 +11,9 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
+#include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
+#include "StatManager.h"
 #include "Templates/Casts.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
@@ -226,6 +228,21 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
     {
         KillScore = NewKillScore;
         ForceNetUpdate();
+    }
+
+    // The kills are the player's AthenaKills stat too, which a progressive cosmetic weapon watches (1.11 and 2.1's Candy
+    // Axe: WeaponProgressiveCosmeticStatName). On the server the weapon finds or adds the stat in its controller's
+    // StatManager when it's equipped and binds to its changes (2.1 0x9BB77E), each change setting its replicated
+    // CosmeticStatValue to the stat's Life value (0x9B8EE0); the owner's client then lights the axe
+    // (OnRep_CosmeticStatValue: K2_OnProgressiveCosmeticWatchedStatChanged). Nothing in these builds sets the stat (its
+    // FName is made, 0x9BBA0, and never used): the server code that did is compiled out. A weapon equipped after the
+    // kills adds the stat at 0, so it's set whenever it differs, not only when KillScore changes.
+    static const FName AthenaKills(L"AthenaKills", FNAME_Find);
+    AFortPlayerController* Controller = AthenaKills != FName() ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(GetOwner())) : nullptr;
+    UStatManager* Stats = Controller ? static_cast<UStatManager*>(Controller->StatManager) : nullptr;
+    if (Stats && Stats->FindStat(AthenaKills) && Stats->GetStatValue(AthenaKills, EStatRecordingPeriod::GetLife()) != KillScore)
+    {
+        Controller->ServerModifyStat_Implementation(AthenaKills, KillScore, EStatMod::GetSet(), false);
     }
     if (!Member_TeamKillScore.IsAvailable())
     {

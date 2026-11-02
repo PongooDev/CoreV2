@@ -110,6 +110,7 @@ public:
     DefineUFunction(ServerUpgradeBuildingActor)
     DefineUFunction(FortClientPlaySoundAtLocation)
     DefineUFunction(ServerPlayEmoteItem)
+    DefineUFunction(ServerModifyStat)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
@@ -171,6 +172,9 @@ public:
     // Match stats (FortPlayerControllerMatchStats.cpp): the player's end-of-match screen gets their stats once their
     // place is final (21.40's AFortPlayerController::SendMatchStatsForPlayer; 1.10's is stripped).
     void SendMatchStatsForPlayer();
+    // The build's own AFortPlayerController::ServerModifyStat_Implementation (1.11 0x8AF900, 2.1 0x8B4C00): the
+    // StatManager's UStatManager::ModifyStat(StatName, Amount, ModType), then a save of the stats if bForceStatSave.
+    void ServerModifyStat_Implementation(FName StatName, int32_t Amount, uint8_t ModType, bool bForceStatSave);
 
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
     // The game's own removals from a player's inventory (IFortInventoryOwnerInterface::RemoveInventoryItem) reach Core.

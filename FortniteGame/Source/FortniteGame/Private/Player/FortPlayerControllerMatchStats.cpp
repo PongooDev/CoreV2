@@ -5,8 +5,10 @@
 #include "Athena/FortPlayerStateAthena.h"
 #include "AthenaPlayerMatchReport.h"
 #include "Engine/World.h"
+#include "Finder.h"
 #include "GameFramework/PlayerState.h"
 #include "Logging/LogMacros.h"
+#include "ObjectLayout.h"
 #include "StatManager.h"
 #include "Templates/Casts.h"
 
@@ -136,5 +138,18 @@ void AFortPlayerController::SendMatchStatsForPlayer()
         Value(FAthenaMatchStats::StatRangedShots()), Value(FAthenaMatchStats::StatRangedHit()), Value(FAthenaMatchStats::StatRangedMiss()),
         std::max(Value(FAthenaMatchStats::StatCriticalShots()), Value(FAthenaMatchStats::StatCriticalHitsToHostiles())),
         Value(FAthenaMatchStats::StatTravelDistanceGround()), Value(FAthenaMatchStats::StatMaterialsGathered()), Value(FAthenaMatchStats::StatMaterialsUsed()));
+#endif
+}
+
+void AFortPlayerController::ServerModifyStat_Implementation(FName StatName, int32_t Amount, uint8_t ModType, bool bForceStatSave)
+{
+#if WITH_SERVER_CODE
+    // The RPC's exec thunk ends in the implementation's slot (2.1 0x1C0, after ServerModifyStat_Validate's 0x1BF).
+    static const int32_t Index = Finder::ImplementationIndex(FindStaticFunction_ServerModifyStat());
+    if (Index < 0 || Role != ROLE_Authority)
+    {
+        return;
+    }
+    CallVirtual<void>(this, Index, StatName, Amount, ModType, bForceStatSave);
 #endif
 }

@@ -178,7 +178,7 @@ namespace Finder
     // SendStatEventWithTags' typed wrapper's arguments (the quest manager, type, target, three tag containers, count, flush).
     const std::vector<uint8_t*>& StrippedQuestStatEventCalls();
     bool ResolveAthenaHeroLive();
-    uint8_t* AircraftPhasePlayerCleanupCall();
+    uint8_t* AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset);
     bool ResolveAthenaMenuHero();
     bool ResolveAthenaHUDPawnBinding();
     bool ResolveMcpProfileQuery();

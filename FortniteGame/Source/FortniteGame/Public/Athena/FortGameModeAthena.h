@@ -70,7 +70,8 @@ public:
 
 private:
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeAthena* This, AController* NewPlayer, AActor* StartSpot);
-    static void AircraftPhasePlayerCleanupCall(AController* Controller);
+    // The arguments are AFortPlayerController::ActivateSlot's; the 1.7.2 call it also takes passes only the controller.
+    static void AircraftPhasePlayerCleanupCall(AController* Controller, uint8_t InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
     static inline void (*ScoreBuildingConstructionOG)(AFortGameModeAthena* This, AController* Builder, ABuildingSMActor* Building) = nullptr;
     static void ScoreBuildingConstructionHK(AFortGameModeAthena* This, AController* Builder, ABuildingSMActor* Building);
 };

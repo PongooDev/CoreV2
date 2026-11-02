@@ -998,18 +998,25 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_ImplementationHK(AFortGameModeAt
 void AFortGameModeAthena::HookCallSites()
 {
     // StartAircraftPhase's per-player cleanup after the warmup pawn is destroyed is stripped (a call to the shared empty
-    // function), so the warmup island's loot went onto the aircraft (#86).
-    if (uint8_t* Call = Finder::AircraftPhasePlayerCleanupCall())
+    // function), so the warmup island's loot went onto the aircraft (#86). 2.2 compiles in the call it took on 1.8.1 and
+    // later (AFortPlayerController::ActivateSlot), which removes nothing, so the loot went onto the aircraft again (#190).
+    if (uint8_t* Call = Finder::AircraftPhasePlayerCleanupCall(AFortPlayerController::QuickBarsOffset()))
     {
         Hooks::RedirectCall(L"AFortGameModeAthena::StartAircraftPhase player cleanup", Call, reinterpret_cast<void*>(&AircraftPhasePlayerCleanupCall));
     }
 }
 
-void AFortGameModeAthena::AircraftPhasePlayerCleanupCall(AController* Controller)
+void AFortGameModeAthena::AircraftPhasePlayerCleanupCall(AController* Controller, uint8_t InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot)
 {
     if (AFortPlayerControllerAthena* PlayerController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)))
     {
         PlayerController->ResetToStartingItems();
+    }
+
+    // Where the call was ActivateSlot's (2.2), the harvesting tool's slot is still activated, once the warmup items are gone.
+    if (Natives::AFortPlayerController_ActivateSlot)
+    {
+        Natives::AFortPlayerController_ActivateSlot(reinterpret_cast<AFortPlayerController*>(Controller), InQuickBar, Slot, ActivateDelay, bUpdatePreviousFocusedSlot);
     }
 }
 

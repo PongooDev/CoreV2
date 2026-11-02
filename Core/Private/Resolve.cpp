@@ -6663,7 +6663,7 @@ bool Finder::ResolveLootTierRedirectLive()
     return true;
 }
 
-uint8_t* Finder::AircraftPhasePlayerCleanupCall()
+uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
 {
     // AFortGameModeAthena::StartAircraftPhase (1.7.2 0x3FFB60) binds the aircraft's delegates by name; OnAircraftFlightEnded
     // (0x3F37D0) unbinds them with copies of the same strings and calls nothing stripped. For each player the phase start
@@ -6673,7 +6673,18 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall()
     // controller-only call: only the (controller, 0, 0, 0.0f, true) one is left (1.8.1 0x437CD1, 1.8.2 0x438FA1, with
     // xorps xmm3, xmm3 before it), just before the warmup pawn is destroyed. It gets the controller in rcx too, so it takes
     // the cleanup when no function has the pair.
+    // That one is AFortPlayerController::ActivateSlot(Primary, 0, 0.0f, true), the harvesting tool's slot: 2.2 (0x42A960)
+    // compiles it in (0x42ADA1 calls 0x85DCA0: if QuickBars (mov rcx, [rcx+1B60h]), its ServerActivateSlotInternal), so
+    // there it is no stub and the cleanup went with it (#190). Nothing else in 2.2's aircraft phase removes the warmup
+    // island's items: OnAircraftExitedDropZone (0x41EF30) only restarts or kicks the players. That call takes the cleanup
+    // too, and the slot is still activated after it (Natives::AFortPlayerController_ActivateSlot).
     std::vector<uintptr_t> LoneStubCalls;
+    std::vector<std::pair<uintptr_t, uintptr_t>> ActivateSlotCalls;
+    const auto IsActivateSlot = [QuickBarsOffset](uintptr_t Target)
+    {
+        return QuickBarsOffset > 0 && IsInText(Target) && Byte(Target) == 0x48 && Byte(Target + 1) == 0x8B && Byte(Target + 2) == 0x89
+            && *reinterpret_cast<const int32_t*>(Target + 3) == QuickBarsOffset;
+    };
     for (const uintptr_t Ref : Finder::StringRefs(L"&AFortGameModeAthena::OnAircraftEnteredDropZone"))
     {
         const uintptr_t Function = Finder::FunctionStart(Ref);
@@ -6684,6 +6695,10 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall()
             if (reinterpret_cast<void*>(Target) == Natives::SharedEmptyFunction)
             {
                 StubCalls.push_back(Site);
+            }
+            else if (IsActivateSlot(Target) && FindInstruction(Site - 0x14, Site, { 0x0F, 0x57, 0xDB }))
+            {
+                ActivateSlotCalls.emplace_back(Site, Target);
             }
         }
         if (StubCalls.size() == 2)
@@ -6700,6 +6715,14 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall()
     {
         Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}, before the warmup pawn is destroyed", Finder::FunctionStart(LoneStubCalls[0]) - Finder::ImageBase(), LoneStubCalls[0] - Finder::ImageBase());
         return reinterpret_cast<uint8_t*>(LoneStubCalls[0]);
+    }
+    if (LoneStubCalls.empty() && ActivateSlotCalls.size() == 1)
+    {
+        const auto [Site, Target] = ActivateSlotCalls[0];
+        Natives::AFortPlayerController_ActivateSlot = reinterpret_cast<decltype(Natives::AFortPlayerController_ActivateSlot)>(Target);
+        Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}, its call to AFortPlayerController::ActivateSlot (0x{:X}), before the warmup pawn is destroyed",
+            Finder::FunctionStart(Site) - Finder::ImageBase(), Site - Finder::ImageBase(), Target - Finder::ImageBase());
+        return reinterpret_cast<uint8_t*>(Site);
     }
     Log::Info(L"Finder: no stripped player cleanup in AFortGameModeAthena::StartAircraftPhase in this build");
     return nullptr;

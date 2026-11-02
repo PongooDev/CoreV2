@@ -161,7 +161,8 @@ public:
     // Core's own command, "cheat clearequippeditem" (#155): the item the player holds leaves their inventory.
     void ClearEquippedItem(const FString& Arguments);
     // Core's own command, "cheat setscale <x> [y z] | reset" (#155): the player's pawn at that scale, collision included,
-    // replicated to every client, until it respawns. FortCheatManagerDisguise.cpp.
+    // replicated to every client, until it respawns; the player's camera follows it (StartDisguiseView, #185).
+    // FortCheatManagerDisguise.cpp.
     void SetScale(const FString& Arguments);
     // Core's own command, "cheat progressquest [quest] [amount | all]" (#155): an open objective of the player's quest
     // (Battle Royale's challenges, Save the World's quests) moves on by the amount, saved to their profile through the
@@ -266,7 +267,8 @@ public:
     static void ReapplyMaxHealthAndShield(AFortPlayerController* PlayerController);
     // Client (#137): every frame, the player's own puppet sits on their pawn (the server sends this client none of its
     // movement), every disguise loses its collision here, and the camera pulls back for a disguise bigger than the
-    // player. Nothing is hooked: Core's game thread tick, reflected properties and UFunctions.
+    // player and moves with the pawn's scale ("cheat setscale", #185). Nothing is hooked: Core's game thread tick,
+    // reflected properties and UFunctions.
     static void StartDisguiseView();
     // Client: "cheat disguiseview <back | hide | normal>" (how the player sees their own disguise) runs here, not on the
     // server; true when Msg was it.

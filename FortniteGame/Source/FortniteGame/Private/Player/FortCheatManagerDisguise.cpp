@@ -2506,7 +2506,7 @@ namespace
         bool bThirdPerson = false;
         bool bAdjusted = false;
         float ForwardDistance = 0.0f;
-        std::vector<float> OffsetZ;
+        std::vector<FVector> Offsets;
         FVector High;
         FVector Mid;
         FVector Low;
@@ -2514,6 +2514,16 @@ namespace
     std::vector<FCameraAdjustment> CameraAdjustments;
     float AppliedBack = 0.0f;
     float AppliedUp = 0.0f;
+    FVector AppliedScale(1.0f, 1.0f, 1.0f);
+
+    // The player's own pawn's scale ("cheat setscale", #185): its root's RelativeScale3D, which the server replicates to
+    // this client with it. Read at every scan.
+    FVector OwnScale(1.0f, 1.0f, 1.0f);
+
+    bool IsUnscaled(const FVector& Scale)
+    {
+        return std::fabs(Scale.X - 1.0f) <= 0.01f && std::fabs(Scale.Y - 1.0f) <= 0.01f && std::fabs(Scale.Z - 1.0f) <= 0.01f;
+    }
 
     ULONGLONG NextScan = 0;
     constexpr ULONGLONG ScanMs = 250;
@@ -2549,11 +2559,9 @@ namespace
                 size_t Next = 0;
                 const auto Restore = [&Adjustment, &Next](FInterpOffsetData& Sample)
                 {
-                    if (Next < Adjustment.OffsetZ.size())
+                    if (Next < Adjustment.Offsets.size())
                     {
-                        FVector Offset = Sample.ViewOffset;
-                        Offset.Z = Adjustment.OffsetZ[Next++];
-                        Sample.ViewOffset = Offset;
+                        Sample.ViewOffset = Adjustment.Offsets[Next++];
                     }
                 };
                 ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset, Restore);
@@ -2573,11 +2581,16 @@ namespace
         CameraAdjustments.clear();
         AppliedBack = 0.0f;
         AppliedUp = 0.0f;
+        AppliedScale = FVector(1.0f, 1.0f, 1.0f);
     }
 
-    // Moves a camera mode Back further behind the player and Up higher, keeping it as it was.
-    void AdjustCameraMode(UObject* Mode, float Back, float Up)
+    // Moves a camera mode to the pawn's scale, then Back further behind the player and Up higher, keeping it as it was.
+    // The camera's offsets from the pawn (its distance behind and to the side by the pawn's largest scale, its height by
+    // its height's) grow and shrink with it (#185): the pawn's origin, which the camera looks from, moves up and down
+    // with its capsule, so at any scale the camera frames it as it frames a pawn at 1, closer for a smaller one.
+    void AdjustCameraMode(UObject* Mode, float Back, float Up, const FVector& Scale)
     {
+        const float Far = std::max({ Scale.X, Scale.Y, Scale.Z });
         FCameraAdjustment Adjustment;
         Adjustment.Mode = TWeakObjectPtr<UObject>(Mode);
         if (IsA(Mode, UFortCameraModeThirdPerson::StaticClass()) && UFortCameraModeThirdPerson::HasOffsets())
@@ -2586,13 +2599,12 @@ namespace
             Adjustment.bThirdPerson = true;
             Adjustment.bAdjusted = true;
             Adjustment.ForwardDistance = ThirdPerson->CameraSpaceForwardDistance;
-            ThirdPerson->CameraSpaceForwardDistance = Adjustment.ForwardDistance - Back;
-            const auto Raise = [&Adjustment, Up](FInterpOffsetData& Sample)
+            ThirdPerson->CameraSpaceForwardDistance = Adjustment.ForwardDistance * Far - Back;
+            const auto Raise = [&Adjustment, Up, Far, &Scale](FInterpOffsetData& Sample)
             {
-                FVector Offset = Sample.ViewOffset;
-                Adjustment.OffsetZ.push_back(Offset.Z);
-                Offset.Z += Up;
-                Sample.ViewOffset = Offset;
+                const FVector Offset = Sample.ViewOffset;
+                Adjustment.Offsets.push_back(Offset);
+                Sample.ViewOffset = FVector(Offset.X * Far, Offset.Y * Far, Offset.Z * Scale.Z + Up);
             };
             ForEachSample(ThirdPerson->ViewTargetSpaceViewOffset, Raise);
             if (UFortCameraModeThirdPerson::HasCrouchOffset())
@@ -2607,26 +2619,28 @@ namespace
             Adjustment.High = Offsets.OffsetHigh;
             Adjustment.Mid = Offsets.OffsetMid;
             Adjustment.Low = Offsets.OffsetLow;
-            Offsets.OffsetHigh = FVector(Adjustment.High.X - Back, Adjustment.High.Y, Adjustment.High.Z + Up);
-            Offsets.OffsetMid = FVector(Adjustment.Mid.X - Back, Adjustment.Mid.Y, Adjustment.Mid.Z + Up);
-            Offsets.OffsetLow = FVector(Adjustment.Low.X - Back, Adjustment.Low.Y, Adjustment.Low.Z + Up);
+            Offsets.OffsetHigh = FVector(Adjustment.High.X * Far - Back, Adjustment.High.Y * Far, Adjustment.High.Z * Scale.Z + Up);
+            Offsets.OffsetMid = FVector(Adjustment.Mid.X * Far - Back, Adjustment.Mid.Y * Far, Adjustment.Mid.Z * Scale.Z + Up);
+            Offsets.OffsetLow = FVector(Adjustment.Low.X * Far - Back, Adjustment.Low.Y * Far, Adjustment.Low.Z * Scale.Z + Up);
         }
         // A mode with neither (the death camera...) is kept as it is, and remembered so it isn't looked at again.
         CameraAdjustments.push_back(std::move(Adjustment));
     }
 
-    // Every camera mode the player's camera blends is moved back and up, the ones it starts blending later (aiming,
-    // building...) as they come; a different distance puts them back first.
-    void ApplyCamera(APlayerController* PlayerController, float Back, float Up)
+    // Every camera mode the player's camera blends is moved to the pawn's scale and back and up, the ones it starts
+    // blending later (aiming, building...) as they come; a different distance or scale puts them back first.
+    void ApplyCamera(APlayerController* PlayerController, float Back, float Up, const FVector& Scale)
     {
-        if (std::fabs(Back - AppliedBack) > 1.0f || std::fabs(Up - AppliedUp) > 1.0f)
+        if (std::fabs(Back - AppliedBack) > 1.0f || std::fabs(Up - AppliedUp) > 1.0f || std::fabs(Scale.X - AppliedScale.X) > 0.01f
+            || std::fabs(Scale.Y - AppliedScale.Y) > 0.01f || std::fabs(Scale.Z - AppliedScale.Z) > 0.01f)
         {
             RestoreCamera();
             AppliedBack = Back;
             AppliedUp = Up;
+            AppliedScale = Scale;
         }
         UObject* CameraManager = reinterpret_cast<UObject*>(static_cast<APlayerCameraManager*>(PlayerController->PlayerCameraManager));
-        if ((Back <= 0.0f && Up <= 0.0f) || !IsA(CameraManager, AFortPlayerCameraBaseStack::StaticClass()) || !AFortPlayerCameraBaseStack::HasCameraBlendStack() || !FActiveFortCamera::StaticStruct())
+        if ((Back <= 0.0f && Up <= 0.0f && IsUnscaled(Scale)) || !IsA(CameraManager, AFortPlayerCameraBaseStack::StaticClass()) || !AFortPlayerCameraBaseStack::HasCameraBlendStack() || !FActiveFortCamera::StaticStruct())
         {
             return;
         }
@@ -2637,7 +2651,7 @@ namespace
             const bool bSeen = std::any_of(CameraAdjustments.begin(), CameraAdjustments.end(), [Mode](const FCameraAdjustment& Adjustment) { return Adjustment.Mode.Get() == Mode; });
             if (Mode && !bSeen)
             {
-                AdjustCameraMode(Mode, Back, Up);
+                AdjustCameraMode(Mode, Back, Up, Scale);
             }
         }
     }
@@ -2897,7 +2911,7 @@ namespace
         }
     }
 
-    void ShowOwnDisguise(APlayerController* PlayerController, AActor* Actor)
+    void ShowOwnDisguise(AActor* Actor)
     {
         const bool bHide = DisguiseView == EDisguiseView::Hide;
         if (bHide != Own.bHiddenHere)
@@ -2905,9 +2919,18 @@ namespace
             Actor->SetActorHiddenInGame(bHide);
             Own.bHiddenHere = bHide;
         }
-        if (DisguiseView == EDisguiseView::Back)
+    }
+
+    // The camera at the player's pawn's scale ("cheat setscale", #185), and pulled back and up for their disguise on top
+    // ("cheat disguiseview back"), measured from the scaled pawn, so both together fit in the view; neither puts it back.
+    void UpdateCamera(APlayerController* PlayerController, AActor* Disguise)
+    {
+        const bool bDisguiseBack = Disguise && DisguiseView == EDisguiseView::Back;
+        const float Back = bDisguiseBack ? ChosenBack.value_or(Own.Back) : 0.0f;
+        const float Up = bDisguiseBack ? ChosenUp.value_or(Own.Up) : 0.0f;
+        if (PlayerController && (Back > 0.0f || Up > 0.0f || !IsUnscaled(OwnScale)))
         {
-            ApplyCamera(PlayerController, ChosenBack.value_or(Own.Back), ChosenUp.value_or(Own.Up));
+            ApplyCamera(PlayerController, Back, Up, OwnScale);
         }
         else if (!CameraAdjustments.empty())
         {
@@ -2950,6 +2973,17 @@ namespace
         {
             NextScan = Now + ScanMs;
             ScanDisguises(World, LocalPawn);
+            const FVector Scale = LocalPawn ? LocalPawn->GetActorScale3D() : FVector(1.0f, 1.0f, 1.0f);
+            if (std::fabs(Scale.X - OwnScale.X) > 0.01f || std::fabs(Scale.Y - OwnScale.Y) > 0.01f || std::fabs(Scale.Z - OwnScale.Z) > 0.01f)
+            {
+                OwnScale = Scale;
+                UE_LOG(LogFortDisguise, Log, TEXT("ScaleView: your pawn is at scale %g x %g x %g: the camera %s"), Scale.X, Scale.Y, Scale.Z,
+                    IsUnscaled(Scale) ? TEXT("is where it was") : TEXT("moves with it"));
+            }
+        }
+        else if (!LocalPawn)
+        {
+            OwnScale = FVector(1.0f, 1.0f, 1.0f);
         }
         if (!OtherPuppets.empty())
         {
@@ -2962,7 +2996,7 @@ namespace
             SetOwnDisguise(nullptr, nullptr);
             Actor = nullptr;
         }
-        else if (!Actor && (Own.Pawn.IsValid() || !CameraAdjustments.empty()))
+        else if (!Actor && Own.Pawn.IsValid())
         {
             SetOwnDisguise(nullptr, nullptr);
         }
@@ -2972,8 +3006,9 @@ namespace
             {
                 FollowPawn(PlayerController, LocalPawn, Actor);
             }
-            ShowOwnDisguise(PlayerController, Actor);
+            ShowOwnDisguise(Actor);
         }
+        UpdateCamera(PlayerController, Actor);
         GameThread::Enqueue(&TickDisguiseView);
     }
 }

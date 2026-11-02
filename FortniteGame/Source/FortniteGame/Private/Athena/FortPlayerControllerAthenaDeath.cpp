@@ -171,7 +171,10 @@ void AFortPlayerControllerAthena::OnPawnDiedHK(AFortPlayerControllerAthena* This
 bool AFortPlayerControllerAthena::IsTeamOut()
 {
     // 1.9 0x42A310: not before the aircraft has gone, then once none of TeamMembers has a pawn that is still in play (a
-    // dead pawn is torn off before its controller hears of the death, 1.9.1 0x426B90).
+    // dead pawn is torn off before its controller hears of the death, 1.9.1 0x426B90). 1.11 moved only the HUD's list to
+    // SquadMembers: TeamMembers is still the team the place and the wins are for (OnPawnDied fills it), and the team is
+    // out as the game counts it, when no one on the team stands (2.1's count of the team's standing players, 0x43BC30,
+    // reads TeamMembers; its DBNO handling, 0x48F2E0, looks for a teammate standing on the team, not the squad).
     UWorld* World = GetWorld();
     AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
     if (GameState && GameState->GamePhase <= EAthenaGamePhase::GetAircraft())

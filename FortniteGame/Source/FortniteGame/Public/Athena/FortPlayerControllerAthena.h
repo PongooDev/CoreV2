@@ -70,11 +70,14 @@ public:
     DefineUProperty(TArray<UFortHeroType*>, DefaultHeroes)
     // 1.8: the player's loadout. Athena_PlayerController_C's default has DefaultGlider and DefaultPickaxe in it.
     DefineUStructProperty(FFortAthenaLoadout, CustomizationLoadout)
-    // Client: the player's team. The HUD's team list takes their talking states in this order (GetTeamTalking, 1.7.2
-    // 0x430440, and the controller's tick, 0x417630, which tells the HUD when they change).
+    // The player's team. Server: filled once, while empty, by the controller's fill (1.9 slot 0x32E, 1.11 and 2.1 0x338:
+    // the game state's and the game mode's inactive player states on the controller's team, 50v50's whole 50), which the
+    // team's place and the wins read. Client up to 1.10: the HUD's team list takes their talking states in this order
+    // (GetTeamTalking, 1.7.2 0x430440, and the controller's tick, 0x417630, which tells the HUD when they change).
     DefineUProperty(TArray<AFortPlayerStateAthena*>, TeamMembers)
-    // 1.11: the player's squad, which the HUD's team list follows instead (GetSquadTalking, 0x43BC20, and the
-    // controller's tick read their talking states from it; TeamMembers stays for the game mode's teams).
+    // 1.11: the player's squad (AFortPlayerStateAthena::SquadId) within the team, which the HUD's team list follows
+    // instead (GetSquadTalking, 0x43BC20, and the controller's tick read their talking states from it). The client adds
+    // to it as squads replicate (OnRep_SquadId); the server fills it as it does TeamMembers (slot 0x339).
     DefineUProperty(TArray<AFortPlayerStateAthena*>, SquadMembers)
     // Server: the player is in the game mode's AlivePlayers (AddToAlivePlayers sets it, RemoveFromAlivePlayers clears it).
     DefineUProperty(bool, bMarkedAlive)

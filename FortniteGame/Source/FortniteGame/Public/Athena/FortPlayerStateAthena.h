@@ -56,6 +56,11 @@ public:
     // each of the team's players.
     DefineUProperty(int32_t, TeamKillScore)
     DefineUStructProperty(FDeathInfo, DeathInfo)
+    // 1.11: the player's squad within their team, 0 for none (OnRep_SquadId adds the squad's player states to the
+    // owning controller's SquadMembers). AFortGameModeAthena::PlacePlayerOnTeam (2.1 0x444780) sets it from the
+    // dedicated session's squads, which the match assignment's teams[i] made squad i + 1 (0x738440).
+    DefineUProperty(uint8_t, SquadId)
+    static bool HasSquadId() { return Member_SquadId.IsAvailable(); }
     // 1.10: the other teams' players the player knocked down (the DBNO handling adds to it), and those they hit (the
     // hit's stat, 0x43D8E0, adds each to the set), for the end-of-match screen's Downs and Assists.
     DefineUProperty(int32_t, DownScore)

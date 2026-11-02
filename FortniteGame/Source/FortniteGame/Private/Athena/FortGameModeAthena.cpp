@@ -428,6 +428,8 @@ namespace
         bool bWarnedNoTeam = false;
         std::set<std::wstring> LateIds;
         std::set<std::wstring> Settled;
+        // 1.11: the squads Core gave late players (PlaceLatePlayerInSquad).
+        std::set<uint8_t> LateSquads;
     };
 
     std::string NarrowId(const std::wstring& Id)
@@ -684,6 +686,69 @@ namespace
         Watch.bOpened = true;
     }
 
+    // 1.11: a late player's squad (AFortPlayerStateAthena::SquadId). AFortGameModeAthena::PlacePlayerOnTeam (2.1
+    // 0x444780) gives a joining player their team (AFortGameMode's) and then, on a dedicated session, their squad from
+    // the session's squads by account id (0x7300A0), which only the match assignment fills: each player of its teams[i]
+    // is in squad i + 1 (MMS's beacon setup, 0x738440). A player Core reserved a place for isn't in them, so their
+    // squad stayed 0, none: the squad bar and its voice list left them out (OnRep_SquadId, 0x45D790, skips squad 0),
+    // while the server's SquadMembers fill (0x433FD0) and SpectateOnDeath (0x44C6F0), which compare squads only, took
+    // every other squadless player for a squadmate, whatever their team.
+    // So once the game has placed them they join their party's squad when a member of it is on their team, as the
+    // assignment puts a party in one squad, else a squad of their own. The assignment's squads count up from 1 and its
+    // players may still be loading, so Core's count down from 255, clear of them. Returns whether the player is placed.
+    bool PlaceLatePlayerInSquad(AFortGameModeAthena* GameMode, FWarmupWatch& Watch, const std::wstring& Id, APlayerController* Controller)
+    {
+        if (!AFortPlayerStateAthena::HasSquadId())
+        {
+            return true;
+        }
+        AFortPlayerStateAthena* State = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState)));
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        // Not placed yet: the player state starts on Spectator (2.1 0x48BFD0).
+        if (!State || !GameState || State->TeamIndex == EFortTeam::GetSpectator())
+        {
+            return false;
+        }
+        if (State->SquadId != 0)
+        {
+            return true;
+        }
+
+        const auto Party = std::find_if(Watch.Parties.begin(), Watch.Parties.end(), [&](const std::vector<std::wstring>& Members) { return std::find(Members.begin(), Members.end(), Id) != Members.end(); });
+        std::set<uint8_t> Used = Watch.LateSquads;
+        uint8_t Squad = 0;
+        const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
+        for (APlayerState* PlayerState : PlayerArray)
+        {
+            AFortPlayerStateAthena* Other = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            const uint8_t OtherSquad = Other && Other != State ? static_cast<uint8_t>(Other->SquadId) : 0;
+            if (OtherSquad == 0)
+            {
+                continue;
+            }
+            Used.insert(OtherSquad);
+            const std::wstring OtherId = Other->UniqueId.ToString().ToStdString();
+            if (Squad == 0 && Party != Watch.Parties.end() && Other->TeamIndex == State->TeamIndex && std::find(Party->begin(), Party->end(), OtherId) != Party->end())
+            {
+                Squad = OtherSquad;
+            }
+        }
+        for (uint32_t Candidate = 255; Squad == 0 && Candidate > 0; --Candidate)
+        {
+            Squad = Used.contains(static_cast<uint8_t>(Candidate)) ? 0 : static_cast<uint8_t>(Candidate);
+        }
+        if (Squad == 0)
+        {
+            Log::Warning(L"Battle Royale: no squad is free for {}, so they have none", Id);
+            return true;
+        }
+        Watch.LateSquads.insert(Squad);
+        State->SquadId = Squad;
+        State->ForceNetUpdate();
+        Log::Info(L"Battle Royale: {} is in squad {} on {}", Id, Squad, static_cast<EFortTeam>(State->TeamIndex).ToString());
+        return true;
+    }
+
     // Gives each player who joined during the warmup a team. Battle Royale's clients never talk to the beacon, so only
     // the assigned players have a reservation, and PickTeam (1.9 0x430A50) gives the beacon's team to anyone on a
     // dedicated session's match: for a player without one that is Spectator (0x6FF3D0 answers 103), which has no
@@ -694,7 +759,8 @@ namespace
     // duo and squad's 100 teams (an empty one is the smallest), and several on 50v50's two teams of 50. The beacon's
     // reservations are its state's reflected array (UPartyBeaconState::Reservations), the ids copied from the
     // connection with the game's own struct copy, and a player is looked at again until they have a player controller,
-    // in case the beacon dropped one that took too long to load (APartyBeaconHost's session timeout).
+    // in case the beacon dropped one that took too long to load (APartyBeaconHost's session timeout), and from 1.11
+    // until they have a squad (PlaceLatePlayerInSquad).
     void ReserveLatePlayers(AFortGameModeAthena* GameMode, FWarmupWatch& Watch, bool bWarmup)
     {
         UPartyBeaconState* State = BeaconStateOf(GameMode);
@@ -735,10 +801,11 @@ namespace
 
         for (const auto& [Id, Connection] : Unsettled)
         {
-            const bool bJoined = static_cast<APlayerController*>(Connection->PlayerController) != nullptr;
+            APlayerController* const Controller = static_cast<APlayerController*>(Connection->PlayerController);
+            const bool bJoined = Controller != nullptr;
             if (ReservationOf.contains(Id))
             {
-                if (bJoined)
+                if (bJoined && (!Watch.LateIds.contains(Id) || PlaceLatePlayerInSquad(GameMode, Watch, Id, Controller)))
                 {
                     Watch.Settled.insert(Id);
                 }

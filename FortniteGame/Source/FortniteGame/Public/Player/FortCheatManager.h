@@ -136,6 +136,13 @@ public:
     // and gadgets have no cooldown until it is turned off, respawns included. The game's ToggleNoCoolDown only sets a flag
     // nothing in a shipping build reads; Core takes each cooldown effect off as soon as it is applied.
     void NoCooldown(const FString& Arguments);
+    // Core's own commands, "cheat stoptimer [on | off]" and "cheat resumetimer" (#186): Save the World's mission timer,
+    // the countdown at the top of the screen, stops where it is and can't run out (the mission can't fail on time) until
+    // it is resumed, from the time it had left. Every countdown of the world's missions and their objectives goes through
+    // the game's own UFortMissionTimerComponent::PauseMissionTimer and UnpauseMissionTimer; one the mission starts while
+    // it is on stops too. Battle Royale's storm has no pause in these builds, so it is Save the World's only.
+    void StopTimer(const FString& Arguments);
+    void ResumeTimer(const FString& Arguments);
     // Core's own command, "cheat infiniteammo [on | off]" ("cheat ToggleInfiniteAmmo" too; #155): the game's
     // ToggleInfiniteAmmo flag (bInfiniteAmmo, replicated): reloads never use up the reserve, the magazine still empties.
     // Says whether it is on, where the game's toggle answered nothing the player saw.

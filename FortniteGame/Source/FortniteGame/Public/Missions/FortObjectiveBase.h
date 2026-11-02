@@ -7,6 +7,7 @@
 class AFortMission;
 class FText;
 class UFortBadgeItemDefinition;
+class UFortMissionTimerComponent;
 class UFortWorldItemDefinition;
 
 class EFortObjectiveStatus
@@ -38,6 +39,9 @@ public:
     DefineUProperty(EFortObjectiveStatus, ObjectiveStatus)
     DefineUProperty(FGameplayTagContainer, ObjectiveHandle)
     DefineUProperty(UFortBadgeItemDefinition*, ObjectiveRewardBadge)
+    DefineUProperty(UFortMissionTimerComponent*, TimerComponent)
+
+    static bool HasTimerComponent() { return Member_TimerComponent.IsAvailable(); }
 
     AFortMission* GetMission() const;
     void SetObjectiveStatus(EFortObjectiveStatus NewStatus);

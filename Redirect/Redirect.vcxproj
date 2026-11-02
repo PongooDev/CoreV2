@@ -284,6 +284,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameState.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGlobals.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortKismetLibrary.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortMissionTimerComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRewardReport.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpottableActorInterface.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortTeamInfo.h" />
@@ -479,6 +480,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameState.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGlobals.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortKismetLibrary.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortMissionTimerComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortTeamInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityManager.cpp" />

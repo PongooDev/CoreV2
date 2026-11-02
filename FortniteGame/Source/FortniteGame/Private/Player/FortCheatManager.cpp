@@ -19,6 +19,7 @@
 #include "FortGameData.h"
 #include "FortGameState.h"
 #include "FortKismetLibrary.h"
+#include "FortMissionTimerComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameModeBase.h"
@@ -727,7 +728,8 @@ namespace
         { L"Save the World", L"MakeAIsGod", L"makeaisgod", L"husks can't be hurt, toggles", ECheatMode::SaveTheWorld },
         { L"Save the World", L"MissionForceSuccess", L"missionforcesuccess", L"win the mission (missionforcefailure)", ECheatMode::SaveTheWorld },
         { L"Save the World", L"MissionForcePrimarySuccess", L"missionforceprimarysuccess 1", L"complete the main objective", ECheatMode::SaveTheWorld },
-        { L"Save the World", L"ClearRespawnTimer", L"clearrespawntimer", L"respawn without waiting", ECheatMode::SaveTheWorld },
+        { L"Save the World", nullptr, L"stoptimer [on | off]", L"the mission timer stops, can't fail on time (resumetimer)", ECheatMode::SaveTheWorld },
+        { L"Save the World", L"ClearRespawnTimer",L"clearrespawntimer", L"respawn without waiting", ECheatMode::SaveTheWorld },
         { L"Save the World", L"SetWorldDaysElapsed", L"worlddayselapsed <days>", L"time of day", ECheatMode::SaveTheWorld },
         { L"Save the World", L"SetGameDifficultyOverride", L"gamedifficultyoverride <value>", L"enemy difficulty", ECheatMode::SaveTheWorld },
         { L"Save the World", L"LoadMission", L"loadmission <mission>", L"load a mission", ECheatMode::SaveTheWorld },
@@ -2471,6 +2473,181 @@ void UFortCheatManager::NoCooldown(const FString& Arguments)
     UE_LOG(LogFortCheats, Log, TEXT("NoCooldown: %s on, %d ability systems, %d gadgets recharged"), *GetNameSafe(PlayerController), AbilitySystems, Recharged);
     Reply(AbilitySystems > 0 ? TEXT("No cooldown ON: your abilities and gadgets are ready again as soon as you use them, their charges always full (nocooldown off: normal again)")
                              : TEXT("No cooldown ON (nocooldown off: normal again); you have no abilities yet, and they'll have none once you do"));
+#endif
+}
+
+#if WITH_SERVER_CODE
+namespace
+{
+    // "cheat stoptimer" (#186): the world whose mission timers stay stopped, and the timers Core paused there, so resuming
+    // unpauses only those (one the mission paused itself stays paused).
+    TWeakObjectPtr<UWorld> TimerStoppedWorld;
+    std::vector<TWeakObjectPtr<UFortMissionTimerComponent>> StoppedTimers;
+    bool bStoppingTimers = false;
+
+    // The countdowns of the world's missions and of their active objectives (SetObjectiveTimer's), the primary mission's
+    // first.
+    std::vector<UFortMissionTimerComponent*> MissionTimers(const UObject* WorldContextObject)
+    {
+        std::vector<UFortMissionTimerComponent*> Timers;
+        for (AFortMission* Mission : CurrentMissions(WorldContextObject))
+        {
+            if (UFortMissionTimerComponent* Timer = AFortMission::HasTimerComponent() ? static_cast<UFortMissionTimerComponent*>(Mission->TimerComponent) : nullptr)
+            {
+                Timers.push_back(Timer);
+            }
+            if (!AFortObjectiveBase::HasTimerComponent())
+            {
+                continue;
+            }
+            for (AFortObjectiveBase* Objective : Mission->ActiveObjectives)
+            {
+                if (UFortMissionTimerComponent* Timer = Objective ? static_cast<UFortMissionTimerComponent*>(Objective->TimerComponent) : nullptr)
+                {
+                    Timers.push_back(Timer);
+                }
+            }
+        }
+        return Timers;
+    }
+
+    // Pauses every countdown that runs, the game's own PauseMissionTimer: the timer manager keeps its remaining time and
+    // the paused flag replicates, so the HUD's countdown stops where it is. Returns the timers it paused.
+    std::vector<UFortMissionTimerComponent*> StopMissionTimers(const UObject* WorldContextObject)
+    {
+        std::vector<UFortMissionTimerComponent*> Stopped;
+        for (UFortMissionTimerComponent* Timer : MissionTimers(WorldContextObject))
+        {
+            if (!Timer->IsMissionTimerSet() || Timer->IsMissionTimerPaused())
+            {
+                continue;
+            }
+            Timer->PauseMissionTimer();
+            if (!Timer->IsMissionTimerPaused())
+            {
+                continue;
+            }
+            Stopped.push_back(Timer);
+            if (std::none_of(StoppedTimers.begin(), StoppedTimers.end(), [Timer](const TWeakObjectPtr<UFortMissionTimerComponent>& Known) { return Known.Get() == Timer; }))
+            {
+                StoppedTimers.emplace_back(Timer);
+            }
+        }
+        return Stopped;
+    }
+
+    // Every frame on the game thread while the timers are stopped: a countdown the mission starts since (its next phase,
+    // a new objective's) stops too. Nothing is hooked; the mission sets its timers as ever.
+    void TickStopTimers()
+    {
+        UWorld* const World = TimerStoppedWorld.Get();
+        if (World)
+        {
+            StopMissionTimers(World);
+        }
+        else
+        {
+            StoppedTimers.clear();
+        }
+        bStoppingTimers = World && GameThread::Enqueue(&TickStopTimers);
+    }
+
+    FString TimeText(float Seconds)
+    {
+        const int32_t Whole = static_cast<int32_t>(std::ceil(std::max(Seconds, 0.0f)));
+        return FString::Printf(TEXT("%d:%02d"), Whole / 60, Whole % 60);
+    }
+}
+#endif
+
+void UFortCheatManager::StopTimer(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
+    const std::wstring Word = Words.empty() ? std::wstring() : Lower(Words[0]);
+    if (Words.size() > 1 || (!Word.empty() && Word != L"on" && Word != L"off"))
+    {
+        Reply(TEXT("Usage: stoptimer [on | off], the mission's countdown stops (resumetimer: it runs on); without on or off it toggles"));
+        return;
+    }
+    AFortPlayerController* PlayerController = GetPlayerController();
+    UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+    if (!World)
+    {
+        return;
+    }
+    if (CurrentMissions(World).empty())
+    {
+        // Battle Royale's storm is run by the game mode against the safe zone's shrink times; these builds have no pause
+        // for it (the safe zone's SetSafeZonePausedForPreview came much later), so there is nothing the game would stop.
+        Reply(AFortGameModeAthena::GetCurrent(PlayerController) ? TEXT("stoptimer stops Save the World's mission timer; Battle Royale's storm has no pause in this build")
+                                                                : TEXT("No mission timer to stop (Save the World missions only)"));
+        return;
+    }
+    if (!UFortMissionTimerComponent::FindStaticFunction_PauseMissionTimer() || !UFortMissionTimerComponent::FindStaticFunction_UnpauseMissionTimer()
+        || !UFortMissionTimerComponent::FindStaticFunction_IsMissionTimerSet() || !UFortMissionTimerComponent::FindStaticFunction_IsMissionTimerPaused()
+        || (!AFortMission::HasTimerComponent() && !AFortObjectiveBase::HasTimerComponent()))
+    {
+        Reply(TEXT("StopTimer needs FortMissionTimerComponent's PauseMissionTimer, which this build doesn't have"));
+        return;
+    }
+
+    const bool bStopped = TimerStoppedWorld.Get() == World;
+    const bool bEnable = Word.empty() ? !bStopped : Word == L"on";
+    if (!bEnable)
+    {
+        int32_t Resumed = 0;
+        float Remaining = -1.0f;
+        for (const TWeakObjectPtr<UFortMissionTimerComponent>& Known : StoppedTimers)
+        {
+            UFortMissionTimerComponent* Timer = Known.Get();
+            if (!Timer || Timer->GetWorld() != World || !Timer->IsMissionTimerSet() || !Timer->IsMissionTimerPaused())
+            {
+                continue;
+            }
+            Timer->UnpauseMissionTimer();
+            if (Remaining < 0.0f && UFortMissionTimerComponent::FindStaticFunction_GetMissionTimerTimeRemaining())
+            {
+                Remaining = Timer->GetMissionTimerTimeRemaining();
+            }
+            ++Resumed;
+        }
+        StoppedTimers.clear();
+        TimerStoppedWorld = TWeakObjectPtr<UWorld>();
+        UE_LOG(LogFortCheats, Log, TEXT("StopTimer: off, %d mission timers resumed"), Resumed);
+        Reply(Resumed == 0 ? FString(TEXT("Mission timer running again (none was stopped)"))
+            : Remaining >= 0.0f ? FString::Printf(TEXT("Mission timer running again from %s"), *TimeText(Remaining))
+                                : FString(TEXT("Mission timer running again")));
+        return;
+    }
+
+    TimerStoppedWorld = World;
+    const std::vector<UFortMissionTimerComponent*> Stopped = StopMissionTimers(World);
+    if (!bStoppingTimers)
+    {
+        bStoppingTimers = GameThread::Enqueue(&TickStopTimers);
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("StopTimer: on, %d mission timers paused"), static_cast<int32_t>(Stopped.size()));
+    if (Stopped.empty())
+    {
+        Reply(TEXT("Mission timer stopped: no countdown runs now, and one that starts stops too (resumetimer: it runs on)"));
+        return;
+    }
+    const float Remaining = UFortMissionTimerComponent::FindStaticFunction_GetMissionTimerTimeRemaining() ? Stopped.front()->GetMissionTimerTimeRemaining() : -1.0f;
+    Reply(Remaining >= 0.0f ? FString::Printf(TEXT("Mission timer stopped at %s; it can't run out until resumetimer, which runs it on from there"), *TimeText(Remaining))
+                            : FString(TEXT("Mission timer stopped; it can't run out until resumetimer, which runs it on from there")));
+#endif
+}
+
+void UFortCheatManager::ResumeTimer(const FString& Arguments)
+{
+#if WITH_SERVER_CODE
+    if (!SplitWords(Arguments.ToStdString()).empty())
+    {
+        Reply(TEXT("Usage: resumetimer, the mission's countdown runs on from where stoptimer stopped it"));
+        return;
+    }
+    StopTimer(FString(L"off"));
 #endif
 }
 

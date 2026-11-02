@@ -2073,13 +2073,16 @@ void AFortPlayerController::RunServerCheat(const FString& Msg)
     // "toggleinfinitedurability", whose answer only reached the server's console, and "unlimitedhealth" (or
     // "toggleunlimitedhealth"), which the game's flips without a word, and "buildwith", whose material and level never
     // reached the pieces (its client runs it too) and which answered nothing. "killscore <kills>" (or "setkillscore";
-    // Core-Backend #145) sets their kill count, for trying what reads it.
+    // Core-Backend #145) sets their kill count, for trying what reads it. "stoptimer [on | off]" and "resumetimer" (#186)
+    // stop and resume Save the World's mission timer, for every player in the world.
     using FCoreCommand = void (UFortCheatManager::*)(const FString&);
     static constexpr std::pair<const wchar_t*, FCoreCommand> CoreCommands[] = {
         { L"spawnactor", &UFortCheatManager::SpawnActor },
         { L"tpactor", &UFortCheatManager::TpActor },
         { L"nocooldown", &UFortCheatManager::NoCooldown },
         { L"togglenocooldown", &UFortCheatManager::NoCooldown },
+        { L"stoptimer", &UFortCheatManager::StopTimer },
+        { L"resumetimer", &UFortCheatManager::ResumeTimer },
         { L"infinitemag", &UFortCheatManager::InfiniteMag },
         { L"infiniteammo", &UFortCheatManager::InfiniteAmmo },
         { L"toggleinfiniteammo", &UFortCheatManager::InfiniteAmmo },

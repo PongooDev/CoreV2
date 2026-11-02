@@ -12,6 +12,7 @@ class UFortBadgeItemDefinition;
 class UFortWorldItemDefinition;
 class AFortMissionManager;
 class UFortMissionInfo;
+class UFortMissionTimerComponent;
 class EFortRewardType;
 
 class EFortMissionStatus
@@ -54,6 +55,9 @@ public:
     DefineUProperty(EFortMissionStatus, MissionStatus)
     DefineUProperty(FGuid, MissionGuid)
     DefineUProperty(FGameplayTagContainer, MissionCompletionTags)
+    DefineUProperty(UFortMissionTimerComponent*, TimerComponent)
+
+    static bool HasTimerComponent() { return Member_TimerComponent.IsAvailable(); }
 
     bool IsPrimaryMission() const;
     static ptrdiff_t MissionInfoOffset();

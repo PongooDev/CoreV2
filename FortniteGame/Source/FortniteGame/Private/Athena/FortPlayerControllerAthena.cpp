@@ -41,17 +41,20 @@ DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 bool AFortPlayerControllerAthena::PlaysBattleRoyaleHeroes()
 {
-    return DefaultHeroes.Num() > 0 || Member_CustomizationLoadout.IsAvailable();
+    return HasDefaultHeroes() || Member_CustomizationLoadout.IsAvailable();
 }
 
 bool AFortPlayerControllerAthena::IsDefaultHero(UFortHero* Hero)
 {
     UFortHeroType* HeroType = Hero ? Hero->GetHeroTypeBP() : nullptr;
-    for (UFortHeroType* DefaultHero : DefaultHeroes)
+    if (HasDefaultHeroes())
     {
-        if (DefaultHero && DefaultHero == HeroType)
+        for (UFortHeroType* DefaultHero : DefaultHeroes)
         {
-            return true;
+            if (DefaultHero && DefaultHero == HeroType)
+            {
+                return true;
+            }
         }
     }
     return HeroType && HeroType == GetLoadoutHero();
@@ -213,7 +216,11 @@ void AFortPlayerControllerAthena::SetupBackpackSize()
     // 1.8 showed "0 | 0" again (#106): its Athena_PlayerController_C has no DefaultHeroes. Its heroes are the loadout
     // characters' (HID_*_Athena_Commando_*, with the same effect), and the loadout is made when the pawn first spawns
     // (GetOrInitializeHero), so the size is set by Possess then, before it gives the loadout's pickaxe.
-    std::vector<UFortHeroType*> Heroes(DefaultHeroes.begin(), DefaultHeroes.end());
+    std::vector<UFortHeroType*> Heroes;
+    if (HasDefaultHeroes())
+    {
+        Heroes.assign(DefaultHeroes.begin(), DefaultHeroes.end());
+    }
     if (UFortHeroType* LoadoutHero = GetLoadoutHero())
     {
         Heroes.push_back(LoadoutHero);

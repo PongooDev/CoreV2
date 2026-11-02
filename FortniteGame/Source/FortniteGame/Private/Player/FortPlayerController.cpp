@@ -784,7 +784,7 @@ void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bS
     if (AthenaController && AthenaController->PlaysBattleRoyaleHeroes() && !AthenaController->IsDefaultHero(NewHero))
     {
         UE_LOG(LogFort, Log, TEXT("TrySetHeroImplementation: %s plays a Battle Royale hero, not %s"), *GetName(), *NewHero->GetName());
-        if (AthenaController->DefaultHeroes.Num() > 0)
+        if (AthenaController->HasDefaultHeroes())
         {
             AthenaController->GetOrInitializeHero();
         }

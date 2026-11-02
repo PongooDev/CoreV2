@@ -66,7 +66,8 @@ class AFortPlayerControllerAthena : public AFortPlayerController
     DefineUnrealClass(AFortPlayerControllerAthena, FortniteGame)
 
 public:
-    // The heroes 1.7.2's Battle Royale plays (Athena_PlayerController_C: HID_Commando_Athena_*). 1.8 leaves it empty.
+    // The heroes 1.7.2's Battle Royale plays (Athena_PlayerController_C: HID_Commando_Athena_*). 1.8 leaves it empty,
+    // and 2.2 (CL-3841827) no longer has it: read it through HasDefaultHeroes.
     DefineUProperty(TArray<UFortHeroType*>, DefaultHeroes)
     // 1.8: the player's loadout. Athena_PlayerController_C's default has DefaultGlider and DefaultPickaxe in it.
     DefineUStructProperty(FFortAthenaLoadout, CustomizationLoadout)
@@ -103,6 +104,8 @@ public:
     void ClientSendEndBattleRoyaleMatchForPlayer(bool bSuccess, const FAthenaRewardResult* Result);
 
     // Whether the controller plays Battle Royale heroes only: 1.7.2's DefaultHeroes, or 1.8's loadout's.
+    // Whether the build has DefaultHeroes and the controller holds any (1.7.2).
+    bool HasDefaultHeroes() const { return Member_DefaultHeroes.IsAvailable() && DefaultHeroes.Num() > 0; }
     bool PlaysBattleRoyaleHeroes();
     bool IsDefaultHero(UFortHero* Hero);
     // 1.8: the hero of the loadout's character, once GetOrInitializeHero has made the loadout.

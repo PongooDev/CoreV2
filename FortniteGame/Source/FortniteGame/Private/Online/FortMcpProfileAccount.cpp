@@ -44,12 +44,15 @@ bool UFortMcpProfileAccount::EndPrimaryMission(FScriptArray& Advance, const FStr
     return Params.Call(this);
 }
 
-FFortSavedModeLoadout UFortMcpProfileAccount::GetModeLoadout(const FString& LoadoutName) const
+// LoadoutName is taken by value: the game frees its buffer when it returns (1.9.1 0x742410, 1.10 0x7469F0, 1.11
+// 0x775150), so it gets its own copy. Passed by reference, Core freed the same 16-byte "Default" block again, and the
+// allocator handed it out twice; the next 16-byte allocation crashed on the text written over its free-list link (#175).
+FFortSavedModeLoadout UFortMcpProfileAccount::GetModeLoadout(FString LoadoutName) const
 {
     FFortSavedModeLoadout ModeLoadout;
     if (Natives::UFortMcpProfileAccount_GetModeLoadout)
     {
-        Natives::UFortMcpProfileAccount_GetModeLoadout(this, &ModeLoadout, LoadoutName);
+        Natives::UFortMcpProfileAccount_GetModeLoadout(this, &ModeLoadout, std::move(LoadoutName));
     }
     return ModeLoadout;
 }

@@ -191,7 +191,7 @@ namespace Natives
     inline bool (*AFortPlayerController_InitializeMcpProfile)(AFortPlayerController* This, const void* OnComplete) = nullptr;
     inline void (*AFortPlayerController_TrySetHeroImplementation)(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused) = nullptr;
     inline void (*AFortPlayerState_SetHeroType)(AFortPlayerState* This, UFortHero* Hero) = nullptr;
-    inline FFortSavedModeLoadout* (*UFortMcpProfileAccount_GetModeLoadout)(const UFortMcpProfileAccount* This, FFortSavedModeLoadout* Result, const FString& LoadoutName) = nullptr;
+    inline FFortSavedModeLoadout* (*UFortMcpProfileAccount_GetModeLoadout)(const UFortMcpProfileAccount* This, FFortSavedModeLoadout* Result, FString LoadoutName) = nullptr;
     inline IAbilitySystemInterface* (*UFortRegisteredPlayerInfo_GetAbilitySystemInterface)(const UFortRegisteredPlayerInfo* This) = nullptr;
     inline void (*UFortHomebaseManager_GetSelectableGadgetItems)(const UFortHomebaseManager* This, const UFortMcpProfileAccount* AccountProfile, IAbilitySystemInterface* AbilitySystem, FScriptArray& OutItems) = nullptr;
     inline void (*UFortHomebaseManager_GetOwnedNodeAbilityKits)(const UFortHomebaseManager* This, const UFortMcpProfileAccount* AccountProfile, TArray<UFortAbilityKit*>& OutKits) = nullptr;

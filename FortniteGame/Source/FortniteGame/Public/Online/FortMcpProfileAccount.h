@@ -35,5 +35,5 @@ public:
     // Sends EndPrimaryMission as the dedicated server. Advance (TArray<FFortQuestObjectiveCompletion>) is moved into the
     // command and left empty.
     bool EndPrimaryMission(FScriptArray& Advance, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadgeData, int32_t NumMissionPoints, bool bCriticalMatchBonus);
-    FFortSavedModeLoadout GetModeLoadout(const FString& LoadoutName) const;
+    FFortSavedModeLoadout GetModeLoadout(FString LoadoutName) const;
 };

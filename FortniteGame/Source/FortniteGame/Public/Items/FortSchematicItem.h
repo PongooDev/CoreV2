@@ -29,7 +29,7 @@ struct FFortItemQuantityPair
 };
 
 // A schematic's recipe (from 1.11, an FTableRowBase), which replaces 1.10's FSchematicRequirement list: what it costs
-// (RecipeCosts), whether crafting consumes all of it (bIsConsumed, one flag for the recipe) and what it makes.
+// (RecipeCosts), bIsConsumed (one flag for the recipe, which crafting doesn't read: every cost is taken) and what it makes.
 struct FRecipe
 {
     DefineUnrealStruct(FRecipe, FortniteGame)

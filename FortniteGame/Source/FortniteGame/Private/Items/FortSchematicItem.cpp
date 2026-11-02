@@ -99,7 +99,10 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
         if (UFunction* GetRecipe = FindStaticFunction_GetSchematicRecipe())
         {
             // 1.11 has no GetSchematicRequirements: its recipe's costs, read as 1.11's CanCraftSchematic (0x6CEC30) reads
-            // them, each cost's item loaded from its soft pointer and taken if the recipe's bIsConsumed says so.
+            // them, each cost's item loaded from its soft pointer. Every cost is taken: CanCraftSchematic and the reserved
+            // count of a craft in progress (2.1 0x6CF310, 0x893250) never read the recipe's bIsConsumed, which the trap and
+            // ammo rows of CraftingRecipes_New leave false. Reading it made crafting free: the client's reservation ended with the
+            // craft and the ingredients were back (#193).
             Reflection::FParams RecipeFrame(GetRecipe, true);
             const FRecipe* Recipe = GetSchematicRecipe(RecipeFrame);
             TStructArray<FFortItemQuantityPair>* Costs = Recipe ? &Recipe->RecipeCosts : nullptr;
@@ -107,7 +110,7 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
             {
                 FFortItemQuantityPair& Cost = (*Costs)[Index];
                 const TAssetPtr<UFortItemDefinition>& CostItem = Cost.ItemDefinition;
-                SpendIngredient(Cast<UFortWorldItemDefinition>(reinterpret_cast<UObject*>(CostItem.LoadSynchronous())), Cost.Quantity, Recipe->bIsConsumed);
+                SpendIngredient(Cast<UFortWorldItemDefinition>(reinterpret_cast<UObject*>(CostItem.LoadSynchronous())), Cost.Quantity, true);
             }
         }
         else

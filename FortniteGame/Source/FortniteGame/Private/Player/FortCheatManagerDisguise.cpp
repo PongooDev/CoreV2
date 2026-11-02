@@ -7,11 +7,14 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Components/SceneComponent.h"
+#include "Engine/ActorChannel.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/NetConnection.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "FortKismetLibrary.h"
 #include "GameFramework/Character.h"
@@ -1710,33 +1713,90 @@ void UFortCheatManager::Undisguise(const FString& Arguments)
 #if WITH_SERVER_CODE
 namespace
 {
-    // An actor's scale is its root component's RelativeScale3D, which reaches a client only in the actor's first bunch
-    // (UPackageMapClient::SerializeNewActor, 1.7.2 0x223ABE0) or while the component replicates. A pawn's capsule doesn't,
-    // so its root replicates for a few seconds after a change, long enough for the clients that have the pawn (its
-    // RelativeLocation goes along, the place the pawn is anyway), and stops again; a client that gets the pawn later
-    // spawns it at its scale. Replicating for good would send the owner's own position back to it all the time.
+    // An actor's scale is its root component's RelativeScale3D (USceneComponent's GetLifetimeReplicatedProps has it,
+    // OnRep_Transform; 1.10 0x18F91B0, 2.1 0x1916260; no PreReplication turns it off), which reaches a client only in
+    // the actor's first bunch (UPackageMapClient::SerializeNewActor, 1.7.2 0x223ABE0) or while the component replicates:
+    // UActorComponent::SetIsReplicated (1.10 0x18927A0, 2.1 0x18AF830) puts it in the actor's ReplicatedComponents
+    // (AActor::UpdateReplicatedComponent), and AActor::ReplicateSubobjects (1.10 0x17618C0) sends it with the actor
+    // from then on. A pawn's capsule doesn't replicate, so its root replicates after a change and stops again; a client
+    // that gets the pawn later spawns it at its scale. Replicating for good would send the owner's own position back to
+    // it all the time (RelativeLocation goes along).
+    //
+    // #185: other players kept the old size until the pawn left and came back into view, while its owner got it. The
+    // root stopped replicating after a fixed 3 seconds, whether or not every client's channel for the pawn had sent it
+    // by then: a player's own pawn goes first on their connection (APawn::GetNetPriority), another player's waits
+    // behind everything else when the connection is saturated, and an update that was lost is sent again
+    // (FObjectReplicator::ReceivedNak) only while the component still replicates. Now the root replicates until every
+    // connection that has the pawn has sent it at least a second after the change (UActorChannel::LastUpdateTime) and
+    // has nothing reliable left unacknowledged (UChannel::NumOutRec: the component's first bunch on a channel is
+    // reliable), with the pawn's update forced (ForceNetUpdate) every frame until then.
     struct FScaleReplication
     {
+        TWeakObjectPtr<AActor> Actor;
         TWeakObjectPtr<USceneComponent> Root;
-        std::chrono::steady_clock::time_point Until;
+        bool bStopReplicating = false;
+        double ChangedAt = 0.0;
+        std::chrono::steady_clock::time_point Started;
     };
     std::vector<FScaleReplication> ScaleReplications;
-    constexpr auto ScaleReplicationTime = std::chrono::seconds(3);
+    constexpr auto ScaleReplicationMinTime = std::chrono::seconds(3);
+    constexpr auto ScaleReplicationMaxTime = std::chrono::seconds(10);
+    constexpr double ScaleResendTime = 1.0;
+
+    UNetDriver* GetGameNetDriver(const AActor* Actor)
+    {
+        UWorld* World = Actor ? Actor->GetWorld() : nullptr;
+        UNetDriver* NetDriver = World ? World->GetNetDriver() : nullptr;
+        return NetDriver && NetDriver->IsServer() ? NetDriver : nullptr;
+    }
+
+    // Whether every client connection that has the actor has sent it since the change, with time for a lost update to
+    // be sent again, and has had its reliable bunches acknowledged.
+    bool HasEveryConnectionSentScale(AActor* Actor, double ChangedAt)
+    {
+        UNetDriver* NetDriver = GetGameNetDriver(Actor);
+        if (!NetDriver || Natives::UNetConnection_ActorChannels < 0 || Natives::UActorChannel_LastUpdateTime < 0 || Natives::UChannel_NumOutRec < 0)
+        {
+            return true;
+        }
+        for (UNetConnection* Connection : NetDriver->ClientConnections)
+        {
+            UActorChannel* Channel = Connection && Connection->State == USOCK_Open ? Connection->ActorChannels.FindRef(Actor) : nullptr;
+            if (!Channel || Channel->Closing)
+            {
+                continue;
+            }
+            if (Channel->LastUpdateTime < ChangedAt + ScaleResendTime || Channel->NumOutRec > 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 
     void TickScaleReplications()
     {
         const auto Now = std::chrono::steady_clock::now();
         std::erase_if(ScaleReplications, [Now](const FScaleReplication& Entry)
         {
+            AActor* Actor = Entry.Actor.Get();
             USceneComponent* Root = Entry.Root.Get();
-            if (Root && Entry.Until > Now)
+            if (!Actor || !Root || Actor->GetRootComponent() != Root)
             {
+                return true;
+            }
+            const auto Elapsed = Now - Entry.Started;
+            if (Elapsed < ScaleReplicationMinTime || (Elapsed < ScaleReplicationMaxTime && !HasEveryConnectionSentScale(Actor, Entry.ChangedAt)))
+            {
+                Actor->ForceNetUpdate();
                 return false;
             }
-            if (Root)
+            if (Entry.bStopReplicating)
             {
                 reinterpret_cast<UActorComponentFunctions*>(Root)->SetIsReplicated(false);
             }
+            UE_LOG(LogFortDisguise, Verbose, TEXT("SetScale: %s's root replicated its scale for %lld ms"), *GetNameSafe(Actor),
+                static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(Elapsed).count()));
             return true;
         });
         if (!ScaleReplications.empty())
@@ -1749,16 +1809,25 @@ namespace
     {
         USceneComponent* Root = Actor->GetRootComponent();
         UActorComponentFunctions* Component = reinterpret_cast<UActorComponentFunctions*>(Root);
+        UNetDriver* NetDriver = GetGameNetDriver(Actor);
+        const double ChangedAt = NetDriver ? NetDriver->Time : 0.0;
         const auto Known = std::find_if(ScaleReplications.begin(), ScaleReplications.end(), [Root](const FScaleReplication& Entry) { return Entry.Root.Get() == Root; });
         if (Known != ScaleReplications.end())
         {
-            Known->Until = std::chrono::steady_clock::now() + ScaleReplicationTime;
+            Known->ChangedAt = ChangedAt;
+            Known->Started = std::chrono::steady_clock::now();
         }
-        else if (Root && UActorComponentFunctions::FindStaticFunction_SetIsReplicated() && UActorComponentFunctions::HasReplicatesFlag() && !Component->bReplicates)
+        else if (Root && UActorComponentFunctions::FindStaticFunction_SetIsReplicated() && UActorComponentFunctions::HasReplicatesFlag())
         {
-            Component->SetIsReplicated(true);
+            // A root that replicates already keeps doing so; the entry still forces the pawn's updates until every
+            // client has the change.
+            const bool bStopReplicating = !Component->bReplicates;
+            if (bStopReplicating)
+            {
+                Component->SetIsReplicated(true);
+            }
             const bool bIdle = ScaleReplications.empty();
-            ScaleReplications.push_back({ TWeakObjectPtr<USceneComponent>(Root), std::chrono::steady_clock::now() + ScaleReplicationTime });
+            ScaleReplications.push_back({ TWeakObjectPtr<AActor>(Actor), TWeakObjectPtr<USceneComponent>(Root), bStopReplicating, ChangedAt, std::chrono::steady_clock::now() });
             if (bIdle)
             {
                 GameThread::Enqueue(&TickScaleReplications);

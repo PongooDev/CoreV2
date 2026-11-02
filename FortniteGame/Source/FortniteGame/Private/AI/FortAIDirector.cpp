@@ -29,6 +29,8 @@ namespace
     constexpr const wchar_t* AIDirectorPopulationCategoryCapsPath = L"/Game/AIDirector/DataTables/AIDirectorPopulationCategoryCaps.AIDirectorPopulationCategoryCaps";
     constexpr const wchar_t* AIDirectorSpawnBudgetCurvesPath = L"/Game/AIDirector/DataTables/AIDirectorSpawnBudgetCurves.AIDirectorSpawnBudgetCurves";
     constexpr const wchar_t* GroupEnemyOffsetsPath = L"/Game/Balance/DataTables/GroupEnemyOffsets.GroupEnemyOffsets";
+    // Mini-Bosses came with 1.11; a build without them has no such class.
+    constexpr const wchar_t* MiniBossSpawnGroupUpgradePath = L"/Game/AIDirector/MiniBoss/SpawnGroupUpgrades/SGU_MiniBoss_1P.SGU_MiniBoss_1P_C";
 
     struct FIntensityContributionDefaults
     {
@@ -585,6 +587,28 @@ void AFortAIDirector::ApplyAIDirectorFortniteDefaults()
     FourPlayerModifier.EncounterTagRequirementsQuery = MakeMatchAllTagsQuery(L"Encounter.EnemyDifficulty.4Player", L"");
     SetCurveTableRow(FourPlayerModifier.DifficultyLevelModifierCurve, LoadDefault<UCurveTable>(GroupEnemyOffsetsPath), L"EnemyOffset_4Player");
 
+    // 1.11's Mini-Bosses (#191), which 1.9.1's director predates. A Mini-Boss mission alert's modifier,
+    // MiniBossEnablePrimaryMissionItem, spawns MiniBossEnablePrimaryMissionMutator (an
+    // AFortGameplayMutator_AIEncounterModifierTags), which tags the mission's Primary encounters Encounter.Enable.MiniBoss.
+    // The director (2.2 0x2C90F0, called by the encounter's tag refresh at 0x2CBC02) offers an encounter the
+    // SpawnGroupUpgrades whose EncounterTagRequirementsQuery its tags match, and only there does the Mini-Boss upgrade
+    // come from. The option sets of the Mini-Boss missions (EDO_Set_RetrieveData, _Gate, _LaunchRocket3, _LaunchBalloon2,
+    // _DeliverBomb3, _Survival_1) unlock its population category after 1, 3 or 5 minutes
+    // (OptionalMiniBossStartTimedTagsCategory: Encounter.PopulationCategory.Enable.MiniBoss). The paks ship one complete
+    // upgrade, the 1P one (SGU_MiniBoss_1P, SUP_MiniBoss_1P, SGC_MiniBoss_1P; SGU_MiniBoss_4P has no probabilities or
+    // caps of its own), so that is the one offered: AIDirector_Fortnite's own list didn't ship, so the choice is Core's.
+    TStructArray<FFortAISpawnGroupUpgradeData>& Upgrades = SpawnGroupUpgrades;
+    Upgrades.Empty();
+    UClass* const MiniBossUpgrade = LoadObject<UClass>(nullptr, MiniBossSpawnGroupUpgradePath);
+    if (MiniBossUpgrade)
+    {
+        FFortAISpawnGroupUpgradeData& MiniBoss = Upgrades.AddDefaulted();
+        MiniBoss.SpawnGroupUpgrade = MiniBossUpgrade;
+        MiniBoss.UpgradeProbabilities = LoadDefault<UClass>(L"/Game/AIDirector/MiniBoss/SpawnUpgradeProbabilities/SUP_MiniBoss_1P.SUP_MiniBoss_1P_C");
+        MiniBoss.SpawnGroupCapsCategories = LoadDefault<UClass>(L"/Game/AIDirector/MiniBoss/SpawnGroupCaps/SGC_MiniBoss_1P.SGC_MiniBoss_1P_C");
+        MiniBoss.EncounterTagRequirementsQuery = MakeMatchAllTagsQuery(L"Encounter.Enable.MiniBoss", L"");
+    }
+
     float* const DesireMappings = &GetMember_DiscreteEncounterUtilityDesireMappings();
     DesireMappings[0] = 2.5f;
     DesireMappings[1] = 5.0f;
@@ -633,7 +657,7 @@ void AFortAIDirector::ApplyAIDirectorFortniteDefaults()
     const TSubclassOf<UFortAIEncounterInfo> BaseEncounter = BaseEncounterClass;
     const int32_t NumEncounterClasses = (DebugEncounter.Get() ? 1 : 0) + (BaseEncounter.Get() ? 1 : 0);
     const int32_t NumSpawnQueries = (RandomDirectionQuery.EnvironmentQuery ? 1 : 0) + (MinDistanceQuery.EnvironmentQuery ? 1 : 0);
-    UE_LOG(LogFortAIDirector, Log, TEXT("AIDirector: this build has no AIDirector_Fortnite, the native director takes its 1.9.1 settings (%d encounter classes, %d spawn queries, %d spawn group cap profiles, %d spawn point profiles)"),
-        NumEncounterClasses, NumSpawnQueries, SpawnGroupCapSettings.Num(), SpawnPointsSettings.Num());
+    UE_LOG(LogFortAIDirector, Log, TEXT("AIDirector: this build has no AIDirector_Fortnite, the native director takes its 1.9.1 settings (%d encounter classes, %d spawn queries, %d spawn group cap profiles, %d spawn point profiles, %d spawn group upgrades)"),
+        NumEncounterClasses, NumSpawnQueries, SpawnGroupCapSettings.Num(), SpawnPointsSettings.Num(), Upgrades.Num());
 #endif
 }

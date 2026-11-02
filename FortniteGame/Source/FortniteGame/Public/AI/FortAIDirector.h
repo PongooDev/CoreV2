@@ -151,6 +151,33 @@ public:
     DefineUStructProperty(FCurveTableRowHandle, DifficultyLevelModifierCurve)
 };
 
+class UFortAISpawnGroupUpgrade : public UObject
+{
+    DefineUnrealClass(UFortAISpawnGroupUpgrade, FortniteGame)
+};
+
+class UFortAISpawnGroupUpgradeProbabilities : public UObject
+{
+    DefineUnrealClass(UFortAISpawnGroupUpgradeProbabilities, FortniteGame)
+};
+
+class UFortAISpawnGroupCapsCategorySet : public UObject
+{
+    DefineUnrealClass(UFortAISpawnGroupCapsCategorySet, FortniteGame)
+};
+
+// From 1.10 on, UFortAIEncounterInfo::AvailableUpgrades holds these in place of 1.2's FFortAISpawnGroupUpgrade.
+struct FFortAISpawnGroupUpgradeData
+{
+    DefineUnrealStruct(FFortAISpawnGroupUpgradeData, FortniteGame)
+
+public:
+    DefineUProperty(TSubclassOf<UFortAISpawnGroupUpgrade>, SpawnGroupUpgrade)
+    DefineUProperty(TSubclassOf<UFortAISpawnGroupUpgradeProbabilities>, UpgradeProbabilities)
+    DefineUProperty(TSubclassOf<UFortAISpawnGroupCapsCategorySet>, SpawnGroupCapsCategories)
+    DefineUProperty(FGameplayTagQuery, EncounterTagRequirementsQuery)
+};
+
 struct FEncounterEnvironmentQueryInfo
 {
     DefineUnrealStruct(FEncounterEnvironmentQueryInfo, FortniteGame)
@@ -190,6 +217,7 @@ protected:
     DefineUStructArrayProperty(FFortAIEncounterSpawnGroupCapsProfile, EncounterSpawnGroupCapSettings)
     DefineUStructArrayProperty(FFortAIEncounterSpawnPointsProfile, EncounterSpawnPointsSettings)
     DefineUStructArrayProperty(FFortAIEncounterPawnDifficultyLevelModifier, EncounterPawnDifficultyLevelModifiers)
+    DefineUStructArrayProperty(FFortAISpawnGroupUpgradeData, SpawnGroupUpgrades)
     // Fixed arrays of four: element 0 here, the rest through the element size.
     DefineUProperty(float, DiscreteEncounterUtilityDesireMappings)
     DefineUProperty(EFortAIUtility, InitialDynamicUtilities)

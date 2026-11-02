@@ -297,6 +297,8 @@ namespace Natives
     inline int32_t UAbilitySystemComponent_InternalServerTryActiveAbilityIndex = -1;
     inline int32_t UFortWorldItemDefinition_ServerExecuteIndex = -1;
     inline void (*AFortInventory_InitializeExistingItem)(AFortInventory* This, UFortWorldItem* Item) = nullptr;
+    // 1.11+: the native bool InitializeExistingItem checks before it adds an item it doesn't have (-1 before 1.11).
+    inline ptrdiff_t AFortInventory_bAllowMcpItemCreation = -1;
     inline int32_t (*AFortInventory_GetOverflowAmount)(AFortInventory* This, const FFortItemEntry& ItemEntry) = nullptr;
     inline int32_t (*AFortInventory_GetMaxStackSize)(AFortInventory* This, const UFortItemDefinition* ItemDefinition) = nullptr;
     inline bool (*AFortInventory_CanStackWith)(AFortInventory* This, UFortWorldItem* Item, const FFortItemEntry& ItemEntry, float MaxDurability) = nullptr;

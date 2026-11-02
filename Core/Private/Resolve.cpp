@@ -6002,6 +6002,21 @@ bool Finder::ResolveInventoryLive()
 
     Natives::AFortInventory_InitializeExistingItem = reinterpret_cast<decltype(Natives::AFortInventory_InitializeExistingItem)>(InitializeExistingItem);
     Log::Info(L"Finder: AFortInventory::InitializeExistingItem found");
+
+    // 1.11 adds an item it doesn't have only while the inventory's bAllowMcpItemCreation is set (0x6BA3D4:
+    // `cmp byte ptr [rbx+0x4EB], bpl; je` to the return). 1.10 and earlier have no such check.
+    const uintptr_t InitializeExistingItemEnd = Finder::FunctionEnd(InitializeExistingItem);
+    for (uintptr_t Site = InitializeExistingItem; Site && Site + 13 <= InitializeExistingItemEnd; ++Site)
+    {
+        const uint8_t ModRM = Byte(Site + 2);
+        if ((Byte(Site) & 0xF0) == 0x40 && Byte(Site + 1) == 0x38 && (ModRM & 0xC0) == 0x80 && (ModRM & 0x07) != 0x04
+            && Byte(Site + 7) == 0x0F && Byte(Site + 8) == 0x84)
+        {
+            Natives::AFortInventory_bAllowMcpItemCreation = *reinterpret_cast<const int32_t*>(Site + 3);
+            Log::Info(L"Finder: AFortInventory::bAllowMcpItemCreation is +0x{:X}", Natives::AFortInventory_bAllowMcpItemCreation);
+            break;
+        }
+    }
     return true;
 }
 

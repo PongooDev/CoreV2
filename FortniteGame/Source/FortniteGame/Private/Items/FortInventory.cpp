@@ -78,7 +78,23 @@ void AFortInventory::AddWorldItem(UFortWorldItem* WorldItem)
     {
         return;
     }
+    // 1.11: InitializeExistingItem only adds an item the inventory doesn't have while bAllowMcpItemCreation is set
+    // (0x6BA3D4). It is set when the inventory is made (0x69DD76) and UFortMcpProfileWorld::BindToPlayerController
+    // clears it once the profile has loaded (0x760B8A), so in Save the World every item the server made after the
+    // player joined was dropped: the harvesting tool, the hero's abilities, the homebase gadgets and new pickups never
+    // reached the inventory or the quickbar (#177). The server's own callers are stripped; the item is created with it
+    // set, and the inventory goes back to how it was.
+    uint8_t* const AllowMcpItemCreation = Natives::AFortInventory_bAllowMcpItemCreation >= 0 ? reinterpret_cast<uint8_t*>(this) + Natives::AFortInventory_bAllowMcpItemCreation : nullptr;
+    const uint8_t bAllowMcpItemCreation = AllowMcpItemCreation ? *AllowMcpItemCreation : 1;
+    if (AllowMcpItemCreation)
+    {
+        *AllowMcpItemCreation = 1;
+    }
     Natives::AFortInventory_InitializeExistingItem(this, WorldItem);
+    if (AllowMcpItemCreation)
+    {
+        *AllowMcpItemCreation = bAllowMcpItemCreation;
+    }
     HandleInventoryLocalUpdate();
 #endif
 }

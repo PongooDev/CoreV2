@@ -1,0 +1,59 @@
+name: Server asset data
+description: Share FModel exports of server-only assets, so Core can match a build without anyone installing them
+title: "Server asset data: <build> <asset>"
+labels: ["server assets"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        PC builds from 1.10 on are missing some assets that only the server uses, such as the Save the World AI director.
+        Core has a stand-in for each one. With the real data from a build's server assets, Core can make that stand-in match Epic's exactly.
+
+        **Please don't upload pak, utoc, ucas or uasset files.** They're Epic's files, and they're too big anyway.
+        Upload FModel's JSON export instead: right-click the asset in FModel and choose **Save Properties (.json)**.
+  - type: input
+    id: build
+    attributes:
+      label: Fortnite build and changelist
+      description: The exact version. It has to match the PC build Core supports.
+      placeholder: "2.2 (CL-3841827)"
+    validations:
+      required: true
+  - type: dropdown
+    id: source
+    attributes:
+      label: Where the server assets came from
+      options:
+        - PlayStation build
+        - Xbox build
+        - Other (say which below)
+    validations:
+      required: true
+  - type: checkboxes
+    id: assets
+    attributes:
+      label: Assets included
+      description: The ones Core needs so far. Tick what you exported.
+      options:
+        - label: "/Game/AIDirector/AIDirector_Fortnite (AIDirector_Fortnite and its Default__AIDirector_Fortnite_C)"
+        - label: Something else server-only (name it below)
+  - type: textarea
+    id: files
+    attributes:
+      label: JSON exports
+      description: Drag the .json files in (zip them if there are several).
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Checks
+      options:
+        - label: The exports are from the same build and changelist as above.
+          required: true
+        - label: I attached JSON exports only, not game files.
+          required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else

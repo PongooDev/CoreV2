@@ -38,6 +38,7 @@ class AFortPlayerStateAthena;
 class AFortGameModeAthena;
 class APlayerState;
 class AFortPlayerState;
+class AFortPlayerPawn;
 class UFortItemDefinition;
 class UFortSchematicItem;
 class UFortQuestManager;
@@ -192,6 +193,8 @@ namespace Natives
     inline bool (*AFortPlayerController_InitializeMcpProfile)(AFortPlayerController* This, const void* OnComplete) = nullptr;
     inline void (*AFortPlayerController_TrySetHeroImplementation)(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused) = nullptr;
     inline void (*AFortPlayerState_SetHeroType)(AFortPlayerState* This, UFortHero* Hero) = nullptr;
+    // From 1.9 (1.9 0x87A800, 2.5 0xE4FAE0, 3.0 0xE75BB0); null on 1.1 to 1.8.2, which don't have it.
+    inline void (*AFortPlayerState_ApplyCharacterCustomization)(AFortPlayerState* This, AFortPlayerPawn* Pawn) = nullptr;
     inline FFortSavedModeLoadout* (*UFortMcpProfileAccount_GetModeLoadout)(const UFortMcpProfileAccount* This, FFortSavedModeLoadout* Result, FString LoadoutName) = nullptr;
     inline IAbilitySystemInterface* (*UFortRegisteredPlayerInfo_GetAbilitySystemInterface)(const UFortRegisteredPlayerInfo* This) = nullptr;
     inline void (*UFortHomebaseManager_GetSelectableGadgetItems)(const UFortHomebaseManager* This, const UFortMcpProfileAccount* AccountProfile, IAbilitySystemInterface* AbilitySystem, FScriptArray& OutItems) = nullptr;

@@ -3160,6 +3160,18 @@ namespace
         }
 
         Require(L"AFortPlayerState::SetHeroType", Natives::AFortPlayerState_SetHeroType, FunctionOf(L"Hero gender does not match gender of HeroType %s!  Hero Gender is %d instead."));
+        // Dresses the player state from its controller's hero, and from 2.4.2 the athena profile's favorite back bling
+        // (1.9 0x87A800 to 3.0 0xE75BB0). It logs this string when the parts chooser fails; 1.1 to 1.8.2 don't have it.
+        Natives::AFortPlayerState_ApplyCharacterCustomization = reinterpret_cast<decltype(Natives::AFortPlayerState_ApplyCharacterCustomization)>(
+            FunctionOf(L"AFortPlayerState::ApplyCharacterCustomization - Failed initialization, using default parts. Player Controller: %s PlayerState: %s, HeroId: %s"));
+        if (Natives::AFortPlayerState_ApplyCharacterCustomization)
+        {
+            Log::Info(L"Finder: AFortPlayerState::ApplyCharacterCustomization at +0x{:X}", reinterpret_cast<uintptr_t>(Natives::AFortPlayerState_ApplyCharacterCustomization) - Finder::ImageBase());
+        }
+        else
+        {
+            Log::Info(L"Finder: AFortPlayerState::ApplyCharacterCustomization isn't in this build (before 1.9); Core dresses the player state itself");
+        }
         Require(L"UFortGlobals::ApplyHeroEffectsAndAbilities", Natives::UFortGlobals_ApplyHeroEffectsAndAbilities, FunctionOf(L"ApplyHeroEffectsAndAbilities succeeded"));
 
         const auto OnlyCaller = [](uintptr_t Function)

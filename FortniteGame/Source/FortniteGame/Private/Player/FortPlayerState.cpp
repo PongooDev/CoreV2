@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "Player/FortPlayerState.h"
-#include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
@@ -66,38 +65,6 @@ void AFortPlayerState::SetHeroType(UFortHero* Hero)
         }
     }
 
-    // The back bling equipped in the locker didn't show in a match (#226): the fill above takes the hero's parts only.
-    // Epic's server put it on in the player state's UCustomPlayerComponent (3.0 0xAC62A0, from
-    // AFortPlayerState::ApplyCharacterCustomization 0xE75BB0): after the hero's parts (ChoosePartsForHero 0xAC6390) it
-    // takes the athena profile's favorite backpack (EAthenaCustomizationCategory::Backpack, 0x9A9170) and, if that is a
-    // UAthenaCharacterPartItemDefinition, puts each of its CharacterParts the player's gender permits into the slot of
-    // its CharacterPartType (0xAC95F0, 0xAC6020). The controller's loadout holds the same favorite_backpack, read from
-    // the same profile (GetAthenaLoadoutWithOverrides) before the hero is made and set.
-    AFortPlayerControllerAthena* AthenaController = FFortAthenaLoadout::HasBackpack() && UAthenaCharacterPartItemDefinition::HasCharacterParts()
-        ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(GetOwner())) : nullptr;
-    UAthenaBackpackItemDefinition* Backpack = AthenaController && AthenaController->HasCustomizationLoadout()
-        ? static_cast<UAthenaBackpackItemDefinition*>(AthenaController->CustomizationLoadout.Backpack) : nullptr;
-    if (Backpack)
-    {
-        bool bApplied = false;
-        for (UCustomCharacterPart* Part : Backpack->CharacterParts)
-        {
-            if (Part && Part->CharacterPartType < NumTypes && (Part->GenderPermitted & CharacterGender) != 0)
-            {
-                GetCharacterPart(Part->CharacterPartType) = Part;
-                bApplied = true;
-            }
-        }
-        if (bApplied)
-        {
-            UE_LOG(LogFort, Log, TEXT("SetHeroType: %s wears the back bling %s"), *GetName(), *Backpack->GetName());
-        }
-        else
-        {
-            UE_LOG(LogFort, Warning, TEXT("SetHeroType: %s's back bling %s has no part for its gender"), *GetName(), *Backpack->GetName());
-        }
-    }
-
     // A picked-up item flew down through the player's head (#96). Clients fly it to the backpack part's loot socket
     // (the pawn's 0x7CC3B0 -> 0x504CC0: the part's UCustomCharacterBackpackData::LootSocketName), coming in along the
     // socket's direction; with no backpack part it goes to the actor's location instead, along the pawn's down vector,
@@ -121,6 +88,33 @@ void AFortPlayerState::SetHeroType(UFortHero* Hero)
     }
 
     OnRep_CharacterParts();
+#endif
+}
+
+bool AFortPlayerState::CanApplyCharacterCustomization()
+{
+    return Natives::AFortPlayerState_ApplyCharacterCustomization != nullptr;
+}
+
+void AFortPlayerState::ApplyCharacterCustomization(AFortPlayerPawn* Pawn)
+{
+#if WITH_SERVER_CODE
+    // 3.0 0xE75BB0, authority only: the player state's UCustomPlayerComponent (0xAC62A0) takes the hero that
+    // AFortPlayerController::GetHero (vtable +0x1728) returns, the one whose id the player state holds, and sets the
+    // CharacterGender and CharacterBodyType it points at (the body type from the hero's head part, ChoosePartsForHero
+    // 0xAC6390) and the parts of that gender and body type, the default backpack when the hero has none. From 2.4.2 it
+    // then reads the athena profile's favorite back bling (0xAC95F0) and puts on its parts that match both (0xAC6020).
+    // Last it hands the parts to the pawn (vtable +0x700, 0xE94C20).
+    if (Role != ROLE_Authority || !CanApplyCharacterCustomization())
+    {
+        return;
+    }
+    Natives::AFortPlayerState_ApplyCharacterCustomization(this, Pawn);
+
+    const EFortCustomPartType NumTypes = EFortCustomPartType::GetNumTypes();
+    const auto PartOf = [this, NumTypes](EFortCustomPartType PartType) { return PartType < NumTypes ? GetCharacterPart(PartType) : nullptr; };
+    UE_LOG(LogFort, Log, TEXT("ApplyCharacterCustomization: %s wears %s, %s, backpack %s"), *GetName(), *GetNameSafe(PartOf(EFortCustomPartType::GetHead())),
+        *GetNameSafe(PartOf(EFortCustomPartType::GetBody())), *GetNameSafe(PartOf(EFortCustomPartType::GetBackpack())));
 #endif
 }
 

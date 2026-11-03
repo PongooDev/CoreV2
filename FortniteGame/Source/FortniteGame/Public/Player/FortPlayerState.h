@@ -122,6 +122,11 @@ public:
     void SetHeroType(UFortHero* Hero);
     // Whether SetHeroType can run here (the server found the native).
     static bool CanSetHeroType() { return SetHeroTypeOG != nullptr; }
+    // Epic's: on the server, chooses the player state's character parts, gender and body type for its controller's hero
+    // (the one whose id it holds), then from 2.4.2 the athena profile's favorite back bling, and gives the pawn its parts.
+    void ApplyCharacterCustomization(AFortPlayerPawn* Pawn);
+    // Whether the build has ApplyCharacterCustomization (1.9 on).
+    static bool CanApplyCharacterCustomization();
     void OnRep_CharacterParts();
     // The player pawn whose player state this is (1.9: AFortPlayerState::GetCurrentPawn), or null.
     AFortPlayerPawn* GetCurrentPawn();

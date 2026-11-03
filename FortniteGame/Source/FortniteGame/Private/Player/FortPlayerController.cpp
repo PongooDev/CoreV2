@@ -5,6 +5,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystemComponent.h"
@@ -795,6 +796,20 @@ void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bS
     TrySetHeroImplementationOG(this, NewHero, bSendToServer, bUnused);
 
 #if WITH_SERVER_CODE
+    // The locker's back bling didn't show in a match (#226). The player state's hero setter (3.0 0xE9AED0, which
+    // TrySetHeroImplementation calls) sets the hero type, gender and the hero's id; its parts come from
+    // AFortPlayerState::ApplyCharacterCustomization (3.0 0xE75BB0), which the player state's virtual at +0x6E0
+    // (0xE764F0: its owner's pawn, then ApplyCustomizationToCharacter 0xE76200, which calls it on authority) reaches.
+    // AFortPlayerStateAthena overrides that virtual with an empty function (3.0 and 2.5) and nothing in the client exe
+    // calls it: stripped server code. The override runs here, once the hero's id is the player state's, with the
+    // controller's pawn when it has one; SetHeroType's own fill (the hook) has run inside the setter by then.
+    AFortPlayerStateAthena* AthenaPlayerState = AthenaGameMode && NewHero && AFortPlayerState::CanApplyCharacterCustomization()
+        ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
+    if (AthenaPlayerState)
+    {
+        AthenaPlayerState->ApplyCharacterCustomization(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(static_cast<AFortPawn*>(MyFortPawn))));
+    }
+
     // Hero ability kit items are Save the World gadgets and kit items.
     if (!AthenaGameMode)
     {

@@ -291,6 +291,8 @@ namespace Natives
     inline int32_t UNetDriver_IsServerIndex = -1;
     inline int32_t UNetDriver_ServerReplicateActorsIndex = -1;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
+    // 8 up to UE 4.19 (2.4.2); UE 4.20 (2.5) drops five delegate instance virtuals and has GetHandle at 4.
+    inline int32_t IDelegateInstance_GetHandleIndex = 8;
     inline int32_t UObject_NeedsLoadForClientIndex = -1;
     inline int32_t UObject_GetWorldIndex = -1;
     inline int32_t AFortGameMode_FinishWorldInitializationIndex = -1;

@@ -26,14 +26,14 @@ public:
     bool IsBound() const
     {
         IDelegateInstance* Ptr = GetDelegateInstanceProtected();
-        return Ptr && Ptr->IsSafeToExecute();
+        return Ptr && DelegateInstance::IsSafeToExecute(Ptr);
     }
 
     void Unbind()
     {
         if (IDelegateInstance* Ptr = GetDelegateInstanceProtected())
         {
-            Ptr->~IDelegateInstance();
+            DelegateInstance::Destroy(Ptr);
             ResizeAllocation(0);
             DelegateSize = 0;
         }
@@ -42,7 +42,7 @@ public:
     FDelegateHandle GetHandle() const
     {
         IDelegateInstance* Ptr = GetDelegateInstanceProtected();
-        return Ptr ? Ptr->GetHandle() : FDelegateHandle();
+        return Ptr ? DelegateInstance::GetHandle(Ptr) : FDelegateHandle();
     }
 
     IDelegateInstance* GetDelegateInstanceProtected() const
@@ -54,7 +54,7 @@ public:
     {
         if (IDelegateInstance* CurrentInstance = GetDelegateInstanceProtected())
         {
-            CurrentInstance->~IDelegateInstance();
+            DelegateInstance::Destroy(CurrentInstance);
         }
 
         const int32_t NewDelegateSize = (Size + static_cast<int32_t>(sizeof(FAlignedInlineDelegateType)) - 1) / static_cast<int32_t>(sizeof(FAlignedInlineDelegateType));

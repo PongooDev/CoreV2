@@ -1466,6 +1466,38 @@ namespace
         }
         RequireAddress(L"UConsole::RegisterConsoleAutoCompleteEntries", reinterpret_cast<uintptr_t&>(Natives::UConsole_RegisterConsoleAutoCompleteEntries), Entries);
 
+        // The delegate instance layout, from the static instance AddStatic binds the handler with (2.5 0x6A8610, 2.4.2
+        // 0x2EBB00): GetHandle (mov rax, [rcx+Handle]; mov [rdx], rax; mov rax, rdx; ret) is slot 8 up to 2.4.2 and 4 on
+        // 2.5 (0x30C79F8), where UE 4.20 dropped five virtuals before it (#192). Not found keeps 8.
+        const uintptr_t AddStaticCall = Entries ? FindRawCall(Bind + 7, Bind + 0x20) : 0;
+        const uintptr_t AddStatic = AddStaticCall ? Finder::RelativeTarget(AddStaticCall, 1, 5) : 0;
+        int32_t GetHandleIndex = -1;
+        for (uintptr_t Lea = AddStatic ? FindInstruction(AddStatic, AddStatic + 0x100, { 0x48, 0x8D, 0x05 }) : 0; Lea && GetHandleIndex < 0; Lea = FindInstruction(Lea + 1, AddStatic + 0x100, { 0x48, 0x8D, 0x05 }))
+        {
+            void* const* const VTable = reinterpret_cast<void* const*>(Finder::RelativeTarget(Lea, 3, 7));
+            if (IsInText(reinterpret_cast<uintptr_t>(VTable)))
+            {
+                continue;
+            }
+            for (int32_t Index = 0; Index < 0x10 && GetHandleIndex < 0; ++Index)
+            {
+                const uintptr_t Function = reinterpret_cast<uintptr_t>(VTable[Index]);
+                if (IsInText(Function) && FindInstruction(Function, Function + 11, { 0x48, 0x8B, 0x41, -1, 0x48, 0x89, 0x02, 0x48, 0x8B, 0xC2, 0xC3 }) == Function)
+                {
+                    GetHandleIndex = Index;
+                }
+            }
+        }
+        if (GetHandleIndex == 4 || GetHandleIndex == 8)
+        {
+            Natives::IDelegateInstance_GetHandleIndex = GetHandleIndex;
+            Log::Info(L"Finder: IDelegateInstance::GetHandle is slot {}", GetHandleIndex);
+        }
+        else
+        {
+            Log::Error(L"Finder: IDelegateInstance::GetHandle not found (slot {}), using slot 8", GetHandleIndex);
+        }
+
 
         uintptr_t GameDir = 0;
         const std::vector<uintptr_t> GameDirRefs = Finder::StringRefs(L"../../");

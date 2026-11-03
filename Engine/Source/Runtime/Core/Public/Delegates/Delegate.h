@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 template <typename FuncType>
@@ -19,6 +20,29 @@ public:
     virtual bool ExecuteIfSafe(ParamTypes... Params) const = 0;
 };
 
+namespace DelegateInstance
+{
+    // IBaseDelegateInstance's virtuals at the build's slots (see EDelegateInstanceSlot). Core's delegates return void.
+    template <typename RetType, typename... ParamTypes>
+    void CreateCopy(IBaseDelegateInstance<RetType(ParamTypes...)>* Instance, FDelegateBase& Base)
+    {
+        CallVirtual<void, IBaseDelegateInstance<RetType(ParamTypes...)>, FDelegateBase&>(Instance, Slot(EDelegateInstanceSlot::CreateCopy), Base);
+    }
+
+    template <typename RetType, typename... ParamTypes>
+    RetType Execute(const IBaseDelegateInstance<RetType(ParamTypes...)>* Instance, std::type_identity_t<ParamTypes>... Params)
+    {
+        static_assert(std::is_void_v<RetType> || std::is_scalar_v<RetType>, "a class return value is passed through a hidden pointer");
+        return CallVirtual<RetType, const IBaseDelegateInstance<RetType(ParamTypes...)>, ParamTypes...>(Instance, Slot(EDelegateInstanceSlot::Execute), Params...);
+    }
+
+    template <typename RetType, typename... ParamTypes>
+    bool ExecuteIfSafe(const IBaseDelegateInstance<RetType(ParamTypes...)>* Instance, std::type_identity_t<ParamTypes>... Params)
+    {
+        return CallVirtual<bool, const IBaseDelegateInstance<RetType(ParamTypes...)>, ParamTypes...>(Instance, Slot(EDelegateInstanceSlot::ExecuteIfSafe), Params...);
+    }
+}
+
 template <typename FuncType, typename... VarTypes>
 class TBaseStaticDelegateInstance;
 
@@ -31,39 +55,58 @@ public:
     TBaseStaticDelegateInstance(FFuncPtr InStaticFuncPtr, VarTypes... Vars)
         : StaticFuncPtr(InStaticFuncPtr), Payload(Vars...), Handle(FDelegateHandle::GenerateNewHandle)
     {
+        UseBuildVTable();
     }
 
-    FName GetFunctionName() const override { return FName(); }
-    UObject* GetUObject() const override { return nullptr; }
-    const void* GetRawMethodPtr() const override { return reinterpret_cast<const void*>(StaticFuncPtr); }
-    const void* GetRawUserObject() const override { return nullptr; }
-    EDelegateInstanceType::Type GetType() const override { return EDelegateInstanceType::Raw; }
-    bool HasSameObject(const void*) const override { return false; }
-    bool IsSafeToExecute() const override { return true; }
-    FDelegateHandle GetHandle() const override { return Handle; }
+    TBaseStaticDelegateInstance(const TBaseStaticDelegateInstance& Other)
+        : StaticFuncPtr(Other.StaticFuncPtr), Payload(Other.Payload), Handle(Other.Handle)
+    {
+        UseBuildVTable();
+    }
 
-    void CreateCopy(FDelegateBase& Base) override
+    FName GetFunctionName() const final { return FName(); }
+    UObject* GetUObject() const final { return nullptr; }
+    const void* GetRawMethodPtr() const final { return reinterpret_cast<const void*>(StaticFuncPtr); }
+    const void* GetRawUserObject() const final { return nullptr; }
+    EDelegateInstanceType::Type GetType() const final { return EDelegateInstanceType::Raw; }
+    bool HasSameObject(const void*) const final { return false; }
+    // Not IDelegateInstance's !IsSafeToExecute(): that is a virtual call, and 4.20's vtable has Execute at its slot.
+    bool IsCompactable() const final { return !TBaseStaticDelegateInstance::IsSafeToExecute(); }
+    bool IsSafeToExecute() const final { return true; }
+    FDelegateHandle GetHandle() const final { return Handle; }
+
+    void CreateCopy(FDelegateBase& Base) final
     {
         new (Base) TBaseStaticDelegateInstance(*this);
     }
 
-    bool IsSameFunction(const IBaseDelegateInstance<RetType(ParamTypes...)>& InOtherDelegate) const override
+    bool IsSameFunction(const IBaseDelegateInstance<RetType(ParamTypes...)>& InOtherDelegate) const final
     {
-        return InOtherDelegate.GetType() == EDelegateInstanceType::Raw && InOtherDelegate.GetRawMethodPtr() == GetRawMethodPtr();
+        return InOtherDelegate.GetType() == EDelegateInstanceType::Raw && InOtherDelegate.GetRawMethodPtr() == TBaseStaticDelegateInstance::GetRawMethodPtr();
     }
 
-    RetType Execute(ParamTypes... Params) const override
+    RetType Execute(ParamTypes... Params) const final
     {
         return std::apply([&](auto&... Vars) { return StaticFuncPtr(Params..., Vars...); }, Payload);
     }
 
-    bool ExecuteIfSafe(ParamTypes... Params) const override
+    bool ExecuteIfSafe(ParamTypes... Params) const final
     {
-        Execute(Params...);
+        TBaseStaticDelegateInstance::Execute(Params...);
         return true;
     }
 
 private:
+    // On 4.20 the engine calls this instance by 4.20's slots: point it at its own functions in that order.
+    void UseBuildVTable()
+    {
+        if (DelegateInstance::UsesLayout420())
+        {
+            void* const** const VTablePointer = reinterpret_cast<void* const**>(this);
+            *VTablePointer = DelegateInstance::BuildVTable<TBaseStaticDelegateInstance>(*VTablePointer);
+        }
+    }
+
     FFuncPtr StaticFuncPtr;
     std::tuple<VarTypes...> Payload;
     FDelegateHandle Handle;
@@ -89,14 +132,14 @@ public:
     {
         if (FDelegateInstance* OtherInstance = Other.GetDelegateInstance())
         {
-            OtherInstance->CreateCopy(*this);
+            DelegateInstance::CreateCopy(OtherInstance, *this);
             Other.Unbind();
         }
     }
 
     RetType Execute(ParamTypes... Params) const
     {
-        return GetDelegateInstance()->Execute(Params...);
+        return DelegateInstance::Execute(GetDelegateInstance(), Params...);
     }
 
     bool ExecuteIfBound(ParamTypes... Params) const
@@ -132,7 +175,7 @@ public:
         for (int32_t InvocationListIndex = InvocationList.ArrayNum - 1; InvocationListIndex >= 0; --InvocationListIndex)
         {
             FDelegateInstance* DelegateInstance = static_cast<FDelegateInstance*>(InvocationList.GetData()[InvocationListIndex].GetDelegateInstanceProtected());
-            if (!DelegateInstance || !DelegateInstance->ExecuteIfSafe(Params...))
+            if (!DelegateInstance || !::DelegateInstance::ExecuteIfSafe(DelegateInstance, Params...))
             {
                 NeedsCompaction = true;
             }
@@ -176,7 +219,7 @@ private:
         {
             FDelegateBase& DelegateBase = InvocationList.GetData()[Index];
             IDelegateInstance* DelegateInstance = DelegateBase.GetDelegateInstanceProtected();
-            if (!DelegateInstance || DelegateInstance->IsCompactable())
+            if (!DelegateInstance || ::DelegateInstance::IsCompactable(DelegateInstance))
             {
                 DelegateBase.~FDelegateBase();
                 if (Index != InvocationList.ArrayNum - 1)

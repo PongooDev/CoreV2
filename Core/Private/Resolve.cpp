@@ -1610,11 +1610,15 @@ namespace
         const uintptr_t GEngine = reinterpret_cast<uintptr_t>(Natives::GEngine);
         uintptr_t Setup = 0;
         int32_t Matches = 0;
-        for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0xC6, 0x41, -1, 0x00, 0x48, 0x8B, 0x0D }); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), { 0xC6, 0x41, -1, 0x00, 0x48, 0x8B, 0x0D }))
+        // mov byte ptr [rcx+X], 0; mov rcx, [GEngine]; lea rax, ... The flag is at +0x78 up to 2.4.2 (disp8), +0x80 on 2.5
+        // (0x200D690, disp32).
+        for (uintptr_t Load = GEngine ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0x48, 0x8B, 0x0D }) : 0; Load; Load = FindInstruction(Load + 1, Finder::TextEnd(), { 0x48, 0x8B, 0x0D }))
         {
-            if (GEngine && Finder::RelativeTarget(Site + 4, 3, 7) == GEngine && Byte(Site + 11) == 0x48 && Byte(Site + 12) == 0x8D && Byte(Site + 13) == 0x05)
+            const bool bStore = (Byte(Load - 4) == 0xC6 && Byte(Load - 3) == 0x41 && Byte(Load - 1) == 0x00)
+                || (Byte(Load - 7) == 0xC6 && Byte(Load - 6) == 0x81 && Byte(Load - 1) == 0x00 && Byte(Load - 2) == 0x00 && Byte(Load - 3) == 0x00);
+            if (bStore && Finder::RelativeTarget(Load, 3, 7) == GEngine && Byte(Load + 7) == 0x48 && Byte(Load + 8) == 0x8D && Byte(Load + 9) == 0x05)
             {
-                Setup = Finder::FunctionStart(Site);
+                Setup = Finder::FunctionStart(Load);
                 ++Matches;
             }
         }

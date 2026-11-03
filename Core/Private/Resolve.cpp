@@ -6360,6 +6360,10 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     // overflow's callees the stack limit (0x687080) is the one that tests a call's bool and shares a callee
     // (GetMaxStackSize) with the backpack limit. GetMaxStackSize and CanStackWith keep 1.8's shapes.
     // 2.4.2's backpack limit (0x6A7B10) caps at 500 (cmp eax, 1F4h at 0x6A7C39) instead of 512.
+    // 2.5's overflow (0xC271C0) also calls the capacity function itself (0xC27252, against the item count), and the
+    // capacity function has the stack limit's shape (a call's bool tested, a callee the backpack limit shares), so it is
+    // no stack limit candidate: taking it made the pick ambiguous and every item add failed (#214). The stack limit
+    // there is 0xC273A0.
     const auto HasBackpackCap = [](uintptr_t Begin, uintptr_t End)
     {
         return FindInstruction(Begin, End, { 0x3D, 0x00, 0x02, 0x00, 0x00 }) || FindInstruction(Begin, End, { 0x3D, 0xF4, 0x01, 0x00, 0x00 });
@@ -6388,7 +6392,7 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     }
     for (const uintptr_t Callee : CapacityOverflow && !bCapacityLimitsAmbiguous ? Targets(CapacityOverflow) : std::vector<uintptr_t>{})
     {
-        const uintptr_t CalleeEnd = Callee != CapacityBackpackLimit && Callee != CapacityStackLimit && Finder::FunctionStart(Callee) == Callee ? Finder::FunctionEnd(Callee) : 0;
+        const uintptr_t CalleeEnd = Callee != CapacityBackpackLimit && Callee != CapacityStackLimit && Callee != Capacity && Finder::FunctionStart(Callee) == Callee ? Finder::FunctionEnd(Callee) : 0;
         bool bTestsBool = false;
         bool bSharesCallee = false;
         for (const auto& [Call, Target] : CalleeEnd > Callee ? Finder::DirectCalls(Callee, CalleeEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})

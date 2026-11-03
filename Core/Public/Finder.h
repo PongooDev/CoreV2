@@ -152,6 +152,7 @@ namespace Finder
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();
     bool ResolveMissionEventLive();
+    bool ResolveMissionEventParamsLive();
     bool ResolveMissionParTimeLive(uintptr_t CustomHandleMissionEvent);
     bool ResolveMissionBadgeLive(ptrdiff_t EarnedBadgesArrayOffset);
     bool ResolveTheaterMapDataLive();

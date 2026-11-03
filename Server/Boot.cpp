@@ -42,6 +42,7 @@
 #include "Online/FortGameSession.h"
 #include "Online/FortMcpProfileWorld.h"
 #include "AI/FortAIGoalManager.h"
+#include "Building/BuildingActor.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "Building/BuildingTrap.h"
@@ -249,6 +250,7 @@ static void InstallHooks()
         UFortKismetLibrary::HookNatives();
         ABuildingSMActor::HookVTables();
         ABuildingContainer::HookVTables();
+        ABuildingActor::HookVTables();
         UFortMissionLibrary::HookNatives();
         AFortMission::HookNatives();
         UFortGameplayAbility::HookNatives();

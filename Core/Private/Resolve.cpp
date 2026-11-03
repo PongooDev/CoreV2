@@ -5553,6 +5553,81 @@ bool Finder::ResolveMissionEventLive()
     return true;
 }
 
+// The function that gives a mission actor its mission event params: every object property typed as a subclass of
+// UFortMissionEventParams that is still null gets a NewObject of that class (a blueprint's DepositStart_ObjParam,
+// GenDeposit, ...), which it then fills with SetParams and sends with ExecuteMissionEventEx. AFortMissionState's
+// PostInitializeComponents calls it right after Super (2.5 0xC85C40 -> 0xC720E0, 2.4.2 0x706F80 -> 0x6F3B70); it is
+// the call there whose callee loads the UFortMissionEventParams class (its StaticClass, "mov rax, [rip+X]; test rax,
+// rax"). That slot is AActor::PostInitializeComponents. 2.2 to 2.4.2's ABuildingActor::PostInitializeComponents calls it
+// too, for buildings that implement UFortMissionInterface (2.4.2 0x472580); 2.5's (0x9F69F0) does not.
+bool Finder::ResolveMissionEventParamsLive()
+{
+    if (Natives::InitializeMissionEventParams && Natives::AActor_PostInitializeComponentsIndex >= 0)
+    {
+        return true;
+    }
+
+    UClass* ParamsClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortMissionEventParams");
+    const auto LoadsParamsClass = [ParamsClass](uintptr_t Function)
+    {
+        const uintptr_t End = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        for (const auto& [Site, Target] : End && End - Function < 0x400 ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            // Before 1.10 a StaticClass compares the cached class instead: "cmp qword ptr [rip+X], 0".
+            const uintptr_t Load = FindInstruction(Target, Target + 0x18, { 0x48, 0x8B, 0x05, -1, -1, -1, -1, 0x48, 0x85, 0xC0 });
+            const uintptr_t Compare = Load ? 0 : FindInstruction(Target, Target + 0x18, { 0x48, 0x83, 0x3D, -1, -1, -1, -1, 0x00 });
+            const uintptr_t Cached = Load ? Finder::RelativeTarget(Load, 3, 7) : Compare ? Finder::RelativeTarget(Compare, 3, 8) : 0;
+            if (Cached && *reinterpret_cast<UClass* const*>(Cached) == ParamsClass)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    void** ActorVTable = CdoVTable(L"/Script/Engine.Actor");
+    void** MissionStateVTable = CdoVTable(L"/Script/FortniteGame.FortMissionState");
+    int32_t PostInitializeIndex = -1;
+    uintptr_t Initialize = 0;
+    int32_t Matches = 0;
+    for (int32_t Index = 0; ParamsClass && ActorVTable && MissionStateVTable && Index < 0x200; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(MissionStateVTable, Index);
+        const uintptr_t Super = VTableEntry(ActorVTable, Index);
+        if (!Entry || !Super)
+        {
+            break;
+        }
+        const uintptr_t EntryEnd = Entry != Super ? Finder::FunctionEnd(Entry) : 0;
+        if (!EntryEnd || EntryEnd - Entry > 0x200)
+        {
+            continue;
+        }
+
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Entry, EntryEnd);
+        const bool bCallsSuper = std::any_of(Calls.begin(), Calls.end(), [Super](const auto& Call) { return Call.second == Super; });
+        for (const auto& [Site, Target] : bCallsSuper ? Calls : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (Target != Super && LoadsParamsClass(Target))
+            {
+                PostInitializeIndex = Index;
+                Initialize = Target;
+                ++Matches;
+            }
+        }
+    }
+
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: mission event params initialization not found ({} matches)", Matches);
+        return false;
+    }
+    Natives::AActor_PostInitializeComponentsIndex = PostInitializeIndex;
+    Natives::InitializeMissionEventParams = reinterpret_cast<decltype(Natives::InitializeMissionEventParams)>(Initialize);
+    Log::Info(L"Finder: mission event params initialization at +0x{:X}, AActor::PostInitializeComponents slot 0x{:X}", Initialize - Finder::ImageBase(), PostInitializeIndex);
+    return true;
+}
+
 bool Finder::ResolveMissionParTimeLive(uintptr_t CustomHandleMissionEvent)
 {
     if (Natives::AFortMission_HandleDeferredMissionEventIndex >= 0)

@@ -21,6 +21,13 @@ void UKismetSystemLibrary::GetComponentBounds(const USceneComponent* Component, 
     }
 }
 
+bool UKismetSystemLibrary::DoesImplementInterface(UObject* TestObject, UClass* Interface)
+{
+    Reflection::FParams Params(StaticFunction_DoesImplementInterface());
+    return TestObject && Interface && Params.Set(L"TestObject", TestObject) && Params.Set(L"Interface", Interface)
+        && Params.Call(StaticClass()->GetDefaultObject()) && Params.Take<bool>(L"ReturnValue");
+}
+
 bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FVector& Start, const FVector& End, uint8_t TraceChannel, bool bTraceComplex, bool bIgnoreSelf, FVector& OutImpactPoint)
 {
     UObject* Actor = nullptr;

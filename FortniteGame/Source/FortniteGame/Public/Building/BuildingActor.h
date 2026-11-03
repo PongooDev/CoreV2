@@ -53,6 +53,13 @@ public:
     bool CountsTowardStructureLimit() const;
     float GetMaxHealth() const;
     FVector GetCentroid() const;
+
+    void PostInitializeComponents();
+    static void HookVTables();
+
+private:
+    static inline void (*PostInitializeComponentsOG)(ABuildingActor* This) = nullptr;
+    static void PostInitializeComponentsHK(ABuildingActor* This);
 };
 
 class AFortPlacementActor : public ABuildingActor

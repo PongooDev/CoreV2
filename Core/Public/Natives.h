@@ -335,6 +335,9 @@ namespace Natives
     inline int32_t AFortMission_GrantBadgeIndex = -1;
     inline void* (*AFortWorldManager_GetTheaterMapData)(AFortWorldManager* This) = nullptr;
     inline int32_t AFortObjectiveBase_ActivateObjectiveIndex = -1;
+    // Creates Object's missing UFortMissionEventParams objects (2.5 0xC720E0); see Finder::ResolveMissionEventParamsLive.
+    inline void (*InitializeMissionEventParams)(UObject* Object) = nullptr;
+    inline int32_t AActor_PostInitializeComponentsIndex = -1;
     inline ptrdiff_t UFortGameData_MissionGenerationData = -1;
     inline bool (*UFortSchematicItem_CanCraftSchematic)(UFortSchematicItem* This, AFortPlayerController* PlayerController, uint8_t* OutFailCause, bool bConsiderReservedItems, int32_t Count) = nullptr;
     inline UFortSchematicItem* (*AFortPlayerController_GetSchematicForItem)(AFortPlayerController* This, const UFortItemDefinition* ItemDefinition) = nullptr;

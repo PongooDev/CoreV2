@@ -12,8 +12,11 @@ class UKismetSystemLibrary : public UObject
     DefineUFunction(LineTraceSingle)
     DefineUFunction(K2_SetTimer)
     DefineUFunction(K2_ClearTimer)
+    DefineUFunction(DoesImplementInterface)
 
 public:
+    // TestObject's class implements Interface, natively or in a blueprint (UClass::ImplementsInterface).
+    static bool DoesImplementInterface(UObject* TestObject, UClass* Interface);
     static void GetComponentBounds(const USceneComponent* Component, FVector& Origin, FVector& BoxExtent, float& SphereRadius);
     // The first blocking hit's impact point from Start to End on a trace channel (ETraceTypeQuery: 0 is Visibility), no
     // actors ignored but the world context object when bIgnoreSelf. False when nothing blocks.

@@ -339,6 +339,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortItemCollectedParams.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMission.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionInfo.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionInterface.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortMissionManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortObjectiveBase.h" />

@@ -14,13 +14,6 @@ namespace
     // EMovementMode.
     constexpr uint8_t MoveFalling = 3;
     constexpr uint8_t MoveFlying = 5;
-
-    // What shipping builds leave of a function whose body is compiled out: "ret 0", shared by all of them.
-    bool IsEmptyFunction(const void* Function)
-    {
-        const uint8_t* const Code = static_cast<const uint8_t*>(Function);
-        return Code && (Code[0] == 0xC3 || (Code[0] == 0xC2 && Code[1] == 0x00 && Code[2] == 0x00));
-    }
 }
 
 void ACharacter::ApplyCheatMovement(ECheatMovement Movement)
@@ -68,7 +61,10 @@ void ACharacter::HookCheatMovement()
             Log::Error(L"Finder: {} slot not found", Name);
             continue;
         }
-        if (!IsEmptyFunction(Original))
+        // Shipping builds leave the shared empty function ("ret 0") here. 1.9.1 and later's jumps into the packer's
+        // guard code instead (2.4 0x33C490: jmp short, then jmp), so the first bytes alone took it for a body and fly
+        // and ghost did nothing again (#207); Finder::IsStubFunction knows that one as Natives::SharedEmptyFunction.
+        if (!Finder::IsStubFunction(reinterpret_cast<uintptr_t>(Original)))
         {
             Log::Info(L"{} has a body in this build, left as it is", Name);
             continue;

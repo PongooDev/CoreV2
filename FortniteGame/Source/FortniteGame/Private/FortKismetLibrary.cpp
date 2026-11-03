@@ -238,7 +238,7 @@ void UFortKismetLibrary::K2_RemoveItemFromAllPlayers(UObject* WorldContextObject
 #endif
 }
 
-AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss)
+AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation)
 {
 #if WITH_SERVER_CODE
     UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
@@ -260,6 +260,12 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
     const FRotator SpawnRotation = Direction.Rotation();
     AFortPickup* Pickup = AFortPickup::CreatePickup(World, *ItemEntry, &Position, &SpawnRotation);
     EntryStruct->DestroyStruct(ItemEntry);
+
+    // 3.0 replicates the choice on the pickup (AFortPickup::bRandomRotation).
+    if (Pickup && bRandomRotation && AFortPickup::HasRandomRotation())
+    {
+        Pickup->bRandomRotation = true;
+    }
 
     // Before 1.8 every pickup spawned here is tossed; 1.8 lets the caller choose (bToss).
     if (Pickup && bToss)
@@ -424,8 +430,11 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorld)
     // bytecode on its last parameter: P_FINISH stepped over bToss's EX_True instead of EX_EndFunctionParms, and the
     // script loop then ran EX_EndFunctionParms as a statement, whose handler (0x1432C00) steps the code back onto itself.
     // The server's game thread spun there for good: the Save the World supply drop's SpawnTierDrops calls this with bToss
-    // true when it is searched.
+    // true when it is searched. 3.0 added bRandomRotation after it (its exec, 0x1046D70, reads eight), and reading seven
+    // spun 3.0's game thread the same way when a quest prop dropped its quest item (#232: the harvesting quests'
+    // InternalSpawnQuestItem calls this with bToss and bRandomRotation true).
     static const bool bHasToss = StaticFunction_K2_SpawnPickupInWorld()->FindPropertyByName(FName(L"bToss", FNAME_Find)) != nullptr;
+    static const bool bHasRandomRotation = StaticFunction_K2_SpawnPickupInWorld()->FindPropertyByName(FName(L"bRandomRotation", FNAME_Find)) != nullptr;
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
     P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
     P_GET_PROPERTY(UIntProperty, Z_Param_NumberToSpawn);
@@ -438,9 +447,15 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorld)
         P_GET_UBOOL(Z_Param_bTossParam);
         Z_Param_bToss = Z_Param_bTossParam;
     }
+    bool Z_Param_bRandomRotation = false;
+    if (bHasRandomRotation)
+    {
+        P_GET_UBOOL(Z_Param_bRandomRotationParam);
+        Z_Param_bRandomRotation = Z_Param_bRandomRotationParam;
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
-    *static_cast<AFortPickup**>(RESULT_PARAM) = K2_SpawnPickupInWorld(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction, Z_Param_OverrideMaxStackCount, Z_Param_bToss);
+    *static_cast<AFortPickup**>(RESULT_PARAM) = K2_SpawnPickupInWorld(Z_Param_WorldContextObject, Z_Param_ItemDefinition, Z_Param_NumberToSpawn, Z_Param_Position, Z_Param_Direction, Z_Param_OverrideMaxStackCount, Z_Param_bToss, Z_Param_bRandomRotation);
     P_NATIVE_END;
 }
 

@@ -56,6 +56,9 @@ public:
     DefineBitfieldUProperty(bPickedUp)
     // From 1.7.2 (Battle Royale): replicated so clients play the toss from a container.
     DefineUProperty(bool, bTossedFromContainer)
+    // From 3.0: replicated, so clients show the pickup at a random rotation (K2_SpawnPickupInWorld's bRandomRotation).
+    DefineUProperty(bool, bRandomRotation)
+    static bool HasRandomRotation() { return Member_bRandomRotation.IsAvailable(); }
 
     // Merges entries of the same item and level up to its stack size, so a drop of five 1-plank rolls is one pickup of
     // five (CoreV2 #67). Without an inventory the stack size is the item's own.

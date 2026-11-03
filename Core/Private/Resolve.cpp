@@ -1265,7 +1265,13 @@ namespace
         for (const wchar_t* Anchor : { L"LoadMap: %s", L"UGameplayStatics::SpawnObject null outer" })
         {
             const uintptr_t Ref = First(Finder::StringRefs(Anchor));
-            const uintptr_t Target = Finder::NextCall(Ref, 0x40);
+            // UE_LOG puts the format on the stack and calls Logf_Internal next, but the packer splits the block: on
+            // 2.2 to 2.4 the "LoadMap: %s" half sits in the moved code, where a scan for the nearest call found
+            // nothing and the other anchor carried it, and 2.4.2 leaves it in .text, where that scan ran past the
+            // jmp to the call and answered with the unrelated function behind it. Follow the jmp instead.
+            const uintptr_t Call = Finder::TraceFind(Ref, 16, [](uintptr_t Instruction) { return Byte(Instruction) == 0xE8; });
+            // 1.1 to 1.9 have no moved code for TraceFind to follow a jmp into, so the nearest call still answers there.
+            const uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : Finder::NextCall(Ref, 0x40);
             if (!Target)
             {
                 continue;

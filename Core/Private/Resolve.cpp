@@ -3074,7 +3074,47 @@ namespace
             return Caller;
         };
         const uintptr_t SetHero = OnlyCaller(reinterpret_cast<uintptr_t>(Natives::AFortPlayerState_SetHeroType));
-        Require(L"AFortPlayerController::TrySetHeroImplementation", Natives::AFortPlayerController_TrySetHeroImplementation, OnlyCaller(SetHero));
+        uintptr_t TrySetHero = 0;
+        if (SetHero && !Finder::ReadOnlySlotsHolding(SetHero).empty())
+        {
+            // 2.4.2 made the player state's hero setter virtual (slot 0x700, 0x8F2380), and Battle Royale's player state
+            // overrides it (0x478900: its own, then the Super call). Its only direct caller is that override, which Core
+            // took for TrySetHeroImplementation and detoured: Possess's SetupHero then ran the player state's setter on
+            // the controller and crashed on its loading screen (#208). TrySetHeroImplementation (0x8AF260) calls the
+            // setter through the vtable and, right after, the player state's next function (0x8F2540, which follows
+            // the setter in the image as on 2.4: 0x8E4230, then 0x8E43F0). Its other caller passes another call's result.
+            const uintptr_t SetHeroEnd = Finder::FunctionEnd(SetHero);
+            uintptr_t AfterSetHero = 0;
+            for (uintptr_t At = SetHeroEnd; At && At < SetHeroEnd + 0x40 && !AfterSetHero; ++At)
+            {
+                if (Byte(At) != 0xCC && Finder::FunctionStart(At) == At)
+                {
+                    AfterSetHero = At;
+                }
+            }
+            for (uintptr_t Call : AfterSetHero ? Finder::CallsTo(AfterSetHero, false) : std::vector<uintptr_t>{})
+            {
+                bool bAfterVirtualSet = false;
+                for (uintptr_t Back = 6; Back <= 0x10 && !bAfterVirtualSet; ++Back)
+                {
+                    const uintptr_t At = Call - Back;
+                    const uint32_t Offset = *reinterpret_cast<const uint32_t*>(At + 2);
+                    bAfterVirtualSet = Byte(At) == 0xFF && (Byte(At + 1) & 0xF8) == 0x90 && Byte(At + 1) != 0x94 && Offset % 8 == 0 && Offset < 0x4000;
+                }
+                const uintptr_t Caller = bAfterVirtualSet ? Finder::FunctionStart(Call) : 0;
+                if (Caller && TrySetHero && Caller != TrySetHero)
+                {
+                    TrySetHero = 0;
+                    break;
+                }
+                TrySetHero = Caller ? Caller : TrySetHero;
+            }
+        }
+        else
+        {
+            TrySetHero = OnlyCaller(SetHero);
+        }
+        Require(L"AFortPlayerController::TrySetHeroImplementation", Natives::AFortPlayerController_TrySetHeroImplementation, TrySetHero);
 
         const uintptr_t ApplyHero = reinterpret_cast<uintptr_t>(Natives::UFortGlobals_ApplyHeroEffectsAndAbilities);
         const uintptr_t ApplyHeroEnd = ApplyHero ? Finder::FunctionEnd(ApplyHero) : 0;

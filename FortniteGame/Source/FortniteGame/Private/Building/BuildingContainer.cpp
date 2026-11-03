@@ -593,20 +593,23 @@ void ABuildingContainer::HookVTables()
         }
 
         // 1.2 stubs SpawnLoot (return false) and turns the PostUpdate override into a jump to the logging-only parent.
+        // 2.4.2's stub still calls GetWorld when it has authority (Finder::IsGetWorldStub).
         const uintptr_t SpawnLoot = reinterpret_cast<uintptr_t>(VTable[SpawnLootIndex]);
-        if (Finder::IsStubFunction(SpawnLoot))
+        if (Finder::IsStubFunction(SpawnLoot) || Finder::IsGetWorldStub(SpawnLoot, 0))
         {
             Hooks::SwapVTable(L"ABuildingContainer::SpawnLoot", VTable, SpawnLootIndex, reinterpret_cast<void*>(&SpawnLootHK));
         }
         // AKeepItemCoreContainer's override tail-jumps to the stubbed parent.
-        else if (const uintptr_t SpawnLootEnd = SpawnLoot >= Finder::TextBegin() && SpawnLoot < Finder::TextEnd() ? Finder::FunctionEnd(SpawnLoot) : 0; SpawnLootEnd > SpawnLoot + 5 && *reinterpret_cast<const uint8_t*>(SpawnLootEnd - 5) == 0xE9 && Finder::IsStubFunction(Finder::RelativeTarget(SpawnLootEnd - 5, 1, 5)))
+        else if (const uintptr_t SpawnLootEnd = SpawnLoot >= Finder::TextBegin() && SpawnLoot < Finder::TextEnd() ? Finder::FunctionEnd(SpawnLoot) : 0; SpawnLootEnd > SpawnLoot + 5 && *reinterpret_cast<const uint8_t*>(SpawnLootEnd - 5) == 0xE9
+                 && (Finder::IsStubFunction(Finder::RelativeTarget(SpawnLootEnd - 5, 1, 5)) || Finder::IsGetWorldStub(Finder::RelativeTarget(SpawnLootEnd - 5, 1, 5), 0)))
         {
             Hooks::RedirectCall(L"ABuildingContainer::SpawnLoot (Super)", reinterpret_cast<uint8_t*>(SpawnLootEnd - 5), reinterpret_cast<void*>(&SpawnLootHK));
         }
 
         const uintptr_t PostUpdate = reinterpret_cast<uintptr_t>(VTable[PostUpdateIndex]);
+        // 2.4.2's override calls the stripped parent, then GetWorld (Finder::IsGetWorldStub).
         const bool bJumpsToStripped = StrippedPostUpdate && *reinterpret_cast<const uint8_t*>(PostUpdate) == 0xE9 && Finder::RelativeTarget(PostUpdate, 1, 5) == StrippedPostUpdate;
-        if (StrippedPostUpdate && (PostUpdate == StrippedPostUpdate || bJumpsToStripped))
+        if (StrippedPostUpdate && (PostUpdate == StrippedPostUpdate || bJumpsToStripped || Finder::IsGetWorldStub(PostUpdate, StrippedPostUpdate)))
         {
             Hooks::SwapVTable(L"ABuildingContainer::PostUpdate", VTable, PostUpdateIndex, reinterpret_cast<void*>(&PostUpdateHK));
         }

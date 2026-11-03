@@ -1940,11 +1940,13 @@ namespace
         const uintptr_t SequencedCreate = First(Finder::StringRefs(L"      Bunch Create %i: ChType %i, ChSequence: %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i"));
         const uintptr_t BunchCreate = SequencedCreate ? SequencedCreate : OnlyRef(L"      Bunch Create %i: ChType %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
         const uintptr_t BunchCreateEnd = BunchCreate + (SequencedCreate ? 0x80 : 0x40);
+        // 2.4.2 sizes Channels by MaxChannelSize (a TArray, as in 4.20) and logs when no index is free (0x1B0C510).
+        const uintptr_t NoFreeChannel = FunctionOf(L"No free channel could be found in the channel list (current limit is %d channels). Consider increasing the max channels allowed using CVarMaxChannelSize.");
         for (uintptr_t Site = BunchCreate ? FindRawCall(BunchCreate, BunchCreateEnd) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, BunchCreateEnd))
         {
             const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
             // CreateChannel looks for a free index below MAX_CHANNELS: 10240 (0x2800) up to 2.1, 32767 (0x7FFF) on 2.2.
-            const bool bMaxChannels = FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }) || FindInstruction(Target, Target + 0x80, { 0xFF, 0x7F, 0x00, 0x00 });
+            const bool bMaxChannels = FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }) || FindInstruction(Target, Target + 0x80, { 0xFF, 0x7F, 0x00, 0x00 }) || (NoFreeChannel && Target == NoFreeChannel);
             if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && bMaxChannels)
             {
                 CreateChannel = Target;
@@ -2344,7 +2346,11 @@ namespace
         const FCalledSlot InitConnect = PlayReplayEnd ? CalledSlot(PlayReplay, PlayReplayEnd, FunctionOf(L"UNetDriver::InitConnect")) : FCalledSlot();
         void** NetDriverVTable = InitConnect.VTable;
 
-        const int32_t ProcessRemoteFunction = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(FunctionOf(L"UNetDriver::ProcessRemoteFunction")), 0x400);
+        // 2.4.2 moves the real ProcessRemoteFunction into UNetDriver (0x1B16EA0, as in 4.20): the stub's log is gone and
+        // its own "no owning connection" warning names UNetDriver.
+        uintptr_t DriverRemoteFunction = FunctionOf(L"UNetDriver::ProcessRemoteFunction");
+        DriverRemoteFunction = DriverRemoteFunction ? DriverRemoteFunction : FunctionOf(L"UNetDriver::ProcessRemoteFunction: No owning connection for actor %s. Function %s will not be processed.");
+        const int32_t ProcessRemoteFunction = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(DriverRemoteFunction), 0x400);
         const int32_t LowLevelGetNetworkNumber = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(FunctionOf(L"UNetDriver::LowLevelGetNetworkNumber")), 0x400);
         const int32_t ServerReplicateActors = ProcessRemoteFunction - 1;
         const uintptr_t StrippedReplicate = ProcessRemoteFunction > 0 && ServerReplicateActors == LowLevelGetNetworkNumber + 2 ? VTableEntry(NetDriverVTable, ServerReplicateActors) : 0;
@@ -2819,6 +2825,27 @@ namespace
             if ((Byte(Store + 2) & 0xC7) == 0x84 && (Byte(Store + 3) >> 6) == 3)
             {
                 Channels = *reinterpret_cast<const int32_t*>(Store + 4);
+            }
+        }
+        // 2.4.2's Channels is a TArray<UChannel*>: the loop bound is its Num, movsxd r9, [rsi+0x1550], and the slots its
+        // Data, mov rax, [rsi+0x1548] (CreateChannel 0x1B0C510). Take the Data load whose next qword is read as Num.
+        Natives::UNetConnection_ChannelsIsArray = false;
+        for (uintptr_t Load = !bChannelLoop && CreateChannelEnd && CreateChannel == NoFreeChannel ? FindInstruction(CreateChannel, CreateChannelEnd, { -1, 0x8B }) : 0; Load && !Channels; Load = FindInstruction(Load + 1, CreateChannelEnd, { -1, 0x8B }))
+        {
+            if ((Byte(Load) & 0xF8) != 0x48 || (Byte(Load + 2) & 0xC0) != 0x80 || (Byte(Load + 2) & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const int32_t Data = *reinterpret_cast<const int32_t*>(Load + 3);
+            const int32_t Num = Data + 8;
+            for (uintptr_t Count = FindInstruction(CreateChannel, CreateChannelEnd, { -1, 0x63 }); Count && !Channels; Count = FindInstruction(Count + 1, CreateChannelEnd, { -1, 0x63 }))
+            {
+                if ((Byte(Count) & 0xF8) == 0x48 && (Byte(Count + 2) & 0xC0) == 0x80 && (Byte(Count + 2) & 0x07) == (Byte(Load + 2) & 0x07)
+                    && (Byte(Count) & 0x01) == (Byte(Load) & 0x01) && *reinterpret_cast<const int32_t*>(Count + 3) == Num)
+                {
+                    Channels = Data;
+                    Natives::UNetConnection_ChannelsIsArray = true;
+                }
             }
         }
         RequireOffset(L"UNetConnection::Channels", Natives::UNetConnection_Channels, Channels);
@@ -6982,7 +7009,9 @@ bool Finder::ResolveQuestStatEvents()
             Flush = Target;
         }
     }
-    if (!Flush && !SendStatEventWithTags && !SaveStatEvents && ResolveStrippedQuestStatEvents())
+    // 2.4.2 puts the client string back in a different function (0x477780, which hands the event to registered
+    // listeners through slot 0x47), but the quest manager's SendStatEventWithTags and SaveStatEvents stay stripped.
+    if (!Flush && !SaveStatEvents && ResolveStrippedQuestStatEvents())
     {
         return true;
     }
@@ -8235,6 +8264,45 @@ bool Finder::IsStubFunction(uintptr_t Function)
         || Finder::BodyIs(Function, { 0x33, 0xC0, 0xC3 })
         || Finder::BodyIs(Function, { 0xB0, 0x01, 0xC3 })
         || Finder::BodyIs(Function, { 0x0F, 0x57, 0xC0, 0xC3 });
+}
+
+// A stripped body that still calls UObject::GetWorld and drops the result, and otherwise only calls Super (or nothing).
+// 2.4.2 leaves these: ABuildingContainer::SpawnLoot is `if (Role == ROLE_Authority) GetWorld(); return false;`
+// (0x4B29A0) and its PostUpdate calls the stripped ABuildingSMActor::PostUpdate (0x4AA8B0), then tail-jumps to
+// GetWorld (0x4AA840).
+bool Finder::IsGetWorldStub(uintptr_t Function, uintptr_t Super)
+{
+    if (!IsInText(Function) || (Natives::UObject_GetWorldIndex < 0 && !Finder::ResolveObjectGetWorld()))
+    {
+        return false;
+    }
+    const uintptr_t End = Finder::FunctionEnd(Function);
+    if (!End || End <= Function || End - Function > 0x40)
+    {
+        return false;
+    }
+    const int32_t GetWorld = Natives::UObject_GetWorldIndex * static_cast<int32_t>(sizeof(void*));
+    int32_t GetWorldCalls = 0;
+    for (uintptr_t Address = Function; Address + 6 <= End; ++Address)
+    {
+        const uint8_t ModRm = Byte(Address + 1);
+        if (Byte(Address) == 0xFF && ((ModRm & 0xF8) == 0x90 || (ModRm & 0xF8) == 0xA0) && (ModRm & 0x07) != 0x04)
+        {
+            if (*reinterpret_cast<const int32_t*>(Address + 2) != GetWorld)
+            {
+                return false;
+            }
+            ++GetWorldCalls;
+        }
+    }
+    for (uintptr_t Call = FindRawCall(Function, End); Call; Call = FindRawCall(Call + 5, End))
+    {
+        if (!Super || Finder::RelativeTarget(Call, 1, 5) != Super)
+        {
+            return false;
+        }
+    }
+    return GetWorldCalls == 1;
 }
 
 bool Finder::ResolveLootLive()

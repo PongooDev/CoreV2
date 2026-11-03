@@ -52,7 +52,20 @@ public:
     DefineNativeMember(int32_t, QueuedBits, UNetConnection_QueuedBits)
     DefineNativeMember(int32_t, TickCount, UNetConnection_TickCount)
     DefineNativeMember(bool, TimeSensitive, UNetConnection_TimeSensitive)
-    DefineNativeArray(UChannel*, Channels, UNetConnection_Channels)
+    // Channels: UChannel* Channels[MAX_CHANNELS] up to 2.4, TArray<UChannel*> Channels from 2.4.2 (as in 4.20).
+    struct FChannelList
+    {
+        uintptr_t Address;
+
+        UChannel*& operator[](int32_t Index) const
+        {
+            return Natives::UNetConnection_ChannelsIsArray
+                ? (*reinterpret_cast<TArray<UChannel*>*>(Address))[Index]
+                : reinterpret_cast<UChannel**>(Address)[Index];
+        }
+    };
+    FChannelList GetNative_Channels() const { return { reinterpret_cast<uintptr_t>(this) + Natives::UNetConnection_Channels }; }
+    __declspec(property(get = GetNative_Channels)) FChannelList Channels;
     using FActorChannelMap = TMap<TWeakObjectPtr<AActor>, UActorChannel*>;
     using FDormantReplicatorMap = TMap<TWeakObjectPtr<UObject>, TSharedPtr<FObjectReplicator>>;
     DefineNativeObject(FActorChannelMap, ActorChannels, UNetConnection_ActorChannels)

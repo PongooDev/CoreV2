@@ -221,6 +221,7 @@ namespace Finder
     bool ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff_t LastEquippedWeaponGuidOffset);
     bool ResolveWeaponAmmoLive(ptrdiff_t AmmoCountOffset, ptrdiff_t ItemEntryGuidOffset);
     bool IsStubFunction(uintptr_t Function);
+    bool IsGetWorldStub(uintptr_t Function, uintptr_t Super);
     bool ResolveLootLive();
     bool ResolveBuildingLootLive();
     bool ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t AllowResourceDropMask);

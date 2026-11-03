@@ -571,6 +571,8 @@ namespace Natives
     inline ptrdiff_t UNetConnection_TickCount = -1;
     inline ptrdiff_t UNetConnection_TimeSensitive = -1;
     inline ptrdiff_t UNetConnection_Channels = -1;
+    // Channels is UChannel* [MAX_CHANNELS] up to 2.4 and a TArray<UChannel*> (sized by MaxChannelSize) from 2.4.2.
+    inline bool UNetConnection_ChannelsIsArray = false;
     inline ptrdiff_t UNetConnection_ActorChannels = -1;
     inline ptrdiff_t UNetConnection_DormantReplicatorMap = -1;
     inline ptrdiff_t UNetConnection_DestroyedStartupOrDormantActors = -1;

@@ -18,6 +18,7 @@ namespace
     constexpr uint8_t Prologue[] = { 0x48, 0x89, 0x5C, 0x24 };
     constexpr int PrologueThreshold = 8;
     constexpr size_t SampleSize = 0x10000;
+    constexpr int SampleCount = 4;
 
     /// <summary>
     /// The entry point is a wrapper the packer put there: `sub rsp,28 / call stub / add rsp,28 / jmp CRT`. The stub
@@ -89,18 +90,23 @@ namespace
             return false;
         }
 
-        // Sample well inside .text: its first pages are reached before the rest and would say "decrypted" early.
+        // Spread the samples over .text, counting across all of them. Its first pages are reached before the rest and
+        // a sample there would say "decrypted" early, and a single one further in is not enough either: a stretch of
+        // the generated registration thunks that 2.5 has at .text+0x100000, where the one sample used to go, is all
+        // `mov r9d, hash / lea rdx, name / lea rcx, slot / jmp` and holds no prologue at all.
         const size_t Length = Image.TextSize < SampleSize ? Image.TextSize : SampleSize;
         const size_t Room = Image.TextSize - Length;
-        const size_t Offset = Room < 0x100000 ? Room : 0x100000;
-        const uint8_t* Sample = Image.Text + Offset;
 
         int Count = 0;
-        for (size_t At = 0; At + sizeof(Prologue) <= Length; ++At)
+        for (int Sample = 1; Sample <= SampleCount; ++Sample)
         {
-            if (memcmp(Sample + At, Prologue, sizeof(Prologue)) == 0 && ++Count >= PrologueThreshold)
+            const uint8_t* Bytes = Image.Text + Room * Sample / (SampleCount + 1);
+            for (size_t At = 0; At + sizeof(Prologue) <= Length; ++At)
             {
-                return true;
+                if (memcmp(Bytes + At, Prologue, sizeof(Prologue)) == 0 && ++Count >= PrologueThreshold)
+                {
+                    return true;
+                }
             }
         }
         return false;

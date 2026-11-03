@@ -50,6 +50,8 @@ public:
     DefineUProperty(float, WarmupCountdownDuration)
     DefineUProperty(float, WarmupEarlyCountdownDuration)
     DefineUStructArrayProperty(FAthenaPlaylistDataTableSet, PlaylistDataTables)
+    // The players still in the match (AddToAlivePlayers adds them, RemoveFromAlivePlayers takes them off).
+    DefineUProperty(TArray<AFortPlayerControllerAthena*>, AlivePlayers)
 
     static bool HasMaxPlayerCount() { return Member_MaxPlayerCount.IsAvailable(); }
     static bool HasWarmupLength() { return Member_WarmupCountdownDuration.IsAvailable() && Member_WarmupEarlyCountdownDuration.IsAvailable(); }

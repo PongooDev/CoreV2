@@ -2,6 +2,7 @@
 #include "Pawns/FortPlayerPawn.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
+#include "Configuration.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Engine/World.h"
@@ -17,6 +18,7 @@
 #include "ObjectLayout.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerControllerZone.h"
+#include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "StatManager.h"
 #include "Templates/Casts.h"
@@ -97,6 +99,34 @@ namespace
             return Value;
         }
         return Value * Params.Take<float>(L"OutXY");
+    }
+
+    // 3.0 (CL-3901517) has EFortQuestObjectiveStatEvent::RevivePlayer, which Season 3's "Revive teammates" challenge
+    // counts (revive_athena_player: Athena.Playlist context, no target or source tags; Core-Backend #214). No sender of
+    // it is left in 3.0: ServerReviveFromDBNO_Implementation is stripped (Core's ReviveFromDBNO stands in) and the 11
+    // native stat event senders send no revive. The teammate who revived sends it: their current sub game's quest
+    // manager, the revived pawn as the target, their own source and context tags, once. A self revive is none.
+    void SendRevivePlayerStatEvent(AFortPlayerControllerZone* Reviver, AFortPlayerPawn* Revived)
+    {
+#if WITH_SERVER_CODE
+        // Looked up by name: builds before it have no RevivePlayer event.
+        const EFortQuestObjectiveStatEvent RevivePlayer{ EFortQuestObjectiveStatEvent::StaticEnumInfo().FindValue(L"RevivePlayer") };
+        UFortRegisteredPlayerInfo* PlayerInfo = Reviver ? static_cast<UFortRegisteredPlayerInfo*>(Reviver->MyPlayerInfo) : nullptr;
+        if (static_cast<uint8_t>(RevivePlayer) == Reflection::InvalidEnumValue || !PlayerInfo)
+        {
+            return;
+        }
+        UFortQuestManager* QuestManager = Configuration::Get().IsBattleRoyale() ? PlayerInfo->GetAthenaQuestManager() : PlayerInfo->GetCampaignQuestManager();
+        if (!QuestManager)
+        {
+            return;
+        }
+        FGameplayTagContainer SourceTags;
+        FGameplayTagContainer ContextTags;
+        QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
+        const FGameplayTagContainer NoTargetTags;
+        QuestManager->SendStatEvent(RevivePlayer, Revived, NoTargetTags, SourceTags, ContextTags, 1, false);
+#endif
     }
 }
 
@@ -328,6 +358,8 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
             }
         }
     }
+
+    SendRevivePlayerStatEvent(Reviver, this);
 
     UE_LOG(LogFort, Log, TEXT("ReviveFromDBNO: %s revived %s to %.0f health"), *GetNameSafe(EventInstigator), *GetNameSafe(this), ReviveHealth);
 #endif

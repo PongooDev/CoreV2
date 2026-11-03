@@ -208,11 +208,12 @@ bool AFortGameModeAthena::AddPlaylistContextTag(FGameplayTagContainer& Tags)
     // world record fills them (OnInitWorldRecordComplete, 0x591340: theater, zone theme and tile tags; BP_ZT_Athena has
     // no ZoneTags), and no code names the Athena.Playlist tags (PvPTags rows 21-23, and 1.10's row 24
     // Athena.Playlist.FiftyFifty for 50v50), so a Battle Royale event had no context and matched none of them. The
-    // playlist ids are MCP's, as the match's CurrentPlaylistId has them. The lobby's event queues are 12 to 19, Event1 to
-    // Event8, whose quests (athenaevent1_playmatches...) count Athena.Playlist.Event.N (Core-Backend #190).
+    // playlist ids are MCP's, as the match's CurrentPlaylistId has them. The lobby's event queues EventN send playlists
+    // 15, 13, 14, 17, 12, 16, 18, 19 for N = 1..8 (the matchmaking button's switch, 2.4.2 0x20FBC90), and their quests
+    // (athenaeventN_playmatches) count Athena.Playlist.Event.N (Core-Backend #190, #195).
     const int32_t PlaylistId = CurrentPlaylistId;
-    static const wchar_t* const EventNames[] = { L"Athena.Playlist.Event.1", L"Athena.Playlist.Event.2", L"Athena.Playlist.Event.3", L"Athena.Playlist.Event.4",
-        L"Athena.Playlist.Event.5", L"Athena.Playlist.Event.6", L"Athena.Playlist.Event.7", L"Athena.Playlist.Event.8" };
+    static const wchar_t* const EventNames[] = { L"Athena.Playlist.Event.5", L"Athena.Playlist.Event.2", L"Athena.Playlist.Event.3", L"Athena.Playlist.Event.1",
+        L"Athena.Playlist.Event.6", L"Athena.Playlist.Event.4", L"Athena.Playlist.Event.7", L"Athena.Playlist.Event.8" };
     const wchar_t* const Name = PlaylistId == 2 ? L"Athena.Playlist.Solo" : PlaylistId == 10 ? L"Athena.Playlist.Duo" : PlaylistId == 9 ? L"Athena.Playlist.Squad"
         : PlaylistId == 11 ? L"Athena.Playlist.FiftyFifty" : PlaylistId >= 12 && PlaylistId <= 19 ? EventNames[PlaylistId - 12] : L"Athena.Playlist";
     const FGameplayTag Tag{ FName(Name) };

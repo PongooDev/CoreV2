@@ -20,6 +20,7 @@ body:
         - "2.2"
         - "2.3"
         - "2.4"
+        - "2.4.2"
         - Other (say which below)
     validations:
       required: true

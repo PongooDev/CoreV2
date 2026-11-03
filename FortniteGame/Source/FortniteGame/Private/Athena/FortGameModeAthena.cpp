@@ -956,12 +956,17 @@ namespace
             }
             Watch.LateIds.insert(Id);
 
+            // Shooting Test #1 (playlist 15, Core-Backend #189) keeps squads' 100 teams of 4 in the server's team table, and
+            // from 2.4.2 matchmaking splits parties into a team each: a party-mate's reservation of one is a solo team,
+            // which a late player doesn't join.
+            const bool bSoloReservations = GameMode->CurrentPlaylistId == 15;
             int32_t Index = -1;
             const auto Party = std::find_if(Watch.Parties.begin(), Watch.Parties.end(), [&](const std::vector<std::wstring>& Members) { return std::find(Members.begin(), Members.end(), Id) != Members.end(); });
             for (const std::wstring& Member : Party != Watch.Parties.end() ? *Party : std::vector<std::wstring>())
             {
                 const auto Found = ReservationOf.find(Member);
-                if (Found != ReservationOf.end() && State->GetNumPlayersOnTeam(Reservations[Found->second].TeamNum) < State->NumPlayersPerTeam)
+                if (Found != ReservationOf.end() && State->GetNumPlayersOnTeam(Reservations[Found->second].TeamNum) < State->NumPlayersPerTeam
+                    && !(bSoloReservations && Reservations[Found->second].GetMember_PartyMembers().Num() < 2))
                 {
                     Index = Found->second;
                     break;

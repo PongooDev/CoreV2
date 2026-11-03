@@ -15,7 +15,7 @@ void UFortMcpProfileAccount::EarnScore(const FString& MatchmakingSessionId, cons
     Params.Call(this);
 }
 
-bool UFortMcpProfileAccount::EndPrimaryMission(FScriptArray& Advance, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadgeData, int32_t NumMissionPoints, bool bCriticalMatchBonus)
+bool UFortMcpProfileAccount::EndPrimaryMission(FScriptArray& Advance, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadgeData, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, bool bCriticalMatchBonus)
 {
     Reflection::FParams Params(StaticFunction_EndPrimaryMission(), true);
     FScriptArray* AdvanceParameter = Params.Get<FScriptArray>(L"Advance");
@@ -35,6 +35,12 @@ bool UFortMcpProfileAccount::EndPrimaryMission(FScriptArray& Advance, const FStr
     Params.Set(L"MatchmakingSessionId", MatchmakingSessionId);
     Params.Set(L"MissionName", MissionName);
     Params.Set(L"MissionStatus", MissionStatus);
+    // The BluGlo Difficulty Pylon's tier (3.0's EndPrimaryMission has it between EarnedBadgeData and NumMissionPoints);
+    // builds before the pylon have no such parameter.
+    if (Params.Has(L"DifficultyIncreaseTier"))
+    {
+        Params.Set(L"DifficultyIncreaseTier", DifficultyIncreaseTier);
+    }
     Params.Set(L"NumMissionPoints", NumMissionPoints);
     Params.Set(L"bCriticalMatchBonus", bCriticalMatchBonus);
     if (Finder::ResolveOutpostMcpRequestLive())

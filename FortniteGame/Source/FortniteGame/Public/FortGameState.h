@@ -44,6 +44,8 @@ class AFortGameStateZone : public AFortGameState
 
 public:
     DefineUProperty(float, GameDifficulty)
+    // The BluGlo Difficulty Pylon's tier (2.5+; Mission_BluGloPylon's SetDifficultyIncreaseRewardTier).
+    DefineUProperty(int32_t, DifficultyIncreaseRewardTier)
     DefineUProperty(TAssetSubclassOf<UFortMissionGenerator>, MissionGeneratorClass)
     DefineUProperty(FString, TheaterUniqueId)
     DefineUProperty(UFortZoneTheme*, ZoneTheme)
@@ -52,6 +54,9 @@ public:
     DefineUProperty(int32_t, MaxPlayerStructures)
 
     UFortMissionGenerator* GetMissionGenerator() const;
+    // The difficulty increase tier the zone's BluGlo Difficulty Pylon reached, which EndPrimaryMission reports; 0 when it
+    // wasn't used or the build has no pylon.
+    int32_t GetDifficultyIncreaseRewardTier() const;
     // The zone's structure count and limit (-1: none). Building is refused once the count reaches the limit
     // (AFortPlayerController::CanPlaceBuildableClassInStructuralGrid, 1.8 0x816430); traps never ask.
     bool GetPlayerStructures(int32_t& OutTotal, int32_t& OutMax) const;

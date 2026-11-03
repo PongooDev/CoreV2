@@ -24,6 +24,15 @@ UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const
     return static_cast<UFortMissionGenerator*>(LoadedClass->GetDefaultObject());
 }
 
+// Set by AFortGameStateZone::SetDifficultyIncreaseRewardTier (3.0 0xB7E650, intact), which Mission_BluGloPylon calls on
+// each deposit and which refuses a tier above the zone's difficulty row's NumDifficultyIncreases. 3.0's own reader
+// left is the mission status analytics (0xCA1140); its EndPrimaryMission sender is stripped (the FName is only made,
+// 0xFFF10), so Core's sends it.
+int32_t AFortGameStateZone::GetDifficultyIncreaseRewardTier() const
+{
+    return Member_DifficultyIncreaseRewardTier.IsAvailable() ? DifficultyIncreaseRewardTier : 0;
+}
+
 bool AFortGameStateZone::GetPlayerStructures(int32_t& OutTotal, int32_t& OutMax) const
 {
     if (!Member_TotalPlayerStructures.IsAvailable() || !Member_MaxPlayerStructures.IsAvailable())

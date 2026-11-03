@@ -88,6 +88,11 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
     Log::Info(L"AFortMissionManager::OnZoneEnd: zone completed {}", bZoneCompleted);
     UWorld* World = GetWorld();
     const FString SessionId = GetGameSessionId(World);
+    // The BluGlo Difficulty Pylon's tier (AFortGameStateZone::DifficultyIncreaseRewardTier), the zone's and so every
+    // player's: EndPrimaryMission's DifficultyIncreaseTier, which the backend rewards when the mission succeeded.
+    const AFortGameStateZone* ZoneGameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    const int32_t DifficultyIncreaseTier = ZoneGameState ? ZoneGameState->GetDifficultyIncreaseRewardTier() : 0;
+    Log::Info(L"OnZoneEnd: difficulty increase tier {}", DifficultyIncreaseTier);
     // EndPrimaryMission is sent after EarnScore (see below), so the players' commands wait here.
     struct FPendingEndPrimaryMission
     {
@@ -179,7 +184,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
     }
     for (FPendingEndPrimaryMission& Pending : PendingEndPrimaryMissions)
     {
-        Pending.QuestManager->SendEndPrimaryMission(SessionId, Pending.MissionName, Pending.StatusName, Pending.EarnedBadges, Pending.MissionPoints, Pending.bCriticalMatchBonus);
+        Pending.QuestManager->SendEndPrimaryMission(SessionId, Pending.MissionName, Pending.StatusName, Pending.EarnedBadges, DifficultyIncreaseTier, Pending.MissionPoints, Pending.bCriticalMatchBonus);
         for (int32_t Index = 0; Index < Pending.EarnedBadges.Num(); ++Index)
         {
             FFortQuestEarnedBadgeData::StaticStruct()->DestroyStruct(&Pending.EarnedBadges[Index]);

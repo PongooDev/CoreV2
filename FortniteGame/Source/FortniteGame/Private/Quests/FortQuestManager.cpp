@@ -1138,10 +1138,11 @@ void UFortQuestManager::SendItemStatEvent(EFortQuestObjectiveStatEvent Type, UFo
 #endif
 }
 
-void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, int32_t NumMissionPoints, bool bCriticalMatchBonus)
+void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, bool bCriticalMatchBonus)
 {
     if (Natives::UFortQuestManager_SendEndPrimaryMission)
     {
+        // The builds that still have it (to 1.9.1) predate the BluGlo Difficulty Pylon, so there is no tier to send.
         Natives::UFortQuestManager_SendEndPrimaryMission(this, MatchmakingSessionId, MissionName, MissionStatus, EarnedBadges, NumMissionPoints, bCriticalMatchBonus);
         return;
     }
@@ -1151,7 +1152,7 @@ void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionI
     // sends EndPrimaryMission with the objective progress not yet saved, through the dedicated server's command URL.
     UFortMcpProfileAccount* Account = Cast<UFortMcpProfileAccount>(static_cast<FWeakObjectPtr&>(BoundProfile).Get());
     FScriptArray& Pending = PendingChanges;
-    if (!Account || !Account->EndPrimaryMission(Pending, MatchmakingSessionId, MissionName, MissionStatus, EarnedBadges, NumMissionPoints, bCriticalMatchBonus))
+    if (!Account || !Account->EndPrimaryMission(Pending, MatchmakingSessionId, MissionName, MissionStatus, EarnedBadges, DifficultyIncreaseTier, NumMissionPoints, bCriticalMatchBonus))
     {
         Log::Error(L"EndPrimaryMission: {} has no account profile to send it to", GetName().ToStdString());
     }

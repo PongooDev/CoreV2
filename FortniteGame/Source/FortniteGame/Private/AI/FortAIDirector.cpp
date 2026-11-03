@@ -6,6 +6,7 @@
 #include "FortGameModeZone.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
+#include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectGlobals.h"
 
@@ -411,6 +412,21 @@ namespace
         return Handle;
     }
 
+    // Whether the curve table has the row, by UDataTableFunctionLibrary::EvaluateCurveTableRow (OutResult RowFound is 0).
+    bool CurveTableHasRow(UCurveTable* CurveTable, const wchar_t* RowName)
+    {
+        UFunction* Evaluate = FindObject<UFunction>(nullptr, L"/Script/Engine.DataTableFunctionLibrary:EvaluateCurveTableRow");
+        UClass* Library = FindObject<UClass>(nullptr, L"/Script/Engine.DataTableFunctionLibrary");
+        UObject* LibraryDefault = Library ? Library->GetDefaultObject() : nullptr;
+        if (!CurveTable || !Evaluate || !LibraryDefault)
+        {
+            return false;
+        }
+        Reflection::FParams Params(Evaluate, true);
+        return Params.Set(L"CurveTable", reinterpret_cast<UObject*>(CurveTable)) && Params.Set(L"RowName", FName(RowName)) && Params.Set(L"InXY", 0.0f)
+            && Params.Call(LibraryDefault) && Params.Take<uint8_t>(L"OutResult") == 0;
+    }
+
     FGameplayTagContainer MakeGameplayTagContainer(std::initializer_list<const wchar_t*> TagNames)
     {
         FGameplayTagContainer Tags;
@@ -583,9 +599,25 @@ void AFortAIDirector::ApplyAIDirectorFortniteDefaults()
 
     TStructArray<FFortAIEncounterPawnDifficultyLevelModifier>& DifficultyLevelModifiers = EncounterPawnDifficultyLevelModifiers;
     DifficultyLevelModifiers.Empty();
+    UCurveTable* const GroupEnemyOffsets = LoadDefault<UCurveTable>(GroupEnemyOffsetsPath);
     FFortAIEncounterPawnDifficultyLevelModifier& FourPlayerModifier = DifficultyLevelModifiers.AddDefaulted();
     FourPlayerModifier.EncounterTagRequirementsQuery = MakeMatchAllTagsQuery(L"Encounter.EnemyDifficulty.4Player", L"");
-    SetCurveTableRow(FourPlayerModifier.DifficultyLevelModifierCurve, LoadDefault<UCurveTable>(GroupEnemyOffsetsPath), L"EnemyOffset_4Player");
+    SetCurveTableRow(FourPlayerModifier.DifficultyLevelModifierCurve, GroupEnemyOffsets, L"EnemyOffset_4Player");
+    // 🟡 Inferred: the BluGlo Difficulty Pylon (2.5+, CoreV2 #225). Its first two boosts' mutators (DifficultyBoost01/02's
+    // Boost01/02AllEncountersMutator, AFortGameplayMutator_AIEncounterModifierTags) tag every encounter
+    // Encounter.EnemyDifficulty.2Player / .3Player, and 3.0's GroupEnemyOffsets has EnemyOffset_2Player / _3Player for
+    // them, but 1.9.1's AIDirector_Fortnite (all these settings) only had the 4Player modifier and the later builds' didn't
+    // ship. Without these the first two boosts left the enemies' level as it was. Only where the rows exist.
+    for (const auto& [TagName, RowName] : { std::pair{ L"Encounter.EnemyDifficulty.3Player", L"EnemyOffset_3Player" }, std::pair{ L"Encounter.EnemyDifficulty.2Player", L"EnemyOffset_2Player" } })
+    {
+        if (!CurveTableHasRow(GroupEnemyOffsets, RowName))
+        {
+            continue;
+        }
+        FFortAIEncounterPawnDifficultyLevelModifier& Modifier = DifficultyLevelModifiers.AddDefaulted();
+        Modifier.EncounterTagRequirementsQuery = MakeMatchAllTagsQuery(TagName, L"");
+        SetCurveTableRow(Modifier.DifficultyLevelModifierCurve, GroupEnemyOffsets, RowName);
+    }
 
     // 1.11's Mini-Bosses (#191), which 1.9.1's director predates. A Mini-Boss mission alert's modifier,
     // MiniBossEnablePrimaryMissionItem, spawns MiniBossEnablePrimaryMissionMutator (an

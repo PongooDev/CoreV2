@@ -696,7 +696,9 @@ namespace
 
         // On 1.9.1 UEngine::LoadMap is moved code, its log reference too: the registers for its Listen call are set in
         // other pieces, so there only the call's target is checked.
-        const uintptr_t ListenLog = OnlyRef(L"LoadMap: failed to Listen(%s)");
+        // On packed builds with moved code (2.4, 2.4.2) the reference can still be ciphertext here, so the string has none
+        // and PackedListenCall finds the call; that is expected there, not worth a warning.
+        const uintptr_t ListenLog = Finder::HasMovedCode() ? First(Finder::StringRefs(L"LoadMap: failed to Listen(%s)")) : OnlyRef(L"LoadMap: failed to Listen(%s)");
         const bool bMovedListen = ListenLog && !IsInText(ListenLog);
         uintptr_t ListenCall = ListenLog ? (bMovedListen ? MovedCallBeforeJccPastRef(ListenLog) : CallBeforeJccPastRef(ListenLog, 0x100)) : 0;
         bool bListen = ListenCall && (bMovedListen || IsListenCall(ListenCall));
@@ -6156,6 +6158,43 @@ bool Finder::ResolveInventoryLive()
             InitializeExistingItem = Caller;
         }
     }
+    // 2.4.2 splits the add out into the virtual InitializeExistingItemInternal (0x6AD8E0), which tail-jumps to
+    // UpdateItemInstances; InitializeExistingItem (0x6AD760) keeps the bAllowMcpItemCreation check and the guid lookup
+    // and calls it through the vtable (call [rax+5F0h]). It is the callee of UFortWorldItem::PopulateFromMcpItem
+    // (0x6D81F0, call at 0x6D849D) that makes that virtual call.
+    if (!InitializeExistingItem && !bAmbiguous && UpdateItemInstances)
+    {
+        uintptr_t InitializeExistingItemInternal = 0;
+        for (uintptr_t Jump : Finder::CallsTo(UpdateItemInstances, true))
+        {
+            const uintptr_t Caller = Byte(Jump) == 0xE9 ? Finder::FunctionStart(Jump) : 0;
+            if (Caller && Caller != Update)
+            {
+                bAmbiguous |= InitializeExistingItemInternal && InitializeExistingItemInternal != Caller;
+                InitializeExistingItemInternal = Caller;
+            }
+        }
+        UClass* InventoryClass = InitializeExistingItemInternal && !bAmbiguous ? FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortInventory") : nullptr;
+        UObject* InventoryDefault = InventoryClass ? InventoryClass->GetDefaultObject() : nullptr;
+        void** const InventoryVTable = InventoryDefault ? *reinterpret_cast<void***>(InventoryDefault) : nullptr;
+        const int32_t InternalSlot = FirstVTableIndex(InventoryVTable, InitializeExistingItemInternal);
+        const uintptr_t PopulateFromMcpItem = InternalSlot >= 0 ? FunctionOf(L"UFortWorldItem::PopulateFromMcpItem: Got mcp request to refresh item %s for %s but it has local changes, ignoring mcp.") : 0;
+        const uintptr_t PopulateFromMcpItemEnd = PopulateFromMcpItem ? Finder::FunctionEnd(PopulateFromMcpItem) : 0;
+        for (const auto& [Call, Target] : PopulateFromMcpItemEnd > PopulateFromMcpItem ? Finder::DirectCalls(PopulateFromMcpItem, PopulateFromMcpItemEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            const uintptr_t TargetEnd = Target != InitializeExistingItem && Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            // call [r64+disp32]: FF /2 with mod 10 (not rsp/r12-based).
+            for (uintptr_t Site = Target; TargetEnd && Site + 6 <= TargetEnd; ++Site)
+            {
+                if (Byte(Site) == 0xFF && (Byte(Site + 1) & 0xF8) == 0x90 && Byte(Site + 1) != 0x94 && *reinterpret_cast<const int32_t*>(Site + 2) == InternalSlot * static_cast<int32_t>(sizeof(void*)))
+                {
+                    bAmbiguous |= InitializeExistingItem != 0;
+                    InitializeExistingItem = Target;
+                    break;
+                }
+            }
+        }
+    }
     if (!InitializeExistingItem || bAmbiguous)
     {
         Log::Error(L"Finder: AFortInventory::InitializeExistingItem not found");
@@ -6166,13 +6205,24 @@ bool Finder::ResolveInventoryLive()
     Log::Info(L"Finder: AFortInventory::InitializeExistingItem found");
 
     // 1.11 adds an item it doesn't have only while the inventory's bAllowMcpItemCreation is set (0x6BA3D4:
-    // `cmp byte ptr [rbx+0x4EB], bpl; je` to the return). 1.10 and earlier have no such check.
+    // `cmp byte ptr [rbx+0x4EB], bpl; je` to the return). 1.10 and earlier have no such check. 2.4.2 tests it first
+    // (0x6AD76A: `cmp byte ptr [rcx+0x4EB], 0`, two movs, then je).
     const uintptr_t InitializeExistingItemEnd = Finder::FunctionEnd(InitializeExistingItem);
     for (uintptr_t Site = InitializeExistingItem; Site && Site + 13 <= InitializeExistingItemEnd; ++Site)
     {
         const uint8_t ModRM = Byte(Site + 2);
-        if ((Byte(Site) & 0xF0) == 0x40 && Byte(Site + 1) == 0x38 && (ModRM & 0xC0) == 0x80 && (ModRM & 0x07) != 0x04
-            && Byte(Site + 7) == 0x0F && Byte(Site + 8) == 0x84)
+        const uint8_t CmpModRM = Byte(Site + 1);
+        const bool bCmpRegister = (Byte(Site) & 0xF0) == 0x40 && Byte(Site + 1) == 0x38 && (ModRM & 0xC0) == 0x80 && (ModRM & 0x07) != 0x04
+            && Byte(Site + 7) == 0x0F && Byte(Site + 8) == 0x84;
+        const bool bCmpZero = Byte(Site) == 0x80 && (CmpModRM & 0xF8) == 0xB8 && (CmpModRM & 0x07) != 0x04 && Byte(Site + 6) == 0x00
+            && FindInstruction(Site + 7, std::min(Site + 0x17, InitializeExistingItemEnd), { 0x0F, 0x84 });
+        if (bCmpZero)
+        {
+            Natives::AFortInventory_bAllowMcpItemCreation = *reinterpret_cast<const int32_t*>(Site + 2);
+            Log::Info(L"Finder: AFortInventory::bAllowMcpItemCreation is +0x{:X}", Natives::AFortInventory_bAllowMcpItemCreation);
+            break;
+        }
+        if (bCmpRegister)
         {
             Natives::AFortInventory_bAllowMcpItemCreation = *reinterpret_cast<const int32_t*>(Site + 3);
             Log::Info(L"Finder: AFortInventory::bAllowMcpItemCreation is +0x{:X}", Natives::AFortInventory_bAllowMcpItemCreation);
@@ -6231,6 +6281,11 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     // function calling it that caps at 512, and the overflow (0x686E80) the backpack limit's one caller. Of the
     // overflow's callees the stack limit (0x687080) is the one that tests a call's bool and shares a callee
     // (GetMaxStackSize) with the backpack limit. GetMaxStackSize and CanStackWith keep 1.8's shapes.
+    // 2.4.2's backpack limit (0x6A7B10) caps at 500 (cmp eax, 1F4h at 0x6A7C39) instead of 512.
+    const auto HasBackpackCap = [](uintptr_t Begin, uintptr_t End)
+    {
+        return FindInstruction(Begin, End, { 0x3D, 0x00, 0x02, 0x00, 0x00 }) || FindInstruction(Begin, End, { 0x3D, 0xF4, 0x01, 0x00, 0x00 });
+    };
     const uintptr_t Capacity = OverflowReason ? 0 : FunctionOf(L"GetInventoryCapacity is returning an overridden value of %i");
     uintptr_t CapacityStackLimit = 0;
     uintptr_t CapacityBackpackLimit = 0;
@@ -6239,7 +6294,7 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     {
         const uintptr_t Caller = Finder::FunctionStart(Call);
         const uintptr_t CallerEnd = Caller ? Finder::FunctionEnd(Caller) : 0;
-        if (CallerEnd > Caller && Caller != CapacityBackpackLimit && FindInstruction(Caller, CallerEnd, { 0x3D, 0x00, 0x02, 0x00, 0x00 }))
+        if (CallerEnd > Caller && Caller != CapacityBackpackLimit && HasBackpackCap(Caller, CallerEnd))
         {
             bCapacityLimitsAmbiguous |= CapacityBackpackLimit != 0;
             CapacityBackpackLimit = Caller;
@@ -6279,14 +6334,16 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     const bool bControllerLimits = OverflowReason ? StackLimit != StackLimitCall : StackLimit != 0;
     const uintptr_t StackLimitEnd = IsInText(StackLimit) ? Finder::FunctionEnd(StackLimit) : 0;
     const uintptr_t BackpackLimitEnd = IsInText(BackpackLimit) ? Finder::FunctionEnd(BackpackLimit) : 0;
-    const bool bStackCap = BackpackLimitEnd > BackpackLimit && FindInstruction(BackpackLimit, BackpackLimitEnd, { 0x3D, 0x00, 0x02, 0x00, 0x00 });
+    const bool bStackCap = BackpackLimitEnd > BackpackLimit && HasBackpackCap(BackpackLimit, BackpackLimitEnd);
 
     const std::vector<uintptr_t> StackLimitCalls = Targets(StackLimit);
     uintptr_t MaxStackSize = 0;
     for (const uintptr_t Target : Targets(BackpackLimit))
     {
-        // 1.7.2's limits both also call a leaf getter (0x219A8F0, no .pdata entry) after GetMaxStackSize.
-        if (Finder::FunctionStart(Target) == Target && std::find(StackLimitCalls.begin(), StackLimitCalls.end(), Target) != StackLimitCalls.end())
+        // 1.7.2's limits both also call a leaf getter (0x219A8F0, no .pdata entry) after GetMaxStackSize. 2.4's call
+        // the item entry's count getter (0x1FECB70, 2.4.2 0x188B810: mov eax, [rcx+0Ch]; ret) after it, and it has one.
+        const bool bFieldGetter = Byte(Target) == 0x8B && Byte(Target + 1) == 0x41 && Byte(Target + 3) == 0xC3;
+        if (!bFieldGetter && Finder::FunctionStart(Target) == Target && std::find(StackLimitCalls.begin(), StackLimitCalls.end(), Target) != StackLimitCalls.end())
         {
             MaxStackSize = Target;
         }

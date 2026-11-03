@@ -286,6 +286,7 @@ static void InstallHooks()
         if (Configuration::Get().IsBattleRoyale())
         {
             Finder::ResolveLootTierRedirectLive();
+            Finder::ResolvePlaylistDataTablesLive();
             AFortPlayerControllerAthena::HookCallSites();
             AFortPlayerControllerAthena::HookVTables();
             AFortPlayerPawnAthena::HookNatives();

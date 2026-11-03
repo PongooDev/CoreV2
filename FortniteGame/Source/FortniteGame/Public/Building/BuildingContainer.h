@@ -53,6 +53,8 @@ public:
 
     static void HookVTables();
     static void LogWorldContainers(UWorld* World);
+    // Rolls the world's container tiers and floor loot again, from the loot tables as they are now.
+    static void RollAthenaLootAgain(UWorld* World);
 
 private:
     bool IsAlreadySearched(AFortPawn* Looter);
@@ -69,7 +71,6 @@ private:
     FVector GetAthenaLootSpawnLocation();
     FVector GetAthenaLootTossVelocity();
     FVector GetAthenaLootFinalLocation();
-    void GetFloorLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation);
 
     static void PostLoadHK(ABuildingContainer* This);
     static void PostUpdateHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList);

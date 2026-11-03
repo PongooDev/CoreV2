@@ -11,6 +11,7 @@
 #include "BackendRequest.h"
 #include "Building/BuildingSMActor.h"
 #include "Configuration.h"
+#include "Engine/DataTable.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/NetConnection.h"
 #include "Engine/NetDriver.h"
@@ -1092,6 +1093,87 @@ void AFortGameModeAthena::WatchWarmup()
     // its match during the warmup, reports its players and time left every second so the backend sends it the parties
     // that queue, and gives each of them a team.
     WatchWarmupOf(FWeakObjectPtr(this), std::make_shared<FWarmupWatch>());
+#endif
+}
+
+namespace
+{
+    // The game mode whose playlist's tables ApplyPlaylistDataTables last copied over the default ones, and that playlist.
+    FWeakObjectPtr TablesGameMode;
+    int32_t TablesPlaylistId = -1;
+
+    // The loot tables PlaylistId's PlaylistDataTables entry copies over the default ones (none: the defaults).
+    std::pair<UDataTable*, UDataTable*> PlaylistLootTables(AFortGameModeAthena* GameMode, int32_t PlaylistId)
+    {
+        TStructArray<FAthenaPlaylistDataTableSet>& Sets = GameMode->PlaylistDataTables;
+        for (int32_t Index = 0; Index < Sets.Num(); ++Index)
+        {
+            FAthenaPlaylistDataTableSet& Set = Sets[Index];
+            if (Set.PlaylistId == PlaylistId)
+            {
+                return { Set.LootTierData, Set.LootPackages };
+            }
+        }
+        return { nullptr, nullptr };
+    }
+
+    void WatchPlaylistDataTablesOf(FWeakObjectPtr GameMode)
+    {
+        GameThread::Enqueue([GameMode]()
+        {
+            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
+            AFortGameStateAthena* GameState = Athena ? AthenaGameStateOf(Athena) : nullptr;
+            // The match is assigned before its players come, in the warmup at the latest.
+            if (!Athena || TablesGameMode.Get() != Athena || !GameState || GameState->GamePhase >= EAthenaGamePhase::GetAircraft())
+            {
+                return;
+            }
+            // The match's playlist is CurrentPlaylistId once the matchmaking service's assignment is being handled
+            // (HandlingMatchAssignment), but OnGivenMatchAssignment, which ends with ApplyPlaylistDataTables, runs only
+            // when the server has answered it (Finished), some 20 s later on 2.4.2. The tables are applied now, the same
+            // way, so the loot is rolled again before the players come; OnGivenMatchAssignment's copy is the same rows.
+            const int32_t PlaylistId = Athena->CurrentPlaylistId;
+            if (PlaylistId != TablesPlaylistId)
+            {
+                const int32_t Previous = TablesPlaylistId;
+                TablesPlaylistId = PlaylistId;
+                Natives::AFortGameModeAthena_ApplyPlaylistDataTables(Athena);
+                if (PlaylistLootTables(Athena, PlaylistId) != PlaylistLootTables(Athena, Previous))
+                {
+                    Log::Info(L"Battle Royale: the match's playlist {} has other loot tables than playlist {}, so the world's loot is rolled again", PlaylistId, Previous);
+                    ABuildingContainer::RollAthenaLootAgain(Athena->GetWorld());
+                }
+            }
+            WatchPlaylistDataTablesOf(GameMode);
+        });
+    }
+}
+
+void AFortGameModeAthena::ApplyPlaylistDataTablesOnce()
+{
+#if WITH_SERVER_CODE
+    // The tables are global: a match before this world's left its playlist's rows in them until the next assignment, so
+    // this world's first rolls would have been that playlist's.
+    if (TablesGameMode.Get() == this || !Finder::ResolvePlaylistDataTablesLive())
+    {
+        return;
+    }
+    TablesGameMode = this;
+    TablesPlaylistId = CurrentPlaylistId;
+    Natives::AFortGameModeAthena_ApplyPlaylistDataTables(this);
+    const auto [LootTierData, LootPackages] = PlaylistLootTables(this, TablesPlaylistId);
+    Log::Info(L"Battle Royale: the world's loot tables are playlist {}'s ({}, {})", TablesPlaylistId, LootTierData ? LootTierData->GetPathName().ToStdString() : std::wstring(L"default loot tiers"),
+        LootPackages ? LootPackages->GetPathName().ToStdString() : std::wstring(L"default loot packages"));
+#endif
+}
+
+void AFortGameModeAthena::WatchPlaylistDataTables()
+{
+#if WITH_SERVER_CODE
+    if (TablesGameMode.Get() == this)
+    {
+        WatchPlaylistDataTablesOf(FWeakObjectPtr(this));
+    }
 #endif
 }
 

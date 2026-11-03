@@ -6919,6 +6919,33 @@ bool Finder::ResolveLootTierRedirectLive()
     return true;
 }
 
+bool Finder::ResolvePlaylistDataTablesLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortGameModeAthena_ApplyPlaylistDataTables || bSearched)
+    {
+        return Natives::AFortGameModeAthena_ApplyPlaylistDataTables != nullptr;
+    }
+    bSearched = true;
+
+    // AFortGameModeAthena::ApplyPlaylistDataTables (2.4 0x409790, 2.4.2 0x411440, 2.5 0x990C60; AFortGameStateAthena's
+    // in 21.40), the game mode's virtual that OnGivenMatchAssignment (2.4.2 0x429330) calls last, logs "Restoring data
+    // tables to defaults" (the game instance's AthenaDataTables copied back over AthenaLootTierData_Client,
+    // AthenaLootPackages_Client, AthenaRangedWeapons, AthenaGameData and AthenaResourceRates), then copies the tables of
+    // the PlaylistDataTables entry whose PlaylistId is CurrentPlaylistId over them (UDataTable::CreateTableFromOtherTable,
+    // "Patched Loot Tier with %s"). Builds before 1.11 have no playlist tables.
+    const uintptr_t Apply = FunctionOf(L"Restoring data tables to defaults");
+    if (!Apply)
+    {
+        Log::Info(L"Finder: no AFortGameModeAthena::ApplyPlaylistDataTables on this build, the loot tables stay the defaults");
+        return false;
+    }
+
+    Natives::AFortGameModeAthena_ApplyPlaylistDataTables = reinterpret_cast<decltype(Natives::AFortGameModeAthena_ApplyPlaylistDataTables)>(Apply);
+    Log::Info(L"Finder: AFortGameModeAthena::ApplyPlaylistDataTables at 0x{:X}", Apply - Finder::ImageBase());
+    return true;
+}
+
 uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
 {
     // AFortGameModeAthena::StartAircraftPhase (1.7.2 0x3FFB60) binds the aircraft's delegates by name; OnAircraftFlightEnded

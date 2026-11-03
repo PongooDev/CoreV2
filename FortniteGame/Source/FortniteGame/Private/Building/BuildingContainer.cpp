@@ -6,6 +6,7 @@
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "FortGameState.h"
 #include "FortKismetLibrary.h"
 #include "FortWorldManager.h"
 #include "Hooks.h"
@@ -71,7 +72,8 @@ namespace
     // AFortGameState virtual (1.9 slot 0xE5, empty in the base). AFortGameStateAthena's override (0x430920) gives
     // playlist -1 to 2 level 1, 10 (Duo) level 2, and 9 (Squad) and 11 level 3. AFortGameModeAthena::OnGivenMatchAssignment
     // (0x42D2B0) calls it, after it copies the match's playlist to the game state, and so does the world manager when it
-    // sets the world level (0x667A50). Before the match is assigned, the floor loot is rolled at level 1. Logged when a roll
+    // sets the world level (0x667A50). Before the match is assigned, the floor loot is rolled at level 1 (and again, at
+    // the match's level, when the assignment brings other loot tables: RollAthenaLootAgain). Logged when a roll
     // uses a level other than the last one logged, so a server log shows which level each playlist's loot got.
     void LogAthenaLootLevel(ABuildingContainer* Container, int32_t LootLevel)
     {
@@ -158,23 +160,76 @@ FVector ABuildingContainer::GetAthenaTossForward()
     return ForwardSize > 0.0f ? Forward * (1.0f / ForwardSize) : FVector(1.0f, 0.0f, 0.0f);
 }
 
-void ABuildingContainer::GetFloorLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation)
+namespace
 {
-    // Floor loot (Tiered_Athena_FloorLoot_01) is out before anyone lands, so it is only dropped into place (#72): each item
-    // gets its own spot around the container's pivot (its floor) and drops from LootSpawnLocation's height a little short
-    // of it, never straight above it: AFortPickup::TossPickup (1.7.2 0x6622F0) sends a toss with no distance in a random
-    // direction 512 away.
-    constexpr float FloorLootRadius = 40.0f;
-    constexpr float DropShortfall = 20.0f;
-    const FTransform ContainerTransform = GetTransform();
-    const FVector Base = ContainerTransform.GetLocation();
-    const FVector Forward = GetAthenaTossForward();
-    const FVector Right(-Forward.Y, Forward.X, 0.0f);
-    const float Height = FMath::Max(ContainerTransform.TransformPosition(LootSpawnLocation).Z - Base.Z, 30.0f);
-    const float Angle = Count > 1 ? 2.0f * 3.1415926535897932f * static_cast<float>(Index) / static_cast<float>(Count) : 0.0f;
-    const FVector Direction = Forward * std::cos(Angle) + Right * std::sin(Angle);
-    OutFinalLocation = Base + Direction * (Count > 1 ? FloorLootRadius : DropShortfall);
-    OutSpawnLocation = OutFinalLocation - Direction * DropShortfall + FVector(0.0f, 0.0f, Height);
+    // A floor loot container's spot, kept after the container is gone, with the pickups its roll spawned, so the roll
+    // can be made again with the match's loot tables (RollAthenaLootAgain).
+    struct FFloorLootSpot
+    {
+        FWeakObjectPtr World;
+        FVector Base;
+        FVector Forward;
+        float Height = 0.0f;
+        FName TierGroup;
+        FGameplayTagContainer Tags;
+        float DurabilityModifier = 1.0f;
+        std::vector<FWeakObjectPtr> Pickups;
+    };
+
+    std::vector<FFloorLootSpot> FloorLootSpots;
+
+    void GetFloorLootLocations(const FFloorLootSpot& Spot, int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation)
+    {
+        // Floor loot (Tiered_Athena_FloorLoot_01) is out before anyone lands, so it is only dropped into place (#72): each
+        // item gets its own spot around the container's pivot (its floor) and drops from LootSpawnLocation's height a little
+        // short of it, never straight above it: AFortPickup::TossPickup (1.7.2 0x6622F0) sends a toss with no distance in a
+        // random direction 512 away.
+        constexpr float FloorLootRadius = 40.0f;
+        constexpr float DropShortfall = 20.0f;
+        const FVector Right(-Spot.Forward.Y, Spot.Forward.X, 0.0f);
+        const float Angle = Count > 1 ? 2.0f * 3.1415926535897932f * static_cast<float>(Index) / static_cast<float>(Count) : 0.0f;
+        const FVector Direction = Spot.Forward * std::cos(Angle) + Right * std::sin(Angle);
+        OutFinalLocation = Spot.Base + Direction * (Count > 1 ? FloorLootRadius : DropShortfall);
+        OutSpawnLocation = OutFinalLocation - Direction * DropShortfall + FVector(0.0f, 0.0f, Spot.Height);
+    }
+
+    void SpawnFloorLootAt(FFloorLootSpot& Spot, UWorld* World, int32_t WorldLevel)
+    {
+        FName LootTierKey;
+        int32_t LootTier = -1;
+        UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(LootTierKey, LootTier, Spot.TierGroup, WorldLevel, -1, Spot.Tags);
+        ++FloorLootContainers;
+        if (!UFortLootTier::ShouldDropLoot(LootTierKey, L"ABuildingContainer::PostUpdate"))
+        {
+            return;
+        }
+
+        TStructArray<FFortItemEntry> LootDrops{};
+        UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, nullptr, Spot.Tags, true, false);
+        AFortPickup::CombineItemEntries(LootDrops, nullptr);
+        const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
+        for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
+        {
+            FFortItemEntry& Entry = LootDrops[Index];
+            UFortWorldItemDefinition* WorldItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition));
+            if (!WorldItemDefinition)
+            {
+                continue;
+            }
+            ApplyLootedDurability(Entry, WorldItemDefinition, Spot.DurabilityModifier);
+            FloorLootLoadedWeapons += Entry.LoadFullClip() ? 1 : 0;
+            FVector SpawnLocation;
+            FVector FinalLocation;
+            GetFloorLootLocations(Spot, Index, LootDrops.Num(), SpawnLocation, FinalLocation);
+            if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
+            {
+                Pickup->TossPickup(FinalLocation, nullptr, 0);
+                Spot.Pickups.emplace_back(Pickup);
+                ++FloorLootPickups;
+            }
+        }
+        LootDrops.Empty();
+    }
 }
 
 float ABuildingContainer::GetAthenaLootFront()
@@ -259,42 +314,81 @@ void ABuildingContainer::SpawnFloorLoot()
 {
     // Battle Royale's floor loot (Tiered_Athena_FloorLoot_01: Loot_AthenaFloorLoot, bStartAlreadySearched_Athena,
     // bDestroyContainerOnSearch) is never searched: its roll lies on the ground from the start, without the container.
+    UWorld* World = GetWorld();
     const int32_t WorldLevel = GetWorldManager() ? GetWorldLevel() : -1;
-    FName LootTierKey;
-    int32_t LootTier = -1;
-    UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(LootTierKey, LootTier, GetSearchLootTierGroup(), WorldLevel, -1, StaticGameplayTags);
-    ++FloorLootContainers;
-    if (!UFortLootTier::ShouldDropLoot(LootTierKey, L"ABuildingContainer::PostUpdate"))
-    {
-        return;
-    }
     LogAthenaLootLevel(this, WorldLevel);
 
-    TStructArray<FFortItemEntry> LootDrops{};
-    UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, nullptr, StaticGameplayTags, true, false);
-    AFortPickup::CombineItemEntries(LootDrops, nullptr);
-    UWorld* World = GetWorld();
-    const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
-    for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
+    // The spots of an earlier world are gone with it.
+    std::erase_if(FloorLootSpots, [World](const FFloorLootSpot& Spot) { return Spot.World.Get() != World; });
+    const FTransform ContainerTransform = GetTransform();
+    FFloorLootSpot& Spot = FloorLootSpots.emplace_back();
+    Spot.World = World;
+    Spot.Base = ContainerTransform.GetLocation();
+    Spot.Forward = GetAthenaTossForward();
+    Spot.Height = FMath::Max(ContainerTransform.TransformPosition(LootSpawnLocation).Z - Spot.Base.Z, 30.0f);
+    Spot.TierGroup = GetSearchLootTierGroup();
+    Spot.Tags.AppendTags(StaticGameplayTags);
+    Spot.DurabilityModifier = LootedWeaponsDurabilityModifier;
+    SpawnFloorLootAt(Spot, World, WorldLevel);
+}
+
+void ABuildingContainer::RollAthenaLootAgain(UWorld* World)
+{
+#if WITH_SERVER_CODE
+    // AFortGameModeAthena::ApplyPlaylistDataTables copies the playlist's rows over the default tables when the match is
+    // assigned, after the world rolled its chests' and ammo boxes' tiers and spawned its floor loot (at its creation, from
+    // the tables the map URL's playlist had). What is rolled when searched (chests, ammo boxes, supply drops) reads the
+    // tables then; the rest is rolled again here: each container's tier, and the floor loot, its earlier pickups removed.
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    const int32_t WorldLevel = GameState && GameState->WorldManager ? static_cast<int32_t>(GameState->WorldLevel) : -1;
+
+    int32_t Containers = 0;
+    for (TObjectIterator<ABuildingContainer> It; It; ++It)
     {
-        FFortItemEntry& Entry = LootDrops[Index];
-        UFortWorldItemDefinition* WorldItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition));
-        if (!WorldItemDefinition)
+        ABuildingContainer* Container = *It;
+        if (Container->GetWorld() != World || Container->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)) || Container->bDestroyed
+            || static_cast<FName>(Container->ContainerLootTierKey).IsNone() || Container->LootTestingData)
         {
             continue;
         }
-        ApplyLootedDurability(Entry, WorldItemDefinition, LootedWeaponsDurabilityModifier);
-        FloorLootLoadedWeapons += Entry.LoadFullClip() ? 1 : 0;
-        FVector SpawnLocation;
-        FVector FinalLocation;
-        GetFloorLootLocations(Index, LootDrops.Num(), SpawnLocation, FinalLocation);
-        if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
+        FName PickedKey;
+        int32_t LootTier = -1;
+        UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(PickedKey, LootTier, Container->GetSearchLootTierGroup(), WorldLevel, -1, Container->StaticGameplayTags);
+        Container->ContainerLootTierKey = PickedKey;
+        if (!PickedKey.IsNone())
         {
-            Pickup->TossPickup(FinalLocation, nullptr, 0);
-            ++FloorLootPickups;
+            Container->SelectMeshSet(LootTier);
         }
+        Container->UpdateReplicatedLootTier();
+        ++Containers;
     }
-    LootDrops.Empty();
+
+    FloorLootContainers = 0;
+    FloorLootPickups = 0;
+    FloorLootLoadedWeapons = 0;
+    int32_t Removed = 0;
+    for (FFloorLootSpot& Spot : FloorLootSpots)
+    {
+        if (Spot.World.Get() != World)
+        {
+            continue;
+        }
+        for (const FWeakObjectPtr& Pickup : Spot.Pickups)
+        {
+            if (AActor* Actor = static_cast<AActor*>(Pickup.Get()))
+            {
+                Actor->K2_DestroyActor();
+                ++Removed;
+            }
+        }
+        Spot.Pickups.clear();
+        SpawnFloorLootAt(Spot, World, WorldLevel);
+    }
+    UE_LOG(LogFortBuilding, Log, TEXT("Loot rolled again (loot level %d): %d containers' tiers; floor loot: %d pickups removed, %d containers spawned %d pickups (%d loaded weapons)"),
+        WorldLevel, Containers, Removed, FloorLootContainers, FloorLootPickups, FloorLootLoadedWeapons);    FloorLootContainers = 0;
+    FloorLootPickups = 0;
+    FloorLootLoadedWeapons = 0;
+#endif
 }
 
 void ABuildingContainer::PostLoad()
@@ -318,6 +412,12 @@ void ABuildingContainer::PostUpdate(EFortBuildingPersistentState State, FFortBui
 {
 #if WITH_SERVER_CODE
     ABuildingSMActor::PostUpdate(State, RandomList);
+
+    // The loot tables are the match's playlist's from the world's first roll on.
+    if (AFortGameModeAthena* AthenaGameMode = AFortGameModeAthena::GetCurrent(this))
+    {
+        AthenaGameMode->ApplyPlaylistDataTablesOnce();
+    }
 
     if (StartsAlreadySearched())
     {
@@ -673,8 +773,7 @@ void ABuildingContainer::LogWorldContainers(UWorld* World)
     }
     FloorLootContainers = 0;
     FloorLootPickups = 0;
-    FloorLootLoadedWeapons = 0;
-}
+    FloorLootLoadedWeapons = 0;}
 
 void ABuildingContainer::PostLoadHK(ABuildingContainer* This)
 {

@@ -426,6 +426,8 @@ namespace Natives
     inline void (*UFortRegisteredPlayerInfo_OnAccountInventoryChanged)(UFortRegisteredPlayerInfo* This, const void* ChangedItemTypes) = nullptr;
     inline int32_t AFortPlayerPawn_ResetGameplayAttributesIndex = -1;
     inline int32_t AFortGameMode_RedirectLootTierGroupIndex = -1;
+    // From 1.11 (Finder::ResolvePlaylistDataTablesLive).
+    inline void (*AFortGameModeAthena_ApplyPlaylistDataTables)(AFortGameModeAthena* This) = nullptr;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;

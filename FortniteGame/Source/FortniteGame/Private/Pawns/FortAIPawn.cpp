@@ -2,10 +2,20 @@
 #include "Pawns/FortAIPawn.h"
 #include "Finder.h"
 #include "Hooks.h"
+#include "Engine/World.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
+#include "Items/FortItemDefinition.h"
+#include "Items/FortPickup.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
+#include "Templates/Casts.h"
+#include "Weapons/FortWeapon.h"
+
+#include <algorithm>
+#include <vector>
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -14,11 +24,125 @@ IFortInventoryOwnerInterface* AFortAIPawn::GetInventoryOwner()
     return InventoryOwnerInterfaceOffset >= 0 ? reinterpret_cast<IFortInventoryOwnerInterface*>(reinterpret_cast<uint8_t*>(this) + InventoryOwnerInterfaceOffset) : nullptr;
 }
 
+AFortInventory* AFortAIPawn::GetWorldInventory()
+{
+    IFortInventoryOwnerInterface* InventoryOwner = GetInventoryOwner();
+    return InventoryOwner && Natives::IFortInventoryOwnerInterface_GetWorldInventoryIndex >= 0 ? InventoryOwner->GetWorldInventory() : nullptr;
+}
+
+AFortPlayerController* AFortAIPawn::GetPlayerManagerController()
+{
+    AFortPlayerStateZone* Manager = Member_PlayerManager.IsAvailable() ? static_cast<AFortPlayerStateZone*>(PlayerManager) : nullptr;
+    return Manager ? Cast<AFortPlayerController>(Manager->GetOwner()) : nullptr;
+}
+
+void AFortAIPawn::ReturnInventoryToPlayerManager()
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = GetWorldInventory();
+    if (Role != ROLE_Authority || !Inventory)
+    {
+        return;
+    }
+
+    // What a post supplies or a defender picks up: its weapon and the ammo for it.
+    std::vector<UFortWorldItem*> Items;
+    TArray<UFortWorldItem*>& Instances = static_cast<FFortItemList&>(Inventory->Inventory).ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        UFortWorldItem* Item = Instances[Index];
+        UFortItemDefinition* Definition = Item ? static_cast<UFortItemDefinition*>(static_cast<FFortItemEntry&>(Item->ItemEntry).ItemDefinition) : nullptr;
+        if (Cast<UFortWeaponItemDefinition>(Definition) || Cast<UFortAmmoItemDefinition>(Definition))
+        {
+            Items.push_back(Item);
+        }
+    }
+    if (Items.empty())
+    {
+        return;
+    }
+
+    for (UFortWorldItem* Item : Items)
+    {
+        ReturnItemToPlayerManager(Item, static_cast<FFortItemEntry&>(Item->ItemEntry).Count);
+    }
+#endif
+}
+
+UFortWorldItem* AFortAIPawn::ReturnItemToPlayerManager(UFortWorldItem* Item, int32_t Count)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = GetWorldInventory();
+    if (Role != ROLE_Authority || !Inventory || !Item || static_cast<AFortInventory*>(Item->OwnerInventory) != Inventory)
+    {
+        return nullptr;
+    }
+
+    FFortItemEntry& Entry = Item->ItemEntry;
+    Count = std::clamp(Count, 0, static_cast<int32_t>(Entry.Count));
+    if (Count <= 0)
+    {
+        return nullptr;
+    }
+
+    // A weapon leaving the defender's hands is unequipped first.
+    AFortWeapon* Weapon = CurrentWeapon;
+    if (Weapon && static_cast<FGuid>(Weapon->ItemEntryGuid) == static_cast<FGuid>(Entry.ItemGuid))
+    {
+        RemoveAbilityWeapon(Weapon);
+    }
+
+    AFortPlayerController* Manager = GetPlayerManagerController();
+    AFortInventory* ManagerInventory = Manager ? static_cast<AFortInventory*>(Manager->WorldInventory) : nullptr;
+    UFortWorldItem* Returned = nullptr;
+    int32_t Given = 0;
+    if (ManagerInventory)
+    {
+        std::vector<UFortWorldItem*> NewItems;
+        Given = ManagerInventory->AddWorldItemCopy(Manager, Entry, Count, -1, &NewItems);
+        for (UFortWorldItem* NewItem : NewItems)
+        {
+            Manager->TryAddToQuickBar(NewItem);
+        }
+        Returned = NewItems.empty() ? nullptr : NewItems.front();
+    }
+    if (Given < Count)
+    {
+        UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+        std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
+        FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
+        EntryStruct->InitializeStruct(DropEntry);
+        EntryStruct->CopyScriptStruct(DropEntry, &Entry);
+        DropEntry->Count = Count - Given;
+        const FVector Location = GetTransform().GetLocation();
+        if (AFortPickup* Pickup = AFortPickup::CreatePickup(GetWorld(), *DropEntry, &Location, nullptr, Manager))
+        {
+            Pickup->TossPickup(Location, this, 0);
+        }
+        EntryStruct->DestroyStruct(DropEntry);
+    }
+
+    const UFortItemDefinition* Definition = Entry.ItemDefinition;
+    Log::Info(L"Defender: {} gives {} {} back to {} ({} dropped)", GetName().ToStdString(), Count, Definition ? Definition->GetName().ToStdString() : L"None",
+        Manager ? Manager->GetName().ToStdString() : L"no one", Count - Given);
+    if (Count >= Entry.Count)
+    {
+        Inventory->RemoveWorldItem(Item);
+    }
+    else
+    {
+        Inventory->UpdateWorldItemCount(Item, Entry.Count - Count);
+    }
+    return Returned;
+#else
+    return nullptr;
+#endif
+}
+
 bool AFortAIPawn::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
 {
 #if WITH_SERVER_CODE
-    IFortInventoryOwnerInterface* InventoryOwner = GetInventoryOwner();
-    AFortInventory* Inventory = InventoryOwner && Natives::IFortInventoryOwnerInterface_GetWorldInventoryIndex >= 0 ? InventoryOwner->GetWorldInventory() : nullptr;
+    AFortInventory* Inventory = GetWorldInventory();
     UFortWorldItem* WorldItem = Role == ROLE_Authority && Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
     if (!WorldItem)
     {

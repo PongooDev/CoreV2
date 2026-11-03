@@ -46,6 +46,7 @@
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "Building/BuildingTrap.h"
+#include "Building/BuildingTrapDefender.h"
 #include "AI/FortBTTask_SetFrustrationDiscouragement.h"
 #include "AI/FortQueryContexts.h"
 #include "AI/FortQueryGenerators.h"
@@ -279,6 +280,7 @@ static void InstallHooks()
         UFortQueryGenerator_Enemies::HookVTables();
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
         AFortAIPawn::HookVTables();
+        ABuildingTrapDefender::HookNatives();
         AFortPlayerPawn::HookVTables();
         AFortPlayerPawn::HookPickupVTables();
         ACharacter::HookCheatMovement();

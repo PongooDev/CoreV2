@@ -16,6 +16,14 @@ namespace
         {
             if (UDataTable* DataTable = SoftElementAt(Tables, Index).LoadSynchronous())
             {
+                // The game data names its tables by soft references only, so nothing kept a loaded table: the next
+                // garbage collection purged it and the next roll loaded it again from the pak. The rows a playlist's
+                // tables put in AthenaLootTierData_Client and AthenaLootPackages_Client (AFortGameModeAthena::
+                // ApplyPlaylistDataTables) went with it, and an LTM's chests gave the default loot from then on (#218).
+                if (!DataTable->IsRooted())
+                {
+                    DataTable->AddToRoot();
+                }
                 Loaded.push_back(DataTable);
             }
         }

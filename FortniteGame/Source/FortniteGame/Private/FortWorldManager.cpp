@@ -1226,8 +1226,7 @@ TArray<AActor*>* AFortWorldManager::SpawnExplorationActorsCall(TArray<AActor*>* 
         const auto HasTag = [](ABuildingActor* Building, const FGameplayTag& Tag)
         {
             const FGameplayTagContainer& StaticTags = Building->StaticGameplayTags;
-            const FGameplayTagContainer& DefaultTags = Building->DefaultTags;
-            return StaticTags.HasTag(Tag) || DefaultTags.HasTag(Tag);
+            return StaticTags.HasTag(Tag) || Building->HasDefaultTag(Tag);
         };
 
         std::vector<ABuildingActor*> Candidates;

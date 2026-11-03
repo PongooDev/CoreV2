@@ -31,8 +31,11 @@ public:
     DefineUProperty(EFortTeam, Team)
     // UFortAbilitySystemComponent: a trap's holds the abilities its AbilitySet grants.
     DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
+    // 2.5 (CL-3889387) dropped DefaultTags, leaving ConstTags and StaticGameplayTags.
     DefineUProperty(FGameplayTagContainer, DefaultTags)
     DefineUProperty(FGameplayTagContainer, StaticGameplayTags)
+    bool HasDefaultTags() const { return Member_DefaultTags.IsAvailable(); }
+    bool HasDefaultTag(const FGameplayTag& Tag) { return HasDefaultTags() && static_cast<FGameplayTagContainer&>(DefaultTags).HasTag(Tag); }
     DefineBitfieldUProperty(bDestroyed)
     DefineBitfieldUProperty(bPersistToWorld)
     DefineUProperty(int32_t, CurrentBuildingLevel)

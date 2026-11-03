@@ -529,8 +529,8 @@ void AFortGameModeZone::GatherPlayerSpawnActors(AController* Player, bool bIniti
             continue;
         }
         const FGameplayTagContainer& StaticTags = PlacementActor->StaticGameplayTags;
-        const FGameplayTagContainer& DefaultTags = PlacementActor->DefaultTags;
-        if (!std::all_of(RequiredTags.begin(), RequiredTags.end(), [&](FName Tag) { return HasPlacementTag(StaticTags, Tag) || HasPlacementTag(DefaultTags, Tag); }))
+        const bool bHasDefaultTags = PlacementActor->HasDefaultTags();
+        if (!std::all_of(RequiredTags.begin(), RequiredTags.end(), [&](FName Tag) { return HasPlacementTag(StaticTags, Tag) || (bHasDefaultTags && HasPlacementTag(PlacementActor->DefaultTags, Tag)); }))
         {
             continue;
         }

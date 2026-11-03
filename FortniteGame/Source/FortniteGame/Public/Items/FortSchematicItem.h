@@ -53,10 +53,13 @@ public:
     FRecipe* GetSchematicRecipe(Reflection::FParams& Recipe) const;
     int32_t GetSchematicQuantityProduced() const;
     bool CanCraftSchematic(AFortPlayerController* PlayerController, uint8_t& OutFailCause, bool bConsiderReservedItems, int32_t Count);
-    int32_t ServerCraftSchematic(AFortPlayerController* PlayerController, int32_t Count);
+    // The game calls it with the RPC's PostCraftSlot, the primary quick bar slot the crafted item goes to (-1: the first
+    // free one), as 2.2's AFortPlayerController::ServerCraftSchematic_Implementation (0x897AD0) does; 21.40's has
+    // CraftAmount and RequestedTier after it. Core crafts an ingredient's shortfall with a CraftAmount of its own.
+    int32_t ServerCraftSchematic(AFortPlayerController* PlayerController, int32_t PostCraftSlot, int32_t CraftAmount = 1);
 
     static void HookVTables();
 
 private:
-    static int32_t ServerCraftSchematicHK(UFortSchematicItem* This, AFortPlayerController* PlayerController, int32_t Count);
+    static int32_t ServerCraftSchematicHK(UFortSchematicItem* This, AFortPlayerController* PlayerController, int32_t PostCraftSlot);
 };

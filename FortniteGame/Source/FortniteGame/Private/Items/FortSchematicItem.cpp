@@ -5,6 +5,7 @@
 #include "Hooks.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
+#include "Items/FortQuickBars.h"
 #include "Items/FortSchematicItemDefinition.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
@@ -49,11 +50,13 @@ bool UFortSchematicItem::CanCraftSchematic(AFortPlayerController* PlayerControll
     return Natives::UFortSchematicItem_CanCraftSchematic(this, PlayerController, &OutFailCause, bConsiderReservedItems, Count);
 }
 
-int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerController, int32_t Count)
+int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerController, int32_t PostCraftSlot, int32_t CraftAmount)
 {
 #if WITH_SERVER_CODE
+    // The RPC (ItemId, PostCraftSlot, bIsQuickCrafted in every build Core supports) crafts once. The slot it passes on
+    // is where the item goes, never an amount: read as one, a quick bar slot above 0 crafted and charged that many times.
     uint8_t FailCause = 0;
-    Count = Count > 0 ? Count : 1;
+    const int32_t Count = CraftAmount > 0 ? CraftAmount : 1;
     if (!PlayerController || !CanCraftSchematic(PlayerController, FailCause, false, Count))
     {
         UE_LOG(LogFort, Warning, TEXT("ServerCraftSchematic: cannot craft %s x%d (fail cause %d)"), *GetName(), Count, static_cast<int32_t>(FailCause));
@@ -86,7 +89,7 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
                 if (UFortSchematicItem* IngredientSchematic = PlayerController->GetSchematicForItem(IngredientDefinition))
                 {
                     const int32_t IngredientProduced = std::max(IngredientSchematic->GetSchematicQuantityProduced(), 1);
-                    IngredientSchematic->ServerCraftSchematic(PlayerController, (Needed - Owned + IngredientProduced - 1) / IngredientProduced);
+                    IngredientSchematic->ServerCraftSchematic(PlayerController, -1, (Needed - Owned + IngredientProduced - 1) / IngredientProduced);
                 }
             }
 
@@ -138,6 +141,7 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
     }
 
     AFortInventory* Inventory = PlayerController->WorldInventory;
+    AFortQuickBars* Bars = PlayerController->QuickBars;
     const int32_t Level = GetLevel();
     for (int32_t Crafted = 0; Crafted < QuantityProduced; ++Crafted)
     {
@@ -149,8 +153,23 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
 
         WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
         Inventory->AddWorldItem(WorldItem);
-        static_cast<FFortItemEntry&>(WorldItem->ItemEntry).SetNewItemCount(1, true);
-        PlayerController->TryAddToQuickBar(WorldItem);
+        FFortItemEntry& NewEntry = WorldItem->ItemEntry;
+        NewEntry.SetNewItemCount(1, true);
+
+        // The first one goes to the primary quick bar slot the player crafted it into (FortInventoryContext's
+        // CraftAndSlotSchematic) when that slot takes it and is free; otherwise, and for the rest, the first free slot.
+        const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
+        const bool bPostCraftSlot = Crafted == 0 && Bars && PostCraftSlot >= 0 && PostCraftSlot < Bars->GetQuickBar(Primary).Slots.Num()
+            && Bars->GetSlotData(Primary, PostCraftSlot).AcceptedItemTypes.Contains(ResultDefinition->ItemType)
+            && Bars->GetSlot(Primary, PostCraftSlot).Items.Num() == 0;
+        if (bPostCraftSlot)
+        {
+            Bars->ServerAddItemInternal(NewEntry.ItemGuid, Primary, PostCraftSlot);
+        }
+        else
+        {
+            PlayerController->TryAddToQuickBar(WorldItem);
+        }
     }
     if (QuestManager)
     {
@@ -191,7 +210,7 @@ void UFortSchematicItem::HookVTables()
     }
 }
 
-int32_t UFortSchematicItem::ServerCraftSchematicHK(UFortSchematicItem* This, AFortPlayerController* PlayerController, int32_t Count)
+int32_t UFortSchematicItem::ServerCraftSchematicHK(UFortSchematicItem* This, AFortPlayerController* PlayerController, int32_t PostCraftSlot)
 {
-    return This->ServerCraftSchematic(PlayerController, Count);
+    return This->ServerCraftSchematic(PlayerController, PostCraftSlot);
 }

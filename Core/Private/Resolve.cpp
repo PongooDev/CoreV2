@@ -602,8 +602,9 @@ namespace
                 continue;
             }
             // On 2.2 the test is in the second section, where its jcc is rewritten into a cmov of the address to go to.
+            // On 2.5 the jmp lands on another jmp in the first .text that leads there, so follow the whole chain.
             const uintptr_t Jump = Previous + 6;
-            const uintptr_t Test = Byte(Jump) == 0xE9 ? Finder::RelativeTarget(Jump, 1, 5) : Jump + 2 + static_cast<int8_t>(Byte(Jump + 1));
+            const uintptr_t Test = Finder::Unthunk(Jump);
             const bool bJcc = IsInText(Test) && (Byte(Test + 2) == 0x74 || Byte(Test + 2) == 0x75 || (Byte(Test + 2) == 0x0F && (Byte(Test + 3) == 0x84 || Byte(Test + 3) == 0x85)));
             const bool bTest = (bJcc || IsInMovedCode(Test)) && Byte(Test) == 0x84 && Byte(Test + 1) == 0xC0;
             if (bTest)
@@ -1983,12 +1984,14 @@ namespace
 
         uintptr_t ObjectListRemove = 0;
         ptrdiff_t NetworkObjects = 0;
-        if (!NotifyCalls.empty())
+        // The last call that loads the driver's object list into rcx. 2.5 (UE 4.20, 0x21107D0) adds one more call after
+        // it, RenamedStartupActors.Remove(Actor's name) on a TMap the driver holds inline (lea rcx, [r14+288h]).
+        for (auto Call = NotifyCalls.rbegin(); Call != NotifyCalls.rend() && !ObjectListRemove; ++Call)
         {
-            const uintptr_t Load = NotifyCalls.back().first - 7;
+            const uintptr_t Load = Call->first - 7;
             if ((Byte(Load) & 0xFE) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04)
             {
-                ObjectListRemove = NotifyCalls.back().second;
+                ObjectListRemove = Call->second;
                 NetworkObjects = *reinterpret_cast<const int32_t*>(Load + 3);
             }
         }
@@ -2023,7 +2026,8 @@ namespace
         int32_t ActorChannelLookups = 0;
         for (uintptr_t Load = NotifyDestroyed; NotifyDestroyedEnd && Load + 12 <= NotifyDestroyedEnd; ++Load)
         {
-            if (Byte(Load) == 0x8B && (Byte(Load + 1) & 0xC0) == 0x80 && (Byte(Load + 1) & 0x07) != 0x04 && Byte(Load + 6) == 0x2B && (Byte(Load + 7) & 0xC0) == 0x80 && (Byte(Load + 7) & 0x07) != 0x04
+            // sub eax, [reg+X+0x2C] up to 2.4.2; 2.5 (0x211094D) compares instead: cmp eax, [reg+X+0x2C].
+            if (Byte(Load) == 0x8B && (Byte(Load + 1) & 0xC0) == 0x80 && (Byte(Load + 1) & 0x07) != 0x04 && (Byte(Load + 6) == 0x2B || Byte(Load + 6) == 0x3B) && (Byte(Load + 7) & 0xC0) == 0x80 && (Byte(Load + 7) & 0x07) != 0x04
                 && *reinterpret_cast<const int32_t*>(Load + 8) - *reinterpret_cast<const int32_t*>(Load + 2) == 0x2C)
             {
                 ActorChannels = *reinterpret_cast<const int32_t*>(Load + 2) - 8;
@@ -2562,11 +2566,27 @@ namespace
             RequireOffset(L"UNetConnection::TickCount", Natives::UNetConnection_TickCount, TickCountTests == 1 ? *reinterpret_cast<const int32_t*>(TickCountTest + 2) : 0);
         }
 
-        const uintptr_t GuidCacheLoad = CreateDestructionInfo ? FindInstruction(CreateDestructionInfo, CreateDestructionInfo + 0x40, { 0x48, 0x8B, 0x89 }) : 0;
-        const uintptr_t AssignGuid = GuidCacheLoad ? FindRawCall(GuidCacheLoad + 7, GuidCacheLoad + 0x20) : 0;
-        const uintptr_t DestroyedActorsBase = AssignGuid ? FindInstruction(AssignGuid + 5, AssignGuid + 0x10, { 0x48, 0x81 }) : 0;
+        // CreateDestructionInfo loads GuidCache into rcx for AssignNewNetGUID_Server, then takes the driver's map:
+        // mov rcx, [rcx+GuidCache]; call; add rbx, Map up to 2.4.2 (0x1B0C9F0); 2.5 (UE 4.20, 0x2105A20) is a static
+        // with the driver in rdx: mov rcx, [rsi+GuidCache], four stores, call (+0x1E); lea rbx, [rsi+Map].
+        uintptr_t GuidCacheLoad = 0;
+        for (uintptr_t Load = CreateDestructionInfo; Load && Load < CreateDestructionInfo + 0x48 && !GuidCacheLoad; ++Load)
+        {
+            if (Byte(Load) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04)
+            {
+                GuidCacheLoad = Load;
+            }
+        }
+        const uintptr_t AssignGuid = GuidCacheLoad ? FindRawCall(GuidCacheLoad + 7, GuidCacheLoad + 0x30) : 0;
+        ptrdiff_t DestroyedActors = 0;
+        for (uintptr_t Base = AssignGuid ? AssignGuid + 5 : 0; Base && Base < AssignGuid + 0x10 && !DestroyedActors; ++Base)
+        {
+            const bool bAdd = Byte(Base) == 0x48 && Byte(Base + 1) == 0x81 && (Byte(Base + 2) & 0xF8) == 0xC0;
+            const bool bLea = Byte(Base) == 0x48 && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
+            DestroyedActors = bAdd || bLea ? *reinterpret_cast<const int32_t*>(Base + 3) : 0;
+        }
         RequireOffset(L"UNetDriver::GuidCache", Natives::UNetDriver_GuidCache, GuidCacheLoad ? *reinterpret_cast<const int32_t*>(GuidCacheLoad + 3) : 0);
-        RequireOffset(L"UNetDriver::DestroyedStartupOrDormantActors", Natives::UNetDriver_DestroyedStartupOrDormantActors, DestroyedActorsBase && (Byte(DestroyedActorsBase + 2) & 0xF8) == 0xC0 ? *reinterpret_cast<const int32_t*>(DestroyedActorsBase + 3) : 0);
+        RequireOffset(L"UNetDriver::DestroyedStartupOrDormantActors", Natives::UNetDriver_DestroyedStartupOrDormantActors, DestroyedActors);
 
         const uintptr_t ReplicateProperties = FunctionOf(L"ReplicateProperties: Object == NULL");
         const uintptr_t ReplicatePropertiesEnd = Finder::FunctionEnd(ReplicateProperties);
@@ -3817,13 +3837,17 @@ bool Finder::ResolvePropertyCPPType()
 bool Finder::ResolveScriptStructCopy()
 {
     const int32_t StructOffset = ObjectLayout::Properties().UStructProperty_Struct;
+    // mov r32, [rcx+Displacement]; 2.5's (0x1268A50) sign-extends MinAlignment instead: movsxd r10, [rcx+44h].
     const auto ReadsStruct = [](uintptr_t Begin, uintptr_t End, int32_t Displacement)
     {
-        for (uintptr_t Load = FindInstruction(Begin, End, { 0x8B, -1, Displacement }); Load; Load = FindInstruction(Load + 1, End, { 0x8B, -1, Displacement }))
+        for (const int32_t Opcode : { 0x8B, 0x63 })
         {
-            if ((Byte(Load + 1) & 0xC7) == 0x41)
+            for (uintptr_t Load = FindInstruction(Begin, End, { Opcode, -1, Displacement }); Load; Load = FindInstruction(Load + 1, End, { Opcode, -1, Displacement }))
             {
-                return true;
+                if ((Byte(Load + 1) & 0xC7) == 0x41)
+                {
+                    return true;
+                }
             }
         }
         return false;
@@ -4617,7 +4641,16 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     }
     // 1.10 strips UFortQuestManager::SendEndPrimaryMission: RemoveParticipantAccount (0x6FDCB0) calls the shared empty
     // function in its place, and Core sends the command itself (UFortQuestManager::SendEndPrimaryMission).
-    const bool bEndMissionStripped = !SendEndPrimaryMission && std::any_of(RemoveParticipantCalls.begin(), RemoveParticipantCalls.end(),
+    // 2.5's (0xC87370) makes that call (0xC875E0) in a separate piece of the function (0xC87569 to 0xC875FE).
+    std::vector<std::pair<uintptr_t, uintptr_t>> RemoveParticipantAllCalls = RemoveParticipantCalls;
+    for (const auto& [ChunkBegin, ChunkEnd] : SendEndPrimaryMission ? std::vector<std::pair<uintptr_t, uintptr_t>>() : Finder::FunctionChunks(RemoveParticipant))
+    {
+        for (uintptr_t Call = ChunkBegin != RemoveParticipant ? FindRawCall(ChunkBegin, ChunkEnd) : 0; Call; Call = FindRawCall(Call + 1, ChunkEnd))
+        {
+            RemoveParticipantAllCalls.emplace_back(Call, Finder::RelativeTarget(Call, 1, 5));
+        }
+    }
+    const bool bEndMissionStripped = !SendEndPrimaryMission && std::any_of(RemoveParticipantAllCalls.begin(), RemoveParticipantAllCalls.end(),
         [](const auto& Call) { return reinterpret_cast<void*>(Call.second) == Natives::SharedEmptyFunction; });
     std::vector<int32_t> InfoLoad{ 0x48, 0x8B, -1 };
     for (int32_t Value : Bytes32(MissionInfoOffset))
@@ -4722,7 +4755,8 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
 
     if (!SendStatEvent || (!SendEndPrimaryMission && !bEndMissionStripped) || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
     {
-        Log::Error(L"Finder: zone end not found (stat {}, end mission {}, session {}, enum {}, mission manager {}, status change {}, game mode {}, game state {})", SendStatEvent != 0, SendEndPrimaryMission != 0, GameSessionId != 0, GetEnumName != 0, MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
+        Log::Error(L"Finder: zone end not found (stat {}, end mission {} (stripped {}, RemoveParticipantAccount 0x{:X}, {} calls), session {}, enum {}, mission manager {}, status change {}, game mode {}, game state {})", SendStatEvent != 0, SendEndPrimaryMission != 0,
+            bEndMissionStripped, RemoveParticipant ? RemoveParticipant - Finder::ImageBase() : 0, RemoveParticipantAllCalls.size(), GameSessionId != 0, GetEnumName != 0, MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
         return false;
     }
 
@@ -7036,10 +7070,18 @@ namespace
             return false;
         }
 
+        // 2.5's AFortMission::RemoveParticipantAccount (0xC87370) also gets the quest manager through the getter and calls
+        // the shared empty function with eight arguments (0xC875E0), where UFortQuestManager::SendEndPrimaryMission was:
+        // that one is no stat event (Core sends EndPrimaryMission itself, ResolveZoneEndLive).
+        const std::vector<std::pair<uintptr_t, uintptr_t>> EndMissionChunks = Finder::FunctionChunks(ExecImplementation(L"/Script/FortniteGame.FortMission:RemoveParticipantAccount"));
+        const auto IsInEndMission = [&EndMissionChunks](uintptr_t Site)
+        {
+            return std::any_of(EndMissionChunks.begin(), EndMissionChunks.end(), [Site](const auto& Chunk) { return Site >= Chunk.first && Site < Chunk.second; });
+        };
         std::vector<uint8_t*> Calls;
         for (const uintptr_t Site : Finder::CallsTo(SharedEmpty, false))
         {
-            const uintptr_t Function = Byte(Site) == 0xE8 && IsStatEventCall(Site) ? Finder::FunctionStart(Site) : 0;
+            const uintptr_t Function = Byte(Site) == 0xE8 && IsStatEventCall(Site) && !IsInEndMission(Site) ? Finder::FunctionStart(Site) : 0;
             if (Function && Function < Site)
             {
                 bool bCallsGetter = false;
@@ -7723,6 +7765,22 @@ uint8_t* Finder::PawnDiedInventoryDropCall()
             if (reinterpret_cast<void*>(Target) == Natives::SharedEmptyFunction)
             {
                 StubCalls.push_back(Site);
+            }
+        }
+        // 2.5 (0xE6A2C0, its body in separate pieces) makes the drop a virtual call, call [rax+1660h] at 0xE6A404, to a
+        // slot every controller class fills with the shared empty function.
+        if (StubCalls.empty() && Index >= 0)
+        {
+            for (const auto& [ChunkBegin, ChunkEnd] : Finder::FunctionChunks(Function))
+            {
+                for (uintptr_t Site = FindVirtualCall(ChunkBegin, ChunkEnd); Site; Site = FindVirtualCall(Site + 1, ChunkEnd))
+                {
+                    const int32_t Slot = Byte(Site + 1) >= 0x90 && Byte(Site + 1) <= 0x97 ? VirtualSlot(Site) : -1;
+                    if (Slot >= 0 && reinterpret_cast<void*>(VTableEntry(ZoneVTable, Slot)) == Natives::SharedEmptyFunction)
+                    {
+                        StubCalls.push_back(Site);
+                    }
+                }
             }
         }
         if (StubCalls.size() == 1)
@@ -8511,6 +8569,30 @@ bool Finder::ResolveBuildingLootLive()
     if (!PostLoad)
     {
         PostLoad = FunctionOf(L"ABuildingContainer::PostLoad() Container: %s, ContainerLootTierKey: %s, ReplicatedLootTier: %d, AltMeshIdx: %d");
+    }
+    // 2.5 drops the log. The override is still there (0xA2BB80, slot 0xF as on 2.4.2): after Super::PostLoad it points
+    // SearchSpeed's curve table at the game data's (mov [rbx+SearchSpeed], rax; 2.4.2 0x4AA41E does the same), which
+    // no other UObject-level override of ABuildingContainer writes.
+    if (!PostLoad && ContainerVTable && ContainerClass)
+    {
+        const UProperty* SearchSpeedProperty = ContainerClass->FindPropertyByName(FName(L"SearchSpeed", FNAME_Find));
+        const int32_t SearchSpeed = SearchSpeedProperty ? SearchSpeedProperty->GetOffset_ForInternal() : -1;
+        int32_t Stores = 0;
+        for (int32_t Index = 0; SearchSpeed > 0 && Index < 0x40; ++Index)
+        {
+            const uintptr_t Function = VTableEntry(ContainerVTable, Index);
+            const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+            for (uintptr_t Store = Function; FunctionEnd && Store + 7 <= FunctionEnd && Store < Function + 0x100; ++Store)
+            {
+                if ((Byte(Store) & 0xF8) == 0x48 && Byte(Store + 1) == 0x89 && (Byte(Store + 2) & 0xC0) == 0x80 && (Byte(Store + 2) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Store + 3) == SearchSpeed)
+                {
+                    PostLoad = Function;
+                    ++Stores;
+                    break;
+                }
+            }
+        }
+        PostLoad = Stores == 1 ? PostLoad : 0;
     }
     const int32_t PostLoadIndex = FirstVTableIndex(ContainerVTable, PostLoad);
     std::vector<uintptr_t> MeshSetSelectors;
@@ -9318,7 +9400,20 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     // (GetErrorMessageFromStructuralQuery) it also asks.
     int32_t CanPlace = -1;
     int32_t PlaceCandidates = 0;
-    for (const int32_t Slot : Candidates == 1 ? PlaceSlots : std::vector<int32_t>())
+    // 2.5 (0xE1A9E0) no longer asks it itself: its build preview query (slot 0x2BE, 0xE1B880) does, and the place
+    // function then asks GetErrorMessageFromStructuralQuery (0x2C2) about the result. So the slots those ask count too.
+    std::vector<int32_t> PlaceAndNestedSlots = PlaceSlots;
+    void** ControllerVTable = Candidates == 1 ? CdoVTable(L"/Script/FortniteGame.FortPlayerController") : nullptr;
+    for (const int32_t Slot : ControllerVTable ? PlaceSlots : std::vector<int32_t>())
+    {
+        for (const int32_t Nested : Slot > CanAfford + 3 ? Slots(VTableEntry(ControllerVTable, Slot)) : std::vector<int32_t>())
+        {
+            PlaceAndNestedSlots.push_back(Nested);
+        }
+    }
+    std::sort(PlaceAndNestedSlots.begin(), PlaceAndNestedSlots.end());
+    PlaceAndNestedSlots.erase(std::unique(PlaceAndNestedSlots.begin(), PlaceAndNestedSlots.end()), PlaceAndNestedSlots.end());
+    for (const int32_t Slot : Candidates == 1 ? PlaceAndNestedSlots : std::vector<int32_t>())
     {
         if (Slot != CanPlace && Slot > CanAfford + 3 && Has(PlaceSlots, Slot + 3))
         {

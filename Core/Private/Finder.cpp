@@ -432,6 +432,51 @@ uintptr_t Finder::FunctionEnd(uintptr_t Start)
     return Memcury::Scanner(Memcury::PE::Address(Start)).FindFunctionEnd().Get();
 }
 
+std::vector<std::pair<uintptr_t, uintptr_t>> Finder::FunctionChunks(uintptr_t Start)
+{
+    std::vector<std::pair<uintptr_t, uintptr_t>> Chunks;
+    const uintptr_t Base = ImageBase();
+    if (!Start || Start < Base)
+    {
+        return Chunks;
+    }
+    const auto* Dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(Base);
+    const auto* Nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(Base + Dos->e_lfanew);
+    const IMAGE_DATA_DIRECTORY& Directory = Nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    const auto* Entries = reinterpret_cast<const IMAGE_RUNTIME_FUNCTION_ENTRY*>(Base + Directory.VirtualAddress);
+    const size_t Count = Directory.Size / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY);
+    const DWORD StartRva = static_cast<DWORD>(Start - Base);
+    const size_t ImageSize = Nt->OptionalHeader.SizeOfImage;
+    for (size_t Index = 0; Directory.VirtualAddress && Index < Count; ++Index)
+    {
+        // UNWIND_INFO: version and flags, prologue size, code count, frame register, then the codes (padded to an even
+        // count), then the chained RUNTIME_FUNCTION when the flags have UNW_FLAG_CHAININFO (4).
+        const IMAGE_RUNTIME_FUNCTION_ENTRY* Entry = &Entries[Index];
+        for (int32_t Depth = 0; Depth < 8 && Entry; ++Depth)
+        {
+            if (Entry->BeginAddress == StartRva)
+            {
+                Chunks.emplace_back(Base + Entries[Index].BeginAddress, Base + Entries[Index].EndAddress);
+                break;
+            }
+            const DWORD UnwindRva = Entry->UnwindData & ~1u;
+            if (UnwindRva + 4 > ImageSize)
+            {
+                break;
+            }
+            const auto* Unwind = reinterpret_cast<const uint8_t*>(Base + UnwindRva);
+            const size_t Codes = (static_cast<size_t>(Unwind[2]) + 1) & ~static_cast<size_t>(1);
+            if (!((Unwind[0] >> 3) & 0x4) || UnwindRva + 4 + Codes * 2 + sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY) > ImageSize)
+            {
+                break;
+            }
+            Entry = reinterpret_cast<const IMAGE_RUNTIME_FUNCTION_ENTRY*>(Unwind + 4 + Codes * 2);
+        }
+    }
+    std::sort(Chunks.begin(), Chunks.end());
+    return Chunks;
+}
+
 uintptr_t Finder::RelativeTarget(uintptr_t Instruction, uint32_t OperandOffset, uint32_t InstructionLength)
 {
     return Instruction + InstructionLength + *reinterpret_cast<const int32_t*>(Instruction + OperandOffset);

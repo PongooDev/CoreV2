@@ -122,12 +122,13 @@ bool Hooks::SwapVTable(std::wstring_view Name, void** VTable, int32_t Index, voi
 
 bool Hooks::RedirectCall(std::wstring_view Name, uint8_t* CallSite, void* Destination)
 {
-    // A rel32 call, a rel32 tail jump (kept as a jump), or a call through an import slot (`call [rip+rel32]`, made a rel32
-    // call and a nop).
-    const bool bImportCall = CallSite && CallSite[0] == 0xFF && CallSite[1] == 0x15;
+    // A rel32 call, a rel32 tail jump (kept as a jump), or a call through an import slot (`call [rip+rel32]`) or a vtable
+    // (`call [reg+disp32]`), each made a rel32 call and a nop.
+    const bool bVirtualCall = CallSite && CallSite[0] == 0xFF && (CallSite[1] & 0xF8) == 0x90 && (CallSite[1] & 0x07) != 0x04;
+    const bool bImportCall = CallSite && CallSite[0] == 0xFF && (CallSite[1] == 0x15 || bVirtualCall);
     if (!CallSite || (CallSite[0] != 0xE8 && CallSite[0] != 0xE9 && !bImportCall))
     {
-        Log::Error(L"Hook {}: call site 0x{:X} is not a rel32 call or jump", Name, reinterpret_cast<uintptr_t>(CallSite));
+        Log::Error(L"Hook {}: call site 0x{:X} is not a rel32, import or vtable call, or a rel32 jump", Name, reinterpret_cast<uintptr_t>(CallSite));
         return false;
     }
 

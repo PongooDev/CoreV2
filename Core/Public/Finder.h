@@ -92,6 +92,9 @@ namespace Finder
 
     uintptr_t FunctionStart(uintptr_t Address);
     uintptr_t FunctionEnd(uintptr_t FunctionStart);
+    // The [begin, end) ranges of the function's separated pieces: the .pdata entries whose unwind info chains back to
+    // the one starting at FunctionStart (UNW_FLAG_CHAININFO). FunctionEnd only covers the first piece.
+    std::vector<std::pair<uintptr_t, uintptr_t>> FunctionChunks(uintptr_t FunctionStart);
 
     uintptr_t RelativeTarget(uintptr_t Instruction, uint32_t OperandOffset, uint32_t InstructionLength);
     uintptr_t NextCall(uintptr_t From, size_t MaxDistance);

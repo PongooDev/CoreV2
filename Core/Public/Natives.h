@@ -442,6 +442,11 @@ namespace Natives
     inline int32_t AFortGameMode_RedirectLootTierGroupIndex = -1;
     // From 1.11 (Finder::ResolvePlaylistDataTablesLive).
     inline void (*AFortGameModeAthena_ApplyPlaylistDataTables)(AFortGameModeAthena* This) = nullptr;
+    // From 3.0 (Finder::ResolvePoiVolumeLive): the two calls that make a POI volume's body in
+    // AFortPoiVolume::PostInitializeComponents (3.0 0x9FDF20): FInitBodySpawnParams' constructor (0x21F5570) and
+    // FBodyInstance::InitBody (0x2206250).
+    inline void* (*FInitBodySpawnParams_Construct)(void* This, const void* PrimComp) = nullptr;
+    inline void (*FBodyInstance_InitBody)(void* This, void* Setup, const FTransform& Transform, void* PrimComp, void* InRBScene, const void* SpawnParams) = nullptr;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;

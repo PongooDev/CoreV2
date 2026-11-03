@@ -181,6 +181,7 @@ namespace Finder
     bool ResolveResetGameplayAttributesLive();
     bool ResolveLootTierRedirectLive();
     bool ResolvePlaylistDataTablesLive();
+    bool ResolvePoiVolumeLive();
     bool ResolveQuestStatEvents();
     // When ResolveQuestStatEvents found the stat events stripped: the call sites that call the shared empty function with
     // SendStatEventWithTags' typed wrapper's arguments (the quest manager, type, target, three tag containers, count, flush).

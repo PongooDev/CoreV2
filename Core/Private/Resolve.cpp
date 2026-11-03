@@ -7138,6 +7138,40 @@ bool Finder::ResolvePlaylistDataTablesLive()
     return true;
 }
 
+bool Finder::ResolvePoiVolumeLive()
+{
+    static bool bSearched = false;
+    if (Natives::FBodyInstance_InitBody || bSearched)
+    {
+        return Natives::FBodyInstance_InitBody != nullptr;
+    }
+    bSearched = true;
+
+    // AFortPoiVolume::PostInitializeComponents (3.0 0x9FDF20; the POI manager is new in 3.0) makes the volume's overlap
+    // body once its brush component is there: it logs "Setting up PoiCollisionComp for %s", reads the brush component's
+    // body setup (its virtual GetBodySetup, call [rax+628h]), then builds FInitBodySpawnParams from PoiCollisionComp
+    // (0x21F5570) and calls FBodyInstance::InitBody (0x2206250) on PoiCollisionComp->PoiBodyInstance with the
+    // component's ComponentToWorld and no physics scene: the two direct calls after the virtual one.
+    const uintptr_t Ref = First(Finder::StringRefs(L"AFortPoiVolume::PostInitializeComponents - Setting up PoiCollisionComp for %s"));
+    if (!Ref)
+    {
+        Log::Info(L"Finder: no AFortPoiVolume on this build");
+        return false;
+    }
+    const uintptr_t GetBodySetupCall = Finder::TraceFind(Ref, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0xFF && Byte(Instruction + 1) == 0x90; });
+    const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = GetBodySetupCall ? Finder::DirectCalls(GetBodySetupCall, GetBodySetupCall + 0x50) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    if (Calls.size() < 2 || !IsInText(Calls[0].second) || !IsInText(Calls[1].second))
+    {
+        Log::Error(L"Finder: FBodyInstance::InitBody not found after AFortPoiVolume::PostInitializeComponents' log (0x{:X}), POI volumes stay shapeless", Ref - Finder::ImageBase());
+        return false;
+    }
+    Natives::FInitBodySpawnParams_Construct = reinterpret_cast<decltype(Natives::FInitBodySpawnParams_Construct)>(Calls[0].second);
+    Natives::FBodyInstance_InitBody = reinterpret_cast<decltype(Natives::FBodyInstance_InitBody)>(Calls[1].second);
+    Log::Info(L"Finder: FInitBodySpawnParams::FInitBodySpawnParams at 0x{:X}, FBodyInstance::InitBody at 0x{:X} (from AFortPoiVolume::PostInitializeComponents)",
+        Calls[0].second - Finder::ImageBase(), Calls[1].second - Finder::ImageBase());
+    return true;
+}
+
 uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
 {
     // AFortGameModeAthena::StartAircraftPhase (1.7.2 0x3FFB60) binds the aircraft's delegates by name; OnAircraftFlightEnded

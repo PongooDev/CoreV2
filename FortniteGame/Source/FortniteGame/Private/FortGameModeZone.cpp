@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "FortGameModeZone.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortPoiManager.h"
+#include "Athena/FortPoiVolume.h"
 #include "FortGameModeOutpost.h"
 #include "Player/FortPlayerStateOutpost.h"
 #include "AI/FortAIDirector.h"
@@ -116,6 +118,9 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     {
         AFortGameMode::FinishWorldInitialization(WorldManager);
         Athena->ApplyContainerSpawnPercents();
+        // 3.0's POI volumes: their brush is stripped from the client paks (FortPoiVolume.cpp).
+        AFortPoiVolume::RestorePoiVolumes(GetWorld());
+        AFortPoiManager::WatchInitialization(GetWorld());
         ABuildingContainer::LogWorldContainers(GetWorld());
         Athena->WatchMatchResults();
         Athena->WatchWarmup();

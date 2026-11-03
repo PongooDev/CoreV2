@@ -36,6 +36,7 @@ body:
       description: Any server-only asset is welcome, the more the better. These are the ones Core already knows it needs.
       options:
         - label: "/Game/AIDirector/AIDirector_Fortnite (AIDirector_Fortnite and its Default__AIDirector_Fortnite_C)"
+        - label: "3.0 (CL-3901517): /Game/Athena/Maps/Athena_LocationVolumes and /Game/Athena/Maps/Streaming/Athena_GameplayActors, with each FortPoiVolume's BrushComponent (its transform and BrushBodySetup)"
         - label: Other server-only assets (list them below, or just say "everything" if you exported the lot)
   - type: textarea
     id: files

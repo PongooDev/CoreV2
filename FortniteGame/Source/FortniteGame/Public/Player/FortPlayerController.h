@@ -94,6 +94,7 @@ public:
     DefineUFunction(GivePlayerAmmo)
     DefineUFunction(SwapQuickBarFocus)
     DefineUFunction(ClientReportDamagedResourceBuilding)
+    DefineUFunction(ClientExecuteInventoryItem)
     DefineUFunction(SetRotatePawnToCamera)
     DefineUFunction(GetRotatePawnToCamera)
     DefineUFunction(Cheat)
@@ -118,6 +119,7 @@ public:
     void GivePlayerAmmo(int32_t AmmoCount);
     void SwapQuickBarFocus(EFortQuickBars InQuickBar);
     void ClientReportDamagedResourceBuilding(ABuildingSMActor* BuildingSMActor, uint8_t PotentialResourceType, int32_t PotentialResourceCount, bool bDestroyed, bool bJustHitWeakspot);
+    void ClientExecuteInventoryItem(const FGuid& ItemGuid, float Delay, bool bForceExecute);
     void SetRotatePawnToCamera(bool bNewRotatePawnToCamera);
     bool GetRotatePawnToCamera();
     void ServerSetPartyOwner(const FUniqueNetIdRepl& PartyOwnerUniqueId);

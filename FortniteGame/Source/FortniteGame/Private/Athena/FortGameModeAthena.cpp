@@ -1248,7 +1248,37 @@ void AFortGameModeAthena::HookCallSites()
 
 void AFortGameModeAthena::AircraftPhasePlayerCleanupCall(AController* Controller, uint8_t InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot)
 {
-    if (AFortPlayerControllerAthena* PlayerController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)))
+    AFortPlayerControllerAthena* PlayerController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller));
+
+    // A player boarding in build mode keeps it on their client (#222). The client leaves build mode only when its own
+    // quickbar's focus moves off the building bar (FocusSlot, 2.5 0xC5D9D0, pops BuildPreviewModeInputComponent there
+    // through 0xE1C490); a focus moved on the server (the pickaxe slot's activation below, or Possess's when the player
+    // leaves the aircraft) reaches the client as replicated values, which never run it. Its ClientRestart's
+    // RefocusQuickBars (0xE2DBC0) only acts while the building bar still has the focus, so the player landed with the
+    // pickaxe in hand and the build preview out. AFortPlayerController's ExecuteInventoryItem (0xE0B390), which a slot
+    // activation runs, has the client equip the slot's item through ClientExecuteInventoryItem, and the client focuses it
+    // on its own quickbar (0xDFC050 -> 0xC5DDB0); Athena's (0x999F30) executes it on the server only. Send it for the
+    // harvesting tool now, forced as the warmup pawn is on its way out, before the server's focus changes (an RPC goes
+    // out at once, the quickbars replicate at the end of the tick).
+    AFortQuickBars* Bars = PlayerController ? static_cast<AFortQuickBars*>(PlayerController->QuickBars) : nullptr;
+    if (Bars && Bars->GetCurrentQuickBar() == EFortQuickBars::GetSecondary())
+    {
+        FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
+        TStructArray<FQuickBarSlot>& Slots = PrimaryQuickBar.Slots;
+        const TArray<FGuid>* SlotItems = nullptr;
+        if (Slots.Num() > 0)
+        {
+            const TArray<FGuid>& HarvestingToolSlotItems = Slots[0].Items;
+            SlotItems = &HarvestingToolSlotItems;
+        }
+        if (SlotItems && SlotItems->Num() > 0)
+        {
+            PlayerController->ClientExecuteInventoryItem((*SlotItems)[0], 0.0f, true);
+            Log::Info(L"Battle Royale: {} boards the aircraft in build mode, its client takes the harvesting tool", PlayerController->GetName().ToStdString());
+        }
+    }
+
+    if (PlayerController)
     {
         PlayerController->ResetToStartingItems();
     }

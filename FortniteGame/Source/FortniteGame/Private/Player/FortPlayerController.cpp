@@ -1911,6 +1911,15 @@ void AFortPlayerController::ClientReportDamagedResourceBuilding(ABuildingSMActor
     Params.Call(this);
 }
 
+void AFortPlayerController::ClientExecuteInventoryItem(const FGuid& ItemGuid, float Delay, bool bForceExecute)
+{
+    Reflection::FParams Params(StaticFunction_ClientExecuteInventoryItem());
+    Params.Set(L"ItemGuid", ItemGuid);
+    Params.Set(L"Delay", Delay);
+    Params.Set(L"bForceExecute", bForceExecute);
+    Params.Call(this);
+}
+
 DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)
 {
     P_GET_PROPERTY(UByteProperty, Z_Param_InQuickBar);

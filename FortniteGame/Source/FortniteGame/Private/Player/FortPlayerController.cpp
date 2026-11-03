@@ -679,8 +679,9 @@ void AFortPlayerController::ReconnectOutpostInventoryHK(AFortPlayerController* T
 
 void AFortPlayerController::HookReconnectVTables()
 {
-    // Both are stripped to the shared empty function (1.10 0x1729B00, 1.9.1 0x15C4C00), so a player who rejoined kept the
-    // empty inventory their new controller spawned with and lost everything for the rest of the mission (CoreV2 #171).
+    // Both are stripped to the shared empty function (1.10 0x1729B00, 1.9.1 0x15C4C00, 3.0 0x25A4AD0 at slots 0x2CA /
+    // 0x2CC), so a player who rejoined kept the empty inventory their new controller spawned with and lost everything for
+    // the rest of the mission (CoreV2 #171, Core-Backend #213).
     UObject* PlayerControllerDefault = StaticClass()->GetDefaultObject(false);
     void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
     for (const auto& [Index, Hook, Name] : {

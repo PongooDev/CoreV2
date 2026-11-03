@@ -5397,24 +5397,37 @@ bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
     Natives::UFortMcpProfileWorld_bIsInventoryInitialized = InitializedOffset;
     Log::Info(L"Finder: UFortMcpProfileWorld::BindToPlayerController is slot 0x{:X}, inventory +0x{:X}, bIsInventoryInitialized +0x{:X}", BindIndex, InventoryOffset, InitializedOffset);
 
-    // With an inventory already bound (a player rejoining the zone) the bind hands it to the controller and returns:
-    // `jmp [rax+disp32]` to ReconnectOutpostInventory or ReconnectWorldInventory (1.10 0x784514 / 0x78452A: +0x15E8 /
-    // +0x15D8; 1.9.1 +0x1600 / +0x15F0). Between them in the vtable is GetOutpostInventory, which the bind's first-bind
-    // branch calls (`call [rax+disp32]`, 1.10 +0x15E0).
-    const uintptr_t GetOutpostInventoryCall = Bind ? FindInstruction(Bind, BindEnd, { 0xFF, 0x90, -1, -1, 0x00, 0x00 }) : 0;
-    const int32_t GetOutpostInventoryDisp = GetOutpostInventoryCall ? *reinterpret_cast<const int32_t*>(GetOutpostInventoryCall + 2) : 0;
-    const auto HasTailCall = [Bind, BindEnd](int32_t Disp)
+    // With an inventory already bound (a player rejoining the zone) the bind hands it to the controller through
+    // ReconnectOutpostInventory or ReconnectWorldInventory, with GetOutpostInventory (which the bind's first-bind branch
+    // calls) between them in the vtable. 1.7.2-1.10 tail-call the two (`jmp [rax+disp32]`, 1.10 0x784514 / 0x78452A:
+    // +0x15E8 / +0x15D8; 1.9.1 +0x1600 / +0x15F0). 1.11+ call them (`call [rax+disp32]`) and then clear the inventory's
+    // bAllowMcpItemCreation (3.0 0xD1C76C / 0xD1C774: +0x1660 / +0x1650, GetOutpostInventory +0x1658; 2.2 +0x1610 /
+    // +0x1600; 1.11 +0x1600 / +0x15F0). Collect every vtable call and jump in the bind and take the three adjacent slots.
+    std::vector<int32_t> VirtualCallDisps;
+    for (uintptr_t Site = Bind; Site && Site + 7 <= BindEnd; ++Site)
     {
-        for (uintptr_t Site = FindInstruction(Bind, BindEnd, { 0x48, 0xFF, 0xA0 }); Site; Site = FindInstruction(Site + 1, BindEnd, { 0x48, 0xFF, 0xA0 }))
+        if (Byte(Site) == 0xFF && Byte(Site + 1) == 0x90 && Byte(Site + 4) == 0x00 && Byte(Site + 5) == 0x00)
         {
-            if (*reinterpret_cast<const int32_t*>(Site + 3) == Disp)
-            {
-                return true;
-            }
+            VirtualCallDisps.push_back(*reinterpret_cast<const int32_t*>(Site + 2));
         }
-        return false;
+        else if (Byte(Site) == 0x48 && Byte(Site + 1) == 0xFF && Byte(Site + 2) == 0xA0 && Byte(Site + 5) == 0x00 && Byte(Site + 6) == 0x00)
+        {
+            VirtualCallDisps.push_back(*reinterpret_cast<const int32_t*>(Site + 3));
+        }
+    }
+    const auto HasVirtualCall = [&VirtualCallDisps](int32_t Disp)
+    {
+        return std::find(VirtualCallDisps.begin(), VirtualCallDisps.end(), Disp) != VirtualCallDisps.end();
     };
-    if (GetOutpostInventoryDisp >= 0x1000 && HasTailCall(GetOutpostInventoryDisp - 8) && HasTailCall(GetOutpostInventoryDisp + 8))
+    int32_t GetOutpostInventoryDisp = 0;
+    for (const int32_t Disp : VirtualCallDisps)
+    {
+        if (!GetOutpostInventoryDisp && Disp >= 0x1000 && HasVirtualCall(Disp - 8) && HasVirtualCall(Disp + 8))
+        {
+            GetOutpostInventoryDisp = Disp;
+        }
+    }
+    if (GetOutpostInventoryDisp)
     {
         Natives::AFortPlayerController_ReconnectWorldInventoryIndex = (GetOutpostInventoryDisp - 8) / 8;
         Natives::AFortPlayerController_ReconnectOutpostInventoryIndex = (GetOutpostInventoryDisp + 8) / 8;

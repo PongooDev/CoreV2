@@ -217,8 +217,10 @@ namespace Natives
     inline void* FBaseServiceMcp_GetBasicAuth = nullptr;
     inline void (*UMcpProfileGroup_SendRequestNow)(UMcpProfileGroup* This, FProfileHttpRequest& Request) = nullptr;
     // UMcpProfile::QueryProfile(const FMcpQueryComplete& OnComplete): the profile's whole query, by whichever URL its group
-    // needs (another account's: the public one).
-    inline void (*UMcpProfile_QueryProfile)(UMcpProfile* This, const void* OnComplete) = nullptr;
+    // needs (another account's: the public one). 2.5 (0x79D250) and 3.0 (0x7A1800) take FBaseUrlContext's
+    // bImmediateMode too (r8b, false from every caller of the game's); a build whose QueryProfile has no third argument
+    // ignores it.
+    inline void (*UMcpProfile_QueryProfile)(UMcpProfile* This, const void* OnComplete, bool bImmediateMode) = nullptr;
     inline bool (*FOnlineSubsystemMcp_QueueRequestForUser)(FOnlineSubsystemMcp* This, FGameServiceMcp& Service, const FUniqueNetId& UserId, const TSharedRef<IHttpRequest>& HttpRequest, FString& OutError) = nullptr;
     inline bool (*FOnlineSubsystemMcp_QueueRequestForClient)(FOnlineSubsystemMcp* This, FGameServiceMcp& Service, const FString& ClientId, const TSharedRef<IHttpRequest>& HttpRequest, FString& OutError) = nullptr;
     inline bool (*FOnlineSubsystemImpl_IsDedicated)(const FOnlineSubsystemImpl* This) = nullptr;

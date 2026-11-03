@@ -7493,15 +7493,32 @@ bool Finder::ResolveMcpProfileQuery()
     // request's URL context, McpDedicatedServerCommandUrl, McpClientCommandUrl or (another account's profile)
     // McpPublicCommandUrl, and calls QueryProfile(FBaseUrlContext&) (1.8.1 0x3C48A80), the only function that logs an
     // overlapping query. Two other functions name McpPublicCommandUrl; only this one calls it (1.8.2: 0x3C52470, calling
-    // 0x3C52120).
+    // 0x3C52120). 1.11 made QueryProfile(FBaseUrlContext&) virtual (UFortMcpProfile's vtable +0x238 on 1.11 to 3.0), and
+    // QueryProfile calls it through the vtable (2.5 0x79D250 calling 0x79D3F0, 3.0 0x7A1800 calling 0x7A19A0): there the
+    // function's virtual call is at the displacement of a vtable slot that holds it. The other two functions only call
+    // through +0x28 or +0x48.
     const uintptr_t QueryWithContext = FunctionOf(L"Caught overlapping attempts to query same user's profile, will be called when previous call completes. User %s");
+    std::vector<int32_t> QueryDisplacements;
+    for (void** Slot : Finder::ReadOnlySlotsHolding(QueryWithContext))
+    {
+        // The slot's displacement in its vtable: the code pointers that come before it, back to the vtable's start.
+        int32_t Index = 0;
+        while (Index < 0x400 && Finder::IsReadable(Slot - Index - 1, sizeof(void*)) &&
+               reinterpret_cast<uintptr_t>(Slot[-Index - 1]) >= Finder::TextBegin() && reinterpret_cast<uintptr_t>(Slot[-Index - 1]) < Finder::TextEnd())
+        {
+            ++Index;
+        }
+        QueryDisplacements.push_back(Index * static_cast<int32_t>(sizeof(void*)));
+    }
     std::vector<uintptr_t> Candidates;
     for (const uintptr_t Ref : QueryWithContext ? Finder::StringRefs(L"McpPublicCommandUrl") : std::vector<uintptr_t>{})
     {
         const uintptr_t Function = Finder::FunctionStart(Ref);
         const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
         const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = End ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
-        const bool bCallsQuery = std::any_of(Calls.begin(), Calls.end(), [QueryWithContext](const auto& Call) { return Call.second == QueryWithContext; });
+        const int32_t VirtualDisplacement = End ? LastVirtualCallDisplacement(Function, End) : -1;
+        const bool bCallsQuery = std::any_of(Calls.begin(), Calls.end(), [QueryWithContext](const auto& Call) { return Call.second == QueryWithContext; }) ||
+                                 (VirtualDisplacement >= 0 && std::find(QueryDisplacements.begin(), QueryDisplacements.end(), VirtualDisplacement) != QueryDisplacements.end());
         if (bCallsQuery && std::find(Candidates.begin(), Candidates.end(), Function) == Candidates.end())
         {
             Candidates.push_back(Function);

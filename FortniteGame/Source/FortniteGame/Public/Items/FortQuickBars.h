@@ -50,6 +50,7 @@ public:
     DefineUStructProperty(FQuickBar, PrimaryQuickBar)
     DefineUStructProperty(FQuickBar, SecondaryQuickBar)
     DefineUFunction(EnableSlot)
+    DefineUFunction(ServerEnableSlot)
     DefineUFunction(ServerActivateSlotInternal)
     DefineUFunction(ServerAddItemInternal)
     DefineUFunction(ServerRemoveItemInternal)

@@ -44,7 +44,9 @@ int32_t AFortQuickBars::FocusSlot(EFortQuickBars InQuickBar, int32_t Slot, bool 
 
 void AFortQuickBars::EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex)
 {
-    Reflection::FParams Params(StaticFunction_EnableSlot());
+    // 3.0 made EnableSlot the server RPC ServerEnableSlot (same parameters); on the server it runs its implementation.
+    UFunction* Function = FindStaticFunction_EnableSlot();
+    Reflection::FParams Params(Function ? Function : StaticFunction_ServerEnableSlot());
     Params.Set(L"InQuickBar", static_cast<uint8_t>(InQuickBar));
     Params.Set(L"SlotIndex", SlotIndex);
     Params.Call(this);

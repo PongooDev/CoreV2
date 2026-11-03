@@ -14,13 +14,18 @@ class UDataTable;
 
 // A playlist's data tables (from 1.11; Athena_GameMode_C's PlaylistDataTables): the tables whose rows
 // ApplyPlaylistDataTables copies over the default ones (AthenaLootTierData_Client, AthenaLootPackages_Client and the rest)
-// while the match's playlist is PlaylistId.
+// while the match's playlist is PlaylistId. From 3.0 the entry is only FortAthenaPlaylistClass, an AFortAthenaPlaylistBase
+// class whose default object has the PlaylistId and the tables.
 struct FAthenaPlaylistDataTableSet
 {
     DefineUnrealStruct(FAthenaPlaylistDataTableSet, FortniteGame)
     DefineUProperty(int32_t, PlaylistId)
     DefineUProperty(UDataTable*, LootTierData)
     DefineUProperty(UDataTable*, LootPackages)
+    DefineUProperty(UClass*, FortAthenaPlaylistClass)
+
+    static bool HasPlaylistId() { return Member_PlaylistId.IsAvailable(); }
+    static bool HasFortAthenaPlaylistClass() { return Member_FortAthenaPlaylistClass.IsAvailable(); }
 };
 
 // Battle Royale's game mode (from 1.7.2; Athena_GameMode_C on Athena_Terrain). Its flow (warmup, aircraft, safe zones,

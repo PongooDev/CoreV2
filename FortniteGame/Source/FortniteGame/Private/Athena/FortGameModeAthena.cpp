@@ -2,6 +2,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
+#include "Athena/FortAthenaPlaylistBase.h"
 #include "Building/BuildingContainer.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -1110,9 +1111,21 @@ namespace
         for (int32_t Index = 0; Index < Sets.Num(); ++Index)
         {
             FAthenaPlaylistDataTableSet& Set = Sets[Index];
-            if (Set.PlaylistId == PlaylistId)
+            if (FAthenaPlaylistDataTableSet::HasPlaylistId())
             {
-                return { Set.LootTierData, Set.LootPackages };
+                if (Set.PlaylistId == PlaylistId)
+                {
+                    return { Set.LootTierData, Set.LootPackages };
+                }
+                continue;
+            }
+            // 3.0: ApplyPlaylistDataTables (3.0 0x99AB50) reads the playlist class's default object.
+            UClass* PlaylistClass = FAthenaPlaylistDataTableSet::HasFortAthenaPlaylistClass() ? Set.FortAthenaPlaylistClass : nullptr;
+            AFortAthenaPlaylistBase* Playlist = PlaylistClass && PlaylistClass->IsChildOf(AFortAthenaPlaylistBase::StaticClass())
+                ? static_cast<AFortAthenaPlaylistBase*>(PlaylistClass->GetDefaultObject()) : nullptr;
+            if (Playlist && Playlist->PlaylistId == PlaylistId)
+            {
+                return { Playlist->LootTierData, Playlist->LootPackages };
             }
         }
         return { nullptr, nullptr };

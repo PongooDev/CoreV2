@@ -16,7 +16,9 @@ namespace
     /// <summary>The opening of an x64 function with a frame, `mov [rsp+8], rbx`. Decrypted game code is full of
     /// them and ciphertext has them only by chance, which is what tells the two apart.</summary>
     constexpr uint8_t Prologue[] = { 0x48, 0x89, 0x5C, 0x24 };
-    constexpr int PrologueThreshold = 8;
+    // Counted over all the samples. The packed image has a few by chance or left in the clear (2.4.2's four windows
+    // hold 17 before the stub runs, 2.5's 16), a decrypted one hundreds (2.5's 362, with one window in its thunks).
+    constexpr int PrologueThreshold = 64;
     constexpr size_t SampleSize = 0x10000;
     constexpr int SampleCount = 4;
 
@@ -273,7 +275,7 @@ namespace
 bool Packed::RunAfterStub(void (*Start)())
 {
     const FImage Image = Describe();
-    if (Image.TextSections < 2 || LooksDecrypted(Image))
+    if (Image.TextSections < 2 || (HandedOver(Image) && LooksDecrypted(Image)))
     {
         return false;
     }

@@ -158,6 +158,9 @@ namespace Finder
     uint8_t* NullGetCurrentCall(UFunction* Function);
     bool ResolveWorldItemLive(void** InventoryOwnerVTable);
     bool ResolveMcpProfileWorldLive(void** ProfileVTable);
+    // AFortGameSession::OnVerifyAuthComplete's slot in SessionVTable (AFortGameSession's), and whether it tests
+    // bWasSuccessful before the kick.
+    bool ResolveGameSessionVerifyAuthLive(void** SessionVTable);
     bool ResolveGoalManagerLive();
     bool ResolveGoalDiscouragementLive();
     bool ResolveQueryGeneratorsLive(void** EnemiesVTable);

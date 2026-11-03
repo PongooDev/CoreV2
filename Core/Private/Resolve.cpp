@@ -5088,6 +5088,50 @@ bool Finder::ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTab
     return true;
 }
 
+bool Finder::ResolveGameSessionVerifyAuthLive(void** SessionVTable)
+{
+    // AFortGameSession::OnVerifyAuthComplete (2.4 0x70A130, 2.3 0x70D630) logs this before it kicks the player whose
+    // UniqueId matches AuthToken.AccountId; it is the slot whose code runs into that log (2.3 and 2.4 slot 0xDC).
+    const uintptr_t KickRef = First(Finder::StringRefs(L"User auth check failed. Server requesting to kick user to login screen UserId=%s bSuccess=%d Error=%s"));
+    int32_t VerifyIndex = -1;
+    uintptr_t Verify = 0;
+    for (int32_t Index = 0; KickRef && Index < 0x400 && VerifyIndex < 0; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(SessionVTable, Index);
+        if (Entry && Entry <= KickRef && KickRef - Entry < 0x1000 && Finder::RunsInto(Entry, KickRef, 512) >= 0)
+        {
+            VerifyIndex = Index;
+            Verify = Entry;
+        }
+    }
+    if (VerifyIndex < 0)
+    {
+        Log::Warning(L"Finder: AFortGameSession::OnVerifyAuthComplete not found (kick log {})", KickRef != 0);
+        return false;
+    }
+
+    // Up to 2.3 its first branch is `if (!bWasSuccessful)`: test dl, dl; jnz return (2.3 0x70D630). 2.4 opens with the
+    // AuthToken.TokenType test instead (cmp [r8+0F4h], r14d; jz) and only logs bWasSuccessful.
+    uintptr_t Previous = 0;
+    const uintptr_t Branch = Finder::TraceFind(Verify, 32, [&](uintptr_t Instruction)
+    {
+        const uint8_t Op = Byte(Instruction);
+        const bool bConditional = (Op >= 0x70 && Op <= 0x7F) || (Op == 0x0F && Byte(Instruction + 1) >= 0x80 && Byte(Instruction + 1) <= 0x8F);
+        if (!bConditional)
+        {
+            Previous = Instruction;
+        }
+        return bConditional;
+    });
+    const bool bTestsSuccess = !Branch || (Previous && Byte(Previous) == 0x84 && Byte(Previous + 1) == 0xD2);
+
+    Natives::AFortGameSession_OnVerifyAuthCompleteIndex = VerifyIndex;
+    Natives::AFortGameSession_bOnVerifyAuthCompleteTestsSuccess = bTestsSuccess;
+    Log::Info(L"Finder: AFortGameSession::OnVerifyAuthComplete is slot 0x{:X} (0x{:X}), {}", VerifyIndex, Verify - Finder::ImageBase(),
+        bTestsSuccess ? L"tests bWasSuccessful" : L"kicks whatever bWasSuccessful is");
+    return true;
+}
+
 bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
 {
     const uintptr_t Bind = FunctionOf(L"ProfileWorld::BindToPlayerController: Called with existing inventory for %s, reinitializing inventory");

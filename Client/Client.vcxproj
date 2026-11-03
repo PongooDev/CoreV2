@@ -522,6 +522,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortObjectiveFailedParams.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortObjectiveNeutralCompleteParams.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortObjectiveSucceededParams.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortGameSession.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortLobbyBeaconHost.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileAccount.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileWorld.cpp" />

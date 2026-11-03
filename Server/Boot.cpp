@@ -39,6 +39,7 @@
 #include "Items/FortPickup.h"
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionManager.h"
+#include "Online/FortGameSession.h"
 #include "Online/FortMcpProfileWorld.h"
 #include "AI/FortAIGoalManager.h"
 #include "Building/BuildingContainer.h"
@@ -267,6 +268,7 @@ static void InstallHooks()
         AFortGameMode::HookCallSites();
         AFortWorldManager::HookCallSites();
         UFortMcpProfileWorld::HookVTables();
+        AFortGameSession::HookVTables();
         AFortPlayerController::HookReconnectVTables();
         AFortAIGoalManager::HookCallSites();
         AFortAIGoalManager::HookNatives();

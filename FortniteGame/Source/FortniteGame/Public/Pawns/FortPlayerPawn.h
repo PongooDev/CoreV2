@@ -14,6 +14,7 @@ class AFortPlayerPawn : public AFortPawn
     DefineUnrealClass(AFortPlayerPawn, FortniteGame)
     DefineUFunction(ServerReviveFromDBNO)
     DefineUFunction(ServerHandlePickup)
+    DefineUFunction(IsUsingPersonalVehicle)
 
 public:
     DefineUProperty(FGuid, LastEquippedWeaponGUID)
@@ -30,6 +31,9 @@ public:
 
     void ResetGameplayAttributes();
     bool EquipLastWeapon();
+    // 3.0 and later: whether the pawn rides its personal vehicle (movement style PersonalVehicle, which the pawn sets while
+    // it has Gameplay.Action.Player.PersonalVehicle). False where the build has no such function.
+    bool IsUsingPersonalVehicle() const;
     // 1.8's revive (0x7FF160), restored where the build strips ServerReviveFromDBNO_Implementation (1.8.1).
     void ServerReviveFromDBNO_Implementation(AController* EventInstigator);
     // The pickup RPC, called as the game calls it (through ProcessEvent, which runs it in place on the server).

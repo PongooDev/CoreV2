@@ -108,6 +108,17 @@ void AFortPlayerPawn::ResetGameplayAttributes()
     }
 }
 
+bool AFortPlayerPawn::IsUsingPersonalVehicle() const
+{
+    UFunction* Function = FindStaticFunction_IsUsingPersonalVehicle();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function);
+    return Params.Call(const_cast<AFortPlayerPawn*>(this)) && Params.Take<bool>(L"ReturnValue");
+}
+
 bool AFortPlayerPawn::EquipLastWeapon()
 {
     if (!Finder::ResolveAbilityWeaponLive(CurrentWeaponListOffset(), LastEquippedWeaponGUIDOffset()))

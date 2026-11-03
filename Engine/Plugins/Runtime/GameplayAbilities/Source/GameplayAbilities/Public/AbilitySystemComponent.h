@@ -38,9 +38,17 @@ public:
     bool HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const;
     void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const;
     FGameplayAbilitySpec* FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle Handle);
+    // The spec whose ability is AbilityClass's default object, or null.
+    FGameplayAbilitySpec* FindAbilitySpecFromClass(UClass* AbilityClass);
     void MarkAbilitySpecDirty(FGameplayAbilitySpec& Spec);
     // Gives the ability and activates it once; the spec is removed when that activation ends. Server only.
     FGameplayAbilitySpecHandle GiveAbilityAndActivateOnce(const FGameplayAbilitySpec& Spec);
+    // The engine's GiveAbility: adds the spec to ActivatableAbilities (replicated to the owner) and returns its handle; an
+    // invalid handle when it isn't the authority or the build's GiveAbility wasn't found. Server only.
+    FGameplayAbilitySpecHandle GiveAbility(const FGameplayAbilitySpec& Spec);
+    // TryActivateAbility as the authority runs it: InternalTryActivateAbility with no prediction key. An instanced-per-actor
+    // ability that is active and bRetriggerInstancedAbility is ended first, then activated again.
+    bool TryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate);
     bool InternalTryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate, const FPredictionKey& InPredictionKey, UGameplayAbility** OutInstancedAbility = nullptr, void* OnGameplayAbilityEndedDelegate = nullptr, const FGameplayEventData* TriggerEventData = nullptr);
     // Removes StacksToRemove stacks (-1: all) of every active effect of the class, from any instigator. Server only; false
     // when the build reflects no such function.

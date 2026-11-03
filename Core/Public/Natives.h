@@ -84,6 +84,7 @@ class UFortHero;
 class UFortAbilityKit;
 class UFortHomebaseManager;
 class UFortMcpProfileAccount;
+class UFortPersonalVehicleItem;
 struct FFortSavedModeLoadout;
 class UGameplayAbility;
 class UScriptStruct;
@@ -206,6 +207,9 @@ namespace Natives
     // FGameplayAbilitySpecHandle::GenerateNewHandle takes handles from (Finder::ResolveEmoteLive).
     inline FGameplayAbilitySpecHandle* (*UAbilitySystemComponent_GiveAbilityAndActivateOnce)(UAbilitySystemComponent* This, FGameplayAbilitySpecHandle* Result, const FGameplayAbilitySpec& Spec) = nullptr;
     inline int32_t* FGameplayAbilitySpecHandle_GHandleID = nullptr;
+    // 3.0's AFortPlayerController::GetCurrentlySelectedPersonalVehicle (0xE31910): the MainMcpProfile's campaign loadout
+    // vehicle, else its first EFortItemType::PersonalVehicle item (Finder::ResolvePersonalVehicleLive).
+    inline UFortPersonalVehicleItem* (*AFortPlayerController_GetCurrentlySelectedPersonalVehicle)(const AFortPlayerController* This) = nullptr;
     inline void* SharedEmptyFunction = nullptr;
     inline void (*FortMcpConfig_UpdateServicePermissions)(void* Environment, void* Context, FMcpServiceConfig* ServiceConfig, void* Extra) = nullptr;
     // FBaseServiceMcp::GetBasicAuth: a service's client credentials, from its config's ServicePermissions. Packed builds

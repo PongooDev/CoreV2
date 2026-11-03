@@ -87,6 +87,27 @@ FGameplayAbilitySpec* UAbilitySystemComponent::FindAbilitySpecFromHandle(FGamepl
     return nullptr;
 }
 
+FGameplayAbilitySpec* UAbilitySystemComponent::FindAbilitySpecFromClass(UClass* AbilityClass)
+{
+    if (!AbilityClass)
+    {
+        return nullptr;
+    }
+
+    UObject* const AbilityDefault = AbilityClass->GetDefaultObject(false);
+    TStructArray<FGameplayAbilitySpec>& Items = ActivatableAbilities.Items;
+    for (int32_t Index = 0; Index < Items.Num(); ++Index)
+    {
+        FGameplayAbilitySpec& Spec = Items[Index];
+        if (Spec.Ability == AbilityDefault)
+        {
+            return &Spec;
+        }
+    }
+
+    return nullptr;
+}
+
 void UAbilitySystemComponent::MarkAbilitySpecDirty(FGameplayAbilitySpec& Spec)
 {
     Natives::UAbilitySystemComponent_MarkAbilitySpecDirty(this, Spec);
@@ -102,6 +123,35 @@ FGameplayAbilitySpecHandle UAbilitySystemComponent::GiveAbilityAndActivateOnce(c
     FGameplayAbilitySpecHandle Handle;
     Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce(this, &Handle, Spec);
     return Handle;
+}
+
+FGameplayAbilitySpecHandle UAbilitySystemComponent::GiveAbility(const FGameplayAbilitySpec& Spec)
+{
+    // Like GiveAbilityAndActivateOnce, the member function returns its handle through a hidden result pointer.
+    FGameplayAbilitySpecHandle Handle;
+    if (Natives::UAbilitySystemComponent_GiveAbility)
+    {
+        using FGiveAbility = FGameplayAbilitySpecHandle* (*)(UAbilitySystemComponent* This, FGameplayAbilitySpecHandle* Result, const FGameplayAbilitySpec& Spec);
+        reinterpret_cast<FGiveAbility>(Natives::UAbilitySystemComponent_GiveAbility)(this, &Handle, Spec);
+    }
+    return Handle;
+}
+
+bool UAbilitySystemComponent::TryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate)
+{
+    if (!FindAbilitySpecFromHandle(AbilityToActivate))
+    {
+        ABILITY_LOG(Warning, TEXT("TryActivateAbility called with invalid Handle"));
+        return false;
+    }
+
+    // FPredictionKey's engine layout is longer than the members Core reflects: a default key in the build's size.
+    UScriptStruct* PredictionKeyStruct = FPredictionKey::StaticStruct();
+    std::vector<uint8_t> PredictionKeyStorage(PredictionKeyStruct->GetStructureSize(), 0);
+    PredictionKeyStruct->InitializeStruct(PredictionKeyStorage.data());
+    const bool bActivated = InternalTryActivateAbility(AbilityToActivate, *reinterpret_cast<const FPredictionKey*>(PredictionKeyStorage.data()));
+    PredictionKeyStruct->DestroyStruct(PredictionKeyStorage.data());
+    return bActivated;
 }
 
 bool UAbilitySystemComponent::InternalTryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate, const FPredictionKey& InPredictionKey, UGameplayAbility** OutInstancedAbility, void* OnGameplayAbilityEndedDelegate, const FGameplayEventData* TriggerEventData)

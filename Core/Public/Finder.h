@@ -205,6 +205,7 @@ namespace Finder
     bool ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset);
     bool OnlyLoadsEmoteAnimation(uintptr_t Implementation, ptrdiff_t AnimationOffset);
     bool ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOffset);
+    bool ResolvePersonalVehicleLive(UFunction* IsPersonalVehicleAvailable, ptrdiff_t MainMcpProfileOffset);
     bool ResolveServerMoveLive();
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();

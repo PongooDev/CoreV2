@@ -19,7 +19,9 @@ class IFortInventoryOwnerInterface;
 class AFortQuickBars;
 class UFortHero;
 class UFortItemDefinition;
+class UFortMcpProfileAccount;
 class UFortMontageItemDefinitionBase;
+class UFortPersonalVehicleItem;
 class UFortQuestManager;
 class UFortRegisteredPlayerInfo;
 class UFortSchematicItem;
@@ -72,6 +74,8 @@ public:
     static bool HasNoCoolDownFlag() { return Member_bNoCoolDown.IsAvailable(); }
     DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
+    // The player's profile0 (the server queries it for each player as the dedicated server).
+    DefineUProperty(UFortMcpProfileAccount*, MainMcpProfile)
     DefineUProperty(int32_t, OverriddenBackpackSize)
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
     DefineUProperty(TAssetPtr<UObject>, StartRepairSound)
@@ -113,6 +117,8 @@ public:
     DefineUFunction(ServerPlayEmoteItem)
     DefineUFunction(ServerEmote)
     DefineUFunction(ServerModifyStat)
+    DefineUFunction(TogglePersonalVehicle)
+    DefineUFunction(IsPersonalVehicleAvailable)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
@@ -167,6 +173,10 @@ public:
     void SendEmoteStatEvent(UFortMontageItemDefinitionBase* EmoteAsset);
     // Save the World's emotes (/dance, the emote wheel): 1.9 strips ServerEmote's load callback; Core's plays the emote.
     void ServerEmote_Implementation(const FName& AssetName);
+    // Personal vehicles (FortPlayerControllerPersonalVehicle.cpp): 3.0 strips the hoverboard's server RPC; Core's grants
+    // and activates the vehicle's ability.
+    void TogglePersonalVehicle_Implementation(bool bOn);
+    UFortPersonalVehicleItem* GetCurrentlySelectedPersonalVehicle() const;
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
@@ -200,6 +210,7 @@ public:
     static void HookReconnectVTables();
     static void HookBuildingVTables();
     static void HookEmoteVTables();
+    static void HookPersonalVehicleVTables();
     // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox.
     static void HookVoice();
     static void HookClientNatives();
@@ -236,6 +247,7 @@ private:
     static inline void (*ServerPlayEmoteItem_ImplementationOG)(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset) = nullptr;
     static void ServerPlayEmoteItem_ImplementationHK(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset);
     static void ServerEmote_ImplementationHK(AFortPlayerController* This, const FName& AssetName);
+    static void TogglePersonalVehicle_ImplementationHK(AFortPlayerController* This, bool bOn);
     static void ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor);
     static void ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg);
     static void ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType);

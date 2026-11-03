@@ -9856,6 +9856,35 @@ bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOf
     return bResolved;
 }
 
+bool Finder::ResolvePersonalVehicleLive(UFunction* IsPersonalVehicleAvailable, ptrdiff_t MainMcpProfileOffset)
+{
+    static bool bSearched = false;
+    static bool bResolved = false;
+    if (bSearched)
+    {
+        return bResolved;
+    }
+    bSearched = true;
+    MissingCount = 0;
+
+    // AFortPlayerController::IsPersonalVehicleAvailable (3.0 slot 0x2AB, 0xE3DEB0) is all one call:
+    // sub rsp, 28h; call GetCurrentlySelectedPersonalVehicle; test rax, rax; setnz al. Its callee (0xE31910) begins by
+    // reading the controller's MainMcpProfile: mov rdi, [rcx+MainMcpProfile].
+    const int32_t AvailableIndex = ImplementationIndex(IsPersonalVehicleAvailable);
+    const uintptr_t Available = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortPlayerController"), AvailableIndex);
+    const uintptr_t Call = Available ? FindRawCall(Available, Available + 0x10) : 0;
+    const uintptr_t Selected = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    const int32_t M = static_cast<int32_t>(MainMcpProfileOffset);
+    const bool bReadsProfile = Selected && M > 0
+        && FindInstruction(Selected, Selected + 0x10, { 0x48, 0x8B, -1, M & 0xFF, (M >> 8) & 0xFF, (M >> 16) & 0xFF, (M >> 24) & 0xFF }) != 0;
+    Require(L"AFortPlayerController::GetCurrentlySelectedPersonalVehicle", Natives::AFortPlayerController_GetCurrentlySelectedPersonalVehicle, bReadsProfile ? Selected : 0);
+
+    Log::Info(L"Finder: personal vehicle helpers: IsPersonalVehicleAvailable slot 0x{:X}, GetCurrentlySelectedPersonalVehicle 0x{:X}, {} missing",
+        AvailableIndex, bReadsProfile ? Selected - Finder::ImageBase() : 0, MissingCount);
+    bResolved = MissingCount == 0;
+    return bResolved;
+}
+
 bool Finder::ResolvePickupCanInteractLive(ptrdiff_t PickedUpOffset)
 {
     if (Natives::IFortInteractInterface_CanInteractIndex >= 0)

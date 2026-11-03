@@ -397,14 +397,20 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
     WatchForCombine();
 }
 
-void AFortPickup::TossFromContainer(const FVector& FloorLocation, float LaunchUpSpeed)
+void AFortPickup::TossFromContainer(const FVector& FinalLocation, const FVector& LaunchVelocity)
 {
-    // A toss (1.7.2 0x6622F0, run by 0x680570 on the server) launches the pickup's projectile movement, and clients play
-    // it from the replicated movement (the pickup's PostNetReceiveVelocity, 0x67BAD0, feeds the projectile). A
-    // container's loot is launched onto its spot like a dropped item's (TossOntoFloor), and bTossedFromContainer tells
-    // clients (OnRep_TossedFromContainer, 0x67A830: the pickup effect's OnTossed and the touch collision). It goes up at
-    // the container's own toss speed (LaunchUpSpeed), not TossOntoFloor's rise.
-    TossOntoFloor(FloorLocation, nullptr, LaunchUpSpeed);
+    // A toss (1.7.2 0x6622F0, run by 0x680570 on the server) launches the pickup's projectile movement at 45 degrees with
+    // a horizontal speed of the distance over the fly time, and clients play it from the replicated movement (the
+    // pickup's PostNetReceiveVelocity, 0x67BAD0, feeds the projectile). A container's loot leaves at the container's own
+    // toss velocity instead and lands where its bounces take it, and bTossedFromContainer tells clients
+    // (OnRep_TossedFromContainer, 0x67A830: the pickup effect's OnTossed and the touch collision).
+    TossPickup(FinalLocation, nullptr, 0);
+    UProjectileMovementComponent* Movement = MovementComponent;
+    if (Movement && Role == ROLE_Authority)
+    {
+        Movement->Velocity = LaunchVelocity;
+        Movement->MaxSpeed = LaunchVelocity.Size();
+    }
     if (Member_bTossedFromContainer.IsAvailable())
     {
         bTossedFromContainer = true;

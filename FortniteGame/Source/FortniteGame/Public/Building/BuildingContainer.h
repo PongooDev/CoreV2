@@ -33,6 +33,7 @@ public:
     DefineUProperty(UFortWorldItemDefinition*, LootTestingData)
     DefineUProperty(float, LootNoiseRange)
     DefineUProperty(FVector, LootSpawnLocation)
+    DefineUProperty(FVector, LootFinalLocation)
     DefineUProperty(uint8_t, HighestRarity)
     DefineBitfieldUProperty(bAlwaysShowContainer)
     DefineBitfieldUProperty(bAlwaysMaintainLoot)
@@ -66,8 +67,8 @@ private:
     FVector GetAthenaTossForward();
     float GetAthenaLootFront();
     FVector GetAthenaLootSpawnLocation();
-    float GetAthenaLootTossUpSpeed();
-    std::vector<FVector> GetAthenaLootSpots(int32_t Count);
+    FVector GetAthenaLootTossVelocity();
+    FVector GetAthenaLootFinalLocation();
     void GetFloorLootLocations(int32_t Index, int32_t Count, FVector& OutSpawnLocation, FVector& OutFinalLocation);
 
     static void PostLoadHK(ABuildingContainer* This);

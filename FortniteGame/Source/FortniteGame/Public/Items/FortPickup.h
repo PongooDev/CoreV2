@@ -63,8 +63,9 @@ public:
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
     // bToss false (1.8 on) puts the pickup at FinalLocation instead of tossing it there; before 1.8 a toss always flies.
     void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss = true);
-    // Tosses a container's loot from where it is onto FloorLocation, like TossOntoFloor, marked as tossed from it.
-    void TossFromContainer(const FVector& FloorLocation, float LaunchUpSpeed = 0.0f);
+    // Tosses a container's loot from where it is at LaunchVelocity (the container's toss), headed for FinalLocation, marked
+    // as tossed from it.
+    void TossFromContainer(const FVector& FinalLocation, const FVector& LaunchVelocity);
     // Tosses the pickup from where it is in a short arc that lands it on FloorLocation, a point on the floor. It rises 70
     // over its start (or the landing, if higher), or as far as LaunchUpSpeed takes it when one is given.
     void TossOntoFloor(const FVector& FloorLocation, AFortPawn* ItemOwner, float LaunchUpSpeed = 0.0f);

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Player/FortPlayerState.h"
+#include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
@@ -62,6 +63,38 @@ void AFortPlayerState::SetHeroType(UFortHero* Hero)
             {
                 GetCharacterPart(Part->CharacterPartType) = Part;
             }
+        }
+    }
+
+    // The back bling equipped in the locker didn't show in a match (#226): the fill above takes the hero's parts only.
+    // Epic's server put it on in the player state's UCustomPlayerComponent (3.0 0xAC62A0, from
+    // AFortPlayerState::ApplyCharacterCustomization 0xE75BB0): after the hero's parts (ChoosePartsForHero 0xAC6390) it
+    // takes the athena profile's favorite backpack (EAthenaCustomizationCategory::Backpack, 0x9A9170) and, if that is a
+    // UAthenaCharacterPartItemDefinition, puts each of its CharacterParts the player's gender permits into the slot of
+    // its CharacterPartType (0xAC95F0, 0xAC6020). The controller's loadout holds the same favorite_backpack, read from
+    // the same profile (GetAthenaLoadoutWithOverrides) before the hero is made and set.
+    AFortPlayerControllerAthena* AthenaController = FFortAthenaLoadout::HasBackpack() && UAthenaCharacterPartItemDefinition::HasCharacterParts()
+        ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(GetOwner())) : nullptr;
+    UAthenaBackpackItemDefinition* Backpack = AthenaController && AthenaController->HasCustomizationLoadout()
+        ? static_cast<UAthenaBackpackItemDefinition*>(AthenaController->CustomizationLoadout.Backpack) : nullptr;
+    if (Backpack)
+    {
+        bool bApplied = false;
+        for (UCustomCharacterPart* Part : Backpack->CharacterParts)
+        {
+            if (Part && Part->CharacterPartType < NumTypes && (Part->GenderPermitted & CharacterGender) != 0)
+            {
+                GetCharacterPart(Part->CharacterPartType) = Part;
+                bApplied = true;
+            }
+        }
+        if (bApplied)
+        {
+            UE_LOG(LogFort, Log, TEXT("SetHeroType: %s wears the back bling %s"), *GetName(), *Backpack->GetName());
+        }
+        else
+        {
+            UE_LOG(LogFort, Warning, TEXT("SetHeroType: %s's back bling %s has no part for its gender"), *GetName(), *Backpack->GetName());
         }
     }
 

@@ -15,6 +15,7 @@ class AFortPawn;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class UAthenaPlayerMatchReport;
+class UCustomCharacterPart;
 class UFortHero;
 class UFortHeroType;
 struct FAthenaMatchStats;
@@ -46,6 +47,24 @@ class UAthenaGliderItemDefinition : public UFortItemDefinition
     DefineUnrealClass(UAthenaGliderItemDefinition, FortniteGame)
 };
 
+// A Battle Royale cosmetic worn as character parts (2.4.2, CL-3870737, on): the parts it puts on the player.
+class UAthenaCharacterPartItemDefinition : public UFortItemDefinition
+{
+    DefineUnrealClass(UAthenaCharacterPartItemDefinition, FortniteGame)
+
+public:
+    DefineUProperty(TArray<UCustomCharacterPart*>, CharacterParts)
+
+    static bool HasCharacterParts() { return Member_CharacterParts.IsAvailable(); }
+};
+
+// A Battle Royale back bling (BID_*). From 2.4.2 it's a UAthenaCharacterPartItemDefinition: BID_004_BlackKnight's
+// CharacterParts is Male_Commando_BlackKnight. Before that it has no parts of its own.
+class UAthenaBackpackItemDefinition : public UAthenaCharacterPartItemDefinition
+{
+    DefineUnrealClass(UAthenaBackpackItemDefinition, FortniteGame)
+};
+
 // The cosmetics a player wears in Battle Royale (from 1.8), from their athena profile's favorite_* items.
 struct FFortAthenaLoadout
 {
@@ -56,8 +75,11 @@ struct FFortAthenaLoadout
     DefineUProperty(UAthenaGliderItemDefinition*, Glider)
     DefineUProperty(UAthenaPickaxeItemDefinition*, Pickaxe)
     DefineUProperty(UAthenaCharacterItemDefinition*, Character)
+    // The athena profile's favorite_backpack (3.0 0x993520 clears it, GetAthenaLoadoutWithOverrides 0xE310B0 fills it).
+    DefineUProperty(UAthenaBackpackItemDefinition*, Backpack)
 
     static bool HasGlider() { return Member_Glider.IsAvailable(); }
+    static bool HasBackpack() { return Member_Backpack.IsAvailable(); }
 };
 
 // Battle Royale's player controller (from 1.7.2; Athena_PlayerController_C).
@@ -106,6 +128,7 @@ public:
     // Whether the controller plays Battle Royale heroes only: 1.7.2's DefaultHeroes, or 1.8's loadout's.
     // Whether the build has DefaultHeroes and the controller holds any (1.7.2).
     bool HasDefaultHeroes() const { return Member_DefaultHeroes.IsAvailable() && DefaultHeroes.Num() > 0; }
+    static bool HasCustomizationLoadout() { return Member_CustomizationLoadout.IsAvailable(); }
     bool PlaysBattleRoyaleHeroes();
     bool IsDefaultHero(UFortHero* Hero);
     // 1.8: the hero of the loadout's character, once GetOrInitializeHero has made the loadout.

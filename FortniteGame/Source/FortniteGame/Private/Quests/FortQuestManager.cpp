@@ -183,6 +183,12 @@ namespace
 
     public:
         DefineUStructArrayProperty(FFortMcpQuestObjectiveInfo, Objectives)
+        // 3.0: a Battle Royale challenge done "in a single match" keeps no progress from a match that didn't complete it.
+        DefineUProperty(bool, bAthenaMustCompleteInSingleMatch)
+        // 3.0: how many of the objectives complete the quest (Land at different named locations: 10 of 18), else all.
+        DefineUProperty(int32_t, ObjectiveCompletionCount)
+        static bool HasSingleMatch() { return Member_bAthenaMustCompleteInSingleMatch.IsAvailable(); }
+        static bool HasObjectiveCompletionCount() { return Member_ObjectiveCompletionCount.IsAvailable(); }
     };
 
     class UFortMcpProfileQuest : public UObject
@@ -504,9 +510,13 @@ namespace
 
     // The context of an event's conditions, as 1.9.1 builds it (0x874590): the target's variables (a pawn's tags, an
     // item's tags, tier and rarity), the player's placement (Athena.Rank), the players in the match, and the zone's
-    // difficulty. Variables that need the game's own getters Core doesn't have (Pawn.Level, Building.*, Mission.*,
-    // Account.*, Team.Size) are left out, so conditions on them don't hold.
-    FConditionContext MakeConditionContext(UObject* TargetObject, AFortPlayerController* PlayerController)
+    // difficulty. 3.0's (0xE6EE10) adds the player's eliminations (Athena.Kills, the player state's KillScore) and the
+    // event's own tags, Source.Tags and Target.Tags, which Season 3's challenges ask for: an elimination at a named
+    // location ("Source.Tags HasTag Athena.Location.POI.TiltedTowers || Target.Tags HasTag ...": the killer's or the
+    // victim's AFortPoiVolume tags) and the building resources collected ("Target.Tags HasTag Building.Resource.Wood").
+    // Variables that need the game's own getters Core doesn't have (Pawn.Level, Building.*, Mission.*, Account.*,
+    // Team.Size, SquadFriend.Count) are left out, so conditions on them don't hold.
+    FConditionContext MakeConditionContext(UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& TargetTags)
     {
         FConditionContext Context;
         if (AFortPawn* Pawn = Cast<AFortPawn>(TargetObject))
@@ -523,6 +533,10 @@ namespace
         if (AFortPlayerStateAthena* PlayerState = PlayerController ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr)
         {
             Context.Numbers[L"athena.rank"] = static_cast<int32_t>(PlayerState->Place);
+            if (AFortPlayerStateAthena::HasKillScore())
+            {
+                Context.Numbers[L"athena.kills"] = static_cast<int32_t>(PlayerState->KillScore);
+            }
         }
         UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
         if (UObject* GameMode = World ? reinterpret_cast<UObject*>(World->GetAuthGameMode()) : nullptr)
@@ -541,6 +555,8 @@ namespace
                 Context.Numbers[L"zone.contentaccountlevel"] = static_cast<int32_t>(Info->ContentAccountLevel);
             }
         }
+        Context.Tags[L"source.tags"] = &SourceTags;
+        Context.Tags[L"target.tags"] = &TargetTags;
         return Context;
     }
 
@@ -729,6 +745,74 @@ namespace
         return *Entry;
     }
 
+    // 3.0 0xED1EC0 (UFortQuestManager::UpdateStatsForSingleMatchQuests), which ProcessPendingStatEvents (0xEC9030) runs
+    // before the pending progress is saved: a quest that must be completed in a single match (bAthenaMustCompleteInSingleMatch)
+    // counts its objectives whose pending count reaches the objective's Count, and when fewer than it needs
+    // (ObjectiveCompletionCount, else all of them) are done, "quest was not completed in a single match, clear all stats for
+    // this quest": its objectives' pending progress isn't saved. Epic's server saved Battle Royale's progress once, at the
+    // match's end, so that cleared a match's partial progress. Core saves it during the match (SendStatEventWithTagsHK), so
+    // such progress is held back here instead, not sent, and stays pending, which the client shows, until the quest is
+    // completed; the match's server goes with its quest managers, which clears what never completed. Returns the held
+    // back progress, which the caller puts back once the rest is sent.
+    std::vector<std::pair<std::wstring, int32_t>> UpdateStatsForSingleMatchQuests(UFortQuestManager* QuestManager)
+    {
+        std::vector<std::pair<std::wstring, int32_t>> Held;
+        if (!UFortQuestItemDefinitionObjectives::HasSingleMatch())
+        {
+            return Held;
+        }
+        const TArray<UFortQuestItem*>& Quests = QuestManager->CurrentQuests;
+        for (int32_t QuestIndex = 0; QuestIndex < Quests.Num(); ++QuestIndex)
+        {
+            UFortQuestItem* Quest = Quests[QuestIndex];
+            UFortQuestItemDefinitionObjectives* Definition = Quest && Quest->quest_state == EFortQuestState::GetActive() ? Cast<UFortQuestItemDefinitionObjectives>(Quest->GetQuestDefinition()) : nullptr;
+            if (!Definition || !static_cast<bool>(Definition->bAthenaMustCompleteInSingleMatch))
+            {
+                continue;
+            }
+            TStructArray<FFortMcpQuestObjectiveInfo>& Objectives = Definition->Objectives;
+            const int32_t CompletionCount = UFortQuestItemDefinitionObjectives::HasObjectiveCompletionCount() ? static_cast<int32_t>(Definition->ObjectiveCompletionCount) : 0;
+            const int32_t Needed = CompletionCount > 0 ? CompletionCount : Objectives.Num();
+            int32_t Completed = 0;
+            bool bHasPending = false;
+            for (int32_t Index = 0; Index < Objectives.Num(); ++Index)
+            {
+                const FFortQuestObjectiveCompletion* Entry = FindPending(QuestManager, static_cast<FName>(Objectives[Index].BackendName).ToString().ToStdString());
+                bHasPending |= Entry != nullptr;
+                Completed += Entry && Entry->Count >= static_cast<int32_t>(Objectives[Index].Count) ? 1 : 0;
+            }
+            if (!bHasPending || Completed >= Needed)
+            {
+                continue;
+            }
+            Log::Info(L"UFortQuestManager::UpdateStatsForSingleMatchQuests: {} quest is not completed in this match ({} of {} objectives), its stats are held back",
+                Definition->GetName().ToStdString(), Completed, Needed);
+            TStructArray<FFortQuestObjectiveCompletion>& Pending = QuestManager->PendingChanges;
+            for (int32_t Index = 0; Index < Objectives.Num(); ++Index)
+            {
+                const std::wstring StatName = static_cast<FName>(Objectives[Index].BackendName).ToString().ToStdString();
+                for (int32_t PendingIndex = Pending.Num() - 1; PendingIndex >= 0; --PendingIndex)
+                {
+                    if (EqualsIgnoreCase(static_cast<FString&>(Pending[PendingIndex].StatName).ToStdString(), StatName))
+                    {
+                        Held.emplace_back(StatName, static_cast<int32_t>(Pending[PendingIndex].Count));
+                        Pending.RemoveAt(PendingIndex);
+                    }
+                }
+            }
+        }
+        return Held;
+    }
+
+    void RestoreHeldStats(UFortQuestManager* QuestManager, const std::vector<std::pair<std::wstring, int32_t>>& Held)
+    {
+        for (const auto& [StatName, Count] : Held)
+        {
+            FFortQuestObjectiveCompletion& Entry = AddPending(QuestManager, StatName);
+            Entry.Count = Entry.Count + Count;
+        }
+    }
+
     // The profile answered an UpdateQuests (1.9.1 0x8BF800): the request is done, and when it failed its progress is
     // pending again.
     void OnStatEventsSaved(UObject* Object, const void* Result)
@@ -768,6 +852,13 @@ namespace
             Log::Warning(L"SaveStatEvents for {}: no profile is bound, the progress stays pending", QuestManager->GetName().ToStdString());
             return;
         }
+        // As ProcessPendingStatEvents (3.0 0xEC9030) does first.
+        const std::vector<std::pair<std::wstring, int32_t>> Held = UpdateStatsForSingleMatchQuests(QuestManager);
+        if (Pending.Num() == 0)
+        {
+            RestoreHeldStats(QuestManager, Held);
+            return;
+        }
 
         std::vector<std::pair<std::wstring, int32_t>> Request;
         std::wstring Text;
@@ -796,6 +887,7 @@ namespace
             }
             Log::Error(L"SaveStatEvents for {}: UpdateQuests couldn't be sent", QuestManager->GetName().ToStdString());
         }
+        RestoreHeldStats(QuestManager, Held);
     }
 
     // 1.9.1 0x8CAC40 (SendStatEventWithTags): every active quest's objectives of its current stage that listen to the
@@ -883,7 +975,7 @@ namespace
                     {
                         if (!Conditions)
                         {
-                            Conditions = MakeConditionContext(TargetObject, PlayerController);
+                            Conditions = MakeConditionContext(TargetObject, PlayerController, SourceTags, TargetTags);
                         }
                         const std::wstring ConditionText = Condition.ToStdString();
                         FConditionEvaluator Evaluator(ConditionText, *Conditions);

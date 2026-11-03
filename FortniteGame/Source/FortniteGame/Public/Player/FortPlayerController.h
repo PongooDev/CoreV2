@@ -163,6 +163,8 @@ public:
     void FortClientPlaySoundAtLocation(UObject* Sound, const FVector& Location, float VolumeMultiplier, float PitchMultiplier);
     // Emotes (FortPlayerControllerEmote.cpp): 1.9 strips the emote RPC's play body; Core's follows 1.8.2's.
     void ServerPlayEmoteItem_Implementation(UFortMontageItemDefinitionBase* EmoteAsset);
+    // 3.0: the dance's EFortQuestObjectiveStatEvent::Emote, which the stripped play body sent.
+    void SendEmoteStatEvent(UFortMontageItemDefinitionBase* EmoteAsset);
     // Save the World's emotes (/dance, the emote wheel): 1.9 strips ServerEmote's load callback; Core's plays the emote.
     void ServerEmote_Implementation(const FName& AssetName);
     bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);

@@ -3,6 +3,7 @@
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
+#include "Configuration.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
 #include "Finder.h"
@@ -15,6 +16,7 @@
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Pawns/FortPlayerPawn.h"
+#include "Quests/FortQuestManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
@@ -92,10 +94,37 @@ void AFortPlayerController::ServerPlayEmoteItem_Implementation(UFortMontageItemD
     if (Handle.IsValid())
     {
         Log::Info(L"Emote: {} plays {}", GetName().ToStdString(), EmoteAsset->GetName().ToStdString());
+        SendEmoteStatEvent(EmoteAsset);
     }
     else
     {
         Log::Warning(L"Emote: {} couldn't play {} ({} wasn't given)", GetName().ToStdString(), EmoteAsset->GetName().ToStdString(), AbilityClass->GetName().ToStdString());
+    }
+#endif
+}
+
+// 3.0 (CL-3901517) adds EFortQuestObjectiveStatEvent::Emote, which Season 3's "Dance on top of" challenges count
+// (dance_location_forbidden_01: an Emote event whose source tags have Athena.Location.Quest.Dance.Forbidden.01, the tag
+// AFortPoiVolume::CheckPawnOverlap, 0x9D9A70, gives the pawn inside that volume). No sender of it is left in 3.0: its
+// native stat event senders (the calls to the quest manager's stripped typed SendStatEvent, through
+// AFortPlayerController::GetQuestManager's slot +0x1710) send Interact, Visit, Land, Damage, kills and WaveComplete only,
+// and GAB_Emote_Generic sends nothing. It went with the stripped play body above, so the dance is sent here, as the
+// other senders send theirs: the current sub game's quest manager (GetQuestManager(ESubGame::Invalid), Battle Royale's
+// in Battle Royale), the emote as the target with its tags, the player's source and context tags, once.
+void AFortPlayerController::SendEmoteStatEvent(UFortMontageItemDefinitionBase* EmoteAsset)
+{
+#if WITH_SERVER_CODE
+    // Looked up by name: builds before 3.0 have no Emote event.
+    const EFortQuestObjectiveStatEvent Emote{ EFortQuestObjectiveStatEvent::StaticEnumInfo().FindValue(L"Emote") };
+    UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
+    if (static_cast<uint8_t>(Emote) == Reflection::InvalidEnumValue || !PlayerInfo)
+    {
+        return;
+    }
+    UFortQuestManager* QuestManager = Configuration::Get().IsBattleRoyale() ? PlayerInfo->GetAthenaQuestManager() : PlayerInfo->GetCampaignQuestManager();
+    if (QuestManager)
+    {
+        QuestManager->SendItemStatEvent(Emote, EmoteAsset, 1);
     }
 #endif
 }

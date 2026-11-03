@@ -215,8 +215,14 @@ bool AFortGameModeAthena::AddPlaylistContextTag(FGameplayTagContainer& Tags)
     const int32_t PlaylistId = CurrentPlaylistId;
     static const wchar_t* const EventNames[] = { L"Athena.Playlist.Event.5", L"Athena.Playlist.Event.2", L"Athena.Playlist.Event.3", L"Athena.Playlist.Event.1",
         L"Athena.Playlist.Event.6", L"Athena.Playlist.Event.4", L"Athena.Playlist.Event.7", L"Athena.Playlist.Event.8" };
+    // 3.0's queues past AthenaEvent8 play their own playlist: the button's switch (3.0 0xD660F0) gives AthenaEvent<N>
+    // playlist N from 21 to 54, so playlist N's matches are queue N's, Athena.Playlist.Event.<N>, as Playlist_5x20's
+    // AthenaPlaylistTag has it (PlaylistId 22) and the quests count them (athenaevent27_playmatches:
+    // complete_athena_event_27, Solid Gold's playlist 27).
+    const std::wstring QueueName = PlaylistId >= 21 && PlaylistId <= 54 ? std::format(L"Athena.Playlist.Event.{}", PlaylistId) : std::wstring();
     const wchar_t* const Name = PlaylistId == 2 ? L"Athena.Playlist.Solo" : PlaylistId == 10 ? L"Athena.Playlist.Duo" : PlaylistId == 9 ? L"Athena.Playlist.Squad"
-        : PlaylistId == 11 ? L"Athena.Playlist.FiftyFifty" : PlaylistId >= 12 && PlaylistId <= 19 ? EventNames[PlaylistId - 12] : L"Athena.Playlist";
+        : PlaylistId == 11 ? L"Athena.Playlist.FiftyFifty" : PlaylistId >= 12 && PlaylistId <= 19 ? EventNames[PlaylistId - 12]
+        : !QueueName.empty() && !FName(QueueName.c_str(), FNAME_Find).IsNone() ? QueueName.c_str() : L"Athena.Playlist";
     const FGameplayTag Tag{ FName(Name) };
     if (Tags.GameplayTags.Contains(Tag))
     {

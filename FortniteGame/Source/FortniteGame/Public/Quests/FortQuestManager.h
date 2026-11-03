@@ -166,6 +166,10 @@ public:
     DefineUProperty(UFortMcpProfileWorld*, WorldProfile)
     DefineUProperty(UFortQuestManager*, QuestManager)
     DefineUProperty(UFortHero*, AthenaMenuHeroDef)
+    DefineUFunction(GetAbilitySystemComponent)
+
+    // The account's ability system, which holds its homebase stats (UFortHomebaseSet).
+    class UAbilitySystemComponent* GetAbilitySystemComponent() const;
 
 private:
     // 1.8: a quest manager per sub game (ESubGame: Campaign 0, Athena 1) instead of QuestManager. A TMap can't be copied,

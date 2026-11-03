@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Player/FortPlayerControllerOutpost.h"
+#include "Abilities/FortHomebaseSet.h"
+#include "AbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameModeZone.h"
@@ -50,18 +52,52 @@ namespace
         DefineUFunction(GetOutpostBuildingItemDefinition)
 
     public:
+        // 2.4.2 dropped the storage vault's and the fabricator's Blueprint functions from this library (#223). The storage
+        // vault ones are restored as 2.4 has them: the capacity is the account's StorageInventorySizeBonus (0x7E7BD0), the
+        // item count the outpost inventory's (0x7E7D80).
         static int32_t GetStorageVaultCapacity(AFortPlayerControllerOutpost* Player)
         {
-            Reflection::FParams Params(StaticFunction_GetStorageVaultCapacity());
-            Params.Set(L"Player", Player);
-            return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<int32_t>(L"ReturnValue") : 0;
+            if (FindStaticFunction_GetStorageVaultCapacity())
+            {
+                Reflection::FParams Params(StaticFunction_GetStorageVaultCapacity());
+                Params.Set(L"Player", Player);
+                return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<int32_t>(L"ReturnValue") : 0;
+            }
+
+            UFortRegisteredPlayerInfo* PlayerInfo = Player ? static_cast<UFortRegisteredPlayerInfo*>(Player->MyPlayerInfo) : nullptr;
+            UAbilitySystemComponent* AbilitySystemComponent = PlayerInfo ? PlayerInfo->GetAbilitySystemComponent() : nullptr;
+            UFortHomebaseSet* HomebaseSet = AbilitySystemComponent ? const_cast<UFortHomebaseSet*>(AbilitySystemComponent->GetSet<UFortHomebaseSet>()) : nullptr;
+            if (!HomebaseSet)
+            {
+                return 0;
+            }
+            FFortGameplayAttributeData& StorageInventorySizeBonus = HomebaseSet->StorageInventorySizeBonus;
+            return static_cast<int32_t>(StorageInventorySizeBonus.GetCurrentValue());
         }
 
         static int32_t GetStorageVaultNumItems(AFortPlayerControllerOutpost* Player)
         {
-            Reflection::FParams Params(StaticFunction_GetStorageVaultNumItems());
-            Params.Set(L"Player", Player);
-            return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<int32_t>(L"ReturnValue") : -1;
+            if (FindStaticFunction_GetStorageVaultNumItems())
+            {
+                Reflection::FParams Params(StaticFunction_GetStorageVaultNumItems());
+                Params.Set(L"Player", Player);
+                return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<int32_t>(L"ReturnValue") : -1;
+            }
+
+            AFortInventory* OutpostInventory = Player ? Player->OutpostInventory : nullptr;
+            if (!OutpostInventory)
+            {
+                return -1;
+            }
+            FFortItemList& ItemList = OutpostInventory->Inventory;
+            TArray<UFortWorldItem*>& ItemInstances = ItemList.ItemInstances;
+            return ItemInstances.Num();
+        }
+
+        // The fabricator left the game with them; its RPCs then do nothing.
+        static bool HasFabricator()
+        {
+            return FindStaticFunction_FabricatorCanDisintegrateItem() && FindStaticFunction_GetGooRequiredToFabricateItem() && FindStaticFunction_GetFabricatorStoredGooAmount() && FindStaticFunction_GetFabricatorRecipes();
         }
 
         static int32_t FabricatorCanDisintegrateItem(AFortPlayerControllerOutpost* FortPC, UFortWorldItem* Item, int32_t Count)
@@ -198,9 +234,9 @@ void AFortPlayerControllerOutpost::ServerDisintegrateItem_Implementation(const F
 {
 #if WITH_SERVER_CODE
     AFortInventory* Inventory = WorldInventory;
-    UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+    UFortWorldItem* WorldItem = Inventory && UFortOutpostFunctionLibrary::HasFabricator() ? Inventory->FindWorldItem(ItemGuid) : nullptr;
     UFortMcpProfileWorld* Profile = WorldProfileOf(this);
-    const int32_t Allowed = WorldItem ? UFortOutpostFunctionLibrary::FabricatorCanDisintegrateItem(this, WorldItem, Count) : 0;
+    const int32_t Allowed = WorldItem ?UFortOutpostFunctionLibrary::FabricatorCanDisintegrateItem(this, WorldItem, Count) : 0;
     if (!Profile || Allowed <= 0)
     {
         return;
@@ -219,7 +255,7 @@ void AFortPlayerControllerOutpost::ServerFabricateItem_Implementation(const UFor
 #if WITH_SERVER_CODE
     UFortMcpProfileWorld* Profile = WorldProfileOf(this);
     UFortWorldItemDefinition* PendingItem = ItemPendingToFabricate;
-    if (!ItemDef || !Profile || PendingItem)
+    if (!ItemDef || !Profile || PendingItem || !UFortOutpostFunctionLibrary::HasFabricator())
     {
         return;
     }

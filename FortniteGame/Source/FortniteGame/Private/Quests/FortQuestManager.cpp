@@ -1168,3 +1168,9 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
 #endif
 }
+
+UAbilitySystemComponent* UFortRegisteredPlayerInfo::GetAbilitySystemComponent() const
+{
+    Reflection::FParams Params(StaticFunction_GetAbilitySystemComponent());
+    return Params.Call(const_cast<UFortRegisteredPlayerInfo*>(this)) ? Params.Take<UAbilitySystemComponent*>(L"ReturnValue") : nullptr;
+}

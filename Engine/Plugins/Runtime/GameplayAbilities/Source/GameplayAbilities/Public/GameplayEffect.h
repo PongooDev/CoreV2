@@ -25,6 +25,9 @@ struct FScalableFloat
     DefineUnrealStruct(FScalableFloat, GameplayAbilities)
     DefineUProperty(float, Value)
     DefineUStructProperty(FCurveTableRowHandle, Curve)
+
+    // Value, scaled by its curve table row at Level when it has one (Value alone when the row is missing).
+    float GetValueAtLevel(float Level) const;
 };
 
 struct FGameplayEffectModifierMagnitude

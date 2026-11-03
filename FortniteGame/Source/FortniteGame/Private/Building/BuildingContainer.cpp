@@ -431,7 +431,8 @@ void ABuildingContainer::PostUpdate(EFortBuildingPersistentState State, FFortBui
 bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
 {
 #if WITH_SERVER_CODE
-    if (Role < ROLE_Authority || !Looter)
+    // A destroyed container (Battle Royale's chests and ammo boxes the match doesn't spawn, #205) has nothing to search.
+    if (Role < ROLE_Authority || !Looter || bDestroyed)
     {
         return false;
     }

@@ -115,6 +115,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     if (AFortGameModeAthena* Athena = Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(this)))
     {
         AFortGameMode::FinishWorldInitialization(WorldManager);
+        Athena->ApplyContainerSpawnPercents();
         ABuildingContainer::LogWorldContainers(GetWorld());
         Athena->WatchMatchResults();
         Athena->WatchWarmup();

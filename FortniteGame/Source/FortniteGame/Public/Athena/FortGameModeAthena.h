@@ -56,6 +56,9 @@ public:
     // filled it (AFortPlayerControllerAthena's override calls it; 1.9.1 and 1.10 strip it).
     void ModifyDeathReport(AFortPlayerControllerAthena* Player, FFortPlayerDeathReport& DeathReport);
 
+    // Removes the placed chests and ammo boxes this match doesn't keep, from the map info's spawn percents (#205).
+    void ApplyContainerSpawnPercents();
+
     // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,
     // for Battle Royale's stats (Core-Backend #59), as long as the game mode is there.
     void WatchMatchResults();

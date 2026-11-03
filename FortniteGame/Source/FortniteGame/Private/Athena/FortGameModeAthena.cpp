@@ -1,6 +1,10 @@
 #include "pch.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortAthenaAircraft.h"
+#include "Athena/FortAthenaMapInfo.h"
+#include "Building/BuildingContainer.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
@@ -84,6 +88,101 @@ AFortGameModeAthena* AFortGameModeAthena::GetCurrent(const UObject* WorldContext
 {
     UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
     return World ? Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+}
+
+namespace
+{
+    AFortAthenaMapInfo* FindMapInfo(UWorld* World)
+    {
+        AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        if (GameState && static_cast<AFortAthenaMapInfo*>(GameState->MapInfo))
+        {
+            return GameState->MapInfo;
+        }
+        // Core runs before AFortGameModeAthena's own FinishWorldInitialization, which sets MapInfo: take the placed one.
+        for (TObjectIterator<AFortAthenaMapInfo> It; It; ++It)
+        {
+            AFortAthenaMapInfo* MapInfo = *It;
+            if (MapInfo->GetWorld() == World && !MapInfo->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)))
+            {
+                return MapInfo;
+            }
+        }
+        return nullptr;
+    }
+
+    // Keeps a share of the world's placed ContainerClass between the two spawn percents, picked at random once a match,
+    // and destroys the rest, picked at random. The rows' units differ: AthenaGameData's Default.TreasureChest rows are
+    // percents (50 and 70) and its Default.AmmoBox rows fractions (0.65 and 0.8), so a value over 1 is read as a percent.
+    void ApplySpawnPercent(UWorld* World, UClass* ContainerClass, const FScalableFloat& MinSpawnPercent, const FScalableFloat& MaxSpawnPercent, const wchar_t* What)
+    {
+        if (!ContainerClass)
+        {
+            Log::Info(L"Battle Royale: the map info has no {} class, every placed one spawns", What);
+            return;
+        }
+        const auto ToFraction = [](float Percent) { return FMath::Clamp(Percent > 1.0f ? Percent / 100.0f : Percent, 0.0f, 1.0f); };
+        const float MinFraction = ToFraction(MinSpawnPercent.GetValueAtLevel(0.0f));
+        const float MaxFraction = ToFraction(MaxSpawnPercent.GetValueAtLevel(0.0f));
+        const float SpawnFraction = MinFraction + (std::max(MaxFraction, MinFraction) - MinFraction) * FMath::FRand();
+
+        std::vector<ABuildingContainer*> Containers;
+        for (TObjectIterator<ABuildingContainer> It; It; ++It)
+        {
+            ABuildingContainer* Container = *It;
+            if (Container->GetWorld() == World && !Container->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)) && Container->IsA(ContainerClass) && !Container->bDestroyed)
+            {
+                Containers.push_back(Container);
+            }
+        }
+        const int32_t Placed = static_cast<int32_t>(Containers.size());
+        const int32_t Kept = static_cast<int32_t>(std::lround(static_cast<float>(Placed) * SpawnFraction));
+        for (int32_t Index = Placed - 1; Index > 0; --Index)
+        {
+            std::swap(Containers[Index], Containers[FMath::Rand() % (Index + 1)]);
+        }
+        // ABuildingActor's K2_DestroyActor override kills the building (bDestroyed, hidden; it replicates) rather than
+        // destroying the actor. It has no loot tier from then on, as a container that rolled no loot.
+        int32_t Destroyed = 0;
+        for (int32_t Index = Kept; Index < Placed; ++Index)
+        {
+            ABuildingContainer* Container = Containers[Index];
+            Container->K2_DestroyActor();
+            if (Container->bDestroyed)
+            {
+                Container->ContainerLootTierKey = FName();
+                ++Destroyed;
+            }
+        }
+        Log::Info(L"Battle Royale: {} of {} {} spawn ({:.0f}%, spawn percents {:.0f}-{:.0f}%), {} destroyed", Placed - Destroyed, Placed, What, SpawnFraction * 100.0f, MinFraction * 100.0f, MaxFraction * 100.0f, Destroyed);
+    }
+}
+
+void AFortGameModeAthena::ApplyContainerSpawnPercents()
+{
+#if WITH_SERVER_CODE
+    // AFortAthenaMapInfo's TreasureChestClass and AmmoBoxClass with their Min/MaxSpawnPercent (from 1.7.2). The code that
+    // read them is server-only and no client build has it (Core-Docs Athena-Gameplay-1.7.2.md §2.4), so every placed chest
+    // spawned: on Epic's servers 50 to 70% of them did (#205).
+    if (FParse::Param(FCommandLine::Get(), L"SpawnAllLoot"))
+    {
+        return;
+    }
+    UWorld* World = GetWorld();
+    AFortAthenaMapInfo* MapInfo = AFortAthenaMapInfo::StaticClass() ? FindMapInfo(World) : nullptr;
+    if (!MapInfo)
+    {
+        return;
+    }
+    if (AFortAthenaMapInfo::HasTreasureChestSpawnPercent())
+    {
+        ApplySpawnPercent(World, MapInfo->TreasureChestClass, MapInfo->TreasureChestMinSpawnPercent, MapInfo->TreasureChestMaxSpawnPercent, L"treasure chests");
+    }
+    if (AFortAthenaMapInfo::HasAmmoBoxSpawnPercent())
+    {
+        ApplySpawnPercent(World, MapInfo->AmmoBoxClass, MapInfo->AmmoBoxMinSpawnPercent, MapInfo->AmmoBoxMaxSpawnPercent, L"ammo boxes");
+    }
+#endif
 }
 
 FName AFortGameModeAthena::RedirectLootTierGroup(FName TierGroup)

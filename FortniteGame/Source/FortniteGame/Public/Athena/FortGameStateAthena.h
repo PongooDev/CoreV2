@@ -2,6 +2,8 @@
 
 #include "FortGameState.h"
 
+class AFortAthenaMapInfo;
+
 class EAthenaGamePhase
 {
     DefineUnrealEnum(EAthenaGamePhase, FortniteGame)
@@ -31,6 +33,9 @@ public:
     // (UpdateWarmupPhase, 1.9 0x43D9A0, the end -1 until then), and the bus leaves at the end.
     DefineUProperty(float, WarmupCountdownStartTime)
     DefineUProperty(float, WarmupCountdownEndTime)
+
+    // The map's AFortAthenaMapInfo, set by AFortGameModeAthena's own FinishWorldInitialization (1.7.2 0x3CF860).
+    DefineUProperty(AFortAthenaMapInfo*, MapInfo)
 
     static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
 };

@@ -632,6 +632,8 @@ namespace Natives
     inline ptrdiff_t UChannel_NumOutRec = -1;
     inline ptrdiff_t UActorChannel_RelevantTime = -1;
     inline ptrdiff_t UActorChannel_LastUpdateTime = -1;
+    // 3.0: UActorChannel::LastUpdateTime is a TMap<TWeakObjectPtr<AActor>, double> on the connection instead.
+    inline ptrdiff_t UNetConnection_LastUpdateTimes = -1;
     inline ptrdiff_t UActorChannel_Bits = -1;
     inline ptrdiff_t FObjectReplicator_OwningChannel = -1;
     inline ptrdiff_t AActor_NetDormancy = -1;

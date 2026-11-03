@@ -1756,7 +1756,7 @@ namespace
     bool HasEveryConnectionSentScale(AActor* Actor, double ChangedAt, int32_t* Viewers = nullptr, int32_t* Sent = nullptr)
     {
         UNetDriver* NetDriver = GetGameNetDriver(Actor);
-        if (!NetDriver || Natives::UNetConnection_ActorChannels < 0 || Natives::UActorChannel_LastUpdateTime < 0 || Natives::UChannel_NumOutRec < 0)
+        if (!NetDriver || Natives::UNetConnection_ActorChannels < 0 || !UActorChannel::HasLastUpdateTime() || Natives::UChannel_NumOutRec < 0)
         {
             return true;
         }

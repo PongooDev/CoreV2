@@ -69,6 +69,9 @@ public:
     using FActorChannelMap = TMap<TWeakObjectPtr<AActor>, UActorChannel*>;
     using FDormantReplicatorMap = TMap<TWeakObjectPtr<UObject>, TSharedPtr<FObjectReplicator>>;
     DefineNativeObject(FActorChannelMap, ActorChannels, UNetConnection_ActorChannels)
+    // 3.0: each actor's last replication time, which UActorChannel::ReplicateActor stores here instead of on the channel.
+    using FLastUpdateTimeMap = TMap<TWeakObjectPtr<AActor>, double>;
+    DefineNativeObject(FLastUpdateTimeMap, LastUpdateTimes, UNetConnection_LastUpdateTimes)
     DefineNativeObject(FDormantReplicatorMap, DormantReplicatorMap, UNetConnection_DormantReplicatorMap)
     DefineNativeObject(TSet<FNetworkGUID>, DestroyedStartupOrDormantActors, UNetConnection_DestroyedStartupOrDormantActors)
     DefineNativeMember(FName, ClientWorldPackageName, UNetConnection_ClientWorldPackageName)

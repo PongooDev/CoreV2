@@ -43,6 +43,18 @@ int32_t UChannel::IsNetReady(bool Saturate)
     return Connection->IsNetReady(Saturate);
 }
 
+double UActorChannel::GetLastUpdateTime() const
+{
+    if (Natives::UActorChannel_LastUpdateTime >= 0)
+    {
+        return *reinterpret_cast<const double*>(reinterpret_cast<uintptr_t>(this) + Natives::UActorChannel_LastUpdateTime);
+    }
+    UActorChannel* This = const_cast<UActorChannel*>(this);
+    UNetConnection* ChannelConnection = This->Connection;
+    AActor* ChannelActor = This->Actor;
+    return ChannelConnection && ChannelActor && Natives::UNetConnection_LastUpdateTimes >= 0 ? ChannelConnection->LastUpdateTimes.FindRef(ChannelActor) : 0.0;
+}
+
 bool UActorChannel::ReplicateActor()
 {
     return Natives::UActorChannel_ReplicateActor(this);

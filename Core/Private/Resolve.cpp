@@ -606,7 +606,10 @@ namespace
             const uintptr_t Jump = Previous + 6;
             const uintptr_t Test = Finder::Unthunk(Jump);
             const bool bJcc = IsInText(Test) && (Byte(Test + 2) == 0x74 || Byte(Test + 2) == 0x75 || (Byte(Test + 2) == 0x0F && (Byte(Test + 3) == 0x84 || Byte(Test + 3) == 0x85)));
-            const bool bTest = (bJcc || IsInMovedCode(Test)) && Byte(Test) == 0x84 && Byte(Test + 1) == 0xC0;
+            // On 3.0 the test is in the first .text (0x59EF29) and its branch is a jmp into the second section, where
+            // a cmov picks the address to go to.
+            const bool bMovedBranch = IsInText(Test) && (Byte(Test + 2) == 0xE9 || Byte(Test + 2) == 0xEB) && IsInMovedCode(Finder::Unthunk(Test + 2));
+            const bool bTest = (bJcc || bMovedBranch || IsInMovedCode(Test)) && Byte(Test) == 0x84 && Byte(Test + 1) == 0xC0;
             if (bTest)
             {
                 Found = Site;
@@ -2320,8 +2323,46 @@ namespace
                 ++LastUpdateStores;
             }
         }
-        RequireOffset(L"UActorChannel::LastUpdateTime", Natives::UActorChannel_LastUpdateTime, LastUpdateStores == 1 ? LastUpdateTime : 0);
-        RequireOffset(L"UActorChannel::RelevantTime", Natives::UActorChannel_RelevantTime, LastUpdateStores == 1 ? LastUpdateTime - static_cast<ptrdiff_t>(sizeof(double)) : 0);
+        // 3.0 moved LastUpdateTime off the channel (UActorChannel lost a double before its bits) into a map on the
+        // connection, TMap<TWeakObjectPtr<AActor>, double> at +0x1860: ReplicateActor (3.0 0x1FDAE90) finds or adds the
+        // actor's entry (lea rcx, [conn+map]; call FindId / Emplace), loads the map's data (mov rax, [conn+map]) and
+        // stores Driver->Time into the value (movsd [rdx], xmm0). RelevantTime is still the double before the bits.
+        ptrdiff_t LastUpdateTimes = 0;
+        int32_t LastUpdateTimesStores = 0;
+        const std::initializer_list<int32_t> MapTimeStore = { 0x0F, 0x5A, 0xC0, 0xF2, 0x0F, 0x11, -1 };
+        for (uintptr_t Store = LastUpdateStores == 0 && ReplicateActorEnd ? FindInstruction(ReplicateActor, ReplicateActorEnd, MapTimeStore) : 0; Store; Store = FindInstruction(Store + 1, ReplicateActorEnd, MapTimeStore))
+        {
+            if ((Byte(Store + 6) & 0xC0) != 0x00 || (Byte(Store + 6) & 0x07) == 0x04 || (Byte(Store + 6) & 0x07) == 0x05)
+            {
+                continue;
+            }
+            ptrdiff_t MapOffset = 0;
+            const std::initializer_list<int32_t> LoadData = { 0x48, 0x8B, -1, -1, -1, 0x00, 0x00 };
+            for (uintptr_t Load = FindInstruction(Store - 0x30, Store, LoadData); Load; Load = FindInstruction(Load + 1, Store, LoadData))
+            {
+                if ((Byte(Load + 2) & 0xF8) == 0x80 && (Byte(Load + 2) & 0x07) != 0x04)
+                {
+                    MapOffset = *reinterpret_cast<const int32_t*>(Load + 3);
+                }
+            }
+            const uintptr_t MapLea = MapOffset > 0 ? FindInstruction(Store - 0x90, Store, { 0x48, 0x8D, -1, static_cast<int32_t>(MapOffset & 0xFF), static_cast<int32_t>((MapOffset >> 8) & 0xFF), 0x00, 0x00 }) : 0;
+            if (MapLea && (Byte(MapLea + 2) & 0xF8) == 0x88)
+            {
+                LastUpdateTimes = MapOffset;
+                ++LastUpdateTimesStores;
+            }
+        }
+        if (LastUpdateStores == 0 && LastUpdateTimesStores == 1)
+        {
+            RequireOffset(L"UNetConnection::LastUpdateTimes", Natives::UNetConnection_LastUpdateTimes, LastUpdateTimes);
+            RequireOffset(L"UActorChannel::RelevantTime", Natives::UActorChannel_RelevantTime, Natives::UActorChannel_Bits > 0 ? Natives::UActorChannel_Bits - static_cast<ptrdiff_t>(sizeof(double)) : 0);
+            Log::Info(L"Finder: UActorChannel::LastUpdateTime is the connection's map at +0x{:X}, RelevantTime +0x{:X}", LastUpdateTimes, Natives::UActorChannel_RelevantTime);
+        }
+        else
+        {
+            RequireOffset(L"UActorChannel::LastUpdateTime", Natives::UActorChannel_LastUpdateTime, LastUpdateStores == 1 ? LastUpdateTime : 0);
+            RequireOffset(L"UActorChannel::RelevantTime", Natives::UActorChannel_RelevantTime, LastUpdateStores == 1 ? LastUpdateTime - static_cast<ptrdiff_t>(sizeof(double)) : 0);
+        }
 
         uintptr_t WorldSettings = 0;
         int32_t WorldSettingsCalls = 0;
@@ -2939,7 +2980,13 @@ namespace
             {
                 continue;
             }
-            const uintptr_t BitsRead = FindInstruction(Load + 7, Load + 0x30, { 0x44, 0x8B, 0x88, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 });
+            // mov r9d, [rax+Bits] up to 2.5, mov r8d on 3.0: any of r8d-r15d read from the channel just loaded.
+            const std::initializer_list<int32_t> ReadBits = { 0x44, 0x8B, -1, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 };
+            uintptr_t BitsRead = FindInstruction(Load + 7, Load + 0x30, ReadBits);
+            while (BitsRead && (Byte(BitsRead + 2) & 0xC7) != 0x80)
+            {
+                BitsRead = FindInstruction(BitsRead + 1, Load + 0x30, ReadBits);
+            }
             if (BitsRead)
             {
                 OwningChannel = *reinterpret_cast<const int32_t*>(Load + 3);
@@ -4980,9 +5027,11 @@ bool Finder::ResolveGoalDiscouragementLive()
 bool Finder::ResolveQuickBarFocusLive()
 {
     // The input binding names the action with a narrow string; the wide "SwitchQuickbar" copies are input-options text.
-    uintptr_t Handler = 0;
+    // 3.0 binds it twice (pressed 0xE49090, released 0xE48EB0); the swap is in the released one, 2.5's only binding.
+    std::vector<uintptr_t> Handlers;
     for (const uintptr_t Ref : Finder::StringRefs("SwitchQuickbar"))
     {
+        uintptr_t Handler = 0;
         for (uintptr_t Site = Ref - 1; Site + 0x20 > Ref && !Handler; --Site)
         {
             if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x05)
@@ -4990,31 +5039,42 @@ bool Finder::ResolveQuickBarFocusLive()
                 Handler = Finder::RelativeTarget(Site, 3, 7);
             }
         }
-        if (Handler)
+        if (Handler && std::find(Handlers.begin(), Handlers.end(), Handler) == Handlers.end())
         {
-            break;
+            Handlers.push_back(Handler);
         }
     }
 
-    const uintptr_t HandlerEnd = IsInText(Handler) ? Finder::FunctionEnd(Handler) : 0;
     // The handler's callee whose first three direct calls go to one function: AFortQuickBars::SwapQuickBarFocus, which
     // focuses through FocusSlot three times before anything else. (1.1 and 1.2 call the swap twice; 1.7.2 once.)
     uintptr_t Swap = 0;
     uintptr_t Focus = 0;
-    for (const auto& [Call, Target] : HandlerEnd > Handler ? Finder::DirectCalls(Handler, HandlerEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    for (const uintptr_t Handler : Handlers)
     {
-        const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
-        const auto TargetCalls = TargetEnd > Target ? Finder::DirectCalls(Target, TargetEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
-        if (TargetCalls.size() >= 3 && TargetCalls[0].second == TargetCalls[1].second && TargetCalls[1].second == TargetCalls[2].second)
+        const uintptr_t HandlerEnd = IsInText(Handler) ? Finder::FunctionEnd(Handler) : 0;
+        for (const auto& [Call, Target] : HandlerEnd > Handler ? Finder::DirectCalls(Handler, HandlerEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
         {
-            Swap = Target;
-            Focus = TargetCalls[0].second;
+            const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            const auto TargetCalls = TargetEnd > Target ? Finder::DirectCalls(Target, TargetEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+            // 3.0's swap (0xC77420) focuses through FocusSlot twice and then a virtual; its call passes (Primary, -1):
+            // or r8d, -1; xor edx, edx, as 2.5's does.
+            const bool bPrimaryNoOverride = Byte(Call - 6) == 0x41 && Byte(Call - 5) == 0x83 && Byte(Call - 4) == 0xC8 && Byte(Call - 3) == 0xFF && Byte(Call - 2) == 0x33 && Byte(Call - 1) == 0xD2;
+            const bool bTwoFocuses = TargetCalls.size() >= 2 && TargetCalls[0].second == TargetCalls[1].second;
+            if ((bTwoFocuses && TargetCalls.size() >= 3 && TargetCalls[1].second == TargetCalls[2].second) || (bTwoFocuses && bPrimaryNoOverride))
+            {
+                Swap = Target;
+                Focus = TargetCalls[0].second;
+                break;
+            }
+        }
+        if (Swap)
+        {
             break;
         }
     }
     if (!Swap || !Focus)
     {
-        Log::Error(L"Finder: AFortQuickBars quickbar focus swap not found (handler {}, swap {})", Handler != 0, Swap != 0);
+        Log::Error(L"Finder: AFortQuickBars quickbar focus swap not found (handlers {}, swap {})", Handlers.size(), Swap != 0);
         return false;
     }
     Natives::AFortQuickBars_SwapQuickBarFocus = reinterpret_cast<decltype(Natives::AFortQuickBars_SwapQuickBarFocus)>(Swap);
@@ -8676,7 +8736,8 @@ bool Finder::ResolveBuildingLootLive()
         bPostUpdateSelectsMeshSet |= Target == SelectMeshSet;
     }
 
-    // SpawnLoot: the first virtual call in the container's IFortInteractInterface::ServerOnAttemptInteract.
+    // SpawnLoot: the last virtual call in the container's IFortInteractInterface::ServerOnAttemptInteract, its only one up
+    // to 2.5. 3.0 (0xA3E4F0) first asks another virtual (slot 0x1A1) whether the pawn may search, then calls SpawnLoot.
     if (!Natives::UObject_GetInterfaceAddress)
     {
         ResolveSpottingLive(FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortSpottableActorInterface"));
@@ -8688,7 +8749,12 @@ bool Finder::ResolveBuildingLootLive()
     void* InteractAddress = ContainerDefault && InteractInterface && Natives::UObject_GetInterfaceAddress ? Natives::UObject_GetInterfaceAddress(ContainerDefault, InteractInterface) : nullptr;
     const uintptr_t AttemptInteract = InteractAddress && InteractSlot >= 0 ? VTableEntry(*reinterpret_cast<void***>(InteractAddress), InteractSlot) : 0;
     const uintptr_t AttemptInteractEnd = AttemptInteract ? Finder::FunctionEnd(AttemptInteract) : 0;
-    const int32_t SpawnLootIndex = AttemptInteractEnd ? VirtualSlot(FindVirtualCall(AttemptInteract, AttemptInteractEnd)) : -1;
+    uintptr_t SpawnLootCall = AttemptInteractEnd ? FindVirtualCall(AttemptInteract, AttemptInteractEnd) : 0;
+    for (uintptr_t Site = SpawnLootCall; Site; Site = FindVirtualCall(Site + 1, AttemptInteractEnd))
+    {
+        SpawnLootCall = Site;
+    }
+    const int32_t SpawnLootIndex = SpawnLootCall ? VirtualSlot(SpawnLootCall) : -1;
 
     // Three slots after SpawnLoot the container hides itself and records it as searched: lea r8d, [r9+4], then a tail jmp
     // (or call) to AFortWorldManager::UpdateActorRecord.
@@ -8768,8 +8834,9 @@ bool Finder::ResolveBuildingLootLive()
 
     if (!SelectMeshSet || SetMeshSetIndex < 0 || PostUpdateIndex < 0 || SpawnLootIndex < 0 || !UpdateActorRecord || PostLoadIndex < 0 || ModifyStatIndex < 0)
     {
-        Log::Error(L"Finder: building loot not found (SelectMeshSet {}, SetMeshSet {}, PostUpdate {}, SpawnLoot {}, UpdateActorRecord {}, PostLoad {}, ModifyStat {})",
-            SelectMeshSet != 0, SetMeshSetIndex, PostUpdateIndex, SpawnLootIndex, UpdateActorRecord != 0, PostLoadIndex, ModifyStatIndex);
+        Log::Error(L"Finder: building loot not found (SelectMeshSet {}, SetMeshSet {}, PostUpdate {}, SpawnLoot {}, UpdateActorRecord {}, PostLoad {}, ModifyStat {}; hide 0x{:X}, searched 0x{:X})",
+            SelectMeshSet != 0, SetMeshSetIndex, PostUpdateIndex, SpawnLootIndex, UpdateActorRecord != 0, PostLoadIndex, ModifyStatIndex,
+            HideContainer ? HideContainer - Finder::ImageBase() : 0, SearchedState ? SearchedState - Finder::ImageBase() : 0);
         return false;
     }
 

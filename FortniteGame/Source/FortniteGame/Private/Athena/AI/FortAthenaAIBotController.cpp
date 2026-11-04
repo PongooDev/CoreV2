@@ -2,7 +2,11 @@
 #include "Athena/AI/FortAthenaAIBotController.h"
 #include "AIController.h"
 #include "AbilitySystemComponent.h"
+#include "Abilities/FortPlayerAttrSet.h"
+#include "Athena/AI/AthenaNavSystem.h"
 #include "Athena/AI/FortServerBotManagerAthena.h"
+#include "Building/BuildingContainer.h"
+#include "Configuration.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
@@ -38,6 +42,117 @@ namespace
 {
     // EMovementMode: walking on the ground.
     constexpr uint8_t MoveWalking = 1;
+    // EFortMovementStyle.
+    constexpr uint8_t StyleRunning = 0;
+    constexpr uint8_t StyleSprinting = 3;
+    // EPathFollowingStatus::Idle.
+    constexpr uint8_t PathIdle = 0;
+
+    // Whether the game's own fire works for a weapon (1), doesn't (0), or isn't known yet (absent): learnt from the
+    // first shot with it, for every bot.
+    std::map<UFortWeaponItemDefinition*, int32_t> WeaponFireWorks;
+
+    // UMovementComponent::GetMaxSpeed (BlueprintPure): what the pawn's movement walks at now (Fortnite's movement
+    // component reads the pawn's movement set for its movement style).
+    float MaxSpeedOf(UCharacterMovementComponent* Movement)
+    {
+        static UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/Engine.MovementComponent:GetMaxSpeed");
+        Reflection::FParams Params(Function, true);
+        return Function && Movement && Params.Call(reinterpret_cast<UObject*>(Movement)) ? Params.Take<float>(L"ReturnValue") : -1.0f;
+    }
+
+    // A trace from Start to End hits something solid that isn't a pawn (the bot's own pawn is ignored).
+    bool IsBlocked(AFortPlayerPawnAthena* Pawn, const FVector& Start, const FVector& End)
+    {
+        FVector Hit;
+        UObject* HitActor = nullptr;
+        UObject* HitComponent = nullptr;
+        if (!UKismetSystemLibrary::LineTraceSingle(Pawn, Start, End, 0, false, true, Hit, HitActor, HitComponent))
+        {
+            return false;
+        }
+        return !(HitActor && Cast<APawn>(HitActor));
+    }
+
+    // A float of a struct (a data table row) by its property's name.
+    float* FloatOf(UStruct* Struct, void* Data, const wchar_t* Name)
+    {
+        UProperty* Property = Struct && Data ? Struct->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        return Property && Property->ElementSize == 4 && Property->GetClass()->GetName().ToStdString() == L"FloatProperty"
+            ? reinterpret_cast<float*>(static_cast<uint8_t*>(Data) + Property->GetOffset_ForInternal()) : nullptr;
+    }
+
+    // An attribute of an attribute set by its name.
+    FGameplayAttributeData* AttributeOf(UObject* Set, const wchar_t* Name)
+    {
+        UProperty* Property = Set ? Set->GetClass()->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        return Property ? reinterpret_cast<FGameplayAttributeData*>(reinterpret_cast<uint8_t*>(Set) + Property->GetOffset_ForInternal()) : nullptr;
+    }
+
+    // The pawn's movement attributes from its hero's stats row (FFortPlayerPawnStats: the hero's LegacyStatHandle,
+    // CharacterAttributesPlayer.PlayerLoadout_AthenaPlayer for Battle Royale's heroes), where they are still 0. A
+    // player's are initialised from it when their hero is applied; nothing does that for an AI controller's pawn, so its
+    // movement set's speeds stay 0, UFortMovementComp_Character::GetMaxSpeed (3.0 0xCAD090) returns 0 and the pawn
+    // creeps at the engine's analog minimum (~105 u/s: phase 1's speed).
+    int32_t InitializeMovementAttributes(AFortPlayerPawnAthena* Pawn, UObject* Hero)
+    {
+        UProperty* HandleProperty = Hero ? Hero->GetClass()->FindPropertyByName(FName(L"LegacyStatHandle", FNAME_Find)) : nullptr;
+        FDataTableRowHandle* Handle = HandleProperty ? reinterpret_cast<FDataTableRowHandle*>(reinterpret_cast<uint8_t*>(Hero) + HandleProperty->GetOffset_ForInternal()) : nullptr;
+        UDataTable* Table = Handle ? static_cast<UDataTable*>(Handle->DataTable) : nullptr;
+        FName RowName = Handle ? static_cast<FName>(Handle->RowName) : FName();
+        if (!Table)
+        {
+            static UDataTable* PlayerTable = LoadObject<UDataTable>(nullptr, L"/Game/Characters/Player/DataTables/CharacterAttributesPlayer.CharacterAttributesPlayer");
+            Table = PlayerTable;
+            RowName = FName(L"PlayerLoadout_AthenaPlayer");
+        }
+        uint8_t* Row = Table ? Table->FindRowUnchecked(RowName) : nullptr;
+        UScriptStruct* RowStruct = Row ? static_cast<UScriptStruct*>(Table->RowStruct) : nullptr;
+        if (!Row || !RowStruct)
+        {
+            return 0;
+        }
+        int32_t Written = 0;
+        const auto Init = [&](UObject* Set, const wchar_t* Attribute, const wchar_t* Stat)
+        {
+            FGameplayAttributeData* Data = AttributeOf(Set, Attribute);
+            const float* Value = FloatOf(RowStruct, Row, Stat);
+            if (Data && Value && *Value > 0.0f && Data->CurrentValue == 0.0f)
+            {
+                Data->BaseValue = *Value;
+                Data->CurrentValue = *Value;
+                ++Written;
+            }
+        };
+        UObject* MovementSet = reinterpret_cast<UObject*>(static_cast<UFortMovementSet*>(Pawn->MovementSet));
+        Init(MovementSet, L"WalkSpeed", L"SpeedWalk");
+        Init(MovementSet, L"RunSpeed", L"SpeedRun");
+        Init(MovementSet, L"SprintSpeed", L"SpeedSprint");
+        Init(MovementSet, L"CrouchedRunSpeed", L"SpeedCrouchedRun");
+        Init(MovementSet, L"CrouchedSprintSpeed", L"SpeedCrouchedSprint");
+        Init(MovementSet, L"BackwardSpeedMultiplier", L"SpeedBackwardsMultiplier");
+        if (FGameplayAttributeData* Multiplier = AttributeOf(MovementSet, L"SpeedMultiplier"); Multiplier && Multiplier->CurrentValue == 0.0f)
+        {
+            Multiplier->BaseValue = 1.0f;
+            Multiplier->CurrentValue = 1.0f;
+            ++Written;
+        }
+        UProperty* AdvancedProperty = reinterpret_cast<UObject*>(Pawn)->GetClass()->FindPropertyByName(FName(L"AdvancedMovementSet", FNAME_Find));
+        UObject* Advanced = AdvancedProperty ? *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(Pawn) + AdvancedProperty->GetOffset_ForInternal()) : nullptr;
+        for (const wchar_t* Name : { L"GroundFriction", L"BrakingDecelerationWalking", L"MaxAcceleration", L"BrakingFrictionFactor", L"JumpZVelocity", L"MinAnalogWalkSpeed" })
+        {
+            Init(Advanced, Name, Name);
+        }
+        return Written;
+    }
+
+    FVector RotateYaw(const FVector& Direction, float Degrees)
+    {
+        const float Radians = Degrees * (3.1415926535897932f / 180.0f);
+        const float C = std::cos(Radians);
+        const float S = std::sin(Radians);
+        return FVector(Direction.X * C - Direction.Y * S, Direction.X * S + Direction.Y * C, 0.0f);
+    }
 
     FVector LocationOf(const AActor* Actor)
     {
@@ -234,7 +349,26 @@ void AFortAthenaAIBotController::AssignDisplayName(const std::wstring& Name)
     State->PlayerName = FString(Name.c_str());
     if (APlayerState::HasPlayerNamePrivate())
     {
+        // From 1.9 the game keeps the name obfuscated in PlayerNamePrivate (APlayerState::SetPlayerName) and
+        // GetPlayerName (3.0 0x2259860, the player state's custom name) gives it back by shifting each character up by
+        // ((Len % 4 * 3 % 8 + 1 + Index) * 3 % 8), so the stored name is shifted down by as much (a plain one comes back
+        // garbled: phase 1's kill feed showed "Hlr|fv" for Clover). Checked against GetPlayerName, plain if that differs.
         State->PlayerNamePrivate = FString(Name.c_str());
+        if (State->GetPlayerName().ToStdString() != Name)
+        {
+            std::wstring Encoded = Name;
+            const int32_t Length = static_cast<int32_t>(Encoded.size());
+            for (int32_t Index = 0; Index < Length; ++Index)
+            {
+                Encoded[static_cast<size_t>(Index)] = static_cast<wchar_t>(Encoded[static_cast<size_t>(Index)] - (Length % 4 * 3 % 8 + 1 + Index) * 3 % 8);
+            }
+            State->PlayerNamePrivate = FString(Encoded.c_str());
+            if (State->GetPlayerName().ToStdString() != Name)
+            {
+                Log::Warning(L"Battle Royale bots: {}'s name reads back as {}", Name, State->GetPlayerName().ToStdString());
+                State->PlayerNamePrivate = FString(Name.c_str());
+            }
+        }
     }
     State->bIsABot = true;
     State->TeamIndex = EFortTeam{ Team };
@@ -276,10 +410,12 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
 
     // The bot's look (8.30: its customization loadout): a default outfit, glider and pickaxe, on the pawn (its loadout
     // replicates: OnRep_CustomizationLoadout) and the player state (the outfit's hero gives it its character parts).
+    UObject* HeroObject = nullptr;
     if (Pawn->HasCustomizationLoadout())
     {
         FFortAthenaLoadout& Loadout = Pawn->CustomizationLoadout;
         UAthenaCharacterItemDefinition* Character = RandomCharacter();
+        HeroObject = Character ? reinterpret_cast<UObject*>(static_cast<UFortHeroType*>(Character->HeroDefinition)) : nullptr;
         Loadout.Character = Character;
         if (FFortAthenaLoadout::HasGlider())
         {
@@ -299,6 +435,11 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
 
     AIController->Possess(Pawn);
     PlayerBotPawn = Pawn;
+    MovementStyle = 0xFF;
+    bPathFollowing = false;
+    bRegisteredInvoker = false;
+    bLoggedMovement = false;
+    bWeaponFireActive = false;
     // A player pawn takes its ability system (its player state's) in OnRep_PlayerState (AFortPlayerPawn's, 3.0
     // 0xDF4E10), which on the server only AFortPlayerController's possession runs: an AI controller's doesn't, and a
     // weapon equipped without one crashes giving its abilities.
@@ -315,6 +456,15 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
         return false;
     }
     ApplyStartingHealth();
+    const int32_t MovementAttributes = InitializeMovementAttributes(Pawn, HeroObject);
+    static bool bLoggedAttributes = false;
+    if (!bLoggedAttributes)
+    {
+        bLoggedAttributes = true;
+        UFortMovementSet* Set = Pawn->MovementSet;
+        Log::Info(L"Battle Royale bots: {} movement attributes from the hero's stats row (walk {:.0f}, run {:.0f}, sprint {:.0f})", MovementAttributes,
+            Set ? static_cast<float>(Set->WalkSpeed.CurrentValue) : -1.0f, Set ? static_cast<float>(Set->RunSpeed.CurrentValue) : -1.0f, Set ? static_cast<float>(Set->SprintSpeed.CurrentValue) : -1.0f);
+    }
     Pawn->ForceNetUpdate();
 
     // The harvesting tool first (Core-held, 8.30's weapon list keeps the bot's weapons on its controller).
@@ -464,7 +614,14 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     }
 
     LastKnownPosition = LocationOf(Pawn);
+    if (!bRegisteredInvoker && Manager->HasNavigation())
+    {
+        // 8.30's bots are their own navigation invokers: the navmesh is generated around them.
+        bRegisteredInvoker = true;
+        UAthenaNavSystem::RegisterNavigationInvoker(reinterpret_cast<AActor*>(Pawn));
+    }
     ManageWeapon(Now);
+    CheckWeaponFireResult(Now);
     if (Now >= NextPerceptionTime)
     {
         NextPerceptionTime = Now + 0.25f;
@@ -474,7 +631,8 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     if (!RangeAttack(Now))
     {
         StopFiring();
-        Intent = Storm(Now) ? L"storm" : Loot(Now) ? L"loot" : L"wander";
+        // Loot close by first, then a chest or ammo box, then loot farther away (21.40's _Loot weighs them by distance).
+        Intent = Storm(Now) ? L"storm" : Loot(Now, 1500.0f) ? L"loot" : SearchContainer(Now) ? L"search" : Loot(Now, 7000.0f) ? L"loot" : L"wander";
         if (Intent[0] == L'w')
         {
             Wander(Now);
@@ -482,6 +640,11 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     }
     TryToUnstuck(Now);
     TakeStormDamage(Now);
+    if (!bLoggedMovement && LandedTime > 0.0f && Now - LandedTime > 6.0f)
+    {
+        bLoggedMovement = true;
+        LogMovementDiagnostics();
+    }
 
     if (Now >= NextLogTime)
     {
@@ -489,10 +652,11 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         AFortPawn* Target = CurrentTarget.Get();
         UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
         const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
-        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f}, mode {}, max walk {:.0f}, style {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots", BotName,
-            LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z, Intent, Velocity.Size(), Movement ? static_cast<int32_t>(Movement->MovementMode) : -1, Movement ? static_cast<float>(Movement->MaxWalkSpeed) : -1.0f, static_cast<int32_t>(Pawn->CurrentMovementStyle), Pawn->GetHealth(), Pawn->GetShield(),
+        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps", BotName,
+            LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z, Intent, Velocity.Size(), MaxSpeedOf(Movement), Movement ? static_cast<int32_t>(Movement->MovementMode) : -1, static_cast<int32_t>(Pawn->CurrentMovementStyle),
+            bPathFollowing ? std::format(L"on a path ({} paths, {} failed)", PathRequests, PathFailures) : std::format(L"steering ({} paths, {} failed)", PathRequests, PathFailures), Pawn->GetHealth(), Pawn->GetShield(),
             WeaponList.size(), EquippedWeapon.Get() ? NameOf(static_cast<UFortWeaponItemDefinition*>(EquippedWeapon.Get()->WeaponData)) : std::wstring(L"nothing"),
-            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired);
+            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps);
     }
 #endif
 }
@@ -514,9 +678,13 @@ void AFortAthenaAIBotController::JumpOffBus(float Now)
     // Where to land: loot near the bus's path, or a spot on the ground below it (21.40's _FreeFalling picks a POI).
     const std::vector<FFortAthenaBotLoot>& LootList = Manager->GetLoot();
     std::vector<FVector> Near;
+    // -CoreBotHotDrop (testing): everyone lands around the first bot's spot.
+    static FVector HotDrop;
+    static bool bHasHotDrop = false;
+    const bool bHotDrop = Configuration::Get().bBotHotDrop && bHasHotDrop;
     for (const FFortAthenaBotLoot& Entry : LootList)
     {
-        if (Entry.bWeapon && Dist2D(Entry.Location, Start) < 20000.0f)
+        if (Entry.bWeapon && (bHotDrop ? Dist2D(Entry.Location, HotDrop) < 8000.0f : Dist2D(Entry.Location, Start) < 20000.0f))
         {
             Near.push_back(Entry.Location);
         }
@@ -524,6 +692,11 @@ void AFortAthenaAIBotController::JumpOffBus(float Now)
     if (!Near.empty())
     {
         DropTarget = Near[static_cast<size_t>(FMath::Rand()) % Near.size()];
+        if (Configuration::Get().bBotHotDrop && !bHasHotDrop)
+        {
+            HotDrop = DropTarget;
+            bHasHotDrop = true;
+        }
     }
     else if (!Manager->FindGroundNear(Start, 15000.0f, DropTarget))
     {
@@ -783,8 +956,32 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
     {
         return;
     }
-    Pawn->PawnStartFire(0);
     const FFortAthenaAIBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+
+    // The game's own shot where its fire works for the weapon (or isn't known yet): its ability aims along the
+    // controller's rotation (the focal point, with the aim error in it), spends the ammo, hits and shows the shot.
+    const auto Known = Held ? WeaponFireWorks.find(Held->WeaponDefinition) : WeaponFireWorks.end();
+    const bool bTryGameFire = Weapon && Held && Weapon->AmmoCount > 0 && (Known == WeaponFireWorks.end() || Known->second == 1);
+    if (bTryGameFire)
+    {
+        const int32_t AmmoBefore = Weapon->AmmoCount;
+        if (ActivateWeaponFire(Weapon))
+        {
+            ++NativeShots;
+            if (Known == WeaponFireWorks.end() && WeaponFireCheckTime <= 0.0f)
+            {
+                WeaponFireAmmoBefore = AmmoBefore;
+                WeaponFireCheckTime = Manager->GetGameMode()->GetWorld()->GetTimeSeconds() + 0.35f;
+            }
+            return;
+        }
+        if (Known == WeaponFireWorks.end())
+        {
+            WeaponFireWorks[Held->WeaponDefinition] = 0;
+            Log::Info(L"Battle Royale bots: {}'s {} didn't activate its fire ability: Core fires it", BotName, NameOf(Held->WeaponDefinition));
+        }
+    }
+    Pawn->PawnStartFire(0);
     if (Weapon && Held && Weapon->AmmoCount > 0)
     {
         Weapon->AmmoCount = Weapon->AmmoCount - 1;
@@ -838,10 +1035,76 @@ void AFortAthenaAIBotController::StopFiring()
         return;
     }
     bFiring = false;
+    ReleaseWeaponFire();
     if (AFortPlayerPawnAthena* Pawn = GetPawn())
     {
         Pawn->PawnStopFire(0);
     }
+}
+
+bool AFortAthenaAIBotController::ActivateWeaponFire(AFortWeapon* Weapon)
+{
+#if WITH_SERVER_CODE
+    // A player's fire input activates the weapon's primary fire ability on their ability system (the player state's,
+    // the pawn its avatar). The bot's controller is local to the server, so the ability runs here as a listen
+    // server's own player's does.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    if (!AbilitySystem || !Weapon || !AFortWeapon::HasPrimaryAbilitySpecHandle())
+    {
+        return false;
+    }
+    const FGameplayAbilitySpecHandle Handle = Weapon->PrimaryAbilitySpecHandle;
+    if (!Handle.IsValid() || !AbilitySystem->FindAbilitySpecFromHandle(Handle))
+    {
+        return false;
+    }
+    const bool bActivated = AbilitySystem->TryActivateAbility(Handle);
+    bWeaponFireActive = bActivated;
+    return bActivated;
+#else
+    return false;
+#endif
+}
+
+void AFortAthenaAIBotController::ReleaseWeaponFire()
+{
+#if WITH_SERVER_CODE
+    // The fire input let go: an automatic weapon's ability waits for it (WaitInputRelease) and ends.
+    if (!bWeaponFireActive)
+    {
+        return;
+    }
+    bWeaponFireActive = false;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    AFortWeapon* Weapon = EquippedWeapon.Get();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    if (AbilitySystem && Weapon && AFortWeapon::HasPrimaryAbilitySpecHandle())
+    {
+        AbilitySystem->ServerSetInputReleased(Weapon->PrimaryAbilitySpecHandle);
+    }
+#endif
+}
+
+void AFortAthenaAIBotController::CheckWeaponFireResult(float Now)
+{
+    // The first shot of a weapon class shows whether the game's fire works for a bot: its magazine went down.
+    if (WeaponFireCheckTime <= 0.0f || Now < WeaponFireCheckTime)
+    {
+        return;
+    }
+    WeaponFireCheckTime = 0.0f;
+    AFortWeapon* Weapon = EquippedWeapon.Get();
+    const FFortAthenaAIBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+    if (!Weapon || !Held || WeaponFireWorks.contains(Held->WeaponDefinition))
+    {
+        return;
+    }
+    const int32_t AmmoNow = Weapon->AmmoCount;
+    const bool bWorks = AmmoNow < WeaponFireAmmoBefore;
+    WeaponFireWorks[Held->WeaponDefinition] = bWorks ? 1 : 0;
+    Log::Info(L"Battle Royale bots: {}'s first shot with {}: the game's fire {} ({} -> {} loaded, active ability {})", BotName, NameOf(Held->WeaponDefinition),
+        bWorks ? L"works, the game fires it" : L"spent no ammo, Core fires it", WeaponFireAmmoBefore, AmmoNow, NameOf(static_cast<UObject*>(Weapon->ActiveAbility)));
 }
 
 bool AFortAthenaAIBotController::RangeAttack(float Now)
@@ -929,7 +1192,7 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
 #endif
 }
 
-bool AFortAthenaAIBotController::Loot(float Now)
+bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_Loot (GatherNearestLoot / ComputeLootScore), for weapons and their ammo on the
@@ -950,7 +1213,7 @@ bool AFortAthenaAIBotController::Loot(float Now)
         for (const FFortAthenaBotLoot& Entry : Manager->GetLoot())
         {
             AFortPickup* Pickup = Entry.Pickup.Get();
-            if (!Pickup || Pickup->bPickedUp)
+            if (!Pickup || Pickup->bPickedUp || IsUnreachable(Pickup))
             {
                 continue;
             }
@@ -969,6 +1232,11 @@ bool AFortAthenaAIBotController::Loot(float Now)
                 Target = Pickup;
             }
         }
+        if (Target)
+        {
+            LootTargetTime = Now;
+            LastLootPursuit = Now;
+        }
         LootTarget = Target;
     }
     if (!Target)
@@ -976,11 +1244,33 @@ bool AFortAthenaAIBotController::Loot(float Now)
         return false;
     }
     const FVector PickupLocation = LocationOf(Target);
+    // Farther than this call looks: a container nearer may come first (the target is kept for the next call).
+    if (Dist2D(PickupLocation, Location) > MaxDistance)
+    {
+        return false;
+    }
+    // The time spent going for it counts (not the time the bot spent on a container meanwhile).
+    LootTargetTime += Now - LastLootPursuit > 0.5f ? Now - LastLootPursuit : 0.0f;
+    LastLootPursuit = Now;
+    // Not reached in 20 s of going for it (behind a closed door, up on a roof): given up.
+    if (Now - LootTargetTime > 20.0f)
+    {
+        MarkUnreachable(Target);
+        LootTarget = nullptr;
+        return false;
+    }
     if (Dist2D(PickupLocation, Location) < 200.0f && std::fabs(PickupLocation.Z - Location.Z) < 250.0f)
     {
         TakePickup(Target);
         LootTarget = nullptr;
         return true;
+    }
+    // Right above or below it (another floor, a roof): out of reach for a bot without a path.
+    if (Dist2D(PickupLocation, Location) < 120.0f)
+    {
+        MarkUnreachable(Target);
+        LootTarget = nullptr;
+        return false;
     }
     MoveTowards(PickupLocation, Now, 50.0f);
     return true;
@@ -1076,8 +1366,8 @@ void AFortAthenaAIBotController::Wander(float Now)
 void AFortAthenaAIBotController::MoveTowards(const FVector& Destination, float Now, float AcceptanceRadius)
 {
 #if WITH_SERVER_CODE
-    // Phase 1 has no navmesh (3.0's Athena_Terrain has none cooked): the engine's direct move (MoveToLocation without
-    // pathfinding) where it takes it, else the pawn's own movement input, every frame towards the goal.
+    // A path on the invoker navmesh (Core's UAthenaNavSystem) where there is one, else the pawn's own movement input,
+    // every frame towards the goal, around what blocks it.
     AFortPlayerPawnAthena* Pawn = GetPawn();
     AAIController* AIController = Controller.Get();
     if (!Pawn || !AIController)
@@ -1088,6 +1378,14 @@ void AFortAthenaAIBotController::MoveTowards(const FVector& Destination, float N
     if (Dist2D(Location, Destination) <= AcceptanceRadius)
     {
         StopMoving();
+        return;
+    }
+    // Sprinting to get there, running while it fights.
+    SetMovementStyle(!bFiring && !(CurrentTarget.Get() && bHasVisualLineOfSightOnTarget));
+    if (FollowPath(Destination, Now, AcceptanceRadius))
+    {
+        bHasMoveGoal = true;
+        MoveGoal = Destination;
         return;
     }
     if (!bHasMoveGoal || Dist2D(MoveGoal, Destination) > 150.0f)
@@ -1106,13 +1404,288 @@ void AFortAthenaAIBotController::MoveTowards(const FVector& Destination, float N
         const FVector Direction = Direction2D(Location, Destination);
         AIController->SetFocalPoint(FVector(Location.X + Direction.X * 1000.0f, Location.Y + Direction.Y * 1000.0f, Location.Z + 60.0f));
     }
-    Pawn->AddMovementInput(Direction2D(Location, Destination), 1.0f, false);
+    FVector Direction = Direction2D(Location, Destination);
+    SteerAroundObstacles(Direction, Now);
+    Pawn->AddMovementInput(Direction, 1.0f, false);
 #endif
 }
 
 void AFortAthenaAIBotController::StopMoving()
 {
     bHasMoveGoal = false;
+    if (bPathFollowing)
+    {
+        bPathFollowing = false;
+        if (AAIController* AIController = Controller.Get())
+        {
+            AIController->StopMovement();
+        }
+    }
+}
+
+bool AFortAthenaAIBotController::FollowPath(const FVector& Destination, float Now, float AcceptanceRadius)
+{
+#if WITH_SERVER_CODE
+    // 21.40's _Movement with a navmesh: AAIController::MoveToLocation with pathfinding (a partial path where the tiles
+    // around the bot end), followed by the engine's path following; when the bot is off the navmesh (its tiles not built
+    // yet) or no path comes back, it steers for a while (21.40's OnGoalOffNavMesh).
+    AAIController* AIController = Controller.Get();
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Manager->HasNavigation() || State != EFortAthenaAIBotState::Landed || Now < PathFailedUntil || !AIController || !Pawn)
+    {
+        if (bPathFollowing)
+        {
+            StopMoving();
+        }
+        return false;
+    }
+    if (!bPathFollowing || Dist2D(PathGoal, Destination) > 250.0f || Now >= NextPathRequest)
+    {
+        UWorld* World = Manager->GetGameMode()->GetWorld();
+        if (!UAthenaNavSystem::IsOnNavMesh(World, LocationOf(Pawn)))
+        {
+            PathFailedUntil = Now + 2.0f;
+            bPathFollowing = false;
+            return false;
+        }
+        const EPathFollowingRequestResult::Type Result = AIController->MoveToLocation(Destination, AcceptanceRadius, false, true, true, false, true);
+        ++PathRequests;
+        NextPathRequest = Now + 4.0f;
+        if (Result == EPathFollowingRequestResult::Failed)
+        {
+            ++PathFailures;
+            PathFailedUntil = Now + 3.0f;
+            bPathFollowing = false;
+            return false;
+        }
+        if (PathRequests == 1)
+        {
+            Log::Info(L"Battle Royale bots: {} follows its first path, to ({:.0f}, {:.0f}, {:.0f}) {:.0f} m away", BotName, Destination.X, Destination.Y, Destination.Z, Dist2D(LocationOf(Pawn), Destination) / 100.0f);
+        }
+        bPathFollowing = Result == EPathFollowingRequestResult::RequestSuccessful;
+        PathGoal = Destination;
+        // The path following turns the pawn along its path (the Move focus) unless the fight's focus outranks it.
+        if (bPathFollowing && !bFiring && !CurrentTarget.Get())
+        {
+            AIController->ClearFocus();
+        }
+        return true;
+    }
+    // The path ended short of the goal (a partial one, or it was blocked): steer, then ask again.
+    if (AIController->GetMoveStatus() == PathIdle)
+    {
+        bPathFollowing = false;
+        PathFailedUntil = Now + 1.5f;
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortAthenaAIBotController::SteerAroundObstacles(FVector& Direction, float Now)
+{
+#if WITH_SERVER_CODE
+    // Without a path: a trace ahead at knee height. Something low (the head-height trace is clear) is jumped; a wall or
+    // a rock turns the bot to the nearest clear heading for a moment.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Direction.SizeSquared() < 0.01f)
+    {
+        return;
+    }
+    if (Now < AvoidUntil)
+    {
+        Direction = AvoidDirection;
+        return;
+    }
+    if (Now < NextObstacleProbe)
+    {
+        return;
+    }
+    NextObstacleProbe = Now + 0.2f;
+    UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
+    if (!Movement || Movement->MovementMode != MoveWalking)
+    {
+        return;
+    }
+    // Only when the bot is held up: a slope it walks up also blocks the knee trace.
+    const FVector Velocity = Movement->Velocity;
+    const float MaxSpeed = MaxSpeedOf(Movement);
+    if (Velocity.Size() > std::max(MaxSpeed, 300.0f) * 0.6f)
+    {
+        return;
+    }
+    const FVector Location = LocationOf(Pawn);
+    const FVector Knee(Location.X, Location.Y, Location.Z - 30.0f);
+    const FVector Head(Location.X, Location.Y, Location.Z + 70.0f);
+    if (!IsBlocked(Pawn, Knee, Knee + Direction * 130.0f))
+    {
+        return;
+    }
+    if (!IsBlocked(Pawn, Head, Head + Direction * 130.0f))
+    {
+        if (Now >= NextJumpTime)
+        {
+            NextJumpTime = Now + 1.2f;
+            static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->Jump();
+            ++Jumps;
+        }
+        return;
+    }
+    for (const float Angle : { 40.0f, -40.0f, 75.0f, -75.0f, 110.0f, -110.0f })
+    {
+        const FVector Turned = RotateYaw(Direction, Angle);
+        if (!IsBlocked(Pawn, Knee, Knee + Turned * 220.0f) && !IsBlocked(Pawn, Head, Head + Turned * 220.0f))
+        {
+            AvoidDirection = Turned;
+            AvoidUntil = Now + 0.7f;
+            Direction = Turned;
+            return;
+        }
+    }
+    AvoidDirection = Direction * -1.0f;
+    AvoidUntil = Now + 1.0f;
+    Direction = AvoidDirection;
+#endif
+}
+
+void AFortAthenaAIBotController::SetMovementStyle(bool bSprint)
+{
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    const uint8_t Style = bSprint ? StyleSprinting : StyleRunning;
+    if (!Pawn || MovementStyle == Style)
+    {
+        return;
+    }
+    MovementStyle = Style;
+    Pawn->CurrentMovementStyle = Style;
+}
+
+void AFortAthenaAIBotController::LogMovementDiagnostics()
+{
+    // What the bot's movement reads its speed from (the speeds of its movement set for its style), once after landing.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
+    if (!Movement)
+    {
+        return;
+    }
+    UFortMovementSet* Set = Pawn->MovementSet;
+    const FVector Velocity = Movement->Velocity;
+    Log::Info(L"Battle Royale bots: {}'s movement: speed {:.0f}, max {:.0f}, mode {}, style {}, movement set {} (walk {:.0f}, run {:.0f}, sprint {:.0f}), max walk {:.0f}, {}",
+        BotName, Velocity.Size(), MaxSpeedOf(Movement), static_cast<int32_t>(Movement->MovementMode), static_cast<int32_t>(Pawn->CurrentMovementStyle), NameOf(reinterpret_cast<UObject*>(Set)),
+        Set ? static_cast<float>(Set->WalkSpeed.CurrentValue) : -1.0f, Set ? static_cast<float>(Set->RunSpeed.CurrentValue) : -1.0f, Set ? static_cast<float>(Set->SprintSpeed.CurrentValue) : -1.0f,
+        static_cast<float>(Movement->MaxWalkSpeed), bPathFollowing ? L"on a path" : L"steering");
+}
+
+bool AFortAthenaAIBotController::IsUnreachable(const void* Object) const
+{
+    return Object && std::find(Unreachable.begin(), Unreachable.end(), Object) != Unreachable.end();
+}
+
+void AFortAthenaAIBotController::MarkUnreachable(const void* Object)
+{
+    if (Object && !IsUnreachable(Object))
+    {
+        Unreachable.push_back(Object);
+    }
+}
+
+bool AFortAthenaAIBotController::SearchContainer(float Now)
+{
+#if WITH_SERVER_CODE
+    // Containers are worth it while the bot wants weapons or ammo for its guns.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    bool bWants = WeaponList.size() < 2;
+    for (const FFortAthenaAIBotWeapon& Weapon : WeaponList)
+    {
+        const auto Found = Ammo.find(Weapon.AmmoDefinition);
+        bWants = bWants || Found == Ammo.end() || Found->second < 60;
+    }
+    ABuildingContainer* Target = ContainerTarget.Get();
+    if (Target && (Target->IsPendingKill() || Target->bDestroyed || Target->IsAlreadySearched(reinterpret_cast<AFortPawn*>(Pawn))))
+    {
+        Manager->OnContainerSearched(Target);
+        Target = nullptr;
+        ContainerTarget = nullptr;
+        SearchUntil = 0.0f;
+    }
+    if (!Pawn || (!bWants && !Target))
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    if (!Target && Now >= NextContainerSearch)
+    {
+        NextContainerSearch = Now + 2.0f;
+        float Best = 5000.0f;
+        for (const FFortAthenaBotContainer& Entry : Manager->GetContainers())
+        {
+            ABuildingContainer* Container = Entry.Container.Get();
+            const float Distance = Dist2D(Entry.Location, Location) * (Entry.bChest ? 0.8f : 1.0f);
+            if (Container && !IsUnreachable(Container) && Distance < Best && std::fabs(Entry.Location.Z - Location.Z) < 800.0f)
+            {
+                Best = Distance;
+                Target = Container;
+            }
+        }
+        if (Target)
+        {
+            ContainerTargetTime = Now;
+        }
+        ContainerTarget = Target;
+    }
+    if (!Target)
+    {
+        return false;
+    }
+    if (Now - ContainerTargetTime > 25.0f && SearchUntil <= 0.0f)
+    {
+        MarkUnreachable(Target);
+        ContainerTarget = nullptr;
+        return false;
+    }
+    const FVector ContainerLocation = LocationOf(Target);
+    if (Dist2D(ContainerLocation, Location) < 190.0f && std::fabs(ContainerLocation.Z - Location.Z) < 250.0f)
+    {
+        // A player holds the interact for the search's time (its SearchSpeed curve, 🟡 1.5 s for a bot).
+        StopMoving();
+        if (SearchUntil <= 0.0f)
+        {
+            SearchUntil = Now + 1.5f;
+            if (AAIController* AIController = Controller.Get())
+            {
+                AIController->SetFocalPoint(ContainerLocation);
+            }
+            return true;
+        }
+        if (Now < SearchUntil)
+        {
+            return true;
+        }
+        SearchUntil = 0.0f;
+        const bool bLoot = Target->ServerOnAttemptInteract(reinterpret_cast<AFortPawn*>(Pawn));
+        ++ContainersSearched;
+        Log::Info(L"Battle Royale bots: {} searches {}{}", BotName, NameOf(reinterpret_cast<UObject*>(Target)), bLoot ? L"" : L" (nothing came out)");
+        Manager->OnContainerSearched(Target);
+        ContainerTarget = nullptr;
+        LootTarget = nullptr;
+        NextLootSearch = 0.0f;
+        return true;
+    }
+    SearchUntil = 0.0f;
+    if (Dist2D(ContainerLocation, Location) < 120.0f)
+    {
+        MarkUnreachable(Target);
+        ContainerTarget = nullptr;
+        return false;
+    }
+    MoveTowards(ContainerLocation, Now, 100.0f);
+    return true;
+#else
+    return false;
+#endif
 }
 
 void AFortAthenaAIBotController::TryToUnstuck(float Now)
@@ -1132,10 +1705,22 @@ void AFortAthenaAIBotController::TryToUnstuck(float Now)
     {
         ++StuckChecks;
         static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->Jump();
+        ++Jumps;
+        if (StuckChecks == 2 && bPathFollowing)
+        {
+            // The path doesn't get it anywhere: steer for a while.
+            StopMoving();
+            PathFailedUntil = Now + 4.0f;
+        }
         if (StuckChecks >= 3)
         {
             StuckChecks = 0;
+            MarkUnreachable(LootTarget.Get());
+            MarkUnreachable(ContainerTarget.Get());
             LootTarget = nullptr;
+            ContainerTarget = nullptr;
+            SearchUntil = 0.0f;
+            NextContainerSearch = Now + 6.0f;
             bHasWanderGoal = true;
             const float Angle = RandomRange(0.0f, 6.2831853f);
             WanderGoal = FVector(Location.X + std::cos(Angle) * 700.0f, Location.Y + std::sin(Angle) * 700.0f, Location.Z);

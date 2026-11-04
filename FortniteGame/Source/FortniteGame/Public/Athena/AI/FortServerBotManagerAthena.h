@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+class ABuildingContainer;
 class AFortGameModeAthena;
 class AFortPickup;
 class AFortPlayerControllerAthena;
@@ -35,6 +36,14 @@ struct FFortAthenaBotLoot
     TWeakObjectPtr<AFortPickup> Pickup;
     FVector Location;
     bool bWeapon = false;
+};
+
+// A chest or ammo box the bots can search (21.40's _Loot looks for containers too; 8.30's bots didn't loot).
+struct FFortAthenaBotContainer
+{
+    TWeakObjectPtr<ABuildingContainer> Container;
+    FVector Location;
+    bool bChest = false;
 };
 
 // Core's backport of Epic's UFortServerBotManagerAthena (8.30: the game mode's ServerBotManager, which registers each
@@ -85,6 +94,11 @@ public:
     const std::vector<TWeakObjectPtr<AFortPawn>>& GetEnemyPawns() const { return EnemyPawns; }
     const std::vector<FFortAthenaBotLoot>& GetLoot() const { return Loot; }
     void ForgetLoot(AFortPickup* Pickup);
+    // The island's unsearched chests and ammo boxes, and a container a bot searched (its loot is looked for next tick).
+    const std::vector<FFortAthenaBotContainer>& GetContainers() const { return Containers; }
+    void OnContainerSearched(ABuildingContainer* Container);
+    // Navigation for the bots (Core's UAthenaNavSystem): whether the invoker navmesh is up.
+    bool HasNavigation() const { return bHasNavigation; }
     AFortGameModeAthena* GetGameMode() const;
     // The next safe zone (its centre and radius), when there is one.
     bool GetSafeZone(FVector& OutCenter, float& OutRadius) const;
@@ -127,6 +141,8 @@ private:
     void CheckWinConditionLastManStanding();
     void RefreshEnemies();
     void RefreshLoot(float Now);
+    void GatherContainers();
+    void InitializeNavigation();
     void LogSummary(float Now);
     std::set<uint8_t> HumanTeams() const;
     std::set<uint8_t> AliveTeams(bool bIncludeHumans) const;
@@ -160,6 +176,8 @@ private:
     bool bBotMatchAircraftStarted = false;
     std::vector<TWeakObjectPtr<AFortPawn>> EnemyPawns;
     std::vector<FFortAthenaBotLoot> Loot;
+    std::vector<FFortAthenaBotContainer> Containers;
+    bool bHasNavigation = false;
     std::map<UFortWeaponItemDefinition*, bool> GunDefinitions;
     struct FBotHit
     {

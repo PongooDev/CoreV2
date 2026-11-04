@@ -50,6 +50,11 @@ public:
     void PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList);
     bool SpawnLoot(AFortPawn* Looter);
     void BounceContainer();
+    // What the container's IFortInteractInterface::ServerOnAttemptInteract does once a pawn's search is done (3.0
+    // 0xA3E4F0): unless it is already searched, its SpawnLoot (the game's, or Core's where the build strips it). For a
+    // searcher without a player controller (Battle Royale's player bots, #233). True when loot came out.
+    bool ServerOnAttemptInteract(AFortPawn* InteractingPawn);
+    bool IsAlreadySearched(AFortPawn* Looter);
 
     static void HookVTables();
     static void LogWorldContainers(UWorld* World);
@@ -57,7 +62,6 @@ public:
     static void RollAthenaLootAgain(UWorld* World);
 
 private:
-    bool IsAlreadySearched(AFortPawn* Looter);
     void ModifyLootDrops(TStructArray<FFortItemEntry>& LootDrops, AFortPlayerController* Looter);
     void OnPickupSpawn(AFortPickup* Pickup, AFortPlayerController* Looter);
     void HideContainer();

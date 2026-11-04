@@ -11,6 +11,7 @@
 
 class AAIController;
 class AActor;
+class ABuildingContainer;
 class AFortGameModeAthena;
 class AFortPawn;
 class AFortPickup;
@@ -119,7 +120,7 @@ private:
     bool RangeAttack(float Now);
     void ManageWeapon(float Now);
     // 21.40's _Loot (GatherNearestLoot): the nearest weapon or ammo on the floor, and taking it.
-    bool Loot(float Now);
+    bool Loot(float Now, float MaxDistance);
     // 8.30's _Storm: back inside the next safe zone.
     bool Storm(float Now);
     // 21.40's _Movement (TryToUnstuck) and a wander inside the safe zone.
@@ -127,6 +128,18 @@ private:
     void MoveTowards(const FVector& Destination, float Now, float AcceptanceRadius = 100.0f);
     void StopMoving();
     void TryToUnstuck(float Now);
+    // 21.40's _Movement: a path on the invoker navmesh (AAIController::MoveToLocation with pathfinding), else steering
+    // straight at the goal, around what blocks the way (traces ahead at knee and head height: jump a low obstacle,
+    // turn aside from a wall).
+    bool FollowPath(const FVector& Destination, float Now, float AcceptanceRadius);
+    void SteerAroundObstacles(FVector& Direction, float Now);
+    // The pawn's EFortMovementStyle: a player sprints to get somewhere and runs while fighting (AFortPawn's
+    // GetMovementSpeed reads the movement set's speed for the style; an AI controller never sets it).
+    void SetMovementStyle(bool bSprint);
+    void LogMovementDiagnostics();
+    // 21.40's _Loot for containers: walk to the nearest unsearched chest or ammo box and search it (its own
+    // ServerOnAttemptInteract), then take what comes out.
+    bool SearchContainer(float Now);
     // The storm hurts a bot outside its circle as it does players (Core's, when the game's own storm damage doesn't
     // reach the bot's pawn).
     void TakeStormDamage(float Now);
@@ -141,6 +154,13 @@ private:
     // One shot at the target: the weapon's fire for everyone to see, the magazine, and its hit, by Core (no player
     // controller aims a bot's weapon ability, so the game's own fire neither spends ammo nor hits).
     void FireShot(AFortPawn* Target, float Distance);
+    // The weapon's own fire: its primary fire ability (PrimaryAbilitySpecHandle), activated on the bot's ability system
+    // as a player's input does, so the shot, its ammo, its hit and its effects are the game's. False when it didn't
+    // activate (Core's shot is used then).
+    bool ActivateWeaponFire(AFortWeapon* Weapon);
+    void ReleaseWeaponFire();
+    // Whether the game's fire works for this weapon class: unknown until a shot shows it spending ammo or not.
+    void CheckWeaponFireResult(float Now);
 
     UFortServerBotManagerAthena* Manager = nullptr;
     TWeakObjectPtr<AAIController> Controller;
@@ -190,6 +210,40 @@ private:
     FVector MoveGoal;
     bool bHasMoveGoal = false;
     TWeakObjectPtr<AFortPickup> LootTarget;
+    TWeakObjectPtr<ABuildingContainer> ContainerTarget;
+    // Loot and containers the bot gave up on (out of reach: above or below it, or it got stuck on the way).
+    std::vector<const void*> Unreachable;
+    // When the bot set off for its loot or container target: one it hasn't reached in a while is out of reach.
+    float LootTargetTime = 0.0f;
+    float LastLootPursuit = 0.0f;
+    float ContainerTargetTime = 0.0f;
+    bool IsUnreachable(const void* Object) const;
+    void MarkUnreachable(const void* Object);
+    float SearchUntil = 0.0f;
+    float NextContainerSearch = 0.0f;
+    int32_t ContainersSearched = 0;
+
+    // Movement: the path being followed, the obstacle turn, and the logged diagnostics.
+    bool bPathFollowing = false;
+    FVector PathGoal;
+    float NextPathRequest = 0.0f;
+    float PathFailedUntil = 0.0f;
+    int32_t PathRequests = 0;
+    int32_t PathFailures = 0;
+    bool bRegisteredInvoker = false;
+    float NextObstacleProbe = 0.0f;
+    float AvoidUntil = 0.0f;
+    FVector AvoidDirection;
+    int32_t Jumps = 0;
+    float NextJumpTime = 0.0f;
+    bool bLoggedMovement = false;
+    uint8_t MovementStyle = 0xFF;
+
+    // The game's own fire (ActivateWeaponFire): the shot waiting to show whether it spent ammo.
+    bool bWeaponFireActive = false;
+    float WeaponFireCheckTime = 0.0f;
+    int32_t WeaponFireAmmoBefore = 0;
+    int32_t NativeShots = 0;
     FVector WanderGoal;
     bool bHasWanderGoal = false;
     FVector AimError;

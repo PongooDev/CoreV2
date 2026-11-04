@@ -25,6 +25,8 @@ class AAIController : public AController
     DefineUFunction(K2_SetFocalPoint)
     DefineUFunction(K2_SetFocus)
     DefineUFunction(K2_ClearFocus)
+    DefineUFunction(GetMoveStatus)
+    DefineUFunction(StopMovement)
 
 public:
     // Whether the controller gets a player state of the game mode's PlayerStateClass (AAIController::PostInitializeComponents
@@ -39,4 +41,8 @@ public:
     void SetFocalPoint(const FVector& FocalPoint);
     void SetFocus(AActor* NewFocus);
     void ClearFocus();
+    // EPathFollowingStatus: 0 Idle, 1 Waiting, 2 Paused, 3 Moving.
+    uint8_t GetMoveStatus() const;
+    // AController::StopMovement: the path following stops.
+    void StopMovement();
 };

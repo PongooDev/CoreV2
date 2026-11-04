@@ -33,6 +33,18 @@ void AAIController::SetFocus(AActor* NewFocus)
     Params.Call(this);
 }
 
+uint8_t AAIController::GetMoveStatus() const
+{
+    Reflection::FParams Params(StaticFunction_GetMoveStatus(), true);
+    return Params.Call(const_cast<AAIController*>(this)) ? Params.Take<uint8_t>(L"ReturnValue") : 0;
+}
+
+void AAIController::StopMovement()
+{
+    Reflection::FParams Params(StaticFunction_StopMovement(), true);
+    Params.Call(this);
+}
+
 void AAIController::ClearFocus()
 {
     Reflection::FParams Params(StaticFunction_K2_ClearFocus(), true);

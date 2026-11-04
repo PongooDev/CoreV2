@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GameFramework/Actor.h"
+#include "GameplayAbilitySpec.h"
 #include "Misc/Guid.h"
 
 class UFortWeaponItemDefinition;
@@ -15,6 +16,10 @@ public:
     DefineUProperty(UFortWeaponItemDefinition*, WeaponData)
     DefineUProperty(FGuid, ItemEntryGuid)
     DefineUProperty(int32_t, AmmoCount)
+    // The fire ability the weapon gave its owner's ability system when equipped (its primary fire), and the one running.
+    DefineUProperty(FGameplayAbilitySpecHandle, PrimaryAbilitySpecHandle)
+    DefineUProperty(UObject*, ActiveAbility)
+    static bool HasPrimaryAbilitySpecHandle() { return Member_PrimaryAbilitySpecHandle.IsAvailable(); }
     DefineBitfieldUProperty(bPendingDestroyDueToDurability)
     DefineBitfieldUProperty(bPendingDestroyDueToDurabilityOrStackCount)
 

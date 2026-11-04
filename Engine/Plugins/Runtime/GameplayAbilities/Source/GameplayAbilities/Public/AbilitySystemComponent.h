@@ -20,6 +20,7 @@ public:
     DefineUProperty(TArray<UAttributeSet*>, SpawnedAttributes)
     DefineUFunction(ClientActivateAbilityFailed)
     DefineUFunction(ServerTryActivateAbility)
+    DefineUFunction(ServerSetInputReleased)
     DefineUFunction(RemoveActiveGameplayEffectBySourceEffect)
 
     template <class T>
@@ -53,6 +54,9 @@ public:
     // Removes StacksToRemove stacks (-1: all) of every active effect of the class, from any instigator. Server only; false
     // when the build reflects no such function.
     bool RemoveActiveGameplayEffectBySourceEffect(UClass* GameplayEffect, UAbilitySystemComponent* InstigatorAbilitySystemComponent = nullptr, int32_t StacksToRemove = -1);
+    // The ability's input was let go (a server RPC: on the server it runs here, AbilitySpecInputReleased): an active
+    // ability waiting for its release (an automatic weapon's fire) ends.
+    void ServerSetInputReleased(FGameplayAbilitySpecHandle AbilityHandle);
     void ClientActivateAbilityFailed(FGameplayAbilitySpecHandle AbilityToActivate, int16_t PredictionKey);
     void InternalServerTryActiveAbility(FGameplayAbilitySpecHandle AbilityToActivate, bool InputPressed, const FPredictionKey& PredictionKey, const FGameplayEventData* TriggerEventData);
 

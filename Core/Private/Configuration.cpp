@@ -35,6 +35,14 @@ void Configuration::Load()
         {
             Current.bBotMatch = true;
         }
+        if (EqualsNoCase(Argument, L"-CoreBotNoNavigation"))
+        {
+            Current.bBotNoNavigation = true;
+        }
+        if (EqualsNoCase(Argument, L"-CoreBotHotDrop"))
+        {
+            Current.bBotHotDrop = true;
+        }
         constexpr std::wstring_view MapOption = L"-CoreMap=";
         if (Argument.size() > MapOption.size() && EqualsNoCase(Argument.substr(0, MapOption.size()), MapOption))
         {

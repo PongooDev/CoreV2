@@ -88,6 +88,19 @@ namespace
     }
 }
 
+bool ABuildingContainer::ServerOnAttemptInteract(AFortPawn* InteractingPawn)
+{
+#if WITH_SERVER_CODE
+    if (!InteractingPawn || bDestroyed || (Natives::ABuildingContainer_SpawnLootIndex < 0 && !Finder::ResolveBuildingLootLive()) || IsAlreadySearched(InteractingPawn))
+    {
+        return false;
+    }
+    return ContainerSlot<bool (*)(ABuildingContainer*, AFortPawn*)>(this, 0)(this, InteractingPawn);
+#else
+    return false;
+#endif
+}
+
 bool ABuildingContainer::IsAlreadySearched(AFortPawn* Looter)
 {
     return ContainerSlot<bool (*)(ABuildingContainer*, AFortPawn*)>(this, -3)(this, Looter);

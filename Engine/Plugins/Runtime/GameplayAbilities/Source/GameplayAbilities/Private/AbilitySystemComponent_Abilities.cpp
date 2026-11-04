@@ -245,3 +245,10 @@ void UAbilitySystemComponent::InternalServerTryActiveAbilityHK(UAbilitySystemCom
 {
     This->InternalServerTryActiveAbility(Handle, InputPressed, PredictionKey, TriggerEventData);
 }
+
+void UAbilitySystemComponent::ServerSetInputReleased(FGameplayAbilitySpecHandle AbilityHandle)
+{
+    Reflection::FParams Params(StaticFunction_ServerSetInputReleased(), true);
+    Params.Set(L"AbilityHandle", AbilityHandle);
+    Params.Call(this);
+}

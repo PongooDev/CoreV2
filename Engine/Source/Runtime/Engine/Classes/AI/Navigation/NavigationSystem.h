@@ -25,7 +25,17 @@ class UNavigationSystem : public UObject
     DefineNativeMember(uint8_t, NavOctreeLockFlags, UNavigationSystem_bNavOctreeLock)
     DefineUFunction(OnNavigationBoundsUpdated)
     DefineUFunction(IsNavigationBeingBuilt)
+    DefineUFunction(RegisterNavigationInvoker)
+    DefineUFunction(K2_ProjectPointToNavigation)
     DefineUStructArrayProperty(FNavDataConfig, SupportedAgents)
+    DefineUProperty(ANavigationData*, MainNavData)
+    DefineUProperty(TArray<ANavigationData*>, NavDataSet)
+    // Navigation generated only in tiles around the registered invokers (read when a navmesh makes its generator), and
+    // whether the system spawns the agents' navigation data by itself once there are navigation bounds.
+    DefineBitfieldUProperty(bGenerateNavigationOnlyAroundNavigationInvokers)
+    DefineBitfieldUProperty(bAutoCreateNavigationData)
+    // ENavDataGatheringModeConfig: 1 Instant, 2 Lazy (geometry gathered when a tile is built).
+    DefineUProperty(uint8_t, DataGatheringMode)
 
 public:
     bool IsNavigationBuildingLocked() const { return NavBuildingLockFlags != 0; }
@@ -38,5 +48,10 @@ public:
     void OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolume);
     void RequestRegistration(ANavigationData* NavData, bool bTriggerRegistrationProcessing = true);
 
+    // An actor around which navigation is generated (TileGenerationRadius) and kept (TileRemovalRadius), while it lives.
+    void RegisterNavigationInvoker(AActor* Invoker, float TileGenerationRadius, float TileRemovalRadius);
+
     static bool IsNavigationBeingBuilt(UObject* WorldContextObject);
+    // The point on the navigation data within QueryExtent of Point, or false when there is none there (no tile yet).
+    static bool K2_ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, FVector& ProjectedLocation, ANavigationData* NavData, const FVector& QueryExtent);
 };

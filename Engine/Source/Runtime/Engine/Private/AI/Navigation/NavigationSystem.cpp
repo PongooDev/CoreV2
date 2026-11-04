@@ -58,3 +58,27 @@ bool UNavigationSystem::IsNavigationBeingBuilt(UObject* WorldContextObject)
     Params.Set(Params.Has(L"WorldContextObject") ? L"WorldContextObject" : L"WorldContext", WorldContextObject);
     return Params.Call(StaticClass()->GetDefaultObject()) && Params.Take<bool>(L"ReturnValue");
 }
+
+void UNavigationSystem::RegisterNavigationInvoker(AActor* Invoker, float TileGenerationRadius, float TileRemovalRadius)
+{
+    Reflection::FParams Params(StaticFunction_RegisterNavigationInvoker(), true);
+    Params.Set(L"Invoker", reinterpret_cast<UObject*>(Invoker));
+    Params.Set(L"TileGenerationRadius", TileGenerationRadius);
+    Params.Set(L"TileRemovalRadius", TileRemovalRadius);
+    Params.Call(this);
+}
+
+bool UNavigationSystem::K2_ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, FVector& ProjectedLocation, ANavigationData* NavData, const FVector& QueryExtent)
+{
+    Reflection::FParams Params(StaticFunction_K2_ProjectPointToNavigation(), true);
+    Params.Set(L"WorldContextObject", WorldContextObject);
+    Params.Set(L"Point", Point);
+    Params.Set(L"NavData", reinterpret_cast<UObject*>(NavData));
+    Params.Set(L"QueryExtent", QueryExtent);
+    if (!Params.Call(StaticClass()->GetDefaultObject()) || !Params.Take<bool>(L"ReturnValue"))
+    {
+        return false;
+    }
+    ProjectedLocation = Params.Take<FVector>(L"ProjectedLocation");
+    return true;
+}

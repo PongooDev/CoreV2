@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Athena/AI/FortServerBotManagerAthena.h"
 #include "AIController.h"
+#include "Athena/AI/AthenaNavSystem.h"
+#include "Building/BuildingContainer.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
@@ -729,6 +731,66 @@ void UFortServerBotManagerAthena::OnAircraftPhaseStarted(float Now)
     }
     UpdateCounts();
     Log::Info(L"Battle Royale bots: the bus leaves with {} players and {} bots (drop zone {:.0f} s to {:.0f} s from now)", HumansAtStart, BotsAtStart, DropStart - Now, DropEnd - Now);
+    if (BotsAtStart > 0)
+    {
+        RefreshLoot(Now);
+        GatherContainers();
+        InitializeNavigation();
+    }
+#endif
+}
+
+void UFortServerBotManagerAthena::GatherContainers()
+{
+#if WITH_SERVER_CODE
+    // Battle Royale's chests and ammo boxes (the tiered containers a player searches; not the floor loot spawners).
+    Containers.clear();
+    int32_t Chests = 0;
+    for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(GetGameMode(), ABuildingContainer::StaticClass()))
+    {
+        ABuildingContainer* Container = Cast<ABuildingContainer>(Actor);
+        const std::wstring ClassName = Container ? reinterpret_cast<UObject*>(Container)->GetClass()->GetName().ToStdString() : std::wstring();
+        const bool bChest = ClassName.find(L"Chest") != std::wstring::npos;
+        const bool bAmmo = ClassName.find(L"Ammo") != std::wstring::npos;
+        if (!Container || Container->IsPendingKill() || Container->bDestroyed || (!bChest && !bAmmo) || ClassName.find(L"FloorLoot") != std::wstring::npos)
+        {
+            continue;
+        }
+        Containers.push_back({ TWeakObjectPtr<ABuildingContainer>(Container), LocationOf(Container), bChest });
+        Chests += bChest ? 1 : 0;
+    }
+    Log::Info(L"Battle Royale bots: {} chests and {} ammo boxes to search", Chests, Containers.size() - static_cast<size_t>(Chests));
+#endif
+}
+
+void UFortServerBotManagerAthena::OnContainerSearched(ABuildingContainer* Container)
+{
+    std::erase_if(Containers, [Container](const FFortAthenaBotContainer& Entry) { return Entry.Container.Get() == Container; });
+    // Its loot is on the floor now: the bots see it on the next tick.
+    NextLootRefresh = 0.0f;
+}
+
+void UFortServerBotManagerAthena::InitializeNavigation()
+{
+#if WITH_SERVER_CODE
+    // The island: everything the bots go to (the loot and the containers), with room around it.
+    FBox Island;
+    for (const FFortAthenaBotLoot& Entry : Loot)
+    {
+        Island += Entry.Location;
+    }
+    for (const FFortAthenaBotContainer& Entry : Containers)
+    {
+        Island += Entry.Location;
+    }
+    if (!Island.IsValid)
+    {
+        return;
+    }
+    Island.Min = Island.Min - FVector(5000.0f, 5000.0f, 3000.0f);
+    Island.Max = Island.Max + FVector(5000.0f, 5000.0f, 6000.0f);
+    AFortGameModeAthena* Athena = GetGameMode();
+    bHasNavigation = !Configuration::Get().bBotNoNavigation && UAthenaNavSystem::InitializeForBots(Athena ? Athena->GetWorld() : nullptr, Island);
 #endif
 }
 

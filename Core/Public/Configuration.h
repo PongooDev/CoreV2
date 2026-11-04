@@ -15,6 +15,10 @@ struct FCoreConfiguration
     // -CoreBotMatch (testing only): a Battle Royale server with "Force player AIs" on starts its match with no players
     // at all, bots only, so a headless server can play a whole match (CoreV2 #233).
     bool bBotMatch = false;
+    // -CoreBotNoNavigation (testing only): the bots steer without the invoker navmesh.
+    bool bBotNoNavigation = false;
+    // -CoreBotHotDrop (testing only): every bot lands around the same spot, so a short headless match has fights.
+    bool bBotHotDrop = false;
 
     bool IsBattleRoyale() const;
 };

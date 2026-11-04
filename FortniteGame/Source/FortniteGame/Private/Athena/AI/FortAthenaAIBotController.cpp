@@ -2,6 +2,7 @@
 #include "Athena/AI/FortAthenaAIBotController.h"
 #include "AIController.h"
 #include "AbilitySystemComponent.h"
+#include "Abilities/FortAbilitySet.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "Athena/AI/AthenaNavSystem.h"
@@ -18,7 +19,9 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Engine/AssetManager.h"
 #include "Engine/DataTable.h"
+#include "Engine/Engine.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
@@ -288,6 +291,37 @@ namespace
     // The outfits bots wear: Battle Royale's default characters (8.30 reads the bot's from its customization loadout).
     UAthenaCharacterItemDefinition* RandomCharacter()
     {
+        // The build's own outfits: what the asset manager lists as the primary asset type "AthenaCharacter" (the
+        // locker's list), CID_*_Athena_Commando_*; loaded when a bot is dressed in one. The default outfits when the
+        // list is empty.
+        static std::vector<std::wstring> OutfitPaths;
+        static bool bListed = false;
+        if (!bListed)
+        {
+            bListed = true;
+            UAssetManager* AssetManager = GEngine ? static_cast<UAssetManager*>(GEngine->AssetManager) : nullptr;
+            TArray<FAssetData> AssetDataList;
+            if (AssetManager && AssetManager->GetPrimaryAssetDataList(FName(L"AthenaCharacter"), AssetDataList))
+            {
+                for (int32_t Index = 0; Index < AssetDataList.Num(); ++Index)
+                {
+                    const std::wstring Name = AssetDataList[Index].AssetName.ToString().ToStdString();
+                    if (Name.starts_with(L"CID_") && Name.find(L"_Athena_Commando_") != std::wstring::npos)
+                    {
+                        OutfitPaths.push_back(AssetDataList[Index].ObjectPath.ToString().ToStdString());
+                    }
+                }
+            }
+            Log::Info(L"Battle Royale bots: {} outfits for the bots to wear", OutfitPaths.size());
+        }
+        for (int32_t Attempt = 0; Attempt < 3 && !OutfitPaths.empty(); ++Attempt)
+        {
+            const std::wstring& Path = OutfitPaths[static_cast<size_t>(FMath::Rand()) % OutfitPaths.size()];
+            if (UAthenaCharacterItemDefinition* Character = LoadObject<UAthenaCharacterItemDefinition>(nullptr, Path.c_str()); Character && static_cast<UFortHeroType*>(Character->HeroDefinition))
+            {
+                return Character;
+            }
+        }
         static std::vector<UAthenaCharacterItemDefinition*> Characters;
         static bool bLoaded = false;
         if (!bLoaded)
@@ -558,6 +592,57 @@ namespace
         return Function && Params.Call(Weapon) ? Params.Take<int32_t>(L"ReturnValue") : 0;
     }
 
+    // The boogie bomb's dance (GA_DanceGrenade_Stun): a player has it from the game data's GenericPlayerAbilitySet
+    // (GAS_DefaultPlayer), which their hero's abilities bring (UFortGlobals::ApplyHeroEffectsAndAbilities). The grenade
+    // activates it by its tag (Gameplay.Action.Player.DanceStunned, TryActivateAbilitiesByTag) on the pawns it hits, so
+    // a bot needs it given too. Only this one of the set: the others (death, DBNO, interaction) are Core's for a bot.
+    UClass* DanceStunAbilityClass()
+    {
+        static UClass* Found = nullptr;
+        static bool bSearched = false;
+        if (bSearched)
+        {
+            return Found;
+        }
+        bSearched = true;
+        UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+        UFortAbilitySet* Set = GameData ? GameData->GenericPlayerAbilitySet.LoadSynchronous() : nullptr;
+        if (Set)
+        {
+            const TArray<UClass*>& Abilities = Set->GameplayAbilities;
+            for (UClass* Ability : Abilities)
+            {
+                if (Ability && Ability->GetName().ToStdString().find(L"DanceGrenade_Stun") != std::wstring::npos)
+                {
+                    Found = Ability;
+                }
+            }
+        }
+        Log::Info(L"Battle Royale bots: the boogie bomb's dance ability: {}", NameOf(Found));
+        return Found;
+    }
+
+    void GiveDanceStunAbility(UAbilitySystemComponent* AbilitySystem)
+    {
+        UClass* AbilityClass = DanceStunAbilityClass();
+        if (!AbilitySystem || !AbilityClass || AbilitySystem->FindAbilitySpecFromClass(AbilityClass))
+        {
+            return;
+        }
+        UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
+        std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
+        SpecStruct->InitializeStruct(SpecStorage.data());
+        FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
+        FGameplayAbilitySpecHandle NewHandle;
+        NewHandle.GenerateNewHandle();
+        Spec.Handle = NewHandle;
+        Spec.Ability = static_cast<UGameplayAbility*>(AbilityClass->GetDefaultObject());
+        Spec.Level = 1;
+        Spec.InputID = INDEX_NONE;
+        AbilitySystem->GiveAbility(Spec);
+        SpecStruct->DestroyStruct(SpecStorage.data());
+    }
+
     // The hit in a damage effect's context, as a weapon ability's targeting adds it: a blocking FHitResult from the
     // shooter to the target (UAbilitySystemBlueprintLibrary::EffectContextAddHitResult) and the context's origin
     // (EffectContextSetOrigin). The victim's damage cue (AFortPawn::GameplayCue_Damage) gets its instigator and hit from
@@ -823,6 +908,17 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
         Log::Info(L"Battle Royale bots: {} movement attributes from the hero's stats row (walk {:.0f}, run {:.0f}, sprint {:.0f})", MovementAttributes,
             Set ? static_cast<float>(Set->WalkSpeed.CurrentValue) : -1.0f, Set ? static_cast<float>(Set->RunSpeed.CurrentValue) : -1.0f, Set ? static_cast<float>(Set->SprintSpeed.CurrentValue) : -1.0f);
     }
+    // The outfit's parts on the player state and the pawn, as a player's hero gets them (Core runs the stripped
+    // AFortPlayerStateAthena override for players in TrySetHeroImplementation; a bot's controller isn't a player's):
+    // without them clients drew the bots without their outfit.
+    if (AFortPlayerStateAthena* State = GetPlayerState(); State && AFortPlayerState::CanApplyCharacterCustomization() && Pawn->HasCustomizationLoadout())
+    {
+        State->ApplyCharacterCustomization(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
+    }
+    GiveDanceStunAbility(static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent));
+    bWasMoving = false;
+    bEmoting = false;
+    bDanceStunned = false;
     Pawn->ForceNetUpdate();
 
     // The harvesting tool first (Core-held, 8.30's weapon list keeps the bot's weapons on its controller).
@@ -953,6 +1049,7 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         {
             return;
         }
+        StopEmote();
         if (NextEmoteTime <= 0.0f)
         {
             NextEmoteTime = Now + RandomRange(8.0f, 30.0f);
@@ -1034,6 +1131,23 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         TakeStormDamage(Now);
         return;
     }
+    // A boogie bomb's dance: the bot neither moves nor shoots until it ends (the ability's own effect stops the pawn).
+    if (const bool bStunned = IsDanceStunned(); bStunned || bDanceStunned)
+    {
+        if (bStunned != bDanceStunned)
+        {
+            bDanceStunned = bStunned;
+            Log::Info(L"Battle Royale bots: {} {} a boogie bomb's dance", BotName, bStunned ? L"is caught in" : L"is free of");
+        }
+        if (bStunned)
+        {
+            StopFiring();
+            StopMoving();
+            CancelHeal();
+            TakeStormDamage(Now);
+            return;
+        }
+    }
     if (Now >= NextPerceptionTime)
     {
         NextPerceptionTime = Now + 0.25f;
@@ -1054,8 +1168,8 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         {
             return;
         }
-        EmoteUntil = 0.0f;
     }
+    StopEmote();
     if (HarvestTarget.Get() && IsInCombat(Now))
     {
         StopHarvesting();
@@ -1251,6 +1365,7 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
             NextLogTime = Now + 5.0f;
             bDiving = false;
             bHasFacingYaw = false;
+            Pawn->ForceNetUpdate();
             Log::Info(L"Battle Royale bots: {} lands at ({:.0f}, {:.0f}, {:.0f}), {:.0f} m from its spot", BotName, Location.X, Location.Y, Location.Z, Distance / 100.0f);
         }
     }
@@ -2186,6 +2301,47 @@ namespace
     }
 }
 
+void AFortAthenaAIBotController::StopEmote()
+{
+#if WITH_SERVER_CODE
+    if (!bEmoting)
+    {
+        return;
+    }
+    bEmoting = false;
+    EmoteUntil = 0.0f;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UClass* AbilityClass = GameData ? GameData->EmoteGameplayAbility.LoadSynchronous() : nullptr;
+    FGameplayAbilitySpec* Spec = AbilitySystem && AbilityClass ? AbilitySystem->FindAbilitySpecFromClass(AbilityClass) : nullptr;
+    if (!Spec)
+    {
+        return;
+    }
+    for (const TArray<UGameplayAbility*>* Instances : { &static_cast<const TArray<UGameplayAbility*>&>(Spec->ReplicatedInstances), &static_cast<const TArray<UGameplayAbility*>&>(Spec->NonReplicatedInstances) })
+    {
+        for (int32_t Index = Instances->Num() - 1; Index >= 0; --Index)
+        {
+            if (UGameplayAbility* Instance = (*Instances)[Index])
+            {
+                Instance->K2_EndAbility();
+                break;
+            }
+        }
+    }
+#endif
+}
+
+bool AFortAthenaAIBotController::IsDanceStunned() const
+{
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    UClass* AbilityClass = DanceStunAbilityClass();
+    FGameplayAbilitySpec* Spec = AbilitySystem && AbilityClass ? AbilitySystem->FindAbilitySpecFromClass(AbilityClass) : nullptr;
+    return Spec && Spec->ActiveCount > 0;
+}
+
 void AFortAthenaAIBotController::PreloadAssets()
 {
 #if WITH_SERVER_CODE
@@ -2215,9 +2371,16 @@ bool AFortAthenaAIBotController::PlayEmote(float Now, float Duration)
     {
         return false;
     }
+    // A player stands still to emote: a bot still moving waits (it slid along dancing).
+    UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
+    const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
+    StopMoving();
+    if (Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 40.0f * 40.0f)
+    {
+        return false;
+    }
     UFortMontageItemDefinitionBase* Emote = EmoteAssets[static_cast<size_t>(FMath::Rand()) % EmoteAssets.size()];
     Emote->Animation.LoadSynchronous();
-    StopMoving();
     StopFiring();
     UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
     std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
@@ -2245,6 +2408,7 @@ bool AFortAthenaAIBotController::PlayEmote(float Now, float Duration)
     }
     ++Emotes;
     EmoteUntil = Now + Duration;
+    bEmoting = true;
     return true;
 #else
     return false;
@@ -2603,6 +2767,13 @@ void AFortAthenaAIBotController::UpdateFacing(float Now, float DeltaSeconds)
     UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
     const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
     const float Speed2D = std::sqrt(Velocity.X * Velocity.X + Velocity.Y * Velocity.Y);
+    // A pawn that starts or stops moving is sent to clients at once: some bots stood in their idle pose while moving
+    // until a hit or a jump sent them again.
+    if ((Speed2D > 50.0f) != bWasMoving)
+    {
+        bWasMoving = Speed2D > 50.0f;
+        Pawn->ForceNetUpdate();
+    }
     FVector Desired;
     if (bHasFacePoint && Now < FacePointUntil)
     {

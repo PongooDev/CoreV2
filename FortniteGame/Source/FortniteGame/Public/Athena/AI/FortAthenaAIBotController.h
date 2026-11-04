@@ -245,6 +245,11 @@ private:
     // on the warmup island (the community list) and after an elimination when nobody is shooting at them (21.40's
     // UFortAthenaAIBotEvaluator_DanceOnKill).
     bool PlayEmote(float Now, float Duration);
+    // Ends the emote the bot is playing (a player's emote ends as they move): its emote ability's instance ends.
+    void StopEmote();
+    // A boogie bomb's dance (GA_DanceGrenade_Stun, which the grenade activates by its ability tag on the pawns it hits):
+    // the bot stands, dancing, until it ends.
+    bool IsDanceStunned() const;
     // Materials (the community list: bots gather materials and drop them on death): out of a fight with few materials,
     // the bot swings its pickaxe at a tree, rock or wall next to it, and a stuck bot breaks what is in its way. The
     // pickaxe's own ability refuses a bot, so the hit is the pickaxe's damage effect (GE_Melee_GenericDamage) applied by
@@ -423,6 +428,10 @@ private:
     // credited even when the pawn is gone by the time the bot sees its death.
     TWeakObjectPtr<AFortPlayerStateAthena> LastAttacker;
     float LastAttackerTime = -100.0f;
+    // Whether the pawn was moving last frame (a pawn that starts moving is sent to clients at once).
+    bool bWasMoving = false;
+    bool bEmoting = false;
+    bool bDanceStunned = false;
     float LastTargetInSightTime = -100.0f;
     // Facing (UpdateFacing): the point to look at, until when it outranks the way the bot moves, and the heading.
     FVector FacePoint;

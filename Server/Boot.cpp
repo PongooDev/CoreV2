@@ -98,15 +98,13 @@ namespace
     // engine's own FConfigFile::CombineFromBuffer: DedicatedServerEngine.ini's bHasVoiceEnabled (the server forwards its
     // players' voice) and bEnableDefaultServiceTracker, and the launcher's [XMPP] bEnabled=False (Core-Launcher
     // ServerConfig). DedicatedServerEngine.ini's map and game mode are in DefaultEngine.ini too, and its [Core.Log] is
-    // only log verbosity. The IpNetDriver's NetServerMaxTickRate (Fortnite's ini: 20) is cleared so the server's frame
-    // isn't capped (UGameEngine::SetServerTickRate).
+    // only log verbosity.
     void CombineServerConfig()
     {
         FConfigCacheIni::CombineIntoEngineIni(L"Server config",
             L"[OnlineSubsystem]\r\nbHasVoiceEnabled=true\r\n"
             L"[OnlineSubsystemMcp]\r\nbEnableDefaultServiceTracker=false\r\n"
-            L"[XMPP]\r\nbEnabled=false\r\n"
-            L"[/Script/OnlineSubsystemUtils.IpNetDriver]\r\nNetServerMaxTickRate=0\r\n");
+            L"[XMPP]\r\nbEnabled=false\r\n");
     }
 }
 

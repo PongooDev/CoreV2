@@ -3403,7 +3403,14 @@ namespace
         const uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + 24, CredentialsCheck + 0x60) : 0;
         Require(L"FOnlineSubsystemMcp::QueueRequest (user)", Natives::FOnlineSubsystemMcp_QueueRequestForUser, QueueForUser ? Finder::RelativeTarget(QueueForUser, 1, 5) : 0);
 
-        Require(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged", Natives::UFortRegisteredPlayerInfo_OnAccountInventoryChanged, FunctionOf(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged trying to initialize ability system actor"));
+        uintptr_t AccountInventoryChanged = FunctionOf(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged trying to initialize ability system actor");
+        if (!AccountInventoryChanged)
+        {
+            // 3.2 drops that log line (3.2 0xC16BD0); the function is still the only reader of the bonus token's template
+            // id, which it checks after the boost buffs (3.1 0xC02950 reads it too).
+            AccountInventoryChanged = FunctionOf(L"Token:accountinventorybonus");
+        }
+        Require(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged", Natives::UFortRegisteredPlayerInfo_OnAccountInventoryChanged, AccountInventoryChanged);
 
         const uintptr_t QueueForClient = FunctionOf(L"Queuing Mcp request for client=%s url=%s");
         Require(L"FOnlineSubsystemMcp::QueueRequest (client)", Natives::FOnlineSubsystemMcp_QueueRequestForClient, QueueForClient);

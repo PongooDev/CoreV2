@@ -130,6 +130,15 @@ namespace
 
 FActorDestructionInfo* UNetDriver::FindDestructionInfo(const FNetworkGUID& NetGUID)
 {
+    if (Natives::UNetDriver_DestroyedStartupOrDormantActorsIsUnique)
+    {
+        // TUniquePtr<FActorDestructionInfo> holds just the pointer.
+        using FUniqueMap = TMap<FNetworkGUID, FActorDestructionInfo*>;
+        static_assert(sizeof(FUniqueMap) == sizeof(FDestroyedActorMap));
+        FActorDestructionInfo** DestructionInfo = reinterpret_cast<FUniqueMap&>(DestroyedStartupOrDormantActors).Find(NetGUID);
+        return DestructionInfo ? *DestructionInfo : nullptr;
+    }
+
     // The finder only takes 4.16's 0x30 bytes or 4.19's 0x38.
     return Natives::FActorDestructionInfo_Size == 0x38 ? FindDestructionInfoIn<0x38>(DestroyedStartupOrDormantActors, NetGUID) : FindDestructionInfoIn<0x30>(DestroyedStartupOrDormantActors, NetGUID);
 }

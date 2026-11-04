@@ -625,6 +625,8 @@ namespace Natives
     inline ptrdiff_t UNetDriver_LastSentActors = -1;
     inline ptrdiff_t UNetDriver_LastNonRelevantActors = -1;
     inline ptrdiff_t UNetDriver_DestroyedStartupOrDormantActors = -1;
+    // The map's values are the FActorDestructionInfos themselves up to 3.2, TUniquePtr<FActorDestructionInfo> from 3.3.
+    inline bool UNetDriver_DestroyedStartupOrDormantActorsIsUnique = false;
     inline ptrdiff_t UNetDriver_ReplicationFrame = -1;
     inline ptrdiff_t UNetDriver_NetworkObjects = -1;
     inline ptrdiff_t UNetConnection_State = -1;

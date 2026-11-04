@@ -82,8 +82,8 @@ public:
     DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastRelevantActors, UNetDriver_LastRelevantActors)
     DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastSentActors, UNetDriver_LastSentActors)
     DefineNativeMember(TArray<TWeakObjectPtr<AActor>>, LastNonRelevantActors, UNetDriver_LastNonRelevantActors)
-    // TMap<FNetworkGUID, FActorDestructionInfo>, typed with 4.16's value size: Num works on every build, lookups go
-    // through FindDestructionInfo.
+    // TMap<FNetworkGUID, FActorDestructionInfo> up to 3.2, TMap<FNetworkGUID, TUniquePtr<FActorDestructionInfo>> from
+    // 3.3, typed with 4.16's value size: Num works on every build, lookups go through FindDestructionInfo.
     using FDestroyedActorMap = TMap<FNetworkGUID, TActorDestructionInfoStorage<0x30>>;
     DefineNativeObject(FDestroyedActorMap, DestroyedStartupOrDormantActors, UNetDriver_DestroyedStartupOrDormantActors)
     DefineNativeMember(uint32_t, ReplicationFrame, UNetDriver_ReplicationFrame)

@@ -2024,10 +2024,15 @@ namespace
         uintptr_t ObjectListRemove = 0;
         ptrdiff_t NetworkObjects = 0;
         // The last call that loads the driver's object list into rcx. 2.5 (UE 4.20, 0x21107D0) adds one more call after
-        // it, RenamedStartupActors.Remove(Actor's name) on a TMap the driver holds inline (lea rcx, [r14+288h]).
+        // it, RenamedStartupActors.Remove(Actor's name) on a TMap the driver holds inline (lea rcx, [r14+288h]). 3.3
+        // (0x21F2B62) loads the actor after the list: mov rcx, [rdi+508h]; mov rdx, rbx; call. Without it the last
+        // match was FNetworkObjectList::Find (0x2212AA0, which returns its TSharedPtr through rdx), and every actor
+        // ServerReplicateActors_BuildConsiderList removed had its vtable zeroed (a missed Find writes an empty pointer):
+        // the server crashed in UNetConnection::GetTimeoutValue on the connection's OwningActor as a player joined (#244).
         for (auto Call = NotifyCalls.rbegin(); Call != NotifyCalls.rend() && !ObjectListRemove; ++Call)
         {
-            const uintptr_t Load = Call->first - 7;
+            const bool bActorLoad = Byte(Call->first - 3) == 0x48 && Byte(Call->first - 2) == 0x8B && (Byte(Call->first - 1) & 0xF8) == 0xD0;
+            const uintptr_t Load = Call->first - (bActorLoad ? 10 : 7);
             if ((Byte(Load) & 0xFE) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04)
             {
                 ObjectListRemove = Call->second;
@@ -2685,6 +2690,29 @@ namespace
         }
         RequireOffset(L"UNetDriver::GuidCache", Natives::UNetDriver_GuidCache, GuidCacheLoad ? *reinterpret_cast<const int32_t*>(GuidCacheLoad + 3) : 0);
         RequireOffset(L"UNetDriver::DestroyedStartupOrDormantActors", Natives::UNetDriver_DestroyedStartupOrDormantActors, DestroyedActors);
+
+        // The map's FindOrAdd steps through its elements (key, value, then the hash's next id): lea r8, [rdx+rdx*N];
+        // cmp [r9+r8*8], ecx; jz; mov eax, [r9+r8*8+HashNextId]. 3.2 (0x2190B90) holds the info in place (+0x40, a 0x38
+        // byte value); 3.3 (0x21E7FF0, UE 4.20's TMap<FNetworkGUID, TUniquePtr<FActorDestructionInfo>>) a pointer (+0x10)
+        // to one it allocates (mov ecx, 38h). Builds without this lookup keep the info in place.
+        const uintptr_t FindOrAddCall = AssignGuid ? FindRawCall(AssignGuid + 5, AssignGuid + 0xC0) : 0;
+        ptrdiff_t DestroyedActorValueSize = 0;
+        for (uintptr_t Next = FindOrAddCall ? FindInstruction(AssignGuid + 5, FindOrAddCall, { 0x8B, 0x44 }) : 0; Next && !DestroyedActorValueSize; Next = FindInstruction(Next + 1, FindOrAddCall, { 0x8B, 0x44 }))
+        {
+            if ((Byte(Next - 1) & 0xF0) == 0x40 && (Byte(Next + 2) & 0xC0) == 0xC0 && Byte(Next - 3) == 0x74 && Byte(Next - 6) == 0x39 && (Byte(Next - 5) & 0xC7) == 0x04 && (Byte(Next - 4) & 0xC0) == 0xC0)
+            {
+                DestroyedActorValueSize = static_cast<ptrdiff_t>(Byte(Next + 3)) - 8;
+            }
+        }
+        Natives::UNetDriver_DestroyedStartupOrDormantActorsIsUnique = DestroyedActorValueSize == static_cast<ptrdiff_t>(sizeof(void*));
+        if (Natives::UNetDriver_DestroyedStartupOrDormantActorsIsUnique)
+        {
+            Log::Info(L"Finder: UNetDriver::DestroyedStartupOrDormantActors holds TUniquePtr<FActorDestructionInfo>");
+        }
+        else if (DestroyedActorValueSize && DestroyedActorValueSize != static_cast<ptrdiff_t>(Natives::FActorDestructionInfo_Size))
+        {
+            Log::Warning(L"Finder: UNetDriver::DestroyedStartupOrDormantActors holds 0x{:X} byte values, FActorDestructionInfo is 0x{:X}", DestroyedActorValueSize, Natives::FActorDestructionInfo_Size);
+        }
 
         const uintptr_t ReplicateProperties = FunctionOf(L"ReplicateProperties: Object == NULL");
         const uintptr_t ReplicatePropertiesEnd = Finder::FunctionEnd(ReplicateProperties);

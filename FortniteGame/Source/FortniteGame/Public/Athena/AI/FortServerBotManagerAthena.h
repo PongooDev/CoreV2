@@ -215,11 +215,18 @@ private:
     float DropStartTime = 0.0f;
     float DropEndTime = 0.0f;
     bool bHasNavigation = false;
+    bool bNavigationTried = false;
     std::chrono::steady_clock::time_point LastFrameStart;
     double FrameMsSum = 0.0;
     double FrameMsMax = 0.0;
     double BotsMsSum = 0.0;
     int32_t FrameCount = 0;
+    // Hitches in the summary's window: frames over 50 ms, the bots' worst frame, and what took longest in it.
+    int32_t FrameSpikes = 0;
+    double BotsMsMax = 0.0;
+    double LootRefreshMsMax = 0.0;
+    double BotTickMsMax = 0.0;
+    std::wstring SlowestBotTick;
     std::map<UFortWeaponItemDefinition*, bool> GunDefinitions;
     struct FBotHit
     {

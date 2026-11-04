@@ -390,6 +390,7 @@ void UFortServerBotManagerAthena::Tick()
         const double FrameMs = std::chrono::duration<double, std::milli>(FrameStart - LastFrameStart).count();
         FrameMsSum += FrameMs;
         FrameMsMax = std::max(FrameMsMax, FrameMs);
+        FrameSpikes += FrameMs >= 50.0 ? 1 : 0;
         ++FrameCount;
     }
     LastFrameStart = FrameStart;
@@ -430,7 +431,9 @@ void UFortServerBotManagerAthena::Tick()
     if (bAircraftStarted && Now >= NextLootRefresh)
     {
         NextLootRefresh = Now + LootRefreshInterval;
+        const auto LootStart = std::chrono::steady_clock::now();
         RefreshLoot(Now);
+        LootRefreshMsMax = std::max(LootRefreshMsMax, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - LootStart).count());
     }
     if (bAircraftStarted && !bLandingAssigned && !bMatchEnded)
     {
@@ -439,14 +442,22 @@ void UFortServerBotManagerAthena::Tick()
     // Once the match has ended the bots stand still (the winners' screen is up).
     for (size_t Index = 0; Index < PlayerBots.size() && !bMatchEnded; ++Index)
     {
+        const auto BotStart = std::chrono::steady_clock::now();
         PlayerBots[Index]->Tick(Now, DeltaSeconds);
+        if (const double BotMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - BotStart).count(); BotMs > BotTickMsMax)
+        {
+            BotTickMsMax = BotMs;
+            SlowestBotTick = PlayerBots[Index]->GetBotName();
+        }
     }
     if (bAircraftStarted && !bMatchEnded)
     {
         UpdateCounts();
         CheckWinConditionLastManStanding();
     }
-    BotsMsSum += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - FrameStart).count();
+    const double BotsMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - FrameStart).count();
+    BotsMsSum += BotsMs;
+    BotsMsMax = std::max(BotsMsMax, BotsMs);
     LogSummary(Now);
 #endif
 }
@@ -560,6 +571,17 @@ void UFortServerBotManagerAthena::TickWarmup(float Now)
     else if (Alive < Wanted)
     {
         SpawnBots(Wanted, Now);
+    }
+    // The navigation (its octree and first build take a quarter of a second in one frame) and the assets the bots load
+    // on first use (emotes) are set up as soon as the bots are in, early in the warmup, not as the bus leaves with
+    // every player on the server ("ping spikes" with bots on, #233).
+    if (!bNavigationTried && Wanted > 0 && GetAliveBotCount() >= Wanted)
+    {
+        bNavigationTried = true;
+        AFortAthenaAIBotController::PreloadAssets();
+        RefreshLoot(Now);
+        GatherContainers();
+        InitializeNavigation();
     }
 #endif
 }
@@ -764,7 +786,11 @@ void UFortServerBotManagerAthena::OnAircraftPhaseStarted(float Now)
         RefreshLoot(Now);
         GatherContainers();
         GatherLandingSpots();
-        InitializeNavigation();
+        if (!bNavigationTried)
+        {
+            bNavigationTried = true;
+            InitializeNavigation();
+        }
     }
 #endif
 }
@@ -1390,11 +1416,16 @@ void UFortServerBotManagerAthena::LogSummary(float Now)
     }
     AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
     Log::Info(L"Battle Royale bots: {} in the warmup, {} in the aircraft, {} skydiving, {} landed ({} on the navmesh), {} out; {} loot pickups seen; players left {}, teams left {}; "
-        L"frame {:.1f} ms average, {:.1f} ms max, bots {:.2f} ms a frame",
+        L"frame {:.1f} ms average, {:.1f} ms max, {} over 50 ms; bots {:.2f} ms a frame, {:.1f} ms max (one bot {:.1f} ms: {}, loot list {:.1f} ms)",
         ByState[0], ByState[1], ByState[2], ByState[3], OnNavMesh, ByState[4], Loot.size(), GameState ? static_cast<int32_t>(GameState->PlayersLeft) : 0, GameState ? static_cast<int32_t>(GameState->TeamsLeft) : 0,
-        FrameCount ? FrameMsSum / FrameCount : 0.0, FrameMsMax, FrameCount ? BotsMsSum / FrameCount : 0.0);
+        FrameCount ? FrameMsSum / FrameCount : 0.0, FrameMsMax, FrameSpikes, FrameCount ? BotsMsSum / FrameCount : 0.0, BotsMsMax, BotTickMsMax, SlowestBotTick, LootRefreshMsMax);
     FrameMsSum = 0.0;
     FrameMsMax = 0.0;
     BotsMsSum = 0.0;
     FrameCount = 0;
+    FrameSpikes = 0;
+    BotsMsMax = 0.0;
+    BotTickMsMax = 0.0;
+    LootRefreshMsMax = 0.0;
+    SlowestBotTick.clear();
 }

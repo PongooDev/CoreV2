@@ -170,6 +170,9 @@ public:
 
     // A healing or shield item's values, or null for anything else (cached per item).
     static const FFortAthenaAIBotConsumable* GetConsumableInfo(UFortItemDefinition* Definition);
+    // Loads what the bots use later (the emotes, their animations and the emote ability) up front, so no bot's first
+    // use of one loads it in the middle of a match.
+    static void PreloadAssets();
     // A gun's kind and stats row values (cached per weapon).
     static const FFortAthenaAIBotWeapon& GetWeaponInfo(UFortWeaponItemDefinition* Definition);
     // Whether the bot wants this floor pickup: a gun it would carry (WeaponSlotFor), ammo for its guns, or a
@@ -201,7 +204,14 @@ private:
     void SteerAroundObstacles(FVector& Direction, float Now);
     // The pawn's EFortMovementStyle: a player sprints to get somewhere and runs while fighting (AFortPawn's
     // GetMovementSpeed reads the movement set's speed for the style; an AI controller never sets it).
-    void SetMovementStyle(bool bSprint);
+    void SetMovementStyle(bool bSprint, float Now);
+    // Where the bot looks. AAIController::UpdateControlRotation turns the pawn to its focal point at once, so the bot
+    // turns there itself at a player's turn rate: the point it wants to look at (FaceTowards: a target, a chest, a
+    // teammate) for a moment, else the way it is moving; each frame the focal point is the turned heading.
+    void FaceTowards(const FVector& Point, float Now, float Hold = 0.4f);
+    void UpdateFacing(float Now, float DeltaSeconds);
+    // How far (degrees) the bot's heading is from the point it wants to look at.
+    float FacingError() const;
     void LogMovementDiagnostics();
     // 21.40's _Loot for containers: walk to the nearest unsearched chest or ammo box and search it (its own
     // ServerOnAttemptInteract), then take what comes out.
@@ -250,7 +260,9 @@ private:
     bool DamagePawn(AFortPawn* Victim, AFortWeapon* Weapon, int32_t Hits, float& OutDamage);
     // The weapon's damage effect (GE_Ranged_GenericDamage, or the pickaxe's GE_Melee_GenericDamage) with the weapon as the
     // context's damage source, from the bot's ability system to the target's.
-    bool ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee);
+    // HitFrom: where the shot came from. The context then carries the hit as the weapon's ability adds it (its hit result,
+    // from the shooter to the target, and its origin), which the victim's damage cue shows as the hit's direction.
+    bool ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee, const FVector* HitFrom = nullptr);
     void EquipPickaxe();
     // A montage shown to the players (reload, healing), as an ability's PlayMontageAndWait replicates it: the ability
     // system's RepAnimMontageInfo (and the Athena pawn's copy). bStop stops the current one.
@@ -357,7 +369,6 @@ private:
     float LatestJumpTime = 0.0f;
     float NextPerceptionTime = 0.0f;
     float NextDeathCheck = 0.0f;
-    float NextFaceTime = 0.0f;
     float NextStormTick = 0.0f;
     float LastStormHealth = -1.0f;
     float NextLootSearch = 0.0f;
@@ -407,6 +418,23 @@ private:
     int32_t DoorsOpened = 0;
     bool bLoggedMovement = false;
     uint8_t MovementStyle = 0xFF;
+    float NextMovementStyleChange = 0.0f;
+    // The player state of whoever hurt the pawn last (from its Damagers when its health fell), so the elimination is
+    // credited even when the pawn is gone by the time the bot sees its death.
+    TWeakObjectPtr<AFortPlayerStateAthena> LastAttacker;
+    float LastAttackerTime = -100.0f;
+    float LastTargetInSightTime = -100.0f;
+    // Facing (UpdateFacing): the point to look at, until when it outranks the way the bot moves, and the heading.
+    FVector FacePoint;
+    float FacePointUntil = 0.0f;
+    bool bHasFacePoint = false;
+    bool bHasFacingYaw = false;
+    float FacingYaw = 0.0f;
+    // Strafing input eased between directions (StrafeSign is where it heads).
+    float StrafeAmount = 0.0f;
+    float LastStrafeTime = 0.0f;
+    // Skydiving: diving (looking down along the fall, the skydive's active control) or gliding towards the spot.
+    bool bDiving = false;
 
     // The game's own fire (ActivateWeaponFire): the shot waiting to show whether it spent ammo.
     bool bWeaponFireActive = false;

@@ -558,6 +558,82 @@ namespace
         return Function && Params.Call(Weapon) ? Params.Take<int32_t>(L"ReturnValue") : 0;
     }
 
+    // The hit in a damage effect's context, as a weapon ability's targeting adds it: a blocking FHitResult from the
+    // shooter to the target (UAbilitySystemBlueprintLibrary::EffectContextAddHitResult) and the context's origin
+    // (EffectContextSetOrigin). The victim's damage cue (AFortPawn::GameplayCue_Damage) gets its instigator and hit from
+    // the context; without them a player hit by a bot saw no hit direction (#233).
+    void AddHitToContext(void* ContextHandle, UObject* TargetActor, const FVector& From)
+    {
+        static UFunction* AddHitResult = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextAddHitResult");
+        static UFunction* SetOrigin = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextSetOrigin");
+        static UClass* Library = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
+        UObject* LibraryDefault = Library ? Library->GetDefaultObject() : nullptr;
+        UProperty* HitProperty = AddHitResult ? AddHitResult->FindPropertyByName(FName(L"HitResult", FNAME_Find)) : nullptr;
+        if (!LibraryDefault || !HitProperty || !TargetActor)
+        {
+            return;
+        }
+        const FVector To = LocationOf(reinterpret_cast<AActor*>(TargetActor));
+        FVector Normal = From - To;
+        const float Length = Normal.Size();
+        Normal = Length > 1.0f ? Normal * (1.0f / Length) : FVector(0.0f, 0.0f, 1.0f);
+        Reflection::FParams Hit(AddHitResult, true);
+        if (Hit.CopyStruct(L"EffectContext", ContextHandle))
+        {
+            UScriptStruct* HitStruct = static_cast<UStructProperty*>(HitProperty)->Struct;
+            uint8_t* Data = static_cast<uint8_t*>(Hit.GetAddress(L"HitResult"));
+            const auto Member = [&](const wchar_t* Name) -> UProperty* { return HitStruct->FindPropertyByName(FName(Name, FNAME_Find)); };
+            const auto SetVector = [&](const wchar_t* Name, const FVector& Value)
+            {
+                if (UProperty* Property = Member(Name))
+                {
+                    *reinterpret_cast<FVector*>(Data + Property->GetOffset_ForInternal()) = Value;
+                }
+            };
+            if (UBoolProperty* Blocking = static_cast<UBoolProperty*>(Member(L"bBlockingHit")))
+            {
+                Blocking->SetPropertyValue(Data + Blocking->GetOffset_ForInternal(), true);
+            }
+            SetVector(L"Location", To);
+            SetVector(L"ImpactPoint", To);
+            SetVector(L"Normal", Normal);
+            SetVector(L"ImpactNormal", Normal);
+            SetVector(L"TraceStart", From);
+            SetVector(L"TraceEnd", To);
+            if (UProperty* Distance = Member(L"Distance"))
+            {
+                *reinterpret_cast<float*>(Data + Distance->GetOffset_ForInternal()) = Length;
+            }
+            if (UProperty* Actor = Member(L"Actor"))
+            {
+                *reinterpret_cast<FWeakObjectPtr*>(Data + Actor->GetOffset_ForInternal()) = TargetActor;
+            }
+            Hit.Set(L"bReset", true);
+            Hit.Call(LibraryDefault);
+        }
+        if (SetOrigin)
+        {
+            Reflection::FParams Origin(SetOrigin, true);
+            if (Origin.CopyStruct(L"EffectContext", ContextHandle) && Origin.Set(L"Origin", From))
+            {
+                Origin.Call(LibraryDefault);
+            }
+        }
+        static int32_t Logged = 0;
+        static UFunction* GetInstigator = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextGetInstigatorActor");
+        static UFunction* HasHitResult = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextHasHitResult");
+        if (Logged < 2 && GetInstigator && HasHitResult)
+        {
+            ++Logged;
+            Reflection::FParams Instigator(GetInstigator, true);
+            Reflection::FParams HasHit(HasHitResult, true);
+            const bool bInstigator = Instigator.CopyStruct(L"EffectContext", ContextHandle) && Instigator.Call(LibraryDefault);
+            const bool bHasHit = HasHit.CopyStruct(L"EffectContext", ContextHandle) && HasHit.Call(LibraryDefault) && HasHit.Take<bool>(L"ReturnValue");
+            Log::Info(L"Battle Royale bots: a bot's hit carries instigator {} and {} hit result, from ({:.0f}, {:.0f}, {:.0f})", bInstigator ? NameOf(reinterpret_cast<UObject*>(Instigator.Take<AActor*>(L"ReturnValue"))) : std::wstring(L"none"),
+                bHasHit ? L"a" : L"no", From.X, From.Y, From.Z);
+        }
+    }
+
     // Who killed the pawn: the newest of its damagers, through the weapon to its owner, as the death report names the
     // killer (8.30's bots learn it from the pawn's death delegate, which Core can't bind).
     AFortPlayerStateAthena* KillerOf(AFortPawn* Pawn)
@@ -566,6 +642,14 @@ namespace
         for (int32_t Index = Damagers.Num() - 1; Index >= 0; --Index)
         {
             AActor* Causer = Damagers[Index].DamageCauser;
+            if (AController* CauserController = Causer ? Cast<AController>(reinterpret_cast<UObject*>(Causer)) : nullptr)
+            {
+                if (AFortPlayerStateAthena* State = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(CauserController->PlayerState))))
+                {
+                    return State;
+                }
+                continue;
+            }
             AActor* Owner = Causer;
             for (int32_t Depth = 0; Owner && Depth < 3 && !Cast<APawn>(reinterpret_cast<UObject*>(Owner)); ++Depth)
             {
@@ -882,6 +966,7 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
             }
         }
         Wander(Now);
+        UpdateFacing(Now, DeltaSeconds);
         return;
     }
     default:
@@ -899,6 +984,11 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     {
         AFortPlayerStateAthena* BotKiller = Pawn ? Manager->LastBotAttackerOf(Pawn) : nullptr;
         AFortPlayerStateAthena* Killer = Pawn ? KillerOf(Pawn) : nullptr;
+        // The pawn may be gone already (or its damagers cleared): whoever hurt it last, within 15 s.
+        if (!Killer && LastAttacker.Get() && Now - LastAttackerTime < 15.0f)
+        {
+            Killer = LastAttacker.Get();
+        }
         // Bled out while down: the one who knocked it is its eliminator.
         Manager->RemoveFromAliveBots(this, Killer ? Killer : BotKiller ? BotKiller : Downer.Get());
         return;
@@ -926,12 +1016,21 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         {
             LastHurtTime = Now;
         }
+        if (LastHealthShield >= 0.0f && HealthShield < LastHealthShield - 0.5f)
+        {
+            if (AFortPlayerStateAthena* Attacker = KillerOf(reinterpret_cast<AFortPawn*>(Pawn)); Attacker && Attacker != GetPlayerState())
+            {
+                LastAttacker = Attacker;
+                LastAttackerTime = Now;
+            }
+        }
         LastHealthShield = HealthShield;
     }
     // Down (squads): crawling to a teammate, bleeding out, or eliminated with the team.
     if (Pawn->bIsDBNO)
     {
         Downed(Now);
+        UpdateFacing(Now, DeltaSeconds);
         TakeStormDamage(Now);
         return;
     }
@@ -997,6 +1096,7 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         }
     }
     TryToUnstuck(Now);
+    UpdateFacing(Now, DeltaSeconds);
     TakeStormDamage(Now);
     if (!bLoggedMovement && LandedTime > 0.0f && Now - LandedTime > 6.0f)
     {
@@ -1091,16 +1191,42 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
     LastKnownPosition = Location;
     const FVector Direction = Direction2D(Location, DropTarget);
     const float Distance = Dist2D(Location, DropTarget);
-    if (Distance > 300.0f)
-    {
-        Pawn->AddMovementInput(Direction, 1.0f, true);
-    }
-    if (AAIController* AIController = Controller.Get(); AIController && Now >= NextShotTime)
+    // A player glides to a far spot and dives once it is below them. The skydive's fast fall is its active air control
+    // (UFortMovementComp_CharacterAthena's SkydivingControlParamsActive: terminal velocity 6000 against the passive 1200
+    // on 3.1, its rows Default.SkydivingControlActive.*), which the movement uses (3.1 0x9B6340, 0x9C0110) while the
+    // pawn's input acceleration points down (its Z below -0.1) and along the controller's view (the dot of the two
+    // directions above 0.4). A player's input follows the camera, pitched down; a bot's AddMovementInput gets a downward
+    // part, and its view is pitched down too: AAIController::UpdateControlRotation keeps a focal point's pitch at 0
+    // ("don't pitch view unless looking at another pawn"), but focused on its own pawn the controller looks from the
+    // pawn's eyes to its middle, straight down.
+    const float Height = Location.Z - DropTarget.Z;
+    const bool bWantsDive = Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen && (Distance < 300.0f || Distance < Height * 0.8f);
+    if (AAIController* AIController = Controller.Get(); AIController && (bWantsDive != bDiving || Now >= NextShotTime))
     {
         NextShotTime = Now + 1.0f;
-        // Looking at the spot itself, as a player dives: the skydive's pitch (the pawn's replicated view pitch, which
-        // other players' animation shows) points down at it, straight down once above it.
-        AIController->SetFocalPoint(Distance > 300.0f ? FVector(DropTarget.X, DropTarget.Y, DropTarget.Z) : FVector(Location.X + Direction.X * 10.0f, Location.Y + Direction.Y * 10.0f, DropTarget.Z));
+        if (bWantsDive)
+        {
+            AIController->SetFocus(reinterpret_cast<AActor*>(Pawn));
+        }
+        else
+        {
+            AIController->SetFocalPoint(FVector(DropTarget.X, DropTarget.Y, DropTarget.Z));
+        }
+        if (bWantsDive != bDiving && !Pawn->bIsParachuteOpen)
+        {
+            Log::Info(L"Battle Royale bots: {} {} at {:.0f} m up, {:.0f} m from its spot", BotName, bWantsDive ? L"dives" : L"glides", Height / 100.0f, Distance / 100.0f);
+        }
+        bDiving = bWantsDive;
+    }
+    if (bWantsDive)
+    {
+        FVector Dive = Distance > 300.0f ? FVector(Direction.X * 0.6f, Direction.Y * 0.6f, -1.0f) : FVector(0.0f, 0.0f, -1.0f);
+        Dive = Dive * (1.0f / Dive.Size());
+        Pawn->AddMovementInput(Dive, 1.0f, true);
+    }
+    else if (Distance > 300.0f)
+    {
+        Pawn->AddMovementInput(Direction, 1.0f, true);
     }
 
     UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
@@ -1108,8 +1234,10 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
     if (Now >= NextLogTime)
     {
         NextLogTime = Now + 5.0f;
-        Log::Info(L"Battle Royale bots: {} falls at ({:.0f}, {:.0f}, {:.0f}), {:.0f} m from its spot (skydiving {}, parachute {}, movement {})", BotName, Location.X, Location.Y, Location.Z,
-            Distance / 100.0f, Pawn->bIsSkydiving ? L"yes" : L"no", Pawn->bIsParachuteOpen ? L"open" : L"closed", Movement ? static_cast<int32_t>(Movement->MovementMode) : -1);
+        AAIController* AIController = Controller.Get();
+        Log::Info(L"Battle Royale bots: {} falls at ({:.0f}, {:.0f}, {:.0f}), {:.0f} m from its spot, {:.0f} u/s down, view pitch {:.0f} (skydiving {}, parachute {}, movement {})", BotName, Location.X, Location.Y, Location.Z,
+            Distance / 100.0f, Movement ? -static_cast<float>(static_cast<FVector>(Movement->Velocity).Z) : 0.0f, AIController ? static_cast<FRotator>(AIController->ControlRotation).Pitch : 0.0f,
+            Pawn->bIsSkydiving ? L"yes" : L"no", Pawn->bIsParachuteOpen ? L"open" : L"closed", Movement ? static_cast<int32_t>(Movement->MovementMode) : -1);
     }
     if (bWalking && !Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen)
     {
@@ -1121,6 +1249,8 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
         {
             State = EFortAthenaAIBotState::Landed;
             NextLogTime = Now + 5.0f;
+            bDiving = false;
+            bHasFacingYaw = false;
             Log::Info(L"Battle Royale bots: {} lands at ({:.0f}, {:.0f}, {:.0f}), {:.0f} m from its spot", BotName, Location.X, Location.Y, Location.Z, Distance / 100.0f);
         }
     }
@@ -1501,9 +1631,10 @@ void AFortAthenaAIBotController::ManageWeapon(float Now)
             const FFortAthenaAIBotWeapon& Next = WeaponList[static_cast<size_t>(ForRange)];
             // A loaded weapon that suits the range as well stays out: only a clearly better one is worth the swap.
             const int32_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
-            if (Entry.LoadedAmmo == 0 || RangePreference(Next.Type, Band) > RangePreference(Entry.Type, Band) + 0.5f || Distance > Entry.EquipMaxDistance)
+            // A margin past the held gun's range keeps a target at the edge of it from swapping guns back and forth.
+            if (Entry.LoadedAmmo == 0 || RangePreference(Next.Type, Band) > RangePreference(Entry.Type, Band) + 0.5f || Distance > Entry.EquipMaxDistance * 1.2f)
             {
-                NextWeaponSwitch = Now + 1.5f;
+                NextWeaponSwitch = Now + 3.0f;
                 static int32_t LoggedSwitches = 0;
                 if (LoggedSwitches++ < 10)
                 {
@@ -1877,7 +2008,8 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     {
         AimError = FVector(RandomRange(-1.0f, 1.0f), RandomRange(-1.0f, 1.0f), RandomRange(-0.6f, 0.6f)) * ErrorScale;
     }
-    AIController->SetFocalPoint(FVector(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 20.0f) + AimError);
+    FaceTowards(FVector(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 20.0f) + AimError, Now, 0.5f);
+    LastTargetInSightTime = Now;
 
     // Keep a fighting distance: close in from afar, back off when too close (a shotgun or the pickaxe wants it close).
     if (!bArmed)
@@ -1908,21 +2040,29 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
         }
         // Strafing (the community list: bots strafe in fights): side to side across the line of fire, changing
         // direction every second or so.
+        // The input eases from one side to the other (about a third of a second) instead of flipping in a frame.
         if (Now >= NextStrafeChange)
         {
-            NextStrafeChange = Now + RandomRange(0.6f, 1.6f);
-            StrafeSign = FMath::FRand() < 0.7f ? -StrafeSign : StrafeSign;
+            NextStrafeChange = Now + RandomRange(0.9f, 2.2f);
+            StrafeSign = FMath::FRand() < 0.6f ? -StrafeSign : StrafeSign;
         }
+        const float Step = std::min(std::max(Now - LastStrafeTime, 0.0f), 0.1f) * 3.0f;
+        LastStrafeTime = Now;
+        StrafeAmount = StrafeAmount < StrafeSign ? std::min(StrafeAmount + Step, StrafeSign) : std::max(StrafeAmount - Step, StrafeSign);
         const FVector Toward = Direction2D(Location, TargetLocation);
-        SetMovementStyle(false);
-        Pawn->AddMovementInput(FVector(-Toward.Y * StrafeSign, Toward.X * StrafeSign, 0.0f), 0.8f, false);
+        SetMovementStyle(false, Now);
+        if (std::fabs(StrafeAmount) > 0.05f)
+        {
+            Pawn->AddMovementInput(FVector(-Toward.Y * StrafeAmount, Toward.X * StrafeAmount, 0.0f), 0.8f, false);
+        }
     }
 
     if (bFiring && Now >= FireUntil)
     {
         StopFiring();
     }
-    const bool bReady = Now >= TargetAcquiredTime + AIBotSkills.MaxTrackingReactionTime && Now >= NextShotTime && ReloadUntil <= 0.0f;
+    // A player turns to face a target before shooting at it.
+    const bool bReady = Now >= TargetAcquiredTime + AIBotSkills.MaxTrackingReactionTime && Now >= NextShotTime && ReloadUntil <= 0.0f && FacingError() < 20.0f;
     const bool bLoaded = bPickaxeEquipped ? Distance < 250.0f : (EquippedWeapon.Get() && EquippedWeapon.Get()->AmmoCount > 0);
     if (bReady && bLoaded && !bFiring)
     {
@@ -2024,23 +2164,48 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
 #endif
 }
 
+namespace
+{
+    std::vector<UFortMontageItemDefinitionBase*>& BotEmotes()
+    {
+        static std::vector<UFortMontageItemDefinitionBase*> EmoteAssets;
+        static bool bLoaded = false;
+        if (!bLoaded)
+        {
+            bLoaded = true;
+            for (const wchar_t* Path : { L"/Game/Athena/Items/Cosmetics/Dances/EID_DanceMoves.EID_DanceMoves", L"/Game/Athena/Items/Cosmetics/Dances/EID_Floss.EID_Floss",
+                     L"/Game/Athena/Items/Cosmetics/Dances/EID_Fresh.EID_Fresh", L"/Game/Athena/Items/Cosmetics/Dances/EID_BreakDance.EID_BreakDance" })
+            {
+                if (UFortMontageItemDefinitionBase* Emote = LoadObject<UFortMontageItemDefinitionBase>(nullptr, Path))
+                {
+                    EmoteAssets.push_back(Emote);
+                }
+            }
+        }
+        return EmoteAssets;
+    }
+}
+
+void AFortAthenaAIBotController::PreloadAssets()
+{
+#if WITH_SERVER_CODE
+    const auto Started = std::chrono::steady_clock::now();
+    for (UFortMontageItemDefinitionBase* Emote : BotEmotes())
+    {
+        Emote->Animation.LoadSynchronous();
+    }
+    if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+    {
+        GameData->EmoteGameplayAbility.LoadSynchronous();
+    }
+    Log::Info(L"Battle Royale bots: {} emotes loaded up front ({:.0f} ms)", BotEmotes().size(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count());
+#endif
+}
+
 bool AFortAthenaAIBotController::PlayEmote(float Now, float Duration)
 {
 #if WITH_SERVER_CODE
-    static std::vector<UFortMontageItemDefinitionBase*> EmoteAssets;
-    static bool bLoaded = false;
-    if (!bLoaded)
-    {
-        bLoaded = true;
-        for (const wchar_t* Path : { L"/Game/Athena/Items/Cosmetics/Dances/EID_DanceMoves.EID_DanceMoves", L"/Game/Athena/Items/Cosmetics/Dances/EID_Floss.EID_Floss",
-                 L"/Game/Athena/Items/Cosmetics/Dances/EID_Fresh.EID_Fresh", L"/Game/Athena/Items/Cosmetics/Dances/EID_BreakDance.EID_BreakDance" })
-        {
-            if (UFortMontageItemDefinitionBase* Emote = LoadObject<UFortMontageItemDefinitionBase>(nullptr, Path))
-            {
-                EmoteAssets.push_back(Emote);
-            }
-        }
-    }
+    std::vector<UFortMontageItemDefinitionBase*>& EmoteAssets = BotEmotes();
     AFortPlayerPawnAthena* Pawn = GetPawn();
     UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
@@ -2212,8 +2377,8 @@ void AFortAthenaAIBotController::MoveTowards(const FVector& Destination, float N
         StopMoving();
         return;
     }
-    // Sprinting to get there, running while it fights.
-    SetMovementStyle(!bFiring && !(CurrentTarget.Get() && bHasVisualLineOfSightOnTarget));
+    // Sprinting to get there, running while it fights (and for a moment after its target leaves its sight).
+    SetMovementStyle(!bFiring && Now - LastTargetInSightTime > 1.5f, Now);
     if (FollowPath(Destination, Now, AcceptanceRadius))
     {
         bHasMoveGoal = true;
@@ -2224,18 +2389,9 @@ void AFortAthenaAIBotController::MoveTowards(const FVector& Destination, float N
     {
         MoveGoal = Destination;
         bHasMoveGoal = true;
-        if (!bFiring && !CurrentTarget.Get())
-        {
-            AIController->SetFocalPoint(FVector(Destination.X, Destination.Y, Location.Z + 60.0f));
-        }
     }
-    // Facing the way it goes: Battle Royale's pawn moves slower sideways and backwards (its directional speed curve).
-    if (!bFiring && !CurrentTarget.Get() && Now >= NextFaceTime)
-    {
-        NextFaceTime = Now + 0.25f;
-        const FVector Direction = Direction2D(Location, Destination);
-        AIController->SetFocalPoint(FVector(Location.X + Direction.X * 1000.0f, Location.Y + Direction.Y * 1000.0f, Location.Z + 60.0f));
-    }
+    // Facing the way it goes (UpdateFacing turns it along its velocity): Battle Royale's pawn moves slower sideways and
+    // backwards (its directional speed curve). Before it gets going, it turns towards the goal.
     FVector Direction = Direction2D(Location, Destination);
     SteerAroundObstacles(Direction, Now);
     Pawn->AddMovementInput(Direction, 1.0f, false);
@@ -2296,11 +2452,7 @@ bool AFortAthenaAIBotController::FollowPath(const FVector& Destination, float No
         }
         bPathFollowing = Result == EPathFollowingRequestResult::RequestSuccessful;
         PathGoal = Destination;
-        // The path following turns the pawn along its path (the Move focus) unless the fight's focus outranks it.
-        if (bPathFollowing && !bFiring && !CurrentTarget.Get())
-        {
-            AIController->ClearFocus();
-        }
+        // The bot faces along its path itself (UpdateFacing follows the velocity), turning smoothly at corners.
         return true;
     }
     // The path ended short of the goal (a partial one, or it was blocked): steer, then ask again.
@@ -2395,16 +2547,93 @@ void AFortAthenaAIBotController::SteerAroundObstacles(FVector& Direction, float 
 #endif
 }
 
-void AFortAthenaAIBotController::SetMovementStyle(bool bSprint)
+void AFortAthenaAIBotController::SetMovementStyle(bool bSprint, float Now)
 {
+    // At most one change a second: a player doesn't flick sprint on and off.
     AFortPlayerPawnAthena* Pawn = GetPawn();
     const uint8_t Style = bSprint ? StyleSprinting : StyleRunning;
-    if (!Pawn || MovementStyle == Style)
+    if (!Pawn || MovementStyle == Style || (MovementStyle != 0xFF && Now < NextMovementStyleChange))
     {
         return;
     }
+    NextMovementStyleChange = Now + 1.0f;
     MovementStyle = Style;
     Pawn->CurrentMovementStyle = Style;
+}
+
+void AFortAthenaAIBotController::FaceTowards(const FVector& Point, float Now, float Hold)
+{
+    FacePoint = Point;
+    bHasFacePoint = true;
+    FacePointUntil = Now + Hold;
+}
+
+float AFortAthenaAIBotController::FacingError() const
+{
+    if (!bHasFacePoint || !bHasFacingYaw)
+    {
+        return 180.0f;
+    }
+    const FVector Direction = Direction2D(LastKnownPosition, FacePoint);
+    if (Direction.SizeSquared() < 0.01f)
+    {
+        return 0.0f;
+    }
+    float Delta = std::atan2(Direction.Y, Direction.X) * (180.0f / 3.1415926535897932f) - FacingYaw;
+    Delta = std::fmod(Delta + 540.0f, 360.0f) - 180.0f;
+    return std::fabs(Delta);
+}
+
+void AFortAthenaAIBotController::UpdateFacing(float Now, float DeltaSeconds)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    AAIController* AIController = Controller.Get();
+    if (!Pawn || !AIController)
+    {
+        return;
+    }
+    const FVector Location = LocationOf(Pawn);
+    if (!bHasFacingYaw)
+    {
+        FacingYaw = static_cast<FRotator>(AIController->ControlRotation).Yaw;
+        bHasFacingYaw = true;
+    }
+    // What it wants to look at: the point it was given (a target, a chest), else the way it moves, else its goal.
+    UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
+    const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
+    const float Speed2D = std::sqrt(Velocity.X * Velocity.X + Velocity.Y * Velocity.Y);
+    FVector Desired;
+    if (bHasFacePoint && Now < FacePointUntil)
+    {
+        Desired = Direction2D(Location, FacePoint);
+    }
+    else if (Speed2D > 150.0f)
+    {
+        Desired = FVector(Velocity.X / Speed2D, Velocity.Y / Speed2D, 0.0f);
+    }
+    else if (bHasMoveGoal)
+    {
+        Desired = Direction2D(Location, MoveGoal);
+    }
+    else if (bHasFacePoint)
+    {
+        Desired = Direction2D(Location, FacePoint);
+    }
+    if (Desired.SizeSquared() > 0.01f)
+    {
+        // A player's turn: quick onto a target (540 degrees a second), easier while moving about (300).
+        const float TurnRate = Now - LastTargetInSightTime < 1.0f ? 540.0f : 300.0f;
+        float Delta = std::atan2(Desired.Y, Desired.X) * (180.0f / 3.1415926535897932f) - FacingYaw;
+        Delta = std::fmod(Delta + 540.0f, 360.0f) - 180.0f;
+        const float MaxStep = TurnRate * std::clamp(DeltaSeconds, 0.0f, 0.1f);
+        FacingYaw += std::clamp(Delta, -MaxStep, MaxStep);
+        FacingYaw = std::fmod(FacingYaw + 540.0f, 360.0f) - 180.0f;
+    }
+    const float Radians = FacingYaw * (3.1415926535897932f / 180.0f);
+    const float Z = bHasFacePoint && Now < FacePointUntil ? FacePoint.Z : Location.Z + 60.0f;
+    AIController->SetFocalPoint(FVector(Location.X + std::cos(Radians) * 1000.0f, Location.Y + std::sin(Radians) * 1000.0f, Z));
+#endif
 }
 
 void AFortAthenaAIBotController::LogMovementDiagnostics()
@@ -2499,10 +2728,7 @@ bool AFortAthenaAIBotController::SearchContainer(float Now)
         if (SearchUntil <= 0.0f)
         {
             SearchUntil = Now + 1.5f;
-            if (AAIController* AIController = Controller.Get())
-            {
-                AIController->SetFocalPoint(ContainerLocation);
-            }
+            FaceTowards(ContainerLocation, Now, 1.5f);
             return true;
         }
         if (Now < SearchUntil)
@@ -2558,7 +2784,7 @@ bool AFortAthenaAIBotController::SwingAtBuilding(ABuildingSMActor* Building, flo
     return Pickaxe && DamageBuilding(Building, Pickaxe, OutDamage);
 }
 
-bool AFortAthenaAIBotController::ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee)
+bool AFortAthenaAIBotController::ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee, const FVector* HitFrom)
 {
 #if WITH_SERVER_CODE
     // A weapon's hit as its ability applies it: the weapon's damage effect (GE_Ranged_GenericDamage for a gun, the
@@ -2605,6 +2831,21 @@ bool AFortAthenaAIBotController::ApplyWeaponDamageEffect(UObject* TargetActor, A
         return false;
     }
     *reinterpret_cast<FWeakObjectPtr*>(ContextData + DamageSourceProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Weapon);
+    // The instigator is the pawn and the causer the weapon, as for a player's shot: the bot's ability system is owned by
+    // its player state (OnRep_PlayerState), so MakeEffectContext names the player state, and the victim's damage cue
+    // (AFortPawn::GameplayCue_Damage, 3.1 0xDECD40) reads the instigator as a pawn: its controller and its location
+    // for the hit's direction.
+    static UProperty* InstigatorProperty = FortContext->FindPropertyByName(FName(L"Instigator", FNAME_Find));
+    static UProperty* CauserProperty = FortContext->FindPropertyByName(FName(L"EffectCauser", FNAME_Find));
+    if (InstigatorProperty && CauserProperty)
+    {
+        *reinterpret_cast<FWeakObjectPtr*>(ContextData + InstigatorProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Pawn);
+        *reinterpret_cast<FWeakObjectPtr*>(ContextData + CauserProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Weapon);
+    }
+    if (HitFrom)
+    {
+        AddHitToContext(ContextHandle, TargetActor, *HitFrom);
+    }
     Reflection::FParams Spec(MakeSpec, true);
     if (!Spec.Set(L"GameplayEffectClass", DamageEffect) || !Spec.Set(L"Level", 1.0f) || !Spec.CopyStruct(L"Context", ContextHandle) || !Spec.Call(reinterpret_cast<UObject*>(Source)))
     {
@@ -2658,7 +2899,8 @@ bool AFortAthenaAIBotController::DamagePawn(AFortPawn* Victim, AFortWeapon* Weap
     bool bApplied = false;
     for (int32_t Index = 0; Index < std::max(Hits, 1) && !Victim->bIsDying; ++Index)
     {
-        bApplied |= ApplyWeaponDamageEffect(reinterpret_cast<UObject*>(Victim), Weapon, bPickaxeEquipped && Weapon == EquippedWeapon.Get());
+        const FVector From = LocationOf(GetPawn()) + FVector(0.0f, 0.0f, 60.0f);
+        bApplied |= ApplyWeaponDamageEffect(reinterpret_cast<UObject*>(Victim), Weapon, bPickaxeEquipped && Weapon == EquippedWeapon.Get(), &From);
     }
     OutDamage = Before - (Victim->bIsDying ? 0.0f : Victim->GetHealth() + Victim->GetShield());
     static int32_t Logged = 0;
@@ -2840,10 +3082,7 @@ bool AFortAthenaAIBotController::Harvest(float Now)
         return true;
     }
     StopMoving();
-    if (AAIController* AIController = Controller.Get())
-    {
-        AIController->SetFocalPoint(HarvestPoint);
-    }
+    FaceTowards(HarvestPoint, Now, 1.0f);
     EquipPickaxe();
     if (Now < NextHarvestSwing)
     {
@@ -3220,10 +3459,7 @@ bool AFortAthenaAIBotController::ReviveTeammate(float Now)
         return true;
     }
     StopMoving();
-    if (AAIController* AIController = Controller.Get())
-    {
-        AIController->SetFocalPoint(DownedLocation);
-    }
+    FaceTowards(DownedLocation, Now, 1.0f);
     if (ReviveDoneAt <= 0.0f)
     {
         const float ReviveTime = NumberOf(reinterpret_cast<UObject*>(Downed), L"ReviveFromDBNOTime", 10.0f);

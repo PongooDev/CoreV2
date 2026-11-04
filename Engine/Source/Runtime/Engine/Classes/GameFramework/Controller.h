@@ -14,6 +14,7 @@ class AController : public AActor
 public:
     DefineUProperty(APawn*, Pawn)
     DefineUProperty(APlayerState*, PlayerState)
+    DefineUProperty(FRotator, ControlRotation)
 
     APawn* GetPawn() const { return Pawn; }
     AActor* GetViewTarget() const;

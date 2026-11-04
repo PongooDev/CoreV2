@@ -1046,8 +1046,8 @@ void FCoreAthenaBotController::AssignDisplayName(const std::wstring& Name)
             }
         }
     }
+    // Its team is the manager's to give, as the game mode gives a player theirs (FCoreAthenaBotManager::PlaceBotOnTeam).
     State->bIsABot = true;
-    State->TeamIndex = EFortTeam{ Team };
     State->ForceNetUpdate();
 }
 
@@ -1236,6 +1236,13 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     }
     GiveDanceStunAbility(static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent));
     LogTrapTargeting(Pawn);
+    // A large team game's pawns are relevant to their whole team, as a player's new pawn is (AFortGameModeAthena's
+    // FinishRestartPlayer, 3.2 0x9B6310: bIsLargeTeamGame and not 50v50): the bot shows on its teammates' map wherever
+    // it is, not only near them.
+    if (AFortPlayerPawnAthena::HasTeamMembersAlwaysRelevant() && AFortGameModeAthena::HasLargeTeamGame())
+    {
+        Pawn->bTeamMembersAlwaysRelevant = GameMode->bIsLargeTeamGame && !GameMode->bFiftyFiftySquadPlay;
+    }
     bTargeting = false;
     bWasMoving = false;
     bEmoting = false;
@@ -1327,6 +1334,21 @@ void FCoreAthenaBotController::Destroy()
     }
     if (AAIController* AIController = Controller.Get())
     {
+        // Out of its team's AFortTeamInfo first (PlaceBotOnTeam put it in TeamMembers, as a player's controller is),
+        // which keeps no controller that's gone.
+        AFortPlayerStateAthena* PlayerState = GetPlayerState();
+        AFortTeamInfo* TeamInfo = PlayerState ? static_cast<AFortTeamInfo*>(PlayerState->PlayerTeam) : nullptr;
+        if (TeamInfo && AFortTeamInfo::HasTeamMembers())
+        {
+            TArray<AController*>& Members = TeamInfo->GetMember_TeamMembers();
+            for (int32_t Index = Members.Num() - 1; Index >= 0; --Index)
+            {
+                if (Members[Index] == reinterpret_cast<AController*>(AIController))
+                {
+                    Members.RemoveAt(Index);
+                }
+            }
+        }
         AIController->K2_DestroyActor();
     }
     PlayerBotPawn = nullptr;

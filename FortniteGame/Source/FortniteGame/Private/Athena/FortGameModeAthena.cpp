@@ -736,6 +736,9 @@ namespace
         bool bOpen = false;
         int32_t MaxPlayers = 0;
         std::vector<std::vector<std::wstring>> Parties;
+        // The match's players whose party plays without fill (the answer's noFill: the party leader's
+        // player.option.fillTeam=false), who don't share a squad with others.
+        std::set<std::wstring> NoFill;
 
         // The game's own warmup lengths, from before Core first changed them (-1 until then), and the length the game
         // mode has now (0: the game's).
@@ -760,6 +763,9 @@ namespace
         std::set<std::wstring> Settled;
         // 1.11: the squads Core gave late players (PlaceLatePlayerInSquad).
         std::set<uint8_t> LateSquads;
+        // A large team game's late players who fill and the players' squad with room they were reserved a place by
+        // (ReserveLatePlayers), which they join once the game has placed them on its team.
+        std::map<std::wstring, uint8_t> FillSquads;
 
         // The room the game gave the game session before its match was assigned (KeepSessionRoom), and whether the
         // session has been given it back.
@@ -954,7 +960,10 @@ namespace
             auto Parties = bAnswered ? JsonParties(Body) : std::vector<std::vector<std::wstring>>();
             FCoreAthenaBotSettings BotSettings;
             const bool bBots = bAnswered && JsonBots(Body, BotSettings);
-            GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings]() mutable
+            // The match's no-fill players (Core-Backend's top-level noFill, #242; a backend from before it sends them only
+            // in the bots block).
+            std::vector<std::wstring> NoFill = bAnswered ? JsonStringArray(Body, "noFill") : std::vector<std::wstring>();
+            GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings, NoFill = std::move(NoFill)]() mutable
             {
                 Watch->bAsking = false;
                 if (bAnswered)
@@ -979,6 +988,7 @@ namespace
                 Watch->bOpen = bOpen;
                 Watch->MaxPlayers = MaxPlayers;
                 Watch->Parties = std::move(Parties);
+                Watch->NoFill = std::set<std::wstring>(NoFill.begin(), NoFill.end());
             });
         });
     }
@@ -1155,6 +1165,9 @@ namespace
         const auto Party = std::find_if(Watch.Parties.begin(), Watch.Parties.end(), [&](const std::vector<std::wstring>& Members) { return std::find(Members.begin(), Members.end(), Id) != Members.end(); });
         std::set<uint8_t> Used = Watch.LateSquads;
         uint8_t Squad = 0;
+        // A large team game's player who fills: the players' squad ReserveLatePlayers found them, when it's on their team.
+        const auto Fill = Watch.FillSquads.find(Id);
+        bool bFillSquadThere = false;
         const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
         for (APlayerState* PlayerState : PlayerArray)
         {
@@ -1170,6 +1183,15 @@ namespace
             {
                 Squad = OtherSquad;
             }
+            bFillSquadThere = bFillSquadThere || (Fill != Watch.FillSquads.end() && OtherSquad == Fill->second && Other->TeamIndex == State->TeamIndex);
+        }
+        if (Squad == 0 && bFillSquadThere)
+        {
+            Squad = Fill->second;
+        }
+        if (Fill != Watch.FillSquads.end())
+        {
+            Watch.FillSquads.erase(Fill);
         }
         for (uint32_t Candidate = 255; Squad == 0 && Candidate > 0; --Candidate)
         {
@@ -1185,6 +1207,77 @@ namespace
         State->ForceNetUpdate();
         Log::Info(L"Battle Royale: {} is in squad {} on {}", Id, Squad, static_cast<EFortTeam>(State->TeamIndex).ToString());
         return true;
+    }
+
+    // A large team game's (Teams of 20: five teams of several squads of 4) place for a late player whose party fills
+    // (#242: they played on another team than the players already in, and alone in their squad): as the matchmaking
+    // service fills squads before it shares them out between the teams (Core-Backend formTeams), the players' squad with
+    // the most players that still has room for their party and no player who doesn't fill, on a team with room; on a
+    // tie, the team with the fewest players. Its squad is kept for PlaceLatePlayerInSquad; the beacon's team (0 for HumanPvP_Team1) is
+    // returned, or INDEX_NONE (another kind of playlist, 50v50's two even sides among them, a player who doesn't fill, or
+    // no such squad): the team the beacon state picks.
+    int32_t FindFillSquad(AFortGameModeAthena* GameMode, FWarmupWatch& Watch, UPartyBeaconState* BeaconState, const std::wstring& Id, int32_t PartySize)
+    {
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        const int32_t SquadSize = FCoreAthenaBotManager::MaxSquadSize;
+        if (!GameState || !AFortPlayerStateAthena::HasSquadId() || BeaconState->NumPlayersPerTeam <= SquadSize || BeaconState->NumTeams <= 2
+            || Watch.NoFill.contains(Id))
+        {
+            return INDEX_NONE;
+        }
+        struct FSquad
+        {
+            int32_t Players = 0;
+            bool bNoFill = false;
+        };
+        const FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get();
+        const uint8_t FirstTeam = EFortTeam::GetHumanPvP_Team1();
+        std::map<std::pair<uint8_t, uint8_t>, FSquad> Squads;
+        for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+        {
+            AFortPlayerStateAthena* Other = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            if (!Other || Other->TeamIndex == EFortTeam::GetSpectator() || static_cast<uint8_t>(Other->SquadId) == 0
+                || (BotManager && BotManager->FindBot(reinterpret_cast<const UObject*>(Other))))
+            {
+                continue;
+            }
+            FSquad& Squad = Squads[{ static_cast<uint8_t>(Other->TeamIndex), static_cast<uint8_t>(Other->SquadId) }];
+            ++Squad.Players;
+            Squad.bNoFill = Squad.bNoFill || Watch.NoFill.contains(Other->UniqueId.ToString().ToStdString());
+        }
+        // The late players already sent to a squad and still loading count in it.
+        for (const auto& [Pending, PendingSquad] : Watch.FillSquads)
+        {
+            for (auto& [Key, Squad] : Squads)
+            {
+                Squad.Players += Pending != Id && Key.second == PendingSquad ? 1 : 0;
+            }
+        }
+        std::pair<uint8_t, uint8_t> Best{ 0, 0 };
+        int32_t BestPlayers = 0;
+        int32_t BestTeamPlayers = 0;
+        for (const auto& [Key, Squad] : Squads)
+        {
+            const int32_t Team = static_cast<int32_t>(Key.first) - FirstTeam;
+            const int32_t TeamPlayers = Team >= 0 ? BeaconState->GetNumPlayersOnTeam(Team) : BeaconState->NumPlayersPerTeam;
+            if (Squad.bNoFill || Squad.Players + PartySize > SquadSize || TeamPlayers + PartySize > BeaconState->NumPlayersPerTeam)
+            {
+                continue;
+            }
+            if (Squad.Players > BestPlayers || (Squad.Players == BestPlayers && TeamPlayers < BestTeamPlayers))
+            {
+                Best = Key;
+                BestPlayers = Squad.Players;
+                BestTeamPlayers = TeamPlayers;
+            }
+        }
+        if (BestPlayers == 0)
+        {
+            return INDEX_NONE;
+        }
+        Watch.FillSquads[Id] = Best.second;
+        Log::Info(L"Battle Royale: {} fills squad {} on {} ({} players in it)", Id, Best.second, EFortTeam{ Best.first }.ToString(), BestPlayers);
+        return static_cast<int32_t>(Best.first) - FirstTeam;
     }
 
     // Gives each player who joined during the warmup a team. Battle Royale's clients never talk to the beacon, so only
@@ -1276,6 +1369,8 @@ namespace
             }
             if (Index < 0)
             {
+                // A large team game's player who fills (Teams of 20, #242): a players' squad with room, on its team.
+                const int32_t FillTeam = FindFillSquad(GameMode, Watch, State, Id, Party != Watch.Parties.end() ? static_cast<int32_t>(Party->size()) : 1);
                 // The new reservation is on no team until it has one, so the teams' counts leave it out.
                 Index = Reservations.Num();
                 FPartyReservation& Reservation = Reservations.AddDefaulted();
@@ -1283,7 +1378,7 @@ namespace
                 IdStruct->CopyScriptStruct(&Reservation.GetMember_PartyLeader(), &Connection->GetMember_PlayerID());
                 FPlayerReservation& Leader = Reservation.GetMember_PartyMembers().AddDefaulted();
                 IdStruct->CopyScriptStruct(&Leader.GetMember_UniqueId(), &Connection->GetMember_PlayerID());
-                const int32_t Team = State->GetTeamAssignment(Reservation);
+                const int32_t Team = FillTeam != INDEX_NONE ? FillTeam : State->GetTeamAssignment(Reservation);
                 if (Team == INDEX_NONE)
                 {
                     Reservations.RemoveAt(Index);

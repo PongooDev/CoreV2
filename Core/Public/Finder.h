@@ -211,6 +211,9 @@ namespace Finder
     // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player
     // bots. IsSkydivingOffset: AFortPlayerPawnAthena's bIsSkydiving, which it checks first.
     bool ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset);
+    // AFortGameMode::AttemptChangeTeamInfoForController's slot (Natives::AFortGameMode_AttemptChangeTeamInfoForControllerIndex),
+    // from PlacePlayerOnTeam, for Battle Royale's player bots: they join their team as a player does.
+    bool ResolveTeamChangeLive();
     // UOnlineEngineInterface::CreateUniquePlayerId's slot (Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex) in
     // the engine's online interface object's vtable, for Battle Royale's player bots' ids.
     bool ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceVTable);

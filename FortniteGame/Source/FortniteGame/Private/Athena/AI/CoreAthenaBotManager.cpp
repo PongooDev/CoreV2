@@ -117,8 +117,8 @@ namespace
         return Controller ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState))) : nullptr;
     }
 
-    // Whether a player on Team is still in the match (the game mode's alive players).
-    bool HasAlivePlayerOnTeam(AFortGameModeAthena* GameMode, uint8_t Team)
+    // Whether a player on Team (in Squad, when it isn't 0) is still in the match (the game mode's alive players).
+    bool HasAlivePlayerOnTeam(AFortGameModeAthena* GameMode, uint8_t Team, uint8_t Squad = 0)
     {
         if (!GameMode)
         {
@@ -128,7 +128,7 @@ namespace
         for (int32_t Index = 0; Index < Alive.Num(); ++Index)
         {
             AFortPlayerStateAthena* State = AthenaStateOf(reinterpret_cast<AController*>(Alive[Index]));
-            if (State && static_cast<uint8_t>(State->TeamIndex) == Team)
+            if (State && static_cast<uint8_t>(State->TeamIndex) == Team && (Squad == 0 || static_cast<uint8_t>(State->SquadId) == Squad))
             {
                 return true;
             }
@@ -674,7 +674,9 @@ int32_t FCoreAthenaBotManager::WantedBotCount(int32_t PlayerTeamBots) const
     // bots = min(requested, MaxPlayers - connected players), re-checked until the bus leaves. Bots play on teams of
     // their own, filled to the playlist's team size: when the room is what limits them, whole teams only, and never
     // more than the teams no player is on can hold. The bots in players' teams' empty places ("Fill players' teams with
-    // bots") are counted first: they take their room from these, so the match stays at its size.
+    // bots") are counted first: they take their room from these, so the match stays at its size. A large team game
+    // (Teams of 20, HasSquadsInTeams) has only the playlist's few teams, players' teams too: the bots fill the room left
+    // on them, in squads (GetNextBotTeamAndSquadId).
     AFortGameModeAthena* Athena = GetGameMode();
     if (!Athena || !bEnabled || Settings.Count <= 0)
     {
@@ -683,6 +685,10 @@ int32_t FCoreAthenaBotManager::WantedBotCount(int32_t PlayerTeamBots) const
     const int32_t Capacity = MatchCapacity();
     int32_t Room = Capacity > 0 ? Capacity - Athena->GetNumConnectedPlayers() - PlayerTeamBots : Settings.Count;
     const int32_t TeamSize = GetTeamSize();
+    if (HasSquadsInTeams())
+    {
+        return std::clamp(std::min(Settings.Count, Room), 0, 100);
+    }
     if (Room < Settings.Count && TeamSize > 1)
     {
         Room = Room / TeamSize * TeamSize;
@@ -694,22 +700,31 @@ int32_t FCoreAthenaBotManager::WantedBotCount(int32_t PlayerTeamBots) const
     return std::clamp(std::min(Settings.Count, Room), 0, 100);
 }
 
-std::map<uint8_t, int32_t> FCoreAthenaBotManager::PlayerTeamSlots() const
+uint16_t FCoreAthenaBotManager::SquadKeyOf(const FCoreAthenaBotController* Bot) const
 {
-    // "Fill players' teams with bots", in duos and squads (teams of 2 to 4: not solo, nor 50v50's or 5x20's big teams,
-    // whose squads aren't Core's to fill). A team gets bots once a player of it is in the match, for the places its players
-    // don't take: those in the match and those its reservations still bring (a party's other members, or another party
-    // that fills, loading in). A team with a player whose party doesn't fill (the backend's noFill) gets none. The bots
-    // count in the match's size: no more of them than its room leaves.
-    std::map<uint8_t, int32_t> Slots;
+    return SquadKey(Bot->GetTeam(), HasSquadsInTeams() ? Bot->GetSquad() : 0);
+}
+
+std::map<uint16_t, int32_t> FCoreAthenaBotManager::PlayerTeamSlots() const
+{
+    // "Fill players' teams with bots", in duos and squads (teams of 2 to 4, not solo), and in a large team game (Teams of
+    // 20) a player's squad of 4 (AFortPlayerStateAthena::SquadId, the match assignment's or Core's for a late
+    // player; a player without one yet waits for it). A team (squad) gets bots once a player of it is in the match, for
+    // the places its players don't take: those in the match and those its reservations still bring (a party's other
+    // members, or another party that fills, loading in; a reservation has a team, not a squad, so only duos' and squads'
+    // count). A team with a player whose party doesn't fill (the backend's noFill) gets none. The bots count in the
+    // match's size: no more of them than its room leaves.
+    std::map<uint16_t, int32_t> Slots;
     AFortGameModeAthena* Athena = GetGameMode();
     AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
-    const int32_t TeamSize = PlaylistTeamSize;
-    if (!bEnabled || !Settings.bFillPlayerTeams || !GameState || TeamSize < 2 || TeamSize > 4)
+    const bool bSquads = HasSquadsInTeams() && AFortPlayerStateAthena::HasSquadId();
+    const int32_t SquadSize = bSquads ? GetSquadSize() : PlaylistTeamSize;
+    if (!bEnabled || !Settings.bFillPlayerTeams || !GameState || SquadSize < 2 || SquadSize > MaxSquadSize)
     {
         return Slots;
     }
-    std::map<uint8_t, std::set<std::wstring>> Players;
+    std::map<uint16_t, std::set<std::wstring>> Players;
+    int32_t InMatch = 0;
     int32_t Unnamed = 0;
     for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
     {
@@ -718,33 +733,35 @@ std::map<uint8_t, int32_t> FCoreAthenaBotManager::PlayerTeamSlots() const
         {
             continue;
         }
+        ++InMatch;
+        const uint8_t Squad = bSquads ? static_cast<uint8_t>(AthenaState->SquadId) : 0;
+        if (bSquads && Squad == 0)
+        {
+            continue;
+        }
         const bool bHasId = AthenaState->UniqueId.IsValid();
-        Players[static_cast<uint8_t>(AthenaState->TeamIndex)].insert(bHasId ? AthenaState->UniqueId.ToString().ToStdString() : std::format(L"#{}", Unnamed++));
+        Players[SquadKey(static_cast<uint8_t>(AthenaState->TeamIndex), Squad)].insert(bHasId ? AthenaState->UniqueId.ToString().ToStdString() : std::format(L"#{}", Unnamed++));
     }
     for (const auto& [Team, Id] : Athena->GetTeamReservations())
     {
-        if (const auto Found = Players.find(Team); Found != Players.end())
+        const auto Found = bSquads ? Players.end() : Players.find(SquadKey(Team, 0));
+        if (Found != Players.end() && Found->second.insert(Id).second)
         {
-            Found->second.insert(Id);
+            ++InMatch;
         }
-    }
-    int32_t InMatch = 0;
-    for (const auto& [Team, Ids] : Players)
-    {
-        InMatch += static_cast<int32_t>(Ids.size());
     }
     const int32_t Capacity = MatchCapacity();
     int32_t Room = Capacity > 0 ? Capacity - std::max(InMatch, Athena->GetNumConnectedPlayers()) : 100;
-    for (const auto& [Team, Ids] : Players)
+    for (const auto& [Key, Ids] : Players)
     {
         const bool bNoFill = std::any_of(Ids.begin(), Ids.end(), [this](const std::wstring& Id)
         {
             return std::find(Settings.NoFillAccounts.begin(), Settings.NoFillAccounts.end(), Id) != Settings.NoFillAccounts.end();
         });
-        const int32_t Free = std::min(TeamSize - static_cast<int32_t>(Ids.size()), Room);
+        const int32_t Free = std::min(SquadSize - static_cast<int32_t>(Ids.size()), Room);
         if (!bNoFill && Free > 0)
         {
-            Slots[Team] = Free;
+            Slots[Key] = Free;
             Room -= Free;
         }
     }
@@ -768,9 +785,9 @@ void FCoreAthenaBotManager::TickWarmup(float Now)
         }
         return;
     }
-    const std::map<uint8_t, int32_t> TeamSlots = PlayerTeamSlots();
+    const std::map<uint16_t, int32_t> TeamSlots = PlayerTeamSlots();
     int32_t TeamBots = 0;
-    for (const auto& [Team, Free] : TeamSlots)
+    for (const auto& [Key, Free] : TeamSlots)
     {
         TeamBots += Free;
     }
@@ -856,22 +873,22 @@ bool FCoreAthenaBotManager::HasHumanSpawned() const
     return false;
 }
 
-bool FCoreAthenaBotManager::SpawnNextBot(int32_t Wanted, const std::map<uint8_t, int32_t>& TeamSlots, float Now)
+bool FCoreAthenaBotManager::SpawnNextBot(int32_t Wanted, const std::map<uint16_t, int32_t>& TeamSlots, float Now)
 {
     if (Now < NextRegisterTime)
     {
         return false;
     }
-    // A player's team first: its bots are in with it, well before the bus.
-    for (const auto& [Team, Free] : TeamSlots)
+    // A player's team (squad) first: its bots are in with it, well before the bus.
+    for (const auto& [Key, Free] : TeamSlots)
     {
-        const int32_t OnTeam = static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [Team](const auto& Bot)
+        const int32_t OnTeam = static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [this, Key](const auto& Bot)
         {
-            return Bot->IsAlive() && Bot->IsOnPlayersTeam() && Bot->GetTeam() == Team;
+            return Bot->IsAlive() && Bot->IsOnPlayersTeam() && SquadKeyOf(Bot.get()) == Key;
         }));
         if (OnTeam < Free)
         {
-            if (!RegisterBot(Now, Team, true))
+            if (!RegisterBot(Now, static_cast<uint8_t>(Key & 0xFF), static_cast<uint8_t>(Key >> 8), true))
             {
                 // Try again in a while (a spawn failed).
                 NextRegisterTime = Now + 2.0f;
@@ -884,8 +901,9 @@ bool FCoreAthenaBotManager::SpawnNextBot(int32_t Wanted, const std::map<uint8_t,
     {
         return false;
     }
-    const uint8_t Team = PlaceBotOnTeam();
-    if (Team == 0xFF)
+    uint8_t Team = 0xFF;
+    uint8_t Squad = 0;
+    if (!GetNextBotTeamAndSquadId(Team, Squad))
     {
         if (!bLoggedCap)
         {
@@ -895,7 +913,7 @@ bool FCoreAthenaBotManager::SpawnNextBot(int32_t Wanted, const std::map<uint8_t,
         NextRegisterTime = Now + 2.0f;
         return false;
     }
-    if (!RegisterBot(Now, Team, false))
+    if (!RegisterBot(Now, Team, Squad, false))
     {
         NextRegisterTime = Now + 2.0f;
         return false;
@@ -903,27 +921,28 @@ bool FCoreAthenaBotManager::SpawnNextBot(int32_t Wanted, const std::map<uint8_t,
     return true;
 }
 
-void FCoreAthenaBotManager::RemoveSurplusBots(int32_t Wanted, const std::map<uint8_t, int32_t>& TeamSlots)
+void FCoreAthenaBotManager::RemoveSurplusBots(int32_t Wanted, const std::map<uint16_t, int32_t>& TeamSlots)
 {
-    // Bots on players' teams: a team keeps as many as it has empty places (a party member loading in late takes one
-    // back; the setting turned off, or a player without fill joining the team, takes them all). Bots on teams of their
-    // own: the newest go first, a bot on a team a player has since joined (late joining) before them.
-    std::map<uint8_t, int32_t> OnTeams;
+    // Bots on players' teams (squads): a team keeps as many as it has empty places (a party member loading in late takes
+    // one back; the setting turned off, or a player without fill joining the team, takes them all). Bots on teams of their
+    // own: the newest go first, a bot on a team a player has since joined (late joining) before them; in a large team
+    // game, whose teams players and bots share, only the newest.
+    std::map<uint16_t, int32_t> OnTeams;
     for (const auto& Bot : PlayerBots)
     {
-        OnTeams[Bot->GetTeam()] += Bot->IsAlive() && Bot->IsOnPlayersTeam() ? 1 : 0;
+        OnTeams[SquadKeyOf(Bot.get())] += Bot->IsAlive() && Bot->IsOnPlayersTeam() ? 1 : 0;
     }
     bool bSurplus = CountAliveBots(false) > Wanted;
-    for (const auto& [Team, OnTeam] : OnTeams)
+    for (const auto& [Key, OnTeam] : OnTeams)
     {
-        const auto Slot = TeamSlots.find(Team);
+        const auto Slot = TeamSlots.find(Key);
         bSurplus = bSurplus || OnTeam > (Slot != TeamSlots.end() ? Slot->second : 0);
     }
     if (!bSurplus)
     {
         return;
     }
-    const std::set<uint8_t> Humans = HumanTeams();
+    const std::set<uint8_t> Humans = HasSquadsInTeams() ? std::set<uint8_t>() : HumanTeams();
     std::stable_sort(PlayerBots.begin(), PlayerBots.end(), [&Humans](const auto& A, const auto& B)
     {
         const bool bAHuman = !A->IsOnPlayersTeam() && Humans.contains(A->GetTeam());
@@ -934,7 +953,7 @@ void FCoreAthenaBotManager::RemoveSurplusBots(int32_t Wanted, const std::map<uin
         }
         return A->GetBotIndex() < B->GetBotIndex();
     });
-    std::map<uint8_t, int32_t> Kept;
+    std::map<uint16_t, int32_t> Kept;
     int32_t KeptOwn = 0;
     for (auto It = PlayerBots.begin(); It != PlayerBots.end();)
     {
@@ -943,10 +962,11 @@ void FCoreAthenaBotManager::RemoveSurplusBots(int32_t Wanted, const std::map<uin
         int32_t Room = Wanted;
         if (Bot->IsAlive() && Bot->IsOnPlayersTeam())
         {
-            const auto Slot = TeamSlots.find(Bot->GetTeam());
+            const uint16_t Key = SquadKeyOf(Bot);
+            const auto Slot = TeamSlots.find(Key);
             Room = Slot != TeamSlots.end() ? Slot->second : 0;
-            bKeep = Kept[Bot->GetTeam()] < Room;
-            Kept[Bot->GetTeam()] += bKeep ? 1 : 0;
+            bKeep = Kept[Key] < Room;
+            Kept[Key] += bKeep ? 1 : 0;
         }
         else if (Bot->IsAlive())
         {
@@ -966,34 +986,179 @@ void FCoreAthenaBotManager::RemoveSurplusBots(int32_t Wanted, const std::map<uin
     }
 }
 
-uint8_t FCoreAthenaBotManager::PlaceBotOnTeam()
+bool FCoreAthenaBotManager::GetNextBotTeamAndSquadId(uint8_t& OutTeam, uint8_t& OutSquadId) const
 {
-    // 21.40's AFortGameModeAthena::PlaceBotOnTeam; 8.30's RegisterBot fills the playlist's teams in order, cycling
-    // LastBotTeam. Core's bots play on teams of their own (the owner's choice): a team no player is on, from the last
-    // (HumanPvP_Team100 on solo's 100 teams) down, while players' teams come from the first, filled to the playlist's
-    // team size.
+    // 21.40's GetNextBotTeamAndSquadId (8.30's RegisterBot fills the playlist's teams in order, cycling LastBotTeam).
+    // Core's bots play on teams of their own (the owner's choice): a team no player is on, from the last (HumanPvP_Team100
+    // on solo's 100 teams) down, while players' teams come from the first, filled to the playlist's team size.
+    // A large team game (Teams of 20's 5 teams of 20) has no teams of their own to give them: they fill
+    // the playlist's teams in squads of 4, as its players do. The team with the fewest players (those in the match or
+    // reserved, and its bots) that has room, the first on a tie; in it, a bots' squad with room, else a new squad.
+    OutTeam = 0xFF;
+    OutSquadId = 0;
     AFortGameModeAthena* Athena = GetGameMode();
-    const int32_t TeamSize = std::max(PlaylistTeamSize, 1);
+    AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+    const int32_t TeamSize = GetTeamSize();
     const int32_t NumTeams = PlaylistTeams > 0 ? std::min(PlaylistTeams, 100) : 100;
     const uint8_t FirstTeam = EFortTeam::GetHumanPvP_Team1();
-    const std::set<uint8_t> Humans = HumanTeams();
-    for (int32_t Index = NumTeams - 1; Index >= 0; --Index)
+    if (!HasSquadsInTeams())
     {
-        const uint8_t Team = static_cast<uint8_t>(FirstTeam + Index);
-        if (Humans.contains(Team))
+        const std::set<uint8_t> Humans = HumanTeams();
+        for (int32_t Index = NumTeams - 1; Index >= 0; --Index)
         {
-            continue;
+            const uint8_t Team = static_cast<uint8_t>(FirstTeam + Index);
+            if (Humans.contains(Team))
+            {
+                continue;
+            }
+            const int32_t OnTeam = static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [Team](const auto& Bot) { return Bot->IsAlive() && Bot->GetTeam() == Team; }));
+            if (OnTeam < TeamSize)
+            {
+                OutTeam = Team;
+                return true;
+            }
         }
-        const int32_t OnTeam = static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [Team](const auto& Bot) { return Bot->IsAlive() && Bot->GetTeam() == Team; }));
-        if (OnTeam < TeamSize)
+        return false;
+    }
+    if (!Athena || !GameState || PlaylistTeams <= 0)
+    {
+        return false;
+    }
+
+    std::map<uint8_t, std::set<std::wstring>> Players;
+    for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+    {
+        AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+        if (AthenaState && !FindBot(reinterpret_cast<const UObject*>(AthenaState)) && AthenaState->TeamIndex != EFortTeam::GetSpectator())
         {
-            return Team;
+            Players[static_cast<uint8_t>(AthenaState->TeamIndex)].insert(AthenaState->UniqueId.IsValid() ? AthenaState->UniqueId.ToString().ToStdString() : AthenaState->GetName().ToStdString());
         }
     }
-    return 0xFF;
+    for (const auto& [Team, Id] : Athena->GetTeamReservations())
+    {
+        Players[Team].insert(Id);
+    }
+    int32_t Fewest = TeamSize;
+    for (int32_t Index = 0; Index < NumTeams; ++Index)
+    {
+        const uint8_t Team = static_cast<uint8_t>(FirstTeam + Index);
+        const auto Found = Players.find(Team);
+        const int32_t OnTeam = (Found != Players.end() ? static_cast<int32_t>(Found->second.size()) : 0)
+            + static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [Team](const auto& Bot) { return Bot->IsAlive() && Bot->GetTeam() == Team; }));
+        if (OnTeam < Fewest)
+        {
+            Fewest = OnTeam;
+            OutTeam = Team;
+        }
+    }
+    if (OutTeam == 0xFF)
+    {
+        return false;
+    }
+    // The fullest of the team's bots' squads that has room, so they make whole squads.
+    std::map<uint8_t, int32_t> BotSquads;
+    for (const auto& Bot : PlayerBots)
+    {
+        if (Bot->IsAlive() && !Bot->IsOnPlayersTeam() && Bot->GetTeam() == OutTeam && Bot->GetSquad() != 0)
+        {
+            ++BotSquads[Bot->GetSquad()];
+        }
+    }
+    int32_t Fullest = 0;
+    for (const auto& [Squad, Members] : BotSquads)
+    {
+        if (Members < GetSquadSize() && Members > Fullest)
+        {
+            Fullest = Members;
+            OutSquadId = Squad;
+        }
+    }
+    if (OutSquadId == 0)
+    {
+        OutSquadId = GetNextUniqueSquadID();
+    }
+    return true;
 }
 
-bool FCoreAthenaBotManager::RegisterBot(float Now, uint8_t Team, bool bPlayersTeam)
+uint8_t FCoreAthenaBotManager::GetNextUniqueSquadID() const
+{
+    // A squad no player state (a player's or a bot's) is in. The match assignment's squads count up from 1 and its players
+    // may still be loading, so, as late players' do (PlaceLatePlayerInSquad), the bots' count down from 255, clear of them.
+    std::set<uint8_t> Used;
+    AFortGameStateAthena* GameState = AthenaGameStateOf(GetGameMode());
+    if (GameState && AFortPlayerStateAthena::HasSquadId())
+    {
+        for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+        {
+            if (AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState)))
+            {
+                Used.insert(static_cast<uint8_t>(AthenaState->SquadId));
+            }
+        }
+    }
+    for (const auto& Bot : PlayerBots)
+    {
+        Used.insert(Bot->GetSquad());
+    }
+    for (uint32_t Candidate = 255; Candidate > 0; --Candidate)
+    {
+        if (!Used.contains(static_cast<uint8_t>(Candidate)))
+        {
+            return static_cast<uint8_t>(Candidate);
+        }
+    }
+    return 0;
+}
+
+void FCoreAthenaBotManager::PlaceBotOnTeam(FCoreAthenaBotController* Bot)
+{
+#if WITH_SERVER_CODE
+    // 21.40's AFortGameModeAthena::PlaceBotOnTeam: the bot's controller joins its team as a joining player's does in
+    // PlacePlayerOnTeam, with the game mode's AttemptChangeTeamInfoForController: the team's AFortTeamInfo takes the
+    // controller (TeamMembers) and its player state the team (PlayerTeam and PlayerTeamPrivate, replicated, and
+    // TeamIndex). Then its squad (SquadId: the squad bar's, and the squad's relevancy), as Battle Royale's
+    // PlacePlayerOnTeam (3.2 0x9C6240) gives a player theirs. Without the finder's slot, or for a team without its
+    // AFortTeamInfo, the bot keeps the old way: TeamIndex alone.
+    AFortGameModeAthena* Athena = GetGameMode();
+    AAIController* Controller = Bot->GetController();
+    AFortPlayerStateAthena* State = Bot->GetPlayerState();
+    if (!Athena || !Controller || !State)
+    {
+        return;
+    }
+    const uint8_t Team = Bot->GetTeam();
+    if (Finder::ResolveTeamChangeLive())
+    {
+        // The team in a whole register: the game compares all of edx with Spectator (3.2 0xB526C0, "cmp r14d, 67h").
+        CallVirtual<bool>(static_cast<AFortGameMode*>(Athena), Natives::AFortGameMode_AttemptChangeTeamInfoForControllerIndex, static_cast<uint32_t>(Team),
+            reinterpret_cast<AController*>(Controller));
+    }
+    static bool bLoggedTeam = false;
+    if (static_cast<uint8_t>(State->TeamIndex) != Team)
+    {
+        State->TeamIndex = EFortTeam{ Team };
+        if (!bLoggedTeam)
+        {
+            bLoggedTeam = true;
+            Log::Warning(L"Battle Royale bots: {} isn't in {}'s AFortTeamInfo, so only its TeamIndex is set", Bot->GetBotName(), EFortTeam{ Team }.ToString());
+        }
+    }
+    else if (!bLoggedTeam)
+    {
+        bLoggedTeam = true;
+        AFortTeamInfo* TeamInfo = static_cast<AFortTeamInfo*>(State->PlayerTeam);
+        Log::Info(L"Battle Royale bots: {} joins {} as a player does ({})", Bot->GetBotName(), EFortTeam{ Team }.ToString(),
+            TeamInfo ? TeamInfo->GetName().ToStdString() : std::wstring(L"no AFortTeamInfo"));
+    }
+    if (Bot->GetSquad() != 0 && AFortPlayerStateAthena::HasSquadId())
+    {
+        State->SquadId = Bot->GetSquad();
+    }
+    State->ForceNetUpdate();
+#endif
+}
+
+bool FCoreAthenaBotManager::RegisterBot(float Now, uint8_t Team, uint8_t Squad, bool bPlayersTeam)
 {
 #if WITH_SERVER_CODE
     AFortGameModeAthena* Athena = GetGameMode();
@@ -1045,6 +1210,7 @@ bool FCoreAthenaBotManager::RegisterBot(float Now, uint8_t Team, bool bPlayersTe
 
     const int32_t BotIndex = NextBotIndex++;
     auto Bot = std::make_unique<FCoreAthenaBotController>(this, Controller, BotIndex, Team);
+    Bot->SetSquad(Squad);
     Bot->SetOnPlayersTeam(bPlayersTeam);
     if (NameOrder.empty())
     {
@@ -1060,16 +1226,18 @@ bool FCoreAthenaBotManager::RegisterBot(float Now, uint8_t Team, bool bPlayersTe
     const wchar_t* const BaseName = BotNames[NameOrder[static_cast<size_t>(BotIndex % NumBotNames)]];
     const std::wstring Name = BotIndex < NumBotNames ? std::wstring(BaseName) : std::format(L"{}{}", BaseName, BotIndex / NumBotNames + 1);
     Bot->AssignDisplayName(Name);
+    PlaceBotOnTeam(Bot.get());
     Bot->InitializeSkills(Settings.Level);
     FVector Spot = WarmupSpots[static_cast<size_t>(FMath::Rand()) % WarmupSpots.size()];
-    // A bot on a player's team comes in by its player, when they have a pawn on the island.
+    // A bot on a player's team (squad) comes in by its player, when they have a pawn on the island.
     if (AFortGameStateAthena* GameState = bPlayersTeam ? AthenaGameStateOf(Athena) : nullptr)
     {
+        const bool bSquads = HasSquadsInTeams() && AFortPlayerStateAthena::HasSquadId();
         for (APlayerState* Other : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
         {
             AFortPlayerStateAthena* OtherState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(Other));
-            AController* Owner = OtherState && static_cast<uint8_t>(OtherState->TeamIndex) == Team && !FindBot(reinterpret_cast<const UObject*>(OtherState))
-                ? Cast<AController>(reinterpret_cast<UObject*>(OtherState->GetOwner())) : nullptr;
+            AController* Owner = OtherState && static_cast<uint8_t>(OtherState->TeamIndex) == Team && (!bSquads || static_cast<uint8_t>(OtherState->SquadId) == Squad)
+                && !FindBot(reinterpret_cast<const UObject*>(OtherState)) ? Cast<AController>(reinterpret_cast<UObject*>(OtherState->GetOwner())) : nullptr;
             if (APawn* OtherPawn = Owner ? static_cast<APawn*>(Owner->Pawn) : nullptr)
             {
                 const FVector Near = LocationOf(reinterpret_cast<const AActor*>(OtherPawn));
@@ -1130,7 +1298,7 @@ void FCoreAthenaBotManager::OnAircraftPhaseStarted(float Now)
             // 21.40's JumpOffBus picks its moment along the path; Core's spread the bots over the drop zone, most of them
             // in its first two thirds.
             // A bot on a player's team waits for its player (UpdatePlayerTeamBots), else goes at the drop zone's end.
-            const float T = Bot->IsOnPlayersTeam() && HasAlivePlayerOnTeam(Athena, Bot->GetTeam()) ? 1.0f : std::pow(FMath::FRand(), 1.4f);
+            const float T = Bot->IsOnPlayersTeam() && HasAlivePlayerOnTeam(Athena, Bot->GetTeam(), HasSquadsInTeams() ? Bot->GetSquad() : 0) ? 1.0f : std::pow(FMath::FRand(), 1.4f);
             Bot->EnterAircraft(DropStart + 1.0f + (DropEnd - DropStart - 3.0f) * T, DropEnd - 1.0f);
         }
     }
@@ -1549,7 +1717,13 @@ void FCoreAthenaBotManager::UpdateCounts()
     // mode only counts its alive players, so the bots are added to its numbers.
     AFortGameModeAthena* Athena = GetGameMode();
     AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
-    if (!GameState || (bAircraftStarted && BotsAtStart == 0) || (!bAircraftStarted && PlayerBots.empty()))
+    if (!GameState)
+    {
+        return;
+    }
+    // Each team's count too, until the last bot that was in it is gone (the warmup's surplus bots leave).
+    UpdateTeamPlayersLeft(Athena, GameState);
+    if ((bAircraftStarted && BotsAtStart == 0) || (!bAircraftStarted && PlayerBots.empty()))
     {
         return;
     }
@@ -1565,6 +1739,57 @@ void FCoreAthenaBotManager::UpdateCounts()
     {
         GameState->PlayersLeft = PlayersLeft;
         GameState->TeamsLeft = TeamsLeft;
+        GameState->ForceNetUpdate();
+    }
+}
+
+void FCoreAthenaBotManager::UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, AFortGameStateAthena* GameState)
+{
+    // The HUD's "1 : 0" in Teams of 20 with bots on every team (#242): AddToAlivePlayers (3.2 0x9AE8D0) counts each
+    // player into the game mode's TeamAlivePlayers and, in a large team game, the game state's TeamXPlayersLeft (growing
+    // it to the player's team), and RemoveFromAlivePlayers (0x9CA730) takes them out of both. The bots' controllers aren't
+    // players' (AddToAlivePlayers writes AFortPlayerControllerAthena's members), so, as 21.40's AddToAliveBots and
+    // RemoveFromAliveBots do, each team's count is its alive players' and its alive bots': the game's own count of the
+    // team's players, and Core's of its bots. TeamAlivePlayers stays the players' (the game's own win check, which
+    // ShouldHoldNativeWinCheck holds while bots are in, reads it). The HUD redraws its count when PlayersLeft changes
+    // (3.2 0x2746410), which UpdateCounts sets after this; the map screen reads it each frame (0x2747150).
+    if (!AFortGameStateAthena::HasTeamXPlayersLeft() || !AFortGameModeAthena::HasTeamAlivePlayers() || !HasSquadsInTeams())
+    {
+        return;
+    }
+    TArray<int32_t>& TeamXPlayersLeft = GameState->GetMember_TeamXPlayersLeft();
+    // Not a large team game's (the playlist didn't size it, and no player was counted into it).
+    if (TeamXPlayersLeft.Num() == 0)
+    {
+        return;
+    }
+    const uint8_t FirstTeam = EFortTeam::GetHumanPvP_Team1();
+    std::map<int32_t, int32_t> Bots;
+    for (const auto& Bot : PlayerBots)
+    {
+        if (Bot->IsAlive() && Bot->GetTeam() >= FirstTeam)
+        {
+            ++Bots[Bot->GetTeam() - FirstTeam];
+        }
+    }
+    const int32_t Teams = std::max(PlaylistTeams, Bots.empty() ? 0 : Bots.rbegin()->first + 1);
+    if (TeamXPlayersLeft.Num() < Teams)
+    {
+        TeamXPlayersLeft.AddZeroed(Teams - TeamXPlayersLeft.Num());
+    }
+    bool bChanged = false;
+    for (int32_t Index = 0; Index < TeamXPlayersLeft.Num(); ++Index)
+    {
+        const auto Found = Bots.find(Index);
+        const int32_t Left = Athena->GetTeamAlivePlayers(Index) + (Found != Bots.end() ? Found->second : 0);
+        if (TeamXPlayersLeft[Index] != Left)
+        {
+            TeamXPlayersLeft[Index] = Left;
+            bChanged = true;
+        }
+    }
+    if (bChanged)
+    {
         GameState->ForceNetUpdate();
     }
 }
@@ -1653,9 +1878,11 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
             !Settings.bEliminationsCountForQuests ? L"off" : bNativeEvent ? L"the game's event" : QuestManager ? L"Core's event" : L"no quest manager");
     }
 
-    // A player's team is out once its players are out too (Core's death handler left its place to its bots then).
+    // A player's team is out once its players are out too (Core's death handler left its place to its bots then); in a
+    // large team game any of the team's players.
+    const bool bPlayersTeam = Bot->IsOnPlayersTeam() || (HasSquadsInTeams() && HumanTeams().contains(Bot->GetTeam()));
     const bool bTeamOut = std::none_of(PlayerBots.begin(), PlayerBots.end(), [Bot](const auto& Other) { return Other.get() != Bot && Other->IsAlive() && Other->GetTeam() == Bot->GetTeam(); })
-        && !(Bot->IsOnPlayersTeam() && HasAlivePlayerOnTeam(Athena, Bot->GetTeam()));
+        && !(bPlayersTeam && HasAlivePlayerOnTeam(Athena, Bot->GetTeam()));
     Bot->OnPossesedPawnDied(KillerState);
     if (bTeamOut && bAircraftStarted)
     {
@@ -1668,7 +1895,7 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
                 MemberState->ForceNetUpdate();
             }
         }
-        if (Bot->IsOnPlayersTeam())
+        if (bPlayersTeam)
         {
             SetPlayersTeamPlace(Bot->GetTeam(), TeamsBefore);
         }
@@ -1762,10 +1989,11 @@ void FCoreAthenaBotManager::NoteBotHit(FCoreAthenaBotController* Attacker, AFort
 
 std::vector<FCoreAthenaBotController*> FCoreAthenaBotManager::TeammatesOf(const FCoreAthenaBotController* Bot) const
 {
+    // In a large team game a bot's squad: the rest of its team of 20 isn't who it lands, regroups and revives with.
     std::vector<FCoreAthenaBotController*> Teammates;
     for (const auto& Other : PlayerBots)
     {
-        if (Other.get() != Bot && Other->IsAlive() && Other->GetTeam() == Bot->GetTeam())
+        if (Other.get() != Bot && Other->IsAlive() && SquadKeyOf(Other.get()) == SquadKeyOf(Bot))
         {
             Teammates.push_back(Other.get());
         }
@@ -1781,12 +2009,13 @@ std::vector<AFortPlayerPawnAthena*> FCoreAthenaBotManager::PlayerTeammatesOf(con
     {
         return Teammates;
     }
+    const bool bSquads = HasSquadsInTeams() && AFortPlayerStateAthena::HasSquadId();
     const TArray<AFortPlayerControllerAthena*>& Alive = Athena->AlivePlayers;
     for (int32_t Index = 0; Index < Alive.Num(); ++Index)
     {
         AFortPlayerControllerAthena* Player = Alive[Index];
         AFortPlayerStateAthena* State = AthenaStateOf(reinterpret_cast<AController*>(Player));
-        AFortPlayerPawnAthena* Pawn = State && static_cast<uint8_t>(State->TeamIndex) == Bot->GetTeam()
+        AFortPlayerPawnAthena* Pawn = State && static_cast<uint8_t>(State->TeamIndex) == Bot->GetTeam() && (!bSquads || static_cast<uint8_t>(State->SquadId) == Bot->GetSquad())
             ? Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Player->GetPawn())) : nullptr;
         if (Pawn && !Pawn->bIsDying && !Pawn->IsPendingKill())
         {
@@ -1798,7 +2027,8 @@ std::vector<AFortPlayerPawnAthena*> FCoreAthenaBotManager::PlayerTeammatesOf(con
 
 bool FCoreAthenaBotManager::HasPlayersTeamBotsLeft(uint8_t Team) const
 {
-    return std::any_of(PlayerBots.begin(), PlayerBots.end(), [Team](const auto& Bot) { return Bot->IsAlive() && Bot->IsOnPlayersTeam() && Bot->GetTeam() == Team; });
+    const bool bSquads = HasSquadsInTeams();
+    return std::any_of(PlayerBots.begin(), PlayerBots.end(), [Team, bSquads](const auto& Bot) { return Bot->IsAlive() && (bSquads || Bot->IsOnPlayersTeam()) && Bot->GetTeam() == Team; });
 }
 
 void FCoreAthenaBotManager::SetPlayersTeamPlace(uint8_t Team, int32_t Place)
@@ -1842,8 +2072,8 @@ void FCoreAthenaBotManager::UpdatePlayerTeamBots(float Now)
         return;
     }
     // The team's squad (AFortPlayerStateAthena::SquadId: the squad bar lists a squad's players, OnRep_SquadId), once one of
-    // its players has one, checked every second.
-    if (AFortPlayerStateAthena::HasSquadId() && Now >= NextPlayerTeamSync)
+    // its players has one, checked every second. In a large team game the bot has its squad from the start (its player's).
+    if (AFortPlayerStateAthena::HasSquadId() && !HasSquadsInTeams() && Now >= NextPlayerTeamSync)
     {
         NextPlayerTeamSync = Now + 1.0f;
         std::map<uint8_t, uint8_t> Squads;
@@ -1873,7 +2103,8 @@ void FCoreAthenaBotManager::UpdatePlayerTeamBots(float Now)
     {
         return;
     }
-    std::map<uint8_t, AFortPlayerPawnAthena*> Jumped;
+    const bool bSquads = HasSquadsInTeams() && AFortPlayerStateAthena::HasSquadId();
+    std::map<uint16_t, AFortPlayerPawnAthena*> Jumped;
     const TArray<AFortPlayerControllerAthena*>& Alive = Athena->AlivePlayers;
     for (int32_t Index = 0; Index < Alive.Num(); ++Index)
     {
@@ -1882,13 +2113,13 @@ void FCoreAthenaBotManager::UpdatePlayerTeamBots(float Now)
         AFortPlayerPawnAthena* Pawn = State ? Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Player->GetPawn())) : nullptr;
         if (Pawn && !Pawn->bIsDying)
         {
-            Jumped.try_emplace(static_cast<uint8_t>(State->TeamIndex), Pawn);
+            Jumped.try_emplace(SquadKey(static_cast<uint8_t>(State->TeamIndex), bSquads ? static_cast<uint8_t>(State->SquadId) : 0), Pawn);
         }
     }
     for (const auto& Bot : PlayerBots)
     {
         const bool bFalling = Bot->GetState() == ECoreAthenaBotState::InAircraft || Bot->GetState() == ECoreAthenaBotState::Skydiving;
-        const auto Player = Bot->IsOnPlayersTeam() && bFalling ? Jumped.find(Bot->GetTeam()) : Jumped.end();
+        const auto Player = Bot->IsOnPlayersTeam() && bFalling ? Jumped.find(SquadKeyOf(Bot.get())) : Jumped.end();
         if (Player != Jumped.end())
         {
             AFortPlayerPawnAthena* Pawn = Player->second;
@@ -1956,7 +2187,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
                     State->Place = 1;
                     State->ForceNetUpdate();
                 }
-                bPlayersTeamWon = bPlayersTeamWon || Bot->IsOnPlayersTeam();
+                bPlayersTeamWon = bPlayersTeamWon || Bot->IsOnPlayersTeam() || (HasSquadsInTeams() && HumanTeams().contains(Bot->GetTeam()));
                 Log::Info(L"Battle Royale bots: {} wins the match ({})", Bot->GetBotName(), Bot->IsOnPlayersTeam() ? L"for its players' team" : L"a bots' team");
             }
         }
@@ -1975,7 +2206,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
         // A players' team whose bots are still in shares the place of the teams left.
         for (const uint8_t Team : Teams)
         {
-            if (std::any_of(PlayerBots.begin(), PlayerBots.end(), [Team](const auto& Bot) { return Bot->IsAlive() && Bot->IsOnPlayersTeam() && Bot->GetTeam() == Team; }))
+            if (HasPlayersTeamBotsLeft(Team) && (!HasSquadsInTeams() || HumanTeams().contains(Team)))
             {
                 SetPlayersTeamPlace(Team, static_cast<int32_t>(Teams.size()));
             }

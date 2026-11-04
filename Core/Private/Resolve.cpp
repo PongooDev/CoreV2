@@ -10731,3 +10731,40 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
     Log::Error(L"Finder: AFortPlayerPawnAthena::BeginSkydiving not found (ExitAircraft 0x{:X}), player bots can't leave the aircraft", ExitAircraft ? ExitAircraft - Finder::ImageBase() : 0);
     return false;
 }
+
+bool Finder::ResolveTeamChangeLive()
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::AFortGameMode_AttemptChangeTeamInfoForControllerIndex >= 0)
+    {
+        return Natives::AFortGameMode_AttemptChangeTeamInfoForControllerIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortGameMode::PlacePlayerOnTeam (3.2 0xB6AD20, 3.1 and 3.3 the same) logs "PlacePlayerOnTeam for %s Current: %s
+    // Actual: %s" between its two virtual calls on the game mode: PickTeam(CurrentTeam, Controller) (slot 0xAA0) and
+    // AttemptChangeTeamInfoForController(Team, Controller) (slot 0xA88, 21.40's names), its last call. The second gets the
+    // team's AFortTeamInfo (GetTeamInfo) and calls SetTeam (0xB74220): RemoveFromTeam on the old team, then
+    // AFortTeamInfo::AddToTeam (0xC01AE0), which adds the controller to TeamMembers and sets its player state's team
+    // (AFortPlayerStateAthena::SetPlayerTeam, 0x9FAB50: PlayerTeam, PlayerTeamPrivate and TeamIndex).
+    const uintptr_t Place = FunctionOf(L"PlacePlayerOnTeam for %s Current: %s Actual: %s");
+    const uintptr_t End = Place ? Finder::FunctionEnd(Place) : 0;
+    std::vector<int32_t> Slots;
+    for (uintptr_t Call = Place ? FindVirtualCall(Place, End) : 0; Call; Call = FindVirtualCall(Call + 6, End))
+    {
+        Slots.push_back(VirtualSlot(Call));
+    }
+    // (The team interface's GetTeam before them is a short call, [rax+28h].) In the vtable PickTeam comes right after
+    // PlacePlayerOnTeam, which comes after AttemptChangeTeamInfoForController and CreateTeam: 3 slots apart.
+    const int32_t Calls = static_cast<int32_t>(Slots.size());
+    const int32_t Slot = Calls == 2 && Slots[1] > 0 && Slots[0] == Slots[1] + 3 ? Slots[1] : -1;
+    if (Slot <= 0)
+    {
+        Log::Error(L"Finder: AFortGameMode::AttemptChangeTeamInfoForController not found (PlacePlayerOnTeam 0x{:X}, {} virtual calls), player bots join their team without its AFortTeamInfo",
+            Place ? Place - Finder::ImageBase() : 0, Calls);
+        return false;
+    }
+    Natives::AFortGameMode_AttemptChangeTeamInfoForControllerIndex = Slot;
+    Log::Info(L"Finder: AFortGameMode::AttemptChangeTeamInfoForController is slot 0x{:X} (PlacePlayerOnTeam 0x{:X})", Slot * 8, Place - Finder::ImageBase());
+    return true;
+}

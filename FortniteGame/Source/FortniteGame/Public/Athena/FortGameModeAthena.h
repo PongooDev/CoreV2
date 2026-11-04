@@ -58,6 +58,16 @@ public:
     DefineUStructArrayProperty(FAthenaPlaylistDataTableSet, PlaylistDataTables)
     // The players still in the match (AddToAlivePlayers adds them, RemoveFromAlivePlayers takes them off).
     DefineUProperty(TArray<AFortPlayerControllerAthena*>, AlivePlayers)
+    // The alive players on each team (3.2's int32 TeamAlivePlayers[100], index: the team less HumanPvP_Team1), as
+    // AddToAlivePlayers and RemoveFromAlivePlayers count them; TeamsLeft follows its teams above 0.
+    DefineUProperty(int32_t, TeamAlivePlayers)
+    static bool HasTeamAlivePlayers() { return Member_TeamAlivePlayers.IsAvailable(); }
+    int32_t GetTeamAlivePlayers(int32_t TeamIndex) { return TeamIndex >= 0 && TeamIndex < 100 ? (&GetMember_TeamAlivePlayers())[TeamIndex] : 0; }
+    // The playlist's (3.2's Teams of 20: teams of several squads), and 50v50's squads. A large
+    // team game's new pawns have bTeamMembersAlwaysRelevant (FinishRestartPlayer, 3.2 0x9B6310), unless it is 50v50.
+    DefineUProperty(bool, bIsLargeTeamGame)
+    DefineUProperty(bool, bFiftyFiftySquadPlay)
+    static bool HasLargeTeamGame() { return Member_bIsLargeTeamGame.IsAvailable() && Member_bFiftyFiftySquadPlay.IsAvailable(); }
 
     static bool HasMaxPlayerCount() { return Member_MaxPlayerCount.IsAvailable(); }
 

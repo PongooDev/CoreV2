@@ -26,6 +26,11 @@ public:
     DefineUProperty(uint8_t, DBNORevivalStacking)
     // The pawn the death camera turns to (the eliminator's), set by the controller's pawn-death handler.
     DefineUProperty(APawn*, KillerForSpectatorRotation)
+    // The pawn is relevant to its whole team, not only its squad (IsNetRelevantFor, 3.2 0x9EEEA0), so its
+    // teammates see it on the map wherever it is. AFortGameModeAthena::FinishRestartPlayer (0x9B6310) sets it on a player's
+    // new pawn in a large team game, but not in 50v50.
+    DefineUProperty(bool, bTeamMembersAlwaysRelevant)
+    static bool HasTeamMembersAlwaysRelevant() { return Member_bTeamMembersAlwaysRelevant.IsAvailable(); }
 
     bool HasCustomizationLoadout() { return Member_CustomizationLoadout.IsAvailable(); }
 

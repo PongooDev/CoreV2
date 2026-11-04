@@ -159,7 +159,12 @@ public:
     AFortPlayerPawnAthena* GetPawn() const;
     AFortPlayerStateAthena* GetPlayerState() const;
     uint8_t GetTeam() const { return Team; }
-    // A bot in an empty place on a player's team ("Fill players' teams with bots"), not on a team of its own.
+    // The bot's squad within its team (AFortPlayerStateAthena::SquadId), 0 for none: in a large team game (Teams of 20,
+    // HasSquadsInTeams) a team is several squads, and the bot's teammates for its squad play are its squad's.
+    uint8_t GetSquad() const { return Squad; }
+    void SetSquad(uint8_t InSquad) { Squad = InSquad; }
+    // A bot in an empty place on a player's team ("Fill players' teams with bots"), not on a team of its own; in a large
+    // team game, in an empty place in a player's squad.
     bool IsOnPlayersTeam() const { return bOnPlayersTeam; }
     void SetOnPlayersTeam(bool bInOnPlayersTeam) { bOnPlayersTeam = bInOnPlayersTeam; }
     int32_t GetBotIndex() const { return BotIndex; }
@@ -401,6 +406,7 @@ private:
     TWeakObjectPtr<AFortPlayerPawnAthena> PlayerBotPawn;
     int32_t BotIndex = 0;
     uint8_t Team = 0;
+    uint8_t Squad = 0;
     bool bOnPlayersTeam = false;
     // Following a player teammate's jump from the bus (FollowTeammateDrop).
     bool bFollowingDrop = false;

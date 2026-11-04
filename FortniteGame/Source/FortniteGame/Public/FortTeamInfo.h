@@ -5,6 +5,7 @@
 #include "StructArray.h"
 
 class AActor;
+class AController;
 class AFortPlayerController;
 
 class EFortTeam
@@ -45,6 +46,9 @@ class AFortTeamInfo : public AInfo
     DefineUFunction(OnSpottedActorDied)
 
 public:
+    // The team's controllers: AddToTeam (3.2 0xC01AE0) adds one, RemoveFromTeam takes it off.
+    DefineUProperty(TArray<AController*>, TeamMembers)
+    static bool HasTeamMembers() { return Member_TeamMembers.IsAvailable(); }
     DefineUProperty(EFortTeam, Team)
     DefineUStructProperty(FTeamSpottedActorInfoArray, TeamSpottedActors)
 

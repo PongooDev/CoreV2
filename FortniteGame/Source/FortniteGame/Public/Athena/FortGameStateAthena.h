@@ -29,6 +29,13 @@ public:
     DefineUProperty(int32_t, TotalPlayers)
     static bool HasTotalPlayers() { return Member_TotalPlayers.IsAvailable(); }
     DefineUProperty(int32_t, TeamsLeft)
+    // A large team game's players left on each team (index: the team less HumanPvP_Team1), which the HUD's
+    // "<Team>{YourTeamAlive}</> : <EnemyTeam>{EnemyTeamAlive}</>" (3.2 0x2746410, redrawn when PlayersLeft changes) and
+    // the map screen's team counts (0x2747150) show. AFortGameModeAthena's AddToAlivePlayers and RemoveFromAlivePlayers
+    // (3.2 0x9AE8D0, 0x9CA730) count each player into it, on a playlist with bIsLargeTeamGame (Teams of 20) or 50v50's;
+    // other playlists leave it empty.
+    DefineUProperty(TArray<int32_t>, TeamXPlayersLeft)
+    static bool HasTeamXPlayersLeft() { return Member_TeamXPlayersLeft.IsAvailable(); }
     // The warmup's countdown in the world's time, replicated for the clients' timer: set when the warmup starts
     // (UpdateWarmupPhase, 1.9 0x43D9A0, the end -1 until then), and the bus leaves at the end.
     DefineUProperty(float, WarmupCountdownStartTime)

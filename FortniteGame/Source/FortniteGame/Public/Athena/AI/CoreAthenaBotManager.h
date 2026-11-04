@@ -16,6 +16,7 @@
 class ABuildingContainer;
 class AController;
 class AFortGameModeAthena;
+class AFortGameStateAthena;
 class AFortPickup;
 class AFortPlayerControllerAthena;
 class AFortPlayerPawnAthena;
@@ -85,6 +86,9 @@ struct FCoreAthenaBotLandingSpot
 class FCoreAthenaBotManager
 {
 public:
+    // A squad's most players in Battle Royale's playlists (the playlists' MaxPartySize, the squad bar's four).
+    static constexpr int32_t MaxSquadSize = 4;
+
     // Starts the manager for a Battle Royale game mode (FinishWorldInitialization): it waits for the backend's settings.
     static void Create(AFortGameModeAthena* GameMode);
     static FCoreAthenaBotManager* Get();
@@ -102,13 +106,21 @@ public:
     // The bots still in the match (riding the aircraft, falling or on the ground).
     int32_t GetAliveBotCount() const;
     bool HasAliveBots() const { return GetAliveBotCount() > 0; }
-    // The playlist's team size (1 solo, 2 duos, 4 squads), and a bot's teammates still in the match.
+    // The playlist's team size (1 solo, 2 duos, 4 squads, 20 Teams of 20, 50 50v50), and a bot's teammates still in the
+    // match: its squad's, in a large team game.
     int32_t GetTeamSize() const { return std::max(PlaylistTeamSize, 1); }
+    // A squad's most players: the team's, up to 4.
+    int32_t GetSquadSize() const { return std::min(GetTeamSize(), MaxSquadSize); }
+    // A large team game of more than two teams (Teams of 20's five teams of 20): each team is several squads, the bots
+    // fill the playlist's teams in squads, and a bot plays with its squad. 50v50's two sides (paused, Core-Backend #135)
+    // keep their bots on a side of their own.
+    bool HasSquadsInTeams() const { return GetTeamSize() > MaxSquadSize && PlaylistTeams > 2; }
     std::vector<FCoreAthenaBotController*> TeammatesOf(const FCoreAthenaBotController* Bot) const;
-    // A bot's teammates who are players (a bot on a player's team, "Fill players' teams with bots"): their pawns, of the
-    // ones still in the match.
+    // A bot's teammates who are players (a bot on a player's team, "Fill players' teams with bots"; in a large team game,
+    // in a player's squad): their pawns, of the ones still in the match.
     std::vector<AFortPlayerPawnAthena*> PlayerTeammatesOf(const FCoreAthenaBotController* Bot) const;
-    // Whether a bot in a player's team's empty places is still in the match on Team (the team isn't out while one is).
+    // Whether a bot that keeps a players' team in is still in the match on Team (the team isn't out while one is): one in
+    // its players' empty places, or in a large team game any bot of the team.
     bool HasPlayersTeamBotsLeft(uint8_t Team) const;
     // The bot whose pawn or player state this is, or null.
     FCoreAthenaBotController* FindBot(const UObject* PawnOrPlayerState) const;
@@ -187,9 +199,12 @@ private:
     void StartBotMatchIfAsked();
     // The bots on teams of their own (Force player AIs), with PlayerTeamBots places on players' teams taken.
     int32_t WantedBotCount(int32_t PlayerTeamBots) const;
-    // "Fill players' teams with bots": each player's team (duos and squads) whose players' parties all fill, and the
-    // places on it no player has (the players on it and those its reservations still bring), for bots.
-    std::map<uint8_t, int32_t> PlayerTeamSlots() const;
+    // "Fill players' teams with bots": each player's team (duos and squads; in a large team game, a player's squad) whose
+    // players' parties all fill, and the places in it no player has (the players in it and those its reservations still
+    // bring), for bots. Keyed by SquadKey: the team, and the squad in a large team game.
+    std::map<uint16_t, int32_t> PlayerTeamSlots() const;
+    static uint16_t SquadKey(uint8_t Team, uint8_t Squad) { return static_cast<uint16_t>(Team | Squad << 8); }
+    uint16_t SquadKeyOf(const FCoreAthenaBotController* Bot) const;
     // The bots alive on players' teams (bPlayersTeams) or on teams of their own.
     int32_t CountAliveBots(bool bPlayersTeams) const;
     // After the bus: the players' teams' bots jump with their players and land by them; and each takes its team's squad.
@@ -199,15 +214,24 @@ private:
     void ReadPlaylistTeams();
     int32_t MatchCapacity() const;
     // One bot more, a player's team first (TeamSlots), else on a team of its own while fewer than Wanted are.
-    bool SpawnNextBot(int32_t Wanted, const std::map<uint8_t, int32_t>& TeamSlots, float Now);
+    bool SpawnNextBot(int32_t Wanted, const std::map<uint16_t, int32_t>& TeamSlots, float Now);
     // A player (not a bot) has a pawn on the island.
     bool HasHumanSpawned() const;
-    void RemoveSurplusBots(int32_t Wanted, const std::map<uint8_t, int32_t>& TeamSlots);
-    bool RegisterBot(float Now, uint8_t Team, bool bPlayersTeam);
-    uint8_t PlaceBotOnTeam();
+    void RemoveSurplusBots(int32_t Wanted, const std::map<uint16_t, int32_t>& TeamSlots);
+    bool RegisterBot(float Now, uint8_t Team, uint8_t Squad, bool bPlayersTeam);
+    // 21.40's GetNextBotTeamAndSquadId: the team of the next bot on a team of its own (in a large team game, the team with
+    // the fewest players and a bots' squad in it with room), false when none has room; and GetNextUniqueSquadID, a squad
+    // nobody is in.
+    bool GetNextBotTeamAndSquadId(uint8_t& OutTeam, uint8_t& OutSquadId) const;
+    uint8_t GetNextUniqueSquadID() const;
+    // 21.40's AFortGameModeAthena::PlaceBotOnTeam: the bot joins its team as a player does, and its squad.
+    void PlaceBotOnTeam(FCoreAthenaBotController* Bot);
     void AddToAliveBots(FCoreAthenaBotController* Bot);
     void OnAircraftPhaseStarted(float Now);
     void UpdateCounts();
+    // A large team game's players left on each team (the game state's TeamXPlayersLeft, which the HUD and the map show):
+    // the game mode's alive players of each team, and its bots.
+    void UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, AFortGameStateAthena* GameState);
     void CheckWinConditionLastManStanding();
     void RefreshEnemies();
     void RefreshLoot(float Now);

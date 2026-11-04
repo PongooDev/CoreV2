@@ -4186,9 +4186,17 @@ void AFortAthenaAIBotController::Downed(float Now)
         static const float BleedDamage = AthenaGameDataValue(L"Default.DBNO.BleedDamage", 1.0f);
         NextBleedTime = Now + BleedTick;
         const float Health = Pawn->GetHealth();
-        if (Health >= LastDBNOHealth - 0.01f && Health > 0.0f)
+        const bool bCoreBleeds = Health >= LastDBNOHealth - 0.01f && Health > 0.0f;
+        if (bCoreBleeds)
         {
             Pawn->SetHealth(Health - BleedDamage);
+        }
+        static int32_t LoggedBleeds = 0;
+        if (LoggedBleeds < 12)
+        {
+            ++LoggedBleeds;
+            Log::Info(L"Battle Royale bots: {} bleeds while down: {:.0f} -> {:.0f} ({}, {:.1f} every {:.1f} s)", BotName, LastDBNOHealth, Pawn->GetHealth(),
+                bCoreBleeds ? L"Core's bleed" : L"the game's bleed or a hit", BleedDamage, BleedTick);
         }
         LastDBNOHealth = Pawn->GetHealth();
     }
@@ -4221,8 +4229,16 @@ bool AFortAthenaAIBotController::ReviveTeammate(float Now)
         return false;
     }
     AFortAthenaAIBotController* Target = ReviveTarget;
-    // A revive goes on with enemies about, but not with one close by in sight or while being shot at.
-    const bool bThreat = IsUnderThreat(Now);
+    // A revive is safe: no enemy in sight and nobody shooting at the bot, and neither of them in the storm (the bot
+    // goes for the circle first; the downed teammate crawls after it).
+    FVector StormCenter;
+    float StormRadius = 0.0f;
+    const bool bHasStorm = Manager->GetCurrentSafeZone(StormCenter, StormRadius);
+    const auto InStorm = [&](AFortAthenaAIBotController* Bot)
+    {
+        return bHasStorm && Bot && Bot->GetPawn() && Dist2D(LocationOf(Bot->GetPawn()), StormCenter) > StormRadius;
+    };
+    const bool bThreat = IsUnderThreat(Now) || (CurrentTarget.Get() && bHasVisualLineOfSightOnTarget) || InStorm(this) || InStorm(Target);
     const bool bTargetValid = Target && Target->IsAlive() && Target->IsDBNO() && Target->GetPawn();
     if (!bTargetValid || bThreat)
     {
@@ -4244,7 +4260,7 @@ bool AFortAthenaAIBotController::ReviveTeammate(float Now)
         float Best = 6000.0f;
         for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
         {
-            const float Distance = Teammate->IsDBNO() && Teammate->GetPawn() ? Dist2D(LocationOf(Teammate->GetPawn()), Location) : 1e9f;
+            const float Distance = Teammate->IsDBNO() && Teammate->GetPawn() && !InStorm(Teammate) ? Dist2D(LocationOf(Teammate->GetPawn()), Location) : 1e9f;
             if (Distance < Best)
             {
                 Best = Distance;

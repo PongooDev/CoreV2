@@ -604,20 +604,36 @@ void UFortServerBotManagerAthena::ReadPlaylistTeams()
 
 int32_t UFortServerBotManagerAthena::MatchCapacity() const
 {
+    // The playlist's most players, not its team slots: the beacon's NumTeams x NumPlayersPerTeam is 100 x 2 in duos and
+    // 100 x 4 in squads (GetMaxTeamInfoForPlaylist), while every Battle Royale playlist of these seasons takes 100
+    // players (FortPlaylistAthena MaxPlayers: solo, duos, squads and 50v50). Duos and squads with bots went past 100.
+    constexpr int32_t PlaylistMaxPlayers = 100;
     AFortGameModeAthena* Athena = GetGameMode();
-    return PlaylistTeams > 0 ? PlaylistTeams * PlaylistTeamSize : Athena ? Athena->GetMatchCapacity() : 0;
+    const int32_t Slots = PlaylistTeams > 0 ? PlaylistTeams * PlaylistTeamSize : Athena ? Athena->GetMatchCapacity() : 0;
+    return Slots > 0 ? std::min(Slots, PlaylistMaxPlayers) : 0;
 }
 
 int32_t UFortServerBotManagerAthena::WantedBotCount() const
 {
-    // bots = min(requested, MatchCapacity - connected players), re-checked until the bus leaves.
+    // bots = min(requested, MaxPlayers - connected players), re-checked until the bus leaves. Bots play on teams of
+    // their own, filled to the playlist's team size: when the room is what limits them, whole teams only, and never
+    // more than the teams no player is on can hold.
     AFortGameModeAthena* Athena = GetGameMode();
     if (!Athena || !bEnabled)
     {
         return 0;
     }
     const int32_t Capacity = MatchCapacity();
-    const int32_t Room = Capacity > 0 ? Capacity - Athena->GetNumConnectedPlayers() : Settings.Count;
+    int32_t Room = Capacity > 0 ? Capacity - Athena->GetNumConnectedPlayers() : Settings.Count;
+    const int32_t TeamSize = GetTeamSize();
+    if (Room < Settings.Count && TeamSize > 1)
+    {
+        Room = Room / TeamSize * TeamSize;
+    }
+    if (PlaylistTeams > 0)
+    {
+        Room = std::min(Room, (PlaylistTeams - static_cast<int32_t>(HumanTeams().size())) * TeamSize);
+    }
     return std::clamp(std::min(Settings.Count, Room), 0, 100);
 }
 
@@ -646,14 +662,47 @@ void UFortServerBotManagerAthena::TickWarmup(float Now)
     {
         RemoveSurplusBots(Wanted);
     }
-    else if (Alive < Wanted)
+    else if (Alive < Wanted && Now >= NextPacedSpawn)
     {
-        SpawnBots(Wanted, Now);
+        // Bots come in as players do (#233): none before the first player is on the island (a server nobody joined
+        // spends nothing on them), then a few at a time, a little more when another player joins, all of them in a
+        // while before the bus. -CoreBotMatch (no players) brings them in at once.
+        AFortGameModeAthena* Athena = GetGameMode();
+        AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+        const int32_t Humans = Athena ? Athena->GetNumConnectedPlayers() : 0;
+        const bool bBotMatch = Configuration::Get().bBotMatch;
+        if (bBotMatch || HasHumanSpawned())
+        {
+            const float EndTime = GameState && AFortGameStateAthena::HasWarmupCountdown() ? static_cast<float>(GameState->WarmupCountdownEndTime) : 0.0f;
+            // Everyone in 20 s before the bus (the warmup's countdown), spread evenly over the time left.
+            const float TimeLeft = EndTime > 0.0f ? EndTime - 20.0f - Now : 0.0f;
+            const int32_t Missing = Wanted - Alive;
+            float Interval = bBotMatch || TimeLeft <= 0.0f ? 0.0f : std::clamp(TimeLeft / static_cast<float>(Missing), 0.0f, 6.0f);
+            int32_t Batch = 1;
+            if (Humans > LastHumanCount && !bBotMatch)
+            {
+                // Another player joined: a couple of bots with them.
+                Batch = std::min(Missing, 1 + static_cast<int32_t>(FMath::Rand() % 3));
+            }
+            LastHumanCount = Humans;
+            if (!bLoggedSpawnStart)
+            {
+                bLoggedSpawnStart = true;
+                Log::Info(L"Battle Royale bots: {} spawning {} bots, about one every {:.1f} s ({:.0f} s of warmup left)", bBotMatch ? L"-CoreBotMatch:" : L"a player is on the island:",
+                    Missing, Interval, EndTime > 0.0f ? EndTime - Now : -1.0f);
+            }
+            for (int32_t Index = 0; Index < Batch; ++Index)
+            {
+                SpawnBots(Wanted, Now);
+                NextRegisterTime = std::min(NextRegisterTime, Now);
+            }
+            NextPacedSpawn = Now + (Interval > 0.0f ? Interval * RandomRange(0.6f, 1.4f) : 0.0f);
+        }
     }
     // The navigation (its octree and first build take a quarter of a second in one frame) and the assets the bots load
-    // on first use (emotes) are set up as soon as the bots are in, early in the warmup, not as the bus leaves with
-    // every player on the server ("ping spikes" with bots on, #233).
-    if (!bNavigationTried && Wanted > 0 && GetAliveBotCount() >= Wanted)
+    // on first use (emotes) are set up as soon as the first bots are in, not as the bus leaves with every player on
+    // the server ("ping spikes" with bots on, #233).
+    if (!bNavigationTried && Wanted > 0 && GetAliveBotCount() > 0)
     {
         bNavigationTried = true;
         AFortAthenaAIBotController::PreloadAssets();
@@ -662,6 +711,26 @@ void UFortServerBotManagerAthena::TickWarmup(float Now)
         InitializeNavigation();
     }
 #endif
+}
+
+bool UFortServerBotManagerAthena::HasHumanSpawned() const
+{
+    // A player on the island: a player state that isn't a bot's, whose controller has a pawn.
+    AFortGameStateAthena* GameState = AthenaGameStateOf(GetGameMode());
+    if (!GameState)
+    {
+        return false;
+    }
+    for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+    {
+        AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+        AController* Owner = AthenaState && !FindBot(reinterpret_cast<const UObject*>(AthenaState)) ? Cast<AController>(reinterpret_cast<UObject*>(AthenaState->GetOwner())) : nullptr;
+        if (Owner && static_cast<APawn*>(Owner->Pawn))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 void UFortServerBotManagerAthena::SpawnBots(int32_t Wanted, float Now)

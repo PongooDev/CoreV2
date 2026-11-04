@@ -165,6 +165,8 @@ private:
     void ReadPlaylistTeams();
     int32_t MatchCapacity() const;
     void SpawnBots(int32_t Wanted, float Now);
+    // A player (not a bot) has a pawn on the island.
+    bool HasHumanSpawned() const;
     void RemoveSurplusBots(int32_t Wanted);
     bool RegisterBot(float Now);
     uint8_t PlaceBotOnTeam();
@@ -213,6 +215,10 @@ private:
     float NextSummaryLog = 0.0f;
     float LastTickTime = -1.0f;
     float NextRegisterTime = 0.0f;
+    // Paced spawning in the warmup: the next bot's time, the players connected last tick, and the first spawn's log.
+    float NextPacedSpawn = 0.0f;
+    int32_t LastHumanCount = 0;
+    bool bLoggedSpawnStart = false;
     bool bBotMatchStarted = false;
     bool bBotMatchAircraftStarted = false;
     std::vector<TWeakObjectPtr<AFortPawn>> EnemyPawns;

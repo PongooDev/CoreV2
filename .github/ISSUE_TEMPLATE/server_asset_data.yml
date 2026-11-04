@@ -9,8 +9,9 @@ body:
         PC builds from 1.10 on are missing some assets that only the server uses, such as the Save the World AI director.
         Core has a stand-in for each one. With the real data from a build's server assets, Core can make that stand-in match Epic's exactly.
 
-        **Please don't upload pak, utoc, ucas or uasset files.** They're Epic's files, and they're too big anyway.
-        Upload FModel's JSON export instead: right-click the asset in FModel and choose **Save Properties (.json)**.
+        **Please don't upload pak, utoc, ucas or uasset files here.** Upload FModel's JSON export instead: right-click the asset in FModel and choose **Save Properties (.json)**.
+
+        **Made a pak of a build's server assets?** Contribute it to [Core-ServerAssets](https://github.com/PongooDev/Core-ServerAssets) with its [Server assets pak form](https://github.com/PongooDev/Core-ServerAssets/issues/new?template=server_assets_pak.yml). Its README lists the assets to include. Core-Launcher installs those paks for server hosts. JSON exports are still welcome here: the data helps Core's stand-ins match Epic's for everyone without the pak.
   - type: input
     id: build
     attributes:
@@ -37,6 +38,7 @@ body:
       options:
         - label: "/Game/AIDirector/AIDirector_Fortnite (AIDirector_Fortnite and its Default__AIDirector_Fortnite_C)"
         - label: "3.0 (CL-3901517): /Game/Athena/Maps/Athena_LocationVolumes and /Game/Athena/Maps/Streaming/Athena_GameplayActors, with each FortPoiVolume's BrushComponent (its transform and BrushBodySetup)"
+        - label: "2.5 and later: the server loot tier data's BluGloDifficultyTG rows (the PC paks only ship LootTierData_Client)"
         - label: Other server-only assets (list them below, or just say "everything" if you exported the lot)
   - type: textarea
     id: files

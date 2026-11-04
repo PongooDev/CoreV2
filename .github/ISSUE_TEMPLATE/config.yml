@@ -1,1 +1,5 @@
 blank_issues_enabled: true
+contact_links:
+  - name: Server assets pak
+    url: https://github.com/PongooDev/Core-ServerAssets/issues/new?template=server_assets_pak.yml
+    about: Made a pak of a build's server assets? Contribute it to Core-ServerAssets, which hosts the paks Core-Launcher installs.

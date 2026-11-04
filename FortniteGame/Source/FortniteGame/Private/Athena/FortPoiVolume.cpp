@@ -413,7 +413,7 @@ int32_t AFortPoiVolume::RestorePoiVolumes(UWorld* World)
         if (Volume->GetBrushComponent())
         {
             ++Epics;
-            Log::Info(L"POI: {} ({}) has its brush: Epic's own shape", Name, Volume->DescribeLocationTags());
+            Log::Info(L"POI: {} ({}) has its brush (server assets): Epic's own shape, no fallback", Name, Volume->DescribeLocationTags());
             continue;
         }
 

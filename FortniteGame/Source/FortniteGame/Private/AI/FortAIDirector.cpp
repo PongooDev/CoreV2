@@ -689,7 +689,7 @@ void AFortAIDirector::ApplyAIDirectorFortniteDefaults()
     const TSubclassOf<UFortAIEncounterInfo> BaseEncounter = BaseEncounterClass;
     const int32_t NumEncounterClasses = (DebugEncounter.Get() ? 1 : 0) + (BaseEncounter.Get() ? 1 : 0);
     const int32_t NumSpawnQueries = (RandomDirectionQuery.EnvironmentQuery ? 1 : 0) + (MinDistanceQuery.EnvironmentQuery ? 1 : 0);
-    UE_LOG(LogFortAIDirector, Log, TEXT("AIDirector: this build has no AIDirector_Fortnite, the native director takes its 1.9.1 settings (%d encounter classes, %d spawn queries, %d spawn group cap profiles, %d spawn point profiles, %d spawn group upgrades)"),
+    UE_LOG(LogFortAIDirector, Log, TEXT("AIDirector: this build has no AIDirector_Fortnite (a server assets pak puts it back), the native director takes its 1.9.1 settings (%d encounter classes, %d spawn queries, %d spawn group cap profiles, %d spawn point profiles, %d spawn group upgrades)"),
         NumEncounterClasses, NumSpawnQueries, SpawnGroupCapSettings.Num(), SpawnPointsSettings.Num(), Upgrades.Num());
 #endif
 }

@@ -292,6 +292,8 @@ void AFortGameModeZone::CreateAIDirector()
         AIDirector = NewAIDirector;
         return;
     }
+    // The real one: the build ships it (to 1.9.1), or a server assets pak (Core-ServerAssets) put it back.
+    UE_LOG(LogFort, Log, TEXT("AIDirector: %s loaded, Core's stand-in isn't used"), *AIDirectorClass->GetPathName());
     AIDirector = World->SpawnActor<AFortAIDirector>(AIDirectorClass, FActorSpawnParameters());
 #endif
 }

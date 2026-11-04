@@ -497,8 +497,14 @@ void UFortServerBotManagerAthena::ReadPlaylistTeams()
     // The reservation beacon's teams, while it has them: a match whose players never came (the bots-only test match)
     // loses its beacon when its match starts, and the game session's own room is Save the World's 4.
     AFortGameModeAthena* Athena = GetGameMode();
-    const int32_t Teams = Athena ? Athena->GetNumTeams() : 0;
-    const int32_t TeamSize = Athena ? Athena->GetPlayersPerTeam() : 0;
+    int32_t Teams = Athena ? Athena->GetNumTeams() : 0;
+    int32_t TeamSize = Athena ? Athena->GetPlayersPerTeam() : 0;
+    if (const int32_t Forced = Configuration::Get().BotTeamSize; Forced > 0 && Configuration::Get().bBotMatch)
+    {
+        // -CoreBotTeamSize (testing only, with -CoreBotMatch): duos or squads in a bots-only match.
+        TeamSize = Forced;
+        Teams = 100 / Forced;
+    }
     if (Teams > 0 && TeamSize > 0 && (Teams != PlaylistTeams || TeamSize != PlaylistTeamSize))
     {
         PlaylistTeams = Teams;
@@ -937,10 +943,19 @@ void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
     // little chance in it, and a far spot counts a little less. -CoreBotHotDrop sends everyone to the richest one.
     const bool bHotDrop = Configuration::Get().bBotHotDrop;
     int32_t Assigned = 0;
+    // A team lands together (duos and squads): its first bot picks the spot and the jump, its teammates follow it out.
+    std::map<uint8_t, std::pair<const FCandidate*, float>> TeamSpots;
     for (const auto& Bot : PlayerBots)
     {
         if (!Bot->IsAlive() || Bot->GetState() != EFortAthenaAIBotState::InAircraft)
         {
+            continue;
+        }
+        if (const auto Chosen = TeamSpots.find(Bot->GetTeam()); Chosen != TeamSpots.end())
+        {
+            const FFortAthenaBotLandingSpot& Spot = LandingSpots[Chosen->second.first->Spot];
+            Bot->SetLandingSpot(Spot.Location, Spot.Radius, std::clamp(Chosen->second.second + RandomRange(0.1f, 0.6f), Earliest, Latest));
+            ++Assigned;
             continue;
         }
         const FCandidate* Best = nullptr;
@@ -958,7 +973,12 @@ void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
         }
         FFortAthenaBotLandingSpot& Spot = LandingSpots[Best->Spot];
         ++Spot.Bots;
-        Bot->SetLandingSpot(Spot.Location, Spot.Radius, std::clamp(Best->Time + RandomRange(-1.5f, 1.5f), Earliest, Latest));
+        const float JumpAt = std::clamp(Best->Time + RandomRange(-1.5f, 1.5f), Earliest, Latest);
+        Bot->SetLandingSpot(Spot.Location, Spot.Radius, JumpAt);
+        if (PlaylistTeamSize > 1)
+        {
+            TeamSpots[Bot->GetTeam()] = { Best, JumpAt };
+        }
         ++Assigned;
     }
     std::wstring Used;
@@ -1141,6 +1161,13 @@ void UFortServerBotManagerAthena::ApplyBotDamage(AFortAthenaAIBotController* Att
         Victim->SetHealth(Health);
         return;
     }
+    // Squads: down, not out, while a teammate stands (the next hit on a downed bot finishes it).
+    if (AFortAthenaAIBotController* VictimBot = FindBot(reinterpret_cast<const UObject*>(Victim)); VictimBot && VictimBot->CanGoDBNO())
+    {
+        Log::Info(L"Battle Royale bots: {} knocks {} down with {}", Attacker->GetBotName(), VictimBot->GetBotName(), Weapon ? Weapon->GetName().ToStdString() : std::wstring(L"the harvesting tool"));
+        VictimBot->EnterDBNO(Attacker->GetPlayerState(), Now);
+        return;
+    }
     // The elimination: the death's damage tag is the weapon's own (the kill feed's weapon), the killer the bot.
     FGameplayTag DeathReason{ FName(L"Gameplay.Damage.Physical", FNAME_Find) };
     if (Weapon)
@@ -1156,6 +1183,19 @@ void UFortServerBotManagerAthena::ApplyBotDamage(AFortAthenaAIBotController* Att
     Victim->SetHealth(1.0f);
     Victim->ForceKill(DeathReason, reinterpret_cast<AController*>(Attacker->GetController()), reinterpret_cast<AActor*>(Attacker->GetPawn()));
 #endif
+}
+
+std::vector<AFortAthenaAIBotController*> UFortServerBotManagerAthena::TeammatesOf(const AFortAthenaAIBotController* Bot) const
+{
+    std::vector<AFortAthenaAIBotController*> Teammates;
+    for (const auto& Other : PlayerBots)
+    {
+        if (Other.get() != Bot && Other->IsAlive() && Other->GetTeam() == Bot->GetTeam())
+        {
+            Teammates.push_back(Other.get());
+        }
+    }
+    return Teammates;
 }
 
 AFortPlayerStateAthena* UFortServerBotManagerAthena::LastBotAttackerOf(const AFortPawn* Pawn) const

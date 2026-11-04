@@ -2,6 +2,8 @@
 #include "Configuration.h"
 
 #include <shellapi.h>
+#include <algorithm>
+#include <string>
 #include <string_view>
 
 namespace
@@ -42,6 +44,11 @@ void Configuration::Load()
         if (EqualsNoCase(Argument, L"-CoreBotHotDrop"))
         {
             Current.bBotHotDrop = true;
+        }
+        constexpr std::wstring_view TeamSizeOption = L"-CoreBotTeamSize=";
+        if (Argument.size() > TeamSizeOption.size() && EqualsNoCase(Argument.substr(0, TeamSizeOption.size()), TeamSizeOption))
+        {
+            Current.BotTeamSize = std::clamp(_wtoi(std::wstring(Argument.substr(TeamSizeOption.size())).c_str()), 1, 4);
         }
         constexpr std::wstring_view MapOption = L"-CoreMap=";
         if (Argument.size() > MapOption.size() && EqualsNoCase(Argument.substr(0, MapOption.size()), MapOption))

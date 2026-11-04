@@ -89,6 +89,9 @@ public:
     // The bots still in the match (riding the aircraft, falling or on the ground).
     int32_t GetAliveBotCount() const;
     bool HasAliveBots() const { return GetAliveBotCount() > 0; }
+    // The playlist's team size (1 solo, 2 duos, 4 squads), and a bot's teammates still in the match.
+    int32_t GetTeamSize() const { return std::max(PlaylistTeamSize, 1); }
+    std::vector<AFortAthenaAIBotController*> TeammatesOf(const AFortAthenaAIBotController* Bot) const;
     // The bot whose pawn or player state this is, or null.
     AFortAthenaAIBotController* FindBot(const UObject* PawnOrPlayerState) const;
     static bool IsBotPawn(const UObject* Object);

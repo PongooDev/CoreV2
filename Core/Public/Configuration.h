@@ -19,6 +19,8 @@ struct FCoreConfiguration
     bool bBotNoNavigation = false;
     // -CoreBotHotDrop (testing only): every bot lands around the same spot, so a short headless match has fights.
     bool bBotHotDrop = false;
+    // -CoreBotTeamSize=N (testing only): a bots-only match plays teams of N (2 duos, 4 squads) whatever its playlist.
+    int32_t BotTeamSize = 0;
 
     bool IsBattleRoyale() const;
 };

@@ -12,6 +12,7 @@
 class AAIController;
 class AActor;
 class ABuildingContainer;
+class ABuildingSMActor;
 class AFortGameModeAthena;
 class AFortPawn;
 class AFortPickup;
@@ -19,6 +20,7 @@ class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class AFortWeapon;
 class UFortItemDefinition;
+class UObject;
 class UFortWeaponItemDefinition;
 class UFortServerBotManagerAthena;
 
@@ -151,6 +153,21 @@ public:
     void SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime);
     bool HasLandingSpot() const { return bHasLandingSpot; }
 
+    // ABuildingSMActor::AttemptSpawnResources with the bot's pawn as instigator: the materials its hit gave (a player's
+    // go into the inventory; the bot keeps them, and drops them on death as a player does).
+    void OnResourcesHarvested(ABuildingSMActor* Building, UFortItemDefinition* ResourceItem, int32_t Count, bool bDestroyed);
+    int32_t GetMaterialCount() const { return Materials[0] + Materials[1] + Materials[2]; }
+
+    // Squads (duos and squads playlists): Battle Royale's DBNO for a bot. A hit that would take it out while a teammate
+    // is still standing downs it instead (UFortServerBotManagerAthena::ApplyBotDamage): the pawn's bIsDBNO, its DBNO
+    // health and the game's GAB_AthenaDBNO; it bleeds out, is finished off, or a teammate revives it.
+    bool IsDBNO() const;
+    bool CanGoDBNO() const;
+    void EnterDBNO(AFortPlayerStateAthena* Downer, float Now);
+    void OnRevived();
+    int32_t GetRevives() const { return Revives; }
+    int32_t GetTimesDowned() const { return TimesDowned; }
+
     // A healing or shield item's values, or null for anything else (cached per item).
     static const FFortAthenaAIBotConsumable* GetConsumableInfo(UFortItemDefinition* Definition);
     // A gun's kind and stats row values (cached per weapon).
@@ -207,6 +224,8 @@ private:
     void CancelReload();
     // In a fight: an enemy in sight, or hurt in the last few seconds (outside the storm).
     bool IsInCombat(float Now) const;
+    // An enemy close by in sight (20 m), or hurt in the last 2 s: what stops a revive.
+    bool IsUnderThreat(float Now) const;
     // 21.40's UFortAthenaAIBotEvaluator_Heal: out of combat, a bandage, medkit, shield potion or Chug Jug the bot
     // carries, held for the item's use time. True while the bot is using one.
     bool Heal(float Now);
@@ -216,6 +235,28 @@ private:
     // on the warmup island (the community list) and after an elimination when nobody is shooting at them (21.40's
     // UFortAthenaAIBotEvaluator_DanceOnKill).
     bool PlayEmote(float Now, float Duration);
+    // Materials (the community list: bots gather materials and drop them on death): out of a fight with few materials,
+    // the bot swings its pickaxe at a tree, rock or wall next to it, and a stuck bot breaks what is in its way. The
+    // pickaxe's own ability refuses a bot, so the hit is the pickaxe's damage effect (GE_Melee_GenericDamage) applied by
+    // the bot's ability system to the building's, with the pickaxe as the context's damage source, and the materials
+    // come from the building's own resource spawn (ABuildingSMActor::AttemptSpawnResources -> OnResourcesHarvested).
+    bool Harvest(float Now);
+    void StopHarvesting();
+    bool SwingAtBuilding(ABuildingSMActor* Building, float& OutDamage);
+    // A building piece hit by the bot's weapon (a pickaxe swing, or a shot a wall stopped): the weapon's damage effect
+    // with the weapon as its damage source, so the building takes what the weapon's stats give it.
+    bool DamageBuilding(ABuildingSMActor* Building, AFortWeapon* Weapon, float& OutDamage);
+    void EquipPickaxe();
+    // A montage shown to the players (reload, healing), as an ability's PlayMontageAndWait replicates it: the ability
+    // system's RepAnimMontageInfo (and the Athena pawn's copy). bStop stops the current one.
+    bool PlayReplicatedMontage(UObject* Montage, float PlayRate, bool bStop = false);
+    // Squads: a downed bot's tick (bleeding, crawling to a teammate, eliminated with its team), the revive of a downed
+    // teammate, and staying near the team.
+    void Downed(float Now);
+    bool ReviveTeammate(float Now);
+    bool StayWithTeam(float Now);
+    // TryToUnstuck: a building the bot can break right in front of it, on the way to its goal.
+    bool FindBuildingInTheWay(float Now);
     void TakePickup(AFortPickup* Pickup);
     // An item dropped where the bot stands, as a player drops it (a weapon with its magazine).
     void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo);
@@ -273,6 +314,29 @@ private:
     int32_t Emotes = 0;
     float StrafeSign = 1.0f;
     float NextStrafeChange = 0.0f;
+    // Harvesting: the building being hit, and the materials carried (wood, stone, metal).
+    TWeakObjectPtr<ABuildingSMActor> HarvestTarget;
+    float HarvestTargetTime = 0.0f;
+    float NextHarvestSwing = 0.0f;
+    float NextHarvestSearch = 0.0f;
+    FVector HarvestPoint;
+    bool bHarvestToUnstick = false;
+    // Set when the building's resource spawn credited the bot during a swing.
+    bool bHarvestCredited = false;
+    int32_t Materials[3] = {};
+    int32_t Swings = 0;
+    int32_t BreakThroughs = 0;
+    // Squads: who downed the bot, when, its bleed, and the teammate it is reviving.
+    TWeakObjectPtr<AFortPlayerStateAthena> Downer;
+    float DBNOStartedAt = 0.0f;
+    float NextBleedTime = 0.0f;
+    float LastDBNOHealth = 0.0f;
+    AFortAthenaAIBotController* ReviveTarget = nullptr;
+    float ReviveDoneAt = 0.0f;
+    int32_t Revives = 0;
+    int32_t TimesDowned = 0;
+    // Shots on target that a wall or a build stopped.
+    int32_t BlockedShots = 0;
     // The landing spot chosen on the bus.
     bool bHasLandingSpot = false;
     FVector LandingSpot;

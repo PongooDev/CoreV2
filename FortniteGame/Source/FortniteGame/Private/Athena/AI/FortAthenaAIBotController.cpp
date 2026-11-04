@@ -6,7 +6,9 @@
 #include "Abilities/GameplayAbility.h"
 #include "Athena/AI/AthenaNavSystem.h"
 #include "Athena/AI/FortServerBotManagerAthena.h"
+#include "AbilitySystemBlueprintLibrary.h"
 #include "Building/BuildingContainer.h"
+#include "Building/BuildingSMActor.h"
 #include "Building/BuildingWall.h"
 #include "Configuration.h"
 #include "FortAssetManager.h"
@@ -81,6 +83,100 @@ namespace
             *OutHitActor = HitActor;
         }
         return !(HitActor && Cast<APawn>(HitActor));
+    }
+
+    // The trace type (ETraceTypeQuery) of the game's weapon trace channel: the custom channel FCC_Trace_Weapon in
+    // UCollisionProfile's DefaultChannelResponses (DefaultEngine.ini). The engine maps trace types to channels in channel
+    // order, Visibility and Camera first (UCollisionProfile::LoadProfileConfig). Player-built pieces are what weapons hit
+    // on that channel; a Visibility trace alone let the bots' shots through walls (the "wallbang" report on #233).
+    // 0xFF when the build has no such channel.
+    uint8_t WeaponTraceType()
+    {
+        static int32_t Cached = -1;
+        if (Cached >= 0)
+        {
+            return static_cast<uint8_t>(Cached);
+        }
+        Cached = 0xFF;
+        UClass* ProfileClass = FindObject<UClass>(nullptr, L"/Script/Engine.CollisionProfile");
+        UObject* Profile = ProfileClass ? ProfileClass->GetDefaultObject() : nullptr;
+        UProperty* Responses = ProfileClass ? ProfileClass->FindPropertyByName(FName(L"DefaultChannelResponses", FNAME_Find)) : nullptr;
+        UScriptStruct* SetupStruct = FindObject<UScriptStruct>(nullptr, L"/Script/Engine.CustomChannelSetup");
+        UProperty* ChannelProperty = SetupStruct ? SetupStruct->FindPropertyByName(FName(L"Channel", FNAME_Find)) : nullptr;
+        UProperty* NameProperty = SetupStruct ? SetupStruct->FindPropertyByName(FName(L"Name", FNAME_Find)) : nullptr;
+        UBoolProperty* TraceProperty = SetupStruct ? static_cast<UBoolProperty*>(SetupStruct->FindPropertyByName(FName(L"bTraceType", FNAME_Find))) : nullptr;
+        if (!Profile || !Responses || !ChannelProperty || !NameProperty || !TraceProperty)
+        {
+            Log::Warning(L"Battle Royale bots: the collision profile's channels weren't found: bot shots trace the Visibility channel only");
+            return static_cast<uint8_t>(Cached);
+        }
+        struct FRawArray
+        {
+            uint8_t* Data;
+            int32_t Num;
+            int32_t Max;
+        };
+        const FRawArray& Array = *reinterpret_cast<const FRawArray*>(reinterpret_cast<uint8_t*>(Profile) + Responses->GetOffset_ForInternal());
+        const int32_t Size = SetupStruct->GetStructureSize();
+        std::vector<std::pair<uint8_t, std::wstring>> TraceChannels;
+        std::wstring Listed;
+        for (int32_t Index = 0; Index < Array.Num; ++Index)
+        {
+            const uint8_t* Entry = Array.Data + static_cast<ptrdiff_t>(Index) * Size;
+            const uint8_t Channel = *(Entry + ChannelProperty->GetOffset_ForInternal());
+            const std::wstring Name = reinterpret_cast<const FName*>(Entry + NameProperty->GetOffset_ForInternal())->ToStdString();
+            const bool bTrace = TraceProperty->GetPropertyValue_InContainer(Entry);
+            Listed += std::format(L"{}{} {}{}", Listed.empty() ? L"" : L", ", Channel, Name, bTrace ? L" (trace)" : L"");
+            if (bTrace)
+            {
+                TraceChannels.emplace_back(Channel, Name);
+            }
+        }
+        std::sort(TraceChannels.begin(), TraceChannels.end());
+        for (size_t Index = 0; Index < TraceChannels.size(); ++Index)
+        {
+            std::wstring Lower = TraceChannels[Index].second;
+            std::transform(Lower.begin(), Lower.end(), Lower.begin(), ::towlower);
+            // 3.1: FCC_Trace_Weapon (FCC_Trace_WeaponCapsule and FCC_Trace_WeaponMulti are the game's wider sweeps).
+            if (Lower == L"fcc_trace_weapon" || Lower == L"weapon")
+            {
+                Cached = static_cast<int32_t>(2 + Index);
+                Log::Info(L"Battle Royale bots: bot shots trace Visibility and {} (channel {}, trace type {}); the custom channels: {}", TraceChannels[Index].second, TraceChannels[Index].first, Cached, Listed);
+                return static_cast<uint8_t>(Cached);
+            }
+        }
+        Log::Warning(L"Battle Royale bots: no weapon trace channel among {}: bot shots trace the Visibility channel only", Listed);
+        return static_cast<uint8_t>(Cached);
+    }
+
+    // Whether a shot (or a look) from Start reaches Target at End: the first blocking hit on the Visibility channel and on
+    // the weapon channel is Target, or nothing. OutBlocker is what stopped it.
+    bool HasClearShot(AFortPlayerPawnAthena* Pawn, const FVector& Start, const FVector& End, const AFortPawn* Target, UObject** OutBlocker = nullptr, FVector* OutImpact = nullptr)
+    {
+        const uint8_t WeaponChannel = WeaponTraceType();
+        for (const uint8_t Channel : { static_cast<uint8_t>(0), WeaponChannel })
+        {
+            if (Channel == 0xFF)
+            {
+                continue;
+            }
+            FVector Hit;
+            UObject* HitActor = nullptr;
+            UObject* HitComponent = nullptr;
+            if (UKismetSystemLibrary::LineTraceSingle(Pawn, Start, End, Channel, false, true, Hit, HitActor, HitComponent) && HitActor != reinterpret_cast<const UObject*>(Target))
+            {
+                if (OutBlocker)
+                {
+                    *OutBlocker = HitActor;
+                }
+                if (OutImpact)
+                {
+                    *OutImpact = Hit;
+                }
+                return false;
+            }
+        }
+        return true;
     }
 
     // A float of a struct (a data table row) by its property's name.
@@ -427,6 +523,34 @@ namespace
         return Type == L"IntProperty" ? static_cast<float>(*reinterpret_cast<const int32_t*>(Value)) : Type == L"FloatProperty" ? *reinterpret_cast<const float*>(Value) : Default;
     }
 
+    // An object (a montage) of Object by its property's name, or of a struct property of it (Name.Inner), and a float
+    // beside it in that struct.
+    UObject* ObjectOf(const UObject* Object, const wchar_t* Name, const wchar_t* Inner = nullptr, float* OutRate = nullptr, const wchar_t* RateName = nullptr)
+    {
+        UProperty* Property = Object ? Object->GetClass()->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        if (!Property)
+        {
+            return nullptr;
+        }
+        const uint8_t* Value = reinterpret_cast<const uint8_t*>(Object) + Property->GetOffset_ForInternal();
+        if (Inner)
+        {
+            UScriptStruct* Struct = Property->GetClass()->GetName().ToStdString() == L"StructProperty" ? static_cast<UStructProperty*>(Property)->Struct : nullptr;
+            UProperty* InnerProperty = Struct ? Struct->FindPropertyByName(FName(Inner, FNAME_Find)) : nullptr;
+            UProperty* RateProperty = Struct && RateName ? Struct->FindPropertyByName(FName(RateName, FNAME_Find)) : nullptr;
+            if (!InnerProperty)
+            {
+                return nullptr;
+            }
+            if (OutRate && RateProperty && RateProperty->ElementSize == 4)
+            {
+                *OutRate = *reinterpret_cast<const float*>(Value + RateProperty->GetOffset_ForInternal());
+            }
+            Value += InnerProperty->GetOffset_ForInternal();
+        }
+        return *reinterpret_cast<UObject* const*>(Value);
+    }
+
     int32_t BulletsPerClip(AFortWeapon* Weapon)
     {
         UFunction* Function = Weapon ? AFortWeapon::FindStaticFunction_GetBulletsPerClip() : nullptr;
@@ -675,6 +799,8 @@ void AFortAthenaAIBotController::EnterAircraft(float InJumpTime, float InLatestJ
     WeaponList.clear();
     Ammo.clear();
     Consumables.clear();
+    Materials[0] = Materials[1] = Materials[2] = 0;
+    HarvestTarget = nullptr;
     bHasLandingSpot = false;
     State = EFortAthenaAIBotState::InAircraft;
     JumpTime = InJumpTime;
@@ -773,7 +899,8 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     {
         AFortPlayerStateAthena* BotKiller = Pawn ? Manager->LastBotAttackerOf(Pawn) : nullptr;
         AFortPlayerStateAthena* Killer = Pawn ? KillerOf(Pawn) : nullptr;
-        Manager->RemoveFromAliveBots(this, Killer ? Killer : BotKiller);
+        // Bled out while down: the one who knocked it is its eliminator.
+        Manager->RemoveFromAliveBots(this, Killer ? Killer : BotKiller ? BotKiller : Downer.Get());
         return;
     }
     if (State == EFortAthenaAIBotState::Skydiving)
@@ -801,6 +928,13 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         }
         LastHealthShield = HealthShield;
     }
+    // Down (squads): crawling to a teammate, bleeding out, or eliminated with the team.
+    if (Pawn->bIsDBNO)
+    {
+        Downed(Now);
+        TakeStormDamage(Now);
+        return;
+    }
     if (Now >= NextPerceptionTime)
     {
         NextPerceptionTime = Now + 0.25f;
@@ -823,13 +957,23 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         }
         EmoteUntil = 0.0f;
     }
-    if (!HealingItem)
+    if (HarvestTarget.Get() && IsInCombat(Now))
+    {
+        StopHarvesting();
+    }
+    if (!HealingItem && !HarvestTarget.Get())
     {
         ManageWeapon(Now);
         CheckWeaponFireResult(Now);
     }
     const wchar_t* Intent = L"attack";
-    if (HealingItem || !RangeAttack(Now))
+    // Mid-revive, the bot keeps at it unless an enemy is close or shooting at it.
+    if (ReviveDoneAt > 0.0f && ReviveTarget && !IsUnderThreat(Now) && ReviveTeammate(Now))
+    {
+        StopFiring();
+        Intent = L"revive";
+    }
+    else if (HealingItem || !RangeAttack(Now))
     {
         StopFiring();
         // Healing first when safe, then loot close by, then a chest or ammo box, then loot farther away (21.40's _Loot
@@ -840,8 +984,13 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         float StormRadius = 0.0f;
         const bool bInStorm = Manager->GetCurrentSafeZone(StormCenter, StormRadius) && Dist2D(LastKnownPosition, StormCenter) > StormRadius * 0.97f;
         const bool bArmed = HasUsableWeapon();
-        Intent = Heal(Now) ? L"heal" : bInStorm && Storm(Now) ? L"storm" : Loot(Now, 1500.0f) ? L"loot" : !bArmed && Loot(Now, 4000.0f) ? L"loot" : !bArmed && SearchContainer(Now) ? L"search"
-            : Storm(Now) ? L"storm" : SearchContainer(Now) ? L"search" : Loot(Now, 7000.0f) ? L"loot" : L"wander";
+        // A bot stuck against a tree, rock or wall breaks through it first (TryToUnstuck chose it).
+        Intent = bHarvestToUnstick && Harvest(Now) ? L"harvest" : ReviveTeammate(Now) ? L"revive" : Heal(Now) ? L"heal" : bInStorm && Storm(Now) ? L"storm" : Loot(Now, 1500.0f) ? L"loot" : !bArmed && Loot(Now, 4000.0f) ? L"loot" : !bArmed && SearchContainer(Now) ? L"search"
+            : Storm(Now) ? L"storm" : SearchContainer(Now) ? L"search" : StayWithTeam(Now) ? L"regroup" : Harvest(Now) ? L"harvest" : Loot(Now, 7000.0f) ? L"loot" : L"wander";
+        if (HarvestTarget.Get() && std::wstring_view(Intent) != L"harvest")
+        {
+            StopHarvesting();
+        }
         if (Intent[0] == L'w')
         {
             Wander(Now);
@@ -861,11 +1010,11 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         AFortPawn* Target = CurrentTarget.Get();
         UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
         const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
-        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps, {} doors, {} reloads, {} weapon changes, {} heals ({} healing items)", BotName,
+        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps, {} doors, {} reloads, {} weapon changes, {} heals ({} healing items), {} swings, {}/{}/{} materials, {} shots stopped by walls", BotName,
             LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z, Intent, Velocity.Size(), MaxSpeedOf(Movement), Movement ? static_cast<int32_t>(Movement->MovementMode) : -1, static_cast<int32_t>(Pawn->CurrentMovementStyle),
             bPathFollowing ? std::format(L"on a path ({} paths, {} failed)", PathRequests, PathFailures) : std::format(L"steering ({} paths, {} failed)", PathRequests, PathFailures), Pawn->GetHealth(), Pawn->GetShield(),
             WeaponList.size(), EquippedWeapon.Get() ? NameOf(static_cast<UFortWeaponItemDefinition*>(EquippedWeapon.Get()->WeaponData)) : std::wstring(L"nothing"),
-            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps, DoorsOpened, Reloads, WeaponSwitches, Heals, Consumables.size());
+            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps, DoorsOpened, Reloads, WeaponSwitches, Heals, Consumables.size(), Swings, Materials[0], Materials[1], Materials[2], BlockedShots);
     }
 #endif
 }
@@ -1004,7 +1153,8 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
         const float Distance = (LocationOf(Other) - Location).Size();
         if (Distance <= AIBotSkills.SightRange)
         {
-            Candidates.push_back({ Other, Distance });
+            // A downed enemy is finished once nobody standing is closer (sorted 20 m farther).
+            Candidates.push_back({ Other, Distance + (Other->bIsDBNO ? 2000.0f : 0.0f) });
         }
     }
     std::sort(Candidates.begin(), Candidates.end(), [](const FCandidate& A, const FCandidate& B) { return A.Distance < B.Distance; });
@@ -1027,11 +1177,7 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
     for (size_t Index = 0; Index < Candidates.size() && Index < 3 && !NewTarget; ++Index)
     {
         const FVector TargetLocation = LocationOf(Candidates[Index].Pawn);
-        FVector Hit;
-        UObject* HitActor = nullptr;
-        UObject* HitComponent = nullptr;
-        const bool bBlocked = UKismetSystemLibrary::LineTraceSingle(Pawn, Eye, FVector(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 40.0f), 0, false, true, Hit, HitActor, HitComponent);
-        if (!bBlocked || HitActor == reinterpret_cast<UObject*>(Candidates[Index].Pawn))
+        if (HasClearShot(Pawn, Eye, FVector(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 40.0f), Candidates[Index].Pawn))
         {
             NewTarget = Candidates[Index].Pawn;
             bInSight = true;
@@ -1039,8 +1185,10 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
     }
     if (!NewTarget && AttackerPawn && (LocationOf(AttackerPawn) - Location).Size() <= AIBotSkills.SightRange * 2.0f)
     {
+        // Whoever hurt the bot is its target, but it only shoots once it sees them (it used to fire back through walls).
+        const FVector AttackerLocation = LocationOf(AttackerPawn);
         NewTarget = AttackerPawn;
-        bInSight = true;
+        bInSight = HasClearShot(Pawn, Eye, FVector(AttackerLocation.X, AttackerLocation.Y, AttackerLocation.Z + 40.0f), AttackerPawn);
     }
 
     if (NewTarget != CurrentTarget.Get())
@@ -1247,6 +1395,13 @@ void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
 #endif
 }
 
+bool AFortAthenaAIBotController::IsUnderThreat(float Now) const
+{
+    AFortPawn* Target = CurrentTarget.Get();
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    return Now - LastHurtTime < 2.0f || (Target && Pawn && bHasVisualLineOfSightOnTarget && (LocationOf(Target) - LocationOf(Pawn)).Size() < 2000.0f);
+}
+
 bool AFortAthenaAIBotController::IsInCombat(float Now) const
 {
     return (CurrentTarget.Get() && bHasVisualLineOfSightOnTarget) || Now - LastHurtTime < 4.0f;
@@ -1269,10 +1424,19 @@ void AFortAthenaAIBotController::StartReload(float Now)
     StopFiring();
     ReloadIndex = EquippedIndex;
     ReloadUntil = Now + std::max(Time, 0.3f);
+    // The reload as players see a player's: the weapon's ReloadAnimation (the pawn's montage).
+    if (UObject* Montage = ObjectOf(reinterpret_cast<UObject*>(EquippedWeapon.Get()), L"ReloadAnimation"))
+    {
+        PlayReplicatedMontage(Montage, 1.0f);
+    }
 }
 
 void AFortAthenaAIBotController::CancelReload()
 {
+    if (ReloadIndex >= 0)
+    {
+        PlayReplicatedMontage(nullptr, 0.0f, true);
+    }
     ReloadIndex = -1;
     ReloadUntil = 0.0f;
 }
@@ -1458,17 +1622,34 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
         const float Horizontal = Dist2D(Closest, Center);
         bHit = Along > 0.0f && Horizontal < 45.0f && std::fabs(Closest.Z - Center.Z) < 90.0f;
     }
-    if (bHit)
-    {
-        FVector HitLocation;
-        UObject* HitActor = nullptr;
-        UObject* HitComponent = nullptr;
-        const bool bBlocked = UKismetSystemLibrary::LineTraceSingle(Pawn, Eye, Center, 0, false, true, HitLocation, HitActor, HitComponent);
-        bHit = !bBlocked || HitActor == reinterpret_cast<UObject*>(Target);
-    }
+    // A wall, a build or the ground in the way stops the shot (both the Visibility and the weapon channel), and a
+    // building piece it stops takes the shot's damage as a player's shot gives it.
+    UObject* Blocker = nullptr;
+    FVector BlockedAt;
+    const FVector ShotEnd = RayLength > 1.0f ? Eye + Ray * ((std::max(RayLength, Distance) + 100.0f) / RayLength) : Center;
+    const bool bClear = HasClearShot(Pawn, Eye, bHit ? Center : ShotEnd, Target, &Blocker, &BlockedAt);
+    const bool bOnTarget = bHit;
+    bHit = bHit && bClear;
     if (Weapon && Held)
     {
-        PlayWeaponFireCue(Weapon, bHit ? Center : Eye + (RayLength > 1.0f ? Ray * (5000.0f / RayLength) : FVector()));
+        PlayWeaponFireCue(Weapon, bHit ? Center : !bClear ? BlockedAt : Eye + (RayLength > 1.0f ? Ray * (5000.0f / RayLength) : FVector()));
+    }
+    if (!bClear)
+    {
+        static int32_t LoggedBlocks = 0;
+        ABuildingSMActor* Building = Blocker ? Cast<ABuildingSMActor>(Blocker) : nullptr;
+        float BuildingDamage = 0.0f;
+        if (Building && Weapon && !Building->bDestroyed && Building->GetHealth() > 0.0f)
+        {
+            DamageBuilding(Building, Weapon, BuildingDamage);
+        }
+        BlockedShots += bOnTarget ? 1 : 0;
+        if (bOnTarget && LoggedBlocks++ < 8)
+        {
+            Log::Info(L"Battle Royale bots: {}'s shot at {} is stopped by {}{}", BotName, NameOf(reinterpret_cast<UObject*>(Target)), NameOf(Blocker),
+                Building ? std::format(L" ({:.0f} damage to it)", BuildingDamage) : std::wstring());
+        }
+        return;
     }
     if (!bHit)
     {
@@ -2335,6 +2516,753 @@ bool AFortAthenaAIBotController::SearchContainer(float Now)
 #endif
 }
 
+void AFortAthenaAIBotController::EquipPickaxe()
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAthenaPickaxeItemDefinition* Pickaxe = DefaultPickaxe();
+    UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr;
+    if (!Pawn || !PickaxeWeapon || (bPickaxeEquipped && EquippedWeapon.Get()))
+    {
+        return;
+    }
+    StopFiring();
+    CancelReload();
+    EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
+    bPickaxeEquipped = true;
+    EquippedIndex = -1;
+#endif
+}
+
+bool AFortAthenaAIBotController::SwingAtBuilding(ABuildingSMActor* Building, float& OutDamage)
+{
+    OutDamage = 0.0f;
+    AFortWeapon* Pickaxe = bPickaxeEquipped ? EquippedWeapon.Get() : nullptr;
+    return Pickaxe && DamageBuilding(Building, Pickaxe, OutDamage);
+}
+
+bool AFortAthenaAIBotController::DamageBuilding(ABuildingSMActor* Building, AFortWeapon* Pickaxe, float& OutDamage)
+{
+#if WITH_SERVER_CODE
+    // The pickaxe's hit as its ability applies it (GAB_Melee_ImpactCombo_Athena's GE_Melee_GenericDamage), made on the
+    // bot's ability system and applied to the building's. Its execution, UFortDamageFormulaExecutionCalculation (3.1
+    // 0xC49090), takes the base damage from the context's damage source: FFortGameplayEffectContext::DamageSourceObject
+    // (an IFortDamageSourceInterface; AFortWeapon's reads its WeaponData's stats row, so the pickaxe's FFortMeleeWeaponStats
+    // give a building its environment damage). A context with no damage source deals 0, which is what phase 4 saw; the
+    // ability fills it with the weapon, and so does Core here, with the bot's pickaxe.
+    static UClass* DamageEffect = LoadObject<UClass>(nullptr, L"/Game/Abilities/Weapons/Melee/GE_Melee_GenericDamage.GE_Melee_GenericDamage_C");
+    static UFunction* MakeContext = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:MakeEffectContext");
+    static UFunction* MakeSpec = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:MakeOutgoingSpec");
+    static UFunction* ApplyToTarget = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:BP_ApplyGameplayEffectSpecToTarget");
+    static UScriptStruct* FortContext = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.FortGameplayEffectContext");
+    static UProperty* DamageSourceProperty = FortContext ? FortContext->FindPropertyByName(FName(L"DamageSourceObject", FNAME_Find)) : nullptr;
+    OutDamage = 0.0f;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* Source = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    UAbilitySystemComponent* Target = Building->AbilitySystemComponent;
+    if (!Target)
+    {
+        Target = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(reinterpret_cast<AActor*>(Building));
+    }
+    static int32_t Logged = 0;
+    if (!DamageEffect || !MakeContext || !MakeSpec || !ApplyToTarget || !DamageSourceProperty || !Pickaxe || !Source || !Target)
+    {
+        if (Logged++ < 3)
+        {
+            Log::Info(L"Battle Royale bots: {} can't hit {}: effect {}, functions {}, damage source {}, pickaxe {}, the bot's ability system {}, the building's {}", BotName, NameOf(reinterpret_cast<UObject*>(Building)),
+                NameOf(DamageEffect), MakeContext && MakeSpec && ApplyToTarget ? L"found" : L"missing", DamageSourceProperty ? L"found" : L"missing", NameOf(reinterpret_cast<UObject*>(Pickaxe)),
+                NameOf(reinterpret_cast<UObject*>(Source)), NameOf(reinterpret_cast<UObject*>(Target)));
+        }
+        return false;
+    }
+    const float Before = Building->GetHealth();
+    Reflection::FParams Context(MakeContext, true);
+    if (!Context.Call(reinterpret_cast<UObject*>(Source)))
+    {
+        return false;
+    }
+    // FGameplayEffectContextHandle: its shared FGameplayEffectContext follows the handle's vtable. The ability system
+    // globals make Fortnite's context (UFortAbilitySystemGlobals::AllocGameplayEffectContext, 0xC8 bytes on 3.1).
+    void* ContextHandle = Context.GetAddress(L"ReturnValue");
+    uint8_t* ContextData = ContextHandle ? static_cast<uint8_t**>(ContextHandle)[1] : nullptr;
+    if (!ContextData)
+    {
+        return false;
+    }
+    *reinterpret_cast<FWeakObjectPtr*>(ContextData + DamageSourceProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Pickaxe);
+    Reflection::FParams Spec(MakeSpec, true);
+    if (!Spec.Set(L"GameplayEffectClass", DamageEffect) || !Spec.Set(L"Level", 1.0f) || !Spec.CopyStruct(L"Context", ContextHandle) || !Spec.Call(reinterpret_cast<UObject*>(Source)))
+    {
+        return false;
+    }
+    const void* Handle = Spec.GetAddress(L"ReturnValue");
+    if (!Handle || !*static_cast<void* const*>(Handle))
+    {
+        return false;
+    }
+    Reflection::FParams Apply(ApplyToTarget, true);
+    if (!Apply.CopyStruct(L"SpecHandle", Handle) || !Apply.Set(L"Target", Target) || !Apply.Call(reinterpret_cast<UObject*>(Source)))
+    {
+        return false;
+    }
+    OutDamage = Before - Building->GetHealth();
+    if (Logged++ < 6)
+    {
+        Log::Info(L"Battle Royale bots: {} hits {} with {}: health {:.0f} -> {:.0f}", BotName, NameOf(reinterpret_cast<UObject*>(Building)), NameOf(static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponData)), Before, Building->GetHealth());
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortAthenaAIBotController::StopHarvesting()
+{
+    HarvestTarget = nullptr;
+    bHarvestToUnstick = false;
+    if (bPickaxeEquipped && HasUsableWeapon())
+    {
+        EquipWeapon(BestWeaponIndex());
+    }
+}
+
+void AFortAthenaAIBotController::OnResourcesHarvested(ABuildingSMActor* Building, UFortItemDefinition* ResourceItem, int32_t Count, bool bDestroyed)
+{
+#if WITH_SERVER_CODE
+    bHarvestCredited = true;
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    if (!GameData || Count <= 0)
+    {
+        return;
+    }
+    const int32_t Kind = ResourceItem == GameData->WoodItemDefinition ? 0 : ResourceItem == GameData->StoneItemDefinition ? 1 : ResourceItem == GameData->MetalItemDefinition ? 2 : -1;
+    if (Kind < 0)
+    {
+        return;
+    }
+    // A player's materials stop at the item's stack size (999 on 3.x).
+    const int32_t MaxStack = ResourceItem->MaxStackSize > 0 ? static_cast<int32_t>(ResourceItem->MaxStackSize) : 999;
+    Materials[Kind] = std::min(Materials[Kind] + Count, MaxStack);
+    static int32_t Logged = 0;
+    if (Logged++ < 8 || bDestroyed)
+    {
+        Log::Info(L"Battle Royale bots: {} harvests {} {} from {}{} ({} wood, {} stone, {} metal)", BotName, Count, Kind == 0 ? L"wood" : Kind == 1 ? L"stone" : L"metal",
+            NameOf(reinterpret_cast<UObject*>(Building)), bDestroyed ? L", which breaks" : L"", Materials[0], Materials[1], Materials[2]);
+    }
+#endif
+}
+
+bool AFortAthenaAIBotController::FindBuildingInTheWay(float Now)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || !bHasMoveGoal || IsInCombat(Now))
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    FVector Direction = MoveGoal - Location;
+    Direction.Z = 0.0f;
+    if (Direction.Size() < 1.0f)
+    {
+        return false;
+    }
+    Direction = Direction * (1.0f / Direction.Size());
+    // Ahead, and a little to each side, at knee and chest height.
+    for (const float Yaw : { 0.0f, -25.0f, 25.0f })
+    {
+        for (const float Height : { -30.0f, 30.0f })
+        {
+            const FVector Start(Location.X, Location.Y, Location.Z + Height);
+            FVector Hit;
+            UObject* HitActor = nullptr;
+            UObject* HitComponent = nullptr;
+            if (!UKismetSystemLibrary::LineTraceSingle(Pawn, Start, Start + RotateYaw(Direction, Yaw) * 200.0f, 0, false, true, Hit, HitActor, HitComponent))
+            {
+                continue;
+            }
+            ABuildingSMActor* Building = HitActor ? Cast<ABuildingSMActor>(HitActor) : nullptr;
+            // Not a chest or an ammo box: the bot searches those.
+            if (Building && !Cast<ABuildingContainer>(HitActor) && !Building->bDestroyed && Building->GetHealth() > 0.0f && !IsUnreachable(Building))
+            {
+                HarvestTarget = Building;
+                HarvestTargetTime = Now;
+                HarvestPoint = Hit;
+                bHarvestToUnstick = true;
+                ++BreakThroughs;
+                Log::Info(L"Battle Royale bots: {} is stuck against {} ({:.0f} health) and breaks through it", BotName, NameOf(reinterpret_cast<UObject*>(Building)), Building->GetHealth());
+                return true;
+            }
+        }
+    }
+    return false;
+#else
+    return false;
+#endif
+}
+
+bool AFortAthenaAIBotController::Harvest(float Now)
+{
+#if WITH_SERVER_CODE
+    // Whether a swing damages a building at all, learnt from the first swings of any bot.
+    static bool bHarvestWorks = true;
+    static int32_t Misses = 0;
+    static int32_t Hits = 0;
+    static bool bLoggedPath = false;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!bHarvestWorks || !Pawn)
+    {
+        return false;
+    }
+    ABuildingSMActor* Target = HarvestTarget.Get();
+    if (Target && (Target->IsPendingKill() || Target->bDestroyed || Target->GetHealth() <= 0.0f))
+    {
+        StopHarvesting();
+        Target = nullptr;
+    }
+    // Materials: out of a fight, up to a stack of each a player would build with (Core's 🟡 300 in all).
+    const int32_t Total = Materials[0] + Materials[1] + Materials[2];
+    if (IsInCombat(Now) || (!bHarvestToUnstick && Total >= 300))
+    {
+        if (Target)
+        {
+            StopHarvesting();
+        }
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    if (!Target)
+    {
+        if (bHarvestToUnstick || Now < NextHarvestSearch)
+        {
+            bHarvestToUnstick = false;
+            return false;
+        }
+        NextHarvestSearch = Now + 3.0f;
+        // A tree, rock, wall or car next to the bot: traces around it at waist height.
+        float Best = 1e9f;
+        const FVector Start(Location.X, Location.Y, Location.Z + 20.0f);
+        for (int32_t Step = 0; Step < 8; ++Step)
+        {
+            const FVector Direction = RotateYaw(FVector(1.0f, 0.0f, 0.0f), 45.0f * static_cast<float>(Step));
+            FVector Hit;
+            UObject* HitActor = nullptr;
+            UObject* HitComponent = nullptr;
+            if (!UKismetSystemLibrary::LineTraceSingle(Pawn, Start, Start + Direction * 800.0f, 0, false, true, Hit, HitActor, HitComponent))
+            {
+                continue;
+            }
+            ABuildingSMActor* Building = HitActor ? Cast<ABuildingSMActor>(HitActor) : nullptr;
+            const float Distance = Dist2D(Hit, Location);
+            const uint8_t Resource = Building ? static_cast<uint8_t>(Building->ResourceType) : 0;
+            const bool bHarvestable = Building && (Resource == EFortResourceType::GetWood() || Resource == EFortResourceType::GetStone() || Resource == EFortResourceType::GetMetal());
+            if (bHarvestable && !Building->bPlayerPlaced && Building->GetHealth() > 0.0f && !IsUnreachable(Building) && Distance < Best)
+            {
+                Best = Distance;
+                Target = Building;
+                HarvestPoint = Hit;
+            }
+        }
+        if (!Target)
+        {
+            return false;
+        }
+        HarvestTarget = Target;
+        HarvestTargetTime = Now;
+    }
+    if (Now - HarvestTargetTime > (bHarvestToUnstick ? 30.0f : 20.0f))
+    {
+        MarkUnreachable(Target);
+        StopHarvesting();
+        return false;
+    }
+    if (Dist2D(HarvestPoint, Location) > 170.0f)
+    {
+        MoveTowards(HarvestPoint, Now, 120.0f);
+        return true;
+    }
+    StopMoving();
+    if (AAIController* AIController = Controller.Get())
+    {
+        AIController->SetFocalPoint(HarvestPoint);
+    }
+    EquipPickaxe();
+    if (Now < NextHarvestSwing)
+    {
+        return true;
+    }
+    NextHarvestSwing = Now + 0.9f;
+    ++Swings;
+    Pawn->PawnStartFire(0);
+    Pawn->PawnStopFire(0);
+    float Damage = 0.0f;
+    bHarvestCredited = false;
+    const bool bApplied = SwingAtBuilding(Target, Damage);
+    if (!bApplied || Damage <= 0.0f)
+    {
+        MarkUnreachable(Target);
+        StopHarvesting();
+        if (Hits == 0 && ++Misses >= 5)
+        {
+            bHarvestWorks = false;
+            Log::Warning(L"Battle Royale bots: harvesting is off: {} swings at buildings did no damage (the pickaxe's damage effect{})", Misses,
+                bApplied ? L" applies but its damage execution gives 0" : L" couldn't be applied");
+        }
+        return false;
+    }
+    ++Hits;
+    // The materials: the building's own resource spawn (Core's ABuildingSMActor::AttemptSpawnResources, which credits
+    // a bot instigator). The game's damage response calls it for a player's hit; when it didn't for the bot's, Core does.
+    if (!bHarvestCredited)
+    {
+        Target->AttemptSpawnResources(Pawn, Damage, false);
+    }
+    if (!bLoggedPath)
+    {
+        bLoggedPath = true;
+        Log::Info(L"Battle Royale bots: a pickaxe hit's materials come from {}", bHarvestCredited ? L"the building's damage response (AttemptSpawnResources)" : L"Core's call of AttemptSpawnResources");
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool AFortAthenaAIBotController::PlayReplicatedMontage(UObject* Montage, float PlayRate, bool bStop)
+{
+#if WITH_SERVER_CODE
+    // How an ability's PlayMontageAndWait reaches other players (UAbilitySystemComponent::PlayMontage): the ability
+    // system's replicated montage, FGameplayAbilityRepAnimMontage RepAnimMontageInfo, which each client plays in
+    // OnRep_ReplicatedAnimMontage for a pawn it doesn't control, a new montage or a flipped ForcePlayBit starting it.
+    // AFortPlayerPawnAthena keeps its own copy (RepAnimMontageInfo, OnRep_ReplicatedAnimMontage) and gets the same.
+    // The bot's reload and healing abilities can't run (no inventory owner), so Core sets it as they would.
+    static UScriptStruct* RepStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayAbilityRepAnimMontage");
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UObject* AbilitySystem = Pawn ? reinterpret_cast<UObject*>(static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent)) : nullptr;
+    if (!RepStruct || !AbilitySystem || (!Montage && !bStop))
+    {
+        return false;
+    }
+    const auto Field = [](const wchar_t* Name) { return RepStruct->FindPropertyByName(FName(Name, FNAME_Find)); };
+    static UProperty* MontageField = Field(L"AnimMontage");
+    static UProperty* RateField = Field(L"PlayRate");
+    static UProperty* PositionField = Field(L"Position");
+    static UProperty* BlendField = Field(L"BlendTime");
+    static UBoolProperty* StoppedField = static_cast<UBoolProperty*>(Field(L"IsStopped"));
+    static UBoolProperty* PlayBitField = static_cast<UBoolProperty*>(Field(L"ForcePlayBit"));
+    static UBoolProperty* SkipCorrectionField = static_cast<UBoolProperty*>(Field(L"SkipPositionCorrection"));
+    if (!MontageField || !RateField || !PositionField || !StoppedField || !PlayBitField)
+    {
+        return false;
+    }
+    int32_t Written = 0;
+    for (UObject* Owner : { AbilitySystem, reinterpret_cast<UObject*>(Pawn) })
+    {
+        UProperty* Property = Owner->GetClass()->FindPropertyByName(FName(L"RepAnimMontageInfo", FNAME_Find));
+        if (!Property)
+        {
+            continue;
+        }
+        uint8_t* Info = reinterpret_cast<uint8_t*>(Owner) + Property->GetOffset_ForInternal();
+        if (bStop)
+        {
+            StoppedField->SetPropertyValue_InContainer(Info, true);
+        }
+        else
+        {
+            *reinterpret_cast<UObject**>(Info + MontageField->GetOffset_ForInternal()) = Montage;
+            *reinterpret_cast<float*>(Info + RateField->GetOffset_ForInternal()) = PlayRate > 0.0f ? PlayRate : 1.0f;
+            *reinterpret_cast<float*>(Info + PositionField->GetOffset_ForInternal()) = 0.0f;
+            if (BlendField)
+            {
+                *reinterpret_cast<float*>(Info + BlendField->GetOffset_ForInternal()) = 0.25f;
+            }
+            StoppedField->SetPropertyValue_InContainer(Info, false);
+            PlayBitField->SetPropertyValue_InContainer(Info, !PlayBitField->GetPropertyValue_InContainer(Info));
+            if (SkipCorrectionField)
+            {
+                SkipCorrectionField->SetPropertyValue_InContainer(Info, true);
+            }
+        }
+        ++Written;
+    }
+    static int32_t Logged = 0;
+    if (!bStop && Logged++ < 6)
+    {
+        Log::Info(L"Battle Royale bots: {} plays {} for the players ({} replicated montage records)", BotName, NameOf(Montage), Written);
+    }
+    return Written > 0;
+#else
+    return false;
+#endif
+}
+
+bool AFortAthenaAIBotController::IsDBNO() const
+{
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    return Pawn && Pawn->bIsDBNO;
+}
+
+bool AFortAthenaAIBotController::CanGoDBNO() const
+{
+    // Battle Royale's DBNO (GAB_AthenaDBNO): in a team playlist a player whose teammate is still up goes down instead of
+    // out; a team all down is eliminated.
+    if (Manager->GetTeamSize() <= 1 || !IsAlive() || IsDBNO())
+    {
+        return false;
+    }
+    for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+    {
+        if (Teammate->GetState() == EFortAthenaAIBotState::Landed && !Teammate->IsDBNO())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+namespace
+{
+    // A row of AthenaGameData (/Game/Athena/Balance/DataTables/AthenaGameData), the curve table the DBNO abilities and
+    // effects read (Default.DBNO.InitialHealth, BleedDamage, BleedTick), or Default when it hasn't the row.
+    float AthenaGameDataValue(const wchar_t* Row, float Default)
+    {
+        static UObject* Table = LoadObject<UObject>(nullptr, L"/Game/Athena/Balance/DataTables/AthenaGameData.AthenaGameData");
+        static UFunction* Evaluate = FindObject<UFunction>(nullptr, L"/Script/Engine.DataTableFunctionLibrary:EvaluateCurveTableRow");
+        static UClass* LibraryClass = FindObject<UClass>(nullptr, L"/Script/Engine.DataTableFunctionLibrary");
+        UObject* Library = LibraryClass ? LibraryClass->GetDefaultObject() : nullptr;
+        Reflection::FParams Params(Evaluate, true);
+        if (!Table || !Library || !Params.Set(L"CurveTable", Table) || !Params.Set(L"RowName", FName(Row)) || !Params.Set(L"InXY", 0.0f) || !Params.Call(Library)
+            || Params.Take<uint8_t>(L"OutResult") != 0)
+        {
+            return Default;
+        }
+        return Params.Take<float>(L"OutXY");
+    }
+
+    // UAbilitySystemBlueprintLibrary::SendGameplayEventToActor, with the payload's instigator.
+    bool SendGameplayEvent(AActor* Actor, const wchar_t* Tag, UObject* Instigator)
+    {
+        static UFunction* Send = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:SendGameplayEventToActor");
+        static UClass* LibraryClass = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
+        static UScriptStruct* PayloadStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayEventData");
+        static UProperty* InstigatorProperty = PayloadStruct ? PayloadStruct->FindPropertyByName(FName(L"Instigator", FNAME_Find)) : nullptr;
+        static UProperty* TargetProperty = PayloadStruct ? PayloadStruct->FindPropertyByName(FName(L"Target", FNAME_Find)) : nullptr;
+        UObject* Library = LibraryClass ? LibraryClass->GetDefaultObject() : nullptr;
+        const FName TagName(Tag, FNAME_Find);
+        Reflection::FParams Params(Send, true);
+        uint8_t* Payload = static_cast<uint8_t*>(Params.GetAddress(L"Payload"));
+        if (!Library || TagName.IsNone() || !Payload || !Params.Set(L"Actor", Actor) || !Params.Set(L"EventTag", FGameplayTag{ TagName }))
+        {
+            return false;
+        }
+        if (InstigatorProperty)
+        {
+            *reinterpret_cast<UObject**>(Payload + InstigatorProperty->GetOffset_ForInternal()) = Instigator;
+        }
+        if (TargetProperty)
+        {
+            *reinterpret_cast<UObject**>(Payload + TargetProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Actor);
+        }
+        return Params.Call(Library);
+    }
+}
+
+void AFortAthenaAIBotController::EnterDBNO(AFortPlayerStateAthena* InDowner, float Now)
+{
+#if WITH_SERVER_CODE
+    // Down, not out: the pawn's bIsDBNO (replicated: clients show it crawling, with its DBNO icon), its DBNO health
+    // (AthenaGameData Default.DBNO.InitialHealth), the box teammates revive through, and the game's own DBNO ability,
+    // GAB_AthenaDBNO, which a player's death event (Event.Damage.DiedAthena) triggers: its montage (DBNO_Athena_Intro), its
+    // start effect and its bleed effect (GE_Athena_DBNO_Bleed). The native damage response that sends that event for a
+    // player doesn't run for a bot's Core-made hit, so Core sends it.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Pawn->bIsDBNO)
+    {
+        return;
+    }
+    StopFiring();
+    CancelReload();
+    CancelHeal();
+    if (HarvestTarget.Get())
+    {
+        StopHarvesting();
+    }
+    StopMoving();
+    EmoteUntil = 0.0f;
+    ReviveTarget = nullptr;
+    ReviveDoneAt = 0.0f;
+    Pawn->bIsDBNO = true;
+    static const float InitialHealth = AthenaGameDataValue(L"Default.DBNO.InitialHealth", 100.0f);
+    Pawn->SetHealth(std::max(InitialHealth, 1.0f));
+    if (Natives::AFortPlayerPawn_UpdateDBNOInteractCollision)
+    {
+        Natives::AFortPlayerPawn_UpdateDBNOInteractCollision(reinterpret_cast<AFortPawn*>(Pawn));
+    }
+    UAbilitySystemComponent* AbilitySystem = static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent);
+    static UClass* DBNOAbility = LoadObject<UClass>(nullptr, L"/Game/Abilities/NPC/Generic/GAB_AthenaDBNO.GAB_AthenaDBNO_C");
+    bool bAbility = false;
+    if (AbilitySystem && DBNOAbility && DBNOAbility->IsChildOf(UGameplayAbility::StaticClass()))
+    {
+        if (!AbilitySystem->FindAbilitySpecFromClass(DBNOAbility))
+        {
+            UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
+            std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
+            SpecStruct->InitializeStruct(SpecStorage.data());
+            FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
+            FGameplayAbilitySpecHandle NewHandle;
+            NewHandle.GenerateNewHandle();
+            Spec.Handle = NewHandle;
+            Spec.Ability = static_cast<UGameplayAbility*>(DBNOAbility->GetDefaultObject());
+            Spec.Level = 1;
+            Spec.InputID = INDEX_NONE;
+            AbilitySystem->GiveAbility(Spec);
+            SpecStruct->DestroyStruct(SpecStorage.data());
+        }
+        AController* DownerController = InDowner ? Cast<AController>(reinterpret_cast<UObject*>(InDowner->GetOwner())) : nullptr;
+        bAbility = SendGameplayEvent(reinterpret_cast<AActor*>(Pawn), L"Event.Damage.DiedAthena", reinterpret_cast<UObject*>(DownerController));
+    }
+    Downer = InDowner;
+    DBNOStartedAt = Now;
+    NextBleedTime = Now + 1.0f;
+    LastDBNOHealth = Pawn->GetHealth();
+    ++TimesDowned;
+    Log::Info(L"Battle Royale bots: {} is down (DBNO){}, {:.0f} health, the DBNO ability {}", BotName, InDowner ? std::format(L", knocked by {}", InDowner->GetPlayerName().ToStdString()) : std::wstring(),
+        Pawn->GetHealth(), bAbility ? L"triggered" : L"not triggered");
+#endif
+}
+
+void AFortAthenaAIBotController::Downed(float Now)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn)
+    {
+        return;
+    }
+    StopFiring();
+    // The team all down: eliminated (the last one knocked is everyone's finisher).
+    bool bTeammateUp = false;
+    AFortAthenaAIBotController* Nearest = nullptr;
+    float NearestDistance = 1e9f;
+    const FVector Location = LocationOf(Pawn);
+    for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+    {
+        if (Teammate->GetState() != EFortAthenaAIBotState::Landed || Teammate->IsDBNO())
+        {
+            continue;
+        }
+        bTeammateUp = true;
+        const float Distance = Dist2D(LocationOf(Teammate->GetPawn()), Location);
+        if (Distance < NearestDistance)
+        {
+            NearestDistance = Distance;
+            Nearest = Teammate;
+        }
+    }
+    AFortPlayerStateAthena* Finisher = Downer.Get();
+    const auto Eliminate = [this, Pawn, Finisher](const wchar_t* Reason, const wchar_t* Why)
+    {
+        AController* Killer = Finisher ? Cast<AController>(reinterpret_cast<UObject*>(Finisher->GetOwner())) : nullptr;
+        Log::Info(L"Battle Royale bots: {} is eliminated while down ({})", BotName, Why);
+        Pawn->SetHealth(1.0f);
+        Pawn->ForceKill(FGameplayTag{ FName(Reason, FNAME_Find) }, Killer, Killer ? reinterpret_cast<AActor*>(static_cast<APawn*>(Killer->Pawn)) : nullptr);
+    };
+    if (!bTeammateUp)
+    {
+        Eliminate(L"Gameplay.Damage.DBNOBleedOut", L"no teammate left standing");
+        return;
+    }
+    // Bleeding: GE_Athena_DBNO_Bleed (AthenaGameData Default.DBNO.BleedDamage every Default.DBNO.BleedTick s) when the
+    // ability applied it; Core bleeds the pawn the same when its health hasn't moved.
+    if (Now >= NextBleedTime)
+    {
+        static const float BleedTick = std::max(AthenaGameDataValue(L"Default.DBNO.BleedTick", 1.0f), 0.1f);
+        static const float BleedDamage = AthenaGameDataValue(L"Default.DBNO.BleedDamage", 1.0f);
+        NextBleedTime = Now + BleedTick;
+        const float Health = Pawn->GetHealth();
+        if (Health >= LastDBNOHealth - 0.01f && Health > 0.0f)
+        {
+            Pawn->SetHealth(Health - BleedDamage);
+        }
+        LastDBNOHealth = Pawn->GetHealth();
+    }
+    if (Pawn->GetHealth() <= 0.5f)
+    {
+        Eliminate(L"Gameplay.Damage.DBNOBleedOut", L"bled out");
+        return;
+    }
+    // Crawling to the nearest teammate standing, who comes to revive it.
+    if (Nearest && NearestDistance > 250.0f)
+    {
+        MoveTowards(LocationOf(Nearest->GetPawn()), Now, 200.0f);
+    }
+    else
+    {
+        StopMoving();
+    }
+#endif
+}
+
+bool AFortAthenaAIBotController::ReviveTeammate(float Now)
+{
+#if WITH_SERVER_CODE
+    // 21.40's bots revive their downed teammates (the community list: "reviving each other"): out of a fight, the nearest
+    // downed teammate within 60 m, the pawn's ReviveFromDBNOTime standing by it, then the game's own revive
+    // (AFortPlayerPawn::ReviveFromDBNO, BlueprintAuthorityOnly; Core's restored one where the build strips it).
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Manager->GetTeamSize() <= 1)
+    {
+        return false;
+    }
+    AFortAthenaAIBotController* Target = ReviveTarget;
+    // A revive goes on with enemies about, but not with one close by in sight or while being shot at.
+    const bool bThreat = IsUnderThreat(Now);
+    const bool bTargetValid = Target && Target->IsAlive() && Target->IsDBNO() && Target->GetPawn();
+    if (!bTargetValid || bThreat)
+    {
+        if (Target && ReviveDoneAt > 0.0f)
+        {
+            Log::Info(L"Battle Royale bots: {} stops reviving {}", BotName, Target->GetBotName());
+        }
+        ReviveTarget = nullptr;
+        ReviveDoneAt = 0.0f;
+        Target = nullptr;
+        if (bThreat)
+        {
+            return false;
+        }
+    }
+    const FVector Location = LocationOf(Pawn);
+    if (!Target)
+    {
+        float Best = 6000.0f;
+        for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+        {
+            const float Distance = Teammate->IsDBNO() && Teammate->GetPawn() ? Dist2D(LocationOf(Teammate->GetPawn()), Location) : 1e9f;
+            if (Distance < Best)
+            {
+                Best = Distance;
+                Target = Teammate;
+            }
+        }
+        if (!Target)
+        {
+            return false;
+        }
+        ReviveTarget = Target;
+        ReviveDoneAt = 0.0f;
+    }
+    AFortPlayerPawnAthena* Downed = Target->GetPawn();
+    const FVector DownedLocation = LocationOf(Downed);
+    if (Dist2D(DownedLocation, Location) > 180.0f)
+    {
+        ReviveDoneAt = 0.0f;
+        MoveTowards(DownedLocation, Now, 120.0f);
+        return true;
+    }
+    StopMoving();
+    if (AAIController* AIController = Controller.Get())
+    {
+        AIController->SetFocalPoint(DownedLocation);
+    }
+    if (ReviveDoneAt <= 0.0f)
+    {
+        const float ReviveTime = NumberOf(reinterpret_cast<UObject*>(Downed), L"ReviveFromDBNOTime", 10.0f);
+        ReviveDoneAt = Now + std::max(ReviveTime, 1.0f);
+        Log::Info(L"Battle Royale bots: {} revives {} ({:.0f} s)", BotName, Target->GetBotName(), ReviveTime);
+        return true;
+    }
+    if (Now < ReviveDoneAt)
+    {
+        return true;
+    }
+    ReviveTarget = nullptr;
+    ReviveDoneAt = 0.0f;
+    static UFunction* Revive = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawn:ReviveFromDBNO");
+    Reflection::FParams Params(Revive, true);
+    AAIController* Reviver = Controller.Get();
+    if (Revive && Params.Set(L"EventInstigator", reinterpret_cast<AController*>(Reviver)))
+    {
+        Params.Call(reinterpret_cast<UObject*>(Downed));
+    }
+    const bool bNative = !Downed->bIsDBNO;
+    if (!bNative)
+    {
+        // The game's revive refused the AI controller (CanReviveFromDBNO): Core gets the pawn up as the revive effect
+        // would (GE_Athena_Revive: AthenaGameData Default.DBNO.ReviveHealth), and ends its DBNO ability.
+        static const float ReviveHealth = AthenaGameDataValue(L"Default.DBNO.ReviveHealth", 30.0f);
+        Downed->bIsDBNO = false;
+        Downed->SetHealth(std::max(ReviveHealth, 1.0f));
+        if (Natives::AFortPlayerPawn_UpdateDBNOInteractCollision)
+        {
+            Natives::AFortPlayerPawn_UpdateDBNOInteractCollision(reinterpret_cast<AFortPawn*>(Downed));
+        }
+        SendGameplayEvent(reinterpret_cast<AActor*>(Downed), L"Event.RevivedAthena", reinterpret_cast<UObject*>(Reviver));
+        UAbilitySystemComponent* AbilitySystem = static_cast<UAbilitySystemComponent*>(Downed->AbilitySystemComponent);
+        const FName DBNOTag(L"Gameplay.Action.Player.DBNOAthena", FNAME_Find);
+        if (AbilitySystem && !DBNOTag.IsNone() && Natives::UAbilitySystemComponent_CancelAbilities)
+        {
+            FGameplayTagContainer Tags;
+            Tags.GameplayTags.Add(FGameplayTag{ DBNOTag });
+            Natives::UAbilitySystemComponent_CancelAbilities(AbilitySystem, &Tags, nullptr, nullptr);
+        }
+    }
+    Target->OnRevived();
+    ++Revives;
+    Log::Info(L"Battle Royale bots: {} revived {} ({}), {:.0f} health", BotName, Target->GetBotName(), bNative ? L"the game's ReviveFromDBNO" : L"Core's, the game's refused", Downed->GetHealth());
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortAthenaAIBotController::OnRevived()
+{
+    Downer = nullptr;
+    DBNOStartedAt = 0.0f;
+    LastHurtTime = -100.0f;
+    StopMoving();
+}
+
+bool AFortAthenaAIBotController::StayWithTeam(float Now)
+{
+#if WITH_SERVER_CODE
+    // Teammates stick together (the community list): a bot with nothing to do rejoins the nearest teammate standing when
+    // it has drifted more than 25 m away.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Manager->GetTeamSize() <= 1)
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    float Best = 1e9f;
+    FVector Goal;
+    for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+    {
+        if (Teammate->GetState() != EFortAthenaAIBotState::Landed || Teammate->IsDBNO() || !Teammate->GetPawn())
+        {
+            continue;
+        }
+        const FVector Other = LocationOf(Teammate->GetPawn());
+        const float Distance = Dist2D(Other, Location);
+        if (Distance < Best)
+        {
+            Best = Distance;
+            Goal = Other;
+        }
+    }
+    if (Best > 2500.0f && Best < 40000.0f)
+    {
+        MoveTowards(Goal, Now, 800.0f);
+        return true;
+    }
+    return false;
+#else
+    return false;
+#endif
+}
+
 void AFortAthenaAIBotController::TryToUnstuck(float Now)
 {
 #if WITH_SERVER_CODE
@@ -2358,6 +3286,13 @@ void AFortAthenaAIBotController::TryToUnstuck(float Now)
             // The path doesn't get it anywhere: steer for a while.
             StopMoving();
             PathFailedUntil = Now + 4.0f;
+        }
+        if (StuckChecks == 2 && !HarvestTarget.Get() && FindBuildingInTheWay(Now))
+        {
+            // Something it can break is in the way: the pickaxe, as a stuck player does.
+            StuckChecks = 0;
+            LastStuckCheckLocation = Location;
+            return;
         }
         if (StuckChecks >= 3)
         {
@@ -2462,6 +3397,14 @@ void AFortAthenaAIBotController::DropInventory()
     {
         DropItem(Definition, Count, 0);
     }
+    if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+    {
+        DropItem(GameData->WoodItemDefinition, Materials[0], 0);
+        DropItem(GameData->StoneItemDefinition, Materials[1], 0);
+        DropItem(GameData->MetalItemDefinition, Materials[2], 0);
+    }
+    Materials[0] = Materials[1] = Materials[2] = 0;
+    HarvestTarget = nullptr;
     WeaponList.clear();
     Ammo.clear();
     Consumables.clear();
@@ -2574,6 +3517,15 @@ bool AFortAthenaAIBotController::Heal(float Now)
             EquippedIndex = -1;
             bPickaxeEquipped = false;
         }
+        // Its use as players see it: the fire ability's montage (GA_Athena_Bandage's AnimMontageInfo: WrapBandages_Athena
+        // at 0.75).
+        UProperty* AbilityProperty = reinterpret_cast<UObject*>(ItemWeapon)->GetClass()->FindPropertyByName(FName(L"PrimaryFireAbility", FNAME_Find));
+        UClass* AbilityClass = AbilityProperty ? reinterpret_cast<TAssetSubclassOf<UObject>*>(reinterpret_cast<uint8_t*>(ItemWeapon) + AbilityProperty->GetOffset_ForInternal())->LoadSynchronous() : nullptr;
+        float PlayRate = 1.0f;
+        if (UObject* Montage = AbilityClass ? ObjectOf(AbilityClass->GetDefaultObject(), L"AnimMontageInfo", L"MontageToPlay", &PlayRate, L"AnimPlayRate") : nullptr)
+        {
+            PlayReplicatedMontage(Montage, PlayRate);
+        }
     }
     Log::Info(L"Battle Royale bots: {} starts using {} ({:.0f} health, {:.0f} shield, {:.1f} s)", BotName, NameOf(Best), Health, Shield, HealUntil - Now);
     return true;
@@ -2590,6 +3542,7 @@ void AFortAthenaAIBotController::CancelHeal()
     }
     HealingItem = nullptr;
     HealUntil = 0.0f;
+    PlayReplicatedMontage(nullptr, 0.0f, true);
     // Back to a gun (the item was in its hands), or the pickaxe.
     if (HasUsableWeapon())
     {

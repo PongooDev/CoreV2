@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Building/BuildingSMActor.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/AI/FortServerBotManagerAthena.h"
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Components/PrimitiveComponent.h"
@@ -239,9 +240,17 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
         return;
     }
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(InstigatorPawn->Controller)));
+    // Core's Battle Royale bots (CoreV2 #233) harvest too: their pawn's controller is an AI controller, and the bot keeps
+    // the materials itself.
+    AFortAthenaAIBotController* Bot = nullptr;
     if (!PlayerController)
     {
-        return;
+        UFortServerBotManagerAthena* BotManager = UFortServerBotManagerAthena::Get();
+        Bot = BotManager ? BotManager->FindBot(reinterpret_cast<const UObject*>(InstigatorPawn)) : nullptr;
+        if (!Bot)
+        {
+            return;
+        }
     }
 
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
@@ -356,7 +365,11 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
         }
     }
 
-    if (ResourceCount > 0 && AthenaGameMode)
+    if (Bot)
+    {
+        Bot->OnResourcesHarvested(this, ResourceItem, ResourceCount, bDestroyed);
+    }
+    else if (ResourceCount > 0 && AthenaGameMode)
     {
         UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, ResourceItem, ResourceCount, false);
         AFortPlayerStateZone* PlayerState = Cast<AFortPlayerStateZone>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState)));

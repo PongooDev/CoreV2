@@ -382,6 +382,16 @@ void UFortServerBotManagerAthena::Tick()
     const float Now = World->GetTimeSeconds();
     const float DeltaSeconds = LastTickTime < 0.0f ? 0.0f : std::max(Now - LastTickTime, 0.0f);
     LastTickTime = Now;
+    // The server's frame (wall clock, the 30 Hz cap included) and the bots' share of it, for the summary.
+    const auto FrameStart = std::chrono::steady_clock::now();
+    if (LastFrameStart.time_since_epoch().count() != 0)
+    {
+        const double FrameMs = std::chrono::duration<double, std::milli>(FrameStart - LastFrameStart).count();
+        FrameMsSum += FrameMs;
+        FrameMsMax = std::max(FrameMsMax, FrameMs);
+        ++FrameCount;
+    }
+    LastFrameStart = FrameStart;
     if (!bEnabled && PlayerBots.empty())
     {
         return;
@@ -411,6 +421,10 @@ void UFortServerBotManagerAthena::Tick()
         TickWarmup(Now);
     }
 
+    if (bHasNavigation)
+    {
+        UAthenaNavSystem::Tick(World);
+    }
     RefreshEnemies();
     if (bAircraftStarted && Now >= NextLootRefresh)
     {
@@ -427,6 +441,7 @@ void UFortServerBotManagerAthena::Tick()
         UpdateCounts();
         CheckWinConditionLastManStanding();
     }
+    BotsMsSum += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - FrameStart).count();
     LogSummary(Now);
 #endif
 }
@@ -1059,13 +1074,24 @@ void UFortServerBotManagerAthena::LogSummary(float Now)
     }
     NextSummaryLog = Now + 15.0f;
     int32_t ByState[5] = {};
-    int32_t Armed = 0;
+    int32_t OnNavMesh = 0;
+    AFortGameModeAthena* Athena = GetGameMode();
+    UWorld* World = Athena ? Athena->GetWorld() : nullptr;
     for (const auto& Bot : PlayerBots)
     {
         ++ByState[static_cast<int32_t>(Bot->GetState())];
+        if (bHasNavigation && Bot->GetState() == EFortAthenaAIBotState::Landed && Bot->GetPawn() && UAthenaNavSystem::IsOnNavMesh(World, LocationOf(reinterpret_cast<const AActor*>(Bot->GetPawn()))))
+        {
+            ++OnNavMesh;
+        }
     }
-    AFortGameStateAthena* GameState = AthenaGameStateOf(GetGameMode());
-    Log::Info(L"Battle Royale bots: {} in the warmup, {} in the aircraft, {} skydiving, {} landed, {} out; {} loot pickups seen; players left {}, teams left {}",
-        ByState[0], ByState[1], ByState[2], ByState[3], ByState[4], Loot.size(), GameState ? static_cast<int32_t>(GameState->PlayersLeft) : 0, GameState ? static_cast<int32_t>(GameState->TeamsLeft) : 0);
-    (void)Armed;
+    AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+    Log::Info(L"Battle Royale bots: {} in the warmup, {} in the aircraft, {} skydiving, {} landed ({} on the navmesh), {} out; {} loot pickups seen; players left {}, teams left {}; "
+        L"frame {:.1f} ms average, {:.1f} ms max, bots {:.2f} ms a frame",
+        ByState[0], ByState[1], ByState[2], ByState[3], OnNavMesh, ByState[4], Loot.size(), GameState ? static_cast<int32_t>(GameState->PlayersLeft) : 0, GameState ? static_cast<int32_t>(GameState->TeamsLeft) : 0,
+        FrameCount ? FrameMsSum / FrameCount : 0.0, FrameMsMax, FrameCount ? BotsMsSum / FrameCount : 0.0);
+    FrameMsSum = 0.0;
+    FrameMsMax = 0.0;
+    BotsMsSum = 0.0;
+    FrameCount = 0;
 }

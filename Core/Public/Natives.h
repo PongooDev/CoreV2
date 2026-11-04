@@ -390,6 +390,9 @@ namespace Natives
     inline void (*UNavigationSystem_ConditionalPopulateNavOctree)(UNavigationSystem* This) = nullptr;
     inline ptrdiff_t UNavigationSystem_bNavOctreeLock = -1;
     inline void (*UNavigationSystem_RequestRegistration)(UNavigationSystem* This, ANavigationData* NavData, bool bTriggerRegistrationProcessing) = nullptr;
+    // static UNavigationSystem::InitializeForWorld(UWorld*, FNavigationSystemRunMode): makes the world's navigation system
+    // (CreateNavigationSystem) when it has none and its settings enable navigation, then runs its OnWorldInitDone.
+    inline void (*UNavigationSystem_InitializeForWorld)(UWorld* World, uint8_t Mode) = nullptr;
     inline void (*UBuildingStructuralSupportSystem_InitializeGrid)(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ) = nullptr;
     inline ptrdiff_t UBuildingStructuralSupportSystem_GridSize = -1;
     inline ptrdiff_t UBuildingStructuralSupportSystem_GridOrigin = -1;

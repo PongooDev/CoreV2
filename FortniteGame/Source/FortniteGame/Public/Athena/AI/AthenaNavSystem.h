@@ -23,6 +23,8 @@ public:
     // steer without it.
     static bool InitializeForBots(UWorld* World, const FBox& IslandBounds);
     static bool IsInitialized();
+    // Each frame: once the navmesh is registered, the octree is populated and the initial build lock released.
+    static void Tick(UWorld* World);
 
     // The navmesh the bots path on, once registered with the navigation system.
     static ANavigationData* GetNavData(UWorld* World);

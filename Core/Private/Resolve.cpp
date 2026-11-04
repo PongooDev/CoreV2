@@ -6209,6 +6209,47 @@ bool Finder::ResolveNavigationSystemLive()
     return true;
 }
 
+bool Finder::ResolveNavigationSystemInitializeForWorldLive(ptrdiff_t WorldNavigationSystemOffset)
+{
+    if (Natives::UNavigationSystem_InitializeForWorld)
+    {
+        return true;
+    }
+    static bool bSearched = false;
+    if (bSearched || WorldNavigationSystemOffset <= 0)
+    {
+        return false;
+    }
+    bSearched = true;
+
+    // UNavigationSystem::InitializeForWorld(World, Mode) has no strings (3.1 0x1E1CCC0, 3.0 0x1E08210; UEngine::LoadMap
+    // calls it with "mov dl, 1" after InitializeActorsForPlay):
+    //   test rcx, rcx; jz; mov [rsp+8], rbx; push rdi; sub rsp, 20h; mov rbx, rcx; movzx edi, dl;
+    //   mov rcx, [rcx+World.NavigationSystem]; test rcx, rcx; jnz; mov rcx, rbx; call CreateNavigationSystem
+    // then calls the system's OnWorldInitDone(Mode). The only function in the exe that starts this way.
+    const int32_t Offset = static_cast<int32_t>(WorldNavigationSystemOffset);
+    const std::initializer_list<int32_t> Pattern = { 0x48, 0x85, 0xC9, 0x74, -1, 0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xD9, 0x0F, 0xB6, 0xFA,
+        0x48, 0x8B, 0x89, Offset & 0xFF, (Offset >> 8) & 0xFF, (Offset >> 16) & 0xFF, (Offset >> 24) & 0xFF, 0x48, 0x85, 0xC9, 0x75, -1, 0x48, 0x8B, 0xCB, 0xE8 };
+    uintptr_t Found = 0;
+    int32_t Matches = 0;
+    for (const auto& [Begin, End] : Finder::ExecutableSections())
+    {
+        for (uintptr_t Site = FindInstruction(Begin, End, Pattern); Site; Site = FindInstruction(Site + 1, End, Pattern))
+        {
+            Found = Site;
+            ++Matches;
+        }
+    }
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: UNavigationSystem::InitializeForWorld not found ({} matches)", Matches);
+        return false;
+    }
+    Natives::UNavigationSystem_InitializeForWorld = reinterpret_cast<decltype(Natives::UNavigationSystem_InitializeForWorld)>(Found);
+    Log::Info(L"Finder: UNavigationSystem::InitializeForWorld at 0x{:X}", Found - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveOutpostOwnerLive()
 {
     UFunction* IsOutpostOwner = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerStateOutpost:IsOutpostOwner");

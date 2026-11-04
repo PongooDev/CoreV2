@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+
 #include "Athena/AI/FortAthenaAIBotController.h"
 #include "Math/Vector.h"
 #include "UObject/WeakObjectPtr.h"
@@ -178,6 +180,11 @@ private:
     std::vector<FFortAthenaBotLoot> Loot;
     std::vector<FFortAthenaBotContainer> Containers;
     bool bHasNavigation = false;
+    std::chrono::steady_clock::time_point LastFrameStart;
+    double FrameMsSum = 0.0;
+    double FrameMsMax = 0.0;
+    double BotsMsSum = 0.0;
+    int32_t FrameCount = 0;
     std::map<UFortWeaponItemDefinition*, bool> GunDefinitions;
     struct FBotHit
     {

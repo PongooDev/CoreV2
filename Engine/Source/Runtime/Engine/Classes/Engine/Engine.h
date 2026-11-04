@@ -25,6 +25,7 @@ class UEngine : public UObject
     DefineUProperty(UClass*, ConsoleClass)
     DefineUProperty(float, NetClientTicksPerSecond)
     DefineUProperty(UAssetManager*, AssetManager)
+    DefineUProperty(UClass*, NavigationSystemClass)
     DefineNativeMember(FOnNetworkFailure, NetworkFailureEvent, UEngine_NetworkFailureEvent)
 
 public:

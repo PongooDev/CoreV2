@@ -17,6 +17,19 @@ namespace ENavigationBuildLock
 }
 
 class ANavMeshBoundsVolume;
+class UWorld;
+
+namespace FNavigationSystemRunMode
+{
+    enum Type : uint8_t
+    {
+        InvalidMode,
+        GameMode,
+        EditorMode,
+        SimulationMode,
+        PIEMode,
+    };
+}
 
 class UNavigationSystem : public UObject
 {
@@ -52,6 +65,10 @@ public:
     void RegisterNavigationInvoker(AActor* Invoker, float TileGenerationRadius, float TileRemovalRadius);
 
     static bool IsNavigationBeingBuilt(UObject* WorldContextObject);
+    // UEngine::LoadMap's call once the world's actors are initialized: CreateNavigationSystem when the world has no
+    // navigation system (GEngine's NavigationSystemClass, if the world settings' bEnableNavigationSystem is on), then
+    // its OnWorldInitDone(Mode). False when the engine function wasn't found.
+    static bool InitializeForWorld(UWorld* World, FNavigationSystemRunMode::Type Mode);
     // The point on the navigation data within QueryExtent of Point, or false when there is none there (no tile yet).
     static bool K2_ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, FVector& ProjectedLocation, ANavigationData* NavData, const FVector& QueryExtent);
 };

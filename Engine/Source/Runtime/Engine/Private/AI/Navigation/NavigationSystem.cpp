@@ -52,6 +52,16 @@ void UNavigationSystem::RequestRegistration(ANavigationData* NavData, bool bTrig
     }
 }
 
+bool UNavigationSystem::InitializeForWorld(UWorld* World, FNavigationSystemRunMode::Type Mode)
+{
+    if (!Natives::UNavigationSystem_InitializeForWorld || !World)
+    {
+        return false;
+    }
+    Natives::UNavigationSystem_InitializeForWorld(World, Mode);
+    return true;
+}
+
 bool UNavigationSystem::IsNavigationBeingBuilt(UObject* WorldContextObject)
 {
     Reflection::FParams Params(StaticFunction_IsNavigationBeingBuilt());

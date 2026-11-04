@@ -26,4 +26,6 @@ class AWorldSettings : public AActor
 
 public:
     DefineUProperty(TArray<FNetViewer>, ReplicationViewers)
+    // Whether the world gets a navigation system (UNavigationSystem::CreateNavigationSystem checks it).
+    DefineBitfieldUProperty(bEnableNavigationSystem)
 };

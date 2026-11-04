@@ -173,6 +173,7 @@ namespace Finder
     bool ResolveQuickBarFocusLive();
     bool ResolveSpottingLive(UClass* SpottableActorInterface);
     bool ResolveNavigationSystemLive();
+    bool ResolveNavigationSystemInitializeForWorldLive(ptrdiff_t WorldNavigationSystemOffset);
     bool ResolveOutpostOwnerLive();
     bool ResolveBadgeScoresLive();
     bool ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, FEarnScoreCallSites& OutSites);

@@ -109,6 +109,7 @@ public:
     AGameModeBase* GetAuthGameMode() const { return AuthorityGameMode; }
     AGameStateBase* GetGameState() const { return GameState; }
     UNavigationSystem* GetNavigationSystem() const { return NavigationSystem; }
+    static ptrdiff_t NavigationSystemOffset() { return Member_NavigationSystem.GetOffsetChecked(); }
     AWorldSettings* GetWorldSettings(bool bCheckStreamingPersistent = false, bool bChecked = true) const;
     void AddNetworkActor(AActor* Actor);
     ULevelStreaming* GetLevelStreamingForPackageName(FName InPackageName);

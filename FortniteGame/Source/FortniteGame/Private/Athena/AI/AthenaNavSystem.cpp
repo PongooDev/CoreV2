@@ -4,7 +4,10 @@
 #include "AI/Navigation/NavigationData.h"
 #include "AI/Navigation/NavigationSystem.h"
 #include "Components/SceneComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Finder.h"
+#include "GameFramework/WorldSettings.h"
 #include "GameFramework/Volume.h"
 #include "Log.h"
 #include "PhysicsEngine/BodySetup.h"
@@ -26,6 +29,7 @@ namespace
     constexpr uint8_t RuntimeDynamic = 2;
 
     bool bInitialized = false;
+    bool bReady = false;
     bool bTried = false;
     FWeakObjectPtr NavDataPtr;
 
@@ -76,7 +80,7 @@ namespace
 
     // One NavMeshBoundsVolume over the island. Battle Royale's cook strips the brushes, and a spawned volume has none:
     // its brush component's bounds come from a one-box body setup instead (UBrushComponent::CalcBounds uses
-    // BrushBodySetup without a brush), scaled to the island like the Zone's unit volumes (FortGameModeZone.cpp).
+    // BrushBodySetup without a brush), a box the island's size.
     ANavMeshBoundsVolume* SpawnIslandBounds(UWorld* World, const FBox& Island)
     {
         FActorSpawnParameters SpawnInfo;
@@ -94,18 +98,56 @@ namespace
         if (BodySetup)
         {
             FKBoxElem& Elem = BodySetup->AggGeom.BoxElems.AddDefaulted();
-            Elem.X = 1.0f;
-            Elem.Y = 1.0f;
-            Elem.Z = 1.0f;
+            // The box is the island's size at scale 1: FKAggregateGeom::CalcAABB scales box elements by the smallest
+            // axis of the component's scale (the first run's island-scaled unit box came out a 22440 cube).
+            const FVector Size = Island.Max - Island.Min;
+            Elem.X = Size.X;
+            Elem.Y = Size.Y;
+            Elem.Z = Size.Z;
             *BodySetupMember = reinterpret_cast<UObject*>(BodySetup);
         }
         if (USceneComponent* Root = Volume->GetRootComponent())
         {
             Root->Mobility = EComponentMobility::Movable;
         }
-        Volume->SetActorScale3D(Island.Max - Island.Min);
         Volume->SetActorLocation(Island.GetCenter());
         return Volume;
+    }
+
+    // 3.0's Athena world is made without a navigation system: its world settings turn bEnableNavigationSystem off, so
+    // UWorld::InitWorld and LoadMap's UNavigationSystem::InitializeForWorld skip CreateNavigationSystem. 8.30's Athena
+    // world has one (UAthenaNavSystem, from its world settings and DefaultEngine's NavigationSystemClass). Core turns
+    // the world's setting on and runs the engine's own InitializeForWorld(World, GameMode) as LoadMap does: it makes
+    // GEngine's NavigationSystemClass for the world and runs its OnWorldInitDone. The class default's config is
+    // 8.30's UAthenaNavSystemConfig for the new system's lifetime (invokers only, no data spawned for every agent, lazy
+    // gathering), so the system is born with it, as from DefaultEngine.ini; the default is put back afterwards.
+    UNavigationSystem* CreateNavigationSystem(UWorld* World)
+    {
+        AWorldSettings* Settings = World->GetWorldSettings(false, false);
+        UClass* NavSysClass = GEngine->NavigationSystemClass;
+        UNavigationSystem* Default = NavSysClass ? reinterpret_cast<UNavigationSystem*>(NavSysClass->GetDefaultObject()) : nullptr;
+        if (!Settings || !Default || !Finder::ResolveNavigationSystemInitializeForWorldLive(UWorld::NavigationSystemOffset()))
+        {
+            Log::Warning(L"Battle Royale navigation: can't make the world's navigation system (settings {}, class {})", NameOf(reinterpret_cast<UObject*>(Settings)), NameOf(reinterpret_cast<UObject*>(NavSysClass)));
+            return nullptr;
+        }
+        const bool bWasEnabled = Settings->bEnableNavigationSystem;
+        const bool bWasInvokersOnly = Default->bGenerateNavigationOnlyAroundNavigationInvokers;
+        const bool bWasAutoCreate = Default->bAutoCreateNavigationData;
+        const uint8_t WasGathering = Default->DataGatheringMode;
+        Settings->bEnableNavigationSystem = true;
+        Default->bGenerateNavigationOnlyAroundNavigationInvokers = true;
+        Default->bAutoCreateNavigationData = false;
+        Default->DataGatheringMode = GatheringLazy;
+        const double Started = NowMs();
+        UNavigationSystem::InitializeForWorld(World, FNavigationSystemRunMode::GameMode);
+        Default->bGenerateNavigationOnlyAroundNavigationInvokers = bWasInvokersOnly;
+        Default->bAutoCreateNavigationData = bWasAutoCreate;
+        Default->DataGatheringMode = WasGathering;
+        UNavigationSystem* NavSys = World->GetNavigationSystem();
+        Log::Info(L"Battle Royale navigation: the world's navigation system was {} (world settings had navigation {}); made {} in {:.0f} ms", NavSys ? L"made" : L"not made",
+            bWasEnabled ? L"on" : L"off", NameOf(reinterpret_cast<UObject*>(NavSys)), NowMs() - Started);
+        return NavSys;
     }
 }
 
@@ -123,11 +165,12 @@ bool UAthenaNavSystem::InitializeForBots(UWorld* World, const FBox& IslandBounds
     }
     bTried = true;
     UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
+    if (!NavSys && World && IslandBounds.IsValid)
+    {
+        NavSys = CreateNavigationSystem(World);
+    }
     if (!NavSys || !IslandBounds.IsValid || !UNavigationSystem::StaticFunction_RegisterNavigationInvoker())
     {
-        // 3.0's Athena world is made without one (UWorld::NavigationSystem is null: the engine only creates it for a
-        // world whose settings enable navigation), and making one needs the engine's native, unreflected
-        // CreateNavigationSystem / InitializeForWorld.
         Log::Warning(L"Battle Royale navigation: the world has no navigation system ({}), the bots steer without a navmesh", NameOf(reinterpret_cast<UObject*>(NavSys)));
         return false;
     }
@@ -157,7 +200,9 @@ bool UAthenaNavSystem::InitializeForBots(UWorld* World, const FBox& IslandBounds
     if (Volume)
     {
         Volume->GetActorBounds(false, Origin, Extent);
-        Log::Info(L"Battle Royale navigation: bounds volume at ({:.0f}, {:.0f}, {:.0f}), extent ({:.0f}, {:.0f}, {:.0f})", Origin.X, Origin.Y, Origin.Z, Extent.X, Extent.Y, Extent.Z);
+        const FVector Scale = Volume->GetActorScale3D();
+        Log::Info(L"Battle Royale navigation: island ({:.0f}, {:.0f}, {:.0f}) - ({:.0f}, {:.0f}, {:.0f}); bounds volume at ({:.0f}, {:.0f}, {:.0f}), extent ({:.0f}, {:.0f}, {:.0f}), scale ({:.0f}, {:.0f}, {:.0f})",
+            IslandBounds.Min.X, IslandBounds.Min.Y, IslandBounds.Min.Z, IslandBounds.Max.X, IslandBounds.Max.Y, IslandBounds.Max.Z, Origin.X, Origin.Y, Origin.Z, Extent.X, Extent.Y, Extent.Z, Scale.X, Scale.Y, Scale.Z);
         NavSys->OnNavigationBoundsUpdated(Volume);
     }
     if (!Volume || Extent.X < 1000.0f || Extent.Y < 1000.0f)
@@ -185,20 +230,40 @@ bool UAthenaNavSystem::InitializeForBots(UWorld* World, const FBox& IslandBounds
     }
     NavSys->RequestRegistration(NavData, true);
     NavDataPtr = FWeakObjectPtr(reinterpret_cast<UObject*>(NavData));
+    Log::Info(L"Battle Royale navigation: {} for agent {} over the island, registering ({:.0f} ms)", NameOf(NavData), AgentIndex, NowMs() - Started);
+    bInitialized = true;
+    return true;
+#else
+    return false;
+#endif
+}
 
-    // The octree (the geometry the tiles are built from, gathered lazily), and the initial lock: its RebuildAll only
-    // marks the active tiles, of which there are none until the bots register.
+void UAthenaNavSystem::Tick(UWorld* World)
+{
+#if WITH_SERVER_CODE
+    // The registration runs on the game thread's next task pass (RequestRegistration queues ProcessRegistrationCandidates).
+    // Once the navmesh is registered (and so needs the octree: RequiresNavOctree), the octree (the geometry the tiles are
+    // built from, gathered lazily) is populated, and the initial lock released: its RebuildAll only marks the active
+    // tiles, which are the invokers'.
+    if (!bInitialized || bReady)
+    {
+        return;
+    }
+    UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
+    ANavigationData* NavData = GetNavData(World);
+    if (!NavSys || !NavData)
+    {
+        return;
+    }
+    bReady = true;
     NavSys->SetNavigationOctreeLock(false);
     const double OctreeStarted = NowMs();
     NavSys->ConditionalPopulateNavOctree();
     const double OctreeMs = NowMs() - OctreeStarted;
     const double LockStarted = NowMs();
     NavSys->ReleaseInitialBuildingLock();
-    Log::Info(L"Battle Royale navigation: {} for agent {} over the island; octree {:.0f} ms, lock release {:.0f} ms, total {:.0f} ms", NameOf(NavData), AgentIndex, OctreeMs, NowMs() - LockStarted, NowMs() - Started);
-    bInitialized = true;
-    return true;
-#else
-    return false;
+    Log::Info(L"Battle Royale navigation: {} registered (main {}); octree {:.0f} ms, lock release {:.0f} ms, build lock 0x{:X}", NameOf(NavData),
+        NameOf(reinterpret_cast<UObject*>(static_cast<ANavigationData*>(NavSys->MainNavData))), OctreeMs, NowMs() - LockStarted, static_cast<int32_t>(NavSys->NavBuildingLockFlags));
 #endif
 }
 

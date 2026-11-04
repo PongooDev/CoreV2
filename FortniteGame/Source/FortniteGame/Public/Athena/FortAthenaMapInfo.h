@@ -2,6 +2,12 @@
 
 #include "GameFramework/Actor.h"
 #include "GameplayEffect.h"
+#include "Math/Box.h"
+
+class AFortAthenaSupplyDrop;
+class AVolume;
+struct FRotator;
+struct FVector;
 
 // Battle Royale's map settings (from 1.7.2; DefaultMapInfo_C, placed in Athena_Terrain). AFortGameModeAthena's own
 // FinishWorldInitialization (1.7.2 0x3CF860) finds it and sets AFortGameStateAthena::MapInfo.
@@ -18,7 +24,22 @@ public:
     DefineUProperty(UClass*, AmmoBoxClass)
     DefineUStructProperty(FScalableFloat, AmmoBoxMinSpawnPercent)
     DefineUStructProperty(FScalableFloat, AmmoBoxMaxSpawnPercent)
+    // The Supply Llama (from 3.3; AthenaSupplyDrop_Llama_C) and how many a match has (AthenaGameData's
+    // Default.Llamas.QuantityMin and QuantityMax rows).
+    DefineUProperty(UClass*, LlamaClass)
+    DefineUStructProperty(FScalableFloat, LlamaQuantityMin)
+    DefineUStructProperty(FScalableFloat, LlamaQuantityMax)
+    // Where the bus may drop players: the island, which PickSupplyDropLocation keeps its points in.
+    DefineUProperty(FBox2D, AircraftDropZone)
+    DefineUProperty(AVolume*, AircraftDropVolume)
 
     static bool HasTreasureChestSpawnPercent() { return Member_TreasureChestClass.IsAvailable() && Member_TreasureChestMinSpawnPercent.IsAvailable() && Member_TreasureChestMaxSpawnPercent.IsAvailable(); }
     static bool HasAmmoBoxSpawnPercent() { return Member_AmmoBoxClass.IsAvailable() && Member_AmmoBoxMinSpawnPercent.IsAvailable() && Member_AmmoBoxMaxSpawnPercent.IsAvailable(); }
+    // Whether the build has Supply Llamas (3.3 on) and the native code that places them (Finder::ResolveSupplyDropSpawnLive).
+    static bool HasLlamas();
+
+    // A random point within Radius of Center (at its height) inside AircraftDropVolume, or Center when 1000 tries find none.
+    FVector PickSupplyDropLocation(const FVector& Center, float Radius);
+    // Spawns a SupplyDropClass on the ground under Location (AFortAthenaSupplyDrop::FindGroundLocationAt).
+    AFortAthenaSupplyDrop* SpawnSupplyDropAtLocation(const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass);
 };

@@ -520,6 +520,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortQueryGenerators.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\Navigation\FortNavigationGraph.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbility.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaMapInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaSupplyDrop.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortGameModeAthena.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPlayerControllerAthena.cpp" />

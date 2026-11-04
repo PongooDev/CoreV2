@@ -102,6 +102,10 @@ public:
     // bus is under way on builds whose playlists bring their own game data (from 1.11, #238), at once before them.
     void ApplyContainerSpawnPercents();
 
+    // Spawns the match's Supply Llamas (from 3.3, #243) at random points of the island, on the ground: once the bus is
+    // under way on builds whose playlists bring their own game data, at once before them. Builds without them do nothing.
+    void SpawnLlamas();
+
     // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,
     // for Battle Royale's stats (Core-Backend #59), as long as the game mode is there.
     void WatchMatchResults();

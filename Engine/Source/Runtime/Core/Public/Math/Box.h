@@ -51,3 +51,15 @@ struct FBox
 };
 
 static_assert(sizeof(FBox) == 0x1C);
+
+// A 2D axis aligned box (Engine's FBox2D: Min, Max and bIsValid, 0x14).
+struct FBox2D
+{
+    float MinX = 0.0f;
+    float MinY = 0.0f;
+    float MaxX = 0.0f;
+    float MaxY = 0.0f;
+    uint8_t bIsValid = 0;
+};
+
+static_assert(sizeof(FBox2D) == 0x14);

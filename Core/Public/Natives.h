@@ -37,6 +37,8 @@ class AFortPlayerControllerAthena;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class AFortGameModeAthena;
+class AFortAthenaMapInfo;
+class AFortAthenaSupplyDrop;
 class APlayerState;
 class AFortPlayerState;
 class AFortPlayerPawn;
@@ -462,6 +464,10 @@ namespace Natives
     // FBodyInstance::InitBody (0x2206250).
     inline void* (*FInitBodySpawnParams_Construct)(void* This, const void* PrimComp) = nullptr;
     inline void (*FBodyInstance_InitBody)(void* This, void* Setup, const FTransform& Transform, void* PrimComp, void* InRBScene, const void* SpawnParams) = nullptr;
+    // From 3.3 (Finder::ResolveSupplyDropSpawnLive): AFortAthenaMapInfo::PickSupplyDropLocation (3.3 0x9F8E80) and
+    // SpawnSupplyDropAtLocation (0xA03800), which the Supply Llamas are placed with.
+    inline FVector* (*AFortAthenaMapInfo_PickSupplyDropLocation)(AFortAthenaMapInfo* This, FVector* Result, const FVector& Center, float Radius) = nullptr;
+    inline AFortAthenaSupplyDrop* (*AFortAthenaMapInfo_SpawnSupplyDropAtLocation)(AFortAthenaMapInfo* This, const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass) = nullptr;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;

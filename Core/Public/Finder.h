@@ -186,6 +186,9 @@ namespace Finder
     bool ResolveLootTierRedirectLive();
     bool ResolvePlaylistDataTablesLive();
     bool ResolvePoiVolumeLive();
+    // AFortAthenaMapInfo::PickSupplyDropLocation and SpawnSupplyDropAtLocation (Natives), from 3.3. LlamaClassOffset:
+    // AFortAthenaMapInfo's LlamaClass.
+    bool ResolveSupplyDropSpawnLive(ptrdiff_t LlamaClassOffset);
     bool ResolveQuestStatEvents();
     // When ResolveQuestStatEvents found the stat events stripped: the call sites that call the shared empty function with
     // SendStatEventWithTags' typed wrapper's arguments (the quest manager, type, target, three tag containers, count, flush).

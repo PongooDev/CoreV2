@@ -7314,6 +7314,53 @@ bool Finder::ResolvePoiVolumeLive()
     return true;
 }
 
+bool Finder::ResolveSupplyDropSpawnLive(ptrdiff_t LlamaClassOffset)
+{
+    static bool bSearched = false;
+    if ((Natives::AFortAthenaMapInfo_PickSupplyDropLocation && Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation) || bSearched)
+    {
+        return Natives::AFortAthenaMapInfo_PickSupplyDropLocation && Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation;
+    }
+    bSearched = true;
+
+    // AFortAthenaMapInfo::PickSupplyDropLocation(Center, Radius) (3.3 0x9F8E80) tries 1000 random points in the circle
+    // (at Center's height) for one inside AircraftDropVolume, and logs this when none is. AFortGameModeAthena's console
+    // commands (3.3 0x9E8230) place a Supply Llama in front of each player for "SPAWNLLAMA": the map info's LlamaClass
+    // (mov r9, [r14+3C8h]) is the class argument of AFortAthenaMapInfo::SpawnSupplyDropAtLocation(Location, Rotation,
+    // Class) (0xA03800), the call after it, which spawns the drop, moves it onto the ground under Location
+    // (AFortAthenaSupplyDrop::FindGroundLocationAt) and finishes it. Neither is in a build before 3.3's Supply Llama.
+    const uintptr_t Pick = FunctionOf(L"PickSupplyDropLocation: Failed to find valid location using rejection.  Using safe zone location.");
+    const uintptr_t Command = First(Finder::StringRefs(L"SPAWNLLAMA"));
+    if (!Pick || !Command || LlamaClassOffset <= 0)
+    {
+        Log::Info(L"Finder: no Supply Llamas on this build");
+        return false;
+    }
+    uintptr_t ClassLoad = 0;
+    for (uintptr_t Load = FindInstruction(Command, Command + 0x300, { -1, 0x8B, -1 }); Load && !ClassLoad; Load = FindInstruction(Load + 1, Command + 0x300, { -1, 0x8B, -1 }))
+    {
+        // mov r9, [reg+disp32]: REX.WR (4C, or 4D for r8 to r15), ModRM 10 001 xxx.
+        const uint8_t Rex = Byte(Load);
+        const uint8_t ModRM = Byte(Load + 2);
+        if ((Rex == 0x4C || Rex == 0x4D) && (ModRM & 0xF8) == 0x88 && (ModRM & 7) != 4 && *reinterpret_cast<const int32_t*>(Load + 3) == LlamaClassOffset)
+        {
+            ClassLoad = Load;
+        }
+    }
+    const uintptr_t SpawnCall = ClassLoad ? FindRawCall(ClassLoad + 7, ClassLoad + 0x40) : 0;
+    const uintptr_t Spawn = SpawnCall ? Finder::RelativeTarget(SpawnCall, 1, 5) : 0;
+    if (!Spawn || Finder::FunctionStart(Spawn) != Spawn)
+    {
+        Log::Error(L"Finder: AFortAthenaMapInfo::SpawnSupplyDropAtLocation not found after \"SPAWNLLAMA\" (0x{:X}), no Supply Llamas", Command - Finder::ImageBase());
+        return false;
+    }
+
+    Natives::AFortAthenaMapInfo_PickSupplyDropLocation = reinterpret_cast<decltype(Natives::AFortAthenaMapInfo_PickSupplyDropLocation)>(Pick);
+    Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation = reinterpret_cast<decltype(Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation)>(Spawn);
+    Log::Info(L"Finder: AFortAthenaMapInfo::PickSupplyDropLocation at 0x{:X}, AFortAthenaMapInfo::SpawnSupplyDropAtLocation at 0x{:X}", Pick - Finder::ImageBase(), Spawn - Finder::ImageBase());
+    return true;
+}
+
 uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
 {
     // AFortGameModeAthena::StartAircraftPhase (1.7.2 0x3FFB60) binds the aircraft's delegates by name; OnAircraftFlightEnded

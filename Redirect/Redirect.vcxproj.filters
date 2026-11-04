@@ -1697,6 +1697,9 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbility.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Abilities</Filter>
     </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaMapInfo.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
+    </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaSupplyDrop.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
     </ClCompile>

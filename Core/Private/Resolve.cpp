@@ -8942,6 +8942,23 @@ bool Finder::ResolveBuildingLootLive()
         HideContainerEnd = HideContainer ? Finder::FunctionEnd(HideContainer) : 0;
         SearchedState = HideContainerEnd ? FindInstruction(HideContainer, HideContainerEnd, { 0x45, 0x8D, 0x41, 0x04 }) : 0;
     }
+    // 3.2 moves the container's tier and mesh roll out of PostUpdate into ABuildingContainer::InitializeTierGroupData
+    // (21.40's name), the first of the two new virtuals. The container's PostUpdate (3.2 0xA364A0) calls the stripped
+    // ABuildingSMActor::PostUpdate, keeps the random list's next value in SavedReservedRandomValueResult, then tail-jumps
+    // to InitializeTierGroupData(State, false) (jmp [rax+0xD38], slot 0x1A7), which is stripped to a GetWorld tail. Up to
+    // 3.1 the override only calls the stripped parent, then GetWorld.
+    const uintptr_t ContainerPostUpdate = PostUpdateIndex >= 0 ? VTableEntry(ContainerVTable, PostUpdateIndex) : 0;
+    const uintptr_t ContainerPostUpdateEnd = ContainerPostUpdate ? Finder::FunctionEnd(ContainerPostUpdate) : 0;
+    int32_t InitializeTierGroupDataIndex = -1;
+    for (uintptr_t Site = ContainerPostUpdateEnd ? FindVirtualCall(ContainerPostUpdate, ContainerPostUpdateEnd) : 0; Site; Site = FindVirtualCall(Site + 1, ContainerPostUpdateEnd))
+    {
+        InitializeTierGroupDataIndex = VirtualSlot(Site);
+    }
+    if (SpawnLootIndex < 0 || HideContainerIndex != SpawnLootIndex + 5 || InitializeTierGroupDataIndex != SpawnLootIndex + 3)
+    {
+        InitializeTierGroupDataIndex = -1;
+    }
+
     uintptr_t UpdateActorRecord = 0;
     for (uintptr_t Site = SearchedState ? SearchedState + 4 : 0; Site && !UpdateActorRecord && Site < SearchedState + 0x10 && Site + 5 <= HideContainerEnd; ++Site)
     {
@@ -9031,9 +9048,10 @@ bool Finder::ResolveBuildingLootLive()
     Natives::AFortWorldManager_UpdateActorRecord = reinterpret_cast<decltype(Natives::AFortWorldManager_UpdateActorRecord)>(UpdateActorRecord);
     Natives::AFortPlayerStateZone_ModifyStatIndex = ModifyStatIndex;
     Natives::ABuildingContainer_HideContainerIndex = HideContainerIndex;
+    Natives::ABuildingContainer_InitializeTierGroupDataIndex = InitializeTierGroupDataIndex;
     Natives::ABuildingContainer_SpawnLootIndex = SpawnLootIndex;
-    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, SpawnLoot slot 0x{:X}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
-        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
+    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, SpawnLoot slot 0x{:X}, InitializeTierGroupData slot {}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
+        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, InitializeTierGroupDataIndex >= 0 ? std::format(L"0x{:X}", InitializeTierGroupDataIndex) : std::wstring(L"none"), HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
     return true;
 }
 

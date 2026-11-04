@@ -45,9 +45,13 @@ public:
     DefineUProperty(float, LootTossSpeed_Athena)
     DefineUProperty(float, LootTossConeHalfAngle_Athena)
     DefineBitfieldUProperty(bStartAlreadySearched_Athena)
+    // From 3.2: PostUpdate keeps the random list's next value here for InitializeTierGroupData's show roll.
+    DefineUProperty(float, SavedReservedRandomValueResult)
 
     void PostLoad();
     void PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList);
+    // 21.40 names only the bool's type; 3.2's PostUpdate passes false, and Core does not read it.
+    void InitializeTierGroupData(EFortBuildingPersistentState State, bool bInitializeAgain);
     bool SpawnLoot(AFortPawn* Looter);
     void BounceContainer();
     // What the container's IFortInteractInterface::ServerOnAttemptInteract does once a pawn's search is done (3.0
@@ -69,6 +73,7 @@ private:
     void UpdateReplicatedLootTier();
     FName GetSearchLootTierGroup();
     bool StartsAlreadySearched();
+    float& SavedReservedRandomValue();
     void SpawnFloorLoot();
     FVector GetAthenaTossForward();
     float GetAthenaLootFront();
@@ -78,6 +83,8 @@ private:
 
     static void PostLoadHK(ABuildingContainer* This);
     static void PostUpdateHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList);
+    static void PostUpdateSuperHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList);
+    static void InitializeTierGroupDataHK(ABuildingContainer* This, uint8_t State, bool bInitializeAgain);
     static bool SpawnLootHK(ABuildingContainer* This, AFortPawn* Looter);
     static inline void (*PostLoadOG)(ABuildingContainer* This) = nullptr;
 };

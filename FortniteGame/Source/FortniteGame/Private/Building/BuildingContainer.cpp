@@ -422,11 +422,26 @@ void ABuildingContainer::PostLoad()
 #endif
 }
 
+float& ABuildingContainer::SavedReservedRandomValue()
+{
+    // Up to 3.1 the container has no SavedReservedRandomValueResult: Core keeps the value for the one call.
+    static float Saved = 0.0f;
+    return Member_SavedReservedRandomValueResult.IsAvailable() ? GetMember_SavedReservedRandomValueResult() : Saved;
+}
+
 void ABuildingContainer::PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList)
 {
 #if WITH_SERVER_CODE
+    // As 3.2 (0xA364A0) does it. Up to 3.1 the roll was in PostUpdate itself.
     ABuildingSMActor::PostUpdate(State, RandomList);
+    SavedReservedRandomValue() = (RandomList ? RandomList->Next() : 0.0f) * 1.0f + 0.00000001f;
+    InitializeTierGroupData(State, false);
+#endif
+}
 
+void ABuildingContainer::InitializeTierGroupData(EFortBuildingPersistentState State, bool bInitializeAgain)
+{
+#if WITH_SERVER_CODE
     // The loot tables are the match's playlist's from the world's first roll on.
     if (AFortGameModeAthena* AthenaGameMode = AFortGameModeAthena::GetCurrent(this))
     {
@@ -509,8 +524,7 @@ void ABuildingContainer::PostUpdate(EFortBuildingPersistentState State, FFortBui
             }
         }
 
-        const float Roll = RandomList ? RandomList->Next() : 0.0f;
-        if (Roll * 1.0f + 0.00000001f > ShowChance)
+        if (SavedReservedRandomValue() > ShowChance)
         {
             HideContainer();
             ContainerLootTierKey = FName();
@@ -697,6 +711,8 @@ void ABuildingContainer::HookVTables()
     const int32_t PostLoadIndex = Natives::ABuildingContainer_PostLoadIndex;
     const uintptr_t StrippedPostUpdate = Natives::ABuildingSMActor_bPostUpdateStripped ? Natives::ABuildingSMActor_PostUpdate : 0;
     const uintptr_t StrippedPostLoad = Natives::ABuildingContainer_bPostLoadStripped ? Natives::ABuildingContainer_PostLoad : 0;
+    const int32_t InitializeTierGroupDataIndex = Natives::ABuildingContainer_InitializeTierGroupDataIndex;
+    std::vector<uintptr_t> RedirectedPostUpdates;
     for (TObjectIterator<UClass> It; It; ++It)
     {
         UClass* Class = *It;
@@ -727,6 +743,34 @@ void ABuildingContainer::HookVTables()
         if (StrippedPostUpdate && (PostUpdate == StrippedPostUpdate || bJumpsToStripped || Finder::IsGetWorldStub(PostUpdate, StrippedPostUpdate)))
         {
             Hooks::SwapVTable(L"ABuildingContainer::PostUpdate", VTable, PostUpdateIndex, reinterpret_cast<void*>(&PostUpdateHK));
+        }
+        // 3.2 keeps PostUpdate (Finder::ResolveBuildingLootLive) and strips InitializeTierGroupData, where the tier and
+        // mesh are rolled: with neither, every container kept its placeholder mesh and no loot tier (#239, #240). The
+        // kept PostUpdate's Super call goes to the stripped ABuildingSMActor::PostUpdate, as the other buildings' do.
+        else if (InitializeTierGroupDataIndex >= 0)
+        {
+            // 3.2's stub (0xA2A550) is mov rax, [rcx]; jmp [rax+GetWorld]: a leaf with no unwind entry, so
+            // Finder::IsGetWorldStub (which needs the function's end) does not see it.
+            const uintptr_t InitializeTierGroupData = reinterpret_cast<uintptr_t>(VTable[InitializeTierGroupDataIndex]);
+            const int32_t GetWorld = Natives::UObject_GetWorldIndex >= 0 || Finder::ResolveObjectGetWorld() ? Natives::UObject_GetWorldIndex * static_cast<int32_t>(sizeof(void*)) : -1;
+            const bool bGetWorldTail = GetWorld > 0
+                && Finder::BodyIs(InitializeTierGroupData, { 0x48, 0x8B, 0x01, 0x48, 0xFF, 0xA0, static_cast<uint8_t>(GetWorld), static_cast<uint8_t>(GetWorld >> 8), static_cast<uint8_t>(GetWorld >> 16), static_cast<uint8_t>(GetWorld >> 24) });
+            if (bGetWorldTail || Finder::IsStubFunction(InitializeTierGroupData) || Finder::IsGetWorldStub(InitializeTierGroupData, 0))
+            {
+                Hooks::SwapVTable(L"ABuildingContainer::InitializeTierGroupData", VTable, InitializeTierGroupDataIndex, reinterpret_cast<void*>(&InitializeTierGroupDataHK));
+            }
+            const uintptr_t PostUpdateEnd = StrippedPostUpdate && PostUpdate >= Finder::TextBegin() && PostUpdate < Finder::TextEnd() ? Finder::FunctionEnd(PostUpdate) : 0;
+            if (PostUpdateEnd && std::find(RedirectedPostUpdates.begin(), RedirectedPostUpdates.end(), PostUpdate) == RedirectedPostUpdates.end())
+            {
+                RedirectedPostUpdates.push_back(PostUpdate);
+                for (const auto& [Site, Target] : Finder::DirectCalls(PostUpdate, PostUpdateEnd))
+                {
+                    if (Target == StrippedPostUpdate)
+                    {
+                        Hooks::RedirectCall(L"ABuildingContainer::PostUpdate (Super)", reinterpret_cast<uint8_t*>(Site), reinterpret_cast<void*>(&PostUpdateSuperHK));
+                    }
+                }
+            }
         }
 
         if (StrippedPostLoad && reinterpret_cast<uintptr_t>(VTable[PostLoadIndex]) == StrippedPostLoad)
@@ -797,6 +841,16 @@ void ABuildingContainer::PostLoadHK(ABuildingContainer* This)
 void ABuildingContainer::PostUpdateHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList)
 {
     This->PostUpdate(EFortBuildingPersistentState{ State }, RandomList);
+}
+
+void ABuildingContainer::PostUpdateSuperHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList)
+{
+    This->ABuildingSMActor::PostUpdate(EFortBuildingPersistentState{ State }, RandomList);
+}
+
+void ABuildingContainer::InitializeTierGroupDataHK(ABuildingContainer* This, uint8_t State, bool bInitializeAgain)
+{
+    This->InitializeTierGroupData(EFortBuildingPersistentState{ State }, bInitializeAgain);
 }
 
 bool ABuildingContainer::SpawnLootHK(ABuildingContainer* This, AFortPawn* Looter)

@@ -2081,9 +2081,20 @@ namespace
         int32_t DestroyedActorAdds = 0;
         for (const auto& [Site, Target] : NotifyCalls)
         {
-            const uintptr_t Lea = Site + 5;
-            const uintptr_t GuidLea = Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04 ? FindInstruction(Lea + 7, Lea + 0x18, { 0x4C, 0x8D, 0x40 }) : 0;
-            if (GuidLea)
+            // Connection->DestroyedStartupOrDormantActors.Add(DestructionInfo->NetGUID): lea rcx, [reg+Set] right after
+            // the call up to 3.2. 3.3 (0x21F2ADA) first hands the info to the connection's ReplicationConnectionDriver
+            // when it has one, so the Add is past a branch: lea r8, [rax+NetGUID]; xor r9d, r9d; lea rcx, [rbx+1648h].
+            const uintptr_t NextCall = FindRawCall(Site + 5, Site + 0x40);
+            const uintptr_t GuidLea = NextCall ? FindInstruction(Site + 5, NextCall, { 0x4C, 0x8D, 0x40 }) : 0;
+            uintptr_t Lea = 0;
+            for (uintptr_t Candidate = GuidLea ? FindInstruction(Site + 5, NextCall, { 0x48, 0x8D }) : 0; Candidate && !Lea; Candidate = FindInstruction(Candidate + 1, NextCall, { 0x48, 0x8D }))
+            {
+                if ((Byte(Candidate + 2) & 0xF8) == 0x88 && (Byte(Candidate + 2) & 0x07) != 0x04)
+                {
+                    Lea = Candidate;
+                }
+            }
+            if (Lea)
             {
                 CreateDestructionInfo = Target;
                 ConnectionDestroyedActors = *reinterpret_cast<const int32_t*>(Lea + 3);
@@ -2113,12 +2124,14 @@ namespace
         }
         Log::Info(L"Finder: FActorDestructionInfo is 0x{:X} bytes, NetGUID +0x{:X}", Natives::FActorDestructionInfo_Size, Natives::FActorDestructionInfo_NetGUID);
 
+        // DormantReplicatorMap sits between ActorChannels and DestroyedStartupOrDormantActors up to 3.2 (0x1690, set at
+        // 0x16E0); 3.3 (UE 4.20's order) puts it after the set (0x16E8, set at 0x1648).
         ptrdiff_t DormantReplicators = 0;
         int32_t DormantReplicatorRemoves = 0;
         for (uintptr_t Lea = NotifyDestroyed; ActorChannels > 0 && DestroyedActorAdds == 1 && Lea + 7 <= NotifyDestroyedEnd; ++Lea)
         {
             const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Lea + 3);
-            if (Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04 && Offset > ActorChannels && Offset < ConnectionDestroyedActors)
+            if (Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04 && Offset > ActorChannels && Offset != ConnectionDestroyedActors && Offset < ConnectionDestroyedActors + 0x100)
             {
                 DormantReplicators = Offset;
                 ++DormantReplicatorRemoves;
@@ -2303,7 +2316,8 @@ namespace
         Log::Info(L"Finder: FOutBunch is 0x{:X} bytes, bClose +0x{:X} & 0x{:X}, bDormant +0x{:X} & 0x{:X}, bReliable +0x{:X} & 0x{:X}, Num +0x{:X}, ArIsError +0x{:X} & 0x{:X}, UChannel::ChIndex +0x{:X}", BunchSize, BunchClose, CloseMask, BunchDormant, DormantMask, BunchReliable, ReliableMask, WriterNum, ErrorByte, ErrorMask, ChIndex);
 
         ptrdiff_t NumOutRec = 0;
-        const uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x80, { 0x0F, 0xBA, -1, 0x08 }) : 0;
+        // 3.3 (0x2074B10) times the replication first (QueryPerformanceCounter), which moves the test to +0xB9.
+        const uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x100, { 0x0F, 0xBA, -1, 0x08 }) : 0;
         for (uintptr_t Compare = PausedTest && (Byte(PausedTest + 2) & 0x38) == 0x20 ? FindInstruction(PausedTest + 4, PausedTest + 0x14, { 0x83, -1, -1, 0x00 }) : 0; Compare && !NumOutRec; Compare = FindInstruction(Compare + 1, PausedTest + 0x14, { 0x83, -1, -1, 0x00 }))
         {
             if ((Byte(Compare + 1) & 0xF8) == 0x78 && (Byte(Compare + 1) & 0x07) != 0x04)
@@ -2500,13 +2514,19 @@ namespace
             {
                 Nearest = Call;
             }
-            if (Nearest)
+            // 3.3 adds a second caller, the ReplicationGraph's (0x6DF1B0), which calls the same slot (0x6F).
+            if (Nearest && (LevelInitializedSites == 0 || VirtualSlot(Nearest) == LevelInitialized))
             {
                 LevelInitialized = VirtualSlot(Nearest);
                 ++LevelInitializedSites;
             }
+            else if (Nearest)
+            {
+                LevelInitializedSites = -1;
+                break;
+            }
         }
-        const uintptr_t LevelInitializedBody = LevelInitializedSites == 1 ? VTableEntry(NetDriverVTable, LevelInitialized) : 0;
+        const uintptr_t LevelInitializedBody = LevelInitializedSites >= 1 ? VTableEntry(NetDriverVTable, LevelInitialized) : 0;
         RequireSlot(L"UNetDriver::IsLevelInitializedForActor", Natives::UNetDriver_IsLevelInitializedForActorIndex, LevelInitializedBody ? LevelInitialized : -1);
 
         const int32_t ClientHasInitializedLevelFor = LevelInitializedBody ? VirtualSlot(FindVirtualCall(LevelInitializedBody, LevelInitializedBody + 0x40)) : -1;
@@ -2818,19 +2838,32 @@ namespace
         for (const uintptr_t Site : FlushDormancy && NetDormancy ? Finder::CallsTo(FlushDormancy, false) : std::vector<uintptr_t>())
         {
             const uintptr_t Function = Finder::FunctionStart(Site);
-            const uintptr_t DormancyTest = Function && Site - Function <= 0x20 ? FindInstruction(Function, Site, { 0x80, -1, static_cast<int32_t>(NetDormancy & 0xFF), static_cast<int32_t>((NetDormancy >> 8) & 0xFF), 0x00, 0x00, 0x01 }) : 0;
+            const uintptr_t DormancyTest = Function && Site - Function <= 0x80 ? FindInstruction(Function, Site, { 0x80, -1, static_cast<int32_t>(NetDormancy & 0xFF), static_cast<int32_t>((NetDormancy >> 8) & 0xFF), 0x00, 0x00, 0x01 }) : 0;
             if (!DormancyTest || (Byte(DormancyTest + 1) & 0xF8) != 0xB8)
             {
                 continue;
             }
-            const uintptr_t Load = FindInstruction(Site, Site + 0x30, { 0xF3, 0x0F, 0x10 });
-            if (Load && (Byte(Load + 3) & 0xC0) == 0x80 && (Byte(Load + 3) & 0x07) != 0x04 && FindInstruction(Load + 8, Load + 0x18, { 0xF3, 0x0F, 0x5C }))
+            const auto IsTimeRead = [](const uintptr_t Load)
             {
+                return Load && (Byte(Load + 3) & 0xC0) == 0x80 && (Byte(Load + 3) & 0x07) != 0x04 && FindInstruction(Load + 8, Load + 0x18, { 0xF3, 0x0F, 0x5C });
+            };
+            uintptr_t Load = FindInstruction(Site, Site + 0x30, { 0xF3, 0x0F, 0x10 });
+            // 3.3's ForceNetUpdate (0x1E696B0) leaves the time to UNetDriver::ForceNetUpdate (0x21EC350), called just
+            // before the dormancy test: NetActor->NextUpdateTime = World->TimeSeconds - 0.01f.
+            uintptr_t DriverForceUpdate = 0;
+            for (uintptr_t Call = IsTimeRead(Load) ? 0 : FindRawCall(Function, DormancyTest); Call; Call = FindRawCall(Call + 5, DormancyTest))
+            {
+                DriverForceUpdate = Finder::RelativeTarget(Call, 1, 5);
+            }
+            Load = DriverForceUpdate ? FindInstruction(DriverForceUpdate, DriverForceUpdate + 0xA0, { 0xF3, 0x0F, 0x10 }) : Load;
+            if (IsTimeRead(Load))
+            {
+                // Every read must agree.
+                TimeSecondsReads = !TimeSecondsReads || TimeSeconds == *reinterpret_cast<const int32_t*>(Load + 4) ? TimeSecondsReads + 1 : -1000;
                 TimeSeconds = *reinterpret_cast<const int32_t*>(Load + 4);
-                ++TimeSecondsReads;
             }
         }
-        RequireOffset(L"UWorld::TimeSeconds", Natives::UWorld_TimeSeconds, TimeSecondsReads == 1 ? TimeSeconds : 0);
+        RequireOffset(L"UWorld::TimeSeconds", Natives::UWorld_TimeSeconds, TimeSecondsReads >= 1 ? TimeSeconds : 0);
 
         ptrdiff_t ActorInitialized = 0;
         uint32_t ActorInitializedMask = 0;
@@ -2856,7 +2889,9 @@ namespace
         const uintptr_t TextEnd = Finder::TextEnd();
         for (uintptr_t Test = FindInstruction(Finder::TextBegin(), TextEnd, { 0xF6, -1, -1, -1, 0x00, 0x00, -1, 0x75, -1, 0xF6 }); Test; Test = FindInstruction(Test + 1, TextEnd, { 0xF6, -1, -1, -1, 0x00, 0x00, -1, 0x75, -1, 0xF6 }))
         {
-            if ((Byte(Test + 1) & 0xF8) == 0x80 && (Byte(Test + 1) & 0x07) != 0x04 && Byte(Test + 10) == Byte(Test + 1) && Byte(Test + 16) == 0x75
+            // Both tests are single bits; 3.3 has another pair of tests a byte apart (0xE0E311: [reg+80h], 18h).
+            const bool bSingleBits = Byte(Test + 6) && !(Byte(Test + 6) & (Byte(Test + 6) - 1)) && Byte(Test + 15) && !(Byte(Test + 15) & (Byte(Test + 15) - 1));
+            if ((Byte(Test + 1) & 0xF8) == 0x80 && (Byte(Test + 1) & 0x07) != 0x04 && Byte(Test + 10) == Byte(Test + 1) && Byte(Test + 16) == 0x75 && bSingleBits
                 && *reinterpret_cast<const int32_t*>(Test + 11) == *reinterpret_cast<const int32_t*>(Test + 2) + 1)
             {
                 AssociatingLevel = *reinterpret_cast<const int32_t*>(Test + 11);
@@ -3133,7 +3168,9 @@ namespace
             Log::Error(L"Finder: AFortAIDirector::GetCurrent call sites: found {} of 4", Sites::AIDirectorGetCurrentCalls.size());
         }
 
-        const uintptr_t ProfileFailed = OnlyRef(L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]");
+        // 3.3 (0xB9D00C) drops the GameAccountId from the line.
+        const uintptr_t ShortProfileFailed = First(Finder::StringRefs(L"Failed to initialize profile for player: UniqueId:[%s]"));
+        const uintptr_t ProfileFailed = ShortProfileFailed ? ShortProfileFailed : OnlyRef(L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]");
         uintptr_t InitializeMcpProfile = 0;
         for (uintptr_t Call = ProfileFailed ? FindRawCall(ProfileFailed - 0x140, ProfileFailed) : 0; Call; Call = FindRawCall(Call + 1, ProfileFailed))
         {
@@ -3144,15 +3181,27 @@ namespace
         }
         Require(L"AFortPlayerController::InitializeMcpProfile", Natives::AFortPlayerController_InitializeMcpProfile, InitializeMcpProfile);
 
-        const uintptr_t UniqueIdToString = ProfileFailed ? FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 }) : 0;
+        uintptr_t UniqueIdToString = ProfileFailed && !ShortProfileFailed ? FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 }) : 0;
+        // IsValid is the `call [rax+18h]; test al, al` just before it (slot 3, ToString 4, on 1.1, 1.2, 1.7.2 and 1.8);
+        // AFortGameMode::ShouldPlayerEarnScore and the game session id ask it on the server.
+        uintptr_t UniqueIdIsValid = UniqueIdToString ? FindBackward(UniqueIdToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
+        // 3.3 logs FUniqueNetIdRepl::ToString (0x347590), the last call before the line: IsValid (call [rax+20h];
+        // test al, al), then "%s:%s" of the id's ToString (call [rax+30h], one slot later than 3.2's) and its type.
+        uintptr_t ReplToString = 0;
+        for (uintptr_t Call = ShortProfileFailed ? FindRawCall(ShortProfileFailed - 0x30, ShortProfileFailed) : 0; Call; Call = FindRawCall(Call + 5, ShortProfileFailed))
+        {
+            ReplToString = Finder::RelativeTarget(Call, 1, 5);
+        }
+        if (ReplToString)
+        {
+            UniqueIdIsValid = FindInstruction(ReplToString, ReplToString + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 });
+            UniqueIdToString = UniqueIdIsValid ? FindInstruction(UniqueIdIsValid + 5, UniqueIdIsValid + 0x40, { 0xFF, 0x50, -1 }) : 0;
+        }
         Natives::FUniqueNetId_ToStringIndex = UniqueIdToString && Byte(UniqueIdToString + 2) % 8 == 0 ? Byte(UniqueIdToString + 2) / 8 : -1;
         if (Natives::FUniqueNetId_ToStringIndex < 0)
         {
             Log::Error(L"Finder: FUniqueNetId::ToString slot not found");
         }
-        // IsValid is the `call [rax+18h]; test al, al` just before it (slot 3, ToString 4, on 1.1, 1.2, 1.7.2 and 1.8);
-        // AFortGameMode::ShouldPlayerEarnScore and the game session id ask it on the server.
-        const uintptr_t UniqueIdIsValid = UniqueIdToString ? FindBackward(UniqueIdToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
         const int32_t UniqueIdIsValidIndex = UniqueIdIsValid && Byte(UniqueIdIsValid + 2) % 8 == 0 ? Byte(UniqueIdIsValid + 2) / 8 : -1;
         Natives::FUniqueNetId_IsValidIndex = UniqueIdIsValidIndex >= 0 && UniqueIdIsValidIndex < Natives::FUniqueNetId_ToStringIndex ? UniqueIdIsValidIndex : -1;
         if (Natives::FUniqueNetId_IsValidIndex < 0)
@@ -4251,10 +4300,11 @@ bool Finder::ResolveReplicationLive()
         }
     }
     const uintptr_t FoundPriority = NetPriorities == 1 ? VTableEntry(ActorVTable, NetPriority) : 0;
-    if (FoundPriority && !ScalesByPriority(FoundPriority, Finder::FunctionEnd(FoundPriority)))
+    if (ActorVTable && Velocity >= 0 && (!FoundPriority || !ScalesByPriority(FoundPriority, Finder::FunctionEnd(FoundPriority))))
     {
         // 1.10's GetNetPriority (0x1757820) is a leaf without unwind data, its call on the owner a tail jump, so the scan
-        // above passes over it and meets another recursive function (slot 0x5E). Leaves are read 0x80 bytes in.
+        // above passes over it and meets another recursive function (slot 0x5E). Leaves are read 0x80 bytes in. 3.3
+        // (0x1E70870, slot 0x71) has no other recursive function in the range, so the scan above finds none.
         NetPriorities = 0;
         for (int32_t Index = Velocity; Index < NetRelevant; ++Index)
         {

@@ -88,6 +88,8 @@ public:
     static bool HasBuildResourceSelection() { return Member_CurrentResourceType.IsAvailable() && Member_CurrentResourceLevel.IsAvailable() && Member_CurrentBuildableClass.IsAvailable(); }
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
+    // 3.2 renames it, with the same parameters.
+    DefineUFunction(ServerAttemptInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
     DefineUFunction(ServerRemoveInventoryStateValue)
     DefineUFunction(ServerSpotActor)

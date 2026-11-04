@@ -1753,7 +1753,7 @@ void AFortPlayerController::HookVTables()
 
     for (const auto& [Function, Implementation, Name] : {
              std::tuple{ StaticFunction_ServerExecuteInventoryItem(), reinterpret_cast<void*>(&ServerExecuteInventoryItem_ImplementationHK), L"AFortPlayerController::ServerExecuteInventoryItem_Implementation" },
-             std::tuple{ StaticFunction_ServerSpawnInventoryDrop(), reinterpret_cast<void*>(&ServerSpawnInventoryDrop_ImplementationHK), L"AFortPlayerController::ServerSpawnInventoryDrop_Implementation" },
+             std::tuple{ FindStaticFunction_ServerSpawnInventoryDrop() ? StaticFunction_ServerSpawnInventoryDrop() : StaticFunction_ServerAttemptInventoryDrop(), reinterpret_cast<void*>(&ServerSpawnInventoryDrop_ImplementationHK), L"AFortPlayerController::ServerSpawnInventoryDrop_Implementation" },
              std::tuple{ StaticFunction_ServerSpotActor(), reinterpret_cast<void*>(&ServerSpotActor_ImplementationHK), L"AFortPlayerController::ServerSpotActor_Implementation" },
          })
     {

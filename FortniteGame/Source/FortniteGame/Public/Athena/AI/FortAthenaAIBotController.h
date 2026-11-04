@@ -211,6 +211,11 @@ private:
     // carries, held for the item's use time. True while the bot is using one.
     bool Heal(float Now);
     void CancelHeal();
+    // An emote, as a player's emote wheel plays it (AFortPlayerController::ServerPlayEmoteItem: the game data's
+    // EmoteGameplayAbility given to the pawn's ability system with the emote as its source, activated once). Bots dance
+    // on the warmup island (the community list) and after an elimination when nobody is shooting at them (21.40's
+    // UFortAthenaAIBotEvaluator_DanceOnKill).
+    bool PlayEmote(float Now, float Duration);
     void TakePickup(AFortPickup* Pickup);
     // An item dropped where the bot stands, as a player drops it (a weapon with its magazine).
     void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo);
@@ -261,6 +266,13 @@ private:
     float LastHealthShield = -1.0f;
     int32_t Reloads = 0;
     int32_t WeaponSwitches = 0;
+    // Emotes and strafing: when the current emote ends, the next warmup emote, a dance owed for a kill, and the strafe.
+    float EmoteUntil = 0.0f;
+    float NextEmoteTime = 0.0f;
+    bool bDanceOnKill = false;
+    int32_t Emotes = 0;
+    float StrafeSign = 1.0f;
+    float NextStrafeChange = 0.0f;
     // The landing spot chosen on the bus.
     bool bHasLandingSpot = false;
     FVector LandingSpot;

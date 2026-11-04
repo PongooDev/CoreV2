@@ -3,11 +3,14 @@
 #include "AIController.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/FortPlayerAttrSet.h"
+#include "Abilities/GameplayAbility.h"
 #include "Athena/AI/AthenaNavSystem.h"
 #include "Athena/AI/FortServerBotManagerAthena.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingWall.h"
 #include "Configuration.h"
+#include "FortAssetManager.h"
+#include "FortGameData.h"
 #include "GameplayTagContainer.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
@@ -696,6 +699,7 @@ void AFortAthenaAIBotController::Destroy()
 void AFortAthenaAIBotController::AddKill()
 {
     ++Kills;
+    bDanceOnKill = State == EFortAthenaAIBotState::Landed && FMath::FRand() < 0.5f;
     if (AFortPlayerStateAthena* PlayerState = GetPlayerState())
     {
         PlayerState->SetKillScore(Kills);
@@ -735,6 +739,22 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
             return;
         }
         LastKnownPosition = LocationOf(Pawn);
+        if (Now < EmoteUntil)
+        {
+            return;
+        }
+        if (NextEmoteTime <= 0.0f)
+        {
+            NextEmoteTime = Now + RandomRange(8.0f, 30.0f);
+        }
+        if (Now >= NextEmoteTime)
+        {
+            NextEmoteTime = Now + RandomRange(20.0f, 45.0f);
+            if (PlayEmote(Now, RandomRange(4.0f, 8.0f)))
+            {
+                return;
+            }
+        }
         Wander(Now);
         return;
     }
@@ -789,6 +809,19 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     if (HealingItem && IsInCombat(Now))
     {
         CancelHeal();
+    }
+    if (bDanceOnKill && !IsInCombat(Now) && !HealingItem)
+    {
+        bDanceOnKill = false;
+        PlayEmote(Now, 3.0f);
+    }
+    if (Now < EmoteUntil)
+    {
+        if (!IsInCombat(Now))
+        {
+            return;
+        }
+        EmoteUntil = 0.0f;
     }
     if (!HealingItem)
     {
@@ -1675,6 +1708,16 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
         {
             Pawn->AddMovementInput(Direction2D(TargetLocation, Location), 0.6f, false);
         }
+        // Strafing (the community list: bots strafe in fights): side to side across the line of fire, changing
+        // direction every second or so.
+        if (Now >= NextStrafeChange)
+        {
+            NextStrafeChange = Now + RandomRange(0.6f, 1.6f);
+            StrafeSign = FMath::FRand() < 0.7f ? -StrafeSign : StrafeSign;
+        }
+        const FVector Toward = Direction2D(Location, TargetLocation);
+        SetMovementStyle(false);
+        Pawn->AddMovementInput(FVector(-Toward.Y * StrafeSign, Toward.X * StrafeSign, 0.0f), 0.8f, false);
     }
 
     if (bFiring && Now >= FireUntil)
@@ -1777,6 +1820,68 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
         return false;
     }
     MoveTowards(PickupLocation, Now, 50.0f);
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool AFortAthenaAIBotController::PlayEmote(float Now, float Duration)
+{
+#if WITH_SERVER_CODE
+    static std::vector<UFortMontageItemDefinitionBase*> EmoteAssets;
+    static bool bLoaded = false;
+    if (!bLoaded)
+    {
+        bLoaded = true;
+        for (const wchar_t* Path : { L"/Game/Athena/Items/Cosmetics/Dances/EID_DanceMoves.EID_DanceMoves", L"/Game/Athena/Items/Cosmetics/Dances/EID_Floss.EID_Floss",
+                 L"/Game/Athena/Items/Cosmetics/Dances/EID_Fresh.EID_Fresh", L"/Game/Athena/Items/Cosmetics/Dances/EID_BreakDance.EID_BreakDance" })
+        {
+            if (UFortMontageItemDefinitionBase* Emote = LoadObject<UFortMontageItemDefinitionBase>(nullptr, Path))
+            {
+                EmoteAssets.push_back(Emote);
+            }
+        }
+    }
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UClass* AbilityClass = GameData ? GameData->EmoteGameplayAbility.LoadSynchronous() : nullptr;
+    UGameplayAbility* Ability = AbilityClass && AbilityClass->IsChildOf(UGameplayAbility::StaticClass()) ? static_cast<UGameplayAbility*>(AbilityClass->GetDefaultObject()) : nullptr;
+    if (!AbilitySystem || !Ability || EmoteAssets.empty())
+    {
+        return false;
+    }
+    UFortMontageItemDefinitionBase* Emote = EmoteAssets[static_cast<size_t>(FMath::Rand()) % EmoteAssets.size()];
+    Emote->Animation.LoadSynchronous();
+    StopMoving();
+    StopFiring();
+    UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
+    std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
+    SpecStruct->InitializeStruct(SpecStorage.data());
+    FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
+    FGameplayAbilitySpecHandle NewHandle;
+    NewHandle.GenerateNewHandle();
+    Spec.Handle = NewHandle;
+    Spec.Ability = Ability;
+    Spec.Level = 1;
+    Spec.InputID = INDEX_NONE;
+    Spec.SourceObject = Emote;
+    const FGameplayAbilitySpecHandle Handle = AbilitySystem->GiveAbilityAndActivateOnce(Spec);
+    SpecStruct->DestroyStruct(SpecStorage.data());
+    // Whether the ability ran: a given-once ability that activated is still on the ability system (until it ends).
+    const bool bPlaying = Handle.IsValid() && AbilitySystem->FindAbilitySpecFromHandle(Handle) != nullptr;
+    static int32_t Logged = 0;
+    if (Logged++ < 6)
+    {
+        Log::Info(L"Battle Royale bots: {} emotes {} ({})", BotName, NameOf(Emote), bPlaying ? L"playing" : L"the emote ability didn't stay active");
+    }
+    if (!bPlaying)
+    {
+        return false;
+    }
+    ++Emotes;
+    EmoteUntil = Now + Duration;
     return true;
 #else
     return false;

@@ -646,6 +646,7 @@ namespace Natives
     inline void (*ABuildingSMActor_SelectMeshSet)(void* This, int32_t LootTier) = nullptr;
     inline int32_t ABuildingSMActor_SetMeshSetIndex = -1;
     inline int32_t ABuildingContainer_SpawnLootIndex = -1;
+    inline int32_t ABuildingContainer_HideContainerIndex = -1;
     inline uintptr_t ABuildingContainer_PostLoad = 0;
     inline int32_t ABuildingContainer_PostLoadIndex = -1;
     inline bool ABuildingContainer_bPostLoadStripped = false;

@@ -8885,11 +8885,20 @@ bool Finder::ResolveBuildingLootLive()
     const int32_t SpawnLootIndex = SpawnLootCall ? VirtualSlot(SpawnLootCall) : -1;
 
     // Three slots after SpawnLoot the container hides itself and records it as searched: lea r8d, [r9+4], then a tail jmp
-    // (or call) to AFortWorldManager::UpdateActorRecord.
+    // (or call) to AFortWorldManager::UpdateActorRecord. 3.2 adds two virtuals after OnPickupSpawn (0xA2A550 twice), so
+    // HideContainer moves to five slots after SpawnLoot (3.2 0xA28E20; 3.1 0xA3F6D0 is at three).
     void** ContainerVTable = ContainerDefault ? *reinterpret_cast<void***>(ContainerDefault) : nullptr;
-    const uintptr_t HideContainer = SpawnLootIndex >= 0 ? VTableEntry(ContainerVTable, SpawnLootIndex + 3) : 0;
-    const uintptr_t HideContainerEnd = HideContainer ? Finder::FunctionEnd(HideContainer) : 0;
-    const uintptr_t SearchedState = HideContainerEnd ? FindInstruction(HideContainer, HideContainerEnd, { 0x45, 0x8D, 0x41, 0x04 }) : 0;
+    int32_t HideContainerIndex = -1;
+    uintptr_t HideContainer = 0;
+    uintptr_t HideContainerEnd = 0;
+    uintptr_t SearchedState = 0;
+    for (int32_t Index = SpawnLootIndex >= 0 ? SpawnLootIndex + 3 : 0; SpawnLootIndex >= 0 && !SearchedState && Index <= SpawnLootIndex + 5; Index += 2)
+    {
+        HideContainerIndex = Index;
+        HideContainer = VTableEntry(ContainerVTable, Index);
+        HideContainerEnd = HideContainer ? Finder::FunctionEnd(HideContainer) : 0;
+        SearchedState = HideContainerEnd ? FindInstruction(HideContainer, HideContainerEnd, { 0x45, 0x8D, 0x41, 0x04 }) : 0;
+    }
     uintptr_t UpdateActorRecord = 0;
     for (uintptr_t Site = SearchedState ? SearchedState + 4 : 0; Site && !UpdateActorRecord && Site < SearchedState + 0x10 && Site + 5 <= HideContainerEnd; ++Site)
     {
@@ -8978,9 +8987,10 @@ bool Finder::ResolveBuildingLootLive()
     Natives::ABuildingContainer_bPostLoadStripped = !bPostLoadSelectsMeshSet;
     Natives::AFortWorldManager_UpdateActorRecord = reinterpret_cast<decltype(Natives::AFortWorldManager_UpdateActorRecord)>(UpdateActorRecord);
     Natives::AFortPlayerStateZone_ModifyStatIndex = ModifyStatIndex;
+    Natives::ABuildingContainer_HideContainerIndex = HideContainerIndex;
     Natives::ABuildingContainer_SpawnLootIndex = SpawnLootIndex;
-    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, SpawnLoot slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
-        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
+    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, SpawnLoot slot 0x{:X}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
+        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
     return true;
 }
 

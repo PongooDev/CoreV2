@@ -118,12 +118,13 @@ void ABuildingContainer::OnPickupSpawn(AFortPickup* Pickup, AFortPlayerControlle
 
 void ABuildingContainer::HideContainer()
 {
-    ContainerSlot<void (*)(ABuildingContainer*)>(this, 3)(this);
+    // Three slots after SpawnLoot, five from 3.2 (Finder::ResolveBuildingLootLive).
+    ContainerSlot<void (*)(ABuildingContainer*)>(this, Natives::ABuildingContainer_HideContainerIndex - Natives::ABuildingContainer_SpawnLootIndex)(this);
 }
 
 void ABuildingContainer::SetSearched(AFortPawn* Searcher)
 {
-    ContainerSlot<void (*)(ABuildingContainer*, AFortPawn*)>(this, 4)(this, Searcher);
+    ContainerSlot<void (*)(ABuildingContainer*, AFortPawn*)>(this, Natives::ABuildingContainer_HideContainerIndex - Natives::ABuildingContainer_SpawnLootIndex + 1)(this, Searcher);
 }
 
 void ABuildingContainer::BounceContainer()

@@ -578,6 +578,11 @@ namespace
         std::set<std::wstring> Settled;
         // 1.11: the squads Core gave late players (PlaceLatePlayerInSquad).
         std::set<uint8_t> LateSquads;
+
+        // The room the game gave the game session before its match was assigned (KeepSessionRoom), and whether the
+        // session has been given it back.
+        int32_t SessionRoom = 0;
+        bool bLoggedSessionRoom = false;
     };
 
     std::string NarrowId(const std::wstring& Id)
@@ -834,6 +839,42 @@ namespace
         Watch.bOpened = true;
     }
 
+    // The game session's room (AGameSession::MaxPlayers) once the match has started (#234). AGameSession::ApproveLogin
+    // (3.0 0x2030960) turns a joining player away with "Server full." when AtCapacity (0x2030BD0) finds GetNumPlayers()
+    // at MaxPlayers, at PreLogin and again at Login, after the player has loaded the map. The game gives the session the
+    // playlist's room when it creates it (GetMaxTeamInfoForPlaylist, 3.0 0xD67E60, MaxPlayers 100 for Battle Royale's
+    // playlists), which is the maxPlayers its MMS ticket asks for, and then the MMS match assignment lowers it to the
+    // players it reserved ("MMS - configuring beacon for match assignment", 3.0 0xCEBE20 and 2.5 0xCD1080:
+    // ReservationBeaconHost->GetNumConsumedReservations()), so only a match the backend filled at once had room for all
+    // its players. Who may join is the game mode's to say (AFortGameModeAthena::PreLogin, 3.0 0x9B95B0: "Match is full"
+    // past MaxPlayerCount, "Match has started" once the bus has left), so from the warmup on the session keeps the room
+    // the game gave it, up to the playlist's teams: a player the game mode lets in is never "Server full." below the
+    // playlist's limit, however the match got them.
+    void KeepSessionRoom(AFortGameModeAthena* GameMode, FWarmupWatch& Watch, uint8_t Phase)
+    {
+        AGameSession* Session = static_cast<AGameSession*>(GameMode->GameSession);
+        if (!Session || !AGameSession::HasMaxPlayers())
+        {
+            return;
+        }
+        if (Phase < EAthenaGamePhase::GetWarmup())
+        {
+            Watch.SessionRoom = std::max(Watch.SessionRoom, static_cast<int32_t>(Session->MaxPlayers));
+            return;
+        }
+        const int32_t Capacity = MatchCapacity(GameMode);
+        const int32_t Room = Capacity > 0 ? std::min(Watch.SessionRoom, Capacity) : Watch.SessionRoom;
+        if (Room > Session->MaxPlayers)
+        {
+            if (!Watch.bLoggedSessionRoom)
+            {
+                Watch.bLoggedSessionRoom = true;
+                Log::Info(L"Battle Royale: the game session has room for {} players again (the match assignment left it {})", Room, Session->MaxPlayers);
+            }
+            Session->MaxPlayers = Room;
+        }
+    }
+
     // 1.11: a late player's squad (AFortPlayerStateAthena::SquadId). AFortGameModeAthena::PlacePlayerOnTeam (2.1
     // 0x444780) gives a joining player their team (AFortGameMode's) and then, on a dedicated session, their squad from
     // the session's squads by account id (0x7300A0), which only the match assignment fills: each player of its teams[i]
@@ -1035,6 +1076,7 @@ namespace
             Watch->NextAsk = Now;
         }
 
+        KeepSessionRoom(GameMode, *Watch, Phase);
         if (Phase <= EAthenaGamePhase::GetWarmup())
         {
             ApplyWarmupLength(GameMode, GameState, *Watch, WorldNow);

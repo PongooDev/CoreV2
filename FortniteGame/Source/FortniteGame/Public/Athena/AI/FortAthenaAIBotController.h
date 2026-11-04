@@ -159,6 +159,10 @@ private:
     // activate (Core's shot is used then).
     bool ActivateWeaponFire(AFortWeapon* Weapon);
     void ReleaseWeaponFire();
+    // Core's shot, shown to the players: the weapon's fire cue (its fire ability's WeaponFireCue,
+    // GameplayCue.Weapons.Activation) executed through the pawn's NetMulticast_InvokeGameplayCueExecuted_WithParams,
+    // as the game's own fire ability sends it, with the weapon as its causer and the shot's end as its location.
+    void PlayWeaponFireCue(AFortWeapon* Weapon, const FVector& ImpactLocation);
     // Whether the game's fire works for this weapon class: unknown until a shot shows it spending ammo or not.
     void CheckWeaponFireResult(float Now);
 
@@ -236,6 +240,7 @@ private:
     FVector AvoidDirection;
     int32_t Jumps = 0;
     float NextJumpTime = 0.0f;
+    int32_t DoorsOpened = 0;
     bool bLoggedMovement = false;
     uint8_t MovementStyle = 0xFF;
 

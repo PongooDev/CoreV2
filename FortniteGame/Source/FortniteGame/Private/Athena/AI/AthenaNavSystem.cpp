@@ -59,7 +59,7 @@ namespace
             FNavDataConfig& Agent = Agents[Index];
             UClass* DataClass = Agent.NavigationDataClass;
             const float Radius = Agent.AgentRadius;
-            Log::Info(L"Battle Royale navigation: agent {} {}: {}, radius {:.0f}, height {:.0f}", Index, static_cast<FName>(Agent.Name).ToString(), NameOf(DataClass), Radius, static_cast<float>(Agent.AgentHeight));
+            Log::Info(L"Battle Royale navigation: agent {} {}: {}, radius {:.0f}, height {:.0f}", Index, static_cast<FName>(Agent.Name).ToString().ToStdString(), NameOf(DataClass), Radius, static_cast<float>(Agent.AgentHeight));
             if (!DataClass || !RecastClass || !DataClass->IsChildOf(RecastClass))
             {
                 continue;

@@ -6,7 +6,9 @@
 #include "Athena/AI/AthenaNavSystem.h"
 #include "Athena/AI/FortServerBotManagerAthena.h"
 #include "Building/BuildingContainer.h"
+#include "Building/BuildingWall.h"
 #include "Configuration.h"
+#include "GameplayTagContainer.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
@@ -62,7 +64,7 @@ namespace
     }
 
     // A trace from Start to End hits something solid that isn't a pawn (the bot's own pawn is ignored).
-    bool IsBlocked(AFortPlayerPawnAthena* Pawn, const FVector& Start, const FVector& End)
+    bool IsBlocked(AFortPlayerPawnAthena* Pawn, const FVector& Start, const FVector& End, UObject** OutHitActor = nullptr)
     {
         FVector Hit;
         UObject* HitActor = nullptr;
@@ -70,6 +72,10 @@ namespace
         if (!UKismetSystemLibrary::LineTraceSingle(Pawn, Start, End, 0, false, true, Hit, HitActor, HitComponent))
         {
             return false;
+        }
+        if (OutHitActor)
+        {
+            *OutHitActor = HitActor;
         }
         return !(HitActor && Cast<APawn>(HitActor));
     }
@@ -632,7 +638,11 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     {
         StopFiring();
         // Loot close by first, then a chest or ammo box, then loot farther away (21.40's _Loot weighs them by distance).
-        Intent = Storm(Now) ? L"storm" : Loot(Now, 1500.0f) ? L"loot" : SearchContainer(Now) ? L"search" : Loot(Now, 7000.0f) ? L"loot" : L"wander";
+        // In the storm it runs; only outside the next circle, it takes the loot right by it first.
+        FVector StormCenter;
+        float StormRadius = 0.0f;
+        const bool bInStorm = Manager->GetCurrentSafeZone(StormCenter, StormRadius) && Dist2D(LastKnownPosition, StormCenter) > StormRadius * 0.97f;
+        Intent = bInStorm && Storm(Now) ? L"storm" : Loot(Now, 1500.0f) ? L"loot" : Storm(Now) ? L"storm" : SearchContainer(Now) ? L"search" : Loot(Now, 7000.0f) ? L"loot" : L"wander";
         if (Intent[0] == L'w')
         {
             Wander(Now);
@@ -652,11 +662,11 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         AFortPawn* Target = CurrentTarget.Get();
         UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
         const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
-        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps", BotName,
+        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps, {} doors", BotName,
             LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z, Intent, Velocity.Size(), MaxSpeedOf(Movement), Movement ? static_cast<int32_t>(Movement->MovementMode) : -1, static_cast<int32_t>(Pawn->CurrentMovementStyle),
             bPathFollowing ? std::format(L"on a path ({} paths, {} failed)", PathRequests, PathFailures) : std::format(L"steering ({} paths, {} failed)", PathRequests, PathFailures), Pawn->GetHealth(), Pawn->GetShield(),
             WeaponList.size(), EquippedWeapon.Get() ? NameOf(static_cast<UFortWeaponItemDefinition*>(EquippedWeapon.Get()->WeaponData)) : std::wstring(L"nothing"),
-            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps);
+            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps, DoorsOpened);
     }
 #endif
 }
@@ -961,7 +971,9 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
     // The game's own shot where its fire works for the weapon (or isn't known yet): its ability aims along the
     // controller's rotation (the focal point, with the aim error in it), spends the ammo, hits and shows the shot.
     const auto Known = Held ? WeaponFireWorks.find(Held->WeaponDefinition) : WeaponFireWorks.end();
-    const bool bTryGameFire = Weapon && Held && Weapon->AmmoCount > 0 && (Known == WeaponFireWorks.end() || Known->second == 1);
+    // Once one weapon's ability refuses a bot (3.0: no inventory owner), none is tried again.
+    static bool bGameFireRefused = false;
+    const bool bTryGameFire = !bGameFireRefused && Weapon && Held && Weapon->AmmoCount > 0 && (Known == WeaponFireWorks.end() || Known->second == 1);
     if (bTryGameFire)
     {
         const int32_t AmmoBefore = Weapon->AmmoCount;
@@ -978,7 +990,8 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
         if (Known == WeaponFireWorks.end())
         {
             WeaponFireWorks[Held->WeaponDefinition] = 0;
-            Log::Info(L"Battle Royale bots: {}'s {} didn't activate its fire ability: Core fires it", BotName, NameOf(Held->WeaponDefinition));
+            bGameFireRefused = true;
+            Log::Info(L"Battle Royale bots: {}'s {} didn't activate its fire ability: Core fires the bots' weapons and sends their fire cue", BotName, NameOf(Held->WeaponDefinition));
         }
     }
     Pawn->PawnStartFire(0);
@@ -1013,6 +1026,10 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
         UObject* HitComponent = nullptr;
         const bool bBlocked = UKismetSystemLibrary::LineTraceSingle(Pawn, Eye, Center, 0, false, true, HitLocation, HitActor, HitComponent);
         bHit = !bBlocked || HitActor == reinterpret_cast<UObject*>(Target);
+    }
+    if (Weapon && Held)
+    {
+        PlayWeaponFireCue(Weapon, bHit ? Center : Eye + (RayLength > 1.0f ? Ray * (5000.0f / RayLength) : FVector()));
     }
     if (!bHit)
     {
@@ -1055,11 +1072,22 @@ bool AFortAthenaAIBotController::ActivateWeaponFire(AFortWeapon* Weapon)
         return false;
     }
     const FGameplayAbilitySpecHandle Handle = Weapon->PrimaryAbilitySpecHandle;
-    if (!Handle.IsValid() || !AbilitySystem->FindAbilitySpecFromHandle(Handle))
+    FGameplayAbilitySpec* Spec = Handle.IsValid() ? AbilitySystem->FindAbilitySpecFromHandle(Handle) : nullptr;
+    static int32_t Logged = 0;
+    if (!Spec)
     {
+        if (Logged++ < 3)
+        {
+            Log::Info(L"Battle Royale bots: {}'s {} has no fire ability to activate (handle {}, {} abilities on {})", BotName, NameOf(static_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData))),
+                Handle.Handle, AbilitySystem->ActivatableAbilities.Items.Num(), NameOf(reinterpret_cast<UObject*>(AbilitySystem)));
+        }
         return false;
     }
     const bool bActivated = AbilitySystem->TryActivateAbility(Handle);
+    if (!bActivated && Logged++ < 3)
+    {
+        Log::Info(L"Battle Royale bots: {}'s fire ability {} didn't activate (handle {})", BotName, NameOf(reinterpret_cast<UObject*>(static_cast<UGameplayAbility*>(Spec->Ability))), Handle.Handle);
+    }
     bWeaponFireActive = bActivated;
     return bActivated;
 #else
@@ -1083,6 +1111,77 @@ void AFortAthenaAIBotController::ReleaseWeaponFire()
     {
         AbilitySystem->ServerSetInputReleased(Weapon->PrimaryAbilitySpecHandle);
     }
+#endif
+}
+
+void AFortAthenaAIBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVector& ImpactLocation)
+{
+#if WITH_SERVER_CODE
+    // The game's fire ability can't run for a bot: its cost check wants an inventory owner ("has a durability cost but
+    // isn't being activated by an inventory owner"), which 8.30's AFortAthenaAIBotController is (it owns an
+    // AFortInventory) and a stock AAIController isn't. So Core fires the shot and sends what the ability would show: its
+    // WeaponFireCue, executed on every client through the pawn's multicast, as GA_Ranged_GenericDamage does.
+    static UFunction* Multicast = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:NetMulticast_InvokeGameplayCueExecuted_WithParams");
+    static UScriptStruct* CueParametersStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayCueParameters");
+    static std::map<const UObject*, FName> CueTags;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    FGameplayAbilitySpec* Spec = AbilitySystem && AFortWeapon::HasPrimaryAbilitySpecHandle() ? AbilitySystem->FindAbilitySpecFromHandle(Weapon->PrimaryAbilitySpecHandle) : nullptr;
+    const UObject* Ability = Spec ? reinterpret_cast<const UObject*>(static_cast<UGameplayAbility*>(Spec->Ability)) : nullptr;
+    if (!Multicast || !CueParametersStruct || !Ability)
+    {
+        return;
+    }
+    auto Found = CueTags.find(Ability);
+    if (Found == CueTags.end())
+    {
+        FName Tag(L"GameplayCue.Weapons.Activation", FNAME_Find);
+        UProperty* CueProperty = Ability->GetClass()->FindPropertyByName(FName(L"WeaponFireCue", FNAME_Find));
+        if (CueProperty)
+        {
+            const FGameplayTagContainer& Cues = *reinterpret_cast<const FGameplayTagContainer*>(reinterpret_cast<const uint8_t*>(Ability) + CueProperty->GetOffset_ForInternal());
+            if (Cues.GameplayTags.Num() > 0)
+            {
+                Tag = Cues.GameplayTags[0].TagName;
+            }
+        }
+        Found = CueTags.emplace(Ability, Tag).first;
+        Log::Info(L"Battle Royale bots: {}'s fire cue is {}", NameOf(Ability), Tag.ToString().ToStdString());
+    }
+    if (Found->second.IsNone())
+    {
+        return;
+    }
+
+    Reflection::FParams Params(Multicast, true);
+    Params.Set(L"GameplayCueTag", FGameplayTag{ Found->second });
+    uint8_t* CueParameters = static_cast<uint8_t*>(Params.GetAddress(L"GameplayCueParameters"));
+    if (!CueParameters)
+    {
+        return;
+    }
+    const auto Field = [CueParameters](const wchar_t* Name) -> uint8_t*
+    {
+        UProperty* Property = CueParametersStruct->FindPropertyByName(FName(Name, FNAME_Find));
+        return Property ? CueParameters + Property->GetOffset_ForInternal() : nullptr;
+    };
+    if (uint8_t* Instigator = Field(L"Instigator"))
+    {
+        *reinterpret_cast<TWeakObjectPtr<UObject>*>(Instigator) = reinterpret_cast<UObject*>(Pawn);
+    }
+    if (uint8_t* Causer = Field(L"EffectCauser"))
+    {
+        *reinterpret_cast<TWeakObjectPtr<UObject>*>(Causer) = reinterpret_cast<UObject*>(Weapon);
+    }
+    if (uint8_t* Source = Field(L"SourceObject"))
+    {
+        *reinterpret_cast<TWeakObjectPtr<UObject>*>(Source) = reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData));
+    }
+    if (uint8_t* Location = Field(L"Location"))
+    {
+        *reinterpret_cast<FVector*>(Location) = ImpactLocation;
+    }
+    Params.Call(reinterpret_cast<UObject*>(Pawn));
 #endif
 }
 
@@ -1125,6 +1224,12 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     const float Distance = (TargetLocation - Location).Size();
     const bool bArmed = HasUsableWeapon();
     if (!bArmed && Distance > 400.0f)
+    {
+        return false;
+    }
+    // Unarmed with a weapon to grab nearby, a player goes for the weapon unless the enemy is on top of it or hitting
+    // it (bots that landed together otherwise all brawled with their pickaxes).
+    if (!bArmed && Distance > 200.0f && !Manager->LastBotAttackerOf(reinterpret_cast<AFortPawn*>(Pawn)) && LootTarget.Get() && Dist2D(LocationOf(LootTarget.Get()), Location) < 2000.0f)
     {
         return false;
     }
@@ -1329,7 +1434,7 @@ bool AFortAthenaAIBotController::Storm(float Now)
         return false;
     }
     const FVector Location = LocationOf(GetPawn());
-    if (Dist2D(Location, Center) <= Radius * 0.8f)
+    if (Dist2D(Location, Center) <= Radius * 0.95f)
     {
         return false;
     }
@@ -1519,9 +1624,22 @@ void AFortAthenaAIBotController::SteerAroundObstacles(FVector& Direction, float 
     const FVector Location = LocationOf(Pawn);
     const FVector Knee(Location.X, Location.Y, Location.Z - 30.0f);
     const FVector Head(Location.X, Location.Y, Location.Z + 70.0f);
-    if (!IsBlocked(Pawn, Knee, Knee + Direction * 130.0f))
+    UObject* Obstacle = nullptr;
+    if (!IsBlocked(Pawn, Knee, Knee + Direction * 130.0f, &Obstacle))
     {
         return;
+    }
+    // A closed door: opened as a player opens it (the floor loot of 3.0's houses is behind them).
+    if (ABuildingWall* Wall = Obstacle ? Cast<ABuildingWall>(Obstacle) : nullptr; Wall && Wall->IsDoor() && !Wall->bDoorCollisionDisabled)
+    {
+        Wall->OpenDoor();
+        ++DoorsOpened;
+        return;
+    }
+    static int32_t LoggedObstacles = 0;
+    if (Obstacle && LoggedObstacles++ < 12)
+    {
+        Log::Info(L"Battle Royale bots: {} is held up by {} ({})", BotName, NameOf(Obstacle), NameOf(Obstacle->GetClass()));
     }
     if (!IsBlocked(Pawn, Head, Head + Direction * 130.0f))
     {

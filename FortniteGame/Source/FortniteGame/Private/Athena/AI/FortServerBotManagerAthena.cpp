@@ -65,8 +65,9 @@ namespace
     };
     constexpr int32_t NumBotNames = static_cast<int32_t>(sizeof(BotNames) / sizeof(BotNames[0]));
 
-    // Bots spawned per frame during the warmup, and how often the loot list is refreshed.
-    constexpr int32_t BotsPerFrame = 3;
+    // Bots spawned per frame during the warmup (one: each loads its loadout's cosmetics from the paks, which three at
+    // once made a hitch), and how often the loot list is refreshed.
+    constexpr int32_t BotsPerFrame = 1;
     constexpr float LootRefreshInterval = 3.0f;
 
     void WatchManager()

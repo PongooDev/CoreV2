@@ -102,6 +102,8 @@ struct FFortAthenaAIBotWeapon
     EFortAthenaAIBotWeaponType Type = EFortAthenaAIBotWeaponType::Other;
     // 8.30's FFortAthenaInventoryInformation::EquipMaxDistance: the farthest target the bot takes this weapon out for.
     float EquipMaxDistance = 5000.0f;
+    // When this gun can fire again (its FiringRate from its last shot): swapping guns doesn't skip a pump's delay.
+    float ReadyTime = 0.0f;
 };
 
 // A healing or shield item (21.40's UFortAthenaAIBotEvaluator_Heal uses them), from its fire ability's blueprint
@@ -216,6 +218,8 @@ private:
     void UpdateFacing(float Now, float DeltaSeconds);
     // How far (degrees) the bot's heading is from the point it wants to look at.
     float FacingError() const;
+    // The target is out of sight behind a player's builds right around it (it boxed itself in).
+    bool IsTargetBoxedIn(AFortPawn* Target) const;
     void LogMovementDiagnostics();
     // 21.40's _Loot for containers: walk to the nearest unsearched chest or ammo box and search it (its own
     // ServerOnAttemptInteract), then take what comes out.
@@ -392,6 +396,10 @@ private:
     float FireUntil = 0.0f;
     bool bFiring = false;
     bool bTargeting = false;
+    bool bBoxedInLogged = false;
+    // The time of the bot's last tick, and when a gun just taken out can first fire (its equip, as a player waits it out).
+    float LastTickTime = 0.0f;
+    float EquipReadyTime = 0.0f;
     // The pickaxe of the bot's loadout (a random one of the build's), or null for the default.
     UAthenaPickaxeItemDefinition* LoadoutPickaxe = nullptr;
     // The back bling of the bot's loadout (an AthenaBackpack item: its character parts), or null.

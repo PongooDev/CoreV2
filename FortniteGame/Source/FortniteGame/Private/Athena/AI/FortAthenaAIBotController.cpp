@@ -1245,6 +1245,7 @@ void AFortAthenaAIBotController::AddKill()
 void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
 {
 #if WITH_SERVER_CODE
+    LastTickTime = Now;
     AFortPlayerPawnAthena* Pawn = GetPawn();
     switch (State)
     {
@@ -1671,6 +1672,13 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
         bInSight = HasClearShot(Pawn, Eye, FVector(AttackerLocation.X, AttackerLocation.Y, AttackerLocation.Z + 40.0f), AttackerPawn);
     }
 
+    // Out of sight behind the builds it just put up around itself, the last target isn't forgotten (RangeAttack breaks in).
+    AFortPawn* Previous = CurrentTarget.Get();
+    if (!NewTarget && Previous && !Previous->bIsDying && Now - LastTargetInSightTime < 15.0f && (LocationOf(Previous) - Location).Size() < 3000.0f && IsTargetBoxedIn(Previous))
+    {
+        NewTarget = Previous;
+    }
+
     if (NewTarget != CurrentTarget.Get())
     {
         CurrentTarget = NewTarget;
@@ -1874,6 +1882,8 @@ void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
     EquippedWeapon = Weapon;
     EquippedIndex = Index;
     bPickaxeEquipped = false;
+    // A player can't fire a gun until it's out (its equip animation, about half a second 🟡).
+    EquipReadyTime = LastTickTime + 0.5f;
 #endif
 }
 
@@ -2350,7 +2360,7 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     AFortPlayerPawnAthena* Pawn = GetPawn();
     AFortPawn* Target = CurrentTarget.Get();
     AAIController* AIController = Controller.Get();
-    if (!Target || !AIController || Target->bIsDying || !bHasVisualLineOfSightOnTarget)
+    if (!Target || !AIController || Target->bIsDying || !Pawn)
     {
         return false;
     }
@@ -2358,6 +2368,25 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     const FVector TargetLocation = LocationOf(Target);
     const float Distance = (TargetLocation - Location).Size();
     const bool bArmed = HasUsableWeapon();
+    // A player who boxed themselves in: the bot saw them a moment ago, and what blocks the view now is a player's
+    // build right around them. It keeps at them and shoots through the walls (a shot a build stops damages the piece),
+    // or swings its pickaxe at them, until they break.
+    if (!bHasVisualLineOfSightOnTarget)
+    {
+        if (Now - LastTargetInSightTime > 15.0f || Distance > 3000.0f || !IsTargetBoxedIn(Target))
+        {
+            return false;
+        }
+        if (!bBoxedInLogged)
+        {
+            bBoxedInLogged = true;
+            Log::Info(L"Battle Royale bots: {} sees {} box themselves in {:.0f} m away and breaks in", BotName, NameOf(Target), Distance / 100.0f);
+        }
+    }
+    else
+    {
+        bBoxedInLogged = false;
+    }
     // Unarmed, a player loots first: they only swing their pickaxe back at someone hitting them right next to them
     // (bots that landed together brawled with their pickaxes, and half a lobby went out that way in the first zone).
     if (!bArmed && (Distance > 300.0f || Now - LastHurtTime > 3.0f))
@@ -2427,7 +2456,9 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     // A player aims down sights with a gun beyond arm's reach, not while reloading.
     SetTargeting(bArmed && !bPickaxeEquipped && ReloadUntil <= 0.0f && Distance > 400.0f && FacingError() < 45.0f);
     // A player turns to face a target before shooting at it.
-    const bool bReady = Now >= TargetAcquiredTime + AIBotSkills.MaxTrackingReactionTime && Now >= NextShotTime && ReloadUntil <= 0.0f && FacingError() < 20.0f;
+    const FFortAthenaAIBotWeapon* Ready = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+    const bool bGunReady = bPickaxeEquipped || (Now >= EquipReadyTime && (!Ready || Now >= Ready->ReadyTime));
+    const bool bReady = Now >= TargetAcquiredTime + AIBotSkills.MaxTrackingReactionTime && Now >= NextShotTime && bGunReady && ReloadUntil <= 0.0f && FacingError() < 20.0f;
     const bool bLoaded = bPickaxeEquipped ? Distance < 250.0f : (EquippedWeapon.Get() && EquippedWeapon.Get()->AmmoCount > 0);
     if (bReady && bLoaded && !bFiring)
     {
@@ -2439,14 +2470,41 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
                 EquippedWeapon.Get() ? NameOf(static_cast<UFortWeaponItemDefinition*>(EquippedWeapon.Get()->WeaponData)) : std::wstring(L"nothing"), EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0);
         }
         FireUntil = Now + 0.12f;
-        const FFortAthenaAIBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+        FFortAthenaAIBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+        // Never faster than the gun itself (its stats row's FiringRate: a pump's or a bolt's delay is in it), with the
+        // bot's level-based spacing on top of that.
         const float WeaponInterval = bPickaxeEquipped ? 0.8f : Held && Held->FiringRate > 0.0f ? 1.0f / Held->FiringRate : 0.5f;
-        NextShotTime = Now + std::max(WeaponInterval, AIBotSkills.MaxTimeBetweenShots + RandomRange(-AIBotSkills.DeviationTimeBetweenShots, AIBotSkills.DeviationTimeBetweenShots));
+        if (Held)
+        {
+            Held->ReadyTime = Now + WeaponInterval;
+        }
+        NextShotTime = Now + WeaponInterval + std::max(AIBotSkills.MaxTimeBetweenShots + RandomRange(-AIBotSkills.DeviationTimeBetweenShots, AIBotSkills.DeviationTimeBetweenShots) - WeaponInterval, 0.0f) + RandomRange(0.0f, 0.06f);
     }
     return true;
 #else
     return false;
 #endif
+}
+
+bool AFortAthenaAIBotController::IsTargetBoxedIn(AFortPawn* Target) const
+{
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || !Target)
+    {
+        return false;
+    }
+    const FVector From = LocationOf(Pawn) + FVector(0.0f, 0.0f, 50.0f);
+    const FVector To = LocationOf(Target) + FVector(0.0f, 0.0f, 20.0f);
+    FVector Hit;
+    UObject* HitActor = nullptr;
+    UObject* HitComponent = nullptr;
+    if (!UKismetSystemLibrary::LineTraceSingle(Pawn, From, To, 0, false, true, Hit, HitActor, HitComponent))
+    {
+        return false;
+    }
+    ABuildingSMActor* Building = HitActor ? Cast<ABuildingSMActor>(HitActor) : nullptr;
+    // A player's piece (a wall, floor, ramp or roof), within a tile of the target.
+    return Building && Building->bPlayerPlaced && !Building->bDestroyed && (Hit - To).Size() < 600.0f;
 }
 
 bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)

@@ -98,7 +98,8 @@ public:
     // EFortQuestObjectiveStatEvent::AthenaOutlive event for each, as 1.8's game mode sends one per death (0x599DA0).
     void SendOutliveStatEvents(AFortPawn* DeadPawn);
 
-    // Removes the placed chests and ammo boxes this match doesn't keep, from the map info's spawn percents (#205).
+    // Removes the placed chests and ammo boxes this match doesn't keep, from the map info's spawn percents (#205): once the
+    // bus is under way on builds whose playlists bring their own game data (from 1.11, #238), at once before them.
     void ApplyContainerSpawnPercents();
 
     // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,

@@ -159,6 +159,46 @@ namespace
         }
         Log::Info(L"Battle Royale: {} of {} {} spawn ({:.0f}%, spawn percents {:.0f}-{:.0f}%), {} destroyed", Placed - Destroyed, Placed, What, SpawnFraction * 100.0f, MinFraction * 100.0f, MaxFraction * 100.0f, Destroyed);
     }
+
+    void ApplySpawnPercents(AFortGameModeAthena* GameMode)
+    {
+        UWorld* World = GameMode->GetWorld();
+        AFortAthenaMapInfo* MapInfo = AFortAthenaMapInfo::StaticClass() ? FindMapInfo(World) : nullptr;
+        if (!MapInfo)
+        {
+            return;
+        }
+        Log::Info(L"Battle Royale: the chests' and ammo boxes' spawn percents are playlist {}'s", static_cast<int32_t>(GameMode->CurrentPlaylistId));
+        if (AFortAthenaMapInfo::HasTreasureChestSpawnPercent())
+        {
+            ApplySpawnPercent(World, MapInfo->TreasureChestClass, MapInfo->TreasureChestMinSpawnPercent, MapInfo->TreasureChestMaxSpawnPercent, L"treasure chests");
+        }
+        if (AFortAthenaMapInfo::HasAmmoBoxSpawnPercent())
+        {
+            ApplySpawnPercent(World, MapInfo->AmmoBoxClass, MapInfo->AmmoBoxMinSpawnPercent, MapInfo->AmmoBoxMaxSpawnPercent, L"ammo boxes");
+        }
+    }
+
+    // Applies the spawn percents once the bus is under way, the match's playlist final by then.
+    void WatchSpawnPercentsOf(FWeakObjectPtr GameMode)
+    {
+        GameThread::Enqueue([GameMode]()
+        {
+            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
+            UWorld* World = Athena ? Athena->GetWorld() : nullptr;
+            if (!World)
+            {
+                return;
+            }
+            AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
+            if (GameState && GameState->GamePhase >= EAthenaGamePhase::GetAircraft())
+            {
+                ApplySpawnPercents(Athena);
+                return;
+            }
+            WatchSpawnPercentsOf(GameMode);
+        });
+    }
 }
 
 void AFortGameModeAthena::ApplyContainerSpawnPercents()
@@ -171,20 +211,18 @@ void AFortGameModeAthena::ApplyContainerSpawnPercents()
     {
         return;
     }
-    UWorld* World = GetWorld();
-    AFortAthenaMapInfo* MapInfo = AFortAthenaMapInfo::StaticClass() ? FindMapInfo(World) : nullptr;
-    if (!MapInfo)
+    // The spawn percents are AthenaGameData's rows (Default.TreasureChest and Default.AmmoBox), and from 1.11 a playlist's
+    // own game data replaces them: ApplyPlaylistDataTables copies its GameData over AthenaGameData ("Patched Game Data
+    // with %s", 3.2 0x9AEF10, the curve table at the playlist class default +0x360), as Teams of 20's does (#238: chests
+    // 60-80%, ammo boxes 75-90%). The world starts on the map URL's playlist and the match's comes with its assignment,
+    // so on those builds the percents wait for the bus, when the playlist is the match's and its game data in place.
+    // Nobody is near the map's containers then (the bus flies at AthenaGameData's Default.Aircraft.Height, 80000 on 3.2).
+    if (Finder::ResolvePlaylistDataTablesLive())
     {
+        WatchSpawnPercentsOf(FWeakObjectPtr(this));
         return;
     }
-    if (AFortAthenaMapInfo::HasTreasureChestSpawnPercent())
-    {
-        ApplySpawnPercent(World, MapInfo->TreasureChestClass, MapInfo->TreasureChestMinSpawnPercent, MapInfo->TreasureChestMaxSpawnPercent, L"treasure chests");
-    }
-    if (AFortAthenaMapInfo::HasAmmoBoxSpawnPercent())
-    {
-        ApplySpawnPercent(World, MapInfo->AmmoBoxClass, MapInfo->AmmoBoxMinSpawnPercent, MapInfo->AmmoBoxMaxSpawnPercent, L"ammo boxes");
-    }
+    ApplySpawnPercents(this);
 #endif
 }
 

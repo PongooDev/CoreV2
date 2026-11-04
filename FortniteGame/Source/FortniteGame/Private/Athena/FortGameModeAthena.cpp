@@ -308,6 +308,9 @@ namespace
     {
         uint8_t Team = 0;
         int32_t Kills = 0;
+        // Of those, the player bots they eliminated (CoreV2 #233): the backend leaves them out of the kill challenges
+        // when the admin panel says bot eliminations don't count for quests.
+        int32_t BotKills = 0;
         int32_t SecondsAlive = 0;
         int32_t Place = 0;
         // Who eliminated the player (their account id), on a build whose server doesn't count kills (1.8): empty while
@@ -422,6 +425,7 @@ namespace
                 AthenaState->SetKillScore(std::max(Kills + UFortCheatManager::KillScoreOffset(AthenaState) + UFortServerBotManagerAthena::BotKillsOf(AthenaState), 0));
             }
             Player.Kills = AthenaState->GetKills();
+            Player.BotKills = std::min(UFortServerBotManagerAthena::BotKillsOf(AthenaState), std::max(Player.Kills, 0));
         }
 
         // The team's place, for its players who left before it was out.
@@ -449,8 +453,8 @@ namespace
             Reported.push_back(AccountId);
             std::string Id;
             std::transform(AccountId.begin(), AccountId.end(), std::back_inserter(Id), [](wchar_t Digit) { return static_cast<char>(Digit); });
-            Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"secondsAlive\":{}}}", Count++ > 0 ? "," : "",
-                Id, Player.Place, std::max(Player.Kills, 0), std::max(Player.SecondsAlive, 0));
+            Body += std::format("{}{{\"accountId\":\"{}\",\"place\":{},\"kills\":{},\"botKills\":{},\"secondsAlive\":{}}}", Count++ > 0 ? "," : "",
+                Id, Player.Place, std::max(Player.Kills, 0), Player.BotKills, std::max(Player.SecondsAlive, 0));
             Log::Info(L"Battle Royale: {} placed {} with {} kills, {} s alive", AccountId, Player.Place, Player.Kills, Player.SecondsAlive);
         }
 

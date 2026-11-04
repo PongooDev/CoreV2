@@ -18,6 +18,8 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
 #include "GameThread.h"
+#include "GameplayTagContainer.h"
+#include "Heroes/FortHeroType.h"
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
@@ -27,9 +29,11 @@
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
 #include "Quests/FortQuestManager.h"
+#include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
+#include "Weapons/FortWeapon.h"
 
 #include <algorithm>
 #include <cmath>
@@ -258,6 +262,55 @@ void UFortServerBotManagerAthena::NoteNativeKillEvent(const UObject* Target)
     NativeKillTargets.push_back(TWeakObjectPtr<UObject>(const_cast<UObject*>(Target)));
 }
 
+bool UFortServerBotManagerAthena::IsWarmup()
+{
+    return Instance && !Instance->bAircraftStarted;
+}
+
+namespace
+{
+    // An actor's own gameplay tags (IGameplayTagAssetInterface::GetOwnedGameplayTags, through its reflected function,
+    // whose exec finds the actor's interface).
+    void AppendOwnedGameplayTags(UObject* Actor, FGameplayTagContainer& Tags)
+    {
+        static UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/GameplayTags.GameplayTagAssetInterface:GetOwnedGameplayTags");
+        Reflection::FParams Params(Function, true);
+        if (Actor && Function && Params.Call(Actor))
+        {
+            Tags.AppendTags(Params.Take<FGameplayTagContainer>(L"TagContainer"));
+        }
+    }
+}
+
+void UFortServerBotManagerAthena::AddKillEventTags(const UObject* Target, AController* Killer, FGameplayTagContainer& TargetTags, FGameplayTagContainer& SourceTags)
+{
+#if WITH_SERVER_CODE
+    // 3.1's AFortGameModeZone::Killed (0xB5E890) sends the killer's Kill event with the dead pawn's own tags as the
+    // target's and the killer's (their player state's hero, UFortPlayerController 0xE466C0) with their pawn's as the
+    // source's. Battle Royale's kill objectives read both (AthenaObjectiveStatTable: killingblow_athena_player asks for
+    // Homebase.Class in each, killingblow_athena_player_shotgun for Weapon.Ranged.shotgun in the source's too). A bot's
+    // pawn has no hero of a player's: its class is its outfit's hero's (HID_*: Homebase.Class.IsCommando...), and the
+    // weapon is the one the killer holds (its item's GameplayTags).
+    AFortAthenaAIBotController* Bot = Instance ? Instance->FindBot(Target) : nullptr;
+    if (!Bot)
+    {
+        return;
+    }
+    AppendOwnedGameplayTags(reinterpret_cast<UObject*>(Bot->GetPawn()), TargetTags);
+    UAthenaCharacterItemDefinition* Character = Cast<UAthenaCharacterItemDefinition>(Bot->GetLoadoutCharacter());
+    if (UFortHeroType* Hero = Character ? static_cast<UFortHeroType*>(Character->HeroDefinition) : nullptr)
+    {
+        TargetTags.AppendTags(static_cast<FGameplayTagContainer&>(reinterpret_cast<UFortItemDefinition*>(Hero)->GameplayTags));
+    }
+    AFortPawn* KillerPawn = Killer ? Cast<AFortPawn>(reinterpret_cast<UObject*>(static_cast<APawn*>(Killer->Pawn))) : nullptr;
+    AFortWeapon* Weapon = KillerPawn ? static_cast<AFortWeapon*>(KillerPawn->CurrentWeapon) : nullptr;
+    if (UFortWeaponItemDefinition* WeaponData = Weapon ? static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData) : nullptr)
+    {
+        SourceTags.AppendTags(static_cast<FGameplayTagContainer&>(reinterpret_cast<UFortItemDefinition*>(WeaponData)->GameplayTags));
+    }
+#endif
+}
+
 bool UFortServerBotManagerAthena::ShouldHoldNativeWinCheck() const
 {
     return HasAliveBots();
@@ -324,6 +377,16 @@ bool UFortServerBotManagerAthena::FindGroundNear(const FVector& Around, float Ra
         }
     }
     return false;
+}
+
+bool UFortServerBotManagerAthena::GetWarmupSpot(FVector& OutLocation) const
+{
+    if (WarmupSpots.empty())
+    {
+        return false;
+    }
+    OutLocation = WarmupSpots[static_cast<size_t>(FMath::Rand()) % WarmupSpots.size()];
+    return true;
 }
 
 uint8_t UFortServerBotManagerAthena::TeamOfPawn(const APawn* Pawn) const
@@ -442,7 +505,8 @@ void UFortServerBotManagerAthena::Tick()
         UAthenaNavSystem::Tick(World);
     }
     RefreshEnemies();
-    if (bAircraftStarted && Now >= NextLootRefresh)
+    // The warmup island's weapons too, once the bots are in (they pick them up for a fight there).
+    if ((bAircraftStarted || bNavigationTried) && Now >= NextLootRefresh)
     {
         NextLootRefresh = Now + LootRefreshInterval;
         const auto LootStart = std::chrono::steady_clock::now();
@@ -1138,6 +1202,24 @@ void UFortServerBotManagerAthena::RemoveFromAliveBots(AFortAthenaAIBotController
     if (KillerBot && KillerBot != Bot)
     {
         KillerBot->AddKill();
+        // The tags a player's kill event for this bot would carry, once a match (what the kill challenges match).
+        if (!bLoggedKillTags)
+        {
+            bLoggedKillTags = true;
+            FGameplayTagContainer TargetTags;
+            FGameplayTagContainer SourceTags;
+            AddKillEventTags(reinterpret_cast<UObject*>(Bot->GetPawn()), reinterpret_cast<AController*>(KillerBot->GetController()), TargetTags, SourceTags);
+            const auto Names = [](const FGameplayTagContainer& Tags)
+            {
+                std::wstring Text;
+                for (const FGameplayTag& Tag : Tags.GameplayTags)
+                {
+                    Text += (Text.empty() ? L"" : L", ") + Tag.TagName.ToStdString();
+                }
+                return Text.empty() ? std::wstring(L"none") : Text;
+            };
+            Log::Info(L"Battle Royale bots: a kill event for {} has the target tags [{}] and the killer's weapon tags [{}]", Bot->GetBotName(), Names(TargetTags), Names(SourceTags));
+        }
     }
     AFortPlayerControllerAthena* KillerPlayer = KillerState && !KillerBot ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(KillerState->GetOwner())) : nullptr;
     if (KillerPlayer)
@@ -1178,8 +1260,10 @@ void UFortServerBotManagerAthena::RemoveFromAliveBots(AFortAthenaAIBotController
             }
         }
 
-        // Quests: the game's own Kill event (if it sent one for this pawn) went through UFortQuestManager already; with
-        // the setting on, one is sent for a kill the game didn't report.
+        // Quests: the game's own Kill event (if it sent one for this pawn) went through UFortQuestManager already, with
+        // the bot's tags added (SendStatEventWithTagsHK); with the setting on, the game's two events are sent for a kill
+        // it didn't report, as its AFortGameModeZone::Killed sends them (3.1 0xB5E890: KillContribution, then Kill),
+        // with the tags its Kill has: the dead pawn's for the target, the killer's and their weapon's for the source.
         UObject* Target = reinterpret_cast<UObject*>(Bot->GetPawn());
         const bool bNativeEvent = std::any_of(NativeKillTargets.begin(), NativeKillTargets.end(), [Target](const TWeakObjectPtr<UObject>& Weak) { return Weak.Get() == Target; });
         UFortRegisteredPlayerInfo* PlayerInfo = static_cast<UFortRegisteredPlayerInfo*>(KillerPlayer->MyPlayerInfo);
@@ -1189,7 +1273,9 @@ void UFortServerBotManagerAthena::RemoveFromAliveBots(AFortAthenaAIBotController
             FGameplayTagContainer SourceTags;
             FGameplayTagContainer ContextTags;
             QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
-            const FGameplayTagContainer TargetTags;
+            FGameplayTagContainer TargetTags;
+            AddKillEventTags(Target, reinterpret_cast<AController*>(KillerPlayer), TargetTags, SourceTags);
+            QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKillContribution(), Target, TargetTags, SourceTags, ContextTags, 1, false);
             QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKill(), Target, TargetTags, SourceTags, ContextTags, 1, false);
         }
         Log::Info(L"Battle Royale bots: {} eliminated {} ({} bots now; quests: {})", KillerState->GetPlayerName().ToStdString(), Bot->GetBotName(), BotKillsOf(KillerState),
@@ -1211,6 +1297,12 @@ void UFortServerBotManagerAthena::RemoveFromAliveBots(AFortAthenaAIBotController
         }
     }
     Log::Info(L"Battle Royale bots: {} is out{} ({} bots left)", Bot->GetBotName(), bTeamOut && bAircraftStarted ? std::format(L", place {}", TeamsBefore) : std::wstring(), GetAliveBotCount());
+    // Every player still in the match outlived the bot ("Outlive opponents", AthenaOutlive), as they outlive a player who
+    // is out, with the setting on.
+    if (Athena && bAircraftStarted && Settings.bEliminationsCountForQuests)
+    {
+        Athena->SendOutliveStatEvents(reinterpret_cast<AFortPawn*>(Bot->GetPawn()));
+    }
     if (Athena)
     {
         UpdateCounts();
@@ -1230,6 +1322,12 @@ void UFortServerBotManagerAthena::ApplyBotDamage(AFortAthenaAIBotController* Att
     }
     const float Now = World->GetTimeSeconds();
     NoteBotHit(Attacker, Victim);
+    // A pawn that can't be damaged (everyone on the warmup island: AFortGameModeAthena's warmup restart turns
+    // bCanBeDamaged off) takes nothing, as the game's own damage leaves it.
+    if (!Victim->bCanBeDamaged)
+    {
+        return;
+    }
 
     const float Shield = Victim->GetShield();
     const float ToShield = std::min(Shield, Damage);

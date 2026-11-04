@@ -102,36 +102,37 @@ namespace
     {
         return Controller ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState))) : nullptr;
     }
+}
 
-    // Every player still in the match outlived the one who is out: an EFortQuestObjectiveStatEvent::AthenaOutlive event
-    // for each, unflushed, which the "Outlive opponents" challenges count (3.0's outlive_athena, "Outlive 1000 opponents";
-    // 1.8's dailies). 1.8 sends one for every other player's death (0x599DA0); 3.0 has no sender of the event left: its
-    // native stat event senders (the 11 calls to the stripped typed SendStatEvent) send Interact, Visit, Land, Damage,
-    // kills, team events (Build, Destroy) and WaveComplete only (Core-Backend #214). Sent here, with the player taken off
-    // the alive players, which only Core's handler does on the builds that strip the native one.
-    void SendOutliveStatEvents(AFortGameModeAthena* GameMode, AFortPawn* DeadPawn)
+// Every player still in the match outlived the one who is out: an EFortQuestObjectiveStatEvent::AthenaOutlive event
+// for each, unflushed, which the "Outlive opponents" challenges count (3.0's outlive_athena, "Outlive 1000 opponents";
+// 1.8's dailies). 1.8 sends one for every other player's death (0x599DA0); 3.0 has no sender of the event left: its
+// native stat event senders (the 11 calls to the stripped typed SendStatEvent) send Interact, Visit, Land, Damage,
+// kills, team events (Build, Destroy) and WaveComplete only (Core-Backend #214). Sent here, with the player taken off
+// the alive players, which only Core's handler does on the builds that strip the native one. A player bot's elimination
+// sends them too (UFortServerBotManagerAthena::RemoveFromAliveBots, CoreV2 #233).
+void AFortGameModeAthena::SendOutliveStatEvents(AFortPawn* DeadPawn)
+{
+    const EFortQuestObjectiveStatEvent AthenaOutlive{ EFortQuestObjectiveStatEvent::StaticEnumInfo().FindValue(L"AthenaOutlive") };
+    if (static_cast<uint8_t>(AthenaOutlive) == Reflection::InvalidEnumValue)
     {
-        const EFortQuestObjectiveStatEvent AthenaOutlive{ EFortQuestObjectiveStatEvent::StaticEnumInfo().FindValue(L"AthenaOutlive") };
-        if (static_cast<uint8_t>(AthenaOutlive) == Reflection::InvalidEnumValue)
+        return;
+    }
+    const FGameplayTagContainer NoTargetTags;
+    const TArray<AFortPlayerControllerAthena*>& Alive = AlivePlayers;
+    for (int32_t Index = 0; Index < Alive.Num(); ++Index)
+    {
+        AFortPlayerControllerAthena* Survivor = Alive[Index];
+        UFortRegisteredPlayerInfo* PlayerInfo = Survivor ? static_cast<UFortRegisteredPlayerInfo*>(Survivor->MyPlayerInfo) : nullptr;
+        UFortQuestManager* QuestManager = PlayerInfo ? PlayerInfo->GetAthenaQuestManager() : nullptr;
+        if (!QuestManager)
         {
-            return;
+            continue;
         }
-        const FGameplayTagContainer NoTargetTags;
-        const TArray<AFortPlayerControllerAthena*>& Alive = GameMode->AlivePlayers;
-        for (int32_t Index = 0; Index < Alive.Num(); ++Index)
-        {
-            AFortPlayerControllerAthena* Survivor = Alive[Index];
-            UFortRegisteredPlayerInfo* PlayerInfo = Survivor ? static_cast<UFortRegisteredPlayerInfo*>(Survivor->MyPlayerInfo) : nullptr;
-            UFortQuestManager* QuestManager = PlayerInfo ? PlayerInfo->GetAthenaQuestManager() : nullptr;
-            if (!QuestManager)
-            {
-                continue;
-            }
-            FGameplayTagContainer SourceTags;
-            FGameplayTagContainer ContextTags;
-            QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
-            QuestManager->SendStatEvent(AthenaOutlive, DeadPawn, NoTargetTags, SourceTags, ContextTags, 1, false);
-        }
+        FGameplayTagContainer SourceTags;
+        FGameplayTagContainer ContextTags;
+        QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
+        QuestManager->SendStatEvent(AthenaOutlive, DeadPawn, NoTargetTags, SourceTags, ContextTags, 1, false);
     }
 }
 
@@ -321,7 +322,7 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         BotManager->OnPlayerRemoved(AthenaStateOf(Instigator));
     }
     UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s is out (place %d, %d players and %d teams left)"), *GetName(), static_cast<int32_t>(AthenaState->Place), static_cast<int32_t>(GameState->PlayersLeft), static_cast<int32_t>(GameState->TeamsLeft));
-    SendOutliveStatEvents(GameMode, DeadPawn);
+    GameMode->SendOutliveStatEvents(DeadPawn);
 
     Reflection::FParams Params(StaticFunction_ClientFinishedInteractionInZone());
     Params.Call(this);

@@ -1079,6 +1079,13 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
         return false;
     }
     ApplyStartingHealth();
+    // The warmup island hurts nobody: AFortGameModeAthena's restart of a player in the warmup turns the new pawn's
+    // bCanBeDamaged off (3.1 0x9B3FD7, GamePhase == Warmup), so hits show their numbers and take nothing. The pawn the
+    // bot leaves the bus with is a new one, which can be damaged.
+    if (!bSkydive && State == EFortAthenaAIBotState::Warmup)
+    {
+        Pawn->bCanBeDamaged = false;
+    }
     const int32_t MovementAttributes = InitializeMovementAttributes(Pawn, HeroObject);
     static bool bLoggedAttributes = false;
     if (!bLoggedAttributes)
@@ -1206,11 +1213,15 @@ void AFortAthenaAIBotController::EnterAircraft(float InJumpTime, float InLatestJ
     }
     PlayerBotPawn = nullptr;
     // The warmup's pickups don't come along (ResetToStartingItems takes a player's).
-    WeaponList.clear();
-    Ammo.clear();
-    Consumables.clear();
-    Materials[0] = Materials[1] = Materials[2] = 0;
-    HarvestTarget = nullptr;
+    ClearInventory();
+    SetTargeting(false);
+    CurrentTarget = nullptr;
+    WarmupRespawnTime = -1.0f;
+    bWarmupGliding = false;
+    if (WarmupDeaths > 0 || WarmupGlides > 0 || WarmupBrawls > 0)
+    {
+        Log::Info(L"Battle Royale bots: {} leaves the warmup island ({} new pawns there, {} glides, {} fights)", BotName, WarmupDeaths, WarmupGlides, WarmupBrawls);
+    }
     bHasLandingSpot = false;
     State = EFortAthenaAIBotState::InAircraft;
     JumpTime = InJumpTime;
@@ -1230,6 +1241,306 @@ void AFortAthenaAIBotController::Destroy()
     }
     PlayerBotPawn = nullptr;
     State = EFortAthenaAIBotState::Dead;
+}
+
+void AFortAthenaAIBotController::ClearInventory()
+{
+    WeaponList.clear();
+    Ammo.clear();
+    Consumables.clear();
+    Materials[0] = Materials[1] = Materials[2] = 0;
+    HarvestTarget = nullptr;
+    HealingItem = nullptr;
+    LootTarget = nullptr;
+    ContainerTarget = nullptr;
+    EquippedIndex = -1;
+    EquippedWeapon = nullptr;
+    bPickaxeEquipped = false;
+}
+
+void AFortAthenaAIBotController::TickWarmup(float Now, float DeltaSeconds)
+{
+#if WITH_SERVER_CODE
+    // Nobody can be hurt on the warmup island (the pawn spawns with bCanBeDamaged off, SpawnPawnAt), so a bot never
+    // dies there; a pawn that is gone all the same (out of the world) is put back at a warmup spot.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Pawn->IsPendingKill() || Pawn->bIsDying || WarmupRespawnTime >= 0.0f)
+    {
+        RespawnInWarmup(Now);
+        return;
+    }
+    if (Pawn->bCanBeDamaged)
+    {
+        Pawn->bCanBeDamaged = false;
+    }
+    LastKnownPosition = LocationOf(Pawn);
+
+    // Falling from a height: the glider.
+    if (WarmupGlide(Now))
+    {
+        return;
+    }
+
+    // Hurt by someone: the bot fights back (a player who shoots a bot there gets shot at).
+    const float HealthShield = Pawn->GetHealth() + Pawn->GetShield();
+    if (LastHealthShield >= 0.0f && HealthShield < LastHealthShield - 0.5f)
+    {
+        LastHurtTime = Now;
+        if (AFortPlayerStateAthena* Attacker = KillerOf(reinterpret_cast<AFortPawn*>(Pawn)); Attacker && Attacker != GetPlayerState())
+        {
+            LastAttacker = Attacker;
+            LastAttackerTime = Now;
+        }
+    }
+    LastHealthShield = HealthShield;
+    if (IsDanceStunned())
+    {
+        StopFiring();
+        StopMoving();
+        return;
+    }
+    if (Now - LastHurtTime < 1.0f && WarmupActivity != EWarmupActivity::Brawl)
+    {
+        ChooseWarmupActivity(Now, true);
+    }
+    else if (Now >= WarmupActivityUntil)
+    {
+        ChooseWarmupActivity(Now, false);
+    }
+
+    switch (WarmupActivity)
+    {
+    case EWarmupActivity::Idle:
+        // Standing about, looking around now and then.
+        StopMoving();
+        if (Now >= NextLookAroundTime)
+        {
+            NextLookAroundTime = Now + RandomRange(1.5f, 4.5f);
+            const float Angle = RandomRange(0.0f, 6.2831853f);
+            FaceTowards(FVector(LastKnownPosition.X + std::cos(Angle) * 1000.0f, LastKnownPosition.Y + std::sin(Angle) * 1000.0f, LastKnownPosition.Z + RandomRange(-150.0f, 150.0f)), Now, 2.5f);
+        }
+        break;
+    case EWarmupActivity::Wander:
+        // A short walk, then standing again.
+        Wander(Now);
+        if (bHasWanderGoal && Dist2D(LastKnownPosition, WanderGoal) < 250.0f)
+        {
+            WarmupActivityUntil = Now;
+        }
+        break;
+    case EWarmupActivity::Emote:
+        if (Now >= EmoteUntil)
+        {
+            StopEmote();
+            WarmupActivityUntil = Now;
+        }
+        return;
+    case EWarmupActivity::Brawl:
+    {
+        // A fight: a weapon from the island's floor if one lies close, then the nearest enemy close by (a bot or a
+        // player), the ground game's own fighting.
+        if (Now >= NextPerceptionTime)
+        {
+            NextPerceptionTime = Now + 0.25f;
+            UpdateCurrentTarget(Now);
+            AFortPawn* Target = CurrentTarget.Get();
+            if (Target && (Dist2D(LocationOf(Target), LastKnownPosition) > 3500.0f || std::fabs(LocationOf(Target).Z - LastKnownPosition.Z) > 800.0f))
+            {
+                CurrentTarget = nullptr;
+            }
+        }
+        ManageWeapon(Now);
+        CheckWeaponFireResult(Now);
+        if (!RangeAttack(Now))
+        {
+            StopFiring();
+            SetTargeting(false);
+            if (!(!HasUsableWeapon() && Loot(Now, 2500.0f)))
+            {
+                AFortPawn* Target = CurrentTarget.Get();
+                if (Target && HasUsableWeapon())
+                {
+                    MoveTowards(LocationOf(Target), Now, 600.0f);
+                }
+                else if (!Loot(Now, 1200.0f))
+                {
+                    Wander(Now);
+                }
+            }
+        }
+        break;
+    }
+    }
+    TryToUnstuck(Now);
+    UpdateFacing(Now, DeltaSeconds);
+#endif
+}
+
+void AFortAthenaAIBotController::ChooseWarmupActivity(float Now, bool bFightBack)
+{
+#if WITH_SERVER_CODE
+    // What players did on the warmup island: mostly standing about and walking a little, a dance, and every so often a
+    // fight with the island's weapons (more often a bot that was hit fights back).
+    StopEmote();
+    if (WarmupActivity == EWarmupActivity::Brawl)
+    {
+        StopFiring();
+        SetTargeting(false);
+        CurrentTarget = nullptr;
+    }
+    const EWarmupActivity Previous = WarmupActivity;
+    const float Roll = FMath::FRand();
+    EWarmupActivity Next = bFightBack ? EWarmupActivity::Brawl
+        : Roll < 0.45f ? EWarmupActivity::Idle : Roll < 0.75f ? EWarmupActivity::Wander : Roll < 0.88f ? EWarmupActivity::Emote : EWarmupActivity::Brawl;
+    // Never two walks or two dances in a row: a stand between them.
+    if (!bFightBack && Next == Previous && Next != EWarmupActivity::Idle)
+    {
+        Next = EWarmupActivity::Idle;
+    }
+    float Duration = Next == EWarmupActivity::Idle ? RandomRange(4.0f, 12.0f) : Next == EWarmupActivity::Wander ? RandomRange(4.0f, 9.0f) : RandomRange(20.0f, 45.0f);
+    if (Next == EWarmupActivity::Emote)
+    {
+        StopMoving();
+        const float EmoteLength = RandomRange(4.0f, 8.0f);
+        if (PlayEmote(Now, EmoteLength))
+        {
+            Duration = EmoteLength + 0.5f;
+        }
+        else
+        {
+            Next = EWarmupActivity::Idle;
+            Duration = RandomRange(4.0f, 10.0f);
+        }
+    }
+    if (Next == EWarmupActivity::Wander)
+    {
+        bHasWanderGoal = false;
+    }
+    if (Next == EWarmupActivity::Brawl)
+    {
+        ++WarmupBrawls;
+        if (WarmupBrawls <= 3)
+        {
+            Log::Info(L"Battle Royale bots: {} {} on the warmup island", BotName, bFightBack ? L"fights back" : L"looks for a fight");
+        }
+    }
+    WarmupActivity = Next;
+    WarmupActivityUntil = Now + Duration;
+    NextLookAroundTime = Now + RandomRange(0.5f, 2.0f);
+#endif
+}
+
+bool AFortAthenaAIBotController::WarmupGlide(float Now)
+{
+#if WITH_SERVER_CODE
+    // A player falling off the island's cliffs (or launched) opens their glider: the skydive's movement begins
+    // (AFortPlayerPawnAthena::BeginSkydiving, not from the bus) and opens the parachute below its forced-deploy height
+    // (SkydivingForceDeployParachuteWorldZ). The glider is the bot's loadout's.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
+    if (!Movement)
+    {
+        return false;
+    }
+    if (Pawn->bIsSkydiving || Pawn->bIsParachuteOpen)
+    {
+        if (!bWarmupGliding)
+        {
+            bWarmupGliding = true;
+            Log::Info(L"Battle Royale bots: {} glides on the warmup island ({}, {:.0f} u/s down)", BotName, Pawn->bIsParachuteOpen ? L"glider open" : L"skydiving",
+                -static_cast<float>(static_cast<FVector>(Movement->Velocity).Z));
+        }
+        StopFiring();
+        StopEmote();
+        return true;
+    }
+    if (bWarmupGliding)
+    {
+        bWarmupGliding = false;
+        LastHealthShield = -1.0f;
+        Log::Info(L"Battle Royale bots: {} lands from its glide at ({:.0f}, {:.0f}, {:.0f})", BotName, LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z);
+    }
+    constexpr uint8_t MoveFalling = 3;
+    if (Movement->MovementMode != MoveFalling || static_cast<FVector>(Movement->Velocity).Z > -400.0f || Now < NextGlideCheck || !Natives::AFortPlayerPawnAthena_BeginSkydiving)
+    {
+        return false;
+    }
+    NextGlideCheck = Now + 0.2f;
+    // High enough: nothing below for 12 m (a jump off a step or a ramp lands first).
+    const FVector Feet(LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z - 90.0f);
+    if (IsBlocked(Pawn, Feet, FVector(Feet.X, Feet.Y, Feet.Z - 1200.0f)))
+    {
+        return false;
+    }
+    StopEmote();
+    StopFiring();
+    StopMoving();
+    Natives::AFortPlayerPawnAthena_BeginSkydiving(Pawn, false);
+    Pawn->ForceNetUpdate();
+    ++WarmupGlides;
+    Log::Info(L"Battle Royale bots: {} falls off the warmup island's heights and opens its glider (skydiving {}, glider {})", BotName,
+        Pawn->bIsSkydiving ? L"yes" : L"no", Pawn->bIsParachuteOpen ? L"open" : L"closed");
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortAthenaAIBotController::RespawnInWarmup(float Now)
+{
+#if WITH_SERVER_CODE
+    // The warmup pawn is gone (fell out of the world): a new one a few seconds later at a warmup spot, with nothing but
+    // the pickaxe, as the game restarts a player there (a new pawn at a FortPlayerStartWarmup).
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (WarmupRespawnTime < 0.0f)
+    {
+        WarmupRespawnTime = Now + 3.0f;
+        ++WarmupDeaths;
+        StopFiring();
+        StopEmote();
+        StopMoving();
+        CurrentTarget = nullptr;
+        LootTarget = nullptr;
+        Log::Info(L"Battle Royale bots: {}'s warmup pawn is gone, a new one in a few seconds", BotName);
+        return;
+    }
+    if (Now < WarmupRespawnTime)
+    {
+        return;
+    }
+    FVector Around = LastKnownPosition;
+    Manager->GetWarmupSpot(Around);
+    FVector Spot;
+    if (!Manager->FindGroundNear(Around, 600.0f, Spot))
+    {
+        WarmupRespawnTime = Now + 1.0f;
+        return;
+    }
+    WarmupRespawnTime = -1.0f;
+    if (Pawn)
+    {
+        if (AAIController* AIController = Controller.Get())
+        {
+            AIController->UnPossess();
+        }
+        if (!Pawn->IsPendingKill())
+        {
+            Pawn->K2_DestroyActor();
+        }
+    }
+    PlayerBotPawn = nullptr;
+    ClearInventory();
+    bWarmupGliding = false;
+    LastHealthShield = -1.0f;
+    LastHurtTime = -100.0f;
+    LastAttacker = nullptr;
+    WarmupActivity = EWarmupActivity::Idle;
+    WarmupActivityUntil = Now + RandomRange(2.0f, 5.0f);
+    if (SpawnPawnAt(FVector(Spot.X, Spot.Y, Spot.Z + 100.0f), RandomRange(0.0f, 360.0f), false))
+    {
+        Log::Info(L"Battle Royale bots: {} is back on the warmup island at ({:.0f}, {:.0f}, {:.0f})", BotName, Spot.X, Spot.Y, Spot.Z);
+    }
+#endif
 }
 
 void AFortAthenaAIBotController::AddKill()
@@ -1255,48 +1566,8 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         JumpOffBus(Now);
         return;
     case EFortAthenaAIBotState::Warmup:
-    {
-        // A bot killed on the warmup island comes back, as players do.
-        const bool bGone = !Pawn || Pawn->IsPendingKill() || Pawn->bIsDying;
-        if (bGone)
-        {
-            if (WarmupRespawnTime < 0.0f)
-            {
-                WarmupRespawnTime = Now + 3.0f;
-            }
-            else if (Now >= WarmupRespawnTime)
-            {
-                WarmupRespawnTime = -1.0f;
-                FVector Spot;
-                if (Manager->FindGroundNear(Pawn ? LocationOf(Pawn) : LastKnownPosition, 2000.0f, Spot))
-                {
-                    SpawnPawnAt(FVector(Spot.X, Spot.Y, Spot.Z + 100.0f), RandomRange(0.0f, 360.0f), false);
-                }
-            }
-            return;
-        }
-        LastKnownPosition = LocationOf(Pawn);
-        if (Now < EmoteUntil)
-        {
-            return;
-        }
-        StopEmote();
-        if (NextEmoteTime <= 0.0f)
-        {
-            NextEmoteTime = Now + RandomRange(8.0f, 30.0f);
-        }
-        if (Now >= NextEmoteTime)
-        {
-            NextEmoteTime = Now + RandomRange(20.0f, 45.0f);
-            if (PlayEmote(Now, RandomRange(4.0f, 8.0f)))
-            {
-                return;
-            }
-        }
-        Wander(Now);
-        UpdateFacing(Now, DeltaSeconds);
+        TickWarmup(Now, DeltaSeconds);
         return;
-    }
     default:
         break;
     }
@@ -3424,11 +3695,20 @@ bool AFortAthenaAIBotController::DamagePawn(AFortPawn* Victim, AFortWeapon* Weap
         return false;
     }
     const float Before = Victim->GetHealth() + Victim->GetShield();
+    const float HealthBefore = Victim->GetHealth();
+    const float ShieldBefore = Victim->GetShield();
     bool bApplied = false;
     for (int32_t Index = 0; Index < std::max(Hits, 1) && !Victim->bIsDying; ++Index)
     {
         const FVector From = LocationOf(GetPawn()) + FVector(0.0f, 0.0f, 60.0f);
         bApplied |= ApplyWeaponDamageEffect(reinterpret_cast<UObject*>(Victim), Weapon, bPickaxeEquipped && Weapon == EquippedWeapon.Get(), &From);
+    }
+    // A pawn that can't be damaged (the warmup island's) shows the hit's numbers and keeps its health and shield, as the
+    // game's own hits leave a player there.
+    if (!Victim->bCanBeDamaged && !Victim->bIsDying && (Victim->GetHealth() != HealthBefore || Victim->GetShield() != ShieldBefore))
+    {
+        Victim->SetHealth(HealthBefore);
+        Victim->SetShield(ShieldBefore);
     }
     OutDamage = Before - (Victim->bIsDying ? 0.0f : Victim->GetHealth() + Victim->GetShield());
     static int32_t Logged = 0;
@@ -4150,7 +4430,7 @@ void AFortAthenaAIBotController::TakeStormDamage(float Now)
     AFortPlayerPawnAthena* Pawn = GetPawn();
     FVector Center;
     float Radius = 0.0f;
-    if (!Pawn || !Manager->GetCurrentSafeZone(Center, Radius))
+    if (!Pawn || !Pawn->bCanBeDamaged || !Manager->GetCurrentSafeZone(Center, Radius))
     {
         LastStormHealth = -1.0f;
         return;

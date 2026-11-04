@@ -135,6 +135,8 @@ public:
     bool IsAlive() const { return State != EFortAthenaAIBotState::Dead; }
     const std::wstring& GetBotName() const { return BotName; }
     int32_t GetKills() const { return Kills; }
+    // The outfit the bot wears this match (an AthenaCharacter item: its hero gives the bot its class tags).
+    UObject* GetLoadoutCharacter() const { return LoadoutCharacter; }
 
     void AssignDisplayName(const std::wstring& Name);
     void InitializeSkills(int32_t Level);
@@ -186,6 +188,24 @@ public:
     bool WantsPickup(UFortItemDefinition* Definition, bool bWeapon, bool bConsumable);
 
 private:
+    // The warmup island (Core's: 8.30's bots spawned after the bus). Players there stand around, look about, walk a
+    // little, dance, and now and then pick up the island's weapons and fight; one eliminated comes back a few seconds
+    // later at a warmup spot, which counts for nothing. A fall from a height opens the glider, as a player redeploys it
+    // there (AFortPlayerPawnAthena::BeginSkydiving: the movement opens the parachute below its forced-deploy height).
+    enum class EWarmupActivity : uint8_t
+    {
+        Idle,
+        Wander,
+        Emote,
+        Brawl,
+    };
+    void TickWarmup(float Now, float DeltaSeconds);
+    void ChooseWarmupActivity(float Now, bool bFightBack);
+    bool WarmupGlide(float Now);
+    void RespawnInWarmup(float Now);
+    // What the bot carries goes (the bus leaving, a warmup respawn: a player's ResetToStartingItems).
+    void ClearInventory();
+
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus / _FreeFalling.
     void JumpOffBus(float Now);
     void FreeFalling(float Now);
@@ -415,6 +435,14 @@ private:
     float LandedTime = 0.0f;
     float NextLogTime = 0.0f;
     float WarmupRespawnTime = -1.0f;
+    EWarmupActivity WarmupActivity = EWarmupActivity::Idle;
+    float WarmupActivityUntil = 0.0f;
+    float NextLookAroundTime = 0.0f;
+    float NextGlideCheck = 0.0f;
+    bool bWarmupGliding = false;
+    int32_t WarmupDeaths = 0;
+    int32_t WarmupGlides = 0;
+    int32_t WarmupBrawls = 0;
     FVector LastStuckCheckLocation;
     int32_t StuckChecks = 0;
 

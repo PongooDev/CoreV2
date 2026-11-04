@@ -14,12 +14,14 @@
 #include <vector>
 
 class ABuildingContainer;
+class AController;
 class AFortGameModeAthena;
 class AFortPickup;
 class AFortPlayerControllerAthena;
 class AFortPlayerStateAthena;
 class APawn;
 class UObject;
+struct FGameplayTagContainer;
 
 // The admin panel's player bot settings (Core-Backend's bots block, sent with the warmup answer: {count, level, health,
 // shield, quests}, or null when "Force player AIs" is off).
@@ -102,6 +104,12 @@ public:
     // and the note that the game sent one (UFortQuestManager's stat events).
     static bool ShouldCountQuestEvent(const UObject* Target);
     static void NoteNativeKillEvent(const UObject* Target);
+    // Whether the bus hasn't left yet (the warmup island, where eliminations don't count).
+    static bool IsWarmup();
+    // A kill event's tags for a bot's elimination, as the game's kill event has them for a player's (3.1's
+    // AFortGameModeZone::Killed, 0xB5E890): the bot's own tags (its pawn's, and its hero's class,
+    // Homebase.Class.IsCommando...) for the target, the killer's weapon's (Weapon.Ranged.shotgun...) for the source.
+    static void AddKillEventTags(const UObject* Target, AController* Killer, FGameplayTagContainer& TargetTags, FGameplayTagContainer& SourceTags);
 
     // Core's death handler took a player out (AFortPlayerControllerAthena::OnPawnDied): whether the game's own win check
     // must be kept from running (bots still in the match), and the bots' recount and win check after it.
@@ -126,6 +134,8 @@ public:
     float GetStormDamagePerSecond() const;
     // A random spot on the ground near Around (a trace down from the sky), or false.
     bool FindGroundNear(const FVector& Around, float Radius, FVector& OutLocation) const;
+    // A random warmup spot (a FortPlayerStartWarmup, where players respawn on the warmup island), or false.
+    bool GetWarmupSpot(FVector& OutLocation) const;
     uint8_t TeamOfPawn(const APawn* Pawn) const;
     // The battle bus while it flies (found when the aircraft phase starts).
     AActor* GetAircraft() const { return reinterpret_cast<AActor*>(CurrentAircraft.Get()); }
@@ -188,6 +198,7 @@ private:
     uint8_t LastPhase = 0xFF;
     bool bAircraftStarted = false;
     bool bMatchEnded = false;
+    bool bLoggedKillTags = false;
     bool bWarnedNative = false;
     bool bWarnedUnsupported = false;
     bool bLoggedCap = false;

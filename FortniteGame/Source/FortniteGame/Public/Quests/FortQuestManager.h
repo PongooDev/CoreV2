@@ -13,6 +13,7 @@ class EFortQuestObjectiveStatEvent
     DefineUnrealEnum(EFortQuestObjectiveStatEvent, FortniteGame)
     DefineUEnumValue(Kill)
     DefineUEnumValue(KillContribution)
+    DefineUEnumValue(TeamKill)
     DefineUEnumValue(Build)
     DefineUEnumValue(BuildingEdit)
     DefineUEnumValue(BuildingRepair)

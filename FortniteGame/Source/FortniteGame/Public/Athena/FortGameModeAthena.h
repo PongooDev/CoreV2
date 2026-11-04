@@ -7,6 +7,7 @@ class AFortSafeZoneIndicator;
 class AActor;
 class ABuildingSMActor;
 class AFortPlayerControllerAthena;
+class AFortPawn;
 class APawn;
 class UObject;
 struct FFortPlayerDeathReport;
@@ -83,6 +84,10 @@ public:
     // Battle Royale's changes to a dead player's death report, after AFortPlayerControllerZone::PrepareDeathReport
     // filled it (AFortPlayerControllerAthena's override calls it; 1.9.1 and 1.10 strip it).
     void ModifyDeathReport(AFortPlayerControllerAthena* Player, FFortPlayerDeathReport& DeathReport);
+
+    // Every player still in the match outlived the one who is out (a player, or a player bot, CoreV2 #233): an
+    // EFortQuestObjectiveStatEvent::AthenaOutlive event for each, as 1.8's game mode sends one per death (0x599DA0).
+    void SendOutliveStatEvents(AFortPawn* DeadPawn);
 
     // Removes the placed chests and ammo boxes this match doesn't keep, from the map info's spawn percents (#205).
     void ApplyContainerSpawnPercents();

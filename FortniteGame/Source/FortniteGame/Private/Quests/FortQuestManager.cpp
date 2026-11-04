@@ -1230,19 +1230,26 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
         SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
         return;
     }
-    // A Battle Royale player bot's elimination counts for quests only when the admin panel says so (CoreV2 #233).
-    if ((Type == EFortQuestObjectiveStatEvent::GetKill() || Type == EFortQuestObjectiveStatEvent::GetKillContribution()) && UFortServerBotManagerAthena::IsBotPawn(TargetObject))
+    // A Battle Royale player bot's elimination counts for quests only when the admin panel says so (CoreV2 #233), and
+    // never on the warmup island (the bot comes back there, as players do). The event carries the bot's tags as a
+    // player's would (its class for "Eliminate players", the killer's weapon for "... with a shotgun").
+    const bool bKillEvent = Type == EFortQuestObjectiveStatEvent::GetKill() || Type == EFortQuestObjectiveStatEvent::GetKillContribution()
+        || Type == EFortQuestObjectiveStatEvent::GetTeamKill();
+    FGameplayTagContainer EventTargetTags = TargetTags;
+    FGameplayTagContainer EventSourceTags = SourceTags;
+    if (bKillEvent && UFortServerBotManagerAthena::IsBotPawn(TargetObject))
     {
         UFortServerBotManagerAthena::NoteNativeKillEvent(TargetObject);
-        if (!UFortServerBotManagerAthena::ShouldCountQuestEvent(TargetObject))
+        if (UFortServerBotManagerAthena::IsWarmup() || !UFortServerBotManagerAthena::ShouldCountQuestEvent(TargetObject))
         {
             return;
         }
+        UFortServerBotManagerAthena::AddKillEventTags(TargetObject, reinterpret_cast<AController*>(PlayerControllerOf(PlayerInfo)), EventTargetTags, EventSourceTags);
     }
     GameMode->AddPlaylistContextTag(static_cast<FGameplayTagContainer&>(GameMode->GameContextTags));
     FGameplayTagContainer EventContextTags = ContextTags;
     GameMode->AddPlaylistContextTag(EventContextTags);
-    SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, EventContextTags, Count, bFlush);
+    SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, EventTargetTags, EventSourceTags, EventContextTags, Count, bFlush);
 
     // Second, SendStatEventWithTags (0x890730) adds what the event advanced to the quest manager's pending progress
     // (+0x128) and, when the event asked for a flush or completed an objective, saves it, but not for an

@@ -23,6 +23,9 @@ public:
     // steer without it.
     static bool InitializeForBots(UWorld* World, const FBox& IslandBounds);
     static bool IsInitialized();
+    // A new match (its world is new: the server reloads the map after a match): the last world's navigation is gone
+    // with it (UWorld::CleanupWorld cleans up its navigation system), so the next match sets its own up.
+    static void ResetForNewMatch();
     // Each frame: once the navmesh is registered, the octree is populated and the initial build lock released.
     static void Tick(UWorld* World);
 

@@ -527,6 +527,10 @@ namespace Natives
     // AFortPlayerPawnAthena::BeginSkydiving(bool bFromBus) (3.0 0x9D7F70), which AFortPlayerControllerAthena's ExitAircraft
     // calls on the new pawn: Finder::ResolveBotSkydiveLive. A player bot leaving the aircraft takes the same path.
     inline void (*AFortPlayerPawnAthena_BeginSkydiving)(AFortPlayerPawnAthena* This, bool bFromBus) = nullptr;
+    // UOnlineEngineInterface::CreateUniquePlayerId(const FString& Str) (3.1 UOnlineEngineInterfaceImpl's 0x316930, slot
+    // 0x268; 2.5 and 3.0 the same slot): the identity interface's CreateUniquePlayerId, as a connection's id is made when
+    // it replicates. Battle Royale's player bots get their account-like ids from it: Finder::ResolveCreateUniquePlayerIdLive.
+    inline int32_t UOnlineEngineInterface_CreateUniquePlayerIdIndex = -1;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
     inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;

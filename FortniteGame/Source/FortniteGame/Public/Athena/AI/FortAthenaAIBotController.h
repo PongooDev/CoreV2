@@ -19,6 +19,7 @@ class AFortPickup;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class AFortWeapon;
+class UAthenaPickaxeItemDefinition;
 class UFortItemDefinition;
 class UObject;
 class UFortWeaponItemDefinition;
@@ -173,6 +174,9 @@ public:
     // Loads what the bots use later (the emotes, their animations and the emote ability) up front, so no bot's first
     // use of one loads it in the middle of a match.
     static void PreloadAssets();
+    // A new match (UFortServerBotManagerAthena::Create): the last match's per-match state is dropped (the hot drop spot,
+    // the weapons' fire cues and whether the game's fire works for them).
+    static void ResetForNewMatch();
     // A gun's kind and stats row values (cached per weapon).
     static const FFortAthenaAIBotWeapon& GetWeaponInfo(UFortWeaponItemDefinition* Definition);
     // Whether the bot wants this floor pickup: a gun it would carry (WeaponSlotFor), ammo for its guns, or a
@@ -288,6 +292,9 @@ private:
     void DropInventory();
     void ApplyStartingHealth();
     void StopFiring();
+    // Aiming down sights as a player does with a gun in a fight: the pawn's replicated bIsTargeting (AFortPlayerPawn,
+    // OnRep_IsTargeting), which other clients' animation reads for the aiming pose.
+    void SetTargeting(bool bNewTargeting);
     // One shot at the target: the weapon's fire for everyone to see, the magazine, and its hit, by Core (no player
     // controller aims a bot's weapon ability, so the game's own fire neither spends ammo nor hits).
     void FireShot(AFortPawn* Target, float Distance);
@@ -384,6 +391,16 @@ private:
     float NextShotTime = 0.0f;
     float FireUntil = 0.0f;
     bool bFiring = false;
+    bool bTargeting = false;
+    // The pickaxe of the bot's loadout (a random one of the build's), or null for the default.
+    UAthenaPickaxeItemDefinition* LoadoutPickaxe = nullptr;
+    // The back bling of the bot's loadout (an AthenaBackpack item: its character parts), or null.
+    UObject* BackpackDefinition = nullptr;
+    // The rest of the loadout, chosen once (the warmup's pawn and the one that leaves the bus look the same).
+    UObject* LoadoutCharacter = nullptr;
+    UObject* LoadoutGlider = nullptr;
+    UObject* LoadoutContrail = nullptr;
+    bool bLoadoutChosen = false;
     float ReloadUntil = 0.0f;
     float TargetAcquiredTime = 0.0f;
     float NextStuckCheck = 0.0f;

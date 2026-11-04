@@ -56,8 +56,13 @@ struct FFortAthenaLoadout
     DefineUProperty(UAthenaGliderItemDefinition*, Glider)
     DefineUProperty(UAthenaPickaxeItemDefinition*, Pickaxe)
     DefineUProperty(UAthenaCharacterItemDefinition*, Character)
+    // The contrail and back bling (not on every build's loadout).
+    DefineUProperty(UObject*, SkyDiveContrail)
+    DefineUProperty(UObject*, Backpack)
 
     static bool HasGlider() { return Member_Glider.IsAvailable(); }
+    static bool HasSkyDiveContrail() { return Member_SkyDiveContrail.IsAvailable(); }
+    static bool HasBackpack() { return Member_Backpack.IsAvailable(); }
 };
 
 // Battle Royale's player controller (from 1.7.2; Athena_PlayerController_C).

@@ -528,17 +528,57 @@ namespace
         return Boxes;
     }
 
+    // The body setups Core gave the volumes, and the world they were made for.
+    std::vector<UBodySetup*>& PoiBodySetups()
+    {
+        static std::vector<UBodySetup*> BodySetups;
+        return BodySetups;
+    }
+
+    FWeakObjectPtr& PoiWorld()
+    {
+        static FWeakObjectPtr World;
+        return World;
+    }
+
+    // A new world (the server's map reload after a match): the last world's volumes are gone, so are their boxes (a
+    // new volume can take a freed one's address), and their body setups are let go.
+    void ForgetPoiVolumesOf(UWorld* World)
+    {
+        if (PoiWorld().Get() == reinterpret_cast<UObject*>(World))
+        {
+            return;
+        }
+        if (!PoiBodySetups().empty())
+        {
+            Log::Info(L"POI: a new world; the last one's {} volume shapes are let go", PoiBodySetups().size());
+        }
+        for (UBodySetup* BodySetup : PoiBodySetups())
+        {
+            BodySetup->RemoveFromRoot();
+        }
+        PoiBodySetups().clear();
+        FallbackBoxes().clear();
+        PoiWorld() = FWeakObjectPtr(reinterpret_cast<UObject*>(World));
+    }
+
     // Does what AFortPoiVolume::PostInitializeComponents does with a brush component, with Box for its shape.
     bool InitPoiBody(AFortPoiVolume* Volume, const FBox& Box)
     {
         UFortPoiCollisionComponent* PoiCollisionComp = Volume->PoiCollisionComp;
-        UBodySetup* BodySetup = PoiCollisionComp ? NewObject<UBodySetup>(PoiCollisionComp, UBodySetup::StaticClass()) : nullptr;
+        // The body keeps only a weak pointer to its setup, as it does to the brush component's, so Core keeps the setup
+        // (rooted). It lives in the transient package, not in the component: the garbage collector keeps a live
+        // object's outers, so a rooted setup inside the volume kept the whole world from being collected. The map
+        // reload after a match then found the old world, its actors gone, and the next game mode's GetWorldSettings
+        // read null (3.0 and 3.1 crashed there).
+        static UObject* TransientPackage = StaticFindObject(nullptr, nullptr, L"/Engine/Transient");
+        UBodySetup* BodySetup = PoiCollisionComp && TransientPackage ? NewObject<UBodySetup>(TransientPackage, UBodySetup::StaticClass()) : nullptr;
         if (!BodySetup)
         {
             return false;
         }
-        // The body keeps only a weak pointer to its setup, as it does to the brush component's.
         BodySetup->AddToRoot();
+        PoiBodySetups().push_back(BodySetup);
         FKBoxElem& Elem = BodySetup->AggGeom.BoxElems.AddDefaulted();
         const FVector Size = Box.Max - Box.Min;
         Elem.X = Size.X;
@@ -625,6 +665,7 @@ int32_t AFortPoiVolume::RestorePoiVolumes(UWorld* World)
     {
         return 0;
     }
+    ForgetPoiVolumesOf(World);
 
     int32_t Epics = 0;
     std::vector<AFortPoiVolume*> Shapeless;

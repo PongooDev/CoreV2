@@ -10451,6 +10451,39 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     return true;
 }
 
+bool Finder::ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceVTable)
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex >= 0)
+    {
+        return Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex >= 0;
+    }
+    bSearched = true;
+
+    // UOnlineEngineInterfaceImpl::CreateUniquePlayerId(const FString& Str) (3.1 0x316930, slot 0x268; 2.5's 0x30ADB0 and
+    // 3.0's 0x30F660 are the same code): "mov rbx, r8" keeps Str, Online::GetIdentityInterface, then
+    // "mov r8, rbx; mov rdx, rsi; call [rax + CreateUniquePlayerId]" on the identity. GetUniquePlayerId (the next slot)
+    // passes LocalUserNum instead, and GetPlayerNickname (after it) keeps its id from r9 ("mov rbx, r9").
+    for (int32_t Index = 0x40; OnlineEngineInterfaceVTable && Index < 0x60; ++Index)
+    {
+        const uintptr_t Function = reinterpret_cast<uintptr_t>(OnlineEngineInterfaceVTable[Index]);
+        if (!IsInText(Function) || !IsInText(Function + 0x60))
+        {
+            continue;
+        }
+        const uintptr_t KeepString = FindInstruction(Function, Function + 0x30, { 0x49, 0x8B, 0xD8 });
+        const uintptr_t Call = KeepString ? FindInstruction(KeepString, Function + 0x50, { 0x4C, 0x8B, 0xC3, 0x48, 0x8B, 0xD6, 0xFF, 0x90 }) : 0;
+        if (Call)
+        {
+            Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex = Index;
+            Log::Info(L"Finder: UOnlineEngineInterface::CreateUniquePlayerId is slot 0x{:X} (0x{:X})", Index * 8, Function - Finder::ImageBase());
+            return true;
+        }
+    }
+    Log::Warning(L"Finder: UOnlineEngineInterface::CreateUniquePlayerId not found, player bots go without ids");
+    return false;
+}
+
 bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
 {
     static bool bSearched = false;

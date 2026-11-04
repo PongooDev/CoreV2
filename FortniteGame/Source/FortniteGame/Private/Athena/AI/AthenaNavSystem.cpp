@@ -156,6 +156,14 @@ bool UAthenaNavSystem::IsInitialized()
     return bInitialized;
 }
 
+void UAthenaNavSystem::ResetForNewMatch()
+{
+    bInitialized = false;
+    bReady = false;
+    bTried = false;
+    NavDataPtr = FWeakObjectPtr();
+}
+
 bool UAthenaNavSystem::InitializeForBots(UWorld* World, const FBox& IslandBounds)
 {
 #if WITH_SERVER_CODE

@@ -182,6 +182,8 @@ private:
     FFortAthenaBotSettings Settings;
     std::vector<std::unique_ptr<AFortAthenaAIBotController>> PlayerBots;
     int32_t NextBotIndex = 0;
+    // This match's shuffled order of the name list.
+    std::vector<int32_t> NameOrder;
     std::vector<FVector> WarmupSpots;
     uint8_t LastPhase = 0xFF;
     bool bAircraftStarted = false;

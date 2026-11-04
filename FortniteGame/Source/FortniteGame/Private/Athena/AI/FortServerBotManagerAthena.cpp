@@ -44,19 +44,24 @@ namespace
     std::vector<std::pair<TWeakObjectPtr<AFortPlayerStateAthena>, int32_t>> BotKills;
     std::vector<TWeakObjectPtr<UObject>> NativeKillTargets;
 
-    // Core's bot names (8.30 names a bot from its customization loadout, else "Bot": AFortAthenaAIBotController's
-    // 0xD49760; 21.40 picks from a name list, AssignDisplayName).
+    // Core's bot names: player-like tags (8.30 names a bot from its customization loadout, else "Bot": AFortAthenaAIBotController's
+    // 0xD49760; 21.40 picks from a name list, AssignDisplayName). Each match deals them out shuffled, none twice.
     const wchar_t* const BotNames[] = {
-        L"Ace", L"Blaze", L"Bolt", L"Bramble", L"Breeze", L"Briar", L"Buckshot", L"Cinder", L"Clover", L"Comet",
-        L"Copper", L"Coral", L"Crow", L"Dash", L"Dune", L"Echo", L"Ember", L"Falcon", L"Fern", L"Flint",
-        L"Frost", L"Gale", L"Ghost", L"Glider", L"Granite", L"Hawk", L"Hazel", L"Hex", L"Indigo", L"Ivy",
-        L"Jade", L"Jinx", L"Juniper", L"Kestrel", L"Kite", L"Lark", L"Lumen", L"Lynx", L"Maple", L"Marble",
-        L"Marsh", L"Meteor", L"Mist", L"Moss", L"Nova", L"Oak", L"Onyx", L"Orbit", L"Otter", L"Pebble",
-        L"Pepper", L"Pike", L"Pixel", L"Quartz", L"Quill", L"Rain", L"Raven", L"Reed", L"Ridge", L"Rook",
-        L"Rust", L"Sable", L"Sage", L"Scout", L"Shadow", L"Shale", L"Slate", L"Sparrow", L"Spark", L"Spruce",
-        L"Storm", L"Summit", L"Talon", L"Thistle", L"Thorn", L"Thunder", L"Tide", L"Timber", L"Torch", L"Tundra",
-        L"Vapor", L"Vesper", L"Viper", L"Volt", L"Wander", L"Wasp", L"Willow", L"Wisp", L"Wren", L"Yarrow",
-        L"Zephyr", L"Zinc", L"Bandit", L"Cobalt", L"Drift", L"Fable", L"Gravel", L"Harbor", L"Maverick", L"Puddle",
+        L"xSniperWolf", L"Kayzo_YT", L"NoScopeNate", L"ToxicTurtle77", L"GhostRider_99", L"Zyphr", L"Frostbyte_TTV", L"LilJimmy2009",
+        L"SweatyMango", L"BuilderBob_42", L"Dr4gonSlay3r", L"CrankKing", L"NightOwlGG", L"Blitzkrieg_X", L"TacoTuesday88", L"PixelPanda",
+        L"MrBushCamper", L"ShadowStrike21", L"Vortexx", L"JustAFloss", L"CaptainCrunchy", L"TheRealDefault", L"OmegaWolf_", L"HeadshotHarry",
+        L"Sk8rBoi_14", L"CoolKid_Max", L"Lemonade_Jay", L"iiFlame", L"BananaBoat_7", L"KingKaiz", L"NoobMaster_69", L"Mystic_Ninja",
+        L"Turbo_Tom", L"LlamaDrama22", L"xXSlayerXx", L"Raptor_GG", L"Ruby_Rose", L"EpicGamer2010", L"ChillVibes_", L"Moonwalker88",
+        L"Crypt1c", L"ZeroGravity_", L"BigChungus_44", L"Fl1ckGod", L"SilentAssassin", L"SunnyDayz", L"Jaxon_Plays", L"OG_Tilted",
+        L"Bacon_Bits99", L"WhyNoW1n", L"Sonic_Boom7", L"Kr4ken", L"FreshPrince_", L"GoldenGoose23", L"StormChaser_X", L"DabOnEm2018",
+        L"Cactus_Jack11", L"Mav3rick_", L"PotatoAim", L"LuckyLoot", L"Nova_Strike", L"AquaMan_09", L"Glitchy_TV", L"DeltaForce_7",
+        L"SpicyNugget", L"TiltedTom_", L"Wolfie_x0", L"ShotgunSally", L"Bl4zeRunner", L"FuzzyPickles", L"Vexxed", L"MrLoot_Llama",
+        L"Cheeto_Dust4", L"Phantom_Ace", L"Ty_The_Guy", L"NinjaTurtl3", L"BlueBerry_Pie", L"Zapdos_99", L"ProBuilder_Z", L"SnipeyMcSnipe",
+        L"Kenzo_YT", L"HypeTrain42", L"Rocket_Rex", L"IceColdKilla", L"Jumpman_23", L"Cosmic_Kitty", L"Dusty_Divot8", L"HungryHippo_",
+        L"Echo_Six", L"Wildcat_Wes", L"Peely4Life", L"SlurpJuice_", L"Rookie_Ray", L"AimAssist_Andy", L"Groot_Gamer", L"Lazer_Tag88",
+        L"CrispyChicken_", L"MidnightMoss", L"Viper_Venom", L"Daisy_Duke07", L"TheSaltyOne", L"Bolt_Action_Bri", L"Panda_Express", L"KiloWatt_",
+        L"SweetChinMusic", L"Juno_x", L"RetailRowRat", L"xTrickShotx", L"Mango_Mike12", L"FlossBoss3000", L"Zeke_The_Freak", L"Pancake_Pete",
+        L"Atomic_Annie", L"Shifty_Sam", L"CloudSurfer_", L"Tomatohead_Tim", L"BrickByBrick", L"Rage_Quit_Ray", L"Nebula_Nick", L"Kaylee_Plays",
     };
     constexpr int32_t NumBotNames = static_cast<int32_t>(sizeof(BotNames) / sizeof(BotNames[0]));
 
@@ -76,6 +81,9 @@ namespace
             {
                 Log::Info(L"Battle Royale bots: the game mode is gone, the bot manager stops");
                 Instance.reset();
+                BotKills.clear();
+                NativeKillTargets.clear();
+                UAthenaNavSystem::ResetForNewMatch();
                 return;
             }
             Instance->Tick();
@@ -119,9 +127,13 @@ void UFortServerBotManagerAthena::Create(AFortGameModeAthena* GameMode)
         return;
     }
     const bool bWatching = Instance != nullptr;
+    // A new game mode is a new world (the server reloads the map after a match): nothing of the last match's bots is
+    // kept. Their controllers and pawns went with the old world; Core only ever holds them weakly.
     Instance.reset(new UFortServerBotManagerAthena(GameMode));
     BotKills.clear();
     NativeKillTargets.clear();
+    UAthenaNavSystem::ResetForNewMatch();
+    AFortAthenaAIBotController::ResetForNewMatch();
     if (!bWatching)
     {
         WatchManager();
@@ -712,7 +724,19 @@ bool UFortServerBotManagerAthena::RegisterBot(float Now)
 
     const int32_t BotIndex = NextBotIndex++;
     auto Bot = std::make_unique<AFortAthenaAIBotController>(this, Controller, BotIndex, Team);
-    const std::wstring Name = BotIndex < NumBotNames ? std::wstring(BotNames[BotIndex]) : std::format(L"{}{}", BotNames[BotIndex % NumBotNames], BotIndex / NumBotNames + 1);
+    if (NameOrder.empty())
+    {
+        for (int32_t Index = 0; Index < NumBotNames; ++Index)
+        {
+            NameOrder.push_back(Index);
+        }
+        for (int32_t Index = NumBotNames - 1; Index > 0; --Index)
+        {
+            std::swap(NameOrder[static_cast<size_t>(Index)], NameOrder[static_cast<size_t>(FMath::Rand()) % static_cast<size_t>(Index + 1)]);
+        }
+    }
+    const wchar_t* const BaseName = BotNames[NameOrder[static_cast<size_t>(BotIndex % NumBotNames)]];
+    const std::wstring Name = BotIndex < NumBotNames ? std::wstring(BaseName) : std::format(L"{}{}", BaseName, BotIndex / NumBotNames + 1);
     Bot->AssignDisplayName(Name);
     Bot->InitializeSkills(Settings.Level);
     const FVector& Spot = WarmupSpots[static_cast<size_t>(FMath::Rand()) % WarmupSpots.size()];

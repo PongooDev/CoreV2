@@ -14,6 +14,8 @@
 #include "Configuration.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "Customization/CustomCharacterPart.h"
+#include "Finder.h"
 #include "GameplayTagContainer.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
@@ -50,6 +52,99 @@
 
 namespace
 {
+    // An asset the bots keep a pointer to across garbage collections and matches (an outfit, emote, weapon or class):
+    // rooted, so the collector never frees it under Core's caches, the map reload after a match included. Never a
+    // world's object: a rooted one would keep its world alive.
+    template <class T>
+    T* KeepLoaded(T* Asset)
+    {
+        UObject* Object = reinterpret_cast<UObject*>(Asset);
+        if (Object && !Object->IsRooted())
+        {
+            Object->AddToRoot();
+        }
+        return Asset;
+    }
+
+    // The engine's online interface (UOnlineEngineInterface::Get(): its one OnlineEngineInterfaceImpl object).
+    UObject* OnlineEngineInterface()
+    {
+        static FWeakObjectPtr Cached;
+        if (UObject* Interface = Cached.Get())
+        {
+            return Interface;
+        }
+        static UClass* InterfaceClass = FindObject<UClass>(nullptr, L"/Script/Engine.OnlineEngineInterface");
+        for (TObjectIterator<UObject> It; It && InterfaceClass; ++It)
+        {
+            if ((*It)->IsA(InterfaceClass))
+            {
+                Cached = FWeakObjectPtr(*It);
+                return *It;
+            }
+        }
+        return nullptr;
+    }
+
+    // A player's id, which its connection brings and its login gives its player state (AGameModeBase::InitNewPlayer's
+    // SetUniqueId): made the way a connection's replicated id is, by the online interface's CreateUniquePlayerId. A
+    // client keeps the names of the other players by their ids (AFortPlayerState::SetPlayerName, 3.1 0xEAC480, files the
+    // name under UniqueId; GetPlayerNameCustom, 0xE974E0, reads it back from there), so bots without one all shared one
+    // name on clients. Id is never an account id (not hex), so match results and rewards pass bots by.
+    bool AssignUniqueId(APlayerState* State, const std::wstring& Id)
+    {
+        FUniqueNetIdRepl& UniqueId = State->UniqueId;
+        // FUniqueNetIdWrapper: its vtable, then the TSharedPtr<const FUniqueNetId> (object, reference controller).
+        void** SharedPtr = reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(&UniqueId) + sizeof(void*));
+        UObject* Interface = SharedPtr[0] ? nullptr : OnlineEngineInterface();
+        if (!Interface || !Finder::ResolveCreateUniquePlayerIdLive(*reinterpret_cast<void* const* const*>(Interface)))
+        {
+            return false;
+        }
+        void* Made[2] = {};
+        const FString IdString(Id.c_str());
+        CallVirtual<void**>(Interface, Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex, Made, &IdString);
+        if (!Made[0])
+        {
+            return false;
+        }
+        // The new id's one reference moves into the player state's.
+        SharedPtr[0] = Made[0];
+        SharedPtr[1] = Made[1];
+        return UniqueId.IsValid();
+    }
+
+    // What a trap's trigger filter (FFortTargetFilter, 3.1 0x842D20) reads of a bot's pawn, once a match: its team
+    // through the game's own team lookup (UFortKismetLibrary::GetActorTeam; friends are passed by: AFortGameStateZone's
+    // 0xB880E0 compares the teams), and whether it can be damaged (the Damageable filter wants bCanBeDamaged).
+    void LogTrapTargeting(AFortPlayerPawnAthena* Pawn)
+    {
+        static int32_t Logged = 0;
+        static UFunction* GetActorTeam = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortKismetLibrary:GetActorTeam");
+        static UClass* Library = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortKismetLibrary");
+        if (Logged >= 2 || !Pawn || !GetActorTeam || !Library)
+        {
+            return;
+        }
+        ++Logged;
+        Reflection::FParams Params(GetActorTeam, true);
+        uint8_t Team = 0xFF;
+        if (Params.Set(L"Actor", reinterpret_cast<AActor*>(Pawn)) && Params.Call(Library->GetDefaultObject()))
+        {
+            Team = Params.Take<uint8_t>(L"ReturnValue");
+        }
+        APlayerState* State = static_cast<APlayerState*>(Pawn->PlayerState);
+        AFortPlayerStateAthena* AthenaState = State ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(State)) : nullptr;
+        Log::Info(L"Battle Royale bots: {}'s team for the game (traps' filter): {}, its player state's {}, can be damaged {}", reinterpret_cast<UObject*>(Pawn)->GetName().ToStdString(), static_cast<int32_t>(Team),
+            AthenaState ? static_cast<int32_t>(static_cast<uint8_t>(AthenaState->TeamIndex)) : -1, static_cast<bool>(Pawn->bCanBeDamaged));
+    }
+
+    // -CoreBotHotDrop (testing): everyone lands around the first bot's spot, one per match.
+    FVector HotDrop;
+    bool bHasHotDrop = false;
+    // The fire cue each weapon ability sends (the abilities are the match's).
+    std::map<const UObject*, FName> CueTags;
+
     // EMovementMode: walking on the ground.
     constexpr uint8_t MoveWalking = 1;
     // EFortMovementStyle.
@@ -210,7 +305,7 @@ namespace
         FName RowName = Handle ? static_cast<FName>(Handle->RowName) : FName();
         if (!Table)
         {
-            static UDataTable* PlayerTable = LoadObject<UDataTable>(nullptr, L"/Game/Characters/Player/DataTables/CharacterAttributesPlayer.CharacterAttributesPlayer");
+            static UDataTable* PlayerTable = KeepLoaded(LoadObject<UDataTable>(nullptr, L"/Game/Characters/Player/DataTables/CharacterAttributesPlayer.CharacterAttributesPlayer"));
             Table = PlayerTable;
             RowName = FName(L"PlayerLoadout_AthenaPlayer");
         }
@@ -336,7 +431,7 @@ namespace
                      L"/Game/Athena/Items/Cosmetics/Characters/CID_007_Athena_Commando_M_Default.CID_007_Athena_Commando_M_Default",
                      L"/Game/Athena/Items/Cosmetics/Characters/CID_008_Athena_Commando_M_Default.CID_008_Athena_Commando_M_Default" })
             {
-                if (UAthenaCharacterItemDefinition* Character = LoadObject<UAthenaCharacterItemDefinition>(nullptr, Path))
+                if (UAthenaCharacterItemDefinition* Character = KeepLoaded(LoadObject<UAthenaCharacterItemDefinition>(nullptr, Path)))
                 {
                     Characters.push_back(Character);
                 }
@@ -346,15 +441,51 @@ namespace
         return Characters.empty() ? nullptr : Characters[static_cast<size_t>(FMath::Rand()) % Characters.size()];
     }
 
+    // A random cosmetic of the build's own: what the asset manager lists as the primary asset type AssetType (the
+    // locker's lists: AthenaPickaxe, AthenaGlider, AthenaBackpack, AthenaSkyDiveContrail), loaded and kept. Null when
+    // the build lists none.
+    UObject* RandomCosmetic(const wchar_t* AssetType)
+    {
+        static std::map<std::wstring, std::vector<std::wstring>> Lists;
+        auto [Found, bNew] = Lists.try_emplace(AssetType);
+        std::vector<std::wstring>& Paths = Found->second;
+        if (bNew)
+        {
+            UAssetManager* AssetManager = GEngine ? static_cast<UAssetManager*>(GEngine->AssetManager) : nullptr;
+            TArray<FAssetData> AssetDataList;
+            if (AssetManager && AssetManager->GetPrimaryAssetDataList(FName(AssetType), AssetDataList))
+            {
+                for (int32_t Index = 0; Index < AssetDataList.Num(); ++Index)
+                {
+                    // Not the winners' umbrellas: a player only has one after a Victory Royale.
+                    std::wstring Path = AssetDataList[Index].ObjectPath.ToString().ToStdString();
+                    if (Path.find(L"Umbrella") == std::wstring::npos)
+                    {
+                        Paths.push_back(std::move(Path));
+                    }
+                }
+            }
+            Log::Info(L"Battle Royale bots: {} {} for the bots", Paths.size(), AssetType);
+        }
+        for (int32_t Attempt = 0; Attempt < 3 && !Paths.empty(); ++Attempt)
+        {
+            if (UObject* Cosmetic = LoadObject<UObject>(nullptr, Paths[static_cast<size_t>(FMath::Rand()) % Paths.size()].c_str()))
+            {
+                return KeepLoaded(Cosmetic);
+            }
+        }
+        return nullptr;
+    }
+
     UAthenaGliderItemDefinition* DefaultGlider()
     {
-        static UAthenaGliderItemDefinition* Glider = LoadObject<UAthenaGliderItemDefinition>(nullptr, L"/Game/Athena/Items/Cosmetics/Gliders/DefaultGlider.DefaultGlider");
+        static UAthenaGliderItemDefinition* Glider = KeepLoaded(LoadObject<UAthenaGliderItemDefinition>(nullptr, L"/Game/Athena/Items/Cosmetics/Gliders/DefaultGlider.DefaultGlider"));
         return Glider;
     }
 
     UAthenaPickaxeItemDefinition* DefaultPickaxe()
     {
-        static UAthenaPickaxeItemDefinition* Pickaxe = LoadObject<UAthenaPickaxeItemDefinition>(nullptr, L"/Game/Athena/Items/Cosmetics/Pickaxes/DefaultPickaxe.DefaultPickaxe");
+        static UAthenaPickaxeItemDefinition* Pickaxe = KeepLoaded(LoadObject<UAthenaPickaxeItemDefinition>(nullptr, L"/Game/Athena/Items/Cosmetics/Pickaxes/DefaultPickaxe.DefaultPickaxe"));
         return Pickaxe;
     }
 
@@ -382,6 +513,7 @@ namespace
             UClass* Fallback = GameMode->GetDefaultPawnClassForController(AIController);
             Cached = Fallback && AthenaPawn && Fallback->IsChildOf(AthenaPawn) ? Fallback : nullptr;
         }
+        KeepLoaded(Cached);
         Log::Info(L"Battle Royale bots: the bots' pawn class is {}", NameOf(Cached));
         return Cached;
     }
@@ -614,7 +746,7 @@ namespace
             {
                 if (Ability && Ability->GetName().ToStdString().find(L"DanceGrenade_Stun") != std::wstring::npos)
                 {
-                    Found = Ability;
+                    Found = KeepLoaded(Ability);
                 }
             }
         }
@@ -760,6 +892,14 @@ AFortAthenaAIBotController::AFortAthenaAIBotController(UFortServerBotManagerAthe
 {
 }
 
+void AFortAthenaAIBotController::ResetForNewMatch()
+{
+    HotDrop = FVector();
+    bHasHotDrop = false;
+    CueTags.clear();
+    WeaponFireWorks.clear();
+}
+
 AAIController* AFortAthenaAIBotController::GetController() const
 {
     return Controller.Get();
@@ -785,6 +925,13 @@ void AFortAthenaAIBotController::AssignDisplayName(const std::wstring& Name)
     if (!State)
     {
         return;
+    }
+    // The id first: a client files the name under it.
+    static int32_t LoggedIds = 0;
+    const bool bHasId = AssignUniqueId(State, std::format(L"CoreBot{}{}", BotIndex, Name));
+    if (LoggedIds++ < 2 || !bHasId)
+    {
+        Log::Info(L"Battle Royale bots: {}'s id: {}", Name, State->UniqueId.ToString().ToStdString());
     }
     State->PlayerName = FString(Name.c_str());
     if (APlayerState::HasPlayerNamePrivate())
@@ -851,17 +998,43 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
     // The bot's look (8.30: its customization loadout): a default outfit, glider and pickaxe, on the pawn (its loadout
     // replicates: OnRep_CustomizationLoadout) and the player state (the outfit's hero gives it its character parts).
     UObject* HeroObject = nullptr;
+    // The outfit's own parts, as SetHeroType gives them to the player state.
+    std::vector<UCustomCharacterPart*> HeroParts;
     if (Pawn->HasCustomizationLoadout())
     {
         FFortAthenaLoadout& Loadout = Pawn->CustomizationLoadout;
-        UAthenaCharacterItemDefinition* Character = RandomCharacter();
+        // A whole locker's loadout, as a player brings: an outfit and a random glider, pickaxe, contrail and back bling
+        // of the build's, chosen once for the match.
+        UClass* GliderClass = UAthenaGliderItemDefinition::StaticClass();
+        UClass* PickaxeClass = UAthenaPickaxeItemDefinition::StaticClass();
+        if (!bLoadoutChosen)
+        {
+            bLoadoutChosen = true;
+            LoadoutCharacter = reinterpret_cast<UObject*>(RandomCharacter());
+            UObject* Glider = FFortAthenaLoadout::HasGlider() ? RandomCosmetic(L"AthenaGlider") : nullptr;
+            LoadoutGlider = Glider && GliderClass && Glider->IsA(GliderClass) ? Glider : reinterpret_cast<UObject*>(DefaultGlider());
+            UObject* RandomPickaxe = RandomCosmetic(L"AthenaPickaxe");
+            UAthenaPickaxeItemDefinition* Pickaxe = RandomPickaxe && PickaxeClass && RandomPickaxe->IsA(PickaxeClass) ? reinterpret_cast<UAthenaPickaxeItemDefinition*>(RandomPickaxe) : nullptr;
+            LoadoutPickaxe = Pickaxe && static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) ? Pickaxe : nullptr;
+            LoadoutContrail = FFortAthenaLoadout::HasSkyDiveContrail() ? RandomCosmetic(L"AthenaSkyDiveContrail") : nullptr;
+            BackpackDefinition = FFortAthenaLoadout::HasBackpack() && FMath::FRand() < 0.6f ? RandomCosmetic(L"AthenaBackpack") : nullptr;
+        }
+        UAthenaCharacterItemDefinition* Character = reinterpret_cast<UAthenaCharacterItemDefinition*>(LoadoutCharacter);
         HeroObject = Character ? reinterpret_cast<UObject*>(static_cast<UFortHeroType*>(Character->HeroDefinition)) : nullptr;
         Loadout.Character = Character;
         if (FFortAthenaLoadout::HasGlider())
         {
-            Loadout.Glider = DefaultGlider();
+            Loadout.Glider = reinterpret_cast<UAthenaGliderItemDefinition*>(LoadoutGlider);
         }
-        Loadout.Pickaxe = DefaultPickaxe();
+        Loadout.Pickaxe = LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe();
+        if (FFortAthenaLoadout::HasSkyDiveContrail())
+        {
+            Loadout.SkyDiveContrail = LoadoutContrail;
+        }
+        if (FFortAthenaLoadout::HasBackpack())
+        {
+            Loadout.Backpack = BackpackDefinition;
+        }
         AFortPlayerStateAthena* State = GetPlayerState();
         UFortHeroType* HeroType = Character ? static_cast<UFortHeroType*>(Character->HeroDefinition) : nullptr;
         if (State && HeroType && AFortPlayerState::CanSetHeroType())
@@ -869,6 +1042,11 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
             if (UFortHero* Hero = UFortCheatManager::CreateLookHero(HeroType))
             {
                 State->SetHeroType(Hero);
+                const EFortCustomPartType NumTypes = EFortCustomPartType::GetNumTypes();
+                for (uint8_t PartType = 0; NumTypes != Reflection::InvalidEnumValue && PartType < NumTypes; ++PartType)
+                {
+                    HeroParts.push_back(State->GetCharacterPart(EFortCustomPartType{ PartType }));
+                }
             }
         }
     }
@@ -916,8 +1094,53 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
     if (AFortPlayerStateAthena* State = GetPlayerState(); State && AFortPlayerState::CanApplyCharacterCustomization() && Pawn->HasCustomizationLoadout())
     {
         State->ApplyCharacterCustomization(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
+        // Its hero lookup is a player controller's (GetHero): for a bot's it fails ("Failed initialization, using
+        // default parts") and every bot wore F_Med_Head1 and F_Med_Soldier_01. The outfit's parts go back on, and the
+        // back bling's, then to the pawn and every client (OnRep_CharacterParts).
+        bool bChanged = false;
+        for (size_t PartType = 0; PartType < HeroParts.size(); ++PartType)
+        {
+            UCustomCharacterPart*& Part = State->GetCharacterPart(EFortCustomPartType{ static_cast<uint8_t>(PartType) });
+            if (HeroParts[PartType] && Part != HeroParts[PartType])
+            {
+                Part = HeroParts[PartType];
+                bChanged = true;
+            }
+        }
+        static UProperty* BackpackPartsProperty = nullptr;
+        if (BackpackDefinition && !BackpackPartsProperty)
+        {
+            BackpackPartsProperty = BackpackDefinition->GetClass()->FindPropertyByName(FName(L"CharacterParts", FNAME_Find));
+        }
+        if (BackpackDefinition && BackpackPartsProperty && EFortCustomPartType::GetBackpack() < EFortCustomPartType::GetNumTypes())
+        {
+            const TArray<UCustomCharacterPart*>& BackpackParts = *reinterpret_cast<const TArray<UCustomCharacterPart*>*>(reinterpret_cast<const uint8_t*>(BackpackDefinition) + BackpackPartsProperty->GetOffset_ForInternal());
+            for (UCustomCharacterPart* Part : BackpackParts)
+            {
+                if (Part && static_cast<EFortCustomPartType>(Part->CharacterPartType) == EFortCustomPartType::GetBackpack())
+                {
+                    State->GetCharacterPart(EFortCustomPartType::GetBackpack()) = Part;
+                    bChanged = true;
+                    break;
+                }
+            }
+        }
+        if (bChanged)
+        {
+            State->OnRep_CharacterParts();
+            State->ForceNetUpdate();
+        }
+        if (BotIndex < 2)
+        {
+            const auto PartName = [State](EFortCustomPartType Type) { UCustomCharacterPart* Part = Type < EFortCustomPartType::GetNumTypes() ? State->GetCharacterPart(Type) : nullptr; return Part ? reinterpret_cast<UObject*>(Part)->GetName().ToStdString() : std::wstring(L"none"); };
+            Log::Info(L"Battle Royale bots: {} wears {}, {}, back bling {} (pickaxe {}, glider {})", BotName, PartName(EFortCustomPartType::GetHead()), PartName(EFortCustomPartType::GetBody()),
+                PartName(EFortCustomPartType::GetBackpack()), NameOf(reinterpret_cast<UObject*>(LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe())),
+                Pawn->HasCustomizationLoadout() && FFortAthenaLoadout::HasGlider() ? NameOf(reinterpret_cast<UObject*>(static_cast<UAthenaGliderItemDefinition*>(Pawn->CustomizationLoadout.Glider))) : std::wstring(L"-"));
+        }
     }
     GiveDanceStunAbility(static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent));
+    LogTrapTargeting(Pawn);
+    bTargeting = false;
     bWasMoving = false;
     bEmoting = false;
     bDanceStunned = false;
@@ -931,7 +1154,7 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
     // landing.
     if (!bSkydive)
     {
-        UAthenaPickaxeItemDefinition* Pickaxe = DefaultPickaxe();
+        UAthenaPickaxeItemDefinition* Pickaxe = (LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe());
         if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
         {
             EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
@@ -1197,6 +1420,7 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     else if (HealingItem || !RangeAttack(Now))
     {
         StopFiring();
+        SetTargeting(false);
         // Healing first when safe, then loot close by, then a chest or ammo box, then loot farther away (21.40's _Loot
         // weighs them by distance). In the storm it runs; only outside the next circle, it takes the loot right by it
         // first, and a bot without a gun arms itself before it heads for the circle (a landing spot far from the first
@@ -1258,9 +1482,6 @@ void AFortAthenaAIBotController::JumpOffBus(float Now)
     // Where to land: loot near the bus's path, or a spot on the ground below it (21.40's _FreeFalling picks a POI).
     const std::vector<FFortAthenaBotLoot>& LootList = Manager->GetLoot();
     std::vector<FVector> Near;
-    // -CoreBotHotDrop (testing): everyone lands around the first bot's spot.
-    static FVector HotDrop;
-    static bool bHasHotDrop = false;
     const bool bHotDrop = Configuration::Get().bBotHotDrop && bHasHotDrop;
     for (const FFortAthenaBotLoot& Entry : LootList)
     {
@@ -1554,8 +1775,8 @@ const FFortAthenaAIBotWeapon& AFortAthenaAIBotController::GetWeaponInfo(UFortWea
     if (bNew && Definition)
     {
         FFortAthenaAIBotWeapon& Weapon = Found->second;
-        Weapon.WeaponDefinition = Definition;
-        Weapon.AmmoDefinition = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(Definition->AmmoData).LoadSynchronous();
+        Weapon.WeaponDefinition = KeepLoaded(Definition);
+        Weapon.AmmoDefinition = KeepLoaded(static_cast<TAssetPtr<UFortWorldItemDefinition>&>(Definition->AmmoData).LoadSynchronous());
         ReadWeaponStats(Weapon);
         Log::Info(L"Battle Royale bots: {}: {} ({:.0f} damage x{}, {:.2f} shots/s, {} a magazine, {:.2f} s reload{}, equipped within {:.0f} m)", NameOf(Definition), WeaponTypeName(Weapon.Type),
             Weapon.Damage, Weapon.Pellets, Weapon.FiringRate, Weapon.ClipSize, Weapon.ReloadTime, Weapon.bReloadIndividualBullets ? L" by the shell" : L"", std::min(Weapon.EquipMaxDistance, 99999.0f) / 100.0f);
@@ -1574,6 +1795,7 @@ const FFortAthenaAIBotConsumable* AFortAthenaAIBotController::GetConsumableInfo(
     {
         return Found->second.get();
     }
+    KeepLoaded(Definition);
     UFortWeaponItemDefinition* Weapon = Definition ? Cast<UFortWeaponItemDefinition>(Definition) : nullptr;
     if (!Weapon || static_cast<TAssetPtr<UFortWorldItemDefinition>&>(Weapon->AmmoData).LoadSynchronous() != reinterpret_cast<UFortWorldItemDefinition*>(Weapon))
     {
@@ -1956,6 +2178,23 @@ void AFortAthenaAIBotController::StopFiring()
     }
 }
 
+void AFortAthenaAIBotController::SetTargeting(bool bNewTargeting)
+{
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || bNewTargeting == bTargeting)
+    {
+        return;
+    }
+    static UBoolProperty* TargetingProperty = static_cast<UBoolProperty*>(AFortPlayerPawn::StaticClass()->FindPropertyByName(FName(L"bIsTargeting", FNAME_Find)));
+    if (!TargetingProperty)
+    {
+        return;
+    }
+    bTargeting = bNewTargeting;
+    TargetingProperty->SetPropertyValue(reinterpret_cast<uint8_t*>(Pawn) + TargetingProperty->GetOffset_ForInternal(), bNewTargeting);
+    Pawn->ForceNetUpdate();
+}
+
 bool AFortAthenaAIBotController::ActivateWeaponFire(AFortWeapon* Weapon)
 {
 #if WITH_SERVER_CODE
@@ -2020,7 +2259,6 @@ void AFortAthenaAIBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FV
     // WeaponFireCue, executed on every client through the pawn's multicast, as GA_Ranged_GenericDamage does.
     static UFunction* Multicast = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:NetMulticast_InvokeGameplayCueExecuted_WithParams");
     static UScriptStruct* CueParametersStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayCueParameters");
-    static std::map<const UObject*, FName> CueTags;
     AFortPlayerPawnAthena* Pawn = GetPawn();
     UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
     FGameplayAbilitySpec* Spec = AbilitySystem && AFortWeapon::HasPrimaryAbilitySpecHandle() ? AbilitySystem->FindAbilitySpecFromHandle(Weapon->PrimaryAbilitySpecHandle) : nullptr;
@@ -2141,7 +2379,7 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     {
         if (!bPickaxeEquipped)
         {
-            UAthenaPickaxeItemDefinition* Pickaxe = DefaultPickaxe();
+            UAthenaPickaxeItemDefinition* Pickaxe = LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe();
             if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
             {
                 StopFiring();
@@ -2186,6 +2424,8 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     {
         StopFiring();
     }
+    // A player aims down sights with a gun beyond arm's reach, not while reloading.
+    SetTargeting(bArmed && !bPickaxeEquipped && ReloadUntil <= 0.0f && Distance > 400.0f && FacingError() < 45.0f);
     // A player turns to face a target before shooting at it.
     const bool bReady = Now >= TargetAcquiredTime + AIBotSkills.MaxTrackingReactionTime && Now >= NextShotTime && ReloadUntil <= 0.0f && FacingError() < 20.0f;
     const bool bLoaded = bPickaxeEquipped ? Distance < 250.0f : (EquippedWeapon.Get() && EquippedWeapon.Get()->AmmoCount > 0);
@@ -2301,7 +2541,7 @@ namespace
             for (const wchar_t* Path : { L"/Game/Athena/Items/Cosmetics/Dances/EID_DanceMoves.EID_DanceMoves", L"/Game/Athena/Items/Cosmetics/Dances/EID_Floss.EID_Floss",
                      L"/Game/Athena/Items/Cosmetics/Dances/EID_Fresh.EID_Fresh", L"/Game/Athena/Items/Cosmetics/Dances/EID_BreakDance.EID_BreakDance" })
             {
-                if (UFortMontageItemDefinitionBase* Emote = LoadObject<UFortMontageItemDefinitionBase>(nullptr, Path))
+                if (UFortMontageItemDefinitionBase* Emote = KeepLoaded(LoadObject<UFortMontageItemDefinitionBase>(nullptr, Path)))
                 {
                     EmoteAssets.push_back(Emote);
                 }
@@ -2940,7 +3180,7 @@ void AFortAthenaAIBotController::EquipPickaxe()
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    UAthenaPickaxeItemDefinition* Pickaxe = DefaultPickaxe();
+    UAthenaPickaxeItemDefinition* Pickaxe = LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe();
     UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr;
     if (!Pawn || !PickaxeWeapon || (bPickaxeEquipped && EquippedWeapon.Get()))
     {
@@ -2988,11 +3228,28 @@ void AFortAthenaAIBotController::PlayFireMontage()
         {
             Log::Info(L"Battle Royale bots: {}'s fire montage: {} ({})", NameOf(Definition), NameOf(Montage), NameOf(AbilityClass));
         }
-        Found = Montages.emplace(Definition, std::make_pair(Montage, PlayRate > 0.0f ? PlayRate : 1.0f)).first;
+        KeepLoaded(Definition);
+        Found = Montages.emplace(Definition, std::make_pair(KeepLoaded(Montage), PlayRate > 0.0f ? PlayRate : 1.0f)).first;
     }
     if (Found->second.first)
     {
         PlayReplicatedMontage(Found->second.first, Found->second.second);
+        return;
+    }
+    // A gun's fire ability (GA_Ranged_GenericDamage) has no montage: a player's shot shows on the pawn through the
+    // gun's own fire animation (AFortWeaponRanged::FireAnimation, FireDownsightsAnimation while aiming), the pawn's
+    // montage, as its ReloadAnimation is for the reload.
+    UObject* GunMontage = bTargeting ? ObjectOf(reinterpret_cast<UObject*>(Weapon), L"FireDownsightsAnimation") : nullptr;
+    GunMontage = GunMontage ? GunMontage : ObjectOf(reinterpret_cast<UObject*>(Weapon), L"FireAnimation");
+    static int32_t LoggedGun = 0;
+    if (LoggedGun < 4 && GunMontage)
+    {
+        ++LoggedGun;
+        Log::Info(L"Battle Royale bots: {}'s fire animation: {}{}", NameOf(Definition), NameOf(GunMontage), bTargeting ? L" (aiming)" : L"");
+    }
+    if (GunMontage)
+    {
+        PlayReplicatedMontage(GunMontage, 1.0f);
     }
 #endif
 }
@@ -3880,7 +4137,12 @@ void AFortAthenaAIBotController::DropItem(UFortItemDefinition* Definition, int32
     FFortItemEntry* Entry = reinterpret_cast<FFortItemEntry*>(Storage.data());
     FFortItemEntry::Construct(Entry, Definition, Count, 0);
     Entry->LoadedAmmo = LoadedAmmo;
-    const FVector Spot(Location.X + RandomRange(-80.0f, 80.0f), Location.Y + RandomRange(-80.0f, 80.0f), Location.Z);
+    // Spread around where the bot fell, as a player's death drop lands: each item at its own angle (the golden angle
+    // from the last) and 120-280 uu out, so none land stacked.
+    static uint32_t DropCount = 0;
+    const float Angle = static_cast<float>(DropCount++) * 2.39996f + RandomRange(-0.3f, 0.3f);
+    const float Radius = RandomRange(120.0f, 280.0f);
+    const FVector Spot(Location.X + std::cos(Angle) * Radius, Location.Y + std::sin(Angle) * Radius, Location.Z);
     // Tossed from the pawn as a player's drop is (AFortPickup::TossPickup with the pawn as its owner): an untossed
     // pickup never took clients' auto-pickup.
     if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &Location))
@@ -4062,7 +4324,7 @@ void AFortAthenaAIBotController::CancelHeal()
     }
     else if (AFortPlayerPawnAthena* Pawn = GetPawn())
     {
-        UAthenaPickaxeItemDefinition* Pickaxe = DefaultPickaxe();
+        UAthenaPickaxeItemDefinition* Pickaxe = LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe();
         if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
         {
             EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());

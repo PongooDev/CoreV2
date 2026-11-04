@@ -37,9 +37,10 @@ public:
     DefineUProperty(FGameplayTagContainer, LocationTags)
     DefineUProperty(UFortPoiCollisionComponent*, PoiCollisionComp)
 
-    // Gives every POI volume of World that has no brush component the shape Core's fallback finds for it (see
-    // FortPoiVolume.cpp), so the manager's overlap tests work. Volumes that have their brush (a server cook, or server
-    // assets put back into the build) are left to Epic's PostInitializeComponents. Returns the volumes it shaped.
+    // Gives every POI volume of World that has no brush component a box where the world's own data puts it (actor tags,
+    // arena cameras, streamed level names; see FortPoiVolume.cpp), so the manager's overlap tests work. Volumes that have
+    // their brush (a server cook, or server assets put back into the build) are left to Epic's PostInitializeComponents,
+    // and volumes the data doesn't place are logged and left shapeless. Returns the volumes it shaped.
     static int32_t RestorePoiVolumes(UWorld* World);
 
     // The box RestorePoiVolumes gave it (invalid for a volume it didn't shape).

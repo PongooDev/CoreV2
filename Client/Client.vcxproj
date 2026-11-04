@@ -319,6 +319,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerControllerAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerPawnAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPlayerStateAthena.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortArenaCamera.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPoiManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortPoiVolume.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortSafeZoneIndicator.h" />

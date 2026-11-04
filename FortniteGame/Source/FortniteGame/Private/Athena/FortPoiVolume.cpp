@@ -1,8 +1,12 @@
 #include "pch.h"
 #include "Athena/FortPoiVolume.h"
+#include "Athena/FortArenaCamera.h"
 #include "Athena/FortPoiManager.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingFoundation.h"
+#include "Components/SceneComponent.h"
+#include "Engine/Level.h"
+#include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "GameThread.h"
@@ -13,146 +17,158 @@
 #include "Natives.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
-#include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cwctype>
 #include <format>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
-// What Epic's server has and the client paks don't (3.0, CL-3901517)
-// ----------------------------------------------------------------------
+// What Epic's server has and the client paks don't (3.0 on)
+// ----------------------------------------------------------
 // Every AFortPoiVolume is a brush volume: its shape is its BrushComponent's BrushBodySetup (convex shapes built from the
 // brush when the level was saved), and the BrushComponent is also its root, so the volume's place on the map is that
 // component's transform. The client cook strips the BrushComponent of every POI volume (BrushComponent and RootComponent
-// are None in Athena_LocationVolumes and Athena_GameplayActors), so on a server running from client paks each volume has
-// no shape and no place: AFortPoiVolume::PostInitializeComponents (0x9FDF20) logs "failed to initalized,
-// PoiCollisionComp: TestPrimComp0 GetBrushComponent(): None" for all 63, PoiCollisionComp's PoiBodyInstance is never
-// made, and its OverlapComponent (0x9FA6C0, PoiBodyInstance's OverlapTest) never holds. Nothing then gets a location tag:
-// not the Visit events of AFortPoiVolume::CheckPawnOverlap, nor the tags Land, Interact and the eliminations ask the game
-// mode for (AFortPoiManager::GetTagsForPawnLocation, 0x9EB7C0). What survives the cook is each volume's LocationTags, its
-// PoiCollisionComp, and its brush geometry (ABrush::Brush, the UModel, in the volume's own space).
+// are None in 3.0's Athena_LocationVolumes and Athena_GameplayActors), so on a server running from client paks each volume
+// has no shape and no place: AFortPoiVolume::PostInitializeComponents (3.0 0x9FDF20) logs "failed to initalized,
+// PoiCollisionComp: TestPrimComp0 GetBrushComponent(): None", PoiCollisionComp's PoiBodyInstance is never made, and its
+// OverlapComponent (0x9FA6C0, PoiBodyInstance's OverlapTest) never holds. Nothing then gets a location tag: not the Visit
+// events of AFortPoiVolume::CheckPawnOverlap, nor the tags Land, Interact and the eliminations ask the game mode for
+// (AFortPoiManager::GetTagsForPawnLocation, 0x9EB7C0). What survives the cook is each volume's LocationTags, its
+// PoiCollisionComp, and its brush geometry (ABrush::Brush, a UModel in the volume's own space, so it has a size but no
+// place).
 //
 // Epic's code is left as it is. When a volume has its BrushComponent (server assets put back into the build), Epic's
 // PostInitializeComponents made its body and Core leaves it alone. Otherwise Core does what PostInitializeComponents
 // does with a shape of its own: a UBodySetup with one box, FBodyInstance::InitBody on PoiBodyInstance with no physics
 // scene, as Epic's call does.
 //
-// Core's fallback shape (Core's own, not Epic's data; Core-Docs/ServerAssets/Athena-POI-3.0.md):
-// - Size: the volume's brush, which survives: its bounds at scale 1 (the brush component's scale is lost with it).
-// - Place: what the volume covers, found in the client paks. Named locations: the plots of their POI levels
-//   (ABuildingFoundation actors stream the POI and building levels, and they keep their transforms; Snobby Shores is its
-//   five mansion plots, Lucky Landing the shrine at the map's south end). Gas stations, taco shops and the animal-shaped
-//   buildings: the plots of those building levels. Ice cream trucks: the trucks. The box is centred on what it covers and
-//   stands on its base (half the brush's height below it, one and a half above); over several plots it is grown to reach
-//   them all.
-// - Numbering: where several volumes cover one kind of thing (GasStation.01-08, TacoShop.01-04, IceCreamTruck.01-14), the
-//   n-th volume takes the n-th one by position (X, then Y). Epic's numbering isn't in the client paks; the quests count
-//   different ones, which this keeps apart.
-// The 15 "forbidden locations" dance volumes (Athena.Location.Quest.Dance.Forbidden.*) mark spots with nothing in the
-// client paks to find them by, so they stay shapeless until the server assets are there.
+// Where the box goes is worked out from the running world's own data, with no per-build table (Core-Docs
+// ServerAssets/Athena-POI-3.0.md). A volume's subject is the last word of its location tag that isn't a number
+// (Athena.Location.POI.TiltedTowers -> TiltedTowers, Athena.Location.Meta.GasStation.03 -> GasStation, number 3). Its
+// place is the first of these that names the subject:
+// 1. Tags: building actors whose StaticGameplayTags end in the subject (Building.Type.Prop.Vehicle.IceCreamTruck for
+//    Athena.Location.Quest.Visit.IceCreamTruck.NN).
+// 2. Arena cameras: the AFortArenaCamera spectator cameras whose CameraZone is one of the volume's tags, or whose name
+//    holds the subject's words (arenaCam_TiltedTowers3). On 3.0 they are in an on-demand sublevel of the persistent map,
+//    which Core loads (not into the world) to read them.
+// 3. Levels: the plots (ABuildingFoundation streaming boxes) whose streamed level's name holds the subject's first word
+//    (Athena_SUB_3x3_GasStation_a for GasStation, Athena_URB_3x3_TacoStand_a for TacoShop, Athena_REM_3x3_Crab_a for
+//    Crab). A match that lies inside another match is the same place (a gas station plot inside a gas-station POI plot),
+//    and only the innermost one counts.
+// Numbered volumes take the n-th match in order of position (X, then Y): nothing in the data says which number is which,
+// and the quests only count different ones. A volume with nothing in the data naming it isn't placed, and is logged.
+// The size is the volume's brush (its UModel bounds, at scale 1: the scale is lost with the component), or what it
+// covers when that is larger.
 namespace
 {
-    enum class EAnchor
-    {
-        // The plots of the POI levels named (their asset names, exactly).
-        PoiLevels,
-        // The plots of the building levels whose asset name contains one of the names, the Index-th of them.
-        Buildings,
-        // The actors of the class named, the Index-th of them.
-        Actors,
-        // Nothing in the client paks.
-        None,
-    };
-
-    struct FPoiFallback
-    {
-        // The volume's actor name (Athena_LocationVolumes, Athena_GameplayActors).
-        std::wstring Volume;
-        EAnchor Anchor;
-        std::vector<std::wstring> Names;
-        // Which match (1-based, by position: X, then Y); 0: all of them.
-        int32_t Index;
-        // Half the brush's size (its UModel bounds, FModel), in the volume's space.
-        FVector BrushExtent;
-    };
-
-    // Athena_LocationVolumes' 34 volumes and Athena_GameplayActors' 29 (FModel, 3.0).
-    const std::vector<FPoiFallback>& PoiFallbacks()
-    {
-        static const std::vector<FPoiFallback> Fallbacks = []()
-        {
-            std::vector<FPoiFallback> Table = {
-                { L"FortPoiVolume_AnarchyAcres", EAnchor::PoiLevels, { L"Athena_POI_FarmStead_002" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_DustyDepot", EAnchor::PoiLevels, { L"Athena_POI_Warehouses_001" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_FatalFields", EAnchor::PoiLevels, { L"Athena_POI_FarmStead" }, 0, FVector(8584, 8584, 5000) },
-                { L"FortPoiVolume_FlushFactory", EAnchor::PoiLevels, { L"Athena_POI_ToiletFactory_001" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_GreasyGrove", EAnchor::PoiLevels, { L"Athena_POI_DurrrBurger_001" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_HauntedHills", EAnchor::PoiLevels, { L"Athena_POI_Cemetery_001" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_JunkJunction", EAnchor::PoiLevels, { L"Athena_POI_Junkyard_001" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_LonelyLodge", EAnchor::PoiLevels, { L"Athena_POI_RangerOutpost" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_LootLake", EAnchor::PoiLevels, { L"Athena_POI_Lake_001" }, 0, FVector(9992, 9480, 5000) },
-                // Lucky Landing has no POI level of its own in 3.0. The Chinatown-style shrine at the map's south end,
-                // below Fatal Fields (Athena_SS_1x1_Shrine_004, one of seven shrine buildings), is where it stands.
-                { L"FortPoiVolume_LuckyLanding", EAnchor::PoiLevels, { L"Athena_SS_1x1_Shrine_004" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_MoistyMire", EAnchor::PoiLevels, { L"Athena_POI_Swamp_001" }, 0, FVector(18184, 11528, 5000) },
-                { L"FortPoiVolume_PleasantPark", EAnchor::PoiLevels, { L"Athena_POI_CommunityPark_001" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_RetailRow", EAnchor::PoiLevels, { L"Athena_POI_StripMall", L"Athena_POI_Suburban_015" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_SaltySprings", EAnchor::PoiLevels, { L"Athena_POI_Suburban_006" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_ShiftyShafts", EAnchor::PoiLevels, { L"Athena_POI_Mine_001" }, 0, FVector(5000, 5000, 5000) },
-                // Snobby Shores' mansions are the five mid-century modern plots on the west coast.
-                { L"FortPoiVolume_SnobbyShores", EAnchor::PoiLevels, { L"Athena_POI_GenericPlot_MCM_001", L"Athena_POI_GenericPlot_MCM_002", L"Athena_POI_GenericPlot_MCM_003",
-                    L"Athena_POI_GenericPlot_MCM_004", L"Athena_POI_GenericPlot_MCM_005" }, 0, FVector(6792, 5640, 5000) },
-                { L"FortPoiVolume_TiltedTowers", EAnchor::PoiLevels, { L"Athena_POI_City_001" }, 0, FVector(6408, 5640, 5000) },
-                { L"FortPoiVolume_TomatoTown", EAnchor::PoiLevels, { L"Athena_POI_Roadside_001" }, 0, FVector(5000, 5000, 5000) },
-                { L"FortPoiVolume_WailingWoods", EAnchor::PoiLevels, { L"Athena_POI_HedgeMaze" }, 0, FVector(10504, 11144, 5000) },
-                { L"FortPoiVolume_Crab", EAnchor::Buildings, { L"_Crab_" }, 0, FVector(1548, 1548, 1548) },
-                { L"FortPoiVolume_Fox", EAnchor::Buildings, { L"_Fox_" }, 0, FVector(1548, 1548, 1548) },
-                { L"FortPoiVolume_llama", EAnchor::Buildings, { L"_Llama_" }, 0, FVector(1548, 1548, 1548) },
-            };
-            for (int32_t Number = 1; Number <= 8; ++Number)
-            {
-                Table.push_back({ std::format(L"FortPoiVolume_GasStation_{:02}", Number), EAnchor::Buildings, { L"GasStation", L"GenericPlot_GAS" }, Number, FVector(1548, 1548, 1548) });
-            }
-            for (int32_t Number = 1; Number <= 4; ++Number)
-            {
-                Table.push_back({ std::format(L"FortPoiVolume_TacoShop_{:02}", Number), EAnchor::Buildings, { L"TacoStand" }, Number, FVector(1548, 1548, 1548) });
-            }
-            for (int32_t Number = 1; Number <= 14; ++Number)
-            {
-                Table.push_back({ std::format(L"Quest_Visit_IceCreamTruck_{:02}", Number), EAnchor::Actors, { L"Car_IceCreamTruck_C" }, Number, FVector(625, 625, 625) });
-            }
-            for (int32_t Number = 1; Number <= 15; ++Number)
-            {
-                Table.push_back({ std::format(L"Quest_Dance_Forbidden_{:02}", Number), EAnchor::None, {}, 0, FVector(500, 500, 500) });
-            }
-            return Table;
-        }();
-        return Fallbacks;
-    }
-
-    struct FAnchor
+    // A place in the world the data ties to a subject.
+    struct FPlace
     {
         std::wstring Name;
-        FVector Location;
-        // Where the thing stands: its plot (a foundation's streaming box moved onto the map) or the actor's bounds.
         FBox Box;
     };
 
-    // The asset a streamed level instance was made from: "/Temp/Game/Athena/Maps/POI/Athena_POI_City_001_43" ->
-    // "Athena_POI_City_001".
-    std::wstring LevelAssetName(const std::wstring& LevelPackage)
+    // How a volume's place was found.
+    struct FResolved
     {
-        std::wstring Name = LevelPackage.substr(LevelPackage.rfind(L'/') + 1);
-        const size_t Suffix = Name.rfind(L'_');
-        if (Suffix != std::wstring::npos && Suffix + 1 < Name.size() && std::all_of(Name.begin() + Suffix + 1, Name.end(), [](wchar_t C) { return std::iswdigit(C) != 0; }))
+        std::wstring Source;
+        std::vector<FPlace> Places;
+        // Arena cameras: their spread is the place, standing on the lowest of them.
+        bool bFromCameras = false;
+    };
+
+    std::wstring Lower(std::wstring Text)
+    {
+        std::transform(Text.begin(), Text.end(), Text.begin(), [](wchar_t C) { return static_cast<wchar_t>(std::towlower(C)); });
+        return Text;
+    }
+
+    bool IsNumber(const std::wstring& Text)
+    {
+        return !Text.empty() && std::all_of(Text.begin(), Text.end(), [](wchar_t C) { return std::iswdigit(C) != 0; });
+    }
+
+    // An asset, actor or tag name's words, lower case: "arenaCam_TiltedTowers3" -> arena, cam, tilted, towers, 3;
+    // "Athena_POI_GenericPlot_GAS_001" -> athena, poi, generic, plot, gas, 001.
+    std::vector<std::wstring> Words(const std::wstring& Name)
+    {
+        std::vector<std::wstring> Result;
+        std::wstring Word;
+        const auto Flush = [&]()
         {
-            Name.resize(Suffix);
+            if (!Word.empty())
+            {
+                Result.push_back(Lower(Word));
+                Word.clear();
+            }
+        };
+        for (size_t Index = 0; Index < Name.size(); ++Index)
+        {
+            const wchar_t C = Name[Index];
+            if (!std::iswalnum(C))
+            {
+                Flush();
+                continue;
+            }
+            if (!Word.empty())
+            {
+                const wchar_t Previous = Word.back();
+                const bool bLowerToUpper = std::iswlower(Previous) && std::iswupper(C);
+                const bool bDigitChange = (std::iswdigit(Previous) != 0) != (std::iswdigit(C) != 0);
+                if (bLowerToUpper || bDigitChange)
+                {
+                    Flush();
+                }
+            }
+            Word += C;
         }
-        return Name;
+        Flush();
+        return Result;
+    }
+
+    bool ContainsSequence(const std::vector<std::wstring>& Haystack, const std::vector<std::wstring>& Needle)
+    {
+        return !Needle.empty() && std::search(Haystack.begin(), Haystack.end(), Needle.begin(), Needle.end()) != Haystack.end();
+    }
+
+    // What a volume's location tags say it is: the last word of a tag that isn't a number, and that number, if any
+    // (Athena.Location.Meta.GasStation.03 -> GasStation, 3).
+    struct FSubject
+    {
+        std::wstring Name;
+        int32_t Number = 0;
+    };
+
+    FSubject SubjectOf(const AFortPoiVolume* Volume)
+    {
+        for (const FGameplayTag& Tag : Volume->LocationTags.GameplayTags)
+        {
+            std::vector<std::wstring> Segments;
+            const std::wstring TagName = Tag.TagName.ToStdString();
+            for (size_t Start = 0; Start <= TagName.size();)
+            {
+                const size_t Dot = std::min(TagName.find(L'.', Start), TagName.size());
+                Segments.push_back(TagName.substr(Start, Dot - Start));
+                Start = Dot + 1;
+            }
+            FSubject Subject;
+            if (!Segments.empty() && IsNumber(Segments.back()))
+            {
+                Subject.Number = std::stoi(Segments.back());
+                Segments.pop_back();
+            }
+            if (!Segments.empty() && !Segments.back().empty())
+            {
+                Subject.Name = Segments.back();
+                return Subject;
+            }
+        }
+        return {};
     }
 
     FBox ActorBox(AActor* Actor)
@@ -161,6 +177,19 @@ namespace
         FVector Extent;
         Actor->GetActorBounds(false, Origin, Extent);
         return FBox(Origin - Extent, Origin + Extent);
+    }
+
+    // The asset a streamed level instance was made from: "/Temp/Game/Athena/Maps/POI/Athena_POI_City_001_43" ->
+    // "Athena_POI_City_001".
+    std::wstring LevelAssetName(const std::wstring& LevelPackage)
+    {
+        std::wstring Name = LevelPackage.substr(LevelPackage.rfind(L'/') + 1);
+        const size_t Suffix = Name.rfind(L'_');
+        if (Suffix != std::wstring::npos && IsNumber(Name.substr(Suffix + 1)))
+        {
+            Name.resize(Suffix);
+        }
+        return Name;
     }
 
     // A foundation's plot: its streaming box (the plot's tile, in the foundation's space) moved onto the map.
@@ -180,21 +209,26 @@ namespace
         return World;
     }
 
-    void SortByPosition(std::vector<FAnchor>& Anchors)
+    struct FCamera
     {
-        std::sort(Anchors.begin(), Anchors.end(), [](const FAnchor& A, const FAnchor& B) { return A.Location.X != B.Location.X ? A.Location.X < B.Location.X : A.Location.Y < B.Location.Y; });
-    }
-
-    // Every streamed level's plot, keyed by the level instance's package, with its asset name.
-    struct FPlots
-    {
-        std::vector<FAnchor> All;
-        std::map<std::wstring, FAnchor> ByLevelPackage;
+        std::wstring Name;
+        FVector Location;
+        FName Zone;
     };
 
-    FPlots StreamedPlots(UWorld* World)
+    // What the world holds that can name a volume's place.
+    struct FWorldData
     {
-        FPlots Plots;
+        // Every streamed plot, with its level's asset name and that name's words.
+        std::vector<std::pair<FPlace, std::vector<std::wstring>>> Plots;
+        std::vector<FCamera> Cameras;
+        // Building actors by the last segment of each of their StaticGameplayTags (lower case), for the subjects asked.
+        std::map<std::wstring, std::vector<FPlace>> TaggedActors;
+        std::wstring CameraSource;
+    };
+
+    void GatherPlots(UWorld* World, FWorldData& Data)
+    {
         for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(World, ABuildingFoundation::StaticClass()))
         {
             ABuildingFoundation* Foundation = static_cast<ABuildingFoundation*>(Actor);
@@ -203,80 +237,283 @@ namespace
             {
                 continue;
             }
-            const FTransform Transform = Foundation->GetTransform();
-            const std::wstring Package = LevelToStream.ToStdString();
-            FAnchor Plot{ LevelAssetName(Package), Transform.Translation, PlotBox(Foundation, Transform) };
-            Plots.ByLevelPackage[Package] = Plot;
-            Plots.All.push_back(Plot);
+            const std::wstring Name = LevelAssetName(LevelToStream.ToStdString());
+            Data.Plots.push_back({ FPlace{ Name, PlotBox(Foundation, Foundation->GetTransform()) }, Words(Name) });
         }
-        SortByPosition(Plots.All);
-        return Plots;
     }
 
-    std::vector<FAnchor> ActorsOfClassNamed(UWorld* World, const std::wstring& ClassName)
+    // The arena cameras: those in the world, or, when the world has none, those of the persistent map's sublevels that
+    // aren't loaded (3.0's Athena_CameraLocations streams only on demand). Such a level is loaded as a package and read;
+    // it isn't added to the world.
+    void GatherCameras(UWorld* World, FWorldData& Data)
     {
-        std::vector<FAnchor> Anchors;
-        for (TObjectIterator<UClass> It; It; ++It)
+        UClass* CameraClass = AFortArenaCamera::StaticClass();
+        if (!CameraClass)
         {
-            UClass* Class = *It;
-            if (Class->GetName().ToStdString() != ClassName)
+            return;
+        }
+        const auto Add = [&Data](AActor* Actor, const FVector& Location)
+        {
+            AFortArenaCamera* Camera = static_cast<AFortArenaCamera*>(Actor);
+            Data.Cameras.push_back({ Actor->GetName().ToStdString(), Location, Camera->HasCameraZone() ? FGameplayTag(Camera->CameraZone).TagName : FName() });
+        };
+        for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(World, CameraClass))
+        {
+            Add(Actor, Actor->GetTransform().Translation);
+        }
+        if (!Data.Cameras.empty())
+        {
+            Data.CameraSource = L"the world";
+            return;
+        }
+        for (ULevelStreaming* Streaming : static_cast<TArray<ULevelStreaming*>&>(World->StreamingLevels))
+        {
+            if (!Streaming || Streaming->LoadedLevel)
             {
                 continue;
             }
-            for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(World, Class))
+            const FString Path = static_cast<const TAssetPtr<UWorld>&>(Streaming->WorldAsset).ToStringReference().ToString();
+            // Levels a foundation streams are /Temp/ instances, picked and loaded by the game itself.
+            if (Path.IsEmpty() || std::wstring(*Path).starts_with(L"/Temp/"))
             {
-                Anchors.push_back({ Actor->GetName().ToStdString(), Actor->GetTransform().Translation, ActorBox(Actor) });
+                continue;
             }
-            break;
+            UWorld* LevelWorld = LoadObject<UWorld>(nullptr, *Path, nullptr, static_cast<uint32_t>(LOAD_NoWarn | LOAD_Quiet));
+            ULevel* Level = LevelWorld ? static_cast<ULevel*>(LevelWorld->PersistentLevel) : nullptr;
+            if (!Level)
+            {
+                continue;
+            }
+            const FTransform LevelTransform = Streaming->LevelTransform;
+            const size_t Before = Data.Cameras.size();
+            for (AActor* Actor : Level->GetActors())
+            {
+                USceneComponent* Root = Actor && Actor->IsA(CameraClass) ? static_cast<USceneComponent*>(Actor->RootComponent) : nullptr;
+                if (Root)
+                {
+                    Add(Actor, LevelTransform.TransformPosition(Root->RelativeLocation));
+                }
+            }
+            if (Data.Cameras.size() > Before)
+            {
+                Data.CameraSource += (Data.CameraSource.empty() ? L"" : L", ") + std::wstring(*Path).substr(std::wstring(*Path).rfind(L'/') + 1);
+            }
         }
-        SortByPosition(Anchors);
-        return Anchors;
     }
 
-    std::vector<FAnchor> FindAnchors(UWorld* World, const FPlots& Plots, const FPoiFallback& Fallback)
+    void GatherTaggedActors(UWorld* World, const std::set<std::wstring>& Subjects, FWorldData& Data)
     {
-        std::vector<FAnchor> Found;
-        if (Fallback.Anchor == EAnchor::PoiLevels)
+        for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(World, ABuildingActor::StaticClass()))
         {
-            for (const FAnchor& Plot : Plots.All)
+            ABuildingActor* Building = static_cast<ABuildingActor*>(Actor);
+            if (!Building)
             {
-                if (std::find(Fallback.Names.begin(), Fallback.Names.end(), Plot.Name) != Fallback.Names.end())
+                continue;
+            }
+            for (const FGameplayTag& Tag : static_cast<FGameplayTagContainer&>(Building->StaticGameplayTags).GameplayTags)
+            {
+                const std::wstring TagName = Tag.TagName.ToStdString();
+                const std::wstring Leaf = Lower(TagName.substr(TagName.rfind(L'.') + 1));
+                if (Subjects.contains(Leaf))
                 {
-                    Found.push_back(Plot);
+                    Data.TaggedActors[Leaf].push_back({ Actor->GetName().ToStdString(), ActorBox(Actor) });
+                    break;
                 }
             }
-            return Found;
+        }
+    }
+
+    // Of matches that are the same place (one's centre inside the other), keeps the innermost.
+    std::vector<FPlace> Innermost(std::vector<FPlace> Places)
+    {
+        const auto Area = [](const FBox& Box) { return (Box.Max.X - Box.Min.X) * (Box.Max.Y - Box.Min.Y); };
+        const auto ContainsXY = [](const FBox& Box, const FVector& Point) { return Point.X > Box.Min.X && Point.X < Box.Max.X && Point.Y > Box.Min.Y && Point.Y < Box.Max.Y; };
+        std::vector<FPlace> Result;
+        for (size_t Index = 0; Index < Places.size(); ++Index)
+        {
+            const bool bHoldsAnother = std::any_of(Places.begin(), Places.end(), [&](const FPlace& Other)
+            {
+                return &Other != &Places[Index] && Area(Other.Box) < Area(Places[Index].Box) && ContainsXY(Places[Index].Box, Other.Box.GetCenter());
+            });
+            if (!bHoldsAnother)
+            {
+                Result.push_back(Places[Index]);
+            }
+        }
+        return Result;
+    }
+
+    void SortByPosition(std::vector<FPlace>& Places)
+    {
+        std::sort(Places.begin(), Places.end(), [](const FPlace& A, const FPlace& B)
+        {
+            const FVector CA = A.Box.GetCenter();
+            const FVector CB = B.Box.GetCenter();
+            return CA.X != CB.X ? CA.X < CB.X : CA.Y < CB.Y;
+        });
+    }
+
+    // The arena cameras of one place, without the odd one far from the rest (a camera of Loot Lake's set looks at it from
+    // Tilted Towers): those within twice the median distance from the median point.
+    std::vector<FCamera> CameraCluster(std::vector<FCamera> Cameras)
+    {
+        if (Cameras.size() < 3)
+        {
+            return Cameras;
+        }
+        const auto Median = [](std::vector<float> Values)
+        {
+            std::nth_element(Values.begin(), Values.begin() + Values.size() / 2, Values.end());
+            return Values[Values.size() / 2];
+        };
+        std::vector<float> Xs;
+        std::vector<float> Ys;
+        for (const FCamera& Camera : Cameras)
+        {
+            Xs.push_back(Camera.Location.X);
+            Ys.push_back(Camera.Location.Y);
+        }
+        const float MX = Median(Xs);
+        const float MY = Median(Ys);
+        std::vector<float> Distances;
+        for (const FCamera& Camera : Cameras)
+        {
+            Distances.push_back(std::hypot(Camera.Location.X - MX, Camera.Location.Y - MY));
+        }
+        const float Limit = Median(Distances) * 2.0f + 1.0f;
+        std::vector<FCamera> Kept;
+        for (const FCamera& Camera : Cameras)
+        {
+            if (std::hypot(Camera.Location.X - MX, Camera.Location.Y - MY) <= Limit)
+            {
+                Kept.push_back(Camera);
+            }
+        }
+        return Kept;
+    }
+
+    // Finds where the data puts a volume, or says why it can't (Reason).
+    FResolved Resolve(const AFortPoiVolume* Volume, const FSubject& Subject, const FWorldData& Data, std::wstring& Reason)
+    {
+        FResolved Resolved;
+        const std::wstring Key = Lower(Subject.Name);
+        const std::vector<std::wstring> SubjectWords = Words(Subject.Name);
+
+        if (const auto Tagged = Data.TaggedActors.find(Key); Tagged != Data.TaggedActors.end() && !Tagged->second.empty())
+        {
+            Resolved.Source = std::format(L"actors tagged *.{}", Subject.Name);
+            Resolved.Places = Tagged->second;
         }
 
-        std::vector<FAnchor> Candidates;
-        if (Fallback.Anchor == EAnchor::Buildings)
+        if (Resolved.Places.empty())
         {
-            for (const FAnchor& Plot : Plots.All)
+            std::vector<FCamera> Named;
+            for (const FCamera& Camera : Data.Cameras)
             {
-                if (std::any_of(Fallback.Names.begin(), Fallback.Names.end(), [&Plot](const std::wstring& Name) { return Plot.Name.find(Name) != std::wstring::npos; }))
+                const bool bZone = !Camera.Zone.IsNone()
+                    && std::any_of(Volume->LocationTags.GameplayTags.begin(), Volume->LocationTags.GameplayTags.end(), [&Camera](const FGameplayTag& Tag) { return Tag.TagName == Camera.Zone; });
+                if (bZone || ContainsSequence(Words(Camera.Name), SubjectWords))
                 {
-                    Candidates.push_back(Plot);
+                    Named.push_back(Camera);
                 }
             }
-        }
-        else if (Fallback.Anchor == EAnchor::Actors && !Fallback.Names.empty())
-        {
-            static std::map<std::wstring, std::vector<FAnchor>> ActorCache;
-            if (!ActorCache.contains(Fallback.Names[0]))
+            if (!Named.empty())
             {
-                ActorCache[Fallback.Names[0]] = ActorsOfClassNamed(World, Fallback.Names[0]);
+                const std::vector<FCamera> Cluster = CameraCluster(Named);
+                FBox Spread;
+                for (const FCamera& Camera : Cluster)
+                {
+                    Spread += Camera.Location;
+                }
+                Resolved.Source = std::format(L"{} of {} arena cameras ({})", Cluster.size(), Named.size(), Data.CameraSource);
+                Resolved.Places.push_back({ Cluster.front().Name, Spread });
+                Resolved.bFromCameras = true;
             }
-            Candidates = ActorCache[Fallback.Names[0]];
         }
-        if (Fallback.Index == 0)
+
+        if (Resolved.Places.empty() && !SubjectWords.empty())
         {
-            return Candidates;
+            std::vector<FPlace> Plots;
+            for (const auto& [Plot, PlotWords] : Data.Plots)
+            {
+                if (std::find(PlotWords.begin(), PlotWords.end(), SubjectWords.front()) != PlotWords.end())
+                {
+                    Plots.push_back(Plot);
+                }
+            }
+            Resolved.Places = Innermost(Plots);
+            if (!Resolved.Places.empty())
+            {
+                Resolved.Source = std::format(L"plots of levels named *{}*", SubjectWords.front());
+            }
         }
-        if (Fallback.Index <= static_cast<int32_t>(Candidates.size()))
+
+        if (Resolved.Places.empty())
         {
-            Found.push_back(Candidates[Fallback.Index - 1]);
+            Reason = std::format(L"no actor tagged *.{}, no arena camera named {} and no streamed level named *{}*", Subject.Name, Subject.Name, SubjectWords.empty() ? Subject.Name : SubjectWords.front());
+            return Resolved;
         }
-        return Found;
+        if (Subject.Number > 0)
+        {
+            SortByPosition(Resolved.Places);
+            if (Subject.Number > static_cast<int32_t>(Resolved.Places.size()))
+            {
+                Reason = std::format(L"number {} but the {} give only {} places", Subject.Number, Resolved.Source, Resolved.Places.size());
+                Resolved.Places.clear();
+                return Resolved;
+            }
+            const size_t Count = Resolved.Places.size();
+            Resolved.Places = { Resolved.Places[Subject.Number - 1] };
+            Resolved.Source += std::format(L", no. {} of {} by position", Subject.Number, Count);
+        }
+        return Resolved;
+    }
+
+    // UModel::Bounds, the brush's bounds in the volume's space (an FBoxSphereBounds: Origin, BoxExtent, SphereRadius).
+    // UModel has no reflected members, so its offset is found once from the brushes themselves: the one offset where
+    // every brush holds a box with positive extents and a sphere radius between its largest extent and the box's
+    // diagonal, as the bounds built from the brush's points are.
+    ptrdiff_t ModelBoundsOffset(const std::vector<const UObject*>& Models)
+    {
+        static ptrdiff_t Offset = -1;
+        if (Offset >= 0 || Models.empty())
+        {
+            return Offset;
+        }
+        const auto Fits = [](const UObject* Model, ptrdiff_t At)
+        {
+            const float* Values = reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(Model) + At);
+            if (!Finder::IsReadable(Values, sizeof(float) * 7))
+            {
+                return false;
+            }
+            for (int32_t Index = 0; Index < 7; ++Index)
+            {
+                if (!std::isfinite(Values[Index]) || std::fabs(Values[Index]) > 1.0e7f)
+                {
+                    return false;
+                }
+            }
+            const float EX = Values[3];
+            const float EY = Values[4];
+            const float EZ = Values[5];
+            const float Radius = Values[6];
+            if (EX < 1.0f || EY < 1.0f || EZ < 1.0f)
+            {
+                return false;
+            }
+            return Radius >= std::max({ EX, EY, EZ }) - 1.0f && Radius <= std::sqrt(EX * EX + EY * EY + EZ * EZ) + 1.0f;
+        };
+        for (ptrdiff_t At = sizeof(void*) * 5; At < 0x400; At += 4)
+        {
+            if (std::all_of(Models.begin(), Models.end(), [&](const UObject* Model) { return Fits(Model, At); }))
+            {
+                Offset = At;
+                Log::Info(L"POI: UModel::Bounds at +0x{:X} (checked on {} brushes)", At, Models.size());
+                break;
+            }
+        }
+        return Offset;
     }
 
     std::wstring Describe(const FVector& V)
@@ -389,18 +626,8 @@ int32_t AFortPoiVolume::RestorePoiVolumes(UWorld* World)
         return 0;
     }
 
-    const FPlots Plots = StreamedPlots(World);
-    std::vector<FVector> Containers;
-    for (AActor* Container : UGameplayStatics::GetAllActorsOfClass(World, ABuildingContainer::StaticClass()))
-    {
-        Containers.push_back(Container->GetTransform().Translation);
-    }
-
     int32_t Epics = 0;
-    int32_t Shaped = 0;
-    int32_t Shapeless = 0;
-    int32_t Tested = 0;
-    int32_t Overlapping = 0;
+    std::vector<AFortPoiVolume*> Shapeless;
     for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(World, VolumeClass))
     {
         AFortPoiVolume* Volume = static_cast<AFortPoiVolume*>(Actor);
@@ -408,56 +635,91 @@ int32_t AFortPoiVolume::RestorePoiVolumes(UWorld* World)
         {
             continue;
         }
-        const std::wstring Name = Volume->GetName().ToStdString();
-        const std::wstring Level = Volume->GetOutermost() ? Volume->GetOutermost()->GetName().ToStdString() : std::wstring();
         if (Volume->GetBrushComponent())
         {
             ++Epics;
-            Log::Info(L"POI: {} ({}) has its brush (server assets): Epic's own shape, no fallback", Name, Volume->DescribeLocationTags());
+            Log::Info(L"POI: {} ({}) has its brush (server assets): Epic's own shape, no fallback", Volume->GetName().ToStdString(), Volume->DescribeLocationTags());
+            continue;
+        }
+        Shapeless.push_back(Volume);
+    }
+    if (Shapeless.empty())
+    {
+        Log::Info(L"POI: no volume lacks its brush ({} with Epic's)", Epics);
+        return 0;
+    }
+
+    std::vector<const UObject*> Models;
+    std::set<std::wstring> Subjects;
+    for (AFortPoiVolume* Volume : Shapeless)
+    {
+        if (const UObject* Model = reinterpret_cast<const UObject*>(static_cast<UModel*>(Volume->Brush)))
+        {
+            Models.push_back(Model);
+        }
+        if (const FSubject Subject = SubjectOf(Volume); !Subject.Name.empty())
+        {
+            Subjects.insert(Lower(Subject.Name));
+        }
+    }
+    const ptrdiff_t BoundsOffset = ModelBoundsOffset(Models);
+
+    FWorldData Data;
+    GatherPlots(World, Data);
+    GatherCameras(World, Data);
+    GatherTaggedActors(World, Subjects, Data);
+    Log::Info(L"POI: {} volumes without a brush; the world has {} streamed plots, {} arena cameras ({}), and {} actors tagged with a volume's subject", Shapeless.size(),
+        Data.Plots.size(), Data.Cameras.size(), Data.CameraSource.empty() ? L"none found" : Data.CameraSource.c_str(),
+        [&Data]() { size_t Count = 0; for (const auto& [Leaf, Places] : Data.TaggedActors) Count += Places.size(); return Count; }());
+
+    std::vector<FVector> Containers;
+    for (AActor* Container : UGameplayStatics::GetAllActorsOfClass(World, ABuildingContainer::StaticClass()))
+    {
+        Containers.push_back(Container->GetTransform().Translation);
+    }
+
+    int32_t Shaped = 0;
+    int32_t Unplaced = 0;
+    int32_t Overlapping = 0;
+    for (AFortPoiVolume* Volume : Shapeless)
+    {
+        const std::wstring Name = Volume->GetName().ToStdString();
+        const FSubject Subject = SubjectOf(Volume);
+        std::wstring Reason = L"its location tags name nothing";
+        const FResolved Resolved = Subject.Name.empty() ? FResolved() : Resolve(Volume, Subject, Data, Reason);
+        if (Resolved.Places.empty())
+        {
+            ++Unplaced;
+            Log::Warning(L"POI: {} ({}) not placed: {}", Name, Volume->DescribeLocationTags(), Reason);
             continue;
         }
 
-        // A volume of a streamed level stands on the plot that streamed it; the always-loaded ones are in the table.
-        std::vector<FAnchor> Anchors;
-        FVector BrushExtent(5000, 5000, 5000);
-        const std::vector<FPoiFallback>& Fallbacks = PoiFallbacks();
-        const auto Fallback = std::find_if(Fallbacks.begin(), Fallbacks.end(), [&Name](const FPoiFallback& Entry) { return Name == Entry.Volume; });
-        const auto StreamedBy = Plots.ByLevelPackage.find(Level);
-        if (StreamedBy != Plots.ByLevelPackage.end())
+        // The brush's size (UModel bounds, at scale 1), or what the volume covers where that is larger.
+        FVector BrushExtent;
+        const UObject* Model = reinterpret_cast<const UObject*>(static_cast<UModel*>(Volume->Brush));
+        if (BoundsOffset >= 0 && Model)
         {
-            Anchors.push_back(StreamedBy->second);
+            const float* Bounds = reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(Model) + BoundsOffset);
+            BrushExtent = FVector(Bounds[3], Bounds[4], Bounds[5]);
         }
-        else if (Fallback != Fallbacks.end())
-        {
-            BrushExtent = Fallback->BrushExtent;
-            Anchors = FindAnchors(World, Plots, *Fallback);
-        }
-        if (Anchors.empty())
-        {
-            ++Shapeless;
-            Log::Warning(L"POI: {} ({}, {}) has no brush and nothing in the client paks places it: shapeless until the server assets are there", Name, Volume->DescribeLocationTags(),
-                Level.substr(Level.rfind(L'/') + 1));
-            continue;
-        }
-
         FBox Covered;
-        FBox Spread;
-        std::wstring AnchorNames;
-        for (const FAnchor& Anchor : Anchors)
+        std::wstring PlaceNames;
+        for (const FPlace& Place : Resolved.Places)
         {
-            Covered += Anchor.Box;
-            Spread += Anchor.Location;
-            AnchorNames += (AnchorNames.empty() ? L"" : L" + ") + Anchor.Name;
+            Covered += Place.Box;
+            PlaceNames += (PlaceNames.empty() ? L"" : L" + ") + Place.Name;
         }
-        // The brush's size, centred on what it covers, standing on its base. A volume over several plots (Retail Row,
-        // Snobby Shores) is grown to reach them all, with a margin of six building cells.
-        const FVector Reach = Spread.GetExtent() + FVector(3072, 3072, 0);
-        const FVector Extent(std::max(BrushExtent.X, Anchors.size() > 1 ? Reach.X : 0.0f), std::max(BrushExtent.Y, Anchors.size() > 1 ? Reach.Y : 0.0f), BrushExtent.Z);
-        const FVector Base(Covered.GetCenter().X, Covered.GetCenter().Y, Covered.Min.Z);
-        const FBox Box(Base - FVector(Extent.X, Extent.Y, Extent.Z * 0.5f), Base + FVector(Extent.X, Extent.Y, Extent.Z * 1.5f));
+        const FVector Reach = Covered.GetExtent();
+        const FVector Extent(std::max(BrushExtent.X, Reach.X), std::max(BrushExtent.Y, Reach.Y), BrushExtent.Z > 0.0f ? BrushExtent.Z : std::max(Reach.Z, 1000.0f));
+        const FVector Centre = Covered.GetCenter();
+        // It stands on what it covers: from half its height below the base to one and a half above. Arena cameras stand
+        // above the ground, so a box from cameras reaches a full height below the lowest.
+        const float Base = Covered.Min.Z;
+        const float Below = Resolved.bFromCameras ? Extent.Z : Extent.Z * 0.5f;
+        const FBox Box(FVector(Centre.X - Extent.X, Centre.Y - Extent.Y, Base - Below), FVector(Centre.X + Extent.X, Centre.Y + Extent.Y, Base + Extent.Z * 1.5f));
         if (!InitPoiBody(Volume, Box))
         {
-            ++Shapeless;
+            ++Unplaced;
             Log::Warning(L"POI: {} ({}) couldn't be given a body", Name, Volume->DescribeLocationTags());
             continue;
         }
@@ -467,17 +729,16 @@ int32_t AFortPoiVolume::RestorePoiVolumes(UWorld* World)
         // What the manager's overlap test now says: inside at the box's centre, outside well above it.
         const bool bInside = OverlapsPoint(Volume, Box.GetCenter());
         const bool bAbove = OverlapsPoint(Volume, Box.GetCenter() + FVector(0, 0, (Box.Max.Z - Box.Min.Z) + 10000.0f));
-        ++Tested;
         Overlapping += bInside && !bAbove ? 1 : 0;
 
         const int32_t ContainersInside = static_cast<int32_t>(std::count_if(Containers.begin(), Containers.end(), [&Box](const FVector& Location) { return Box.IsInside(Location); }));
         const float LargeGameVolume = Volume->LargeGameVolume;
         const bool bShouldTickUpdate = LargeGameVolume * LargeGameVolume > (Box.Max - Box.Min).SizeSquared();
-        Log::Info(L"POI: {} at {} - {} on {} ({} containers inside{}{})", Volume->DescribeLocationTags(), Describe(Box.Min), Describe(Box.Max), AnchorNames, ContainersInside,
-            bShouldTickUpdate ? L", Visit" : L"", bInside && !bAbove ? L"" : L", OVERLAP TEST FAILED");
+        Log::Info(L"POI: {} at {} - {} from {}: {} (brush {}; {} containers inside{}{})", Volume->DescribeLocationTags(), Describe(Box.Min), Describe(Box.Max), Resolved.Source,
+            PlaceNames, BoundsOffset >= 0 ? Describe(BrushExtent) : std::wstring(L"unknown"), ContainersInside, bShouldTickUpdate ? L", Visit" : L"",
+            bInside && !bAbove ? L"" : L", OVERLAP TEST FAILED");
     }
-    Log::Info(L"POI: {} volumes given Core's fallback shape ({} of {} pass the overlap test), {} with Epic's brush, {} shapeless; {} streamed plots", Shaped, Overlapping, Tested, Epics,
-        Shapeless, Plots.All.size());
+    Log::Info(L"POI: {} volumes placed from the world's data ({} of {} pass the overlap test), {} with Epic's brush, {} not placed", Shaped, Overlapping, Shaped, Epics, Unplaced);
     return Shaped;
 #else
     return 0;

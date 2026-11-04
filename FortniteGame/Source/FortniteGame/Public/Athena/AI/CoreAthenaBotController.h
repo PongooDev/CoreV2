@@ -272,11 +272,17 @@ private:
     void MoveTowards(const FVector& Destination, float Now, float AcceptanceRadius = 100.0f);
     void StopMoving();
     void TryToUnstuck(float Now);
-    // 21.40's _Movement: a path on the invoker navmesh (AAIController::MoveToLocation with pathfinding), else steering
-    // straight at the goal, around what blocks the way (traces ahead at knee and head height: jump a low obstacle,
-    // turn aside from a wall).
-    bool FollowPath(const FVector& Destination, float Now, float AcceptanceRadius);
+    // 21.40's _Movement: a path on the invoker navmesh (AAIController::MoveToLocation with pathfinding), a far goal a leg
+    // on the navmesh at a time, the next leg asked for before the last one ends. False when the bot steers instead, and
+    // SteerGoal is where it steers to (the goal, or its nearest navmesh point when it is just off the navmesh).
+    bool FollowPath(const FVector& Destination, float Now, float AcceptanceRadius, FVector& SteerGoal);
+    bool RequestPath(const FVector& Destination, float Now, float AcceptanceRadius, FVector& SteerGoal);
+    // The last resort, without a path: straight at the goal, around what blocks the way (traces ahead at knee and head
+    // height across the capsule's width: jump a low obstacle, turn to the side that opens up from a wall).
     void SteerAroundObstacles(FVector& Direction, float Now);
+    // A closed door right ahead (on the path or the steered heading) is opened with the wall's own interaction, as a
+    // player's interact does.
+    void OpenDoorInTheWay(const FVector& Direction, float Now);
     // The pawn's EFortMovementStyle: a player sprints to get somewhere and runs while fighting (AFortPawn's
     // GetMovementSpeed reads the movement set's speed for the style; an AI controller never sets it).
     void SetMovementStyle(bool bSprint, float Now);
@@ -520,10 +526,26 @@ private:
     float PathFailedUntil = 0.0f;
     int32_t PathRequests = 0;
     int32_t PathFailures = 0;
+    // The path's end on the navmesh (a leg's, for a far goal), where the bot asked for it and when.
+    bool bOnLeg = false;
+    FVector PathTarget;
+    FVector PathRequestLocation;
+    float LastPathRequest = -100.0f;
+    // Why the bot steers rather than follows a path, for the status line.
+    const wchar_t* SteerReason = L"no goal";
+    // Where it steers to meanwhile, when not its goal (its nearest navmesh point, just off the navmesh).
+    FVector SteerTarget;
+    bool bHasSteerTarget = false;
     bool bRegisteredInvoker = false;
     float NextObstacleProbe = 0.0f;
     float AvoidUntil = 0.0f;
     FVector AvoidDirection;
+    // The side (1 left, -1 right, 0 none yet) the bot last turned to around an obstacle: it keeps to it.
+    float AvoidSide = 0.0f;
+    float NextDoorProbe = 0.0f;
+    // A door whose interaction refused the bot, left alone for a while.
+    const void* RefusedDoor = nullptr;
+    float RefusedDoorUntil = 0.0f;
     int32_t Jumps = 0;
     float NextJumpTime = 0.0f;
     int32_t DoorsOpened = 0;

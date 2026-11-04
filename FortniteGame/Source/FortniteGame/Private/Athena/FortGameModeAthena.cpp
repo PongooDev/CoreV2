@@ -697,7 +697,7 @@ namespace
         return Ids;
     }
 
-    // The answer's "bots": {count, level, health, shield, quests}, or null when the admin panel's "Force player AIs" is
+    // The answer's "bots": {count, level, health, shield, quests, fights}, or null when the admin panel's "Force player AIs" is
     // off (Core-Backend's bots block). False when it isn't there or is null.
     bool JsonBots(const std::string& Json, FCoreAthenaBotSettings& OutSettings)
     {
@@ -716,6 +716,9 @@ namespace
         OutSettings.StartingHealth = Health.empty() ? 100.0f : std::clamp(static_cast<float>(std::atof(Health.c_str())), 1.0f, 100.0f);
         OutSettings.StartingShield = Shield.empty() ? 0.0f : std::clamp(static_cast<float>(std::atof(Shield.c_str())), 0.0f, 100.0f);
         OutSettings.bEliminationsCountForQuests = BackendRequest::JsonField(Bots, "quests") != "false";
+        // A backend from before the setting sends none: the old 30%.
+        const std::string Fights = BackendRequest::JsonField(Bots, "fights");
+        OutSettings.BotFightChance = Fights.empty() ? 30 : std::clamp(std::atoi(Fights.c_str()), 0, 100);
         return OutSettings.Count > 0;
     }
 

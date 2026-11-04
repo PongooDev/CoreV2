@@ -326,6 +326,8 @@ namespace Natives
     inline void (*AFortPickup_SetPickupTarget)(AFortPickup* Pickup, AFortPawn* PickupTarget, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound) = nullptr;
     // The pickup's IFortInteractInterface::CanInteract(const FInteractionType&) slot, in the interface's own vtable.
     inline int32_t IFortInteractInterface_CanInteractIndex = -1;
+    // IFortInteractInterface::ServerOnAttemptInteract(const FInteractionType&)'s slot in the interface's own vtable.
+    inline int32_t IFortInteractInterface_ServerOnAttemptInteractIndex = -1;
     inline int32_t AFortGameModeZone_CreateAIDirectorIndex = -1;
     inline void (*AFortAIDirector_StopEncounter)(UObject* This, UObject* EncounterToStop, uint8_t EncounterStopReason, bool bForceKillAI, bool bBroadcastStop) = nullptr;
     inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;

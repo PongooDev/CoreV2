@@ -3,6 +3,7 @@
 #include "AI/Navigation/NavMeshBoundsVolume.h"
 #include "AI/Navigation/NavigationData.h"
 #include "AI/Navigation/NavigationSystem.h"
+#include "AI/Navigation/RecastNavMesh.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -16,6 +17,7 @@
 #include "UObject/UnrealType.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 
@@ -27,6 +29,9 @@ namespace
     // ENavDataGatheringModeConfig::Lazy and ERuntimeGenerationType::Dynamic.
     constexpr uint8_t GatheringLazy = 2;
     constexpr uint8_t RuntimeDynamic = 2;
+    // Tile jobs at once (Core's 🟡): each one's geometry is gathered on the game thread when it starts (see
+    // InitializeForBots), so this bounds that work per frame; the tiles still build on the worker threads.
+    constexpr int32_t MaxTileGenerationJobs = 8;
 
     bool bInitialized = false;
     bool bReady = false;
@@ -236,6 +241,29 @@ bool UAthenaNavSystem::InitializeForBots(UWorld* World, const FBox& IslandBounds
         Log::Info(L"Battle Royale navigation: {} runtime generation {} -> dynamic", NameOf(NavData), static_cast<int32_t>(NavData->RuntimeGeneration));
         NavData->RuntimeGeneration = RuntimeDynamic;
     }
+    // Each tile's geometry gathered on the game thread as its job is made (FRecastTileGenerator::Setup's GatherGeometry,
+    // the engine's default), the build itself still on a worker thread, a few jobs at once. FortNavMesh gathers it on the tile
+    // jobs' worker threads (bDoFullyAsyncNavDataGathering), and with lazy gathering a landscape component's slice for a
+    // tile is written into the component's one shared FNavigationRelevantData (3.1's DoAsyncGeometryGathering 0x1E3F3B0:
+    // GatherGeometrySlice, StoreCollisionCache appending to its CollisionData, then emptying it). Two jobs over the same
+    // component (any two neighbouring tiles) race on it: the second append breaks the first's header, and
+    // FNavigationRelevantData::IsCollisionDataValid (0x1E1D190) logs "NavOctree element has corrupted collision data!
+    // Owner:LandscapeHeightfieldCollisionComponent_N Bounds:IsValid=false" (402 times in one 3.1 match) and the tile is
+    // built without the ground. A tile emptied by the other job before its append loses the ground without the error.
+    if (ARecastNavMesh::HasTileGenerationSettings())
+    {
+        ARecastNavMesh* RecastNavMesh = reinterpret_cast<ARecastNavMesh*>(NavData);
+        const bool bWasAsync = RecastNavMesh->bDoFullyAsyncNavDataGathering;
+        const int32_t WasJobs = RecastNavMesh->MaxSimultaneousTileGenerationJobsCount;
+        RecastNavMesh->bDoFullyAsyncNavDataGathering = false;
+        RecastNavMesh->MaxSimultaneousTileGenerationJobsCount = std::clamp(WasJobs, 1, MaxTileGenerationJobs);
+        Log::Info(L"Battle Royale navigation: {} gathers tile geometry on the game thread (was {}), {} tile jobs at once (was {})", NameOf(NavData),
+            bWasAsync ? L"on the jobs' threads" : L"on the game thread", static_cast<int32_t>(RecastNavMesh->MaxSimultaneousTileGenerationJobsCount), WasJobs);
+    }
+    else
+    {
+        Log::Warning(L"Battle Royale navigation: {} has no tile generation settings; its landscape tiles may be built without the ground", NameOf(NavData));
+    }
     NavSys->RequestRegistration(NavData, true);
     NavDataPtr = FWeakObjectPtr(reinterpret_cast<UObject*>(NavData));
     Log::Info(L"Battle Royale navigation: {} for agent {} over the island, registering ({:.0f} ms)", NameOf(NavData), AgentIndex, NowMs() - Started);
@@ -303,9 +331,14 @@ void UAthenaNavSystem::RegisterNavigationInvoker(AActor* Invoker)
     }
 }
 
-bool UAthenaNavSystem::IsOnNavMesh(UWorld* World, const FVector& Location)
+bool UAthenaNavSystem::ProjectPointToNavigation(UWorld* World, const FVector& Point, FVector& OutLocation, const FVector& Extent)
 {
     ANavigationData* NavData = GetNavData(World);
+    return NavData && UNavigationSystem::K2_ProjectPointToNavigation(reinterpret_cast<UObject*>(World), Point, OutLocation, NavData, Extent);
+}
+
+bool UAthenaNavSystem::IsOnNavMesh(UWorld* World, const FVector& Location)
+{
     FVector Projected;
-    return NavData && UNavigationSystem::K2_ProjectPointToNavigation(reinterpret_cast<UObject*>(World), Location, Projected, NavData, FVector(100.0f, 100.0f, 250.0f));
+    return ProjectPointToNavigation(World, Location, Projected, FVector(100.0f, 100.0f, 250.0f));
 }

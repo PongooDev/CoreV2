@@ -24,7 +24,7 @@ class UObject;
 struct FGameplayTagContainer;
 
 // The admin panel's player bot settings (Core-Backend's bots block, sent with the warmup answer: {count, level, health,
-// shield, quests}, or null when "Force player AIs" is off).
+// shield, quests, fights}, or null when "Force player AIs" is off).
 struct FCoreAthenaBotSettings
 {
     int32_t Count = 0;
@@ -32,6 +32,8 @@ struct FCoreAthenaBotSettings
     float StartingHealth = 100.0f;
     float StartingShield = 0.0f;
     bool bEliminationsCountForQuests = true;
+    // "Bot vs bot fight chance (%)": how often a bot takes on another bot it sees (doubled, up to 100, late in a match).
+    int32_t BotFightChance = 30;
 };
 
 // A weapon, ammo or healing item pickup lying on the floor, as the bots' loot search sees it (refreshed every few

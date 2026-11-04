@@ -39,6 +39,12 @@ uint8_t AAIController::GetMoveStatus() const
     return Params.Call(const_cast<AAIController*>(this)) ? Params.Take<uint8_t>(L"ReturnValue") : 0;
 }
 
+FVector AAIController::GetImmediateMoveDestination() const
+{
+    Reflection::FParams Params(StaticFunction_GetImmediateMoveDestination(), true);
+    return Params.Call(const_cast<AAIController*>(this)) ? Params.Take<FVector>(L"ReturnValue") : FVector();
+}
+
 void AAIController::StopMovement()
 {
     Reflection::FParams Params(StaticFunction_StopMovement(), true);

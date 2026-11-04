@@ -153,6 +153,12 @@ namespace
     constexpr uint8_t StyleSprinting = 3;
     // EPathFollowingStatus::Idle.
     constexpr uint8_t PathIdle = 0;
+    // A goal farther than this is reached a leg at a time (Core's 🟡: legs end inside the 40 m of navmesh tiles built
+    // around each bot); the next leg is asked for once the bot is this close to its leg's end; a path ending this close
+    // to its goal (plus the goal's acceptance) leaves a last straight step.
+    constexpr float LegGoalDistance = 5000.0f;
+    constexpr float NextLegDistance = 1000.0f;
+    constexpr float LastStepDistance = 250.0f;
 
     // Whether the game's own fire works for a weapon (1), doesn't (0), or isn't known yet (absent): learnt from the
     // first shot with it, for every bot.
@@ -718,10 +724,9 @@ namespace
     // Battle Royale's epic rarity (EFortRarity::Quality): a bot with guns below it still searches chests for better ones.
     constexpr uint8_t EpicRarity = 3;
 
-    // How often a bot takes on another bot it sees and that isn't after it (Core's 🟡: one time in three, rolled again
-    // every 30 s per pair; more once the last few bots are left, so a match still ends).
-    constexpr int32_t BotEngageChance = 30;
-    constexpr int32_t LateGameBotEngageChance = 60;
+    // How often a bot takes on another bot it sees and that isn't after it: the admin panel's "Bot vs bot fight chance"
+    // (30% by default), rolled again every 30 s per pair; doubled once the last few bots are left, so a match still ends.
+    constexpr int32_t LateGameBotCount = 10;
     constexpr float BotEngageRollPeriod = 30.0f;
     // A bot heads for a player within this distance (Core's 🟡: 100 m), at most this many bots for one player.
     constexpr float HuntRange = 10000.0f;
@@ -1855,7 +1860,7 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
         const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
         Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps, {} doors, {} reloads, {} weapon changes, {} heals ({} healing items), {} swings, {}/{}/{} materials, {} shots stopped by walls, {} goal changes, {} POIs reached, {} hunts, {} bots let be", BotName,
             LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z, Intent, Velocity.Size(), MaxSpeedOf(Movement), Movement ? static_cast<int32_t>(Movement->MovementMode) : -1, static_cast<int32_t>(Pawn->CurrentMovementStyle),
-            bPathFollowing ? std::format(L"on a path ({} paths, {} failed)", PathRequests, PathFailures) : std::format(L"steering ({} paths, {} failed)", PathRequests, PathFailures), Pawn->GetHealth(), Pawn->GetShield(),
+            bPathFollowing ? std::format(L"on a path ({} paths, {} failed)", PathRequests, PathFailures) : std::format(L"steering ({} paths, {} failed, {})", PathRequests, PathFailures, SteerReason), Pawn->GetHealth(), Pawn->GetShield(),
             WeaponList.size(), EquippedWeapon.Get() ? NameOf(static_cast<UFortWeaponItemDefinition*>(EquippedWeapon.Get()->WeaponData)) : std::wstring(L"nothing"),
             EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps, DoorsOpened, Reloads, WeaponSwitches, Heals, Consumables.size(), Swings, Materials[0], Materials[1], Materials[2], BlockedShots, GoalChanges, POIsVisited, Hunts, BotsIgnored);
     }
@@ -2124,7 +2129,8 @@ bool FCoreAthenaBotController::WillEngageBot(FCoreAthenaBotController* Other, fl
     Hash ^= Hash >> 13;
     Hash *= 0x5bd1e995u;
     Hash ^= Hash >> 15;
-    const int32_t Chance = Manager->GetAliveBotCount() <= 10 ? LateGameBotEngageChance : BotEngageChance;
+    const int32_t BaseChance = std::clamp(Manager->GetSettings().BotFightChance, 0, 100);
+    const int32_t Chance = Manager->GetAliveBotCount() <= LateGameBotCount ? std::min(BaseChance * 2, 100) : BaseChance;
     return static_cast<int32_t>(Hash % 100u) < Chance;
 }
 
@@ -3585,10 +3591,17 @@ void FCoreAthenaBotController::MoveTowards(const FVector& Destination, float Now
     }
     // Sprinting to get there, running while it fights (and for a moment after its target leaves its sight).
     SetMovementStyle(!bFiring && Now - LastTargetInSightTime > 1.5f, Now);
-    if (FollowPath(Destination, Now, AcceptanceRadius))
+    FVector SteerGoal = Destination;
+    if (FollowPath(Destination, Now, AcceptanceRadius, SteerGoal))
     {
         bHasMoveGoal = true;
         MoveGoal = Destination;
+        // A path runs through doorways (the door's nav link): the door on the way is opened before the bot walks into it.
+        if (Now >= NextDoorProbe)
+        {
+            const FVector Next = AIController->GetImmediateMoveDestination();
+            OpenDoorInTheWay(Dist2D(Location, Next) > 10.0f ? Direction2D(Location, Next) : Direction2D(Location, Destination), Now);
+        }
         return;
     }
     if (!bHasMoveGoal || Dist2D(MoveGoal, Destination) > 150.0f)
@@ -3598,7 +3611,8 @@ void FCoreAthenaBotController::MoveTowards(const FVector& Destination, float Now
     }
     // Facing the way it goes (UpdateFacing turns it along its velocity): Battle Royale's pawn moves slower sideways and
     // backwards (its directional speed curve). Before it gets going, it turns towards the goal.
-    FVector Direction = Direction2D(Location, Destination);
+    FVector Direction = Direction2D(Location, SteerGoal);
+    OpenDoorInTheWay(Direction, Now);
     SteerAroundObstacles(Direction, Now);
     Pawn->AddMovementInput(Direction, 1.0f, false);
 #endif
@@ -3607,6 +3621,7 @@ void FCoreAthenaBotController::MoveTowards(const FVector& Destination, float Now
 void FCoreAthenaBotController::StopMoving()
 {
     bHasMoveGoal = false;
+    SteerReason = L"standing";
     if (bPathFollowing)
     {
         bPathFollowing = false;
@@ -3617,80 +3632,244 @@ void FCoreAthenaBotController::StopMoving()
     }
 }
 
-bool FCoreAthenaBotController::FollowPath(const FVector& Destination, float Now, float AcceptanceRadius)
+bool FCoreAthenaBotController::FollowPath(const FVector& Destination, float Now, float AcceptanceRadius, FVector& SteerGoal)
 {
 #if WITH_SERVER_CODE
     // 21.40's _Movement with a navmesh: AAIController::MoveToLocation with pathfinding (a partial path where the tiles
-    // around the bot end), followed by the engine's path following; when the bot is off the navmesh (its tiles not built
-    // yet) or no path comes back, it steers for a while (21.40's OnGoalOffNavMesh).
+    // around the bot end), followed by the engine's path following. A far goal is reached a leg at a time, each leg's end
+    // a point on the navmesh, and the next leg is asked for while the bot is still on the last one. It steers only when
+    // there is no navmesh to path on (off it, its tiles not built yet) or no path, for a moment (21.40's OnGoalOffNavMesh).
+    SteerGoal = Destination;
     AAIController* AIController = Controller.Get();
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    if (!Manager->HasNavigation() || State != ECoreAthenaBotState::Landed || Now < PathFailedUntil || !AIController || !Pawn)
+    if (!Manager->HasNavigation() || State != ECoreAthenaBotState::Landed || !AIController || !Pawn)
     {
         if (bPathFollowing)
         {
             StopMoving();
         }
+        SteerReason = L"no navigation";
         return false;
     }
-    if (!bPathFollowing || Dist2D(PathGoal, Destination) > 250.0f || Now >= NextPathRequest)
+    if (Now < PathFailedUntil)
     {
-        UWorld* World = Manager->GetGameMode()->GetWorld();
-        if (!UAthenaNavSystem::IsOnNavMesh(World, LocationOf(Pawn)))
+        if (bHasSteerTarget)
         {
-            PathFailedUntil = Now + 2.0f;
+            SteerGoal = SteerTarget;
+        }
+        if (bPathFollowing)
+        {
             bPathFollowing = false;
-            return false;
+            AIController->StopMovement();
         }
-        // A far goal (a POI, the circle) is reached a leg at a time: a path to a point 40 m along the way, asked again as
-        // the bot gets there (a path search across hundreds of metres of navmesh held the game thread for seconds).
-        const FVector From = LocationOf(Pawn);
-        const float Far = Dist2D(From, Destination);
-        const FVector Direction = Direction2D(From, Destination);
-        const FVector PathTarget = Far > 6000.0f ? FVector(From.X + Direction.X * 4000.0f, From.Y + Direction.Y * 4000.0f, From.Z) : Destination;
-        const EPathFollowingRequestResult::Type Result = AIController->MoveToLocation(PathTarget, Far > 6000.0f ? 300.0f : AcceptanceRadius, false, true, true, false, true);
-        ++PathRequests;
-        NextPathRequest = Now + 4.0f;
-        if (Result == EPathFollowingRequestResult::Failed)
-        {
-            ++PathFailures;
-            PathFailedUntil = Now + 3.0f;
-            bPathFollowing = false;
-            return false;
-        }
-        if (PathRequests == 1)
-        {
-            Log::Info(L"Battle Royale bots: {} follows its first path, to ({:.0f}, {:.0f}, {:.0f}) {:.0f} m away", BotName, Destination.X, Destination.Y, Destination.Z, Dist2D(LocationOf(Pawn), Destination) / 100.0f);
-        }
-        bPathFollowing = Result == EPathFollowingRequestResult::RequestSuccessful;
-        PathGoal = Destination;
-        // The bot faces along its path itself (UpdateFacing follows the velocity), turning smoothly at corners.
-        return true;
-    }
-    // The path ended short of the goal (a partial one, or it was blocked): steer, then ask again.
-    if (AIController->GetMoveStatus() == PathIdle)
-    {
-        bPathFollowing = false;
-        // A leg of a far goal done: the next one at once.
-        if (Dist2D(LocationOf(Pawn), Destination) > 6000.0f)
-        {
-            NextPathRequest = 0.0f;
-            return false;
-        }
-        PathFailedUntil = Now + 1.5f;
         return false;
     }
+    const FVector Location = LocationOf(Pawn);
+    // A far goal that drifts (the storm's point on the bot's side of the circle) keeps its leg until it moves a tenth of
+    // the way.
+    const float GoalDrift = bOnLeg ? std::max(250.0f, Dist2D(Location, Destination) * 0.1f) : 250.0f;
+    if (bPathFollowing && Dist2D(PathGoal, Destination) <= GoalDrift && Now < NextPathRequest)
+    {
+        if (AIController->GetMoveStatus() != PathIdle)
+        {
+            // Still on its way: a leg's last stretch asks for the next leg, so the bot never stops between legs.
+            if (!bOnLeg || Dist2D(Location, PathTarget) > NextLegDistance || Now - LastPathRequest < 1.0f)
+            {
+                return true;
+            }
+        }
+        else
+        {
+            bPathFollowing = false;
+            if (!bOnLeg && Dist2D(Location, Destination) <= AcceptanceRadius + LastStepDistance)
+            {
+                // The path ends at the goal's point on the navmesh, a step from the goal itself (an item by a wall, a
+                // chest's front): the last step is straight in.
+                SteerReason = L"last step";
+                PathFailedUntil = Now + 0.75f;
+                bHasSteerTarget = false;
+                return false;
+            }
+            if (Dist2D(Location, PathRequestLocation) < 150.0f)
+            {
+                // A path that took it nowhere: a partial one ending where it stood (the goal is past the navmesh built
+                // so far, or cut off from it).
+                SteerReason = L"path ends here";
+                PathFailedUntil = Now + 1.0f;
+                bHasSteerTarget = false;
+                return false;
+            }
+        }
+    }
+    // At most a few requests a second (a path that ends at once is asked for again).
+    if (Now - LastPathRequest < 0.25f)
+    {
+        return bPathFollowing;
+    }
+    return RequestPath(Destination, Now, AcceptanceRadius, SteerGoal);
+#else
+    return false;
+#endif
+}
+
+bool FCoreAthenaBotController::RequestPath(const FVector& Destination, float Now, float AcceptanceRadius, FVector& SteerGoal)
+{
+#if WITH_SERVER_CODE
+    AAIController* AIController = Controller.Get();
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UWorld* World = Manager->GetGameMode()->GetWorld();
+    const FVector Location = LocationOf(Pawn);
+    LastPathRequest = Now;
+    const auto Steer = [&](const wchar_t* Reason, float Seconds)
+    {
+        if (bPathFollowing)
+        {
+            bPathFollowing = false;
+            AIController->StopMovement();
+        }
+        SteerReason = Reason;
+        PathFailedUntil = Now + Seconds;
+        bHasSteerTarget = false;
+        return false;
+    };
+
+    // The bot on the navmesh. Just off it (pressed into the edge the navmesh keeps from walls, on a prop, by a hole),
+    // it goes straight back onto its nearest point and asks again from there.
+    FVector OnNavMesh;
+    if (!UAthenaNavSystem::ProjectPointToNavigation(World, Location, OnNavMesh, FVector(100.0f, 100.0f, 250.0f)))
+    {
+        if (UAthenaNavSystem::ProjectPointToNavigation(World, Location, OnNavMesh, FVector(600.0f, 600.0f, 400.0f)))
+        {
+            Steer(L"back to the navmesh", 0.5f);
+            SteerGoal = OnNavMesh;
+            SteerTarget = OnNavMesh;
+            bHasSteerTarget = true;
+            return false;
+        }
+        return Steer(L"off the navmesh", 1.0f);
+    }
+
+    // The path's end on the navmesh. A far goal: a leg 30 m along the way (inside the 40 m of tiles built around the
+    // bot), projected onto the navmesh with the height between, else a shorter or a turned one. A path search across
+    // hundreds of metres held the game thread for seconds. A near goal: its own point on the navmesh, near it.
+    const bool bFar = Dist2D(Location, Destination) > LegGoalDistance;
+    FVector Target;
+    bool bHasTarget = false;
+    if (bFar)
+    {
+        const FVector Way = Direction2D(Location, Destination);
+        for (const float Length : { 3000.0f, 2000.0f, 1200.0f })
+        {
+            for (const float Angle : { 0.0f, 20.0f, -20.0f, 45.0f, -45.0f })
+            {
+                const FVector Turned = RotateYaw(Way, Angle);
+                const FVector Point(Location.X + Turned.X * Length, Location.Y + Turned.Y * Length, Location.Z);
+                if (UAthenaNavSystem::ProjectPointToNavigation(World, Point, Target, FVector(200.0f, 200.0f, 2000.0f)))
+                {
+                    bHasTarget = true;
+                    break;
+                }
+            }
+            if (bHasTarget)
+            {
+                break;
+            }
+        }
+    }
+    else
+    {
+        bHasTarget = UAthenaNavSystem::ProjectPointToNavigation(World, Destination, Target, FVector(300.0f, 300.0f, 400.0f))
+            || UAthenaNavSystem::ProjectPointToNavigation(World, Destination, Target, FVector(800.0f, 800.0f, 1500.0f));
+    }
+    if (!bHasTarget)
+    {
+        ++PathFailures;
+        return Steer(bFar ? L"no leg on the navmesh" : L"goal off the navmesh", 1.0f);
+    }
+
+    const EPathFollowingRequestResult::Type Result = AIController->MoveToLocation(Target, bFar ? 150.0f : AcceptanceRadius, false, true, false, false, true);
+    ++PathRequests;
+    if (Result == EPathFollowingRequestResult::Failed)
+    {
+        ++PathFailures;
+        return Steer(L"no path", 1.0f);
+    }
+    if (Result == EPathFollowingRequestResult::AlreadyAtGoal)
+    {
+        // At the goal's point on the navmesh already: the last step straight in.
+        return Steer(L"last step", 0.75f);
+    }
+    if (PathRequests == 1)
+    {
+        Log::Info(L"Battle Royale bots: {} follows its first path, to ({:.0f}, {:.0f}, {:.0f}) {:.0f} m away", BotName, Destination.X, Destination.Y, Destination.Z, Dist2D(Location, Destination) / 100.0f);
+    }
+    bPathFollowing = true;
+    bOnLeg = bFar;
+    PathGoal = Destination;
+    PathTarget = Target;
+    PathRequestLocation = Location;
+    NextPathRequest = Now + (bFar ? 6.0f : 4.0f);
+    SteerReason = L"";
+    // The bot faces along its path itself (UpdateFacing follows the velocity), turning smoothly at corners.
     return true;
 #else
     return false;
 #endif
 }
 
+void FCoreAthenaBotController::OpenDoorInTheWay(const FVector& Direction, float Now)
+{
+#if WITH_SERVER_CODE
+    // A player walks up to a closed door and presses interact (AFortPlayerController::ServerAttemptInteract on the door
+    // component). The bot does the same through the wall's IFortInteractInterface::ServerOnAttemptInteract: the game's own
+    // door code swings it away from the bot, turns its collision off and its nav link open, as for a player, and closes
+    // it again only as the game does for players. A door is left open behind the bot, as players leave them.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Now < NextDoorProbe || Direction.SizeSquared() < 0.01f || !ABuildingWall::HasDoor())
+    {
+        return;
+    }
+    NextDoorProbe = Now + 0.25f;
+    const FVector Location = LocationOf(Pawn);
+    // Waist height, a door's reach ahead (a player's interact reaches about 2.5 m).
+    const FVector Start(Location.X, Location.Y, Location.Z);
+    UObject* Hit = nullptr;
+    if (!IsBlocked(Pawn, Start, Start + Direction * 220.0f, &Hit) || !Hit)
+    {
+        return;
+    }
+    ABuildingWall* Wall = Cast<ABuildingWall>(Hit);
+    if (!Wall || !Wall->IsDoor() || Wall->bDoorOpen || (Wall == RefusedDoor && Now < RefusedDoorUntil))
+    {
+        return;
+    }
+    FaceTowards(LocationOf(reinterpret_cast<AActor*>(Wall)), Now, 0.3f);
+    if (Wall->ServerOnAttemptInteract(reinterpret_cast<AFortPawn*>(Pawn)))
+    {
+        ++DoorsOpened;
+        static int32_t LoggedDoors = 0;
+        if (LoggedDoors++ < 12)
+        {
+            Log::Info(L"Battle Royale bots: {} opens {} ({})", BotName, NameOf(reinterpret_cast<UObject*>(Wall)), Wall->bDoorOpen ? L"open" : L"still closed");
+        }
+        return;
+    }
+    RefusedDoor = Wall;
+    RefusedDoorUntil = Now + 5.0f;
+    static int32_t LoggedRefusals = 0;
+    if (LoggedRefusals++ < 12)
+    {
+        Log::Info(L"Battle Royale bots: {} can't open {} (the door's interaction refused it)", BotName, NameOf(reinterpret_cast<UObject*>(Wall)));
+    }
+#endif
+}
+
 void FCoreAthenaBotController::SteerAroundObstacles(FVector& Direction, float Now)
 {
 #if WITH_SERVER_CODE
-    // Without a path: a trace ahead at knee height. Something low (the head-height trace is clear) is jumped; a wall or
-    // a rock turns the bot to the nearest clear heading for a moment.
+    // Without a path: traces ahead at knee height from the capsule's middle and both its sides. Something low (the
+    // head-height traces are clear) is jumped; a wall or a rock turns the bot, for a moment, to the side that opens up
+    // first, with the most room that way, keeping to the side it turned to last (no back and forth along a wall).
     AFortPlayerPawnAthena* Pawn = GetPawn();
     if (!Pawn || Direction.SizeSquared() < 0.01f)
     {
@@ -3721,20 +3900,35 @@ void FCoreAthenaBotController::SteerAroundObstacles(FVector& Direction, float No
     const FVector Location = LocationOf(Pawn);
     const FVector Knee(Location.X, Location.Y, Location.Z - 30.0f);
     const FVector Head(Location.X, Location.Y, Location.Z + 70.0f);
+    // The room ahead along Way: the shortest of the traces at knee height from the capsule's middle and its two sides
+    // (36 uu), and at head height from its middle, up to Length.
+    const auto Room = [&](const FVector& Way, float Length)
+    {
+        const FVector Side = RotateYaw(Way, 90.0f) * 36.0f;
+        float Shortest = Length;
+        for (const FVector& Start : { Knee, Knee + Side, Knee - Side, Head })
+        {
+            FVector Hit;
+            UObject* HitActor = nullptr;
+            UObject* HitComponent = nullptr;
+            if (UKismetSystemLibrary::LineTraceSingle(Pawn, Start, Start + Way * Length, 0, false, true, Hit, HitActor, HitComponent) && !(HitActor && Cast<APawn>(HitActor)))
+            {
+                Shortest = std::min(Shortest, Dist2D(Start, Hit));
+            }
+        }
+        return Shortest;
+    };
     UObject* Obstacle = nullptr;
-    if (!IsBlocked(Pawn, Knee, Knee + Direction * 130.0f, &Obstacle))
+    if (!IsBlocked(Pawn, Knee, Knee + Direction * 150.0f, &Obstacle))
     {
         return;
     }
-    // Closed doors are left alone: Core's opening (bDoorOpen and its collision set by hand) left doors players couldn't
-    // open again and without collision (#233). With the navmesh a bot walks around them; the door's own interaction
-    // needs a player controller.
     static int32_t LoggedObstacles = 0;
     if (Obstacle && LoggedObstacles++ < 12)
     {
         Log::Info(L"Battle Royale bots: {} is held up by {} ({})", BotName, NameOf(Obstacle), NameOf(Obstacle->GetClass()));
     }
-    if (!IsBlocked(Pawn, Head, Head + Direction * 130.0f))
+    if (!IsBlocked(Pawn, Head, Head + Direction * 150.0f))
     {
         if (Now >= NextJumpTime)
         {
@@ -3744,16 +3938,34 @@ void FCoreAthenaBotController::SteerAroundObstacles(FVector& Direction, float No
         }
         return;
     }
-    for (const float Angle : { 40.0f, -40.0f, 75.0f, -75.0f, 110.0f, -110.0f })
+    // Each side's first clear heading (3 m of room), the smaller turn winning; the same turn on both sides goes to the
+    // one with more room, then the side it took last.
+    constexpr float Clear = 300.0f;
+    float BestAngle = 0.0f;
+    float BestRoom = -1.0f;
+    for (const float Turn : { 30.0f, 55.0f, 80.0f, 105.0f, 135.0f })
     {
-        const FVector Turned = RotateYaw(Direction, Angle);
-        if (!IsBlocked(Pawn, Knee, Knee + Turned * 220.0f) && !IsBlocked(Pawn, Head, Head + Turned * 220.0f))
+        for (const float Side : { AvoidSide < 0.0f ? -1.0f : 1.0f, AvoidSide < 0.0f ? 1.0f : -1.0f })
         {
-            AvoidDirection = Turned;
-            AvoidUntil = Now + 0.7f;
-            Direction = Turned;
-            return;
+            const float Space = Room(RotateYaw(Direction, Turn * Side), 500.0f);
+            if (Space >= Clear && Space > BestRoom + 50.0f)
+            {
+                BestAngle = Turn * Side;
+                BestRoom = Space;
+            }
         }
+        if (BestRoom >= 0.0f)
+        {
+            break;
+        }
+    }
+    if (BestRoom >= 0.0f)
+    {
+        AvoidSide = BestAngle > 0.0f ? 1.0f : -1.0f;
+        AvoidDirection = RotateYaw(Direction, BestAngle);
+        AvoidUntil = Now + 0.4f + 0.004f * std::fabs(BestAngle);
+        Direction = AvoidDirection;
+        return;
     }
     AvoidDirection = Direction * -1.0f;
     AvoidUntil = Now + 1.0f;
@@ -4898,9 +5110,11 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
         ++Jumps;
         if (StuckChecks == 2 && bPathFollowing)
         {
-            // The path doesn't get it anywhere: steer for a while.
+            // The path doesn't get it anywhere (something the navmesh doesn't know of is in the way): steer a moment.
             StopMoving();
-            PathFailedUntil = Now + 4.0f;
+            SteerReason = L"stuck on its path";
+            PathFailedUntil = Now + 2.0f;
+            bHasSteerTarget = false;
         }
         if (StuckChecks == 2 && !HarvestTarget.Get() && FindBuildingInTheWay(Now))
         {

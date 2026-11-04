@@ -245,4 +245,6 @@ namespace Finder
     bool ResolveSpawnGroupUpgradeLive(ptrdiff_t AvailableUpgradesOffset, ptrdiff_t ActiveSpawnGroupsOffset, ptrdiff_t TotalGroupCostOffset, ptrdiff_t PawnUpgradesOffset, ptrdiff_t ModifiersForAllPawnsOffset, FSpawnGroupUpgradeSites& OutSites);
     bool ResolveDurabilityLive(UFunction* ServerModDurability, UObject* PlayerControllerDefault, ptrdiff_t EntryDurabilityOffset, ptrdiff_t PendingDestroyDueToDurabilityOffset, uint8_t PendingDestroyDueToDurabilityMask);
     bool ResolvePickupCanInteractLive(ptrdiff_t PickedUpOffset);
+    // IFortInteractInterface::ServerOnAttemptInteract's interface slot and UObject::GetInterfaceAddress.
+    bool ResolveServerOnAttemptInteractLive();
 }

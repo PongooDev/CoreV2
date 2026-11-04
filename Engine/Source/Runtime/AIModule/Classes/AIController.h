@@ -26,6 +26,7 @@ class AAIController : public AController
     DefineUFunction(K2_SetFocus)
     DefineUFunction(K2_ClearFocus)
     DefineUFunction(GetMoveStatus)
+    DefineUFunction(GetImmediateMoveDestination)
     DefineUFunction(StopMovement)
 
 public:
@@ -43,6 +44,8 @@ public:
     void ClearFocus();
     // EPathFollowingStatus: 0 Idle, 1 Waiting, 2 Paused, 3 Moving.
     uint8_t GetMoveStatus() const;
+    // The end of the path segment the pawn is walking (its own location when it isn't following a path).
+    FVector GetImmediateMoveDestination() const;
     // AController::StopMovement: the path following stops.
     void StopMovement();
 };

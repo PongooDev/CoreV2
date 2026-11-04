@@ -35,6 +35,9 @@ public:
     // 8.30's AAthenaNavInvokerBox / RegisterNavGenerationObserver: navigation is generated around Invoker while it lives.
     static void RegisterNavigationInvoker(AActor* Invoker);
 
+    // UNavigationSystem::ProjectPointToNavigation on the bots' navmesh: the nearest navmesh point within Extent of Point,
+    // or false when there is none there (no tile built yet, or inside geometry).
+    static bool ProjectPointToNavigation(UWorld* World, const FVector& Point, FVector& OutLocation, const FVector& Extent);
     // Whether there is navmesh under Location (its tile is built).
     static bool IsOnNavMesh(UWorld* World, const FVector& Location);
 };

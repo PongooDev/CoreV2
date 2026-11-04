@@ -10064,6 +10064,44 @@ bool Finder::ResolvePickupCanInteractLive(ptrdiff_t PickedUpOffset)
     return true;
 }
 
+bool Finder::ResolveServerOnAttemptInteractLive()
+{
+    if (Natives::IFortInteractInterface_ServerOnAttemptInteractIndex >= 0 && Natives::UObject_GetInterfaceAddress)
+    {
+        return true;
+    }
+    static bool bTried = false;
+    if (bTried)
+    {
+        return false;
+    }
+    bTried = true;
+
+    // IFortInteractInterface::execServerOnAttemptInteract reads the FInteractionType and ends in the interface's own
+    // virtual, `call [rax+disp8]` on the vtable of the interface it is given (3.1 0x1051530: call [rax+28h], slot 5;
+    // the wall's override there is 0xA86DB0).
+    if (!Natives::UObject_GetInterfaceAddress)
+    {
+        ResolveSpottingLive(FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortSpottableActorInterface"));
+    }
+    UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortInteractInterface:ServerOnAttemptInteract");
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    int32_t Slot = -1;
+    for (uintptr_t Site = ExecEnd ? FindInstruction(Exec, ExecEnd, { 0xFF, 0x50, -1 }) : 0; Site; Site = FindInstruction(Site + 1, ExecEnd, { 0xFF, 0x50, -1 }))
+    {
+        Slot = Byte(Site + 2) % 8 == 0 ? Byte(Site + 2) / 8 : -1;
+    }
+    if (Slot < 2 || !Natives::UObject_GetInterfaceAddress)
+    {
+        Log::Error(L"Finder: IFortInteractInterface::ServerOnAttemptInteract not found (exec {}, slot {}, GetInterfaceAddress {})", Exec != 0, Slot, Natives::UObject_GetInterfaceAddress != nullptr);
+        return false;
+    }
+    Natives::IFortInteractInterface_ServerOnAttemptInteractIndex = Slot;
+    Log::Info(L"Finder: IFortInteractInterface::ServerOnAttemptInteract is slot {}", Slot);
+    return true;
+}
+
 namespace
 {
     // "Opcode ModRM disp32" at Site, addressing [base + disp32] (ModRM mod 10, no SIB byte), with ModRM's reg field Reg

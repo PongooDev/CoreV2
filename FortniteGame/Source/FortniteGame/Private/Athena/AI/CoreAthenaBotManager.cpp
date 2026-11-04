@@ -171,16 +171,17 @@ void FCoreAthenaBotManager::SetSettings(bool bInEnabled, const FCoreAthenaBotSet
 {
     const bool bChanged = !bHasSettings || bInEnabled != bEnabled || InSettings.Count != Settings.Count || InSettings.Level != Settings.Level
         || InSettings.StartingHealth != Settings.StartingHealth || InSettings.StartingShield != Settings.StartingShield
-        || InSettings.bEliminationsCountForQuests != Settings.bEliminationsCountForQuests;
+        || InSettings.bEliminationsCountForQuests != Settings.bEliminationsCountForQuests || InSettings.BotFightChance != Settings.BotFightChance;
     bHasSettings = true;
     if (!bChanged)
     {
         return;
     }
-    // The match keeps the bots it has once the bus has left.
+    // The match keeps the bots it has once the bus has left; how they behave follows the panel.
     if (bAircraftStarted)
     {
         Settings.bEliminationsCountForQuests = InSettings.bEliminationsCountForQuests;
+        Settings.BotFightChance = InSettings.BotFightChance;
         return;
     }
     bEnabled = bInEnabled;
@@ -193,8 +194,8 @@ void FCoreAthenaBotManager::SetSettings(bool bInEnabled, const FCoreAthenaBotSet
     }
     if (bEnabled)
     {
-        Log::Info(L"Battle Royale bots: Force player AIs is on: up to {} bots, level {}, {:.0f} health, {:.0f} shield, eliminations {} for quests", Settings.Count, Settings.Level,
-            Settings.StartingHealth, Settings.StartingShield, Settings.bEliminationsCountForQuests ? L"count" : L"don't count");
+        Log::Info(L"Battle Royale bots: Force player AIs is on: up to {} bots, level {}, {:.0f} health, {:.0f} shield, eliminations {} for quests, {}% bot fights", Settings.Count, Settings.Level,
+            Settings.StartingHealth, Settings.StartingShield, Settings.bEliminationsCountForQuests ? L"count" : L"don't count", Settings.BotFightChance);
     }
     else
     {

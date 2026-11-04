@@ -204,17 +204,22 @@ void UFortServerBotManagerAthena::SetSettings(bool bInEnabled, const FFortAthena
 
 FAIBotSkills UFortServerBotManagerAthena::SkillsForLevel(int32_t Level)
 {
-    // Core's levels 🟡 (8.30's FAIBotSkills values don't ship): level 1 reacts slowly, shoots slowly and misses a lot;
-    // level 10 reacts in a fifth of a second and aims within a few units at 10 m.
+    // Core's levels 🟡 (8.30's FAIBotSkills values and 21.40's aiming skill sets don't ship): level 1 reacts slowly,
+    // shoots slowly and misses a lot; level 10 reacts in a quarter of a second and tracks closely. The default level 5
+    // aims for a player's hit rate, a quarter to two fifths of its assault rifle shots at mid range (10-35 m; a
+    // headless 3.1 match: 23%, 16 of 69, against strafing bots); testers found the old error, which shrank to nothing
+    // up close and at high levels, an aimbot.
     const float T = std::clamp((static_cast<float>(Level) - 1.0f) / 9.0f, 0.0f, 1.0f);
     FAIBotSkills Skills;
     Skills.MaxTimeBetweenShots = FMath::Lerp(0.9f, 0.25f, T);
     Skills.DeviationTimeBetweenShots = FMath::Lerp(0.5f, 0.1f, T);
-    Skills.MaxTrackingReactionTime = FMath::Lerp(1.2f, 0.2f, T);
-    Skills.MaxTrackingInterpTime = FMath::Lerp(0.6f, 0.1f, T);
+    Skills.MaxTrackingReactionTime = FMath::Lerp(1.2f, 0.25f, T);
+    Skills.MaxTrackingInterpTime = FMath::Lerp(0.25f, 0.05f, T);
     Skills.MaxTrackingPredictionError = FMath::Lerp(250.0f, 30.0f, T);
     Skills.SightRange = FMath::Lerp(4000.0f, 9000.0f, T);
-    Skills.AimErrorAt10m = FMath::Lerp(140.0f, 12.0f, T);
+    Skills.MaxTrackingOffsetError = FMath::Lerp(70.0f, 20.0f, T);
+    Skills.MaxTrackingDistanceNearError = FMath::Lerp(35.0f, 8.0f, T);
+    Skills.MaxTrackingDistanceFarError = FMath::Lerp(50.0f, 12.0f, T);
     return Skills;
 }
 
@@ -961,23 +966,6 @@ void UFortServerBotManagerAthena::GatherLandingSpots()
     // AFortPoiVolumes tagged Athena.Location.POI.* (Core gives the shapeless ones a box, FortPoiVolume.cpp); the loot
     // elsewhere is in clusters of chests (houses and farms), which count as spots too.
     LandingSpots.clear();
-    const auto LootAround = [this](const FVector& Center, float Radius)
-    {
-        float Value = 0.0f;
-        for (const FFortAthenaBotContainer& Container : Containers)
-        {
-            const float Dx = Container.Location.X - Center.X;
-            const float Dy = Container.Location.Y - Center.Y;
-            Value += Dx * Dx + Dy * Dy < Radius * Radius ? (Container.bChest ? 1.0f : 0.3f) : 0.0f;
-        }
-        for (const FFortAthenaBotLoot& Entry : Loot)
-        {
-            const float Dx = Entry.Location.X - Center.X;
-            const float Dy = Entry.Location.Y - Center.Y;
-            Value += Entry.bWeapon && Dx * Dx + Dy * Dy < Radius * Radius ? 0.3f : 0.0f;
-        }
-        return Value;
-    };
     size_t Named = 0;
     for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(GetGameMode(), AFortPoiVolume::StaticClass()))
     {
@@ -1048,6 +1036,120 @@ void UFortServerBotManagerAthena::GatherLandingSpots()
     }
     Log::Info(L"Battle Royale bots: {} landing spots, {} of them named locations; the richest: {}", LandingSpots.size(), Named, Top);
 #endif
+}
+
+float UFortServerBotManagerAthena::LootAround(const FVector& Center, float Radius) const
+{
+    float Value = 0.0f;
+    for (const FFortAthenaBotContainer& Container : Containers)
+    {
+        const float Dx = Container.Location.X - Center.X;
+        const float Dy = Container.Location.Y - Center.Y;
+        Value += Dx * Dx + Dy * Dy < Radius * Radius ? (Container.bChest ? 1.0f : 0.3f) : 0.0f;
+    }
+    for (const FFortAthenaBotLoot& Entry : Loot)
+    {
+        const float Dx = Entry.Location.X - Center.X;
+        const float Dy = Entry.Location.Y - Center.Y;
+        Value += Entry.bWeapon && Dx * Dx + Dy * Dy < Radius * Radius ? 0.3f : 0.0f;
+    }
+    return Value;
+}
+
+int32_t UFortServerBotManagerAthena::FindNextBestPOI(const FVector& From, const std::vector<int32_t>& Visited) const
+{
+#if WITH_SERVER_CODE
+    // 21.40's UFortAthenaAIBotEvaluator_SelectNextPOI::FindNextBestPOI: the spots are the world's own (its AFortPoiVolumes'
+    // Athena.Location.POI.* tags and its chest clusters, GatherLandingSpots), so every build's map has its own. A spot
+    // counts with loot still in it (its containers unsearched), inside the next safe zone, and near (Core's 🟡: within
+    // 400 m); the loot left weighs it, the distance (squared) and the bots already there count against it.
+    constexpr float MaxDistance = 40000.0f;
+    FVector ZoneCenter;
+    float ZoneRadius = 0.0f;
+    const bool bHasZone = GetSafeZone(ZoneCenter, ZoneRadius);
+    int32_t Best = -1;
+    float BestScore = 0.0f;
+    for (size_t Index = 0; Index < LandingSpots.size(); ++Index)
+    {
+        const FFortAthenaBotLandingSpot& Spot = LandingSpots[Index];
+        if (std::find(Visited.begin(), Visited.end(), static_cast<int32_t>(Index)) != Visited.end())
+        {
+            continue;
+        }
+        const float Dx = Spot.Location.X - From.X;
+        const float Dy = Spot.Location.Y - From.Y;
+        const float Distance = std::sqrt(Dx * Dx + Dy * Dy);
+        if (Distance > MaxDistance || Distance < Spot.Radius * 0.5f)
+        {
+            continue;
+        }
+        if (bHasZone)
+        {
+            const float Zx = Spot.Location.X - ZoneCenter.X;
+            const float Zy = Spot.Location.Y - ZoneCenter.Y;
+            if (std::sqrt(Zx * Zx + Zy * Zy) > ZoneRadius * 0.85f)
+            {
+                continue;
+            }
+        }
+        const float Value = LootAround(Spot.Location, Spot.Radius);
+        if (Value < 1.0f)
+        {
+            continue;
+        }
+        int32_t BotsThere = 0;
+        for (const auto& Bot : PlayerBots)
+        {
+            if (Bot->GetState() != EFortAthenaAIBotState::Landed || !Bot->GetPawn())
+            {
+                continue;
+            }
+            const FVector Other = LocationOf(reinterpret_cast<const AActor*>(Bot->GetPawn()));
+            const float Ox = Other.X - Spot.Location.X;
+            const float Oy = Other.Y - Spot.Location.Y;
+            BotsThere += Bot->GetNextPOI() == static_cast<int32_t>(Index) || Ox * Ox + Oy * Oy < Spot.Radius * Spot.Radius ? 1 : 0;
+        }
+        // The nearest come first (a big named location 300 m off outscored the chests next door): the weight falls with
+        // the square of the distance in 100 m.
+        const float Hundreds = Distance / 10000.0f;
+        const float Score = Value * RandomRange(0.8f, 1.2f) / (1.0f + Hundreds * Hundreds) / (1.0f + 0.5f * static_cast<float>(BotsThere));
+        if (Score > BestScore)
+        {
+            BestScore = Score;
+            Best = static_cast<int32_t>(Index);
+        }
+    }
+    return Best;
+#else
+    return -1;
+#endif
+}
+
+int32_t UFortServerBotManagerAthena::FindPOIAt(const FVector& Location) const
+{
+    int32_t Found = -1;
+    float Nearest = 1e18f;
+    for (size_t Index = 0; Index < LandingSpots.size(); ++Index)
+    {
+        const FFortAthenaBotLandingSpot& Spot = LandingSpots[Index];
+        const float DistanceSquared = (Spot.Location.X - Location.X) * (Spot.Location.X - Location.X) + (Spot.Location.Y - Location.Y) * (Spot.Location.Y - Location.Y);
+        if (DistanceSquared < Spot.Radius * Spot.Radius && DistanceSquared < Nearest)
+        {
+            Nearest = DistanceSquared;
+            Found = static_cast<int32_t>(Index);
+        }
+    }
+    return Found;
+}
+
+const FFortAthenaBotLandingSpot* UFortServerBotManagerAthena::GetPOI(int32_t Index) const
+{
+    return Index >= 0 && Index < static_cast<int32_t>(LandingSpots.size()) ? &LandingSpots[static_cast<size_t>(Index)] : nullptr;
+}
+
+int32_t UFortServerBotManagerAthena::CountHuntersOf(const AFortPawn* Target, const AFortAthenaAIBotController* Except) const
+{
+    return static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [Target, Except](const auto& Bot) { return Bot.get() != Except && Bot->IsAlive() && Bot->GetHuntTarget() == Target; }));
 }
 
 void UFortServerBotManagerAthena::UpdateFlightPath(float Now)

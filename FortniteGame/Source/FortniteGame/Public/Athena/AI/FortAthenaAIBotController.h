@@ -44,9 +44,16 @@ struct FAIBotSkills
     float MaxTrackingReactionTime = 0.6f;
     float MaxTrackingInterpTime = 0.3f;
     float MaxTrackingPredictionError = 150.0f;
-    // Core's: how far the bot sees an enemy, and how far off (in units, at 10 m) its aim strays.
+    // Core's: how far the bot sees an enemy.
     float SightRange = 6000.0f;
-    float AimErrorAt10m = 60.0f;
+    // 21.40's UFortAthenaAIBotAimingSkillSet / FWeaponAccuracy terms (its values are server-only content, so Core's 🟡):
+    // the spread of a shot at the target (one standard deviation, in units across the line of fire), a base
+    // (MaxTrackingOffsetError) plus a share per 10 m up to 25 m (MaxTrackingDistanceNearError) and per 10 m beyond it
+    // (MaxTrackingDistanceFarError). The vertical spread is MaxTrackingHeightOffsetError times the horizontal.
+    float MaxTrackingOffsetError = 48.0f;
+    float MaxTrackingDistanceNearError = 23.0f;
+    float MaxTrackingDistanceFarError = 33.0f;
+    float MaxTrackingHeightOffsetError = 0.6f;
 };
 
 // 8.30's EAlertLevel (the controller's CurrentAlertLevel, OnPerceptionSensed's state machine).
@@ -81,6 +88,24 @@ enum class EFortAthenaAIBotWeaponType : uint8_t
     Launcher,
 };
 
+// What a bot on the ground is set on doing, out of a fight (Core's: 21.40's behaviour tree runs one evaluator's task at a
+// time). A goal it chose is kept until it is done or no longer applies, so the bot doesn't turn back and forth between
+// two of them; only something close by (a pickup within 15 m, healing, a teammate down) comes first meanwhile.
+enum class EFortAthenaAIBotGoal : uint8_t
+{
+    None,
+    Loot,
+    Search,
+    Storm,
+    Regroup,
+    Harvest,
+    // 21.40's UFortAthenaAIBotEvaluator_Investigate: an opponent the bot heads for.
+    Hunt,
+    // 21.40's UFortAthenaAIBotEvaluator_SelectNextPOI: the next named location or chest cluster, once this one is looted.
+    TravelToPOI,
+    Wander,
+};
+
 // One of the bot's weapons (8.30's FFortAthenaInventoryInformation is the weapon list's entry: EquipMaxDistance and
 // WeaponDefinition; the item itself lives in the controller's own AFortInventory there, in Core's brain here).
 struct FFortAthenaAIBotWeapon
@@ -89,6 +114,8 @@ struct FFortAthenaAIBotWeapon
     UFortItemDefinition* AmmoDefinition = nullptr;
     FGuid ItemGuid;
     int32_t LoadedAmmo = 0;
+    // The definition's EFortRarity (UFortItemDefinition::GetRarity: 0 common to 4 legendary in Battle Royale).
+    uint8_t Rarity = 0;
     // From its stats row (FFortBaseWeaponStats::DmgPB, ClipSize, ReloadTime, ReloadType;
     // FFortRangedWeaponStats::BulletsPerCartridge and FiringRate).
     int32_t ClipSize = 0;
@@ -135,6 +162,11 @@ public:
     bool IsAlive() const { return State != EFortAthenaAIBotState::Dead; }
     const std::wstring& GetBotName() const { return BotName; }
     int32_t GetKills() const { return Kills; }
+    // The enemy the bot is fighting, the opponent it is heading for (Investigate), and the POI it is travelling to (an
+    // index into the manager's spots, or -1).
+    AFortPawn* GetCurrentTarget() const { return CurrentTarget.Get(); }
+    AFortPawn* GetHuntTarget() const { return Goal == EFortAthenaAIBotGoal::Hunt ? HuntTarget.Get() : nullptr; }
+    int32_t GetNextPOI() const { return NextPOI; }
     // The outfit the bot wears this match (an AthenaCharacter item: its hero gives the bot its class tags).
     UObject* GetLoadoutCharacter() const { return LoadoutCharacter; }
 
@@ -211,6 +243,21 @@ private:
     void FreeFalling(float Now);
     // 8.30's perception (OnPerceptionSensed): the nearest visible enemy, and the alert level.
     void UpdateCurrentTarget(float Now);
+    // Whether the bot takes on another bot it sees (Core's: players come first, so a match lasts longer for them and
+    // the kills are theirs): one that is shooting at it or going for it always; otherwise now and then.
+    bool WillEngageBot(AFortAthenaAIBotController* Other, float Now) const;
+    // Out of a fight: the goal the bot pursues (ChooseGoal picks a new one when the last is done), and PursueGoal's step
+    // towards it, false when it is done or no longer applies.
+    const wchar_t* ChooseGoal(float Now);
+    bool PursueGoal(EFortAthenaAIBotGoal InGoal, float Now);
+    void SetGoal(EFortAthenaAIBotGoal NewGoal, float Now);
+    // 21.40's UFortAthenaAIBotEvaluator_Investigate: an armed bot with nothing left to loot heads for a player near it
+    // (a few bots at most go for the same one), and for an enemy it just lost sight of.
+    bool Investigate(float Now);
+    // 21.40's UFortAthenaAIBotEvaluator_SelectNextPOI (FindNextBestPOI, SetNextDestination, ClearNextDestination): the
+    // spot looted out, the next one nearby inside the safe zone (UFortServerBotManagerAthena::FindNextBestPOI).
+    bool SelectNextPOI(float Now);
+    void ClearNextDestination();
     // 8.30's _RangeAttack and _ManageWeapon, 21.40's _MeleeAttack.
     bool RangeAttack(float Now);
     void ManageWeapon(float Now);
@@ -242,8 +289,8 @@ private:
     bool IsTargetBoxedIn(AFortPawn* Target) const;
     void LogMovementDiagnostics();
     // 21.40's _Loot for containers: walk to the nearest unsearched chest or ammo box and search it (its own
-    // ServerOnAttemptInteract), then take what comes out.
-    bool SearchContainer(float Now);
+    // ServerOnAttemptInteract), then take what comes out. A new one is looked for within MaxDistance.
+    bool SearchContainer(float Now, float MaxDistance = 5000.0f);
     // The storm hurts a bot outside its circle as it does players (Core's, when the game's own storm damage doesn't
     // reach the bot's pawn).
     void TakeStormDamage(float Now);
@@ -457,6 +504,7 @@ private:
     float LootTargetTime = 0.0f;
     float LastLootPursuit = 0.0f;
     float ContainerTargetTime = 0.0f;
+    float LastContainerPursuit = 0.0f;
     bool IsUnreachable(const void* Object) const;
     void MarkUnreachable(const void* Object);
     float SearchUntil = 0.0f;
@@ -510,4 +558,32 @@ private:
     FVector WanderGoal;
     bool bHasWanderGoal = false;
     FVector AimError;
+    // Tracking (21.40's TrackingInterpTime): where the bot's aim follows the target, lagging behind a moving one, and the
+    // target it tracks. A target it just saw again is reacted to anew (TrackingReactionTime).
+    FVector TrackedTargetLocation;
+    TWeakObjectPtr<AFortPawn> TrackedTarget;
+    float LastTrackTime = 0.0f;
+
+    // The goal out of a fight (ChooseGoal), since when, and how often it changed (the 20 s log).
+    EFortAthenaAIBotGoal Goal = EFortAthenaAIBotGoal::None;
+    float GoalStartTime = 0.0f;
+    int32_t GoalChanges = 0;
+    // A stuck bot's detour (TryToUnstuck) before it sets off again for somewhere far.
+    float DetourUntil = 0.0f;
+    // Investigate: the player the bot heads for, when it looks again, and the enemy it last saw (and where).
+    TWeakObjectPtr<AFortPawn> HuntTarget;
+    float NextHuntSearch = 0.0f;
+    TWeakObjectPtr<AFortPawn> LastSeenTarget;
+    FVector LastSeenTargetLocation;
+    int32_t Hunts = 0;
+    // SelectNextPOI: the spots the bot has been to or looted, the one it heads for, where on the ground, and when it
+    // looks for the next.
+    std::vector<int32_t> VisitedPOIs;
+    int32_t NextPOI = -1;
+    FVector POIDestination;
+    float NextPOISearch = 0.0f;
+    float POITravelStartTime = 0.0f;
+    int32_t POIsVisited = 0;
+    // The bots it has let be, for the log.
+    int32_t BotsIgnored = 0;
 };

@@ -137,6 +137,14 @@ public:
     // A random warmup spot (a FortPlayerStartWarmup, where players respawn on the warmup island), or false.
     bool GetWarmupSpot(FVector& OutLocation) const;
     uint8_t TeamOfPawn(const APawn* Pawn) const;
+    // The POIs (the landing spots, from the world's AFortPoiVolumes and its chest clusters, gathered at the bus): 21.40's
+    // UFortAthenaAIBotEvaluator_SelectNextPOI::FindNextBestPOI, the best spot near From the bot hasn't been to, with
+    // loot left and inside the next safe zone (-1: none); the spot Location is in (-1: none); and a spot by its index.
+    int32_t FindNextBestPOI(const FVector& From, const std::vector<int32_t>& Visited) const;
+    int32_t FindPOIAt(const FVector& Location) const;
+    const FFortAthenaBotLandingSpot* GetPOI(int32_t Index) const;
+    // How many bots are heading for Target (AFortAthenaAIBotController::Investigate), other than Except.
+    int32_t CountHuntersOf(const AFortPawn* Target, const AFortAthenaAIBotController* Except) const;
     // The battle bus while it flies (found when the aircraft phase starts).
     AActor* GetAircraft() const { return reinterpret_cast<AActor*>(CurrentAircraft.Get()); }
 
@@ -180,6 +188,8 @@ private:
     // The landing spots (at the bus), the bus's path (its location sampled while it flies), and each bot's spot and
     // jump: spread over the reachable spots by their loot, or all at the best one with -CoreBotHotDrop.
     void GatherLandingSpots();
+    // The loot left around a spot: its unsearched chests and ammo boxes, and the floor weapons.
+    float LootAround(const FVector& Center, float Radius) const;
     void UpdateFlightPath(float Now);
     void AssignLandingSpots(float Now);
     void InitializeNavigation();

@@ -47,6 +47,7 @@
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <format>
 
@@ -644,6 +645,88 @@ namespace
         return Weapon.Damage * static_cast<float>(Weapon.Pellets) * std::max(Weapon.FiringRate, 0.1f);
     }
 
+    // EFortRarity's Battle Royale names (Handmade, Ordinary, Sturdy, Quality, Fine: common to legendary).
+    const wchar_t* RarityName(uint8_t Rarity)
+    {
+        static const wchar_t* const Names[] = { L"common", L"uncommon", L"rare", L"epic", L"legendary", L"mythic" };
+        return Rarity < 6 ? Names[Rarity] : L"exotic";
+    }
+
+    // Whether Found is better than Held, a gun of the same kind (the community list: bots swap for higher rarity): a
+    // rarer one unless it is clearly weaker, else one of the same rarity with a tenth more damage a second.
+    bool IsBetterWeapon(const FFortAthenaAIBotWeapon& Found, const FFortAthenaAIBotWeapon& Held)
+    {
+        if (Found.Rarity != Held.Rarity)
+        {
+            return Found.Rarity > Held.Rarity && DamagePerSecond(Found) > DamagePerSecond(Held) * 0.85f;
+        }
+        return DamagePerSecond(Found) > DamagePerSecond(Held) * 1.1f;
+    }
+
+    const wchar_t* GoalName(EFortAthenaAIBotGoal Goal)
+    {
+        switch (Goal)
+        {
+        case EFortAthenaAIBotGoal::Loot: return L"loot";
+        case EFortAthenaAIBotGoal::Search: return L"search";
+        case EFortAthenaAIBotGoal::Storm: return L"storm";
+        case EFortAthenaAIBotGoal::Regroup: return L"regroup";
+        case EFortAthenaAIBotGoal::Harvest: return L"harvest";
+        case EFortAthenaAIBotGoal::Hunt: return L"hunt";
+        case EFortAthenaAIBotGoal::TravelToPOI: return L"travel";
+        case EFortAthenaAIBotGoal::Wander: return L"wander";
+        default: return L"idle";
+        }
+    }
+
+    // The bots' shots this match and how many hit, by the kind of gun and the range band (RangePreference's: under 10 m,
+    // under 35 m, farther), logged every 100 shots, so the aim's tuning can be checked against a player's hit rate.
+    struct FBotShotStats
+    {
+        int32_t Shots[7][3] = {};
+        int32_t Hits[7][3] = {};
+        int32_t Total = 0;
+    };
+    FBotShotStats ShotStats;
+
+    void RecordShot(EFortAthenaAIBotWeaponType Type, float Distance, bool bHit)
+    {
+        const size_t Kind = static_cast<size_t>(Type);
+        const size_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
+        ++ShotStats.Shots[Kind][Band];
+        ShotStats.Hits[Kind][Band] += bHit ? 1 : 0;
+        if (++ShotStats.Total % 100 != 0)
+        {
+            return;
+        }
+        std::wstring Rates;
+        static const wchar_t* const BandNames[] = { L"close", L"mid", L"far" };
+        for (size_t KindIndex = 0; KindIndex < 7; ++KindIndex)
+        {
+            for (size_t BandIndex = 0; BandIndex < 3; ++BandIndex)
+            {
+                if (const int32_t Shots = ShotStats.Shots[KindIndex][BandIndex]; Shots > 0)
+                {
+                    Rates += std::format(L"{}{} {} {:.0f}% ({}/{})", Rates.empty() ? L"" : L", ", WeaponTypeName(static_cast<EFortAthenaAIBotWeaponType>(KindIndex)), BandNames[BandIndex],
+                        100.0f * static_cast<float>(ShotStats.Hits[KindIndex][BandIndex]) / static_cast<float>(Shots), ShotStats.Hits[KindIndex][BandIndex], Shots);
+                }
+            }
+        }
+        Log::Info(L"Battle Royale bots: hit rates after {} shots: {}", ShotStats.Total, Rates);
+    }
+
+    // Battle Royale's epic rarity (EFortRarity::Quality): a bot with guns below it still searches chests for better ones.
+    constexpr uint8_t EpicRarity = 3;
+
+    // How often a bot takes on another bot it sees and that isn't after it (Core's 🟡: one time in three, rolled again
+    // every 30 s per pair; more once the last few bots are left, so a match still ends).
+    constexpr int32_t BotEngageChance = 30;
+    constexpr int32_t LateGameBotEngageChance = 60;
+    constexpr float BotEngageRollPeriod = 30.0f;
+    // A bot heads for a player within this distance (Core's 🟡: 100 m), at most this many bots for one player.
+    constexpr float HuntRange = 10000.0f;
+    constexpr int32_t MaxHuntersPerPlayer = 3;
+
     // A bot carries up to this many guns (a player's five quickbar slots, two kept for healing items).
     constexpr size_t MaxWeapons = 3;
     constexpr size_t MaxConsumableKinds = 2;
@@ -898,6 +981,7 @@ void AFortAthenaAIBotController::ResetForNewMatch()
     bHasHotDrop = false;
     CueTags.clear();
     WeaponFireWorks.clear();
+    ShotStats = FBotShotStats();
 }
 
 AAIController* AFortAthenaAIBotController::GetController() const
@@ -1683,6 +1767,7 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         CheckWeaponFireResult(Now);
     }
     const wchar_t* Intent = L"attack";
+    const auto DecisionStarted = std::chrono::steady_clock::now();
     // Mid-revive, the bot keeps at it unless an enemy is close or shooting at it.
     if (ReviveDoneAt > 0.0f && ReviveTarget && !IsUnderThreat(Now) && ReviveTeammate(Now))
     {
@@ -1693,24 +1778,64 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     {
         StopFiring();
         SetTargeting(false);
-        // Healing first when safe, then loot close by, then a chest or ammo box, then loot farther away (21.40's _Loot
-        // weighs them by distance). In the storm it runs; only outside the next circle, it takes the loot right by it
-        // first, and a bot without a gun arms itself before it heads for the circle (a landing spot far from the first
-        // circle otherwise sent it off empty-handed).
+        // Healing first when safe, then loot close by (a bot without a gun arms itself before it heads for the circle: a
+        // landing spot far from the first circle otherwise sent it off empty-handed). In the storm it runs. Then the
+        // goal it set out on, until it is done (ChooseGoal: it turned back and forth between two of them, re-choosing
+        // each frame), and when it is, the next one.
         FVector StormCenter;
         float StormRadius = 0.0f;
         const bool bInStorm = Manager->GetCurrentSafeZone(StormCenter, StormRadius) && Dist2D(LastKnownPosition, StormCenter) > StormRadius * 0.97f;
         const bool bArmed = HasUsableWeapon();
         // A bot stuck against a tree, rock or wall breaks through it first (TryToUnstuck chose it).
-        Intent = bHarvestToUnstick && Harvest(Now) ? L"harvest" : ReviveTeammate(Now) ? L"revive" : Heal(Now) ? L"heal" : bInStorm && Storm(Now) ? L"storm" : Loot(Now, 1500.0f) ? L"loot" : !bArmed && Loot(Now, 4000.0f) ? L"loot" : !bArmed && SearchContainer(Now) ? L"search"
-            : Storm(Now) ? L"storm" : SearchContainer(Now) ? L"search" : StayWithTeam(Now) ? L"regroup" : Harvest(Now) ? L"harvest" : Loot(Now, 7000.0f) ? L"loot" : L"wander";
+        if (bHarvestToUnstick && Harvest(Now))
+        {
+            Intent = L"harvest";
+        }
+        else if (ReviveTeammate(Now))
+        {
+            Intent = L"revive";
+        }
+        else if (Heal(Now))
+        {
+            Intent = L"heal";
+        }
+        else if (bInStorm && Storm(Now))
+        {
+            Intent = L"storm";
+            SetGoal(EFortAthenaAIBotGoal::Storm, Now);
+        }
+        // What lies within 15 m is taken on the way, whatever the goal (it stays the goal).
+        else if (Loot(Now, 1500.0f) || (!bArmed && Loot(Now, 4000.0f)))
+        {
+            Intent = L"loot";
+        }
+        else if (SearchContainer(Now, bArmed ? 1500.0f : 5000.0f))
+        {
+            Intent = L"search";
+        }
+        // A bot that just lost sight of the enemy it was fighting goes where it last saw it for a moment, instead of
+        // turning away to its loot and back when it shows again.
+        else if (bArmed && LastSeenTarget.Get() && !LastSeenTarget.Get()->bIsDying && Now - LastTargetInSightTime < 3.0f && Dist2D(LastKnownPosition, LastSeenTargetLocation) > 300.0f)
+        {
+            Intent = L"chase";
+            MoveTowards(LastSeenTargetLocation, Now, 250.0f);
+        }
+        else
+        {
+            Intent = ChooseGoal(Now);
+        }
         if (HarvestTarget.Get() && std::wstring_view(Intent) != L"harvest")
         {
             StopHarvesting();
         }
-        if (Intent[0] == L'w')
+    }
+    // A slow decision (a hitch in the summary) is named, with what the bot was doing.
+    if (const double DecisionMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - DecisionStarted).count(); DecisionMs > 50.0)
+    {
+        static int32_t LoggedSlow = 0;
+        if (LoggedSlow++ < 30)
         {
-            Wander(Now);
+            Log::Info(L"Battle Royale bots: {}'s decision took {:.0f} ms ({}, goal {}, {:.0f} m from where it is going)", BotName, DecisionMs, Intent, GoalName(Goal), bHasMoveGoal ? Dist2D(LastKnownPosition, MoveGoal) / 100.0f : 0.0f);
         }
     }
     TryToUnstuck(Now);
@@ -1728,11 +1853,11 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         AFortPawn* Target = CurrentTarget.Get();
         UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
         const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
-        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps, {} doors, {} reloads, {} weapon changes, {} heals ({} healing items), {} swings, {}/{}/{} materials, {} shots stopped by walls", BotName,
+        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps, {} doors, {} reloads, {} weapon changes, {} heals ({} healing items), {} swings, {}/{}/{} materials, {} shots stopped by walls, {} goal changes, {} POIs reached, {} hunts, {} bots let be", BotName,
             LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z, Intent, Velocity.Size(), MaxSpeedOf(Movement), Movement ? static_cast<int32_t>(Movement->MovementMode) : -1, static_cast<int32_t>(Pawn->CurrentMovementStyle),
             bPathFollowing ? std::format(L"on a path ({} paths, {} failed)", PathRequests, PathFailures) : std::format(L"steering ({} paths, {} failed)", PathRequests, PathFailures), Pawn->GetHealth(), Pawn->GetShield(),
             WeaponList.size(), EquippedWeapon.Get() ? NameOf(static_cast<UFortWeaponItemDefinition*>(EquippedWeapon.Get()->WeaponData)) : std::wstring(L"nothing"),
-            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps, DoorsOpened, Reloads, WeaponSwitches, Heals, Consumables.size(), Swings, Materials[0], Materials[1], Materials[2], BlockedShots);
+            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps, DoorsOpened, Reloads, WeaponSwitches, Heals, Consumables.size(), Swings, Materials[0], Materials[1], Materials[2], BlockedShots, GoalChanges, POIsVisited, Hunts, BotsIgnored);
     }
 #endif
 }
@@ -1895,6 +2020,7 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
         float Distance;
     };
     std::vector<FCandidate> Candidates;
+    AFortPawn* Previous = CurrentTarget.Get();
     for (const TWeakObjectPtr<AFortPawn>& Weak : Manager->GetEnemyPawns())
     {
         AFortPawn* Other = Weak.Get();
@@ -1903,21 +2029,35 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
             continue;
         }
         const float Distance = (LocationOf(Other) - Location).Size();
-        if (Distance <= AIBotSkills.SightRange)
+        if (Distance > AIBotSkills.SightRange)
         {
-            // A downed enemy is finished once nobody standing is closer (sorted 20 m farther).
-            Candidates.push_back({ Other, Distance + (Other->bIsDBNO ? 2000.0f : 0.0f) });
+            continue;
         }
+        // Players come first: after the bus, a bot is passed by unless it is after this one (or the roll says fight), and
+        // sorted 15 m farther than a player (the warmup island's brawls are anyone's).
+        AFortAthenaAIBotController* OtherBot = State != EFortAthenaAIBotState::Warmup ? Manager->FindBot(reinterpret_cast<UObject*>(Other)) : nullptr;
+        if (OtherBot && Other != Previous && !WillEngageBot(OtherBot, Now))
+        {
+            ++BotsIgnored;
+            continue;
+        }
+        // A downed enemy is finished once nobody standing is closer (sorted 20 m farther). The enemy it is fighting
+        // stays its target unless another is much closer (it turned from one to the other and back).
+        float Sorted = Distance + (Other->bIsDBNO ? 2000.0f : 0.0f) + (OtherBot ? 1500.0f : 0.0f);
+        Sorted *= Other == Previous ? 0.7f : 1.0f;
+        Candidates.push_back({ Other, Sorted });
     }
     std::sort(Candidates.begin(), Candidates.end(), [](const FCandidate& A, const FCandidate& B) { return A.Distance < B.Distance; });
 
-    // Damage: the newest damager is an enemy pawn within twice the sight range.
+    // Damage: the newest damager is an enemy pawn within twice the sight range (a bot only while it is still hurting
+    // this one: one that shot it a minute ago isn't hunted down across the map).
     AFortPlayerStateAthena* Attacker = KillerOf(Pawn);
     AFortPawn* AttackerPawn = nullptr;
     for (const TWeakObjectPtr<AFortPawn>& Weak : Manager->GetEnemyPawns())
     {
         AFortPawn* Other = Weak.Get();
-        if (Attacker && Other && reinterpret_cast<UObject*>(static_cast<APlayerState*>(Other->PlayerState)) == reinterpret_cast<UObject*>(Attacker) && Manager->TeamOfPawn(Other) != Team)
+        if (Attacker && Other && reinterpret_cast<UObject*>(static_cast<APlayerState*>(Other->PlayerState)) == reinterpret_cast<UObject*>(Attacker) && Manager->TeamOfPawn(Other) != Team
+            && (Now - LastHurtTime < 10.0f || !Manager->FindBot(reinterpret_cast<UObject*>(Other))))
         {
             AttackerPawn = Other;
         }
@@ -1944,7 +2084,6 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
     }
 
     // Out of sight behind the builds it just put up around itself, the last target isn't forgotten (RangeAttack breaks in).
-    AFortPawn* Previous = CurrentTarget.Get();
     if (!NewTarget && Previous && !Previous->bIsDying && Now - LastTargetInSightTime < 15.0f && (LocationOf(Previous) - Location).Size() < 3000.0f && IsTargetBoxedIn(Previous))
     {
         NewTarget = Previous;
@@ -1962,8 +2101,31 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
         }
     }
     bHasVisualLineOfSightOnTarget = bInSight;
+    if (NewTarget && bInSight)
+    {
+        LastSeenTarget = NewTarget;
+        LastSeenTargetLocation = LocationOf(NewTarget);
+    }
     CurrentAlertLevel = NewTarget ? EAlertLevel::Threatened : Attacker ? EAlertLevel::Alerted : EAlertLevel::Unaware;
 #endif
+}
+
+bool AFortAthenaAIBotController::WillEngageBot(AFortAthenaAIBotController* Other, float Now) const
+{
+    // Whoever it is fighting or going for it is fought back (its shots hurt this bot, or will).
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Other || (Pawn && Other->GetCurrentTarget() == reinterpret_cast<AFortPawn*>(Pawn)))
+    {
+        return true;
+    }
+    // Otherwise a roll per pair of bots, the same for 30 s (so the bot doesn't change its mind each look).
+    const uint32_t Period = static_cast<uint32_t>(std::max(Now, 0.0f) / BotEngageRollPeriod);
+    uint32_t Hash = static_cast<uint32_t>(BotIndex) * 73856093u ^ static_cast<uint32_t>(Other->GetBotIndex()) * 19349663u ^ Period * 83492791u;
+    Hash ^= Hash >> 13;
+    Hash *= 0x5bd1e995u;
+    Hash ^= Hash >> 15;
+    const int32_t Chance = Manager->GetAliveBotCount() <= 10 ? LateGameBotEngageChance : BotEngageChance;
+    return static_cast<int32_t>(Hash % 100u) < Chance;
 }
 
 bool AFortAthenaAIBotController::HasAmmoFor(const FFortAthenaAIBotWeapon& Weapon) const
@@ -2010,8 +2172,9 @@ int32_t AFortAthenaAIBotController::WeaponIndexForRange(float Distance) const
 
 int32_t AFortAthenaAIBotController::WeaponSlotFor(UFortWeaponItemDefinition* Definition) const
 {
-    // One gun of each kind, the better one kept (its damage a second from the stats row); with every slot full, a gun of
-    // a more wanted kind (assault rifle and shotgun, then SMG, sniper, pistol) replaces the least wanted one.
+    // One gun of each kind, the better one kept (IsBetterWeapon: a higher rarity, else more damage a second from the stats
+    // row); with every slot full, a gun of a more wanted kind (assault rifle and shotgun, then SMG, sniper, pistol)
+    // replaces the least wanted one.
     if (!Definition)
     {
         return -2;
@@ -2026,7 +2189,7 @@ int32_t AFortAthenaAIBotController::WeaponSlotFor(UFortWeaponItemDefinition* Def
         }
         if (Held.Type == Found.Type)
         {
-            return DamagePerSecond(Found) > DamagePerSecond(Held) * 1.1f ? static_cast<int32_t>(Index) : -2;
+            return IsBetterWeapon(Found, Held) ? static_cast<int32_t>(Index) : -2;
         }
     }
     if (WeaponList.size() < MaxWeapons)
@@ -2057,7 +2220,8 @@ const FFortAthenaAIBotWeapon& AFortAthenaAIBotController::GetWeaponInfo(UFortWea
         Weapon.WeaponDefinition = KeepLoaded(Definition);
         Weapon.AmmoDefinition = KeepLoaded(static_cast<TAssetPtr<UFortWorldItemDefinition>&>(Definition->AmmoData).LoadSynchronous());
         ReadWeaponStats(Weapon);
-        Log::Info(L"Battle Royale bots: {}: {} ({:.0f} damage x{}, {:.2f} shots/s, {} a magazine, {:.2f} s reload{}, equipped within {:.0f} m)", NameOf(Definition), WeaponTypeName(Weapon.Type),
+        Weapon.Rarity = UFortItemDefinition::HasRarity() ? Definition->GetRarity() : 0;
+        Log::Info(L"Battle Royale bots: {}: {} {} ({:.0f} damage x{}, {:.2f} shots/s, {} a magazine, {:.2f} s reload{}, equipped within {:.0f} m)", NameOf(Definition), RarityName(Weapon.Rarity), WeaponTypeName(Weapon.Type),
             Weapon.Damage, Weapon.Pellets, Weapon.FiringRate, Weapon.ClipSize, Weapon.ReloadTime, Weapon.bReloadIndividualBullets ? L" by the shell" : L"", std::min(Weapon.EquipMaxDistance, 99999.0f) / 100.0f);
     }
     return Found->second;
@@ -2368,13 +2532,14 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
         Weapon->AmmoCount = Weapon->AmmoCount - 1;
     }
 
-    // The hit: the shot's line, from the bot's eyes through its aim point (the target plus FAIBotSkills' error), passes
-    // within the target's capsule, and nothing stands between them.
+    // The hit: the shot's line, from the bot's eyes through its aim point (where its tracking has the target, plus the
+    // shot's aim error), passes within the target's capsule, and nothing stands between them.
     const FVector Location = LocationOf(Pawn);
     const FVector Eye(Location.X, Location.Y, Location.Z + 60.0f);
     const FVector TargetLocation = LocationOf(Target);
     const FVector Center(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 20.0f);
-    const FVector Aim = Center + AimError;
+    const FVector Tracked = TrackedTarget.Get() == Target ? FVector(TrackedTargetLocation.X, TrackedTargetLocation.Y, TrackedTargetLocation.Z + 20.0f) : Center;
+    const FVector Aim = Tracked + AimError;
     const FVector Ray = Aim - Eye;
     const float RayLength = Ray.Size();
     bool bHit = false;
@@ -2395,6 +2560,10 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
     const bool bClear = HasClearShot(Pawn, Eye, bHit ? Center : ShotEnd, Target, &Blocker, &BlockedAt);
     const bool bOnTarget = bHit;
     bHit = bHit && bClear;
+    if (Held)
+    {
+        RecordShot(Held->Type, Distance, bHit);
+    }
     if (Weapon && Held)
     {
         PlayWeaponFireCue(Weapon, bHit ? Center : !bClear ? BlockedAt : Eye + (RayLength > 1.0f ? Ray * (5000.0f / RayLength) : FVector()));
@@ -2665,13 +2834,41 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
         return false;
     }
 
-    // The aim, refreshed every shot.
-    const float ErrorScale = AIBotSkills.AimErrorAt10m * std::max(Distance, 300.0f) / 1000.0f;
+    // Reaction (21.40's TrackingReactionTime): a new target, or one seen again after a second out of sight, isn't shot
+    // at before the bot has reacted to it (RangeAttack's bReady waits MaxTrackingReactionTime from TargetAcquiredTime).
+    if (Target != TrackedTarget.Get() || Now - LastTargetInSightTime > 1.0f)
+    {
+        TrackedTarget = Target;
+        TrackedTargetLocation = TargetLocation;
+        TargetAcquiredTime = Now;
+        LastTrackTime = Now;
+    }
+    // Tracking (TrackingInterpTime): the aim follows the target with a lag, so a target on the move (strafing, running
+    // past) is aimed at where it was a moment ago and missed more, as a player's tracking falls behind.
+    {
+        const float Step = std::clamp(Now - LastTrackTime, 0.0f, 0.25f);
+        const float Alpha = 1.0f - std::exp(-Step / std::max(AIBotSkills.MaxTrackingInterpTime, 0.02f));
+        TrackedTargetLocation = TrackedTargetLocation + (TargetLocation - TrackedTargetLocation) * Alpha;
+        LastTrackTime = Now;
+    }
+    // The aim error (FWeaponAccuracy's MaxTrackingOffsetError and the near and far distance errors), drawn for every
+    // shot: a normal spread across the line of fire, a base plus a share that grows with the range, more beyond 25 m.
     if (Now >= NextShotTime || AimError.SizeSquared() == 0.0f)
     {
-        AimError = FVector(RandomRange(-1.0f, 1.0f), RandomRange(-1.0f, 1.0f), RandomRange(-0.6f, 0.6f)) * ErrorScale;
+        const float Spread = AIBotSkills.MaxTrackingOffsetError + AIBotSkills.MaxTrackingDistanceNearError * std::min(Distance, 2500.0f) / 1000.0f
+            + AIBotSkills.MaxTrackingDistanceFarError * std::max(Distance - 2500.0f, 0.0f) / 1000.0f;
+        const auto Gaussian = []()
+        {
+            const float U1 = std::max(FMath::FRand(), 1e-6f);
+            const float U2 = FMath::FRand();
+            return std::sqrt(-2.0f * std::log(U1)) * std::cos(6.2831853f * U2);
+        };
+        const FVector Toward = Direction2D(Location, TargetLocation);
+        const float Across = Gaussian() * Spread;
+        const float Up = Gaussian() * Spread * AIBotSkills.MaxTrackingHeightOffsetError;
+        AimError = FVector(-Toward.Y * Across, Toward.X * Across, Up);
     }
-    FaceTowards(FVector(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 20.0f) + AimError, Now, 0.5f);
+    FaceTowards(FVector(TrackedTargetLocation.X, TrackedTargetLocation.Y, TrackedTargetLocation.Z + 20.0f) + AimError, Now, 0.5f);
     LastTargetInSightTime = Now;
 
     // Keep a fighting distance: close in from afar, back off when too close (a shotgun or the pickaxe wants it close).
@@ -2791,10 +2988,14 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
         Target = nullptr;
         LootTarget = nullptr;
     }
-    if (!Target && Now >= NextLootSearch)
+    // The nearest wanted pickup, looked for every second. The one the bot is going for (its goal) is kept unless another
+    // is less than half as far; one it only noted (farther than this call looks) gives way to whatever is nearest.
+    const bool bCommitted = Goal == EFortAthenaAIBotGoal::Loot;
+    if (Now >= NextLootSearch && (!Target || !bCommitted || Dist2D(LocationOf(Target), Location) > 1000.0f))
     {
         NextLootSearch = Now + 1.0f;
         float Best = 7000.0f;
+        AFortPickup* Nearest = nullptr;
         for (const FFortAthenaBotLoot& Entry : Manager->GetLoot())
         {
             AFortPickup* Pickup = Entry.Pickup.Get();
@@ -2803,20 +3004,20 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
                 continue;
             }
             FFortItemEntry& PickupEntry = Pickup->PrimaryPickupItemEntry;
-            const bool bWanted = WantsPickup(PickupEntry.ItemDefinition, Entry.bWeapon, Entry.bConsumable);
             const float Distance = (Entry.Location - Location).Size();
-            if (bWanted && Distance < Best && std::fabs(Entry.Location.Z - Location.Z) < 800.0f)
+            if (Distance < Best && std::fabs(Entry.Location.Z - Location.Z) < 800.0f && WantsPickup(PickupEntry.ItemDefinition, Entry.bWeapon, Entry.bConsumable))
             {
                 Best = Distance;
-                Target = Pickup;
+                Nearest = Pickup;
             }
         }
-        if (Target)
+        if (Nearest != Target && (!Target || !bCommitted || Best < (LocationOf(Target) - Location).Size() * 0.5f))
         {
+            Target = Nearest;
             LootTargetTime = Now;
             LastLootPursuit = Now;
+            LootTarget = Target;
         }
-        LootTarget = Target;
     }
     if (!Target)
     {
@@ -2832,16 +3033,20 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
     LootTargetTime += Now - LastLootPursuit > 0.5f ? Now - LastLootPursuit : 0.0f;
     LastLootPursuit = Now;
     // Not reached in 20 s of going for it (behind a closed door, up on a roof): given up.
+    // The next pickup is looked for at once when this one is taken or given up (a second's wait sent the bot off to
+    // its next goal with loot left around it).
     if (Now - LootTargetTime > 20.0f)
     {
         MarkUnreachable(Target);
         LootTarget = nullptr;
+        NextLootSearch = 0.0f;
         return false;
     }
     if (Dist2D(PickupLocation, Location) < 200.0f && std::fabs(PickupLocation.Z - Location.Z) < 250.0f)
     {
         TakePickup(Target);
         LootTarget = nullptr;
+        NextLootSearch = 0.0f;
         return true;
     }
     // Right above or below it (another floor, a roof): out of reach for a bot without a path.
@@ -2849,6 +3054,7 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
     {
         MarkUnreachable(Target);
         LootTarget = nullptr;
+        NextLootSearch = 0.0f;
         return false;
     }
     MoveTowards(PickupLocation, Now, 50.0f);
@@ -3035,7 +3241,7 @@ void AFortAthenaAIBotController::TakePickup(AFortPickup* Pickup)
         if (Slot >= 0)
         {
             const FFortAthenaAIBotWeapon& Replaced = WeaponList[static_cast<size_t>(Slot)];
-            Log::Info(L"Battle Royale bots: {} swaps its {} for {}", BotName, NameOf(Replaced.WeaponDefinition), NameOf(WeaponDefinition));
+            Log::Info(L"Battle Royale bots: {} swaps its {} {} for a {} {}", BotName, RarityName(Replaced.Rarity), NameOf(Replaced.WeaponDefinition), RarityName(Weapon.Rarity), NameOf(WeaponDefinition));
             DropItem(Replaced.WeaponDefinition, 1, Replaced.LoadedAmmo);
             WeaponList[static_cast<size_t>(Slot)] = Weapon;
             Index = Slot;
@@ -3069,7 +3275,8 @@ bool AFortAthenaAIBotController::Storm(float Now)
         return false;
     }
     const FVector Location = LocationOf(GetPawn());
-    if (Dist2D(Location, Center) <= Radius * 0.95f)
+    // Once on its way in, it goes well inside (it stopped at the edge, wandered out and turned back in).
+    if (Dist2D(Location, Center) <= Radius * (Goal == EFortAthenaAIBotGoal::Storm ? 0.75f : 0.95f))
     {
         return false;
     }
@@ -3090,17 +3297,273 @@ void AFortAthenaAIBotController::Wander(float Now)
         FVector Center;
         float Radius = 0.0f;
         FVector Around = Location;
-        if (State != EFortAthenaAIBotState::Warmup && Manager->GetSafeZone(Center, Radius) && Dist2D(Location, Center) > Radius * 0.5f)
+        const bool bHasZone = State != EFortAthenaAIBotState::Warmup && Manager->GetSafeZone(Center, Radius);
+        if (bHasZone && Dist2D(Location, Center) > Radius * 0.5f)
         {
             Around = FVector(Location.X + (Center.X - Location.X) * 0.3f, Location.Y + (Center.Y - Location.Y) * 0.3f, Location.Z);
         }
-        const float Angle = RandomRange(0.0f, 6.2831853f);
+        // On the ground, onwards: the next goal within 60 degrees of the way it was going (a random one each time sent it
+        // back the way it came), turned back towards the middle of the safe zone near its edge.
+        float Angle = RandomRange(0.0f, 6.2831853f);
+        UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
+        const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
+        if (State != EFortAthenaAIBotState::Warmup && (bHasWanderGoal || Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 100.0f * 100.0f))
+        {
+            const FVector Heading = Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 100.0f * 100.0f ? Direction2D(FVector(), FVector(Velocity.X, Velocity.Y, 0.0f)) : Direction2D(Location, WanderGoal);
+            if (Heading.SizeSquared() > 0.01f)
+            {
+                Angle = std::atan2(Heading.Y, Heading.X) + RandomRange(-1.05f, 1.05f);
+            }
+        }
         const float Distance = RandomRange(Range * 0.3f, Range);
         WanderGoal = FVector(Around.X + std::cos(Angle) * Distance, Around.Y + std::sin(Angle) * Distance, Location.Z);
+        if (bHasZone && Dist2D(WanderGoal, Center) > Radius * 0.8f)
+        {
+            const FVector Inward = Direction2D(Location, Center);
+            WanderGoal = FVector(Location.X + Inward.X * Distance, Location.Y + Inward.Y * Distance, Location.Z);
+        }
         bHasWanderGoal = true;
-        NextWanderTime = Now + RandomRange(5.0f, 9.0f);
+        NextWanderTime = Now + (State == EFortAthenaAIBotState::Warmup ? RandomRange(5.0f, 9.0f) : 15.0f);
     }
     MoveTowards(WanderGoal, Now, 150.0f);
+}
+
+void AFortAthenaAIBotController::SetGoal(EFortAthenaAIBotGoal NewGoal, float Now)
+{
+    if (NewGoal != Goal)
+    {
+        Goal = NewGoal;
+        GoalStartTime = Now;
+        ++GoalChanges;
+    }
+}
+
+bool AFortAthenaAIBotController::PursueGoal(EFortAthenaAIBotGoal InGoal, float Now)
+{
+    switch (InGoal)
+    {
+    case EFortAthenaAIBotGoal::Loot: return Loot(Now, 1e9f);
+    case EFortAthenaAIBotGoal::Search: return SearchContainer(Now);
+    case EFortAthenaAIBotGoal::Storm: return Storm(Now);
+    case EFortAthenaAIBotGoal::Regroup: return StayWithTeam(Now);
+    case EFortAthenaAIBotGoal::Harvest: return Harvest(Now);
+    case EFortAthenaAIBotGoal::Hunt: return Investigate(Now);
+    case EFortAthenaAIBotGoal::TravelToPOI: return SelectNextPOI(Now);
+    case EFortAthenaAIBotGoal::Wander: Wander(Now); return true;
+    default: return false;
+    }
+}
+
+const wchar_t* AFortAthenaAIBotController::ChooseGoal(float Now)
+{
+    // The goal the bot set out on comes first while it applies: the pickup or container it is going for, the circle, a
+    // teammate it is going back to, the building it is breaking. Then a new one: the next circle, a container, the
+    // team, loot farther away, materials. With none of those left (the spot looted out), a goal that takes it
+    // somewhere: a player near it (Investigate), the next POI (SelectNextPOI), or onwards (Wander); these also hold
+    // until they're done, unless loot or a container shows up meanwhile.
+    switch (Goal)
+    {
+    case EFortAthenaAIBotGoal::Loot:
+    case EFortAthenaAIBotGoal::Search:
+    case EFortAthenaAIBotGoal::Storm:
+    case EFortAthenaAIBotGoal::Regroup:
+    case EFortAthenaAIBotGoal::Harvest:
+        if (PursueGoal(Goal, Now))
+        {
+            return GoalName(Goal);
+        }
+        break;
+    default:
+        break;
+    }
+    for (const EFortAthenaAIBotGoal Next : { EFortAthenaAIBotGoal::Storm, EFortAthenaAIBotGoal::Search, EFortAthenaAIBotGoal::Regroup, EFortAthenaAIBotGoal::Loot, EFortAthenaAIBotGoal::Harvest })
+    {
+        // Materials wait until the bot has a gun (a bot that landed empty-handed chopped trees instead of arming itself).
+        if (Next == EFortAthenaAIBotGoal::Harvest && !HasUsableWeapon())
+        {
+            continue;
+        }
+        if (Next != Goal && PursueGoal(Next, Now))
+        {
+            SetGoal(Next, Now);
+            return GoalName(Next);
+        }
+    }
+    if (Now < DetourUntil)
+    {
+        Wander(Now);
+        return L"detour";
+    }
+    if ((Goal == EFortAthenaAIBotGoal::Hunt || Goal == EFortAthenaAIBotGoal::TravelToPOI) && PursueGoal(Goal, Now))
+    {
+        return GoalName(Goal);
+    }
+    for (const EFortAthenaAIBotGoal Next : { EFortAthenaAIBotGoal::Hunt, EFortAthenaAIBotGoal::TravelToPOI, EFortAthenaAIBotGoal::Wander })
+    {
+        if (Next != Goal && PursueGoal(Next, Now))
+        {
+            SetGoal(Next, Now);
+            return GoalName(Next);
+        }
+    }
+    // Wandering already (it is always possible).
+    Wander(Now);
+    SetGoal(EFortAthenaAIBotGoal::Wander, Now);
+    return GoalName(EFortAthenaAIBotGoal::Wander);
+}
+
+bool AFortAthenaAIBotController::Investigate(float Now)
+{
+#if WITH_SERVER_CODE
+    // 21.40's UFortAthenaAIBotEvaluator_Investigate (GetLastKnownPosition, SetDestination): an armed bot (two guns with
+    // ammo) heads for a player within 100 m inside the safe zone, at most three bots for one player; other bots are left
+    // to meet it by chance (WillEngageBot). Once the player is in sight, RangeAttack fights them.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    const int32_t Armed = static_cast<int32_t>(std::count_if(WeaponList.begin(), WeaponList.end(), [this](const FFortAthenaAIBotWeapon& Weapon) { return HasAmmoFor(Weapon); }));
+    if (!Pawn || Armed < 2)
+    {
+        HuntTarget = nullptr;
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    FVector Center;
+    float Radius = 0.0f;
+    const bool bHasZone = Manager->GetSafeZone(Center, Radius);
+    const auto Huntable = [&](AFortPawn* Other, float Range)
+    {
+        return Other && !Other->bIsDying && !Other->IsPendingKill() && Manager->TeamOfPawn(Other) != Team && Dist2D(LocationOf(Other), Location) < Range
+            && (!bHasZone || Dist2D(LocationOf(Other), Center) < Radius);
+    };
+    AFortPawn* Target = HuntTarget.Get();
+    if (Target && !Huntable(Target, HuntRange * 1.5f))
+    {
+        Target = nullptr;
+        HuntTarget = nullptr;
+    }
+    if (!Target)
+    {
+        if (Now < NextHuntSearch)
+        {
+            return false;
+        }
+        NextHuntSearch = Now + 3.0f;
+        float Best = HuntRange;
+        for (const TWeakObjectPtr<AFortPawn>& Weak : Manager->GetEnemyPawns())
+        {
+            AFortPawn* Other = Weak.Get();
+            if (!Huntable(Other, Best) || Manager->FindBot(reinterpret_cast<UObject*>(Other)) || Manager->CountHuntersOf(Other, this) >= MaxHuntersPerPlayer)
+            {
+                continue;
+            }
+            Best = Dist2D(LocationOf(Other), Location);
+            Target = Other;
+        }
+        if (!Target)
+        {
+            return false;
+        }
+        HuntTarget = Target;
+        ++Hunts;
+        Log::Info(L"Battle Royale bots: {} goes after {} {:.0f} m away", BotName, NameOf(Target), Best / 100.0f);
+    }
+    MoveTowards(LocationOf(Target), Now, 300.0f);
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortAthenaAIBotController::ClearNextDestination()
+{
+    NextPOI = -1;
+}
+
+bool AFortAthenaAIBotController::SelectNextPOI(float Now)
+{
+#if WITH_SERVER_CODE
+    // 21.40's UFortAthenaAIBotEvaluator_SelectNextPOI: with nothing left to loot where it is, the bot sets off for the
+    // best spot near it (FindNextBestPOI: a named location or a cluster of chests with loot left, inside the next safe
+    // zone, not one it has been to), a teammate's choice first so the team stays together; it arrives within a third of
+    // the spot's radius, and the loot there takes over.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn)
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    const FFortAthenaBotLandingSpot* Spot = Manager->GetPOI(NextPOI);
+    if (Spot)
+    {
+        // A spot the storm is closing on is given up.
+        FVector Center;
+        float Radius = 0.0f;
+        if (Manager->GetSafeZone(Center, Radius) && Dist2D(Spot->Location, Center) > Radius * 0.9f)
+        {
+            Log::Info(L"Battle Royale bots: {} gives up on {} (outside the safe zone)", BotName, Spot->Name);
+            ClearNextDestination();
+            Spot = nullptr;
+        }
+        // Not there in three minutes (the way is blocked): another one.
+        else if (Now - POITravelStartTime > 180.0f)
+        {
+            Log::Info(L"Battle Royale bots: {} gives up on {} ({:.0f} m short of it)", BotName, Spot->Name, Dist2D(Location, POIDestination) / 100.0f);
+            ClearNextDestination();
+            Spot = nullptr;
+        }
+        else if (Dist2D(Location, POIDestination) < std::max(Spot->Radius * 0.33f, 1500.0f))
+        {
+            Log::Info(L"Battle Royale bots: {} arrives at {} after {:.0f} s", BotName, Spot->Name, Now - POITravelStartTime);
+            ++POIsVisited;
+            ClearNextDestination();
+            return false;
+        }
+    }
+    if (!Spot)
+    {
+        if (Now < NextPOISearch)
+        {
+            return false;
+        }
+        NextPOISearch = Now + 3.0f;
+        // Where it is now counts as looted.
+        if (const int32_t Here = Manager->FindPOIAt(Location); Here >= 0 && std::find(VisitedPOIs.begin(), VisitedPOIs.end(), Here) == VisitedPOIs.end())
+        {
+            VisitedPOIs.push_back(Here);
+        }
+        int32_t Next = -1;
+        for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+        {
+            if (Teammate->GetState() == EFortAthenaAIBotState::Landed && Teammate->GetNextPOI() >= 0
+                && std::find(VisitedPOIs.begin(), VisitedPOIs.end(), Teammate->GetNextPOI()) == VisitedPOIs.end())
+            {
+                Next = Teammate->GetNextPOI();
+                break;
+            }
+        }
+        if (Next < 0)
+        {
+            Next = Manager->FindNextBestPOI(Location, VisitedPOIs);
+        }
+        Spot = Manager->GetPOI(Next);
+        if (!Spot)
+        {
+            return false;
+        }
+        NextPOI = Next;
+        VisitedPOIs.push_back(Next);
+        POITravelStartTime = Now;
+        // A spot on the ground near its middle (the volume's centre can be in the air or inside a building).
+        if (!Manager->FindGroundNear(Spot->Location, Spot->Radius * 0.25f, POIDestination))
+        {
+            POIDestination = FVector(Spot->Location.X, Spot->Location.Y, Location.Z);
+        }
+        Log::Info(L"Battle Royale bots: {} has looted its spot and heads for {} {:.0f} m away", BotName, Spot->Name, Dist2D(Location, POIDestination) / 100.0f);
+    }
+    MoveTowards(POIDestination, Now, 300.0f);
+    return true;
+#else
+    return false;
+#endif
 }
 
 void AFortAthenaAIBotController::MoveTowards(const FVector& Destination, float Now, float AcceptanceRadius)
@@ -3179,7 +3642,13 @@ bool AFortAthenaAIBotController::FollowPath(const FVector& Destination, float No
             bPathFollowing = false;
             return false;
         }
-        const EPathFollowingRequestResult::Type Result = AIController->MoveToLocation(Destination, AcceptanceRadius, false, true, true, false, true);
+        // A far goal (a POI, the circle) is reached a leg at a time: a path to a point 40 m along the way, asked again as
+        // the bot gets there (a path search across hundreds of metres of navmesh held the game thread for seconds).
+        const FVector From = LocationOf(Pawn);
+        const float Far = Dist2D(From, Destination);
+        const FVector Direction = Direction2D(From, Destination);
+        const FVector PathTarget = Far > 6000.0f ? FVector(From.X + Direction.X * 4000.0f, From.Y + Direction.Y * 4000.0f, From.Z) : Destination;
+        const EPathFollowingRequestResult::Type Result = AIController->MoveToLocation(PathTarget, Far > 6000.0f ? 300.0f : AcceptanceRadius, false, true, true, false, true);
         ++PathRequests;
         NextPathRequest = Now + 4.0f;
         if (Result == EPathFollowingRequestResult::Failed)
@@ -3202,6 +3671,12 @@ bool AFortAthenaAIBotController::FollowPath(const FVector& Destination, float No
     if (AIController->GetMoveStatus() == PathIdle)
     {
         bPathFollowing = false;
+        // A leg of a far goal done: the next one at once.
+        if (Dist2D(LocationOf(Pawn), Destination) > 6000.0f)
+        {
+            NextPathRequest = 0.0f;
+            return false;
+        }
         PathFailedUntil = Now + 1.5f;
         return false;
     }
@@ -3412,17 +3887,21 @@ void AFortAthenaAIBotController::MarkUnreachable(const void* Object)
     }
 }
 
-bool AFortAthenaAIBotController::SearchContainer(float Now)
+bool AFortAthenaAIBotController::SearchContainer(float Now, float MaxDistance)
 {
 #if WITH_SERVER_CODE
-    // Containers are worth it while the bot wants weapons or ammo for its guns.
+    // Ammo boxes are worth it while the bot wants ammo for its guns; chests while it wants anything, a better gun too
+    // (a free slot, or one below epic: the community list, bots look for better loot).
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    bool bWants = WeaponList.size() < 2 || Consumables.empty();
+    bool bWantsAmmo = false;
+    bool bWantsBetter = WeaponList.size() < MaxWeapons;
     for (const FFortAthenaAIBotWeapon& Weapon : WeaponList)
     {
         const auto Found = Ammo.find(Weapon.AmmoDefinition);
-        bWants = bWants || Found == Ammo.end() || Found->second < 60;
+        bWantsAmmo = bWantsAmmo || Found == Ammo.end() || Found->second < 60;
+        bWantsBetter = bWantsBetter || Weapon.Rarity < EpicRarity;
     }
+    const bool bWantsChest = bWantsAmmo || bWantsBetter || Consumables.empty();
     ABuildingContainer* Target = ContainerTarget.Get();
     if (Target && (Target->IsPendingKill() || Target->bDestroyed || Target->IsAlreadySearched(reinterpret_cast<AFortPawn*>(Pawn))))
     {
@@ -3430,12 +3909,18 @@ bool AFortAthenaAIBotController::SearchContainer(float Now)
         Target = nullptr;
         ContainerTarget = nullptr;
         SearchUntil = 0.0f;
+        NextContainerSearch = 0.0f;
     }
-    if (!Pawn || (!bWants && !Target))
+    if (!Pawn || (!bWantsChest && !Target))
     {
         return false;
     }
     const FVector Location = LocationOf(Pawn);
+    // One the bot only noted (it isn't its goal) gives way to the nearest when it looks again.
+    if (Target && Goal != EFortAthenaAIBotGoal::Search && SearchUntil <= 0.0f && Now >= NextContainerSearch)
+    {
+        Target = nullptr;
+    }
     if (!Target && Now >= NextContainerSearch)
     {
         NextContainerSearch = Now + 2.0f;
@@ -3444,15 +3929,16 @@ bool AFortAthenaAIBotController::SearchContainer(float Now)
         {
             ABuildingContainer* Container = Entry.Container.Get();
             const float Distance = Dist2D(Entry.Location, Location) * (Entry.bChest ? 0.8f : 1.0f);
-            if (Container && !IsUnreachable(Container) && Distance < Best && std::fabs(Entry.Location.Z - Location.Z) < 800.0f)
+            if (Container && (Entry.bChest || bWantsAmmo) && !IsUnreachable(Container) && Distance < Best && std::fabs(Entry.Location.Z - Location.Z) < 800.0f)
             {
                 Best = Distance;
                 Target = Container;
             }
         }
-        if (Target)
+        if (Target != ContainerTarget.Get())
         {
             ContainerTargetTime = Now;
+            LastContainerPursuit = Now;
         }
         ContainerTarget = Target;
     }
@@ -3460,10 +3946,19 @@ bool AFortAthenaAIBotController::SearchContainer(float Now)
     {
         return false;
     }
+    // Farther than this call looks: kept for the goal's call.
+    if (Dist2D(LocationOf(Target), Location) > MaxDistance && SearchUntil <= 0.0f)
+    {
+        return false;
+    }
+    // The time spent going for it counts (not the time the bot spent on something else meanwhile).
+    ContainerTargetTime += Now - LastContainerPursuit > 0.5f ? Now - LastContainerPursuit : 0.0f;
+    LastContainerPursuit = Now;
     if (Now - ContainerTargetTime > 25.0f && SearchUntil <= 0.0f)
     {
         MarkUnreachable(Target);
         ContainerTarget = nullptr;
+        NextContainerSearch = 0.0f;
         return false;
     }
     const FVector ContainerLocation = LocationOf(Target);
@@ -3496,6 +3991,7 @@ bool AFortAthenaAIBotController::SearchContainer(float Now)
     {
         MarkUnreachable(Target);
         ContainerTarget = nullptr;
+        NextContainerSearch = 0.0f;
         return false;
     }
     MoveTowards(ContainerLocation, Now, 100.0f);
@@ -4355,7 +4851,7 @@ bool AFortAthenaAIBotController::StayWithTeam(float Now)
     }
     const FVector Location = LocationOf(Pawn);
     float Best = 1e9f;
-    FVector Goal;
+    FVector TeammateLocation;
     for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
     {
         if (Teammate->GetState() != EFortAthenaAIBotState::Landed || Teammate->IsDBNO() || !Teammate->GetPawn())
@@ -4367,12 +4863,13 @@ bool AFortAthenaAIBotController::StayWithTeam(float Now)
         if (Distance < Best)
         {
             Best = Distance;
-            Goal = Other;
+            TeammateLocation = Other;
         }
     }
-    if (Best > 2500.0f && Best < 40000.0f)
+    // Once on its way back, it goes all the way (it stopped at 25 m, wandered off and came back).
+    if (Best > (Goal == EFortAthenaAIBotGoal::Regroup ? 1000.0f : 2500.0f) && Best < 40000.0f)
     {
-        MoveTowards(Goal, Now, 800.0f);
+        MoveTowards(TeammateLocation, Now, 800.0f);
         return true;
     }
     return false;
@@ -4425,6 +4922,8 @@ void AFortAthenaAIBotController::TryToUnstuck(float Now)
             const float Angle = RandomRange(0.0f, 6.2831853f);
             WanderGoal = FVector(Location.X + std::cos(Angle) * 700.0f, Location.Y + std::sin(Angle) * 700.0f, Location.Z);
             NextWanderTime = Now + 3.0f;
+            // On its way somewhere far (a POI, a player), it walks the detour first, then sets off again.
+            DetourUntil = Now + 3.0f;
         }
     }
     else

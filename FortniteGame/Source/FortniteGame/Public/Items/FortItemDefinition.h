@@ -114,6 +114,8 @@ public:
     UFortItem* CreateTemporaryItemInstanceBP(int32_t Count, int32_t Level) const;
     FString GetPersistentName() const;
     uint8_t GetRarity() const;
+    // Whether the build reflects what GetRarity reads.
+    static bool HasRarity() { return Member_bCalculateRarityFromQualityAndTier.IsAvailable() && Member_Quality.IsAvailable() && Member_Tier.IsAvailable() && Member_Rarity.IsAvailable(); }
 };
 
 class UFortWorldItemDefinition : public UFortItemDefinition

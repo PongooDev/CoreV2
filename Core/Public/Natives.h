@@ -395,6 +395,15 @@ namespace Natives
     // static UNavigationSystem::InitializeForWorld(UWorld*, FNavigationSystemRunMode): makes the world's navigation system
     // (CreateNavigationSystem) when it has none and its settings enable navigation, then runs its OnWorldInitDone.
     inline void (*UNavigationSystem_InitializeForWorld)(UWorld* World, uint8_t Mode) = nullptr;
+    // Battle Royale's navmesh tile cache (UAthenaNavSystem), from FRecastNavMeshGenerator::AddGeneratedTiles: Detour's
+    // dtNavMesh::addTile (dtStatus, 64-bit tile refs), ARecastNavMesh's RecastNavMeshImpl, FPImplRecastNavMesh's
+    // DetourNavMesh and the generator's DestNavMesh, ActiveTiles and NumActiveTiles.
+    inline uint32_t (*dtNavMesh_addTile)(void* This, uint8_t* Data, int32_t DataSize, int32_t Flags, uint64_t LastRef, uint64_t* Result) = nullptr;
+    inline ptrdiff_t ARecastNavMesh_RecastNavMeshImpl = -1;
+    inline ptrdiff_t FPImplRecastNavMesh_DetourNavMesh = -1;
+    inline ptrdiff_t FRecastNavMeshGenerator_DestNavMesh = -1;
+    inline ptrdiff_t FRecastNavMeshGenerator_ActiveTiles = -1;
+    inline ptrdiff_t FRecastNavMeshGenerator_NumActiveTiles = -1;
     inline void (*UBuildingStructuralSupportSystem_InitializeGrid)(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ) = nullptr;
     inline ptrdiff_t UBuildingStructuralSupportSystem_GridSize = -1;
     inline ptrdiff_t UBuildingStructuralSupportSystem_GridOrigin = -1;

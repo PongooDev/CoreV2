@@ -14,6 +14,11 @@ class UWorld;
 //
 // 3.0 has no UAthenaNavSystem, and Core can't add UClasses: this is a Core type named after Epic's, driving the world's
 // own UNavigationSystem (UFortNavSystem) through its reflected members and UFunctions. Nothing is hooked.
+//
+// The navmesh's tiles are cached per build, map and agent (Core's, CoreV2 #233; 26.20 cooks the island's navmesh
+// instead): each tile the engine builds for the base map is saved to a file beside Core.dll, the next matches add the
+// saved tiles to their navmesh (dtNavMesh::addTile) and keep the ones around the bots in the generator's active tiles,
+// so the engine only builds tiles nobody has saved yet, and the ones a structure changed (its own dirty areas).
 class UAthenaNavSystem
 {
 public:
@@ -24,10 +29,18 @@ public:
     static bool InitializeForBots(UWorld* World, const FBox& IslandBounds);
     static bool IsInitialized();
     // A new match (its world is new: the server reloads the map after a match): the last world's navigation is gone
-    // with it (UWorld::CleanupWorld cleans up its navigation system), so the next match sets its own up.
+    // with it (UWorld::CleanupWorld cleans up its navigation system), so the next match sets its own up. The cached
+    // tiles stay in memory for it.
     static void ResetForNewMatch();
-    // Each frame: once the navmesh is registered, the octree is populated and the initial build lock released.
+    // Each frame: once the navmesh is registered, the octree is populated, the initial build lock released and the tile
+    // cache's file read on a worker thread; then the tile cache: cached tiles added, the bots' cached tiles kept active,
+    // new tiles saved.
     static void Tick(UWorld* World);
+
+    // A structure was built, edited or destroyed at Actor (Core's building and harvesting code): the cached tiles under
+    // it are out of date for this match, so the engine builds them again when a bot comes near, and none of them is
+    // saved as the base map's. Near a bot the engine's own dirty area rebuilds them anyway.
+    static void AddDirtyArea(const AActor* Actor);
 
     // The navmesh the bots path on, once registered with the navigation system.
     static ANavigationData* GetNavData(UWorld* World);

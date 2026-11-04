@@ -6257,6 +6257,49 @@ bool Finder::ResolveNavigationSystemInitializeForWorldLive(ptrdiff_t WorldNaviga
     return true;
 }
 
+bool Finder::ResolveRecastNavMeshLive()
+{
+    if (Natives::dtNavMesh_addTile)
+    {
+        return true;
+    }
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return false;
+    }
+    bSearched = true;
+
+    // FRecastNavMeshGenerator::AddGeneratedTiles (2.5 0x1DDF0A0, 3.0 0x1E21D80, 3.1 0x1E36B20, 3.2 0x1E65480) logs
+    // "%s> Tile (%d,%d:%d), tile limit reached!! (%d)" when dtNavMesh::addTile runs out of tiles. The same bytes in all four:
+    //   mov rax, [r15+DestNavMesh]; mov rcx, [rax+RecastNavMeshImpl]; mov rax, [rcx+DetourNavMesh]
+    //   test byte ptr [r15+270h], 2 (bRestrictBuildingToActiveTiles); mov r8, [r15+ActiveTiles]; movsxd rax, [r15+ActiveTiles+8]
+    //   call dtNavMesh::addTile; mov ecx, eax; and eax, 80000004h; cmp eax, 80000004h (DT_FAILURE | DT_OUT_OF_MEMORY)
+    //   inc dword ptr [r15+NumActiveTiles] (after a tile is added)
+    const uintptr_t Reference = First(Finder::StringRefs(L"%s> Tile (%d,%d:%d), tile limit reached!! (%d)"));
+    const uintptr_t Function = Reference ? Finder::FunctionStart(Reference) : 0;
+    const uintptr_t End = Function ? (std::max)(Finder::FunctionEnd(Function), Reference + 0x400) : 0;
+    const uintptr_t Impl = FindInstruction(Function, End, { 0x49, 0x8B, 0x87, -1, -1, -1, -1, 0x48, 0x8B, 0x88, -1, -1, -1, -1, 0x48, 0x8B, 0x41, -1 });
+    const uintptr_t Active = Impl ? FindInstruction(Impl, Impl + 0x40, { 0x4D, 0x8B, 0x87, -1, -1, -1, -1, 0x49, 0x63, 0x87 }) : 0;
+    const uintptr_t AddTileCall = FindInstruction(Function, End, { 0xE8, -1, -1, -1, -1, 0x8B, 0xC8, 0x25, 0x04, 0x00, 0x00, 0x80, 0x3D, 0x04, 0x00, 0x00, 0x80 });
+    const uintptr_t AddTile = AddTileCall ? Finder::RelativeTarget(AddTileCall, 1, 5) : 0;
+    const uintptr_t Added = AddTileCall ? FindInstruction(AddTileCall, End, { 0x41, 0xFF, 0x87, -1, -1, -1, -1 }) : 0;
+    if (!Impl || !Active || !IsInText(AddTile) || !Added)
+    {
+        Log::Error(L"Finder: dtNavMesh::addTile not resolved (AddGeneratedTiles {}, impl {}, active tiles {}, add tile {}, tile count {})", Function != 0, Impl != 0, Active != 0, IsInText(AddTile), Added != 0);
+        return false;
+    }
+    Natives::FRecastNavMeshGenerator_DestNavMesh = *reinterpret_cast<const int32_t*>(Impl + 3);
+    Natives::ARecastNavMesh_RecastNavMeshImpl = *reinterpret_cast<const int32_t*>(Impl + 10);
+    Natives::FPImplRecastNavMesh_DetourNavMesh = Byte(Impl + 17);
+    Natives::FRecastNavMeshGenerator_ActiveTiles = *reinterpret_cast<const int32_t*>(Active + 3);
+    Natives::FRecastNavMeshGenerator_NumActiveTiles = *reinterpret_cast<const int32_t*>(Added + 3);
+    Natives::dtNavMesh_addTile = reinterpret_cast<decltype(Natives::dtNavMesh_addTile)>(AddTile);
+    Log::Info(L"Finder: dtNavMesh::addTile at 0x{:X}; RecastNavMeshImpl +0x{:X}, DetourNavMesh +0x{:X}, generator DestNavMesh +0x{:X}, ActiveTiles +0x{:X}, NumActiveTiles +0x{:X}", AddTile - Finder::ImageBase(),
+        Natives::ARecastNavMesh_RecastNavMeshImpl, Natives::FPImplRecastNavMesh_DetourNavMesh, Natives::FRecastNavMeshGenerator_DestNavMesh, Natives::FRecastNavMeshGenerator_ActiveTiles, Natives::FRecastNavMeshGenerator_NumActiveTiles);
+    return true;
+}
+
 bool Finder::ResolveOutpostOwnerLive()
 {
     UFunction* IsOutpostOwner = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerStateOutpost:IsOutpostOwner");

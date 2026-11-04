@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Player/FortPlayerController.h"
+#include "Athena/AI/AthenaNavSystem.h"
 #include "Building/BuildingSMActor.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -251,6 +252,7 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     const int32_t WorldPlayerId = FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -1;
     CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, true, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
     CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, true);
+    UAthenaNavSystem::AddDirtyArea(Building);
     FBuildingClassData PayClassData = BuildingClassData;
     CallVirtual<int32_t>(this, Natives::AFortPlayerController_PayBuildableClassPlacementCostIndex, &PayClassData);
 
@@ -278,6 +280,7 @@ void AFortPlayerController::ServerEditBuildingActor_Implementation(ABuildingSMAc
     SetEditingPlayer(Building, nullptr);
     // Replacement type 1 (edited): the new piece takes the old one's place and team (ReplaceBuildingActor, 1.8.1 0x4A3760).
     const int32_t BuildingLevel = Building->CurrentBuildingLevel;
+    UAthenaNavSystem::AddDirtyArea(Building);
     CallVirtual<ABuildingSMActor*>(Building, Natives::ABuildingSMActor_ReplaceBuildingActorIndex, static_cast<uint8_t>(1), NewBuildingClass, BuildingLevel, RotationIterations, bMirrored, this);
     if (UObject* GameMode = AuthGameModeOf(this))
     {

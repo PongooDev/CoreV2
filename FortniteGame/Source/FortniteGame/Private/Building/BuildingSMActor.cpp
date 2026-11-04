@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Building/BuildingSMActor.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/AI/AthenaNavSystem.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
@@ -330,6 +331,7 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
     if (GetHealth() <= 0.0f)
     {
         bDestroyed = true;
+        UAthenaNavSystem::AddDirtyArea(this);
         ResourceCount = FMath::Max(ResourceCount, ResourceItem && ResourcesPerHealth != 0.0f ? 1 : 0);
 
         const FName LootTierKey = DestructionLootTierKey;

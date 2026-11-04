@@ -269,6 +269,9 @@ public:
     static inline bool bDisguisePossess = false;
     // From Possess once the controller's hero is set again (a respawn): the skin "cheat skin" chose.
     static void ReapplySkin(AFortPlayerController* PlayerController);
+    // A hero of HeroType with its specializations, only to wear its look (AFortPlayerState::SetHeroType): "cheat skin"'s,
+    // and a Battle Royale player bot's outfit.
+    static class UFortHero* CreateLookHero(class UFortHeroType* HeroType);
     // From Possess once the pawn's attributes are reset to the hero's (a respawn, Battle Royale's drop from the aircraft):
     // the maximum health and shield "cheat maxhealth" and "cheat setmaxshield" chose.
     static void ReapplyMaxHealthAndShield(AFortPlayerController* PlayerController);

@@ -7,4 +7,10 @@
 class AFortAthenaAircraft : public AActor
 {
     DefineUnrealClass(AFortAthenaAircraft, FortniteGame)
+
+public:
+    // When its players may jump (world seconds; replicated): the drop zone, from entering to leaving it.
+    DefineUProperty(float, DropStartTime)
+    DefineUProperty(float, DropEndTime)
+    static bool HasDropTimes() { return Member_DropStartTime.IsAvailable() && Member_DropEndTime.IsAvailable(); }
 };

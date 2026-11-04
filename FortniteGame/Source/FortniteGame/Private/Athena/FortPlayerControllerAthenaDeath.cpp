@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Athena/AI/FortServerBotManagerAthena.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
@@ -306,7 +307,19 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     {
         Natives::AFortPlayerControllerAthena_SetTeamPlace(this, GameState->TeamsLeft);
     }
+    // Battle Royale's player bots (CoreV2 #233) are in the match's counts but not among its alive players: while any is
+    // left, the game's solo win (the last of the alive players, once the count it had was more than 1) mustn't run, so
+    // its count before is held at 0; the bots' manager puts the counts right and checks the win after.
+    UFortServerBotManagerAthena* BotManager = UFortServerBotManagerAthena::Get();
+    if (BotManager && BotManager->ShouldHoldNativeWinCheck())
+    {
+        GameState->PlayersLeft = 0;
+    }
     Natives::AFortGameModeAthena_RemoveFromAlivePlayers(GameMode, this, Instigator ? static_cast<APlayerState*>(Instigator->PlayerState) : nullptr);
+    if (BotManager)
+    {
+        BotManager->OnPlayerRemoved(AthenaStateOf(Instigator));
+    }
     UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s is out (place %d, %d players and %d teams left)"), *GetName(), static_cast<int32_t>(AthenaState->Place), static_cast<int32_t>(GameState->PlayersLeft), static_cast<int32_t>(GameState->TeamsLeft));
     SendOutliveStatEvents(GameMode, DeadPawn);
 

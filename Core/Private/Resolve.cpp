@@ -7212,6 +7212,7 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
         }
         if (StubCalls.size() == 2)
         {
+            Natives::AFortGameModeAthena_StartAircraftPhase = reinterpret_cast<decltype(Natives::AFortGameModeAthena_StartAircraftPhase)>(Function);
             Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}", Function - Finder::ImageBase(), StubCalls[1] - Finder::ImageBase());
             return reinterpret_cast<uint8_t*>(StubCalls[1]);
         }
@@ -7222,6 +7223,7 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
     }
     if (LoneStubCalls.size() == 1)
     {
+        Natives::AFortGameModeAthena_StartAircraftPhase = reinterpret_cast<decltype(Natives::AFortGameModeAthena_StartAircraftPhase)>(Finder::FunctionStart(LoneStubCalls[0]));
         Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}, before the warmup pawn is destroyed", Finder::FunctionStart(LoneStubCalls[0]) - Finder::ImageBase(), LoneStubCalls[0] - Finder::ImageBase());
         return reinterpret_cast<uint8_t*>(LoneStubCalls[0]);
     }
@@ -7229,6 +7231,7 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
     {
         const auto [Site, Target] = ActivateSlotCalls[0];
         Natives::AFortPlayerController_ActivateSlot = reinterpret_cast<decltype(Natives::AFortPlayerController_ActivateSlot)>(Target);
+        Natives::AFortGameModeAthena_StartAircraftPhase = reinterpret_cast<decltype(Natives::AFortGameModeAthena_StartAircraftPhase)>(Finder::FunctionStart(Site));
         Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}, its call to AFortPlayerController::ActivateSlot (0x{:X}), before the warmup pawn is destroyed",
             Finder::FunctionStart(Site) - Finder::ImageBase(), Site - Finder::ImageBase(), Target - Finder::ImageBase());
         return reinterpret_cast<uint8_t*>(Site);
@@ -10350,6 +10353,7 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     }
 
     Natives::AFortGameModeAthena_RemoveFromAlivePlayers = reinterpret_cast<decltype(Natives::AFortGameModeAthena_RemoveFromAlivePlayers)>(Remove);
+    Natives::AFortGameModeAthena_StartEndGamePhase = reinterpret_cast<decltype(Natives::AFortGameModeAthena_StartEndGamePhase)>(SoloWin);
     Natives::AFortPlayerControllerAthena_SetTeamPlace = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_SetTeamPlace)>(SetTeamPlace);
     Natives::AFortPlayerStateAthena_GetSecondsAlive = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_GetSecondsAlive)>(GetSecondsAlive);
     Natives::AFortPlayerPawn_GetDeathCause = reinterpret_cast<decltype(Natives::AFortPlayerPawn_GetDeathCause)>(GetDeathCause);
@@ -10372,4 +10376,36 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
             GetDeathCause ? L"" : L"the death cause, ", UpdateTeamMembersIndex >= 0 ? L"" : L"the TeamMembers fill, ", OutlivedStore ? L"" : L"the outlived count, ");
     }
     return true;
+}
+
+bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::AFortPlayerPawnAthena_BeginSkydiving)
+    {
+        return Natives::AFortPlayerPawnAthena_BeginSkydiving != nullptr;
+    }
+    bSearched = true;
+
+    // AFortPlayerControllerAthena's ExitAircraft (3.0 0x9A5090) logs "ExitAircraft: %s (Pawn %s)", then, with the new
+    // pawn cast to AFortPlayerPawnAthena: "mov dl, 1; mov rcx, rbx; call BeginSkydiving" (0x9A5305). BeginSkydiving
+    // (0x9D7F70) starts with "cmp byte ptr [rcx + bIsSkydiving], 0": a pawn already skydiving doesn't start again.
+    const uintptr_t ExitAircraft = FunctionOf(L"ExitAircraft: %s (Pawn %s)");
+    const uintptr_t End = ExitAircraft ? Finder::FunctionEnd(ExitAircraft) : 0;
+    for (uintptr_t Site = ExitAircraft ? FindInstruction(ExitAircraft, End, { 0xB2, 0x01 }) : 0; Site; Site = FindInstruction(Site + 1, End, { 0xB2, 0x01 }))
+    {
+        const uintptr_t Call = FindRawCall(Site + 2, std::min(End, Site + 0xA));
+        const uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+        for (uintptr_t Check = Target; Target && Check < Target + 0x20; ++Check)
+        {
+            if (Byte(Check) == 0x80 && IsDisp32Access(Check, 0x80, 7, IsSkydivingOffset) && Byte(Check + 6) == 0)
+            {
+                Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(Target);
+                Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X})", Target - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());
+                return true;
+            }
+        }
+    }
+    Log::Error(L"Finder: AFortPlayerPawnAthena::BeginSkydiving not found (ExitAircraft 0x{:X}), player bots can't leave the aircraft", ExitAircraft ? ExitAircraft - Finder::ImageBase() : 0);
+    return false;
 }

@@ -54,6 +54,14 @@ public:
     DefineUProperty(TArray<AFortPlayerControllerAthena*>, AlivePlayers)
 
     static bool HasMaxPlayerCount() { return Member_MaxPlayerCount.IsAvailable(); }
+
+    // The most players a match here can have (the playlist's teams x their size; 0 when unknown), and the players
+    // connected now (from their login on). Battle Royale's player bots fill the difference (UFortServerBotManagerAthena).
+    int32_t GetMatchCapacity();
+    int32_t GetNumConnectedPlayers();
+    // The playlist's team size and number of teams (the reservation beacon's NumPlayersPerTeam and NumTeams; 0 without one).
+    int32_t GetPlayersPerTeam();
+    int32_t GetNumTeams();
     static bool HasWarmupLength() { return Member_WarmupCountdownDuration.IsAvailable() && Member_WarmupEarlyCountdownDuration.IsAvailable(); }
 
     // Where a Battle Royale server starts: the Battle Royale zone theme's map and playlist

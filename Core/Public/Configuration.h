@@ -12,6 +12,9 @@ struct FCoreConfiguration
     // -CoreMode=BattleRoyale: the server hosts Battle Royale, on the map and playlist the build's own data names, and
     // registers with the matchmaking service (Core-Docs Athena-Plan.md). Without it the server is Save the World's.
     std::wstring Mode;
+    // -CoreBotMatch (testing only): a Battle Royale server with "Force player AIs" on starts its match with no players
+    // at all, bots only, so a headless server can play a whole match (CoreV2 #233).
+    bool bBotMatch = false;
 
     bool IsBattleRoyale() const;
 };

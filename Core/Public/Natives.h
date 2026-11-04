@@ -34,6 +34,7 @@ class AFortGameModeZone;
 class AFortLobbyBeaconHost;
 class AFortPlayerController;
 class AFortPlayerControllerAthena;
+class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class AFortGameModeAthena;
 class APlayerState;
@@ -513,6 +514,16 @@ namespace Natives
     inline int32_t (*AFortPlayerControllerAthena_CountTeammatesOut)(AFortPlayerControllerAthena* This) = nullptr;
     inline ptrdiff_t AFortGameStateAthena_StartingPlayers = -1;
     inline ptrdiff_t AFortPlayerStateAthena_PlayersOutlived = -1;
+    // AFortGameModeAthena::StartEndGamePhase (3.0 0x9C52C0, 21.40's name): the solo win, RemoveFromAlivePlayers' last call
+    // ("%s won the match!", place 1 for the winner, then the end game); with no winner it only ends the match. Battle
+    // Royale's player bots end a match with it (UFortServerBotManagerAthena::CheckWinConditionLastManStanding).
+    inline void (*AFortGameModeAthena_StartEndGamePhase)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Winner) = nullptr;
+    // AFortGameModeAthena::StartAircraftPhase (3.0 0x9C4A60): Finder::AircraftPhasePlayerCleanupCall's function. Only
+    // the bots-only test match (-CoreBotMatch) calls it, the warmup's countdown having nobody to start the bus for.
+    inline bool (*AFortGameModeAthena_StartAircraftPhase)(AFortGameModeAthena* This) = nullptr;
+    // AFortPlayerPawnAthena::BeginSkydiving(bool bFromBus) (3.0 0x9D7F70), which AFortPlayerControllerAthena's ExitAircraft
+    // calls on the new pawn: Finder::ResolveBotSkydiveLive. A player bot leaving the aircraft takes the same path.
+    inline void (*AFortPlayerPawnAthena_BeginSkydiving)(AFortPlayerPawnAthena* This, bool bFromBus) = nullptr;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
     inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;

@@ -31,6 +31,10 @@ void Configuration::Load()
         {
             Current.Mode = Argument.substr(ModeOption.size());
         }
+        if (EqualsNoCase(Argument, L"-CoreBotMatch"))
+        {
+            Current.bBotMatch = true;
+        }
         constexpr std::wstring_view MapOption = L"-CoreMap=";
         if (Argument.size() > MapOption.size() && EqualsNoCase(Argument.substr(0, MapOption.size()), MapOption))
         {

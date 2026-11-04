@@ -1370,6 +1370,11 @@ void UFortCheatManager::Skin(const FString& Arguments)
 #endif
 }
 
+UFortHero* UFortCheatManager::CreateLookHero(UFortHeroType* HeroType)
+{
+    return HeroType ? CreateHero(HeroType) : nullptr;
+}
+
 void UFortCheatManager::ReapplySkin(AFortPlayerController* PlayerController)
 {
 #if WITH_SERVER_CODE

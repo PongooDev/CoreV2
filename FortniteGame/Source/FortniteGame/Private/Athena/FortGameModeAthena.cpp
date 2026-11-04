@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/AI/FortServerBotManagerAthena.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortAthenaPlaylistBase.h"
@@ -416,8 +417,9 @@ namespace
                 {
                     return Other.second.EliminatedBy == AccountId && Other.second.Team != Player.Team;
                 }));
-                // With the kills the player's "cheat killscore" added (Core-Backend #145).
-                AthenaState->SetKillScore(std::max(Kills + UFortCheatManager::KillScoreOffset(AthenaState), 0));
+                // With the kills the player's "cheat killscore" added (Core-Backend #145), and the player bots they
+                // eliminated (CoreV2 #233; bots have no account, so they aren't among the match's players here).
+                AthenaState->SetKillScore(std::max(Kills + UFortCheatManager::KillScoreOffset(AthenaState) + UFortServerBotManagerAthena::BotKillsOf(AthenaState), 0));
             }
             Player.Kills = AthenaState->GetKills();
         }
@@ -691,6 +693,28 @@ namespace
         return Ids;
     }
 
+    // The answer's "bots": {count, level, health, shield, quests}, or null when the admin panel's "Force player AIs" is
+    // off (Core-Backend's bots block). False when it isn't there or is null.
+    bool JsonBots(const std::string& Json, FFortAthenaBotSettings& OutSettings)
+    {
+        const size_t Key = Json.find("\"bots\"");
+        const size_t Open = Key == std::string::npos ? std::string::npos : Json.find_first_not_of(" \t\r\n:", Key + 6);
+        if (Open == std::string::npos || Json[Open] != '{')
+        {
+            return false;
+        }
+        const size_t Close = Json.find('}', Open);
+        const std::string Bots = Json.substr(Open, Close == std::string::npos ? std::string::npos : Close - Open + 1);
+        OutSettings.Count = std::clamp(std::atoi(BackendRequest::JsonField(Bots, "count").c_str()), 0, 100);
+        OutSettings.Level = std::clamp(std::atoi(BackendRequest::JsonField(Bots, "level").c_str()), 1, 10);
+        const std::string Health = BackendRequest::JsonField(Bots, "health");
+        const std::string Shield = BackendRequest::JsonField(Bots, "shield");
+        OutSettings.StartingHealth = Health.empty() ? 100.0f : std::clamp(static_cast<float>(std::atof(Health.c_str())), 1.0f, 100.0f);
+        OutSettings.StartingShield = Shield.empty() ? 0.0f : std::clamp(static_cast<float>(std::atof(Shield.c_str())), 0.0f, 100.0f);
+        OutSettings.bEliminationsCountForQuests = BackendRequest::JsonField(Bots, "quests") != "false";
+        return OutSettings.Count > 0;
+    }
+
     void ReportWarmup(const std::shared_ptr<FWarmupWatch>& Watch, const std::wstring& Phase, const std::vector<std::wstring>& AccountIds, float SecondsLeft)
     {
         std::string Ids;
@@ -712,9 +736,18 @@ namespace
             const bool bOpen = bAnswered && BackendRequest::JsonField(Body, "open") == "true";
             const int32_t MaxPlayers = bAnswered ? std::clamp(std::atoi(BackendRequest::JsonField(Body, "maxPlayers").c_str()), 0, 1000) : 0;
             auto Parties = bAnswered ? JsonParties(Body) : std::vector<std::vector<std::wstring>>();
-            GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties)]() mutable
+            FFortAthenaBotSettings BotSettings;
+            const bool bBots = bAnswered && JsonBots(Body, BotSettings);
+            GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings]() mutable
             {
                 Watch->bAsking = false;
+                if (bAnswered)
+                {
+                    if (UFortServerBotManagerAthena* BotManager = UFortServerBotManagerAthena::Get())
+                    {
+                        BotManager->SetSettings(bBots, BotSettings);
+                    }
+                }
                 if (Status == 404 && !Watch->bUnsupported)
                 {
                     Watch->bUnsupported = true;
@@ -1144,6 +1177,28 @@ void AFortGameModeAthena::WatchWarmup()
     // that queue, and gives each of them a team.
     WatchWarmupOf(FWeakObjectPtr(this), std::make_shared<FWarmupWatch>());
 #endif
+}
+
+int32_t AFortGameModeAthena::GetMatchCapacity()
+{
+    return MatchCapacity(this);
+}
+
+int32_t AFortGameModeAthena::GetNumConnectedPlayers()
+{
+    return static_cast<int32_t>(ConnectedAccounts(this).size());
+}
+
+int32_t AFortGameModeAthena::GetPlayersPerTeam()
+{
+    UPartyBeaconState* State = BeaconStateOf(this);
+    return State && State->NumPlayersPerTeam > 0 ? static_cast<int32_t>(State->NumPlayersPerTeam) : 0;
+}
+
+int32_t AFortGameModeAthena::GetNumTeams()
+{
+    UPartyBeaconState* State = BeaconStateOf(this);
+    return State && State->NumTeams > 0 ? static_cast<int32_t>(State->NumTeams) : 0;
 }
 
 namespace

@@ -12,6 +12,11 @@ public:
     DefineUProperty(FString, PlayerName)
     DefineUStructProperty(FUniqueNetIdRepl, UniqueId)
     DefineUFunction(GetPlayerName)
+    // The replicated name (4.20: PlayerName is only the server's copy; GetPlayerName returns this one).
+    DefineUProperty(FString, PlayerNamePrivate)
+    static bool HasPlayerNamePrivate() { return Member_PlayerNamePrivate.IsAvailable(); }
+    // The player is an AI (a Battle Royale player bot's AAIController player state).
+    DefineBitfieldUProperty(bIsABot)
 
     // The player's name. From 1.9 (CL-3757339) the game keeps it in PlayerNamePrivate (+0x418), obfuscated (SetPlayerName
     // 0x23D0D50), and leaves PlayerName empty: there it is GetPlayerName's (0x23C3550). Builds without that function

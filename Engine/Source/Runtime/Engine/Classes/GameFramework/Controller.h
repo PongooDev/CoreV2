@@ -19,4 +19,6 @@ public:
     AActor* GetViewTarget() const;
     // Server: lets go of the pawn (AController::UnPossess, through its UFunction).
     void UnPossess();
+    // Server: takes InPawn (AController::Possess, through its UFunction).
+    void Possess(APawn* InPawn);
 };

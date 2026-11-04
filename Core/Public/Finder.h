@@ -201,6 +201,9 @@ namespace Finder
     int32_t StrippedAthenaPrepareDeathReportIndex(ptrdiff_t KillerPlayerStateOffset);
     bool ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsAliveOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t DeathInfoDBNOOffset, ptrdiff_t TeamMembersOffset);
     uint8_t* PawnDiedInventoryDropCall();
+    // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player
+    // bots. IsSkydivingOffset: AFortPlayerPawnAthena's bIsSkydiving, which it checks first.
+    bool ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset);
     bool ResolveDecoSpawnedLive();
     bool ResolveScoreBuildingConstructionLive();
     bool ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset);

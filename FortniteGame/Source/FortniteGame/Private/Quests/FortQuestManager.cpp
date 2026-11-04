@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Quests/FortQuestManager.h"
+#include "Athena/AI/FortServerBotManagerAthena.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
@@ -1228,6 +1229,15 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     {
         SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
         return;
+    }
+    // A Battle Royale player bot's elimination counts for quests only when the admin panel says so (CoreV2 #233).
+    if ((Type == EFortQuestObjectiveStatEvent::GetKill() || Type == EFortQuestObjectiveStatEvent::GetKillContribution()) && UFortServerBotManagerAthena::IsBotPawn(TargetObject))
+    {
+        UFortServerBotManagerAthena::NoteNativeKillEvent(TargetObject);
+        if (!UFortServerBotManagerAthena::ShouldCountQuestEvent(TargetObject))
+        {
+            return;
+        }
     }
     GameMode->AddPlaylistContextTag(static_cast<FGameplayTagContainer&>(GameMode->GameContextTags));
     FGameplayTagContainer EventContextTags = ContextTags;

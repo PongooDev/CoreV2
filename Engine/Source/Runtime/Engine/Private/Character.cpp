@@ -4,6 +4,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Hooks.h"
 #include "Log.h"
+#include "ReflectionParams.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -14,6 +15,12 @@ namespace
     // EMovementMode.
     constexpr uint8_t MoveFalling = 3;
     constexpr uint8_t MoveFlying = 5;
+}
+
+void ACharacter::Jump()
+{
+    Reflection::FParams Params(StaticFunction_Jump());
+    Params.Call(this);
 }
 
 void ACharacter::ApplyCheatMovement(ECheatMovement Movement)

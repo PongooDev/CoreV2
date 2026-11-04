@@ -19,6 +19,7 @@ public:
     DefineUProperty(APawn*, CharacterOwner)
     DefineUProperty(uint8_t, MovementMode)
     DefineUProperty(uint8_t, CustomMovementMode)
+    DefineUProperty(float, MaxWalkSpeed)
     DefineBitfieldUProperty(bCheatFlying)
     // Whether the movement simulates (gravity, walking) for a character no controller has.
     DefineBitfieldUProperty(bRunPhysicsWithNoController)

@@ -11,6 +11,13 @@ AActor* AController::GetViewTarget() const
     return CallVirtual<AActor*>(this, Natives::AController_GetViewTargetIndex);
 }
 
+void AController::Possess(APawn* InPawn)
+{
+    Reflection::FParams Params(StaticFunction_Possess());
+    Params.Set(L"InPawn", InPawn);
+    Params.Call(this);
+}
+
 void AController::UnPossess()
 {
     Reflection::FParams Params(StaticFunction_UnPossess());

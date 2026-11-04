@@ -19,6 +19,7 @@ class ACharacter : public APawn
     DefineUFunction(ClientCheatWalk)
     DefineUFunction(ClientCheatFly)
     DefineUFunction(ClientCheatGhost)
+    DefineUFunction(Jump)
 
 public:
     DefineUProperty(UCharacterMovementComponent*, CharacterMovement)
@@ -27,6 +28,8 @@ public:
 
     // The body of ClientCheatWalk, ClientCheatFly or ClientCheatGhost.
     void ApplyCheatMovement(ECheatMovement Movement);
+    // The character jumps on its next movement update.
+    void Jump();
 
     // Server and client: the Walk, Fly and Ghost cheats move the pawn (#100).
     static void HookCheatMovement();

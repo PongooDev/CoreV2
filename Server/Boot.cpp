@@ -243,6 +243,12 @@ static void InstallHooks()
             FCommandLine::AddSwitch(L"EnableMMS");
         }
         FCommandLine::RestoreSwitch(L"EnableMMS");
+        // The bots-only test match (-CoreBotMatch) has nobody in it but the replay recorder's spectator, whose logout
+        // when its upload fails restarts the session ("Logout called on final player"): it records no replay.
+        if (Configuration::Get().bBotMatch)
+        {
+            FCommandLine::AddSwitch(L"noreplays");
+        }
         UGameEngine::SetServerTickRate();
         AFortGameModeZone::HookVTables();
         AFortGameModeAthena::HookVTables();

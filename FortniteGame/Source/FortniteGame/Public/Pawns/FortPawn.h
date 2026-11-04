@@ -4,6 +4,8 @@
 #include "Containers/Array.h"
 #include "Engine/DataTable.h"
 #include "GameFramework/Pawn.h"
+#include "GameplayTagContainer.h"
+#include "StructArray.h"
 #include "Misc/Guid.h"
 #include "UObject/ScriptDelegates.h"
 
@@ -28,9 +30,20 @@ private:
     DefineUProperty(float, SpeedCrouchedSprint)
 };
 
+// Who damaged a pawn and how much (AFortPawn::Damagers, transient, newest last).
+struct FDamagerInfo
+{
+    DefineUnrealStruct(FDamagerInfo, FortniteGame)
+    DefineUProperty(AActor*, DamageCauser)
+    DefineUProperty(int32_t, DamageAmount)
+};
+
 class AFortPawn : public APawn
 {
     DefineUnrealClass(AFortPawn, FortniteGame)
+    DefineUFunction(PawnStartFire)
+    DefineUFunction(PawnStopFire)
+    DefineUFunction(ForceKill)
     DefineUFunction(IsDead)
     DefineUFunction(EquipWeaponDefinition)
     DefineUFunction(TriggerFeedbackEvent)
@@ -49,6 +62,13 @@ public:
     // Down But Not Out: knocked down until a teammate revives the pawn or it bleeds out.
     DefineUProperty(bool, bIsDBNO)
     DefineUProperty(bool, bPlayedDying)
+    // Set on the server as the pawn dies (replicated: HandleIsDying).
+    DefineUProperty(bool, bIsDying)
+    // EFortMovementStyle: Running 0, Walking 1, Charging 2, Sprinting 3 (replicated).
+    DefineUProperty(uint8_t, CurrentMovementStyle)
+    // The damage tags of the hit that killed the pawn.
+    DefineUProperty(FGameplayTagContainer, DeathTags)
+    DefineUStructArrayProperty(FDamagerInfo, Damagers)
     DefineUProperty(UFortHealthSet*, HealthSet)
     // What the pawn's IAbilitySystemInterface returns (its player state's, for a player).
     DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
@@ -58,6 +78,12 @@ public:
     DefineUProperty(UFortMovementSet*, MovementSet)
 
     bool IsDead() const;
+    // Server: the current weapon starts or stops firing in FireModeNum, as a player's held fire button does.
+    void PawnStartFire(uint8_t FireModeNum = 0);
+    void PawnStopFire(uint8_t FireModeNum = 0);
+    // Server: the pawn dies at once, KillerController's elimination (its death runs as any other: the controller's
+    // OnPawnDied with KillerController as the instigator), DeathReason its damage tag.
+    void ForceKill(const FGameplayTag& DeathReason, AController* KillerController, AActor* KillerActor);
     AFortWeapon* EquipWeaponDefinition(const UFortWeaponItemDefinition* WeaponData, const FGuid& ItemEntryGuid);
     bool EquipDefaultWeapon();
     void RemoveAbilityWeapon(AFortWeapon* Weapon);

@@ -26,6 +26,29 @@ bool AFortPawn::IsDead() const
     return Params.Call(const_cast<AFortPawn*>(this)) && Params.Take<bool>(L"ReturnValue");
 }
 
+void AFortPawn::PawnStartFire(uint8_t FireModeNum)
+{
+    Reflection::FParams Params(StaticFunction_PawnStartFire(), true);
+    Params.Set(L"FireModeNum", FireModeNum);
+    Params.Call(this);
+}
+
+void AFortPawn::ForceKill(const FGameplayTag& DeathReason, AController* KillerController, AActor* KillerActor)
+{
+    Reflection::FParams Params(StaticFunction_ForceKill(), true);
+    Params.Set(L"DeathReason", DeathReason);
+    Params.Set(L"KillerController", KillerController);
+    Params.Set(L"KillerActor", KillerActor);
+    Params.Call(this);
+}
+
+void AFortPawn::PawnStopFire(uint8_t FireModeNum)
+{
+    Reflection::FParams Params(StaticFunction_PawnStopFire(), true);
+    Params.Set(L"FireModeNum", FireModeNum);
+    Params.Call(this);
+}
+
 AFortWeapon* AFortPawn::EquipWeaponDefinition(const UFortWeaponItemDefinition* WeaponData, const FGuid& ItemEntryGuid)
 {
     Reflection::FParams Params(StaticFunction_EquipWeaponDefinition());

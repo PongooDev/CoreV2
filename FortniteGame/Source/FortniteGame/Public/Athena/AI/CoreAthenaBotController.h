@@ -23,21 +23,23 @@ class UAthenaPickaxeItemDefinition;
 class UFortItemDefinition;
 class UObject;
 class UFortWeaponItemDefinition;
-class UFortServerBotManagerAthena;
+class FCoreAthenaBotManager;
 
-// Core's backport of Epic's Battle Royale player bots (CoreV2 #233, Core-Docs Athena-Bots-Plan.md). Epic's
-// AFortAthenaAIBotController (8.30, CL-5793395) is a UClass deriving from AAIController; 3.0 has none of the Athena AI
-// classes and Core can't add UClasses, so each bot is a stock AAIController (with a player state) possessing an ordinary
-// AFortPlayerPawnAthena, and this C++ class, named after Epic's, is its "brain": 8.30's controller fields
+// Core's backport of Epic's Battle Royale player bots for builds before 8.30 (CoreV2 #233, Core-Docs
+// Athena-Bots-Plan.md), named after Epic's design but under Core names: Epic's own names (AFortAthenaAIBotController,
+// UFortServerBotManagerAthena, ...) are kept for the wrappers over the game's real classes from 8.30. Epic's
+// AFortAthenaAIBotController (8.30, CL-5793395) is a UClass deriving from AAIController; builds before 8.30 have none of
+// the Athena AI classes and Core can't add UClasses, so each bot is a stock AAIController (with a player state)
+// possessing an ordinary AFortPlayerPawnAthena, and this C++ class is its "brain": 8.30's controller fields
 // (CurrentTarget, CurrentAlertLevel, WeaponList, Inventory, AIBotSkills) and its behaviour tree's evaluators, as
 // functions named after 8.30's and 21.40's UFortAthenaAIBotEvaluator_* classes, run from Core's game-thread tick.
-// None of 8.30's tuning ships (its behaviour tree, skill values and spawn data are server-only content), so the numbers
-// here are Core's own 🟡.
+// The builds this serves have none of 8.30's tuning, so the numbers here are Core's own 🟡. From 8.30 Core will use the
+// native system instead (the game's own bot manager, controller and behaviour trees, which ship in the PC paks).
 
 // 8.30's FAIBotSkills (0x14 bytes: aim timing and tracking), which a bot's controller blueprint sets; Core fills it from
-// the admin panel's bot level (UFortServerBotManagerAthena::SkillsForLevel), with the sight range and aim error 21.40
+// the admin panel's bot level (FCoreAthenaBotManager::SkillsForLevel), with the sight range and aim error 21.40
 // keeps in its Perception and Aiming skill sets.
-struct FAIBotSkills
+struct FCoreAIBotSkills
 {
     float MaxTimeBetweenShots = 0.4f;
     float DeviationTimeBetweenShots = 0.2f;
@@ -46,7 +48,7 @@ struct FAIBotSkills
     float MaxTrackingPredictionError = 150.0f;
     // Core's: how far the bot sees an enemy.
     float SightRange = 6000.0f;
-    // 21.40's UFortAthenaAIBotAimingSkillSet / FWeaponAccuracy terms (its values are server-only content, so Core's 🟡):
+    // 21.40's UFortAthenaAIBotAimingSkillSet / FWeaponAccuracy terms (its values aren't in builds before 8.30, so Core's 🟡):
     // the spread of a shot at the target (one standard deviation, in units across the line of fire), a base
     // (MaxTrackingOffsetError) plus a share per 10 m up to 25 m (MaxTrackingDistanceNearError) and per 10 m beyond it
     // (MaxTrackingDistanceFarError). The vertical spread is MaxTrackingHeightOffsetError times the horizontal.
@@ -57,7 +59,7 @@ struct FAIBotSkills
 };
 
 // 8.30's EAlertLevel (the controller's CurrentAlertLevel, OnPerceptionSensed's state machine).
-enum class EAlertLevel : uint8_t
+enum class ECoreAlertLevel : uint8_t
 {
     Unaware,
     Suspicious,
@@ -66,7 +68,7 @@ enum class EAlertLevel : uint8_t
 };
 
 // Where a bot is in the match (Core's: 8.30's bots only ever spawned on the ground).
-enum class EFortAthenaAIBotState : uint8_t
+enum class ECoreAthenaBotState : uint8_t
 {
     Warmup,
     InAircraft,
@@ -77,7 +79,7 @@ enum class EFortAthenaAIBotState : uint8_t
 
 // The kind of gun, which decides the range a bot uses it at (from the weapon definition's name: WID_Shotgun_*,
 // WID_Assault_*, WID_Sniper_*, WID_Pistol_AutoHeavy* and WID_Pistol_Scavenger* are 3.x's SMGs, WID_Launcher_*).
-enum class EFortAthenaAIBotWeaponType : uint8_t
+enum class ECoreAthenaBotWeaponType : uint8_t
 {
     Other,
     Pistol,
@@ -91,7 +93,7 @@ enum class EFortAthenaAIBotWeaponType : uint8_t
 // What a bot on the ground is set on doing, out of a fight (Core's: 21.40's behaviour tree runs one evaluator's task at a
 // time). A goal it chose is kept until it is done or no longer applies, so the bot doesn't turn back and forth between
 // two of them; only something close by (a pickup within 15 m, healing, a teammate down) comes first meanwhile.
-enum class EFortAthenaAIBotGoal : uint8_t
+enum class ECoreAthenaBotGoal : uint8_t
 {
     None,
     Loot,
@@ -108,7 +110,7 @@ enum class EFortAthenaAIBotGoal : uint8_t
 
 // One of the bot's weapons (8.30's FFortAthenaInventoryInformation is the weapon list's entry: EquipMaxDistance and
 // WeaponDefinition; the item itself lives in the controller's own AFortInventory there, in Core's brain here).
-struct FFortAthenaAIBotWeapon
+struct FCoreAthenaBotWeapon
 {
     UFortWeaponItemDefinition* WeaponDefinition = nullptr;
     UFortItemDefinition* AmmoDefinition = nullptr;
@@ -126,7 +128,7 @@ struct FFortAthenaAIBotWeapon
     // EFortWeaponReloadType::ReloadIndividualBullets: a pump shotgun or a revolver loads its shells one at a time, so a
     // partial reload takes its share of ReloadTime.
     bool bReloadIndividualBullets = false;
-    EFortAthenaAIBotWeaponType Type = EFortAthenaAIBotWeaponType::Other;
+    ECoreAthenaBotWeaponType Type = ECoreAthenaBotWeaponType::Other;
     // 8.30's FFortAthenaInventoryInformation::EquipMaxDistance: the farthest target the bot takes this weapon out for.
     float EquipMaxDistance = 5000.0f;
     // When this gun can fire again (its FiringRate from its last shot): swapping guns doesn't skip a pump's delay.
@@ -137,7 +139,7 @@ struct FFortAthenaAIBotWeapon
 // defaults: GA_Athena_Bandage (MaxHealingAmount 15, HealingCap 75, TriggerDuration 3.5), GA_Athena_Medkit (HealingAmount
 // 100, 10 s), GA_Athena_ShieldSmall (ShieldingAmount 25, SmallShieldCap 50, 2 s), GA_Athena_Shields (ShieldingAmount 50,
 // 5 s), GA_Athena_SuperMedkit (HealingAmount 100, 15 s; the Chug Jug, "full health and shield").
-struct FFortAthenaAIBotConsumable
+struct FCoreAthenaBotConsumable
 {
     UFortWeaponItemDefinition* ItemDefinition = nullptr;
     float Health = 0.0f;
@@ -148,24 +150,24 @@ struct FFortAthenaAIBotConsumable
     int32_t MaxStackSize = 1;
 };
 
-class AFortAthenaAIBotController
+class FCoreAthenaBotController
 {
 public:
-    AFortAthenaAIBotController(UFortServerBotManagerAthena* InManager, AAIController* InController, int32_t InBotIndex, uint8_t InTeam);
+    FCoreAthenaBotController(FCoreAthenaBotManager* InManager, AAIController* InController, int32_t InBotIndex, uint8_t InTeam);
 
     AAIController* GetController() const;
     AFortPlayerPawnAthena* GetPawn() const;
     AFortPlayerStateAthena* GetPlayerState() const;
     uint8_t GetTeam() const { return Team; }
     int32_t GetBotIndex() const { return BotIndex; }
-    EFortAthenaAIBotState GetState() const { return State; }
-    bool IsAlive() const { return State != EFortAthenaAIBotState::Dead; }
+    ECoreAthenaBotState GetState() const { return State; }
+    bool IsAlive() const { return State != ECoreAthenaBotState::Dead; }
     const std::wstring& GetBotName() const { return BotName; }
     int32_t GetKills() const { return Kills; }
     // The enemy the bot is fighting, the opponent it is heading for (Investigate), and the POI it is travelling to (an
     // index into the manager's spots, or -1).
     AFortPawn* GetCurrentTarget() const { return CurrentTarget.Get(); }
-    AFortPawn* GetHuntTarget() const { return Goal == EFortAthenaAIBotGoal::Hunt ? HuntTarget.Get() : nullptr; }
+    AFortPawn* GetHuntTarget() const { return Goal == ECoreAthenaBotGoal::Hunt ? HuntTarget.Get() : nullptr; }
     int32_t GetNextPOI() const { return NextPOI; }
     // The outfit the bot wears this match (an AthenaCharacter item: its hero gives the bot its class tags).
     UObject* GetLoadoutCharacter() const { return LoadoutCharacter; }
@@ -185,7 +187,7 @@ public:
     void OnPossesedPawnDied(AFortPlayerStateAthena* KillerState);
     void AddKill();
 
-    // The bus: where the bot lands (UFortServerBotManagerAthena::AssignLandingSpots picks a named location or a
+    // The bus: where the bot lands (FCoreAthenaBotManager::AssignLandingSpots picks a named location or a
     // loot-rich spot near the bus's path) and when it jumps to get there.
     void SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime);
     bool HasLandingSpot() const { return bHasLandingSpot; }
@@ -196,7 +198,7 @@ public:
     int32_t GetMaterialCount() const { return Materials[0] + Materials[1] + Materials[2]; }
 
     // Squads (duos and squads playlists): Battle Royale's DBNO for a bot. A hit that would take it out while a teammate
-    // is still standing downs it instead (UFortServerBotManagerAthena::ApplyBotDamage): the pawn's bIsDBNO, its DBNO
+    // is still standing downs it instead (FCoreAthenaBotManager::ApplyBotDamage): the pawn's bIsDBNO, its DBNO
     // health and the game's GAB_AthenaDBNO; it bleeds out, is finished off, or a teammate revives it.
     bool IsDBNO() const;
     bool CanGoDBNO() const;
@@ -206,15 +208,15 @@ public:
     int32_t GetTimesDowned() const { return TimesDowned; }
 
     // A healing or shield item's values, or null for anything else (cached per item).
-    static const FFortAthenaAIBotConsumable* GetConsumableInfo(UFortItemDefinition* Definition);
+    static const FCoreAthenaBotConsumable* GetConsumableInfo(UFortItemDefinition* Definition);
     // Loads what the bots use later (the emotes, their animations and the emote ability) up front, so no bot's first
     // use of one loads it in the middle of a match.
     static void PreloadAssets();
-    // A new match (UFortServerBotManagerAthena::Create): the last match's per-match state is dropped (the hot drop spot,
+    // A new match (FCoreAthenaBotManager::Create): the last match's per-match state is dropped (the hot drop spot,
     // the weapons' fire cues and whether the game's fire works for them).
     static void ResetForNewMatch();
     // A gun's kind and stats row values (cached per weapon).
-    static const FFortAthenaAIBotWeapon& GetWeaponInfo(UFortWeaponItemDefinition* Definition);
+    static const FCoreAthenaBotWeapon& GetWeaponInfo(UFortWeaponItemDefinition* Definition);
     // Whether the bot wants this floor pickup: a gun it would carry (WeaponSlotFor), ammo for its guns, or a
     // consumable it has room for.
     bool WantsPickup(UFortItemDefinition* Definition, bool bWeapon, bool bConsumable);
@@ -245,17 +247,17 @@ private:
     void UpdateCurrentTarget(float Now);
     // Whether the bot takes on another bot it sees (Core's: players come first, so a match lasts longer for them and
     // the kills are theirs): one that is shooting at it or going for it always; otherwise now and then.
-    bool WillEngageBot(AFortAthenaAIBotController* Other, float Now) const;
+    bool WillEngageBot(FCoreAthenaBotController* Other, float Now) const;
     // Out of a fight: the goal the bot pursues (ChooseGoal picks a new one when the last is done), and PursueGoal's step
     // towards it, false when it is done or no longer applies.
     const wchar_t* ChooseGoal(float Now);
-    bool PursueGoal(EFortAthenaAIBotGoal InGoal, float Now);
-    void SetGoal(EFortAthenaAIBotGoal NewGoal, float Now);
+    bool PursueGoal(ECoreAthenaBotGoal InGoal, float Now);
+    void SetGoal(ECoreAthenaBotGoal NewGoal, float Now);
     // 21.40's UFortAthenaAIBotEvaluator_Investigate: an armed bot with nothing left to loot heads for a player near it
     // (a few bots at most go for the same one), and for an enemy it just lost sight of.
     bool Investigate(float Now);
     // 21.40's UFortAthenaAIBotEvaluator_SelectNextPOI (FindNextBestPOI, SetNextDestination, ClearNextDestination): the
-    // spot looted out, the next one nearby inside the safe zone (UFortServerBotManagerAthena::FindNextBestPOI).
+    // spot looted out, the next one nearby inside the safe zone (FCoreAthenaBotManager::FindNextBestPOI).
     bool SelectNextPOI(float Now);
     void ClearNextDestination();
     // 8.30's _RangeAttack and _ManageWeapon, 21.40's _MeleeAttack.
@@ -296,7 +298,7 @@ private:
     void TakeStormDamage(float Now);
 
     bool HasUsableWeapon() const;
-    bool HasAmmoFor(const FFortAthenaAIBotWeapon& Weapon) const;
+    bool HasAmmoFor(const FCoreAthenaBotWeapon& Weapon) const;
     int32_t BestWeaponIndex() const;
     // 8.30's _ManageWeapon: the weapon whose EquipMaxDistance suits a target this far (a shotgun close, an assault
     // rifle or SMG at mid range, a sniper far, a pistol when nothing better has ammo).
@@ -381,21 +383,21 @@ private:
     // Whether the game's fire works for this weapon class: unknown until a shot shows it spending ammo or not.
     void CheckWeaponFireResult(float Now);
 
-    UFortServerBotManagerAthena* Manager = nullptr;
+    FCoreAthenaBotManager* Manager = nullptr;
     TWeakObjectPtr<AAIController> Controller;
     TWeakObjectPtr<AFortPlayerPawnAthena> PlayerBotPawn;
     int32_t BotIndex = 0;
     uint8_t Team = 0;
     std::wstring BotName;
-    EFortAthenaAIBotState State = EFortAthenaAIBotState::Warmup;
+    ECoreAthenaBotState State = ECoreAthenaBotState::Warmup;
 
-    FAIBotSkills AIBotSkills;
-    EAlertLevel CurrentAlertLevel = EAlertLevel::Unaware;
+    FCoreAIBotSkills AIBotSkills;
+    ECoreAlertLevel CurrentAlertLevel = ECoreAlertLevel::Unaware;
     TWeakObjectPtr<AFortPawn> CurrentTarget;
     bool bHasVisualLineOfSightOnTarget = false;
     FVector LastKnownPosition;
 
-    std::vector<FFortAthenaAIBotWeapon> WeaponList;
+    std::vector<FCoreAthenaBotWeapon> WeaponList;
     std::map<UFortItemDefinition*, int32_t> Ammo;
     // Healing and shield items carried, and the one in use.
     std::map<UFortItemDefinition*, int32_t> Consumables;
@@ -434,7 +436,7 @@ private:
     float DBNOStartedAt = 0.0f;
     float NextBleedTime = 0.0f;
     float LastDBNOHealth = 0.0f;
-    AFortAthenaAIBotController* ReviveTarget = nullptr;
+    FCoreAthenaBotController* ReviveTarget = nullptr;
     float ReviveDoneAt = 0.0f;
     int32_t Revives = 0;
     int32_t TimesDowned = 0;
@@ -565,7 +567,7 @@ private:
     float LastTrackTime = 0.0f;
 
     // The goal out of a fight (ChooseGoal), since when, and how often it changed (the 20 s log).
-    EFortAthenaAIBotGoal Goal = EFortAthenaAIBotGoal::None;
+    ECoreAthenaBotGoal Goal = ECoreAthenaBotGoal::None;
     float GoalStartTime = 0.0f;
     int32_t GoalChanges = 0;
     // A stuck bot's detour (TryToUnstuck) before it sets off again for somewhere far.

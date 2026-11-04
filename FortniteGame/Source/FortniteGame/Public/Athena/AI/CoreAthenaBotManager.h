@@ -2,7 +2,7 @@
 
 #include <chrono>
 
-#include "Athena/AI/FortAthenaAIBotController.h"
+#include "Athena/AI/CoreAthenaBotController.h"
 #include "Math/Vector.h"
 #include "UObject/WeakObjectPtr.h"
 
@@ -25,7 +25,7 @@ struct FGameplayTagContainer;
 
 // The admin panel's player bot settings (Core-Backend's bots block, sent with the warmup answer: {count, level, health,
 // shield, quests}, or null when "Force player AIs" is off).
-struct FFortAthenaBotSettings
+struct FCoreAthenaBotSettings
 {
     int32_t Count = 0;
     int32_t Level = 5;
@@ -36,7 +36,7 @@ struct FFortAthenaBotSettings
 
 // A weapon, ammo or healing item pickup lying on the floor, as the bots' loot search sees it (refreshed every few
 // seconds).
-struct FFortAthenaBotLoot
+struct FCoreAthenaBotLoot
 {
     TWeakObjectPtr<AFortPickup> Pickup;
     FVector Location;
@@ -45,7 +45,7 @@ struct FFortAthenaBotLoot
 };
 
 // A chest or ammo box the bots can search (21.40's _Loot looks for containers too; 8.30's bots didn't loot).
-struct FFortAthenaBotContainer
+struct FCoreAthenaBotContainer
 {
     TWeakObjectPtr<ABuildingContainer> Container;
     FVector Location;
@@ -54,7 +54,7 @@ struct FFortAthenaBotContainer
 
 // A place bots land at (21.40's _SelectNextPOI): a named location (an AFortPoiVolume tagged Athena.Location.POI.*) or a
 // cluster of chests, with its loot (chests, and a share of the floor weapons) and the bots sent there.
-struct FFortAthenaBotLandingSpot
+struct FCoreAthenaBotLandingSpot
 {
     FVector Location;
     float Radius = 6000.0f;
@@ -71,19 +71,19 @@ struct FFortAthenaBotLandingSpot
 // Bots only exist on builds without Epic's own (every build before 8.30, which has AFortAthenaAIBotController): a build
 // with native player bots never uses this backport (HasNativePlayerBots). They're off unless the admin panel's "Force
 // player AIs" is on.
-class UFortServerBotManagerAthena
+class FCoreAthenaBotManager
 {
 public:
     // Starts the manager for a Battle Royale game mode (FinishWorldInitialization): it waits for the backend's settings.
     static void Create(AFortGameModeAthena* GameMode);
-    static UFortServerBotManagerAthena* Get();
+    static FCoreAthenaBotManager* Get();
 
     // Whether the build has Epic's own player bots (AFortAthenaAIBotController, 8.x on).
     static bool HasNativePlayerBots();
 
     // The backend's settings, from each warmup answer (null: off).
-    void SetSettings(bool bEnabled, const FFortAthenaBotSettings& InSettings);
-    const FFortAthenaBotSettings& GetSettings() const { return Settings; }
+    void SetSettings(bool bEnabled, const FCoreAthenaBotSettings& InSettings);
+    const FCoreAthenaBotSettings& GetSettings() const { return Settings; }
     bool IsEnabled() const { return bEnabled; }
     // Each frame, on the game thread (WatchManager).
     void Tick();
@@ -93,9 +93,9 @@ public:
     bool HasAliveBots() const { return GetAliveBotCount() > 0; }
     // The playlist's team size (1 solo, 2 duos, 4 squads), and a bot's teammates still in the match.
     int32_t GetTeamSize() const { return std::max(PlaylistTeamSize, 1); }
-    std::vector<AFortAthenaAIBotController*> TeammatesOf(const AFortAthenaAIBotController* Bot) const;
+    std::vector<FCoreAthenaBotController*> TeammatesOf(const FCoreAthenaBotController* Bot) const;
     // The bot whose pawn or player state this is, or null.
-    AFortAthenaAIBotController* FindBot(const UObject* PawnOrPlayerState) const;
+    FCoreAthenaBotController* FindBot(const UObject* PawnOrPlayerState) const;
     static bool IsBotPawn(const UObject* Object);
 
     // The bots a player eliminated (AFortGameModeAthena's match results add them to the player's kills).
@@ -118,10 +118,10 @@ public:
 
     // Server: the enemies a bot can fight, and the loot it can take (shared by every bot each tick).
     const std::vector<TWeakObjectPtr<AFortPawn>>& GetEnemyPawns() const { return EnemyPawns; }
-    const std::vector<FFortAthenaBotLoot>& GetLoot() const { return Loot; }
+    const std::vector<FCoreAthenaBotLoot>& GetLoot() const { return Loot; }
     void ForgetLoot(AFortPickup* Pickup);
     // The island's unsearched chests and ammo boxes, and a container a bot searched (its loot is looked for next tick).
-    const std::vector<FFortAthenaBotContainer>& GetContainers() const { return Containers; }
+    const std::vector<FCoreAthenaBotContainer>& GetContainers() const { return Containers; }
     void OnContainerSearched(ABuildingContainer* Container);
     // Navigation for the bots (Core's UAthenaNavSystem): whether the invoker navmesh is up.
     bool HasNavigation() const { return bHasNavigation; }
@@ -142,30 +142,30 @@ public:
     // loot left and inside the next safe zone (-1: none); the spot Location is in (-1: none); and a spot by its index.
     int32_t FindNextBestPOI(const FVector& From, const std::vector<int32_t>& Visited) const;
     int32_t FindPOIAt(const FVector& Location) const;
-    const FFortAthenaBotLandingSpot* GetPOI(int32_t Index) const;
-    // How many bots are heading for Target (AFortAthenaAIBotController::Investigate), other than Except.
-    int32_t CountHuntersOf(const AFortPawn* Target, const AFortAthenaAIBotController* Except) const;
+    const FCoreAthenaBotLandingSpot* GetPOI(int32_t Index) const;
+    // How many bots are heading for Target (FCoreAthenaBotController::Investigate), other than Except.
+    int32_t CountHuntersOf(const AFortPawn* Target, const FCoreAthenaBotController* Except) const;
     // The battle bus while it flies (found when the aircraft phase starts).
     AActor* GetAircraft() const { return reinterpret_cast<AActor*>(CurrentAircraft.Get()); }
 
     // A bot's shot hit Victim (a bot's or a player's pawn): its shield, then its health; at 0 it dies, the bot's
     // elimination (AFortPawn::ForceKill with the bot's controller).
-    void ApplyBotDamage(AFortAthenaAIBotController* Attacker, AFortPawn* Victim, float Damage, UFortWeaponItemDefinition* Weapon);
+    void ApplyBotDamage(FCoreAthenaBotController* Attacker, AFortPawn* Victim, float Damage, UFortWeaponItemDefinition* Weapon);
     // Whether a bot's hit on Victim goes the game's way (its damage effect): a player's pawn always; a bot's in a solo
     // playlist (in team playlists Core's damage downs bots while a teammate stands).
     bool UsesGameDamage(const AFortPawn* Victim) const;
     // A bot hit Victim (LastBotAttackerOf).
-    void NoteBotHit(AFortAthenaAIBotController* Attacker, AFortPawn* Victim);
+    void NoteBotHit(FCoreAthenaBotController* Attacker, AFortPawn* Victim);
     // The player state of the bot that last hit Pawn, in the last few seconds, or null.
     AFortPlayerStateAthena* LastBotAttackerOf(const AFortPawn* Pawn) const;
 
-    // A bot's pawn died (AFortAthenaAIBotController::Tick saw it): its place, the kill, the counts and the win check.
-    void RemoveFromAliveBots(AFortAthenaAIBotController* Bot, AFortPlayerStateAthena* KillerState);
+    // A bot's pawn died (FCoreAthenaBotController::Tick saw it): its place, the kill, the counts and the win check.
+    void RemoveFromAliveBots(FCoreAthenaBotController* Bot, AFortPlayerStateAthena* KillerState);
 
-    static FAIBotSkills SkillsForLevel(int32_t Level);
+    static FCoreAIBotSkills SkillsForLevel(int32_t Level);
 
 private:
-    explicit UFortServerBotManagerAthena(AFortGameModeAthena* InGameMode);
+    explicit FCoreAthenaBotManager(AFortGameModeAthena* InGameMode);
 
     void TickWarmup(float Now);
     void StartBotMatchIfAsked();
@@ -178,7 +178,7 @@ private:
     void RemoveSurplusBots(int32_t Wanted);
     bool RegisterBot(float Now);
     uint8_t PlaceBotOnTeam();
-    void AddToAliveBots(AFortAthenaAIBotController* Bot);
+    void AddToAliveBots(FCoreAthenaBotController* Bot);
     void OnAircraftPhaseStarted(float Now);
     void UpdateCounts();
     void CheckWinConditionLastManStanding();
@@ -201,8 +201,8 @@ private:
     FWeakObjectPtr CurrentAircraft;
     bool bEnabled = false;
     bool bHasSettings = false;
-    FFortAthenaBotSettings Settings;
-    std::vector<std::unique_ptr<AFortAthenaAIBotController>> PlayerBots;
+    FCoreAthenaBotSettings Settings;
+    std::vector<std::unique_ptr<FCoreAthenaBotController>> PlayerBots;
     int32_t NextBotIndex = 0;
     // This match's shuffled order of the name list.
     std::vector<int32_t> NameOrder;
@@ -232,9 +232,9 @@ private:
     bool bBotMatchStarted = false;
     bool bBotMatchAircraftStarted = false;
     std::vector<TWeakObjectPtr<AFortPawn>> EnemyPawns;
-    std::vector<FFortAthenaBotLoot> Loot;
-    std::vector<FFortAthenaBotContainer> Containers;
-    std::vector<FFortAthenaBotLandingSpot> LandingSpots;
+    std::vector<FCoreAthenaBotLoot> Loot;
+    std::vector<FCoreAthenaBotContainer> Containers;
+    std::vector<FCoreAthenaBotLandingSpot> LandingSpots;
     bool bLandingAssigned = false;
     bool bHasFlightSample = false;
     FVector FlightSample;

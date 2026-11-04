@@ -17,7 +17,7 @@ namespace EPathFollowingRequestResult
 }
 
 // The engine's AI controller (AIModule). Battle Royale's player bots are stock AAIControllers, as Epic's 8.30
-// AFortAthenaAIBotController derives from it rather than from AFortAIController (which wants an AFortAIPawn).
+// FCoreAthenaBotController derives from it rather than from AFortAIController (which wants an AFortAIPawn).
 class AAIController : public AController
 {
     DefineUnrealClass(AAIController, AIModule)

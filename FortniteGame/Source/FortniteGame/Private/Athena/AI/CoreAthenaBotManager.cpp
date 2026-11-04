@@ -1,5 +1,5 @@
 #include "pch.h"
-#include "Athena/AI/FortServerBotManagerAthena.h"
+#include "Athena/AI/CoreAthenaBotManager.h"
 #include "AIController.h"
 #include "Athena/AI/AthenaNavSystem.h"
 #include "Building/BuildingContainer.h"
@@ -41,7 +41,7 @@
 
 namespace
 {
-    std::unique_ptr<UFortServerBotManagerAthena> Instance;
+    std::unique_ptr<FCoreAthenaBotManager> Instance;
 
     // The bots each player eliminated (their match results add them), and the bot pawns the game itself sent a Kill
     // quest event for.
@@ -124,7 +124,7 @@ namespace
     }
 }
 
-void UFortServerBotManagerAthena::Create(AFortGameModeAthena* GameMode)
+void FCoreAthenaBotManager::Create(AFortGameModeAthena* GameMode)
 {
 #if WITH_SERVER_CODE
     if (!GameMode || (Instance && Instance->GetGameMode() == GameMode))
@@ -134,11 +134,11 @@ void UFortServerBotManagerAthena::Create(AFortGameModeAthena* GameMode)
     const bool bWatching = Instance != nullptr;
     // A new game mode is a new world (the server reloads the map after a match): nothing of the last match's bots is
     // kept. Their controllers and pawns went with the old world; Core only ever holds them weakly.
-    Instance.reset(new UFortServerBotManagerAthena(GameMode));
+    Instance.reset(new FCoreAthenaBotManager(GameMode));
     BotKills.clear();
     NativeKillTargets.clear();
     UAthenaNavSystem::ResetForNewMatch();
-    AFortAthenaAIBotController::ResetForNewMatch();
+    FCoreAthenaBotController::ResetForNewMatch();
     if (!bWatching)
     {
         WatchManager();
@@ -146,28 +146,28 @@ void UFortServerBotManagerAthena::Create(AFortGameModeAthena* GameMode)
 #endif
 }
 
-UFortServerBotManagerAthena* UFortServerBotManagerAthena::Get()
+FCoreAthenaBotManager* FCoreAthenaBotManager::Get()
 {
     return Instance.get();
 }
 
-UFortServerBotManagerAthena::UFortServerBotManagerAthena(AFortGameModeAthena* InGameMode)
+FCoreAthenaBotManager::FCoreAthenaBotManager(AFortGameModeAthena* InGameMode)
     : GameMode(InGameMode)
 {
 }
 
-bool UFortServerBotManagerAthena::HasNativePlayerBots()
+bool FCoreAthenaBotManager::HasNativePlayerBots()
 {
-    static const bool bNative = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaAIBotController") != nullptr;
+    static const bool bNative = FindObject<UClass>(nullptr, L"/Script/FortniteGame.CoreAthenaBotController") != nullptr;
     return bNative;
 }
 
-AFortGameModeAthena* UFortServerBotManagerAthena::GetGameMode() const
+AFortGameModeAthena* FCoreAthenaBotManager::GetGameMode() const
 {
     return static_cast<AFortGameModeAthena*>(GameMode.Get());
 }
 
-void UFortServerBotManagerAthena::SetSettings(bool bInEnabled, const FFortAthenaBotSettings& InSettings)
+void FCoreAthenaBotManager::SetSettings(bool bInEnabled, const FCoreAthenaBotSettings& InSettings)
 {
     const bool bChanged = !bHasSettings || bInEnabled != bEnabled || InSettings.Count != Settings.Count || InSettings.Level != Settings.Level
         || InSettings.StartingHealth != Settings.StartingHealth || InSettings.StartingShield != Settings.StartingShield
@@ -202,7 +202,7 @@ void UFortServerBotManagerAthena::SetSettings(bool bInEnabled, const FFortAthena
     }
 }
 
-FAIBotSkills UFortServerBotManagerAthena::SkillsForLevel(int32_t Level)
+FCoreAIBotSkills FCoreAthenaBotManager::SkillsForLevel(int32_t Level)
 {
     // Core's levels 🟡 (8.30's FAIBotSkills values and 21.40's aiming skill sets don't ship): level 1 reacts slowly,
     // shoots slowly and misses a lot; level 10 reacts in a quarter of a second and tracks closely. The default level 5
@@ -210,7 +210,7 @@ FAIBotSkills UFortServerBotManagerAthena::SkillsForLevel(int32_t Level)
     // headless 3.1 match: 23%, 16 of 69, against strafing bots); testers found the old error, which shrank to nothing
     // up close and at high levels, an aimbot.
     const float T = std::clamp((static_cast<float>(Level) - 1.0f) / 9.0f, 0.0f, 1.0f);
-    FAIBotSkills Skills;
+    FCoreAIBotSkills Skills;
     Skills.MaxTimeBetweenShots = FMath::Lerp(0.9f, 0.25f, T);
     Skills.DeviationTimeBetweenShots = FMath::Lerp(0.5f, 0.1f, T);
     Skills.MaxTrackingReactionTime = FMath::Lerp(1.2f, 0.25f, T);
@@ -223,12 +223,12 @@ FAIBotSkills UFortServerBotManagerAthena::SkillsForLevel(int32_t Level)
     return Skills;
 }
 
-int32_t UFortServerBotManagerAthena::GetAliveBotCount() const
+int32_t FCoreAthenaBotManager::GetAliveBotCount() const
 {
     return static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [](const auto& Bot) { return Bot->IsAlive(); }));
 }
 
-AFortAthenaAIBotController* UFortServerBotManagerAthena::FindBot(const UObject* PawnOrPlayerState) const
+FCoreAthenaBotController* FCoreAthenaBotManager::FindBot(const UObject* PawnOrPlayerState) const
 {
     if (!PawnOrPlayerState)
     {
@@ -245,29 +245,29 @@ AFortAthenaAIBotController* UFortServerBotManagerAthena::FindBot(const UObject* 
     return nullptr;
 }
 
-bool UFortServerBotManagerAthena::IsBotPawn(const UObject* Object)
+bool FCoreAthenaBotManager::IsBotPawn(const UObject* Object)
 {
     return Instance && Instance->FindBot(Object) != nullptr;
 }
 
-int32_t UFortServerBotManagerAthena::BotKillsOf(const AFortPlayerStateAthena* PlayerState)
+int32_t FCoreAthenaBotManager::BotKillsOf(const AFortPlayerStateAthena* PlayerState)
 {
     const auto Found = std::find_if(BotKills.begin(), BotKills.end(), [PlayerState](const auto& Entry) { return Entry.first.Get() == PlayerState; });
     return Found != BotKills.end() ? Found->second : 0;
 }
 
-bool UFortServerBotManagerAthena::ShouldCountQuestEvent(const UObject* Target)
+bool FCoreAthenaBotManager::ShouldCountQuestEvent(const UObject* Target)
 {
     return !Instance || Instance->Settings.bEliminationsCountForQuests;
 }
 
-void UFortServerBotManagerAthena::NoteNativeKillEvent(const UObject* Target)
+void FCoreAthenaBotManager::NoteNativeKillEvent(const UObject* Target)
 {
     std::erase_if(NativeKillTargets, [](const TWeakObjectPtr<UObject>& Weak) { return !Weak.Get(); });
     NativeKillTargets.push_back(TWeakObjectPtr<UObject>(const_cast<UObject*>(Target)));
 }
 
-bool UFortServerBotManagerAthena::IsWarmup()
+bool FCoreAthenaBotManager::IsWarmup()
 {
     return Instance && !Instance->bAircraftStarted;
 }
@@ -287,7 +287,7 @@ namespace
     }
 }
 
-void UFortServerBotManagerAthena::AddKillEventTags(const UObject* Target, AController* Killer, FGameplayTagContainer& TargetTags, FGameplayTagContainer& SourceTags)
+void FCoreAthenaBotManager::AddKillEventTags(const UObject* Target, AController* Killer, FGameplayTagContainer& TargetTags, FGameplayTagContainer& SourceTags)
 {
 #if WITH_SERVER_CODE
     // 3.1's AFortGameModeZone::Killed (0xB5E890) sends the killer's Kill event with the dead pawn's own tags as the
@@ -296,7 +296,7 @@ void UFortServerBotManagerAthena::AddKillEventTags(const UObject* Target, AContr
     // Homebase.Class in each, killingblow_athena_player_shotgun for Weapon.Ranged.shotgun in the source's too). A bot's
     // pawn has no hero of a player's: its class is its outfit's hero's (HID_*: Homebase.Class.IsCommando...), and the
     // weapon is the one the killer holds (its item's GameplayTags).
-    AFortAthenaAIBotController* Bot = Instance ? Instance->FindBot(Target) : nullptr;
+    FCoreAthenaBotController* Bot = Instance ? Instance->FindBot(Target) : nullptr;
     if (!Bot)
     {
         return;
@@ -316,14 +316,14 @@ void UFortServerBotManagerAthena::AddKillEventTags(const UObject* Target, AContr
 #endif
 }
 
-bool UFortServerBotManagerAthena::ShouldHoldNativeWinCheck() const
+bool FCoreAthenaBotManager::ShouldHoldNativeWinCheck() const
 {
     return HasAliveBots();
 }
 
-void UFortServerBotManagerAthena::OnPlayerRemoved(AFortPlayerStateAthena* KillerState)
+void FCoreAthenaBotManager::OnPlayerRemoved(AFortPlayerStateAthena* KillerState)
 {
-    if (AFortAthenaAIBotController* Killer = FindBot(KillerState))
+    if (FCoreAthenaBotController* Killer = FindBot(KillerState))
     {
         Killer->AddKill();
     }
@@ -331,7 +331,7 @@ void UFortServerBotManagerAthena::OnPlayerRemoved(AFortPlayerStateAthena* Killer
     CheckWinConditionLastManStanding();
 }
 
-bool UFortServerBotManagerAthena::GetSafeZone(FVector& OutCenter, float& OutRadius) const
+bool FCoreAthenaBotManager::GetSafeZone(FVector& OutCenter, float& OutRadius) const
 {
     AFortGameModeAthena* Athena = GetGameMode();
     AFortSafeZoneIndicator* Indicator = Athena ? static_cast<AFortSafeZoneIndicator*>(Athena->SafeZoneIndicator) : nullptr;
@@ -344,7 +344,7 @@ bool UFortServerBotManagerAthena::GetSafeZone(FVector& OutCenter, float& OutRadi
     return OutRadius > 0.0f;
 }
 
-bool UFortServerBotManagerAthena::GetCurrentSafeZone(FVector& OutCenter, float& OutRadius) const
+bool FCoreAthenaBotManager::GetCurrentSafeZone(FVector& OutCenter, float& OutRadius) const
 {
     AFortGameModeAthena* Athena = GetGameMode();
     AFortSafeZoneIndicator* Indicator = Athena ? static_cast<AFortSafeZoneIndicator*>(Athena->SafeZoneIndicator) : nullptr;
@@ -357,7 +357,7 @@ bool UFortServerBotManagerAthena::GetCurrentSafeZone(FVector& OutCenter, float& 
     return OutRadius > 0.0f;
 }
 
-float UFortServerBotManagerAthena::GetStormDamagePerSecond() const
+float FCoreAthenaBotManager::GetStormDamagePerSecond() const
 {
     // Battle Royale's storm hurts 1 a second in its first circles, more later 🟡 (the game's GE_OutsideSafeZone
     // damage by phase isn't read here).
@@ -366,7 +366,7 @@ float UFortServerBotManagerAthena::GetStormDamagePerSecond() const
     return Phase <= 2 ? 1.0f : Phase <= 4 ? 2.0f : Phase <= 6 ? 5.0f : 10.0f;
 }
 
-bool UFortServerBotManagerAthena::FindGroundNear(const FVector& Around, float Radius, FVector& OutLocation) const
+bool FCoreAthenaBotManager::FindGroundNear(const FVector& Around, float Radius, FVector& OutLocation) const
 {
     AFortGameModeAthena* Athena = GetGameMode();
     for (int32_t Attempt = 0; Athena && Attempt < 6; ++Attempt)
@@ -384,7 +384,7 @@ bool UFortServerBotManagerAthena::FindGroundNear(const FVector& Around, float Ra
     return false;
 }
 
-bool UFortServerBotManagerAthena::GetWarmupSpot(FVector& OutLocation) const
+bool FCoreAthenaBotManager::GetWarmupSpot(FVector& OutLocation) const
 {
     if (WarmupSpots.empty())
     {
@@ -394,18 +394,18 @@ bool UFortServerBotManagerAthena::GetWarmupSpot(FVector& OutLocation) const
     return true;
 }
 
-uint8_t UFortServerBotManagerAthena::TeamOfPawn(const APawn* Pawn) const
+uint8_t FCoreAthenaBotManager::TeamOfPawn(const APawn* Pawn) const
 {
     AFortPlayerStateAthena* State = Pawn ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Pawn->PlayerState))) : nullptr;
     return State ? static_cast<uint8_t>(State->TeamIndex) : 0xFF;
 }
 
-void UFortServerBotManagerAthena::ForgetLoot(AFortPickup* Pickup)
+void FCoreAthenaBotManager::ForgetLoot(AFortPickup* Pickup)
 {
-    std::erase_if(Loot, [Pickup](const FFortAthenaBotLoot& Entry) { return Entry.Pickup.Get() == Pickup; });
+    std::erase_if(Loot, [Pickup](const FCoreAthenaBotLoot& Entry) { return Entry.Pickup.Get() == Pickup; });
 }
 
-std::set<uint8_t> UFortServerBotManagerAthena::HumanTeams() const
+std::set<uint8_t> FCoreAthenaBotManager::HumanTeams() const
 {
     std::set<uint8_t> Teams;
     AFortGameModeAthena* Athena = GetGameMode();
@@ -426,7 +426,7 @@ std::set<uint8_t> UFortServerBotManagerAthena::HumanTeams() const
     return Teams;
 }
 
-std::set<uint8_t> UFortServerBotManagerAthena::AliveTeams(bool bIncludeHumans) const
+std::set<uint8_t> FCoreAthenaBotManager::AliveTeams(bool bIncludeHumans) const
 {
     std::set<uint8_t> Teams;
     for (const auto& Bot : PlayerBots)
@@ -451,7 +451,7 @@ std::set<uint8_t> UFortServerBotManagerAthena::AliveTeams(bool bIncludeHumans) c
     return Teams;
 }
 
-void UFortServerBotManagerAthena::Tick()
+void FCoreAthenaBotManager::Tick()
 {
 #if WITH_SERVER_CODE
     AFortGameModeAthena* Athena = GetGameMode();
@@ -545,7 +545,7 @@ void UFortServerBotManagerAthena::Tick()
 #endif
 }
 
-void UFortServerBotManagerAthena::StartBotMatchIfAsked()
+void FCoreAthenaBotManager::StartBotMatchIfAsked()
 {
 #if WITH_SERVER_CODE
     // Testing only (-CoreBotMatch): a match of bots alone. Nobody's coming, so nothing assigns the match or starts its
@@ -586,7 +586,7 @@ void UFortServerBotManagerAthena::StartBotMatchIfAsked()
 #endif
 }
 
-void UFortServerBotManagerAthena::ReadPlaylistTeams()
+void FCoreAthenaBotManager::ReadPlaylistTeams()
 {
     // The reservation beacon's teams, while it has them: a match whose players never came (the bots-only test match)
     // loses its beacon when its match starts, and the game session's own room is Save the World's 4.
@@ -607,7 +607,7 @@ void UFortServerBotManagerAthena::ReadPlaylistTeams()
     }
 }
 
-int32_t UFortServerBotManagerAthena::MatchCapacity() const
+int32_t FCoreAthenaBotManager::MatchCapacity() const
 {
     // The playlist's most players, not its team slots: the beacon's NumTeams x NumPlayersPerTeam is 100 x 2 in duos and
     // 100 x 4 in squads (GetMaxTeamInfoForPlaylist), while every Battle Royale playlist of these seasons takes 100
@@ -618,7 +618,7 @@ int32_t UFortServerBotManagerAthena::MatchCapacity() const
     return Slots > 0 ? std::min(Slots, PlaylistMaxPlayers) : 0;
 }
 
-int32_t UFortServerBotManagerAthena::WantedBotCount() const
+int32_t FCoreAthenaBotManager::WantedBotCount() const
 {
     // bots = min(requested, MaxPlayers - connected players), re-checked until the bus leaves. Bots play on teams of
     // their own, filled to the playlist's team size: when the room is what limits them, whole teams only, and never
@@ -642,7 +642,7 @@ int32_t UFortServerBotManagerAthena::WantedBotCount() const
     return std::clamp(std::min(Settings.Count, Room), 0, 100);
 }
 
-void UFortServerBotManagerAthena::TickWarmup(float Now)
+void FCoreAthenaBotManager::TickWarmup(float Now)
 {
 #if WITH_SERVER_CODE
     if (!Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset()) || !AAIController::StaticClass())
@@ -710,7 +710,7 @@ void UFortServerBotManagerAthena::TickWarmup(float Now)
     if (!bNavigationTried && Wanted > 0 && GetAliveBotCount() > 0)
     {
         bNavigationTried = true;
-        AFortAthenaAIBotController::PreloadAssets();
+        FCoreAthenaBotController::PreloadAssets();
         RefreshLoot(Now);
         GatherContainers();
         InitializeNavigation();
@@ -718,7 +718,7 @@ void UFortServerBotManagerAthena::TickWarmup(float Now)
 #endif
 }
 
-bool UFortServerBotManagerAthena::HasHumanSpawned() const
+bool FCoreAthenaBotManager::HasHumanSpawned() const
 {
     // A player on the island: a player state that isn't a bot's, whose controller has a pawn.
     AFortGameStateAthena* GameState = AthenaGameStateOf(GetGameMode());
@@ -738,7 +738,7 @@ bool UFortServerBotManagerAthena::HasHumanSpawned() const
     return false;
 }
 
-void UFortServerBotManagerAthena::SpawnBots(int32_t Wanted, float Now)
+void FCoreAthenaBotManager::SpawnBots(int32_t Wanted, float Now)
 {
     for (int32_t Spawned = 0; Spawned < BotsPerFrame && GetAliveBotCount() < Wanted && Now >= NextRegisterTime; ++Spawned)
     {
@@ -751,7 +751,7 @@ void UFortServerBotManagerAthena::SpawnBots(int32_t Wanted, float Now)
     }
 }
 
-void UFortServerBotManagerAthena::RemoveSurplusBots(int32_t Wanted)
+void FCoreAthenaBotManager::RemoveSurplusBots(int32_t Wanted)
 {
     // The newest bots go first. A bot on a team a player has since joined (late joining) goes before them.
     const std::set<uint8_t> Humans = HumanTeams();
@@ -767,14 +767,14 @@ void UFortServerBotManagerAthena::RemoveSurplusBots(int32_t Wanted)
     });
     while (GetAliveBotCount() > Wanted && !PlayerBots.empty())
     {
-        AFortAthenaAIBotController* Bot = PlayerBots.back().get();
+        FCoreAthenaBotController* Bot = PlayerBots.back().get();
         Log::Info(L"Battle Royale bots: {} leaves to make room (the match wants {} bots)", Bot->GetBotName(), Wanted);
         Bot->Destroy();
         PlayerBots.pop_back();
     }
 }
 
-uint8_t UFortServerBotManagerAthena::PlaceBotOnTeam()
+uint8_t FCoreAthenaBotManager::PlaceBotOnTeam()
 {
     // 21.40's AFortGameModeAthena::PlaceBotOnTeam; 8.30's RegisterBot fills the playlist's teams in order, cycling
     // LastBotTeam. Core's bots play on teams of their own (the owner's choice): a team no player is on, from the last
@@ -801,7 +801,7 @@ uint8_t UFortServerBotManagerAthena::PlaceBotOnTeam()
     return 0xFF;
 }
 
-bool UFortServerBotManagerAthena::RegisterBot(float Now)
+bool FCoreAthenaBotManager::RegisterBot(float Now)
 {
 #if WITH_SERVER_CODE
     AFortGameModeAthena* Athena = GetGameMode();
@@ -862,7 +862,7 @@ bool UFortServerBotManagerAthena::RegisterBot(float Now)
     }
 
     const int32_t BotIndex = NextBotIndex++;
-    auto Bot = std::make_unique<AFortAthenaAIBotController>(this, Controller, BotIndex, Team);
+    auto Bot = std::make_unique<FCoreAthenaBotController>(this, Controller, BotIndex, Team);
     if (NameOrder.empty())
     {
         for (int32_t Index = 0; Index < NumBotNames; ++Index)
@@ -892,14 +892,14 @@ bool UFortServerBotManagerAthena::RegisterBot(float Now)
 #endif
 }
 
-void UFortServerBotManagerAthena::AddToAliveBots(AFortAthenaAIBotController* Bot)
+void FCoreAthenaBotManager::AddToAliveBots(FCoreAthenaBotController* Bot)
 {
     AFortPlayerStateAthena* State = Bot->GetPlayerState();
     Log::Info(L"Battle Royale bots: {} joins on {} ({}, {})", Bot->GetBotName(), State ? static_cast<EFortTeam>(State->TeamIndex).ToString() : std::wstring(L"no team"),
         Bot->GetController() ? Bot->GetController()->GetName().ToStdString() : std::wstring(), Bot->GetPawn() ? Bot->GetPawn()->GetName().ToStdString() : std::wstring(L"no pawn"));
 }
 
-void UFortServerBotManagerAthena::OnAircraftPhaseStarted(float Now)
+void FCoreAthenaBotManager::OnAircraftPhaseStarted(float Now)
 {
 #if WITH_SERVER_CODE
     bAircraftStarted = true;
@@ -959,7 +959,7 @@ void UFortServerBotManagerAthena::OnAircraftPhaseStarted(float Now)
 #endif
 }
 
-void UFortServerBotManagerAthena::GatherLandingSpots()
+void FCoreAthenaBotManager::GatherLandingSpots()
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_FreeFalling lands at a POI (_SelectNextPOI). 3.x's named locations are its
@@ -999,7 +999,7 @@ void UFortServerBotManagerAthena::GatherLandingSpots()
     }
     // Clusters of chests away from the named locations: a 60 m grid, three chests or more to a cell.
     std::map<std::pair<int32_t, int32_t>, std::vector<FVector>> Cells;
-    for (const FFortAthenaBotContainer& Container : Containers)
+    for (const FCoreAthenaBotContainer& Container : Containers)
     {
         if (Container.bChest)
         {
@@ -1020,7 +1020,7 @@ void UFortServerBotManagerAthena::GatherLandingSpots()
         bool bNearNamed = false;
         for (size_t Index = 0; Index < Named; ++Index)
         {
-            const FFortAthenaBotLandingSpot& Spot = LandingSpots[Index];
+            const FCoreAthenaBotLandingSpot& Spot = LandingSpots[Index];
             bNearNamed = bNearNamed || (Spot.Location.X - Center.X) * (Spot.Location.X - Center.X) + (Spot.Location.Y - Center.Y) * (Spot.Location.Y - Center.Y) < Spot.Radius * Spot.Radius;
         }
         if (!bNearNamed)
@@ -1028,7 +1028,7 @@ void UFortServerBotManagerAthena::GatherLandingSpots()
             LandingSpots.push_back({ Center, 4500.0f, std::format(L"chests at ({:.0f}, {:.0f})", Center.X, Center.Y), LootAround(Center, 4500.0f), 0 });
         }
     }
-    std::sort(LandingSpots.begin(), LandingSpots.end(), [](const FFortAthenaBotLandingSpot& A, const FFortAthenaBotLandingSpot& B) { return A.Loot > B.Loot; });
+    std::sort(LandingSpots.begin(), LandingSpots.end(), [](const FCoreAthenaBotLandingSpot& A, const FCoreAthenaBotLandingSpot& B) { return A.Loot > B.Loot; });
     std::wstring Top;
     for (size_t Index = 0; Index < LandingSpots.size() && Index < 8; ++Index)
     {
@@ -1038,16 +1038,16 @@ void UFortServerBotManagerAthena::GatherLandingSpots()
 #endif
 }
 
-float UFortServerBotManagerAthena::LootAround(const FVector& Center, float Radius) const
+float FCoreAthenaBotManager::LootAround(const FVector& Center, float Radius) const
 {
     float Value = 0.0f;
-    for (const FFortAthenaBotContainer& Container : Containers)
+    for (const FCoreAthenaBotContainer& Container : Containers)
     {
         const float Dx = Container.Location.X - Center.X;
         const float Dy = Container.Location.Y - Center.Y;
         Value += Dx * Dx + Dy * Dy < Radius * Radius ? (Container.bChest ? 1.0f : 0.3f) : 0.0f;
     }
-    for (const FFortAthenaBotLoot& Entry : Loot)
+    for (const FCoreAthenaBotLoot& Entry : Loot)
     {
         const float Dx = Entry.Location.X - Center.X;
         const float Dy = Entry.Location.Y - Center.Y;
@@ -1056,7 +1056,7 @@ float UFortServerBotManagerAthena::LootAround(const FVector& Center, float Radiu
     return Value;
 }
 
-int32_t UFortServerBotManagerAthena::FindNextBestPOI(const FVector& From, const std::vector<int32_t>& Visited) const
+int32_t FCoreAthenaBotManager::FindNextBestPOI(const FVector& From, const std::vector<int32_t>& Visited) const
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_SelectNextPOI::FindNextBestPOI: the spots are the world's own (its AFortPoiVolumes'
@@ -1071,7 +1071,7 @@ int32_t UFortServerBotManagerAthena::FindNextBestPOI(const FVector& From, const 
     float BestScore = 0.0f;
     for (size_t Index = 0; Index < LandingSpots.size(); ++Index)
     {
-        const FFortAthenaBotLandingSpot& Spot = LandingSpots[Index];
+        const FCoreAthenaBotLandingSpot& Spot = LandingSpots[Index];
         if (std::find(Visited.begin(), Visited.end(), static_cast<int32_t>(Index)) != Visited.end())
         {
             continue;
@@ -1100,7 +1100,7 @@ int32_t UFortServerBotManagerAthena::FindNextBestPOI(const FVector& From, const 
         int32_t BotsThere = 0;
         for (const auto& Bot : PlayerBots)
         {
-            if (Bot->GetState() != EFortAthenaAIBotState::Landed || !Bot->GetPawn())
+            if (Bot->GetState() != ECoreAthenaBotState::Landed || !Bot->GetPawn())
             {
                 continue;
             }
@@ -1125,13 +1125,13 @@ int32_t UFortServerBotManagerAthena::FindNextBestPOI(const FVector& From, const 
 #endif
 }
 
-int32_t UFortServerBotManagerAthena::FindPOIAt(const FVector& Location) const
+int32_t FCoreAthenaBotManager::FindPOIAt(const FVector& Location) const
 {
     int32_t Found = -1;
     float Nearest = 1e18f;
     for (size_t Index = 0; Index < LandingSpots.size(); ++Index)
     {
-        const FFortAthenaBotLandingSpot& Spot = LandingSpots[Index];
+        const FCoreAthenaBotLandingSpot& Spot = LandingSpots[Index];
         const float DistanceSquared = (Spot.Location.X - Location.X) * (Spot.Location.X - Location.X) + (Spot.Location.Y - Location.Y) * (Spot.Location.Y - Location.Y);
         if (DistanceSquared < Spot.Radius * Spot.Radius && DistanceSquared < Nearest)
         {
@@ -1142,17 +1142,17 @@ int32_t UFortServerBotManagerAthena::FindPOIAt(const FVector& Location) const
     return Found;
 }
 
-const FFortAthenaBotLandingSpot* UFortServerBotManagerAthena::GetPOI(int32_t Index) const
+const FCoreAthenaBotLandingSpot* FCoreAthenaBotManager::GetPOI(int32_t Index) const
 {
     return Index >= 0 && Index < static_cast<int32_t>(LandingSpots.size()) ? &LandingSpots[static_cast<size_t>(Index)] : nullptr;
 }
 
-int32_t UFortServerBotManagerAthena::CountHuntersOf(const AFortPawn* Target, const AFortAthenaAIBotController* Except) const
+int32_t FCoreAthenaBotManager::CountHuntersOf(const AFortPawn* Target, const FCoreAthenaBotController* Except) const
 {
     return static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [Target, Except](const auto& Bot) { return Bot.get() != Except && Bot->IsAlive() && Bot->GetHuntTarget() == Target; }));
 }
 
-void UFortServerBotManagerAthena::UpdateFlightPath(float Now)
+void FCoreAthenaBotManager::UpdateFlightPath(float Now)
 {
 #if WITH_SERVER_CODE
     // The bus flies a straight line at a steady speed: two of its locations a moment apart give its path.
@@ -1192,7 +1192,7 @@ void UFortServerBotManagerAthena::UpdateFlightPath(float Now)
 #endif
 }
 
-void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
+void FCoreAthenaBotManager::AssignLandingSpots(float Now)
 {
 #if WITH_SERVER_CODE
     // Each spot's moment: when the bus passes closest to it, within the drop zone. It is reachable from there when a
@@ -1234,13 +1234,13 @@ void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
     std::map<uint8_t, std::pair<const FCandidate*, float>> TeamSpots;
     for (const auto& Bot : PlayerBots)
     {
-        if (!Bot->IsAlive() || Bot->GetState() != EFortAthenaAIBotState::InAircraft)
+        if (!Bot->IsAlive() || Bot->GetState() != ECoreAthenaBotState::InAircraft)
         {
             continue;
         }
         if (const auto Chosen = TeamSpots.find(Bot->GetTeam()); Chosen != TeamSpots.end())
         {
-            const FFortAthenaBotLandingSpot& Spot = LandingSpots[Chosen->second.first->Spot];
+            const FCoreAthenaBotLandingSpot& Spot = LandingSpots[Chosen->second.first->Spot];
             Bot->SetLandingSpot(Spot.Location, Spot.Radius, std::clamp(Chosen->second.second + RandomRange(0.1f, 0.6f), Earliest, Latest));
             ++Assigned;
             continue;
@@ -1249,7 +1249,7 @@ void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
         float BestScore = -1.0f;
         for (const FCandidate& Candidate : Candidates)
         {
-            const FFortAthenaBotLandingSpot& Spot = LandingSpots[Candidate.Spot];
+            const FCoreAthenaBotLandingSpot& Spot = LandingSpots[Candidate.Spot];
             const float Shared = (1.0f + static_cast<float>(Spot.Bots)) * (1.0f + static_cast<float>(Spot.Bots));
             const float Score = bHotDrop ? Spot.Loot : Spot.Loot * RandomRange(0.7f, 1.3f) * (1.0f - 0.4f * Candidate.Reach / MaxReach) / Shared;
             if (Score > BestScore)
@@ -1258,7 +1258,7 @@ void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
                 Best = &Candidate;
             }
         }
-        FFortAthenaBotLandingSpot& Spot = LandingSpots[Best->Spot];
+        FCoreAthenaBotLandingSpot& Spot = LandingSpots[Best->Spot];
         ++Spot.Bots;
         const float JumpAt = std::clamp(Best->Time + RandomRange(-1.5f, 1.5f), Earliest, Latest);
         Bot->SetLandingSpot(Spot.Location, Spot.Radius, JumpAt);
@@ -1270,7 +1270,7 @@ void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
     }
     std::wstring Used;
     int32_t SpotsUsed = 0;
-    for (const FFortAthenaBotLandingSpot& Spot : LandingSpots)
+    for (const FCoreAthenaBotLandingSpot& Spot : LandingSpots)
     {
         if (Spot.Bots > 0)
         {
@@ -1281,7 +1281,7 @@ void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
 #endif
 }
 
-void UFortServerBotManagerAthena::GatherContainers()
+void FCoreAthenaBotManager::GatherContainers()
 {
 #if WITH_SERVER_CODE
     // Battle Royale's chests and ammo boxes (the tiered containers a player searches; not the floor loot spawners).
@@ -1304,23 +1304,23 @@ void UFortServerBotManagerAthena::GatherContainers()
 #endif
 }
 
-void UFortServerBotManagerAthena::OnContainerSearched(ABuildingContainer* Container)
+void FCoreAthenaBotManager::OnContainerSearched(ABuildingContainer* Container)
 {
-    std::erase_if(Containers, [Container](const FFortAthenaBotContainer& Entry) { return Entry.Container.Get() == Container; });
+    std::erase_if(Containers, [Container](const FCoreAthenaBotContainer& Entry) { return Entry.Container.Get() == Container; });
     // Its loot is on the floor now: the bots see it on the next tick.
     NextLootRefresh = 0.0f;
 }
 
-void UFortServerBotManagerAthena::InitializeNavigation()
+void FCoreAthenaBotManager::InitializeNavigation()
 {
 #if WITH_SERVER_CODE
     // The island: everything the bots go to (the loot and the containers), with room around it.
     FBox Island;
-    for (const FFortAthenaBotLoot& Entry : Loot)
+    for (const FCoreAthenaBotLoot& Entry : Loot)
     {
         Island += Entry.Location;
     }
-    for (const FFortAthenaBotContainer& Entry : Containers)
+    for (const FCoreAthenaBotContainer& Entry : Containers)
     {
         Island += Entry.Location;
     }
@@ -1335,7 +1335,7 @@ void UFortServerBotManagerAthena::InitializeNavigation()
 #endif
 }
 
-void UFortServerBotManagerAthena::UpdateCounts()
+void FCoreAthenaBotManager::UpdateCounts()
 {
     // 21.40 counts bots in the game state's players and teams left (AddToAliveBots / RemoveFromAliveBots); 3.0's game
     // mode only counts its alive players, so the bots are added to its numbers.
@@ -1361,7 +1361,7 @@ void UFortServerBotManagerAthena::UpdateCounts()
     }
 }
 
-void UFortServerBotManagerAthena::RemoveFromAliveBots(AFortAthenaAIBotController* Bot, AFortPlayerStateAthena* KillerState)
+void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, AFortPlayerStateAthena* KillerState)
 {
 #if WITH_SERVER_CODE
     // 21.40's AFortGameModeAthena::RemoveFromAliveBots. The team's place is the teams left when its last player is out
@@ -1369,7 +1369,7 @@ void UFortServerBotManagerAthena::RemoveFromAliveBots(AFortAthenaAIBotController
     AFortGameModeAthena* Athena = GetGameMode();
     const int32_t TeamsBefore = static_cast<int32_t>(AliveTeams(true).size());
     AFortPlayerStateAthena* State = Bot->GetPlayerState();
-    AFortAthenaAIBotController* KillerBot = FindBot(KillerState);
+    FCoreAthenaBotController* KillerBot = FindBot(KillerState);
     if (KillerBot && KillerBot != Bot)
     {
         KillerBot->AddKill();
@@ -1482,7 +1482,7 @@ void UFortServerBotManagerAthena::RemoveFromAliveBots(AFortAthenaAIBotController
 #endif
 }
 
-void UFortServerBotManagerAthena::ApplyBotDamage(AFortAthenaAIBotController* Attacker, AFortPawn* Victim, float Damage, UFortWeaponItemDefinition* Weapon)
+void FCoreAthenaBotManager::ApplyBotDamage(FCoreAthenaBotController* Attacker, AFortPawn* Victim, float Damage, UFortWeaponItemDefinition* Weapon)
 {
 #if WITH_SERVER_CODE
     AFortGameModeAthena* Athena = GetGameMode();
@@ -1513,7 +1513,7 @@ void UFortServerBotManagerAthena::ApplyBotDamage(AFortAthenaAIBotController* Att
         return;
     }
     // Squads: down, not out, while a teammate stands (the next hit on a downed bot finishes it).
-    if (AFortAthenaAIBotController* VictimBot = FindBot(reinterpret_cast<const UObject*>(Victim)); VictimBot && VictimBot->CanGoDBNO())
+    if (FCoreAthenaBotController* VictimBot = FindBot(reinterpret_cast<const UObject*>(Victim)); VictimBot && VictimBot->CanGoDBNO())
     {
         Log::Info(L"Battle Royale bots: {} knocks {} down with {}", Attacker->GetBotName(), VictimBot->GetBotName(), Weapon ? Weapon->GetName().ToStdString() : std::wstring(L"the harvesting tool"));
         VictimBot->EnterDBNO(Attacker->GetPlayerState(), Now);
@@ -1536,12 +1536,12 @@ void UFortServerBotManagerAthena::ApplyBotDamage(AFortAthenaAIBotController* Att
 #endif
 }
 
-bool UFortServerBotManagerAthena::UsesGameDamage(const AFortPawn* Victim) const
+bool FCoreAthenaBotManager::UsesGameDamage(const AFortPawn* Victim) const
 {
     return Victim && (!IsBotPawn(reinterpret_cast<const UObject*>(Victim)) || GetTeamSize() <= 1);
 }
 
-void UFortServerBotManagerAthena::NoteBotHit(AFortAthenaAIBotController* Attacker, AFortPawn* Victim)
+void FCoreAthenaBotManager::NoteBotHit(FCoreAthenaBotController* Attacker, AFortPawn* Victim)
 {
     AFortGameModeAthena* Athena = GetGameMode();
     UWorld* World = Athena ? Athena->GetWorld() : nullptr;
@@ -1554,9 +1554,9 @@ void UFortServerBotManagerAthena::NoteBotHit(AFortAthenaAIBotController* Attacke
     BotHits.push_back({ TWeakObjectPtr<AFortPawn>(Victim), TWeakObjectPtr<AFortPlayerStateAthena>(Attacker->GetPlayerState()), Now });
 }
 
-std::vector<AFortAthenaAIBotController*> UFortServerBotManagerAthena::TeammatesOf(const AFortAthenaAIBotController* Bot) const
+std::vector<FCoreAthenaBotController*> FCoreAthenaBotManager::TeammatesOf(const FCoreAthenaBotController* Bot) const
 {
-    std::vector<AFortAthenaAIBotController*> Teammates;
+    std::vector<FCoreAthenaBotController*> Teammates;
     for (const auto& Other : PlayerBots)
     {
         if (Other.get() != Bot && Other->IsAlive() && Other->GetTeam() == Bot->GetTeam())
@@ -1567,7 +1567,7 @@ std::vector<AFortAthenaAIBotController*> UFortServerBotManagerAthena::TeammatesO
     return Teammates;
 }
 
-AFortPlayerStateAthena* UFortServerBotManagerAthena::LastBotAttackerOf(const AFortPawn* Pawn) const
+AFortPlayerStateAthena* FCoreAthenaBotManager::LastBotAttackerOf(const AFortPawn* Pawn) const
 {
     for (auto It = BotHits.rbegin(); It != BotHits.rend(); ++It)
     {
@@ -1579,7 +1579,7 @@ AFortPlayerStateAthena* UFortServerBotManagerAthena::LastBotAttackerOf(const AFo
     return nullptr;
 }
 
-void UFortServerBotManagerAthena::CheckWinConditionLastManStanding()
+void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
 {
 #if WITH_SERVER_CODE
     // 21.40's AFortGameModeAthena::CheckWinConditionLastManStanding, for a match with bots in it: the game's own check
@@ -1629,7 +1629,7 @@ void UFortServerBotManagerAthena::CheckWinConditionLastManStanding()
 #endif
 }
 
-void UFortServerBotManagerAthena::RefreshEnemies()
+void FCoreAthenaBotManager::RefreshEnemies()
 {
     EnemyPawns.clear();
     AFortGameModeAthena* Athena = GetGameMode();
@@ -1656,7 +1656,7 @@ void UFortServerBotManagerAthena::RefreshEnemies()
     }
 }
 
-void UFortServerBotManagerAthena::RefreshLoot(float Now)
+void FCoreAthenaBotManager::RefreshLoot(float Now)
 {
 #if WITH_SERVER_CODE
     Loot.clear();
@@ -1687,7 +1687,7 @@ void UFortServerBotManagerAthena::RefreshLoot(float Now)
         }
         const bool bAmmo = Cast<UFortAmmoItemDefinition>(Definition) != nullptr;
         // A bandage, medkit, shield potion or Chug Jug (21.40's _Loot takes healing items too).
-        const bool bConsumable = !bWeapon && !bAmmo && Weapon && AFortAthenaAIBotController::GetConsumableInfo(Definition) != nullptr;
+        const bool bConsumable = !bWeapon && !bAmmo && Weapon && FCoreAthenaBotController::GetConsumableInfo(Definition) != nullptr;
         if (bWeapon || bAmmo || bConsumable)
         {
             Loot.push_back({ TWeakObjectPtr<AFortPickup>(Pickup), LocationOf(Pickup), bWeapon, bConsumable });
@@ -1696,7 +1696,7 @@ void UFortServerBotManagerAthena::RefreshLoot(float Now)
 #endif
 }
 
-void UFortServerBotManagerAthena::LogSummary(float Now)
+void FCoreAthenaBotManager::LogSummary(float Now)
 {
     if (Now < NextSummaryLog || PlayerBots.empty())
     {
@@ -1710,7 +1710,7 @@ void UFortServerBotManagerAthena::LogSummary(float Now)
     for (const auto& Bot : PlayerBots)
     {
         ++ByState[static_cast<int32_t>(Bot->GetState())];
-        if (bHasNavigation && Bot->GetState() == EFortAthenaAIBotState::Landed && Bot->GetPawn() && UAthenaNavSystem::IsOnNavMesh(World, LocationOf(reinterpret_cast<const AActor*>(Bot->GetPawn()))))
+        if (bHasNavigation && Bot->GetState() == ECoreAthenaBotState::Landed && Bot->GetPawn() && UAthenaNavSystem::IsOnNavMesh(World, LocationOf(reinterpret_cast<const AActor*>(Bot->GetPawn()))))
         {
             ++OnNavMesh;
         }

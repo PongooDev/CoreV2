@@ -519,7 +519,7 @@ namespace Natives
     inline ptrdiff_t AFortPlayerStateAthena_PlayersOutlived = -1;
     // AFortGameModeAthena::StartEndGamePhase (3.0 0x9C52C0, 21.40's name): the solo win, RemoveFromAlivePlayers' last call
     // ("%s won the match!", place 1 for the winner, then the end game); with no winner it only ends the match. Battle
-    // Royale's player bots end a match with it (UFortServerBotManagerAthena::CheckWinConditionLastManStanding).
+    // Royale's player bots end a match with it (FCoreAthenaBotManager::CheckWinConditionLastManStanding).
     inline void (*AFortGameModeAthena_StartEndGamePhase)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Winner) = nullptr;
     // AFortGameModeAthena::StartAircraftPhase (3.0 0x9C4A60): Finder::AircraftPhasePlayerCleanupCall's function. Only
     // the bots-only test match (-CoreBotMatch) calls it, the warmup's countdown having nobody to start the bus for.

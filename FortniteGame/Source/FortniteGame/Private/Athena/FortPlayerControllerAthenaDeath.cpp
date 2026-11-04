@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "Athena/FortPlayerControllerAthena.h"
-#include "Athena/AI/FortServerBotManagerAthena.h"
+#include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
@@ -110,7 +110,7 @@ namespace
 // native stat event senders (the 11 calls to the stripped typed SendStatEvent) send Interact, Visit, Land, Damage,
 // kills, team events (Build, Destroy) and WaveComplete only (Core-Backend #214). Sent here, with the player taken off
 // the alive players, which only Core's handler does on the builds that strip the native one. A player bot's elimination
-// sends them too (UFortServerBotManagerAthena::RemoveFromAliveBots, CoreV2 #233).
+// sends them too (FCoreAthenaBotManager::RemoveFromAliveBots, CoreV2 #233).
 void AFortGameModeAthena::SendOutliveStatEvents(AFortPawn* DeadPawn)
 {
     const EFortQuestObjectiveStatEvent AthenaOutlive{ EFortQuestObjectiveStatEvent::StaticEnumInfo().FindValue(L"AthenaOutlive") };
@@ -311,7 +311,7 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     // Battle Royale's player bots (CoreV2 #233) are in the match's counts but not among its alive players: while any is
     // left, the game's solo win (the last of the alive players, once the count it had was more than 1) mustn't run, so
     // its count before is held at 0; the bots' manager puts the counts right and checks the win after.
-    UFortServerBotManagerAthena* BotManager = UFortServerBotManagerAthena::Get();
+    FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get();
     if (BotManager && BotManager->ShouldHoldNativeWinCheck())
     {
         GameState->PlayersLeft = 0;

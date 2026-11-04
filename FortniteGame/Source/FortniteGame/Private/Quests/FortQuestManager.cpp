@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "Quests/FortQuestManager.h"
-#include "Athena/AI/FortServerBotManagerAthena.h"
+#include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
@@ -1237,14 +1237,14 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
         || Type == EFortQuestObjectiveStatEvent::GetTeamKill();
     FGameplayTagContainer EventTargetTags = TargetTags;
     FGameplayTagContainer EventSourceTags = SourceTags;
-    if (bKillEvent && UFortServerBotManagerAthena::IsBotPawn(TargetObject))
+    if (bKillEvent && FCoreAthenaBotManager::IsBotPawn(TargetObject))
     {
-        UFortServerBotManagerAthena::NoteNativeKillEvent(TargetObject);
-        if (UFortServerBotManagerAthena::IsWarmup() || !UFortServerBotManagerAthena::ShouldCountQuestEvent(TargetObject))
+        FCoreAthenaBotManager::NoteNativeKillEvent(TargetObject);
+        if (FCoreAthenaBotManager::IsWarmup() || !FCoreAthenaBotManager::ShouldCountQuestEvent(TargetObject))
         {
             return;
         }
-        UFortServerBotManagerAthena::AddKillEventTags(TargetObject, reinterpret_cast<AController*>(PlayerControllerOf(PlayerInfo)), EventTargetTags, EventSourceTags);
+        FCoreAthenaBotManager::AddKillEventTags(TargetObject, reinterpret_cast<AController*>(PlayerControllerOf(PlayerInfo)), EventTargetTags, EventSourceTags);
     }
     GameMode->AddPlaylistContextTag(static_cast<FGameplayTagContainer&>(GameMode->GameContextTags));
     FGameplayTagContainer EventContextTags = ContextTags;

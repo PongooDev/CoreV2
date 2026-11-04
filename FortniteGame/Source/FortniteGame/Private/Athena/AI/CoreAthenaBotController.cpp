@@ -1,12 +1,12 @@
 #include "pch.h"
-#include "Athena/AI/FortAthenaAIBotController.h"
+#include "Athena/AI/CoreAthenaBotController.h"
 #include "AIController.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/FortAbilitySet.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "Athena/AI/AthenaNavSystem.h"
-#include "Athena/AI/FortServerBotManagerAthena.h"
+#include "Athena/AI/CoreAthenaBotManager.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingSMActor.h"
@@ -551,68 +551,68 @@ namespace
     // EFortWeaponReloadType::ReloadIndividualBullets.
     constexpr int32_t ReloadIndividualBullets = 1;
 
-    EFortAthenaAIBotWeaponType WeaponTypeOf(UFortWeaponItemDefinition* Definition, int32_t Pellets)
+    ECoreAthenaBotWeaponType WeaponTypeOf(UFortWeaponItemDefinition* Definition, int32_t Pellets)
     {
         const std::wstring Name = Definition ? Definition->GetName().ToStdString() : std::wstring();
         const auto Has = [&Name](const wchar_t* Part) { return Name.find(Part) != std::wstring::npos; };
         if (Has(L"Shotgun") || Pellets > 1)
         {
-            return EFortAthenaAIBotWeaponType::Shotgun;
+            return ECoreAthenaBotWeaponType::Shotgun;
         }
         if (Has(L"Sniper"))
         {
-            return EFortAthenaAIBotWeaponType::Sniper;
+            return ECoreAthenaBotWeaponType::Sniper;
         }
         if (Has(L"Assault"))
         {
-            return EFortAthenaAIBotWeaponType::AssaultRifle;
+            return ECoreAthenaBotWeaponType::AssaultRifle;
         }
         if (Has(L"Pistol_AutoHeavy") || Has(L"Pistol_Scavenger") || Has(L"SMG"))
         {
-            return EFortAthenaAIBotWeaponType::SMG;
+            return ECoreAthenaBotWeaponType::SMG;
         }
         if (Has(L"Pistol"))
         {
-            return EFortAthenaAIBotWeaponType::Pistol;
+            return ECoreAthenaBotWeaponType::Pistol;
         }
         if (Has(L"Launcher"))
         {
-            return EFortAthenaAIBotWeaponType::Launcher;
+            return ECoreAthenaBotWeaponType::Launcher;
         }
-        return EFortAthenaAIBotWeaponType::Other;
+        return ECoreAthenaBotWeaponType::Other;
     }
 
-    const wchar_t* WeaponTypeName(EFortAthenaAIBotWeaponType Type)
+    const wchar_t* WeaponTypeName(ECoreAthenaBotWeaponType Type)
     {
         switch (Type)
         {
-        case EFortAthenaAIBotWeaponType::Pistol: return L"pistol";
-        case EFortAthenaAIBotWeaponType::SMG: return L"SMG";
-        case EFortAthenaAIBotWeaponType::AssaultRifle: return L"assault rifle";
-        case EFortAthenaAIBotWeaponType::Shotgun: return L"shotgun";
-        case EFortAthenaAIBotWeaponType::Sniper: return L"sniper";
-        case EFortAthenaAIBotWeaponType::Launcher: return L"launcher";
+        case ECoreAthenaBotWeaponType::Pistol: return L"pistol";
+        case ECoreAthenaBotWeaponType::SMG: return L"SMG";
+        case ECoreAthenaBotWeaponType::AssaultRifle: return L"assault rifle";
+        case ECoreAthenaBotWeaponType::Shotgun: return L"shotgun";
+        case ECoreAthenaBotWeaponType::Sniper: return L"sniper";
+        case ECoreAthenaBotWeaponType::Launcher: return L"launcher";
         default: return L"gun";
         }
     }
 
     // Core's EquipMaxDistance per kind 🟡 (8.30's values are in its bot blueprints, which don't ship).
-    float EquipMaxDistanceOf(EFortAthenaAIBotWeaponType Type)
+    float EquipMaxDistanceOf(ECoreAthenaBotWeaponType Type)
     {
         switch (Type)
         {
-        case EFortAthenaAIBotWeaponType::Shotgun: return 1200.0f;
-        case EFortAthenaAIBotWeaponType::SMG: return 2500.0f;
-        case EFortAthenaAIBotWeaponType::Pistol: return 3500.0f;
-        case EFortAthenaAIBotWeaponType::Launcher: return 4000.0f;
-        case EFortAthenaAIBotWeaponType::AssaultRifle: return 6000.0f;
-        case EFortAthenaAIBotWeaponType::Sniper: return 100000.0f;
+        case ECoreAthenaBotWeaponType::Shotgun: return 1200.0f;
+        case ECoreAthenaBotWeaponType::SMG: return 2500.0f;
+        case ECoreAthenaBotWeaponType::Pistol: return 3500.0f;
+        case ECoreAthenaBotWeaponType::Launcher: return 4000.0f;
+        case ECoreAthenaBotWeaponType::AssaultRifle: return 6000.0f;
+        case ECoreAthenaBotWeaponType::Sniper: return 100000.0f;
         default: return 3000.0f;
         }
     }
 
     // How much a bot wants a kind of gun at a range band (0 close, under 10 m; 1 mid, under 35 m; 2 far) 🟡.
-    float RangePreference(EFortAthenaAIBotWeaponType Type, int32_t Band)
+    float RangePreference(ECoreAthenaBotWeaponType Type, int32_t Band)
     {
         static const float Table[7][3] = {
             { 1.0f, 1.0f, 1.0f },  // Other
@@ -627,20 +627,20 @@ namespace
     }
 
     // How much a bot wants a kind of gun in its inventory at all (it carries one of each kind).
-    float TypePriority(EFortAthenaAIBotWeaponType Type)
+    float TypePriority(ECoreAthenaBotWeaponType Type)
     {
         switch (Type)
         {
-        case EFortAthenaAIBotWeaponType::AssaultRifle:
-        case EFortAthenaAIBotWeaponType::Shotgun: return 5.0f;
-        case EFortAthenaAIBotWeaponType::SMG: return 4.0f;
-        case EFortAthenaAIBotWeaponType::Sniper: return 3.0f;
-        case EFortAthenaAIBotWeaponType::Pistol: return 2.0f;
+        case ECoreAthenaBotWeaponType::AssaultRifle:
+        case ECoreAthenaBotWeaponType::Shotgun: return 5.0f;
+        case ECoreAthenaBotWeaponType::SMG: return 4.0f;
+        case ECoreAthenaBotWeaponType::Sniper: return 3.0f;
+        case ECoreAthenaBotWeaponType::Pistol: return 2.0f;
         default: return 1.0f;
         }
     }
 
-    float DamagePerSecond(const FFortAthenaAIBotWeapon& Weapon)
+    float DamagePerSecond(const FCoreAthenaBotWeapon& Weapon)
     {
         return Weapon.Damage * static_cast<float>(Weapon.Pellets) * std::max(Weapon.FiringRate, 0.1f);
     }
@@ -654,7 +654,7 @@ namespace
 
     // Whether Found is better than Held, a gun of the same kind (the community list: bots swap for higher rarity): a
     // rarer one unless it is clearly weaker, else one of the same rarity with a tenth more damage a second.
-    bool IsBetterWeapon(const FFortAthenaAIBotWeapon& Found, const FFortAthenaAIBotWeapon& Held)
+    bool IsBetterWeapon(const FCoreAthenaBotWeapon& Found, const FCoreAthenaBotWeapon& Held)
     {
         if (Found.Rarity != Held.Rarity)
         {
@@ -663,18 +663,18 @@ namespace
         return DamagePerSecond(Found) > DamagePerSecond(Held) * 1.1f;
     }
 
-    const wchar_t* GoalName(EFortAthenaAIBotGoal Goal)
+    const wchar_t* GoalName(ECoreAthenaBotGoal Goal)
     {
         switch (Goal)
         {
-        case EFortAthenaAIBotGoal::Loot: return L"loot";
-        case EFortAthenaAIBotGoal::Search: return L"search";
-        case EFortAthenaAIBotGoal::Storm: return L"storm";
-        case EFortAthenaAIBotGoal::Regroup: return L"regroup";
-        case EFortAthenaAIBotGoal::Harvest: return L"harvest";
-        case EFortAthenaAIBotGoal::Hunt: return L"hunt";
-        case EFortAthenaAIBotGoal::TravelToPOI: return L"travel";
-        case EFortAthenaAIBotGoal::Wander: return L"wander";
+        case ECoreAthenaBotGoal::Loot: return L"loot";
+        case ECoreAthenaBotGoal::Search: return L"search";
+        case ECoreAthenaBotGoal::Storm: return L"storm";
+        case ECoreAthenaBotGoal::Regroup: return L"regroup";
+        case ECoreAthenaBotGoal::Harvest: return L"harvest";
+        case ECoreAthenaBotGoal::Hunt: return L"hunt";
+        case ECoreAthenaBotGoal::TravelToPOI: return L"travel";
+        case ECoreAthenaBotGoal::Wander: return L"wander";
         default: return L"idle";
         }
     }
@@ -689,7 +689,7 @@ namespace
     };
     FBotShotStats ShotStats;
 
-    void RecordShot(EFortAthenaAIBotWeaponType Type, float Distance, bool bHit)
+    void RecordShot(ECoreAthenaBotWeaponType Type, float Distance, bool bHit)
     {
         const size_t Kind = static_cast<size_t>(Type);
         const size_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
@@ -707,7 +707,7 @@ namespace
             {
                 if (const int32_t Shots = ShotStats.Shots[KindIndex][BandIndex]; Shots > 0)
                 {
-                    Rates += std::format(L"{}{} {} {:.0f}% ({}/{})", Rates.empty() ? L"" : L", ", WeaponTypeName(static_cast<EFortAthenaAIBotWeaponType>(KindIndex)), BandNames[BandIndex],
+                    Rates += std::format(L"{}{} {} {:.0f}% ({}/{})", Rates.empty() ? L"" : L", ", WeaponTypeName(static_cast<ECoreAthenaBotWeaponType>(KindIndex)), BandNames[BandIndex],
                         100.0f * static_cast<float>(ShotStats.Hits[KindIndex][BandIndex]) / static_cast<float>(Shots), ShotStats.Hits[KindIndex][BandIndex], Shots);
                 }
             }
@@ -731,7 +731,7 @@ namespace
     constexpr size_t MaxWeapons = 3;
     constexpr size_t MaxConsumableKinds = 2;
 
-    void ReadWeaponStats(FFortAthenaAIBotWeapon& Weapon)
+    void ReadWeaponStats(FCoreAthenaBotWeapon& Weapon)
     {
         float Value = 0.0f;
         if (ReadStat(Weapon.WeaponDefinition, L"DmgPB", Value) && Value > 0.0f)
@@ -967,7 +967,7 @@ namespace
     }
 }
 
-AFortAthenaAIBotController::AFortAthenaAIBotController(UFortServerBotManagerAthena* InManager, AAIController* InController, int32_t InBotIndex, uint8_t InTeam)
+FCoreAthenaBotController::FCoreAthenaBotController(FCoreAthenaBotManager* InManager, AAIController* InController, int32_t InBotIndex, uint8_t InTeam)
     : Manager(InManager)
     , Controller(InController)
     , BotIndex(InBotIndex)
@@ -975,7 +975,7 @@ AFortAthenaAIBotController::AFortAthenaAIBotController(UFortServerBotManagerAthe
 {
 }
 
-void AFortAthenaAIBotController::ResetForNewMatch()
+void FCoreAthenaBotController::ResetForNewMatch()
 {
     HotDrop = FVector();
     bHasHotDrop = false;
@@ -984,23 +984,23 @@ void AFortAthenaAIBotController::ResetForNewMatch()
     ShotStats = FBotShotStats();
 }
 
-AAIController* AFortAthenaAIBotController::GetController() const
+AAIController* FCoreAthenaBotController::GetController() const
 {
     return Controller.Get();
 }
 
-AFortPlayerPawnAthena* AFortAthenaAIBotController::GetPawn() const
+AFortPlayerPawnAthena* FCoreAthenaBotController::GetPawn() const
 {
     return PlayerBotPawn.Get();
 }
 
-AFortPlayerStateAthena* AFortAthenaAIBotController::GetPlayerState() const
+AFortPlayerStateAthena* FCoreAthenaBotController::GetPlayerState() const
 {
     AAIController* AIController = Controller.Get();
     return AIController ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(AIController->PlayerState))) : nullptr;
 }
 
-void AFortAthenaAIBotController::AssignDisplayName(const std::wstring& Name)
+void FCoreAthenaBotController::AssignDisplayName(const std::wstring& Name)
 {
     // 21.40's AFortAthenaAIBotController::AssignDisplayName. The player state is the game's own: it's a bot
     // (APlayerState::bIsABot) on its team, and its name shows in the kill feed and above its head.
@@ -1046,13 +1046,13 @@ void AFortAthenaAIBotController::AssignDisplayName(const std::wstring& Name)
     State->ForceNetUpdate();
 }
 
-void AFortAthenaAIBotController::InitializeSkills(int32_t Level)
+void FCoreAthenaBotController::InitializeSkills(int32_t Level)
 {
     // 21.40's AFortAthenaAIBotController::InitializeSkills.
-    AIBotSkills = UFortServerBotManagerAthena::SkillsForLevel(Level);
+    AIBotSkills = FCoreAthenaBotManager::SkillsForLevel(Level);
 }
 
-bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw, bool bSkydive)
+bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, bool bSkydive)
 {
 #if WITH_SERVER_CODE
     AAIController* AIController = Controller.Get();
@@ -1166,7 +1166,7 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
     // The warmup island hurts nobody: AFortGameModeAthena's restart of a player in the warmup turns the new pawn's
     // bCanBeDamaged off (3.1 0x9B3FD7, GamePhase == Warmup), so hits show their numbers and take nothing. The pawn the
     // bot leaves the bus with is a new one, which can be damaged.
-    if (!bSkydive && State == EFortAthenaAIBotState::Warmup)
+    if (!bSkydive && State == ECoreAthenaBotState::Warmup)
     {
         Pawn->bCanBeDamaged = false;
     }
@@ -1267,11 +1267,11 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
 #endif
 }
 
-void AFortAthenaAIBotController::ApplyStartingHealth()
+void FCoreAthenaBotController::ApplyStartingHealth()
 {
     // The admin panel's starting health and shield (8.30 has no bot health field: its bot pawn class's default).
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    const FFortAthenaBotSettings& Settings = Manager->GetSettings();
+    const FCoreAthenaBotSettings& Settings = Manager->GetSettings();
     if (!Pawn)
     {
         return;
@@ -1283,7 +1283,7 @@ void AFortAthenaAIBotController::ApplyStartingHealth()
     Pawn->SetShield(Settings.StartingShield);
 }
 
-void AFortAthenaAIBotController::EnterAircraft(float InJumpTime, float InLatestJumpTime)
+void FCoreAthenaBotController::EnterAircraft(float InJumpTime, float InLatestJumpTime)
 {
     // The bus has left: like a player's, the warmup pawn goes (StartAircraftPhase destroys theirs) and the bot rides it.
     StopFiring();
@@ -1307,12 +1307,12 @@ void AFortAthenaAIBotController::EnterAircraft(float InJumpTime, float InLatestJ
         Log::Info(L"Battle Royale bots: {} leaves the warmup island ({} new pawns there, {} glides, {} fights)", BotName, WarmupDeaths, WarmupGlides, WarmupBrawls);
     }
     bHasLandingSpot = false;
-    State = EFortAthenaAIBotState::InAircraft;
+    State = ECoreAthenaBotState::InAircraft;
     JumpTime = InJumpTime;
     LatestJumpTime = InLatestJumpTime;
 }
 
-void AFortAthenaAIBotController::Destroy()
+void FCoreAthenaBotController::Destroy()
 {
     StopFiring();
     if (AFortPlayerPawnAthena* Pawn = GetPawn())
@@ -1324,10 +1324,10 @@ void AFortAthenaAIBotController::Destroy()
         AIController->K2_DestroyActor();
     }
     PlayerBotPawn = nullptr;
-    State = EFortAthenaAIBotState::Dead;
+    State = ECoreAthenaBotState::Dead;
 }
 
-void AFortAthenaAIBotController::ClearInventory()
+void FCoreAthenaBotController::ClearInventory()
 {
     WeaponList.clear();
     Ammo.clear();
@@ -1342,7 +1342,7 @@ void AFortAthenaAIBotController::ClearInventory()
     bPickaxeEquipped = false;
 }
 
-void AFortAthenaAIBotController::TickWarmup(float Now, float DeltaSeconds)
+void FCoreAthenaBotController::TickWarmup(float Now, float DeltaSeconds)
 {
 #if WITH_SERVER_CODE
     // Nobody can be hurt on the warmup island (the pawn spawns with bCanBeDamaged off, SpawnPawnAt), so a bot never
@@ -1460,7 +1460,7 @@ void AFortAthenaAIBotController::TickWarmup(float Now, float DeltaSeconds)
 #endif
 }
 
-void AFortAthenaAIBotController::ChooseWarmupActivity(float Now, bool bFightBack)
+void FCoreAthenaBotController::ChooseWarmupActivity(float Now, bool bFightBack)
 {
 #if WITH_SERVER_CODE
     // What players did on the warmup island: mostly standing about and walking a little, a dance, and every so often a
@@ -1514,7 +1514,7 @@ void AFortAthenaAIBotController::ChooseWarmupActivity(float Now, bool bFightBack
 #endif
 }
 
-bool AFortAthenaAIBotController::WarmupGlide(float Now)
+bool FCoreAthenaBotController::WarmupGlide(float Now)
 {
 #if WITH_SERVER_CODE
     // A player falling off the island's cliffs (or launched) opens their glider: the skydive's movement begins
@@ -1570,7 +1570,7 @@ bool AFortAthenaAIBotController::WarmupGlide(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::RespawnInWarmup(float Now)
+void FCoreAthenaBotController::RespawnInWarmup(float Now)
 {
 #if WITH_SERVER_CODE
     // The warmup pawn is gone (fell out of the world): a new one a few seconds later at a warmup spot, with nothing but
@@ -1627,29 +1627,29 @@ void AFortAthenaAIBotController::RespawnInWarmup(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::AddKill()
+void FCoreAthenaBotController::AddKill()
 {
     ++Kills;
-    bDanceOnKill = State == EFortAthenaAIBotState::Landed && FMath::FRand() < 0.5f;
+    bDanceOnKill = State == ECoreAthenaBotState::Landed && FMath::FRand() < 0.5f;
     if (AFortPlayerStateAthena* PlayerState = GetPlayerState())
     {
         PlayerState->SetKillScore(Kills);
     }
 }
 
-void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
+void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
 {
 #if WITH_SERVER_CODE
     LastTickTime = Now;
     AFortPlayerPawnAthena* Pawn = GetPawn();
     switch (State)
     {
-    case EFortAthenaAIBotState::Dead:
+    case ECoreAthenaBotState::Dead:
         return;
-    case EFortAthenaAIBotState::InAircraft:
+    case ECoreAthenaBotState::InAircraft:
         JumpOffBus(Now);
         return;
-    case EFortAthenaAIBotState::Warmup:
+    case ECoreAthenaBotState::Warmup:
         TickWarmup(Now, DeltaSeconds);
         return;
     default:
@@ -1676,7 +1676,7 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         Manager->RemoveFromAliveBots(this, Killer ? Killer : BotKiller ? BotKiller : Downer.Get());
         return;
     }
-    if (State == EFortAthenaAIBotState::Skydiving)
+    if (State == ECoreAthenaBotState::Skydiving)
     {
         FreeFalling(Now);
         return;
@@ -1802,7 +1802,7 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         else if (bInStorm && Storm(Now))
         {
             Intent = L"storm";
-            SetGoal(EFortAthenaAIBotGoal::Storm, Now);
+            SetGoal(ECoreAthenaBotGoal::Storm, Now);
         }
         // What lies within 15 m is taken on the way, whatever the goal (it stays the goal).
         else if (Loot(Now, 1500.0f) || (!bArmed && Loot(Now, 4000.0f)))
@@ -1862,7 +1862,7 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
 #endif
 }
 
-void AFortAthenaAIBotController::JumpOffBus(float Now)
+void FCoreAthenaBotController::JumpOffBus(float Now)
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus: at the bot's moment along the path (EnterAircraft picked it), or
@@ -1877,10 +1877,10 @@ void AFortAthenaAIBotController::JumpOffBus(float Now)
     const FVector Start(BusLocation.X + RandomRange(-300.0f, 300.0f), BusLocation.Y + RandomRange(-300.0f, 300.0f), BusLocation.Z - 500.0f);
 
     // Where to land: loot near the bus's path, or a spot on the ground below it (21.40's _FreeFalling picks a POI).
-    const std::vector<FFortAthenaBotLoot>& LootList = Manager->GetLoot();
+    const std::vector<FCoreAthenaBotLoot>& LootList = Manager->GetLoot();
     std::vector<FVector> Near;
     const bool bHotDrop = Configuration::Get().bBotHotDrop && bHasHotDrop;
-    for (const FFortAthenaBotLoot& Entry : LootList)
+    for (const FCoreAthenaBotLoot& Entry : LootList)
     {
         // The landing spot the manager chose (a named location or a cluster of chests): a weapon in it, else its middle.
         const bool bInSpot = bHasLandingSpot && Dist2D(Entry.Location, LandingSpot) < LandingRadius;
@@ -1912,7 +1912,7 @@ void AFortAthenaAIBotController::JumpOffBus(float Now)
         LatestJumpTime = std::max(LatestJumpTime, Now + 1.0f);
         return;
     }
-    State = EFortAthenaAIBotState::Skydiving;
+    State = ECoreAthenaBotState::Skydiving;
     AFortPlayerPawnAthena* Pawn = GetPawn();
     Log::Info(L"Battle Royale bots: {} jumps from the bus at ({:.0f}, {:.0f}, {:.0f}) towards ({:.0f}, {:.0f}) {:.0f} m away (skydiving {})", BotName, Start.X, Start.Y, Start.Z,
         DropTarget.X, DropTarget.Y, Dist2D(Start, DropTarget) / 100.0f, Pawn && Pawn->bIsSkydiving ? L"yes" : L"no");
@@ -1921,7 +1921,7 @@ void AFortAthenaAIBotController::JumpOffBus(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::FreeFalling(float Now)
+void FCoreAthenaBotController::FreeFalling(float Now)
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_FreeFalling: steer towards the landing spot while skydiving and under the
@@ -1983,7 +1983,7 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
         }
         if (Now - LandedTime > 0.5f)
         {
-            State = EFortAthenaAIBotState::Landed;
+            State = ECoreAthenaBotState::Landed;
             NextLogTime = Now + 5.0f;
             bDiving = false;
             bHasFacingYaw = false;
@@ -2006,7 +2006,7 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
+void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
 {
 #if WITH_SERVER_CODE
     // 8.30's perception (OnPerceptionSensed, an EAlertLevel state machine over sight, hearing and damage), cheaply: the
@@ -2035,7 +2035,7 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
         }
         // Players come first: after the bus, a bot is passed by unless it is after this one (or the roll says fight), and
         // sorted 15 m farther than a player (the warmup island's brawls are anyone's).
-        AFortAthenaAIBotController* OtherBot = State != EFortAthenaAIBotState::Warmup ? Manager->FindBot(reinterpret_cast<UObject*>(Other)) : nullptr;
+        FCoreAthenaBotController* OtherBot = State != ECoreAthenaBotState::Warmup ? Manager->FindBot(reinterpret_cast<UObject*>(Other)) : nullptr;
         if (OtherBot && Other != Previous && !WillEngageBot(OtherBot, Now))
         {
             ++BotsIgnored;
@@ -2106,11 +2106,11 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
         LastSeenTarget = NewTarget;
         LastSeenTargetLocation = LocationOf(NewTarget);
     }
-    CurrentAlertLevel = NewTarget ? EAlertLevel::Threatened : Attacker ? EAlertLevel::Alerted : EAlertLevel::Unaware;
+    CurrentAlertLevel = NewTarget ? ECoreAlertLevel::Threatened : Attacker ? ECoreAlertLevel::Alerted : ECoreAlertLevel::Unaware;
 #endif
 }
 
-bool AFortAthenaAIBotController::WillEngageBot(AFortAthenaAIBotController* Other, float Now) const
+bool FCoreAthenaBotController::WillEngageBot(FCoreAthenaBotController* Other, float Now) const
 {
     // Whoever it is fighting or going for it is fought back (its shots hurt this bot, or will).
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -2128,32 +2128,32 @@ bool AFortAthenaAIBotController::WillEngageBot(AFortAthenaAIBotController* Other
     return static_cast<int32_t>(Hash % 100u) < Chance;
 }
 
-bool AFortAthenaAIBotController::HasAmmoFor(const FFortAthenaAIBotWeapon& Weapon) const
+bool FCoreAthenaBotController::HasAmmoFor(const FCoreAthenaBotWeapon& Weapon) const
 {
     const auto Found = Ammo.find(Weapon.AmmoDefinition);
     return Weapon.LoadedAmmo > 0 || (Found != Ammo.end() && Found->second > 0);
 }
 
-bool AFortAthenaAIBotController::HasUsableWeapon() const
+bool FCoreAthenaBotController::HasUsableWeapon() const
 {
-    return std::any_of(WeaponList.begin(), WeaponList.end(), [this](const FFortAthenaAIBotWeapon& Weapon) { return HasAmmoFor(Weapon); });
+    return std::any_of(WeaponList.begin(), WeaponList.end(), [this](const FCoreAthenaBotWeapon& Weapon) { return HasAmmoFor(Weapon); });
 }
 
-int32_t AFortAthenaAIBotController::BestWeaponIndex() const
+int32_t FCoreAthenaBotController::BestWeaponIndex() const
 {
     // Out of a fight: the weapon for a mid-range fight, the likeliest next one.
     const int32_t Index = WeaponIndexForRange(2000.0f);
     return Index >= 0 ? Index : WeaponList.empty() ? -1 : 0;
 }
 
-int32_t AFortAthenaAIBotController::WeaponIndexForRange(float Distance) const
+int32_t FCoreAthenaBotController::WeaponIndexForRange(float Distance) const
 {
     const int32_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
     int32_t Best = -1;
     float BestScore = -1.0f;
     for (size_t Index = 0; Index < WeaponList.size(); ++Index)
     {
-        const FFortAthenaAIBotWeapon& Weapon = WeaponList[Index];
+        const FCoreAthenaBotWeapon& Weapon = WeaponList[Index];
         if (!HasAmmoFor(Weapon))
         {
             continue;
@@ -2170,7 +2170,7 @@ int32_t AFortAthenaAIBotController::WeaponIndexForRange(float Distance) const
     return Best;
 }
 
-int32_t AFortAthenaAIBotController::WeaponSlotFor(UFortWeaponItemDefinition* Definition) const
+int32_t FCoreAthenaBotController::WeaponSlotFor(UFortWeaponItemDefinition* Definition) const
 {
     // One gun of each kind, the better one kept (IsBetterWeapon: a higher rarity, else more damage a second from the stats
     // row); with every slot full, a gun of a more wanted kind (assault rifle and shotgun, then SMG, sniper, pistol)
@@ -2179,10 +2179,10 @@ int32_t AFortAthenaAIBotController::WeaponSlotFor(UFortWeaponItemDefinition* Def
     {
         return -2;
     }
-    const FFortAthenaAIBotWeapon& Found = GetWeaponInfo(Definition);
+    const FCoreAthenaBotWeapon& Found = GetWeaponInfo(Definition);
     for (size_t Index = 0; Index < WeaponList.size(); ++Index)
     {
-        const FFortAthenaAIBotWeapon& Held = WeaponList[Index];
+        const FCoreAthenaBotWeapon& Held = WeaponList[Index];
         if (Held.WeaponDefinition == Definition)
         {
             return -2;
@@ -2210,13 +2210,13 @@ int32_t AFortAthenaAIBotController::WeaponSlotFor(UFortWeaponItemDefinition* Def
     return Worst;
 }
 
-const FFortAthenaAIBotWeapon& AFortAthenaAIBotController::GetWeaponInfo(UFortWeaponItemDefinition* Definition)
+const FCoreAthenaBotWeapon& FCoreAthenaBotController::GetWeaponInfo(UFortWeaponItemDefinition* Definition)
 {
-    static std::map<UFortWeaponItemDefinition*, FFortAthenaAIBotWeapon> Cache;
+    static std::map<UFortWeaponItemDefinition*, FCoreAthenaBotWeapon> Cache;
     auto [Found, bNew] = Cache.try_emplace(Definition);
     if (bNew && Definition)
     {
-        FFortAthenaAIBotWeapon& Weapon = Found->second;
+        FCoreAthenaBotWeapon& Weapon = Found->second;
         Weapon.WeaponDefinition = KeepLoaded(Definition);
         Weapon.AmmoDefinition = KeepLoaded(static_cast<TAssetPtr<UFortWorldItemDefinition>&>(Definition->AmmoData).LoadSynchronous());
         ReadWeaponStats(Weapon);
@@ -2227,12 +2227,12 @@ const FFortAthenaAIBotWeapon& AFortAthenaAIBotController::GetWeaponInfo(UFortWea
     return Found->second;
 }
 
-const FFortAthenaAIBotConsumable* AFortAthenaAIBotController::GetConsumableInfo(UFortItemDefinition* Definition)
+const FCoreAthenaBotConsumable* FCoreAthenaBotController::GetConsumableInfo(UFortItemDefinition* Definition)
 {
     // A consumable is a ranged weapon that is its own ammo (Athena_Bandage's AmmoData is Athena_Bandage); what it gives
     // and how long it takes are its fire ability's blueprint defaults (the game's ability can't run for a bot: it isn't
     // an inventory owner, the same refusal as its guns).
-    static std::map<UFortItemDefinition*, std::unique_ptr<FFortAthenaAIBotConsumable>> Cache;
+    static std::map<UFortItemDefinition*, std::unique_ptr<FCoreAthenaBotConsumable>> Cache;
     auto [Found, bNew] = Cache.try_emplace(Definition);
     if (!bNew)
     {
@@ -2251,7 +2251,7 @@ const FFortAthenaAIBotConsumable* AFortAthenaAIBotController::GetConsumableInfo(
     {
         return nullptr;
     }
-    auto Info = std::make_unique<FFortAthenaAIBotConsumable>();
+    auto Info = std::make_unique<FCoreAthenaBotConsumable>();
     Info->ItemDefinition = Weapon;
     Info->Health = NumberOf(Ability, L"HealingAmount", 0.0f);
     Info->Health = Info->Health > 0.0f ? Info->Health : NumberOf(Ability, L"MaxHealingAmount", 0.0f);
@@ -2275,7 +2275,7 @@ const FFortAthenaAIBotConsumable* AFortAthenaAIBotController::GetConsumableInfo(
     return Found->second.get();
 }
 
-bool AFortAthenaAIBotController::WantsPickup(UFortItemDefinition* Definition, bool bWeapon, bool bConsumable)
+bool FCoreAthenaBotController::WantsPickup(UFortItemDefinition* Definition, bool bWeapon, bool bConsumable)
 {
     if (bWeapon)
     {
@@ -2283,16 +2283,16 @@ bool AFortAthenaAIBotController::WantsPickup(UFortItemDefinition* Definition, bo
     }
     if (bConsumable)
     {
-        const FFortAthenaAIBotConsumable* Info = GetConsumableInfo(Definition);
+        const FCoreAthenaBotConsumable* Info = GetConsumableInfo(Definition);
         const auto Held = Consumables.find(Definition);
         return Info && (Held != Consumables.end() ? Held->second < Info->MaxStackSize : Consumables.size() < MaxConsumableKinds);
     }
     const auto Reserve = Ammo.find(Definition);
-    return std::any_of(WeaponList.begin(), WeaponList.end(), [Definition](const FFortAthenaAIBotWeapon& Weapon) { return Weapon.AmmoDefinition == Definition; })
+    return std::any_of(WeaponList.begin(), WeaponList.end(), [Definition](const FCoreAthenaBotWeapon& Weapon) { return Weapon.AmmoDefinition == Definition; })
         && (Reserve == Ammo.end() || Reserve->second < 120);
 }
 
-void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
+void FCoreAthenaBotController::EquipWeapon(int32_t Index)
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -2302,7 +2302,7 @@ void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
     }
     StopFiring();
     CancelReload();
-    FFortAthenaAIBotWeapon& Entry = WeaponList[static_cast<size_t>(Index)];
+    FCoreAthenaBotWeapon& Entry = WeaponList[static_cast<size_t>(Index)];
     AFortWeapon* Weapon = Pawn->EquipWeaponDefinition(Entry.WeaponDefinition, Entry.ItemGuid);
     if (!Weapon)
     {
@@ -2322,25 +2322,25 @@ void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
 #endif
 }
 
-bool AFortAthenaAIBotController::IsUnderThreat(float Now) const
+bool FCoreAthenaBotController::IsUnderThreat(float Now) const
 {
     AFortPawn* Target = CurrentTarget.Get();
     AFortPlayerPawnAthena* Pawn = GetPawn();
     return Now - LastHurtTime < 2.0f || (Target && Pawn && bHasVisualLineOfSightOnTarget && (LocationOf(Target) - LocationOf(Pawn)).Size() < 2000.0f);
 }
 
-bool AFortAthenaAIBotController::IsInCombat(float Now) const
+bool FCoreAthenaBotController::IsInCombat(float Now) const
 {
     return (CurrentTarget.Get() && bHasVisualLineOfSightOnTarget) || Now - LastHurtTime < 4.0f;
 }
 
-void AFortAthenaAIBotController::StartReload(float Now)
+void FCoreAthenaBotController::StartReload(float Now)
 {
     if (EquippedIndex < 0 || EquippedIndex >= static_cast<int32_t>(WeaponList.size()))
     {
         return;
     }
-    const FFortAthenaAIBotWeapon& Entry = WeaponList[static_cast<size_t>(EquippedIndex)];
+    const FCoreAthenaBotWeapon& Entry = WeaponList[static_cast<size_t>(EquippedIndex)];
     const int32_t Missing = Entry.ClipSize - Entry.LoadedAmmo;
     float Time = Entry.ReloadTime;
     if (Entry.bReloadIndividualBullets && Entry.ClipSize > 0)
@@ -2358,7 +2358,7 @@ void AFortAthenaAIBotController::StartReload(float Now)
     }
 }
 
-void AFortAthenaAIBotController::CancelReload()
+void FCoreAthenaBotController::CancelReload()
 {
     if (ReloadIndex >= 0)
     {
@@ -2368,7 +2368,7 @@ void AFortAthenaAIBotController::CancelReload()
     ReloadUntil = 0.0f;
 }
 
-void AFortAthenaAIBotController::ManageWeapon(float Now)
+void FCoreAthenaBotController::ManageWeapon(float Now)
 {
 #if WITH_SERVER_CODE
     // 8.30's _ManageWeapon: the weapon for the target's range (FFortAthenaInventoryInformation::EquipMaxDistance),
@@ -2383,7 +2383,7 @@ void AFortAthenaAIBotController::ManageWeapon(float Now)
         }
         return;
     }
-    FFortAthenaAIBotWeapon& Entry = WeaponList[static_cast<size_t>(EquippedIndex)];
+    FCoreAthenaBotWeapon& Entry = WeaponList[static_cast<size_t>(EquippedIndex)];
     if (!Weapon)
     {
         EquipWeapon(EquippedIndex);
@@ -2423,7 +2423,7 @@ void AFortAthenaAIBotController::ManageWeapon(float Now)
         const int32_t ForRange = WeaponIndexForRange(Distance);
         if (ForRange >= 0 && ForRange != EquippedIndex)
         {
-            const FFortAthenaAIBotWeapon& Next = WeaponList[static_cast<size_t>(ForRange)];
+            const FCoreAthenaBotWeapon& Next = WeaponList[static_cast<size_t>(ForRange)];
             // A loaded weapon that suits the range as well stays out: only a clearly better one is worth the swap.
             const int32_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
             // A margin past the held gun's range keeps a target at the edge of it from swapping guns back and forth.
@@ -2468,7 +2468,7 @@ void AFortAthenaAIBotController::ManageWeapon(float Now)
         }
         for (size_t Index = 0; Index < WeaponList.size(); ++Index)
         {
-            const FFortAthenaAIBotWeapon& Other = WeaponList[Index];
+            const FCoreAthenaBotWeapon& Other = WeaponList[Index];
             const auto OtherReserve = Ammo.find(Other.AmmoDefinition);
             if (static_cast<int32_t>(Index) != EquippedIndex && Other.LoadedAmmo < Other.ClipSize && OtherReserve != Ammo.end() && OtherReserve->second > 0)
             {
@@ -2488,7 +2488,7 @@ void AFortAthenaAIBotController::ManageWeapon(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
+void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -2498,7 +2498,7 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
         return;
     }
     PlayFireMontage();
-    const FFortAthenaAIBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+    const FCoreAthenaBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
 
     // The game's own shot where its fire works for the weapon (or isn't known yet): its ability aims along the
     // controller's rotation (the focal point, with the aim error in it), spends the ammo, hits and shows the shot.
@@ -2614,7 +2614,7 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
 #endif
 }
 
-void AFortAthenaAIBotController::StopFiring()
+void FCoreAthenaBotController::StopFiring()
 {
     if (!bFiring)
     {
@@ -2628,7 +2628,7 @@ void AFortAthenaAIBotController::StopFiring()
     }
 }
 
-void AFortAthenaAIBotController::SetTargeting(bool bNewTargeting)
+void FCoreAthenaBotController::SetTargeting(bool bNewTargeting)
 {
     AFortPlayerPawnAthena* Pawn = GetPawn();
     if (!Pawn || bNewTargeting == bTargeting)
@@ -2645,7 +2645,7 @@ void AFortAthenaAIBotController::SetTargeting(bool bNewTargeting)
     Pawn->ForceNetUpdate();
 }
 
-bool AFortAthenaAIBotController::ActivateWeaponFire(AFortWeapon* Weapon)
+bool FCoreAthenaBotController::ActivateWeaponFire(AFortWeapon* Weapon)
 {
 #if WITH_SERVER_CODE
     // A player's fire input activates the weapon's primary fire ability on their ability system (the player state's,
@@ -2681,7 +2681,7 @@ bool AFortAthenaAIBotController::ActivateWeaponFire(AFortWeapon* Weapon)
 #endif
 }
 
-void AFortAthenaAIBotController::ReleaseWeaponFire()
+void FCoreAthenaBotController::ReleaseWeaponFire()
 {
 #if WITH_SERVER_CODE
     // The fire input let go: an automatic weapon's ability waits for it (WaitInputRelease) and ends.
@@ -2700,7 +2700,7 @@ void AFortAthenaAIBotController::ReleaseWeaponFire()
 #endif
 }
 
-void AFortAthenaAIBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVector& ImpactLocation)
+void FCoreAthenaBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVector& ImpactLocation)
 {
 #if WITH_SERVER_CODE
     // The game's fire ability can't run for a bot: its cost check wants an inventory owner ("has a durability cost but
@@ -2770,7 +2770,7 @@ void AFortAthenaAIBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FV
 #endif
 }
 
-void AFortAthenaAIBotController::CheckWeaponFireResult(float Now)
+void FCoreAthenaBotController::CheckWeaponFireResult(float Now)
 {
     // The first shot of a weapon class shows whether the game's fire works for a bot: its magazine went down.
     if (WeaponFireCheckTime <= 0.0f || Now < WeaponFireCheckTime)
@@ -2779,7 +2779,7 @@ void AFortAthenaAIBotController::CheckWeaponFireResult(float Now)
     }
     WeaponFireCheckTime = 0.0f;
     AFortWeapon* Weapon = EquippedWeapon.Get();
-    const FFortAthenaAIBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+    const FCoreAthenaBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
     if (!Weapon || !Held || WeaponFireWorks.contains(Held->WeaponDefinition))
     {
         return;
@@ -2791,11 +2791,11 @@ void AFortAthenaAIBotController::CheckWeaponFireResult(float Now)
         bWorks ? L"works, the game fires it" : L"spent no ammo, Core fires it", WeaponFireAmmoBefore, AmmoNow, NameOf(static_cast<UObject*>(Weapon->ActiveAbility)));
 }
 
-bool AFortAthenaAIBotController::RangeAttack(float Now)
+bool FCoreAthenaBotController::RangeAttack(float Now)
 {
 #if WITH_SERVER_CODE
     // 8.30's _RangeAttack (a ranged weapon at a target in sight; the destination is the target) and 21.40's
-    // _MeleeAttack (the harvesting tool, close up). Aim: FAIBotSkills' reaction time before the first shot, an error that
+    // _MeleeAttack (the harvesting tool, close up). Aim: FCoreAIBotSkills' reaction time before the first shot, an error that
     // grows with the distance, and shots spaced by MaxTimeBetweenShots +- DeviationTimeBetweenShots.
     AFortPlayerPawnAthena* Pawn = GetPawn();
     AFortPawn* Target = CurrentTarget.Get();
@@ -2924,7 +2924,7 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     // A player aims down sights with a gun beyond arm's reach, not while reloading.
     SetTargeting(bArmed && !bPickaxeEquipped && ReloadUntil <= 0.0f && Distance > 400.0f && FacingError() < 45.0f);
     // A player turns to face a target before shooting at it.
-    const FFortAthenaAIBotWeapon* Ready = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+    const FCoreAthenaBotWeapon* Ready = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
     const bool bGunReady = bPickaxeEquipped || (Now >= EquipReadyTime && (!Ready || Now >= Ready->ReadyTime));
     const bool bReady = Now >= TargetAcquiredTime + AIBotSkills.MaxTrackingReactionTime && Now >= NextShotTime && bGunReady && ReloadUntil <= 0.0f && FacingError() < 20.0f;
     const bool bLoaded = bPickaxeEquipped ? Distance < 250.0f : (EquippedWeapon.Get() && EquippedWeapon.Get()->AmmoCount > 0);
@@ -2938,7 +2938,7 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
                 EquippedWeapon.Get() ? NameOf(static_cast<UFortWeaponItemDefinition*>(EquippedWeapon.Get()->WeaponData)) : std::wstring(L"nothing"), EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0);
         }
         FireUntil = Now + 0.12f;
-        FFortAthenaAIBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+        FCoreAthenaBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
         // Never faster than the gun itself (its stats row's FiringRate: a pump's or a bolt's delay is in it), with the
         // bot's level-based spacing on top of that.
         const float WeaponInterval = bPickaxeEquipped ? 0.8f : Held && Held->FiringRate > 0.0f ? 1.0f / Held->FiringRate : 0.5f;
@@ -2954,7 +2954,7 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
 #endif
 }
 
-bool AFortAthenaAIBotController::IsTargetBoxedIn(AFortPawn* Target) const
+bool FCoreAthenaBotController::IsTargetBoxedIn(AFortPawn* Target) const
 {
     AFortPlayerPawnAthena* Pawn = GetPawn();
     if (!Pawn || !Target)
@@ -2975,7 +2975,7 @@ bool AFortAthenaAIBotController::IsTargetBoxedIn(AFortPawn* Target) const
     return Building && Building->bPlayerPlaced && !Building->bDestroyed && (Hit - To).Size() < 600.0f;
 }
 
-bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
+bool FCoreAthenaBotController::Loot(float Now, float MaxDistance)
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_Loot (GatherNearestLoot / ComputeLootScore), for weapons and their ammo on the
@@ -2990,13 +2990,13 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
     }
     // The nearest wanted pickup, looked for every second. The one the bot is going for (its goal) is kept unless another
     // is less than half as far; one it only noted (farther than this call looks) gives way to whatever is nearest.
-    const bool bCommitted = Goal == EFortAthenaAIBotGoal::Loot;
+    const bool bCommitted = Goal == ECoreAthenaBotGoal::Loot;
     if (Now >= NextLootSearch && (!Target || !bCommitted || Dist2D(LocationOf(Target), Location) > 1000.0f))
     {
         NextLootSearch = Now + 1.0f;
         float Best = 7000.0f;
         AFortPickup* Nearest = nullptr;
-        for (const FFortAthenaBotLoot& Entry : Manager->GetLoot())
+        for (const FCoreAthenaBotLoot& Entry : Manager->GetLoot())
         {
             AFortPickup* Pickup = Entry.Pickup.Get();
             if (!Pickup || Pickup->bPickedUp || IsUnreachable(Pickup))
@@ -3086,7 +3086,7 @@ namespace
     }
 }
 
-void AFortAthenaAIBotController::StopEmote()
+void FCoreAthenaBotController::StopEmote()
 {
 #if WITH_SERVER_CODE
     if (!bEmoting)
@@ -3118,7 +3118,7 @@ void AFortAthenaAIBotController::StopEmote()
 #endif
 }
 
-bool AFortAthenaAIBotController::IsDanceStunned() const
+bool FCoreAthenaBotController::IsDanceStunned() const
 {
     AFortPlayerPawnAthena* Pawn = GetPawn();
     UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
@@ -3127,7 +3127,7 @@ bool AFortAthenaAIBotController::IsDanceStunned() const
     return Spec && Spec->ActiveCount > 0;
 }
 
-void AFortAthenaAIBotController::PreloadAssets()
+void FCoreAthenaBotController::PreloadAssets()
 {
 #if WITH_SERVER_CODE
     const auto Started = std::chrono::steady_clock::now();
@@ -3143,7 +3143,7 @@ void AFortAthenaAIBotController::PreloadAssets()
 #endif
 }
 
-bool AFortAthenaAIBotController::PlayEmote(float Now, float Duration)
+bool FCoreAthenaBotController::PlayEmote(float Now, float Duration)
 {
 #if WITH_SERVER_CODE
     std::vector<UFortMontageItemDefinitionBase*>& EmoteAssets = BotEmotes();
@@ -3200,7 +3200,7 @@ bool AFortAthenaAIBotController::PlayEmote(float Now, float Duration)
 #endif
 }
 
-void AFortAthenaAIBotController::TakePickup(AFortPickup* Pickup)
+void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
 {
 #if WITH_SERVER_CODE
     // Into the bot's own inventory (8.30 keeps it in the controller's AFortInventory; Core's brain holds it), and the
@@ -3208,7 +3208,7 @@ void AFortAthenaAIBotController::TakePickup(AFortPickup* Pickup)
     FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
     UFortItemDefinition* Definition = Entry.ItemDefinition;
     const int32_t Count = std::max(static_cast<int32_t>(Entry.Count), 1);
-    if (const FFortAthenaAIBotConsumable* Consumable = GetConsumableInfo(Definition))
+    if (const FCoreAthenaBotConsumable* Consumable = GetConsumableInfo(Definition))
     {
         // As many as the stack holds; the rest stays on the floor.
         int32_t& Held = Consumables[Definition];
@@ -3228,7 +3228,7 @@ void AFortAthenaAIBotController::TakePickup(AFortPickup* Pickup)
             MarkUnreachable(Pickup);
             return;
         }
-        FFortAthenaAIBotWeapon Weapon = GetWeaponInfo(WeaponDefinition);
+        FCoreAthenaBotWeapon Weapon = GetWeaponInfo(WeaponDefinition);
         Weapon.ItemGuid = FGuid::NewGuid();
         Weapon.LoadedAmmo = std::max(static_cast<int32_t>(Entry.LoadedAmmo), 0);
         // A weapon found empty with no ammo to go with it gets a magazine 🟡.
@@ -3240,7 +3240,7 @@ void AFortAthenaAIBotController::TakePickup(AFortPickup* Pickup)
         int32_t Index = static_cast<int32_t>(WeaponList.size());
         if (Slot >= 0)
         {
-            const FFortAthenaAIBotWeapon& Replaced = WeaponList[static_cast<size_t>(Slot)];
+            const FCoreAthenaBotWeapon& Replaced = WeaponList[static_cast<size_t>(Slot)];
             Log::Info(L"Battle Royale bots: {} swaps its {} {} for a {} {}", BotName, RarityName(Replaced.Rarity), NameOf(Replaced.WeaponDefinition), RarityName(Weapon.Rarity), NameOf(WeaponDefinition));
             DropItem(Replaced.WeaponDefinition, 1, Replaced.LoadedAmmo);
             WeaponList[static_cast<size_t>(Slot)] = Weapon;
@@ -3265,7 +3265,7 @@ void AFortAthenaAIBotController::TakePickup(AFortPickup* Pickup)
 #endif
 }
 
-bool AFortAthenaAIBotController::Storm(float Now)
+bool FCoreAthenaBotController::Storm(float Now)
 {
     // 8.30's _Storm: the safe zone's phase and state feed the behaviour tree, which heads for the next circle.
     FVector Center;
@@ -3276,7 +3276,7 @@ bool AFortAthenaAIBotController::Storm(float Now)
     }
     const FVector Location = LocationOf(GetPawn());
     // Once on its way in, it goes well inside (it stopped at the edge, wandered out and turned back in).
-    if (Dist2D(Location, Center) <= Radius * (Goal == EFortAthenaAIBotGoal::Storm ? 0.75f : 0.95f))
+    if (Dist2D(Location, Center) <= Radius * (Goal == ECoreAthenaBotGoal::Storm ? 0.75f : 0.95f))
     {
         return false;
     }
@@ -3287,17 +3287,17 @@ bool AFortAthenaAIBotController::Storm(float Now)
     return true;
 }
 
-void AFortAthenaAIBotController::Wander(float Now)
+void FCoreAthenaBotController::Wander(float Now)
 {
     AFortPlayerPawnAthena* Pawn = GetPawn();
     const FVector Location = LocationOf(Pawn);
     if (!bHasWanderGoal || Dist2D(Location, WanderGoal) < 200.0f || Now >= NextWanderTime)
     {
-        const float Range = State == EFortAthenaAIBotState::Warmup ? 800.0f : 2500.0f;
+        const float Range = State == ECoreAthenaBotState::Warmup ? 800.0f : 2500.0f;
         FVector Center;
         float Radius = 0.0f;
         FVector Around = Location;
-        const bool bHasZone = State != EFortAthenaAIBotState::Warmup && Manager->GetSafeZone(Center, Radius);
+        const bool bHasZone = State != ECoreAthenaBotState::Warmup && Manager->GetSafeZone(Center, Radius);
         if (bHasZone && Dist2D(Location, Center) > Radius * 0.5f)
         {
             Around = FVector(Location.X + (Center.X - Location.X) * 0.3f, Location.Y + (Center.Y - Location.Y) * 0.3f, Location.Z);
@@ -3307,7 +3307,7 @@ void AFortAthenaAIBotController::Wander(float Now)
         float Angle = RandomRange(0.0f, 6.2831853f);
         UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
         const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
-        if (State != EFortAthenaAIBotState::Warmup && (bHasWanderGoal || Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 100.0f * 100.0f))
+        if (State != ECoreAthenaBotState::Warmup && (bHasWanderGoal || Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 100.0f * 100.0f))
         {
             const FVector Heading = Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 100.0f * 100.0f ? Direction2D(FVector(), FVector(Velocity.X, Velocity.Y, 0.0f)) : Direction2D(Location, WanderGoal);
             if (Heading.SizeSquared() > 0.01f)
@@ -3323,12 +3323,12 @@ void AFortAthenaAIBotController::Wander(float Now)
             WanderGoal = FVector(Location.X + Inward.X * Distance, Location.Y + Inward.Y * Distance, Location.Z);
         }
         bHasWanderGoal = true;
-        NextWanderTime = Now + (State == EFortAthenaAIBotState::Warmup ? RandomRange(5.0f, 9.0f) : 15.0f);
+        NextWanderTime = Now + (State == ECoreAthenaBotState::Warmup ? RandomRange(5.0f, 9.0f) : 15.0f);
     }
     MoveTowards(WanderGoal, Now, 150.0f);
 }
 
-void AFortAthenaAIBotController::SetGoal(EFortAthenaAIBotGoal NewGoal, float Now)
+void FCoreAthenaBotController::SetGoal(ECoreAthenaBotGoal NewGoal, float Now)
 {
     if (NewGoal != Goal)
     {
@@ -3338,23 +3338,23 @@ void AFortAthenaAIBotController::SetGoal(EFortAthenaAIBotGoal NewGoal, float Now
     }
 }
 
-bool AFortAthenaAIBotController::PursueGoal(EFortAthenaAIBotGoal InGoal, float Now)
+bool FCoreAthenaBotController::PursueGoal(ECoreAthenaBotGoal InGoal, float Now)
 {
     switch (InGoal)
     {
-    case EFortAthenaAIBotGoal::Loot: return Loot(Now, 1e9f);
-    case EFortAthenaAIBotGoal::Search: return SearchContainer(Now);
-    case EFortAthenaAIBotGoal::Storm: return Storm(Now);
-    case EFortAthenaAIBotGoal::Regroup: return StayWithTeam(Now);
-    case EFortAthenaAIBotGoal::Harvest: return Harvest(Now);
-    case EFortAthenaAIBotGoal::Hunt: return Investigate(Now);
-    case EFortAthenaAIBotGoal::TravelToPOI: return SelectNextPOI(Now);
-    case EFortAthenaAIBotGoal::Wander: Wander(Now); return true;
+    case ECoreAthenaBotGoal::Loot: return Loot(Now, 1e9f);
+    case ECoreAthenaBotGoal::Search: return SearchContainer(Now);
+    case ECoreAthenaBotGoal::Storm: return Storm(Now);
+    case ECoreAthenaBotGoal::Regroup: return StayWithTeam(Now);
+    case ECoreAthenaBotGoal::Harvest: return Harvest(Now);
+    case ECoreAthenaBotGoal::Hunt: return Investigate(Now);
+    case ECoreAthenaBotGoal::TravelToPOI: return SelectNextPOI(Now);
+    case ECoreAthenaBotGoal::Wander: Wander(Now); return true;
     default: return false;
     }
 }
 
-const wchar_t* AFortAthenaAIBotController::ChooseGoal(float Now)
+const wchar_t* FCoreAthenaBotController::ChooseGoal(float Now)
 {
     // The goal the bot set out on comes first while it applies: the pickup or container it is going for, the circle, a
     // teammate it is going back to, the building it is breaking. Then a new one: the next circle, a container, the
@@ -3363,11 +3363,11 @@ const wchar_t* AFortAthenaAIBotController::ChooseGoal(float Now)
     // until they're done, unless loot or a container shows up meanwhile.
     switch (Goal)
     {
-    case EFortAthenaAIBotGoal::Loot:
-    case EFortAthenaAIBotGoal::Search:
-    case EFortAthenaAIBotGoal::Storm:
-    case EFortAthenaAIBotGoal::Regroup:
-    case EFortAthenaAIBotGoal::Harvest:
+    case ECoreAthenaBotGoal::Loot:
+    case ECoreAthenaBotGoal::Search:
+    case ECoreAthenaBotGoal::Storm:
+    case ECoreAthenaBotGoal::Regroup:
+    case ECoreAthenaBotGoal::Harvest:
         if (PursueGoal(Goal, Now))
         {
             return GoalName(Goal);
@@ -3376,10 +3376,10 @@ const wchar_t* AFortAthenaAIBotController::ChooseGoal(float Now)
     default:
         break;
     }
-    for (const EFortAthenaAIBotGoal Next : { EFortAthenaAIBotGoal::Storm, EFortAthenaAIBotGoal::Search, EFortAthenaAIBotGoal::Regroup, EFortAthenaAIBotGoal::Loot, EFortAthenaAIBotGoal::Harvest })
+    for (const ECoreAthenaBotGoal Next : { ECoreAthenaBotGoal::Storm, ECoreAthenaBotGoal::Search, ECoreAthenaBotGoal::Regroup, ECoreAthenaBotGoal::Loot, ECoreAthenaBotGoal::Harvest })
     {
         // Materials wait until the bot has a gun (a bot that landed empty-handed chopped trees instead of arming itself).
-        if (Next == EFortAthenaAIBotGoal::Harvest && !HasUsableWeapon())
+        if (Next == ECoreAthenaBotGoal::Harvest && !HasUsableWeapon())
         {
             continue;
         }
@@ -3394,11 +3394,11 @@ const wchar_t* AFortAthenaAIBotController::ChooseGoal(float Now)
         Wander(Now);
         return L"detour";
     }
-    if ((Goal == EFortAthenaAIBotGoal::Hunt || Goal == EFortAthenaAIBotGoal::TravelToPOI) && PursueGoal(Goal, Now))
+    if ((Goal == ECoreAthenaBotGoal::Hunt || Goal == ECoreAthenaBotGoal::TravelToPOI) && PursueGoal(Goal, Now))
     {
         return GoalName(Goal);
     }
-    for (const EFortAthenaAIBotGoal Next : { EFortAthenaAIBotGoal::Hunt, EFortAthenaAIBotGoal::TravelToPOI, EFortAthenaAIBotGoal::Wander })
+    for (const ECoreAthenaBotGoal Next : { ECoreAthenaBotGoal::Hunt, ECoreAthenaBotGoal::TravelToPOI, ECoreAthenaBotGoal::Wander })
     {
         if (Next != Goal && PursueGoal(Next, Now))
         {
@@ -3408,18 +3408,18 @@ const wchar_t* AFortAthenaAIBotController::ChooseGoal(float Now)
     }
     // Wandering already (it is always possible).
     Wander(Now);
-    SetGoal(EFortAthenaAIBotGoal::Wander, Now);
-    return GoalName(EFortAthenaAIBotGoal::Wander);
+    SetGoal(ECoreAthenaBotGoal::Wander, Now);
+    return GoalName(ECoreAthenaBotGoal::Wander);
 }
 
-bool AFortAthenaAIBotController::Investigate(float Now)
+bool FCoreAthenaBotController::Investigate(float Now)
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_Investigate (GetLastKnownPosition, SetDestination): an armed bot (two guns with
     // ammo) heads for a player within 100 m inside the safe zone, at most three bots for one player; other bots are left
     // to meet it by chance (WillEngageBot). Once the player is in sight, RangeAttack fights them.
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    const int32_t Armed = static_cast<int32_t>(std::count_if(WeaponList.begin(), WeaponList.end(), [this](const FFortAthenaAIBotWeapon& Weapon) { return HasAmmoFor(Weapon); }));
+    const int32_t Armed = static_cast<int32_t>(std::count_if(WeaponList.begin(), WeaponList.end(), [this](const FCoreAthenaBotWeapon& Weapon) { return HasAmmoFor(Weapon); }));
     if (!Pawn || Armed < 2)
     {
         HuntTarget = nullptr;
@@ -3473,12 +3473,12 @@ bool AFortAthenaAIBotController::Investigate(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::ClearNextDestination()
+void FCoreAthenaBotController::ClearNextDestination()
 {
     NextPOI = -1;
 }
 
-bool AFortAthenaAIBotController::SelectNextPOI(float Now)
+bool FCoreAthenaBotController::SelectNextPOI(float Now)
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_SelectNextPOI: with nothing left to loot where it is, the bot sets off for the
@@ -3491,7 +3491,7 @@ bool AFortAthenaAIBotController::SelectNextPOI(float Now)
         return false;
     }
     const FVector Location = LocationOf(Pawn);
-    const FFortAthenaBotLandingSpot* Spot = Manager->GetPOI(NextPOI);
+    const FCoreAthenaBotLandingSpot* Spot = Manager->GetPOI(NextPOI);
     if (Spot)
     {
         // A spot the storm is closing on is given up.
@@ -3531,9 +3531,9 @@ bool AFortAthenaAIBotController::SelectNextPOI(float Now)
             VisitedPOIs.push_back(Here);
         }
         int32_t Next = -1;
-        for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+        for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
         {
-            if (Teammate->GetState() == EFortAthenaAIBotState::Landed && Teammate->GetNextPOI() >= 0
+            if (Teammate->GetState() == ECoreAthenaBotState::Landed && Teammate->GetNextPOI() >= 0
                 && std::find(VisitedPOIs.begin(), VisitedPOIs.end(), Teammate->GetNextPOI()) == VisitedPOIs.end())
             {
                 Next = Teammate->GetNextPOI();
@@ -3566,7 +3566,7 @@ bool AFortAthenaAIBotController::SelectNextPOI(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::MoveTowards(const FVector& Destination, float Now, float AcceptanceRadius)
+void FCoreAthenaBotController::MoveTowards(const FVector& Destination, float Now, float AcceptanceRadius)
 {
 #if WITH_SERVER_CODE
     // A path on the invoker navmesh (Core's UAthenaNavSystem) where there is one, else the pawn's own movement input,
@@ -3604,7 +3604,7 @@ void AFortAthenaAIBotController::MoveTowards(const FVector& Destination, float N
 #endif
 }
 
-void AFortAthenaAIBotController::StopMoving()
+void FCoreAthenaBotController::StopMoving()
 {
     bHasMoveGoal = false;
     if (bPathFollowing)
@@ -3617,7 +3617,7 @@ void AFortAthenaAIBotController::StopMoving()
     }
 }
 
-bool AFortAthenaAIBotController::FollowPath(const FVector& Destination, float Now, float AcceptanceRadius)
+bool FCoreAthenaBotController::FollowPath(const FVector& Destination, float Now, float AcceptanceRadius)
 {
 #if WITH_SERVER_CODE
     // 21.40's _Movement with a navmesh: AAIController::MoveToLocation with pathfinding (a partial path where the tiles
@@ -3625,7 +3625,7 @@ bool AFortAthenaAIBotController::FollowPath(const FVector& Destination, float No
     // yet) or no path comes back, it steers for a while (21.40's OnGoalOffNavMesh).
     AAIController* AIController = Controller.Get();
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    if (!Manager->HasNavigation() || State != EFortAthenaAIBotState::Landed || Now < PathFailedUntil || !AIController || !Pawn)
+    if (!Manager->HasNavigation() || State != ECoreAthenaBotState::Landed || Now < PathFailedUntil || !AIController || !Pawn)
     {
         if (bPathFollowing)
         {
@@ -3686,7 +3686,7 @@ bool AFortAthenaAIBotController::FollowPath(const FVector& Destination, float No
 #endif
 }
 
-void AFortAthenaAIBotController::SteerAroundObstacles(FVector& Direction, float Now)
+void FCoreAthenaBotController::SteerAroundObstacles(FVector& Direction, float Now)
 {
 #if WITH_SERVER_CODE
     // Without a path: a trace ahead at knee height. Something low (the head-height trace is clear) is jumped; a wall or
@@ -3761,7 +3761,7 @@ void AFortAthenaAIBotController::SteerAroundObstacles(FVector& Direction, float 
 #endif
 }
 
-void AFortAthenaAIBotController::SetMovementStyle(bool bSprint, float Now)
+void FCoreAthenaBotController::SetMovementStyle(bool bSprint, float Now)
 {
     // At most one change a second: a player doesn't flick sprint on and off.
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -3775,14 +3775,14 @@ void AFortAthenaAIBotController::SetMovementStyle(bool bSprint, float Now)
     Pawn->CurrentMovementStyle = Style;
 }
 
-void AFortAthenaAIBotController::FaceTowards(const FVector& Point, float Now, float Hold)
+void FCoreAthenaBotController::FaceTowards(const FVector& Point, float Now, float Hold)
 {
     FacePoint = Point;
     bHasFacePoint = true;
     FacePointUntil = Now + Hold;
 }
 
-float AFortAthenaAIBotController::FacingError() const
+float FCoreAthenaBotController::FacingError() const
 {
     if (!bHasFacePoint || !bHasFacingYaw)
     {
@@ -3798,7 +3798,7 @@ float AFortAthenaAIBotController::FacingError() const
     return std::fabs(Delta);
 }
 
-void AFortAthenaAIBotController::UpdateFacing(float Now, float DeltaSeconds)
+void FCoreAthenaBotController::UpdateFacing(float Now, float DeltaSeconds)
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -3857,7 +3857,7 @@ void AFortAthenaAIBotController::UpdateFacing(float Now, float DeltaSeconds)
 #endif
 }
 
-void AFortAthenaAIBotController::LogMovementDiagnostics()
+void FCoreAthenaBotController::LogMovementDiagnostics()
 {
     // What the bot's movement reads its speed from (the speeds of its movement set for its style), once after landing.
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -3874,12 +3874,12 @@ void AFortAthenaAIBotController::LogMovementDiagnostics()
         static_cast<float>(Movement->MaxWalkSpeed), bPathFollowing ? L"on a path" : L"steering");
 }
 
-bool AFortAthenaAIBotController::IsUnreachable(const void* Object) const
+bool FCoreAthenaBotController::IsUnreachable(const void* Object) const
 {
     return Object && std::find(Unreachable.begin(), Unreachable.end(), Object) != Unreachable.end();
 }
 
-void AFortAthenaAIBotController::MarkUnreachable(const void* Object)
+void FCoreAthenaBotController::MarkUnreachable(const void* Object)
 {
     if (Object && !IsUnreachable(Object))
     {
@@ -3887,7 +3887,7 @@ void AFortAthenaAIBotController::MarkUnreachable(const void* Object)
     }
 }
 
-bool AFortAthenaAIBotController::SearchContainer(float Now, float MaxDistance)
+bool FCoreAthenaBotController::SearchContainer(float Now, float MaxDistance)
 {
 #if WITH_SERVER_CODE
     // Ammo boxes are worth it while the bot wants ammo for its guns; chests while it wants anything, a better gun too
@@ -3895,7 +3895,7 @@ bool AFortAthenaAIBotController::SearchContainer(float Now, float MaxDistance)
     AFortPlayerPawnAthena* Pawn = GetPawn();
     bool bWantsAmmo = false;
     bool bWantsBetter = WeaponList.size() < MaxWeapons;
-    for (const FFortAthenaAIBotWeapon& Weapon : WeaponList)
+    for (const FCoreAthenaBotWeapon& Weapon : WeaponList)
     {
         const auto Found = Ammo.find(Weapon.AmmoDefinition);
         bWantsAmmo = bWantsAmmo || Found == Ammo.end() || Found->second < 60;
@@ -3917,7 +3917,7 @@ bool AFortAthenaAIBotController::SearchContainer(float Now, float MaxDistance)
     }
     const FVector Location = LocationOf(Pawn);
     // One the bot only noted (it isn't its goal) gives way to the nearest when it looks again.
-    if (Target && Goal != EFortAthenaAIBotGoal::Search && SearchUntil <= 0.0f && Now >= NextContainerSearch)
+    if (Target && Goal != ECoreAthenaBotGoal::Search && SearchUntil <= 0.0f && Now >= NextContainerSearch)
     {
         Target = nullptr;
     }
@@ -3925,7 +3925,7 @@ bool AFortAthenaAIBotController::SearchContainer(float Now, float MaxDistance)
     {
         NextContainerSearch = Now + 2.0f;
         float Best = 5000.0f;
-        for (const FFortAthenaBotContainer& Entry : Manager->GetContainers())
+        for (const FCoreAthenaBotContainer& Entry : Manager->GetContainers())
         {
             ABuildingContainer* Container = Entry.Container.Get();
             const float Distance = Dist2D(Entry.Location, Location) * (Entry.bChest ? 0.8f : 1.0f);
@@ -4001,7 +4001,7 @@ bool AFortAthenaAIBotController::SearchContainer(float Now, float MaxDistance)
 #endif
 }
 
-void AFortAthenaAIBotController::EquipPickaxe()
+void FCoreAthenaBotController::EquipPickaxe()
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -4019,7 +4019,7 @@ void AFortAthenaAIBotController::EquipPickaxe()
 #endif
 }
 
-bool AFortAthenaAIBotController::SwingAtBuilding(ABuildingSMActor* Building, float& OutDamage)
+bool FCoreAthenaBotController::SwingAtBuilding(ABuildingSMActor* Building, float& OutDamage)
 {
     OutDamage = 0.0f;
     AFortWeapon* Pickaxe = bPickaxeEquipped ? EquippedWeapon.Get() : nullptr;
@@ -4030,7 +4030,7 @@ bool AFortAthenaAIBotController::SwingAtBuilding(ABuildingSMActor* Building, flo
     return Pickaxe && DamageBuilding(Building, Pickaxe, OutDamage);
 }
 
-void AFortAthenaAIBotController::PlayFireMontage()
+void FCoreAthenaBotController::PlayFireMontage()
 {
 #if WITH_SERVER_CODE
     AFortWeapon* Weapon = EquippedWeapon.Get();
@@ -4079,7 +4079,7 @@ void AFortAthenaAIBotController::PlayFireMontage()
 #endif
 }
 
-bool AFortAthenaAIBotController::ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee, const FVector* HitFrom)
+bool FCoreAthenaBotController::ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee, const FVector* HitFrom)
 {
 #if WITH_SERVER_CODE
     // A weapon's hit as its ability applies it: the weapon's damage effect (GE_Ranged_GenericDamage for a gun, the
@@ -4158,7 +4158,7 @@ bool AFortAthenaAIBotController::ApplyWeaponDamageEffect(UObject* TargetActor, A
 #endif
 }
 
-bool AFortAthenaAIBotController::DamageBuilding(ABuildingSMActor* Building, AFortWeapon* Weapon, float& OutDamage)
+bool FCoreAthenaBotController::DamageBuilding(ABuildingSMActor* Building, AFortWeapon* Weapon, float& OutDamage)
 {
 #if WITH_SERVER_CODE
     OutDamage = 0.0f;
@@ -4179,7 +4179,7 @@ bool AFortAthenaAIBotController::DamageBuilding(ABuildingSMActor* Building, AFor
 #endif
 }
 
-bool AFortAthenaAIBotController::DamagePawn(AFortPawn* Victim, AFortWeapon* Weapon, int32_t Hits, float& OutDamage)
+bool FCoreAthenaBotController::DamagePawn(AFortPawn* Victim, AFortWeapon* Weapon, int32_t Hits, float& OutDamage)
 {
 #if WITH_SERVER_CODE
     // A shot that hit, the game's way (ApplyWeaponDamageEffect), once per pellet that hit: a player sees the hit as any
@@ -4220,7 +4220,7 @@ bool AFortAthenaAIBotController::DamagePawn(AFortPawn* Victim, AFortWeapon* Weap
 #endif
 }
 
-void AFortAthenaAIBotController::StopHarvesting()
+void FCoreAthenaBotController::StopHarvesting()
 {
     HarvestTarget = nullptr;
     bHarvestToUnstick = false;
@@ -4230,7 +4230,7 @@ void AFortAthenaAIBotController::StopHarvesting()
     }
 }
 
-void AFortAthenaAIBotController::OnResourcesHarvested(ABuildingSMActor* Building, UFortItemDefinition* ResourceItem, int32_t Count, bool bDestroyed)
+void FCoreAthenaBotController::OnResourcesHarvested(ABuildingSMActor* Building, UFortItemDefinition* ResourceItem, int32_t Count, bool bDestroyed)
 {
 #if WITH_SERVER_CODE
     bHarvestCredited = true;
@@ -4256,7 +4256,7 @@ void AFortAthenaAIBotController::OnResourcesHarvested(ABuildingSMActor* Building
 #endif
 }
 
-bool AFortAthenaAIBotController::FindBuildingInTheWay(float Now)
+bool FCoreAthenaBotController::FindBuildingInTheWay(float Now)
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -4305,7 +4305,7 @@ bool AFortAthenaAIBotController::FindBuildingInTheWay(float Now)
 #endif
 }
 
-bool AFortAthenaAIBotController::Harvest(float Now)
+bool FCoreAthenaBotController::Harvest(float Now)
 {
 #if WITH_SERVER_CODE
     // Whether a swing damages a building at all, learnt from the first swings of any bot.
@@ -4429,7 +4429,7 @@ bool AFortAthenaAIBotController::Harvest(float Now)
 #endif
 }
 
-bool AFortAthenaAIBotController::PlayReplicatedMontage(UObject* Montage, float PlayRate, bool bStop)
+bool FCoreAthenaBotController::PlayReplicatedMontage(UObject* Montage, float PlayRate, bool bStop)
 {
 #if WITH_SERVER_CODE
     // How an ability's PlayMontageAndWait reaches other players (UAbilitySystemComponent::PlayMontage): the ability
@@ -4498,13 +4498,13 @@ bool AFortAthenaAIBotController::PlayReplicatedMontage(UObject* Montage, float P
 #endif
 }
 
-bool AFortAthenaAIBotController::IsDBNO() const
+bool FCoreAthenaBotController::IsDBNO() const
 {
     AFortPlayerPawnAthena* Pawn = GetPawn();
     return Pawn && Pawn->bIsDBNO;
 }
 
-bool AFortAthenaAIBotController::CanGoDBNO() const
+bool FCoreAthenaBotController::CanGoDBNO() const
 {
     // Battle Royale's DBNO (GAB_AthenaDBNO): in a team playlist a player whose teammate is still up goes down instead of
     // out; a team all down is eliminated.
@@ -4512,9 +4512,9 @@ bool AFortAthenaAIBotController::CanGoDBNO() const
     {
         return false;
     }
-    for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+    for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
     {
-        if (Teammate->GetState() == EFortAthenaAIBotState::Landed && !Teammate->IsDBNO())
+        if (Teammate->GetState() == ECoreAthenaBotState::Landed && !Teammate->IsDBNO())
         {
             return true;
         }
@@ -4569,7 +4569,7 @@ namespace
     }
 }
 
-void AFortAthenaAIBotController::EnterDBNO(AFortPlayerStateAthena* InDowner, float Now)
+void FCoreAthenaBotController::EnterDBNO(AFortPlayerStateAthena* InDowner, float Now)
 {
 #if WITH_SERVER_CODE
     // Down, not out: the pawn's bIsDBNO (replicated: clients show it crawling, with its DBNO icon), its DBNO health
@@ -4633,7 +4633,7 @@ void AFortAthenaAIBotController::EnterDBNO(AFortPlayerStateAthena* InDowner, flo
 #endif
 }
 
-void AFortAthenaAIBotController::Downed(float Now)
+void FCoreAthenaBotController::Downed(float Now)
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -4644,12 +4644,12 @@ void AFortAthenaAIBotController::Downed(float Now)
     StopFiring();
     // The team all down: eliminated (the last one knocked is everyone's finisher).
     bool bTeammateUp = false;
-    AFortAthenaAIBotController* Nearest = nullptr;
+    FCoreAthenaBotController* Nearest = nullptr;
     float NearestDistance = 1e9f;
     const FVector Location = LocationOf(Pawn);
-    for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+    for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
     {
-        if (Teammate->GetState() != EFortAthenaAIBotState::Landed || Teammate->IsDBNO())
+        if (Teammate->GetState() != ECoreAthenaBotState::Landed || Teammate->IsDBNO())
         {
             continue;
         }
@@ -4713,7 +4713,7 @@ void AFortAthenaAIBotController::Downed(float Now)
 #endif
 }
 
-bool AFortAthenaAIBotController::ReviveTeammate(float Now)
+bool FCoreAthenaBotController::ReviveTeammate(float Now)
 {
 #if WITH_SERVER_CODE
     // 21.40's bots revive their downed teammates (the community list: "reviving each other"): out of a fight, the nearest
@@ -4724,13 +4724,13 @@ bool AFortAthenaAIBotController::ReviveTeammate(float Now)
     {
         return false;
     }
-    AFortAthenaAIBotController* Target = ReviveTarget;
+    FCoreAthenaBotController* Target = ReviveTarget;
     // A revive is safe: no enemy in sight and nobody shooting at the bot, and neither of them in the storm (the bot
     // goes for the circle first; the downed teammate crawls after it).
     FVector StormCenter;
     float StormRadius = 0.0f;
     const bool bHasStorm = Manager->GetCurrentSafeZone(StormCenter, StormRadius);
-    const auto InStorm = [&](AFortAthenaAIBotController* Bot)
+    const auto InStorm = [&](FCoreAthenaBotController* Bot)
     {
         return bHasStorm && Bot && Bot->GetPawn() && Dist2D(LocationOf(Bot->GetPawn()), StormCenter) > StormRadius;
     };
@@ -4754,7 +4754,7 @@ bool AFortAthenaAIBotController::ReviveTeammate(float Now)
     if (!Target)
     {
         float Best = 6000.0f;
-        for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+        for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
         {
             const float Distance = Teammate->IsDBNO() && Teammate->GetPawn() && !InStorm(Teammate) ? Dist2D(LocationOf(Teammate->GetPawn()), Location) : 1e9f;
             if (Distance < Best)
@@ -4831,7 +4831,7 @@ bool AFortAthenaAIBotController::ReviveTeammate(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::OnRevived()
+void FCoreAthenaBotController::OnRevived()
 {
     Downer = nullptr;
     DBNOStartedAt = 0.0f;
@@ -4839,7 +4839,7 @@ void AFortAthenaAIBotController::OnRevived()
     StopMoving();
 }
 
-bool AFortAthenaAIBotController::StayWithTeam(float Now)
+bool FCoreAthenaBotController::StayWithTeam(float Now)
 {
 #if WITH_SERVER_CODE
     // Teammates stick together (the community list): a bot with nothing to do rejoins the nearest teammate standing when
@@ -4852,9 +4852,9 @@ bool AFortAthenaAIBotController::StayWithTeam(float Now)
     const FVector Location = LocationOf(Pawn);
     float Best = 1e9f;
     FVector TeammateLocation;
-    for (AFortAthenaAIBotController* Teammate : Manager->TeammatesOf(this))
+    for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
     {
-        if (Teammate->GetState() != EFortAthenaAIBotState::Landed || Teammate->IsDBNO() || !Teammate->GetPawn())
+        if (Teammate->GetState() != ECoreAthenaBotState::Landed || Teammate->IsDBNO() || !Teammate->GetPawn())
         {
             continue;
         }
@@ -4867,7 +4867,7 @@ bool AFortAthenaAIBotController::StayWithTeam(float Now)
         }
     }
     // Once on its way back, it goes all the way (it stopped at 25 m, wandered off and came back).
-    if (Best > (Goal == EFortAthenaAIBotGoal::Regroup ? 1000.0f : 2500.0f) && Best < 40000.0f)
+    if (Best > (Goal == ECoreAthenaBotGoal::Regroup ? 1000.0f : 2500.0f) && Best < 40000.0f)
     {
         MoveTowards(TeammateLocation, Now, 800.0f);
         return true;
@@ -4878,7 +4878,7 @@ bool AFortAthenaAIBotController::StayWithTeam(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::TryToUnstuck(float Now)
+void FCoreAthenaBotController::TryToUnstuck(float Now)
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_Movement::TryToUnstuck: a bot that wants to move and hasn't, jumps; still stuck,
@@ -4934,7 +4934,7 @@ void AFortAthenaAIBotController::TryToUnstuck(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::TakeStormDamage(float Now)
+void FCoreAthenaBotController::TakeStormDamage(float Now)
 {
 #if WITH_SERVER_CODE
     if (Now < NextStormTick)
@@ -4974,7 +4974,7 @@ void AFortAthenaAIBotController::TakeStormDamage(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo)
+void FCoreAthenaBotController::DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo)
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -5006,13 +5006,13 @@ void AFortAthenaAIBotController::DropItem(UFortItemDefinition* Definition, int32
 #endif
 }
 
-void AFortAthenaAIBotController::DropInventory()
+void FCoreAthenaBotController::DropInventory()
 {
 #if WITH_SERVER_CODE
     // 8.30's bots drop their loot as players do: each weapon (with its magazine), the ammo and the healing items, where
     // the bot fell.
     HealingItem = nullptr;
-    for (const FFortAthenaAIBotWeapon& Weapon : WeaponList)
+    for (const FCoreAthenaBotWeapon& Weapon : WeaponList)
     {
         DropItem(Weapon.WeaponDefinition, 1, Weapon.LoadedAmmo);
     }
@@ -5038,7 +5038,7 @@ void AFortAthenaAIBotController::DropInventory()
 #endif
 }
 
-bool AFortAthenaAIBotController::Heal(float Now)
+bool FCoreAthenaBotController::Heal(float Now)
 {
 #if WITH_SERVER_CODE
     // 21.40's UFortAthenaAIBotEvaluator_Heal. A player holds the item for its use time (the ability's TriggerDuration),
@@ -5060,7 +5060,7 @@ bool AFortAthenaAIBotController::Heal(float Now)
         {
             return true;
         }
-        const FFortAthenaAIBotConsumable* Info = GetConsumableInfo(HealingItem);
+        const FCoreAthenaBotConsumable* Info = GetConsumableInfo(HealingItem);
         const float Health = Pawn->GetHealth();
         const float Shield = Pawn->GetShield();
         const float MaxHealth = std::max(Pawn->GetMaxHealth(), 1.0f);
@@ -5107,7 +5107,7 @@ bool AFortAthenaAIBotController::Heal(float Now)
     float BestScore = 0.0f;
     for (const auto& [Definition, Count] : Consumables)
     {
-        const FFortAthenaAIBotConsumable* Info = Count > 0 ? GetConsumableInfo(Definition) : nullptr;
+        const FCoreAthenaBotConsumable* Info = Count > 0 ? GetConsumableInfo(Definition) : nullptr;
         if (!Info)
         {
             continue;
@@ -5161,7 +5161,7 @@ bool AFortAthenaAIBotController::Heal(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::CancelHeal()
+void FCoreAthenaBotController::CancelHeal()
 {
     if (!HealingItem)
     {
@@ -5187,7 +5187,7 @@ void AFortAthenaAIBotController::CancelHeal()
     }
 }
 
-void AFortAthenaAIBotController::SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime)
+void FCoreAthenaBotController::SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime)
 {
     bHasLandingSpot = true;
     LandingSpot = Spot;
@@ -5195,7 +5195,7 @@ void AFortAthenaAIBotController::SetLandingSpot(const FVector& Spot, float Radiu
     JumpTime = InJumpTime;
 }
 
-void AFortAthenaAIBotController::OnPossesedPawnDied(AFortPlayerStateAthena* KillerState)
+void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* KillerState)
 {
 #if WITH_SERVER_CODE
     // 21.40's AFortAthenaAIBotController::OnPossesedPawnDied. The bot's player state takes its death report as a
@@ -5216,7 +5216,7 @@ void AFortAthenaAIBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Kill
         PlayerState->ForceNetUpdate();
     }
     DropInventory();
-    State = EFortAthenaAIBotState::Dead;
+    State = ECoreAthenaBotState::Dead;
     CurrentTarget = nullptr;
     LootTarget = nullptr;
     Log::Info(L"Battle Royale bots: {} died at ({:.0f}, {:.0f}, {:.0f}){}", BotName, LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z,

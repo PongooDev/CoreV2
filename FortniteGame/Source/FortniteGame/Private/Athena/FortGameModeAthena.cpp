@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "Athena/FortGameModeAthena.h"
-#include "Athena/AI/FortServerBotManagerAthena.h"
+#include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortAthenaPlaylistBase.h"
@@ -422,10 +422,10 @@ namespace
                 }));
                 // With the kills the player's "cheat killscore" added (Core-Backend #145), and the player bots they
                 // eliminated (CoreV2 #233; bots have no account, so they aren't among the match's players here).
-                AthenaState->SetKillScore(std::max(Kills + UFortCheatManager::KillScoreOffset(AthenaState) + UFortServerBotManagerAthena::BotKillsOf(AthenaState), 0));
+                AthenaState->SetKillScore(std::max(Kills + UFortCheatManager::KillScoreOffset(AthenaState) + FCoreAthenaBotManager::BotKillsOf(AthenaState), 0));
             }
             Player.Kills = AthenaState->GetKills();
-            Player.BotKills = std::min(UFortServerBotManagerAthena::BotKillsOf(AthenaState), std::max(Player.Kills, 0));
+            Player.BotKills = std::min(FCoreAthenaBotManager::BotKillsOf(AthenaState), std::max(Player.Kills, 0));
         }
 
         // The team's place, for its players who left before it was out.
@@ -699,7 +699,7 @@ namespace
 
     // The answer's "bots": {count, level, health, shield, quests}, or null when the admin panel's "Force player AIs" is
     // off (Core-Backend's bots block). False when it isn't there or is null.
-    bool JsonBots(const std::string& Json, FFortAthenaBotSettings& OutSettings)
+    bool JsonBots(const std::string& Json, FCoreAthenaBotSettings& OutSettings)
     {
         const size_t Key = Json.find("\"bots\"");
         const size_t Open = Key == std::string::npos ? std::string::npos : Json.find_first_not_of(" \t\r\n:", Key + 6);
@@ -740,14 +740,14 @@ namespace
             const bool bOpen = bAnswered && BackendRequest::JsonField(Body, "open") == "true";
             const int32_t MaxPlayers = bAnswered ? std::clamp(std::atoi(BackendRequest::JsonField(Body, "maxPlayers").c_str()), 0, 1000) : 0;
             auto Parties = bAnswered ? JsonParties(Body) : std::vector<std::vector<std::wstring>>();
-            FFortAthenaBotSettings BotSettings;
+            FCoreAthenaBotSettings BotSettings;
             const bool bBots = bAnswered && JsonBots(Body, BotSettings);
             GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings]() mutable
             {
                 Watch->bAsking = false;
                 if (bAnswered)
                 {
-                    if (UFortServerBotManagerAthena* BotManager = UFortServerBotManagerAthena::Get())
+                    if (FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get())
                     {
                         BotManager->SetSettings(bBots, BotSettings);
                     }

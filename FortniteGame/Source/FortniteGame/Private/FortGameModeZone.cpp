@@ -1,6 +1,6 @@
 #include "pch.h"
 #include "FortGameModeZone.h"
-#include "Athena/AI/FortServerBotManagerAthena.h"
+#include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPoiManager.h"
 #include "Athena/FortPoiVolume.h"
@@ -126,7 +126,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         Athena->WatchMatchResults();
         Athena->WatchWarmup();
         Athena->WatchPlaylistDataTables();
-        UFortServerBotManagerAthena::Create(Athena);
+        FCoreAthenaBotManager::Create(Athena);
         return;
     }
 

@@ -1,7 +1,7 @@
 #include "pch.h"
 #include "Building/BuildingSMActor.h"
 #include "Athena/FortGameModeAthena.h"
-#include "Athena/AI/FortServerBotManagerAthena.h"
+#include "Athena/AI/CoreAthenaBotManager.h"
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Components/PrimitiveComponent.h"
@@ -242,10 +242,10 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
     AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(InstigatorPawn->Controller)));
     // Core's Battle Royale bots (CoreV2 #233) harvest too: their pawn's controller is an AI controller, and the bot keeps
     // the materials itself.
-    AFortAthenaAIBotController* Bot = nullptr;
+    FCoreAthenaBotController* Bot = nullptr;
     if (!PlayerController)
     {
-        UFortServerBotManagerAthena* BotManager = UFortServerBotManagerAthena::Get();
+        FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get();
         Bot = BotManager ? BotManager->FindBot(reinterpret_cast<const UObject*>(InstigatorPawn)) : nullptr;
         if (!Bot)
         {

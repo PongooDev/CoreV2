@@ -15,7 +15,10 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cwchar>
+#include <cwctype>
 #include <string>
+#include <utility>
 #include <vector>
 
 // The Battle Royale end-of-match screen (AthenaMatchStatsPartial, "Your Results") shows the controller's match report
@@ -50,6 +53,70 @@ namespace
             }
         }
         return Assists;
+    }
+
+    // Hits: the hits the player's guns landed on other teams' pawns. Epic's "Ranged.Hit.Hostile:<source>"
+    // (AFortPlayerPawnAthena's damage handler, 3.0 0x9ED290, 3.3 0xA212E0) counts a hit only when the victim's
+    // controller is an AFortPlayerControllerAthena, so Core's bots (an AAIController each) never count, nor do they go
+    // in HostilePlayersDamaged there: a match against bots read Hits 0 and Accuracy 0% while their damage counted
+    // (#236). AFortPawn's damage handler (2.5 0xD991C0, 3.0 0xDBB500, 3.1 0xDF8C50, 3.2 0xE0DA60, 3.3 0xE59470), the one
+    // that adds "Damage.Dealt.ToHostile", counts every weapon's hit on another team's pawn, whoever controls it, as
+    // "Hit.Zone.Normal.ToHostile:<source>" or "Hit.Zone.Critical.ToHostile:<source>" (one each, by the hit's damage
+    // zone), under the same weapon's AnalyticTags. The guns are the sources the player fired from ("Ranged.Bullets.Fired",
+    // 3.0 0x8141D0, or 1.10's "Ranged.Fire"), which leaves out the pickaxe's hits; a build without the zone stats keeps
+    // Epic's count.
+    int32_t CountRangedHits(UStatManager* Manager, EStatRecordingPeriod Period)
+    {
+        static const std::wstring FiredPrefixes[] = { L"Ranged.Bullets.Fired:", L"Ranged.Fire:" };
+        static const std::wstring HitPrefixes[] = { L"Hit.Zone.Normal.ToHostile:", L"Hit.Zone.Critical.ToHostile:" };
+        // Names compare without case, as FNames do.
+        const auto SourceAfter = [](const std::wstring& Name, const std::wstring& Prefix)
+        {
+            if (Name.size() <= Prefix.size() || _wcsnicmp(Name.c_str(), Prefix.c_str(), Prefix.size()) != 0)
+            {
+                return std::wstring();
+            }
+            std::wstring Source = Name.substr(Prefix.size());
+            std::transform(Source.begin(), Source.end(), Source.begin(), [](wchar_t Char) { return static_cast<wchar_t>(std::towlower(Char)); });
+            return Source;
+        };
+
+        std::vector<std::wstring> Guns;
+        std::vector<std::pair<std::wstring, FName>> Hits;
+        const TArray<UStat*>& AllStats = Manager->Stats;
+        for (UStat* Each : AllStats)
+        {
+            if (!Each)
+            {
+                continue;
+            }
+            const FName Name = static_cast<FName>(Each->StatName);
+            const std::wstring Text = Name.ToStdString();
+            for (const std::wstring& Prefix : FiredPrefixes)
+            {
+                if (std::wstring Source = SourceAfter(Text, Prefix); !Source.empty())
+                {
+                    Guns.push_back(std::move(Source));
+                }
+            }
+            for (const std::wstring& Prefix : HitPrefixes)
+            {
+                if (std::wstring Source = SourceAfter(Text, Prefix); !Source.empty())
+                {
+                    Hits.emplace_back(std::move(Source), Name);
+                }
+            }
+        }
+
+        int32_t Total = 0;
+        for (const auto& [Source, Name] : Hits)
+        {
+            if (std::find(Guns.begin(), Guns.end(), Source) != Guns.end())
+            {
+                Total += Manager->GetStatValue(Name, Period);
+            }
+        }
+        return Total;
     }
 
     // The objects of Json's array Name, each as its own text: the backend's are flat ({"source":1,"amount":10}).
@@ -119,7 +186,8 @@ void AFortPlayerController::SendMatchStatsForPlayer()
         // A build records one of the two: 1.10 "Ranged.Fire", 1.11 on "Ranged.Bullets.Fired" (the cartridges times
         // the bullets in each, 2.1 0x2A35D0).
         const int32_t ShotsFired = Manager->GetStatValueForAllSources(L"Ranged.Bullets.Fired", Match) + Manager->GetStatValueForAllSources(L"Ranged.Fire", Match);
-        const int32_t Hits = Manager->GetStatValueForAllSources(L"Ranged.Hit.Hostile", Match);
+        // Every hit on a player counts in both, a hit on a bot only in the zone stats (CountRangedHits).
+        const int32_t Hits = std::max(Manager->GetStatValueForAllSources(L"Ranged.Hit.Hostile", Match), CountRangedHits(Manager, Match));
         const int32_t Headshots = Manager->GetStatValue(FName(L"Headshots"), Match);
         const int32_t UsedWood = Manager->GetStatValue(FName(L"WoodExpended"), Match);
         const int32_t UsedStone = Manager->GetStatValue(FName(L"StoneExpended"), Match);

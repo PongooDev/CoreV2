@@ -39,7 +39,9 @@ public:
 // (its sources are the weapon's AnalyticTags, 0x8F1AF0 adding to each), and "DamageDealt"; the damage handler after it
 // (0x838390) the damage a player takes as "DamageReceived"; a building's (0x480EC0) "Damage.Dealt.ToStructure:<source>";
 // a weapon's fire (0x2A1C70) "Ranged.Fire:<source>" (1.11 on: "Ranged.Bullets.Fired:<source>", 2.1 0x2A35D0), its hit
-// on another team's player (0x43D8E0) "Ranged.Hit.Hostile:<source>"; a head shot (0x9B38A0) "Headshots"; the pawn's
+// on another team's player (0x43D8E0) "Ranged.Hit.Hostile:<source>" (a player's pawn only: bots' hits are the first
+// handler's "Hit.Zone.Normal.ToHostile:<source>" and "Hit.Zone.Critical.ToHostile:<source>", which count any pawn's,
+// on 2.5 to 3.3 at least); a head shot (0x9B38A0) "Headshots"; the pawn's
 // movement on the ground (0x454FF0) "Travel.Distance.Ground" in centimetres; and the building costs paid (0x8A9F00)
 // "WoodExpended" ... "MetalExpended". No code adds to "WoodAcquired" ... "MetalAcquired" (1.10 to 2.2): the materials
 // gathered are the player state's WoodGathered ... MetalGathered (AFortPlayerState::GetStatValue). Their match values

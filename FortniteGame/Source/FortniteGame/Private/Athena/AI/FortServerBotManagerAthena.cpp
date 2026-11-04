@@ -1094,6 +1094,31 @@ void UFortServerBotManagerAthena::RemoveFromAliveBots(AFortAthenaAIBotController
             BotKills.emplace_back(TWeakObjectPtr<AFortPlayerStateAthena>(KillerState), 1);
         }
         KillerState->ClientReportKill(State);
+        // The player's elimination count now (the HUD's, OnRep_Kills; the match results set it again from the same
+        // counts once a second), and their team's.
+        if (AFortPlayerStateAthena::CountsKills())
+        {
+            KillerState->Kills = KillerState->Kills + 1;
+            KillerState->ForceNetUpdate();
+        }
+        else if (AFortPlayerStateAthena::HasKillScore())
+        {
+            KillerState->SetKillScore(KillerState->GetKills() + 1);
+        }
+        UWorld* KillWorld = Athena ? Athena->GetWorld() : nullptr;
+        AGameStateBase* KillGameState = KillWorld ? KillWorld->GetGameState() : nullptr;
+        if (AFortPlayerStateAthena::HasTeamKillScore() && KillGameState)
+        {
+            const uint8_t KillerTeam = static_cast<uint8_t>(KillerState->TeamIndex);
+            for (APlayerState* Other : KillGameState->PlayerArray)
+            {
+                AFortPlayerStateAthena* Mate = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(Other));
+                if (Mate && static_cast<uint8_t>(Mate->TeamIndex) == KillerTeam)
+                {
+                    Mate->TeamKillScore = Mate->TeamKillScore + 1;
+                }
+            }
+        }
 
         // Quests: the game's own Kill event (if it sent one for this pawn) went through UFortQuestManager already; with
         // the setting on, one is sent for a kill the game didn't report.
@@ -1146,8 +1171,7 @@ void UFortServerBotManagerAthena::ApplyBotDamage(AFortAthenaAIBotController* Att
         return;
     }
     const float Now = World->GetTimeSeconds();
-    std::erase_if(BotHits, [Now, Victim](const FBotHit& Hit) { return !Hit.Victim.Get() || Hit.Victim.Get() == Victim || Now - Hit.Time > 15.0f; });
-    BotHits.push_back({ TWeakObjectPtr<AFortPawn>(Victim), TWeakObjectPtr<AFortPlayerStateAthena>(Attacker->GetPlayerState()), Now });
+    NoteBotHit(Attacker, Victim);
 
     const float Shield = Victim->GetShield();
     const float ToShield = std::min(Shield, Damage);
@@ -1183,6 +1207,24 @@ void UFortServerBotManagerAthena::ApplyBotDamage(AFortAthenaAIBotController* Att
     Victim->SetHealth(1.0f);
     Victim->ForceKill(DeathReason, reinterpret_cast<AController*>(Attacker->GetController()), reinterpret_cast<AActor*>(Attacker->GetPawn()));
 #endif
+}
+
+bool UFortServerBotManagerAthena::UsesGameDamage(const AFortPawn* Victim) const
+{
+    return Victim && (!IsBotPawn(reinterpret_cast<const UObject*>(Victim)) || GetTeamSize() <= 1);
+}
+
+void UFortServerBotManagerAthena::NoteBotHit(AFortAthenaAIBotController* Attacker, AFortPawn* Victim)
+{
+    AFortGameModeAthena* Athena = GetGameMode();
+    UWorld* World = Athena ? Athena->GetWorld() : nullptr;
+    if (!Attacker || !Victim || !World)
+    {
+        return;
+    }
+    const float Now = World->GetTimeSeconds();
+    std::erase_if(BotHits, [Now, Victim](const FBotHit& Hit) { return !Hit.Victim.Get() || Hit.Victim.Get() == Victim || Now - Hit.Time > 15.0f; });
+    BotHits.push_back({ TWeakObjectPtr<AFortPawn>(Victim), TWeakObjectPtr<AFortPlayerStateAthena>(Attacker->GetPlayerState()), Now });
 }
 
 std::vector<AFortAthenaAIBotController*> UFortServerBotManagerAthena::TeammatesOf(const AFortAthenaAIBotController* Bot) const

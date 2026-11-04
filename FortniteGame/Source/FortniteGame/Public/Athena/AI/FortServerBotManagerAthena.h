@@ -133,6 +133,11 @@ public:
     // A bot's shot hit Victim (a bot's or a player's pawn): its shield, then its health; at 0 it dies, the bot's
     // elimination (AFortPawn::ForceKill with the bot's controller).
     void ApplyBotDamage(AFortAthenaAIBotController* Attacker, AFortPawn* Victim, float Damage, UFortWeaponItemDefinition* Weapon);
+    // Whether a bot's hit on Victim goes the game's way (its damage effect): a player's pawn always; a bot's in a solo
+    // playlist (in team playlists Core's damage downs bots while a teammate stands).
+    bool UsesGameDamage(const AFortPawn* Victim) const;
+    // A bot hit Victim (LastBotAttackerOf).
+    void NoteBotHit(AFortAthenaAIBotController* Attacker, AFortPawn* Victim);
     // The player state of the bot that last hit Pawn, in the last few seconds, or null.
     AFortPlayerStateAthena* LastBotAttackerOf(const AFortPawn* Pawn) const;
 

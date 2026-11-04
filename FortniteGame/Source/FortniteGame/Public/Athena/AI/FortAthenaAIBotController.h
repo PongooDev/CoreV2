@@ -246,6 +246,11 @@ private:
     // A building piece hit by the bot's weapon (a pickaxe swing, or a shot a wall stopped): the weapon's damage effect
     // with the weapon as its damage source, so the building takes what the weapon's stats give it.
     bool DamageBuilding(ABuildingSMActor* Building, AFortWeapon* Weapon, float& OutDamage);
+    // A pawn hit by the bot's weapon, the game's way (its damage effect, Hits times for a shotgun's pellets).
+    bool DamagePawn(AFortPawn* Victim, AFortWeapon* Weapon, int32_t Hits, float& OutDamage);
+    // The weapon's damage effect (GE_Ranged_GenericDamage, or the pickaxe's GE_Melee_GenericDamage) with the weapon as the
+    // context's damage source, from the bot's ability system to the target's.
+    bool ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee);
     void EquipPickaxe();
     // A montage shown to the players (reload, healing), as an ability's PlayMontageAndWait replicates it: the ability
     // system's RepAnimMontageInfo (and the Athena pawn's copy). bStop stops the current one.

@@ -1098,7 +1098,9 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
     if (AAIController* AIController = Controller.Get(); AIController && Now >= NextShotTime)
     {
         NextShotTime = Now + 1.0f;
-        AIController->SetFocalPoint(FVector(DropTarget.X, DropTarget.Y, Location.Z));
+        // Looking at the spot itself, as a player dives: the skydive's pitch (the pawn's replicated view pitch, which
+        // other players' animation shows) points down at it, straight down once above it.
+        AIController->SetFocalPoint(Distance > 300.0f ? FVector(DropTarget.X, DropTarget.Y, DropTarget.Z) : FVector(Location.X + Direction.X * 10.0f, Location.Y + Direction.Y * 10.0f, DropTarget.Z));
     }
 
     UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
@@ -1656,10 +1658,25 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
         return;
     }
     float Damage = bPickaxeEquipped ? 20.0f : Held ? Held->Damage : 20.0f;
+    int32_t PelletsHit = 1;
     if (Held && Held->Pellets > 1)
     {
         // A shotgun's pellets: all of them close up, fewer with the distance 🟡.
-        Damage *= static_cast<float>(Held->Pellets) * std::clamp(1.0f - (Distance - 400.0f) / 2000.0f, 0.25f, 1.0f);
+        const float Share = std::clamp(1.0f - (Distance - 400.0f) / 2000.0f, 0.25f, 1.0f);
+        Damage *= static_cast<float>(Held->Pellets) * Share;
+        PelletsHit = std::max(static_cast<int32_t>(std::lround(static_cast<float>(Held->Pellets) * Share)), 1);
+    }
+    // The game's damage where it decides the outcome itself (a player's pawn, and bots in solo playlists): the hit
+    // numbers, the kill feed and the death are then the game's. Bots in team playlists take Core's damage, which downs
+    // them (DBNO) while a teammate stands. Core's damage is the fallback when the game's deals none.
+    float Dealt = 0.0f;
+    if (Weapon && Manager->UsesGameDamage(Target))
+    {
+        Manager->NoteBotHit(this, Target);
+        if (DamagePawn(Target, Weapon, PelletsHit, Dealt))
+        {
+            return;
+        }
     }
     Manager->ApplyBotDamage(this, Target, Damage, Held ? Held->WeaponDefinition : nullptr);
 #endif
@@ -2541,41 +2558,39 @@ bool AFortAthenaAIBotController::SwingAtBuilding(ABuildingSMActor* Building, flo
     return Pickaxe && DamageBuilding(Building, Pickaxe, OutDamage);
 }
 
-bool AFortAthenaAIBotController::DamageBuilding(ABuildingSMActor* Building, AFortWeapon* Pickaxe, float& OutDamage)
+bool AFortAthenaAIBotController::ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee)
 {
 #if WITH_SERVER_CODE
-    // The pickaxe's hit as its ability applies it (GAB_Melee_ImpactCombo_Athena's GE_Melee_GenericDamage), made on the
-    // bot's ability system and applied to the building's. Its execution, UFortDamageFormulaExecutionCalculation (3.1
-    // 0xC49090), takes the base damage from the context's damage source: FFortGameplayEffectContext::DamageSourceObject
-    // (an IFortDamageSourceInterface; AFortWeapon's reads its WeaponData's stats row, so the pickaxe's FFortMeleeWeaponStats
-    // give a building its environment damage). A context with no damage source deals 0, which is what phase 4 saw; the
-    // ability fills it with the weapon, and so does Core here, with the bot's pickaxe.
-    static UClass* DamageEffect = LoadObject<UClass>(nullptr, L"/Game/Abilities/Weapons/Melee/GE_Melee_GenericDamage.GE_Melee_GenericDamage_C");
+    // A weapon's hit as its ability applies it: the weapon's damage effect (GE_Ranged_GenericDamage for a gun, the
+    // pickaxe's GE_Melee_GenericDamage), made on the bot's ability system and applied to the target's. Its execution,
+    // UFortDamageFormulaExecutionCalculation (3.1 0xC49090), takes the base damage from the context's damage source:
+    // FFortGameplayEffectContext::DamageSourceObject (an IFortDamageSourceInterface; AFortWeapon's reads its WeaponData's
+    // stats row: a building takes its environment damage, a pawn its damage with the range's falloff). A context with no
+    // damage source deals 0 (what phase 4 saw); the ability fills it with the weapon, and so does Core here. The damage
+    // then goes the game's own way: the target's health, its damage response (the hit's numbers and direction, the
+    // pawn's Damagers), and for a pawn its death or DBNO with the bot's controller as the instigator.
+    static UClass* MeleeEffect = LoadObject<UClass>(nullptr, L"/Game/Abilities/Weapons/Melee/GE_Melee_GenericDamage.GE_Melee_GenericDamage_C");
+    static UClass* RangedEffect = LoadObject<UClass>(nullptr, L"/Game/Abilities/Weapons/Ranged/GE_Ranged_GenericDamage.GE_Ranged_GenericDamage_C");
     static UFunction* MakeContext = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:MakeEffectContext");
     static UFunction* MakeSpec = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:MakeOutgoingSpec");
     static UFunction* ApplyToTarget = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:BP_ApplyGameplayEffectSpecToTarget");
     static UScriptStruct* FortContext = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.FortGameplayEffectContext");
     static UProperty* DamageSourceProperty = FortContext ? FortContext->FindPropertyByName(FName(L"DamageSourceObject", FNAME_Find)) : nullptr;
-    OutDamage = 0.0f;
+    UClass* DamageEffect = bMelee ? MeleeEffect : RangedEffect;
     AFortPlayerPawnAthena* Pawn = GetPawn();
     UAbilitySystemComponent* Source = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
-    UAbilitySystemComponent* Target = Building->AbilitySystemComponent;
-    if (!Target)
-    {
-        Target = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(reinterpret_cast<AActor*>(Building));
-    }
+    UAbilitySystemComponent* Target = TargetActor ? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(reinterpret_cast<AActor*>(TargetActor)) : nullptr;
     static int32_t Logged = 0;
-    if (!DamageEffect || !MakeContext || !MakeSpec || !ApplyToTarget || !DamageSourceProperty || !Pickaxe || !Source || !Target)
+    if (!DamageEffect || !MakeContext || !MakeSpec || !ApplyToTarget || !DamageSourceProperty || !Weapon || !Source || !Target)
     {
         if (Logged++ < 3)
         {
-            Log::Info(L"Battle Royale bots: {} can't hit {}: effect {}, functions {}, damage source {}, pickaxe {}, the bot's ability system {}, the building's {}", BotName, NameOf(reinterpret_cast<UObject*>(Building)),
-                NameOf(DamageEffect), MakeContext && MakeSpec && ApplyToTarget ? L"found" : L"missing", DamageSourceProperty ? L"found" : L"missing", NameOf(reinterpret_cast<UObject*>(Pickaxe)),
+            Log::Info(L"Battle Royale bots: {} can't hit {}: effect {}, functions {}, damage source {}, weapon {}, the bot's ability system {}, the target's {}", BotName, NameOf(TargetActor),
+                NameOf(DamageEffect), MakeContext && MakeSpec && ApplyToTarget ? L"found" : L"missing", DamageSourceProperty ? L"found" : L"missing", NameOf(reinterpret_cast<UObject*>(Weapon)),
                 NameOf(reinterpret_cast<UObject*>(Source)), NameOf(reinterpret_cast<UObject*>(Target)));
         }
         return false;
     }
-    const float Before = Building->GetHealth();
     Reflection::FParams Context(MakeContext, true);
     if (!Context.Call(reinterpret_cast<UObject*>(Source)))
     {
@@ -2589,7 +2604,7 @@ bool AFortAthenaAIBotController::DamageBuilding(ABuildingSMActor* Building, AFor
     {
         return false;
     }
-    *reinterpret_cast<FWeakObjectPtr*>(ContextData + DamageSourceProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Pickaxe);
+    *reinterpret_cast<FWeakObjectPtr*>(ContextData + DamageSourceProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Weapon);
     Reflection::FParams Spec(MakeSpec, true);
     if (!Spec.Set(L"GameplayEffectClass", DamageEffect) || !Spec.Set(L"Level", 1.0f) || !Spec.CopyStruct(L"Context", ContextHandle) || !Spec.Call(reinterpret_cast<UObject*>(Source)))
     {
@@ -2601,16 +2616,59 @@ bool AFortAthenaAIBotController::DamageBuilding(ABuildingSMActor* Building, AFor
         return false;
     }
     Reflection::FParams Apply(ApplyToTarget, true);
-    if (!Apply.CopyStruct(L"SpecHandle", Handle) || !Apply.Set(L"Target", Target) || !Apply.Call(reinterpret_cast<UObject*>(Source)))
+    return Apply.CopyStruct(L"SpecHandle", Handle) && Apply.Set(L"Target", Target) && Apply.Call(reinterpret_cast<UObject*>(Source));
+#else
+    return false;
+#endif
+}
+
+bool AFortAthenaAIBotController::DamageBuilding(ABuildingSMActor* Building, AFortWeapon* Weapon, float& OutDamage)
+{
+#if WITH_SERVER_CODE
+    OutDamage = 0.0f;
+    const float Before = Building->GetHealth();
+    if (!ApplyWeaponDamageEffect(reinterpret_cast<UObject*>(Building), Weapon, Weapon == EquippedWeapon.Get() && bPickaxeEquipped))
     {
         return false;
     }
     OutDamage = Before - Building->GetHealth();
+    static int32_t Logged = 0;
     if (Logged++ < 6)
     {
-        Log::Info(L"Battle Royale bots: {} hits {} with {}: health {:.0f} -> {:.0f}", BotName, NameOf(reinterpret_cast<UObject*>(Building)), NameOf(static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponData)), Before, Building->GetHealth());
+        Log::Info(L"Battle Royale bots: {} hits {} with {}: health {:.0f} -> {:.0f}", BotName, NameOf(reinterpret_cast<UObject*>(Building)), NameOf(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData)), Before, Building->GetHealth());
     }
     return true;
+#else
+    return false;
+#endif
+}
+
+bool AFortAthenaAIBotController::DamagePawn(AFortPawn* Victim, AFortWeapon* Weapon, int32_t Hits, float& OutDamage)
+{
+#if WITH_SERVER_CODE
+    // A shot that hit, the game's way (ApplyWeaponDamageEffect), once per pellet that hit: a player sees the hit as any
+    // other (its damage, the hit direction), and goes down or out through the game's own death path, with this bot as
+    // the instigator for the kill feed.
+    OutDamage = 0.0f;
+    if (!Victim || !Weapon || Victim->bIsDying)
+    {
+        return false;
+    }
+    const float Before = Victim->GetHealth() + Victim->GetShield();
+    bool bApplied = false;
+    for (int32_t Index = 0; Index < std::max(Hits, 1) && !Victim->bIsDying; ++Index)
+    {
+        bApplied |= ApplyWeaponDamageEffect(reinterpret_cast<UObject*>(Victim), Weapon, bPickaxeEquipped && Weapon == EquippedWeapon.Get());
+    }
+    OutDamage = Before - (Victim->bIsDying ? 0.0f : Victim->GetHealth() + Victim->GetShield());
+    static int32_t Logged = 0;
+    if (bApplied && Logged++ < 8)
+    {
+        Log::Info(L"Battle Royale bots: {} hits {} with {} the game's way ({} x, {:.0f} damage: {:.0f} -> {:.0f}{})", BotName, NameOf(reinterpret_cast<UObject*>(Victim)),
+            NameOf(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData)), std::max(Hits, 1), OutDamage, Before, Victim->bIsDying ? 0.0f : Victim->GetHealth() + Victim->GetShield(),
+            Victim->bIsDying ? L", eliminated" : Victim->bIsDBNO ? L", down" : L"");
+    }
+    return bApplied && OutDamage > 0.0f;
 #else
     return false;
 #endif

@@ -269,6 +269,9 @@ private:
     // from the shooter to the target, and its origin), which the victim's damage cue shows as the hit's direction.
     bool ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee, const FVector* HitFrom = nullptr);
     void EquipPickaxe();
+    // A swing or a shot as players see it: the held weapon's fire ability's montage (UFortGameplayAbility::MontageInfo:
+    // the pickaxe's PlayerMeleeCombo, a gun's fire), replicated as the reload's is.
+    void PlayFireMontage();
     // A montage shown to the players (reload, healing), as an ability's PlayMontageAndWait replicates it: the ability
     // system's RepAnimMontageInfo (and the Athena pawn's copy). bStop stops the current one.
     bool PlayReplicatedMontage(UObject* Montage, float PlayRate, bool bStop = false);
@@ -442,8 +445,9 @@ private:
     // Strafing input eased between directions (StrafeSign is where it heads).
     float StrafeAmount = 0.0f;
     float LastStrafeTime = 0.0f;
-    // Skydiving: diving (looking down along the fall, the skydive's active control) or gliding towards the spot.
+    // Skydiving: diving (the skydive's active control), and the heading it dives along.
     bool bDiving = false;
+    FVector DiveHeading;
 
     // The game's own fire (ActivateWeaponFire): the shot waiting to show whether it spent ammo.
     bool bWeaponFireActive = false;

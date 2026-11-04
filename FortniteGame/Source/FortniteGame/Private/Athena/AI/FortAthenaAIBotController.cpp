@@ -729,7 +729,9 @@ namespace
             AActor* Causer = Damagers[Index].DamageCauser;
             if (AController* CauserController = Causer ? Cast<AController>(reinterpret_cast<UObject*>(Causer)) : nullptr)
             {
-                if (AFortPlayerStateAthena* State = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(CauserController->PlayerState))))
+                // Not its own controller (the storm's damage names the victim's).
+                AFortPlayerStateAthena* State = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(CauserController->PlayerState)));
+                if (State && reinterpret_cast<UObject*>(State) != reinterpret_cast<UObject*>(static_cast<APlayerState*>(Pawn->PlayerState)))
                 {
                     return State;
                 }
@@ -925,15 +927,20 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
     bPickaxeEquipped = false;
     EquippedIndex = -1;
     EquippedWeapon = nullptr;
-    UAthenaPickaxeItemDefinition* Pickaxe = DefaultPickaxe();
-    if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
+    // A skydiving player holds nothing (the pickaxe's equip sound was heard as the bots left the bus): it comes out on
+    // landing.
+    if (!bSkydive)
     {
-        EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
-        bPickaxeEquipped = EquippedWeapon.Get() != nullptr;
-    }
-    if (!WeaponList.empty())
-    {
-        EquipWeapon(BestWeaponIndex());
+        UAthenaPickaxeItemDefinition* Pickaxe = DefaultPickaxe();
+        if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
+        {
+            EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
+            bPickaxeEquipped = EquippedWeapon.Get() != nullptr;
+        }
+        if (!WeaponList.empty())
+        {
+            EquipWeapon(BestWeaponIndex());
+        }
     }
 
     if (bSkydive && Natives::AFortPlayerPawnAthena_BeginSkydiving)
@@ -1150,7 +1157,8 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
     }
     if (Now >= NextPerceptionTime)
     {
-        NextPerceptionTime = Now + 0.25f;
+        // Spread over the frames by the bot's index, so twenty bots in the last circle don't all trace in one frame.
+        NextPerceptionTime = Now + 0.25f + (NextPerceptionTime <= 0.0f ? static_cast<float>(BotIndex % 8) * 0.033f : 0.0f);
         UpdateCurrentTarget(Now);
     }
     if (HealingItem && IsInCombat(Now))
@@ -1305,36 +1313,32 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
     LastKnownPosition = Location;
     const FVector Direction = Direction2D(Location, DropTarget);
     const float Distance = Dist2D(Location, DropTarget);
-    // A player glides to a far spot and dives once it is below them. The skydive's fast fall is its active air control
-    // (UFortMovementComp_CharacterAthena's SkydivingControlParamsActive: terminal velocity 6000 against the passive 1200
-    // on 3.1, its rows Default.SkydivingControlActive.*), which the movement uses (3.1 0x9B6340, 0x9C0110) while the
-    // pawn's input acceleration points down (its Z below -0.1) and along the controller's view (the dot of the two
-    // directions above 0.4). A player's input follows the camera, pitched down; a bot's AddMovementInput gets a downward
-    // part, and its view is pitched down too: AAIController::UpdateControlRotation keeps a focal point's pitch at 0
-    // ("don't pitch view unless looking at another pawn"), but focused on its own pawn the controller looks from the
-    // pawn's eyes to its middle, straight down.
+    // A player dives at their spot. The skydive's fast fall is its active air control (UFortMovementComp_CharacterAthena's
+    // SkydivingControlParamsActive: terminal velocity 6000 and lateral speed 2400 against the passive 1200 and 1200 on
+    // 3.1, rows Default.SkydivingControlActive.*), which the movement uses (3.1 0x9B6340, 0x9C0110) while the pawn's
+    // input acceleration points down (its Z below -0.1) and along the controller's view (the dot of the two directions
+    // above 0.4). A player's input follows the camera, pitched down. A bot looks at its spot (AAIController keeps a
+    // focal point's pitch at 0) and its input is that heading tilted down; above the spot, mostly down with a little of
+    // the heading, which keeps the dot over 0.4.
     const float Height = Location.Z - DropTarget.Z;
-    const bool bWantsDive = Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen && (Distance < 300.0f || Distance < Height * 0.8f);
+    const bool bWantsDive = Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen;
+    if (Distance > 300.0f)
+    {
+        DiveHeading = Direction;
+    }
     if (AAIController* AIController = Controller.Get(); AIController && (bWantsDive != bDiving || Now >= NextShotTime))
     {
         NextShotTime = Now + 1.0f;
-        if (bWantsDive)
+        AIController->SetFocalPoint(FVector(Location.X + DiveHeading.X * 1000.0f, Location.Y + DiveHeading.Y * 1000.0f, Location.Z));
+        if (bWantsDive && !bDiving)
         {
-            AIController->SetFocus(reinterpret_cast<AActor*>(Pawn));
-        }
-        else
-        {
-            AIController->SetFocalPoint(FVector(DropTarget.X, DropTarget.Y, DropTarget.Z));
-        }
-        if (bWantsDive != bDiving && !Pawn->bIsParachuteOpen)
-        {
-            Log::Info(L"Battle Royale bots: {} {} at {:.0f} m up, {:.0f} m from its spot", BotName, bWantsDive ? L"dives" : L"glides", Height / 100.0f, Distance / 100.0f);
+            Log::Info(L"Battle Royale bots: {} dives at {:.0f} m up, {:.0f} m from its spot", BotName, Height / 100.0f, Distance / 100.0f);
         }
         bDiving = bWantsDive;
     }
-    if (bWantsDive)
+    if (bWantsDive && DiveHeading.SizeSquared() > 0.01f)
     {
-        FVector Dive = Distance > 300.0f ? FVector(Direction.X * 0.6f, Direction.Y * 0.6f, -1.0f) : FVector(0.0f, 0.0f, -1.0f);
+        FVector Dive = Distance > 300.0f ? FVector(DiveHeading.X * 0.8f, DiveHeading.Y * 0.8f, -0.6f) : FVector(DiveHeading.X * 0.5f, DiveHeading.Y * 0.5f, -0.87f);
         Dive = Dive * (1.0f / Dive.Size());
         Pawn->AddMovementInput(Dive, 1.0f, true);
     }
@@ -1365,6 +1369,14 @@ void AFortAthenaAIBotController::FreeFalling(float Now)
             NextLogTime = Now + 5.0f;
             bDiving = false;
             bHasFacingYaw = false;
+            if (!EquippedWeapon.Get())
+            {
+                EquipPickaxe();
+                if (!WeaponList.empty())
+                {
+                    EquipWeapon(BestWeaponIndex());
+                }
+            }
             Pawn->ForceNetUpdate();
             Log::Info(L"Battle Royale bots: {} lands at ({:.0f}, {:.0f}, {:.0f}), {:.0f} m from its spot", BotName, Location.X, Location.Y, Location.Z, Distance / 100.0f);
         }
@@ -1442,7 +1454,8 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
     {
         CurrentTarget = NewTarget;
         TargetAcquiredTime = Now;
-        if (NewTarget)
+        static int32_t LoggedSpots = 0;
+        if (NewTarget && LoggedSpots++ < 100)
         {
             Log::Info(L"Battle Royale bots: {} spots {} {:.0f} m away", BotName, NameOf(reinterpret_cast<AFortPlayerStateAthena*>(static_cast<APlayerState*>(NewTarget->PlayerState)) ?
                 reinterpret_cast<UObject*>(static_cast<APlayerState*>(NewTarget->PlayerState)) : reinterpret_cast<UObject*>(NewTarget)), (LocationOf(NewTarget) - Location).Size() / 100.0f);
@@ -1817,6 +1830,7 @@ void AFortAthenaAIBotController::FireShot(AFortPawn* Target, float Distance)
     {
         return;
     }
+    PlayFireMontage();
     const FFortAthenaAIBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
 
     // The game's own shot where its fire works for the weapon (or isn't known yet): its ability aims along the
@@ -2106,13 +2120,9 @@ bool AFortAthenaAIBotController::RangeAttack(float Now)
     const FVector TargetLocation = LocationOf(Target);
     const float Distance = (TargetLocation - Location).Size();
     const bool bArmed = HasUsableWeapon();
-    if (!bArmed && Distance > 400.0f)
-    {
-        return false;
-    }
-    // Unarmed with a weapon to grab nearby, a player goes for the weapon unless the enemy is on top of it or hitting
-    // it (bots that landed together otherwise all brawled with their pickaxes).
-    if (!bArmed && Distance > 200.0f && !Manager->LastBotAttackerOf(reinterpret_cast<AFortPawn*>(Pawn)) && LootTarget.Get() && Dist2D(LocationOf(LootTarget.Get()), Location) < 2000.0f)
+    // Unarmed, a player loots first: they only swing their pickaxe back at someone hitting them right next to them
+    // (bots that landed together brawled with their pickaxes, and half a lobby went out that way in the first zone).
+    if (!bArmed && (Distance > 300.0f || Now - LastHurtTime > 3.0f))
     {
         return false;
     }
@@ -2672,13 +2682,9 @@ void AFortAthenaAIBotController::SteerAroundObstacles(FVector& Direction, float 
     {
         return;
     }
-    // A closed door: opened as a player opens it (the floor loot of 3.0's houses is behind them).
-    if (ABuildingWall* Wall = Obstacle ? Cast<ABuildingWall>(Obstacle) : nullptr; Wall && Wall->IsDoor() && !Wall->bDoorCollisionDisabled)
-    {
-        Wall->OpenDoor();
-        ++DoorsOpened;
-        return;
-    }
+    // Closed doors are left alone: Core's opening (bDoorOpen and its collision set by hand) left doors players couldn't
+    // open again and without collision (#233). With the navmesh a bot walks around them; the door's own interaction
+    // needs a player controller.
     static int32_t LoggedObstacles = 0;
     if (Obstacle && LoggedObstacles++ < 12)
     {
@@ -2952,7 +2958,43 @@ bool AFortAthenaAIBotController::SwingAtBuilding(ABuildingSMActor* Building, flo
 {
     OutDamage = 0.0f;
     AFortWeapon* Pickaxe = bPickaxeEquipped ? EquippedWeapon.Get() : nullptr;
+    if (Pickaxe)
+    {
+        PlayFireMontage();
+    }
     return Pickaxe && DamageBuilding(Building, Pickaxe, OutDamage);
+}
+
+void AFortAthenaAIBotController::PlayFireMontage()
+{
+#if WITH_SERVER_CODE
+    AFortWeapon* Weapon = EquippedWeapon.Get();
+    UFortWeaponItemDefinition* Definition = Weapon ? static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData) : nullptr;
+    static std::map<UFortWeaponItemDefinition*, std::pair<UObject*, float>> Montages;
+    if (!Definition)
+    {
+        return;
+    }
+    auto Found = Montages.find(Definition);
+    if (Found == Montages.end())
+    {
+        UProperty* AbilityProperty = reinterpret_cast<UObject*>(Definition)->GetClass()->FindPropertyByName(FName(L"PrimaryFireAbility", FNAME_Find));
+        UClass* AbilityClass = AbilityProperty ? reinterpret_cast<TAssetSubclassOf<UObject>*>(reinterpret_cast<uint8_t*>(Definition) + AbilityProperty->GetOffset_ForInternal())->LoadSynchronous() : nullptr;
+        float PlayRate = 1.0f;
+        // UFortGameplayAbility::MontageInfo (the melee combo plays it with PlayMontageInfoAndWaitForTrigger).
+        UObject* Montage = AbilityClass ? ObjectOf(AbilityClass->GetDefaultObject(), L"MontageInfo", L"MontageToPlay", &PlayRate, L"AnimPlayRate") : nullptr;
+        static int32_t Logged = 0;
+        if (Logged++ < 8)
+        {
+            Log::Info(L"Battle Royale bots: {}'s fire montage: {} ({})", NameOf(Definition), NameOf(Montage), NameOf(AbilityClass));
+        }
+        Found = Montages.emplace(Definition, std::make_pair(Montage, PlayRate > 0.0f ? PlayRate : 1.0f)).first;
+    }
+    if (Found->second.first)
+    {
+        PlayReplicatedMontage(Found->second.first, Found->second.second);
+    }
+#endif
 }
 
 bool AFortAthenaAIBotController::ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee, const FVector* HitFrom)
@@ -3839,7 +3881,12 @@ void AFortAthenaAIBotController::DropItem(UFortItemDefinition* Definition, int32
     FFortItemEntry::Construct(Entry, Definition, Count, 0);
     Entry->LoadedAmmo = LoadedAmmo;
     const FVector Spot(Location.X + RandomRange(-80.0f, 80.0f), Location.Y + RandomRange(-80.0f, 80.0f), Location.Z);
-    AFortPickup::CreatePickup(World, *Entry, &Spot);
+    // Tossed from the pawn as a player's drop is (AFortPickup::TossPickup with the pawn as its owner): an untossed
+    // pickup never took clients' auto-pickup.
+    if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &Location))
+    {
+        Pickup->TossPickup(Spot, reinterpret_cast<AFortPawn*>(Pawn), 0);
+    }
     EntryStruct->DestroyStruct(Entry);
 #endif
 }

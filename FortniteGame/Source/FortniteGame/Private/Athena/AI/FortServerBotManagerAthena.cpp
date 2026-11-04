@@ -421,6 +421,7 @@ void UFortServerBotManagerAthena::Tick()
     if (Phase == EAthenaGamePhase::GetWarmup())
     {
         TickWarmup(Now);
+        UpdateCounts();
     }
 
     if (bHasNavigation)
@@ -1080,11 +1081,17 @@ void UFortServerBotManagerAthena::UpdateCounts()
     // mode only counts its alive players, so the bots are added to its numbers.
     AFortGameModeAthena* Athena = GetGameMode();
     AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
-    if (!GameState || !bAircraftStarted || BotsAtStart == 0)
+    if (!GameState || (bAircraftStarted && BotsAtStart == 0) || (!bAircraftStarted && PlayerBots.empty()))
     {
         return;
     }
+    // On the warmup island too: its player count (the game state's, which the game mode counts for its players) has
+    // the bots in it, as 21.40's AddToAliveBots counts them.
     const int32_t PlayersLeft = Athena->AlivePlayers.Num() + GetAliveBotCount();
+    if (!bAircraftStarted && AFortGameStateAthena::HasTotalPlayers() && GameState->TotalPlayers != PlayersLeft)
+    {
+        GameState->TotalPlayers = PlayersLeft;
+    }
     const int32_t TeamsLeft = static_cast<int32_t>(AliveTeams(true).size());
     if (GameState->PlayersLeft != PlayersLeft || GameState->TeamsLeft != TeamsLeft)
     {

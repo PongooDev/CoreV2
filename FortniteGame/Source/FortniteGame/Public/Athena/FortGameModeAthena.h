@@ -2,6 +2,11 @@
 
 #include "FortGameModeZone.h"
 
+#include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
+
 class AController;
 class AFortSafeZoneIndicator;
 class AActor;
@@ -63,6 +68,10 @@ public:
     // The playlist's team size and number of teams (the reservation beacon's NumPlayersPerTeam and NumTeams; 0 without one).
     int32_t GetPlayersPerTeam();
     int32_t GetNumTeams();
+    // The players the match has places for, by team: each reservation's players (the reservation beacon's, the assigned
+    // parties' and the late ones Core reserved) with their EFortTeam (HumanPvP_Team1 for beacon team 0) and account id,
+    // those still loading in included. Empty without a beacon.
+    std::vector<std::pair<uint8_t, std::wstring>> GetTeamReservations();
     static bool HasWarmupLength() { return Member_WarmupCountdownDuration.IsAvailable() && Member_WarmupEarlyCountdownDuration.IsAvailable(); }
 
     // Where a Battle Royale server starts: the Battle Royale zone theme's map and playlist

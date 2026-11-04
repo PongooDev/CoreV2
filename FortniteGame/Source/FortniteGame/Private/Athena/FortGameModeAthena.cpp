@@ -697,8 +697,37 @@ namespace
         return Ids;
     }
 
-    // The answer's "bots": {count, level, health, shield, quests, fights}, or null when the admin panel's "Force player AIs" is
-    // off (Core-Backend's bots block). False when it isn't there or is null.
+    // A JSON object's array of strings Key: ["<accountId>", ...] (none when it isn't there).
+    std::vector<std::wstring> JsonStringArray(const std::string& Json, const char* Key)
+    {
+        std::vector<std::wstring> Values;
+        const std::string Quoted = std::format("\"{}\"", Key);
+        const size_t Found = Json.find(Quoted);
+        const size_t Open = Found == std::string::npos ? std::string::npos : Json.find_first_not_of(" \t\r\n:", Found + Quoted.size());
+        if (Open == std::string::npos || Json[Open] != '[')
+        {
+            return Values;
+        }
+        for (size_t Index = Open + 1; Index < Json.size() && Json[Index] != ']'; ++Index)
+        {
+            if (Json[Index] != '"')
+            {
+                continue;
+            }
+            const size_t End = Json.find('"', Index + 1);
+            if (End == std::string::npos)
+            {
+                break;
+            }
+            Values.push_back(WidenId(Json.substr(Index + 1, End - Index - 1)));
+            Index = End;
+        }
+        return Values;
+    }
+
+    // The answer's "bots": {count, level, health, shield, quests, fights, teams, noFill}, or null when the admin panel's
+    // "Force player AIs" and "Fill players' teams with bots" are both off (Core-Backend's bots block). False when it isn't
+    // there or is null.
     bool JsonBots(const std::string& Json, FCoreAthenaBotSettings& OutSettings)
     {
         const size_t Key = Json.find("\"bots\"");
@@ -719,7 +748,11 @@ namespace
         // A backend from before the setting sends none: the old 30%.
         const std::string Fights = BackendRequest::JsonField(Bots, "fights");
         OutSettings.BotFightChance = Fights.empty() ? 30 : std::clamp(std::atoi(Fights.c_str()), 0, 100);
-        return OutSettings.Count > 0;
+        // "Fill players' teams with bots", and the players whose party plays without fill (a backend from before the
+        // setting sends neither: off).
+        OutSettings.bFillPlayerTeams = BackendRequest::JsonField(Bots, "teams") == "true";
+        OutSettings.NoFillAccounts = JsonStringArray(Bots, "noFill");
+        return OutSettings.Count > 0 || OutSettings.bFillPlayerTeams;
     }
 
     void ReportWarmup(const std::shared_ptr<FWarmupWatch>& Watch, const std::wstring& Phase, const std::vector<std::wstring>& AccountIds, float SecondsLeft)
@@ -1206,6 +1239,35 @@ int32_t AFortGameModeAthena::GetNumTeams()
 {
     UPartyBeaconState* State = BeaconStateOf(this);
     return State && State->NumTeams > 0 ? static_cast<int32_t>(State->NumTeams) : 0;
+}
+
+std::vector<std::pair<uint8_t, std::wstring>> AFortGameModeAthena::GetTeamReservations()
+{
+    std::vector<std::pair<uint8_t, std::wstring>> Players;
+    UPartyBeaconState* State = UPartyBeaconState::IsReflected() ? BeaconStateOf(this) : nullptr;
+    if (!State)
+    {
+        return Players;
+    }
+    const int32_t FirstTeam = EFortTeam::GetHumanPvP_Team1();
+    const TStructArray<FPartyReservation>& Reservations = State->GetMember_Reservations();
+    for (int32_t Index = 0; Index < Reservations.Num(); ++Index)
+    {
+        const FPartyReservation& Reservation = Reservations[Index];
+        if (Reservation.TeamNum < 0 || FirstTeam + Reservation.TeamNum > 0xFF)
+        {
+            continue;
+        }
+        const TStructArray<FPlayerReservation>& Members = Reservation.GetMember_PartyMembers();
+        for (int32_t Member = 0; Member < Members.Num(); ++Member)
+        {
+            if (Members[Member].UniqueId.IsValid())
+            {
+                Players.emplace_back(static_cast<uint8_t>(FirstTeam + Reservation.TeamNum), Members[Member].UniqueId.ToString().ToStdString());
+            }
+        }
+    }
+    return Players;
 }
 
 namespace

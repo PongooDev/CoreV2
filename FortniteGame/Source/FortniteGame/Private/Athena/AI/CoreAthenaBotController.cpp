@@ -1312,6 +1312,7 @@ void FCoreAthenaBotController::EnterAircraft(float InJumpTime, float InLatestJum
         Log::Info(L"Battle Royale bots: {} leaves the warmup island ({} new pawns there, {} glides, {} fights)", BotName, WarmupDeaths, WarmupGlides, WarmupBrawls);
     }
     bHasLandingSpot = false;
+    bFollowingDrop = false;
     State = ECoreAthenaBotState::InAircraft;
     JumpTime = InJumpTime;
     LatestJumpTime = InLatestJumpTime;
@@ -1722,6 +1723,12 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
         TakeStormDamage(Now);
         return;
     }
+    if (DBNOStartedAt > 0.0f)
+    {
+        // Up again without a bot's revive: a player teammate revived it (a bot on a player's team).
+        Log::Info(L"Battle Royale bots: {} is back up (revived by a player), {:.0f} health", BotName, Pawn->GetHealth());
+        OnRevived();
+    }
     // A boogie bomb's dance: the bot neither moves nor shoots until it ends (the ability's own effect stops the pawn).
     if (const bool bStunned = IsDanceStunned(); bStunned || bDanceStunned)
     {
@@ -1774,7 +1781,7 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     const wchar_t* Intent = L"attack";
     const auto DecisionStarted = std::chrono::steady_clock::now();
     // Mid-revive, the bot keeps at it unless an enemy is close or shooting at it.
-    if (ReviveDoneAt > 0.0f && ReviveTarget && !IsUnderThreat(Now) && ReviveTeammate(Now))
+    if (ReviveDoneAt > 0.0f && (ReviveTarget || RevivePlayer.Get()) && !IsUnderThreat(Now) && ReviveTeammate(Now))
     {
         StopFiring();
         Intent = L"revive";
@@ -3426,7 +3433,8 @@ bool FCoreAthenaBotController::Investigate(float Now)
     // to meet it by chance (WillEngageBot). Once the player is in sight, RangeAttack fights them.
     AFortPlayerPawnAthena* Pawn = GetPawn();
     const int32_t Armed = static_cast<int32_t>(std::count_if(WeaponList.begin(), WeaponList.end(), [this](const FCoreAthenaBotWeapon& Weapon) { return HasAmmoFor(Weapon); }));
-    if (!Pawn || Armed < 2)
+    // A bot on a player's team stays with its players: it fights what comes to them rather than going hunting.
+    if (!Pawn || Armed < 2 || !Manager->PlayerTeammatesOf(this).empty())
     {
         HuntTarget = nullptr;
         return false;
@@ -3494,6 +3502,12 @@ bool FCoreAthenaBotController::SelectNextPOI(float Now)
     AFortPlayerPawnAthena* Pawn = GetPawn();
     if (!Pawn)
     {
+        return false;
+    }
+    // A bot on a player's team goes where its players go (StayWithTeam): the next spot is theirs to choose.
+    if (!Manager->PlayerTeammatesOf(this).empty())
+    {
+        ClearNextDestination();
         return false;
     }
     const FVector Location = LocationOf(Pawn);
@@ -4731,7 +4745,9 @@ bool FCoreAthenaBotController::CanGoDBNO() const
             return true;
         }
     }
-    return false;
+    // A bot on a player's team: its player teammates standing count too.
+    const std::vector<AFortPlayerPawnAthena*> Players = Manager->PlayerTeammatesOf(this);
+    return std::any_of(Players.begin(), Players.end(), [](AFortPlayerPawnAthena* Player) { return !Player->bIsDBNO; });
 }
 
 namespace
@@ -4804,6 +4820,7 @@ void FCoreAthenaBotController::EnterDBNO(AFortPlayerStateAthena* InDowner, float
     StopMoving();
     EmoteUntil = 0.0f;
     ReviveTarget = nullptr;
+    RevivePlayer = nullptr;
     ReviveDoneAt = 0.0f;
     Pawn->bIsDBNO = true;
     static const float InitialHealth = AthenaGameDataValue(L"Default.DBNO.InitialHealth", 100.0f);
@@ -4856,21 +4873,35 @@ void FCoreAthenaBotController::Downed(float Now)
     StopFiring();
     // The team all down: eliminated (the last one knocked is everyone's finisher).
     bool bTeammateUp = false;
-    FCoreAthenaBotController* Nearest = nullptr;
+    bool bHasNearest = false;
+    FVector Nearest;
     float NearestDistance = 1e9f;
     const FVector Location = LocationOf(Pawn);
-    for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
+    const auto Consider = [&](const FVector& Other)
     {
-        if (Teammate->GetState() != ECoreAthenaBotState::Landed || Teammate->IsDBNO())
-        {
-            continue;
-        }
         bTeammateUp = true;
-        const float Distance = Dist2D(LocationOf(Teammate->GetPawn()), Location);
+        const float Distance = Dist2D(Other, Location);
         if (Distance < NearestDistance)
         {
             NearestDistance = Distance;
-            Nearest = Teammate;
+            Nearest = Other;
+            bHasNearest = true;
+        }
+    };
+    for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
+    {
+        if (Teammate->GetState() == ECoreAthenaBotState::Landed && !Teammate->IsDBNO())
+        {
+            Consider(LocationOf(Teammate->GetPawn()));
+        }
+    }
+    // A bot on a player's team: a player teammate standing is one to crawl to (their revive is the game's own, through
+    // the downed pawn's DBNO interaction; Tick notices the bot is up).
+    for (AFortPlayerPawnAthena* Player : Manager->PlayerTeammatesOf(this))
+    {
+        if (!Player->bIsDBNO)
+        {
+            Consider(LocationOf(Player));
         }
     }
     AFortPlayerStateAthena* Finisher = Downer.Get();
@@ -4914,9 +4945,9 @@ void FCoreAthenaBotController::Downed(float Now)
         return;
     }
     // Crawling to the nearest teammate standing, who comes to revive it.
-    if (Nearest && NearestDistance > 250.0f)
+    if (bHasNearest && NearestDistance > 250.0f)
     {
-        MoveTowards(LocationOf(Nearest->GetPawn()), Now, 200.0f);
+        MoveTowards(Nearest, Now, 200.0f);
     }
     else
     {
@@ -4936,53 +4967,72 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
     {
         return false;
     }
+    // The downed teammate: a bot (ReviveTarget), or a player (RevivePlayer) for a bot on a player's team.
     FCoreAthenaBotController* Target = ReviveTarget;
+    AFortPlayerPawnAthena* PlayerTarget = Target ? nullptr : RevivePlayer.Get();
     // A revive is safe: no enemy in sight and nobody shooting at the bot, and neither of them in the storm (the bot
     // goes for the circle first; the downed teammate crawls after it).
     FVector StormCenter;
     float StormRadius = 0.0f;
     const bool bHasStorm = Manager->GetCurrentSafeZone(StormCenter, StormRadius);
-    const auto InStorm = [&](FCoreAthenaBotController* Bot)
+    const auto InStorm = [&](AFortPlayerPawnAthena* Someone)
     {
-        return bHasStorm && Bot && Bot->GetPawn() && Dist2D(LocationOf(Bot->GetPawn()), StormCenter) > StormRadius;
+        return bHasStorm && Someone && Dist2D(LocationOf(Someone), StormCenter) > StormRadius;
     };
-    const bool bThreat = IsUnderThreat(Now) || (CurrentTarget.Get() && bHasVisualLineOfSightOnTarget) || InStorm(this) || InStorm(Target);
-    const bool bTargetValid = Target && Target->IsAlive() && Target->IsDBNO() && Target->GetPawn();
+    const auto TargetPawn = [&]() { return Target ? Target->GetPawn() : PlayerTarget; };
+    const auto TargetName = [&]() { return Target ? Target->GetBotName() : PlayerTarget ? NameOf(PlayerTarget) : std::wstring(); };
+    const bool bThreat = IsUnderThreat(Now) || (CurrentTarget.Get() && bHasVisualLineOfSightOnTarget) || InStorm(Pawn) || InStorm(TargetPawn());
+    const bool bTargetValid = Target ? Target->IsAlive() && Target->IsDBNO() && Target->GetPawn()
+        : PlayerTarget && PlayerTarget->bIsDBNO && !PlayerTarget->bIsDying && !PlayerTarget->IsPendingKill();
     if (!bTargetValid || bThreat)
     {
-        if (Target && ReviveDoneAt > 0.0f)
+        if ((Target || PlayerTarget) && ReviveDoneAt > 0.0f)
         {
-            Log::Info(L"Battle Royale bots: {} stops reviving {}", BotName, Target->GetBotName());
+            Log::Info(L"Battle Royale bots: {} stops reviving {}", BotName, TargetName());
         }
         ReviveTarget = nullptr;
+        RevivePlayer = nullptr;
         ReviveDoneAt = 0.0f;
         Target = nullptr;
+        PlayerTarget = nullptr;
         if (bThreat)
         {
             return false;
         }
     }
     const FVector Location = LocationOf(Pawn);
-    if (!Target)
+    if (!Target && !PlayerTarget)
     {
         float Best = 6000.0f;
         for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
         {
-            const float Distance = Teammate->IsDBNO() && Teammate->GetPawn() && !InStorm(Teammate) ? Dist2D(LocationOf(Teammate->GetPawn()), Location) : 1e9f;
+            const float Distance = Teammate->IsDBNO() && Teammate->GetPawn() && !InStorm(Teammate->GetPawn()) ? Dist2D(LocationOf(Teammate->GetPawn()), Location) : 1e9f;
             if (Distance < Best)
             {
                 Best = Distance;
                 Target = Teammate;
             }
         }
-        if (!Target)
+        // A bot on a player's team revives its downed player teammates too.
+        for (AFortPlayerPawnAthena* Player : Manager->PlayerTeammatesOf(this))
+        {
+            const float Distance = Player->bIsDBNO && !InStorm(Player) ? Dist2D(LocationOf(Player), Location) : 1e9f;
+            if (Distance < Best)
+            {
+                Best = Distance;
+                Target = nullptr;
+                PlayerTarget = Player;
+            }
+        }
+        if (!Target && !PlayerTarget)
         {
             return false;
         }
         ReviveTarget = Target;
+        RevivePlayer = PlayerTarget;
         ReviveDoneAt = 0.0f;
     }
-    AFortPlayerPawnAthena* Downed = Target->GetPawn();
+    AFortPlayerPawnAthena* Downed = TargetPawn();
     const FVector DownedLocation = LocationOf(Downed);
     if (Dist2D(DownedLocation, Location) > 180.0f)
     {
@@ -4996,7 +5046,7 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
     {
         const float ReviveTime = NumberOf(reinterpret_cast<UObject*>(Downed), L"ReviveFromDBNOTime", 10.0f);
         ReviveDoneAt = Now + std::max(ReviveTime, 1.0f);
-        Log::Info(L"Battle Royale bots: {} revives {} ({:.0f} s)", BotName, Target->GetBotName(), ReviveTime);
+        Log::Info(L"Battle Royale bots: {} revives {} ({:.0f} s)", BotName, TargetName(), ReviveTime);
         return true;
     }
     if (Now < ReviveDoneAt)
@@ -5004,6 +5054,7 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
         return true;
     }
     ReviveTarget = nullptr;
+    RevivePlayer = nullptr;
     ReviveDoneAt = 0.0f;
     static UFunction* Revive = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawn:ReviveFromDBNO");
     Reflection::FParams Params(Revive, true);
@@ -5034,9 +5085,12 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
             Natives::UAbilitySystemComponent_CancelAbilities(AbilitySystem, &Tags, nullptr, nullptr);
         }
     }
-    Target->OnRevived();
+    if (Target)
+    {
+        Target->OnRevived();
+    }
     ++Revives;
-    Log::Info(L"Battle Royale bots: {} revived {} ({}), {:.0f} health", BotName, Target->GetBotName(), bNative ? L"the game's ReviveFromDBNO" : L"Core's, the game's refused", Downed->GetHealth());
+    Log::Info(L"Battle Royale bots: {} revived {} ({}), {:.0f} health", BotName, TargetName(), bNative ? L"the game's ReviveFromDBNO" : L"Core's, the game's refused", Downed->GetHealth());
     return true;
 #else
     return false;
@@ -5064,7 +5118,22 @@ bool FCoreAthenaBotController::StayWithTeam(float Now)
     const FVector Location = LocationOf(Pawn);
     float Best = 1e9f;
     FVector TeammateLocation;
-    for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
+    // A bot on a player's team follows its players: the nearest one standing on the ground, before any bot teammate.
+    for (AFortPlayerPawnAthena* Player : Manager->PlayerTeammatesOf(this))
+    {
+        if (Player->bIsDBNO || Player->bIsSkydiving || Player->bIsParachuteOpen)
+        {
+            continue;
+        }
+        const FVector Other = LocationOf(Player);
+        const float Distance = Dist2D(Other, Location);
+        if (Distance < Best)
+        {
+            Best = Distance;
+            TeammateLocation = Other;
+        }
+    }
+    for (FCoreAthenaBotController* Teammate : Best < 1e9f ? std::vector<FCoreAthenaBotController*>() : Manager->TeammatesOf(this))
     {
         if (Teammate->GetState() != ECoreAthenaBotState::Landed || Teammate->IsDBNO() || !Teammate->GetPawn())
         {
@@ -5407,6 +5476,33 @@ void FCoreAthenaBotController::SetLandingSpot(const FVector& Spot, float Radius,
     LandingSpot = Spot;
     LandingRadius = Radius;
     JumpTime = InJumpTime;
+}
+
+void FCoreAthenaBotController::FollowTeammateDrop(const FVector& Where, bool bLanded, float Now)
+{
+    // Teammates drop together: on the bus, the bot jumps a moment after its player, aiming for the weapons around where
+    // they are (JumpOffBus); falling, it heads for them, a few metres to its own side so the team doesn't land in a pile.
+    const float Angle = static_cast<float>(BotIndex % 8) * 0.785398f;
+    const FVector Beside(Where.X + std::cos(Angle) * 400.0f, Where.Y + std::sin(Angle) * 400.0f, Where.Z);
+    if (State == ECoreAthenaBotState::InAircraft)
+    {
+        if (!bFollowingDrop)
+        {
+            bFollowingDrop = true;
+            bHasLandingSpot = true;
+            LandingSpot = Beside;
+            LandingRadius = 2500.0f;
+            JumpTime = std::min(JumpTime, Now + RandomRange(0.3f, 1.5f));
+            Log::Info(L"Battle Royale bots: {} jumps after its player teammate", BotName);
+        }
+        return;
+    }
+    if (State == ECoreAthenaBotState::Skydiving)
+    {
+        bFollowingDrop = true;
+        // Its height is the ground's once the player is down; until then the spot keeps the height it had.
+        DropTarget = FVector(Beside.X, Beside.Y, bLanded ? Where.Z : DropTarget.Z);
+    }
 }
 
 void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* KillerState)

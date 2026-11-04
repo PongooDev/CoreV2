@@ -159,6 +159,9 @@ public:
     AFortPlayerPawnAthena* GetPawn() const;
     AFortPlayerStateAthena* GetPlayerState() const;
     uint8_t GetTeam() const { return Team; }
+    // A bot in an empty place on a player's team ("Fill players' teams with bots"), not on a team of its own.
+    bool IsOnPlayersTeam() const { return bOnPlayersTeam; }
+    void SetOnPlayersTeam(bool bInOnPlayersTeam) { bOnPlayersTeam = bInOnPlayersTeam; }
     int32_t GetBotIndex() const { return BotIndex; }
     ECoreAthenaBotState GetState() const { return State; }
     bool IsAlive() const { return State != ECoreAthenaBotState::Dead; }
@@ -191,6 +194,10 @@ public:
     // loot-rich spot near the bus's path) and when it jumps to get there.
     void SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime);
     bool HasLandingSpot() const { return bHasLandingSpot; }
+    // A bot on a player's team: its player teammate left the bus (a pawn at Where): the bot jumps after them and heads for
+    // them while it falls (bLanded: they are on the ground).
+    void FollowTeammateDrop(const FVector& Where, bool bLanded, float Now);
+    bool IsFollowingTeammateDrop() const { return bFollowingDrop; }
 
     // ABuildingSMActor::AttemptSpawnResources with the bot's pawn as instigator: the materials its hit gave (a player's
     // go into the inventory; the bot keeps them, and drops them on death as a player does).
@@ -359,7 +366,7 @@ private:
     // system's RepAnimMontageInfo (and the Athena pawn's copy). bStop stops the current one.
     bool PlayReplicatedMontage(UObject* Montage, float PlayRate, bool bStop = false);
     // Squads: a downed bot's tick (bleeding, crawling to a teammate, eliminated with its team), the revive of a downed
-    // teammate, and staying near the team.
+    // teammate, and staying near the team. A bot on a player's team counts its player teammates too.
     void Downed(float Now);
     bool ReviveTeammate(float Now);
     bool StayWithTeam(float Now);
@@ -394,6 +401,9 @@ private:
     TWeakObjectPtr<AFortPlayerPawnAthena> PlayerBotPawn;
     int32_t BotIndex = 0;
     uint8_t Team = 0;
+    bool bOnPlayersTeam = false;
+    // Following a player teammate's jump from the bus (FollowTeammateDrop).
+    bool bFollowingDrop = false;
     std::wstring BotName;
     ECoreAthenaBotState State = ECoreAthenaBotState::Warmup;
 
@@ -443,6 +453,8 @@ private:
     float NextBleedTime = 0.0f;
     float LastDBNOHealth = 0.0f;
     FCoreAthenaBotController* ReviveTarget = nullptr;
+    // A downed player teammate the bot is reviving (a bot on a player's team), instead of ReviveTarget.
+    TWeakObjectPtr<AFortPlayerPawnAthena> RevivePlayer;
     float ReviveDoneAt = 0.0f;
     int32_t Revives = 0;
     int32_t TimesDowned = 0;

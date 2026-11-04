@@ -215,6 +215,14 @@ bool AFortPlayerControllerAthena::IsTeamOut()
     {
         return false;
     }
+    // Battle Royale's player bots in the team's empty places ("Fill players' teams with bots", CoreV2 #233) keep it in:
+    // its place is the bots' manager's to give once the last of them is out (FCoreAthenaBotManager::RemoveFromAliveBots).
+    const FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get();
+    const AFortPlayerStateAthena* AthenaState = AthenaStateOf(this);
+    if (BotManager && AthenaState && BotManager->HasPlayersTeamBotsLeft(static_cast<uint8_t>(AthenaState->TeamIndex)))
+    {
+        return false;
+    }
     const TArray<AFortPlayerStateAthena*>& Members = TeamMembers;
     for (int32_t MemberIndex = 0; MemberIndex < Members.Num(); ++MemberIndex)
     {

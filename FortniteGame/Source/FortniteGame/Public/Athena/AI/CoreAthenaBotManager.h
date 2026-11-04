@@ -18,15 +18,17 @@ class AController;
 class AFortGameModeAthena;
 class AFortPickup;
 class AFortPlayerControllerAthena;
+class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class APawn;
 class UObject;
 struct FGameplayTagContainer;
 
 // The admin panel's player bot settings (Core-Backend's bots block, sent with the warmup answer: {count, level, health,
-// shield, quests, fights}, or null when "Force player AIs" is off).
+// shield, quests, fights, teams, noFill}, or null when "Force player AIs" and "Fill players' teams with bots" are off).
 struct FCoreAthenaBotSettings
 {
+    // "Force player AIs": the bots on teams of their own (0 with the toggle off).
     int32_t Count = 0;
     int32_t Level = 5;
     float StartingHealth = 100.0f;
@@ -34,6 +36,11 @@ struct FCoreAthenaBotSettings
     bool bEliminationsCountForQuests = true;
     // "Bot vs bot fight chance (%)": how often a bot takes on another bot it sees (doubled, up to 100, late in a match).
     int32_t BotFightChance = 30;
+    // "Fill players' teams with bots" (separate from Force player AIs): in duos and squads, the empty places on a team of
+    // players whose party fills are bots'. NoFillAccounts: the match's players whose party doesn't (the party leader's
+    // matchmaking ticket's player.option.fillTeam=false, Squad Fill on No Fill), whose teams get none.
+    bool bFillPlayerTeams = false;
+    std::vector<std::wstring> NoFillAccounts;
 };
 
 // A weapon, ammo or healing item pickup lying on the floor, as the bots' loot search sees it (refreshed every few
@@ -72,7 +79,9 @@ struct FCoreAthenaBotLandingSpot
 //
 // Bots only exist on builds without Epic's own (every build before 8.30, which has AFortAthenaAIBotController): a build
 // with native player bots never uses this backport (HasNativePlayerBots). They're off unless the admin panel's "Force
-// player AIs" is on.
+// player AIs" (bots on teams of their own) or "Fill players' teams with bots" (bots in the empty places of players' teams
+// in duos and squads, PlayerTeamSlots) is on. The second is for every build: on one with native player bots it is the
+// native system's to do, which Core doesn't drive yet, so this backport leaves it alone there too.
 class FCoreAthenaBotManager
 {
 public:
@@ -96,6 +105,11 @@ public:
     // The playlist's team size (1 solo, 2 duos, 4 squads), and a bot's teammates still in the match.
     int32_t GetTeamSize() const { return std::max(PlaylistTeamSize, 1); }
     std::vector<FCoreAthenaBotController*> TeammatesOf(const FCoreAthenaBotController* Bot) const;
+    // A bot's teammates who are players (a bot on a player's team, "Fill players' teams with bots"): their pawns, of the
+    // ones still in the match.
+    std::vector<AFortPlayerPawnAthena*> PlayerTeammatesOf(const FCoreAthenaBotController* Bot) const;
+    // Whether a bot in a player's team's empty places is still in the match on Team (the team isn't out while one is).
+    bool HasPlayersTeamBotsLeft(uint8_t Team) const;
     // The bot whose pawn or player state this is, or null.
     FCoreAthenaBotController* FindBot(const UObject* PawnOrPlayerState) const;
     static bool IsBotPawn(const UObject* Object);
@@ -171,14 +185,25 @@ private:
 
     void TickWarmup(float Now);
     void StartBotMatchIfAsked();
-    int32_t WantedBotCount() const;
+    // The bots on teams of their own (Force player AIs), with PlayerTeamBots places on players' teams taken.
+    int32_t WantedBotCount(int32_t PlayerTeamBots) const;
+    // "Fill players' teams with bots": each player's team (duos and squads) whose players' parties all fill, and the
+    // places on it no player has (the players on it and those its reservations still bring), for bots.
+    std::map<uint8_t, int32_t> PlayerTeamSlots() const;
+    // The bots alive on players' teams (bPlayersTeams) or on teams of their own.
+    int32_t CountAliveBots(bool bPlayersTeams) const;
+    // After the bus: the players' teams' bots jump with their players and land by them; and each takes its team's squad.
+    void UpdatePlayerTeamBots(float Now);
+    // A player's team is out: its players' place (the game's SetTeamPlace on one of them, else their player states).
+    void SetPlayersTeamPlace(uint8_t Team, int32_t Place);
     void ReadPlaylistTeams();
     int32_t MatchCapacity() const;
-    void SpawnBots(int32_t Wanted, float Now);
+    // One bot more, a player's team first (TeamSlots), else on a team of its own while fewer than Wanted are.
+    bool SpawnNextBot(int32_t Wanted, const std::map<uint8_t, int32_t>& TeamSlots, float Now);
     // A player (not a bot) has a pawn on the island.
     bool HasHumanSpawned() const;
-    void RemoveSurplusBots(int32_t Wanted);
-    bool RegisterBot(float Now);
+    void RemoveSurplusBots(int32_t Wanted, const std::map<uint8_t, int32_t>& TeamSlots);
+    bool RegisterBot(float Now, uint8_t Team, bool bPlayersTeam);
     uint8_t PlaceBotOnTeam();
     void AddToAliveBots(FCoreAthenaBotController* Bot);
     void OnAircraftPhaseStarted(float Now);
@@ -217,6 +242,8 @@ private:
     bool bWarnedUnsupported = false;
     bool bLoggedCap = false;
     int32_t LastLoggedWanted = -1;
+    int32_t LastLoggedTeamBots = -1;
+    float NextPlayerTeamSync = 0.0f;
     int32_t BotsAtStart = 0;
     int32_t PlaylistTeams = 0;
     int32_t PlaylistTeamSize = 0;

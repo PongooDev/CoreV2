@@ -65,19 +65,55 @@ enum class EFortAthenaAIBotState : uint8_t
     Dead,
 };
 
-// One of the bot's weapons (8.30's FFortAthenaInventoryInformation is the weapon list's entry; the item itself lives
-// in the controller's own AFortInventory there, in Core's brain here).
+// The kind of gun, which decides the range a bot uses it at (from the weapon definition's name: WID_Shotgun_*,
+// WID_Assault_*, WID_Sniper_*, WID_Pistol_AutoHeavy* and WID_Pistol_Scavenger* are 3.x's SMGs, WID_Launcher_*).
+enum class EFortAthenaAIBotWeaponType : uint8_t
+{
+    Other,
+    Pistol,
+    SMG,
+    AssaultRifle,
+    Shotgun,
+    Sniper,
+    Launcher,
+};
+
+// One of the bot's weapons (8.30's FFortAthenaInventoryInformation is the weapon list's entry: EquipMaxDistance and
+// WeaponDefinition; the item itself lives in the controller's own AFortInventory there, in Core's brain here).
 struct FFortAthenaAIBotWeapon
 {
     UFortWeaponItemDefinition* WeaponDefinition = nullptr;
     UFortItemDefinition* AmmoDefinition = nullptr;
     FGuid ItemGuid;
     int32_t LoadedAmmo = 0;
+    // From its stats row (FFortBaseWeaponStats::DmgPB, ClipSize, ReloadTime, ReloadType;
+    // FFortRangedWeaponStats::BulletsPerCartridge and FiringRate).
     int32_t ClipSize = 0;
-    // From its stats row (FFortBaseWeaponStats::DmgPB, FFortRangedWeaponStats::BulletsPerCartridge and FiringRate).
     float Damage = 20.0f;
     int32_t Pellets = 1;
     float FiringRate = 2.0f;
+    float ReloadTime = 1.6f;
+    // EFortWeaponReloadType::ReloadIndividualBullets: a pump shotgun or a revolver loads its shells one at a time, so a
+    // partial reload takes its share of ReloadTime.
+    bool bReloadIndividualBullets = false;
+    EFortAthenaAIBotWeaponType Type = EFortAthenaAIBotWeaponType::Other;
+    // 8.30's FFortAthenaInventoryInformation::EquipMaxDistance: the farthest target the bot takes this weapon out for.
+    float EquipMaxDistance = 5000.0f;
+};
+
+// A healing or shield item (21.40's UFortAthenaAIBotEvaluator_Heal uses them), from its fire ability's blueprint
+// defaults: GA_Athena_Bandage (MaxHealingAmount 15, HealingCap 75, TriggerDuration 3.5), GA_Athena_Medkit (HealingAmount
+// 100, 10 s), GA_Athena_ShieldSmall (ShieldingAmount 25, SmallShieldCap 50, 2 s), GA_Athena_Shields (ShieldingAmount 50,
+// 5 s), GA_Athena_SuperMedkit (HealingAmount 100, 15 s; the Chug Jug, "full health and shield").
+struct FFortAthenaAIBotConsumable
+{
+    UFortWeaponItemDefinition* ItemDefinition = nullptr;
+    float Health = 0.0f;
+    float HealthCap = 100.0f;
+    float Shield = 0.0f;
+    float ShieldCap = 100.0f;
+    float UseTime = 2.0f;
+    int32_t MaxStackSize = 1;
 };
 
 class AFortAthenaAIBotController
@@ -109,6 +145,19 @@ public:
     // The pawn died: Core's OnPossesedPawnDied (21.40's AFortAthenaAIBotController::OnPossesedPawnDied).
     void OnPossesedPawnDied(AFortPlayerStateAthena* KillerState);
     void AddKill();
+
+    // The bus: where the bot lands (UFortServerBotManagerAthena::AssignLandingSpots picks a named location or a
+    // loot-rich spot near the bus's path) and when it jumps to get there.
+    void SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime);
+    bool HasLandingSpot() const { return bHasLandingSpot; }
+
+    // A healing or shield item's values, or null for anything else (cached per item).
+    static const FFortAthenaAIBotConsumable* GetConsumableInfo(UFortItemDefinition* Definition);
+    // A gun's kind and stats row values (cached per weapon).
+    static const FFortAthenaAIBotWeapon& GetWeaponInfo(UFortWeaponItemDefinition* Definition);
+    // Whether the bot wants this floor pickup: a gun it would carry (WeaponSlotFor), ammo for its guns, or a
+    // consumable it has room for.
+    bool WantsPickup(UFortItemDefinition* Definition, bool bWeapon, bool bConsumable);
 
 private:
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus / _FreeFalling.
@@ -145,9 +194,26 @@ private:
     void TakeStormDamage(float Now);
 
     bool HasUsableWeapon() const;
+    bool HasAmmoFor(const FFortAthenaAIBotWeapon& Weapon) const;
     int32_t BestWeaponIndex() const;
+    // 8.30's _ManageWeapon: the weapon whose EquipMaxDistance suits a target this far (a shotgun close, an assault
+    // rifle or SMG at mid range, a sniper far, a pistol when nothing better has ammo).
+    int32_t WeaponIndexForRange(float Distance) const;
+    // Where a weapon found on the floor would go: -1 a free slot, an index the weapon it replaces, -2 not wanted.
+    int32_t WeaponSlotFor(UFortWeaponItemDefinition* Definition) const;
     void EquipWeapon(int32_t Index);
+    // The held weapon's reload: its stats row's ReloadTime (a share of it for a partial individual-bullet reload).
+    void StartReload(float Now);
+    void CancelReload();
+    // In a fight: an enemy in sight, or hurt in the last few seconds (outside the storm).
+    bool IsInCombat(float Now) const;
+    // 21.40's UFortAthenaAIBotEvaluator_Heal: out of combat, a bandage, medkit, shield potion or Chug Jug the bot
+    // carries, held for the item's use time. True while the bot is using one.
+    bool Heal(float Now);
+    void CancelHeal();
     void TakePickup(AFortPickup* Pickup);
+    // An item dropped where the bot stands, as a player drops it (a weapon with its magazine).
+    void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo);
     void DropInventory();
     void ApplyStartingHealth();
     void StopFiring();
@@ -182,6 +248,23 @@ private:
 
     std::vector<FFortAthenaAIBotWeapon> WeaponList;
     std::map<UFortItemDefinition*, int32_t> Ammo;
+    // Healing and shield items carried, and the one in use.
+    std::map<UFortItemDefinition*, int32_t> Consumables;
+    UFortItemDefinition* HealingItem = nullptr;
+    float HealUntil = 0.0f;
+    float NextHealCheck = 0.0f;
+    int32_t Heals = 0;
+    // Reload and weapon choice: the weapon being reloaded, the last weapon change, and when the bot was last hurt.
+    int32_t ReloadIndex = -1;
+    float NextWeaponSwitch = 0.0f;
+    float LastHurtTime = -100.0f;
+    float LastHealthShield = -1.0f;
+    int32_t Reloads = 0;
+    int32_t WeaponSwitches = 0;
+    // The landing spot chosen on the bus.
+    bool bHasLandingSpot = false;
+    FVector LandingSpot;
+    float LandingRadius = 0.0f;
     int32_t EquippedIndex = -1;
     TWeakObjectPtr<AFortWeapon> EquippedWeapon;
     bool bPickaxeEquipped = false;

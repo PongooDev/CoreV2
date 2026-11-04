@@ -32,12 +32,14 @@ struct FFortAthenaBotSettings
     bool bEliminationsCountForQuests = true;
 };
 
-// A weapon or ammo pickup lying on the floor, as the bots' loot search sees it (refreshed every few seconds).
+// A weapon, ammo or healing item pickup lying on the floor, as the bots' loot search sees it (refreshed every few
+// seconds).
 struct FFortAthenaBotLoot
 {
     TWeakObjectPtr<AFortPickup> Pickup;
     FVector Location;
     bool bWeapon = false;
+    bool bConsumable = false;
 };
 
 // A chest or ammo box the bots can search (21.40's _Loot looks for containers too; 8.30's bots didn't loot).
@@ -46,6 +48,17 @@ struct FFortAthenaBotContainer
     TWeakObjectPtr<ABuildingContainer> Container;
     FVector Location;
     bool bChest = false;
+};
+
+// A place bots land at (21.40's _SelectNextPOI): a named location (an AFortPoiVolume tagged Athena.Location.POI.*) or a
+// cluster of chests, with its loot (chests, and a share of the floor weapons) and the bots sent there.
+struct FFortAthenaBotLandingSpot
+{
+    FVector Location;
+    float Radius = 6000.0f;
+    std::wstring Name;
+    float Loot = 0.0f;
+    int32_t Bots = 0;
 };
 
 // Core's backport of Epic's UFortServerBotManagerAthena (8.30: the game mode's ServerBotManager, which registers each
@@ -144,6 +157,11 @@ private:
     void RefreshEnemies();
     void RefreshLoot(float Now);
     void GatherContainers();
+    // The landing spots (at the bus), the bus's path (its location sampled while it flies), and each bot's spot and
+    // jump: spread over the reachable spots by their loot, or all at the best one with -CoreBotHotDrop.
+    void GatherLandingSpots();
+    void UpdateFlightPath(float Now);
+    void AssignLandingSpots(float Now);
     void InitializeNavigation();
     void LogSummary(float Now);
     std::set<uint8_t> HumanTeams() const;
@@ -179,6 +197,15 @@ private:
     std::vector<TWeakObjectPtr<AFortPawn>> EnemyPawns;
     std::vector<FFortAthenaBotLoot> Loot;
     std::vector<FFortAthenaBotContainer> Containers;
+    std::vector<FFortAthenaBotLandingSpot> LandingSpots;
+    bool bLandingAssigned = false;
+    bool bHasFlightSample = false;
+    FVector FlightSample;
+    float FlightSampleTime = 0.0f;
+    FVector FlightDirection;
+    float FlightSpeed = 0.0f;
+    float DropStartTime = 0.0f;
+    float DropEndTime = 0.0f;
     bool bHasNavigation = false;
     std::chrono::steady_clock::time_point LastFrameStart;
     double FrameMsSum = 0.0;

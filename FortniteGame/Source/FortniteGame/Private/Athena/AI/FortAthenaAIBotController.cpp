@@ -271,6 +271,118 @@ namespace
         return true;
     }
 
+    // A one-byte value (an enum) of the weapon's stats row, or -1.
+    int32_t ReadByteStat(UFortWeaponItemDefinition* Definition, const wchar_t* Name)
+    {
+        const FDataTableRowHandle& StatHandle = Definition->WeaponStatHandle;
+        UDataTable* Table = StatHandle.DataTable;
+        uint8_t* Row = Table ? Table->FindRowUnchecked(StatHandle.RowName) : nullptr;
+        UScriptStruct* RowStruct = Row ? static_cast<UScriptStruct*>(Table->RowStruct) : nullptr;
+        UProperty* Property = RowStruct ? RowStruct->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        return Property && Property->ElementSize == 1 ? static_cast<int32_t>(Row[Property->GetOffset_ForInternal()]) : -1;
+    }
+
+    // EFortWeaponReloadType::ReloadIndividualBullets.
+    constexpr int32_t ReloadIndividualBullets = 1;
+
+    EFortAthenaAIBotWeaponType WeaponTypeOf(UFortWeaponItemDefinition* Definition, int32_t Pellets)
+    {
+        const std::wstring Name = Definition ? Definition->GetName().ToStdString() : std::wstring();
+        const auto Has = [&Name](const wchar_t* Part) { return Name.find(Part) != std::wstring::npos; };
+        if (Has(L"Shotgun") || Pellets > 1)
+        {
+            return EFortAthenaAIBotWeaponType::Shotgun;
+        }
+        if (Has(L"Sniper"))
+        {
+            return EFortAthenaAIBotWeaponType::Sniper;
+        }
+        if (Has(L"Assault"))
+        {
+            return EFortAthenaAIBotWeaponType::AssaultRifle;
+        }
+        if (Has(L"Pistol_AutoHeavy") || Has(L"Pistol_Scavenger") || Has(L"SMG"))
+        {
+            return EFortAthenaAIBotWeaponType::SMG;
+        }
+        if (Has(L"Pistol"))
+        {
+            return EFortAthenaAIBotWeaponType::Pistol;
+        }
+        if (Has(L"Launcher"))
+        {
+            return EFortAthenaAIBotWeaponType::Launcher;
+        }
+        return EFortAthenaAIBotWeaponType::Other;
+    }
+
+    const wchar_t* WeaponTypeName(EFortAthenaAIBotWeaponType Type)
+    {
+        switch (Type)
+        {
+        case EFortAthenaAIBotWeaponType::Pistol: return L"pistol";
+        case EFortAthenaAIBotWeaponType::SMG: return L"SMG";
+        case EFortAthenaAIBotWeaponType::AssaultRifle: return L"assault rifle";
+        case EFortAthenaAIBotWeaponType::Shotgun: return L"shotgun";
+        case EFortAthenaAIBotWeaponType::Sniper: return L"sniper";
+        case EFortAthenaAIBotWeaponType::Launcher: return L"launcher";
+        default: return L"gun";
+        }
+    }
+
+    // Core's EquipMaxDistance per kind 🟡 (8.30's values are in its bot blueprints, which don't ship).
+    float EquipMaxDistanceOf(EFortAthenaAIBotWeaponType Type)
+    {
+        switch (Type)
+        {
+        case EFortAthenaAIBotWeaponType::Shotgun: return 1200.0f;
+        case EFortAthenaAIBotWeaponType::SMG: return 2500.0f;
+        case EFortAthenaAIBotWeaponType::Pistol: return 3500.0f;
+        case EFortAthenaAIBotWeaponType::Launcher: return 4000.0f;
+        case EFortAthenaAIBotWeaponType::AssaultRifle: return 6000.0f;
+        case EFortAthenaAIBotWeaponType::Sniper: return 100000.0f;
+        default: return 3000.0f;
+        }
+    }
+
+    // How much a bot wants a kind of gun at a range band (0 close, under 10 m; 1 mid, under 35 m; 2 far) 🟡.
+    float RangePreference(EFortAthenaAIBotWeaponType Type, int32_t Band)
+    {
+        static const float Table[7][3] = {
+            { 1.0f, 1.0f, 1.0f },  // Other
+            { 3.0f, 3.5f, 3.0f },  // Pistol
+            { 5.0f, 5.0f, 2.5f },  // SMG
+            { 4.0f, 6.0f, 5.0f },  // AssaultRifle
+            { 6.0f, 2.0f, 0.5f },  // Shotgun
+            { 1.0f, 2.5f, 6.0f },  // Sniper
+            { 0.5f, 2.0f, 2.0f },  // Launcher
+        };
+        return Table[static_cast<size_t>(Type)][static_cast<size_t>(std::clamp(Band, 0, 2))];
+    }
+
+    // How much a bot wants a kind of gun in its inventory at all (it carries one of each kind).
+    float TypePriority(EFortAthenaAIBotWeaponType Type)
+    {
+        switch (Type)
+        {
+        case EFortAthenaAIBotWeaponType::AssaultRifle:
+        case EFortAthenaAIBotWeaponType::Shotgun: return 5.0f;
+        case EFortAthenaAIBotWeaponType::SMG: return 4.0f;
+        case EFortAthenaAIBotWeaponType::Sniper: return 3.0f;
+        case EFortAthenaAIBotWeaponType::Pistol: return 2.0f;
+        default: return 1.0f;
+        }
+    }
+
+    float DamagePerSecond(const FFortAthenaAIBotWeapon& Weapon)
+    {
+        return Weapon.Damage * static_cast<float>(Weapon.Pellets) * std::max(Weapon.FiringRate, 0.1f);
+    }
+
+    // A bot carries up to this many guns (a player's five quickbar slots, two kept for healing items).
+    constexpr size_t MaxWeapons = 3;
+    constexpr size_t MaxConsumableKinds = 2;
+
     void ReadWeaponStats(FFortAthenaAIBotWeapon& Weapon)
     {
         float Value = 0.0f;
@@ -286,6 +398,30 @@ namespace
         {
             Weapon.FiringRate = Value;
         }
+        if (ReadStat(Weapon.WeaponDefinition, L"ClipSize", Value) && Value >= 1.0f)
+        {
+            Weapon.ClipSize = static_cast<int32_t>(Value);
+        }
+        if (ReadStat(Weapon.WeaponDefinition, L"ReloadTime", Value) && Value > 0.0f)
+        {
+            Weapon.ReloadTime = Value;
+        }
+        Weapon.bReloadIndividualBullets = ReadByteStat(Weapon.WeaponDefinition, L"ReloadType") == ReloadIndividualBullets;
+        Weapon.Type = WeaponTypeOf(Weapon.WeaponDefinition, Weapon.Pellets);
+        Weapon.EquipMaxDistance = EquipMaxDistanceOf(Weapon.Type);
+    }
+
+    // A number (an int or a float property) of an object, by its name, or Default.
+    float NumberOf(const UObject* Object, const wchar_t* Name, float Default)
+    {
+        UProperty* Property = Object ? Object->GetClass()->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        if (!Property || Property->ElementSize != 4)
+        {
+            return Default;
+        }
+        const uint8_t* Value = reinterpret_cast<const uint8_t*>(Object) + Property->GetOffset_ForInternal();
+        const std::wstring Type = Property->GetClass()->GetName().ToStdString();
+        return Type == L"IntProperty" ? static_cast<float>(*reinterpret_cast<const int32_t*>(Value)) : Type == L"FloatProperty" ? *reinterpret_cast<const float*>(Value) : Default;
     }
 
     int32_t BulletsPerClip(AFortWeapon* Weapon)
@@ -446,6 +582,11 @@ bool AFortAthenaAIBotController::SpawnPawnAt(const FVector& Location, float Yaw,
     bRegisteredInvoker = false;
     bLoggedMovement = false;
     bWeaponFireActive = false;
+    HealingItem = nullptr;
+    ReloadIndex = -1;
+    ReloadUntil = 0.0f;
+    LastHealthShield = -1.0f;
+    LastHurtTime = -100.0f;
     // A player pawn takes its ability system (its player state's) in OnRep_PlayerState (AFortPlayerPawn's, 3.0
     // 0xDF4E10), which on the server only AFortPlayerController's possession runs: an AI controller's doesn't, and a
     // weapon equipped without one crashes giving its abilities.
@@ -530,6 +671,8 @@ void AFortAthenaAIBotController::EnterAircraft(float InJumpTime, float InLatestJ
     // The warmup's pickups don't come along (ResetToStartingItems takes a player's).
     WeaponList.clear();
     Ammo.clear();
+    Consumables.clear();
+    bHasLandingSpot = false;
     State = EFortAthenaAIBotState::InAircraft;
     JumpTime = InJumpTime;
     LatestJumpTime = InLatestJumpTime;
@@ -626,23 +769,46 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         bRegisteredInvoker = true;
         UAthenaNavSystem::RegisterNavigationInvoker(reinterpret_cast<AActor*>(Pawn));
     }
-    ManageWeapon(Now);
-    CheckWeaponFireResult(Now);
+    // Hurt (by an enemy: the storm's damage outside the circle doesn't count) puts the bot in a fight for a while.
+    {
+        FVector Center;
+        float Radius = 0.0f;
+        const bool bOutside = Manager->GetCurrentSafeZone(Center, Radius) && Dist2D(LastKnownPosition, Center) > Radius;
+        const float HealthShield = Pawn->GetHealth() + Pawn->GetShield();
+        if (LastHealthShield >= 0.0f && HealthShield < LastHealthShield - 0.5f && !bOutside)
+        {
+            LastHurtTime = Now;
+        }
+        LastHealthShield = HealthShield;
+    }
     if (Now >= NextPerceptionTime)
     {
         NextPerceptionTime = Now + 0.25f;
         UpdateCurrentTarget(Now);
     }
+    if (HealingItem && IsInCombat(Now))
+    {
+        CancelHeal();
+    }
+    if (!HealingItem)
+    {
+        ManageWeapon(Now);
+        CheckWeaponFireResult(Now);
+    }
     const wchar_t* Intent = L"attack";
-    if (!RangeAttack(Now))
+    if (HealingItem || !RangeAttack(Now))
     {
         StopFiring();
-        // Loot close by first, then a chest or ammo box, then loot farther away (21.40's _Loot weighs them by distance).
-        // In the storm it runs; only outside the next circle, it takes the loot right by it first.
+        // Healing first when safe, then loot close by, then a chest or ammo box, then loot farther away (21.40's _Loot
+        // weighs them by distance). In the storm it runs; only outside the next circle, it takes the loot right by it
+        // first, and a bot without a gun arms itself before it heads for the circle (a landing spot far from the first
+        // circle otherwise sent it off empty-handed).
         FVector StormCenter;
         float StormRadius = 0.0f;
         const bool bInStorm = Manager->GetCurrentSafeZone(StormCenter, StormRadius) && Dist2D(LastKnownPosition, StormCenter) > StormRadius * 0.97f;
-        Intent = bInStorm && Storm(Now) ? L"storm" : Loot(Now, 1500.0f) ? L"loot" : Storm(Now) ? L"storm" : SearchContainer(Now) ? L"search" : Loot(Now, 7000.0f) ? L"loot" : L"wander";
+        const bool bArmed = HasUsableWeapon();
+        Intent = Heal(Now) ? L"heal" : bInStorm && Storm(Now) ? L"storm" : Loot(Now, 1500.0f) ? L"loot" : !bArmed && Loot(Now, 4000.0f) ? L"loot" : !bArmed && SearchContainer(Now) ? L"search"
+            : Storm(Now) ? L"storm" : SearchContainer(Now) ? L"search" : Loot(Now, 7000.0f) ? L"loot" : L"wander";
         if (Intent[0] == L'w')
         {
             Wander(Now);
@@ -662,11 +828,11 @@ void AFortAthenaAIBotController::Tick(float Now, float DeltaSeconds)
         AFortPawn* Target = CurrentTarget.Get();
         UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
         const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
-        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps, {} doors", BotName,
+        Log::Info(L"Battle Royale bots: {} at ({:.0f}, {:.0f}, {:.0f}) {}s, speed {:.0f} (max {:.0f}), mode {}, style {}, {}: {:.0f} health, {:.0f} shield, {} weapons, holding {} ({} loaded), target {}{}, {} shots ({} the game's), {} searched, {} jumps, {} doors, {} reloads, {} weapon changes, {} heals ({} healing items)", BotName,
             LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z, Intent, Velocity.Size(), MaxSpeedOf(Movement), Movement ? static_cast<int32_t>(Movement->MovementMode) : -1, static_cast<int32_t>(Pawn->CurrentMovementStyle),
             bPathFollowing ? std::format(L"on a path ({} paths, {} failed)", PathRequests, PathFailures) : std::format(L"steering ({} paths, {} failed)", PathRequests, PathFailures), Pawn->GetHealth(), Pawn->GetShield(),
             WeaponList.size(), EquippedWeapon.Get() ? NameOf(static_cast<UFortWeaponItemDefinition*>(EquippedWeapon.Get()->WeaponData)) : std::wstring(L"nothing"),
-            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps, DoorsOpened);
+            EquippedWeapon.Get() ? static_cast<int32_t>(EquippedWeapon.Get()->AmmoCount) : 0, Target ? NameOf(Target) : std::wstring(L"none"), bHasVisualLineOfSightOnTarget ? L" (in sight)" : L"", ShotsFired, NativeShots, ContainersSearched, Jumps, DoorsOpened, Reloads, WeaponSwitches, Heals, Consumables.size());
     }
 #endif
 }
@@ -694,12 +860,18 @@ void AFortAthenaAIBotController::JumpOffBus(float Now)
     const bool bHotDrop = Configuration::Get().bBotHotDrop && bHasHotDrop;
     for (const FFortAthenaBotLoot& Entry : LootList)
     {
-        if (Entry.bWeapon && (bHotDrop ? Dist2D(Entry.Location, HotDrop) < 8000.0f : Dist2D(Entry.Location, Start) < 20000.0f))
+        // The landing spot the manager chose (a named location or a cluster of chests): a weapon in it, else its middle.
+        const bool bInSpot = bHasLandingSpot && Dist2D(Entry.Location, LandingSpot) < LandingRadius;
+        if (Entry.bWeapon && (bHasLandingSpot ? bInSpot : bHotDrop ? Dist2D(Entry.Location, HotDrop) < 8000.0f : Dist2D(Entry.Location, Start) < 20000.0f))
         {
             Near.push_back(Entry.Location);
         }
     }
-    if (!Near.empty())
+    if (Near.empty() && bHasLandingSpot)
+    {
+        DropTarget = LandingSpot;
+    }
+    else if (!Near.empty())
     {
         DropTarget = Near[static_cast<size_t>(FMath::Rand()) % Near.size()];
         if (Configuration::Get().bBotHotDrop && !bHasHotDrop)
@@ -853,32 +1025,165 @@ void AFortAthenaAIBotController::UpdateCurrentTarget(float Now)
 #endif
 }
 
+bool AFortAthenaAIBotController::HasAmmoFor(const FFortAthenaAIBotWeapon& Weapon) const
+{
+    const auto Found = Ammo.find(Weapon.AmmoDefinition);
+    return Weapon.LoadedAmmo > 0 || (Found != Ammo.end() && Found->second > 0);
+}
+
 bool AFortAthenaAIBotController::HasUsableWeapon() const
 {
-    for (const FFortAthenaAIBotWeapon& Weapon : WeaponList)
-    {
-        const auto Found = Ammo.find(Weapon.AmmoDefinition);
-        if (Weapon.LoadedAmmo > 0 || (Found != Ammo.end() && Found->second > 0))
-        {
-            return true;
-        }
-    }
-    return false;
+    return std::any_of(WeaponList.begin(), WeaponList.end(), [this](const FFortAthenaAIBotWeapon& Weapon) { return HasAmmoFor(Weapon); });
 }
 
 int32_t AFortAthenaAIBotController::BestWeaponIndex() const
 {
-    // The newest weapon with ammo (later weapons are usually the better finds), else the first.
-    for (int32_t Index = static_cast<int32_t>(WeaponList.size()) - 1; Index >= 0; --Index)
+    // Out of a fight: the weapon for a mid-range fight, the likeliest next one.
+    const int32_t Index = WeaponIndexForRange(2000.0f);
+    return Index >= 0 ? Index : WeaponList.empty() ? -1 : 0;
+}
+
+int32_t AFortAthenaAIBotController::WeaponIndexForRange(float Distance) const
+{
+    const int32_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
+    int32_t Best = -1;
+    float BestScore = -1.0f;
+    for (size_t Index = 0; Index < WeaponList.size(); ++Index)
     {
-        const FFortAthenaAIBotWeapon& Weapon = WeaponList[static_cast<size_t>(Index)];
-        const auto Found = Ammo.find(Weapon.AmmoDefinition);
-        if (Weapon.LoadedAmmo > 0 || (Found != Ammo.end() && Found->second > 0))
+        const FFortAthenaAIBotWeapon& Weapon = WeaponList[Index];
+        if (!HasAmmoFor(Weapon))
         {
-            return Index;
+            continue;
+        }
+        float Score = RangePreference(Weapon.Type, Band) + std::min(DamagePerSecond(Weapon) / 200.0f, 1.0f);
+        Score += Weapon.LoadedAmmo > 0 ? 1.0f : 0.0f;
+        Score -= Distance > Weapon.EquipMaxDistance ? 3.0f : 0.0f;
+        if (Score > BestScore)
+        {
+            BestScore = Score;
+            Best = static_cast<int32_t>(Index);
         }
     }
-    return WeaponList.empty() ? -1 : 0;
+    return Best;
+}
+
+int32_t AFortAthenaAIBotController::WeaponSlotFor(UFortWeaponItemDefinition* Definition) const
+{
+    // One gun of each kind, the better one kept (its damage a second from the stats row); with every slot full, a gun of
+    // a more wanted kind (assault rifle and shotgun, then SMG, sniper, pistol) replaces the least wanted one.
+    if (!Definition)
+    {
+        return -2;
+    }
+    const FFortAthenaAIBotWeapon& Found = GetWeaponInfo(Definition);
+    for (size_t Index = 0; Index < WeaponList.size(); ++Index)
+    {
+        const FFortAthenaAIBotWeapon& Held = WeaponList[Index];
+        if (Held.WeaponDefinition == Definition)
+        {
+            return -2;
+        }
+        if (Held.Type == Found.Type)
+        {
+            return DamagePerSecond(Found) > DamagePerSecond(Held) * 1.1f ? static_cast<int32_t>(Index) : -2;
+        }
+    }
+    if (WeaponList.size() < MaxWeapons)
+    {
+        return -1;
+    }
+    int32_t Worst = -2;
+    float WorstPriority = TypePriority(Found.Type);
+    for (size_t Index = 0; Index < WeaponList.size(); ++Index)
+    {
+        const float Priority = TypePriority(WeaponList[Index].Type);
+        if (Priority < WorstPriority)
+        {
+            WorstPriority = Priority;
+            Worst = static_cast<int32_t>(Index);
+        }
+    }
+    return Worst;
+}
+
+const FFortAthenaAIBotWeapon& AFortAthenaAIBotController::GetWeaponInfo(UFortWeaponItemDefinition* Definition)
+{
+    static std::map<UFortWeaponItemDefinition*, FFortAthenaAIBotWeapon> Cache;
+    auto [Found, bNew] = Cache.try_emplace(Definition);
+    if (bNew && Definition)
+    {
+        FFortAthenaAIBotWeapon& Weapon = Found->second;
+        Weapon.WeaponDefinition = Definition;
+        Weapon.AmmoDefinition = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(Definition->AmmoData).LoadSynchronous();
+        ReadWeaponStats(Weapon);
+        Log::Info(L"Battle Royale bots: {}: {} ({:.0f} damage x{}, {:.2f} shots/s, {} a magazine, {:.2f} s reload{}, equipped within {:.0f} m)", NameOf(Definition), WeaponTypeName(Weapon.Type),
+            Weapon.Damage, Weapon.Pellets, Weapon.FiringRate, Weapon.ClipSize, Weapon.ReloadTime, Weapon.bReloadIndividualBullets ? L" by the shell" : L"", std::min(Weapon.EquipMaxDistance, 99999.0f) / 100.0f);
+    }
+    return Found->second;
+}
+
+const FFortAthenaAIBotConsumable* AFortAthenaAIBotController::GetConsumableInfo(UFortItemDefinition* Definition)
+{
+    // A consumable is a ranged weapon that is its own ammo (Athena_Bandage's AmmoData is Athena_Bandage); what it gives
+    // and how long it takes are its fire ability's blueprint defaults (the game's ability can't run for a bot: it isn't
+    // an inventory owner, the same refusal as its guns).
+    static std::map<UFortItemDefinition*, std::unique_ptr<FFortAthenaAIBotConsumable>> Cache;
+    auto [Found, bNew] = Cache.try_emplace(Definition);
+    if (!bNew)
+    {
+        return Found->second.get();
+    }
+    UFortWeaponItemDefinition* Weapon = Definition ? Cast<UFortWeaponItemDefinition>(Definition) : nullptr;
+    if (!Weapon || static_cast<TAssetPtr<UFortWorldItemDefinition>&>(Weapon->AmmoData).LoadSynchronous() != reinterpret_cast<UFortWorldItemDefinition*>(Weapon))
+    {
+        return nullptr;
+    }
+    UProperty* AbilityProperty = reinterpret_cast<UObject*>(Weapon)->GetClass()->FindPropertyByName(FName(L"PrimaryFireAbility", FNAME_Find));
+    UClass* AbilityClass = AbilityProperty ? reinterpret_cast<TAssetSubclassOf<UObject>*>(reinterpret_cast<uint8_t*>(Weapon) + AbilityProperty->GetOffset_ForInternal())->LoadSynchronous() : nullptr;
+    const UObject* Ability = AbilityClass ? AbilityClass->GetDefaultObject() : nullptr;
+    if (!Ability)
+    {
+        return nullptr;
+    }
+    auto Info = std::make_unique<FFortAthenaAIBotConsumable>();
+    Info->ItemDefinition = Weapon;
+    Info->Health = NumberOf(Ability, L"HealingAmount", 0.0f);
+    Info->Health = Info->Health > 0.0f ? Info->Health : NumberOf(Ability, L"MaxHealingAmount", 0.0f);
+    Info->HealthCap = NumberOf(Ability, L"HealingCap", 100.0f);
+    Info->Shield = NumberOf(Ability, L"ShieldingAmount", 0.0f);
+    Info->ShieldCap = NumberOf(Ability, L"SmallShieldCap", 100.0f);
+    Info->UseTime = std::max(NumberOf(Ability, L"TriggerDuration", 2.0f), 0.5f);
+    // The Chug Jug's ability gives its shield in its graph ("Gives full health and shield", Athena_SuperMedkit).
+    if (AbilityClass->GetName().ToStdString().find(L"SuperMedkit") != std::wstring::npos)
+    {
+        Info->Shield = 100.0f;
+    }
+    Info->MaxStackSize = std::max(static_cast<int32_t>(Definition->MaxStackSize), 1);
+    // The Slurp Juice (GA_Athena_PurpleStuff, HealingAmount 1) heals over time through its own effect: not one of these.
+    if (Info->Health < 5.0f && Info->Shield < 5.0f)
+    {
+        return nullptr;
+    }
+    Log::Info(L"Battle Royale bots: {} heals {:.0f} (to {:.0f}) and shields {:.0f} (to {:.0f}) in {:.1f} s, {} a stack", NameOf(Definition), Info->Health, Info->HealthCap, Info->Shield, Info->ShieldCap, Info->UseTime, Info->MaxStackSize);
+    Found->second = std::move(Info);
+    return Found->second.get();
+}
+
+bool AFortAthenaAIBotController::WantsPickup(UFortItemDefinition* Definition, bool bWeapon, bool bConsumable)
+{
+    if (bWeapon)
+    {
+        return WeaponSlotFor(Cast<UFortWeaponItemDefinition>(Definition)) != -2;
+    }
+    if (bConsumable)
+    {
+        const FFortAthenaAIBotConsumable* Info = GetConsumableInfo(Definition);
+        const auto Held = Consumables.find(Definition);
+        return Info && (Held != Consumables.end() ? Held->second < Info->MaxStackSize : Consumables.size() < MaxConsumableKinds);
+    }
+    const auto Reserve = Ammo.find(Definition);
+    return std::any_of(WeaponList.begin(), WeaponList.end(), [Definition](const FFortAthenaAIBotWeapon& Weapon) { return Weapon.AmmoDefinition == Definition; })
+        && (Reserve == Ammo.end() || Reserve->second < 120);
 }
 
 void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
@@ -890,6 +1195,7 @@ void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
         return;
     }
     StopFiring();
+    CancelReload();
     FFortAthenaAIBotWeapon& Entry = WeaponList[static_cast<size_t>(Index)];
     AFortWeapon* Weapon = Pawn->EquipWeaponDefinition(Entry.WeaponDefinition, Entry.ItemGuid);
     if (!Weapon)
@@ -897,7 +1203,10 @@ void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
         Log::Warning(L"Battle Royale bots: {} couldn't equip {}", BotName, NameOf(Entry.WeaponDefinition));
         return;
     }
-    Entry.ClipSize = std::max(BulletsPerClip(Weapon), 1);
+    if (Entry.ClipSize <= 0)
+    {
+        Entry.ClipSize = std::max(BulletsPerClip(Weapon), 1);
+    }
     Weapon->AmmoCount = Entry.LoadedAmmo;
     EquippedWeapon = Weapon;
     EquippedIndex = Index;
@@ -905,11 +1214,42 @@ void AFortAthenaAIBotController::EquipWeapon(int32_t Index)
 #endif
 }
 
+bool AFortAthenaAIBotController::IsInCombat(float Now) const
+{
+    return (CurrentTarget.Get() && bHasVisualLineOfSightOnTarget) || Now - LastHurtTime < 4.0f;
+}
+
+void AFortAthenaAIBotController::StartReload(float Now)
+{
+    if (EquippedIndex < 0 || EquippedIndex >= static_cast<int32_t>(WeaponList.size()))
+    {
+        return;
+    }
+    const FFortAthenaAIBotWeapon& Entry = WeaponList[static_cast<size_t>(EquippedIndex)];
+    const int32_t Missing = Entry.ClipSize - Entry.LoadedAmmo;
+    float Time = Entry.ReloadTime;
+    if (Entry.bReloadIndividualBullets && Entry.ClipSize > 0)
+    {
+        // A shell at a time 🟡 (ReloadTime taken as a full magazine's).
+        Time = Entry.ReloadTime * static_cast<float>(std::min(Missing, std::max(Ammo[Entry.AmmoDefinition], 1))) / static_cast<float>(Entry.ClipSize);
+    }
+    StopFiring();
+    ReloadIndex = EquippedIndex;
+    ReloadUntil = Now + std::max(Time, 0.3f);
+}
+
+void AFortAthenaAIBotController::CancelReload()
+{
+    ReloadIndex = -1;
+    ReloadUntil = 0.0f;
+}
+
 void AFortAthenaAIBotController::ManageWeapon(float Now)
 {
 #if WITH_SERVER_CODE
-    // 8.30's _ManageWeapon: fire while the target is in sight, reload an empty weapon (from the bot's own ammo: no
-    // player controller's inventory to reload from), and change to a weapon with ammo.
+    // 8.30's _ManageWeapon: the weapon for the target's range (FFortAthenaInventoryInformation::EquipMaxDistance),
+    // reloading from the bot's own ammo (no player controller's inventory to reload from) when the magazine is empty, or
+    // out of a fight when it isn't full, and changing to a weapon with ammo.
     AFortWeapon* Weapon = EquippedWeapon.Get();
     if (bPickaxeEquipped || EquippedIndex < 0 || EquippedIndex >= static_cast<int32_t>(WeaponList.size()))
     {
@@ -926,33 +1266,99 @@ void AFortAthenaAIBotController::ManageWeapon(float Now)
         return;
     }
     Entry.LoadedAmmo = Weapon->AmmoCount;
-    if (Entry.LoadedAmmo > 0)
+
+    // A reload under way: the magazine fills once its time is up.
+    if (ReloadIndex >= 0)
     {
+        if (ReloadIndex != EquippedIndex)
+        {
+            CancelReload();
+        }
+        else if (Now >= ReloadUntil)
+        {
+            CancelReload();
+            int32_t& Reserve = Ammo[Entry.AmmoDefinition];
+            const int32_t Loaded = std::min(Reserve, std::max(Entry.ClipSize - Entry.LoadedAmmo, 0));
+            if (Loaded > 0)
+            {
+                Reserve -= Loaded;
+                Entry.LoadedAmmo += Loaded;
+                Weapon->AmmoCount = Entry.LoadedAmmo;
+                Weapon->ForceNetUpdate();
+                ++Reloads;
+            }
+        }
         return;
     }
-    if (ReloadUntil <= 0.0f)
+
+    // The weapon for the range, while fighting a target in sight (a change takes a moment before the first shot).
+    AFortPawn* Target = CurrentTarget.Get();
+    if (Target && bHasVisualLineOfSightOnTarget && Now >= NextWeaponSwitch)
     {
-        StopFiring();
-        ReloadUntil = Now + 1.6f;
+        const float Distance = (LocationOf(Target) - LastKnownPosition).Size();
+        const int32_t ForRange = WeaponIndexForRange(Distance);
+        if (ForRange >= 0 && ForRange != EquippedIndex)
+        {
+            const FFortAthenaAIBotWeapon& Next = WeaponList[static_cast<size_t>(ForRange)];
+            // A loaded weapon that suits the range as well stays out: only a clearly better one is worth the swap.
+            const int32_t Band = Distance < 1000.0f ? 0 : Distance < 3500.0f ? 1 : 2;
+            if (Entry.LoadedAmmo == 0 || RangePreference(Next.Type, Band) > RangePreference(Entry.Type, Band) + 0.5f || Distance > Entry.EquipMaxDistance)
+            {
+                NextWeaponSwitch = Now + 1.5f;
+                static int32_t LoggedSwitches = 0;
+                if (LoggedSwitches++ < 10)
+                {
+                    Log::Info(L"Battle Royale bots: {} changes from its {} to its {} for a target {:.0f} m away", BotName, WeaponTypeName(Entry.Type), WeaponTypeName(Next.Type), Distance / 100.0f);
+                }
+                EquipWeapon(ForRange);
+                ++WeaponSwitches;
+                NextShotTime = std::max(NextShotTime, Now + 0.4f);
+                return;
+            }
+        }
+    }
+
+    const auto Reserve = Ammo.find(Entry.AmmoDefinition);
+    const bool bHasReserve = Reserve != Ammo.end() && Reserve->second > 0;
+    if (Entry.LoadedAmmo <= 0)
+    {
+        if (bHasReserve)
+        {
+            StartReload(Now);
+        }
+        else if (HasUsableWeapon())
+        {
+            NextWeaponSwitch = Now + 1.0f;
+            EquipWeapon(Target && bHasVisualLineOfSightOnTarget ? WeaponIndexForRange((LocationOf(Target) - LastKnownPosition).Size()) : BestWeaponIndex());
+        }
         return;
     }
-    if (Now < ReloadUntil)
+    // Out of a fight a player tops the magazine up, then the other guns.
+    if (!IsInCombat(Now) && Now >= NextWeaponSwitch)
     {
-        return;
-    }
-    ReloadUntil = 0.0f;
-    int32_t& Reserve = Ammo[Entry.AmmoDefinition];
-    const int32_t Loaded = std::min(Reserve, Entry.ClipSize);
-    if (Loaded > 0)
-    {
-        Reserve -= Loaded;
-        Entry.LoadedAmmo = Loaded;
-        Weapon->AmmoCount = Loaded;
-        Weapon->ForceNetUpdate();
-    }
-    else if (HasUsableWeapon())
-    {
-        EquipWeapon(BestWeaponIndex());
+        if (Entry.LoadedAmmo < Entry.ClipSize && bHasReserve)
+        {
+            StartReload(Now);
+            return;
+        }
+        for (size_t Index = 0; Index < WeaponList.size(); ++Index)
+        {
+            const FFortAthenaAIBotWeapon& Other = WeaponList[Index];
+            const auto OtherReserve = Ammo.find(Other.AmmoDefinition);
+            if (static_cast<int32_t>(Index) != EquippedIndex && Other.LoadedAmmo < Other.ClipSize && OtherReserve != Ammo.end() && OtherReserve->second > 0)
+            {
+                NextWeaponSwitch = Now + 1.0f;
+                EquipWeapon(static_cast<int32_t>(Index));
+                return;
+            }
+        }
+        // Everything loaded: the gun for the likeliest fight in hand.
+        const int32_t Best = BestWeaponIndex();
+        if (Best >= 0 && Best != EquippedIndex)
+        {
+            NextWeaponSwitch = Now + 1.0f;
+            EquipWeapon(Best);
+        }
     }
 #endif
 }
@@ -1313,7 +1719,6 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
     if (!Target && Now >= NextLootSearch)
     {
         NextLootSearch = Now + 1.0f;
-        const bool bWantWeapon = WeaponList.size() < 2;
         float Best = 7000.0f;
         for (const FFortAthenaBotLoot& Entry : Manager->GetLoot())
         {
@@ -1322,14 +1727,8 @@ bool AFortAthenaAIBotController::Loot(float Now, float MaxDistance)
             {
                 continue;
             }
-            bool bWanted = Entry.bWeapon ? bWantWeapon : false;
-            if (!Entry.bWeapon && !WeaponList.empty())
-            {
-                FFortItemEntry& PickupEntry = Pickup->PrimaryPickupItemEntry;
-                UFortItemDefinition* Definition = PickupEntry.ItemDefinition;
-                bWanted = std::any_of(WeaponList.begin(), WeaponList.end(), [Definition](const FFortAthenaAIBotWeapon& Weapon) { return Weapon.AmmoDefinition == Definition; })
-                    && Ammo[Definition] < 120;
-            }
+            FFortItemEntry& PickupEntry = Pickup->PrimaryPickupItemEntry;
+            const bool bWanted = WantsPickup(PickupEntry.ItemDefinition, Entry.bWeapon, Entry.bConsumable);
             const float Distance = (Entry.Location - Location).Size();
             if (bWanted && Distance < Best && std::fabs(Entry.Location.Z - Location.Z) < 800.0f)
             {
@@ -1392,26 +1791,51 @@ void AFortAthenaAIBotController::TakePickup(AFortPickup* Pickup)
     FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
     UFortItemDefinition* Definition = Entry.ItemDefinition;
     const int32_t Count = std::max(static_cast<int32_t>(Entry.Count), 1);
-    if (UFortWeaponItemDefinition* WeaponDefinition = Cast<UFortWeaponItemDefinition>(Definition))
+    if (const FFortAthenaAIBotConsumable* Consumable = GetConsumableInfo(Definition))
     {
-        FFortAthenaAIBotWeapon Weapon;
-        Weapon.WeaponDefinition = WeaponDefinition;
-        Weapon.AmmoDefinition = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(WeaponDefinition->AmmoData).LoadSynchronous();
+        // As many as the stack holds; the rest stays on the floor.
+        int32_t& Held = Consumables[Definition];
+        const int32_t Taken = std::min(Count, std::max(Consumable->MaxStackSize - Held, 0));
+        Held += Taken;
+        if (Taken < Count)
+        {
+            DropItem(Definition, Count - Taken, 0);
+        }
+        Log::Info(L"Battle Royale bots: {} picks up {} {} ({} held)", BotName, Taken, NameOf(Definition), Held);
+    }
+    else if (UFortWeaponItemDefinition* WeaponDefinition = Cast<UFortWeaponItemDefinition>(Definition))
+    {
+        const int32_t Slot = WeaponSlotFor(WeaponDefinition);
+        if (Slot == -2)
+        {
+            MarkUnreachable(Pickup);
+            return;
+        }
+        FFortAthenaAIBotWeapon Weapon = GetWeaponInfo(WeaponDefinition);
         Weapon.ItemGuid = FGuid::NewGuid();
         Weapon.LoadedAmmo = std::max(static_cast<int32_t>(Entry.LoadedAmmo), 0);
-        ReadWeaponStats(Weapon);
-        // A weapon found empty with no ammo to go with it gets a magazine 🟡 (bots don't search chests yet: phase 2).
+        // A weapon found empty with no ammo to go with it gets a magazine 🟡.
         if (Weapon.LoadedAmmo == 0 && Ammo[Weapon.AmmoDefinition] == 0)
         {
-            Ammo[Weapon.AmmoDefinition] += 30;
+            Ammo[Weapon.AmmoDefinition] += std::max(Weapon.ClipSize, 10);
         }
-        if (WeaponList.size() >= 2)
+        // A full inventory swaps: the weapon it replaces drops where the bot stands, as a player's does.
+        int32_t Index = static_cast<int32_t>(WeaponList.size());
+        if (Slot >= 0)
         {
-            WeaponList.erase(WeaponList.begin());
+            const FFortAthenaAIBotWeapon& Replaced = WeaponList[static_cast<size_t>(Slot)];
+            Log::Info(L"Battle Royale bots: {} swaps its {} for {}", BotName, NameOf(Replaced.WeaponDefinition), NameOf(WeaponDefinition));
+            DropItem(Replaced.WeaponDefinition, 1, Replaced.LoadedAmmo);
+            WeaponList[static_cast<size_t>(Slot)] = Weapon;
+            Index = Slot;
         }
-        WeaponList.push_back(Weapon);
-        EquipWeapon(static_cast<int32_t>(WeaponList.size()) - 1);
-        Log::Info(L"Battle Royale bots: {} picks up {} ({} loaded, {} ammo held)", BotName, NameOf(WeaponDefinition), Weapon.LoadedAmmo, Ammo[Weapon.AmmoDefinition]);
+        else
+        {
+            WeaponList.push_back(Weapon);
+        }
+        EquippedIndex = -1;
+        EquipWeapon(Index);
+        Log::Info(L"Battle Royale bots: {} picks up {} ({}, {} loaded, {} ammo held)", BotName, NameOf(WeaponDefinition), WeaponTypeName(Weapon.Type), Weapon.LoadedAmmo, Ammo[Weapon.AmmoDefinition]);
     }
     else
     {
@@ -1715,7 +2139,7 @@ bool AFortAthenaAIBotController::SearchContainer(float Now)
 #if WITH_SERVER_CODE
     // Containers are worth it while the bot wants weapons or ammo for its guns.
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    bool bWants = WeaponList.size() < 2;
+    bool bWants = WeaponList.size() < 2 || Consumables.empty();
     for (const FFortAthenaAIBotWeapon& Weapon : WeaponList)
     {
         const auto Found = Ammo.find(Weapon.AmmoDefinition);
@@ -1893,44 +2317,197 @@ void AFortAthenaAIBotController::TakeStormDamage(float Now)
 #endif
 }
 
-void AFortAthenaAIBotController::DropInventory()
+void AFortAthenaAIBotController::DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo)
 {
 #if WITH_SERVER_CODE
-    // 8.30's bots drop their loot as players do: each weapon (with its magazine) and the ammo, where the bot fell.
     AFortPlayerPawnAthena* Pawn = GetPawn();
     AFortGameModeAthena* GameMode = Manager->GetGameMode();
     UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
-    if (!Pawn || !World)
+    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+    if (!Pawn || !World || !Definition || Count <= 0 || !EntryStruct)
     {
         return;
     }
     const FVector Location = LocationOf(Pawn);
-    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
-    const auto Drop = [&](UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo)
-    {
-        if (!Definition || Count <= 0 || !EntryStruct)
-        {
-            return;
-        }
-        std::vector<uint8_t> Storage(EntryStruct->GetStructureSize(), 0);
-        FFortItemEntry* Entry = reinterpret_cast<FFortItemEntry*>(Storage.data());
-        FFortItemEntry::Construct(Entry, Definition, Count, 0);
-        Entry->LoadedAmmo = LoadedAmmo;
-        const FVector Spot(Location.X + RandomRange(-80.0f, 80.0f), Location.Y + RandomRange(-80.0f, 80.0f), Location.Z);
-        AFortPickup::CreatePickup(World, *Entry, &Spot);
-        EntryStruct->DestroyStruct(Entry);
-    };
+    std::vector<uint8_t> Storage(EntryStruct->GetStructureSize(), 0);
+    FFortItemEntry* Entry = reinterpret_cast<FFortItemEntry*>(Storage.data());
+    FFortItemEntry::Construct(Entry, Definition, Count, 0);
+    Entry->LoadedAmmo = LoadedAmmo;
+    const FVector Spot(Location.X + RandomRange(-80.0f, 80.0f), Location.Y + RandomRange(-80.0f, 80.0f), Location.Z);
+    AFortPickup::CreatePickup(World, *Entry, &Spot);
+    EntryStruct->DestroyStruct(Entry);
+#endif
+}
+
+void AFortAthenaAIBotController::DropInventory()
+{
+#if WITH_SERVER_CODE
+    // 8.30's bots drop their loot as players do: each weapon (with its magazine), the ammo and the healing items, where
+    // the bot fell.
+    HealingItem = nullptr;
     for (const FFortAthenaAIBotWeapon& Weapon : WeaponList)
     {
-        Drop(Weapon.WeaponDefinition, 1, Weapon.LoadedAmmo);
+        DropItem(Weapon.WeaponDefinition, 1, Weapon.LoadedAmmo);
     }
     for (const auto& [Definition, Count] : Ammo)
     {
-        Drop(Definition, Count, 0);
+        DropItem(Definition, Count, 0);
+    }
+    for (const auto& [Definition, Count] : Consumables)
+    {
+        DropItem(Definition, Count, 0);
     }
     WeaponList.clear();
     Ammo.clear();
+    Consumables.clear();
 #endif
+}
+
+bool AFortAthenaAIBotController::Heal(float Now)
+{
+#if WITH_SERVER_CODE
+    // 21.40's UFortAthenaAIBotEvaluator_Heal. A player holds the item for its use time (the ability's TriggerDuration),
+    // standing still; a hit or an enemy in sight interrupts it, and the item isn't used up.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn)
+    {
+        return false;
+    }
+    if (HealingItem)
+    {
+        if (IsInCombat(Now))
+        {
+            CancelHeal();
+            return false;
+        }
+        StopMoving();
+        if (Now < HealUntil)
+        {
+            return true;
+        }
+        const FFortAthenaAIBotConsumable* Info = GetConsumableInfo(HealingItem);
+        const float Health = Pawn->GetHealth();
+        const float Shield = Pawn->GetShield();
+        const float MaxHealth = std::max(Pawn->GetMaxHealth(), 1.0f);
+        const float MaxShield = std::max(Pawn->GetMaxShield(), 1.0f);
+        if (Info && Info->Health > 0.0f && Health < std::min(Info->HealthCap, MaxHealth))
+        {
+            Pawn->SetHealth(std::min(Health + Info->Health, std::min(Info->HealthCap, MaxHealth)));
+        }
+        if (Info && Info->Shield > 0.0f && Shield < std::min(Info->ShieldCap, MaxShield))
+        {
+            Pawn->SetShield(std::min(Shield + Info->Shield, std::min(Info->ShieldCap, MaxShield)));
+        }
+        LastHealthShield = Pawn->GetHealth() + Pawn->GetShield();
+        ++Heals;
+        Log::Info(L"Battle Royale bots: {} uses {}: {:.0f} health, {:.0f} shield (was {:.0f}, {:.0f})", BotName, NameOf(HealingItem), Pawn->GetHealth(), Pawn->GetShield(), Health, Shield);
+        if (--Consumables[HealingItem] <= 0)
+        {
+            Consumables.erase(HealingItem);
+        }
+        CancelHeal();
+        NextHealCheck = Now + 0.5f;
+        return true;
+    }
+    if (Now < NextHealCheck || Consumables.empty() || IsInCombat(Now))
+    {
+        return false;
+    }
+    NextHealCheck = Now + 1.0f;
+    // Not in the storm (the bot runs out of it first).
+    FVector Center;
+    float Radius = 0.0f;
+    if (Manager->GetCurrentSafeZone(Center, Radius) && Dist2D(LastKnownPosition, Center) > Radius)
+    {
+        return false;
+    }
+    // The item that restores most for its time, without wasting much of it: at least 40 % of what it gives, and 25 or
+    // its half (a bandage below its cap of 75, a medkit at 60 health or less, a shield potion at 75 shield or less, a
+    // Chug Jug when both are low).
+    const float Health = Pawn->GetHealth();
+    const float Shield = Pawn->GetShield();
+    const float MaxHealth = std::max(Pawn->GetMaxHealth(), 1.0f);
+    const float MaxShield = std::max(Pawn->GetMaxShield(), 1.0f);
+    UFortItemDefinition* Best = nullptr;
+    float BestScore = 0.0f;
+    for (const auto& [Definition, Count] : Consumables)
+    {
+        const FFortAthenaAIBotConsumable* Info = Count > 0 ? GetConsumableInfo(Definition) : nullptr;
+        if (!Info)
+        {
+            continue;
+        }
+        const float HealthGain = std::min(Info->Health, std::max(std::min(Info->HealthCap, MaxHealth) - Health, 0.0f));
+        const float ShieldGain = std::min(Info->Shield, std::max(std::min(Info->ShieldCap, MaxShield) - Shield, 0.0f));
+        const float Worth = Info->Health + Info->Shield;
+        if (HealthGain + ShieldGain < std::min(Worth * 0.5f, 25.0f) || (HealthGain + ShieldGain) < Worth * 0.4f)
+        {
+            continue;
+        }
+        const float Score = (HealthGain * 1.2f + ShieldGain) / Info->UseTime;
+        if (Score > BestScore)
+        {
+            BestScore = Score;
+            Best = Definition;
+        }
+    }
+    if (!Best)
+    {
+        return false;
+    }
+    StopFiring();
+    StopMoving();
+    CancelReload();
+    HealingItem = Best;
+    HealUntil = Now + GetConsumableInfo(Best)->UseTime;
+    // The item in the bot's hands while it uses it, as players see a player's.
+    if (UFortWeaponItemDefinition* ItemWeapon = Cast<UFortWeaponItemDefinition>(Best))
+    {
+        if (AFortWeapon* Held = Pawn->EquipWeaponDefinition(ItemWeapon, FGuid::NewGuid()))
+        {
+            EquippedWeapon = Held;
+            EquippedIndex = -1;
+            bPickaxeEquipped = false;
+        }
+    }
+    Log::Info(L"Battle Royale bots: {} starts using {} ({:.0f} health, {:.0f} shield, {:.1f} s)", BotName, NameOf(Best), Health, Shield, HealUntil - Now);
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortAthenaAIBotController::CancelHeal()
+{
+    if (!HealingItem)
+    {
+        return;
+    }
+    HealingItem = nullptr;
+    HealUntil = 0.0f;
+    // Back to a gun (the item was in its hands), or the pickaxe.
+    if (HasUsableWeapon())
+    {
+        EquipWeapon(BestWeaponIndex());
+    }
+    else if (AFortPlayerPawnAthena* Pawn = GetPawn())
+    {
+        UAthenaPickaxeItemDefinition* Pickaxe = DefaultPickaxe();
+        if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
+        {
+            EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
+            bPickaxeEquipped = true;
+            EquippedIndex = -1;
+        }
+    }
+}
+
+void AFortAthenaAIBotController::SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime)
+{
+    bHasLandingSpot = true;
+    LandingSpot = Spot;
+    LandingRadius = Radius;
+    JumpTime = InJumpTime;
 }
 
 void AFortAthenaAIBotController::OnPossesedPawnDied(AFortPlayerStateAthena* KillerState)

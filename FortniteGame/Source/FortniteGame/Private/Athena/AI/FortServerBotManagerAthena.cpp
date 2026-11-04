@@ -9,6 +9,7 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Athena/FortPoiVolume.h"
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Configuration.h"
 #include "Engine/World.h"
@@ -431,6 +432,10 @@ void UFortServerBotManagerAthena::Tick()
         NextLootRefresh = Now + LootRefreshInterval;
         RefreshLoot(Now);
     }
+    if (bAircraftStarted && !bLandingAssigned && !bMatchEnded)
+    {
+        UpdateFlightPath(Now);
+    }
     // Once the match has ended the bots stand still (the winners' screen is up).
     for (size_t Index = 0; Index < PlayerBots.size() && !bMatchEnded; ++Index)
     {
@@ -720,6 +725,8 @@ void UFortServerBotManagerAthena::OnAircraftPhaseStarted(float Now)
         DropStart = Aircraft->DropStartTime;
         DropEnd = Aircraft->DropEndTime;
     }
+    DropStartTime = DropStart;
+    DropEndTime = DropEnd;
     CurrentAircraft = FWeakObjectPtr(reinterpret_cast<UObject*>(Aircraft));
     if (!Aircraft)
     {
@@ -750,8 +757,220 @@ void UFortServerBotManagerAthena::OnAircraftPhaseStarted(float Now)
     {
         RefreshLoot(Now);
         GatherContainers();
+        GatherLandingSpots();
         InitializeNavigation();
     }
+#endif
+}
+
+void UFortServerBotManagerAthena::GatherLandingSpots()
+{
+#if WITH_SERVER_CODE
+    // 21.40's UFortAthenaAIBotEvaluator_FreeFalling lands at a POI (_SelectNextPOI). 3.x's named locations are its
+    // AFortPoiVolumes tagged Athena.Location.POI.* (Core gives the shapeless ones a box, FortPoiVolume.cpp); the loot
+    // elsewhere is in clusters of chests (houses and farms), which count as spots too.
+    LandingSpots.clear();
+    const auto LootAround = [this](const FVector& Center, float Radius)
+    {
+        float Value = 0.0f;
+        for (const FFortAthenaBotContainer& Container : Containers)
+        {
+            const float Dx = Container.Location.X - Center.X;
+            const float Dy = Container.Location.Y - Center.Y;
+            Value += Dx * Dx + Dy * Dy < Radius * Radius ? (Container.bChest ? 1.0f : 0.3f) : 0.0f;
+        }
+        for (const FFortAthenaBotLoot& Entry : Loot)
+        {
+            const float Dx = Entry.Location.X - Center.X;
+            const float Dy = Entry.Location.Y - Center.Y;
+            Value += Entry.bWeapon && Dx * Dx + Dy * Dy < Radius * Radius ? 0.3f : 0.0f;
+        }
+        return Value;
+    };
+    size_t Named = 0;
+    for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(GetGameMode(), AFortPoiVolume::StaticClass()))
+    {
+        AFortPoiVolume* Volume = static_cast<AFortPoiVolume*>(Actor);
+        std::wstring Name;
+        for (const FGameplayTag& Tag : Volume->LocationTags.GameplayTags)
+        {
+            const std::wstring TagName = Tag.TagName.ToString().ToStdString();
+            if (TagName.rfind(L"Athena.Location.POI.", 0) == 0)
+            {
+                Name = TagName.substr(20);
+            }
+        }
+        if (Name.empty())
+        {
+            continue;
+        }
+        const FBox Box = Volume->GetFallbackBox();
+        const FVector Center = Box.IsValid ? Box.GetCenter() : LocationOf(Volume);
+        const float Radius = Box.IsValid ? std::clamp(std::max(Box.GetExtent().X, Box.GetExtent().Y), 4000.0f, 15000.0f) : 8000.0f;
+        if (std::fabs(Center.X) < 1.0f && std::fabs(Center.Y) < 1.0f)
+        {
+            continue;
+        }
+        const float Value = LootAround(Center, Radius);
+        if (Value >= 2.0f)
+        {
+            LandingSpots.push_back({ Center, Radius, Name, Value, 0 });
+            ++Named;
+        }
+    }
+    // Clusters of chests away from the named locations: a 60 m grid, three chests or more to a cell.
+    std::map<std::pair<int32_t, int32_t>, std::vector<FVector>> Cells;
+    for (const FFortAthenaBotContainer& Container : Containers)
+    {
+        if (Container.bChest)
+        {
+            Cells[{ static_cast<int32_t>(std::floor(Container.Location.X / 6000.0f)), static_cast<int32_t>(std::floor(Container.Location.Y / 6000.0f)) }].push_back(Container.Location);
+        }
+    }
+    for (const auto& [Cell, Chests] : Cells)
+    {
+        if (Chests.size() < 3)
+        {
+            continue;
+        }
+        FVector Center;
+        for (const FVector& Chest : Chests)
+        {
+            Center = Center + Chest * (1.0f / static_cast<float>(Chests.size()));
+        }
+        bool bNearNamed = false;
+        for (size_t Index = 0; Index < Named; ++Index)
+        {
+            const FFortAthenaBotLandingSpot& Spot = LandingSpots[Index];
+            bNearNamed = bNearNamed || (Spot.Location.X - Center.X) * (Spot.Location.X - Center.X) + (Spot.Location.Y - Center.Y) * (Spot.Location.Y - Center.Y) < Spot.Radius * Spot.Radius;
+        }
+        if (!bNearNamed)
+        {
+            LandingSpots.push_back({ Center, 4500.0f, std::format(L"chests at ({:.0f}, {:.0f})", Center.X, Center.Y), LootAround(Center, 4500.0f), 0 });
+        }
+    }
+    std::sort(LandingSpots.begin(), LandingSpots.end(), [](const FFortAthenaBotLandingSpot& A, const FFortAthenaBotLandingSpot& B) { return A.Loot > B.Loot; });
+    std::wstring Top;
+    for (size_t Index = 0; Index < LandingSpots.size() && Index < 8; ++Index)
+    {
+        Top += std::format(L"{}{} ({:.0f})", Index ? L", " : L"", LandingSpots[Index].Name, LandingSpots[Index].Loot);
+    }
+    Log::Info(L"Battle Royale bots: {} landing spots, {} of them named locations; the richest: {}", LandingSpots.size(), Named, Top);
+#endif
+}
+
+void UFortServerBotManagerAthena::UpdateFlightPath(float Now)
+{
+#if WITH_SERVER_CODE
+    // The bus flies a straight line at a steady speed: two of its locations a moment apart give its path.
+    AActor* Aircraft = GetAircraft();
+    if (!Aircraft || LandingSpots.empty())
+    {
+        bLandingAssigned = true;
+        Log::Info(L"Battle Royale bots: no {}, the bots drop near the bus's path", Aircraft ? L"landing spots" : L"aircraft");
+        return;
+    }
+    const FVector Location = LocationOf(Aircraft);
+    if (!bHasFlightSample)
+    {
+        bHasFlightSample = true;
+        FlightSample = Location;
+        FlightSampleTime = Now;
+        return;
+    }
+    const float Moved = std::sqrt((Location.X - FlightSample.X) * (Location.X - FlightSample.X) + (Location.Y - FlightSample.Y) * (Location.Y - FlightSample.Y));
+    if (Moved < 2000.0f || Now - FlightSampleTime < 0.5f)
+    {
+        // The bus waiting on its start: sampled again from where it is.
+        if (Now - FlightSampleTime > 2.0f && Moved < 100.0f)
+        {
+            FlightSample = Location;
+            FlightSampleTime = Now;
+        }
+        return;
+    }
+    FlightSpeed = Moved / (Now - FlightSampleTime);
+    FlightDirection = FVector((Location.X - FlightSample.X) / Moved, (Location.Y - FlightSample.Y) / Moved, 0.0f);
+    FlightSample = Location;
+    FlightSampleTime = Now;
+    bLandingAssigned = true;
+    Log::Info(L"Battle Royale bots: the bus flies at {:.0f} u/s heading ({:.2f}, {:.2f})", FlightSpeed, FlightDirection.X, FlightDirection.Y);
+    AssignLandingSpots(Now);
+#endif
+}
+
+void UFortServerBotManagerAthena::AssignLandingSpots(float Now)
+{
+#if WITH_SERVER_CODE
+    // Each spot's moment: when the bus passes closest to it, within the drop zone. It is reachable from there when a
+    // skydive covers the distance (Core's 🟡: 700 m; a bot glides ~12 m/s through a 60-80 s fall).
+    constexpr float MaxReach = 70000.0f;
+    struct FCandidate
+    {
+        size_t Spot;
+        float Time;
+        float Reach;
+    };
+    std::vector<FCandidate> Candidates;
+    const float Earliest = std::max(DropStartTime + 1.0f, Now + 0.5f);
+    const float Latest = DropEndTime - 1.0f;
+    for (size_t Index = 0; Index < LandingSpots.size() && Latest > Earliest; ++Index)
+    {
+        const FVector& Spot = LandingSpots[Index].Location;
+        const float Along = (Spot.X - FlightSample.X) * FlightDirection.X + (Spot.Y - FlightSample.Y) * FlightDirection.Y;
+        const float Time = std::clamp(FlightSampleTime + Along / FlightSpeed, Earliest, Latest);
+        const float Travelled = (Time - FlightSampleTime) * FlightSpeed;
+        const float JumpX = FlightSample.X + FlightDirection.X * Travelled;
+        const float JumpY = FlightSample.Y + FlightDirection.Y * Travelled;
+        const float Reach = std::sqrt((Spot.X - JumpX) * (Spot.X - JumpX) + (Spot.Y - JumpY) * (Spot.Y - JumpY));
+        if (Reach <= MaxReach)
+        {
+            Candidates.push_back({ Index, Time, Reach });
+        }
+    }
+    if (Candidates.empty())
+    {
+        Log::Info(L"Battle Royale bots: no landing spot in reach of the bus's path, the bots drop near it");
+        return;
+    }
+    // Spread: a spot's loot is shared by the bots sent there (its weight falls with the square of their number), with a
+    // little chance in it, and a far spot counts a little less. -CoreBotHotDrop sends everyone to the richest one.
+    const bool bHotDrop = Configuration::Get().bBotHotDrop;
+    int32_t Assigned = 0;
+    for (const auto& Bot : PlayerBots)
+    {
+        if (!Bot->IsAlive() || Bot->GetState() != EFortAthenaAIBotState::InAircraft)
+        {
+            continue;
+        }
+        const FCandidate* Best = nullptr;
+        float BestScore = -1.0f;
+        for (const FCandidate& Candidate : Candidates)
+        {
+            const FFortAthenaBotLandingSpot& Spot = LandingSpots[Candidate.Spot];
+            const float Shared = (1.0f + static_cast<float>(Spot.Bots)) * (1.0f + static_cast<float>(Spot.Bots));
+            const float Score = bHotDrop ? Spot.Loot : Spot.Loot * RandomRange(0.7f, 1.3f) * (1.0f - 0.4f * Candidate.Reach / MaxReach) / Shared;
+            if (Score > BestScore)
+            {
+                BestScore = Score;
+                Best = &Candidate;
+            }
+        }
+        FFortAthenaBotLandingSpot& Spot = LandingSpots[Best->Spot];
+        ++Spot.Bots;
+        Bot->SetLandingSpot(Spot.Location, Spot.Radius, std::clamp(Best->Time + RandomRange(-1.5f, 1.5f), Earliest, Latest));
+        ++Assigned;
+    }
+    std::wstring Used;
+    int32_t SpotsUsed = 0;
+    for (const FFortAthenaBotLandingSpot& Spot : LandingSpots)
+    {
+        if (Spot.Bots > 0)
+        {
+            Used += std::format(L"{}{} x{}", SpotsUsed++ ? L", " : L"", Spot.Name, Spot.Bots);
+        }
+    }
+    Log::Info(L"Battle Royale bots: {} bots land at {} of {} reachable spots: {}", Assigned, SpotsUsed, Candidates.size(), Used);
 #endif
 }
 
@@ -1058,9 +1277,11 @@ void UFortServerBotManagerAthena::RefreshLoot(float Now)
             bWeapon = Found->second;
         }
         const bool bAmmo = Cast<UFortAmmoItemDefinition>(Definition) != nullptr;
-        if (bWeapon || bAmmo)
+        // A bandage, medkit, shield potion or Chug Jug (21.40's _Loot takes healing items too).
+        const bool bConsumable = !bWeapon && !bAmmo && Weapon && AFortAthenaAIBotController::GetConsumableInfo(Definition) != nullptr;
+        if (bWeapon || bAmmo || bConsumable)
         {
-            Loot.push_back({ TWeakObjectPtr<AFortPickup>(Pickup), LocationOf(Pickup), bWeapon });
+            Loot.push_back({ TWeakObjectPtr<AFortPickup>(Pickup), LocationOf(Pickup), bWeapon, bConsumable });
         }
     }
 #endif

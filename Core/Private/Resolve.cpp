@@ -2326,7 +2326,8 @@ namespace
         // 3.0 moved LastUpdateTime off the channel (UActorChannel lost a double before its bits) into a map on the
         // connection, TMap<TWeakObjectPtr<AActor>, double> at +0x1860: ReplicateActor (3.0 0x1FDAE90) finds or adds the
         // actor's entry (lea rcx, [conn+map]; call FindId / Emplace), loads the map's data (mov rax, [conn+map]) and
-        // stores Driver->Time into the value (movsd [rdx], xmm0). RelevantTime is still the double before the bits.
+        // stores Driver->Time into the value (movsd [rdx], xmm0). RelevantTime is still the double before the bits. 3.1
+        // put it back on the channel (0x1FEF480: movsd [r13 + 80h], xmm0, RelevantTime +0x78), the store found above.
         ptrdiff_t LastUpdateTimes = 0;
         int32_t LastUpdateTimesStores = 0;
         const std::initializer_list<int32_t> MapTimeStore = { 0x0F, 0x5A, 0xC0, 0xF2, 0x0F, 0x11, -1 };
@@ -10345,6 +10346,32 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
         return false;
     }) : -1;
 
+    // 3.1 dropped the fill and its SquadMembers sibling (3.0 slots 0x351 and 0x352): the game mode keeps TeamMembers
+    // itself, appending each player state to its teammates' controllers as it joins a team. A game mode virtual (3.1
+    // 0x9C7410: the player state's dedicated-server flag, then the team join) calls 0x9A6F10, which appends inline:
+    // "movsxd rsi, [r15 + TeamMembers.Num]; ...; mov [r15 + TeamMembers.Num], ecx". Without the fill, the handler needs
+    // nothing more there.
+    int32_t GameModeTeamJoinIndex = -1;
+    if (UpdateTeamMembersIndex < 0 && TeamMembersOffset > 0)
+    {
+        void** GameModeVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeAthena");
+        GameModeTeamJoinIndex = FirstVTableIndexWhere(GameModeVTable, [&](uintptr_t Entry)
+        {
+            for (const auto& [Site, Callee] : CallsOf(Entry))
+            {
+                const uintptr_t End = Finder::FunctionStart(Callee) == Callee ? Finder::FunctionEnd(Callee) : 0;
+                for (uintptr_t Write = Callee; End && Write + 6 <= End; ++Write)
+                {
+                    if (IsDisp32AccessAnyBase(Write, 0x89, -1, TeamMembersNumOffset))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        });
+    }
+
     if (!Remove || !SetTeamPlace || !GetSecondsAlive)
     {
         Log::Error(L"Finder: the pawn-death handler's pieces not found (RemoveFromAlivePlayers 0x{:X}, solo win 0x{:X}, team place 0x{:X}, seconds alive 0x{:X})",
@@ -10370,10 +10397,15 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
         Rva(Remove), Rva(SetTeamPlace), Rva(SoloWin), Rva(GetSecondsAlive), Rva(GetDeathCause), UpdateTeamMembersIndex);
     Log::Info(L"Finder: pawn-death handler: teammates out 0x{:X}, starting players +0x{:X}, players outlived +0x{:X}",
         Rva(reinterpret_cast<uintptr_t>(Natives::AFortPlayerControllerAthena_CountTeammatesOut)), Natives::AFortGameStateAthena_StartingPlayers, Natives::AFortPlayerStateAthena_PlayersOutlived);
-    if (!GetDeathCause || UpdateTeamMembersIndex < 0 || !OutlivedStore)
+    if (GameModeTeamJoinIndex >= 0)
+    {
+        Log::Info(L"Finder: pawn-death handler: no TeamMembers fill; the game mode fills TeamMembers as players join teams (slot 0x{:X})", GameModeTeamJoinIndex);
+    }
+    const bool bTeamMembersFillMissing = UpdateTeamMembersIndex < 0 && GameModeTeamJoinIndex < 0;
+    if (!GetDeathCause || bTeamMembersFillMissing || !OutlivedStore)
     {
         Log::Warning(L"Finder: pawn-death handler: {}{}{}not found, the restored handler goes without",
-            GetDeathCause ? L"" : L"the death cause, ", UpdateTeamMembersIndex >= 0 ? L"" : L"the TeamMembers fill, ", OutlivedStore ? L"" : L"the outlived count, ");
+            GetDeathCause ? L"" : L"the death cause, ", bTeamMembersFillMissing ? L"the TeamMembers fill, " : L"", OutlivedStore ? L"" : L"the outlived count, ");
     }
     return true;
 }

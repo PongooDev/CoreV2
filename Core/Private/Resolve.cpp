@@ -10463,6 +10463,7 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
     // AFortPlayerControllerAthena's ExitAircraft (3.0 0x9A5090) logs "ExitAircraft: %s (Pawn %s)", then, with the new
     // pawn cast to AFortPlayerPawnAthena: "mov dl, 1; mov rcx, rbx; call BeginSkydiving" (0x9A5305). BeginSkydiving
     // (0x9D7F70) starts with "cmp byte ptr [rcx + bIsSkydiving], 0": a pawn already skydiving doesn't start again.
+    // 2.5's (0x9CCA20, called at 0x99A58A) has no such check: it opens with "mov byte ptr [rcx + bIsSkydiving], 1".
     const uintptr_t ExitAircraft = FunctionOf(L"ExitAircraft: %s (Pawn %s)");
     const uintptr_t End = ExitAircraft ? Finder::FunctionEnd(ExitAircraft) : 0;
     for (uintptr_t Site = ExitAircraft ? FindInstruction(ExitAircraft, End, { 0xB2, 0x01 }) : 0; Site; Site = FindInstruction(Site + 1, End, { 0xB2, 0x01 }))
@@ -10471,7 +10472,9 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         const uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
         for (uintptr_t Check = Target; Target && Check < Target + 0x20; ++Check)
         {
-            if (Byte(Check) == 0x80 && IsDisp32Access(Check, 0x80, 7, IsSkydivingOffset) && Byte(Check + 6) == 0)
+            const bool bCheck = IsDisp32Access(Check, 0x80, 7, IsSkydivingOffset) && Byte(Check + 6) == 0;
+            const bool bSet = IsDisp32Access(Check, 0xC6, 0, IsSkydivingOffset) && (Byte(Check + 1) & 0x07) == 0x01 && Byte(Check + 6) == 1;
+            if (bCheck || bSet)
             {
                 Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(Target);
                 Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X})", Target - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());

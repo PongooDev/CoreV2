@@ -19,6 +19,8 @@ public:
     ULocalPlayer* SetupInitialLocalPlayer(FString& OutError);
 
     static void Hook();
+    // On the game thread, once the detours are in: gives a viewport that was set up before them its console.
+    static void CreateConsoleIfMissing();
 
 private:
     static inline ULocalPlayer* (*SetupInitialLocalPlayerOG)(UGameViewportClient* This, FString& OutError) = nullptr;

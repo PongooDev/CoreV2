@@ -5,6 +5,7 @@
 #include "UObject/Object.h"
 
 class UAssetManager;
+class UGameViewportClient;
 class UNetDriver;
 class UWorld;
 
@@ -23,6 +24,7 @@ class UEngine : public UObject
 {
     DefineUnrealClass(UEngine, Engine)
     DefineUProperty(UClass*, ConsoleClass)
+    DefineUProperty(UGameViewportClient*, GameViewport)
     DefineUProperty(float, NetClientTicksPerSecond)
     DefineUProperty(UAssetManager*, AssetManager)
     DefineUProperty(UClass*, NavigationSystemClass)

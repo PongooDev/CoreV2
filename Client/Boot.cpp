@@ -99,6 +99,7 @@ static void Start()
 
     GameThread::Enqueue([]
     {
+        UGameViewportClient::CreateConsoleIfMissing();
         APlayerController::Hook();
         AFortPlayerController::HookVoice();
         AFortPlayerController::HookClientNatives();

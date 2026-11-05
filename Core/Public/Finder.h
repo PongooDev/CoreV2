@@ -257,4 +257,7 @@ namespace Finder
     bool ResolvePickupCanInteractLive(ptrdiff_t PickedUpOffset);
     // IFortInteractInterface::ServerOnAttemptInteract's interface slot and UObject::GetInterfaceAddress.
     bool ResolveServerOnAttemptInteractLive();
+    // From 3.5: the delegate instance vtable of ABuildingItemCollectorActor::CheckDepositGoalReached's output timer
+    // (Natives::ABuildingItemCollectorActor_GrantOutputDelegateVTable), from CollectorDefault's interact.
+    bool ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UClass* InteractInterface);
 }

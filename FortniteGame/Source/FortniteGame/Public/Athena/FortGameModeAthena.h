@@ -114,6 +114,10 @@ public:
     // bus is under way on builds whose playlists bring their own game data (from 1.11, #238), at once before them.
     void ApplyContainerSpawnPercents();
 
+    // Has the map info roll the placed vending machines' rarities and what they sell (AFortAthenaMapInfo::
+    // SpawnVendingMachines, from 3.5, #257), with the world's loot tables, so they sell from warmup on.
+    void SpawnVendingMachines();
+
     // Has the map info spawn the match's Supply Llamas (AFortAthenaMapInfo::SpawnLlamas, from 3.3, #243) once the bus is
     // under way. Builds without them do nothing.
     void WatchLlamas();

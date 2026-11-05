@@ -2,6 +2,7 @@
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortAthenaSupplyDrop.h"
 #include "Athena/FortGameStateAthena.h"
+#include "Building/BuildingItemCollectorActor.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "GameFramework/Volume.h"
@@ -154,5 +155,71 @@ void AFortAthenaMapInfo::SpawnLlamas()
         Log::Info(L"Battle Royale: Supply Llama {} at ({:.0f}, {:.0f}, {:.0f})", GetNameSafe(SupplyDrop).ToStdString(), Placed.X, Placed.Y, Placed.Z);
     }
     Log::Info(L"Battle Royale: {} of {} Supply Llamas spawned (quantity {}-{}), {} points off open ground picked again", Spawned, Quantity, QuantityMin, QuantityMax, Repicked);
+#endif
+}
+
+void AFortAthenaMapInfo::SpawnVendingMachines()
+{
+#if WITH_SERVER_CODE
+    // The vending machines are placed in the map (B_Athena_VendingMachine_C). Their BeginPlay (3.5.1 0xA84B40) starts the
+    // input cycle at StartingGoalLevel 0, and nothing sells: no rarity is rolled and no output picked, as the server step
+    // that did both is gone (nothing in 3.5.1 reads VendingMachineClass or VendingMachineRarityCount but reflection).
+    // 3.5's patch notes: each machine randomly picks a rarity, and everything it sells matches it.
+    UClass* VendingMachine = HasVendingMachines() ? static_cast<UClass*>(VendingMachineClass) : nullptr;
+    if (!VendingMachine || !ABuildingItemCollectorActor::HasOutputItems())
+    {
+        return;
+    }
+
+    // The row's levels are the weights: level 0 no machine, level N rarity N - 1 (the inputs' cost rows have 5 levels).
+    constexpr int32_t RarityCount = 5;
+    float Weights[RarityCount + 1] = {};
+    float TotalWeight = 0.0f;
+    const FScalableFloat& RarityWeights = VendingMachineRarityCount;
+    for (int32_t Level = 0; Level <= RarityCount; ++Level)
+    {
+        Weights[Level] = std::max(RarityWeights.GetValueAtLevel(static_cast<float>(Level)), 0.0f);
+        TotalWeight += Weights[Level];
+    }
+
+    UWorld* World = GetWorld();
+    int32_t Placed = 0;
+    int32_t Destroyed = 0;
+    int32_t ByRarity[RarityCount] = {};
+    for (TObjectIterator<ABuildingItemCollectorActor> It; It; ++It)
+    {
+        ABuildingItemCollectorActor* Machine = *It;
+        if (Machine->GetWorld() != World || Machine->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)) || !Machine->IsA(VendingMachine) || Machine->bDestroyed)
+        {
+            continue;
+        }
+        ++Placed;
+
+        int32_t Level = RarityCount;
+        float Roll = FMath::FRand() * TotalWeight;
+        for (int32_t Candidate = 0; Candidate < RarityCount; ++Candidate)
+        {
+            if (Roll < Weights[Candidate])
+            {
+                Level = Candidate;
+                break;
+            }
+            Roll -= Weights[Candidate];
+        }
+        if (Level == 0 && TotalWeight > 0.0f)
+        {
+            // ABuildingActor's K2_DestroyActor kills the building (bDestroyed, hidden; it replicates).
+            Machine->K2_DestroyActor();
+            ++Destroyed;
+            continue;
+        }
+
+        Machine->StartingGoalLevel = std::max(Level, 1) - 1;
+        Machine->FinishItemSelectionSetup();
+        Machine->ForceNetUpdate();
+        ++ByRarity[std::max(Level, 1) - 1];
+    }
+    Log::Info(L"Battle Royale: {} of {} vending machines spawn ({} Common, {} Uncommon, {} Rare, {} Epic, {} Legendary), {} destroyed",
+        Placed - Destroyed, Placed, ByRarity[0], ByRarity[1], ByRarity[2], ByRarity[3], ByRarity[4], Destroyed);
 #endif
 }

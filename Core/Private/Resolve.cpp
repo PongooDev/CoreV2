@@ -10395,6 +10395,104 @@ bool Finder::ResolveServerOnAttemptInteractLive()
     return true;
 }
 
+bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UClass* InteractInterface)
+{
+    if (Natives::ABuildingItemCollectorActor_GrantOutputDelegateVTable)
+    {
+        return true;
+    }
+    static bool bTried = false;
+    if (bTried)
+    {
+        return false;
+    }
+    bTried = true;
+
+    // ABuildingItemCollectorActor's IFortInteractInterface::ServerOnAttemptInteract (3.5.1 0xAA1F00) deposits first: its
+    // first direct call (0xA87CD0), which takes the input and then calls CheckDepositGoalReached (0xA866C0). That one
+    // sets a timer with a lambda's delegate instance, stored as `lea rax, [vtable]; mov [rdi], rax` twice: the functor
+    // base's vtable (0x32CDE70), then the instance's own (0x32CDEB8). The instance's CreateCopy (slot 6, 0xA87F90) does
+    // the same, so its last vtable is the instance's own; its Execute (slot 7, 0xA8A4E0) reads the three weak pointers
+    // (three calls to FWeakObjectPtr::Get) and then only the controller's MyFortPawn: the GrantOutput call is gone.
+    void* Interface = CollectorDefault && InteractInterface && ResolveServerOnAttemptInteractLive() ? Natives::UObject_GetInterfaceAddress(CollectorDefault, InteractInterface) : nullptr;
+    void** InterfaceVTable = Interface ? *reinterpret_cast<void***>(Interface) : nullptr;
+    const uintptr_t Interact = VTableEntry(InterfaceVTable, Natives::IFortInteractInterface_ServerOnAttemptInteractIndex);
+    const uintptr_t InteractEnd = Interact ? Finder::FunctionEnd(Interact) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> InteractCalls = InteractEnd ? Finder::DirectCalls(Interact, InteractEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    const uintptr_t Deposit = InteractCalls.empty() ? 0 : InteractCalls.front().second;
+    const uintptr_t DepositEnd = IsInText(Deposit) ? Finder::FunctionEnd(Deposit) : 0;
+
+    const auto LeaTargets = [](uintptr_t Begin, uintptr_t End)
+    {
+        std::vector<uintptr_t> Targets;
+        for (uintptr_t Lea = End ? FindInstruction(Begin, End, { 0x48, 0x8D, 0x05 }) : 0; Lea; Lea = FindInstruction(Lea + 1, End, { 0x48, 0x8D, 0x05 }))
+        {
+            Targets.push_back(Finder::RelativeTarget(Lea, 3, 7));
+        }
+        return Targets;
+    };
+    const auto IsDelegateVTable = [&LeaTargets](uintptr_t Candidate)
+    {
+        void** VTable = reinterpret_cast<void**>(Candidate);
+        if (!Candidate || IsInText(Candidate) || !Finder::IsReadable(VTable, 9 * sizeof(void*)))
+        {
+            return false;
+        }
+        const uintptr_t CreateCopy = VTableEntry(VTable, 6);
+        const uintptr_t Execute = VTableEntry(VTable, 7);
+        const uintptr_t CreateCopyEnd = CreateCopy ? Finder::FunctionEnd(CreateCopy) : 0;
+        const uintptr_t ExecuteEnd = Execute ? Finder::FunctionEnd(Execute) : 0;
+        if (!CreateCopyEnd || !ExecuteEnd || !VTableEntry(VTable, 8))
+        {
+            return false;
+        }
+        const std::vector<uintptr_t> CopyVTables = LeaTargets(CreateCopy, CreateCopyEnd);
+        if (CopyVTables.empty() || CopyVTables.back() != Candidate)
+        {
+            return false;
+        }
+        int32_t MostCallsToOne = 0;
+        const std::vector<std::pair<uintptr_t, uintptr_t>> ExecuteCalls = Finder::DirectCalls(Execute, ExecuteEnd);
+        for (const auto& [Site, Target] : ExecuteCalls)
+        {
+            MostCallsToOne = std::max(MostCallsToOne, static_cast<int32_t>(std::count_if(ExecuteCalls.begin(), ExecuteCalls.end(), [Target](const auto& Call) { return Call.second == Target; })));
+        }
+        return MostCallsToOne == 3;
+    };
+
+    uintptr_t CheckGoal = 0;
+    uintptr_t DelegateVTable = 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> DepositCalls = DepositEnd ? Finder::DirectCalls(Deposit, DepositEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    for (const auto& [Site, Callee] : DepositCalls)
+    {
+        const uintptr_t CalleeEnd = IsInText(Callee) ? Finder::FunctionEnd(Callee) : 0;
+        for (const uintptr_t Target : LeaTargets(Callee, CalleeEnd))
+        {
+            if (IsDelegateVTable(Target))
+            {
+                CheckGoal = Callee;
+                DelegateVTable = Target;
+            }
+        }
+        if (DelegateVTable)
+        {
+            break;
+        }
+    }
+
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+    if (!DelegateVTable)
+    {
+        Log::Error(L"Finder: ABuildingItemCollectorActor's output timer not found (interact 0x{:X}, deposit 0x{:X}, {} calls)", Rva(Interact), Rva(Deposit), DepositCalls.size());
+        return false;
+    }
+    Natives::ABuildingItemCollectorActor_GrantOutputDelegateVTable = reinterpret_cast<void**>(DelegateVTable);
+    Natives::ABuildingItemCollectorActor_GrantOutputDelegateExecuteIndex = 7;
+    Log::Info(L"Finder: ABuildingItemCollectorActor: interact 0x{:X}, deposit 0x{:X}, CheckDepositGoalReached 0x{:X}, output timer delegate vtable 0x{:X} (Execute 0x{:X})",
+        Rva(Interact), Rva(Deposit), Rva(CheckGoal), Rva(DelegateVTable), Rva(VTableEntry(reinterpret_cast<void**>(DelegateVTable), 7)));
+    return true;
+}
+
 namespace
 {
     // "Opcode ModRM disp32" at Site, addressing [base + disp32] (ModRM mod 10, no SIB byte), with ModRM's reg field Reg

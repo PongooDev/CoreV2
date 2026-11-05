@@ -331,6 +331,11 @@ namespace Natives
     inline int32_t IFortInteractInterface_CanInteractIndex = -1;
     // IFortInteractInterface::ServerOnAttemptInteract(const FInteractionType&)'s slot in the interface's own vtable.
     inline int32_t IFortInteractInterface_ServerOnAttemptInteractIndex = -1;
+    // From 3.5 (Finder::ResolveItemCollectorGrantOutputLive): the vtable of the timer delegate instance that
+    // ABuildingItemCollectorActor::CheckDepositGoalReached (3.5.1 0xA866C0) sets to grant a collector's output
+    // (0x32CDEB8), and its Execute and ExecuteIfSafe slots (7 and 8).
+    inline void** ABuildingItemCollectorActor_GrantOutputDelegateVTable = nullptr;
+    inline int32_t ABuildingItemCollectorActor_GrantOutputDelegateExecuteIndex = -1;
     inline int32_t AFortGameModeZone_CreateAIDirectorIndex = -1;
     inline void (*AFortAIDirector_StopEncounter)(UObject* This, UObject* EncounterToStop, uint8_t EncounterStopReason, bool bForceKillAI, bool bBroadcastStop) = nullptr;
     inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;

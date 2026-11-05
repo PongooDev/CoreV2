@@ -29,6 +29,12 @@ public:
     DefineUProperty(UClass*, LlamaClass)
     DefineUStructProperty(FScalableFloat, LlamaQuantityMin)
     DefineUStructProperty(FScalableFloat, LlamaQuantityMax)
+    // The vending machine (from 3.5; B_Athena_VendingMachine_C) and the weights of its rarities (AthenaGameData's
+    // Default.VendingMachine.RarityWeights, levels 0 to 5: 75 for no machine, then 10 Common, 20 Uncommon, 20 Rare, 7.5
+    // Epic and 5 Legendary).
+    DefineUProperty(UClass*, VendingMachineClass)
+    DefineUStructProperty(FScalableFloat, VendingMachineRarityCount)
+    static bool HasVendingMachines() { return Member_VendingMachineClass.IsAvailable() && Member_VendingMachineRarityCount.IsAvailable(); }
     // Where the bus may drop players: the island, which PickSupplyDropLocation keeps its points in.
     DefineUProperty(FBox2D, AircraftDropZone)
     DefineUProperty(AVolume*, AircraftDropVolume)
@@ -44,4 +50,8 @@ public:
     AFortAthenaSupplyDrop* SpawnSupplyDropAtLocation(const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass);
     // Spawns the match's Supply Llamas at random points of the island (from 3.3; stripped, Core supplies its body).
     void SpawnLlamas();
+    // Rolls a rarity for each of the map's placed vending machines from VendingMachineRarityCount: no machine (it is
+    // destroyed), or Common to Legendary, which sets its StartingGoalLevel (prices 100 to 500 a material, its colour) and
+    // the loot tier of the three items it sells (from 3.5; the server step is stripped, Core supplies it).
+    void SpawnVendingMachines();
 };

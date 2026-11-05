@@ -44,6 +44,7 @@
 #include "AI/FortAIGoalManager.h"
 #include "Building/BuildingActor.h"
 #include "Building/BuildingContainer.h"
+#include "Building/BuildingItemCollectorActor.h"
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "Building/BuildingTrap.h"
 #include "Building/BuildingTrapDefender.h"
@@ -333,6 +334,7 @@ static void InstallHooks()
             AFortAthenaSupplyDrop::HookNatives();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
+            ABuildingItemCollectorActor::HookVTables();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
             UCharacterMovementComponent::HookServerMove(L"/Script/FortniteGame.FortMovementComp_CharacterAthena");

@@ -250,6 +250,17 @@ void AFortGameModeAthena::ApplyContainerSpawnPercents()
 #endif
 }
 
+void AFortGameModeAthena::SpawnVendingMachines()
+{
+#if WITH_SERVER_CODE
+    AFortAthenaMapInfo* MapInfo = AFortAthenaMapInfo::StaticClass() && AFortAthenaMapInfo::HasVendingMachines() ? FindMapInfo(GetWorld()) : nullptr;
+    if (MapInfo)
+    {
+        MapInfo->SpawnVendingMachines();
+    }
+#endif
+}
+
 FName AFortGameModeAthena::RedirectLootTierGroup(FName TierGroup)
 {
     // The override (1.7.2 0x3FA190) is intact, but its caller went with the stripped container and building code, so

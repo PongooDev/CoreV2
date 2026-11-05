@@ -2,6 +2,7 @@
 
 #include "FortGameState.h"
 
+class AFortAthenaAircraft;
 class AFortAthenaMapInfo;
 class UFortPlaylistAthena;
 
@@ -49,6 +50,12 @@ public:
     // ApplyPlaylistDataTables (0x9DC890) copies its tables over the default ones.
     DefineUProperty(UFortPlaylistAthena*, CurrentPlaylistData)
     static bool HasCurrentPlaylistData() { return Member_CurrentPlaylistData.IsAvailable(); }
+
+    // 3.5: EAirCraftBehavior (1: OpposingAirCraftForEachTeam, 50v50's) and the aircrafts StartAircraftPhase spawns, one
+    // per team in that behaviour. GetAircraftIndex (3.5.1 0x9E5750) maps a player state to its aircraft from them.
+    DefineUProperty(uint8_t, AirCraftBehavior)
+    DefineUProperty(TArray<AFortAthenaAircraft*>, Aircrafts)
+    static bool HasAircrafts() { return Member_AirCraftBehavior.IsAvailable() && Member_Aircrafts.IsAvailable(); }
 
     static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
 };

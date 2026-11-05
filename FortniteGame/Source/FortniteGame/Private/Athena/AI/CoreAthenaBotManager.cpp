@@ -1419,6 +1419,28 @@ void FCoreAthenaBotManager::AddToAliveBots(FCoreAthenaBotController* Bot)
         State ? static_cast<EFortTeam>(State->TeamIndex).ToString() : std::wstring(L"no team"), Bot->GetController() ? Bot->GetController()->GetName().ToStdString() : std::wstring(), Bot->GetPawn() ? Bot->GetPawn()->GetName().ToStdString() : std::wstring(L"no pawn"));
 }
 
+AFortAthenaAircraft* FCoreAthenaBotManager::AircraftOfTeam(AFortGameStateAthena* GameState, uint8_t Team, AFortAthenaAircraft* DefaultAircraft)
+{
+#if WITH_SERVER_CODE
+    // 3.5's AFortGameStateAthena::GetAircraftIndex (3.5.1 0x9E5750) for a bot's team: with OpposingAirCraftForEachTeam
+    // (50v50: one bus per team) the aircraft is Aircrafts[the team less HumanPvP_Team1], else the only one (index 0). The
+    // index is unbounded during the setup and the warmup, and from the aircraft phase on it is 0 outside Aircrafts.
+    if (!GameState || !AFortGameStateAthena::HasAircrafts() || GameState->AirCraftBehavior != 1)
+    {
+        return DefaultAircraft;
+    }
+    const TArray<AFortAthenaAircraft*>& Aircrafts = GameState->GetMember_Aircrafts();
+    int32_t Index = static_cast<int32_t>(Team) - static_cast<int32_t>(EFortTeam::GetHumanPvP_Team1());
+    if (Index < 0 || Index >= Aircrafts.Num())
+    {
+        Index = 0;
+    }
+    return Aircrafts.IsValidIndex(Index) && Aircrafts[Index] ? Aircrafts[Index] : DefaultAircraft;
+#else
+    return DefaultAircraft;
+#endif
+}
+
 void FCoreAthenaBotManager::OnAircraftPhaseStarted(float Now)
 {
 #if WITH_SERVER_CODE
@@ -1452,7 +1474,7 @@ void FCoreAthenaBotManager::OnAircraftPhaseStarted(float Now)
             // in its first two thirds.
             // A bot on a player's team waits for its player (UpdatePlayerTeamBots), else goes at the drop zone's end.
             const float T = Bot->IsOnPlayersTeam() && HasAlivePlayerOnTeam(Athena, Bot->GetTeam(), HasSquadsInTeams() ? Bot->GetSquad() : 0) ? 1.0f : std::pow(FMath::FRand(), 1.4f);
-            Bot->EnterAircraft(DropStart + 1.0f + (DropEnd - DropStart - 3.0f) * T, DropEnd - 1.0f);
+            Bot->EnterAircraft(AircraftOfTeam(GameState, Bot->GetTeam(), Aircraft), DropStart + 1.0f + (DropEnd - DropStart - 3.0f) * T, DropEnd - 1.0f);
         }
     }
     BotsAtStart = GetAliveBotCount();
@@ -1775,6 +1797,11 @@ void FCoreAthenaBotManager::AssignLandingSpots(float Now)
         if (Bot->IsFollowingTeammateDrop())
         {
             ++Assigned;
+            continue;
+        }
+        // The spots are timed along the first bus's path; a bot on another team's bus (50v50) drops near its own bus's.
+        if (Bot->GetAircraft() != GetAircraft())
+        {
             continue;
         }
         const bool bWaitsForPlayer = Bot->IsOnPlayersTeam() && HasAlivePlayerOnTeam(GetGameMode(), Bot->GetTeam());

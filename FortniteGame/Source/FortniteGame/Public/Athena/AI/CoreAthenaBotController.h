@@ -14,6 +14,7 @@ class AAIController;
 class AActor;
 class ABuildingContainer;
 class ABuildingSMActor;
+class AFortAthenaAircraft;
 class AFortGameModeAthena;
 class AFortPawn;
 class AFortPickup;
@@ -262,7 +263,9 @@ public:
     // Spawns the warmup pawn at Location and possesses it.
     bool SpawnPawnAt(const FVector& Location, float Yaw, bool bSkydive);
     // The bus has left: the warmup pawn goes, the bot rides the aircraft until its jump.
-    void EnterAircraft(float JumpTime, float LatestJumpTime);
+    void EnterAircraft(AFortAthenaAircraft* InAircraft, float JumpTime, float LatestJumpTime);
+    // The aircraft the bot rides: its team's where the match has one per team (50v50), else the only one.
+    AActor* GetAircraft() const { return reinterpret_cast<AActor*>(BoardedAircraft.Get()); }
     // Leaves the match (a surplus bot, or the match ending): its pawn and controller are destroyed.
     void Destroy();
 
@@ -633,6 +636,8 @@ private:
     bool bPickaxeEquipped = false;
     int32_t Kills = 0;
     int32_t ShotsFired = 0;
+
+    FWeakObjectPtr BoardedAircraft;
 
     // Timers (world seconds).
     float JumpTime = 0.0f;

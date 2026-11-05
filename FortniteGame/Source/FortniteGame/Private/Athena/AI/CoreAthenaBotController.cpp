@@ -1420,8 +1420,9 @@ void FCoreAthenaBotController::ApplyStartingHealth()
     Pawn->SetShield(Settings.StartingShield);
 }
 
-void FCoreAthenaBotController::EnterAircraft(float InJumpTime, float InLatestJumpTime)
+void FCoreAthenaBotController::EnterAircraft(AFortAthenaAircraft* InAircraft, float InJumpTime, float InLatestJumpTime)
 {
+    BoardedAircraft = FWeakObjectPtr(reinterpret_cast<UObject*>(InAircraft));
     // The bus has left: like a player's, the warmup pawn goes (StartAircraftPhase destroys theirs) and the bot rides it.
     StopFiring();
     if (AFortPlayerPawnAthena* Pawn = GetPawn())
@@ -2102,7 +2103,7 @@ void FCoreAthenaBotController::JumpOffBus(float Now)
     {
         return;
     }
-    AActor* Aircraft = Manager->GetAircraft();
+    AActor* Aircraft = GetAircraft();
     const FVector BusLocation = Aircraft ? LocationOf(Aircraft) : LastKnownPosition + FVector(0.0f, 0.0f, 15000.0f);
     const FVector Start(BusLocation.X + RandomRange(-300.0f, 300.0f), BusLocation.Y + RandomRange(-300.0f, 300.0f), BusLocation.Z - 500.0f);
 

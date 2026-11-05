@@ -15,6 +15,7 @@
 
 class ABuildingContainer;
 class AController;
+class AFortAthenaAircraft;
 class AFortGameModeAthena;
 class AFortGameStateAthena;
 class AFortPickup;
@@ -192,6 +193,8 @@ public:
     int32_t CountHuntersOf(const AFortPawn* Target, const FCoreAthenaBotController* Except) const;
     // The battle bus while it flies (found when the aircraft phase starts).
     AActor* GetAircraft() const { return reinterpret_cast<AActor*>(CurrentAircraft.Get()); }
+    // The aircraft a team's bots ride (AFortGameStateAthena::GetAircraftIndex's), DefaultAircraft where there is one bus.
+    static AFortAthenaAircraft* AircraftOfTeam(AFortGameStateAthena* GameState, uint8_t Team, AFortAthenaAircraft* DefaultAircraft);
 
     // A bot's shot hit Victim (a bot's or a player's pawn): its shield, then its health; at 0 it dies, the bot's
     // elimination (AFortPawn::ForceKill with the bot's controller).

@@ -1952,13 +1952,19 @@ void FCoreAthenaBotManager::UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, A
     // team's players, and Core's of its bots. TeamAlivePlayers stays the players' (the game's own win check, which
     // ShouldHoldNativeWinCheck holds while bots are in, reads it). The HUD redraws its count when PlayersLeft changes
     // (3.2 0x2746410), which UpdateCounts sets after this; the map screen reads it each frame (0x2747150).
-    if (!AFortGameStateAthena::HasTeamXPlayersLeft() || !AFortGameModeAthena::HasTeamAlivePlayers() || !HasSquadsInTeams())
+    // 50v50 too, not only Teams of 20: 3.5.1's HUD (0x2882780) shows "<Team>{YourTeamAlive}</>:<EnemyTeam>{EnemyTeamAlive}</>"
+    // whenever the game state's bIsLargeTeamGame is set and TeamXPlayersLeft has two teams or more, in place of
+    // PlayersLeft, and its AddToAlivePlayers (0x9DBFB0) counts a player into TeamXPlayersLeft on the same flag. 50v50's
+    // two sides were left out here, so its HUD stayed at the players' "1 : 0" as the bots came in and went.
+    if (!AFortGameStateAthena::HasTeamXPlayersLeft() || !AFortGameModeAthena::HasTeamAlivePlayers())
     {
         return;
     }
     TArray<int32_t>& TeamXPlayersLeft = GameState->GetMember_TeamXPlayersLeft();
-    // Not a large team game's (the playlist didn't size it, and no player was counted into it).
-    if (TeamXPlayersLeft.Num() == 0)
+    // Not a large team game's: the game state doesn't say it is one, and no player was counted into it (before 3.5 the
+    // gate was the playlist's or the game type's, 3.2 0x9AE8D0).
+    const bool bLargeTeamGame = AFortGameStateAthena::HasLargeTeamGame() && GameState->bIsLargeTeamGame;
+    if (!bLargeTeamGame && TeamXPlayersLeft.Num() == 0)
     {
         return;
     }

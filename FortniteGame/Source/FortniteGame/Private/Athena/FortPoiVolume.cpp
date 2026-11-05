@@ -4,6 +4,7 @@
 #include "Athena/FortPoiManager.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingFoundation.h"
+#include "Components/BrushComponent.h"
 #include "Components/SceneComponent.h"
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
@@ -588,6 +589,19 @@ namespace
         FTransform Transform;
         Transform.Translation = Box.GetCenter();
         PoiCollisionComp->PoiBodyInstance.InitBody(BodySetup, Transform, PoiCollisionComp, nullptr);
+
+        // 3.5's AFortPoiVolume::CheckPawnOverlap (3.5.1 0xA44FA0, from AFortPoiManager's tick, 0xA74120) tests the pawn's
+        // bounds against the volume's BrushComponent's Bounds (0xA687C0) before PoiCollisionComp's overlap test, without
+        // checking the component: with the brush component cooked out, the server crashed reading null's Bounds as soon
+        // as a player's pawn was on the map (#262). The volume gets the component it was saved with, unregistered (no
+        // physics or render state, as the shape is PoiCollisionComp's), its BrushBodySetup the same box and its Bounds
+        // the box. 3.0 to 3.3 never read it.
+        if (UBrushComponent* BrushComponent = NewObject<UBrushComponent>(reinterpret_cast<UObject*>(Volume), UBrushComponent::StaticClass(), FName(L"BrushComponent0")))
+        {
+            BrushComponent->BrushBodySetup = BodySetup;
+            BrushComponent->GetBounds() = FBoxSphereBounds(Box);
+            Volume->BrushComponent = BrushComponent;
+        }
         return true;
     }
 

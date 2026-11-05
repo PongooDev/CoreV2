@@ -1173,11 +1173,18 @@ namespace
             std::memcpy(Params.Orig, DetourNavMesh + Detour::NavMeshOrig, sizeof(Params.Orig));
             Params.TileWidth = *reinterpret_cast<const float*>(DetourNavMesh + Detour::NavMeshTileWidth);
             Params.TileHeight = *reinterpret_cast<const float*>(DetourNavMesh + Detour::NavMeshTileHeight);
-            if (std::fabs(Params.TileWidth - static_cast<float>(RecastNavMesh->TileSizeUU)) > 1.0f || std::fabs(Params.TileHeight - Params.TileWidth) > 1.0f)
+            // The generator's tile is a whole number of cells: FRecastNavMeshGenerator::Init sets the config's tileSize to
+            // TruncToInt(TileSizeUU / CellSize), and the dtNavMesh's tile width is tileSize * cs (3.5.1's FortNavMesh:
+            // 60 cells of 17, 1020, for a TileSizeUU of 1024; earlier builds' cells divide 1024).
+            const float TileSizeUU = static_cast<float>(RecastNavMesh->TileSizeUU);
+            const float CellSize = static_cast<float>(RecastNavMesh->CellSize);
+            const float GeneratorTileSize = CellSize > 0.0f ? std::trunc(TileSizeUU / CellSize) * CellSize : TileSizeUU;
+            if (std::fabs(Params.TileWidth - GeneratorTileSize) > 1.0f || std::fabs(Params.TileHeight - Params.TileWidth) > 1.0f)
             {
-                // Not the dtNavMesh layout Core reads (its tile size is the navmesh's TileSizeUU).
+                // Not the dtNavMesh layout Core reads.
                 TileCache.bDisabled = true;
-                Log::Error(L"Battle Royale navigation: the dtNavMesh's tile size {:.0f} x {:.0f} isn't the navmesh's {:.0f}: no navmesh cache", Params.TileWidth, Params.TileHeight, static_cast<float>(RecastNavMesh->TileSizeUU));
+                Log::Error(L"Battle Royale navigation: the dtNavMesh's tile size {:.0f} x {:.0f} isn't the navmesh's {:.0f} ({:.0f} in {:.1f} cells): no navmesh cache",
+                    Params.TileWidth, Params.TileHeight, GeneratorTileSize, TileSizeUU, CellSize);
                 return;
             }
             TileCache.Params = Params;

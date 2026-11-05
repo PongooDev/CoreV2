@@ -208,15 +208,18 @@ namespace
         // Only a primary slot that takes the new item is swapped, never the harvesting tool's.
         const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
         int32_t FocusedSlot = Bars->GetCurrentQuickBar() == Primary ? static_cast<int32_t>(Bars->GetQuickBar(Primary).CurrentFocusedSlot) : -1;
-        // 3.5 (CL-4000805) leaves the primary bar's CurrentFocusedSlot at the harvesting tool's 0 on the server while the
-        // player holds a weapon from another slot, so a full backpack never swapped (every pickup flew in and back down).
-        // The slot is then the one holding the pawn's current weapon's item.
-        if (FocusedSlot == 0)
+        // 3.5 (CL-4000805) doesn't keep the primary bar's CurrentFocusedSlot up to date on the server as the player
+        // switches slots: it stays at the harvesting tool's 0 (a full backpack never swapped: every pickup flew in and back
+        // down) or at the slot the server last focused, the last pickup's (#269: the swap took that slot, not the held
+        // weapon's). The slot is the one holding the pawn's current weapon's item: a weapon in none of the primary slots
+        // past the tool's (the harvesting tool itself) takes no slot, so it isn't swapped.
+        const AFortPawn* Pawn = PlayerController->MyFortPawn;
+        const AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        if (FocusedSlot >= 0 && Weapon)
         {
-            const AFortPawn* Pawn = PlayerController->MyFortPawn;
-            const AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+            FocusedSlot = 0;
             const int32_t SlotCount = Bars->GetQuickBar(Primary).Slots.Num();
-            for (int32_t Slot = 1; Weapon && Slot < SlotCount; ++Slot)
+            for (int32_t Slot = 1; Slot < SlotCount; ++Slot)
             {
                 const TArray<FGuid>& Items = Bars->GetSlot(Primary, Slot).Items;
                 if (Items.Num() > 0 && Items[0] == Weapon->ItemEntryGuid)

@@ -94,7 +94,7 @@ static void Start()
     UAthenaHUDContext::Hook();
     // Packed builds only: the packer checks its decrypted code as the initial load ends, and patches
     // present at that moment hang the game, so the detours go in once the engine is up.
-    Packed::WaitForCodeCheck();
+    Packed::WaitForCodeCheck(true);
     Hooks::EnableAll();
 
     GameThread::Enqueue([]

@@ -33,6 +33,32 @@ namespace
     constexpr DWORD TimeoutMs = 60000;
     constexpr DWORD CheckTimeoutMs = 300000;
     constexpr DWORD PollMs = 2;
+    // How long to let a 3.5+ menu tick before patching, so the packer's first-tick recheck runs on clean code. The
+    // natural crash was about 14s after the engine came up and a 45s hold cleared it, so a 12s settle sits safely past.
+    constexpr DWORD TickSettleMs = 12000;
+
+    // 3.5 (CL-4000805) is the first build whose packer rechecks the code on the first tick after the menu map loads; up
+    // to 3.3 (CL-3942182) it only checks once as the load ends, so those patch at UEngine::Init / the engine coming up
+    // as they always have. The extra ticking wait is only for this changelist on, where frame-0 patches crash.
+    constexpr uint32_t FirstRecheckChangelist = 4000805;
+
+    // The build's changelist from its version string in .rdata ("++Fortnite+Release-3.5-CL-4000805"); 0 when missing.
+    uint32_t BuildChangelist()
+    {
+        static const uint32_t Changelist = []
+        {
+            static constexpr wchar_t Prefix[] = L"++Fortnite+";
+            const uintptr_t Found = Finder::FindReadOnly(Prefix, sizeof(Prefix) - sizeof(wchar_t));
+            std::wstring Version;
+            for (const wchar_t* Char = reinterpret_cast<const wchar_t*>(Found); Found && Version.size() < 128 && Finder::IsReadable(Char, sizeof(wchar_t)) && *Char; ++Char)
+            {
+                Version.push_back(*Char);
+            }
+            const size_t At = Version.find(L"-CL-");
+            return At == std::wstring::npos ? 0u : static_cast<uint32_t>(std::wcstoul(Version.c_str() + At + 4, nullptr, 10));
+        }();
+        return Changelist;
+    }
 
     struct FImage
     {
@@ -299,7 +325,7 @@ bool Packed::IsPacked()
     return Describe().TextSections >= 2;
 }
 
-void Packed::WaitForCodeCheck()
+void Packed::WaitForCodeCheck(bool bUntilTicking)
 {
     if (Describe().TextSections < 2)
     {
@@ -307,8 +333,8 @@ void Packed::WaitForCodeCheck()
     }
 
     // GEngine is set in FEngineLoop::Init, the step after the initial load whose end the packer checks at, so the
-    // engine existing means the check has been and gone. Waiting on a timer instead would be guesswork: the window
-    // is a phase of start-up, and how long the phase takes moves around between runs.
+    // engine existing means that first check has been and gone. Waiting on a timer instead would be guesswork: the
+    // window is a phase of start-up, and how long the phase takes moves around between runs.
     if (!Natives::GEngine)
     {
         Log::Error(L"Packed exe: GEngine was never resolved, so enabling hooks without waiting for the packer");
@@ -326,6 +352,25 @@ void Packed::WaitForCodeCheck()
             return;
         }
         Sleep(PollMs);
+    }
+
+    // 3.5 checks the code again on the first tick after its menu map loads, so on those builds the engine merely being
+    // up is too early. Wait on past it: until a world exists (the menu map is loading) and then a settle margin, which
+    // puts that tick's check well before any patch. The margin only slows a packed client/launcher's menu by a few
+    // seconds and never runs for the server, which holds at UEngine::Init instead (RunBeforeEngineInit).
+    if (bUntilTicking && Natives::GWorld && BuildChangelist() >= FirstRecheckChangelist)
+    {
+        while (!*Natives::GWorld)
+        {
+            if (GetTickCount() > Deadline)
+            {
+                Log::Error(L"Packed exe: no world after {}s, enabling hooks anyway", CheckTimeoutMs / 1000);
+                return;
+            }
+            Sleep(PollMs);
+        }
+        Log::Info(L"Packed exe: a world is up; letting it tick {}s past the menu-load check before patching", TickSettleMs / 1000);
+        Sleep(TickSettleMs);
     }
 
     Log::Info(L"Packed exe: the engine is up, so the packer has finished checking; enabling hooks now");

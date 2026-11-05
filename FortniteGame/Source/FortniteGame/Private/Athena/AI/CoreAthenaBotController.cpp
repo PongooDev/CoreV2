@@ -6261,6 +6261,66 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
     NextStuckCheck = Now + 1.5f;
     const FVector Location = LocationOf(Pawn);
     const bool bMoving = bHasMoveGoal;
+    // Giving up: the loot or container it was going for, and, stuck again near where it gave up last time, the far goal
+    // it keeps coming back to (the POI it was heading for, the player it hunted); then a detour away from where it was
+    // going. CoreV2 #233: bots stuck wandering around the same spot walked their detour and went back to the goal they
+    // couldn't reach, again and again (a POI was given up only after 3 minutes, a hunted player never).
+    const auto GiveUp = [&](const wchar_t* Why)
+    {
+        StuckChecks = 0;
+        MarkUnreachable(LootTarget.Get());
+        MarkUnreachable(ContainerTarget.Get());
+        LootTarget = nullptr;
+        ContainerTarget = nullptr;
+        SearchUntil = 0.0f;
+        NextContainerSearch = Now + 6.0f;
+        const bool bAgain = Now - LastGiveUpTime < 30.0f && Dist2D(Location, LastGiveUpLocation) < 1500.0f;
+        LastGiveUpTime = Now;
+        LastGiveUpLocation = Location;
+        if (bAgain && Goal == ECoreAthenaBotGoal::TravelToPOI && NextPOI >= 0)
+        {
+            const FCoreAthenaBotLandingSpot* Spot = Manager->GetPOI(NextPOI);
+            Log::Info(L"Battle Royale bots: {} gives up on {} ({}, {:.0f} m short of it)", BotName, Spot ? Spot->Name : std::wstring(L"its next spot"), Why, Dist2D(Location, POIDestination) / 100.0f);
+            ClearNextDestination();
+        }
+        if (bAgain && Goal == ECoreAthenaBotGoal::Hunt && HuntTarget.Get())
+        {
+            Log::Info(L"Battle Royale bots: {} stops going after {} ({})", BotName, NameOf(HuntTarget.Get()), Why);
+            HuntTarget = nullptr;
+            NextHuntSearch = Now + 20.0f;
+        }
+        // The detour: 7 m off to a side or back, away from the way that didn't go.
+        const FVector Away = bHasMoveGoal ? Direction2D(MoveGoal, Location) : FVector();
+        const float Angle = Away.SizeSquared() > 0.01f ? std::atan2(Away.Y, Away.X) + RandomRange(-1.6f, 1.6f) : RandomRange(0.0f, 6.2831853f);
+        bHasWanderGoal = true;
+        WanderGoal = FVector(Location.X + std::cos(Angle) * 700.0f, Location.Y + std::sin(Angle) * 700.0f, Location.Z);
+        NextWanderTime = Now + 3.0f;
+        // On its way somewhere far (a POI, a player), it walks the detour first, then sets off again.
+        DetourUntil = Now + 3.0f;
+        ProgressDistance = -1.0f;
+    };
+    // Moving but getting no nearer (circling an obstacle, sliding along a wall, paths that end where it stands) isn't
+    // caught by the 60 cm check below: 15 s without coming 3 m nearer to a goal over 10 m away counts as stuck too.
+    if (bMoving && Now >= DetourUntil)
+    {
+        const float GoalDistance = Dist2D(Location, MoveGoal);
+        if (ProgressDistance < 0.0f || Dist2D(MoveGoal, ProgressGoal) > 500.0f || GoalDistance < ProgressDistance - 300.0f)
+        {
+            ProgressGoal = MoveGoal;
+            ProgressDistance = GoalDistance;
+            ProgressSince = Now;
+        }
+        else if (GoalDistance > 1000.0f && Now - ProgressSince > 15.0f)
+        {
+            GiveUp(L"no nearer in 15 s");
+            LastStuckCheckLocation = Location;
+            return;
+        }
+    }
+    else if (!bMoving)
+    {
+        ProgressDistance = -1.0f;
+    }
     if (bMoving && Dist2D(Location, LastStuckCheckLocation) < 60.0f)
     {
         ++StuckChecks;
@@ -6286,19 +6346,7 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
         }
         if (StuckChecks >= 3)
         {
-            StuckChecks = 0;
-            MarkUnreachable(LootTarget.Get());
-            MarkUnreachable(ContainerTarget.Get());
-            LootTarget = nullptr;
-            ContainerTarget = nullptr;
-            SearchUntil = 0.0f;
-            NextContainerSearch = Now + 6.0f;
-            bHasWanderGoal = true;
-            const float Angle = RandomRange(0.0f, 6.2831853f);
-            WanderGoal = FVector(Location.X + std::cos(Angle) * 700.0f, Location.Y + std::sin(Angle) * 700.0f, Location.Z);
-            NextWanderTime = Now + 3.0f;
-            // On its way somewhere far (a POI, a player), it walks the detour first, then sets off again.
-            DetourUntil = Now + 3.0f;
+            GiveUp(L"stuck");
         }
     }
     else

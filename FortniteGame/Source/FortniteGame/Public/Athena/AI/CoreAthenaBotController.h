@@ -685,6 +685,13 @@ private:
     int32_t WarmupBrawls = 0;
     FVector LastStuckCheckLocation;
     int32_t StuckChecks = 0;
+    // TryToUnstuck's last give-up (a second one near it gives up the far goal too), and the move goal it measures
+    // progress towards: how near it got and since when.
+    float LastGiveUpTime = -100.0f;
+    FVector LastGiveUpLocation;
+    FVector ProgressGoal;
+    float ProgressDistance = -1.0f;
+    float ProgressSince = 0.0f;
 
     FVector DropTarget;
     FVector MoveGoal;

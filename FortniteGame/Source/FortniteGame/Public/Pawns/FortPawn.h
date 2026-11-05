@@ -126,6 +126,10 @@ public:
     // state), not its stats row's (Battle Royale's, which each machine reads on its own).
     bool MovesWithMovementSet() const;
 
+    // Server, before each frame's replication (UNetDriver::AddPreReplicationCallback): the null entries of the
+    // connections' pawns' CurrentWeaponList, left by destroyed weapons, are taken out; 3.4's replication graph reads
+    // every entry.
+    static void RemoveDestroyedWeaponsFromLists();
     static ptrdiff_t CurrentWeaponListOffset();
     static ptrdiff_t IsDBNOOffset();
 };

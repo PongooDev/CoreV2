@@ -2,6 +2,11 @@
 #include "Pawns/FortPawn.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Finder.h"
+#include "Engine/NetConnection.h"
+#include "Engine/NetDriver.h"
+#include "Engine/ReplicationDriver.h"
+#include "Engine/World.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/PlayerState.h"
 #include "GameThread.h"
 #include "Log.h"
@@ -253,6 +258,46 @@ void AFortPawn::RemoveAbilityWeapon(AFortWeapon* Weapon)
         }
     }
     Weapon->K2_DestroyActor();
+#endif
+}
+
+void AFortPawn::RemoveDestroyedWeaponsFromLists()
+{
+#if WITH_SERVER_CODE
+    // CurrentWeaponList is a UPROPERTY: when a weapon in it is destroyed (a consumable or trap whose stack ran out, a
+    // weapon broken by durability: AFortWeapon::OnEquippedWeaponDestory), garbage collection nulls its entry, and the pawn
+    // keeps it. The pawn's own code steps over null entries (3.5.1's EquipWeaponDefinition, 0xE70C20), but 3.4's Battle
+    // Royale replication graph doesn't: UFortReplicationGraphNode_AlwaysRelevant_ForConnection::GatherActorListsForConnection
+    // (3.5.1 0xE34600) adds each entry of the connection's pawn's list to its always relevant actors (0xE2D5E0), which
+    // reads the actor's InternalIndex, and crashed on the null one (reading 0xC). The entries are taken out of the
+    // connections' pawns' lists before each frame's replication.
+    if (!Member_CurrentWeaponList.IsAvailable() || !Natives::GWorld)
+    {
+        return;
+    }
+    UWorld* World = static_cast<UWorld*>(GWorld);
+    UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
+    if (!Driver || !Driver->HasReplicationDriver() || !static_cast<UReplicationDriver*>(Driver->ReplicationDriver))
+    {
+        return;
+    }
+    for (UNetConnection* Connection : static_cast<TArray<UNetConnection*>&>(Driver->ClientConnections))
+    {
+        AController* Controller = Connection ? Cast<AController>(static_cast<AActor*>(Connection->OwningActor)) : nullptr;
+        AFortPawn* Pawn = Controller ? Cast<AFortPawn>(static_cast<APawn*>(Controller->Pawn)) : nullptr;
+        if (!Pawn)
+        {
+            continue;
+        }
+        TArray<AFortWeapon*>& Weapons = Pawn->CurrentWeaponList;
+        for (int32_t Index = Weapons.Num() - 1; Index >= 0; --Index)
+        {
+            if (!Weapons[Index])
+            {
+                Weapons.RemoveAt(Index);
+            }
+        }
+    }
 #endif
 }
 

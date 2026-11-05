@@ -123,8 +123,10 @@ struct FCoreAthenaBotBuildingQueue
     float SamePieceBuildDelayRandomDeviation = 0.0f;
     float DifferentPieceBuildDelay = 0.0f;
     float DifferentPieceBuildDelayRandomDeviation = 0.0f;
-    int32_t CellX = 0;
-    int32_t CellY = 0;
+    // The origin cell's lower corner on the game's structural grid (UBuildingStructuralSupportSystem's grid box): its
+    // cells are 512 uu, centred on the grid origin plus whole cells, and its levels 384 uu up from the origin.
+    float CellMinX = 0.0f;
+    float CellMinY = 0.0f;
     float BaseZ = 0.0f;
     // 0 +X, 1 +Y, 2 -X, 3 -Y.
     int32_t Forward = 0;

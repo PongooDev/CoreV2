@@ -10,10 +10,12 @@
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingSMActor.h"
+#include "Building/BuildingStructuralSupportSystem.h"
 #include "Building/BuildingWall.h"
 #include "Configuration.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortGameState.h"
 #include "Customization/CustomCharacterPart.h"
 #include "Finder.h"
 #include "GameplayCueInterface.h"
@@ -5112,6 +5114,41 @@ namespace
         }
         return Classes[Piece][MaterialKind];
     }
+
+    // The building grid's cell at Location, as the game finds a player's piece's: the structural support system's
+    // K2_GetGridBoxFromWorldLoc (3.5.1 0xAF7590) rounds X and Y to the nearest cell centre (the grid origin plus whole
+    // 512 uu cells, so a cell's edges are half a cell off the origin's) and floors Z to a 384 uu level above the origin.
+    // Core's cells from the world origin and the ground under the bot put the bots' pieces off the grid (CoreV2 #264).
+    bool GetBuildingGridCell(UWorld* World, const FVector& Location, FVector& OutCellMin)
+    {
+        static UFunction* GetGridBox = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.BuildingStructuralSupportSystem:K2_GetGridBoxFromWorldLoc");
+        AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        UBuildingStructuralSupportSystem* SupportSystem = GameState ? static_cast<UBuildingStructuralSupportSystem*>(GameState->StructuralSupportSystem) : nullptr;
+        static bool bLogged = false;
+        if (!GetGridBox || !SupportSystem)
+        {
+            if (!bLogged)
+            {
+                bLogged = true;
+                Log::Warning(L"Battle Royale bots: no building grid ({}), the bots build on cells from the world origin", GetGridBox ? L"no structural support system" : L"no K2_GetGridBoxFromWorldLoc");
+            }
+            return false;
+        }
+        Reflection::FParams Params(GetGridBox);
+        FBox* Box = Params.Get<FBox>(L"ReturnValue");
+        if (!Box || !Params.Set(L"WorldLocation", Location) || !Params.Call(reinterpret_cast<UObject*>(SupportSystem)) || !Box->IsValid)
+        {
+            return false;
+        }
+        OutCellMin = Box->Min;
+        if (!bLogged)
+        {
+            bLogged = true;
+            Log::Info(L"Battle Royale bots: the building grid's cell at ({:.0f}, {:.0f}, {:.0f}) is ({:.0f}, {:.0f}, {:.0f}) to ({:.0f}, {:.0f}, {:.0f})", Location.X, Location.Y, Location.Z,
+                Box->Min.X, Box->Min.Y, Box->Min.Z, Box->Max.X, Box->Max.Y, Box->Max.Z);
+        }
+        return true;
+    }
 }
 
 bool FCoreAthenaBotController::DefensiveBuilding(float Now, AFortPawn* Attacker)
@@ -5265,7 +5302,8 @@ bool FCoreAthenaBotController::StartBuildingQueue(float Now, const FVector& Towa
         return false;
     }
     const FVector Location = LocationOf(Pawn);
-    // The ground under the bot's feet: every piece of the build stands on it (a box's walls and roof line up).
+    // The ground under the bot's feet, and the building grid's cell there: every piece of the build is on the grid, as
+    // a player's is (a box's walls and roof line up, and with everyone's pieces).
     FVector Ground;
     UObject* GroundActor = nullptr;
     UObject* GroundComponent = nullptr;
@@ -5275,9 +5313,14 @@ bool FCoreAthenaBotController::StartBuildingQueue(float Now, const FVector& Towa
         return false;
     }
     FCoreAthenaBotBuildingQueue Queue;
-    Queue.CellX = static_cast<int32_t>(std::floor(Location.X / BuildingCellSize));
-    Queue.CellY = static_cast<int32_t>(std::floor(Location.Y / BuildingCellSize));
-    Queue.BaseZ = Ground.Z;
+    FVector CellMin;
+    if (!GetBuildingGridCell(Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr, FVector(Location.X, Location.Y, Ground.Z + 10.0f), CellMin))
+    {
+        CellMin = FVector(std::floor(Location.X / BuildingCellSize) * BuildingCellSize, std::floor(Location.Y / BuildingCellSize) * BuildingCellSize, Ground.Z);
+    }
+    Queue.CellMinX = CellMin.X;
+    Queue.CellMinY = CellMin.Y;
+    Queue.BaseZ = CellMin.Z;
     const FVector Way = Direction2D(Location, Towards);
     Queue.Forward = std::fabs(Way.X) >= std::fabs(Way.Y) ? (Way.X >= 0.0f ? 0 : 2) : (Way.Y >= 0.0f ? 1 : 3);
     Queue.MaterialKind = Kind;
@@ -5337,7 +5380,7 @@ bool FCoreAthenaBotController::TickBuildingQueue(float Now)
     UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
     const FVector Location = LocationOf(Pawn);
     if (!Pawn || !Movement || State != ECoreAthenaBotState::Landed || Pawn->bIsDBNO || Movement->MovementMode != MoveWalking || NextBuildPiece >= BuildQueue.Descriptors.size()
-        || static_cast<int32_t>(std::floor(Location.X / BuildingCellSize)) != BuildQueue.CellX || static_cast<int32_t>(std::floor(Location.Y / BuildingCellSize)) != BuildQueue.CellY)
+        || Location.X < BuildQueue.CellMinX || Location.X >= BuildQueue.CellMinX + BuildingCellSize || Location.Y < BuildQueue.CellMinY || Location.Y >= BuildQueue.CellMinY + BuildingCellSize)
     {
         ClearBuildingQueue();
         return false;
@@ -5386,8 +5429,9 @@ bool FCoreAthenaBotController::GetPiecePlacement(const FCoreAthenaBotBuildDescri
     int32_t RightY = 0;
     GridAxis(BuildQueue.Forward, ForwardX, ForwardY);
     GridAxis(BuildQueue.Forward + 1, RightX, RightY);
-    const int32_t CellX = BuildQueue.CellX + ForwardX * Descriptor.Location[0] + RightX * Descriptor.Location[1];
-    const int32_t CellY = BuildQueue.CellY + ForwardY * Descriptor.Location[0] + RightY * Descriptor.Location[1];
+    // Cells from the origin cell's lower corner.
+    const float CellX = static_cast<float>(ForwardX * Descriptor.Location[0] + RightX * Descriptor.Location[1]) + BuildQueue.CellMinX / BuildingCellSize;
+    const float CellY = static_cast<float>(ForwardY * Descriptor.Location[0] + RightY * Descriptor.Location[1]) + BuildQueue.CellMinY / BuildingCellSize;
     const float Z = BuildQueue.BaseZ + static_cast<float>(Descriptor.Location[2]) * BuildingLevelHeight;
     // The pieces' meshes (3.x's PBW_W1_*): a wall spans 512 along its X, its origin the bottom middle; a ramp (StairW) and
     // a cone (RoofC) span 512 along X and along +Y from their origin, the middle of one edge. The ramp is high at its
@@ -5426,14 +5470,15 @@ bool FCoreAthenaBotController::IsPiecePlaceClear(const FCoreAthenaBotBuildDescri
         return false;
     }
     // Ground under it, a step below the build's at most (not hanging over a drop): under a wall's middle, under a ramp's
-    // or a cone's cell centre (half a cell along their +Y from the origin's edge).
+    // or a cone's cell centre (half a cell along their +Y from the origin's edge). The grid's level can be partly in
+    // the ground (as a player's piece is on a slope), so it is looked for from the level's top down.
     const FVector Probe = IsWallPiece(Descriptor.BuildingType) ? Origin : Origin + RotateYaw(FVector(0.0f, 1.0f, 0.0f), Yaw) * (BuildingCellSize * 0.5f);
     if (Descriptor.BuildingType != ECoreOrientedConstructionBuildingType::Roof)
     {
         FVector Ground;
         UObject* GroundActor = nullptr;
         UObject* GroundComponent = nullptr;
-        if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Probe.X, Probe.Y, Origin.Z + 50.0f), FVector(Probe.X, Probe.Y, Origin.Z - 250.0f), 0, false, true, Ground, GroundActor, GroundComponent)
+        if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Probe.X, Probe.Y, Origin.Z + BuildingLevelHeight), FVector(Probe.X, Probe.Y, Origin.Z - 250.0f), 0, false, true, Ground, GroundActor, GroundComponent)
             || (GroundActor && Cast<APawn>(GroundActor)))
         {
             return false;

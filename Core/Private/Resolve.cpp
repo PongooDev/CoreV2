@@ -6429,14 +6429,32 @@ bool Finder::ResolveRecastNavMeshLive()
     //   test byte ptr [r15+270h], 2 (bRestrictBuildingToActiveTiles); mov r8, [r15+ActiveTiles]; movsxd rax, [r15+ActiveTiles+8]
     //   call dtNavMesh::addTile; mov ecx, eax; and eax, 80000004h; cmp eax, 80000004h (DT_FAILURE | DT_OUT_OF_MEMORY)
     //   inc dword ptr [r15+NumActiveTiles] (after a tile is added)
+    // 3.5.1's (0x1F51650) keeps the generator in r13 and the Detour mesh in r15 ("mov r15, [rcx+8]", 0x1F51758), and
+    // keeps addTile's status in ebx ("mov ebx, eax"); the offsets are 3.3's.
     const uintptr_t Reference = First(Finder::StringRefs(L"%s> Tile (%d,%d:%d), tile limit reached!! (%d)"));
     const uintptr_t Function = Reference ? Finder::FunctionStart(Reference) : 0;
     const uintptr_t End = Function ? (std::max)(Finder::FunctionEnd(Function), Reference + 0x400) : 0;
-    const uintptr_t Impl = FindInstruction(Function, End, { 0x49, 0x8B, 0x87, -1, -1, -1, -1, 0x48, 0x8B, 0x88, -1, -1, -1, -1, 0x48, 0x8B, 0x41, -1 });
-    const uintptr_t Active = Impl ? FindInstruction(Impl, Impl + 0x40, { 0x4D, 0x8B, 0x87, -1, -1, -1, -1, 0x49, 0x63, 0x87 }) : 0;
-    const uintptr_t AddTileCall = FindInstruction(Function, End, { 0xE8, -1, -1, -1, -1, 0x8B, 0xC8, 0x25, 0x04, 0x00, 0x00, 0x80, 0x3D, 0x04, 0x00, 0x00, 0x80 });
+    // "mov rax, [Generator + disp32]" (REX.WB, mod 10, reg rax, an r8-r15 base that isn't r12), then the two loads.
+    uintptr_t Impl = 0;
+    for (uintptr_t Site = Function ? FindInstruction(Function, End, { 0x49, 0x8B, -1, -1, -1, -1, -1, 0x48, 0x8B, 0x88, -1, -1, -1, -1, -1, 0x8B, -1, -1 }) : 0; Site && !Impl;
+         Site = FindInstruction(Site + 1, End, { 0x49, 0x8B, -1, -1, -1, -1, -1, 0x48, 0x8B, 0x88, -1, -1, -1, -1, -1, 0x8B, -1, -1 }))
+    {
+        const bool bGeneratorLoad = (Byte(Site + 2) & 0xF8) == 0x80 && (Byte(Site + 2) & 0x07) != 0x04;
+        const bool bDetourLoad = (Byte(Site + 14) == 0x48 || Byte(Site + 14) == 0x4C) && (Byte(Site + 16) & 0xC7) == 0x41;
+        Impl = bGeneratorLoad && bDetourLoad ? Site : 0;
+    }
+    // The generator's base register, as the mod-10 ModRM byte with reg 0 (r15 0x87, r13 0x85).
+    const int32_t Generator = Impl ? Byte(Impl + 2) : -1;
+    const uintptr_t Active = Impl ? FindInstruction(Impl, Impl + 0x40, { 0x4D, 0x8B, Generator, -1, -1, -1, -1, 0x49, 0x63, Generator }) : 0;
+    uintptr_t AddTileCall = 0;
+    for (uintptr_t Site = Function ? FindInstruction(Function, End, { 0xE8, -1, -1, -1, -1, 0x8B, -1, 0x25, 0x04, 0x00, 0x00, 0x80, 0x3D, 0x04, 0x00, 0x00, 0x80 }) : 0; Site && !AddTileCall;
+         Site = FindInstruction(Site + 1, End, { 0xE8, -1, -1, -1, -1, 0x8B, -1, 0x25, 0x04, 0x00, 0x00, 0x80, 0x3D, 0x04, 0x00, 0x00, 0x80 }))
+    {
+        // "mov ecx, eax" (2.5-3.3) or "mov ebx, eax" (3.5.1): a register-to-register copy of eax.
+        AddTileCall = (Byte(Site + 6) & 0xC7) == 0xC0 ? Site : 0;
+    }
     const uintptr_t AddTile = AddTileCall ? Finder::RelativeTarget(AddTileCall, 1, 5) : 0;
-    const uintptr_t Added = AddTileCall ? FindInstruction(AddTileCall, End, { 0x41, 0xFF, 0x87, -1, -1, -1, -1 }) : 0;
+    const uintptr_t Added = AddTileCall && Impl ? FindInstruction(AddTileCall, End, { 0x41, 0xFF, Generator, -1, -1, -1, -1 }) : 0;
     if (!Impl || !Active || !IsInText(AddTile) || !Added)
     {
         Log::Error(L"Finder: dtNavMesh::addTile not resolved (AddGeneratedTiles {}, impl {}, active tiles {}, add tile {}, tile count {})", Function != 0, Impl != 0, Active != 0, IsInText(AddTile), Added != 0);
@@ -11053,12 +11071,25 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
     // pawn cast to AFortPlayerPawnAthena: "mov dl, 1; mov rcx, rbx; call BeginSkydiving" (0x9A5305). BeginSkydiving
     // (0x9D7F70) starts with "cmp byte ptr [rcx + bIsSkydiving], 0": a pawn already skydiving doesn't start again.
     // 2.5's (0x9CCA20, called at 0x99A58A) has no such check: it opens with "mov byte ptr [rcx + bIsSkydiving], 1".
+    // 3.5 made it virtual (bIsSkydiving moved up to AFortPlayerPawn): ExitAircraft (3.5.1 0xA19D40) does "mov rax, [rbx];
+    // mov dl, 1; mov rcx, rbx; call qword ptr [rax + 0xE18]" (0xA19FD5), and AFortPlayerPawnAthena's slot holds
+    // 0xA10420, which opens with the same check.
     const uintptr_t ExitAircraft = FunctionOf(L"ExitAircraft: %s (Pawn %s)");
     const uintptr_t End = ExitAircraft ? Finder::FunctionEnd(ExitAircraft) : 0;
+    void** PawnVTable = nullptr;
     for (uintptr_t Site = ExitAircraft ? FindInstruction(ExitAircraft, End, { 0xB2, 0x01 }) : 0; Site; Site = FindInstruction(Site + 1, End, { 0xB2, 0x01 }))
     {
         const uintptr_t Call = FindRawCall(Site + 2, std::min(End, Site + 0xA));
-        const uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+        uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+        if (!Target)
+        {
+            const uintptr_t VirtualCall = FindVirtualCall(Site + 2, std::min(End, Site + 0x10));
+            if (VirtualCall && Byte(VirtualCall + 1) == 0x90)
+            {
+                PawnVTable = PawnVTable ? PawnVTable : CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena");
+                Target = VTableEntry(PawnVTable, VirtualSlot(VirtualCall));
+            }
+        }
         for (uintptr_t Check = Target; Target && Check < Target + 0x20; ++Check)
         {
             const bool bCheck = IsDisp32Access(Check, 0x80, 7, IsSkydivingOffset) && Byte(Check + 6) == 0;

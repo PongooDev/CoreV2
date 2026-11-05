@@ -167,6 +167,32 @@ namespace
 
     // Where the exec steps the SweepResult (a const FHitResult&, 0x88 bytes in 4.16) when it isn't passed by address.
     constexpr size_t SweepResultStorageSize = 0x200;
+
+    // A stripped bool function as 3.5's packed image has it: one or more jumps (jmp short / jmp near) to xor al, al and a
+    // return written as lea rsp, [rsp+8]; jmp [rsp-8] (3.5.1 0x657BE0 -> 0x657BD3 -> 0x2C6E85), or a plain stub.
+    bool IsFalseStub(uintptr_t Function)
+    {
+        for (int32_t Jumps = 0; Function && Jumps <= 4; ++Jumps)
+        {
+            if (Finder::IsStubFunction(Function) || Finder::BodyIs(Function, { 0x32, 0xC0, 0x48, 0x8D, 0x64, 0x24, 0x08, 0xFF, 0x64, 0x24, 0xF8 }))
+            {
+                return true;
+            }
+            if (Finder::BodyIs(Function, { 0xEB }))
+            {
+                Function = Function + 2 + *reinterpret_cast<const int8_t*>(Function + 1);
+            }
+            else if (Finder::BodyIs(Function, { 0xE9 }))
+            {
+                Function = Finder::RelativeTarget(Function, 1, 5);
+            }
+            else
+            {
+                return false;
+            }
+        }
+        return false;
+    }
 }
 
 void AFortPlayerPawnAthena::OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32_t OtherBodyIndex, bool bFromSweep, const void* SweepResult)
@@ -310,10 +336,21 @@ void AFortPlayerPawnAthena::HookNatives()
         Log::Error(L"Finder: AFortPlayerPawnAthena::OnCapsuleBeginOverlap native call not found (exec +0x{:X})", Exec ? Exec - Finder::ImageBase() : 0);
         return;
     }
-    if (!Finder::IsStubFunction(Native))
+    // 3.5 keeps the body (3.5.1 0xA275F0: 1.8.1's checks, then the pawn's pickup handling, 0xA34490), but its first
+    // call, a check everything after it waits on, is stripped to a false stub (0x657BE0): walking over ammo picked
+    // nothing up (#266). The pickup handling starts with the same check.
+    const uintptr_t NativeEnd = Native >= Finder::TextBegin() && Native < Finder::TextEnd() ? Finder::FunctionEnd(Native) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> NativeCalls = NativeEnd > Native ? Finder::DirectCalls(Native, NativeEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    const bool bGatedByStub = !NativeCalls.empty() && IsFalseStub(NativeCalls.front().second);
+    if (!Finder::IsStubFunction(Native) && !bGatedByStub)
     {
         Log::Info(L"Finder: AFortPlayerPawnAthena::OnCapsuleBeginOverlap is native in this build (+0x{:X})", Native - Finder::ImageBase());
         return;
+    }
+    if (bGatedByStub)
+    {
+        Log::Info(L"Finder: AFortPlayerPawnAthena::OnCapsuleBeginOverlap (+0x{:X}) first calls a stripped check (+0x{:X}), so it never picks anything up",
+            Native - Finder::ImageBase(), NativeCalls.front().second - Finder::ImageBase());
     }
 
     UProperty* SweepResultProperty = OverlapFunction->FindPropertyByName(FName(L"SweepResult", FNAME_Find));

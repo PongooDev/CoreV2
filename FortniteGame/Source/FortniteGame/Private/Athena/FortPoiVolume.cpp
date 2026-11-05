@@ -563,6 +563,31 @@ namespace
         PoiWorld() = FWeakObjectPtr(reinterpret_cast<UObject*>(World));
     }
 
+    // 3.5's AFortPoiVolume::CheckPawnOverlap (3.5.1 0xA44FA0, from AFortPoiManager's tick, 0xA74120) tests the pawn's
+    // bounds against the volume's BrushComponent's Bounds (0xA687C0) before PoiCollisionComp's overlap test, without
+    // checking the component: with the brush component cooked out, the server crashed reading null's Bounds as soon as a
+    // player's pawn was on the map (#262). The volume gets the component it was saved with, unregistered (no physics or
+    // render state, as the shape is PoiCollisionComp's), with BodySetup and Bounds for its shape. 3.0 to 3.3 never read it.
+    void GiveBrushComponent(AFortPoiVolume* Volume, UBodySetup* BodySetup, const FBoxSphereBounds& Bounds)
+    {
+        if (UBrushComponent* BrushComponent = NewObject<UBrushComponent>(reinterpret_cast<UObject*>(Volume), UBrushComponent::StaticClass(), FName(L"BrushComponent0")))
+        {
+            BrushComponent->BrushBodySetup = BodySetup;
+            BrushComponent->GetBounds() = Bounds;
+            Volume->BrushComponent = BrushComponent;
+        }
+    }
+
+    // A volume Core couldn't place covers nothing, but the manager still ticks it, so it needs a component too: bounds of no
+    // size far below the map, which no pawn's bounds reach, so the test ends there (3.5.1 crashed on 50v50 v2's join with
+    // the quest volumes the world's data names no place for). No body setup: nothing past the bounds test runs.
+    void GiveUnplacedBrushComponent(AFortPoiVolume* Volume)
+    {
+        FBoxSphereBounds Nowhere;
+        Nowhere.Origin = FVector(0.0f, 0.0f, -1000000.0f);
+        GiveBrushComponent(Volume, nullptr, Nowhere);
+    }
+
     // Does what AFortPoiVolume::PostInitializeComponents does with a brush component, with Box for its shape.
     bool InitPoiBody(AFortPoiVolume* Volume, const FBox& Box)
     {
@@ -589,19 +614,7 @@ namespace
         FTransform Transform;
         Transform.Translation = Box.GetCenter();
         PoiCollisionComp->PoiBodyInstance.InitBody(BodySetup, Transform, PoiCollisionComp, nullptr);
-
-        // 3.5's AFortPoiVolume::CheckPawnOverlap (3.5.1 0xA44FA0, from AFortPoiManager's tick, 0xA74120) tests the pawn's
-        // bounds against the volume's BrushComponent's Bounds (0xA687C0) before PoiCollisionComp's overlap test, without
-        // checking the component: with the brush component cooked out, the server crashed reading null's Bounds as soon
-        // as a player's pawn was on the map (#262). The volume gets the component it was saved with, unregistered (no
-        // physics or render state, as the shape is PoiCollisionComp's), its BrushBodySetup the same box and its Bounds
-        // the box. 3.0 to 3.3 never read it.
-        if (UBrushComponent* BrushComponent = NewObject<UBrushComponent>(reinterpret_cast<UObject*>(Volume), UBrushComponent::StaticClass(), FName(L"BrushComponent0")))
-        {
-            BrushComponent->BrushBodySetup = BodySetup;
-            BrushComponent->GetBounds() = FBoxSphereBounds(Box);
-            Volume->BrushComponent = BrushComponent;
-        }
+        GiveBrushComponent(Volume, BodySetup, FBoxSphereBounds(Box));
         return true;
     }
 
@@ -745,6 +758,7 @@ int32_t AFortPoiVolume::RestorePoiVolumes(UWorld* World)
         if (Resolved.Places.empty())
         {
             ++Unplaced;
+            GiveUnplacedBrushComponent(Volume);
             Log::Warning(L"POI: {} ({}) not placed: {}", Name, Volume->DescribeLocationTags(), Reason);
             continue;
         }
@@ -775,6 +789,7 @@ int32_t AFortPoiVolume::RestorePoiVolumes(UWorld* World)
         if (!InitPoiBody(Volume, Box))
         {
             ++Unplaced;
+            GiveUnplacedBrushComponent(Volume);
             Log::Warning(L"POI: {} ({}) couldn't be given a body", Name, Volume->DescribeLocationTags());
             continue;
         }

@@ -202,6 +202,15 @@ public:
     // The player state of the bot that last hit Pawn, in the last few seconds, or null.
     AFortPlayerStateAthena* LastBotAttackerOf(const AFortPawn* Pawn) const;
 
+    // DBNO timing (CoreV2 #233): seconds since Pawn was knocked down, tracked for every downed pawn (player or bot) in
+    // RefreshEnemies, so a bot gives a knocked enemy a few seconds before thirsting it; a large number when it isn't down.
+    float DBNODownedElapsed(const AFortPawn* Pawn, float Now) const;
+    // The distance to the nearest standing squadmate of Downed (same team, and same squad in a large team game), neither
+    // DBNO nor dead: who could revive it. FLT_MAX when no one can. A bot holds off thirsting while a revive could happen.
+    float NearestStandingSquadmateDistance(const AFortPawn* Downed) const;
+    // Players and bots still in the match (the HUD's players-left count), for the late-game check.
+    int32_t PlayersLeft() const;
+
     // A bot's pawn died (FCoreAthenaBotController::Tick saw it): its place, the kill, the counts and the win check.
     void RemoveFromAliveBots(FCoreAthenaBotController* Bot, AFortPlayerStateAthena* KillerState);
 
@@ -248,7 +257,7 @@ private:
     // the game mode's alive players of each team, and its bots.
     void UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, AFortGameStateAthena* GameState);
     void CheckWinConditionLastManStanding();
-    void RefreshEnemies();
+    void RefreshEnemies(float Now);
     void RefreshLoot(float Now);
     void GatherContainers();
     // The landing spots (at the bus), the bus's path (its location sampled while it flies), and each bot's spot and
@@ -332,4 +341,11 @@ private:
         float Time = 0.0f;
     };
     std::vector<FBotHit> BotHits;
+    // When each currently downed pawn (player or bot) went DBNO, kept up to date in RefreshEnemies.
+    struct FDBNODown
+    {
+        TWeakObjectPtr<AFortPawn> Pawn;
+        float DownedAt = 0.0f;
+    };
+    std::vector<FDBNODown> DBNODowned;
 };

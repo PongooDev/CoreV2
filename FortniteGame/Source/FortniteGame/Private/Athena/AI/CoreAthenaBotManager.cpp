@@ -37,6 +37,7 @@
 #include "Weapons/FortWeapon.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <format>
 
@@ -557,7 +558,7 @@ void FCoreAthenaBotManager::Tick()
     {
         UAthenaNavSystem::Tick(World);
     }
-    RefreshEnemies();
+    RefreshEnemies(Now);
     // The warmup island's weapons too, once the bots are in (they pick them up for a fight there).
     if ((bAircraftStarted || bNavigationTried) && Now >= NextLootRefresh)
     {
@@ -2358,7 +2359,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
 #endif
 }
 
-void FCoreAthenaBotManager::RefreshEnemies()
+void FCoreAthenaBotManager::RefreshEnemies(float Now)
 {
     EnemyPawns.clear();
     AFortGameModeAthena* Athena = GetGameMode();
@@ -2383,6 +2384,66 @@ void FCoreAthenaBotManager::RefreshEnemies()
             EnemyPawns.emplace_back(Pawn);
         }
     }
+    // DBNO timing (CoreV2 #233): note when each downed pawn (player or bot) was knocked and forget it once it is revived,
+    // eliminated or gone, so a bot can give a knocked enemy a few seconds before thirsting it.
+    std::erase_if(DBNODowned, [](const FDBNODown& Down) { AFortPawn* Pawn = Down.Pawn.Get(); return !Pawn || !Pawn->bIsDBNO || Pawn->IsPendingKill(); });
+    for (const TWeakObjectPtr<AFortPawn>& Weak : EnemyPawns)
+    {
+        AFortPawn* Pawn = Weak.Get();
+        if (Pawn && Pawn->bIsDBNO && std::none_of(DBNODowned.begin(), DBNODowned.end(), [Pawn](const FDBNODown& Down) { return Down.Pawn.Get() == Pawn; }))
+        {
+            DBNODowned.push_back({ TWeakObjectPtr<AFortPawn>(Pawn), Now });
+        }
+    }
+}
+
+float FCoreAthenaBotManager::DBNODownedElapsed(const AFortPawn* Pawn, float Now) const
+{
+    for (const FDBNODown& Down : DBNODowned)
+    {
+        if (Down.Pawn.Get() == Pawn)
+        {
+            return std::max(Now - Down.DownedAt, 0.0f);
+        }
+    }
+    return FLT_MAX;
+}
+
+float FCoreAthenaBotManager::NearestStandingSquadmateDistance(const AFortPawn* Downed) const
+{
+    AFortPlayerStateAthena* DownedState = Downed ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Downed->PlayerState))) : nullptr;
+    if (!DownedState)
+    {
+        return FLT_MAX;
+    }
+    // A teammate who could revive: the same team, and the same squad in a large team game (Teams of 20's squads revive
+    // their own); neither DBNO nor dead (AFortPawn::IsDead), as HasStandingTeammate counts standing.
+    const bool bSquads = HasSquadsInTeams() && AFortPlayerStateAthena::HasSquadId();
+    const uint8_t Team = static_cast<uint8_t>(DownedState->TeamIndex);
+    const uint8_t Squad = bSquads ? static_cast<uint8_t>(DownedState->SquadId) : 0;
+    const FVector DownedLocation = LocationOf(reinterpret_cast<const AActor*>(Downed));
+    float Nearest = FLT_MAX;
+    for (const TWeakObjectPtr<AFortPawn>& Weak : EnemyPawns)
+    {
+        AFortPawn* Pawn = Weak.Get();
+        if (!Pawn || Pawn == Downed || Pawn->bIsDBNO || Pawn->IsDead() || Pawn->IsPendingKill())
+        {
+            continue;
+        }
+        AFortPlayerStateAthena* State = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Pawn->PlayerState)));
+        if (!State || static_cast<uint8_t>(State->TeamIndex) != Team || (bSquads && static_cast<uint8_t>(State->SquadId) != Squad))
+        {
+            continue;
+        }
+        Nearest = std::min(Nearest, (LocationOf(reinterpret_cast<const AActor*>(Pawn)) - DownedLocation).Size());
+    }
+    return Nearest;
+}
+
+int32_t FCoreAthenaBotManager::PlayersLeft() const
+{
+    AFortGameModeAthena* Athena = GetGameMode();
+    return (Athena ? Athena->AlivePlayers.Num() : 0) + GetAliveBotCount();
 }
 
 void FCoreAthenaBotManager::RefreshLoot(float Now)

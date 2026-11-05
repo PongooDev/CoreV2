@@ -272,6 +272,11 @@ private:
     // Whether the bot takes on another bot it sees (Core's: players come first, so a match lasts longer for them and
     // the kills are theirs): one that is shooting at it or going for it always; otherwise now and then.
     bool WillEngageBot(FCoreAthenaBotController* Other, float Now) const;
+    // Whether the bot holds off finishing a knocked (DBNO) enemy for now, so a teammate gets a chance to revive it
+    // (CoreV2 #233): true for a few seconds after the knock, longer while a squadmate is right there to revive; false in
+    // the late game (few players left) or when no squadmate could revive it. The caller only defers while a standing
+    // enemy is also in reach, so a lone downed enemy is still finished eventually.
+    bool ShouldDeferThirst(AFortPawn* Downed, float Now) const;
     // Out of a fight: the goal the bot pursues (ChooseGoal picks a new one when the last is done), and PursueGoal's step
     // towards it, false when it is done or no longer applies.
     const wchar_t* ChooseGoal(float Now);

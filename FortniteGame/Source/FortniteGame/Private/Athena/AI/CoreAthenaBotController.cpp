@@ -732,6 +732,16 @@ namespace
     // (30% by default), rolled again every 30 s per pair; doubled once the last few bots are left, so a match still ends.
     constexpr int32_t LateGameBotCount = 10;
     constexpr float BotEngageRollPeriod = 30.0f;
+
+    // Giving a knocked (DBNO) enemy time before thirsting it (CoreV2 #233), so a teammate can revive: the base hold-off
+    // after the knock; the longer hold-off while a squadmate is right there (a revive could be underway); how close a
+    // standing squadmate counts as "right there"; and how far one can be and still be treated as a possible reviver
+    // (beyond this, or with none, the downed enemy is fair game). The downed enemy stays deprioritised behind standing
+    // ones the whole time, so the hold-off only matters when nothing else is worth shooting.
+    constexpr float ThirstGrace = 8.0f;
+    constexpr float ThirstReviveGrace = 20.0f;
+    constexpr float ThirstReviveRange = 1500.0f;
+    constexpr float ThirstNoReviverRange = 8000.0f;
     // A bot heads for a player within this distance (Core's 🟡: 100 m), at most this many bots for one player.
     constexpr float HuntRange = 10000.0f;
     constexpr int32_t MaxHuntersPerPlayer = 3;
@@ -2144,8 +2154,10 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
     {
         AFortPawn* Pawn;
         float Distance;
+        bool bDowned;
     };
     std::vector<FCandidate> Candidates;
+    bool bHasStandingCandidate = false;
     AFortPawn* Previous = CurrentTarget.Get();
     for (const TWeakObjectPtr<AFortPawn>& Weak : Manager->GetEnemyPawns())
     {
@@ -2169,9 +2181,18 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
         }
         // A downed enemy is finished once nobody standing is closer (sorted 20 m farther). The enemy it is fighting
         // stays its target unless another is much closer (it turned from one to the other and back).
-        float Sorted = Distance + (Other->bIsDBNO ? 2000.0f : 0.0f) + (OtherBot ? 1500.0f : 0.0f);
+        const bool bDowned = Other->bIsDBNO;
+        bHasStandingCandidate = bHasStandingCandidate || !bDowned;
+        float Sorted = Distance + (bDowned ? 2000.0f : 0.0f) + (OtherBot ? 1500.0f : 0.0f);
         Sorted *= Other == Previous ? 0.7f : 1.0f;
-        Candidates.push_back({ Other, Sorted });
+        Candidates.push_back({ Other, Sorted, bDowned });
+    }
+    // Don't thirst a knocked enemy right away: while a standing enemy is also in reach, drop a downed one the bot should
+    // still be giving time (so a teammate can revive it), and fight the standing enemy (a reviver among them) instead. A
+    // lone downed enemy, or one past its grace with no reviver, stays, so it is still finished eventually (CoreV2 #233).
+    if (bHasStandingCandidate)
+    {
+        std::erase_if(Candidates, [this, Now](const FCandidate& Candidate) { return Candidate.bDowned && ShouldDeferThirst(Candidate.Pawn, Now); });
     }
     std::sort(Candidates.begin(), Candidates.end(), [](const FCandidate& A, const FCandidate& B) { return A.Distance < B.Distance; });
 
@@ -2253,6 +2274,30 @@ bool FCoreAthenaBotController::WillEngageBot(FCoreAthenaBotController* Other, fl
     const int32_t BaseChance = std::clamp(Manager->GetSettings().BotFightChance, 0, 100);
     const int32_t Chance = Manager->GetAliveBotCount() <= LateGameBotCount ? std::min(BaseChance * 2, 100) : BaseChance;
     return static_cast<int32_t>(Hash % 100u) < Chance;
+}
+
+bool FCoreAthenaBotController::ShouldDeferThirst(AFortPawn* Downed, float Now) const
+{
+#if WITH_SERVER_CODE
+    // Late game (few players left): finish knocked enemies promptly so the match still ends.
+    if (Manager->PlayersLeft() <= LateGameBotCount)
+    {
+        return false;
+    }
+    // No squadmate close enough to revive it (none at all, or the nearest too far to make it in time): nothing to wait
+    // for, so it is fair game (it is still sorted behind standing enemies, so a lone downed one is finished in its time).
+    const float NearestMate = Manager->NearestStandingSquadmateDistance(Downed);
+    if (NearestMate >= ThirstNoReviverRange)
+    {
+        return false;
+    }
+    // A squadmate right on the body could be reviving (or about to): keep sparing the downed and fight the reviver, as a
+    // player would. Otherwise hold off for a few seconds so a revive can begin.
+    const float Grace = NearestMate <= ThirstReviveRange ? ThirstReviveGrace : ThirstGrace;
+    return Manager->DBNODownedElapsed(Downed, Now) < Grace;
+#else
+    return false;
+#endif
 }
 
 bool FCoreAthenaBotController::HasAmmoFor(const FCoreAthenaBotWeapon& Weapon) const

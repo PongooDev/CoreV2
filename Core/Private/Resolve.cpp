@@ -2424,12 +2424,19 @@ namespace
             for (uintptr_t Call = FindRawCall(SerializeNewActor, SerializeNewActorEnd); Call; Call = FindRawCall(Call + 1, SerializeNewActorEnd))
             {
                 const uintptr_t GetArchetype = Finder::RelativeTarget(Call, 1, 5);
-                const uintptr_t Load = FindInstruction(GetArchetype, GetArchetype + 0x80, { 0x44, 0x8B, -1, 0x08, 0x4C, 0x8B, -1, 0x18, 0x48, 0x8B, -1, 0x20, 0x48, 0x8B, -1, 0x10, 0xE8 });
+                uintptr_t Load = FindInstruction(GetArchetype, GetArchetype + 0x80, { 0x44, 0x8B, -1, 0x08, 0x4C, 0x8B, -1, 0x18, 0x48, 0x8B, -1, 0x20, 0x48, 0x8B, -1, 0x10, 0xE8 });
+                uintptr_t LoadCall = Load ? Load + 16 : 0;
+                if (!Load)
+                {
+                    // 3.5.1 (0x14C39D7) schedules a stack store between the loads and the call: mov [rsp+X], rsi.
+                    Load = FindInstruction(GetArchetype, GetArchetype + 0x80, { 0x44, 0x8B, -1, 0x08, 0x4C, 0x8B, -1, 0x18, 0x48, 0x8B, -1, 0x20, 0x48, 0x8B, -1, 0x10, 0x48, 0x89, -1, 0x24, -1, 0xE8 });
+                    LoadCall = Load && (Byte(Load + 18) & 0xC7) == 0x44 ? Load + 21 : 0;
+                }
                 // One [base + disp8] for all four loads, the base not rsp.
                 const auto Base = [&](uintptr_t Modrm) { return Byte(Modrm) & 0xC7; };
-                if (Load && (Base(Load + 2) & 0xC0) == 0x40 && (Base(Load + 2) & 0x07) != 0x04 && Base(Load + 6) == Base(Load + 2) && Base(Load + 10) == Base(Load + 2) && Base(Load + 14) == Base(Load + 2))
+                if (LoadCall && (Base(Load + 2) & 0xC0) == 0x40 && (Base(Load + 2) & 0x07) != 0x04 && Base(Load + 6) == Base(Load + 2) && Base(Load + 10) == Base(Load + 2) && Base(Load + 14) == Base(Load + 2))
                 {
-                    const uintptr_t Target = Finder::RelativeTarget(Load + 16, 1, 5);
+                    const uintptr_t Target = Finder::RelativeTarget(LoadCall, 1, 5);
                     if (Target != Archetype)
                     {
                         Archetype = Target;
@@ -2457,7 +2464,17 @@ namespace
         const int32_t LowLevelGetNetworkNumber = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(FunctionOf(L"UNetDriver::LowLevelGetNetworkNumber")), 0x400);
         const int32_t ServerReplicateActors = ProcessRemoteFunction - 1;
         const uintptr_t StrippedReplicate = ProcessRemoteFunction > 0 && ServerReplicateActors == LowLevelGetNetworkNumber + 2 ? VTableEntry(NetDriverVTable, ServerReplicateActors) : 0;
-        const bool bServerReplicateActors = Finder::BodyIs(StrippedReplicate, { 0x33, 0xC0, 0xC3 });
+        bool bServerReplicateActors = Finder::BodyIs(StrippedReplicate, { 0x33, 0xC0, 0xC3 });
+        if (!bServerReplicateActors && StrippedReplicate)
+        {
+            // 3.5.1's stub (0x229EB20) keeps the function's SCOPE_CYCLE_COUNTER(STAT_NetServerRepActorsTime) before its
+            // return 0: xor eax, eax; add rsp, 28h; ret.
+            const uintptr_t StrippedReplicateEnd = Finder::FunctionEnd(StrippedReplicate);
+            const std::vector<uintptr_t> StatRefs = Finder::StringRefs(L"STAT_NetServerRepActorsTime");
+            const bool bStatScope = std::any_of(StatRefs.begin(), StatRefs.end(), [&](uintptr_t Ref) { return Ref >= StrippedReplicate && Ref < StrippedReplicateEnd; });
+            bServerReplicateActors = bStatScope && StrippedReplicateEnd - StrippedReplicate <= 0x60
+                && FindInstruction(StrippedReplicate, StrippedReplicateEnd, { 0x33, 0xC0, 0x48, 0x83, 0xC4, -1, 0xC3 });
+        }
         RequireSlot(L"UNetDriver::ServerReplicateActors", Natives::UNetDriver_ServerReplicateActorsIndex, bServerReplicateActors ? ServerReplicateActors : -1);
 
         Sites::NetDriverVTables.clear();
@@ -2688,6 +2705,13 @@ namespace
             const bool bLea = Byte(Base) == 0x48 && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
             DestroyedActors = bAdd || bLea ? *reinterpret_cast<const int32_t*>(Base + 3) : 0;
         }
+        // 3.5.1's AssignNewNetGUID_Server (0x228B0B4) returns the NetGUID through rdx, and the invalid-NetGUID warning
+        // comes before the map: lea rbx, [rsi+240h] (0x228B143).
+        for (uintptr_t Base = AssignGuid && !DestroyedActors ? AssignGuid + 5 : 0; Base && Base < AssignGuid + 0xA0 && !DestroyedActors; ++Base)
+        {
+            const bool bLea = Byte(Base) == 0x48 && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
+            DestroyedActors = bLea ? *reinterpret_cast<const int32_t*>(Base + 3) : 0;
+        }
         RequireOffset(L"UNetDriver::GuidCache", Natives::UNetDriver_GuidCache, GuidCacheLoad ? *reinterpret_cast<const int32_t*>(GuidCacheLoad + 3) : 0);
         RequireOffset(L"UNetDriver::DestroyedStartupOrDormantActors", Natives::UNetDriver_DestroyedStartupOrDormantActors, DestroyedActors);
 
@@ -2866,7 +2890,7 @@ namespace
         for (const uintptr_t Site : FlushDormancy && NetDormancy ? Finder::CallsTo(FlushDormancy, false) : std::vector<uintptr_t>())
         {
             const uintptr_t Function = Finder::FunctionStart(Site);
-            const uintptr_t DormancyTest = Function && Site - Function <= 0x80 ? FindInstruction(Function, Site, { 0x80, -1, static_cast<int32_t>(NetDormancy & 0xFF), static_cast<int32_t>((NetDormancy >> 8) & 0xFF), 0x00, 0x00, 0x01 }) : 0;
+            const uintptr_t DormancyTest = Function && Site - Function <= 0xB0 ? FindInstruction(Function, Site, { 0x80, -1, static_cast<int32_t>(NetDormancy & 0xFF), static_cast<int32_t>((NetDormancy >> 8) & 0xFF), 0x00, 0x00, 0x01 }) : 0;
             if (!DormancyTest || (Byte(DormancyTest + 1) & 0xF8) != 0xB8)
             {
                 continue;
@@ -2884,6 +2908,13 @@ namespace
                 DriverForceUpdate = Finder::RelativeTarget(Call, 1, 5);
             }
             Load = DriverForceUpdate ? FindInstruction(DriverForceUpdate, DriverForceUpdate + 0xA0, { 0xF3, 0x0F, 0x10 }) : Load;
+            // 3.5.1's UNetDriver::ForceNetUpdate (0x228F370) is virtual: AActor::ForceNetUpdate (0x1EFF0A0, its call to
+            // FlushNetDormancy at +0xA3) calls it through the net driver's vtable, call [r8+2E8h].
+            for (uintptr_t Call = IsTimeRead(Load) ? 0 : FindVirtualCall(Function, DormancyTest); Call && !IsTimeRead(Load); Call = FindVirtualCall(Call + 1, DormancyTest))
+            {
+                const uintptr_t Entry = VTableEntry(NetDriverVTable, VirtualSlot(Call));
+                Load = Entry ? FindInstruction(Entry, Entry + 0xA0, { 0xF3, 0x0F, 0x10 }) : 0;
+            }
             if (IsTimeRead(Load))
             {
                 // Every read must agree.
@@ -3062,6 +3093,10 @@ namespace
         Sites::FlushActorDormancyCalls.clear();
         uintptr_t StrippedFlushDormancy = 0;
         bool bFlushDormancyCalls = AddNetworkActor != 0;
+        // 3.5 keeps UNetDriver::FlushActorDormancy (3.5.1 0x228E710): FlushNetDormancy and SetNetDormancy call it for the
+        // net driver and the demo net driver, and Core leaves those calls alone.
+        bool bFlushDormancyIntact = AddNetworkActor != 0;
+        uintptr_t IntactFlushDormancy = 0;
         for (const uintptr_t Function : { FlushDormancy, SetDormancyFunctions == 1 ? SetDormancy : uintptr_t(0) })
         {
             const uintptr_t End = Finder::FunctionEnd(Function);
@@ -3072,9 +3107,11 @@ namespace
             }
 
             int32_t Calls = 0;
+            std::unordered_map<uintptr_t, int32_t> TargetCalls;
             for (uintptr_t Call = AddActorCall ? FindRawCall(AddActorCall + 5, End) : 0; Call; Call = FindRawCall(Call + 5, End))
             {
                 const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+                ++TargetCalls[Target];
                 if (IsSharedEmptyBody(Target) && (!StrippedFlushDormancy || Target == StrippedFlushDormancy))
                 {
                     StrippedFlushDormancy = Target;
@@ -3083,8 +3120,21 @@ namespace
                 }
             }
             bFlushDormancyCalls = bFlushDormancyCalls && Calls == 2;
+
+            uintptr_t Twice = 0;
+            for (const auto& [Target, Count] : TargetCalls)
+            {
+                Twice = Count == 2 && !IsSharedEmptyBody(Target) && (!IntactFlushDormancy || Target == IntactFlushDormancy) ? Target : Twice;
+            }
+            IntactFlushDormancy = Twice ? Twice : IntactFlushDormancy;
+            bFlushDormancyIntact = bFlushDormancyIntact && Calls == 0 && Twice;
         }
-        if (!bFlushDormancyCalls)
+        if (!bFlushDormancyCalls && bFlushDormancyIntact)
+        {
+            Log::Info(L"Finder: UNetDriver::FlushActorDormancy is intact at +0x{:X}, its calls stay", IntactFlushDormancy - Finder::ImageBase());
+            Sites::FlushActorDormancyCalls.clear();
+        }
+        else if (!bFlushDormancyCalls)
         {
             Log::Error(L"Finder: UNetDriver::FlushActorDormancy call sites not found ({})", Sites::FlushActorDormancyCalls.size());
             Sites::FlushActorDormancyCalls.clear();
@@ -3383,6 +3433,12 @@ namespace
             const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
             SharedEmpty = IsSharedEmptyBody(Target) ? Target : 0;
         }
+        if (!SharedEmpty && Finder::HasMovedCode() && Finder::BodyIs(Finder::MostReferencedFunction(), { 0xC2, 0x00, 0x00 }))
+        {
+            // 3.5's FlushNetDormancy calls the intact UNetDriver::FlushActorDormancy: the shared empty function is the one
+            // most vtable slots hold (3.5.1 0xC0B7D0, 82,620 of them).
+            SharedEmpty = Finder::MostReferencedFunction();
+        }
         Require(L"Shared empty function", Natives::SharedEmptyFunction, SharedEmpty);
 
         const uintptr_t Permissions = FunctionOf(L"e1f31c211f28413186262d37a13fc84d");
@@ -3393,6 +3449,17 @@ namespace
         {
             const uintptr_t AddCall = FindRawCall(Lea + 7, Lea + 0x10);
             const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Lea + 3);
+            if (AddCall && (!PermissionAdds || Offset == PermissionsArray))
+            {
+                PermissionsArray = Offset;
+                ++PermissionAdds;
+            }
+        }
+        // 3.5.1 (0xE2D906) reloads the config from the stack and adds the offset: mov rcx, [rbp+X]; add rcx, 98h; call.
+        for (uintptr_t Add = !PermissionAdds && PermissionsEnd ? FindInstruction(Permissions, PermissionsEnd, { 0x48, 0x81, 0xC1 }) : 0; Add; Add = FindInstruction(Add + 1, PermissionsEnd, { 0x48, 0x81, 0xC1 }))
+        {
+            const uintptr_t AddCall = FindRawCall(Add + 7, Add + 0x10);
+            const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Add + 3);
             if (AddCall && (!PermissionAdds || Offset == PermissionsArray))
             {
                 PermissionsArray = Offset;

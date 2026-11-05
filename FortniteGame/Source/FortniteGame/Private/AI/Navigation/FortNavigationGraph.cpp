@@ -172,8 +172,39 @@ bool AFortNavigationGraph::ResolveNatives()
     const uintptr_t BlockCellsLoad = BuildBlockLinks ? ThisDisplacement(BuildBlockLinks, BuildBlockLinks + 0x100, 0x8B, 0) : 0;
 
     const uintptr_t CellIndexBody = FindUnique({ 0x8B, 0x52, 0x08, 0x8B, 0x49, 0x38, 0xD3, 0xFA, 0x0F, 0xAF, 0x53, 0x1C });
-    const uintptr_t PathSearchBody = FindUnique({ 0x48, 0x8D, 0x59, 0x08, 0x48, 0x89, 0x11, 0x33, 0xF6, 0x48, 0x8B, 0xF9, 0x48, 0x89, 0x33 });
-    const uintptr_t FloodFill = FindUnique({ 0x40, 0x57, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x48, 0x48, 0x8B, 0xF9, 0x4D, 0x8B, 0xF0, 0x48, 0x8B, 0x89 });
+    const std::initializer_list<int32_t> PathSearchPattern = { 0x48, 0x8D, 0x59, 0x08, 0x48, 0x89, 0x11, 0x33, 0xF6, 0x48, 0x8B, 0xF9, 0x48, 0x89, 0x33 };
+    uintptr_t PathSearchBody = FindUnique(PathSearchPattern);
+    if (!PathSearchBody)
+    {
+        // 3.5.1 has a second constructor of the same shape (0x90E390, the flood fill's search of 32-byte nodes): take the
+        // one whose first call reserves FNavGraphPathSearch's 40-byte nodes (0x90E430: lea rcx, [rbx+rbx*4]; xor edx,
+        // edx; shl rcx, 3 in 0xDBEA50).
+        int32_t Matches = 0;
+        for (uintptr_t Site = FindPattern(Finder::TextBegin(), Finder::TextEnd(), PathSearchPattern); Site; Site = FindPattern(Site + 1, Finder::TextEnd(), PathSearchPattern))
+        {
+            const uintptr_t Reserve = FirstCallTarget(Site, 0x50);
+            if (Reserve && FindPattern(Reserve, Reserve + 0x20, { 0x48, 0x8D, 0x0C, 0x9B, 0x33, 0xD2, 0x48, 0xC1, 0xE1, 0x03 }))
+            {
+                PathSearchBody = Site;
+                ++Matches;
+            }
+        }
+        PathSearchBody = Matches == 1 ? PathSearchBody : 0;
+    }
+    uintptr_t FloodFill = FindUnique({ 0x40, 0x57, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x48, 0x48, 0x8B, 0xF9, 0x4D, 0x8B, 0xF0, 0x48, 0x8B, 0x89 });
+    uintptr_t PathSearchLoad = FloodFill ? FloodFill + 17 : 0;
+    for (const uintptr_t Ref : FloodFill ? std::vector<uintptr_t>() : Finder::StringRefs(L"STAT_NavGraphFlowField"))
+    {
+        // 3.5.1's (0x920050) opens with SCOPE_CYCLE_COUNTER(STAT_NavGraphFlowField), as the function after it does: the
+        // flood fill keeps this in rdi and loads the path search into rcx, mov rdi, rcx; mov rcx, [rcx+618h].
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const uintptr_t Load = Function ? FindPattern(Function, Function + 0x40, { 0x48, 0x8B, 0xF9, 0x48, 0x8B, 0x89, -1, -1, 0x00, 0x00 }) : 0;
+        if (Load && !FloodFill)
+        {
+            FloodFill = Function;
+            PathSearchLoad = Load + 6;
+        }
+    }
     // Two functions log the full queue; RequestRegistration(this, NavData, bTriggerRegistrationProcessing) is the one that
     // spills NavData (mov [rsp+10h], rdx) in its prologue, the other registers every nav data actor in the world.
     uintptr_t RequestRegistration = 0;
@@ -200,7 +231,7 @@ bool AFortNavigationGraph::ResolveNatives()
     Natives::AFortNavigationGraph_Flags = Displacement(ClearDirtyFlag + 2);
     Natives::AFortNavigationGraph_BlockLinks = Displacement(BlockLinksAdd);
     Natives::AFortNavigationGraph_Cells = Displacement(BlockCellsLoad) - static_cast<int32_t>(offsetof(FNavGraphCells, BlockCells));
-    Natives::AFortNavigationGraph_PathSearch = Displacement(FloodFill + 17);
+    Natives::AFortNavigationGraph_PathSearch = Displacement(PathSearchLoad);
     Natives::AFortNavigationGraph_UpdateDirtyBlocks = reinterpret_cast<decltype(Natives::AFortNavigationGraph_UpdateDirtyBlocks)>(UpdateDirtyBlocks);
     Natives::FNavGraphCells_GetCellIndex = reinterpret_cast<decltype(Natives::FNavGraphCells_GetCellIndex)>(Finder::FunctionStart(CellIndexBody));
     Natives::FNavGraphPathSearch_Construct = reinterpret_cast<decltype(Natives::FNavGraphPathSearch_Construct)>(Finder::FunctionStart(PathSearchBody));

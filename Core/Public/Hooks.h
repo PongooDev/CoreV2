@@ -13,6 +13,10 @@ namespace Hooks
     bool SkipBranch(std::wstring_view Name, uint8_t* Branch);
     bool EnableAll();
 
+    // Packed-build test switches (Packed::TestSwitch): hold vtable swaps and/or detour creation until EnableAll, to
+    // find which early write a packed exe reacts to. Only the client and redirect turn them on.
+    void DeferUntilEnableAll(bool bVTables, bool bDetours);
+
     template <typename T>
     bool Detour(std::wstring_view Name, void* Target, T Replacement, T* Original)
     {

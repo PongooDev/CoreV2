@@ -33,4 +33,13 @@ namespace Packed
     /// <para>Returns false, without running <paramref name="Callback"/>, when the engine got there first.</para>
     /// </summary>
     bool RunBeforeEngineInit(const wchar_t* EngineDefaultObject, void (*Callback)());
+
+    /// <summary>
+    /// A test switch on the command line (e.g. -CoreTestLateVTables), for working out which of Core's early steps a
+    /// packed build reacts to. Only ever true on a packed exe.
+    /// </summary>
+    bool TestSwitch(const wchar_t* Name);
+
+    /// <summary>A test switch's number (-CoreTestStartDelayMs=N); 0 when it isn't given or the exe isn't packed.</summary>
+    unsigned long TestValue(const wchar_t* Name);
 }

@@ -3,6 +3,8 @@
 #include "Log.h"
 
 #include <mutex>
+#include <string>
+#include <vector>
 
 namespace
 {
@@ -72,6 +74,71 @@ namespace
         const int64_t Distance = reinterpret_cast<const uint8_t*>(To) - From;
         return Distance >= INT32_MIN && Distance <= INT32_MAX;
     }
+
+    struct FPendingDetour
+    {
+        std::wstring Name;
+        void* Target;
+        void* Replacement;
+        void** Original;
+    };
+
+    struct FPendingSwap
+    {
+        std::wstring Name;
+        void** VTable;
+        int32_t Index;
+        void* Replacement;
+    };
+
+    bool bDeferVTables = false;
+    bool bDeferDetours = false;
+    std::vector<FPendingDetour> PendingDetours;
+    std::vector<FPendingSwap> PendingSwaps;
+
+    bool CreateDetour(std::wstring_view Name, void* Target, void* Replacement, void** Original)
+    {
+        const MH_STATUS Status = MH_CreateHook(Target, Replacement, Original);
+        if (Status != MH_OK)
+        {
+            Log::Error(L"Hook {}: MH_CreateHook failed ({})", Name, static_cast<int32_t>(Status));
+            return false;
+        }
+
+        Log::Info(L"Hook {}: detour at 0x{:X}", Name, reinterpret_cast<uintptr_t>(Target));
+        return true;
+    }
+
+    bool WriteSlot(std::wstring_view Name, void** VTable, int32_t Index, void* Replacement)
+    {
+        void** Slot = VTable + Index;
+        DWORD OldProtection = 0;
+        if (!VirtualProtect(Slot, sizeof(void*), PAGE_READWRITE, &OldProtection))
+        {
+            Log::Error(L"Hook {}: VirtualProtect failed on vtable slot 0x{:X}", Name, Index);
+            return false;
+        }
+
+        *Slot = Replacement;
+        VirtualProtect(Slot, sizeof(void*), OldProtection, &OldProtection);
+
+        Log::Info(L"Hook {}: vtable 0x{:X} slot 0x{:X}", Name, reinterpret_cast<uintptr_t>(VTable), Index);
+        return true;
+    }
+}
+
+void Hooks::DeferUntilEnableAll(bool bVTables, bool bDetours)
+{
+    bDeferVTables = bVTables;
+    bDeferDetours = bDetours;
+    if (bVTables)
+    {
+        Log::Info(L"Test switch -CoreTestLateVTables: vtable swaps wait until the engine is up");
+    }
+    if (bDetours)
+    {
+        Log::Info(L"Test switch -CoreTestLateDetours: detours (and their trampolines) are made when the engine is up");
+    }
 }
 
 bool Hooks::Detour(std::wstring_view Name, void* Target, void* Replacement, void** Original)
@@ -82,15 +149,12 @@ bool Hooks::Detour(std::wstring_view Name, void* Target, void* Replacement, void
         return false;
     }
 
-    const MH_STATUS Status = MH_CreateHook(Target, Replacement, Original);
-    if (Status != MH_OK)
+    if (bDeferDetours)
     {
-        Log::Error(L"Hook {}: MH_CreateHook failed ({})", Name, static_cast<int32_t>(Status));
-        return false;
+        PendingDetours.push_back({ std::wstring(Name), Target, Replacement, Original });
+        return true;
     }
-
-    Log::Info(L"Hook {}: detour at 0x{:X}", Name, reinterpret_cast<uintptr_t>(Target));
-    return true;
+    return CreateDetour(Name, Target, Replacement, Original);
 }
 
 bool Hooks::SwapVTable(std::wstring_view Name, void** VTable, int32_t Index, void* Replacement, void** Original)
@@ -101,23 +165,17 @@ bool Hooks::SwapVTable(std::wstring_view Name, void** VTable, int32_t Index, voi
         return false;
     }
 
-    void** Slot = VTable + Index;
-    DWORD OldProtection = 0;
-    if (!VirtualProtect(Slot, sizeof(void*), PAGE_READWRITE, &OldProtection))
-    {
-        Log::Error(L"Hook {}: VirtualProtect failed on vtable slot 0x{:X}", Name, Index);
-        return false;
-    }
-
+    // The original is only read, so a held swap still hands it over now.
     if (Original)
     {
-        *Original = *Slot;
+        *Original = VTable[Index];
     }
-    *Slot = Replacement;
-    VirtualProtect(Slot, sizeof(void*), OldProtection, &OldProtection);
-
-    Log::Info(L"Hook {}: vtable 0x{:X} slot 0x{:X}", Name, reinterpret_cast<uintptr_t>(VTable), Index);
-    return true;
+    if (bDeferVTables)
+    {
+        PendingSwaps.push_back({ std::wstring(Name), VTable, Index, Replacement });
+        return true;
+    }
+    return WriteSlot(Name, VTable, Index, Replacement);
 }
 
 bool Hooks::RedirectCall(std::wstring_view Name, uint8_t* CallSite, void* Destination)
@@ -183,6 +241,19 @@ bool Hooks::SkipBranch(std::wstring_view Name, uint8_t* Branch)
 
 bool Hooks::EnableAll()
 {
+    bDeferVTables = false;
+    bDeferDetours = false;
+    for (const FPendingSwap& Swap : PendingSwaps)
+    {
+        WriteSlot(Swap.Name, Swap.VTable, Swap.Index, Swap.Replacement);
+    }
+    for (const FPendingDetour& Detour : PendingDetours)
+    {
+        CreateDetour(Detour.Name, Detour.Target, Detour.Replacement, Detour.Original);
+    }
+    PendingSwaps.clear();
+    PendingDetours.clear();
+
     const MH_STATUS Status = MH_EnableHook(MH_ALL_HOOKS);
     if (Status != MH_OK)
     {

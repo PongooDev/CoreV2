@@ -34,6 +34,7 @@ static void Start()
         Log::Error(L"MinHook failed to initialize");
         return;
     }
+    Hooks::DeferUntilEnableAll(Packed::TestSwitch(L"CoreTestLateVTables"), Packed::TestSwitch(L"CoreTestLateDetours"));
 
     if (!Finder::ResolveRuntime())
     {

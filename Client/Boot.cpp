@@ -51,13 +51,21 @@ void Boot::Initialize()
 
 static void Start()
 {
-    CrashLog::Install();
+    if (Packed::TestSwitch(L"CoreTestNoCrashLog"))
+    {
+        Log::Info(L"Test switch -CoreTestNoCrashLog: no exception handler");
+    }
+    else
+    {
+        CrashLog::Install();
+    }
 
     if (MH_Initialize() != MH_OK)
     {
         Log::Error(L"MinHook failed to initialize");
         return;
     }
+    Hooks::DeferUntilEnableAll(Packed::TestSwitch(L"CoreTestLateVTables"), Packed::TestSwitch(L"CoreTestLateDetours"));
 
     // Packed builds only: the GetBool detour that turns voice on for the others can't go in before the packer has checked
     // its code, which is after the online subsystem has started its voice interface. That interface's Init is a vtable

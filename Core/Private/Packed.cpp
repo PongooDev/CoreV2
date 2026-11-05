@@ -141,6 +141,11 @@ namespace
         // finished, so what runs next is the CRT's own start-up, and everything Core hooks belongs to the engine
         // and is not reached until engine init. Suspending a thread that may hold the heap or loader lock while
         // Core allocates and patches is a real deadlock, and buys very little.
+        if (const DWORD Delay = Packed::TestValue(L"CoreTestStartDelayMs"))
+        {
+            Log::Info(L"Packed exe: the stub has handed over; test switch -CoreTestStartDelayMs holds Core {} ms", Delay);
+            Sleep(Delay);
+        }
         Log::Info(L"Packed exe: the stub has handed over, starting Core");
         GStart();
         return 0;
@@ -297,6 +302,40 @@ bool Packed::RunAfterStub(void (*Start)())
 bool Packed::IsPacked()
 {
     return Describe().TextSections >= 2;
+}
+
+namespace
+{
+    // The text after "-<Name>" on the command line, if the switch is there and ends at a space, '=' or the line's end.
+    const wchar_t* FindTestSwitch(const wchar_t* Name)
+    {
+        if (!Packed::IsPacked())
+        {
+            return nullptr;
+        }
+        const std::wstring Line = GetCommandLineW();
+        const std::wstring Switch = std::wstring(L"-") + Name;
+        for (size_t At = Line.find(Switch); At != std::wstring::npos; At = Line.find(Switch, At + 1))
+        {
+            const size_t End = At + Switch.size();
+            if (End == Line.size() || Line[End] == L' ' || Line[End] == L'=')
+            {
+                return GetCommandLineW() + End;
+            }
+        }
+        return nullptr;
+    }
+}
+
+bool Packed::TestSwitch(const wchar_t* Name)
+{
+    return FindTestSwitch(Name) != nullptr;
+}
+
+unsigned long Packed::TestValue(const wchar_t* Name)
+{
+    const wchar_t* Value = FindTestSwitch(Name);
+    return Value && *Value == L'=' ? wcstoul(Value + 1, nullptr, 10) : 0;
 }
 
 void Packed::WaitForCodeCheck()

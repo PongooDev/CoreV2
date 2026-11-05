@@ -241,7 +241,7 @@ namespace
             }
             TheaterMapData = Natives::AFortWorldManager_GetTheaterMapData ? static_cast<FFortTheaterMapData*>(Natives::AFortWorldManager_GetTheaterMapData(WorldManager)) : nullptr;
             TheaterType = TheaterMapData ? TheaterMapData->RuntimeInfo.TheaterType : EFortTheaterType::GetMax_None();
-            bIsTestMap = TheaterType == EFortTheaterType::GetTest() || TheaterType == EFortTheaterType::GetMax_None();
+            bIsTestMap = TheaterType == EFortTheaterType::GetTestIfAvailable() || TheaterType == EFortTheaterType::GetMax_None();
 
             FFortMissionManagerRecord& Record = WorldManager->MissionManagerRecord;
             MissionRecords = &static_cast<TStructArray<FFortMissionRecord>&>(Record.MissionRecords);
@@ -270,7 +270,7 @@ namespace
                 return L"difficulty";
             }
 
-            if ((SharedMission.bIsPrototype && TheaterType != EFortTheaterType::GetTest()) || (bIsTestMap && !SharedMission.bAllowInTestMaps))
+            if ((SharedMission.bIsPrototype && TheaterType != EFortTheaterType::GetTestIfAvailable()) || (bIsTestMap && !SharedMission.bAllowInTestMaps))
             {
                 return L"prototype or test map";
             }
@@ -414,7 +414,7 @@ void AFortWorldManager::ServerTickLoadingOrCreatingWorld()
                     Finder::ResolveTheaterMapDataLive();
                 }
                 FFortTheaterMapData* TheaterMapData = Natives::AFortWorldManager_GetTheaterMapData ? static_cast<FFortTheaterMapData*>(Natives::AFortWorldManager_GetTheaterMapData(this)) : nullptr;
-                const bool bAllowPrototypes = TheaterMapData && TheaterMapData->RuntimeInfo.TheaterType == EFortTheaterType::GetTest();
+                const bool bAllowPrototypes = TheaterMapData && TheaterMapData->RuntimeInfo.TheaterType == EFortTheaterType::GetTestIfAvailable();
 
                 const std::pair<TStructArray<FFortPossibleMission>*, EMissionGenerationCategory> Lists[] = {
                     { &static_cast<TStructArray<FFortPossibleMission>&>(MissionGenerator->SecondaryMissionList), EMissionGenerationCategory::GetSecondary() },

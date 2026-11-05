@@ -12,8 +12,11 @@ class EFortTheaterType
     DefineUEnumValue(PvP2)
     DefineUEnumValue(Tutorial)
     DefineUEnumValue(TutorialGate)
-    DefineUEnumValue(Test)
     DefineUEnumValue(Max_None)
+
+    // 3.5 drops Test (Max_None follows TutorialGate there; the theater's own bIsTestTheater stays): InvalidEnumValue,
+    // which no theater's type matches, where it is gone.
+    static EFortTheaterType GetTestIfAvailable() { return EFortTheaterType{ StaticEnumInfo().FindValue(L"Test") }; }
 };
 
 struct FFortTheaterRuntimeData

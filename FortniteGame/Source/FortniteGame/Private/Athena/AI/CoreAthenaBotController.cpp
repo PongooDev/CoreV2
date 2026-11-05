@@ -1234,6 +1234,9 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     if (!bSkydive && State == ECoreAthenaBotState::Warmup)
     {
         Pawn->bCanBeDamaged = false;
+        // A player arriving on the island has no spawn animation here: the bot stands a moment instead, as if it were
+        // loading in (TickWarmup).
+        bWarmupArrivalHold = true;
     }
     const int32_t MovementAttributes = InitializeMovementAttributes(Pawn, HeroObject);
     static bool bLoggedAttributes = false;
@@ -1485,6 +1488,15 @@ void FCoreAthenaBotController::TickWarmup(float Now, float DeltaSeconds)
     if (Now - LastHurtTime < 1.0f && WarmupActivity != EWarmupActivity::Brawl)
     {
         ChooseWarmupActivity(Now, true);
+    }
+    else if (bWarmupArrivalHold)
+    {
+        // Just arrived: standing still for a few seconds, looking about a little (the Idle activity: no walking, no
+        // shooting, no building). Being hurt above still starts a fight.
+        bWarmupArrivalHold = false;
+        WarmupActivity = EWarmupActivity::Idle;
+        WarmupActivityUntil = Now + RandomRange(3.0f, 8.0f);
+        NextLookAroundTime = Now + RandomRange(0.8f, 2.0f);
     }
     else if (Now >= WarmupActivityUntil)
     {

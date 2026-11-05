@@ -660,6 +660,8 @@ private:
     float NextLookAroundTime = 0.0f;
     float NextGlideCheck = 0.0f;
     bool bWarmupGliding = false;
+    // A new warmup pawn stands still for a few seconds before the warmup's activities begin.
+    bool bWarmupArrivalHold = false;
     int32_t WarmupDeaths = 0;
     int32_t WarmupGlides = 0;
     int32_t WarmupBrawls = 0;

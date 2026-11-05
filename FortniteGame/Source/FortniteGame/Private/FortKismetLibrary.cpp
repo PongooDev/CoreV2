@@ -175,7 +175,7 @@ void UFortKismetLibrary::K2_GiveItemToAllPlayers(UObject* WorldContextObject, UF
 #endif
 }
 
-int32_t UFortKismetLibrary::K2_RemoveItemFromPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove)
+int32_t UFortKismetLibrary::K2_RemoveItemFromPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove, bool bForceRemoval)
 {
 #if WITH_SERVER_CODE
     AFortInventory* Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
@@ -208,7 +208,7 @@ int32_t UFortKismetLibrary::K2_RemoveItemFromPlayer(AFortPlayerController* Playe
         const int32_t Count = Entry.Count;
         const int32_t Taken = AmountToRemove < 0 ? Count : std::min(Count, AmountToRemove - Removed);
         const FGuid ItemGuid = Entry.ItemGuid;
-        if (PlayerController->RemoveInventoryItem(ItemGuid, Taken, true))
+        if (PlayerController->RemoveInventoryItem(ItemGuid, Taken, true, bForceRemoval))
         {
             Removed += Taken;
         }
@@ -217,6 +217,17 @@ int32_t UFortKismetLibrary::K2_RemoveItemFromPlayer(AFortPlayerController* Playe
 #else
     return 0;
 #endif
+}
+
+bool UFortKismetLibrary::HasForceRemoval()
+{
+    static const bool bHasForceRemoval = StaticFunction_K2_RemoveItemFromPlayer()->FindPropertyByName(FName(L"bForceRemoval", FNAME_Find)) != nullptr;
+    return bHasForceRemoval;
+}
+
+int32_t UFortKismetLibrary::K2_RemoveItemFromPlayerHK(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove, bool bForceRemoval)
+{
+    return K2_RemoveItemFromPlayer(PlayerController, ItemDefinition, AmountToRemove, HasForceRemoval() && bForceRemoval);
 }
 
 void UFortKismetLibrary::K2_RemoveItemFromAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove)
@@ -398,9 +409,20 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_GiveItemToAllPlayers)
 
 DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromPlayer)
 {
+    // 3.2 added bForceRemoval (3.3's exec, 0x10C6710, reads four parameters). Reading three left the call's bytecode on
+    // it, so P_FINISH stepped over its EX_True and the script loop spun on EX_EndFunctionParms, as K2_SpawnPickupInWorld's
+    // did (#250): 3.3's Remote Explosives remove the emptied detonator with it true (GA_Athena_C4_Passive once the last
+    // thrown charge has exploded, GAT_Athena_c4_Detonate after detonating with none left), and shooting a charge set
+    // that off once the last one was thrown, which froze the server's game thread.
     P_GET_OBJECT(AFortPlayerController, Z_Param_PlayerController);
     P_GET_OBJECT(UFortWorldItemDefinition, Z_Param_ItemDefinition);
     P_GET_PROPERTY(UIntProperty, Z_Param_AmountToRemove);
+    bool Z_Param_bForceRemoval = false;
+    if (HasForceRemoval())
+    {
+        P_GET_UBOOL(Z_Param_bForceRemovalParam);
+        Z_Param_bForceRemoval = Z_Param_bForceRemovalParam;
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
 #if WITH_SERVER_CODE
@@ -409,7 +431,7 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromPlayer)
 #else
     const bool bKeep = false;
 #endif
-    *static_cast<int32_t*>(RESULT_PARAM) = bKeep ? Z_Param_AmountToRemove : K2_RemoveItemFromPlayer(Z_Param_PlayerController, Z_Param_ItemDefinition, Z_Param_AmountToRemove);
+    *static_cast<int32_t*>(RESULT_PARAM) = bKeep ? Z_Param_AmountToRemove : K2_RemoveItemFromPlayer(Z_Param_PlayerController, Z_Param_ItemDefinition, Z_Param_AmountToRemove, Z_Param_bForceRemoval);
     P_NATIVE_END;
 }
 
@@ -493,7 +515,7 @@ void UFortKismetLibrary::HookNatives()
     {
         for (const uintptr_t Site : Finder::CallsTo(RemoveItemFromPlayerNative, false))
         {
-            Hooks::RedirectCall(L"UFortKismetLibrary::K2_RemoveItemFromPlayer", reinterpret_cast<uint8_t*>(Site), reinterpret_cast<void*>(&K2_RemoveItemFromPlayer));
+            Hooks::RedirectCall(L"UFortKismetLibrary::K2_RemoveItemFromPlayer", reinterpret_cast<uint8_t*>(Site), reinterpret_cast<void*>(&K2_RemoveItemFromPlayerHK));
         }
     }
 #endif

@@ -125,12 +125,16 @@ class UFortWorldItemDefinition : public UFortItemDefinition
 public:
     DefineBitfieldUProperty(bCanBeDropped)
     DefineBitfieldUProperty(bCanBeDepositedInStorageVault)
+    DefineBitfieldUProperty(bPersistInInventoryWhenFinalStackEmpty)
     DefineUProperty(int32_t, PreferredQuickbarSlot)
     DefineUStructProperty(FDataTableCategoryHandle, LootLevelData)
     DefineUProperty(uint8_t, AccumulatingStatType)
     DefineUFunction(GetMaxDurability)
 
     const FDataTableCategoryHandle* GetLootLevelData() const { return &LootLevelData; }
+    // 3.2 added the flag (3.3's Remote Explosives, Athena_C4, set it): the item's last stack stays at 0 instead of
+    // leaving the inventory, as the C4 detonator does while thrown charges are out.
+    bool ShouldPersistInInventoryWhenFinalStackEmpty() const { return Member_bPersistInInventoryWhenFinalStackEmpty.IsAvailable() && bPersistInInventoryWhenFinalStackEmpty; }
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
     float GetMaxDurability(int32_t ItemLevel) const;

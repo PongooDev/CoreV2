@@ -1250,7 +1250,9 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
     EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
     DropEntry->Count = DropCount;
 
-    if (RemoveInventoryItem(ItemGuid, DropCount, false))
+    // A drop takes the item even where its definition would keep it at 0 (3.3's Remote Explosives): the player drops
+    // the whole stack.
+    if (RemoveInventoryItem(ItemGuid, DropCount, false, true))
     {
         const FTransform PawnTransform = Pawn->GetTransform();
         const FVector Location = PawnTransform.GetLocation();
@@ -1324,10 +1326,10 @@ AFortPickup* AFortPlayerController::SpawnDropPickup(const FFortItemEntry& ItemEn
     return CallVirtual<AFortPickup*>(this, Natives::AFortPlayerController_SpawnDropPickupIndex, &ItemEntry, SpawnLocation, SpawnRotation);
 }
 
-bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
+bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars, bool bForceRemoval)
 {
     void* InventoryOwner = reinterpret_cast<uint8_t*>(this) + Natives::AFortPlayerController_InventoryOwnerInterface;
-    const bool bRemoved = RemoveInventoryItemOG(InventoryOwner, ItemGuid, Count, bForceRemoveFromQuickBars);
+    const bool bRemoved = RemoveInventoryItemOG(InventoryOwner, ItemGuid, Count, bForceRemoveFromQuickBars, bForceRemoval);
 
 #if WITH_SERVER_CODE
     if (Role != ROLE_Authority)
@@ -1344,9 +1346,35 @@ bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t C
 
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     const int32_t Remaining = ItemEntry.Count - Count;
-    UFortAmmoItemDefinition* AmmoDefinition = Cast<UFortAmmoItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+    UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
+    UFortAmmoItemDefinition* AmmoDefinition = Cast<UFortAmmoItemDefinition>(ItemDefinition);
+    UFortWorldItemDefinition* WorldItemDefinition = Cast<UFortWorldItemDefinition>(ItemDefinition);
+    const auto IsFinalStack = [Inventory, WorldItem, ItemDefinition]()
+    {
+        FFortItemList& ItemList = Inventory->Inventory;
+        TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+        for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+        {
+            if (Instances[Index] && Instances[Index] != WorldItem)
+            {
+                FFortItemEntry& Entry = Instances[Index]->ItemEntry;
+                if (static_cast<UFortItemDefinition*>(Entry.ItemDefinition) == ItemDefinition)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
     if (Count >= 0 && Remaining <= 0 && AmmoDefinition && AmmoDefinition->RegenCooldown > 0.0f)
     {
+        Inventory->UpdateWorldItemCount(WorldItem, 0);
+    }
+    else if (Count >= 0 && Remaining <= 0 && !bForceRemoval && WorldItemDefinition && WorldItemDefinition->ShouldPersistInInventoryWhenFinalStackEmpty() && IsFinalStack())
+    {
+        // 3.3's Remote Explosives (#249): the last charge thrown (GA_Athena_C4's ammo cost) leaves Athena_C4 at 0 in its
+        // slot as the detonator. GA_Athena_C4_Passive and GAT_Athena_c4_Detonate take it with bForceRemoval once no
+        // thrown charge is left.
         Inventory->UpdateWorldItemCount(WorldItem, 0);
     }
     else if (Count < 0 || Remaining <= 0)
@@ -2285,8 +2313,12 @@ AFortPlayerController* AFortPlayerController::FromInventoryOwner(IFortInventoryO
     return reinterpret_cast<AFortPlayerController*>(reinterpret_cast<uint8_t*>(InventoryOwner) - Natives::AFortPlayerController_InventoryOwnerInterface);
 }
 
-bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars)
+bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars, bool bForceRemoval)
 {
+    // 3.2 added bForceRemoval (ServerRemoveInventoryItem's fourth parameter, which its _Implementation passes on);
+    // before it the callers leave the register unset.
+    static const bool bHasForceRemoval = StaticFunction_ServerRemoveInventoryItem()->FindPropertyByName(FName(L"bForceRemoval", FNAME_Find)) != nullptr;
+    bForceRemoval = bHasForceRemoval && bForceRemoval;
     AFortPlayerController* PlayerController = FromInventoryOwner(static_cast<IFortInventoryOwnerInterface*>(InventoryOwner));
 #if WITH_SERVER_CODE
     // "cheat infiniteconsumables" (#155): the game spends a consumable it uses through here (a self-ammo weapon's ammo
@@ -2298,7 +2330,7 @@ bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FG
         return true;
     }
 #endif
-    return PlayerController->RemoveInventoryItem(ItemGuid, Count, bForceRemoveFromQuickBars);
+    return PlayerController->RemoveInventoryItem(ItemGuid, Count, bForceRemoveFromQuickBars, bForceRemoval);
 }
 
 bool AFortPlayerController::ModDurabilityHK(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet)

@@ -179,7 +179,9 @@ public:
     // and activates the vehicle's ability.
     void TogglePersonalVehicle_Implementation(bool bOn);
     UFortPersonalVehicleItem* GetCurrentlySelectedPersonalVehicle() const;
-    bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
+    // bForceRemoval (3.2 added it to IFortInventoryOwnerInterface::RemoveInventoryItem) takes an item whose definition
+    // persists it at 0 (UFortWorldItemDefinition::ShouldPersistInInventoryWhenFinalStackEmpty) out of the inventory too.
+    bool RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars, bool bForceRemoval = false);
     AFortPickup* SpawnDropPickup(const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation);
     bool ModDurability(const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
     bool HandleItemZeroDurability(const FGuid& ItemGuid);
@@ -254,8 +256,8 @@ private:
     static void ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg);
     static void ServerRemoveInventoryStateValue_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType);
     static inline void (*ServerRemoveInventoryStateValue_ImplementationOG)(AFortPlayerController* This, const FGuid& ItemGuid, EFortItemEntryState StateType) = nullptr;
-    static bool RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars);
-    static inline bool (*RemoveInventoryItemOG)(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars) = nullptr;
+    static bool RemoveInventoryItemHK(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars, bool bForceRemoval);
+    static inline bool (*RemoveInventoryItemOG)(void* InventoryOwner, const FGuid& ItemGuid, int32_t Count, bool bForceRemoveFromQuickBars, bool bForceRemoval) = nullptr;
     static bool ModDurabilityHK(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet);
     static void ServerDisassembleInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerDisassembleInventoryItems_ImplementationHK(AFortPlayerController* This, const TArray<FGuid>& ItemGuids, const TArray<int32_t>& ItemCounts);

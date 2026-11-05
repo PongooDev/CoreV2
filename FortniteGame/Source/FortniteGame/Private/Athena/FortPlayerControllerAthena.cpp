@@ -310,7 +310,7 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
         const int32_t Count = ItemEntry.Count;
         EntryStruct->InitializeStruct(DropEntry);
         EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
-        if (RemoveInventoryItem(ItemGuid, Count, false))
+        if (RemoveInventoryItem(ItemGuid, Count, false, true))
         {
             if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &DeathLocation, nullptr))
             {
@@ -601,7 +601,9 @@ void AFortPlayerControllerAthena::ResetToStartingItems()
                 return std::max(static_cast<int32_t>(Entry.Count), 0);
             }
         }
-        return 0;
+        // Not a starting item: it goes at any count, an empty one too (3.3's Remote Explosives detonator stays at 0
+        // while thrown charges are out).
+        return -1;
     };
 
     // Count -1 takes the whole item.

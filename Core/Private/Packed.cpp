@@ -8,6 +8,7 @@
 #include "UObject/NameTypes.h"
 #include "UObject/UObjectArray.h"
 #include "UObject/UObjectBase.h"
+#include "Engine/World.h"
 
 #include <atomic>
 
@@ -33,9 +34,10 @@ namespace
     constexpr DWORD TimeoutMs = 60000;
     constexpr DWORD CheckTimeoutMs = 300000;
     constexpr DWORD PollMs = 2;
-    // How long to let a 3.5+ menu tick before patching, so the packer's first-tick recheck runs on clean code. The
-    // natural crash was about 14s after the engine came up and a 45s hold cleared it, so a 12s settle sits safely past.
-    constexpr DWORD TickSettleMs = 12000;
+    // How long to let a 3.5+ menu tick before patching, so the packer's recheck runs on clean code while Core still
+    // patches as early as it can: measured on 3.5.1, 1s still died (and left a null call at frame 1) and 3s was clean
+    // over repeated runs, so 4s keeps a margin. Hooks then land while the menu is still on its login flow.
+    constexpr DWORD TickSettleMs = 4000;
 
     // 3.5 (CL-4000805) is the first build whose packer rechecks the code on the first tick after the menu map loads; up
     // to 3.3 (CL-3942182) it only checks once as the load ends, so those patch at UEngine::Init / the engine coming up
@@ -43,6 +45,7 @@ namespace
     constexpr uint32_t FirstRecheckChangelist = 4000805;
 
     // The build's changelist from its version string in .rdata ("++Fortnite+Release-3.5-CL-4000805"); 0 when missing.
+
     uint32_t BuildChangelist()
     {
         static const uint32_t Changelist = []
@@ -369,8 +372,9 @@ void Packed::WaitForCodeCheck(bool bUntilTicking)
             }
             Sleep(PollMs);
         }
-        Log::Info(L"Packed exe: a world is up; letting it tick {}s past the menu-load check before patching", TickSettleMs / 1000);
-        Sleep(TickSettleMs);
+        const DWORD Settle = TickSettleMs;
+        Log::Info(L"Packed exe: a world is up; letting it tick {}ms past the menu-load check before patching", Settle);
+        Sleep(Settle);
     }
 
     Log::Info(L"Packed exe: the engine is up, so the packer has finished checking; enabling hooks now");

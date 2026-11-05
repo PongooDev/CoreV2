@@ -6,6 +6,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
+#include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -21,6 +22,13 @@
 // other writer, setting None). ClientReceiveSquadQuickChatMessage_Implementation (slot 0x363) is the shared empty function
 // on the client, and the client stub that sends it is gone with the server code.
 //
+// The sender sees their own callout as an emoji (#267): every callout of AthenaQuickChatOptions has EmojiItemDefinition
+// Emoji_Comm, whose EmojiGameplayCueTag (GameplayCue.Abilities.DisplaySquadTeamChat, GCNS_GM_OnDisplayChatEmoji) shows
+// the callout bubble over the instigator's head, its icon from that pawn's CurrQuickChatBrush, on the instigator's own
+// client only (everyone else's is deactivated), and its Animation (Toss_Emoji) is the toss. The cue only comes from the
+// emote ability, which the server gives the pawn with the emoji as its source object, as the emote wheel's
+// ServerPlayEmoteItem does; nothing on the client plays it, so the stripped body played it.
+//
 // 3.3 has the RPC but no team member state; it is left alone.
 void AFortPlayerControllerAthena::ServerPlaySquadQuickChatMessage_Implementation(const FAthenaQuickChatActiveEntry& ChatEntry)
 {
@@ -32,6 +40,18 @@ void AFortPlayerControllerAthena::ServerPlaySquadQuickChatMessage_Implementation
     {
         Log::Warning(L"Squad Comms: {} sent a callout that isn't on the wheel (bank {}, index {})", GetName().ToStdString(), Bank ? Bank->GetName().ToStdString() : L"none", Index);
         return;
+    }
+
+    // The callout's emoji, in every mode (solo has no squad, but the sender still sees it): played as the emote wheel
+    // plays one, through ServerPlayEmoteItem's implementation (the build's, or Core's where it is stripped).
+    UFortMontageItemDefinitionBase* Emoji = Bank->ChatOptions[Index].EmojiItemDefinition;
+    if (UFunction* PlayEmote = Emoji ? FindStaticFunction_ServerPlayEmoteItem() : nullptr)
+    {
+        Reflection::FParams Params(PlayEmote);
+        if (!Params.Set(L"EmoteAsset", Emoji) || !Params.Call(this))
+        {
+            Log::Warning(L"Squad Comms: {} couldn't play the callout's emoji {}", GetName().ToStdString(), Emoji->GetName().ToStdString());
+        }
     }
 
     // The callout's TeamCommType is what the squad's HUD shows over the sender.

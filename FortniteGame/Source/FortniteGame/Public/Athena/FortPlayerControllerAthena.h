@@ -65,10 +65,12 @@ struct FFortAthenaLoadout
     static bool HasBackpack() { return Member_Backpack.IsAvailable(); }
 };
 
-// One callout of a Squad Comms bank (from 3.5): its texts, icon, and the ETeamMemberState it shows the squad.
+// One callout of a Squad Comms bank (from 3.5): its texts, icon, the emoji the sender plays (a
+// UAthenaEmojiItemDefinition: 3.5.1's are all Emoji_Comm, the callout bubble) and the ETeamMemberState it shows the squad.
 struct FAthenaQuickChatLeafEntry
 {
     DefineUnrealStruct(FAthenaQuickChatLeafEntry, FortniteGame)
+    DefineUProperty(UFortMontageItemDefinitionBase*, EmojiItemDefinition)
     DefineUProperty(uint8_t, TeamCommType)
 };
 

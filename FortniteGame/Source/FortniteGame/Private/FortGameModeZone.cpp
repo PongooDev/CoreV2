@@ -119,7 +119,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     {
         AFortGameMode::FinishWorldInitialization(WorldManager);
         Athena->ApplyContainerSpawnPercents();
-        Athena->SpawnLlamas();
+        Athena->WatchLlamas();
         // 3.0's POI volumes: their brush is stripped from the client paks (FortPoiVolume.cpp).
         AFortPoiVolume::RestorePoiVolumes(GetWorld());
         AFortPoiManager::WatchInitialization(GetWorld());

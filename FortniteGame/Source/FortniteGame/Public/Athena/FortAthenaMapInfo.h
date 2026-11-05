@@ -42,4 +42,6 @@ public:
     FVector PickSupplyDropLocation(const FVector& Center, float Radius);
     // Spawns a SupplyDropClass on the ground under Location (AFortAthenaSupplyDrop::FindGroundLocationAt).
     AFortAthenaSupplyDrop* SpawnSupplyDropAtLocation(const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass);
+    // Spawns the match's Supply Llamas at random points of the island (from 3.3; stripped, Core supplies its body).
+    void SpawnLlamas();
 };

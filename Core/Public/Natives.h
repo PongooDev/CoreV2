@@ -679,6 +679,7 @@ namespace Natives
     inline bool ABuildingSMActor_bPostUpdateStripped = false;
     inline void (*ABuildingSMActor_SelectMeshSet)(void* This, int32_t LootTier) = nullptr;
     inline int32_t ABuildingSMActor_SetMeshSetIndex = -1;
+    inline int32_t ABuildingContainer_IsAlreadySearchedIndex = -1;
     inline int32_t ABuildingContainer_SpawnLootIndex = -1;
     inline int32_t ABuildingContainer_HideContainerIndex = -1;
     inline int32_t ABuildingContainer_InitializeTierGroupDataIndex = -1;

@@ -103,7 +103,8 @@ bool ABuildingContainer::ServerOnAttemptInteract(AFortPawn* InteractingPawn)
 
 bool ABuildingContainer::IsAlreadySearched(AFortPawn* Looter)
 {
-    return ContainerSlot<bool (*)(ABuildingContainer*, AFortPawn*)>(this, -3)(this, Looter);
+    // Three slots before SpawnLoot up to 3.3, four from 3.5 (Finder::ResolveBuildingLootLive).
+    return ContainerSlot<bool (*)(ABuildingContainer*, AFortPawn*)>(this, Natives::ABuildingContainer_IsAlreadySearchedIndex - Natives::ABuildingContainer_SpawnLootIndex)(this, Looter);
 }
 
 void ABuildingContainer::ModifyLootDrops(TStructArray<FFortItemEntry>& LootDrops, AFortPlayerController* Looter)

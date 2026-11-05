@@ -9192,12 +9192,17 @@ bool Finder::ResolveBuildingLootLive()
     void* InteractAddress = ContainerDefault && InteractInterface && Natives::UObject_GetInterfaceAddress ? Natives::UObject_GetInterfaceAddress(ContainerDefault, InteractInterface) : nullptr;
     const uintptr_t AttemptInteract = InteractAddress && InteractSlot >= 0 ? VTableEntry(*reinterpret_cast<void***>(InteractAddress), InteractSlot) : 0;
     const uintptr_t AttemptInteractEnd = AttemptInteract ? Finder::FunctionEnd(AttemptInteract) : 0;
-    uintptr_t SpawnLootCall = AttemptInteractEnd ? FindVirtualCall(AttemptInteract, AttemptInteractEnd) : 0;
+    const uintptr_t FirstInteractCall = AttemptInteractEnd ? FindVirtualCall(AttemptInteract, AttemptInteractEnd) : 0;
+    uintptr_t SpawnLootCall = FirstInteractCall;
     for (uintptr_t Site = SpawnLootCall; Site; Site = FindVirtualCall(Site + 1, AttemptInteractEnd))
     {
         SpawnLootCall = Site;
     }
     const int32_t SpawnLootIndex = SpawnLootCall ? VirtualSlot(SpawnLootCall) : -1;
+    // IsAlreadySearched: that first virtual (3.0 slot 0x1A1, 3.3 0x1A3), three slots before SpawnLoot up to 3.3. 3.5 adds
+    // a virtual after it (0x1A5, which sets bAlreadySearched), so it is four before (3.5.1 0x1A4, SpawnLoot 0x1A8).
+    const int32_t FirstInteractIndex = FirstInteractCall && FirstInteractCall != SpawnLootCall ? VirtualSlot(FirstInteractCall) : -1;
+    const int32_t IsAlreadySearchedIndex = FirstInteractIndex >= 0 && FirstInteractIndex < SpawnLootIndex ? FirstInteractIndex : (SpawnLootIndex >= 0 ? SpawnLootIndex - 3 : -1);
 
     // Three slots after SpawnLoot the container hides itself and records it as searched: lea r8d, [r9+4], then a tail jmp
     // (or call) to AFortWorldManager::UpdateActorRecord. 3.2 adds two virtuals after OnPickupSpawn (0xA2A550 twice), so
@@ -9321,9 +9326,10 @@ bool Finder::ResolveBuildingLootLive()
     Natives::AFortPlayerStateZone_ModifyStatIndex = ModifyStatIndex;
     Natives::ABuildingContainer_HideContainerIndex = HideContainerIndex;
     Natives::ABuildingContainer_InitializeTierGroupDataIndex = InitializeTierGroupDataIndex;
+    Natives::ABuildingContainer_IsAlreadySearchedIndex = IsAlreadySearchedIndex;
     Natives::ABuildingContainer_SpawnLootIndex = SpawnLootIndex;
-    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, SpawnLoot slot 0x{:X}, InitializeTierGroupData slot {}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
-        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, SpawnLootIndex, InitializeTierGroupDataIndex >= 0 ? std::format(L"0x{:X}", InitializeTierGroupDataIndex) : std::wstring(L"none"), HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
+    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, IsAlreadySearched slot 0x{:X}, SpawnLoot slot 0x{:X}, InitializeTierGroupData slot {}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
+        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, IsAlreadySearchedIndex, SpawnLootIndex, InitializeTierGroupDataIndex >= 0 ? std::format(L"0x{:X}", InitializeTierGroupDataIndex) : std::wstring(L"none"), HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
     return true;
 }
 

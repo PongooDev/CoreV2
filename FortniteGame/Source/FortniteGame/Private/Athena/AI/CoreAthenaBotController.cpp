@@ -5039,6 +5039,11 @@ namespace
     constexpr float BuildingLevelHeight = 384.0f;
     // What a Battle Royale piece costs a player, whichever the material.
     constexpr int32_t BuildingPieceCost = 10;
+    // How far a bot keeps from the middle of a wall it is about to build (its capsule's radius and the wall's half
+    // thickness, with room to spare), and the most a wall may stand above the ground at its middle: a player's wall
+    // needs the world's support, and shots passed under a bot's wall hanging over a dip.
+    constexpr float BotWallClearance = 60.0f;
+    constexpr float MaxWallGroundGap = 50.0f;
 
     // A grid axis: 0 +X, 1 +Y, 2 -X, 3 -Y (a quarter turn to the right each, as yaw turns X towards Y).
     void GridAxis(int32_t Axis, int32_t& OutX, int32_t& OutY)
@@ -5385,6 +5390,24 @@ bool FCoreAthenaBotController::TickBuildingQueue(float Now)
         ClearBuildingQueue();
         return false;
     }
+    // A wall goes up beside the bot, not through it: by its cell's edge, the bot's capsule stuck out of a wall placed
+    // there (the piece spawns whatever overlaps it), and players shot it through its own wall (CoreV2 #264). It steps
+    // towards the cell's middle first, for a second and a half at most.
+    const FCoreAthenaBotBuildDescriptor& Upcoming = BuildQueue.Descriptors[NextBuildPiece];
+    FVector WallOrigin;
+    float WallYaw = 0.0f;
+    if (IsWallPiece(Upcoming.BuildingType) && Now < LastBuildTime + DelayBeforeNextBuildPiece + 1.5f && GetPiecePlacement(Upcoming, WallOrigin, WallYaw))
+    {
+        const FVector Across = RotateYaw(FVector(0.0f, 1.0f, 0.0f), WallYaw);
+        const FVector Along = RotateYaw(FVector(1.0f, 0.0f, 0.0f), WallYaw);
+        const float FromWall = std::fabs((Location.X - WallOrigin.X) * Across.X + (Location.Y - WallOrigin.Y) * Across.Y);
+        const float AlongWall = std::fabs((Location.X - WallOrigin.X) * Along.X + (Location.Y - WallOrigin.Y) * Along.Y);
+        if (FromWall < BotWallClearance && AlongWall < BuildingCellSize * 0.5f + BotWallClearance)
+        {
+            MoveTowards(FVector(BuildQueue.CellMinX + BuildingCellSize * 0.5f, BuildQueue.CellMinY + BuildingCellSize * 0.5f, Location.Z), Now, 40.0f);
+            return true;
+        }
+    }
     StopMoving();
     int32_t ForwardX = 0;
     int32_t ForwardY = 0;
@@ -5479,7 +5502,7 @@ bool FCoreAthenaBotController::IsPiecePlaceClear(const FCoreAthenaBotBuildDescri
         UObject* GroundActor = nullptr;
         UObject* GroundComponent = nullptr;
         if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Probe.X, Probe.Y, Origin.Z + BuildingLevelHeight), FVector(Probe.X, Probe.Y, Origin.Z - 250.0f), 0, false, true, Ground, GroundActor, GroundComponent)
-            || (GroundActor && Cast<APawn>(GroundActor)))
+            || (GroundActor && Cast<APawn>(GroundActor)) || (IsWallPiece(Descriptor.BuildingType) && Ground.Z < Origin.Z - MaxWallGroundGap))
         {
             return false;
         }

@@ -3758,7 +3758,7 @@ void FCoreAthenaBotController::Wander(float Now)
     const FVector Location = LocationOf(Pawn);
     if (!bHasWanderGoal || Dist2D(Location, WanderGoal) < 200.0f || Now >= NextWanderTime)
     {
-        const float Range = State == ECoreAthenaBotState::Warmup ? 800.0f : 2500.0f;
+        float Range = State == ECoreAthenaBotState::Warmup ? 800.0f : 2500.0f;
         FVector Center;
         float Radius = 0.0f;
         FVector Around = Location;
@@ -3767,12 +3767,33 @@ void FCoreAthenaBotController::Wander(float Now)
         {
             Around = FVector(Location.X + (Center.X - Location.X) * 0.3f, Location.Y + (Center.Y - Location.Y) * 0.3f, Location.Z);
         }
+        // A bot on a player's team stays with its players (StayWithTeam calls it back past 25 m): it wanders around the
+        // nearest one standing, within 10 m of them. Onwards, it went out 25 m, was called back, and went out again: back
+        // and forth by its player (CoreV2 #264).
+        bool bByPlayer = false;
+        if (State != ECoreAthenaBotState::Warmup)
+        {
+            float Nearest = 1e9f;
+            for (AFortPlayerPawnAthena* Player : Manager->PlayerTeammatesOf(this))
+            {
+                if (!Player->bIsDBNO && !Player->bIsSkydiving && !Player->bIsParachuteOpen && Dist2D(LocationOf(Player), Location) < Nearest)
+                {
+                    Nearest = Dist2D(LocationOf(Player), Location);
+                    Around = LocationOf(Player);
+                    bByPlayer = true;
+                }
+            }
+        }
+        if (bByPlayer)
+        {
+            Range = 1000.0f;
+        }
         // On the ground, onwards: the next goal within 60 degrees of the way it was going (a random one each time sent it
         // back the way it came), turned back towards the middle of the safe zone near its edge.
         float Angle = RandomRange(0.0f, 6.2831853f);
         UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
         const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
-        if (State != ECoreAthenaBotState::Warmup && (bHasWanderGoal || Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 100.0f * 100.0f))
+        if (!bByPlayer && State != ECoreAthenaBotState::Warmup && (bHasWanderGoal || Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 100.0f * 100.0f))
         {
             const FVector Heading = Velocity.X * Velocity.X + Velocity.Y * Velocity.Y > 100.0f * 100.0f ? Direction2D(FVector(), FVector(Velocity.X, Velocity.Y, 0.0f)) : Direction2D(Location, WanderGoal);
             if (Heading.SizeSquared() > 0.01f)
@@ -6177,6 +6198,9 @@ bool FCoreAthenaBotController::StayWithTeam(float Now)
     // Once on its way back, it goes all the way (it stopped at 25 m, wandered off and came back).
     if (Best > (Goal == ECoreAthenaBotGoal::Regroup ? 1000.0f : 2500.0f) && Best < 40000.0f)
     {
+        // The wander goal it had is behind it now: back with the team, it picks a new one there (Wander), instead of
+        // walking out to it again and being called back at 25 m, over and over (CoreV2 #264).
+        bHasWanderGoal = false;
         MoveTowards(TeammateLocation, Now, 800.0f);
         return true;
     }

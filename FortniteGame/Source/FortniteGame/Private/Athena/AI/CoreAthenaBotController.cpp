@@ -1921,6 +1921,15 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
             Intent = L"storm";
             SetGoal(ECoreAthenaBotGoal::Storm, Now);
         }
+        // A squad's player marked the map: the bot goes there (an unarmed one arms itself first).
+        else if (bHasMapMarker && !bArmed && Loot(Now, 4000.0f))
+        {
+            Intent = L"loot";
+        }
+        else if (FollowMapMarker(Now))
+        {
+            Intent = L"marker";
+        }
         // What lies within 15 m is taken on the way, whatever the goal (it stays the goal).
         else if (Loot(Now, 1500.0f) || (!bArmed && Loot(Now, 4000.0f)))
         {
@@ -2935,6 +2944,20 @@ void FCoreAthenaBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVec
     if (uint8_t* Location = Field(L"Location"))
     {
         *reinterpret_cast<FVector*>(Location) = ImpactLocation;
+    }
+    // On each client the cue reaches the weapon through the pawn (3.3): the multicast's body (0xA25440) hands it to the
+    // pawn's ability system, whose avatar's IGameplayCueInterface::HandleGameplayCue (0x54BF60) finds no handler for the
+    // tag on the pawn but AFortPawn::GameplayCue, its catch-all for GameplayCue.* (0xE4D340), which forwards it to the
+    // pawn's CurrentWeapon (ForwardGameplayCueToTarget); AFortWeapon::GameplayCue_Weapons_Activation then plays the shot's
+    // sound and muzzle flash. So the weapon fired has to be the pawn's CurrentWeapon, as it is for a player.
+    if (AFortPawn::HasCurrentWeapon() && static_cast<AFortWeapon*>(Pawn->CurrentWeapon) != Weapon)
+    {
+        static int32_t LoggedNotCurrent = 0;
+        if (LoggedNotCurrent++ < 5)
+        {
+            Log::Info(L"Battle Royale bots: {}'s fire cue is for {}, but its pawn's CurrentWeapon is {}: clients play it on that one", BotName, NameOf(reinterpret_cast<UObject*>(Weapon)),
+                NameOf(reinterpret_cast<UObject*>(static_cast<AFortWeapon*>(Pawn->CurrentWeapon))));
+        }
     }
     Params.Call(reinterpret_cast<UObject*>(Pawn));
 #endif
@@ -5523,6 +5546,75 @@ bool FCoreAthenaBotController::StayWithTeam(float Now)
         return true;
     }
     return false;
+#else
+    return false;
+#endif
+}
+
+bool FCoreAthenaBotController::FollowMapMarker(float Now)
+{
+#if WITH_SERVER_CODE
+    // The squad's map marker (3.3: a player's MapIndicatorPos, ServerPlaceMapCursor's), looked for twice a second.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || !bOnPlayersTeam)
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    if (Now >= NextMapMarkerCheck)
+    {
+        NextMapMarkerCheck = Now + 0.5f;
+        FVector Marker;
+        std::wstring Player;
+        if (!Manager->GetSquadMapMarker(this, Location, Marker, Player))
+        {
+            if (bHasMapMarker)
+            {
+                bHasMapMarker = false;
+                Log::Info(L"Battle Royale bots: {}'s squad marker is gone, it goes back to playing", BotName);
+            }
+            return false;
+        }
+        // A new marker (or one moved): where it is on the ground.
+        if (!bHasMapMarker || Dist2D(Marker, MapMarker) > 100.0f)
+        {
+            bHasMapMarker = true;
+            MapMarker = Marker;
+            MapMarkerGround = Marker;
+            FVector Ground;
+            if (Manager->FindGroundNear(FVector(Marker.X, Marker.Y, Location.Z), 200.0f, Ground))
+            {
+                MapMarkerGround = Ground;
+            }
+            ++MapMarkersFollowed;
+            ClearNextDestination();
+            HuntTarget = nullptr;
+            Log::Info(L"Battle Royale bots: {} heads for {}'s map marker {:.0f} m away", BotName, Player, Dist2D(Location, MapMarkerGround) / 100.0f);
+        }
+    }
+    if (!bHasMapMarker)
+    {
+        return false;
+    }
+    // The storm comes first: a marker outside the circle waits until the circle reaches it.
+    FVector StormCenter;
+    float StormRadius = 0.0f;
+    if (Manager->GetCurrentSafeZone(StormCenter, StormRadius) && Dist2D(MapMarkerGround, StormCenter) > StormRadius)
+    {
+        return false;
+    }
+    // There: it stays around the marker, taking what lies close by, as a player waiting at a ping does.
+    if (Dist2D(Location, MapMarkerGround) < 800.0f)
+    {
+        if (Loot(Now, 1500.0f) || SearchContainer(Now, 1500.0f))
+        {
+            return true;
+        }
+        StopMoving();
+        return true;
+    }
+    MoveTowards(MapMarkerGround, Now, 400.0f);
+    return true;
 #else
     return false;
 #endif

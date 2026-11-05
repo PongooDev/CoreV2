@@ -1599,8 +1599,13 @@ void FCoreAthenaBotManager::AssignLandingSpots(float Now)
     // little chance in it, and a far spot counts a little less. -CoreBotHotDrop sends everyone to the richest one.
     const bool bHotDrop = Configuration::Get().bBotHotDrop;
     int32_t Assigned = 0;
-    // A team lands together (duos and squads): its first bot picks the spot and the jump, its teammates follow it out.
-    std::map<uint8_t, std::pair<const FCandidate*, float>> TeamSpots;
+    // A squad lands together (duos and squads: the team): its first bot picks the spot and the jump, its squadmates follow
+    // it out. A large team game's team is several squads (Teams of 20: five teams of 20 in squads of 4), which land apart:
+    // each squad picks its own spot, a spot another squad of its team has taken scoring lower, and a bot without a squad
+    // picks alone (CoreV2 #233: a whole team of 20 landed at Shifty Shafts).
+    const bool bSquadsInTeams = HasSquadsInTeams();
+    std::map<uint16_t, std::pair<const FCandidate*, float>> SquadSpots;
+    std::map<std::pair<uint8_t, size_t>, int32_t> TeamSquadsAtSpot;
     for (const auto& Bot : PlayerBots)
     {
         if (!Bot->IsAlive() || Bot->GetState() != ECoreAthenaBotState::InAircraft)
@@ -1615,7 +1620,9 @@ void FCoreAthenaBotManager::AssignLandingSpots(float Now)
             continue;
         }
         const bool bWaitsForPlayer = Bot->IsOnPlayersTeam() && HasAlivePlayerOnTeam(GetGameMode(), Bot->GetTeam());
-        if (const auto Chosen = TeamSpots.find(Bot->GetTeam()); Chosen != TeamSpots.end())
+        const bool bLandsWithSquad = PlaylistTeamSize > 1 && (!bSquadsInTeams || Bot->GetSquad() != 0);
+        const uint16_t Squad = SquadKeyOf(Bot.get());
+        if (const auto Chosen = bLandsWithSquad ? SquadSpots.find(Squad) : SquadSpots.end(); Chosen != SquadSpots.end())
         {
             const FCoreAthenaBotLandingSpot& Spot = LandingSpots[Chosen->second.first->Spot];
             Bot->SetLandingSpot(Spot.Location, Spot.Radius, bWaitsForPlayer ? Latest : std::clamp(Chosen->second.second + RandomRange(0.1f, 0.6f), Earliest, Latest));
@@ -1628,7 +1635,9 @@ void FCoreAthenaBotManager::AssignLandingSpots(float Now)
         {
             const FCoreAthenaBotLandingSpot& Spot = LandingSpots[Candidate.Spot];
             const float Shared = (1.0f + static_cast<float>(Spot.Bots)) * (1.0f + static_cast<float>(Spot.Bots));
-            const float Score = bHotDrop ? Spot.Loot : Spot.Loot * RandomRange(0.7f, 1.3f) * (1.0f - 0.4f * Candidate.Reach / MaxReach) / Shared;
+            const auto TeamSquads = bSquadsInTeams ? TeamSquadsAtSpot.find({ Bot->GetTeam(), Candidate.Spot }) : TeamSquadsAtSpot.end();
+            const float TeamShared = TeamSquads != TeamSquadsAtSpot.end() ? 1.0f + 3.0f * static_cast<float>(TeamSquads->second) : 1.0f;
+            const float Score = bHotDrop ? Spot.Loot : Spot.Loot * RandomRange(0.7f, 1.3f) * (1.0f - 0.4f * Candidate.Reach / MaxReach) / (Shared * TeamShared);
             if (Score > BestScore)
             {
                 BestScore = Score;
@@ -1639,9 +1648,13 @@ void FCoreAthenaBotManager::AssignLandingSpots(float Now)
         ++Spot.Bots;
         const float JumpAt = std::clamp(Best->Time + RandomRange(-1.5f, 1.5f), Earliest, Latest);
         Bot->SetLandingSpot(Spot.Location, Spot.Radius, bWaitsForPlayer ? Latest : JumpAt);
-        if (PlaylistTeamSize > 1)
+        if (bLandsWithSquad)
         {
-            TeamSpots[Bot->GetTeam()] = { Best, JumpAt };
+            SquadSpots[Squad] = { Best, JumpAt };
+        }
+        if (bSquadsInTeams)
+        {
+            ++TeamSquadsAtSpot[{ Bot->GetTeam(), Best->Spot }];
         }
         ++Assigned;
     }
@@ -2043,6 +2056,42 @@ std::vector<AFortPlayerPawnAthena*> FCoreAthenaBotManager::PlayerTeammatesOf(con
         }
     }
     return Teammates;
+}
+
+bool FCoreAthenaBotManager::GetSquadMapMarker(const FCoreAthenaBotController* Bot, const FVector& From, FVector& OutLocation, std::wstring& OutPlayer) const
+{
+    // A player's marker is their player state's MapIndicatorPos (3.3: ServerPlaceMapCursor sets it, ServerRemoveMapCursor
+    // zeroes it), which their squad's map and compass show: the squad's players in the match, as PlayerTeammatesOf has them.
+    AFortGameModeAthena* Athena = GetGameMode();
+    if (!Athena || !Bot->IsOnPlayersTeam() || !AFortPlayerStateAthena::HasMapIndicatorPos())
+    {
+        return false;
+    }
+    const bool bSquads = HasSquadsInTeams() && AFortPlayerStateAthena::HasSquadId();
+    const TArray<AFortPlayerControllerAthena*>& Alive = Athena->AlivePlayers;
+    float Best = -1.0f;
+    for (int32_t Index = 0; Index < Alive.Num(); ++Index)
+    {
+        AFortPlayerStateAthena* State = AthenaStateOf(reinterpret_cast<AController*>(Alive[Index]));
+        if (!State || static_cast<uint8_t>(State->TeamIndex) != Bot->GetTeam() || (bSquads && static_cast<uint8_t>(State->SquadId) != Bot->GetSquad()))
+        {
+            continue;
+        }
+        const FVector2D Marker = State->MapIndicatorPos;
+        if (Marker.IsZero())
+        {
+            continue;
+        }
+        const FVector Location(Marker.X, Marker.Y, From.Z);
+        const float Distance = std::sqrt((Location.X - From.X) * (Location.X - From.X) + (Location.Y - From.Y) * (Location.Y - From.Y));
+        if (Best < 0.0f || Distance < Best)
+        {
+            Best = Distance;
+            OutLocation = Location;
+            OutPlayer = State->GetPlayerName().ToStdString();
+        }
+    }
+    return Best >= 0.0f;
 }
 
 AFortPlayerStateAthena* FCoreAthenaBotManager::FindPlayerToSpectate(const FCoreAthenaBotController* Bot, AFortPlayerStateAthena* KillerState) const

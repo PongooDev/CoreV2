@@ -3,6 +3,7 @@
 #include "Containers/Set.h"
 #include "Engine/NetSerialization.h"
 #include "FortTeamInfo.h"
+#include "Math/Vector2D.h"
 #include "Natives.h"
 #include "StructArray.h"
 #include "Player/FortPlayerState.h"
@@ -92,6 +93,11 @@ public:
     // hit's stat, 0x43D8E0, adds each to the set), for the end-of-match screen's Downs and Assists.
     DefineUProperty(int32_t, DownScore)
     static bool HasDownScore() { return Member_DownScore.IsAvailable(); }
+    // 3.3: the player's map marker, the world X and Y their squad's map and compass show (OnRep_MapIndicatorPos).
+    // AFortPlayerControllerAthena::ServerPlaceMapCursor (3.3 0xA2E850) sets it, ServerRemoveMapCursor (0xA2E9B0) zeroes
+    // it, and GetMapIndicatorLocation (0xA1F280) reads it back.
+    DefineUProperty(FVector2D, MapIndicatorPos)
+    static bool HasMapIndicatorPos() { return Member_MapIndicatorPos.IsAvailable(); }
 
 private:
     // A set can't be assigned, so it has no DefineUProperty setter: read-only.

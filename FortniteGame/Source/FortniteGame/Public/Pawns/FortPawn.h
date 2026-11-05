@@ -56,6 +56,7 @@ class AFortPawn : public APawn
 
 public:
     DefineUProperty(AFortWeapon*, CurrentWeapon)
+    static bool HasCurrentWeapon() { return Member_CurrentWeapon.IsAvailable(); }
     DefineUProperty(TArray<AFortWeapon*>, CurrentWeaponList)
     DefineUProperty(FMulticastScriptDelegate, OnDied)
     DefineUProperty(FName, SpottedEvent)

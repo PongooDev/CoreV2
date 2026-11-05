@@ -239,6 +239,10 @@ private:
     int32_t CountAliveBots(bool bPlayersTeams) const;
     // After the bus: the players' teams' bots jump with their players and land by them; and each takes its team's squad.
     void UpdatePlayerTeamBots(float Now);
+    // AFortGameModeZone::ReplicateHealthAndShield for the players' teams' bots: their pawns' health and shield on their
+    // player states, for their squadmates' squad bar. The game's own pass (every game mode tick) gives a controller
+    // that isn't a player's 0 health, so this runs after it, as the frame's actors replicate.
+    void ReplicateHealthAndShield();
     // A player's team is out: its players' place (the game's SetTeamPlace on one of them, else their player states).
     void SetPlayersTeamPlace(uint8_t Team, int32_t Place);
     void ReadPlaylistTeams();

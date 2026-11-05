@@ -1118,12 +1118,19 @@ void FCoreAthenaBotController::AssignDisplayName(const std::wstring& Name)
     {
         return;
     }
-    // The id first: a client files the name under it.
+    // The ids first, as AGameSession::RegisterPlayer gives a joining player's state its PlayerId (GetNextPlayerID) and
+    // its UniqueId: a client files the name under the UniqueId, and lists a squadmate on its squad bar only with a
+    // PlayerId (3.5.1's OnRep_SquadId, 0xA429D0: the bots on a player's team were missing there, CoreV2 #264).
+    if (APlayerState::HasPlayerId() && State->PlayerId == 0
+        && Finder::ResolveNextPlayerIDLive(reinterpret_cast<const uint8_t*>(&State->PlayerId) - reinterpret_cast<const uint8_t*>(State)))
+    {
+        State->PlayerId = (*Natives::AGameSession_NextPlayerID)++;
+    }
     static int32_t LoggedIds = 0;
     const bool bHasId = AssignUniqueId(State, std::format(L"CoreBot{}{}", BotIndex, Name));
     if (LoggedIds++ < 2 || !bHasId)
     {
-        Log::Info(L"Battle Royale bots: {}'s id: {}", Name, State->UniqueId.ToString().ToStdString());
+        Log::Info(L"Battle Royale bots: {}'s id: {} (PlayerId {})", Name, State->UniqueId.ToString().ToStdString(), APlayerState::HasPlayerId() ? static_cast<int32_t>(State->PlayerId) : -1);
     }
     State->PlayerName = FString(Name.c_str());
     if (APlayerState::HasPlayerNamePrivate())

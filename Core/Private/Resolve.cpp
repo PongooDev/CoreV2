@@ -10962,6 +10962,60 @@ bool Finder::ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceV
     return false;
 }
 
+bool Finder::ResolveNextPlayerIDLive(ptrdiff_t PlayerIdOffset)
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::AGameSession_NextPlayerID)
+    {
+        return Natives::AGameSession_NextPlayerID != nullptr;
+    }
+    bSearched = true;
+
+    // AGameSession::RegisterPlayer(APlayerController* NewPlayer, const TSharedPtr<const FUniqueNetId>& UniqueId, bool
+    // bWasFromInvite) (3.1 0x2056E60, slot 0x608; 3.3 0x20DC8E0 and 3.5.1 0x217C620, slot 0x610) with GetNextPlayerID
+    // inlined: "mov eax, cs:NextPlayerID; ...; inc eax; mov cs:NextPlayerID, eax; mov rax, [rdx + PlayerState];
+    // mov [rax + PlayerId], ecx", then SetUniqueId and RegisterPlayerWithSession on the player state.
+    void** SessionVTable = CdoVTable(L"/Script/Engine.GameSession");
+    for (int32_t Index = 0x60; SessionVTable && PlayerIdOffset > 0 && Index < 0x110; ++Index)
+    {
+        const uintptr_t Function = reinterpret_cast<uintptr_t>(SessionVTable[Index]);
+        if (!IsInText(Function) || !IsInText(Function + 0x60))
+        {
+            continue;
+        }
+        uintptr_t Counter = 0;
+        bool bStored = false;
+        bool bPlayerId = false;
+        for (uintptr_t Site = Function; Site < Function + 0x50; ++Site)
+        {
+            // A load and a store of one rip-relative int (modrm 00 reg 101), and the store to the player state's PlayerId.
+            const bool bRipRelative = (Byte(Site + 1) & 0xC7) == 0x05;
+            if (!Counter && Byte(Site) == 0x8B && bRipRelative)
+            {
+                Counter = Finder::RelativeTarget(Site, 2, 6);
+            }
+            else if (Counter && Byte(Site) == 0x89 && bRipRelative && Finder::RelativeTarget(Site, 2, 6) == Counter)
+            {
+                bStored = true;
+            }
+            else if (bStored && Byte(Site) == 0x89 && (Byte(Site + 1) & 0xC0) == 0x80 && *reinterpret_cast<const int32_t*>(Site + 2) == static_cast<int32_t>(PlayerIdOffset))
+            {
+                bPlayerId = true;
+                break;
+            }
+        }
+        if (bPlayerId && !IsInText(Counter))
+        {
+            Natives::AGameSession_NextPlayerID = reinterpret_cast<int32_t*>(Counter);
+            Log::Info(L"Finder: AGameSession::RegisterPlayer is slot 0x{:X} (0x{:X}), its NextPlayerID 0x{:X} ({})", Index * 8, Function - Finder::ImageBase(), Counter - Finder::ImageBase(),
+                *Natives::AGameSession_NextPlayerID);
+            return true;
+        }
+    }
+    Log::Warning(L"Finder: AGameSession::RegisterPlayer's NextPlayerID not found, player bots go without PlayerIds");
+    return false;
+}
+
 bool Finder::ResolveReplicationDriverLive()
 {
     static bool bSearched = false;

@@ -9,6 +9,8 @@
 #include "UObject/Object.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <functional>
+
 class AActor;
 class FNetGUIDCache;
 class FNetworkNotify;
@@ -115,6 +117,10 @@ public:
     FActorDestructionInfo* FindDestructionInfo(const FNetworkGUID& NetGUID);
 
     static void Hook();
+    // Core: Callback runs on the server each frame in TickFlush, after the world's actors have ticked and before they
+    // replicate (UE 4.20's FWorldDelegates::OnWorldPostActorTick moment), for a value the game's own tick sets that
+    // Core corrects for that frame's replication.
+    static void AddPreReplicationCallback(std::function<void()> Callback);
 
 #if WITH_SERVER_CODE
 private:

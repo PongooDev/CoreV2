@@ -78,11 +78,25 @@ bool UNetDriver::IsAdaptiveNetUpdateFrequencyEnabled()
     return Natives::UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled();
 }
 
+namespace
+{
+    std::vector<std::function<void()>> PreReplicationCallbacks;
+}
+
+void UNetDriver::AddPreReplicationCallback(std::function<void()> Callback)
+{
+    PreReplicationCallbacks.push_back(std::move(Callback));
+}
+
 void UNetDriver::TickFlush(float DeltaSeconds)
 {
     if (IsServer() && ClientConnections.Num() > 0 && !ClientConnections[0]->InternalAck)
     {
 #if WITH_SERVER_CODE
+        for (const std::function<void()>& Callback : PreReplicationCallbacks)
+        {
+            Callback();
+        }
         const int32_t Updated = ServerReplicateActors(DeltaSeconds);
 
         static int32_t LastUpdateCount = 0;

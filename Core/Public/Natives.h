@@ -560,6 +560,11 @@ namespace Natives
     // it replicates. UE 4.20 (3.3 0x328DE0, slot 0x278) adds FName Type: NAME_None is the default online subsystem's.
     // Battle Royale's player bots get their account-like ids from it: Finder::ResolveCreateUniquePlayerIdLive.
     inline int32_t UOnlineEngineInterface_CreateUniquePlayerIdIndex = -1;
+    // AGameSession::GetNextPlayerID's static NextPlayerID (UE 4.20: "static int32 NextPlayerID = 256; return
+    // NextPlayerID++;"), inlined into AGameSession::RegisterPlayer (3.1 0x2056E60, slot 0x608; 3.3 0x20DC8E0 and 3.5.1
+    // 0x217C620, slot 0x610), which gives a joining player's state its PlayerId from it. Battle Royale's player bots
+    // take theirs from it too: Finder::ResolveNextPlayerIDLive.
+    inline int32_t* AGameSession_NextPlayerID = nullptr;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
     inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;

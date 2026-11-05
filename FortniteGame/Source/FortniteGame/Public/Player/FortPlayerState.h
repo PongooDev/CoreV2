@@ -162,6 +162,14 @@ class AFortPlayerStateZone : public AFortPlayerState
 public:
     DefineUStructArrayProperty(FAccumulatedItemEntry, AccumulatedItems)
     DefineUFunction(OnRep_AccumulatedItems)
+    // The pawn's health and shield, replicated for the squad bar: the game mode's ReplicateHealthAndShield (every tick,
+    // 3.5.1 Athena's 0x9F7440, AFortGameModeZone's slot 0xB10) copies them from a player controller's pawn, and sets
+    // 0 health of 100 for any other controller's.
+    DefineUProperty(float, CurrentHealth)
+    DefineUProperty(float, MaxHealth)
+    DefineUProperty(float, CurrentShield)
+    DefineUProperty(float, MaxShield)
+    static bool HasHealthAndShield() { return Member_CurrentHealth.IsAvailable() && Member_MaxShield.IsAvailable(); }
 
     void AddAccumulatedItem(UFortItemDefinition* ItemDefinition, int32_t Delta);
     void ModifyStat(EFortReplicatedStat StatType, int32_t StatDelta, int32_t ScoreDelta, const FVector& Location);

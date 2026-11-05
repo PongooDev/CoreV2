@@ -217,6 +217,9 @@ namespace Finder
     // UOnlineEngineInterface::CreateUniquePlayerId's slot (Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex) in
     // the engine's online interface object's vtable, for Battle Royale's player bots' ids.
     bool ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceVTable);
+    // AGameSession::GetNextPlayerID's counter (Natives::AGameSession_NextPlayerID), from AGameSession::RegisterPlayer's
+    // store to the player state's PlayerId (at PlayerIdOffset), for Battle Royale's player bots' PlayerIds.
+    bool ResolveNextPlayerIDLive(ptrdiff_t PlayerIdOffset);
     bool ResolveReplicationDriverLive();
     bool ResolveDecoSpawnedLive();
     bool ResolveScoreBuildingConstructionLive();

@@ -12,6 +12,7 @@
 #include "Athena/FortPoiVolume.h"
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Configuration.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "GameFramework/GameMode.h"
@@ -29,6 +30,7 @@
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortCheatManager.h"
+#include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -252,6 +254,18 @@ void FCoreAthenaBotManager::Create(AFortGameModeAthena* GameMode)
     if (!bWatching)
     {
         WatchManager();
+    }
+    static bool bReplicatesHealth = false;
+    if (!bReplicatesHealth)
+    {
+        bReplicatesHealth = true;
+        UNetDriver::AddPreReplicationCallback([]()
+        {
+            if (Instance)
+            {
+                Instance->ReplicateHealthAndShield();
+            }
+        });
     }
 #endif
 }
@@ -2396,6 +2410,32 @@ void FCoreAthenaBotManager::UpdatePlayerTeamBots(float Now)
             AFortPlayerPawnAthena* Pawn = Player->second;
             Bot->FollowTeammateDrop(LocationOf(reinterpret_cast<const AActor*>(Pawn)), !Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen, Now);
         }
+    }
+#endif
+}
+
+void FCoreAthenaBotManager::ReplicateHealthAndShield()
+{
+#if WITH_SERVER_CODE
+    // As the game's own pass does for a player controller's pawn (3.5.1 0x9F7440): the pawn's GetHealth, GetMaxHealth,
+    // GetShield and GetMaxShield onto the player state's replicated CurrentHealth, MaxHealth, CurrentShield and
+    // MaxShield. Without it a bot teammate's squad bar showed no health or shield (CoreV2 #264).
+    if (!AFortPlayerStateZone::HasHealthAndShield() || !GetGameMode())
+    {
+        return;
+    }
+    for (const auto& Bot : PlayerBots)
+    {
+        AFortPlayerPawnAthena* Pawn = Bot->IsAlive() && Bot->IsOnPlayersTeam() ? Bot->GetPawn() : nullptr;
+        AFortPlayerStateAthena* State = Pawn && !Pawn->bIsDying ? Bot->GetPlayerState() : nullptr;
+        if (!State)
+        {
+            continue;
+        }
+        State->CurrentHealth = Pawn->GetHealth();
+        State->MaxHealth = Pawn->GetMaxHealth();
+        State->CurrentShield = Pawn->GetShield();
+        State->MaxShield = Pawn->GetMaxShield();
     }
 #endif
 }

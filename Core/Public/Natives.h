@@ -529,6 +529,10 @@ namespace Natives
     // it to a jump to AFortPlayerControllerZone's (1.9.1): Finder::StrippedAthenaPawnDiedIndex and
     // Finder::ResolveAthenaPawnDiedLive. The outlived count's pieces are 1.9.1's own (its wins').
     inline void (*AFortPlayerControllerZone_OnPawnDied)(AFortPlayerControllerAthena* This, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* Instigator, AActor* DamageCauser, AController* Downer) = nullptr;
+    // What 3.5's stripped handler (3.5.1 0xA27A00) keeps after Zone's, on the server: the player's map marker removed
+    // (3.5.1 0xA1B160: ServerRemoveMapCursor, then the player state's MapIndicatorPos zeroed). Null where the slot is a
+    // jump to Zone's.
+    inline void (*AFortPlayerControllerAthena_RemoveMapCursor)(AFortPlayerControllerAthena* This) = nullptr;
     // AFortPlayerControllerZone's death report (1.10 0x8DB450), which AFortPlayerControllerAthena's override calls first
     // where its Athena part is stripped (1.9.1, 1.10): Finder::StrippedAthenaPrepareDeathReportIndex.
     inline void (*AFortPlayerControllerZone_PrepareDeathReport)(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack) = nullptr;

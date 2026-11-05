@@ -243,6 +243,11 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     // 1.9 0x42DB20. Zone's handler first: the death report and ClientOnPawnDied, the inventory drop and where the
     // controller stands (Core's, PawnDiedInventoryDropCall).
     Natives::AFortPlayerControllerZone_OnPawnDied(this, Damage, DamageTags, Momentum, Instigator, DamageCauser, Downer);
+    // 3.5 keeps this much of its own body (3.5.1 0xA27A00): the player's map marker goes on the server.
+    if (Natives::AFortPlayerControllerAthena_RemoveMapCursor && Role == ROLE_Authority)
+    {
+        Natives::AFortPlayerControllerAthena_RemoveMapCursor(this);
+    }
 
 #if WITH_SERVER_CODE
     AFortPawn* DeadPawn = MyFortPawn;
@@ -321,10 +326,17 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     // Battle Royale's player bots (CoreV2 #233) are in the match's counts but not among its alive players: while any is
     // left, the game's solo win (the last of the alive players, once the count it had was more than 1) mustn't run, so
     // its count before is held at 0; the bots' manager puts the counts right and checks the win after.
+    // Its team win too (with bSquadPlay: TeamsLeft at 1 or fewer once the team this player leaves without players is
+    // taken off it, 3.5.2 0x9FA050, 3.3 0x9FD930), whose count has the bots' teams in it: in 50v50 a player's death took
+    // it from 2 to 1 and ended the match with both sides' bots still in. It is held above 1 the same way.
     FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get();
     if (BotManager && BotManager->ShouldHoldNativeWinCheck())
     {
         GameState->PlayersLeft = 0;
+        if (GameMode->bSquadPlay)
+        {
+            GameState->TeamsLeft = std::max(static_cast<int32_t>(GameState->TeamsLeft), 1) + 2;
+        }
     }
     Natives::AFortGameModeAthena_RemoveFromAlivePlayers(GameMode, this, Instigator ? static_cast<APlayerState*>(Instigator->PlayerState) : nullptr);
     if (BotManager)

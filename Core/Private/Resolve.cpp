@@ -10658,7 +10658,29 @@ int32_t Finder::StrippedAthenaPawnDiedIndex()
 
     // Stripped: the slot holds Zone's handler, a stub or a jump to Zone's, none of which calls RemoveFromAlivePlayers.
     const bool bJumpsToZone = Byte(Athena) == 0xE9 && Finder::RelativeTarget(Athena, 1, 5) == Zone;
-    const bool bStripped = Athena == Zone || bJumpsToZone || Finder::IsStubFunction(Athena);
+    // 3.5 (3.5.1 0xA27A00, 3.5.2 0xA2B260, slot 0x337) keeps a body of its own, but only Zone's handler and, on the
+    // server, the map marker's removal are left in it: "call AFortPlayerControllerZone's; cmp byte ptr [rbx + Role],
+    // ROLE_Authority; jnz; ...; jmp 0xA1B160" (3.5.1: ServerRemoveMapCursor, then the player state's MapIndicatorPos
+    // zeroed). RemoveFromAlivePlayers is left with Logout (3.5.1 0x9EE930) for its one caller, as on 1.9.1. Taken for the
+    // build's own, nobody who died was out of the match or had a death report (no kill feed line), and the player bots'
+    // win had no StartEndGamePhase to end the match with (CoreV2 #270).
+    uintptr_t MapCursorRemoval = 0;
+    const uintptr_t AthenaEnd = Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
+    const uintptr_t ZoneCall = AthenaEnd > Athena && AthenaEnd - Athena <= 0x60 ? FindRawCall(Athena, AthenaEnd) : 0;
+    if (ZoneCall && Finder::RelativeTarget(ZoneCall, 1, 5) == Zone && !FindRawCall(ZoneCall + 5, AthenaEnd))
+    {
+        const uintptr_t Jump = FindInstruction(ZoneCall + 5, AthenaEnd, { 0xE9 });
+        const uintptr_t Tail = Jump && Jump + 5 <= AthenaEnd ? Finder::RelativeTarget(Jump, 1, 5) : 0;
+        const uintptr_t TailEnd = Tail && Finder::FunctionStart(Tail) == Tail ? Finder::FunctionEnd(Tail) : 0;
+        const uintptr_t Remove = FunctionOf(RemoveFromAlivePlayersLog);
+        bool bTailCallsRemove = false;
+        for (const auto& [Site, Target] : TailEnd > Tail && TailEnd - Tail <= 0x80 ? Finder::DirectCalls(Tail, TailEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            bTailCallsRemove = bTailCallsRemove || Target == Remove;
+        }
+        MapCursorRemoval = TailEnd > Tail && TailEnd - Tail <= 0x80 && Remove && !bTailCallsRemove ? Tail : 0;
+    }
+    const bool bStripped = Athena == Zone || bJumpsToZone || Finder::IsStubFunction(Athena) || MapCursorRemoval;
     if (!bStripped)
     {
         const uintptr_t Remove = FunctionOf(RemoveFromAlivePlayersLog);
@@ -10673,9 +10695,11 @@ int32_t Finder::StrippedAthenaPawnDiedIndex()
     }
 
     Natives::AFortPlayerControllerZone_OnPawnDied = reinterpret_cast<decltype(Natives::AFortPlayerControllerZone_OnPawnDied)>(Zone);
+    Natives::AFortPlayerControllerAthena_RemoveMapCursor = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_RemoveMapCursor)>(MapCursorRemoval);
     StrippedIndex = Index;
-    Log::Info(L"Finder: AFortPlayerControllerAthena's pawn-death handler is stripped: slot 0x{:X} holds 0x{:X} ({}AFortPlayerControllerZone's 0x{:X}), which never calls RemoveFromAlivePlayers",
-        Index, Athena - Finder::ImageBase(), bJumpsToZone ? L"a jump to " : Athena == Zone ? L"" : L"a stub, not ", Zone - Finder::ImageBase());
+    Log::Info(L"Finder: AFortPlayerControllerAthena's pawn-death handler is stripped: slot 0x{:X} holds 0x{:X} ({}AFortPlayerControllerZone's 0x{:X}{}), which never calls RemoveFromAlivePlayers",
+        Index, Athena - Finder::ImageBase(), bJumpsToZone ? L"a jump to " : Athena == Zone ? L"" : MapCursorRemoval ? L"a call to " : L"a stub, not ", Zone - Finder::ImageBase(),
+        MapCursorRemoval ? std::format(L" and the map marker's removal, 0x{:X}", MapCursorRemoval - Finder::ImageBase()) : std::wstring());
     return StrippedIndex;
 }
 

@@ -321,3 +321,81 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
         }
     }
 }
+
+void FFortSpectatorAthenaArray::AddSpectatingPlayer(AFortPlayerStateAthena* Spectator)
+{
+    FFortSpectatorAthenaItem& Item = SpectatorArray.AddDefaulted();
+    Item.ReplicationID = INDEX_NONE;
+    Item.ReplicationKey = INDEX_NONE;
+    Item.PlayerState = Spectator;
+    MarkArrayDirty();
+}
+
+void FFortSpectatorAthenaArray::RemoveSpectatingPlayer(AFortPlayerStateAthena* Spectator)
+{
+    TStructArray<FFortSpectatorAthenaItem>& Items = SpectatorArray;
+    for (int32_t Index = Items.Num() - 1; Index >= 0; --Index)
+    {
+        if (static_cast<AFortPlayerStateAthena*>(Items[Index].PlayerState) == Spectator)
+        {
+            Items.RemoveAt(Index);
+            MarkArrayDirty();
+            return;
+        }
+    }
+}
+
+void AFortPlayerStateAthena::BeginSpectating(AFortPlayerStateAthena* PlayerToSpectate)
+{
+#if WITH_SERVER_CODE
+    if (!HasSpectators() || PlayerToSpectate == SpectatingTarget || PlayerToSpectate == this)
+    {
+        return;
+    }
+    EndSpectating();
+    if (!PlayerToSpectate)
+    {
+        return;
+    }
+    SpectatingTarget = PlayerToSpectate;
+    // The others watching the same player see this one, and it sees them (the count every one of them shows).
+    TStructArray<FFortSpectatorAthenaItem>& Watchers = PlayerToSpectate->Spectators.SpectatorArray;
+    for (int32_t Index = 0; Index < Watchers.Num(); ++Index)
+    {
+        AFortPlayerStateAthena* Other = Watchers[Index].PlayerState;
+        if (Other && Other != PlayerToSpectate)
+        {
+            Other->Spectators.AddSpectatingPlayer(this);
+            Spectators.AddSpectatingPlayer(Other);
+        }
+    }
+    PlayerToSpectate->Spectators.AddSpectatingPlayer(this);
+    Spectators.AddSpectatingPlayer(this);
+#endif
+}
+
+void AFortPlayerStateAthena::EndSpectating()
+{
+#if WITH_SERVER_CODE
+    if (!HasSpectators())
+    {
+        return;
+    }
+    if (AFortPlayerStateAthena* Target = SpectatingTarget)
+    {
+        Target->Spectators.RemoveSpectatingPlayer(this);
+        TStructArray<FFortSpectatorAthenaItem>& Watchers = Target->Spectators.SpectatorArray;
+        for (int32_t Index = 0; Index < Watchers.Num(); ++Index)
+        {
+            if (AFortPlayerStateAthena* Other = Watchers[Index].PlayerState)
+            {
+                Other->Spectators.RemoveSpectatingPlayer(this);
+            }
+        }
+        SpectatingTarget = nullptr;
+    }
+    FFortSpectatorAthenaArray& Own = Spectators;
+    Own.SpectatorArray.Empty();
+    Own.MarkArrayDirty();
+#endif
+}

@@ -122,6 +122,10 @@ public:
     // A teammate standing, as the game counts one for DBNO: any pawn on the bot's team (not just its squad), a bot's or a
     // player's, neither down nor dead.
     bool HasStandingTeammate(const FCoreAthenaBotController* Bot) const;
+    // The player an eliminated bot spectates, as SpectateOnDeath picks one (3.3 0xA31650): in squads a teammate still
+    // in the match, else its eliminator, else anyone in it. Only players (a bot has no HUD to count it), none if none
+    // are left.
+    AFortPlayerStateAthena* FindPlayerToSpectate(const FCoreAthenaBotController* Bot, AFortPlayerStateAthena* KillerState) const;
     // Whether a bot that keeps a players' team in is still in the match on Team (the team isn't out while one is): one in
     // its players' empty places, or in a large team game any bot of the team.
     bool HasPlayersTeamBotsLeft(uint8_t Team) const;

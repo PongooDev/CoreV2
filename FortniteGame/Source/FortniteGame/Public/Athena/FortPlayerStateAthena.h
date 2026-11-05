@@ -1,7 +1,10 @@
 #pragma once
 
 #include "Containers/Set.h"
+#include "Engine/NetSerialization.h"
 #include "FortTeamInfo.h"
+#include "Natives.h"
+#include "StructArray.h"
 #include "Player/FortPlayerState.h"
 
 class AFortPlayerStateAthena;
@@ -35,6 +38,30 @@ public:
 
     static ptrdiff_t DeathCauseOffset() { return Member_DeathCause.GetOffsetChecked(); }
     static ptrdiff_t DBNOOffset() { return Member_bDBNO.GetOffsetChecked(); }
+};
+
+// One of the player states watching a player (21.40's FFortSpectatorZoneItem).
+struct FFortSpectatorAthenaItem : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FFortSpectatorAthenaItem, FortniteGame)
+    DefineUProperty(AFortPlayerStateAthena*, PlayerState)
+};
+
+// A player state's Spectators (21.40's FFortSpectatorZoneArray), replicated as a fast array: on the watched player's
+// the player states spectating them, whose number is the HUD's "N spectating" (GetSpectatorCount, 3.3 0x11449B0, is
+// SpectatorArray.Num()); on a spectator's, itself and the others watching the same player (BeginSpectating).
+struct FFortSpectatorAthenaArray : public FFastArraySerializer
+{
+    DefineUnrealStruct(FFortSpectatorAthenaArray, FortniteGame)
+    DefineUStructArrayProperty(FFortSpectatorAthenaItem, SpectatorArray)
+
+public:
+    static bool IsWritable() { return Member_SpectatorArray.IsAvailable() && Natives::FFastArraySerializer_MarkArrayDirty; }
+
+    // 3.3 0xA10BF0 (21.40's AFortPlayerStateZone::AddSpectatingPlayer): a new item, unnumbered, and the array dirty.
+    void AddSpectatingPlayer(AFortPlayerStateAthena* Spectator);
+    // 3.3 0xA2D510 (21.40's AFortPlayerStateZone::RemoveSpectatingPlayer).
+    void RemoveSpectatingPlayer(AFortPlayerStateAthena* Spectator);
 };
 
 // Battle Royale's player state (from 1.7.2).
@@ -78,6 +105,20 @@ public:
     // From 1.10, replicated to every client.
     DefineUStructProperty(FPlayerBannerInfo, Banner)
     DefineUFunction(ClientReportKill)
+    // From 2.5 (Season 2's spectator count): the player state this one spectates (OnRep_SpectatingTarget) and those
+    // spectating it (Spectators). The server's AFortPlayerControllerAthena::SpectateOnDeath (3.3 0xA31650) sets them
+    // through BeginSpectating when bEnableSpectatorUpdates is on.
+    DefineUProperty(AFortPlayerStateAthena*, SpectatingTarget)
+    DefineUStructProperty(FFortSpectatorAthenaArray, Spectators)
+    static bool HasSpectators() { return Member_SpectatingTarget.IsAvailable() && Member_Spectators.IsAvailable() && FFortSpectatorAthenaArray::IsWritable(); }
+
+    // 3.3 0xA12BB0 (21.40's AFortPlayerStateZone::BeginSpectating): ends the current spectating, then watches
+    // PlayerToSpectate: in its Spectators, and in those of the others watching it, who are added to this one's, with
+    // itself. Not itself, nor the one it already watches.
+    void BeginSpectating(AFortPlayerStateAthena* PlayerToSpectate);
+    // 3.3 0xA19660: out of the watched player's Spectators and their spectators', SpectatingTarget cleared, and its own
+    // Spectators emptied.
+    void EndSpectating();
 
     // The kill feed line on the eliminator's client ("You eliminated <name>"): the killed player's name up to 1.9.1
     // (KilledPlayersName), their player state from 1.10 (Player; 1.11's client also counts the kill for the replay

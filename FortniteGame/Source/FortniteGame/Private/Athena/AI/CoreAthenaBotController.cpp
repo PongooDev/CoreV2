@@ -1376,6 +1376,7 @@ void FCoreAthenaBotController::EnterAircraft(float InJumpTime, float InLatestJum
 
 void FCoreAthenaBotController::Destroy()
 {
+    OnEndSpectating();
     StopFiring();
     if (AFortPlayerPawnAthena* Pawn = GetPawn())
     {
@@ -1727,6 +1728,7 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     switch (State)
     {
     case ECoreAthenaBotState::Dead:
+        TickSpectating(Now);
         return;
     case ECoreAthenaBotState::InAircraft:
         JumpOffBus(Now);
@@ -5652,5 +5654,93 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     LootTarget = nullptr;
     Log::Info(L"Battle Royale bots: {} died at ({:.0f}, {:.0f}, {:.0f}){}", BotName, LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z,
         KillerState ? std::format(L", eliminated by {}", KillerState->GetPlayerName().ToStdString()) : std::wstring(L" (nobody's elimination)"));
+    // Out of the match, it spectates a player as an eliminated player does (CoreV2 #251).
+    UWorld* World = Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr;
+    if (World)
+    {
+        OnBeginSpectating(KillerState, World->GetTimeSeconds());
+    }
+#endif
+}
+
+void FCoreAthenaBotController::OnBeginSpectating(AFortPlayerStateAthena* KillerState, float Now)
+{
+#if WITH_SERVER_CODE
+    // A player's SpectateOnDeath starts 5 seconds after the death and looks again every 2 (1.9's timer, Core's
+    // SpectateOnDeathSoon); the bot does the same, for a while of its own.
+    AFortPlayerStateAthena* PlayerState = GetPlayerState();
+    if (!PlayerState || !AFortPlayerStateAthena::HasSpectators())
+    {
+        return;
+    }
+    SpectateEndTime = Now + RandomRange(20.0f, 120.0f);
+    NextSpectateCheckTime = Now + 5.0f;
+    SpectatedPlayer = KillerState;
+#endif
+}
+
+void FCoreAthenaBotController::TickSpectating(float Now)
+{
+#if WITH_SERVER_CODE
+    if (!IsSpectating() || Now < NextSpectateCheckTime)
+    {
+        return;
+    }
+    NextSpectateCheckTime = Now + 2.0f;
+    AFortPlayerStateAthena* PlayerState = GetPlayerState();
+    if (!PlayerState || Now >= SpectateEndTime)
+    {
+        OnEndSpectating();
+        return;
+    }
+    // The player it watched left (their player state is gone, its pointer stale): only its own side to clear, as the
+    // game's EndSpectating would read the stale one.
+    AFortPlayerStateAthena* Watched = SpectatedPlayer.Get();
+    if (!Watched && static_cast<AFortPlayerStateAthena*>(PlayerState->SpectatingTarget))
+    {
+        PlayerState->SpectatingTarget = nullptr;
+    }
+    // The one it watches while they're in the match (the first time, its eliminator if a player); else the next, or
+    // nobody while no player is left.
+    AFortPlayerStateAthena* Next = Manager->FindPlayerToSpectate(this, Watched);
+    if (Next && Next == static_cast<AFortPlayerStateAthena*>(PlayerState->SpectatingTarget))
+    {
+        return;
+    }
+    if (!Next)
+    {
+        if (static_cast<AFortPlayerStateAthena*>(PlayerState->SpectatingTarget))
+        {
+            PlayerState->EndSpectating();
+        }
+        SpectatedPlayer = nullptr;
+        return;
+    }
+    PlayerState->BeginSpectating(Next);
+    SpectatedPlayer = Next;
+    Log::Info(L"Battle Royale bots: {} spectates {} ({} spectating, {:.0f} s left)", BotName, Next->GetPlayerName().ToStdString(),
+        Next->Spectators.SpectatorArray.Num(), SpectateEndTime - Now);
+#endif
+}
+
+void FCoreAthenaBotController::OnEndSpectating()
+{
+#if WITH_SERVER_CODE
+    if (!IsSpectating())
+    {
+        return;
+    }
+    SpectateEndTime = -1.0f;
+    AFortPlayerStateAthena* PlayerState = GetPlayerState();
+    if (PlayerState && AFortPlayerStateAthena::HasSpectators())
+    {
+        if (!SpectatedPlayer.Get())
+        {
+            PlayerState->SpectatingTarget = nullptr;
+        }
+        PlayerState->EndSpectating();
+        Log::Info(L"Battle Royale bots: {} stops spectating", BotName);
+    }
+    SpectatedPlayer = nullptr;
 #endif
 }

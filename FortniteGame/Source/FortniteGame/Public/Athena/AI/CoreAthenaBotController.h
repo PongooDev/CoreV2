@@ -193,6 +193,13 @@ public:
 
     // The pawn died: Core's OnPossesedPawnDied (21.40's AFortAthenaAIBotController::OnPossesedPawnDied).
     void OnPossesedPawnDied(AFortPlayerStateAthena* KillerState);
+    // Out of the match, the bot spectates a player still in it, as an eliminated player's SpectateOnDeath does (21.40's
+    // AFortAthenaAIBotController::OnBeginSpectating): its player state in theirs' Spectators, so their HUD counts it.
+    // Bots have no client, so there's no camera: only the replicated state. It watches for 20 to 120 seconds, a new
+    // player when the one it watches is out, then stops (OnEndSpectating).
+    void OnBeginSpectating(AFortPlayerStateAthena* KillerState, float Now);
+    void OnEndSpectating();
+    bool IsSpectating() const { return SpectateEndTime >= 0.0f; }
     void AddKill();
 
     // The bus: where the bot lands (FCoreAthenaBotManager::AssignLandingSpots picks a named location or a
@@ -457,6 +464,11 @@ private:
     int32_t Swings = 0;
     int32_t BreakThroughs = 0;
     // Squads: who downed the bot, when, its bleed, and the teammate it is reviving.
+    // Out of the match: the player it spectates, and when it stops (-1: not spectating).
+    TWeakObjectPtr<AFortPlayerStateAthena> SpectatedPlayer;
+    float SpectateEndTime = -1.0f;
+    float NextSpectateCheckTime = 0.0f;
+    void TickSpectating(float Now);
     TWeakObjectPtr<AFortPlayerStateAthena> Downer;
     float DBNOStartedAt = 0.0f;
     // The pawn has had its DBNO health (a pawn the game downed is at 0 until the DBNO ability heals it).

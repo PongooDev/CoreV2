@@ -2025,6 +2025,48 @@ std::vector<AFortPlayerPawnAthena*> FCoreAthenaBotManager::PlayerTeammatesOf(con
     return Teammates;
 }
 
+AFortPlayerStateAthena* FCoreAthenaBotManager::FindPlayerToSpectate(const FCoreAthenaBotController* Bot, AFortPlayerStateAthena* KillerState) const
+{
+    // SpectateOnDeath's order (3.3 0xA31650): in squad play (the game mode's bSquadPlay) a pawn of the player's squad
+    // that isn't dead, then one of their team; then the one who eliminated them (PlayerToSpectateOnDeath), while alive;
+    // then the first pawn alive. A bot's choice is among the players still in the match (the game mode's AlivePlayers),
+    // the last one at random, so the bots out of a match don't all watch the same player.
+    AFortGameModeAthena* Athena = GetGameMode();
+    if (!Athena)
+    {
+        return nullptr;
+    }
+    const bool bSquads = HasSquadsInTeams() && AFortPlayerStateAthena::HasSquadId();
+    std::vector<AFortPlayerStateAthena*> Players;
+    AFortPlayerStateAthena* Teammate = nullptr;
+    AFortPlayerStateAthena* Killer = nullptr;
+    const TArray<AFortPlayerControllerAthena*>& Alive = Athena->AlivePlayers;
+    for (int32_t Index = 0; Index < Alive.Num(); ++Index)
+    {
+        AFortPlayerControllerAthena* Player = Alive[Index];
+        AFortPlayerStateAthena* State = AthenaStateOf(reinterpret_cast<AController*>(Player));
+        AFortPawn* Pawn = State && !FindBot(reinterpret_cast<const UObject*>(State)) ? Cast<AFortPawn>(reinterpret_cast<UObject*>(Player->GetPawn())) : nullptr;
+        if (!Pawn || Pawn->IsDead() || Pawn->IsPendingKill())
+        {
+            continue;
+        }
+        Players.push_back(State);
+        if (!Teammate && static_cast<uint8_t>(State->TeamIndex) == Bot->GetTeam() && (!bSquads || static_cast<uint8_t>(State->SquadId) == Bot->GetSquad()))
+        {
+            Teammate = State;
+        }
+        if (State == KillerState)
+        {
+            Killer = State;
+        }
+    }
+    if (Teammate || Killer || Players.empty())
+    {
+        return Teammate ? Teammate : Killer;
+    }
+    return Players[static_cast<size_t>(FMath::Rand()) % Players.size()];
+}
+
 bool FCoreAthenaBotManager::HasStandingTeammate(const FCoreAthenaBotController* Bot) const
 {
     // The game's choice between down and out (AFortPlayerPawnAthena's, 3.3 0xA31C20, after AFortPawn's health ran out,

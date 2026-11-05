@@ -21,6 +21,8 @@
 #include "GameplayCueInterface.h"
 #include "GameplayTagContainer.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortGameStateAthena.h"
+#include "Athena/FortPlaylistAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
@@ -1353,10 +1355,17 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     LogTrapTargeting(Pawn);
     // A large team game's pawns are relevant to their whole team, as a player's new pawn is (AFortGameModeAthena's
     // FinishRestartPlayer, 3.2 0x9B6310: bIsLargeTeamGame and not 50v50): the bot shows on its teammates' map wherever
-    // it is, not only near them.
+    // it is, not only near them. 3.5.1's (0x9E43D0) reads the game state's bIsLargeTeamGame and its playlist's
+    // MaxTeamSize instead: "cmp [GameState + bIsLargeTeamGame], 0; ...; cmp [CurrentPlaylistData + MaxTeamSize], 20; jle".
     if (AFortPlayerPawnAthena::HasTeamMembersAlwaysRelevant() && AFortGameModeAthena::HasLargeTeamGame())
     {
         Pawn->bTeamMembersAlwaysRelevant = GameMode->bIsLargeTeamGame && !GameMode->bFiftyFiftySquadPlay;
+    }
+    else if (AFortPlayerPawnAthena::HasTeamMembersAlwaysRelevant() && AFortGameStateAthena::HasLargeTeamGame() && AFortGameStateAthena::HasCurrentPlaylistData() && UFortPlaylist::HasMaxTeamSize())
+    {
+        AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
+        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        Pawn->bTeamMembersAlwaysRelevant = GameState && GameState->bIsLargeTeamGame && Playlist && Playlist->MaxTeamSize <= 20;
     }
     bTargeting = false;
     bWasMoving = false;

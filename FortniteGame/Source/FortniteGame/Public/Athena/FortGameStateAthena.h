@@ -50,6 +50,10 @@ public:
     // ApplyPlaylistDataTables (0x9DC890) copies its tables over the default ones.
     DefineUProperty(UFortPlaylistAthena*, CurrentPlaylistData)
     static bool HasCurrentPlaylistData() { return Member_CurrentPlaylistData.IsAvailable(); }
+    // 3.5: the playlist's bIsLargeTeamGame, on the game state (the game mode's before 3.5, with bFiftyFiftySquadPlay,
+    // which 3.5 dropped).
+    DefineUProperty(bool, bIsLargeTeamGame)
+    static bool HasLargeTeamGame() { return Member_bIsLargeTeamGame.IsAvailable(); }
 
     // 3.5: EAirCraftBehavior (1: OpposingAirCraftForEachTeam, 50v50's) and the aircrafts StartAircraftPhase spawns, one
     // per team in that behaviour. GetAircraftIndex (3.5.1 0x9E5750) maps a player state to its aircraft from them.

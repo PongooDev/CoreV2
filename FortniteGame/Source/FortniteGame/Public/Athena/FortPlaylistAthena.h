@@ -16,6 +16,10 @@ class UFortPlaylist : public UObject
 public:
     DefineUProperty(TAssetPtr<UDataTable>, LootTierData)
     DefineUProperty(TAssetPtr<UDataTable>, LootPackages)
+    // The most players on a team. AFortGameModeAthena's FinishRestartPlayer (3.5.1 0x9E43D0) treats a large team game's
+    // playlist with teams of 20 at most as Teams of 20, and one with bigger teams as 50v50.
+    DefineUProperty(int32_t, MaxTeamSize)
+    static bool HasMaxTeamSize() { return Member_MaxTeamSize.IsAvailable(); }
 };
 
 class UFortPlaylistAthena : public UFortPlaylist

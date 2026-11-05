@@ -16,6 +16,7 @@
 #include "FortGameData.h"
 #include "Customization/CustomCharacterPart.h"
 #include "Finder.h"
+#include "GameplayCueInterface.h"
 #include "GameplayTagContainer.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
@@ -149,6 +150,48 @@ namespace
     bool bHasHotDrop = false;
     // The fire cue each weapon ability sends (the abilities are the match's).
     std::map<const UObject*, FName> CueTags;
+
+    // AFortWeaponRanged::bPersistentFireFX (its ShouldUsePersistentFireFX, 3.3 0xFE1490, reads it): the weapon's fire
+    // effects loop while its fire cue is active instead of playing once per executed cue.
+    bool UsesPersistentFireFX(AFortWeapon* Weapon)
+    {
+        static UClass* RangedClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortWeaponRanged");
+        static UBoolProperty* PersistentProperty = RangedClass ? static_cast<UBoolProperty*>(RangedClass->FindPropertyByName(FName(L"bPersistentFireFX", FNAME_Find))) : nullptr;
+        UObject* Object = reinterpret_cast<UObject*>(Weapon);
+        return PersistentProperty && Object && Object->IsA(RangedClass) && PersistentProperty->GetPropertyValue_InContainer(Object);
+    }
+
+    // A weapon fire cue's FGameplayCueParameters as the fire ability fills them: the pawn as instigator, the weapon as
+    // causer, its item definition as source, the shot's end as location.
+    void FillWeaponCueParameters(uint8_t* CueParameters, AFortPlayerPawnAthena* Pawn, AFortWeapon* Weapon, const FVector& ImpactLocation)
+    {
+        static UScriptStruct* CueParametersStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayCueParameters");
+        if (!CueParameters || !CueParametersStruct || !Weapon)
+        {
+            return;
+        }
+        const auto Field = [CueParameters](const wchar_t* Name) -> uint8_t*
+        {
+            UProperty* Property = CueParametersStruct->FindPropertyByName(FName(Name, FNAME_Find));
+            return Property ? CueParameters + Property->GetOffset_ForInternal() : nullptr;
+        };
+        if (uint8_t* Instigator = Field(L"Instigator"))
+        {
+            *reinterpret_cast<TWeakObjectPtr<UObject>*>(Instigator) = reinterpret_cast<UObject*>(Pawn);
+        }
+        if (uint8_t* Causer = Field(L"EffectCauser"))
+        {
+            *reinterpret_cast<TWeakObjectPtr<UObject>*>(Causer) = reinterpret_cast<UObject*>(Weapon);
+        }
+        if (uint8_t* Source = Field(L"SourceObject"))
+        {
+            *reinterpret_cast<TWeakObjectPtr<UObject>*>(Source) = reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData));
+        }
+        if (uint8_t* Location = Field(L"Location"))
+        {
+            *reinterpret_cast<FVector*>(Location) = ImpactLocation;
+        }
+    }
 
     // EMovementMode: walking on the ground.
     constexpr uint8_t MoveWalking = 1;
@@ -1758,6 +1801,11 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
 #if WITH_SERVER_CODE
     LastTickTime = Now;
     AFortPlayerPawnAthena* Pawn = GetPawn();
+    // A held fire cue whose trigger time ran out, whatever the bot went on to do.
+    if (!FireCueTag.IsNone() && Now >= FireCueUntil)
+    {
+        RemoveWeaponFireCue();
+    }
     switch (State)
     {
     case ECoreAthenaBotState::Dead:
@@ -2861,6 +2909,12 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
 
 void FCoreAthenaBotController::StopFiring()
 {
+    RemoveWeaponFireCue();
+    EndShot();
+}
+
+void FCoreAthenaBotController::EndShot()
+{
     if (!bFiring)
     {
         return;
@@ -2998,6 +3052,23 @@ void FCoreAthenaBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVec
     {
         return;
     }
+    // An automatic gun's fire effects loop from the first shot until the cue is removed (PlayWeaponFireFX keeps
+    // bIsPlayingFireFX for a weapon with bPersistentFireFX), so its cue is held while the trigger is, not executed per
+    // shot: an executed one started the loop on every client and nothing ever stopped it (CoreV2 #263: the bots' guns
+    // kept their firing animation after they stopped shooting).
+    // (Where the cue can't be added, the executed one goes out as before.)
+    if (UsesPersistentFireFX(Weapon))
+    {
+        if (FireCueTag == Found->second && FireCueAbilitySystem.Get())
+        {
+            return;
+        }
+        RemoveWeaponFireCue();
+        if (AddWeaponFireCue(Weapon, Found->second, ImpactLocation))
+        {
+            return;
+        }
+    }
 
     Reflection::FParams Params(Multicast, true);
     Params.Set(L"GameplayCueTag", FGameplayTag{ Found->second });
@@ -3006,27 +3077,7 @@ void FCoreAthenaBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVec
     {
         return;
     }
-    const auto Field = [CueParameters](const wchar_t* Name) -> uint8_t*
-    {
-        UProperty* Property = CueParametersStruct->FindPropertyByName(FName(Name, FNAME_Find));
-        return Property ? CueParameters + Property->GetOffset_ForInternal() : nullptr;
-    };
-    if (uint8_t* Instigator = Field(L"Instigator"))
-    {
-        *reinterpret_cast<TWeakObjectPtr<UObject>*>(Instigator) = reinterpret_cast<UObject*>(Pawn);
-    }
-    if (uint8_t* Causer = Field(L"EffectCauser"))
-    {
-        *reinterpret_cast<TWeakObjectPtr<UObject>*>(Causer) = reinterpret_cast<UObject*>(Weapon);
-    }
-    if (uint8_t* Source = Field(L"SourceObject"))
-    {
-        *reinterpret_cast<TWeakObjectPtr<UObject>*>(Source) = reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData));
-    }
-    if (uint8_t* Location = Field(L"Location"))
-    {
-        *reinterpret_cast<FVector*>(Location) = ImpactLocation;
-    }
+    FillWeaponCueParameters(CueParameters, Pawn, Weapon, ImpactLocation);
     // On each client the cue reaches the weapon through the pawn (3.3): the multicast's body (0xA25440) hands it to the
     // pawn's ability system, whose avatar's IGameplayCueInterface::HandleGameplayCue (0x54BF60) finds no handler for the
     // tag on the pawn but AFortPawn::GameplayCue, its catch-all for GameplayCue.* (0xE4D340), which forwards it to the
@@ -3042,6 +3093,73 @@ void FCoreAthenaBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVec
         }
     }
     Params.Call(reinterpret_cast<UObject*>(Pawn));
+#endif
+}
+
+bool FCoreAthenaBotController::AddWeaponFireCue(AFortWeapon* Weapon, FName Tag, const FVector& ImpactLocation)
+{
+#if WITH_SERVER_CODE
+    // UAbilitySystemComponent::AddGameplayCue_Internal into the ability system's ActiveGameplayCues, as the ranged fire
+    // ability adds its WeaponFireCue. The cue reaches each client in the ability system's replication (its player
+    // state's), which runs its WhileActive on the avatar: the pawn hands it to its CurrentWeapon (AFortPawn::GameplayCue,
+    // 0xE4D340), which starts the looping fire effects for a pawn it doesn't control.
+    static UProperty* CuesProperty = UAbilitySystemComponent::StaticClass()->FindPropertyByName(FName(L"ActiveGameplayCues", FNAME_Find));
+    static UScriptStruct* CueStruct = FActiveGameplayCue::StaticStruct();
+    static UProperty* ParametersProperty = CueStruct ? CueStruct->FindPropertyByName(FName(L"Parameters", FNAME_Find)) : nullptr;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    if (!AbilitySystem || !CuesProperty || !CueStruct || !ParametersProperty || Tag.IsNone())
+    {
+        static int32_t LoggedMissing = 0;
+        if (LoggedMissing++ < 3)
+        {
+            Log::Info(L"Battle Royale bots: {}'s held fire cue can't be added (ability system {}, ActiveGameplayCues {}, ActiveGameplayCue {})", BotName,
+                AbilitySystem ? L"found" : L"missing", CuesProperty ? L"found" : L"missing", CueStruct && ParametersProperty ? L"found" : L"missing");
+        }
+        return false;
+    }
+    FActiveGameplayCueContainer& Cues = *reinterpret_cast<FActiveGameplayCueContainer*>(reinterpret_cast<uint8_t*>(AbilitySystem) + CuesProperty->GetOffset_ForInternal());
+    FActiveGameplayCue& Cue = Cues.AddCue(FGameplayTag{ Tag });
+    FillWeaponCueParameters(reinterpret_cast<uint8_t*>(&Cue) + ParametersProperty->GetOffset_ForInternal(), Pawn, Weapon, ImpactLocation);
+    FireCueTag = Tag;
+    FireCueAbilitySystem = AbilitySystem;
+    if (AActor* Owner = AbilitySystem->GetOwner())
+    {
+        Owner->ForceNetUpdate();
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+void FCoreAthenaBotController::RemoveWeaponFireCue()
+{
+#if WITH_SERVER_CODE
+    // UAbilitySystemComponent::RemoveGameplayCue_Internal, as the ranged fire ability's EndAbility removes its
+    // WeaponFireCue: each client runs the cue's Removed, and the weapon stops its fire effects (StopWeaponFireFX).
+    if (FireCueTag.IsNone())
+    {
+        return;
+    }
+    const FName Tag = FireCueTag;
+    FireCueTag = FName();
+    FireCueUntil = 0.0f;
+    UAbilitySystemComponent* AbilitySystem = FireCueAbilitySystem.Get();
+    FireCueAbilitySystem = nullptr;
+    static UProperty* CuesProperty = UAbilitySystemComponent::StaticClass()->FindPropertyByName(FName(L"ActiveGameplayCues", FNAME_Find));
+    if (!AbilitySystem || !CuesProperty)
+    {
+        return;
+    }
+    FActiveGameplayCueContainer& Cues = *reinterpret_cast<FActiveGameplayCueContainer*>(reinterpret_cast<uint8_t*>(AbilitySystem) + CuesProperty->GetOffset_ForInternal());
+    if (Cues.RemoveCue(FGameplayTag{ Tag }))
+    {
+        if (AActor* Owner = AbilitySystem->GetOwner())
+        {
+            Owner->ForceNetUpdate();
+        }
+    }
 #endif
 }
 
@@ -3204,7 +3322,7 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
 
     if (bFiring && Now >= FireUntil)
     {
-        StopFiring();
+        EndShot();
     }
     // A player aims down sights with a gun beyond arm's reach, not while reloading.
     SetTargeting(bArmed && !bPickaxeEquipped && ReloadUntil <= 0.0f && Distance > 400.0f && FacingError() < 45.0f);
@@ -3232,6 +3350,12 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
             Held->ReadyTime = Now + WeaponInterval;
         }
         NextShotTime = Now + WeaponInterval + std::max(AIBotSkills.MaxTimeBetweenShots + RandomRange(-AIBotSkills.DeviationTimeBetweenShots, AIBotSkills.DeviationTimeBetweenShots) - WeaponInterval, 0.0f) + RandomRange(0.0f, 0.06f);
+        // A held fire cue lasts while the trigger would be: through to the next shot when it follows at about the gun's
+        // own rate, else for one shot's interval.
+        if (!FireCueTag.IsNone())
+        {
+            FireCueUntil = std::min(NextShotTime, Now + WeaponInterval * 1.5f) + 0.05f;
+        }
     }
     return true;
 #else
@@ -6480,17 +6604,35 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     StopFiring();
     AFortPlayerPawnAthena* Pawn = GetPawn();
     AFortPlayerStateAthena* PlayerState = GetPlayerState();
-    // The body takes no more hits (CoreV2 #254: the elimination's drone played 4 or more times on a bot a player had
-    // just eliminated, with one death on the server). A hit on a pawn at 0 health is a fatal one again: its damage cue
-    // (AFortPlayerPawnAthena's GameplayCue_Damage, 3.3 0xA1BA10, into AFortPawn's, 0xE4D3C0) runs the death's effects on
-    // every client once more, OnDeathPlayEffects among them (BP_VictoryDrone). The rest of an automatic weapon's burst
-    // landed on the body. A player's dead pawn is let go by its controller in the same death call; a bot's controller is
-    // an AAIController, which keeps it, so Core turns damage off on the body, as the warmup island's pawns have it, and
-    // stops its movement.
+    // The death's effects (OnDeathPlayEffects: the elimination drone, BP_VictoryDrone) play on a client as the dead
+    // pawn's actor channel closes torn off: AFortPlayerPawnAthena::TornOff (3.3 0xA34600), from UActorChannel::CleanUp
+    // (0x205ACA0). The damage cue's death path doesn't play them for an Athena pawn (its PlayDying, 0xA2B5D0, leaves out
+    // AFortPawn's, 0xE6EA70). The death tears the pawn off (0xA21190), the server replicates that and closes the
+    // channel; but an RPC sent on the torn-off pawn afterwards opens a new channel to it (InternalProcessRemoteFunction,
+    // 0x21F14E0, has no torn-off check), which the server closes again at once (the pawn is torn off), and the client
+    // tears it off again: the drone once more (CoreV2 #254, #263: 3 or 4 drones for one death). Those RPCs are the
+    // gameplay cues of the bot's ability system, whose avatar the body still is: its DBNO ability's bleed
+    // (GE_Athena_DBNO_Bleed, every Default.DBNO.BleedTick s) on a bot killed while down, and hits on the body. A player's
+    // death leaves no such ability running on the body; the bot's is ended here (the ability removes its bleed as it
+    // ends), the bleed taken off with it, and the body takes no more hits (damage off, as the warmup island's pawns have
+    // it); its movement stops.
     if (Pawn)
     {
         Pawn->bCanBeDamaged = false;
         Pawn->ForceNetUpdate();
+        UAbilitySystemComponent* AbilitySystem = static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent);
+        const FName DBNOTag(L"Gameplay.Action.Player.DBNOAthena", FNAME_Find);
+        if (AbilitySystem && !DBNOTag.IsNone() && Natives::UAbilitySystemComponent_CancelAbilities)
+        {
+            FGameplayTagContainer Tags;
+            Tags.GameplayTags.Add(FGameplayTag{ DBNOTag });
+            Natives::UAbilitySystemComponent_CancelAbilities(AbilitySystem, &Tags, nullptr, nullptr);
+        }
+        static UClass* BleedEffect = LoadObject<UClass>(nullptr, L"/Game/Athena/MappedEffects/GE_Athena_DBNO_Bleed.GE_Athena_DBNO_Bleed_C");
+        if (AbilitySystem && BleedEffect)
+        {
+            AbilitySystem->RemoveActiveGameplayEffectBySourceEffect(BleedEffect, nullptr, -1);
+        }
     }
     if (AAIController* AIController = Controller.Get())
     {

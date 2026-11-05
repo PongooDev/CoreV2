@@ -2,6 +2,7 @@
 
 #include "Math/Vector.h"
 #include "Misc/Guid.h"
+#include "UObject/NameTypes.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <cstdint>
@@ -19,6 +20,7 @@ class AFortPickup;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class AFortWeapon;
+class UAbilitySystemComponent;
 class UAthenaPickaxeItemDefinition;
 class UFortItemDefinition;
 class UObject;
@@ -505,7 +507,11 @@ private:
     void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo);
     void DropInventory();
     void ApplyStartingHealth();
+    // The bot stops shooting: the shot's fire input is let go (EndShot) and a held fire cue goes (RemoveWeaponFireCue).
     void StopFiring();
+    // One shot's fire input let go (the pawn's PawnStopFire, the game's fire ability's input release). A gun held
+    // firing keeps its fire cue between shots.
+    void EndShot();
     // Aiming down sights as a player does with a gun in a fight: the pawn's replicated bIsTargeting (AFortPlayerPawn,
     // OnRep_IsTargeting), which other clients' animation reads for the aiming pose.
     void SetTargeting(bool bNewTargeting);
@@ -521,6 +527,13 @@ private:
     // GameplayCue.Weapons.Activation) executed through the pawn's NetMulticast_InvokeGameplayCueExecuted_WithParams,
     // as the game's own fire ability sends it, with the weapon as its causer and the shot's end as its location.
     void PlayWeaponFireCue(AFortWeapon* Weapon, const FVector& ImpactLocation);
+    // A gun with persistent fire effects (AFortWeaponRanged::bPersistentFireFX: the automatic ones) has its fire cue added
+    // while the trigger is held and removed as it's let go, as UFortGameplayAbility_RangedWeapon does: its activation
+    // adds each WeaponFireCue tag to the ability system's ActiveGameplayCues (3.3 0x85CE00), its EndAbility removes them
+    // (0x867450). Clients start the weapon's looping fire effects on the cue's WhileActive and stop them on its Removed
+    // (AFortWeapon::GameplayCue_Weapons_Activation, 0xFC5EB0: PlayWeaponFireFX, StopWeaponFireFX).
+    bool AddWeaponFireCue(AFortWeapon* Weapon, FName Tag, const FVector& ImpactLocation);
+    void RemoveWeaponFireCue();
     // Whether the game's fire works for this weapon class: unknown until a shot shows it spending ammo or not.
     void CheckWeaponFireResult(float Now);
 
@@ -631,6 +644,11 @@ private:
     float NextShotTime = 0.0f;
     float FireUntil = 0.0f;
     bool bFiring = false;
+    // The fire cue Core added to the bot's ability system for a gun with persistent fire effects (AddWeaponFireCue), and
+    // until when the trigger counts as held: the next shot due by then keeps it.
+    FName FireCueTag;
+    TWeakObjectPtr<UAbilitySystemComponent> FireCueAbilitySystem;
+    float FireCueUntil = 0.0f;
     bool bTargeting = false;
     bool bBoxedInLogged = false;
     // ShouldHeadForSafeZone this tick.

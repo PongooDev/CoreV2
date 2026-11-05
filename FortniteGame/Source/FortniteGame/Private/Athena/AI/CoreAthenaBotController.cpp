@@ -4412,7 +4412,8 @@ void FCoreAthenaBotController::SteerAroundObstacles(FVector& Direction, float No
     {
         Log::Info(L"Battle Royale bots: {} is held up by {} ({})", BotName, NameOf(Obstacle), NameOf(Obstacle->GetClass()));
     }
-    if (!IsBlocked(Pawn, Head, Head + Direction * 150.0f))
+    // A downed (DBNO) pawn crawls and can't jump, as a downed player can't (CoreV2 #233): it steers around instead.
+    if (!Pawn->bIsDBNO && !IsBlocked(Pawn, Head, Head + Direction * 150.0f))
     {
         if (Now >= NextJumpTime)
         {
@@ -6263,8 +6264,11 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
     if (bMoving && Dist2D(Location, LastStuckCheckLocation) < 60.0f)
     {
         ++StuckChecks;
-        static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->Jump();
-        ++Jumps;
+        if (!Pawn->bIsDBNO)
+        {
+            static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->Jump();
+            ++Jumps;
+        }
         if (StuckChecks == 2 && bPathFollowing)
         {
             // The path doesn't get it anywhere (something the navmesh doesn't know of is in the way): steer a moment.

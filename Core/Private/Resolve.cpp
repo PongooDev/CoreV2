@@ -10796,8 +10796,7 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     // win (1.9.1 0x438B50, after "is the last player alive.  Starting end game.").
     const uintptr_t Remove = FunctionOf(RemoveFromAlivePlayersLog);
     const std::vector<std::pair<uintptr_t, uintptr_t>> RemoveCalls = CallsOf(Remove);
-    const uintptr_t SoloWin = RemoveCalls.empty() ? 0 : RemoveCalls.back().second;
-    const uintptr_t SoloWinEnd = SoloWin && Finder::FunctionStart(SoloWin) == SoloWin ? Finder::FunctionEnd(SoloWin) : 0;
+    uintptr_t SoloWin = RemoveCalls.empty() ? 0 : RemoveCalls.back().second;
 
     // The team's place setter (1.9.1 0x435C20, 1.9 0x436600): the win's "mov edx, 1" call (place 1 for the winners). It
     // sets Place on each of TeamMembers and on the controller's player state through the player state's setter (1.9.1
@@ -10813,20 +10812,41 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
         }
         return false;
     };
-    uintptr_t SetTeamPlace = 0;
-    for (uintptr_t Site = SoloWinEnd ? FindInstruction(SoloWin, SoloWinEnd, { 0xBA, 0x01, 0x00, 0x00, 0x00 }) : 0; Site && !SetTeamPlace; Site = FindInstruction(Site + 1, SoloWinEnd, { 0xBA, 0x01, 0x00, 0x00, 0x00 }))
+    const auto FindSetTeamPlace = [&](uintptr_t Win)
     {
-        const uintptr_t Call = FindRawCall(Site + 5, std::min(SoloWinEnd, Site + 0x10));
-        const uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
-        for (const auto& [CalleeSite, Callee] : CallsOf(Target))
+        const uintptr_t WinEnd = Win && Finder::FunctionStart(Win) == Win ? Finder::FunctionEnd(Win) : 0;
+        for (uintptr_t Site = WinEnd ? FindInstruction(Win, WinEnd, { 0xBA, 0x01, 0x00, 0x00, 0x00 }) : 0; Site; Site = FindInstruction(Site + 1, WinEnd, { 0xBA, 0x01, 0x00, 0x00, 0x00 }))
         {
-            if (WritesPlace(Callee))
+            const uintptr_t Call = FindRawCall(Site + 5, std::min(WinEnd, Site + 0x10));
+            const uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+            for (const auto& [CalleeSite, Callee] : CallsOf(Target))
             {
-                SetTeamPlace = Target;
-                break;
+                if (WritesPlace(Callee))
+                {
+                    return Target;
+                }
             }
         }
+        return uintptr_t{ 0 };
+    };
+    uintptr_t SetTeamPlace = FindSetTeamPlace(SoloWin);
+
+    // 3.6 puts AFortGameModeAthena::CheckWinConditionLastManStanding (0x9EB8B0) between them: RemoveFromAlivePlayers'
+    // last call is now the check, which ends the match through StartEndGamePhaseTeam (0xA09BA0, "Team %d won the
+    // match!") in a large team game, else StartEndGamePhase (0xA099C0, "%s won the match!") for the last player alive.
+    // StartEndGamePhase is the old solo win (place 1, the time alive, the end game): the check's last direct call.
+    if (!SetTeamPlace && SoloWin)
+    {
+        const std::vector<std::pair<uintptr_t, uintptr_t>> CheckCalls = CallsOf(SoloWin);
+        const uintptr_t StartEndGamePhase = CheckCalls.empty() ? 0 : CheckCalls.back().second;
+        SetTeamPlace = FindSetTeamPlace(StartEndGamePhase);
+        if (SetTeamPlace)
+        {
+            Log::Info(L"Finder: RemoveFromAlivePlayers ends in CheckWinConditionLastManStanding (0x{:X}), whose StartEndGamePhase is 0x{:X}", Rva(SoloWin), Rva(StartEndGamePhase));
+            SoloWin = StartEndGamePhase;
+        }
     }
+    const uintptr_t SoloWinEnd = SoloWin && Finder::FunctionStart(SoloWin) == SoloWin ? Finder::FunctionEnd(SoloWin) : 0;
 
     // The time alive (1.9.1 0x4634D0, 1.9 0x464250): the win stores what it returns in SecondsAlive. 1.9.1 then counts
     // what the winner outlived (the native +0xE10, which the player state's constructor sets to -1): the match's starting

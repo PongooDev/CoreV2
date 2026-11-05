@@ -1493,6 +1493,24 @@ namespace
         return { nullptr, nullptr };
     }
 
+    // The playlist whose tables ApplyPlaylistDataTables copies now: the game mode's CurrentPlaylistId, and from 3.5 the
+    // game state's CurrentPlaylistData (-1 while it has none, when it copies nothing). The game state has it only from
+    // the match's assignment on: OnGivenMatchAssignment (3.5.1 0x9EF530) calls SetCurrentPlaylistId (0x9FA020) with the
+    // game mode's CurrentPlaylistId, which looks it up in the game mode's PlaylistManager, and its assets load before
+    // OnPlaylistDataLoadCompleted (0x9EFE50) has the game mode apply its tables. So on 3.5 CurrentPlaylistId changed
+    // before the tables could, the watcher took the default tables for 50v50 v2's (#260), and its world kept the
+    // default loot.
+    int32_t AppliedPlaylistId(AFortGameModeAthena* GameMode)
+    {
+        if (AFortGameModeAthena::HasPlaylistDataTables() || !AFortGameStateAthena::HasCurrentPlaylistData())
+        {
+            return GameMode->CurrentPlaylistId;
+        }
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        return Playlist ? static_cast<int32_t>(Playlist->PlaylistId) : -1;
+    }
+
     void WatchPlaylistDataTablesOf(FWeakObjectPtr GameMode)
     {
         GameThread::Enqueue([GameMode]()
@@ -1508,8 +1526,9 @@ namespace
             // (HandlingMatchAssignment), but OnGivenMatchAssignment, which ends with ApplyPlaylistDataTables, runs only
             // when the server has answered it (Finished), some 20 s later on 2.4.2. The tables are applied now, the same
             // way, so the loot is rolled again before the players come; OnGivenMatchAssignment's copy is the same rows.
-            const int32_t PlaylistId = Athena->CurrentPlaylistId;
-            if (PlaylistId != TablesPlaylistId)
+            // From 3.5 the tables wait for the game state's playlist (AppliedPlaylistId).
+            const int32_t PlaylistId = AppliedPlaylistId(Athena);
+            if (PlaylistId != TablesPlaylistId && PlaylistId >= 0)
             {
                 const int32_t Previous = TablesPlaylistId;
                 TablesPlaylistId = PlaylistId;
@@ -1538,11 +1557,12 @@ void AFortGameModeAthena::ApplyPlaylistDataTablesOnce()
         return;
     }
     TablesGameMode = this;
-    TablesPlaylistId = CurrentPlaylistId;
+    TablesPlaylistId = AppliedPlaylistId(this);
     Natives::AFortGameModeAthena_ApplyPlaylistDataTables(this);
     TablesLoot = PlaylistLootTables(this, TablesPlaylistId);
     const auto [LootTierData, LootPackages] = TablesLoot;
-    Log::Info(L"Battle Royale: the world's loot tables are playlist {}'s ({}, {})", TablesPlaylistId, LootTierData ? LootTierData->GetPathName().ToStdString() : std::wstring(L"default loot tiers"),
+    Log::Info(L"Battle Royale: the world's loot tables are {} ({}, {})", TablesPlaylistId >= 0 ? std::format(L"playlist {}'s", TablesPlaylistId)
+        : std::wstring(L"the defaults until the game state has the match's playlist"), LootTierData ? LootTierData->GetPathName().ToStdString() : std::wstring(L"default loot tiers"),
         LootPackages ? LootPackages->GetPathName().ToStdString() : std::wstring(L"default loot packages"));
 #endif
 }

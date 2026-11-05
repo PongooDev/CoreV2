@@ -193,10 +193,11 @@ public:
 
     // The pawn died: Core's OnPossesedPawnDied (21.40's AFortAthenaAIBotController::OnPossesedPawnDied).
     void OnPossesedPawnDied(AFortPlayerStateAthena* KillerState);
-    // Out of the match, the bot spectates a player still in it, as an eliminated player's SpectateOnDeath does (21.40's
-    // AFortAthenaAIBotController::OnBeginSpectating): its player state in theirs' Spectators, so their HUD counts it.
-    // Bots have no client, so there's no camera: only the replicated state. It watches for 20 to 120 seconds, a new
-    // player when the one it watches is out, then stops (OnEndSpectating).
+    // Out of the match, a bot a player eliminated spectates that player, as an eliminated player's SpectateOnDeath does
+    // (21.40's AFortAthenaAIBotController::OnBeginSpectating): its player state in theirs' Spectators, so their HUD counts
+    // it. Bots have no client, so there's no camera: only the replicated state. It watches for 20 to 120 seconds, or
+    // until that player is out, then stops (OnEndSpectating). A bot eliminated by a bot, the storm or a fall doesn't
+    // spectate (CoreV2 #255).
     void OnBeginSpectating(AFortPlayerStateAthena* KillerState, float Now);
     void OnEndSpectating();
     bool IsSpectating() const { return SpectateEndTime >= 0.0f; }
@@ -296,6 +297,10 @@ private:
     bool Loot(float Now, float MaxDistance);
     // 8.30's _Storm: back inside the next safe zone.
     bool Storm(float Now);
+    // Whether the safe zone comes before anything but a fight (CoreV2 #233: bots looted, healed or stood fighting until
+    // the storm caught them, and died in it): in the storm already, or outside the next circle with no more time before
+    // the storm finishes closing in than it takes to run there. A fight on the way is still taken, moving inwards.
+    bool ShouldHeadForSafeZone(float Now) const;
     // 21.40's _Movement (TryToUnstuck) and a wander inside the safe zone.
     void Wander(float Now);
     void MoveTowards(const FVector& Destination, float Now, float AcceptanceRadius = 100.0f);
@@ -524,6 +529,8 @@ private:
     bool bFiring = false;
     bool bTargeting = false;
     bool bBoxedInLogged = false;
+    // ShouldHeadForSafeZone this tick.
+    bool bHeadingForSafeZone = false;
     // The time of the bot's last tick, and when a gun just taken out can first fire (its equip, as a player waits it out).
     float LastTickTime = 0.0f;
     float EquipReadyTime = 0.0f;

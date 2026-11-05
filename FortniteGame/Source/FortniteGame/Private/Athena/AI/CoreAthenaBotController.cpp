@@ -1895,6 +1895,12 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     }
     const wchar_t* Intent = L"attack";
     const auto DecisionStarted = std::chrono::steady_clock::now();
+    // The storm closing in: a heal is put off until the bot is in (it stood still in the storm for a medkit's 10 s).
+    bHeadingForSafeZone = ShouldHeadForSafeZone(Now);
+    if (bHeadingForSafeZone && HealingItem)
+    {
+        CancelHeal();
+    }
     // Mid-revive, the bot keeps at it unless an enemy is close or shooting at it.
     if (ReviveDoneAt > 0.0f && (ReviveTarget || RevivePlayer.Get()) && !IsUnderThreat(Now) && ReviveTeammate(Now))
     {
@@ -1906,17 +1912,20 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
         StopFiring();
         SetTargeting(false);
         // Healing first when safe, then loot close by (a bot without a gun arms itself before it heads for the circle: a
-        // landing spot far from the first circle otherwise sent it off empty-handed). In the storm it runs. Then the
-        // goal it set out on, until it is done (ChooseGoal: it turned back and forth between two of them, re-choosing
-        // each frame), and when it is, the next one.
-        FVector StormCenter;
-        float StormRadius = 0.0f;
-        const bool bInStorm = Manager->GetCurrentSafeZone(StormCenter, StormRadius) && Dist2D(LastKnownPosition, StormCenter) > StormRadius * 0.97f;
+        // landing spot far from the first circle otherwise sent it off empty-handed). In the storm, or with the storm
+        // about to catch it (ShouldHeadForSafeZone), it runs before anything else. Then the goal it set out on, until it
+        // is done (ChooseGoal: it turned back and forth between two of them, re-choosing each frame), and when it is,
+        // the next one.
         const bool bArmed = HasUsableWeapon();
         // A bot stuck against a tree, rock or wall breaks through it first (TryToUnstuck chose it).
         if (bHarvestToUnstick && Harvest(Now))
         {
             Intent = L"harvest";
+        }
+        else if (bHeadingForSafeZone && Storm(Now))
+        {
+            Intent = L"storm";
+            SetGoal(ECoreAthenaBotGoal::Storm, Now);
         }
         else if (ReviveTeammate(Now))
         {
@@ -1925,11 +1934,6 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
         else if (Heal(Now))
         {
             Intent = L"heal";
-        }
-        else if (bInStorm && Storm(Now))
-        {
-            Intent = L"storm";
-            SetGoal(ECoreAthenaBotGoal::Storm, Now);
         }
         // A squad's player marked the map: the bot goes there (an unarmed one arms itself first).
         else if (bHasMapMarker && !bArmed && Loot(Now, 4000.0f))
@@ -3110,7 +3114,17 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
     LastTargetInSightTime = Now;
 
     // Keep a fighting distance: close in from afar, back off when too close (a shotgun or the pickaxe wants it close).
-    if (!bArmed)
+    // With the storm closing in (ShouldHeadForSafeZone), it fights on the way: it keeps heading in, shooting, instead
+    // of standing (or chasing) in the storm (CoreV2 #233).
+    const bool bRunningIn = bHeadingForSafeZone && Storm(Now);
+    if (bRunningIn)
+    {
+        if (!bArmed && !bPickaxeEquipped)
+        {
+            EquipPickaxe();
+        }
+    }
+    else if (!bArmed)
     {
         if (!bPickaxeEquipped)
         {
@@ -3537,6 +3551,41 @@ bool FCoreAthenaBotController::Storm(float Now)
     const FVector Goal(Center.X + Inward.X * Radius * 0.4f, Center.Y + Inward.Y * Radius * 0.4f, Location.Z);
     MoveTowards(Goal, Now, 300.0f);
     return true;
+}
+
+bool FCoreAthenaBotController::ShouldHeadForSafeZone(float Now) const
+{
+    // Inside the next circle with room to spare, nothing to run from.
+    FVector Center;
+    float Radius = 0.0f;
+    if (!Manager->GetSafeZone(Center, Radius))
+    {
+        return false;
+    }
+    const float Remaining = Dist2D(LastKnownPosition, Center) - Radius * 0.9f;
+    if (Remaining <= 0.0f)
+    {
+        return false;
+    }
+    // In the storm now: out of it first.
+    FVector StormCenter;
+    float StormRadius = 0.0f;
+    if (Manager->GetCurrentSafeZone(StormCenter, StormRadius) && Dist2D(LastKnownPosition, StormCenter) > StormRadius * 0.97f)
+    {
+        return true;
+    }
+    // The storm's edge closes in from where it is to the next circle by SafeZoneFinishShrinkTime (it waits, then
+    // shrinks at a steady pace): a bot inside the circle now that heads straight in, getting there by then, stays ahead
+    // of it all the way. So it sets off once the time left is what the run takes: at a pace below a sprint's (paths
+    // aren't straight) 🟡, with 15 s to spare 🟡. A circle that finished closing has its next one set at the next phase.
+    const float Finish = Manager->GetSafeZoneFinishShrinkTime();
+    if (Finish <= Now || Finish - Now > 1800.0f)
+    {
+        return false;
+    }
+    constexpr float RunSpeed = 400.0f;
+    constexpr float Spare = 15.0f;
+    return Now + Remaining / RunSpeed + Spare >= Finish;
 }
 
 void FCoreAthenaBotController::Wander(float Now)
@@ -6055,9 +6104,10 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     LootTarget = nullptr;
     Log::Info(L"Battle Royale bots: {} died at ({:.0f}, {:.0f}, {:.0f}){}", BotName, LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z,
         KillerState ? std::format(L", eliminated by {}", KillerState->GetPlayerName().ToStdString()) : std::wstring(L" (nobody's elimination)"));
-    // Out of the match, it spectates a player as an eliminated player does (CoreV2 #251).
+    // Out of the match, it spectates the player who eliminated it, as an eliminated player does (CoreV2 #251). One
+    // eliminated by a bot, the storm, a fall or anything else just leaves the match (CoreV2 #255).
     UWorld* World = Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr;
-    if (World)
+    if (World && Manager->FindPlayerToSpectate(this, KillerState))
     {
         OnBeginSpectating(KillerState, World->GetTimeSeconds());
     }
@@ -6101,20 +6151,15 @@ void FCoreAthenaBotController::TickSpectating(float Now)
     {
         PlayerState->SpectatingTarget = nullptr;
     }
-    // The one it watches while they're in the match (the first time, its eliminator if a player); else the next, or
-    // nobody while no player is left.
+    // Its eliminator while they're in the match; once they're out (or gone), it stops (CoreV2 #255: no other player).
     AFortPlayerStateAthena* Next = Manager->FindPlayerToSpectate(this, Watched);
-    if (Next && Next == static_cast<AFortPlayerStateAthena*>(PlayerState->SpectatingTarget))
-    {
-        return;
-    }
     if (!Next)
     {
-        if (static_cast<AFortPlayerStateAthena*>(PlayerState->SpectatingTarget))
-        {
-            PlayerState->EndSpectating();
-        }
-        SpectatedPlayer = nullptr;
+        OnEndSpectating();
+        return;
+    }
+    if (Next == static_cast<AFortPlayerStateAthena*>(PlayerState->SpectatingTarget))
+    {
         return;
     }
     PlayerState->BeginSpectating(Next);

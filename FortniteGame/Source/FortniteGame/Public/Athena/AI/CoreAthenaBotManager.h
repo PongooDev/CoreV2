@@ -126,9 +126,9 @@ public:
     // A teammate standing, as the game counts one for DBNO: any pawn on the bot's team (not just its squad), a bot's or a
     // player's, neither down nor dead.
     bool HasStandingTeammate(const FCoreAthenaBotController* Bot) const;
-    // The player an eliminated bot spectates, as SpectateOnDeath picks one (3.3 0xA31650): in squads a teammate still
-    // in the match, else its eliminator, else anyone in it. Only players (a bot has no HUD to count it), none if none
-    // are left.
+    // The player an eliminated bot spectates (SpectateOnDeath's PlayerToSpectateOnDeath, 3.3 0xA31650): its eliminator,
+    // while that is a player (not a bot) still in the match; null otherwise (CoreV2 #255: no fallback to a teammate or
+    // anyone alive, so the dead bots don't pile onto the last player).
     AFortPlayerStateAthena* FindPlayerToSpectate(const FCoreAthenaBotController* Bot, AFortPlayerStateAthena* KillerState) const;
     // Whether a bot that keeps a players' team in is still in the match on Team (the team isn't out while one is): one in
     // its players' empty places, or in a large team game any bot of the team.
@@ -169,6 +169,9 @@ public:
     bool GetSafeZone(FVector& OutCenter, float& OutRadius) const;
     // The storm circle as it is now, when there is one.
     bool GetCurrentSafeZone(FVector& OutCenter, float& OutRadius) const;
+    // When the storm finishes closing in on the next safe zone (the indicator's SafeZoneFinishShrinkTime, world
+    // seconds), -1 when unknown.
+    float GetSafeZoneFinishShrinkTime() const;
     // The storm's damage a second to a pawn outside the circle, for the safe zone phase.
     float GetStormDamagePerSecond() const;
     // A random spot on the ground near Around (a trace down from the sky), or false.
@@ -270,6 +273,8 @@ private:
     void InitializeNavigation();
     void LogSummary(float Now);
     std::set<uint8_t> HumanTeams() const;
+    // A player (not a bot) still connected, in the match or out of it and spectating.
+    bool HasPlayersConnected() const;
     std::set<uint8_t> AliveTeams(bool bIncludeHumans) const;
 
     FWeakObjectPtr GameMode;

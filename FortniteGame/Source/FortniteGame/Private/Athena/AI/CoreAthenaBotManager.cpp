@@ -406,6 +406,18 @@ bool FCoreAthenaBotManager::GetCurrentSafeZone(FVector& OutCenter, float& OutRad
     return OutRadius > 0.0f;
 }
 
+float FCoreAthenaBotManager::GetSafeZoneFinishShrinkTime() const
+{
+    AFortGameModeAthena* Athena = GetGameMode();
+    AFortSafeZoneIndicator* Indicator = Athena ? static_cast<AFortSafeZoneIndicator*>(Athena->SafeZoneIndicator) : nullptr;
+    if (!Indicator || !AFortSafeZoneIndicator::HasShrinkTimes())
+    {
+        return -1.0f;
+    }
+    const float Finish = Indicator->SafeZoneFinishShrinkTime;
+    return Finish > 0.0f ? Finish : -1.0f;
+}
+
 float FCoreAthenaBotManager::GetStormDamagePerSecond() const
 {
     // Battle Royale's storm hurts 1 a second in its first circles, more later 🟡 (the game's GE_OutsideSafeZone
@@ -473,6 +485,27 @@ std::set<uint8_t> FCoreAthenaBotManager::HumanTeams() const
         }
     }
     return Teams;
+}
+
+bool FCoreAthenaBotManager::HasPlayersConnected() const
+{
+    // A player's player state stays in the game state's PlayerArray, out of the match or not, until they leave
+    // (AGameModeBase::Logout); a bot's has an AI controller for its owner.
+    AFortGameStateAthena* GameState = AthenaGameStateOf(GetGameMode());
+    if (!GameState)
+    {
+        return false;
+    }
+    const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
+    for (APlayerState* PlayerState : PlayerArray)
+    {
+        AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+        if (AthenaState && !FindBot(AthenaState) && Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(AthenaState->GetOwner())))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::set<uint8_t> FCoreAthenaBotManager::AliveTeams(bool bIncludeHumans) const
@@ -2097,44 +2130,29 @@ bool FCoreAthenaBotManager::GetSquadMapMarker(const FCoreAthenaBotController* Bo
 
 AFortPlayerStateAthena* FCoreAthenaBotManager::FindPlayerToSpectate(const FCoreAthenaBotController* Bot, AFortPlayerStateAthena* KillerState) const
 {
-    // SpectateOnDeath's order (3.3 0xA31650): in squad play (the game mode's bSquadPlay) a pawn of the player's squad
-    // that isn't dead, then one of their team; then the one who eliminated them (PlayerToSpectateOnDeath), while alive;
-    // then the first pawn alive. A bot's choice is among the players still in the match (the game mode's AlivePlayers),
-    // the last one at random, so the bots out of a match don't all watch the same player.
+    // SpectateOnDeath (3.3 0xA31650) watches the one who eliminated them (PlayerToSpectateOnDeath) while alive, else a
+    // squadmate or anyone alive. A bot only ever watches its eliminator, and only a player (CoreV2 #255: with a
+    // teammate or anyone alive as the fallback, the match's dead bots all piled onto the last player standing): a player
+    // still in the match (the game mode's AlivePlayers) with a pawn alive. KillerState is only compared, never read (a
+    // player who left leaves it stale).
     AFortGameModeAthena* Athena = GetGameMode();
-    if (!Athena)
+    if (!Athena || !KillerState || FindBot(reinterpret_cast<const UObject*>(KillerState)) || KillerState == Bot->GetPlayerState())
     {
         return nullptr;
     }
-    const bool bSquads = HasSquadsInTeams() && AFortPlayerStateAthena::HasSquadId();
-    std::vector<AFortPlayerStateAthena*> Players;
-    AFortPlayerStateAthena* Teammate = nullptr;
-    AFortPlayerStateAthena* Killer = nullptr;
     const TArray<AFortPlayerControllerAthena*>& Alive = Athena->AlivePlayers;
     for (int32_t Index = 0; Index < Alive.Num(); ++Index)
     {
         AFortPlayerControllerAthena* Player = Alive[Index];
         AFortPlayerStateAthena* State = AthenaStateOf(reinterpret_cast<AController*>(Player));
-        AFortPawn* Pawn = State && !FindBot(reinterpret_cast<const UObject*>(State)) ? Cast<AFortPawn>(reinterpret_cast<UObject*>(Player->GetPawn())) : nullptr;
-        if (!Pawn || Pawn->IsDead() || Pawn->IsPendingKill())
+        if (!State || State != KillerState)
         {
             continue;
         }
-        Players.push_back(State);
-        if (!Teammate && static_cast<uint8_t>(State->TeamIndex) == Bot->GetTeam() && (!bSquads || static_cast<uint8_t>(State->SquadId) == Bot->GetSquad()))
-        {
-            Teammate = State;
-        }
-        if (State == KillerState)
-        {
-            Killer = State;
-        }
+        AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(Player->GetPawn()));
+        return Pawn && !Pawn->IsDead() && !Pawn->IsPendingKill() ? State : nullptr;
     }
-    if (Teammate || Killer || Players.empty())
-    {
-        return Teammate ? Teammate : Killer;
-    }
-    return Players[static_cast<size_t>(FMath::Rand()) % Players.size()];
+    return nullptr;
 }
 
 bool FCoreAthenaBotManager::HasStandingTeammate(const FCoreAthenaBotController* Bot) const
@@ -2342,10 +2360,13 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
         Natives::AFortGameModeAthena_StartEndGamePhase(Athena, nullptr);
         return;
     }
-    if (HumansAtStart > 0 && HumansLeft == 0)
+    // Every player out: the match goes on while one of them is still connected, watching it (CoreV2 #255: ending it at
+    // the last player's elimination stopped the bots, so those spectating saw them freeze), until a team is left; once
+    // none is, it ends.
+    if (HumansAtStart > 0 && HumansLeft == 0 && !HasPlayersConnected())
     {
         bMatchEnded = true;
-        Log::Info(L"Battle Royale bots: every player is out with {} bots left, so the match ends", GetAliveBotCount());
+        Log::Info(L"Battle Royale bots: every player is out and gone with {} bots left, so the match ends", GetAliveBotCount());
         // A players' team whose bots are still in shares the place of the teams left.
         for (const uint8_t Team : Teams)
         {

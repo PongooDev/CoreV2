@@ -219,6 +219,18 @@ int32_t UFortKismetLibrary::K2_RemoveItemFromPlayer(AFortPlayerController* Playe
 #endif
 }
 
+uint8_t UFortKismetLibrary::GetActorTeam(const AActor* Actor)
+{
+    UFunction* Function = FindStaticFunction_GetActorTeam();
+    UObject* LibraryDefault = Function ? StaticClass()->GetDefaultObject(false) : nullptr;
+    Reflection::FParams Params(Function);
+    if (!LibraryDefault || !Params.Set(L"Actor", Actor) || !Params.Call(LibraryDefault))
+    {
+        return Reflection::InvalidEnumValue;
+    }
+    return Params.Take<uint8_t>(L"ReturnValue");
+}
+
 bool UFortKismetLibrary::HasForceRemoval()
 {
     static const bool bHasForceRemoval = StaticFunction_K2_RemoveItemFromPlayer()->FindPropertyByName(FName(L"bForceRemoval", FNAME_Find)) != nullptr;

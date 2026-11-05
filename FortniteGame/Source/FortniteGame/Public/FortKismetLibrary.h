@@ -6,6 +6,7 @@
 #include "UObject/ScriptInterface.h"
 #include "UObject/Stack.h"
 
+class AActor;
 class AFortAIDirector;
 class AFortAIGoalManager;
 class AFortPickup;
@@ -32,8 +33,13 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(K2_RemoveItemFromAllPlayers)
     DefineUFunction(K2_SpawnPickupInWorld)
     DefineUFunction(PickLootDrops)
+    DefineUFunction(GetActorTeam)
 
 public:
+    // The game's team of Actor (3.5.1 0xC35E40): its IFortTeamActorInterface's GetTeam, else its Instigator's, else
+    // EFortTeam_MAX. A trap's blueprint compares its own Team with the local controller's this way (Trap_Floor_Spikes_C's
+    // ChangeToFriendlyMaterial). Reflection::InvalidEnumValue where the build has no GetActorTeam.
+    static uint8_t GetActorTeam(const AActor* Actor);
     static void EquipFortAbilitySet(TScriptInterface<IAbilitySystemInterface> AbilitySystemInterfaceActor, UFortAbilitySet* AbilitySet, UObject* OverrideSourceObject, FFortAbilitySetHandle& OutHandle);
     static AFortAIDirector* GetAIDirector(UObject* WorldContextObject);
     static AFortAIGoalManager* GetAIGoalManager(UObject* WorldContextObject);

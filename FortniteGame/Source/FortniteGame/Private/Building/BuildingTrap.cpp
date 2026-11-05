@@ -5,6 +5,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Finder.h"
+#include "FortKismetLibrary.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
@@ -25,19 +26,29 @@ void ABuildingTrap::TakePlacerTeam(AFortPlayerController* Placer)
     // placer's WorldPlayerId, which stays -1 (AFortPlayerState 0x83C4A0) for every
     // Battle Royale player: Core sets it in its Zone Login hook, which Athena's own Login (slot 0xE0, 0x3F2450) never
     // reaches. The second slot, which gets the placer's controller once the trap is initialized, gives it their team.
+    //
+    // From 3.5 the team also tints the trap for its own team (the patch notes' "blue tint to friendly traps"): the client's
+    // ABuildingTrap::OnRep_Team (3.5.1 0xACF000, slot 0xEA) calls the OnInitTeam event, whose blueprint
+    // (Trap_Floor_Spikes_C's ChangeToFriendlyMaterial) gives the mesh FriendlyTrapMaterial when the trap's Team is
+    // UFortKismetLibrary::GetActorTeam of the local controller. So the trap takes its placer's team the same way, from
+    // their controller; the player state's (their AFortTeamInfo's, else TeamIndex) where the build has no GetActorTeam.
     AFortPlayerState* PlayerState = Placer ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Placer->PlayerState))) : nullptr;
 
     // AFortPlayerStateAthena::TeamIndex is copied from the player's AFortTeamInfo when they join it.
     AFortTeamInfo* TeamInfo = PlayerState ? static_cast<AFortTeamInfo*>(PlayerState->PlayerTeam) : nullptr;
     AFortPlayerStateAthena* AthenaPlayerState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
-    if (!TeamInfo && !AthenaPlayerState)
+    const uint8_t NoTeam = EFortTeam::StaticEnumInfo().FindValue(L"EFortTeam_MAX");
+    const uint8_t ControllerTeam = UFortKismetLibrary::GetActorTeam(reinterpret_cast<AActor*>(Placer));
+    const bool bControllerTeam = ControllerTeam != Reflection::InvalidEnumValue && ControllerTeam != NoTeam;
+    if (!bControllerTeam && !TeamInfo && !AthenaPlayerState)
     {
         UE_LOG(LogFortTrap, Warning, TEXT("%s: its placer %s has no team, its team stays %d"), *GetName(), *GetNameSafe(Placer), static_cast<uint8_t>(Team));
         return;
     }
-    Team = TeamInfo ? static_cast<EFortTeam>(TeamInfo->Team) : static_cast<EFortTeam>(AthenaPlayerState->TeamIndex);
+    const uint8_t PlayerStateTeam = TeamInfo ? static_cast<uint8_t>(TeamInfo->Team) : AthenaPlayerState ? static_cast<uint8_t>(AthenaPlayerState->TeamIndex) : Reflection::InvalidEnumValue;
+    Team = EFortTeam{ bControllerTeam ? ControllerTeam : PlayerStateTeam };
     ForceNetUpdate();
-    UE_LOG(LogFortTrap, Log, TEXT("%s placed by %s is on their team %d"), *GetName(), *GetNameSafe(Placer), static_cast<uint8_t>(Team));
+    UE_LOG(LogFortTrap, Log, TEXT("%s placed by %s is on their team %d (controller's %d, player state's %d)"), *GetName(), *GetNameSafe(Placer), static_cast<uint8_t>(Team), ControllerTeam, PlayerStateTeam);
 }
 
 void ABuildingTrap::LetEnemiesUse()

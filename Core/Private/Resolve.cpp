@@ -2699,11 +2699,13 @@ namespace
         }
         const uintptr_t AssignGuid = GuidCacheLoad ? FindRawCall(GuidCacheLoad + 7, GuidCacheLoad + 0x30) : 0;
         ptrdiff_t DestroyedActors = 0;
+        uintptr_t DestroyedActorsBase = 0;
         for (uintptr_t Base = AssignGuid ? AssignGuid + 5 : 0; Base && Base < AssignGuid + 0x10 && !DestroyedActors; ++Base)
         {
             const bool bAdd = Byte(Base) == 0x48 && Byte(Base + 1) == 0x81 && (Byte(Base + 2) & 0xF8) == 0xC0;
             const bool bLea = Byte(Base) == 0x48 && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
             DestroyedActors = bAdd || bLea ? *reinterpret_cast<const int32_t*>(Base + 3) : 0;
+            DestroyedActorsBase = DestroyedActors ? Base : 0;
         }
         // 3.5.1's AssignNewNetGUID_Server (0x228B0B4) returns the NetGUID through rdx, and the invalid-NetGUID warning
         // comes before the map: lea rbx, [rsi+240h] (0x228B143).
@@ -2711,6 +2713,7 @@ namespace
         {
             const bool bLea = Byte(Base) == 0x48 && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
             DestroyedActors = bLea ? *reinterpret_cast<const int32_t*>(Base + 3) : 0;
+            DestroyedActorsBase = DestroyedActors ? Base : 0;
         }
         RequireOffset(L"UNetDriver::GuidCache", Natives::UNetDriver_GuidCache, GuidCacheLoad ? *reinterpret_cast<const int32_t*>(GuidCacheLoad + 3) : 0);
         RequireOffset(L"UNetDriver::DestroyedStartupOrDormantActors", Natives::UNetDriver_DestroyedStartupOrDormantActors, DestroyedActors);
@@ -2718,10 +2721,15 @@ namespace
         // The map's FindOrAdd steps through its elements (key, value, then the hash's next id): lea r8, [rdx+rdx*N];
         // cmp [r9+r8*8], ecx; jz; mov eax, [r9+r8*8+HashNextId]. 3.2 (0x2190B90) holds the info in place (+0x40, a 0x38
         // byte value); 3.3 (0x21E7FF0, UE 4.20's TMap<FNetworkGUID, TUniquePtr<FActorDestructionInfo>>) a pointer (+0x10)
-        // to one it allocates (mov ecx, 38h). Builds without this lookup keep the info in place.
-        const uintptr_t FindOrAddCall = AssignGuid ? FindRawCall(AssignGuid + 5, AssignGuid + 0xC0) : 0;
+        // to one it allocates (mov ecx, 38h). Builds without this lookup keep the info in place. The lookup follows the
+        // map's address: 3.5.1's (0x228B143) comes after the invalid-NetGUID warning, whose calls (0x228B0DB, 0x228B11A)
+        // are the first after AssignNewNetGUID_Server, so a search from the GUID's call to the first call after it found
+        // nothing and the TUniquePtr map (0x18-byte elements, the next id at +0x10, 0x228B19E) was read as 0x48-byte ones:
+        // a joining client's destroyed startup actors (UNetDriver::AddClientConnection copies their GUIDs) were looked up
+        // at the wrong stride when the server first replicated to it (#262).
+        const uintptr_t FindOrAddCall = DestroyedActorsBase ? FindRawCall(DestroyedActorsBase, DestroyedActorsBase + 0xC0) : 0;
         ptrdiff_t DestroyedActorValueSize = 0;
-        for (uintptr_t Next = FindOrAddCall ? FindInstruction(AssignGuid + 5, FindOrAddCall, { 0x8B, 0x44 }) : 0; Next && !DestroyedActorValueSize; Next = FindInstruction(Next + 1, FindOrAddCall, { 0x8B, 0x44 }))
+        for (uintptr_t Next = FindOrAddCall ? FindInstruction(DestroyedActorsBase, FindOrAddCall, { 0x8B, 0x44 }) : 0; Next && !DestroyedActorValueSize; Next = FindInstruction(Next + 1, FindOrAddCall, { 0x8B, 0x44 }))
         {
             if ((Byte(Next - 1) & 0xF0) == 0x40 && (Byte(Next + 2) & 0xC0) == 0xC0 && Byte(Next - 3) == 0x74 && Byte(Next - 6) == 0x39 && (Byte(Next - 5) & 0xC7) == 0x04 && (Byte(Next - 4) & 0xC0) == 0xC0)
             {
@@ -6793,9 +6801,11 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     // capacity function has the stack limit's shape (a call's bool tested, a callee the backpack limit shares), so it is
     // no stack limit candidate: taking it made the pick ambiguous and every item add failed (#214). The stack limit
     // there is 0xC273A0.
+    // 3.5.1's backpack limit (0xCD1DD0) loads the cap instead of comparing with it: mov eax, 1F4h (0xCD1FC9).
     const auto HasBackpackCap = [](uintptr_t Begin, uintptr_t End)
     {
-        return FindInstruction(Begin, End, { 0x3D, 0x00, 0x02, 0x00, 0x00 }) || FindInstruction(Begin, End, { 0x3D, 0xF4, 0x01, 0x00, 0x00 });
+        return FindInstruction(Begin, End, { 0x3D, 0x00, 0x02, 0x00, 0x00 }) || FindInstruction(Begin, End, { 0x3D, 0xF4, 0x01, 0x00, 0x00 })
+            || FindInstruction(Begin, End, { 0xB8, 0xF4, 0x01, 0x00, 0x00 });
     };
     const uintptr_t Capacity = OverflowReason ? 0 : FunctionOf(L"GetInventoryCapacity is returning an overridden value of %i");
     uintptr_t CapacityStackLimit = 0;
@@ -6858,6 +6868,38 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
         {
             MaxStackSize = Target;
         }
+    }
+    // 3.5 inlines GetMaxStackSize(AFortPlayerController*, const UFortItemDefinition*) (3.5.1 0xCCF810: the controller's
+    // hero, 0xC6DE50, then the item definition's virtual, call [rax+328h]) into both limits, so the callee they share
+    // last is something else (0x79FBD0, a TArray's growth: GetMaxStackSize read the item count's call frame). The
+    // function is still there: the small caller of a shared callee that makes the virtual call the backpack limit makes
+    // right after calling it (0xCD1E9B, then 0xCD1EB0).
+    const uintptr_t MaxStackSizeEnd = MaxStackSize ? Finder::FunctionEnd(MaxStackSize) : 0;
+    if (bControllerLimits && BackpackLimitEnd > BackpackLimit && (!MaxStackSizeEnd || !FindVirtualCall(MaxStackSize, MaxStackSizeEnd)))
+    {
+        uintptr_t Inlined = 0;
+        bool bInlinedAmbiguous = false;
+        for (const auto& [Call, Target] : Finder::DirectCalls(BackpackLimit, BackpackLimitEnd))
+        {
+            const uintptr_t Virtual = std::find(StackLimitCalls.begin(), StackLimitCalls.end(), Target) != StackLimitCalls.end() ? FindVirtualCall(Call + 5, std::min(Call + 0x30, BackpackLimitEnd)) : 0;
+            const uintptr_t NextCall = Virtual ? FindRawCall(Call + 5, Virtual) : 0;
+            if (!Virtual || NextCall)
+            {
+                continue;
+            }
+            for (const uintptr_t Site : Finder::CallsTo(Target, false))
+            {
+                const uintptr_t Caller = Finder::FunctionStart(Site);
+                const uintptr_t CallerEnd = Caller ? Finder::FunctionEnd(Caller) : 0;
+                const uintptr_t CallerVirtual = CallerEnd > Caller && CallerEnd - Caller < 0x80 ? FindVirtualCall(Site + 5, CallerEnd) : 0;
+                if (CallerVirtual && VirtualSlot(CallerVirtual) == VirtualSlot(Virtual) && Caller != Inlined)
+                {
+                    bInlinedAmbiguous |= Inlined != 0;
+                    Inlined = Caller;
+                }
+            }
+        }
+        MaxStackSize = Inlined && !bInlinedAmbiguous ? Inlined : MaxStackSize;
     }
 
     uintptr_t CanStackWith = 0;

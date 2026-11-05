@@ -10705,15 +10705,22 @@ bool Finder::ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceV
     // 3.0's 0x30F660 are the same code): "mov rbx, r8" keeps Str, Online::GetIdentityInterface, then
     // "mov r8, rbx; mov rdx, rsi; call [rax + CreateUniquePlayerId]" on the identity. GetUniquePlayerId (the next slot)
     // passes LocalUserNum instead, and GetPlayerNickname (after it) keeps its id from r9 ("mov rbx, r9").
+    // UE 4.20's CreateUniquePlayerId(const FString& Str, FName Type) (3.3 0x328DE0, slot 0x278) keeps Str in rbp ("mov
+    // rbp, r8"), asks IsLoaded(Type) ("mov rdx, r9; mov rax, [rcx]; call [rax+238h]"), then Online::GetIdentityInterface
+    // and "mov r8, rbp; call [rax + CreateUniquePlayerId]" on the identity. Without it 3.3's bots had no ids, and clients,
+    // which file names under ids, showed one name for every bot (#247).
     for (int32_t Index = 0x40; OnlineEngineInterfaceVTable && Index < 0x60; ++Index)
     {
         const uintptr_t Function = reinterpret_cast<uintptr_t>(OnlineEngineInterfaceVTable[Index]);
-        if (!IsInText(Function) || !IsInText(Function + 0x60))
+        if (!IsInText(Function) || !IsInText(Function + 0x80))
         {
             continue;
         }
         const uintptr_t KeepString = FindInstruction(Function, Function + 0x30, { 0x49, 0x8B, 0xD8 });
-        const uintptr_t Call = KeepString ? FindInstruction(KeepString, Function + 0x50, { 0x4C, 0x8B, 0xC3, 0x48, 0x8B, 0xD6, 0xFF, 0x90 }) : 0;
+        uintptr_t Call = KeepString ? FindInstruction(KeepString, Function + 0x50, { 0x4C, 0x8B, 0xC3, 0x48, 0x8B, 0xD6, 0xFF, 0x90 }) : 0;
+        const uintptr_t KeepTypedString = Call ? 0 : FindInstruction(Function, Function + 0x30, { 0x49, 0x8B, 0xE8 });
+        const uintptr_t IsLoaded = KeepTypedString ? FindInstruction(KeepTypedString, KeepTypedString + 0x20, { 0x49, 0x8B, 0xD1, 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0;
+        Call = IsLoaded ? FindInstruction(IsLoaded, Function + 0x80, { 0x4C, 0x8B, 0xC5, 0xFF, 0x90 }) : Call;
         if (Call)
         {
             Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex = Index;

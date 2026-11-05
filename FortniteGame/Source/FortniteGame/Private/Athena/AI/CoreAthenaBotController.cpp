@@ -104,7 +104,10 @@ namespace
         }
         void* Made[2] = {};
         const FString IdString(Id.c_str());
-        CallVirtual<void**>(Interface, Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex, Made, &IdString);
+        // UE 4.20's Type (NAME_None: the default online subsystem, whose ids the players have); 4.19's takes Str alone and
+        // leaves r9 be.
+        const FName Type = NAME_None;
+        CallVirtual<void**>(Interface, Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex, Made, &IdString, Type);
         if (!Made[0])
         {
             return false;

@@ -38,6 +38,29 @@ TArray<AActor*>& ULevel::GetActors() const
                 return static_cast<ptrdiff_t>(Num) - 8;
             }
         }
+        // 3.5 takes the array's address first (3.5.1 0x223061F): lea rax, [r14+Actors]; mov edx, [rax+8]; ...;
+        // mov [rax+8], ecx; cmp ecx, [rax+0Ch].
+        for (uintptr_t Site = Spawn; End && Site + 7 + 0x10 <= End; ++Site)
+        {
+            const uint8_t Rex = Byte(Site);
+            const uint8_t ModRm = Byte(Site + 2);
+            if ((Rex != 0x48 && Rex != 0x49) || Byte(Site + 1) != 0x8D || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const int32_t Actors = *reinterpret_cast<const int32_t*>(Site + 3);
+            const uint8_t Array = (ModRm >> 3) & 0x07;
+            for (uintptr_t Add = Site + 7; Actors > 0 && Add + 6 <= Site + 7 + 0x10; ++Add)
+            {
+                const uint8_t AddModRm = Byte(Add + 1);
+                if (Byte(Add) == 0x89 && (AddModRm & 0xC0) == 0x40 && (AddModRm & 0x07) == Array && Array != 0x04 && Byte(Add + 2) == 0x08
+                    && Byte(Add + 3) == 0x3B && Byte(Add + 4) == AddModRm && Byte(Add + 5) == 0x0C)
+                {
+                    UE_LOG(LogLevel, Log, TEXT("ULevel::Actors +0x%X (UWorld::SpawnActor)"), Actors);
+                    return static_cast<ptrdiff_t>(Actors);
+                }
+            }
+        }
         UE_LOG(LogLevel, Error, TEXT("ULevel::Actors not found in UWorld::SpawnActor, using OwningWorld - 0x10"));
         return static_cast<ptrdiff_t>(-1);
     }();

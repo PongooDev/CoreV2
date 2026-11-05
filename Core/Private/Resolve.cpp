@@ -7334,9 +7334,18 @@ bool Finder::ResolveLootTierRedirectLive()
     // AFortGameModeAthena's override of the game mode's loot tier group redirect (1.7.2 0x3FA190, slot 0x156) is the only
     // reader of "Loot_AthenaTreasure": Loot_Treasure -> Loot_AthenaTreasure, Loot_Ammo -> Loot_AthenaAmmoLarge, the Athena
     // floor loot, ammo and supply drop groups unchanged, every other group None. AFortGameMode's (0x212F110) returns its
-    // argument, so the slot is found through the Athena override.
-    const uintptr_t Redirect = Finder::FunctionStart(First(Finder::StringRefs("Loot_AthenaTreasure")));
-    const int32_t Index = FirstVTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameModeAthena"), Redirect);
+    // argument, so the slot is found through the Athena override. 3.5 adds a second reader before it, a non-virtual
+    // check of the Athena groups (3.5.1 0x9ED730; the override is 0x9F5980): the slot is the first reader's in the vtable.
+    void** AthenaVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeAthena");
+    int32_t Index = -1;
+    for (const uintptr_t Ref : Finder::StringRefs("Loot_AthenaTreasure"))
+    {
+        Index = FirstVTableIndex(AthenaVTable, Finder::FunctionStart(Ref));
+        if (Index >= 0)
+        {
+            break;
+        }
+    }
     if (Index < 0)
     {
         Log::Error(L"Finder: AFortGameMode::RedirectLootTierGroup slot not found");
@@ -7393,24 +7402,30 @@ bool Finder::ResolvePoiVolumeLive()
     // body once its brush component is there: it logs "Setting up PoiCollisionComp for %s", reads the brush component's
     // body setup (its virtual GetBodySetup, call [rax+628h]), then builds FInitBodySpawnParams from PoiCollisionComp
     // (0x21F5570) and calls FBodyInstance::InitBody (0x2206250) on PoiCollisionComp->PoiBodyInstance with the
-    // component's ComponentToWorld and no physics scene: the two direct calls after the virtual one.
+    // component's ComponentToWorld and no physics scene: the two direct calls after the virtual one. 3.5 moves the two
+    // calls into a helper of their own (3.5.1 0xA5E220) that the volume tail-jumps to with the component and the body
+    // setup, so the calls are traced through that jump in the order they run.
     const uintptr_t Ref = First(Finder::StringRefs(L"AFortPoiVolume::PostInitializeComponents - Setting up PoiCollisionComp for %s"));
     if (!Ref)
     {
         Log::Info(L"Finder: no AFortPoiVolume on this build");
         return false;
     }
+    const auto IsDirectCall = [](uintptr_t Instruction) { return Byte(Instruction) == 0xE8; };
     const uintptr_t GetBodySetupCall = Finder::TraceFind(Ref, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0xFF && Byte(Instruction + 1) == 0x90; });
-    const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = GetBodySetupCall ? Finder::DirectCalls(GetBodySetupCall, GetBodySetupCall + 0x50) : std::vector<std::pair<uintptr_t, uintptr_t>>();
-    if (Calls.size() < 2 || !IsInText(Calls[0].second) || !IsInText(Calls[1].second))
+    const uintptr_t ParamsCall = GetBodySetupCall ? Finder::TraceFind(GetBodySetupCall + 6, 24, IsDirectCall) : 0;
+    const uintptr_t InitBodyCall = ParamsCall ? Finder::TraceFind(ParamsCall + 5, 24, IsDirectCall) : 0;
+    const uintptr_t Params = ParamsCall ? Finder::RelativeTarget(ParamsCall, 1, 5) : 0;
+    const uintptr_t InitBody = InitBodyCall ? Finder::RelativeTarget(InitBodyCall, 1, 5) : 0;
+    if (!IsInText(Params) || !IsInText(InitBody))
     {
         Log::Error(L"Finder: FBodyInstance::InitBody not found after AFortPoiVolume::PostInitializeComponents' log (0x{:X}), POI volumes stay shapeless", Ref - Finder::ImageBase());
         return false;
     }
-    Natives::FInitBodySpawnParams_Construct = reinterpret_cast<decltype(Natives::FInitBodySpawnParams_Construct)>(Calls[0].second);
-    Natives::FBodyInstance_InitBody = reinterpret_cast<decltype(Natives::FBodyInstance_InitBody)>(Calls[1].second);
+    Natives::FInitBodySpawnParams_Construct = reinterpret_cast<decltype(Natives::FInitBodySpawnParams_Construct)>(Params);
+    Natives::FBodyInstance_InitBody = reinterpret_cast<decltype(Natives::FBodyInstance_InitBody)>(InitBody);
     Log::Info(L"Finder: FInitBodySpawnParams::FInitBodySpawnParams at 0x{:X}, FBodyInstance::InitBody at 0x{:X} (from AFortPoiVolume::PostInitializeComponents)",
-        Calls[0].second - Finder::ImageBase(), Calls[1].second - Finder::ImageBase());
+        Params - Finder::ImageBase(), InitBody - Finder::ImageBase());
     return true;
 }
 
@@ -10265,11 +10280,14 @@ bool Finder::ResolvePersonalVehicleLive(UFunction* IsPersonalVehicleAvailable, p
 
     // AFortPlayerController::IsPersonalVehicleAvailable (3.0 slot 0x2AB, 0xE3DEB0) is all one call:
     // sub rsp, 28h; call GetCurrentlySelectedPersonalVehicle; test rax, rax; setnz al. Its callee (0xE31910) begins by
-    // reading the controller's MainMcpProfile: mov rdi, [rcx+MainMcpProfile].
+    // reading the controller's MainMcpProfile: mov rdi, [rcx+MainMcpProfile]. 3.5 makes the callee virtual: mov rax, [rcx];
+    // call [rax+1598h] (3.5.1 slot 0x2B3, 0xECD260), read from the controller's vtable.
+    void** ControllerVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerController");
     const int32_t AvailableIndex = ImplementationIndex(IsPersonalVehicleAvailable);
-    const uintptr_t Available = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortPlayerController"), AvailableIndex);
+    const uintptr_t Available = VTableEntry(ControllerVTable, AvailableIndex);
     const uintptr_t Call = Available ? FindRawCall(Available, Available + 0x10) : 0;
-    const uintptr_t Selected = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    const uintptr_t VirtualCall = Available && !Call ? FindVirtualCall(Available, Available + 0x10) : 0;
+    const uintptr_t Selected = Call ? Finder::RelativeTarget(Call, 1, 5) : VirtualCall ? VTableEntry(ControllerVTable, VirtualSlot(VirtualCall)) : 0;
     const int32_t M = static_cast<int32_t>(MainMcpProfileOffset);
     const bool bReadsProfile = Selected && M > 0
         && FindInstruction(Selected, Selected + 0x10, { 0x48, 0x8B, -1, M & 0xFF, (M >> 8) & 0xFF, (M >> 16) & 0xFF, (M >> 24) & 0xFF }) != 0;

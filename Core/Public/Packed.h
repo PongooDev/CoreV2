@@ -39,4 +39,21 @@ namespace Packed
     /// <para>Returns false, without running <paramref name="Callback"/>, when the engine got there first.</para>
     /// </summary>
     bool RunBeforeEngineInit(const wchar_t* EngineDefaultObject, void (*Callback)());
+
+    /// <summary>
+    /// Whether the exe is packed and its packer checks the code on the engine's first ticks: 3.5 (CL-4000805) on. A
+    /// byte of the game's .text changed by then (a detour, a patched call or branch) has it jump to a bad address and
+    /// the process dies at frame 0, so until then Core may only change data.
+    /// </summary>
+    bool ChecksCodeOnFirstTicks();
+
+    /// <summary>
+    /// On such a build, called on the engine's thread before FEngineLoop::Init starts the engine (from
+    /// RunBeforeEngineInit's callback): holds UEngine::Start, so the engine goes into its main loop with no map loaded,
+    /// and once it has ticked past the packer's check runs <paramref name="Callback"/> (which patches the code) and then
+    /// Start, at the top of a frame. The map, the listen socket and everything after then load with the patches in place.
+    /// It swaps the Start and Tick slots of the engine's vtable, data the check doesn't look at.
+    /// <para>Returns false, holding nothing, when the slots can't be found.</para>
+    /// </summary>
+    bool RunBeforeEngineStart(void (*Callback)());
 }

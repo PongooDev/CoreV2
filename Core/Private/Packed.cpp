@@ -260,8 +260,8 @@ namespace
         }
     }
 
-    // The class of the default object called Name, once the engine has made it.
-    const UObjectBase* ClassOfDefaultObject(const wchar_t* Name)
+    // The default object called Name, once the engine has made it.
+    const UObjectBase* FindDefaultObject(const wchar_t* Name)
     {
         const FName Wanted(Name, FNAME_Find);
         const UObjectBase* Found = nullptr;
@@ -269,10 +269,17 @@ namespace
         {
             ForEachDefaultObject([&](UObjectBase* Object)
             {
-                Found = !Found && Object->GetFName() == Wanted ? ClassOf(Object) : Found;
+                Found = !Found && Object->GetFName() == Wanted ? Object : Found;
             });
         }
         return Found;
+    }
+
+    // The class of the default object called Name, once the engine has made it.
+    const UObjectBase* ClassOfDefaultObject(const wchar_t* Name)
+    {
+        const UObjectBase* Found = FindDefaultObject(Name);
+        return Found ? ClassOf(Found) : nullptr;
     }
 
     // Holds Init in the vtable of every class there is so far that is Base or derives from it.
@@ -328,6 +335,11 @@ bool Packed::IsPacked()
     return Describe().TextSections >= 2;
 }
 
+bool Packed::ChecksCodeOnFirstTicks()
+{
+    return IsPacked() && BuildChangelist() >= FirstRecheckChangelist;
+}
+
 void Packed::WaitForCodeCheck(bool bUntilTicking)
 {
     if (Describe().TextSections < 2)
@@ -360,7 +372,7 @@ void Packed::WaitForCodeCheck(bool bUntilTicking)
     // 3.5 checks the code again on the first tick after its menu map loads, so on those builds the engine merely being
     // up is too early. Wait on past it: until a world exists (the menu map is loading) and then a settle margin, which
     // puts that tick's check well before any patch. The margin only slows a packed client/launcher's menu by a few
-    // seconds and never runs for the server, which holds at UEngine::Init instead (RunBeforeEngineInit).
+    // seconds. The server doesn't wait here: it holds the engine at UEngine::Start instead (RunBeforeEngineStart).
     if (bUntilTicking && Natives::GWorld && BuildChangelist() >= FirstRecheckChangelist)
     {
         while (!*Natives::GWorld)
@@ -438,4 +450,91 @@ bool Packed::RunBeforeEngineInit(const wchar_t* EngineDefaultObject, void (*Call
     }
     Log::Info(L"Packed exe: the engine is a {}, held at its Init", EngineClass);
     return true;
+}
+
+namespace
+{
+    using FEngineStart = void (*)(void* Engine);
+    using FEngineTick = void (*)(void* Engine, float DeltaSeconds, bool bIdleMode);
+
+    // UEngine's virtuals go Init, Start, PreExit, ReleaseAudioDeviceManager, Tick (Engine.h); 3.5.1's are 0x4A to 0x4E.
+    constexpr int32_t StartAfterInit = 1;
+    constexpr int32_t TickAfterInit = 4;
+
+    // Set before the slots are swapped, and only used on the engine's thread after.
+    FEngineStart GHeldStart = nullptr;
+    FEngineTick GHeldTick = nullptr;
+    void (*GBeforeEngineStart)() = nullptr;
+    bool bStartHeld = false;
+    bool bStarted = false;
+    uint32_t HeldFrames = 0;
+    DWORD FirstHeldFrame = 0;
+
+    // UEngine::Start, FEngineLoop::Init's last call on the engine before its main loop: UGameEngine::Start has the game
+    // instance browse to the default map. Held, the engine goes into its loop with the empty world
+    // UGameInstance::InitializeStandalone made, and nothing of the server's has loaded, listened or registered yet.
+    void EngineStartHK(void* Engine)
+    {
+        bStartHeld = true;
+        Log::Info(L"Packed exe: holding the engine at UEngine::Start, so its first ticks run on unpatched code for the packer's check");
+    }
+
+    // UEngine::Tick, called by FEngineLoop::Tick every frame. While Start is held it counts the frames the engine runs
+    // without a map, and once they are past the packer's check (and a settle margin, as the client has) runs Core's
+    // callback and then the held Start at the top of the frame: where the engine's own travel loads a map
+    // (UGameEngine::Tick's TickWorldTravel), so the frame goes on to tick the world Start loaded.
+    void EngineTickHK(void* Engine, float DeltaSeconds, bool bIdleMode)
+    {
+        if (bStartHeld && !bStarted)
+        {
+            const DWORD Now = GetTickCount();
+            if (HeldFrames++ == 0)
+            {
+                FirstHeldFrame = Now;
+                Log::Info(L"Packed exe: the engine is ticking without a map; letting it run {}ms past the packer's check before patching", TickSettleMs);
+            }
+            if (HeldFrames > 1 && Now - FirstHeldFrame >= TickSettleMs)
+            {
+                bStarted = true;
+                Log::Info(L"Packed exe: {} frames past the packer's check; Core patches the code and starts the engine", HeldFrames);
+                GBeforeEngineStart();
+                GHeldStart(Engine);
+            }
+        }
+        GHeldTick(Engine, DeltaSeconds, bIdleMode);
+    }
+}
+
+bool Packed::RunBeforeEngineStart(void (*Callback)())
+{
+    UObjectBase* Engine = Natives::GEngine ? reinterpret_cast<UObjectBase*>(*Natives::GEngine) : nullptr;
+    const UObjectBase* GameEngine = FindDefaultObject(L"Default__GameEngine");
+    if (!Engine || !GameEngine || Natives::UEngine_InitIndex < 0 || !Natives::UGameEngine_Tick)
+    {
+        Log::Error(L"Packed exe: the engine, GameEngine's default object, UEngine::Init's slot or UGameEngine::Tick is missing, so Core can't hold the engine at UEngine::Start");
+        return false;
+    }
+
+    // The slots, checked against UGameEngine's own vtable: its Start logs "Starting Game." and its Tick is the one the
+    // finders resolved. The engine's own class (FortEngine) overrides both and calls these.
+    void** const GameEngineVTable = *reinterpret_cast<void** const*>(GameEngine);
+    const int32_t StartIndex = Natives::UEngine_InitIndex + StartAfterInit;
+    const int32_t TickIndex = Natives::UEngine_InitIndex + TickAfterInit;
+    uintptr_t GameEngineStart = 0;
+    for (const uintptr_t Reference : Finder::StringRefs(L"Starting Game."))
+    {
+        GameEngineStart = GameEngineStart ? GameEngineStart : Finder::FunctionStart(Reference);
+    }
+    if (!GameEngineStart || reinterpret_cast<uintptr_t>(GameEngineVTable[StartIndex]) != GameEngineStart
+        || GameEngineVTable[TickIndex] != reinterpret_cast<void*>(Natives::UGameEngine_Tick))
+    {
+        Log::Error(L"Packed exe: UGameEngine's vtable has no Start at slot 0x{:X} or no Tick at slot 0x{:X}, so Core can't hold the engine at UEngine::Start", StartIndex, TickIndex);
+        return false;
+    }
+
+    void** const VTable = *reinterpret_cast<void** const*>(Engine);
+    GBeforeEngineStart = Callback;
+    const std::wstring EngineClass = ClassOf(Engine)->GetFName().ToStdString();
+    return Hooks::SwapVTable(L"UEngine::Tick (" + EngineClass + L")", VTable, TickIndex, reinterpret_cast<void*>(&EngineTickHK), reinterpret_cast<void**>(&GHeldTick))
+        && Hooks::SwapVTable(L"UEngine::Start (" + EngineClass + L")", VTable, StartIndex, reinterpret_cast<void*>(&EngineStartHK), reinterpret_cast<void**>(&GHeldStart));
 }

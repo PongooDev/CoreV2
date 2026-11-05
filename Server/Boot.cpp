@@ -183,6 +183,16 @@ static void InstallHooks()
     // On a packed build this runs once PreInit is over. FApp::ShouldUseThreadingForPerformance only matters to PreInit,
     // and its GIsServer/GIsClient stores have run, so HookAfterPreInit sets the globals themselves.
     const bool bAfterPreInit = Packed::IsPacked();
+    // 3.5+ packed builds check the code again on the engine's first ticks, and a patch in place by then crashes them at
+    // frame 0. Everything below that changes data (GIsClient, the merged config, the MCP permissions, vtable slots)
+    // still goes in now, before UEngine::Init; the detours and patched calls and branches are held, and so is the engine,
+    // at UEngine::Start: it ticks with no map on unpatched code, and is then patched, made a server (GIsServer) and
+    // started. The default map, Listen and the matchmaking registration all come after that, with every hook in place.
+    const bool bHoldCode = Packed::ChecksCodeOnFirstTicks();
+    if (bHoldCode)
+    {
+        Hooks::HoldCode();
+    }
     if (!bAfterPreInit)
     {
         FApp::Hook();
@@ -192,7 +202,14 @@ static void InstallHooks()
     FLinker::Hook();
     if (bAfterPreInit)
     {
-        FEngineLoop::HookAfterPreInit();
+        if (bHoldCode)
+        {
+            FEngineLoop::HookAfterPreInitUntilStart();
+        }
+        else
+        {
+            FEngineLoop::HookAfterPreInit();
+        }
         if (void (*Combine)() = FOnlineSubsystemImpl::BeforeFirstDedicatedCheck.exchange(nullptr))
         {
             Log::Warning(L"Server config: the online subsystem never asked whether it is dedicated, merging the server settings now");
@@ -233,6 +250,19 @@ static void InstallHooks()
     }
     UFortQuestManager::Hook();
     Hooks::EnableAll();
+    if (bHoldCode)
+    {
+        static constexpr void (*AtStart)() = []
+        {
+            Hooks::ReleaseCode();
+            FEngineLoop::ServerAtStart();
+        };
+        if (!Packed::RunBeforeEngineStart(AtStart))
+        {
+            Log::Error(L"Packed exe: patching the code now, before the packer's check on the first ticks, which it may not survive");
+            AtStart();
+        }
+    }
 
     GameThread::Enqueue([]
     {

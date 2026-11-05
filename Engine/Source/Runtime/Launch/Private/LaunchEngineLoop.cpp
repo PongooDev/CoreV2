@@ -53,3 +53,27 @@ void FEngineLoop::HookAfterPreInit()
 
     HookIdleMode();
 }
+
+void FEngineLoop::HookAfterPreInitUntilStart()
+{
+    if (!Natives::GIsServer || !Natives::GIsClient)
+    {
+        Log::Error(L"FEngineLoop: GIsServer or GIsClient not found, the engine stays a client");
+    }
+    else
+    {
+        *Natives::GIsClient = false;
+        Log::Info(L"FEngineLoop: GIsClient off (after PreInit), GIsServer on once the engine starts");
+    }
+
+    HookIdleMode();
+}
+
+void FEngineLoop::ServerAtStart()
+{
+    if (Natives::GIsServer)
+    {
+        *Natives::GIsServer = true;
+        Log::Info(L"FEngineLoop: GIsServer on (engine start)");
+    }
+}

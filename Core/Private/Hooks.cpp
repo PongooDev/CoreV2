@@ -3,6 +3,9 @@
 #include "Log.h"
 
 #include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace
 {
@@ -71,6 +74,46 @@ namespace
     {
         const int64_t Distance = reinterpret_cast<const uint8_t*>(To) - From;
         return Distance >= INT32_MIN && Distance <= INT32_MAX;
+    }
+
+    // Code changes held back by HoldCode, in the order they were asked for.
+    struct FHeldWrite
+    {
+        std::wstring Name;
+        void* Address = nullptr;
+        std::vector<uint8_t> Bytes;
+    };
+    std::mutex HeldMutex;
+    bool bHoldingCode = false;
+    bool bEnableHeld = false;
+    std::vector<FHeldWrite> HeldWrites;
+
+    bool Write(std::wstring_view Name, void* Address, std::span<const uint8_t> Bytes)
+    {
+        DWORD OldProtection = 0;
+        if (!Address || !VirtualProtect(Address, Bytes.size(), PAGE_EXECUTE_READWRITE, &OldProtection))
+        {
+            Log::Error(L"Hook {}: cannot write 0x{:X} bytes at 0x{:X}", Name, Bytes.size(), reinterpret_cast<uintptr_t>(Address));
+            return false;
+        }
+
+        memcpy(Address, Bytes.data(), Bytes.size());
+        VirtualProtect(Address, Bytes.size(), OldProtection, &OldProtection);
+        FlushInstructionCache(GetCurrentProcess(), Address, Bytes.size());
+
+        Log::Info(L"Hook {}: patched 0x{:X} bytes at 0x{:X}", Name, Bytes.size(), reinterpret_cast<uintptr_t>(Address));
+        return true;
+    }
+
+    bool EnableDetours()
+    {
+        const MH_STATUS Status = MH_EnableHook(MH_ALL_HOOKS);
+        if (Status != MH_OK)
+        {
+            Log::Error(L"Hooks: MH_EnableHook failed ({})", static_cast<int32_t>(Status));
+            return false;
+        }
+        return true;
     }
 }
 
@@ -150,19 +193,20 @@ bool Hooks::RedirectCall(std::wstring_view Name, uint8_t* CallSite, void* Destin
 
 bool Hooks::WriteBytes(std::wstring_view Name, void* Address, std::span<const uint8_t> Bytes)
 {
-    DWORD OldProtection = 0;
-    if (!Address || !VirtualProtect(Address, Bytes.size(), PAGE_EXECUTE_READWRITE, &OldProtection))
     {
-        Log::Error(L"Hook {}: cannot write 0x{:X} bytes at 0x{:X}", Name, Bytes.size(), reinterpret_cast<uintptr_t>(Address));
-        return false;
+        std::scoped_lock Lock(HeldMutex);
+        if (bHoldingCode)
+        {
+            if (!Address)
+            {
+                Log::Error(L"Hook {}: cannot write 0x{:X} bytes at 0x0", Name, Bytes.size());
+                return false;
+            }
+            HeldWrites.push_back({ std::wstring(Name), Address, std::vector<uint8_t>(Bytes.begin(), Bytes.end()) });
+            return true;
+        }
     }
-
-    memcpy(Address, Bytes.data(), Bytes.size());
-    VirtualProtect(Address, Bytes.size(), OldProtection, &OldProtection);
-    FlushInstructionCache(GetCurrentProcess(), Address, Bytes.size());
-
-    Log::Info(L"Hook {}: patched 0x{:X} bytes at 0x{:X}", Name, Bytes.size(), reinterpret_cast<uintptr_t>(Address));
-    return true;
+    return Write(Name, Address, Bytes);
 }
 
 bool Hooks::SkipBranch(std::wstring_view Name, uint8_t* Branch)
@@ -183,11 +227,43 @@ bool Hooks::SkipBranch(std::wstring_view Name, uint8_t* Branch)
 
 bool Hooks::EnableAll()
 {
-    const MH_STATUS Status = MH_EnableHook(MH_ALL_HOOKS);
-    if (Status != MH_OK)
     {
-        Log::Error(L"Hooks: MH_EnableHook failed ({})", static_cast<int32_t>(Status));
-        return false;
+        std::scoped_lock Lock(HeldMutex);
+        if (bHoldingCode)
+        {
+            bEnableHeld = true;
+            return true;
+        }
     }
-    return true;
+    return EnableDetours();
+}
+
+void Hooks::HoldCode()
+{
+    std::scoped_lock Lock(HeldMutex);
+    bHoldingCode = true;
+}
+
+bool Hooks::ReleaseCode()
+{
+    std::vector<FHeldWrite> Writes;
+    bool bEnable = false;
+    {
+        std::scoped_lock Lock(HeldMutex);
+        if (!bHoldingCode)
+        {
+            return true;
+        }
+        bHoldingCode = false;
+        Writes.swap(HeldWrites);
+        bEnable = std::exchange(bEnableHeld, false);
+    }
+
+    Log::Info(L"Hooks: writing the {} held code patches{}", Writes.size(), bEnable ? L" and enabling the detours" : L"");
+    bool bWritten = true;
+    for (const FHeldWrite& Held : Writes)
+    {
+        bWritten = Write(Held.Name, Held.Address, Held.Bytes) && bWritten;
+    }
+    return (!bEnable || EnableDetours()) && bWritten;
 }

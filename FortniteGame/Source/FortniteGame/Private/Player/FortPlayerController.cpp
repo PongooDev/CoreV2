@@ -1215,6 +1215,25 @@ void AFortPlayerController::ServerExecuteInventoryItem_Implementation(const FGui
         return;
     }
 
+    // Where the client has its own quickbar (3.5's Battle Royale), this is the only thing it tells the server about its
+    // slots: it focused the item's slot before sending it (ClientExecuteInventoryItem_Implementation, 3.5.2 0xEB8F50, through
+    // 0xD0D890). The server's quickbar focuses the same item, so its CurrentFocusedSlot is the client's.
+    AFortQuickBars* Bars = QuickBars;
+    if (Bars && !Bars->IsReplicatedToOwner())
+    {
+        // Right after a full-backpack swap, the client's quickbar moved on to the next slot when the held item went and
+        // activated it, which dropped the swapped-in weapon's pending execute (#269). That item is executed again
+        // instead: the client then has it in the emptied slot, and focuses and equips it there.
+        FGuid SwappedInItem;
+        if (Bars->TakeSwappedInItem(SwappedInItem) && SwappedInItem != ItemGuid && Bars->ContainsItem(SwappedInItem))
+        {
+            UE_LOG(LogFort, Log, TEXT("ServerExecuteInventoryItem: %s's client moved off its swapped-in item, which it executes again"), *GetNameSafe(this));
+            ClientExecuteInventoryItem(SwappedInItem, 0.0f, false, true);
+            return;
+        }
+        Bars->FocusItem(ItemGuid);
+    }
+
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     if (UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition)))
     {
@@ -1956,12 +1975,17 @@ void AFortPlayerController::ClientReportDamagedResourceBuilding(ABuildingSMActor
     Params.Call(this);
 }
 
-void AFortPlayerController::ClientExecuteInventoryItem(const FGuid& ItemGuid, float Delay, bool bForceExecute)
+void AFortPlayerController::ClientExecuteInventoryItem(const FGuid& ItemGuid, float Delay, bool bForceExecute, bool bActivateSlotAfterSettingFocused)
 {
     Reflection::FParams Params(StaticFunction_ClientExecuteInventoryItem());
     Params.Set(L"ItemGuid", ItemGuid);
     Params.Set(L"Delay", Delay);
     Params.Set(L"bForceExecute", bForceExecute);
+    // 3.5 adds it.
+    if (Params.Has(L"bActivateSlotAfterSettingFocused"))
+    {
+        Params.Set(L"bActivateSlotAfterSettingFocused", bActivateSlotAfterSettingFocused);
+    }
     Params.Call(this);
 }
 

@@ -127,7 +127,10 @@ public:
     void GivePlayerAmmo(int32_t AmmoCount);
     void SwapQuickBarFocus(EFortQuickBars InQuickBar);
     void ClientReportDamagedResourceBuilding(ABuildingSMActor* BuildingSMActor, uint8_t PotentialResourceType, int32_t PotentialResourceCount, bool bDestroyed, bool bJustHitWeakspot);
-    void ClientExecuteInventoryItem(const FGuid& ItemGuid, float Delay, bool bForceExecute);
+    // bActivateSlotAfterSettingFocused (3.5): the client sends ServerExecuteInventoryItem for the item it focused and
+    // equipped. A server slot activation sets it (ServerActivateSlotInternal_Implementation 3.5.2 0xD08860 -> 0xD09920
+    // -> AFortPlayerController::ExecuteInventoryItem 0xECE9F0).
+    void ClientExecuteInventoryItem(const FGuid& ItemGuid, float Delay, bool bForceExecute, bool bActivateSlotAfterSettingFocused = false);
     void SetRotatePawnToCamera(bool bNewRotatePawnToCamera);
     bool GetRotatePawnToCamera();
     void ServerSetPartyOwner(const FUniqueNetIdRepl& PartyOwnerUniqueId);

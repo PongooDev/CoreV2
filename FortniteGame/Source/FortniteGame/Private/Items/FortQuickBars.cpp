@@ -1,5 +1,8 @@
 #include "pch.h"
 #include "Items/FortQuickBars.h"
+#include "Engine/NetDriver.h"
+#include "Engine/ReplicationDriver.h"
+#include "Engine/World.h"
 #include "Finder.h"
 #include "Hooks.h"
 #include "Log.h"
@@ -11,6 +14,9 @@
 #include "Weapons/FortWeapon.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/Class.h"
+#include "UObject/WeakObjectPtr.h"
+
+#include <vector>
 
 EFortQuickBars AFortQuickBars::GetCurrentQuickBar()
 {
@@ -40,6 +46,69 @@ int32_t AFortQuickBars::FocusSlot(EFortQuickBars InQuickBar, int32_t Slot, bool 
         return Natives::AFortQuickBars_FocusSlot(this, static_cast<int32_t>(InQuickBar), Slot, bUpdatePreviousFocusedSlot);
     }
     return -1;
+}
+
+bool AFortQuickBars::FocusItem(const FGuid& Item)
+{
+    for (EFortQuickBars InQuickBar : { EFortQuickBars::GetPrimary(), EFortQuickBars::GetSecondary() })
+    {
+        const int32_t NumSlots = GetQuickBar(InQuickBar).Slots.Num();
+        for (int32_t Slot = 0; Slot < NumSlots; ++Slot)
+        {
+            if (GetSlot(InQuickBar, Slot).Items.Contains(Item))
+            {
+                return FocusSlot(InQuickBar, Slot, true) != -1;
+            }
+        }
+    }
+    return false;
+}
+
+bool AFortQuickBars::IsReplicatedToOwner()
+{
+    UWorld* World = GetWorld();
+    UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
+    return !Driver || !Driver->HasReplicationDriver() || !static_cast<UReplicationDriver*>(Driver->ReplicationDriver);
+}
+
+namespace
+{
+    // The client reports its own activation (ServerExecuteInventoryItem) a round trip after the swap's inventory change.
+    constexpr float SwappedInItemLifetime = 2.0f;
+
+    struct FSwappedInItem
+    {
+        TWeakObjectPtr<AFortQuickBars> QuickBars;
+        FGuid Item;
+        float Time;
+    };
+
+    std::vector<FSwappedInItem> SwappedInItems;
+}
+
+void AFortQuickBars::SetSwappedInItem(const FGuid& Item)
+{
+    UWorld* World = GetWorld();
+    std::erase_if(SwappedInItems, [this](const FSwappedInItem& Entry) { return !Entry.QuickBars.Get() || Entry.QuickBars.Get() == this; });
+    SwappedInItems.push_back({ this, Item, World ? World->GetTimeSeconds() : 0.0f });
+}
+
+bool AFortQuickBars::TakeSwappedInItem(FGuid& OutItem)
+{
+    UWorld* World = GetWorld();
+    const float Now = World ? World->GetTimeSeconds() : 0.0f;
+    bool bFound = false;
+    for (auto It = SwappedInItems.begin(); It != SwappedInItems.end(); ++It)
+    {
+        if (It->QuickBars.Get() == this)
+        {
+            bFound = Now - It->Time <= SwappedInItemLifetime;
+            OutItem = It->Item;
+            SwappedInItems.erase(It);
+            break;
+        }
+    }
+    return bFound;
 }
 
 void AFortQuickBars::EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex)
@@ -156,6 +225,12 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
                 break;
             }
         }
+    }
+    else if (bRemovedFocusedItem && !IsReplicatedToOwner())
+    {
+        // The client's own quickbar moves its focus on to the next slot and activates it (3.5.2 0xA75070 -> 0xD03200).
+        // An activation from here would send it a second item to equip.
+        Log::Info(L"Quickbar: {}'s client picks the slot after its focused item was removed", GetNameSafe(Controller).ToStdString());
     }
     else if (bRemovedFocusedItem)
     {

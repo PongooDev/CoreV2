@@ -208,11 +208,12 @@ namespace
         // Only a primary slot that takes the new item is swapped, never the harvesting tool's.
         const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
         int32_t FocusedSlot = Bars->GetCurrentQuickBar() == Primary ? static_cast<int32_t>(Bars->GetQuickBar(Primary).CurrentFocusedSlot) : -1;
-        // 3.5 (CL-4000805) doesn't keep the primary bar's CurrentFocusedSlot up to date on the server as the player
-        // switches slots: it stays at the harvesting tool's 0 (a full backpack never swapped: every pickup flew in and back
-        // down) or at the slot the server last focused, the last pickup's (#269: the swap took that slot, not the held
-        // weapon's). The slot is the one holding the pawn's current weapon's item: a weapon in none of the primary slots
-        // past the tool's (the harvesting tool itself) takes no slot, so it isn't swapped.
+        // On 3.5 (CL-4000805) the client has its own quickbar and never tells the server it switched slots
+        // (AFortQuickBars::IsReplicatedToOwner). The server's CurrentFocusedSlot follows the client's executes now, but it
+        // stayed at the harvesting tool's 0 (a full backpack never swapped: every pickup flew in and back down) or at the
+        // slot the server last focused (#269: the swap took that slot, not the held weapon's). The slot is the one holding
+        // the pawn's current weapon's item: a weapon in none of the primary slots past the tool's (the harvesting tool
+        // itself) takes no slot, so it isn't swapped.
         const AFortPawn* Pawn = PlayerController->MyFortPawn;
         const AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
         if (FocusedSlot >= 0 && Weapon)
@@ -845,9 +846,15 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
     if (SwappedSlot >= 0 && Bars)
     {
         const EFortQuickBars Primary = EFortQuickBars::GetPrimary();
-        if (Bars->GetSlot(Primary, SwappedSlot).Items.Num() > 0)
+        if (const TArray<FGuid>& SwappedItems = Bars->GetSlot(Primary, SwappedSlot).Items; SwappedItems.Num() > 0)
         {
             Bars->ServerActivateSlotInternal(Primary, SwappedSlot, 0.0f, false);
+            // The client's own quickbar (3.5) leaves the emptied slot for the next one: the activation's execute can be
+            // dropped there, and the server's quickbar can't keep the slot focused for it (#269).
+            if (!Bars->IsReplicatedToOwner())
+            {
+                Bars->SetSwappedInItem(SwappedItems[0]);
+            }
         }
         else
         {

@@ -815,13 +815,18 @@ namespace
         return Function && Params.Call(Weapon) ? Params.Take<int32_t>(L"ReturnValue") : 0;
     }
 
-    // The boogie bomb's dance (GA_DanceGrenade_Stun): a player has it from the game data's GenericPlayerAbilitySet
-    // (GAS_DefaultPlayer), which their hero's abilities bring (UFortGlobals::ApplyHeroEffectsAndAbilities). The grenade
-    // activates it by its tag (Gameplay.Action.Player.DanceStunned, TryActivateAbilitiesByTag) on the pawns it hits, so
-    // a bot needs it given too. Only this one of the set: the others (death, DBNO, interaction) are Core's for a bot.
-    UClass* DanceStunAbilityClass()
+    // A player's abilities from the game data's GenericPlayerAbilitySet (GAS_DefaultPlayer), which their hero's abilities
+    // bring (UFortGlobals::ApplyHeroEffectsAndAbilities), that a bot needs too:
+    // - the boogie bomb's dance (GA_DanceGrenade_Stun): the grenade activates it by its tag
+    //   (Gameplay.Action.Player.DanceStunned, TryActivateAbilitiesByTag) on the pawns it hits;
+    // - Battle Royale's DBNO (GAB_AthenaDBNO, on Event.Damage.DiedAthena) and getting up (GAB_AthenaDBNORevive, on
+    //   Event.RevivedAthena): when a player's hit knocks a bot, the game downs it itself (AFortPlayerPawnAthena's DBNO
+    //   handling sets bIsDBNO) and sends the event, and without the ability the pawn sat at 0 health, with no DBNO
+    //   health and no bleed (#248).
+    // The others of the set (death, interaction) are Core's for a bot.
+    const std::vector<UClass*>& PlayerAbilityClasses()
     {
-        static UClass* Found = nullptr;
+        static std::vector<UClass*> Found;
         static bool bSearched = false;
         if (bSearched)
         {
@@ -835,19 +840,52 @@ namespace
             const TArray<UClass*>& Abilities = Set->GameplayAbilities;
             for (UClass* Ability : Abilities)
             {
-                if (Ability && Ability->GetName().ToStdString().find(L"DanceGrenade_Stun") != std::wstring::npos)
+                const std::wstring Name = Ability ? Ability->GetName().ToStdString() : std::wstring();
+                if (Name.find(L"DanceGrenade_Stun") != std::wstring::npos || Name == L"GAB_AthenaDBNO_C" || Name == L"GAB_AthenaDBNORevive_C")
                 {
-                    Found = KeepLoaded(Ability);
+                    Found.push_back(KeepLoaded(Ability));
                 }
             }
         }
-        Log::Info(L"Battle Royale bots: the boogie bomb's dance ability: {}", NameOf(Found));
+        // The DBNO abilities by their paths when the set hasn't them.
+        for (const wchar_t* Path : { L"/Game/Abilities/NPC/Generic/GAB_AthenaDBNO.GAB_AthenaDBNO_C", L"/Game/Abilities/NPC/Generic/GAB_AthenaDBNORevive.GAB_AthenaDBNORevive_C" })
+        {
+            UClass* Ability = LoadObject<UClass>(nullptr, Path);
+            if (Ability && Ability->IsChildOf(UGameplayAbility::StaticClass()) && std::find(Found.begin(), Found.end(), Ability) == Found.end())
+            {
+                Found.push_back(KeepLoaded(Ability));
+            }
+        }
+        std::wstring Names;
+        for (UClass* Ability : Found)
+        {
+            Names += (Names.empty() ? L"" : L", ") + NameOf(Ability);
+        }
+        Log::Info(L"Battle Royale bots: a player's abilities the bots get: {}", Names.empty() ? std::wstring(L"none") : Names);
         return Found;
     }
 
-    void GiveDanceStunAbility(UAbilitySystemComponent* AbilitySystem)
+    // One of those, by a part of its name (DanceGrenade_Stun, GAB_AthenaDBNO_C).
+    UClass* PlayerAbilityClass(const wchar_t* Name)
     {
-        UClass* AbilityClass = DanceStunAbilityClass();
+        for (UClass* Ability : PlayerAbilityClasses())
+        {
+            if (Ability->GetName().ToStdString().find(Name) != std::wstring::npos)
+            {
+                return Ability;
+            }
+        }
+        return nullptr;
+    }
+
+    UClass* DanceStunAbilityClass()
+    {
+        static UClass* Found = PlayerAbilityClass(L"DanceGrenade_Stun");
+        return Found;
+    }
+
+    void GiveAbility(UAbilitySystemComponent* AbilitySystem, UClass* AbilityClass)
+    {
         if (!AbilitySystem || !AbilityClass || AbilitySystem->FindAbilitySpecFromClass(AbilityClass))
         {
             return;
@@ -864,6 +902,14 @@ namespace
         Spec.InputID = INDEX_NONE;
         AbilitySystem->GiveAbility(Spec);
         SpecStruct->DestroyStruct(SpecStorage.data());
+    }
+
+    void GivePlayerAbilities(UAbilitySystemComponent* AbilitySystem)
+    {
+        for (UClass* AbilityClass : PlayerAbilityClasses())
+        {
+            GiveAbility(AbilitySystem, AbilityClass);
+        }
     }
 
     // The hit in a damage effect's context, as a weapon ability's targeting adds it: a blocking FHitResult from the
@@ -1237,7 +1283,7 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
                 Pawn->HasCustomizationLoadout() && FFortAthenaLoadout::HasGlider() ? NameOf(reinterpret_cast<UObject*>(static_cast<UAthenaGliderItemDefinition*>(Pawn->CustomizationLoadout.Glider))) : std::wstring(L"-"));
         }
     }
-    GiveDanceStunAbility(static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent));
+    GivePlayerAbilities(static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent));
     LogTrapTargeting(Pawn);
     // A large team game's pawns are relevant to their whole team, as a player's new pawn is (AFortGameModeAthena's
     // FinishRestartPlayer, 3.2 0x9B6310: bIsLargeTeamGame and not 50v50): the bot shows on its teammates' map wherever
@@ -1668,6 +1714,11 @@ void FCoreAthenaBotController::AddKill()
     }
 }
 
+namespace
+{
+    bool HasDBNOAbilityActive(AFortPlayerPawnAthena* Pawn);
+}
+
 void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
 {
 #if WITH_SERVER_CODE
@@ -1688,8 +1739,10 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     }
 
     // Skydiving or on the ground: the pawn's death takes the bot out of the match.
+    // A downed pawn isn't dead at 0 health (AFortPawn::IsDead counts it as dead): the knock leaves it there until its DBNO
+    // ability heals it, and a bleed-out is Downed's to end.
     bool bDead = !Pawn || Pawn->IsPendingKill() || Pawn->bIsDying;
-    if (!bDead && Now >= NextDeathCheck)
+    if (!bDead && !Pawn->bIsDBNO && Now >= NextDeathCheck)
     {
         NextDeathCheck = Now + 0.5f;
         bDead = Pawn->IsDead();
@@ -1743,6 +1796,15 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     // Down (squads): crawling to a teammate, bleeding out, or eliminated with the team.
     if (Pawn->bIsDBNO)
     {
+        if (DBNOStartedAt <= 0.0f)
+        {
+            // Downed by the game (a player's hit: AFortPlayerPawnAthena's DBNO handling), not by Core's EnterDBNO.
+            AFortPlayerStateAthena* Knocker = KillerOf(reinterpret_cast<AFortPawn*>(Pawn));
+            Knocker = Knocker && Knocker != GetPlayerState() ? Knocker : LastAttacker.Get();
+            OnEnteredDBNO(Knocker, Now, false);
+            Log::Info(L"Battle Royale bots: {} is down (DBNO, the game's){}, {:.0f} health, the DBNO ability {}", BotName,
+                Knocker ? std::format(L", knocked by {}", Knocker->GetPlayerName().ToStdString()) : std::wstring(), Pawn->GetHealth(), HasDBNOAbilityActive(Pawn) ? L"active" : L"not active yet");
+        }
         Downed(Now);
         UpdateFacing(Now, DeltaSeconds);
         TakeStormDamage(Now);
@@ -4758,21 +4820,9 @@ bool FCoreAthenaBotController::IsDBNO() const
 bool FCoreAthenaBotController::CanGoDBNO() const
 {
     // Battle Royale's DBNO (GAB_AthenaDBNO): in a team playlist a player whose teammate is still up goes down instead of
-    // out; a team all down is eliminated.
-    if (Manager->GetTeamSize() <= 1 || !IsAlive() || IsDBNO())
-    {
-        return false;
-    }
-    for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
-    {
-        if (Teammate->GetState() == ECoreAthenaBotState::Landed && !Teammate->IsDBNO())
-        {
-            return true;
-        }
-    }
-    // A bot on a player's team: its player teammates standing count too.
-    const std::vector<AFortPlayerPawnAthena*> Players = Manager->PlayerTeammatesOf(this);
-    return std::any_of(Players.begin(), Players.end(), [](AFortPlayerPawnAthena* Player) { return !Player->bIsDBNO; });
+    // out; a team all down is eliminated. The teammate is the game's (FCoreAthenaBotManager::HasStandingTeammate), so a
+    // bot Core's damage knocks and one a player's knocks go down alike.
+    return Manager->GetTeamSize() > 1 && IsAlive() && !IsDBNO() && Manager->HasStandingTeammate(this);
 }
 
 namespace
@@ -4792,6 +4842,29 @@ namespace
             return Default;
         }
         return Params.Take<float>(L"OutXY");
+    }
+
+    // GE_Athena_DBNO_Start heals a downed pawn to Default.DBNO.InitialHealth; GE_Athena_DBNO_Bleed takes
+    // Default.DBNO.BleedDamage every Default.DBNO.BleedTick s.
+    float DBNOInitialHealth()
+    {
+        static const float InitialHealth = std::max(AthenaGameDataValue(L"Default.DBNO.InitialHealth", 100.0f), 1.0f);
+        return InitialHealth;
+    }
+
+    float DBNOBleedTick()
+    {
+        static const float BleedTick = std::max(AthenaGameDataValue(L"Default.DBNO.BleedTick", 1.0f), 0.1f);
+        return BleedTick;
+    }
+
+    // GAB_AthenaDBNO is active on the pawn (it applies the bleed, GE_Athena_DBNO_Bleed, and removes it as it ends).
+    bool HasDBNOAbilityActive(AFortPlayerPawnAthena* Pawn)
+    {
+        UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+        static UClass* DBNOAbility = LoadObject<UClass>(nullptr, L"/Game/Abilities/NPC/Generic/GAB_AthenaDBNO.GAB_AthenaDBNO_C");
+        FGameplayAbilitySpec* Spec = AbilitySystem && DBNOAbility ? AbilitySystem->FindAbilitySpecFromClass(DBNOAbility) : nullptr;
+        return Spec && Spec->ActiveCount > 0;
     }
 
     // UAbilitySystemBlueprintLibrary::SendGameplayEventToActor, with the payload's instigator.
@@ -4835,6 +4908,33 @@ void FCoreAthenaBotController::EnterDBNO(AFortPlayerStateAthena* InDowner, float
     {
         return;
     }
+    Pawn->bIsDBNO = true;
+    Pawn->SetHealth(DBNOInitialHealth());
+    if (Natives::AFortPlayerPawn_UpdateDBNOInteractCollision)
+    {
+        Natives::AFortPlayerPawn_UpdateDBNOInteractCollision(reinterpret_cast<AFortPawn*>(Pawn));
+    }
+    UAbilitySystemComponent* AbilitySystem = static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent);
+    static UClass* DBNOAbility = LoadObject<UClass>(nullptr, L"/Game/Abilities/NPC/Generic/GAB_AthenaDBNO.GAB_AthenaDBNO_C");
+    bool bAbility = false;
+    if (AbilitySystem && DBNOAbility && DBNOAbility->IsChildOf(UGameplayAbility::StaticClass()))
+    {
+        GiveAbility(AbilitySystem, DBNOAbility);
+        AController* DownerController = InDowner ? Cast<AController>(reinterpret_cast<UObject*>(InDowner->GetOwner())) : nullptr;
+        bAbility = SendGameplayEvent(reinterpret_cast<AActor*>(Pawn), L"Event.Damage.DiedAthena", reinterpret_cast<UObject*>(DownerController));
+    }
+    OnEnteredDBNO(InDowner, Now, true);
+    Log::Info(L"Battle Royale bots: {} is down (DBNO){}, {:.0f} health, the DBNO ability {}", BotName, InDowner ? std::format(L", knocked by {}", InDowner->GetPlayerName().ToStdString()) : std::wstring(),
+        Pawn->GetHealth(), bAbility ? L"triggered" : L"not triggered");
+#endif
+}
+
+void FCoreAthenaBotController::OnEnteredDBNO(AFortPlayerStateAthena* InDowner, float Now, bool bHealed)
+{
+#if WITH_SERVER_CODE
+    // Down by Core's knock (EnterDBNO, which gave the pawn its DBNO health) or the game's (a player's hit: Tick finds the
+    // pawn DBNO at the knock's 0 health, the DBNO ability's start effect heals it a moment later): the bot stops what it
+    // was doing and starts bleeding.
     StopFiring();
     CancelReload();
     CancelHeal();
@@ -4847,43 +4947,13 @@ void FCoreAthenaBotController::EnterDBNO(AFortPlayerStateAthena* InDowner, float
     ReviveTarget = nullptr;
     RevivePlayer = nullptr;
     ReviveDoneAt = 0.0f;
-    Pawn->bIsDBNO = true;
-    static const float InitialHealth = AthenaGameDataValue(L"Default.DBNO.InitialHealth", 100.0f);
-    Pawn->SetHealth(std::max(InitialHealth, 1.0f));
-    if (Natives::AFortPlayerPawn_UpdateDBNOInteractCollision)
-    {
-        Natives::AFortPlayerPawn_UpdateDBNOInteractCollision(reinterpret_cast<AFortPawn*>(Pawn));
-    }
-    UAbilitySystemComponent* AbilitySystem = static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent);
-    static UClass* DBNOAbility = LoadObject<UClass>(nullptr, L"/Game/Abilities/NPC/Generic/GAB_AthenaDBNO.GAB_AthenaDBNO_C");
-    bool bAbility = false;
-    if (AbilitySystem && DBNOAbility && DBNOAbility->IsChildOf(UGameplayAbility::StaticClass()))
-    {
-        if (!AbilitySystem->FindAbilitySpecFromClass(DBNOAbility))
-        {
-            UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
-            std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
-            SpecStruct->InitializeStruct(SpecStorage.data());
-            FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
-            FGameplayAbilitySpecHandle NewHandle;
-            NewHandle.GenerateNewHandle();
-            Spec.Handle = NewHandle;
-            Spec.Ability = static_cast<UGameplayAbility*>(DBNOAbility->GetDefaultObject());
-            Spec.Level = 1;
-            Spec.InputID = INDEX_NONE;
-            AbilitySystem->GiveAbility(Spec);
-            SpecStruct->DestroyStruct(SpecStorage.data());
-        }
-        AController* DownerController = InDowner ? Cast<AController>(reinterpret_cast<UObject*>(InDowner->GetOwner())) : nullptr;
-        bAbility = SendGameplayEvent(reinterpret_cast<AActor*>(Pawn), L"Event.Damage.DiedAthena", reinterpret_cast<UObject*>(DownerController));
-    }
     Downer = InDowner;
     DBNOStartedAt = Now;
-    NextBleedTime = Now + 1.0f;
-    LastDBNOHealth = Pawn->GetHealth();
+    bDBNOHealed = bHealed;
+    NextBleedTime = Now + DBNOBleedTick();
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    LastDBNOHealth = Pawn ? Pawn->GetHealth() : 0.0f;
     ++TimesDowned;
-    Log::Info(L"Battle Royale bots: {} is down (DBNO){}, {:.0f} health, the DBNO ability {}", BotName, InDowner ? std::format(L", knocked by {}", InDowner->GetPlayerName().ToStdString()) : std::wstring(),
-        Pawn->GetHealth(), bAbility ? L"triggered" : L"not triggered");
 #endif
 }
 
@@ -4896,15 +4966,15 @@ void FCoreAthenaBotController::Downed(float Now)
         return;
     }
     StopFiring();
-    // The team all down: eliminated (the last one knocked is everyone's finisher).
-    bool bTeammateUp = false;
+    // The team all down: eliminated (the last one knocked is everyone's finisher). A teammate standing anywhere on the
+    // team keeps the bot down, as the game's DBNO handling counts one; it crawls to the nearest of its squad.
+    const bool bTeammateUp = Manager->HasStandingTeammate(this);
     bool bHasNearest = false;
     FVector Nearest;
     float NearestDistance = 1e9f;
     const FVector Location = LocationOf(Pawn);
     const auto Consider = [&](const FVector& Other)
     {
-        bTeammateUp = true;
         const float Distance = Dist2D(Other, Location);
         if (Distance < NearestDistance)
         {
@@ -4937,20 +5007,46 @@ void FCoreAthenaBotController::Downed(float Now)
         Pawn->SetHealth(1.0f);
         Pawn->ForceKill(FGameplayTag{ FName(Reason, FNAME_Find) }, Killer, Killer ? reinterpret_cast<AActor*>(static_cast<APawn*>(Killer->Pawn)) : nullptr);
     };
+    // The DBNO health: a pawn the game downed is at the knock's 0 health until GAB_AthenaDBNO's start effect
+    // (GE_Athena_DBNO_Start, after the ability's 0.01 s delay) heals it to Default.DBNO.InitialHealth; that 0 isn't a
+    // bleed-out (#248: bots knocked by players were eliminated the moment they went down). Core heals it the same when
+    // the ability hasn't within half a second.
+    if (!bDBNOHealed)
+    {
+        if (Pawn->GetHealth() > 0.5f)
+        {
+            bDBNOHealed = true;
+        }
+        else if (Now - DBNOStartedAt < 0.5f)
+        {
+            StopMoving();
+            return;
+        }
+        else
+        {
+            Pawn->SetHealth(DBNOInitialHealth());
+            bDBNOHealed = true;
+            Log::Info(L"Battle Royale bots: {} had no DBNO health from the game's DBNO ability, Core gives it {:.0f}", BotName, Pawn->GetHealth());
+        }
+        LastDBNOHealth = Pawn->GetHealth();
+        NextBleedTime = Now + DBNOBleedTick();
+    }
     if (!bTeammateUp)
     {
         Eliminate(L"Gameplay.Damage.DBNOBleedOut", L"no teammate left standing");
         return;
     }
-    // Bleeding: GE_Athena_DBNO_Bleed (AthenaGameData Default.DBNO.BleedDamage every Default.DBNO.BleedTick s) when the
-    // ability applied it; Core bleeds the pawn the same when its health hasn't moved.
+    // Bleeding: GE_Athena_DBNO_Bleed (AthenaGameData Default.DBNO.BleedDamage every Default.DBNO.BleedTick s) while the
+    // DBNO ability that applied it is active (the effect pauses while a player revives the pawn,
+    // Gameplay.Status.DBNOBeingRevived). Core bleeds the pawn the same only without the ability, when its health hasn't
+    // moved.
     if (Now >= NextBleedTime)
     {
-        static const float BleedTick = std::max(AthenaGameDataValue(L"Default.DBNO.BleedTick", 1.0f), 0.1f);
         static const float BleedDamage = AthenaGameDataValue(L"Default.DBNO.BleedDamage", 1.0f);
+        const float BleedTick = DBNOBleedTick();
         NextBleedTime = Now + BleedTick;
         const float Health = Pawn->GetHealth();
-        const bool bCoreBleeds = Health >= LastDBNOHealth - 0.01f && Health > 0.0f;
+        const bool bCoreBleeds = !HasDBNOAbilityActive(Pawn) && Health >= LastDBNOHealth - 0.01f && Health > 0.0f;
         if (bCoreBleeds)
         {
             Pawn->SetHealth(Health - BleedDamage);

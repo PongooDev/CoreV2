@@ -119,6 +119,9 @@ public:
     // A bot's teammates who are players (a bot on a player's team, "Fill players' teams with bots"; in a large team game,
     // in a player's squad): their pawns, of the ones still in the match.
     std::vector<AFortPlayerPawnAthena*> PlayerTeammatesOf(const FCoreAthenaBotController* Bot) const;
+    // A teammate standing, as the game counts one for DBNO: any pawn on the bot's team (not just its squad), a bot's or a
+    // player's, neither down nor dead.
+    bool HasStandingTeammate(const FCoreAthenaBotController* Bot) const;
     // Whether a bot that keeps a players' team in is still in the match on Team (the team isn't out while one is): one in
     // its players' empty places, or in a large team game any bot of the team.
     bool HasPlayersTeamBotsLeft(uint8_t Team) const;

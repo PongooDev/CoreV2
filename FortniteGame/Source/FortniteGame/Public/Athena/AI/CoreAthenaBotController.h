@@ -210,11 +210,14 @@ public:
     int32_t GetMaterialCount() const { return Materials[0] + Materials[1] + Materials[2]; }
 
     // Squads (duos and squads playlists): Battle Royale's DBNO for a bot. A hit that would take it out while a teammate
-    // is still standing downs it instead (FCoreAthenaBotManager::ApplyBotDamage): the pawn's bIsDBNO, its DBNO
-    // health and the game's GAB_AthenaDBNO; it bleeds out, is finished off, or a teammate revives it.
+    // is still standing downs it instead: a bot's hit through Core's damage (FCoreAthenaBotManager::ApplyBotDamage,
+    // EnterDBNO: the pawn's bIsDBNO, its DBNO health and the game's GAB_AthenaDBNO), a player's through the game's own
+    // DBNO handling (Tick notices it). It bleeds out, is finished off, or a teammate revives it.
     bool IsDBNO() const;
     bool CanGoDBNO() const;
     void EnterDBNO(AFortPlayerStateAthena* Downer, float Now);
+    // What a bot does once down, whoever downed it; bHealed when the pawn has its DBNO health already.
+    void OnEnteredDBNO(AFortPlayerStateAthena* Downer, float Now, bool bHealed);
     void OnRevived();
     int32_t GetRevives() const { return Revives; }
     int32_t GetTimesDowned() const { return TimesDowned; }
@@ -456,6 +459,8 @@ private:
     // Squads: who downed the bot, when, its bleed, and the teammate it is reviving.
     TWeakObjectPtr<AFortPlayerStateAthena> Downer;
     float DBNOStartedAt = 0.0f;
+    // The pawn has had its DBNO health (a pawn the game downed is at 0 until the DBNO ability heals it).
+    bool bDBNOHealed = false;
     float NextBleedTime = 0.0f;
     float LastDBNOHealth = 0.0f;
     FCoreAthenaBotController* ReviveTarget = nullptr;

@@ -2025,6 +2025,37 @@ std::vector<AFortPlayerPawnAthena*> FCoreAthenaBotManager::PlayerTeammatesOf(con
     return Teammates;
 }
 
+bool FCoreAthenaBotManager::HasStandingTeammate(const FCoreAthenaBotController* Bot) const
+{
+    // The game's choice between down and out (AFortPlayerPawnAthena's, 3.3 0xA31C20, after AFortPawn's health ran out,
+    // 0xE5BAE0): in squad play, another Athena pawn on the pawn's team, the whole team in a large team game and not its
+    // squad, neither DBNO nor dead (AFortPawn::IsDead), skydiving or on the ground.
+    const auto Standing = [](AFortPawn* Pawn) { return Pawn && !Pawn->bIsDBNO && !Pawn->IsDead(); };
+    for (const auto& Other : PlayerBots)
+    {
+        if (Other.get() != Bot && Other->GetTeam() == Bot->GetTeam() && Standing(reinterpret_cast<AFortPawn*>(Other->GetPawn())))
+        {
+            return true;
+        }
+    }
+    AFortGameModeAthena* Athena = GetGameMode();
+    if (!Athena)
+    {
+        return false;
+    }
+    const TArray<AFortPlayerControllerAthena*>& Alive = Athena->AlivePlayers;
+    for (int32_t Index = 0; Index < Alive.Num(); ++Index)
+    {
+        AFortPlayerControllerAthena* Player = Alive[Index];
+        AFortPlayerStateAthena* State = Player ? AthenaStateOf(reinterpret_cast<AController*>(Player)) : nullptr;
+        if (State && static_cast<uint8_t>(State->TeamIndex) == Bot->GetTeam() && Standing(Cast<AFortPawn>(reinterpret_cast<UObject*>(Player->GetPawn()))))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool FCoreAthenaBotManager::HasPlayersTeamBotsLeft(uint8_t Team) const
 {
     const bool bSquads = HasSquadsInTeams();

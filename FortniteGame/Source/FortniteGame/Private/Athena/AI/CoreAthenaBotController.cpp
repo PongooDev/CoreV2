@@ -36,6 +36,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Log.h"
 #include "Natives.h"
+#include "ObjectLayout.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortCheatManager.h"
 #include "ReflectionParams.h"
@@ -1296,6 +1297,16 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     bWasMoving = false;
     bEmoting = false;
     bDanceStunned = false;
+    // Path following moves the pawn with acceleration, as a player's input does (UNavMovementComponent::
+    // bUseAccelerationForPaths, off by default: UPathFollowingComponent then calls RequestDirectMove, which sets the
+    // velocity and leaves the movement's Acceleration at 0). Clients animate another player's pawn from the acceleration
+    // the server packs for them (AFortPlayerPawn::AccelerationPack, 3.3 0xE71850, read back by OnRep_AccelerationPack,
+    // 0xE6CAA0), so a bot on a path ran in its idle pose and slid across the ground (CoreV2 #252); a bot steering with
+    // AddMovementInput animated.
+    if (UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement; Movement && UCharacterMovementComponent::HasUseAccelerationForPaths())
+    {
+        Movement->bUseAccelerationForPaths = true;
+    }
     Pawn->ForceNetUpdate();
 
     // The harvesting tool first (Core-held, 8.30's weapon list keeps the bot's weapons on its controller).
@@ -1791,6 +1802,11 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
             {
                 LastAttacker = Attacker;
                 LastAttackerTime = Now;
+                // Shot in the open: sometimes a wall goes up between them (CoreV2 #252).
+                if (!bOutside && !Pawn->bIsDBNO)
+                {
+                    DefensiveBuilding(Now, reinterpret_cast<AFortPawn*>(Attacker->GetCurrentPawn()));
+                }
             }
         }
         LastHealthShield = HealthShield;
@@ -2389,9 +2405,45 @@ bool FCoreAthenaBotController::WantsPickup(UFortItemDefinition* Definition, bool
         const auto Held = Consumables.find(Definition);
         return Info && (Held != Consumables.end() ? Held->second < Info->MaxStackSize : Consumables.size() < MaxConsumableKinds);
     }
+    // Materials (wood, stone, metal on the floor: a chest's or an eliminated player's) up to the stack a player holds
+    // (CoreV2 #252: searched houses kept their floor loot).
+    if (const int32_t Kind = MaterialKindOf(Definition); Kind >= 0)
+    {
+        return Materials[Kind] < std::max(static_cast<int32_t>(Definition->MaxStackSize), 1);
+    }
+    // Ammo for its guns, a reserve of 120; with a free weapon slot, a little of the other kinds too, for the gun it
+    // finds next (a player sweeps an ammo box's spill whole).
     const auto Reserve = Ammo.find(Definition);
-    return std::any_of(WeaponList.begin(), WeaponList.end(), [Definition](const FCoreAthenaBotWeapon& Weapon) { return Weapon.AmmoDefinition == Definition; })
-        && (Reserve == Ammo.end() || Reserve->second < 120);
+    const int32_t Held = Reserve != Ammo.end() ? Reserve->second : 0;
+    const bool bForItsGuns = std::any_of(WeaponList.begin(), WeaponList.end(), [Definition](const FCoreAthenaBotWeapon& Weapon) { return Weapon.AmmoDefinition == Definition; });
+    return Cast<UFortAmmoItemDefinition>(Definition) && (bForItsGuns ? Held < 120 : WeaponList.size() < MaxWeapons && Held < 30);
+}
+
+int32_t FCoreAthenaBotController::MaterialKindOf(const UFortItemDefinition* Definition)
+{
+    // Asked for every floor pickup a bot looks over: the game data's three items are looked up once.
+    static const UFortItemDefinition* Resources[3] = {};
+    if (!Resources[0])
+    {
+        if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+        {
+            Resources[0] = GameData->WoodItemDefinition;
+            Resources[1] = GameData->StoneItemDefinition;
+            Resources[2] = GameData->MetalItemDefinition;
+        }
+    }
+    if (!Definition)
+    {
+        return -1;
+    }
+    for (int32_t Kind = 0; Kind < 3; ++Kind)
+    {
+        if (Resources[Kind] && Definition == Resources[Kind])
+        {
+            return Kind;
+        }
+    }
+    return -1;
 }
 
 void FCoreAthenaBotController::EquipWeapon(int32_t Index)
@@ -2815,8 +2867,24 @@ void FCoreAthenaBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVec
     UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
     FGameplayAbilitySpec* Spec = AbilitySystem && AFortWeapon::HasPrimaryAbilitySpecHandle() ? AbilitySystem->FindAbilitySpecFromHandle(Weapon->PrimaryAbilitySpecHandle) : nullptr;
     const UObject* Ability = Spec ? reinterpret_cast<const UObject*>(static_cast<UGameplayAbility*>(Spec->Ability)) : nullptr;
+    // A weapon whose ability the bot's ability system wasn't given (no spec for its handle) still has the cue its
+    // ability class sends: the weapon data's PrimaryFireAbility default (CoreV2 #252: the bots' guns made no sound when
+    // the spec lookup failed, as no cue went out at all).
+    if (!Ability && Weapon)
+    {
+        UObject* Definition = reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData));
+        UProperty* AbilityProperty = Definition ? Definition->GetClass()->FindPropertyByName(FName(L"PrimaryFireAbility", FNAME_Find)) : nullptr;
+        UClass* AbilityClass = AbilityProperty ? reinterpret_cast<TAssetSubclassOf<UObject>*>(reinterpret_cast<uint8_t*>(Definition) + AbilityProperty->GetOffset_ForInternal())->LoadSynchronous() : nullptr;
+        Ability = AbilityClass ? AbilityClass->GetDefaultObject() : nullptr;
+    }
     if (!Multicast || !CueParametersStruct || !Ability)
     {
+        static int32_t LoggedMissing = 0;
+        if (LoggedMissing++ < 3)
+        {
+            Log::Info(L"Battle Royale bots: {}'s shot sends no fire cue (multicast {}, cue parameters {}, ability {})", BotName, Multicast ? L"found" : L"missing",
+                CueParametersStruct ? L"found" : L"missing", NameOf(Ability));
+        }
         return;
     }
     auto Found = CueTags.find(Ability);
@@ -3151,8 +3219,10 @@ bool FCoreAthenaBotController::Loot(float Now, float MaxDistance)
         NextLootSearch = 0.0f;
         return true;
     }
-    // Right above or below it (another floor, a roof): out of reach for a bot without a path.
-    if (Dist2D(PickupLocation, Location) < 120.0f)
+    // Right above or below it (another floor, a roof): out of reach for a bot without a path. With a navmesh the path
+    // takes it up the stairs, so it is given a few seconds first (CoreV2 #252: ammo on an upper floor was given up as
+    // the bot walked under it).
+    if (Dist2D(PickupLocation, Location) < 120.0f && (!Manager->HasNavigation() || Now - LootTargetTime > 8.0f))
     {
         MarkUnreachable(Target);
         LootTarget = nullptr;
@@ -3355,6 +3425,18 @@ void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
         EquippedIndex = -1;
         EquipWeapon(Index);
         Log::Info(L"Battle Royale bots: {} picks up {} ({}, {} loaded, {} ammo held)", BotName, NameOf(WeaponDefinition), WeaponTypeName(Weapon.Type), Weapon.LoadedAmmo, Ammo[Weapon.AmmoDefinition]);
+    }
+    else if (const int32_t Kind = MaterialKindOf(Definition); Kind >= 0)
+    {
+        // Up to the stack; the rest stays on the floor.
+        const int32_t MaxStack = std::max(static_cast<int32_t>(Definition->MaxStackSize), 1);
+        const int32_t Taken = std::min(Count, std::max(MaxStack - Materials[Kind], 0));
+        Materials[Kind] += Taken;
+        if (Taken < Count)
+        {
+            DropItem(Definition, Count - Taken, 0);
+        }
+        Log::Info(L"Battle Royale bots: {} picks up {} {} ({} wood, {} stone, {} metal)", BotName, Taken, NameOf(Definition), Materials[0], Materials[1], Materials[2]);
     }
     else
     {
@@ -3700,10 +3782,35 @@ void FCoreAthenaBotController::MoveTowards(const FVector& Destination, float Now
         bHasMoveGoal = true;
         MoveGoal = Destination;
         // A path runs through doorways (the door's nav link): the door on the way is opened before the bot walks into it.
+        const FVector Next = AIController->GetImmediateMoveDestination();
+        const FVector Ahead = Dist2D(Location, Next) > 10.0f ? Direction2D(Location, Next) : Direction2D(Location, Destination);
         if (Now >= NextDoorProbe)
         {
-            const FVector Next = AIController->GetImmediateMoveDestination();
-            OpenDoorInTheWay(Dist2D(Location, Next) > 10.0f ? Direction2D(Location, Next) : Direction2D(Location, Destination), Now);
+            OpenDoorInTheWay(Ahead, Now);
+        }
+        // A wall the path doesn't know of (a piece built since its navmesh tile was made, a closed door that didn't
+        // open): held up against it for most of a second, the bot steers around it for a moment instead of walking into
+        // it until TryToUnstuck's checks (3 s) give up on the path (CoreV2 #252: "some bots walk into walls").
+        UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
+        const FVector Velocity = Movement ? static_cast<FVector>(Movement->Velocity) : FVector();
+        const bool bHeldUp = Movement && Movement->MovementMode == MoveWalking && std::sqrt(Velocity.X * Velocity.X + Velocity.Y * Velocity.Y) < 60.0f
+            && IsBlocked(Pawn, FVector(Location.X, Location.Y, Location.Z - 30.0f), FVector(Location.X, Location.Y, Location.Z - 30.0f) + Ahead * 90.0f)
+            && IsBlocked(Pawn, FVector(Location.X, Location.Y, Location.Z + 70.0f), FVector(Location.X, Location.Y, Location.Z + 70.0f) + Ahead * 90.0f);
+        if (!bHeldUp)
+        {
+            HeldUpOnPathSince = -1.0f;
+        }
+        else if (HeldUpOnPathSince < 0.0f)
+        {
+            HeldUpOnPathSince = Now;
+        }
+        else if (Now - HeldUpOnPathSince > 0.75f)
+        {
+            HeldUpOnPathSince = -1.0f;
+            StopMoving();
+            SteerReason = L"wall on its path";
+            PathFailedUntil = Now + 1.5f;
+            bHasSteerTarget = false;
         }
         return;
     }
@@ -4514,9 +4621,9 @@ bool FCoreAthenaBotController::DamagePawn(AFortPawn* Victim, AFortWeapon* Weapon
         const FVector From = LocationOf(GetPawn()) + FVector(0.0f, 0.0f, 60.0f);
         bApplied |= ApplyWeaponDamageEffect(reinterpret_cast<UObject*>(Victim), Weapon, bPickaxeEquipped && Weapon == EquippedWeapon.Get(), &From);
     }
-    // A pawn that can't be damaged (the warmup island's) shows the hit's numbers and keeps its health and shield, as the
-    // game's own hits leave a player there.
-    if (!Victim->bCanBeDamaged && !Victim->bIsDying && (Victim->GetHealth() != HealthBefore || Victim->GetShield() != ShieldBefore))
+    // A pawn that can't be damaged (the warmup island's, a player in god mode) shows the hit's numbers and keeps its
+    // health and shield, as the game's own hits leave a player there.
+    if (FCoreAthenaBotManager::IsInvulnerable(Victim) && !Victim->bIsDying && (Victim->GetHealth() != HealthBefore || Victim->GetShield() != ShieldBefore))
     {
         Victim->SetHealth(HealthBefore);
         Victim->SetShield(ShieldBefore);
@@ -4615,6 +4722,145 @@ bool FCoreAthenaBotController::FindBuildingInTheWay(float Now)
         }
     }
     return false;
+#else
+    return false;
+#endif
+}
+
+bool FCoreAthenaBotController::DefensiveBuilding(float Now, AFortPawn* Attacker)
+{
+#if WITH_SERVER_CODE
+    // 21.40's UFortAthenaAIBotEvaluator_DefensiveBuilding (CanBuildNextTimeDelay between builds), Core's simple version
+    // (CoreV2 #252): shot out in the open, the bot sometimes puts a wall between itself and the shooter, on the edge of
+    // its own grid cell that faces them, from the material it has the most of (10 a piece, as a player pays). Not on the
+    // warmup island (nobody can be hurt there), nor where the edge isn't clear (a house's wall, another piece).
+    //
+    // A player's piece goes through AFortPlayerController::ServerCreateBuildingActor, whose checks (CanAffordTo...,
+    // CanPlaceBuildableClassInStructuralGrid) are the player controller's own virtuals; a bot's controller is an
+    // AAIController. So the bot's wall is spawned and initialized the way that body does it after its checks
+    // (InitializeBuildingActor, PostInitializeSpawnedBuildingActor), with the bot's team, and the navmesh around it is
+    // rebuilt.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UWorld* World = Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr;
+    if (!Pawn || !Attacker || !World || Now < NextDefensiveBuildTime || State != ECoreAthenaBotState::Landed || !Pawn->bCanBeDamaged || Pawn->bIsDBNO
+        || Natives::ABuildingActor_InitializeBuildingActorIndex < 0 || Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex < 0)
+    {
+        return false;
+    }
+    // Occasionally: a third of the hits that find it in the open, at most one wall in 10-20 s.
+    NextDefensiveBuildTime = Now + 1.0f;
+    UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
+    if (!Movement || Movement->MovementMode != MoveWalking || FMath::FRand() > 0.33f)
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    const FVector Shooter = LocationOf(Attacker);
+    const float Distance = Dist2D(Location, Shooter);
+    // Out in the open: nothing between the bot's eyes and the shooter's.
+    const FVector Eye(Location.X, Location.Y, Location.Z + 60.0f);
+    if (Distance < 700.0f || Distance > 8000.0f || IsBlocked(Pawn, Eye, FVector(Shooter.X, Shooter.Y, Shooter.Z + 60.0f)))
+    {
+        return false;
+    }
+    const int32_t Kind = static_cast<int32_t>(std::max_element(std::begin(Materials), std::end(Materials)) - std::begin(Materials));
+    constexpr int32_t WallCost = 10;
+    if (Materials[Kind] < WallCost)
+    {
+        return false;
+    }
+    static const wchar_t* const WallPaths[3] = {
+        L"/Game/Building/ActorBlueprints/Player/Wood/L1/PBWA_W1_Solid.PBWA_W1_Solid_C",
+        L"/Game/Building/ActorBlueprints/Player/Stone/L1/PBWA_S1_Solid.PBWA_S1_Solid_C",
+        L"/Game/Building/ActorBlueprints/Player/Metal/L1/PBWA_M1_Solid.PBWA_M1_Solid_C",
+    };
+    static UClass* WallClasses[3] = {};
+    static bool bLoaded[3] = {};
+    if (!bLoaded[Kind])
+    {
+        bLoaded[Kind] = true;
+        WallClasses[Kind] = KeepLoaded(LoadObject<UClass>(nullptr, WallPaths[Kind]));
+    }
+    UClass* WallClass = WallClasses[Kind];
+    if (!WallClass || !WallClass->IsChildOf(ABuildingSMActor::StaticClass()))
+    {
+        return false;
+    }
+
+    // The player building grid: 512 uu cells; a wall stands on a cell's edge, its origin the edge's middle, 512 long
+    // along its own X. The edge of the bot's cell on the shooter's side.
+    constexpr float Cell = 512.0f;
+    const FVector Way = Direction2D(Location, Shooter);
+    const float CellX = std::floor(Location.X / Cell);
+    const float CellY = std::floor(Location.Y / Cell);
+    FVector Center;
+    float Yaw = 0.0f;
+    if (std::fabs(Way.X) >= std::fabs(Way.Y))
+    {
+        Center = FVector((CellX + (Way.X > 0.0f ? 1.0f : 0.0f)) * Cell, (CellY + 0.5f) * Cell, Location.Z);
+        Yaw = 90.0f;
+    }
+    else
+    {
+        Center = FVector((CellX + 0.5f) * Cell, (CellY + (Way.Y > 0.0f ? 1.0f : 0.0f)) * Cell, Location.Z);
+    }
+    // On the ground under the edge, a step from the bot's feet at most.
+    FVector Ground;
+    UObject* GroundActor = nullptr;
+    UObject* GroundComponent = nullptr;
+    if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Center.X, Center.Y, Location.Z + 50.0f), FVector(Center.X, Center.Y, Location.Z - 250.0f), 0, false, true, Ground, GroundActor, GroundComponent)
+        || (GroundActor && Cast<APawn>(GroundActor)))
+    {
+        return false;
+    }
+    Center.Z = Ground.Z;
+    // The edge clear: along it and across it, at knee and head height, nothing (a house's wall, another piece, a tree).
+    const FVector Along = RotateYaw(FVector(1.0f, 0.0f, 0.0f), Yaw) * (Cell * 0.5f - 20.0f);
+    const FVector Across = RotateYaw(FVector(0.0f, 1.0f, 0.0f), Yaw) * 40.0f;
+    for (const float Height : { 50.0f, 300.0f })
+    {
+        const FVector Middle(Center.X, Center.Y, Center.Z + Height);
+        if (IsBlocked(Pawn, Middle - Along, Middle + Along) || IsBlocked(Pawn, Middle - Across, Middle + Across))
+        {
+            return false;
+        }
+    }
+
+    FActorSpawnParameters SpawnParameters;
+    SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    FTransform SpawnTransform;
+    SpawnTransform.Rotation = FRotator(0.0f, Yaw, 0.0f).Quaternion();
+    SpawnTransform.SetLocation(Center);
+    ABuildingSMActor* Wall = Cast<ABuildingSMActor>(World->SpawnActor(WallClass, &SpawnTransform, SpawnParameters));
+    if (!Wall)
+    {
+        return false;
+    }
+    if (Natives::ABuildingSMActor_SetMirroredIndex >= 0)
+    {
+        CallVirtual<void>(Wall, Natives::ABuildingSMActor_SetMirroredIndex, false);
+    }
+    AFortPlayerStateAthena* PlayerState = GetPlayerState();
+    const int32_t WorldPlayerId = PlayerState ? static_cast<int32_t>(PlayerState->WorldPlayerId) : -1;
+    CallVirtual<void>(Wall, Natives::ABuildingActor_InitializeBuildingActorIndex, true, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
+    CallVirtual<void>(Wall, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, true);
+    // The bot's team, as Battle Royale's ScoreBuildingConstruction gives a player's piece theirs (#120): its team can
+    // edit it, and its shots and its teammates' pass it as their own.
+    if (PlayerState && Wall->Team == EFortTeam::GetSpectator())
+    {
+        Wall->Team = PlayerState->TeamIndex;
+    }
+    UAthenaNavSystem::AddDirtyArea(Wall);
+    Materials[Kind] -= WallCost;
+    ++WallsBuilt;
+    NextDefensiveBuildTime = Now + RandomRange(10.0f, 20.0f);
+    static int32_t Logged = 0;
+    if (Logged++ < 12)
+    {
+        Log::Info(L"Battle Royale bots: {} is shot by {} {:.0f} m away in the open and builds {} ({} wood, {} stone, {} metal left)", BotName, NameOf(reinterpret_cast<UObject*>(Attacker)), Distance / 100.0f,
+            NameOf(reinterpret_cast<UObject*>(Wall)), Materials[0], Materials[1], Materials[2]);
+    }
+    return true;
 #else
     return false;
 #endif
@@ -5637,6 +5883,24 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     StopFiring();
     AFortPlayerPawnAthena* Pawn = GetPawn();
     AFortPlayerStateAthena* PlayerState = GetPlayerState();
+    // The body takes no more hits (CoreV2 #254: the elimination's drone played 4 or more times on a bot a player had
+    // just eliminated, with one death on the server). A hit on a pawn at 0 health is a fatal one again: its damage cue
+    // (AFortPlayerPawnAthena's GameplayCue_Damage, 3.3 0xA1BA10, into AFortPawn's, 0xE4D3C0) runs the death's effects on
+    // every client once more, OnDeathPlayEffects among them (BP_VictoryDrone). The rest of an automatic weapon's burst
+    // landed on the body. A player's dead pawn is let go by its controller in the same death call; a bot's controller is
+    // an AAIController, which keeps it, so Core turns damage off on the body, as the warmup island's pawns have it, and
+    // stops its movement.
+    if (Pawn)
+    {
+        Pawn->bCanBeDamaged = false;
+        Pawn->ForceNetUpdate();
+    }
+    if (AAIController* AIController = Controller.Get())
+    {
+        AIController->StopMovement();
+    }
+    bPathFollowing = false;
+    bHasMoveGoal = false;
     if (PlayerState && AFortPlayerStateAthena::HasEliminator())
     {
         FDeathInfo& DeathInfo = PlayerState->DeathInfo;

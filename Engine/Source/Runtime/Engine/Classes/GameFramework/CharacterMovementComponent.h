@@ -23,6 +23,10 @@ public:
     DefineBitfieldUProperty(bCheatFlying)
     // Whether the movement simulates (gravity, walking) for a character no controller has.
     DefineBitfieldUProperty(bRunPhysicsWithNoController)
+    // UNavMovementComponent's: path following moves the character through its input (RequestPathMove, so the movement
+    // has an acceleration) instead of setting its velocity (RequestDirectMove).
+    DefineBitfieldUProperty(bUseAccelerationForPaths)
+    static bool HasUseAccelerationForPaths() { return Member_bUseAccelerationForPaths.IsAvailable(); }
     DefineUFunction(SetMovementMode)
 
     void SetMovementMode(uint8_t NewMovementMode, uint8_t NewCustomMode = 0);

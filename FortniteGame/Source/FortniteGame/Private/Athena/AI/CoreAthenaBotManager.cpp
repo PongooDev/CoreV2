@@ -28,6 +28,7 @@
 #include "Log.h"
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
+#include "Player/FortCheatManager.h"
 #include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -1927,8 +1928,8 @@ void FCoreAthenaBotManager::ApplyBotDamage(FCoreAthenaBotController* Attacker, A
     const float Now = World->GetTimeSeconds();
     NoteBotHit(Attacker, Victim);
     // A pawn that can't be damaged (everyone on the warmup island: AFortGameModeAthena's warmup restart turns
-    // bCanBeDamaged off) takes nothing, as the game's own damage leaves it.
-    if (!Victim->bCanBeDamaged)
+    // bCanBeDamaged off; a player in god mode) takes nothing, as the game's own damage leaves it.
+    if (IsInvulnerable(Victim))
     {
         return;
     }
@@ -1967,6 +1968,25 @@ void FCoreAthenaBotManager::ApplyBotDamage(FCoreAthenaBotController* Attacker, A
     Victim->SetHealth(1.0f);
     Victim->ForceKill(DeathReason, reinterpret_cast<AController*>(Attacker->GetController()), reinterpret_cast<AActor*>(Attacker->GetPawn()));
 #endif
+}
+
+bool FCoreAthenaBotManager::IsInvulnerable(AFortPawn* Victim)
+{
+    // The pawn's damage check (3.3 0xE6AB30) gives a hit no damage while bCanBeDamaged is off or bIsInvulnerable (the
+    // god cheat's) is on; the unlimitedhealth cheat's bUnlimitedHealth is read by the same damage path (1.9 0x7AE300).
+    // Core's own bot damage (a hit the game's damage didn't take, or a team playlist's bot) asks the same (CoreV2 #252:
+    // "cheat god" didn't stop the bots' hits).
+    if (!Victim || !Victim->bCanBeDamaged)
+    {
+        return true;
+    }
+    if (AFortPawn::HasInvulnerable() && Victim->bIsInvulnerable)
+    {
+        return true;
+    }
+    APlayerController* Player = Cast<APlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Victim->Controller)));
+    UFortCheatManager* Cheats = Player ? Cast<UFortCheatManager>(static_cast<UObject*>(Player->CheatManager)) : nullptr;
+    return Cheats && UFortCheatManager::HasUnlimitedHealthFlag() && Cheats->bUnlimitedHealth;
 }
 
 bool FCoreAthenaBotManager::UsesGameDamage(const AFortPawn* Victim) const
@@ -2348,7 +2368,9 @@ void FCoreAthenaBotManager::RefreshLoot(float Now)
         const bool bAmmo = Cast<UFortAmmoItemDefinition>(Definition) != nullptr;
         // A bandage, medkit, shield potion or Chug Jug (21.40's _Loot takes healing items too).
         const bool bConsumable = !bWeapon && !bAmmo && Weapon && FCoreAthenaBotController::GetConsumableInfo(Definition) != nullptr;
-        if (bWeapon || bAmmo || bConsumable)
+        // Wood, stone and metal on the floor, which bots take for building (CoreV2 #252).
+        const bool bMaterial = !Weapon && FCoreAthenaBotController::MaterialKindOf(Definition) >= 0;
+        if (bWeapon || bAmmo || bConsumable || bMaterial)
         {
             Loot.push_back({ TWeakObjectPtr<AFortPickup>(Pickup), LocationOf(Pickup), bWeapon, bConsumable });
         }

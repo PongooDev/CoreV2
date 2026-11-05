@@ -76,6 +76,10 @@ public:
     DefineUStructProperty(FDataTableRowHandle, PawnStatHandle)
     // Its player state's movement attributes, for a player (replicated with the player state).
     DefineUProperty(UFortMovementSet*, MovementSet)
+    // The god cheat's flag (UFortCheatManager::God, 3.3 0xE58C40, toggles it on the possessed pawn): the pawn's damage
+    // check (3.3 0xE6AB30) makes every hit 0 while it, or bCanBeDamaged off, says so.
+    DefineBitfieldUProperty(bIsInvulnerable)
+    static bool HasInvulnerable() { return Member_bIsInvulnerable.IsAvailable(); }
 
     bool IsDead() const;
     // Server: the current weapon starts or stops firing in FireModeNum, as a player's held fire button does.

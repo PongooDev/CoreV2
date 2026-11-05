@@ -189,6 +189,10 @@ public:
     // Whether a bot's hit on Victim goes the game's way (its damage effect): a player's pawn always; a bot's in a solo
     // playlist (in team playlists Core's damage downs bots while a teammate stands).
     bool UsesGameDamage(const AFortPawn* Victim) const;
+    // Whether Victim takes no damage as the game's own damage leaves it (CoreV2 #252): bCanBeDamaged off (the warmup
+    // island, a dead pawn), the god cheat's bIsInvulnerable, or its player's "unlimitedhealth" cheat (the cheat
+    // manager's bUnlimitedHealth).
+    static bool IsInvulnerable(AFortPawn* Victim);
     // A bot hit Victim (LastBotAttackerOf).
     void NoteBotHit(FCoreAthenaBotController* Attacker, AFortPawn* Victim);
     // The player state of the bot that last hit Pawn, in the last few seconds, or null.

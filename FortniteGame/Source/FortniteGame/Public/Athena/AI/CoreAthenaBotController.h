@@ -239,9 +239,11 @@ public:
     static void ResetForNewMatch();
     // A gun's kind and stats row values (cached per weapon).
     static const FCoreAthenaBotWeapon& GetWeaponInfo(UFortWeaponItemDefinition* Definition);
-    // Whether the bot wants this floor pickup: a gun it would carry (WeaponSlotFor), ammo for its guns, or a
-    // consumable it has room for.
+    // Whether the bot wants this floor pickup: a gun it would carry (WeaponSlotFor), ammo for its guns (and some of the
+    // other kinds while it has a free weapon slot), materials below a stack, or a consumable it has room for.
     bool WantsPickup(UFortItemDefinition* Definition, bool bWeapon, bool bConsumable);
+    // 0 wood, 1 stone, 2 metal (UFortGameData's resource items), -1 for anything else.
+    static int32_t MaterialKindOf(const UFortItemDefinition* Definition);
 
 private:
     // The warmup island (Core's: 8.30's bots spawned after the bus). Players there stand around, look about, walk a
@@ -387,6 +389,9 @@ private:
     bool StayWithTeam(float Now);
     // TryToUnstuck: a building the bot can break right in front of it, on the way to its goal.
     bool FindBuildingInTheWay(float Now);
+    // 21.40's UFortAthenaAIBotEvaluator_DefensiveBuilding, simply: hit by Attacker out in the open, sometimes a wall
+    // from its materials between them (not on the warmup island).
+    bool DefensiveBuilding(float Now, AFortPawn* Attacker);
     void TakePickup(AFortPickup* Pickup);
     // An item dropped where the bot stands, as a player drops it (a weapon with its magazine).
     void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo);
@@ -461,6 +466,9 @@ private:
     // Set when the building's resource spawn credited the bot during a swing.
     bool bHarvestCredited = false;
     int32_t Materials[3] = {};
+    // DefensiveBuilding's CanBuildNextTimeDelay: no wall before this time.
+    float NextDefensiveBuildTime = 0.0f;
+    int32_t WallsBuilt = 0;
     int32_t Swings = 0;
     int32_t BreakThroughs = 0;
     // Squads: who downed the bot, when, its bleed, and the teammate it is reviving.
@@ -522,6 +530,8 @@ private:
     float ReloadUntil = 0.0f;
     float TargetAcquiredTime = 0.0f;
     float NextStuckCheck = 0.0f;
+    // When the bot was first seen held up against a wall on its path (-1: it isn't).
+    float HeldUpOnPathSince = -1.0f;
     float LandedTime = 0.0f;
     float NextLogTime = 0.0f;
     float WarmupRespawnTime = -1.0f;

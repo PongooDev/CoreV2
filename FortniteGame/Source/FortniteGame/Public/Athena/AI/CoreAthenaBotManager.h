@@ -115,10 +115,11 @@ public:
     int32_t GetTeamSize() const { return std::max(PlaylistTeamSize, 1); }
     // A squad's most players: the team's, up to 4.
     int32_t GetSquadSize() const { return std::min(GetTeamSize(), MaxSquadSize); }
-    // A large team game of more than two teams (Teams of 20's five teams of 20): each team is several squads, the bots
-    // fill the playlist's teams in squads, and a bot plays with its squad. 50v50's two sides (paused, Core-Backend #135)
-    // keep their bots on a side of their own.
-    bool HasSquadsInTeams() const { return GetTeamSize() > MaxSquadSize && PlaylistTeams > 2; }
+    // A large team game (Teams of 20's five teams of 20, 50v50's two sides of 50): each team is several squads, the bots
+    // fill the playlist's teams in squads, players' teams too, and a bot plays with its squad. 50v50 kept its bots on a
+    // side of their own while it was paused, so with one player in, all of them went to the other side (50 bots, the
+    // player's side empty) and "Fill players' teams with bots" gave the player's squad none: no bot teammates at all.
+    bool HasSquadsInTeams() const { return GetTeamSize() > MaxSquadSize && PlaylistTeams >= 2; }
     std::vector<FCoreAthenaBotController*> TeammatesOf(const FCoreAthenaBotController* Bot) const;
     // A bot's teammates who are players (a bot on a player's team, "Fill players' teams with bots"; in a large team game,
     // in a player's squad): their pawns, of the ones still in the match.

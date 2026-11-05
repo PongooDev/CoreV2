@@ -49,6 +49,7 @@ Core moves forward one build at a time and skips builds nobody has a copy of, so
 | 2.5 | Release-2.5 CL-3889387 | Full support ✅ |
 | 3.0 | Release-3.0.0 CL-3901517 | Full support ✅ |
 | 3.1 | Release-3.1 CL-3915963 | Full support ✅ |
+| 3.1.1 | Release-3.1 CL-3917250 | Full support ✅ |
 | 3.2 | Release-3.2 CL-3935073 | Full support ✅ |
 | 3.3 | Release-3.3 CL-3942182 | In development 🚧 |
 

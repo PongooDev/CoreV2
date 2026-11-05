@@ -71,9 +71,16 @@ namespace
     };
     constexpr int32_t NumBotNames = static_cast<int32_t>(sizeof(BotNames) / sizeof(BotNames[0]));
 
-    // Bots spawned per frame during the warmup (one: each loads its loadout's cosmetics from the paks, which three at
-    // once made a hitch), and how often the loot list is refreshed.
-    constexpr int32_t BotsPerFrame = 1;
+    // Bots spawned in the warmup (CoreV2 #256): one at a time, at most one every MinSpawnInterval seconds and MinSpawnFrames
+    // frames (a third of a second at the server's 30 Hz, longer when its frames run long). Each spawn is a controller, a
+    // pawn and its loadout's cosmetics loaded from the paks, a heavy frame: one bot a frame, as the warmup's last 20 s
+    // (or a countdown the game shortened to 15 s) had it, hung the server. They are spread over the warmup up to
+    // SpawnDoneBeforeBus seconds before the bus, never closer, and the most MaxSpawnInterval apart. And how often the loot
+    // list is refreshed.
+    constexpr float MinSpawnInterval = 0.5f;
+    constexpr int32_t MinSpawnFrames = 10;
+    constexpr float MaxSpawnInterval = 6.0f;
+    constexpr float SpawnDoneBeforeBus = 20.0f;
     constexpr float LootRefreshInterval = 3.0f;
 
     void WatchManager()
@@ -856,41 +863,56 @@ void FCoreAthenaBotManager::TickWarmup(float Now)
         LastLoggedTeamBots = TeamBots;
     }
     RemoveSurplusBots(Wanted, TeamSlots);
+    LastWantedTotal = Wanted + TeamBots;
+    ++FramesSinceSpawn;
     const int32_t Missing = std::max(Wanted - CountAliveBots(false), 0) + std::max(TeamBots - CountAliveBots(true), 0);
-    if (Missing > 0 && Now >= NextPacedSpawn)
+    if (Missing > 0)
     {
         // Bots come in as players do (#233): none before the first player is on the island (a server nobody joined
-        // spends nothing on them), then a few at a time, a little more when another player joins, all of them in a
-        // while before the bus. -CoreBotMatch (no players) brings them in at once. A player's team's bots come first.
+        // spends nothing on them), then one at a time, a few sooner when another player joins, spread over the warmup
+        // up to 20 s before the bus. Never more than one a frame, nor closer than MinSpawnInterval and MinSpawnFrames
+        // (#256): when the warmup is too short for them all at that rate, fewer are in when the bus leaves, which
+        // OnAircraftPhaseStarted logs. -CoreBotMatch (no players) brings them in at that rate from the start. A
+        // player's team's bots come first.
         AFortGameModeAthena* Athena = GetGameMode();
         AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
         const int32_t Humans = Athena ? Athena->GetNumConnectedPlayers() : 0;
         const bool bBotMatch = Configuration::Get().bBotMatch;
         if (bBotMatch || HasHumanSpawned())
         {
-            const float EndTime = GameState && AFortGameStateAthena::HasWarmupCountdown() ? static_cast<float>(GameState->WarmupCountdownEndTime) : 0.0f;
-            // Everyone in 20 s before the bus (the warmup's countdown), spread evenly over the time left.
-            const float TimeLeft = EndTime > 0.0f ? EndTime - 20.0f - Now : 0.0f;
-            float Interval = bBotMatch || TimeLeft <= 0.0f ? 0.0f : std::clamp(TimeLeft / static_cast<float>(Missing), 0.0f, 6.0f);
-            int32_t Batch = 1;
             if (Humans > LastHumanCount && !bBotMatch)
             {
-                // Another player joined: a couple of bots with them.
-                Batch = std::min(Missing, 1 + static_cast<int32_t>(FMath::Rand() % 3));
+                // Another player joined: a few bots with them, the next one now and the others at the quickest rate.
+                JoinBotsLeft = std::min(Missing, 1 + static_cast<int32_t>(FMath::Rand() % 3));
+                NextPacedSpawn = std::min(NextPacedSpawn, Now);
             }
             LastHumanCount = Humans;
-            if (!bLoggedSpawnStart)
+            if (Now >= NextPacedSpawn && Now - LastSpawnTime >= MinSpawnInterval && FramesSinceSpawn >= MinSpawnFrames)
             {
-                bLoggedSpawnStart = true;
-                Log::Info(L"Battle Royale bots: {} spawning {} bots, about one every {:.1f} s ({:.0f} s of warmup left)", bBotMatch ? L"-CoreBotMatch:" : L"a player is on the island:",
-                    Missing, Interval, EndTime > 0.0f ? EndTime - Now : -1.0f);
-            }
-            for (int32_t Index = 0; Index < Batch; ++Index)
-            {
+                const float EndTime = GameState && AFortGameStateAthena::HasWarmupCountdown() ? static_cast<float>(GameState->WarmupCountdownEndTime) : 0.0f;
+                // Spread evenly over the time left to 20 s before the bus (the warmup's countdown); with no countdown
+                // yet, or past that point, at the quickest rate.
+                const float TimeLeft = EndTime > 0.0f ? EndTime - SpawnDoneBeforeBus - Now : 0.0f;
+                const float Interval = std::clamp(TimeLeft / static_cast<float>(Missing), MinSpawnInterval, MaxSpawnInterval);
+                if (!bLoggedSpawnStart)
+                {
+                    bLoggedSpawnStart = true;
+                    Log::Info(L"Battle Royale bots: {} spawning {} bots, about one every {:.1f} s ({:.0f} s of warmup left)", bBotMatch ? L"-CoreBotMatch:" : L"a player is on the island:",
+                        Missing, Interval, EndTime > 0.0f ? EndTime - Now : -1.0f);
+                    if (const int32_t Fit = EndTime > 0.0f ? std::max(static_cast<int32_t>((EndTime - Now) / MinSpawnInterval), 0) : Missing; Fit < Missing)
+                    {
+                        Log::Warning(L"Battle Royale bots: the warmup has room for about {} of the {} bots at one every {:.1f} s at most, so about {} won't be in by the bus "
+                            L"(a longer warmup on the admin panel's Matchmaking tab brings them all)", Fit, Missing, MinSpawnInterval, Missing - Fit);
+                    }
+                }
+                const auto SpawnStart = std::chrono::steady_clock::now();
                 SpawnNextBot(Wanted, TeamSlots, Now);
-                NextRegisterTime = std::min(NextRegisterTime, Now);
+                SpawnMsMax = std::max(SpawnMsMax, std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - SpawnStart).count());
+                LastSpawnTime = Now;
+                FramesSinceSpawn = 0;
+                JoinBotsLeft = std::max(JoinBotsLeft - 1, 0);
+                NextPacedSpawn = Now + (JoinBotsLeft > 0 ? MinSpawnInterval : std::max(Interval * RandomRange(0.6f, 1.4f), MinSpawnInterval));
             }
-            NextPacedSpawn = Now + (Interval > 0.0f ? Interval * RandomRange(0.6f, 1.4f) : 0.0f);
         }
     }
     // The navigation (its octree and first build take a quarter of a second in one frame) and the assets the bots load
@@ -1367,6 +1389,12 @@ void FCoreAthenaBotManager::OnAircraftPhaseStarted(float Now)
     }
     UpdateCounts();
     Log::Info(L"Battle Royale bots: the bus leaves with {} players and {} bots (drop zone {:.0f} s to {:.0f} s from now)", HumansAtStart, BotsAtStart, DropStart - Now, DropEnd - Now);
+    if (bLoggedSpawnStart && BotsAtStart < LastWantedTotal)
+    {
+        // Paced spawning (#256): the warmup ran out before every bot was in, and the rest don't come in a burst.
+        Log::Warning(L"Battle Royale bots: {} bots short of the {} wanted: the warmup ran out at one bot every {:.1f} s at most (a longer warmup on the admin panel's Matchmaking tab brings them all)",
+            LastWantedTotal - BotsAtStart, LastWantedTotal, MinSpawnInterval);
+    }
     if (BotsAtStart > 0)
     {
         RefreshLoot(Now);
@@ -2549,9 +2577,9 @@ void FCoreAthenaBotManager::LogSummary(float Now)
     }
     AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
     Log::Info(L"Battle Royale bots: {} in the warmup, {} in the aircraft, {} skydiving, {} landed ({} on the navmesh), {} out; {} loot pickups seen; players left {}, teams left {}; "
-        L"frame {:.1f} ms average, {:.1f} ms max, {} over 50 ms; bots {:.2f} ms a frame, {:.1f} ms max (one bot {:.1f} ms: {}, loot list {:.1f} ms)",
+        L"frame {:.1f} ms average, {:.1f} ms max, {} over 50 ms; bots {:.2f} ms a frame, {:.1f} ms max (one bot {:.1f} ms: {}, loot list {:.1f} ms, a spawn {:.1f} ms)",
         ByState[0], ByState[1], ByState[2], ByState[3], OnNavMesh, ByState[4], Loot.size(), GameState ? static_cast<int32_t>(GameState->PlayersLeft) : 0, GameState ? static_cast<int32_t>(GameState->TeamsLeft) : 0,
-        FrameCount ? FrameMsSum / FrameCount : 0.0, FrameMsMax, FrameSpikes, FrameCount ? BotsMsSum / FrameCount : 0.0, BotsMsMax, BotTickMsMax, SlowestBotTick, LootRefreshMsMax);
+        FrameCount ? FrameMsSum / FrameCount : 0.0, FrameMsMax, FrameSpikes, FrameCount ? BotsMsSum / FrameCount : 0.0, BotsMsMax, BotTickMsMax, SlowestBotTick, LootRefreshMsMax, SpawnMsMax);
     FrameMsSum = 0.0;
     FrameMsMax = 0.0;
     BotsMsSum = 0.0;
@@ -2560,5 +2588,6 @@ void FCoreAthenaBotManager::LogSummary(float Now)
     BotsMsMax = 0.0;
     BotTickMsMax = 0.0;
     LootRefreshMsMax = 0.0;
+    SpawnMsMax = 0.0;
     SlowestBotTick.clear();
 }

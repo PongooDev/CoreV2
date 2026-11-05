@@ -100,6 +100,9 @@ public:
     void SetSettings(bool bEnabled, const FCoreAthenaBotSettings& InSettings);
     const FCoreAthenaBotSettings& GetSettings() const { return Settings; }
     bool IsEnabled() const { return bEnabled; }
+    // Whether the warmup keeps its full length (CoreV2 #256): the bots come in over it, one at a time, so the game's early
+    // countdown (15 s once the match's players are all in) would leave them no room. Bots on (the backend's bots block).
+    bool ShouldKeepFullWarmup() const { return bEnabled; }
     // Each frame, on the game thread (WatchManager).
     void Tick();
 
@@ -307,9 +310,17 @@ private:
     float NextSummaryLog = 0.0f;
     float LastTickTime = -1.0f;
     float NextRegisterTime = 0.0f;
-    // Paced spawning in the warmup: the next bot's time, the players connected last tick, and the first spawn's log.
+    // Paced spawning in the warmup (CoreV2 #256): the next bot's time, the last spawn's time and the frames since it (one
+    // bot at most every MinSpawnInterval seconds and MinSpawnFrames frames), the bots still to come quickly after a
+    // player joined, the players connected last tick, the bots wanted (for the bus's shortfall log), the slowest spawn
+    // in the summary's window, and the first spawn's log.
     float NextPacedSpawn = 0.0f;
+    float LastSpawnTime = -1000.0f;
+    int32_t FramesSinceSpawn = 1000;
+    int32_t JoinBotsLeft = 0;
     int32_t LastHumanCount = 0;
+    int32_t LastWantedTotal = 0;
+    double SpawnMsMax = 0.0;
     bool bLoggedSpawnStart = false;
     bool bBotMatchStarted = false;
     bool bBotMatchAircraftStarted = false;

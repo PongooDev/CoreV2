@@ -911,7 +911,11 @@ namespace
         const float Duration = bGame ? Watch.GameDuration : static_cast<float>(Watch.WarmupSeconds);
         const int32_t Capacity = MatchCapacity(GameMode);
         const bool bClosed = Watch.bUnsupported || (Watch.bAnswered && !Watch.bLateJoin);
-        const bool bEarly = bClosed || (AFortGameModeAthena::HasMaxPlayerCount() && Capacity > 0 && GameMode->MaxPlayerCount >= Capacity);
+        // With player bots on, the warmup is in full whatever the players (CoreV2 #256): the match fills with bots, which
+        // come in one at a time over it, and a countdown shortened to 15 s brought them all in a burst that hung the server.
+        const FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get();
+        const bool bBots = BotManager && BotManager->ShouldKeepFullWarmup();
+        const bool bEarly = !bBots && (bClosed || (AFortGameModeAthena::HasMaxPlayerCount() && Capacity > 0 && GameMode->MaxPlayerCount >= Capacity));
         GameMode->WarmupCountdownDuration = Duration;
         GameMode->WarmupEarlyCountdownDuration = bEarly ? std::min(Watch.GameEarly, Duration) : Duration;
 
@@ -927,7 +931,12 @@ namespace
             if (!bGame)
             {
                 Log::Info(L"Battle Royale: the warmup lasts {} s (the backend's), {}", Watch.WarmupSeconds,
-                    bEarly ? std::format(L"{:.0f} s once the match's players are all in", std::min(Watch.GameEarly, Duration)) : std::wstring(L"in full while late players can still join"));
+                    bEarly ? std::format(L"{:.0f} s once the match's players are all in", std::min(Watch.GameEarly, Duration))
+                        : std::wstring(bBots ? L"in full while the player bots come in" : L"in full while late players can still join"));
+            }
+            else if (bBots)
+            {
+                Log::Info(L"Battle Royale: the warmup is the game's {:.0f} s in full while the player bots come in", Watch.GameDuration);
             }
             else if (bEarly)
             {

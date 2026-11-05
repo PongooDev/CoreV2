@@ -15,6 +15,7 @@ class FNetworkNotify;
 class FNetworkObjectList;
 class UActorChannel;
 class UNetConnection;
+class UReplicationDriver;
 class UWorld;
 struct FNetViewer;
 struct FNetworkObjectInfo;
@@ -74,6 +75,9 @@ public:
     DefineUProperty(UWorld*, World)
     DefineUProperty(FName, NetDriverName)
     DefineUProperty(float, Time)
+    // UE 4.20 (3.3 on); older builds have none.
+    DefineUProperty(UReplicationDriver*, ReplicationDriver)
+    bool HasReplicationDriver() const { return Member_ReplicationDriver.IsAvailable(); }
     DefineNativeMember(bool, bIsPeer, UNetDriver_bIsPeer)
     DefineNativeMember(TSharedPtr<FNetGUIDCache>, GuidCache, UNetDriver_GuidCache)
     DefineNativeMember(int32_t, NetTag, UNetDriver_NetTag)

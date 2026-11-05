@@ -10732,6 +10732,30 @@ bool Finder::ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceV
     return false;
 }
 
+bool Finder::ResolveReplicationDriverLive()
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::UReplicationDriver_ServerReplicateActorsIndex >= 0)
+    {
+        return Natives::UReplicationDriver_ServerReplicateActorsIndex >= 0;
+    }
+    bSearched = true;
+
+    // UReplicationDriver::ServerReplicateActors is PURE_VIRTUAL: the base class's body only reports "Pure virtual not
+    // implemented (UReplicationDriver::ServerReplicateActors)", so that name's function is the one in its default object's
+    // vtable, and its slot is the one UReplicationGraph overrides.
+    const uintptr_t PureVirtual = FunctionOf(L"UReplicationDriver::ServerReplicateActors");
+    const int32_t Index = Finder::VTableIndex(CdoVTable(L"/Script/Engine.ReplicationDriver"), reinterpret_cast<void*>(PureVirtual), 0x400);
+    if (Index < 0)
+    {
+        Log::Warning(L"Finder: UReplicationDriver::ServerReplicateActors not found, a replication driver replicates nothing");
+        return false;
+    }
+    Natives::UReplicationDriver_ServerReplicateActorsIndex = Index;
+    Log::Info(L"Finder: UReplicationDriver::ServerReplicateActors is slot 0x{:X} (0x{:X})", Index * 8, PureVirtual - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
 {
     static bool bSearched = false;

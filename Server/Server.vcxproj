@@ -223,6 +223,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\LocalPlayer.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\NetConnection.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\NetDriver.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\ReplicationDriver.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\NetSerialization.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\NetworkObjectList.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\PackageMapClient.h" />
@@ -467,6 +468,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetConnection.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetSerialization.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetworkDriver.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ReplicationDriver.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\NetworkObjectList.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PackageMapClient.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Pawn.cpp" />

@@ -6,6 +6,7 @@
 #include "Engine/NetConnection.h"
 #include "Engine/NetworkObjectList.h"
 #include "Engine/PackageMapClient.h"
+#include "Engine/ReplicationDriver.h"
 #include "Engine/World.h"
 #include "EngineLogs.h"
 #include "Finder.h"
@@ -682,6 +683,16 @@ int32_t UNetDriver::ServerReplicateActors(float DeltaSeconds)
     if (ClientConnections.Num() == 0)
     {
         return 0;
+    }
+
+    // UE 4.20: a net driver with a replication driver (3.4's Battle Royale has UFortReplicationGraph; 3.3 and Save the
+    // World leave it off) hands it the whole job.
+    if (HasReplicationDriver())
+    {
+        if (UReplicationDriver* Driver = ReplicationDriver)
+        {
+            return Driver->ServerReplicateActors(DeltaSeconds);
+        }
     }
 
     check(World);

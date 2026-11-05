@@ -1,9 +1,10 @@
-#include "pch.h"
+﻿#include "pch.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortAthenaPlaylistBase.h"
+#include "Athena/FortPlaylistAthena.h"
 #include "Building/BuildingContainer.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -1431,10 +1432,23 @@ namespace
     // The game mode whose playlist's tables ApplyPlaylistDataTables last copied over the default ones, and that playlist.
     FWeakObjectPtr TablesGameMode;
     int32_t TablesPlaylistId = -1;
+    // The loot tables that playlist copied over the default ones.
+    std::pair<UDataTable*, UDataTable*> TablesLoot;
 
     // The loot tables PlaylistId's PlaylistDataTables entry copies over the default ones (none: the defaults).
     std::pair<UDataTable*, UDataTable*> PlaylistLootTables(AFortGameModeAthena* GameMode, int32_t PlaylistId)
     {
+        if (!AFortGameModeAthena::HasPlaylistDataTables())
+        {
+            // 3.5: ApplyPlaylistDataTables (3.5.1 0x9DC890) loads the game state's CurrentPlaylistData's tables.
+            AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylistData() ? AthenaGameStateOf(GameMode) : nullptr;
+            UFortPlaylistAthena* Playlist = GameState ? GameState->CurrentPlaylistData : nullptr;
+            if (Playlist && Playlist->PlaylistId == PlaylistId)
+            {
+                return { Playlist->LootTierData.LoadSynchronous(), Playlist->LootPackages.LoadSynchronous() };
+            }
+            return { nullptr, nullptr };
+        }
         TStructArray<FAthenaPlaylistDataTableSet>& Sets = GameMode->PlaylistDataTables;
         for (int32_t Index = 0; Index < Sets.Num(); ++Index)
         {
@@ -1480,7 +1494,10 @@ namespace
                 const int32_t Previous = TablesPlaylistId;
                 TablesPlaylistId = PlaylistId;
                 Natives::AFortGameModeAthena_ApplyPlaylistDataTables(Athena);
-                if (PlaylistLootTables(Athena, PlaylistId) != PlaylistLootTables(Athena, Previous))
+                const std::pair<UDataTable*, UDataTable*> Tables = PlaylistLootTables(Athena, PlaylistId);
+                const bool bOtherTables = Tables != TablesLoot;
+                TablesLoot = Tables;
+                if (bOtherTables)
                 {
                     Log::Info(L"Battle Royale: the match's playlist {} has other loot tables than playlist {}, so the world's loot is rolled again", PlaylistId, Previous);
                     ABuildingContainer::RollAthenaLootAgain(Athena->GetWorld());
@@ -1503,7 +1520,8 @@ void AFortGameModeAthena::ApplyPlaylistDataTablesOnce()
     TablesGameMode = this;
     TablesPlaylistId = CurrentPlaylistId;
     Natives::AFortGameModeAthena_ApplyPlaylistDataTables(this);
-    const auto [LootTierData, LootPackages] = PlaylistLootTables(this, TablesPlaylistId);
+    TablesLoot = PlaylistLootTables(this, TablesPlaylistId);
+    const auto [LootTierData, LootPackages] = TablesLoot;
     Log::Info(L"Battle Royale: the world's loot tables are playlist {}'s ({}, {})", TablesPlaylistId, LootTierData ? LootTierData->GetPathName().ToStdString() : std::wstring(L"default loot tiers"),
         LootPackages ? LootPackages->GetPathName().ToStdString() : std::wstring(L"default loot packages"));
 #endif

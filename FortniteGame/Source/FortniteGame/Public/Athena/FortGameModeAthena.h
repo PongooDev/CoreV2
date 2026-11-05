@@ -55,7 +55,9 @@ public:
     // 1.9 0x43D9A0). Config values; no match option sets them.
     DefineUProperty(float, WarmupCountdownDuration)
     DefineUProperty(float, WarmupEarlyCountdownDuration)
+    // 1.11 to 3.3; from 3.5 the playlist is a data asset, AFortGameStateAthena's CurrentPlaylistData.
     DefineUStructArrayProperty(FAthenaPlaylistDataTableSet, PlaylistDataTables)
+    static bool HasPlaylistDataTables() { return Member_PlaylistDataTables.IsAvailable(); }
     // The players still in the match (AddToAlivePlayers adds them, RemoveFromAlivePlayers takes them off).
     DefineUProperty(TArray<AFortPlayerControllerAthena*>, AlivePlayers)
     // The alive players on each team (3.2's int32 TeamAlivePlayers[100], index: the team less HumanPvP_Team1), as

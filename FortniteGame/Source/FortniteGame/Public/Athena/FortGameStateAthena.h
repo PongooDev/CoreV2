@@ -3,6 +3,7 @@
 #include "FortGameState.h"
 
 class AFortAthenaMapInfo;
+class UFortPlaylistAthena;
 
 class EAthenaGamePhase
 {
@@ -43,6 +44,11 @@ public:
 
     // The map's AFortAthenaMapInfo, set by AFortGameModeAthena's own FinishWorldInitialization (1.7.2 0x3CF860).
     DefineUProperty(AFortAthenaMapInfo*, MapInfo)
+
+    // 3.5: the match's playlist, set by SetCurrentPlaylistId (3.5.1 0x9FA020) from the game mode's playlist list.
+    // ApplyPlaylistDataTables (0x9DC890) copies its tables over the default ones.
+    DefineUProperty(UFortPlaylistAthena*, CurrentPlaylistData)
+    static bool HasCurrentPlaylistData() { return Member_CurrentPlaylistData.IsAvailable(); }
 
     static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
 };

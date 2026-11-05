@@ -7295,8 +7295,13 @@ bool Finder::ResolvePlaylistDataTablesLive()
     // tables to defaults" (the game instance's AthenaDataTables copied back over AthenaLootTierData_Client,
     // AthenaLootPackages_Client, AthenaRangedWeapons, AthenaGameData and AthenaResourceRates), then copies the tables of
     // the PlaylistDataTables entry whose PlaylistId is CurrentPlaylistId over them (UDataTable::CreateTableFromOtherTable,
-    // "Patched Loot Tier with %s"). Builds before 1.11 have no playlist tables.
-    const uintptr_t Apply = FunctionOf(L"Restoring data tables to defaults");
+    // "Patched Loot Tier with %s"). Builds before 1.11 have no playlist tables. 3.5's (3.5.1 0x9DC890) restores nothing:
+    // it logs that it applies the game state's CurrentPlaylistData, then copies that playlist's tables over the defaults.
+    uintptr_t Apply = FunctionOf(L"Restoring data tables to defaults");
+    if (!Apply)
+    {
+        Apply = FunctionOf(L"PLAYLIST: Preparing to apply Data Tables and Curves in AFortGameModeAthena::ApplyPlaylistDataTables(), PlaylistName is %s (Server Only)");
+    }
     if (!Apply)
     {
         Log::Info(L"Finder: no AFortGameModeAthena::ApplyPlaylistDataTables on this build, the loot tables stay the defaults");

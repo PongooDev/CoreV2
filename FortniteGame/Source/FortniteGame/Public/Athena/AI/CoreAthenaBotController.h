@@ -36,6 +36,35 @@ class FCoreAthenaBotManager;
 // The builds this serves have none of 8.30's tuning, so the numbers here are Core's own 🟡. From 8.30 Core will use the
 // native system instead (the game's own bot manager, controller and behaviour trees, which ship in the PC paks).
 
+// How a bot builds (Chapter 2's player bots), by skill level: 21.40's UFortAthenaAIBotBuildingDigestedSkillSet (the
+// defensive builds' timing and WeightedBuildingLists) and its UFortAthenaAIPerk_Bunker (FFortAIRuntimePerkInfo_Bunker: the
+// 1x1 box while healing or under fire from an unseen enemy). Epic's are FScalableFloats over the skill level (Digest);
+// their values ship only in later builds' bot data, so these are Core's 🟡, filled by FCoreAthenaBotManager::SkillsForLevel.
+struct FCoreAthenaBotBuildingSkills
+{
+    // UFortAthenaAIBotBuildingDigestedSkillSet.
+    float DefensiveBuildingDelayBetweenBuilds = 15.0f;
+    float DefensiveBuildingDelayDeviationBetweenBuilds = 5.0f;
+    float DelayBetweenBuildPieces = 0.35f;
+    // Core's: the share of hits in the open that the bot answers with a build (Epic's evaluator only has its cooldown).
+    float DefensiveBuildingOdds = 0.33f;
+    // FAthenaFortAIBotWeightedBuildingList::Weight of the two lists Core's bots build from when shot: a wall towards the
+    // shooter, and that wall with a ramp up to it behind (the bunker's forward ramp).
+    float WallListWeight = 0.7f;
+    float WallAndRampListWeight = 0.3f;
+    // UFortAthenaAIPerk_Bunker (FFortAIRuntimePerkInfo's OddsToActivate and CooldownDuration for the box while healing).
+    float BunkerOddsToActivate = 0.4f;
+    float BunkerCooldownDuration = 45.0f;
+    float OddsToBeUsedAgainstUnknownThreat = 0.2f;
+    float OddsToUseRoofBuilding = 0.5f;
+    float OddsToBuildForwardRamp = 0.35f;
+    float InitialBuildDelay = 0.4f;
+    float SamePieceBuildDelay = 0.3f;
+    float SamePieceBuildDelayRandomDeviation = 0.1f;
+    float DifferentPieceBuildDelay = 0.45f;
+    float DifferentPieceBuildDelayRandomDeviation = 0.15f;
+};
+
 // 8.30's FAIBotSkills (0x14 bytes: aim timing and tracking), which a bot's controller blueprint sets; Core fills it from
 // the admin panel's bot level (FCoreAthenaBotManager::SkillsForLevel), with the sight range and aim error 21.40
 // keeps in its Perception and Aiming skill sets.
@@ -56,6 +85,50 @@ struct FCoreAIBotSkills
     float MaxTrackingDistanceNearError = 23.0f;
     float MaxTrackingDistanceFarError = 33.0f;
     float MaxTrackingHeightOffsetError = 0.6f;
+    FCoreAthenaBotBuildingSkills Building;
+};
+
+// 21.40's EOrientedConstructionBuildingType (its values aren't in the PDB; Epic's has walls along X and Y, floors and
+// ramps), as Core's bots use it: a piece in a grid cell, oriented by the build's forward (towards the threat).
+enum class ECoreOrientedConstructionBuildingType : uint8_t
+{
+    WallForward,
+    WallRight,
+    WallBack,
+    WallLeft,
+    // A ramp rising towards the forward edge (BR's ramp, PBWA_*1_StairW).
+    RampForward,
+    // A cone roof on the cell (BR's cone, PBWA_*1_RoofC), a level up.
+    Roof,
+};
+
+// 21.40's FFortAthenaAIBotBuildDescriptor: a piece and its grid cell (Location), here relative to the build's origin cell
+// (cells forward, cells to the right, levels up).
+struct FCoreAthenaBotBuildDescriptor
+{
+    int32_t Location[3] = {};
+    ECoreOrientedConstructionBuildingType BuildingType = ECoreOrientedConstructionBuildingType::WallForward;
+};
+
+// 21.40's FFortAthenaAIBotBuildingQueue (UFortAthenaAIBotBuildingComponent::BuildQueue): the pieces to build one after
+// another, the delays between them, and Core's frame for them (the origin cell on the 512 uu building grid, the ground
+// there, the forward axis, the material).
+struct FCoreAthenaBotBuildingQueue
+{
+    std::vector<FCoreAthenaBotBuildDescriptor> Descriptors;
+    float InitialBuildDelay = 0.0f;
+    float SamePieceBuildDelay = 0.0f;
+    float SamePieceBuildDelayRandomDeviation = 0.0f;
+    float DifferentPieceBuildDelay = 0.0f;
+    float DifferentPieceBuildDelayRandomDeviation = 0.0f;
+    int32_t CellX = 0;
+    int32_t CellY = 0;
+    float BaseZ = 0.0f;
+    // 0 +X, 1 +Y, 2 -X, 3 -Y.
+    int32_t Forward = 0;
+    // 0 wood, 1 stone, 2 metal.
+    int32_t MaterialKind = 0;
+    const wchar_t* Reason = L"";
 };
 
 // 8.30's EAlertLevel (the controller's CurrentAlertLevel, OnPerceptionSensed's state machine).
@@ -403,9 +476,30 @@ private:
     bool FollowMapMarker(float Now);
     // TryToUnstuck: a building the bot can break right in front of it, on the way to its goal.
     bool FindBuildingInTheWay(float Now);
-    // 21.40's UFortAthenaAIBotEvaluator_DefensiveBuilding, simply: hit by Attacker out in the open, sometimes a wall
-    // from its materials between them (not on the warmup island).
+    // Chapter 2's bot building (21.40), for builds before 8.30. Nothing is built on the warmup island, by a bot that is
+    // down or not on its feet, or on 1.1-1.8 (their own building RPC bodies leave the initialize indices unresolved).
+    // UFortAthenaAIBotEvaluator_DefensiveBuilding: hit by an enemy it can see, out in the open, now and then one of the
+    // skill set's WeightedBuildingLists towards it (a wall, or a wall with a ramp up to it), then
+    // DefensiveBuildingDelayBetweenBuilds before the next.
     bool DefensiveBuilding(float Now, AFortPawn* Attacker);
+    // UFortAthenaAIBotEvaluator_Bunker (UFortAthenaAIPerk_Bunker): a 1x1 box of walls around the bot as it heals, or when
+    // an enemy it hadn't seen shoots it (OddsToBeUsedAgainstUnknownThreat), with a cone roof (OddsToUseRoofBuilding) and a
+    // ramp inside towards the threat (OddsToBuildForwardRamp). Threat may be null (the way the bot faces then).
+    bool Bunker(float Now, AFortPawn* Threat, bool bUnknownThreat);
+    // Starts a build: the origin cell is the bot's, forward the grid axis nearest the way to Towards. Pieces the bot can't
+    // afford or whose place isn't clear are left out; false when none is left.
+    bool StartBuildingQueue(float Now, const FVector& Towards, const std::vector<FCoreAthenaBotBuildDescriptor>& Descriptors, float InitialDelay, float SameDelay, float SameDeviation,
+        float DifferentDelay, float DifferentDeviation, const wchar_t* Reason);
+    // UFortAthenaAIBotBuildingComponent's tick: the next piece once its delay is up. True while a build is under way (the
+    // bot stands and holds fire: UFortAthenaBTTask_Build's BlockWeaponActions).
+    bool TickBuildingQueue(float Now);
+    void ClearBuildingQueue();
+    // Where a piece goes (the actor's origin and yaw) and whether its place is clear of the world and of anyone's pieces.
+    bool GetPiecePlacement(const FCoreAthenaBotBuildDescriptor& Descriptor, FVector& OutLocation, float& OutYaw) const;
+    bool IsPiecePlaceClear(const FCoreAthenaBotBuildDescriptor& Descriptor) const;
+    // A player piece of the queue's material spawned and initialized as ServerCreateBuildingActor's body does after its
+    // checks, with the bot's team; its materials paid.
+    bool BuildPiece(const FCoreAthenaBotBuildDescriptor& Descriptor);
     void TakePickup(AFortPickup* Pickup);
     // An item dropped where the bot stands, as a player drops it (a weapon with its magazine).
     void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo);
@@ -480,9 +574,19 @@ private:
     // Set when the building's resource spawn credited the bot during a swing.
     bool bHarvestCredited = false;
     int32_t Materials[3] = {};
-    // DefensiveBuilding's CanBuildNextTimeDelay: no wall before this time.
+    // DefensiveBuilding's CanBuildNextTimeDelay and the bunker perk's cooldown: no build of that kind before these times.
     float NextDefensiveBuildTime = 0.0f;
-    int32_t WallsBuilt = 0;
+    float NextBunkerTime = 0.0f;
+    // UFortAthenaAIBotBuildingComponent: the build under way (BuildQueue), the next piece's index, when the last piece went
+    // up (LastBuildTime) and the wait before the next (DelayBeforeNextBuildPiece).
+    FCoreAthenaBotBuildingQueue BuildQueue;
+    size_t NextBuildPiece = 0;
+    float LastBuildTime = 0.0f;
+    float DelayBeforeNextBuildPiece = 0.0f;
+    // The bunker's HideEndTime: the bot stays in its box until then (unless the storm comes).
+    float HideEndTime = 0.0f;
+    int32_t PiecesBuilt = 0;
+    int32_t BuildsStarted = 0;
     int32_t Swings = 0;
     int32_t BreakThroughs = 0;
     // Squads: who downed the bot, when, its bleed, and the teammate it is reviving.

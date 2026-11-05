@@ -269,6 +269,25 @@ FCoreAIBotSkills FCoreAthenaBotManager::SkillsForLevel(int32_t Level)
     Skills.MaxTrackingOffsetError = FMath::Lerp(70.0f, 20.0f, T);
     Skills.MaxTrackingDistanceNearError = FMath::Lerp(35.0f, 8.0f, T);
     Skills.MaxTrackingDistanceFarError = FMath::Lerp(50.0f, 12.0f, T);
+    // Building (Chapter 2's bots, 21.40's building skill set and bunker perk, scaled by level as their FScalableFloats
+    // are): a better bot builds more often, faster, and boxes up more. Kept occasional: these bots fill matches.
+    FCoreAthenaBotBuildingSkills& Building = Skills.Building;
+    Building.DefensiveBuildingDelayBetweenBuilds = FMath::Lerp(25.0f, 10.0f, T);
+    Building.DefensiveBuildingDelayDeviationBetweenBuilds = FMath::Lerp(6.0f, 3.0f, T);
+    Building.DelayBetweenBuildPieces = FMath::Lerp(0.6f, 0.2f, T);
+    Building.DefensiveBuildingOdds = FMath::Lerp(0.2f, 0.45f, T);
+    Building.WallListWeight = FMath::Lerp(0.85f, 0.5f, T);
+    Building.WallAndRampListWeight = FMath::Lerp(0.15f, 0.5f, T);
+    Building.BunkerOddsToActivate = FMath::Lerp(0.2f, 0.6f, T);
+    Building.BunkerCooldownDuration = FMath::Lerp(60.0f, 30.0f, T);
+    Building.OddsToBeUsedAgainstUnknownThreat = FMath::Lerp(0.1f, 0.35f, T);
+    Building.OddsToUseRoofBuilding = FMath::Lerp(0.3f, 0.7f, T);
+    Building.OddsToBuildForwardRamp = FMath::Lerp(0.2f, 0.5f, T);
+    Building.InitialBuildDelay = FMath::Lerp(0.7f, 0.2f, T);
+    Building.SamePieceBuildDelay = FMath::Lerp(0.5f, 0.15f, T);
+    Building.SamePieceBuildDelayRandomDeviation = FMath::Lerp(0.15f, 0.05f, T);
+    Building.DifferentPieceBuildDelay = FMath::Lerp(0.7f, 0.25f, T);
+    Building.DifferentPieceBuildDelayRandomDeviation = FMath::Lerp(0.2f, 0.08f, T);
     return Skills;
 }
 

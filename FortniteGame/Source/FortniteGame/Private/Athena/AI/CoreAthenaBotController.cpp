@@ -1812,10 +1812,12 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
             {
                 LastAttacker = Attacker;
                 LastAttackerTime = Now;
-                // Shot in the open: sometimes a wall goes up between them (CoreV2 #252).
-                if (!bOutside && !Pawn->bIsDBNO)
+                // Shot in the open: sometimes a wall (and a ramp) goes up towards the shooter (DefensiveBuilding); shot by
+                // an enemy it hadn't seen, sometimes a box (Bunker's unknown threat).
+                AFortPawn* AttackerPawn = reinterpret_cast<AFortPawn*>(Attacker->GetCurrentPawn());
+                if (!bOutside && !Pawn->bIsDBNO && !DefensiveBuilding(Now, AttackerPawn) && AttackerPawn && AttackerPawn != CurrentTarget.Get() && AttackerPawn != LastSeenTarget.Get())
                 {
-                    DefensiveBuilding(Now, reinterpret_cast<AFortPawn*>(Attacker->GetCurrentPawn()));
+                    Bunker(Now, AttackerPawn, true);
                 }
             }
         }
@@ -1901,11 +1903,24 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     {
         CancelHeal();
     }
+    // Nor a build or a box to hide in.
+    if (bHeadingForSafeZone)
+    {
+        ClearBuildingQueue();
+        HideEndTime = 0.0f;
+    }
     // Mid-revive, the bot keeps at it unless an enemy is close or shooting at it.
     if (ReviveDoneAt > 0.0f && (ReviveTarget || RevivePlayer.Get()) && !IsUnderThreat(Now) && ReviveTeammate(Now))
     {
         StopFiring();
         Intent = L"revive";
+    }
+    // Building: it stands and holds fire until the last piece is up.
+    else if (TickBuildingQueue(Now))
+    {
+        StopFiring();
+        SetTargeting(false);
+        Intent = L"build";
     }
     else if (HealingItem || !RangeAttack(Now))
     {
@@ -1934,6 +1949,12 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
         else if (Heal(Now))
         {
             Intent = L"heal";
+        }
+        // In its box after an unseen enemy's shots (Bunker's HideEndTime), with nobody in sight to fight.
+        else if (Now < HideEndTime)
+        {
+            StopMoving();
+            Intent = L"bunker";
         }
         // A squad's player marked the map: the bot goes there (an unarmed one arms itself first).
         else if (bHasMapMarker && !bArmed && Loot(Now, 4000.0f))
@@ -4844,30 +4865,109 @@ bool FCoreAthenaBotController::FindBuildingInTheWay(float Now)
 #endif
 }
 
+namespace
+{
+    // The player building grid: 512 uu cells, 384 uu a level.
+    constexpr float BuildingCellSize = 512.0f;
+    constexpr float BuildingLevelHeight = 384.0f;
+    // What a Battle Royale piece costs a player, whichever the material.
+    constexpr int32_t BuildingPieceCost = 10;
+
+    // A grid axis: 0 +X, 1 +Y, 2 -X, 3 -Y (a quarter turn to the right each, as yaw turns X towards Y).
+    void GridAxis(int32_t Axis, int32_t& OutX, int32_t& OutY)
+    {
+        static constexpr int32_t Axes[4][2] = { { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 } };
+        OutX = Axes[((Axis % 4) + 4) % 4][0];
+        OutY = Axes[((Axis % 4) + 4) % 4][1];
+    }
+
+    bool IsWallPiece(ECoreOrientedConstructionBuildingType Type)
+    {
+        return Type == ECoreOrientedConstructionBuildingType::WallForward || Type == ECoreOrientedConstructionBuildingType::WallRight || Type == ECoreOrientedConstructionBuildingType::WallBack
+            || Type == ECoreOrientedConstructionBuildingType::WallLeft;
+    }
+
+    // The axis a piece faces from its cell, relative to the build's forward.
+    int32_t PieceAxisOffset(ECoreOrientedConstructionBuildingType Type)
+    {
+        switch (Type)
+        {
+        case ECoreOrientedConstructionBuildingType::WallRight:
+            return 1;
+        case ECoreOrientedConstructionBuildingType::WallBack:
+            return 2;
+        case ECoreOrientedConstructionBuildingType::WallLeft:
+            return 3;
+        default:
+            return 0;
+        }
+    }
+
+    const wchar_t* PieceName(ECoreOrientedConstructionBuildingType Type)
+    {
+        return IsWallPiece(Type) ? L"wall" : Type == ECoreOrientedConstructionBuildingType::RampForward ? L"ramp" : L"cone";
+    }
+
+    // The Battle Royale build tool's pieces (its BuildingItemData_Wall, _Stair_W and _RoofS place these): 0 wall, 1 ramp,
+    // 2 cone; by material, 0 wood, 1 stone, 2 metal.
+    UClass* PlayerBuildingClass(int32_t Piece, int32_t MaterialKind)
+    {
+        static const wchar_t* const Paths[3][3] = {
+            {
+                L"/Game/Building/ActorBlueprints/Player/Wood/L1/PBWA_W1_Solid.PBWA_W1_Solid_C",
+                L"/Game/Building/ActorBlueprints/Player/Stone/L1/PBWA_S1_Solid.PBWA_S1_Solid_C",
+                L"/Game/Building/ActorBlueprints/Player/Metal/L1/PBWA_M1_Solid.PBWA_M1_Solid_C",
+            },
+            {
+                L"/Game/Building/ActorBlueprints/Player/Wood/L1/PBWA_W1_StairW.PBWA_W1_StairW_C",
+                L"/Game/Building/ActorBlueprints/Player/Stone/L1/PBWA_S1_StairW.PBWA_S1_StairW_C",
+                L"/Game/Building/ActorBlueprints/Player/Metal/L1/PBWA_M1_StairW.PBWA_M1_StairW_C",
+            },
+            {
+                L"/Game/Building/ActorBlueprints/Player/Wood/L1/PBWA_W1_RoofC.PBWA_W1_RoofC_C",
+                L"/Game/Building/ActorBlueprints/Player/Stone/L1/PBWA_S1_RoofC.PBWA_S1_RoofC_C",
+                L"/Game/Building/ActorBlueprints/Player/Metal/L1/PBWA_M1_RoofC.PBWA_M1_RoofC_C",
+            },
+        };
+        static UClass* Classes[3][3] = {};
+        static bool bLoaded[3][3] = {};
+        if (Piece < 0 || Piece > 2 || MaterialKind < 0 || MaterialKind > 2)
+        {
+            return nullptr;
+        }
+        if (!bLoaded[Piece][MaterialKind])
+        {
+            bLoaded[Piece][MaterialKind] = true;
+            UClass* Class = LoadObject<UClass>(nullptr, Paths[Piece][MaterialKind]);
+            Classes[Piece][MaterialKind] = Class && Class->IsChildOf(ABuildingSMActor::StaticClass()) ? KeepLoaded(Class) : nullptr;
+            if (!Classes[Piece][MaterialKind])
+            {
+                Log::Warning(L"Battle Royale bots: no building class {}", Paths[Piece][MaterialKind]);
+            }
+        }
+        return Classes[Piece][MaterialKind];
+    }
+}
+
 bool FCoreAthenaBotController::DefensiveBuilding(float Now, AFortPawn* Attacker)
 {
 #if WITH_SERVER_CODE
-    // 21.40's UFortAthenaAIBotEvaluator_DefensiveBuilding (CanBuildNextTimeDelay between builds), Core's simple version
-    // (CoreV2 #252): shot out in the open, the bot sometimes puts a wall between itself and the shooter, on the edge of
-    // its own grid cell that faces them, from the material it has the most of (10 a piece, as a player pays). Not on the
-    // warmup island (nobody can be hurt there), nor where the edge isn't clear (a house's wall, another piece).
-    //
-    // A player's piece goes through AFortPlayerController::ServerCreateBuildingActor, whose checks (CanAffordTo...,
-    // CanPlaceBuildableClassInStructuralGrid) are the player controller's own virtuals; a bot's controller is an
-    // AAIController. So the bot's wall is spawned and initialized the way that body does it after its checks
-    // (InitializeBuildingActor, PostInitializeSpawnedBuildingActor), with the bot's team, and the navmesh around it is
-    // rebuilt.
+    // 21.40's UFortAthenaAIBotEvaluator_DefensiveBuilding (CanBuildNextTimeDelay, the building skill set's
+    // DefensiveBuildingDelayBetweenBuilds and WeightedBuildingLists): shot out in the open by an enemy it sees, the bot
+    // now and then builds towards them, on the edge of its own grid cell that faces them: a wall, or (a better bot more
+    // often) the wall with a ramp up to it behind, as Chapter 2's bots do. Not on the warmup island (nobody can be hurt
+    // there), nor where the place isn't clear (a house's wall, anyone's piece).
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    UWorld* World = Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr;
-    if (!Pawn || !Attacker || !World || Now < NextDefensiveBuildTime || State != ECoreAthenaBotState::Landed || !Pawn->bCanBeDamaged || Pawn->bIsDBNO
+    if (!Pawn || !Attacker || Now < NextDefensiveBuildTime || !BuildQueue.Descriptors.empty() || State != ECoreAthenaBotState::Landed || !Pawn->bCanBeDamaged || Pawn->bIsDBNO
         || Natives::ABuildingActor_InitializeBuildingActorIndex < 0 || Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex < 0)
     {
         return false;
     }
-    // Occasionally: a third of the hits that find it in the open, at most one wall in 10-20 s.
+    const FCoreAthenaBotBuildingSkills& Skills = AIBotSkills.Building;
+    // Occasionally: a share of the hits that find it in the open, then the skill set's delay before the next build.
     NextDefensiveBuildTime = Now + 1.0f;
     UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
-    if (!Movement || Movement->MovementMode != MoveWalking || FMath::FRand() > 0.33f)
+    if (!Movement || Movement->MovementMode != MoveWalking || FMath::FRand() > Skills.DefensiveBuildingOdds)
     {
         return false;
     }
@@ -4880,102 +4980,399 @@ bool FCoreAthenaBotController::DefensiveBuilding(float Now, AFortPawn* Attacker)
     {
         return false;
     }
-    const int32_t Kind = static_cast<int32_t>(std::max_element(std::begin(Materials), std::end(Materials)) - std::begin(Materials));
-    constexpr int32_t WallCost = 10;
-    if (Materials[Kind] < WallCost)
+    // One of the weighted lists.
+    std::vector<FCoreAthenaBotBuildDescriptor> Descriptors;
+    Descriptors.push_back({ { 0, 0, 0 }, ECoreOrientedConstructionBuildingType::WallForward });
+    const float TotalWeight = Skills.WallListWeight + Skills.WallAndRampListWeight;
+    const bool bWallAndRamp = TotalWeight > 0.0f && FMath::FRand() * TotalWeight >= Skills.WallListWeight;
+    if (bWallAndRamp)
+    {
+        Descriptors.push_back({ { 0, 0, 0 }, ECoreOrientedConstructionBuildingType::RampForward });
+    }
+    if (!StartBuildingQueue(Now, Shooter, Descriptors, 0.0f, Skills.DelayBetweenBuildPieces, 0.0f, Skills.DelayBetweenBuildPieces, 0.0f, bWallAndRamp ? L"a wall and a ramp" : L"a wall"))
     {
         return false;
     }
-    static const wchar_t* const WallPaths[3] = {
-        L"/Game/Building/ActorBlueprints/Player/Wood/L1/PBWA_W1_Solid.PBWA_W1_Solid_C",
-        L"/Game/Building/ActorBlueprints/Player/Stone/L1/PBWA_S1_Solid.PBWA_S1_Solid_C",
-        L"/Game/Building/ActorBlueprints/Player/Metal/L1/PBWA_M1_Solid.PBWA_M1_Solid_C",
-    };
-    static UClass* WallClasses[3] = {};
-    static bool bLoaded[3] = {};
-    if (!bLoaded[Kind])
+    NextDefensiveBuildTime = Now + Skills.DefensiveBuildingDelayBetweenBuilds + RandomRange(-1.0f, 1.0f) * Skills.DefensiveBuildingDelayDeviationBetweenBuilds;
+    static int32_t Logged = 0;
+    if (Logged++ < 12)
     {
-        bLoaded[Kind] = true;
-        WallClasses[Kind] = KeepLoaded(LoadObject<UClass>(nullptr, WallPaths[Kind]));
+        Log::Info(L"Battle Royale bots: {} is shot by {} {:.0f} m away in the open and builds {}", BotName, NameOf(reinterpret_cast<UObject*>(Attacker)), Distance / 100.0f, BuildQueue.Reason);
     }
-    UClass* WallClass = WallClasses[Kind];
-    if (!WallClass || !WallClass->IsChildOf(ABuildingSMActor::StaticClass()))
-    {
-        return false;
-    }
+    return true;
+#else
+    return false;
+#endif
+}
 
-    // The player building grid: 512 uu cells; a wall stands on a cell's edge, its origin the edge's middle, 512 long
-    // along its own X. The edge of the bot's cell on the shooter's side.
-    constexpr float Cell = 512.0f;
-    const FVector Way = Direction2D(Location, Shooter);
-    const float CellX = std::floor(Location.X / Cell);
-    const float CellY = std::floor(Location.Y / Cell);
-    FVector Center;
-    float Yaw = 0.0f;
-    if (std::fabs(Way.X) >= std::fabs(Way.Y))
+bool FCoreAthenaBotController::Bunker(float Now, AFortPawn* Threat, bool bUnknownThreat)
+{
+#if WITH_SERVER_CODE
+    // 21.40's UFortAthenaAIBotEvaluator_Bunker with UFortAthenaAIPerk_Bunker: the bot boxes itself in, four walls on its
+    // cell's edges (the one towards the threat first), a cone on top (OddsToUseRoofBuilding) and a ramp inside up to
+    // the front wall (OddsToBuildForwardRamp), each piece after the perk's delays (InitialBuildDelay, then
+    // SamePieceBuildDelay between walls and DifferentPieceBuildDelay between kinds). It does so as it heals (the
+    // evaluator's HealingStatusKey) and, at OddsToBeUsedAgainstUnknownThreat, when an enemy it hadn't seen shoots it;
+    // the perk's cooldown keeps it to now and then.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Now < NextBunkerTime || !BuildQueue.Descriptors.empty() || State != ECoreAthenaBotState::Landed || !Pawn->bCanBeDamaged || Pawn->bIsDBNO
+        || Natives::ABuildingActor_InitializeBuildingActorIndex < 0 || Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex < 0)
     {
-        Center = FVector((CellX + (Way.X > 0.0f ? 1.0f : 0.0f)) * Cell, (CellY + 0.5f) * Cell, Location.Z);
-        Yaw = 90.0f;
+        return false;
     }
-    else
+    const FCoreAthenaBotBuildingSkills& Skills = AIBotSkills.Building;
+    // A failed roll isn't rolled again for a moment (a burst of hits is one chance, not ten).
+    NextBunkerTime = Now + (bUnknownThreat ? 3.0f : 1.0f);
+    UCharacterMovementComponent* Movement = static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement;
+    if (!Movement || Movement->MovementMode != MoveWalking || FMath::FRand() > (bUnknownThreat ? Skills.OddsToBeUsedAgainstUnknownThreat : Skills.BunkerOddsToActivate))
     {
-        Center = FVector((CellX + 0.5f) * Cell, (CellY + (Way.Y > 0.0f ? 1.0f : 0.0f)) * Cell, Location.Z);
+        return false;
     }
-    // On the ground under the edge, a step from the bot's feet at most.
+    const FVector Location = LocationOf(Pawn);
+    // Towards the threat, the enemy it last saw, or the way it faces.
+    FVector Towards = Location + RotateYaw(FVector(1.0f, 0.0f, 0.0f), FacingYaw) * 500.0f;
+    if (Threat)
+    {
+        Towards = LocationOf(Threat);
+    }
+    else if (LastSeenTarget.Get() && Now - LastTargetInSightTime < 30.0f)
+    {
+        Towards = LastSeenTargetLocation;
+    }
+    std::vector<FCoreAthenaBotBuildDescriptor> Descriptors = {
+        { { 0, 0, 0 }, ECoreOrientedConstructionBuildingType::WallForward },
+        { { 0, 0, 0 }, ECoreOrientedConstructionBuildingType::WallLeft },
+        { { 0, 0, 0 }, ECoreOrientedConstructionBuildingType::WallRight },
+        { { 0, 0, 0 }, ECoreOrientedConstructionBuildingType::WallBack },
+    };
+    const bool bRamp = FMath::FRand() < Skills.OddsToBuildForwardRamp;
+    const bool bRoof = FMath::FRand() < Skills.OddsToUseRoofBuilding;
+    if (bRamp)
+    {
+        Descriptors.push_back({ { 0, 0, 0 }, ECoreOrientedConstructionBuildingType::RampForward });
+    }
+    if (bRoof)
+    {
+        Descriptors.push_back({ { 0, 0, 1 }, ECoreOrientedConstructionBuildingType::Roof });
+    }
+    if (!StartBuildingQueue(Now, Towards, Descriptors, Skills.InitialBuildDelay, Skills.SamePieceBuildDelay, Skills.SamePieceBuildDelayRandomDeviation, Skills.DifferentPieceBuildDelay,
+            Skills.DifferentPieceBuildDelayRandomDeviation, bUnknownThreat ? L"a box (shot by an enemy it hadn't seen)" : L"a box to heal in"))
+    {
+        return false;
+    }
+    // A box is three walls at least (a house's wall may be the fourth).
+    const size_t Walls = static_cast<size_t>(std::count_if(BuildQueue.Descriptors.begin(), BuildQueue.Descriptors.end(), [](const FCoreAthenaBotBuildDescriptor& Descriptor) { return IsWallPiece(Descriptor.BuildingType); }));
+    if (Walls < 3)
+    {
+        ClearBuildingQueue();
+        return false;
+    }
+    NextBunkerTime = Now + Skills.BunkerCooldownDuration;
+    // Under fire it stays in the box a little after the last piece; healing, until the item is used (Heal holds it).
+    if (bUnknownThreat)
+    {
+        HideEndTime = Now + Skills.InitialBuildDelay + static_cast<float>(BuildQueue.Descriptors.size()) * Skills.DifferentPieceBuildDelay + RandomRange(2.0f, 4.0f);
+    }
+    static int32_t Logged = 0;
+    if (Logged++ < 12)
+    {
+        Log::Info(L"Battle Royale bots: {} builds {}: {} walls{}{}", BotName, BuildQueue.Reason, Walls, bRamp ? L", a ramp" : L"", bRoof ? L", a cone" : L"");
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool FCoreAthenaBotController::StartBuildingQueue(float Now, const FVector& Towards, const std::vector<FCoreAthenaBotBuildDescriptor>& Descriptors, float InitialDelay, float SameDelay,
+    float SameDeviation, float DifferentDelay, float DifferentDeviation, const wchar_t* Reason)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Descriptors.empty())
+    {
+        return false;
+    }
+    // The material it has the most of, as a player picks one for a build.
+    const int32_t Kind = static_cast<int32_t>(std::max_element(std::begin(Materials), std::end(Materials)) - std::begin(Materials));
+    if (Materials[Kind] < BuildingPieceCost)
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    // The ground under the bot's feet: every piece of the build stands on it (a box's walls and roof line up).
     FVector Ground;
     UObject* GroundActor = nullptr;
     UObject* GroundComponent = nullptr;
-    if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Center.X, Center.Y, Location.Z + 50.0f), FVector(Center.X, Center.Y, Location.Z - 250.0f), 0, false, true, Ground, GroundActor, GroundComponent)
+    if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Location.X, Location.Y, Location.Z), FVector(Location.X, Location.Y, Location.Z - 300.0f), 0, false, true, Ground, GroundActor, GroundComponent)
         || (GroundActor && Cast<APawn>(GroundActor)))
     {
         return false;
     }
-    Center.Z = Ground.Z;
-    // The edge clear: along it and across it, at knee and head height, nothing (a house's wall, another piece, a tree).
-    const FVector Along = RotateYaw(FVector(1.0f, 0.0f, 0.0f), Yaw) * (Cell * 0.5f - 20.0f);
-    const FVector Across = RotateYaw(FVector(0.0f, 1.0f, 0.0f), Yaw) * 40.0f;
-    for (const float Height : { 50.0f, 300.0f })
+    FCoreAthenaBotBuildingQueue Queue;
+    Queue.CellX = static_cast<int32_t>(std::floor(Location.X / BuildingCellSize));
+    Queue.CellY = static_cast<int32_t>(std::floor(Location.Y / BuildingCellSize));
+    Queue.BaseZ = Ground.Z;
+    const FVector Way = Direction2D(Location, Towards);
+    Queue.Forward = std::fabs(Way.X) >= std::fabs(Way.Y) ? (Way.X >= 0.0f ? 0 : 2) : (Way.Y >= 0.0f ? 1 : 3);
+    Queue.MaterialKind = Kind;
+    Queue.InitialBuildDelay = InitialDelay;
+    Queue.SamePieceBuildDelay = SameDelay;
+    Queue.SamePieceBuildDelayRandomDeviation = SameDeviation;
+    Queue.DifferentPieceBuildDelay = DifferentDelay;
+    Queue.DifferentPieceBuildDelayRandomDeviation = DifferentDeviation;
+    Queue.Reason = Reason;
+    // The pieces whose place is clear now, as many as it can pay for (the placement reads the queue's frame).
+    BuildQueue = std::move(Queue);
+    std::vector<FCoreAthenaBotBuildDescriptor> Clear;
+    for (const FCoreAthenaBotBuildDescriptor& Descriptor : Descriptors)
     {
-        const FVector Middle(Center.X, Center.Y, Center.Z + Height);
-        if (IsBlocked(Pawn, Middle - Along, Middle + Along) || IsBlocked(Pawn, Middle - Across, Middle + Across))
+        if (static_cast<int32_t>(Clear.size() + 1) * BuildingPieceCost > Materials[Kind])
+        {
+            break;
+        }
+        if (IsPiecePlaceClear(Descriptor))
+        {
+            Clear.push_back(Descriptor);
+        }
+    }
+    if (Clear.empty())
+    {
+        BuildQueue = FCoreAthenaBotBuildingQueue();
+        return false;
+    }
+    BuildQueue.Descriptors = std::move(Clear);
+    NextBuildPiece = 0;
+    LastBuildTime = Now;
+    DelayBeforeNextBuildPiece = InitialDelay;
+    ++BuildsStarted;
+    StopMoving();
+    return true;
+#else
+    return false;
+#endif
+}
+
+void FCoreAthenaBotController::ClearBuildingQueue()
+{
+    BuildQueue = FCoreAthenaBotBuildingQueue();
+    NextBuildPiece = 0;
+    DelayBeforeNextBuildPiece = 0.0f;
+}
+
+bool FCoreAthenaBotController::TickBuildingQueue(float Now)
+{
+#if WITH_SERVER_CODE
+    if (BuildQueue.Descriptors.empty())
+    {
+        return false;
+    }
+    // A build ends with the bot down, off its feet, or out of its cell (pushed, or it had to move).
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
+    const FVector Location = LocationOf(Pawn);
+    if (!Pawn || !Movement || State != ECoreAthenaBotState::Landed || Pawn->bIsDBNO || Movement->MovementMode != MoveWalking || NextBuildPiece >= BuildQueue.Descriptors.size()
+        || static_cast<int32_t>(std::floor(Location.X / BuildingCellSize)) != BuildQueue.CellX || static_cast<int32_t>(std::floor(Location.Y / BuildingCellSize)) != BuildQueue.CellY)
+    {
+        ClearBuildingQueue();
+        return false;
+    }
+    StopMoving();
+    int32_t ForwardX = 0;
+    int32_t ForwardY = 0;
+    GridAxis(BuildQueue.Forward, ForwardX, ForwardY);
+    FaceTowards(Location + FVector(static_cast<float>(ForwardX), static_cast<float>(ForwardY), 0.0f) * 500.0f, Now, 0.5f);
+    if (Now < LastBuildTime + DelayBeforeNextBuildPiece)
+    {
+        return true;
+    }
+    const FCoreAthenaBotBuildDescriptor Descriptor = BuildQueue.Descriptors[NextBuildPiece++];
+    // Placed only if its place is still clear (someone may have built there meanwhile).
+    if (!IsPiecePlaceClear(Descriptor) || !BuildPiece(Descriptor))
+    {
+        static int32_t LoggedSkipped = 0;
+        if (LoggedSkipped++ < 12)
+        {
+            Log::Info(L"Battle Royale bots: {} leaves out a {} of {} (its place isn't clear or it can't pay)", BotName, PieceName(Descriptor.BuildingType), BuildQueue.Reason);
+        }
+    }
+    if (NextBuildPiece >= BuildQueue.Descriptors.size() || Materials[BuildQueue.MaterialKind] < BuildingPieceCost)
+    {
+        ClearBuildingQueue();
+        return true;
+    }
+    const bool bSamePiece = IsWallPiece(Descriptor.BuildingType) == IsWallPiece(BuildQueue.Descriptors[NextBuildPiece].BuildingType)
+        && (IsWallPiece(Descriptor.BuildingType) || Descriptor.BuildingType == BuildQueue.Descriptors[NextBuildPiece].BuildingType);
+    LastBuildTime = Now;
+    DelayBeforeNextBuildPiece = bSamePiece ? BuildQueue.SamePieceBuildDelay + RandomRange(-1.0f, 1.0f) * BuildQueue.SamePieceBuildDelayRandomDeviation
+                                           : BuildQueue.DifferentPieceBuildDelay + RandomRange(-1.0f, 1.0f) * BuildQueue.DifferentPieceBuildDelayRandomDeviation;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool FCoreAthenaBotController::GetPiecePlacement(const FCoreAthenaBotBuildDescriptor& Descriptor, FVector& OutLocation, float& OutYaw) const
+{
+    // The piece's cell from the origin cell (forward, right, up).
+    int32_t ForwardX = 0;
+    int32_t ForwardY = 0;
+    int32_t RightX = 0;
+    int32_t RightY = 0;
+    GridAxis(BuildQueue.Forward, ForwardX, ForwardY);
+    GridAxis(BuildQueue.Forward + 1, RightX, RightY);
+    const int32_t CellX = BuildQueue.CellX + ForwardX * Descriptor.Location[0] + RightX * Descriptor.Location[1];
+    const int32_t CellY = BuildQueue.CellY + ForwardY * Descriptor.Location[0] + RightY * Descriptor.Location[1];
+    const float Z = BuildQueue.BaseZ + static_cast<float>(Descriptor.Location[2]) * BuildingLevelHeight;
+    // The pieces' meshes (3.x's PBW_W1_*): a wall spans 512 along its X, its origin the bottom middle; a ramp (StairW) and
+    // a cone (RoofC) span 512 along X and along +Y from their origin, the middle of one edge. The ramp is high at its
+    // origin's edge (392) and meets the ground at the far one.
+    if (Descriptor.BuildingType == ECoreOrientedConstructionBuildingType::Roof)
+    {
+        OutLocation = FVector((static_cast<float>(CellX) + 0.5f) * BuildingCellSize, static_cast<float>(CellY) * BuildingCellSize, Z);
+        OutYaw = 0.0f;
+        return true;
+    }
+    // A wall on the cell's edge on that side; a ramp rising to that edge, its origin there and its +Y back into the cell.
+    int32_t SideX = 0;
+    int32_t SideY = 0;
+    GridAxis(BuildQueue.Forward + PieceAxisOffset(Descriptor.BuildingType), SideX, SideY);
+    OutLocation = FVector((static_cast<float>(CellX) + 0.5f + 0.5f * static_cast<float>(SideX)) * BuildingCellSize, (static_cast<float>(CellY) + 0.5f + 0.5f * static_cast<float>(SideY)) * BuildingCellSize, Z);
+    if (IsWallPiece(Descriptor.BuildingType))
+    {
+        OutYaw = SideX != 0 ? 90.0f : 0.0f;
+    }
+    else
+    {
+        // Yaw turns +Y to (-sin, cos): pointing it back into the cell, against the side.
+        OutYaw = SideX > 0 ? 90.0f : SideX < 0 ? -90.0f : SideY > 0 ? 180.0f : 0.0f;
+    }
+    return true;
+}
+
+bool FCoreAthenaBotController::IsPiecePlaceClear(const FCoreAthenaBotBuildDescriptor& Descriptor) const
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    FVector Origin;
+    float Yaw = 0.0f;
+    if (!Pawn || !GetPiecePlacement(Descriptor, Origin, Yaw))
+    {
+        return false;
+    }
+    // Ground under it, a step below the build's at most (not hanging over a drop): under a wall's middle, under a ramp's
+    // or a cone's cell centre (half a cell along their +Y from the origin's edge).
+    const FVector Probe = IsWallPiece(Descriptor.BuildingType) ? Origin : Origin + RotateYaw(FVector(0.0f, 1.0f, 0.0f), Yaw) * (BuildingCellSize * 0.5f);
+    if (Descriptor.BuildingType != ECoreOrientedConstructionBuildingType::Roof)
+    {
+        FVector Ground;
+        UObject* GroundActor = nullptr;
+        UObject* GroundComponent = nullptr;
+        if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Probe.X, Probe.Y, Origin.Z + 50.0f), FVector(Probe.X, Probe.Y, Origin.Z - 250.0f), 0, false, true, Ground, GroundActor, GroundComponent)
+            || (GroundActor && Cast<APawn>(GroundActor)))
         {
             return false;
         }
     }
+    // Nothing where it goes (a house's wall, a tree, anyone's piece): traces through its body.
+    if (IsWallPiece(Descriptor.BuildingType))
+    {
+        // Along the edge, short of the corners (a neighbouring wall's thickness), and across it, at knee and head height.
+        const FVector Along = RotateYaw(FVector(1.0f, 0.0f, 0.0f), Yaw) * (BuildingCellSize * 0.5f - 40.0f);
+        const FVector Across = RotateYaw(FVector(0.0f, 1.0f, 0.0f), Yaw) * 40.0f;
+        for (const float Height : { 50.0f, 300.0f })
+        {
+            const FVector Middle(Origin.X, Origin.Y, Origin.Z + Height);
+            if (IsBlocked(Pawn, Middle - Along, Middle + Along) || IsBlocked(Pawn, Middle - Across, Middle + Across))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    if (Descriptor.BuildingType == ECoreOrientedConstructionBuildingType::RampForward)
+    {
+        // Above the slope, from the low edge to short of the high one, in the middle and towards both sides.
+        const FVector Back = RotateYaw(FVector(0.0f, 1.0f, 0.0f), Yaw);
+        const FVector Side = RotateYaw(FVector(1.0f, 0.0f, 0.0f), Yaw);
+        for (const float Offset : { -200.0f, 0.0f, 200.0f })
+        {
+            const FVector Low = Origin + Back * (BuildingCellSize - 40.0f) + Side * Offset;
+            const FVector High = Origin + Back * 60.0f + Side * Offset;
+            if (IsBlocked(Pawn, FVector(Low.X, Low.Y, Origin.Z + 60.0f + 376.0f * (40.0f / BuildingCellSize)), FVector(High.X, High.Y, Origin.Z + 60.0f + 376.0f * ((BuildingCellSize - 60.0f) / BuildingCellSize))))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+    // A cone: across its cell's diagonals, above the walls' tops.
+    const float MinX = Probe.X - BuildingCellSize * 0.5f + 40.0f;
+    const float MaxX = Probe.X + BuildingCellSize * 0.5f - 40.0f;
+    const float MinY = Probe.Y - BuildingCellSize * 0.5f + 40.0f;
+    const float MaxY = Probe.Y + BuildingCellSize * 0.5f - 40.0f;
+    const float Height = Origin.Z + 60.0f;
+    return !IsBlocked(Pawn, FVector(MinX, MinY, Height), FVector(MaxX, MaxY, Height)) && !IsBlocked(Pawn, FVector(MinX, MaxY, Height), FVector(MaxX, MinY, Height));
+#else
+    return false;
+#endif
+}
 
+bool FCoreAthenaBotController::BuildPiece(const FCoreAthenaBotBuildDescriptor& Descriptor)
+{
+#if WITH_SERVER_CODE
+    // A player's piece goes through AFortPlayerController::ServerCreateBuildingActor, whose checks (CanAffordTo...,
+    // CanPlaceBuildableClassInStructuralGrid) are the player controller's own virtuals; a bot's controller is an
+    // AAIController. So the bot's piece is spawned and initialized the way that body does it after its checks
+    // (SetMirrored, InitializeBuildingActor, PostInitializeSpawnedBuildingActor), with the bot's team, and the navmesh
+    // around it is rebuilt.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UWorld* World = Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr;
+    const int32_t Kind = BuildQueue.MaterialKind;
+    if (!Pawn || !World || Kind < 0 || Kind > 2 || Materials[Kind] < BuildingPieceCost || Natives::ABuildingActor_InitializeBuildingActorIndex < 0
+        || Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex < 0)
+    {
+        return false;
+    }
+    const int32_t Piece = IsWallPiece(Descriptor.BuildingType) ? 0 : Descriptor.BuildingType == ECoreOrientedConstructionBuildingType::RampForward ? 1 : 2;
+    UClass* PieceClass = PlayerBuildingClass(Piece, Kind);
+    FVector Origin;
+    float Yaw = 0.0f;
+    if (!PieceClass || !GetPiecePlacement(Descriptor, Origin, Yaw))
+    {
+        return false;
+    }
     FActorSpawnParameters SpawnParameters;
     SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     FTransform SpawnTransform;
     SpawnTransform.Rotation = FRotator(0.0f, Yaw, 0.0f).Quaternion();
-    SpawnTransform.SetLocation(Center);
-    ABuildingSMActor* Wall = Cast<ABuildingSMActor>(World->SpawnActor(WallClass, &SpawnTransform, SpawnParameters));
-    if (!Wall)
+    SpawnTransform.SetLocation(Origin);
+    ABuildingSMActor* Building = Cast<ABuildingSMActor>(World->SpawnActor(PieceClass, &SpawnTransform, SpawnParameters));
+    if (!Building)
     {
         return false;
     }
     if (Natives::ABuildingSMActor_SetMirroredIndex >= 0)
     {
-        CallVirtual<void>(Wall, Natives::ABuildingSMActor_SetMirroredIndex, false);
+        CallVirtual<void>(Building, Natives::ABuildingSMActor_SetMirroredIndex, false);
     }
     AFortPlayerStateAthena* PlayerState = GetPlayerState();
     const int32_t WorldPlayerId = PlayerState ? static_cast<int32_t>(PlayerState->WorldPlayerId) : -1;
-    CallVirtual<void>(Wall, Natives::ABuildingActor_InitializeBuildingActorIndex, true, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
-    CallVirtual<void>(Wall, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, true);
+    CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, true, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
+    CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, true);
     // The bot's team, as Battle Royale's ScoreBuildingConstruction gives a player's piece theirs (#120): its team can
     // edit it, and its shots and its teammates' pass it as their own.
-    if (PlayerState && Wall->Team == EFortTeam::GetSpectator())
+    if (PlayerState && Building->Team == EFortTeam::GetSpectator())
     {
-        Wall->Team = PlayerState->TeamIndex;
+        Building->Team = PlayerState->TeamIndex;
     }
-    UAthenaNavSystem::AddDirtyArea(Wall);
-    Materials[Kind] -= WallCost;
-    ++WallsBuilt;
-    NextDefensiveBuildTime = Now + RandomRange(10.0f, 20.0f);
+    UAthenaNavSystem::AddDirtyArea(Building);
+    Materials[Kind] -= BuildingPieceCost;
+    ++PiecesBuilt;
     static int32_t Logged = 0;
-    if (Logged++ < 12)
+    if (Logged++ < 24)
     {
-        Log::Info(L"Battle Royale bots: {} is shot by {} {:.0f} m away in the open and builds {} ({} wood, {} stone, {} metal left)", BotName, NameOf(reinterpret_cast<UObject*>(Attacker)), Distance / 100.0f,
-            NameOf(reinterpret_cast<UObject*>(Wall)), Materials[0], Materials[1], Materials[2]);
+        Log::Info(L"Battle Royale bots: {} builds {} ({}, {} wood, {} stone, {} metal left)", BotName, NameOf(reinterpret_cast<UObject*>(Building)), BuildQueue.Reason, Materials[0], Materials[1], Materials[2]);
     }
     return true;
 #else
@@ -5993,6 +6390,8 @@ bool FCoreAthenaBotController::Heal(float Now)
         }
     }
     Log::Info(L"Battle Royale bots: {} starts using {} ({:.0f} health, {:.0f} shield, {:.1f} s)", BotName, NameOf(Best), Health, Shield, HealUntil - Now);
+    // Sometimes it boxes itself in to heal (21.40's UFortAthenaAIBotEvaluator_Bunker, its HealingStatusKey).
+    Bunker(Now, nullptr, false);
     return true;
 #else
     return false;

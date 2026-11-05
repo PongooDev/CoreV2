@@ -65,12 +65,29 @@ public:
     void RemoveSpectatingPlayer(AFortPlayerStateAthena* Spectator);
 };
 
+// What a squad's HUD shows over a player (from 3.5): a Squad Comms callout (NeedAmmoHeavy to NeedWeapon), or None.
+class ETeamMemberState
+{
+    DefineUnrealEnum(ETeamMemberState, FortniteGame)
+    DefineUEnumValue(None)
+};
+
 // Battle Royale's player state (from 1.7.2).
 class AFortPlayerStateAthena : public AFortPlayerStateZone
 {
     DefineUnrealClass(AFortPlayerStateAthena, FortniteGame)
 
 public:
+    // 3.5: the player's Squad Comms callout, replicated to everyone. OnRep_ReplicatedTeamMemberState (3.5.1 0xA66160)
+    // copies a callout to TeamMemberState, starts the timer that ends it (0xA70710: the server sets the replicated one
+    // back to None, a client its TeamMemberState) and tells the HUD (its team member state delegate).
+    DefineUProperty(uint8_t, ReplicatedTeamMemberState)
+    DefineUFunction(OnRep_ReplicatedTeamMemberState)
+    static bool HasTeamMemberState() { return Member_ReplicatedTeamMemberState.IsAvailable(); }
+    // 21.40's AFortPlayerStateAthena::SetTeamMemberState, server only: the callout, replicated, its OnRep run here for
+    // the timer that ends it.
+    void SetTeamMemberState(uint8_t NewState);
+
     // The player's team, copied from its AFortTeamInfo when it joins one (0x44AB80).
     DefineUProperty(EFortTeam, TeamIndex)
     // Set when the player's team is out of the match (the teams left, for each player of it: 0x44A870) or has won (1).

@@ -65,6 +65,33 @@ struct FFortAthenaLoadout
     static bool HasBackpack() { return Member_Backpack.IsAvailable(); }
 };
 
+// One callout of a Squad Comms bank (from 3.5): its texts, icon, and the ETeamMemberState it shows the squad.
+struct FAthenaQuickChatLeafEntry
+{
+    DefineUnrealStruct(FAthenaQuickChatLeafEntry, FortniteGame)
+    DefineUProperty(uint8_t, TeamCommType)
+};
+
+// The Squad Comms wheel's callouts (from 3.3; AthenaQuickChatBank assets, the UI's SquadChatOptionBanks).
+class UAthenaQuickChatBank : public UObject
+{
+    DefineUnrealClass(UAthenaQuickChatBank, FortniteGame)
+
+public:
+    DefineUStructArrayProperty(FAthenaQuickChatLeafEntry, ChatOptions)
+};
+
+// The callout a player picked on the wheel (from 3.3): its bank and its index in the bank's ChatOptions, with what it
+// is about (the item or material it asks for).
+struct FAthenaQuickChatActiveEntry
+{
+    DefineUnrealStruct(FAthenaQuickChatActiveEntry, FortniteGame)
+    DefineUProperty(UAthenaQuickChatBank*, Bank)
+    DefineUProperty(UObject*, ContextObject)
+    DefineUProperty(int16_t, ContextValue)
+    DefineUProperty(int8_t, Index)
+};
+
 // Battle Royale's player controller (from 1.7.2; Athena_PlayerController_C).
 class AFortPlayerControllerAthena : public AFortPlayerController
 {
@@ -137,6 +164,15 @@ public:
     // game's death camera (#125).
     void PlaceAtDeathLocation(AFortPawn* DeadPawn);
 
+    // Squad Comms (from 3.3): the wheel sends ServerPlaySquadQuickChatMessage (its exec, 3.5.1 0x1192190, calls
+    // _Validate, slot 0x364, then _Implementation, slot 0x365); ClientReceiveSquadQuickChatMessage is the squad's copy.
+    DefineUFunction(ServerPlaySquadQuickChatMessage)
+    DefineUFunction(ClientReceiveSquadQuickChatMessage)
+    void ServerPlaySquadQuickChatMessage_Implementation(const FAthenaQuickChatActiveEntry& ChatEntry);
+    void ClientReceiveSquadQuickChatMessage(const FAthenaQuickChatActiveEntry& ChatEntry, AFortPlayerController* SenderPC);
+    // Where the build strips ServerPlaySquadQuickChatMessage_Implementation (3.5.1: its body only destroys SenderID).
+    static void HookQuickChatVTables();
+
     static void HookCallSites();
     // Restores the pawn-death handler (OnPawnDied) and the Athena part of PrepareDeathReport where the build strips them
     // (1.9.1).
@@ -145,6 +181,10 @@ public:
     static ptrdiff_t PlayerDeathReportOffset() { return Member_PlayerDeathReport.GetOffsetChecked(); }
 
 private:
+    // _Implementation's parameters by value: the caller's copies, which the callee destroys (the original's body does).
+    static void ServerPlaySquadQuickChatMessage_ImplementationHK(AFortPlayerControllerAthena* This, FAthenaQuickChatActiveEntry* ChatEntry, void* SenderID);
+    static inline void (*ServerPlaySquadQuickChatMessage_ImplementationOG)(AFortPlayerControllerAthena* This, FAthenaQuickChatActiveEntry* ChatEntry, void* SenderID) = nullptr;
+
     static void PawnDiedInventoryDropCall(AFortPlayerController* Controller, void* Unused, const FGameplayTagContainer* DamageTags, AFortPawn* DeadPawn, bool* bOutDroppedBackpack);
 
     // FortPlayerControllerAthenaDeath.cpp: 1.9's AFortPlayerControllerAthena::OnPawnDied (0x42DB20), which 1.9.1 strips.

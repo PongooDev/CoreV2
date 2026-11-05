@@ -241,6 +241,24 @@ AFortPlayerPawn* AFortPlayerState::GetCurrentPawn()
     return Function && Params.Call(this) ? Params.Take<AFortPlayerPawn*>(L"ReturnValue") : nullptr;
 }
 
+void AFortPlayerStateAthena::SetTeamMemberState(uint8_t NewState)
+{
+#if WITH_SERVER_CODE
+    UFunction* OnRep = FindStaticFunction_OnRep_ReplicatedTeamMemberState();
+    if (!HasTeamMemberState() || Role != ROLE_Authority)
+    {
+        return;
+    }
+    ReplicatedTeamMemberState = NewState;
+    if (OnRep)
+    {
+        Reflection::FParams Params(OnRep);
+        Params.Call(this);
+    }
+    ForceNetUpdate();
+#endif
+}
+
 void AFortPlayerStateAthena::ClientReportKill(AFortPlayerStateAthena* KilledPlayer)
 {
     UFunction* Function = FindStaticFunction_ClientReportKill();

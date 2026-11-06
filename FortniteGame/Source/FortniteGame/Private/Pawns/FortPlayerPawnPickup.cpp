@@ -376,7 +376,18 @@ void AFortPlayerPawnAthena::HookNatives()
     // nothing up (#266). The pickup handling starts with the same check.
     const uintptr_t NativeEnd = Native >= Finder::TextBegin() && Native < Finder::TextEnd() ? Finder::FunctionEnd(Native) : 0;
     const std::vector<std::pair<uintptr_t, uintptr_t>> NativeCalls = NativeEnd > Native ? Finder::DirectCalls(Native, NativeEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
-    const bool bGatedByStub = !NativeCalls.empty() && IsFalseStub(NativeCalls.front().second);
+    uintptr_t StrippedCheck = !NativeCalls.empty() && IsFalseStub(NativeCalls.front().second) ? NativeCalls.front().second : 0;
+    // 4.2 moved the check into the pickup handling (0xA9A9A0, the overlap's last call, 0xA857C0), which asks it third
+    // (0x127E100, a false stub): stubbed, the handling wants the local player's settings, which a server has none of,
+    // so nothing is picked up. 4.1's handling (0xAB0E10) asks it fifth, after the overlap had already been refused.
+    const uintptr_t Handling = !StrippedCheck && !NativeCalls.empty() ? NativeCalls.back().second : 0;
+    const uintptr_t HandlingEnd = Handling >= Finder::TextBegin() && Handling < Finder::TextEnd() && Finder::FunctionStart(Handling) == Handling ? Finder::FunctionEnd(Handling) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> HandlingCalls = HandlingEnd > Handling ? Finder::DirectCalls(Handling, HandlingEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    for (size_t Index = 0; Index < HandlingCalls.size() && Index < 3 && !StrippedCheck; ++Index)
+    {
+        StrippedCheck = IsFalseStub(HandlingCalls[Index].second) ? HandlingCalls[Index].second : 0;
+    }
+    const bool bGatedByStub = StrippedCheck != 0;
     if (!Finder::IsStubFunction(Native) && !bGatedByStub)
     {
         Log::Info(L"Finder: AFortPlayerPawnAthena::OnCapsuleBeginOverlap is native in this build (+0x{:X})", Native - Finder::ImageBase());
@@ -384,8 +395,9 @@ void AFortPlayerPawnAthena::HookNatives()
     }
     if (bGatedByStub)
     {
-        Log::Info(L"Finder: AFortPlayerPawnAthena::OnCapsuleBeginOverlap (+0x{:X}) first calls a stripped check (+0x{:X}), so it never picks anything up",
-            Native - Finder::ImageBase(), NativeCalls.front().second - Finder::ImageBase());
+        Log::Info(L"Finder: AFortPlayerPawnAthena::OnCapsuleBeginOverlap (+0x{:X}) {} a stripped check (+0x{:X}), so it never picks anything up",
+            Native - Finder::ImageBase(), Handling ? std::format(L"hands the pickup to +0x{:X}, which asks", Handling - Finder::ImageBase()) : std::wstring(L"first calls"),
+            StrippedCheck - Finder::ImageBase());
     }
 
     UProperty* SweepResultProperty = OverlapFunction->FindPropertyByName(FName(L"SweepResult", FNAME_Find));

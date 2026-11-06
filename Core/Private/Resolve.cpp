@@ -9352,14 +9352,13 @@ bool Finder::ResolveBuildingLootLive()
     // (21.40's name), the first of the two new virtuals. The container's PostUpdate (3.2 0xA364A0) calls the stripped
     // ABuildingSMActor::PostUpdate, keeps the random list's next value in SavedReservedRandomValueResult, then tail-jumps
     // to InitializeTierGroupData(State, false) (jmp [rax+0xD38], slot 0x1A7), which is stripped to a GetWorld tail. Up to
-    // 3.1 the override only calls the stripped parent, then GetWorld.
+    // 3.1 the override only calls the stripped parent, then GetWorld. 4.1 (0xAD85D0) calls InitializeTierGroupData
+    // (call [rax+0xD58], slot 0x1AB) and goes on to GetWorld (slot 0x28) for its Athena check, so the slot is the first
+    // virtual call's, not the last's (#288).
     const uintptr_t ContainerPostUpdate = PostUpdateIndex >= 0 ? VTableEntry(ContainerVTable, PostUpdateIndex) : 0;
     const uintptr_t ContainerPostUpdateEnd = ContainerPostUpdate ? Finder::FunctionEnd(ContainerPostUpdate) : 0;
-    int32_t InitializeTierGroupDataIndex = -1;
-    for (uintptr_t Site = ContainerPostUpdateEnd ? FindVirtualCall(ContainerPostUpdate, ContainerPostUpdateEnd) : 0; Site; Site = FindVirtualCall(Site + 1, ContainerPostUpdateEnd))
-    {
-        InitializeTierGroupDataIndex = VirtualSlot(Site);
-    }
+    const uintptr_t InitializeTierGroupDataCall = ContainerPostUpdateEnd ? FindVirtualCall(ContainerPostUpdate, ContainerPostUpdateEnd) : 0;
+    int32_t InitializeTierGroupDataIndex = InitializeTierGroupDataCall ? VirtualSlot(InitializeTierGroupDataCall) : -1;
     if (SpawnLootIndex < 0 || HideContainerIndex != SpawnLootIndex + 5 || InitializeTierGroupDataIndex != SpawnLootIndex + 3)
     {
         InitializeTierGroupDataIndex = -1;

@@ -4734,8 +4734,21 @@ bool Finder::ResolvePickupGiveLive()
             // rdx; jz; mov r8b, 1; xor edx, edx; jmp AActor::Destroy; ret", with the inventory part stripped.
             const int32_t Slot = VirtualCalls >= 2 ? VirtualSlot(LastVirtualCall) : -1;
             const uintptr_t Give = VTableEntry(PickupVTable, Slot);
+            // 4.1 (0xD821A0) reports the pickup to the Athena game state between the checks and Destroy, so it keeps
+            // rbx for this: "push rbx; sub rsp, 20h; cmp byte [rcx+Role], 3; mov rbx, rcx; jnz; test rdx, rdx; jz;
+            // ...; call; mov r8b, 1; xor edx, edx; mov rcx, rbx; add rsp, 20h; pop rbx; jmp AActor::Destroy".
+            const auto IsReportingGive = [](uintptr_t Function)
+            {
+                if (FindInstruction(Function, Function + 23, { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x80, 0xB9, -1, -1, 0x00, 0x00, 0x03, 0x48, 0x8B, 0xD9, 0x75, -1, 0x48, 0x85, 0xD2, 0x74, -1 }) != Function)
+                {
+                    return false;
+                }
+                const uintptr_t Destroy = FindInstruction(Function + 23, Function + 0x50, { 0x41, 0xB0, 0x01, 0x33, 0xD2, 0x48, 0x8B, 0xCB, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xE9 });
+                return Destroy && FindRawCall(Function + 23, Destroy) != 0;
+            };
             if (Give && (reinterpret_cast<void*>(Give) == Natives::SharedEmptyFunction
-                || FindInstruction(Give, Give + 25, { 0x80, 0xB9, -1, -1, 0x00, 0x00, 0x03, 0x75, -1, 0x48, 0x85, 0xD2, 0x74, -1, 0x41, 0xB0, 0x01, 0x33, 0xD2, 0xE9, -1, -1, -1, -1, 0xC3 }) == Give))
+                || FindInstruction(Give, Give + 25, { 0x80, 0xB9, -1, -1, 0x00, 0x00, 0x03, 0x75, -1, 0x48, 0x85, 0xD2, 0x74, -1, 0x41, 0xB0, 0x01, 0x33, 0xD2, 0xE9, -1, -1, -1, -1, 0xC3 }) == Give
+                || IsReportingGive(Give)))
             {
                 GiveIndex = Slot;
                 Natives::AFortPickup_GivePickupToStripped = reinterpret_cast<void*>(Give);

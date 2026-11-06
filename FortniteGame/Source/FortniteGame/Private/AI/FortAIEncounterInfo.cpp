@@ -117,6 +117,16 @@ void UFortAIEncounterInfo::GetAIPawnLootDropData(const FGameplayTagContainer& AI
 
     OutLootDropData.WorldItemTierGroup = BaseRow->WorldItemLootTierGroup;
     OutLootDropData.AccountItemTierGroup = BaseRow->AccountItemLootTierGroup;
+    if (FFortAIBaseLootDropRow::HasItemDropChance())
+    {
+        // 4.2 (0x8B3AE0): one chance, the modifier's ItemDropChanceMultiplier times the row's ItemDropChance.
+        const float Multiplier = ModifierRow ? static_cast<float>(ModifierRow->ItemDropChanceMultiplier) : 1.0f;
+        const float Chance = FMath::Clamp(Multiplier * static_cast<float>(BaseRow->ItemDropChance), 0.0f, 1.0f);
+        OutLootDropData.bSingleChance = true;
+        OutLootDropData.WorldItemLootDropChance = Chance;
+        OutLootDropData.AccountItemLootDropChance = Chance;
+        return;
+    }
     const float WorldMultiplier = ModifierRow ? static_cast<float>(ModifierRow->WorldItemDropChanceMultiplier) : 1.0f;
     const float AccountMultiplier = ModifierRow ? static_cast<float>(ModifierRow->AccountItemDropChanceMultiplier) : 1.0f;
     OutLootDropData.WorldItemLootDropChance = FMath::Clamp(WorldMultiplier * static_cast<float>(BaseRow->WorldItemDropChance), 0.0f, 1.0f);

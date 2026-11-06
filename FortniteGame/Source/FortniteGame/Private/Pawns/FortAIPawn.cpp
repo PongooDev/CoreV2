@@ -225,6 +225,22 @@ void AFortAIPawn::DropLoot(const FFortAIPawnLootDropData& LootDropData, const FG
         LootDrops.Empty();
         Log::Info(L"AFortAIPawn: {} dropped {} {} item(s) from {} (world level {})", GetName().ToStdString(), Dropped, Kind, TierGroup.ToString().ToStdString(), WorldLevel);
     };
+    if (LootDropData.bSingleChance)
+    {
+        // 4.2's one LootDropChance: a single roll decides whether the pawn drops its loot, then every tier group drops
+        // (a Mini-Boss's row has 1.0 with world, instanced and cache groups). Its WorldItemInstancedLootTierGroup, loot
+        // each player gets a copy of, isn't dropped: a pickup on the server is one item for whoever takes it.
+        if (LootDropData.WorldItemLootDropChance <= 0.0f || FMath::FRand() >= LootDropData.WorldItemLootDropChance)
+        {
+            return;
+        }
+        DropFromTierGroup(LootDropData.WorldItemTierGroup, 1.0f, L"world");
+        if (bEnemyItemCacheDrops)
+        {
+            DropFromTierGroup(LootDropData.AccountItemTierGroup, 1.0f, L"account");
+        }
+        return;
+    }
     DropFromTierGroup(LootDropData.WorldItemTierGroup, LootDropData.WorldItemLootDropChance, L"world");
     if (bEnemyItemCacheDrops)
     {

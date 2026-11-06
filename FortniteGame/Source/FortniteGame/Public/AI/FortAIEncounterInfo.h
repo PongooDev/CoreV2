@@ -68,6 +68,10 @@ public:
     DefineUProperty(float, AccountItemDropChance)
     DefineUProperty(FName, AccountItemLootTierGroup)
     DefineUProperty(FGameplayTagContainer, AITagsContainer)
+    // 4.2: one ItemDropChance for every tier group of the row, in place of the world and account item chances.
+    DefineUProperty(float, ItemDropChance)
+
+    static bool HasItemDropChance() { return Member_ItemDropChance.IsAvailable(); }
 };
 
 // 4.0: a row of /Game/AIDirector/LootDropsModifiers: the chances of the encounter's pawns that have its tags, scaled.
@@ -80,11 +84,16 @@ public:
     DefineUProperty(float, WorldItemDropChanceMultiplier)
     DefineUProperty(float, AccountItemDropChanceMultiplier)
     DefineUProperty(FGameplayTagContainer, AITagsContainer)
+    // 4.2's one multiplier, for its row's ItemDropChance.
+    DefineUProperty(float, ItemDropChanceMultiplier)
 };
 
-// 4.0's FFortAIPawnLootDropData (a pending spawn's LootDropData): what a pawn may drop when it dies.
+// 4.0's FFortAIPawnLootDropData (a pending spawn's LootDropData): what a pawn may drop when it dies. 4.2 has one
+// LootDropChance for all its tier groups (GetAIPawnLootDropData at 0x8B3AE0); bSingleChance marks that shape, with both
+// chances below set to it.
 struct FFortAIPawnLootDropData
 {
+    bool bSingleChance = false;
     float WorldItemLootDropChance = 0.0f;
     FName WorldItemTierGroup;
     float AccountItemLootDropChance = 0.0f;

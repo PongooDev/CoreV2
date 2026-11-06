@@ -16,7 +16,7 @@ struct FNavDataConfig
 
 class ANavigationData : public AActor
 {
-    DefineUnrealClass(ANavigationData, Engine)
+    DefineMovedUnrealClass(ANavigationData, NavigationSystem, Engine)
 
 public:
     DefineUStructProperty(FNavDataConfig, NavDataConfig)

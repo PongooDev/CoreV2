@@ -4,6 +4,7 @@
 #include "Natives.h"
 #include "Log.h"
 #include "ObjectLayout.h"
+#include "Packed.h"
 #include "Engine/EngineBaseTypes.h"
 #include "AI/Navigation/NavigationSystem.h"
 #include "Engine/World.h"
@@ -1217,7 +1218,14 @@ namespace
                 break;
             }
         }
-        if (!Sites::PreInitRegularClient)
+        if (!Sites::PreInitRegularClient && Packed::IsPacked())
+        {
+            // A packed build's PreInit has run, untouched, before Core starts (FEngineLoop::HookAfterPreInit sets the
+            // globals instead), so the block is never patched there. 4.2 keeps the 1 in r13b through PreInit and stores
+            // GIsClient before GIsServer (0x2AD522), a shape the patch doesn't take.
+            Log::Info(L"Finder: PreInit regular-client block not found, unused on a packed build");
+        }
+        else if (!Sites::PreInitRegularClient)
         {
             Log::Error(L"Finder: PreInit regular-client block not found");
             ++MissingCount;
@@ -1272,8 +1280,12 @@ namespace
                 PreInitChecks.push_back(reinterpret_cast<uint8_t*>(At + 3));
             }
         }
-        // 1.10's PreInit guards a second movie player call (0x291B32) as well.
-        RequireChecks(L"FEngineLoop::PreInit", Sites::PreInitDedicatedServerChecks, std::move(PreInitChecks), 5, 6);
+        // 1.10's PreInit guards a second movie player call (0x291B32) as well. Like the regular-client block, these are
+        // only patched on a build that isn't packed; a packed one without the block has no use for them.
+        if (Sites::PreInitRegularClient || !Packed::IsPacked())
+        {
+            RequireChecks(L"FEngineLoop::PreInit", Sites::PreInitDedicatedServerChecks, std::move(PreInitChecks), 5, 6);
+        }
         RequireChecks(L"UEngine::Init", Sites::EngineInitDedicatedServerChecks, CommandletChecks(FunctionOf(L"Initializing Engine...")), 2);
         RequireChecks(L"UGameEngine::Tick", Sites::GameEngineTickDedicatedServerChecks, CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick)), 2);
     }
@@ -2200,7 +2212,15 @@ namespace
         const uintptr_t Close = FunctionOf(L"UChannel::Close: Sending CloseBunch. Dormant: %d, %s");
         const uintptr_t CloseEnd = Finder::FunctionEnd(Close);
         const uintptr_t ClosingTest = Close ? FindInstruction(Close, Close + 0x20, { 0xF6, 0x41, -1, 0x02 }) : 0;
-        RequireOffset(L"UChannel::Bits", Natives::UChannel_Bits, ClosingTest ? Byte(ClosingTest + 2) : 0);
+        ptrdiff_t ChannelBits = ClosingTest ? Byte(ClosingTest + 2) : 0;
+        if (Close && !ClosingTest)
+        {
+            // 4.2 (0x2054D20) loads the bits once for two tests: mov ecx, [rcx+30h]; test cl, 2; ...; bt ecx, 9.
+            const uintptr_t Load = FindInstruction(Close, Close + 0x20, { 0x8B, -1, -1, 0xF6, -1, 0x02 });
+            const uint8_t Register = Load ? (Byte(Load + 1) >> 3) & 0x07 : 0;
+            ChannelBits = Load && (Byte(Load + 1) & 0xC7) == 0x41 && Byte(Load + 4) == (0xC0 | Register) ? Byte(Load + 2) : 0;
+        }
+        RequireOffset(L"UChannel::Bits", Natives::UChannel_Bits, ChannelBits);
 
         ptrdiff_t State = 0;
         for (uintptr_t Load = CloseEnd ? FindInstruction(Close, CloseEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x83, -1, 0x02, 0x83, -1, 0x01 }) : 0; Load && !State; Load = FindInstruction(Load + 1, CloseEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x83, -1, 0x02, 0x83, -1, 0x01 }))
@@ -2465,9 +2485,15 @@ namespace
                 uintptr_t LoadCall = Load ? Load + 16 : 0;
                 if (!Load)
                 {
-                    // 3.5.1 (0x14C39D7) schedules a stack store between the loads and the call: mov [rsp+X], rsi.
-                    Load = FindInstruction(GetArchetype, GetArchetype + 0x80, { 0x44, 0x8B, -1, 0x08, 0x4C, 0x8B, -1, 0x18, 0x48, 0x8B, -1, 0x20, 0x48, 0x8B, -1, 0x10, 0x48, 0x89, -1, 0x24, -1, 0xE8 });
+                    // 3.5.1 (0x14C39D7) schedules a stack store between the loads and the call: mov [rsp+X], rsi. 4.2
+                    // (0x1519267) stores its fifth argument, bUseUpToDateClass, after that one: mov [rsp+20h], bl.
+                    Load = FindInstruction(GetArchetype, GetArchetype + 0x80, { 0x44, 0x8B, -1, 0x08, 0x4C, 0x8B, -1, 0x18, 0x48, 0x8B, -1, 0x20, 0x48, 0x8B, -1, 0x10, 0x48, 0x89, -1, 0x24, -1 });
                     LoadCall = Load && (Byte(Load + 18) & 0xC7) == 0x44 ? Load + 21 : 0;
+                    if (LoadCall && Byte(LoadCall) == 0x88 && (Byte(LoadCall + 1) & 0xC7) == 0x44 && Byte(LoadCall + 2) == 0x24 && Byte(LoadCall + 3) == 0x20)
+                    {
+                        LoadCall += 4;
+                    }
+                    LoadCall = LoadCall && Byte(LoadCall) == 0xE8 ? LoadCall : 0;
                 }
                 // One [base + disp8] for all four loads, the base not rsp.
                 const auto Base = [&](uintptr_t Modrm) { return Byte(Modrm) & 0xC7; };
@@ -2998,12 +3024,15 @@ namespace
             if ((Byte(Test + 1) & 0xF8) == 0x80 && (Byte(Test + 1) & 0x07) != 0x04 && Byte(Test + 10) == Byte(Test + 1) && Byte(Test + 16) == 0x75 && bSingleBits
                 && *reinterpret_cast<const int32_t*>(Test + 11) == *reinterpret_cast<const int32_t*>(Test + 2) + 1)
             {
-                AssociatingLevel = *reinterpret_cast<const int32_t*>(Test + 11);
+                // 4.2 has the actor iterator's test in two functions (0x6D084A, 0x2493AD6): every copy must agree.
+                const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Test + 11);
+                const bool bAgrees = !AssociatingLevelTests || (Offset == AssociatingLevel && Byte(Test + 15) == AssociatingLevelMask);
+                AssociatingLevel = Offset;
                 AssociatingLevelMask = Byte(Test + 15);
-                ++AssociatingLevelTests;
+                AssociatingLevelTests = bAgrees ? AssociatingLevelTests + 1 : -1000;
             }
         }
-        RequireOffset(L"ULevel::bIsAssociatingLevel", Natives::ULevel_bIsAssociatingLevel, AssociatingLevelTests == 1 ? AssociatingLevel : 0);
+        RequireOffset(L"ULevel::bIsAssociatingLevel", Natives::ULevel_bIsAssociatingLevel, AssociatingLevelTests >= 1 ? AssociatingLevel : 0);
         Natives::ULevel_bIsAssociatingLevelMask = Natives::ULevel_bIsAssociatingLevel > 0 ? AssociatingLevelMask : 0;
 
         const uintptr_t AdaptiveRef = OnlyRef(L"net.UseAdaptiveNetUpdateFrequency");
@@ -3267,8 +3296,16 @@ namespace
         Require(L"AFortWorldManager::ServerTickLoadingOrCreatingWorld", Natives::AFortWorldManager_ServerTickLoadingOrCreatingWorld, FunctionOf(L"Skipping loading of level %s, LevelStreaming does not exist"));
 
         Sites::AIDirectorGetCurrentCalls.clear();
+        size_t ExpectedDirectorCalls = 0;
         for (const wchar_t* Text : { L"StartMissionAIEncounter: No AI Director!", L"StartMissionAIEncounterFromGeneratedProfile: No AI Director!", L"Failed to set simulated number of players, no AI Director found.", L"Failed to clear simulated number of players, no AI Director found." })
         {
+            // 4.2 drops the two simulated number of players cheats, lines and all; the mission encounter ones stay.
+            const bool bSimulatedPlayers = std::wcsstr(Text, L"simulated number of players") != nullptr;
+            if (bSimulatedPlayers && Finder::StringRefs(Text).empty())
+            {
+                continue;
+            }
+            ++ExpectedDirectorCalls;
             const uintptr_t Function = FunctionOf(Text);
             const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
             uintptr_t GetCurrentCall = 0;
@@ -3285,10 +3322,10 @@ namespace
                 Sites::AIDirectorGetCurrentCalls.push_back(reinterpret_cast<uint8_t*>(GetCurrentCall));
             }
         }
-        if (Sites::AIDirectorGetCurrentCalls.size() != 4)
+        if (ExpectedDirectorCalls < 2 || Sites::AIDirectorGetCurrentCalls.size() != ExpectedDirectorCalls)
         {
             ++MissingCount;
-            Log::Error(L"Finder: AFortAIDirector::GetCurrent call sites: found {} of 4", Sites::AIDirectorGetCurrentCalls.size());
+            Log::Error(L"Finder: AFortAIDirector::GetCurrent call sites: found {} of {}", Sites::AIDirectorGetCurrentCalls.size(), ExpectedDirectorCalls);
         }
 
         // 3.3 (0xB9D00C) drops the GameAccountId from the line.
@@ -3814,6 +3851,19 @@ namespace
             while (Byte(Move) == 0x90 && Move < Exit + 0x12)
             {
                 ++Move;
+            }
+            // 4.2 (0x2463C9D) aligns it with a multi-byte nop instead: nop dword ptr [rax] (0F 1F 00), or a longer form.
+            uintptr_t LongNop = Move;
+            while (Byte(LongNop) == 0x66 && LongNop < Move + 4)
+            {
+                ++LongNop;
+            }
+            if (Byte(LongNop) == 0x0F && Byte(LongNop + 1) == 0x1F && (Byte(LongNop + 2) & 0x38) == 0)
+            {
+                const uint8_t Modrm = Byte(LongNop + 2);
+                const uint32_t Sib = (Modrm & 0x07) == 0x04 && (Modrm & 0xC0) != 0xC0 ? 1 : 0;
+                const uint32_t Displacement = (Modrm & 0xC0) == 0x40 ? 1 : (Modrm & 0xC0) == 0x80 ? 4 : 0;
+                Move = LongNop + 3 + Sib + Displacement;
             }
             Move += (Byte(Move) & 0xF0) == 0x40 ? 1 : 0;
             const bool bWait = Byte(Move) == 0x0F && Byte(Move + 1) == 0x28 && Byte(Move + 3) == 0xE8;
@@ -4427,7 +4477,31 @@ bool Finder::ResolveAssetManagerLive()
         }
     }
     const uintptr_t ItemsOfTypeEnd = ItemsOfType && Finder::FunctionStart(ItemsOfType) == ItemsOfType ? Finder::FunctionEnd(ItemsOfType) : 0;
-    const int32_t Index = ItemsOfTypeEnd ? VirtualSlot(FindVirtualCall(ItemsOfType, ItemsOfTypeEnd)) : -1;
+    int32_t Index = ItemsOfTypeEnd ? VirtualSlot(FindVirtualCall(ItemsOfType, ItemsOfTypeEnd)) : -1;
+    if (Index < 0 && !ItemsOfType)
+    {
+        // 4.2 strips ListWeapons (0x4D4750 jumps straight back to its caller). UKismetSystemLibrary::GetPrimaryAssetIdList
+        // (4.2 0x215F0D0, called by its exec) is UAssetManager::GetIfValid() then the manager's GetPrimaryAssetIdList:
+        // call [r9+2C0h] on 4.1 and 4.2, ten slots after GetPrimaryAssetDataList (UE 4.20's AssetManager.h puts
+        // GetPrimaryAssetObject, the object, path and id-for lookups and GetPrimaryAssetIdForFile between them; 4.1's
+        // lister calls 0x270, its id list 0x2C0).
+        const UFunction* IdList = FindObject<UFunction>(nullptr, L"/Script/Engine.KismetSystemLibrary:GetPrimaryAssetIdList");
+        const uintptr_t IdListExec = IdList ? reinterpret_cast<uintptr_t>(IdList->GetNativeFunc()) : 0;
+        const uintptr_t IdListExecEnd = IsInText(IdListExec) ? Finder::FunctionEnd(IdListExec) : 0;
+        for (const auto& [Call, Target] : IdListExecEnd ? Finder::DirectCalls(IdListExec, IdListExecEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            const uintptr_t GetIfValid = IsInText(Target) ? FindRawCall(Target, Target + 0x18) : 0;
+            const uintptr_t Test = GetIfValid ? GetIfValid + 5 : 0;
+            const bool bManager = Test && Byte(Test) == 0x48 && Byte(Test + 1) == 0x85 && Byte(Test + 2) == 0xC0 && Byte(Test + 3) == 0x74;
+            const int32_t IdListIndex = bManager ? VirtualSlot(FindVirtualCall(Test, Test + 0x20)) : -1;
+            if (IdListIndex >= 0x2A)
+            {
+                Index = IdListIndex - 10;
+                ItemsOfType = Target;
+                break;
+            }
+        }
+    }
     if (Index < 0x20 || Index > 0x100)
     {
         Log::Error(L"Finder: UAssetManager::GetPrimaryAssetDataList not found (ListWeapons 0x{:X}, item type lister 0x{:X}, slot {})", List ? List - Finder::ImageBase() : 0, ItemsOfType ? ItemsOfType - Finder::ImageBase() : 0, Index);
@@ -6463,7 +6537,18 @@ bool Finder::ResolveNavigationSystemLive()
     {
         BuildSlot = VirtualSlot(Site);
     }
-    const uintptr_t Build = VTableEntry(CdoVTable(L"/Script/Engine.NavigationSystem"), BuildSlot);
+    // 4.2's is /Script/NavigationSystem.NavigationSystemV1.
+    UClass* NavigationSystemClass = UNavigationSystem::StaticClass();
+    UObject* NavigationSystemDefault = NavigationSystemClass ? NavigationSystemClass->GetDefaultObject() : nullptr;
+    void** NavigationSystemVTable = NavigationSystemDefault ? *reinterpret_cast<void***>(NavigationSystemDefault) : nullptr;
+    uintptr_t Build = VTableEntry(NavigationSystemVTable, BuildSlot);
+    if (!Build && CheatSlot < 0)
+    {
+        // 4.2 drops UCheatManager::RebuildNavigation; UNavigationSystemV1::Build (0x26F1A20) logs its time as it ends.
+        Build = FunctionOf(L"UNavigationSystemV1::Build total execution time: %.5f");
+        BuildSlot = Build ? Finder::VTableIndex(NavigationSystemVTable, reinterpret_cast<void*>(Build), 0x400) : -1;
+        Build = BuildSlot >= 0 ? Build : 0;
+    }
     const uintptr_t BuildEnd = Build ? Finder::FunctionEnd(Build) : 0;
 
     uintptr_t LockTest = 0;
@@ -6478,14 +6563,38 @@ bool Finder::ResolveNavigationSystemLive()
     const ptrdiff_t LockFlagsOffset = LockTest ? *reinterpret_cast<const int32_t*>(LockTest + 2) : -1;
 
     const uintptr_t SpawnMissing = LockTest ? FindVirtualCall(LockTest, BuildEnd) : 0;
-    const uintptr_t ProcessCandidates = SpawnMissing ? FindRawCall(SpawnMissing, BuildEnd) : 0;
-    const uintptr_t RebuildAllCall = ProcessCandidates ? FindRawCall(ProcessCandidates + 5, BuildEnd) : 0;
+    // 4.2's UNavigationSystemV1 makes ProcessRegistrationCandidates virtual (0x26F1AE5, call [rax+2A8h] right after
+    // SpawnMissingNavigationData's call [rax+2F8h]), so the first raw call after them is RebuildAll there.
+    const uintptr_t VirtualCandidates = SpawnMissing ? FindVirtualCall(SpawnMissing + 6, SpawnMissing + 0x18) : 0;
+    const int32_t ProcessCandidatesSlot = VirtualCandidates && !FindRawCall(SpawnMissing + 6, VirtualCandidates) ? VirtualSlot(VirtualCandidates) : -1;
+    const uintptr_t ProcessCandidates = ProcessCandidatesSlot < 0 && SpawnMissing ? FindRawCall(SpawnMissing, BuildEnd) : 0;
+    const uintptr_t RebuildAllCall = ProcessCandidatesSlot >= 0 ? FindRawCall(VirtualCandidates + 6, BuildEnd) : ProcessCandidates ? FindRawCall(ProcessCandidates + 5, BuildEnd) : 0;
     const uintptr_t RebuildAll = RebuildAllCall ? Finder::RelativeTarget(RebuildAllCall, 1, 5) : 0;
 
     const int32_t SpawnMissingSlot = VirtualSlot(SpawnMissing);
     const uintptr_t ProcessCandidatesTarget = ProcessCandidates ? Finder::RelativeTarget(ProcessCandidates, 1, 5) : 0;
     uintptr_t PopulateNavOctree = 0;
     int32_t PopulateCandidates = 0;
+    // The world's init (4.2 0x271E6D1) runs the same pair, then ConditionalPopulateNavOctree.
+    for (uintptr_t Call = ProcessCandidatesSlot >= 0 && SpawnMissingSlot >= 0 ? FindVirtualCall(Finder::TextBegin(), Finder::TextEnd()) : 0; Call; Call = FindVirtualCall(Call + 1, Finder::TextEnd()))
+    {
+        if (VirtualSlot(Call) != SpawnMissingSlot || Call == SpawnMissing)
+        {
+            continue;
+        }
+        const uintptr_t Candidates = FindVirtualCall(Call + 6, Call + 0x18);
+        if (!Candidates || VirtualSlot(Candidates) != ProcessCandidatesSlot || FindRawCall(Call + 6, Candidates))
+        {
+            continue;
+        }
+        const uintptr_t Next = FindRawCall(Candidates + 6, Candidates + 18);
+        const uintptr_t Target = Next ? Finder::RelativeTarget(Next, 1, 5) : 0;
+        if (Target && Target != RebuildAll && Target != PopulateNavOctree)
+        {
+            PopulateNavOctree = Target;
+            ++PopulateCandidates;
+        }
+    }
     for (uintptr_t Call = ProcessCandidatesTarget ? FindRawCall(Finder::TextBegin(), Finder::TextEnd()) : 0; Call; Call = FindRawCall(Call + 1, Finder::TextEnd()))
     {
         if (Finder::RelativeTarget(Call, 1, 5) != ProcessCandidatesTarget || Call == ProcessCandidates || VirtualSlot(FindVirtualCall(Call - 12, Call)) != SpawnMissingSlot)
@@ -6508,6 +6617,14 @@ bool Finder::ResolveNavigationSystemLive()
         if (Byte(Site) == 0xF6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && Byte(Site + 6) == 0x01)
         {
             OctreeLockOffset = *reinterpret_cast<const int32_t*>(Site + 2);
+        }
+    }
+    for (uintptr_t Site = PopulateNavOctree; PopulateEnd && Site + 9 <= PopulateEnd && OctreeLockOffset < 0; ++Site)
+    {
+        // 4.2 (0x26F6F9C) tests it through r12: test byte [r12+39Ah], 1 (41 F6 84 24 disp32 01).
+        if (Byte(Site) == 0x41 && Byte(Site + 1) == 0xF6 && Byte(Site + 2) == 0x84 && Byte(Site + 3) == 0x24 && Byte(Site + 8) == 0x01)
+        {
+            OctreeLockOffset = *reinterpret_cast<const int32_t*>(Site + 4);
         }
     }
     if (PopulateEnd && OctreeLockOffset < 0)
@@ -10008,17 +10125,26 @@ bool Finder::ResolveConfigCombine()
 
     // UOnlineHotfixManager::HotfixIniFile (1.9.1 0x3C68890, which logs how long the update took): GetConfigFile,
     // then ConfigFile->CombineFromBuffer(IniData) (0x1310D80) as its third call. CombineFromBuffer reads the buffer a
-    // line at a time, skipping CR and LF first.
+    // line at a time, skipping CR and LF first. 4.2 asks FileName.Find(TEXT("Engine.ini")) first (0x626650), which makes
+    // CombineFromBuffer (0x130B040) the fourth call there.
+    const auto ReadsLines = [](uintptr_t Function)
+    {
+        return Function
+            && Finder::TraceFind(Function, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0x66 && Byte(Instruction + 1) == 0x83 && Byte(Instruction + 3) == 0x0D; })
+            && Finder::TraceFind(Function, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0x66 && Byte(Instruction + 1) == 0x83 && Byte(Instruction + 3) == 0x0A; });
+    };
     uintptr_t Combine = 0;
     int32_t Calls = 0;
-    Finder::TraceFind(FunctionOf(L"Updating config from %s took %f seconds and reloaded %d objects"), 32, [&](uintptr_t Instruction)
+    Finder::TraceFind(FunctionOf(L"Updating config from %s took %f seconds and reloaded %d objects"), 64, [&](uintptr_t Instruction)
     {
-        Combine = Byte(Instruction) == 0xE8 && ++Calls == 3 ? Finder::RelativeTarget(Instruction, 1, 5) : 0;
-        return Combine != 0;
+        if (Byte(Instruction) != 0xE8 || ++Calls < 3)
+        {
+            return false;
+        }
+        Combine = Finder::RelativeTarget(Instruction, 1, 5);
+        return ReadsLines(Combine) || Calls >= 4;
     });
-    const bool bCombineReadsLines = Combine
-        && Finder::TraceFind(Combine, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0x66 && Byte(Instruction + 1) == 0x83 && Byte(Instruction + 3) == 0x0D; })
-        && Finder::TraceFind(Combine, 48, [](uintptr_t Instruction) { return Byte(Instruction) == 0x66 && Byte(Instruction + 1) == 0x83 && Byte(Instruction + 3) == 0x0A; });
+    const bool bCombineReadsLines = ReadsLines(Combine);
 
     if (!Find || !Config || !EngineIni || !bCombineReadsLines)
     {

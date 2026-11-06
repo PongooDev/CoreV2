@@ -7,7 +7,7 @@
 // reads these when it is made, at the navmesh's registration.
 class ARecastNavMesh : public ANavigationData
 {
-    DefineUnrealClass(ARecastNavMesh, Engine)
+    DefineMovedUnrealClass(ARecastNavMesh, NavigationSystem, Engine)
 
 public:
     // Whether a tile's geometry is gathered on its worker thread (FRecastTileGenerator::DoAsyncGeometryGathering) rather

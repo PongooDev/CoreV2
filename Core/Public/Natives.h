@@ -272,7 +272,9 @@ namespace Natives
     // SupportsObject(Object, const TWeakObjectPtr<UObject>* WeakObjectPtr): 1.8 (0x22B2090) reads WeakObjectPtr when it
     // isn't null, 1.7.2 (0x223CCA0) takes no such argument.
     inline bool (*FNetGUIDCache_SupportsObject)(const FNetGUIDCache* This, const UObject* Object, const void* WeakObjectPtr) = nullptr;
-    inline UObject* (*UObject_GetArchetypeFromRequiredInfo)(UClass* Class, UObject* Outer, FName Name, int32_t ObjectFlags) = nullptr;
+    // 4.2's (0x1519300) takes a fifth argument, bUseUpToDateClass, which UObject::GetArchetype passes false; the builds
+    // before it take four and leave the fifth's stack slot unread.
+    inline UObject* (*UObject_GetArchetypeFromRequiredInfo)(UClass* Class, UObject* Outer, FName Name, int32_t ObjectFlags, bool bUseUpToDateClass) = nullptr;
     inline AWorldSettings* (*UWorld_GetWorldSettings)(const UWorld* This, bool bCheckStreamingPersistent, bool bChecked) = nullptr;
     inline void (*UWorld_AddNetworkActor)(UWorld* This, AActor* Actor) = nullptr;
     inline AActor* (*UWorld_SpawnActor)(UWorld* This, UClass* Class, const FTransform* UserTransformPtr, const FActorSpawnParameters& SpawnParameters) = nullptr;

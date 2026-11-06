@@ -33,7 +33,9 @@ namespace FNavigationSystemRunMode
 
 class UNavigationSystem : public UObject
 {
-    DefineUnrealClass(UNavigationSystem, Engine)
+    // 4.2 takes UE 4.20's NavigationSystem module: the class is UNavigationSystemV1 there (Engine keeps a stub
+    // UNavigationSystem with none of its members).
+    DefineMovedRenamedUnrealClass(UNavigationSystem, Engine, UNavigationSystemV1, NavigationSystem)
     DefineNativeMember(uint8_t, NavBuildingLockFlags, UNavigationSystem_NavBuildingLockFlags)
     DefineNativeMember(uint8_t, NavOctreeLockFlags, UNavigationSystem_bNavOctreeLock)
     DefineUFunction(OnNavigationBoundsUpdated)

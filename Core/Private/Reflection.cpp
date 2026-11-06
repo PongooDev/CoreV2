@@ -42,8 +42,8 @@ namespace
     }
 }
 
-Reflection::FTypeInfo::FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind, const wchar_t* InFormerName)
-    : Package(InPackage), NativeName(InNativeName), Kind(InKind), FormerName(InFormerName)
+Reflection::FTypeInfo::FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind, const wchar_t* InFormerName, const wchar_t* InFormerPackage)
+    : Package(InPackage), NativeName(InNativeName), Kind(InKind), FormerName(InFormerName), FormerPackage(InFormerPackage)
 {
     Types().push_back(this);
 }
@@ -52,14 +52,14 @@ UStruct* Reflection::FTypeInfo::Get()
 {
     const EClassCastFlags Expected = Kind == ETypeKind::Class ? CASTCLASS_UClass : CASTCLASS_UScriptStruct;
     // The current name first, then the one older builds had (3.5 renamed UFortMcpProfileAccount to
-    // UFortMcpProfileCampaign and UFortMcpProfileQuest to UFortMcpProfileSubgame).
-    for (const wchar_t* Name : { NativeName, FormerName })
+    // UFortMcpProfileCampaign and UFortMcpProfileQuest to UFortMcpProfileSubgame), in the package they had it in (4.2
+    // moved the navigation classes from Engine to NavigationSystem).
+    const size_t CandidateCount = FormerName || FormerPackage ? 2 : 1;
+    const std::pair<const wchar_t*, const wchar_t*> Candidates[] = { { Package, NativeName }, { FormerPackage ? FormerPackage : Package, FormerName ? FormerName : NativeName } };
+    for (size_t Index = 0; Index < CandidateCount && !Struct; ++Index)
     {
-        if (Struct || !Name)
-        {
-            break;
-        }
-        const std::wstring Path = std::format(L"/Script/{}.{}", Package, Name + 1);
+        const auto& [CandidatePackage, Name] = Candidates[Index];
+        const std::wstring Path = std::format(L"/Script/{}.{}", CandidatePackage, Name + 1);
         UObject* Found = StaticFindObject(nullptr, nullptr, Path.c_str(), false);
         if (Found && Found->GetClass()->HasAnyCastFlag(Expected))
         {

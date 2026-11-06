@@ -76,7 +76,7 @@ namespace
     // nearest the player capsule's ðŸŸ¡ (Fortnite's player capsule is 36 x 90 half-height).
     int32_t PickPlayerAgent(UNavigationSystem* NavSys)
     {
-        static UClass* RecastClass = FindObject<UClass>(nullptr, L"/Script/Engine.RecastNavMesh");
+        static UClass* RecastClass = ARecastNavMesh::StaticClass();
         TStructArray<FNavDataConfig>& Agents = NavSys->SupportedAgents;
         int32_t Best = -1;
         float BestScore = 1.0e9f;

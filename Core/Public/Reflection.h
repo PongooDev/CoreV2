@@ -42,7 +42,9 @@ namespace Reflection
     {
     public:
         // InFormerName: the name older builds give the type, for a type Epic renamed (nullptr when it never was).
-        FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind, const wchar_t* InFormerName = nullptr);
+        // InFormerPackage: the package older builds have it in, for a type Epic moved to another module (nullptr when
+        // it never moved).
+        FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind, const wchar_t* InFormerName = nullptr, const wchar_t* InFormerPackage = nullptr);
 
         UStruct* Get();
         UClass* GetClass();
@@ -55,6 +57,7 @@ namespace Reflection
         const wchar_t* NativeName;
         ETypeKind Kind;
         const wchar_t* FormerName;
+        const wchar_t* FormerPackage;
         UStruct* Struct = nullptr;
     };
 
@@ -171,6 +174,25 @@ public: \
 #define DefineRenamedUnrealClass(ClassName, FormerName, Package) \
 private: \
     static inline Reflection::FTypeInfo TypeInfo_##ClassName{ TEXT(#Package), TEXT(#ClassName), Reflection::ETypeKind::Class, TEXT(#FormerName) }; \
+public: \
+    static UClass* StaticClass() { return TypeInfo_##ClassName.GetClass(); } \
+    static UStruct* StaticReflectionOwner() { return TypeInfo_##ClassName.Get(); }
+
+// A class Epic moved to another module: Package is the one it is in from then on, FormerPackage the one older builds
+// reflect it in (UE 4.20's NavigationSystem module, which Fortnite takes from 4.2, has the navigation classes Engine had).
+#define DefineMovedUnrealClass(ClassName, Package, FormerPackage) \
+private: \
+    static inline Reflection::FTypeInfo TypeInfo_##ClassName{ TEXT(#Package), TEXT(#ClassName), Reflection::ETypeKind::Class, nullptr, TEXT(#FormerPackage) }; \
+public: \
+    static UClass* StaticClass() { return TypeInfo_##ClassName.GetClass(); } \
+    static UStruct* StaticReflectionOwner() { return TypeInfo_##ClassName.Get(); }
+
+// A class Epic both moved to another module and renamed: ClassName is the name the builds before the move reflect it
+// by, in FormerPackage, and NewName the one it has in Package from then on (UNavigationSystem, UNavigationSystemV1 from
+// 4.2).
+#define DefineMovedRenamedUnrealClass(ClassName, FormerPackage, NewName, Package) \
+private: \
+    static inline Reflection::FTypeInfo TypeInfo_##ClassName{ TEXT(#Package), TEXT(#NewName), Reflection::ETypeKind::Class, TEXT(#ClassName), TEXT(#FormerPackage) }; \
 public: \
     static UClass* StaticClass() { return TypeInfo_##ClassName.GetClass(); } \
     static UStruct* StaticReflectionOwner() { return TypeInfo_##ClassName.Get(); }

@@ -4,5 +4,5 @@
 
 class ANavMeshBoundsVolume : public AActor
 {
-    DefineUnrealClass(ANavMeshBoundsVolume, Engine)
+    DefineMovedUnrealClass(ANavMeshBoundsVolume, NavigationSystem, Engine)
 };

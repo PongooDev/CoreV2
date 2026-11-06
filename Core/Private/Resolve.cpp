@@ -7321,7 +7321,6 @@ bool Finder::ResolveLeaveOutpostLive()
     }
 
     const int32_t ReturnIndex = Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameMode"), reinterpret_cast<void*>(FunctionOf(L"Ignoring ReturnToMainMenuHost, already in a level travel")), 0x400);
-    const uintptr_t OnZoneEnd = Natives::AFortGameModeZone_OnZoneEndIndex >= 0 ? VTableEntry(CdoVTable(L"/Script/FortniteGame.FortGameModeZone"), Natives::AFortGameModeZone_OnZoneEndIndex) : 0;
     // The ClientStayWithParty RPC stub: the AFortPlayerController slot whose small body loads the function's name global
     // (mov rdx, [rip+Name]), which its static FName initializer fills (lea rdx, L"ClientStayWithParty"; lea rcx, Name).
     // Slot 0x29F on 1.1 and 1.2, 0x2D0 on 1.7.2.
@@ -7341,12 +7340,23 @@ bool Finder::ResolveLeaveOutpostLive()
         return false;
     }) : -1;
     const int32_t StayCall = StaySlot * 8;
+    // The game mode zone's zone end (slot 0x15F on 3.5.2 and 3.6, 0xC4 in the zone end finder's log there) calls it within
+    // its first 0x200 bytes (0xC18430 on 3.6). The zone end finder's slot isn't relied on, as it takes the first slot
+    // that holds the zone's offsets and 3.5 and 3.6 have an inherited one before the zone end: the slot is the first of
+    // the class's vtable that calls a function with the ClientStayWithParty virtual call.
+    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
     uintptr_t StayWithParty = 0;
-    for (uintptr_t Call = OnZoneEnd && StaySlot >= 0 ? FindRawCall(OnZoneEnd, OnZoneEnd + 0x200) : 0; Call && !StayWithParty; Call = FindRawCall(Call + 1, OnZoneEnd + 0x200))
+    for (int32_t Slot = 0; ZoneVTable && StaySlot >= 0 && Slot < 0x400 && !StayWithParty; ++Slot)
     {
-        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
-        const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
-        StayWithParty = TargetEnd && FindInstruction(Target, TargetEnd, { 0xFF, 0x90, StayCall & 0xFF, (StayCall >> 8) & 0xFF, (StayCall >> 16) & 0xFF, 0x00 }) ? Target : 0;
+        const uintptr_t Entry = VTableEntry(ZoneVTable, Slot);
+        const uintptr_t EntryEnd = Entry && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        const uintptr_t Window = EntryEnd ? std::min<uintptr_t>(EntryEnd, Entry + 0x200) : 0;
+        for (uintptr_t Call = Window ? FindRawCall(Entry, Window) : 0; Call && !StayWithParty; Call = FindRawCall(Call + 1, Window))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            StayWithParty = TargetEnd && FindInstruction(Target, TargetEnd, { 0xFF, 0x90, StayCall & 0xFF, (StayCall >> 8) & 0xFF, (StayCall >> 16) & 0xFF, 0x00 }) ? Target : 0;
+        }
     }
     if (ReturnIndex < 0 || !StayWithParty)
     {

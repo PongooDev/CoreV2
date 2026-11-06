@@ -63,10 +63,14 @@ void AFortPlayerController::ServerPlayEmoteItem_Implementation(UFortMontageItemD
         return;
     }
 
-    // It asks CanPerformAction(Gameplay.Action.Player.InteractUse): a pawn that isn't in stasis and whose ability system
-    // doesn't block the tag (Athena's override adds nothing for it).
-    const FGameplayTag InteractUse{ FName(L"Gameplay.Action.Player.InteractUse") };
-    if (!CallVirtual<bool>(this, Natives::AFortPlayerController_CanPerformActionIndex, &InteractUse))
+    // CanPerformAction: a pawn that isn't in stasis and whose ability system doesn't block the tag (Athena's override adds
+    // nothing for it). 1.8.2's body asks Gameplay.Action.Player.InteractUse (its tag struct's +0x2D0); 4.1's client asks
+    // Gameplay.Action.Player.Emote, the emote ability's own tag, before it sends the RPC (AFortPlayerController::
+    // PlayEmoteItem, 4.1 0xF85F20, with the emote cooldown), and this asks the same. InteractUse is the wrong question
+    // from then on: Thanos (4.1's Infinity Gauntlet) can't interact, so InteractUse is blocked for him, and his emotes
+    // were refused here while his client had let them through (#297).
+    const FGameplayTag EmoteTag{ FName(L"Gameplay.Action.Player.Emote") };
+    if (!CallVirtual<bool>(this, Natives::AFortPlayerController_CanPerformActionIndex, &EmoteTag))
     {
         return;
     }

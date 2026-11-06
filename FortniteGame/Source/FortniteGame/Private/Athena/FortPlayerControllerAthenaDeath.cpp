@@ -257,9 +257,9 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         // The death report the death screen shows (OnRep_DeathInfo): how the player died, and who downed them, else who
         // eliminated them, else themselves. The eliminator's client gets its kill feed line.
         FDeathInfo& DeathInfo = AthenaState->DeathInfo;
-        if (DeadPawn && Natives::AFortPlayerPawn_GetDeathCause)
+        if (DeadPawn && AFortPlayerStateAthena::HasToDeathCause())
         {
-            DeathInfo.DeathCause = Natives::AFortPlayerPawn_GetDeathCause(DeadPawn, DamageTags, DeadPawn->bIsDBNO);
+            DeathInfo.DeathCause = AFortPlayerStateAthena::ToDeathCause(DeadPawn, DamageTags, DeadPawn->bIsDBNO);
         }
         if (Instigator)
         {

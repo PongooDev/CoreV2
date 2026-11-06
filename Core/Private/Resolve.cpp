@@ -11009,8 +11009,12 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     // then stores with bDBNO: "call 0x43AE20; mov [rbp + DeathInfo.DeathCause], al; mov byte ptr [rbp + DeathInfo.bDBNO],
     // 1". It returns FallDamage or OutsideSafeZone (DBNOTimeout for those when the pawn was DBNO), DBNOTimeout for a
     // bleed-out, the weapon's or the trap's cause, else Unspecified.
+    // From 3.5 the function is the player state's static ToDeathCause (21.40's name), which takes only the tags and
+    // bWasDBNO: the DBNO handling passes them in rcx and edx, "lea rcx, [rdi + tags]; ...; xor edx, edx; call" (3.5.1
+    // 0xA31A09, 3.6 0xA3F339, 4.0 0xAA20B9, 4.1 0xAAE53C), where the pawn's took the tags in rdx and false in r8.
     void** PawnVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena");
     uintptr_t GetDeathCause = 0;
+    bool bStaticDeathCause = false;
     FirstVTableIndexWhere(PawnVTable, [&](uintptr_t Entry)
     {
         const uintptr_t End = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
@@ -11029,6 +11033,7 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
             if (Store && (IsDisp32Access(NextStore + 6, 0xC6, 0, DeathInfoDBNOOffset) || IsDisp32Access(NextStore + 7, 0xC6, 0, DeathInfoDBNOOffset)))
             {
                 GetDeathCause = Finder::RelativeTarget(Site, 1, 5);
+                bStaticDeathCause = (Byte(Site - 2) == 0x33 || Byte(Site - 2) == 0x31) && Byte(Site - 1) == 0xD2;
                 return true;
             }
         }
@@ -11127,7 +11132,14 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     Natives::AFortGameModeAthena_StartEndGamePhase = reinterpret_cast<decltype(Natives::AFortGameModeAthena_StartEndGamePhase)>(SoloWin);
     Natives::AFortPlayerControllerAthena_SetTeamPlace = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_SetTeamPlace)>(SetTeamPlace);
     Natives::AFortPlayerStateAthena_GetSecondsAlive = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_GetSecondsAlive)>(GetSecondsAlive);
-    Natives::AFortPlayerPawn_GetDeathCause = reinterpret_cast<decltype(Natives::AFortPlayerPawn_GetDeathCause)>(GetDeathCause);
+    if (bStaticDeathCause)
+    {
+        Natives::AFortPlayerStateAthena_ToDeathCause = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_ToDeathCause)>(GetDeathCause);
+    }
+    else
+    {
+        Natives::AFortPlayerPawn_GetDeathCause = reinterpret_cast<decltype(Natives::AFortPlayerPawn_GetDeathCause)>(GetDeathCause);
+    }
     Natives::AFortPlayerControllerAthena_UpdateTeamMembersIndex = UpdateTeamMembersIndex;
     if (OutlivedStore)
     {
@@ -11137,8 +11149,8 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     }
     bResolved = true;
 
-    Log::Info(L"Finder: pawn-death handler: RemoveFromAlivePlayers 0x{:X}, team place 0x{:X} (solo win 0x{:X}), seconds alive 0x{:X}, death cause 0x{:X}, TeamMembers fill slot 0x{:X}",
-        Rva(Remove), Rva(SetTeamPlace), Rva(SoloWin), Rva(GetSecondsAlive), Rva(GetDeathCause), UpdateTeamMembersIndex);
+    Log::Info(L"Finder: pawn-death handler: RemoveFromAlivePlayers 0x{:X}, team place 0x{:X} (solo win 0x{:X}), seconds alive 0x{:X}, death cause 0x{:X}{}, TeamMembers fill slot 0x{:X}",
+        Rva(Remove), Rva(SetTeamPlace), Rva(SoloWin), Rva(GetSecondsAlive), Rva(GetDeathCause), bStaticDeathCause ? L" (ToDeathCause)" : L"", UpdateTeamMembersIndex);
     Log::Info(L"Finder: pawn-death handler: teammates out 0x{:X}, starting players +0x{:X}, players outlived +0x{:X}",
         Rva(reinterpret_cast<uintptr_t>(Natives::AFortPlayerControllerAthena_CountTeammatesOut)), Natives::AFortGameStateAthena_StartingPlayers, Natives::AFortPlayerStateAthena_PlayersOutlived);
     if (GameModeTeamJoinIndex >= 0)

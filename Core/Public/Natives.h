@@ -550,7 +550,11 @@ namespace Natives
     inline void (*AFortGameModeAthena_RemoveFromAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState) = nullptr;
     inline void (*AFortPlayerControllerAthena_SetTeamPlace)(AFortPlayerControllerAthena* This, int32_t Place) = nullptr;
     inline int32_t (*AFortPlayerStateAthena_GetSecondsAlive)(AFortPlayerStateAthena* This) = nullptr;
+    // The death cause up to 3.3 (1.9.1 0x43AE20), on the pawn.
     inline uint8_t (*AFortPlayerPawn_GetDeathCause)(AFortPawn* This, const FGameplayTagContainer& DamageTags, bool bWasDBNO) = nullptr;
+    // From 3.5 it is 21.40's static AFortPlayerStateAthena::ToDeathCause (3.5.1 0xA754E0, 3.6 0xA835B0, 4.0 0xAA41A0,
+    // 4.1 0xAB04B0): the damage tags and whether the pawn was DBNO, no pawn. Only one of the two is set.
+    inline uint8_t (*AFortPlayerStateAthena_ToDeathCause)(const FGameplayTagContainer& InTags, bool bWasDBNO) = nullptr;
     inline int32_t AFortPlayerControllerAthena_UpdateTeamMembersIndex = -1;
     inline int32_t (*AFortPlayerControllerAthena_CountTeammatesOut)(AFortPlayerControllerAthena* This) = nullptr;
     inline ptrdiff_t AFortGameStateAthena_StartingPlayers = -1;

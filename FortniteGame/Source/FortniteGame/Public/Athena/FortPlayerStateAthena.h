@@ -168,6 +168,19 @@ public:
         return Member_Kills.IsAvailable();
     }
 
+    // 21.40's static AFortPlayerStateAthena::ToDeathCause: the EDeathCause the damage tags give (DeathInfo.DeathCause,
+    // which picks the kill feed line), DBNOTimeout for some when the pawn was DBNO. From 3.5 it is that static;
+    // up to 3.3 the pawn's own (DeadPawn). Only where HasToDeathCause.
+    static bool HasToDeathCause() { return Natives::AFortPlayerStateAthena_ToDeathCause || Natives::AFortPlayerPawn_GetDeathCause; }
+    static uint8_t ToDeathCause(AFortPawn* DeadPawn, const FGameplayTagContainer& InTags, bool bWasDBNO)
+    {
+        if (Natives::AFortPlayerStateAthena_ToDeathCause)
+        {
+            return Natives::AFortPlayerStateAthena_ToDeathCause(InTags, bWasDBNO);
+        }
+        return Natives::AFortPlayerPawn_GetDeathCause(DeadPawn, InTags, bWasDBNO);
+    }
+
     static bool HasKillScore() { return Member_KillScore.IsAvailable(); }
     static bool HasTeamKillScore() { return Member_TeamKillScore.IsAvailable(); }
 

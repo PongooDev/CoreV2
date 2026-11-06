@@ -165,6 +165,11 @@ private:
 class UFortGadgetItemDefinition : public UFortWorldItemDefinition
 {
     DefineUnrealClass(UFortGadgetItemDefinition, FortniteGame)
+
+public:
+    // Taking the gadget drops everything else its taker carries (4.1's Infinity Gauntlet; #297).
+    DefineUProperty(bool, bDropAllOnEquip)
+    static bool HasDropAllOnEquip() { return Member_bDropAllOnEquip.IsAvailable(); }
 };
 
 // An item used up as it is used. StaticClass is null on a build without the class.

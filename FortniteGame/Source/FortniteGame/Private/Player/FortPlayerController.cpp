@@ -1285,6 +1285,67 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
 #endif
 }
 
+// 4.1 (CL-4053532; #297). Picking up a gadget whose definition has bDropAllOnEquip (AGID_CarminePack, the Infinity
+// Gauntlet) drops everything else its taker carries. The pickup's IFortInteractInterface::LocalOnAttemptInteract (4.1
+// 0xD853E0) sends ServerDropAllItems(the gadget) and then ServerHandlePickup, and UFortGadgetItemDefinition::
+// ApplyGadgetData (0xD43BA0, "Applying Gadget Data for Gadet Item") checks bDropAllOnEquip on the authority and calls the
+// controller's DropAllItems. Both bodies are stripped: ServerDropAllItems_Implementation (slot 0x1A7) is the shared empty
+// function in every controller class, and DropAllItems' exec (0x2B5F400) and ApplyGadgetData's call end in it too. So
+// the player kept their weapons as Thanos.
+//
+// This drops what a manual drop could (bCanBeDropped: not the pickaxe, the edit tool or the building pieces), each whole
+// stack, except the item being kept, tossed from the pawn as ServerSpawnInventoryDrop tosses one.
+void AFortPlayerController::DropAllItems(const UFortItemDefinition* IgnoreItemDef)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = Role == ROLE_Authority ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    AFortPawn* Pawn = MyFortPawn;
+    if (!Inventory || !Pawn)
+    {
+        return;
+    }
+
+    std::vector<FGuid> Drops;
+    TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* ItemEntry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        const UFortWorldItemDefinition* ItemDefinition = ItemEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition)) : nullptr;
+        if (ItemDefinition && ItemDefinition != IgnoreItemDef && ItemDefinition->bCanBeDropped && ItemEntry->Count > 0)
+        {
+            Drops.push_back(ItemEntry->ItemGuid);
+        }
+    }
+
+    // Each drop changes the inventory's list, so the drops go by guid.
+    for (const FGuid& ItemGuid : Drops)
+    {
+        UFortWorldItem* WorldItem = Inventory->FindWorldItem(ItemGuid);
+        if (WorldItem)
+        {
+            FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+            ServerSpawnInventoryDrop_Implementation(ItemGuid, static_cast<int32_t>(ItemEntry.Count));
+        }
+    }
+    UE_LOG(LogFort, Log, TEXT("DropAllItems: %s dropped %d items, keeping %s"), *GetName(), static_cast<int32_t>(Drops.size()), IgnoreItemDef ? *IgnoreItemDef->GetName() : TEXT("nothing"));
+#endif
+}
+
+void AFortPlayerController::ServerDropAllItems_Implementation(const UFortItemDefinition* IgnoreItemDef)
+{
+#if WITH_SERVER_CODE
+    // The client sends it only for a gadget that drops all on equip, just before it takes that gadget's pickup; the server
+    // asks the same of the item it was given, so a client can't empty its inventory onto the floor for anything else.
+    const UFortGadgetItemDefinition* Gadget = Cast<UFortGadgetItemDefinition>(const_cast<UFortItemDefinition*>(IgnoreItemDef));
+    if (!Gadget || !UFortGadgetItemDefinition::HasDropAllOnEquip() || !Gadget->bDropAllOnEquip)
+    {
+        UE_LOG(LogFort, Warning, TEXT("ServerDropAllItems: %s asked to drop all for %s, which isn't a gadget that drops all on equip"), *GetName(), IgnoreItemDef ? *IgnoreItemDef->GetName() : TEXT("nothing"));
+        return;
+    }
+    DropAllItems(IgnoreItemDef);
+#endif
+}
+
 void AFortPlayerController::ServerSpotActor_Implementation(AActor* NewlySpottedActor)
 {
 #if WITH_SERVER_CODE
@@ -1820,6 +1881,33 @@ void AFortPlayerController::HookVTables()
             {
                 Hooks::SwapVTable(Name, VTable, Index, Implementation);
             }
+        }
+    }
+
+    // ServerDropAllItems (#297): only where the build has the RPC and its body is the shared empty function (4.1's slot
+    // 0x1A7 in every controller class).
+    if (UFunction* DropAllFunction = FindStaticFunction_ServerDropAllItems())
+    {
+        const int32_t DropAllIndex = Finder::ImplementationIndex(DropAllFunction);
+        int32_t Swapped = 0;
+        for (TObjectIterator<UClass> It; DropAllIndex >= 0 && It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[DropAllIndex] == Natives::SharedEmptyFunction)
+            {
+                Hooks::SwapVTable(L"AFortPlayerController::ServerDropAllItems_Implementation", VTable, DropAllIndex, reinterpret_cast<void*>(&ServerDropAllItems_ImplementationHK));
+                ++Swapped;
+            }
+        }
+        if (DropAllIndex < 0)
+        {
+            Log::Error(L"Finder: AFortPlayerController::ServerDropAllItems_Implementation slot not found");
+        }
+        else if (Swapped == 0)
+        {
+            Log::Info(L"Finder: AFortPlayerController::ServerDropAllItems_Implementation (slot 0x{:X}) is native in this build", DropAllIndex);
         }
     }
 
@@ -2392,6 +2480,11 @@ void AFortPlayerController::ServerExecuteInventoryItem_ImplementationHK(AFortPla
 void AFortPlayerController::ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor)
 {
     This->ServerSpotActor_Implementation(NewlySpottedActor);
+}
+
+void AFortPlayerController::ServerDropAllItems_ImplementationHK(AFortPlayerController* This, const UFortItemDefinition* IgnoreItemDef)
+{
+    This->ServerDropAllItems_Implementation(IgnoreItemDef);
 }
 
 void AFortPlayerController::ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg)

@@ -98,6 +98,7 @@ public:
     // 3.2 renames it, with the same parameters.
     DefineUFunction(ServerAttemptInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
+    DefineUFunction(ServerDropAllItems)
     DefineUFunction(ServerRemoveInventoryStateValue)
     DefineUFunction(ServerSpotActor)
     DefineUFunction(ServerDisassembleInventoryItem)
@@ -162,6 +163,11 @@ public:
     void ApplyHomebaseGadgets();
     void ServerExecuteInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerSpawnInventoryDrop_Implementation(const FGuid& ItemGuid, int32_t Count);
+    // A gadget with bDropAllOnEquip (4.1's Infinity Gauntlet) makes its taker drop everything else (#297): the pickup's
+    // LocalOnAttemptInteract sends ServerDropAllItems(the gadget) before ServerHandlePickup, and the gadget's
+    // ApplyGadgetData calls DropAllItems on the server. 4.1 strips both bodies.
+    void DropAllItems(const UFortItemDefinition* IgnoreItemDef);
+    void ServerDropAllItems_Implementation(const UFortItemDefinition* IgnoreItemDef);
     void ServerSpotActor_Implementation(AActor* NewlySpottedActor);
     void ServerDisassembleInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerDisassembleInventoryItems_Implementation(const TArray<FGuid>& ItemGuids, const TArray<int32_t>& ItemCounts);
@@ -259,6 +265,7 @@ private:
     static void TrySetHeroImplementationHK(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused);
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count);
+    static void ServerDropAllItems_ImplementationHK(AFortPlayerController* This, const UFortItemDefinition* IgnoreItemDef);
     bool ValidateBuildingClassData(FBuildingClassData& BuildingClassData);
     bool HasRequiredBuildingLevel(const FBuildingClassData& BuildingClassData);
     void ExecuteEditTool(ABuildingSMActor* EditActor);

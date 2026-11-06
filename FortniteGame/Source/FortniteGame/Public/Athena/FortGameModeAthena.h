@@ -115,7 +115,8 @@ public:
     void ApplyContainerSpawnPercents();
 
     // Has the map info roll the placed vending machines' rarities and what they sell (AFortAthenaMapInfo::
-    // SpawnVendingMachines, from 3.5, #257), with the world's loot tables, so they sell from warmup on.
+    // SpawnVendingMachines, from 3.5, #257) with the match's playlist's tables: at once where they are already in place,
+    // else once the game state has that playlist (WatchPlaylistDataTables, #291) or the bus is under way.
     void SpawnVendingMachines();
 
     // Has the world's BGA consumable spawners (ABGAConsumableSpawner, from 4.0's Hop Rocks, #278) roll and place their

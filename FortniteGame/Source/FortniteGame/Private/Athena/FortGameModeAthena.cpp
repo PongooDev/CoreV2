@@ -251,17 +251,6 @@ void AFortGameModeAthena::ApplyContainerSpawnPercents()
 #endif
 }
 
-void AFortGameModeAthena::SpawnVendingMachines()
-{
-#if WITH_SERVER_CODE
-    AFortAthenaMapInfo* MapInfo = AFortAthenaMapInfo::StaticClass() && AFortAthenaMapInfo::HasVendingMachines() ? FindMapInfo(GetWorld()) : nullptr;
-    if (MapInfo)
-    {
-        MapInfo->SpawnVendingMachines();
-    }
-#endif
-}
-
 void AFortGameModeAthena::SpawnBGAConsumables()
 {
 #if WITH_SERVER_CODE
@@ -1464,6 +1453,29 @@ namespace
     int32_t TablesPlaylistId = -1;
     // The loot tables that playlist copied over the default ones.
     std::pair<UDataTable*, UDataTable*> TablesLoot;
+    // The game mode whose vending machines wait for the match's playlist (SpawnVendingMachines).
+    FWeakObjectPtr VendingGameMode;
+
+    void SpawnMapVendingMachines(AFortGameModeAthena* GameMode)
+    {
+        AFortAthenaMapInfo* MapInfo = AFortAthenaMapInfo::StaticClass() && AFortAthenaMapInfo::HasVendingMachines() ? FindMapInfo(GameMode->GetWorld()) : nullptr;
+        if (MapInfo)
+        {
+            MapInfo->SpawnVendingMachines();
+        }
+    }
+
+    // The vending machines that waited for the match's playlist roll now, from the world's tables as they are.
+    void SpawnWaitingVendingMachines(AFortGameModeAthena* GameMode, const std::wstring& Why)
+    {
+        if (VendingGameMode.Get() != GameMode)
+        {
+            return;
+        }
+        VendingGameMode = FWeakObjectPtr();
+        Log::Info(L"Battle Royale: the vending machines roll {}", Why);
+        SpawnMapVendingMachines(GameMode);
+    }
 
     // The loot tables PlaylistId's PlaylistDataTables entry copies over the default ones (none: the defaults).
     std::pair<UDataTable*, UDataTable*> PlaylistLootTables(AFortGameModeAthena* GameMode, int32_t PlaylistId)
@@ -1528,8 +1540,13 @@ namespace
             AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
             AFortGameStateAthena* GameState = Athena ? AthenaGameStateOf(Athena) : nullptr;
             // The match is assigned before its players come, in the warmup at the latest.
-            if (!Athena || TablesGameMode.Get() != Athena || !GameState || GameState->GamePhase >= EAthenaGamePhase::GetAircraft())
+            if (!Athena || TablesGameMode.Get() != Athena || !GameState)
             {
+                return;
+            }
+            if (GameState->GamePhase >= EAthenaGamePhase::GetAircraft())
+            {
+                SpawnWaitingVendingMachines(Athena, L"from the default tables: the bus is under way and the game state has no playlist");
                 return;
             }
             // The match's playlist is CurrentPlaylistId once the matchmaking service's assignment is being handled
@@ -1552,6 +1569,7 @@ namespace
                     ABuildingContainer::RollAthenaLootAgain(Athena->GetWorld());
                     ABGAConsumableSpawner::SpawnWorldConsumables(Athena->GetWorld());
                 }
+                SpawnWaitingVendingMachines(Athena, std::format(L"from the match's playlist {}'s tables", PlaylistId));
             }
             WatchPlaylistDataTablesOf(GameMode);
         });
@@ -1575,6 +1593,26 @@ void AFortGameModeAthena::ApplyPlaylistDataTablesOnce()
     Log::Info(L"Battle Royale: the world's loot tables are {} ({}, {})", TablesPlaylistId >= 0 ? std::format(L"playlist {}'s", TablesPlaylistId)
         : std::wstring(L"the defaults until the game state has the match's playlist"), LootTierData ? LootTierData->GetPathName().ToStdString() : std::wstring(L"default loot tiers"),
         LootPackages ? LootPackages->GetPathName().ToStdString() : std::wstring(L"default loot packages"));
+#endif
+}
+
+void AFortGameModeAthena::SpawnVendingMachines()
+{
+#if WITH_SERVER_CODE
+    // Whether a machine stands, its rarity, cost and what it sells are the match's playlist's: the rarity weights and
+    // costs are AthenaGameData's Default.VendingMachine rows and the items its Loot_AthenaVending rows, which
+    // ApplyPlaylistDataTables (3.5.1 0x9DC890) replaces with the playlist's own (Snipers, High Explosives and Sky Supply
+    // have no machines, Solid Gold only Legendary ones, Playground its own weights and costs). From 3.5 the game state
+    // has that playlist only from the match's assignment on, so the machines rolled at the world's creation took the
+    // default tables in every LTM (#291). They wait for it (WatchPlaylistDataTables), or for the bus if it never comes.
+    ApplyPlaylistDataTablesOnce();
+    if (TablesGameMode.Get() == this && TablesPlaylistId < 0 && AFortAthenaMapInfo::StaticClass() && AFortAthenaMapInfo::HasVendingMachines())
+    {
+        VendingGameMode = this;
+        Log::Info(L"Battle Royale: the vending machines wait for the match's playlist");
+        return;
+    }
+    SpawnMapVendingMachines(this);
 #endif
 }
 

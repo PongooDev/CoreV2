@@ -1516,15 +1516,36 @@ namespace
                 Entries = 0;
             }
         }
+        // 4.2 inlines AddStatic into the registration (0x6E944E): it makes the delegate instance there (lea rax, Handler;
+        // mov [rdi+8], rax ... lea rax, its vtable; mov [rdi], rax), then adds it to the multicast delegate, whose
+        // compaction threshold (+0x60) it lowers first: mov eax, [Threshold]; mov edx, [Num]; dec eax; mov [Threshold], eax.
+        uintptr_t InlineBind = 0;
+        if (!Entries && Handler && Matches == 0)
+        {
+            int32_t LeaMatches = 0;
+            const uintptr_t HandlerLea = ScanRipTarget({ 0x48, 0x8D, 0x05 }, 3, 7, Handler, LeaMatches);
+            for (uintptr_t Load = LeaMatches == 1 ? FindInstruction(HandlerLea + 7, HandlerLea + 0x40, { 0x8B, 0x05 }) : 0; Load && !Entries; Load = FindInstruction(Load + 1, HandlerLea + 0x40, { 0x8B, 0x05 }))
+            {
+                const uintptr_t Threshold = Finder::RelativeTarget(Load, 2, 6);
+                const uintptr_t Store = FindInstruction(Load + 6, Load + 0x14, { 0x89, 0x05 });
+                if (Store && Finder::RelativeTarget(Store, 2, 6) == Threshold && !IsInText(Threshold) && *reinterpret_cast<const int32_t*>(Threshold) == 2)
+                {
+                    Entries = Threshold - 0x60;
+                    InlineBind = HandlerLea;
+                }
+            }
+        }
         RequireAddress(L"UConsole::RegisterConsoleAutoCompleteEntries", reinterpret_cast<uintptr_t&>(Natives::UConsole_RegisterConsoleAutoCompleteEntries), Entries);
 
         // The delegate instance layout, from the static instance AddStatic binds the handler with (2.5 0x6A8610, 2.4.2
         // 0x2EBB00): GetHandle (mov rax, [rcx+Handle]; mov [rdx], rax; mov rax, rdx; ret) is slot 8 up to 2.4.2 and 4 on
         // 2.5 (0x30C79F8), where UE 4.20 dropped five virtuals before it (#192). Not found keeps 8.
-        const uintptr_t AddStaticCall = Entries ? FindRawCall(Bind + 7, Bind + 0x20) : 0;
-        const uintptr_t AddStatic = AddStaticCall ? Finder::RelativeTarget(AddStaticCall, 1, 5) : 0;
+        // 4.2's inline instance: its vtable is the lea after the handler's (0x6E9462).
+        const uintptr_t AddStaticCall = Entries && !InlineBind ? FindRawCall(Bind + 7, Bind + 0x20) : 0;
+        const uintptr_t AddStatic = AddStaticCall ? Finder::RelativeTarget(AddStaticCall, 1, 5) : InlineBind ? InlineBind + 7 : 0;
+        const uintptr_t AddStaticScanEnd = InlineBind ? InlineBind + 0x20 : AddStatic + 0x100;
         int32_t GetHandleIndex = -1;
-        for (uintptr_t Lea = AddStatic ? FindInstruction(AddStatic, AddStatic + 0x100, { 0x48, 0x8D, 0x05 }) : 0; Lea && GetHandleIndex < 0; Lea = FindInstruction(Lea + 1, AddStatic + 0x100, { 0x48, 0x8D, 0x05 }))
+        for (uintptr_t Lea = AddStatic ? FindInstruction(AddStatic, AddStaticScanEnd, { 0x48, 0x8D, 0x05 }) : 0; Lea && GetHandleIndex < 0; Lea = FindInstruction(Lea + 1, AddStaticScanEnd, { 0x48, 0x8D, 0x05 }))
         {
             void* const* const VTable = reinterpret_cast<void* const*>(Finder::RelativeTarget(Lea, 3, 7));
             if (IsInText(reinterpret_cast<uintptr_t>(VTable)))
@@ -1704,6 +1725,21 @@ namespace
             {
                 Setup = Finder::FunctionStart(Load);
                 ++Matches;
+            }
+        }
+        // 4.2 (0x210F300) schedules the clear and the GEngine load apart: mov byte ptr [rcx+80h], 0 (0x210F31A), then
+        // mov rdi, [GEngine] (0x210F333) to add the viewport's delegates to the engine's.
+        for (uintptr_t Store = GEngine && Matches == 0 ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0xC6, 0x81, 0x80, 0x00, 0x00, 0x00, 0x00 }) : 0; Store;
+             Store = FindInstruction(Store + 1, Finder::TextEnd(), { 0xC6, 0x81, 0x80, 0x00, 0x00, 0x00, 0x00 }))
+        {
+            for (uintptr_t Load = Store + 7; Load < Store + 7 + 0x30; ++Load)
+            {
+                if (Byte(Load) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Load, 3, 7) == GEngine)
+                {
+                    Setup = Finder::FunctionStart(Store);
+                    ++Matches;
+                    break;
+                }
             }
         }
         if (Matches != 1)

@@ -1264,7 +1264,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortLobbyBeaconHost.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Online</Filter>
     </ClInclude>
-    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileAccount.h">
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileCampaign.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Online</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileWorld.h">
@@ -1814,7 +1814,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortLobbyBeaconHost.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Online</Filter>
     </ClCompile>
-    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileAccount.cpp">
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileCampaign.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Online</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileWorld.cpp">

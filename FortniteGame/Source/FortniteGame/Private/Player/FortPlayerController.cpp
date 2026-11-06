@@ -32,7 +32,7 @@
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
-#include "Online/FortMcpProfileAccount.h"
+#include "Online/FortMcpProfileCampaign.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "Pawns/FortPawn.h"
 #include "Pawns/FortPlayerPawn.h"
@@ -1076,7 +1076,7 @@ void AFortPlayerController::ApplyHomebaseGadgets()
     AFortInventory* Inventory = WorldInventory;
     AFortQuickBars* Bars = QuickBars;
     UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
-    UFortMcpProfileAccount* AccountProfile = PlayerInfo ? static_cast<UFortMcpProfileAccount*>(PlayerInfo->AccountProfile) : nullptr;
+    UFortMcpProfileCampaign* AccountProfile = PlayerInfo ? static_cast<UFortMcpProfileCampaign*>(PlayerInfo->AccountProfile) : nullptr;
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
     if (Role != ROLE_Authority || !Inventory || !Bars || !AccountProfile || !GameData || !Finder::ResolveHomebaseGadgetsLive())
     {

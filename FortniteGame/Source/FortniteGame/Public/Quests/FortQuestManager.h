@@ -67,7 +67,7 @@ struct FFortQuestEarnedBadgeData
 class AFortPlayerController;
 class UFortHero;
 class UFortItemDefinition;
-class UFortMcpProfileAccount;
+class UFortMcpProfileCampaign;
 class UFortMcpProfileWorld;
 class UFortQuestItemDefinition;
 
@@ -163,7 +163,7 @@ class UFortRegisteredPlayerInfo : public UObject
 
 public:
     DefineUStructProperty(FUniqueNetIdRepl, PlayerID)
-    DefineUProperty(UFortMcpProfileAccount*, AccountProfile)
+    DefineUProperty(UFortMcpProfileCampaign*, AccountProfile)
     DefineUProperty(UFortMcpProfileWorld*, WorldProfile)
     DefineUProperty(UFortQuestManager*, QuestManager)
     DefineUProperty(UFortHero*, AthenaMenuHeroDef)

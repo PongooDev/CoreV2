@@ -41,7 +41,8 @@ namespace Reflection
     class FTypeInfo
     {
     public:
-        FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind);
+        // InFormerName: the name older builds give the type, for a type Epic renamed (nullptr when it never was).
+        FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind, const wchar_t* InFormerName = nullptr);
 
         UStruct* Get();
         UClass* GetClass();
@@ -53,6 +54,7 @@ namespace Reflection
         const wchar_t* Package;
         const wchar_t* NativeName;
         ETypeKind Kind;
+        const wchar_t* FormerName;
         UStruct* Struct = nullptr;
     };
 
@@ -161,6 +163,14 @@ namespace Reflection
 #define DefineUnrealClass(ClassName, Package) \
 private: \
     static inline Reflection::FTypeInfo TypeInfo_##ClassName{ TEXT(#Package), TEXT(#ClassName), Reflection::ETypeKind::Class }; \
+public: \
+    static UClass* StaticClass() { return TypeInfo_##ClassName.GetClass(); } \
+    static UStruct* StaticReflectionOwner() { return TypeInfo_##ClassName.Get(); }
+
+// A class Epic renamed: ClassName is its current name (as 21.40 has it), FormerName the one older builds reflect it by.
+#define DefineRenamedUnrealClass(ClassName, FormerName, Package) \
+private: \
+    static inline Reflection::FTypeInfo TypeInfo_##ClassName{ TEXT(#Package), TEXT(#ClassName), Reflection::ETypeKind::Class, TEXT(#FormerName) }; \
 public: \
     static UClass* StaticClass() { return TypeInfo_##ClassName.GetClass(); } \
     static UStruct* StaticReflectionOwner() { return TypeInfo_##ClassName.Get(); }

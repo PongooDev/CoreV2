@@ -3,7 +3,7 @@
 #include "Finder.h"
 #include "Natives.h"
 
-void UFortHomebaseManager::GetSelectableGadgetItems(const UFortMcpProfileAccount* AccountProfile, IAbilitySystemInterface* AbilitySystem, TStructArray<FFortItemEntry>& OutItems) const
+void UFortHomebaseManager::GetSelectableGadgetItems(const UFortMcpProfileCampaign* AccountProfile, IAbilitySystemInterface* AbilitySystem, TStructArray<FFortItemEntry>& OutItems) const
 {
     if (Finder::ResolveHomebaseGadgetsLive())
     {
@@ -11,7 +11,7 @@ void UFortHomebaseManager::GetSelectableGadgetItems(const UFortMcpProfileAccount
     }
 }
 
-void UFortHomebaseManager::GetOwnedNodeAbilityKits(const UFortMcpProfileAccount* AccountProfile, TArray<UFortAbilityKit*>& OutKits) const
+void UFortHomebaseManager::GetOwnedNodeAbilityKits(const UFortMcpProfileCampaign* AccountProfile, TArray<UFortAbilityKit*>& OutKits) const
 {
     if (Finder::ResolveHomebaseGadgetsLive())
     {

@@ -24,14 +24,15 @@ struct FFortSavedModeLoadout
 
 static_assert(sizeof(FFortSavedModeLoadout) == 0x20);
 
-class UFortMcpProfileAccount : public UObject
+class UFortMcpProfileCampaign : public UObject
 {
-    DefineUnrealClass(UFortMcpProfileAccount, FortniteGame)
+    DefineRenamedUnrealClass(UFortMcpProfileCampaign, UFortMcpProfileAccount, FortniteGame)
     DefineUFunction(EarnScore)
     DefineUFunction(EndPrimaryMission)
 
 public:
-    void EarnScore(const FString& MatchmakingSessionId, const TArray<FAccountIdAndScore>& PlayersAndScores);
+    // Sends EarnScore as the dedicated server; false when the build has no such command.
+    bool EarnScore(const FString& MatchmakingSessionId, const TArray<FAccountIdAndScore>& PlayersAndScores);
     // Sends EndPrimaryMission as the dedicated server. Advance (TArray<FFortQuestObjectiveCompletion>) is moved into the
     // command and left empty. DifficultyIncreaseTier is sent where the function has it (2.5+).
     bool EndPrimaryMission(FScriptArray& Advance, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadgeData, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, bool bCriticalMatchBonus);

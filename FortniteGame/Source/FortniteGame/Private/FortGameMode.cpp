@@ -13,7 +13,7 @@
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Online/FortGameSessionDedicated.h"
-#include "Online/FortMcpProfileAccount.h"
+#include "Online/FortMcpProfileCampaign.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
@@ -159,14 +159,18 @@ void AFortGameMode::SendEarnScoreCommand(AFortPlayerController* SendingPlayer, c
 {
 #if WITH_SERVER_CODE
     UFortRegisteredPlayerInfo* PlayerInfo = SendingPlayer ? static_cast<UFortRegisteredPlayerInfo*>(SendingPlayer->MyPlayerInfo) : nullptr;
-    UFortMcpProfileAccount* AccountProfile = PlayerInfo ? static_cast<UFortMcpProfileAccount*>(PlayerInfo->AccountProfile) : nullptr;
+    UFortMcpProfileCampaign* AccountProfile = PlayerInfo ? static_cast<UFortMcpProfileCampaign*>(PlayerInfo->AccountProfile) : nullptr;
     if (!AccountProfile)
     {
         Log::Error(L"EarnScore: {} has no account profile, {} players get no score", SendingPlayer ? SendingPlayer->GetName().ToStdString() : std::wstring(L"(none)"), PlayersAndScores.Num());
         return;
     }
 
-    AccountProfile->EarnScore(GetGameSessionId(SendingPlayer->GetWorld()), PlayersAndScores);
+    if (!AccountProfile->EarnScore(GetGameSessionId(SendingPlayer->GetWorld()), PlayersAndScores))
+    {
+        Log::Error(L"EarnScore: {} has no EarnScore command, {} players get no score", AccountProfile->GetClass()->GetName().ToStdString(), PlayersAndScores.Num());
+        return;
+    }
     for (const FAccountIdAndScore& Entry : PlayersAndScores)
     {
         Log::Info(L"EarnScore: {} total score {}, critical match bonus {}", Entry.AccountId.ToStdString(), Entry.TotalScore, Entry.bCriticalMatchBonus);

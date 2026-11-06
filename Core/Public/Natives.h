@@ -89,7 +89,7 @@ class IAbilitySystemInterface;
 class UFortHero;
 class UFortAbilityKit;
 class UFortHomebaseManager;
-class UFortMcpProfileAccount;
+class UFortMcpProfileCampaign;
 class UFortPersonalVehicleItem;
 struct FFortSavedModeLoadout;
 class UGameplayAbility;
@@ -200,10 +200,10 @@ namespace Natives
     inline void (*AFortPlayerState_SetHeroType)(AFortPlayerState* This, UFortHero* Hero) = nullptr;
     // From 1.9 (1.9 0x87A800, 2.5 0xE4FAE0, 3.0 0xE75BB0); null on 1.1 to 1.8.2, which don't have it.
     inline void (*AFortPlayerState_ApplyCharacterCustomization)(AFortPlayerState* This, AFortPlayerPawn* Pawn) = nullptr;
-    inline FFortSavedModeLoadout* (*UFortMcpProfileAccount_GetModeLoadout)(const UFortMcpProfileAccount* This, FFortSavedModeLoadout* Result, FString LoadoutName) = nullptr;
+    inline FFortSavedModeLoadout* (*UFortMcpProfileCampaign_GetModeLoadout)(const UFortMcpProfileCampaign* This, FFortSavedModeLoadout* Result, FString LoadoutName) = nullptr;
     inline IAbilitySystemInterface* (*UFortRegisteredPlayerInfo_GetAbilitySystemInterface)(const UFortRegisteredPlayerInfo* This) = nullptr;
-    inline void (*UFortHomebaseManager_GetSelectableGadgetItems)(const UFortHomebaseManager* This, const UFortMcpProfileAccount* AccountProfile, IAbilitySystemInterface* AbilitySystem, FScriptArray& OutItems) = nullptr;
-    inline void (*UFortHomebaseManager_GetOwnedNodeAbilityKits)(const UFortHomebaseManager* This, const UFortMcpProfileAccount* AccountProfile, TArray<UFortAbilityKit*>& OutKits) = nullptr;
+    inline void (*UFortHomebaseManager_GetSelectableGadgetItems)(const UFortHomebaseManager* This, const UFortMcpProfileCampaign* AccountProfile, IAbilitySystemInterface* AbilitySystem, FScriptArray& OutItems) = nullptr;
+    inline void (*UFortHomebaseManager_GetOwnedNodeAbilityKits)(const UFortHomebaseManager* This, const UFortMcpProfileCampaign* AccountProfile, TArray<UFortAbilityKit*>& OutKits) = nullptr;
     inline void (*UFortGlobals_ApplyHeroEffectsAndAbilities)(UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles, FScriptArray& OutAbilitySetHandles) = nullptr;
     inline void* (*FScopedPredictionWindow_FScopedPredictionWindow)(void* This, UAbilitySystemComponent* AbilitySystemComponent, void* InPredictionKey, bool InSetReplicatedPredictionKey) = nullptr;
     inline void (*FScopedPredictionWindow_Destructor)(void* This) = nullptr;

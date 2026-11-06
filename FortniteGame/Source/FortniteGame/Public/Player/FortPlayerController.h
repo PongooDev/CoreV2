@@ -19,7 +19,7 @@ class IFortInventoryOwnerInterface;
 class AFortQuickBars;
 class UFortHero;
 class UFortItemDefinition;
-class UFortMcpProfileAccount;
+class UFortMcpProfileCampaign;
 class UFortMontageItemDefinitionBase;
 class UFortPersonalVehicleItem;
 class UFortQuestManager;
@@ -75,7 +75,7 @@ public:
     DefineUProperty(bool, bShouldReceiveCriticalMatchBonus)
     DefineUProperty(UFortRegisteredPlayerInfo*, MyPlayerInfo)
     // The player's profile0 (the server queries it for each player as the dedicated server).
-    DefineUProperty(UFortMcpProfileAccount*, MainMcpProfile)
+    DefineUProperty(UFortMcpProfileCampaign*, MainMcpProfile)
     DefineUProperty(int32_t, OverriddenBackpackSize)
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
     DefineUProperty(TAssetPtr<UObject>, StartRepairSound)

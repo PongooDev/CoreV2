@@ -16,7 +16,7 @@
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Natives.h"
-#include "Online/FortMcpProfileAccount.h"
+#include "Online/FortMcpProfileCampaign.h"
 #include "Online/FortMcpProfileWorld.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
@@ -196,9 +196,9 @@ namespace
         static bool HasObjectiveCompletionCount() { return Member_ObjectiveCompletionCount.IsAvailable(); }
     };
 
-    class UFortMcpProfileQuest : public UObject
+    class UFortMcpProfileSubgame : public UObject
     {
-        DefineUnrealClass(UFortMcpProfileQuest, FortniteGame)
+        DefineRenamedUnrealClass(UFortMcpProfileSubgame, UFortMcpProfileQuest, FortniteGame)
         DefineUFunction(UpdateQuests)
 
     public:
@@ -206,7 +206,7 @@ namespace
         // command, and Completed is called with the quest manager when the profile answers.
         bool UpdateQuests(FScriptArray& Advance, UObject* Object, void (*Completed)(UObject* Object, const void* Result))
         {
-            Reflection::FParams Params(StaticFunction_UpdateQuests(), true);
+            Reflection::FParams Params(FindStaticFunction_UpdateQuests(), true);
             FScriptArray* AdvanceParameter = Params.Get<FScriptArray>(L"Advance");
             FDedicatedServerUrlContext* Context = Params.Get<FDedicatedServerUrlContext>(L"Context");
             if (!AdvanceParameter || !Context)
@@ -851,7 +851,7 @@ namespace
         {
             return;
         }
-        UFortMcpProfileQuest* Profile = Cast<UFortMcpProfileQuest>(static_cast<FWeakObjectPtr&>(QuestManager->BoundProfile).Get());
+        UFortMcpProfileSubgame* Profile = Cast<UFortMcpProfileSubgame>(static_cast<FWeakObjectPtr&>(QuestManager->BoundProfile).Get());
         if (!Profile)
         {
             Log::Warning(L"SaveStatEvents for {}: no profile is bound, the progress stays pending", QuestManager->GetName().ToStdString());
@@ -1156,11 +1156,11 @@ void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionI
 #if WITH_SERVER_CODE
     // 1.10 strips it (Finder::ResolveZoneEndLive). As 1.9.1's does (0x8BA710), the quest manager's bound account profile
     // sends EndPrimaryMission with the objective progress not yet saved, through the dedicated server's command URL.
-    UFortMcpProfileAccount* Account = Cast<UFortMcpProfileAccount>(static_cast<FWeakObjectPtr&>(BoundProfile).Get());
+    UFortMcpProfileCampaign* Account = Cast<UFortMcpProfileCampaign>(static_cast<FWeakObjectPtr&>(BoundProfile).Get());
     FScriptArray& Pending = PendingChanges;
     if (!Account || !Account->EndPrimaryMission(Pending, MatchmakingSessionId, MissionName, MissionStatus, EarnedBadges, DifficultyIncreaseTier, NumMissionPoints, bCriticalMatchBonus))
     {
-        Log::Error(L"EndPrimaryMission: {} has no account profile to send it to", GetName().ToStdString());
+        Log::Error(L"EndPrimaryMission: {} has no campaign profile to send it to, or the build has no such command", GetName().ToStdString());
     }
 #endif
 }

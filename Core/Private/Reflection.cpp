@@ -42,20 +42,25 @@ namespace
     }
 }
 
-Reflection::FTypeInfo::FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind)
-    : Package(InPackage), NativeName(InNativeName), Kind(InKind)
+Reflection::FTypeInfo::FTypeInfo(const wchar_t* InPackage, const wchar_t* InNativeName, ETypeKind InKind, const wchar_t* InFormerName)
+    : Package(InPackage), NativeName(InNativeName), Kind(InKind), FormerName(InFormerName)
 {
     Types().push_back(this);
 }
 
 UStruct* Reflection::FTypeInfo::Get()
 {
-    if (!Struct)
+    const EClassCastFlags Expected = Kind == ETypeKind::Class ? CASTCLASS_UClass : CASTCLASS_UScriptStruct;
+    // The current name first, then the one older builds had (3.5 renamed UFortMcpProfileAccount to
+    // UFortMcpProfileCampaign and UFortMcpProfileQuest to UFortMcpProfileSubgame).
+    for (const wchar_t* Name : { NativeName, FormerName })
     {
-        const std::wstring Path = std::format(L"/Script/{}.{}", Package, NativeName + 1);
+        if (Struct || !Name)
+        {
+            break;
+        }
+        const std::wstring Path = std::format(L"/Script/{}.{}", Package, Name + 1);
         UObject* Found = StaticFindObject(nullptr, nullptr, Path.c_str(), false);
-        const EClassCastFlags Expected = Kind == ETypeKind::Class ? CASTCLASS_UClass : CASTCLASS_UScriptStruct;
-
         if (Found && Found->GetClass()->HasAnyCastFlag(Expected))
         {
             Struct = static_cast<UStruct*>(Found);

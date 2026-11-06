@@ -6064,7 +6064,7 @@ bool Finder::ResolveTheaterMapDataLive()
 
 bool Finder::ResolveHomebaseGadgetsLive()
 {
-    if (Natives::UFortMcpProfileAccount_GetModeLoadout && Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface && Natives::UFortHomebaseManager_GetSelectableGadgetItems && Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits)
+    if (Natives::UFortMcpProfileCampaign_GetModeLoadout && Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface && Natives::UFortHomebaseManager_GetSelectableGadgetItems && Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits)
     {
         return true;
     }
@@ -6118,7 +6118,7 @@ bool Finder::ResolveHomebaseGadgetsLive()
         Log::Error(L"Finder: homebase gadgets not found (owned nodes {}, selectable gadgets {}, gadget items {}, mode loadout {})", OwnedNodes != 0, SelectableGadgets != 0, GadgetItems != 0, ModeLoadout != 0);
         return false;
     }
-    Natives::UFortMcpProfileAccount_GetModeLoadout = reinterpret_cast<decltype(Natives::UFortMcpProfileAccount_GetModeLoadout)>(ModeLoadout);
+    Natives::UFortMcpProfileCampaign_GetModeLoadout = reinterpret_cast<decltype(Natives::UFortMcpProfileCampaign_GetModeLoadout)>(ModeLoadout);
     Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface = reinterpret_cast<decltype(Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface)>(AbilitySystemInterface);
     Natives::UFortHomebaseManager_GetSelectableGadgetItems = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetSelectableGadgetItems)>(GadgetItems);
     Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits)>(OwnedNodeKits);

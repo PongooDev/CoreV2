@@ -367,7 +367,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSession.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortGameSessionDedicated.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortLobbyBeaconHost.h" />
-    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileAccount.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileCampaign.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileWorld.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortPartyBeaconHost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
@@ -555,7 +555,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortObjectiveSucceededParams.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortGameSession.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortLobbyBeaconHost.cpp" />
-    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileAccount.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileCampaign.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\FortMcpProfileWorld.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Online\NotForLicensees\FortMcpConfig.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Pawns\FortAIPawn.cpp" />

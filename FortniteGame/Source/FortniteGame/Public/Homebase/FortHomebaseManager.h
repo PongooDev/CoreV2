@@ -7,13 +7,13 @@
 
 class IAbilitySystemInterface;
 class UFortAbilityKit;
-class UFortMcpProfileAccount;
+class UFortMcpProfileCampaign;
 
 class UFortHomebaseManager : public UObject
 {
     DefineUnrealClass(UFortHomebaseManager, FortniteGame)
 
 public:
-    void GetSelectableGadgetItems(const UFortMcpProfileAccount* AccountProfile, IAbilitySystemInterface* AbilitySystem, TStructArray<FFortItemEntry>& OutItems) const;
-    void GetOwnedNodeAbilityKits(const UFortMcpProfileAccount* AccountProfile, TArray<UFortAbilityKit*>& OutKits) const;
+    void GetSelectableGadgetItems(const UFortMcpProfileCampaign* AccountProfile, IAbilitySystemInterface* AbilitySystem, TStructArray<FFortItemEntry>& OutItems) const;
+    void GetOwnedNodeAbilityKits(const UFortMcpProfileCampaign* AccountProfile, TArray<UFortAbilityKit*>& OutKits) const;
 };

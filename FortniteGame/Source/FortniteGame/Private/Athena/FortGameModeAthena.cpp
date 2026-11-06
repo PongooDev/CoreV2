@@ -1629,6 +1629,30 @@ namespace
         return Playlist ? static_cast<int32_t>(Playlist->PlaylistId) : -1;
     }
 
+    // The aircraft paths are the match's playlist's. The world's playlist built them: OnPlaylistDataLoaded (4.1 0xA2F500)
+    // builds the map info's FlightInfos (0xA2B8F0) once, while bFlightPathInitialized is false, and sets it, and the world
+    // starts on the map URL's playlist, the match's coming with its assignment. The paths are one per team with
+    // OpposingAirCraftForEachTeam (AirCraftBehavior 1, which SetCurrentPlaylistId, 0xA6DD20, gives playlists 50 and 11,
+    // with TeamCount the playlist's MaxTeamCount), else one, and StartAircraftPhase (0xA3B530) spawns TeamCount aircraft
+    // with no check that a path is there: each takes FlightInfos[its index] (0xA3A830). So 50v50 v2 had one path for two
+    // buses (#295): the second took memory past the array, never reached its drop zone, and OnAircraftEnteredDropZone
+    // (0xA2E350) unlocks the aircraft (bAircraftIsLocked, which the jump checks, 0xA2C750) only once every aircraft has,
+    // so nobody could jump until the first bus dropped everyone; nor did the match reach SafeZones, which
+    // OnAircraftExitedDropZone (0xA2E400) starts once every aircraft has left its drop zone, so the HUD's timer (0xA740D0)
+    // stayed at the aircraft phase's 0:00. With the flag cleared the game builds them again, for the match's playlist and
+    // its game data, at the next OnPlaylistDataLoaded or at StartAircraftPhase (both empty FlightInfos first), as it does
+    // when the world starts on the match's playlist. From 3.5 (OpposingAirCraftForEachTeam): 3.5.1 to 4.1 have the same
+    // checks.
+    void RebuildFlightPathsFor(AFortGameModeAthena* GameMode, int32_t PlaylistId, int32_t WorldPlaylistId)
+    {
+        if (WorldPlaylistId < 0 || !AFortGameModeAthena::HasFlightPathInitialized() || !AFortGameStateAthena::HasAircrafts() || !GameMode->bFlightPathInitialized)
+        {
+            return;
+        }
+        GameMode->bFlightPathInitialized = false;
+        Log::Info(L"Battle Royale: the aircraft paths were built for playlist {}, so the game builds them again for the match's playlist {}", WorldPlaylistId, PlaylistId);
+    }
+
     void WatchPlaylistDataTablesOf(FWeakObjectPtr GameMode)
     {
         GameThread::Enqueue([GameMode]()
@@ -1655,6 +1679,7 @@ namespace
             {
                 const int32_t Previous = TablesPlaylistId;
                 TablesPlaylistId = PlaylistId;
+                RebuildFlightPathsFor(Athena, PlaylistId, Previous);
                 Natives::AFortGameModeAthena_ApplyPlaylistDataTables(Athena);
                 MergeDefaultLootRows(PlaylistId);
                 const std::pair<UDataTable*, UDataTable*> Tables = PlaylistLootTables(Athena, PlaylistId);

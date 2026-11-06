@@ -30,8 +30,13 @@ struct FDeathInfo
     DefineUProperty(bool, bDBNO)
     // EDeathCause (from 1.8): OutsideSafeZone, FallDamage, Pistol, ... Trap, DBNOTimeout, ..., Unspecified.
     DefineUProperty(uint8_t, DeathCause)
+    // How far the eliminator's pawn was from the player, in cm (AActor::GetDistanceTo), 0 when nobody else eliminated
+    // them. The client's OnRep_DeathInfo (3.5.1 0xA617C0) shows it in metres (Distance * 0.01) after a Sniper kill
+    // feed line or past the game data's distance.
+    DefineUProperty(float, Distance)
 
 public:
+    static bool HasDistance() { return Member_Distance.IsAvailable(); }
     static bool IsReadable()
     {
         return Member_FinisherOrDowner.IsAvailable() && Member_bDBNO.IsAvailable();

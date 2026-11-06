@@ -261,6 +261,14 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         {
             DeathInfo.DeathCause = AFortPlayerStateAthena::ToDeathCause(DeadPawn, DamageTags, DeadPawn->bIsDBNO);
         }
+        // How far away the eliminator was, as the DBNO handling has it (4.1 0xAAE559, 0xAAE619): 0, then the
+        // eliminator's pawn's distance to this one when someone else eliminated the player.
+        if (FDeathInfo::HasDistance())
+        {
+            AController* Finisher = Downer ? Downer : Instigator;
+            APawn* FinisherPawn = Finisher && Finisher != this ? Finisher->GetPawn() : nullptr;
+            DeathInfo.Distance = FinisherPawn && DeadPawn ? FinisherPawn->GetDistanceTo(DeadPawn) : 0.0f;
+        }
         if (Instigator)
         {
             DeathInfo.FinisherOrDowner = AthenaStateOf(Downer ? Downer : Instigator);

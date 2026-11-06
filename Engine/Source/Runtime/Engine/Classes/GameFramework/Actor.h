@@ -87,6 +87,7 @@ public:
     DefineUFunction(K2_AttachToActor)
     DefineUFunction(K2_DestroyActor)
     DefineUFunction(GetComponentsByClass)
+    DefineUFunction(GetDistanceTo)
 
     ENetRole GetRemoteRole() const { return RemoteRole; }
     AActor* GetOwner() const { return Owner; }
@@ -121,6 +122,8 @@ public:
     void K2_DestroyActor();
     TArray<UActorComponent*> GetComponentsByClass(UClass* ComponentClass) const;
     FVector GetVelocity() const;
+    // The distance between the two actors' locations, in cm; 0 without OtherActor.
+    float GetDistanceTo(const AActor* OtherActor) const;
     float GetNetPriority(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);
     bool GetNetDormancy(const FVector& ViewPos, const FVector& ViewDir, AActor* Viewer, AActor* ViewTarget, UActorChannel* InChannel, float Time, bool bLowBandwidth);
     bool IsNetRelevantFor(const AActor* RealViewer, const AActor* ViewTarget, const FVector& SrcLocation) const;

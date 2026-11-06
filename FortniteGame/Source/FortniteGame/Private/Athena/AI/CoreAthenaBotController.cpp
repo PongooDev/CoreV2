@@ -6953,6 +6953,11 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
         {
             DeathInfo.DeathCause = AFortPlayerStateAthena::ToDeathCause(Pawn, Pawn->DeathTags, false);
         }
+        if (FDeathInfo::HasDistance())
+        {
+            AFortPlayerPawn* KillerPawn = KillerState && KillerState != PlayerState ? KillerState->GetCurrentPawn() : nullptr;
+            DeathInfo.Distance = KillerPawn && Pawn ? KillerPawn->GetDistanceTo(Pawn) : 0.0f;
+        }
         PlayerState->ForceNetUpdate();
     }
     DropInventory();

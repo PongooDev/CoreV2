@@ -95,6 +95,13 @@ FVector AActor::GetActorScale3D() const
     return Params.Call(const_cast<AActor*>(this)) ? Params.Take<FVector>(L"ReturnValue") : FVector(1.0f, 1.0f, 1.0f);
 }
 
+float AActor::GetDistanceTo(const AActor* OtherActor) const
+{
+    Reflection::FParams Params(StaticFunction_GetDistanceTo());
+    Params.Set(L"OtherActor", const_cast<AActor*>(OtherActor));
+    return Params.Call(const_cast<AActor*>(this)) ? Params.Take<float>(L"ReturnValue") : 0.0f;
+}
+
 void AActor::SetReplicates(bool bInReplicates)
 {
     Reflection::FParams Params(StaticFunction_SetReplicates());

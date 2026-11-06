@@ -397,6 +397,18 @@ AFortPickup* AFortPickup::CreatePickup(UWorld* World, const FFortItemEntry& Item
     {
         return nullptr;
     }
+    if (Natives::AFortPickup_CreateFromData)
+    {
+        // 4.1 on. bRandomRotation stays off: Core's callers set it themselves when they want it.
+        FFortCreatePickupData PickupData;
+        PickupData.World = World;
+        PickupData.ItemEntry = &ItemEntry;
+        PickupData.SpawnLocation = SpawnLocation;
+        PickupData.SpawnRotation = SpawnRotation;
+        PickupData.PlayerController = OptionalOwner;
+        PickupData.OverrideClass = OverrideClass;
+        return Natives::AFortPickup_CreateFromData(PickupData);
+    }
     return Natives::AFortPickup_CreatePickup(World, ItemEntry, SpawnLocation, SpawnRotation, OptionalOwner, OverrideClass, 0);
 }
 

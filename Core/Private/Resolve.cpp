@@ -4672,10 +4672,17 @@ bool Finder::ResolvePickupLive()
         // 1.10's constructor (0x6B0A90) takes no alterations, so nothing is stored for them before "lea r8d, [r9+1]"
         // (0x6FF37C); the entry still goes straight on (mov rdx, rax) to CreatePickup (0x6B6D10).
         const uintptr_t CountSetup = FindInstruction(SpawnMissionItemPickup, SpawnMissionItemPickupEnd, { 0x45, 0x8D, 0x41, 0x01, 0xE8 });
-        const uintptr_t Pass = CountSetup ? FindInstruction(CountSetup + 9, CountSetup + 0x30, { 0x48, 0x8B, 0xD0 }) : 0;
+        // 4.1 stores the entry in its FFortCreatePickupData instead (mov [rsp+48h], rax, 0xDB623C) and passes that
+        // (lea rcx, [rsp+40h]) to AFortPickup::CreateFromData (0xD73420), the next call.
+        const bool bFromData = CountSetup && FindInstruction(CountSetup + 9, CountSetup + 14, { 0x48, 0x89, 0x44, 0x24, -1 }) == CountSetup + 9;
+        const uintptr_t Pass = CountSetup ? (bFromData ? CountSetup + 9 : FindInstruction(CountSetup + 9, CountSetup + 0x30, { 0x48, 0x8B, 0xD0 })) : 0;
         const uintptr_t Create = Pass ? FindRawCall(Pass, SpawnMissionItemPickupEnd) : 0;
         EntryConstructor = Create ? Finder::RelativeTarget(CountSetup + 4, 1, 5) : 0;
         CreatePickup = Create ? Finder::RelativeTarget(Create, 1, 5) : 0;
+        if (bFromData && CreatePickup)
+        {
+            Natives::AFortPickup_CreateFromData = reinterpret_cast<decltype(Natives::AFortPickup_CreateFromData)>(CreatePickup);
+        }
     }
 
     if (!EntryConstructor || !CreatePickup)

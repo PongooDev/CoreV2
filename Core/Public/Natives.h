@@ -27,6 +27,7 @@ class AFortInventory;
 class UFortWorldItem;
 class UFortWorldItemDefinition;
 struct FGuid;
+struct FFortCreatePickupData;
 class AFortGameState;
 class UFortMissionInfo;
 struct FFortMissionManagerRecord;
@@ -283,6 +284,9 @@ namespace Natives
     inline void (*FFortItemEntry_MarkDirty)(FFortItemEntry* This) = nullptr;
     // 1.10 adds a seventh argument, which its callers pass as 0 (older builds ignore it).
     inline AFortPickup* (*AFortPickup_CreatePickup)(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation, AFortPlayerController* OptionalOwner, UClass* OverrideClass, uint64_t Unused) = nullptr;
+    // 4.1 (CL-4053532) on: CreatePickup takes its arguments as one FFortCreatePickupData (AFortPickup::CreateFromData).
+    // AFortPickup_CreatePickup then holds the same function, for the finders that look for its calls.
+    inline AFortPickup* (*AFortPickup_CreateFromData)(const FFortCreatePickupData& PickupData) = nullptr;
     inline void (*FFrame_StepExplicitProperty)(FFrame* This, void* const Result, UProperty* Property) = nullptr;
     inline bool (*UNetDriver_IsAdaptiveNetUpdateFrequencyEnabled)() = nullptr;
     inline void (*UNetDriver_TickFlush)(UNetDriver* This, float DeltaSeconds) = nullptr;

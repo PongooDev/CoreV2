@@ -39,6 +39,30 @@ public:
     static bool IsCombineAvailable();
 };
 
+// 4.1 (CL-4053532) on: what AFortPickup::CreateFromData (21.40's STAT_CreatePickupFromData; 4.1 0xD73420) takes in
+// place of CreatePickup's arguments. Native only, so the layout is 4.1's, read from CreateFromData and its callers
+// (SpawnMissionItemPickup 0xDB6190, SetPickupTarget 0xD8D3A0, SpawnDropPickup 0xF97E50); the PDB has no type for it,
+// so the names of the last members are Core's, after what CreateFromData does with them.
+struct FFortCreatePickupData
+{
+    UWorld* World = nullptr;
+    const FFortItemEntry* ItemEntry = nullptr;
+    const FVector* SpawnLocation = nullptr;
+    const FRotator* SpawnRotation = nullptr;
+    // The pickup's owner when bOnlyRelevantToOwner is set; given to the pickup (0xD8D1F0) either way.
+    AFortPlayerController* PlayerController = nullptr;
+    UClass* OverrideClass = nullptr;
+    // The spawn's owner otherwise; a pickup spawned at it is raised above its root component.
+    AActor* SpawnOwner = nullptr;
+    // AFortPickup::bRandomRotation.
+    bool bRandomRotation = false;
+    // Spawns the pickup bOnlyRelevantToOwner, owned by PlayerController.
+    bool bOnlyRelevantToOwner = false;
+    // EFortPickupSourceTypeFlag bits, or'd into AFortPickup::PickupSourceTypeFlags; Epic's callers pass Other (15).
+    uint32_t PickupSourceTypeFlags = 15;
+};
+static_assert(sizeof(FFortCreatePickupData) == 0x40);
+
 class AFortPickup : public AActor
 {
     DefineUnrealClass(AFortPickup, FortniteGame)

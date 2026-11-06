@@ -1848,6 +1848,7 @@ void AFortPlayerController::HookVTables()
 
     HookBuildingVTables();
     HookEmoteVTables();
+    HookSprayVTables();
     HookPersonalVehicleVTables();
 }
 

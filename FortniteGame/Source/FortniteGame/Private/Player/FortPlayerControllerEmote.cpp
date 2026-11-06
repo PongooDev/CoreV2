@@ -9,7 +9,9 @@
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "HAL/IConsoleManager.h"
 #include "Hooks.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
@@ -17,10 +19,12 @@
 #include "ObjectLayout.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Quests/FortQuestManager.h"
+#include "ReflectionParams.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
 
+#include <algorithm>
 #include <vector>
 
 // 1.9 (CL-3757339) strips the play half of AFortPlayerController::ServerPlayEmoteItem_Implementation, the RPC the
@@ -161,6 +165,224 @@ void AFortPlayerController::ServerEmote_Implementation(const FName& AssetName)
     }
     ServerPlayEmoteItem_Implementation(EmoteAsset);
 #endif
+}
+
+// Sprays (4.0, CL-4039451; #283). The emote wheel's sprays (UAthenaSprayItemDefinition) go through the controller's own
+// PlaySprayItem (slot 0x30E, 0xF6F430), which is kept: it asks CanPerformAction(Gameplay.Action.Player.Spray), waits out
+// SprayOffCooldownTime (MinSprayCooldown or the spray's own cooldown, whichever is longer) and sends
+// ServerPlaySprayItem(SprayAsset). 4.0 strips that RPC's body: AFortPlayerController's slot 0x1B1 (and every controller
+// class's) is the shared empty function, so nothing was ever sprayed.
+//
+// What is left says what the body did. UFortGameData::SprayGameplayAbility is GAB_Spray_Generic, a GAB_Emote_Generic
+// that takes its spray from GetCurrentSourceObject (as the emote ability takes its emote) and, on the server once its
+// montage starts, traces from the pawn and spawns BP_SprayDecal (an AFortSprayDecalInstance) with the spray and
+// SpawningPlayerController set; the decal's BeginPlay calls the native SetSprayParameters (0xBA37A0, kept), which fills
+// the replicated SprayInfo (the spray, the player's banner and stat value). The game's cvar fort.NumSpraysAlivePerPlayer
+// (3: "if a spray is triggered when this many exist already, then the oldest one will quickly fade out") is registered
+// but nothing reads it any more, and nothing but the controller's constructor and destructor touches its
+// ActiveSprayInstances: both went with the body. AFortSprayDecalInstance::StartSprayFadeOutDueToNewPlacement is the
+// decal's own one-second fade (BP_SprayDecal: DecalFadeoutTime 1, SetLifeSpan).
+//
+// So this gives the pawn SprayGameplayAbility with the spray as the spec's source object and activates it once, as the
+// emote body does with EmoteGameplayAbility, fading the player's oldest spray when fort.NumSpraysAlivePerPlayer are
+// already on the map. The cooldown is the client's own (PlaySprayItem above); the 1.8.2 emote body the spray body
+// mirrors checks none either.
+// An ABuildingSMActor in the game; only the fade is called.
+class AFortSprayDecalInstance : public AActor
+{
+    DefineUnrealClass(AFortSprayDecalInstance, FortniteGame)
+
+public:
+    DefineUFunction(StartSprayFadeOutDueToNewPlacement)
+};
+
+namespace
+{
+    TAutoConsoleVariable<int32_t> CVarNumSpraysAlivePerPlayer(
+        TEXT("fort.NumSpraysAlivePerPlayer"),
+        3,
+        TEXT("The number of sprays allowed to be alive per player (if a spray is triggered when this many exist already, then the oldest one will quickly fade out)"));
+
+    // A decal that is gone or fading (StartSprayFadeOutDueToNewPlacement gives it a lifespan) no longer counts.
+    bool IsSprayAlive(const AFortSprayDecalInstance* Decal)
+    {
+        return Decal && !Decal->IsPendingKill() && Decal->InitialLifeSpan <= 0.0f;
+    }
+
+    // BP_SprayDecal's SpawningPlayerController, which GAB_Spray_Generic sets before the decal finishes spawning.
+    AFortPlayerController* GetSpawningPlayerController(AFortSprayDecalInstance* Decal)
+    {
+        const UProperty* Property = Decal->GetClass()->FindPropertyByName(FName(L"SpawningPlayerController", FNAME_Find));
+        return Property ? *reinterpret_cast<AFortPlayerController**>(reinterpret_cast<uint8_t*>(Decal) + Property->GetOffset_ForInternal()) : nullptr;
+    }
+}
+
+void AFortPlayerController::UpdateActiveSprayInstances()
+{
+#if WITH_SERVER_CODE
+    TArray<AFortSprayDecalInstance*>& Active = ActiveSprayInstances;
+    for (int32_t Index = Active.Num() - 1; Index >= 0; --Index)
+    {
+        if (!IsSprayAlive(Active[Index]))
+        {
+            Active.RemoveAt(Index);
+        }
+    }
+
+    // The decal the last spray placed (the ability spawns it once its montage starts, after the RPC has returned).
+    for (TObjectIterator<AFortSprayDecalInstance> It; It; ++It)
+    {
+        AFortSprayDecalInstance* Decal = *It;
+        if (IsSprayAlive(Decal) && GetSpawningPlayerController(Decal) == this && !Active.Contains(Decal))
+        {
+            Active.Add(Decal);
+        }
+    }
+#endif
+}
+
+void AFortPlayerController::ServerPlaySprayItem_Implementation(UAthenaSprayItemDefinition* SprayAsset)
+{
+#if WITH_SERVER_CODE
+    if (!SprayAsset || !SprayAsset->IsA(UAthenaSprayItemDefinition::StaticClass()))
+    {
+        return;
+    }
+
+    AFortPawn* Pawn = MyFortPawn;
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    if (!AbilitySystem && Pawn)
+    {
+        AbilitySystem = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Pawn);
+    }
+    if (!AbilitySystem)
+    {
+        return;
+    }
+
+    // The tag the client's PlaySprayItem asks for, asked again here.
+    const FGameplayTag SprayTag{ FName(L"Gameplay.Action.Player.Spray") };
+    if (!CallVirtual<bool>(this, Natives::AFortPlayerController_CanPerformActionIndex, &SprayTag))
+    {
+        return;
+    }
+
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UClass* AbilityClass = GameData ? GameData->SprayGameplayAbility.LoadSynchronous() : nullptr;
+    UGameplayAbility* Ability = AbilityClass && AbilityClass->IsChildOf(UGameplayAbility::StaticClass()) ? static_cast<UGameplayAbility*>(AbilityClass->GetDefaultObject()) : nullptr;
+    if (!Ability)
+    {
+        Log::Warning(L"Spray: {} asked to spray {}, but UFortGameData::SprayGameplayAbility isn't a gameplay ability", GetName().ToStdString(), SprayAsset->GetName().ToStdString());
+        return;
+    }
+    SprayAsset->Animation.LoadSynchronous();
+
+    // FGameplayAbilitySpec(Ability's default object, level 1, no input, SprayAsset), with a new handle.
+    UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
+    std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
+    SpecStruct->InitializeStruct(SpecStorage.data());
+    FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
+    FGameplayAbilitySpecHandle NewHandle;
+    NewHandle.GenerateNewHandle();
+    Spec.Handle = NewHandle;
+    Spec.Ability = Ability;
+    Spec.Level = 1;
+    Spec.InputID = INDEX_NONE;
+    Spec.SourceObject = SprayAsset;
+    const FGameplayAbilitySpecHandle Handle = AbilitySystem->GiveAbilityAndActivateOnce(Spec);
+    SpecStruct->DestroyStruct(SpecStorage.data());
+
+    if (!Handle.IsValid())
+    {
+        Log::Warning(L"Spray: {} couldn't spray {} ({} wasn't given)", GetName().ToStdString(), SprayAsset->GetName().ToStdString(), AbilityClass->GetName().ToStdString());
+        return;
+    }
+
+    // A spray triggered with fort.NumSpraysAlivePerPlayer already on the map fades the oldest out.
+    UpdateActiveSprayInstances();
+    TArray<AFortSprayDecalInstance*>& Active = ActiveSprayInstances;
+    const int32_t MaxSprays = std::max(CVarNumSpraysAlivePerPlayer.GetValueOnGameThread(), 1);
+    while (Active.Num() >= MaxSprays)
+    {
+        AFortSprayDecalInstance* Oldest = Active[0];
+        Active.RemoveAt(0);
+        Reflection::FParams Params(Oldest->FindFunction(AFortSprayDecalInstance::StaticFunction_StartSprayFadeOutDueToNewPlacement()->GetFName()));
+        Params.Call(Oldest);
+    }
+
+    Log::Info(L"Spray: {} sprays {}", GetName().ToStdString(), SprayAsset->GetName().ToStdString());
+    SendSprayStatEvent(SprayAsset);
+#endif
+}
+
+// 4.0's EFortQuestObjectiveStatEvent::Spray, which went with the stripped body as the Emote event went with the emote's:
+// sent as the emote's is (SendEmoteStatEvent), the spray as the target, the player's source and context tags (their
+// location among them), once.
+void AFortPlayerController::SendSprayStatEvent(UAthenaSprayItemDefinition* SprayAsset)
+{
+#if WITH_SERVER_CODE
+    const EFortQuestObjectiveStatEvent Spray{ EFortQuestObjectiveStatEvent::StaticEnumInfo().FindValue(L"Spray") };
+    UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
+    if (static_cast<uint8_t>(Spray) == Reflection::InvalidEnumValue || !PlayerInfo)
+    {
+        return;
+    }
+    UFortQuestManager* QuestManager = Configuration::Get().IsBattleRoyale() ? PlayerInfo->GetAthenaQuestManager() : PlayerInfo->GetCampaignQuestManager();
+    if (QuestManager)
+    {
+        QuestManager->SendItemStatEvent(Spray, SprayAsset, 1);
+    }
+#endif
+}
+
+void AFortPlayerController::HookSprayVTables()
+{
+    // Builds before 4.0 have no sprays.
+    UFunction* ServerPlaySprayItem = FindStaticFunction_ServerPlaySprayItem();
+    if (!ServerPlaySprayItem || !UAthenaSprayItemDefinition::StaticClass())
+    {
+        return;
+    }
+
+    const int32_t Index = Finder::ImplementationIndex(ServerPlaySprayItem);
+    UObject* PlayerControllerDefault = StaticClass()->GetDefaultObject(false);
+    void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;
+    if (Index < 0 || !PlayerControllerVTable)
+    {
+        Log::Error(L"Finder: AFortPlayerController::ServerPlaySprayItem_Implementation slot not found");
+        return;
+    }
+    if (PlayerControllerVTable[Index] != Natives::SharedEmptyFunction)
+    {
+        Log::Info(L"Finder: AFortPlayerController::ServerPlaySprayItem_Implementation (slot 0x{:X}) is native in this build", Index);
+        return;
+    }
+    if (!Member_ActiveSprayInstances.IsAvailable() || !AFortSprayDecalInstance::FindStaticFunction_StartSprayFadeOutDueToNewPlacement()
+        || !Finder::ResolveEmoteLive(MyFortPawnOffset(), AFortPlayerPawn::StasisModeOffset()))
+    {
+        // ResolveEmoteLive finds the spec handle counter, GiveAbilityAndActivateOnce and CanPerformAction.
+        Log::Error(L"Spray: this build strips ServerPlaySprayItem_Implementation and its helpers were not found, so nobody can spray");
+        return;
+    }
+
+    int32_t Swapped = 0;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[Index] == Natives::SharedEmptyFunction)
+        {
+            Hooks::SwapVTable(L"AFortPlayerController::ServerPlaySprayItem_Implementation", VTable, Index, reinterpret_cast<void*>(&ServerPlaySprayItem_ImplementationHK));
+            ++Swapped;
+        }
+    }
+    Log::Info(L"Finder: AFortPlayerController::ServerPlaySprayItem_Implementation slot 0x{:X}, restored in {} controller classes", Index, Swapped);
+}
+
+void AFortPlayerController::ServerPlaySprayItem_ImplementationHK(AFortPlayerController* This, UAthenaSprayItemDefinition* SprayAsset)
+{
+    This->ServerPlaySprayItem_Implementation(SprayAsset);
 }
 
 void AFortPlayerController::HookEmoteVTables()

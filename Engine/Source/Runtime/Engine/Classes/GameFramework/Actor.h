@@ -67,6 +67,8 @@ public:
     DefineUProperty(int32_t, NetTag)
     DefineUProperty(float, NetUpdateFrequency)
     DefineUProperty(float, MinNetUpdateFrequency)
+    // SetLifeSpan's lifespan (0 for none).
+    DefineUProperty(float, InitialLifeSpan)
     DefineNativeMember(TEnumAsByte<ENetDormancy>, NetDormancy, AActor_NetDormancy)
     DefineNativeBitfield(bActorInitialized, AActor_bActorInitialized, Natives::AActor_bActorInitializedMask)
     DefineUProperty(USceneComponent*, RootComponent)

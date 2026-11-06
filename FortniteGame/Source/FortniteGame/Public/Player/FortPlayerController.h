@@ -17,6 +17,7 @@ class AFortWeapon;
 class APawn;
 class IFortInventoryOwnerInterface;
 class AFortQuickBars;
+class AFortSprayDecalInstance;
 class UFortHero;
 class UFortItemDefinition;
 class UFortMcpProfileCampaign;
@@ -25,6 +26,7 @@ class UFortPersonalVehicleItem;
 class UFortQuestManager;
 class UFortRegisteredPlayerInfo;
 class UFortSchematicItem;
+class UAthenaSprayItemDefinition;
 class UFortWorldItem;
 class UStatManager;
 struct FFortItemEntry;
@@ -85,6 +87,8 @@ public:
     DefineUProperty(uint8_t, CurrentResourceType)
     DefineUProperty(uint8_t, CurrentResourceLevel)
     DefineUProperty(UClass*, CurrentBuildableClass)
+    // 4.0: the player's sprays still on the map, oldest first (fort.NumSpraysAlivePerPlayer of them at most).
+    DefineUProperty(TArray<AFortSprayDecalInstance*>, ActiveSprayInstances)
     static bool HasBuildResourceSelection() { return Member_CurrentResourceType.IsAvailable() && Member_CurrentResourceLevel.IsAvailable() && Member_CurrentBuildableClass.IsAvailable(); }
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
@@ -118,6 +122,7 @@ public:
     DefineUFunction(FortClientPlaySoundAtLocation)
     DefineUFunction(ServerPlayEmoteItem)
     DefineUFunction(ServerEmote)
+    DefineUFunction(ServerPlaySprayItem)
     DefineUFunction(ServerModifyStat)
     DefineUFunction(TogglePersonalVehicle)
     DefineUFunction(IsPersonalVehicleAvailable)
@@ -178,6 +183,10 @@ public:
     void SendEmoteStatEvent(UFortMontageItemDefinitionBase* EmoteAsset);
     // Save the World's emotes (/dance, the emote wheel): 1.9 strips ServerEmote's load callback; Core's plays the emote.
     void ServerEmote_Implementation(const FName& AssetName);
+    // Sprays (4.0): the emote wheel's sprays send ServerPlaySprayItem, whose body 4.0 strips; Core's plays the spray's
+    // ability, fades the player's oldest spray out past fort.NumSpraysAlivePerPlayer and sends the Spray stat event.
+    void ServerPlaySprayItem_Implementation(UAthenaSprayItemDefinition* SprayAsset);
+    void SendSprayStatEvent(UAthenaSprayItemDefinition* SprayAsset);
     // Personal vehicles (FortPlayerControllerPersonalVehicle.cpp): 3.0 strips the hoverboard's server RPC; Core's grants
     // and activates the vehicle's ability.
     void TogglePersonalVehicle_Implementation(bool bOn);
@@ -217,6 +226,7 @@ public:
     static void HookReconnectVTables();
     static void HookBuildingVTables();
     static void HookEmoteVTables();
+    static void HookSprayVTables();
     static void HookPersonalVehicleVTables();
     // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox.
     static void HookVoice();
@@ -254,6 +264,9 @@ private:
     static inline void (*ServerPlayEmoteItem_ImplementationOG)(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset) = nullptr;
     static void ServerPlayEmoteItem_ImplementationHK(AFortPlayerController* This, UFortMontageItemDefinitionBase* EmoteAsset);
     static void ServerEmote_ImplementationHK(AFortPlayerController* This, const FName& AssetName);
+    static void ServerPlaySprayItem_ImplementationHK(AFortPlayerController* This, UAthenaSprayItemDefinition* SprayAsset);
+    // The sprays this player has placed that are neither gone nor fading, oldest first, in ActiveSprayInstances.
+    void UpdateActiveSprayInstances();
     static void TogglePersonalVehicle_ImplementationHK(AFortPlayerController* This, bool bOn);
     static void ServerSpotActor_ImplementationHK(AFortPlayerController* This, AActor* NewlySpottedActor);
     static void ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg);

@@ -56,6 +56,8 @@ public:
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
     // The ability an emote plays through (its montage comes from the spec's source object, the emote item).
     DefineUProperty(TAssetSubclassOf<UGameplayAbility>, EmoteGameplayAbility)
+    // 4.0: the ability a spray plays through (GAB_Spray_Generic; the spray is the spec's source object).
+    DefineUProperty(TAssetSubclassOf<UGameplayAbility>, SprayGameplayAbility)
     DefineUProperty(TAssetPtr<UFortWorldItemDefinition>, EditToolItem)
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
     DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)

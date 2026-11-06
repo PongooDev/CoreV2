@@ -185,6 +185,13 @@ public:
     static ptrdiff_t AnimationOffset() { return Member_Animation.IsAvailable() ? Member_Animation.GetOffsetChecked() : -1; }
 };
 
+// A spray (4.0, Season 4; an AthenaDanceItemDefinition in the game): the decal the spray ability places. StaticClass is
+// null on a build without the class.
+class UAthenaSprayItemDefinition : public UFortMontageItemDefinitionBase
+{
+    DefineUnrealClass(UAthenaSprayItemDefinition, FortniteGame)
+};
+
 struct FFortBaseWeaponStats
 {
     DefineUnrealStruct(FFortBaseWeaponStats, FortniteGame)

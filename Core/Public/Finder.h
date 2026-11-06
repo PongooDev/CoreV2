@@ -227,6 +227,7 @@ namespace Finder
     bool ResolveReplicationDriverLive();
     bool ResolveDecoSpawnedLive();
     bool ResolveScoreBuildingConstructionLive();
+    bool ResolveGetPoiTagsForLive();
     bool ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset);
     bool OnlyLoadsEmoteAnimation(uintptr_t Implementation, ptrdiff_t AnimationOffset);
     bool ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOffset);

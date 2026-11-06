@@ -145,9 +145,11 @@ public:
     // The bots a player eliminated (AFortGameModeAthena's match results add them to the player's kills).
     static int32_t BotKillsOf(const AFortPlayerStateAthena* PlayerState);
     // Battle Royale's quests: whether a Kill event against Target counts (the "bot eliminations count for quests" setting),
-    // and the note that the game sent one (UFortQuestManager's stat events).
+    // and the note that the game sent one of the kill events (Kill, KillContribution or TeamKill, the Type) for it
+    // (UFortQuestManager's stat events).
     static bool ShouldCountQuestEvent(const UObject* Target);
-    static void NoteNativeKillEvent(const UObject* Target);
+    static void NoteNativeKillEvent(const UObject* Target, uint8_t Type);
+    static bool HasNativeKillEvent(const UObject* Target, uint8_t Type);
     // Whether the bus hasn't left yet (the warmup island, where eliminations don't count).
     static bool IsWarmup();
     // A kill event's tags for a bot's elimination, as the game's kill event has them for a player's (3.1's

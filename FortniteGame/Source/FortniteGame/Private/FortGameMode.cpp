@@ -89,6 +89,16 @@ UFortSharedMissionLists* AFortGameMode::GetSharedMissionLists()
     return SharedMissionLists;
 }
 
+void AFortGameMode::GetPoiTagsFor(AActor* Actor, FGameplayTagContainer& OutTags)
+{
+#if WITH_SERVER_CODE
+    if (Actor && Finder::ResolveGetPoiTagsForLive())
+    {
+        CallVirtual<void>(this, Natives::AFortGameMode_GetPoiTagsForIndex, Actor, &OutTags);
+    }
+#endif
+}
+
 void AFortGameMode::SetBadgeScores()
 {
     if (Natives::AFortGameMode_SetBadgeScores || Finder::ResolveBadgeScoresLive())

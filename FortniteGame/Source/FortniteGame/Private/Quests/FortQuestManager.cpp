@@ -1244,7 +1244,7 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     FGameplayTagContainer EventSourceTags = SourceTags;
     if (bKillEvent && FCoreAthenaBotManager::IsBotPawn(TargetObject))
     {
-        FCoreAthenaBotManager::NoteNativeKillEvent(TargetObject);
+        FCoreAthenaBotManager::NoteNativeKillEvent(TargetObject, Type);
         if (FCoreAthenaBotManager::IsWarmup() || !FCoreAthenaBotManager::ShouldCountQuestEvent(TargetObject))
         {
             return;

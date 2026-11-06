@@ -8438,6 +8438,69 @@ bool Finder::ResolveScoreBuildingConstructionLive()
     return true;
 }
 
+bool Finder::ResolveGetPoiTagsForLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortGameMode_GetPoiTagsForIndex >= 0 || bSearched)
+    {
+        return Natives::AFortGameMode_GetPoiTagsForIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortGameMode::GetPoiTagsFor (21.40's name, after IsCVarToGatherPoiTagsFromManagerEnabled) adds the location tags
+    // of where an actor is to a tag container. AFortGameModeAthena's (4.0 0xA1EFB0, 3.6 0x9F5B90) asks its POI manager
+    // (AFortPoiManager::GetTagsForPawnLocation) for a pawn; AFortGameModeZone's is the shared empty function. The stat
+    // senders call it on the game mode just before they send: Interact and Land for the player's pawn, the game mode's
+    // Kill for the killer's pawn (source) and the dead pawn (target) (4.0 AFortGameModeZone::Killed 0xC1BBE7 and
+    // 0xC1BBFA, [vtable+0xA20], before its Kill at 0xC1BC42). The slot is the one the most senders call through, among
+    // those where the Athena game mode has a function and the Zone game mode the empty one: 0x144 on 3.6 and 4.0.
+    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
+    void** AthenaVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeAthena");
+    if (!ZoneVTable || !AthenaVTable || !Natives::SharedEmptyFunction || !Finder::ResolveQuestStatEvents() || !Natives::UFortQuestManager_bStatEventsStripped)
+    {
+        Log::Info(L"Finder: AFortGameMode::GetPoiTagsFor not looked for (no Athena game mode, or the stat events aren't stripped)");
+        return false;
+    }
+    std::unordered_map<int32_t, int32_t> Senders;
+    for (const uint8_t* Call : StrippedStatEventCalls)
+    {
+        const uintptr_t Site = reinterpret_cast<uintptr_t>(Call);
+        std::vector<int32_t> Slots;
+        for (uintptr_t At = FindVirtualCall(Site - 0x90, Site); At; At = FindVirtualCall(At + 1, Site))
+        {
+            const int32_t Slot = VirtualSlot(At);
+            const uintptr_t Athena = VTableEntry(AthenaVTable, Slot);
+            if (Athena && !Finder::IsStubFunction(Athena) && reinterpret_cast<void*>(VTableEntry(ZoneVTable, Slot)) == Natives::SharedEmptyFunction
+                && std::find(Slots.begin(), Slots.end(), Slot) == Slots.end())
+            {
+                Slots.push_back(Slot);
+                ++Senders[Slot];
+            }
+        }
+    }
+    int32_t Index = -1;
+    int32_t Most = 0;
+    for (const auto& [Slot, Count] : Senders)
+    {
+        if (Count > Most)
+        {
+            Index = Slot;
+            Most = Count;
+        }
+    }
+    const bool bTied = std::count_if(Senders.begin(), Senders.end(), [Most](const auto& Entry) { return Entry.second == Most; }) > 1;
+    if (Index < 0 || bTied)
+    {
+        Log::Error(L"Finder: AFortGameMode::GetPoiTagsFor not found ({} candidate slots{})", Senders.size(), bTied ? L", tied" : L"");
+        return false;
+    }
+
+    Natives::AFortGameMode_GetPoiTagsForIndex = Index;
+    Log::Info(L"Finder: AFortGameMode::GetPoiTagsFor is slot 0x{:X} (Athena's 0x{:X}), called by {} of the {} stat senders", Index, VTableEntry(AthenaVTable, Index) - Finder::ImageBase(),
+        Most, StrippedStatEventCalls.size());
+    return true;
+}
+
 uint8_t* Finder::PawnDiedInventoryDropCall()
 {
     // AFortPlayerControllerZone's pawn-death handler (1.7.2 0x864E10, slot 0x2F9; the pawn calls it, Athena's override

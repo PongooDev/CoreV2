@@ -48,10 +48,10 @@ namespace
 {
     std::unique_ptr<FCoreAthenaBotManager> Instance;
 
-    // The bots each player eliminated (their match results add them), and the bot pawns the game itself sent a Kill
-    // quest event for.
+    // The bots each player eliminated (their match results add them), and the bot pawns the game itself sent kill quest
+    // events for, with each event's type.
     std::vector<std::pair<TWeakObjectPtr<AFortPlayerStateAthena>, int32_t>> BotKills;
-    std::vector<TWeakObjectPtr<UObject>> NativeKillTargets;
+    std::vector<std::pair<TWeakObjectPtr<UObject>, uint8_t>> NativeKillTargets;
 
     // Core's bot names: player-like tags (8.30 names a bot from its customization loadout, else "Bot": AFortAthenaAIBotController's
     // 0xD49760; 21.40 picks from a name list, AssignDisplayName). Each match deals them out shuffled, none twice.
@@ -414,10 +414,18 @@ bool FCoreAthenaBotManager::ShouldCountQuestEvent(const UObject* Target)
     return !Instance || Instance->Settings.bEliminationsCountForQuests;
 }
 
-void FCoreAthenaBotManager::NoteNativeKillEvent(const UObject* Target)
+void FCoreAthenaBotManager::NoteNativeKillEvent(const UObject* Target, uint8_t Type)
 {
-    std::erase_if(NativeKillTargets, [](const TWeakObjectPtr<UObject>& Weak) { return !Weak.Get(); });
-    NativeKillTargets.push_back(TWeakObjectPtr<UObject>(const_cast<UObject*>(Target)));
+    std::erase_if(NativeKillTargets, [](const auto& Entry) { return !Entry.first.Get(); });
+    if (!HasNativeKillEvent(Target, Type))
+    {
+        NativeKillTargets.emplace_back(TWeakObjectPtr<UObject>(const_cast<UObject*>(Target)), Type);
+    }
+}
+
+bool FCoreAthenaBotManager::HasNativeKillEvent(const UObject* Target, uint8_t Type)
+{
+    return std::any_of(NativeKillTargets.begin(), NativeKillTargets.end(), [Target, Type](const auto& Entry) { return Entry.first.Get() == Target && Entry.second == Type; });
 }
 
 bool FCoreAthenaBotManager::IsWarmup()
@@ -2062,26 +2070,52 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
         }
         AddTeamKillScore(Athena, static_cast<uint8_t>(KillerState->TeamIndex));
 
-        // Quests: the game's own Kill event (if it sent one for this pawn) went through UFortQuestManager already, with
-        // the bot's tags added (SendStatEventWithTagsHK); with the setting on, the game's two events are sent for a kill
-        // it didn't report, as its AFortGameModeZone::Killed sends them (3.1 0xB5E890: KillContribution, then Kill),
-        // with the tags its Kill has: the dead pawn's for the target, the killer's and their weapon's for the source.
+        // Quests: the game's own kill events for this pawn went through UFortQuestManager already, with the bot's tags
+        // added (SendStatEventWithTagsHK). AFortGameModeZone::Killed (3.1 0xB5E890, 4.0 0xC1B530) sends each damage
+        // contributor's KillContribution, but the killer's Kill only when GetTeamAttitude says the killer and the dead
+        // pawn's controller are hostile (4.0 0xC8F200: each one's IFortTeamActorInterface team, or its Instigator's).
+        // A bot's controller is a stock AAIController, which has no team and no Instigator, so the attitude is neutral
+        // and the game sends no Kill for a bot: the KillContribution it did send isn't the elimination ("Eliminate
+        // opponents in Flush Factory", killingblow_athena_player_*). With the setting on, Core sends the events the game
+        // didn't, as Killed does: KillContribution, then Kill, with the tags its Kill has: the dead pawn's and the
+        // location tags of where it died for the target, the killer's, their weapon's and the location tags of where
+        // they are for the source (AFortGameMode::GetPoiTagsFor, 4.0 0xC1BBE7 and 0xC1BBFA).
         UObject* Target = reinterpret_cast<UObject*>(Bot->GetPawn());
-        const bool bNativeEvent = std::any_of(NativeKillTargets.begin(), NativeKillTargets.end(), [Target](const TWeakObjectPtr<UObject>& Weak) { return Weak.Get() == Target; });
+        const bool bNativeKill = HasNativeKillEvent(Target, EFortQuestObjectiveStatEvent::GetKill());
+        const bool bNativeContribution = HasNativeKillEvent(Target, EFortQuestObjectiveStatEvent::GetKillContribution());
         UFortRegisteredPlayerInfo* PlayerInfo = static_cast<UFortRegisteredPlayerInfo*>(KillerPlayer->MyPlayerInfo);
         UFortQuestManager* QuestManager = PlayerInfo ? PlayerInfo->GetAthenaQuestManager() : nullptr;
-        if (Settings.bEliminationsCountForQuests && !bNativeEvent && QuestManager)
+        std::wstring Location;
+        if (Settings.bEliminationsCountForQuests && !bNativeKill && QuestManager)
         {
             FGameplayTagContainer SourceTags;
             FGameplayTagContainer ContextTags;
             QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
             FGameplayTagContainer TargetTags;
             AddKillEventTags(Target, reinterpret_cast<AController*>(KillerPlayer), TargetTags, SourceTags);
-            QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKillContribution(), Target, TargetTags, SourceTags, ContextTags, 1, false);
+            if (!bNativeContribution)
+            {
+                QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKillContribution(), Target, TargetTags, SourceTags, ContextTags, 1, false);
+            }
+            if (Athena)
+            {
+                FGameplayTagContainer KillerLocation;
+                FGameplayTagContainer TargetLocation;
+                Athena->GetPoiTagsFor(reinterpret_cast<AActor*>(static_cast<APawn*>(KillerPlayer->Pawn)), KillerLocation);
+                Athena->GetPoiTagsFor(reinterpret_cast<AActor*>(Target), TargetLocation);
+                SourceTags.AppendTags(KillerLocation);
+                TargetTags.AppendTags(TargetLocation);
+                for (const FGameplayTag& Tag : TargetLocation.GameplayTags)
+                {
+                    Location += (Location.empty() ? L"" : L", ") + Tag.TagName.ToStdString();
+                }
+            }
             QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKill(), Target, TargetTags, SourceTags, ContextTags, 1, false);
         }
-        Log::Info(L"Battle Royale bots: {} eliminated {} ({} bots now; quests: {})", KillerState->GetPlayerName().ToStdString(), Bot->GetBotName(), BotKillsOf(KillerState),
-            !Settings.bEliminationsCountForQuests ? L"off" : bNativeEvent ? L"the game's event" : QuestManager ? L"Core's event" : L"no quest manager");
+        Log::Info(L"Battle Royale bots: {} eliminated {} ({} bots now; quests: {}{})", KillerState->GetPlayerName().ToStdString(), Bot->GetBotName(), BotKillsOf(KillerState),
+            !Settings.bEliminationsCountForQuests ? L"off" : bNativeKill ? L"the game's event" : !QuestManager ? L"no quest manager"
+                : bNativeContribution ? L"the game's KillContribution, Core's Kill" : L"Core's events",
+            Location.empty() ? std::wstring() : std::format(L", at {}", Location));
     }
 
     // A player's team is out once its players are out too (Core's death handler left its place to its bots then); in a

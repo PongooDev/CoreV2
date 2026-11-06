@@ -50,6 +50,9 @@ public:
     void SetBadgeScores();
     void SendEarnScore();
     UFortSharedMissionLists* GetSharedMissionLists();
+    // The location tags of where Actor is (Battle Royale's POI volumes: Athena.Location.POI.FlushFactory...), added to
+    // OutTags, as the stat senders add them to their events. Nothing on builds before 3.0 or outside Battle Royale.
+    void GetPoiTagsFor(AActor* Actor, FGameplayTagContainer& OutTags);
     // The game mode's own quickbars (1.7.2's native quickbar setup, 0x6813D0, reads them before GameData's).
     bool OverridesQuickBars();
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const

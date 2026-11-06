@@ -479,6 +479,9 @@ namespace Natives
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;
+    // From 3.0 (Finder::ResolveGetPoiTagsForLive): AFortGameMode::GetPoiTagsFor, a pawn's location tags (slot 0x144 on
+    // 3.6 and 4.0; AFortGameModeAthena's asks its POI manager, AFortGameModeZone's is the shared empty function).
+    inline int32_t AFortGameMode_GetPoiTagsForIndex = -1;
     // The native helpers of the building RPCs 1.8.1 strips (Finder::ResolveBuildingRestorationLive).
     inline int32_t AFortGameMode_ScoreBuildingRepairIndex = -1;
     inline int32_t AFortGameMode_ScoreBuildingEditIndex = -1;

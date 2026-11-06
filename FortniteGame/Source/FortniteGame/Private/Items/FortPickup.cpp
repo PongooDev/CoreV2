@@ -409,7 +409,7 @@ AFortPickup* AFortPickup::CreatePickup(UWorld* World, const FFortItemEntry& Item
         PickupData.OverrideClass = OverrideClass;
         return Natives::AFortPickup_CreateFromData(PickupData);
     }
-    return Natives::AFortPickup_CreatePickup(World, ItemEntry, SpawnLocation, SpawnRotation, OptionalOwner, OverrideClass, 0);
+    return Natives::AFortPickup_CreatePickup(World, ItemEntry, SpawnLocation, SpawnRotation, OptionalOwner, OverrideClass, 0, 0, 0);
 }
 
 void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss)

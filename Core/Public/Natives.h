@@ -282,8 +282,10 @@ namespace Natives
     inline FFortItemEntry* (*FFortItemEntry_FFortItemEntry)(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel, const void* InAlterations) = nullptr;
     inline void (*FFortItemEntry_SetStateValue)(FFortItemEntry* This, uint8_t StateType, int32_t IntValue) = nullptr;
     inline void (*FFortItemEntry_MarkDirty)(FFortItemEntry* This) = nullptr;
-    // 1.10 adds a seventh argument, which its callers pass as 0 (older builds ignore it).
-    inline AFortPickup* (*AFortPickup_CreatePickup)(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation, AFortPlayerController* OptionalOwner, UClass* OverrideClass, uint64_t Unused) = nullptr;
+    // 1.10 adds a seventh argument, which its callers pass as 0 (older builds ignore it). Later builds up to 4.0 read two
+    // more (the first is the pickup's bRandomRotation; 4.1's FFortCreatePickupData carries both): Core passes them as 0,
+    // where it left them to whatever was on the stack. A build that reads fewer ignores them.
+    inline AFortPickup* (*AFortPickup_CreatePickup)(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation, AFortPlayerController* OptionalOwner, UClass* OverrideClass, uint64_t Unused, uint64_t Extra0, uint64_t Extra1) = nullptr;
     // 4.1 (CL-4053532) on: CreatePickup takes its arguments as one FFortCreatePickupData (AFortPickup::CreateFromData).
     // AFortPickup_CreatePickup then holds the same function, for the finders that look for its calls.
     inline AFortPickup* (*AFortPickup_CreateFromData)(const FFortCreatePickupData& PickupData) = nullptr;

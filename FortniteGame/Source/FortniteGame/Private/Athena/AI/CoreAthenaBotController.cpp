@@ -3485,6 +3485,12 @@ bool FCoreAthenaBotController::Loot(float Now, float MaxDistance)
     // the bot walked under it).
     if (Dist2D(PickupLocation, Location) < 120.0f && (!Manager->HasNavigation() || Now - LootTargetTime > 8.0f))
     {
+        // On the roof (or floor) over it: the bot breaks through to it (CoreV2 #275).
+        if (BreakDownFromRoof(Now, PickupLocation))
+        {
+            LootTargetTime = Now;
+            return true;
+        }
         MarkUnreachable(Target);
         LootTarget = nullptr;
         NextLootSearch = 0.0f;
@@ -4804,6 +4810,12 @@ bool FCoreAthenaBotController::SearchContainer(float Now, float MaxDistance)
     SearchUntil = 0.0f;
     if (Dist2D(ContainerLocation, Location) < 120.0f)
     {
+        // On the roof (or floor) over it: the bot breaks through to it (CoreV2 #275).
+        if (BreakDownFromRoof(Now, ContainerLocation))
+        {
+            ContainerTargetTime = Now;
+            return true;
+        }
         MarkUnreachable(Target);
         ContainerTarget = nullptr;
         NextContainerSearch = 0.0f;
@@ -5115,6 +5127,48 @@ bool FCoreAthenaBotController::FindBuildingInTheWay(float Now)
         }
     }
     return false;
+#else
+    return false;
+#endif
+}
+
+bool FCoreAthenaBotController::BreakDownFromRoof(float Now, const FVector& Below)
+{
+#if WITH_SERVER_CODE
+    // Where it is going is well below (a level is 384 uu), and what it stands on is a building's piece (a roof, a
+    // floor): no path leads down from there (the roof's navmesh doesn't reach the ground, or the loot is in the house
+    // under it), so it breaks the piece and drops through. On the ground or a rock there is nothing to break.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || HarvestTarget.Get() || IsInCombat(Now))
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    if (Location.Z - Below.Z < 250.0f)
+    {
+        return false;
+    }
+    FVector Hit;
+    UObject* HitActor = nullptr;
+    UObject* HitComponent = nullptr;
+    if (!UKismetSystemLibrary::LineTraceSingle(Pawn, Location, FVector(Location.X, Location.Y, Location.Z - 300.0f), 0, false, true, Hit, HitActor, HitComponent))
+    {
+        return false;
+    }
+    ABuildingSMActor* Building = HitActor ? Cast<ABuildingSMActor>(HitActor) : nullptr;
+    if (!Building || Cast<ABuildingContainer>(HitActor) || Building->bDestroyed || Building->GetHealth() <= 0.0f || IsUnreachable(Building))
+    {
+        return false;
+    }
+    StopMoving();
+    HarvestTarget = Building;
+    HarvestTargetTime = Now;
+    HarvestPoint = Hit;
+    bHarvestToUnstick = true;
+    ++BreakThroughs;
+    Log::Info(L"Battle Royale bots: {} is up on {} ({:.0f} health), {:.0f} m above where it is going, and breaks through it", BotName, NameOf(reinterpret_cast<UObject*>(Building)),
+        Building->GetHealth(), (Location.Z - Below.Z) / 100.0f);
+    return true;
 #else
     return false;
 #endif
@@ -6503,6 +6557,13 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
         }
         else if (GoalDistance > 1000.0f && Now - ProgressSince > 15.0f)
         {
+            // Walking about on a roof with no way down: through it first.
+            if (BreakDownFromRoof(Now, MoveGoal))
+            {
+                ProgressDistance = -1.0f;
+                LastStuckCheckLocation = Location;
+                return;
+            }
             GiveUp(L"no nearer in 15 s");
             LastStuckCheckLocation = Location;
             return;
@@ -6528,7 +6589,7 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
             PathFailedUntil = Now + 2.0f;
             bHasSteerTarget = false;
         }
-        if (StuckChecks == 2 && !HarvestTarget.Get() && FindBuildingInTheWay(Now))
+        if (StuckChecks == 2 && !HarvestTarget.Get() && (FindBuildingInTheWay(Now) || BreakDownFromRoof(Now, MoveGoal)))
         {
             // Something it can break is in the way: the pickaxe, as a stuck player does.
             StuckChecks = 0;

@@ -487,6 +487,9 @@ private:
     bool FollowMapMarker(float Now);
     // TryToUnstuck: a building the bot can break right in front of it, on the way to its goal.
     bool FindBuildingInTheWay(float Now);
+    // A bot up on a building (a roof, an upper floor) with where it is going well below it and no way down: the piece it
+    // stands on, broken with the pickaxe (Harvest), as a player gets down into a house (CoreV2 #275).
+    bool BreakDownFromRoof(float Now, const FVector& Below);
     // Chapter 2's bot building (21.40), for builds before 8.30. Nothing is built on the warmup island, by a bot that is
     // down or not on its feet, or on 1.1-1.8 (their own building RPC bodies leave the initialize indices unresolved).
     // UFortAthenaAIBotEvaluator_DefensiveBuilding: hit by an enemy it can see, out in the open, now and then one of the

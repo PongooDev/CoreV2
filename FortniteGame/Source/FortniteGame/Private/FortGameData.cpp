@@ -4,6 +4,7 @@
 #include "Items/FortLootPackage.h"
 #include "Items/FortLootTablesCert.h"
 #include "Logging/LogMacros.h"
+#include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortLoot, Log, All);
 
@@ -56,6 +57,20 @@ bool UFortGameData::HasLootPackageDataTables()
 UDataTable* UFortGameData::GetLootQuotaData()
 {
     FortLootTablesCert::CreateMissingTables(this);
+    // The PC cook empties LootQuotaData's reference on every build from 1.10 on, so a server-assets pak that carries the
+    // server's table (Core-ServerAssets' list) is only found by its path. Tried once, after the Cert fallback, which
+    // stands down when the game data already has a quota table.
+    static bool bTriedServerAssets = false;
+    if (!LootQuotaData && !bTriedServerAssets)
+    {
+        bTriedServerAssets = true;
+        if (UDataTable* Table = LoadObject<UDataTable>(nullptr, L"/Game/Items/Datatables/LootQuotaData.LootQuotaData"))
+        {
+            Table->AddToRoot();
+            LootQuotaData = Table;
+            UE_LOG(LogFortLoot, Log, TEXT("Loot quotas: the server's LootQuotaData from the installed server assets (%d rows)"), Table->GetRowMap().Num());
+        }
+    }
     return LootQuotaData;
 }
 

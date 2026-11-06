@@ -46,6 +46,10 @@ namespace
     std::vector<std::pair<FWeakObjectPtr, std::chrono::steady_clock::time_point>> DueSaves;
     constexpr auto SaveDelay = std::chrono::seconds(5);
 
+    // Whether the last event Core's SendStatEventWithTags took flushed (it asked to, or it completed an objective), for
+    // SendStatEventWithTagsHK. The builds that keep the native one leave it false.
+    bool bLastEventFlushed = false;
+
 #if WITH_SERVER_CODE
     void SaveStatEvents(UFortQuestManager* QuestManager);
 #endif
@@ -1027,7 +1031,8 @@ namespace
             Log::Info(L"SendStatEvent for {}: {} objective(s) listening to event {}{}", This->GetName().ToStdString(), Processed.size(),
                 bCustom ? static_cast<FName>(CustomStat->RowName).ToString().ToStdString() : EFortQuestObjectiveStatEvent{ Type }.ToString(), bFlush ? L" (flushed)" : L"");
         }
-        if (bFlush && !Processed.empty() && !Cast<AFortPlayerControllerAthena>(PlayerController))
+        bLastEventFlushed = bFlush && !Processed.empty();
+        if (bLastEventFlushed && !Cast<AFortPlayerControllerAthena>(PlayerController))
         {
             SaveStatEvents(This);
         }
@@ -1249,6 +1254,7 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     GameMode->AddPlaylistContextTag(static_cast<FGameplayTagContainer&>(GameMode->GameContextTags));
     FGameplayTagContainer EventContextTags = ContextTags;
     GameMode->AddPlaylistContextTag(EventContextTags);
+    bLastEventFlushed = false;
     SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, EventTargetTags, EventSourceTags, EventContextTags, Count, bFlush);
 
     // Second, SendStatEventWithTags (0x890730) adds what the event advanced to the quest manager's pending progress
@@ -1259,7 +1265,20 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     // athena quest manager's progress is saved here, at once when the event asked for it, as Save the World's is, and
     // within a few seconds otherwise, so bursts (every other player's death is an AthenaOutlive event, 0x599DA0,
     // unflushed) make one UpdateQuests.
-    if (bFlush)
+    // Saved at once as well: an event that completed an objective, which SendStatEventWithTags flushes (1.9.1 0x8CAC40,
+    // Core's on the builds that strip it), and every event of a player who is out of the match (no longer among the game
+    // mode's AlivePlayers). The match is over for them, as it was for everyone when Epic's servers saved, and their
+    // client goes back to the lobby within seconds, taking the quest manager with it before a delayed save comes round:
+    // the Damage events sent at a player's death (DamageDone.Total for "Deal damage to opponents", the weapon ones) and
+    // what completed in the last seconds never reached the profile (#274).
+    const AFortPlayerControllerAthena* PlayerController = reinterpret_cast<AFortPlayerControllerAthena*>(PlayerControllerOf(PlayerInfo));
+    const TArray<AFortPlayerControllerAthena*>& Alive = GameMode->AlivePlayers;
+    bool bInMatch = false;
+    for (int32_t Index = 0; Index < Alive.Num() && !bInMatch; ++Index)
+    {
+        bInMatch = Alive[Index] == PlayerController;
+    }
+    if (bFlush || bLastEventFlushed || !bInMatch)
     {
         SaveProgress(This);
         return;

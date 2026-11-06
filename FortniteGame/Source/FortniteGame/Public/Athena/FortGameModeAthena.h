@@ -140,8 +140,9 @@ public:
     // match is assigned). Builds without it keep their tables.
     void ApplyPlaylistDataTablesOnce();
 
-    // Once the match's assignment gives it another playlist, applies that playlist's tables and, when its loot tables
-    // are other ones, rolls the world's loot again, as long as the match hasn't left its warmup.
+    // Once the match's assignment gives it another playlist, applies that playlist's tables (from 3.5 with the default
+    // loot rows of the tier groups and packages they have none of, #292) and, when its loot tables are other ones, rolls
+    // the world's loot again, as long as the match hasn't left its warmup.
     void WatchPlaylistDataTables();
 
     static void HookVTables();

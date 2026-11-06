@@ -36,6 +36,8 @@ class AFortPlayerController;
 class AFortPlayerControllerAthena;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
+class AFortPlayerStateZone;
+class AFortTeamPrivateInfo;
 class AFortGameModeAthena;
 class AFortAthenaMapInfo;
 class AFortAthenaSupplyDrop;
@@ -569,6 +571,11 @@ namespace Natives
     // 0x217C620, slot 0x610), which gives a joining player's state its PlayerId from it. Battle Royale's player bots
     // take theirs from it too: Finder::ResolveNextPlayerIDLive.
     inline int32_t* AGameSession_NextPlayerID = nullptr;
+    // AFortTeamPrivateInfo::SetHealthAndShield (3.5.1 0xF83CB0, 21.40's name): the player state's CurrentHealth, MaxHealth,
+    // CurrentShield and MaxShield into its team's replicated RepData (marking the changed items dirty), which squadmates'
+    // squad bars read. The game mode's ReplicateHealthAndShield calls it for every player state each tick; Battle
+    // Royale's player bots call it after correcting their values: Finder::ResolveTeamPrivateHealthAndShieldLive.
+    inline void (*AFortTeamPrivateInfo_SetHealthAndShield)(AFortTeamPrivateInfo* This, AFortPlayerStateZone* PlayerState) = nullptr;
     inline int32_t AFortWeapon_ModAmmoIndex = -1;
     inline int32_t AFortWeapon_DestroyedDueToDurabilityIndex = -1;
     inline int32_t IFortInventoryOwnerInterface_GetWorldInventoryIndex = -1;

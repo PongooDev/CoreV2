@@ -7,6 +7,7 @@
 class AActor;
 class AController;
 class AFortPlayerController;
+class AFortPlayerStateZone;
 
 class EFortTeam
 {
@@ -38,6 +39,18 @@ struct FTeamSpottedActorInfoArray : public FFastArraySerializer
 {
     DefineUnrealStruct(FTeamSpottedActorInfoArray, FortniteGame)
     DefineUStructArrayProperty(FTeamSpottedActorInfo, SpottedActorInfo)
+};
+
+// The team's private, team-only replicated data (3.0 onwards): RepData, a fast array of per-player values (health and
+// shield among them) that the team's clients read for their squadmates.
+class AFortTeamPrivateInfo : public AInfo
+{
+    DefineUnrealClass(AFortTeamPrivateInfo, FortniteGame)
+
+public:
+    // The player state's CurrentHealth, MaxHealth, CurrentShield and MaxShield into RepData (3.5.1 0xF83CB0). False where
+    // the build's native wasn't found.
+    bool SetHealthAndShield(AFortPlayerStateZone* PlayerState);
 };
 
 class AFortTeamInfo : public AInfo

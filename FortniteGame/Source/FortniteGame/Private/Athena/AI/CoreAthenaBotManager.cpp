@@ -15,6 +15,7 @@
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "FortTeamInfo.h"
 #include "GameFramework/GameMode.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
@@ -2452,7 +2453,9 @@ void FCoreAthenaBotManager::ReplicateHealthAndShield()
 #if WITH_SERVER_CODE
     // As the game's own pass does for a player controller's pawn (3.5.1 0x9F7440): the pawn's GetHealth, GetMaxHealth,
     // GetShield and GetMaxShield onto the player state's replicated CurrentHealth, MaxHealth, CurrentShield and
-    // MaxShield. Without it a bot teammate's squad bar showed no health or shield (CoreV2 #264).
+    // MaxShield, then the team's copy of them (AFortTeamPrivateInfo::SetHealthAndShield). A client's squad bar reads a
+    // squadmate's health from that copy, not from the player state (3.5.1 0xF703D0 reads the player state only for the
+    // local player): with the player state alone, a bot teammate's bar stayed at the game pass's 0 (CoreV2 #264, #275).
     if (!AFortPlayerStateZone::HasHealthAndShield() || !GetGameMode())
     {
         return;
@@ -2469,6 +2472,10 @@ void FCoreAthenaBotManager::ReplicateHealthAndShield()
         State->MaxHealth = Pawn->GetMaxHealth();
         State->CurrentShield = Pawn->GetShield();
         State->MaxShield = Pawn->GetMaxShield();
+        if (AFortTeamPrivateInfo* TeamPrivate = AFortPlayerState::HasPlayerTeamPrivate() ? static_cast<AFortTeamPrivateInfo*>(State->PlayerTeamPrivate) : nullptr)
+        {
+            TeamPrivate->SetHealthAndShield(State);
+        }
     }
 #endif
 }

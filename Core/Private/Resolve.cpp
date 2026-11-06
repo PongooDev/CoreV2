@@ -11120,6 +11120,63 @@ bool Finder::ResolveNextPlayerIDLive(ptrdiff_t PlayerIdOffset)
     return false;
 }
 
+bool Finder::ResolveTeamPrivateHealthAndShieldLive(ptrdiff_t PlayerTeamPrivateOffset, ptrdiff_t MaxShieldOffset)
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::AFortTeamPrivateInfo_SetHealthAndShield)
+    {
+        return Natives::AFortTeamPrivateInfo_SetHealthAndShield != nullptr;
+    }
+    bSearched = true;
+
+    // AFortGameModeAthena::ReplicateHealthAndShield (3.3 0x9FE870 slot 0xB08; 3.5.1 0x9F7440, 3.6 0xA03C40 and 4.0
+    // 0xA2B8A0, slot 0xB10), each tick: for every player state, a player controller's pawn's health and shield onto
+    // CurrentHealth, MaxHealth, CurrentShield and MaxShield, else "mov dword ptr [rbx + MaxShield], 42C80000h" (100), and
+    // then the team's copy: "mov rcx, [rbx + PlayerTeamPrivate]; test rcx, rcx; jz; mov rdx, rbx; call
+    // AFortTeamPrivateInfo::SetHealthAndShield" (3.5.1 0xF83CB0, 21.40's name). That copy (RepData, a fast array) is what a
+    // client's squad bar reads for a squadmate (AFortTeamPrivateInfo's 3.5.1 0xF703D0 reads the player state only for its
+    // own local player).
+    void** GameModeVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeAthena");
+    for (int32_t Index = 0x120; GameModeVTable && PlayerTeamPrivateOffset > 0 && MaxShieldOffset > 0 && Index < 0x1A0; ++Index)
+    {
+        const uintptr_t Function = reinterpret_cast<uintptr_t>(GameModeVTable[Index]);
+        if (!IsInText(Function) || !IsInText(Function + 0x300))
+        {
+            continue;
+        }
+        bool bMaxShield = false;
+        for (uintptr_t Site = Function; Site < Function + 0x300; ++Site)
+        {
+            // mov dword ptr [reg + MaxShield], 100.0f (C7 /0, modrm 10 000 reg).
+            if (Byte(Site) == 0xC7 && (Byte(Site + 1) & 0xF8) == 0x80 && *reinterpret_cast<const int32_t*>(Site + 2) == static_cast<int32_t>(MaxShieldOffset)
+                && *reinterpret_cast<const uint32_t*>(Site + 6) == 0x42C80000)
+            {
+                bMaxShield = true;
+            }
+            // mov rcx, [reg + PlayerTeamPrivate]; test rcx, rcx; jz short; mov rdx, reg; call rel32.
+            const uint8_t ModRM = Byte(Site + 2);
+            if (!bMaxShield || Byte(Site) != 0x48 || Byte(Site + 1) != 0x8B || (ModRM & 0xF8) != 0x88 || (ModRM & 7) == 4
+                || *reinterpret_cast<const int32_t*>(Site + 3) != static_cast<int32_t>(PlayerTeamPrivateOffset) || Byte(Site + 7) != 0x48 || Byte(Site + 8) != 0x85
+                || Byte(Site + 9) != 0xC9 || Byte(Site + 10) != 0x74 || Byte(Site + 12) != 0x48 || Byte(Site + 13) != 0x8B || Byte(Site + 14) != (0xD0 | (ModRM & 7))
+                || Byte(Site + 15) != 0xE8)
+            {
+                continue;
+            }
+            const uintptr_t SetHealthAndShield = Finder::RelativeTarget(Site + 15, 1, 5);
+            if (!IsInText(SetHealthAndShield))
+            {
+                break;
+            }
+            Natives::AFortTeamPrivateInfo_SetHealthAndShield = reinterpret_cast<decltype(Natives::AFortTeamPrivateInfo_SetHealthAndShield)>(SetHealthAndShield);
+            Log::Info(L"Finder: AFortGameModeAthena::ReplicateHealthAndShield is slot 0x{:X} (0x{:X}), its AFortTeamPrivateInfo::SetHealthAndShield 0x{:X}", Index * 8,
+                Function - Finder::ImageBase(), SetHealthAndShield - Finder::ImageBase());
+            return true;
+        }
+    }
+    Log::Warning(L"Finder: AFortTeamPrivateInfo::SetHealthAndShield not found, player bots' squad bar health stays empty");
+    return false;
+}
+
 bool Finder::ResolveReplicationDriverLive()
 {
     static bool bSearched = false;

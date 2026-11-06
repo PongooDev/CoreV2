@@ -6,6 +6,7 @@
 
 class AFortPlayerPawn;
 class AFortTeamInfo;
+class AFortTeamPrivateInfo;
 class UAbilitySystemComponent;
 class UFortHero;
 class UFortItemDefinition;
@@ -108,6 +109,9 @@ public:
     DefineUStructArrayProperty(FFortExperienceDelta, ExperienceDeltas)
     DefineUProperty(bool, bAreZoneStatsFinalized)
     DefineUProperty(AFortTeamInfo*, PlayerTeam)
+    // The team's AFortTeamPrivateInfo (3.0 onwards), set with PlayerTeam when the player joins it.
+    DefineUProperty(AFortTeamPrivateInfo*, PlayerTeamPrivate)
+    static bool HasPlayerTeamPrivate() { return Member_PlayerTeamPrivate.IsAvailable(); }
     DefineUStructProperty(FUniqueNetIdRepl, PartyOwnerUniqueId)
     DefineBitfieldUProperty(bHasStartedPlaying)
     DefineUFunction(OnRep_CharacterParts)

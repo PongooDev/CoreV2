@@ -220,6 +220,10 @@ namespace Finder
     // AGameSession::GetNextPlayerID's counter (Natives::AGameSession_NextPlayerID), from AGameSession::RegisterPlayer's
     // store to the player state's PlayerId (at PlayerIdOffset), for Battle Royale's player bots' PlayerIds.
     bool ResolveNextPlayerIDLive(ptrdiff_t PlayerIdOffset);
+    // AFortTeamPrivateInfo::SetHealthAndShield (Natives::AFortTeamPrivateInfo_SetHealthAndShield), from the Athena game
+    // mode's ReplicateHealthAndShield: its 100 MaxShield store (MaxShieldOffset, the player state's) and then its call on
+    // the player state's PlayerTeamPrivate (PlayerTeamPrivateOffset). For Battle Royale's player bots' squad bar health.
+    bool ResolveTeamPrivateHealthAndShieldLive(ptrdiff_t PlayerTeamPrivateOffset, ptrdiff_t MaxShieldOffset);
     bool ResolveReplicationDriverLive();
     bool ResolveDecoSpawnedLive();
     bool ResolveScoreBuildingConstructionLive();

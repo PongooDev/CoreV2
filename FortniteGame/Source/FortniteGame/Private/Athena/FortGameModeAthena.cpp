@@ -5,6 +5,7 @@
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortAthenaPlaylistBase.h"
 #include "Athena/FortPlaylistAthena.h"
+#include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingContainer.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -258,6 +259,15 @@ void AFortGameModeAthena::SpawnVendingMachines()
     {
         MapInfo->SpawnVendingMachines();
     }
+#endif
+}
+
+void AFortGameModeAthena::SpawnBGAConsumables()
+{
+#if WITH_SERVER_CODE
+    // The spawners roll from the playlist's tables (21.40's spawner waits for them: bAthenaPostApplyPlaylistDataTables).
+    ApplyPlaylistDataTablesOnce();
+    ABGAConsumableSpawner::SpawnWorldConsumables(GetWorld());
 #endif
 }
 
@@ -1540,6 +1550,7 @@ namespace
                 {
                     Log::Info(L"Battle Royale: the match's playlist {} has other loot tables than playlist {}, so the world's loot is rolled again", PlaylistId, Previous);
                     ABuildingContainer::RollAthenaLootAgain(Athena->GetWorld());
+                    ABGAConsumableSpawner::SpawnWorldConsumables(Athena->GetWorld());
                 }
             }
             WatchPlaylistDataTablesOf(GameMode);

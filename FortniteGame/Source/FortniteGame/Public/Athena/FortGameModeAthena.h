@@ -118,6 +118,10 @@ public:
     // SpawnVendingMachines, from 3.5, #257), with the world's loot tables, so they sell from warmup on.
     void SpawnVendingMachines();
 
+    // Has the world's BGA consumable spawners (ABGAConsumableSpawner, from 4.0's Hop Rocks, #278) roll and place their
+    // building gameplay actors, with the world's loot tables. Builds without them do nothing.
+    void SpawnBGAConsumables();
+
     // Has the map info spawn the match's Supply Llamas (AFortAthenaMapInfo::SpawnLlamas, from 3.3, #243) once the bus is
     // under way. Builds without them do nothing.
     void WatchLlamas();

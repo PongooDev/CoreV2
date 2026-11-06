@@ -35,7 +35,7 @@ bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FV
     return LineTraceSingle(WorldContextObject, Start, End, TraceChannel, bTraceComplex, bIgnoreSelf, OutImpactPoint, Actor, Component);
 }
 
-bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FVector& Start, const FVector& End, uint8_t TraceChannel, bool bTraceComplex, bool bIgnoreSelf, FVector& OutImpactPoint, UObject*& OutActor, UObject*& OutComponent)
+bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FVector& Start, const FVector& End, uint8_t TraceChannel, bool bTraceComplex, bool bIgnoreSelf, FVector& OutImpactPoint, UObject*& OutActor, UObject*& OutComponent, FVector* OutImpactNormal)
 {
     OutActor = nullptr;
     OutComponent = nullptr;
@@ -62,6 +62,13 @@ bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FV
         return false;
     }
     OutImpactPoint = *reinterpret_cast<const FVector*>(Hit.data() + ImpactPointProperty->GetOffset_ForInternal());
+    if (OutImpactNormal)
+    {
+        // ImpactNormal is an FVector_NetQuantizeNormal, an FVector.
+        const UProperty* ImpactNormalProperty = HitStruct->FindPropertyByName(FName(L"ImpactNormal", FNAME_Find));
+        *OutImpactNormal = ImpactNormalProperty && ImpactNormalProperty->ElementSize == sizeof(FVector)
+            ? *reinterpret_cast<const FVector*>(Hit.data() + ImpactNormalProperty->GetOffset_ForInternal()) : FVector(0.0f, 0.0f, 1.0f);
+    }
     // Actor and Component are weak pointers (8 bytes), not always 8-aligned in the hit (Actor is at 0x64 in 4.16).
     const auto ReadWeak = [&Hit, HitStruct](const wchar_t* Name) -> UObject*
     {

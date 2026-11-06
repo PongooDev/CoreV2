@@ -69,6 +69,8 @@ public:
     DefineUProperty(uint8_t, CurrentMovementStyle)
     // The damage tags of the hit that killed the pawn.
     DefineUProperty(FGameplayTagContainer, DeathTags)
+    // The pawn's own tags (a husk's NPC.CharacterType.Husk.Basic and the like, from its class defaults).
+    DefineUProperty(FGameplayTagContainer, GameplayTags)
     DefineUStructArrayProperty(FDamagerInfo, Damagers)
     DefineUProperty(UFortHealthSet*, HealthSet)
     // What the pawn's IAbilitySystemInterface returns (its player state's, for a player).

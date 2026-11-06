@@ -1,8 +1,15 @@
 #include "pch.h"
 #include "Pawns/FortAIPawn.h"
+#include "AI/FortAIDirector.h"
+#include "BlueprintGameplayTagLibrary.h"
 #include "Finder.h"
+#include "FortGameState.h"
+#include "FortKismetLibrary.h"
+#include "FortRuntimeOptions.h"
 #include "Hooks.h"
 #include "Engine/World.h"
+#include "Kismet/KismetMathLibrary.h"
+#include "Math/Rotator.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
 #include "Items/FortItemDefinition.h"
@@ -165,8 +172,121 @@ bool AFortAIPawn::RemoveInventoryItem(const FGuid& ItemGuid, int32_t Count, bool
 #endif
 }
 
+void AFortAIPawn::DropLoot(const FFortAIPawnLootDropData& LootDropData, const FGameplayTagContainer& DamageTags)
+{
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority || bHasDroppedLoot)
+    {
+        return;
+    }
+    AFortAIDirector* Director = AFortAIDirector::GetCurrent(this);
+    const FGameplayTagQuery* DenialQuery = Director ? Director->GetLootDropDenialQuery() : nullptr;
+    if (DenialQuery && !DenialQuery->IsEmpty() && UBlueprintGameplayTagLibrary::DoesContainerMatchTagQuery(DamageTags, *DenialQuery))
+    {
+        return;
+    }
+    bHasDroppedLoot = true;
+
+    UWorld* World = GetWorld();
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    const int32_t WorldLevel = GameState ? static_cast<int32_t>(GameState->WorldLevel) : 0;
+    const FVector Location = GetTransform().GetLocation();
+    const FRotator Rotation(0.0f, 0.0f, 0.0f);
+    const float ConeHalfAngle = FMath::Max(static_cast<float>(LootDropConeHalfAngle), 0.0f) * 0.017453292f;
+    const float Speed = LootDropSpeed;
+
+    // Each drop leaves the body upwards, within the cone, at the pawn's loot drop speed.
+    const auto DropFromTierGroup = [&](FName TierGroup, float Chance, const wchar_t* Kind)
+    {
+        if (TierGroup.IsNone() || Chance <= 0.0f || FMath::FRand() >= Chance)
+        {
+            return;
+        }
+        TStructArray<FFortItemEntry> LootDrops{};
+        UFortKismetLibrary::PickLootDrops(LootDrops, TierGroup, WorldLevel, -1);
+        int32_t Dropped = 0;
+        for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
+        {
+            FFortItemEntry& Entry = LootDrops[Index];
+            if (!Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition)))
+            {
+                continue;
+            }
+            if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &Location, &Rotation))
+            {
+                const FVector Direction = UKismetMathLibrary::RandomUnitVectorInCone(FVector(0.0f, 0.0f, 1.0f), ConeHalfAngle);
+                Pickup->TossFromContainer(Location, Direction * Speed);
+                ++Dropped;
+            }
+        }
+        LootDrops.Empty();
+        Log::Info(L"AFortAIPawn: {} dropped {} {} item(s) from {} (world level {})", GetName().ToStdString(), Dropped, Kind, TierGroup.ToString().ToStdString(), WorldLevel);
+    };
+    DropFromTierGroup(LootDropData.WorldItemTierGroup, LootDropData.WorldItemLootDropChance, L"world");
+#endif
+}
+
+void AFortAIPawn::HandleDeathHK(AFortAIPawn* This, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, const void* HitInfo, void* Arg5)
+{
+    // The handler's own tests (4.0 0xEEBAC0): nothing for a pawn already down or dying, and a pawn that uses DBNO is
+    // knocked down instead. The loot drop data is worked out first: the encounter's death handling, which the handler
+    // runs, can let the pawn's spawn group go.
+    UFortAIEncounterInfo* Encounter = !This->bIsDBNO && !This->bIsDying && !This->bUsesDBNO ? static_cast<UFortAIEncounterInfo*>(This->EncounterInfo) : nullptr;
+    FFortAIPawnLootDropData LootDropData;
+    if (Encounter)
+    {
+        FGameplayTagContainer AITags;
+        Encounter->GetAIPawnLootDropTags(This, AITags);
+        Encounter->GetAIPawnLootDropData(AITags, LootDropData);
+    }
+    HandleDeathOG(This, Damage, DamageTags, Momentum, HitInfo, Arg5);
+    if (Encounter)
+    {
+        This->DropLoot(LootDropData, DamageTags);
+    }
+}
+
+void AFortAIPawn::HookDeathVTables()
+{
+#if WITH_SERVER_CODE
+    // Enemy loot drops came with 4.0's loot drop rows; earlier builds have none to drop.
+    if (!UFortAIEncounterInfo::HasLootDropRows() || !Member_bHasDroppedLoot.IsAvailable() || !Member_bUsesDBNO.IsAvailable() || !Member_EncounterInfo.IsAvailable())
+    {
+        return;
+    }
+    UObject* PawnDefault = StaticClass()->GetDefaultObject(false);
+    void** PawnVTable = PawnDefault ? *reinterpret_cast<void***>(PawnDefault) : nullptr;
+    // The mask is only set once the offset resolves, and the arguments are evaluated right to left.
+    const ptrdiff_t UsesDBNOOffset = Member_bUsesDBNO.GetOffsetChecked();
+    if (!PawnVTable || !Finder::ResolveAIPawnDeathLive(PawnVTable, UsesDBNOOffset, Member_bUsesDBNO.GetFieldMask()))
+    {
+        return;
+    }
+
+    const int32_t DeathIndex = Natives::AFortAIPawn_HandleDeathIndex;
+    void* const PawnHandleDeath = PawnVTable[DeathIndex];
+    HandleDeathOG = reinterpret_cast<decltype(HandleDeathOG)>(PawnHandleDeath);
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[DeathIndex] == PawnHandleDeath)
+        {
+            Hooks::SwapVTable(L"AFortAIPawn death handler (loot drops)", VTable, DeathIndex, reinterpret_cast<void*>(&HandleDeathHK));
+        }
+    }
+
+    // The encounters only get loot drop rows with bEnableSTWLootDrops on.
+    const UFortRuntimeOptions* Options = UFortRuntimeOptions::Get();
+    Log::Info(L"AFortAIPawn: enemy loot drops restored (bEnableSTWLootDrops {})", Options && UFortRuntimeOptions::HasSTWLootDrops() && Options->bEnableSTWLootDrops);
+#endif
+}
+
 void AFortAIPawn::HookVTables()
 {
+    HookDeathVTables();
+
     UObject* PawnDefault = StaticClass()->GetDefaultObject(false);
     void* InventoryOwner = PawnDefault && Natives::UObject_GetInterfaceAddress ? Natives::UObject_GetInterfaceAddress(PawnDefault, UFortInventoryOwnerInterface::StaticClass()) : nullptr;
     const int32_t RemoveIndex = Natives::IFortInventoryOwnerInterface_RemoveInventoryItemIndex;

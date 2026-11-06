@@ -168,6 +168,8 @@ namespace Finder
     bool ResolveGoalManagerLive();
     bool ResolveGoalDiscouragementLive();
     bool ResolveQueryGeneratorsLive(void** EnemiesVTable);
+    // 4.0: AFortAIPawn's death handler's slot in PawnVTable (AFortAIPawn's), from the bUsesDBNO test in it.
+    bool ResolveAIPawnDeathLive(void** PawnVTable, ptrdiff_t UsesDBNOOffset, uint8_t UsesDBNOMask);
     bool ResolveAssignmentGoalChecksLive(ptrdiff_t MaxAIForAssignmentOffset, ptrdiff_t MaxAIPerGoalOffset);
     bool ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTable, UClass* GoalItemType);
     bool ResolveQuickBarFocusLive();

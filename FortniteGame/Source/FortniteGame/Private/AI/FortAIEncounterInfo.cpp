@@ -6,6 +6,7 @@
 #include "Items/FortItem.h"
 #include "Items/FortLootPackage.h"
 #include "Natives.h"
+#include "Pawns/FortAIPawn.h"
 #include "ReflectionParams.h"
 
 namespace
@@ -38,6 +39,116 @@ bool UFortAIEncounterInfo::SpawnAIGroup(const UFortAISpawnGroup* SpawnGroupToSpa
     Params.Set(L"bAllowAssigningToExternalSpawners", bAllowAssigningToExternalSpawners);
     Params.Set(L"SecondsBetweenSpawns", 0.25f);
     return Params.Call(this);
+}
+
+void UFortAISpawnGroup::GetEnemyGameplayTags(int32_t EnemyIndex, FGameplayTagContainer& OutTags) const
+{
+    TStructArray<FSpawnGroupEnemy>& Enemies = EnemiesToSpawn;
+    UClass* VariantClass = EnemyIndex >= 0 && EnemyIndex < Enemies.Num() ? static_cast<UClass*>(Enemies[EnemyIndex].EnemyVariantClass) : nullptr;
+    const UFortAIPawnVariant* Variant = VariantClass && VariantClass->IsChildOf(UFortAIPawnVariant::StaticClass()) ? static_cast<const UFortAIPawnVariant*>(VariantClass->GetDefaultObject(false)) : nullptr;
+    if (!Variant)
+    {
+        return;
+    }
+    TStructArray<FFortAIPawnVariantDefinition>& Definitions = Variant->PawnVariantDefinitions;
+    for (int32_t Index = 0; Index < Definitions.Num(); ++Index)
+    {
+        UClass* PawnClass = Definitions[Index].PawnClass;
+        if (PawnClass && PawnClass->IsChildOf(AFortAIPawn::StaticClass()))
+        {
+            if (const AFortPawn* PawnDefault = static_cast<const AFortPawn*>(PawnClass->GetDefaultObject(false)))
+            {
+                OutTags.AppendTags(PawnDefault->GameplayTags);
+            }
+            return;
+        }
+    }
+}
+
+void UFortAIEncounterInfo::GetAIPawnLootDropData(const FGameplayTagContainer& AITags, FFortAIPawnLootDropData& OutLootDropData) const
+{
+    // Each row's tags must all be among the pawn's (its tags or their parents). The rows are walked last to first, and
+    // a later match only replaces the one found when its priority is higher.
+    const auto HasAllTags = [&AITags](const FGameplayTagContainer& RowTags)
+    {
+        for (const FGameplayTag& Tag : RowTags.GameplayTags)
+        {
+            if (!AITags.HasTag(Tag))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    TStructArray<FFortAIBaseLootDropRow>& BaseRows = BaseLootDropRows;
+    const FFortAIBaseLootDropRow* BaseRow = nullptr;
+    for (int32_t Index = BaseRows.Num() - 1; Index >= 0; --Index)
+    {
+        const FFortAIBaseLootDropRow& Row = BaseRows[Index];
+        if (!HasAllTags(Row.AITagsContainer))
+        {
+            continue;
+        }
+        if (!BaseRow || static_cast<int32_t>(BaseRow->Priority) < static_cast<int32_t>(Row.Priority))
+        {
+            BaseRow = &Row;
+        }
+    }
+    if (!BaseRow)
+    {
+        return;
+    }
+
+    TStructArray<FFortAILootDropModifierRow>& ModifierRows = LootDropModifierRows;
+    const FFortAILootDropModifierRow* ModifierRow = nullptr;
+    for (int32_t Index = ModifierRows.Num() - 1; Index >= 0; --Index)
+    {
+        const FFortAILootDropModifierRow& Row = ModifierRows[Index];
+        if (!HasAllTags(Row.AITagsContainer))
+        {
+            continue;
+        }
+        if (!ModifierRow || static_cast<int32_t>(ModifierRow->Priority) < static_cast<int32_t>(Row.Priority))
+        {
+            ModifierRow = &Row;
+        }
+    }
+
+    OutLootDropData.WorldItemTierGroup = BaseRow->WorldItemLootTierGroup;
+    OutLootDropData.AccountItemTierGroup = BaseRow->AccountItemLootTierGroup;
+    const float WorldMultiplier = ModifierRow ? static_cast<float>(ModifierRow->WorldItemDropChanceMultiplier) : 1.0f;
+    const float AccountMultiplier = ModifierRow ? static_cast<float>(ModifierRow->AccountItemDropChanceMultiplier) : 1.0f;
+    OutLootDropData.WorldItemLootDropChance = FMath::Clamp(WorldMultiplier * static_cast<float>(BaseRow->WorldItemDropChance), 0.0f, 1.0f);
+    OutLootDropData.AccountItemLootDropChance = FMath::Clamp(AccountMultiplier * static_cast<float>(BaseRow->AccountItemDropChance), 0.0f, 1.0f);
+}
+
+void UFortAIEncounterInfo::GetAIPawnLootDropTags(const AFortAIPawn* Pawn, FGameplayTagContainer& OutAITags) const
+{
+    // The queue (4.0 0x8DABE0) takes the encounter's tags (0x8C32D0, of which only its own ModifierTags and
+    // GameContextTags are reflected; the director's and the mutators' tags it adds there aren't kept, and none of 4.0's
+    // loot rows asks for an encounter tag), then the group instance's UpgradeTags, its spawn group's tags and the enemy's.
+    OutAITags.AppendTags(ModifierTags);
+    OutAITags.AppendTags(GameContextTags);
+
+    const FGuid GroupGuid = Pawn->SpawnGroupGuid;
+    TStructArray<FSpawnGroupInstanceInfo>& Groups = ActiveSpawnGroups;
+    const FSpawnGroupInstanceInfo* Instance = nullptr;
+    for (int32_t Index = 0; Index < Groups.Num(); ++Index)
+    {
+        if (Groups[Index].GroupGuid == GroupGuid)
+        {
+            Instance = &Groups[Index];
+        }
+    }
+    UFortAISpawnGroup* SpawnGroup = Instance ? static_cast<UFortAISpawnGroup*>(Instance->SpawnGroup) : nullptr;
+    if (!SpawnGroup)
+    {
+        return;
+    }
+    OutAITags.AppendTags(Instance->UpgradeTags);
+    OutAITags.AppendTags(SpawnGroup->SpawnGroupGameplayTags);
+    SpawnGroup->GetEnemyGameplayTags(Pawn->EnemyIndexInSpawnGroup, OutAITags);
 }
 
 void UFortAIEncounterInfo::RollSpawnGroupUpgradeModifiers(const FGuid& GroupGuid, const FFortAISpawnGroupUpgrade& Upgrade, float DifficultyLevel, const FGameplayTagContainer& EnemyTags)

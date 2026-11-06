@@ -1036,6 +1036,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRewardReport.h">
       <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRuntimeOptions.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpottableActorInterface.h">
       <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
     </ClInclude>

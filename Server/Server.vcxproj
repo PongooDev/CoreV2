@@ -291,6 +291,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortKismetLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortMissionTimerComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRewardReport.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRuntimeOptions.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpottableActorInterface.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortTeamInfo.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortTheaterInfo.h" />

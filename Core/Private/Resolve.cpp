@@ -5435,6 +5435,61 @@ bool Finder::ResolveQueryGeneratorsLive(void** EnemiesVTable)
     return true;
 }
 
+bool Finder::ResolveAIPawnDeathLive(void** PawnVTable, ptrdiff_t UsesDBNOOffset, uint8_t UsesDBNOMask)
+{
+    if (Natives::AFortAIPawn_HandleDeathIndex >= 0)
+    {
+        return true;
+    }
+
+    // The encounter's handling of a pawn's death (4.0 0x8CF250, 4.1 0x8D46C0) is the one function with this log, and the
+    // pawn's death notification (4.0 0xEEB6B0, 4.1 0xF01A90) its one caller. Two of AFortAIPawn's slots call that: its
+    // Destroyed and its death handler (4.0 0xEEBAC0, slot 0x123), which tests bUsesDBNO (a knock-down goes elsewhere).
+    const uintptr_t EncounterPawnDied = FunctionOf(L"Failed to find spawn group info on enemy pawn death for pawn %s. Associated Mission Name: %s. Group GUID is %s. Num active groups %i.");
+    const std::vector<uintptr_t> EncounterPawnDiedCalls = EncounterPawnDied ? Finder::CallsTo(EncounterPawnDied, true) : std::vector<uintptr_t>();
+    const uintptr_t NotifyDeath = EncounterPawnDiedCalls.size() == 1 ? Finder::FunctionStart(EncounterPawnDiedCalls.front()) : 0;
+
+    // test byte ptr [reg+UsesDBNOOffset], UsesDBNOMask (F6 /0, disp32, imm8, no SIB).
+    const auto TestsUsesDBNO = [UsesDBNOOffset, UsesDBNOMask](uintptr_t Function, uintptr_t End)
+    {
+        for (uintptr_t Site = Function; Site + 7 <= End; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 1);
+            if (Byte(Site) == 0xF6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 2) == UsesDBNOOffset && Byte(Site + 6) == UsesDBNOMask)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const int32_t Index = NotifyDeath && UsesDBNOOffset > 0 ? FirstVTableIndexWhere(PawnVTable, [&](uintptr_t Entry)
+        {
+            const uintptr_t Function = Finder::Unthunk(Entry);
+            const uintptr_t End = Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : 0;
+            if (!End || !TestsUsesDBNO(Function, End))
+            {
+                return false;
+            }
+            for (const auto& [Call, Target] : Finder::DirectCalls(Function, End))
+            {
+                if (Finder::Unthunk(Target) == NotifyDeath)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }) : -1;
+
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortAIPawn's death handler not found (encounter 0x{:X}, {} calls, notify 0x{:X})", EncounterPawnDied ? EncounterPawnDied - Finder::ImageBase() : 0, EncounterPawnDiedCalls.size(), NotifyDeath ? NotifyDeath - Finder::ImageBase() : 0);
+        return false;
+    }
+    Natives::AFortAIPawn_HandleDeathIndex = Index;
+    Log::Info(L"Finder: AFortAIPawn's death handler is slot 0x{:X} (0x{:X})", Index, reinterpret_cast<uintptr_t>(PawnVTable[Index]) - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveAssignmentGoalChecksLive(ptrdiff_t MaxAIForAssignmentOffset, ptrdiff_t MaxAIPerGoalOffset)
 {
     if (Natives::UFortAIAssignment_CanPawnUse && Natives::FFortAIGoal_CanAIUse)

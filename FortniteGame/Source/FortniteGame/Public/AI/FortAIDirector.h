@@ -226,6 +226,8 @@ protected:
     DefineUStructProperty(FFortEncounterPawnNumberCaps, DefaultEncounterPawnCaps)
     DefineUProperty(FGameplayTagContainer, AmbientThreatPreferredPlacementActorTags)
     DefineUProperty(FGameplayTagContainer, AmbientThreatRequiredPlacementActorTags)
+    // 4.0: no loot drops from a pawn whose death's damage tags match it (AIDirector_Fortnite's: Gameplay.Effect.InstantDeath).
+    DefineUProperty(FGameplayTagQuery, LootDropDenialQuery)
 
 public:
     DefineUProperty(float, EncounterPawnSpawnInterval)
@@ -239,6 +241,8 @@ public:
     DefineUProperty(float, EncounterRelevantDistanceToPlayer)
 
     static AFortAIDirector* GetCurrent(const UObject* WorldContextObject);
+    // 4.0: LootDropDenialQuery, null on builds without it.
+    const FGameplayTagQuery* GetLootDropDenialQuery() const { return Member_LootDropDenialQuery.IsAvailable() ? &GetMember_LootDropDenialQuery() : nullptr; }
 
     void StopEncounter(UFortAIEncounterInfo* EncounterToStop, EFortObjectiveStatus EncounterStopReason, bool bForceKillAI = false, bool bBroadcastStop = true);
 

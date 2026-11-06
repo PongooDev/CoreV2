@@ -3,13 +3,77 @@
 #include "StructArray.h"
 #include "UObject/Object.h"
 
+// The 21.40 layout's stat slots (4.0 on): FAthenaMatchStats::Stats[i] and FAthenaWeaponStats::Stats[i] hold the stat of
+// the i-th native GameplayStat tag. 4.0's global tags (0xC6FE70) map "GameplayStat.Profile.Match.Score" ... ".GamesPlayed"
+// to 0-19 and "GameplayStat.Profile.Weapon.Eliminations" ... ".CriticalHitsToFriends" to 0-12; the rest of the tags are
+// made from those (FAthenaMatchStats::GetStat 0xA88E00, FAthenaWeaponStats::GetStat 0xA89050): Accuracy is the weapons'
+// hits to hostiles over their RangedShots, MaterialsGathered and MaterialsUsed the three materials added up, the damage
+// and hits to hostiles the weapons' Normal plus Critical ones, so the end-of-match screen's damage, hits and accuracy
+// come from WeaponStats.
+enum class EAthenaMatchStat : int32_t
+{
+    Score,
+    Placement,
+    SecondsAlive,
+    PersonalElimination,
+    TeamEliminations,
+    Downs,
+    Assists,
+    Revives,
+    DamageTaken,
+    TravelDistanceGround,
+    GatheredWood,
+    GatheredStone,
+    GatheredMetal,
+    UsedWood,
+    UsedStone,
+    UsedMetal,
+    Wins,
+    HighBracket,
+    LowBracket,
+    GamesPlayed,
+    Count
+};
+
+enum class EAthenaWeaponStat : int32_t
+{
+    Eliminations,
+    Downs,
+    RangedShots,
+    NormalDamageToHostiles,
+    NormalDamageToFriends,
+    NormalDamageToStructures,
+    CriticalDamageToHostiles,
+    CriticalDamageToFriends,
+    NormalHitsToHostiles,
+    NormalHitsToFriends,
+    NormalHitsToStructures,
+    CriticalHitsToHostiles,
+    CriticalHitsToFriends,
+    Count
+};
+
+// One weapon's stats in a match (4.0 on): its WeaponId (the weapon item definition's name, which
+// UAthenaWeaponStatView::GetWeaponDefinition finds it by) and int32 Stats[13] by EAthenaWeaponStat.
+struct FAthenaWeaponStats
+{
+    DefineUnrealStruct(FAthenaWeaponStats, FortniteGame)
+    DefineUProperty(FString, WeaponId)
+    DefineUProperty(int32_t, Stats)
+
+public:
+    void SetStat(EAthenaWeaponStat Stat, int32_t Value) { (&GetMember_Stats())[static_cast<int32_t>(Stat)] = Value; }
+    int32_t GetStat(EAthenaWeaponStat Stat) const { return (&GetMember_Stats())[static_cast<int32_t>(Stat)]; }
+};
+
 // A Battle Royale player's stats for one match (from 1.10; FortniteGame/Public/AthenaPlayerMatchReport.h), which the
 // end-of-match screen shows (AthenaMatchStatsPartial: placement, Kills, Assists, Revives, Accuracy, Hits, Critical
 // Hits, Distance Traveled, Materials Gathered and Used, Damage To Players, Damage Taken and To Structures). 1.10 names
 // each stat; later builds (21.40) keep them in an int32 Stats[20] beside a StatBucket and the match's id. 1.11 moves
 // Place and TotalPlayers out to FAthenaMatchTeamStats, has RangedShots for RangedMiss, splits the materials by type
 // and the damage and hits into normal and critical ones (its screen's Headshots is CriticalHitsToHostiles, where
-// 1.10's is CriticalShots). Members a build doesn't reflect are left out (IsAvailable).
+// 1.10's is CriticalShots). 4.0 has 21.40's layout: StatBucket, MatchID, MatchEndTime, MatchPlatform, int32 Stats[20]
+// by EAthenaMatchStat and the WeaponStats. Members a build doesn't reflect are left out (IsAvailable).
 struct FAthenaMatchStats
 {
     DefineUnrealStruct(FAthenaMatchStats, FortniteGame)
@@ -42,9 +106,17 @@ struct FAthenaMatchStats
     DefineUProperty(int32_t, MaterialsUsed)
     DefineUProperty(int32_t, CriticalShots)
     DefineUProperty(int32_t, CriticalHitsToHostiles)
+    // 4.0 on.
+    DefineUProperty(int32_t, Stats)
+    DefineUStructArrayProperty(FAthenaWeaponStats, WeaponStats)
 
 public:
     static bool IsReflected() { return StaticStruct() != nullptr; }
+    // 4.0 on: the stats are slots (EAthenaMatchStat) and the weapons' stats (FAthenaWeaponStats).
+    static bool HasStatSlots() { return Member_Stats.IsAvailable() && Member_WeaponStats.IsAvailable() && FAthenaWeaponStats::StaticStruct() != nullptr; }
+
+    void SetStat(EAthenaMatchStat Stat, int32_t Value) { (&GetMember_Stats())[static_cast<int32_t>(Stat)] = Value; }
+    int32_t GetStat(EAthenaMatchStat Stat) const { return (&GetMember_Stats())[static_cast<int32_t>(Stat)]; }
 
     // Sets a stat the build reflects; a build without it keeps its struct as it is.
     template <typename T>
@@ -164,6 +236,7 @@ public:
 // (ClientSendMatchStatsForPlayer 0x42F030, ClientSendEndBattleRoyaleMatchForPlayer 0x42EFC0), which set the struct,
 // its bHas flag and broadcast OnStatsAvailable / OnRewardsAvailable to the screen. The server's holds what the server
 // sent, so bHasStats on it says the player's stats are out (21.40's controller adds bMatchStatsForPlayerSent for that).
+// 4.0 names them bHasMatchStats and MatchStats.
 class UAthenaPlayerMatchReport : public UObject
 {
     DefineUnrealClass(UAthenaPlayerMatchReport, FortniteGame)
@@ -171,10 +244,31 @@ class UAthenaPlayerMatchReport : public UObject
 public:
     DefineUProperty(bool, bHasStats)
     DefineUStructProperty(FAthenaMatchStats, Stats)
+    DefineUProperty(bool, bHasMatchStats)
+    DefineUStructProperty(FAthenaMatchStats, MatchStats)
     // 1.11 (ClientSendTeamStatsForPlayer).
     DefineUProperty(bool, bHasTeamStats)
     DefineUStructProperty(FAthenaMatchTeamStats, TeamStats)
 
-    static bool HasStats() { return Member_bHasStats.IsAvailable() && Member_Stats.IsAvailable(); }
+    static bool HasStats() { return HasOldStatNames() || (Member_bHasMatchStats.IsAvailable() && Member_MatchStats.IsAvailable()); }
+
+    bool HasStatsSent() const { return HasOldStatNames() ? GetMember_bHasStats() : GetMember_bHasMatchStats(); }
+    void SetStatsSent()
+    {
+        if (HasOldStatNames())
+        {
+            SetMember_bHasStats(true);
+        }
+        else
+        {
+            SetMember_bHasMatchStats(true);
+        }
+    }
+    FAthenaMatchStats& GetMatchStats() const { return HasOldStatNames() ? GetMember_Stats() : GetMember_MatchStats(); }
+
+private:
+    static bool HasOldStatNames() { return Member_bHasStats.IsAvailable() && Member_Stats.IsAvailable(); }
+
+public:
     static bool HasTeamStats() { return FAthenaMatchTeamStats::IsReflected() && Member_bHasTeamStats.IsAvailable() && Member_TeamStats.IsAvailable(); }
 };

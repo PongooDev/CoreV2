@@ -546,8 +546,9 @@ void AFortPlayerControllerAthena::HookCallSites()
     if (FindStaticFunction_ClientSendMatchStatsForPlayer())
     {
         Finder::ResolveMatchStatsLive();
-        Log::Info(L"Battle Royale: the end-of-match screen takes FAthenaMatchStats ({}), the match report {}, the player state {}", FAthenaMatchStats::IsReflected() ? L"reflected" : L"not reflected",
-            UAthenaPlayerMatchReport::HasStats() && HasMatchReport() ? L"holds them" : L"is missing", AFortPlayerStateAthena::HasDownScore() ? L"has DownScore" : L"has no DownScore");
+        Log::Info(L"Battle Royale: the end-of-match screen takes FAthenaMatchStats ({}{}), the match report {}, the player state {}", FAthenaMatchStats::IsReflected() ? L"reflected" : L"not reflected",
+            FAthenaMatchStats::HasStatSlots() ? L", 21.40's Stats slots and WeaponStats" : L"", UAthenaPlayerMatchReport::HasStats() && HasMatchReport() ? L"holds them" : L"is missing",
+            AFortPlayerStateAthena::HasDownScore() ? L"has DownScore" : L"has no DownScore");
     }
 #endif
 

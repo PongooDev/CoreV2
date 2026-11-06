@@ -119,6 +119,81 @@ namespace
         return Total;
     }
 
+    // 4.0's weapon stats (FAthenaWeaponStats), one for each weapon the StatManager has stats for. 4.0's weapons add each
+    // stat under every one of their ActualAnalyticFNames, which are their AnalyticTags ("weapon.ranged") and
+    // "Tag:Weapon:<item definition, lower case>", so a weapon's stats are the "<Stat>:Tag:Weapon:<id>" ones: AFortPawn's
+    // damage handler's "Damage.Dealt.Zone.<Normal|Critical>.To<Hostile|Friend>" and "Hit.Zone.<Normal|Critical>.To<Hostile|
+    // Friend>", a building's "Damage.Dealt.Zone.Normal.ToStructure" and "Hit.Zone.Normal.ToStructure", and a weapon's fire
+    // "Ranged.Bullets.Fired". Nothing records a weapon's eliminations or downs (the match's are in the player state).
+    // The screen's accuracy is the hits over the shots: only the guns' hits count, as CountRangedHits does.
+    void AddWeaponStats(FAthenaMatchStats& Stats, UStatManager* Manager, EStatRecordingPeriod Period)
+    {
+        static const std::pair<std::wstring, EAthenaWeaponStat> WeaponStatNames[] = {
+            { L"Ranged.Bullets.Fired", EAthenaWeaponStat::RangedShots },
+            { L"Damage.Dealt.Zone.Normal.ToHostile", EAthenaWeaponStat::NormalDamageToHostiles },
+            { L"Damage.Dealt.Zone.Normal.ToFriend", EAthenaWeaponStat::NormalDamageToFriends },
+            { L"Damage.Dealt.Zone.Normal.ToStructure", EAthenaWeaponStat::NormalDamageToStructures },
+            { L"Damage.Dealt.Zone.Critical.ToHostile", EAthenaWeaponStat::CriticalDamageToHostiles },
+            { L"Damage.Dealt.Zone.Critical.ToFriend", EAthenaWeaponStat::CriticalDamageToFriends },
+            { L"Hit.Zone.Normal.ToHostile", EAthenaWeaponStat::NormalHitsToHostiles },
+            { L"Hit.Zone.Normal.ToFriend", EAthenaWeaponStat::NormalHitsToFriends },
+            { L"Hit.Zone.Normal.ToStructure", EAthenaWeaponStat::NormalHitsToStructures },
+            { L"Hit.Zone.Critical.ToHostile", EAthenaWeaponStat::CriticalHitsToHostiles },
+            { L"Hit.Zone.Critical.ToFriend", EAthenaWeaponStat::CriticalHitsToFriends },
+        };
+        static const std::wstring WeaponSource = L":Tag:Weapon:";
+
+        std::vector<std::pair<std::wstring, std::vector<int32_t>>> Weapons;
+        const TArray<UStat*>& AllStats = Manager->Stats;
+        for (UStat* Each : AllStats)
+        {
+            if (!Each)
+            {
+                continue;
+            }
+            const FName Name = static_cast<FName>(Each->StatName);
+            const std::wstring Text = Name.ToStdString();
+            for (const auto& [StatName, Stat] : WeaponStatNames)
+            {
+                const size_t Prefix = StatName.size() + WeaponSource.size();
+                // Names compare without case, as FNames do.
+                if (Text.size() <= Prefix || _wcsnicmp(Text.c_str(), StatName.c_str(), StatName.size()) != 0
+                    || _wcsnicmp(Text.c_str() + StatName.size(), WeaponSource.c_str(), WeaponSource.size()) != 0)
+                {
+                    continue;
+                }
+                std::wstring WeaponId = Text.substr(Prefix);
+                std::transform(WeaponId.begin(), WeaponId.end(), WeaponId.begin(), [](wchar_t Char) { return static_cast<wchar_t>(std::towlower(Char)); });
+                auto Weapon = std::find_if(Weapons.begin(), Weapons.end(), [&WeaponId](const auto& Entry) { return Entry.first == WeaponId; });
+                if (Weapon == Weapons.end())
+                {
+                    Weapons.emplace_back(std::move(WeaponId), std::vector<int32_t>(static_cast<size_t>(EAthenaWeaponStat::Count), 0));
+                    Weapon = Weapons.end() - 1;
+                }
+                Weapon->second[static_cast<size_t>(Stat)] += Manager->GetStatValue(Name, Period);
+                break;
+            }
+        }
+
+        for (auto& [WeaponId, Values] : Weapons)
+        {
+            if (Values[static_cast<size_t>(EAthenaWeaponStat::RangedShots)] <= 0)
+            {
+                for (EAthenaWeaponStat Hits : { EAthenaWeaponStat::NormalHitsToHostiles, EAthenaWeaponStat::NormalHitsToFriends, EAthenaWeaponStat::NormalHitsToStructures,
+                         EAthenaWeaponStat::CriticalHitsToHostiles, EAthenaWeaponStat::CriticalHitsToFriends })
+                {
+                    Values[static_cast<size_t>(Hits)] = 0;
+                }
+            }
+            FAthenaWeaponStats& Weapon = Stats.GetMember_WeaponStats().AddDefaulted();
+            Weapon.WeaponId = FString(std::wstring_view(WeaponId));
+            for (int32_t Index = 0; Index < static_cast<int32_t>(EAthenaWeaponStat::Count); ++Index)
+            {
+                Weapon.SetStat(static_cast<EAthenaWeaponStat>(Index), Values[static_cast<size_t>(Index)]);
+            }
+        }
+    }
+
     // The objects of Json's array Name, each as its own text: the backend's are flat ({"source":1,"amount":10}).
     std::vector<std::string> JsonObjects(const std::string& Json, const std::string& Name)
     {
@@ -152,7 +227,7 @@ void AFortPlayerController::SendMatchStatsForPlayer()
         return;
     }
     UAthenaPlayerMatchReport* Report = AthenaController->GetMatchReport();
-    if (!Report || Report->bHasStats)
+    if (!Report || Report->HasStatsSent())
     {
         return;
     }
@@ -162,7 +237,7 @@ void AFortPlayerController::SendMatchStatsForPlayer()
     const int32_t Place = std::max<int32_t>(AthenaState->Place, 0);
     const int32_t TotalPlayers = std::max(GameState && AFortGameStateAthena::HasTotalPlayers() ? static_cast<int32_t>(GameState->TotalPlayers) : 0, Place);
 
-    FAthenaMatchStats& Stats = Report->Stats;
+    FAthenaMatchStats& Stats = Report->GetMatchStats();
     Stats.SetStat(FAthenaMatchStats::StatPlace(), Place);
     Stats.SetStat(FAthenaMatchStats::StatTotalPlayers(), TotalPlayers);
     Stats.SetStat(FAthenaMatchStats::StatSecondsAlive(), std::max<int32_t>(AthenaState->SecondsAlive, 0));
@@ -214,7 +289,37 @@ void AFortPlayerController::SendMatchStatsForPlayer()
         UE_LOG(LogFortMatchStats, Warning, TEXT("SendMatchStatsForPlayer: %s has no StatManager, only its place, time alive, kills, downs, assists and materials gathered are sent"), *GetName());
     }
 
-    Report->bHasStats = true;
+    // 4.0: the same stats in their slots, and the damage, hits and shots by weapon.
+    const bool bStatSlots = FAthenaMatchStats::HasStatSlots();
+    if (bStatSlots)
+    {
+        const int32_t Kills = std::max(AthenaState->GetKills(), 0);
+        Stats.SetStat(EAthenaMatchStat::Placement, Place);
+        Stats.SetStat(EAthenaMatchStat::SecondsAlive, std::max<int32_t>(AthenaState->SecondsAlive, 0));
+        Stats.SetStat(EAthenaMatchStat::PersonalElimination, Kills);
+        Stats.SetStat(EAthenaMatchStat::TeamEliminations, AFortPlayerStateAthena::HasTeamKillScore() ? std::max<int32_t>(AthenaState->TeamKillScore, Kills) : Kills);
+        Stats.SetStat(EAthenaMatchStat::Downs, AFortPlayerStateAthena::HasDownScore() ? std::max<int32_t>(AthenaState->DownScore, 0) : 0);
+        Stats.SetStat(EAthenaMatchStat::Assists, CountAssists(AthenaState));
+        Stats.SetStat(EAthenaMatchStat::GatheredWood, GatheredWood);
+        Stats.SetStat(EAthenaMatchStat::GatheredStone, GatheredStone);
+        Stats.SetStat(EAthenaMatchStat::GatheredMetal, GatheredMetal);
+        // One match played, won when the player's team placed first (UAthenaStatsSet's CumulativeStats add them up).
+        Stats.SetStat(EAthenaMatchStat::Wins, Place == 1 ? 1 : 0);
+        Stats.SetStat(EAthenaMatchStat::GamesPlayed, 1);
+        if (Manager)
+        {
+            const EStatRecordingPeriod Match = EStatRecordingPeriod::GetMap();
+            Stats.SetStat(EAthenaMatchStat::Revives, Manager->GetStatValue(FName(L"TeammateRevives"), Match));
+            Stats.SetStat(EAthenaMatchStat::DamageTaken, Manager->GetStatValue(FName(L"DamageReceived"), Match));
+            Stats.SetStat(EAthenaMatchStat::TravelDistanceGround, Manager->GetStatValue(FName(L"Travel.Distance.Ground"), Match));
+            Stats.SetStat(EAthenaMatchStat::UsedWood, Manager->GetStatValue(FName(L"WoodExpended"), Match));
+            Stats.SetStat(EAthenaMatchStat::UsedStone, Manager->GetStatValue(FName(L"StoneExpended"), Match));
+            Stats.SetStat(EAthenaMatchStat::UsedMetal, Manager->GetStatValue(FName(L"MetalExpended"), Match));
+            AddWeaponStats(Stats, Manager, Match);
+        }
+    }
+
+    Report->SetStatsSent();
     AthenaController->ClientSendMatchStatsForPlayer(Stats);
     if (UAthenaPlayerMatchReport::HasTeamStats() && AFortPlayerControllerAthena::FindStaticFunction_ClientSendTeamStatsForPlayer())
     {
@@ -225,6 +330,29 @@ void AFortPlayerController::SendMatchStatsForPlayer()
         AthenaController->ClientSendTeamStatsForPlayer(TeamStats);
     }
     // The rewards follow with the backend's answer to the match's results (SendEndBattleRoyaleMatchForPlayer).
+
+    if (bStatSlots)
+    {
+        int32_t Weapon[static_cast<int32_t>(EAthenaWeaponStat::Count)] = {};
+        TStructArray<FAthenaWeaponStats>& Weapons = Stats.GetMember_WeaponStats();
+        for (int32_t Index = 0; Index < Weapons.Num(); ++Index)
+        {
+            for (int32_t Stat = 0; Stat < static_cast<int32_t>(EAthenaWeaponStat::Count); ++Stat)
+            {
+                Weapon[Stat] += Weapons[Index].GetStat(static_cast<EAthenaWeaponStat>(Stat));
+            }
+        }
+        const auto Of = [&Weapon](EAthenaWeaponStat Stat) { return Weapon[static_cast<int32_t>(Stat)]; };
+        UE_LOG(LogFortMatchStats, Log, TEXT("SendMatchStatsForPlayer: %s placed %d of %d, %d s alive, %d kills, %d downs, %d assists, %d revives, %d weapons: damage %d to players, %d to friends, %d to structures, %d taken, %d shots, %d hits, %d critical, %d cm on the ground, materials %d gathered and %d used"),
+            *GetName(), Place, TotalPlayers, Stats.GetStat(EAthenaMatchStat::SecondsAlive), Stats.GetStat(EAthenaMatchStat::PersonalElimination), Stats.GetStat(EAthenaMatchStat::Downs),
+            Stats.GetStat(EAthenaMatchStat::Assists), Stats.GetStat(EAthenaMatchStat::Revives), Weapons.Num(),
+            Of(EAthenaWeaponStat::NormalDamageToHostiles) + Of(EAthenaWeaponStat::CriticalDamageToHostiles), Of(EAthenaWeaponStat::NormalDamageToFriends) + Of(EAthenaWeaponStat::CriticalDamageToFriends),
+            Of(EAthenaWeaponStat::NormalDamageToStructures), Stats.GetStat(EAthenaMatchStat::DamageTaken), Of(EAthenaWeaponStat::RangedShots),
+            Of(EAthenaWeaponStat::NormalHitsToHostiles) + Of(EAthenaWeaponStat::CriticalHitsToHostiles), Of(EAthenaWeaponStat::CriticalHitsToHostiles),
+            Stats.GetStat(EAthenaMatchStat::TravelDistanceGround), GatheredWood + GatheredStone + GatheredMetal,
+            Stats.GetStat(EAthenaMatchStat::UsedWood) + Stats.GetStat(EAthenaMatchStat::UsedStone) + Stats.GetStat(EAthenaMatchStat::UsedMetal));
+        return;
+    }
 
     const auto Value = [&Stats](Reflection::FMemberInfo& Member) { return Member.IsAvailable() ? Reflection::AccessMember<int32_t>(&Stats, Member) : 0; };
     UE_LOG(LogFortMatchStats, Log, TEXT("SendMatchStatsForPlayer: %s placed %d of %d, %d s alive, %d kills, %d downs, %d assists, %d revives, damage %d to players, %d to friends, %d to structures, %d taken, %d shots, %d hits, %d misses, %d critical, %d cm on the ground, materials %d gathered and %d used"),

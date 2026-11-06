@@ -7141,11 +7141,14 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
         return true;
     }
 
+    // The opcode's last byte is its ModRM, which must address [reg+disp32]: comiss xmm0, [rdx+RegenCooldown] (0F 2F 82)
+    // up to 3.6, comiss xmm0, [r13+RegenCooldown] (41 0F 2F 85) on 4.0.
     const auto FindDisplacement = [](uintptr_t Begin, uintptr_t End, std::initializer_list<int32_t> Opcode, ptrdiff_t Displacement)
     {
         for (uintptr_t Site = FindInstruction(Begin, End, Opcode); Site; Site = FindInstruction(Site + 1, End, Opcode))
         {
-            if (Site + Opcode.size() + sizeof(int32_t) <= End && *reinterpret_cast<const int32_t*>(Site + Opcode.size()) == Displacement)
+            const uint8_t ModRm = Byte(Site + Opcode.size() - 1);
+            if ((ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && Site + Opcode.size() + sizeof(int32_t) <= End && *reinterpret_cast<const int32_t*>(Site + Opcode.size()) == Displacement)
             {
                 return Site;
             }
@@ -7161,7 +7164,7 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
     {
         const uintptr_t Function = VTableEntry(AmmoVTable, Index);
         const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
-        const uintptr_t Compare = FunctionEnd > Function ? FindDisplacement(Function, FunctionEnd, { 0x0F, 0x2F, 0x82 }, RegenCooldownOffset) : 0;
+        const uintptr_t Compare = FunctionEnd > Function ? FindDisplacement(Function, FunctionEnd, { 0x0F, 0x2F, -1 }, RegenCooldownOffset) : 0;
         if (Compare)
         {
             bAmbiguous |= RegenCompare && RegenCompare != Compare;

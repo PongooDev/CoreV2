@@ -11590,16 +11590,32 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
                 Target = VTableEntry(PawnVTable, VirtualSlot(VirtualCall));
             }
         }
-        for (uintptr_t Check = Target; Target && Check < Target + 0x20; ++Check)
+        const auto OpensWithSkydivingCheck = [IsSkydivingOffset](uintptr_t Function)
         {
-            const bool bCheck = IsDisp32Access(Check, 0x80, 7, IsSkydivingOffset) && Byte(Check + 6) == 0;
-            const bool bSet = IsDisp32Access(Check, 0xC6, 0, IsSkydivingOffset) && (Byte(Check + 1) & 0x07) == 0x01 && Byte(Check + 6) == 1;
-            if (bCheck || bSet)
+            for (uintptr_t Check = Function; Function && Check < Function + 0x20; ++Check)
             {
-                Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(Target);
-                Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X})", Target - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());
-                return true;
+                const bool bCheck = IsDisp32Access(Check, 0x80, 7, IsSkydivingOffset) && Byte(Check + 6) == 0;
+                const bool bSet = IsDisp32Access(Check, 0xC6, 0, IsSkydivingOffset) && (Byte(Check + 1) & 0x07) == 0x01 && Byte(Check + 6) == 1;
+                if (bCheck || bSet)
+                {
+                    return true;
+                }
             }
+            return false;
+        };
+        // 4.2 overrides it in AFortPlayerPawnAthena (slot 0x1CB, 0xA6D480): its own bookkeeping, then Super::BeginSkydiving
+        // (AFortPlayerPawn's, 0xEE15B0, at 0xA6D4B4), which opens with the check. The slot is still what ExitAircraft calls.
+        bool bFound = OpensWithSkydivingCheck(Target);
+        const uintptr_t TargetEnd = !bFound && Target && Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        for (uintptr_t SuperCall = TargetEnd ? FindRawCall(Target, std::min(TargetEnd, Target + 0x40)) : 0; SuperCall && !bFound; SuperCall = FindRawCall(SuperCall + 1, std::min(TargetEnd, Target + 0x40)))
+        {
+            bFound = OpensWithSkydivingCheck(Finder::RelativeTarget(SuperCall, 1, 5));
+        }
+        if (bFound)
+        {
+            Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(Target);
+            Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X})", Target - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());
+            return true;
         }
     }
     Log::Error(L"Finder: AFortPlayerPawnAthena::BeginSkydiving not found (ExitAircraft 0x{:X}), player bots can't leave the aircraft", ExitAircraft ? ExitAircraft - Finder::ImageBase() : 0);

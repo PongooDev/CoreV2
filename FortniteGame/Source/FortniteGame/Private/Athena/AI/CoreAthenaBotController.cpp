@@ -1993,10 +1993,13 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     {
         CancelHeal();
     }
-    // Nor a build or a box to hide in.
+    // Nor a build or a box to hide in (a ramp out of where it is stuck is its way to the circle).
     if (bHeadingForSafeZone)
     {
-        ClearBuildingQueue();
+        if (!BuildQueue.bToUnstick)
+        {
+            ClearBuildingQueue();
+        }
         HideEndTime = 0.0f;
     }
     // Mid-revive, the bot keeps at it unless an enemy is close or shooting at it.
@@ -5104,37 +5107,45 @@ bool FCoreAthenaBotController::FindBuildingInTheWay(float Now)
         return false;
     }
     const FVector Location = LocationOf(Pawn);
-    FVector Direction = MoveGoal - Location;
-    Direction.Z = 0.0f;
-    if (Direction.Size() < 1.0f)
+    // The way it is trying to go first (inside a house its path turns through rooms, and the wall that holds it up is
+    // seldom the one towards its goal: the goal's way alone found nothing to break), then the way to its goal.
+    const FVector Ahead = WayAhead(Now, Location);
+    const FVector ToGoal = Direction2D(Location, MoveGoal);
+    std::vector<FVector> Ways;
+    for (const FVector& Way : { Ahead, ToGoal })
     {
-        return false;
-    }
-    Direction = Direction * (1.0f / Direction.Size());
-    // Ahead, and a little to each side, at knee and chest height.
-    for (const float Yaw : { 0.0f, -25.0f, 25.0f })
-    {
-        for (const float Height : { -30.0f, 30.0f })
+        if (Way.SizeSquared() > 0.01f && std::none_of(Ways.begin(), Ways.end(), [&Way](const FVector& Other) { return (Other - Way).SizeSquared() < 0.01f; }))
         {
-            const FVector Start(Location.X, Location.Y, Location.Z + Height);
-            FVector Hit;
-            UObject* HitActor = nullptr;
-            UObject* HitComponent = nullptr;
-            if (!UKismetSystemLibrary::LineTraceSingle(Pawn, Start, Start + RotateYaw(Direction, Yaw) * 200.0f, 0, false, true, Hit, HitActor, HitComponent))
+            Ways.push_back(Way);
+        }
+    }
+    // Ahead, and a little to each side, at knee, chest and head height.
+    for (const FVector& Direction : Ways)
+    {
+        for (const float Yaw : { 0.0f, -25.0f, 25.0f })
+        {
+            for (const float Height : { -30.0f, 30.0f, 70.0f })
             {
-                continue;
-            }
-            ABuildingSMActor* Building = HitActor ? Cast<ABuildingSMActor>(HitActor) : nullptr;
-            // Not a chest or an ammo box: the bot searches those.
-            if (Building && !Cast<ABuildingContainer>(HitActor) && !Building->bDestroyed && Building->GetHealth() > 0.0f && !IsUnreachable(Building))
-            {
-                HarvestTarget = Building;
-                HarvestTargetTime = Now;
-                HarvestPoint = Hit;
-                bHarvestToUnstick = true;
-                ++BreakThroughs;
-                Log::Info(L"Battle Royale bots: {} is stuck against {} ({:.0f} health) and breaks through it", BotName, NameOf(reinterpret_cast<UObject*>(Building)), Building->GetHealth());
-                return true;
+                const FVector Start(Location.X, Location.Y, Location.Z + Height);
+                FVector Hit;
+                UObject* HitActor = nullptr;
+                UObject* HitComponent = nullptr;
+                if (!UKismetSystemLibrary::LineTraceSingle(Pawn, Start, Start + RotateYaw(Direction, Yaw) * 200.0f, 0, false, true, Hit, HitActor, HitComponent))
+                {
+                    continue;
+                }
+                ABuildingSMActor* Building = HitActor ? Cast<ABuildingSMActor>(HitActor) : nullptr;
+                // Not a chest or an ammo box: the bot searches those.
+                if (Building && !Cast<ABuildingContainer>(HitActor) && !Building->bDestroyed && Building->GetHealth() > 0.0f && !IsUnreachable(Building))
+                {
+                    HarvestTarget = Building;
+                    HarvestTargetTime = Now;
+                    HarvestPoint = Hit;
+                    bHarvestToUnstick = true;
+                    ++BreakThroughs;
+                    Log::Info(L"Battle Royale bots: {} is stuck against {} ({:.0f} health) and breaks through it", BotName, NameOf(reinterpret_cast<UObject*>(Building)), Building->GetHealth());
+                    return true;
+                }
             }
         }
     }
@@ -5310,6 +5321,146 @@ namespace
     }
 }
 
+FVector FCoreAthenaBotController::WayAhead(float Now, const FVector& Location) const
+{
+    if (AAIController* AIController = Controller.Get(); AIController && bPathFollowing)
+    {
+        const FVector Next = AIController->GetImmediateMoveDestination();
+        if (Dist2D(Location, Next) > 10.0f)
+        {
+            return Direction2D(Location, Next);
+        }
+    }
+    if (bHasSteerTarget && Now < PathFailedUntil && Dist2D(Location, SteerTarget) > 10.0f)
+    {
+        return Direction2D(Location, SteerTarget);
+    }
+    return Direction2D(Location, MoveGoal);
+}
+
+bool FCoreAthenaBotController::FreeItself(float Now, const wchar_t* Why)
+{
+#if WITH_SERVER_CODE
+    // A stuck player doesn't walk back and forth: they break the wall that holds them in, break the floor to get down,
+    // or build up and over what they can't walk up (Chapter 2's bots ramp up hills and out of holes the same way).
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || !bHasMoveGoal || IsInCombat(Now) || HarvestTarget.Get() || !BuildQueue.Descriptors.empty() || Pawn->bIsDBNO)
+    {
+        return false;
+    }
+    const FVector Location = LocationOf(Pawn);
+    if (FindBuildingInTheWay(Now) || BreakDownFromRoof(Now, MoveGoal))
+    {
+        return true;
+    }
+    // Not where it's going down to: a hill, a cliff or a wall that isn't a building's in the way at head height (what
+    // the bot can't step or jump onto), or where it's going a level and more above (out of a basement, up a slope).
+    const float Rise = MoveGoal.Z - Location.Z;
+    const FVector Ahead = WayAhead(Now, Location);
+    const FVector Knee(Location.X, Location.Y, Location.Z - 30.0f);
+    const FVector Head(Location.X, Location.Y, Location.Z + 70.0f);
+    const bool bWallAhead = Ahead.SizeSquared() > 0.01f && IsBlocked(Pawn, Knee, Knee + Ahead * 120.0f) && IsBlocked(Pawn, Head, Head + Ahead * 120.0f);
+    if (Location.Z - MoveGoal.Z < 250.0f && (bWallAhead || Rise > 250.0f) && BuildWayUp(Now, Location))
+    {
+        Log::Info(L"Battle Royale bots: {} is stuck ({}, {}) and builds {}", BotName, Why, bWallAhead ? L"a slope or a wall it can't get over" : L"where it is going is above it", BuildQueue.Reason);
+        return true;
+    }
+    // Under a building's floor with where it's going above (a basement): the ceiling broken, to make room for the ramp.
+    if (Rise > 250.0f && BreakUpThroughCeiling(Now, Location))
+    {
+        return true;
+    }
+    return false;
+#else
+    return false;
+#endif
+}
+
+bool FCoreAthenaBotController::BuildWayUp(float Now, const FVector& Location)
+{
+#if WITH_SERVER_CODE
+    // A ramp in the bot's cell rising the way it is trying to go, and a second from its top where the hill goes on
+    // (StartBuildingQueue leaves out a piece whose place isn't clear: no ground under it, a house's wall). Bounded: one
+    // build every 6 s, four in a minute, two pieces each, and only what it can pay for.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UCharacterMovementComponent* Movement = Pawn ? static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->CharacterMovement : nullptr;
+    if (!Pawn || !Movement || Movement->MovementMode != MoveWalking || State != ECoreAthenaBotState::Landed || !Pawn->bCanBeDamaged || Now < NextUnstickBuildTime
+        || Natives::ABuildingActor_InitializeBuildingActorIndex < 0 || Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex < 0)
+    {
+        return false;
+    }
+    if (Now - UnstickBuildWindowStart > 60.0f)
+    {
+        UnstickBuildWindowStart = Now;
+        UnstickBuildsInWindow = 0;
+    }
+    if (UnstickBuildsInWindow >= 4)
+    {
+        return false;
+    }
+    NextUnstickBuildTime = Now + 2.0f;
+    const FVector Ahead = WayAhead(Now, Location);
+    if (Ahead.SizeSquared() < 0.01f)
+    {
+        return false;
+    }
+    const std::vector<FCoreAthenaBotBuildDescriptor> Descriptors = {
+        { { 0, 0, 0 }, ECoreOrientedConstructionBuildingType::RampForward },
+        { { 1, 0, 1 }, ECoreOrientedConstructionBuildingType::RampForward },
+    };
+    const float Delay = AIBotSkills.Building.DelayBetweenBuildPieces;
+    if (!StartBuildingQueue(Now, Location + Ahead * 500.0f, Descriptors, Delay, Delay, 0.0f, Delay, 0.0f, L"a ramp to climb out on", true))
+    {
+        return false;
+    }
+    // The upper ramp only on top of the first: alone it would hang in the air, out of reach.
+    if (BuildQueue.Descriptors.front().Location[2] != 0)
+    {
+        ClearBuildingQueue();
+        return false;
+    }
+    NextUnstickBuildTime = Now + 6.0f;
+    ++UnstickBuildsInWindow;
+    ++Climbs;
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool FCoreAthenaBotController::BreakUpThroughCeiling(float Now, const FVector& Location)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || HarvestTarget.Get() || IsInCombat(Now))
+    {
+        return false;
+    }
+    FVector Hit;
+    UObject* HitActor = nullptr;
+    UObject* HitComponent = nullptr;
+    if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Location.X, Location.Y, Location.Z + 60.0f), FVector(Location.X, Location.Y, Location.Z + 450.0f), 0, false, true, Hit, HitActor, HitComponent))
+    {
+        return false;
+    }
+    ABuildingSMActor* Building = HitActor ? Cast<ABuildingSMActor>(HitActor) : nullptr;
+    if (!Building || Cast<ABuildingContainer>(HitActor) || Building->bDestroyed || Building->GetHealth() <= 0.0f || IsUnreachable(Building))
+    {
+        return false;
+    }
+    StopMoving();
+    HarvestTarget = Building;
+    HarvestTargetTime = Now;
+    HarvestPoint = Hit;
+    bHarvestToUnstick = true;
+    ++BreakThroughs;
+    Log::Info(L"Battle Royale bots: {} is under {} ({:.0f} health) with where it is going above, and breaks up through it", BotName, NameOf(reinterpret_cast<UObject*>(Building)), Building->GetHealth());
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool FCoreAthenaBotController::DefensiveBuilding(float Now, AFortPawn* Attacker)
 {
 #if WITH_SERVER_CODE
@@ -5446,7 +5597,7 @@ bool FCoreAthenaBotController::Bunker(float Now, AFortPawn* Threat, bool bUnknow
 }
 
 bool FCoreAthenaBotController::StartBuildingQueue(float Now, const FVector& Towards, const std::vector<FCoreAthenaBotBuildDescriptor>& Descriptors, float InitialDelay, float SameDelay,
-    float SameDeviation, float DifferentDelay, float DifferentDeviation, const wchar_t* Reason)
+    float SameDeviation, float DifferentDelay, float DifferentDeviation, const wchar_t* Reason, bool bToUnstick)
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -5489,6 +5640,7 @@ bool FCoreAthenaBotController::StartBuildingQueue(float Now, const FVector& Towa
     Queue.DifferentPieceBuildDelay = DifferentDelay;
     Queue.DifferentPieceBuildDelayRandomDeviation = DifferentDeviation;
     Queue.Reason = Reason;
+    Queue.bToUnstick = bToUnstick;
     // The pieces whose place is clear now, as many as it can pay for (the placement reads the queue's frame).
     BuildQueue = std::move(Queue);
     std::vector<FCoreAthenaBotBuildDescriptor> Clear;
@@ -5559,6 +5711,21 @@ bool FCoreAthenaBotController::TickBuildingQueue(float Now)
         if (FromWall < BotWallClearance && AlongWall < BuildingCellSize * 0.5f + BotWallClearance)
         {
             MoveTowards(FVector(BuildQueue.CellMinX + BuildingCellSize * 0.5f, BuildQueue.CellMinY + BuildingCellSize * 0.5f, Location.Z), Now, 40.0f);
+            return true;
+        }
+    }
+    // A ramp to climb out on goes up under the bot from where it stands: it steps back to the ramp's low edge first (it
+    // stood against the hill, under the ramp's high end), for a second and a half at most.
+    if (BuildQueue.bToUnstick && Upcoming.BuildingType == ECoreOrientedConstructionBuildingType::RampForward && Upcoming.Location[0] == 0 && Upcoming.Location[2] == 0
+        && Now < LastBuildTime + DelayBeforeNextBuildPiece + 1.5f)
+    {
+        int32_t BackX = 0;
+        int32_t BackY = 0;
+        GridAxis(BuildQueue.Forward, BackX, BackY);
+        const FVector LowEnd(BuildQueue.CellMinX + BuildingCellSize * 0.5f - static_cast<float>(BackX) * 160.0f, BuildQueue.CellMinY + BuildingCellSize * 0.5f - static_cast<float>(BackY) * 160.0f, Location.Z);
+        if (Dist2D(Location, LowEnd) > 60.0f)
+        {
+            MoveTowards(LowEnd, Now, 40.0f);
             return true;
         }
     }
@@ -5679,14 +5846,18 @@ bool FCoreAthenaBotController::IsPiecePlaceClear(const FCoreAthenaBotBuildDescri
     }
     if (Descriptor.BuildingType == ECoreOrientedConstructionBuildingType::RampForward)
     {
-        // Above the slope, from the low edge to short of the high one, in the middle and towards both sides.
+        // Above the slope, from the low edge to short of the high one, in the middle and towards both sides. A ramp to
+        // climb out on (bToUnstick) may run into the hill it climbs, as a player's ramp up a slope does; a building's piece
+        // (a house's, anyone's, a rock) in its way still keeps it out.
         const FVector Back = RotateYaw(FVector(0.0f, 1.0f, 0.0f), Yaw);
         const FVector Side = RotateYaw(FVector(1.0f, 0.0f, 0.0f), Yaw);
         for (const float Offset : { -200.0f, 0.0f, 200.0f })
         {
             const FVector Low = Origin + Back * (BuildingCellSize - 40.0f) + Side * Offset;
             const FVector High = Origin + Back * 60.0f + Side * Offset;
-            if (IsBlocked(Pawn, FVector(Low.X, Low.Y, Origin.Z + 60.0f + 376.0f * (40.0f / BuildingCellSize)), FVector(High.X, High.Y, Origin.Z + 60.0f + 376.0f * ((BuildingCellSize - 60.0f) / BuildingCellSize))))
+            UObject* Hit = nullptr;
+            if (IsBlocked(Pawn, FVector(Low.X, Low.Y, Origin.Z + 60.0f + 376.0f * (40.0f / BuildingCellSize)), FVector(High.X, High.Y, Origin.Z + 60.0f + 376.0f * ((BuildingCellSize - 60.0f) / BuildingCellSize)), &Hit)
+                && (!BuildQueue.bToUnstick || !Hit || Cast<ABuildingSMActor>(Hit)))
             {
                 return false;
             }
@@ -6643,15 +6814,16 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
             ProgressDistance = GoalDistance;
             ProgressSince = Now;
         }
+        else if (GoalDistance > 1000.0f && Now - ProgressSince > 8.0f && FreeItself(Now, L"no nearer in 8 s"))
+        {
+            // Walking about on a roof with no way down, or along a cliff it can't get up: through it, or up it (8 s; it
+            // gave up only after 15).
+            ProgressDistance = -1.0f;
+            LastStuckCheckLocation = Location;
+            return;
+        }
         else if (GoalDistance > 1000.0f && Now - ProgressSince > 15.0f)
         {
-            // Walking about on a roof with no way down: through it first.
-            if (BreakDownFromRoof(Now, MoveGoal))
-            {
-                ProgressDistance = -1.0f;
-                LastStuckCheckLocation = Location;
-                return;
-            }
             GiveUp(L"no nearer in 15 s");
             LastStuckCheckLocation = Location;
             return;
@@ -6661,6 +6833,34 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
     {
         ProgressDistance = -1.0f;
     }
+    // Held in one place: wanting to move and still within 2.5 m of where it was 4.5 s ago (CoreV2 #287: bots twitched
+    // back and forth against walls, hills and in basements for a long time. Turning away from a wall for a second, the
+    // path and the steering taking turns, or the detour and back moved them more than the 60 cm below between two
+    // looks, so that check never counted up, and the one above needs 15 s and a goal 10 m away).
+    const bool bBusy = HarvestTarget.Get() || !BuildQueue.Descriptors.empty();
+    if (bMoving && !bBusy && !IsInCombat(Now))
+    {
+        if (ConfineSince < 0.0f || Dist2D(Location, ConfineAnchor) > 250.0f)
+        {
+            ConfineAnchor = Location;
+            ConfineSince = Now;
+        }
+        else if (Now - ConfineSince > 4.5f)
+        {
+            ConfineSince = -1.0f;
+            StuckChecks = 0;
+            LastStuckCheckLocation = Location;
+            if (!FreeItself(Now, L"held in one place"))
+            {
+                GiveUp(L"held in one place");
+            }
+            return;
+        }
+    }
+    else
+    {
+        ConfineSince = -1.0f;
+    }
     if (bMoving && Dist2D(Location, LastStuckCheckLocation) < 60.0f)
     {
         ++StuckChecks;
@@ -6669,6 +6869,15 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
             static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->Jump();
             ++Jumps;
         }
+        // Something it can break is in the way (the pickaxe, as a stuck player does), or a slope it can build up. Looked
+        // for before the path is let go: StopMoving below drops the move goal the look needs (it found nothing on a path).
+        if (StuckChecks == 2 && FreeItself(Now, L"stuck"))
+        {
+            StuckChecks = 0;
+            ConfineSince = -1.0f;
+            LastStuckCheckLocation = Location;
+            return;
+        }
         if (StuckChecks == 2 && bPathFollowing)
         {
             // The path doesn't get it anywhere (something the navmesh doesn't know of is in the way): steer a moment.
@@ -6676,13 +6885,6 @@ void FCoreAthenaBotController::TryToUnstuck(float Now)
             SteerReason = L"stuck on its path";
             PathFailedUntil = Now + 2.0f;
             bHasSteerTarget = false;
-        }
-        if (StuckChecks == 2 && !HarvestTarget.Get() && (FindBuildingInTheWay(Now) || BreakDownFromRoof(Now, MoveGoal)))
-        {
-            // Something it can break is in the way: the pickaxe, as a stuck player does.
-            StuckChecks = 0;
-            LastStuckCheckLocation = Location;
-            return;
         }
         if (StuckChecks >= 3)
         {

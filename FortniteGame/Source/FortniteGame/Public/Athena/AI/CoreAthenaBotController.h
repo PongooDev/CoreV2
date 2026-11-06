@@ -134,6 +134,9 @@ struct FCoreAthenaBotBuildingQueue
     // 0 wood, 1 stone, 2 metal.
     int32_t MaterialKind = 0;
     const wchar_t* Reason = L"";
+    // A way out for a stuck bot (TryToUnstuck's ramps up a hill or out of a basement): its pieces may sit in the
+    // landscape, as a player's ramp up a slope does, but not in anyone's piece or a house, and the storm doesn't end it.
+    bool bToUnstick = false;
 };
 
 // 8.30's EAlertLevel (the controller's CurrentAlertLevel, OnPerceptionSensed's state machine).
@@ -491,8 +494,19 @@ private:
     // GetSquadMapMarker), out of a fight, healing, reviving and the storm, takes what lies close by there, then plays on
     // from there until the marker is moved. One in the storm is left until the circle reaches it.
     bool FollowMapMarker(float Now);
+    // TryToUnstuck's ways out, as a stuck player gets out: the piece in the way broken with the pickaxe, the floor under
+    // it broken to get down, a ramp built up a hill or a cliff or out of a basement (Chapter 2's bots), the ceiling
+    // broken to make room for it. False when none applies.
+    bool FreeItself(float Now, const wchar_t* Why);
+    // The way the bot is trying to go: along its path (the path's next point), else towards where it steers, else its goal.
+    FVector WayAhead(float Now, const FVector& Location) const;
     // TryToUnstuck: a building the bot can break right in front of it, on the way to its goal.
     bool FindBuildingInTheWay(float Now);
+    // A ramp (and a second one up from its top where the hill goes on) towards the way it is trying to go, at most every
+    // few seconds and a few times a minute.
+    bool BuildWayUp(float Now, const FVector& Location);
+    // A building's piece over its head (a basement's ceiling, a floor above) broken, to get up through it.
+    bool BreakUpThroughCeiling(float Now, const FVector& Location);
     // A bot up on a building (a roof, an upper floor) with where it is going well below it and no way down: the piece it
     // stands on, broken with the pickaxe (Harvest), as a player gets down into a house (CoreV2 #275).
     bool BreakDownFromRoof(float Now, const FVector& Below);
@@ -509,7 +523,7 @@ private:
     // Starts a build: the origin cell is the bot's, forward the grid axis nearest the way to Towards. Pieces the bot can't
     // afford or whose place isn't clear are left out; false when none is left.
     bool StartBuildingQueue(float Now, const FVector& Towards, const std::vector<FCoreAthenaBotBuildDescriptor>& Descriptors, float InitialDelay, float SameDelay, float SameDeviation,
-        float DifferentDelay, float DifferentDeviation, const wchar_t* Reason);
+        float DifferentDelay, float DifferentDeviation, const wchar_t* Reason, bool bToUnstick = false);
     // UFortAthenaAIBotBuildingComponent's tick: the next piece once its delay is up. True while a build is under way (the
     // bot stands and holds fire: UFortAthenaBTTask_Build's BlockWeaponActions).
     bool TickBuildingQueue(float Now);
@@ -714,6 +728,15 @@ private:
     FVector ProgressGoal;
     float ProgressDistance = -1.0f;
     float ProgressSince = 0.0f;
+    // Where the bot has been held, within a couple of metres, since when (-1: it is moving on): twitching back and forth
+    // against a wall moves it more than the 60 cm check between two looks, and isn't caught by that.
+    FVector ConfineAnchor;
+    float ConfineSince = -1.0f;
+    // Its unstick builds: none before NextUnstickBuildTime, and at most a few in a minute (from UnstickBuildWindowStart).
+    float NextUnstickBuildTime = 0.0f;
+    float UnstickBuildWindowStart = -100.0f;
+    int32_t UnstickBuildsInWindow = 0;
+    int32_t Climbs = 0;
 
     FVector DropTarget;
     FVector MoveGoal;

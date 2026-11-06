@@ -3982,6 +3982,48 @@ namespace
         UObject* Default = Class ? Class->GetDefaultObject() : nullptr;
         return Default ? *reinterpret_cast<void***>(Default) : nullptr;
     }
+
+    // The ClientStayWithParty RPC stub: the AFortPlayerController slot whose small body loads the function's name global
+    // (mov rdx, [rip+Name]), which its static FName initializer fills (lea rdx, L"ClientStayWithParty"; lea rcx, Name).
+    // Slot 0x29F on 1.1 and 1.2, 0x2D0 on 1.7.2, 0x2F2 on 3.3, 0x2FE on 3.5.1 to 4.0.
+    int32_t ClientStayWithPartySlot()
+    {
+        const uintptr_t NameInit = First(Finder::StringRefs(L"ClientStayWithParty"));
+        const uintptr_t NameStore = NameInit ? FindInstruction(NameInit + 7, NameInit + 0x20, { 0x48, 0x8D, 0x0D }) : 0;
+        const uintptr_t NameGlobal = NameStore ? Finder::RelativeTarget(NameStore, 3, 7) : 0;
+        return NameGlobal ? FirstVTableIndexWhere(CdoVTable(L"/Script/FortniteGame.FortPlayerController"), [NameGlobal](uintptr_t Entry)
+        {
+            const uintptr_t EntryEnd = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+            for (uintptr_t Load = EntryEnd > Entry && EntryEnd - Entry < 0x200 ? FindInstruction(Entry, EntryEnd, { 0x48, 0x8B, 0x15 }) : 0; Load; Load = FindInstruction(Load + 1, EntryEnd, { 0x48, 0x8B, 0x15 }))
+            {
+                if (Finder::RelativeTarget(Load, 3, 7) == NameGlobal)
+                {
+                    return true;
+                }
+            }
+            return false;
+        }) : -1;
+    }
+
+    // AFortGameMode::SendStayWithParty, the function the game mode zone's zone end calls within its first 0x200 bytes
+    // (3.3 0xBD1530, 3.5.1 0xC0B8C0, 3.5.2 0xC10710, 3.6 0xC18430, 4.0 0xC45E50): the call whose target makes the
+    // ClientStayWithParty virtual call (3.6 0xBE4B80, 4.0 0xC1F230). 0 when the zone end doesn't call it.
+    uintptr_t ZoneEndStayWithParty(uintptr_t ZoneEnd, int32_t StaySlot)
+    {
+        const uintptr_t ZoneEndEnd = ZoneEnd && StaySlot >= 0 && Finder::FunctionStart(ZoneEnd) == ZoneEnd ? Finder::FunctionEnd(ZoneEnd) : 0;
+        const uintptr_t Window = ZoneEndEnd ? std::min<uintptr_t>(ZoneEndEnd, ZoneEnd + 0x200) : 0;
+        const int32_t StayCall = StaySlot * 8;
+        for (uintptr_t Call = Window ? FindRawCall(ZoneEnd, Window) : 0; Call; Call = FindRawCall(Call + 1, Window))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            if (TargetEnd && FindInstruction(Target, TargetEnd, { 0xFF, 0x90, StayCall & 0xFF, (StayCall >> 8) & 0xFF, (StayCall >> 16) & 0xFF, 0x00 }))
+            {
+                return Target;
+            }
+        }
+        return 0;
+    }
 }
 
 bool Finder::ResolveProcessEvent()
@@ -4963,7 +5005,7 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
         }
     }
 
-    const auto FirstEntryContaining = [](void** VTable, const std::vector<std::vector<int32_t>>& Patterns, const auto& ContainsFn)
+    const auto FirstEntryContaining = [](void** VTable, const std::vector<std::vector<int32_t>>& Patterns, const auto& ContainsFn, const auto& Accept)
     {
         for (int32_t Index = 0; VTable && Index < 0x400; ++Index)
         {
@@ -4978,15 +5020,27 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
             {
                 bAll = bAll && ContainsFn(Function, FunctionEnd, Pattern);
             }
-            if (bAll)
+            if (bAll && Accept(Function))
             {
                 return Index;
             }
         }
         return -1;
     };
+    const auto AnyEntry = [](uintptr_t) { return true; };
 
-    const int32_t GameModeIndex = FirstEntryContaining(CdoVTable(L"/Script/FortniteGame.FortGameModeZone"), { Bytes32(EndOfZoneRemainTimeOffset), Bytes32(ActiveSpawnPadOffset) }, Contains);
+    // AFortGameModeZone::OnZoneEnd holds the zone's EndOfZoneRemainTime and ActiveSpawnPad offsets. 3.5 and 3.6 have an
+    // inherited slot (0xC4, 3.6 0xC02E20) holding them before the zone end (0x15F, 3.5.2 0xC10710, 3.6 0xC18430), so the
+    // slot taken is the first of them whose start calls AFortGameMode::SendStayWithParty, which the zone end does on
+    // 3.3 to 4.0 and no other slot holding the offsets does. A build where none does takes the first of them, as before.
+    void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
+    const std::vector<std::vector<int32_t>> ZoneOffsets{ Bytes32(EndOfZoneRemainTimeOffset), Bytes32(ActiveSpawnPadOffset) };
+    const int32_t StaySlot = ClientStayWithPartySlot();
+    int32_t GameModeIndex = StaySlot >= 0 ? FirstEntryContaining(ZoneVTable, ZoneOffsets, Contains, [StaySlot](uintptr_t Function) { return ZoneEndStayWithParty(Function, StaySlot) != 0; }) : -1;
+    if (GameModeIndex < 0)
+    {
+        GameModeIndex = FirstEntryContaining(ZoneVTable, ZoneOffsets, Contains, AnyEntry);
+    }
 
     void** GameStateVTable = CdoVTable(L"/Script/FortniteGame.FortGameStateZone");
     const uintptr_t OnRepGameplayState = FunctionOf(L"Zone has been completed, OnZoneCompleteEvent event triggering HUD EndOfZone");
@@ -5003,10 +5057,10 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     }
     // AFortGameState::SetGameplayState sets the state and calls OnRep_GameplayState. 1.1's and 1.2's zone override inlines
     // it; 1.7.2's (0x5C6400) calls it as Super, so the base class's vtable is searched then (same slot in the zone class).
-    int32_t GameStateIndex = OnRepIndex >= 0 ? FirstEntryContaining(GameStateVTable, { OnRepCall }, Contains) : -1;
+    int32_t GameStateIndex = OnRepIndex >= 0 ? FirstEntryContaining(GameStateVTable, { OnRepCall }, Contains, AnyEntry) : -1;
     if (OnRepIndex >= 0 && GameStateIndex < 0)
     {
-        GameStateIndex = FirstEntryContaining(CdoVTable(L"/Script/FortniteGame.FortGameState"), { OnRepCall }, Contains);
+        GameStateIndex = FirstEntryContaining(CdoVTable(L"/Script/FortniteGame.FortGameState"), { OnRepCall }, Contains, AnyEntry);
     }
 
     if (!SendStatEvent || (!SendEndPrimaryMission && !bEndMissionStripped) || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
@@ -7321,42 +7375,14 @@ bool Finder::ResolveLeaveOutpostLive()
     }
 
     const int32_t ReturnIndex = Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameMode"), reinterpret_cast<void*>(FunctionOf(L"Ignoring ReturnToMainMenuHost, already in a level travel")), 0x400);
-    // The ClientStayWithParty RPC stub: the AFortPlayerController slot whose small body loads the function's name global
-    // (mov rdx, [rip+Name]), which its static FName initializer fills (lea rdx, L"ClientStayWithParty"; lea rcx, Name).
-    // Slot 0x29F on 1.1 and 1.2, 0x2D0 on 1.7.2.
-    const uintptr_t NameInit = First(Finder::StringRefs(L"ClientStayWithParty"));
-    const uintptr_t NameStore = NameInit ? FindInstruction(NameInit + 7, NameInit + 0x20, { 0x48, 0x8D, 0x0D }) : 0;
-    const uintptr_t NameGlobal = NameStore ? Finder::RelativeTarget(NameStore, 3, 7) : 0;
-    const int32_t StaySlot = NameGlobal ? FirstVTableIndexWhere(CdoVTable(L"/Script/FortniteGame.FortPlayerController"), [NameGlobal](uintptr_t Entry)
-    {
-        const uintptr_t EntryEnd = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
-        for (uintptr_t Load = EntryEnd > Entry && EntryEnd - Entry < 0x200 ? FindInstruction(Entry, EntryEnd, { 0x48, 0x8B, 0x15 }) : 0; Load; Load = FindInstruction(Load + 1, EntryEnd, { 0x48, 0x8B, 0x15 }))
-        {
-            if (Finder::RelativeTarget(Load, 3, 7) == NameGlobal)
-            {
-                return true;
-            }
-        }
-        return false;
-    }) : -1;
-    const int32_t StayCall = StaySlot * 8;
-    // The game mode zone's zone end (slot 0x15F on 3.5.2 and 3.6, 0xC4 in the zone end finder's log there) calls it within
-    // its first 0x200 bytes (0xC18430 on 3.6). The zone end finder's slot isn't relied on, as it takes the first slot
-    // that holds the zone's offsets and 3.5 and 3.6 have an inherited one before the zone end: the slot is the first of
-    // the class's vtable that calls a function with the ClientStayWithParty virtual call.
+    // The game mode zone's zone end calls it (ZoneEndStayWithParty). The slot is the first of the class's vtable that
+    // calls a function with the ClientStayWithParty virtual call, so the zone end finder needn't have run.
     void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
+    const int32_t StaySlot = ClientStayWithPartySlot();
     uintptr_t StayWithParty = 0;
     for (int32_t Slot = 0; ZoneVTable && StaySlot >= 0 && Slot < 0x400 && !StayWithParty; ++Slot)
     {
-        const uintptr_t Entry = VTableEntry(ZoneVTable, Slot);
-        const uintptr_t EntryEnd = Entry && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
-        const uintptr_t Window = EntryEnd ? std::min<uintptr_t>(EntryEnd, Entry + 0x200) : 0;
-        for (uintptr_t Call = Window ? FindRawCall(Entry, Window) : 0; Call && !StayWithParty; Call = FindRawCall(Call + 1, Window))
-        {
-            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
-            const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
-            StayWithParty = TargetEnd && FindInstruction(Target, TargetEnd, { 0xFF, 0x90, StayCall & 0xFF, (StayCall >> 8) & 0xFF, (StayCall >> 16) & 0xFF, 0x00 }) ? Target : 0;
-        }
+        StayWithParty = ZoneEndStayWithParty(VTableEntry(ZoneVTable, Slot), StaySlot);
     }
     if (ReturnIndex < 0 || !StayWithParty)
     {

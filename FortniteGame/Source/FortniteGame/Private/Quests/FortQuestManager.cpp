@@ -598,15 +598,28 @@ namespace
         return Result;
     }
 
+    // Epic caches the parsed tags in the row itself (bIsCached), so they go with it. Core's cache is keyed by the row's
+    // tag text, not by its address: the stat table can be let go with a match's quest managers and loaded again for
+    // the next match, its rows at new addresses, often ones another row had before (#274). Keyed by address, such a row
+    // took the other row's tags: the first match counted the Forbidden location danced at, and in a later match on the
+    // same server a dance or visit at a different location could match no objective, or the wrong one.
     const FRowTags& RowTagsOf(const FFortQuestObjectiveStatTableRow* Row)
     {
-        static std::unordered_map<const void*, FRowTags> Cache;
-        auto [Found, bAdded] = Cache.try_emplace(Row);
+        static std::unordered_map<std::wstring, FRowTags> Cache;
+        const FString& TargetTags = Row->TargetTags;
+        const FString& SourceTags = Row->SourceTags;
+        const FString& ContextTags = Row->ContextTags;
+        std::wstring Key = TargetTags.ToStdString();
+        Key += L'\n';
+        Key += SourceTags.ToStdString();
+        Key += L'\n';
+        Key += ContextTags.ToStdString();
+        auto [Found, bAdded] = Cache.try_emplace(std::move(Key));
         if (bAdded)
         {
-            Found->second.Target = ParseTagNames(Row->TargetTags);
-            Found->second.Source = ParseTagNames(Row->SourceTags);
-            Found->second.Context = ParseTagNames(Row->ContextTags);
+            Found->second.Target = ParseTagNames(TargetTags);
+            Found->second.Source = ParseTagNames(SourceTags);
+            Found->second.Context = ParseTagNames(ContextTags);
         }
         return Found->second;
     }

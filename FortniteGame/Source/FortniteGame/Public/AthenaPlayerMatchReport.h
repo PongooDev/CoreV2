@@ -237,6 +237,23 @@ public:
     static bool HasRewards() { return Member_Rewards.IsAvailable() && FAthenaAwardGroup::StaticStruct() != nullptr; }
 };
 
+// A player's season level, its XP and their Battle Pass tier, from their athena profile (UFortMcpProfileAthena's
+// GetAthenaLevelInfo, 4.1 0xA5EC20: the accountLevel, level, xp, book_level and book_xp stats; MaxLevel and the XP for the
+// level from the season's UAthenaSeasonItemDefinition, NumSeasonLevels and its XP curve).
+struct FAthenaLevelInfo
+{
+    DefineUnrealStruct(FAthenaLevelInfo, FortniteGame)
+    DefineUProperty(int32_t, AccountLevel)
+    DefineUProperty(int32_t, Level)
+    DefineUProperty(int32_t, MaxLevel)
+    DefineUProperty(int32_t, LevelXp)
+    DefineUProperty(int32_t, LevelXpForLevel)
+    DefineUProperty(int32_t, BookLevel)
+    DefineUProperty(int32_t, BookMaxLevel)
+    DefineUProperty(int32_t, BookLevelXp)
+    DefineUProperty(int32_t, BookLevelXpForLevel)
+};
+
 // A player's report of their match (from 1.10; AFortPlayerControllerAthena::MatchReport, made with the controller in
 // its BeginPlay, 1.10 0x42B1B0, on the server as on the client). The client's fills from the server's RPCs
 // (ClientSendMatchStatsForPlayer 0x42F030, ClientSendEndBattleRoyaleMatchForPlayer 0x42EFC0), which set the struct,
@@ -255,7 +272,13 @@ public:
     // 1.11 (ClientSendTeamStatsForPlayer).
     DefineUProperty(bool, bHasTeamStats)
     DefineUStructProperty(FAthenaMatchTeamStats, TeamStats)
+    // The level the end-of-match XP bar starts from (AthenaMatchStatsPartial's SetMatchReport hands it to
+    // XpMatchProgression's SetPlayerState). Only the client's report has it: AFortPlayerControllerAthena's
+    // OnReadyToStartMatch (4.1 0xA68540) stores the athena profile's GetAthenaLevelInfo there, and the report is made in
+    // the controller's BeginPlay.
+    DefineUStructProperty(FAthenaLevelInfo, InitialLevelInfo)
 
+    static bool HasInitialLevelInfo() { return Member_InitialLevelInfo.IsAvailable(); }
     static bool HasStats() { return HasOldStatNames() || (Member_bHasMatchStats.IsAvailable() && Member_MatchStats.IsAvailable()); }
 
     bool HasStatsSent() const { return HasOldStatNames() ? GetMember_bHasStats() : GetMember_bHasMatchStats(); }

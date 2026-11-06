@@ -5,8 +5,13 @@
 #include "Athena/FortPlayerStateAthena.h"
 #include "AthenaPlayerMatchReport.h"
 #include "BackendRequest.h"
+#include "Engine/ActorChannel.h"
+#include "Engine/NetConnection.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "Natives.h"
+#include "UObject/WeakObjectPtr.h"
 #include "GameFramework/PlayerState.h"
 #include "Logging/LogMacros.h"
 #include "ObjectLayout.h"
@@ -14,10 +19,12 @@
 #include "Templates/Casts.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cwchar>
 #include <cwctype>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -439,5 +446,100 @@ void AFortPlayerController::ServerModifyStat_Implementation(FName StatName, int3
         return;
     }
     CallVirtual<void>(this, Index, StatName, Amount, ModType, bForceStatSave);
+#endif
+}
+
+void AFortPlayerController::ReplicateServerFinishedLoadingAfterGameState()
+{
+#if WITH_SERVER_CODE
+    // The end-of-match XP bar starts from the client's report's InitialLevelInfo, which the client's
+    // AFortPlayerControllerAthena::OnReadyToStartMatch (4.1 0xA68540) stores, and only if the report exists ("Match report
+    // could not be found to store initial level info!"). The report is made in the controller's BeginPlay (0xA52700),
+    // which a client calls only once the world has begun play there, when the game state has replicated
+    // (OnRep_ReplicatedHasBegunPlay). OnReadyToStartMatch doesn't wait for that: the client's ready check (0xF9A900, on
+    // the timer that ClientOnGenericPlayerInitialization starts) runs it once the client has finished loading, and
+    // CheckFinishedLoading (0xFA77E0) finishes once bHasServerFinishedLoading has come, its building foundation wait
+    // (0xF585D0) passing at once without a game state. When the game state came after bHasServerFinishedLoading, the
+    // level was never stored: the screen read "LEVEL 0", MAX, with a full bar that never moved (#296, and #294 in LTMs).
+    // A 4.0 client logged it too: "OnReadyToStartMatch did not have GameState", then the missing report, with the game
+    // state 36 ms later. It comes late in matches with many actors to send first (bots' player states are each forced to
+    // replicate when they join). The server's flag now goes out only once the client has the game state: its channel is
+    // open on the player's connection and every reliable bunch of it (the actor's spawn) is acknowledged. The game state
+    // is forced to replicate in the meantime, and a connection that has not received it after ten seconds gets the flag
+    // anyway.
+    struct FFinishedLoadingHold
+    {
+        TWeakObjectPtr<AFortPlayerController> Controller;
+        std::chrono::steady_clock::time_point Started;
+        bool bHeld = false;
+        bool bReleased = false;
+    };
+    static std::unordered_map<const UNetConnection*, FFinishedLoadingHold> Holds;
+    constexpr auto MaxHoldTime = std::chrono::seconds(10);
+
+    if (!Member_bHasServerFinishedLoading.IsAvailable() || !UAthenaPlayerMatchReport::HasInitialLevelInfo() || !Natives::GWorld
+        || Natives::UNetConnection_ActorChannels < 0 || Natives::UChannel_NumOutRec < 0)
+    {
+        return;
+    }
+    UWorld* World = static_cast<UWorld*>(GWorld);
+    UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
+    AActor* GameState = World ? Cast<AActor>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!Driver || !GameState)
+    {
+        return;
+    }
+
+    const auto Now = std::chrono::steady_clock::now();
+    std::unordered_map<const UNetConnection*, FFinishedLoadingHold> Current;
+    bool bAnyHeld = false;
+    for (UNetConnection* Connection : static_cast<TArray<UNetConnection*>&>(Driver->ClientConnections))
+    {
+        AFortPlayerController* Controller = Connection && Connection->State == USOCK_Open ? Cast<AFortPlayerController>(static_cast<AActor*>(Connection->OwningActor)) : nullptr;
+        if (!Controller)
+        {
+            continue;
+        }
+        const auto Found = Holds.find(Connection);
+        FFinishedLoadingHold Hold = Found != Holds.end() && Found->second.Controller.Get() == Controller ? Found->second : FFinishedLoadingHold{ Controller, Now };
+        if (!Hold.bReleased)
+        {
+            UActorChannel* Channel = Connection->ActorChannels.FindRef(GameState);
+            const bool bHasGameState = Channel && !Channel->Closing && Channel->NumOutRec <= 0;
+            if (bHasGameState || Now - Hold.Started >= MaxHoldTime)
+            {
+                Hold.bReleased = true;
+                if (Hold.bHeld)
+                {
+                    Controller->bHasServerFinishedLoading = true;
+                    const long long HeldFor = std::chrono::duration_cast<std::chrono::milliseconds>(Now - Hold.Started).count();
+                    if (bHasGameState)
+                    {
+                        UE_LOG(LogFortMatchStats, Log, TEXT("%s has the game state: bHasServerFinishedLoading replicates (held %lld ms)"), *Controller->GetName(), HeldFor);
+                    }
+                    else
+                    {
+                        UE_LOG(LogFortMatchStats, Warning, TEXT("%s has not received the game state in %lld ms: bHasServerFinishedLoading replicates anyway"), *Controller->GetName(), HeldFor);
+                    }
+                }
+            }
+            else if (Controller->bHasServerFinishedLoading)
+            {
+                Controller->bHasServerFinishedLoading = false;
+                if (!Hold.bHeld)
+                {
+                    UE_LOG(LogFortMatchStats, Log, TEXT("%s: bHasServerFinishedLoading waits for the game state to reach the client"), *Controller->GetName());
+                }
+                Hold.bHeld = true;
+            }
+            bAnyHeld |= !Hold.bReleased;
+        }
+        Current.emplace(Connection, Hold);
+    }
+    Holds = std::move(Current);
+    if (bAnyHeld)
+    {
+        GameState->ForceNetUpdate();
+    }
 #endif
 }

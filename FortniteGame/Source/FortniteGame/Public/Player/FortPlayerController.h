@@ -90,6 +90,9 @@ public:
     // 4.0: the player's sprays still on the map, oldest first (fort.NumSpraysAlivePerPlayer of them at most).
     DefineUProperty(TArray<AFortSprayDecalInstance*>, ActiveSprayInstances)
     static bool HasBuildResourceSelection() { return Member_CurrentResourceType.IsAvailable() && Member_CurrentResourceLevel.IsAvailable() && Member_CurrentBuildableClass.IsAvailable(); }
+    // Whether the server has finished loading for this player (replicated, OnRep_bHasServerFinishedLoading): the
+    // client's CheckFinishedLoading waits for it before its SetHasFinishedLoading and OnReadyToStartMatch.
+    DefineUProperty(bool, bHasServerFinishedLoading)
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
     // 3.2 renames it, with the same parameters.
@@ -211,6 +214,10 @@ public:
     // The build's own AFortPlayerController::ServerModifyStat_Implementation (1.11 0x8AF900, 2.1 0x8B4C00): the
     // StatManager's UStatManager::ModifyStat(StatName, Amount, ModType), then a save of the stats if bForceStatSave.
     void ServerModifyStat_Implementation(FName StatName, int32_t Amount, uint8_t ModType, bool bForceStatSave);
+    // Server, before each frame's replication (UNetDriver::AddPreReplicationCallback): a joining player's
+    // bHasServerFinishedLoading goes out only once their client has the game state, so that their match report exists
+    // when their client is ready to start the match (#296).
+    static void ReplicateServerFinishedLoadingAfterGameState();
 
     static AFortPlayerController* FromInventoryOwner(IFortInventoryOwnerInterface* InventoryOwner);
     // The game's own removals from a player's inventory (IFortInventoryOwnerInterface::RemoveInventoryItem) reach Core.

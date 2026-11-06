@@ -7,6 +7,8 @@
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortGameState.h"
+#include "FortWorldManager.h"
 #include "GameFramework/ProjectileMovementComponent.h"
 #include "GameThread.h"
 #include "Math/UnrealMathUtility.h"
@@ -820,8 +822,27 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
     AFortPawn* Pawn = PlayerController->MyFortPawn;
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     int32_t SwappedSlot = -1;
+    // An item cache (4.0) isn't an item the player carries: the world manager keeps it for the end of the mission, when
+    // EndPrimaryMission's EarnedItemCaches has the MCP give its card pack (AFortWorldManager::AddEarnedItemCache).
+    UWorld* World = GetWorld();
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    AFortWorldManager* WorldManager = GameState && AFortWorldManager::HasEarnedItemCaches() ? static_cast<AFortWorldManager*>(GameState->WorldManager) : nullptr;
     for (FFortItemEntry* Entry : Entries)
     {
+        if (UFortItemCacheItemDefinition* ItemCache = WorldManager ? Cast<UFortItemCacheItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)) : nullptr)
+        {
+            int32_t Earned = 0;
+            while (Earned < Entry->Count && WorldManager->AddEarnedItemCache(PlayerController, ItemCache))
+            {
+                ++Earned;
+            }
+            if (Earned > 0)
+            {
+                UFortItemCollectedParams::SendItemCollected(PlayerController, ItemCache, Earned);
+                continue;
+            }
+        }
+
         int32_t EntrySwappedSlot = -1;
         if (SwappedSlot < 0)
         {

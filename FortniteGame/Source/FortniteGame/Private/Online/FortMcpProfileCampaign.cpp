@@ -17,7 +17,7 @@ bool UFortMcpProfileCampaign::EarnScore(const FString& MatchmakingSessionId, con
     return Params.Call(this);
 }
 
-bool UFortMcpProfileCampaign::EndPrimaryMission(FScriptArray& Advance, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadgeData, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, bool bCriticalMatchBonus)
+bool UFortMcpProfileCampaign::EndPrimaryMission(FScriptArray& Advance, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadgeData, const TArray<FString>& EarnedItemCaches, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, bool bCriticalMatchBonus)
 {
     Reflection::FParams Params(FindStaticFunction_EndPrimaryMission(), true);
     FScriptArray* AdvanceParameter = Params.Get<FScriptArray>(L"Advance");
@@ -42,6 +42,15 @@ bool UFortMcpProfileCampaign::EndPrimaryMission(FScriptArray& Advance, const FSt
     if (Params.Has(L"DifficultyIncreaseTier"))
     {
         Params.Set(L"DifficultyIncreaseTier", DifficultyIncreaseTier);
+    }
+    // The item caches the player picked up (4.0's TArray<FString> EarnedItemCaches, between EarnedBadgeData and
+    // DifficultyIncreaseTier); builds before item caches have no such parameter.
+    if (TArray<FString>* CachesParameter = Params.Has(L"EarnedItemCaches") ? Params.Get<TArray<FString>>(L"EarnedItemCaches") : nullptr)
+    {
+        for (const FString& ItemCache : EarnedItemCaches)
+        {
+            CachesParameter->Add(ItemCache);
+        }
     }
     Params.Set(L"NumMissionPoints", NumMissionPoints);
     Params.Set(L"bCriticalMatchBonus", bCriticalMatchBonus);

@@ -34,7 +34,8 @@ public:
     // Sends EarnScore as the dedicated server; false when the build has no such command.
     bool EarnScore(const FString& MatchmakingSessionId, const TArray<FAccountIdAndScore>& PlayersAndScores);
     // Sends EndPrimaryMission as the dedicated server. Advance (TArray<FFortQuestObjectiveCompletion>) is moved into the
-    // command and left empty. DifficultyIncreaseTier is sent where the function has it (2.5+).
-    bool EndPrimaryMission(FScriptArray& Advance, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadgeData, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, bool bCriticalMatchBonus);
+    // command and left empty. DifficultyIncreaseTier is sent where the function has it (2.5+), EarnedItemCaches (the
+    // template ids of the item caches the player picked up) where it has that (4.0+).
+    bool EndPrimaryMission(FScriptArray& Advance, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadgeData, const TArray<FString>& EarnedItemCaches, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, bool bCriticalMatchBonus);
     FFortSavedModeLoadout GetModeLoadout(FString LoadoutName) const;
 };

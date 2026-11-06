@@ -980,6 +980,99 @@ bool AFortWorldManager::RestorePlayerQuickBars(AFortPlayerController* PlayerCont
 #endif
 }
 
+// 4.0 added item caches (UFortItemCacheItemDefinition, a Mini-Boss's drop) and the world manager's
+// UnsavedPlayerEarnedItemCaches (TArray<FFortPlayerEarnedItemCaches>, 4.0 +0x9E0): the caches each player picked up,
+// which EndPrimaryMission sends as EarnedItemCaches for the MCP to give. The client exe strips everything that touched
+// them: UFortItemCacheItemDefinition::StaticClass (4.0 0x1192F80) and FFortPlayerEarnedItemCaches' struct (0x1284110)
+// are only called by their own registration, and Core sends EndPrimaryMission itself (Finder::ResolveZoneEndLive).
+// The client's own half is there: UFortMcpContext::GetPendingItemCacheRewards (0xDFEC00) lists the campaign profile's
+// card packs with pack_source "ItemCache", and ClaimItemCacheReward (0xDED0E0) opens one with OpenCardPack.
+bool AFortWorldManager::HasEarnedItemCaches()
+{
+    return UFortItemCacheItemDefinition::StaticClass() && FFortPlayerEarnedItemCaches::StaticStruct() && Member_UnsavedPlayerEarnedItemCaches.IsAvailable();
+}
+
+namespace
+{
+    // The player's entry in UnsavedPlayerEarnedItemCaches, by their net id; -1 when they have none.
+    int32_t FindEarnedItemCaches(TStructArray<FFortPlayerEarnedItemCaches>& EarnedItemCaches, const FUniqueNetIdRepl& PlayerID)
+    {
+        if (!PlayerID.IsValid())
+        {
+            return -1;
+        }
+        const FString PlayerIdString = PlayerID.ToString();
+        for (int32_t Index = 0; Index < EarnedItemCaches.Num(); ++Index)
+        {
+            const FUniqueNetIdRepl& EntryId = EarnedItemCaches[Index].PlayerID;
+            if (EntryId.IsValid() && EntryId.ToString().ToStdString() == PlayerIdString.ToStdString())
+            {
+                return Index;
+            }
+        }
+        return -1;
+    }
+
+    FUniqueNetIdRepl* PlayerIdOf(AFortPlayerController* PlayerController)
+    {
+        APlayerState* PlayerState = PlayerController ? static_cast<APlayerState*>(PlayerController->PlayerState) : nullptr;
+        return PlayerState ? &static_cast<FUniqueNetIdRepl&>(PlayerState->UniqueId) : nullptr;
+    }
+}
+
+bool AFortWorldManager::AddEarnedItemCache(AFortPlayerController* PlayerController, UFortItemCacheItemDefinition* ItemCache)
+{
+#if WITH_SERVER_CODE
+    FUniqueNetIdRepl* PlayerID = PlayerIdOf(PlayerController);
+    if (!ItemCache || !HasEarnedItemCaches() || !PlayerID || !PlayerID->IsValid())
+    {
+        return false;
+    }
+
+    TStructArray<FFortPlayerEarnedItemCaches>& EarnedItemCaches = UnsavedPlayerEarnedItemCaches;
+    int32_t Index = FindEarnedItemCaches(EarnedItemCaches, *PlayerID);
+    if (Index < 0)
+    {
+        FFortPlayerEarnedItemCaches& Entry = EarnedItemCaches.AddDefaulted();
+        FUniqueNetIdRepl::StaticStruct()->CopyScriptStruct(&static_cast<FUniqueNetIdRepl&>(Entry.PlayerID), PlayerID);
+        Index = EarnedItemCaches.Num() - 1;
+    }
+    TArray<UFortItemCacheItemDefinition*>& PlayerCaches = EarnedItemCaches[Index].EarnedItemCaches;
+    PlayerCaches.Add(ItemCache);
+    Log::Info(L"Item cache: {} earned {} ({} this mission)", PlayerController->GetName().ToStdString(), ItemCache->GetName().ToStdString(), PlayerCaches.Num());
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortWorldManager::TakeEarnedItemCaches(AFortPlayerController* PlayerController, TArray<FString>& OutEarnedItemCaches)
+{
+#if WITH_SERVER_CODE
+    FUniqueNetIdRepl* PlayerID = PlayerIdOf(PlayerController);
+    if (!HasEarnedItemCaches() || !PlayerID)
+    {
+        return;
+    }
+
+    TStructArray<FFortPlayerEarnedItemCaches>& EarnedItemCaches = UnsavedPlayerEarnedItemCaches;
+    const int32_t Index = FindEarnedItemCaches(EarnedItemCaches, *PlayerID);
+    if (Index < 0)
+    {
+        return;
+    }
+    // EndPrimaryMission names each cache by its template id, as EarnedBadgeData does a badge (GetPersistentName).
+    for (UFortItemCacheItemDefinition* ItemCache : static_cast<TArray<UFortItemCacheItemDefinition*>&>(EarnedItemCaches[Index].EarnedItemCaches))
+    {
+        if (ItemCache)
+        {
+            OutEarnedItemCaches.Add(ItemCache->GetPersistentName());
+        }
+    }
+    EarnedItemCaches.RemoveAt(Index);
+#endif
+}
+
 void AFortWorldManager::Hook()
 {
     Hooks::Detour(L"AFortWorldManager::OnWorldRecordQueryComplete", reinterpret_cast<void*>(Natives::AFortWorldManager_OnWorldRecordQueryComplete), &OnWorldRecordQueryCompleteHK, &OnWorldRecordQueryCompleteOG);
@@ -992,6 +1085,11 @@ void AFortWorldManager::Hook()
     else
     {
         Log::Error(L"Finder: AFortPlayerController NewPlayer mission event sender not found");
+    }
+
+    if (HasEarnedItemCaches())
+    {
+        Log::Info(L"Item caches: picked-up caches are kept in UnsavedPlayerEarnedItemCaches (+0x{:X}) for EndPrimaryMission's EarnedItemCaches", Member_UnsavedPlayerEarnedItemCaches.GetOffsetChecked());
     }
 }
 

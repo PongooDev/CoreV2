@@ -173,6 +173,14 @@ class UFortConsumableItemDefinition : public UFortWorldItemDefinition
     DefineUnrealClass(UFortConsumableItemDefinition, FortniteGame)
 };
 
+// A Save the World item cache (4.0): a world item a Mini-Boss drops (Cache_EvolveTier_VR_Pickup_T01-T04,
+// Cache_Schematic_R/VR/SR_Pickup) that the player keeps for the end of the mission, when the MCP gives its
+// CardPackReward (a TSoftObjectPtr<UFortCardPackItemDefinition>). StaticClass is null on a build without the class.
+class UFortItemCacheItemDefinition : public UFortWorldItemDefinition
+{
+    DefineUnrealClass(UFortItemCacheItemDefinition, FortniteGame)
+};
+
 // An emote or a dance (an account item): the montage it plays (TSoftObjectPtr<UAnimMontage>).
 class UFortMontageItemDefinitionBase : public UFortItemDefinition
 {

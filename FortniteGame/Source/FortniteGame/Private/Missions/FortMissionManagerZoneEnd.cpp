@@ -100,10 +100,14 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
         FString MissionName;
         FString StatusName;
         TStructArray<FFortQuestEarnedBadgeData> EarnedBadges;
+        TArray<FString> EarnedItemCaches;
         int32_t MissionPoints;
         bool bCriticalMatchBonus;
     };
     std::vector<FPendingEndPrimaryMission> PendingEndPrimaryMissions;
+    // The item caches each player picked up (4.0), which the world manager kept until now.
+    AFortGameState* FortGameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    AFortWorldManager* WorldManager = FortGameState && AFortWorldManager::HasEarnedItemCaches() ? static_cast<AFortWorldManager*>(FortGameState->WorldManager) : nullptr;
     TArray<AFortMission*>& MissionList = Missions;
     for (AFortMission* Mission : MissionList)
     {
@@ -161,8 +165,18 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                     Log::Info(L"OnZoneEnd: {} badges {}; missed {}; mission points {}", PlayerController->GetName().ToStdString(), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.RewardItems)), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.MissedRewardItems)), MissionPoints);
                 }
             }
-            FPendingEndPrimaryMission& Pending = PendingEndPrimaryMissions.emplace_back(FPendingEndPrimaryMission{ QuestManager, MissionName, StatusName, {}, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus });
+            FPendingEndPrimaryMission& Pending = PendingEndPrimaryMissions.emplace_back(FPendingEndPrimaryMission{ QuestManager, MissionName, StatusName, {}, {}, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus });
             CollectEarnedBadgeData(PlayerController, Pending.EarnedBadges);
+            if (WorldManager)
+            {
+                WorldManager->TakeEarnedItemCaches(PlayerController, Pending.EarnedItemCaches);
+                std::wstring Caches;
+                for (const FString& ItemCache : Pending.EarnedItemCaches)
+                {
+                    Caches += (Caches.empty() ? L"" : L", ") + ItemCache.ToStdString();
+                }
+                Log::Info(L"OnZoneEnd: {} item caches: {}", PlayerController->GetName().ToStdString(), Caches.empty() ? L"none" : Caches);
+            }
         }
     }
 
@@ -184,7 +198,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
     }
     for (FPendingEndPrimaryMission& Pending : PendingEndPrimaryMissions)
     {
-        Pending.QuestManager->SendEndPrimaryMission(SessionId, Pending.MissionName, Pending.StatusName, Pending.EarnedBadges, DifficultyIncreaseTier, Pending.MissionPoints, Pending.bCriticalMatchBonus);
+        Pending.QuestManager->SendEndPrimaryMission(SessionId, Pending.MissionName, Pending.StatusName, Pending.EarnedBadges, Pending.EarnedItemCaches, DifficultyIncreaseTier, Pending.MissionPoints, Pending.bCriticalMatchBonus);
         for (int32_t Index = 0; Index < Pending.EarnedBadges.Num(); ++Index)
         {
             FFortQuestEarnedBadgeData::StaticStruct()->DestroyStruct(&Pending.EarnedBadges[Index]);

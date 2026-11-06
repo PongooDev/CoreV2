@@ -34,9 +34,10 @@
 // weapon equip makes it dismount itself. Its ActivationOwnedTags (Gameplay.Action.Player.PersonalVehicle) make the pawn's
 // own tag handler (0xDF4E10 -> 0xE13C70) switch it to the PersonalVehicle movement style.
 // Inferred (the body is gone): that the server gives the ability from the selected vehicle and activates it, and that
-// turning it off activates it again, as the ability's graph is built for. 21.40 keeps the spec handle on the pawn
-// (AFortPlayerPawn::PersonalVehicleAbilitySpecHandle); Core finds the spec by its ability instead, so the pawn's layout
-// isn't needed.
+// turning it off ends it. 21.40 keeps the spec handle on the pawn (AFortPlayerPawn::PersonalVehicleAbilitySpecHandle);
+// Core finds the ride's spec by its ability instead, so the pawn's layout isn't needed. Each ride gets its own spec (see
+// below, #302): the graph's other way off, activating it again while riding (state 2), isn't used, as retriggering a spec
+// that is removed after its activation would clear it under the activation.
 
 UFortPersonalVehicleItem* AFortPlayerController::GetCurrentlySelectedPersonalVehicle() const
 {
@@ -79,42 +80,70 @@ void AFortPlayerController::TogglePersonalVehicle_Implementation(bool bOn)
         return;
     }
 
-    FGameplayAbilitySpecHandle Handle;
-    if (const FGameplayAbilitySpec* Existing = AbilitySystem->FindAbilitySpecFromClass(AbilityClass))
+    // The ride going on: the vehicle ability's spec with an active instance.
+    UObject* const AbilityDefault = AbilityClass->GetDefaultObject();
+    UGameplayAbility* RidingInstance = nullptr;
+    TStructArray<FGameplayAbilitySpec>& Specs = AbilitySystem->ActivatableAbilities.Items;
+    for (int32_t Index = 0; Index < Specs.Num() && !RidingInstance; ++Index)
     {
-        Handle = Existing->Handle;
-    }
-    else if (bOn)
-    {
-        // FGameplayAbilitySpec(the ability's default object, level 1, no input, the vehicle item), with a new handle.
-        UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
-        std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
-        SpecStruct->InitializeStruct(SpecStorage.data());
-        FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
-        FGameplayAbilitySpecHandle NewHandle;
-        NewHandle.GenerateNewHandle();
-        Spec.Handle = NewHandle;
-        Spec.Ability = static_cast<UGameplayAbility*>(AbilityClass->GetDefaultObject());
-        Spec.Level = 1;
-        Spec.InputID = INDEX_NONE;
-        Spec.SourceObject = VehicleItem;
-        Handle = AbilitySystem->GiveAbility(Spec);
-        SpecStruct->DestroyStruct(SpecStorage.data());
-        if (!Handle.IsValid())
+        FGameplayAbilitySpec& Spec = Specs[Index];
+        UGameplayAbility* const SpecAbility = Spec.Ability;
+        const uint8_t ActiveCount = Spec.ActiveCount;
+        if (SpecAbility != AbilityDefault || ActiveCount == 0)
         {
-            Log::Warning(L"PersonalVehicle: couldn't give {} {}", GetName().ToStdString(), AbilityClass->GetName().ToStdString());
-            return;
+            continue;
         }
-        Log::Info(L"PersonalVehicle: gave {} {} ({})", GetName().ToStdString(), AbilityClass->GetName().ToStdString(), VehicleItem->GetName().ToStdString());
+        TArray<UGameplayAbility*>& ReplicatedInstances = Spec.ReplicatedInstances;
+        TArray<UGameplayAbility*>& NonReplicatedInstances = Spec.NonReplicatedInstances;
+        for (TArray<UGameplayAbility*>* Instances : { &ReplicatedInstances, &NonReplicatedInstances })
+        {
+            for (UGameplayAbility* Instance : *Instances)
+            {
+                if (Instance && !RidingInstance)
+                {
+                    RidingInstance = Instance;
+                }
+            }
+        }
     }
-    else
+
+    if (!bOn)
+    {
+        // Off: cancel the ride. K2_OnEndAbility(bWasCancelled) cleans up (effect, attachment, delegates) and puts the graph
+        // back in its idle state, on the server and on the rider's client; the ride's spec goes with the activation.
+        if (RidingInstance)
+        {
+            RidingInstance->K2_CancelAbility();
+            Log::Info(L"PersonalVehicle: {} dismounts {}", GetName().ToStdString(), AbilityClass->GetName().ToStdString());
+        }
+        return;
+    }
+    if (RidingInstance)
     {
         return;
     }
 
-    // On: the ability mounts. Off: activating it again while it runs ends that activation and the graph then dismounts.
-    const bool bActivated = AbilitySystem->TryActivateAbility(Handle);
-    Log::Info(L"PersonalVehicle: {} {} {}{}", GetName().ToStdString(), bOn ? L"mounts" : L"dismounts", AbilityClass->GetName().ToStdString(), bActivated ? L"" : L" (activation failed)");
+    // On: a new spec for each ride, FGameplayAbilitySpec(the ability's default object, level 1, no input, the vehicle item),
+    // given and activated once, so it is removed when the ride ends (#302). A spec kept between rides keeps its instance and
+    // the graph's state in it: damage or a weapon equip (OnPawnDamaged, OnEquippedWeapon -> ForceDismount) ends the ride on
+    // the server only, the rider's client then ends its instance without bWasCancelled and leaves it in the riding state,
+    // and from then on every activation the server starts is ended at once by the client's instance, which dismounts
+    // instead. A new instance starts idle on both.
+    UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
+    std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
+    SpecStruct->InitializeStruct(SpecStorage.data());
+    FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
+    FGameplayAbilitySpecHandle NewHandle;
+    NewHandle.GenerateNewHandle();
+    Spec.Handle = NewHandle;
+    Spec.Ability = static_cast<UGameplayAbility*>(AbilityDefault);
+    Spec.Level = 1;
+    Spec.InputID = INDEX_NONE;
+    Spec.SourceObject = VehicleItem;
+    const FGameplayAbilitySpecHandle Handle = AbilitySystem->GiveAbilityAndActivateOnce(Spec);
+    SpecStruct->DestroyStruct(SpecStorage.data());
+    Log::Info(L"PersonalVehicle: {} mounts {} ({}){}", GetName().ToStdString(), AbilityClass->GetName().ToStdString(), VehicleItem->GetName().ToStdString(),
+        Handle.IsValid() ? L"" : L" (activation failed)");
 #endif
 }
 
@@ -143,9 +172,10 @@ void AFortPlayerController::HookPersonalVehicleVTables()
     }
     if (!Finder::ResolvePersonalVehicleLive(IsPersonalVehicleAvailable, Member_MainMcpProfile.GetOffsetChecked())
         || !Finder::ResolveEmoteLive(MyFortPawnOffset(), AFortPlayerPawn::StasisModeOffset())
-        || !Natives::UAbilitySystemComponent_GiveAbility)
+        || !Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce
+        || !UGameplayAbility::FindStaticFunction_K2_CancelAbility())
     {
-        // ResolveEmoteLive also finds the spec handle counter and CanPerformAction.
+        // ResolveEmoteLive also finds GiveAbilityAndActivateOnce, the spec handle counter and CanPerformAction.
         Log::Error(L"PersonalVehicle: this build strips TogglePersonalVehicle_Implementation and its helpers were not found, so nobody can ride a hoverboard");
         return;
     }

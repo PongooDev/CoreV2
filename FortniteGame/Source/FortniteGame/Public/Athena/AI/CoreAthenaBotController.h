@@ -478,8 +478,8 @@ private:
     bool ReviveTeammate(float Now);
     bool StayWithTeam(float Now);
     // A bot in a player's squad goes to the map marker one of its players placed (FCoreAthenaBotManager::
-    // GetSquadMapMarker), out of a fight, healing, reviving and the storm, and stays around it, taking what lies close by,
-    // until the marker is removed. One in the storm is left until the circle reaches it.
+    // GetSquadMapMarker), out of a fight, healing, reviving and the storm, takes what lies close by there, then plays on
+    // from there until the marker is moved. One in the storm is left until the circle reaches it.
     bool FollowMapMarker(float Now);
     // TryToUnstuck: a building the bot can break right in front of it, on the way to its goal.
     bool FindBuildingInTheWay(float Now);
@@ -810,7 +810,9 @@ private:
     // The bots it has let be, for the log.
     int32_t BotsIgnored = 0;
     // FollowMapMarker: the squad's marker it heads for (on the ground there), when it looks again, and how many it went to.
+    // Reached: it got there and took what lay around it, and plays on (until the marker is moved).
     bool bHasMapMarker = false;
+    bool bMapMarkerReached = false;
     FVector MapMarker;
     FVector MapMarkerGround;
     float NextMapMarkerCheck = 0.0f;

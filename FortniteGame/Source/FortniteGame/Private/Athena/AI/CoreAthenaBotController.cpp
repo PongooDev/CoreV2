@@ -6316,6 +6316,7 @@ bool FCoreAthenaBotController::FollowMapMarker(float Now)
         if (!bHasMapMarker || Dist2D(Marker, MapMarker) > 100.0f)
         {
             bHasMapMarker = true;
+            bMapMarkerReached = false;
             MapMarker = Marker;
             MapMarkerGround = Marker;
             FVector Ground;
@@ -6329,7 +6330,7 @@ bool FCoreAthenaBotController::FollowMapMarker(float Now)
             Log::Info(L"Battle Royale bots: {} heads for {}'s map marker {:.0f} m away", BotName, Player, Dist2D(Location, MapMarkerGround) / 100.0f);
         }
     }
-    if (!bHasMapMarker)
+    if (!bHasMapMarker || bMapMarkerReached)
     {
         return false;
     }
@@ -6340,15 +6341,18 @@ bool FCoreAthenaBotController::FollowMapMarker(float Now)
     {
         return false;
     }
-    // There: it stays around the marker, taking what lies close by, as a player waiting at a ping does.
+    // There: it takes what lies close by, then plays on from there (its goals: loot, the team, the circle). It stood at
+    // the marker with nothing to do until the marker went or the storm came, and a marker left on the map (the drop's)
+    // held it there for the whole circle (CoreV2 #275: "freeze and stand in place without a goal until the next zone").
     if (Dist2D(Location, MapMarkerGround) < 800.0f)
     {
         if (Loot(Now, 1500.0f) || SearchContainer(Now, 1500.0f))
         {
             return true;
         }
-        StopMoving();
-        return true;
+        bMapMarkerReached = true;
+        Log::Info(L"Battle Royale bots: {} reached its squad's map marker and plays on", BotName);
+        return false;
     }
     MoveTowards(MapMarkerGround, Now, 400.0f);
     return true;

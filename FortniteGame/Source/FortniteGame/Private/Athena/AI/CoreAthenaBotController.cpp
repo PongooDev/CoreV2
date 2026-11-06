@@ -3424,10 +3424,13 @@ bool FCoreAthenaBotController::Loot(float Now, float MaxDistance)
         NextLootSearch = Now + 1.0f;
         float Best = 7000.0f;
         AFortPickup* Nearest = nullptr;
+        FVector LeashAround;
+        float LeashRadius = 0.0f;
+        const bool bLeashed = GetSquadLeash(LeashAround, LeashRadius);
         for (const FCoreAthenaBotLoot& Entry : Manager->GetLoot())
         {
             AFortPickup* Pickup = Entry.Pickup.Get();
-            if (!Pickup || Pickup->bPickedUp || IsUnreachable(Pickup))
+            if (!Pickup || Pickup->bPickedUp || IsUnreachable(Pickup) || (Pickup != Target && IsTakenByTeammate(Pickup)) || (bLeashed && Dist2D(Entry.Location, LeashAround) > LeashRadius))
             {
                 continue;
             }
@@ -3798,7 +3801,7 @@ void FCoreAthenaBotController::Wander(float Now)
         }
         if (bByPlayer)
         {
-            Range = 1000.0f;
+            Range = 1800.0f;
         }
         // On the ground, onwards: the next goal within 60 degrees of the way it was going (a random one each time sent it
         // back the way it came), turned back towards the middle of the safe zone near its edge.
@@ -3813,8 +3816,46 @@ void FCoreAthenaBotController::Wander(float Now)
                 Angle = std::atan2(Heading.Y, Heading.X) + RandomRange(-1.05f, 1.05f);
             }
         }
-        const float Distance = RandomRange(Range * 0.3f, Range);
+        float Distance = RandomRange(Range * 0.3f, Range);
         WanderGoal = FVector(Around.X + std::cos(Angle) * Distance, Around.Y + std::sin(Angle) * Distance, Location.Z);
+        // By its player, a squad spreads out as players do: of a few spots around them, the one farthest from where its
+        // bot teammates are and are going (CoreV2 #275: all of them wandered within 10 m of the player, on top of each
+        // other, and moved as one).
+        if (bByPlayer)
+        {
+            std::vector<FVector> Taken{ Around };
+            for (const FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
+            {
+                FVector TheirGoal;
+                if (Teammate->GetState() != ECoreAthenaBotState::Landed || !Teammate->GetPawn())
+                {
+                    continue;
+                }
+                Taken.push_back(LocationOf(Teammate->GetPawn()));
+                if (Teammate->GetWanderGoal(TheirGoal))
+                {
+                    Taken.push_back(TheirGoal);
+                }
+            }
+            float BestSpacing = -1.0f;
+            for (int32_t Try = 0; Try < 6; ++Try)
+            {
+                const float TryAngle = RandomRange(0.0f, 6.2831853f);
+                const float TryDistance = RandomRange(Range * 0.3f, Range);
+                const FVector Candidate(Around.X + std::cos(TryAngle) * TryDistance, Around.Y + std::sin(TryAngle) * TryDistance, Location.Z);
+                float Spacing = 1e9f;
+                for (const FVector& Other : Taken)
+                {
+                    Spacing = std::min(Spacing, Dist2D(Candidate, Other));
+                }
+                if (Spacing > BestSpacing)
+                {
+                    BestSpacing = Spacing;
+                    WanderGoal = Candidate;
+                    Distance = TryDistance;
+                }
+            }
+        }
         if (bHasZone && Dist2D(WanderGoal, Center) > Radius * 0.8f)
         {
             const FVector Inward = Direction2D(Location, Center);
@@ -4624,6 +4665,39 @@ void FCoreAthenaBotController::MarkUnreachable(const void* Object)
     }
 }
 
+bool FCoreAthenaBotController::IsTakenByTeammate(const void* Object) const
+{
+    if (!Object)
+    {
+        return false;
+    }
+    for (const FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
+    {
+        if (Teammate->GetState() == ECoreAthenaBotState::Landed && (Teammate->GetLootTarget() == Object || Teammate->GetContainerTarget() == Object))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool FCoreAthenaBotController::GetSquadLeash(FVector& OutAround, float& OutRadius) const
+{
+    // 🟡 40 m: a house or two from its player, so it still reaches them in a few seconds (it regroups past 25 m).
+    const FVector Location = LastKnownPosition;
+    float Nearest = 1e9f;
+    for (AFortPlayerPawnAthena* Player : Manager->PlayerTeammatesOf(this))
+    {
+        if (!Player->bIsDBNO && !Player->bIsSkydiving && !Player->bIsParachuteOpen && Dist2D(LocationOf(Player), Location) < Nearest)
+        {
+            Nearest = Dist2D(LocationOf(Player), Location);
+            OutAround = LocationOf(Player);
+        }
+    }
+    OutRadius = 4000.0f;
+    return Nearest < 1e9f;
+}
+
 bool FCoreAthenaBotController::SearchContainer(float Now, float MaxDistance)
 {
 #if WITH_SERVER_CODE
@@ -4662,11 +4736,15 @@ bool FCoreAthenaBotController::SearchContainer(float Now, float MaxDistance)
     {
         NextContainerSearch = Now + 2.0f;
         float Best = 5000.0f;
+        FVector LeashAround;
+        float LeashRadius = 0.0f;
+        const bool bLeashed = GetSquadLeash(LeashAround, LeashRadius);
         for (const FCoreAthenaBotContainer& Entry : Manager->GetContainers())
         {
             ABuildingContainer* Container = Entry.Container.Get();
             const float Distance = Dist2D(Entry.Location, Location) * (Entry.bChest ? 0.8f : 1.0f);
-            if (Container && (Entry.bChest || bWantsAmmo) && !IsUnreachable(Container) && Distance < Best && std::fabs(Entry.Location.Z - Location.Z) < 800.0f)
+            if (Container && (Entry.bChest || bWantsAmmo) && !IsUnreachable(Container) && Distance < Best && std::fabs(Entry.Location.Z - Location.Z) < 800.0f
+                && !IsTakenByTeammate(Container) && (!bLeashed || Dist2D(Entry.Location, LeashAround) <= LeashRadius))
             {
                 Best = Distance;
                 Target = Container;

@@ -255,6 +255,10 @@ public:
     AFortPawn* GetCurrentTarget() const { return CurrentTarget.Get(); }
     AFortPawn* GetHuntTarget() const { return Goal == ECoreAthenaBotGoal::Hunt ? HuntTarget.Get() : nullptr; }
     int32_t GetNextPOI() const { return NextPOI; }
+    // What a landed bot is going for (teammates leave each other's to them, so they loot apart), and where it wanders to.
+    const void* GetLootTarget() const { return LootTarget.Get(); }
+    const void* GetContainerTarget() const { return ContainerTarget.Get(); }
+    bool GetWanderGoal(FVector& OutGoal) const { OutGoal = WanderGoal; return bHasWanderGoal; }
     // The outfit the bot wears this match (an AthenaCharacter item: its hero gives the bot its class tags).
     UObject* GetLoadoutCharacter() const { return LoadoutCharacter; }
 
@@ -714,6 +718,11 @@ private:
     float LastContainerPursuit = 0.0f;
     bool IsUnreachable(const void* Object) const;
     void MarkUnreachable(const void* Object);
+    // A pickup or container a bot teammate is going for: the squad loots apart instead of all going for one (CoreV2 #275).
+    bool IsTakenByTeammate(const void* Object) const;
+    // A bot on a player's team stays within reach of them: what it loots on its own lies within this of its nearest
+    // player standing (StayWithTeam calls it back past 25 m once it is done). False with no player to stay by.
+    bool GetSquadLeash(FVector& OutAround, float& OutRadius) const;
     float SearchUntil = 0.0f;
     float NextContainerSearch = 0.0f;
     int32_t ContainersSearched = 0;

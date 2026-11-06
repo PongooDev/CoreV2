@@ -324,6 +324,32 @@ namespace
         return Stores;
     }
 
+    // FEngineLoop::PreInit's run of `GIsClient = GIsServer = true` and the flag after them. 1.1 to 4.1 write one
+    // `mov byte [rip+X], 1` each; 4.2 holds the 1 in a register for the whole function and writes
+    // `mov [rip+X], r13b`, which is the same three assignments with the immediate hoisted out, so a run of byte
+    // stores through one register stands in for them. Three of them is the run: the window is the code right in
+    // front of one string, and a fourth store would mean this is not that run and the mapping below would be wrong.
+    std::vector<std::pair<uintptr_t, uintptr_t>> FlagStores(uintptr_t Begin, uintptr_t End)
+    {
+        std::vector<std::pair<uintptr_t, uintptr_t>> Immediates = MovStores(Begin, End, { 0xC6, 0x05 }, 2, 7);
+        Immediates.erase(std::remove_if(Immediates.begin(), Immediates.end(), [](const auto& Store) { return Byte(Store.first + 6) != 0x01; }), Immediates.end());
+        if (!Immediates.empty())
+        {
+            return Immediates;
+        }
+
+        // mov byte [rip+X], r8b to r15b: REX.R, 88 /r, and a modrm naming rip with the register in its reg field.
+        for (uint8_t Register = 0; Register < 8; ++Register)
+        {
+            std::vector<std::pair<uintptr_t, uintptr_t>> Through = MovStores(Begin, End, { 0x44, 0x88, 0x05 | Register << 3 }, 3, 7);
+            if (Through.size() == 3)
+            {
+                return Through;
+            }
+        }
+        return Immediates;
+    }
+
     void ResolvePreInitGlobals()
     {
         const uintptr_t Ref = First(Finder::StringRefs(L"AllowCommandletRendering"));
@@ -335,8 +361,7 @@ namespace
             return;
         }
 
-        std::vector<std::pair<uintptr_t, uintptr_t>> Flags = MovStores(Ref - 0x40, Ref, { 0xC6, 0x05 }, 2, 7);
-        Flags.erase(std::remove_if(Flags.begin(), Flags.end(), [](const auto& Store) { return Byte(Store.first + 6) != 0x01; }), Flags.end());
+        std::vector<std::pair<uintptr_t, uintptr_t>> Flags = FlagStores(Ref - 0x40, Ref);
         std::sort(Flags.begin(), Flags.end());
         if (Flags.size() >= 3)
         {
@@ -404,6 +429,18 @@ namespace
             // the PIE online-subsystem check loads first.
             const uintptr_t Check = FunctionOf(L"Failed to determine if OSS is server in PIE, OSS requests will fail");
             const uintptr_t Load = Check ? FindInstruction(Check, Check + 0x10, { 0x48, 0x8B, 0x1D }) : 0;
+            Engine = Load ? Finder::RelativeTarget(Load, 3, 7) : 0;
+        }
+        if (!Engine)
+        {
+            // 4.2 drops that check, so read it where FEngineLoop::Init uses it: the log "Initializing Game Engine..."
+            // is the line before GEngine->Init(this), which loads the engine into rcx to reach its vtable. Following
+            // jumps, since Init is in the moved code and split into pieces.
+            const uintptr_t Ref = First(Finder::StringRefs(L"Initializing Game Engine..."));
+            const uintptr_t Load = Finder::TraceFind(Ref, 16, [](uintptr_t Instruction)
+            {
+                return Byte(Instruction) == 0x48 && Byte(Instruction + 1) == 0x8B && Byte(Instruction + 2) == 0x0D;
+            });
             Engine = Load ? Finder::RelativeTarget(Load, 3, 7) : 0;
         }
         RequireAddress(L"GEngine", reinterpret_cast<uintptr_t&>(Natives::GEngine), Engine);

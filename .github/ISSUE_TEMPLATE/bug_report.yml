@@ -31,6 +31,7 @@ body:
         - "3.5.2"
         - "3.6"
         - "4.0"
+        - "4.1"
         - Other (say which below)
     validations:
       required: true

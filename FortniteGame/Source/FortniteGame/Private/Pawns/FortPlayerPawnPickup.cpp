@@ -3,6 +3,10 @@
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Finder.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/Controller.h"
+#include "GameplayTagContainer.h"
+#include "ObjectLayout.h"
+#include "Player/FortPlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HAL/IConsoleManager.h"
 #include "Hooks.h"
@@ -55,6 +59,24 @@ namespace
         }
         return *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(Pawn) + Property->GetOffset_ForInternal());
     }
+
+    // Whether the pawn may interact: CanPerformAction(Gameplay.Action.Player.InteractUse), the question 4.1 asks before
+    // any pickup (#297). The walk-over pickup (AFortPlayerPawnAthena::OnCapsuleBeginOverlap, 4.1 0xA9A0E0) asks the pawn's
+    // (slot 0x168: its ability system's blocked tags) after its DBNO check, and the interact press asks the controller's
+    // (0xF9E7A0, slot 0x27C: the same, and the pawn not in stasis) before the pickup's LocalOnAttemptInteract sends
+    // ServerHandlePickup. Thanos (the Infinity Gauntlet) has it blocked: he can't pick anything up. The controller's is
+    // asked here for both (Core resolves its slot; a pawn in stasis doesn't walk over anything). Where the slot isn't
+    // known, or the pawn has no player controller, nothing is refused.
+    bool CanInteractUse(AFortPlayerPawn* Pawn)
+    {
+        AFortPlayerController* PlayerController = Pawn ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Pawn->Controller))) : nullptr;
+        if (!PlayerController || Natives::AFortPlayerController_CanPerformActionIndex < 0)
+        {
+            return true;
+        }
+        const FGameplayTag InteractUse{ FName(L"Gameplay.Action.Player.InteractUse") };
+        return CallVirtual<bool>(PlayerController, Natives::AFortPlayerController_CanPerformActionIndex, &InteractUse);
+    }
 }
 
 void AFortPlayerPawn::ServerHandlePickup(AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
@@ -81,6 +103,12 @@ void AFortPlayerPawn::ServerHandlePickup_Implementation(AFortPickup* Pickup, flo
     if (!Pickup || Pickup->IsPendingKill())
     {
         Log::Warning(L"Pickup: {} asked for {}", GetName().ToStdString(), Pickup ? L"a pickup that is pending kill" : L"no pickup");
+        return;
+    }
+    // The client asks it before it sends the RPC; asked again so a pawn that can't interact takes nothing.
+    if (!CanInteractUse(this))
+    {
+        Log::Info(L"Pickup: {} can't interact (Gameplay.Action.Player.InteractUse is blocked), so doesn't take {}", GetName().ToStdString(), Pickup->GetName().ToStdString());
         return;
     }
     FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
@@ -137,6 +165,7 @@ namespace
         Disabled,
         NotAuthority,
         DBNO,
+        CannotInteractUse,
         NotPickup,
         OwnDrop,
         NoMovement,
@@ -220,6 +249,12 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap(UPrimitiveComponent* Overlappe
     if (bIsDBNO)
     {
         LogRefusal(EAutoPickupRefusal::DBNO, this, OtherActor, L"the pawn is down (DBNO)");
+        return;
+    }
+    // 4.1's (0xA9A0E0) asks CanPerformAction(InteractUse) next (#297).
+    if (!CanInteractUse(this))
+    {
+        LogRefusal(EAutoPickupRefusal::CannotInteractUse, this, OtherActor, L"the pawn can't interact (Gameplay.Action.Player.InteractUse is blocked)");
         return;
     }
 

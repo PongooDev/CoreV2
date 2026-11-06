@@ -5287,7 +5287,11 @@ bool Finder::ResolveQuickBarFocusLive()
             // or r8d, -1; xor edx, edx, as 2.5's does.
             const bool bPrimaryNoOverride = Byte(Call - 6) == 0x41 && Byte(Call - 5) == 0x83 && Byte(Call - 4) == 0xC8 && Byte(Call - 3) == 0xFF && Byte(Call - 2) == 0x33 && Byte(Call - 1) == 0xD2;
             const bool bTwoFocuses = TargetCalls.size() >= 2 && TargetCalls[0].second == TargetCalls[1].second;
-            if ((bTwoFocuses && TargetCalls.size() >= 3 && TargetCalls[1].second == TargetCalls[2].second) || (bTwoFocuses && bPrimaryNoOverride))
+            // 3.6 (0xD15460) and 4.0 (0xD7B760) share the (Primary, -1) arguments with the other branch's (bar, slot)
+            // through a jump, so the call has neither; the swap itself checks SlotOverride == -1 (cmp r8d, -1) before
+            // its first FocusSlot.
+            const bool bChecksSlotOverride = bTwoFocuses && FindInstruction(Target, TargetCalls[0].first, { 0x41, 0x83, 0xF8, 0xFF });
+            if ((bTwoFocuses && TargetCalls.size() >= 3 && TargetCalls[1].second == TargetCalls[2].second) || (bTwoFocuses && bPrimaryNoOverride) || bChecksSlotOverride)
             {
                 Swap = Target;
                 Focus = TargetCalls[0].second;
@@ -10936,7 +10940,10 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
             // 2.2 (0x46E3B8) zeroes a register first: call; xor ebx, ebx; mov [r14 + DeathCause], al.
             const uintptr_t Cleared = Site + 5 + ((Byte(Site + 5) == 0x33 || Byte(Site + 5) == 0x31) && (Byte(Site + 6) & 0xC0) == 0xC0 ? 2 : 0);
             const uintptr_t Store = IsDisp32Access(Cleared, 0x88, 0, DeathCauseOffset) ? Cleared : IsDisp32Access(Cleared + 1, 0x88, 0, DeathCauseOffset) ? Cleared + 1 : 0;
-            if (Store && (IsDisp32Access(Store + 6, 0xC6, 0, DeathInfoDBNOOffset) || IsDisp32Access(Store + 7, 0xC6, 0, DeathInfoDBNOOffset)))
+            // 3.6 (0xA3F338) and 4.0 (0xAA20B8) zero DeathInfo.Distance between the two: call; xor ebx, ebx;
+            // mov [r14 + DeathCause], al; mov [r14 + Distance], ebx; mov byte ptr [r14 + bDBNO], 1.
+            const uintptr_t NextStore = Store && Byte(Store + 6) == 0x41 && IsDisp32Access(Store + 7, 0x89, -1, DeathCauseOffset + 3) ? Store + 7 : Store;
+            if (Store && (IsDisp32Access(NextStore + 6, 0xC6, 0, DeathInfoDBNOOffset) || IsDisp32Access(NextStore + 7, 0xC6, 0, DeathInfoDBNOOffset)))
             {
                 GetDeathCause = Finder::RelativeTarget(Site, 1, 5);
                 return true;
@@ -10973,18 +10980,50 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     // 0x9C7410: the player state's dedicated-server flag, then the team join) calls 0x9A6F10, which appends inline:
     // "movsxd rsi, [r15 + TeamMembers.Num]; ...; mov [r15 + TeamMembers.Num], ecx". Without the fill, the handler needs
     // nothing more there.
+    // 3.6 and 4.0 add through a function of the controller's own (3.6 0xA1CD80, 4.0 0xA45A60: "add rcx, TeamMembers;
+    // call" TArray's add, then the sort) that the team join (3.6 0x9E6DD0, 4.0 0xA11950) calls, one call further down
+    // from the game mode's virtual (4.0 slot 0x155, 0xA269D0).
     int32_t GameModeTeamJoinIndex = -1;
     if (UpdateTeamMembersIndex < 0 && TeamMembersOffset > 0)
     {
+        const auto AddsTeamMember = [TeamMembersOffset, TeamMembersNumOffset](uintptr_t Callee)
+        {
+            const uintptr_t End = Finder::FunctionStart(Callee) == Callee ? Finder::FunctionEnd(Callee) : 0;
+            for (uintptr_t Write = Callee; End && Write + 6 <= End; ++Write)
+            {
+                if (IsDisp32AccessAnyBase(Write, 0x89, -1, TeamMembersNumOffset))
+                {
+                    return true;
+                }
+            }
+            for (uintptr_t Add = Callee; End && Add + 7 <= End && Add < Callee + 0x30; ++Add)
+            {
+                if (Byte(Add) == 0x48 && Byte(Add + 1) == 0x81 && Byte(Add + 2) == 0xC1 && *reinterpret_cast<const int32_t*>(Add + 3) == TeamMembersOffset && FindRawCall(Add + 7, Add + 0xC))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
         void** GameModeVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeAthena");
         GameModeTeamJoinIndex = FirstVTableIndexWhere(GameModeVTable, [&](uintptr_t Entry)
         {
             for (const auto& [Site, Callee] : CallsOf(Entry))
             {
-                const uintptr_t End = Finder::FunctionStart(Callee) == Callee ? Finder::FunctionEnd(Callee) : 0;
-                for (uintptr_t Write = Callee; End && Write + 6 <= End; ++Write)
+                if (AddsTeamMember(Callee))
                 {
-                    if (IsDisp32AccessAnyBase(Write, 0x89, -1, TeamMembersNumOffset))
+                    return true;
+                }
+            }
+            return false;
+        });
+        GameModeTeamJoinIndex = GameModeTeamJoinIndex >= 0 ? GameModeTeamJoinIndex : FirstVTableIndexWhere(GameModeVTable, [&](uintptr_t Entry)
+        {
+            for (const auto& [Site, Callee] : CallsOf(Entry))
+            {
+                for (const auto& [InnerSite, InnerCallee] : CallsOf(Callee))
+                {
+                    if (AddsTeamMember(InnerCallee))
                     {
                         return true;
                     }

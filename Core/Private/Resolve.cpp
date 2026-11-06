@@ -7589,13 +7589,16 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
     // compiles it in (0x42ADA1 calls 0x85DCA0: if QuickBars (mov rcx, [rcx+1B60h]), its ServerActivateSlotInternal), so
     // there it is no stub and the cleanup went with it (#190). Nothing else in 2.2's aircraft phase removes the warmup
     // island's items: OnAircraftExitedDropZone (0x41EF30) only restarts or kicks the players. That call takes the cleanup
-    // too, and the slot is still activated after it (Natives::AFortPlayerController_ActivateSlot).
+    // too, and the slot is still activated after it (Natives::AFortPlayerController_ActivateSlot). 3.6 (0xEDD160) still
+    // tail-jumps to ServerActivateSlotInternal; 4.0's (0xF3F800) adds its bForceExecution (false) and calls it from a
+    // frame of its own (sub rsp, 38h first), so the QuickBars load comes after that.
     std::vector<uintptr_t> LoneStubCalls;
     std::vector<std::pair<uintptr_t, uintptr_t>> ActivateSlotCalls;
     const auto IsActivateSlot = [QuickBarsOffset](uintptr_t Target)
     {
-        return QuickBarsOffset > 0 && IsInText(Target) && Byte(Target) == 0x48 && Byte(Target + 1) == 0x8B && Byte(Target + 2) == 0x89
-            && *reinterpret_cast<const int32_t*>(Target + 3) == QuickBarsOffset;
+        const uintptr_t Load = IsInText(Target) && Byte(Target) == 0x48 && Byte(Target + 1) == 0x83 && Byte(Target + 2) == 0xEC ? Target + 4 : Target;
+        return QuickBarsOffset > 0 && IsInText(Target) && Byte(Load) == 0x48 && Byte(Load + 1) == 0x8B && Byte(Load + 2) == 0x89
+            && *reinterpret_cast<const int32_t*>(Load + 3) == QuickBarsOffset;
     };
     for (const uintptr_t Ref : Finder::StringRefs(L"&AFortGameModeAthena::OnAircraftEnteredDropZone"))
     {

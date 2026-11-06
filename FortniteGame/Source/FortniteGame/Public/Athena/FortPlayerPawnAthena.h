@@ -24,6 +24,7 @@ public:
     DefineUStructProperty(FFortAthenaLoadout, CustomizationLoadout)
     // How many teammates are reviving the pawn (AFortPlayerControllerAthena::ServerDBNOReviveStarted and Interrupted).
     DefineUProperty(uint8_t, DBNORevivalStacking)
+    static bool HasDBNORevivalStacking() { return Member_DBNORevivalStacking.IsAvailable(); }
     // The pawn the death camera turns to (the eliminator's), set by the controller's pawn-death handler.
     DefineUProperty(APawn*, KillerForSpectatorRotation)
     // The pawn is relevant to its whole team, not only its squad (IsNetRelevantFor, 3.2 0x9EEEA0), so its

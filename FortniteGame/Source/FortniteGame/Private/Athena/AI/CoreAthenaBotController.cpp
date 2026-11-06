@@ -1969,7 +1969,18 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     {
         StopHarvesting();
     }
-    if (!HealingItem && !HarvestTarget.Get())
+    // A revive under way stops first if an enemy turned up (ReviveTeammate lets go of it then), so the bot fights with its
+    // weapons in hand. Mid-revive its hands are on the interaction: no reload, no weapon change (CoreV2 #287).
+    if (IsReviving() && (IsUnderThreat(Now) || (!ReviveTarget && !RevivePlayer.Get())))
+    {
+        ReviveTeammate(Now);
+        if (IsReviving())
+        {
+            EndReviveInteraction();
+            ReviveDoneAt = 0.0f;
+        }
+    }
+    if (!HealingItem && !HarvestTarget.Get() && !IsReviving())
     {
         ManageWeapon(Now);
         CheckWeaponFireResult(Now);
@@ -1992,6 +2003,7 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     if (ReviveDoneAt > 0.0f && (ReviveTarget || RevivePlayer.Get()) && !IsUnderThreat(Now) && ReviveTeammate(Now))
     {
         StopFiring();
+        SetTargeting(false);
         Intent = L"revive";
     }
     // Building: it stands and holds fire until the last piece is up.
@@ -6081,6 +6093,7 @@ void FCoreAthenaBotController::OnEnteredDBNO(AFortPlayerStateAthena* InDowner, f
     }
     StopMoving();
     EmoteUntil = 0.0f;
+    EndReviveInteraction();
     ReviveTarget = nullptr;
     RevivePlayer = nullptr;
     ReviveDoneAt = 0.0f;
@@ -6248,6 +6261,7 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
         {
             Log::Info(L"Battle Royale bots: {} stops reviving {}", BotName, TargetName());
         }
+        EndReviveInteraction();
         ReviveTarget = nullptr;
         RevivePlayer = nullptr;
         ReviveDoneAt = 0.0f;
@@ -6294,6 +6308,11 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
     const FVector DownedLocation = LocationOf(Downed);
     if (Dist2D(DownedLocation, Location) > 180.0f)
     {
+        // Out of the interaction's reach (the downed pawn crawled off, or the bot was pushed): it starts over there.
+        if (ReviveDoneAt > 0.0f)
+        {
+            EndReviveInteraction();
+        }
         ReviveDoneAt = 0.0f;
         MoveTowards(DownedLocation, Now, 120.0f);
         return true;
@@ -6302,9 +6321,19 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
     FaceTowards(DownedLocation, Now, 1.0f);
     if (ReviveDoneAt <= 0.0f)
     {
+        // A player holds the interaction with the downed pawn: hands busy, no gun up, no reload or heal under way. The
+        // interaction's start is the game's ServerDBNOReviveStarted: the downed pawn's revive cue and tag (its "being
+        // revived" animation, the bleed paused), as for a player's revive (CoreV2 #287: the bots reloaded and looked
+        // about as they revived, and no revive showed).
+        StopFiring();
+        SetTargeting(false);
+        CancelReload();
+        CancelHeal();
+        BeginReviveInteraction(Downed);
         const float ReviveTime = NumberOf(reinterpret_cast<UObject*>(Downed), L"ReviveFromDBNOTime", 10.0f);
         ReviveDoneAt = Now + std::max(ReviveTime, 1.0f);
-        Log::Info(L"Battle Royale bots: {} revives {} ({:.0f} s)", BotName, TargetName(), ReviveTime);
+        Log::Info(L"Battle Royale bots: {} revives {} ({:.0f} s, {})", BotName, TargetName(), ReviveTime,
+            ReviveInteractionPawn.Get() ? L"the game's revive interaction" : L"no revive interaction in this build");
         return true;
     }
     if (Now < ReviveDoneAt)
@@ -6343,6 +6372,8 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
             Natives::UAbilitySystemComponent_CancelAbilities(AbilitySystem, &Tags, nullptr, nullptr);
         }
     }
+    // Up: out of its "being revived" state, as AFortPlayerPawnAthena's ServerReviveFromDBNO ends it after a player's.
+    EndReviveInteraction();
     if (Target)
     {
         Target->OnRevived();
@@ -6352,6 +6383,63 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
     return true;
 #else
     return false;
+#endif
+}
+
+namespace
+{
+    // The slot of an AFortPlayerControllerAthena RPC's _Implementation (from its exec), or -1 where the build lacks it or
+    // strips it to the shared stub.
+    int32_t AthenaControllerImplementationIndex(const wchar_t* Path)
+    {
+        UFunction* Function = FindObject<UFunction>(nullptr, Path);
+        const int32_t Index = Function ? Finder::ImplementationIndex(Function) : -1;
+        UClass* Class = Index >= 0 ? AFortPlayerControllerAthena::StaticClass() : nullptr;
+        UObject* Default = Class ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = Default ? *reinterpret_cast<void***>(Default) : nullptr;
+        return VTable && VTable[Index] && !Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[Index])) ? Index : -1;
+    }
+}
+
+void FCoreAthenaBotController::BeginReviveInteraction(AFortPlayerPawnAthena* Downed)
+{
+#if WITH_SERVER_CODE
+    // AFortPlayerControllerAthena::ServerDBNOReviveStarted_Implementation (3.5.1 0xA2CF00, 4.1 0xA6D140), which a
+    // player's client sends as it starts holding the interaction on the downed pawn: the pawn's DBNORevivalStacking goes
+    // up, and with the first reviver its ability system gets Gameplay.Status.DBNOBeingRevived (which pauses its bleed)
+    // and the replicated GameplayCue.Athena.Player.BeingRevivedFromDBNO (its revive animation and effect on every
+    // client). The body reads nothing of the controller it runs on but its player state, for the reviver's squad status;
+    // a bot's controller is an AAIController, so it runs on the class default, as Core's restored ServerReviveFromDBNO
+    // runs ServerDBNOReviveInterrupted (that status is left out).
+    static const int32_t Index = AthenaControllerImplementationIndex(L"/Script/FortniteGame.FortPlayerControllerAthena:ServerDBNOReviveStarted");
+    EndReviveInteraction();
+    UClass* Class = AFortPlayerControllerAthena::StaticClass();
+    UObject* Default = Class ? Class->GetDefaultObject(false) : nullptr;
+    if (!Downed || !Downed->bIsDBNO || Index < 0 || !Default || !AFortPlayerPawnAthena::HasDBNORevivalStacking())
+    {
+        return;
+    }
+    CallVirtual<void>(reinterpret_cast<AFortPlayerControllerAthena*>(Default), Index, Downed);
+    ReviveInteractionPawn = Downed;
+#endif
+}
+
+void FCoreAthenaBotController::EndReviveInteraction()
+{
+#if WITH_SERVER_CODE
+    // ServerDBNOReviveInterrupted_Implementation (3.5.1 0xA2CE10): one reviver fewer, and with the last one gone the tag
+    // and the cue come off. Its count is a byte taken down unchecked, so it is only called on a pawn the bot is counted
+    // on.
+    static const int32_t Index = AthenaControllerImplementationIndex(L"/Script/FortniteGame.FortPlayerControllerAthena:ServerDBNOReviveInterrupted");
+    AFortPlayerPawnAthena* Downed = ReviveInteractionPawn.Get();
+    ReviveInteractionPawn = nullptr;
+    UClass* Class = AFortPlayerControllerAthena::StaticClass();
+    UObject* Default = Class ? Class->GetDefaultObject(false) : nullptr;
+    if (!Downed || Downed->IsPendingKill() || Index < 0 || !Default || static_cast<uint8_t>(Downed->DBNORevivalStacking) == 0)
+    {
+        return;
+    }
+    CallVirtual<void>(reinterpret_cast<AFortPlayerControllerAthena*>(Default), Index, Downed);
 #endif
 }
 
@@ -6906,6 +6994,10 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     // player's does (AFortPlayerControllerAthena's handler): who eliminated it (else itself) and how; it replicates
     // (OnRep_DeathInfo), which writes the clients' kill feed.
     StopFiring();
+    EndReviveInteraction();
+    ReviveTarget = nullptr;
+    RevivePlayer = nullptr;
+    ReviveDoneAt = 0.0f;
     AFortPlayerPawnAthena* Pawn = GetPawn();
     AFortPlayerStateAthena* PlayerState = GetPlayerState();
     // The death's effects (OnDeathPlayEffects: the elimination drone, BP_VictoryDrone) play on a client as the dead

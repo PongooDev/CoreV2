@@ -480,6 +480,12 @@ private:
     // teammate, and staying near the team. A bot on a player's team counts its player teammates too.
     void Downed(float Now);
     bool ReviveTeammate(float Now);
+    // A player's revive as the game runs it on the server: the interaction's start (AFortPlayerControllerAthena::
+    // ServerDBNOReviveStarted) puts the downed pawn in its "being revived" state, and its end (ServerDBNOReviveInterrupted,
+    // also what the Athena revive does once the pawn is up) takes it out again.
+    void BeginReviveInteraction(AFortPlayerPawnAthena* Downed);
+    void EndReviveInteraction();
+    bool IsReviving() const { return ReviveDoneAt > 0.0f; }
     bool StayWithTeam(float Now);
     // A bot in a player's squad goes to the map marker one of its players placed (FCoreAthenaBotManager::
     // GetSquadMapMarker), out of a fight, healing, reviving and the storm, takes what lies close by there, then plays on
@@ -630,6 +636,8 @@ private:
     // A downed player teammate the bot is reviving (a bot on a player's team), instead of ReviveTarget.
     TWeakObjectPtr<AFortPlayerPawnAthena> RevivePlayer;
     float ReviveDoneAt = 0.0f;
+    // The downed pawn whose "being revived" state the bot's revive started (BeginReviveInteraction).
+    TWeakObjectPtr<AFortPlayerPawnAthena> ReviveInteractionPawn;
     int32_t Revives = 0;
     int32_t TimesDowned = 0;
     // Shots on target that a wall or a build stopped.

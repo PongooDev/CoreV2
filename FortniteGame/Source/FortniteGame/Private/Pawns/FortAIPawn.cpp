@@ -187,6 +187,9 @@ void AFortAIPawn::DropLoot(const FFortAIPawnLootDropData& LootDropData, const FG
     }
     bHasDroppedLoot = true;
 
+    // The item cache (the account item drop) has its own switch, which nothing left in the client exe reads.
+    const UFortRuntimeOptions* Options = UFortRuntimeOptions::Get();
+    const bool bEnemyItemCacheDrops = Options && UFortRuntimeOptions::HasSTWEnemyItemCacheDrops() && Options->bEnableSTWEnemyItemCacheDrops;
     UWorld* World = GetWorld();
     AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
     const int32_t WorldLevel = GameState ? static_cast<int32_t>(GameState->WorldLevel) : 0;
@@ -223,6 +226,10 @@ void AFortAIPawn::DropLoot(const FFortAIPawnLootDropData& LootDropData, const FG
         Log::Info(L"AFortAIPawn: {} dropped {} {} item(s) from {} (world level {})", GetName().ToStdString(), Dropped, Kind, TierGroup.ToString().ToStdString(), WorldLevel);
     };
     DropFromTierGroup(LootDropData.WorldItemTierGroup, LootDropData.WorldItemLootDropChance, L"world");
+    if (bEnemyItemCacheDrops)
+    {
+        DropFromTierGroup(LootDropData.AccountItemTierGroup, LootDropData.AccountItemLootDropChance, L"account");
+    }
 #endif
 }
 
@@ -279,7 +286,8 @@ void AFortAIPawn::HookDeathVTables()
 
     // The encounters only get loot drop rows with bEnableSTWLootDrops on.
     const UFortRuntimeOptions* Options = UFortRuntimeOptions::Get();
-    Log::Info(L"AFortAIPawn: enemy loot drops restored (bEnableSTWLootDrops {})", Options && UFortRuntimeOptions::HasSTWLootDrops() && Options->bEnableSTWLootDrops);
+    Log::Info(L"AFortAIPawn: enemy loot drops restored (bEnableSTWLootDrops {}, bEnableSTWEnemyItemCacheDrops {})",
+        Options && UFortRuntimeOptions::HasSTWLootDrops() && Options->bEnableSTWLootDrops, Options && UFortRuntimeOptions::HasSTWEnemyItemCacheDrops() && Options->bEnableSTWEnemyItemCacheDrops);
 #endif
 }
 

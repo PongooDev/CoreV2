@@ -13,7 +13,11 @@ public:
     // 4.0: Save the World's enemy loot drops. AFortAIDirector::GetBaseLootDropData (4.0 0x8C07E0) and
     // GetLootDropModifierData (0x8C5B60) return nothing without it, so no encounter gets loot drop rows.
     DefineUProperty(bool, bEnableSTWLootDrops)
+    // 4.0: whether an enemy's account item drop (a Mini-Boss's item cache) drops. Nothing in the client exe reads it: the
+    // server code that did is stripped.
+    DefineUProperty(bool, bEnableSTWEnemyItemCacheDrops)
     static bool HasSTWLootDrops() { return Member_bEnableSTWLootDrops.IsAvailable(); }
+    static bool HasSTWEnemyItemCacheDrops() { return Member_bEnableSTWEnemyItemCacheDrops.IsAvailable(); }
 
     static const UFortRuntimeOptions* Get()
     {

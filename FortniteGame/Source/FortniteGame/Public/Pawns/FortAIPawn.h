@@ -44,9 +44,10 @@ public:
     // Count of Item (one in this pawn's inventory) to that player, or to the ground; returns the player's item it became.
     UFortWorldItem* ReturnItemToPlayerManager(UFortWorldItem* Item, int32_t Count);
 
-    // 4.0 (#289): Save the World's enemy loot drops, which the client exe strips. A pawn the director spawned rolls its
-    // loot drop data (UFortAIEncounterInfo::GetAIPawnLootDropData) as it dies: its world item chance drops pickups from
-    // its world item tier group (resources, ammo, crafting ingredients and traps). None for a death the director's
+    // 4.0 (#289, #290): Save the World's enemy loot drops, which the client exe strips. A pawn the director spawned rolls
+    // its loot drop data (UFortAIEncounterInfo::GetAIPawnLootDropData) as it dies: its world item chance drops pickups
+    // from its world item tier group (resources, ammo, crafting ingredients and traps), and its account item chance
+    // drops one from its account item tier group (a Mini-Boss's item cache). None for a death the director's
     // LootDropDenialQuery matches the damage tags of. Nothing on builds without loot drop rows.
     void DropLoot(const FFortAIPawnLootDropData& LootDropData, const FGameplayTagContainer& DamageTags);
 

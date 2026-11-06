@@ -62,6 +62,15 @@ public:
     DefineUStructArrayProperty(FItemDefinitionAndCount, DefaultInventoryList)
     DefineUProperty(TArray<TAssetSubclassOf<AFortAIDirector>>, AIDirectors)
     DefineUProperty(UClass*, SharedMissionListsClass)
+
+private:
+    // 4.2 keeps SharedMissionListsClass as a soft class pointer (a TSoftClassPtr) where earlier builds hold the class.
+    static inline Reflection::FMemberInfo Member_SharedMissionListsClassPath{ &StaticReflectionOwner, TEXT("SharedMissionListsClass"), sizeof(TAssetSubclassOf<UObject>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetSubclassOf<UObject>> };
+
+public:
+    // The shared mission lists' class, loading it from its path on 4.2+; null when the game data names none.
+    UClass* GetSharedMissionListsClass() const;
+
     DefineUProperty(TAssetPtr<UFortHomebaseManager>, HomebaseManager)
     DefineUStructProperty(FConditionalFoundationQuota, ConditionalFoundationQuota)
     DefineUProperty(TArray<TAssetPtr<UDataTable>>, LootTierDataTables)

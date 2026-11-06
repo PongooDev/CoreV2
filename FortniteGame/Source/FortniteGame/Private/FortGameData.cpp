@@ -87,3 +87,12 @@ FFortLootTierData* UFortGameData::FindLootTierDataRow(FName LootTierKey, const w
     UE_LOG(LogFortLoot, Warning, TEXT("UFortGameData::FindLootTierDataRow : TierGroupName %s with context %s not found!"), *LootTierKey.ToString(), ContextString);
     return nullptr;
 }
+
+UClass* UFortGameData::GetSharedMissionListsClass() const
+{
+    if (Member_SharedMissionListsClassPath.IsAvailable())
+    {
+        return Reflection::AccessMember<TAssetSubclassOf<UObject>>(this, Member_SharedMissionListsClassPath).LoadSynchronous();
+    }
+    return Member_SharedMissionListsClass.IsAvailable() ? static_cast<UClass*>(SharedMissionListsClass) : nullptr;
+}

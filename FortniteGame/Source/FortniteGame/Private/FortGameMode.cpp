@@ -75,7 +75,7 @@ UFortSharedMissionLists* AFortGameMode::GetSharedMissionLists()
     if (!SharedMissionLists)
     {
         UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-        UClass* SharedMissionListsClass = GameData ? static_cast<UClass*>(GameData->SharedMissionListsClass) : nullptr;
+        UClass* SharedMissionListsClass = GameData ? GameData->GetSharedMissionListsClass() : nullptr;
         if (SharedMissionListsClass && SharedMissionListsClass->IsChildOf(UFortSharedMissionLists::StaticClass()))
         {
             SharedMissionLists = static_cast<UFortSharedMissionLists*>(SharedMissionListsClass->GetDefaultObject());

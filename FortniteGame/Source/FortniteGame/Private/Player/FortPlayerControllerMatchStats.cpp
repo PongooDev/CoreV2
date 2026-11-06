@@ -393,6 +393,11 @@ void AFortPlayerController::SendEndBattleRoyaleMatchForPlayer(const std::string&
     Result->SetReward(FAthenaRewardResult::RewardBookLevelsGained(), Int(RewardResultJson, "bookLevelsGained"));
     Result->SetReward(FAthenaRewardResult::RewardTotalSeasonXpGained(), Int(RewardResultJson, "totalSeasonXpGained"));
     Result->SetReward(FAthenaRewardResult::RewardTotalBookXpGained(), Int(RewardResultJson, "totalBookXpGained"));
+    // 3.2+: the XP before the anti-addiction penalty, which the screen's boosts share (#286). Epic's MCP answers it; a
+    // backend from before it takes no penalty, so it is the season XP gained.
+    const std::string PrePenaltySeasonXpGained = BackendRequest::JsonField(RewardResultJson, "prePenaltySeasonXpGained");
+    Result->SetReward(FAthenaRewardResult::RewardPrePenaltySeasonXpGained(),
+        PrePenaltySeasonXpGained.empty() ? Int(RewardResultJson, "totalSeasonXpGained") : std::atoi(PrePenaltySeasonXpGained.c_str()));
     if (FAthenaRewardResult::HasXpMultipliers())
     {
         for (const std::string& Group : JsonObjects(RewardResultJson, "xpMultipliers"))

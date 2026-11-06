@@ -199,7 +199,11 @@ public:
 // boosts and the award groups. The screen's XP bar (XpMatchProgression) plays each group with a Score or SeasonXp as
 // "<source> +<Score>" (2.1 sub_4759C0), then shares the rest of TotalSeasonXpGained among the boosts by their percent;
 // its Total Score is the groups' Scores added up (sub_4748B0), its Total XP TotalSeasonXpGained (sub_474900). 1.10's
-// has LevelsGained and the groups only. Members a build doesn't reflect are left out.
+// has LevelsGained and the groups only. Members a build doesn't reflect are left out. From 3.2 the boosts share
+// PrePenaltySeasonXpGained instead, the season XP before the anti-addiction penalty (AntiAddictionMultiplier): the
+// report's GetXpRewards (4.1 0xA95DB0) writes a positive boost's line as its percent's part of PrePenaltySeasonXpGained
+// less the groups' Scores, and the penalty's (EAthenaMatchXpMultiplierSource 4) as its part of PrePenaltySeasonXpGained
+// less TotalSeasonXpGained; left 0, the Battle Pass Bonus read "+-<Total Score>" (#286).
 struct FAthenaRewardResult
 {
     DefineUnrealStruct(FAthenaRewardResult, FortniteGame)
@@ -207,6 +211,7 @@ struct FAthenaRewardResult
     DefineUProperty(int32_t, BookLevelsGained)
     DefineUProperty(int32_t, TotalSeasonXpGained)
     DefineUProperty(int32_t, TotalBookXpGained)
+    DefineUProperty(int32_t, PrePenaltySeasonXpGained)
     DefineUStructArrayProperty(FAthenaMatchXpMultiplierGroup, XpMultipliers)
     DefineUStructArrayProperty(FAthenaAwardGroup, Rewards)
 
@@ -227,6 +232,7 @@ public:
     static Reflection::FMemberInfo& RewardBookLevelsGained() { return Member_BookLevelsGained; }
     static Reflection::FMemberInfo& RewardTotalSeasonXpGained() { return Member_TotalSeasonXpGained; }
     static Reflection::FMemberInfo& RewardTotalBookXpGained() { return Member_TotalBookXpGained; }
+    static Reflection::FMemberInfo& RewardPrePenaltySeasonXpGained() { return Member_PrePenaltySeasonXpGained; }
     static bool HasXpMultipliers() { return Member_XpMultipliers.IsAvailable() && FAthenaMatchXpMultiplierGroup::StaticStruct() != nullptr; }
     static bool HasRewards() { return Member_Rewards.IsAvailable() && FAthenaAwardGroup::StaticStruct() != nullptr; }
 };

@@ -233,3 +233,22 @@ TSubclassOf<AGameSession>* AFortGameMode::GetGameSessionClassHK(const AFortGameM
     *Result = This->GetGameSessionClass();
     return Result;
 }
+
+UFortGameDeathPenalty* AFortGameMode::GetDeathPenaltyData()
+{
+    // 4.0 split the member: DefaultDeathPenaltyData holds the path and DeathPenaltyData the loaded asset. Before 4.0,
+    // DeathPenaltyData was the path itself.
+    if (Member_DeathPenaltyData.IsAvailable())
+    {
+        if (UFortGameDeathPenalty* DeathPenalty = DeathPenaltyData)
+        {
+            return DeathPenalty;
+        }
+        return Member_DefaultDeathPenaltyData.IsAvailable() ? DefaultDeathPenaltyData.LoadSynchronous() : nullptr;
+    }
+    if (Member_DeathPenaltyDataPath.IsAvailable())
+    {
+        return Reflection::AccessMember<TAssetPtr<UFortGameDeathPenalty>>(this, Member_DeathPenaltyDataPath).LoadSynchronous();
+    }
+    return nullptr;
+}

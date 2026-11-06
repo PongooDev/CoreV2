@@ -42,7 +42,18 @@ public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
     // The match's playlist (Battle Royale: 2 solo, 10 duo, 9 squad), what the game mode records its winners with.
     DefineUProperty(int32_t, CurrentPlaylistId)
-    DefineUProperty(TAssetPtr<UFortGameDeathPenalty>, DeathPenaltyData)
+    // From 4.0 the game mode keeps the asset's path in DefaultDeathPenaltyData and the loaded asset in DeathPenaltyData.
+    DefineUProperty(TAssetPtr<UFortGameDeathPenalty>, DefaultDeathPenaltyData)
+    DefineUProperty(UFortGameDeathPenalty*, DeathPenaltyData)
+
+private:
+    // Before 4.0, DeathPenaltyData was the asset's path (a TAssetPtr), with no DefaultDeathPenaltyData.
+    static inline Reflection::FMemberInfo Member_DeathPenaltyDataPath{ &StaticReflectionOwner, TEXT("DeathPenaltyData"), sizeof(TAssetPtr<UFortGameDeathPenalty>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UFortGameDeathPenalty>> };
+
+public:
+    // The death penalty (Save the World's resurrect durability costs), loading it from its path if need be; null when
+    // the game mode has none.
+    UFortGameDeathPenalty* GetDeathPenaltyData();
 
     TSubclassOf<AGameSession> GetGameSessionClass() const;
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);

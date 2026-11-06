@@ -331,8 +331,7 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
         AFortGameMode* GameMode = Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode()));
         if (GameState && GameState->GameplayState != EFortGameplayState::GetEndOfZone() && GameMode && Natives::AFortPlayerControllerZone_ApplyResurrectDurabilityPenaltyIndex >= 0)
         {
-            const TAssetPtr<UFortGameDeathPenalty>& DeathPenaltyData = GameMode->DeathPenaltyData;
-            if (UFortGameDeathPenalty* DeathPenalty = DeathPenaltyData.LoadSynchronous())
+            if (UFortGameDeathPenalty* DeathPenalty = GameMode->GetDeathPenaltyData())
             {
                 const float Penalty = bSelfRevive ? DeathPenalty->SelfResurrectDurabilityPenalty : DeathPenalty->TeammateResurrectDurabilityPenalty;
                 CallVirtual<void>(PlayerController, Natives::AFortPlayerControllerZone_ApplyResurrectDurabilityPenaltyIndex, Penalty);

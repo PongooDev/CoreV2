@@ -341,9 +341,12 @@ void AFortPlayerController::SendSprayStatEvent(UAthenaSprayItemDefinition* Spray
 
 void AFortPlayerController::HookSprayVTables()
 {
-    // Builds before 4.0 have no sprays.
+    // Builds before 4.0 have no sprays. 3.5 (CL-4000805) to 3.6 (CL-4019403) already declare ServerPlaySprayItem,
+    // PlaySprayItem and UAthenaSprayItemDefinition, but nothing a spray needs: no AFortSprayDecalInstance, no
+    // ActiveSprayInstances, and their paks hold no spray items, GAB_Spray_Generic or BP_SprayDecal, so no client can
+    // send one. The decal class arrives with 4.0's sprays.
     UFunction* ServerPlaySprayItem = FindStaticFunction_ServerPlaySprayItem();
-    if (!ServerPlaySprayItem || !UAthenaSprayItemDefinition::StaticClass())
+    if (!ServerPlaySprayItem || !UAthenaSprayItemDefinition::StaticClass() || !AFortSprayDecalInstance::StaticClass())
     {
         return;
     }

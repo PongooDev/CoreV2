@@ -3211,63 +3211,57 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(
     }
     AddTeamKillScore(Athena, static_cast<uint8_t>(KillerState->TeamIndex));
 
-    // Quests: the game's own kill events for this pawn went through
-    // UFortQuestManager already, with the bot's tags added
-    // (SendStatEventWithTagsHK). AFortGameModeZone::Killed (3.1 0xB5E890, 4.0
-    // 0xC1B530) sends each damage contributor's KillContribution, but the
-    // killer's Kill only when GetTeamAttitude says the killer and the dead
-    // pawn's controller are hostile (4.0 0xC8F200: each one's
-    // IFortTeamActorInterface team, or its Instigator's). A bot's controller is
-    // a stock AAIController, which has no team and no Instigator, so the
-    // attitude is neutral and the game sends no Kill for a bot: the
-    // KillContribution it did send isn't the elimination ("Eliminate opponents
-    // in Flush Factory", killingblow_athena_player_*). With the setting on,
-    // Core sends the events the game didn't, as Killed does: KillContribution,
-    // then Kill, with the tags its Kill has: the dead pawn's and the location
-    // tags of where it died for the target, the killer's, their weapon's and
-    // the location tags of where they are for the source
-    // (AFortGameMode::GetPoiTagsFor, 4.0 0xC1BBE7 and 0xC1BBFA).
-    UObject *Target = reinterpret_cast<UObject *>(Bot->GetPawn());
-    const bool bNativeKill =
-        HasNativeKillEvent(Target, EFortQuestObjectiveStatEvent::GetKill());
-    const bool bNativeContribution = HasNativeKillEvent(
-        Target, EFortQuestObjectiveStatEvent::GetKillContribution());
-    UFortRegisteredPlayerInfo *PlayerInfo =
-        static_cast<UFortRegisteredPlayerInfo *>(KillerPlayer->MyPlayerInfo);
-    UFortQuestManager *QuestManager =
-        PlayerInfo ? PlayerInfo->GetAthenaQuestManager() : nullptr;
-    std::wstring Location;
-    if (Settings.bEliminationsCountForQuests && !bNativeKill && QuestManager) {
-      FGameplayTagContainer SourceTags;
-      FGameplayTagContainer ContextTags;
-      QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
-      FGameplayTagContainer TargetTags;
-      AddKillEventTags(Target, reinterpret_cast<AController *>(KillerPlayer),
-                       TargetTags, SourceTags);
-      if (!bNativeContribution) {
-        QuestManager->SendStatEvent(
-            EFortQuestObjectiveStatEvent::GetKillContribution(), Target,
-            TargetTags, SourceTags, ContextTags, 1, false);
-      }
-      if (Athena) {
-        FGameplayTagContainer KillerLocation;
-        FGameplayTagContainer TargetLocation;
-        Athena->GetPoiTagsFor(reinterpret_cast<AActor *>(
-                                  static_cast<APawn *>(KillerPlayer->Pawn)),
-                              KillerLocation);
-        Athena->GetPoiTagsFor(reinterpret_cast<AActor *>(Target),
-                              TargetLocation);
-        SourceTags.AppendTags(KillerLocation);
-        TargetTags.AppendTags(TargetLocation);
-        for (const FGameplayTag &Tag : TargetLocation.GameplayTags) {
-          Location +=
-              (Location.empty() ? L"" : L", ") + Tag.TagName.ToStdString();
+        // Quests: the game's own kill events for this pawn went through UFortQuestManager already, with the bot's tags
+        // added (SendStatEventWithTagsHK). AFortGameModeZone::Killed (3.1 0xB5E890, 4.0 0xC1B530) sends each damage
+        // contributor's KillContribution, but the killer's Kill only when GetTeamAttitude says the killer and the dead
+        // pawn's controller are hostile (4.0 0xC8F200: each one's IFortTeamActorInterface team, or its Instigator's).
+        // A bot's controller is a stock AAIController, which has no team and no Instigator, so the attitude is neutral
+        // and the game sends no Kill for a bot: the KillContribution it did send isn't the elimination ("Eliminate
+        // opponents in Flush Factory", killingblow_athena_player_*). With the setting on, Core sends the events the game
+        // didn't, as Killed does: KillContribution, then Kill, with the tags its Kill has: the dead pawn's and the
+        // location tags of where it died for the target, the killer's, their weapon's and the location tags of where
+        // they are for the source (AFortGameMode::GetPoiTagsFor, 4.0 0xC1BBE7 and 0xC1BBFA).
+        UObject* Target = reinterpret_cast<UObject*>(Bot->GetPawn());
+        const bool bNativeKill = HasNativeKillEvent(Target, EFortQuestObjectiveStatEvent::GetKill());
+        const bool bNativeContribution = HasNativeKillEvent(Target, EFortQuestObjectiveStatEvent::GetKillContribution());
+        UFortRegisteredPlayerInfo* PlayerInfo = static_cast<UFortRegisteredPlayerInfo*>(KillerPlayer->MyPlayerInfo);
+        UFortQuestManager* QuestManager = PlayerInfo ? PlayerInfo->GetAthenaQuestManager() : nullptr;
+        std::wstring Location;
+        if (Settings.bEliminationsCountForQuests && !bNativeKill && QuestManager)
+        {
+            FGameplayTagContainer SourceTags;
+            FGameplayTagContainer ContextTags;
+            QuestManager->GetSourceAndContextTags(SourceTags, ContextTags);
+            FGameplayTagContainer TargetTags;
+            AddKillEventTags(Target, reinterpret_cast<AController*>(KillerPlayer), TargetTags, SourceTags);
+            if (!bNativeContribution)
+            {
+                QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKillContribution(), Target, TargetTags, SourceTags, ContextTags, 1, false);
+            }
+            // Killed (4.2 0xC167B0) builds the Kill's source from the killer's tags and appends the tags it was called
+            // with (0xC16DEB), the dead pawn's DeathTags: the damage tags of the hit that killed it. A trap's hit carries
+            // its TrapData's tags there (trap.hostile, which killingblow_athena_player_with_trap asks for in the source,
+            // CoreV2 #315); the killer's held weapon says nothing about a trap.
+            AFortPawn* TargetPawn = Cast<AFortPawn>(Target);
+            if (TargetPawn && AFortPawn::HasDeathTags())
+            {
+                SourceTags.AppendTags(TargetPawn->DeathTags);
+            }
+            if (Athena)
+            {
+                FGameplayTagContainer KillerLocation;
+                FGameplayTagContainer TargetLocation;
+                Athena->GetPoiTagsFor(reinterpret_cast<AActor*>(static_cast<APawn*>(KillerPlayer->Pawn)), KillerLocation);
+                Athena->GetPoiTagsFor(reinterpret_cast<AActor*>(Target), TargetLocation);
+                SourceTags.AppendTags(KillerLocation);
+                TargetTags.AppendTags(TargetLocation);
+                for (const FGameplayTag& Tag : TargetLocation.GameplayTags)
+                {
+                    Location += (Location.empty() ? L"" : L", ") + Tag.TagName.ToStdString();
+                }
+            }
+            QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKill(), Target, TargetTags, SourceTags, ContextTags, 1, false);
         }
-      }
-      QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKill(),
-                                  Target, TargetTags, SourceTags, ContextTags,
-                                  1, false);
-    }
     Log::Info(
         L"Battle Royale bots: {} eliminated {} ({} bots now; quests: {}{})",
         KillerState->GetPlayerName().ToStdString(), Bot->GetBotName(),

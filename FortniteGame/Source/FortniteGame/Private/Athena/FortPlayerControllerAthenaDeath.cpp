@@ -282,6 +282,10 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         {
             DeathInfo.FinisherOrDowner = AthenaState;
         }
+        if (FDeathInfo::HasDeathLocation() && DeadPawn)
+        {
+            DeathInfo.DeathLocation = DeadPawn->GetTransform().GetLocation();
+        }
     }
 
     UWorld* World = GetWorld();
@@ -290,8 +294,12 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         return;
     }
     AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this);
+    // A playlist that brings its players back (4.2's Playground, #308): the pawn's death handler (4.2 0xA81B50, after this
+    // one) asks the game mode the same, with the death cause set above, and has RespawnPlayerAfterDeath run once the
+    // respawn countdown is over. The player stays in the match and doesn't spectate meanwhile.
+    const bool bRespawning = GameMode && AthenaState && GameMode->IsRespawningAllowed(AthenaState);
     APawn* KillerPawn = Instigator ? Instigator->GetPawn() : nullptr;
-    if (GameMode && GameMode->bAllowSpectateAfterDeath)
+    if (GameMode && GameMode->bAllowSpectateAfterDeath && !bRespawning)
     {
         if (Instigator)
         {
@@ -308,6 +316,11 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
     if (!GameState || !GameMode || GameState->GamePhase <= EAthenaGamePhase::GetWarmup() || !bMarkedAlive || !AthenaState)
     {
+        return;
+    }
+    if (bRespawning)
+    {
+        UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s respawns, the playlist brings its players back"), *GetName());
         return;
     }
     AthenaState->SecondsAlive = Natives::AFortPlayerStateAthena_GetSecondsAlive(AthenaState);

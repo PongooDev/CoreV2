@@ -22,10 +22,23 @@ public:
     static bool HasMaxTeamSize() { return Member_MaxTeamSize.IsAvailable(); }
 };
 
+// Whether the players of a playlist come back after they die (from 3.5; 4.2's Playground: InfiniteRespawnExceptStorm).
+class EAthenaRespawnType
+{
+    DefineUnrealEnum(EAthenaRespawnType, FortniteGame)
+    DefineUEnumValue(None)
+    DefineUEnumValue(InfiniteRespawn)
+    DefineUEnumValue(InfiniteRespawnExceptStorm)
+};
+
 class UFortPlaylistAthena : public UFortPlaylist
 {
     DefineUnrealClass(UFortPlaylistAthena, FortniteGame)
 
 public:
     DefineUProperty(int32_t, PlaylistId)
+    // AFortGameModeAthena::OnPlaylistDataLoaded (4.2 0xA1BE40) allows respawning (an unreflected game mode flag) when it
+    // isn't None; IsRespawningAllowed (0xA19780) reads it again for InfiniteRespawnExceptStorm.
+    DefineUProperty(EAthenaRespawnType, RespawnType)
+    static bool HasRespawnType() { return Member_RespawnType.IsAvailable(); }
 };

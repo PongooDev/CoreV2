@@ -12,6 +12,7 @@ class AFortSafeZoneIndicator;
 class AActor;
 class ABuildingSMActor;
 class AFortPlayerControllerAthena;
+class AFortPlayerStateAthena;
 class AFortPawn;
 class APawn;
 class UObject;
@@ -111,6 +112,15 @@ public:
     bool AddPlaylistContextTag(FGameplayTagContainer& Tags);
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
+
+    // 4.2 0xA19780: whether the match's playlist brings its players back after they die (EAthenaRespawnType), and with
+    // InfiniteRespawnExceptStorm not one the storm killed (PlayerState's DeathInfo). The pawn's death handler (4.2
+    // AFortPlayerPawnAthena 0xA81B50, after its controller's) then has the controller's RespawnPlayerAfterDeath run once
+    // the death penalty's respawn countdown is over, and ChoosePlayerStart (0xA0AE70) and PlayerCanRestart (0xA1E6F0)
+    // let it restart in the safe zones phase. False before 3.5.
+    bool IsRespawningAllowed(AFortPlayerStateAthena* PlayerState);
+    // TeleportToSkyDive's height above a spot (AFortPlayerPawnAthena 4.2 0xA98690: 10000 for any height up to 1000).
+    static constexpr float RespawnHeight = 10000.0f;
 
     // Battle Royale's changes to a dead player's death report, after AFortPlayerControllerZone::PrepareDeathReport
     // filled it (AFortPlayerControllerAthena's override calls it; 1.9.1 and 1.10 strip it).

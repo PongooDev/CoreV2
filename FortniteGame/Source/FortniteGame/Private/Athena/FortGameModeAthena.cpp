@@ -325,28 +325,51 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
     // aircraft spawns the pawn where it is, whatever is there, as the engine's default spawn does (the spot's location and
     // yaw); the warmup island's spots keep AFortGameMode's spawn.
     AFortAthenaAircraft* Aircraft = Cast<AFortAthenaAircraft>(StartSpot);
-    UClass* PawnClass = Aircraft && NewPlayer ? GetDefaultPawnClassForController(NewPlayer) : nullptr;
+    // A respawn in the safe zones phase (4.2's Playground, #308): ChoosePlayerStart (4.2 0xA0AE70) gives the engine's
+    // player start, on the warmup island, and RespawnPlayerAfterDeath (0xA57AD0) has the new pawn BeginSkydiving there.
+    // The playlist's RespawnLocation is Air, which no code left in the build reads: the pawn starts in the air over
+    // where the player died, at TeleportToSkyDive's height (0xA98690), and skydives from there.
+    FVector RespawnLocation;
+    bool bRespawnInAir = false;
+    if (!Aircraft && StartSpot && NewPlayer && FDeathInfo::HasDeathLocation() && AFortPlayerStateAthena::HasEliminator())
+    {
+        UWorld* SpotWorld = GetWorld();
+        AFortGameStateAthena* GameState = SpotWorld ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(SpotWorld->GetGameState())) : nullptr;
+        AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(NewPlayer->PlayerState)));
+        if (GameState && AthenaState && GameState->GamePhase == EAthenaGamePhase::GetSafeZones() && IsRespawningAllowed(AthenaState))
+        {
+            const FVector DeathLocation = AthenaState->DeathInfo.DeathLocation;
+            bRespawnInAir = DeathLocation.X != 0.0f || DeathLocation.Y != 0.0f || DeathLocation.Z != 0.0f;
+            RespawnLocation = DeathLocation + FVector(0.0f, 0.0f, RespawnHeight);
+        }
+    }
+    UClass* PawnClass = (Aircraft || bRespawnInAir) && NewPlayer ? GetDefaultPawnClassForController(NewPlayer) : nullptr;
     UWorld* World = PawnClass ? GetWorld() : nullptr;
     if (World)
     {
-        const FTransform SpotTransform = Aircraft->GetTransform();
+        const FTransform SpotTransform = Aircraft ? Aircraft->GetTransform() : StartSpot->GetTransform();
         const float HalfYaw = SpotTransform.Rotation.Rotator().Yaw * (3.1415926535897932f / 360.0f);
         FTransform SpawnTransform;
         SpawnTransform.Rotation.Z = std::sin(HalfYaw);
         SpawnTransform.Rotation.W = std::cos(HalfYaw);
-        SpawnTransform.SetLocation(SpotTransform.GetLocation());
+        SpawnTransform.SetLocation(Aircraft ? SpotTransform.GetLocation() : RespawnLocation);
 
         FActorSpawnParameters SpawnInfo;
         SpawnInfo.ObjectFlags = SpawnInfo.ObjectFlags | RF_Transient;
         SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
         APawn* Pawn = Cast<APawn>(World->SpawnActor(PawnClass, &SpawnTransform, SpawnInfo));
-        if (Pawn)
+        if (Pawn && !Aircraft)
+        {
+            Log::Info(L"Battle Royale: {} respawns in the air as {} at ({:.0f}, {:.0f}, {:.0f})", NewPlayer->GetName().ToStdString(), Pawn->GetName().ToStdString(),
+                RespawnLocation.X, RespawnLocation.Y, RespawnLocation.Z);
+        }
+        else if (Pawn)
         {
             Log::Info(L"Battle Royale: {} leaves the aircraft as {}", NewPlayer->GetName().ToStdString(), Pawn->GetName().ToStdString());
         }
         else
         {
-            Log::Error(L"Battle Royale: couldn't spawn {}'s {} at the aircraft", NewPlayer->GetName().ToStdString(), PawnClass->GetName().ToStdString());
+            Log::Error(L"Battle Royale: couldn't spawn {}'s {} {}", NewPlayer->GetName().ToStdString(), PawnClass->GetName().ToStdString(), Aircraft ? L"at the aircraft" : L"in the air");
         }
         return Pawn;
     }
@@ -1703,6 +1726,21 @@ namespace
             WatchPlaylistDataTablesOf(GameMode);
         });
     }
+}
+
+bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerState)
+{
+    // 4.2 0xA19780: bAllowRespawning (an unreflected flag OnPlaylistDataLoaded, 0xA1BE40, sets when the loaded playlist's
+    // RespawnType isn't None), then true unless the playlist is InfiniteRespawnExceptStorm and the player died in the
+    // storm. The playlist's RespawnType stands in for the flag: Core can't read it.
+    AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylistData() && UFortPlaylistAthena::HasRespawnType() ? AthenaGameStateOf(this) : nullptr;
+    UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+    if (!Playlist || Playlist->RespawnType == EAthenaRespawnType::GetNone())
+    {
+        return false;
+    }
+    return !PlayerState || !AFortPlayerStateAthena::HasEliminator() || Playlist->RespawnType != EAthenaRespawnType::GetInfiniteRespawnExceptStorm()
+        || PlayerState->DeathInfo.DeathCause != EDeathCause::GetOutsideSafeZone();
 }
 
 bool AFortGameModeAthena::InitializeFlightPath()

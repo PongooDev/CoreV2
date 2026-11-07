@@ -3,6 +3,7 @@
 #include "Containers/Set.h"
 #include "Engine/NetSerialization.h"
 #include "FortTeamInfo.h"
+#include "Math/Vector.h"
 #include "Math/Vector2D.h"
 #include "Natives.h"
 #include "StructArray.h"
@@ -17,6 +18,13 @@ struct FPlayerBannerInfo
     DefineUProperty(FString, IconId)
     DefineUProperty(FString, ColorId)
     DefineUProperty(int32_t, Level)
+};
+
+// What killed a Battle Royale player (FDeathInfo's DeathCause, from 1.8).
+class EDeathCause
+{
+    DefineUnrealEnum(EDeathCause, FortniteGame)
+    DefineUEnumValue(OutsideSafeZone)
 };
 
 // How a Battle Royale player was last downed or eliminated, which the death screen shows (OnRep_DeathInfo). The death
@@ -34,9 +42,13 @@ struct FDeathInfo
     // them. The client's OnRep_DeathInfo (3.5.1 0xA617C0) shows it in metres (Distance * 0.01) after a Sniper kill
     // feed line or past the game data's distance.
     DefineUProperty(float, Distance)
+    // Where the player died (from 3.5). AFortPlayerControllerAthena::RespawnPlayerAfterDeath (4.2 0xA57AD0) clears the
+    // death info, this with it, once the player is back.
+    DefineUProperty(FVector, DeathLocation)
 
 public:
     static bool HasDistance() { return Member_Distance.IsAvailable(); }
+    static bool HasDeathLocation() { return Member_DeathLocation.IsAvailable(); }
     static bool IsReadable()
     {
         return Member_FinisherOrDowner.IsAvailable() && Member_bDBNO.IsAvailable();

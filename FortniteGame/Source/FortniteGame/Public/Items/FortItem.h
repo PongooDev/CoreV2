@@ -2,6 +2,7 @@
 
 #include "Engine/NetSerialization.h"
 #include "Containers/Array.h"
+#include "Containers/UnrealString.h"
 #include "Misc/Guid.h"
 #include "StructArray.h"
 #include "UObject/Object.h"
@@ -55,17 +56,32 @@ public:
     // Loads a ranged weapon's full magazine (Battle Royale's loot). False for anything else.
     bool LoadFullClip();
 
+    // The entry's perks (alterations): AlterationDefinitions, their template ids ("Alteration:AID_Ele_Fire_T01"), which
+    // is what the MCP saves (SaveGame, "alterationDefinitions"), and AlterationInstances, the definitions they name
+    // (Transient). UFortWorldItem::PopulateFromMcpItem (4.2 0xD6D930) fills the instances from the template ids when the
+    // backpack loads (0xD40A00); every other entry the server makes has to be given both. The world item's
+    // GetActiveAlterations reads the instances: AFortWeapon takes its AppliedAlterations from them (0x1073C60) and a
+    // placed trap its own (ABuildingTrap::SpawnedFromItem, 0xAFC240). False when the build has neither member as these
+    // types (template id strings from 3.0 at the latest).
+    static bool HasAlterations();
+    bool SetAlterations(const TArray<FString>& TemplateIds, const TArray<UObject*>& Definitions);
+    // Source's perks into this entry, as a copy of the entry carries them.
+    void CopyAlterationsFrom(const FFortItemEntry& Source);
+
     DefineUProperty(int32_t, Count)
     DefineUProperty(UFortItemDefinition*, ItemDefinition)
     DefineUProperty(float, Durability)
     DefineUProperty(int32_t, Level)
     DefineUProperty(int32_t, LoadedAmmo)
-    DefineUProperty(TArray<UObject*>, AlterationDefinitions)
     DefineUProperty(FGuid, ItemGuid)
     DefineBitfieldUProperty(inventory_overflow_date)
     DefineUProperty(bool, bIsDirty)
     DefineUProperty(FWeakObjectPtr, ParentInventory)
     DefineUStructArrayProperty(FFortItemEntryStateValue, StateValues)
+
+private:
+    DefineUProperty(TArray<FString>, AlterationDefinitions)
+    DefineUProperty(TArray<UObject*>, AlterationInstances)
 };
 
 class UFortItem : public UObject
@@ -76,10 +92,14 @@ class UFortItem : public UObject
     DefineUFunction(HasDurability)
     DefineUFunction(GetNormalizedDurability)
     DefineUFunction(GetFilterCategory)
+    DefineUFunction(GetActiveAlterations)
 
 public:
     UFortItemDefinition* GetItemDefinitionBP() const;
     int32_t GetLevel() const;
+    // The item's perks that work (4.2 0xD31D00): its alteration slots whose MinRequiredLevel the item's level (or
+    // PretendLevel, from 0) reaches and whose MinHostItemRarity its rarity does. Empty without the function.
+    TArray<UObject*> GetActiveAlterations(int32_t PretendLevel = -1) const;
     bool HasDurability() const;
     float GetNormalizedDurability() const;
     EFortInventoryFilter GetFilterCategory() const;

@@ -219,7 +219,7 @@ int32_t AFortInventory::AddWorldItemCopy(AFortPlayerController* Owner, const FFo
                 WorldItem->SetDurability(Source.Durability);
             }
             NewEntry.LoadedAmmo = Source.LoadedAmmo;
-            NewEntry.AlterationDefinitions = Source.AlterationDefinitions;
+            NewEntry.CopyAlterationsFrom(Source);
             if (Owner)
             {
                 WorldItem->SetOwningControllerForTemporaryItem(Owner);

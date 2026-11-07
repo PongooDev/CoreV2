@@ -11,6 +11,7 @@
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
 
@@ -141,6 +142,56 @@ bool FFortItemEntry::LoadFullClip()
     LoadedAmmo = ClipSize;
     bIsDirty = true;
     return true;
+}
+
+namespace
+{
+    // Whether a reflected TArray member of FFortItemEntry has elements of property class Kind.
+    bool IsArrayOf(const wchar_t* Name, EClassCastFlags Kind)
+    {
+        UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
+        const UProperty* Property = EntryStruct ? EntryStruct->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        const UProperty* Inner = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UArrayProperty) ? static_cast<const UProperty*>(static_cast<const UArrayProperty*>(Property)->Inner) : nullptr;
+        return Inner && Inner->GetClass()->HasAnyCastFlag(Kind);
+    }
+}
+
+bool FFortItemEntry::HasAlterations()
+{
+    static const bool bHasAlterations = IsArrayOf(L"AlterationDefinitions", CASTCLASS_UStrProperty) && IsArrayOf(L"AlterationInstances", CASTCLASS_UObjectPropertyBase);
+    return bHasAlterations;
+}
+
+bool FFortItemEntry::SetAlterations(const TArray<FString>& TemplateIds, const TArray<UObject*>& Definitions)
+{
+    if (!HasAlterations())
+    {
+        return false;
+    }
+    AlterationDefinitions = TemplateIds;
+    AlterationInstances = Definitions;
+    bIsDirty = true;
+    return true;
+}
+
+void FFortItemEntry::CopyAlterationsFrom(const FFortItemEntry& Source)
+{
+    if (HasAlterations() && this != &Source)
+    {
+        SetAlterations(Source.AlterationDefinitions, Source.AlterationInstances);
+    }
+}
+
+TArray<UObject*> UFortItem::GetActiveAlterations(int32_t PretendLevel) const
+{
+    UFunction* Function = FindStaticFunction_GetActiveAlterations();
+    if (!Function)
+    {
+        return {};
+    }
+    Reflection::FParams Params(Function, true);
+    Params.Set(L"PretendLevel", PretendLevel);
+    return Params.Call(const_cast<UFortItem*>(this)) ? Params.Take<TArray<UObject*>>(L"ReturnValue") : TArray<UObject*>();
 }
 
 int32_t UFortWeaponItemDefinition::GetClipSize() const
@@ -412,3 +463,4 @@ bool UFortWorldItem::SetDurabilityHK(UFortWorldItem* This, float NewDurability)
 {
     return This->SetDurability(NewDurability);
 }
+

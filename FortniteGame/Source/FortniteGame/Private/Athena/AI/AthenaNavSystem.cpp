@@ -143,12 +143,56 @@ namespace
     // GEngine's NavigationSystemClass for the world and runs its OnWorldInitDone. The class default's config is
     // 8.30's UAthenaNavSystemConfig for the new system's lifetime (invokers only, no data spawned for every agent, lazy
     // gathering), so the system is born with it, as from DefaultEngine.ini; the default is put back afterwards.
+    //
+    // 4.2 (UE 4.20's NavigationSystem module) makes the world's system from its world settings' NavigationSystemConfig
+    // instead (FNavigationSystem::AddNavigationSystemToWorld, LoadMap's call in InitializeForWorld's place), and
+    // Athena_Terrain's has none. The world settings get a UAthenaNavSystemConfig (8.30's Athena world settings have
+    // one) that makes GEngine's NavigationSystemClass, and the engine's own AddNavigationSystemToWorld(World, GameMode)
+    // runs as LoadMap does: UNavigationSystemConfig::CreateAndConfigureNavigationSystem, UWorld::SetNavigationSystem and
+    // the system's InitializeForWorld.
+    UClass* PrepareNavigationSystemConfig(AWorldSettings* Settings, UClass* EngineClass)
+    {
+        UNavigationSystemConfig* Config = Settings->NavigationSystemConfig;
+        if (!Config)
+        {
+            UClass* AthenaConfigClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.AthenaNavSystemConfig");
+            UClass* ConfigClass = AthenaConfigClass ? AthenaConfigClass : UNavigationSystemModuleConfig::StaticClass();
+            Config = ConfigClass ? NewObject<UNavigationSystemConfig>(reinterpret_cast<UObject*>(Settings), ConfigClass) : nullptr;
+            if (!Config)
+            {
+                return nullptr;
+            }
+            Settings->NavigationSystemConfig = Config;
+        }
+        const FString ClassPath = Config->NavigationSystemClass.ToString();
+        UClass* NavSysClass = ClassPath.Len() > 0 ? FindObject<UClass>(nullptr, *ClassPath) : nullptr;
+        if (!NavSysClass && EngineClass)
+        {
+            Config->NavigationSystemClass.SetPath(reinterpret_cast<UObject*>(EngineClass)->GetPathName());
+            NavSysClass = EngineClass;
+        }
+        // No navigation data spawned for every agent by itself (UNavigationSystemV1::Configure copies it into the
+        // system's bAutoCreateNavigationData).
+        if (Config->IsA(UNavigationSystemModuleConfig::StaticClass()))
+        {
+            static_cast<UNavigationSystemModuleConfig*>(Config)->bAutoSpawnMissingNavData = false;
+        }
+        Log::Info(L"Battle Royale navigation: the world settings' navigation config is {}, for {}", NameOf(reinterpret_cast<UObject*>(Config)), NameOf(reinterpret_cast<UObject*>(NavSysClass)));
+        return NavSysClass;
+    }
+
     UNavigationSystem* CreateNavigationSystem(UWorld* World)
     {
         AWorldSettings* Settings = World->GetWorldSettings(false, false);
+        const bool bFromConfig = AWorldSettings::HasNavigationSystemConfig();
         UClass* NavSysClass = GEngine->NavigationSystemClass;
+        if (bFromConfig && Settings)
+        {
+            NavSysClass = Finder::ResolveAddNavigationSystemToWorldLive(UWorld::NavigationSystemOffset(), AWorldSettings::NavigationSystemConfigOffset())
+                ? PrepareNavigationSystemConfig(Settings, NavSysClass) : nullptr;
+        }
         UNavigationSystem* Default = NavSysClass ? reinterpret_cast<UNavigationSystem*>(NavSysClass->GetDefaultObject()) : nullptr;
-        if (!Settings || !Default || !Finder::ResolveNavigationSystemInitializeForWorldLive(UWorld::NavigationSystemOffset()))
+        if (!Settings || !Default || (!bFromConfig && !Finder::ResolveNavigationSystemInitializeForWorldLive(UWorld::NavigationSystemOffset())))
         {
             Log::Warning(L"Battle Royale navigation: can't make the world's navigation system (settings {}, class {})", NameOf(reinterpret_cast<UObject*>(Settings)), NameOf(reinterpret_cast<UObject*>(NavSysClass)));
             return nullptr;
@@ -162,7 +206,14 @@ namespace
         Default->bAutoCreateNavigationData = false;
         Default->DataGatheringMode = GatheringLazy;
         const double Started = NowMs();
-        UNavigationSystem::InitializeForWorld(World, FNavigationSystemRunMode::GameMode);
+        if (bFromConfig)
+        {
+            FNavigationSystem::AddNavigationSystemToWorld(*World, FNavigationSystemRunMode::GameMode);
+        }
+        else
+        {
+            UNavigationSystem::InitializeForWorld(World, FNavigationSystemRunMode::GameMode);
+        }
         Default->bGenerateNavigationOnlyAroundNavigationInvokers = bWasInvokersOnly;
         Default->bAutoCreateNavigationData = bWasAutoCreate;
         Default->DataGatheringMode = WasGathering;

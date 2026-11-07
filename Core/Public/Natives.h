@@ -417,6 +417,11 @@ namespace Natives
     // static UNavigationSystem::InitializeForWorld(UWorld*, FNavigationSystemRunMode): makes the world's navigation system
     // (CreateNavigationSystem) when it has none and its settings enable navigation, then runs its OnWorldInitDone.
     inline void (*UNavigationSystem_InitializeForWorld)(UWorld* World, uint8_t Mode) = nullptr;
+    // 4.2 (UE 4.20's NavigationSystem module): FNavigationSystem::AddNavigationSystemToWorld(UWorld&, RunMode,
+    // bInitializeForWorld) (4.2 0x1E9D8F0) in its place. When the world has no navigation system it makes one from the
+    // world settings' NavigationSystemConfig (UNavigationSystemConfig::CreateAndConfigureNavigationSystem, then
+    // UWorld::SetNavigationSystem), then runs the system's InitializeForWorld(World, Mode).
+    inline void (*FNavigationSystem_AddNavigationSystemToWorld)(UWorld& WorldOwner, uint8_t RunMode, bool bInitializeForWorld) = nullptr;
     // Battle Royale's navmesh tile cache (UAthenaNavSystem), from FRecastNavMeshGenerator::AddGeneratedTiles: Detour's
     // dtNavMesh::addTile (dtStatus, 64-bit tile refs), ARecastNavMesh's RecastNavMeshImpl, FPImplRecastNavMesh's
     // DetourNavMesh and the generator's DestNavMesh, ActiveTiles and NumActiveTiles.

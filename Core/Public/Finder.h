@@ -176,6 +176,9 @@ namespace Finder
     bool ResolveSpottingLive(UClass* SpottableActorInterface);
     bool ResolveNavigationSystemLive();
     bool ResolveNavigationSystemInitializeForWorldLive(ptrdiff_t WorldNavigationSystemOffset);
+    // 4.2: FNavigationSystem::AddNavigationSystemToWorld (Natives), from the world's NavigationSystem and the world
+    // settings' NavigationSystemConfig offsets.
+    bool ResolveAddNavigationSystemToWorldLive(ptrdiff_t WorldNavigationSystemOffset, ptrdiff_t NavigationSystemConfigOffset);
     // dtNavMesh::addTile and the native recast members around it (Natives::dtNavMesh_addTile and the offsets after it),
     // from FRecastNavMeshGenerator::AddGeneratedTiles, for Battle Royale's navmesh tile cache.
     bool ResolveRecastNavMeshLive();

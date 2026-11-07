@@ -6754,6 +6754,53 @@ bool Finder::ResolveNavigationSystemInitializeForWorldLive(ptrdiff_t WorldNaviga
     return true;
 }
 
+bool Finder::ResolveAddNavigationSystemToWorldLive(ptrdiff_t WorldNavigationSystemOffset, ptrdiff_t NavigationSystemConfigOffset)
+{
+    if (Natives::FNavigationSystem_AddNavigationSystemToWorld)
+    {
+        return true;
+    }
+    static bool bSearched = false;
+    if (bSearched || WorldNavigationSystemOffset <= 0 || NavigationSystemConfigOffset <= 0)
+    {
+        return false;
+    }
+    bSearched = true;
+
+    // 4.2's FNavigationSystem::AddNavigationSystemToWorld(UWorld& WorldOwner, FNavigationSystemRunMode RunMode, bool
+    // bInitializeForWorld) (0x1E9D8F0; UE 4.20's NavigationSystemBase.cpp, called by UEngine::LoadMap and UWorld::InitWorld)
+    // has no strings either:
+    //   mov [rsp+8], rbx; mov [rsp+10h], rsi; push rdi; sub rsp, 20h; cmp qword ptr [rcx+World.NavigationSystem], 0;
+    //   movzx esi, r8b; movzx edi, dl; mov rbx, rcx; jnz; mov r8b, 1; xor edx, edx; call UWorld::GetWorldSettings;
+    //   test rax, rax; jz; mov rcx, [rax+WorldSettings.NavigationSystemConfig]
+    // then UNavigationSystemConfig::CreateAndConfigureNavigationSystem(World) (0x1EA1E60), UWorld::SetNavigationSystem
+    // (0x24A7890) and the system's InitializeForWorld(World, RunMode).
+    const auto Bytes = [](ptrdiff_t Value, int32_t Index) { return static_cast<int32_t>((Value >> (8 * Index)) & 0xFF); };
+    const ptrdiff_t World = WorldNavigationSystemOffset;
+    const ptrdiff_t Config = NavigationSystemConfigOffset;
+    const std::initializer_list<int32_t> Pattern = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20,
+        0x48, 0x83, 0xB9, Bytes(World, 0), Bytes(World, 1), Bytes(World, 2), Bytes(World, 3), 0x00, 0x41, 0x0F, 0xB6, 0xF0, 0x0F, 0xB6, 0xFA, 0x48, 0x8B, 0xD9, 0x75, -1,
+        0x41, 0xB0, 0x01, 0x33, 0xD2, 0xE8, -1, -1, -1, -1, 0x48, 0x85, 0xC0, 0x74, -1, 0x48, 0x8B, 0x88, Bytes(Config, 0), Bytes(Config, 1), Bytes(Config, 2), Bytes(Config, 3) };
+    uintptr_t Found = 0;
+    int32_t Matches = 0;
+    for (const auto& [Begin, End] : Finder::ExecutableSections())
+    {
+        for (uintptr_t Site = FindInstruction(Begin, End, Pattern); Site; Site = FindInstruction(Site + 1, End, Pattern))
+        {
+            Found = Site;
+            ++Matches;
+        }
+    }
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: FNavigationSystem::AddNavigationSystemToWorld not found ({} matches)", Matches);
+        return false;
+    }
+    Natives::FNavigationSystem_AddNavigationSystemToWorld = reinterpret_cast<decltype(Natives::FNavigationSystem_AddNavigationSystemToWorld)>(Found);
+    Log::Info(L"Finder: FNavigationSystem::AddNavigationSystemToWorld at 0x{:X}", Found - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveRecastNavMeshLive()
 {
     if (Natives::dtNavMesh_addTile)
@@ -6787,9 +6834,36 @@ bool Finder::ResolveRecastNavMeshLive()
         const bool bDetourLoad = (Byte(Site + 14) == 0x48 || Byte(Site + 14) == 0x4C) && (Byte(Site + 16) & 0xC7) == 0x41;
         Impl = bGeneratorLoad && bDetourLoad ? Site : 0;
     }
+    // The three loads' displacements (back to back up to 4.1).
+    int32_t ImplOffset = Impl ? *reinterpret_cast<const int32_t*>(Impl + 10) : -1;
+    int32_t DetourOffset = Impl ? Byte(Impl + 17) : -1;
+    uintptr_t ActiveSearchEnd = Impl + 0x40;
+    // 4.2's (0x26EC750) schedules other instructions between them: mov rax, [r13+0D8h] (0x26EC860); mov edi, ebx; mov
+    // [rsp+68h], rdx; mov rcx, [rax+580h]; mov eax, ebx; mov r14, [rcx+8] (0x26EC877), and its ActiveTiles loads come
+    // 0x90 bytes on (0x26EC8F0).
+    for (uintptr_t Site = Function && !Impl ? FindInstruction(Function, End, { 0x49, 0x8B, -1, -1, -1, -1, -1 }) : 0; Site && !Impl; Site = FindInstruction(Site + 1, End, { 0x49, 0x8B, -1, -1, -1, -1, -1 }))
+    {
+        if ((Byte(Site + 2) & 0xF8) != 0x80 || (Byte(Site + 2) & 0x07) == 0x04)
+        {
+            continue;
+        }
+        const uintptr_t ImplLoad = FindInstruction(Site + 7, Site + 0x18, { 0x48, 0x8B, 0x88, -1, -1, -1, -1 });
+        uintptr_t DetourLoad = ImplLoad ? FindInstruction(ImplLoad + 7, ImplLoad + 0x18, { 0x4C, 0x8B, -1, -1 }) : 0;
+        if (DetourLoad && (Byte(DetourLoad + 2) & 0xC7) != 0x41)
+        {
+            DetourLoad = 0;
+        }
+        if (DetourLoad)
+        {
+            Impl = Site;
+            ImplOffset = *reinterpret_cast<const int32_t*>(ImplLoad + 3);
+            DetourOffset = Byte(DetourLoad + 3);
+            ActiveSearchEnd = Site + 0x100;
+        }
+    }
     // The generator's base register, as the mod-10 ModRM byte with reg 0 (r15 0x87, r13 0x85).
     const int32_t Generator = Impl ? Byte(Impl + 2) : -1;
-    const uintptr_t Active = Impl ? FindInstruction(Impl, Impl + 0x40, { 0x4D, 0x8B, Generator, -1, -1, -1, -1, 0x49, 0x63, Generator }) : 0;
+    const uintptr_t Active = Impl ? FindInstruction(Impl, ActiveSearchEnd, { 0x4D, 0x8B, Generator, -1, -1, -1, -1, 0x49, 0x63, Generator }) : 0;
     uintptr_t AddTileCall = 0;
     for (uintptr_t Site = Function ? FindInstruction(Function, End, { 0xE8, -1, -1, -1, -1, 0x8B, -1, 0x25, 0x04, 0x00, 0x00, 0x80, 0x3D, 0x04, 0x00, 0x00, 0x80 }) : 0; Site && !AddTileCall;
          Site = FindInstruction(Site + 1, End, { 0xE8, -1, -1, -1, -1, 0x8B, -1, 0x25, 0x04, 0x00, 0x00, 0x80, 0x3D, 0x04, 0x00, 0x00, 0x80 }))
@@ -6805,8 +6879,8 @@ bool Finder::ResolveRecastNavMeshLive()
         return false;
     }
     Natives::FRecastNavMeshGenerator_DestNavMesh = *reinterpret_cast<const int32_t*>(Impl + 3);
-    Natives::ARecastNavMesh_RecastNavMeshImpl = *reinterpret_cast<const int32_t*>(Impl + 10);
-    Natives::FPImplRecastNavMesh_DetourNavMesh = Byte(Impl + 17);
+    Natives::ARecastNavMesh_RecastNavMeshImpl = ImplOffset;
+    Natives::FPImplRecastNavMesh_DetourNavMesh = DetourOffset;
     Natives::FRecastNavMeshGenerator_ActiveTiles = *reinterpret_cast<const int32_t*>(Active + 3);
     Natives::FRecastNavMeshGenerator_NumActiveTiles = *reinterpret_cast<const int32_t*>(Added + 3);
     Natives::dtNavMesh_addTile = reinterpret_cast<decltype(Natives::dtNavMesh_addTile)>(AddTile);

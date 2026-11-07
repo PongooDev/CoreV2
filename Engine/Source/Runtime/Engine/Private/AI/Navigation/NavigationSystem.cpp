@@ -62,6 +62,16 @@ bool UNavigationSystem::InitializeForWorld(UWorld* World, FNavigationSystemRunMo
     return true;
 }
 
+bool FNavigationSystem::AddNavigationSystemToWorld(UWorld& WorldOwner, FNavigationSystemRunMode::Type RunMode, bool bInitializeForWorld)
+{
+    if (!Natives::FNavigationSystem_AddNavigationSystemToWorld)
+    {
+        return false;
+    }
+    Natives::FNavigationSystem_AddNavigationSystemToWorld(WorldOwner, RunMode, bInitializeForWorld);
+    return true;
+}
+
 bool UNavigationSystem::IsNavigationBeingBuilt(UObject* WorldContextObject)
 {
     Reflection::FParams Params(StaticFunction_IsNavigationBeingBuilt());

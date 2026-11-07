@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "Math/Vector.h"
 
+class UNavigationSystemConfig;
 class UNetConnection;
 
 struct FNetViewer
@@ -28,4 +29,11 @@ public:
     DefineUProperty(TArray<FNetViewer>, ReplicationViewers)
     // Whether the world gets a navigation system (UNavigationSystem::CreateNavigationSystem checks it).
     DefineBitfieldUProperty(bEnableNavigationSystem)
+    // 4.2 (UE 4.20): what the world's navigation system is made from (FNavigationSystem::AddNavigationSystemToWorld);
+    // null when the world has none.
+    DefineUProperty(UNavigationSystemConfig*, NavigationSystemConfig)
+
+public:
+    static bool HasNavigationSystemConfig() { return Member_NavigationSystemConfig.IsAvailable(); }
+    static ptrdiff_t NavigationSystemConfigOffset() { return Member_NavigationSystemConfig.GetOffsetChecked(); }
 };

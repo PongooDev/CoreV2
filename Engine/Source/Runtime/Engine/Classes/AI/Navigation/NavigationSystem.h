@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AI/Navigation/NavigationData.h"
+#include "Misc/StringAssetReference.h"
 #include "ObjectLayout.h"
 #include "Reflection.h"
 #include "StructArray.h"
@@ -29,6 +30,36 @@ namespace FNavigationSystemRunMode
         SimulationMode,
         PIEMode,
     };
+}
+
+// 4.2 (UE 4.20, Engine's AI/NavigationSystemConfig.h): what a world's navigation system is made from, the world
+// settings' NavigationSystemConfig. Older builds have neither (StaticClass is null): GEngine's NavigationSystemClass.
+class UNavigationSystemConfig : public UObject
+{
+    DefineUnrealClass(UNavigationSystemConfig, Engine)
+
+public:
+    // The class CreateAndConfigureNavigationSystem makes (an FSoftClassPath).
+    DefineUProperty(FStringAssetReference, NavigationSystemClass)
+};
+
+// 4.2's NavigationSystem module config (UNavigationSystemV1::Configure reads it): whether the system spawns the agents'
+// navigation data by itself. 8.30's Battle Royale one is UAthenaNavSystemConfig, a subclass (4.2 has it too).
+class UNavigationSystemModuleConfig : public UNavigationSystemConfig
+{
+    DefineUnrealClass(UNavigationSystemModuleConfig, NavigationSystem)
+
+public:
+    DefineBitfieldUProperty(bAutoSpawnMissingNavData)
+};
+
+// 4.2 (UE 4.20, Engine's AI/NavigationSystemBase.h).
+namespace FNavigationSystem
+{
+    // UEngine::LoadMap's call once the world's actors are initialized: when the world has no navigation system, one
+    // made from the world settings' NavigationSystemConfig (none without a config), then, with bInitializeForWorld, its
+    // InitializeForWorld(World, RunMode). False when the engine function wasn't found.
+    bool AddNavigationSystemToWorld(UWorld& WorldOwner, FNavigationSystemRunMode::Type RunMode = FNavigationSystemRunMode::InvalidMode, bool bInitializeForWorld = true);
 }
 
 class UNavigationSystem : public UObject

@@ -21,6 +21,31 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
+bool UFortAlterableItem::GetActiveAlterationTemplateIds(TArray<FString>& OutTemplateIds, TArray<UObject*>& OutDefinitions) const
+{
+    if (!Member_Alterations.IsAvailable() || !Member_AlterationInstances.IsAvailable() || !FFortItemEntry::HasAlterations())
+    {
+        return false;
+    }
+
+    const TArray<FString>& TemplateIds = Alterations;
+    const TArray<UObject*>& Instances = AlterationInstances;
+    const TArray<UObject*> Active = GetActiveAlterations();
+    for (UObject* Definition : Active)
+    {
+        for (int32_t Index = 0; Definition && Index < Instances.Num() && Index < TemplateIds.Num(); ++Index)
+        {
+            if (Instances[Index] == Definition)
+            {
+                OutTemplateIds.Add(TemplateIds[Index]);
+                OutDefinitions.Add(Definition);
+                break;
+            }
+        }
+    }
+    return true;
+}
+
 void UFortSchematicItem::GetSchematicRequirements(TStructArray<FSchematicRequirement>& Requirements) const
 {
     Reflection::FParams Params(StaticFunction_GetSchematicRequirements());
@@ -143,6 +168,12 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
     AFortInventory* Inventory = PlayerController->WorldInventory;
     AFortQuickBars* Bars = PlayerController->QuickBars;
     const int32_t Level = GetLevel();
+    // From 4.2 every weapon and trap schematic carries one perk per alteration slot (Core-Backend #270). The item crafted
+    // from it carries the perks its level and rarity unlock, as the backend's CraftWorldItem gives them: the weapon then
+    // applies them when it's equipped and a placed trap gets them, both from the item's GetActiveAlterations.
+    TArray<FString> AlterationTemplateIds;
+    TArray<UObject*> Alterations;
+    GetActiveAlterationTemplateIds(AlterationTemplateIds, Alterations);
     for (int32_t Crafted = 0; Crafted < QuantityProduced; ++Crafted)
     {
         UFortWorldItem* WorldItem = Cast<UFortWorldItem>(ResultDefinition->CreateTemporaryItemInstanceBP(1, Level));
@@ -151,6 +182,10 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
             return Crafted;
         }
 
+        if (Alterations.Num() > 0)
+        {
+            static_cast<FFortItemEntry&>(WorldItem->ItemEntry).SetAlterations(AlterationTemplateIds, Alterations);
+        }
         WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
         Inventory->AddWorldItem(WorldItem);
         FFortItemEntry& NewEntry = WorldItem->ItemEntry;

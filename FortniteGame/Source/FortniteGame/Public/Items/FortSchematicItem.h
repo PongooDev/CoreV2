@@ -38,7 +38,24 @@ struct FRecipe
     DefineUStructArrayProperty(FFortItemQuantityPair, RecipeCosts)
 };
 
-class UFortSchematicItem : public UFortItem
+// An account item with perks (a schematic). Alterations holds the template id of each alteration slot's perk ("" for an
+// empty slot), the MCP item's "alterations"; the profile load puts the definition each one names at the same index of
+// AlterationInstances (4.2 0xD436A0).
+class UFortAlterableItem : public UFortItem
+{
+    DefineUnrealClass(UFortAlterableItem, FortniteGame)
+
+public:
+    // The template ids of the perks GetActiveAlterations returns, in its order: what a crafted item's
+    // AlterationDefinitions carries. False when the build has no perks on schematics.
+    bool GetActiveAlterationTemplateIds(TArray<FString>& OutTemplateIds, TArray<UObject*>& OutDefinitions) const;
+
+private:
+    DefineUProperty(TArray<FString>, Alterations)
+    DefineUProperty(TArray<UObject*>, AlterationInstances)
+};
+
+class UFortSchematicItem : public UFortAlterableItem
 {
     DefineUnrealClass(UFortSchematicItem, FortniteGame)
     DefineUFunction(GetSchematicRequirements)

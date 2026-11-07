@@ -4092,10 +4092,71 @@ bool Finder::ResolveObjectGetWorld()
     return true;
 }
 
+namespace
+{
+    // The vtable of the delegate instance AFortPlayerControllerOutpost::ServerAbortDisintegration (4.1 0xFC1810, 4.2
+    // 0xF798F0) sends its MCP command's completion with: after the completion lambda's address (its first lea of code),
+    // the functor base's vtable, then the instance's own (lea rax, vtable; mov [rbx], rax, twice).
+    uintptr_t OutpostMcpRequestVTable(uintptr_t Abort, uintptr_t AbortEnd, uintptr_t& OutCompleted)
+    {
+        OutCompleted = 0;
+        int32_t DataLoads = 0;
+        for (uintptr_t Site = Abort; Site && Site + 7 <= AbortEnd; ++Site)
+        {
+            if (Byte(Site) != 0x48 || Byte(Site + 1) != 0x8D || Byte(Site + 2) != 0x05)
+            {
+                continue;
+            }
+            const uintptr_t Target = Finder::RelativeTarget(Site, 3, 7);
+            if (IsInText(Target))
+            {
+                OutCompleted = OutCompleted ? OutCompleted : Target;
+            }
+            else if (OutCompleted && ++DataLoads == 2)
+            {
+                return Target;
+            }
+        }
+        return 0;
+    }
+
+    // The build's NUM_DELEGATE_INLINE_BYTES (Natives::NumDelegateInlineBytes, which FDelegateBase and TMulticastDelegate
+    // read), for the server: the client reads it from its console delegates, which the server never resolves. The MCP
+    // request delegate's CreateCopy (IBaseDelegateInstance::CreateCopy(FDelegateBase& Base): new (Base) T(*this))
+    // allocates in Base. Up to 4.1 it calls FDelegateBase::Allocate, whose DelegateSize follows TInlineAllocator<2>'s
+    // two inline elements and SecondaryData (4.1 0x29762F0 calling 0x2A2C40: cmp dword [rcx+30h], 0); 4.2 inlines
+    // Allocate, with DelegateSize right after FHeapAllocator's Data (0x29824B0: cmp dword [rdx+8], 0; ...; mov dword
+    // [rbx+8], 3), UE 4.21's NUM_DELEGATE_INLINE_BYTES 0. Only that shape switches to the heap layout; anything else
+    // keeps the inline one (32).
+    void ResolveDelegateLayout()
+    {
+        const uintptr_t Abort = FunctionOf(L"AFortPlayerControllerOutpost::ServerAbortDisintegration");
+        const uintptr_t AbortEnd = Abort ? Finder::FunctionEnd(Abort) : 0;
+        uintptr_t Completed = 0;
+        void** const VTable = reinterpret_cast<void**>(OutpostMcpRequestVTable(Abort, AbortEnd, Completed));
+        uintptr_t CreateCopy = 0;
+        for (int32_t Index = 0; VTable && Index < 0x10 && !CreateCopy; ++Index)
+        {
+            const uintptr_t Function = VTableEntry(VTable, Index);
+            const uintptr_t SizeCheck = IsInText(Function) ? FindInstruction(Function, Function + 0x20, { 0x83, 0x7A, 0x08, 0x00 }) : 0;
+            const uintptr_t SizeStore = SizeCheck ? FindInstruction(SizeCheck, SizeCheck + 0x40, { 0xC7, -1, 0x08, 0x03, 0x00, 0x00, 0x00 }) : 0;
+            CreateCopy = SizeStore && (Byte(SizeStore + 1) & 0xF8) == 0x40 ? Function : 0;
+        }
+        if (CreateCopy)
+        {
+            Natives::NumDelegateInlineBytes = 0;
+            Log::Info(L"Finder: delegates use the heap allocator (NUM_DELEGATE_INLINE_BYTES 0: CreateCopy 0x{:X} keeps DelegateSize at +8)", CreateCopy - Finder::ImageBase());
+            return;
+        }
+        Log::Info(L"Finder: delegates use the inline allocator (NUM_DELEGATE_INLINE_BYTES {})", Natives::NumDelegateInlineBytes);
+    }
+}
+
 bool Finder::ResolveServer()
 {
     MissingCount = 0;
 
+    ResolveDelegateLayout();
     ResolveConsoleManagerGlobals();
     ResolveEngineNet();
     ResolveNetMode();
@@ -9578,24 +9639,7 @@ bool Finder::ResolveOutpostMcpRequestLive()
         return ModRm == (0x44 | (Register << 3)) && Byte(ModRmSite + 1) == 0x24 ? 2 : 0;
     };
     uintptr_t Completed = 0;
-    uintptr_t VTable = 0;
-    int32_t DataLoads = 0;
-    for (uintptr_t Site = Abort; Site && Site + 7 <= AbortEnd && !VTable; ++Site)
-    {
-        if (Byte(Site) != 0x48 || Byte(Site + 1) != 0x8D || Byte(Site + 2) != 0x05)
-        {
-            continue;
-        }
-        const uintptr_t Target = Finder::RelativeTarget(Site, 3, 7);
-        if (IsInText(Target))
-        {
-            Completed = Completed ? Completed : Target;
-        }
-        else if (Completed && ++DataLoads == 2)
-        {
-            VTable = Target;
-        }
-    }
+    const uintptr_t VTable = OutpostMcpRequestVTable(Abort, AbortEnd, Completed);
 
     const uintptr_t HandleStore = Abort ? FindInstruction(Abort, AbortEnd, { 0x0F, 0x11, -1, 0x10, 0xE8 }) : 0;
     uintptr_t UrlLoad = 0;

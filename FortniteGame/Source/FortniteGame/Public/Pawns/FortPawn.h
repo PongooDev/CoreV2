@@ -69,6 +69,7 @@ public:
     DefineUProperty(uint8_t, CurrentMovementStyle)
     // The damage tags of the hit that killed the pawn.
     DefineUProperty(FGameplayTagContainer, DeathTags)
+    static bool HasDeathTags() { return Member_DeathTags.IsAvailable(); }
     // The pawn's own tags (a husk's NPC.CharacterType.Husk.Basic and the like, from its class defaults).
     DefineUProperty(FGameplayTagContainer, GameplayTags)
     DefineUStructArrayProperty(FDamagerInfo, Damagers)

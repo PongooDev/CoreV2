@@ -2114,6 +2114,15 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
             {
                 QuestManager->SendStatEvent(EFortQuestObjectiveStatEvent::GetKillContribution(), Target, TargetTags, SourceTags, ContextTags, 1, false);
             }
+            // Killed (4.2 0xC167B0) builds the Kill's source from the killer's tags and appends the tags it was called
+            // with (0xC16DEB), the dead pawn's DeathTags: the damage tags of the hit that killed it. A trap's hit carries
+            // its TrapData's tags there (trap.hostile, which killingblow_athena_player_with_trap asks for in the source,
+            // CoreV2 #315); the killer's held weapon says nothing about a trap.
+            AFortPawn* TargetPawn = Cast<AFortPawn>(Target);
+            if (TargetPawn && AFortPawn::HasDeathTags())
+            {
+                SourceTags.AppendTags(TargetPawn->DeathTags);
+            }
             if (Athena)
             {
                 FGameplayTagContainer KillerLocation;

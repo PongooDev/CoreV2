@@ -15,14 +15,13 @@ struct FFortWorldPlayerLoadout
     DefineUStructProperty(FQuickBar, SecondaryQuickBarRecord)
 };
 
-struct alignas(16) FDedicatedServerUrlContext
+// McpProfileSys's FDedicatedServerUrlContext (an FBaseUrlContext): 0x70 bytes up to 4.1, where its delegate keeps an
+// inline allocator, and 0x38 on 4.2, whose delegates are heap-allocated (FDelegateBase is 0x10). Core only reaches it
+// inside a command's parameters (Params.GetAddress), never by value, and Bind writes the fields the finder located.
+struct FDedicatedServerUrlContext
 {
-    uint8_t Bytes[0x70];
-
     void Bind(UObject* Object, void (*Completed)(UObject* Object, const void* Result));
 };
-
-static_assert(sizeof(FDedicatedServerUrlContext) == 0x70);
 
 class UFortMcpProfileWorld : public UObject
 {

@@ -22,7 +22,7 @@ bool UFortMcpProfileCampaign::EndPrimaryMission(FScriptArray& Advance, const FSt
     Reflection::FParams Params(FindStaticFunction_EndPrimaryMission(), true);
     FScriptArray* AdvanceParameter = Params.Get<FScriptArray>(L"Advance");
     TStructArray<FFortQuestEarnedBadgeData>* BadgesParameter = Params.Get<TStructArray<FFortQuestEarnedBadgeData>>(L"EarnedBadgeData");
-    FDedicatedServerUrlContext* Context = Params.Get<FDedicatedServerUrlContext>(L"Context");
+    FDedicatedServerUrlContext* Context = static_cast<FDedicatedServerUrlContext*>(Params.GetAddress(L"Context"));
     if (!AdvanceParameter || !BadgesParameter || !Context)
     {
         return false;

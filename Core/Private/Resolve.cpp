@@ -9557,13 +9557,26 @@ bool Finder::ResolveDurabilityLive(UFunction* ServerModDurability, UObject* Play
 
 bool Finder::ResolveOutpostMcpRequestLive()
 {
-    if (Natives::FDelegateBase_Allocate && Natives::AFortPlayerControllerOutpost_GetFabricatorProgress)
+    // Set together on success (4.2 leaves FDelegateBase_Allocate null, see below).
+    if (Natives::McpRequestDelegateInstanceVTable && Natives::AFortPlayerControllerOutpost_GetFabricatorProgress)
     {
         return true;
     }
 
     const uintptr_t Abort = FunctionOf(L"AFortPlayerControllerOutpost::ServerAbortDisintegration");
     const uintptr_t AbortEnd = Abort ? Finder::FunctionEnd(Abort) : 0;
+    // The context's fields are frame slots: [rbp+disp8] up to 4.1, [rsp+disp8] on 4.2, whose ServerAbortDisintegration
+    // (0xF798F0) keeps no frame pointer. ModRmSite is the ModRM byte; the result is the displacement byte's distance from
+    // it (1 for rbp, 2 past the rsp SIB byte 24), 0 when it isn't that form.
+    const auto FrameSlot = [](uintptr_t ModRmSite, uint8_t Register, bool bRsp) -> uintptr_t
+    {
+        const uint8_t ModRm = Byte(ModRmSite);
+        if (!bRsp)
+        {
+            return ModRm == (0x45 | (Register << 3)) ? 1 : 0;
+        }
+        return ModRm == (0x44 | (Register << 3)) && Byte(ModRmSite + 1) == 0x24 ? 2 : 0;
+    };
     uintptr_t Completed = 0;
     uintptr_t VTable = 0;
     int32_t DataLoads = 0;
@@ -9585,43 +9598,90 @@ bool Finder::ResolveOutpostMcpRequestLive()
     }
 
     const uintptr_t HandleStore = Abort ? FindInstruction(Abort, AbortEnd, { 0x0F, 0x11, -1, 0x10, 0xE8 }) : 0;
-    const uintptr_t Copy = Abort ? FindInstruction(Abort, AbortEnd, { 0x48, 0x8D, 0x55, -1, 0xFF, 0x50, -1 }) : 0;
     uintptr_t UrlLoad = 0;
     for (uintptr_t Reference : Finder::StringRefs(L"McpDedicatedServerCommandUrl"))
     {
         UrlLoad = Reference >= Abort && Reference < AbortEnd ? Reference : UrlLoad;
     }
+
+    // Copy, UrlName, Credentials and Context hold the displacement byte of their frame slot; the rbp form is tried
+    // first, so builds up to 4.1 decode exactly as before.
+    uintptr_t Copy = 0;
+    uintptr_t CopySlot = 0;
     uintptr_t UrlName = 0;
-    for (uintptr_t Site = UrlLoad ? UrlLoad - 0x30 : 0; Site && Site < UrlLoad; ++Site)
-    {
-        UrlName = Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x4D ? Site : UrlName;
-    }
-    const uintptr_t Credentials = UrlLoad ? FindInstruction(UrlLoad, AbortEnd, { 0xC7, 0x45, -1, 0x01, 0x00, 0x00, 0x00 }) : 0;
-    // The request is made from the context: lea rdx, [rbp+Context]; mov rcx, <profile>; call. 1.10 and 1.11 keep the
-    // profile in r14 (mov rcx, r14: 49 8B CE; 1.10 0x8DFF8B, 1.11 0x8F2EDB), earlier builds in a low register (48 8B).
+    uintptr_t Credentials = 0;
     uintptr_t Context = 0;
-    for (uintptr_t Site = Credentials; Site && (Site = FindInstruction(Site + 1, AbortEnd, { 0x48, 0x8D, 0x55, -1, -1, 0x8B, -1, 0xE8 })) != 0;)
+    for (const bool bRsp : { false, true })
     {
-        Context = Byte(Site + 4) == 0x48 || Byte(Site + 4) == 0x49 ? Site : Context;
+        Copy = CopySlot = UrlName = Credentials = Context = 0;
+        // The delegate is copied into the context: lea rdx, [frame+Delegate]; call [rax+CreateCopy]. 4.2 sets this
+        // between them (0xF799C6: lea rdx, [rsp+40h]; mov rcx, rbx; call [rax+30h]).
+        for (uintptr_t Site = Abort; Site && !Copy && Site + 10 <= AbortEnd; ++Site)
+        {
+            const uintptr_t Slot = Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D ? FrameSlot(Site + 2, 2, bRsp) : 0;
+            const uintptr_t Next = Site + 3 + Slot;
+            if (Slot && Byte(Next) == 0xFF && Byte(Next + 1) == 0x50)
+            {
+                Copy = Site + 2 + Slot;
+                CopySlot = Next + 2;
+            }
+            else if (Slot && bRsp && Byte(Next) == 0x48 && Byte(Next + 1) == 0x8B && Byte(Next + 3) == 0xFF && Byte(Next + 4) == 0x50)
+            {
+                Copy = Site + 2 + Slot;
+                CopySlot = Next + 5;
+            }
+        }
+        // lea rcx, [frame+UrlConfigName] for the FString the url name is copied into.
+        for (uintptr_t Site = UrlLoad ? UrlLoad - 0x30 : 0; Site && Site < UrlLoad; ++Site)
+        {
+            const uintptr_t Slot = Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D ? FrameSlot(Site + 2, 1, bRsp) : 0;
+            UrlName = Slot ? Site + 2 + Slot : UrlName;
+        }
+        // mov dword [frame+ContextCredentials], 1
+        for (uintptr_t Site = UrlLoad; Site && !Credentials && Site + 8 <= AbortEnd; ++Site)
+        {
+            const uintptr_t Slot = Byte(Site) == 0xC7 ? FrameSlot(Site + 1, 0, bRsp) : 0;
+            Credentials = Slot && *reinterpret_cast<const int32_t*>(Site + 2 + Slot) == 1 ? Site + 1 + Slot : 0;
+        }
+        // The request is made from the context: lea rdx, [frame+Context]; mov rcx, <profile>; call. 1.10 and 1.11 keep
+        // the profile in r14 (mov rcx, r14: 49 8B CE; 1.10 0x8DFF8B, 1.11 0x8F2EDB), earlier builds in a low register
+        // (48 8B; 4.2 0xF79A49: lea rdx, [rsp+40h]; mov rcx, rdi).
+        for (uintptr_t Site = Credentials; Site && Site + 10 <= AbortEnd; ++Site)
+        {
+            const uintptr_t Slot = Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D ? FrameSlot(Site + 2, 2, bRsp) : 0;
+            const uintptr_t Next = Site + 3 + Slot;
+            Context = Slot && (Byte(Next) == 0x48 || Byte(Next) == 0x49) && Byte(Next + 1) == 0x8B && Byte(Next + 3) == 0xE8 ? Site + 2 + Slot : Context;
+        }
+        if (Copy && UrlName && Credentials && Context)
+        {
+            break;
+        }
     }
 
-    const uintptr_t CreateCopy = VTable && Copy ? VTableEntry(reinterpret_cast<void**>(VTable), Byte(Copy + 6) / 8) : 0;
-    const uintptr_t AllocateCall = CreateCopy ? FindRawCall(CreateCopy, CreateCopy + 0x40) : 0;
+    // The context's FDelegateBase runs from its delegate to its url name: 0x40 bytes up to 4.1 (TInlineAllocator<2>),
+    // 0x10 on 4.2 (UE 4.21's NUM_DELEGATE_INLINE_BYTES 0: FHeapAllocator Data and DelegateSize, FDelegateBase.h). The
+    // server never runs the client's delegate-layout finder, so the layout is read from the context here. Up to 4.1
+    // CreateCopy calls FDelegateBase::Allocate first; 4.2 inlines it (0x29824B0), and FDedicatedServerUrlContext::Bind
+    // allocates as it does.
+    const bool bHeapDelegates = Copy && UrlName && static_cast<int8_t>(Byte(UrlName)) - static_cast<int8_t>(Byte(Copy)) == 0x10;
+    const uintptr_t CreateCopy = VTable && Copy ? VTableEntry(reinterpret_cast<void**>(VTable), Byte(CopySlot) / 8) : 0;
+    const uintptr_t AllocateCall = CreateCopy && !bHeapDelegates ? FindRawCall(CreateCopy, CreateCopy + 0x40) : 0;
     const uintptr_t CompletedEnd = Completed ? Finder::FunctionEnd(Completed) : 0;
     const auto CompletedCalls = CompletedEnd ? Finder::DirectCalls(Completed, CompletedEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
-    if (!Completed || !VTable || !HandleStore || !Copy || !UrlName || !Credentials || !Context || !AllocateCall || CompletedCalls.size() < 3)
+    if (!Completed || !VTable || !HandleStore || !Copy || !UrlName || !Credentials || !Context || (!AllocateCall && !bHeapDelegates) || CompletedCalls.size() < 3)
     {
         Log::Error(L"Finder: outpost MCP request not decoded (completed {}, vtable {}, handle {}, copy {}, url {}, credentials {}, context {}, allocate {}, completed calls {})",
             Completed != 0, VTable != 0, HandleStore != 0, Copy != 0, UrlName != 0, Credentials != 0, Context != 0, AllocateCall != 0, CompletedCalls.size());
         return false;
     }
 
-    const int32_t Base = static_cast<int8_t>(Byte(Context + 3));
-    Natives::FBaseUrlContext_Delegate = static_cast<int8_t>(Byte(Copy + 3)) - Base;
-    Natives::FBaseUrlContext_UrlConfigName = static_cast<int8_t>(Byte(UrlName + 3)) - Base;
-    Natives::FBaseUrlContext_ContextCredentials = static_cast<int8_t>(Byte(Credentials + 2)) - Base;
+    const int32_t Base = static_cast<int8_t>(Byte(Context));
+    Natives::FBaseUrlContext_Delegate = static_cast<int8_t>(Byte(Copy)) - Base;
+    Natives::FBaseUrlContext_UrlConfigName = static_cast<int8_t>(Byte(UrlName)) - Base;
+    Natives::FBaseUrlContext_ContextCredentials = static_cast<int8_t>(Byte(Credentials)) - Base;
     Natives::McpRequestDelegateInstanceVTable = reinterpret_cast<void*>(VTable);
-    Natives::FDelegateBase_Allocate = reinterpret_cast<decltype(Natives::FDelegateBase_Allocate)>(Finder::RelativeTarget(AllocateCall, 1, 5));
+    Natives::FDelegateBase_Allocate = AllocateCall ? reinterpret_cast<decltype(Natives::FDelegateBase_Allocate)>(Finder::RelativeTarget(AllocateCall, 1, 5)) : nullptr;
+    Natives::FBaseUrlContext_bHeapDelegate = bHeapDelegates;
     Natives::FDelegateHandle_GenerateNewID = reinterpret_cast<decltype(Natives::FDelegateHandle_GenerateNewID)>(Finder::RelativeTarget(HandleStore + 4, 1, 5));
     Natives::FDateTime_UtcNow = reinterpret_cast<decltype(Natives::FDateTime_UtcNow)>(CompletedCalls[CompletedCalls.size() - 2].second);
     Natives::AFortPlayerControllerOutpost_GetFabricatorProgress = reinterpret_cast<decltype(Natives::AFortPlayerControllerOutpost_GetFabricatorProgress)>(CompletedCalls.back().second);

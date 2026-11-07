@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Online/FortMcpProfileWorld.h"
+#include "Delegates/DelegateBase.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameState.h"
@@ -46,6 +47,7 @@ void UFortMcpProfileWorld::InitializeTheater(const FString& TheaterGuid)
 
 void FDedicatedServerUrlContext::Bind(UObject* Object, void (*Completed)(UObject* Object, const void* Result))
 {
+    uint8_t* const Bytes = reinterpret_cast<uint8_t*>(this);
     *reinterpret_cast<FString*>(Bytes + Natives::FBaseUrlContext_UrlConfigName) = FString(L"McpDedicatedServerCommandUrl");
     *reinterpret_cast<int32_t*>(Bytes + Natives::FBaseUrlContext_ContextCredentials) = 1;
     if (!Object || !Completed)
@@ -53,7 +55,30 @@ void FDedicatedServerUrlContext::Bind(UObject* Object, void (*Completed)(UObject
         return;
     }
 
-    uint8_t* Instance = static_cast<uint8_t*>(Natives::FDelegateBase_Allocate(Bytes + Natives::FBaseUrlContext_Delegate, 0x30));
+    // FDelegateBase::Allocate(0x30): up to 4.1 the build's own. 4.2 inlines it into each CreateCopy (0x29824B0): its
+    // FHeapAllocator delegate (Data, DelegateSize) is resized to 3 FAlignedInlineDelegateType when it isn't already.
+    // The command's parameters are freshly initialized, so the delegate holds no instance to destroy first.
+    uint8_t* Instance = nullptr;
+    if (Natives::FBaseUrlContext_bHeapDelegate)
+    {
+        constexpr int32_t NewDelegateSize = 0x30 / sizeof(FAlignedInlineDelegateType);
+        void*& Data = *reinterpret_cast<void**>(Bytes + Natives::FBaseUrlContext_Delegate);
+        int32_t& DelegateSize = *reinterpret_cast<int32_t*>(Bytes + Natives::FBaseUrlContext_Delegate + 8);
+        if (DelegateSize != NewDelegateSize)
+        {
+            Data = FMemory::Realloc(Data, NewDelegateSize * sizeof(FAlignedInlineDelegateType));
+            DelegateSize = NewDelegateSize;
+        }
+        Instance = static_cast<uint8_t*>(Data);
+    }
+    else
+    {
+        Instance = static_cast<uint8_t*>(Natives::FDelegateBase_Allocate(Bytes + Natives::FBaseUrlContext_Delegate, 0x30));
+    }
+    if (!Instance)
+    {
+        return;
+    }
     std::memset(Instance, 0, 0x30);
     *reinterpret_cast<void**>(Instance) = Natives::McpRequestDelegateInstanceVTable;
     *reinterpret_cast<FWeakObjectPtr*>(Instance + 0x08) = Object;
@@ -65,7 +90,7 @@ namespace
 {
     bool SendCommand(UFortMcpProfileWorld* Profile, Reflection::FParams& Params, UObject* Object, void (*Completed)(UObject* Object, const void* Result))
     {
-        FDedicatedServerUrlContext* Context = Params.Get<FDedicatedServerUrlContext>(L"Context");
+        FDedicatedServerUrlContext* Context = static_cast<FDedicatedServerUrlContext*>(Params.GetAddress(L"Context"));
         if (!Context || !Finder::ResolveOutpostMcpRequestLive())
         {
             return false;

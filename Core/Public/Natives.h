@@ -478,6 +478,8 @@ namespace Natives
     inline ptrdiff_t FBaseUrlContext_Delegate = -1;
     inline ptrdiff_t FBaseUrlContext_UrlConfigName = -1;
     inline ptrdiff_t FBaseUrlContext_ContextCredentials = -1;
+    // 4.2: the context's delegate is a heap FDelegateBase (Data, DelegateSize), whose Allocate the build inlines.
+    inline bool FBaseUrlContext_bHeapDelegate = false;
     inline void* (*FDateTime_UtcNow)(int64_t* Result) = nullptr;
     inline bool (*AFortPlayerControllerOutpost_GetFabricatorProgress)(AFortPlayerController* This, int64_t* DisintegrationStartTime, int32_t* QuantumGooCompleted, int32_t* QuantumGooIncoming) = nullptr;
     inline void (*UFortRegisteredPlayerInfo_OnAccountInventoryChanged)(UFortRegisteredPlayerInfo* This, const void* ChangedItemTypes) = nullptr;

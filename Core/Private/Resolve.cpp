@@ -1518,7 +1518,10 @@ namespace
         }
         // 4.2 inlines AddStatic into the registration (0x6E944E): it makes the delegate instance there (lea rax, Handler;
         // mov [rdi+8], rax ... lea rax, its vtable; mov [rdi], rax), then adds it to the multicast delegate, whose
-        // compaction threshold (+0x60) it lowers first: mov eax, [Threshold]; mov edx, [Num]; dec eax; mov [Threshold], eax.
+        // compaction threshold it lowers first: mov eax, [Threshold]; mov edx, [ArrayNum]; dec eax; mov [Threshold], eax.
+        // 4.2 also takes UE 4.21's NUM_DELEGATE_INLINE_BYTES 0: the invocation list is a heap TArray (Data 0x4917F50,
+        // ArrayNum 0x4917F58, CompactionThreshold 0x4917F60) of 0x10-byte FDelegateBases, where up to 4.1 ArrayNum is
+        // 0x10 before the threshold at +0x60 (#303: Core read 4.2's delegate as 4.1's and the console crashed when opened).
         uintptr_t InlineBind = 0;
         if (!Entries && Handler && Matches == 0)
         {
@@ -1528,11 +1531,29 @@ namespace
             {
                 const uintptr_t Threshold = Finder::RelativeTarget(Load, 2, 6);
                 const uintptr_t Store = FindInstruction(Load + 6, Load + 0x14, { 0x89, 0x05 });
-                if (Store && Finder::RelativeTarget(Store, 2, 6) == Threshold && !IsInText(Threshold) && *reinterpret_cast<const int32_t*>(Threshold) == 2)
+                if (!Store || Finder::RelativeTarget(Store, 2, 6) != Threshold || IsInText(Threshold) || *reinterpret_cast<const int32_t*>(Threshold) != 2)
+                {
+                    continue;
+                }
+                uintptr_t ArrayNum = 0;
+                for (uintptr_t Num = Load + 6; Num + 6 <= Store && !ArrayNum; ++Num)
+                {
+                    if (Byte(Num) == 0x8B && (Byte(Num + 1) & 0xC7) == 0x05)
+                    {
+                        ArrayNum = Finder::RelativeTarget(Num, 2, 6);
+                    }
+                }
+                if (ArrayNum == Threshold - 0x08)
+                {
+                    Natives::NumDelegateInlineBytes = 0;
+                    Entries = Threshold - 0x10;
+                    Log::Info(L"Finder: delegates use the heap allocator (NUM_DELEGATE_INLINE_BYTES 0)");
+                }
+                else if (ArrayNum == Threshold - 0x10)
                 {
                     Entries = Threshold - 0x60;
-                    InlineBind = HandlerLea;
                 }
+                InlineBind = Entries ? HandlerLea : 0;
             }
         }
         RequireAddress(L"UConsole::RegisterConsoleAutoCompleteEntries", reinterpret_cast<uintptr_t&>(Natives::UConsole_RegisterConsoleAutoCompleteEntries), Entries);

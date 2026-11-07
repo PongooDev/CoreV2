@@ -171,16 +171,16 @@ public:
     {
         bool NeedsCompaction = false;
 
-        ++InvocationListLockCount;
-        for (int32_t InvocationListIndex = InvocationList.ArrayNum - 1; InvocationListIndex >= 0; --InvocationListIndex)
+        ++InvocationListLockCount();
+        for (int32_t InvocationListIndex = ArrayNum() - 1; InvocationListIndex >= 0; --InvocationListIndex)
         {
-            FDelegateInstance* DelegateInstance = static_cast<FDelegateInstance*>(InvocationList.GetData()[InvocationListIndex].GetDelegateInstanceProtected());
+            FDelegateInstance* DelegateInstance = static_cast<FDelegateInstance*>(Invocation(InvocationListIndex).GetDelegateInstanceProtected());
             if (!DelegateInstance || !::DelegateInstance::ExecuteIfSafe(DelegateInstance, Params...))
             {
                 NeedsCompaction = true;
             }
         }
-        --InvocationListLockCount;
+        --InvocationListLockCount();
 
         if (NeedsCompaction)
         {
@@ -189,44 +189,82 @@ public:
     }
 
 private:
-    struct alignas(16) FInvocationList
+    // The engine's multicast delegate in either layout (see FDelegateBase). Up to 4.1 the invocation list is a
+    // TArray<FDelegateBase, TInlineAllocator<1>>; 4.2's is a TArray<FDelegateBase> (UConsole::
+    // RegisterConsoleAutoCompleteEntries at 0x4917F50: Data, ArrayNum +8, CompactionThreshold +0x10, lock count +0x14).
+    struct alignas(16) FInlineInvocationList
     {
-        struct alignas(16) FAllocator
+        struct alignas(16) FInvocationList
         {
-            alignas(16) uint8_t InlineData[sizeof(FDelegateBase)];
-            FDelegateBase* SecondaryData;
+            struct alignas(16) FAllocator
+            {
+                alignas(16) uint8_t InlineData[sizeof(FDelegateBase)];
+                uint8_t* SecondaryData;
+            };
+
+            FAllocator Allocator;
+            int32_t ArrayNum;
+            int32_t ArrayMax;
         };
 
-        FDelegateBase* GetData() const
-        {
-            return Allocator.SecondaryData ? Allocator.SecondaryData : reinterpret_cast<FDelegateBase*>(const_cast<uint8_t*>(Allocator.InlineData));
-        }
+        FInvocationList InvocationList;
+        int32_t CompactionThreshold;
+        int32_t InvocationListLockCount;
+    };
 
-        FAllocator Allocator;
+    struct FHeapInvocationList
+    {
+        uint8_t* Data;
         int32_t ArrayNum;
         int32_t ArrayMax;
+        int32_t CompactionThreshold;
+        int32_t InvocationListLockCount;
     };
+
+    FInlineInvocationList& Inline() const { return *reinterpret_cast<FInlineInvocationList*>(const_cast<uint8_t*>(Storage)); }
+    FHeapInvocationList& Heap() const { return *reinterpret_cast<FHeapInvocationList*>(const_cast<uint8_t*>(Storage)); }
+
+    int32_t& ArrayNum() const { return DelegateBase::UsesHeapAllocator() ? Heap().ArrayNum : Inline().InvocationList.ArrayNum; }
+    int32_t& CompactionThreshold() const { return DelegateBase::UsesHeapAllocator() ? Heap().CompactionThreshold : Inline().CompactionThreshold; }
+    int32_t& InvocationListLockCount() const { return DelegateBase::UsesHeapAllocator() ? Heap().InvocationListLockCount : Inline().InvocationListLockCount; }
+
+    uint8_t* GetData() const
+    {
+        if (DelegateBase::UsesHeapAllocator())
+        {
+            return Heap().Data;
+        }
+        typename FInlineInvocationList::FInvocationList::FAllocator& Allocator = Inline().InvocationList.Allocator;
+        return Allocator.SecondaryData ? Allocator.SecondaryData : Allocator.InlineData;
+    }
+
+    // The build's elements are FDelegateBase::BuildSize() apart.
+    FDelegateBase& Invocation(int32_t Index) const
+    {
+        return *reinterpret_cast<FDelegateBase*>(GetData() + Index * FDelegateBase::BuildSize());
+    }
 
     void CompactInvocationList()
     {
-        if (InvocationListLockCount > 0)
+        if (InvocationListLockCount() > 0)
         {
             return;
         }
 
-        const int32_t OldNumItems = InvocationList.ArrayNum;
-        for (int32_t Index = 0; Index < InvocationList.ArrayNum;)
+        const size_t ElementSize = FDelegateBase::BuildSize();
+        const int32_t OldNumItems = ArrayNum();
+        for (int32_t Index = 0; Index < ArrayNum();)
         {
-            FDelegateBase& DelegateBase = InvocationList.GetData()[Index];
-            IDelegateInstance* DelegateInstance = DelegateBase.GetDelegateInstanceProtected();
+            FDelegateBase& DelegateBaseRef = Invocation(Index);
+            IDelegateInstance* DelegateInstance = DelegateBaseRef.GetDelegateInstanceProtected();
             if (!DelegateInstance || ::DelegateInstance::IsCompactable(DelegateInstance))
             {
-                DelegateBase.~FDelegateBase();
-                if (Index != InvocationList.ArrayNum - 1)
+                DelegateBaseRef.~FDelegateBase();
+                if (Index != ArrayNum() - 1)
                 {
-                    memcpy(static_cast<void*>(&DelegateBase), &InvocationList.GetData()[InvocationList.ArrayNum - 1], sizeof(FDelegateBase));
+                    memcpy(static_cast<void*>(&DelegateBaseRef), &Invocation(ArrayNum() - 1), ElementSize);
                 }
-                --InvocationList.ArrayNum;
+                --ArrayNum();
             }
             else
             {
@@ -234,30 +272,49 @@ private:
             }
         }
 
-        CompactionThreshold = InvocationList.ArrayNum * 2 > 2 ? InvocationList.ArrayNum * 2 : 2;
-        if (OldNumItems > CompactionThreshold && InvocationList.Allocator.SecondaryData && InvocationList.ArrayNum <= 1)
+        CompactionThreshold() = ArrayNum() * 2 > 2 ? ArrayNum() * 2 : 2;
+        if (DelegateBase::UsesHeapAllocator())
         {
-            if (InvocationList.ArrayNum == 1)
+            // InvocationList.Shrink() (4.2 0x6E94FE).
+            FHeapInvocationList& List = Heap();
+            if (OldNumItems > List.CompactionThreshold && List.ArrayMax != List.ArrayNum)
             {
-                memcpy(InvocationList.Allocator.InlineData, InvocationList.Allocator.SecondaryData, sizeof(FDelegateBase));
+                List.ArrayMax = List.ArrayNum;
+                if (List.Data || List.ArrayNum)
+                {
+                    List.Data = static_cast<uint8_t*>(FMemory::Realloc(List.Data, List.ArrayNum * ElementSize));
+                }
             }
-            FMemory::Free(InvocationList.Allocator.SecondaryData);
-            InvocationList.Allocator.SecondaryData = nullptr;
-            InvocationList.ArrayMax = 1;
+            return;
+        }
+
+        typename FInlineInvocationList::FInvocationList& List = Inline().InvocationList;
+        if (OldNumItems > Inline().CompactionThreshold && List.Allocator.SecondaryData && List.ArrayNum <= 1)
+        {
+            if (List.ArrayNum == 1)
+            {
+                memcpy(List.Allocator.InlineData, List.Allocator.SecondaryData, ElementSize);
+            }
+            FMemory::Free(List.Allocator.SecondaryData);
+            List.Allocator.SecondaryData = nullptr;
+            List.ArrayMax = 1;
         }
     }
 
-    FInvocationList InvocationList;
-    int32_t CompactionThreshold;
-    mutable int32_t InvocationListLockCount;
+    alignas(16) uint8_t Storage[sizeof(FInlineInvocationList)];
 
     friend struct FMulticastDelegateLayout;
 };
 
 struct FMulticastDelegateLayout
 {
-    static_assert(offsetof(TMulticastDelegate<int32_t>, InvocationList.ArrayNum) == 0x50);
-    static_assert(offsetof(TMulticastDelegate<int32_t>, CompactionThreshold) == 0x60);
-    static_assert(offsetof(TMulticastDelegate<int32_t>, InvocationListLockCount) == 0x64);
-    static_assert(sizeof(TMulticastDelegate<int32_t>) == 0x70);
+    using FInline = TMulticastDelegate<int32_t>::FInlineInvocationList;
+    using FHeap = TMulticastDelegate<int32_t>::FHeapInvocationList;
+    static_assert(offsetof(FInline, InvocationList.ArrayNum) == 0x50);
+    static_assert(offsetof(FInline, CompactionThreshold) == 0x60);
+    static_assert(offsetof(FInline, InvocationListLockCount) == 0x64);
+    static_assert(sizeof(FInline) == 0x70);
+    static_assert(offsetof(FHeap, ArrayNum) == 0x08);
+    static_assert(offsetof(FHeap, CompactionThreshold) == 0x10);
+    static_assert(offsetof(FHeap, InvocationListLockCount) == 0x14);
 };

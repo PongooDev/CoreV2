@@ -316,6 +316,9 @@ namespace Natives
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
     // 8 up to UE 4.19 (2.4.2); UE 4.20 (2.5) drops five delegate instance virtuals and has GetHandle at 4.
     inline int32_t IDelegateInstance_GetHandleIndex = 8;
+    // The build's NUM_DELEGATE_INLINE_BYTES: 32 (TInlineAllocator<2>) up to 4.1. 4.2 takes UE 4.21's 0 (FHeapAllocator),
+    // with NUM_MULTICAST_DELEGATE_INLINE_ENTRIES 0 too, so an FDelegateBase is { Data, DelegateSize } (#303).
+    inline int32_t NumDelegateInlineBytes = 32;
     inline int32_t UObject_NeedsLoadForClientIndex = -1;
     inline int32_t UObject_GetWorldIndex = -1;
     inline int32_t AFortGameMode_FinishWorldInitializationIndex = -1;

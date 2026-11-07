@@ -34,9 +34,9 @@ FVector AFortAthenaMapInfo::PickSupplyDropLocation(const FVector& Center, float 
     return Result;
 }
 
-AFortAthenaSupplyDrop* AFortAthenaMapInfo::SpawnSupplyDropAtLocation(const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass)
+AFortAthenaSupplyDrop* AFortAthenaMapInfo::SpawnSupplyDropAtLocation(const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass, float TraceStartZ, float TraceEndZ)
 {
-    return Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation ? Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation(this, Location, Rotation, SupplyDropClass) : nullptr;
+    return Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation ? Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation(this, Location, Rotation, SupplyDropClass, TraceStartZ, TraceEndZ) : nullptr;
 }
 
 namespace
@@ -97,7 +97,8 @@ void AFortAthenaMapInfo::SpawnLlamas()
     // each at a random point of the island, on the ground, facing a random way. The quantity is rolled as 3.3's safe zone
     // supply drops roll theirs (0xA039C0: Min plus a random 0 to Max - Min), and each llama is placed as "SPAWNLLAMA"
     // places one: a random yaw and SpawnSupplyDropAtLocation, at a point PickSupplyDropLocation picked inside
-    // AircraftDropVolume (SpawnSupplyDropAtLocation's FindGroundLocationAt reads the placement heights from this map info).
+    // AircraftDropVolume (SpawnSupplyDropAtLocation's FindGroundLocationAt reads the placement heights from this map info
+    // up to 3.5; from 3.6 the command passes them).
     UClass* Llama = static_cast<UClass*>(LlamaClass);
     if (!Llama)
     {
@@ -135,6 +136,17 @@ void AFortAthenaMapInfo::SpawnLlamas()
     // again (up to 50 times; about half of the island's points are open ground).
     UClass* LandscapeClass = FindObject<UClass>(nullptr, L"/Script/Landscape.LandscapeProxy");
     const std::vector<FBox> Water = FindWaterBounds(GetWorld());
+
+    // From 3.6 "SPAWNLLAMA" passes the trace heights too: SupplyDropMaxPlacementHeight and SupplyDropMinPlacementHeight at
+    // level 0 (4.2 0xA10BE8). Without them the trace ran between whatever was in xmm3 and on the stack, hit nothing and
+    // left the llama at that height (#305).
+    float TraceStartZ = 0.0f;
+    float TraceEndZ = 0.0f;
+    if (Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocationTakesHeights && Member_SupplyDropMaxPlacementHeight.IsAvailable() && Member_SupplyDropMinPlacementHeight.IsAvailable())
+    {
+        TraceStartZ = SupplyDropMaxPlacementHeight.GetValueAtLevel(0.0f);
+        TraceEndZ = SupplyDropMinPlacementHeight.GetValueAtLevel(0.0f);
+    }
     int32_t Spawned = 0;
     int32_t Repicked = 0;
     for (int32_t Index = 0; Index < Quantity; ++Index)
@@ -145,7 +157,7 @@ void AFortAthenaMapInfo::SpawnLlamas()
             Location = PickSupplyDropLocation(Center, Radius);
         }
         const FRotator Rotation(0.0f, FMath::FRand() * 360.0f, 0.0f);
-        AFortAthenaSupplyDrop* SupplyDrop = SpawnSupplyDropAtLocation(Location, Rotation, Llama);
+        AFortAthenaSupplyDrop* SupplyDrop = SpawnSupplyDropAtLocation(Location, Rotation, Llama, TraceStartZ, TraceEndZ);
         if (!SupplyDrop)
         {
             continue;
@@ -154,7 +166,8 @@ void AFortAthenaMapInfo::SpawnLlamas()
         const FVector Placed = SupplyDrop->GetTransform().GetLocation();
         Log::Info(L"Battle Royale: Supply Llama {} at ({:.0f}, {:.0f}, {:.0f})", GetNameSafe(SupplyDrop).ToStdString(), Placed.X, Placed.Y, Placed.Z);
     }
-    Log::Info(L"Battle Royale: {} of {} Supply Llamas spawned (quantity {}-{}), {} points off open ground picked again", Spawned, Quantity, QuantityMin, QuantityMax, Repicked);
+    Log::Info(L"Battle Royale: {} of {} Supply Llamas spawned (quantity {}-{}), {} points off open ground picked again{}", Spawned, Quantity, QuantityMin, QuantityMax, Repicked,
+        Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocationTakesHeights ? std::format(L", traced from Z {:.0f} to {:.0f}", TraceStartZ, TraceEndZ) : std::wstring());
 #endif
 }
 

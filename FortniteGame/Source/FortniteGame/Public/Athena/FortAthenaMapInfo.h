@@ -35,6 +35,11 @@ public:
     DefineUProperty(UClass*, VendingMachineClass)
     DefineUStructProperty(FScalableFloat, VendingMachineRarityCount)
     static bool HasVendingMachines() { return Member_VendingMachineClass.IsAvailable() && Member_VendingMachineRarityCount.IsAvailable(); }
+    // The heights a supply drop's ground trace runs between (AthenaGameData's Default.SupplyDrop.MinPlacementHeight and
+    // MaxPlacementHeight rows), which the "SPAWNLLAMA" command passes to SpawnSupplyDropAtLocation from 3.6 (Max as
+    // TraceStartZ, Min as TraceEndZ).
+    DefineUStructProperty(FScalableFloat, SupplyDropMinPlacementHeight)
+    DefineUStructProperty(FScalableFloat, SupplyDropMaxPlacementHeight)
     // Where the bus may drop players: the island, which PickSupplyDropLocation keeps its points in.
     DefineUProperty(FBox2D, AircraftDropZone)
     DefineUProperty(AVolume*, AircraftDropVolume)
@@ -46,8 +51,10 @@ public:
 
     // A random point within Radius of Center (at its height) inside AircraftDropVolume, or Center when 1000 tries find none.
     FVector PickSupplyDropLocation(const FVector& Center, float Radius);
-    // Spawns a SupplyDropClass on the ground under Location (AFortAthenaSupplyDrop::FindGroundLocationAt).
-    AFortAthenaSupplyDrop* SpawnSupplyDropAtLocation(const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass);
+    // Spawns a SupplyDropClass on the ground under Location (AFortAthenaSupplyDrop::FindGroundLocationAt). From 3.6 its
+    // ground trace runs from TraceStartZ down to TraceEndZ (the drop stays at TraceEndZ when it hits nothing); before,
+    // FindGroundLocationAt read the heights from the map info and the two are ignored.
+    AFortAthenaSupplyDrop* SpawnSupplyDropAtLocation(const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass, float TraceStartZ, float TraceEndZ);
     // Spawns the match's Supply Llamas at random points of the island (from 3.3; stripped, Core supplies its body).
     void SpawnLlamas();
     // Rolls a rarity for each of the map's placed vending machines from VendingMachineRarityCount: no machine (it is

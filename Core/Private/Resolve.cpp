@@ -8028,9 +8028,28 @@ bool Finder::ResolveSupplyDropSpawnLive(ptrdiff_t LlamaClassOffset)
         return false;
     }
 
+    // From 3.6 SpawnSupplyDropAtLocation takes two more floats, the heights its ground trace starts and ends at, and the
+    // command passes the map info's SupplyDropMaxPlacementHeight and SupplyDropMinPlacementHeight on the stack (3.6
+    // 0x9EE8A2/0x9EE8B0, 4.2 0xA10C3A/0xA10C48: movss [rsp+28h], xmm0; movss [rsp+20h], xmm6) just before the call. 3.5's
+    // (0x9E6893) passes four arguments.
+    const auto StoresStackFloat = [SpawnCall](int32_t Displacement)
+    {
+        for (uintptr_t Store = FindInstruction(SpawnCall - 0x30, SpawnCall, { 0xF3, 0x0F, 0x11, -1, 0x24, Displacement }); Store;
+             Store = FindInstruction(Store + 1, SpawnCall, { 0xF3, 0x0F, 0x11, -1, 0x24, Displacement }))
+        {
+            if ((Byte(Store + 3) & 0xC7) == 0x44)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocationTakesHeights = StoresStackFloat(0x20) && StoresStackFloat(0x28);
+
     Natives::AFortAthenaMapInfo_PickSupplyDropLocation = reinterpret_cast<decltype(Natives::AFortAthenaMapInfo_PickSupplyDropLocation)>(Pick);
     Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation = reinterpret_cast<decltype(Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocation)>(Spawn);
-    Log::Info(L"Finder: AFortAthenaMapInfo::PickSupplyDropLocation at 0x{:X}, AFortAthenaMapInfo::SpawnSupplyDropAtLocation at 0x{:X}", Pick - Finder::ImageBase(), Spawn - Finder::ImageBase());
+    Log::Info(L"Finder: AFortAthenaMapInfo::PickSupplyDropLocation at 0x{:X}, AFortAthenaMapInfo::SpawnSupplyDropAtLocation at 0x{:X}{}", Pick - Finder::ImageBase(), Spawn - Finder::ImageBase(),
+        Natives::AFortAthenaMapInfo_SpawnSupplyDropAtLocationTakesHeights ? L" (takes the trace heights)" : L"");
     return true;
 }
 

@@ -491,9 +491,13 @@ namespace Natives
     inline void* (*FInitBodySpawnParams_Construct)(void* This, const void* PrimComp) = nullptr;
     inline void (*FBodyInstance_InitBody)(void* This, void* Setup, const FTransform& Transform, void* PrimComp, void* InRBScene, const void* SpawnParams) = nullptr;
     // From 3.3 (Finder::ResolveSupplyDropSpawnLive): AFortAthenaMapInfo::PickSupplyDropLocation (3.3 0x9F8E80) and
-    // SpawnSupplyDropAtLocation (0xA03800), which the Supply Llamas are placed with.
+    // SpawnSupplyDropAtLocation (0xA03800), which the Supply Llamas are placed with. From 3.6 SpawnSupplyDropAtLocation
+    // also takes the heights its ground trace runs between (3.6 0xA08A90, 4.2 0xA28200: TraceStartZ, TraceEndZ, passed on
+    // to AFortAthenaSupplyDrop::FindGroundLocationAt); before, FindGroundLocationAt read them from the map info. The two
+    // extra arguments are ignored by the older four-argument function.
     inline FVector* (*AFortAthenaMapInfo_PickSupplyDropLocation)(AFortAthenaMapInfo* This, FVector* Result, const FVector& Center, float Radius) = nullptr;
-    inline AFortAthenaSupplyDrop* (*AFortAthenaMapInfo_SpawnSupplyDropAtLocation)(AFortAthenaMapInfo* This, const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass) = nullptr;
+    inline AFortAthenaSupplyDrop* (*AFortAthenaMapInfo_SpawnSupplyDropAtLocation)(AFortAthenaMapInfo* This, const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass, float TraceStartZ, float TraceEndZ) = nullptr;
+    inline bool AFortAthenaMapInfo_SpawnSupplyDropAtLocationTakesHeights = false;
     // 4.2 (Finder::ResolveFlightPathLive): AFortAthenaMapInfo::IsMapInfoValidForAircraft (4.2 0xA19370) and
     // InitializeFlightPath(GameState) (0xA17EB0; 21.40's names), the aircraft paths' build, which 4.2 runs only from
     // AFortGameModeAthena::OnPlaylistDataLoaded (0xA1BE40). Null on 3.5 to 4.1, whose StartAircraftPhase builds them too.

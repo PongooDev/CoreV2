@@ -61,6 +61,8 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(SetCapturePercentage)
     DefineUFunction(CountPlayerBuiltBuildingActors)
     DefineUFunction(BuildWith)
+    DefineUFunction(BuildFree)
+    DefineUFunction(GiveAthenaFullKit)
 
 public:
     // ToggleUnlimitedHealth's flag: the player's pawn can't be damaged while its controller's cheat manager has it (1.9
@@ -121,6 +123,13 @@ public:
     // The zone's structure count and limit, and the pieces in the world it counts (walls, floors, roofs, stairs, traps,
     // others), so a count that doesn't match what is standing shows (#128, #130).
     void CountPlayerBuiltBuildingActors();
+    // The pawn flies, or walks again when it already does ("[Fly Cheat Enabled] You feel much lighter"); UCheatManager::Fly's
+    // override. 4.2 compiles it out (#312).
+    void Fly();
+    // Toggles the controller's bBuildFree and says which it is. 4.2 compiles it out (#312).
+    void BuildFree();
+    // The game ini's CheatScript.GiveAthenaFullKit (weapons, healing, shields, ammo). 4.2 compiles it out (#312).
+    void GiveAthenaFullKit();
 
     // Core's own command, "cheat corecheats [filter]": the cheats Core supports, with usage, as chat lines.
     void ListCoreCheats(const FString& Filter);
@@ -345,8 +354,12 @@ public:
     DECLARE_FUNCTION(execToggleInvincibleCornerstones);
     DECLARE_FUNCTION(execSetCapturePercentage);
     DECLARE_FUNCTION(execCountPlayerBuiltBuildingActors);
+    DECLARE_FUNCTION(execBuildFree);
+    DECLARE_FUNCTION(execGiveAthenaFullKit);
 
 private:
+    static void FlyHK(UFortCheatManager* This);
+
     void Reply(const FString& Message) const;
     // The player, when they have an inventory to give items to.
     AFortPlayerController* GetReceiver() const;

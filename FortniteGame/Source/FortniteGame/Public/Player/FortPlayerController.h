@@ -61,6 +61,10 @@ public:
     // materials the end-of-match screen shows, ...).
     DefineUProperty(UStatManager*, StatManager)
     DefineBitfieldUProperty(bCraftFree)
+    // BuildFree's flag, replicated: placing, editing and repairing pieces cost nothing (the controller's own cost checks
+    // read it).
+    DefineBitfieldUProperty(bBuildFree)
+    static bool HasBuildFreeFlag() { return Member_bBuildFree.IsAvailable(); }
     DefineBitfieldUProperty(bInfiniteDurability)
     static bool HasInfiniteDurabilityFlag() { return Member_bInfiniteDurability.IsAvailable(); }
     // ToggleInfiniteAmmo's flag, replicated to the player's client: GetRemainingAmmo is then unlimited (the reserve never

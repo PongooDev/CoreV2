@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/UnrealString.h"
 #include "UObject/Object.h"
 
 class APlayerController;
@@ -8,7 +9,11 @@ class APlayerController;
 class UCheatManager : public UObject
 {
     DefineUnrealClass(UCheatManager, Engine)
+    DefineUFunction(Fly)
+    DefineUFunction(CheatScript)
 
 public:
     APlayerController* GetOuterAPlayerController() const;
+    // Runs each command of the game ini's [CheatScript.<ScriptName>] section on the outer player controller.
+    void CheatScript(const FString& ScriptName);
 };

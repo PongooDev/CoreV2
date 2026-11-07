@@ -21,6 +21,7 @@
 #include "FortKismetLibrary.h"
 #include "FortMissionTimerComponent.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/GameStateBase.h"
@@ -35,6 +36,8 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "Finder.h"
+#include "Hooks.h"
+#include "ObjectLayout.h"
 #include "GameThread.h"
 #include "GameplayEffect.h"
 #include "Missions/FortMission.h"
@@ -5775,6 +5778,109 @@ DEFINE_FUNCTION(UFortCheatManager::execCountPlayerBuiltBuildingActors)
     P_NATIVE_END;
 }
 
+void UFortCheatManager::Fly()
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF25090). A client asks its server; the server toggles between flying and walking by the pawn's own
+    // bCheatFlying, and sends the pawn's ClientCheatFly or ClientCheatWalk. The pawn isn't locally controlled on the
+    // dedicated server, so the RPC's body (Core's ClientCheat*_Implementation, ACharacter::HookCheatMovement) runs here too.
+    APlayerController* PlayerController = GetOuterAPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    if (PlayerController->GetNetMode() == NM_Client)
+    {
+        if (AFortPlayerController* FortPlayerController = Cast<AFortPlayerController>(PlayerController))
+        {
+            FortPlayerController->ServerCheat(TEXT("Fly"));
+        }
+        return;
+    }
+    ACharacter* Character = Cast<ACharacter>(PlayerController->GetPawn());
+    if (!Character)
+    {
+        return;
+    }
+    UCharacterMovementComponent* Movement = Character->CharacterMovement;
+    const bool bFlying = Movement && Movement->bCheatFlying;
+    PlayerController->ClientMessage(bFlying ? TEXT("[Fly Cheat Disabled] Back to the ground with you") : TEXT("[Fly Cheat Enabled] You feel much lighter"));
+    UFunction* const Function = bFlying ? ACharacter::StaticFunction_ClientCheatWalk() : ACharacter::StaticFunction_ClientCheatFly();
+    Reflection::FParams Params(Function);
+    Params.Call(Character);
+    if (const int32_t Index = Finder::ImplementationIndex(Function); Index >= 0)
+    {
+        CallVirtual<void>(Character, Index);
+    }
+#endif
+}
+
+void UFortCheatManager::BuildFree()
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF1B070): the controller's replicated bBuildFree, which its building cost checks read, flips.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController || !AFortPlayerController::HasBuildFreeFlag())
+    {
+        return;
+    }
+    PlayerController->bBuildFree = !PlayerController->bBuildFree;
+    PlayerController->ClientMessage(FString::Printf(TEXT("BuildFree is %d"), static_cast<bool>(PlayerController->bBuildFree) ? 1 : 0));
+#endif
+}
+
+void UFortCheatManager::GiveAthenaFullKit()
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF2BF80).
+    CheatScript(TEXT("GiveAthenaFullKit"));
+#endif
+}
+
+void UFortCheatManager::FlyHK(UFortCheatManager* This)
+{
+    This->Fly();
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execBuildFree)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->BuildFree();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execGiveAthenaFullKit)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->GiveAthenaFullKit();
+    P_NATIVE_END;
+}
+
+namespace
+{
+    // A parameterless exec ("Code += !!Code", then "jmp Body") whose body is the shared empty function: the cheat is
+    // compiled out of this build.
+    bool ExecJumpsToStub(UFunction* Function)
+    {
+        const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+        if (!Exec)
+        {
+            return false;
+        }
+        static constexpr uint8_t TailJump[] = { 0x4C, 0x89, 0x42, 0x20, 0xE9 }; // mov [rdx+20h], r8; jmp rel32
+        for (uintptr_t Address = Exec; Address < Exec + 0x20; ++Address)
+        {
+            if (std::memcmp(reinterpret_cast<const void*>(Address), TailJump, sizeof(TailJump)) == 0)
+            {
+                return Finder::IsStubFunction(Finder::RelativeTarget(Address + 4, 1, 5));
+            }
+        }
+        return false;
+    }
+}
+
 void UFortCheatManager::HookNatives()
 {
     // Each of these is stripped on 1.2, 1.7.2 and 1.8 alike (Cheats.md): GiveWeapon, GiveAmmo, GiveTrap, GiveGadget(s),
@@ -5837,6 +5943,41 @@ void UFortCheatManager::HookNatives()
         {
             Function->SetNativeFunc(Native);
             Log::Info(L"Hook {}: native", Name);
+        }
+    }
+
+    // 4.2 compiles out cheats that 4.1 still has (#312): BuildFree's and GiveAthenaFullKit's execs both tail-jump to the
+    // shared empty function (4.2 0x1105C30 -> 0x4D4750; 4.1's reach 0xF1B070 and 0xF2BF80). Only a build whose exec does
+    // that runs Core's body.
+    for (const auto& [Function, Native, Name] : {
+             std::tuple{ FindStaticFunction_BuildFree(), &execBuildFree, L"UFortCheatManager::BuildFree" },
+             std::tuple{ FindStaticFunction_GiveAthenaFullKit(), &execGiveAthenaFullKit, L"UFortCheatManager::GiveAthenaFullKit" },
+         })
+    {
+        if (ExecJumpsToStub(Function))
+        {
+            Function->SetNativeFunc(Native);
+            Log::Info(L"Hook {}: native", Name);
+        }
+    }
+
+    // UFortCheatManager::Fly, UCheatManager::Fly's override (4.1 0xF25090), is the shared empty function in 4.2's vtable
+    // (0x4D4750), so "cheat fly" answered nothing and nothing flew (#312). Where it is, the slot gets Core's body back.
+    const int32_t FlyIndex = Finder::ImplementationIndex(FindStaticFunction_Fly());
+    UObject* const Default = StaticClass()->GetDefaultObject(false);
+    void** const DefaultVTable = Default ? *reinterpret_cast<void***>(Default) : nullptr;
+    void* const FlyOriginal = DefaultVTable && FlyIndex >= 0 ? DefaultVTable[FlyIndex] : nullptr;
+    if (FlyOriginal && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(FlyOriginal)))
+    {
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[FlyIndex] == FlyOriginal)
+            {
+                Hooks::SwapVTable(L"UFortCheatManager::Fly", VTable, FlyIndex, reinterpret_cast<void*>(&FlyHK));
+            }
         }
     }
     Finder::ResolveAssetManagerLive();

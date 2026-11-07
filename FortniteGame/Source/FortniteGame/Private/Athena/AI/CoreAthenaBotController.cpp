@@ -2079,7 +2079,11 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
         {
             Intent = ChooseGoal(Now);
         }
-        if (HarvestTarget.Get() && std::wstring_view(Intent) != L"harvest")
+        // A break-through Loot or SearchContainer started just now (BreakDownFromRoof: the bot is on a roof over its
+        // loot) is kept for the next frame's Harvest. Stopped here, it was started again the next frame, every frame:
+        // the bot stood on the roof for minutes, logging the break-through each frame (#319).
+        const bool bBreakThroughStarted = bHarvestToUnstick && HarvestTargetTime == Now;
+        if (HarvestTarget.Get() && std::wstring_view(Intent) != L"harvest" && !bBreakThroughStarted)
         {
             StopHarvesting();
         }

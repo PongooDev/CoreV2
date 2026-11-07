@@ -16,6 +16,26 @@ class EFortBuildingPersistentState
     DefineUEnumValue(Searched)
 };
 
+// Why a building actor is initialized: InitializeBuildingActor and PostInitializeSpawnedBuildingActor take it. A UENUM in a
+// namespace, so its native type is an int: 4.2's InitializeBuildingActor (0xAEB110) compares all of edx (mov r14d, edx;
+// lea eax, [r14-1]; cmp eax, 1), and a bool passed there leaves edx's upper bytes to chance. When they aren't zero the
+// piece skips the Spawned path: no Gameplay.Effect.Building.Create event, no ability system or BuildingAttributeSet, no
+// build-up, so it stands at full health (#300). The values are the 3.0 to 4.2 SDKs' (Spawned was already 1 before).
+namespace EFortBuildingInitializationReason
+{
+    enum Type : int32_t
+    {
+        StaticallyPlaced = 0,
+        Spawned = 1,
+        Replaced = 2,
+        LoadedFromSave = 3,
+        DynamicBuilderPlaced = 4,
+        PlacementTool = 5,
+        TrapTool = 6,
+        None = 7,
+    };
+}
+
 class ABuildingActor : public AActor
 {
     DefineUnrealClass(ABuildingActor, FortniteGame)

@@ -5916,8 +5916,8 @@ bool FCoreAthenaBotController::BuildPiece(const FCoreAthenaBotBuildDescriptor& D
     }
     AFortPlayerStateAthena* PlayerState = GetPlayerState();
     const int32_t WorldPlayerId = PlayerState ? static_cast<int32_t>(PlayerState->WorldPlayerId) : -1;
-    CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, true, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
-    CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, true);
+    CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, EFortBuildingInitializationReason::Spawned, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
+    CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, EFortBuildingInitializationReason::Spawned);
     // The bot's team, as Battle Royale's ScoreBuildingConstruction gives a player's piece theirs (#120): its team can
     // edit it, and its shots and its teammates' pass it as their own.
     if (PlayerState && Building->Team == EFortTeam::GetSpectator())

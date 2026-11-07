@@ -304,8 +304,8 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     CallVirtual<void>(Building, Natives::ABuildingSMActor_SetMirroredIndex, bMirrored);
     AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(PlayerStateOf(this)));
     const int32_t WorldPlayerId = FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -1;
-    CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, true, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
-    CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, true);
+    CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, EFortBuildingInitializationReason::Spawned, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
+    CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, EFortBuildingInitializationReason::Spawned);
     LogPlacedPieceBuildUp(Building, FortPlayerState);
     UAthenaNavSystem::AddDirtyArea(Building);
     FBuildingClassData PayClassData = BuildingClassData;

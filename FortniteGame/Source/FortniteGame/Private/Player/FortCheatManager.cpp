@@ -3842,7 +3842,9 @@ void UFortCheatManager::FireRate(const FString& Arguments)
 void UFortCheatManager::WeaponDamage(const FString& Arguments)
 {
 #if WITH_SERVER_CODE
-    const FString Message = RunBoostCommand(GetPlayerController(), WeaponDamageBoost, L"weapondamage", Arguments, 100.0f,
+    // No cap of Core's own (#312: it was 100x): how far the game's damage effects stack (MaxBoostEffects) is the limit,
+    // and ApplyBoostStage says how far that is when a multiplier goes beyond it.
+    const FString Message = RunBoostCommand(GetPlayerController(), WeaponDamageBoost, L"weapondamage", Arguments, 1000000.0f,
         L"\"weapondamage 2\" makes your guns and melee weapons do twice the damage they do on their own", L"Your weapons do their own damage again");
     if (!Message.IsEmpty())
     {

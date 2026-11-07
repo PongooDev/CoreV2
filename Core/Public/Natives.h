@@ -41,6 +41,7 @@ class AFortPlayerStateZone;
 class AFortTeamPrivateInfo;
 class AFortGameModeAthena;
 class AFortAthenaMapInfo;
+class AFortGameStateAthena;
 class AFortAthenaSupplyDrop;
 class APlayerState;
 class AFortPlayerState;
@@ -487,6 +488,16 @@ namespace Natives
     // SpawnSupplyDropAtLocation (0xA03800), which the Supply Llamas are placed with.
     inline FVector* (*AFortAthenaMapInfo_PickSupplyDropLocation)(AFortAthenaMapInfo* This, FVector* Result, const FVector& Center, float Radius) = nullptr;
     inline AFortAthenaSupplyDrop* (*AFortAthenaMapInfo_SpawnSupplyDropAtLocation)(AFortAthenaMapInfo* This, const FVector& Location, const FRotator& Rotation, UClass* SupplyDropClass) = nullptr;
+    // 4.2 (Finder::ResolveFlightPathLive): AFortAthenaMapInfo::IsMapInfoValidForAircraft (4.2 0xA19370) and
+    // InitializeFlightPath(GameState) (0xA17EB0; 21.40's names), the aircraft paths' build, which 4.2 runs only from
+    // AFortGameModeAthena::OnPlaylistDataLoaded (0xA1BE40). Null on 3.5 to 4.1, whose StartAircraftPhase builds them too.
+    inline bool (*AFortAthenaMapInfo_IsMapInfoValidForAircraft)(AFortAthenaMapInfo* This) = nullptr;
+    inline void (*AFortAthenaMapInfo_InitializeFlightPath)(AFortAthenaMapInfo* This, AFortGameStateAthena* GameState) = nullptr;
+    // From 3.5 (Finder::ResolveSetCurrentPlaylistIdLive): AFortGameStateAthena::SetCurrentPlaylistId (4.1 0xA6DD20, 4.2
+    // 0xA592E0), which gives the game state the game mode's playlist and loads its assets (OnPlaylistDataLoaded follows).
+    // 4.1's AFortGameModeAthena::InitGameState (0xA2B880) calls it at the world's start; 4.2 only from
+    // OnGivenMatchAssignment (0xA1B5F0).
+    inline void (*AFortGameStateAthena_SetCurrentPlaylistId)(AFortGameStateAthena* This, int32_t PlaylistId) = nullptr;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;

@@ -57,9 +57,14 @@ public:
     DefineUProperty(float, WarmupEarlyCountdownDuration)
     // Whether the map info's FlightInfos (one aircraft path, or one per team with OpposingAirCraftForEachTeam) are built:
     // OnPlaylistDataLoaded (4.1 0xA2F500) and StartAircraftPhase (0xA3B530) build them (AFortAthenaMapInfo, 0xA2B8F0)
-    // only while it is false, and set it.
+    // only while it is false, and set it. 4.2 builds them only in OnPlaylistDataLoaded (0xA1BE40).
     DefineUProperty(bool, bFlightPathInitialized)
     static bool HasFlightPathInitialized() { return Member_bFlightPathInitialized.IsAvailable(); }
+    // Where StartAircraftPhase no longer builds the aircraft paths (4.2): OnPlaylistDataLoaded's build of them, while
+    // bFlightPathInitialized is false and the map info is valid for an aircraft (AFortAthenaMapInfo::
+    // InitializeFlightPath with the game state). For a match whose playlist never loads (the bots-only test match), and
+    // when the match's playlist replaces the world's. True when it built them.
+    bool InitializeFlightPath();
     // 1.11 to 3.3; from 3.5 the playlist is a data asset, AFortGameStateAthena's CurrentPlaylistData.
     DefineUStructArrayProperty(FAthenaPlaylistDataTableSet, PlaylistDataTables)
     static bool HasPlaylistDataTables() { return Member_PlaylistDataTables.IsAvailable(); }

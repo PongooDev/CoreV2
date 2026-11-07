@@ -187,6 +187,12 @@ namespace Finder
     bool ResolveResetGameplayAttributesLive();
     bool ResolveLootTierRedirectLive();
     bool ResolvePlaylistDataTablesLive();
+    // 4.2: AFortAthenaMapInfo::IsMapInfoValidForAircraft and InitializeFlightPath (Natives), from OnPlaylistDataLoaded's
+    // build of the aircraft paths; false (and nothing set) where StartAircraftPhase still builds them (3.5 to 4.1).
+    // FlightPathInitializedOffset: AFortGameModeAthena's bFlightPathInitialized.
+    bool ResolveFlightPathLive(ptrdiff_t FlightPathInitializedOffset);
+    // From 3.5: AFortGameStateAthena::SetCurrentPlaylistId (Natives), from its log string.
+    bool ResolveSetCurrentPlaylistIdLive();
     bool ResolvePoiVolumeLive();
     // AFortAthenaMapInfo::PickSupplyDropLocation and SpawnSupplyDropAtLocation (Natives), from 3.3. LlamaClassOffset:
     // AFortAthenaMapInfo's LlamaClass.

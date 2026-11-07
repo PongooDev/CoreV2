@@ -1642,7 +1642,9 @@ namespace
     // stayed at the aircraft phase's 0:00. With the flag cleared the game builds them again, for the match's playlist and
     // its game data, at the next OnPlaylistDataLoaded or at StartAircraftPhase (both empty FlightInfos first), as it does
     // when the world starts on the match's playlist. From 3.5 (OpposingAirCraftForEachTeam): 3.5.1 to 4.1 have the same
-    // checks.
+    // checks. 4.2's StartAircraftPhase (0xA28610) no longer builds them, and the next OnPlaylistDataLoaded may never come,
+    // so there the game's own build runs now (AFortGameModeAthena::InitializeFlightPath): the game state already has the
+    // match's playlist (AppliedPlaylistId reads it), its AirCraftBehavior and TeamCount with it.
     void RebuildFlightPathsFor(AFortGameModeAthena* GameMode, int32_t PlaylistId, int32_t WorldPlaylistId)
     {
         if (WorldPlaylistId < 0 || !AFortGameModeAthena::HasFlightPathInitialized() || !AFortGameStateAthena::HasAircrafts() || !GameMode->bFlightPathInitialized)
@@ -1650,6 +1652,11 @@ namespace
             return;
         }
         GameMode->bFlightPathInitialized = false;
+        if (GameMode->InitializeFlightPath())
+        {
+            Log::Info(L"Battle Royale: the aircraft paths were built for playlist {}, so they are built again for the match's playlist {}", WorldPlaylistId, PlaylistId);
+            return;
+        }
         Log::Info(L"Battle Royale: the aircraft paths were built for playlist {}, so the game builds them again for the match's playlist {}", WorldPlaylistId, PlaylistId);
     }
 
@@ -1696,6 +1703,31 @@ namespace
             WatchPlaylistDataTablesOf(GameMode);
         });
     }
+}
+
+bool AFortGameModeAthena::InitializeFlightPath()
+{
+#if WITH_SERVER_CODE
+    // OnPlaylistDataLoaded's (4.2 0xA1BE40): if (!bFlightPathInitialized && MapInfo->IsMapInfoValidForAircraft())
+    // { MapInfo->InitializeFlightPath(GameState); bFlightPathInitialized = true; }, which 3.5.1 to 4.1 also have in
+    // StartWarmupPhase and StartAircraftPhase (Finder::ResolveFlightPathLive leaves it to them there).
+    if (!HasFlightPathInitialized() || bFlightPathInitialized || !Finder::ResolveFlightPathLive(Member_bFlightPathInitialized.GetOffsetChecked()))
+    {
+        return false;
+    }
+    AFortGameStateAthena* GameState = AthenaGameStateOf(this);
+    AFortAthenaMapInfo* MapInfo = GameState ? static_cast<AFortAthenaMapInfo*>(GameState->MapInfo) : nullptr;
+    if (!MapInfo || !Natives::AFortAthenaMapInfo_IsMapInfoValidForAircraft(MapInfo))
+    {
+        Log::Warning(L"Battle Royale: the aircraft paths can't be built (map info {})", MapInfo ? L"not valid for an aircraft" : L"missing");
+        return false;
+    }
+    Natives::AFortAthenaMapInfo_InitializeFlightPath(MapInfo, GameState);
+    bFlightPathInitialized = true;
+    return true;
+#else
+    return false;
+#endif
 }
 
 void AFortGameModeAthena::ApplyPlaylistDataTablesOnce()

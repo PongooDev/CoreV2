@@ -7778,6 +7778,93 @@ bool Finder::ResolvePlaylistDataTablesLive()
     return true;
 }
 
+bool Finder::ResolveSetCurrentPlaylistIdLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortGameStateAthena_SetCurrentPlaylistId || bSearched)
+    {
+        return Natives::AFortGameStateAthena_SetCurrentPlaylistId != nullptr;
+    }
+    bSearched = true;
+
+    // AFortGameStateAthena::SetCurrentPlaylistId (4.1 0xA6DD20, 4.2 0xA592E0) logs the playlist it found in the game
+    // mode's playlist manager, then sets CurrentPlaylistData and loads its assets.
+    const uintptr_t Function = FunctionOf(L"PLAYLIST: Playlist Object found in AFortGameStateAthena::SetCurrentPlaylistId() PlaylistName is %s (Server Only)");
+    if (!Function)
+    {
+        Log::Error(L"Finder: AFortGameStateAthena::SetCurrentPlaylistId not found");
+        return false;
+    }
+    Natives::AFortGameStateAthena_SetCurrentPlaylistId = reinterpret_cast<decltype(Natives::AFortGameStateAthena_SetCurrentPlaylistId)>(Function);
+    Log::Info(L"Finder: AFortGameStateAthena::SetCurrentPlaylistId at 0x{:X}", Function - Finder::ImageBase());
+    return true;
+}
+
+bool Finder::ResolveFlightPathLive(ptrdiff_t FlightPathInitializedOffset)
+{
+    static bool bSearched = false;
+    if (Natives::AFortAthenaMapInfo_InitializeFlightPath || bSearched)
+    {
+        return Natives::AFortAthenaMapInfo_InitializeFlightPath != nullptr;
+    }
+    if (FlightPathInitializedOffset <= 0 || !Natives::AFortGameModeAthena_StartAircraftPhase)
+    {
+        return false;
+    }
+    bSearched = true;
+
+    // The aircraft paths are built once, while AFortGameModeAthena's bFlightPathInitialized is false, the same way in
+    // each place that builds them:
+    //   cmp byte ptr [GameMode + bFlightPathInitialized], 0; jnz; mov rcx, MapInfo; call IsMapInfoValidForAircraft;
+    //   test al, al; jz; mov rdx, GameState; mov rcx, MapInfo; call InitializeFlightPath;
+    //   mov byte ptr [GameMode + bFlightPathInitialized], 1
+    // 3.5.1 to 4.1 have it in OnPlaylistDataLoaded (4.1 0xA2F500), StartWarmupPhase (0xA3D1B0) and StartAircraftPhase
+    // (0xA3B530), so a match that never loads its playlist (the bots-only test match) still has its paths when the bus
+    // leaves. 4.2 keeps only OnPlaylistDataLoaded's (0xA1BE40), and its StartAircraftPhase (0xA28610) spawns the
+    // aircraft (0xA27910) on FlightInfos[index] with no check that a path is there. Core only needs the build where
+    // StartAircraftPhase no longer has it.
+    const int32_t Offset = static_cast<int32_t>(FlightPathInitializedOffset);
+    const auto Bytes = [](int32_t Value, int32_t Index) { return (Value >> (8 * Index)) & 0xFF; };
+    const std::initializer_list<int32_t> Check = { 0x80, -1, Bytes(Offset, 0), Bytes(Offset, 1), Bytes(Offset, 2), Bytes(Offset, 3), 0x00, 0x75 };
+    const uintptr_t AircraftPhase = reinterpret_cast<uintptr_t>(Natives::AFortGameModeAthena_StartAircraftPhase);
+    if (FindInstruction(AircraftPhase, Finder::FunctionEnd(AircraftPhase), Check))
+    {
+        Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase builds the aircraft paths itself on this build");
+        return false;
+    }
+
+    const uintptr_t Loaded = FunctionOf(L"PLAYLIST: Playlist Object finished loading its assets and GameMode can now use the assets AFortGameModeAthena::OnPlaylistDataLoaded(), PlaylistName is %s (Server Only)");
+    const uintptr_t LoadedEnd = Loaded ? Finder::FunctionEnd(Loaded) : 0;
+    uintptr_t IsValid = 0;
+    uintptr_t Initialize = 0;
+    for (uintptr_t Site = FindInstruction(Loaded, LoadedEnd, Check); Site && !Initialize; Site = FindInstruction(Site + 1, LoadedEnd, Check))
+    {
+        // jnz rel8; mov rcx, MapInfo; call IsMapInfoValidForAircraft; test al, al; jz rel8; mov rdx, ...; mov rcx, ...; call
+        const uintptr_t ValidCall = FindInstruction(Site + 9, Site + 14, { 0x8B, -1, 0xE8 }) + 2;
+        if (ValidCall == 2 || Byte(ValidCall + 5) != 0x84 || Byte(ValidCall + 6) != 0xC0 || Byte(ValidCall + 7) != 0x74)
+        {
+            continue;
+        }
+        const uintptr_t InitCall = FindInstruction(ValidCall + 9, ValidCall + 18, { 0x8B, -1, -1, 0x8B, -1, 0xE8 }) + 5;
+        if (InitCall == 5 || !FindInstruction(InitCall + 5, InitCall + 13, { 0xC6, -1, Bytes(Offset, 0), Bytes(Offset, 1), Bytes(Offset, 2), Bytes(Offset, 3), 0x01 }))
+        {
+            continue;
+        }
+        IsValid = Finder::RelativeTarget(ValidCall, 1, 5);
+        Initialize = Finder::RelativeTarget(InitCall, 1, 5);
+    }
+    if (!IsInText(IsValid) || !IsInText(Initialize))
+    {
+        Log::Error(L"Finder: AFortAthenaMapInfo::InitializeFlightPath not found (OnPlaylistDataLoaded {}), StartAircraftPhase doesn't build the aircraft paths", Loaded != 0);
+        return false;
+    }
+    Natives::AFortAthenaMapInfo_IsMapInfoValidForAircraft = reinterpret_cast<decltype(Natives::AFortAthenaMapInfo_IsMapInfoValidForAircraft)>(IsValid);
+    Natives::AFortAthenaMapInfo_InitializeFlightPath = reinterpret_cast<decltype(Natives::AFortAthenaMapInfo_InitializeFlightPath)>(Initialize);
+    Log::Info(L"Finder: AFortAthenaMapInfo::InitializeFlightPath at 0x{:X}, IsMapInfoValidForAircraft at 0x{:X} (OnPlaylistDataLoaded 0x{:X}); StartAircraftPhase doesn't build the aircraft paths",
+        Initialize - Finder::ImageBase(), IsValid - Finder::ImageBase(), Loaded - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolvePoiVolumeLive()
 {
     static bool bSearched = false;

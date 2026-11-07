@@ -765,6 +765,16 @@ void FCoreAthenaBotManager::StartBotMatchIfAsked()
     {
         bBotMatchStarted = true;
         Log::Info(L"Battle Royale bots: -CoreBotMatch: starting a match of bots only");
+        // The match's playlist comes with its assignment, and nobody assigns this one. 3.5.1 to 4.1's InitGameState
+        // (4.1 0xA2B880) gives the game state the game mode's playlist at the world's start anyway; 4.2's leaves it to
+        // OnGivenMatchAssignment (0xA1B5F0), so the world had no playlist data: no aircraft paths, no safe zone
+        // locations (OnPlaylistDataLoaded, 0xA1BE40). The assignment's own call runs here, on the world's playlist.
+        if (AFortGameStateAthena::HasCurrentPlaylistData() && !static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) && Athena->CurrentPlaylistId >= 0
+            && Finder::ResolveSetCurrentPlaylistIdLive())
+        {
+            Log::Info(L"Battle Royale bots: -CoreBotMatch: the game state has no playlist, so it takes the world's playlist {}", static_cast<int32_t>(Athena->CurrentPlaylistId));
+            Natives::AFortGameStateAthena_SetCurrentPlaylistId(GameState, Athena->CurrentPlaylistId);
+        }
         reinterpret_cast<AGameMode*>(Athena)->StartMatch();
     }
     if (!bBotMatchAircraftStarted && GameState->GamePhase == EAthenaGamePhase::GetWarmup() && AFortGameStateAthena::HasWarmupCountdown()
@@ -773,6 +783,13 @@ void FCoreAthenaBotManager::StartBotMatchIfAsked()
         bBotMatchAircraftStarted = true;
         if (Natives::AFortGameModeAthena_StartAircraftPhase)
         {
+            // Nothing loads the match's playlist either, so OnPlaylistDataLoaded never builds the aircraft paths. 3.5.1
+            // to 4.1's StartWarmupPhase and StartAircraftPhase build them anyway; 4.2's don't, and its StartAircraftPhase
+            // spawns the aircraft on FlightInfos[0] unchecked: the game's own build runs first.
+            if (Athena->InitializeFlightPath())
+            {
+                Log::Info(L"Battle Royale bots: -CoreBotMatch: no playlist loaded, so the aircraft paths are built before the bus leaves");
+            }
             Log::Info(L"Battle Royale bots: -CoreBotMatch: the bus leaves with {} bots", GetAliveBotCount());
             Natives::AFortGameModeAthena_StartAircraftPhase(Athena);
         }

@@ -35,6 +35,12 @@ void APlayerController::AddCheats(bool bForce)
     if (Natives::APlayerController_AddCheatsIndex >= 0 || Finder::ResolvePlayerControllerCheats())
     {
         CallVirtual<void>(this, Natives::APlayerController_AddCheatsIndex, bForce);
+        // 4.2's AFortPlayerController::AddCheats is compiled out (up to 4.1 it was Super::AddCheats(bForce)): its Super call.
+        // Where the override still has it, the cheat manager is made by now and this does nothing.
+        if (!CheatManager && Natives::APlayerController_AddCheats)
+        {
+            Natives::APlayerController_AddCheats(this, bForce);
+        }
     }
 }
 

@@ -4465,7 +4465,15 @@ bool Finder::ResolvePlayerControllerCheats()
     }
 
     Natives::APlayerController_AddCheatsIndex = *reinterpret_cast<const int32_t*>(Body + 8) / static_cast<int32_t>(sizeof(void*));
-    Log::Info(L"Finder: APlayerController::EnableCheats is slot 0x{:X}, AddCheats slot 0x{:X}", EnableCheats, Natives::APlayerController_AddCheatsIndex);
+    // APlayerController::AddCheats (4.1 0x243DDF0, 4.2 0x22E9F80): if no CheatManager and CheatClass is a cheat manager,
+    // and the game mode's AllowCheats or bForce, a new CheatClass and its InitCheatManager. AFortPlayerController's
+    // override was Super::AddCheats(bForce) up to 4.1 (0xF56D50, a jump to it); 4.2 compiles its body out (0x4D4750, the
+    // shared empty function), so no Fort controller gets a cheat manager. APlayerController::AddCheats's call of it calls
+    // the engine's own as that override's Super when the override made none.
+    const uintptr_t AddCheats = VTableEntry(CdoVTable(L"/Script/Engine.PlayerController"), Natives::APlayerController_AddCheatsIndex);
+    Natives::APlayerController_AddCheats = IsInText(AddCheats) ? reinterpret_cast<decltype(Natives::APlayerController_AddCheats)>(AddCheats) : nullptr;
+    Log::Info(L"Finder: APlayerController::EnableCheats is slot 0x{:X}, AddCheats slot 0x{:X} (0x{:X})", EnableCheats, Natives::APlayerController_AddCheatsIndex,
+        AddCheats ? AddCheats - Finder::ImageBase() : 0);
     return true;
 }
 

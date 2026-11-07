@@ -44,6 +44,7 @@ class AFortAthenaMapInfo;
 class AFortGameStateAthena;
 class AFortAthenaSupplyDrop;
 class APlayerState;
+class APlayerController;
 class AFortPlayerState;
 class AFortPlayerPawn;
 class UFortItemDefinition;
@@ -642,6 +643,9 @@ namespace Natives
     inline int32_t APlayerController_ConsoleKeyIndex = -1;
     inline int32_t APlayerController_SendToConsoleIndex = -1;
     inline int32_t APlayerController_AddCheatsIndex = -1;
+    // APlayerController::AddCheats itself (the engine's, from PlayerController's own vtable), for the Super::AddCheats call
+    // of AFortPlayerController::AddCheats, which 4.2 compiles out (Finder::ResolvePlayerControllerCheats).
+    inline void (*APlayerController_AddCheats)(APlayerController* This, bool bForce) = nullptr;
     inline int32_t UAssetManager_GetPrimaryAssetDataListIndex = -1;
     inline int32_t AFortPlayerController_PushToTalkPressedIndex = -1;
     inline int32_t AFortPlayerController_PushToTalkReleasedIndex = -1;

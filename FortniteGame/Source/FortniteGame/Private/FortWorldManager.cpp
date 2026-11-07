@@ -1086,15 +1086,17 @@ void AFortWorldManager::Hook()
     {
         Log::Error(L"Finder: AFortPlayerController NewPlayer mission event sender not found");
     }
-
-    if (HasEarnedItemCaches())
-    {
-        Log::Info(L"Item caches: picked-up caches are kept in UnsavedPlayerEarnedItemCaches (+0x{:X}) for EndPrimaryMission's EarnedItemCaches", Member_UnsavedPlayerEarnedItemCaches.GetOffsetChecked());
-    }
 }
 
 void AFortWorldManager::HookCallSites()
 {
+    // On the game thread: Hook runs before the engine's WinMain on unpacked builds (1.1-1.9), where StaticFindObject's
+    // hash table lock isn't made yet (#311).
+    if (HasEarnedItemCaches())
+    {
+        Log::Info(L"Item caches: picked-up caches are kept in UnsavedPlayerEarnedItemCaches (+0x{:X}) for EndPrimaryMission's EarnedItemCaches", Member_UnsavedPlayerEarnedItemCaches.GetOffsetChecked());
+    }
+
     if (uint8_t* Call = Finder::QuickBarChangedWorldManagerCall())
     {
         Hooks::RedirectCall(L"AFortQuickBars quickbar changed -> AFortWorldManager::UpdatePlayerQuickBarRecords", Call, reinterpret_cast<void*>(&UpdatePlayerQuickBarRecordsCall));

@@ -16,6 +16,7 @@
 #include "UObject/Class.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <algorithm>
 #include <vector>
 
 EFortQuickBars AFortQuickBars::GetCurrentQuickBar()
@@ -75,40 +76,63 @@ namespace
 {
     // The client reports its own activation (ServerExecuteInventoryItem) a round trip after the swap's inventory change.
     constexpr float SwappedInItemLifetime = 2.0f;
+    // How many of the client's executes after one swap are answered with the swapped-in item, so a client that keeps
+    // going back to another stack can't make the two bounce for the whole lifetime.
+    constexpr int32_t MaxSwappedInItemAnswers = 3;
 
     struct FSwappedInItem
     {
         TWeakObjectPtr<AFortQuickBars> QuickBars;
         FGuid Item;
+        // Only compared, never read: the definition of the item the swap dropped.
+        const UFortItemDefinition* SwappedOutDefinition;
         float Time;
+        int32_t Answers;
+        // The client executed the swapped-in item itself.
+        bool bExecuted;
     };
 
     std::vector<FSwappedInItem> SwappedInItems;
 }
 
-void AFortQuickBars::SetSwappedInItem(const FGuid& Item)
+void AFortQuickBars::SetSwappedInItem(const FGuid& Item, const UFortItemDefinition* SwappedOutDefinition)
 {
     UWorld* World = GetWorld();
     std::erase_if(SwappedInItems, [this](const FSwappedInItem& Entry) { return !Entry.QuickBars.Get() || Entry.QuickBars.Get() == this; });
-    SwappedInItems.push_back({ this, Item, World ? World->GetTimeSeconds() : 0.0f });
+    SwappedInItems.push_back({ this, Item, SwappedOutDefinition, World ? World->GetTimeSeconds() : 0.0f, 0, false });
 }
 
-bool AFortQuickBars::TakeSwappedInItem(FGuid& OutItem)
+bool AFortQuickBars::GetSwappedInItemFor(const FGuid& ExecutedItem, const UFortItemDefinition* ExecutedDefinition, FGuid& OutItem)
 {
     UWorld* World = GetWorld();
     const float Now = World ? World->GetTimeSeconds() : 0.0f;
-    bool bFound = false;
-    for (auto It = SwappedInItems.begin(); It != SwappedInItems.end(); ++It)
+    const auto It = std::find_if(SwappedInItems.begin(), SwappedInItems.end(), [this](const FSwappedInItem& Entry) { return Entry.QuickBars.Get() == this; });
+    if (It == SwappedInItems.end())
     {
-        if (It->QuickBars.Get() == this)
-        {
-            bFound = Now - It->Time <= SwappedInItemLifetime;
-            OutItem = It->Item;
-            SwappedInItems.erase(It);
-            break;
-        }
+        return false;
     }
-    return bFound;
+    if (Now - It->Time > SwappedInItemLifetime || It->Answers >= MaxSwappedInItemAnswers)
+    {
+        SwappedInItems.erase(It);
+        return false;
+    }
+    if (ExecutedItem == It->Item)
+    {
+        // The client holds the swapped-in item. It is kept a while longer for a late move to the dropped item's other stack.
+        It->bExecuted = true;
+        return false;
+    }
+    // The client's first other item is where its quickbar moved when the held item went (#269). After that, only a stack of
+    // the dropped item is answered (#309): with another stack of the held consumable in another slot, the client went on
+    // to that stack (the full one) instead of the swapped-in weapon. Any other item is the player's own choice.
+    if ((It->Answers > 0 || It->bExecuted) && (!ExecutedDefinition || ExecutedDefinition != It->SwappedOutDefinition))
+    {
+        SwappedInItems.erase(It);
+        return false;
+    }
+    ++It->Answers;
+    OutItem = It->Item;
+    return true;
 }
 
 void AFortQuickBars::EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex)

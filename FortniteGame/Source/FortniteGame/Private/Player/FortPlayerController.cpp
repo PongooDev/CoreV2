@@ -1222,10 +1222,12 @@ void AFortPlayerController::ServerExecuteInventoryItem_Implementation(const FGui
     if (Bars && !Bars->IsReplicatedToOwner())
     {
         // Right after a full-backpack swap, the client's quickbar moved on to the next slot when the held item went and
-        // activated it, which dropped the swapped-in weapon's pending execute (#269). That item is executed again
-        // instead: the client then has it in the emptied slot, and focuses and equips it there.
+        // activated it, which dropped the swapped-in weapon's pending execute (#269), or the client went on to another
+        // stack of the dropped consumable (#309). That item is executed again instead: the client then has it in the
+        // emptied slot, and focuses and equips it there.
         FGuid SwappedInItem;
-        if (Bars->TakeSwappedInItem(SwappedInItem) && SwappedInItem != ItemGuid && Bars->ContainsItem(SwappedInItem))
+        FFortItemEntry& ExecutedEntry = WorldItem->ItemEntry;
+        if (Bars->GetSwappedInItemFor(ItemGuid, static_cast<UFortItemDefinition*>(ExecutedEntry.ItemDefinition), SwappedInItem) && Bars->ContainsItem(SwappedInItem))
         {
             UE_LOG(LogFort, Log, TEXT("ServerExecuteInventoryItem: %s's client moved off its swapped-in item, which it executes again"), *GetNameSafe(this));
             ClientExecuteInventoryItem(SwappedInItem, 0.0f, false, true);

@@ -159,7 +159,7 @@ namespace
     // item type, the backpack's count at its size, and the focused quickbar slot's item, 0x66BF80, one that
     // bCanBeDropped; the pickaxe can't) and shows "Swap equipped" (0x66C3C0), but the swap was in the stripped give: Core's
     // tossed the weapon back down. The held item is dropped as the player's own drop would be; returns the primary slot
-    // it emptied, or -1.
+    // it emptied, or -1, and the dropped item's definition in OutDroppedDefinition.
     //
     // The slot stays focused through the drop. Removing the focused item activates the previous slot, or the harvesting
     // tool's (slot 0), and that activation sends ClientExecuteInventoryItem for its item (1.7.2 0x67E190 -> 0x67F240 ->
@@ -187,7 +187,7 @@ namespace
             || (Consumable != Reflection::InvalidEnumValue && ItemType == Consumable);
     }
 
-    int32_t DropFocusedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry)
+    int32_t DropFocusedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry, const UFortItemDefinition*& OutDroppedDefinition)
     {
         const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
         const EFortItemType ItemType = ItemDefinition ? static_cast<EFortItemType>(ItemDefinition->ItemType) : EFortItemType::GetMax_None();
@@ -260,6 +260,7 @@ namespace
             return -1;
         }
         Log::Info(L"Battle Royale: {} swaps {} for {} in quickbar slot {} (slot 0 is the harvesting tool's)", PlayerController->GetName().ToStdString(), FocusedDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(), FocusedSlot);
+        OutDroppedDefinition = FocusedDefinition;
         return FocusedSlot;
     }
 
@@ -822,6 +823,7 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
     AFortPawn* Pawn = PlayerController->MyFortPawn;
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     int32_t SwappedSlot = -1;
+    const UFortItemDefinition* DroppedDefinition = nullptr;
     // An item cache (4.0) isn't an item the player carries: the world manager keeps it for the end of the mission, when
     // EndPrimaryMission's EarnedItemCaches has the MCP give its card pack (AFortWorldManager::AddEarnedItemCache).
     UWorld* World = GetWorld();
@@ -846,7 +848,7 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         int32_t EntrySwappedSlot = -1;
         if (SwappedSlot < 0)
         {
-            SwappedSlot = EntrySwappedSlot = DropFocusedItemForSwap(PlayerController, *Entry);
+            SwappedSlot = EntrySwappedSlot = DropFocusedItemForSwap(PlayerController, *Entry, DroppedDefinition);
         }
         const int32_t Given = GiveItemEntry(PlayerController, *Entry, EntrySwappedSlot);
         if (Given > 0)
@@ -886,7 +888,7 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
             // dropped there, and the server's quickbar can't keep the slot focused for it (#269).
             if (!Bars->IsReplicatedToOwner())
             {
-                Bars->SetSwappedInItem(SwappedItems[0]);
+                Bars->SetSwappedInItem(SwappedItems[0], DroppedDefinition);
             }
         }
         else

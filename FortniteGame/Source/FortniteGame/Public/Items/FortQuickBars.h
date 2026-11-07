@@ -98,10 +98,13 @@ public:
     // its focus to the next slot when the held item goes (AFortQuickBarsAthena's ServerRemoveItemInternal_Implementation,
     // 3.5.2 0xA75070, cycles on the primary bar). That activation goes through ClientExecuteInventoryItem_Implementation,
     // which replaces the item the server's execute left pending, so the server asks again once the client reports it.
-    void SetSwappedInItem(const FGuid& Item);
-    // The swapped-in item the server still has to execute when the client reports another one, which is then forgotten.
-    // Only for a short while after the swap.
-    bool TakeSwappedInItem(FGuid& OutItem);
+    // SwappedOutDefinition is the dropped item's definition: with another stack of it elsewhere on the quickbar (#309), the
+    // client can move on to that stack even after it took the swapped-in item.
+    void SetSwappedInItem(const FGuid& Item, const UFortItemDefinition* SwappedOutDefinition);
+    // Whether the client's execute of ExecutedItem is to be answered by executing the swapped-in item again (OutItem): its
+    // first execute of another item, and after that one of the dropped item's other stacks. Only for a short while after
+    // the swap, and a few times at most.
+    bool GetSwappedInItemFor(const FGuid& ExecutedItem, const UFortItemDefinition* ExecutedDefinition, FGuid& OutItem);
 
     static void HookVTables();
 

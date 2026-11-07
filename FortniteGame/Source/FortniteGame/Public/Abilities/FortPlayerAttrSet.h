@@ -23,6 +23,29 @@ public:
     DefineUStructProperty(FFortGameplayAttributeData, HarvestingTool)
 };
 
+// A player's building speed (on the player state's ability system). GE_DefaultPlayer_BuildTime, which
+// GA_DefaultPlayer_BuildingCreated applies to each piece the player places, divides the piece's BuildTime by it.
+class UFortConstructionSet : public UAttributeSet
+{
+    DefineUnrealClass(UFortConstructionSet, FortniteGame)
+
+public:
+    DefineUStructProperty(FFortGameplayAttributeData, BuildSpeed)
+    static bool HasBuildSpeed() { return StaticClass() && Member_BuildSpeed.IsAvailable(); }
+};
+
+// A building piece's own attributes (ABuildingActor::BuildingAttributeSet). BuildTime is the time a placed piece takes to
+// build up (ABuildingSMActor::GetBuildTime reads it, 4.1 0xAF5560): its base value is the curve table's, its current one
+// after the placer's GE_DefaultPlayer_BuildTime.
+class UFortBuildingActorSet : public UAttributeSet
+{
+    DefineUnrealClass(UFortBuildingActorSet, FortniteGame)
+
+public:
+    DefineUStructProperty(FFortGameplayAttributeData, BuildTime)
+    static bool HasBuildTime() { return StaticClass() && Member_BuildTime.IsAvailable(); }
+};
+
 class UFortHealthSet : public UAttributeSet
 {
     DefineUnrealClass(UFortHealthSet, FortniteGame)

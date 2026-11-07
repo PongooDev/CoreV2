@@ -73,6 +73,10 @@ public:
     DefineUProperty(int32_t, MaxResourcesToSpawn)
     DefineBitfieldUProperty(bAllowResourceDrop)
     DefineBitfieldUProperty(bClearMIDWhenReturningToUndamagedState)
+    // Set while a newly placed piece builds up (InitializeBuildingActor sets it when the piece has a BuildTime and animating
+    // materials, 4.1 0xAFE680; Tick clears it at full health, 0xB11BF0).
+    DefineBitfieldUProperty(bIsInitiallyBuilding)
+    static bool HasIsInitiallyBuilding() { return Member_bIsInitiallyBuilding.IsAvailable(); }
     DefineUProperty(TArray<UMaterialInstanceDynamic*>, AnimatingMIDs)
     DefineUProperty(UStaticMeshComponent*, StaticMeshComponent)
     DefineUProperty(AFortPlayerStateZone*, EditingPlayer)

@@ -1,5 +1,8 @@
 #include "pch.h"
 #include "Player/FortPlayerController.h"
+#include "Abilities/FortPlayerAttrSet.h"
+#include "Abilities/GameplayAbility.h"
+#include "AbilitySystemComponent.h"
 #include "Athena/AI/AthenaNavSystem.h"
 #include "Building/BuildingSMActor.h"
 #include "Engine/World.h"
@@ -11,6 +14,7 @@
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
+#include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Pawns/FortPawn.h"
@@ -33,6 +37,8 @@
 // slots Finder::ResolveBuildingRestorationLive finds. They leave out 1.8's analytics event ("Building.BuildingAction"),
 // its messages and feedback to the client when the server refuses (the client asks the same questions before it sends
 // the RPC and shows its own), and two cosmetic montages after a piece is placed (the build tool's and the pawn's).
+
+DEFINE_LOG_CATEGORY_STATIC(LogFortBuilding, Log, All);
 
 namespace
 {
@@ -93,6 +99,54 @@ namespace
     void SetEditingPlayer(ABuildingSMActor* Building, AFortPlayerStateZone* EditingPlayer)
     {
         CallVirtual<void>(Building, Natives::ABuildingSMActor_SetEditingPlayerIndex, EditingPlayer);
+    }
+
+    // Diagnostic for #300 (a player's piece starting at full health): what decides whether a newly placed piece builds up.
+    // InitializeBuildingActor (4.1 0xAFE680) sends Gameplay.Effect.Building.Create to the placer's ability system, whose
+    // GA_DefaultPlayer_BuildingCreated applies GE_DefaultPlayer_BuildTime to the piece (BuildTime divided by the placer's
+    // UFortConstructionSet BuildSpeed). The piece builds up only when its BuildTime is then above 0: it starts at
+    // MaxHealth * the initial health percent, with bIsInitiallyBuilding set, and Tick heals it to full.
+    void LogPlacedPieceBuildUp(ABuildingSMActor* Building, AFortPlayerState* Placer)
+    {
+        float BaseBuildTime = -1.0f;
+        float BuildTime = -1.0f;
+        if (ABuildingActor::HasBuildingAttributeSet() && UFortBuildingActorSet::HasBuildTime())
+        {
+            if (UFortBuildingActorSet* Set = Building->BuildingAttributeSet)
+            {
+                const FFortGameplayAttributeData& Attribute = Set->BuildTime;
+                BaseBuildTime = Attribute.GetBaseValue();
+                BuildTime = Attribute.GetCurrentValue();
+            }
+        }
+
+        UAbilitySystemComponent* AbilitySystem = Placer ? static_cast<UAbilitySystemComponent*>(Placer->AbilitySystemComponent) : nullptr;
+        float BuildSpeed = -1.0f;
+        int32_t BuildingCreatedSpecs = 0;
+        if (AbilitySystem)
+        {
+            if (UFortConstructionSet::HasBuildSpeed())
+            {
+                if (const UFortConstructionSet* ConstructionSet = AbilitySystem->GetSet<UFortConstructionSet>())
+                {
+                    BuildSpeed = static_cast<const FFortGameplayAttributeData&>(ConstructionSet->BuildSpeed).GetCurrentValue();
+                }
+            }
+            TStructArray<FGameplayAbilitySpec>& Specs = AbilitySystem->ActivatableAbilities.Items;
+            for (int32_t Index = 0; Index < Specs.Num(); ++Index)
+            {
+                UGameplayAbility* Ability = Specs[Index].Ability;
+                if (Ability && Ability->GetClass()->GetName().ToStdString() == L"GA_DefaultPlayer_BuildingCreated_C")
+                {
+                    ++BuildingCreatedSpecs;
+                }
+            }
+        }
+
+        const wchar_t* InitiallyBuilding = ABuildingSMActor::HasIsInitiallyBuilding() ? (Building->bIsInitiallyBuilding ? L"yes" : L"no") : L"unknown";
+        UE_LOG(LogFortBuilding, Log, TEXT("%s placed %s: BuildTime %.2f (base %.2f), health %.0f/%.0f, bIsInitiallyBuilding %s; placer BuildSpeed %.3f, %d GA_DefaultPlayer_BuildingCreated"),
+            Placer ? *Placer->GetName() : TEXT("nobody"), *Building->GetName(), BuildTime, BaseBuildTime, Building->GetHealth(), Building->GetMaxHealth(), InitiallyBuilding,
+            BuildSpeed, BuildingCreatedSpecs);
     }
 }
 
@@ -252,6 +306,7 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     const int32_t WorldPlayerId = FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -1;
     CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, true, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
     CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, true);
+    LogPlacedPieceBuildUp(Building, FortPlayerState);
     UAthenaNavSystem::AddDirtyArea(Building);
     FBuildingClassData PayClassData = BuildingClassData;
     CallVirtual<int32_t>(this, Natives::AFortPlayerController_PayBuildableClassPlacementCostIndex, &PayClassData);

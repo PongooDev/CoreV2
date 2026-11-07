@@ -6,6 +6,7 @@
 #include "UObject/ScriptDelegates.h"
 
 class UAbilitySystemComponent;
+class UFortBuildingActorSet;
 
 class EFortBuildingPersistentState
 {
@@ -44,6 +45,9 @@ public:
     DefineUProperty(FMulticastScriptDelegate, OnDied)
     DefineBitfieldUProperty(bPlayerPlaced)
     DefineUProperty(bool, bFireBuiltAndDestroyedEvents)
+    // The piece's UFortBuildingActorSet (its BuildTime and RepairTime), made with its ability system.
+    DefineUProperty(UFortBuildingActorSet*, BuildingAttributeSet)
+    static bool HasBuildingAttributeSet() { return Member_BuildingAttributeSet.IsAvailable(); }
 
     float GetHealth() const;
     // Whether the zone's structure count includes this piece: one alive, player built (IsPlayerBuilt, 1.8 0x47F850: an

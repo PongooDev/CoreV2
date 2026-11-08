@@ -116,7 +116,10 @@ namespace
     };
 
     // The objective's new count shows on the player's client, as SendStatEventWithTags gives it (1.9 0x866A00, 1.9.1
-    // 0x869010: the entry for the quest and objective, else a new one).
+    // 0x869010: the entry for the quest and objective, else a new one). 4.4.2 keeps it unchanged (0xFC0690: find by Quest
+    // and BackendName, else add, then StatValue), and its client shows the toast again (gone on 4.0-4.2, #320): the
+    // OnRep (0xFA5A30) has the Athena quest manager re-init its quests from the update (0x1008000), whose quest items
+    // take the replicated StatValue over the profile's count (0x101B430 reads it through 0xF7DE50).
     void ShowObjectiveCount(AFortPlayerController* PlayerController, UFortItemDefinition* QuestDefinition, FName BackendName, int32_t Count)
     {
         if (!PlayerController || !AFortPlayerControllerQuests::HasUpdatedObjectiveStats())

@@ -2248,6 +2248,37 @@ namespace
                 ++DormantReplicatorRemoves;
             }
         }
+        // 4.4 (0x227DA30) moves the removal into a connection helper it calls per connection (0x2271BC0, as 4.21's
+        // UNetConnection::CleanupDormantReplicatorsForActor): DormantReplicatorMap.Remove for the actor and each of its
+        // subobjects, both lea rcx, [rbp+1700h]. Count the distinct offsets in the callees.
+        if (DormantReplicatorRemoves == 0 && ActorChannels > 0 && DestroyedActorAdds == 1)
+        {
+            std::vector<uintptr_t> Scanned;
+            std::vector<ptrdiff_t> Found;
+            for (const auto& [Site, Target] : NotifyCalls)
+            {
+                if (std::find(Scanned.begin(), Scanned.end(), Target) != Scanned.end())
+                {
+                    continue;
+                }
+                Scanned.push_back(Target);
+                const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
+                for (uintptr_t Lea = Target; TargetEnd && TargetEnd - Target < 0x200 && Lea + 7 <= TargetEnd; ++Lea)
+                {
+                    const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Lea + 3);
+                    if (Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04 && Offset > ActorChannels && Offset != ConnectionDestroyedActors && Offset < ConnectionDestroyedActors + 0x100
+                        && std::find(Found.begin(), Found.end(), Offset) == Found.end())
+                    {
+                        Found.push_back(Offset);
+                    }
+                }
+            }
+            if (Found.size() == 1)
+            {
+                DormantReplicators = Found[0];
+                DormantReplicatorRemoves = 1;
+            }
+        }
         RequireOffset(L"UNetConnection::DormantReplicatorMap", Natives::UNetConnection_DormantReplicatorMap, DormantReplicatorRemoves == 1 ? DormantReplicators : 0);
 
         const uintptr_t ActorChannelClose = FunctionOf(L"UActorChannel::Close: ChIndex: %d, Actor: %s");
@@ -10835,6 +10866,33 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
             CanPerformAction = VirtualSlot(Site);
         }
     }
+    // 4.4 (0xF9A9CA) adds the slot to the vtable first and calls through the register, with the controller moved into
+    // rcx after the tag getter: mov rbx, [rdi]; add rbx, 13E8h; call TagsGetter; mov rcx, rdi;
+    // lea rdx, [rax+Tag]; call qword ptr [rbx].
+    for (uintptr_t Lea = PlaceEnd && TagsGetter && !InteractBuild.IsNone() && CanPerformAction < 0 ? FindInstruction(Place, PlaceEnd, { 0x48, 0x8D, 0x90 }) : 0; Lea && CanPerformAction < 0; Lea = FindInstruction(Lea + 1, PlaceEnd, { 0x48, 0x8D, 0x90 }))
+    {
+        // call qword ptr [reg] (not rsp/rbp) right after the lea.
+        const uint8_t ModRm = Byte(Lea + 8);
+        if (Byte(Lea + 7) != 0xFF || (ModRm & 0xF8) != 0x10 || (ModRm & 0x07) == 0x04 || (ModRm & 0x07) == 0x05 || !CallWithin(Lea - 0x10, 0x10, TagsGetter))
+        {
+            continue;
+        }
+        // add reg, imm32 (48 81 C0+reg) on the same register shortly before.
+        uintptr_t Add = 0;
+        for (uintptr_t Candidate = Lea - 0x20 > Place ? Lea - 0x20 : Place; Candidate + 7 <= Lea; ++Candidate)
+        {
+            if (Byte(Candidate) == 0x48 && Byte(Candidate + 1) == 0x81 && Byte(Candidate + 2) == (0xC0 | (ModRm & 0x07)))
+            {
+                Add = Candidate;
+            }
+        }
+        const int32_t Displacement = Add ? *reinterpret_cast<const int32_t*>(Add + 3) : 0;
+        const uintptr_t Tags = Add && Displacement > 0 && Displacement % 8 == 0 ? reinterpret_cast<uintptr_t (*)()>(TagsGetter)() : 0;
+        if (Tags && *reinterpret_cast<const FName*>(Tags + *reinterpret_cast<const int32_t*>(Lea + 3)) == InteractBuild)
+        {
+            CanPerformAction = Displacement / 8;
+        }
+    }
 
     const auto BodyIs = [](uintptr_t Entry, std::initializer_list<int32_t> Pattern)
     {
@@ -11301,6 +11359,36 @@ bool Finder::ResolveMatchStatsLive()
             break;
         }
     }
+    // 4.4 strips that reader (0x9AD6E0 only builds its static names). GetStatValue (0x1045A60) then is the caller of the
+    // stat lookup (0x10459D0, the first call of the "Attempt to modify stat" setter, 0x1047A60) that rounds the period's
+    // value at once: call Lookup; ...; cvtss2si eax, xmm1; sar eax, 1 (FMath::RoundToInt).
+    if (!Natives::UStatManager_GetStatValue)
+    {
+        const uintptr_t ModifyStat = FunctionOf(L"Attempt to modify stat '%s' failed as it cannot be found!");
+        const uintptr_t ModifyStatEnd = ModifyStat ? Finder::FunctionEnd(ModifyStat) : 0;
+        const std::vector<std::pair<uintptr_t, uintptr_t>> ModifyCalls = ModifyStatEnd ? Finder::DirectCalls(ModifyStat, ModifyStatEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+        const uintptr_t Lookup = ModifyCalls.empty() ? 0 : ModifyCalls.front().second;
+        uintptr_t GetStatValue = 0;
+        int32_t Candidates = 0;
+        for (const uintptr_t Site : Lookup ? Finder::CallsTo(Lookup, false) : std::vector<uintptr_t>())
+        {
+            const uintptr_t Function = Finder::FunctionStart(Site);
+            if (!Function || Function == ModifyStat || Function == GetStatValue || Site - Function > 0x10)
+            {
+                continue;
+            }
+            const uintptr_t Round = FindInstruction(Site, Site + 0x40, { 0xF3, 0x0F, 0x2D, -1, 0xD1, 0xF8 });
+            if (Round)
+            {
+                GetStatValue = Function;
+                ++Candidates;
+            }
+        }
+        if (Candidates == 1)
+        {
+            Natives::UStatManager_GetStatValue = reinterpret_cast<decltype(Natives::UStatManager_GetStatValue)>(GetStatValue);
+        }
+    }
     if (!Natives::UStatManager_GetStatValue)
     {
         Log::Error(L"Finder: UStatManager::GetStatValue not found, the end-of-match screen gets no stats from the StatManager");
@@ -11602,6 +11690,23 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
                 bStaticDeathCause = (Byte(Site - 2) == 0x33 || Byte(Site - 2) == 0x31) && Byte(Site - 1) == 0xD2;
                 return true;
             }
+            // 4.4 (0xAD5AC2) builds the FDeathInfo on the stack and hands it to the player state's setter (0xAC4BB0):
+            // xor edx, edx; call ToDeathCause; mov byte ptr [rsp + Info.DeathCause], al; ...;
+            // mov byte ptr [rsp + Info.bDBNO], 1.
+            if ((Byte(Site - 2) == 0x33 || Byte(Site - 2) == 0x31) && Byte(Site - 1) == 0xD2 && Byte(Site + 5) == 0x88 && Byte(Site + 6) == 0x44 && Byte(Site + 7) == 0x24
+                && DeathInfoDBNOOffset + 1 == DeathCauseOffset)
+            {
+                const uint8_t CauseSlot = Byte(Site + 8);
+                for (uintptr_t Flag = Site + 9; Flag + 5 <= Site + 0x20; ++Flag)
+                {
+                    if (Byte(Flag) == 0xC6 && Byte(Flag + 1) == 0x44 && Byte(Flag + 2) == 0x24 && Byte(Flag + 3) == static_cast<uint8_t>(CauseSlot - 1) && Byte(Flag + 4) == 0x01)
+                    {
+                        GetDeathCause = Finder::RelativeTarget(Site, 1, 5);
+                        bStaticDeathCause = true;
+                        return true;
+                    }
+                }
+            }
         }
         return false;
     });
@@ -11681,6 +11786,32 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
                     {
                         return true;
                     }
+                }
+            }
+            return false;
+        });
+        // 4.4 adds inline in the team join (0xA711C0, called by the game mode's virtual 0xA95DE0 after the player
+        // state's dedicated-server flag): "lea rcx, [r14 + TeamMembers]; call" TArray's AddUnique, then the sort.
+        const auto AddsTeamMemberInline = [TeamMembersOffset](uintptr_t Callee)
+        {
+            const uintptr_t End = Finder::FunctionStart(Callee) == Callee ? Finder::FunctionEnd(Callee) : 0;
+            for (uintptr_t Lea = Callee; End && Lea + 12 <= End; ++Lea)
+            {
+                if ((Byte(Lea) & 0xFE) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == 0x88 && (Byte(Lea + 2) & 0x07) != 0x04
+                    && *reinterpret_cast<const int32_t*>(Lea + 3) == TeamMembersOffset && Byte(Lea + 7) == 0xE8)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        GameModeTeamJoinIndex = GameModeTeamJoinIndex >= 0 ? GameModeTeamJoinIndex : FirstVTableIndexWhere(GameModeVTable, [&](uintptr_t Entry)
+        {
+            for (const auto& [Site, Callee] : CallsOf(Entry))
+            {
+                if (AddsTeamMemberInline(Callee))
+                {
+                    return true;
                 }
             }
             return false;

@@ -5839,9 +5839,109 @@ void UFortCheatManager::GiveAthenaFullKit()
 #endif
 }
 
+void UFortCheatManager::God()
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF2C820), UCheatManager::God's override: the possessed pawn's replicated bIsInvulnerable flips.
+    APlayerController* PlayerController = GetOuterAPlayerController();
+    if (!PlayerController)
+    {
+        return;
+    }
+    AFortPawn* Pawn = Cast<AFortPawn>(PlayerController->GetPawn());
+    if (!Pawn || !AFortPawn::HasInvulnerable())
+    {
+        PlayerController->ClientMessage(TEXT("No FortPawn* possessed"));
+        return;
+    }
+    if (Pawn->bIsInvulnerable)
+    {
+        Pawn->bIsInvulnerable = false;
+        PlayerController->ClientMessage(TEXT("God Mode off"));
+    }
+    else
+    {
+        Pawn->bIsInvulnerable = true;
+        PlayerController->ClientMessage(TEXT("God mode on"));
+    }
+#endif
+}
+
+void UFortCheatManager::CraftFree()
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF1E390): the controller's replicated bCraftFree, which crafting's cost checks read, flips.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController || !AFortPlayerController::HasCraftFreeFlag())
+    {
+        return;
+    }
+    PlayerController->bCraftFree = !PlayerController->bCraftFree;
+    PlayerController->ClientMessage(FString::Printf(TEXT("CraftFree is %d"), static_cast<bool>(PlayerController->bCraftFree) ? 1 : 0));
+#endif
+}
+
+void UFortCheatManager::BackpackSetSize(int32_t Size)
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF19E20): the controller's replicated OverriddenBackpackSize, which the inventory's slot count reads.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController || !AFortPlayerController::HasOverriddenBackpackSize())
+    {
+        return;
+    }
+    PlayerController->OverriddenBackpackSize = Size;
+#endif
+}
+
+void UFortCheatManager::ListSpawnGroups()
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF35AC0) prints the spawn groups SpawnAIGroup takes on the server's own screen and log, where the player
+    // doesn't see them: here they answer the player, by the names SpawnAIGroup finds them by.
+    std::vector<FCheatAsset> Assets = ListAssets({ L"FortAISpawnGroup" });
+    std::sort(Assets.begin(), Assets.end(), [](const FCheatAsset& A, const FCheatAsset& B) { return A.Name < B.Name; });
+    Reply(TEXT("Valid spawn group names that can be spawned with SpawnAIGroup:"));
+    for (const FCheatAsset& Asset : Assets)
+    {
+        Reply(FString::Printf(TEXT("Name: %s"), Asset.Name.c_str()));
+    }
+#endif
+}
+
 void UFortCheatManager::FlyHK(UFortCheatManager* This)
 {
     This->Fly();
+}
+
+void UFortCheatManager::GodHK(UFortCheatManager* This)
+{
+    This->God();
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execCraftFree)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->CraftFree();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execBackpackSetSize)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_Size);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->BackpackSetSize(Z_Param_Size);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execListSpawnGroups)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->ListSpawnGroups();
+    P_NATIVE_END;
 }
 
 DEFINE_FUNCTION(UFortCheatManager::execBuildFree)
@@ -5880,6 +5980,49 @@ namespace
             }
         }
         return false;
+    }
+
+    // An exec with parameters (4.2's shared int exec, 0x1107770: the argument read through FFrame::Step, then "call Body")
+    // whose body is the shared empty function.
+    bool ExecCallsStub(UFunction* Function)
+    {
+        const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+        const uintptr_t End = Exec ? Finder::FunctionEnd(Exec) : 0;
+        if (!Exec || !End || End - Exec > 0x200)
+        {
+            return false;
+        }
+        for (const auto& [Call, Target] : Finder::DirectCalls(Exec, End))
+        {
+            if (Finder::IsStubFunction(Target))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Each UFortCheatManager class's vtable slot Index, where the base class's holds the shared empty function (an
+    // override compiled out of this build), gets Hook.
+    void RestoreStubbedOverride(UClass* BaseClass, int32_t Index, void* Hook, const wchar_t* Name)
+    {
+        UObject* const Default = BaseClass->GetDefaultObject(false);
+        void** const DefaultVTable = Default ? *reinterpret_cast<void***>(Default) : nullptr;
+        void* const Original = DefaultVTable && Index >= 0 ? DefaultVTable[Index] : nullptr;
+        if (!Original || !Finder::IsStubFunction(reinterpret_cast<uintptr_t>(Original)))
+        {
+            return;
+        }
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(BaseClass) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[Index] == Original)
+            {
+                Hooks::SwapVTable(Name, VTable, Index, Hook);
+            }
+        }
     }
 }
 
@@ -5954,6 +6097,10 @@ void UFortCheatManager::HookNatives()
     for (const auto& [Function, Native, Name] : {
              std::tuple{ FindStaticFunction_BuildFree(), &execBuildFree, L"UFortCheatManager::BuildFree" },
              std::tuple{ FindStaticFunction_GiveAthenaFullKit(), &execGiveAthenaFullKit, L"UFortCheatManager::GiveAthenaFullKit" },
+             // CraftFree (4.1 0xF1E390) too.
+             std::tuple{ FindStaticFunction_CraftFree(), &execCraftFree, L"UFortCheatManager::CraftFree" },
+             // ListSpawnGroups (4.1 0xF35AC0) too.
+             std::tuple{ FindStaticFunction_ListSpawnGroups(), &execListSpawnGroups, L"UFortCheatManager::ListSpawnGroups" },
          })
     {
         if (ExecJumpsToStub(Function))
@@ -5962,26 +6109,19 @@ void UFortCheatManager::HookNatives()
             Log::Info(L"Hook {}: native", Name);
         }
     }
-
-    // UFortCheatManager::Fly, UCheatManager::Fly's override (4.1 0xF25090), is the shared empty function in 4.2's vtable
-    // (0x4D4750), so "cheat fly" answered nothing and nothing flew (#312). Where it is, the slot gets Core's body back.
-    const int32_t FlyIndex = Finder::ImplementationIndex(FindStaticFunction_Fly());
-    UObject* const Default = StaticClass()->GetDefaultObject(false);
-    void** const DefaultVTable = Default ? *reinterpret_cast<void***>(Default) : nullptr;
-    void* const FlyOriginal = DefaultVTable && FlyIndex >= 0 ? DefaultVTable[FlyIndex] : nullptr;
-    if (FlyOriginal && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(FlyOriginal)))
+    // BackpackSetSize's exec (4.2's shared int exec, 0x1107770) reads its argument and calls the empty function, where
+    // 4.1's reaches 0xF19E20.
+    if (UFunction* Function = FindStaticFunction_BackpackSetSize(); ExecCallsStub(Function))
     {
-        for (TObjectIterator<UClass> It; It; ++It)
-        {
-            UClass* Class = *It;
-            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
-            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-            if (VTable && VTable[FlyIndex] == FlyOriginal)
-            {
-                Hooks::SwapVTable(L"UFortCheatManager::Fly", VTable, FlyIndex, reinterpret_cast<void*>(&FlyHK));
-            }
-        }
+        Function->SetNativeFunc(&execBackpackSetSize);
+        Log::Info(L"Hook UFortCheatManager::BackpackSetSize: native");
     }
+
+    // UFortCheatManager::Fly and God, UCheatManager's overrides (4.1 0xF25090 and 0xF2C820), are the shared empty function
+    // in 4.2's vtable (0x4D4750), so "cheat fly" and "cheat god" answered nothing and did nothing (#312). Where they are,
+    // the slot gets Core's body back.
+    RestoreStubbedOverride(StaticClass(), Finder::ImplementationIndex(FindStaticFunction_Fly()), reinterpret_cast<void*>(&FlyHK), L"UFortCheatManager::Fly");
+    RestoreStubbedOverride(StaticClass(), Finder::ImplementationIndex(FindStaticFunction_God()), reinterpret_cast<void*>(&GodHK), L"UFortCheatManager::God");
     Finder::ResolveAssetManagerLive();
 }
 

@@ -63,6 +63,9 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(BuildWith)
     DefineUFunction(BuildFree)
     DefineUFunction(GiveAthenaFullKit)
+    DefineUFunction(CraftFree)
+    DefineUFunction(BackpackSetSize)
+    DefineUFunction(ListSpawnGroups)
 
 public:
     // ToggleUnlimitedHealth's flag: the player's pawn can't be damaged while its controller's cheat manager has it (1.9
@@ -130,6 +133,15 @@ public:
     void BuildFree();
     // The game ini's CheatScript.GiveAthenaFullKit (weapons, healing, shields, ammo). 4.2 compiles it out (#312).
     void GiveAthenaFullKit();
+    // The pawn's bIsInvulnerable flips ("God mode on" / "God Mode off"); UCheatManager::God's override. 4.2 compiles it
+    // out (#312).
+    void God();
+    // Toggles the controller's bCraftFree and says which it is. 4.2 compiles it out (#312).
+    void CraftFree();
+    // The controller's OverriddenBackpackSize. 4.2 compiles it out (#312).
+    void BackpackSetSize(int32_t Size);
+    // The spawn groups SpawnAIGroup takes, as chat lines. 4.2 compiles it out (#312).
+    void ListSpawnGroups();
 
     // Core's own command, "cheat corecheats [filter]": the cheats Core supports, with usage, as chat lines.
     void ListCoreCheats(const FString& Filter);
@@ -356,9 +368,13 @@ public:
     DECLARE_FUNCTION(execCountPlayerBuiltBuildingActors);
     DECLARE_FUNCTION(execBuildFree);
     DECLARE_FUNCTION(execGiveAthenaFullKit);
+    DECLARE_FUNCTION(execCraftFree);
+    DECLARE_FUNCTION(execBackpackSetSize);
+    DECLARE_FUNCTION(execListSpawnGroups);
 
 private:
     static void FlyHK(UFortCheatManager* This);
+    static void GodHK(UFortCheatManager* This);
 
     void Reply(const FString& Message) const;
     // The player, when they have an inventory to give items to.

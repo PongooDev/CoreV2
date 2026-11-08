@@ -10,6 +10,7 @@ class UCheatManager : public UObject
 {
     DefineUnrealClass(UCheatManager, Engine)
     DefineUFunction(Fly)
+    DefineUFunction(God)
     DefineUFunction(CheatScript)
 
 public:

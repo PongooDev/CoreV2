@@ -60,7 +60,9 @@ public:
     // The player's gameplay stats (SelfRevives, RevivesFromTeammate, TeammateRevives, the damage, shots, distance and
     // materials the end-of-match screen shows, ...).
     DefineUProperty(UStatManager*, StatManager)
+    // CraftFree's flag, replicated: crafting costs nothing.
     DefineBitfieldUProperty(bCraftFree)
+    static bool HasCraftFreeFlag() { return Member_bCraftFree.IsAvailable(); }
     // BuildFree's flag, replicated: placing, editing and repairing pieces cost nothing (the controller's own cost checks
     // read it).
     DefineBitfieldUProperty(bBuildFree)
@@ -83,6 +85,7 @@ public:
     // The player's profile0 (the server queries it for each player as the dedicated server).
     DefineUProperty(UFortMcpProfileCampaign*, MainMcpProfile)
     DefineUProperty(int32_t, OverriddenBackpackSize)
+    static bool HasOverriddenBackpackSize() { return Member_OverriddenBackpackSize.IsAvailable(); }
     DefineUStructProperty(FFortRewardReport, LatestRewardReport)
     DefineUProperty(TAssetPtr<UObject>, StartRepairSound)
     // The building material (EFortResourceType) and level (EFortResourceLevel, 0-based) this machine's build tool places,

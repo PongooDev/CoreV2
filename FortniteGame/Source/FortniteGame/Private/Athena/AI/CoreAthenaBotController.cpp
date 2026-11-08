@@ -5700,6 +5700,13 @@ bool FCoreAthenaBotController::TickBuildingQueue(float Now)
         ClearBuildingQueue();
         return false;
     }
+    // The bot looks the way it builds, as a player aims a piece, also while it steps into place: it backs up to a ramp's
+    // low edge rather than turning round to walk there (its facing follows its velocity otherwise), so the ramp goes up
+    // where it looks, not behind it (CoreV2 #324: bots stuck in a 1x1 built their stairs behind themselves).
+    int32_t ForwardX = 0;
+    int32_t ForwardY = 0;
+    GridAxis(BuildQueue.Forward, ForwardX, ForwardY);
+    FaceTowards(Location + FVector(static_cast<float>(ForwardX), static_cast<float>(ForwardY), 0.0f) * 500.0f, Now, 0.5f);
     // A wall goes up beside the bot, not through it: by its cell's edge, the bot's capsule stuck out of a wall placed
     // there (the piece spawns whatever overlaps it), and players shot it through its own wall (CoreV2 #264). It steps
     // towards the cell's middle first, for a second and a half at most.
@@ -5734,10 +5741,6 @@ bool FCoreAthenaBotController::TickBuildingQueue(float Now)
         }
     }
     StopMoving();
-    int32_t ForwardX = 0;
-    int32_t ForwardY = 0;
-    GridAxis(BuildQueue.Forward, ForwardX, ForwardY);
-    FaceTowards(Location + FVector(static_cast<float>(ForwardX), static_cast<float>(ForwardY), 0.0f) * 500.0f, Now, 0.5f);
     if (Now < LastBuildTime + DelayBeforeNextBuildPiece)
     {
         return true;

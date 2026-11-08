@@ -43,8 +43,13 @@ public:
     DefineUProperty(TArray<int32_t>, LootPackageCategoryWeightArray)
     DefineUProperty(TArray<int32_t>, LootPackageCategoryMinArray)
     DefineUProperty(TArray<int32_t>, LootPackageCategoryMaxArray)
+    // One tag up to 4.2; 4.4 (4.3?) makes it a container, RequiredGameplayTags, next to a new GameplayTags.
     DefineUProperty(FGameplayTag, RequiredGameplayTag)
+    DefineUProperty(FGameplayTagContainer, RequiredGameplayTags)
     DefineUProperty(bool, bAllowBonusLootDrops)
+
+    static bool HasRequiredGameplayTag() { return Member_RequiredGameplayTag.IsAvailable(); }
+    static bool HasRequiredGameplayTags() { return Member_RequiredGameplayTags.IsAvailable(); }
 };
 
 struct FFortLootPackageData

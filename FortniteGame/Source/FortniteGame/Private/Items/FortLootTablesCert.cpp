@@ -141,7 +141,15 @@ namespace
             Row->LootPackageCategoryWeightArray = ArrayOf(Source.LootPackageCategoryWeightArray);
             Row->LootPackageCategoryMinArray = ArrayOf(Source.LootPackageCategoryMinArray);
             Row->LootPackageCategoryMaxArray = ArrayOf(Source.LootPackageCategoryMaxArray);
-            Row->RequiredGameplayTag = FGameplayTag{ NameOf(Source.RequiredGameplayTag) };
+            if (FFortLootTierData::HasRequiredGameplayTag())
+            {
+                Row->RequiredGameplayTag = FGameplayTag{ NameOf(Source.RequiredGameplayTag) };
+            }
+            else if (FFortLootTierData::HasRequiredGameplayTags())
+            {
+                // 4.4's container (a BR-only install has no Save the World tables, so these rows fill in for them).
+                Row->RequiredGameplayTags.AddTag(FGameplayTag{ NameOf(Source.RequiredGameplayTag) });
+            }
             Row->bAllowBonusLootDrops = Source.bAllowBonusLootDrops;
         }
         return Table;

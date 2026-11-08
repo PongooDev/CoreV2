@@ -163,8 +163,15 @@ void UFortLootTier::GetLootTierRows(std::vector<FFortLootTierRow>& OutRows, floa
         {
             return false;
         }
-        const FGameplayTag& RequiredTag = Row.RequiredGameplayTag;
-        if (RequiredTag.IsValid() && !ContextTags.HasTag(RequiredTag))
+        if (FFortLootTierData::HasRequiredGameplayTag())
+        {
+            const FGameplayTag& RequiredTag = Row.RequiredGameplayTag;
+            if (RequiredTag.IsValid() && !ContextTags.HasTag(RequiredTag))
+            {
+                return false;
+            }
+        }
+        else if (FFortLootTierData::HasRequiredGameplayTags() && !ContextTags.HasAll(Row.RequiredGameplayTags))
         {
             return false;
         }

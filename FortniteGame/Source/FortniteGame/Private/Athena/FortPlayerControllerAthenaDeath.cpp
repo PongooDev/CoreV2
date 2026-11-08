@@ -4,6 +4,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
+#include "Athena/FortPlaylistAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -41,6 +42,18 @@ DEFINE_LOG_CATEGORY_STATIC(LogFortDeath, Log, All);
 
 namespace
 {
+    // A team game: the game mode's bSquadPlay up to 4.2. 4.4 drops it and reads the playlist instead: its team win
+    // (4.4.2 0xA74DB0, RemoveFromAlivePlayers' last call) checks "cmp [CurrentPlaylistData + MaxTeamSize], 1; jle".
+    bool IsSquadPlay(AFortGameModeAthena* GameMode, AFortGameStateAthena* GameState)
+    {
+        if (AFortGameModeAthena::HasSquadPlay())
+        {
+            return GameMode->bSquadPlay;
+        }
+        UFortPlaylist* Playlist = AFortGameStateAthena::HasCurrentPlaylistData() && UFortPlaylist::HasMaxTeamSize() ? static_cast<UFortPlaylist*>(GameState->CurrentPlaylistData) : nullptr;
+        return Playlist && Playlist->MaxTeamSize > 1;
+    }
+
     // 1.9's spectate timer: SpectateOnDeath five seconds after the death, then every two (FTimerManager::SetTimer with
     // the controller's native handle +0x32B0, rate 2, looping, first delay 5).
     constexpr float SpectateFirstDelay = 5.0f;
@@ -336,7 +349,8 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     UE_LOG(LogFortDeath, Log, TEXT("FortGameModeAthena: Player [%s] killed after %d seconds.  Removing from alive players list."), *AthenaState->GetPlayerName(), static_cast<int32_t>(AthenaState->SecondsAlive));
 
     // The team's place is the teams left when its last player is out (before this one is taken off the count).
-    if (GameMode->bSquadPlay && Natives::AFortPlayerControllerAthena_UpdateTeamMembersIndex >= 0)
+    const bool bSquadPlay = IsSquadPlay(GameMode, GameState);
+    if (bSquadPlay && Natives::AFortPlayerControllerAthena_UpdateTeamMembersIndex >= 0)
     {
         CallVirtual<void>(this, Natives::AFortPlayerControllerAthena_UpdateTeamMembersIndex);
     }
@@ -354,7 +368,7 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     if (BotManager && BotManager->ShouldHoldNativeWinCheck())
     {
         GameState->PlayersLeft = 0;
-        if (GameMode->bSquadPlay)
+        if (bSquadPlay)
         {
             GameState->TeamsLeft = std::max(static_cast<int32_t>(GameState->TeamsLeft), 1) + 2;
         }

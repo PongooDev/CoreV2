@@ -46,7 +46,9 @@ public:
     DefineUProperty(AFortSafeZoneIndicator*, SafeZoneIndicator)
     // Each safe zone's center, picked when the storm starts (index: the phase).
     DefineUProperty(TArray<FVector>, SafeZoneLocations)
+    // Up to 4.2; 4.4 reads its playlist's MaxTeamSize instead.
     DefineUProperty(bool, bSquadPlay)
+    static bool HasSquadPlay() { return Member_bSquadPlay.IsAvailable(); }
     // Whether a dead player goes on to spectate (SpectateOnDeath).
     DefineUProperty(bool, bAllowSpectateAfterDeath)
     // Who PreLogin lets in ("Match is full" at it, 1.9 0x4319F0): the assigned players (OnGivenMatchAssignment,

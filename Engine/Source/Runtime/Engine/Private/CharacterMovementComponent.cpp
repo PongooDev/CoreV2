@@ -3,6 +3,7 @@
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
 #include "Hooks.h"
 #include "Log.h"
@@ -12,6 +13,7 @@
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -32,6 +34,7 @@ namespace
         int32_t Moves = 0;
         int32_t Errors = 0;
         int32_t Logged = 0;
+        int32_t VehicleLogged = 0;
     };
 
     std::unordered_map<const UCharacterMovementComponent*, FClientErrorStats> ClientErrorStats;
@@ -44,6 +47,31 @@ namespace
     constexpr uint8_t PackedCustomModeStart = 16;
     constexpr uint8_t PackedModeMask = 0x07;
     constexpr uint8_t MoveCustom = 6;
+    // EFortCustomMovement's Driving and Passenger: the custom modes a vehicle's seats put their riders in (4.x+).
+    constexpr uint8_t CustomDriving = 1;
+    constexpr uint8_t CustomPassenger = 2;
+    constexpr int32_t MaxLoggedVehicleErrors = 40;
+
+    bool IsVehicleCustomMode(uint8_t CustomMode)
+    {
+        return CustomMode == CustomDriving || CustomMode == CustomPassenger;
+    }
+
+    // AFortPlayerPawn's VehicleStateRep or VehicleStateLocal (FVehiclePawnState: the vehicle, then its seat index), read by
+    // name: builds before vehicles (4.x) have neither.
+    FString DescribeVehicleState(APawn* Pawn, const wchar_t* PropertyName)
+    {
+        UClass* PawnClass = Pawn ? Pawn->GetClass() : nullptr;
+        UProperty* Property = PawnClass ? PawnClass->FindPropertyByName(FName(PropertyName, FNAME_Find)) : nullptr;
+        if (!Property)
+        {
+            return FString(TEXT("none"));
+        }
+        const uint8_t* State = Property->ContainerPtrToValuePtr<uint8_t>(Pawn);
+        UObject* Vehicle = *reinterpret_cast<UObject* const*>(State);
+        const uint8_t SeatIndex = State[sizeof(UObject*)];
+        return Vehicle ? FString::Printf(TEXT("%s seat %d"), *Vehicle->GetName(), SeatIndex) : FString(TEXT("no vehicle"));
+    }
 }
 
 void UCharacterMovementComponent::SetMovementMode(uint8_t NewMovementMode, uint8_t NewCustomMode)
@@ -93,6 +121,21 @@ void UCharacterMovementComponent::ReportClientError(float TimeStamp, const FVect
     {
         ++Stats.Errors;
         Stats.MaxError = std::max(Stats.MaxError, bPlaceable ? LocDiff.Size() : 0.0f);
+
+        // A shopping cart flipped between two angles as its rider got in or out (#336): the client's moves were in a seat's
+        // mode (driving 17, passenger 18) while the server's pawn walked, unattached (an attached capsule returns above).
+        // These say which side the seat change is missing on, whatever the pawn's first errors already used up.
+        const bool bClientInVehicle = ClientMovementMode >= PackedCustomModeStart && IsVehicleCustomMode(ClientMovementMode - PackedCustomModeStart);
+        const bool bServerInVehicle = ServerMode == MoveCustom && IsVehicleCustomMode(ServerCustomMode);
+        if (bModeDiffers && (bClientInVehicle || bServerInVehicle) && Stats.VehicleLogged < MaxLoggedVehicleErrors)
+        {
+            ++Stats.VehicleLogged;
+            AActor* BaseOwner = ClientMovementBase ? ClientMovementBase->GetOwner() : nullptr;
+            UE_LOG(LogCharacterMovement, Warning, TEXT("%s: the move at %.3f is in a vehicle seat's mode on one side only: client mode %d on %s (%s), server mode %d/%d; the server's pawn has VehicleStateRep %s, VehicleStateLocal %s"),
+                *Pawn->GetName(), TimeStamp, ClientMovementMode, ClientMovementBase ? *ClientMovementBase->GetName() : TEXT("no base"), BaseOwner ? *BaseOwner->GetName() : TEXT("no owner"),
+                ServerMode, ServerCustomMode, *DescribeVehicleState(Pawn, L"VehicleStateRep"), *DescribeVehicleState(Pawn, L"VehicleStateLocal"));
+        }
+
         if (Stats.Logged < MaxLoggedErrors)
         {
             ++Stats.Logged;

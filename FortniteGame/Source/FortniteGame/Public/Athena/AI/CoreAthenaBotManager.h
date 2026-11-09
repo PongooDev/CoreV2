@@ -99,6 +99,9 @@ public:
 
     // The backend's settings, from each warmup answer (null: off).
     void SetSettings(bool bEnabled, const FCoreAthenaBotSettings& InSettings);
+    // The players a warmup answer was for (the report's accountIds): the backend has said whether their party fills, so
+    // their teams may take bots (PlayerTeamSlots). CoreV2 #330.
+    void SetFillAnswered(const std::vector<std::wstring>& AccountIds);
     const FCoreAthenaBotSettings& GetSettings() const { return Settings; }
     bool IsEnabled() const { return bEnabled; }
     // Whether the warmup keeps its full length (CoreV2 #256): the bots come in over it, one at a time, so the game's early
@@ -237,7 +240,8 @@ private:
     int32_t WantedBotCount(int32_t PlayerTeamBots) const;
     // "Fill players' teams with bots": each player's team (duos and squads; in a large team game, a player's squad) whose
     // players' parties all fill, and the places in it no player has (the players in it and those its reservations still
-    // bring), for bots. Keyed by SquadKey: the team, and the squad in a large team game.
+    // bring), for bots. A team waits until a warmup answer has covered each of its players in the match (SetFillAnswered).
+    // Keyed by SquadKey: the team, and the squad in a large team game.
     std::map<uint16_t, int32_t> PlayerTeamSlots() const;
     static uint16_t SquadKey(uint8_t Team, uint8_t Squad) { return static_cast<uint16_t>(Team | Squad << 8); }
     uint16_t SquadKeyOf(const FCoreAthenaBotController* Bot) const;
@@ -295,6 +299,8 @@ private:
     bool bEnabled = false;
     bool bHasSettings = false;
     FCoreAthenaBotSettings Settings;
+    // The players whose fill choice a warmup answer has given (SetFillAnswered).
+    std::set<std::wstring> FillAnsweredAccounts;
     std::vector<std::unique_ptr<FCoreAthenaBotController>> PlayerBots;
     int32_t NextBotIndex = 0;
     // This match's shuffled order of the name list.

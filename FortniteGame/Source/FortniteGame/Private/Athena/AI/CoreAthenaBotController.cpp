@@ -1471,9 +1471,16 @@ void FCoreAthenaBotController::Destroy()
     if (AAIController* AIController = Controller.Get())
     {
         // Out of its team's AFortTeamInfo first (PlaceBotOnTeam put it in TeamMembers, as a player's controller is),
-        // which keeps no controller that's gone.
+        // which keeps no controller that's gone: the game's RemoveFromTeam, as a player changing teams leaves theirs
+        // (AttemptChangeTeamInfoForController). It also has the team's AFortTeamPrivateInfo drop the bot's entries:
+        // taking the controller out of TeamMembers by hand left them, and a bot sent away from a player's squad stayed
+        // on the squad bar and as a teammate marker where it had stood (CoreV2 #330). By hand where it isn't found.
         AFortPlayerStateAthena* PlayerState = GetPlayerState();
         AFortTeamInfo* TeamInfo = PlayerState ? static_cast<AFortTeamInfo*>(PlayerState->PlayerTeam) : nullptr;
+        if (TeamInfo && Finder::ResolveTeamRemoveLive())
+        {
+            Natives::AFortTeamInfo_RemoveFromTeam(TeamInfo, reinterpret_cast<AController*>(AIController));
+        }
         if (TeamInfo && AFortTeamInfo::HasTeamMembers())
         {
             TArray<AController*>& Members = TeamInfo->GetMember_TeamMembers();

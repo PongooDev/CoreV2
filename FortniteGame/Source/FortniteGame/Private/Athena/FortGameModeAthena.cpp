@@ -868,7 +868,7 @@ namespace
         Watch->bAsking = true;
         BackendRequest::PostJson(L"Battle Royale warmup report", L"/fortnite/api/game/v2/matchmakingservice/warmup",
             std::format("{{\"phase\":\"{}\",\"accountIds\":[{}],\"secondsLeft\":{:.1f}}}", NarrowId(Phase), Ids, std::max(SecondsLeft, 0.0f)),
-            FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [Watch](uint32_t Status, const std::string& Body)
+            FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [Watch, AccountIds](uint32_t Status, const std::string& Body)
         {
             // {warmupSeconds: a number or null, lateJoin, sessionId, open, maxPlayers, parties}. Anything else (no
             // answer) keeps what the server has.
@@ -884,7 +884,7 @@ namespace
             // The match's no-fill players (Core-Backend's top-level noFill, #242; a backend from before it sends them only
             // in the bots block).
             std::vector<std::wstring> NoFill = bAnswered ? JsonStringArray(Body, "noFill") : std::vector<std::wstring>();
-            GameThread::Enqueue([Watch, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings, NoFill = std::move(NoFill)]() mutable
+            GameThread::Enqueue([Watch, AccountIds, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings, NoFill = std::move(NoFill)]() mutable
             {
                 Watch->bAsking = false;
                 if (bAnswered)
@@ -892,6 +892,8 @@ namespace
                     if (FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get())
                     {
                         BotManager->SetSettings(bBots, BotSettings);
+                        // The players this report named: their fill choice is in this answer (CoreV2 #330).
+                        BotManager->SetFillAnswered(AccountIds);
                     }
                 }
                 if (Status == 404 && !Watch->bUnsupported)

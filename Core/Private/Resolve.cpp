@@ -12138,3 +12138,34 @@ bool Finder::ResolveTeamChangeLive()
     Log::Info(L"Finder: AFortGameMode::AttemptChangeTeamInfoForController is slot 0x{:X} (PlacePlayerOnTeam 0x{:X})", Slot * 8, Place - Finder::ImageBase());
     return true;
 }
+
+bool Finder::ResolveTeamRemoveLive()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortTeamInfo_RemoveFromTeam != nullptr;
+    }
+    bSearched = true;
+
+    // AFortTeamInfo::RemoveFromTeam (4.2 0xCEDDC0) logs "Removing %s from team %s" once it has found the controller in
+    // TeamMembers (AddToTeam's line is "Adding %s to team %s"); the line's only reference on 4.2. The function opens with
+    // its null check of the controller ("test rdx, rdx", 4.2 0xCEDDC0), which tells it from a split-off logging block.
+    const std::vector<uintptr_t> Refs = Finder::StringRefs(L"Removing %s from team %s");
+    uintptr_t Remove = Refs.size() == 1 ? Finder::FunctionStart(Refs.front()) : 0;
+    bool bChecksController = false;
+    for (uintptr_t Check = Remove; Remove && Check < Remove + 0x30 && !bChecksController; ++Check)
+    {
+        bChecksController = Byte(Check) == 0x48 && Byte(Check + 1) == 0x85 && Byte(Check + 2) == 0xD2;
+    }
+    Remove = bChecksController ? Remove : 0;
+    if (!Remove)
+    {
+        Log::Warning(L"Finder: AFortTeamInfo::RemoveFromTeam not found ({} references to its log line), a player bot leaving the match only leaves its team's TeamMembers",
+            Refs.size());
+        return false;
+    }
+    Natives::AFortTeamInfo_RemoveFromTeam = reinterpret_cast<decltype(Natives::AFortTeamInfo_RemoveFromTeam)>(Remove);
+    Log::Info(L"Finder: AFortTeamInfo::RemoveFromTeam at 0x{:X}", Remove - Finder::ImageBase());
+    return true;
+}

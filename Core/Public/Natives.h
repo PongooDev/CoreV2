@@ -38,6 +38,7 @@ class AFortPlayerControllerAthena;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class AFortPlayerStateZone;
+class AFortTeamInfo;
 class AFortTeamPrivateInfo;
 class AFortGameModeAthena;
 class AFortAthenaMapInfo;
@@ -602,6 +603,11 @@ namespace Natives
     // controller in the team's AFortTeamInfo and its player state on the team. It takes any controller whose player
     // state is an AFortPlayerState, so Battle Royale's player bots join their team with it: Finder::ResolveTeamChangeLive.
     inline int32_t AFortGameMode_AttemptChangeTeamInfoForControllerIndex = -1;
+    // AFortTeamInfo::RemoveFromTeam(AController* Controller) (4.2 0xCEDDC0, 21.40's name): takes the controller out of
+    // TeamMembers, clears its player state's team (SetPlayerTeam(nullptr)) and has the team's AFortTeamPrivateInfo drop
+    // the player's entries (4.2 0xFB3750), which the squad bar and the teammate markers read. A controller that isn't in
+    // TeamMembers changes nothing. A player bot leaving the match leaves its team with it: Finder::ResolveTeamRemoveLive.
+    inline void (*AFortTeamInfo_RemoveFromTeam)(AFortTeamInfo* This, AController* Controller) = nullptr;
     // UOnlineEngineInterface::CreateUniquePlayerId(const FString& Str) (3.1 UOnlineEngineInterfaceImpl's 0x316930, slot
     // 0x268; 2.5 and 3.0 the same slot): the identity interface's CreateUniquePlayerId, as a connection's id is made when
     // it replicates. UE 4.20 (3.3 0x328DE0, slot 0x278) adds FName Type: NAME_None is the default online subsystem's.

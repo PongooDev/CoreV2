@@ -225,6 +225,9 @@ namespace Finder
     // AFortGameMode::AttemptChangeTeamInfoForController's slot (Natives::AFortGameMode_AttemptChangeTeamInfoForControllerIndex),
     // from PlacePlayerOnTeam, for Battle Royale's player bots: they join their team as a player does.
     bool ResolveTeamChangeLive();
+    // AFortTeamInfo::RemoveFromTeam (Natives::AFortTeamInfo_RemoveFromTeam), from its log line, for Battle Royale's player
+    // bots: one leaving the match leaves its team as a player changing teams does.
+    bool ResolveTeamRemoveLive();
     // UOnlineEngineInterface::CreateUniquePlayerId's slot (Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex) in
     // the engine's online interface object's vtable, for Battle Royale's player bots' ids.
     bool ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceVTable);

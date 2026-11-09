@@ -586,6 +586,11 @@ void FCoreAthenaBotManager::SetSettings(bool bInEnabled, const FCoreAthenaBotSet
     }
 }
 
+void FCoreAthenaBotManager::SetFillAnswered(const std::vector<std::wstring>& AccountIds)
+{
+    FillAnsweredAccounts.insert(AccountIds.begin(), AccountIds.end());
+}
+
 FCoreAIBotSkills FCoreAthenaBotManager::SkillsForLevel(int32_t Level)
 {
     // Core's levels 🟡 (8.30's FAIBotSkills values and 21.40's aiming skill sets don't ship): level 1 reacts slowly,
@@ -1128,6 +1133,11 @@ std::map<uint16_t, int32_t> FCoreAthenaBotManager::PlayerTeamSlots() const
     // members, or another party that fills, loading in; a reservation has a team, not a squad, so only duos' and squads'
     // count). A team with a player whose party doesn't fill (the backend's noFill) gets none. The bots count in the
     // match's size: no more of them than its room leaves.
+    //
+    // The noFill list comes with the warmup answer to a report naming the player (every second in the warmup), and the
+    // settings the server has before then are an earlier answer's: the one from before anyone joined has nobody in noFill
+    // (CoreV2 #330: a no-fill squad's player got a bot the frame they reached the island, which the answer 0.1 s later
+    // sent away). So a team gets bots only once an answer has covered each of its players in the match.
     std::map<uint16_t, int32_t> Slots;
     AFortGameModeAthena* Athena = GetGameMode();
     AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
@@ -1138,6 +1148,7 @@ std::map<uint16_t, int32_t> FCoreAthenaBotManager::PlayerTeamSlots() const
         return Slots;
     }
     std::map<uint16_t, std::set<std::wstring>> Players;
+    std::set<uint16_t> Unanswered;
     int32_t InMatch = 0;
     int32_t Unnamed = 0;
     for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
@@ -1154,7 +1165,13 @@ std::map<uint16_t, int32_t> FCoreAthenaBotManager::PlayerTeamSlots() const
             continue;
         }
         const bool bHasId = AthenaState->UniqueId.IsValid();
-        Players[SquadKey(static_cast<uint8_t>(AthenaState->TeamIndex), Squad)].insert(bHasId ? AthenaState->UniqueId.ToString().ToStdString() : std::format(L"#{}", Unnamed++));
+        const std::wstring Id = bHasId ? AthenaState->UniqueId.ToString().ToStdString() : std::format(L"#{}", Unnamed++);
+        const uint16_t Key = SquadKey(static_cast<uint8_t>(AthenaState->TeamIndex), Squad);
+        Players[Key].insert(Id);
+        if (bHasId && !FillAnsweredAccounts.contains(Id))
+        {
+            Unanswered.insert(Key);
+        }
     }
     for (const auto& [Team, Id] : Athena->GetTeamReservations())
     {
@@ -1173,7 +1190,7 @@ std::map<uint16_t, int32_t> FCoreAthenaBotManager::PlayerTeamSlots() const
             return std::find(Settings.NoFillAccounts.begin(), Settings.NoFillAccounts.end(), Id) != Settings.NoFillAccounts.end();
         });
         const int32_t Free = std::min(SquadSize - static_cast<int32_t>(Ids.size()), Room);
-        if (!bNoFill && Free > 0)
+        if (!bNoFill && !Unanswered.contains(Key) && Free > 0)
         {
             Slots[Key] = Free;
             Room -= Free;

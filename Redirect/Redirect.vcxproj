@@ -383,6 +383,8 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPlayerPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortCheatManager.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortClientSettingsRecord.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortLocalPlayer.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerController.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerControllerDeployableBase.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerControllerOutpost.h" />

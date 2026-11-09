@@ -35,8 +35,12 @@ public:
     // CheatClass would on a listen server, so the game's own cheats work from the console after every travel.
     static void EnsureLocalCheatManager(class UGameInstance* GameInstance);
     // Voice is push to talk on desktop: the server's ClientEnableNetworkVoice(true) (open microphone, from its
-    // bRequiresPushToTalk=false, which Epic set for consoles) no longer turns the microphone on.
+    // bRequiresPushToTalk=false, which Epic set for consoles) no longer turns the microphone on by itself. It is kept
+    // here instead, and the game opens the microphone when the player's own voice chat setting is open microphone.
     static void HookVoice();
+    // Client: the controller whose server last asked for an open microphone (null once it asks for push to talk). Only
+    // compared, never dereferenced: it may be gone after a travel.
+    static inline const APlayerController* NetworkVoiceController = nullptr;
 
 private:
     static void ConsoleKeyHK(APlayerController* This, FKey Key);

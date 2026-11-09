@@ -114,9 +114,12 @@ DEFINE_FUNCTION(APlayerController::execClientEnableNetworkVoice)
 {
     P_GET_UBOOL(Z_Param_bEnable);
     P_FINISH;
+    // Epic's ClientEnableNetworkVoice_Implementation is ToggleSpeaking(bEnable). The game module's voice tick opens the
+    // microphone for this request only when the player's voice chat setting has push to talk off (#182).
+    NetworkVoiceController = Z_Param_bEnable ? static_cast<const APlayerController*>(Context) : nullptr;
     if (Z_Param_bEnable)
     {
-        Log::Info(L"Voice chat: the server asked for an open microphone; Core keeps push to talk");
+        Log::Info(L"Voice chat: the server asked for an open microphone; it opens if the player's voice chat setting is open microphone, otherwise push to talk");
     }
 }
 

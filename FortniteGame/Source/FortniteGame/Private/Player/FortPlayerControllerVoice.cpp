@@ -1,5 +1,7 @@
 #include "pch.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortClientSettingsRecord.h"
+#include "Player/FortLocalPlayer.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Engine/GameEngine.h"
@@ -29,7 +31,7 @@ void AFortPlayerController::HookVoice()
 {
     APlayerController::HookVoice();
     Finder::ResolveVoiceHandshake();
-    FOnlineVoiceImpl::OnTick = &UpdateTeamTalking;
+    FOnlineVoiceImpl::OnTick = &TickVoice;
     if (!Finder::ResolvePushToTalk())
     {
         return;
@@ -96,32 +98,136 @@ void AFortPlayerController::HookVoice()
     }
 }
 
+namespace
+{
+    ULocalPlayer* GetFirstLocalPlayer()
+    {
+        UGameEngine* const Engine = Natives::GEngine ? Cast<UGameEngine>(static_cast<UEngine*>(GEngine)) : nullptr;
+        UGameInstance* const GameInstance = Engine ? static_cast<UGameInstance*>(Engine->GameInstance) : nullptr;
+        const TArray<ULocalPlayer*>* const LocalPlayers = GameInstance ? &static_cast<TArray<ULocalPlayer*>&>(GameInstance->LocalPlayers) : nullptr;
+        return LocalPlayers && LocalPlayers->Num() > 0 ? (*LocalPlayers)[0] : nullptr;
+    }
+
+    // The player's own voice chat settings, where the build reflects them (3.0 on): null on older builds and until the
+    // settings are read, and Core then keeps push to talk as before.
+    const UFortClientSettingsRecord* GetVoiceChatSettings(UPlayer* Player)
+    {
+        if (!Player || !UFortLocalPlayer::HasClientSettingsRecord() || !UFortClientSettingsRecord::HasVoiceChatSettings())
+        {
+            return nullptr;
+        }
+        const UFortLocalPlayer* const FortPlayer = Cast<UFortLocalPlayer>(Player);
+        return FortPlayer ? static_cast<const UFortClientSettingsRecord*>(FortPlayer->ClientSettingsRecord) : nullptr;
+    }
+
+    // Whether the player talks with the push to talk key: the game's own handlers (4.5 0xFA4BB0, 0xFA50E0) act only with
+    // voice chat and push to talk both on.
+    bool UsesPushToTalk(const UFortClientSettingsRecord* Settings)
+    {
+        return !Settings || (Settings->bEnableVoiceChat && Settings->bEnableVoiceChatPTT);
+    }
+
+    // Whether the player's setting is an open microphone: voice chat on, push to talk off.
+    bool UsesOpenMicrophone(const UFortClientSettingsRecord* Settings)
+    {
+        return Settings && Settings->bEnableVoiceChat && !Settings->bEnableVoiceChatPTT;
+    }
+
+    // The controller Core opened the microphone for (open microphone setting); compared only.
+    const AFortPlayerController* OpenMicrophoneController = nullptr;
+
+    void StartSpeaking(AFortPlayerController* Controller)
+    {
+        // The engine's FOnlineVoiceImpl::RegisterLocalTalker (4.5 0x3A9870) calls its own StartNetworkedVoice (slot 3)
+        // before the voice engine's RegisterLocalTalker gives the device to the player, so a session's registration logs
+        // "Device is currently owned by another user" and leaves the microphone off: the next StartNetworkedVoice, from
+        // ToggleSpeaking, starts it (#182).
+        FOnlineVoiceImpl::RegisterLocalTalker(0);
+
+        // The client's voice channel sends the microphone's packets only once the controller's voice handshake is
+        // complete (UVoiceChannel's tick, 1.7.2 0x24A74D0, checks the connection's controller's
+        // MuteList.bHasVoiceHandshakeCompleted), which the server's ClientVoiceHandshakeComplete sets. Without it every
+        // packet stayed on the client (Core-Backend #54: packets recorded, none received by the server). The server
+        // forwards voice only to players whose handshake it completed itself, so completing it here only lets this
+        // player's voice leave.
+        if (Finder::ResolveVoiceHandshake())
+        {
+            uint8_t& bHandshakeCompleted = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(Controller) + Natives::APlayerController_VoiceHandshakeCompletedOffset);
+            if (!bHandshakeCompleted)
+            {
+                Log::Info(L"Voice chat: the server's voice handshake hasn't arrived; Core completes it so the voice is sent");
+                bHandshakeCompleted = 1;
+            }
+        }
+        Controller->ToggleSpeaking(true);
+    }
+}
+
 void AFortPlayerController::PushToTalkPressedHK(AFortPlayerController* This)
 {
-    Log::Info(L"Voice chat: talking");
-    FOnlineVoiceImpl::RegisterLocalTalker(0);
-
-    // The client's voice channel sends the microphone's packets only once the controller's voice handshake is complete
-    // (UVoiceChannel's tick, 1.7.2 0x24A74D0, checks the connection's controller's MuteList.bHasVoiceHandshakeCompleted),
-    // which the server's ClientVoiceHandshakeComplete sets. Without it every packet stayed on the client (Core-Backend #54:
-    // packets recorded, none received by the server). The server forwards voice only to players whose handshake it
-    // completed itself, so completing it here only lets this player's voice leave.
-    if (Finder::ResolveVoiceHandshake())
+    // With an open microphone (or voice chat off) the key does nothing, as in the game's own handler; letting go of it
+    // would close the open microphone.
+    if (!UsesPushToTalk(GetVoiceChatSettings(This->Player)))
     {
-        uint8_t& bHandshakeCompleted = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(This) + Natives::APlayerController_VoiceHandshakeCompletedOffset);
-        if (!bHandshakeCompleted)
-        {
-            Log::Info(L"Voice chat: the server's voice handshake hasn't arrived; Core completes it so the voice is sent");
-            bHandshakeCompleted = 1;
-        }
+        return;
     }
-    This->ToggleSpeaking(true);
+    Log::Info(L"Voice chat: talking");
+    StartSpeaking(This);
 }
 
 void AFortPlayerController::PushToTalkReleasedHK(AFortPlayerController* This)
 {
+    if (!UsesPushToTalk(GetVoiceChatSettings(This->Player)))
+    {
+        return;
+    }
     Log::Info(L"Voice chat: stopped talking");
     This->ToggleSpeaking(false);
+}
+
+void AFortPlayerController::UpdateOpenMicrophone()
+{
+    // 3.0 and later have a Push To Talk switch in the audio settings. With it off (an open microphone, which Vivox's
+    // TransmitToAllChannels honoured) the player never presses the key, and Core, which only talked on the key, never
+    // started the microphone: the session's registration leaves it off (StartSpeaking), so the voice interface was asked
+    // for packets but recorded none (#182). The server's ClientEnableNetworkVoice(true), Epic's ToggleSpeaking(true),
+    // opens it for such a player. The setting is read every frame, so switching it during a match applies.
+    UPlayer* const Player = GetFirstLocalPlayer();
+    AFortPlayerController* const Controller = Player ? Cast<AFortPlayerController>(static_cast<APlayerController*>(Player->PlayerController)) : nullptr;
+    if (OpenMicrophoneController && OpenMicrophoneController != Controller)
+    {
+        // The controller Core opened it for is gone (travel): the voice interface keeps the microphone on until told.
+        if (Controller)
+        {
+            Controller->ToggleSpeaking(false);
+        }
+        OpenMicrophoneController = nullptr;
+    }
+    if (!Controller)
+    {
+        return;
+    }
+
+    const bool bOpen = OpenMicrophoneController == Controller;
+    const bool bWantOpen = APlayerController::NetworkVoiceController == Controller && UsesOpenMicrophone(GetVoiceChatSettings(Player));
+    if (bWantOpen && !bOpen)
+    {
+        Log::Info(L"Voice chat: open microphone (the player's voice chat setting has push to talk off)");
+        OpenMicrophoneController = Controller;
+        StartSpeaking(Controller);
+    }
+    else if (!bWantOpen && bOpen)
+    {
+        Log::Info(L"Voice chat: open microphone closed (push to talk or voice chat switched off, or the server asked for push to talk)");
+        OpenMicrophoneController = nullptr;
+        Controller->ToggleSpeaking(false);
+    }
+}
+
+void AFortPlayerController::TickVoice()
+{
+    UpdateOpenMicrophone();
+    UpdateTeamTalking();
 }
 
 void AFortPlayerController::UpdateTeamTalking()

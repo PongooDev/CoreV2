@@ -248,7 +248,8 @@ public:
     static void HookEmoteVTables();
     static void HookSprayVTables();
     static void HookPersonalVehicleVTables();
-    // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox.
+    // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox, and with the
+    // player's open microphone setting (3.0 on) the microphone is open while the server asks for it.
     static void HookVoice();
     static void HookClientNatives();
 
@@ -266,6 +267,11 @@ private:
     static void PossessHK(AFortPlayerController* This, APawn* InPawn);
     static void PushToTalkPressedHK(AFortPlayerController* This);
     static void PushToTalkReleasedHK(AFortPlayerController* This);
+    // Client, every frame, from the voice interface's tick.
+    static void TickVoice();
+    // Client, every frame: the microphone is open while the server asks for it and the player's voice chat setting is
+    // open microphone (3.0 on).
+    static void UpdateOpenMicrophone();
     // Client, every frame: Battle Royale's team list shows who is talking in the engine's voice chat.
     static void UpdateTeamTalking();
     static inline void (*TrySetHeroImplementationOG)(AFortPlayerController* This, UFortHero* NewHero, bool bSendToServer, bool bUnused) = nullptr;

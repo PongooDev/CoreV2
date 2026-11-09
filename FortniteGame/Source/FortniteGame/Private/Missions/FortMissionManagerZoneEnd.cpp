@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Missions/FortMissionManager.h"
 #include "BlueprintGameplayTagLibrary.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameModeZone.h"
@@ -30,11 +31,7 @@ namespace
     FString GetGameSessionId(UWorld* World)
     {
         UGameInstance* GameInstance = World ? static_cast<UGameInstance*>(World->OwningGameInstance) : nullptr;
-        TSharedPtr<const FUniqueNetId> SessionId;
-        if (GameInstance)
-        {
-            Natives::UGameInstance_GetGameSessionId(GameInstance, &SessionId);
-        }
+        const TSharedPtr<const FUniqueNetId> SessionId = GameInstance ? GameInstance->GetGameSessionId() : TSharedPtr<const FUniqueNetId>();
         return SessionId.IsValid() && SessionId->IsValid() ? SessionId->ToString() : FString();
     }
 

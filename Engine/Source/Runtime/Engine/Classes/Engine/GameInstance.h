@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ObjectLayout.h"
+#include "Templates/SharedPointer.h"
+#include "UObject/CoreOnline.h"
 #include "UObject/Object.h"
 
 struct FWorldContext;
@@ -15,6 +17,10 @@ public:
     DefineUProperty(TArray<ULocalPlayer*>, LocalPlayers)
 
     bool IsDedicatedServerInstance() const;
+
+    // Fortnite's UGameInstance::GetGameSessionId (Natives::UGameInstance_GetGameSessionId): the game session's id, or
+    // null when there is none or the native was not found.
+    TSharedPtr<const FUniqueNetId> GetGameSessionId() const;
 
     static void Hook();
 

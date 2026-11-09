@@ -89,6 +89,8 @@ namespace Finder
     std::vector<uintptr_t> AddressRefs(uintptr_t Target);
     // The first copy of the bytes in .rdata, or 0.
     uintptr_t FindReadOnly(const void* Bytes, size_t Size);
+    // The first copy of the bytes in .rdata past After, or 0.
+    uintptr_t FindReadOnlyAfter(const void* Bytes, size_t Size, uintptr_t After);
 
     uintptr_t FunctionStart(uintptr_t Address);
     uintptr_t FunctionEnd(uintptr_t FunctionStart);

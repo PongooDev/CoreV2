@@ -14,6 +14,10 @@ namespace
             *reinterpret_cast<int32_t*>(NotWindowed + 1) = static_cast<int32_t>(Sites::ShouldUseIdleModeFalse - (IdleCheck + 5));
             Hooks::WriteBytes(L"FEngineLoop::ShouldUseIdleMode SupportsWindowedMode", IdleCheck, NotWindowed);
         }
+        else if (uint8_t* IdleBranch = Sites::ShouldUseIdleModeInlinedBranch)
+        {
+            Hooks::SkipBranch(L"FEngineLoop::Tick ShouldUseIdleMode t.IdleWhenNotForeground", IdleBranch);
+        }
     }
 }
 

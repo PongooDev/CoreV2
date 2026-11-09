@@ -146,6 +146,8 @@ namespace Natives
     inline int (*CRT_rand)() = nullptr;
     inline float (*FMath_SRand)() = nullptr;
     inline int32_t (*FUObjectArray_AllocateSerialNumber)(FUObjectArray* This, int32_t Index) = nullptr;
+    // 5.0 (UE 4.21): AllocateSerialNumber is inlined into FWeakObjectPtr::operator=(const UObject*), called instead.
+    inline void (*FWeakObjectPtr_Assign)(FWeakObjectPtr* This, const UObject* Object) = nullptr;
     inline FOutputDeviceRedirector* (*GetGlobalLogSingleton)() = nullptr;
     inline void (*FOutputDeviceRedirector_AddOutputDevice)(FOutputDeviceRedirector* This, FOutputDevice* OutputDevice) = nullptr;
 
@@ -287,6 +289,8 @@ namespace Natives
     inline void (*UScriptStruct_CopyScriptStruct)(const UScriptStruct* This, void* Dest, const void* Src, int32_t ArrayDim) = nullptr;
     inline void (*FFrame_Step)(FFrame* This, UObject* Context, void* const Result) = nullptr;
     inline void (*FFastArraySerializer_MarkArrayDirty)(FFastArraySerializer* This) = nullptr;
+    // 5.0 (UE 4.21) inlines MarkArrayDirty: ItemMap.Reset() (TMap<int32, int32>::Reset, ItemMap at +0).
+    inline void (*FFastArraySerializer_ItemMapReset)(FFastArraySerializer* This) = nullptr;
     inline FFortItemEntry* (*FFortItemEntry_FFortItemEntry)(FFortItemEntry* This, const UFortItemDefinition* InItemDefinition, int32_t InCount, int32_t InLevel, const void* InAlterations) = nullptr;
     inline void (*FFortItemEntry_SetStateValue)(FFortItemEntry* This, uint8_t StateType, int32_t IntValue) = nullptr;
     inline void (*FFortItemEntry_MarkDirty)(FFortItemEntry* This) = nullptr;
@@ -305,6 +309,9 @@ namespace Natives
 
     inline int32_t (*UWorld_InternalGetNetMode)(const UWorld* This) = nullptr;
     inline int32_t (*UWorld_AttemptDeriveFromURL)(const UWorld* This) = nullptr;
+    // 5.0 (UE 4.21): AttemptDeriveFromURL is inlined into InternalGetNetMode, so UWorld_AttemptDeriveFromURL becomes the
+    // original InternalGetNetMode (its trampoline), which derives from the URL when both net drivers are null.
+    inline bool bInternalGetNetModeDerivesFromURL = false;
     inline FLevelCollection* (*UWorld_FindCollectionByType)(UWorld* This, ELevelCollectionType InType) = nullptr;
     inline int32_t (*UNetDriver_GetNetMode)(const UNetDriver* This) = nullptr;
     inline void (*UNetDriver_SetWorld)(UNetDriver* This, UWorld* InWorld) = nullptr;
@@ -738,6 +745,8 @@ namespace Natives
     inline ptrdiff_t UChannel_ChIndex = -1;
     inline ptrdiff_t FFrame_Object = -1;
     inline ptrdiff_t FFastArraySerializer_IDCounter = -1;
+    // 5.0: CachedNumItems, then CachedNumItemsToConsiderForWriting (int32 each), for the inlined MarkArrayDirty.
+    inline ptrdiff_t FFastArraySerializer_CachedNumItems = -1;
     inline ptrdiff_t AFortPlayerController_InventoryOwnerInterface = -1;
     inline ptrdiff_t UAbilitySystemComponent_GameplayTagAssetInterface = -1;
     inline int32_t IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex = -1;
@@ -809,10 +818,14 @@ namespace Sites
     inline uint8_t* ActorTickReceiveTick = nullptr;
     inline uint8_t* ShouldUseThreadingForPerformanceDedicatedCheck = nullptr;
     inline uint8_t* LinkerFilterClientButNotServer = nullptr;
+    // 5.0 (UE 4.21): the store is mov [base+disp32], r8b-r15b (REX 88) rather than mov byte ptr [...], 1.
+    inline bool LinkerFilterRegisterStore = false;
     inline std::vector<uint8_t*> ChoosePlayerStartGoalManagerCalls;
     inline std::vector<uint8_t*> AIDirectorGetCurrentCalls;
     inline uint8_t* ShouldUseIdleModeCheck = nullptr;
     inline uint8_t* ShouldUseIdleModeFalse = nullptr;
+    // 5.0 (UE 4.21): ShouldUseIdleMode is inlined into FEngineLoop::Tick; the jz past bIdleMode = true.
+    inline uint8_t* ShouldUseIdleModeInlinedBranch = nullptr;
     inline uint8_t* TeamMemberInfoAthenaMenuHeroRand = nullptr;
 
     struct FMaxTickRateWait

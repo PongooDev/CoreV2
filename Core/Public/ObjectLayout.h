@@ -7,6 +7,10 @@
 struct FObjectLayout
 {
     int32_t FUObjectArray_Members = 0;
+    // UE 4.21 (5.0): ObjObjects is a FChunkedFixedUObjectArray.
+    bool bChunkedObjectArray = false;
+    // Items per chunk: UE's 64K, Fortnite 5.0's 0x10400.
+    int32_t ObjectArrayElementsPerChunk = 64 * 1024;
     bool bSoftObjectPaths = false;
     int32_t UField_Next = 0x28;
     int32_t UStruct_SuperStruct = 0x30;

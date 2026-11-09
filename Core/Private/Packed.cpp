@@ -50,15 +50,23 @@ namespace
     {
         static const uint32_t Changelist = []
         {
+            // The first copy names the build ("++Fortnite+Release-4.5-CL-4166199") up to 4.5; 5.0 has the bare branch
+            // name ("++Fortnite+Release-5.0") first, so the first copy with a changelist counts.
             static constexpr wchar_t Prefix[] = L"++Fortnite+";
-            const uintptr_t Found = Finder::FindReadOnly(Prefix, sizeof(Prefix) - sizeof(wchar_t));
-            std::wstring Version;
-            for (const wchar_t* Char = reinterpret_cast<const wchar_t*>(Found); Found && Version.size() < 128 && Finder::IsReadable(Char, sizeof(wchar_t)) && *Char; ++Char)
+            for (uintptr_t Found = Finder::FindReadOnly(Prefix, sizeof(Prefix) - sizeof(wchar_t)); Found; Found = Finder::FindReadOnlyAfter(Prefix, sizeof(Prefix) - sizeof(wchar_t), Found))
             {
-                Version.push_back(*Char);
+                std::wstring Version;
+                for (const wchar_t* Char = reinterpret_cast<const wchar_t*>(Found); Version.size() < 128 && Finder::IsReadable(Char, sizeof(wchar_t)) && *Char; ++Char)
+                {
+                    Version.push_back(*Char);
+                }
+                const size_t At = Version.find(L"-CL-");
+                if (At != std::wstring::npos)
+                {
+                    return static_cast<uint32_t>(std::wcstoul(Version.c_str() + At + 4, nullptr, 10));
+                }
             }
-            const size_t At = Version.find(L"-CL-");
-            return At == std::wstring::npos ? 0u : static_cast<uint32_t>(std::wcstoul(Version.c_str() + At + 4, nullptr, 10));
+            return 0u;
         }();
         return Changelist;
     }

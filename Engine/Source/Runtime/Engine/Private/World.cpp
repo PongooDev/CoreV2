@@ -140,7 +140,10 @@ ENetMode UWorld::InternalGetNetModeHK(const UWorld* World)
 
 void UWorld::Hook()
 {
-    Hooks::Detour(L"UWorld::InternalGetNetMode", reinterpret_cast<void*>(Natives::UWorld_InternalGetNetMode), reinterpret_cast<void*>(&InternalGetNetModeHK), nullptr);
+    // 5.0's InternalGetNetMode derives the URL's mode itself: its original, reached only with both net drivers null
+    // (InternalGetNetMode above), stands in for AttemptDeriveFromURL.
+    void** const DeriveFromURL = Natives::bInternalGetNetModeDerivesFromURL ? reinterpret_cast<void**>(&Natives::UWorld_AttemptDeriveFromURL) : nullptr;
+    Hooks::Detour(L"UWorld::InternalGetNetMode", reinterpret_cast<void*>(Natives::UWorld_InternalGetNetMode), reinterpret_cast<void*>(&InternalGetNetModeHK), DeriveFromURL);
 
     for (const Sites::FInlinedNetMode& NetMode : Sites::InlinedNetMode)
     {

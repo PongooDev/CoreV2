@@ -153,7 +153,12 @@ namespace
 
     void ResolveGUObjectArray()
     {
-        const uintptr_t UObjectBaseInit = FunctionOf(L"Presizing for max %d objects, including %i objects not considered by GC, pre-allocating %i bytes for permanent pool.");
+        // UE 4.21 (5.0) logs "Pre-allocating" or "Presizing" through a %s: UObjectBaseInit 0x17A69A0 on CL-4204761.
+        uintptr_t UObjectBaseInit = FunctionOf(L"Presizing for max %d objects, including %i objects not considered by GC, pre-allocating %i bytes for permanent pool.");
+        if (!UObjectBaseInit)
+        {
+            UObjectBaseInit = FunctionOf(L"%s for max %d objects, including %i objects not considered by GC, pre-allocating %i bytes for permanent pool.");
+        }
         const uintptr_t AllocatePool = FunctionOf(L"Max UObject count is invalid. It must be a number that is greater than 0.");
         const uintptr_t End = Finder::FunctionEnd(UObjectBaseInit);
 
@@ -180,6 +185,66 @@ namespace
             {
                 ObjectLayout::Current.FUObjectArray_Members = Members;
                 Log::Info(L"Object layout: FUObjectArray's members start at +0x{:X}", Members);
+
+                // UE 4.21 (5.0) chunks ObjObjects: AllocateObjectPool takes its address and fills in MaxElements and
+                // MaxChunks, lea rsi, [rbp+100h]; ...; mov [rsi+18h], ecx (MaxChunks); mov [rsi+10h], eax (CL-4214610
+                // 0x178CA71). The fixed array has nothing at +0x18.
+                const int32_t ObjObjects = (Members + 3 * static_cast<int32_t>(sizeof(int32_t)) + 1 + 7) & ~7;
+                const uintptr_t AllocatePoolEnd = Finder::FunctionEnd(AllocatePool);
+                for (uintptr_t Lea = AllocatePoolEnd ? FindInstruction(AllocatePool, AllocatePoolEnd, { 0x48, 0x8D, -1, ObjObjects & 0xFF, (ObjObjects >> 8) & 0xFF, 0x00, 0x00 }) : 0; Lea && !ObjectLayout::Current.bChunkedObjectArray;
+                     Lea = FindInstruction(Lea + 1, AllocatePoolEnd, { 0x48, 0x8D, -1, ObjObjects & 0xFF, (ObjObjects >> 8) & 0xFF, 0x00, 0x00 }))
+                {
+                    const uint8_t ModRm = Byte(Lea + 2);
+                    const uint8_t Address = (ModRm >> 3) & 0x07;
+                    if ((ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04 || Address == 0x04)
+                    {
+                        continue;
+                    }
+                    for (uintptr_t Store = Lea + 7; Store + 3 <= Lea + 0x40 && Store + 3 <= AllocatePoolEnd; ++Store)
+                    {
+                        if (Byte(Store) == 0x89 && (Byte(Store + 1) & 0xC7) == (0x40 | Address) && Byte(Store + 2) == 0x18 && (Byte(Store - 1) & 0xF1) != 0x41)
+                        {
+                            ObjectLayout::Current.bChunkedObjectArray = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Fortnite's chunks hold 0x10400 items, not UE's 64K: the inlined IndexToObject divides by them (imul eax,
+                // edx, 10400h after the 7E07E07Fh reciprocal) right before it loads the chunk table, mov rax,
+                // [GUObjectArray+ObjObjects] (CL-4214610 0x287C51B, in KismetSystemLibrary::execIsValidClass). The size
+                // most such reads agree on counts.
+                const uintptr_t ChunkTable = Array + ObjObjects;
+                std::unordered_map<int32_t, int32_t> ChunkSizes;
+                for (uintptr_t Load = ObjectLayout::Current.bChunkedObjectArray ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { -1, 0x8B, -1, -1, -1, -1, -1 }) : 0; Load; Load = FindInstruction(Load + 1, Finder::TextEnd(), { -1, 0x8B, -1, -1, -1, -1, -1 }))
+                {
+                    if ((Byte(Load) & 0xFB) != 0x48 || (Byte(Load + 2) & 0xC7) != 0x05 || Finder::RelativeTarget(Load, 3, 7) != ChunkTable)
+                    {
+                        continue;
+                    }
+                    for (uintptr_t Multiply = Load - 0x30; Multiply + 6 <= Load; ++Multiply)
+                    {
+                        const int32_t Size = *reinterpret_cast<const int32_t*>(Multiply + 2);
+                        if (Byte(Multiply) == 0x69 && (Byte(Multiply + 1) & 0xC0) == 0xC0 && Size >= 0x1000 && Size <= 0x100000)
+                        {
+                            ++ChunkSizes[Size];
+                            break;
+                        }
+                    }
+                }
+                int32_t ChunkSizeVotes = 0;
+                for (const auto& [Size, Votes] : ChunkSizes)
+                {
+                    if (Votes > ChunkSizeVotes)
+                    {
+                        ObjectLayout::Current.ObjectArrayElementsPerChunk = Size;
+                        ChunkSizeVotes = Votes;
+                    }
+                }
+                if (ObjectLayout::Current.bChunkedObjectArray)
+                {
+                    Log::Info(L"Object layout: ObjObjects (+0x{:X}) is a FChunkedFixedUObjectArray of 0x{:X}-item chunks ({} reads agree)", ObjObjects, ObjectLayout::Current.ObjectArrayElementsPerChunk, ChunkSizeVotes);
+                }
             }
         }
         // 4.4.0 (CL-4117433) has them 8 bytes in, close enough for a byte displacement: mov [rcx+10h], r8d (0x1579311),
@@ -577,6 +642,62 @@ namespace
                     ++ViewportWindowSites;
                 }
             }
+            // 5.0 (UE 4.21) holds the engine in r12 and compares with the register it cleared bFirstTime with:
+            // cmp [r12+0C28h], rdi; jz (CL-4214610 0x23C685B), then mov rbx, [r12+0C30h] and, further on, [r12+0C48h].
+            // r12 as a base takes a SIB byte (24h); other bases don't.
+            struct FMemoryOperand
+            {
+                uint8_t Base = 0;
+                int32_t Displacement = 0;
+                uintptr_t Next = 0;
+            };
+            // REX.W Opcode ModRm [SIB 24h] disp32, the ModRm a [base+disp32] (mod 10) with no index.
+            const auto DecodeMemory = [](uintptr_t At, uint8_t Opcode, FMemoryOperand& Out)
+            {
+                const uint8_t Rex = Byte(At);
+                const uint8_t ModRm = Byte(At + 2);
+                if ((Rex & 0xF8) != 0x48 || Byte(At + 1) != Opcode || (ModRm & 0xC0) != 0x80)
+                {
+                    return false;
+                }
+                const bool bSib = (ModRm & 0x07) == 0x04;
+                if (bSib && Byte(At + 3) != 0x24)
+                {
+                    return false;
+                }
+                Out.Base = static_cast<uint8_t>(((Rex & 0x01) << 3) | (ModRm & 0x07));
+                Out.Displacement = *reinterpret_cast<const int32_t*>(At + (bSib ? 4 : 3));
+                Out.Next = At + (bSib ? 8 : 7);
+                return true;
+            };
+            for (uintptr_t Compare = ViewportWindowSites == 0 ? Tick : 0; Compare && Compare + 8 <= TickEnd; ++Compare)
+            {
+                FMemoryOperand Operand;
+                if (!DecodeMemory(Compare, 0x39, Operand))
+                {
+                    continue;
+                }
+                const int32_t Window = Operand.Displacement;
+                const uintptr_t Jcc = Operand.Next;
+                const uintptr_t AfterJcc = Byte(Jcc) == 0x74 ? Jcc + 2 : Byte(Jcc) == 0x0F && Byte(Jcc + 1) == 0x84 ? Jcc + 6 : 0;
+                const auto LoadsField = [&](uintptr_t From, uintptr_t To, int32_t Field)
+                {
+                    for (uintptr_t Load = From; Load + 8 <= To; ++Load)
+                    {
+                        FMemoryOperand Loaded;
+                        if (DecodeMemory(Load, 0x8B, Loaded) && Loaded.Base == Operand.Base && Loaded.Displacement == Field)
+                        {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                if (Window > 0 && AfterJcc && LoadsField(AfterJcc, AfterJcc + 0x10, Window + 8) && LoadsField(AfterJcc, std::min(AfterJcc + 0x100, TickEnd), Window + 0x20))
+                {
+                    ViewportWindow = Window;
+                    ++ViewportWindowSites;
+                }
+            }
             if (ViewportWindowSites == 1)
             {
                 Natives::UGameEngine_GameViewportWindow = ViewportWindow;
@@ -960,6 +1081,28 @@ namespace
                         WorldDemoNetDriver = Offset;
                     }
                 }
+                // 5.0 (UE 4.21) inlines a longer Cast, so the store is further on (CL-4214610 0x23C4BD1, 0x46 past the
+                // call), and SetWorld is called on the stored register straight away: mov [rdi+108h], rbx; mov rdx, rdi;
+                // mov rcx, rbx; call SetWorld.
+                for (uintptr_t Store = FindNamed && !DemoStore ? FindInstruction(FindCall, FindCall + 0x60, { -1, 0x89 }) : 0; Store && !DemoStore; Store = FindInstruction(Store + 1, FindCall + 0x60, { -1, 0x89 }))
+                {
+                    const int32_t Offset = *reinterpret_cast<const int32_t*>(Store + 3);
+                    if ((Byte(Store) & 0xF8) != 0x48 || (Byte(Store + 2) & 0xC0) != 0x80 || (Byte(Store + 2) & 0x07) == 0x04 || Offset <= WorldNetDriver || Offset >= 0x200)
+                    {
+                        continue;
+                    }
+                    const uint8_t Stored = static_cast<uint8_t>(((Byte(Store) & 0x04) << 1) | ((Byte(Store + 2) >> 3) & 0x07));
+                    const uintptr_t Call = FindRawCall(Store + 7, Store + 0x14);
+                    for (uintptr_t Move = Store + 7; Call && Move + 3 <= Call && !DemoStore; ++Move)
+                    {
+                        // mov rcx, Stored: REX.W (REX.B for r8-r15) 8B, ModRm 11 001 rm.
+                        if (Byte(Move) == (Stored >= 8 ? 0x49 : 0x48) && Byte(Move + 1) == 0x8B && Byte(Move + 2) == (0xC8 | (Stored & 0x07)))
+                        {
+                            DemoStore = Store;
+                            WorldDemoNetDriver = Offset;
+                        }
+                    }
+                }
                 if (DemoStore)
                 {
                     const uintptr_t SetCall = FindRawCall(DemoStore + 7, DemoStore + 0x20);
@@ -1036,6 +1179,25 @@ namespace
                 GetNetMode = Target;
             }
         }
+        // 5.0 (UE 4.21) inlines AttemptDeriveFromURL into InternalGetNetMode, the function with the "listen" strings
+        // (CL-4214610 0x27C27C0): push rbx; sub rsp, 90h; cmp qword ptr [rcx+38h], 0 (NetDriver); ...; mov rcx,
+        // [rcx+108h] (DemoNetDriver); ...; jmp UNetDriver::GetNetMode; then the URL's derivation. Its 84 callers are
+        // GetNetMode's calls, with no inlined copies to patch. The URL derivation is reached through the original
+        // function with both drivers null (UWorld::Hook keeps its trampoline as AttemptDeriveFromURL).
+        if (!InternalGetNetMode && FindInstruction(Derive, Derive + 0x10, { 0x48, 0x83, 0x79, WorldNetDriver, 0x00 }))
+        {
+            const uintptr_t DeriveEnd = Finder::FunctionEnd(Derive);
+            const uintptr_t Jump = DeriveEnd > Derive ? FindInstruction(Derive, (std::min)(DeriveEnd, Derive + 0x60), { 0xE9 }) : 0;
+            const uintptr_t Target = Jump ? Finder::RelativeTarget(Jump, 1, 5) : 0;
+            if (IsInText(Target))
+            {
+                InternalGetNetMode = Derive;
+                GetNetMode = Target;
+                Natives::bInternalGetNetModeDerivesFromURL = true;
+                Calls.clear();
+                Log::Info(L"Finder: UWorld::InternalGetNetMode derives the URL's net mode itself, GetNetMode's calls need no patching");
+            }
+        }
         Require(L"UWorld::InternalGetNetMode", Natives::UWorld_InternalGetNetMode, InternalGetNetMode);
         Require(L"UNetDriver::GetNetMode", Natives::UNetDriver_GetNetMode, GetNetMode);
 
@@ -1048,7 +1210,7 @@ namespace
                 Sites::InlinedNetMode[Found++] = NetMode;
             }
         }
-        if (Calls.size() != std::size(Sites::InlinedNetMode) || Found != static_cast<int32_t>(Calls.size()))
+        if (!Natives::bInternalGetNetModeDerivesFromURL && (Calls.size() != std::size(Sites::InlinedNetMode) || Found != static_cast<int32_t>(Calls.size())))
         {
             Log::Error(L"Finder: inlined net mode copies: {} calls, {} matched", Calls.size(), Found);
             std::fill(std::begin(Sites::InlinedNetMode), std::end(Sites::InlinedNetMode), Sites::FInlinedNetMode{});
@@ -1118,6 +1280,40 @@ namespace
             Broadcast = 0;
             Natives::UEngine_NetworkFailureEvent = -1;
         }
+        if (!Broadcast && Natives::NumDelegateInlineBytes == 0)
+        {
+            // 5.0 (UE 4.21) inlines the broadcast over the heap invocation list (CL-4214610 0x2783510): lea r14,
+            // [r15+930h] (NetworkFailureEvent); inc dword ptr [r14+14h] (its lock count); ...; mov r9d,
+            // PendingConnectionFailure; ...; call [rax+40h] (ExecuteIfSafe). Core broadcasts it the same way itself
+            // (TMulticastDelegate::Broadcast), so only the event's offset is needed.
+            for (uintptr_t Type = FindInstruction(Travel, TravelEnd, { 0x41, 0xB9, ENetworkFailure::PendingConnectionFailure, 0x00, 0x00, 0x00 }); Type && Natives::UEngine_NetworkFailureEvent < 0; Type = FindInstruction(Type + 1, TravelEnd, { 0x41, 0xB9, ENetworkFailure::PendingConnectionFailure, 0x00, 0x00, 0x00 }))
+            {
+                for (uintptr_t Lea = Type - 0x80; Lea + 11 <= Type; ++Lea)
+                {
+                    // lea reg, [base+disp32] (REX.W, mod 10, no SIB), then inc dword ptr [reg+14h].
+                    const uint8_t Rex = Byte(Lea);
+                    const uint8_t ModRm = Byte(Lea + 2);
+                    if ((Rex & 0xF8) != 0x48 || Byte(Lea + 1) != 0x8D || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04)
+                    {
+                        continue;
+                    }
+                    const uint8_t Destination = static_cast<uint8_t>(((Rex & 0x04) << 1) | ((ModRm >> 3) & 0x07));
+                    const uintptr_t Increment = Lea + 7;
+                    const bool bIncrement = Byte(Increment) == (Destination >= 8 ? 0x41 : 0xFF) && Byte(Increment + (Destination >= 8 ? 1 : 0)) == 0xFF;
+                    const uintptr_t IncrementModRm = Increment + (Destination >= 8 ? 2 : 1);
+                    if (bIncrement && Byte(IncrementModRm) == (0x40 | (Destination & 0x07)) && Byte(IncrementModRm + 1) == 0x14)
+                    {
+                        Natives::UEngine_NetworkFailureEvent = *reinterpret_cast<const int32_t*>(Lea + 3);
+                        Log::Info(L"Finder: FOnNetworkFailure::Broadcast is inlined, Core broadcasts UEngine::NetworkFailureEvent (+0x{:X}) itself", Natives::UEngine_NetworkFailureEvent);
+                        break;
+                    }
+                }
+            }
+            if (Natives::UEngine_NetworkFailureEvent > 0)
+            {
+                return;
+            }
+        }
         Require(L"FOnNetworkFailure::Broadcast", Natives::FOnNetworkFailure_Broadcast, Broadcast);
     }
 
@@ -1129,6 +1325,7 @@ namespace
         uintptr_t StaticClass = 0;
         uintptr_t GameDefaultMap = 0;
         int32_t Matches = 0;
+        std::vector<std::pair<uintptr_t, uintptr_t>> Candidates;
         for (const auto& [Site, Target] : StartCalls)
         {
             const uintptr_t TargetFirst = FirstCall(Target);
@@ -1140,7 +1337,43 @@ namespace
             {
                 StaticClass = TargetFirst;
                 GameDefaultMap = Target;
+                Candidates.emplace_back(Target, TargetFirst);
                 ++Matches;
+            }
+        }
+
+        const uintptr_t PrefixRef = OnlyRef(L"Failed to load game mode '%s' specified by prefixed map name %s.");
+        const uintptr_t CreateGameMode = Finder::FunctionStart(PrefixRef);
+        const std::vector<std::pair<uintptr_t, uintptr_t>> CreateCalls = CreateGameMode ? Finder::DirectCalls(PrefixRef, Finder::FunctionEnd(CreateGameMode)) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+        // GetGlobalDefaultGameMode: the one function CreateGameModeForURL calls whose first call is the settings' StaticClass.
+        const auto FindGlobalDefaultGameMode = [&](uintptr_t SettingsClass)
+        {
+            uintptr_t Found = 0;
+            int32_t FoundMatches = 0;
+            for (const auto& [Site, Target] : SettingsClass ? CreateCalls : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                if (Target != Found && FirstCall(Target) == SettingsClass)
+                {
+                    Found = Target;
+                    ++FoundMatches;
+                }
+            }
+            return FoundMatches == 1 ? Found : 0;
+        };
+        if (Matches > 1)
+        {
+            // 5.0 (UE 4.21) has a second such pair in StartGameInstance (CL-4214610 0x23C4781, after a call it makes
+            // first too): the settings class is the one CreateGameModeForURL's GetGlobalDefaultGameMode starts with, a
+            // getter other than GetGameDefaultMap (the false pair's function is called from both).
+            Matches = 0;
+            for (const auto& [Target, TargetFirst] : Candidates)
+            {
+                if (const uintptr_t GlobalGetter = FindGlobalDefaultGameMode(TargetFirst); GlobalGetter && GlobalGetter != Target)
+                {
+                    StaticClass = TargetFirst;
+                    GameDefaultMap = Target;
+                    ++Matches;
+                }
             }
         }
         if (Matches != 1)
@@ -1150,22 +1383,7 @@ namespace
         }
         Require(L"UGameMapsSettings::GetGameDefaultMap", Natives::UGameMapsSettings_GetGameDefaultMap, GameDefaultMap);
 
-        uintptr_t GlobalDefaultGameMode = 0;
-        const uintptr_t PrefixRef = OnlyRef(L"Failed to load game mode '%s' specified by prefixed map name %s.");
-        const uintptr_t CreateGameMode = Finder::FunctionStart(PrefixRef);
-        Matches = 0;
-        for (const auto& [Site, Target] : StaticClass && CreateGameMode ? Finder::DirectCalls(PrefixRef, Finder::FunctionEnd(CreateGameMode)) : std::vector<std::pair<uintptr_t, uintptr_t>>())
-        {
-            if (Target != GlobalDefaultGameMode && FirstCall(Target) == StaticClass)
-            {
-                GlobalDefaultGameMode = Target;
-                ++Matches;
-            }
-        }
-        if (Matches != 1)
-        {
-            GlobalDefaultGameMode = 0;
-        }
+        const uintptr_t GlobalDefaultGameMode = FindGlobalDefaultGameMode(StaticClass);
         Require(L"UGameMapsSettings::GetGlobalDefaultGameMode", Natives::UGameMapsSettings_GetGlobalDefaultGameMode, GlobalDefaultGameMode);
     }
 
@@ -1175,11 +1393,45 @@ namespace
         const uintptr_t Begin = Finder::TextBegin();
         const uintptr_t End = Finder::TextEnd();
 
+        // One scan of the code collects the votes of every candidate offset (+0xC0 to +0x140), which
+        // ResolveCreateDefaultObject asks about one after another: a scan each made the packed 5.0 server miss the
+        // engine before its creation.
+        struct FVotes
+        {
+            std::unordered_map<int32_t, int32_t> Votes;
+            int32_t Total = 0;
+        };
+        static std::unordered_map<int32_t, FVotes> Cache;
+        static bool bScanned = false;
+        constexpr int32_t MinOffset = 0xC0;
+        constexpr int32_t MaxOffset = 0x140;
+        if (bScanned && DefaultObject >= MinOffset && DefaultObject <= MaxOffset)
+        {
+            const FVotes& Cached = Cache[DefaultObject];
+            int32_t CachedWinner = -1;
+            int32_t CachedWinnerVotes = 0;
+            for (const auto& [Displacement, Count] : Cached.Votes)
+            {
+                if (Count > CachedWinnerVotes)
+                {
+                    CachedWinner = Displacement;
+                    CachedWinnerVotes = Count;
+                }
+            }
+            OutWinner = CachedWinner;
+            OutWinnerVotes = CachedWinnerVotes;
+            OutTotal = Cached.Total;
+            return CachedWinner > 0 && CachedWinner % 8 == 0 && CachedWinnerVotes * 10 >= Cached.Total * 9;
+        }
+        const bool bFill = DefaultObject >= MinOffset && DefaultObject <= MaxOffset;
+
         std::unordered_map<int32_t, int32_t> Votes;
         int32_t Total = 0;
         for (uintptr_t At = Begin; At + 8 <= End; ++At)
         {
-            if ((Byte(At) & 0xF8) != 0x48 || (Byte(At + 2) & 0xC0) != 0x80 || (Byte(At + 2) & 0x07) == 0x04 || *reinterpret_cast<const int32_t*>(At + 3) != DefaultObject)
+            const int32_t Displacement = *reinterpret_cast<const int32_t*>(At + 3);
+            const bool bCandidate = bFill ? Displacement >= MinOffset && Displacement <= MaxOffset && Displacement % 8 == 0 : Displacement == DefaultObject;
+            if ((Byte(At) & 0xF8) != 0x48 || (Byte(At + 2) & 0xC0) != 0x80 || (Byte(At + 2) & 0x07) == 0x04 || !bCandidate)
             {
                 continue;
             }
@@ -1202,11 +1454,25 @@ namespace
             {
                 if (Byte(Call) == 0xFF && (Byte(Call + 1) & 0xF8) == 0x90 && (Byte(Call + 1) & 0x07) != 0x04)
                 {
-                    ++Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
-                    ++Total;
+                    if (bFill)
+                    {
+                        FVotes& Entry = Cache[Displacement];
+                        ++Entry.Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
+                        ++Entry.Total;
+                    }
+                    else
+                    {
+                        ++Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
+                        ++Total;
+                    }
                     break;
                 }
             }
+        }
+        if (bFill)
+        {
+            bScanned = true;
+            return VoteCreateDefaultObject(DefaultObject, OutWinner, OutWinnerVotes, OutTotal);
         }
 
         int32_t Winner = -1;
@@ -1235,18 +1501,63 @@ namespace
         if (!bPassed)
         {
             // 1.10's UClass holds the CDO at +0xF8: the true offset carries hundreds of agreeing sites, every other a handful.
+            // Each offset's vote is kept for the 5.0 rule below, so every offset is scanned once.
+            struct FOffsetVote
+            {
+                int32_t Offset = 0;
+                bool bPassed = false;
+                int32_t Winner = -1;
+                int32_t Votes = 0;
+                int32_t Total = 0;
+            };
+            std::vector<FOffsetVote> OffsetVotes;
             const int32_t Default = ObjectLayout::Current.UClass_ClassDefaultObject;
             for (int32_t Offset = Default - 0x20; Offset <= Default + 0x20; Offset += static_cast<int32_t>(sizeof(void*)))
             {
-                int32_t OffsetWinner = -1;
-                int32_t OffsetVotes = 0;
-                int32_t OffsetTotal = 0;
-                if (Offset != Default && VoteCreateDefaultObject(Offset, OffsetWinner, OffsetVotes, OffsetTotal) && OffsetVotes >= 100 && OffsetVotes > WinnerVotes)
+                if (Offset == Default)
+                {
+                    continue;
+                }
+                FOffsetVote& Vote = OffsetVotes.emplace_back();
+                Vote.Offset = Offset;
+                Vote.bPassed = VoteCreateDefaultObject(Offset, Vote.Winner, Vote.Votes, Vote.Total);
+                if (Vote.bPassed && Vote.Votes >= 100 && Vote.Votes > WinnerVotes)
                 {
                     ObjectLayout::Current.UClass_ClassDefaultObject = Offset;
-                    Winner = OffsetWinner;
-                    WinnerVotes = OffsetVotes;
-                    Total = OffsetTotal;
+                    Winner = Vote.Winner;
+                    WinnerVotes = Vote.Votes;
+                    Total = Vote.Total;
+                    bPassed = true;
+                }
+            }
+            if (!bPassed)
+            {
+                // 5.0 (UE 4.21) inlines GetDefaultObject far less: CL-4214610 has 41 of 42 sites at +0xF8 agreeing on
+                // slot 0x65, and no other offset passes. Take the one passing offset with clearly the most sites.
+                const FOffsetVote* Best = nullptr;
+                int32_t RunnerUpVotes = 0;
+                for (const FOffsetVote& Vote : OffsetVotes)
+                {
+                    if (!Vote.bPassed)
+                    {
+                        continue;
+                    }
+                    if (!Best || Vote.Votes > Best->Votes)
+                    {
+                        RunnerUpVotes = Best ? Best->Votes : 0;
+                        Best = &Vote;
+                    }
+                    else
+                    {
+                        RunnerUpVotes = (std::max)(RunnerUpVotes, Vote.Votes);
+                    }
+                }
+                if (Best && Best->Votes >= 30 && Best->Votes >= RunnerUpVotes * 4)
+                {
+                    ObjectLayout::Current.UClass_ClassDefaultObject = Best->Offset;
+                    Winner = Best->Winner;
+                    WinnerVotes = Best->Votes;
+                    Total = Best->Total;
                     bPassed = true;
                 }
             }
@@ -1309,9 +1620,39 @@ namespace
                 }
             }
         }
+        if (!Matches)
+        {
+            // 5.0 (UE 4.21) works in eax: imul eax, [GSRandSeed], 0BB38435h; add eax, 3619636Bh; mov [GSRandSeed], eax, a
+            // called leaf (CL-4204761 0x14F72A0, CL-4214610 0x14F78A0 with no .pdata entry). Inlined copies store the
+            // seed back too, so only a function's first instruction, or a called one with no .pdata entry, counts.
+            for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0x69, 0x05, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B, 0x05, 0x6B, 0x63, 0x19, 0x36, 0x89, 0x05 }); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), { 0x69, 0x05, -1, -1, -1, -1, 0x35, 0x84, 0xB3, 0x0B, 0x05, 0x6B, 0x63, 0x19, 0x36, 0x89, 0x05 }))
+            {
+                const uintptr_t Start = Finder::FunctionStart(Site);
+                if (Finder::RelativeTarget(Site, 2, 10) == Finder::RelativeTarget(Site + 15, 2, 6) && (Start == Site || (!Start && !Finder::CallsTo(Site, false).empty())))
+                {
+                    SRand = Site;
+                    ++Matches;
+                }
+            }
+        }
         Require(L"FMath::SRand", Natives::FMath_SRand, Matches == 1 ? SRand : 0);
 
-        Require(L"FUObjectArray::AllocateSerialNumber", Natives::FUObjectArray_AllocateSerialNumber, FunctionOf(L"UObject serial numbers overflowed (trying to allocate serial number %d)."));
+        // 5.0 (UE 4.21) inlines AllocateSerialNumber into FWeakObjectPtr::operator=(const UObject*), which then holds the
+        // log (CL-4214610 0x178A990): test rdx, rdx; jz; mov ecx, [rdx+0Ch] (InternalIndex); mov [rsi], ecx, with rsi the
+        // pointer. Core's FWeakObjectPtr calls that instead.
+        const uintptr_t SerialNumbers = FunctionOf(L"UObject serial numbers overflowed (trying to allocate serial number %d).");
+        const uintptr_t NullTest = SerialNumbers ? FindInstruction(SerialNumbers, SerialNumbers + 0x20, { 0x48, 0x85, 0xD2 }) : 0;
+        const uintptr_t IndexCopy = NullTest ? FindInstruction(NullTest, NullTest + 0x14, { 0x8B, 0x4A, 0x0C, 0x89 }) : 0;
+        Natives::FWeakObjectPtr_Assign = nullptr;
+        if (IndexCopy && (Byte(IndexCopy + 4) & 0xF8) == 0x08)
+        {
+            Natives::FWeakObjectPtr_Assign = reinterpret_cast<decltype(Natives::FWeakObjectPtr_Assign)>(SerialNumbers);
+            Log::Info(L"Finder: FUObjectArray::AllocateSerialNumber is inlined into FWeakObjectPtr::operator= (+0x{:X}), which Core calls", SerialNumbers - Finder::ImageBase());
+        }
+        else
+        {
+            Require(L"FUObjectArray::AllocateSerialNumber", Natives::FUObjectArray_AllocateSerialNumber, SerialNumbers);
+        }
     }
 
     void ResolveRequestingExit()
@@ -1372,7 +1713,9 @@ namespace
         }
     }
 
-    std::vector<uint8_t*> CommandletChecks(uintptr_t Function)
+    // bWide: 5.0 (UE 4.21) schedules more between the compare and its jnz (UGameEngine::Tick, CL-4214610 0x23C60AF: jnz
+    // 0x12 on); the wider scan stops at a jz, the other branch of a compare that isn't such a check.
+    std::vector<uint8_t*> CommandletChecks(uintptr_t Function, bool bWide = false)
     {
         std::vector<uint8_t*> Checks;
         const uintptr_t End = Finder::FunctionEnd(Function);
@@ -1383,8 +1726,12 @@ namespace
             {
                 continue;
             }
-            for (uintptr_t Jump = Compare + 6; Jump < Compare + 0x12; ++Jump)
+            for (uintptr_t Jump = Compare + 6; Jump < Compare + (bWide ? 0x18 : 0x12); ++Jump)
             {
+                if (bWide && (Byte(Jump) == 0x74 || (Byte(Jump) == 0x0F && Byte(Jump + 1) == 0x84)))
+                {
+                    break;
+                }
                 if (Byte(Jump) == 0x75 || (Byte(Jump) == 0x0F && Byte(Jump + 1) == 0x85))
                 {
                     Checks.push_back(reinterpret_cast<uint8_t*>(Jump));
@@ -1427,7 +1774,12 @@ namespace
             RequireChecks(L"FEngineLoop::PreInit", Sites::PreInitDedicatedServerChecks, std::move(PreInitChecks), 5, 6);
         }
         RequireChecks(L"UEngine::Init", Sites::EngineInitDedicatedServerChecks, CommandletChecks(FunctionOf(L"Initializing Engine...")), 2);
-        RequireChecks(L"UGameEngine::Tick", Sites::GameEngineTickDedicatedServerChecks, CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick)), 2);
+        std::vector<uint8_t*> TickChecks = CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick));
+        if (TickChecks.size() < 2)
+        {
+            TickChecks = CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick), true);
+        }
+        RequireChecks(L"UGameEngine::Tick", Sites::GameEngineTickDedicatedServerChecks, std::move(TickChecks), 2);
     }
 
     void ResolveOutputDevices()
@@ -1695,6 +2047,22 @@ namespace
                 }
                 InlineBind = Entries ? HandlerLea : 0;
             }
+            // 5.0 (UE 4.21) makes the instance inline as 4.2 does but adds it through a call: lea rax, Handler; ...; lea
+            // rax, its vtable; mov [rbx], rax; lea rcx, [Entries]; call AddInternal (CL-4214610 0x79BF9D, 0x79BFC3),
+            // whose compaction threshold (2) is at +0x10 after Data and ArrayNum: dec dword ptr [rcx+10h].
+            for (uintptr_t Lea = !Entries && LeaMatches == 1 ? FindInstruction(HandlerLea + 7, HandlerLea + 0x40, { 0x48, 0x8D, 0x0D }) : 0; Lea && !Entries; Lea = FindInstruction(Lea + 1, HandlerLea + 0x40, { 0x48, 0x8D, 0x0D }))
+            {
+                const uintptr_t Delegate = Finder::RelativeTarget(Lea, 3, 7);
+                const uintptr_t AddCall = FindRawCall(Lea + 7, Lea + 0x10);
+                const uintptr_t Add = AddCall ? Finder::RelativeTarget(AddCall, 1, 5) : 0;
+                if (!IsInText(Delegate) && Add && FindInstruction(Add, Add + 0x30, { 0xFF, 0x49, 0x10 }) && *reinterpret_cast<const int32_t*>(Delegate + 0x10) == 2)
+                {
+                    Natives::NumDelegateInlineBytes = 0;
+                    Entries = Delegate;
+                    InlineBind = HandlerLea;
+                    Log::Info(L"Finder: delegates use the heap allocator (NUM_DELEGATE_INLINE_BYTES 0)");
+                }
+            }
         }
         RequireAddress(L"UConsole::RegisterConsoleAutoCompleteEntries", reinterpret_cast<uintptr_t&>(Natives::UConsole_RegisterConsoleAutoCompleteEntries), Entries);
 
@@ -1899,6 +2267,26 @@ namespace
                 {
                     Setup = Finder::FunctionStart(Store);
                     ++Matches;
+                    break;
+                }
+            }
+        }
+        // 5.0 (UE 4.21, CL-4214610 0x23FC7C0) clears the flag at +0x70 (disp8) and loads GEngine into rdi further on to add
+        // the viewport's delegate to the engine's travel failure event: mov byte ptr [rcx+70h], 0; ...; mov rdi, [GEngine];
+        // lea edx, [r8+30h]; add rdi, 918h.
+        for (uintptr_t Store = GEngine && Matches == 0 ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0xC6, 0x41, -1, 0x00 }) : 0; Store; Store = FindInstruction(Store + 1, Finder::TextEnd(), { 0xC6, 0x41, -1, 0x00 }))
+        {
+            for (uintptr_t Load = Store + 4; Load < Store + 0x20; ++Load)
+            {
+                if ((Byte(Load) & 0xFB) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Load, 3, 7) == GEngine
+                    && FindInstruction(Load + 7, Load + 0x14, { 0x48, 0x81, 0xC0 | ((Byte(Load + 2) >> 3) & 0x07) }))
+                {
+                    const uintptr_t Function = Finder::FunctionStart(Store);
+                    if (Function && Function != Setup)
+                    {
+                        Setup = Function;
+                        ++Matches;
+                    }
                     break;
                 }
             }
@@ -2275,14 +2663,19 @@ namespace
         // match was FNetworkObjectList::Find (0x2212AA0, which returns its TSharedPtr through rdx), and every actor
         // ServerReplicateActors_BuildConsiderList removed had its vtable zeroed (a missed Find writes an empty pointer):
         // the server crashed in UNetConnection::GetTimeoutValue on the connection's OwningActor as a player joined (#244).
-        for (auto Call = NotifyCalls.rbegin(); Call != NotifyCalls.rend() && !ObjectListRemove; ++Call)
+        // 5.0 holds the actor in r15: mov rcx, [rdi+550h]; mov rdx, r15 (49 8B D7; CL-4214610 0x24E8087), taken only when
+        // no call matches the older way.
+        for (const uint8_t ActorRexMask : { static_cast<uint8_t>(0xFF), static_cast<uint8_t>(0xFE) })
         {
-            const bool bActorLoad = Byte(Call->first - 3) == 0x48 && Byte(Call->first - 2) == 0x8B && (Byte(Call->first - 1) & 0xF8) == 0xD0;
-            const uintptr_t Load = Call->first - (bActorLoad ? 10 : 7);
-            if ((Byte(Load) & 0xFE) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04)
+            for (auto Call = NotifyCalls.rbegin(); Call != NotifyCalls.rend() && !ObjectListRemove; ++Call)
             {
-                ObjectListRemove = Call->second;
-                NetworkObjects = *reinterpret_cast<const int32_t*>(Load + 3);
+                const bool bActorLoad = (Byte(Call->first - 3) & ActorRexMask) == 0x48 && Byte(Call->first - 2) == 0x8B && (Byte(Call->first - 1) & 0xF8) == 0xD0;
+                const uintptr_t Load = Call->first - (bActorLoad ? 10 : 7);
+                if ((Byte(Load) & 0xFE) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04)
+                {
+                    ObjectListRemove = Call->second;
+                    NetworkObjects = *reinterpret_cast<const int32_t*>(Load + 3);
+                }
             }
         }
         Require(L"FNetworkObjectList::Remove", Natives::FNetworkObjectList_Remove, ObjectListRemove);
@@ -2324,33 +2717,49 @@ namespace
                 ++ActorChannelLookups;
             }
         }
+        // 5.0 holds the connection in r13, so both carry a REX prefix: mov eax, [r13+1610h]; sub eax, [r13+163Ch]
+        // (CL-4214610 0x24E7ECA).
+        for (uintptr_t Load = NotifyDestroyed; ActorChannelLookups == 0 && NotifyDestroyedEnd && Load + 14 <= NotifyDestroyedEnd; ++Load)
+        {
+            if (Byte(Load) == 0x41 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC0) == 0x80 && (Byte(Load + 2) & 0x07) != 0x04 && Byte(Load + 7) == 0x41 && (Byte(Load + 8) == 0x2B || Byte(Load + 8) == 0x3B)
+                && (Byte(Load + 9) & 0xC0) == 0x80 && (Byte(Load + 9) & 0x07) == (Byte(Load + 2) & 0x07) && *reinterpret_cast<const int32_t*>(Load + 10) - *reinterpret_cast<const int32_t*>(Load + 3) == 0x2C)
+            {
+                ActorChannels = *reinterpret_cast<const int32_t*>(Load + 3) - 8;
+                ++ActorChannelLookups;
+            }
+        }
         RequireOffset(L"UNetConnection::ActorChannels", Natives::UNetConnection_ActorChannels, ActorChannelLookups == 1 ? ActorChannels : 0);
 
         uintptr_t CreateDestructionInfo = 0;
         ptrdiff_t ConnectionDestroyedActors = 0;
         ptrdiff_t DestructionInfoNetGUID = 0;
         int32_t DestroyedActorAdds = 0;
-        for (const auto& [Site, Target] : NotifyCalls)
+        // 5.0's connection is in r13: lea rcx, [r13+1660h] (49 8D 8D; CL-4214610 0x24E801E), tried when rbx..rdi find none.
+        for (const int32_t SetRex : { 0x48, 0x49 })
         {
-            // Connection->DestroyedStartupOrDormantActors.Add(DestructionInfo->NetGUID): lea rcx, [reg+Set] right after
-            // the call up to 3.2. 3.3 (0x21F2ADA) first hands the info to the connection's ReplicationConnectionDriver
-            // when it has one, so the Add is past a branch: lea r8, [rax+NetGUID]; xor r9d, r9d; lea rcx, [rbx+1648h].
-            const uintptr_t NextCall = FindRawCall(Site + 5, Site + 0x40);
-            const uintptr_t GuidLea = NextCall ? FindInstruction(Site + 5, NextCall, { 0x4C, 0x8D, 0x40 }) : 0;
-            uintptr_t Lea = 0;
-            for (uintptr_t Candidate = GuidLea ? FindInstruction(Site + 5, NextCall, { 0x48, 0x8D }) : 0; Candidate && !Lea; Candidate = FindInstruction(Candidate + 1, NextCall, { 0x48, 0x8D }))
+            for (const auto& [Site, Target] : DestroyedActorAdds == 0 ? NotifyCalls : std::vector<std::pair<uintptr_t, uintptr_t>>())
             {
-                if ((Byte(Candidate + 2) & 0xF8) == 0x88 && (Byte(Candidate + 2) & 0x07) != 0x04)
+                // Connection->DestroyedStartupOrDormantActors.Add(DestructionInfo->NetGUID): lea rcx, [reg+Set] right after
+                // the call up to 3.2. 3.3 (0x21F2ADA) first hands the info to the connection's ReplicationConnectionDriver
+                // when it has one, so the Add is past a branch: lea r8, [rax+NetGUID]; xor r9d, r9d; lea rcx, [rbx+1648h].
+                // 5.0's Add call ends 0x42 past the CreateDestructionInfo call (0x24E8029).
+                const uintptr_t NextCall = FindRawCall(Site + 5, Site + (SetRex == 0x49 ? 0x50 : 0x40));
+                const uintptr_t GuidLea = NextCall ? FindInstruction(Site + 5, NextCall, { 0x4C, 0x8D, 0x40 }) : 0;
+                uintptr_t Lea = 0;
+                for (uintptr_t Candidate = GuidLea ? FindInstruction(Site + 5, NextCall, { SetRex, 0x8D }) : 0; Candidate && !Lea; Candidate = FindInstruction(Candidate + 1, NextCall, { SetRex, 0x8D }))
                 {
-                    Lea = Candidate;
+                    if ((Byte(Candidate + 2) & 0xF8) == 0x88 && (Byte(Candidate + 2) & 0x07) != 0x04)
+                    {
+                        Lea = Candidate;
+                    }
                 }
-            }
-            if (Lea)
-            {
-                CreateDestructionInfo = Target;
-                ConnectionDestroyedActors = *reinterpret_cast<const int32_t*>(Lea + 3);
-                DestructionInfoNetGUID = Byte(GuidLea + 3);
-                ++DestroyedActorAdds;
+                if (Lea)
+                {
+                    CreateDestructionInfo = Target;
+                    ConnectionDestroyedActors = *reinterpret_cast<const int32_t*>(Lea + 3);
+                    DestructionInfoNetGUID = Byte(GuidLea + 3);
+                    ++DestroyedActorAdds;
+                }
             }
         }
         RequireOffset(L"UNetConnection::DestroyedStartupOrDormantActors", Natives::UNetConnection_DestroyedStartupOrDormantActors, DestroyedActorAdds == 1 ? ConnectionDestroyedActors : 0);
@@ -2615,6 +3024,21 @@ namespace
                 NumOutRec = Byte(Compare + 2);
             }
         }
+        // 5.0 (UE 4.21) compares with a zeroed register, the channel in r12: cmp [r12+4Ch], r15d (45 39 7C 24 4C;
+        // CL-4214610 0x2350970).
+        for (uintptr_t Compare = PausedTest && !NumOutRec && (Byte(PausedTest + 2) & 0x38) == 0x20 ? PausedTest + 4 : 0; Compare && Compare < PausedTest + 0x14 && !NumOutRec; ++Compare)
+        {
+            const uint8_t ModRm = Byte(Compare + 1);
+            if (Byte(Compare) != 0x39 || (Byte(Compare - 1) & 0xF0) != 0x40 || (ModRm & 0xC0) != 0x40)
+            {
+                continue;
+            }
+            const bool bSib = (ModRm & 0x07) == 0x04;
+            if (!bSib || Byte(Compare + 2) == 0x24)
+            {
+                NumOutRec = Byte(Compare + (bSib ? 3 : 2));
+            }
+        }
         RequireOffset(L"UChannel::NumOutRec", Natives::UChannel_NumOutRec, NumOutRec);
 
         ptrdiff_t LastUpdateTime = 0;
@@ -2626,6 +3050,13 @@ namespace
                 LastUpdateTime = *reinterpret_cast<const int32_t*>(Store + 8);
                 ++LastUpdateStores;
             }
+        }
+        // 5.0 holds the channel in r12, which takes a SIB byte: movsd [r12+80h], xmm0 (F2 41 0F 11 84 24; CL-4214610
+        // 0x2351949).
+        for (uintptr_t Store = LastUpdateStores == 0 && ReplicateActorEnd ? FindInstruction(ReplicateActor, ReplicateActorEnd, { 0x0F, 0x5A, 0xC0, 0xF2, 0x41, 0x0F, 0x11, 0x84, 0x24 }) : 0; Store; Store = FindInstruction(Store + 1, ReplicateActorEnd, { 0x0F, 0x5A, 0xC0, 0xF2, 0x41, 0x0F, 0x11, 0x84, 0x24 }))
+        {
+            LastUpdateTime = *reinterpret_cast<const int32_t*>(Store + 9);
+            ++LastUpdateStores;
         }
         // 3.0 moved LastUpdateTime off the channel (UActorChannel lost a double before its bits) into a map on the
         // connection, TMap<TWeakObjectPtr<AActor>, double> at +0x1860: ReplicateActor (3.0 0x1FDAE90) finds or adds the
@@ -2721,6 +3152,11 @@ namespace
                     {
                         LoadCall += 4;
                     }
+                    // 5.0 (UE 4.21, 0x17958F5) keeps it in r14b: mov [rsp+20h], r14b (44 88 74 24 20).
+                    else if (LoadCall && Byte(LoadCall) == 0x44 && Byte(LoadCall + 1) == 0x88 && (Byte(LoadCall + 2) & 0xC7) == 0x44 && Byte(LoadCall + 3) == 0x24 && Byte(LoadCall + 4) == 0x20)
+                    {
+                        LoadCall += 5;
+                    }
                     LoadCall = LoadCall && Byte(LoadCall) == 0xE8 ? LoadCall : 0;
                 }
                 // One [base + disp8] for all four loads, the base not rsp.
@@ -2811,16 +3247,23 @@ namespace
         RequireSlot(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlushIndex, TickFlushIndex);
         Require(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlush, bDemoTickFlush ? TickFlush : 0);
 
+        // IsServer: return ServerConnection == nullptr, cmp qword ptr [rcx+ServerConnection], 0; sete al; ret. 5.0 (UE
+        // 4.21) moves ServerConnection past 0x7F: cmp qword ptr [rcx+88h], 0 (CL-4214610 0x24E7310).
+        const auto IsServerShape = [](uintptr_t Body)
+        {
+            return Body && (FindInstruction(Body, Body + 9, { 0x48, 0x83, 0x79, -1, 0x00, 0x0F, 0x94, 0xC0, 0xC3 }) == Body
+                || FindInstruction(Body, Body + 12, { 0x48, 0x83, 0xB9, -1, -1, 0x00, 0x00, 0x00, 0x0F, 0x94, 0xC0, 0xC3 }) == Body);
+        };
         int32_t IsServer = TickFlush ? VirtualSlot(FindVirtualCall(TickFlush, TickFlush + 0x60)) : -1;
         uintptr_t IsServerBody = VTableEntry(NetDriverVTable, IsServer);
         const uintptr_t GetNetMode = reinterpret_cast<uintptr_t>(Natives::UNetDriver_GetNetMode);
-        bool bIsServer = IsServerBody && FindInstruction(IsServerBody, IsServerBody + 9, { 0x48, 0x83, 0x79, -1, 0x00, 0x0F, 0x94, 0xC0, 0xC3 }) == IsServerBody && GetNetMode && VirtualSlot(FindVirtualCall(GetNetMode, GetNetMode + 0x10)) == IsServer;
+        bool bIsServer = IsServerShape(IsServerBody) && GetNetMode && VirtualSlot(FindVirtualCall(GetNetMode, GetNetMode + 0x10)) == IsServer;
         if (!bIsServer && GetNetMode)
         {
             // 1.10's TickFlush (0x1AD79B0) no longer starts with IsServer; GetNetMode (0x1AC2BB0) still does (slot 0x60).
             IsServer = VirtualSlot(FindVirtualCall(GetNetMode, GetNetMode + 0x10));
             IsServerBody = VTableEntry(NetDriverVTable, IsServer);
-            bIsServer = IsServerBody && FindInstruction(IsServerBody, IsServerBody + 9, { 0x48, 0x83, 0x79, -1, 0x00, 0x0F, 0x94, 0xC0, 0xC3 }) == IsServerBody;
+            bIsServer = IsServerShape(IsServerBody);
         }
         RequireSlot(L"UNetDriver::IsServer", Natives::UNetDriver_IsServerIndex, bIsServer ? IsServer : -1);
 
@@ -2890,7 +3333,12 @@ namespace
         const uintptr_t ConnectionTickBody = ConnectionTicks >= 2 ? VTableEntry(ConnectionVTable, ConnectionTick) : 0;
         RequireSlot(L"UNetConnection::Tick", Natives::UNetConnection_TickIndex, ConnectionTickBody ? ConnectionTick : -1);
 
-        const uintptr_t IsNetReadyBody = InitRemoteConnection >= 6 && IsNetReady == ConnectionTick + 1 ? VTableEntry(ConnectionVTable, IsNetReady) : 0;
+        uintptr_t IsNetReadyBody = InitRemoteConnection >= 6 && IsNetReady == ConnectionTick + 1 ? VTableEntry(ConnectionVTable, IsNetReady) : 0;
+        // 5.0 (UE 4.21) copies this first: mov r8, rcx; test dl, dl; ... (CL-4214610 0x24E71A0).
+        if (IsNetReadyBody && Byte(IsNetReadyBody) == 0x4C && Byte(IsNetReadyBody + 1) == 0x8B && Byte(IsNetReadyBody + 2) == 0xC1)
+        {
+            IsNetReadyBody += 3;
+        }
         const bool bIsNetReady = IsNetReadyBody && FindInstruction(IsNetReadyBody, IsNetReadyBody + 18, { 0x84, 0xD2, 0x74, -1, 0x8B, 0x81, -1, -1, 0x00, 0x00, 0xF7, 0xD8, 0x89, 0x81, -1, -1, 0x00, 0x00 }) == IsNetReadyBody;
         RequireSlot(L"UNetConnection::IsNetReady", Natives::UNetConnection_IsNetReadyIndex, bIsNetReady ? IsNetReady : -1);
         RequireOffset(L"UNetConnection::QueuedBits", Natives::UNetConnection_QueuedBits, bIsNetReady ? *reinterpret_cast<const int32_t*>(IsNetReadyBody + 14) : 0);
@@ -3058,6 +3506,34 @@ namespace
             if ((Byte(Load + 2) & 0xF8) == 0x80 && (Byte(Load + 2) & 0x07) != 0x04 && FindRawCall(Load + 7, Load + 0x10))
             {
                 ReplicationFrame = *reinterpret_cast<const int32_t*>(Load + 3);
+                ++ReplicationFrameReads;
+            }
+        }
+        // 5.0 (UE 4.21) loads the frame early and checks it against the changelist state's last frame before it calls the
+        // update: mov r14d, [rcx+370h]; ...; cmp [rbx+20h], r14d; ...; mov [rbx+20h], r14d (CL-4214610 0x2352302).
+        for (uintptr_t Load = ReplicationFrameReads == 0 && ReplicatePropertiesEnd ? FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, { 0x44, 0x8B }) : 0; Load; Load = FindInstruction(Load + 1, ReplicatePropertiesEnd, { 0x44, 0x8B }))
+        {
+            const uint8_t ModRm = Byte(Load + 2);
+            if ((ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const int32_t Register = ModRm & 0x38;
+            const auto UsesFrame = [&](uint8_t Opcode)
+            {
+                for (uintptr_t At = FindInstruction(Load + 7, ReplicatePropertiesEnd, { 0x44, Opcode }); At; At = FindInstruction(At + 1, ReplicatePropertiesEnd, { 0x44, Opcode }))
+                {
+                    if ((Byte(At + 2) & 0xC0) == 0x40 && (Byte(At + 2) & 0x38) == Register && (Byte(At + 2) & 0x07) != 0x04)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            };
+            const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Load + 3);
+            if (UsesFrame(0x39) && UsesFrame(0x89) && Offset != ReplicationFrame)
+            {
+                ReplicationFrame = Offset;
                 ++ReplicationFrameReads;
             }
         }
@@ -3233,6 +3709,27 @@ namespace
                 TimeSeconds = *reinterpret_cast<const int32_t*>(Load + 4);
             }
         }
+        // 5.0 (UE 4.21) inlines FlushNetDormancy into AActor::ForceNetUpdate (CL-4214610 0x217F380), so nothing above
+        // calls it: take the functions that test NetDormancy > DORM_Awake (cmp byte ptr [reg+NetDormancy], 1) within
+        // 0xB0 of their start, and the net driver virtual each calls before it (UNetDriver::ForceNetUpdate, slot 0x5F,
+        // 0x24E1670: NextUpdateTime = World->TimeSeconds - 0.01f, movss xmm0, [rax+7A8h]; subss), read inside that
+        // virtual's own body.
+        for (uintptr_t Test = TimeSecondsReads == 0 && NetDormancy && NetDriverVTable ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0x80, -1, static_cast<int32_t>(NetDormancy & 0xFF), static_cast<int32_t>((NetDormancy >> 8) & 0xFF), 0x00, 0x00, 0x01 }) : 0; Test;
+             Test = FindInstruction(Test + 1, Finder::TextEnd(), { 0x80, -1, static_cast<int32_t>(NetDormancy & 0xFF), static_cast<int32_t>((NetDormancy >> 8) & 0xFF), 0x00, 0x00, 0x01 }))
+        {
+            const uintptr_t Function = (Byte(Test + 1) & 0xF8) == 0xB8 ? Finder::FunctionStart(Test) : 0;
+            for (uintptr_t Call = Function && Test - Function <= 0xB0 ? FindVirtualCall(Function, Test) : 0; Call; Call = FindVirtualCall(Call + 1, Test))
+            {
+                const uintptr_t Entry = VTableEntry(NetDriverVTable, VirtualSlot(Call));
+                const uintptr_t EntryEnd = Entry ? Finder::FunctionEnd(Entry) : 0;
+                const uintptr_t Load = EntryEnd > Entry ? FindInstruction(Entry, (std::min)(EntryEnd, Entry + 0xA0), { 0xF3, 0x0F, 0x10 }) : 0;
+                if (Load && Load + 0x18 <= EntryEnd && (Byte(Load + 3) & 0xC0) == 0x80 && (Byte(Load + 3) & 0x07) != 0x04 && FindInstruction(Load + 8, Load + 0x18, { 0xF3, 0x0F, 0x5C }))
+                {
+                    TimeSecondsReads = !TimeSecondsReads || TimeSeconds == *reinterpret_cast<const int32_t*>(Load + 4) ? TimeSecondsReads + 1 : -1000;
+                    TimeSeconds = *reinterpret_cast<const int32_t*>(Load + 4);
+                }
+            }
+        }
         RequireOffset(L"UWorld::TimeSeconds", Natives::UWorld_TimeSeconds, TimeSecondsReads >= 1 ? TimeSeconds : 0);
 
         ptrdiff_t ActorInitialized = 0;
@@ -3363,7 +3860,9 @@ namespace
         for (const uintptr_t Site : Finder::StringRefs(L"(PEER)"))
         {
             const bool bPeerTest = Byte(Site - 7) == 0x80 && (Byte(Site - 6) & 0xF8) == 0xB8 && (Byte(Site - 6) & 0x07) != 0x04 && Byte(Site - 1) == 0x00;
-            const ptrdiff_t Offset = bPeerTest ? *reinterpret_cast<const int32_t*>(Site - 5) : 0;
+            // 5.0 (UE 4.21) also compares with a zeroed register: cmp [r14+188h], r13b (45 38 AE; CL-4214610 0x24DE58F).
+            const bool bPeerRegisterTest = !bPeerTest && (Byte(Site - 7) & 0xF0) == 0x40 && Byte(Site - 6) == 0x38 && (Byte(Site - 5) & 0xC0) == 0x80 && (Byte(Site - 5) & 0x07) != 0x04;
+            const ptrdiff_t Offset = bPeerTest ? *reinterpret_cast<const int32_t*>(Site - 5) : bPeerRegisterTest ? *reinterpret_cast<const int32_t*>(Site - 4) : 0;
             if (!Offset || (IsPeerSites && Offset != IsPeer))
             {
                 IsPeerSites = 0;
@@ -3393,6 +3892,26 @@ namespace
             const std::initializer_list<int32_t> ReadBits = { 0x44, 0x8B, -1, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 };
             uintptr_t BitsRead = FindInstruction(Load + 7, Load + 0x30, ReadBits);
             while (BitsRead && (Byte(BitsRead + 2) & 0xC7) != 0x80)
+            {
+                BitsRead = FindInstruction(BitsRead + 1, Load + 0x30, ReadBits);
+            }
+            if (BitsRead)
+            {
+                OwningChannel = *reinterpret_cast<const int32_t*>(Load + 3);
+                ++OwningChannelLoads;
+            }
+        }
+        // 5.0 (UE 4.21) reads the bits into ecx: mov rax, [rdi+0F8h]; ...; mov ecx, [rax+88h] (CL-4214610 0x23522D0).
+        // Only a load into rax counts here, the register the bits are read through.
+        for (uintptr_t Load = OwningChannelLoads == 0 && ReplicatePropertiesEnd && ActorChannelBits > 0 ? FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, { 0x48, 0x8B }) : 0; Load; Load = FindInstruction(Load + 1, ReplicatePropertiesEnd, { 0x48, 0x8B }))
+        {
+            if ((Byte(Load + 2) & 0xF8) != 0x80 || (Byte(Load + 2) & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const std::initializer_list<int32_t> ReadBits = { 0x8B, -1, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 };
+            uintptr_t BitsRead = FindInstruction(Load + 7, Load + 0x30, ReadBits);
+            while (BitsRead && ((Byte(BitsRead + 1) & 0xC7) != 0x80 || (Byte(BitsRead - 1) & 0xF0) == 0x40))
             {
                 BitsRead = FindInstruction(BitsRead + 1, Load + 0x30, ReadBits);
             }
@@ -3459,6 +3978,13 @@ namespace
 
 namespace
 {
+    // bForceDedicated's offset in FOnlineSubsystemImpl::IsDedicated: xor eax, eax; cmp [rcx+X], al up to 4.5, or (UE
+    // 4.21, 5.0) cmp byte ptr [rcx+X], 0.
+    int32_t OnlineSubsystemForceDedicatedOffset(uintptr_t IsDedicated)
+    {
+        return *reinterpret_cast<const int32_t*>(IsDedicated + (Byte(IsDedicated) == 0x80 ? 2 : 4));
+    }
+
     std::vector<void**> VTablesWithEntry(uintptr_t Function)
     {
         std::vector<void**> Entries;
@@ -3523,7 +4049,23 @@ namespace
 
     void ResolveZone()
     {
-        const uintptr_t ZoneSpawnPawn = UniqueFunction({ 0x4D, 0x85, 0xC0, 0x74, 0x47, 0x48, 0x85, 0xD2, 0x74, 0x42, 0xE8 });
+        uintptr_t ZoneSpawnPawn = UniqueFunction({ 0x4D, 0x85, 0xC0, 0x74, 0x47, 0x48, 0x85, 0xD2, 0x74, 0x42, 0xE8 });
+        if (!ZoneSpawnPawn)
+        {
+            // 5.0 (UE 4.21) has a longer body behind the same two null checks: test r8, r8; jz +51h; test rdx, rdx; jz
+            // +4Ch; call (CL-4214610 0xE10EF0). Both jumps still meet; the one such pair.
+            int32_t Pairs = 0;
+            const std::initializer_list<int32_t> NullChecks = { 0x4D, 0x85, 0xC0, 0x74, -1, 0x48, 0x85, 0xD2, 0x74, -1, 0xE8 };
+            for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), NullChecks); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), NullChecks))
+            {
+                if (Site + 5 + Byte(Site + 4) == Site + 10 + Byte(Site + 9) && Finder::FunctionStart(Site))
+                {
+                    ZoneSpawnPawn = Site;
+                    ++Pairs;
+                }
+            }
+            ZoneSpawnPawn = Pairs == 1 ? ZoneSpawnPawn : 0;
+        }
         Require(L"AFortGameModeZone::SpawnDefaultPawnFor_Implementation", Natives::AFortGameModeZone_SpawnDefaultPawnFor, ZoneSpawnPawn ? Finder::FunctionStart(ZoneSpawnPawn) : 0);
         Require(L"AFortGameMode::SpawnDefaultPawnFor_Implementation", Natives::AFortGameMode_SpawnDefaultPawnFor, FunctionOf(L"Couldn't spawn player pawn of type %s due to no start spot"));
 
@@ -3719,6 +4261,28 @@ namespace
                 HasAll = Call + 3;
             }
         }
+        // 5.0 (UE 4.21) loads the interface's vtable from the component and passes the interface itself straight to the
+        // call: mov rax, [r15+170h]; lea rdx, [rdi+28h]; lea rcx, [r15+170h]; call [rax+20h] (CL-4214610 0xE32020).
+        for (uintptr_t Lea = !TagAssetInterface && ApplyHeroEnd ? FindInstruction(ApplyHero, ApplyHeroEnd, { -1, 0x8D, -1, -1, -1, 0x00, 0x00, 0xFF, 0x50 }) : 0; Lea && !TagAssetInterface; Lea = FindInstruction(Lea + 1, ApplyHeroEnd, { -1, 0x8D, -1, -1, -1, 0x00, 0x00, 0xFF, 0x50 }))
+        {
+            const uint8_t Rex = Byte(Lea);
+            const uint8_t ModRm = Byte(Lea + 2);
+            if ((Rex & 0xFC) != 0x48 || (ModRm & 0xF8) != 0x88 || (ModRm & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const int32_t Offset = *reinterpret_cast<const int32_t*>(Lea + 3);
+            // mov rax, [base+Offset] shortly before, from the same base.
+            const uint8_t VTableLoad[] = { Rex, 0x8B, static_cast<uint8_t>(0x80 | (ModRm & 0x07)) };
+            for (uintptr_t Load = Lea > 0x18 ? Lea - 0x18 : 0; Load && Load + 7 <= Lea && !TagAssetInterface; ++Load)
+            {
+                if (memcmp(reinterpret_cast<const void*>(Load), VTableLoad, sizeof(VTableLoad)) == 0 && *reinterpret_cast<const int32_t*>(Load + 3) == Offset)
+                {
+                    TagAssetInterface = Lea;
+                    HasAll = Lea + 7;
+                }
+            }
+        }
         const int32_t HasAllDisplacement = TagAssetInterface ? static_cast<int8_t>(Byte(HasAll + 2)) : 0;
         if (HasAllDisplacement > 0 && HasAllDisplacement % 8 == 0)
         {
@@ -3733,13 +4297,14 @@ namespace
         Sites::ChoosePlayerStartGoalManagerCalls.clear();
         std::vector<uint8_t*> GoalManagerCalls;
         RequireSlot(L"UObject::GetWorld", Natives::UObject_GetWorldIndex, DecodeGetWorldSlot(GoalManagerCalls));
-        if (GoalManagerCalls.size() == 3)
+        // 5.0 (CL-4214610 0xDEDE50) asks for the goal manager a fourth time (0xDEE45F), each the same stub call.
+        if (GoalManagerCalls.size() == 3 || GoalManagerCalls.size() == 4)
         {
             Sites::ChoosePlayerStartGoalManagerCalls = std::move(GoalManagerCalls);
         }
         else
         {
-            Log::Error(L"Finder: AFortGameModeZone::ChoosePlayerStart has {} AFortAIGoalManager::GetCurrent calls, expected 3", GoalManagerCalls.size());
+            Log::Error(L"Finder: AFortGameModeZone::ChoosePlayerStart has {} AFortAIGoalManager::GetCurrent calls, expected 3 or 4", GoalManagerCalls.size());
             ++MissingCount;
         }
 
@@ -3754,6 +4319,22 @@ namespace
             {
                 const int32_t Bitfield = *reinterpret_cast<const int32_t*>(Site + 2);
                 if (*reinterpret_cast<const int32_t*>(Site + 17) == Bitfield && *reinterpret_cast<const int32_t*>(Site + 23) == Bitfield)
+                {
+                    RecordLoaded = Site;
+                    ++Matches;
+                }
+            }
+            RecordLoaded = Matches == 1 ? RecordLoaded : 0;
+        }
+        if (!RecordLoaded)
+        {
+            // 5.0 (UE 4.21) works on a copy in r8d (CL-4214610 0xFE02E0, no .pdata entry): mov eax, [rcx+388h]; and eax,
+            // 0FFFFFFFDh; movzx r8d, dl; add r8d, r8d; or r8d, eax; mov [rcx+388h], r8d; test r8b, 2.
+            int32_t Matches = 0;
+            const std::initializer_list<int32_t> SetBit = { 0x8B, 0x81, -1, -1, 0x00, 0x00, 0x83, 0xE0, 0xFD, 0x44, 0x0F, 0xB6, 0xC2, 0x45, 0x03, 0xC0, 0x44, 0x0B, 0xC0, 0x44, 0x89, 0x81, -1, -1, 0x00, 0x00, 0x41, 0xF6, 0xC0, 0x02 };
+            for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), SetBit); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), SetBit))
+            {
+                if (*reinterpret_cast<const int32_t*>(Site + 2) == *reinterpret_cast<const int32_t*>(Site + 22))
                 {
                     RecordLoaded = Site;
                     ++Matches;
@@ -3858,7 +4439,16 @@ namespace
                 const uintptr_t Getter = GetterCall ? Finder::RelativeTarget(GetterCall, 1, 5) : 0;
                 const uintptr_t Read = Getter ? FindInstruction(Getter, Getter + 0x10, { 0x48, 0x8B, 0x81 }) : 0;
                 ServiceObject = Read ? *reinterpret_cast<const int32_t*>(Read + 3) : 0;
-                const uintptr_t ReadReference = Read ? FindInstruction(Read + 7, Read + 0x40, { 0x48, 0x8B, 0x81 }) : 0;
+                uintptr_t ReadReference = Read ? FindInstruction(Read + 7, Read + 0x40, { 0x48, 0x8B, 0x81 }) : 0;
+                // 5.0 (UE 4.21) reads the reference controller into rcx itself: mov rcx, [rcx+280h] (CL-4214610 0x5863C9).
+                for (uintptr_t Candidate = Read && !(ReadReference && *reinterpret_cast<const int32_t*>(ReadReference + 3) == ServiceObject + 8) ? FindInstruction(Read + 7, Read + 0x40, { 0x48, 0x8B }) : 0; Candidate; Candidate = FindInstruction(Candidate + 1, Read + 0x40, { 0x48, 0x8B }))
+                {
+                    if ((Byte(Candidate + 2) & 0xC7) == 0x81 && *reinterpret_cast<const int32_t*>(Candidate + 3) == ServiceObject + 8)
+                    {
+                        ReadReference = Candidate;
+                        break;
+                    }
+                }
                 if (ReadReference && *reinterpret_cast<const int32_t*>(ReadReference + 3) == ServiceObject + 8)
                 {
                     McpSubsystem = *reinterpret_cast<const int32_t*>(Load + 3);
@@ -3921,7 +4511,10 @@ namespace
         const uintptr_t OneThread = OnlyRef(L"ONETHREAD");
         const bool bParamTest = OneThread && Byte(OneThread + 7) == 0xE8 && Byte(OneThread + 12) == 0x84 && Byte(OneThread + 13) == 0xC0 && Byte(OneThread + 14) == 0x75;
         const uintptr_t OnlyOneThread = bParamTest ? OneThread + 16 + static_cast<int8_t>(Byte(OneThread + 15)) : 0;
-        if (OnlyOneThread && Byte(OnlyOneThread) == 0xC6 && Byte(OnlyOneThread + 1) == 0x05 && Byte(OnlyOneThread + 6) == 0x01)
+        // 5.0 (UE 4.21) sets al and stores it after the static's lock: mov al, 1; lea rcx, [...]; mov [OnlyOneThread], al
+        // (CL-4214610 0x1586792).
+        const bool bStoresOne = OnlyOneThread && Byte(OnlyOneThread) == 0xB0 && Byte(OnlyOneThread + 1) == 0x01 && FindInstruction(OnlyOneThread + 2, OnlyOneThread + 0x12, { 0x88, 0x05 });
+        if (OnlyOneThread && ((Byte(OnlyOneThread) == 0xC6 && Byte(OnlyOneThread + 1) == 0x05 && Byte(OnlyOneThread + 6) == 0x01) || bStoresOne))
         {
             Sites::ShouldUseThreadingForPerformanceDedicatedCheck = reinterpret_cast<uint8_t*>(OneThread + 14);
         }
@@ -3947,6 +4540,24 @@ namespace
             if (bReadsFlags && bStoresMember)
             {
                 Sites::LinkerFilterClientButNotServer = reinterpret_cast<uint8_t*>(Site + 18);
+                ++Filters;
+            }
+        }
+        // 5.0 (UE 4.21) compares with r15b and stores r12b (CL-4214610 0x1714758): cmp [GIsClient], r15b; jnz; cmp
+        // [GIsServer], r15b; jz; mov [rdi+1F0h], r12b (44 88 A7 F0 01 00 00), which FLinker::Hook rewrites to
+        // mov byte ptr [rdi+1F0h], 0, the same length while the base needs no REX.B.
+        Sites::LinkerFilterRegisterStore = false;
+        const std::initializer_list<int32_t> RegisterFilterPattern = { -1, 0x38, -1, -1, -1, -1, -1, 0x75, -1, -1, 0x38, -1, -1, -1, -1, -1, 0x74, -1, -1, 0x88 };
+        for (uintptr_t Site = Filters == 0 && IsClient && IsServer ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), RegisterFilterPattern) : 0; Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), RegisterFilterPattern))
+        {
+            const bool bRex = (Byte(Site) & 0xF0) == 0x40 && (Byte(Site + 9) & 0xF0) == 0x40 && (Byte(Site + 18) & 0xF0) == 0x40;
+            const bool bReadsFlags = bRex && (Byte(Site + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Site, 3, 7) == IsClient
+                && (Byte(Site + 11) & 0xC7) == 0x05 && Finder::RelativeTarget(Site + 9, 3, 7) == IsServer;
+            const bool bStoresMember = (Byte(Site + 18) & 0x01) == 0 && (Byte(Site + 20) & 0xC0) == 0x80 && (Byte(Site + 20) & 0x07) != 0x04;
+            if (bReadsFlags && bStoresMember)
+            {
+                Sites::LinkerFilterClientButNotServer = reinterpret_cast<uint8_t*>(Site + 18);
+                Sites::LinkerFilterRegisterStore = true;
                 ++Filters;
             }
         }
@@ -4043,10 +4654,44 @@ namespace
         Require(L"UAbilitySystemComponent::MarkAbilitySpecDirty", Natives::UAbilitySystemComponent_MarkAbilitySpecDirty, MarkDirty);
 
         const uintptr_t MarkDirtyEnd = MarkDirty ? Finder::FunctionEnd(MarkDirty) : 0;
-        const uintptr_t IncrementId = MarkDirtyEnd ? FindInstruction(MarkDirty, MarkDirtyEnd, { 0xFF, 0x41, -1 }) : 0;
+        uintptr_t IncrementId = MarkDirtyEnd ? FindInstruction(MarkDirty, MarkDirtyEnd, { 0xFF, 0x41, -1 }) : 0;
+        // 5.0 (UE 4.21) takes the spec array's address first: lea rbx, [rcx+460h]; ...; inc dword ptr [rbx+50h]
+        // (CL-4214610 0x606235). Any base but rsp; IDCounter is the disp8 either way.
+        for (uintptr_t Increment = !IncrementId && MarkDirtyEnd ? FindInstruction(MarkDirty, MarkDirtyEnd, { 0xFF }) : 0; Increment && !IncrementId; Increment = FindInstruction(Increment + 1, MarkDirtyEnd, { 0xFF }))
+        {
+            if ((Byte(Increment + 1) & 0xF8) == 0x40 && Byte(Increment + 1) != 0x44 && Byte(Increment - 1) != 0x41 && FindRawCall(Increment + 3, Increment + 0x40))
+            {
+                IncrementId = Increment;
+            }
+        }
         RequireOffset(L"FFastArraySerializer::IDCounter", Natives::FFastArraySerializer_IDCounter, IncrementId ? Byte(IncrementId + 2) : 0);
         const uintptr_t MarkArrayDirty = IncrementId ? FindRawCall(IncrementId, MarkDirtyEnd) : 0;
-        Require(L"FFastArraySerializer::MarkArrayDirty", Natives::FFastArraySerializer_MarkArrayDirty, MarkArrayDirty ? Finder::RelativeTarget(MarkArrayDirty, 1, 5) : 0);
+        // 5.0 (UE 4.21) inlines MarkArrayDirty: ItemMap.Reset() is the call (rcx = the serializer, ItemMap first), then
+        // IncrementArrayReplicationKey, inc dword ptr [rbx+IDCounter+4], and CachedNumItems and
+        // CachedNumItemsToConsiderForWriting = INDEX_NONE in one store, mov qword ptr [rbx+0A8h], -1 (CL-4214610 0x606253).
+        // Core then does the same (FFastArraySerializer::MarkArrayDirty) with the Reset native and those offsets.
+        Natives::FFastArraySerializer_ItemMapReset = nullptr;
+        Natives::FFastArraySerializer_CachedNumItems = -1;
+        if (MarkArrayDirty && IncrementId && Byte(MarkArrayDirty + 5) == 0xFF && Byte(MarkArrayDirty + 6) == Byte(IncrementId + 1) && Byte(MarkArrayDirty + 7) == Byte(IncrementId + 2) + 4)
+        {
+            const uint8_t CachedStore[] = { 0x48, 0xC7, static_cast<uint8_t>(0x80 | (Byte(IncrementId + 1) & 0x07)) };
+            for (uintptr_t Store = MarkArrayDirty + 8; Store + 11 <= MarkArrayDirty + 0x40 && Natives::FFastArraySerializer_CachedNumItems < 0; ++Store)
+            {
+                if (memcmp(reinterpret_cast<const void*>(Store), CachedStore, sizeof(CachedStore)) == 0 && *reinterpret_cast<const int32_t*>(Store + 7) == -1)
+                {
+                    Natives::FFastArraySerializer_CachedNumItems = *reinterpret_cast<const int32_t*>(Store + 3);
+                }
+            }
+            if (Natives::FFastArraySerializer_CachedNumItems > 0)
+            {
+                Natives::FFastArraySerializer_ItemMapReset = reinterpret_cast<decltype(Natives::FFastArraySerializer_ItemMapReset)>(Finder::RelativeTarget(MarkArrayDirty, 1, 5));
+                Log::Info(L"Finder: FFastArraySerializer::MarkArrayDirty is inlined; ItemMap.Reset +0x{:X}, CachedNumItems +0x{:X}", Finder::RelativeTarget(MarkArrayDirty, 1, 5) - Finder::ImageBase(), Natives::FFastArraySerializer_CachedNumItems);
+            }
+        }
+        if (!Natives::FFastArraySerializer_ItemMapReset)
+        {
+            Require(L"FFastArraySerializer::MarkArrayDirty", Natives::FFastArraySerializer_MarkArrayDirty, MarkArrayDirty ? Finder::RelativeTarget(MarkArrayDirty, 1, 5) : 0);
+        }
 
         const uint8_t* Count = reinterpret_cast<const uint8_t*>(&LockCount);
         const uintptr_t Increment = LockCount > 0 ? UniqueFunction({ 0xFF, 0x81, Count[0], Count[1], Count[2], Count[3], 0xC3 }) : 0;
@@ -4071,7 +4716,52 @@ namespace
             }
         }
         const uint8_t* IdleFalse = Sites::ShouldUseIdleModeFalse;
+        Sites::ShouldUseIdleModeInlinedBranch = nullptr;
         if (!IdleFalse || IdleFalse[0] != 0x32 || IdleFalse[1] != 0xC0)
+        {
+            // 5.0 (UE 4.21) inlines ShouldUseIdleMode into FEngineLoop::Tick (CL-4214610 0x2B6DC6): mov rax,
+            // [CVarIdleWhenNotForeground]; ...; cmp dword ptr [rax], r14d; jz NotIdle; call FApp::HasFocus; test al, al;
+            // jnz NotIdle; mov sil, 1 (bIdleMode). The cvar's static is where the "t.IdleWhenNotForeground" lookup
+            // stores its result (mov [rip+X], rax after the call). Core makes the jz unconditional.
+            for (const uintptr_t Ref : Finder::StringRefs(L"t.IdleWhenNotForeground"))
+            {
+                uintptr_t Static = 0;
+                for (uintptr_t Store = FindInstruction(Ref, Ref + 0x40, { 0x48, 0x89, 0x05 }); Store && !Static; Store = FindInstruction(Store + 1, Ref + 0x40, { 0x48, 0x89, 0x05 }))
+                {
+                    Static = Finder::RelativeTarget(Store, 3, 7);
+                }
+                for (uintptr_t Load = Static ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0x48, 0x8B, 0x05 }) : 0; Load && !Sites::ShouldUseIdleModeInlinedBranch; Load = FindInstruction(Load + 1, Finder::TextEnd(), { 0x48, 0x8B, 0x05 }))
+                {
+                    if (Finder::RelativeTarget(Load, 3, 7) != Static)
+                    {
+                        continue;
+                    }
+                    // cmp dword ptr [rax], reg (39 30 / 44 39 30 ...), then jz short.
+                    for (uintptr_t Compare = Load + 7; Compare < Load + 0x18; ++Compare)
+                    {
+                        if (Byte(Compare) != 0x39 || (Byte(Compare + 1) & 0xC7) != 0x00 || Byte(Compare + 2) != 0x74)
+                        {
+                            continue;
+                        }
+                        const uintptr_t Branch = Compare + 2;
+                        const uintptr_t NotIdle = Branch + 2 + static_cast<int8_t>(Byte(Branch + 1));
+                        const uintptr_t FocusTest = Branch + 2;
+                        const bool bFocus = Byte(FocusTest) == 0xE8 && Byte(FocusTest + 5) == 0x84 && Byte(FocusTest + 6) == 0xC0 && Byte(FocusTest + 7) == 0x75 && FocusTest + 9 + static_cast<int8_t>(Byte(FocusTest + 8)) == NotIdle;
+                        if (bFocus)
+                        {
+                            Sites::ShouldUseIdleModeInlinedBranch = reinterpret_cast<uint8_t*>(Branch);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (Sites::ShouldUseIdleModeInlinedBranch)
+        {
+            Sites::ShouldUseIdleModeCheck = nullptr;
+            Sites::ShouldUseIdleModeFalse = nullptr;
+        }
+        else if (!IdleFalse || IdleFalse[0] != 0x32 || IdleFalse[1] != 0xC0)
         {
             Log::Error(L"Finder: FEngineLoop::ShouldUseIdleMode not found");
             Sites::ShouldUseIdleModeCheck = nullptr;
@@ -4216,31 +4906,39 @@ namespace
         int32_t IsDedicatedMatches = Natives::FOnlineSubsystemImpl_IsDedicated ? 1 : 0;
         const uintptr_t IsDedicated = Natives::FOnlineSubsystemImpl_IsDedicated ? reinterpret_cast<uintptr_t>(Natives::FOnlineSubsystemImpl_IsDedicated) : Finder::FindOnlineSubsystemIsDedicated(IsDedicatedMatches);
         Require(L"FOnlineSubsystemImpl::IsDedicated", Natives::FOnlineSubsystemImpl_IsDedicated, IsDedicatedMatches == 1 ? IsDedicated : 0);
-        RequireOffset(L"FOnlineSubsystemImpl::bForceDedicated", Natives::FOnlineSubsystemImpl_bForceDedicated, IsDedicatedMatches == 1 ? *reinterpret_cast<const int32_t*>(IsDedicated + 4) : 0);
+        RequireOffset(L"FOnlineSubsystemImpl::bForceDedicated", Natives::FOnlineSubsystemImpl_bForceDedicated, IsDedicatedMatches == 1 ? OnlineSubsystemForceDedicatedOffset(IsDedicated) : 0);
     }
 }
 
 uintptr_t Finder::FindOnlineSubsystemIsDedicated(int32_t& OutMatches)
 {
     // FOnlineSubsystemImpl::IsDedicated: xor eax, eax; cmp [rcx+bForceDedicated], al; setnz al; ret, with SetForceDedicated
-    // (mov [rcx+bForceDedicated], dl; ret) two slots on in the same vtables.
+    // (mov [rcx+bForceDedicated], dl; ret) two slots on in the same vtables. 5.0 (UE 4.21) compiles it as
+    // cmp byte ptr [rcx+bForceDedicated], 0; setnz al; ret (0x3E5400 on CL-4204761).
     uintptr_t IsDedicated = 0;
     OutMatches = 0;
-    const std::initializer_list<int32_t> IsDedicatedPattern = { 0x33, 0xC0, 0x38, 0x81, -1, -1, -1, -1, 0x0F, 0x95, 0xC0, 0xC3 };
-    for (uintptr_t Getter = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), IsDedicatedPattern); Getter; Getter = FindInstruction(Getter + 1, Finder::TextEnd(), IsDedicatedPattern))
+    for (const std::initializer_list<int32_t> IsDedicatedPattern : { std::initializer_list<int32_t>{ 0x33, 0xC0, 0x38, 0x81, -1, -1, -1, -1, 0x0F, 0x95, 0xC0, 0xC3 },
+                                                                     std::initializer_list<int32_t>{ 0x80, 0xB9, -1, -1, -1, -1, 0x00, 0x0F, 0x95, 0xC0, 0xC3 } })
     {
-        const int32_t Offset = *reinterpret_cast<const int32_t*>(Getter + 4);
-        for (void** Entry : VTablesWithEntry(Getter))
+        for (uintptr_t Getter = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), IsDedicatedPattern); Getter; Getter = FindInstruction(Getter + 1, Finder::TextEnd(), IsDedicatedPattern))
         {
-            const uintptr_t Setter = reinterpret_cast<uintptr_t>(Entry[2]);
-            if (IsInText(Setter) && Byte(Setter) == 0x88 && Byte(Setter + 1) == 0x91 && *reinterpret_cast<const int32_t*>(Setter + 2) == Offset && Byte(Setter + 6) == 0xC3)
+            const int32_t Offset = OnlineSubsystemForceDedicatedOffset(Getter);
+            for (void** Entry : VTablesWithEntry(Getter))
             {
-                if (Getter != IsDedicated)
+                const uintptr_t Setter = reinterpret_cast<uintptr_t>(Entry[2]);
+                if (IsInText(Setter) && Byte(Setter) == 0x88 && Byte(Setter + 1) == 0x91 && *reinterpret_cast<const int32_t*>(Setter + 2) == Offset && Byte(Setter + 6) == 0xC3)
                 {
-                    ++OutMatches;
+                    if (Getter != IsDedicated)
+                    {
+                        ++OutMatches;
+                    }
+                    IsDedicated = Getter;
                 }
-                IsDedicated = Getter;
             }
+        }
+        if (IsDedicated)
+        {
+            break;
         }
     }
     return IsDedicated;
@@ -4260,7 +4958,7 @@ bool Finder::ResolveOnlineSubsystemIsDedicated()
         return false;
     }
     Natives::FOnlineSubsystemImpl_IsDedicated = reinterpret_cast<decltype(Natives::FOnlineSubsystemImpl_IsDedicated)>(IsDedicated);
-    Natives::FOnlineSubsystemImpl_bForceDedicated = *reinterpret_cast<const int32_t*>(IsDedicated + 4);
+    Natives::FOnlineSubsystemImpl_bForceDedicated = OnlineSubsystemForceDedicatedOffset(IsDedicated);
     return true;
 }
 
@@ -4336,8 +5034,17 @@ namespace
         for (int32_t Index = 0; VTable && Index < 0x10 && !CreateCopy; ++Index)
         {
             const uintptr_t Function = VTableEntry(VTable, Index);
-            const uintptr_t SizeCheck = IsInText(Function) ? FindInstruction(Function, Function + 0x20, { 0x83, 0x7A, 0x08, 0x00 }) : 0;
-            const uintptr_t SizeStore = SizeCheck ? FindInstruction(SizeCheck, SizeCheck + 0x40, { 0xC7, -1, 0x08, 0x03, 0x00, 0x00, 0x00 }) : 0;
+            uintptr_t SizeCheck = IsInText(Function) ? FindInstruction(Function, Function + 0x20, { 0x83, 0x7A, 0x08, 0x00 }) : 0;
+            uintptr_t SizeWindow = 0x40;
+            if (!SizeCheck && IsInText(Function))
+            {
+                // 5.0 (UE 4.21) loads it first: mov eax, [rdx+8]; ...; test eax, eax (CL-4214610 0x2ED93A).
+                const uintptr_t SizeLoad = FindInstruction(Function, Function + 0x20, { 0x8B, 0x42, 0x08 });
+                SizeCheck = SizeLoad && FindInstruction(SizeLoad + 3, SizeLoad + 0x10, { 0x85, 0xC0 }) ? SizeLoad : 0;
+                // Its DelegateSize store is 0x3B on (0x2ED975), past the 0x40 the older shape needs.
+                SizeWindow = 0x60;
+            }
+            const uintptr_t SizeStore = SizeCheck ? FindInstruction(SizeCheck, SizeCheck + SizeWindow, { 0xC7, -1, 0x08, 0x03, 0x00, 0x00, 0x00 }) : 0;
             CreateCopy = SizeStore && (Byte(SizeStore + 1) & 0xF8) == 0x40 ? Function : 0;
         }
         if (CreateCopy)
@@ -4538,9 +5245,12 @@ bool Finder::ResolveScriptStructCopy()
 {
     const int32_t StructOffset = ObjectLayout::Properties().UStructProperty_Struct;
     // mov r32, [rcx+Displacement]; 2.5's (0x1268A50) sign-extends MinAlignment instead: movsxd r10, [rcx+44h].
-    const auto ReadsStruct = [](uintptr_t Begin, uintptr_t End, int32_t Displacement)
+    // 5.0 (UE 4.21, CL-4214610 0x165BC00) adds PropertiesSize straight in: add r13d, [rcx+40h]; tried when no thunk reads
+    // both with a mov.
+    bool bAddReads = false;
+    const auto ReadsStruct = [&bAddReads](uintptr_t Begin, uintptr_t End, int32_t Displacement)
     {
-        for (const int32_t Opcode : { 0x8B, 0x63 })
+        for (const int32_t Opcode : { 0x8B, 0x63, bAddReads ? 0x03 : 0x8B })
         {
             for (uintptr_t Load = FindInstruction(Begin, End, { Opcode, -1, Displacement }); Load; Load = FindInstruction(Load + 1, End, { Opcode, -1, Displacement }))
             {
@@ -4559,7 +5269,9 @@ bool Finder::ResolveScriptStructCopy()
     for (int32_t Index = 0; VTable && Index < 0x100; ++Index)
     {
         const uintptr_t Thunk = reinterpret_cast<uintptr_t>(VTable[Index]);
-        if (IsInText(Thunk) && FindInstruction(Thunk, Thunk + 0x14, { 0x48, 0x8B, 0x41, StructOffset, 0x44, 0x8B, 0x41, ArrayDimOffset, 0x48, 0x8B, 0xC8, 0x4C, 0x8B, 0x08, 0x49, 0xFF, 0xA1 }) == Thunk)
+        // 5.0 (UE 4.21) encodes the tail jump through r9 with REX 41 instead of 49 (CL-4214610 0x17765AE).
+        if (IsInText(Thunk) && FindInstruction(Thunk, Thunk + 0x14, { 0x48, 0x8B, 0x41, StructOffset, 0x44, 0x8B, 0x41, ArrayDimOffset, 0x48, 0x8B, 0xC8, 0x4C, 0x8B, 0x08, -1, 0xFF, 0xA1 }) == Thunk
+            && (Byte(Thunk + 14) == 0x49 || Byte(Thunk + 14) == 0x41))
         {
             StructSlots.push_back(*reinterpret_cast<const int32_t*>(Thunk + 17) / static_cast<int32_t>(sizeof(void*)));
         }
@@ -4570,18 +5282,22 @@ bool Finder::ResolveScriptStructCopy()
         Natives::UStruct_DestroyStructIndex = std::max(StructSlots[0], StructSlots[1]);
     }
 
-    for (int32_t Index = 0; VTable && Index < 0x100 && !Natives::UScriptStruct_CopyScriptStruct; ++Index)
+    for (const bool bAdd : { false, true })
     {
-        const uintptr_t Thunk = reinterpret_cast<uintptr_t>(VTable[Index]);
-        if (!IsInText(Thunk) || FindInstruction(Thunk, Thunk + 9, { 0x48, 0x8B, 0x49, StructOffset, 0xE9 }) != Thunk)
+        bAddReads = bAdd;
+        for (int32_t Index = 0; VTable && Index < 0x100 && !Natives::UScriptStruct_CopyScriptStruct; ++Index)
         {
-            continue;
-        }
+            const uintptr_t Thunk = reinterpret_cast<uintptr_t>(VTable[Index]);
+            if (!IsInText(Thunk) || FindInstruction(Thunk, Thunk + 9, { 0x48, 0x8B, 0x49, StructOffset, 0xE9 }) != Thunk)
+            {
+                continue;
+            }
 
-        const uintptr_t Target = Finder::RelativeTarget(Thunk + 4, 1, 5);
-        if (IsInText(Target) && ReadsStruct(Target, Target + 0x30, ObjectLayout::Current.UStruct_MinAlignment) && ReadsStruct(Target, Target + 0x30, ObjectLayout::Current.UStruct_PropertiesSize))
-        {
-            Natives::UScriptStruct_CopyScriptStruct = reinterpret_cast<decltype(Natives::UScriptStruct_CopyScriptStruct)>(Target);
+            const uintptr_t Target = Finder::RelativeTarget(Thunk + 4, 1, 5);
+            if (IsInText(Target) && ReadsStruct(Target, Target + 0x30, ObjectLayout::Current.UStruct_MinAlignment) && ReadsStruct(Target, Target + 0x30, ObjectLayout::Current.UStruct_PropertiesSize))
+            {
+                Natives::UScriptStruct_CopyScriptStruct = reinterpret_cast<decltype(Natives::UScriptStruct_CopyScriptStruct)>(Target);
+            }
         }
     }
 
@@ -4604,6 +5320,14 @@ bool Finder::ResolveScriptFrame()
     if (const uintptr_t Compare = ThunkEnd ? FindInstruction(Thunk, ThunkEnd, { 0x48, 0x83, 0x7A, -1, 0x00 }) : 0)
     {
         Code = Byte(Compare + 3);
+    }
+    // 5.0 (UE 4.21) compares with a zeroed register: cmp [rdx+20h], rdi (48 39 7A 20; CL-4214610 0x287C4AF).
+    for (uintptr_t Compare = !Code && ThunkEnd ? FindInstruction(Thunk, ThunkEnd, { 0x48, 0x39 }) : 0; Compare && !Code; Compare = FindInstruction(Compare + 1, ThunkEnd, { 0x48, 0x39 }))
+    {
+        if ((Byte(Compare + 2) & 0xC7) == 0x42)
+        {
+            Code = Byte(Compare + 3);
+        }
     }
 
     ptrdiff_t Object = 0;
@@ -9801,6 +10525,28 @@ bool Finder::ResolveDurabilityLive(UFunction* ServerModDurability, UObject* Play
         }
     }
 
+    // 5.0 (UE 4.21) keeps the destroy in the function (CL-4214610 0x12978C0): after its prologue, or dword ptr
+    // [rcx+0A00h], 10h; mov rbx, rcx; cmp byte ptr [rcx+118h], 3 (ROLE_Authority); jnz; inc byte ptr [rcx+3BCh]; ...
+    for (int32_t Index = 0; DestroyedIndex < 0 && Index < 0x200; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(WeaponVTable, Index);
+        if (!Function)
+        {
+            break;
+        }
+        for (uintptr_t Site = Function; Site + 7 <= Function + 0x14; ++Site)
+        {
+            if ((Byte(Site) == 0x83 || Byte(Site) == 0x80) && Byte(Site + 1) == 0x89 && *reinterpret_cast<const int32_t*>(Site + 2) == PendingDestroyDueToDurabilityOffset
+                && Byte(Site + 6) == PendingDestroyDueToDurabilityMask && FindInstruction(Site + 7, Site + 0x14, { 0x80, 0xB9, -1, -1, 0x00, 0x00, 0x03 }))
+            {
+                bDestroyedAmbiguous |= DestroyedFunction != 0 && DestroyedFunction != Function;
+                DestroyedIndex = Index;
+                DestroyedFunction = Function;
+                break;
+            }
+        }
+    }
+
     if (ModIndex < 0 || SetDurabilityIndex < 0 || bSetDurabilityAmbiguous || !bSetDurabilityStripped || DestroyedIndex < 0 || bDestroyedAmbiguous)
     {
         Log::Error(L"Finder: durability natives not found (ModDurability {}, SetDurability {} stripped {}, DestroyedDueToDurability {})", ModIndex, SetDurabilityIndex, bSetDurabilityStripped, DestroyedIndex);
@@ -10004,10 +10750,20 @@ bool Finder::ResolveLootLive()
         GetOwnedGameplayTagsIndex = Byte(Site + 2) % 8 == 0 ? Byte(Site + 2) / 8 : -1;
     }
 
+    // 5.0 (UE 4.21) inlines GetItemLevel(LootLevelData, WorldLevel) into a caller that takes a world context in rdx and
+    // works out the world level itself (CL-4214610 0xF33D40: test rdx, rdx; jz; mov rax, [rdx]; call [rax+140h]
+    // (GetWorld), then the handle at [rcx+378h]); that one can't be called with a handle, so loot gets item level 0, as
+    // Core gives without the native (Battle Royale items have no levels).
+    const uintptr_t ContextTest = GetItemLevel ? FindInstruction(GetItemLevel, GetItemLevel + 0x30, { 0x48, 0x85, 0xD2 }) : 0;
+    const bool bTakesWorldContext = ContextTest && FindInstruction(ContextTest + 3, ContextTest + 0x10, { 0x48, 0x8B, 0x02 });
     // Each is kept on its own, so the item levels don't depend on the tag slot.
-    if (GetItemLevel)
+    if (GetItemLevel && !bTakesWorldContext)
     {
         Natives::UFortLootLevel_GetItemLevel = reinterpret_cast<decltype(Natives::UFortLootLevel_GetItemLevel)>(GetItemLevel);
+    }
+    if (bTakesWorldContext)
+    {
+        Log::Info(L"Finder: UFortLootLevel::GetItemLevel is inlined into a world-context caller (+0x{:X}) in this build, loot items get level 0", GetItemLevel - Finder::ImageBase());
     }
     if (GetOwnedGameplayTagsIndex >= 0)
     {
@@ -10834,6 +11590,16 @@ bool Finder::ResolveOnlineVoice()
     const uintptr_t Serialize = VTableEntry(VTable, UnmuteIndex + 1);
     const uintptr_t SerializeEnd = Serialize ? Finder::FunctionEnd(Serialize) : 0;
     const uintptr_t GetSenderCall = SerializeEnd > Serialize ? FindInstruction(Serialize, SerializeEnd, { 0x48, 0x8D, 0x54, 0x24, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1 }) : 0;
+    int32_t GetSenderDisplacement = GetSenderCall ? Byte(GetSenderCall + 10) : -1;
+    // 5.0 (UE 4.21) schedules a stack store between the out parameter and the call: lea rdx, [rsp+30h]; mov [rsp+60h],
+    // rbp; mov rax, [rcx]; call [rax+18h] (CL-4214610 0x41813D).
+    for (uintptr_t Call = !GetSenderCall && SerializeEnd > Serialize ? FindInstruction(Serialize, SerializeEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x50, -1 }) : 0; Call && GetSenderDisplacement < 0; Call = FindInstruction(Call + 1, SerializeEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x50, -1 }))
+    {
+        if (Call >= Serialize + 0x10 && FindInstruction(Call - 0x10, Call, { 0x48, 0x8D, 0x54, 0x24, -1 }))
+        {
+            GetSenderDisplacement = Byte(Call + 5);
+        }
+    }
     const uintptr_t IsDedicatedCall = SerializeEnd > Serialize ? FindInstruction(Serialize, SerializeEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0;
     const int32_t IsDedicatedOffset = IsDedicatedCall ? *reinterpret_cast<const int32_t*>(IsDedicatedCall + 5) : 0;
     int32_t TickIndex = -1;
@@ -10844,7 +11610,7 @@ bool Finder::ResolveOnlineVoice()
         const uintptr_t Call = EntryEnd > Entry ? FindInstruction(Entry, EntryEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0;
         TickIndex = Call && *reinterpret_cast<const int32_t*>(Call + 5) == IsDedicatedOffset ? Index : -1;
     }
-    Natives::FVoicePacket_GetSenderIndex = GetSenderCall && Byte(GetSenderCall + 10) % 8 == 0 ? Byte(GetSenderCall + 10) / 8 : -1;
+    Natives::FVoicePacket_GetSenderIndex = GetSenderDisplacement >= 0 && GetSenderDisplacement % 8 == 0 ? GetSenderDisplacement / 8 : -1;
     Natives::FOnlineVoiceImpl_TickIndex = TickIndex;
     if (Natives::FVoicePacket_GetSenderIndex < 0 || TickIndex < 0)
     {
@@ -11557,6 +12323,32 @@ bool Finder::ResolveMatchStatsLive()
         {
             Natives::UStatManager_GetStatValue = reinterpret_cast<decltype(Natives::UStatManager_GetStatValue)>(GetStatValue);
         }
+    }
+    // 5.0 (UE 4.21) inlines the lookup too, and its GetStatValue (CL-4214610 0x11FEE20, no .pdata entry or padding) ends in
+    // 4.5's rounding of the period's value: movsd xmm0, [rax+rcx*8]; cvtpd2ps; addss; subss; cvtss2si eax, xmm1; sar eax,
+    // 1; neg eax; ret. Its start is the call target nearest before that tail, which dozens of callers share.
+    if (!Natives::UStatManager_GetStatValue)
+    {
+        const std::initializer_list<int32_t> RoundedValue = { 0xF2, 0x0F, 0x10, 0x04, 0xC8, 0x66, 0x0F, 0x5A, 0xC0, 0xF3, 0x0F, 0x58, 0xC0, 0xF3, 0x0F, 0x5C, 0xC8, 0xF3, 0x0F, 0x2D, 0xC1, 0xD1, 0xF8, 0xF7, 0xD8, 0xC3 };
+        const uintptr_t Tail = UniqueFunction(RoundedValue);
+        std::unordered_map<uintptr_t, int32_t> Targets;
+        for (uintptr_t Call = Tail ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { 0xE8 }) : 0; Call; Call = FindInstruction(Call + 1, Finder::TextEnd(), { 0xE8 }))
+        {
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            if (Target < Tail && Target + 0x100 > Tail)
+            {
+                ++Targets[Target];
+            }
+        }
+        uintptr_t Start = 0;
+        for (const auto& [Target, Count] : Targets)
+        {
+            if (Count >= 4 && Target > Start)
+            {
+                Start = Target;
+            }
+        }
+        Natives::UStatManager_GetStatValue = reinterpret_cast<decltype(Natives::UStatManager_GetStatValue)>(Start);
     }
     if (!Natives::UStatManager_GetStatValue)
     {

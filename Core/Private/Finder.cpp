@@ -414,6 +414,16 @@ uintptr_t Finder::FindReadOnly(const void* Bytes, size_t Size)
     return Found != End ? reinterpret_cast<uintptr_t>(Found) : 0;
 }
 
+uintptr_t Finder::FindReadOnlyAfter(const void* Bytes, size_t Size, uintptr_t After)
+{
+    Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+    const uint8_t* const SectionBegin = reinterpret_cast<const uint8_t*>(ReadOnly.GetSectionStart().Get());
+    const uint8_t* const End = reinterpret_cast<const uint8_t*>(ReadOnly.GetSectionEnd().Get());
+    const uint8_t* const Begin = (std::max)(SectionBegin, reinterpret_cast<const uint8_t*>(After + 1));
+    const uint8_t* const Found = Size && Begin < End && End - Begin >= static_cast<ptrdiff_t>(Size) ? std::search(Begin, End, static_cast<const uint8_t*>(Bytes), static_cast<const uint8_t*>(Bytes) + Size) : End;
+    return Found != End ? reinterpret_cast<uintptr_t>(Found) : 0;
+}
+
 uintptr_t Finder::FunctionStart(uintptr_t Address)
 {
     if (!Address)

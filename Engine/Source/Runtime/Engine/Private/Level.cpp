@@ -61,6 +61,22 @@ TArray<AActor*>& ULevel::GetActors() const
                 }
             }
         }
+        // 5.0 (UE 4.21) holds the level in r12, which takes a SIB byte: mov [r12+0A8h], ecx; cmp ecx, [r12+0ACh]
+        // (41 89 8C 24 A8 00 00 00, 41 3B 8C 24 AC 00 00 00; CL-4214610 0x247CE68).
+        for (uintptr_t Mov = Spawn; End && Mov + 16 <= End; ++Mov)
+        {
+            if (Byte(Mov) != 0x41 || Byte(Mov + 1) != 0x89 || (Byte(Mov + 2) & 0xC7) != 0x84 || Byte(Mov + 3) != 0x24)
+            {
+                continue;
+            }
+            const int32_t Num = *reinterpret_cast<const int32_t*>(Mov + 4);
+            const uintptr_t Cmp = Mov + 8;
+            if (Byte(Cmp) == 0x41 && Byte(Cmp + 1) == 0x3B && Byte(Cmp + 2) == Byte(Mov + 2) && Byte(Cmp + 3) == 0x24 && *reinterpret_cast<const int32_t*>(Cmp + 4) == Num + 4)
+            {
+                UE_LOG(LogLevel, Log, TEXT("ULevel::Actors +0x%X (UWorld::SpawnActor)"), Num - 8);
+                return static_cast<ptrdiff_t>(Num) - 8;
+            }
+        }
         UE_LOG(LogLevel, Error, TEXT("ULevel::Actors not found in UWorld::SpawnActor, using OwningWorld - 0x10"));
         return static_cast<ptrdiff_t>(-1);
     }();

@@ -6,6 +6,11 @@
 
 void FWeakObjectPtr::operator=(const UObject* Object)
 {
+    if (Natives::FWeakObjectPtr_Assign)
+    {
+        Natives::FWeakObjectPtr_Assign(this, Object);
+        return;
+    }
     if (Object && Natives::GUObjectArray)
     {
         ObjectIndex = Object->GetUniqueID();

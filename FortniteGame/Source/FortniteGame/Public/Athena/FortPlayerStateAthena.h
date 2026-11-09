@@ -81,7 +81,7 @@ struct FFortSpectatorAthenaArray : public FFastArraySerializer
     DefineUStructArrayProperty(FFortSpectatorAthenaItem, SpectatorArray)
 
 public:
-    static bool IsWritable() { return Member_SpectatorArray.IsAvailable() && Natives::FFastArraySerializer_MarkArrayDirty; }
+    static bool IsWritable() { return Member_SpectatorArray.IsAvailable() && (Natives::FFastArraySerializer_MarkArrayDirty || Natives::FFastArraySerializer_ItemMapReset); }
 
     // 3.3 0xA10BF0 (21.40's AFortPlayerStateZone::AddSpectatingPlayer): a new item, unnumbered, and the array dirty.
     void AddSpectatingPlayer(AFortPlayerStateAthena* Spectator);

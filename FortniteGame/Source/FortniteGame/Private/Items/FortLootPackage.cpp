@@ -125,8 +125,11 @@ void FFortLootQuotaData::GetLootQuotasForCategory(const FName& QuotaCategory, FF
 
 int32_t UFortLootLevel::GetItemLevel(const void* LootLevelData, int32_t WorldLevel)
 {
-    if (!Natives::UFortLootLevel_GetItemLevel)
+    // Once: 5.0 has no callable native (Finder::ResolveLootLive), and the loot rolls ask for every item.
+    static bool bResolveTried = false;
+    if (!Natives::UFortLootLevel_GetItemLevel && !bResolveTried)
     {
+        bResolveTried = true;
         Finder::ResolveLootLive();
     }
     return Natives::UFortLootLevel_GetItemLevel ? Natives::UFortLootLevel_GetItemLevel(LootLevelData, WorldLevel) : 0;

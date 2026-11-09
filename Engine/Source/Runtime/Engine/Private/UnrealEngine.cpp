@@ -1,11 +1,19 @@
 #include "pch.h"
 #include "Engine/Engine.h"
+#include "Delegates/Delegate.h"
 #include "Hooks.h"
 #include "Natives.h"
 
 void FOnNetworkFailure::Broadcast(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString) const
 {
-    Natives::FOnNetworkFailure_Broadcast(const_cast<FOnNetworkFailure*>(this), World, NetDriver, FailureType, ErrorString);
+    if (Natives::FOnNetworkFailure_Broadcast)
+    {
+        Natives::FOnNetworkFailure_Broadcast(const_cast<FOnNetworkFailure*>(this), World, NetDriver, FailureType, ErrorString);
+        return;
+    }
+    // 5.0 (UE 4.21) inlines it everywhere: FOnNetworkFailure is a TMulticastDelegate<void(UWorld*, UNetDriver*,
+    // ENetworkFailure::Type, const FString&)>, broadcast the engine's way.
+    reinterpret_cast<const TMulticastDelegate<UWorld*, UNetDriver*, ENetworkFailure::Type, const FString&>*>(this)->Broadcast(World, NetDriver, FailureType, ErrorString);
 }
 
 bool UEngine::CreateNamedNetDriver(UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition)

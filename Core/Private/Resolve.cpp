@@ -610,7 +610,7 @@ namespace
     // so LoadMap's call to it is a call; nop; jmp whose target is that stub, reached right after the
     // FURL::HasOption("Listen") test (the previous call; nop; jmp, whose result is tested with test al, al; jcc). That
     // pair is unique in the first .text, so it names the same call Core hooks on 1.9 without reading any moved code.
-    uintptr_t PackedListenCall()
+    uintptr_t PackedListenCall(int32_t& OutCount)
     {
         const uintptr_t Begin = Finder::TextBegin();
         const uintptr_t End = Finder::TextEnd();
@@ -654,9 +654,43 @@ namespace
                 ++Count;
             }
         }
+        OutCount = Count;
+        return Count == 1 ? Found : 0;
+    }
+
+    // PackedListenCall's fallback, for 4.4.0/4.4.1 (CL-4117433, CL-4127312), where its HasOption pairing did not hold
+    // on 4.4.1. The "LoadMap: failed to Listen(%s)" reference's moved piece jumps back to the UE_LOG call in LoadMap's
+    // first-.text code (4.4.0: ref 0x554008F, log call 0x24CEFAA), and the Listen call (0x24CEF4B) is the only call
+    // to a stripped xor al, al; ret function within 0x200 bytes of it, on 4.4.0 and 4.4.2 alike.
+    uintptr_t ListenCallNearLog(uintptr_t ListenLog)
+    {
+        const uintptr_t LogSite = ListenLog ? Finder::TraceFind(ListenLog, 16, [](uintptr_t Instruction) { return IsInText(Instruction); }) : 0;
+        if (!LogSite)
+        {
+            Log::Error(L"Finder: no first-.text code after the LoadMap Listen log reference (+0x{:X})", ListenLog ? ListenLog - Finder::ImageBase() : 0);
+            return 0;
+        }
+        constexpr uintptr_t Window = 0x200;
+        const uintptr_t Begin = std::max(Finder::TextBegin(), LogSite - Window);
+        const uintptr_t End = std::min(Finder::TextEnd() - 5, LogSite + Window);
+        uintptr_t Found = 0;
+        int32_t Count = 0;
+        for (uintptr_t Site = Begin; Site < End; ++Site)
+        {
+            if (Byte(Site) != 0xE8)
+            {
+                continue;
+            }
+            const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+            if (IsInText(Target) && Finder::BodyIs(Target, { 0x32, 0xC0, 0xC3 }))
+            {
+                Found = Site;
+                ++Count;
+            }
+        }
         if (Count != 1)
         {
-            Log::Error(L"Finder: expected 1 first-.text LoadMap Listen call, found {}", Count);
+            Log::Error(L"Finder: expected 1 stripped call near the LoadMap Listen log at +0x{:X}, found {}", LogSite - Finder::ImageBase(), Count);
         }
         return Count == 1 ? Found : 0;
     }
@@ -748,7 +782,20 @@ namespace
         {
             // The log reference and the call's register setup can be ciphertext when Core resolves; find the call in
             // the first .text instead.
-            const uintptr_t Packed = PackedListenCall();
+            int32_t PackedCount = 0;
+            uintptr_t Packed = PackedListenCall(PackedCount);
+            if (!Packed)
+            {
+                Packed = ListenCallNearLog(ListenLog);
+                if (Packed)
+                {
+                    Log::Info(L"Finder: LoadMap Listen call at +0x{:X}, the stripped call next to its log ({} HasOption-paired calls)", Packed - Finder::ImageBase(), PackedCount);
+                }
+                else
+                {
+                    Log::Error(L"Finder: expected 1 first-.text LoadMap Listen call, found {}", PackedCount);
+                }
+            }
             if (Packed)
             {
                 ListenCall = Packed;

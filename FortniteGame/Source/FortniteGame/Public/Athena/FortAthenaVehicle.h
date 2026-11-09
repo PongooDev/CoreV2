@@ -6,7 +6,8 @@
 
 // The physics state a vehicle's driver sends the server (4.2-5.0: 0x40 bytes). The driver's client fills it from its
 // body (4.1 0xA381C0): Translation and Rotation are the body's ComponentToWorld, LinearVelocity is
-// GetPhysicsLinearVelocity and AngularVelocity is GetPhysicsAngularVelocityInRadians (radians per second).
+// GetPhysicsLinearVelocity and AngularVelocity is GetPhysicsAngularVelocityInRadians (radians per second). 4.4.2 and
+// 4.5 send Rotation encoded (see ReceivedRotation in FortAthenaVehicle.cpp).
 struct alignas(16) FReplicatedAthenaVehiclePhysicsState
 {
     FVector Translation;

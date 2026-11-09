@@ -89,6 +89,43 @@ namespace
         Applied.Rotation = InState.Rotation;
         Applied.ServerTime = Now;
     }
+
+    // The shopping cart flipped and was thrown around (#336) because the server set the rotation the driver sends as it
+    // arrives, but the driver's client doesn't send its body's rotation as it is. Its sender (4.4.2 0x5667C28, 4.5
+    // 0x578247B, both behind the obfuscated sender whose call to ServerUpdatePhysicsParams is at 4.4.2 0xE02069 and
+    // 4.5 0x56E1D38) normalizes it and then sends X + 2.5, Y * 0.3, Z - 2 and W * -1.2; the struct's NetSerialize
+    // (4.5 0xA41140) carries the four floats unchanged. Translation and the velocities are sent as they are.
+    constexpr float SentRotationXOffset = 2.5f;
+    constexpr float SentRotationYScale = 0.3f;
+    constexpr float SentRotationZOffset = -2.0f;
+    constexpr float SentRotationWScale = -1.2f;
+
+    // The driver's body rotation from the one it sent. An encoded rotation's X is at least 1.5 and its Z at most -1, so
+    // its size is never near 1; a rotation that is already a unit quaternion (a build that sends it as it is) is kept.
+    FQuat ReceivedRotation(const FQuat& Sent)
+    {
+        const float SentSizeSquared = Sent.X * Sent.X + Sent.Y * Sent.Y + Sent.Z * Sent.Z + Sent.W * Sent.W;
+        FQuat Rotation = Sent;
+        if (SentSizeSquared > 2.0f)
+        {
+            Rotation.X = Sent.X - SentRotationXOffset;
+            Rotation.Y = Sent.Y / SentRotationYScale;
+            Rotation.Z = Sent.Z - SentRotationZOffset;
+            Rotation.W = Sent.W / SentRotationWScale;
+        }
+
+        const float SizeSquared = Rotation.X * Rotation.X + Rotation.Y * Rotation.Y + Rotation.Z * Rotation.Z + Rotation.W * Rotation.W;
+        if (SizeSquared <= 1e-8f)
+        {
+            return FQuat();
+        }
+        const float Scale = 1.0f / std::sqrt(SizeSquared);
+        Rotation.X *= Scale;
+        Rotation.Y *= Scale;
+        Rotation.Z *= Scale;
+        Rotation.W *= Scale;
+        return Rotation;
+    }
 }
 
 // Leaving a vehicle put the player back where they got in (#332). The driver's client simulates the vehicle and sends
@@ -106,16 +143,18 @@ namespace
 void AFortAthenaVehicle::ServerUpdatePhysicsParams_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState)
 {
 #if WITH_SERVER_CODE
-    LogPhysicsJump(this, InState);
+    FReplicatedAthenaVehiclePhysicsState State = InState;
+    State.Rotation = ReceivedRotation(InState.Rotation);
+    LogPhysicsJump(this, State);
 
     // Teleport the body to the driver's state (keeping its simulation), then give it the driver's velocities.
-    SetActorLocationAndRotation(InState.Translation, InState.Rotation.Rotator(), false, true);
+    SetActorLocationAndRotation(State.Translation, State.Rotation.Rotator(), false, true);
     USceneComponent* Root = GetRootComponent();
     if (Root && Root->IsA(UPrimitiveComponent::StaticClass()))
     {
         UPrimitiveComponent* Body = static_cast<UPrimitiveComponent*>(Root);
-        Body->SetPhysicsLinearVelocity(InState.LinearVelocity);
-        Body->SetPhysicsAngularVelocityInRadians(InState.AngularVelocity);
+        Body->SetPhysicsLinearVelocity(State.LinearVelocity);
+        Body->SetPhysicsAngularVelocityInRadians(State.AngularVelocity);
     }
 #endif
 }

@@ -32,9 +32,9 @@ void UPrimitiveComponent::SetPhysicsLinearVelocity(const FVector& NewVel, bool b
     Params.Call(this);
 }
 
-void UPrimitiveComponent::SetPhysicsAngularVelocityInDegrees(const FVector& NewAngVel, bool bAddToCurrent, FName BoneName)
+void UPrimitiveComponent::SetPhysicsAngularVelocityInRadians(const FVector& NewAngVel, bool bAddToCurrent, FName BoneName)
 {
-    Reflection::FParams Params(StaticFunction_SetPhysicsAngularVelocityInDegrees());
+    Reflection::FParams Params(StaticFunction_SetPhysicsAngularVelocityInRadians());
     Params.Set(L"NewAngVel", NewAngVel);
     Params.Set(L"bAddToCurrent", bAddToCurrent);
     Params.Set(L"BoneName", BoneName);

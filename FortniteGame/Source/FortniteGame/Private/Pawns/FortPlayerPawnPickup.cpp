@@ -310,10 +310,14 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap(UPrimitiveComponent* Overlappe
     {
         // The Athena pickup's CanInteract (1.8.2 0x69DB90) wants IT_Simple, a pickup not picked up and not in its short
         // interaction lock, and its OptionalOwnerID equal to the requester's WorldPlayerId (-1 for both in Battle Royale).
+        // 4.5's (0xDAAA00, AFortPickup's and AFortPickupAthena's) also wants the requesting pawn's controller to be an
+        // AFortPlayerController (0xCFD350), and then room for the item in that controller's inventory: a bot's
+        // AIController always fails it, so bots pick up through their own controller instead.
         AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(static_cast<APlayerState*>(PlayerState));
-        LogRefusal(EAutoPickupRefusal::CannotInteract, this, OtherActor, std::format(L"the pickup's CanInteract refused ({} {}, picked up {}, OptionalOwnerID {}, the pawn's WorldPlayerId {})",
+        const bool bPlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Controller))) != nullptr;
+        LogRefusal(EAutoPickupRefusal::CannotInteract, this, OtherActor, std::format(L"the pickup's CanInteract refused ({} {}, picked up {}, OptionalOwnerID {}, the pawn's WorldPlayerId {}, player controller {})",
             static_cast<int32_t>(Entry.Count), ItemDefinition->GetName().ToStdString(), static_cast<bool>(Pickup->bPickedUp), static_cast<int32_t>(Pickup->OptionalOwnerID),
-            FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -2));
+            FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -2, bPlayerController));
         return;
     }
 

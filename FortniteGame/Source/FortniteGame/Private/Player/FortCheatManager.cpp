@@ -41,6 +41,7 @@
 #include "GameThread.h"
 #include "GameplayEffect.h"
 #include "Missions/FortMission.h"
+#include "Missions/FortMissionForceSuccessParams.h"
 #include "Missions/FortMissionInfo.h"
 #include "Missions/FortMissionLibrary.h"
 #include "Missions/FortMissionManager.h"
@@ -5952,6 +5953,38 @@ void UFortCheatManager::MakeBuildingActorsGod()
 #endif
 }
 
+void UFortCheatManager::MissionForcePrimarySuccess(float FractionCompleted)
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF3BDA0): the mission manager's first primary mission gets the "MissionForceSuccess" mission event, by its
+    // MissionGuid, with a UFortMissionForceSuccessParams holding FractionCompleted. 4.1's hands it to the mission manager
+    // itself; UFortMissionLibrary::ExecuteMissionEvent (4.1 0xDA4C40) builds the same event and hands it to the same
+    // manager. The mission's own handler (4.1 0xD821F0, 4.2 0xD675E0, 4.4.2 0xDBD660) sets it Succeeded, and the zone
+    // ends from there as for a mission won by playing.
+    AFortPlayerController* PlayerController = GetPlayerController();
+    if (!PlayerController || PlayerController->GetNetMode() == NM_Client)
+    {
+        return;
+    }
+    for (AFortMission* Mission : CurrentMissions(PlayerController))
+    {
+        if (!Mission->IsPrimaryMission())
+        {
+            continue;
+        }
+        UObject* TransientPackage = StaticFindObject(nullptr, nullptr, L"/Engine/Transient");
+        UFortMissionForceSuccessParams* Params = NewObject<UFortMissionForceSuccessParams>(TransientPackage, UFortMissionForceSuccessParams::StaticClass());
+        if (Params)
+        {
+            Params->SetParams(FractionCompleted);
+        }
+        UE_LOG(LogFortCheats, Log, TEXT("MissionForcePrimarySuccess: MissionForceSuccess (%.2f) to %s"), FractionCompleted, *Mission->GetName());
+        UFortMissionLibrary::ExecuteMissionEvent(PlayerController, FName(L"MissionForceSuccess"), Mission->MissionGuid, FGameplayTagContainer(), Params);
+        return;
+    }
+#endif
+}
+
 void UFortCheatManager::FlyHK(UFortCheatManager* This)
 {
     This->Fly();
@@ -5992,6 +6025,15 @@ DEFINE_FUNCTION(UFortCheatManager::execMakeBuildingActorsGod)
     P_FINISH;
     P_NATIVE_BEGIN;
     static_cast<UFortCheatManager*>(Context)->MakeBuildingActorsGod();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execMissionForcePrimarySuccess)
+{
+    P_GET_PROPERTY(UFloatProperty, Z_Param_FractionCompleted);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->MissionForcePrimarySuccess(Z_Param_FractionCompleted);
     P_NATIVE_END;
 }
 
@@ -6178,6 +6220,12 @@ void UFortCheatManager::HookNatives()
     {
         Function->SetNativeFunc(&execBackpackSetSize);
         Log::Info(L"Hook UFortCheatManager::BackpackSetSize: native");
+    }
+    // So does MissionForcePrimarySuccess's (4.2 0x1105FD0, 4.4.2 0x117C930) with its float, where 4.1's reaches 0xF3BDA0.
+    if (UFunction* Function = FindStaticFunction_MissionForcePrimarySuccess(); ExecCallsStub(Function))
+    {
+        Function->SetNativeFunc(&execMissionForcePrimarySuccess);
+        Log::Info(L"Hook UFortCheatManager::MissionForcePrimarySuccess: native");
     }
 
     // UFortCheatManager::Fly and God, UCheatManager's overrides (4.1 0xF25090 and 0xF2C820), are the shared empty function

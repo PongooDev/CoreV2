@@ -68,6 +68,7 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(ListSpawnGroups)
     DefineUFunction(ToggleInfiniteStamina)
     DefineUFunction(MakeBuildingActorsGod)
+    DefineUFunction(MissionForcePrimarySuccess)
 
 public:
     // ToggleUnlimitedHealth's flag: the player's pawn can't be damaged while its controller's cheat manager has it (1.9
@@ -152,6 +153,9 @@ public:
     void ToggleInfiniteStamina();
     // Every building actor in the world flips its bIsInvulnerable. 4.2 compiles it out (#312).
     void MakeBuildingActorsGod();
+    // Save the World: the primary mission succeeds through its own "MissionForceSuccess" mission event, FractionCompleted
+    // of it counted as done. 4.2 compiles it out (#312).
+    void MissionForcePrimarySuccess(float FractionCompleted);
 
     // Core's own command, "cheat corecheats [filter]": the cheats Core supports, with usage, as chat lines.
     void ListCoreCheats(const FString& Filter);
@@ -383,6 +387,7 @@ public:
     DECLARE_FUNCTION(execListSpawnGroups);
     DECLARE_FUNCTION(execToggleInfiniteStamina);
     DECLARE_FUNCTION(execMakeBuildingActorsGod);
+    DECLARE_FUNCTION(execMissionForcePrimarySuccess);
 
 private:
     static void FlyHK(UFortCheatManager* This);

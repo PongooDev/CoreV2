@@ -45,10 +45,16 @@ struct FDeathInfo
     // Where the player died (from 3.5). AFortPlayerControllerAthena::RespawnPlayerAfterDeath (4.2 0xA57AD0) clears the
     // death info, this with it, once the player is back.
     DefineUProperty(FVector, DeathLocation)
+    // Set once the death info holds a death. The player state's IsDead (4.5 0xAE25A0) is bInitialized && !bDBNO &&
+    // (FinisherOrDowner || DeathCause != Unspecified): the squad bar's dead state (UAthenaPlayerInfoBase::SetPlayerState,
+    // 0x2997B00, DeadStateChanged), the squad's count of teammates standing (0xA99E30) and their map markers read it.
+    // The game's death handling sets it as it stores a death (0xAE1C40); a death report written field by field doesn't.
+    DefineUProperty(bool, bInitialized)
 
 public:
     static bool HasDistance() { return Member_Distance.IsAvailable(); }
     static bool HasDeathLocation() { return Member_DeathLocation.IsAvailable(); }
+    static bool HasInitialized() { return Member_bInitialized.IsAvailable(); }
     static bool IsReadable()
     {
         return Member_FinisherOrDowner.IsAvailable() && Member_bDBNO.IsAvailable();

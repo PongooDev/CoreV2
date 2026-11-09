@@ -7266,6 +7266,16 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
             AFortPlayerPawn* KillerPawn = KillerState && KillerState != PlayerState ? KillerState->GetCurrentPawn() : nullptr;
             DeathInfo.Distance = KillerPawn && Pawn ? KillerPawn->GetDistanceTo(Pawn) : 0.0f;
         }
+        if (FDeathInfo::HasDeathLocation() && Pawn)
+        {
+            DeathInfo.DeathLocation = Pawn->GetTransform().GetLocation();
+        }
+        // A death stored as the game stores a player's (4.5 0xAE1C40): without it the player state isn't dead to the
+        // clients (IsDead), so a bot teammate's squad bar entry kept its name and an empty health bar.
+        if (FDeathInfo::HasInitialized())
+        {
+            DeathInfo.bInitialized = true;
+        }
         PlayerState->ForceNetUpdate();
     }
     DropInventory();

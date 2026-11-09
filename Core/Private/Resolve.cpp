@@ -3585,19 +3585,34 @@ namespace
         // IsValid is the `call [rax+18h]; test al, al` just before it (slot 3, ToString 4, on 1.1, 1.2, 1.7.2 and 1.8);
         // AFortGameMode::ShouldPlayerEarnScore and the game session id ask it on the server.
         uintptr_t UniqueIdIsValid = UniqueIdToString ? FindBackward(UniqueIdToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
-        // 3.3 logs FUniqueNetIdRepl::ToString (0x347590), the last call before the line: IsValid (call [rax+20h];
-        // test al, al), then "%s:%s" of the id's ToString (call [rax+30h], one slot later than 3.2's) and its type.
-        uintptr_t ReplToString = 0;
+        // 3.3 logs FUniqueNetIdWrapper::ToDebugString (0x347590, 4.5 0x33AC70), the last call before the line: IsValid
+        // (call [rax+20h]; test al, al), then "%s:%s" of the id's type and its ToDebugString (call [rax+30h]). The id's
+        // ToString is the slot before ToDebugString (21.40's FUniqueNetId: IsValid, ToString, ToDebugString; 3.2's
+        // ToString is the [rax+28h] the long line calls). Core read ToDebugString, which 4.0's prints whole but 4.4.2's and
+        // 4.5's redact to the first and last five characters ("d8b43...352c0"): no account id, so the match results
+        // skipped every player, the end-of-match screen got no stats and no rewards (all zeros, "Team Still Alive"), and
+        // the warmup reported no players.
+        uintptr_t WrapperToDebugString = 0;
         for (uintptr_t Call = ShortProfileFailed ? FindRawCall(ShortProfileFailed - 0x30, ShortProfileFailed) : 0; Call; Call = FindRawCall(Call + 5, ShortProfileFailed))
         {
-            ReplToString = Finder::RelativeTarget(Call, 1, 5);
+            WrapperToDebugString = Finder::RelativeTarget(Call, 1, 5);
         }
-        if (ReplToString)
+        int32_t UniqueIdToDebugStringIndex = -1;
+        if (WrapperToDebugString)
         {
-            UniqueIdIsValid = FindInstruction(ReplToString, ReplToString + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 });
-            UniqueIdToString = UniqueIdIsValid ? FindInstruction(UniqueIdIsValid + 5, UniqueIdIsValid + 0x40, { 0xFF, 0x50, -1 }) : 0;
+            UniqueIdIsValid = FindInstruction(WrapperToDebugString, WrapperToDebugString + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 });
+            const uintptr_t UniqueIdToDebugString = UniqueIdIsValid ? FindInstruction(UniqueIdIsValid + 5, UniqueIdIsValid + 0x40, { 0xFF, 0x50, -1 }) : 0;
+            UniqueIdToDebugStringIndex = UniqueIdToDebugString && Byte(UniqueIdToDebugString + 2) % 8 == 0 ? Byte(UniqueIdToDebugString + 2) / 8 : -1;
+            UniqueIdToString = 0;
         }
-        Natives::FUniqueNetId_ToStringIndex = UniqueIdToString && Byte(UniqueIdToString + 2) % 8 == 0 ? Byte(UniqueIdToString + 2) / 8 : -1;
+        if (UniqueIdToDebugStringIndex >= 0)
+        {
+            Natives::FUniqueNetId_ToStringIndex = UniqueIdToDebugStringIndex - 1;
+        }
+        else
+        {
+            Natives::FUniqueNetId_ToStringIndex = UniqueIdToString && Byte(UniqueIdToString + 2) % 8 == 0 ? Byte(UniqueIdToString + 2) / 8 : -1;
+        }
         if (Natives::FUniqueNetId_ToStringIndex < 0)
         {
             Log::Error(L"Finder: FUniqueNetId::ToString slot not found");

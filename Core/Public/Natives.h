@@ -824,7 +824,8 @@ namespace Sites
     inline std::vector<uint8_t*> AIDirectorGetCurrentCalls;
     inline uint8_t* ShouldUseIdleModeCheck = nullptr;
     inline uint8_t* ShouldUseIdleModeFalse = nullptr;
-    // 5.0 (UE 4.21): ShouldUseIdleMode is inlined into FEngineLoop::Tick; the jz past bIdleMode = true.
+    // 5.0 (UE 4.21): ShouldUseIdleMode is inlined into FEngineLoop::Tick; the jz past bIdleMode = true (not patched:
+    // its presence makes Core set t.IdleWhenNotForeground to 0).
     inline uint8_t* ShouldUseIdleModeInlinedBranch = nullptr;
     inline uint8_t* TeamMemberInfoAthenaMenuHeroRand = nullptr;
 

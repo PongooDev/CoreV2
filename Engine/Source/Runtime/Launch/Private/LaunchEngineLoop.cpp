@@ -1,12 +1,14 @@
 #include "pch.h"
 #include "LaunchEngineLoop.h"
+#include "HAL/IConsoleManager.h"
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
 
 namespace
 {
-    void HookIdleMode()
+    // bEngineUp: PreInit has run, so the console manager and its variables exist (a packed build's late hooks).
+    void HookIdleMode(bool bEngineUp)
     {
         if (uint8_t* IdleCheck = Sites::ShouldUseIdleModeCheck)
         {
@@ -14,9 +16,19 @@ namespace
             *reinterpret_cast<int32_t*>(NotWindowed + 1) = static_cast<int32_t>(Sites::ShouldUseIdleModeFalse - (IdleCheck + 5));
             Hooks::WriteBytes(L"FEngineLoop::ShouldUseIdleMode SupportsWindowedMode", IdleCheck, NotWindowed);
         }
-        else if (uint8_t* IdleBranch = Sites::ShouldUseIdleModeInlinedBranch)
+        else if (Sites::ShouldUseIdleModeInlinedBranch)
         {
-            Hooks::SkipBranch(L"FEngineLoop::Tick ShouldUseIdleMode t.IdleWhenNotForeground", IdleBranch);
+            // 5.0 (UE 4.21) inlines ShouldUseIdleMode into FEngineLoop::Tick, where bIdleMode needs
+            // CVarIdleWhenNotForeground.GetValueOnGameThread() to be non-zero, so the variable is turned off through the
+            // console manager instead of patching the engine's branch.
+            IConsoleVariable* IdleWhenNotForeground = bEngineUp ? IConsoleManager::Get().FindConsoleVariable(L"t.IdleWhenNotForeground") : nullptr;
+            if (!IdleWhenNotForeground)
+            {
+                Log::Error(L"FEngineLoop: t.IdleWhenNotForeground {}, the server may idle without focus", bEngineUp ? L"is not registered" : L"can't be set before PreInit");
+                return;
+            }
+            IdleWhenNotForeground->Set(0, ECVF_SetByCode);
+            Log::Info(L"FEngineLoop: t.IdleWhenNotForeground set to {} (ShouldUseIdleMode is inlined into Tick)", IdleWhenNotForeground->GetInt());
         }
     }
 }
@@ -39,7 +51,7 @@ void FEngineLoop::Hook()
         Hooks::SkipBranch(L"FEngineLoop::PreInit IsRunningDedicatedServer", Check);
     }
 
-    HookIdleMode();
+    HookIdleMode(false);
 }
 
 void FEngineLoop::HookAfterPreInit()
@@ -55,7 +67,7 @@ void FEngineLoop::HookAfterPreInit()
         Log::Info(L"FEngineLoop: GIsServer on, GIsClient off (after PreInit)");
     }
 
-    HookIdleMode();
+    HookIdleMode(true);
 }
 
 void FEngineLoop::HookAfterPreInitUntilStart()
@@ -70,7 +82,7 @@ void FEngineLoop::HookAfterPreInitUntilStart()
         Log::Info(L"FEngineLoop: GIsClient off (after PreInit), GIsServer on once the engine starts");
     }
 
-    HookIdleMode();
+    HookIdleMode(true);
 }
 
 void FEngineLoop::ServerAtStart()

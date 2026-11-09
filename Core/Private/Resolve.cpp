@@ -4722,7 +4722,8 @@ namespace
             // 5.0 (UE 4.21) inlines ShouldUseIdleMode into FEngineLoop::Tick (CL-4214610 0x2B6DC6): mov rax,
             // [CVarIdleWhenNotForeground]; ...; cmp dword ptr [rax], r14d; jz NotIdle; call FApp::HasFocus; test al, al;
             // jnz NotIdle; mov sil, 1 (bIdleMode). The cvar's static is where the "t.IdleWhenNotForeground" lookup
-            // stores its result (mov [rip+X], rax after the call). Core makes the jz unconditional.
+            // stores its result (mov [rip+X], rax after the call). The site only tells that the check is inlined: Core
+            // turns t.IdleWhenNotForeground off through the console manager (FEngineLoop's HookIdleMode).
             for (const uintptr_t Ref : Finder::StringRefs(L"t.IdleWhenNotForeground"))
             {
                 uintptr_t Static = 0;

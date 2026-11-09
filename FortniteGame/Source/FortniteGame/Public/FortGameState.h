@@ -32,8 +32,13 @@ public:
     DefineUProperty(int32_t, WorldLevel)
     DefineUProperty(AFortVisibilityManager*, VisibilityManager)
     DefineUProperty(EFortGameplayState, GameplayState)
+    DefineUFunction(Client_RefreshEventCalendar)
 
     void SpawnMissionManager(const FFortMissionManagerRecord& MissionManagerRecord);
+    // The game's own multicast (Net, NetReliable, NetMulticast): the server and every client fetch the event calendar
+    // again at once, not at its cacheExpire (4.5's _Implementation, 0xC77C70, has the seasonal event manager's calendar
+    // download it, 0xF20400). False where the build has no such function.
+    bool Client_RefreshEventCalendar();
 
     static ptrdiff_t MissionManagerOffset();
 };

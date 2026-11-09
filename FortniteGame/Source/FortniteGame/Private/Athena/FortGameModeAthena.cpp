@@ -1422,6 +1422,84 @@ void AFortGameModeAthena::WatchWarmup()
 #endif
 }
 
+namespace
+{
+    // How often a match asks for the calendar's revision.
+    constexpr auto EventCalendarAskInterval = std::chrono::seconds(5);
+
+    struct FEventCalendarWatch
+    {
+        std::chrono::steady_clock::time_point NextAsk{};
+        bool bAsking = false;
+        // The backend has no such route (one from before it): it isn't asked again.
+        bool bUnsupported = false;
+        // The revision of the calendar the server last fetched (empty until the first answer).
+        std::string Revision;
+    };
+
+    void AskEventCalendarRevision(FWeakObjectPtr GameMode, const std::shared_ptr<FEventCalendarWatch>& Watch)
+    {
+        Watch->bAsking = true;
+        BackendRequest::GetJson(L"event calendar revision", L"/fortnite/api/game/v2/calendar/revision",
+            FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [GameMode, Watch](uint32_t Status, const std::string& Body)
+        {
+            std::string Revision = Status == 200 ? BackendRequest::JsonField(Body, "revision") : std::string();
+            GameThread::Enqueue([GameMode, Watch, Status, Revision = std::move(Revision)]()
+            {
+                Watch->bAsking = false;
+                if (Status == 404)
+                {
+                    Watch->bUnsupported = true;
+                    Log::Info(L"Event calendar: the backend has no calendar revision, so a running match fetches the calendar only at its cacheExpire");
+                    return;
+                }
+                if (Revision.empty() || Revision == Watch->Revision)
+                {
+                    return;
+                }
+                // The first answer is the calendar the server fetched as it started.
+                const bool bChanged = !Watch->Revision.empty();
+                Watch->Revision = Revision;
+                AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
+                AFortGameState* GameState = Athena ? static_cast<AFortGameState*>(AthenaGameStateOf(Athena)) : nullptr;
+                if (bChanged && GameState && GameState->Client_RefreshEventCalendar())
+                {
+                    Log::Info(L"Event calendar: the admin panel changed it, so the server and its players fetch it again");
+                }
+            });
+        });
+    }
+
+    void WatchEventCalendarOf(FWeakObjectPtr GameMode, std::shared_ptr<FEventCalendarWatch> Watch)
+    {
+        GameThread::Enqueue([GameMode, Watch]()
+        {
+            if (!GameMode.Get() || Watch->bUnsupported)
+            {
+                return;
+            }
+            const auto Now = std::chrono::steady_clock::now();
+            if (!Watch->bAsking && Now >= Watch->NextAsk)
+            {
+                Watch->NextAsk = Now + EventCalendarAskInterval;
+                AskEventCalendarRevision(GameMode, Watch);
+            }
+            WatchEventCalendarOf(GameMode, Watch);
+        });
+    }
+}
+
+void AFortGameModeAthena::WatchEventCalendar()
+{
+#if WITH_SERVER_CODE
+    if (!AFortGameState::FindStaticFunction_Client_RefreshEventCalendar())
+    {
+        return;
+    }
+    WatchEventCalendarOf(FWeakObjectPtr(this), std::make_shared<FEventCalendarWatch>());
+#endif
+}
+
 int32_t AFortGameModeAthena::GetMatchCapacity()
 {
     return MatchCapacity(this);

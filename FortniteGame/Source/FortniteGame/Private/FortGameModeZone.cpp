@@ -128,6 +128,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         ABuildingContainer::LogWorldContainers(GetWorld());
         Athena->WatchMatchResults();
         Athena->WatchWarmup();
+        Athena->WatchEventCalendar();
         Athena->WatchPlaylistDataTables();
         FCoreAthenaBotManager::Create(Athena);
         return;

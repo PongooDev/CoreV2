@@ -157,6 +157,11 @@ public:
     // (Core-Backend #122), as long as the game mode is there.
     void WatchWarmup();
 
+    // Has the server and its players fetch the event calendar again (AFortGameState::Client_RefreshEventCalendar) as soon
+    // as the admin panel changes it (Core-Backend's calendar revision), so that a running match sees an admin's event
+    // change (4.5's rocket launch) at once, not at the calendar's cacheExpire. Builds without the function do nothing.
+    void WatchEventCalendar();
+
     // The game's own ApplyPlaylistDataTables (from 1.11), once per game mode, before the world's first loot roll: it
     // restores the default loot tables and copies the playlist's over them (the playlist the map URL gave, until the
     // match is assigned). Builds without it keep their tables.

@@ -3,6 +3,7 @@
 #include "Finder.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
+#include "ReflectionParams.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
 
 void AFortGameState::SpawnMissionManager(const FFortMissionManagerRecord& MissionManagerRecord)
@@ -11,6 +12,18 @@ void AFortGameState::SpawnMissionManager(const FFortMissionManagerRecord& Missio
     {
         Natives::AFortGameState_SpawnMissionManager(this, MissionManagerRecord);
     }
+}
+
+bool AFortGameState::Client_RefreshEventCalendar()
+{
+    UFunction* Function = FindStaticFunction_Client_RefreshEventCalendar();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function);
+    Params.Call(this);
+    return true;
 }
 
 UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const

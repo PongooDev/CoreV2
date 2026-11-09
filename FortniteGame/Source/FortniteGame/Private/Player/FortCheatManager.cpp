@@ -5909,6 +5909,22 @@ void UFortCheatManager::ListSpawnGroups()
 #endif
 }
 
+void UFortCheatManager::ToggleInfiniteStamina()
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF4E710): this cheat manager's bInfiniteStamina flips, and its controller hears which it is.
+    if (!HasInfiniteStaminaFlag())
+    {
+        return;
+    }
+    bInfiniteStamina = !bInfiniteStamina;
+    if (APlayerController* PlayerController = GetOuterAPlayerController())
+    {
+        PlayerController->ClientMessage(FString::Printf(TEXT("Infinite stamina is %d"), static_cast<bool>(bInfiniteStamina) ? 1 : 0));
+    }
+#endif
+}
+
 void UFortCheatManager::FlyHK(UFortCheatManager* This)
 {
     This->Fly();
@@ -5933,6 +5949,14 @@ DEFINE_FUNCTION(UFortCheatManager::execBackpackSetSize)
     P_FINISH;
     P_NATIVE_BEGIN;
     static_cast<UFortCheatManager*>(Context)->BackpackSetSize(Z_Param_Size);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execToggleInfiniteStamina)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->ToggleInfiniteStamina();
     P_NATIVE_END;
 }
 
@@ -6101,6 +6125,8 @@ void UFortCheatManager::HookNatives()
              std::tuple{ FindStaticFunction_CraftFree(), &execCraftFree, L"UFortCheatManager::CraftFree" },
              // ListSpawnGroups (4.1 0xF35AC0) too.
              std::tuple{ FindStaticFunction_ListSpawnGroups(), &execListSpawnGroups, L"UFortCheatManager::ListSpawnGroups" },
+             // ToggleInfiniteStamina (4.1 0xF4E710) too: 4.4.2's exec (0x117E1A0) jumps to the moved empty function.
+             std::tuple{ FindStaticFunction_ToggleInfiniteStamina(), &execToggleInfiniteStamina, L"UFortCheatManager::ToggleInfiniteStamina" },
          })
     {
         if (ExecJumpsToStub(Function))

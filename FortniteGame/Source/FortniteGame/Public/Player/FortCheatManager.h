@@ -66,12 +66,17 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(CraftFree)
     DefineUFunction(BackpackSetSize)
     DefineUFunction(ListSpawnGroups)
+    DefineUFunction(ToggleInfiniteStamina)
 
 public:
     // ToggleUnlimitedHealth's flag: the player's pawn can't be damaged while its controller's cheat manager has it (1.9
     // 0x7AE300, the pawn's damage check, reads it).
     DefineBitfieldUProperty(bUnlimitedHealth)
     static bool HasUnlimitedHealthFlag() { return Member_bUnlimitedHealth.IsAvailable(); }
+    // ToggleInfiniteStamina's flag: UFortPlayerAttrSet's stamina change (4.1 0xAA8770, 4.2 0xA92BC0, 4.4.2 0xB0CAA0) keeps
+    // the pawn's Stamina at its maximum while its controller's cheat manager has it.
+    DefineBitfieldUProperty(bInfiniteStamina)
+    static bool HasInfiniteStaminaFlag() { return Member_bInfiniteStamina.IsAvailable(); }
 
     AFortPlayerController* GetPlayerController() const;
 
@@ -142,6 +147,8 @@ public:
     void BackpackSetSize(int32_t Size);
     // The spawn groups SpawnAIGroup takes, as chat lines. 4.2 compiles it out (#312).
     void ListSpawnGroups();
+    // Toggles bInfiniteStamina and says which it is ("Infinite stamina is %d"). 4.2 compiles it out (#312).
+    void ToggleInfiniteStamina();
 
     // Core's own command, "cheat corecheats [filter]": the cheats Core supports, with usage, as chat lines.
     void ListCoreCheats(const FString& Filter);
@@ -371,6 +378,7 @@ public:
     DECLARE_FUNCTION(execCraftFree);
     DECLARE_FUNCTION(execBackpackSetSize);
     DECLARE_FUNCTION(execListSpawnGroups);
+    DECLARE_FUNCTION(execToggleInfiniteStamina);
 
 private:
     static void FlyHK(UFortCheatManager* This);

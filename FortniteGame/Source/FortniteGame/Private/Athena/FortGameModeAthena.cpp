@@ -779,23 +779,62 @@ namespace
         return Default ? static_cast<const AGameSession*>(Default)->MaxPlayers : 0;
     }
 
-    // The account ids of the players connected (from their login on, so those still loading the map count).
+    // The account ids of the players connected: their connections' (UNetConnection::PlayerID, from their login on, so
+    // those still loading the map count), and the players' own player states in the game state's PlayerArray (a player
+    // controller's, not a bot's: AGameModeBase::Logout takes it out). A 4.5 duo with fill (CoreV2) had its player on the
+    // island and in PlayerArray with a valid UniqueId while no connection gave an account id: the bots didn't count them
+    // (101 in the match) and the warmup report never named them, so no answer gave their fill choice and their team got
+    // no bot. Each player is counted once, by either.
     std::vector<std::wstring> ConnectedAccounts(AFortGameModeAthena* GameMode)
     {
         std::vector<std::wstring> Ids;
         UWorld* World = GameMode->GetWorld();
         UNetDriver* Driver = World && UNetConnection::HasPlayerID() ? World->GetNetDriver() : nullptr;
-        if (!Driver)
+        int32_t Connections = 0;
+        std::wstring ConnectionIds;
+        if (Driver)
+        {
+            for (UNetConnection* Connection : static_cast<TArray<UNetConnection*>&>(Driver->ClientConnections))
+            {
+                const bool bValid = Connection && Connection->PlayerID.IsValid();
+                const std::wstring Id = bValid ? Connection->PlayerID.ToString().ToStdString() : std::wstring();
+                ++Connections;
+                // Shortened: the log is shared in issues.
+                const std::wstring Shown = Id.size() > 8 ? Id.substr(0, 4) + L"..." + Id.substr(Id.size() - 4) : Id;
+                ConnectionIds += std::format(L"{}{}", ConnectionIds.empty() ? L"" : L", ", !Connection ? L"none" : !bValid ? L"invalid" : Id.empty() ? L"empty" : Shown);
+                if (IsAccountId(Id) && std::find(Ids.begin(), Ids.end(), Id) == Ids.end())
+                {
+                    Ids.push_back(Id);
+                }
+            }
+        }
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        if (!GameState)
         {
             return Ids;
         }
-        for (UNetConnection* Connection : static_cast<TArray<UNetConnection*>&>(Driver->ClientConnections))
+        const size_t FromConnections = Ids.size();
+        for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
         {
-            const std::wstring Id = Connection && Connection->PlayerID.IsValid() ? Connection->PlayerID.ToString().ToStdString() : std::wstring();
-            if (IsAccountId(Id))
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            if (!AthenaState || !Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(AthenaState->GetOwner())))
+            {
+                continue;
+            }
+            const std::wstring Id = AthenaState->UniqueId.IsValid() ? AthenaState->UniqueId.ToString().ToStdString() : std::wstring();
+            if (IsAccountId(Id) && std::find(Ids.begin(), Ids.end(), Id) == Ids.end())
             {
                 Ids.push_back(Id);
             }
+        }
+        // Once: why the connections missed a player (the next match's log says which part didn't give their id).
+        static bool bLoggedMissed = false;
+        if (Ids.size() > FromConnections && !bLoggedMissed)
+        {
+            bLoggedMissed = true;
+            Log::Warning(L"Battle Royale: {} players are in the game state but not among the connections' ids (net driver {}, PlayerID {}, {} client connections: {}); "
+                L"they count from their player states", Ids.size() - FromConnections, Driver ? L"found" : World && World->GetNetDriver() ? L"found" : L"none",
+                UNetConnection::HasPlayerID() ? L"found" : L"not found", Connections, ConnectionIds.empty() ? L"-" : ConnectionIds);
         }
         return Ids;
     }

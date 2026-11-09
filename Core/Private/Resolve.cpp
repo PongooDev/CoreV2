@@ -12104,6 +12104,7 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
     const uintptr_t ExitAircraft = FunctionOf(L"ExitAircraft: %s (Pawn %s)");
     const uintptr_t End = ExitAircraft ? Finder::FunctionEnd(ExitAircraft) : 0;
     void** PawnVTable = nullptr;
+    uintptr_t MovedTarget = 0;
     for (uintptr_t Site = ExitAircraft ? FindInstruction(ExitAircraft, End, { 0xB2, 0x01 }) : 0; Site; Site = FindInstruction(Site + 1, End, { 0xB2, 0x01 }))
     {
         const uintptr_t Call = FindRawCall(Site + 2, std::min(End, Site + 0xA));
@@ -12144,6 +12145,20 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
             Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X})", Target - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());
             return true;
         }
+        // 4.4.2's packer moved BeginSkydiving's body: ExitAircraft (0xA80200) still does "mov dl, 1; mov rcx, rbx; call
+        // BeginSkydiving" (0xA8048D, right after the AFortPlayerPawnAthena cast), but the callee (0xF48220) is only a jmp
+        // into the second code section, so its skydiving check can't be read. Only that exact call shape is kept.
+        if (!MovedTarget && Call == Site + 5 && Byte(Site + 2) == 0x48 && Byte(Site + 3) == 0x8B && (Byte(Site + 4) & 0xF8) == 0xC8 && Target &&
+            Byte(Target) == 0xE9 && IsInMovedCode(Finder::RelativeTarget(Target, 1, 5)))
+        {
+            MovedTarget = Target;
+        }
+    }
+    if (MovedTarget)
+    {
+        Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(MovedTarget);
+        Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X}), its body moved by the packer", MovedTarget - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());
+        return true;
     }
     Log::Error(L"Finder: AFortPlayerPawnAthena::BeginSkydiving not found (ExitAircraft 0x{:X}), player bots can't leave the aircraft", ExitAircraft ? ExitAircraft - Finder::ImageBase() : 0);
     return false;

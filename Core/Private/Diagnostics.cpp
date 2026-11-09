@@ -170,8 +170,21 @@ void Diagnostics::HookLobbyServer()
 
 void Diagnostics::HookLobbyClient()
 {
-    const auto Refs = Finder::StringRefs(L"Not logged in when calling SetHeroType");
-    const uintptr_t SetHeroType = Refs.empty() ? 0 : Finder::FunctionStart(Refs.front());
+    // From 5.0 the string is also in the function SetHeroType is inlined into (the one logging "Lobby login complete",
+    // first in .text), whose arguments aren't SetHeroType's (#342). SetHeroType itself is the smallest of them.
+    uintptr_t SetHeroType = 0;
+    size_t SetHeroTypeSize = SIZE_MAX;
+    for (const uintptr_t Ref : Finder::StringRefs(L"Not logged in when calling SetHeroType"))
+    {
+        const uintptr_t Start = Finder::FunctionStart(Ref);
+        const uintptr_t End = Start ? Finder::FunctionEnd(Start) : 0;
+        const size_t Size = End > Start ? End - Start : SIZE_MAX - 1;
+        if (Start && Size < SetHeroTypeSize)
+        {
+            SetHeroType = Start;
+            SetHeroTypeSize = Size;
+        }
+    }
     if (SetHeroType)
     {
         Hooks::Detour(L"Diagnostics AFortLobbyBeaconClient::SetHeroType", reinterpret_cast<void*>(SetHeroType), &SetHeroTypeHK, &SetHeroTypeOG);

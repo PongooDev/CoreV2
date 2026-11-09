@@ -201,6 +201,7 @@ public:
     void ServerEmote_Implementation(const FName& AssetName);
     // Sprays (4.0): the emote wheel's sprays send ServerPlaySprayItem, whose body 4.0 strips; Core's plays the spray's
     // ability, fades the player's oldest spray out past fort.NumSpraysAlivePerPlayer and sends the Spray stat event.
+    // 4.5 drops the RPC and sends sprays as ServerPlayEmoteItem, whose body calls this for them.
     void ServerPlaySprayItem_Implementation(UAthenaSprayItemDefinition* SprayAsset);
     void SendSprayStatEvent(UAthenaSprayItemDefinition* SprayAsset);
     // Personal vehicles (FortPlayerControllerPersonalVehicle.cpp): 3.0 strips the hoverboard's server RPC; Core's grants

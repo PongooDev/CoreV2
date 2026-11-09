@@ -27,6 +27,15 @@
 #include <algorithm>
 #include <vector>
 
+// The spray decal (4.0, sprays below). An ABuildingSMActor in the game; only the fade is called.
+class AFortSprayDecalInstance : public AActor
+{
+    DefineUnrealClass(AFortSprayDecalInstance, FortniteGame)
+
+public:
+    DefineUFunction(StartSprayFadeOutDueToNewPlacement)
+};
+
 // 1.9 (CL-3757339) strips the play half of AFortPlayerController::ServerPlayEmoteItem_Implementation, the RPC the
 // emote wheel sends (#141). 1.8.2 (CL-3741772) loads the emote's montage, then calls its play body (0x84F000 ->
 // 0x82CD40), which gives the pawn's ability system UFortGameData::EmoteGameplayAbility with the emote as the spec's
@@ -50,6 +59,18 @@ void AFortPlayerController::ServerPlayEmoteItem_Implementation(UFortMontageItemD
         return;
     }
     EmoteAsset->Animation.LoadSynchronous();
+
+    // 4.5 (CL-4166199) drops ServerPlaySprayItem and PlaySprayItem: the emote wheel's sprays go through PlayEmoteItem
+    // (4.5 0xFA8E79), which asks UAthenaSprayItemDefinition apart for its cooldown (SprayOffCooldownTime) and its
+    // CanPerformAction tag (Gameplay.Action.Player.Spray), then sends the spray as this RPC's EmoteAsset (#338). A spray
+    // given EmoteGameplayAbility placed no decal, so it plays the spray body. 4.0 to 4.4 send theirs to
+    // ServerPlaySprayItem; builds without the decal class (before 4.0) have no sprays.
+    UClass* SprayClass = UAthenaSprayItemDefinition::StaticClass();
+    if (SprayClass && AFortSprayDecalInstance::StaticClass() && Member_ActiveSprayInstances.IsAvailable() && EmoteAsset->IsA(SprayClass))
+    {
+        ServerPlaySprayItem_Implementation(static_cast<UAthenaSprayItemDefinition*>(EmoteAsset));
+        return;
+    }
 
     // 1.8.2 plays through the pawn's IAbilitySystemInterface, which returns its AbilitySystemComponent.
     AFortPawn* Pawn = MyFortPawn;
@@ -191,14 +212,6 @@ void AFortPlayerController::ServerEmote_Implementation(const FName& AssetName)
 // emote body does with EmoteGameplayAbility, fading the player's oldest spray when fort.NumSpraysAlivePerPlayer are
 // already on the map. The cooldown is the client's own (PlaySprayItem above); the 1.8.2 emote body the spray body
 // mirrors checks none either.
-// An ABuildingSMActor in the game; only the fade is called.
-class AFortSprayDecalInstance : public AActor
-{
-    DefineUnrealClass(AFortSprayDecalInstance, FortniteGame)
-
-public:
-    DefineUFunction(StartSprayFadeOutDueToNewPlacement)
-};
 
 namespace
 {
@@ -346,8 +359,14 @@ void AFortPlayerController::HookSprayVTables()
     // ActiveSprayInstances, and their paks hold no spray items, GAB_Spray_Generic or BP_SprayDecal, so no client can
     // send one. The decal class arrives with 4.0's sprays.
     UFunction* ServerPlaySprayItem = FindStaticFunction_ServerPlaySprayItem();
-    if (!ServerPlaySprayItem || !UAthenaSprayItemDefinition::StaticClass() || !AFortSprayDecalInstance::StaticClass())
+    if (!UAthenaSprayItemDefinition::StaticClass() || !AFortSprayDecalInstance::StaticClass())
     {
+        return;
+    }
+    if (!ServerPlaySprayItem)
+    {
+        // 4.5 and later: sprays come through ServerPlayEmoteItem (its body above).
+        Log::Info(L"Finder: no AFortPlayerController::ServerPlaySprayItem in this build, sprays play through ServerPlayEmoteItem");
         return;
     }
 

@@ -6,8 +6,11 @@
 
 FTextLocalizationManager& FTextLocalizationManager::Get()
 {
-    if (!Natives::FTextLocalizationManager_FindDisplayString)
+    // Resolved once: on 5.0 FindDisplayString stays null (it's inlined), and the console asks for every show flag (#343).
+    static bool bResolved = false;
+    if (!bResolved && !Natives::FTextLocalizationManager_FindDisplayString)
     {
+        bResolved = true;
         Finder::ResolveTextLocalizationManager();
     }
     return **Natives::GTextLocalizationManager;

@@ -5397,13 +5397,29 @@ bool Finder::ResolveTextLocalizationManager()
         }
     }
 
+    // 5.0 (UE 4.21) inlines both Get and FindDisplayString into FindText, and Get now creates the manager on first use
+    // (5.0 CL-4204761 0x1549450: mov rdi, cs:Manager; test rdi, rdi; jnz; mov ecx, 160h; call FMemory::Malloc). With
+    // no rax load the manager was left null and Core's Get dereferenced it when the console listed the show flags (#343).
+    // 5.0 has no FindDisplayString of its own to call, so only the manager is kept there.
+    for (uintptr_t Address = FindText; FindText && !ManagerLoad && Address < FindText + 0x40; ++Address)
+    {
+        if (Byte(Address) == 0x48 && Byte(Address + 1) == 0x8B && (Byte(Address + 2) & 0xC7) == 0x05)
+        {
+            ManagerLoad = Address;
+        }
+    }
+
+    if (ManagerLoad)
+    {
+        Natives::GTextLocalizationManager = reinterpret_cast<FTextLocalizationManager**>(Finder::RelativeTarget(ManagerLoad, 3, 7));
+    }
+
     if (!ManagerLoad || !DisplayCall)
     {
         Log::Error(L"Finder: FTextLocalizationManager::FindDisplayString not found");
         return false;
     }
 
-    Natives::GTextLocalizationManager = reinterpret_cast<FTextLocalizationManager**>(Finder::RelativeTarget(ManagerLoad, 3, 7));
     Natives::FTextLocalizationManager_FindDisplayString = reinterpret_cast<decltype(Natives::FTextLocalizationManager_FindDisplayString)>(Finder::RelativeTarget(DisplayCall, 1, 5));
     return true;
 }

@@ -288,6 +288,13 @@ public:
     void OnBeginSpectating(AFortPlayerStateAthena* KillerState, float Now);
     void OnEndSpectating();
     bool IsSpectating() const { return SpectateEndTime >= 0.0f; }
+    // A playlist that brings its players back (Playground's InfiniteRespawnExceptStorm, CoreV2 #344): the dead bot stays
+    // in the match, as a player does (AFortGameModeAthena::IsRespawningAllowed), and comes back once Athena's respawn
+    // countdown is over (Anthem_DeathPenalty's AthenaRespawnDelayOverTime: 10 s), skydiving from TeleportToSkyDive's
+    // height over where it died, as Core respawns a player there (SpawnDefaultPawnFor_Implementation).
+    bool IsRespawnPending() const { return RespawnTime >= 0.0f; }
+    void RespawnPlayerAfterDeath(float Now);
+    static constexpr float RespawnDelay = 10.0f;
     void AddKill();
 
     // The bus: where the bot lands (FCoreAthenaBotManager::AssignLandingSpots picks a named location or a
@@ -710,6 +717,8 @@ private:
     float LandedTime = 0.0f;
     float NextLogTime = 0.0f;
     float WarmupRespawnTime = -1.0f;
+    // When a dead bot's respawn is due (-1: none pending, RespawnPlayerAfterDeath).
+    float RespawnTime = -1.0f;
     EWarmupActivity WarmupActivity = EWarmupActivity::Idle;
     float WarmupActivityUntil = 0.0f;
     float NextLookAroundTime = 0.0f;

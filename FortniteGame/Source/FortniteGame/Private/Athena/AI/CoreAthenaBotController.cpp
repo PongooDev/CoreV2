@@ -1835,6 +1835,11 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     switch (State)
     {
     case ECoreAthenaBotState::Dead:
+        if (IsRespawnPending())
+        {
+            RespawnPlayerAfterDeath(Now);
+            return;
+        }
         TickSpectating(Now);
         return;
     case ECoreAthenaBotState::InAircraft:
@@ -7318,13 +7323,104 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     LootTarget = nullptr;
     Log::Info(L"Battle Royale bots: {} died at ({:.0f}, {:.0f}, {:.0f}){}", BotName, LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z,
         KillerState ? std::format(L", eliminated by {}", KillerState->GetPlayerName().ToStdString()) : std::wstring(L" (nobody's elimination)"));
+    // A playlist that brings its players back (Playground, CoreV2 #344): the bot stays in the match and doesn't spectate,
+    // as a respawning player doesn't (Core's AFortPlayerControllerAthena death handler asks the same).
+    AFortGameModeAthena* GameMode = Manager->GetGameMode();
+    UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+    if (World && PlayerState && GameMode->IsRespawningAllowed(PlayerState))
+    {
+        RespawnTime = World->GetTimeSeconds() + RespawnDelay;
+        Log::Info(L"Battle Royale bots: {} respawns in {:.0f} s, the playlist brings its players back", BotName, RespawnDelay);
+        return;
+    }
     // Out of the match, it spectates the player who eliminated it, as an eliminated player does (CoreV2 #251). One
     // eliminated by a bot, the storm, a fall or anything else just leaves the match (CoreV2 #255).
-    UWorld* World = Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr;
     if (World && Manager->FindPlayerToSpectate(this, KillerState))
     {
         OnBeginSpectating(KillerState, World->GetTimeSeconds());
     }
+#endif
+}
+
+void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
+{
+#if WITH_SERVER_CODE
+    // As AFortPlayerControllerAthena::RespawnPlayerAfterDeath brings a player back on such a playlist (CoreV2 #344): a new
+    // pawn once the countdown is over, in the safe zones phase (PlayerCanRestart), skydiving from RespawnHeight over where
+    // the old one died, with nothing but the pickaxe (its loot dropped where it fell).
+    if (Now < RespawnTime)
+    {
+        return;
+    }
+    AFortGameModeAthena* GameMode = Manager->GetGameMode();
+    UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!GameState || GameState->GamePhase > EAthenaGamePhase::GetSafeZones())
+    {
+        // The match is over: the bot stays dead.
+        RespawnTime = -1.0f;
+        return;
+    }
+    if (GameState->GamePhase != EAthenaGamePhase::GetSafeZones())
+    {
+        RespawnTime = Now + 1.0f;
+        return;
+    }
+    AFortPlayerStateAthena* PlayerState = GetPlayerState();
+    FVector DeathLocation = LastKnownPosition;
+    if (PlayerState && FDeathInfo::HasDeathLocation() && AFortPlayerStateAthena::HasEliminator())
+    {
+        const FVector Stored = PlayerState->DeathInfo.DeathLocation;
+        if (Stored.X != 0.0f || Stored.Y != 0.0f || Stored.Z != 0.0f)
+        {
+            DeathLocation = Stored;
+        }
+    }
+    const FVector Start(DeathLocation.X, DeathLocation.Y, DeathLocation.Z + AFortGameModeAthena::RespawnHeight);
+
+    // The body goes, as the restarted player's old pawn does.
+    if (AFortPlayerPawnAthena* OldPawn = GetPawn())
+    {
+        if (AAIController* AIController = Controller.Get())
+        {
+            AIController->UnPossess();
+        }
+        if (!OldPawn->IsPendingKill())
+        {
+            OldPawn->K2_DestroyActor();
+        }
+    }
+    PlayerBotPawn = nullptr;
+    ClearInventory();
+    CurrentTarget = nullptr;
+    LastAttacker = nullptr;
+    Downer = nullptr;
+    DBNOStartedAt = 0.0f;
+    NextDeathCheck = 0.0f;
+    LastHealthShield = -1.0f;
+    LastHurtTime = -100.0f;
+    bDiving = false;
+    if (!Manager->FindGroundNear(DeathLocation, 3000.0f, DropTarget))
+    {
+        DropTarget = DeathLocation;
+    }
+    if (!SpawnPawnAt(Start, RandomRange(0.0f, 360.0f), true))
+    {
+        RespawnTime = Now + 1.0f;
+        return;
+    }
+    RespawnTime = -1.0f;
+    // Alive again to the clients (IsDead reads DeathInfo's bInitialized, which the death set).
+    if (PlayerState && AFortPlayerStateAthena::HasEliminator() && FDeathInfo::HasInitialized())
+    {
+        PlayerState->DeathInfo.bInitialized = false;
+        PlayerState->ForceNetUpdate();
+    }
+    State = ECoreAthenaBotState::Skydiving;
+    LandedTime = 0.0f;
+    NextLogTime = Now + 3.0f;
+    LastKnownPosition = Start;
+    Log::Info(L"Battle Royale bots: {} respawns in the air at ({:.0f}, {:.0f}, {:.0f})", BotName, Start.X, Start.Y, Start.Z);
 #endif
 }
 

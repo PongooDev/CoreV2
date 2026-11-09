@@ -2418,6 +2418,12 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
     const bool bTeamOut = std::none_of(PlayerBots.begin(), PlayerBots.end(), [Bot](const auto& Other) { return Other.get() != Bot && Other->IsAlive() && Other->GetTeam() == Bot->GetTeam(); })
         && !(bPlayersTeam && HasAlivePlayerOnTeam(Athena, Bot->GetTeam()));
     Bot->OnPossesedPawnDied(KillerState);
+    // A playlist that brings its players back (Playground, CoreV2 #344): the bot is still in the match, as a respawning
+    // player stays among the alive players; no place, no outlive events, the counts stay.
+    if (Bot->IsRespawnPending())
+    {
+        return;
+    }
     if (bTeamOut && bAircraftStarted)
     {
         for (const auto& Member : PlayerBots)

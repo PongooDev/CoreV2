@@ -320,6 +320,8 @@ private:
     int32_t PlaylistTeams = 0;
     int32_t PlaylistTeamSize = 0;
     int32_t HumansAtStart = 0;
+    // The most teams in the match since the bus left, players' and bots': with one (Playground), nobody is left standing.
+    int32_t MostTeamsAlive = 0;
     int32_t LastPlayersLeft = -1;
     int32_t LastTeamsLeft = -1;
     float NextLootRefresh = 0.0f;

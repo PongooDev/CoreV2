@@ -24,6 +24,7 @@
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "Weapons/FortWeapon.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <vector>
@@ -265,6 +266,7 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
 #if WITH_SERVER_CODE
     AFortPawn* DeadPawn = MyFortPawn;
     AFortPlayerStateAthena* AthenaState = AthenaStateOf(this);
+    uint8_t DeathCause = EDeathCause::GetUnspecified();
     if (AthenaState)
     {
         // The death report the death screen shows (OnRep_DeathInfo): how the player died, and who downed them, else who
@@ -272,7 +274,8 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         FDeathInfo& DeathInfo = AthenaState->DeathInfo;
         if (DeadPawn && AFortPlayerStateAthena::HasToDeathCause())
         {
-            DeathInfo.DeathCause = AFortPlayerStateAthena::ToDeathCause(DeadPawn, DamageTags, DeadPawn->bIsDBNO);
+            DeathCause = AFortPlayerStateAthena::ToDeathCause(DeadPawn, DamageTags, DeadPawn->bIsDBNO);
+            DeathInfo.DeathCause = DeathCause;
         }
         // How far away the eliminator was, as the DBNO handling has it (4.1 0xAAE559, 0xAAE619): 0, then the
         // eliminator's pawn's distance to this one when someone else eliminated the player.
@@ -373,7 +376,12 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
             GameState->TeamsLeft = std::max(static_cast<int32_t>(GameState->TeamsLeft), 1) + 2;
         }
     }
-    Natives::AFortGameModeAthena_RemoveFromAlivePlayers(GameMode, this, Instigator ? static_cast<APlayerState*>(Instigator->PlayerState) : nullptr);
+    // From 4.4 the finisher's pawn, weapon and the death cause go on to the win (ClientNotifyWon's parameters).
+    APawn* FinisherPawn = Instigator && Instigator != this ? KillerPawn : nullptr;
+    AFortPawn* FinisherFortPawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(FinisherPawn));
+    AFortWeapon* FinishingWeapon = FinisherFortPawn ? static_cast<AFortWeapon*>(FinisherFortPawn->CurrentWeapon) : nullptr;
+    Natives::AFortGameModeAthena_RemoveFromAlivePlayers(GameMode, this, Instigator ? static_cast<APlayerState*>(Instigator->PlayerState) : nullptr, FinisherPawn,
+        FinishingWeapon ? static_cast<UFortWeaponItemDefinition*>(FinishingWeapon->WeaponData) : nullptr, DeathCause);
     if (BotManager)
     {
         BotManager->OnPlayerRemoved(AthenaStateOf(Instigator));

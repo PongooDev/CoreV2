@@ -49,6 +49,7 @@ class APlayerController;
 class AFortPlayerState;
 class AFortPlayerPawn;
 class UFortItemDefinition;
+class UFortWeaponItemDefinition;
 class UFortSchematicItem;
 class UFortQuestManager;
 class UFortRegisteredPlayerInfo;
@@ -578,7 +579,9 @@ namespace Natives
     // AFortPlayerControllerZone's death report (1.10 0x8DB450), which AFortPlayerControllerAthena's override calls first
     // where its Athena part is stripped (1.9.1, 1.10): Finder::StrippedAthenaPrepareDeathReportIndex.
     inline void (*AFortPlayerControllerZone_PrepareDeathReport)(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack) = nullptr;
-    inline void (*AFortGameModeAthena_RemoveFromAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState) = nullptr;
+    // From 4.4 it also takes the finisher's pawn, weapon and the death cause, which it hands to the win checks and on to
+    // ClientNotifyWon (4.5 0xA7B630; Logout's call, 0xA747C1, passes null, null, Unspecified). Earlier builds ignore them.
+    inline void (*AFortGameModeAthena_RemoveFromAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause) = nullptr;
     inline void (*AFortPlayerControllerAthena_SetTeamPlace)(AFortPlayerControllerAthena* This, int32_t Place) = nullptr;
     inline int32_t (*AFortPlayerStateAthena_GetSecondsAlive)(AFortPlayerStateAthena* This) = nullptr;
     // The death cause up to 3.3 (1.9.1 0x43AE20), on the pawn.
@@ -593,7 +596,10 @@ namespace Natives
     // AFortGameModeAthena::StartEndGamePhase (3.0 0x9C52C0, 21.40's name): the solo win, RemoveFromAlivePlayers' last call
     // ("%s won the match!", place 1 for the winner, then the end game); with no winner it only ends the match. Battle
     // Royale's player bots end a match with it (FCoreAthenaBotManager::CheckWinConditionLastManStanding).
-    inline void (*AFortGameModeAthena_StartEndGamePhase)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Winner) = nullptr;
+    // From 4.4 ClientNotifyWon has parameters and the win passes its own on to it (4.5 0xA82160 -> 0x125B8E0): called with
+    // the winner alone, they were whatever r8, r9 and the stack held, and the RPC's FinisherPawn faulted (AV reading 0xD).
+    // Earlier builds ignore them.
+    inline void (*AFortGameModeAthena_StartEndGamePhase)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Winner, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause) = nullptr;
     // AFortGameModeAthena::StartAircraftPhase (3.0 0x9C4A60): Finder::AircraftPhasePlayerCleanupCall's function. Only
     // the bots-only test match (-CoreBotMatch) calls it, the warmup's countdown having nobody to start the bus for.
     inline bool (*AFortGameModeAthena_StartAircraftPhase)(AFortGameModeAthena* This) = nullptr;

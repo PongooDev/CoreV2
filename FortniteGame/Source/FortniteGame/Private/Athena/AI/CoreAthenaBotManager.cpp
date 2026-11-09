@@ -1772,6 +1772,7 @@ void FCoreAthenaBotManager::OnAircraftPhaseStarted(float Now)
     }
     BotsAtStart = GetAliveBotCount();
     HumansAtStart = Athena ? Athena->AlivePlayers.Num() : 0;
+    MostTeamsAlive = static_cast<int32_t>(AliveTeams(true).size());
     // The match's starting players (the count the players outlived is worked out from, copied from PlayersLeft as the
     // aircraft starts) and its players and teams left count the bots.
     if (GameState && Natives::AFortGameStateAthena_StartingPlayers > 0)
@@ -2833,6 +2834,15 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
         return;
     }
     const std::set<uint8_t> Teams = AliveTeams(true);
+    // The game's check (4.5 0xA5FCB0) runs only as someone is taken out (RemoveFromAlivePlayers, which hands it the
+    // count from before): its solo win needs that count above 1, its team win TeamsLeft brought down to 1. A match that
+    // only ever had one team (Playground's "1 teams of 4", a player and their fill bots) never has a last team standing:
+    // declaring one as the bus left ended it with a win the game never gives.
+    MostTeamsAlive = std::max(MostTeamsAlive, static_cast<int32_t>(Teams.size()));
+    if (MostTeamsAlive <= 1)
+    {
+        return;
+    }
     const TArray<AFortPlayerControllerAthena*>& Alive = Athena->AlivePlayers;
     const int32_t HumansLeft = Alive.Num();
     if (Teams.size() <= 1)
@@ -2852,7 +2862,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
                     State->ForceNetUpdate();
                 }
             }
-            Natives::AFortGameModeAthena_StartEndGamePhase(Athena, Winner);
+            Natives::AFortGameModeAthena_StartEndGamePhase(Athena, Winner, nullptr, nullptr, EDeathCause::GetUnspecified());
             return;
         }
         bool bPlayersTeamWon = false;
@@ -2874,7 +2884,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
         {
             SetPlayersTeamPlace(*Teams.begin(), 1);
         }
-        Natives::AFortGameModeAthena_StartEndGamePhase(Athena, nullptr);
+        Natives::AFortGameModeAthena_StartEndGamePhase(Athena, nullptr, nullptr, nullptr, EDeathCause::GetUnspecified());
         return;
     }
     // Every player out: the match goes on while one of them is still connected, watching it (CoreV2 #255: ending it at
@@ -2892,7 +2902,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
                 SetPlayersTeamPlace(Team, static_cast<int32_t>(Teams.size()));
             }
         }
-        Natives::AFortGameModeAthena_StartEndGamePhase(Athena, nullptr);
+        Natives::AFortGameModeAthena_StartEndGamePhase(Athena, nullptr, nullptr, nullptr, EDeathCause::GetUnspecified());
     }
 #endif
 }

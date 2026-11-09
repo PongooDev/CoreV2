@@ -25,6 +25,7 @@ class EDeathCause
 {
     DefineUnrealEnum(EDeathCause, FortniteGame)
     DefineUEnumValue(OutsideSafeZone)
+    DefineUEnumValue(Unspecified)
 };
 
 // How a Battle Royale player was last downed or eliminated, which the death screen shows (OnRep_DeathInfo). The death

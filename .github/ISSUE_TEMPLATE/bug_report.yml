@@ -37,6 +37,7 @@ body:
         - "4.4.1"
         - "4.4.2"
         - "4.5"
+        - "5.0"
         - Other (say which below)
     validations:
       required: true

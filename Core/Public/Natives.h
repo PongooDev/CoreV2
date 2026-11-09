@@ -237,6 +237,8 @@ namespace Natives
     inline bool (*FOnlineSubsystemMcp_QueueRequestForClient)(FOnlineSubsystemMcp* This, FGameServiceMcp& Service, const FString& ClientId, const TSharedRef<IHttpRequest>& HttpRequest, FString& OutError) = nullptr;
     inline bool (*FOnlineSubsystemImpl_IsDedicated)(const FOnlineSubsystemImpl* This) = nullptr;
     inline void (*UGameEngine_Tick)(UGameEngine* This, float DeltaSeconds, bool bIdleMode) = nullptr;
+    // UGameEngine::GameViewportWindow (TWeakPtr<SWindow>); GameViewportWidget is 0x20 after it. 0 when not found.
+    inline ptrdiff_t UGameEngine_GameViewportWindow = 0;
     inline bool (*UEngine_CreateNamedNetDriver)(UEngine* This, UWorld* InWorld, FName NetDriverName, FName NetDriverDefinition) = nullptr;
     inline UNetDriver* (*UEngine_FindNamedNetDriver)(UEngine* This, const UWorld* InWorld, FName NetDriverName) = nullptr;
     inline void (*UEngine_DestroyNamedNetDriver)(UEngine* This, UWorld* InWorld, FName NetDriverName) = nullptr;

@@ -501,6 +501,56 @@ namespace
                 }
             }
             RequireAddress(L"GWorld", reinterpret_cast<uintptr_t&>(Natives::GWorld), World);
+
+            // UGameEngine::GameViewportWindow (a TWeakPtr<SWindow>), from Tick's first frame: bFirstTime = false;
+            // FPlatformSplash::Hide(); if (GameViewportWindow.IsValid()) { ShowWindow; RegisterGameViewport(
+            // GameViewportWidget) }, which tests the weak pointer's object, then its reference controller:
+            // cmp qword ptr [this+Window], 0; jz; mov rax, [this+Window+8] (4.5 CL-4166199 0x217D6E5, +0xBF0). The
+            // widget is the TSharedPtr<SViewport> after SceneViewport (GameEngine.h), Window+0x20, read for the
+            // RegisterGameViewport call further on (+0xC10).
+            ptrdiff_t ViewportWindow = 0;
+            int32_t ViewportWindowSites = 0;
+            for (uintptr_t Compare = FindInstruction(Tick, TickEnd, { -1, 0x83, -1, -1, -1, 0x00, 0x00, 0x00 }); Compare; Compare = FindInstruction(Compare + 1, TickEnd, { -1, 0x83, -1, -1, -1, 0x00, 0x00, 0x00 }))
+            {
+                const uint8_t Rex = Byte(Compare);
+                const uint8_t ModRm = Byte(Compare + 2);
+                if ((Rex != 0x48 && Rex != 0x49) || (ModRm & 0xF8) != 0xB8 || (ModRm & 0x07) == 0x04)
+                {
+                    continue;
+                }
+                const auto BaseOf = [](uint8_t Prefix, uint8_t Operand) { return static_cast<uint8_t>(((Prefix & 0x01) << 3) | (Operand & 0x07)); };
+                const uint8_t Base = BaseOf(Rex, ModRm);
+                const int32_t Window = *reinterpret_cast<const int32_t*>(Compare + 3);
+                const uintptr_t Jcc = Compare + 8;
+                const uintptr_t AfterJcc = Byte(Jcc) == 0x74 ? Jcc + 2 : Byte(Jcc) == 0x0F && Byte(Jcc + 1) == 0x84 ? Jcc + 6 : 0;
+                const auto LoadsField = [&](uintptr_t From, uintptr_t To, int32_t Field)
+                {
+                    for (uintptr_t Load = From; Load + 7 <= To; ++Load)
+                    {
+                        if ((Byte(Load) & 0xFA) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC0) == 0x80 && (Byte(Load + 2) & 0x07) != 0x04
+                            && BaseOf(Byte(Load), Byte(Load + 2)) == Base && *reinterpret_cast<const int32_t*>(Load + 3) == Field)
+                        {
+                            return true;
+                        }
+                    }
+                    return false;
+                };
+                if (Window > 0 && AfterJcc && LoadsField(AfterJcc, AfterJcc + 0x10, Window + 8) && LoadsField(AfterJcc, std::min(AfterJcc + 0x100, TickEnd), Window + 0x20))
+                {
+                    ViewportWindow = Window;
+                    ++ViewportWindowSites;
+                }
+            }
+            if (ViewportWindowSites == 1)
+            {
+                Natives::UGameEngine_GameViewportWindow = ViewportWindow;
+                Log::Info(L"Finder: UGameEngine::GameViewportWindow +0x{:X}, GameViewportWidget +0x{:X}", ViewportWindow, ViewportWindow + 0x20);
+            }
+            else
+            {
+                // Only a build whose PreLoadScreen hands the engine a window (4.5+) needs it (UGameEngine::ReleasePreLoadScreenWindow).
+                Log::Info(L"Finder: UGameEngine::GameViewportWindow not found ({} candidates), only a PreLoadScreen window needs it", ViewportWindowSites);
+            }
         }
     }
 
@@ -661,10 +711,17 @@ namespace
     // PackedListenCall's fallback, for 4.4.0/4.4.1 (CL-4117433, CL-4127312), where its HasOption pairing did not hold
     // on 4.4.1. The "LoadMap: failed to Listen(%s)" reference's moved piece jumps back to the UE_LOG call in LoadMap's
     // first-.text code (4.4.0: ref 0x554008F, log call 0x24CEFAA), and the Listen call (0x24CEF4B) is the only call
-    // to a stripped xor al, al; ret function within 0x200 bytes of it, on 4.4.0 and 4.4.2 alike.
+    // to a stripped xor al, al; ret function within 0x200 bytes of it, on 4.4.0 and 4.4.2 alike. 4.5 puts the moved
+    // piece in the first .text itself (CL-4166199: ref 0x10F6B, jmp to the log call 0x24F777A, Listen call 0x24F771B;
+    // CL-4159770: ref 0xC3AC, log call 0x24F85AA, Listen call 0x24F854B), so the trace looks past the reference's own
+    // piece. 4.5's HasOption test (0x3B77F4) has a store between its test al, al and the jcc, which PackedListenCall
+    // doesn't take.
     uintptr_t ListenCallNearLog(uintptr_t ListenLog)
     {
-        const uintptr_t LogSite = ListenLog ? Finder::TraceFind(ListenLog, 16, [](uintptr_t Instruction) { return IsInText(Instruction); }) : 0;
+        const uintptr_t LogSite = ListenLog ? Finder::TraceFind(ListenLog, 16, [ListenLog](uintptr_t Instruction)
+        {
+            return IsInText(Instruction) && (Instruction < ListenLog || Instruction >= ListenLog + 0x40);
+        }) : 0;
         if (!LogSite)
         {
             Log::Error(L"Finder: no first-.text code after the LoadMap Listen log reference (+0x{:X})", ListenLog ? ListenLog - Finder::ImageBase() : 0);
@@ -2695,15 +2752,27 @@ namespace
         }
 
         const int32_t TickDispatch = Finder::VTableIndex(NetDriverVTable, reinterpret_cast<void*>(FunctionOf(L"UNetDriver::TickDispatch: Very long time between ticks. DeltaTime: %2.2f, Realtime: %2.2f. %s")), 0x400);
-        const uintptr_t TickFlush = TickDispatch >= 0 ? VTableEntry(NetDriverVTable, TickDispatch + 1) : 0;
-        const uintptr_t TickFlushEnd = Finder::FunctionEnd(TickFlush);
+        // TickFlush is the slot after TickDispatch, the one UDemoNetDriver::TickFlush calls (Super::TickFlush). 4.5 adds
+        // PostTickDispatch between them (4.21's; CL-4166199 slot +1 0x228ECD0, TickFlush +2 0x22988E0).
         const uintptr_t DemoTickFlush = FunctionOf(L"UDemoNetDriver::TickFlush: ReplayStreamer ERROR: %s");
-        bool bDemoTickFlush = false;
-        for (const uintptr_t Site : TickFlush && DemoTickFlush ? Finder::CallsTo(TickFlush, false) : std::vector<uintptr_t>())
+        int32_t TickFlushIndex = -1;
+        uintptr_t TickFlush = 0;
+        for (int32_t After = 1; After <= 2 && TickDispatch >= 0 && DemoTickFlush && TickFlushIndex < 0; ++After)
         {
-            bDemoTickFlush = bDemoTickFlush || Finder::FunctionStart(Site) == DemoTickFlush;
+            const uintptr_t Candidate = VTableEntry(NetDriverVTable, TickDispatch + After);
+            for (const uintptr_t Site : Candidate ? Finder::CallsTo(Candidate, false) : std::vector<uintptr_t>())
+            {
+                if (Finder::FunctionStart(Site) == DemoTickFlush)
+                {
+                    TickFlushIndex = TickDispatch + After;
+                    TickFlush = Candidate;
+                    break;
+                }
+            }
         }
-        RequireSlot(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlushIndex, bDemoTickFlush ? TickDispatch + 1 : -1);
+        const bool bDemoTickFlush = TickFlushIndex >= 0;
+        const uintptr_t TickFlushEnd = Finder::FunctionEnd(TickFlush);
+        RequireSlot(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlushIndex, TickFlushIndex);
         Require(L"UNetDriver::TickFlush", Natives::UNetDriver_TickFlush, bDemoTickFlush ? TickFlush : 0);
 
         int32_t IsServer = TickFlush ? VirtualSlot(FindVirtualCall(TickFlush, TickFlush + 0x60)) : -1;
@@ -9925,13 +9994,15 @@ bool Finder::ResolveBuildingLootLive()
         return Function ? Finder::DirectCalls(Function, Finder::FunctionEnd(Function)) : std::vector<std::pair<uintptr_t, uintptr_t>>();
     };
 
-    // ABuildingSMActor::SelectMeshSet(int32 LootTier) survives in 1.2 and ends in the SetMeshSet virtual.
+    // ABuildingSMActor::SelectMeshSet(int32 LootTier) survives in 1.2 and ends in the SetMeshSet virtual. The byte scan
+    // also meets FF 9x in other instructions: 4.5's last log string lea (CL-4166199 0xB282DB) reads as a call with a
+    // displacement no slot has, after the real calls ([rax+0D20h], [r8+0D20h]), so only a slot counts.
     const uintptr_t SelectMeshSet = FunctionOf(L"ABuildingSMActor::SelectMeshSet(int32 LootTier) just set AltMeshIdx Building: %s, AltMeshIdx: %d");
     const uintptr_t SelectMeshSetEnd = SelectMeshSet ? Finder::FunctionEnd(SelectMeshSet) : 0;
     int32_t SetMeshSetIndex = -1;
     for (uintptr_t Site = SelectMeshSetEnd ? FindVirtualCall(SelectMeshSet, SelectMeshSetEnd) : 0; Site; Site = FindVirtualCall(Site + 1, SelectMeshSetEnd))
     {
-        SetMeshSetIndex = VirtualSlot(Site);
+        SetMeshSetIndex = VirtualSlot(Site) >= 0 ? VirtualSlot(Site) : SetMeshSetIndex;
     }
 
     // ABuildingSMActor::PostUpdate: Cert selects the alternate mesh set in it, 1.2 only logs.
@@ -11740,11 +11811,21 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
             // 4.4 (0xAD5AC2) builds the FDeathInfo on the stack and hands it to the player state's setter (0xAC4BB0):
             // xor edx, edx; call ToDeathCause; mov byte ptr [rsp + Info.DeathCause], al; ...;
             // mov byte ptr [rsp + Info.bDBNO], 1.
-            if ((Byte(Site - 2) == 0x33 || Byte(Site - 2) == 0x31) && Byte(Site - 1) == 0xD2 && Byte(Site + 5) == 0x88 && Byte(Site + 6) == 0x44 && Byte(Site + 7) == 0x24
+            // 4.5 (CL-4166199 0xAAC6FB) clears edx before the stack stores of the other fields and asks for the new
+            // DeathCircumstance right after: xor edx, edx; ...; call ToDeathCause (0xAF8250); mov rcx, rdi;
+            // mov byte ptr [rsp + Info.DeathCause], al; call 0xAF8BF0; mov [rsp + Info.DeathCircumstance], eax; ...;
+            // mov byte ptr [rsp + Info.bDBNO], 1.
+            bool bClearsFlag = false;
+            for (uintptr_t Clear = Site - 2; Clear + 0x30 >= Site && !bClearsFlag; --Clear)
+            {
+                bClearsFlag = (Byte(Clear) == 0x33 || Byte(Clear) == 0x31) && Byte(Clear + 1) == 0xD2;
+            }
+            const uintptr_t CauseStore = Site + 5 + ((Byte(Site + 5) & 0xF8) == 0x48 && Byte(Site + 6) == 0x8B && (Byte(Site + 7) & 0xF8) == 0xC8 ? 3 : 0);
+            if (bClearsFlag && Byte(CauseStore) == 0x88 && Byte(CauseStore + 1) == 0x44 && Byte(CauseStore + 2) == 0x24
                 && DeathInfoDBNOOffset + 1 == DeathCauseOffset)
             {
-                const uint8_t CauseSlot = Byte(Site + 8);
-                for (uintptr_t Flag = Site + 9; Flag + 5 <= Site + 0x20; ++Flag)
+                const uint8_t CauseSlot = Byte(CauseStore + 3);
+                for (uintptr_t Flag = CauseStore + 4; Flag + 5 <= CauseStore + 0x24; ++Flag)
                 {
                     if (Byte(Flag) == 0xC6 && Byte(Flag + 1) == 0x44 && Byte(Flag + 2) == 0x24 && Byte(Flag + 3) == static_cast<uint8_t>(CauseSlot - 1) && Byte(Flag + 4) == 0x01)
                     {

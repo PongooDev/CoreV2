@@ -212,6 +212,8 @@ static void InstallHooks()
         {
             FEngineLoop::HookAfterPreInit();
         }
+        // With GIsClient off, before UGameEngine::Init: a window the PreLoadScreen handed the engine gets no viewport.
+        UGameEngine::ReleasePreLoadScreenWindow();
         if (void (*Combine)() = FOnlineSubsystemImpl::BeforeFirstDedicatedCheck.exchange(nullptr))
         {
             Log::Warning(L"Server config: the online subsystem never asked whether it is dedicated, merging the server settings now");

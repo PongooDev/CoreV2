@@ -6,6 +6,7 @@
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Templates/Casts.h"
 
 namespace
 {
@@ -29,6 +30,35 @@ void UGameEngine::Hook()
         Hooks::SkipBranch(L"UGameEngine::Tick IsRunningDedicatedServer", Check);
     }
     Hooks::Detour(L"UGameEngine::Tick", reinterpret_cast<void*>(Natives::UGameEngine_Tick), &TickHK, &TickOG);
+}
+
+void UGameEngine::ReleasePreLoadScreenWindow()
+{
+    // 4.5 (CL-4166199) has UE 4.21's PreLoadScreen: FEngineLoop::PreInit makes the game window for it
+    // (FPreLoadScreenManager::Initialize 0x270D5E0, UGameEngine::CreateGameWindow 0x2161010, as it does whenever the
+    // render thread is on), and FEngineLoop::Init hands that window to the new engine as its GameViewportWindow
+    // (PassPreLoadScreenWindowBackToGame) before UGameEngine::Init. A dedicated server never makes it (PreInit's
+    // !IsRunningDedicatedServer() block), and the server's UGameEngine::Init, with GIsClient off, makes no viewport for
+    // it, so GameViewportWidget stays empty. Tick's first frame (0x217D6E5) then shows the window and registers that empty
+    // widget (FSlateApplication::RegisterGameViewport 0x16C6520, FindPathToWidget reading 0xC0): the server died at frame
+    // 0. Core lets go of the window, so the engine has none, as on a dedicated server or a build without a PreLoadScreen
+    // (4.4); Slate and the PreLoadScreen manager keep their own references to it.
+    UGameEngine* Engine = Natives::GEngine ? Cast<UGameEngine>(reinterpret_cast<UObject*>(*Natives::GEngine)) : nullptr;
+    const ptrdiff_t Window = Natives::UGameEngine_GameViewportWindow;
+    if (!Engine || !Window || !Natives::GIsClient || *Natives::GIsClient)
+    {
+        return;
+    }
+    // TWeakPtr<SWindow> {Object, WeakReferenceCount}: IsValid is a non-null object with a live controller. With the
+    // object cleared it is invalid; the controller's weak reference goes with the engine, as it would have.
+    void** const WindowObject = reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(Engine) + Window);
+    void* const WidgetObject = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(Engine) + Window + 0x20);
+    if (!*WindowObject || WidgetObject)
+    {
+        return;
+    }
+    *WindowObject = nullptr;
+    Log::Info(L"UGameEngine: let go of the PreLoadScreen's game window, which a server has no viewport for");
 }
 
 void UGameEngine::SetServerTickRate()

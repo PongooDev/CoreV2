@@ -13,10 +13,14 @@ public:
     DefineUFunction(GetNumMaterials)
     DefineUFunction(GetMaterial)
     DefineUFunction(SetMaterial)
+    DefineUFunction(SetPhysicsLinearVelocity)
+    DefineUFunction(SetPhysicsAngularVelocityInDegrees)
 
     int32_t GetNumMaterials() const;
     UMaterialInterface* GetMaterial(int32_t ElementIndex) const;
     void SetMaterial(int32_t ElementIndex, UMaterialInterface* Material);
+    void SetPhysicsLinearVelocity(const FVector& NewVel, bool bAddToCurrent = false, FName BoneName = FName());
+    void SetPhysicsAngularVelocityInDegrees(const FVector& NewAngVel, bool bAddToCurrent = false, FName BoneName = FName());
 };
 
 class UMeshComponent : public UPrimitiveComponent

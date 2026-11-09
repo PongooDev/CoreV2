@@ -23,6 +23,24 @@ void UPrimitiveComponent::SetMaterial(int32_t ElementIndex, UMaterialInterface* 
     Params.Call(this);
 }
 
+void UPrimitiveComponent::SetPhysicsLinearVelocity(const FVector& NewVel, bool bAddToCurrent, FName BoneName)
+{
+    Reflection::FParams Params(StaticFunction_SetPhysicsLinearVelocity());
+    Params.Set(L"NewVel", NewVel);
+    Params.Set(L"bAddToCurrent", bAddToCurrent);
+    Params.Set(L"BoneName", BoneName);
+    Params.Call(this);
+}
+
+void UPrimitiveComponent::SetPhysicsAngularVelocityInDegrees(const FVector& NewAngVel, bool bAddToCurrent, FName BoneName)
+{
+    Reflection::FParams Params(StaticFunction_SetPhysicsAngularVelocityInDegrees());
+    Params.Set(L"NewAngVel", NewAngVel);
+    Params.Set(L"bAddToCurrent", bAddToCurrent);
+    Params.Set(L"BoneName", BoneName);
+    Params.Call(this);
+}
+
 bool UStaticMeshComponent::GetLocalBounds(FVector& Min, FVector& Max) const
 {
     // Without a mesh the function leaves both zero.

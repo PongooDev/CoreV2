@@ -182,6 +182,18 @@ namespace
                 Log::Info(L"Object layout: FUObjectArray's members start at +0x{:X}", Members);
             }
         }
+        // 4.4.0 (CL-4117433) has them 8 bytes in, close enough for a byte displacement: mov [rcx+10h], r8d (0x1579311),
+        // where 4.4.2 has mov [rcx+110h], r8d. Up to 1.9.1 that store is mov [rcx+8], r8d, which leaves them at 0.
+        if (!ObjectLayout::Current.FUObjectArray_Members)
+        {
+            const uintptr_t Store = AllocatePool ? FindInstruction(AllocatePool, AllocatePool + 0x20, { 0x44, 0x89, 0x41 }) : 0;
+            const int32_t Members = Store ? static_cast<int8_t>(Byte(Store + 3)) - 8 : 0;
+            if (Members > 0 && Members % 4 == 0 && !FindInstruction(AllocatePool, Store, { 0x44, 0x89, 0x81 }))
+            {
+                ObjectLayout::Current.FUObjectArray_Members = Members;
+                Log::Info(L"Object layout: FUObjectArray's members start at +0x{:X}", Members);
+            }
+        }
     }
 
     void ResolveNames()
@@ -403,6 +415,22 @@ namespace
         Require(L"FParse::Param", Natives::FParse_Param, Finder::NextCall(Ref, 0x20));
     }
 
+    // Whether any code loads the global (mov r64, [rip+Global]).
+    bool IsReadByCode(uintptr_t Global)
+    {
+        for (const auto& [Begin, End] : Finder::ExecutableSections())
+        {
+            for (uintptr_t Load = Begin; Load + 7 <= End; ++Load)
+            {
+                if ((Byte(Load) & 0xFB) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Load, 3, 7) == Global)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     void ResolveEngineReadiness()
     {
         uintptr_t Engine = 0;
@@ -421,6 +449,14 @@ namespace
                     InitOnes.push_back(Store.second);
                 }
             }
+        }
+        if (Engine && Finder::HasMovedCode() && !IsReadByCode(Engine))
+        {
+            // 4.4.0 (CL-4117433) leaves a piece of FEngineLoop::Init that names the class in .text (0x537740), but its
+            // store is to a global no code reads (0x5379AE: mov [rip+0x4F40310], rax), while GEngine is read in about
+            // 1,500 places. That piece is not the one that makes the engine, so neither its store nor its flags count.
+            Engine = 0;
+            InitOnes.clear();
         }
         if (!Engine)
         {

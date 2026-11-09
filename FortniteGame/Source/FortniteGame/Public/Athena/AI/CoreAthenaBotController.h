@@ -535,8 +535,9 @@ private:
     // checks, with the bot's team; its materials paid.
     bool BuildPiece(const FCoreAthenaBotBuildDescriptor& Descriptor);
     void TakePickup(AFortPickup* Pickup);
-    // An item dropped where the bot stands, as a player drops it (a weapon with its magazine).
-    void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo);
+    // An item dropped where the bot stands, as a player drops it (a weapon with its magazine). A death drop is tossed onto
+    // DeathSpot, its spot around the body (AFortPlayerControllerAthena::GetInventoryDropSpots).
+    void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo, const FVector* DeathSpot = nullptr);
     void DropInventory();
     void ApplyStartingHealth();
     // The bot stops shooting: the shot's fire input is let go (EndShot) and a held fire cue goes (RemoveWeaponFireCue).

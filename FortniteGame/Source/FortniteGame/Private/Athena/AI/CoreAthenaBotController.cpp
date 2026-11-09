@@ -6953,7 +6953,7 @@ void FCoreAthenaBotController::TakeStormDamage(float Now)
 #endif
 }
 
-void FCoreAthenaBotController::DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo)
+void FCoreAthenaBotController::DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo, const FVector* DeathSpot)
 {
 #if WITH_SERVER_CODE
     AFortPlayerPawnAthena* Pawn = GetPawn();
@@ -6979,7 +6979,16 @@ void FCoreAthenaBotController::DropItem(UFortItemDefinition* Definition, int32_t
     // pickup never took clients' auto-pickup.
     if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &Location))
     {
-        Pickup->TossPickup(Spot, reinterpret_cast<AFortPawn*>(Pawn), 0);
+        if (DeathSpot)
+        {
+            // A death drop, as DropInventoryOnDeath tosses a player's.
+            Pickup->PawnWhoDroppedPickup = reinterpret_cast<AFortPawn*>(Pawn);
+            Pickup->TossOntoFloor(*DeathSpot, reinterpret_cast<AFortPawn*>(Pawn));
+        }
+        else
+        {
+            Pickup->TossPickup(Spot, reinterpret_cast<AFortPawn*>(Pawn), 0);
+        }
     }
     EntryStruct->DestroyStruct(Entry);
 #endif
@@ -6989,25 +6998,50 @@ void FCoreAthenaBotController::DropInventory()
 {
 #if WITH_SERVER_CODE
     // 8.30's bots drop their loot as players do: each weapon (with its magazine), the ammo and the healing items, where
-    // the bot fell.
+    // the bot fell. A player's death drop (AFortPlayerControllerAthena::DropInventoryOnDeath) is followed: each item gets
+    // its own spot on the rings around the body (GetInventoryDropSpots) and is tossed onto it (TossOntoFloor). The plain
+    // toss the bots used falls short of the spot it is aimed at (#89: aimed 1.2 to 2.8m out, it comes down 10 to 35 out),
+    // so a bot's loot lay in a pile (#339).
     HealingItem = nullptr;
+    struct FBotDrop
+    {
+        UFortItemDefinition* Definition;
+        int32_t Count;
+        int32_t LoadedAmmo;
+    };
+    std::vector<FBotDrop> Drops;
+    const auto AddDrop = [&Drops](UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo)
+    {
+        if (Definition && Count > 0)
+        {
+            Drops.push_back({ Definition, Count, LoadedAmmo });
+        }
+    };
     for (const FCoreAthenaBotWeapon& Weapon : WeaponList)
     {
-        DropItem(Weapon.WeaponDefinition, 1, Weapon.LoadedAmmo);
+        AddDrop(Weapon.WeaponDefinition, 1, Weapon.LoadedAmmo);
     }
     for (const auto& [Definition, Count] : Ammo)
     {
-        DropItem(Definition, Count, 0);
+        AddDrop(Definition, Count, 0);
     }
     for (const auto& [Definition, Count] : Consumables)
     {
-        DropItem(Definition, Count, 0);
+        AddDrop(Definition, Count, 0);
     }
     if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
     {
-        DropItem(GameData->WoodItemDefinition, Materials[0], 0);
-        DropItem(GameData->StoneItemDefinition, Materials[1], 0);
-        DropItem(GameData->MetalItemDefinition, Materials[2], 0);
+        AddDrop(GameData->WoodItemDefinition, Materials[0], 0);
+        AddDrop(GameData->StoneItemDefinition, Materials[1], 0);
+        AddDrop(GameData->MetalItemDefinition, Materials[2], 0);
+    }
+    if (AFortPlayerPawnAthena* Pawn = GetPawn(); Pawn && !Drops.empty())
+    {
+        const std::vector<FVector> Spots = AFortPlayerControllerAthena::GetInventoryDropSpots(reinterpret_cast<AActor*>(Pawn), LocationOf(Pawn), static_cast<int32_t>(Drops.size()));
+        for (size_t Index = 0; Index < Drops.size() && Index < Spots.size(); ++Index)
+        {
+            DropItem(Drops[Index].Definition, Drops[Index].Count, Drops[Index].LoadedAmmo, &Spots[Index]);
+        }
     }
     Materials[0] = Materials[1] = Materials[2] = 0;
     HarvestTarget = nullptr;

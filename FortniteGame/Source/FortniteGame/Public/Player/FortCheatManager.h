@@ -67,6 +67,7 @@ class UFortCheatManager : public UCheatManager
     DefineUFunction(BackpackSetSize)
     DefineUFunction(ListSpawnGroups)
     DefineUFunction(ToggleInfiniteStamina)
+    DefineUFunction(MakeBuildingActorsGod)
 
 public:
     // ToggleUnlimitedHealth's flag: the player's pawn can't be damaged while its controller's cheat manager has it (1.9
@@ -149,6 +150,8 @@ public:
     void ListSpawnGroups();
     // Toggles bInfiniteStamina and says which it is ("Infinite stamina is %d"). 4.2 compiles it out (#312).
     void ToggleInfiniteStamina();
+    // Every building actor in the world flips its bIsInvulnerable. 4.2 compiles it out (#312).
+    void MakeBuildingActorsGod();
 
     // Core's own command, "cheat corecheats [filter]": the cheats Core supports, with usage, as chat lines.
     void ListCoreCheats(const FString& Filter);
@@ -379,6 +382,7 @@ public:
     DECLARE_FUNCTION(execBackpackSetSize);
     DECLARE_FUNCTION(execListSpawnGroups);
     DECLARE_FUNCTION(execToggleInfiniteStamina);
+    DECLARE_FUNCTION(execMakeBuildingActorsGod);
 
 private:
     static void FlyHK(UFortCheatManager* This);

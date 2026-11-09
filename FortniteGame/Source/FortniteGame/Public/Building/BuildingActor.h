@@ -68,6 +68,9 @@ public:
     // The piece's UFortBuildingActorSet (its BuildTime and RepairTime), made with its ability system.
     DefineUProperty(UFortBuildingActorSet*, BuildingAttributeSet)
     static bool HasBuildingAttributeSet() { return Member_BuildingAttributeSet.IsAvailable(); }
+    // Replicated. TakeDamage (4.2 0xABF040) does nothing to an invulnerable building; MakeBuildingActorsGod flips it.
+    DefineBitfieldUProperty(bIsInvulnerable)
+    static bool HasInvulnerable() { return Member_bIsInvulnerable.IsAvailable(); }
 
     float GetHealth() const;
     // Whether the zone's structure count includes this piece: one alive, player built (IsPlayerBuilt, 1.8 0x47F850: an

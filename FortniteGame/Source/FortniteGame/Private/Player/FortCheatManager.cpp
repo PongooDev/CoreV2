@@ -5925,6 +5925,33 @@ void UFortCheatManager::ToggleInfiniteStamina()
 #endif
 }
 
+void UFortCheatManager::MakeBuildingActorsGod()
+{
+#if WITH_SERVER_CODE
+    // 4.1's (0xF36C40): every building actor in the world (a TActorIterator<ABuildingActor>, as GetAllActorsOfClass walks
+    // it) flips its replicated bIsInvulnerable, so running it again undoes it. It answers nothing; the server's log says
+    // how many it flipped.
+    UWorld* World = GetWorld();
+    if (!World || !ABuildingActor::HasInvulnerable())
+    {
+        return;
+    }
+    int32_t Invulnerable = 0;
+    int32_t Vulnerable = 0;
+    for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(World, ABuildingActor::StaticClass()))
+    {
+        if (ABuildingActor* Building = Cast<ABuildingActor>(Actor))
+        {
+            const bool bInvulnerable = !Building->bIsInvulnerable;
+            Building->bIsInvulnerable = bInvulnerable;
+            Invulnerable += bInvulnerable ? 1 : 0;
+            Vulnerable += bInvulnerable ? 0 : 1;
+        }
+    }
+    UE_LOG(LogFortCheats, Log, TEXT("MakeBuildingActorsGod: %d building actors are invulnerable now, %d are not"), Invulnerable, Vulnerable);
+#endif
+}
+
 void UFortCheatManager::FlyHK(UFortCheatManager* This)
 {
     This->Fly();
@@ -5957,6 +5984,14 @@ DEFINE_FUNCTION(UFortCheatManager::execToggleInfiniteStamina)
     P_FINISH;
     P_NATIVE_BEGIN;
     static_cast<UFortCheatManager*>(Context)->ToggleInfiniteStamina();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execMakeBuildingActorsGod)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<UFortCheatManager*>(Context)->MakeBuildingActorsGod();
     P_NATIVE_END;
 }
 
@@ -6127,6 +6162,8 @@ void UFortCheatManager::HookNatives()
              std::tuple{ FindStaticFunction_ListSpawnGroups(), &execListSpawnGroups, L"UFortCheatManager::ListSpawnGroups" },
              // ToggleInfiniteStamina (4.1 0xF4E710) too: 4.4.2's exec (0x117E1A0) jumps to the moved empty function.
              std::tuple{ FindStaticFunction_ToggleInfiniteStamina(), &execToggleInfiniteStamina, L"UFortCheatManager::ToggleInfiniteStamina" },
+             // MakeBuildingActorsGod (4.1 0xF36C40) too.
+             std::tuple{ FindStaticFunction_MakeBuildingActorsGod(), &execMakeBuildingActorsGod, L"UFortCheatManager::MakeBuildingActorsGod" },
          })
     {
         if (ExecJumpsToStub(Function))

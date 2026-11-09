@@ -490,7 +490,10 @@ void AFortPlayerControllerAthena::PlaceAtDeathLocation(AFortPawn* DeadPawn)
     {
         bWatchingDeathViews = GameThread::Enqueue(&WatchDeathViews);
     }
-    UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s stands over its body at (%.0f, %.0f, %.0f)"), *GetName(), ViewLocation.X, ViewLocation.Y, ViewLocation.Z);
+    // The body's facing on the server is what the dying player's own client turns its pawn to once the pawn is let go
+    // (#332: the death montage, PlayerDeath_Athena, plays at the pawn's own rotation; nothing in the death turns it).
+    UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s stands over its body at (%.0f, %.0f, %.0f), the body facing yaw %.0f"), *GetName(), ViewLocation.X, ViewLocation.Y, ViewLocation.Z,
+        DeadPawn->GetActorRotation().Yaw);
 #endif
 }
 

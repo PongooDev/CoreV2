@@ -1,15 +1,95 @@
 #include "pch.h"
 #include "Athena/FortAthenaVehicle.h"
 #include "Components/PrimitiveComponent.h"
+#include "Engine/World.h"
 #include "Finder.h"
 #include "Hooks.h"
 #include "Log.h"
+#include "Logging/LogMacros.h"
 #include "Math/Rotator.h"
+#include "Math/Transform.h"
 #include "Natives.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <unordered_map>
+
+DEFINE_LOG_CATEGORY_STATIC(LogVehicles, Log, All);
+
+namespace
+{
+    // A shopping cart went wild while its rider got in and out quickly (#336). The server only takes a driver's state from
+    // the connection that owns the vehicle (FObjectReplicator::ReceivedRPC rejects a server RPC without bNetOwner, 4.5
+    // 0x21086D0), and only the driver's seat gives the vehicle an owner (4.5 0xA43D00 sets it, 0xA43850 and the seat
+    // change 0xA43930 clear it). What isn't known is whether the jumps come from the driver's states or from the server's
+    // own simulation between them, so the large ones are logged, each against the state the server last took.
+    struct FAppliedPhysicsState
+    {
+        FVector Translation;
+        FQuat Rotation;
+        float ServerTime = 0.0f;
+        int32_t Logged = 0;
+    };
+    std::unordered_map<const AFortAthenaVehicle*, FAppliedPhysicsState> AppliedPhysicsStates;
+
+    constexpr int32_t MaxLoggedPhysicsJumps = 40;
+    constexpr float MaxServerDrift = 100.0f;
+    constexpr float MaxServerTurn = 30.0f;
+    constexpr float MaxDriverStep = 200.0f;
+    constexpr float MaxDriverTurn = 45.0f;
+    constexpr float NewDriveGap = 1.0f;
+
+    // The angle between two rotations, in degrees.
+    float AngleBetween(const FQuat& A, const FQuat& B)
+    {
+        const float Dot = std::min(1.0f, std::fabs(A.X * B.X + A.Y * B.Y + A.Z * B.Z + A.W * B.W));
+        return 2.0f * std::acos(Dot) * (180.0f / 3.14159265f);
+    }
+
+    // How upright a rotation leaves the vehicle: its up axis's Z (1 upright, 0 on its side, -1 upside down).
+    float UpZ(const FQuat& Rotation)
+    {
+        return Rotation.RotateVector(FVector(0.0f, 0.0f, 1.0f)).Z;
+    }
+
+    void LogPhysicsJump(AFortAthenaVehicle* Vehicle, const FReplicatedAthenaVehiclePhysicsState& InState)
+    {
+        UWorld* World = Vehicle->GetWorld();
+        const float Now = World ? World->GetTimeSeconds() : 0.0f;
+        const FTransform Current = Vehicle->GetTransform();
+        if (AppliedPhysicsStates.size() > 256)
+        {
+            AppliedPhysicsStates.clear();
+        }
+
+        auto Found = AppliedPhysicsStates.find(Vehicle);
+        if (Found != AppliedPhysicsStates.end() && Found->second.Logged < MaxLoggedPhysicsJumps)
+        {
+            FAppliedPhysicsState& Last = Found->second;
+            const float Gap = Now - Last.ServerTime;
+            const float ServerDrift = (Current.Translation - Last.Translation).Size();
+            const float ServerTurn = AngleBetween(Current.Rotation, Last.Rotation);
+            const float DriverStep = (InState.Translation - Last.Translation).Size();
+            const float DriverTurn = AngleBetween(InState.Rotation, Last.Rotation);
+            if (Gap >= NewDriveGap || ServerDrift > MaxServerDrift || ServerTurn > MaxServerTurn || DriverStep > MaxDriverStep || DriverTurn > MaxDriverTurn)
+            {
+                ++Last.Logged;
+                AActor* Owner = Vehicle->GetOwner();
+                UE_LOG(LogVehicles, Warning, TEXT("ServerUpdatePhysicsParams: %s from %s after %.2fs: since the last state the server moved it %.0f and turned it %.0f deg (up %.2f), the driver moves it %.0f and turns it %.0f deg (up %.2f) to (%.0f, %.0f, %.0f), velocity (%.0f, %.0f, %.0f)"),
+                    *Vehicle->GetName(), Owner ? *Owner->GetName() : TEXT("no owner"), Gap, ServerDrift, ServerTurn, UpZ(Current.Rotation), DriverStep, DriverTurn, UpZ(InState.Rotation),
+                    InState.Translation.X, InState.Translation.Y, InState.Translation.Z, InState.LinearVelocity.X, InState.LinearVelocity.Y, InState.LinearVelocity.Z);
+            }
+        }
+
+        FAppliedPhysicsState& Applied = AppliedPhysicsStates[Vehicle];
+        Applied.Translation = InState.Translation;
+        Applied.Rotation = InState.Rotation;
+        Applied.ServerTime = Now;
+    }
+}
 
 // Leaving a vehicle put the player back where they got in (#332). The driver's client simulates the vehicle and sends
 // its body's state through ServerUpdatePhysicsParams, but the client builds strip the server's side: the exec (4.4.2
@@ -26,6 +106,8 @@
 void AFortAthenaVehicle::ServerUpdatePhysicsParams_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState)
 {
 #if WITH_SERVER_CODE
+    LogPhysicsJump(this, InState);
+
     // Teleport the body to the driver's state (keeping its simulation), then give it the driver's velocities.
     SetActorLocationAndRotation(InState.Translation, InState.Rotation.Rotator(), false, true);
     USceneComponent* Root = GetRootComponent();

@@ -41,4 +41,10 @@ public:
     // isn't None; IsRespawningAllowed (0xA19780) reads it again for InfiniteRespawnExceptStorm.
     DefineUProperty(EAthenaRespawnType, RespawnType)
     static bool HasRespawnType() { return Member_RespawnType.IsAvailable(); }
+    // Set on Playground (4.5's Playlist_Playground, unlike Solo, Duo, Squad and 50v50): the match makes no progress on
+    // the profile's quests, the battle pass and daily challenges. The build reads it only for the playlist's context
+    // tags (4.5 AFortGameStateAthena::GetAthenaPlaylistContextTags, 0xA6A670); the quest progress the server sent from
+    // it was Epic's to refuse, so Core's server sends none (CoreV2 #344).
+    DefineUProperty(bool, bIgnoreDefaultQuests)
+    static bool HasIgnoreDefaultQuests() { return Member_bIgnoreDefaultQuests.IsAvailable(); }
 };

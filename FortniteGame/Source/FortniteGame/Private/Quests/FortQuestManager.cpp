@@ -2,8 +2,10 @@
 #include "Quests/FortQuestManager.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Athena/FortPlaylistAthena.h"
 #include "Configuration.h"
 #include "Containers/ScriptArray.h"
 #include "Engine/DataTable.h"
@@ -49,6 +51,16 @@ namespace
     // Whether the last event Core's SendStatEventWithTags took flushed (it asked to, or it completed an objective), for
     // SendStatEventWithTagsHK. The builds that keep the native one leave it false.
     bool bLastEventFlushed = false;
+
+    // Whether the match's playlist keeps its players' quests where they are (Playground's bIgnoreDefaultQuests, CoreV2
+    // #344). False before 3.5, whose playlists aren't data assets.
+    bool IgnoresDefaultQuests(AFortGameModeAthena* GameMode)
+    {
+        UWorld* World = GameMode && AFortGameStateAthena::HasCurrentPlaylistData() && UFortPlaylistAthena::HasIgnoreDefaultQuests() ? GameMode->GetWorld() : nullptr;
+        AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        return Playlist && Playlist->bIgnoreDefaultQuests;
+    }
 
 #if WITH_SERVER_CODE
     void SaveStatEvents(UFortQuestManager* QuestManager);
@@ -1250,6 +1262,17 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     if (!GameMode)
     {
         SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
+        return;
+    }
+    // Playground (bIgnoreDefaultQuests): the match advances no challenge, so nothing reaches the profile (CoreV2 #344).
+    if (IgnoresDefaultQuests(GameMode))
+    {
+        static bool bLoggedIgnored = false;
+        if (!bLoggedIgnored)
+        {
+            bLoggedIgnored = true;
+            Log::Info(L"Battle Royale: the match's playlist ignores the default quests (bIgnoreDefaultQuests), its stat events advance no challenge");
+        }
         return;
     }
     // A Battle Royale player bot's elimination counts for quests only when the admin panel says so (CoreV2 #233), and

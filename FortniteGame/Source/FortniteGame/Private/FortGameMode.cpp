@@ -4,6 +4,7 @@
 #include "CoreGlobals.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
@@ -227,6 +228,13 @@ void* AFortGameMode::MakeEarnScoreContextCall(void* Result, void* Players)
 
 TSubclassOf<AGameSession>* AFortGameMode::GetGameSessionClassHK(const AFortGameMode* This, TSubclassOf<AGameSession>* Result)
 {
+    // GetGameSessionClass is virtual. AFortGameModeAthena's override (5.0 0xBB7ED0) is stripped to its Super call, which
+    // lands here, so the override is dispatched to from here.
+    if (const AFortGameModeAthena* Athena = Cast<AFortGameModeAthena>(This))
+    {
+        *Result = Athena->GetGameSessionClass();
+        return Result;
+    }
     *Result = This->GetGameSessionClass();
     return Result;
 }

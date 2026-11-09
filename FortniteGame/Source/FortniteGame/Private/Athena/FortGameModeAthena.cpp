@@ -10,12 +10,14 @@
 #include "Items/FortLootPackage.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
+#include "Athena/FortGameSessionDedicatedAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "BackendRequest.h"
 #include "Building/BuildingSMActor.h"
 #include "Configuration.h"
+#include "CoreGlobals.h"
 #include "Engine/DataTable.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/NetConnection.h"
@@ -96,6 +98,21 @@ AFortGameModeAthena* AFortGameModeAthena::GetCurrent(const UObject* WorldContext
 {
     UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
     return World ? Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+}
+
+TSubclassOf<AGameSession> AFortGameModeAthena::GetGameSessionClass() const
+{
+    // Core-Backend #301: with 5.0's base AFortGameSessionDedicated the session was created but never registered with the
+    // matchmaking service, so no ticket reached a server.
+    if (IsRunningDedicatedServer())
+    {
+        if (UClass* SessionClass = AFortGameSessionDedicatedAthena::StaticClass())
+        {
+            return SessionClass;
+        }
+    }
+
+    return AFortGameModeZone::GetGameSessionClass();
 }
 
 namespace

@@ -106,6 +106,10 @@ public:
     // The world's game mode when it is Battle Royale's, else null (Save the World and the builds before Battle Royale).
     static AFortGameModeAthena* GetCurrent(const UObject* WorldContextObject);
 
+    // A dedicated server's Battle Royale session is AFortGameSessionDedicatedAthena from 5.0, the session that registers
+    // with the matchmaking service; before 5.0 AFortGameMode's (AFortGameSessionDedicated) does.
+    TSubclassOf<AGameSession> GetGameSessionClass() const;
+
     // The loot tier group Battle Royale rolls in place of a container's or building's own (None: no loot).
     FName RedirectLootTierGroup(FName TierGroup);
 

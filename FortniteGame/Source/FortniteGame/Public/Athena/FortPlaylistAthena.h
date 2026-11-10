@@ -47,4 +47,11 @@ public:
     // it was Epic's to refuse, so Core's server sends none (CoreV2 #344).
     DefineUProperty(bool, bIgnoreDefaultQuests)
     static bool HasIgnoreDefaultQuests() { return Member_bIgnoreDefaultQuests.IsAvailable(); }
+    // How many times a container's search and a floor loot spot pick their loot (from 5.0; 1 by default). 5.10's
+    // Playground (CoreV2 #357) has 3: "Chests now spawn 3 weapons and more ammo & consumables than normal" and "Floor
+    // loot now spawns 3 items"; 5.21's is back to 1 ("Chest & floor loot changed back to one weapon spawn each").
+    // The search that read it, ABuildingContainer::SpawnLoot, is stripped from 5.10's and 5.21's client builds, whose
+    // servers run Core's (Building/BuildingContainer.cpp), and nothing else in them reads it.
+    DefineUProperty(int32_t, LootDropRounds)
+    static bool HasLootDropRounds() { return Member_LootDropRounds.IsAvailable(); }
 };

@@ -1848,6 +1848,12 @@ namespace
                 RebuildFlightPathsFor(Athena, PlaylistId, Previous);
                 Natives::AFortGameModeAthena_ApplyPlaylistDataTables(Athena);
                 MergeDefaultLootRows(PlaylistId);
+                // 5.0+: the searches and floor loot pick this many times (Building/BuildingContainer.cpp, #357).
+                if (UFortPlaylistAthena* Playlist = UFortPlaylistAthena::HasLootDropRounds() && AFortGameStateAthena::HasCurrentPlaylistData() ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+                    Playlist && Playlist->LootDropRounds > 1)
+                {
+                    Log::Info(L"Battle Royale: playlist {}'s loot drops {} rounds a search and floor loot spot", PlaylistId, static_cast<int32_t>(Playlist->LootDropRounds));
+                }
                 const std::pair<UDataTable*, UDataTable*> Tables = PlaylistLootTables(Athena, PlaylistId);
                 const bool bOtherTables = Tables != TablesLoot;
                 TablesLoot = Tables;

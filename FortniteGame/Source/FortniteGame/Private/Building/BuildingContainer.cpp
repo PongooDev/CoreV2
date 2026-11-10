@@ -2,6 +2,8 @@
 #include "Building/BuildingContainer.h"
 #include "AbilitySystemBlueprintLibrary.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortGameStateAthena.h"
+#include "Athena/FortPlaylistAthena.h"
 #include "Components/PrimitiveComponent.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
@@ -85,6 +87,30 @@ namespace
         LastLogged = LootLevel;
         AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(Container);
         UE_LOG(LogFortBuilding, Log, TEXT("Battle Royale loot level %d (playlist %d), first rolled for %s"), LootLevel, GameMode ? static_cast<int32_t>(GameMode->CurrentPlaylistId) : -1, *Container->GetName());
+    }
+
+    // The match's playlist's LootDropRounds (UFortPlaylistAthena, from 5.0): how many times a Battle Royale search or
+    // floor loot spot picks its loot. 1 before 5.0, before the game state has the match's playlist, and for a playlist
+    // that leaves it at 0.
+    int32_t GetLootDropRounds(UWorld* World)
+    {
+        if (!UFortPlaylistAthena::HasLootDropRounds() || !AFortGameStateAthena::HasCurrentPlaylistData() || !World)
+        {
+            return 1;
+        }
+        AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
+        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        return Playlist ? std::clamp(static_cast<int32_t>(Playlist->LootDropRounds), 1, 10) : 1;
+    }
+
+    // PickLootDrops once for each of the playlist's loot drop rounds: each round adds its drops to LootDrops.
+    void PickLootDropRounds(TStructArray<FFortItemEntry>& LootDrops, int32_t Rounds, int32_t WorldLevel, FName LootTierKey, UAbilitySystemComponent* AbilitySystemComponent,
+        const FGameplayTagContainer& ContextTags)
+    {
+        for (int32_t Round = 0; Round < Rounds; ++Round)
+        {
+            UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, AbilitySystemComponent, ContextTags, true, false);
+        }
     }
 }
 
@@ -220,7 +246,7 @@ namespace
         }
 
         TStructArray<FFortItemEntry> LootDrops{};
-        UFortLootPackage::PickLootDrops(LootDrops, WorldLevel, LootTierKey, nullptr, Spot.Tags, true, false);
+        PickLootDropRounds(LootDrops, GetLootDropRounds(World), WorldLevel, LootTierKey, nullptr, Spot.Tags);
         AFortPickup::CombineItemEntries(LootDrops, nullptr);
         const FRotator SpawnRotation(0.0f, 0.0f, 0.0f);
         for (int32_t Index = 0; Index < LootDrops.Num(); ++Index)
@@ -611,7 +637,9 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
             {
                 LogAthenaLootLevel(this, LootLevel);
             }
-            UFortLootPackage::PickLootDrops(LootDrops, LootLevel, ContainerLootTierKey, UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Looter), StaticGameplayTags, true, false);
+            // A Battle Royale search picks once for each of the match's playlist's loot drop rounds (5.10's Playground: 3).
+            PickLootDropRounds(LootDrops, bAthena ? GetLootDropRounds(World) : 1, LootLevel, ContainerLootTierKey, UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Looter),
+                StaticGameplayTags);
 
             AFortPlayerController* LooterController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(static_cast<AController*>(Looter->Controller)));
             ModifyLootDrops(LootDrops, LooterController);

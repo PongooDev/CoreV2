@@ -365,6 +365,11 @@ bool UFortKismetLibrary::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDr
 #endif
 }
 
+bool UFortKismetLibrary::PickLootDrops(UObject* WorldContextObject, TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier)
+{
+    return PickLootDrops(OutLootToDrop, TierGroupName, WorldLevel, ForcedLootTier);
+}
+
 DEFINE_FUNCTION(UFortKismetLibrary::execGetAIDirector)
 {
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
@@ -501,10 +506,18 @@ void UFortKismetLibrary::HookNatives()
     }
 
 #if WITH_SERVER_CODE
-    // 1.2 cut the loot roll: the exec calls a shared return-false stub instead of the native.
+    // 1.2 cut the loot roll: the exec calls a shared return-false stub instead of the native. 5.0's native takes the
+    // WorldContextObject first (CL-4204761's exec calls it at 0x13B9876 with rcx = WorldContextObject, rdx = OutLootToDrop,
+    // r8 = TierGroupName, r9d = WorldLevel and ForcedLootTier on the stack). Redirected to the four-parameter function,
+    // every parameter was the one before it: the tier group was OutLootToDrop's address, no tier matched, and every
+    // supply drop and Supply Llama opened onto nothing ("Failed to spawn tier 0 loot from Loot Crate.").
     if (uint8_t* PickLootDropsCall = Finder::ImplementationCall(StaticFunction_PickLootDrops()); PickLootDropsCall && Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(PickLootDropsCall), 1, 5)))
     {
-        Hooks::RedirectCall(L"UFortKismetLibrary::PickLootDrops", PickLootDropsCall, reinterpret_cast<void*>(&PickLootDrops));
+        const bool bHasWorldContext = StaticFunction_PickLootDrops()->FindPropertyByName(FName(L"WorldContextObject", FNAME_Find)) != nullptr;
+        using FPickLootDrops = bool (*)(TStructArray<FFortItemEntry>&, FName, int32_t, int32_t);
+        using FPickLootDropsWithWorldContext = bool (*)(UObject*, TStructArray<FFortItemEntry>&, FName, int32_t, int32_t);
+        void* const Target = bHasWorldContext ? reinterpret_cast<void*>(static_cast<FPickLootDropsWithWorldContext>(&PickLootDrops)) : reinterpret_cast<void*>(static_cast<FPickLootDrops>(&PickLootDrops));
+        Hooks::RedirectCall(bHasWorldContext ? L"UFortKismetLibrary::PickLootDrops (WorldContextObject)" : L"UFortKismetLibrary::PickLootDrops", PickLootDropsCall, Target);
 
         // Load (or, without them in the pak, create) the loot tables now, not from inside a level's PostLoad.
         if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())

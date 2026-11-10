@@ -343,6 +343,12 @@ namespace Natives
     inline int32_t (*AFortInventory_GetOverflowAmount)(AFortInventory* This, const FFortItemEntry& ItemEntry) = nullptr;
     inline int32_t (*AFortInventory_GetMaxStackSize)(AFortInventory* This, const UFortItemDefinition* ItemDefinition) = nullptr;
     inline bool (*AFortInventory_CanStackWith)(AFortInventory* This, UFortWorldItem* Item, const FFortItemEntry& ItemEntry, float MaxDurability) = nullptr;
+    // 5.0 inlines CanStackWith into the stack limit (CL-4204761 0xF142B0); these are its pieces, which Core puts back
+    // together (AFortInventory::CanStackWith): the item entries' same-item test (the definition, the level and the
+    // alterations; 5.0 0xF01CF0, 4.5 0xD7B320, ItemEntry first) and UFortWorldItem::BaseRegenCooldown's offset (5.0
+    // 0xF46890 reads +0x1A8). Null and -1 where the build still has CanStackWith.
+    inline bool (*FFortItemEntry_IsSameItem)(const FFortItemEntry& ItemEntry, const FFortItemEntry& Other) = nullptr;
+    inline ptrdiff_t UFortWorldItem_BaseRegenCooldown = -1;
     inline ptrdiff_t AFortInventory_InventoryInterfaceOffset = -1;
     inline int32_t IFortInventoryInterface_GetMaxItemsIndex = -1;
     inline int32_t IFortInventoryInterface_GetNumItemsIndex = -1;

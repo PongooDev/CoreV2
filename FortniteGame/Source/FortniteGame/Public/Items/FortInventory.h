@@ -46,6 +46,8 @@ public:
     int32_t GetMaxStackSize(const UFortItemDefinition* ItemDefinition);
     int32_t GetOverflowAmount(const FFortItemEntry& ItemEntry, bool bForce);
     bool IsBackpackFull();
+    // Whether ItemEntry's items can go on Item's stack (MaxDurability: the entry's definition's at its level).
+    bool CanStackWith(UFortWorldItem* Item, const FFortItemEntry& ItemEntry, float MaxDurability);
     int32_t AddItemStacks(const FFortItemEntry& ItemEntry, int32_t Count, int32_t MaxNewItems, bool bBackpack, bool bKeepOverflow,
         const std::function<void(UFortWorldItem* Item, int32_t Added)>& TopUp, const std::function<UFortWorldItem*(int32_t StackCount, bool bOverflow)>& NewStack);
 

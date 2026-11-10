@@ -8191,12 +8191,19 @@ bool Finder::ResolveInventoryLive()
     return true;
 }
 
-bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
+bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff_t WorldItemEntryOffset)
 {
-    if (Natives::AFortInventory_CanStackWith)
+    if (Natives::AFortInventory_CanStackWith || Natives::FFortItemEntry_IsSameItem)
     {
         return true;
     }
+    // Every inventory change asks again; a build where the search fails logged it on each one (5.0 #345).
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return false;
+    }
+    bSearched = true;
 
     const auto Targets = [](uintptr_t Function)
     {
@@ -8251,20 +8258,57 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
         return FindInstruction(Begin, End, { 0x3D, 0x00, 0x02, 0x00, 0x00 }) || FindInstruction(Begin, End, { 0x3D, 0xF4, 0x01, 0x00, 0x00 })
             || FindInstruction(Begin, End, { 0xB8, 0xF4, 0x01, 0x00, 0x00 });
     };
+    // 5.0's (CL-4204761 0xF147F0) loads it into ecx: mov ecx, 1F4h (0xF14B4F). Only looked for when no caller has the
+    // older forms, so the older builds' pick stays as it was.
+    const auto HasBackpackCapInEcx = [](uintptr_t Begin, uintptr_t End)
+    {
+        return FindInstruction(Begin, End, { 0xB9, 0xF4, 0x01, 0x00, 0x00 }) != 0;
+    };
     const uintptr_t Capacity = OverflowReason ? 0 : FunctionOf(L"GetInventoryCapacity is returning an overridden value of %i");
     uintptr_t CapacityStackLimit = 0;
     uintptr_t CapacityBackpackLimit = 0;
     bool bCapacityLimitsAmbiguous = false;
-    for (const uintptr_t Call : Capacity ? Finder::CallsTo(Capacity, false) : std::vector<uintptr_t>{})
+    for (const bool bEcx : { false, true })
     {
-        const uintptr_t Caller = Finder::FunctionStart(Call);
-        const uintptr_t CallerEnd = Caller ? Finder::FunctionEnd(Caller) : 0;
-        if (CallerEnd > Caller && Caller != CapacityBackpackLimit && HasBackpackCap(Caller, CallerEnd))
+        for (const uintptr_t Call : Capacity && !CapacityBackpackLimit && !bCapacityLimitsAmbiguous ? Finder::CallsTo(Capacity, false) : std::vector<uintptr_t>{})
         {
-            bCapacityLimitsAmbiguous |= CapacityBackpackLimit != 0;
-            CapacityBackpackLimit = Caller;
+            const uintptr_t Caller = Finder::FunctionStart(Call);
+            const uintptr_t CallerEnd = Caller ? Finder::FunctionEnd(Caller) : 0;
+            if (CallerEnd > Caller && Caller != CapacityBackpackLimit && (bEcx ? HasBackpackCapInEcx(Caller, CallerEnd) : HasBackpackCap(Caller, CallerEnd)))
+            {
+                bCapacityLimitsAmbiguous |= CapacityBackpackLimit != 0;
+                CapacityBackpackLimit = Caller;
+            }
         }
     }
+
+    // 5.0 inlines CanStackWith (4.5 0xD7A520) into the stack limit (0xF142B0): the world item's entry (0x7E61F0:
+    // lea rax, [rcx+0D0h]; ret) goes to the item entries' same-item test (mov rdx, rax; mov rcx, rdi; call 0xF01CF0),
+    // then the world item to its regen cooldown test (mov rcx, rbx; movzx r15d, al; call 0xF46890: xorps xmm0, xmm0;
+    // comiss xmm0, [rcx+1A8h]; setb al; ret). Returns the same-item test and the cooldown's offset.
+    const auto FindInlinedCanStackWith = [WorldItemEntryOffset](uintptr_t Function) -> std::pair<uintptr_t, ptrdiff_t>
+    {
+        const uintptr_t FunctionEnd = WorldItemEntryOffset > 0 && IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        for (const auto& [Call, Target] : FunctionEnd > Function ? Finder::DirectCalls(Function, FunctionEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            const bool bEntryGetter = Byte(Target) == 0x48 && Byte(Target + 1) == 0x8D && Byte(Target + 2) == 0x81
+                && *reinterpret_cast<const int32_t*>(Target + 3) == WorldItemEntryOffset && Byte(Target + 7) == 0xC3;
+            const uintptr_t Next = Call + 5;
+            if (!bEntryGetter || Next + 11 > FunctionEnd || Byte(Next) != 0x48 || Byte(Next + 1) != 0x8B || Byte(Next + 2) != 0xD0 || Byte(Next + 6) != 0xE8)
+            {
+                continue;
+            }
+            const uintptr_t SameItem = Finder::RelativeTarget(Next + 6, 1, 5);
+            const uintptr_t CooldownCall = FindRawCall(Next + 11, std::min(Next + 11 + 0x10, FunctionEnd));
+            const uintptr_t Cooldown = CooldownCall ? Finder::RelativeTarget(CooldownCall, 1, 5) : 0;
+            if (IsInText(SameItem) && Finder::FunctionStart(SameItem) == SameItem && Cooldown && Finder::BodyIs(Cooldown, { 0x0F, 0x57, 0xC0, 0x0F, 0x2F, 0x81 })
+                && Byte(Cooldown + 10) == 0x0F && Byte(Cooldown + 11) == 0x92 && Byte(Cooldown + 12) == 0xC0 && Byte(Cooldown + 13) == 0xC3)
+            {
+                return { SameItem, *reinterpret_cast<const int32_t*>(Cooldown + 6) };
+            }
+        }
+        return { 0, -1 };
+    };
     const std::vector<uintptr_t> CapacityBackpackCalls = CapacityBackpackLimit && !bCapacityLimitsAmbiguous ? Targets(CapacityBackpackLimit) : std::vector<uintptr_t>{};
     uintptr_t CapacityOverflow = 0;
     for (const uintptr_t Call : CapacityBackpackCalls.empty() ? std::vector<uintptr_t>{} : Finder::CallsTo(CapacityBackpackLimit, false))
@@ -8273,6 +8317,10 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
         bCapacityLimitsAmbiguous |= CapacityOverflow && CapacityOverflow != Caller;
         CapacityOverflow = Caller;
     }
+    // 5.0's stack limit tests no call's bool (CanStackWith is inlined into it): when no callee has that shape, the stack
+    // limit is the one callee that shares a callee with the backpack limit, isn't one of the backpack limit's own callees
+    // (5.0's item count, 0xF11930, is both) and has the inlined CanStackWith.
+    std::vector<uintptr_t> InlinedStackLimits;
     for (const uintptr_t Callee : CapacityOverflow && !bCapacityLimitsAmbiguous ? Targets(CapacityOverflow) : std::vector<uintptr_t>{})
     {
         const uintptr_t CalleeEnd = Callee != CapacityBackpackLimit && Callee != CapacityStackLimit && Callee != Capacity && Finder::FunctionStart(Callee) == Callee ? Finder::FunctionEnd(Callee) : 0;
@@ -8288,6 +8336,15 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
             bCapacityLimitsAmbiguous |= CapacityStackLimit != 0;
             CapacityStackLimit = Callee;
         }
+        else if (bSharesCallee && std::find(CapacityBackpackCalls.begin(), CapacityBackpackCalls.end(), Callee) == CapacityBackpackCalls.end()
+            && std::find(InlinedStackLimits.begin(), InlinedStackLimits.end(), Callee) == InlinedStackLimits.end() && FindInlinedCanStackWith(Callee).first)
+        {
+            InlinedStackLimits.push_back(Callee);
+        }
+    }
+    if (!CapacityStackLimit && !bCapacityLimitsAmbiguous && InlinedStackLimits.size() == 1)
+    {
+        CapacityStackLimit = InlinedStackLimits[0];
     }
     if (bCapacityLimitsAmbiguous || !CapacityStackLimit)
     {
@@ -8299,7 +8356,7 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
     const bool bControllerLimits = OverflowReason ? StackLimit != StackLimitCall : StackLimit != 0;
     const uintptr_t StackLimitEnd = IsInText(StackLimit) ? Finder::FunctionEnd(StackLimit) : 0;
     const uintptr_t BackpackLimitEnd = IsInText(BackpackLimit) ? Finder::FunctionEnd(BackpackLimit) : 0;
-    const bool bStackCap = BackpackLimitEnd > BackpackLimit && HasBackpackCap(BackpackLimit, BackpackLimitEnd);
+    const bool bStackCap = BackpackLimitEnd > BackpackLimit && (HasBackpackCap(BackpackLimit, BackpackLimitEnd) || HasBackpackCapInEcx(BackpackLimit, BackpackLimitEnd));
 
     const std::vector<uintptr_t> StackLimitCalls = Targets(StackLimit);
     uintptr_t MaxStackSize = 0;
@@ -8356,6 +8413,7 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
             CanStackWith = Target;
         }
     }
+    const auto [InlinedSameItem, BaseRegenCooldown] = !CanStackWith && StackLimit ? FindInlinedCanStackWith(StackLimit) : std::pair<uintptr_t, ptrdiff_t>{ 0, -1 };
 
     ptrdiff_t InterfaceOffset = -1;
     int32_t NumItemsSlot = -1;
@@ -8489,12 +8547,19 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset)
         Overflow = Wrapper;
     }
 
-    if (!BackpackLimit || !StackLimit || !bStackCap || !MaxStackSize || !CanStackWith || !Overflow || bAmbiguous || MaxItemsSlot < 0)
+    const bool bInlinedCanStackWith = !CanStackWith && InlinedSameItem && BaseRegenCooldown > 0;
+    if (!BackpackLimit || !StackLimit || !bStackCap || !MaxStackSize || (!CanStackWith && !bInlinedCanStackWith) || !Overflow || bAmbiguous || MaxItemsSlot < 0)
     {
-        Log::Error(L"Finder: AFortInventory overflow checks not found (reason {}, capacity {}, stack cap {}, max stack {}, can stack {}, overflow {}, ambiguous {}, slots {}/{})", OverflowReason != 0, Capacity != 0, bStackCap, MaxStackSize != 0, CanStackWith != 0, Overflow != 0, bAmbiguous, NumItemsSlot, MaxItemsSlot);
+        Log::Error(L"Finder: AFortInventory overflow checks not found (reason {}, capacity {}, stack cap {}, max stack {}, can stack {}, overflow {}, ambiguous {}, slots {}/{})", OverflowReason != 0, Capacity != 0, bStackCap, MaxStackSize != 0, CanStackWith != 0 || bInlinedCanStackWith, Overflow != 0, bAmbiguous, NumItemsSlot, MaxItemsSlot);
         return false;
     }
 
+    if (bInlinedCanStackWith)
+    {
+        Natives::FFortItemEntry_IsSameItem = reinterpret_cast<decltype(Natives::FFortItemEntry_IsSameItem)>(InlinedSameItem);
+        Natives::UFortWorldItem_BaseRegenCooldown = BaseRegenCooldown;
+        Log::Info(L"Finder: AFortInventory::CanStackWith is inlined into the stack limit: the item entries' same-item test +0x{:X}, UFortWorldItem::BaseRegenCooldown +0x{:X}", InlinedSameItem - Finder::ImageBase(), BaseRegenCooldown);
+    }
     Natives::AFortInventory_GetOverflowAmount = reinterpret_cast<decltype(Natives::AFortInventory_GetOverflowAmount)>(Overflow);
     Natives::AFortInventory_GetMaxStackSize = reinterpret_cast<decltype(Natives::AFortInventory_GetMaxStackSize)>(MaxStackSize);
     Natives::AFortInventory_InventoryInterfaceOffset = InterfaceOffset;

@@ -244,7 +244,7 @@ int32_t AFortInventory::GetMaxStackSize(const UFortItemDefinition* ItemDefinitio
     {
         return 1;
     }
-    if (!Natives::AFortInventory_GetMaxStackSize && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset()))
+    if (!Natives::AFortInventory_GetMaxStackSize && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset(), UFortWorldItem::ItemEntryOffset()))
     {
         return std::max(static_cast<int32_t>(ItemDefinition->MaxStackSize), 1);
     }
@@ -266,7 +266,7 @@ int32_t AFortInventory::GetOverflowAmount(const FFortItemEntry& ItemEntry, bool 
     {
         return 0;
     }
-    if (!Natives::AFortInventory_GetOverflowAmount && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset()))
+    if (!Natives::AFortInventory_GetOverflowAmount && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset(), UFortWorldItem::ItemEntryOffset()))
     {
         return 0;
     }
@@ -279,7 +279,7 @@ int32_t AFortInventory::GetOverflowAmount(const FFortItemEntry& ItemEntry, bool 
 
 bool AFortInventory::IsBackpackFull()
 {
-    if (Natives::AFortInventory_InventoryInterfaceOffset < 0 && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset()))
+    if (Natives::AFortInventory_InventoryInterfaceOffset < 0 && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset(), UFortWorldItem::ItemEntryOffset()))
     {
         return false;
     }
@@ -291,12 +291,36 @@ bool AFortInventory::IsBackpackFull()
     return NumItems >= reinterpret_cast<FGetItems>(VTable[Natives::IFortInventoryInterface_GetMaxItemsIndex])(Interface);
 }
 
+bool AFortInventory::CanStackWith(UFortWorldItem* Item, const FFortItemEntry& ItemEntry, float MaxDurability)
+{
+    if (Natives::AFortInventory_CanStackWith)
+    {
+        // 1.8: CanStackWith(UFortWorldItem*, const FFortItemEntry&, float MaxDurability), no inventory argument.
+        return Natives::AFortInventory_bControllerLimits
+            ? reinterpret_cast<bool (*)(UFortWorldItem*, const FFortItemEntry&, float)>(Natives::AFortInventory_CanStackWith)(Item, ItemEntry, MaxDurability)
+            : Natives::AFortInventory_CanStackWith(this, Item, ItemEntry, MaxDurability);
+    }
+    if (!Natives::FFortItemEntry_IsSameItem || Natives::UFortWorldItem_BaseRegenCooldown < 0)
+    {
+        return false;
+    }
+
+    // 4.5's CanStackWith (0xD7A520), which 5.0 inlines into its stack limit (CL-4204761 0xF142B0): the same item as the
+    // stack's, a stack that isn't regenerating, and for an item with durability, a stack at the full durability.
+    const FFortItemEntry& StackEntry = static_cast<FFortItemEntry&>(Item->ItemEntry);
+    const bool bSameItem = Natives::FFortItemEntry_IsSameItem(ItemEntry, StackEntry);
+    const float BaseRegenCooldown = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(Item) + Natives::UFortWorldItem_BaseRegenCooldown);
+    const UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
+    const bool bHasDurability = ItemDefinition && ItemDefinition->ItemHasDurability();
+    return bSameItem && !(BaseRegenCooldown > 0.0f) && (!bHasDurability || MaxDurability == StackEntry.Durability);
+}
+
 int32_t AFortInventory::AddItemStacks(const FFortItemEntry& ItemEntry, int32_t Count, int32_t MaxNewItems, bool bBackpack, bool bKeepOverflow,
     const std::function<void(UFortWorldItem* Item, int32_t Added)>& TopUp, const std::function<UFortWorldItem*(int32_t StackCount, bool bOverflow)>& NewStack)
 {
 #if WITH_SERVER_CODE
     UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
-    if (!ItemDefinition || Count <= 0 || (!Natives::AFortInventory_CanStackWith && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset())))
+    if (!ItemDefinition || Count <= 0 || (!Natives::AFortInventory_CanStackWith && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset(), UFortWorldItem::ItemEntryOffset())))
     {
         return 0;
     }
@@ -307,10 +331,7 @@ int32_t AFortInventory::AddItemStacks(const FFortItemEntry& ItemEntry, int32_t C
     bool bHasStack = false;
     const auto CanStack = [&](UFortWorldItem* Existing)
     {
-        // 1.8: CanStackWith(UFortWorldItem*, const FFortItemEntry&, float MaxDurability), no inventory argument.
-        return Natives::AFortInventory_bControllerLimits
-            ? reinterpret_cast<bool (*)(UFortWorldItem*, const FFortItemEntry&, float)>(Natives::AFortInventory_CanStackWith)(Existing, ItemEntry, MaxDurability)
-            : Natives::AFortInventory_CanStackWith(this, Existing, ItemEntry, MaxDurability);
+        return CanStackWith(Existing, ItemEntry, MaxDurability);
     };
 
     FFortItemList& ItemList = Inventory;

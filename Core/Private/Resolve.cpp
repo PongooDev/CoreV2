@@ -6174,10 +6174,16 @@ bool Finder::ResolveMissionGenerationLive()
         }
     }
 
+    // The world manager's random stream is the third argument: lea r8, [reg+disp32] up to 4.5 (+0x938). From 5.0 the
+    // world manager is loaded into r8 and the offset added in place, add r8, 940h (5.10 0xF88C20, 5.21 0xFAC2D0).
     ptrdiff_t StreamOffset = -1;
     for (uintptr_t Site = GenerateCall ? GenerateCall - 0x30 : 0; Site && Site + 7 <= GenerateCall; ++Site)
     {
         if ((Byte(Site) == 0x4C || Byte(Site) == 0x4D) && Byte(Site + 1) == 0x8D && (Byte(Site + 2) & 0xF8) == 0x80 && (Byte(Site + 2) & 0x07) != 0x04)
+        {
+            StreamOffset = *reinterpret_cast<const int32_t*>(Site + 3);
+        }
+        else if (Byte(Site) == 0x49 && Byte(Site + 1) == 0x81 && Byte(Site + 2) == 0xC0)
         {
             StreamOffset = *reinterpret_cast<const int32_t*>(Site + 3);
         }

@@ -105,9 +105,10 @@ void AFortGameMode::SetBadgeScores()
     }
 }
 
-void AFortGameMode::SendEarnScore()
+void AFortGameMode::SendEarnScore(TArray<FAccountIdAndScore>* OutPlayersAndScores)
 {
-    if (Natives::AFortGameMode_SendEarnScoreIndex < 0)
+    const bool bScoresForEndMatch = Natives::AFortGameMode_GetPlayersAndScores && Natives::AFortGameMode_GrantScoreRewardIndex >= 0;
+    if (Natives::AFortGameMode_SendEarnScoreIndex < 0 && !bScoresForEndMatch)
     {
         return;
     }
@@ -135,6 +136,25 @@ void AFortGameMode::SendEarnScore()
         }
     }
 #endif
+
+    if (bScoresForEndMatch)
+    {
+        // 5.21's SendEarnScore(bIsFinal) (slot 0x140, 0xE07650) has the scores built (0xDF6220) and granted (slot 0x13A,
+        // the ExperienceDelta placeholders the earnScore notifications fill), and sends nothing: each player's score
+        // goes in their EndMatch entry (AFortMissionManager::OnZoneEnd).
+        TArray<FAccountIdAndScore> PlayersAndScores;
+        Natives::AFortGameMode_GetPlayersAndScores(this, reinterpret_cast<FScriptArray*>(&PlayersAndScores));
+        CallVirtual<void>(this, Natives::AFortGameMode_GrantScoreRewardIndex, static_cast<const TArray<FAccountIdAndScore>*>(&PlayersAndScores), true);
+        for (const FAccountIdAndScore& Entry : PlayersAndScores)
+        {
+            Log::Info(L"SendEarnScore: {} total score {}, critical match bonus {} (for EndMatch)", Entry.AccountId.ToStdString(), Entry.TotalScore, Entry.bCriticalMatchBonus);
+        }
+        if (OutPlayersAndScores)
+        {
+            *OutPlayersAndScores = std::move(PlayersAndScores);
+        }
+        return;
+    }
 
     PendingPlayersAndScores = nullptr;
     // bIsFinal: 1.7.2's SendEarnScore(bool) only builds the EarnScore context when it is set; 1.1 and 1.2 ignore it.
@@ -194,6 +214,16 @@ void AFortGameMode::Hook()
 void AFortGameMode::HookCallSites()
 {
     Finder::FEarnScoreCallSites Sites;
+    if (UFortMcpProfileCampaign::HasEndMatch())
+    {
+        // 5.21: SendEarnScore's scores are built by a callee, whose gate and badges score are the same stripped stubs.
+        if (Finder::ResolveMatchEndScoresLive(Sites))
+        {
+            Hooks::RedirectCall(L"AFortGameMode::SendEarnScore scores -> ShouldPlayerEarnScore", Sites.GateCall, reinterpret_cast<void*>(&ShouldPlayerEarnScore));
+            Hooks::RedirectCall(L"AFortGameMode::SendEarnScore scores -> GetPlayerBadgesScore", Sites.ScoreCall, reinterpret_cast<void*>(&GetPlayerBadgesScore));
+        }
+        return;
+    }
     if (!Finder::ResolveEarnScoreLive(AFortPlayerController::CriticalMatchBonusOffset(), Sites))
     {
         return;

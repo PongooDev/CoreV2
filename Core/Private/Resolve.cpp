@@ -6188,7 +6188,12 @@ bool Finder::ResolveMissionGenerationLive()
 
 bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset)
 {
-    if (Natives::AFortMissionManager_OnZoneEndIndex >= 0 && Natives::AFortMissionManager_OnMissionStatusChangeIndex >= 0 && Natives::AFortGameModeZone_OnZoneEndIndex >= 0 && Natives::AFortGameStateZone_SetGameplayStateIndex >= 0 && Natives::UFortQuestManager_SendStatEvent && Natives::UGameInstance_GetGameSessionId && Natives::UEnum_GetEnumName)
+    // 5.21 ends a mission with UFortMcpProfileCampaign::EndMatch, for every player at once, and RemoveParticipantAccount
+    // (0xF8DA40) no longer sends EndPrimaryMission or names the mission's status: it waits for the leaving player's
+    // save and then takes them out of the participants (0xF79E00). Core sends EndMatch at zone end and names the status
+    // through reflection (EFortMissionStatus), so neither is looked for there.
+    const bool bHasEndMatch = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortMcpProfileCampaign:EndMatch") != nullptr;
+    if (Natives::AFortMissionManager_OnZoneEndIndex >= 0 && Natives::AFortMissionManager_OnMissionStatusChangeIndex >= 0 && Natives::AFortGameModeZone_OnZoneEndIndex >= 0 && Natives::AFortGameStateZone_SetGameplayStateIndex >= 0 && Natives::UFortQuestManager_SendStatEvent && Natives::UGameInstance_GetGameSessionId && (Natives::UEnum_GetEnumName || bHasEndMatch))
     {
         return true;
     }
@@ -6420,10 +6425,10 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
         GameStateIndex = FirstEntryContaining(CdoVTable(L"/Script/FortniteGame.FortGameState"), { OnRepCall }, Contains, AnyEntry);
     }
 
-    if (!SendStatEvent || (!SendEndPrimaryMission && !bEndMissionStripped) || !GameSessionId || !GetEnumName || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
+    if (!SendStatEvent || (!SendEndPrimaryMission && !bEndMissionStripped && !bHasEndMatch) || !GameSessionId || (!GetEnumName && !bHasEndMatch) || MissionManagerIndex < 0 || StatusChangeIndex < 0 || GameModeIndex < 0 || GameStateIndex < 0)
     {
-        Log::Error(L"Finder: zone end not found (stat {}, end mission {} (stripped {}, RemoveParticipantAccount 0x{:X}, {} calls), session {}, enum {}, mission manager {}, status change {}, game mode {}, game state {})", SendStatEvent != 0, SendEndPrimaryMission != 0,
-            bEndMissionStripped, RemoveParticipant ? RemoveParticipant - Finder::ImageBase() : 0, RemoveParticipantAllCalls.size(), GameSessionId != 0, GetEnumName != 0, MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
+        Log::Error(L"Finder: zone end not found (stat {}, end mission {} (stripped {}, EndMatch {}, RemoveParticipantAccount 0x{:X}, {} calls), session {}, enum {}, mission manager {}, status change {}, game mode {}, game state {})", SendStatEvent != 0, SendEndPrimaryMission != 0,
+            bEndMissionStripped, bHasEndMatch, RemoveParticipant ? RemoveParticipant - Finder::ImageBase() : 0, RemoveParticipantAllCalls.size(), GameSessionId != 0, GetEnumName != 0, MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
         return false;
     }
 
@@ -6436,7 +6441,11 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     Natives::AFortGameModeZone_OnZoneEndIndex = GameModeIndex;
     Natives::AFortGameStateZone_SetGameplayStateIndex = GameStateIndex;
     Log::Info(L"Finder: zone end resolved: AFortMissionManager::OnZoneEnd slot 0x{:X}, OnMissionStatusChange slot 0x{:X}, AFortGameModeZone::OnZoneEnd slot 0x{:X}, AFortGameStateZone::SetGameplayState slot 0x{:X}", MissionManagerIndex, StatusChangeIndex, GameModeIndex, GameStateIndex);
-    if (bEndMissionStripped)
+    if (bHasEndMatch && !SendEndPrimaryMission)
+    {
+        Log::Info(L"Finder: the build ends missions with UFortMcpProfileCampaign::EndMatch, Core sends EndMatch itself at zone end");
+    }
+    else if (bEndMissionStripped)
     {
         Log::Info(L"Finder: UFortQuestManager::SendEndPrimaryMission is stripped, Core sends EndPrimaryMission itself");
     }
@@ -8260,6 +8269,78 @@ bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, FEarnScore
     Natives::TArray_FAccountIdAndScore_ResizeGrow = reinterpret_cast<decltype(Natives::TArray_FAccountIdAndScore_ResizeGrow)>(GrowTarget);
     Natives::AFortPlayerState_GetStatIndex = GetStatIndex;
     Log::Info(L"Finder: AFortGameMode EarnScore sender is slot 0x{:X}, AFortPlayerState::GetStat slot 0x{:X}", Index, GetStatIndex);
+    return true;
+}
+
+bool Finder::ResolveMatchEndScoresLive(FEarnScoreCallSites& OutSites)
+{
+    const auto IsStub = [](uintptr_t Target, uint8_t Opcode)
+    {
+        return Finder::BodyIs(Target, { Opcode, 0xC0, 0xC3 });
+    };
+
+    // 5.21's AFortGameMode::SendEarnScore (slot 0x140, 0xE07650) has the scores built by a callee (0xDF6220): the one
+    // that reads the total score stat (lea edx, [r8+1Bh], GetStat 27) and calls one 32 C0 C3 stub (the earn gate) and
+    // one 33 C0 C3 stub (the badges score), as 1.1's SendEarnScore did itself. The virtual call after it is the grant
+    // (call [rax+9D0h], slot 0x13A), which gets the scores and bIsFinal.
+    void** GameModeVTable = CdoVTable(L"/Script/FortniteGame.FortGameMode");
+    uintptr_t Scores = 0;
+    uintptr_t ScoresEnd = 0;
+    int32_t GrantIndex = -1;
+    const int32_t Index = FirstVTableIndexWhere(GameModeVTable, [&](uintptr_t Entry)
+    {
+        const uintptr_t EntryEnd = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        if (EntryEnd <= Entry || EntryEnd - Entry > 0x400)
+        {
+            return false;
+        }
+        for (const auto& [Call, Target] : Finder::DirectCalls(Entry, EntryEnd))
+        {
+            const uintptr_t TargetEnd = IsInText(Target) && Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            if (TargetEnd <= Target || TargetEnd - Target > 0x2000 || !FindInstruction(Target, TargetEnd, { 0x41, 0x8D, 0x50, 0x1B }))
+            {
+                continue;
+            }
+            int32_t Gates = 0;
+            int32_t BadgeScores = 0;
+            for (const auto& [InnerCall, InnerTarget] : Finder::DirectCalls(Target, TargetEnd))
+            {
+                Gates += IsStub(InnerTarget, 0x32) ? 1 : 0;
+                BadgeScores += IsStub(InnerTarget, 0x33) ? 1 : 0;
+            }
+            const int32_t Grant = VirtualSlot(FindVirtualCall(Call + 5, EntryEnd));
+            if (Gates == 1 && BadgeScores == 1 && Grant >= 0)
+            {
+                Scores = Target;
+                ScoresEnd = TargetEnd;
+                GrantIndex = Grant;
+                return true;
+            }
+        }
+        return false;
+    });
+
+    uintptr_t GateCall = 0;
+    uintptr_t ScoreCall = 0;
+    for (const auto& [Call, Target] : Scores ? Finder::DirectCalls(Scores, ScoresEnd) : decltype(Finder::DirectCalls(0, 0)){})
+    {
+        GateCall = IsStub(Target, 0x32) ? Call : GateCall;
+        ScoreCall = IsStub(Target, 0x33) ? Call : ScoreCall;
+    }
+    const uintptr_t TotalScoreLoad = Scores ? FindInstruction(Scores, ScoresEnd, { 0x41, 0x8D, 0x50, 0x1B }) : 0;
+    const int32_t GetStatIndex = TotalScoreLoad ? VirtualSlot(FindVirtualCall(TotalScoreLoad + 4, TotalScoreLoad + 0x10)) : -1;
+    if (Index < 0 || !GateCall || !ScoreCall || GetStatIndex < 0)
+    {
+        Log::Error(L"Finder: AFortGameMode match end scores not decoded (SendEarnScore slot {}, scores 0x{:X}, grant slot {}, gate {}, score {}, GetStat slot {})", Index, Scores ? Scores - Finder::ImageBase() : 0, GrantIndex, GateCall != 0, ScoreCall != 0, GetStatIndex);
+        return false;
+    }
+
+    OutSites.GateCall = reinterpret_cast<uint8_t*>(GateCall);
+    OutSites.ScoreCall = reinterpret_cast<uint8_t*>(ScoreCall);
+    Natives::AFortGameMode_GetPlayersAndScores = reinterpret_cast<decltype(Natives::AFortGameMode_GetPlayersAndScores)>(Scores);
+    Natives::AFortGameMode_GrantScoreRewardIndex = GrantIndex;
+    Natives::AFortPlayerState_GetStatIndex = GetStatIndex;
+    Log::Info(L"Finder: AFortGameMode::SendEarnScore is slot 0x{:X}: scores 0x{:X}, grant slot 0x{:X}, AFortPlayerState::GetStat slot 0x{:X}", Index, Scores - Finder::ImageBase(), GrantIndex, GetStatIndex);
     return true;
 }
 

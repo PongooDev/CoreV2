@@ -187,6 +187,8 @@ namespace Finder
     bool ResolveOutpostOwnerLive();
     bool ResolveBadgeScoresLive();
     bool ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, FEarnScoreCallSites& OutSites);
+    // 5.21 (EndMatch): AFortGameMode::SendEarnScore's score builder and grant; OutSites gets the gate and score calls.
+    bool ResolveMatchEndScoresLive(FEarnScoreCallSites& OutSites);
     bool ResolveLeaveOutpostLive();
     bool ResolveOutpostMcpRequestLive();
     bool ResolveResetGameplayAttributesLive();

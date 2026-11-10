@@ -486,6 +486,11 @@ namespace Natives
     inline FString* (*UEnum_GetEnumName)(const UObject* This, FString* Result, int32_t Index) = nullptr;
     inline void (*AFortGameMode_SetBadgeScores)(AFortGameMode* This) = nullptr;
     inline int32_t AFortGameMode_SendEarnScoreIndex = -1;
+    // 5.21's SendEarnScore (slot 0x140, 0xE07650) is these two steps: the players' scores (0xDF6220, an out
+    // TArray<FAccountIdAndScore>) and the score grant (slot 0x13A, 0xE0E460: PlayersAndScores, bIsFinal). Its EarnScore
+    // send is gone, as EndMatch carries each player's score.
+    inline void (*AFortGameMode_GetPlayersAndScores)(AFortGameMode* This, FScriptArray* OutPlayersAndScores) = nullptr;
+    inline int32_t AFortGameMode_GrantScoreRewardIndex = -1;
     inline void* (*AFortGameMode_MakeEarnScoreContext)(void* Result, void* Players) = nullptr;
     inline void (*TArray_FAccountIdAndScore_ResizeGrow)(FScriptArray* Array, int32_t OldNum) = nullptr;
     inline int32_t AFortPlayerState_GetStatIndex = -1;

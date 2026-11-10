@@ -59,7 +59,9 @@ public:
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
     void SetBadgeScores();
-    void SendEarnScore();
+    // Scores the players and grants it. Before 5.21 the game sends it as EarnScore; 5.21 (EndMatch) has no such send,
+    // so the scores go in OutPlayersAndScores for EndMatch to carry.
+    void SendEarnScore(TArray<FAccountIdAndScore>* OutPlayersAndScores = nullptr);
     UFortSharedMissionLists* GetSharedMissionLists();
     // The location tags of where Actor is (Battle Royale's POI volumes: Athena.Location.POI.FlushFactory...), added to
     // OutTags, as the stat senders add them to their events. Nothing on builds before 3.0 or outside Battle Royale.

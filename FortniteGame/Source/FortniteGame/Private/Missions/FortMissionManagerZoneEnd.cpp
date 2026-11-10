@@ -16,6 +16,7 @@
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionLibrary.h"
 #include "Natives.h"
+#include "Online/FortMcpProfileCampaign.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
@@ -42,6 +43,12 @@ namespace
         if (StatusEnum && Natives::UEnum_GetEnumName)
         {
             Natives::UEnum_GetEnumName(StatusEnum, &Name, static_cast<int32_t>(Status));
+        }
+        else if (StatusEnum)
+        {
+            // 5.21 (EndMatch) has no native left that names it (Finder::ResolveZoneEndLive): the enumerator's name
+            // without its EFortMissionStatus:: scope, as UEnum::GetNameStringByValue gives it.
+            Name = FString(Status.ToString().c_str());
         }
         return Name;
     }
@@ -77,7 +84,8 @@ namespace
 void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
 {
 #if WITH_SERVER_CODE
-    if (Role != ROLE_Authority || !Natives::UGameInstance_GetGameSessionId || !Natives::UEnum_GetEnumName)
+    const bool bEndMatch = UFortMcpProfileCampaign::HasEndMatch();
+    if (Role != ROLE_Authority || !Natives::UGameInstance_GetGameSessionId || (!Natives::UEnum_GetEnumName && !bEndMatch))
     {
         return;
     }
@@ -94,6 +102,8 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
     struct FPendingEndPrimaryMission
     {
         UFortQuestManager* QuestManager;
+        // The player's account id, which 5.21's EndMatch entry names them by.
+        FString AccountId;
         FString MissionName;
         FString StatusName;
         TStructArray<FFortQuestEarnedBadgeData> EarnedBadges;
@@ -162,7 +172,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                     Log::Info(L"OnZoneEnd: {} badges {}; missed {}; mission points {}", PlayerController->GetName().ToStdString(), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.RewardItems)), DescribeBadges(static_cast<TStructArray<FFortItemEntry>&>(Activity.MissedRewardItems)), MissionPoints);
                 }
             }
-            FPendingEndPrimaryMission& Pending = PendingEndPrimaryMissions.emplace_back(FPendingEndPrimaryMission{ QuestManager, MissionName, StatusName, {}, {}, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus });
+            FPendingEndPrimaryMission& Pending = PendingEndPrimaryMissions.emplace_back(FPendingEndPrimaryMission{ QuestManager, PlayerState && PlayerState->UniqueId.IsValid() ? PlayerState->UniqueId.ToString() : FString(), MissionName, StatusName, {}, {}, MissionPoints, PlayerController->bShouldReceiveCriticalMatchBonus });
             CollectEarnedBadgeData(PlayerController, Pending.EarnedBadges);
             if (WorldManager)
             {
@@ -188,14 +198,39 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
     // addresses them to the profile group's account, and the handler is bound per player), so every other player's XP
     // notification comes in the response to their own EndPrimaryMission below (Core-Backend holds it from EarnScore and
     // waits for EarnScore if an EndPrimaryMission gets there first).
+    // 5.21 has neither: EndMatch carries each player's EndPrimaryMission data and score (FAccountIdAndMatchEndData), so
+    // the scores are taken first and go in the players' entries.
+    TArray<FAccountIdAndScore> PlayersAndScores;
     if (AFortGameMode* FortGameMode = World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr)
     {
         FortGameMode->SetBadgeScores();
-        FortGameMode->SendEarnScore();
+        FortGameMode->SendEarnScore(bEndMatch ? &PlayersAndScores : nullptr);
     }
     for (FPendingEndPrimaryMission& Pending : PendingEndPrimaryMissions)
     {
-        Pending.QuestManager->SendEndPrimaryMission(SessionId, Pending.MissionName, Pending.StatusName, Pending.EarnedBadges, Pending.EarnedItemCaches, DifficultyIncreaseTier, Pending.MissionPoints, Pending.bCriticalMatchBonus);
+        if (bEndMatch)
+        {
+            FAccountIdAndScore* Score = nullptr;
+            for (FAccountIdAndScore& Entry : PlayersAndScores)
+            {
+                Score = !Score && !Pending.AccountId.IsEmpty() && _wcsicmp(*Entry.AccountId, *Pending.AccountId) == 0 ? &Entry : Score;
+            }
+            if (!Score)
+            {
+                Log::Error(L"OnZoneEnd: {} was not scored, so their EndMatch has no score", Pending.AccountId.ToStdString());
+            }
+            Pending.QuestManager->SendEndMatch(SessionId, Pending.MissionName, Pending.StatusName, Pending.AccountId, Pending.EarnedBadges, Pending.EarnedItemCaches, DifficultyIncreaseTier, Pending.MissionPoints, Score ? Score->TotalScore : 0,
+                Score ? Score->bCriticalMatchBonus : Pending.bCriticalMatchBonus);
+            // The score is the zone's, given once however many primary missions the player was in.
+            if (Score)
+            {
+                Score->TotalScore = 0;
+            }
+        }
+        else
+        {
+            Pending.QuestManager->SendEndPrimaryMission(SessionId, Pending.MissionName, Pending.StatusName, Pending.EarnedBadges, Pending.EarnedItemCaches, DifficultyIncreaseTier, Pending.MissionPoints, Pending.bCriticalMatchBonus);
+        }
         for (int32_t Index = 0; Index < Pending.EarnedBadges.Num(); ++Index)
         {
             FFortQuestEarnedBadgeData::StaticStruct()->DestroyStruct(&Pending.EarnedBadges[Index]);

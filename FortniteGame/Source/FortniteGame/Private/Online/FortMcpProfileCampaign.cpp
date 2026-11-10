@@ -61,6 +61,29 @@ bool UFortMcpProfileCampaign::EndPrimaryMission(FScriptArray& Advance, const FSt
     return Params.Call(this);
 }
 
+bool UFortMcpProfileCampaign::EndMatch(TStructArray<FAccountIdAndMatchEndData>& PlayersAndMatchEndData, const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, int32_t DifficultyIncreaseTier)
+{
+    Reflection::FParams Params(FindStaticFunction_EndMatch(), true);
+    FScriptArray* PlayersParameter = Params.Get<FScriptArray>(L"PlayersAndMatchEndData");
+    FDedicatedServerUrlContext* Context = static_cast<FDedicatedServerUrlContext*>(Params.GetAddress(L"Context"));
+    if (!PlayersParameter || !Context)
+    {
+        return false;
+    }
+
+    // The parameters are destroyed with the command, so the players' entries move in.
+    std::swap(*PlayersParameter, static_cast<FScriptArray&>(PlayersAndMatchEndData));
+    Params.Set(L"MatchmakingSessionId", MatchmakingSessionId);
+    Params.Set(L"MissionName", MissionName);
+    Params.Set(L"MissionStatus", MissionStatus);
+    Params.Set(L"DifficultyIncreaseTier", DifficultyIncreaseTier);
+    if (Finder::ResolveOutpostMcpRequestLive())
+    {
+        Context->Bind(nullptr, nullptr);
+    }
+    return Params.Call(this);
+}
+
 // LoadoutName is taken by value: the game frees its buffer when it returns (1.9.1 0x742410, 1.10 0x7469F0, 1.11
 // 0x775150), so it gets its own copy. Passed by reference, Core freed the same 16-byte "Default" block again, and the
 // allocator handed it out twice; the next 16-byte allocation crashed on the text written over its free-list link (#175).

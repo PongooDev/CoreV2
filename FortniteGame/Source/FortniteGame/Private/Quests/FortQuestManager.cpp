@@ -1194,6 +1194,54 @@ void UFortQuestManager::SendEndPrimaryMission(const FString& MatchmakingSessionI
 #endif
 }
 
+void UFortQuestManager::SendEndMatch(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, const FString& AccountId, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, const TArray<FString>& EarnedItemCaches, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, int32_t TotalScore, bool bCriticalMatchBonus)
+{
+#if WITH_SERVER_CODE
+    // EndMatch's PlayersAndMatchEndData can carry every player, but a response's notifications reach only the player
+    // whose profile sent the command (5.21's parser, 0x8D8E00, reads only a notification's type and primary, as 1.x's
+    // 0x3903DB0 did), and each player's earnScore notification is what finalizes their results screen's XP. So each
+    // player's entry goes through their own account profile, as their EndPrimaryMission did.
+    UFortMcpProfileCampaign* Account = Cast<UFortMcpProfileCampaign>(static_cast<FWeakObjectPtr&>(BoundProfile).Get());
+    UScriptStruct* const BadgeStruct = FFortQuestEarnedBadgeData::StaticStruct();
+    if (!Account || !FAccountIdAndMatchEndData::StaticStruct() || !BadgeStruct)
+    {
+        Log::Error(L"EndMatch: {} has no campaign profile to send it to", GetName().ToStdString());
+        return;
+    }
+
+    TStructArray<FAccountIdAndMatchEndData> PlayersAndMatchEndData;
+    FAccountIdAndMatchEndData& Entry = PlayersAndMatchEndData.AddDefaulted();
+    Entry.AccountId = AccountId;
+    // The objective progress not yet saved moves in, as EndPrimaryMission's Advance did.
+    FScriptArray& Pending = PendingChanges;
+    std::swap(Entry.GetMember_Advance(), Pending);
+    TStructArray<FFortQuestEarnedBadgeData>& Badges = static_cast<TStructArray<FFortQuestEarnedBadgeData>&>(Entry.GetMember_EarnedBadgeData());
+    for (int32_t Index = 0; Index < EarnedBadges.Num(); ++Index)
+    {
+        BadgeStruct->CopyScriptStruct(&Badges.AddDefaulted(), &EarnedBadges[Index]);
+    }
+    TArray<FString>& ItemCaches = Entry.GetMember_EarnedItemCaches();
+    for (const FString& ItemCache : EarnedItemCaches)
+    {
+        ItemCaches.Add(ItemCache);
+    }
+    Entry.TotalScore = TotalScore;
+    Entry.bCriticalMatchBonus = bCriticalMatchBonus;
+    Entry.NumMissionPoints = NumMissionPoints;
+    if (Account->EndMatch(PlayersAndMatchEndData, MatchmakingSessionId, MissionName, MissionStatus, DifficultyIncreaseTier))
+    {
+        Log::Info(L"EndMatch: {} {} for {}: total score {}, critical match bonus {}, {} mission points, {} badge type(s), {} item cache(s), difficulty increase tier {}", MissionName.ToStdString(), MissionStatus.ToStdString(),
+            AccountId.ToStdString(), TotalScore, bCriticalMatchBonus, NumMissionPoints, EarnedBadges.Num(), EarnedItemCaches.Num(), DifficultyIncreaseTier);
+    }
+    else
+    {
+        Log::Error(L"EndMatch: {} has no EndMatch command, {} gets no mission rewards", Account->GetClass()->GetName().ToStdString(), AccountId.ToStdString());
+    }
+    // Empty once EndMatch took the entry; otherwise its strings and arrays are freed here.
+    PlayersAndMatchEndData.Empty();
+#endif
+}
+
 void UFortQuestManager::Hook()
 {
 #if WITH_SERVER_CODE

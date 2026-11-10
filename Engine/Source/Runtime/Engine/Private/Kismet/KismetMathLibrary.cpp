@@ -8,6 +8,12 @@ FVector UKismetMathLibrary::RandomUnitVector()
     return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<FVector>(L"ReturnValue") : FVector();
 }
 
+FDateTime UKismetMathLibrary::UtcNow()
+{
+    Reflection::FParams Params(StaticFunction_UtcNow());
+    return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<FDateTime>(L"ReturnValue") : FDateTime();
+}
+
 FVector UKismetMathLibrary::RandomUnitVectorInCone(const FVector& ConeDir, float ConeHalfAngle)
 {
     UFunction* const InCone = FindStaticFunction_RandomUnitVectorInCone();

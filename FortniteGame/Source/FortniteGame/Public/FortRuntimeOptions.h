@@ -16,6 +16,11 @@ public:
     // 4.0: whether an enemy's account item drop (a Mini-Boss's item cache) drops. Nothing in the client exe reads it: the
     // server code that did is stripped.
     DefineUProperty(bool, bEnableSTWEnemyItemCacheDrops)
+    // 5.0+: Mission Control. The missions read it on the server (Retrieve the Data's Mission_DeadDrop for UseNewReadyUp):
+    // the ready-up console and its votes instead of the Difficulty Pylon. Off on 5.0's server (CL-4204761), on from 5.10
+    // (5.10's constructor, 0x12DF540, sets +0x3F4).
+    DefineUProperty(bool, bEnableMissionActivationVote)
+    static bool HasMissionActivationVote() { return Member_bEnableMissionActivationVote.IsAvailable(); }
     static bool HasSTWLootDrops() { return Member_bEnableSTWLootDrops.IsAvailable(); }
     static bool HasSTWEnemyItemCacheDrops() { return Member_bEnableSTWEnemyItemCacheDrops.IsAvailable(); }
 

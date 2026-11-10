@@ -1,8 +1,11 @@
 #include "pch.h"
 #include "Player/FortPlayerControllerZone.h"
+#include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameState.h"
+#include "FortRuntimeOptions.h"
+#include "GameFramework/PlayerState.h"
 #include "Hooks.h"
 #include "Log.h"
 #include "Missions/FortMissionLibrary.h"
@@ -75,9 +78,114 @@ void AFortPlayerControllerZone::ServerAcknowledgePossession_Implementation(APawn
     ServerAcknowledgePossession_ImplementationSuper(this, P);
 }
 
+AFortGameStateZone* AFortPlayerControllerZone::GetVoteGameState(const FUniqueNetIdRepl*& OutPlayerNetId) const
+{
+    UWorld* World = GetWorld();
+    AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    APlayerState* const Player = PlayerState;
+    OutPlayerNetId = Player ? &Player->GetMember_UniqueId() : nullptr;
+    return OutPlayerNetId ? GameState : nullptr;
+}
+
+void AFortPlayerControllerZone::ServerBeginGameplayVote_Implementation(EFortVoteType VoteType, float VoteDuration, float FailedVoteLockOutDuration, EFortVoteArbitratorType VoteArbitratorType)
+{
+    const FUniqueNetIdRepl* PlayerNetId = nullptr;
+    if (AFortGameStateZone* GameState = GetVoteGameState(PlayerNetId))
+    {
+        GameState->ServerBeginGameplayVote(VoteType, *PlayerNetId, VoteDuration, FailedVoteLockOutDuration, VoteArbitratorType);
+    }
+}
+
+void AFortPlayerControllerZone::ServerSubmitGameplayVote_Implementation(EFortVoteType VoteType, int32_t VoteDecision)
+{
+    const FUniqueNetIdRepl* PlayerNetId = nullptr;
+    if (AFortGameStateZone* GameState = GetVoteGameState(PlayerNetId))
+    {
+        GameState->ServerSubmitGameplayVote(VoteType, VoteDecision, *PlayerNetId);
+    }
+}
+
+void AFortPlayerControllerZone::ServerEndGameplayVote_Implementation(EFortVoteType VoteType)
+{
+    const FUniqueNetIdRepl* PlayerNetId = nullptr;
+    if (AFortGameStateZone* GameState = GetVoteGameState(PlayerNetId))
+    {
+        GameState->ServerEndGameplayVote(VoteType, *PlayerNetId);
+    }
+}
+
+void AFortPlayerControllerZone::ServerBeginGameplayVote_ImplementationHK(AFortPlayerControllerZone* This, uint8_t VoteType, float VoteDuration, float FailedVoteLockOutDuration, uint8_t VoteArbitratorType)
+{
+    This->ServerBeginGameplayVote_Implementation(EFortVoteType{ VoteType }, VoteDuration, FailedVoteLockOutDuration, EFortVoteArbitratorType{ VoteArbitratorType });
+}
+
+void AFortPlayerControllerZone::ServerSubmitGameplayVote_ImplementationHK(AFortPlayerControllerZone* This, uint8_t VoteType, int32_t VoteDecision)
+{
+    This->ServerSubmitGameplayVote_Implementation(EFortVoteType{ VoteType }, VoteDecision);
+}
+
+void AFortPlayerControllerZone::ServerEndGameplayVote_ImplementationHK(AFortPlayerControllerZone* This, uint8_t VoteType)
+{
+    This->ServerEndGameplayVote_Implementation(EFortVoteType{ VoteType });
+}
+
+void AFortPlayerControllerZone::HookGameplayVoteVTables()
+{
+#if WITH_SERVER_CODE
+    // 5.10 CL-4240749: the RPCs' execs (0x1452710, 0x1453040, 0x1452940) call the _Implementations in slots 0x37B, 0x379
+    // and 0x377 (0x11AF870, 0x11B0430, 0x11AFB90), which find the game state and the player's UniqueId and call the game
+    // state's stripped functions. 5.0 (CL-4204761) has the same code (OnRep_GameplayVotes 0xE03A50, the same FVoteData)
+    // but its UFortRuntimeOptions::bEnableMissionActivationVote is off, so no mission uses it; builds before 5.0 have
+    // no votes.
+    if (!FindStaticFunction_ServerBeginGameplayVote() || !AFortGameStateZone::AreGameplayVotesStripped())
+    {
+        return;
+    }
+    struct FVoteRestore
+    {
+        UFunction* Function;
+        const wchar_t* Name;
+        void* Implementation;
+    };
+    const FVoteRestore Restores[] = {
+        { StaticFunction_ServerBeginGameplayVote(), L"AFortPlayerControllerZone::ServerBeginGameplayVote_Implementation", reinterpret_cast<void*>(&ServerBeginGameplayVote_ImplementationHK) },
+        { StaticFunction_ServerSubmitGameplayVote(), L"AFortPlayerControllerZone::ServerSubmitGameplayVote_Implementation", reinterpret_cast<void*>(&ServerSubmitGameplayVote_ImplementationHK) },
+        { StaticFunction_ServerEndGameplayVote(), L"AFortPlayerControllerZone::ServerEndGameplayVote_Implementation", reinterpret_cast<void*>(&ServerEndGameplayVote_ImplementationHK) },
+    };
+    UObject* const ZoneDefault = StaticClass()->GetDefaultObject(false);
+    void** const ZoneVTable = ZoneDefault ? *reinterpret_cast<void***>(ZoneDefault) : nullptr;
+    for (const FVoteRestore& Restore : Restores)
+    {
+        const int32_t Index = Restore.Function ? Finder::ImplementationIndex(Restore.Function) : -1;
+        void* const Original = ZoneVTable && Index >= 0 ? ZoneVTable[Index] : nullptr;
+        if (!Original)
+        {
+            Log::Error(L"Finder: {} slot not found", Restore.Name);
+            return;
+        }
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[Index] == Original)
+            {
+                Hooks::SwapVTable(Restore.Name, VTable, Index, Restore.Implementation);
+            }
+        }
+    }
+    UNetDriver::AddPreReplicationCallback(&AFortGameStateZone::TickGameplayVotes);
+
+    const UFortRuntimeOptions* Options = UFortRuntimeOptions::Get();
+    Log::Info(L"Mission Control: gameplay votes restored (bEnableMissionActivationVote {})",
+        Options && UFortRuntimeOptions::HasMissionActivationVote() ? (Options->bEnableMissionActivationVote ? L"on" : L"off") : L"unknown");
+#endif
+}
+
 void AFortPlayerControllerZone::HookVTables()
 {
     HookPossessionVTables();
+    HookGameplayVoteVTables();
 
     const int32_t Index = Finder::ImplementationIndex(StaticFunction_ServerTriggerSetupTeleportCameraEvent());
     if (Index < 0)

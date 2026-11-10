@@ -34,9 +34,14 @@ public:
     DefineUProperty(FVector, LootInitialPosition)
     DefineUProperty(float, FlyTime)
     DefineUProperty(EFortPickupTossState, TossState)
+    // Where a pickup at rest lies: the toss branch of OnRep_PickupLocationData (AFortPickup::SetupForMovementCompToss,
+    // 4.5 0xDC75B0, 5.0 CL-4204761 0xF533F0) puts an AtRest pickup there.
+    DefineUProperty(FVector, FinalTossRestLocation)
 
     // Whether the build reflects what pickup combining uses.
     static bool IsCombineAvailable();
+    // Whether the build reflects FinalTossRestLocation and EFortPickupTossState's AtRest.
+    static bool CanRestAt();
 };
 
 // 4.1 (CL-4053532) on: what AFortPickup::CreateFromData (21.40's STAT_CreatePickupFromData; 4.1 0xD73420) takes in
@@ -116,6 +121,8 @@ private:
     void WatchForCombine();
     void StartCombine(AFortPickup* Target);
     void FinishCombine(AFortPickup* Target);
+    // Ends a combine that didn't take the whole pickup: it goes back to where it lay when the combine started, at rest.
+    void CancelCombine();
     static void CombinePickups();
     static void GivePickupToHK(AFortPickup* This, IFortInventoryOwnerInterface* InventoryOwner);
 };

@@ -558,6 +558,12 @@ bool FFortPickupLocationData::IsCombineAvailable()
     return Member_CombineTarget.IsAvailable() && Member_LootInitialPosition.IsAvailable() && Member_FlyTime.IsAvailable() && Member_TossState.IsAvailable();
 }
 
+bool FFortPickupLocationData::CanRestAt()
+{
+    static const bool bCanRestAt = Member_FinalTossRestLocation.IsAvailable() && EFortPickupTossState::GetAtRest() != Reflection::InvalidEnumValue;
+    return bCanRestAt;
+}
+
 void AFortPickup::OnRep_PickupLocationData()
 {
     Reflection::FParams Params(StaticFunction_OnRep_PickupLocationData());
@@ -606,21 +612,42 @@ void AFortPickup::CombinePickups()
     bCombinePickupsQueued = false;
     std::unordered_map<AFortPickup*, int32_t> Incoming;
     std::vector<std::pair<AFortPickup*, AFortPickup*>> Finished;
+    std::vector<std::pair<AFortPickup*, AFortPickup*>> Cancelled;
     std::erase_if(PickupCombines, [&](const FPickupCombine& Combine)
     {
         AFortPickup* Pickup = Combine.Pickup.Get();
         UWorld* World = Pickup ? Pickup->GetWorld() : nullptr;
-        if (World && World->GetTimeSeconds() < Combine.EndTime)
+        if (!World)
         {
-            Incoming[Combine.Target.Get()] += Combine.Count;
+            return true;
+        }
+        // The pickup's tick moves it toward its target's location as it is now (5.0 CL-4204761 0xF55420: VInterpTo from
+        // LootInitialPosition to the CombineTarget's root, then SetActorLocation), on the server and on each client. A
+        // target that a pawn picks up flies to the pawn and the pickup followed it there (#344): light bullets from a chest
+        // flying into floor ammo the player then walked over ended up at the player. A pickup whose target is picked up
+        // or gone stops at once and goes back.
+        AFortPickup* Target = Combine.Target.Get();
+        if (!Target || Target->bPickedUp)
+        {
+            Cancelled.emplace_back(Pickup, Target);
+            return true;
+        }
+        if (World->GetTimeSeconds() < Combine.EndTime)
+        {
+            Incoming[Target] += Combine.Count;
             return false;
         }
-        if (World)
-        {
-            Finished.emplace_back(Pickup, Combine.Target.Get());
-        }
+        Finished.emplace_back(Pickup, Target);
         return true;
     });
+    for (const auto& [Pickup, Target] : Cancelled)
+    {
+        const FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
+        const UFortItemDefinition* Definition = Entry.ItemDefinition;
+        Log::Info(L"Pickup: {} {} was flying into {}, which {}, so it goes back", static_cast<int32_t>(Entry.Count), Definition ? Definition->GetName().ToStdString() : L"None",
+            Target ? Target->GetName().ToStdString() : L"a pickup", Target ? L"was picked up" : L"is gone");
+        Pickup->CancelCombine();
+    }
     for (const auto& [Pickup, Target] : Finished)
     {
         Pickup->FinishCombine(Target);
@@ -779,10 +806,34 @@ void AFortPickup::FinishCombine(AFortPickup* Target)
     }
 
     Entry.Count = Count - Moved;
-    static_cast<FFortPickupLocationData&>(PickupLocationData).CombineTarget = nullptr;
-    OnRep_PickupLocationData();
-    ForceNetUpdate();
     Log::Info(L"Pickup: {} of {} {} combined into {}, the rest goes back", Moved, Count, Definition ? Definition->GetName().ToStdString() : L"None", Target ? Target->GetName().ToStdString() : L"a pickup that is gone");
+    CancelCombine();
+}
+
+void AFortPickup::CancelCombine()
+{
+    // With no target, OnRep_PickupLocationData takes the toss branch (AFortPickup::SetupForMovementCompToss, 4.5 0xDC75B0,
+    // 5.0 0xF533F0). A toss still InProgress there is launched again, from where the pickup is, at a velocity solved from
+    // LootInitialPosition to LootFinalPosition: a pickup that had followed its target to a player was thrown out from the
+    // player (#344). A toss AtRest stops the movement and puts the pickup on FinalTossRestLocation, on the server and on
+    // each client. Core's combine starts once the pickup lies still (IsTossOver), well before the 5s after which its tick
+    // sets AtRest, so it was still InProgress. The pickup now goes back AtRest to where it lay when the combine started
+    // (StartCombine's LootInitialPosition).
+    FFortPickupLocationData& LocationData = PickupLocationData;
+    const FVector RestLocation = LocationData.LootInitialPosition;
+    LocationData.CombineTarget = nullptr;
+    const bool bReturnAtRest = FFortPickupLocationData::CanRestAt();
+    if (bReturnAtRest)
+    {
+        LocationData.TossState = EFortPickupTossState::GetAtRest();
+        LocationData.FinalTossRestLocation = RestLocation;
+    }
+    OnRep_PickupLocationData();
+    if (!bReturnAtRest)
+    {
+        SetActorLocation(RestLocation, false, true);
+    }
+    ForceNetUpdate();
     WatchForCombine();
 }
 

@@ -789,6 +789,10 @@ namespace
     constexpr float ThirstReviveGrace = 20.0f;
     constexpr float ThirstReviveRange = 1500.0f;
     constexpr float ThirstNoReviverRange = 8000.0f;
+    // How long a bot remembers an enemy that went out of sight (CoreV2 #349): 8.30's perception keeps a sight
+    // stimulus until its max age, and the bot aims at and closes in on its last known position meanwhile (21.40's
+    // GetLastKnownPosition). Core's 🟡: 5 s.
+    constexpr float TargetMemoryAge = 5.0f;
     // A bot heads for a player within this distance (Core's 🟡: 100 m), at most this many bots for one player.
     constexpr float HuntRange = 10000.0f;
     constexpr int32_t MaxHuntersPerPlayer = 3;
@@ -2370,6 +2374,14 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
     {
         NewTarget = Previous;
     }
+    // Nor is one that just ducked behind cover: the bot remembers it for TargetMemoryAge and RangeAttack aims at where
+    // it last saw it (it forgot the enemy the moment the line of sight broke, CoreV2 #349). A downed one it is giving
+    // time to (ShouldDeferThirst) is let go, as above.
+    if (!NewTarget && Previous && Previous == LastSeenTarget.Get() && !Previous->bIsDying && !Previous->IsPendingKill() && Now - LastTargetInSightTime < TargetMemoryAge
+        && (LocationOf(Previous) - Location).Size() <= AIBotSkills.SightRange && (!Previous->bIsDBNO || !ShouldDeferThirst(Previous, Now)))
+    {
+        NewTarget = Previous;
+    }
 
     if (NewTarget != CurrentTarget.Get())
     {
@@ -3258,7 +3270,25 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
     {
         if (Now - LastTargetInSightTime > 15.0f || Distance > 3000.0f || !IsTargetBoxedIn(Target))
         {
-            return false;
+            // Behind cover: while it remembers the enemy (UpdateCurrentTarget), an armed bot holds its aim on where it
+            // last saw it, aiming down sights without firing, and closes in on that spot (CoreV2 #349). The storm comes
+            // first.
+            if (!bArmed || bHeadingForSafeZone || Now - LastTargetInSightTime >= TargetMemoryAge)
+            {
+                return false;
+            }
+            StopFiring();
+            FaceTowards(FVector(LastSeenTargetLocation.X, LastSeenTargetLocation.Y, LastSeenTargetLocation.Z + 20.0f), Now, 0.5f);
+            SetTargeting(!bPickaxeEquipped && ReloadUntil <= 0.0f && FacingError() < 45.0f);
+            if (Dist2D(Location, LastSeenTargetLocation) > 300.0f)
+            {
+                MoveTowards(LastSeenTargetLocation, Now, 250.0f);
+            }
+            else
+            {
+                StopMoving();
+            }
+            return true;
         }
         if (!bBoxedInLogged)
         {

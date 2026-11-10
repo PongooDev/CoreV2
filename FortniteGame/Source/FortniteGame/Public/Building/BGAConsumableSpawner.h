@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Building/BuildingActor.h"
+#include "EnvironmentQuery/EnvQueryTypes.h"
 #include "Items/FortItem.h"
 #include "StructArray.h"
 
@@ -24,6 +25,7 @@ public:
     DefineUProperty(FName, SpawnLootTierGroup)
     DefineUProperty(ABuildingActor*, AssociatedBuildingActor)
     DefineUProperty(UEnvQuery*, QueryTemplate)
+    DefineUStructArrayProperty(FAIDynamicParam, QueryConfig)
     DefineUProperty(bool, bAlignSpawnedActorsToSurface)
     DefineUStructArrayProperty(FFortItemEntry, ConsumablesToSpawn)
 

@@ -159,13 +159,18 @@ void ABGAConsumableSpawner::SpawnConsumables(int32_t WorldLevel)
 {
 #if WITH_SERVER_CODE
     // The roll: the tier group (through the game mode's Athena redirects, as the containers' groups go) gives wrapper items
-    // whose Count is how many of its class to place.
+    // whose Count is how many of its class to place. The Athena redirect (5.10 0xBD4DA0) keeps only the containers', drops'
+    // and vending groups, Loot_ForagedItem_GravityRocks and Loot_AthenaMeteorDrop, and turns every other group into None:
+    // 4.2's apples and mushrooms (Loot_ForagedItem_Grassland, _Farmland, _Forest, _Swamp), 5.0's rifts (_AthenaRift) and
+    // 5.10's Birthday cake slices (_TempEvent) never rolled (#356). Those groups are the spawner's own, so a group the
+    // redirect drops is rolled as it is.
     TStructArray<FFortItemEntry>& Consumables = ConsumablesToSpawn;
     Consumables.Empty();
     FName TierGroup = SpawnLootTierGroup;
     if (AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this))
     {
-        TierGroup = GameMode->RedirectLootTierGroup(TierGroup);
+        const FName Redirected = GameMode->RedirectLootTierGroup(TierGroup);
+        TierGroup = Redirected.IsNone() ? TierGroup : Redirected;
     }
     FName LootTierKey;
     int32_t LootTier = -1;
@@ -184,6 +189,20 @@ void ABGAConsumableSpawner::SpawnConsumables(int32_t WorldLevel)
     {
         OnQueryFinished(nullptr);
         return;
+    }
+    // The spawner's QueryConfig is the query's params, as an FEQSParametrizedQueryExecutionRequest runs its QueryTemplate
+    // with its QueryConfig. 4.2's EQS_ConsumableBGAPlacement_ForagedItem_A binds its donut's radii to the params
+    // Donut.InnerRadius and Donut.OuterRadius; run without them, both are 0, the donut has no points and every apple and
+    // mushroom of a spawner was stacked on the spawner. The instance runs on the EQS manager's next tick, so the params
+    // are in before its generator reads them.
+    if (Member_QueryConfig.IsAvailable())
+    {
+        const TStructArray<FAIDynamicParam>& Params = QueryConfig;
+        for (int32_t Index = 0; Index < Params.Num(); ++Index)
+        {
+            const FAIDynamicParam& Param = Params[Index];
+            QueryInstance->SetNamedParam(Param.ParamName, Param.Value);
+        }
     }
     WaitForQuery(FWeakObjectPtr(this), FWeakObjectPtr(QueryInstance), QueryTicks);
 #endif

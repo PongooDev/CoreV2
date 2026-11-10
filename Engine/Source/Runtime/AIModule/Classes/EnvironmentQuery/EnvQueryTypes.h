@@ -29,3 +29,15 @@ public:
     DefineUProperty(EAIParamType, ParamType)
     DefineUProperty(float, Value)
 };
+
+// A query parameter as an EQS caller configures it (FEQSParametrizedQueryExecutionRequest's QueryConfig): the named
+// param and its value, or a blackboard key to read it from.
+struct FAIDynamicParam
+{
+    DefineUnrealStruct(FAIDynamicParam, AIModule)
+
+public:
+    DefineUProperty(FName, ParamName)
+    DefineUProperty(EAIParamType, ParamType)
+    DefineUProperty(float, Value)
+};

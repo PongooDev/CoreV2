@@ -17,6 +17,10 @@ class UAbilitySystemComponent : public UGameplayTasksComponent
 public:
     DefineUStructProperty(FGameplayAbilitySpecContainer, ActivatableAbilities)
     DefineUProperty(AActor*, OwnerActor)
+    // Reflected from UE 4.21 (5.0) on; older builds keep them unreflected (IsAvailable).
+    DefineUProperty(AActor*, AvatarActor)
+    DefineUProperty(bool, UserAbilityActivationInhibited)
+    DefineUProperty(TArray<uint8_t>, BlockedAbilityBindings)
     DefineUProperty(TArray<UAttributeSet*>, SpawnedAttributes)
     DefineUFunction(ClientActivateAbilityFailed)
     DefineUFunction(ServerTryActivateAbility)
@@ -66,6 +70,10 @@ public:
     static void HookVTables();
 
 private:
+    // Why the native InternalTryActivateAbility refused a client's activation, from the state its checks read (actor
+    // info, the avatar's role, UserAbilityActivationInhibited, input blocking, the ability's tag requirements).
+    FString DescribeActivationFailure(const FGameplayAbilitySpec& Spec) const;
+
     static void InternalServerTryActiveAbilityHK(UAbilitySystemComponent* This, FGameplayAbilitySpecHandle AbilityToActivate, bool InputPressed, const FPredictionKey& PredictionKey, const FGameplayEventData* TriggerEventData);
 };
 

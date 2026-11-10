@@ -2,6 +2,7 @@
 #include "AbilitySystemComponent.h"
 #include "Abilities/GameplayAbility.h"
 #include "Finder.h"
+#include "GameFramework/Actor.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
@@ -41,6 +42,42 @@ void UGameplayAbility::K2_EndAbility()
 {
     Reflection::FParams Params(StaticFunction_K2_EndAbility());
     Params.Call(this);
+}
+
+std::wstring UGameplayAbility::DescribeTagRequirements(const FGameplayTagContainer& OwnedTags) const
+{
+    std::wstring Description;
+    if (Member_ActivationBlockedTags.IsAvailable())
+    {
+        for (const FGameplayTag& Tag : ActivationBlockedTags.GameplayTags)
+        {
+            if (OwnedTags.HasTag(Tag))
+            {
+                Description += L" blocked by owned " + Tag.TagName.ToStdString() + L";";
+            }
+        }
+    }
+    if (Member_ActivationRequiredTags.IsAvailable())
+    {
+        for (const FGameplayTag& Tag : ActivationRequiredTags.GameplayTags)
+        {
+            if (!OwnedTags.HasTag(Tag))
+            {
+                Description += L" requires missing " + Tag.TagName.ToStdString() + L";";
+            }
+        }
+    }
+    return Description;
+}
+
+int32_t UGameplayAbility::GetInstancingPolicyValue() const
+{
+    return Member_InstancingPolicy.IsAvailable() ? static_cast<int32_t>(InstancingPolicy) : -1;
+}
+
+int32_t UGameplayAbility::GetNetExecutionPolicyValue() const
+{
+    return Member_NetExecutionPolicy.IsAvailable() ? static_cast<int32_t>(NetExecutionPolicy) : -1;
 }
 
 void UGameplayAbility::K2_CancelAbility()
@@ -219,12 +256,51 @@ void UAbilitySystemComponent::InternalServerTryActiveAbility(FGameplayAbilitySpe
 
     if (!InternalTryActivateAbility(Handle, PredictionKey, &InstancedAbility, nullptr, TriggerEventData))
     {
-        ABILITY_LOG(Display, TEXT("InternalServerTryActiveAbility. Rejecting ClientActivation of %s with PredictionKey %s. InternalTryActivateAbility failed"), *GetNameSafe(Spec->Ability), *PredictionKey.ToString());
+        ABILITY_LOG(Display, TEXT("InternalServerTryActiveAbility. Rejecting ClientActivation of %s with PredictionKey %s. InternalTryActivateAbility failed: %s"), *GetNameSafe(Spec->Ability), *PredictionKey.ToString(), *DescribeActivationFailure(*Spec));
         ClientActivateAbilityFailed(Handle, PredictionKey.Current);
         Spec->InputPressed = false;
         MarkAbilitySpecDirty(*Spec);
     }
 #endif
+}
+
+FString UAbilitySystemComponent::DescribeActivationFailure(const FGameplayAbilitySpec& Spec) const
+{
+    // The native's checks, in its order: a valid owner and avatar, an avatar that isn't a simulated proxy, the user
+    // activation inhibit, the spec's input not blocked, then the ability's owner tag requirements.
+    std::wstring Description;
+    AActor* const Owner = OwnerActor;
+    Description += L"owner " + GetNameSafe(Owner).ToStdString();
+    if (Member_AvatarActor.IsAvailable())
+    {
+        AActor* const Avatar = AvatarActor;
+        Description += L", avatar " + GetNameSafe(Avatar).ToStdString();
+        if (Avatar)
+        {
+            Description += L" (role " + std::to_wstring(static_cast<int32_t>(static_cast<uint8_t>(Avatar->Role))) + L")";
+        }
+    }
+    if (Member_UserAbilityActivationInhibited.IsAvailable() && UserAbilityActivationInhibited)
+    {
+        Description += L", user ability activation inhibited";
+    }
+    if (Member_BlockedAbilityBindings.IsAvailable())
+    {
+        const TArray<uint8_t>& Bindings = BlockedAbilityBindings;
+        if (Spec.InputID >= 0 && Spec.InputID < Bindings.Num() && Bindings[Spec.InputID] > 0)
+        {
+            Description += L", input " + std::to_wstring(Spec.InputID) + L" blocked";
+        }
+    }
+    if (UGameplayAbility* const Ability = Spec.Ability)
+    {
+        Description += L", instancing " + std::to_wstring(Ability->GetInstancingPolicyValue()) + L", net execution " + std::to_wstring(Ability->GetNetExecutionPolicyValue())
+            + L", " + std::to_wstring(Spec.ReplicatedInstances.Num() + Spec.NonReplicatedInstances.Num()) + L" instances";
+        FGameplayTagContainer OwnedTags;
+        GetOwnedGameplayTags(OwnedTags);
+        Description += L";" + Ability->DescribeTagRequirements(OwnedTags);
+    }
+    return FString(Description.c_str());
 }
 
 void UAbilitySystemComponent::HookVTables()

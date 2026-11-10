@@ -3395,7 +3395,24 @@ namespace
         // the server connection and each client connection through Tick. 1.7.2's TickFlush also calls IsNetReady(false)
         // on each first (slot 0x51, then Tick 0x50), so the calls aren't all one slot.
         const int32_t InitRemoteConnection = Finder::VTableIndex(ConnectionVTable, reinterpret_cast<void*>(FunctionOf(L"UNetConnection::InitRemoteConnection")), 0x400);
-        const int32_t IsNetReady = InitRemoteConnection - 6;
+        // IsNetReady's body: test dl, dl; jz; mov eax, [rcx+QueuedBits']; neg eax; mov [rcx+QueuedBits], eax (5.0, UE 4.21,
+        // copies rcx into r8 first: mov r8, rcx; CL-4214610 0x24E71A0).
+        const auto IsNetReadyBodyOf = [&](int32_t Slot)
+        {
+            uintptr_t Body = Slot >= 0 ? VTableEntry(ConnectionVTable, Slot) : 0;
+            if (Body && Byte(Body) == 0x4C && Byte(Body + 1) == 0x8B && Byte(Body + 2) == 0xC1)
+            {
+                Body += 3;
+            }
+            return Body && FindInstruction(Body, Body + 18, { 0x84, 0xD2, 0x74, -1, 0x8B, 0x81, -1, -1, 0x00, 0x00, 0xF7, 0xD8, 0x89, 0x81, -1, -1, 0x00, 0x00 }) == Body ? Body : 0;
+        };
+        // 5.10 (CL-4240749) declares one more virtual between them (slot 0x57, an FString getter), so InitRemoteConnection
+        // is 0x5A and IsNetReady stays 0x53, seven before it.
+        int32_t IsNetReady = InitRemoteConnection - 6;
+        if (InitRemoteConnection >= 7 && !IsNetReadyBodyOf(IsNetReady) && IsNetReadyBodyOf(InitRemoteConnection - 7))
+        {
+            IsNetReady = InitRemoteConnection - 7;
+        }
         const int32_t ConnectionTick = IsNetReady - 1;
         int32_t ConnectionTicks = 0;
         for (uintptr_t Call = TickFlushEnd && ConnectionTick >= 0 ? FindInstruction(TickFlush, TickFlushEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0; Call; Call = FindInstruction(Call + 1, TickFlushEnd, { 0x48, 0x8B, 0x01, 0xFF, 0x90 }))
@@ -3405,13 +3422,8 @@ namespace
         const uintptr_t ConnectionTickBody = ConnectionTicks >= 2 ? VTableEntry(ConnectionVTable, ConnectionTick) : 0;
         RequireSlot(L"UNetConnection::Tick", Natives::UNetConnection_TickIndex, ConnectionTickBody ? ConnectionTick : -1);
 
-        uintptr_t IsNetReadyBody = InitRemoteConnection >= 6 && IsNetReady == ConnectionTick + 1 ? VTableEntry(ConnectionVTable, IsNetReady) : 0;
-        // 5.0 (UE 4.21) copies this first: mov r8, rcx; test dl, dl; ... (CL-4214610 0x24E71A0).
-        if (IsNetReadyBody && Byte(IsNetReadyBody) == 0x4C && Byte(IsNetReadyBody + 1) == 0x8B && Byte(IsNetReadyBody + 2) == 0xC1)
-        {
-            IsNetReadyBody += 3;
-        }
-        const bool bIsNetReady = IsNetReadyBody && FindInstruction(IsNetReadyBody, IsNetReadyBody + 18, { 0x84, 0xD2, 0x74, -1, 0x8B, 0x81, -1, -1, 0x00, 0x00, 0xF7, 0xD8, 0x89, 0x81, -1, -1, 0x00, 0x00 }) == IsNetReadyBody;
+        const uintptr_t IsNetReadyBody = InitRemoteConnection >= 6 ? IsNetReadyBodyOf(IsNetReady) : 0;
+        const bool bIsNetReady = IsNetReadyBody != 0;
         RequireSlot(L"UNetConnection::IsNetReady", Natives::UNetConnection_IsNetReadyIndex, bIsNetReady ? IsNetReady : -1);
         RequireOffset(L"UNetConnection::QueuedBits", Natives::UNetConnection_QueuedBits, bIsNetReady ? *reinterpret_cast<const int32_t*>(IsNetReadyBody + 14) : 0);
         RequireSlot(L"UNetConnection::FlushDormancy", Natives::UNetConnection_FlushDormancyIndex, Finder::VTableIndex(ConnectionVTable, reinterpret_cast<void*>(FunctionOf(L"FlushDormancy: %s. Connection: %s")), 0x400));
@@ -4965,17 +4977,30 @@ namespace
             // 1.7.2 (0x593180) calls IsDedicatedServerInstance instead of inlining it, so the branch to skip is the jnz
             // after the call: call IsDedicatedServerInstance; test al, al; jnz Skip; mov rcx, [rbx+UpdateManager];
             // test rcx, rcx; jz Skip; mov rax, [rcx]; xor edx, edx; call [rax+...].
-            const std::initializer_list<int32_t> CallPattern = { 0xE8, -1, -1, -1, -1, 0x84, 0xC0, 0x75, -1, 0x48, 0x8B, 0x8B, -1, -1, 0x00, 0x00,
+            // The UpdateManager load is mov rcx, [rbx+disp32] up to 5.0 and mov rcx, [rsi+disp32] on 5.10 (CL-4240749
+            // 0xDE9C66): any base register.
+            const std::initializer_list<int32_t> CallPattern = { 0xE8, -1, -1, -1, -1, 0x84, 0xC0, 0x75, -1, 0x48, 0x8B, -1, -1, -1, 0x00, 0x00,
                 0x48, 0x85, 0xC9, 0x74, -1, 0x48, 0x8B, 0x01, 0x33, 0xD2, 0xFF, 0x90 };
-            for (const uintptr_t Call : Finder::CallsTo(DedicatedInstance, false))
+            // rbx alone first, as every build before 5.10 has it; any base only if that doesn't find exactly one.
+            const std::vector<uintptr_t> Calls = Finder::CallsTo(DedicatedInstance, false);
+            for (const bool bAnyBase : { false, true })
             {
-                const uintptr_t Branch = Call + 7;
-                const uintptr_t Target = Branch + 2 + static_cast<int8_t>(Byte(Branch + 1));
-                if (FindInstruction(Call, Call + 28, CallPattern) == Call && Call + 21 + static_cast<int8_t>(Byte(Call + 20)) == Target)
+                if (bAnyBase && StartChecks == 1)
                 {
-                    StartBranch = Branch;
-                    StartTarget = Target;
-                    ++StartChecks;
+                    break;
+                }
+                StartChecks = 0;
+                for (const uintptr_t Call : Calls)
+                {
+                    const uintptr_t Branch = Call + 7;
+                    const uintptr_t Target = Branch + 2 + static_cast<int8_t>(Byte(Branch + 1));
+                    const bool bLoadsUpdateManager = bAnyBase ? (Byte(Call + 11) & 0xF8) == 0x88 && (Byte(Call + 11) & 0x07) != 0x04 : Byte(Call + 11) == 0x8B;
+                    if (FindInstruction(Call, Call + 28, CallPattern) == Call && bLoadsUpdateManager && Call + 21 + static_cast<int8_t>(Byte(Call + 20)) == Target)
+                    {
+                        StartBranch = Branch;
+                        StartTarget = Target;
+                        ++StartChecks;
+                    }
                 }
             }
             bStartCheck = StartChecks == 1 && StartTarget > StartBranch + 2 && StartTarget - (StartBranch + 2) <= 0x7F;
@@ -12804,7 +12829,14 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     if (!SetTeamPlace && SoloWin)
     {
         const std::vector<std::pair<uintptr_t, uintptr_t>> CheckCalls = CallsOf(SoloWin);
-        const uintptr_t StartEndGamePhase = CheckCalls.empty() ? 0 : CheckCalls.back().second;
+        uintptr_t StartEndGamePhase = CheckCalls.empty() ? 0 : CheckCalls.back().second;
+        // 5.10 (CL-4240749) calls another function (0xBC6940) after StartEndGamePhase (0xBDCA50): take the call to the
+        // function that logs the win, if the check makes one.
+        const uintptr_t WonTheMatch = FunctionOf(L"FortGameModeAthena: %s won the match!");
+        for (const auto& [CheckSite, Callee] : WonTheMatch ? CheckCalls : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            StartEndGamePhase = Callee == WonTheMatch ? Callee : StartEndGamePhase;
+        }
         SetTeamPlace = FindSetTeamPlace(StartEndGamePhase);
         if (SetTeamPlace)
         {

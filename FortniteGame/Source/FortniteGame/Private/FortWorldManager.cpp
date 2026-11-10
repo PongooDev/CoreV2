@@ -531,11 +531,11 @@ void AFortWorldManager::AddSharedMissionsToMissionManagerRecord()
     {
         RegisteredPlayers = GameInstance->RegisteredPlayers;
     }
-    TStructArray<FFortQuestDrivenMission>& QuestDrivenMissionList = SharedMissionLists->QuestDrivenMissionList;
-    UE_LOG(LogFortWorld, Log, TEXT("Checking %d quest-driven missions against %d registered players"), QuestDrivenMissionList.Num(), RegisteredPlayers.Num());
-    for (int32_t Index = 0; Index < QuestDrivenMissionList.Num(); ++Index)
+    const TArray<FFortQuestDrivenMission*> QuestDrivenMissions = SharedMissionLists->GetQuestDrivenMissions();
+    UE_LOG(LogFortWorld, Log, TEXT("Checking %d quest-driven missions against %d registered players"), QuestDrivenMissions.Num(), RegisteredPlayers.Num());
+    for (int32_t Index = 0; Index < QuestDrivenMissions.Num(); ++Index)
     {
-        FFortQuestDrivenMission& QuestDrivenMission = QuestDrivenMissionList[Index];
+        FFortQuestDrivenMission& QuestDrivenMission = *QuestDrivenMissions[Index];
         UFortQuestItemDefinition* RequiredQuest = QuestDrivenMission.RequiredQuest;
         bool bQuestActive = !RequiredQuest;
         for (int32_t PlayerIndex = 0; PlayerIndex < RegisteredPlayers.Num() && !bQuestActive; ++PlayerIndex)
@@ -583,10 +583,10 @@ void AFortWorldManager::LoadQuestDrivenMissionsForPlayer(AFortPlayerController* 
 
     FGlobalMissionFilter Filter(this);
     UFortSharedMissionLists* SharedMissionLists = Filter.SharedMissionLists;
-    TStructArray<FFortQuestDrivenMission>* QuestDrivenMissionList = SharedMissionLists ? &static_cast<TStructArray<FFortQuestDrivenMission>&>(SharedMissionLists->QuestDrivenMissionList) : nullptr;
-    for (int32_t Index = 0; QuestDrivenMissionList && Index < QuestDrivenMissionList->Num(); ++Index)
+    const TArray<FFortQuestDrivenMission*> QuestDrivenMissions = SharedMissionLists ? SharedMissionLists->GetQuestDrivenMissions() : TArray<FFortQuestDrivenMission*>();
+    for (int32_t Index = 0; Index < QuestDrivenMissions.Num(); ++Index)
     {
-        FFortQuestDrivenMission& QuestDrivenMission = (*QuestDrivenMissionList)[Index];
+        FFortQuestDrivenMission& QuestDrivenMission = *QuestDrivenMissions[Index];
         UFortQuestItemDefinition* RequiredQuest = QuestDrivenMission.RequiredQuest;
         if (!RequiredQuest || !QuestManager->HasActiveQuest(RequiredQuest))
         {

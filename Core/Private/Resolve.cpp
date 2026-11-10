@@ -13609,9 +13609,12 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         // 5.10 CL-4225813 (ExitAircraft 0xBF1FB0) took neither path above (#368). On 5.x the call is the one right after
         // the AFortPlayerPawnAthena cast's test (CL-4240749 0xBF64FB: "test al, al; jz; mov dl, 1; mov rcx, rbx; call",
         // 5.21 0xC0941B, 5.30 0xC18C2B), so a callee whose jumps end in moved code, or that is a function of its own,
-        // is taken there when nothing better was found.
+        // is taken there when nothing better was found. CL-4225813's callee (0x110D140, no .pdata) is "jmp 0x4B70E1": its
+        // packer moved the body back into the first section, below the stub, so it is neither in moved code nor a function
+        // start; a jmp whose hops all stay in executable code (Finder::Unthunk only follows those) is taken as well.
         const bool bAfterCast = Byte(Site - 8) == 0x84 && Byte(Site - 7) == 0xC0 && Byte(Site - 6) == 0x0F && Byte(Site - 5) == 0x84;
-        if (!CastTarget && bCallShape && bAfterCast && (IsInMovedCode(Finder::Unthunk(Target)) || Finder::FunctionStart(Target) == Target))
+        const bool bJumpsToCode = Byte(Target) == 0xE9 && Finder::Unthunk(Target) != Target;
+        if (!CastTarget && bCallShape && bAfterCast && (IsInMovedCode(Finder::Unthunk(Target)) || Finder::FunctionStart(Target) == Target || bJumpsToCode))
         {
             CastTarget = Target;
         }

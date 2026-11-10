@@ -13498,6 +13498,19 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
     const uintptr_t End = ExitAircraft ? Finder::FunctionEnd(ExitAircraft) : 0;
     void** PawnVTable = nullptr;
     uintptr_t MovedTarget = 0;
+    uintptr_t CastTarget = 0;
+    // What each mov dl, 1 site and its callee hold, for the log when nothing is found.
+    std::wstring Diagnostics;
+    int32_t DiagnosedSites = 0;
+    const auto HexBytes = [](uintptr_t Address, size_t Count)
+    {
+        std::wstring Text;
+        for (size_t Index = 0; Index < Count && Finder::IsReadable(reinterpret_cast<const void*>(Address + Index), 1); ++Index)
+        {
+            Text += std::format(L"{}{:02X}", Index ? L" " : L"", Byte(Address + Index));
+        }
+        return Text;
+    };
     for (uintptr_t Site = ExitAircraft ? FindInstruction(ExitAircraft, End, { 0xB2, 0x01 }) : 0; Site; Site = FindInstruction(Site + 1, End, { 0xB2, 0x01 }))
     {
         const uintptr_t Call = FindRawCall(Site + 2, std::min(End, Site + 0xA));
@@ -13526,11 +13539,13 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         };
         // 4.2 overrides it in AFortPlayerPawnAthena (slot 0x1CB, 0xA6D480): its own bookkeeping, then Super::BeginSkydiving
         // (AFortPlayerPawn's, 0xEE15B0, at 0xA6D4B4), which opens with the check. The slot is still what ExitAircraft calls.
-        bool bFound = OpensWithSkydivingCheck(Target);
+        // A packed build may leave either one behind jumps into readable code, so each is also read where its jumps lead.
+        bool bFound = OpensWithSkydivingCheck(Target) || (Target && Finder::Unthunk(Target) != Target && OpensWithSkydivingCheck(Finder::Unthunk(Target)));
         const uintptr_t TargetEnd = !bFound && Target && Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
         for (uintptr_t SuperCall = TargetEnd ? FindRawCall(Target, std::min(TargetEnd, Target + 0x40)) : 0; SuperCall && !bFound; SuperCall = FindRawCall(SuperCall + 1, std::min(TargetEnd, Target + 0x40)))
         {
-            bFound = OpensWithSkydivingCheck(Finder::RelativeTarget(SuperCall, 1, 5));
+            const uintptr_t Super = Finder::RelativeTarget(SuperCall, 1, 5);
+            bFound = OpensWithSkydivingCheck(Super) || (Super && OpensWithSkydivingCheck(Finder::Unthunk(Super)));
         }
         if (bFound)
         {
@@ -13541,19 +13556,36 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         // 4.4.2's packer moved BeginSkydiving's body: ExitAircraft (0xA80200) still does "mov dl, 1; mov rcx, rbx; call
         // BeginSkydiving" (0xA8048D, right after the AFortPlayerPawnAthena cast), but the callee (0xF48220) is only a jmp
         // into the second code section, so its skydiving check can't be read. Only that exact call shape is kept.
-        if (!MovedTarget && Call == Site + 5 && Byte(Site + 2) == 0x48 && Byte(Site + 3) == 0x8B && (Byte(Site + 4) & 0xF8) == 0xC8 && Target &&
-            Byte(Target) == 0xE9 && IsInMovedCode(Finder::RelativeTarget(Target, 1, 5)))
+        const bool bCallShape = Call == Site + 5 && Byte(Site + 2) == 0x48 && Byte(Site + 3) == 0x8B && (Byte(Site + 4) & 0xF8) == 0xC8 && Target;
+        if (!MovedTarget && bCallShape && Byte(Target) == 0xE9 && IsInMovedCode(Finder::RelativeTarget(Target, 1, 5)))
         {
             MovedTarget = Target;
         }
+        // 5.10 CL-4225813 (ExitAircraft 0xBF1FB0) took neither path above (#368). On 5.x the call is the one right after
+        // the AFortPlayerPawnAthena cast's test (CL-4240749 0xBF64FB: "test al, al; jz; mov dl, 1; mov rcx, rbx; call",
+        // 5.21 0xC0941B, 5.30 0xC18C2B), so a callee whose jumps end in moved code, or that is a function of its own,
+        // is taken there when nothing better was found.
+        const bool bAfterCast = Byte(Site - 8) == 0x84 && Byte(Site - 7) == 0xC0 && Byte(Site - 6) == 0x0F && Byte(Site - 5) == 0x84;
+        if (!CastTarget && bCallShape && bAfterCast && (IsInMovedCode(Finder::Unthunk(Target)) || Finder::FunctionStart(Target) == Target))
+        {
+            CastTarget = Target;
+        }
+        if (DiagnosedSites++ < 4)
+        {
+            const uintptr_t Body = Target ? Finder::Unthunk(Target) : 0;
+            Diagnostics += std::format(L"{}site 0x{:X} [{}] target 0x{:X} [{}] body 0x{:X}", Diagnostics.empty() ? L"" : L"; ", Site - Finder::ImageBase(),
+                HexBytes(Site - 8, 20), Target ? Target - Finder::ImageBase() : 0, Target ? HexBytes(Target, 16) : L"", Body ? Body - Finder::ImageBase() : 0);
+        }
     }
-    if (MovedTarget)
+    if (MovedTarget || CastTarget)
     {
-        Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(MovedTarget);
-        Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X}), its body moved by the packer", MovedTarget - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());
+        const uintptr_t Found = MovedTarget ? MovedTarget : CastTarget;
+        Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(Found);
+        Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X}), {}", Found - Finder::ImageBase(), ExitAircraft - Finder::ImageBase(),
+            MovedTarget ? L"its body moved by the packer" : L"the call after ExitAircraft's AFortPlayerPawnAthena cast");
         return true;
     }
-    Log::Error(L"Finder: AFortPlayerPawnAthena::BeginSkydiving not found (ExitAircraft 0x{:X}), player bots can't leave the aircraft", ExitAircraft ? ExitAircraft - Finder::ImageBase() : 0);
+    Log::Error(L"Finder: AFortPlayerPawnAthena::BeginSkydiving not found (ExitAircraft 0x{:X}), player bots can't leave the aircraft ({})", ExitAircraft ? ExitAircraft - Finder::ImageBase() : 0, Diagnostics.empty() ? L"no mov dl, 1 sites" : Diagnostics);
     return false;
 }
 

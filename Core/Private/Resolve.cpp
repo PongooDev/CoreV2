@@ -8211,15 +8211,16 @@ bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, FEarnScore
     // The EarnScore context maker: a small function that allocates the shared-ref controller (mov ecx, 20h; call). It is
     // the first such call after the critical match bonus load in SendEarnScore (1.1, 1.2), or in the callee 1.7.2 moved
     // it to (GrantScoreReward 0x57B4A0, which builds the context only when bIsFinal is set).
-    const auto IsContextMaker = [](uintptr_t Target)
+    // 5.0 (GrantScoreReward 0xDC1BC0 calls it at 0xDC1FB8) and 5.10 (0xDD26D0, at 0xDD2AC8) inline the TSharedFromThis
+    // weak reference update (4.5 calls it, 0x459110), so the maker grew from 0x5E bytes (4.5 0xF9E3A0) to 0xE3 (5.0
+    // 0x1141DD0, 5.10 0x11585E0). The larger size is only tried when the old one found nothing, so 1.1-4.5 match as before.
+    const auto IsContextMaker = [](uintptr_t Target, uintptr_t MaxSize)
     {
         const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
-        return TargetEnd > Target && TargetEnd - Target < 0x80 && FindInstruction(Target, TargetEnd, { 0xB9, 0x20, 0x00, 0x00, 0x00, 0xE8 }) != 0;
+        return TargetEnd > Target && TargetEnd - Target < MaxSize && FindInstruction(Target, TargetEnd, { 0xB9, 0x20, 0x00, 0x00, 0x00, 0xE8 }) != 0;
     };
     uintptr_t GrowCall = 0;
     uintptr_t GrowTarget = 0;
-    uintptr_t ContextCall = 0;
-    uintptr_t ContextTarget = 0;
     for (const auto& [Call, Target] : Calls)
     {
         if (CriticalLoad && Call > ScoreCall && Call < CriticalLoad)
@@ -8227,27 +8228,39 @@ bool Finder::ResolveEarnScoreLive(ptrdiff_t CriticalMatchBonusOffset, FEarnScore
             GrowCall = Call;
             GrowTarget = Target;
         }
-        if (CriticalLoad && !ContextCall && Call > CriticalLoad && IsContextMaker(Target))
-        {
-            ContextCall = Call;
-            ContextTarget = Target;
-        }
     }
-    for (const auto& [Call, Target] : Calls)
+    uintptr_t ContextCall = 0;
+    uintptr_t ContextTarget = 0;
+    for (const uintptr_t MaxSize : { uintptr_t{ 0x80 }, uintptr_t{ 0x100 } })
     {
-        if (!CriticalLoad || ContextCall || Call < CriticalLoad || Finder::FunctionStart(Target) != Target)
+        for (const auto& [Call, Target] : Calls)
         {
-            continue;
-        }
-        const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
-        for (const auto& [InnerCall, InnerTarget] : TargetEnd > Target ? Finder::DirectCalls(Target, TargetEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
-        {
-            if (IsContextMaker(InnerTarget))
+            if (CriticalLoad && !ContextCall && Call > CriticalLoad && IsContextMaker(Target, MaxSize))
             {
-                ContextCall = InnerCall;
-                ContextTarget = InnerTarget;
-                break;
+                ContextCall = Call;
+                ContextTarget = Target;
             }
+        }
+        for (const auto& [Call, Target] : Calls)
+        {
+            if (!CriticalLoad || ContextCall || Call < CriticalLoad || Finder::FunctionStart(Target) != Target)
+            {
+                continue;
+            }
+            const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
+            for (const auto& [InnerCall, InnerTarget] : TargetEnd > Target ? Finder::DirectCalls(Target, TargetEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+            {
+                if (IsContextMaker(InnerTarget, MaxSize))
+                {
+                    ContextCall = InnerCall;
+                    ContextTarget = InnerTarget;
+                    break;
+                }
+            }
+        }
+        if (ContextCall)
+        {
+            break;
         }
     }
 

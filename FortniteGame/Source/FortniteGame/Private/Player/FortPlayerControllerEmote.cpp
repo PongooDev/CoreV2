@@ -379,9 +379,16 @@ void AFortPlayerController::SendSprayStatEvent(UAthenaSprayItemDefinition* Spray
 // CueToPlayWhenReused where it is (the teleport-away cue), and StartToyFadeOutDueToNewPlacement plays
 // CueToPlayWhenExpired and dies.
 //
-// So this counts the summon, takes back the player's toy of the same class when one is still out (its reuse cue, then
-// moved to the new spot), and otherwise fades the oldest toys out until fort.NumToysAlivePerPlayer leave room and
-// spawns a new one owned by the controller; either way the toy is initialized with the summon count and handed back.
+// So this counts the summon, takes back the player's toy of the same class when one is still out, fades the oldest toys
+// out until fort.NumToysAlivePerPlayer leave room, and spawns a new one owned by the controller, initialized with the
+// summon count and handed back.
+//
+// A toy taken back plays its reuse cue where it is and then dies silently, as StartToyFadeOutDueToNewPlacement's own
+// cue-then-SilentDie does; it is not moved to the new spot (#344). The ability attaches whatever it gets to the hand
+// socket (UFortAnimNotifyState_ToySpawn's NotifyBegin, 0xB5DED0, AttachToComponent at SocketName plus LocationOffset)
+// and makes it dormant there in the same frame, so a ball still in flight never sends its clients a stop: their copy
+// kept its projectile velocity and the Ball mesh's interpolation offset, and drifted away from the hand while attached,
+// and the throw then left from that point. A new actor reaches clients already attached and at rest.
 
 namespace
 {
@@ -430,42 +437,45 @@ AActor* AFortPlayerController::SpawnToyInstance(UClass* ToyClass, const FTransfo
         }
     }
 
-    // The player's toy of this class, if one is still out, comes back to the new spot.
-    AActor* NewToy = nullptr;
+    // The player's toy of this class, if one is still out, teleports away (its reuse cue where it is) and dies; the new
+    // one starts at the hand.
     for (int32_t Index = 0; Index < Active.Num(); ++Index)
     {
-        if (Active[Index]->GetClass() == ToyClass)
+        AActor* Reused = Active[Index];
+        if (Reused->GetClass() != ToyClass)
         {
-            NewToy = Active[Index];
-            Active.RemoveAt(Index);
-            break;
+            continue;
         }
-    }
-    if (NewToy)
-    {
-        CallToyEvent(NewToy, L"NotifyToyInstanceOfReuse");
-        NewToy->SetActorLocationAndRotation(SpawnPosition.GetLocation(), SpawnPosition.Rotation.Rotator(), false, true);
-    }
-    else
-    {
-        const int32_t MaxToys = std::max(CVarNumToysAlivePerPlayer.GetValueOnGameThread(), 1);
-        while (Active.Num() >= MaxToys)
+        Active.RemoveAt(Index);
+        CallToyEvent(Reused, L"NotifyToyInstanceOfReuse");
+        if (Reused->FindFunction(FName(L"SilentDie", FNAME_Find)))
         {
-            AActor* Oldest = Active[0];
-            Active.RemoveAt(0);
-            CallToyEvent(Oldest, L"StartToyFadeOutDueToNewPlacement");
+            CallToyEvent(Reused, L"SilentDie");
         }
+        else
+        {
+            Reused->K2_DestroyActor();
+        }
+        break;
+    }
 
-        FActorSpawnParameters SpawnParameters;
-        SpawnParameters.Owner = this;
-        SpawnParameters.Instigator = MyFortPawn;
-        SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-        NewToy = World->SpawnActor(ToyClass, &SpawnPosition, SpawnParameters);
-        if (!NewToy)
-        {
-            Log::Warning(L"Toy: {} couldn't spawn {}", GetName().ToStdString(), ToyClass->GetName().ToStdString());
-            return nullptr;
-        }
+    const int32_t MaxToys = std::max(CVarNumToysAlivePerPlayer.GetValueOnGameThread(), 1);
+    while (Active.Num() >= MaxToys)
+    {
+        AActor* Oldest = Active[0];
+        Active.RemoveAt(0);
+        CallToyEvent(Oldest, L"StartToyFadeOutDueToNewPlacement");
+    }
+
+    FActorSpawnParameters SpawnParameters;
+    SpawnParameters.Owner = this;
+    SpawnParameters.Instigator = MyFortPawn;
+    SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    AActor* NewToy = World->SpawnActor(ToyClass, &SpawnPosition, SpawnParameters);
+    if (!NewToy)
+    {
+        Log::Warning(L"Toy: {} couldn't spawn {}", GetName().ToStdString(), ToyClass->GetName().ToStdString());
+        return nullptr;
     }
 
     Active.Add(NewToy);

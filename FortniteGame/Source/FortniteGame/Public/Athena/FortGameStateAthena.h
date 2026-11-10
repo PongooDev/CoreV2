@@ -62,4 +62,13 @@ public:
     static bool HasAircrafts() { return Member_AirCraftBehavior.IsAvailable() && Member_Aircrafts.IsAvailable(); }
 
     static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
+
+    // A FirstToGoalScore playlist's (Score Royale, 5.30): the best team score and its team, which AFortGameModeAthena's
+    // score check (0xBD9E80) keeps up to date, and the winning team's score and team once one reaches the GoalScore
+    // (WinningScore is -1 until then, the game state's constructor's).
+    DefineUProperty(int32_t, CurrentHighScore)
+    DefineUProperty(int32_t, CurrentHighScoreTeam)
+    DefineUProperty(int32_t, WinningScore)
+    DefineUProperty(int32_t, WinningTeam)
+    static bool HasWinningScore() { return Member_CurrentHighScore.IsAvailable() && Member_CurrentHighScoreTeam.IsAvailable() && Member_WinningScore.IsAvailable() && Member_WinningTeam.IsAvailable(); }
 };

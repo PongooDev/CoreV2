@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GameplayEffect.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
 
@@ -31,12 +32,39 @@ class EAthenaRespawnType
     DefineUEnumValue(InfiniteRespawnExceptStorm)
 };
 
+// How a playlist's match is won (from 3.6). FirstToGoalScore is Score Royale's (5.30's Playlist_Score_Solo, Duos and
+// Squads): the first team whose score reaches its ScoringData's GoalScore wins.
+class EAthenaWinCondition
+{
+    DefineUnrealEnum(EAthenaWinCondition, FortniteGame)
+    DefineUEnumValue(LastManStanding)
+    DefineUEnumValue(FirstToGoalScore)
+};
+
+// A FirstToGoalScore playlist's scoring (from 4.4): the score that wins and the points of each scoring event, whose
+// ScoreAwarded rows are the playlist's own AthenaGameData (Default.ScoringEvent.*).
+struct FWinConditionScoreData
+{
+    DefineUnrealStruct(FWinConditionScoreData, FortniteGame)
+    DefineUStructProperty(FScalableFloat, GoalScore)
+};
+
 class UFortPlaylistAthena : public UFortPlaylist
 {
     DefineUnrealClass(UFortPlaylistAthena, FortniteGame)
 
 public:
     DefineUProperty(int32_t, PlaylistId)
+    // The game's own code plays a FirstToGoalScore playlist (5.30): AFortPlayerStateAthena scores the playlist's events
+    // into TotalPlayerScore and its AFortTeamInfoAthena's score (a searched container's tags in
+    // AFortPlayerController::ServerAttemptInteract, a supply drop's or llama's in AFortAthenaSupplyDrop::
+    // SpawningLootOnDestruction, a coin's in AFortSpawnedScoreActor::OnScoreActorCollected, the eliminations in
+    // OnRep_Kills), and AFortGameModeAthena's Tick sorts the teams by score and ends the match for the first at GoalScore
+    // (5.30 0xC006E0 and 0xBD9E80: the team places, ClientNotifyWon, StartEndGamePhase's end).
+    DefineUProperty(EAthenaWinCondition, WinConditionType)
+    DefineUStructProperty(FWinConditionScoreData, ScoringData)
+    static bool HasScoringData() { return Member_WinConditionType.IsAvailable() && Member_ScoringData.IsAvailable(); }
+    bool IsScoringPlaylist() const { return HasScoringData() && WinConditionType == EAthenaWinCondition::GetFirstToGoalScore(); }
     // AFortGameModeAthena::OnPlaylistDataLoaded (4.2 0xA1BE40) allows respawning (an unreflected game mode flag) when it
     // isn't None; IsRespawningAllowed (0xA19780) reads it again for InfiniteRespawnExceptStorm.
     DefineUProperty(EAthenaRespawnType, RespawnType)

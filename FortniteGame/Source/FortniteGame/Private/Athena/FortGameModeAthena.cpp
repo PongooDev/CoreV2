@@ -648,6 +648,148 @@ void AFortGameModeAthena::WatchMatchResults()
 
 namespace
 {
+    // What Score Royale's log last showed.
+    struct FScoringWatch
+    {
+        std::chrono::steady_clock::time_point NextCheck;
+        bool bAnnounced = false;
+        bool bWon = false;
+        int32_t GoalScore = 0;
+        int32_t HighScore = -1;
+        int32_t Mutators = 0;
+        int32_t ActorsSpawned = 0;
+        // Each player's TotalPlayerScore, by their player state's name.
+        std::map<std::wstring, int32_t> Scores;
+    };
+
+    void CheckScoring(AFortGameModeAthena* GameMode, FScoringWatch& Watch)
+    {
+        UWorld* World = GameMode->GetWorld();
+        AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        // The world starts on the map URL's playlist; the match's comes with its assignment.
+        if (!Playlist || !Playlist->IsScoringPlaylist())
+        {
+            return;
+        }
+        if (!Watch.bAnnounced)
+        {
+            Watch.bAnnounced = true;
+            FWinConditionScoreData& ScoringData = Playlist->ScoringData;
+            Watch.GoalScore = static_cast<int32_t>(ScoringData.GoalScore.GetValueAtLevel(0.0f));
+            Log::Info(L"Score Royale: {} (playlist {}), the first team to {} points wins; {} spawn actor groups", Playlist->GetName().ToStdString(),
+                static_cast<int32_t>(Playlist->PlaylistId), Watch.GoalScore, AFortGameModeAthena::HasSpawnActorDataList() ? GameMode->SpawnActorDataList.Num() : 0);
+        }
+
+        if (AFortGameModeAthena::HasSpawnActorDataList())
+        {
+            const TArray<AActor*>& Mutators = GameMode->GameplayMutators;
+            if (Mutators.Num() != Watch.Mutators)
+            {
+                Watch.Mutators = Mutators.Num();
+                for (AActor* Mutator : Mutators)
+                {
+                    Log::Info(L"Score Royale: gameplay mutator {}", Mutator ? Mutator->GetName().ToStdString() : std::wstring(L"None"));
+                }
+            }
+            // The coins (the playlist's spawn actors) as their waves spawn, at the start of a storm's hold.
+            TStructArray<FFortSpawnActorData>& SpawnActorDataList = GameMode->SpawnActorDataList;
+            int32_t Spawned = 0;
+            for (int32_t Index = 0; Index < SpawnActorDataList.Num(); ++Index)
+            {
+                const TArray<AActor*>& Actors = SpawnActorDataList[Index].SpawnedFortSpawnActors;
+                Spawned += Actors.Num();
+            }
+            if (Spawned != Watch.ActorsSpawned)
+            {
+                Log::Info(L"Score Royale: {} coins spawned ({} in all, storm phase {})", Spawned - Watch.ActorsSpawned, Spawned, static_cast<int32_t>(GameMode->SafeZonePhase));
+                Watch.ActorsSpawned = Spawned;
+            }
+        }
+
+        for (APlayerState* PlayerState : GameState->PlayerArray)
+        {
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            if (!AthenaState)
+            {
+                continue;
+            }
+            const int32_t Score = AthenaState->TotalPlayerScore;
+            int32_t& Logged = Watch.Scores.try_emplace(AthenaState->GetName().ToStdString(), 0).first->second;
+            if (Score == Logged)
+            {
+                continue;
+            }
+            Log::Info(L"Score Royale: {} (team {}) scored {}, {} points now: chests {}, ammo boxes {}, supply drops {}, llamas {}, foraged items {}, coins {}/{}/{}, eliminations {}; the team has {}",
+                AthenaState->GetPlayerName().ToStdString(), static_cast<int32_t>(static_cast<uint8_t>(AthenaState->TeamIndex)), Score - Logged, Score,
+                static_cast<int32_t>(AthenaState->NumChestsOpened), static_cast<int32_t>(AthenaState->NumAmmoCansOpened), static_cast<int32_t>(AthenaState->NumSupplyDropsOpened),
+                static_cast<int32_t>(AthenaState->NumLlamasOpened), static_cast<int32_t>(AthenaState->NumForagedItemsConsumed), static_cast<int32_t>(AthenaState->NumBronzeCoinsCollected),
+                static_cast<int32_t>(AthenaState->NumSilverCoinsCollected), static_cast<int32_t>(AthenaState->NumGoldCoinsCollected), AthenaState->GetKills(),
+                static_cast<int32_t>(AthenaState->TeamScore));
+            Logged = Score;
+        }
+
+        if (!AFortGameStateAthena::HasWinningScore())
+        {
+            return;
+        }
+        if (GameState->CurrentHighScore != Watch.HighScore)
+        {
+            Watch.HighScore = GameState->CurrentHighScore;
+            Log::Info(L"Score Royale: the high score is {} of {} (team {})", Watch.HighScore, Watch.GoalScore, static_cast<int32_t>(GameState->CurrentHighScoreTeam));
+        }
+        if (GameState->WinningScore >= 0 && !Watch.bWon)
+        {
+            Watch.bWon = true;
+            const int32_t WinningTeam = GameState->WinningTeam;
+            std::wstring Winners;
+            for (APlayerState* PlayerState : GameState->PlayerArray)
+            {
+                AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+                if (AthenaState && static_cast<int32_t>(static_cast<uint8_t>(AthenaState->TeamIndex)) == WinningTeam)
+                {
+                    Winners += (Winners.empty() ? L"" : L", ") + AthenaState->GetPlayerName().ToStdString();
+                }
+            }
+            Log::Info(L"Score Royale: team {} won with {} points (goal {}): {}", WinningTeam, static_cast<int32_t>(GameState->WinningScore), Watch.GoalScore,
+                Winners.empty() ? std::wstring(L"no players left") : Winners);
+        }
+    }
+
+    void WatchScores(FWeakObjectPtr GameMode, std::shared_ptr<FScoringWatch> Watch)
+    {
+        GameThread::Enqueue([GameMode, Watch]()
+        {
+            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
+            if (!Athena || Watch->bWon)
+            {
+                return;
+            }
+            const auto Now = std::chrono::steady_clock::now();
+            if (Now >= Watch->NextCheck)
+            {
+                Watch->NextCheck = Now + std::chrono::seconds(1);
+                CheckScoring(Athena, *Watch);
+            }
+            WatchScores(GameMode, Watch);
+        });
+    }
+}
+
+void AFortGameModeAthena::WatchScoring()
+{
+#if WITH_SERVER_CODE
+    // From 4.4 (UFortPlaylistAthena's ScoringData, Score Royale's playlists); the scoring and the win are the build's.
+    if (!UFortPlaylistAthena::HasScoringData() || !AFortPlayerStateAthena::HasTotalPlayerScore() || !AFortGameStateAthena::HasCurrentPlaylistData())
+    {
+        return;
+    }
+    WatchScores(FWeakObjectPtr(this), std::make_shared<FScoringWatch>());
+#endif
+}
+
+namespace
+{
     // How often the server asks for the admin panel's settings before its warmup, and reports during it.
     constexpr auto WarmupAskInterval = std::chrono::seconds(30);
     constexpr auto WarmupReportInterval = std::chrono::seconds(1);

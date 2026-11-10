@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Player/FortPlayerState.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Athena/FortGameStateAthena.h"
+#include "Athena/FortPlaylistAthena.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "Heroes/FortHero.h"
@@ -8,6 +10,7 @@
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "Hooks.h"
+#include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
@@ -285,6 +288,25 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
     {
         KillScore = NewKillScore;
         ForceNetUpdate();
+#if WITH_SERVER_CODE
+        // Score Royale's eliminations (5.30's OnRep_Kills, 0xC4FA60: the playlist's Elimination points for each kill,
+        // into TotalPlayerScore and the team's score, which AFortGameModeAthena's Tick checks against the GoalScore).
+        UWorld* World = GetWorld();
+        AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState && AFortGameStateAthena::HasCurrentPlaylistData() ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        UFunction* OnRep = Role == ROLE_Authority && Playlist && Playlist->IsScoringPlaylist() ? FindStaticFunction_OnRep_Kills() : nullptr;
+        if (OnRep)
+        {
+            const int32_t ScoreBefore = HasTotalPlayerScore() ? static_cast<int32_t>(TotalPlayerScore) : 0;
+            Reflection::FParams Params(OnRep);
+            Params.Call(this);
+            if (HasTotalPlayerScore())
+            {
+                Log::Info(L"Score Royale: {} has {} eliminations, {} points from them (score {} -> {})", GetPlayerName().ToStdString(), static_cast<int32_t>(KillScore),
+                    static_cast<int32_t>(TotalPlayerScore) - ScoreBefore, ScoreBefore, static_cast<int32_t>(TotalPlayerScore));
+            }
+        }
+#endif
     }
 
     // The kills are the player's AthenaKills stat too, which a progressive cosmetic weapon watches (1.11 and 2.1's Candy

@@ -121,9 +121,30 @@ public:
     // 0x4216C0), so Core counts 1.8's kills itself (CountsKills; AFortGameModeAthena's results).
     DefineUProperty(int32_t, Kills)
     DefineUProperty(int32_t, KillScore)
+    // KillScore's RepNotify. From the playlists with a ScoringData (Score Royale's FirstToGoalScore), 5.30's (0xC4FA60)
+    // also scores the eliminations: the playlist's Elimination points for each, into TotalPlayerScore and the team's score.
+    DefineUFunction(OnRep_Kills)
     // The kills of the player's whole team (not replicated): 21.40's AFortPlayerStateAthena::SetKillScore keeps it for
     // each of the team's players.
     DefineUProperty(int32_t, TeamKillScore)
+    // Score Royale's (5.30): what the player scored with, each count followed by an unreflected int32 of the points it
+    // gave (AFortPlayerStateAthena 0xC4B5A0 counts a container's or coin's scoring event, 0xC3C460 prices it from the
+    // playlist's ScoringData), and the sum of those points with the eliminations' (0xC3C540, which adds what it gained to
+    // the player's AFortTeamInfoAthena score).
+    DefineUProperty(int32_t, NumChestsOpened)
+    DefineUProperty(int32_t, NumAmmoCansOpened)
+    DefineUProperty(int32_t, NumSupplyDropsOpened)
+    DefineUProperty(int32_t, NumLlamasOpened)
+    DefineUProperty(int32_t, NumForagedItemsConsumed)
+    DefineUProperty(int32_t, NumBronzeCoinsCollected)
+    DefineUProperty(int32_t, NumSilverCoinsCollected)
+    DefineUProperty(int32_t, NumGoldCoinsCollected)
+    DefineUProperty(int32_t, TotalPlayerScore)
+    // The team's score and its place by score, which AFortGameModeAthena's score check (5.30 0xBD9E80) copies to each of
+    // the team's players.
+    DefineUProperty(int32_t, TeamScore)
+    DefineUProperty(int32_t, TeamScorePlacement)
+    static bool HasTotalPlayerScore() { return Member_TotalPlayerScore.IsAvailable() && Member_NumGoldCoinsCollected.IsAvailable(); }
     DefineUStructProperty(FDeathInfo, DeathInfo)
     // 1.11: the player's squad within their team, 0 for none (OnRep_SquadId adds the squad's player states to the
     // owning controller's SquadMembers). AFortGameModeAthena::PlacePlayerOnTeam (2.1 0x444780) sets it from the
@@ -225,7 +246,9 @@ public:
     }
 
     // 21.40's SetKillScore: the player's KillScore, and TeamKillScore for every player of their team (the sum of the
-    // team's KillScore). Replicated at once (ForceNetUpdate), so the HUD's kill count (OnRep_Kills) follows. Builds with
-    // Kills (1.7.2) count their own: nothing is set there.
+    // team's KillScore). Replicated at once (ForceNetUpdate), so the HUD's kill count (OnRep_Kills) follows. Builds
+    // with Kills (1.7.2) count their own: nothing is set there. A RepNotify runs on clients only, and a scoring
+    // playlist's elimination points are scored in OnRep_Kills, so there the server, whose points count, calls it itself
+    // (the Unreal way to run a RepNotify on the server).
     void SetKillScore(int32_t NewKillScore);
 };

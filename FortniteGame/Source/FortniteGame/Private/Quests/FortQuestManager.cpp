@@ -64,21 +64,29 @@ namespace
 
 #if WITH_SERVER_CODE
     void SaveStatEvents(UFortQuestManager* QuestManager);
+    std::vector<std::pair<std::wstring, int32_t>> HoldStatsCountedFromResults(UFortQuestManager* QuestManager);
+    void RestoreHeldStats(UFortQuestManager* QuestManager, const std::vector<std::pair<std::wstring, int32_t>>& Held);
 #endif
 
     // The quest manager's flush: its pending progress goes to its profile as UpdateQuests, nothing is sent when none is
     // pending. The completion delegate it takes by value is left unbound. Builds that strip it save it through Core's.
+    // Battle Royale's objectives the backend counts from the match's results stay pending (HoldStatsCountedFromResults).
     void SaveProgress(UFortQuestManager* QuestManager)
     {
 #if WITH_SERVER_CODE
+        const std::vector<std::pair<std::wstring, int32_t>> Held = HoldStatsCountedFromResults(QuestManager);
         if (!Natives::UFortQuestManager_FlushStatEvents)
         {
             SaveStatEvents(QuestManager);
+            RestoreHeldStats(QuestManager, Held);
             return;
         }
 #endif
         alignas(16) uint8_t OnComplete[0x40] = {};
         Natives::UFortQuestManager_FlushStatEvents(QuestManager, OnComplete);
+#if WITH_SERVER_CODE
+        RestoreHeldStats(QuestManager, Held);
+#endif
     }
 
     void SaveWhenDue()
@@ -844,6 +852,93 @@ namespace
             FFortQuestObjectiveCompletion& Entry = AddPending(QuestManager, StatName);
             Entry.Count = Entry.Count + Count;
         }
+    }
+
+    // Core-Backend counts two kinds of Battle Royale objectives from the match's results (battleroyale/recordresults,
+    // profiles/athena.js countedFromResults) and skips them in UpdateQuests, so a match counts once: placement
+    // (AthenaRank rows) and eliminations with any weapon (a Kill row whose SourceTags are just Homebase.Class, with no
+    // condition: killingblow_athena_player, "Eliminate opponents").
+    bool IsCountedFromResults(FFortMcpQuestObjectiveInfo& Objective, const wchar_t* ContextString)
+    {
+        const FFortQuestObjectiveStatTableRow* Row = StatRowOf(Objective.ObjectiveStatHandle, ContextString);
+        if (!Row)
+        {
+            return false;
+        }
+        const uint8_t Type = static_cast<uint8_t>(Row->Type);
+        if (Type == EFortQuestObjectiveStatEvent::GetKill())
+        {
+            const FString& SourceTags = Row->SourceTags;
+            const FString& Condition = Row->Condition;
+            return SourceTags.ToStdString() == L"Homebase.Class" && Condition.Len() == 0;
+        }
+        return EFortQuestObjectiveStatEvent{ Type }.ToString().ends_with(L"AthenaRank");
+    }
+
+    // The pending progress of the objectives Core-Backend counts from the match's results is held back, not sent, and
+    // put back after the flush (RestoreHeldStats), so it stays pending for the rest of the match. Sent, the backend left
+    // it out and the server's copy of the profile never moved, so once the request was answered the objective's count
+    // (the profile's, the requests in flight and the pending progress) fell back, and the client, which shows the
+    // server's count (UpdatedObjectiveStats), went from 2/3 or 3/3 back to 1/3 at the next elimination (#366). Held, it
+    // counts up through the match, and the match's results move the profile. A name is held only when every active
+    // quest's objective of that name is counted from the results, so a name another objective counts still goes.
+    std::vector<std::pair<std::wstring, int32_t>> HoldStatsCountedFromResults(UFortQuestManager* QuestManager)
+    {
+        std::vector<std::pair<std::wstring, int32_t>> Held;
+        UFortRegisteredPlayerInfo* PlayerInfo = QuestManager ? Cast<UFortRegisteredPlayerInfo>(QuestManager->GetOuter()) : nullptr;
+        if (!PlayerInfo || PlayerInfo->GetAthenaQuestManager() != QuestManager || !UFortQuestManager::HasCurrentQuests() || !Configuration::Get().IsBattleRoyale())
+        {
+            return Held;
+        }
+        TStructArray<FFortQuestObjectiveCompletion>& Pending = QuestManager->PendingChanges;
+        if (Pending.Num() == 0)
+        {
+            return Held;
+        }
+
+        const auto Lower = [](std::wstring Text)
+        {
+            std::transform(Text.begin(), Text.end(), Text.begin(), [](wchar_t Character) { return static_cast<wchar_t>(std::towlower(Character)); });
+            return Text;
+        };
+        std::unordered_map<std::wstring, bool> FromResults;
+        const TArray<UFortQuestItem*>& Quests = QuestManager->CurrentQuests;
+        for (int32_t QuestIndex = 0; QuestIndex < Quests.Num(); ++QuestIndex)
+        {
+            UFortQuestItem* Quest = Quests[QuestIndex];
+            UFortQuestItemDefinitionObjectives* Definition = Quest && Quest->quest_state == EFortQuestState::GetActive() ? Cast<UFortQuestItemDefinitionObjectives>(Quest->GetQuestDefinition()) : nullptr;
+            if (!Definition)
+            {
+                continue;
+            }
+            const std::wstring DefinitionName = Definition->GetName().ToStdString();
+            TStructArray<FFortMcpQuestObjectiveInfo>& Objectives = Definition->Objectives;
+            for (int32_t Index = 0; Index < Objectives.Num(); ++Index)
+            {
+                const bool bFromResults = IsCountedFromResults(Objectives[Index], DefinitionName.c_str());
+                auto [Found, bAdded] = FromResults.try_emplace(Lower(static_cast<FName>(Objectives[Index].BackendName).ToString().ToStdString()), bFromResults);
+                Found->second = Found->second && bFromResults;
+            }
+        }
+
+        std::wstring Text;
+        for (int32_t Index = Pending.Num() - 1; Index >= 0; --Index)
+        {
+            const std::wstring StatName = static_cast<FString&>(Pending[Index].StatName).ToStdString();
+            const auto Found = FromResults.find(Lower(StatName));
+            if (Found == FromResults.end() || !Found->second)
+            {
+                continue;
+            }
+            Held.emplace_back(StatName, static_cast<int32_t>(Pending[Index].Count));
+            Text += std::format(L"{}{}:{}", Text.empty() ? L"" : L", ", StatName, Held.back().second);
+            Pending.RemoveAt(Index);
+        }
+        if (!Held.empty())
+        {
+            Log::Info(L"SaveStatEvents for {}: {} held back, the backend counts them from the match's results", QuestManager->GetName().ToStdString(), Text);
+        }
+        return Held;
     }
 
     // The profile answered an UpdateQuests (1.9.1 0x8BF800): the request is done, and when it failed its progress is

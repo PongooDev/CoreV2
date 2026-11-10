@@ -61,6 +61,7 @@
 #include "Player/FortCheatManager.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerControllerDeployableBase.h"
+#include "DeployableBases/FortDeployableBaseLibrary.h"
 #include "Player/FortPlayerControllerOutpost.h"
 #include "Player/FortPlayerControllerZone.h"
 #include "Player/FortPlayerState.h"
@@ -299,6 +300,7 @@ static void InstallHooks()
         AFortPlayerControllerZone::HookVTables();
         AFortPlayerControllerOutpost::HookVTables();
         AFortPlayerControllerDeployableBase::HookVTables();
+        UFortDeployableBaseLibrary::HookNatives();
         AFortQuickBars::HookVTables();
         AFortPickup::HookVTables();
         AFortObjectiveBase::HookVTables();

@@ -21,6 +21,7 @@
 #include "FortGameState.h"
 #include "FortVisibilityManager.h"
 #include "FortZoneTheme.h"
+#include "DeployableBases/FortDeployableBaseManager.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "Online/FortLobbyBeaconHost.h"
@@ -258,6 +259,8 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     {
         Outpost->KeepStructureLimit();
     }
+    // Challenge the Horde and Build the Fort (5.0): their game mode's own FinishWorldInitialization runs next.
+    AFortDeployableBaseManager::WatchHorde(this);
 #endif
 }
 

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Player/FortPlayerControllerDeployableBase.h"
+#include "DeployableBases/FortDeployableBaseManager.h"
 #include "Finder.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
@@ -35,28 +36,6 @@ public:
 
 namespace
 {
-    class AFortDeployableBaseManager : public AActor
-    {
-        DefineUnrealClass(AFortDeployableBaseManager, FortniteGame)
-        DefineUFunction(GetCurrent)
-        DefineUFunction(GetDeployableBasePlotFromLocation)
-
-    public:
-        static AFortDeployableBaseManager* GetCurrent(UObject* WorldContextObject)
-        {
-            Reflection::FParams Params(StaticFunction_GetCurrent());
-            Params.Set(L"WorldContextObject", WorldContextObject);
-            return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<AFortDeployableBaseManager*>(L"ReturnValue") : nullptr;
-        }
-
-        ADeployableBasePlot* GetDeployableBasePlotFromLocation(const FVector& Location) const
-        {
-            Reflection::FParams Params(StaticFunction_GetDeployableBasePlotFromLocation());
-            Params.Set(L"Location", Location);
-            return Params.Call(const_cast<AFortDeployableBaseManager*>(this)) ? Params.Take<ADeployableBasePlot*>(L"ReturnValue") : nullptr;
-        }
-    };
-
     class UFortDeployableBaseLibrary : public UObject
     {
         DefineUnrealClass(UFortDeployableBaseLibrary, FortniteGame)

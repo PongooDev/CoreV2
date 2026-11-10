@@ -361,7 +361,11 @@ void AFortMissionManager::SetMissionCompletionResult(AFortMission* Mission)
 #if WITH_SERVER_CODE
     const EFortMissionStatus Status = Mission->MissionStatus;
     const bool bSucceeded = Status == EFortMissionStatus::GetSucceeded();
+    // Challenge the Horde's override (Mission_ChallengeTheHorde) gives the points of the tier reached from its layout's
+    // TierToMissionPointLookupTable (HordeTierToMissionPointCurve), which raise the reward chest's level.
     const int32_t AdditionalMissionPoints = Mission->GetAdditionalMissionCompletionMissionPoints(Status);
+    Log::Info(L"AFortMissionManager::SetMissionCompletionResult: {} is {}, {} additional completion mission point(s) for the reward chest", Mission->GetName().ToStdString(),
+        GetMissionStatusName(Status).ToStdString(), AdditionalMissionPoints);
     for (AFortPlayerController* PlayerController : Mission->GetParticipatingMissionControllers())
     {
         if (!PlayerController)

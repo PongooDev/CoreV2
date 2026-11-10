@@ -185,70 +185,11 @@ namespace
             {
                 ObjectLayout::Current.FUObjectArray_Members = Members;
                 Log::Info(L"Object layout: FUObjectArray's members start at +0x{:X}", Members);
-
-                // UE 4.21 (5.0) chunks ObjObjects: AllocateObjectPool takes its address and fills in MaxElements and
-                // MaxChunks, lea rsi, [rbp+100h]; ...; mov [rsi+18h], ecx (MaxChunks); mov [rsi+10h], eax (CL-4214610
-                // 0x178CA71). The fixed array has nothing at +0x18.
-                const int32_t ObjObjects = (Members + 3 * static_cast<int32_t>(sizeof(int32_t)) + 1 + 7) & ~7;
-                const uintptr_t AllocatePoolEnd = Finder::FunctionEnd(AllocatePool);
-                for (uintptr_t Lea = AllocatePoolEnd ? FindInstruction(AllocatePool, AllocatePoolEnd, { 0x48, 0x8D, -1, ObjObjects & 0xFF, (ObjObjects >> 8) & 0xFF, 0x00, 0x00 }) : 0; Lea && !ObjectLayout::Current.bChunkedObjectArray;
-                     Lea = FindInstruction(Lea + 1, AllocatePoolEnd, { 0x48, 0x8D, -1, ObjObjects & 0xFF, (ObjObjects >> 8) & 0xFF, 0x00, 0x00 }))
-                {
-                    const uint8_t ModRm = Byte(Lea + 2);
-                    const uint8_t Address = (ModRm >> 3) & 0x07;
-                    if ((ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04 || Address == 0x04)
-                    {
-                        continue;
-                    }
-                    for (uintptr_t Store = Lea + 7; Store + 3 <= Lea + 0x40 && Store + 3 <= AllocatePoolEnd; ++Store)
-                    {
-                        if (Byte(Store) == 0x89 && (Byte(Store + 1) & 0xC7) == (0x40 | Address) && Byte(Store + 2) == 0x18 && (Byte(Store - 1) & 0xF1) != 0x41)
-                        {
-                            ObjectLayout::Current.bChunkedObjectArray = true;
-                            break;
-                        }
-                    }
-                }
-
-                // Fortnite's chunks hold 0x10400 items, not UE's 64K: the inlined IndexToObject divides by them (imul eax,
-                // edx, 10400h after the 7E07E07Fh reciprocal) right before it loads the chunk table, mov rax,
-                // [GUObjectArray+ObjObjects] (CL-4214610 0x287C51B, in KismetSystemLibrary::execIsValidClass). The size
-                // most such reads agree on counts.
-                const uintptr_t ChunkTable = Array + ObjObjects;
-                std::unordered_map<int32_t, int32_t> ChunkSizes;
-                for (uintptr_t Load = ObjectLayout::Current.bChunkedObjectArray ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { -1, 0x8B, -1, -1, -1, -1, -1 }) : 0; Load; Load = FindInstruction(Load + 1, Finder::TextEnd(), { -1, 0x8B, -1, -1, -1, -1, -1 }))
-                {
-                    if ((Byte(Load) & 0xFB) != 0x48 || (Byte(Load + 2) & 0xC7) != 0x05 || Finder::RelativeTarget(Load, 3, 7) != ChunkTable)
-                    {
-                        continue;
-                    }
-                    for (uintptr_t Multiply = Load - 0x30; Multiply + 6 <= Load; ++Multiply)
-                    {
-                        const int32_t Size = *reinterpret_cast<const int32_t*>(Multiply + 2);
-                        if (Byte(Multiply) == 0x69 && (Byte(Multiply + 1) & 0xC0) == 0xC0 && Size >= 0x1000 && Size <= 0x100000)
-                        {
-                            ++ChunkSizes[Size];
-                            break;
-                        }
-                    }
-                }
-                int32_t ChunkSizeVotes = 0;
-                for (const auto& [Size, Votes] : ChunkSizes)
-                {
-                    if (Votes > ChunkSizeVotes)
-                    {
-                        ObjectLayout::Current.ObjectArrayElementsPerChunk = Size;
-                        ChunkSizeVotes = Votes;
-                    }
-                }
-                if (ObjectLayout::Current.bChunkedObjectArray)
-                {
-                    Log::Info(L"Object layout: ObjObjects (+0x{:X}) is a FChunkedFixedUObjectArray of 0x{:X}-item chunks ({} reads agree)", ObjObjects, ObjectLayout::Current.ObjectArrayElementsPerChunk, ChunkSizeVotes);
-                }
             }
         }
         // 4.4.0 (CL-4117433) has them 8 bytes in, close enough for a byte displacement: mov [rcx+10h], r8d (0x1579311),
-        // where 4.4.2 has mov [rcx+110h], r8d. Up to 1.9.1 that store is mov [rcx+8], r8d, which leaves them at 0.
+        // where 4.4.2 has mov [rcx+110h], r8d. Up to 1.9.1 that store is mov [rcx+8], r8d, which leaves them at 0. 5.21
+        // (CL-4288479) has them at +0x64 (mov [rcx+6Ch], r8d, 0x17DB48A), and its ObjObjects is chunked.
         if (!ObjectLayout::Current.FUObjectArray_Members)
         {
             const uintptr_t Store = AllocatePool ? FindInstruction(AllocatePool, AllocatePool + 0x20, { 0x44, 0x89, 0x41 }) : 0;
@@ -257,6 +198,90 @@ namespace
             {
                 ObjectLayout::Current.FUObjectArray_Members = Members;
                 Log::Info(L"Object layout: FUObjectArray's members start at +0x{:X}", Members);
+            }
+        }
+        if (const int32_t Members = ObjectLayout::Current.FUObjectArray_Members)
+        {
+            // UE 4.21 (5.0) chunks ObjObjects: AllocateObjectPool takes its address and fills in MaxElements and
+            // MaxChunks, lea rsi, [rbp+100h]; ...; mov [rsi+18h], ecx (MaxChunks); mov [rsi+10h], eax (CL-4214610
+            // 0x178CA71). The fixed array has nothing at +0x18.
+            const int32_t ObjObjects = (Members + 3 * static_cast<int32_t>(sizeof(int32_t)) + 1 + 7) & ~7;
+            const uintptr_t AllocatePoolEnd = Finder::FunctionEnd(AllocatePool);
+            for (uintptr_t Lea = AllocatePoolEnd ? FindInstruction(AllocatePool, AllocatePoolEnd, { 0x48, 0x8D, -1, ObjObjects & 0xFF, (ObjObjects >> 8) & 0xFF, 0x00, 0x00 }) : 0; Lea && !ObjectLayout::Current.bChunkedObjectArray;
+                 Lea = FindInstruction(Lea + 1, AllocatePoolEnd, { 0x48, 0x8D, -1, ObjObjects & 0xFF, (ObjObjects >> 8) & 0xFF, 0x00, 0x00 }))
+            {
+                const uint8_t ModRm = Byte(Lea + 2);
+                const uint8_t Address = (ModRm >> 3) & 0x07;
+                if ((ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04 || Address == 0x04)
+                {
+                    continue;
+                }
+                for (uintptr_t Store = Lea + 7; Store + 3 <= Lea + 0x40 && Store + 3 <= AllocatePoolEnd; ++Store)
+                {
+                    if (Byte(Store) == 0x89 && (Byte(Store + 1) & 0xC7) == (0x40 | Address) && Byte(Store + 2) == 0x18 && (Byte(Store - 1) & 0xF1) != 0x41)
+                    {
+                        ObjectLayout::Current.bChunkedObjectArray = true;
+                        break;
+                    }
+                }
+            }
+            // 5.21 (CL-4288479) has the members at +0x64, so ObjObjects (+0x78) is close enough to address through
+            // the array itself, with no lea: mov [rbp+88h], eax (MaxElements); mov [rbp+90h], ecx (MaxChunks), with
+            // rbp the array (0x17DB516). A store at +0x10 and +0x18 from one base is the chunked array's too.
+            for (uintptr_t Store = AllocatePoolEnd && !ObjectLayout::Current.bChunkedObjectArray ? AllocatePool : 0; Store && Store + 6 <= AllocatePoolEnd; ++Store)
+            {
+                const uint8_t ModRm = Byte(Store + 1);
+                if (Byte(Store) != 0x89 || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04 || (Byte(Store - 1) & 0xF1) == 0x41 ||
+                    *reinterpret_cast<const int32_t*>(Store + 2) != ObjObjects + 0x18)
+                {
+                    continue;
+                }
+                for (uintptr_t Other = AllocatePool; Other + 6 <= AllocatePoolEnd; ++Other)
+                {
+                    if (Byte(Other) == 0x89 && (Byte(Other + 1) & 0xC7) == (0x80 | (ModRm & 0x07)) && (Byte(Other - 1) & 0xF1) != 0x41 &&
+                        *reinterpret_cast<const int32_t*>(Other + 2) == ObjObjects + 0x10)
+                    {
+                        ObjectLayout::Current.bChunkedObjectArray = true;
+                        break;
+                    }
+                }
+                break;
+            }
+
+            // Fortnite's chunks hold 0x10400 items, not UE's 64K: the inlined IndexToObject divides by them (imul eax,
+            // edx, 10400h after the 7E07E07Fh reciprocal) right before it loads the chunk table, mov rax,
+            // [GUObjectArray+ObjObjects] (CL-4214610 0x287C51B, in KismetSystemLibrary::execIsValidClass). The size
+            // most such reads agree on counts.
+            const uintptr_t ChunkTable = Array + ObjObjects;
+            std::unordered_map<int32_t, int32_t> ChunkSizes;
+            for (uintptr_t Load = ObjectLayout::Current.bChunkedObjectArray ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { -1, 0x8B, -1, -1, -1, -1, -1 }) : 0; Load; Load = FindInstruction(Load + 1, Finder::TextEnd(), { -1, 0x8B, -1, -1, -1, -1, -1 }))
+            {
+                if ((Byte(Load) & 0xFB) != 0x48 || (Byte(Load + 2) & 0xC7) != 0x05 || Finder::RelativeTarget(Load, 3, 7) != ChunkTable)
+                {
+                    continue;
+                }
+                for (uintptr_t Multiply = Load - 0x30; Multiply + 6 <= Load; ++Multiply)
+                {
+                    const int32_t Size = *reinterpret_cast<const int32_t*>(Multiply + 2);
+                    if (Byte(Multiply) == 0x69 && (Byte(Multiply + 1) & 0xC0) == 0xC0 && Size >= 0x1000 && Size <= 0x100000)
+                    {
+                        ++ChunkSizes[Size];
+                        break;
+                    }
+                }
+            }
+            int32_t ChunkSizeVotes = 0;
+            for (const auto& [Size, Votes] : ChunkSizes)
+            {
+                if (Votes > ChunkSizeVotes)
+                {
+                    ObjectLayout::Current.ObjectArrayElementsPerChunk = Size;
+                    ChunkSizeVotes = Votes;
+                }
+            }
+            if (ObjectLayout::Current.bChunkedObjectArray)
+            {
+                Log::Info(L"Object layout: ObjObjects (+0x{:X}) is a FChunkedFixedUObjectArray of 0x{:X}-item chunks ({} reads agree)", ObjObjects, ObjectLayout::Current.ObjectArrayElementsPerChunk, ChunkSizeVotes);
             }
         }
     }
@@ -1787,24 +1812,42 @@ namespace
 
     // bWide: 5.0 (UE 4.21) schedules more between the compare and its jnz (UGameEngine::Tick, CL-4214610 0x23C60AF: jnz
     // 0x12 on); the wider scan stops at a jz, the other branch of a compare that isn't such a check.
-    std::vector<uint8_t*> CommandletChecks(uintptr_t Function, bool bWide = false)
+    // bDecode: instruction by instruction, not byte by byte. On 5.21 (CL-4288479) the displacements of the flag compares
+    // after two of UGameEngine::Tick's commandlet compares hold a 0x75 (0x248B4EC, 0x248B547), which the byte scan read as
+    // jnz, three checks where there are two.
+    std::vector<uint8_t*> CommandletChecks(uintptr_t Function, bool bWide = false, bool bDecode = false)
     {
         std::vector<uint8_t*> Checks;
         const uintptr_t End = Finder::FunctionEnd(Function);
         const uintptr_t Commandlet = reinterpret_cast<uintptr_t>(Natives::PRIVATE_GIsRunningCommandlet);
+        const auto IsJnz = [](uintptr_t At) { return Byte(At) == 0x75 || (Byte(At) == 0x0F && Byte(At + 1) == 0x85); };
+        const auto IsJz = [](uintptr_t At) { return Byte(At) == 0x74 || (Byte(At) == 0x0F && Byte(At + 1) == 0x84); };
         for (uintptr_t Compare = Function; Function && End && Compare + 6 <= End; ++Compare)
         {
             if (Byte(Compare) != 0x38 || (Byte(Compare + 1) & 0xC7) != 0x05 || Finder::RelativeTarget(Compare, 2, 6) != Commandlet)
             {
                 continue;
             }
-            for (uintptr_t Jump = Compare + 6; Jump < Compare + (bWide ? 0x18 : 0x12); ++Jump)
+            const uintptr_t Limit = Compare + (bWide ? 0x18 : 0x12);
+            if (bDecode)
             {
-                if (bWide && (Byte(Jump) == 0x74 || (Byte(Jump) == 0x0F && Byte(Jump + 1) == 0x84)))
+                const uintptr_t Jump = Finder::TraceFind(Compare + 6, 8, [&](uintptr_t At)
+                {
+                    return At < Compare + 6 || At >= Limit || IsJnz(At) || (bWide && IsJz(At));
+                });
+                if (Jump >= Compare + 6 && Jump < Limit && IsJnz(Jump))
+                {
+                    Checks.push_back(reinterpret_cast<uint8_t*>(Jump));
+                }
+                continue;
+            }
+            for (uintptr_t Jump = Compare + 6; Jump < Limit; ++Jump)
+            {
+                if (bWide && IsJz(Jump))
                 {
                     break;
                 }
-                if (Byte(Jump) == 0x75 || (Byte(Jump) == 0x0F && Byte(Jump + 1) == 0x85))
+                if (IsJnz(Jump))
                 {
                     Checks.push_back(reinterpret_cast<uint8_t*>(Jump));
                     break;
@@ -1850,6 +1893,14 @@ namespace
         if (TickChecks.size() < 2)
         {
             TickChecks = CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick), true);
+        }
+        if (TickChecks.size() > 2)
+        {
+            TickChecks = CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick), false, true);
+            if (TickChecks.size() < 2)
+            {
+                TickChecks = CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick), true, true);
+            }
         }
         RequireChecks(L"UGameEngine::Tick", Sites::GameEngineTickDedicatedServerChecks, std::move(TickChecks), 2);
     }
@@ -6669,8 +6720,9 @@ bool Finder::ResolveQueryGeneratorsLive(void** EnemiesVTable)
         GenerateIndex = VTableEntry(EnemiesVTable, Index) == Enemies ? Index : -1;
     }
 
+    // 5.21 (CL-4288479) saves more registers first: its lea rcx, [rdx+34h] is 0x24 bytes in (0xA73A54).
     int32_t OwnerOffset = -1;
-    for (uintptr_t Site = Enemies; Site && Site + 4 <= Enemies + 0x20 && OwnerOffset < 0; ++Site)
+    for (uintptr_t Site = Enemies; Site && Site + 4 <= Enemies + 0x40 && OwnerOffset < 0; ++Site)
     {
         if (Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == 0x4A)
         {
@@ -12872,6 +12924,18 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     {
         OutlivedStore = IsDisp32Access(Site, 0x89, -1, -1) ? Site : 0;
     }
+    // 5.21 (CL-4288479) counts no teammates out: the win stores the starting players less the team's size at the start
+    // (a native of the player state the aircraft's start sets, 0xBE27B0), "mov eax, [rsi + 1030h]; sub eax, [rbx + 0F84h];
+    // mov [rbx + 0F80h], eax" (0xBE57EA), and the team placement (0xBE59B0, from CheckWinConditionLastManStanding) does
+    // the same for each player of the team still at -1. The game counts what the player outlived itself there.
+    bool bOutlivedByGame = false;
+    if (SecondsAliveStore && !CountCall && IsDisp32Access(SecondsAliveStore + 6, 0x8B, -1, -1) && Byte(SecondsAliveStore + 12) == 0x2B && (Byte(SecondsAliveStore + 13) & 0xC0) == 0x80 &&
+        IsDisp32Access(SecondsAliveStore + 18, 0x89, -1, -1) && Byte(SecondsAliveStore + 7) >> 3 == Byte(SecondsAliveStore + 13) >> 3 && Byte(SecondsAliveStore + 13) == Byte(SecondsAliveStore + 19))
+    {
+        StartingPlayersLoad = SecondsAliveStore + 6;
+        OutlivedStore = SecondsAliveStore + 18;
+        bOutlivedByGame = true;
+    }
 
     // The death cause (1.9.1 0x43AE20, on the pawn): 1.9 matched the damage tags in the handler itself, 1.9.1 has a
     // function for it, which its DBNO handling (AFortPlayerPawnAthena's 0x438640) calls with the damage tags and false,
@@ -13065,7 +13129,8 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     Natives::AFortPlayerControllerAthena_UpdateTeamMembersIndex = UpdateTeamMembersIndex;
     if (OutlivedStore)
     {
-        Natives::AFortPlayerControllerAthena_CountTeammatesOut = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_CountTeammatesOut)>(Finder::RelativeTarget(CountCall, 1, 5));
+        // Left unset where the game counts it (bOutlivedByGame), so the restored handler leaves the count to the game.
+        Natives::AFortPlayerControllerAthena_CountTeammatesOut = CountCall ? reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_CountTeammatesOut)>(Finder::RelativeTarget(CountCall, 1, 5)) : nullptr;
         Natives::AFortGameStateAthena_StartingPlayers = *reinterpret_cast<const int32_t*>(StartingPlayersLoad + 2);
         Natives::AFortPlayerStateAthena_PlayersOutlived = *reinterpret_cast<const int32_t*>(OutlivedStore + 2);
     }
@@ -13075,6 +13140,11 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
         Rva(Remove), Rva(SetTeamPlace), Rva(SoloWin), Rva(GetSecondsAlive), Rva(GetDeathCause), bStaticDeathCause ? L" (ToDeathCause)" : L"", UpdateTeamMembersIndex);
     Log::Info(L"Finder: pawn-death handler: teammates out 0x{:X}, starting players +0x{:X}, players outlived +0x{:X}",
         Rva(reinterpret_cast<uintptr_t>(Natives::AFortPlayerControllerAthena_CountTeammatesOut)), Natives::AFortGameStateAthena_StartingPlayers, Natives::AFortPlayerStateAthena_PlayersOutlived);
+    if (bOutlivedByGame)
+    {
+        Log::Info(L"Finder: pawn-death handler: the win and the team placement count what each player outlived (the starting players less the team's size at the start, +0x{:X})",
+            *reinterpret_cast<const int32_t*>(SecondsAliveStore + 14));
+    }
     if (GameModeTeamJoinIndex >= 0)
     {
         Log::Info(L"Finder: pawn-death handler: no TeamMembers fill; the game mode fills TeamMembers as players join teams (slot 0x{:X})", GameModeTeamJoinIndex);

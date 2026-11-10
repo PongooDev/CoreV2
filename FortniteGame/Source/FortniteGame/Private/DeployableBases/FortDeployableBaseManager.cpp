@@ -336,18 +336,24 @@ namespace
         }
         FWorldInitializationNatives& Natives = Resolved[GameModeFinish];
 
-        // The game mode's FinishWorldInitialization: a short call to GetCurrent, then a jmp to the manager's.
+        // The game mode's FinishWorldInitialization: a short call to GetCurrent, then a jmp to the manager's. 5.21
+        // (CL-4288479 0xE004D0) calls the manager's when there is one (0xDE0350) and jumps to Super's after, so the
+        // target taken is the first call or jump whose body sets bWorldInitialized: or dword ptr [this+550h], 2.
+        const auto SetsWorldInitialized = [](uintptr_t Function)
+        {
+            const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
+            return FunctionEnd && ContainsBytes(Function, FunctionEnd, { 0x83, -1, 0x50, 0x05, 0x00, 0x00, 0x02 });
+        };
         const uintptr_t Finish = reinterpret_cast<uintptr_t>(GameModeFinish);
         const uintptr_t FinishEnd = Finish ? Finder::FunctionEnd(Finish) : 0;
         for (uintptr_t Site = Finish; FinishEnd > Finish && FinishEnd - Finish <= 0x40 && Site + 5 <= FinishEnd && !Natives.WorldInitialization; ++Site)
         {
-            const uintptr_t Target = CodeByte(Site) == 0xE9 ? Finder::RelativeTarget(Site, 1, 5) : 0;
-            Natives.WorldInitialization = Target && Finder::FunctionStart(Target) == Target ? Target : 0;
+            const uintptr_t Target = CodeByte(Site) == 0xE9 || CodeByte(Site) == 0xE8 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+            Natives.WorldInitialization = Target && Finder::FunctionStart(Target) == Target && SetsWorldInitialized(Target) ? Target : 0;
         }
         const uintptr_t Begin = Natives.WorldInitialization;
         const uintptr_t End = Begin ? Finder::FunctionEnd(Begin) : 0;
-        // bWorldInitialized: or dword ptr [this+550h], 2.
-        if (!End || !ContainsBytes(Begin, End, { 0x83, -1, 0x50, 0x05, 0x00, 0x00, 0x02 }))
+        if (!End)
         {
             Log::Error(L"Finder: AFortDeployableBaseManager world initialization not found (game mode's FinishWorldInitialization +0x{:X})", Finish ? Finish - Finder::ImageBase() : 0);
             Natives = {};

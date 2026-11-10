@@ -438,7 +438,12 @@ void AFortPlayerController::ServerRepairBuildingActor_Implementation(ABuildingSM
         UAISense_Hearing::ReportNoiseEvent(Pawn, Location, BuildingNoiseLoudness, Pawn, BuildingNoiseRange, FName());
     }
 
-    // Every player in the world hears the repair start there (0x5FE470).
+    // Every player in the world hears the repair start there (0x5FE470). 5.21 (CL-4288479) moves StartRepairSound to
+    // ABuildingSMActor, which plays it itself at its location when the repair starts (0xCA2AE0).
+    if (!Member_StartRepairSound.IsAvailable())
+    {
+        return;
+    }
     const TAssetPtr<UObject>& RepairSound = StartRepairSound;
     if (UObject* Sound = RepairSound.LoadSynchronous())
     {

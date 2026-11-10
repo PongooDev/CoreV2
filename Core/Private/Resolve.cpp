@@ -7357,7 +7357,7 @@ bool Finder::ResolveTheaterMapDataLive()
 
 bool Finder::ResolveHomebaseGadgetsLive()
 {
-    if (Natives::UFortMcpProfileCampaign_GetModeLoadout && Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface && Natives::UFortHomebaseManager_GetSelectableGadgetItems && Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits)
+    if (Natives::UFortMcpProfileCampaign_GetModeLoadout && Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface && Natives::UFortHomebaseManager_GetSelectableGadgetItems && Natives::UFortHomebaseManager_GetOwnedNodes)
     {
         return true;
     }
@@ -7390,6 +7390,13 @@ bool Finder::ResolveHomebaseGadgetsLive()
             GadgetItems = Target;
             OwnedNodeKits = FirstTarget;
         }
+        // 5.0 inlines GetOwnedNodeAbilityKits: GetSelectableGadgetItems calls GetOwnedNodes itself (5.0 +0x86, past
+        // an AbilitySystem->GetAbilitySystemComponent() call). Core then builds the kits from GetOwnedNodes.
+        else if (IsInText(Target) && CallWithin(Target, 0xC0, OwnedNodes))
+        {
+            AbilitySystemInterface = Previous;
+            GadgetItems = Target;
+        }
         Previous = Target;
     }
 
@@ -7415,7 +7422,8 @@ bool Finder::ResolveHomebaseGadgetsLive()
     Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface = reinterpret_cast<decltype(Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface)>(AbilitySystemInterface);
     Natives::UFortHomebaseManager_GetSelectableGadgetItems = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetSelectableGadgetItems)>(GadgetItems);
     Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits)>(OwnedNodeKits);
-    Log::Info(L"Finder: homebase gadgets found");
+    Natives::UFortHomebaseManager_GetOwnedNodes = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetOwnedNodes)>(OwnedNodes);
+    Log::Info(L"Finder: homebase gadgets found{}", OwnedNodeKits ? L"" : L" (GetOwnedNodeAbilityKits inlined)");
     return true;
 }
 

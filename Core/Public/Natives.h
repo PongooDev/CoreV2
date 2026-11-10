@@ -210,7 +210,9 @@ namespace Natives
     inline FFortSavedModeLoadout* (*UFortMcpProfileCampaign_GetModeLoadout)(const UFortMcpProfileCampaign* This, FFortSavedModeLoadout* Result, FString LoadoutName) = nullptr;
     inline IAbilitySystemInterface* (*UFortRegisteredPlayerInfo_GetAbilitySystemInterface)(const UFortRegisteredPlayerInfo* This) = nullptr;
     inline void (*UFortHomebaseManager_GetSelectableGadgetItems)(const UFortHomebaseManager* This, const UFortMcpProfileCampaign* AccountProfile, IAbilitySystemInterface* AbilitySystem, FScriptArray& OutItems) = nullptr;
+    // Null from 5.0, which inlines it into GetSelectableGadgetItems (Core then does it from GetOwnedNodes).
     inline void (*UFortHomebaseManager_GetOwnedNodeAbilityKits)(const UFortHomebaseManager* This, const UFortMcpProfileCampaign* AccountProfile, TArray<UFortAbilityKit*>& OutKits) = nullptr;
+    inline TArray<FName>* (*UFortHomebaseManager_GetOwnedNodes)(const UFortHomebaseManager* This, TArray<FName>* Result, const UFortMcpProfileCampaign* McpProfile) = nullptr;
     inline void (*UFortGlobals_ApplyHeroEffectsAndAbilities)(UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles, FScriptArray& OutAbilitySetHandles) = nullptr;
     inline void* (*FScopedPredictionWindow_FScopedPredictionWindow)(void* This, UAbilitySystemComponent* AbilitySystemComponent, void* InPredictionKey, bool InSetReplicatedPredictionKey) = nullptr;
     inline void (*FScopedPredictionWindow_Destructor)(void* This) = nullptr;

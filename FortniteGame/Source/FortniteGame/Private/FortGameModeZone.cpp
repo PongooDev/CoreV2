@@ -686,6 +686,10 @@ void AFortGameModeZone::HookVTables()
             if (Hooks::SwapVTable(L"AFortGameModeZone subclass FinishWorldInitialization", VTable, FinishIndex, reinterpret_cast<void*>(&SubclassFinishWorldInitializationHK), &Original))
             {
                 SubclassFinishWorldInitialization[VTable] = reinterpret_cast<FFinishWorldInitialization>(Original);
+                if (Class->GetName().ToStdString().find(L"DeployableBase") != std::wstring::npos)
+                {
+                    AFortDeployableBaseManager::ResolveWorldInitialization(Original);
+                }
             }
         }
     }
@@ -802,7 +806,9 @@ void AFortGameModeZone::SubclassFinishWorldInitializationHK(AFortGameModeZone* T
         Original->second(This, WorldManager);
     }
     This->FinishWorldInitialization(WorldManager);
-    if (bHasOriginal && !bOriginalFirst)
+    // AFortGameModeDeployableBase's (5.0) hands over to the deployable base manager, whose plot spawn 5.0 strips: Core runs
+    // the manager's part with the plots restored (CoreV2 #353).
+    if (bHasOriginal && !bOriginalFirst && !AFortDeployableBaseManager::FinishWorldInitialization(This, reinterpret_cast<void*>(Original->second)))
     {
         Original->second(This, WorldManager);
     }

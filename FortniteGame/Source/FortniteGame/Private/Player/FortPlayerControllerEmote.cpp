@@ -6,6 +6,7 @@
 #include "Configuration.h"
 #include "Engine/AssetManager.h"
 #include "Engine/Engine.h"
+#include "Engine/World.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
@@ -15,6 +16,7 @@
 #include "Hooks.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
+#include "Math/Rotator.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Pawns/FortPlayerPawn.h"
@@ -96,12 +98,20 @@ void AFortPlayerController::ServerPlayEmoteItem_Implementation(UFortMontageItemD
         return;
     }
 
-    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    UClass* AbilityClass = GameData ? GameData->EmoteGameplayAbility.LoadSynchronous() : nullptr;
+    // 5.0's toys (UAthenaToyItemDefinition, Season 5) play their own ToySpawnAbility (GAB_Toy_BasketballToss,
+    // GAB_Toy_GolfSwing, GAB_Toy_BeachBall: GAB_ToyThrow_Base children of GAB_Emote_Generic), which takes the toy from
+    // GetCurrentSourceObject as the emote ability takes its emote, loads its ToyActorClass and, from the montage's
+    // UFortAnimNotifyState_ToySpawn, asks the controller's SpawnToyInstance (below) for the toy it throws. Given
+    // EmoteGameplayAbility, a toy only played its throw montage and no toy came out (#344). Every other emote plays
+    // UFortGameData::EmoteGameplayAbility.
+    UClass* ToyItemClass = UAthenaToyItemDefinition::StaticClass();
+    UAthenaToyItemDefinition* Toy = ToyItemClass && UAthenaToyItemDefinition::HasToySpawnAbility() && EmoteAsset->IsA(ToyItemClass) ? static_cast<UAthenaToyItemDefinition*>(EmoteAsset) : nullptr;
+    UFortGameData* GameData = Toy ? nullptr : UFortAssetManager::Get().GetGameData();
+    UClass* AbilityClass = Toy ? Toy->ToySpawnAbility.LoadSynchronous() : GameData ? GameData->EmoteGameplayAbility.LoadSynchronous() : nullptr;
     UGameplayAbility* Ability = AbilityClass && AbilityClass->IsChildOf(UGameplayAbility::StaticClass()) ? static_cast<UGameplayAbility*>(AbilityClass->GetDefaultObject()) : nullptr;
     if (!Ability)
     {
-        Log::Warning(L"Emote: {} asked to play {}, but UFortGameData::EmoteGameplayAbility isn't a gameplay ability", GetName().ToStdString(), EmoteAsset->GetName().ToStdString());
+        Log::Warning(L"Emote: {} asked to play {}, but its {} isn't a gameplay ability", GetName().ToStdString(), EmoteAsset->GetName().ToStdString(), Toy ? L"ToySpawnAbility" : L"UFortGameData::EmoteGameplayAbility");
         return;
     }
 
@@ -350,6 +360,150 @@ void AFortPlayerController::SendSprayStatEvent(UAthenaSprayItemDefinition* Spray
         QuestManager->SendItemStatEvent(Spray, SprayAsset, 1);
     }
 #endif
+}
+
+// Toys (5.0, CL-4204761 and CL-4214610; #344). A toy's ability (GAB_ToyThrow_Base, its ToySpawnAbility above) loads the
+// toy's ToyActorClass and, when its throw montage reaches UFortAnimNotifyState_ToySpawn (kept, 0xB5DED0: off a client
+// it asks the montage's ability, through IFortToyAbilityInterface::NotifyAbilityToSpawnToy, for the toy at the hand's
+// socket), calls the controller's SpawnToyInstance(ToyToSpawn, DesiredLocation), makes the toy dormant and, on
+// NotifyAbilityToReleaseToy, throws it (SetBallVelocityAndStartTicking). 5.0 strips SpawnToyInstance's body: its exec
+// (0x1425F80) steps both parameters and calls the shared return-zero stub, so the ability got no toy and threw nothing.
+//
+// What is left says what the body did. The controller keeps ActiveToyInstances and ToySummonCounts (TMap<UClass*,
+// int32>), which nothing else touches; the game's cvar fort.NumToysAlivePerPlayer (1: "if a toy is triggered when this
+// many exist already, then the oldest one will quickly fade out") is registered but nothing reads it; and the toy's
+// IFortToyInterface events (InitializeToyInstance(OwningPC, NumTimesSummoned), NotifyToyInstanceOfReuse,
+// StartToyFadeOutDueToNewPlacement) have no caller left: their Execute_ thunks' FNames are never read. B_PlayerSpawnedBall
+// implements them: InitializeToyInstance stops the ball where it is and keeps that as its spawn position
+// (B_ToyBasketball_Base also keeps NumTimesSummoned as its BallSerialNumber), NotifyToyInstanceOfReuse plays its
+// CueToPlayWhenReused where it is (the teleport-away cue), and StartToyFadeOutDueToNewPlacement plays
+// CueToPlayWhenExpired and dies.
+//
+// So this counts the summon, takes back the player's toy of the same class when one is still out (its reuse cue, then
+// moved to the new spot), and otherwise fades the oldest toys out until fort.NumToysAlivePerPlayer leave room and
+// spawns a new one owned by the controller; either way the toy is initialized with the summon count and handed back.
+
+namespace
+{
+    TAutoConsoleVariable<int32_t> CVarNumToysAlivePerPlayer(
+        TEXT("fort.NumToysAlivePerPlayer"),
+        1,
+        TEXT("The number of toys allowed to be alive per player (if a toy is triggered when this many exist already, then the oldest one will quickly fade out)"));
+
+    // One of the toy's IFortToyInterface events (BlueprintNativeEvents), called as the interface's Execute_ thunks call
+    // it: through the toy's own function by that name, which its blueprint implements.
+    void CallToyEvent(AActor* Toy, const wchar_t* EventName, AFortPlayerController* OwningPC = nullptr, int32_t NumTimesSummoned = 0)
+    {
+        UFunction* Event = Toy ? Toy->FindFunction(FName(EventName, FNAME_Find)) : nullptr;
+        if (!Event)
+        {
+            return;
+        }
+        Reflection::FParams Params(Event);
+        if (OwningPC)
+        {
+            Params.Set(L"OwningPC", OwningPC);
+            Params.Set(L"NumTimesSummoned", NumTimesSummoned);
+        }
+        Params.Call(Toy);
+    }
+}
+
+AActor* AFortPlayerController::SpawnToyInstance(UClass* ToyClass, const FTransform& SpawnPosition)
+{
+#if WITH_SERVER_CODE
+    UWorld* World = GetWorld();
+    if (!ToyClass || !World || Role != ROLE_Authority || !ToyClass->IsChildOf(AActor::StaticClass()))
+    {
+        return nullptr;
+    }
+
+    int32_t& NumTimesSummoned = GetToySummonCounts().FindOrAdd(ToyClass);
+    ++NumTimesSummoned;
+
+    TArray<AActor*>& Active = ActiveToyInstances;
+    for (int32_t Index = Active.Num() - 1; Index >= 0; --Index)
+    {
+        if (!Active[Index] || Active[Index]->IsPendingKill())
+        {
+            Active.RemoveAt(Index);
+        }
+    }
+
+    // The player's toy of this class, if one is still out, comes back to the new spot.
+    AActor* NewToy = nullptr;
+    for (int32_t Index = 0; Index < Active.Num(); ++Index)
+    {
+        if (Active[Index]->GetClass() == ToyClass)
+        {
+            NewToy = Active[Index];
+            Active.RemoveAt(Index);
+            break;
+        }
+    }
+    if (NewToy)
+    {
+        CallToyEvent(NewToy, L"NotifyToyInstanceOfReuse");
+        NewToy->SetActorLocationAndRotation(SpawnPosition.GetLocation(), SpawnPosition.Rotation.Rotator(), false, true);
+    }
+    else
+    {
+        const int32_t MaxToys = std::max(CVarNumToysAlivePerPlayer.GetValueOnGameThread(), 1);
+        while (Active.Num() >= MaxToys)
+        {
+            AActor* Oldest = Active[0];
+            Active.RemoveAt(0);
+            CallToyEvent(Oldest, L"StartToyFadeOutDueToNewPlacement");
+        }
+
+        FActorSpawnParameters SpawnParameters;
+        SpawnParameters.Owner = this;
+        SpawnParameters.Instigator = MyFortPawn;
+        SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        NewToy = World->SpawnActor(ToyClass, &SpawnPosition, SpawnParameters);
+        if (!NewToy)
+        {
+            Log::Warning(L"Toy: {} couldn't spawn {}", GetName().ToStdString(), ToyClass->GetName().ToStdString());
+            return nullptr;
+        }
+    }
+
+    Active.Add(NewToy);
+    CallToyEvent(NewToy, L"InitializeToyInstance", this, NumTimesSummoned);
+    Log::Info(L"Toy: {} summons {} (summon {})", GetName().ToStdString(), NewToy->GetName().ToStdString(), NumTimesSummoned);
+    return NewToy;
+#else
+    return nullptr;
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerController::execSpawnToyInstance)
+{
+    P_GET_OBJECT(UClass, Z_Param_ToyClass);
+    P_GET_STRUCT(FTransform, Z_Param_SpawnPosition);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    *static_cast<AActor**>(RESULT_PARAM) = static_cast<AFortPlayerController*>(Context)->SpawnToyInstance(Z_Param_ToyClass, Z_Param_SpawnPosition);
+    P_NATIVE_END;
+}
+
+void AFortPlayerController::HookToyNatives()
+{
+    // Builds before 5.0 have no SpawnToyInstance (4.5 already has UAthenaToyItemDefinition and ActiveToyInstances, but
+    // no toy items in its paks), so it is looked up without failing there.
+    UFunction* Function = FindStaticFunction_SpawnToyInstance();
+    if (!Function || !Member_ActiveToyInstances.IsAvailable() || !Member_ToySummonCounts.IsAvailable() || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))
+    {
+        return;
+    }
+    uint8_t* NativeCall = Finder::ImplementationCall(Function);
+    if (!NativeCall || !Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5)))
+    {
+        Log::Info(L"Finder: AFortPlayerController::SpawnToyInstance is native in this build");
+        return;
+    }
+    Function->SetNativeFunc(&execSpawnToyInstance);
+    Log::Info(L"Hook AFortPlayerController::SpawnToyInstance: native");
 }
 
 void AFortPlayerController::HookSprayVTables()

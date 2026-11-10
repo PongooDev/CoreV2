@@ -1941,6 +1941,7 @@ void AFortPlayerController::HookVTables()
     HookBuildingVTables();
     HookEmoteVTables();
     HookSprayVTables();
+    HookToyNatives();
     HookPersonalVehicleVTables();
 }
 

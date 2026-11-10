@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/Map.h"
 #include "FortRewardReport.h"
 #include "GameFramework/PlayerController.h"
 #include "Items/FortQuickBars.h"
@@ -33,6 +34,7 @@ struct FFortItemEntry;
 struct FItemDefinitionAndCount;
 struct FItemAndCount;
 struct FRotator;
+struct FTransform;
 struct FVector;
 
 class ABuildingActor;
@@ -96,6 +98,13 @@ public:
     DefineUProperty(UClass*, CurrentBuildableClass)
     // 4.0: the player's sprays still on the map, oldest first (fort.NumSpraysAlivePerPlayer of them at most).
     DefineUProperty(TArray<AFortSprayDecalInstance*>, ActiveSprayInstances)
+    // 5.0: the player's toys still on the map, oldest first (fort.NumToysAlivePerPlayer of them at most), and how many
+    // times each toy class has been summoned (the number InitializeToyInstance hands the toy).
+    DefineUProperty(TArray<AActor*>, ActiveToyInstances)
+    // A TMap can't be copied, so it has no DefineUProperty accessors.
+    using FToySummonCounts = TMap<UClass*, int32_t>;
+    static inline Reflection::FMemberInfo Member_ToySummonCounts{ &StaticReflectionOwner, TEXT("ToySummonCounts"), sizeof(FToySummonCounts), Reflection::EMemberKind::Value };
+    FToySummonCounts& GetToySummonCounts() { return Reflection::AccessMember<FToySummonCounts>(this, Member_ToySummonCounts); }
     static bool HasBuildResourceSelection() { return Member_CurrentResourceType.IsAvailable() && Member_CurrentResourceLevel.IsAvailable() && Member_CurrentBuildableClass.IsAvailable(); }
     // Whether the server has finished loading for this player (replicated, OnRep_bHasServerFinishedLoading): the
     // client's CheckFinishedLoading waits for it before its SetHasFinishedLoading and OnReadyToStartMatch.
@@ -134,6 +143,7 @@ public:
     DefineUFunction(ServerPlayEmoteItem)
     DefineUFunction(ServerEmote)
     DefineUFunction(ServerPlaySprayItem)
+    DefineUFunction(SpawnToyInstance)
     DefineUFunction(ServerModifyStat)
     DefineUFunction(TogglePersonalVehicle)
     DefineUFunction(IsPersonalVehicleAvailable)
@@ -204,6 +214,10 @@ public:
     // 4.5 drops the RPC and sends sprays as ServerPlayEmoteItem, whose body calls this for them.
     void ServerPlaySprayItem_Implementation(UAthenaSprayItemDefinition* SprayAsset);
     void SendSprayStatEvent(UAthenaSprayItemDefinition* SprayAsset);
+    // Toys (5.0): the toy's ability (GAB_ToyThrow_Base) asks the controller for its toy actor through the native
+    // SpawnToyInstance, whose body 5.0 strips. Core's spawns the toy, or moves the player's toy of that class, and fades
+    // the oldest out past fort.NumToysAlivePerPlayer.
+    AActor* SpawnToyInstance(UClass* ToyClass, const FTransform& SpawnPosition);
     // Personal vehicles (FortPlayerControllerPersonalVehicle.cpp): 3.0 strips the hoverboard's server RPC; Core's grants
     // and activates the vehicle's ability.
     void TogglePersonalVehicle_Implementation(bool bOn);
@@ -248,6 +262,7 @@ public:
     static void HookBuildingVTables();
     static void HookEmoteVTables();
     static void HookSprayVTables();
+    static void HookToyNatives();
     static void HookPersonalVehicleVTables();
     // Client: Fortnite's push to talk key (PushToTalk, Y) talks through engine voice chat instead of Vivox, and with the
     // player's open microphone setting (3.0 on) the microphone is open while the server asks for it.
@@ -259,6 +274,7 @@ public:
     DECLARE_FUNCTION(execSwapQuickBarFocus);
     DECLARE_FUNCTION(execCheat);
     DECLARE_FUNCTION(execOnRep_CheatMovement);
+    DECLARE_FUNCTION(execSpawnToyInstance);
 
 private:
     static inline bool (*InitializeMcpProfileOG)(AFortPlayerController* This, const void* OnComplete) = nullptr;

@@ -12,6 +12,7 @@ struct FFortItemEntry;
 class IFortInventoryOwnerInterface;
 class UFortItem;
 class UFortWorldItem;
+class UGameplayAbility;
 
 class EFortInventoryFilter
 {
@@ -206,6 +207,18 @@ public:
 class UAthenaSprayItemDefinition : public UFortMontageItemDefinitionBase
 {
     DefineUnrealClass(UAthenaSprayItemDefinition, FortniteGame)
+};
+
+// A toy (5.0, Season 5: the basketball, golf ball and beach ball; a UAthenaDanceItemDefinition in the game): the ability
+// the toy's emote plays (GAB_Toy_BasketballToss and the other GAB_ToyThrow_Base children) and the toy actor it throws.
+// StaticClass is null on a build without the class.
+class UAthenaToyItemDefinition : public UFortMontageItemDefinitionBase
+{
+    DefineUnrealClass(UAthenaToyItemDefinition, FortniteGame)
+
+public:
+    DefineUProperty(TAssetSubclassOf<UGameplayAbility>, ToySpawnAbility)
+    static bool HasToySpawnAbility() { return Member_ToySpawnAbility.IsAvailable(); }
 };
 
 struct FFortBaseWeaponStats

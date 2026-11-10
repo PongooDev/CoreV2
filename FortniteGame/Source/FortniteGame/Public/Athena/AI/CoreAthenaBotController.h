@@ -415,7 +415,8 @@ private:
     // player's interact does.
     void OpenDoorInTheWay(const FVector& Direction, float Now);
     // The pawn's EFortMovementStyle: a player sprints to get somewhere and runs while fighting (AFortPawn's
-    // GetMovementSpeed reads the movement set's speed for the style; an AI controller never sets it).
+    // GetMovementSpeed reads the movement set's speed for the style; an AI controller never sets it). Aiming down sights
+    // walks, as AFortPlayerPawn's movement style update (5.10 0x112B010) picks Walking while bIsTargeting.
     void SetMovementStyle(bool bSprint, float Now);
     // Where the bot looks. AAIController::UpdateControlRotation turns the pawn to its focal point at once, so the bot
     // turns there itself at a player's turn rate: the point it wants to look at (FaceTowards: a target, a chest, a
@@ -454,6 +455,9 @@ private:
     // carries, held for the item's use time. True while the bot is using one.
     bool Heal(float Now);
     void CancelHeal();
+    // Low on health with nothing that heals it: the nearest healing item on the floor within 40 m comes before the rest
+    // of the loot (CoreV2 #373).
+    bool LootHealing(float Now);
     // An emote, as a player's emote wheel plays it (AFortPlayerController::ServerPlayEmoteItem: the game data's
     // EmoteGameplayAbility given to the pawn's ability system with the emote as its source, activated once). Bots dance
     // on the warmup island (the community list) and after an elimination when nobody is shooting at them (21.40's
@@ -580,6 +584,12 @@ private:
     // (AFortWeapon::GameplayCue_Weapons_Activation, 0xFC5EB0: PlayWeaponFireFX, StopWeaponFireFX).
     bool AddWeaponFireCue(AFortWeapon* Weapon, FName Tag, const FVector& ImpactLocation);
     void RemoveWeaponFireCue();
+    // The shot's bullet as the others see it: the fire ability's impact cue (its EffectContainers' ImpactCues,
+    // GameplayCue.Impact.Physical on GA_Ranged_GenericDamage) executed with the shot's hit result in its effect context.
+    // On each client the pawn hands it to its CurrentWeapon, whose GameplayCue_Impact (5.10 0x12B8740) plays the bullet's
+    // tracer from the muzzle to the hit (AFortWeaponRanged::PlayBulletFireFX, for a pawn the client doesn't control) and
+    // its impact. The fire cue alone has no hit, so the bots' shots showed no tracers (CoreV2 #373).
+    void PlayWeaponImpactCue(AFortWeapon* Weapon, const FVector& Start, const FVector& End, UObject* HitActor);
     // Whether the game's fire works for this weapon class: unknown until a shot shows it spending ammo or not.
     void CheckWeaponFireResult(float Now);
 
@@ -608,6 +618,7 @@ private:
     UFortItemDefinition* HealingItem = nullptr;
     float HealUntil = 0.0f;
     float NextHealCheck = 0.0f;
+    float NextHealingLootSearch = 0.0f;
     int32_t Heals = 0;
     // Reload and weapon choice: the weapon being reloaded, the last weapon change, and when the bot was last hurt.
     int32_t ReloadIndex = -1;

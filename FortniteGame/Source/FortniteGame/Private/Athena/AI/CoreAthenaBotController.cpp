@@ -154,6 +154,27 @@ namespace
     bool bHasHotDrop = false;
     // The fire cue each weapon ability sends (the abilities are the match's).
     std::map<const UObject*, FName> CueTags;
+    // The impact cue each weapon ability sends with a shot's hit (its EffectContainers' ImpactCues).
+    std::map<const UObject*, FName> ImpactCueTags;
+
+    // The weapon's fire ability: the spec the bot's ability system has for its PrimaryAbilitySpecHandle, or, for a weapon
+    // whose ability the bot's ability system wasn't given (no spec for its handle), the weapon data's PrimaryFireAbility
+    // default, which sends the same cues (CoreV2 #252: the bots' guns made no sound when the spec lookup failed, as no cue
+    // went out at all).
+    const UObject* WeaponFireAbilityOf(AFortPlayerPawnAthena* Pawn, AFortWeapon* Weapon)
+    {
+        UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+        FGameplayAbilitySpec* Spec = AbilitySystem && Weapon && AFortWeapon::HasPrimaryAbilitySpecHandle() ? AbilitySystem->FindAbilitySpecFromHandle(Weapon->PrimaryAbilitySpecHandle) : nullptr;
+        const UObject* Ability = Spec ? reinterpret_cast<const UObject*>(static_cast<UGameplayAbility*>(Spec->Ability)) : nullptr;
+        if (!Ability && Weapon)
+        {
+            UObject* Definition = reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData));
+            UProperty* AbilityProperty = Definition ? Definition->GetClass()->FindPropertyByName(FName(L"PrimaryFireAbility", FNAME_Find)) : nullptr;
+            UClass* AbilityClass = AbilityProperty ? reinterpret_cast<TAssetSubclassOf<UObject>*>(reinterpret_cast<uint8_t*>(Definition) + AbilityProperty->GetOffset_ForInternal())->LoadSynchronous() : nullptr;
+            Ability = AbilityClass ? AbilityClass->GetDefaultObject() : nullptr;
+        }
+        return Ability;
+    }
 
     // AFortWeaponRanged::bPersistentFireFX (its ShouldUsePersistentFireFX, 3.3 0xFE1490, reads it): the weapon's fire
     // effects loop while its fire cue is active instead of playing once per executed cue.
@@ -201,6 +222,7 @@ namespace
     constexpr uint8_t MoveWalking = 1;
     // EFortMovementStyle.
     constexpr uint8_t StyleRunning = 0;
+    constexpr uint8_t StyleWalking = 1;
     constexpr uint8_t StyleSprinting = 3;
     // EPathFollowingStatus::Idle.
     constexpr uint8_t PathIdle = 0;
@@ -239,6 +261,32 @@ namespace
             *OutHitActor = HitActor;
         }
         return !(HitActor && Cast<APawn>(HitActor));
+    }
+
+    // A mountainside ahead along Direction: the ground 1 m ahead well above the ground under the bot, and 2.5 m ahead
+    // higher again by as much, too steep to walk up or to get onto with a jump (a ledge or a step levels off). The knee
+    // trace hits such a slope with the head trace clear, which read as something low to jump over: bots jumped into the
+    // side of mountains until they gave up (CoreV2 #373).
+    bool IsSteepSlopeAhead(AFortPlayerPawnAthena* Pawn, const FVector& Location, const FVector& Direction)
+    {
+        const auto GroundAt = [Pawn, &Location](const FVector& Where, float& OutZ)
+        {
+            FVector Hit;
+            UObject* HitActor = nullptr;
+            UObject* HitComponent = nullptr;
+            const bool bHit = UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Where.X, Where.Y, Location.Z + 400.0f), FVector(Where.X, Where.Y, Location.Z - 300.0f), 0, false, true, Hit, HitActor, HitComponent)
+                && !(HitActor && Cast<APawn>(HitActor));
+            OutZ = Hit.Z;
+            return bHit;
+        };
+        float Under = 0.0f;
+        float Near = 0.0f;
+        float Far = 0.0f;
+        if (Direction.SizeSquared() < 0.01f || !GroundAt(Location, Under) || !GroundAt(Location + Direction * 100.0f, Near) || !GroundAt(Location + Direction * 250.0f, Far))
+        {
+            return false;
+        }
+        return Near - Under > 70.0f && Far - Near > 90.0f;
     }
 
     // The trace type (ETraceTypeQuery) of the game's weapon trace channel: the custom channel FCC_Trace_Weapon in
@@ -779,6 +827,11 @@ namespace
     // (30% by default), rolled again every 30 s per pair; doubled once the last few bots are left, so a match still ends.
     constexpr int32_t LateGameBotCount = 10;
     constexpr float BotEngageRollPeriod = 30.0f;
+    // With a teammate down, every enemy within this distance is taken on before the revive (CoreV2 #373, Core's 🟡: 50 m,
+    // the revive's own 60 m search being about as far).
+    constexpr float ReviveEngageRange = 5000.0f;
+    // Low on health (health and shield together, Core's 🟡): what makes a bot without healing items look for some first.
+    constexpr float LowHealthShield = 50.0f;
 
     // Giving a knocked (DBNO) enemy time before thirsting it (CoreV2 #233), so a teammate can revive: the base hold-off
     // after the knock; the longer hold-off while a squadmate is right there (a revive could be underway); how close a
@@ -978,22 +1031,24 @@ namespace
     // shooter to the target (UAbilitySystemBlueprintLibrary::EffectContextAddHitResult) and the context's origin
     // (EffectContextSetOrigin). The victim's damage cue (AFortPawn::GameplayCue_Damage) gets its instigator and hit from
     // the context; without them a player hit by a bot saw no hit direction (#233).
-    void AddHitToContext(void* ContextHandle, UObject* TargetActor, const FVector& From)
+    // A shot's FHitResult added to an effect context, from From to To (the hit's point; HitActor what it hit, or none
+    // for a shot that hit nothing, whose hit isn't blocking), and the context's origin.
+    bool AddShotHitToContext(void* ContextHandle, const FVector& From, const FVector& To, UObject* HitActor, bool bBlocking)
     {
         static UFunction* AddHitResult = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextAddHitResult");
         static UFunction* SetOrigin = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextSetOrigin");
         static UClass* Library = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
         UObject* LibraryDefault = Library ? Library->GetDefaultObject() : nullptr;
         UProperty* HitProperty = AddHitResult ? AddHitResult->FindPropertyByName(FName(L"HitResult", FNAME_Find)) : nullptr;
-        if (!LibraryDefault || !HitProperty || !TargetActor)
+        if (!LibraryDefault || !HitProperty || !ContextHandle)
         {
-            return;
+            return false;
         }
-        const FVector To = LocationOf(reinterpret_cast<AActor*>(TargetActor));
         FVector Normal = From - To;
         const float Length = Normal.Size();
         Normal = Length > 1.0f ? Normal * (1.0f / Length) : FVector(0.0f, 0.0f, 1.0f);
         Reflection::FParams Hit(AddHitResult, true);
+        bool bAdded = false;
         if (Hit.CopyStruct(L"EffectContext", ContextHandle))
         {
             UScriptStruct* HitStruct = static_cast<UStructProperty*>(HitProperty)->Struct;
@@ -1008,7 +1063,7 @@ namespace
             };
             if (UBoolProperty* Blocking = static_cast<UBoolProperty*>(Member(L"bBlockingHit")))
             {
-                Blocking->SetPropertyValue(Data + Blocking->GetOffset_ForInternal(), true);
+                Blocking->SetPropertyValue(Data + Blocking->GetOffset_ForInternal(), bBlocking);
             }
             SetVector(L"Location", To);
             SetVector(L"ImpactPoint", To);
@@ -1020,12 +1075,12 @@ namespace
             {
                 *reinterpret_cast<float*>(Data + Distance->GetOffset_ForInternal()) = Length;
             }
-            if (UProperty* Actor = Member(L"Actor"))
+            if (UProperty* Actor = Member(L"Actor"); Actor && HitActor)
             {
-                *reinterpret_cast<FWeakObjectPtr*>(Data + Actor->GetOffset_ForInternal()) = TargetActor;
+                *reinterpret_cast<FWeakObjectPtr*>(Data + Actor->GetOffset_ForInternal()) = HitActor;
             }
             Hit.Set(L"bReset", true);
-            Hit.Call(LibraryDefault);
+            bAdded = Hit.Call(LibraryDefault);
         }
         if (SetOrigin)
         {
@@ -1035,6 +1090,17 @@ namespace
                 Origin.Call(LibraryDefault);
             }
         }
+        return bAdded;
+    }
+
+    void AddHitToContext(void* ContextHandle, UObject* TargetActor, const FVector& From)
+    {
+        if (!TargetActor || !AddShotHitToContext(ContextHandle, From, LocationOf(reinterpret_cast<AActor*>(TargetActor)), TargetActor, true))
+        {
+            return;
+        }
+        static UClass* Library = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
+        UObject* LibraryDefault = Library ? Library->GetDefaultObject() : nullptr;
         static int32_t Logged = 0;
         static UFunction* GetInstigator = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextGetInstigatorActor");
         static UFunction* HasHitResult = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:EffectContextHasHitResult");
@@ -2061,6 +2127,11 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
         {
             Intent = L"heal";
         }
+        // Low with nothing to heal with: healing on the floor nearby first (CoreV2 #373).
+        else if (LootHealing(Now))
+        {
+            Intent = L"loot healing";
+        }
         // In its box after an unseen enemy's shots (Bunker's HideEndTime), with nobody in sight to fight.
         else if (Now < HideEndTime)
         {
@@ -2328,6 +2399,20 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
     std::vector<FCandidate> Candidates;
     bool bHasStandingCandidate = false;
     AFortPawn* Previous = CurrentTarget.Get();
+    // A teammate down: the enemies around are dealt with before the revive, other bots included, whatever the engage roll
+    // (CoreV2 #373: bots let enemy bots be and walked over to revive in front of them).
+    bool bTeammateDown = false;
+    if (Manager->GetTeamSize() > 1 && State != ECoreAthenaBotState::Warmup)
+    {
+        for (FCoreAthenaBotController* Teammate : Manager->TeammatesOf(this))
+        {
+            bTeammateDown = bTeammateDown || (Teammate->IsDBNO() && Teammate->GetPawn());
+        }
+        for (AFortPlayerPawnAthena* Player : Manager->PlayerTeammatesOf(this))
+        {
+            bTeammateDown = bTeammateDown || (Player && Player->bIsDBNO);
+        }
+    }
     for (const TWeakObjectPtr<AFortPawn>& Weak : Manager->GetEnemyPawns())
     {
         AFortPawn* Other = Weak.Get();
@@ -2343,7 +2428,7 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
         // Players come first: after the bus, a bot is passed by unless it is after this one (or the roll says fight), and
         // sorted 15 m farther than a player (the warmup island's brawls are anyone's).
         FCoreAthenaBotController* OtherBot = State != ECoreAthenaBotState::Warmup ? Manager->FindBot(reinterpret_cast<UObject*>(Other)) : nullptr;
-        if (OtherBot && Other != Previous && !WillEngageBot(OtherBot, Now))
+        if (OtherBot && Other != Previous && !(bTeammateDown && Distance < ReviveEngageRange) && !WillEngageBot(OtherBot, Now))
         {
             ++BotsIgnored;
             continue;
@@ -2951,7 +3036,10 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     }
     if (Weapon && Held)
     {
-        PlayWeaponFireCue(Weapon, bHit ? Center : !bClear ? BlockedAt : Eye + (RayLength > 1.0f ? Ray * (5000.0f / RayLength) : FVector()));
+        const FVector ShotImpact = bHit ? Center : !bClear ? BlockedAt : Eye + (RayLength > 1.0f ? Ray * (5000.0f / RayLength) : FVector());
+        PlayWeaponFireCue(Weapon, ShotImpact);
+        // Its tracer, to where it hit (the target, what stopped it) or past the target for a miss.
+        PlayWeaponImpactCue(Weapon, Eye, ShotImpact, bHit ? reinterpret_cast<UObject*>(Target) : !bClear ? Blocker : nullptr);
     }
     if (!bClear)
     {
@@ -3033,6 +3121,8 @@ void FCoreAthenaBotController::SetTargeting(bool bNewTargeting)
     }
     bTargeting = bNewTargeting;
     TargetingProperty->SetPropertyValue(reinterpret_cast<uint8_t*>(Pawn) + TargetingProperty->GetOffset_ForInternal(), bNewTargeting);
+    // The movement style follows, as AFortPlayerPawn's targeting change updates it (walking while aiming).
+    SetMovementStyle(MovementStyle == StyleSprinting, LastTickTime);
     Pawn->ForceNetUpdate();
 }
 
@@ -3101,19 +3191,7 @@ void FCoreAthenaBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVec
     static UFunction* Multicast = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:NetMulticast_InvokeGameplayCueExecuted_WithParams");
     static UScriptStruct* CueParametersStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayCueParameters");
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
-    FGameplayAbilitySpec* Spec = AbilitySystem && AFortWeapon::HasPrimaryAbilitySpecHandle() ? AbilitySystem->FindAbilitySpecFromHandle(Weapon->PrimaryAbilitySpecHandle) : nullptr;
-    const UObject* Ability = Spec ? reinterpret_cast<const UObject*>(static_cast<UGameplayAbility*>(Spec->Ability)) : nullptr;
-    // A weapon whose ability the bot's ability system wasn't given (no spec for its handle) still has the cue its
-    // ability class sends: the weapon data's PrimaryFireAbility default (CoreV2 #252: the bots' guns made no sound when
-    // the spec lookup failed, as no cue went out at all).
-    if (!Ability && Weapon)
-    {
-        UObject* Definition = reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData));
-        UProperty* AbilityProperty = Definition ? Definition->GetClass()->FindPropertyByName(FName(L"PrimaryFireAbility", FNAME_Find)) : nullptr;
-        UClass* AbilityClass = AbilityProperty ? reinterpret_cast<TAssetSubclassOf<UObject>*>(reinterpret_cast<uint8_t*>(Definition) + AbilityProperty->GetOffset_ForInternal())->LoadSynchronous() : nullptr;
-        Ability = AbilityClass ? AbilityClass->GetDefaultObject() : nullptr;
-    }
+    const UObject* Ability = WeaponFireAbilityOf(Pawn, Weapon);
     if (!Multicast || !CueParametersStruct || !Ability)
     {
         static int32_t LoggedMissing = 0;
@@ -3252,6 +3330,84 @@ void FCoreAthenaBotController::RemoveWeaponFireCue()
             Owner->ForceNetUpdate();
         }
     }
+#endif
+}
+
+void FCoreAthenaBotController::PlayWeaponImpactCue(AFortWeapon* Weapon, const FVector& Start, const FVector& End, UObject* HitActor)
+{
+#if WITH_SERVER_CODE
+    // What the ranged fire ability sends for each hit of its trace: its effect containers' ImpactCues executed with the
+    // hit in the cue's effect context (FGameplayCueParameters::EffectContext, whose GetHitResult the weapon reads). Clients
+    // play the tracer for a pawn they don't control only (the bot's pawn on every client).
+    static UFunction* Multicast = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:NetMulticast_InvokeGameplayCueExecuted_WithParams");
+    static UFunction* MakeContext = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:MakeEffectContext");
+    static UScriptStruct* CueParametersStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayCueParameters");
+    static UStructProperty* ContextProperty = CueParametersStruct ? static_cast<UStructProperty*>(CueParametersStruct->FindPropertyByName(FName(L"EffectContext", FNAME_Find))) : nullptr;
+    static UScriptStruct* ContainerStruct = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.FortGameplayEffectContainer");
+    static UProperty* ImpactCuesProperty = ContainerStruct ? ContainerStruct->FindPropertyByName(FName(L"ImpactCues", FNAME_Find)) : nullptr;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    const UObject* Ability = WeaponFireAbilityOf(Pawn, Weapon);
+    if (!Multicast || !MakeContext || !ContextProperty || !AbilitySystem || !Ability || !Weapon)
+    {
+        static int32_t LoggedMissing = 0;
+        if (LoggedMissing++ < 3)
+        {
+            Log::Info(L"Battle Royale bots: {}'s shot sends no impact cue (multicast {}, MakeEffectContext {}, cue context {}, ability {})", BotName, Multicast ? L"found" : L"missing",
+                MakeContext ? L"found" : L"missing", ContextProperty ? L"found" : L"missing", NameOf(Ability));
+        }
+        return;
+    }
+    auto Found = ImpactCueTags.find(Ability);
+    if (Found == ImpactCueTags.end())
+    {
+        // UFortGameplayAbility::EffectContainers (a fixed array): the first container's first impact cue. A ranged
+        // ability without one sends GameplayCue.Impact.Physical, as GA_Ranged_GenericDamage does.
+        FName Tag;
+        UProperty* ContainersProperty = Ability->GetClass()->FindPropertyByName(FName(L"EffectContainers", FNAME_Find));
+        if (ContainersProperty && ImpactCuesProperty && ContainersProperty->GetClass()->GetName().ToStdString() == L"StructProperty" && static_cast<UStructProperty*>(ContainersProperty)->Struct == ContainerStruct)
+        {
+            for (int32_t Index = 0; Index < ContainersProperty->ArrayDim && Tag.IsNone(); ++Index)
+            {
+                const uint8_t* Container = ContainersProperty->ContainerPtrToValuePtr<uint8_t>(const_cast<UObject*>(Ability), Index);
+                const FGameplayTagContainer& Cues = *reinterpret_cast<const FGameplayTagContainer*>(Container + ImpactCuesProperty->GetOffset_ForInternal());
+                if (Cues.GameplayTags.Num() > 0)
+                {
+                    Tag = Cues.GameplayTags[0].TagName;
+                }
+            }
+        }
+        if (Tag.IsNone())
+        {
+            Tag = FName(L"GameplayCue.Impact.Physical", FNAME_Find);
+        }
+        Found = ImpactCueTags.emplace(Ability, Tag).first;
+        Log::Info(L"Battle Royale bots: {}'s impact cue (its tracer) is {}", NameOf(Ability), Tag.IsNone() ? std::wstring(L"none") : Tag.ToString().ToStdString());
+    }
+    if (Found->second.IsNone())
+    {
+        return;
+    }
+    Reflection::FParams Context(MakeContext, true);
+    if (!Context.Call(reinterpret_cast<UObject*>(AbilitySystem)))
+    {
+        return;
+    }
+    void* ContextHandle = Context.GetAddress(L"ReturnValue");
+    if (!ContextHandle || !static_cast<void**>(ContextHandle)[1] || !AddShotHitToContext(ContextHandle, Start, End, HitActor, HitActor != nullptr))
+    {
+        return;
+    }
+    Reflection::FParams Params(Multicast, true);
+    Params.Set(L"GameplayCueTag", FGameplayTag{ Found->second });
+    uint8_t* CueParameters = static_cast<uint8_t*>(Params.GetAddress(L"GameplayCueParameters"));
+    if (!CueParameters)
+    {
+        return;
+    }
+    FillWeaponCueParameters(CueParameters, Pawn, Weapon, End);
+    ContextProperty->Struct->CopyScriptStruct(CueParameters + ContextProperty->GetOffset_ForInternal(), ContextHandle);
+    Params.Call(reinterpret_cast<UObject*>(Pawn));
 #endif
 }
 
@@ -4226,8 +4382,9 @@ void FCoreAthenaBotController::MoveTowards(const FVector& Destination, float Now
         StopMoving();
         return;
     }
-    // Sprinting to get there, running while it fights (and for a moment after its target leaves its sight).
-    SetMovementStyle(!bFiring && Now - LastTargetInSightTime > 1.5f, Now);
+    // Sprinting to get there, as players do (CoreV2 #373: the bots ran at 4.1 m/s for a second and a half each time their
+    // target left their sight, and looked as if they walked); running only while firing.
+    SetMovementStyle(!bFiring, Now);
     FVector SteerGoal = Destination;
     if (FollowPath(Destination, Now, AcceptanceRadius, SteerGoal))
     {
@@ -4591,7 +4748,8 @@ void FCoreAthenaBotController::SteerAroundObstacles(FVector& Direction, float No
         Log::Info(L"Battle Royale bots: {} is held up by {} ({})", BotName, NameOf(Obstacle), NameOf(Obstacle->GetClass()));
     }
     // A downed (DBNO) pawn crawls and can't jump, as a downed player can't (CoreV2 #233): it steers around instead.
-    if (!Pawn->bIsDBNO && !IsBlocked(Pawn, Head, Head + Direction * 150.0f))
+    // A mountainside isn't jumped at: the bot turns along it (and, stuck, TryToUnstuck builds up it).
+    if (!Pawn->bIsDBNO && !IsBlocked(Pawn, Head, Head + Direction * 150.0f) && !IsSteepSlopeAhead(Pawn, Location, Direction))
     {
         if (Now >= NextJumpTime)
         {
@@ -4638,10 +4796,13 @@ void FCoreAthenaBotController::SteerAroundObstacles(FVector& Direction, float No
 
 void FCoreAthenaBotController::SetMovementStyle(bool bSprint, float Now)
 {
-    // At most one change a second: a player doesn't flick sprint on and off.
+    // At most one change a second: a player doesn't flick sprint on and off. Aiming down sights walks (AFortPlayerPawn's
+    // movement style update: Walking while bIsTargeting, before sprint), and the sights going up or down changes it at
+    // once, as it does for a player (CoreV2 #373: the bots aimed down sights at full speed).
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    const uint8_t Style = bSprint ? StyleSprinting : StyleRunning;
-    if (!Pawn || MovementStyle == Style || (MovementStyle != 0xFF && Now < NextMovementStyleChange))
+    const uint8_t Style = bTargeting ? StyleWalking : bSprint ? StyleSprinting : StyleRunning;
+    const bool bSightsChanged = (Style == StyleWalking) != (MovementStyle == StyleWalking);
+    if (!Pawn || (MovementStyle == Style && static_cast<uint8_t>(Pawn->CurrentMovementStyle) == Style) || (MovementStyle != 0xFF && MovementStyle != Style && Now < NextMovementStyleChange && !bSightsChanged))
     {
         return;
     }
@@ -5472,15 +5633,17 @@ bool FCoreAthenaBotController::FreeItself(float Now, const wchar_t* Why)
     const FVector Ahead = WayAhead(Now, Location);
     const FVector Knee(Location.X, Location.Y, Location.Z - 30.0f);
     const FVector Head(Location.X, Location.Y, Location.Z + 70.0f);
-    const bool bWallAhead = Ahead.SizeSquared() > 0.01f && IsBlocked(Pawn, Knee, Knee + Ahead * 120.0f) && IsBlocked(Pawn, Head, Head + Ahead * 120.0f);
+    const bool bWallAhead = Ahead.SizeSquared() > 0.01f && ((IsBlocked(Pawn, Knee, Knee + Ahead * 120.0f) && IsBlocked(Pawn, Head, Head + Ahead * 120.0f)) || IsSteepSlopeAhead(Pawn, Location, Ahead));
+    // Under a building's floor with where it's going above (a basement): the ceiling broken first, then the ramp. A ramp
+    // built first ran into the floor above and the bot stayed down there (CoreV2 #373: bots stuck in basements failed to
+    // build out).
+    if (Rise > 250.0f && BreakUpThroughCeiling(Now, Location))
+    {
+        return true;
+    }
     if (Location.Z - MoveGoal.Z < 250.0f && (bWallAhead || Rise > 250.0f) && BuildWayUp(Now, Location))
     {
         Log::Info(L"Battle Royale bots: {} is stuck ({}, {}) and builds {}", BotName, Why, bWallAhead ? L"a slope or a wall it can't get over" : L"where it is going is above it", BuildQueue.Reason);
-        return true;
-    }
-    // Under a building's floor with where it's going above (a basement): the ceiling broken, to make room for the ramp.
-    if (Rise > 250.0f && BreakUpThroughCeiling(Now, Location))
-    {
         return true;
     }
     return false;
@@ -7334,6 +7497,77 @@ void FCoreAthenaBotController::CancelHeal()
             EquippedIndex = -1;
         }
     }
+}
+
+bool FCoreAthenaBotController::LootHealing(float Now)
+{
+#if WITH_SERVER_CODE
+    // 21.40's Loot evaluator scores what the bot needs: hurt, the healing it lacks comes first. Out of a fight and not in
+    // the storm (Heal's own conditions), low on health and shield with nothing it carries that would restore either.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || IsInCombat(Now) || bHeadingForSafeZone)
+    {
+        return false;
+    }
+    const float Health = Pawn->GetHealth();
+    const float Shield = Pawn->GetShield();
+    if (Health + Shield >= LowHealthShield)
+    {
+        return false;
+    }
+    const float MaxHealth = std::max(Pawn->GetMaxHealth(), 1.0f);
+    const float MaxShield = std::max(Pawn->GetMaxShield(), 1.0f);
+    const auto Helps = [&](const FCoreAthenaBotConsumable* Info)
+    {
+        return Info && ((Info->Health > 0.0f && Health < std::min(Info->HealthCap, MaxHealth) - 5.0f) || (Info->Shield > 0.0f && Shield < std::min(Info->ShieldCap, MaxShield) - 5.0f));
+    };
+    for (const auto& [Definition, Count] : Consumables)
+    {
+        if (Count > 0 && Helps(GetConsumableInfo(Definition)))
+        {
+            return false;
+        }
+    }
+    AFortPickup* Current = LootTarget.Get();
+    UFortItemDefinition* CurrentDefinition = Current ? Current->PrimaryPickupItemEntry.ItemDefinition : nullptr;
+    bool bGoingForHealing = Current && !Current->bPickedUp && Goal == ECoreAthenaBotGoal::Loot && CurrentDefinition && Helps(GetConsumableInfo(CurrentDefinition));
+    if (!bGoingForHealing && Now >= NextHealingLootSearch)
+    {
+        NextHealingLootSearch = Now + 1.0f;
+        const FVector Location = LocationOf(Pawn);
+        float Best = 4000.0f;
+        AFortPickup* Nearest = nullptr;
+        for (const FCoreAthenaBotLoot& Entry : Manager->GetLoot())
+        {
+            AFortPickup* Pickup = Entry.Pickup.Get();
+            if (!Entry.bConsumable || !Pickup || Pickup->bPickedUp || IsUnreachable(Pickup) || IsTakenByTeammate(Pickup) || std::fabs(Entry.Location.Z - Location.Z) > 800.0f)
+            {
+                continue;
+            }
+            UFortItemDefinition* Definition = Pickup->PrimaryPickupItemEntry.ItemDefinition;
+            const float Distance = (Entry.Location - Location).Size();
+            if (Distance < Best && WantsPickup(Definition, false, true) && Helps(GetConsumableInfo(Definition)))
+            {
+                Best = Distance;
+                Nearest = Pickup;
+            }
+        }
+        if (Nearest)
+        {
+            UFortItemDefinition* NearestDefinition = Nearest->PrimaryPickupItemEntry.ItemDefinition;
+            Log::Info(L"Battle Royale bots: {} is low ({:.0f} health, {:.0f} shield) and goes for {} {:.0f} m away", BotName, Health, Shield, NameOf(NearestDefinition), Best / 100.0f);
+            LootTarget = Nearest;
+            LootTargetTime = Now;
+            LastLootPursuit = Now;
+            NextLootSearch = Now + 1.0f;
+            SetGoal(ECoreAthenaBotGoal::Loot, Now);
+            bGoingForHealing = true;
+        }
+    }
+    return bGoingForHealing && Loot(Now, 4000.0f);
+#else
+    return false;
+#endif
 }
 
 void FCoreAthenaBotController::SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime)

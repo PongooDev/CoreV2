@@ -127,6 +127,7 @@ void UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventor
     if (Given < NumberToGive && Pawn)
     {
         ItemEntry->Count = NumberToGive - Given;
+        Log::Info(L"GiveItemToInventoryOwner: {} of {} {} for {} didn't fit, they drop at the pawn", static_cast<int32_t>(ItemEntry->Count), NumberToGive, ItemDefinition->GetName().ToStdString(), PlayerController->GetName().ToStdString());
         if (bLoadFullClip)
         {
             ItemEntry->LoadFullClip();

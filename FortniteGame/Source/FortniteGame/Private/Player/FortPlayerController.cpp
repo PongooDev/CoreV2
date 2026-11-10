@@ -1281,6 +1281,8 @@ void AFortPlayerController::ServerSpawnInventoryDrop_Implementation(const FGuid&
         {
             Pickup->PawnWhoDroppedPickup = Pawn;
             Pickup->TossPickup(GetDropTossLocation(PawnTransform), Pawn, 0);
+            // Said, so a drop the player didn't make (#344: ammo "appearing" at a player) shows in the server log.
+            Log::Info(L"Drop: {} drops {} {} as {}", GetName().ToStdString(), DropCount, ItemDefinition->GetName().ToStdString(), Pickup->GetName().ToStdString());
         }
     }
     EntryStruct->DestroyStruct(DropEntry);

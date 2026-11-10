@@ -113,7 +113,8 @@ void AFortPlayerPawn::ServerHandlePickup_Implementation(AFortPickup* Pickup, flo
     }
     FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
     const UFortItemDefinition* ItemDefinition = Entry.ItemDefinition;
-    Log::Info(L"Pickup: {} picks up {} {} ({:.2f}s)", GetName().ToStdString(), static_cast<int32_t>(Entry.Count), ItemDefinition ? ItemDefinition->GetName().ToStdString() : L"None", InFlyTime);
+    Log::Info(L"Pickup: {} picks up {} {} ({:.2f}s, {})", GetName().ToStdString(), static_cast<int32_t>(Entry.Count), ItemDefinition ? ItemDefinition->GetName().ToStdString() : L"None", InFlyTime,
+        Pickup->GetName().ToStdString());
     Pickup->SetPickupTarget(this, InFlyTime, InStartDirection, bPlayPickupSound);
 #endif
 }

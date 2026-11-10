@@ -865,6 +865,10 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         EntryStruct->InitializeStruct(Leftover);
         EntryStruct->CopyScriptStruct(Leftover, Entry);
         Leftover->Count = Entry->Count - Given;
+        // A leftover lands at the player's feet: said, so a pickup that "appears" at a player can be told apart (#344).
+        const UFortItemDefinition* LeftoverDefinition = Entry->ItemDefinition;
+        Log::Info(L"Pickup: {} of {}'s {} {} went into the inventory, the other {} go back down at the pawn", Given, PlayerController->GetName().ToStdString(), static_cast<int32_t>(Entry->Count),
+            LeftoverDefinition ? LeftoverDefinition->GetName().ToStdString() : L"None", static_cast<int32_t>(Leftover->Count));
 
         const FVector Location = Pawn->GetTransform().GetLocation();
         if (AFortPickup* Pickup = CreatePickup(GetWorld(), *Leftover, &Location, nullptr, OptionalOwnerID != -1 ? PlayerController : nullptr))

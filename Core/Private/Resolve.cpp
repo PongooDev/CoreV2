@@ -7021,6 +7021,35 @@ bool Finder::ResolveCraftingLive()
         Previous = Target;
     }
 
+    // 5.0 (UE 4.21, CL-4204761 CanCraftSchematic 0xF344E0) inlines GetSchematicQuantityProduced (0xF44900): a missing
+    // ingredient's schematic is "call GetSchematicForItem (0x1134100); call [rdx+398h] (GetItemDefinitionBP); call
+    // UFortSchematicItemDefinition::StaticClass; call 0xF44570; call 0xF43A70", then CanCraftSchematic calls itself for
+    // it. So no call to QuantityProduced followed GetSchematicForItem and crafting went unresolved on 5.0's STW. Here
+    // GetSchematicForItem is the last call before that recursion that isn't QuantityProduced or one of its callees.
+    if (CanCraftEnd && !GetSchematicForItem)
+    {
+        const uintptr_t QuantityProducedEnd = Finder::FunctionEnd(QuantityProduced);
+        std::vector<uintptr_t> QuantityProducedCallees{ QuantityProduced };
+        for (const auto& [Site, Target] : QuantityProducedEnd > QuantityProduced && QuantityProducedEnd - QuantityProduced <= 0x100 ? Finder::DirectCalls(QuantityProduced, QuantityProducedEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            QuantityProducedCallees.push_back(Target);
+        }
+
+        uintptr_t PreviousOwn = 0;
+        for (const auto& [Site, Target] : Finder::DirectCalls(CanCraft, CanCraftEnd))
+        {
+            if (Target == CanCraft)
+            {
+                GetSchematicForItem = PreviousOwn;
+                break;
+            }
+            if (std::find(QuantityProducedCallees.begin(), QuantityProducedCallees.end(), Target) == QuantityProducedCallees.end())
+            {
+                PreviousOwn = Target;
+            }
+        }
+    }
+
     if (CraftIndex < 0 || !CanCraft || !GetSchematicForItem)
     {
         Log::Error(L"Finder: schematic crafting not found");

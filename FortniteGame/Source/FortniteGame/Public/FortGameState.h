@@ -80,6 +80,11 @@ struct FVoteData
 
 public:
     static bool IsAvailable() { return Member_VoteStatus.IsAvailable() && Member_Voters.IsAvailable(); }
+    // 5.0-5.21 keep the vote's settings in FVoteData itself, as ServerBeginGameplayVote passes them. 5.30 (CL-4305896)
+    // passes an FFortVoteConfig instead (NumVoteOptions, VoteDuration, FailedVoteLockOutDuration,
+    // MaxVotesAllowedPerPlayer, VoteArbitratorType), which FVoteData keeps as VoteConfig, with NumVotersWithMaxVotes
+    // and FVoter::NumVotesCast for votes of more than one option.
+    static bool HasVoteSettings() { return Member_VoteDuration.IsAvailable() && Member_FailedVoteLockOutDuration.IsAvailable() && Member_VoteArbitratorType.IsAvailable(); }
     // LastVoteStatus, the TOptional<EFortVoteStatus> after VoteStatus (21.40's FVoteData has it as a member; 5.10's
     // OnRep_GameplayVotes, 0xE142E0, reads the value at +0x69 and its set flag at +0x6A): no UPROPERTY, so never
     // replicated, and OnRep_GameplayVotes is what sets it.

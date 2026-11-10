@@ -141,6 +141,13 @@ void AFortPlayerControllerZone::HookGameplayVoteVTables()
     {
         return;
     }
+    // Core's restore takes 5.0-5.21's settings (VoteDuration, FailedVoteLockOutDuration, VoteArbitratorType); 5.30's
+    // RPCs take an FFortVoteConfig, which these _Implementations would read as floats.
+    if (!FVoteData::HasVoteSettings())
+    {
+        Log::Warning(L"Mission Control: this build's votes take an FFortVoteConfig, which Core's restore doesn't handle yet; gameplay votes stay as the build has them");
+        return;
+    }
     struct FVoteRestore
     {
         UFunction* Function;

@@ -108,26 +108,51 @@ namespace DelegateInstance
     inline constexpr int32_t SlotsBefore420[] = { 1, 5, 6, 7, 8, 9, 10, 12, 13 };
     static_assert(std::size(SlotsBefore420) == static_cast<size_t>(EDelegateInstanceSlot::Num));
 
+    // 5.30 (CL-4305896) adds GetObjectForTimerManager after GetUObject (21.40's IDelegateInstance has it there), so
+    // everything after GetUObject moves down one: its static instance vtable (0x38B0C70) is GetUObject, GetObjectFor-
+    // TimerManager, HasSameObject, IsCompactable, IsSafeToExecute, GetHandle (slot 5), the destructor, CreateCopy, Execute,
+    // ExecuteIfSafe.
+    inline constexpr int32_t GetObjectForTimerManagerSlot = 1;
+    inline constexpr int32_t SlotsWithTimerManagerObject[] = { 0, 2, 3, 4, 5, 6, 7, 8, 9 };
+    static_assert(std::size(SlotsWithTimerManagerObject) == static_cast<size_t>(EDelegateInstanceSlot::Num));
+
+    inline bool UsesTimerManagerObjectLayout()
+    {
+        return Natives::IDelegateInstance_GetHandleIndex == SlotsWithTimerManagerObject[static_cast<int32_t>(EDelegateInstanceSlot::GetHandle)];
+    }
+
+    // 4.20's order, with or without GetObjectForTimerManager: Core builds its instances' vtables in the build's order.
     inline bool UsesLayout420()
     {
-        return Natives::IDelegateInstance_GetHandleIndex == static_cast<int32_t>(EDelegateInstanceSlot::GetHandle);
+        return Natives::IDelegateInstance_GetHandleIndex == static_cast<int32_t>(EDelegateInstanceSlot::GetHandle) || UsesTimerManagerObjectLayout();
     }
 
     inline int32_t Slot(EDelegateInstanceSlot Function)
     {
+        if (UsesTimerManagerObjectLayout())
+        {
+            return SlotsWithTimerManagerObject[static_cast<int32_t>(Function)];
+        }
         return UsesLayout420() ? static_cast<int32_t>(Function) : SlotsBefore420[static_cast<int32_t>(Function)];
     }
 
-    // A vtable in 4.20's order taken from Core's own (4.16-4.19) one, built once per instance type.
+    // A vtable in 4.20's order (or 5.30's, with GetObjectForTimerManager) taken from Core's own (4.16-4.19) one, built
+    // once per instance type. A static instance has no object for the timer manager, as it has no UObject: Core's
+    // GetUObject (nullptr) answers both.
     template <typename InstanceType>
     void* const* BuildVTable(void* const* CompiledVTable)
     {
-        static void* VTable[static_cast<size_t>(EDelegateInstanceSlot::Num)] = {};
+        static void* VTable[static_cast<size_t>(EDelegateInstanceSlot::Num) + 1] = {};
         static const bool bBuilt = [CompiledVTable]
         {
-            for (size_t Index = 0; Index < std::size(VTable); ++Index)
+            const bool bTimerManagerObject = UsesTimerManagerObjectLayout();
+            for (size_t Index = 0; Index < static_cast<size_t>(EDelegateInstanceSlot::Num); ++Index)
             {
-                VTable[Index] = CompiledVTable[SlotsBefore420[Index]];
+                VTable[bTimerManagerObject ? SlotsWithTimerManagerObject[Index] : Index] = CompiledVTable[SlotsBefore420[Index]];
+            }
+            if (bTimerManagerObject)
+            {
+                VTable[GetObjectForTimerManagerSlot] = CompiledVTable[SlotsBefore420[static_cast<int32_t>(EDelegateInstanceSlot::GetUObject)]];
             }
             return true;
         }();

@@ -227,7 +227,9 @@ namespace
             }
             // 5.21 (CL-4288479) has the members at +0x64, so ObjObjects (+0x78) is close enough to address through
             // the array itself, with no lea: mov [rbp+88h], eax (MaxElements); mov [rbp+90h], ecx (MaxChunks), with
-            // rbp the array (0x17DB516). A store at +0x10 and +0x18 from one base is the chunked array's too.
+            // rbp the array (0x17DB516). A store at +0x10 and +0x18 from one base is the chunked array's too. 5.30
+            // (CL-4305896) has the members at +0x58 and ObjObjects at +0x68, so MaxElements is a byte displacement:
+            // mov [rbp+80h], ecx (MaxChunks); mov [rbp+78h], eax (MaxElements) (0x181E506).
             for (uintptr_t Store = AllocatePoolEnd && !ObjectLayout::Current.bChunkedObjectArray ? AllocatePool : 0; Store && Store + 6 <= AllocatePoolEnd; ++Store)
             {
                 const uint8_t ModRm = Byte(Store + 1);
@@ -238,8 +240,9 @@ namespace
                 }
                 for (uintptr_t Other = AllocatePool; Other + 6 <= AllocatePoolEnd; ++Other)
                 {
-                    if (Byte(Other) == 0x89 && (Byte(Other + 1) & 0xC7) == (0x80 | (ModRm & 0x07)) && (Byte(Other - 1) & 0xF1) != 0x41 &&
-                        *reinterpret_cast<const int32_t*>(Other + 2) == ObjObjects + 0x10)
+                    const bool bDisp32 = (Byte(Other + 1) & 0xC7) == (0x80 | (ModRm & 0x07)) && *reinterpret_cast<const int32_t*>(Other + 2) == ObjObjects + 0x10;
+                    const bool bDisp8 = ObjObjects + 0x10 < 0x80 && (Byte(Other + 1) & 0xC7) == (0x40 | (ModRm & 0x07)) && Byte(Other + 2) == ObjObjects + 0x10;
+                    if (Byte(Other) == 0x89 && (bDisp32 || bDisp8) && (Byte(Other - 1) & 0xF1) != 0x41)
                     {
                         ObjectLayout::Current.bChunkedObjectArray = true;
                         break;
@@ -2213,7 +2216,9 @@ namespace
                 }
             }
         }
-        if (GetHandleIndex == 4 || GetHandleIndex == 8)
+        // 5.30 (CL-4305896): slot 5, after GetUObject and the new GetObjectForTimerManager (DelegateInstance::
+        // SlotsWithTimerManagerObject).
+        if (GetHandleIndex == 4 || GetHandleIndex == 5 || GetHandleIndex == 8)
         {
             Natives::IDelegateInstance_GetHandleIndex = GetHandleIndex;
             Log::Info(L"Finder: IDelegateInstance::GetHandle is slot {}", GetHandleIndex);
@@ -4282,10 +4287,16 @@ namespace
         // 4.5's redact to the first and last five characters ("d8b43...352c0"): no account id, so the match results
         // skipped every player, the end-of-match screen got no stats and no rewards (all zeros, "Team Still Alive"), and
         // the warmup reported no players.
+        // Only a call whose target asks IsValid counts: 5.30 (CL-4305896) has lea r8, [rbp-18h] (4C 8D 45 E8) after
+        // the call (0xE2DCD1), an E8 byte the raw scan took for a later call into .text.
         uintptr_t WrapperToDebugString = 0;
         for (uintptr_t Call = ShortProfileFailed ? FindRawCall(ShortProfileFailed - 0x30, ShortProfileFailed) : 0; Call; Call = FindRawCall(Call + 5, ShortProfileFailed))
         {
-            WrapperToDebugString = Finder::RelativeTarget(Call, 1, 5);
+            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+            if (FindInstruction(Target, Target + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 }))
+            {
+                WrapperToDebugString = Target;
+            }
         }
         int32_t UniqueIdToDebugStringIndex = -1;
         if (WrapperToDebugString)
@@ -11188,9 +11199,22 @@ bool Finder::ResolveBuildingLootLive()
     }
 
     // ABuildingSMActor::PostUpdate: Cert selects the alternate mesh set in it, 1.2 only logs.
-    const uintptr_t PostUpdate = FunctionOf(L"ABuildingSMActor::PostUpdate() Building: %s, AltMeshIdx: %d");
+    // 5.30 (CL-4305896) logs the line from a second function (0xCC4CA0, which goes on to call 0xCC71D0) ahead of the
+    // stripped PostUpdate (0xCC4D50), and the vtable scan runs on into it at slot 0x319: the earliest slot wins.
+    constexpr const wchar_t* PostUpdateText = L"ABuildingSMActor::PostUpdate() Building: %s, AltMeshIdx: %d";
     void** SMActorVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
-    const int32_t PostUpdateIndex = FirstVTableIndex(SMActorVTable, PostUpdate);
+    uintptr_t PostUpdate = FunctionOf(PostUpdateText);
+    int32_t PostUpdateIndex = FirstVTableIndex(SMActorVTable, PostUpdate);
+    for (const uintptr_t Ref : Finder::StringRefs(PostUpdateText))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const int32_t Index = FirstVTableIndex(SMActorVTable, Function);
+        if (Index >= 0 && (PostUpdateIndex < 0 || Index < PostUpdateIndex))
+        {
+            PostUpdate = Function;
+            PostUpdateIndex = Index;
+        }
+    }
     bool bPostUpdateSelectsMeshSet = false;
     for (const auto& [Site, Target] : Calls(PostUpdate))
     {
@@ -12369,6 +12393,13 @@ bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOf
         {
             HandleID = Counter;
         }
+        // 5.30 (CL-4305896) increments the loaded value and stores it back further on: mov eax, [GHandleID] (0x642195);
+        // ...; inc eax; mov [GHandleID], eax (0x6421F3).
+        const uintptr_t StoreEnd = std::min(Load + 0x80, SpecFromDefEnd);
+        for (uintptr_t Store = !HandleID && !IsInText(Counter) ? FindInstruction(Load + 6, StoreEnd, { 0xFF, 0xC0, 0x89, 0x05 }) : 0; Store && !HandleID; Store = FindInstruction(Store + 1, StoreEnd, { 0xFF, 0xC0, 0x89, 0x05 }))
+        {
+            HandleID = Finder::RelativeTarget(Store + 2, 2, 6) == Counter ? Counter : 0;
+        }
     }
     Require(L"FGameplayAbilitySpecHandle::GenerateNewHandle's counter", Natives::FGameplayAbilitySpecHandle_GHandleID, HandleID);
 
@@ -12560,18 +12591,20 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
         }
         return Targets;
     };
-    const auto IsDelegateVTable = [&LeaTargets](uintptr_t Candidate)
+    // 5.30 (CL-4305896) puts the instance's destructor in slot 6 (0x2DAD90, which stores the base vtable), so CreateCopy
+    // is slot 7 (0xCAC440), Execute 8 (0xCAE910) and ExecuteIfSafe 9.
+    const auto IsDelegateVTable = [&LeaTargets](uintptr_t Candidate, int32_t CreateCopyIndex)
     {
         void** VTable = reinterpret_cast<void**>(Candidate);
-        if (!Candidate || IsInText(Candidate) || !Finder::IsReadable(VTable, 9 * sizeof(void*)))
+        if (!Candidate || IsInText(Candidate) || !Finder::IsReadable(VTable, (CreateCopyIndex + 3) * sizeof(void*)))
         {
             return false;
         }
-        const uintptr_t CreateCopy = VTableEntry(VTable, 6);
-        const uintptr_t Execute = VTableEntry(VTable, 7);
+        const uintptr_t CreateCopy = VTableEntry(VTable, CreateCopyIndex);
+        const uintptr_t Execute = VTableEntry(VTable, CreateCopyIndex + 1);
         const uintptr_t CreateCopyEnd = CreateCopy ? Finder::FunctionEnd(CreateCopy) : 0;
         const uintptr_t ExecuteEnd = Execute ? Finder::FunctionEnd(Execute) : 0;
-        if (!CreateCopyEnd || !ExecuteEnd || !VTableEntry(VTable, 8))
+        if (!CreateCopyEnd || !ExecuteEnd || !VTableEntry(VTable, CreateCopyIndex + 2))
         {
             return false;
         }
@@ -12591,16 +12624,22 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
 
     uintptr_t CheckGoal = 0;
     uintptr_t DelegateVTable = 0;
+    int32_t ExecuteIndex = -1;
     const std::vector<std::pair<uintptr_t, uintptr_t>> DepositCalls = DepositEnd ? Finder::DirectCalls(Deposit, DepositEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
     for (const auto& [Site, Callee] : DepositCalls)
     {
         const uintptr_t CalleeEnd = IsInText(Callee) ? Finder::FunctionEnd(Callee) : 0;
         for (const uintptr_t Target : LeaTargets(Callee, CalleeEnd))
         {
-            if (IsDelegateVTable(Target))
+            for (const int32_t CreateCopyIndex : { 6, 7 })
             {
-                CheckGoal = Callee;
-                DelegateVTable = Target;
+                if (IsDelegateVTable(Target, CreateCopyIndex))
+                {
+                    CheckGoal = Callee;
+                    DelegateVTable = Target;
+                    ExecuteIndex = CreateCopyIndex + 1;
+                    break;
+                }
             }
         }
         if (DelegateVTable)
@@ -12616,9 +12655,9 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
         return false;
     }
     Natives::ABuildingItemCollectorActor_GrantOutputDelegateVTable = reinterpret_cast<void**>(DelegateVTable);
-    Natives::ABuildingItemCollectorActor_GrantOutputDelegateExecuteIndex = 7;
-    Log::Info(L"Finder: ABuildingItemCollectorActor: interact 0x{:X}, deposit 0x{:X}, CheckDepositGoalReached 0x{:X}, output timer delegate vtable 0x{:X} (Execute 0x{:X})",
-        Rva(Interact), Rva(Deposit), Rva(CheckGoal), Rva(DelegateVTable), Rva(VTableEntry(reinterpret_cast<void**>(DelegateVTable), 7)));
+    Natives::ABuildingItemCollectorActor_GrantOutputDelegateExecuteIndex = ExecuteIndex;
+    Log::Info(L"Finder: ABuildingItemCollectorActor: interact 0x{:X}, deposit 0x{:X}, CheckDepositGoalReached 0x{:X}, output timer delegate vtable 0x{:X} (Execute slot {} 0x{:X})",
+        Rva(Interact), Rva(Deposit), Rva(CheckGoal), Rva(DelegateVTable), ExecuteIndex, Rva(VTableEntry(reinterpret_cast<void**>(DelegateVTable), ExecuteIndex)));
     return true;
 }
 

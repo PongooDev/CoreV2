@@ -6,6 +6,7 @@
 
 class AActor;
 class UPrimitiveComponent;
+struct FGameplayTagContainer;
 
 // Battle Royale's player pawn (from 1.7.2; PlayerPawn_Athena_C).
 class AFortPlayerPawnAthena : public AFortPlayerPawn
@@ -32,6 +33,15 @@ public:
     // new pawn in a large team game, but not in 50v50.
     DefineUProperty(bool, bTeamMembersAlwaysRelevant)
     static bool HasTeamMembersAlwaysRelevant() { return Member_bTeamMembersAlwaysRelevant.IsAvailable(); }
+    // How far the pawn fell when it last landed hard enough to be hurt (from 4.0). The falling-damage handler (5.10
+    // 0xBEE1D0) sets it on the server as it applies the damage tagged Gameplay.Damage.Environment.Falling, and the death
+    // report's Distance is this for a fall (the DBNO handling, 5.10 0xC11510).
+    DefineUProperty(float, LastFallDistance)
+    static bool HasLastFallDistance() { return Member_LastFallDistance.IsAvailable(); }
+
+    // The death report's distance (FDeathInfo::Distance) as the DBNO handling (5.10 0xC11510) works it out: the eliminator's
+    // pawn's distance (AActor::GetDistanceTo), or the fall's when the damage tags hold the falling damage tag.
+    static float GetDeathInfoDistance(AFortPawn* Victim, APawn* FinisherPawn, const FGameplayTagContainer& DamageTags);
 
     bool HasCustomizationLoadout() { return Member_CustomizationLoadout.IsAvailable(); }
 

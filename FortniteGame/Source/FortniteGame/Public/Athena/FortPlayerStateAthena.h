@@ -39,9 +39,10 @@ struct FDeathInfo
     DefineUProperty(bool, bDBNO)
     // EDeathCause (from 1.8): OutsideSafeZone, FallDamage, Pistol, ... Trap, DBNOTimeout, ..., Unspecified.
     DefineUProperty(uint8_t, DeathCause)
-    // How far the eliminator's pawn was from the player, in cm (AActor::GetDistanceTo), 0 when nobody else eliminated
-    // them. The client's OnRep_DeathInfo (3.5.1 0xA617C0) shows it in metres (Distance * 0.01) after a Sniper kill
-    // feed line or past the game data's distance.
+    // How far the eliminator's pawn was from the player, in cm (AActor::GetDistanceTo), or for a fall how far the player
+    // fell (AFortPlayerPawnAthena::LastFallDistance, from 4.0), else 0. The client's OnRep_DeathInfo (3.5.1 0xA617C0)
+    // shows it in metres (Distance * 0.01) after a Sniper kill feed line or past the game data's distance; 5.10's
+    // (0xC492D0) always does after a fall.
     DefineUProperty(float, Distance)
     // Where the player died (from 3.5). AFortPlayerControllerAthena::RespawnPlayerAfterDeath (4.2 0xA57AD0) clears the
     // death info, this with it, once the player is back.

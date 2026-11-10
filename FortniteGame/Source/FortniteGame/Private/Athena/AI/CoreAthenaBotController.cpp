@@ -7432,7 +7432,10 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
         if (FDeathInfo::HasDistance())
         {
             AFortPlayerPawn* KillerPawn = KillerState && KillerState != PlayerState ? KillerState->GetCurrentPawn() : nullptr;
-            DeathInfo.Distance = KillerPawn && Pawn ? KillerPawn->GetDistanceTo(Pawn) : 0.0f;
+            // A fall's distance when the hit that killed the bot was falling damage, as a player's.
+            const FGameplayTagContainer NoTags;
+            DeathInfo.Distance = Pawn && AFortPawn::HasDeathTags() ? AFortPlayerPawnAthena::GetDeathInfoDistance(Pawn, KillerPawn, Pawn->DeathTags)
+                : AFortPlayerPawnAthena::GetDeathInfoDistance(Pawn, KillerPawn, NoTags);
         }
         if (FDeathInfo::HasDeathLocation() && Pawn)
         {

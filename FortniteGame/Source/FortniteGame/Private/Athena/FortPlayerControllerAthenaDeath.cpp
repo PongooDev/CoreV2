@@ -218,6 +218,24 @@ void AFortPlayerControllerAthena::OnPawnDiedHK(AFortPlayerControllerAthena* This
     This->OnPawnDied(Damage, DamageTags, Momentum, Instigator, DamageCauser, Downer);
 }
 
+float AFortPlayerPawnAthena::GetDeathInfoDistance(AFortPawn* Victim, APawn* FinisherPawn, const FGameplayTagContainer& DamageTags)
+{
+    // 5.10 0xC11510: 0, the eliminator's pawn's distance when someone else did it, then the pawn's LastFallDistance when
+    // the damage tags hold FortGlobals' falling damage tag (the one ToDeathCause, 0xC5F0D0, turns into FallDamage). The
+    // client's kill feed always shows the distance for a fall ("didn't stick the landing (N m)", OnRep_DeathInfo 0xC492D0).
+    float Distance = FinisherPawn && Victim ? FinisherPawn->GetDistanceTo(Victim) : 0.0f;
+    if (HasLastFallDistance())
+    {
+        static const FName FallingTag(L"Gameplay.Damage.Environment.Falling", FNAME_Find);
+        AFortPlayerPawnAthena* AthenaVictim = Victim ? Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Victim)) : nullptr;
+        if (AthenaVictim && !FallingTag.IsNone() && DamageTags.HasTag(FGameplayTag{ FallingTag }))
+        {
+            Distance = AthenaVictim->LastFallDistance;
+        }
+    }
+    return Distance;
+}
+
 bool AFortPlayerControllerAthena::IsTeamOut()
 {
     // 1.9 0x42A310: not before the aircraft has gone, then once none of TeamMembers has a pawn that is still in play (a
@@ -277,13 +295,13 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
             DeathCause = AFortPlayerStateAthena::ToDeathCause(DeadPawn, DamageTags, DeadPawn->bIsDBNO);
             DeathInfo.DeathCause = DeathCause;
         }
-        // How far away the eliminator was, as the DBNO handling has it (4.1 0xAAE559, 0xAAE619): 0, then the
-        // eliminator's pawn's distance to this one when someone else eliminated the player.
+        // How far away the eliminator was, or how far the player fell, as the DBNO handling has it (4.1 0xAAE559,
+        // 0xAAE619; 5.10 0xC11510).
         if (FDeathInfo::HasDistance())
         {
             AController* Finisher = Downer ? Downer : Instigator;
             APawn* FinisherPawn = Finisher && Finisher != this ? Finisher->GetPawn() : nullptr;
-            DeathInfo.Distance = FinisherPawn && DeadPawn ? FinisherPawn->GetDistanceTo(DeadPawn) : 0.0f;
+            DeathInfo.Distance = AFortPlayerPawnAthena::GetDeathInfoDistance(DeadPawn, FinisherPawn, DamageTags);
         }
         if (Instigator)
         {

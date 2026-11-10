@@ -1387,8 +1387,51 @@ namespace
         Require(L"UGameMapsSettings::GetGlobalDefaultGameMode", Natives::UGameMapsSettings_GetGlobalDefaultGameMode, GlobalDefaultGameMode);
     }
 
+    // Whether the code between a null check of [Base+disp] (at Check, Length bytes) and the virtual call at Call loads the
+    // vtable of that same object: `mov rX, [Base]`, or `mov rcx, Base` then `mov rX, [rcx]`. That is the inlined
+    // UClass::GetDefaultObject's `if (!ClassDefaultObject) CreateDefaultObject();`, where `this` is the class tested.
+    bool CallsSameObject(uintptr_t Check, size_t Length, uintptr_t Call)
+    {
+        const uint8_t Base = static_cast<uint8_t>((Byte(Check + 2) & 0x07) | ((Byte(Check) & 0x01) << 3));
+        const auto LoadsVtable = [&](uint8_t Register)
+        {
+            if ((Register & 0x07) == 0x04 || (Register & 0x07) == 0x05)
+            {
+                return false;
+            }
+            for (uintptr_t At = Check + Length; At + 3 <= Call; ++At)
+            {
+                // REX.W [+R] [+B] 8B /r with mod 00 and r/m the register.
+                if ((Byte(At) & 0xFA) == 0x48 && ((Byte(At) & 0x01) << 3) == (Register & 0x08) && Byte(At + 1) == 0x8B &&
+                    (Byte(At + 2) & 0xC0) == 0x00 && (Byte(At + 2) & 0x07) == (Register & 0x07))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        if (LoadsVtable(Base))
+        {
+            return true;
+        }
+        for (uintptr_t At = Check + Length; At + 3 <= Call; ++At)
+        {
+            // mov rcx, Base: REX.W 8B C8+r (r/m = Base) or REX.W 89 C1+(r<<3) (reg = Base).
+            const bool bMovCxFrom8B = (Byte(At) & 0xFE) == 0x48 && ((Byte(At) & 0x01) << 3) == (Base & 0x08) &&
+                Byte(At + 1) == 0x8B && Byte(At + 2) == (0xC8 | (Base & 0x07));
+            const bool bMovCxFrom89 = (Byte(At) & 0xFB) == 0x48 && ((Byte(At) & 0x04) << 1) == (Base & 0x08) &&
+                Byte(At + 1) == 0x89 && Byte(At + 2) == (0xC1 | ((Base & 0x07) << 3));
+            if (bMovCxFrom8B || bMovCxFrom89)
+            {
+                return LoadsVtable(0x01);
+            }
+        }
+        return false;
+    }
+
     // Votes on the vtable slot called right after the inlined UClass::GetDefaultObject's null check of the CDO at DefaultObject.
-    bool VoteCreateDefaultObject(int32_t DefaultObject, int32_t& OutWinner, int32_t& OutWinnerVotes, int32_t& OutTotal)
+    // bSameObject counts only the sites whose call goes through the vtable of the object that was checked.
+    bool VoteCreateDefaultObject(int32_t DefaultObject, int32_t& OutWinner, int32_t& OutWinnerVotes, int32_t& OutTotal, bool bSameObject = false)
     {
         const uintptr_t Begin = Finder::TextBegin();
         const uintptr_t End = Finder::TextEnd();
@@ -1402,12 +1445,13 @@ namespace
             int32_t Total = 0;
         };
         static std::unordered_map<int32_t, FVotes> Cache;
+        static std::unordered_map<int32_t, FVotes> SameObjectCache;
         static bool bScanned = false;
         constexpr int32_t MinOffset = 0xC0;
         constexpr int32_t MaxOffset = 0x140;
         if (bScanned && DefaultObject >= MinOffset && DefaultObject <= MaxOffset)
         {
-            const FVotes& Cached = Cache[DefaultObject];
+            const FVotes& Cached = bSameObject ? SameObjectCache[DefaultObject] : Cache[DefaultObject];
             int32_t CachedWinner = -1;
             int32_t CachedWinnerVotes = 0;
             for (const auto& [Displacement, Count] : Cached.Votes)
@@ -1459,8 +1503,14 @@ namespace
                         FVotes& Entry = Cache[Displacement];
                         ++Entry.Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
                         ++Entry.Total;
+                        if (CallsSameObject(At, Length, Call))
+                        {
+                            FVotes& SameObjectEntry = SameObjectCache[Displacement];
+                            ++SameObjectEntry.Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
+                            ++SameObjectEntry.Total;
+                        }
                     }
-                    else
+                    else if (!bSameObject || CallsSameObject(At, Length, Call))
                     {
                         ++Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
                         ++Total;
@@ -1472,7 +1522,7 @@ namespace
         if (bFill)
         {
             bScanned = true;
-            return VoteCreateDefaultObject(DefaultObject, OutWinner, OutWinnerVotes, OutTotal);
+            return VoteCreateDefaultObject(DefaultObject, OutWinner, OutWinnerVotes, OutTotal, bSameObject);
         }
 
         int32_t Winner = -1;
@@ -1551,6 +1601,28 @@ namespace
                     {
                         RunnerUpVotes = (std::max)(RunnerUpVotes, Vote.Votes);
                     }
+                }
+                if (Best && Best->Votes >= 30 && Best->Votes < RunnerUpVotes * 4)
+                {
+                    // 5.10 (CL-4240749): +0x110 also passes, 11 of 12 sites on slot 0x47, against +0xF8's 40 of 41 on
+                    // 0x65. Those sites call through another object (loaded from [rbx+0xA8]); count only the sites
+                    // that call through the object whose member was checked, as GetDefaultObject does.
+                    int32_t SameWinner = -1;
+                    int32_t SameVotes = 0;
+                    int32_t SameTotal = 0;
+                    const bool bBestSame = VoteCreateDefaultObject(Best->Offset, SameWinner, SameVotes, SameTotal, true) && SameWinner == Best->Winner;
+                    int32_t SameRunnerUp = 0;
+                    for (const FOffsetVote& Vote : OffsetVotes)
+                    {
+                        int32_t OtherWinner = -1;
+                        int32_t OtherVotes = 0;
+                        int32_t OtherTotal = 0;
+                        if (&Vote != Best && Vote.bPassed && VoteCreateDefaultObject(Vote.Offset, OtherWinner, OtherVotes, OtherTotal, true))
+                        {
+                            SameRunnerUp = (std::max)(SameRunnerUp, OtherVotes);
+                        }
+                    }
+                    RunnerUpVotes = bBestSame && SameVotes >= 30 && SameVotes >= SameRunnerUp * 4 ? 0 : RunnerUpVotes;
                 }
                 if (Best && Best->Votes >= 30 && Best->Votes >= RunnerUpVotes * 4)
                 {

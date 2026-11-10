@@ -11,7 +11,39 @@
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/WeakObjectPtr.h"
+
+namespace
+{
+    // Whether the build reflects FAthenaQuickChatActiveEntry's member Name as a TWeakObjectPtr (5.21 on) rather than a
+    // raw object pointer (3.3 to 5.10). Both are 8 bytes at the same offset; reading 5.21's ObjectIndex and SerialNumber
+    // as a pointer is what crashed the server on a callout.
+    bool IsWeakObjectMember(const wchar_t* Name)
+    {
+        const UScriptStruct* Struct = FAthenaQuickChatActiveEntry::StaticStruct();
+        const UProperty* Property = Struct ? Struct->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        return Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UWeakObjectProperty);
+    }
+
+    UObject* ReadObjectMember(const void* Member, bool bWeak)
+    {
+        return bWeak ? static_cast<const FWeakObjectPtr*>(Member)->Get() : *static_cast<UObject* const*>(Member);
+    }
+}
+
+UAthenaQuickChatBank* FAthenaQuickChatActiveEntry::GetBank() const
+{
+    static const bool bWeak = IsWeakObjectMember(L"Bank");
+    return reinterpret_cast<UAthenaQuickChatBank*>(ReadObjectMember(&GetMember_Bank(), bWeak));
+}
+
+UObject* FAthenaQuickChatActiveEntry::GetContextObject() const
+{
+    static const bool bWeak = IsWeakObjectMember(L"ContextObject");
+    return ReadObjectMember(&GetMember_ContextObject(), bWeak);
+}
 
 // Squad Comms (3.5's patch notes: "Enemy Spotted", "Need Meds", "Need Shields", "Need Materials", "Need Weapon", "Need
 // Ammo", on V). The wheel's client (3.5.1 0xA34270) shows the callout over its own pawn (CurrQuickChatBrush), starts its
@@ -34,11 +66,12 @@ void AFortPlayerControllerAthena::ServerPlaySquadQuickChatMessage_Implementation
 {
 #if WITH_SERVER_CODE
     AFortPlayerStateAthena* SenderState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState)));
-    UAthenaQuickChatBank* Bank = ChatEntry.Bank;
+    UObject* BankObject = ChatEntry.GetBank();
+    UAthenaQuickChatBank* Bank = BankObject && BankObject->IsA(UAthenaQuickChatBank::StaticClass()) ? reinterpret_cast<UAthenaQuickChatBank*>(BankObject) : nullptr;
     const int32_t Index = ChatEntry.Index;
     if (!SenderState || !Bank || Index < 0 || Index >= Bank->ChatOptions.Num())
     {
-        Log::Warning(L"Squad Comms: {} sent a callout that isn't on the wheel (bank {}, index {})", GetName().ToStdString(), Bank ? Bank->GetName().ToStdString() : L"none", Index);
+        Log::Warning(L"Squad Comms: {} sent a callout that isn't on the wheel (bank {}, index {})", GetName().ToStdString(), BankObject ? BankObject->GetName().ToStdString() : L"none", Index);
         return;
     }
 

@@ -5,6 +5,7 @@
 #include "Math/Vector.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerControllerZone.h"
+#include "UObject/WeakObjectPtr.h"
 
 #include <vector>
 
@@ -84,14 +85,18 @@ public:
 };
 
 // The callout a player picked on the wheel (from 3.3): its bank and its index in the bank's ChatOptions, with what it
-// is about (the item or material it asks for).
+// is about (the item or material it asks for). 5.21 (CL-4288479) makes Bank and ContextObject TWeakObjectPtrs, as 21.40
+// has them; 3.3 to 5.10 reflect raw object pointers in the same 8 bytes. GetBank and GetContextObject read either.
 struct FAthenaQuickChatActiveEntry
 {
     DefineUnrealStruct(FAthenaQuickChatActiveEntry, FortniteGame)
-    DefineUProperty(UAthenaQuickChatBank*, Bank)
-    DefineUProperty(UObject*, ContextObject)
+    DefineUProperty(TWeakObjectPtr<UAthenaQuickChatBank>, Bank)
+    DefineUProperty(TWeakObjectPtr<UObject>, ContextObject)
     DefineUProperty(int16_t, ContextValue)
     DefineUProperty(int8_t, Index)
+
+    UAthenaQuickChatBank* GetBank() const;
+    UObject* GetContextObject() const;
 };
 
 // Battle Royale's player controller (from 1.7.2; Athena_PlayerController_C).

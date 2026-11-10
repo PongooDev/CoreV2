@@ -12492,24 +12492,42 @@ int32_t Finder::StrippedAthenaPawnDiedIndex()
     // win had no StartEndGamePhase to end the match with (CoreV2 #270).
     uintptr_t MapCursorRemoval = 0;
     const uintptr_t AthenaEnd = Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
+    const uintptr_t Remove = FunctionOf(RemoveFromAlivePlayersLog);
+    // A short function that never calls RemoveFromAlivePlayers.
+    const auto IsShortWithoutRemove = [Remove](uintptr_t Function)
+    {
+        const uintptr_t End = Function && Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : 0;
+        bool bCallsRemove = false;
+        for (const auto& [Site, Target] : End > Function && End - Function <= 0x80 ? Finder::DirectCalls(Function, End) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            bCallsRemove = bCallsRemove || Target == Remove;
+        }
+        return End > Function && End - Function <= 0x80 && Remove && !bCallsRemove;
+    };
     const uintptr_t ZoneCall = AthenaEnd > Athena && AthenaEnd - Athena <= 0x60 ? FindRawCall(Athena, AthenaEnd) : 0;
     if (ZoneCall && Finder::RelativeTarget(ZoneCall, 1, 5) == Zone && !FindRawCall(ZoneCall + 5, AthenaEnd))
     {
         const uintptr_t Jump = FindInstruction(ZoneCall + 5, AthenaEnd, { 0xE9 });
         const uintptr_t Tail = Jump && Jump + 5 <= AthenaEnd ? Finder::RelativeTarget(Jump, 1, 5) : 0;
-        const uintptr_t TailEnd = Tail && Finder::FunctionStart(Tail) == Tail ? Finder::FunctionEnd(Tail) : 0;
-        const uintptr_t Remove = FunctionOf(RemoveFromAlivePlayersLog);
-        bool bTailCallsRemove = false;
-        for (const auto& [Site, Target] : TailEnd > Tail && TailEnd - Tail <= 0x80 ? Finder::DirectCalls(Tail, TailEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        MapCursorRemoval = IsShortWithoutRemove(Tail) ? Tail : 0;
+    }
+    // 5.0 (CL-4204761 0xBF8F10) first sends the player's inventory report (0xAE8310, a virtual that sends the
+    // "Core.AthenaPlayerInventoryReport" analytics event), then calls Zone's handler, and on the server calls the map
+    // marker's removal (0xBECBD0) and returns: "call 0xAE8310; ...; call Zone; cmp byte ptr [rsi + Role],
+    // ROLE_Authority; jnz; mov rcx, rsi; call 0xBECBD0; ...; retn". Taken for the build's own, nobody who died was out
+    // of the match and the player bots' win had no StartEndGamePhase (CoreV2 #349). Core's handler leaves the analytics
+    // event out, as it does 1.9's "Combat.PlayerDeath".
+    if (!MapCursorRemoval && AthenaEnd > Athena && AthenaEnd - Athena <= 0xA0)
+    {
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Athena, AthenaEnd);
+        if (Calls.size() == 3 && Calls[0].second != Zone && Calls[1].second == Zone && Calls[0].second != Remove && Calls[2].second != Remove)
         {
-            bTailCallsRemove = bTailCallsRemove || Target == Remove;
+            MapCursorRemoval = IsShortWithoutRemove(Calls[2].second) ? Calls[2].second : 0;
         }
-        MapCursorRemoval = TailEnd > Tail && TailEnd - Tail <= 0x80 && Remove && !bTailCallsRemove ? Tail : 0;
     }
     const bool bStripped = Athena == Zone || bJumpsToZone || Finder::IsStubFunction(Athena) || MapCursorRemoval;
     if (!bStripped)
     {
-        const uintptr_t Remove = FunctionOf(RemoveFromAlivePlayersLog);
         const uintptr_t AthenaEnd = Remove && Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
         bool bCallsRemove = false;
         for (const auto& [Site, Target] : AthenaEnd > Athena ? Finder::DirectCalls(Athena, AthenaEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
@@ -12945,6 +12963,12 @@ bool Finder::ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceV
         const uintptr_t KeepTypedString = Call ? 0 : FindInstruction(Function, Function + 0x30, { 0x49, 0x8B, 0xE8 });
         const uintptr_t IsLoaded = KeepTypedString ? FindInstruction(KeepTypedString, KeepTypedString + 0x20, { 0x49, 0x8B, 0xD1, 0x48, 0x8B, 0x01, 0xFF, 0x90 }) : 0;
         Call = IsLoaded ? FindInstruction(IsLoaded, Function + 0x80, { 0x4C, 0x8B, 0xC5, 0xFF, 0x90 }) : Call;
+        // 5.0 (CL-4204761 0x3FACD0, the same slot) keeps Str in r14 ("mov r14, r8"), asks IsLoaded(Type) with "mov rax,
+        // [rcx]; mov rdx, r9; call [rax+238h]", then "mov r8, r14; call [rax+0D0h]" on the identity. Without it 5.0's
+        // bots had no ids again, and one name on clients (CoreV2 #349).
+        const uintptr_t KeepR14String = Call ? 0 : FindInstruction(Function, Function + 0x30, { 0x4D, 0x8B, 0xF0 });
+        const uintptr_t IsLoadedR14 = KeepR14String ? FindInstruction(KeepR14String, KeepR14String + 0x20, { 0x48, 0x8B, 0x01, 0x49, 0x8B, 0xD1, 0xFF, 0x90 }) : 0;
+        Call = IsLoadedR14 ? FindInstruction(IsLoadedR14, Function + 0x80, { 0x4D, 0x8B, 0xC6, 0xFF, 0x90, 0xD0, 0x00, 0x00, 0x00 }) : Call;
         if (Call)
         {
             Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex = Index;

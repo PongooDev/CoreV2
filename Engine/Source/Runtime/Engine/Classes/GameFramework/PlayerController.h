@@ -20,6 +20,7 @@ public:
     DefineUFunction(ToggleSpeaking)
     DefineUFunction(ClientEnableNetworkVoice)
     DefineUFunction(ClientMessage)
+    DefineUFunction(ServerAcknowledgePossession)
 
     void ConsoleKey(FKey Key);
     void SendToConsole(const FString& Command);

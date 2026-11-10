@@ -24,6 +24,8 @@ class AFortPlayerControllerZone : public AFortPlayerController
 
 public:
     void ServerTriggerSetupTeleportCameraEvent_Implementation();
+    // The client's ServerAcknowledgePossession, sent once it has taken a new pawn (APlayerController::ClientRestart).
+    void ServerAcknowledgePossession_Implementation(APawn* P);
 
     static void HookVTables();
 
@@ -31,4 +33,9 @@ private:
     static inline FWeakObjectPtr SetupTeleportOutCameraGameState;
 
     static void ServerTriggerSetupTeleportCameraEvent_ImplementationHK(AFortPlayerControllerZone* This);
+    // Restores ServerAcknowledgePossession_Implementation where the build strips this class's override (5.0).
+    static void HookPossessionVTables();
+    static void ServerAcknowledgePossession_ImplementationHK(AFortPlayerControllerZone* This, APawn* P);
+    // The super class's (AFortPlayerController's, which is APlayerController's) ServerAcknowledgePossession_Implementation.
+    static inline void (*ServerAcknowledgePossession_ImplementationSuper)(AFortPlayerControllerZone* This, APawn* P) = nullptr;
 };

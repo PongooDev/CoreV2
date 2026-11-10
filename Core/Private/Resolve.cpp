@@ -3487,6 +3487,19 @@ namespace
                 DestroyedActorValueSize = static_cast<ptrdiff_t>(Byte(Next + 3)) - 8;
             }
         }
+        // UE 4.21 takes the element's address before the jump and reads the next id through it: lea r8, [rdx+rdx*2];
+        // cmp [r9+r8*8], ecx; lea rdx, [r9+r8*8]; jz; mov eax, [rdx+10h] (5.0 CL-4204761 0x24DC797). The probe above
+        // found nothing there, so 5.0's TUniquePtr map (0x18-byte elements) was read as 0x38-byte values and a client
+        // joining a zone with a destroyed startup actor crashed the server in UNetDriver::FindDestructionInfo.
+        for (uintptr_t Next = FindOrAddCall && !DestroyedActorValueSize ? DestroyedActorsBase + 10 : 0; Next && Next + 3 <= FindOrAddCall && !DestroyedActorValueSize; ++Next)
+        {
+            if (Byte(Next) == 0x8B && (Byte(Next + 1) & 0xC0) == 0x40 && (Byte(Next + 1) & 0x07) != 0x04 && Byte(Next - 2) == 0x74
+                && (Byte(Next - 6) & 0xF0) == 0x40 && Byte(Next - 5) == 0x8D && (Byte(Next - 4) & 0xC7) == 0x04 && (Byte(Next - 3) & 0xC0) == 0xC0 && ((Byte(Next - 4) >> 3) & 0x07) == (Byte(Next + 1) & 0x07)
+                && (Byte(Next - 10) & 0xF0) == 0x40 && Byte(Next - 9) == 0x39 && (Byte(Next - 8) & 0xC7) == 0x04 && Byte(Next - 7) == Byte(Next - 3))
+            {
+                DestroyedActorValueSize = static_cast<ptrdiff_t>(Byte(Next + 2)) - 8;
+            }
+        }
         Natives::UNetDriver_DestroyedStartupOrDormantActorsIsUnique = DestroyedActorValueSize == static_cast<ptrdiff_t>(sizeof(void*));
         if (Natives::UNetDriver_DestroyedStartupOrDormantActorsIsUnique)
         {

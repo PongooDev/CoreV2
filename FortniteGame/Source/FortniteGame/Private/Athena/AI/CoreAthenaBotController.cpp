@@ -1462,6 +1462,7 @@ void FCoreAthenaBotController::EnterAircraft(AFortAthenaAircraft* InAircraft, fl
     State = ECoreAthenaBotState::InAircraft;
     JumpTime = InJumpTime;
     LatestJumpTime = InLatestJumpTime;
+    ThankBusDriverTime = AFortPlayerStateAthena::HasThankedBusDriver() ? -2.0f : -1.0f;
 }
 
 void FCoreAthenaBotController::Destroy()
@@ -2143,10 +2144,23 @@ void FCoreAthenaBotController::JumpOffBus(float Now)
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus: at the bot's moment along the path (EnterAircraft picked it), or
     // when the bus is about to leave the drop zone, the bot leaves the aircraft where it is, skydiving from the bus as a
     // player does (ExitAircraft's AFortPlayerPawnAthena::BeginSkydiving).
+    if (ThankBusDriverTime == -2.0f)
+    {
+        // About a third of the bots thank the bus driver, as players do: at some moment between the bus leaving and
+        // their jump.
+        const float Before = std::min(JumpTime, LatestJumpTime) - 0.5f;
+        ThankBusDriverTime = FMath::FRand() < 0.35f && Before > Now + 1.0f ? Now + 1.0f + (Before - Now - 1.0f) * FMath::FRand() : -1.0f;
+    }
+    if (ThankBusDriverTime >= 0.0f && Now >= ThankBusDriverTime)
+    {
+        ThankBusDriverTime = -1.0f;
+        ThankBusDriver();
+    }
     if (Now < JumpTime && Now < LatestJumpTime)
     {
         return;
     }
+    ThankBusDriverTime = -1.0f;
     AActor* Aircraft = GetAircraft();
     const FVector BusLocation = Aircraft ? LocationOf(Aircraft) : LastKnownPosition + FVector(0.0f, 0.0f, 15000.0f);
     const FVector Start(BusLocation.X + RandomRange(-300.0f, 300.0f), BusLocation.Y + RandomRange(-300.0f, 300.0f), BusLocation.Z - 500.0f);
@@ -2193,6 +2207,22 @@ void FCoreAthenaBotController::JumpOffBus(float Now)
         DropTarget.X, DropTarget.Y, Dist2D(Start, DropTarget) / 100.0f, Pawn && Pawn->bIsSkydiving ? L"yes" : L"no");
     NextLogTime = Now + 3.0f;
     LandedTime = 0.0f;
+#endif
+}
+
+void FCoreAthenaBotController::ThankBusDriver()
+{
+#if WITH_SERVER_CODE
+    // AFortPlayerControllerAthena::ServerThankBusDriver_Implementation (5.30 0xC289A0): the controller's PlayerState, when
+    // it is an AFortPlayerStateAthena, gets bThankedBusDriver. Replicated, it shows in every client's feed
+    // (OnRep_ThankedBusDriver). The bot's controller is an AAIController, so the RPC itself can't run on it.
+    AFortPlayerStateAthena* PlayerState = GetPlayerState();
+    if (!AFortPlayerStateAthena::HasThankedBusDriver() || !PlayerState || PlayerState->bThankedBusDriver)
+    {
+        return;
+    }
+    PlayerState->bThankedBusDriver = true;
+    Log::Info(L"Battle Royale bots: {} thanks the bus driver", BotName);
 #endif
 }
 

@@ -160,6 +160,12 @@ public:
     // it, and GetMapIndicatorLocation (0xA1F280) reads it back.
     DefineUProperty(FVector2D, MapIndicatorPos)
     static bool HasMapIndicatorPos() { return Member_MapIndicatorPos.IsAvailable(); }
+    // 5.30: the player thanked the bus driver, replicated to everyone. AFortPlayerControllerAthena::
+    // ServerThankBusDriver_Implementation (5.30 0xC289A0) only sets it, on its PlayerState when that is an
+    // AFortPlayerStateAthena; each client's OnRep_ThankedBusDriver (0xC510B0) puts "<{VictimStyle}>{PlayerName}</> has
+    // thanked the bus driver" (Athena.ThankedBusDriver, TeamVictim for a teammate) in its feed.
+    DefineUProperty(bool, bThankedBusDriver)
+    static bool HasThankedBusDriver() { return Member_bThankedBusDriver.IsAvailable(); }
 
 private:
     // A set can't be assigned, so it has no DefineUProperty setter: read-only.

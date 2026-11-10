@@ -362,6 +362,9 @@ private:
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus / _FreeFalling.
     void JumpOffBus(float Now);
     void FreeFalling(float Now);
+    // On the bus (from 5.30), some bots thank the bus driver as a player does: AFortPlayerControllerAthena::
+    // ServerThankBusDriver_Implementation's work on the bot's player state, which every client's feed shows.
+    void ThankBusDriver();
     // 8.30's perception (OnPerceptionSensed): the nearest visible enemy, and the alert level.
     void UpdateCurrentTarget(float Now);
     // Whether the bot takes on another bot it sees (Core's: players come first, so a match lasts longer for them and
@@ -682,6 +685,8 @@ private:
     // Timers (world seconds).
     float JumpTime = 0.0f;
     float LatestJumpTime = 0.0f;
+    // When the bot thanks the bus driver: -2 until its first tick on the bus picks it, -1 for not at all.
+    float ThankBusDriverTime = -1.0f;
     float NextPerceptionTime = 0.0f;
     float NextDeathCheck = 0.0f;
     float NextStormTick = 0.0f;

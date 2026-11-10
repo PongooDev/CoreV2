@@ -111,10 +111,13 @@ void AFortPlayerControllerAthena::HookQuickChatVTables()
     }
 
     // Only a stripped body: 3.5.1's is 0x62 bytes, SenderID's destructor and nothing else. A body that sets the team
-    // member state or tells the squad is far longer.
+    // member state or tells the squad is far longer. 5.0's (CL-4204761 0xC013B0, slot 0x3B8) only tail-calls that
+    // destructor, "mov rcx, r8; jmp ~FUniqueNetIdRepl": a leaf with no .pdata entry, so it has no known end.
     void* const Implementation = AthenaVTable[Index];
     const uintptr_t Begin = reinterpret_cast<uintptr_t>(Implementation);
-    const uintptr_t End = Finder::FunctionEnd(Begin);
+    const auto* Code = reinterpret_cast<const uint8_t*>(Begin);
+    const bool bDestructorTailCall = Finder::IsReadable(Code, 8) && Code[0] == 0x49 && Code[1] == 0x8B && Code[2] == 0xC8 && (Code[3] == 0xE9 || Code[3] == 0xEB);
+    const uintptr_t End = bDestructorTailCall ? Begin + (Code[3] == 0xE9 ? 8 : 5) : Finder::FunctionEnd(Begin);
     if (!End || End - Begin > 0x80)
     {
         Log::Info(L"Finder: AFortPlayerControllerAthena::ServerPlaySquadQuickChatMessage_Implementation (slot 0x{:X}) is native in this build", Index);

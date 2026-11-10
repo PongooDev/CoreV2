@@ -483,8 +483,11 @@ private:
     // A swing or a shot as players see it: the held weapon's fire ability's montage (UFortGameplayAbility::MontageInfo:
     // the pickaxe's PlayerMeleeCombo, a gun's fire), replicated as the reload's is.
     void PlayFireMontage();
-    // A montage shown to the players (reload, healing), as an ability's PlayMontageAndWait replicates it: the ability
-    // system's RepAnimMontageInfo (and the Athena pawn's copy). bStop stops the current one.
+    // The playing montage ends after its current section (a melee combo's sections loop into each other).
+    void EndMontageAfterSection(UObject* Montage);
+    // A montage shown to the players (reload, healing), as an ability's PlayMontageAndWait replicates it: the pawn's
+    // PlayAnimMontage (its ability system's PlayMontage), or the ability system's RepAnimMontageInfo (and the Athena
+    // pawn's copy) where that doesn't replicate. bStop stops the current one.
     bool PlayReplicatedMontage(UObject* Montage, float PlayRate, bool bStop = false);
     // Squads: a downed bot's tick (bleeding, crawling to a teammate, eliminated with its team), the revive of a downed
     // teammate, and staying near the team. A bot on a player's team counts its player teammates too.

@@ -20,6 +20,8 @@ class ACharacter : public APawn
     DefineUFunction(ClientCheatFly)
     DefineUFunction(ClientCheatGhost)
     DefineUFunction(Jump)
+    DefineUFunction(PlayAnimMontage)
+    DefineUFunction(StopAnimMontage)
 
 public:
     DefineUProperty(UCharacterMovementComponent*, CharacterMovement)
@@ -30,6 +32,12 @@ public:
     void ApplyCheatMovement(ECheatMovement Movement);
     // The character jumps on its next movement update.
     void Jump();
+    // ACharacter::PlayAnimMontage (UAnimMontage* AnimMontage, float InPlayRate, FName StartSectionName): the montage's
+    // length, 0 when it didn't play. AFortPawn's override plays it through its ability system
+    // (UAbilitySystemComponent::PlayMontage), which replicates it to the other players.
+    float PlayAnimMontage(UObject* AnimMontage, float InPlayRate = 1.0f, FName StartSectionName = FName());
+    // ACharacter::StopAnimMontage: null stops the current one (AFortPawn's: the ability system's CurrentMontageStop).
+    void StopAnimMontage(UObject* AnimMontage = nullptr);
 
     // Server and client: the Walk, Fly and Ghost cheats move the pawn (#100).
     static void HookCheatMovement();

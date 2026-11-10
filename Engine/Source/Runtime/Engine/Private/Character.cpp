@@ -23,6 +23,32 @@ void ACharacter::Jump()
     Params.Call(this);
 }
 
+float ACharacter::PlayAnimMontage(UObject* AnimMontage, float InPlayRate, FName StartSectionName)
+{
+    UFunction* Function = FindStaticFunction_PlayAnimMontage();
+    Reflection::FParams Params(Function, true);
+    if (!Function || !AnimMontage)
+    {
+        return 0.0f;
+    }
+    Params.Set(L"AnimMontage", AnimMontage);
+    Params.Set(L"InPlayRate", InPlayRate);
+    Params.Set(L"StartSectionName", StartSectionName);
+    return Params.Call(this) ? Params.Take<float>(L"ReturnValue") : 0.0f;
+}
+
+void ACharacter::StopAnimMontage(UObject* AnimMontage)
+{
+    UFunction* Function = FindStaticFunction_StopAnimMontage();
+    Reflection::FParams Params(Function, true);
+    if (!Function)
+    {
+        return;
+    }
+    Params.Set(L"AnimMontage", AnimMontage);
+    Params.Call(this);
+}
+
 void ACharacter::ApplyCheatMovement(ECheatMovement Movement)
 {
     // The engine's ClientCheatWalk/Fly/Ghost_Implementation: collision is off only for Ghost, Fly and Ghost fly and Walk

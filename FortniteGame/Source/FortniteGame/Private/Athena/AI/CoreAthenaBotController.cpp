@@ -4946,7 +4946,10 @@ void FCoreAthenaBotController::PlayFireMontage()
     }
     if (Found->second.first)
     {
-        PlayReplicatedMontage(Found->second.first, Found->second.second);
+        if (PlayReplicatedMontage(Found->second.first, Found->second.second))
+        {
+            EndMontageAfterSection(Found->second.first);
+        }
         return;
     }
     // A gun's fire ability (GA_Ranged_GenericDamage) has no montage: a player's shot shows on the pawn through the
@@ -4964,6 +4967,40 @@ void FCoreAthenaBotController::PlayFireMontage()
     {
         PlayReplicatedMontage(GunMontage, 1.0f);
     }
+#endif
+}
+
+void FCoreAthenaBotController::EndMontageAfterSection(UObject* Montage)
+{
+#if WITH_SERVER_CODE
+    // The melee combo's sections link into each other (PlayerMeleeCombo: Swing1 -> Swing2 -> Swing1), so a player's
+    // pickaxe keeps swinging while their fire input is held and their ability chains the swings. A bot's swing is one
+    // section: UAnimInstance::Montage_SetNextSection(the playing section, None) ends the montage after it, and the
+    // ability system's next replicated update (AnimMontage_UpdateReplicatedData's NextSectionID) ends it on the clients.
+    static UFunction* GetAnimInstance = FindObject<UFunction>(nullptr, L"/Script/Engine.SkeletalMeshComponent:GetAnimInstance");
+    static UFunction* GetCurrentSection = FindObject<UFunction>(nullptr, L"/Script/Engine.AnimInstance:Montage_GetCurrentSection");
+    static UFunction* SetNextSection = FindObject<UFunction>(nullptr, L"/Script/Engine.AnimInstance:Montage_SetNextSection");
+    static UProperty* MeshProperty = ACharacter::StaticClass()->FindPropertyByName(FName(L"Mesh", FNAME_Find));
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || !Montage || !GetAnimInstance || !GetCurrentSection || !SetNextSection || !MeshProperty)
+    {
+        return;
+    }
+    UObject* Mesh = *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(Pawn) + MeshProperty->GetOffset_ForInternal());
+    Reflection::FParams Instance(GetAnimInstance, true);
+    UObject* AnimInstance = Mesh && Instance.Call(Mesh) ? Instance.Take<UObject*>(L"ReturnValue") : nullptr;
+    Reflection::FParams Current(GetCurrentSection, true);
+    Current.Set(L"Montage", Montage);
+    const FName Section = AnimInstance && Current.Call(AnimInstance) ? Current.Take<FName>(L"ReturnValue") : FName();
+    if (Section.IsNone())
+    {
+        return;
+    }
+    Reflection::FParams Next(SetNextSection, true);
+    Next.Set(L"SectionNameToChange", Section);
+    Next.Set(L"NextSection", FName());
+    Next.Set(L"Montage", Montage);
+    Next.Call(AnimInstance);
 #endif
 }
 
@@ -6138,6 +6175,38 @@ bool FCoreAthenaBotController::PlayReplicatedMontage(UObject* Montage, float Pla
     {
         return false;
     }
+    UProperty* AbilityInfoProperty = AbilitySystem->GetClass()->FindPropertyByName(FName(L"RepAnimMontageInfo", FNAME_Find));
+    uint8_t* AbilityInfo = AbilityInfoProperty ? reinterpret_cast<uint8_t*>(AbilitySystem) + AbilityInfoProperty->GetOffset_ForInternal() : nullptr;
+    // The game's own way first, as a weapon's equip animation reaches the players (AFortWeapon's equip calls the pawn's
+    // PlayAnimMontage): AFortPawn::PlayAnimMontage (4.5 0xF5E240) is UAbilitySystemComponent::PlayMontage (0x58AA00),
+    // which sets the ability system's LocalAnimMontageInfo and RepAnimMontageInfo together, and StopAnimMontage
+    // (0xF6CC30) is its CurrentMontageStop. Writing RepAnimMontageInfo alone showed nothing once the bot had equipped a
+    // weapon (#363): from then on its LocalAnimMontageInfo holds the equip montage, and the ability system's tick
+    // (UAbilitySystemComponent::TickComponent, 0x591890, AnimMontage_UpdateReplicatedData 0x5619A0 on the server)
+    // copies that montage back over RepAnimMontageInfo before the frame replicates. The pawn's copy follows the
+    // ability system's when the pawn replicates (AFortPlayerPawnAthena, 0xAA5300).
+    if (bStop)
+    {
+        static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->StopAnimMontage(nullptr);
+    }
+    else if (static_cast<ACharacter*>(reinterpret_cast<APawn*>(Pawn))->PlayAnimMontage(Montage, PlayRate > 0.0f ? PlayRate : 1.0f) > 0.0f && AbilityInfo && *reinterpret_cast<UObject**>(AbilityInfo + MontageField->GetOffset_ForInternal()) == Montage)
+    {
+        // A montage Core wrote before skips the clients' position and next-section corrections; PlayMontage leaves the
+        // flag as it found it.
+        if (SkipCorrectionField)
+        {
+            SkipCorrectionField->SetPropertyValue_InContainer(AbilityInfo, false);
+        }
+        Pawn->ForceNetUpdate();
+        static int32_t LoggedGame = 0;
+        if (LoggedGame++ < 6)
+        {
+            Log::Info(L"Battle Royale bots: {} plays {} for the players (the pawn's PlayAnimMontage)", BotName, NameOf(Montage));
+        }
+        return true;
+    }
+    // Where the game's way doesn't replicate it (no anim instance on the server, or a pawn whose PlayAnimMontage
+    // doesn't go through its ability system): the replicated records as an ability's montage fills them.
     int32_t Written = 0;
     for (UObject* Owner : { AbilitySystem, reinterpret_cast<UObject*>(Pawn) })
     {

@@ -5868,6 +5868,16 @@ void UFortCheatManager::God()
 #endif
 }
 
+void UFortCheatManager::Teleport()
+{
+#if WITH_SERVER_CODE
+    // 5.21 and 5.30 give UFortCheatManager an override of UCheatManager::Teleport (vtable slot 74, 5.30 0x3A74248), and
+    // compile its body out to the shared empty function (5.30 0x2C79C0, 5.21 0x2BA450), so "cheat teleport" did nothing
+    // (#370). 5.10 and before inherit UCheatManager's (5.10 0x22A7E80); that body runs again here, as Super::Teleport.
+    UCheatManager::Teleport();
+#endif
+}
+
 void UFortCheatManager::CraftFree()
 {
 #if WITH_SERVER_CODE
@@ -5993,6 +6003,11 @@ void UFortCheatManager::FlyHK(UFortCheatManager* This)
 void UFortCheatManager::GodHK(UFortCheatManager* This)
 {
     This->God();
+}
+
+void UFortCheatManager::TeleportHK(UFortCheatManager* This)
+{
+    This->Teleport();
 }
 
 DEFINE_FUNCTION(UFortCheatManager::execCraftFree)
@@ -6233,6 +6248,8 @@ void UFortCheatManager::HookNatives()
     // the slot gets Core's body back.
     RestoreStubbedOverride(StaticClass(), Finder::ImplementationIndex(FindStaticFunction_Fly()), reinterpret_cast<void*>(&FlyHK), L"UFortCheatManager::Fly");
     RestoreStubbedOverride(StaticClass(), Finder::ImplementationIndex(FindStaticFunction_God()), reinterpret_cast<void*>(&GodHK), L"UFortCheatManager::God");
+    // So is UFortCheatManager::Teleport on 5.21 and 5.30 (#370); before, the slot is UCheatManager's own and stays.
+    RestoreStubbedOverride(StaticClass(), Finder::ImplementationIndex(FindStaticFunction_Teleport()), reinterpret_cast<void*>(&TeleportHK), L"UFortCheatManager::Teleport");
     Finder::ResolveAssetManagerLive();
 }
 

@@ -143,6 +143,9 @@ public:
     // The pawn's bIsInvulnerable flips ("God mode on" / "God Mode off"); UCheatManager::God's override. 4.2 compiles it
     // out (#312).
     void God();
+    // "cheat teleport": the pawn goes where the player looks; UCheatManager::Teleport's override. 5.21 and 5.30 compile it
+    // out (#370), where 5.10 and before have no override and run UCheatManager's.
+    void Teleport();
     // Toggles the controller's bCraftFree and says which it is. 4.2 compiles it out (#312).
     void CraftFree();
     // The controller's OverriddenBackpackSize. 4.2 compiles it out (#312).
@@ -392,6 +395,7 @@ public:
 private:
     static void FlyHK(UFortCheatManager* This);
     static void GodHK(UFortCheatManager* This);
+    static void TeleportHK(UFortCheatManager* This);
 
     void Reply(const FString& Message) const;
     // The player, when they have an inventory to give items to.

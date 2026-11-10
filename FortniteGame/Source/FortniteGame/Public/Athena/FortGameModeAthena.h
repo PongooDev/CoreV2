@@ -97,6 +97,17 @@ public:
     static bool HasLargeTeamGame() { return Member_bIsLargeTeamGame.IsAvailable() && Member_bFiftyFiftySquadPlay.IsAvailable(); }
 
     static bool HasMaxPlayerCount() { return Member_MaxPlayerCount.IsAvailable(); }
+    // AFortGamePvPBase's teams, the players the warmup waits for before its countdown, how long an assignment may take
+    // (config) and the match's AI (UAthenaAISettings), which OnGivenMatchAssignment sets.
+    DefineUProperty(uint8_t, NumTeams)
+    DefineUProperty(int32_t, WarmupRequiredPlayerCount)
+    DefineUProperty(float, FailedMatchAssignmentTimeout)
+    DefineUProperty(UObject*, AISettings)
+
+    // The matchmaking service's assignment of a match to the server (the game session's delegate, on its vtable slot):
+    // AFortGameMode's (the match options), then the game state's playlist, the match's player count and its warmup's
+    // required players. 5.30 strips it (Core's restoration; 5.21 0xBD59E0 is the game's own).
+    void OnGivenMatchAssignment(bool bSuccess, const void* MatchOptions);
 
     // The playlist's spawned actors (FFortSpawnActorData) and its modifiers' mutators (AFortAthenaMutator: Score
     // Royale's AthenaMutator_Score_C, whose OnGamePhaseStepChanged tells the players a batch of coins is coming).
@@ -202,8 +213,11 @@ public:
     static void HookVTables();
     static void HookCallSites();
     static void HookBuildingVTables();
+    // Restores OnGivenMatchAssignment in the Battle Royale game modes whose slot is the shared empty function (5.30).
+    static void HookMatchAssignmentVTables();
 
 private:
+    static void OnGivenMatchAssignmentHK(AFortGameModeAthena* This, bool bSuccess, const void* MatchOptions);
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeAthena* This, AController* NewPlayer, AActor* StartSpot);
     // The arguments are AFortPlayerController::ActivateSlot's; the 1.7.2 call it also takes passes only the controller.
     static void AircraftPhasePlayerCleanupCall(AController* Controller, uint8_t InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);

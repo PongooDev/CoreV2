@@ -50,6 +50,17 @@ public:
     // ApplyPlaylistDataTables (0x9DC890) copies its tables over the default ones.
     DefineUProperty(UFortPlaylistAthena*, CurrentPlaylistData)
     static bool HasCurrentPlaylistData() { return Member_CurrentPlaylistData.IsAvailable(); }
+    // Up to 5.21 the playlist's id is the game state's too (5.30 has none).
+    DefineUProperty(int32_t, CurrentPlaylistId)
+    static bool HasCurrentPlaylistId() { return Member_CurrentPlaylistId.IsAvailable(); }
+    // Whether the playlist's assets have loaded (LoadCurrentPlaylistData, then OnPlaylistDataLoadCompleted), or are
+    // loading.
+    DefineUProperty(bool, bPlaylistDataIsLoaded)
+    DefineUProperty(bool, bPlaylistDataIsActivelyLoading)
+    // 5.30 0xBEC6C0: what a client does with a playlist that has replicated, and what the stripped server side did
+    // after setting it (5.21's AFortGameModeAthena::OnGivenMatchAssignment, 0xBD59E0): the game state's values from it
+    // (0xBD2710), then LoadCurrentPlaylistData (0xBD3AD0).
+    DefineUFunction(OnRep_CurrentPlaylistData)
     // 3.5: the playlist's bIsLargeTeamGame, on the game state (the game mode's before 3.5, with bFiftyFiftySquadPlay,
     // which 3.5 dropped).
     DefineUProperty(bool, bIsLargeTeamGame)

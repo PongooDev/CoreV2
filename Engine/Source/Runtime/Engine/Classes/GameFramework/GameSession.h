@@ -9,6 +9,7 @@ class AGameSession : public AInfo
 public:
     // The players ApproveLogin lets in ("Server full." past it, AtCapacity).
     DefineUProperty(int32_t, MaxPlayers)
+    DefineUProperty(int32_t, MaxSpectators)
 
     static bool HasMaxPlayers() { return Member_MaxPlayers.IsAvailable(); }
 };

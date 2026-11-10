@@ -200,6 +200,10 @@ namespace Finder
     bool ResolveFlightPathLive(ptrdiff_t FlightPathInitializedOffset);
     // From 3.5: AFortGameStateAthena::SetCurrentPlaylistId (Natives), from its log string.
     bool ResolveSetCurrentPlaylistIdLive();
+    // AFortGameMode::OnGivenMatchAssignment and its slot in AFortGameMode's vtable, AFortGameMode::SetCurrentPlaylistName
+    // and AFortGameState::StartStreamingAdditionalPlaylistLevel (Natives), from their strings. False without the first.
+    // GameModeVTable: AFortGameMode's default object's.
+    bool ResolveMatchAssignmentLive(void** GameModeVTable);
     bool ResolvePoiVolumeLive();
     // AFortAthenaMapInfo::PickSupplyDropLocation and SpawnSupplyDropAtLocation (Natives), from 3.3. LlamaClassOffset:
     // AFortAthenaMapInfo's LlamaClass.

@@ -5,6 +5,7 @@
 #include "UObject/Object.h"
 
 class UDataTable;
+class UWorld;
 
 // A playlist's settings as a data asset (from 3.5, where it replaced AFortAthenaPlaylistBase and the game mode's
 // PlaylistDataTables). AFortGameStateAthena::SetCurrentPlaylistId (3.5.1 0x9FA020) looks the match's up by its id and
@@ -15,6 +16,12 @@ class UFortPlaylist : public UObject
     DefineUnrealClass(UFortPlaylist, FortniteGame)
 
 public:
+    // The name the playlist manager finds it by (Playlist_DefaultSolo), the one the matchmaking service's assignment
+    // gives from 5.30 (HandleAssignMatchMessage's "PlaylistName: %s").
+    DefineUProperty(FName, PlaylistName)
+    // The levels the match streams in with the playlist (AFortGameState::StartStreamingAdditionalPlaylistLevel).
+    DefineUProperty(TArray<TAssetPtr<UWorld>>, AdditionalLevels)
+    static bool HasAdditionalLevels() { return Member_AdditionalLevels.IsAvailable(); }
     DefineUProperty(TAssetPtr<UDataTable>, LootTierData)
     DefineUProperty(TAssetPtr<UDataTable>, LootPackages)
     // The most players on a team. AFortGameModeAthena's FinishRestartPlayer (3.5.1 0x9E43D0) treats a large team game's
@@ -55,6 +62,11 @@ class UFortPlaylistAthena : public UFortPlaylist
 
 public:
     DefineUProperty(int32_t, PlaylistId)
+    // EAirCraftBehavior (1: OpposingAirCraftForEachTeam), which the game state takes with the playlist.
+    DefineUProperty(uint8_t, AirCraftBehavior)
+    // The AI of the playlist's match (UAthenaAISettings), which the game mode takes as its AISettings; Battle Royale's
+    // own playlists have none.
+    DefineUProperty(UObject*, AISettings)
     // The game's own code plays a FirstToGoalScore playlist (5.30): AFortPlayerStateAthena scores the playlist's events
     // into TotalPlayerScore and its AFortTeamInfoAthena's score (a searched container's tags in
     // AFortPlayerController::ServerAttemptInteract, a supply drop's or llama's in AFortAthenaSupplyDrop::
@@ -82,4 +94,38 @@ public:
     // servers run Core's (Building/BuildingContainer.cpp), and nothing else in them reads it.
     DefineUProperty(int32_t, LootDropRounds)
     static bool HasLootDropRounds() { return Member_LootDropRounds.IsAvailable(); }
+};
+
+// The game mode's playlists (AFortGameMode's PlaylistManager): every Battle Royale playlist the build has.
+class UFortPlaylistManager : public UObject
+{
+    DefineUnrealClass(UFortPlaylistManager, FortniteGame)
+
+public:
+    DefineUProperty(TArray<UFortPlaylistAthena*>, AthenaPlaylists)
+
+    // 5.30 0xEEE5A0: the playlist named PlaylistName (null, with "UFortPlaylistManager::GetPlaylist: Unable to find
+    // playlist %s", when there is none); 0xEEAE20: the one with the id.
+    UFortPlaylistAthena* GetPlaylist(FName PlaylistName)
+    {
+        for (UFortPlaylistAthena* Playlist : static_cast<TArray<UFortPlaylistAthena*>&>(AthenaPlaylists))
+        {
+            if (Playlist && static_cast<FName>(Playlist->PlaylistName) == PlaylistName)
+            {
+                return Playlist;
+            }
+        }
+        return nullptr;
+    }
+    UFortPlaylistAthena* GetPlaylist(int32_t PlaylistId)
+    {
+        for (UFortPlaylistAthena* Playlist : static_cast<TArray<UFortPlaylistAthena*>&>(AthenaPlaylists))
+        {
+            if (Playlist && Playlist->PlaylistId == PlaylistId)
+            {
+                return Playlist;
+            }
+        }
+        return nullptr;
+    }
 };

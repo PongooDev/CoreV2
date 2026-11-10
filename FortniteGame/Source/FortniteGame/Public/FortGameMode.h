@@ -11,6 +11,7 @@ class AFortGameSession;
 class AFortPlayerController;
 class AFortWorldManager;
 class UFortSharedMissionLists;
+class UFortPlaylistManager;
 class APawn;
 class FScriptArray;
 struct FAccountIdAndScore;
@@ -42,6 +43,12 @@ public:
     DefineUStructProperty(FQuickBarData, QuickBarDefinitions)
     // The match's playlist (Battle Royale: 2 solo, 10 duo, 9 squad), what the game mode records its winners with.
     DefineUProperty(int32_t, CurrentPlaylistId)
+    // The playlist's name with its id (SetCurrentPlaylistName sets both), the matchmaking service's bucket of the match
+    // the server was assigned ("Fortnite:Fortnite:<netcl>:0:<region>:<playlist>...", which the game session keeps here
+    // from the assignment) and the game mode's playlists.
+    DefineUProperty(FName, CurrentPlaylistName)
+    DefineUProperty(FString, CurrentBucketId)
+    DefineUProperty(UFortPlaylistManager*, PlaylistManager)
     // From 4.0 the game mode keeps the asset's path in DefaultDeathPenaltyData and the loaded asset in DeathPenaltyData.
     DefineUProperty(TAssetPtr<UFortGameDeathPenalty>, DefaultDeathPenaltyData)
     DefineUProperty(UFortGameDeathPenalty*, DeathPenaltyData)

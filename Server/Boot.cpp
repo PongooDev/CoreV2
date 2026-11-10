@@ -344,6 +344,7 @@ static void InstallHooks()
             ABuildingItemCollectorActor::HookVTables();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
+            AFortGameModeAthena::HookMatchAssignmentVTables();
             UNetDriver::AddPreReplicationCallback(&AFortPlayerController::ReplicateServerFinishedLoadingAfterGameState);
             UCharacterMovementComponent::HookServerMove(L"/Script/FortniteGame.FortMovementComp_CharacterAthena");
         }

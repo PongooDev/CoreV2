@@ -9257,6 +9257,51 @@ bool Finder::ResolveSetCurrentPlaylistIdLive()
     return true;
 }
 
+bool Finder::ResolveMatchAssignmentLive(void** GameModeVTable)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortGameMode_OnGivenMatchAssignmentIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortGameMode::OnGivenMatchAssignment (5.21 0xE0F360, 5.30 0xE31710) reads the assignment's match options: a
+    // custom key of more than one character becomes the game state's "CK-%s" session name, else match.option.isPlaytest
+    // makes a "Playtest-%s" one.
+    const uintptr_t OnGivenMatchAssignment = FunctionOf(L"match.option.isPlaytest");
+    void** VTable = OnGivenMatchAssignment ? GameModeVTable : nullptr;
+    if (!VTable)
+    {
+        Log::Info(L"Finder: no AFortGameMode::OnGivenMatchAssignment on this build");
+        return false;
+    }
+    // The first slot holding it: the vtables sit back to back, so the next game mode's repeats it.
+    int32_t Index = -1;
+    for (int32_t Slot = 0; Slot < 0x200 && Index < 0; ++Slot)
+    {
+        Index = reinterpret_cast<uintptr_t>(VTable[Slot]) == OnGivenMatchAssignment ? Slot : -1;
+    }
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortGameMode::OnGivenMatchAssignment (0x{:X}) is in no slot of AFortGameMode's vtable", OnGivenMatchAssignment - Finder::ImageBase());
+        return false;
+    }
+    Natives::AFortGameMode_OnGivenMatchAssignment = reinterpret_cast<decltype(Natives::AFortGameMode_OnGivenMatchAssignment)>(OnGivenMatchAssignment);
+    Natives::AFortGameMode_OnGivenMatchAssignmentIndex = Index;
+
+    // AFortGameMode::SetCurrentPlaylistName (5.30 0xE40340) and AFortGameState::StartStreamingAdditionalPlaylistLevel
+    // (5.30 0xE42750) log these.
+    const uintptr_t SetCurrentPlaylistName = FunctionOf(L"AFortGameMode::SetCurrentPlaylistName(%s) set playlist to (%s, ID: %d)");
+    const uintptr_t StartStreaming = FunctionOf(L"PLAYLIST: Failed to locate valid level to be streamed %s");
+    Natives::AFortGameMode_SetCurrentPlaylistName = reinterpret_cast<decltype(Natives::AFortGameMode_SetCurrentPlaylistName)>(SetCurrentPlaylistName);
+    Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel = reinterpret_cast<decltype(Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel)>(StartStreaming);
+    Log::Info(L"Finder: AFortGameMode::OnGivenMatchAssignment is slot 0x{:X} (0x{:X}), SetCurrentPlaylistName 0x{:X}, StartStreamingAdditionalPlaylistLevel 0x{:X}",
+        Index, OnGivenMatchAssignment - Finder::ImageBase(), SetCurrentPlaylistName ? SetCurrentPlaylistName - Finder::ImageBase() : 0,
+        StartStreaming ? StartStreaming - Finder::ImageBase() : 0);
+    return true;
+}
+
 bool Finder::ResolveFlightPathLive(ptrdiff_t FlightPathInitializedOffset)
 {
     static bool bSearched = false;

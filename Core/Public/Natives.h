@@ -534,6 +534,17 @@ namespace Natives
     // 4.1's AFortGameModeAthena::InitGameState (0xA2B880) calls it at the world's start; 4.2 only from
     // OnGivenMatchAssignment (0xA1B5F0).
     inline void (*AFortGameStateAthena_SetCurrentPlaylistId)(AFortGameStateAthena* This, int32_t PlaylistId) = nullptr;
+    // Finder::ResolveMatchAssignmentLive. AFortGameMode::OnGivenMatchAssignment(bSuccess, MatchOptions) (5.21 0xE0F360,
+    // 5.30 0xE31710): the match options' custom key and playtest name; the matchmaking service's assignment reaches the
+    // game mode through it (a delegate on its vtable slot). MatchOptions: the assignment's TMap<FString, FString> of
+    // match.option.* values. AFortGameMode::SetCurrentPlaylistName (5.30 0xE40340): the game mode's CurrentPlaylistName
+    // and CurrentPlaylistId from its playlist manager's playlist of that name. AFortGameState::
+    // StartStreamingAdditionalPlaylistLevel (21.40's name; 5.21 0xE1FE60, 5.30 0xE42750): streams one of the playlist's
+    // AdditionalLevels in.
+    inline void (*AFortGameMode_OnGivenMatchAssignment)(AFortGameMode* This, bool bSuccess, const void* MatchOptions) = nullptr;
+    inline int32_t AFortGameMode_OnGivenMatchAssignmentIndex = -1;
+    inline void (*AFortGameMode_SetCurrentPlaylistName)(AFortGameMode* This, FName PlaylistName) = nullptr;
+    inline void (*AFortGameState_StartStreamingAdditionalPlaylistLevel)(AFortGameState* This, FName LevelName) = nullptr;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;

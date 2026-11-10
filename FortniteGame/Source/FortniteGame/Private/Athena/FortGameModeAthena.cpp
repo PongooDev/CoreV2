@@ -2261,3 +2261,164 @@ void AFortGameModeAthena::ScoreBuildingConstructionHK(AFortGameModeAthena* This,
 #endif
     ScoreBuildingConstructionOG(This, Builder, Building);
 }
+
+void AFortGameModeAthena::OnGivenMatchAssignment(bool bSuccess, const void* MatchOptions)
+{
+#if WITH_SERVER_CODE
+    // 5.21's (0xBD59E0) takes the matchmaking service's assignment from the game session's delegate (5.30 binds it at
+    // 0xBE7BF4; the game session broadcasts it once the service has closed its socket, 0x101E8E0). 5.30 strips it to the
+    // shared empty function, so the game state never got the match's playlist: nothing loaded it
+    // (LoadCurrentPlaylistData), the game mode's OnPlaylistDataLoaded never ran, the match stayed in its Setup phase and
+    // its players on their loading screen (#367).
+    if (!bSuccess)
+    {
+        return;
+    }
+    // 5.21 first sends the "MatchStarted" analytics event (0xBE1B40), which Core doesn't.
+    if (Natives::AFortGameMode_OnGivenMatchAssignment)
+    {
+        Natives::AFortGameMode_OnGivenMatchAssignment(this, bSuccess, MatchOptions);
+    }
+
+    // 5.21's game session gave the game mode the assignment's playlist before this (CurrentPlaylistId, or its name when
+    // the id is 0; 0xFF7C90). 5.30's assignment names the playlist (HandleAssignMatchMessage, 0x6F2350, reads the sixth
+    // of its bucket's ":" fields as an FName, "PlaylistName: %s") and its game session sets only CurrentBucketId and
+    // MatchmakingRegionId from it (0x101DC90), so the name is read from that bucket the same way and set with the game's
+    // own SetCurrentPlaylistName (0xE40340).
+    const std::wstring Bucket = static_cast<FString&>(CurrentBucketId).ToStdString();
+    std::vector<std::wstring> Fields;
+    for (size_t Begin = 0; Begin <= Bucket.size();)
+    {
+        const size_t End = std::min(Bucket.find(L':', Begin), Bucket.size());
+        if (End > Begin)
+        {
+            Fields.push_back(Bucket.substr(Begin, End - Begin));
+        }
+        Begin = End + 1;
+    }
+    if (Fields.size() >= 6 && Natives::AFortGameMode_SetCurrentPlaylistName)
+    {
+        Natives::AFortGameMode_SetCurrentPlaylistName(this, FName(Fields[5].c_str()));
+    }
+    const FName PlaylistName = CurrentPlaylistName;
+    const std::wstring PlaylistText = PlaylistName.IsNone() ? std::to_wstring(static_cast<int32_t>(CurrentPlaylistId)) : PlaylistName.ToStdString();
+    Log::Info(L"PLAYLIST: Assignment Received in AFortGameModeAthena::OnGivenMatchAssignment() PlaylistName is {} (Server-Only)", PlaylistText);
+
+    // The game state's playlist (5.21's AFortGameStateAthena::SetCurrentPlaylistId, inlined there): the playlist of that
+    // name, else of the game mode's id, unless the game state has it already, loaded or loading.
+    AFortGameStateAthena* GameState = AthenaGameStateOf(this);
+    UFortPlaylistManager* Playlists = PlaylistManager;
+    if (GameState && Playlists && AFortGameStateAthena::HasCurrentPlaylistData())
+    {
+        UFortPlaylistAthena* Current = GameState->CurrentPlaylistData;
+        const bool bLoadedOrLoading = GameState->bPlaylistDataIsLoaded || GameState->bPlaylistDataIsActivelyLoading;
+        UFortPlaylistAthena* Playlist = nullptr;
+        if (!PlaylistName.IsNone())
+        {
+            UFortPlaylistAthena* Named = Playlists->GetPlaylist(PlaylistName);
+            Playlist = Named != Current || !bLoadedOrLoading ? Named : nullptr;
+        }
+        else if (GameState->Role == ROLE_Authority && (!Current || Current->PlaylistId != CurrentPlaylistId || !bLoadedOrLoading))
+        {
+            Playlist = Playlists->GetPlaylist(static_cast<int32_t>(CurrentPlaylistId));
+        }
+        if (Playlist)
+        {
+            Log::Info(L"PLAYLIST: Playlist Object found in AFortGameStateAthena::SetCurrentPlaylistId() PlaylistName is {} (Server Only)",
+                static_cast<FName>(Playlist->PlaylistName).ToStdString());
+            CurrentPlaylistId = Playlist->PlaylistId;
+            if (AFortGameStateAthena::HasCurrentPlaylistId())
+            {
+                GameState->CurrentPlaylistId = Playlist->PlaylistId;
+            }
+            GameState->CurrentPlaylistData = Playlist;
+            GameState->AirCraftBehavior = Playlist->AirCraftBehavior;
+            // AFortGameModeAthena::SetAISettings (5.21 0xBD80F0), stripped with it, also hands them to the world's AI
+            // system; Battle Royale's playlists have none.
+            if (UObject* PlaylistAISettings = Playlist->AISettings)
+            {
+                AISettings = PlaylistAISettings;
+                Log::Warning(L"PLAYLIST: {} has AI settings ({}); the game mode takes them, the world's AI system doesn't", static_cast<FName>(Playlist->PlaylistName).ToStdString(),
+                    PlaylistAISettings->GetName().ToStdString());
+            }
+            // 5.21's next two steps, the game state's values from the playlist (0xBD2710) and LoadCurrentPlaylistData
+            // (0xBD3AD0), are 5.30's OnRep_CurrentPlaylistData (0xBEC6C0), whose "(Client Only)" log shows on the server.
+            if (UFunction* OnRep = AFortGameStateAthena::FindStaticFunction_OnRep_CurrentPlaylistData())
+            {
+                Reflection::FParams Params(OnRep);
+                Params.Call(GameState);
+            }
+            // The playlist's additional levels stream in (0xBE7080).
+            if (GameState->Role == ROLE_Authority && UFortPlaylist::HasAdditionalLevels() && Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel)
+            {
+                const TArray<TAssetPtr<UWorld>>& Levels = Playlist->AdditionalLevels;
+                for (int32_t Index = 0; Index < Levels.Num(); ++Index)
+                {
+                    const FStringAssetReference& Level = SoftElementAt(Levels, Index).ToStringReference();
+                    if (Level.IsValid())
+                    {
+                        const FString PackageName = Level.GetLongPackageName();
+                        Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel(reinterpret_cast<AFortGameState*>(GameState), FName(*PackageName));
+                    }
+                }
+            }
+        }
+        else if (!Current)
+        {
+            Log::Warning(L"PLAYLIST: the assigned playlist {} isn't one of the playlist manager's, so the game state has none", PlaylistText);
+        }
+    }
+
+    // The match is the players the assignment reserved (configuring the beacon left the game session's MaxPlayers at
+    // them), and its warmup waits for a tenth of them. Not with -nomcp (nor in the editor).
+    AGameSession* Session = static_cast<AGameSession*>(GameSession);
+    if (Session && AGameSession::HasMaxPlayers() && HasMaxPlayerCount() && !FParse::Param(FCommandLine::Get(), TEXT("nomcp")))
+    {
+        const uint8_t Teams = static_cast<uint8_t>(Session->MaxPlayers - Session->MaxSpectators);
+        NumTeams = Teams;
+        MaxPlayerCount = Teams;
+        WarmupRequiredPlayerCount = std::max(1, static_cast<int32_t>(std::floor(static_cast<float>(Teams) * 0.1f + 0.5f)));
+    }
+    // 5.21 then starts the failed assignment timer, whose handler ("FortGameModeAthena: Failed match assignment,
+    // restarting session.") 5.30 strips too, names the positional voice channel (confctl-d-%s), which Core's voice chat
+    // doesn't use, and keeps the match options' isMatchStatsDisabled, isProgressionDisabled and custom key in flags the
+    // build doesn't reflect (AFortGameMode's own took the custom key above).
+    Log::Info(L"AFortGameModeAthena::OnGivenMatchAssignment: MaxPlayerCount: {}, NumTeams: {}, WarmupRequiredPlayerCount: {}, Timeout: {:.2f}",
+        static_cast<int32_t>(MaxPlayerCount), static_cast<int32_t>(static_cast<uint8_t>(NumTeams)), static_cast<int32_t>(WarmupRequiredPlayerCount),
+        static_cast<float>(FailedMatchAssignmentTimeout));
+#endif
+}
+
+void AFortGameModeAthena::HookMatchAssignmentVTables()
+{
+    UClass* AthenaClass = StaticClass();
+    UObject* GameModeDefault = AthenaClass ? AFortGameMode::StaticClass()->GetDefaultObject(false) : nullptr;
+    void** GameModeVTable = GameModeDefault ? *reinterpret_cast<void***>(GameModeDefault) : nullptr;
+    if (!GameModeVTable || !Natives::SharedEmptyFunction || !Finder::ResolveMatchAssignmentLive(GameModeVTable))
+    {
+        return;
+    }
+    // Only where the Battle Royale game mode's own is stripped (5.30); 5.21's and earlier keep theirs.
+    const int32_t Index = Natives::AFortGameMode_OnGivenMatchAssignmentIndex;
+    int32_t Swapped = 0;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(AthenaClass) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && VTable[Index] == Natives::SharedEmptyFunction)
+        {
+            Hooks::SwapVTable(L"AFortGameModeAthena::OnGivenMatchAssignment", VTable, Index, reinterpret_cast<void*>(&OnGivenMatchAssignmentHK));
+            ++Swapped;
+        }
+    }
+    if (Swapped > 0)
+    {
+        Log::Info(L"Finder: AFortGameModeAthena::OnGivenMatchAssignment is stripped, restored in {} game mode classes", Swapped);
+    }
+}
+
+void AFortGameModeAthena::OnGivenMatchAssignmentHK(AFortGameModeAthena* This, bool bSuccess, const void* MatchOptions)
+{
+    This->OnGivenMatchAssignment(bSuccess, MatchOptions);
+}

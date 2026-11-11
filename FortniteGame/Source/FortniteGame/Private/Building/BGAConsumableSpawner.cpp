@@ -8,7 +8,6 @@
 #include "EnvironmentQuery/EnvQueryTypes.h"
 #include "FortGameState.h"
 #include "FortKismetLibrary.h"
-#include "GameThread.h"
 #include "Items/BGAConsumableWrapperItemDefinition.h"
 #include "Items/FortLootPackage.h"
 #include "Kismet/KismetSystemLibrary.h"
@@ -17,17 +16,24 @@
 #include "Math/Transform.h"
 #include "Math/Vector.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace
 {
-    // The placement query is asynchronous (UEnvQueryManager runs it over the next frames): its result is checked each
-    // frame, for up to ten seconds at 30 Hz.
-    constexpr int32_t QueryTicks = 300;
+    // The placement query is asynchronous: UEnvQueryManager runs it on its tick over the next frames. Epic's spawner
+    // ran it as an instant query (21.40's class keeps the query's result and binds no completion delegate:
+    // UEnvQueryManager::RunInstantQuery), which the client builds don't link, and the async query's own completion
+    // (UEnvQueryInstanceBlueprintWrapper::OnQueryFinishedEvent) is a dynamic delegate only a blueprint function can be
+    // bound to. So the spawner looks for its query's end on a timer, QueryCheckInterval seconds apart, for up to ten
+    // seconds.
+    constexpr float QueryCheckInterval = 0.1f;
+    constexpr int32_t QueryChecks = 100;
 
     // What the spawners of the current world spawned, taken out when the match's loot tables roll them again.
     struct FSpawnedConsumables
@@ -64,25 +70,32 @@ namespace
             Tally.Spawners, Tally.Actors, Classes.empty() ? std::wstring(L"none") : Classes, Tally.OnSpawner, Tally.Unplaced);
     }
 
-    void WaitForQuery(FWeakObjectPtr Spawner, FWeakObjectPtr Query, int32_t TicksLeft)
+    // The query has ended once its wrapper has left its manager's running wrappers, or, where the build has no such
+    // list, once it has points.
+    void WaitForQuery(FWeakObjectPtr World, FWeakObjectPtr Spawner, FWeakObjectPtr Query, int32_t ChecksLeft, bool bSeenRunning)
     {
-        GameThread::Enqueue([Spawner, Query, TicksLeft]()
+        UEnvQueryInstanceBlueprintWrapper* QueryInstance = static_cast<UEnvQueryInstanceBlueprintWrapper*>(Query.Get());
+        const std::optional<bool> bRunning = UEnvQueryManager::IsQueryRunning(QueryInstance);
+        bSeenRunning = bSeenRunning || bRunning.value_or(false);
+        const bool bEnded = !QueryInstance || (bSeenRunning && !bRunning.value_or(true)) || QueryInstance->GetResultsAsLocations().Num() > 0;
+        UWorld* QueryWorld = static_cast<UWorld*>(World.Get());
+        if (!bEnded && ChecksLeft > 0 && QueryWorld)
         {
-            UEnvQueryInstanceBlueprintWrapper* QueryInstance = static_cast<UEnvQueryInstanceBlueprintWrapper*>(Query.Get());
-            if (QueryInstance && QueryInstance->GetResultsAsLocations().Num() == 0 && TicksLeft > 0)
+            FTimerHandle QueryTimerHandle;
+            QueryWorld->GetTimerManager().SetTimer(QueryTimerHandle, FTimerDelegate::CreateLambda([World, Spawner, Query, ChecksLeft, bSeenRunning]()
             {
-                WaitForQuery(Spawner, Query, TicksLeft - 1);
-                return;
-            }
-            if (ABGAConsumableSpawner* Owner = static_cast<ABGAConsumableSpawner*>(Spawner.Get()))
-            {
-                Owner->OnQueryFinished(QueryInstance);
-            }
-            else
-            {
-                LogTallyWhenDone();
-            }
-        });
+                WaitForQuery(World, Spawner, Query, ChecksLeft - 1, bSeenRunning);
+            }), QueryCheckInterval, false);
+            return;
+        }
+        if (ABGAConsumableSpawner* Owner = static_cast<ABGAConsumableSpawner*>(Spawner.Get()))
+        {
+            Owner->OnQueryFinished(QueryInstance);
+        }
+        else
+        {
+            LogTallyWhenDone();
+        }
     }
 
     // The rotation that turns the actor's up onto the surface's normal (FQuat::FindBetweenNormals).
@@ -204,7 +217,7 @@ void ABGAConsumableSpawner::SpawnConsumables(int32_t WorldLevel)
             QueryInstance->SetNamedParam(Param.ParamName, Param.Value);
         }
     }
-    WaitForQuery(FWeakObjectPtr(this), FWeakObjectPtr(QueryInstance), QueryTicks);
+    WaitForQuery(FWeakObjectPtr(reinterpret_cast<UObject*>(GetWorld())), FWeakObjectPtr(this), FWeakObjectPtr(QueryInstance), QueryChecks, false);
 #endif
 }
 

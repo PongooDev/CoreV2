@@ -35,6 +35,7 @@
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/WeakObjectPtr.h"
 #include "Finder.h"
 #include "Hooks.h"
@@ -48,6 +49,7 @@
 #include <cfloat>
 #include <chrono>
 #include <cmath>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -72,7 +74,14 @@ DEFINE_LOG_CATEGORY_STATIC(LogNavigation, Log, All);
 
 namespace
 {
-    constexpr int32_t SpawnPadQueryTicks = 600;
+    // The spawn pad's placement query is asynchronous: UEnvQueryManager runs it on its tick over the next frames. Epic's
+    // PlacePlayerSpawnPad ran it as an instant query (21.40's AFortGameModeZone binds no query completion delegate:
+    // UEnvQueryManager::RunInstantQuery), which the client builds don't link, and the async query's own completion
+    // (UEnvQueryInstanceBlueprintWrapper::OnQueryFinishedEvent) is a dynamic delegate only a blueprint function can be
+    // bound to. So the game mode looks for its query's end on a timer, SpawnPadQueryCheckInterval seconds apart, for up
+    // to twenty seconds.
+    constexpr float SpawnPadQueryCheckInterval = 0.1f;
+    constexpr int32_t SpawnPadQueryChecks = 200;
     constexpr float BuildingCellSizeXY = 512.0f;
     constexpr float BuildingCellSizeZ = 384.0f;
     constexpr float UnitNavBoundsExtent = 1.0f;
@@ -88,25 +97,32 @@ namespace
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
     }
 
-    void WaitForQuery(FWeakObjectPtr GameMode, FWeakObjectPtr WorldManager, FWeakObjectPtr Query, int32_t TicksLeft)
+    // The query has ended once its wrapper has left its manager's running wrappers, or, where the build has no such
+    // list, once it has a result.
+    void WaitForQuery(FWeakObjectPtr GameMode, FWeakObjectPtr WorldManager, FWeakObjectPtr Query, int32_t ChecksLeft, bool bSeenRunning)
     {
-        GameThread::Enqueue([GameMode, WorldManager, Query, TicksLeft]()
+        AFortGameModeZone* Zone = static_cast<AFortGameModeZone*>(GameMode.Get());
+        UWorld* World = Zone ? Zone->GetWorld() : nullptr;
+        if (!World)
         {
-            AFortGameModeZone* Zone = static_cast<AFortGameModeZone*>(GameMode.Get());
-            UEnvQueryInstanceBlueprintWrapper* PlacementQuery = static_cast<UEnvQueryInstanceBlueprintWrapper*>(Query.Get());
-            if (!Zone)
-            {
-                return;
-            }
+            return;
+        }
 
-            if (PlacementQuery && PlacementQuery->GetResultsAsActors().Num() == 0 && TicksLeft > 0)
+        UEnvQueryInstanceBlueprintWrapper* PlacementQuery = static_cast<UEnvQueryInstanceBlueprintWrapper*>(Query.Get());
+        const std::optional<bool> bRunning = UEnvQueryManager::IsQueryRunning(PlacementQuery);
+        bSeenRunning = bSeenRunning || bRunning.value_or(false);
+        const bool bEnded = !PlacementQuery || (bSeenRunning && !bRunning.value_or(true)) || PlacementQuery->GetResultsAsActors().Num() > 0;
+        if (!bEnded && ChecksLeft > 0)
+        {
+            FTimerHandle QueryTimerHandle;
+            World->GetTimerManager().SetTimer(QueryTimerHandle, FTimerDelegate::CreateLambda([GameMode, WorldManager, Query, ChecksLeft, bSeenRunning]()
             {
-                WaitForQuery(GameMode, WorldManager, Query, TicksLeft - 1);
-                return;
-            }
+                WaitForQuery(GameMode, WorldManager, Query, ChecksLeft - 1, bSeenRunning);
+            }), SpawnPadQueryCheckInterval, false);
+            return;
+        }
 
-            Zone->OnPlayerSpawnPadQueryFinished(static_cast<AFortWorldManager*>(WorldManager.Get()), PlacementQuery);
-        });
+        Zone->OnPlayerSpawnPadQueryFinished(static_cast<AFortWorldManager*>(WorldManager.Get()), PlacementQuery);
     }
 }
 
@@ -410,7 +426,7 @@ void AFortGameModeZone::PlacePlayerSpawnPad(AFortWorldManager* WorldManager)
         return;
     }
 
-    WaitForQuery(FWeakObjectPtr(this), FWeakObjectPtr(WorldManager), FWeakObjectPtr(Query), SpawnPadQueryTicks);
+    WaitForQuery(FWeakObjectPtr(this), FWeakObjectPtr(WorldManager), FWeakObjectPtr(Query), SpawnPadQueryChecks, false);
 #endif
 }
 

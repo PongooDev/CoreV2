@@ -186,6 +186,12 @@ static void InstallHooks()
     // On a packed build this runs once PreInit is over. FApp::ShouldUseThreadingForPerformance only matters to PreInit,
     // and its GIsServer/GIsClient stores have run, so HookAfterPreInit sets the globals themselves.
     const bool bAfterPreInit = Packed::IsPacked();
+    // The string references were first read as the packer's stub handed over, while its worker threads were still
+    // decrypting part of the code; the finders from here on (UFortGameInstance::Init's on 5.40, #385) read them anew.
+    if (bAfterPreInit)
+    {
+        Finder::RescanStringRefs();
+    }
     // 3.5+ packed builds check the code again on the engine's first ticks, and a patch in place by then crashes them at
     // frame 0. Everything below that changes data (GIsClient, the merged config, the MCP permissions, vtable slots)
     // still goes in now, before UEngine::Init; the detours and patched calls and branches are held, and so is the engine,

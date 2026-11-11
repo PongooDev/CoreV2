@@ -84,6 +84,10 @@ namespace Finder
 
     std::vector<uintptr_t> StringRefs(const wchar_t* Text);
     std::vector<uintptr_t> StringRefs(const char* Text);
+    // Reads the code's string references (the table StringRefs looks in) again. A packed exe's stub is still decrypting
+    // parts of the code on its worker threads when its entry wrapper hands over, where the table is first read, so a
+    // packed server calls this once the engine is up.
+    void RescanStringRefs();
     // Every lea r64, [rip+X] in executable code whose X is Target: the sites that take a function's address, which the
     // ones bound into a delegate have instead of a call.
     std::vector<uintptr_t> AddressRefs(uintptr_t Target);

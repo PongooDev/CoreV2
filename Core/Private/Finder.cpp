@@ -7,6 +7,8 @@
 #include <cstring>
 #include <cwchar>
 #include <iterator>
+#include <mutex>
+#include <optional>
 #include <unordered_map>
 
 namespace
@@ -22,46 +24,51 @@ namespace
         uint32_t Site;
     };
 
-    const std::vector<FStringReference>& StringReferences()
+    std::vector<FStringReference> ScanStringReferences()
     {
-        static const std::vector<FStringReference> References = []
+        std::vector<FStringReference> Found;
+        Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
+        const uintptr_t Base = Memcury::PE::GetModuleBase();
+        const uintptr_t ReadOnlyBegin = ReadOnly.GetSectionStart().Get();
+        const uintptr_t ReadOnlyEnd = ReadOnly.GetSectionEnd().Get();
+        // .text's references come first; 1.9.1's moved code holds others (Finder::HasMovedCode).
+        for (const auto& [Begin, End] : Finder::ExecutableSections())
         {
-            std::vector<FStringReference> Found;
-            Memcury::PE::Section ReadOnly = Memcury::PE::Section::GetSection(".rdata");
-            const uintptr_t Base = Memcury::PE::GetModuleBase();
-            const uintptr_t ReadOnlyBegin = ReadOnly.GetSectionStart().Get();
-            const uintptr_t ReadOnlyEnd = ReadOnly.GetSectionEnd().Get();
-            // .text's references come first; 1.9.1's moved code holds others (Finder::HasMovedCode).
-            for (const auto& [Begin, End] : Finder::ExecutableSections())
+            const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Begin);
+            const size_t Size = End - Begin;
+            for (size_t Index = 0; Index + 7 <= Size; ++Index)
             {
-                const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Begin);
-                const size_t Size = End - Begin;
-                for (size_t Index = 0; Index + 7 <= Size; ++Index)
+                if ((Bytes[Index] != 0x48 && Bytes[Index] != 0x4C) || Bytes[Index + 1] != 0x8D || (Bytes[Index + 2] & 0xC7) != 0x05)
                 {
-                    if ((Bytes[Index] != 0x48 && Bytes[Index] != 0x4C) || Bytes[Index + 1] != 0x8D || (Bytes[Index + 2] & 0xC7) != 0x05)
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    const uintptr_t Site = reinterpret_cast<uintptr_t>(Bytes + Index);
-                    const uintptr_t Target = Site + 7 + *reinterpret_cast<const int32_t*>(Bytes + Index + 3);
-                    if (Target >= ReadOnlyBegin && Target < ReadOnlyEnd)
-                    {
-                        Found.push_back({ static_cast<uint32_t>(Target - Base), static_cast<uint32_t>(Site - Base) });
-                    }
+                const uintptr_t Site = reinterpret_cast<uintptr_t>(Bytes + Index);
+                const uintptr_t Target = Site + 7 + *reinterpret_cast<const int32_t*>(Bytes + Index + 3);
+                if (Target >= ReadOnlyBegin && Target < ReadOnlyEnd)
+                {
+                    Found.push_back({ static_cast<uint32_t>(Target - Base), static_cast<uint32_t>(Site - Base) });
                 }
             }
-            return Found;
-        }();
-        return References;
+        }
+        return Found;
     }
+
+    // Read on first use, which on a packed exe is just after its stub hands over, and again by Finder::RescanStringRefs.
+    std::mutex StringReferencesMutex;
+    std::optional<std::vector<FStringReference>> StringReferenceTable;
 
     template <typename TChar>
     std::vector<uintptr_t> FindStringReferences(const TChar* Text)
     {
         std::vector<uintptr_t> Result;
         const uintptr_t Base = Memcury::PE::GetModuleBase();
-        for (const FStringReference& Reference : StringReferences())
+        const std::lock_guard<std::mutex> Lock(StringReferencesMutex);
+        if (!StringReferenceTable)
+        {
+            StringReferenceTable = ScanStringReferences();
+        }
+        for (const FStringReference& Reference : *StringReferenceTable)
         {
             const TChar* Candidate = reinterpret_cast<const TChar*>(Base + Reference.Target);
             if (Candidate[0] != Text[0])
@@ -374,6 +381,23 @@ std::vector<uintptr_t> Finder::StringRefs(const wchar_t* Text)
 std::vector<uintptr_t> Finder::StringRefs(const char* Text)
 {
     return FindStringReferences(Text);
+}
+
+void Finder::RescanStringRefs()
+{
+    // Measured on 5.40 (CL-4352937, #385): as the entry wrapper's handover bytes appear, a few hundred of the code's
+    // 249,589 references to .rdata (219 to 292 over our runs) are still ciphertext in the second .text, UFortGameInstance::
+    // Init's lea of "TeamChatroom" (0x5CD0E6A) among them, and the stub's worker threads finish them within about a tenth
+    // of a second. They don't change after that, so whether a read at the handover has them comes down to which thread
+    // wins: the reporter's server read without them and found no Init. Read again later, the table has them all.
+    std::vector<FStringReference> Scanned = ScanStringReferences();
+    const std::lock_guard<std::mutex> Lock(StringReferencesMutex);
+    const size_t Before = StringReferenceTable ? StringReferenceTable->size() : 0;
+    StringReferenceTable = std::move(Scanned);
+    if (Before && StringReferenceTable->size() != Before)
+    {
+        Log::Info(L"Finder: string references read again now the packer's stub has finished: {} found, {} at its handover", StringReferenceTable->size(), Before);
+    }
 }
 
 std::vector<uintptr_t> Finder::AddressRefs(uintptr_t Target)

@@ -15,6 +15,7 @@ namespace
     constexpr int MaxFrames = 48;
 
     std::atomic<int> LoggedExceptions = 0;
+    std::atomic<int> LoggedOtherExceptions = 0;
     thread_local bool bInHandler = false;
 
     // The engine's fatal errors (UE_LOG Fatal, a failed check, LowLevelFatalError, Core's own check) end in
@@ -58,19 +59,27 @@ namespace
         }
     }
 
-    const wchar_t* KindOf(DWORD Code)
+    // Any other exception of error severity (0xC0000000 and up, other modules' C++ throws among them). The engine's crash
+    // handler takes every code: the __except around GuardedMain and each FRunnableThreadWin::Run (ReportCrash, which
+    // starts CrashReportClient.exe) goes on to HandleError and FPlatformMisc::RequestExit(true), whose TerminateProcess
+    // gives exit code 3 (GIsCriticalError ? 3 : 0, 1.8.1 0x135D050). A 1.8.1 server exited with 3 (CoreV2 #352), so a
+    // crash on a code outside IsCrash's list is named too. These have their own count, so ones the game survives can't
+    // use up the crashes' lines.
+    [[maybe_unused]] bool IsOtherError(const EXCEPTION_RECORD* Record)
     {
-        switch (Code)
+        return (Record->ExceptionCode & 0xC0000000) == 0xC0000000;
+    }
+
+    std::wstring ModuleName(HMODULE Module)
+    {
+        wchar_t Path[MAX_PATH] = {};
+        if (!GetModuleFileNameW(Module, Path, MAX_PATH))
         {
-        case EXCEPTION_STACK_OVERFLOW:
-            return L" (stack overflow)";
-        case EngineFatalErrorCode:
-            return L" (engine fatal error, the reason is in FortniteGame.log)";
-        case CppExceptionCode:
-            return L" (C++ exception thrown by Core)";
-        default:
-            return L"";
+            return std::format(L"0x{:X}", reinterpret_cast<uintptr_t>(Module));
         }
+        const std::wstring_view Name = Path;
+        const size_t Slash = Name.find_last_of(L"\\/");
+        return std::wstring(Slash == std::wstring_view::npos ? Name : Name.substr(Slash + 1));
     }
 
     std::wstring Describe(DWORD64 Address)
@@ -80,17 +89,69 @@ namespace
         {
             return std::format(L"0x{:X}", Address);
         }
-        wchar_t Path[MAX_PATH] = {};
-        GetModuleFileNameW(Module, Path, MAX_PATH);
-        const std::wstring_view Name = Path;
-        const size_t Slash = Name.find_last_of(L"\\/");
-        return std::format(L"{}+0x{:X}", Slash == std::wstring_view::npos ? Name : Name.substr(Slash + 1), Address - reinterpret_cast<DWORD64>(Module));
+        return std::format(L"{}+0x{:X}", ModuleName(Module), Address - reinterpret_cast<DWORD64>(Module));
+    }
+
+#if WITH_SERVER_CODE
+    // A C++ throw's type (its ThrowInfo's first catchable type, decorated, e.g. ".?AVout_of_range@std@@") and the module
+    // that threw it. ExceptionInformation: [0] the MSVC magic, [2] the ThrowInfo, [3] the thrower's image base, which the
+    // x64 ThrowInfo's offsets are relative to: ThrowInfo { attributes, pmfnUnwind, pForwardCompat, pCatchableTypeArray },
+    // CatchableTypeArray { count, types[] }, CatchableType { properties, pType, ... }, TypeDescriptor { vftable, spare,
+    // name[] }.
+    std::wstring DescribeCppException(const EXCEPTION_RECORD* Record)
+    {
+        if (Record->NumberParameters < 4 || Record->ExceptionInformation[0] < 0x19930520 || Record->ExceptionInformation[0] > 0x19930522)
+        {
+            return L" (C++ exception)";
+        }
+        const auto ImageBase = static_cast<uintptr_t>(Record->ExceptionInformation[3]);
+        const auto* ThrowInfo = reinterpret_cast<const int32_t*>(Record->ExceptionInformation[2]);
+        std::wstring Type = L"of unknown type";
+        if (ImageBase && ThrowInfo && !IsBadReadPtr(ThrowInfo, 4 * sizeof(int32_t)) && ThrowInfo[3])
+        {
+            const auto* Types = reinterpret_cast<const int32_t*>(ImageBase + ThrowInfo[3]);
+            const auto* Catchable = !IsBadReadPtr(Types, 2 * sizeof(int32_t)) && Types[0] > 0 ? reinterpret_cast<const int32_t*>(ImageBase + Types[1]) : nullptr;
+            const char* Name = Catchable && !IsBadReadPtr(Catchable, 2 * sizeof(int32_t)) ? reinterpret_cast<const char*>(ImageBase + Catchable[1] + 2 * sizeof(void*)) : nullptr;
+            if (Name && !IsBadStringPtrA(Name, 256))
+            {
+                Type.assign(Name, Name + strnlen(Name, 256));
+            }
+        }
+        return std::format(L" (C++ exception {} thrown by {})", Type, ImageBase ? ModuleName(reinterpret_cast<HMODULE>(ImageBase)) : L"an unknown module");
+    }
+#endif
+
+    std::wstring KindOf(const EXCEPTION_RECORD* Record)
+    {
+        switch (Record->ExceptionCode)
+        {
+        case EXCEPTION_STACK_OVERFLOW:
+            return L" (stack overflow)";
+        case EngineFatalErrorCode:
+            return L" (engine fatal error, the reason is in FortniteGame.log)";
+#if WITH_SERVER_CODE
+        case CppExceptionCode:
+            return DescribeCppException(Record);
+#endif
+        default:
+            return L"";
+        }
     }
 
     LONG CALLBACK OnException(PEXCEPTION_POINTERS Pointers)
     {
         const EXCEPTION_RECORD* Record = Pointers ? Pointers->ExceptionRecord : nullptr;
-        if (!Record || !Pointers->ContextRecord || !IsCrash(Record) || bInHandler || LoggedExceptions.fetch_add(1) >= MaxLoggedExceptions)
+        if (!Record || !Pointers->ContextRecord || bInHandler)
+        {
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+        const bool bCrash = IsCrash(Record);
+#if WITH_SERVER_CODE
+        const bool bOtherError = !bCrash && IsOtherError(Record);
+#else
+        const bool bOtherError = false;
+#endif
+        if (bCrash ? LoggedExceptions.fetch_add(1) >= MaxLoggedExceptions : !bOtherError || LoggedOtherExceptions.fetch_add(1) >= MaxLoggedExceptions)
         {
             return EXCEPTION_CONTINUE_SEARCH;
         }
@@ -98,7 +159,7 @@ namespace
 
         // Logged when raised, before any handler: one the game catches and survives is logged too, hence "exception",
         // and only the first few are.
-        std::wstring Text = std::format(L"Exception 0x{:08X}{} at {} (thread {})", Record->ExceptionCode, KindOf(Record->ExceptionCode), Describe(reinterpret_cast<DWORD64>(Record->ExceptionAddress)), GetCurrentThreadId());
+        std::wstring Text = std::format(L"Exception 0x{:08X}{} at {} (thread {})", Record->ExceptionCode, KindOf(Record), Describe(reinterpret_cast<DWORD64>(Record->ExceptionAddress)), GetCurrentThreadId());
         if ((Record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION || Record->ExceptionCode == EXCEPTION_IN_PAGE_ERROR) && Record->NumberParameters >= 2)
         {
             const ULONG_PTR Operation = Record->ExceptionInformation[0];

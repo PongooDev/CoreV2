@@ -115,6 +115,7 @@ void Boot::Initialize()
 {
     Configuration::Load();
     Log::Initialize(L"Server");
+    Log::KeepFromChildProcesses();
     Log::Info(L"Core V2 starting");
 
     // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched

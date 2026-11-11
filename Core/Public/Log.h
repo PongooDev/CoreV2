@@ -15,6 +15,8 @@ enum class ELogLevel : uint8_t
 namespace Log
 {
     void Initialize(const wchar_t* Name);
+    // Keeps the log's handle out of the processes this one starts (the crash reporter among them).
+    void KeepFromChildProcesses();
     void Write(ELogLevel Level, std::wstring_view Message);
 
     template <typename... TArgs>

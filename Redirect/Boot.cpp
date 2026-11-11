@@ -15,6 +15,8 @@ void Boot::Initialize()
 {
     Configuration::Load();
     Log::Initialize(L"Redirect");
+    // A crashed server's crash reporter could hold this log too, and the launcher moves it before the server's (CoreV2 #352).
+    Log::KeepFromChildProcesses();
     Log::Info(L"Core Redirect starting");
 
     // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched

@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <io.h>
 #include <mutex>
 #include <share.h>
 #include <string>
@@ -40,6 +41,19 @@ void Log::Initialize(const wchar_t* Name)
 {
     std::scoped_lock Lock(LogMutex);
     LogFile = _wfsopen(std::format(L"{}{}_log_{}.txt", ExecutableDirectory(), Name, GetCurrentProcessId()).c_str(), L"w, ccs=UTF-8", _SH_DENYWR);
+}
+
+void Log::KeepFromChildProcesses()
+{
+    // The CRT's file handles are inheritable unless opened with 'N', and the engine's crash handler starts
+    // CrashReportClient.exe with bInheritHandles (FWindowsPlatformProcess::CreateProc, 1.8.1 0x13651F0, from the crash
+    // reporter launch at 0x135BD00), so the crash reporter could hold the log open after the server had died: the
+    // launcher couldn't move a crashed 1.8.1 server's logs ("being used by another process", CoreV2 #352).
+    std::scoped_lock Lock(LogMutex);
+    if (LogFile)
+    {
+        SetHandleInformation(reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(LogFile))), HANDLE_FLAG_INHERIT, 0);
+    }
 }
 
 void Log::Write(ELogLevel Level, std::wstring_view Message)

@@ -9,6 +9,7 @@
 #include "Engine/Level.h"
 #include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
+#include "FortGameModeZone.h"
 #include "Finder.h"
 #include "Kismet/GameplayStatics.h"
 #include "Log.h"
@@ -16,8 +17,10 @@
 #include "Math/Transform.h"
 #include "Natives.h"
 #include "TimerManager.h"
+#include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UnrealType.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
@@ -826,11 +829,8 @@ AFortPoiManager* AFortPoiManager::Get(UWorld* World)
 
 namespace
 {
-    // The volumes Core shaped are put right in the manager's list once the match has started, as a wait on a timer,
-    // InitializationCheckInterval seconds apart. InitalizePoiManger (3.2 0xA29530) runs from the game mode's intact
-    // HandleMatchHasStarted and broadcasts nothing, and its ShouldTickUpdate (3.2 0xA3C3B0) reads the volume's actor
-    // bounds (AActor::GetActorBounds: registered components only), which Core's shapes can't give without registering
-    // the brush component, and so giving the volume the physics and render state its cooked-out one never had.
+    // The fallback where the game mode's OnHandleMatchHasStarted can't call Core's native: the manager's list is looked
+    // for on a timer, InitializationCheckInterval seconds apart, until InitalizePoiManger has filled it.
     constexpr float InitializationCheckInterval = 0.25f;
 
     void CheckPoiManagerInitialization(FWeakObjectPtr Manager)
@@ -848,35 +848,47 @@ namespace
             World->GetTimerManager().SetTimer(CheckTimerHandle, FTimerDelegate::CreateLambda([Manager]() { CheckPoiManagerInitialization(Manager); }), InitializationCheckInterval, false);
             return;
         }
+        PoiManager->HandleMatchHasStarted();
+    }
 
-        // InitalizePoiManger has run (HandleMatchHasStarted). It put a volume in SmallTickUpdatedPoi when
-        // ShouldTickUpdate held: LargeGameVolume squared above the squared diagonal of the volume's actor bounds. The
-        // volumes Core shaped have no registered component for those bounds, so their test is done again on their box.
-        TArray<AFortPoiVolume*>& SmallTickUpdatedPoi = PoiManager->SmallTickUpdatedPoi;
-        for (AFortPoiVolume* Volume : AllPoiVolumes)
+    AFortGameModeZone* GameModeOf(UWorld* World)
+    {
+        return World ? Cast<AFortGameModeZone>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+    }
+}
+
+void AFortPoiManager::HandleMatchHasStarted()
+{
+#if WITH_SERVER_CODE
+    // InitalizePoiManger has run (HandleMatchHasStarted). It put a volume in SmallTickUpdatedPoi when ShouldTickUpdate
+    // held: LargeGameVolume squared above the squared diagonal of the volume's actor bounds. The volumes Core shaped have
+    // no registered component for those bounds, so their test is done again on their box.
+    TArray<AFortPoiVolume*>& Volumes = AllPoiVolumes;
+    TArray<AFortPoiVolume*>& SmallVolumes = SmallTickUpdatedPoi;
+    for (AFortPoiVolume* Volume : Volumes)
+    {
+        const FBox Box = Volume ? Volume->GetFallbackBox() : FBox();
+        if (!Box.IsValid)
         {
-            const FBox Box = Volume ? Volume->GetFallbackBox() : FBox();
-            if (!Box.IsValid)
+            continue;
+        }
+        const float LargeGameVolume = Volume->LargeGameVolume;
+        const bool bShouldTickUpdate = LargeGameVolume * LargeGameVolume > (Box.Max - Box.Min).SizeSquared();
+        for (int32_t Index = SmallVolumes.Num() - 1; Index >= 0; --Index)
+        {
+            if (SmallVolumes[Index] == Volume)
             {
-                continue;
-            }
-            const float LargeGameVolume = Volume->LargeGameVolume;
-            const bool bShouldTickUpdate = LargeGameVolume * LargeGameVolume > (Box.Max - Box.Min).SizeSquared();
-            for (int32_t Index = SmallTickUpdatedPoi.Num() - 1; Index >= 0; --Index)
-            {
-                if (SmallTickUpdatedPoi[Index] == Volume)
-                {
-                    SmallTickUpdatedPoi.RemoveAt(Index);
-                }
-            }
-            if (bShouldTickUpdate)
-            {
-                SmallTickUpdatedPoi.Add(Volume);
+                SmallVolumes.RemoveAt(Index);
             }
         }
-        Log::Info(L"POI: the match's POI manager has {} volumes, {} tested for Visit each tick ({} players a frame)", AllPoiVolumes.Num(), SmallTickUpdatedPoi.Num(),
-            PoiManager->MaxNumTestsPerFrame);
+        if (bShouldTickUpdate)
+        {
+            SmallVolumes.Add(Volume);
+        }
     }
+    Log::Info(L"POI: the match's POI manager has {} volumes, {} tested for Visit each tick ({} players a frame)", Volumes.Num(), SmallVolumes.Num(),
+        static_cast<int32_t>(MaxNumTestsPerFrame));
+#endif
 }
 
 void AFortPoiManager::WatchInitialization(UWorld* World)
@@ -887,7 +899,48 @@ void AFortPoiManager::WatchInitialization(UWorld* World)
     {
         return;
     }
+
+    // InitalizePoiManger (3.2 0xA29530) broadcasts nothing, and its ShouldTickUpdate (3.2 0xA3C3B0) reads the volume's
+    // actor bounds (AActor::GetActorBounds: registered components only), which Core's shapes can't give without
+    // registering the brush component, and so giving the volume the physics and render state its cooked-out one never
+    // had. AFortGameModeAthena::HandleMatchHasStarted (3.2 0x9BE210, 5.30 0xBE6FF0, 5.40 0xBEEAD0) calls it, then hands
+    // over to its super's (a tail call), whose AFortGameModeZone part broadcasts the game mode's OnHandleMatchHasStarted
+    // (3.2 0xB950B6, 5.30 0xE291AF, 5.40 0xE32C7F): the volumes are listed by then, so the fix runs from there, once.
+    AFortGameModeZone* GameMode = GameModeOf(World);
+    if (HandleMatchHasStartedFunction && GameMode && AFortGameModeZone::HasOnHandleMatchHasStarted())
+    {
+        Log::Info(L"POI: {} lists the volumes when the match starts ({}'s OnHandleMatchHasStarted)", Manager->GetName().ToStdString(), GameMode->GetName().ToStdString());
+        FMulticastScriptDelegate& MatchHasStarted = GameMode->OnHandleMatchHasStarted;
+        MatchHasStarted.AddUniqueDynamic(Manager, HandleMatchHasStartedFunction->GetFName());
+        return;
+    }
     Log::Info(L"POI: {} lists the volumes when the match starts", Manager->GetName().ToStdString());
     CheckPoiManagerInitialization(FWeakObjectPtr(Manager));
 #endif
+}
+
+DEFINE_FUNCTION(AFortPoiManager::execHandleMatchHasStarted)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    // Once: the binding goes as it runs (the broadcast calls a copy of the list).
+    AFortPoiManager* Manager = static_cast<AFortPoiManager*>(Context);
+    if (AFortGameModeZone* GameMode = GameModeOf(Manager->GetWorld()))
+    {
+        FMulticastScriptDelegate& MatchHasStarted = GameMode->OnHandleMatchHasStarted;
+        MatchHasStarted.RemoveDynamic(Manager, HandleMatchHasStartedFunction->GetFName());
+    }
+    Manager->HandleMatchHasStarted();
+    P_NATIVE_END;
+}
+
+void AFortPoiManager::HookNatives()
+{
+    // The game mode's OnHandleMatchHasStarted calls it on the manager (an AFortPoiManager itself) through the class's
+    // FuncMap. Its signature has no parameters.
+    const UProperty* Property = StaticClass() && AFortGameModeZone::HasOnHandleMatchHasStarted() && Finder::ResolveClassFunctionMap()
+        ? AFortGameModeZone::StaticClass()->FindPropertyByName(FName(L"OnHandleMatchHasStarted")) : nullptr;
+    const UFunction* Signature = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+        ? static_cast<const UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+    HandleMatchHasStartedFunction = Signature ? StaticClass()->AddNativeFunction(L"HandleMatchHasStarted", &execHandleMatchHasStarted, Signature) : nullptr;
 }

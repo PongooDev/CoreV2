@@ -3,6 +3,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/World.h"
+#include "Finder.h"
 #include "EnvironmentQuery/EnvQueryInstanceBlueprintWrapper.h"
 #include "EnvironmentQuery/EnvQueryManager.h"
 #include "EnvironmentQuery/EnvQueryTypes.h"
@@ -17,6 +18,8 @@
 #include "Math/Vector.h"
 #include "Templates/Casts.h"
 #include "TimerManager.h"
+#include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
@@ -27,11 +30,12 @@
 namespace
 {
     // The placement query is asynchronous: UEnvQueryManager runs it on its tick over the next frames. Epic's spawner
-    // ran it as an instant query (21.40's class keeps the query's result and binds no completion delegate:
-    // UEnvQueryManager::RunInstantQuery), which the client builds don't link, and the async query's own completion
-    // (UEnvQueryInstanceBlueprintWrapper::OnQueryFinishedEvent) is a dynamic delegate only a blueprint function can be
-    // bound to. So the spawner looks for its query's end on a timer, QueryCheckInterval seconds apart, for up to ten
-    // seconds.
+    // ran it as an instant query (21.40's class keeps the query's result, QueryResult, and binds no completion delegate:
+    // UEnvQueryManager::RunInstantQuery), which the client builds don't link. So the spawner waits for the async query's
+    // own completion, as the game's blueprints wait for theirs (5.30's Trap_Floor_Defender_Master binds its
+    // EQS_DefenderPadTeleportIn query's OnQueryFinishedEvent): the wrapper broadcasts OnQueryFinishedEvent once the
+    // result is in, which calls Core's OnQueryFinished native. Where that native couldn't be added (HookNatives), the
+    // spawner looks for its query's end on a timer, QueryCheckInterval seconds apart, for up to ten seconds.
     constexpr float QueryCheckInterval = 0.1f;
     constexpr int32_t QueryChecks = 100;
 
@@ -70,9 +74,9 @@ namespace
             Tally.Spawners, Tally.Actors, Classes.empty() ? std::wstring(L"none") : Classes, Tally.OnSpawner, Tally.Unplaced);
     }
 
-    // The query has ended once its wrapper has left its manager's running wrappers, or, where the build has no such
-    // list, once it has points.
-    void WaitForQuery(FWeakObjectPtr World, FWeakObjectPtr Spawner, FWeakObjectPtr Query, int32_t ChecksLeft, bool bSeenRunning)
+    // The fallback without Core's native: the query has ended once its wrapper has left its manager's running wrappers,
+    // or, where the build has no such list, once it has points.
+    void CheckQueryEnded(FWeakObjectPtr World, FWeakObjectPtr Spawner, FWeakObjectPtr Query, int32_t ChecksLeft, bool bSeenRunning)
     {
         UEnvQueryInstanceBlueprintWrapper* QueryInstance = static_cast<UEnvQueryInstanceBlueprintWrapper*>(Query.Get());
         const std::optional<bool> bRunning = UEnvQueryManager::IsQueryRunning(QueryInstance);
@@ -84,7 +88,7 @@ namespace
             FTimerHandle QueryTimerHandle;
             QueryWorld->GetTimerManager().SetTimer(QueryTimerHandle, FTimerDelegate::CreateLambda([World, Spawner, Query, ChecksLeft, bSeenRunning]()
             {
-                WaitForQuery(World, Spawner, Query, ChecksLeft - 1, bSeenRunning);
+                CheckQueryEnded(World, Spawner, Query, ChecksLeft - 1, bSeenRunning);
             }), QueryCheckInterval, false);
             return;
         }
@@ -217,7 +221,22 @@ void ABGAConsumableSpawner::SpawnConsumables(int32_t WorldLevel)
             QueryInstance->SetNamedParam(Param.ParamName, Param.Value);
         }
     }
-    WaitForQuery(FWeakObjectPtr(reinterpret_cast<UObject*>(GetWorld())), FWeakObjectPtr(this), FWeakObjectPtr(QueryInstance), QueryChecks, false);
+
+    // Until the query is done: its OnQueryFinishedEvent calls OnQueryFinished, bound before UEnvQueryManager first ticks
+    // the query. A query RunEQSQuery couldn't start (FEnvQueryRequest::Execute gave it no ID, so its wrapper never joined
+    // its manager's running wrappers) never broadcasts: it is done now, without points.
+    if (!OnQueryFinishedFunction || !UEnvQueryInstanceBlueprintWrapper::HasOnQueryFinishedEvent())
+    {
+        CheckQueryEnded(FWeakObjectPtr(reinterpret_cast<UObject*>(GetWorld())), FWeakObjectPtr(this), FWeakObjectPtr(QueryInstance), QueryChecks, false);
+        return;
+    }
+    if (UEnvQueryManager::IsQueryRunning(QueryInstance) == std::optional<bool>(false))
+    {
+        OnQueryFinished(QueryInstance);
+        return;
+    }
+    FMulticastScriptDelegate& OnQueryFinishedEvent = QueryInstance->OnQueryFinishedEvent;
+    OnQueryFinishedEvent.AddUniqueDynamic(this, OnQueryFinishedFunction->GetFName());
 #endif
 }
 
@@ -274,4 +293,24 @@ void ABGAConsumableSpawner::OnQueryFinished(UEnvQueryInstanceBlueprintWrapper* Q
     }
     LogTallyWhenDone();
 #endif
+}
+
+DEFINE_FUNCTION(ABGAConsumableSpawner::execOnQueryFinished)
+{
+    P_GET_OBJECT(UEnvQueryInstanceBlueprintWrapper, Z_Param_QueryInstance);
+    P_GET_PROPERTY(UByteProperty, Z_Param_QueryStatus);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    // A query that ended otherwise than with Success (Failed: no point passed its tests) has no points: the roll goes on
+    // the spawner, which the world's tally counts.
+    static_cast<ABGAConsumableSpawner*>(Context)->OnQueryFinished(Z_Param_QueryInstance);
+    P_NATIVE_END;
+}
+
+void ABGAConsumableSpawner::HookNatives()
+{
+    // OnQueryFinishedEvent calls it on the spawner (a BP_BGACSpawner_C, which has no function of that name) through the
+    // class's FuncMap, with FEQSQueryDoneSignature's parameters.
+    const UFunction* Signature = StaticClass() && Finder::ResolveClassFunctionMap() ? UEnvQueryInstanceBlueprintWrapper::GetQueryFinishedSignature() : nullptr;
+    OnQueryFinishedFunction = Signature ? StaticClass()->AddNativeFunction(L"OnQueryFinished", &execOnQueryFinished, Signature) : nullptr;
 }

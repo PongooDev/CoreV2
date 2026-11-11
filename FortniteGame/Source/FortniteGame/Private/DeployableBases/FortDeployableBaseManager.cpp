@@ -221,10 +221,14 @@ namespace
     }
 
     // Core's Horde log: what the manager, the primary mission's waves and the storm shields are at, once a second on a
-    // timer on the world's timer manager, until the zone ends. Logging only, with no Epic counterpart: the waves run in
-    // the mission blueprint (GenMission_TieredWaves), whose calls into the game (AFortMission::OnWaveCompleted) are
-    // intact, so there is nothing stripped to restore there, and its events are dynamic delegates, which only a
-    // blueprint function can be bound to.
+    // timer on the world's timer manager, until the zone ends. Logging only, with no Epic counterpart, so it stays on
+    // the timer. The waves run in the mission blueprint (GenMission_TieredWaves), whose only call into native code as a
+    // wave ends (AFortMission::OnWaveCompleted) is intact, so there is nothing stripped to restore there. Its wave events
+    // (5.30's OnTierStarted, OnWaveStarted, OnWaveDefenseSucceeded, OnWaveDefenseFailed) are the blueprint's own
+    // dispatchers, which Epic's C++ never binds: their signatures exist only once the mission blueprint loads, after
+    // boot, when Core can no longer add a native (UClass::AddNativeFunction). The manager's OnDeployableBasePlotsSpawned
+    // fires only in its world initialization, which is logged already; the players waiting for a plot and the storm
+    // shields' radius reset have no event at all.
     void Watch(std::shared_ptr<FHordeWatch> State)
     {
         AFortGameModeZone* GameMode = static_cast<AFortGameModeZone*>(State->GameMode.Get());

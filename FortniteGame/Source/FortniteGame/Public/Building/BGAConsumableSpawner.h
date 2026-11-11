@@ -4,8 +4,10 @@
 #include "EnvironmentQuery/EnvQueryTypes.h"
 #include "Items/FortItem.h"
 #include "StructArray.h"
+#include "UObject/Stack.h"
 
 class UEnvQuery;
+class UFunction;
 class UEnvQueryInstanceBlueprintWrapper;
 class UWorld;
 
@@ -33,9 +35,16 @@ public:
     // (called from AFortGameModeZone::FinishWorldInitialization). Called again when the match's playlist brings other
     // loot tables, it takes out what the earlier roll spawned and rolls again.
     static void SpawnWorldConsumables(UWorld* World);
-    // Places the roll's consumables on the query's points (the query's finished delegate in Epic's).
+    // Places the roll's consumables on the query's points (the query's finished delegate in Epic's). Here the query's
+    // OnQueryFinishedEvent calls it, through Core's native of the same name (execOnQueryFinished).
     void OnQueryFinished(UEnvQueryInstanceBlueprintWrapper* QueryInstance);
+
+    // Adds OnQueryFinished's native to the class at boot, for the placement queries' OnQueryFinishedEvent to call.
+    static void HookNatives();
 
 private:
     void SpawnConsumables(int32_t WorldLevel);
+
+    DECLARE_FUNCTION(execOnQueryFinished);
+    static inline UFunction* OnQueryFinishedFunction = nullptr;
 };

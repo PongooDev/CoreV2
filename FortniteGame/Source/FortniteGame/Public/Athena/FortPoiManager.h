@@ -3,8 +3,10 @@
 #include "Containers/Array.h"
 #include "GameFramework/Actor.h"
 #include "Reflection.h"
+#include "UObject/Stack.h"
 
 class AFortPoiVolume;
+class UFunction;
 class UWorld;
 
 // Battle Royale's POI manager (3.0). AFortGameModeAthena::InitGame spawns it (the game mode keeps it unreflected at
@@ -26,6 +28,18 @@ public:
     static AFortPoiManager* Get(UWorld* World);
 
     // Once the match has started and InitalizePoiManger has listed the volumes, puts the volumes Core shaped in
-    // SmallTickUpdatedPoi by ShouldTickUpdate's own test on their shape, as long as World's manager is there.
+    // SmallTickUpdatedPoi by ShouldTickUpdate's own test on their shape, as long as World's manager is there: from the
+    // game mode's OnHandleMatchHasStarted (HandleMatchHasStarted), bound here.
     static void WatchInitialization(UWorld* World);
+
+    // Core's: the fix above, once. The game mode's OnHandleMatchHasStarted calls it through Core's native of the same
+    // name (execHandleMatchHasStarted), after AFortGameModeAthena::HandleMatchHasStarted's InitalizePoiManger.
+    void HandleMatchHasStarted();
+
+    // Adds HandleMatchHasStarted's native to the class at boot, for OnHandleMatchHasStarted to call.
+    static void HookNatives();
+
+private:
+    DECLARE_FUNCTION(execHandleMatchHasStarted);
+    static inline UFunction* HandleMatchHasStartedFunction = nullptr;
 };

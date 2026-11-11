@@ -43,6 +43,7 @@
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 
 #include <algorithm>
@@ -76,9 +77,11 @@ namespace
 {
     // The spawn pad's placement query is asynchronous: UEnvQueryManager runs it on its tick over the next frames. Epic's
     // PlacePlayerSpawnPad ran it as an instant query (21.40's AFortGameModeZone binds no query completion delegate:
-    // UEnvQueryManager::RunInstantQuery), which the client builds don't link, and the async query's own completion
-    // (UEnvQueryInstanceBlueprintWrapper::OnQueryFinishedEvent) is a dynamic delegate only a blueprint function can be
-    // bound to. So the game mode looks for its query's end on a timer, SpawnPadQueryCheckInterval seconds apart, for up
+    // UEnvQueryManager::RunInstantQuery), which the client builds don't link. So the game mode waits for the async
+    // query's own completion, as the game's blueprints wait for theirs (5.30's Trap_Floor_Defender_Master binds its
+    // EQS_DefenderPadTeleportIn query's OnQueryFinishedEvent): the wrapper broadcasts OnQueryFinishedEvent once the
+    // result is in, which calls Core's OnPlayerSpawnPadQueryFinished native. Where that native couldn't be added
+    // (HookVTables), the game mode looks for the query's end on a timer, SpawnPadQueryCheckInterval seconds apart, for up
     // to twenty seconds.
     constexpr float SpawnPadQueryCheckInterval = 0.1f;
     constexpr int32_t SpawnPadQueryChecks = 200;
@@ -97,9 +100,9 @@ namespace
         return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
     }
 
-    // The query has ended once its wrapper has left its manager's running wrappers, or, where the build has no such
-    // list, once it has a result.
-    void WaitForQuery(FWeakObjectPtr GameMode, FWeakObjectPtr WorldManager, FWeakObjectPtr Query, int32_t ChecksLeft, bool bSeenRunning)
+    // The fallback without Core's native: the query has ended once its wrapper has left its manager's running wrappers,
+    // or, where the build has no such list, once it has a result.
+    void CheckQueryEnded(FWeakObjectPtr GameMode, FWeakObjectPtr WorldManager, FWeakObjectPtr Query, int32_t ChecksLeft, bool bSeenRunning)
     {
         AFortGameModeZone* Zone = static_cast<AFortGameModeZone*>(GameMode.Get());
         UWorld* World = Zone ? Zone->GetWorld() : nullptr;
@@ -117,12 +120,34 @@ namespace
             FTimerHandle QueryTimerHandle;
             World->GetTimerManager().SetTimer(QueryTimerHandle, FTimerDelegate::CreateLambda([GameMode, WorldManager, Query, ChecksLeft, bSeenRunning]()
             {
-                WaitForQuery(GameMode, WorldManager, Query, ChecksLeft - 1, bSeenRunning);
+                CheckQueryEnded(GameMode, WorldManager, Query, ChecksLeft - 1, bSeenRunning);
             }), SpawnPadQueryCheckInterval, false);
             return;
         }
 
         Zone->OnPlayerSpawnPadQueryFinished(static_cast<AFortWorldManager*>(WorldManager.Get()), PlacementQuery);
+    }
+
+    // Until the placement query is done: its OnQueryFinishedEvent calls the game mode's OnPlayerSpawnPadQueryFinished,
+    // bound before UEnvQueryManager first ticks the query. A query RunEQSQuery couldn't start (FEnvQueryRequest::Execute
+    // gave it no ID, so its wrapper never joined its manager's running wrappers) never broadcasts: it is done now, with
+    // no result.
+    void WaitForQuery(AFortGameModeZone* Zone, AFortWorldManager* WorldManager, UEnvQueryInstanceBlueprintWrapper* Query)
+    {
+        UFunction* QueryFinished = AFortGameModeZone::GetOnPlayerSpawnPadQueryFinishedFunction();
+        if (!QueryFinished || !UEnvQueryInstanceBlueprintWrapper::HasOnQueryFinishedEvent())
+        {
+            CheckQueryEnded(FWeakObjectPtr(Zone), FWeakObjectPtr(WorldManager), FWeakObjectPtr(Query), SpawnPadQueryChecks, false);
+            return;
+        }
+
+        if (UEnvQueryManager::IsQueryRunning(Query) == std::optional<bool>(false))
+        {
+            Zone->OnPlayerSpawnPadQueryFinished(WorldManager, Query);
+            return;
+        }
+        FMulticastScriptDelegate& OnQueryFinishedEvent = Query->OnQueryFinishedEvent;
+        OnQueryFinishedEvent.AddUniqueDynamic(Zone, QueryFinished->GetFName());
     }
 }
 
@@ -426,7 +451,7 @@ void AFortGameModeZone::PlacePlayerSpawnPad(AFortWorldManager* WorldManager)
         return;
     }
 
-    WaitForQuery(FWeakObjectPtr(this), FWeakObjectPtr(WorldManager), FWeakObjectPtr(Query), SpawnPadQueryChecks, false);
+    WaitForQuery(this, WorldManager, Query);
 #endif
 }
 
@@ -451,6 +476,22 @@ void AFortGameModeZone::OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldMa
         ActiveSpawnPad = SpawnPad;
     }
 #endif
+}
+
+DEFINE_FUNCTION(AFortGameModeZone::execOnPlayerSpawnPadQueryFinished)
+{
+    P_GET_OBJECT(UEnvQueryInstanceBlueprintWrapper, Z_Param_QueryInstance);
+    P_GET_PROPERTY(UByteProperty, Z_Param_QueryStatus);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    // Any status but Success leaves the query without a result, which OnPlayerSpawnPadQueryFinished reports. The world
+    // manager is the game state's, the one that finished the world's initialization.
+    AFortGameModeZone* Zone = static_cast<AFortGameModeZone*>(Context);
+    UWorld* World = Zone->GetWorld();
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    AFortWorldManager* WorldManager = GameState ? static_cast<AFortWorldManager*>(GameState->WorldManager) : nullptr;
+    Zone->OnPlayerSpawnPadQueryFinished(WorldManager, Z_Param_QueryInstance);
+    P_NATIVE_END;
 }
 
 void AFortGameModeZone::OnZoneEnd()
@@ -682,6 +723,12 @@ namespace
 
 void AFortGameModeZone::HookVTables()
 {
+    // The spawn pad's placement query's OnQueryFinishedEvent calls this native (FEQSQueryDoneSignature's parameters)
+    // on the game mode, through the game mode's class's FuncMap.
+    const UFunction* QueryFinishedSignature = Finder::ResolveClassFunctionMap() ? UEnvQueryInstanceBlueprintWrapper::GetQueryFinishedSignature() : nullptr;
+    OnPlayerSpawnPadQueryFinishedFunction = QueryFinishedSignature && StaticClass()
+        ? StaticClass()->AddNativeFunction(L"OnPlayerSpawnPadQueryFinished", &execOnPlayerSpawnPadQueryFinished, QueryFinishedSignature) : nullptr;
+
     if (!Finder::ResolveGameModeZoneLive())
     {
         return;

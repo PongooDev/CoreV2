@@ -166,8 +166,13 @@ void AFortGameModeOutpost::KeepStructureLimit()
     // every Storm Shield. So the server asks the backend for its Storm Shield's limit, by the zone theme's
     // CloudSaveItemDefinition (Outpost:outpostcore_pve_01..04: Stonewood to Twine Peaks), and keeps the game state at it,
     // checked once a second and asked again every 30 seconds. Without one the game's own limit stays.
-    // The checks run on a timer: the limit is Core's (Epic's game has no admin limit to keep), and the game's own store
-    // (ApplyStructureLimit, once the match starts) broadcasts nothing Core can bind to.
+    // The checks stay on a timer, as nothing the game broadcasts marks the moments that matter. The limit is Core's
+    // (Epic's game has no admin limit to keep), and the backend has no push for a change in the admin panel. The game's
+    // own store of the limit, ApplyStructureLimit, runs after the only match-start event: AFortGameModeOutpost's
+    // HandleMatchHasStarted (5.30 0xE28FB0) calls its super's first, whose OnHandleMatchHasStarted broadcast (0xE291AF)
+    // comes before ApplyStructureLimit (0xE17270), which broadcasts nothing. And no game state has a structure placed or
+    // destroyed event (5.30's AFortGameStateZone's only delegates are OnScoreTotalsChanged and
+    // OnNumSurvivorsRescuedChangedDelegate; AFortGameStateOutpost has none).
     CheckStructureLimit(FWeakObjectPtr(this), std::make_shared<FStructureLimitWatch>());
 #endif
 }

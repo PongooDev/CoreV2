@@ -28,6 +28,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
+#include "Athena/FortPoiManager.h"
 #include "Misc/CommandLine.h"
 #include "FortVisibilityComponent.h"
 #include "FortWorldManager.h"
@@ -43,6 +44,7 @@
 #include "Online/FortGameSession.h"
 #include "Online/FortMcpProfileWorld.h"
 #include "AI/FortAIGoalManager.h"
+#include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingActor.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingItemCollectorActor.h"
@@ -349,6 +351,8 @@ static void InstallHooks()
             AFortPlayerPawnAthena::HookNatives();
             AFortPlayerPawnAthena::HookVTables();
             AFortAthenaSupplyDrop::HookNatives();
+            ABGAConsumableSpawner::HookNatives();
+            AFortPoiManager::HookNatives();
             AFortAthenaVehicle::HookVTables();
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();

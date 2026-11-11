@@ -14,6 +14,20 @@ namespace EEnvQueryRunMode
     };
 }
 
+// How a query ended, as its wrapper's OnQueryFinishedEvent passes it (FEQSQueryDoneSignature's QueryStatus).
+namespace EEnvQueryStatus
+{
+    enum Type
+    {
+        Processing,
+        Success,
+        Failed,
+        Aborted,
+        OwnerLost,
+        MissingParam,
+    };
+}
+
 class EAIParamType
 {
     DefineUnrealEnum(EAIParamType, AIModule)

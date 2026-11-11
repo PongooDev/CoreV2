@@ -11,6 +11,7 @@
 #include "UObject/NameTypes.h"
 #include "UObject/UnrealNames.h"
 #include "UObject/Object.h"
+#include "UObject/ScriptDelegates.h"
 
 class ULevel;
 class UNetDriver;
@@ -72,6 +73,11 @@ public:
     DefineNativeMember(TEnumAsByte<ENetDormancy>, NetDormancy, AActor_NetDormancy)
     DefineNativeBitfield(bActorInitialized, AActor_bActorInitialized, Natives::AActor_bActorInitializedMask)
     DefineUProperty(USceneComponent*, RootComponent)
+    // What AActor::EndPlay broadcasts as the actor leaves play (FActorEndPlaySignature: Actor, EndPlayReason): destroyed
+    // (AActor::Destroyed routes EndPlay before its OnDestroyed, while the actor is still valid), or its level or world
+    // going away.
+    DefineUProperty(FMulticastScriptDelegate, OnEndPlay)
+    static bool HasOnEndPlay() { return StaticClass() && Member_OnEndPlay.IsAvailable(); }
     DefineUFunction(GetTransform)
     DefineUFunction(GetActorBounds)
     DefineUFunction(K2_SetActorLocation)

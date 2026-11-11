@@ -1,11 +1,14 @@
 #pragma once
 
 #include "Building/BuildingTrap.h"
+#include "UObject/ScriptDelegates.h"
 #include "UObject/Stack.h"
 
 #include <cstdint>
 
+class AActor;
 class AFortAIPawn;
+class UFunction;
 class UWorld;
 class UFortWorldItem;
 
@@ -25,6 +28,10 @@ class ABuildingTrapDefender : public ABuildingTrap
 
 public:
     DefineUProperty(AFortAIPawn*, DefenderPawn)
+    // What the post's blueprint broadcasts whenever it sets its DefenderPawn or its DefenderItemDefinition (its
+    // SetDefenderPawn and SetDefenderItemDefinition, on the server too): a Blueprint delegate without parameters.
+    DefineUProperty(FMulticastScriptDelegate, DefenderPawnOrItemSet)
+    static bool HasDefenderPawnOrItemSet() { return StaticClass() && Member_DefenderPawnOrItemSet.IsAvailable(); }
 
     // The defender gets WeaponToGive (moved out of its player's inventory; one it already holds stays) in its hands, and
     // AmmoQuantity of that weapon's ammo, the count the post's ammo slider sets: more comes from the player, the rest goes
@@ -37,17 +44,28 @@ public:
     DECLARE_FUNCTION(execSupplyDefender);
     DECLARE_FUNCTION(execTakeWeaponAwayFromDefender);
 
+    // Also adds the natives the post's DefenderPawnOrItemSet and its defender's OnEndPlay call
+    // (HandleDefenderPawnOrItemSet, HandleDefenderEndPlay).
     static void HookNatives();
 
 private:
     // A supplied defender gives its weapon and ammo back once it leaves its post: unsummoned, replaced, killed, or the
-    // post gone. The post's blueprint clears its DefenderPawn when it lets the defender go (its ClearCurrentDefender:
+    // post gone. The post's blueprint clears its DefenderPawn when it lets the defender go (5.30's ClearCurrentDefender:
     // AFortGameStateZone::OnDefenderRemoved, then SetDefenderPawn(None), before the defender teleports out; and from the
-    // defender's OnEndPlay, which it binds), so that is what is looked for, on a timer (QueueReturnCheck) while supplied
-    // defenders stand. Kept as a check: everything the post runs at that moment is intact (OnDefenderRemoved too, 5.30
-    // 0xE83C00), so there is nothing stripped to restore there, and the defender's OnEndPlay is a dynamic delegate,
-    // which only a blueprint function can be bound to.
-    static void WatchDefender(ABuildingTrapDefender* Trap, AFortAIPawn* Defender);
+    // defender's OnEndPlay, which it binds as it spawns the defender), and SetDefenderPawn broadcasts the post's
+    // DefenderPawnOrItemSet. So the post's DefenderPawnOrItemSet and the defender's own OnEndPlay (destroyed) are bound
+    // to Core's natives, as the post's blueprint binds the defender's OnEndPlay, and each runs the check then. Everything
+    // the post runs at that moment is intact (OnDefenderRemoved too, 5.30 0xE83C00): there is nothing stripped to restore
+    // there. Where the natives couldn't be added, the check runs on a timer (QueueReturnCheck) while supplied defenders
+    // stand.
+    static void TrackDefender(ABuildingTrapDefender* Trap, AFortAIPawn* Defender);
     static void QueueReturnCheck(UWorld* World);
-    static void ReturnLeftDefendersItems();
+    // The check: each supplied defender whose post no longer names it, or that is gone (EndingDefender: leaving play
+    // now), gives its items back. Returns the world of a defender still at its post, if any.
+    static UWorld* ReturnLeftDefendersItems(const AActor* EndingDefender = nullptr);
+
+    DECLARE_FUNCTION(execHandleDefenderPawnOrItemSet);
+    DECLARE_FUNCTION(execHandleDefenderEndPlay);
+    static inline UFunction* HandleDefenderPawnOrItemSetFunction = nullptr;
+    static inline UFunction* HandleDefenderEndPlayFunction = nullptr;
 };

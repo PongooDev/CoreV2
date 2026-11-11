@@ -1,6 +1,8 @@
 #pragma once
 
 #include "FortGameMode.h"
+#include "UObject/ScriptDelegates.h"
+#include "UObject/Stack.h"
 
 class AFortAIDirector;
 class APlayerController;
@@ -11,6 +13,7 @@ class AFortVisibilityManager;
 class UEnvQueryInstanceBlueprintWrapper;
 struct FFortPlayerSpawnPadPlacementData;
 class UFortItemDefinition;
+class UFunction;
 
 struct FItemAndCount
 {
@@ -33,6 +36,11 @@ public:
     // What a player starts a match with (Battle Royale's: the pickaxe, the building pieces, the edit tool and the
     // materials, Athena_GameMode). No native code reads it in the shipping exe.
     DefineUStructArrayProperty(FItemAndCount, StartingItems)
+    // What the game mode's HandleMatchHasStarted broadcasts as the match starts (a Blueprint delegate without parameters;
+    // 3.2 0xB950B6, 5.30 0xE291AF, 5.40 0xE32C7F), after its subclasses' own part: Battle Royale's has listed the POI
+    // volumes by then (AFortPoiManager::HandleMatchHasStarted).
+    DefineUProperty(FMulticastScriptDelegate, OnHandleMatchHasStarted)
+    static bool HasOnHandleMatchHasStarted() { return StaticClass() && Member_OnHandleMatchHasStarted.IsAvailable(); }
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
     UClass* DetermineAIDirectorClass() const;
@@ -42,7 +50,12 @@ public:
     void FinishWorldInitialization(AFortWorldManager* WorldManager);
     FFortPlayerSpawnPadPlacementData* GetPlayerSpawnPadPlacementData();
     void PlacePlayerSpawnPad(AFortWorldManager* WorldManager);
+    // The spawn pad on the placement query's spot, once the query is done: the query's OnQueryFinishedEvent calls Core's
+    // native OnPlayerSpawnPadQueryFinished (execOnPlayerSpawnPadQueryFinished), which HookVTables adds to the class.
     void OnPlayerSpawnPadQueryFinished(AFortWorldManager* WorldManager, UEnvQueryInstanceBlueprintWrapper* PlacementQuery);
+    // OnPlayerSpawnPadQueryFinished's native, or null where HookVTables couldn't add it (the query is then waited on with
+    // a timer).
+    static UFunction* GetOnPlayerSpawnPadQueryFinishedFunction() { return OnPlayerSpawnPadQueryFinishedFunction; }
 
     void OnZoneEnd();
 
@@ -53,6 +66,9 @@ public:
     static void HookVTables();
 
 private:
+    DECLARE_FUNCTION(execOnPlayerSpawnPadQueryFinished);
+    static inline UFunction* OnPlayerSpawnPadQueryFinishedFunction = nullptr;
+
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeZone* This, AController* NewPlayer, AActor* StartSpot);
     static AActor* PickFriendlyPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius);
     static AActor* PickInitialPlayerSpawnActorCall(AFortGameModeZone* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius);

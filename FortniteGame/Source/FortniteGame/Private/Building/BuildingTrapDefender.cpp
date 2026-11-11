@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Building/BuildingTrapDefender.h"
+#include "Components/ActorComponent.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
@@ -31,8 +32,17 @@ namespace
     std::vector<FSuppliedDefender> SuppliedDefenders;
     bool bReturnQueued = false;
 
-    // How often the supplied defenders are looked at, on a timer on the world's timer manager, while there are any.
+    // Without Core's natives: how often the supplied defenders are looked at, on a timer on the world's timer manager,
+    // while there are any.
     constexpr float ReturnCheckInterval = 0.25f;
+
+    // The signature of Class's Blueprint delegate DelegateName, the parameters a native bound to it takes.
+    const UFunction* DelegateSignature(const UClass* Class, const wchar_t* DelegateName)
+    {
+        const UProperty* Property = Class ? Class->FindPropertyByName(FName(DelegateName)) : nullptr;
+        return Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+            ? static_cast<const UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+    }
 
     std::vector<UFortWorldItem*> FindItems(AFortInventory* Inventory, bool (*Matches)(UFortItemDefinition* Definition))
     {
@@ -77,7 +87,7 @@ void ABuildingTrapDefender::SupplyDefender(const UFortWorldItem* WeaponToGive, i
 
     // A defender this one replaced gives its weapon and ammo back first, so its ammo can go to this one.
     ReturnLeftDefendersItems();
-    WatchDefender(this, Defender);
+    TrackDefender(this, Defender);
 
     AFortPlayerController* Manager = Defender->GetPlayerManagerController();
     AFortInventory* ManagerInventory = Manager ? static_cast<AFortInventory*>(Manager->WorldInventory) : nullptr;
@@ -191,12 +201,23 @@ UFortWorldItem* ABuildingTrapDefender::TakeWeaponAwayFromDefender(UFortWorldItem
 #endif
 }
 
-void ABuildingTrapDefender::WatchDefender(ABuildingTrapDefender* Trap, AFortAIPawn* Defender)
+void ABuildingTrapDefender::TrackDefender(ABuildingTrapDefender* Trap, AFortAIPawn* Defender)
 {
     const TWeakObjectPtr<AFortAIPawn> WeakDefender(Defender);
     if (std::none_of(SuppliedDefenders.begin(), SuppliedDefenders.end(), [&](const FSuppliedDefender& Supplied) { return Supplied.Defender == WeakDefender; }))
     {
         SuppliedDefenders.push_back({ TWeakObjectPtr<ABuildingTrapDefender>(Trap), WeakDefender });
+    }
+
+    // The post letting it go, and it leaving play: each bound once, to the post, as the post's blueprint binds the
+    // defender's OnEndPlay.
+    if (Trap && Defender && HandleDefenderPawnOrItemSetFunction && HandleDefenderEndPlayFunction && HasDefenderPawnOrItemSet() && AActor::HasOnEndPlay())
+    {
+        FMulticastScriptDelegate& PawnOrItemSet = Trap->DefenderPawnOrItemSet;
+        PawnOrItemSet.AddUniqueDynamic(Trap, HandleDefenderPawnOrItemSetFunction->GetFName());
+        FMulticastScriptDelegate& EndPlay = Defender->OnEndPlay;
+        EndPlay.AddUniqueDynamic(Trap, HandleDefenderEndPlayFunction->GetFName());
+        return;
     }
     QueueReturnCheck(Trap ? Trap->GetWorld() : nullptr);
 }
@@ -209,19 +230,27 @@ void ABuildingTrapDefender::QueueReturnCheck(UWorld* World)
     }
     bReturnQueued = true;
     FTimerHandle ReturnTimerHandle;
-    World->GetTimerManager().SetTimer(ReturnTimerHandle, FTimerDelegate::CreateLambda([]() { ReturnLeftDefendersItems(); }), ReturnCheckInterval, false);
+    World->GetTimerManager().SetTimer(ReturnTimerHandle, FTimerDelegate::CreateLambda([]()
+    {
+        bReturnQueued = false;
+        UWorld* StandingWorld = ReturnLeftDefendersItems();
+        if (!SuppliedDefenders.empty())
+        {
+            QueueReturnCheck(StandingWorld);
+        }
+    }), ReturnCheckInterval, false);
 }
 
-void ABuildingTrapDefender::ReturnLeftDefendersItems()
+UWorld* ABuildingTrapDefender::ReturnLeftDefendersItems(const AActor* EndingDefender)
 {
-    bReturnQueued = false;
     UWorld* World = nullptr;
     for (auto It = SuppliedDefenders.begin(); It != SuppliedDefenders.end();)
     {
         // A defender destroyed this tick (its post's force kill) is still readable until garbage collection.
         AFortAIPawn* Defender = It->Defender.Get(true);
         ABuildingTrapDefender* Trap = It->Trap.Get();
-        if (Defender && Trap && !Defender->IsPendingKill() && static_cast<AFortAIPawn*>(Trap->DefenderPawn) == Defender)
+        if (Defender && Trap && reinterpret_cast<const AActor*>(Defender) != EndingDefender && !Defender->IsPendingKill()
+            && static_cast<AFortAIPawn*>(Trap->DefenderPawn) == Defender)
         {
             World = World ? World : Trap->GetWorld();
             ++It;
@@ -233,10 +262,35 @@ void ABuildingTrapDefender::ReturnLeftDefendersItems()
         }
         It = SuppliedDefenders.erase(It);
     }
-    if (!SuppliedDefenders.empty())
+    return World;
+}
+
+DEFINE_FUNCTION(ABuildingTrapDefender::execHandleDefenderPawnOrItemSet)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    // The post set its DefenderPawn (or its item): a defender it no longer names has left it. Not while the engine shuts
+    // down, when each post's EndPlay lets its defender go: the timer this replaced stopped with the world.
+    if (!Natives::GIsRequestingExit || !*Natives::GIsRequestingExit)
     {
-        QueueReturnCheck(World);
+        ReturnLeftDefendersItems();
     }
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(ABuildingTrapDefender::execHandleDefenderEndPlay)
+{
+    P_GET_OBJECT(AActor, Z_Param_Actor);
+    P_GET_PROPERTY(UByteProperty, Z_Param_EndPlayReason);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    // Destroyed (killed, unsummoned once it has teleported out, force-killed with its post): it has left its post. A
+    // level or world going away gives nothing back, as the timer this replaced stopped with the world.
+    if (Z_Param_EndPlayReason == EEndPlayReason::Destroyed)
+    {
+        ReturnLeftDefendersItems(Z_Param_Actor);
+    }
+    P_NATIVE_END;
 }
 
 DEFINE_FUNCTION(ABuildingTrapDefender::execSupplyDefender)
@@ -277,4 +331,11 @@ void ABuildingTrapDefender::HookNatives()
         Function->SetNativeFunc(Native);
         Log::Info(L"Hook {}: native", Name);
     }
+
+    // The post's DefenderPawnOrItemSet and its defender's OnEndPlay call these on the post, through the post's class's
+    // FuncMap (a Trap_Floor_Defender_Master_C has no functions of these names), with their signatures' parameters.
+    const UFunction* PawnOrItemSetSignature = Finder::ResolveClassFunctionMap() && HasDefenderPawnOrItemSet() ? DelegateSignature(StaticClass(), L"DefenderPawnOrItemSet") : nullptr;
+    const UFunction* EndPlaySignature = PawnOrItemSetSignature && AActor::HasOnEndPlay() ? DelegateSignature(AActor::StaticClass(), L"OnEndPlay") : nullptr;
+    HandleDefenderPawnOrItemSetFunction = EndPlaySignature ? StaticClass()->AddNativeFunction(L"HandleDefenderPawnOrItemSet", &execHandleDefenderPawnOrItemSet, PawnOrItemSetSignature) : nullptr;
+    HandleDefenderEndPlayFunction = HandleDefenderPawnOrItemSetFunction ? StaticClass()->AddNativeFunction(L"HandleDefenderEndPlay", &execHandleDefenderEndPlay, EndPlaySignature) : nullptr;
 }

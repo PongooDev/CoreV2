@@ -8623,6 +8623,9 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff
     // lea rax, [rcx+0D0h]; ret) goes to the item entries' same-item test (mov rdx, rax; mov rcx, rdi; call 0xF01CF0),
     // then the world item to its regen cooldown test (mov rcx, rbx; movzx r15d, al; call 0xF46890: xorps xmm0, xmm0;
     // comiss xmm0, [rcx+1A8h]; setb al; ret). Returns the same-item test and the cooldown's offset.
+    // 5.40's stack limit (0xF73560) loads the new entry from its stack argument between the two: after the entry getter
+    // (0x806050) comes "mov rbx, [rbp+30h]; mov rdx, rax; mov rcx, rbx; call 0xF91F30" (0xF73961), then the cooldown test
+    // (0xF9F3C0, +0x1A8). That form is only looked for after 5.0's.
     const auto FindInlinedCanStackWith = [WorldItemEntryOffset](uintptr_t Function) -> std::pair<uintptr_t, ptrdiff_t>
     {
         const uintptr_t FunctionEnd = WorldItemEntryOffset > 0 && IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
@@ -8630,13 +8633,24 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff
         {
             const bool bEntryGetter = Byte(Target) == 0x48 && Byte(Target + 1) == 0x8D && Byte(Target + 2) == 0x81
                 && *reinterpret_cast<const int32_t*>(Target + 3) == WorldItemEntryOffset && Byte(Target + 7) == 0xC3;
+            const auto IsSameItemCall = [FunctionEnd](uintptr_t Move)
+            {
+                return Move + 11 <= FunctionEnd && Byte(Move) == 0x48 && Byte(Move + 1) == 0x8B && Byte(Move + 2) == 0xD0 && Byte(Move + 6) == 0xE8;
+            };
+            // mov r64, [rbp+disp8] (48 8B, ModRM mod 01 and rm rbp), into neither rax nor rdx.
+            const auto IsStackArgumentLoad = [FunctionEnd](uintptr_t Load)
+            {
+                const uint8_t ModRm = Byte(Load + 2);
+                return Load + 4 <= FunctionEnd && Byte(Load) == 0x48 && Byte(Load + 1) == 0x8B && (ModRm & 0xC7) == 0x45 && (ModRm & 0x38) != 0x00 && (ModRm & 0x38) != 0x10;
+            };
             const uintptr_t Next = Call + 5;
-            if (!bEntryGetter || Next + 11 > FunctionEnd || Byte(Next) != 0x48 || Byte(Next + 1) != 0x8B || Byte(Next + 2) != 0xD0 || Byte(Next + 6) != 0xE8)
+            const uintptr_t Move = !bEntryGetter ? 0 : IsSameItemCall(Next) ? Next : IsStackArgumentLoad(Next) && IsSameItemCall(Next + 4) ? Next + 4 : 0;
+            if (!Move)
             {
                 continue;
             }
-            const uintptr_t SameItem = Finder::RelativeTarget(Next + 6, 1, 5);
-            const uintptr_t CooldownCall = FindRawCall(Next + 11, std::min(Next + 11 + 0x10, FunctionEnd));
+            const uintptr_t SameItem = Finder::RelativeTarget(Move + 6, 1, 5);
+            const uintptr_t CooldownCall = FindRawCall(Move + 11, std::min(Move + 11 + 0x10, FunctionEnd));
             const uintptr_t Cooldown = CooldownCall ? Finder::RelativeTarget(CooldownCall, 1, 5) : 0;
             if (IsInText(SameItem) && Finder::FunctionStart(SameItem) == SameItem && Cooldown && Finder::BodyIs(Cooldown, { 0x0F, 0x57, 0xC0, 0x0F, 0x2F, 0x81 })
                 && Byte(Cooldown + 10) == 0x0F && Byte(Cooldown + 11) == 0x92 && Byte(Cooldown + 12) == 0xC0 && Byte(Cooldown + 13) == 0xC3)
@@ -13670,8 +13684,10 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         // is taken there when nothing better was found. CL-4225813's callee (0x110D140, no .pdata) is "jmp 0x4B70E1": its
         // packer moved the body back into the first section, below the stub, so it is neither in moved code nor a function
         // start; a jmp whose hops all stay in executable code (Finder::Unthunk only follows those) is taken as well.
+        // A B2 01 pair inside another instruction has no callee: 5.40's ExitAircraft (0xC21350) has one in the call at
+        // 0xC21524 (E8 77 8B B2 01), before the real site (0xC21603), and reading its null target crashed the server (#386).
         const bool bAfterCast = Byte(Site - 8) == 0x84 && Byte(Site - 7) == 0xC0 && Byte(Site - 6) == 0x0F && Byte(Site - 5) == 0x84;
-        const bool bJumpsToCode = Byte(Target) == 0xE9 && Finder::Unthunk(Target) != Target;
+        const bool bJumpsToCode = Target && Byte(Target) == 0xE9 && Finder::Unthunk(Target) != Target;
         if (!CastTarget && bCallShape && bAfterCast && (IsInMovedCode(Finder::Unthunk(Target)) || Finder::FunctionStart(Target) == Target || bJumpsToCode))
         {
             CastTarget = Target;

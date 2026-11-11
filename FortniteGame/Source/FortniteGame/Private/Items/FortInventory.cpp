@@ -300,16 +300,15 @@ bool AFortInventory::CanStackWith(UFortWorldItem* Item, const FFortItemEntry& It
             ? reinterpret_cast<bool (*)(UFortWorldItem*, const FFortItemEntry&, float)>(Natives::AFortInventory_CanStackWith)(Item, ItemEntry, MaxDurability)
             : Natives::AFortInventory_CanStackWith(this, Item, ItemEntry, MaxDurability);
     }
-    if (!Natives::FFortItemEntry_IsSameItem || Natives::UFortWorldItem_BaseRegenCooldown < 0)
-    {
-        return false;
-    }
-
     // 4.5's CanStackWith (0xD7A520), which 5.0 inlines into its stack limit (CL-4204761 0xF142B0): the same item as the
     // stack's, a stack that isn't regenerating, and for an item with durability, a stack at the full durability.
+    // Without the build's pieces (the overflow checks weren't found, 5.40 #386) the same item is the same definition at
+    // the same level, and the regen cooldown can't be read: an item still stacks instead of never going in.
     const FFortItemEntry& StackEntry = static_cast<FFortItemEntry&>(Item->ItemEntry);
-    const bool bSameItem = Natives::FFortItemEntry_IsSameItem(ItemEntry, StackEntry);
-    const float BaseRegenCooldown = *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(Item) + Natives::UFortWorldItem_BaseRegenCooldown);
+    const bool bPieces = Natives::FFortItemEntry_IsSameItem && Natives::UFortWorldItem_BaseRegenCooldown >= 0;
+    const bool bSameItem = bPieces ? Natives::FFortItemEntry_IsSameItem(ItemEntry, StackEntry)
+        : static_cast<UFortItemDefinition*>(StackEntry.ItemDefinition) == static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition) && StackEntry.Level == ItemEntry.Level;
+    const float BaseRegenCooldown = bPieces ? *reinterpret_cast<const float*>(reinterpret_cast<const uint8_t*>(Item) + Natives::UFortWorldItem_BaseRegenCooldown) : 0.0f;
     const UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
     const bool bHasDurability = ItemDefinition && ItemDefinition->ItemHasDurability();
     return bSameItem && !(BaseRegenCooldown > 0.0f) && (!bHasDurability || MaxDurability == StackEntry.Durability);
@@ -320,9 +319,16 @@ int32_t AFortInventory::AddItemStacks(const FFortItemEntry& ItemEntry, int32_t C
 {
 #if WITH_SERVER_CODE
     UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
-    if (!ItemDefinition || Count <= 0 || (!Natives::AFortInventory_CanStackWith && !Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset(), UFortWorldItem::ItemEntryOffset())))
+    if (!ItemDefinition || Count <= 0)
     {
         return 0;
+    }
+    // The overflow checks are found on the first add. A build whose checks aren't found still gets its items (5.40's
+    // starting items, pickaxe and pickups went nowhere, #386): CanStackWith and GetMaxStackSize fall back to the item
+    // definition's own rules, GetOverflowAmount and IsBackpackFull to no backpack limit.
+    if (!Natives::AFortInventory_CanStackWith)
+    {
+        Finder::ResolveBackpackLive(AFortPickup::PrimaryPickupItemEntryOffset(), UFortWorldItem::ItemEntryOffset());
     }
 
     const int32_t MaxStackSize = GetMaxStackSize(ItemDefinition);

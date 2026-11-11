@@ -18,6 +18,7 @@ class AFortPlayerStateAthena;
 class UAthenaPlayerMatchReport;
 class UFortHero;
 class UFortHeroType;
+class UFortWeaponItemDefinition;
 struct FAthenaMatchStats;
 struct FAthenaMatchTeamStats;
 struct FAthenaRewardResult;
@@ -133,6 +134,12 @@ public:
     // 1.11: the screen's place and total players, out of FAthenaMatchStats.
     DefineUFunction(ClientSendTeamStatsForPlayer)
     DefineUFunction(ClientSendEndBattleRoyaleMatchForPlayer)
+    // The winning team's notice (3.0 on): the game's team placement (5.10 0xBDCD70, "Team %d placed %d!", from
+    // CheckWinConditionLastManStanding 0xBB69B0) sends it to each player of the team, alive or out, with place 1. From
+    // 4.4 it takes the finisher's pawn, its weapon and the death cause: its _Implementation (5.10 0xBF1560) plays
+    // PlayWinEffects with a finisher's pawn, and GameState->OnWinnerAnnounced (the victory slow motion) when that pawn
+    // is the player's own.
+    DefineUFunction(ClientNotifyTeamWon)
 
     static bool HasMatchReport() { return Member_MatchReport.IsAvailable(); }
     static bool HasSquadMembers() { return Member_SquadMembers.IsAvailable(); }
@@ -141,6 +148,9 @@ public:
     void ClientSendTeamStatsForPlayer(const FAthenaMatchTeamStats& TeamStats);
     // Result null: no rewards (MCP's EndBattleRoyaleGame, which answered with them, has no caller left).
     void ClientSendEndBattleRoyaleMatchForPlayer(bool bSuccess, const FAthenaRewardResult* Result);
+    // Whether the build's ClientNotifyTeamWon takes the finisher (4.4 on).
+    static bool HasClientNotifyTeamWonFinisher();
+    void ClientNotifyTeamWon(APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause);
 
     // Whether the controller plays Battle Royale heroes only: 1.7.2's DefaultHeroes, or 1.8's loadout's.
     // Whether the build has DefaultHeroes and the controller holds any (1.7.2).

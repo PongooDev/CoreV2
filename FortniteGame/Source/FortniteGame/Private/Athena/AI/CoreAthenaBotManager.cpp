@@ -2460,7 +2460,7 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
         // The elimination's finisher (the killer's pawn and the weapon it holds) and the death cause the bot's death
         // stored, as RemoveFromAlivePlayers hands a player's to the game's check: the winner's ClientNotifyWon plays its
         // win effects (the victory music and the slow motion, Athena_PlayerController's PlayWinEffects) only with a
-        // finisher's pawn (5.10 0xBF1560, CoreV2 #376).
+        // finisher's pawn (5.10 0xBF1960, ClientNotifyTeamWon's 0xBF1560 the same; CoreV2 #376).
         AFortPlayerPawn* FinisherPawn = KillerState && KillerState != State ? KillerState->GetCurrentPawn() : nullptr;
         AFortWeapon* FinishingWeapon = FinisherPawn ? static_cast<AFortWeapon*>(FinisherPawn->CurrentWeapon) : nullptr;
         const uint8_t DeathCause = State && AFortPlayerStateAthena::HasEliminator() && AFortPlayerStateAthena::HasToDeathCause()
@@ -2731,6 +2731,47 @@ void FCoreAthenaBotManager::SetPlayersTeamPlace(uint8_t Team, int32_t Place)
 #endif
 }
 
+void FCoreAthenaBotManager::NotifyTeamWon(uint8_t Team, AFortPlayerControllerAthena* Winner, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause)
+{
+#if WITH_SERVER_CODE
+    // 5.10 0xBDCD70's place 1: each player state of the game state's PlayerArray on the team whose owner is a player's
+    // controller takes the place (SetTeamPlace), the time alive (one still in has none yet) and ClientNotifyTeamWon
+    // with the win's finisher. The winner had them from StartEndGamePhase.
+    AFortGameModeAthena* Athena = GetGameMode();
+    AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+    if (!GameState)
+    {
+        return;
+    }
+    const TArray<AFortPlayerControllerAthena*>& Alive = Athena->AlivePlayers;
+    for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+    {
+        AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+        if (!AthenaState || static_cast<uint8_t>(AthenaState->TeamIndex) != Team || FindBot(reinterpret_cast<const UObject*>(AthenaState)))
+        {
+            continue;
+        }
+        AFortPlayerControllerAthena* Player = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(AthenaState->GetOwner()));
+        if (!Player || Player == Winner)
+        {
+            continue;
+        }
+        if (Natives::AFortPlayerControllerAthena_SetTeamPlace)
+        {
+            Natives::AFortPlayerControllerAthena_SetTeamPlace(Player, 1);
+        }
+        AthenaState->Place = 1;
+        if (Natives::AFortPlayerStateAthena_GetSecondsAlive && std::find(Alive.begin(), Alive.end(), Player) != Alive.end())
+        {
+            AthenaState->SecondsAlive = Natives::AFortPlayerStateAthena_GetSecondsAlive(AthenaState);
+        }
+        AthenaState->ForceNetUpdate();
+        Player->ClientNotifyTeamWon(FinisherPawn, FinishingWeapon, DeathCause);
+        Log::Info(L"Battle Royale bots: {} wins with its team", Player->GetName().ToStdString());
+    }
+#endif
+}
+
 void FCoreAthenaBotManager::UpdatePlayerTeamBots(float Now)
 {
 #if WITH_SERVER_CODE
@@ -2875,6 +2916,19 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding(APawn* FinisherPawn
         if (HumansLeft > 0)
         {
             AFortPlayerControllerAthena* Winner = Alive[0];
+            // A team's win (5.10 0xBB69B0: the playlist's MaxTeamSize above 1, TeamsLeft down to 1) names the killer's
+            // player state its winner when it is on the winning team, else the first alive player's; the game state's
+            // WinningPlayerState is the one StartEndGamePhase is handed here.
+            const bool bTeamWin = GetTeamSize() > 1 && Winner;
+            AFortPlayerControllerAthena* Finisher = bTeamWin && FinisherPawn ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(FinisherPawn->Controller)) : nullptr;
+            AFortPlayerStateAthena* FinisherState = Finisher ? AthenaStateOf(reinterpret_cast<AController*>(Finisher)) : nullptr;
+            AFortPlayerStateAthena* WinnerState = Winner ? AthenaStateOf(reinterpret_cast<AController*>(Winner)) : nullptr;
+            if (FinisherState && WinnerState && static_cast<uint8_t>(FinisherState->TeamIndex) == static_cast<uint8_t>(WinnerState->TeamIndex)
+                && std::find(Alive.begin(), Alive.end(), Finisher) != Alive.end())
+            {
+                Winner = Finisher;
+                WinnerState = FinisherState;
+            }
             Log::Info(L"Battle Royale bots: {} is the last team standing, it wins", Winner ? Winner->GetName().ToStdString() : std::wstring());
             // Its bots (a player's team filled with bots) win with it.
             for (const auto& Bot : PlayerBots)
@@ -2887,6 +2941,15 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding(APawn* FinisherPawn
                 }
             }
             Natives::AFortGameModeAthena_StartEndGamePhase(Athena, Winner, FinisherPawn, FinishingWeapon, DeathCause);
+            // StartEndGamePhase is the solo win: only the winner hears of it (ClientNotifyWon). The game's team placement
+            // (5.10 0xBDCD70) tells every player of the winning team, alive or out (CoreV2 #378: a duo's other player had
+            // no Victory Royale and kept moving); their clients then play the slow motion from the game state's
+            // OnRep_WinningPlayerState (0xBCF480: a winner's player state that isn't their own), the finisher's from
+            // its notice. From 4.4, where the notice takes the finisher.
+            if (bTeamWin && WinnerState && AFortPlayerControllerAthena::HasClientNotifyTeamWonFinisher())
+            {
+                NotifyTeamWon(static_cast<uint8_t>(WinnerState->TeamIndex), Winner, FinisherPawn, FinishingWeapon, DeathCause);
+            }
             return;
         }
         bool bPlayersTeamWon = false;

@@ -604,6 +604,21 @@ void AFortPlayerControllerAthena::ClientSendEndBattleRoyaleMatchForPlayer(bool b
     }
 }
 
+bool AFortPlayerControllerAthena::HasClientNotifyTeamWonFinisher()
+{
+    UFunction* Function = FindStaticFunction_ClientNotifyTeamWon();
+    return Function && Reflection::FParams(Function).Has(L"FinisherPawn");
+}
+
+void AFortPlayerControllerAthena::ClientNotifyTeamWon(APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause)
+{
+    Reflection::FParams Params(FindStaticFunction_ClientNotifyTeamWon(), true);
+    if (Params.Set(L"FinisherPawn", FinisherPawn) && Params.Set(L"FinishingWeapon", FinishingWeapon) && Params.Set(L"DeathCause", DeathCause))
+    {
+        Params.Call(this);
+    }
+}
+
 void AFortPlayerControllerAthena::HookCallSites()
 {
 #if WITH_SERVER_CODE

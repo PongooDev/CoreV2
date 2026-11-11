@@ -257,6 +257,8 @@ private:
     void ReplicateHealthAndShield();
     // A player's team is out: its players' place (the game's SetTeamPlace on one of them, else their player states).
     void SetPlayersTeamPlace(uint8_t Team, int32_t Place);
+    // A team's win: its players other than Winner (whom StartEndGamePhase told) take place 1 and ClientNotifyTeamWon.
+    void NotifyTeamWon(uint8_t Team, AFortPlayerControllerAthena* Winner, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause);
     void ReadPlaylistTeams();
     int32_t MatchCapacity() const;
     // One bot more, a player's team first (TeamSlots), else on a team of its own while fewer than Wanted are.

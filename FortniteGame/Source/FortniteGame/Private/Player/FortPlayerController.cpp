@@ -434,6 +434,12 @@ void AFortPlayerController::Possess(APawn* InPawn)
         UFortCheatManager::ReapplyBoosts(this);
     }
 
+    // 5.40: the pawn going down (its StartDBNO's OnPlayerStartDBNO) drops what drops on DBNO.
+    if (AFortPlayerPawnAthena* AthenaPawn = Role == ROLE_Authority ? Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(InPawn)) : nullptr)
+    {
+        AthenaPawn->BindPlayerStartDBNO();
+    }
+
     AFortPlayerState* FortPlayerState = Role == ROLE_Authority && MyFortPawn ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
     if (FortPlayerState && !FortPlayerState->bHasStartedPlaying)
     {

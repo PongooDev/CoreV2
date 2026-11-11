@@ -5254,6 +5254,21 @@ namespace
         {
             Log::Warning(L"Finder: IDelegateInstance::GetHandle not found in the MCP request delegate (slot {}), keeping slot {}", GetHandleIndex, Natives::IDelegateInstance_GetHandleIndex);
         }
+        // The handle the request's delegate gets: movups [frame+10h], xmm; call FDelegateHandle::GenerateNewID (5.40
+        // 0x120D62A calling 0x1583270: lock xadd on the engine's counter). Core's own instances take their handles from it
+        // too (FDelegateHandle::GenerateNewID), so an engine Remove(Handle) never matches one of Core's in a delegate both
+        // bind. Not found keeps Core's own counter.
+        const uintptr_t HandleStore = Abort ? FindInstruction(Abort, AbortEnd, { 0x0F, 0x11, -1, 0x10, 0xE8 }) : 0;
+        const uintptr_t GenerateNewID = HandleStore ? Finder::RelativeTarget(HandleStore + 4, 1, 5) : 0;
+        if (IsInText(GenerateNewID))
+        {
+            Natives::FDelegateHandle_GenerateNewID = reinterpret_cast<decltype(Natives::FDelegateHandle_GenerateNewID)>(GenerateNewID);
+            Log::Info(L"Finder: FDelegateHandle::GenerateNewID 0x{:X}, Core's delegate handles come from the engine's counter", GenerateNewID - Finder::ImageBase());
+        }
+        else
+        {
+            Log::Warning(L"Finder: FDelegateHandle::GenerateNewID not found in the MCP request; Core's delegate handles come from its own counter");
+        }
         uintptr_t CreateCopy = 0;
         for (int32_t Index = 0; VTable && Index < 0x10 && !CreateCopy; ++Index)
         {
@@ -5580,10 +5595,150 @@ bool Finder::ResolveScriptFrame()
 
     Natives::FFrame_Code = Code;
     Natives::FFrame_Object = Object;
+    // Epic's FFrame declares Node, Object, Code, Locals in a row (5.40: +0x10, +0x18, +0x20, +0x28).
+    Natives::FFrame_Locals = Code + static_cast<ptrdiff_t>(sizeof(void*));
     Natives::FFrame_PropertyChainForCompiledIn = PropertyChain;
     Natives::FFrame_Step = reinterpret_cast<decltype(Natives::FFrame_Step)>(Step);
     Natives::FFrame_StepExplicitProperty = reinterpret_cast<decltype(Natives::FFrame_StepExplicitProperty)>(StepExplicitProperty);
-    Log::Info(L"Finder: FFrame Object +0x{:X}, Code +0x{:X}, PropertyChainForCompiledIn +0x{:X}", Object, Code, PropertyChain);
+    Log::Info(L"Finder: FFrame Object +0x{:X}, Code +0x{:X}, Locals +0x{:X}, PropertyChainForCompiledIn +0x{:X}", Object, Code, Natives::FFrame_Locals, PropertyChain);
+    return true;
+}
+
+namespace
+{
+    // Looks Name up in what may be a TMap<FName, UFunction*> at Map the way TSet::FindId does (the hash is the FName's
+    // ComparisonIndex + Number, the elements { Key, Value, HashNextId, HashIndex } 0x18 bytes apart), checking each read
+    // against the map's own counts first. Returns its value, or null; a read that faults (not a map) is null too.
+    UFunction* ProbeFunctionMap(const uint8_t* Map, uint64_t Name)
+    {
+        __try
+        {
+            const uint8_t* const Data = *reinterpret_cast<const uint8_t* const*>(Map);
+            const int32_t ArrayNum = *reinterpret_cast<const int32_t*>(Map + 0x08);
+            const int32_t ArrayMax = *reinterpret_cast<const int32_t*>(Map + 0x0C);
+            const int32_t NumFreeIndices = *reinterpret_cast<const int32_t*>(Map + 0x34);
+            const int32_t* const InlineHash = reinterpret_cast<const int32_t*>(Map + 0x38);
+            const int32_t* const SecondaryHash = *reinterpret_cast<const int32_t* const*>(Map + 0x40);
+            const int32_t HashSize = *reinterpret_cast<const int32_t*>(Map + 0x48);
+            if (!Data || ArrayNum <= 0 || ArrayNum > ArrayMax || ArrayMax > 0x10000 || NumFreeIndices < 0 || NumFreeIndices > ArrayNum
+                || HashSize <= 0 || HashSize > 0x10000 || (HashSize & (HashSize - 1)) != 0 || (HashSize > 1) != (SecondaryHash != nullptr))
+            {
+                return nullptr;
+            }
+            const int32_t* const Hash = SecondaryHash ? SecondaryHash : InlineHash;
+            const uint32_t KeyHash = static_cast<uint32_t>(Name) + static_cast<uint32_t>(Name >> 32);
+            int32_t Id = Hash[KeyHash & (HashSize - 1)];
+            for (int32_t Steps = 0; Id != -1 && Steps <= ArrayNum; ++Steps)
+            {
+                if (Id < 0 || Id >= ArrayNum)
+                {
+                    return nullptr;
+                }
+                const uint8_t* const Element = Data + Id * 0x18;
+                if (*reinterpret_cast<const uint64_t*>(Element) == Name)
+                {
+                    return *reinterpret_cast<UFunction* const*>(Element + 0x08);
+                }
+                Id = *reinterpret_cast<const int32_t*>(Element + 0x10);
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+        return nullptr;
+    }
+
+    // Whether every function Class declares (its own Children, delegate signatures aside) is at Offset's map under its name.
+    bool HasFunctionMapAt(const UClass* Class, int32_t Offset)
+    {
+        const uint8_t* const Map = reinterpret_cast<const uint8_t*>(Class) + Offset;
+        int32_t Functions = 0;
+        for (UField* Field = Class ? Class->Children : nullptr; Field; Field = Field->Next)
+        {
+            const UClass* FieldClass = Field->GetClass();
+            if (!FieldClass->HasAnyCastFlag(CASTCLASS_UFunction) || FieldClass->HasAnyCastFlag(CASTCLASS_UDelegateFunction))
+            {
+                continue;
+            }
+            FName Name = Field->GetFName();
+            uint64_t Key = 0;
+            memcpy(&Key, &Name, sizeof(Key));
+            if (ProbeFunctionMap(Map, Key) != reinterpret_cast<UFunction*>(Field))
+            {
+                return false;
+            }
+            ++Functions;
+        }
+        return Functions >= 3;
+    }
+
+    // UFunction's NumParms, ParmsSize and ReturnValueOffset, from KismetSystemLibrary::IsValidClass (Class, then the bool
+    // return value: 2 parameters, 9 bytes, return value at +8). With a RepOffset after FunctionFlags they sit at +0x8E,
+    // +0x90 and +0x92 (ObjectLayout's defaults); 2.4.2, 3.3 and 5.40 have none and, as 21.40, have them right after
+    // FunctionFlags: +0x8C, +0x8E, +0x90 (5.40's K2_SetTimer reads ParmsSize at +0x8E, 0x2594090). Only the server reads
+    // this (Core's natives are made there); the client keeps the defaults it has always used.
+    bool DetectFunctionLayout()
+    {
+        const UObject* IsValidClass = StaticFindObject(nullptr, nullptr, L"/Script/Engine.KismetSystemLibrary:IsValidClass", false);
+        const uint8_t* const Function = reinterpret_cast<const uint8_t*>(IsValidClass);
+        const auto Matches = [Function](int32_t NumParms)
+        {
+            return Function[NumParms] == 2 && *reinterpret_cast<const uint16_t*>(Function + NumParms + 2) == 9 && *reinterpret_cast<const uint16_t*>(Function + NumParms + 4) == 8;
+        };
+        const int32_t FunctionFlags = ObjectLayout::Current.UFunction_FunctionFlags;
+        for (const int32_t NumParms : { FunctionFlags + 6, FunctionFlags + 4 })
+        {
+            if (Function && Matches(NumParms))
+            {
+                ObjectLayout::Current.UFunction_NumParms = NumParms;
+                ObjectLayout::Current.UFunction_ParmsSize = NumParms + 2;
+                ObjectLayout::Current.UFunction_ReturnValueOffset = NumParms + 4;
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+bool Finder::ResolveClassFunctionMap()
+{
+    // UClass::FuncMap, the TMap<FName, UFunction*> UClass::FindFunctionByName looks a name up in first (5.40 0x170A3F0
+    // reads it at +0x100, its super classes' cache, SuperFuncMap, at +0x150). It follows ClassDefaultObject (5.40 +0xF8).
+    // The engine finds a Blueprint delegate's function through it, so Core's natives go in it (UClass::AddNativeFunction).
+    // Checked on classes whose every own function must be in it under its name.
+    static int32_t Resolved = 0;
+    if (Resolved != 0)
+    {
+        return Resolved > 0;
+    }
+    Resolved = -1;
+
+    if (!DetectFunctionLayout())
+    {
+        Log::Error(L"Finder: UFunction's ParmsSize not found (KismetSystemLibrary::IsValidClass); Core can't bind its natives to Blueprint delegates");
+        return false;
+    }
+
+    const UClass* Classes[] = {
+        FindObject<UClass>(nullptr, L"/Script/Engine.Actor"),
+        FindObject<UClass>(nullptr, L"/Script/Engine.KismetSystemLibrary"),
+        FindObject<UClass>(nullptr, L"/Script/Engine.PlayerController"),
+    };
+    const int32_t First = ObjectLayout::Current.UClass_ClassDefaultObject + static_cast<int32_t>(sizeof(void*));
+    for (int32_t Offset = First; Offset < First + 0x60 && Resolved < 0; Offset += static_cast<int32_t>(sizeof(void*)))
+    {
+        if (std::all_of(std::begin(Classes), std::end(Classes), [Offset](const UClass* Class) { return Class && HasFunctionMapAt(Class, Offset); }))
+        {
+            ObjectLayout::Current.UClass_FuncMap = Offset;
+            Resolved = 1;
+        }
+    }
+    if (Resolved < 0)
+    {
+        Log::Error(L"Finder: UClass::FuncMap not found after ClassDefaultObject (+0x{:X}); Core can't bind its natives to Blueprint delegates", ObjectLayout::Current.UClass_ClassDefaultObject);
+        return false;
+    }
+    Log::Info(L"Finder: UClass::FuncMap at +0x{:X}, UFunction::ParmsSize at +0x{:X}: Core's natives bind to Blueprint delegates", ObjectLayout::Current.UClass_FuncMap, ObjectLayout::Current.UFunction_ParmsSize);
     return true;
 }
 

@@ -36,6 +36,12 @@ FUObjectItem* FWeakObjectPtr::Internal_GetObjectItem() const
     return ObjectItem;
 }
 
+UObject* FWeakObjectPtr::GetEvenIfUnreachable() const
+{
+    FUObjectItem* const ObjectItem = Internal_GetObjectItem();
+    return ObjectItem ? reinterpret_cast<UObject*>(ObjectItem->Object) : nullptr;
+}
+
 UObject* FWeakObjectPtr::Get(bool bEvenIfPendingKill) const
 {
     FUObjectItem* const ObjectItem = Internal_GetObjectItem();

@@ -2,6 +2,7 @@
 
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Pawns/FortPlayerPawn.h"
+#include "UObject/ScriptDelegates.h"
 #include "UObject/Stack.h"
 
 class AActor;
@@ -38,6 +39,10 @@ public:
     // report's Distance is this for a fall (the DBNO handling, 5.10 0xC11510).
     DefineUProperty(float, LastFallDistance)
     static bool HasLastFallDistance() { return Member_LastFallDistance.IsAvailable(); }
+    // From 5.40: what the pawn's StartDBNO broadcasts as it goes down (5.40 0xC688B2, after it sets bIsDBNO and before
+    // the DBNO ability's gameplay event). A Blueprint delegate without parameters.
+    DefineUProperty(FMulticastScriptDelegate, OnPlayerStartDBNO)
+    static bool HasOnPlayerStartDBNO() { return Member_OnPlayerStartDBNO.IsAvailable(); }
 
     // The death report's distance (FDeathInfo::Distance) as the DBNO handling (5.10 0xC11510) works it out: the eliminator's
     // pawn's distance (AActor::GetDistanceTo), or the fall's when the damage tags hold the falling damage tag.
@@ -50,16 +55,25 @@ public:
     void OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32_t OtherBodyIndex, bool bFromSweep, const void* SweepResult);
 
     // FortPlayerPawnAthena.cpp: the server part of AFortPlayerPawn::StartDBNO (the pawn going down), which the build cuts
-    // out: the items whose definition has bDropOnDBNO (5.40's The Getaway jewel) leave the downed pawn. The build's own
-    // StartDBNO runs first (StartDBNOHK); Core's knock for a bot (FCoreAthenaBotController::EnterDBNO) calls it too.
+    // out: the items whose definition has bDropOnDBNO (5.40's The Getaway jewel) leave the downed pawn. It runs when the
+    // build's StartDBNO broadcasts the pawn's OnPlayerStartDBNO (HandlePlayerStartDBNO); Core's knock for a bot
+    // (FCoreAthenaBotController::EnterDBNO) calls it too.
     void StartDBNO();
 
+    // Binds the pawn's OnPlayerStartDBNO to Core's HandlePlayerStartDBNO, once (AFortPlayerController::Possess: the pawn
+    // a player plays). Nothing where HookVTables added no HandlePlayerStartDBNO.
+    void BindPlayerStartDBNO();
+
     static void HookNatives();
-    // From 5.40 (UFortWorldItemDefinition's bDropOnDBNO): StartDBNO's slot, so the server part runs after the build's.
+    // From 5.40 (UFortWorldItemDefinition's bDropOnDBNO): Core's HandlePlayerStartDBNO, the native OnPlayerStartDBNO
+    // calls. Where it can't be added, StartDBNO's slot instead, so the server part runs after the build's.
     static void HookVTables();
 
 private:
     DECLARE_FUNCTION(execOnCapsuleBeginOverlap);
+    DECLARE_FUNCTION(execHandlePlayerStartDBNO);
+
+    static inline UFunction* HandlePlayerStartDBNOFunction = nullptr;
 
     static void StartDBNOHK(AFortPlayerPawnAthena* This);
     static inline void (*StartDBNOOG)(AFortPlayerPawnAthena* This) = nullptr;

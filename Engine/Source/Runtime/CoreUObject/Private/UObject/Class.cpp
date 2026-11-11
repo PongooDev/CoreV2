@@ -2,7 +2,9 @@
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectArray.h"
 #include "Finder.h"
+#include "Log.h"
 #include "Natives.h"
+#include "UObject/UObjectGlobals.h"
 
 #include <shared_mutex>
 #include <unordered_map>
@@ -130,6 +132,72 @@ void UScriptStruct::CopyScriptStruct(void* Dest, void const* Src, int32_t ArrayD
 UFunction* UClass::FindFunctionByName(FName InName, EIncludeSuperFlag::Type IncludeSuper) const
 {
     return static_cast<UFunction*>(FindField(this, InName, CASTCLASS_UFunction, IncludeSuper == EIncludeSuperFlag::IncludeSuper));
+}
+
+void UClass::AddFunctionToFunctionMap(UFunction* Function, FName FuncName)
+{
+    GetFuncMap().Add(FuncName, Function);
+}
+
+UFunction* UClass::AddNativeFunction(const wchar_t* InName, FNativeFuncPtr InPointer, const UFunction* SignatureFunction)
+{
+    const FName FunctionName(InName);
+    // Its native's parameters are read through the FFrame (P_GET_*, P_STACK.Locals).
+    if (!Finder::ResolveClassFunctionMap() || ((Natives::FFrame_Locals < 0 || !Natives::FFrame_StepExplicitProperty) && !Finder::ResolveScriptFrame()))
+    {
+        Log::Error(L"Delegates: Core's native {}::{} can't be added (UClass::FuncMap or FFrame not found)", GetName().ToStdString(), InName);
+        return nullptr;
+    }
+    if (UFunction* const* Existing = GetFuncMap().Find(FunctionName))
+    {
+        if ((*Existing)->GetNativeFunc() == InPointer)
+        {
+            return *Existing;
+        }
+        Log::Error(L"Delegates: {} already has a function named {}, Core's native isn't added", GetName().ToStdString(), InName);
+        return nullptr;
+    }
+
+    // UECodeGen_Private::ConstructUFunction: a native function, public and final as a UFUNCTION() is, outered to its class
+    // (UFunction::Invoke reads its outer as the class). Rooted: nothing else references it for the garbage collector.
+    UFunction* Function = NewObject<UFunction>(this, UFunction::StaticClass(), FunctionName, RF_Public | RF_Transient);
+    if (!Function)
+    {
+        Log::Error(L"Delegates: Core's native {}::{} couldn't be constructed", GetName().ToStdString(), InName);
+        return nullptr;
+    }
+    Function->AddToRoot();
+
+    // Its parameters are the signature's own properties (Children), so ProcessEvent sizes its frame from them, points
+    // the out parameters at the caller's (FUNC_HasOutParms) and the thunk steps through them as a compiled-in one does.
+    // DestructorLink stays empty: the frame's copies of the caller's parameters aren't destroyed twice.
+    EFunctionFlags Flags = static_cast<EFunctionFlags>(FUNC_Final | FUNC_Native | FUNC_Public);
+    if (SignatureFunction)
+    {
+        Flags = static_cast<EFunctionFlags>(Flags | (SignatureFunction->FunctionFlags & FUNC_HasOutParms));
+        Function->Children = SignatureFunction->Children;
+        Function->PropertiesSize = SignatureFunction->PropertiesSize;
+        Function->MinAlignment = SignatureFunction->MinAlignment;
+        Function->NumParms = SignatureFunction->NumParms;
+        Function->ParmsSize = SignatureFunction->ParmsSize;
+        Function->ReturnValueOffset = SignatureFunction->ReturnValueOffset;
+    }
+    else
+    {
+        Function->MinAlignment = 1;
+        Function->ReturnValueOffset = 0xFFFF;
+    }
+    Function->FunctionFlags = Flags;
+    Function->SetNativeFunc(InPointer);
+
+    // UClass::CreateLinkAndAddChildFunctionsToMap.
+    Function->Next = Children;
+    Children = Function;
+    AddFunctionToFunctionMap(Function, FunctionName);
+
+    Log::Info(L"Delegates: Core's native {}::{} added ({}, {} bytes of parameters)", GetName().ToStdString(), InName,
+        SignatureFunction ? SignatureFunction->GetName().ToStdString() : std::wstring(L"no signature"), static_cast<int32_t>(Function->ParmsSize));
+    return Function;
 }
 
 UObject* UClass::CreateDefaultObject()

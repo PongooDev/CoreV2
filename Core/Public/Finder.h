@@ -123,6 +123,9 @@ namespace Finder
     bool ResolvePropertyCPPType();
     bool ResolveScriptStructCopy();
     bool ResolveScriptFrame();
+    // UClass::FuncMap's offset (ObjectLayout UClass_FuncMap), which UClass::AddNativeFunction adds Core's natives to.
+    // Game thread, once the engine's reflection is up; false (logged once) where it isn't found.
+    bool ResolveClassFunctionMap();
     bool ResolveTextLocalizationManager();
     bool ResolvePlayerControllerConsole();
     bool ResolvePlayerControllerCheats();

@@ -75,6 +75,20 @@ class UArrayProperty : public UProperty
     DefinePropertyLayoutMember(UProperty*, Inner, UArrayProperty_Inner)
 };
 
+// A dynamic delegate (FScriptDelegate) and a BlueprintAssignable one (FMulticastScriptDelegate). SignatureFunction, the
+// delegate's __DelegateSignature, is their first member past UProperty's, as each property class's is.
+class UDelegateProperty : public UProperty
+{
+    DefineUnrealClass(UDelegateProperty, CoreUObject)
+    DefinePropertyLayoutMember(UFunction*, SignatureFunction, UObjectPropertyBase_PropertyClass)
+};
+
+class UMulticastDelegateProperty : public UProperty
+{
+    DefineUnrealClass(UMulticastDelegateProperty, CoreUObject)
+    DefinePropertyLayoutMember(UFunction*, SignatureFunction, UObjectPropertyBase_PropertyClass)
+};
+
 template <class T>
 class TFieldIterator
 {

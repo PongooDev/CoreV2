@@ -11,6 +11,7 @@
 #include "Logging/LogMacros.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 
 #include <vector>
@@ -26,10 +27,11 @@ void AFortPlayerPawnAthena::StartDBNO()
     // where one was: the build's StartDBNO (AFortPlayerPawnAthena slot 0x1BD, 0xC68250) differs from 5.30's (0xC58D50)
     // only by the OnPlayerStartDBNO broadcast (0xC688B2), no native code binds that delegate, and the DBNO ability
     // (GAB_AthenaDBNO), the jewel's (GA_Athena_Bling_Pack) and The Getaway's mutator (Mutator_BlingMode_C) drop nothing.
-    // So the drop was StartDBNO's server code, which the client build compiles out whole; Core puts it back after the
-    // build's StartDBNO. 21.40 names nothing else for it (its only drops are AFortPlayerController's
-    // DropItemsOnPawnDestruction, for EPawnDestructionReason Death and Logout). The items go as a death's do: whole
-    // stacks, each its own pickup tossed around the pawn (AFortPlayerControllerAthena::DropInventoryOnDeath).
+    // So the drop was StartDBNO's server code, which the client build compiles out whole; Core runs it from that
+    // broadcast (HandlePlayerStartDBNO, bound to each player's pawn), with bIsDBNO set and before the DBNO ability starts.
+    // 21.40 names nothing else for it (its only drops are AFortPlayerController's DropItemsOnPawnDestruction, for
+    // EPawnDestructionReason Death and Logout). The items go as a death's do: whole stacks, each its own pickup tossed
+    // around the pawn (AFortPlayerControllerAthena::DropInventoryOnDeath).
     if (Role != ROLE_Authority || !bIsDBNO || !UFortWorldItemDefinition::HasDropOnDBNO())
     {
         return;
@@ -88,6 +90,25 @@ void AFortPlayerPawnAthena::StartDBNO()
 #endif
 }
 
+DEFINE_FUNCTION(AFortPlayerPawnAthena::execHandlePlayerStartDBNO)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerPawnAthena*>(Context)->StartDBNO();
+    P_NATIVE_END;
+}
+
+void AFortPlayerPawnAthena::BindPlayerStartDBNO()
+{
+#if WITH_SERVER_CODE
+    if (HandlePlayerStartDBNOFunction && Role == ROLE_Authority)
+    {
+        FMulticastScriptDelegate& Delegate = OnPlayerStartDBNO;
+        Delegate.AddUniqueDynamic(this, HandlePlayerStartDBNOFunction->GetFName());
+    }
+#endif
+}
+
 void AFortPlayerPawnAthena::StartDBNOHK(AFortPlayerPawnAthena* This)
 {
     StartDBNOOG(This);
@@ -101,6 +122,21 @@ void AFortPlayerPawnAthena::HookVTables()
     {
         return;
     }
+
+    // The build's StartDBNO broadcasts the pawn's OnPlayerStartDBNO (ProcessMulticastDelegate, 5.40 0x2ECA90), which
+    // calls each bound UFunction through ProcessEvent: Core's HandlePlayerStartDBNO, on the pawn's class, runs the server
+    // part from there. Each player's pawn binds it as the player gets it (BindPlayerStartDBNO).
+    const UProperty* Property = HasOnPlayerStartDBNO() ? StaticClass()->FindPropertyByName(FName(L"OnPlayerStartDBNO")) : nullptr;
+    const UFunction* Signature = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+        ? static_cast<UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+    HandlePlayerStartDBNOFunction = Signature ? StaticClass()->AddNativeFunction(L"HandlePlayerStartDBNO", &execHandlePlayerStartDBNO, Signature) : nullptr;
+    if (HandlePlayerStartDBNOFunction)
+    {
+        return;
+    }
+
+    // Without it (no OnPlayerStartDBNO, or Core can't add a native to the class): StartDBNO's slot, the build's first.
+    Log::Warning(L"DBNO: OnPlayerStartDBNO can't call Core's HandlePlayerStartDBNO, so AFortPlayerPawn::StartDBNO's slot runs the drop");
     const int32_t Index = Finder::StartDBNOIndex(IsDBNOOffset());
     UObject* PawnDefault = Index >= 0 && StaticClass() ? StaticClass()->GetDefaultObject(false) : nullptr;
     void** PawnVTable = PawnDefault ? *reinterpret_cast<void***>(PawnDefault) : nullptr;

@@ -201,6 +201,29 @@ public:
         ArrayNum -= Count;
     }
 
+    // Epic's RemoveAtSwap: the last elements move into the hole, so the order isn't kept (elements relocate bitwise, as
+    // UE's containers relocate them).
+    void RemoveAtSwap(int32_t Index, int32_t Count = 1)
+    {
+        if (Count <= 0)
+        {
+            return;
+        }
+
+        for (int32_t Removed = Index; Removed < Index + Count; ++Removed)
+        {
+            Data[Removed].~T();
+        }
+
+        const int32_t NumElementsAfterHole = ArrayNum - (Index + Count);
+        const int32_t NumElementsToMoveIntoHole = Count < NumElementsAfterHole ? Count : NumElementsAfterHole;
+        if (NumElementsToMoveIntoHole > 0)
+        {
+            memcpy(static_cast<void*>(Data + Index), Data + (ArrayNum - NumElementsToMoveIntoHole), sizeof(T) * NumElementsToMoveIntoHole);
+        }
+        ArrayNum -= Count;
+    }
+
     void Reset()
     {
         for (int32_t Index = 0; Index < ArrayNum; ++Index)

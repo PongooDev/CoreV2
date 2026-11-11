@@ -292,6 +292,9 @@ static void InstallHooks()
             FCommandLine::AddSwitch(L"noreplays");
         }
         UGameEngine::SetServerTickRate();
+        // Where Core's natives go for the game's Blueprint delegates to call (UClass::AddNativeFunction), before the
+        // HookVTables and HookNatives below add theirs.
+        Finder::ResolveClassFunctionMap();
         AFortGameModeZone::HookVTables();
         AFortGameModeAthena::HookVTables();
         UFortVisibilityComponent::HookVTables();

@@ -810,6 +810,9 @@ namespace Natives
     inline int32_t (*UFortAISpawnGroup_GetSpawnGroupCost)(void* SpawnGroup, const void* Upgrade, float DifficultyLevel, int32_t NumPlayers) = nullptr;
     inline void (*FFortAISpawnGroupUpgrade_PickPawnUpgrade)(const void* Upgrade, const void* EnemyTags, int32_t NumPlayers, void* OutPawnUpgrade) = nullptr;
     inline ptrdiff_t FFrame_Code = -1;
+    // FFrame::Locals, right after Code (Epic's FFrame: Node, Object, Code, Locals): the frame ProcessEvent copied a native's
+    // parameters into.
+    inline ptrdiff_t FFrame_Locals = -1;
     inline ptrdiff_t FFrame_PropertyChainForCompiledIn = -1;
     inline ptrdiff_t UChannel_NumOutRec = -1;
     inline ptrdiff_t UActorChannel_RelevantTime = -1;

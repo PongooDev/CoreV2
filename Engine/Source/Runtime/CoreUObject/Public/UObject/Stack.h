@@ -58,6 +58,9 @@ struct FFrame
 {
     DefineNativeMember(UObject*, Object, FFrame_Object)
     DefineNativeMember(uint8_t*, Code, FFrame_Code)
+    // The frame's local variables; a native's parameters, which ProcessEvent copied in (a delegate's: its signature's
+    // parameter struct, as the broadcast passed it).
+    DefineNativeMember(uint8_t*, Locals, FFrame_Locals)
     DefineNativeMember(UField*, PropertyChainForCompiledIn, FFrame_PropertyChainForCompiledIn)
 
 public:

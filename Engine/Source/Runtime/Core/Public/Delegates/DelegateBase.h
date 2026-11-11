@@ -4,6 +4,7 @@
 #include "HAL/UnrealMemory.h"
 
 #include <cstddef>
+#include <cstring>
 
 struct alignas(16) FAlignedInlineDelegateType
 {
@@ -67,6 +68,15 @@ public:
     IDelegateInstance* GetDelegateInstanceProtected() const
     {
         return DelegateSize() ? static_cast<IDelegateInstance*>(GetAllocation()) : nullptr;
+    }
+
+    // FDelegateBase's move constructor (DelegateAllocator.MoveToEmpty, then DelegateSize), into Destination, an element of
+    // an engine invocation list: the build's BuildSize() bytes, with the instance whether it is inline or allocated (UE's
+    // containers relocate delegates bitwise, and so does this). This delegate is left empty.
+    void RelocateTo(void* Destination)
+    {
+        memcpy(Destination, Storage, BuildSize());
+        memset(Storage, 0, sizeof(Storage));
     }
 
     void* Allocate(int32_t Size)

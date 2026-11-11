@@ -25,6 +25,8 @@ struct FWeakObjectPtr
     }
 
     UObject* Get(bool bEvenIfPendingKill = false) const;
+    // The object while its slot still holds it, even unreachable (being garbage collected).
+    UObject* GetEvenIfUnreachable() const;
 
     bool IsValid(bool bEvenIfPendingKill = false) const
     {

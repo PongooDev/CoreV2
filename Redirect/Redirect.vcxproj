@@ -137,7 +137,11 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Containers\UnrealString.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\Delegate.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateBase.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateInstanceInterface.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateInstancesImpl.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateSignatureImpl.inl" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\IDelegateInstance.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\MulticastDelegateBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\IConsoleManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\Platform.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformMisc.h" />

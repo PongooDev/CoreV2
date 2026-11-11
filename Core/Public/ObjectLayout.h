@@ -19,7 +19,13 @@ struct FObjectLayout
     int32_t UStruct_MinAlignment = 0x44;
     int32_t UClass_ClassCastFlags = 0xB8;
     int32_t UClass_ClassDefaultObject = 0x100;
+    // TMap<FName, UFunction*> FuncMap, after ClassDefaultObject (5.40 +0x100): -1 until Finder::ResolveClassFunctionMap.
+    int32_t UClass_FuncMap = -1;
     int32_t UFunction_FunctionFlags = 0x88;
+    // NumParms, ParmsSize and ReturnValueOffset after a RepOffset (+0x8C), as Core has always read them. 2.4.2, 3.3 and
+    // 5.40 have no RepOffset (+0x8C, +0x8E, +0x90, as 21.40): the server reads which from the build before it makes a
+    // UFunction of its own (Finder::ResolveClassFunctionMap); the client keeps these.
+    int32_t UFunction_NumParms = 0x8E;
     int32_t UFunction_ParmsSize = 0x90;
     int32_t UFunction_ReturnValueOffset = 0x92;
     int32_t UFunction_Func = 0xB0;

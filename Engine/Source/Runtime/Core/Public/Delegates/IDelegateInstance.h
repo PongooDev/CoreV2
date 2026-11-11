@@ -46,8 +46,15 @@ public:
     bool operator==(const FDelegateHandle& Other) const = default;
 
 private:
+    // FDelegateHandle::GenerateNewID. The engine's own where the server found it (Finder: its MCP request delegate's
+    // handle), so a handle Core gives its instance is never one the engine gave out: an engine Remove(Handle) must not
+    // take Core's instance out of a delegate both bind. Elsewhere (the client) Core's own counter, as before.
     static uint64_t GenerateNewID()
     {
+        if (Natives::FDelegateHandle_GenerateNewID)
+        {
+            return Natives::FDelegateHandle_GenerateNewID();
+        }
         static std::atomic<uint64_t> NextID = 1;
         uint64_t Result = NextID++;
         if (Result == 0)
@@ -158,6 +165,35 @@ namespace DelegateInstance
         }();
         (void)bBuilt;
         return VTable;
+    }
+
+    // An instance Core makes, once constructed: on 4.20+ the engine calls it by the build's slots, so its vtable is
+    // BuildVTable's. Core never calls an instance's virtuals directly afterwards (the slot calls below), and an instance's
+    // own functions call each other non-virtually.
+    template <typename InstanceType>
+    void UseBuildVTable(InstanceType* Instance)
+    {
+        if (UsesLayout420())
+        {
+            void* const** const VTablePointer = reinterpret_cast<void* const**>(Instance);
+            *VTablePointer = BuildVTable<InstanceType>(*VTablePointer);
+        }
+    }
+
+    // Whether Core may put its own instances in the engine's delegates: the build's instance layout was read.
+    inline bool IsLayoutResolved()
+    {
+        return Natives::IDelegateInstance_GetHandleIndexResolved;
+    }
+
+    inline UObject* GetUObject(const IDelegateInstance* Instance)
+    {
+        return CallVirtual<UObject*>(Instance, Slot(EDelegateInstanceSlot::GetUObject));
+    }
+
+    inline bool HasSameObject(const IDelegateInstance* Instance, const void* InUserObject)
+    {
+        return CallVirtual<bool, const IDelegateInstance, const void*>(Instance, Slot(EDelegateInstanceSlot::HasSameObject), InUserObject);
     }
 
     inline bool IsCompactable(const IDelegateInstance* Instance)

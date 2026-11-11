@@ -474,6 +474,15 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
     // toss (0x67D9E0, AFortPickup slot 0x678) starts the pickup at FinalLocation instead of where it is, so its launch
     // covers no distance: every pickup Core tossed on 1.8 appeared on its spot instead of flying there (#108). Core's
     // tosses left the parameter at zero, as it is a parameter 1.1 to 1.7.2 don't have.
+    //
+    // What clients see of a toss from 4.5 on (#384): the pickup has bClientUseInterpolationOnly (AFortPickup's and
+    // AFortPickupAthena's constructors, 5.40 0xF8B830 and 0x14BC220), so SetupPickupMesh (0xFA7CA0) turns a client's
+    // simulation off and interpolates the pickup effect toward the replicated positions instead
+    // (PostNetReceiveLocationAndRotation 0xFA32A0 -> MoveInterpolationTarget). TickInterpolation (0x2444210) keeps the
+    // effect InterpLocationTime (0.1s) behind, so a pickup falling at the speed SetupForMovementCompToss caps it to (its
+    // launch speed, about 500 to 650) is drawn 50 to 65 units above where it is. The server's bounces (Bounciness 0.6
+    // under Battle Royale's gravity of 2800: 5 to 20 units, measured on 5.40) are smaller than that, so the effect lands
+    // without turning back up. That is the game's own toss and the client's own smoothing, not something Core changes.
     static const bool bHasToss = StaticFunction_TossPickup()->FindPropertyByName(FName(L"bToss", FNAME_Find)) != nullptr;
     Reflection::FParams Params(StaticFunction_TossPickup());
     Params.Set(L"FinalLocation", FinalLocation);

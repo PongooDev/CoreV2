@@ -504,8 +504,8 @@ namespace
     UAthenaCharacterItemDefinition* RandomCharacter()
     {
         // The build's own outfits: what the asset manager lists as the primary asset type "AthenaCharacter" (the
-        // locker's list), CID_*_Athena_Commando_*; loaded when a bot is dressed in one. The default outfits when the
-        // list is empty.
+        // locker's list), CID_*_Athena_Commando_*; loaded and kept when a bot is dressed in one. The default outfits
+        // when the list is empty.
         static std::vector<std::wstring> OutfitPaths;
         static bool bListed = false;
         if (!bListed)
@@ -531,7 +531,12 @@ namespace
             const std::wstring& Path = OutfitPaths[static_cast<size_t>(FMath::Rand()) % OutfitPaths.size()];
             if (UAthenaCharacterItemDefinition* Character = LoadObject<UAthenaCharacterItemDefinition>(nullptr, Path.c_str()); Character && static_cast<UFortHeroType*>(Character->HeroDefinition))
             {
-                return Character;
+                // Kept, as the bot keeps it for the whole match (LoadoutCharacter) and only its pawn's loadout refers to
+                // it. Unkept, a collection after the warmup pawns went for the bus freed it, and the pawn the bot left
+                // the bus with got the freed outfit as its CustomizationLoadout.Character: when that pawn's parts had
+                // loaded, 5.41's variant pass (0xC45A30, the pawn's slot 0xEB8 from UpdateCharacterCustomization_PostLoad)
+                // called the outfit's virtual through the freed block's header and the server crashed (CoreV2 #397).
+                return KeepLoaded(Character);
             }
         }
         static std::vector<UAthenaCharacterItemDefinition*> Characters;

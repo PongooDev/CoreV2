@@ -1135,6 +1135,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaMapInfo.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaMutator_Heist.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaPlaylistBase.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>

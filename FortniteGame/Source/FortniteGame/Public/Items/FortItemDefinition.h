@@ -139,6 +139,10 @@ public:
     bool ShouldPersistInInventoryWhenFinalStackEmpty() const { return Member_bPersistInInventoryWhenFinalStackEmpty.IsAvailable() && bPersistInInventoryWhenFinalStackEmpty; }
     // The item wears down (its entries carry a durability); false where the build doesn't reflect the flag.
     bool ItemHasDurability() const { return Member_bItemHasDurability.IsAvailable() && bItemHasDurability; }
+    // The item leaves its carrier when they go down (5.40's The Getaway jewel, Athena_Bling_Pack). The server's drop is
+    // stripped: AFortPlayerControllerAthena::DropItemsOnDBNO. False where the build doesn't reflect the flag.
+    DefineBitfieldUProperty(bDropOnDBNO)
+    bool ShouldDropOnDBNO() const { return Member_bDropOnDBNO.IsAvailable() && bDropOnDBNO; }
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
     float GetMaxDurability(int32_t ItemLevel) const;

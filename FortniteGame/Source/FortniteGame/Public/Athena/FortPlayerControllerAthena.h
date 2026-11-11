@@ -163,6 +163,10 @@ public:
 
     // An eliminated player's inventory lies around where they died: everything that can be dropped, one pickup each.
     void DropInventoryOnDeath(AFortPawn* DeadPawn);
+    // A downed player's items that its definition drops on DBNO (bDropOnDBNO: The Getaway's jewel) lie where they went
+    // down, tossed as DropInventoryOnDeath tosses them. 5.40's DBNO start (AFortPlayerPawnAthena 0xC68250) has no drop:
+    // the build never reads the flag. How many it dropped.
+    int32_t DropItemsOnDBNO(AFortPawn* DBNOPawn);
     // The spots on the floor around DeathLocation that DropInventoryOnDeath tosses Count pickups to (DeadPawn is the
     // traces' world context and is ignored by them).
     static std::vector<FVector> GetInventoryDropSpots(AActor* DeadPawn, const FVector& DeathLocation, int32_t Count);

@@ -3,11 +3,15 @@
 #include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
+#include "Athena/FortAthenaMutator_Heist.h"
 #include "Athena/FortAthenaPlaylistBase.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingContainer.h"
+#include "Items/FortInventory.h"
+#include "Items/FortItemDefinition.h"
 #include "Items/FortLootPackage.h"
+#include "Pawns/FortPawn.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Athena/FortGameSessionDedicatedAthena.h"
@@ -785,6 +789,215 @@ void AFortGameModeAthena::WatchScoring()
         return;
     }
     WatchScores(FWeakObjectPtr(this), std::make_shared<FScoringWatch>());
+#endif
+}
+
+namespace
+{
+    // What The Getaway's log last showed.
+    struct FGetawayWatch
+    {
+        std::chrono::steady_clock::time_point NextCheck;
+        FWeakObjectPtr Mutator;
+        bool bEnded = false;
+        int32_t Unspawned = -1;
+        int32_t Spawned = -1;
+        int32_t Departed = -1;
+        int32_t JewelsLostToStorm = 0;
+        int32_t SafesLostToStorm = 0;
+        // Each van's ExitCraftState, by its SpawnedExitCraftList index.
+        std::vector<uint8_t> VanStates;
+        // The jewel carriers, by their player state's name.
+        std::set<std::wstring> Carriers;
+        // The teams that got away (place 1).
+        std::set<int32_t> EscapedTeams;
+    };
+
+    int32_t TeamOf(const AFortPlayerStateAthena* AthenaState)
+    {
+        return AthenaState ? static_cast<int32_t>(static_cast<uint8_t>(AthenaState->TeamIndex)) : -1;
+    }
+
+    // Whether the controller's inventory holds an item with the jewel's tag (Loot.Type.Gadget.Bling).
+    bool CarriesJewel(AFortPlayerControllerAthena* Controller, const FGameplayTag& JewelTag)
+    {
+        AFortInventory* Inventory = Controller ? static_cast<AFortInventory*>(Controller->WorldInventory) : nullptr;
+        if (!Inventory || !JewelTag.IsValid())
+        {
+            return false;
+        }
+        TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
+        for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+        {
+            FFortItemEntry* ItemEntry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+            const UFortItemDefinition* ItemDefinition = ItemEntry ? static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition) : nullptr;
+            if (ItemDefinition && ItemEntry->Count > 0 && static_cast<const FGameplayTagContainer&>(ItemDefinition->GameplayTags).HasTag(JewelTag))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The mutator's vans, jewels and escapes as they change.
+    void CheckGetaway(AFortGameModeAthena* GameMode, AFortGameStateAthena* GameState, AFortAthenaMutator_Heist* Heist, FGetawayWatch& Watch)
+    {
+        if (Heist->NumUnspawnedExitCrafts != Watch.Unspawned || Heist->NumSpawnedExitCrafts != Watch.Spawned || Heist->NumDepartedExitCrafts != Watch.Departed)
+        {
+            Watch.Unspawned = Heist->NumUnspawnedExitCrafts;
+            Watch.Spawned = Heist->NumSpawnedExitCrafts;
+            Watch.Departed = Heist->NumDepartedExitCrafts;
+            Log::Info(L"Getaway: vans: {} to come, {} in, {} gone (storm phase {})", Watch.Unspawned, Watch.Spawned, Watch.Departed, static_cast<int32_t>(GameMode->SafeZonePhase));
+        }
+
+        TStructArray<FHeistExitCraftData>& Vans = Heist->SpawnedExitCraftList;
+        Watch.VanStates.resize(static_cast<size_t>(std::max(Vans.Num(), 0)), EHeistExitCraftState::GetNone());
+        for (int32_t Index = 0; Index < Vans.Num(); ++Index)
+        {
+            FHeistExitCraftData& Van = Vans[Index];
+            const EHeistExitCraftState State = Van.ExitCraftState;
+            if (static_cast<uint8_t>(State) == Watch.VanStates[Index])
+            {
+                continue;
+            }
+            Watch.VanStates[Index] = State;
+            AActor* Craft = reinterpret_cast<AActor*>(static_cast<AFortAthenaExitCraft*>(Van.SpawnedExitCraft));
+            AActor* Spawner = reinterpret_cast<AActor*>(static_cast<AFortAthenaExitCraftSpawner*>(Van.ExitCraftSpawner));
+            AActor* Where = Craft ? Craft : Spawner;
+            const FVector Location = Where ? Where->GetTransform().GetLocation() : FVector{};
+            Log::Info(L"Getaway: van {} is {} ({} at ({:.0f}, {:.0f}, {:.0f})){}", Index + 1, State.ToString(), Where ? Where->GetName().ToStdString() : std::wstring(L"nothing spawned"),
+                Location.X, Location.Y, Location.Z, Van.bHasDeparted ? std::format(L", gone with {} pawns", static_cast<const TArray<AFortPlayerPawnAthena*>&>(Van.DepartedPawns).Num()) : std::wstring());
+        }
+
+        if (Heist->JewelsLostToStorm != Watch.JewelsLostToStorm || Heist->SafesLostToStorm != Watch.SafesLostToStorm)
+        {
+            Watch.JewelsLostToStorm = Heist->JewelsLostToStorm;
+            Watch.SafesLostToStorm = Heist->SafesLostToStorm;
+            Log::Info(L"Getaway: the storm has taken {} jewels and {} jewel drops", Watch.JewelsLostToStorm, Watch.SafesLostToStorm);
+        }
+
+        const FGameplayTag JewelTag = Heist->BlingLootItemTag;
+        std::set<std::wstring> Carriers;
+        for (AFortPlayerControllerAthena* Controller : GameMode->AlivePlayers)
+        {
+            AFortPlayerStateAthena* AthenaState = Controller ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState))) : nullptr;
+            if (!AthenaState || !CarriesJewel(Controller, JewelTag))
+            {
+                continue;
+            }
+            const std::wstring Name = AthenaState->GetName().ToStdString();
+            Carriers.insert(Name);
+            if (!Watch.Carriers.contains(Name))
+            {
+                Log::Info(L"Getaway: {} (team {}) picked up a jewel", AthenaState->GetPlayerName().ToStdString(), TeamOf(AthenaState));
+            }
+        }
+        for (const std::wstring& Name : Watch.Carriers)
+        {
+            if (!Carriers.contains(Name))
+            {
+                Log::Info(L"Getaway: {} no longer carries a jewel (dropped it, went down, was eliminated or got away)", Name);
+            }
+        }
+        Watch.Carriers = std::move(Carriers);
+
+        // A van's team places 1 (0xC02B20): each team that got away has won.
+        std::map<int32_t, std::wstring> NewEscapes;
+        for (APlayerState* PlayerState : GameState->PlayerArray)
+        {
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            const int32_t Team = TeamOf(AthenaState);
+            if (!AthenaState || AthenaState->Place != 1 || Watch.EscapedTeams.contains(Team))
+            {
+                continue;
+            }
+            std::wstring& Names = NewEscapes[Team];
+            Names += (Names.empty() ? L"" : L", ") + AthenaState->GetPlayerName().ToStdString();
+        }
+        for (const auto& [Team, Names] : NewEscapes)
+        {
+            Watch.EscapedTeams.insert(Team);
+            Log::Info(L"Getaway: team {} got away and wins ({} of {} vans gone): {}", Team, Heist->NumDepartedExitCrafts,
+                Heist->NumDepartedExitCrafts + Heist->NumSpawnedExitCrafts + Heist->NumUnspawnedExitCrafts, Names);
+        }
+
+        if (GameState->GamePhase >= EAthenaGamePhase::GetEndGame())
+        {
+            Watch.bEnded = true;
+            Log::Info(L"Getaway: the match is over: {} teams got away, {} vans left with them", Watch.EscapedTeams.size(), Heist->NumDepartedExitCrafts);
+        }
+    }
+
+    void WatchHeist(FWeakObjectPtr GameMode, std::shared_ptr<FGetawayWatch> Watch)
+    {
+        GameThread::Enqueue([GameMode, Watch]()
+        {
+            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
+            UWorld* World = Athena ? Athena->GetWorld() : nullptr;
+            AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+            if (!Athena || Watch->bEnded)
+            {
+                return;
+            }
+            AFortAthenaMutator_Heist* Heist = static_cast<AFortAthenaMutator_Heist*>(Watch->Mutator.Get());
+            const auto Now = std::chrono::steady_clock::now();
+            const bool bCheck = Now >= Watch->NextCheck;
+            if (bCheck)
+            {
+                Watch->NextCheck = Now + std::chrono::seconds(1);
+            }
+            // The playlist's mutators spawn when its data has loaded (the match's comes with its assignment).
+            if (!Heist && bCheck && GameState)
+            {
+                for (AActor* Mutator : Athena->GameplayMutators)
+                {
+                    if (AFortAthenaMutator_Heist* Found = Cast<AFortAthenaMutator_Heist>(reinterpret_cast<UObject*>(Mutator)))
+                    {
+                        Heist = Found;
+                        Watch->Mutator = FWeakObjectPtr(Found);
+                        const UObject* Playlist = GameState->CurrentPlaylistData;
+                        Log::Info(L"Getaway: {} runs {}: the jewel drops fall, the vans come, and the teams that reach one with a jewel win", Found->GetName().ToStdString(),
+                            Playlist ? Playlist->GetName().ToStdString() : std::wstring(L"the map URL's playlist"));
+                        break;
+                    }
+                }
+                // No Getaway mutator once the storm is up (the mutators spawn with the playlist, before the warmup ends):
+                // another playlist, nothing to watch.
+                if (!Heist && GameState->GamePhase >= EAthenaGamePhase::GetSafeZones())
+                {
+                    return;
+                }
+            }
+            if (Heist && GameState)
+            {
+                // Every frame: a jewel carrier who went down drops it.
+                for (AFortPlayerControllerAthena* Controller : Athena->AlivePlayers)
+                {
+                    AFortPawn* Pawn = Controller ? static_cast<AFortPawn*>(Controller->MyFortPawn) : nullptr;
+                    if (Pawn && Pawn->bIsDBNO && Controller->DropItemsOnDBNO(Pawn) > 0)
+                    {
+                        Log::Info(L"Getaway: {} went down and dropped the jewel", Controller->GetName().ToStdString());
+                    }
+                }
+                if (bCheck)
+                {
+                    CheckGetaway(Athena, GameState, Heist, *Watch);
+                }
+            }
+            WatchHeist(GameMode, Watch);
+        });
+    }
+}
+
+void AFortGameModeAthena::WatchGetaway()
+{
+#if WITH_SERVER_CODE
+    // From 5.40 (AFortAthenaMutator_Heist, The Getaway's playlists); its vans, jewel drops and wins are the build's.
+    if (!AFortAthenaMutator_Heist::StaticClass() || !AFortAthenaMutator_Heist::HasHeistData() || !HasSpawnActorDataList() || !AFortGameStateAthena::HasCurrentPlaylistData())
+    {
+        return;
+    }
+    WatchHeist(FWeakObjectPtr(this), std::make_shared<FGetawayWatch>());
 #endif
 }
 

@@ -191,6 +191,12 @@ public:
     // mode is there. Other playlists log nothing.
     void WatchScoring();
 
+    // The Getaway (5.40's Playlist_Bling_*: AFortAthenaMutator_Heist), whose jewel drops, vans and wins are the game's
+    // own: a downed carrier drops the jewel (the stripped bDropOnDBNO drop, AFortPlayerControllerAthena::DropItemsOnDBNO),
+    // and the jewel pickups and drops, the vans, the storm's losses and the teams that get away are logged as "Getaway:"
+    // lines, as long as the game mode is there. Other playlists stop being watched once the storm is up.
+    void WatchGetaway();
+
     // Keeps the warmup at the admin panel's length and, with late joining on, takes more players during it
     // (Core-Backend #122), as long as the game mode is there.
     void WatchWarmup();

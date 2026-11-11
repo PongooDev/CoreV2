@@ -325,6 +325,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortArenaCamera.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaAircraft.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaMapInfo.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaMutator_Heist.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaPlaylistBase.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaSupplyDrop.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaVehicle.h" />

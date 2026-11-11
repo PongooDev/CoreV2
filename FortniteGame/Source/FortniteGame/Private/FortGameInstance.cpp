@@ -28,6 +28,17 @@ void UFortGameInstance::Hook()
     for (uintptr_t Reference : Finder::StringRefs(L"TeamChatroom"))
     {
         Init = Init ? Init : Finder::FunctionStart(Reference);
+        // 5.40 (CL-4352937): the packer moved the piece that names the chatroom into its own section, with no .pdata
+        // entry (lea rdx, "TeamChatroom" at 0x5CD0E6A), and it jumps back into Init's body (jmp 0xE33718), whose
+        // .pdata entry chains to Init's (0xE33550). The first jmp after the reference leads back.
+        for (uintptr_t Jump = Reference + 7; !Init && Jump + 5 <= Reference + 0x20; ++Jump)
+        {
+            if (*reinterpret_cast<const uint8_t*>(Jump) == 0xE9)
+            {
+                Init = Finder::FunctionStart(Finder::RelativeTarget(Jump, 1, 5));
+                break;
+            }
+        }
     }
     if (!Init)
     {

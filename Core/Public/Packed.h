@@ -48,6 +48,12 @@ namespace Packed
     bool ChecksCodeOnFirstTicks();
 
     /// <summary>
+    /// The build's changelist, from its version string in .rdata ("++Fortnite+Release-5.40-CL-4352937"); 0 when it
+    /// has none. Packed or not.
+    /// </summary>
+    uint32_t Changelist();
+
+    /// <summary>
     /// On such a build, called on the engine's thread before FEngineLoop::Init starts the engine (from
     /// RunBeforeEngineInit's callback): holds UEngine::Start, so the engine goes into its main loop with no map loaded,
     /// and once it has ticked past the packer's check runs <paramref name="Callback"/> (which patches the code) and then

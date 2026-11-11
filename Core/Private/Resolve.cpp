@@ -229,12 +229,18 @@ namespace
             // the array itself, with no lea: mov [rbp+88h], eax (MaxElements); mov [rbp+90h], ecx (MaxChunks), with
             // rbp the array (0x17DB516). A store at +0x10 and +0x18 from one base is the chunked array's too. 5.30
             // (CL-4305896) has the members at +0x58 and ObjObjects at +0x68, so MaxElements is a byte displacement:
-            // mov [rbp+80h], ecx (MaxChunks); mov [rbp+78h], eax (MaxElements) (0x181E506).
+            // mov [rbp+80h], ecx (MaxChunks); mov [rbp+78h], eax (MaxElements) (0x181E506). 5.40 (CL-4352937) has the
+            // members at +0x18 and ObjObjects at +0x28, so both are byte displacements: mov [rbp+40h], ecx (MaxChunks);
+            // mov [rbp+38h], eax (MaxElements) (0x1839C96). Only UE 4.21 (5.0, CL-4214610) on chunks the array, so only
+            // there may MaxChunks be a byte displacement: 4.4.0's members at +0x8 would allow one into its fixed array.
+            constexpr uint32_t FirstChunkedChangelist = 4214610;
+            const bool bChunksMayBeNear = Packed::Changelist() >= FirstChunkedChangelist;
             for (uintptr_t Store = AllocatePoolEnd && !ObjectLayout::Current.bChunkedObjectArray ? AllocatePool : 0; Store && Store + 6 <= AllocatePoolEnd; ++Store)
             {
                 const uint8_t ModRm = Byte(Store + 1);
-                if (Byte(Store) != 0x89 || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04 || (Byte(Store - 1) & 0xF1) == 0x41 ||
-                    *reinterpret_cast<const int32_t*>(Store + 2) != ObjObjects + 0x18)
+                const bool bMaxChunksDisp32 = (ModRm & 0xC0) == 0x80 && *reinterpret_cast<const int32_t*>(Store + 2) == ObjObjects + 0x18;
+                const bool bMaxChunksDisp8 = bChunksMayBeNear && ObjObjects + 0x18 < 0x80 && (ModRm & 0xC0) == 0x40 && Byte(Store + 2) == ObjObjects + 0x18;
+                if (Byte(Store) != 0x89 || !(bMaxChunksDisp32 || bMaxChunksDisp8) || (ModRm & 0x07) == 0x04 || (Byte(Store - 1) & 0xF1) == 0x41)
                 {
                     continue;
                 }
@@ -4065,6 +4071,27 @@ namespace
             const std::initializer_list<int32_t> ReadBits = { 0x8B, -1, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 };
             uintptr_t BitsRead = FindInstruction(Load + 7, Load + 0x30, ReadBits);
             while (BitsRead && ((Byte(BitsRead + 1) & 0xC7) != 0x80 || (Byte(BitsRead - 1) & 0xF0) == 0x40))
+            {
+                BitsRead = FindInstruction(BitsRead + 1, Load + 0x30, ReadBits);
+            }
+            if (BitsRead)
+            {
+                OwningChannel = *reinterpret_cast<const int32_t*>(Load + 3);
+                ++OwningChannelLoads;
+            }
+        }
+        // 5.40 (CL-4352937) loads the channel into rcx and reads the bits through it into eax: mov rcx, [rbx+0F8h];
+        // mov eax, [rcx+88h] (0x2491235). The bits read's base is the register the load wrote (no REX on either side).
+        for (uintptr_t Load = OwningChannelLoads == 0 && ReplicatePropertiesEnd && ActorChannelBits > 0 ? FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, { 0x48, 0x8B }) : 0; Load; Load = FindInstruction(Load + 1, ReplicatePropertiesEnd, { 0x48, 0x8B }))
+        {
+            if ((Byte(Load + 2) & 0xC0) != 0x80 || (Byte(Load + 2) & 0x07) == 0x04)
+            {
+                continue;
+            }
+            const uint8_t Channel = (Byte(Load + 2) >> 3) & 0x07;
+            const std::initializer_list<int32_t> ReadBits = { 0x8B, -1, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 };
+            uintptr_t BitsRead = FindInstruction(Load + 7, Load + 0x30, ReadBits);
+            while (BitsRead && ((Byte(BitsRead + 1) & 0xC7) != (0x80 | Channel) || Channel == 0x04 || (Byte(BitsRead - 1) & 0xF0) == 0x40))
             {
                 BitsRead = FindInstruction(BitsRead + 1, Load + 0x30, ReadBits);
             }

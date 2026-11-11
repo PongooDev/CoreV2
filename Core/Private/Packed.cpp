@@ -348,6 +348,11 @@ bool Packed::ChecksCodeOnFirstTicks()
     return IsPacked() && BuildChangelist() >= FirstRecheckChangelist;
 }
 
+uint32_t Packed::Changelist()
+{
+    return BuildChangelist();
+}
+
 void Packed::WaitForCodeCheck(bool bUntilTicking)
 {
     if (Describe().TextSections < 2)

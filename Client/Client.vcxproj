@@ -410,6 +410,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerState.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerStateOutpost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Quests\FortQuestManager.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\RemoteControlledPawn\FortRemoteControlledPawnAthena.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\AthenaHUDContext.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FortAsyncAction_ShowPartyDialog.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FortPartyContext.h" />

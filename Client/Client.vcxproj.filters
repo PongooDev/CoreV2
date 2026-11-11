@@ -430,6 +430,9 @@
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Quests">
       <UniqueIdentifier>{096c2a07-af64-48f7-8469-5a99deb80449}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Public\RemoteControlledPawn">
+      <UniqueIdentifier>{56555a21-22db-45b8-8ed8-40e61f7d9a00}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\UI">
       <UniqueIdentifier>{c97048a8-d419-4722-ae74-1a33ffd64e6f}</UniqueIdentifier>
     </Filter>
@@ -1407,6 +1410,9 @@
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Quests\FortQuestManager.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Quests</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\RemoteControlledPawn\FortRemoteControlledPawnAthena.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\RemoteControlledPawn</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\AthenaHUDContext.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\UI</Filter>

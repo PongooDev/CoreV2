@@ -39,6 +39,7 @@
 #include "Player/FortCheatManager.h"
 #include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
+#include "RemoteControlledPawn/FortRemoteControlledPawnAthena.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
@@ -424,6 +425,29 @@ void AFortPlayerController::Possess(APawn* InPawn)
     {
         AddCheats(true);
         UE_LOG(LogFort, Log, TEXT("Possess: %s has cheat manager %s"), *GetNameSafe(this), *GetNameSafe(static_cast<UObject*>(CheatManager)));
+    }
+
+    // The Guided Missile (#396): the missile is a pawn the player flies (AFortRemoteControlledPawnAthena, a Battle Royale
+    // player pawn class), which its SetupRemoteControlPawn possesses with the player's controller while their own pawn
+    // stays behind holding the launcher; letting go of it possesses the player's pawn again with its bBeingRepossessed
+    // set. Neither is a new pawn for the player, and Epic's code treats them so: AFortPlayerPawnAthena::PossessedBy
+    // (5.41 0xC63200) gives the game mode's effects only while bBeingRepossessed isn't set, and the missile's class
+    // empties ResetGameplayAttributes (its slot 0x17B is the shared empty function, 0x118A970 its parent's; 4.2's too).
+    // What follows sets up a pawn the player plays from now on: the hero's character parts went on the missile
+    // (SetupHero's ApplyCharacterCustomization), the quickbar's activation had the client equip the launcher on it
+    // (ClientExecuteInventoryItem), and the way back reset the player's health and shield to full. The missile and the
+    // pawn it returns to keep the player's hero, items and attributes as they are.
+    if (Role == ROLE_Authority && InPawn)
+    {
+        UObject* const PawnObject = reinterpret_cast<UObject*>(InPawn);
+        const bool bRemoteControlled = Cast<AFortRemoteControlledPawnAthena>(PawnObject) != nullptr;
+        const AFortPlayerPawn* const ReturningPawn = bRemoteControlled ? nullptr : Cast<AFortPlayerPawn>(PawnObject);
+        if (bRemoteControlled || (ReturningPawn && ReturningPawn->IsBeingRepossessed()))
+        {
+            UE_LOG(LogFort, Log, TEXT("Possess: %s %s %s"), *GetNameSafe(this), bRemoteControlled ? TEXT("flies the remote-controlled") : TEXT("is back in their pawn"),
+                *GetNameSafe(InPawn));
+            return;
+        }
     }
 
     // The player's cheats on the pawn they play now, whatever it is (a disguise's too): a dead pawn's cheat speed leaves

@@ -28,6 +28,13 @@ public:
     DefineUProperty(TWeakObjectPtr<UFortHero>, Hero)
     // EFortPawnStasisMode: the pawn may not act while it is anything but None.
     DefineUProperty(uint8_t, StasisMode)
+    // From 3.5: set while the player's controller takes this pawn back from the remote-controlled pawn they flew (the
+    // Guided Missile's; AFortRemoteControlledPawnAthena, 5.41 0x1234EA0 around its Possess). The pawn isn't new to the
+    // player then: AFortPlayerPawnAthena::PossessedBy (5.41 0xC63200) skips the game mode's effects while it is set.
+    DefineUProperty(bool, bBeingRepossessed)
+
+    // Epic's getter (5.41 0x11820E0). False where the build has no remote-controlled pawns.
+    bool IsBeingRepossessed() const { return Member_bBeingRepossessed.IsAvailable() && bBeingRepossessed; }
 
     void ResetGameplayAttributes();
     bool EquipLastWeapon();

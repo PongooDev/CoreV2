@@ -289,6 +289,14 @@ private:
             {
                 Ref = Variable->AsVariableString();
             }
+            // A variable the build registered another way (a reference to its own global, FAutoConsoleVariableRef) has
+            // no TConsoleVariableData of this type, and AsVariableInt and its siblings answer null. 5.41's Save the
+            // World server read through that null in UNetDriver::ServerReplicateActors (net.DormancyValidate). Such a
+            // variable reads as Core's own default.
+            if (!Ref)
+            {
+                Ref = &Unregistered;
+            }
         }
         return Ref;
     }

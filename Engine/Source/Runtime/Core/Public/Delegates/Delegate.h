@@ -112,6 +112,75 @@ private:
     FDelegateHandle Handle;
 };
 
+// A delegate bound to a functor (a lambda), as TBaseDelegate::CreateLambda makes it. The engine relocates an instance
+// with a memcpy when it moves a delegate (TInlineAllocator::MoveToEmpty up to 4.1), so the functor's captures must not
+// point into themselves (no std::function; weak pointers, shared pointers, strings and vectors are fine).
+template <typename FuncType, typename FunctorType>
+class TBaseFunctorDelegateInstance;
+
+template <typename RetType, typename... ParamTypes, typename FunctorType>
+class TBaseFunctorDelegateInstance<RetType(ParamTypes...), FunctorType> : public IBaseDelegateInstance<RetType(ParamTypes...)>
+{
+public:
+    explicit TBaseFunctorDelegateInstance(const FunctorType& InFunctor)
+        : Functor(InFunctor), Handle(FDelegateHandle::GenerateNewHandle)
+    {
+        UseBuildVTable();
+    }
+
+    TBaseFunctorDelegateInstance(const TBaseFunctorDelegateInstance& Other)
+        : Functor(Other.Functor), Handle(Other.Handle)
+    {
+        UseBuildVTable();
+    }
+
+    FName GetFunctionName() const final { return FName(); }
+    UObject* GetUObject() const final { return nullptr; }
+    const void* GetRawMethodPtr() const final { return nullptr; }
+    const void* GetRawUserObject() const final { return nullptr; }
+    EDelegateInstanceType::Type GetType() const final { return EDelegateInstanceType::Functor; }
+    bool HasSameObject(const void*) const final { return false; }
+    // Not IDelegateInstance's !IsSafeToExecute(): that is a virtual call, and 4.20's vtable has Execute at its slot.
+    bool IsCompactable() const final { return !TBaseFunctorDelegateInstance::IsSafeToExecute(); }
+    bool IsSafeToExecute() const final { return true; }
+    FDelegateHandle GetHandle() const final { return Handle; }
+
+    void CreateCopy(FDelegateBase& Base) final
+    {
+        new (Base) TBaseFunctorDelegateInstance(*this);
+    }
+
+    // Functors aren't comparable (Epic's TBaseFunctorDelegateInstance::IsSameFunction returns false too).
+    bool IsSameFunction(const IBaseDelegateInstance<RetType(ParamTypes...)>&) const final
+    {
+        return false;
+    }
+
+    RetType Execute(ParamTypes... Params) const final
+    {
+        return Functor(Params...);
+    }
+
+    bool ExecuteIfSafe(ParamTypes... Params) const final
+    {
+        TBaseFunctorDelegateInstance::Execute(Params...);
+        return true;
+    }
+
+private:
+    void UseBuildVTable()
+    {
+        if (DelegateInstance::UsesLayout420())
+        {
+            void* const** const VTablePointer = reinterpret_cast<void* const**>(this);
+            *VTablePointer = DelegateInstance::BuildVTable<TBaseFunctorDelegateInstance>(*VTablePointer);
+        }
+    }
+
+    mutable std::remove_const_t<FunctorType> Functor;
+    FDelegateHandle Handle;
+};
+
 template <typename RetType, typename... ParamTypes>
 class TBaseDelegate : public FDelegateBase
 {
@@ -124,6 +193,27 @@ public:
         TBaseDelegate Result;
         new (Result) TBaseStaticDelegateInstance<RetType(ParamTypes...), VarTypes...>(InFunc, Vars...);
         return Result;
+    }
+
+    template <typename FunctorType>
+    static TBaseDelegate CreateLambda(FunctorType&& InFunctor)
+    {
+        TBaseDelegate Result;
+        new (Result) TBaseFunctorDelegateInstance<RetType(ParamTypes...), std::remove_cvref_t<FunctorType>>(InFunctor);
+        return Result;
+    }
+
+    // A copy of Other's instance (TBaseDelegate's copy constructor, through the instance's CreateCopy).
+    void CopyFrom(const TBaseDelegate& Other)
+    {
+        if (FDelegateInstance* OtherInstance = Other.GetDelegateInstance())
+        {
+            DelegateInstance::CreateCopy(OtherInstance, *this);
+        }
+        else
+        {
+            Unbind();
+        }
     }
 
     TBaseDelegate() = default;

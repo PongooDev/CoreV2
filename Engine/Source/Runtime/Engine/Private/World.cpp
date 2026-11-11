@@ -2,6 +2,7 @@
 #include "Engine/World.h"
 #include "Engine/DemoNetDriver.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "Engine/LevelStreaming.h"
 #include "Engine/NetDriver.h"
 #include "Engine/Player.h"
@@ -10,6 +11,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Natives.h"
+#include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorld, Log, All);
 
@@ -99,6 +101,17 @@ AActor* UWorld::SpawnActor(UClass* InClass, FTransform const* UserTransformPtr, 
 AWorldSettings* UWorld::GetWorldSettings(bool bCheckStreamingPersistent, bool bChecked) const
 {
     return Natives::UWorld_GetWorldSettings(this, bCheckStreamingPersistent, bChecked);
+}
+
+FTimerManager& UWorld::GetTimerManager() const
+{
+    FTimerManager* Manager = nullptr;
+    if (FTimerManager::ResolveNatives())
+    {
+        UGameInstance* GameInstance = OwningGameInstance;
+        Manager = GameInstance ? GameInstance->TimerManager : TimerManager;
+    }
+    return Manager ? *Manager : FTimerManager::Fallback();
 }
 
 void UWorld::AddNetworkActor(AActor* Actor)

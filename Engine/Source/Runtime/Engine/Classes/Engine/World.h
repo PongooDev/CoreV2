@@ -21,6 +21,7 @@ class ULevelStreaming;
 class UGameInstance;
 class UNetDriver;
 class UNavigationSystem;
+class FTimerManager;
 struct FTransform;
 
 struct FActorSpawnParameters
@@ -93,6 +94,7 @@ class UWorld final : public UObject, public FNetworkNotify
     DefineUProperty(UNavigationSystem*, NavigationSystem)
     DefineNativeMember(float, NextSwitchCountdown, UWorld_NextSwitchCountdown)
     DefineNativeMember(float, TimeSeconds, UWorld_TimeSeconds)
+    DefineNativeMember(FTimerManager*, TimerManager, UWorld_TimerManager)
 
 public:
     bool Listen(FURL& InURL);
@@ -109,7 +111,11 @@ public:
     AGameModeBase* GetAuthGameMode() const { return AuthorityGameMode; }
     AGameStateBase* GetGameState() const { return GameState; }
     UNavigationSystem* GetNavigationSystem() const { return NavigationSystem; }
+    // The owning game instance's timer manager, else the world's own (Epic's inline UWorld::GetTimerManager). Where
+    // FTimerManager::ResolveNatives failed, Core's (FTimerManager::Fallback).
+    FTimerManager& GetTimerManager() const;
     static ptrdiff_t NavigationSystemOffset() { return Member_NavigationSystem.GetOffsetChecked(); }
+    static ptrdiff_t OwningGameInstanceOffset() { return Member_OwningGameInstance.GetOffsetChecked(); }
     AWorldSettings* GetWorldSettings(bool bCheckStreamingPersistent = false, bool bChecked = true) const;
     void AddNetworkActor(AActor* Actor);
     ULevelStreaming* GetLevelStreamingForPackageName(FName InPackageName);

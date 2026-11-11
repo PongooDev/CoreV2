@@ -2227,6 +2227,7 @@ namespace
         if (GetHandleIndex == 4 || GetHandleIndex == 5 || GetHandleIndex == 8)
         {
             Natives::IDelegateInstance_GetHandleIndex = GetHandleIndex;
+            Natives::IDelegateInstance_GetHandleIndexResolved = true;
             Log::Info(L"Finder: IDelegateInstance::GetHandle is slot {}", GetHandleIndex);
         }
         else
@@ -5230,6 +5231,29 @@ namespace
         const uintptr_t AbortEnd = Abort ? Finder::FunctionEnd(Abort) : 0;
         uintptr_t Completed = 0;
         void** const VTable = reinterpret_cast<void**>(OutpostMcpRequestVTable(Abort, AbortEnd, Completed));
+        // The same instance's GetHandle (mov rax, [rcx+Handle]; mov [rdx], rax; mov rax, rdx; ret) gives the instance
+        // vtable's layout (Natives::IDelegateInstance_GetHandleIndex), which the client reads from its console
+        // delegates: slot 8 up to 2.4.2, 4 from 2.5 (UE 4.20), 5 from 5.30. The server's own instances (Core's timer
+        // delegates, FTimerManager) take the build's layout from it.
+        int32_t GetHandleIndex = -1;
+        for (int32_t Index = 0; VTable && Index < 0x10 && GetHandleIndex < 0; ++Index)
+        {
+            const uintptr_t Function = VTableEntry(VTable, Index);
+            if (Function && FindInstruction(Function, Function + 11, { 0x48, 0x8B, 0x41, -1, 0x48, 0x89, 0x02, 0x48, 0x8B, 0xC2, 0xC3 }) == Function)
+            {
+                GetHandleIndex = Index;
+            }
+        }
+        if (GetHandleIndex == 4 || GetHandleIndex == 5 || GetHandleIndex == 8)
+        {
+            Natives::IDelegateInstance_GetHandleIndex = GetHandleIndex;
+            Natives::IDelegateInstance_GetHandleIndexResolved = true;
+            Log::Info(L"Finder: IDelegateInstance::GetHandle is slot {} (from the MCP request delegate)", GetHandleIndex);
+        }
+        else
+        {
+            Log::Warning(L"Finder: IDelegateInstance::GetHandle not found in the MCP request delegate (slot {}), keeping slot {}", GetHandleIndex, Natives::IDelegateInstance_GetHandleIndex);
+        }
         uintptr_t CreateCopy = 0;
         for (int32_t Index = 0; VTable && Index < 0x10 && !CreateCopy; ++Index)
         {

@@ -268,6 +268,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\EngineLogs.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\NetworkingDistanceConstants.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\ShowFlags.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\TimerManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\Net\DataBunch.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Public\Net\DataReplication.h" />
     <ClInclude Include="..\Engine\Source\Runtime\EngineSettings\Classes\ConsoleSettings.h" />
@@ -499,6 +500,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PrimitiveComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ReplicationDriver.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\TimerManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AI\Navigation\NavigationSystem.cpp" />

@@ -331,6 +331,9 @@ namespace Natives
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
     // 8 up to UE 4.19 (2.4.2); UE 4.20 (2.5) drops five delegate instance virtuals and has GetHandle at 4.
     inline int32_t IDelegateInstance_GetHandleIndex = 8;
+    // Whether IDelegateInstance_GetHandleIndex was read from the build (the client's console delegates, the server's MCP
+    // request delegate) rather than left at its default.
+    inline bool IDelegateInstance_GetHandleIndexResolved = false;
     // The build's NUM_DELEGATE_INLINE_BYTES: 32 (TInlineAllocator<2>) up to 4.1. 4.2 takes UE 4.21's 0 (FHeapAllocator),
     // with NUM_MULTICAST_DELEGATE_INLINE_ENTRIES 0 too, so an FDelegateBase is { Data, DelegateSize } (#303).
     inline int32_t NumDelegateInlineBytes = 32;
@@ -827,6 +830,13 @@ namespace Natives
     inline ptrdiff_t UConsole_bIsRuntimeAutoCompleteUpToDate = -1;
     inline ptrdiff_t UConsole_AutoCompleteTree = -1;
     inline ptrdiff_t UConsole_ConsoleSettings = -1;
+
+    // FTimerManager::ResolveNatives, from UKismetSystemLibrary::K2_SetTimerDelegate: the timer manager pointers
+    // UWorld::GetTimerManager reads (the owning game instance's, else the world's own) and FTimerManager::
+    // InternalSetTimer(InOutHandle, FTimerUnifiedDelegate&&, InRate, InbLoop, InFirstDelay).
+    inline ptrdiff_t UGameInstance_TimerManager = -1;
+    inline ptrdiff_t UWorld_TimerManager = -1;
+    inline void (*FTimerManager_InternalSetTimer)(void* TimerManager, void* InOutHandle, void* InDelegate, float InRate, bool InbLoop, float InFirstDelay) = nullptr;
 }
 
 namespace Sites

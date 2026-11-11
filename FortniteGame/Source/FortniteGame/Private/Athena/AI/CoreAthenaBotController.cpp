@@ -186,6 +186,17 @@ namespace
         return PersistentProperty && Object && Object->IsA(RangedClass) && PersistentProperty->GetPropertyValue_InContainer(Object);
     }
 
+    // One of the pawn's gameplay cue multicasts (its IAbilitySystemReplicationProxyInterface), by name, from the pawn's
+    // class: AFortPlayerPawnAthena declares them up to 5.30 and 5.40 moved them to AFortPawn
+    // (FortPawn:NetMulticast_InvokeGameplayCueExecuted_WithParams, FortPawn:NetMulticast_Athena_BatchedDamageCues). The
+    // FortPlayerPawnAthena path found nothing on 5.40, so the bots' shots sent no cue there at all: no sound, no muzzle
+    // flash, no tracer (CoreV2 #392).
+    UFunction* PawnCueMulticast(AFortPlayerPawnAthena* Pawn, const wchar_t* Name)
+    {
+        const UObject* Object = reinterpret_cast<const UObject*>(Pawn);
+        return Object ? Object->FindFunction(FName(Name, FNAME_Find)) : nullptr;
+    }
+
     // A weapon fire cue's FGameplayCueParameters as the fire ability fills them: the pawn as instigator, the weapon as
     // causer, its item definition as source, the shot's end as location.
     void FillWeaponCueParameters(uint8_t* CueParameters, AFortPlayerPawnAthena* Pawn, AFortWeapon* Weapon, const FVector& ImpactLocation)
@@ -2996,7 +3007,14 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
             Log::Info(L"Battle Royale bots: {}'s {} didn't activate its fire ability: Core fires the bots' weapons and sends their fire cue", BotName, NameOf(Held->WeaponDefinition));
         }
     }
-    Pawn->PawnStartFire(0);
+    // The pawn's fire input, for a gun (its ability doesn't run for a bot, see bGameFireRefused). Not for the pickaxe:
+    // there the input starts the pickaxe's own melee ability (GAB_Melee_ImpactCombo_Athena activates for a bot, seen on
+    // a headless 5.30), whose swing plays the same montage as PlayFireMontage above, and two plays of one montage in a
+    // frame cancel out for the other players (PlayFireMontage, CoreV2 #389).
+    if (!bPickaxeEquipped)
+    {
+        Pawn->PawnStartFire(0);
+    }
     if (Weapon && Held && Weapon->AmmoCount > 0)
     {
         Weapon->AmmoCount = Weapon->AmmoCount - 1;
@@ -3037,9 +3055,25 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     if (Weapon && Held)
     {
         const FVector ShotImpact = bHit ? Center : !bClear ? BlockedAt : Eye + (RayLength > 1.0f ? Ray * (5000.0f / RayLength) : FVector());
-        PlayWeaponFireCue(Weapon, ShotImpact);
-        // Its tracer, to where it hit (the target, what stopped it) or past the target for a miss.
-        PlayWeaponImpactCue(Weapon, Eye, ShotImpact, bHit ? reinterpret_cast<UObject*>(Target) : !bClear ? Blocker : nullptr);
+        // Its tracer goes to where it hit (the target, what stopped it) or past the target for a miss.
+        UObject* ShotHit = bHit ? reinterpret_cast<UObject*>(Target) : !bClear ? Blocker : nullptr;
+        // An automatic gun's fire cue is held while its trigger is (PlayWeaponFireCue, CoreV2 #263); any other gun's
+        // fires with each shot.
+        const bool bHeldFireCue = UsesPersistentFireFX(Weapon);
+        if (bHeldFireCue)
+        {
+            PlayWeaponFireCue(Weapon, ShotImpact);
+        }
+        // The shot reaches the other players as a player's does, its fire and its hit in one batch
+        // (PlayBatchedDamageCues, CoreV2 #389); the two cues on their own where the pawn has no batch.
+        if (!PlayBatchedDamageCues(Weapon, Eye, ShotImpact, ShotHit, !bHeldFireCue))
+        {
+            if (!bHeldFireCue)
+            {
+                PlayWeaponFireCue(Weapon, ShotImpact);
+            }
+            PlayWeaponImpactCue(Weapon, Eye, ShotImpact, ShotHit);
+        }
     }
     if (!bClear)
     {
@@ -3188,9 +3222,9 @@ void FCoreAthenaBotController::PlayWeaponFireCue(AFortWeapon* Weapon, const FVec
     // isn't being activated by an inventory owner"), which 8.30's AFortAthenaAIBotController is (it owns an
     // AFortInventory) and a stock AAIController isn't. So Core fires the shot and sends what the ability would show: its
     // WeaponFireCue, executed on every client through the pawn's multicast, as GA_Ranged_GenericDamage does.
-    static UFunction* Multicast = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:NetMulticast_InvokeGameplayCueExecuted_WithParams");
     static UScriptStruct* CueParametersStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayCueParameters");
     AFortPlayerPawnAthena* Pawn = GetPawn();
+    UFunction* Multicast = PawnCueMulticast(Pawn, L"NetMulticast_InvokeGameplayCueExecuted_WithParams");
     const UObject* Ability = WeaponFireAbilityOf(Pawn, Weapon);
     if (!Multicast || !CueParametersStruct || !Ability)
     {
@@ -3339,13 +3373,13 @@ void FCoreAthenaBotController::PlayWeaponImpactCue(AFortWeapon* Weapon, const FV
     // What the ranged fire ability sends for each hit of its trace: its effect containers' ImpactCues executed with the
     // hit in the cue's effect context (FGameplayCueParameters::EffectContext, whose GetHitResult the weapon reads). Clients
     // play the tracer for a pawn they don't control only (the bot's pawn on every client).
-    static UFunction* Multicast = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:NetMulticast_InvokeGameplayCueExecuted_WithParams");
     static UFunction* MakeContext = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:MakeEffectContext");
     static UScriptStruct* CueParametersStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayCueParameters");
     static UStructProperty* ContextProperty = CueParametersStruct ? static_cast<UStructProperty*>(CueParametersStruct->FindPropertyByName(FName(L"EffectContext", FNAME_Find))) : nullptr;
     static UScriptStruct* ContainerStruct = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.FortGameplayEffectContainer");
     static UProperty* ImpactCuesProperty = ContainerStruct ? ContainerStruct->FindPropertyByName(FName(L"ImpactCues", FNAME_Find)) : nullptr;
     AFortPlayerPawnAthena* Pawn = GetPawn();
+    UFunction* Multicast = PawnCueMulticast(Pawn, L"NetMulticast_InvokeGameplayCueExecuted_WithParams");
     UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
     const UObject* Ability = WeaponFireAbilityOf(Pawn, Weapon);
     if (!Multicast || !MakeContext || !ContextProperty || !AbilitySystem || !Ability || !Weapon)
@@ -3408,6 +3442,84 @@ void FCoreAthenaBotController::PlayWeaponImpactCue(AFortWeapon* Weapon, const FV
     FillWeaponCueParameters(CueParameters, Pawn, Weapon, End);
     ContextProperty->Struct->CopyScriptStruct(CueParameters + ContextProperty->GetOffset_ForInternal(), ContextHandle);
     Params.Call(reinterpret_cast<UObject*>(Pawn));
+#endif
+}
+
+bool FCoreAthenaBotController::PlayBatchedDamageCues(AFortWeapon* Weapon, const FVector& Start, const FVector& End, UObject* HitActor, bool bWeaponActivate)
+{
+#if WITH_SERVER_CODE
+    // How the server sends the other players a player's shot or swing: the fire ability's WeaponFireCue
+    // (GameplayCue.Weapons.Activation) and its hit's ImpactCues (GameplayCue.Impact.Physical) go to the pawn's
+    // replication proxy, which batches them (5.30 0xC3D010, into AccumulatedBatchData) while the ability system serves
+    // the player's fire (0xA102A0), and then sends the batch (0xC48370): one NetMulticast_Athena_BatchedDamageCues with the
+    // hit's location, normal and actor and whether the weapon fired. Every other client (0xC53F10; 5.0 0xBFDF50) makes the
+    // cues' context itself, the pawn's CurrentWeapon as the effect causer and the weapon's muzzle as the trace's start,
+    // and executes the activation (the shot's sound and muzzle flash) and the impact on the pawn: for a gun
+    // AFortWeaponRanged::GameplayCue_Impact draws the tracer from the muzzle to the hit, for the pickaxe its hit's sound
+    // and effect. A magnitude of 0 leaves out the batch's damage cues: the damage's own response shows those.
+    // Core sent the two cues as separate executed multicasts instead, which no other player's shot uses (CoreV2 #389).
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UFunction* Multicast = PawnCueMulticast(Pawn, L"NetMulticast_Athena_BatchedDamageCues");
+    if (!Multicast || !Weapon)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Multicast, true);
+    // 3.0 to 5.0 take the batch in one struct (BatchData); 5.10 split it into what every client gets (SharedData) and
+    // the actors (NonSharedData).
+    const auto Field = [&](const wchar_t* Name) -> uint8_t*
+    {
+        for (const wchar_t* Part : { L"BatchData", L"SharedData", L"NonSharedData" })
+        {
+            UProperty* Property = Params.Has(Part) ? Multicast->FindPropertyByName(FName(Part, FNAME_Find)) : nullptr;
+            UProperty* Member = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty)
+                ? static_cast<UStructProperty*>(Property)->Struct->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+            if (Member)
+            {
+                return static_cast<uint8_t*>(Params.GetAddress(Part)) + Member->GetOffset_ForInternal();
+            }
+        }
+        return nullptr;
+    };
+    uint8_t* Location = Field(L"Location");
+    uint8_t* Normal = Field(L"Normal");
+    uint8_t* WeaponActivate = Field(L"bWeaponActivate");
+    uint8_t* Actor = Field(L"HitActor");
+    if (!Location || !Normal || !WeaponActivate || !Actor)
+    {
+        static bool bLoggedMissing = false;
+        if (!bLoggedMissing)
+        {
+            bLoggedMissing = true;
+            Log::Warning(L"Battle Royale bots: the pawn's batched damage cues lack a field (location {}, normal {}, weapon activate {}, hit actor {}): the bots' shots send their cues one by one",
+                Location ? L"found" : L"missing", Normal ? L"found" : L"missing", WeaponActivate ? L"found" : L"missing", Actor ? L"found" : L"missing");
+        }
+        return false;
+    }
+    // The hit's impact point and normal (the server's batch takes the hit result's ImpactPoint and ImpactNormal), facing
+    // back along the shot.
+    FVector Facing = Start - End;
+    const float Length = Facing.Size();
+    Facing = Length > 1.0f ? Facing * (1.0f / Length) : FVector(0.0f, 0.0f, 1.0f);
+    *reinterpret_cast<FVector*>(Location) = End;
+    *reinterpret_cast<FVector*>(Normal) = Facing;
+    *reinterpret_cast<bool*>(WeaponActivate) = bWeaponActivate;
+    *reinterpret_cast<UObject**>(Actor) = HitActor && HitActor->IsA(AActor::StaticClass()) ? HitActor : nullptr;
+    // The server's own flush sends only a batch marked valid.
+    if (uint8_t* Valid = Field(L"bIsValid"))
+    {
+        *reinterpret_cast<bool*>(Valid) = true;
+    }
+    static bool bLoggedPath = false;
+    if (!bLoggedPath)
+    {
+        bLoggedPath = true;
+        Log::Info(L"Battle Royale bots: shots and pickaxe hits reach the players as the game's batched damage cues ({}:{})", NameOf(reinterpret_cast<UObject*>(Multicast->GetOuter())),
+            Multicast->GetName().ToStdString());
+    }
+    return Params.Call(reinterpret_cast<UObject*>(Pawn));
+#else
+    return false;
 #endif
 }
 
@@ -5157,14 +5269,17 @@ bool FCoreAthenaBotController::SwingAtBuilding(ABuildingSMActor* Building, float
     {
         return false;
     }
-    // The swing's hit for the other players, as the melee ability sends it for a player's: its impact cue executed with
-    // the hit (the point the bot swings at, on the building) in the cue's context, which the pickaxe's impact handler
-    // (AFortWeapon::GameplayCue_Impact) plays as the hit's sound and effect on the building. The damage effect alone
-    // only took the building's health down, silently (CoreV2 #377).
+    // The swing's hit for the other players, as the melee ability sends it for a player's: its impact cue with the hit
+    // (the point the bot swings at, on the building), in the pawn's batched damage cues (PlayBatchedDamageCues), which
+    // the pickaxe's impact handler (AFortWeapon::GameplayCue_Impact) plays as the hit's sound and effect on the
+    // building. The damage effect alone only took the building's health down, silently (CoreV2 #377).
     if (OutDamage > 0.0f)
     {
         const FVector Eye = LocationOf(GetPawn()) + FVector(0.0f, 0.0f, 60.0f);
-        PlayWeaponImpactCue(Pickaxe, Eye, HarvestPoint, reinterpret_cast<UObject*>(Building));
+        if (!PlayBatchedDamageCues(Pickaxe, Eye, HarvestPoint, reinterpret_cast<UObject*>(Building), false))
+        {
+            PlayWeaponImpactCue(Pickaxe, Eye, HarvestPoint, reinterpret_cast<UObject*>(Building));
+        }
     }
     return true;
 }
@@ -5197,6 +5312,12 @@ void FCoreAthenaBotController::PlayFireMontage()
     }
     if (Found->second.first)
     {
+        // Once per swing. Each play through the ability system (UAbilitySystemComponent::PlayMontage) flips the
+        // replicated montage's ForcePlayBit, and another client replays a montage it is already showing only when that
+        // bit has changed since the pawn's last update (OnRep_ReplicatedAnimMontage). The pawn's fire input started the
+        // pickaxe's own melee ability right before (5.30: GAB_Melee_ImpactCombo_Athena, its PlayerMeleeCombo with the
+        // bit flipped once, then flipped back by this), so every swing after the first reached the clients as no change
+        // at all; seen on a headless 5.30 (CoreV2 #389). The fire input is now left out for the pickaxe.
         if (PlayReplicatedMontage(Found->second.first, Found->second.second))
         {
             EndMontageAfterSection(Found->second.first);
@@ -6459,8 +6580,9 @@ bool FCoreAthenaBotController::Harvest(float Now)
     }
     NextHarvestSwing = Now + 0.9f;
     ++Swings;
-    Pawn->PawnStartFire(0);
-    Pawn->PawnStopFire(0);
+    // No fire input here (the pawn's PawnStartFire and PawnStopFire, which this did until CoreV2 #389): on 5.30 it starts
+    // the pickaxe's own melee ability, whose swing SwingAtBuilding's montage then replaced in the same frame, and the two
+    // plays cancelled out for the other players (PlayFireMontage).
     float Damage = 0.0f;
     bHarvestCredited = false;
     const bool bApplied = SwingAtBuilding(Target, Damage);

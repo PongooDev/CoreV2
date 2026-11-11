@@ -591,6 +591,12 @@ private:
     // tracer from the muzzle to the hit (AFortWeaponRanged::PlayBulletFireFX, for a pawn the client doesn't control) and
     // its impact. The fire cue alone has no hit, so the bots' shots showed no tracers (CoreV2 #373).
     void PlayWeaponImpactCue(AFortWeapon* Weapon, const FVector& Start, const FVector& End, UObject* HitActor);
+    // A shot or a pickaxe hit as the server sends a player's to the others: the pawn's NetMulticast_Athena_BatchedDamageCues
+    // (AFortPlayerPawnAthena's, AFortPawn's from 5.40) with the hit's point, normal and actor and whether the weapon
+    // fired; each client plays the weapon's fire (sound, muzzle flash) and its impact (the tracer from the muzzle, the
+    // hit's effect) from it. False where the pawn has no batch, for the cues one by one (PlayWeaponFireCue,
+    // PlayWeaponImpactCue).
+    bool PlayBatchedDamageCues(AFortWeapon* Weapon, const FVector& Start, const FVector& End, UObject* HitActor, bool bWeaponActivate);
     // Whether the game's fire works for this weapon class: unknown until a shot shows it spending ammo or not.
     void CheckWeaponFireResult(float Now);
 

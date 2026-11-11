@@ -191,6 +191,84 @@ namespace
         }
         return Found;
     }
+
+    // 6.00 (CL-4395664 0x2B33390) has FLwsWebSocketsManager::InitWebSockets give libwebsockets FHttpModule's proxy
+    // (lws_context_creation_info::http_proxy_address, from -httpproxy), which 5.41's (0x2ACF7F0) doesn't. Every WebSocket
+    // then opens with "CONNECT host:port" to the backend the launcher names as the proxy, and the backend takes a CONNECT
+    // for a TLS tunnel to an Epic https host, so the plain ws:// matchmaking connection failed on the client
+    // (Core-Backend #327: "Connecting to matchmaking service", FailedToConnectToMMS) and on the server
+    // (HandleWebSocketConnectionError, then AFortGameSessionDedicated::Restart reloads the map). Redirect points the
+    // WebSockets at the backend itself, as on every build before 6.00, so the manager initialises with the HTTP module's
+    // proxy address empty and the address goes back afterwards for libcurl.
+    using FInitWebSockets = uintptr_t (*)(void* Manager, const void* Protocols);
+    using FGetHttpModule = uint8_t* (*)();
+    FInitWebSockets InitWebSocketsOG = nullptr;
+    FGetHttpModule GetHttpModule = nullptr;
+    int32_t HttpProxyAddressOffset = -1;
+
+    uintptr_t InitWebSocketsHK(void* Manager, const void* Protocols)
+    {
+        // FHttpModule::HttpProxyAddress, an FString (data, count, capacity): empty while libwebsockets reads it.
+        uint8_t* const ProxyAddress = GetHttpModule() + HttpProxyAddressOffset;
+        uint8_t Saved[16];
+        std::memcpy(Saved, ProxyAddress, sizeof(Saved));
+        std::memset(ProxyAddress, 0, sizeof(Saved));
+        const uintptr_t Result = InitWebSocketsOG(Manager, Protocols);
+        std::memcpy(ProxyAddress, Saved, sizeof(Saved));
+        Log::Info(L"Redirect: libwebsockets started without the HTTP proxy, so WebSockets go straight to their host");
+        return Result;
+    }
+
+    // In InitWebSockets: the call to FHttpModule::Get, then the proxy address's test, `cmp dword ptr [rax+Count], 1; jle`,
+    // and its read, `mov r64, [rax+Data]` with Count = Data + 8 (6.00 0x2B33697: call 0x1F1DE20 ... cmp [rax+50h], 1;
+    // jle; mov rdx, [rax+48h]).
+    void HookWebSocketsProxy()
+    {
+        uintptr_t Init = 0;
+        for (const uintptr_t Ref : Finder::StringRefs(L"Failed to initialize libwebsockets"))
+        {
+            const uintptr_t Function = Finder::FunctionStart(Ref);
+            Init = !Init || Init == Function ? Function : static_cast<uintptr_t>(-1);
+        }
+        const uintptr_t End = Init && Init != static_cast<uintptr_t>(-1) ? Finder::FunctionEnd(Init) : 0;
+        uintptr_t Get = 0;
+        int32_t Offset = -1;
+        for (uintptr_t Site = Init; End && Site + 10 <= End && Offset < 0; ++Site)
+        {
+            const auto* Code = reinterpret_cast<const uint8_t*>(Site);
+            if (Code[0] != 0x83 || Code[1] != 0x78 || Code[3] != 0x01 || Code[4] != 0x7E || Code[6] != 0x48 || Code[7] != 0x8B
+                || (Code[8] & 0xC7) != 0x40 || Code[9] + 8 != Code[2])
+            {
+                continue;
+            }
+            for (uintptr_t Call = Site - 5; Call >= Init && Call + 0x30 > Site; --Call)
+            {
+                const uintptr_t Target = *reinterpret_cast<const uint8_t*>(Call) == 0xE8 ? Finder::RelativeTarget(Call, 1, 5) : 0;
+                if (Target >= Finder::TextBegin() && Target < Finder::TextEnd() && Finder::FunctionStart(Target) == Target)
+                {
+                    Get = Target;
+                    Offset = Code[9];
+                    break;
+                }
+            }
+        }
+        if (!Get)
+        {
+            // Before 6.00 the manager never reads the HTTP proxy.
+            return;
+        }
+        const std::vector<void**> Slots = Finder::ReadOnlySlotsHolding(Init);
+        if (Slots.size() != 1)
+        {
+            Log::Error(L"Redirect: FLwsWebSocketsManager::InitWebSockets (0x{:X}) is in {} vtable slots, WebSockets keep the HTTP proxy", Init - Finder::ImageBase(), Slots.size());
+            return;
+        }
+        GetHttpModule = reinterpret_cast<FGetHttpModule>(Get);
+        HttpProxyAddressOffset = Offset;
+        Log::Info(L"Redirect: FLwsWebSocketsManager::InitWebSockets 0x{:X} gives libwebsockets the HTTP proxy (FHttpModule::Get 0x{:X}, HttpProxyAddress +0x{:X})",
+            Init - Finder::ImageBase(), Get - Finder::ImageBase(), Offset);
+        Hooks::SwapVTable(L"FLwsWebSocketsManager::InitWebSockets", Slots.front(), 0, reinterpret_cast<void*>(&InitWebSocketsHK), reinterpret_cast<void**>(&InitWebSocketsOG));
+    }
 }
 
 bool HttpRedirect::Hook()
@@ -211,8 +289,10 @@ bool HttpRedirect::Hook()
     const bool bWinInet = !bWinInetBuilt || HookRequest(L"FHttpRequestWinInet::SetURL",
         L"ProcessRequest failed. Could not initialize Internet connection.",
         &WinInetSetURLOG, &SetURL<&WinInetSetURLOG>);
-    // The client's STOMP notifications (StompClientMcp) connect through libwebsockets, which doesn't use the HTTP proxy,
-    // to the service config's URL, read before the hotfix can change it (Backend-Evidence "STOMP").
+    // The client's STOMP notifications (StompClientMcp) connect through libwebsockets, which doesn't use the HTTP proxy
+    // (from 6.00 it would, HookWebSocketsProxy), to the service config's URL, read before the hotfix can change it
+    // (Backend-Evidence "STOMP").
+    HookWebSocketsProxy();
     const std::vector<uintptr_t> CreateWebSockets = FindCreateWebSockets();
     if (CreateWebSockets.empty() || CreateWebSockets.size() > 2)
     {

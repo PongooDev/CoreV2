@@ -24,23 +24,28 @@ void UFortGameInstance::Hook()
         Hooks::WriteBytes(L"UFortGameInstance::StartGameInstance IsDedicatedServerInstance", Check, Skip);
     }
 
-    uintptr_t Init = 0;
+    // The function that names the chatroom, then the function the piece holding the name jumps back into.
+    std::vector<uintptr_t> Candidates;
     for (uintptr_t Reference : Finder::StringRefs(L"TeamChatroom"))
     {
-        Init = Init ? Init : Finder::FunctionStart(Reference);
+        Candidates.push_back(Finder::FunctionStart(Reference));
         // 5.40 (CL-4352937): the packer moved the piece that names the chatroom into its own section, with no .pdata
         // entry (lea rdx, "TeamChatroom" at 0x5CD0E6A), and it jumps back into Init's body (jmp 0xE33718), whose
-        // .pdata entry chains to Init's (0xE33550). The first jmp after the reference leads back.
-        for (uintptr_t Jump = Reference + 7; !Init && Jump + 5 <= Reference + 0x20; ++Jump)
+        // .pdata entry chains to Init's (0xE33550). The first jmp after the reference leads back. 5.41 (CL-4363240) moved
+        // the piece within the first .text and gave it a .pdata entry of its own, unchained (0x8B50D0, lea at 0x8B5184),
+        // so the reference's function is the piece, which no vtable holds; its jmp (0x8B518F) leads back to 0xE34AE8,
+        // whose entry chains to Init's (0xE34920).
+        for (uintptr_t Jump = Reference + 7; Jump + 5 <= Reference + 0x20; ++Jump)
         {
             if (*reinterpret_cast<const uint8_t*>(Jump) == 0xE9)
             {
-                Init = Finder::FunctionStart(Finder::RelativeTarget(Jump, 1, 5));
+                Candidates.push_back(Finder::FunctionStart(Finder::RelativeTarget(Jump, 1, 5)));
                 break;
             }
         }
     }
-    if (!Init)
+    std::erase(Candidates, uintptr_t{ 0 });
+    if (Candidates.empty())
     {
         Log::Error(L"Finder: UFortGameInstance::Init not found");
         return;
@@ -50,7 +55,17 @@ void UFortGameInstance::Hook()
     // vtables that hold it, data the check doesn't look at.
     if (Packed::ChecksCodeOnFirstTicks())
     {
-        const std::vector<void**> Slots = Finder::ReadOnlySlotsHolding(Init);
+        uintptr_t Init = 0;
+        std::vector<void**> Slots;
+        for (const uintptr_t Candidate : Candidates)
+        {
+            Slots = Finder::ReadOnlySlotsHolding(Candidate);
+            if (!Slots.empty())
+            {
+                Init = Candidate;
+                break;
+            }
+        }
         if (Slots.empty())
         {
             Log::Error(L"Finder: UFortGameInstance::Init is in no vtable");
@@ -63,7 +78,7 @@ void UFortGameInstance::Hook()
         }
         return;
     }
-    Hooks::Detour(L"UFortGameInstance::Init", reinterpret_cast<void*>(Init), &InitHK, &InitOG);
+    Hooks::Detour(L"UFortGameInstance::Init", reinterpret_cast<void*>(Candidates.front()), &InitHK, &InitOG);
 }
 
 void UFortGameInstance::InitHK(UFortGameInstance* This)

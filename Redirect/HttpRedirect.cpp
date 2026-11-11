@@ -200,7 +200,15 @@ bool HttpRedirect::Hook()
     const bool bCurl = HookRequest(L"FCurlHttpRequest::SetURL",
         L"Could not set libcurl options for easy handle, processing HTTP request failed. Increase verbosity for additional information.",
         &CurlSetURLOG, &SetURL<&CurlSetURLOG>);
-    const bool bWinInet = HookRequest(L"FHttpRequestWinInet::SetURL",
+    // 5.41 (CL-4363240) has no WinInet requests: FHttpModule::StartupModule only warns that "-HTTP=WinInet is no longer
+    // valid" (0x1EBB2F9) and makes every request libcurl's, so there is no FHttpRequestWinInet vtable to hook.
+    static constexpr wchar_t WinInetRemoved[] = L"-HTTP=WinInet is no longer valid";
+    const bool bWinInetBuilt = !Finder::FindReadOnly(WinInetRemoved, sizeof(WinInetRemoved));
+    if (!bWinInetBuilt)
+    {
+        Log::Info(L"Redirect: this build has no WinInet requests (\"-HTTP=WinInet is no longer valid\"), libcurl's carry them all");
+    }
+    const bool bWinInet = !bWinInetBuilt || HookRequest(L"FHttpRequestWinInet::SetURL",
         L"ProcessRequest failed. Could not initialize Internet connection.",
         &WinInetSetURLOG, &SetURL<&WinInetSetURLOG>);
     // The client's STOMP notifications (StompClientMcp) connect through libwebsockets, which doesn't use the HTTP proxy,

@@ -93,6 +93,7 @@ public:
     DefineUProperty(int32_t, WarmupRequiredPlayerCount)
     DefineUProperty(float, FailedMatchAssignmentTimeout)
     DefineUProperty(UObject*, AISettings)
+    static bool HasAISettings() { return Member_AISettings.IsAvailable(); }
 
     // The matchmaking service's assignment of a match to the server (the game session's delegate, on its vtable slot):
     // AFortGameMode's (the match options), then the game state's playlist, the match's player count and its warmup's

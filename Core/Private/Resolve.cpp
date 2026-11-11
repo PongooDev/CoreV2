@@ -9455,7 +9455,7 @@ bool Finder::ResolvePlaylistDataTablesLive()
     return true;
 }
 
-bool Finder::ResolveSetCurrentPlaylistIdLive()
+bool Finder::ResolveSetCurrentPlaylistIdLive(ptrdiff_t StormReachedFinalPositionOffset)
 {
     static bool bSearched = false;
     if (Natives::AFortGameStateAthena_SetCurrentPlaylistId || bSearched)
@@ -9465,11 +9465,47 @@ bool Finder::ResolveSetCurrentPlaylistIdLive()
     bSearched = true;
 
     // AFortGameStateAthena::SetCurrentPlaylistId (4.1 0xA6DD20, 4.2 0xA592E0) logs the playlist it found in the game
-    // mode's playlist manager, then sets CurrentPlaylistData and loads its assets.
-    const uintptr_t Function = FunctionOf(L"PLAYLIST: Playlist Object found in AFortGameStateAthena::SetCurrentPlaylistId() PlaylistName is %s (Server Only)");
+    // mode's playlist manager, then sets CurrentPlaylistData and loads its assets. 4.4 and 4.5 log it from two
+    // functions, the id's (4.5 0xA7FF10) and the name's (0xA800A0), which OnGivenMatchAssignment calls; the id's is the
+    // one that clears bStormReachedFinalPosition first ("mov byte ptr [rcx + 0x1039], 0"). 5.0 to 5.21 inline both
+    // copies into AFortGameModeAthena::OnGivenMatchAssignment (5.21 0xBD59E0, which logs "Assignment Received"), which
+    // the old first-reference read took for it (#388: the -CoreBotMatch call crashed 5.21 in AFortGameMode's half),
+    // and 5.30 strips them with it: none of its own there, and AFortGameStateAthena::SetCurrentPlaylistId runs its steps.
+    const uintptr_t Assignment = FunctionOf(L"PLAYLIST: Assignment Received in AFortGameModeAthena::OnGivenMatchAssignment() PlaylistId is %d (Server-Only)");
+    std::vector<uintptr_t> Candidates;
+    for (const uintptr_t Reference : Finder::StringRefs(L"PLAYLIST: Playlist Object found in AFortGameStateAthena::SetCurrentPlaylistId() PlaylistName is %s (Server Only)"))
+    {
+        const uintptr_t Candidate = Finder::FunctionStart(Reference);
+        if (Candidate && Candidate != Assignment && std::find(Candidates.begin(), Candidates.end(), Candidate) == Candidates.end())
+        {
+            Candidates.push_back(Candidate);
+        }
+    }
+    uintptr_t Function = Candidates.size() == 1 ? Candidates.front() : 0;
+    if (Candidates.size() > 1 && StormReachedFinalPositionOffset > 0)
+    {
+        const int32_t Offset = static_cast<int32_t>(StormReachedFinalPositionOffset);
+        const auto Bytes = [](int32_t Value, int32_t Index) { return (Value >> (8 * Index)) & 0xFF; };
+        for (const uintptr_t Candidate : Candidates)
+        {
+            if (FindInstruction(Candidate, Candidate + 0x30, { 0xC6, -1, Bytes(Offset, 0), Bytes(Offset, 1), Bytes(Offset, 2), Bytes(Offset, 3), 0x00 }))
+            {
+                Function = Function ? UINTPTR_MAX : Candidate;
+            }
+        }
+        Function = Function == UINTPTR_MAX ? 0 : Function;
+    }
     if (!Function)
     {
-        Log::Error(L"Finder: AFortGameStateAthena::SetCurrentPlaylistId not found");
+        if (Candidates.empty())
+        {
+            Log::Info(L"Finder: no AFortGameStateAthena::SetCurrentPlaylistId of its own on this build (OnGivenMatchAssignment {}), Core runs its steps",
+                Assignment ? L"inlines it" : L"strips it");
+        }
+        else
+        {
+            Log::Error(L"Finder: AFortGameStateAthena::SetCurrentPlaylistId not told apart from the name's ({} functions log it), Core runs its steps", Candidates.size());
+        }
         return false;
     }
     Natives::AFortGameStateAthena_SetCurrentPlaylistId = reinterpret_cast<decltype(Natives::AFortGameStateAthena_SetCurrentPlaylistId)>(Function);
@@ -9511,14 +9547,16 @@ bool Finder::ResolveMatchAssignmentLive(void** GameModeVTable)
     Natives::AFortGameMode_OnGivenMatchAssignmentIndex = Index;
 
     // AFortGameMode::SetCurrentPlaylistName (5.30 0xE40340) and AFortGameState::StartStreamingAdditionalPlaylistLevel
-    // (5.30 0xE42750) log these.
+    // (5.21 0xE1FE60, 5.30 0xE42750) log these. Only the restored OnGivenMatchAssignment (5.30 on) and
+    // AFortGameStateAthena::SetCurrentPlaylistId's steps (5.0 on) use them; builds without playlist assets (before 3.5)
+    // or without the name's setter have none.
     const uintptr_t SetCurrentPlaylistName = FunctionOf(L"AFortGameMode::SetCurrentPlaylistName(%s) set playlist to (%s, ID: %d)");
     const uintptr_t StartStreaming = FunctionOf(L"PLAYLIST: Failed to locate valid level to be streamed %s");
     Natives::AFortGameMode_SetCurrentPlaylistName = reinterpret_cast<decltype(Natives::AFortGameMode_SetCurrentPlaylistName)>(SetCurrentPlaylistName);
     Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel = reinterpret_cast<decltype(Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel)>(StartStreaming);
-    Log::Info(L"Finder: AFortGameMode::OnGivenMatchAssignment is slot 0x{:X} (0x{:X}), SetCurrentPlaylistName 0x{:X}, StartStreamingAdditionalPlaylistLevel 0x{:X}",
-        Index, OnGivenMatchAssignment - Finder::ImageBase(), SetCurrentPlaylistName ? SetCurrentPlaylistName - Finder::ImageBase() : 0,
-        StartStreaming ? StartStreaming - Finder::ImageBase() : 0);
+    const auto Where = [](uintptr_t Function) { return Function ? std::format(L"0x{:X}", Function - Finder::ImageBase()) : std::wstring(L"none on this build"); };
+    Log::Info(L"Finder: AFortGameMode::OnGivenMatchAssignment is slot 0x{:X} (0x{:X}), SetCurrentPlaylistName {}, StartStreamingAdditionalPlaylistLevel {}",
+        Index, OnGivenMatchAssignment - Finder::ImageBase(), Where(SetCurrentPlaylistName), Where(StartStreaming));
     return true;
 }
 

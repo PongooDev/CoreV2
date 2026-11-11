@@ -71,6 +71,7 @@ public:
     // The AI of the playlist's match (UAthenaAISettings), which the game mode takes as its AISettings; Battle Royale's
     // own playlists have none.
     DefineUProperty(UObject*, AISettings)
+    static bool HasAISettings() { return Member_AISettings.IsAvailable(); }
     // The game's own code plays a FirstToGoalScore playlist (5.30): AFortPlayerStateAthena scores the playlist's events
     // into TotalPlayerScore and its AFortTeamInfoAthena's score (a searched container's tags in
     // AFortPlayerController::ServerAttemptInteract, a supply drop's or llama's in AFortAthenaSupplyDrop::

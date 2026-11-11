@@ -69,13 +69,31 @@ public:
     DefineUProperty(int32_t, CurrentPlaylistId)
     static bool HasCurrentPlaylistId() { return Member_CurrentPlaylistId.IsAvailable(); }
     // Whether the playlist's assets have loaded (LoadCurrentPlaylistData, then OnPlaylistDataLoadCompleted), or are
-    // loading.
+    // loading (from 4.2).
     DefineUProperty(bool, bPlaylistDataIsLoaded)
     DefineUProperty(bool, bPlaylistDataIsActivelyLoading)
+    static bool HasPlaylistDataLoadState() { return Member_bPlaylistDataIsLoaded.IsAvailable() && Member_bPlaylistDataIsActivelyLoading.IsAvailable(); }
     // 5.30 0xBEC6C0: what a client does with a playlist that has replicated, and what the stripped server side did
     // after setting it (5.21's AFortGameModeAthena::OnGivenMatchAssignment, 0xBD59E0): the game state's values from it
-    // (0xBD2710), then LoadCurrentPlaylistData (0xBD3AD0).
+    // (0xBD2710), then LoadCurrentPlaylistData (0xBD3AD0). 4.5's (0xA77500) and 5.0's (0xBC4050) do the same.
     DefineUFunction(OnRep_CurrentPlaylistData)
+    // From 3.5; SetCurrentPlaylistId clears it (4.4 0xA922C0, 5.21 0xBD5CC7).
+    DefineUProperty(bool, bStormReachedFinalPosition)
+    static bool HasStormReachedFinalPosition() { return Member_bStormReachedFinalPosition.IsAvailable(); }
+
+    // Gives the game state the playlist manager's playlist with that id (the world's game mode's PlaylistManager) and
+    // loads it: CurrentPlaylistData, its values and LoadCurrentPlaylistData, whose end has the game mode's
+    // OnPlaylistDataLoaded build the aircraft paths and apply the playlist's tables, then the playlist's additional
+    // levels. Nothing when the game state has that playlist already, loaded or loading. The game's own on 3.5 to 4.5
+    // (4.2 0xA592E0, 4.5 0xA7FF10); 5.0 to 5.21 inline it into AFortGameModeAthena::OnGivenMatchAssignment (5.21
+    // 0xBD5CBA), and 5.30 strips it with that, so Core runs its steps there.
+    void SetCurrentPlaylistId(int32_t PlaylistId);
+    // The same with the playlist's name, which OnGivenMatchAssignment uses when the game mode has it (4.5 0xA800A0, a
+    // function of its own that logs as the id's does; 5.21 0xBD5B68, inlined). Core's steps on every build.
+    void SetCurrentPlaylistId(FName PlaylistName);
+    // The playlist's additional levels stream in, on the server (21.40's name; 5.21 0xBE7080, which 5.30 strips):
+    // AFortGameState::StartStreamingAdditionalPlaylistLevel with each one's package name.
+    void StreamAdditionalPlaylistLevels();
     // 3.5: the playlist's bIsLargeTeamGame, on the game state (the game mode's before 3.5, with bFiftyFiftySquadPlay,
     // which 3.5 dropped).
     DefineUProperty(bool, bIsLargeTeamGame)
@@ -86,6 +104,7 @@ public:
     DefineUProperty(uint8_t, AirCraftBehavior)
     DefineUProperty(TArray<AFortAthenaAircraft*>, Aircrafts)
     static bool HasAircrafts() { return Member_AirCraftBehavior.IsAvailable() && Member_Aircrafts.IsAvailable(); }
+    static bool HasAirCraftBehavior() { return Member_AirCraftBehavior.IsAvailable(); }
 
     static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
 };

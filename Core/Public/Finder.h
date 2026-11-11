@@ -213,8 +213,10 @@ namespace Finder
     // build of the aircraft paths; false (and nothing set) where StartAircraftPhase still builds them (3.5 to 4.1).
     // FlightPathInitializedOffset: AFortGameModeAthena's bFlightPathInitialized.
     bool ResolveFlightPathLive(ptrdiff_t FlightPathInitializedOffset);
-    // From 3.5: AFortGameStateAthena::SetCurrentPlaylistId (Natives), from its log string.
-    bool ResolveSetCurrentPlaylistIdLive();
+    // 3.5 to 4.5: AFortGameStateAthena::SetCurrentPlaylistId (Natives), from its log string; false where it has no
+    // function of its own (5.0 to 5.21 inline it into OnGivenMatchAssignment, 5.30 strips it).
+    // StormReachedFinalPositionOffset: AFortGameStateAthena's bStormReachedFinalPosition, which the id's clears (4.4, 4.5).
+    bool ResolveSetCurrentPlaylistIdLive(ptrdiff_t StormReachedFinalPositionOffset);
     // AFortGameMode::OnGivenMatchAssignment and its slot in AFortGameMode's vtable, AFortGameMode::SetCurrentPlaylistName
     // and AFortGameState::StartStreamingAdditionalPlaylistLevel (Natives), from their strings. False without the first.
     // GameModeVTable: AFortGameMode's default object's.

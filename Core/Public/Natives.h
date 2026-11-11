@@ -533,10 +533,10 @@ namespace Natives
     // AFortGameModeAthena::OnPlaylistDataLoaded (0xA1BE40). Null on 3.5 to 4.1, whose StartAircraftPhase builds them too.
     inline bool (*AFortAthenaMapInfo_IsMapInfoValidForAircraft)(AFortAthenaMapInfo* This) = nullptr;
     inline void (*AFortAthenaMapInfo_InitializeFlightPath)(AFortAthenaMapInfo* This, AFortGameStateAthena* GameState) = nullptr;
-    // From 3.5 (Finder::ResolveSetCurrentPlaylistIdLive): AFortGameStateAthena::SetCurrentPlaylistId (4.1 0xA6DD20, 4.2
-    // 0xA592E0), which gives the game state the game mode's playlist and loads its assets (OnPlaylistDataLoaded follows).
-    // 4.1's AFortGameModeAthena::InitGameState (0xA2B880) calls it at the world's start; 4.2 only from
-    // OnGivenMatchAssignment (0xA1B5F0).
+    // 3.5 to 4.5 (Finder::ResolveSetCurrentPlaylistIdLive): AFortGameStateAthena::SetCurrentPlaylistId (4.1 0xA6DD20,
+    // 4.2 0xA592E0, 4.5 0xA7FF10), which gives the game state the game mode's playlist and loads its assets
+    // (OnPlaylistDataLoaded follows). 4.1's AFortGameModeAthena::InitGameState (0xA2B880) calls it at the world's start;
+    // 4.2 only from OnGivenMatchAssignment (0xA1B5F0). Null from 5.0, which inlines it there.
     inline void (*AFortGameStateAthena_SetCurrentPlaylistId)(AFortGameStateAthena* This, int32_t PlaylistId) = nullptr;
     // Finder::ResolveMatchAssignmentLive. AFortGameMode::OnGivenMatchAssignment(bSuccess, MatchOptions) (5.21 0xE0F360,
     // 5.30 0xE31710): the match options' custom key and playtest name; the matchmaking service's assignment reaches the

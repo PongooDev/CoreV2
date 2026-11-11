@@ -369,6 +369,8 @@ private:
     int32_t LastWantedTotal = 0;
     double SpawnMsMax = 0.0;
     bool bLoggedSpawnStart = false;
+    // -CoreBotMatch: the world's playlist was asked for, the match started (once that playlist loaded), the bus left.
+    bool bBotMatchPlaylistSet = false;
     bool bBotMatchStarted = false;
     bool bBotMatchAircraftStarted = false;
     std::vector<TWeakObjectPtr<AFortPawn>> EnemyPawns;

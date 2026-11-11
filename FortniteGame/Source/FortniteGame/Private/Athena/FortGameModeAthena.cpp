@@ -2773,66 +2773,15 @@ void AFortGameModeAthena::OnGivenMatchAssignment(bool bSuccess, const void* Matc
 
     // The game state's playlist (5.21's AFortGameStateAthena::SetCurrentPlaylistId, inlined there): the playlist of that
     // name, else of the game mode's id, unless the game state has it already, loaded or loading.
-    AFortGameStateAthena* GameState = AthenaGameStateOf(this);
-    UFortPlaylistManager* Playlists = PlaylistManager;
-    if (GameState && Playlists && AFortGameStateAthena::HasCurrentPlaylistData())
+    if (AFortGameStateAthena* GameState = AthenaGameStateOf(this))
     {
-        UFortPlaylistAthena* Current = GameState->CurrentPlaylistData;
-        const bool bLoadedOrLoading = GameState->bPlaylistDataIsLoaded || GameState->bPlaylistDataIsActivelyLoading;
-        UFortPlaylistAthena* Playlist = nullptr;
         if (!PlaylistName.IsNone())
         {
-            UFortPlaylistAthena* Named = Playlists->GetPlaylist(PlaylistName);
-            Playlist = Named != Current || !bLoadedOrLoading ? Named : nullptr;
+            GameState->SetCurrentPlaylistId(PlaylistName);
         }
-        else if (GameState->Role == ROLE_Authority && (!Current || Current->PlaylistId != CurrentPlaylistId || !bLoadedOrLoading))
+        else
         {
-            Playlist = Playlists->GetPlaylist(static_cast<int32_t>(CurrentPlaylistId));
-        }
-        if (Playlist)
-        {
-            Log::Info(L"PLAYLIST: Playlist Object found in AFortGameStateAthena::SetCurrentPlaylistId() PlaylistName is {} (Server Only)",
-                static_cast<FName>(Playlist->PlaylistName).ToStdString());
-            CurrentPlaylistId = Playlist->PlaylistId;
-            if (AFortGameStateAthena::HasCurrentPlaylistId())
-            {
-                GameState->CurrentPlaylistId = Playlist->PlaylistId;
-            }
-            GameState->CurrentPlaylistData = Playlist;
-            GameState->AirCraftBehavior = Playlist->AirCraftBehavior;
-            // AFortGameModeAthena::SetAISettings (5.21 0xBD80F0), stripped with it, also hands them to the world's AI
-            // system; Battle Royale's playlists have none.
-            if (UObject* PlaylistAISettings = Playlist->AISettings)
-            {
-                AISettings = PlaylistAISettings;
-                Log::Warning(L"PLAYLIST: {} has AI settings ({}); the game mode takes them, the world's AI system doesn't", static_cast<FName>(Playlist->PlaylistName).ToStdString(),
-                    PlaylistAISettings->GetName().ToStdString());
-            }
-            // 5.21's next two steps, the game state's values from the playlist (0xBD2710) and LoadCurrentPlaylistData
-            // (0xBD3AD0), are 5.30's OnRep_CurrentPlaylistData (0xBEC6C0), whose "(Client Only)" log shows on the server.
-            if (UFunction* OnRep = AFortGameStateAthena::FindStaticFunction_OnRep_CurrentPlaylistData())
-            {
-                Reflection::FParams Params(OnRep);
-                Params.Call(GameState);
-            }
-            // The playlist's additional levels stream in (0xBE7080).
-            if (GameState->Role == ROLE_Authority && UFortPlaylist::HasAdditionalLevels() && Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel)
-            {
-                const TArray<TAssetPtr<UWorld>>& Levels = Playlist->AdditionalLevels;
-                for (int32_t Index = 0; Index < Levels.Num(); ++Index)
-                {
-                    const FStringAssetReference& Level = SoftElementAt(Levels, Index).ToStringReference();
-                    if (Level.IsValid())
-                    {
-                        const FString PackageName = Level.GetLongPackageName();
-                        Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel(reinterpret_cast<AFortGameState*>(GameState), FName(*PackageName));
-                    }
-                }
-            }
-        }
-        else if (!Current)
-        {
-            Log::Warning(L"PLAYLIST: the assigned playlist {} isn't one of the playlist manager's, so the game state has none", PlaylistText);
+            GameState->SetCurrentPlaylistId(static_cast<int32_t>(CurrentPlaylistId));
         }
     }
 

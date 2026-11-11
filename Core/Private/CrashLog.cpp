@@ -16,12 +16,18 @@ namespace
 
     std::atomic<int> LoggedExceptions = 0;
     std::atomic<int> LoggedOtherExceptions = 0;
+    std::atomic<int> LoggedEngineErrorReports = 0;
     thread_local bool bInHandler = false;
 
     // The engine's fatal errors (UE_LOG Fatal, a failed check, LowLevelFatalError, Core's own check) end in
     // FPlatformMisc::RaiseException(1) (1.8.1 0x135B6C0, from FOutputDeviceWindowsError::Serialize and
     // FDebug::AssertFailed). A 1.8.1 server died with none of the codes below and nothing in its Core log (CoreV2 #352).
-    constexpr DWORD EngineFatalErrorCode = 1;
+    // The ensures and FThreadHeartBeat's hang reports raise the same code inside their own __try, and the game carries
+    // on: a 5.41 server's "Hang detected on GameThread" (a 56 s garbage collection on a PC short of memory, 2026-11-11)
+    // went FThreadHeartBeat::Run (0x15C5760) -> the ensure report (0x16884B0) -> RaiseException(1) at 0x1689B20, and the
+    // server kept running. So the line says it may be either, and these have their own count, so reports the game
+    // survives can't use up the crashes' lines.
+    constexpr DWORD EngineErrorReportCode = 1;
     // MSVC's C++ throw. Core catches none, so one Core throws ends the process.
     constexpr DWORD CppExceptionCode = 0xE06D7363;
 
@@ -49,7 +55,7 @@ namespace
             return true;
 #if WITH_SERVER_CODE
         case EXCEPTION_STACK_OVERFLOW:
-        case EngineFatalErrorCode:
+        case EngineErrorReportCode:
             return true;
         case CppExceptionCode:
             return IsThrownByCore(Record);
@@ -127,8 +133,8 @@ namespace
         {
         case EXCEPTION_STACK_OVERFLOW:
             return L" (stack overflow)";
-        case EngineFatalErrorCode:
-            return L" (engine fatal error, the reason is in FortniteGame.log)";
+        case EngineErrorReportCode:
+            return L" (engine error report: a fatal error, or an ensure or hang report the game carries on from; FortniteGame.log says which)";
 #if WITH_SERVER_CODE
         case CppExceptionCode:
             return DescribeCppException(Record);
@@ -151,7 +157,8 @@ namespace
 #else
         const bool bOtherError = false;
 #endif
-        if (bCrash ? LoggedExceptions.fetch_add(1) >= MaxLoggedExceptions : !bOtherError || LoggedOtherExceptions.fetch_add(1) >= MaxLoggedExceptions)
+        std::atomic<int>& Logged = Record->ExceptionCode == EngineErrorReportCode ? LoggedEngineErrorReports : bCrash ? LoggedExceptions : LoggedOtherExceptions;
+        if ((!bCrash && !bOtherError) || Logged.fetch_add(1) >= MaxLoggedExceptions)
         {
             return EXCEPTION_CONTINUE_SEARCH;
         }

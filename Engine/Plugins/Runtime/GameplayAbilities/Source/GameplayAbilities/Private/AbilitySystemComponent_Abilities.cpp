@@ -205,6 +205,74 @@ bool UAbilitySystemComponent::InternalTryActivateAbility(FGameplayAbilitySpecHan
     return Natives::UAbilitySystemComponent_InternalTryActivateAbility(this, AbilityToActivate, PredictionKeyCopy.data(), OutInstancedAbility, OnGameplayAbilityEndedDelegate, TriggerEventData);
 }
 
+bool UAbilitySystemComponent::TryActivateAbilitiesByTag(const FGameplayTagContainer& GameplayTagContainer, bool bAllowRemoteActivation)
+{
+    UFunction* Function = FindStaticFunction_TryActivateAbilitiesByTag();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
+    if (!Params.Set(L"GameplayTagContainer", GameplayTagContainer) || !Params.Set(L"bAllowRemoteActivation", bAllowRemoteActivation) || !Params.Call(this))
+    {
+        return false;
+    }
+    return Params.Take<bool>(L"ReturnValue");
+}
+
+void UAbilitySystemComponent::CancelAbilities(const FGameplayTagContainer* WithTags, const FGameplayTagContainer* WithoutTags, UGameplayAbility* Ignore)
+{
+    if (Natives::UAbilitySystemComponent_CancelAbilities)
+    {
+        Natives::UAbilitySystemComponent_CancelAbilities(this, WithTags, WithoutTags, Ignore);
+        return;
+    }
+
+    // The engine's walk of ActivatableAbilities (under its ability list lock): every active spec whose ability's tags pass
+    // goes through CancelAbilitySpec, which cancels each of its instances on that instance's current activation. Core
+    // takes the instances first and cancels them after the walk, since an ability that ends can take its spec with it
+    // (GiveAbilityAndActivateOnce). A non-instanced ability is cancelled on its class default with the spec's activation,
+    // which only the native does, so it is left alone here.
+    std::vector<UGameplayAbility*> AbilitiesToCancel;
+    TStructArray<FGameplayAbilitySpec>& Items = ActivatableAbilities.Items;
+    for (int32_t Index = 0; Index < Items.Num(); ++Index)
+    {
+        FGameplayAbilitySpec& Spec = Items[Index];
+        UGameplayAbility* const SpecAbility = Spec.Ability;
+        const uint8_t ActiveCount = Spec.ActiveCount;
+        if (ActiveCount == 0 || !SpecAbility)
+        {
+            continue;
+        }
+
+        const FGameplayTagContainer& AbilityTags = SpecAbility->AbilityTags;
+        const bool WithTagPass = !WithTags || AbilityTags.HasAll(*WithTags);
+        const bool WithoutTagPass = !WithoutTags || !AbilityTags.HasAny(*WithoutTags);
+        if (!WithTagPass || !WithoutTagPass)
+        {
+            continue;
+        }
+
+        TArray<UGameplayAbility*>& ReplicatedInstances = Spec.ReplicatedInstances;
+        TArray<UGameplayAbility*>& NonReplicatedInstances = Spec.NonReplicatedInstances;
+        for (TArray<UGameplayAbility*>* Instances : { &ReplicatedInstances, &NonReplicatedInstances })
+        {
+            for (UGameplayAbility* InstanceAbility : *Instances)
+            {
+                if (InstanceAbility && InstanceAbility != Ignore)
+                {
+                    AbilitiesToCancel.push_back(InstanceAbility);
+                }
+            }
+        }
+    }
+
+    for (UGameplayAbility* InstanceAbility : AbilitiesToCancel)
+    {
+        InstanceAbility->K2_CancelAbility();
+    }
+}
+
 void UAbilitySystemComponent::ClientActivateAbilityFailed(FGameplayAbilitySpecHandle AbilityToActivate, int16_t PredictionKey)
 {
     Reflection::FParams Params(StaticFunction_ClientActivateAbilityFailed());

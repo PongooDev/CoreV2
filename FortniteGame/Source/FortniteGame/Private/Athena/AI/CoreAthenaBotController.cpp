@@ -948,8 +948,11 @@ namespace
     // - Battle Royale's DBNO (GAB_AthenaDBNO, on Event.Damage.DiedAthena) and getting up (GAB_AthenaDBNORevive, on
     //   Event.RevivedAthena): when a player's hit knocks a bot, the game downs it itself (AFortPlayerPawnAthena's DBNO
     //   handling sets bIsDBNO) and sends the event, and without the ability the pawn sat at 0 health, with no DBNO
-    //   health and no bleed (#248).
-    // The others of the set (death, interaction) are Core's for a bot.
+    //   health and no bleed (#248);
+    // - a long interaction's animation (GA_DefaultPlayer_InteractSearch, the Search montage): the pawn's
+    //   StartItemInteractionAbility activates it by its tag (Gameplay.Action.Player.InteractSearch) as a teammate's
+    //   revive starts, and without it the reviving bot stood still (#393).
+    // The others of the set (death, the other interactions) are Core's for a bot.
     const std::vector<UClass*>& PlayerAbilityClasses()
     {
         static std::vector<UClass*> Found;
@@ -967,7 +970,7 @@ namespace
             for (UClass* Ability : Abilities)
             {
                 const std::wstring Name = Ability ? Ability->GetName().ToStdString() : std::wstring();
-                if (Name.find(L"DanceGrenade_Stun") != std::wstring::npos || Name == L"GAB_AthenaDBNO_C" || Name == L"GAB_AthenaDBNORevive_C")
+                if (Name.find(L"DanceGrenade_Stun") != std::wstring::npos || Name == L"GAB_AthenaDBNO_C" || Name == L"GAB_AthenaDBNORevive_C" || Name == L"GA_DefaultPlayer_InteractSearch_C")
                 {
                     Found.push_back(KeepLoaded(Ability));
                 }
@@ -7158,13 +7161,40 @@ namespace
         void** VTable = Default ? *reinterpret_cast<void***>(Default) : nullptr;
         return VTable && VTable[Index] && !Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[Index])) ? Index : -1;
     }
+
+    // What the pawn's ability system replicates as its montage (RepAnimMontageInfo: the montage, its ForcePlayBit and
+    // IsStopped), for the log.
+    std::wstring DescribeReplicatedMontage(AFortPlayerPawnAthena* Pawn)
+    {
+        static UScriptStruct* RepStruct = FindObject<UScriptStruct>(nullptr, L"/Script/GameplayAbilities.GameplayAbilityRepAnimMontage");
+        UObject* AbilitySystem = Pawn ? reinterpret_cast<UObject*>(static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent)) : nullptr;
+        UProperty* InfoProperty = AbilitySystem ? AbilitySystem->GetClass()->FindPropertyByName(FName(L"RepAnimMontageInfo", FNAME_Find)) : nullptr;
+        UProperty* MontageField = RepStruct ? RepStruct->FindPropertyByName(FName(L"AnimMontage", FNAME_Find)) : nullptr;
+        UBoolProperty* PlayBitField = RepStruct ? static_cast<UBoolProperty*>(RepStruct->FindPropertyByName(FName(L"ForcePlayBit", FNAME_Find))) : nullptr;
+        UBoolProperty* StoppedField = RepStruct ? static_cast<UBoolProperty*>(RepStruct->FindPropertyByName(FName(L"IsStopped", FNAME_Find))) : nullptr;
+        if (!InfoProperty || !MontageField || !PlayBitField || !StoppedField)
+        {
+            return L"no replicated montage";
+        }
+        const uint8_t* Info = reinterpret_cast<const uint8_t*>(AbilitySystem) + InfoProperty->GetOffset_ForInternal();
+        return std::format(L"{} (ForcePlayBit {}{})", NameOf(*reinterpret_cast<UObject* const*>(Info + MontageField->GetOffset_ForInternal())),
+            PlayBitField->GetPropertyValue_InContainer(const_cast<uint8_t*>(Info)) ? 1 : 0, StoppedField->GetPropertyValue_InContainer(const_cast<uint8_t*>(Info)) ? L", stopped" : L"");
+    }
 }
 
 void FCoreAthenaBotController::BeginReviveInteraction(AFortPlayerPawnAthena* Downed)
 {
 #if WITH_SERVER_CODE
-    // AFortPlayerControllerAthena::ServerDBNOReviveStarted_Implementation (3.5.1 0xA2CF00, 4.1 0xA6D140), which a
-    // player's client sends as it starts holding the interaction on the downed pawn: the pawn's DBNORevivalStacking goes
+    // A player's revive starts as their controller's long interaction with the downed pawn (AFortPlayerController, 5.40
+    // 0x11E5B70): after OnStartLongInteract (PlayerPawn_Athena's skips nothing for a downed pawn) the pawn's interaction
+    // animation, AFortPlayerPawn::StartItemInteractionAbility: GA_DefaultPlayer_InteractSearch and its looping Search
+    // montage, which the server's activation of that ability replicates to every other client (CoreV2 #393: a reviving
+    // bot showed nothing, as it never activated it). The bot's controller is local to the server, so the ability runs
+    // here as a listen server's own player's does. Its montage is the only one played this frame: the reload's and the
+    // heal's were cancelled first, and EndReviveInteraction just ended the last one's ability.
+    //
+    // Then AFortPlayerControllerAthena's part (0xC39C40) sends ServerDBNOReviveStarted for a downed pawn:
+    // ServerDBNOReviveStarted_Implementation (3.5.1 0xA2CF00, 4.1 0xA6D140): the pawn's DBNORevivalStacking goes
     // up, and with the first reviver its ability system gets Gameplay.Status.DBNOBeingRevived (which pauses its bleed)
     // and the replicated GameplayCue.Athena.Player.BeingRevivedFromDBNO (its revive animation and effect on every
     // client). The body reads nothing of the controller it runs on but its player state, for the reviver's squad status;
@@ -7172,9 +7202,24 @@ void FCoreAthenaBotController::BeginReviveInteraction(AFortPlayerPawnAthena* Dow
     // runs ServerDBNOReviveInterrupted (that status is left out).
     static const int32_t Index = AthenaControllerImplementationIndex(L"/Script/FortniteGame.FortPlayerControllerAthena:ServerDBNOReviveStarted");
     EndReviveInteraction();
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || !Downed || !Downed->bIsDBNO)
+    {
+        return;
+    }
+    // The ability system refuses the activation while the pawn's ability tags are blocked (seen on 5.40 as
+    // Activate.Failed.Tags.Blocked), as it would a player's: the revive then goes on without the animation.
+    const std::wstring MontageBefore = DescribeReplicatedMontage(Pawn);
+    bReviveInteractionAbility = Pawn->StartItemInteractionAbility();
+    static int32_t Logged = 0;
+    if (Logged++ < 8)
+    {
+        Log::Info(L"Battle Royale bots: {}'s revive {} its interaction ability (Gameplay.Action.Player.InteractSearch): the replicated montage {} -> {}", BotName,
+            bReviveInteractionAbility ? L"activated" : L"didn't activate", MontageBefore, DescribeReplicatedMontage(Pawn));
+    }
     UClass* Class = AFortPlayerControllerAthena::StaticClass();
     UObject* Default = Class ? Class->GetDefaultObject(false) : nullptr;
-    if (!Downed || !Downed->bIsDBNO || Index < 0 || !Default || !AFortPlayerPawnAthena::HasDBNORevivalStacking())
+    if (Index < 0 || !Default || !AFortPlayerPawnAthena::HasDBNORevivalStacking())
     {
         return;
     }
@@ -7186,6 +7231,21 @@ void FCoreAthenaBotController::BeginReviveInteraction(AFortPlayerPawnAthena* Dow
 void FCoreAthenaBotController::EndReviveInteraction()
 {
 #if WITH_SERVER_CODE
+    // The interaction let go of or completed: the controller's long-interaction end (5.40 0x11A80B0) ends the pawn's
+    // animation, AFortPlayerPawn::StopItemInteractionAbility, which cancels the search ability and stops its montage.
+    if (bReviveInteractionAbility)
+    {
+        bReviveInteractionAbility = false;
+        if (AFortPlayerPawnAthena* Pawn = GetPawn())
+        {
+            Pawn->StopItemInteractionAbility();
+            static int32_t Logged = 0;
+            if (Logged++ < 6)
+            {
+                Log::Info(L"Battle Royale bots: {}'s revive interaction ends: the replicated montage is {}", BotName, DescribeReplicatedMontage(Pawn));
+            }
+        }
+    }
     // ServerDBNOReviveInterrupted_Implementation (3.5.1 0xA2CE10): one reviver fewer, and with the last one gone the tag
     // and the cue come off. Its count is a byte taken down unchecked, so it is only called on a pawn the bot is counted
     // on.

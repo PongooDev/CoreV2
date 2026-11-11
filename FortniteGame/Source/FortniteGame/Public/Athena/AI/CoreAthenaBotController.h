@@ -684,6 +684,9 @@ private:
     float ReviveDoneAt = 0.0f;
     // The downed pawn whose "being revived" state the bot's revive started (BeginReviveInteraction).
     TWeakObjectPtr<AFortPlayerPawnAthena> ReviveInteractionPawn;
+    // The bot's pawn shows the revive's interaction animation (AFortPlayerPawn::StartItemInteractionAbility), which
+    // EndReviveInteraction stops.
+    bool bReviveInteractionAbility = false;
     int32_t Revives = 0;
     int32_t TimesDowned = 0;
     // Shots on target that a wall or a build stopped.

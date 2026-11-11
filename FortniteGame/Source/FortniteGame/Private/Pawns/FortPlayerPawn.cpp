@@ -149,6 +149,48 @@ bool AFortPlayerPawn::IsUsingPersonalVehicle() const
     return Params.Call(const_cast<AFortPlayerPawn*>(this)) && Params.Take<bool>(L"ReturnValue");
 }
 
+namespace
+{
+    // FFortGameplayTags' Gameplay.Action.Player.InteractSearch (5.30 +0x430, 5.40 +0x440), as a container of that tag.
+    // Empty where the build has no such tag.
+    const FGameplayTagContainer& InteractSearchTags()
+    {
+        static const FGameplayTagContainer Tags = []
+        {
+            FGameplayTagContainer Container;
+            const FName TagName(L"Gameplay.Action.Player.InteractSearch", FNAME_Find);
+            if (!TagName.IsNone())
+            {
+                Container.AddTag(FGameplayTag{ TagName });
+            }
+            return Container;
+        }();
+        return Tags;
+    }
+}
+
+bool AFortPlayerPawn::StartItemInteractionAbility()
+{
+    UAbilitySystemComponent* const AbilitySystem = AbilitySystemComponent;
+    const FGameplayTagContainer& Tags = InteractSearchTags();
+    if (!AbilitySystem || Tags.Num() == 0)
+    {
+        return false;
+    }
+    return AbilitySystem->TryActivateAbilitiesByTag(Tags, true);
+}
+
+void AFortPlayerPawn::StopItemInteractionAbility()
+{
+    UAbilitySystemComponent* const AbilitySystem = AbilitySystemComponent;
+    const FGameplayTagContainer& Tags = InteractSearchTags();
+    if (!AbilitySystem || Tags.Num() == 0)
+    {
+        return;
+    }
+    AbilitySystem->CancelAbilities(&Tags, nullptr, nullptr);
+}
+
 bool AFortPlayerPawn::EquipLastWeapon()
 {
     if (!Finder::ResolveAbilityWeaponLive(CurrentWeaponListOffset(), LastEquippedWeaponGUIDOffset()))

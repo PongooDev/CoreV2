@@ -74,6 +74,19 @@ struct FGameplayTagContainer
         return true;
     }
 
+    // Any tag of the other container matches here (an empty one never does), as UE's HasAny.
+    bool HasAny(const FGameplayTagContainer& ContainerToCheck) const
+    {
+        for (const FGameplayTag& OtherTag : ContainerToCheck.GameplayTags)
+        {
+            if (HasTag(OtherTag))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     TArray<FGameplayTag> GameplayTags;
     TArray<FGameplayTag> ParentTags;
 };

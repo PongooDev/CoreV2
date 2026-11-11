@@ -38,6 +38,7 @@ public:
     DefineUFunction(ServerTryActivateAbility)
     DefineUFunction(ServerSetInputReleased)
     DefineUFunction(RemoveActiveGameplayEffectBySourceEffect)
+    DefineUFunction(TryActivateAbilitiesByTag)
 
     template <class T>
     const T* GetSet() const
@@ -67,6 +68,13 @@ public:
     // ability that is active and bRetriggerInstancedAbility is ended first, then activated again.
     bool TryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate);
     bool InternalTryActivateAbility(FGameplayAbilitySpecHandle AbilityToActivate, const FPredictionKey& InPredictionKey, UGameplayAbility** OutInstancedAbility = nullptr, void* OnGameplayAbilityEndedDelegate = nullptr, const FGameplayEventData* TriggerEventData = nullptr);
+    // Tries to activate every ability whose AbilityTags have all of the container's tags (the engine's, BlueprintCallable):
+    // true when any did. A locally controlled owner (a server-side bot) activates them here, a client predicts them.
+    bool TryActivateAbilitiesByTag(const FGameplayTagContainer& GameplayTagContainer, bool bAllowRemoteActivation = true);
+    // Cancels every active ability whose AbilityTags have all of WithTags and none of WithoutTags, Ignore aside. The build's
+    // own where Core found it (Finder::ResolveDBNOReviveLive); otherwise the engine's CancelAbilitySpec per spec: each
+    // instance's CancelAbility on its current activation (K2_CancelAbility), replicated to the owner's client.
+    void CancelAbilities(const FGameplayTagContainer* WithTags = nullptr, const FGameplayTagContainer* WithoutTags = nullptr, UGameplayAbility* Ignore = nullptr);
     // Removes StacksToRemove stacks (-1: all) of every active effect of the class, from any instigator. Server only; false
     // when the build reflects no such function.
     bool RemoveActiveGameplayEffectBySourceEffect(UClass* GameplayEffect, UAbilitySystemComponent* InstigatorAbilitySystemComponent = nullptr, int32_t StacksToRemove = -1);

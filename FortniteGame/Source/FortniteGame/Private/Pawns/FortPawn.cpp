@@ -311,6 +311,24 @@ ptrdiff_t AFortPawn::IsDBNOOffset()
     return Member_bIsDBNO.GetOffsetChecked();
 }
 
+ptrdiff_t AFortPawn::CurrentMovementStyleOffset()
+{
+    return Member_CurrentMovementStyle.IsAvailable() ? Member_CurrentMovementStyle.GetOffsetChecked() : -1;
+}
+
+void AFortPawn::SetCurrentMovementStyle(uint8_t NewStyle)
+{
+    // Writing CurrentMovementStyle alone leaves the character movement at the old style's MaxWalkSpeed: bots told to
+    // sprint (style 3, GetMaxSpeed 550) still moved at the run's 410 (CoreV2 #377).
+    if (Finder::ResolveMovementStyleLive(CurrentMovementStyleOffset()))
+    {
+        const uint8_t Style = NewStyle;
+        CallVirtual<void>(this, Natives::AFortPawn_SetCurrentMovementStyleIndex, &Style);
+        return;
+    }
+    CurrentMovementStyle = NewStyle;
+}
+
 void FFortPawnStats::ScaleSpeeds(float Scale)
 {
     SpeedWalk = SpeedWalk * Scale;

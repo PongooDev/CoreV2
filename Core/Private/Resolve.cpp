@@ -13664,6 +13664,54 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
     return false;
 }
 
+bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::AFortPawn_SetCurrentMovementStyleIndex >= 0)
+    {
+        return Natives::AFortPawn_SetCurrentMovementStyleIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortPawn::SetCurrentMovementStyle (21.40's name; 5.10 0x1107A30, 4.5 0xF68460, 1.11 0x8645B0) is the only
+    // function that stores CurrentMovementStyle: "movzx eax, byte ptr [rdx]; mov rbx, rcx; mov [rcx + CurrentMovementStyle],
+    // al", then the character movement's MaxWalkSpeed and its other speeds from GetMovementSpeed for the new style. The
+    // pawn's movement style update (5.10 0x112B010) calls it through the vtable (slot 0x8C8 on 5.10).
+    const auto StoresStyle = [CurrentMovementStyleOffset](uintptr_t Entry)
+    {
+        const uintptr_t Body = Finder::Unthunk(Entry);
+        if (!Body || !Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30))
+        {
+            return false;
+        }
+        for (uintptr_t Load = Body; Load < Body + 0x18; ++Load)
+        {
+            if (Byte(Load) != 0x0F || Byte(Load + 1) != 0xB6 || Byte(Load + 2) != 0x02)
+            {
+                continue;
+            }
+            for (uintptr_t Store = Load + 3; Store < Load + 0x10; ++Store)
+            {
+                if (IsDisp32Access(Store, 0x88, 0, CurrentMovementStyleOffset) && (Byte(Store + 1) & 0x07) == 0x01)
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+    const int32_t Index = CurrentMovementStyleOffset > 0 ? FirstVTableIndexWhere(CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena"), StoresStyle) : -1;
+    if (Index < 0)
+    {
+        Log::Warning(L"Finder: AFortPawn::SetCurrentMovementStyle not found (CurrentMovementStyle 0x{:X}), player bots set their movement style without its speeds",
+            CurrentMovementStyleOffset);
+        return false;
+    }
+    Natives::AFortPawn_SetCurrentMovementStyleIndex = Index;
+    Log::Info(L"Finder: AFortPawn::SetCurrentMovementStyle is slot 0x{:X}", Index * 8);
+    return true;
+}
+
 bool Finder::ResolveTeamChangeLive()
 {
     static bool bSearched = false;

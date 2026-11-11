@@ -230,6 +230,9 @@ namespace Finder
     // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player
     // bots. IsSkydivingOffset: AFortPlayerPawnAthena's bIsSkydiving, which it checks first.
     bool ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset);
+    // AFortPawn::SetCurrentMovementStyle's slot (Natives::AFortPawn_SetCurrentMovementStyleIndex), for Battle Royale's
+    // player bots. CurrentMovementStyleOffset: AFortPawn's CurrentMovementStyle, which it stores first.
+    bool ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset);
     // AFortGameMode::AttemptChangeTeamInfoForController's slot (Natives::AFortGameMode_AttemptChangeTeamInfoForControllerIndex),
     // from PlacePlayerOnTeam, for Battle Royale's player bots: they join their team as a player does.
     bool ResolveTeamChangeLive();

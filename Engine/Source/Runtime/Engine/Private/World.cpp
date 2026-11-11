@@ -4,6 +4,7 @@
 #include "Engine/Engine.h"
 #include "Engine/LevelStreaming.h"
 #include "Engine/NetDriver.h"
+#include "Engine/Player.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
 #include "Misc/CommandLine.h"
@@ -67,6 +68,21 @@ bool UWorld::Listen(FURL& InURL)
     {
         NetDriver->MaxClientRate = NetDriver->MaxInternetClientRate;
     }
+    // Core (CoreV2 #377): a dedicated server sends each client at least UNetDriver::CoreMinClientRate; the client build's
+    // ini, which the server runs on, has 20000 (5.10), the clients ask for 30000, and RaiseClientNetSpeeds lifts their
+    // connections to it.
+    const int32_t IniClientRate = NetDriver->MaxClientRate;
+    if (NetDriver->MaxClientRate < UNetDriver::CoreMinClientRate)
+    {
+        NetDriver->MaxClientRate = UNetDriver::CoreMinClientRate;
+    }
+    if (NetDriver->MaxInternetClientRate < UNetDriver::CoreMinClientRate)
+    {
+        NetDriver->MaxInternetClientRate = UNetDriver::CoreMinClientRate;
+    }
+    const UPlayer* PlayerDefault = UPlayer::StaticClass() ? static_cast<const UPlayer*>(UPlayer::StaticClass()->GetDefaultObject()) : nullptr;
+    UE_LOG(LogWorld, Log, TEXT("Listen: clients are sent up to %d bytes a second (the game's MaxClientRate %d), clients ask for %d"), NetDriver->MaxClientRate,
+        IniClientRate, PlayerDefault ? static_cast<int32_t>(PlayerDefault->ConfiguredInternetSpeed) : -1);
 
     NextSwitchCountdown = NetDriver->ServerTravelPause;
     return true;

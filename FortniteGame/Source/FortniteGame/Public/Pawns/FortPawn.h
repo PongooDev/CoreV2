@@ -135,4 +135,10 @@ public:
     static void RemoveDestroyedWeaponsFromLists();
     static ptrdiff_t CurrentWeaponListOffset();
     static ptrdiff_t IsDBNOOffset();
+    static ptrdiff_t CurrentMovementStyleOffset();
+
+    // Server: the pawn's movement style made NewStyle (EFortMovementStyle) the game's way, AFortPawn's
+    // SetCurrentMovementStyle, which also gives its character movement that style's speeds (MaxWalkSpeed); only
+    // CurrentMovementStyle where that isn't found.
+    void SetCurrentMovementStyle(uint8_t NewStyle);
 };

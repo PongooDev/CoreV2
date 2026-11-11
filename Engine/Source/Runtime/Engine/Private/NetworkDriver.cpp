@@ -93,6 +93,7 @@ void UNetDriver::TickFlush(float DeltaSeconds)
     if (IsServer() && ClientConnections.Num() > 0 && !ClientConnections[0]->InternalAck)
     {
 #if WITH_SERVER_CODE
+        RaiseClientNetSpeeds();
         for (const std::function<void()>& Callback : PreReplicationCallbacks)
         {
             Callback();
@@ -109,6 +110,22 @@ void UNetDriver::TickFlush(float DeltaSeconds)
     }
 
     TickFlushOG(this, DeltaSeconds);
+}
+
+void UNetDriver::RaiseClientNetSpeeds()
+{
+    const int32_t Rate = MaxClientRate;
+    if (Rate < CoreMinClientRate || !UPlayer::HasCurrentNetSpeed())
+    {
+        return;
+    }
+    for (UNetConnection* Connection : ClientConnections)
+    {
+        if (Connection && Connection->CurrentNetSpeed < Rate)
+        {
+            Connection->CurrentNetSpeed = Rate;
+        }
+    }
 }
 
 void UNetDriver::FlushActorDormancy(AActor* Actor)

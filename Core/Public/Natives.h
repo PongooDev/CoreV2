@@ -638,6 +638,10 @@ namespace Natives
     // AFortPlayerPawnAthena::BeginSkydiving(bool bFromBus) (3.0 0x9D7F70), which AFortPlayerControllerAthena's ExitAircraft
     // calls on the new pawn: Finder::ResolveBotSkydiveLive. A player bot leaving the aircraft takes the same path.
     inline void (*AFortPlayerPawnAthena_BeginSkydiving)(AFortPlayerPawnAthena* This, bool bFromBus) = nullptr;
+    // AFortPawn::SetCurrentMovementStyle(const TEnumAsByte<EFortMovementStyle>&)'s slot (21.40's name; 5.10 0x1107A30,
+    // slot 0x8C8): it sets CurrentMovementStyle and then the character movement's speeds for that style (MaxWalkSpeed and
+    // the rest, from GetMovementSpeed). A bot's sprint goes through it: Finder::ResolveMovementStyleLive.
+    inline int32_t AFortPawn_SetCurrentMovementStyleIndex = -1;
     // AFortGameMode::AttemptChangeTeamInfoForController(uint8 Team, AFortPlayerController* Controller)'s slot (3.2 0xA88,
     // 0xB526C0; 21.40's name and signature): PlacePlayerOnTeam's change of a joining player's team, which puts the
     // controller in the team's AFortTeamInfo and its player state on the team. It takes any controller whose player

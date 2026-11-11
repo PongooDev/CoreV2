@@ -122,6 +122,16 @@ public:
     // Core corrects for that frame's replication.
     static void AddPreReplicationCallback(std::function<void()> Callback);
 
+    // Core: the rate a dedicated server sends each client at least, in bytes a second (CoreV2 #377). The game's ini, the
+    // client's, caps it at 20000 (MaxClientRate, MaxInternetClientRate on 5.10), and each client asks for 30000
+    // (ConfiguredInternetSpeed), far under what a match with up to 100 player bots in view sends: the replication graph
+    // closes the channel of an actor it couldn't send for a few frames (ActorChannelFrameTimeout), so pawns and builds
+    // went and came back on the clients.
+    static constexpr int32_t CoreMinClientRate = 100000;
+    // Core: each client connection's CurrentNetSpeed (its NMT_Netspeed request clamped to MaxClientRate) raised to
+    // MaxClientRate, on the server, before the frame replicates.
+    void RaiseClientNetSpeeds();
+
 #if WITH_SERVER_CODE
 private:
     int32_t ServerReplicateActors_PrepConnections(const float DeltaSeconds);

@@ -4808,7 +4808,7 @@ void FCoreAthenaBotController::SetMovementStyle(bool bSprint, float Now)
     }
     NextMovementStyleChange = Now + 1.0f;
     MovementStyle = Style;
-    Pawn->CurrentMovementStyle = Style;
+    reinterpret_cast<AFortPawn*>(Pawn)->SetCurrentMovementStyle(Style);
 }
 
 void FCoreAthenaBotController::FaceTowards(const FVector& Point, float Now, float Hold)
@@ -5106,7 +5106,20 @@ bool FCoreAthenaBotController::SwingAtBuilding(ABuildingSMActor* Building, float
     {
         PlayFireMontage();
     }
-    return Pickaxe && DamageBuilding(Building, Pickaxe, OutDamage);
+    if (!Pickaxe || !DamageBuilding(Building, Pickaxe, OutDamage))
+    {
+        return false;
+    }
+    // The swing's hit for the other players, as the melee ability sends it for a player's: its impact cue executed with
+    // the hit (the point the bot swings at, on the building) in the cue's context, which the pickaxe's impact handler
+    // (AFortWeapon::GameplayCue_Impact) plays as the hit's sound and effect on the building. The damage effect alone
+    // only took the building's health down, silently (CoreV2 #377).
+    if (OutDamage > 0.0f)
+    {
+        const FVector Eye = LocationOf(GetPawn()) + FVector(0.0f, 0.0f, 60.0f);
+        PlayWeaponImpactCue(Pickaxe, Eye, HarvestPoint, reinterpret_cast<UObject*>(Building));
+    }
+    return true;
 }
 
 void FCoreAthenaBotController::PlayFireMontage()

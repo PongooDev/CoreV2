@@ -89,6 +89,8 @@ namespace
         SetHeroTypeOG(This, InUniqueId, InHeroType);
     }
 
+    // Pure logging, in the client only (CoreClient.dll, HookLobbyClient), which Core doesn't change: the front end's lobby
+    // player states are looked at every 60 frames and each change of hero is logged. Nothing in the game depends on it.
     void WatchLobbyPlayers(int32_t TicksLeft)
     {
         GameThread::Enqueue([TicksLeft]()

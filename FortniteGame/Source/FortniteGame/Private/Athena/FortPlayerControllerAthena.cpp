@@ -10,7 +10,6 @@
 #include "GameFramework/PlayerState.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
-#include "GameThread.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
 #include "Hooks.h"
@@ -28,6 +27,7 @@
 #include "Pawns/FortPawn.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/WeakObjectPtr.h"
@@ -372,82 +372,49 @@ std::vector<FVector> AFortPlayerControllerAthena::GetInventoryDropSpots(AActor* 
 #if WITH_SERVER_CODE
 namespace
 {
-    // A dead player whose client is still to be told where its controller stands.
-    struct FPendingDeathView
+    // How long after the death its client is told where its controller stands: two frames at the server's 30 Hz (#109),
+    // so the frame of the death has sent the game's own death RPCs (ClientOnPawnDied) and the controller's replication
+    // without its pawn (UNetDriver::TickFlush) ahead of it.
+    constexpr float DeathViewDelay = 0.05f;
+}
+
+void AFortPlayerControllerAthena::SendDeathView(TWeakObjectPtr<AFortPawn> DeadPawn, FVector ViewLocation)
+{
+    // The game's death handling is done once the dead pawn is let go (the unpossess, at the end of the same death call,
+    // AFortPawn's 1.8.2 0x7BE18F) and the controller views itself. A new pawn (a respawn) has its own place.
+    APawn* Pawn = GetPawn();
+    if (Pawn || GetViewTarget() != this)
     {
-        TWeakObjectPtr<AFortPlayerControllerAthena> Controller;
-        TWeakObjectPtr<AFortPawn> DeadPawn;
-        FVector ViewLocation;
-        float Deadline = 0.0f;
-        int32_t Frames = 0;
-    };
-
-    // The client is told two frames after the death at the earliest, so the game's own death RPCs of that frame and the
-    // pawn's replication (Pawn null) are ahead of it, and only before SpectateOnDeath's 5 seconds are up.
-    constexpr int32_t DeathViewMinFrames = 2;
-    constexpr float DeathViewWaitSeconds = 4.0f;
-
-    std::vector<FPendingDeathView> PendingDeathViews;
-    bool bWatchingDeathViews = false;
+        const bool bNewPawn = Pawn && Pawn != static_cast<APawn*>(DeadPawn.Get());
+        UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s's client wasn't told where it stands (%s)"), *GetName(),
+            bNewPawn ? TEXT("it has a new pawn") : Pawn ? TEXT("it never let its dead pawn go") : TEXT("it never viewed itself"));
+        return;
+    }
 
     // Moves the client's controller to ViewLocation: ClientSetSpectatorCamera (1.8.2 0x820630, 1.8.1 0x820E80, 1.8
     // 0x819040) is SetInitialLocationAndRotation (Athena's, 1.8.2 0x4366D0: APlayerController's 0x23B6B40, which moves
     // the controller and its spawn location and sets its control rotation, then SetViewTarget(this)) and SetViewTarget
     // (this). A controller that already views itself keeps its camera: APlayerCameraManager::SetViewTarget (0x23B75D0)
     // only drops a pending blend for the target it has.
-    bool SendDeathView(AFortPlayerControllerAthena* Controller, const FVector& ViewLocation)
+    UClass* Class = GetClass();
+    UFunction* SetSpectatorCamera = Class->FindFunctionByName(FName(L"ClientSetSpectatorCamera", FNAME_Find));
+    UFunction* GetControlRotation = Class->FindFunctionByName(FName(L"GetControlRotation", FNAME_Find));
+    if (!SetSpectatorCamera || !GetControlRotation)
     {
-        UClass* Class = Controller->GetClass();
-        UFunction* SetSpectatorCamera = Class->FindFunctionByName(FName(L"ClientSetSpectatorCamera", FNAME_Find));
-        UFunction* GetControlRotation = Class->FindFunctionByName(FName(L"GetControlRotation", FNAME_Find));
-        if (!SetSpectatorCamera || !GetControlRotation)
-        {
-            return false;
-        }
-
-        // The rotation it has: with itself as its view target, Athena's GetControlRotation (1.8.2 0x41F5E0) is its root's,
-        // which SetControlRotation keeps at the control rotation.
-        Reflection::FParams RotationParams(GetControlRotation);
-        RotationParams.Call(Controller);
-        const FRotator* ControlRotation = RotationParams.Get<FRotator>(L"ReturnValue");
-        Reflection::FParams Params(SetSpectatorCamera);
-        Params.Set(L"CameraLocation", ViewLocation);
-        Params.Set(L"CameraRotation", ControlRotation ? *ControlRotation : FRotator());
-        Params.Call(Controller);
-        return true;
+        UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s's client can't be told (no ClientSetSpectatorCamera) it stands over its body"), *GetName());
+        return;
     }
 
-    void WatchDeathViews()
-    {
-        std::erase_if(PendingDeathViews, [](FPendingDeathView& Pending)
-        {
-            AFortPlayerControllerAthena* Controller = Pending.Controller.Get();
-            UWorld* World = Controller ? Controller->GetWorld() : nullptr;
-            if (!World)
-            {
-                return true;
-            }
-            // A new pawn (a respawn) has its own place, and once the time is up SpectateOnDeath may be watching someone.
-            APawn* Pawn = Controller->GetPawn();
-            const bool bNewPawn = Pawn && Pawn != static_cast<APawn*>(Pending.DeadPawn.Get());
-            if (bNewPawn || World->GetTimeSeconds() > Pending.Deadline)
-            {
-                UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s's client wasn't told where it stands (%s)"), *Controller->GetName(),
-                    bNewPawn ? TEXT("it has a new pawn") : Pawn ? TEXT("it never let its dead pawn go") : TEXT("it never viewed itself"));
-                return true;
-            }
-            // Until the dead pawn is let go (the unpossess, at the end of the same death call, AFortPawn's 1.8.2
-            // 0x7BE18F) and the controller views itself, the game's death handling isn't done.
-            if (++Pending.Frames < DeathViewMinFrames || Pawn || Controller->GetViewTarget() != Controller)
-            {
-                return false;
-            }
-            const bool bSent = SendDeathView(Controller, Pending.ViewLocation);
-            UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s's client %s it stands over its body"), *Controller->GetName(), bSent ? TEXT("is told") : TEXT("can't be told (no ClientSetSpectatorCamera)"));
-            return true;
-        });
-        bWatchingDeathViews = !PendingDeathViews.empty() && GameThread::Enqueue(&WatchDeathViews);
-    }
+    // The rotation it has: with itself as its view target, Athena's GetControlRotation (1.8.2 0x41F5E0) is its root's,
+    // which SetControlRotation keeps at the control rotation.
+    Reflection::FParams RotationParams(GetControlRotation);
+    RotationParams.Call(this);
+    const FRotator* ControlRotation = RotationParams.Get<FRotator>(L"ReturnValue");
+    Reflection::FParams Params(SetSpectatorCamera);
+    Params.Set(L"CameraLocation", ViewLocation);
+    Params.Set(L"CameraRotation", ControlRotation ? *ControlRotation : FRotator());
+    Params.Call(this);
+    UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s's client is told it stands over its body"), *GetName());
 }
 #endif
 
@@ -466,8 +433,11 @@ void AFortPlayerControllerAthena::PlaceAtDeathLocation(AFortPawn* DeadPawn)
     // This is ahead of the game's own death handling (this handler then sends ClientOnPawnDied, 0x9F8560, and the pawn
     // lets the controller go at the end of the same death call), while the client still played its pawn, and it once
     // left the camera under the middle of the map (#125). So the client is now told a couple of frames later, once the
-    // server's controller has let the pawn go and views itself (WatchDeathViews), when the client's view target is the
-    // controller already or becomes it with the death camera the game gives it then anyway. The death camera itself is
+    // server's controller has let the pawn go and views itself (SendDeathView), when the client's view target is the
+    // controller already or becomes it with the death camera the game gives it then anyway. That moment is the server's
+    // AFortPlayerController::SetPawn(nullptr) at the unpossess, which is intact game code with nothing to bind (its
+    // PendingSpectatorLocation branch, 5.40 0x11D68E0, only runs on the client, where ClientOnPawnDied sets it), and the
+    // replication that has to go first is the frame's: a world timer runs it after that frame. The death camera itself is
     // the game's: the camera picks DeathCameraClass for a controller viewing itself (AFortPlayerCameraBase, 1.8.2
     // 0x4FDFB0), which stays where the camera last was (UFortDeathCameraMode, 0x519650) and turns to the death report's
     // KillerPawn. In a self-elimination (a fall, their own grenade: "YOU ELIMINATED YOURSELF!") that is the dead pawn,
@@ -484,12 +454,10 @@ void AFortPlayerControllerAthena::PlaceAtDeathLocation(AFortPawn* DeadPawn)
     const FVector Body = DeadPawn->GetTransform().GetLocation();
     const FVector ViewLocation(Body.X, Body.Y, Body.Z + DeathViewHeight);
     SetActorLocation(ViewLocation, false, true);
-    std::erase_if(PendingDeathViews, [this](const FPendingDeathView& Pending) { return Pending.Controller.Get() == this; });
-    PendingDeathViews.push_back({ TWeakObjectPtr<AFortPlayerControllerAthena>(this), TWeakObjectPtr<AFortPawn>(DeadPawn), ViewLocation, World->GetTimeSeconds() + DeathViewWaitSeconds });
-    if (!bWatchingDeathViews)
-    {
-        bWatchingDeathViews = GameThread::Enqueue(&WatchDeathViews);
-    }
+    // Bound to the controller, so the timer manager drops it with the controller (a player who leaves meanwhile).
+    FTimerHandle DeathViewTimerHandle;
+    World->GetTimerManager().SetTimer(DeathViewTimerHandle, FTimerDelegate::CreateUObject(this, &AFortPlayerControllerAthena::SendDeathView, TWeakObjectPtr<AFortPawn>(DeadPawn), ViewLocation),
+        DeathViewDelay, false);
     // The body's facing on the server is what the dying player's own client turns its pawn to once the pawn is let go
     // (#332: the death montage, PlayerDeath_Athena, plays at the pawn's own rotation; nothing in the death turns it).
     UE_LOG(LogFort, Log, TEXT("PlaceAtDeathLocation: %s stands over its body at (%.0f, %.0f, %.0f), the body facing yaw %.0f"), *GetName(), ViewLocation.X, ViewLocation.Y, ViewLocation.Z,

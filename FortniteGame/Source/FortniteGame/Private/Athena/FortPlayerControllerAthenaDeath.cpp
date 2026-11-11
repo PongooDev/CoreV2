@@ -11,10 +11,8 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
-#include "GameThread.h"
 #include "GameplayTagContainer.h"
 #include "Hooks.h"
-#include "Kismet/KismetSystemLibrary.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
@@ -22,11 +20,13 @@
 #include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 #include "Weapons/FortWeapon.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <utility>
 #include <vector>
 
 // 1.9.1 (CL-3775276) strips AFortPlayerControllerAthena's pawn-death handler, which the pawn calls when it dies (1.9
@@ -60,62 +60,34 @@ namespace
     constexpr float SpectateFirstDelay = 5.0f;
     constexpr float SpectateRate = 2.0f;
 
-    struct FPendingSpectate
-    {
-        TWeakObjectPtr<AFortPlayerControllerAthena> Controller;
-        float StartTime = 0.0f;
-    };
+    // The spectate timer's handle for each controller that died: 1.9 keeps it on the controller (+0x32B0, a native
+    // FTimerHandle no build reflects), so a later death's timer replaces the last one's.
+    std::vector<std::pair<TWeakObjectPtr<AFortPlayerControllerAthena>, FTimerHandle>> SpectateOnDeathTimerHandles;
 
-    std::vector<FPendingSpectate> PendingSpectates;
-    bool bWatchingSpectates = false;
-
-    void StartSpectating(AFortPlayerControllerAthena* Controller)
+    FTimerHandle& SpectateOnDeathTimerHandleOf(AFortPlayerControllerAthena* Controller)
     {
-        Reflection::FParams Params(AFortPlayerControllerAthena::StaticFunction_SpectateOnDeath());
-        Params.Call(Controller);
-        UKismetSystemLibrary::K2_SetTimer(Controller, L"SpectateOnDeath", SpectateRate, true);
-    }
-
-    void WatchSpectates()
-    {
-        std::erase_if(PendingSpectates, [](const FPendingSpectate& Pending)
+        std::erase_if(SpectateOnDeathTimerHandles, [](const auto& Entry) { return !Entry.first.Get(true); });
+        const TWeakObjectPtr<AFortPlayerControllerAthena> WeakController(Controller);
+        for (auto& [Owner, Handle] : SpectateOnDeathTimerHandles)
         {
-            AFortPlayerControllerAthena* Controller = Pending.Controller.Get();
-            UWorld* World = Controller ? Controller->GetWorld() : nullptr;
-            if (!World)
+            if (Owner == WeakController)
             {
-                return true;
+                return Handle;
             }
-            if (World->GetTimeSeconds() < Pending.StartTime)
-            {
-                return false;
-            }
-            StartSpectating(Controller);
-            return true;
-        });
-        bWatchingSpectates = !PendingSpectates.empty() && GameThread::Enqueue(&WatchSpectates);
-    }
-
-    void SpectateOnDeathSoon(AFortPlayerControllerAthena* Controller)
-    {
-        UWorld* World = Controller->GetWorld();
-        if (!World)
-        {
-            return;
         }
-        UKismetSystemLibrary::K2_ClearTimer(Controller, L"SpectateOnDeath");
-        std::erase_if(PendingSpectates, [Controller](const FPendingSpectate& Pending) { return Pending.Controller.Get() == Controller; });
-        PendingSpectates.push_back({ TWeakObjectPtr<AFortPlayerControllerAthena>(Controller), World->GetTimeSeconds() + SpectateFirstDelay });
-        if (!bWatchingSpectates)
-        {
-            bWatchingSpectates = GameThread::Enqueue(&WatchSpectates);
-        }
+        return SpectateOnDeathTimerHandles.emplace_back(WeakController, FTimerHandle()).second;
     }
 
     AFortPlayerStateAthena* AthenaStateOf(AController* Controller)
     {
         return Controller ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState))) : nullptr;
     }
+}
+
+void AFortPlayerControllerAthena::SpectateOnDeath()
+{
+    Reflection::FParams Params(StaticFunction_SpectateOnDeath());
+    Params.Call(this);
 }
 
 // Every player still in the match outlived the one who is out: an EFortQuestObjectiveStatEvent::AthenaOutlive event
@@ -339,7 +311,10 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         {
             PlayerToSpectateOnDeath = KillerPawn;
         }
-        SpectateOnDeathSoon(this);
+        // 1.9: GetWorldTimerManager().SetTimer(Handle, this, &AFortPlayerControllerAthena::SpectateOnDeath, 2, true, 5).
+        // Bound to the controller, so the timer manager drops it with the controller.
+        World->GetTimerManager().SetTimer(SpectateOnDeathTimerHandleOf(this), FTimerDelegate::CreateUObject(this, &AFortPlayerControllerAthena::SpectateOnDeath),
+            SpectateRate, true, SpectateFirstDelay);
     }
     if (AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(DeadPawn)); AthenaPawn && Instigator)
     {

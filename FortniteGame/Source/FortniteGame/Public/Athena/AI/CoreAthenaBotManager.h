@@ -78,7 +78,8 @@ struct FCoreAthenaBotLandingSpot
 // Core's backport of Epic's UFortServerBotManagerAthena (8.30: the game mode's ServerBotManager, which registers each
 // bot's controller, puts it on a team and handles its death), with 21.40's AFortGameModeAthena bot functions
 // (PlaceBotOnTeam, AddToAliveBots, RemoveFromAliveBots, CheckWinConditionLastManStanding) for the bots' share of the
-// match's counts. Not a UObject (3.0 has no such class): one per Battle Royale game mode, run from Core's game-thread tick.
+// match's counts. Not a UObject (3.0 has no such class): one per Battle Royale game mode, updated every frame by a timer
+// on the world's timer manager while the match has bots (SetTickEnabled).
 //
 // Bots only exist on builds without Epic's own (every build before 8.30, which has AFortAthenaAIBotController): a build
 // with native player bots never uses this backport (HasNativePlayerBots). They're off unless the admin panel's "Force
@@ -108,8 +109,12 @@ public:
     // Whether the warmup keeps its full length (CoreV2 #256): the bots come in over it, one at a time, so the game's early
     // countdown (15 s once the match's players are all in) would leave them no room. Bots on (the backend's bots block).
     bool ShouldKeepFullWarmup() const { return bEnabled; }
-    // Each frame, on the game thread (WatchManager).
+    // Once a frame, from the update's world timer: from when the backend turns the match's bots on (SetSettings) until
+    // the match ends, or until the bots are off and gone.
     void Tick();
+    // Starts or stops the update's timer, a looping timer on the game mode's world's timer manager (Epic's bots think
+    // in their components' ticks, every frame).
+    void SetTickEnabled(bool bTickEnabled);
 
     // The bots still in the match (riding the aircraft, falling or on the ground).
     int32_t GetAliveBotCount() const;

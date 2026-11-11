@@ -125,6 +125,9 @@ public:
     // Server: who SpectateOnDeath watches first after a death, the eliminator's pawn.
     DefineUProperty(APawn*, PlayerToSpectateOnDeath)
     DefineUFunction(SpectateOnDeath)
+    // The build's SpectateOnDeath (1.9 0x438550, 3.3 0xA31650, 5.40 0xC34710), through its UFunction: what the death's
+    // spectate timer calls (OnPawnDied).
+    void SpectateOnDeath();
     // AFortPlayerControllerZone's: the report of the player's last death, which ClientOnPawnDied sends.
     DefineUStructProperty(FFortPlayerDeathReport, PlayerDeathReport)
     // 1.10: the player's report of their match (AthenaPlayerMatchReport.h), made in BeginPlay on the server too.
@@ -180,6 +183,9 @@ public:
     // game's own death handling is done, their client's does too (the minimap follows it, #139). The camera stays the
     // game's death camera (#125).
     void PlaceAtDeathLocation(AFortPawn* DeadPawn);
+    // PlaceAtDeathLocation's timer, a couple of frames after the death: tells the client its controller stands at
+    // ViewLocation (ClientSetSpectatorCamera) once the controller has let DeadPawn go and views itself.
+    void SendDeathView(TWeakObjectPtr<AFortPawn> DeadPawn, FVector ViewLocation);
 
     // Squad Comms (from 3.3): the wheel sends ServerPlaySquadQuickChatMessage (its exec, 3.5.1 0x1192190, calls
     // _Validate, slot 0x364, then _Implementation, slot 0x365); ClientReceiveSquadQuickChatMessage is the squad's copy.

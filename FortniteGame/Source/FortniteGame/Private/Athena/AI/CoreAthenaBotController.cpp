@@ -7826,8 +7826,8 @@ void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
 void FCoreAthenaBotController::OnBeginSpectating(AFortPlayerStateAthena* KillerState, float Now)
 {
 #if WITH_SERVER_CODE
-    // A player's SpectateOnDeath starts 5 seconds after the death and looks again every 2 (1.9's timer, Core's
-    // SpectateOnDeathSoon); the bot does the same, for a while of its own.
+    // A player's SpectateOnDeath starts 5 seconds after the death and looks again every 2 (1.9's timer, which Core's
+    // AFortPlayerControllerAthena::OnPawnDied sets); the bot does the same, for a while of its own.
     AFortPlayerStateAthena* PlayerState = GetPlayerState();
     if (!PlayerState || !AFortPlayerStateAthena::HasSpectators())
     {

@@ -22,6 +22,15 @@ public:
     // after InFirstDelay when that is 0 or more. A timer already in InOutHandle is replaced; InRate <= 0 clears it.
     void SetTimer(FTimerHandle& InOutHandle, FTimerDelegate const& InDelegate, float InRate, bool InbLoop, float InFirstDelay = -1.0f);
 
+    // Clears the timer in InHandle, if any, and invalidates the handle (Epic's ClearTimer): InternalSetTimer clears the
+    // handle's timer for a rate of 0, and leaves the handle as it was (5.40 0x28B5077). A timer may clear itself while
+    // it runs.
+    void ClearTimer(FTimerHandle& InHandle)
+    {
+        SetTimer(InHandle, FTimerDelegate(), 0.0f, false);
+        InHandle.Invalidate();
+    }
+
     // Finds InternalSetTimer and the timer manager pointers UWorld::GetTimerManager reads, from
     // UKismetSystemLibrary::K2_SetTimerDelegate (the function that logs "SetTimer passed a bad function (%s) or object
     // (%s)"). Run on the game thread, once the engine's reflection is up. False where they weren't found: SetTimer then

@@ -20,7 +20,6 @@
 #include "GameFramework/GameMode.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
-#include "GameThread.h"
 #include "GameplayTagContainer.h"
 #include "Heroes/FortHeroType.h"
 #include "Items/FortItem.h"
@@ -36,6 +35,7 @@
 #include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "Weapons/FortWeapon.h"
@@ -400,26 +400,35 @@ namespace
     constexpr float SpawnDoneBeforeBus = 20.0f;
     constexpr float LootRefreshInterval = 3.0f;
 
-    void WatchManager()
+    // The bots' update runs once a frame, as 8.30's bots think: each AFortAthenaAIBotController is an AAIController whose
+    // behaviour tree and path following components tick with the world. It is a looping timer on the world's timer
+    // manager due more often than any server frame (Core's run at 30 Hz, #109; one left at a player's frame rate limit
+    // runs at that), so it comes due in every frame. FTimerManager::Tick calls a looping timer once for each of its
+    // periods a frame took, and the update takes the frame's first (Tick).
+    constexpr float UpdateTimerRate = 1.0f / 240.0f;
+    FTimerHandle UpdateTimerHandle;
+
+    void UpdateManager()
     {
-        GameThread::Enqueue([]()
+        if (!Instance)
         {
-            if (!Instance)
+            return;
+        }
+        if (!Instance->GetGameMode())
+        {
+            // Gone with its world before the match ended (a session restarted in the warmup).
+            Log::Info(L"Battle Royale bots: the game mode is gone, the bot manager stops");
+            if (UWorld* World = GWorld)
             {
-                return;
+                World->GetTimerManager().ClearTimer(UpdateTimerHandle);
             }
-            if (!Instance->GetGameMode())
-            {
-                Log::Info(L"Battle Royale bots: the game mode is gone, the bot manager stops");
-                Instance.reset();
-                BotKills.clear();
-                NativeKillTargets.clear();
-                UAthenaNavSystem::ResetForNewMatch();
-                return;
-            }
-            Instance->Tick();
-            WatchManager();
-        });
+            Instance.reset();
+            BotKills.clear();
+            NativeKillTargets.clear();
+            UAthenaNavSystem::ResetForNewMatch();
+            return;
+        }
+        Instance->Tick();
     }
 
     FVector LocationOf(const AActor* Actor)
@@ -491,22 +500,21 @@ namespace
 void FCoreAthenaBotManager::Create(AFortGameModeAthena* GameMode)
 {
 #if WITH_SERVER_CODE
-    if (!GameMode || (Instance && Instance->GetGameMode() == GameMode))
+    UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+    if (!World || (Instance && Instance->GetGameMode() == GameMode))
     {
         return;
     }
-    const bool bWatching = Instance != nullptr;
     // A new game mode is a new world (the server reloads the map after a match): nothing of the last match's bots is
-    // kept. Their controllers and pawns went with the old world; Core only ever holds them weakly.
+    // kept. Their controllers and pawns went with the old world; Core only ever holds them weakly. The last match's
+    // update, if it still ran, stops (the game instance's timer manager outlives the world). This match's starts when
+    // the backend turns its bots on (SetSettings).
+    World->GetTimerManager().ClearTimer(UpdateTimerHandle);
     Instance.reset(new FCoreAthenaBotManager(GameMode));
     BotKills.clear();
     NativeKillTargets.clear();
     UAthenaNavSystem::ResetForNewMatch();
     FCoreAthenaBotController::ResetForNewMatch();
-    if (!bWatching)
-    {
-        WatchManager();
-    }
     static bool bReplicatesHealth = false;
     if (!bReplicatesHealth)
     {
@@ -545,6 +553,27 @@ AFortGameModeAthena* FCoreAthenaBotManager::GetGameMode() const
     return static_cast<AFortGameModeAthena*>(GameMode.Get());
 }
 
+void FCoreAthenaBotManager::SetTickEnabled(bool bTickEnabled)
+{
+#if WITH_SERVER_CODE
+    AFortGameModeAthena* Athena = GetGameMode();
+    UWorld* World = Athena ? Athena->GetWorld() : nullptr;
+    if (!World || bTickEnabled == UpdateTimerHandle.IsValid())
+    {
+        return;
+    }
+    if (!bTickEnabled)
+    {
+        World->GetTimerManager().ClearTimer(UpdateTimerHandle);
+        return;
+    }
+    // A fresh start: no frame before it is measured, and the first update's bots move no time on.
+    LastTickTime = -1.0f;
+    LastFrameStart = {};
+    World->GetTimerManager().SetTimer(UpdateTimerHandle, FTimerDelegate::CreateLambda([]() { UpdateManager(); }), UpdateTimerRate, true);
+#endif
+}
+
 void FCoreAthenaBotManager::SetSettings(bool bInEnabled, const FCoreAthenaBotSettings& InSettings)
 {
     const bool bChanged = !bHasSettings || bInEnabled != bEnabled || InSettings.Count != Settings.Count || InSettings.Level != Settings.Level
@@ -576,6 +605,8 @@ void FCoreAthenaBotManager::SetSettings(bool bInEnabled, const FCoreAthenaBotSet
     }
     if (bEnabled)
     {
+        // The match's bots are on: their update starts, and runs until the match ends (Tick).
+        SetTickEnabled(true);
         Log::Info(L"Battle Royale bots: Force player AIs is {}: up to {} bots; players' teams {}; level {}, {:.0f} health, {:.0f} shield, eliminations {} for quests, {}% bot fights",
             Settings.Count > 0 ? L"on" : L"off", Settings.Count,
             Settings.bFillPlayerTeams ? std::format(L"filled with bots ({} players without fill)", Settings.NoFillAccounts.size()) : std::wstring(L"not filled"), Settings.Level,
@@ -912,6 +943,11 @@ void FCoreAthenaBotManager::Tick()
         return;
     }
     const float Now = World->GetTimeSeconds();
+    // Once a frame: the update's timer comes due more than once in a frame longer than its rate.
+    if (Now == LastTickTime)
+    {
+        return;
+    }
     const float DeltaSeconds = LastTickTime < 0.0f ? 0.0f : std::max(Now - LastTickTime, 0.0f);
     LastTickTime = Now;
     // The server's frame (wall clock, the 30 Hz cap included) and the bots' share of it, for the summary.
@@ -927,6 +963,8 @@ void FCoreAthenaBotManager::Tick()
     LastFrameStart = FrameStart;
     if (!bEnabled && PlayerBots.empty())
     {
+        // The backend turned the bots off and the warmup's are gone: nothing to update until it turns them on again.
+        SetTickEnabled(false);
         return;
     }
 
@@ -946,7 +984,10 @@ void FCoreAthenaBotManager::Tick()
         }
         if (Phase == EAthenaGamePhase::GetEndGame())
         {
+            // The match is over and the bots stand still (the winners' screen is up): their update stops after this
+            // frame's.
             bMatchEnded = true;
+            SetTickEnabled(false);
         }
     }
     if (Phase == EAthenaGamePhase::GetWarmup())

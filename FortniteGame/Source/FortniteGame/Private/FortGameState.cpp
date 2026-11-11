@@ -82,6 +82,16 @@ void AFortGameStateZone::SetGameplayState(EFortGameplayState NewGameplayState)
     }
 }
 
+bool AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects(IAbilitySystemInterface* AbilitySystemInterface)
+{
+    if (!AbilitySystemInterface || !Finder::ResolvePersistentGameplayEffectsLive())
+    {
+        return false;
+    }
+    Natives::AFortGameStateZone_OnAbilitySystemInterfaceReadyForPersistentGameplayEffects(this, AbilitySystemInterface);
+    return true;
+}
+
 // Mission Control (5.10's patch notes: the new mission activation and voting replaces the Difficulty Pylon on Retrieve
 // the Data and Ride the Lightning; with more than one player, a difficulty increase, and starting before the mission
 // ready timer runs out, take a majority vote). The mission (Mission_DeadDrop, with UseNewReadyUp from

@@ -9560,6 +9560,51 @@ bool Finder::ResolveMatchAssignmentLive(void** GameModeVTable)
     return true;
 }
 
+bool Finder::ResolvePersistentGameplayEffectsLive()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortGameStateZone_OnAbilitySystemInterfaceReadyForPersistentGameplayEffects && Natives::UObject_GetInterfaceAddress;
+    }
+    bSearched = true;
+
+    // AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects(IAbilitySystemInterface*) (21.40's
+    // name and its stat: 4.2 0xC3D5E0, 5.21 0xE5FC60, 5.41 0xE81110, 6.00 0xEC4B30) is the only function that opens a
+    // STAT_Fort_GameStateZoneApplyingPersistentEffects scope: on the authority it spawns the game state's
+    // GlobalEnvironmentAbilityActor if it has none, then has each of ActiveGameplayModifiers apply its modifier's
+    // persistent effects and ability sets to the actor (FActiveGameplayModifier::ApplyModifierToAbilitySystemInterface,
+    // 5.41 0xE6AC60). 1.x builds compile their stats out, so they have no name to find it by.
+    const std::vector<uintptr_t> Refs = Finder::StringRefs(L"STAT_Fort_GameStateZoneApplyingPersistentEffects");
+    const uintptr_t Ready = Finder::FunctionStart(First(Refs));
+    if (!IsInText(Ready))
+    {
+        Log::Info(L"Finder: AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects not found ({} references to its stat), so no actor gets the gameplay modifiers' persistent effects from Core", Refs.size());
+        return false;
+    }
+    for (const uintptr_t Ref : Refs)
+    {
+        if (Finder::FunctionStart(Ref) != Ready)
+        {
+            Log::Error(L"Finder: STAT_Fort_GameStateZoneApplyingPersistentEffects is in more than one function (0x{:X}, 0x{:X})", Ready - Finder::ImageBase(), Finder::FunctionStart(Ref) - Finder::ImageBase());
+            return false;
+        }
+    }
+
+    if (!Natives::UObject_GetInterfaceAddress)
+    {
+        ResolveSpottingLive(FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortSpottableActorInterface"));
+    }
+    if (!Natives::UObject_GetInterfaceAddress)
+    {
+        Log::Error(L"Finder: UObject::GetInterfaceAddress not found, so no actor's IAbilitySystemInterface for AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects");
+        return false;
+    }
+    Natives::AFortGameStateZone_OnAbilitySystemInterfaceReadyForPersistentGameplayEffects = reinterpret_cast<decltype(Natives::AFortGameStateZone_OnAbilitySystemInterfaceReadyForPersistentGameplayEffects)>(Ready);
+    Log::Info(L"Finder: AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects at 0x{:X}", Ready - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveFlightPathLive(ptrdiff_t FlightPathInitializedOffset)
 {
     static bool bSearched = false;

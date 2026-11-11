@@ -29,6 +29,7 @@ class UFortWorldItemDefinition;
 struct FGuid;
 struct FFortCreatePickupData;
 class AFortGameState;
+class AFortGameStateZone;
 class UFortMissionInfo;
 struct FFortMissionManagerRecord;
 class AFortGameModeZone;
@@ -551,6 +552,12 @@ namespace Natives
     inline int32_t AFortGameMode_OnGivenMatchAssignmentIndex = -1;
     inline void (*AFortGameMode_SetCurrentPlaylistName)(AFortGameMode* This, FName PlaylistName) = nullptr;
     inline void (*AFortGameState_StartStreamingAdditionalPlaylistLevel)(AFortGameState* This, FName LevelName) = nullptr;
+    // Finder::ResolvePersistentGameplayEffectsLive. AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects
+    // (21.40's name; 4.2 0xC3D5E0, 5.21 0xE5FC60, 5.41 0xE81110, 6.00 0xEC4B30): every active gameplay modifier's
+    // persistent effects and ability sets (the playlist's ModifierList, a Save the World zone's modifiers) on an actor
+    // whose ability system is ready, from the game state's global environment ability actor. Null where the build has no
+    // stat name to find it by (1.x).
+    inline void (*AFortGameStateZone_OnAbilitySystemInterfaceReadyForPersistentGameplayEffects)(AFortGameStateZone* This, IAbilitySystemInterface* AbilitySystemInterface) = nullptr;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;

@@ -8,6 +8,7 @@
 
 class AFortMissionManager;
 class AFortVisibilityManager;
+class IAbilitySystemInterface;
 class AFortWorldManager;
 class UBuildingStructuralSupportSystem;
 class UFortMissionGenerator;
@@ -148,6 +149,11 @@ public:
     // AFortGameModeOutpost::ApplyStructureLimit does (1.8 0x57C440, a plain store). False without the property.
     bool SetMaxPlayerStructures(int32_t NewMax);
     void SetGameplayState(EFortGameplayState NewGameplayState);
+    // The game's own (21.40's name; 5.41 0xE81110): on the authority, every ActiveGameplayModifiers entry's persistent
+    // effects and ability sets go on the actor whose ability system this is, from the game state's global environment
+    // ability actor, as each modifier's delivery requirements allow (a playlist's RedeployGlider_Modifier: player pawns).
+    // The actors call it once their ability system is ready. False where the build has no such function (1.x).
+    bool OnAbilitySystemInterfaceReadyForPersistentGameplayEffects(IAbilitySystemInterface* AbilitySystemInterface);
 
     // The gameplay votes' server side (5.0+, used from 5.10), which the build strips: ServerBeginGameplayVote keeps only its refusal of
     // a second vote of a type (CL-4240749 0xE1DCF0), ServerSubmitGameplayVote and ServerEndGameplayVote are the shared

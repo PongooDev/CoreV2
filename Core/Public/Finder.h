@@ -221,6 +221,10 @@ namespace Finder
     // and AFortGameState::StartStreamingAdditionalPlaylistLevel (Natives), from their strings. False without the first.
     // GameModeVTable: AFortGameMode's default object's.
     bool ResolveMatchAssignmentLive(void** GameModeVTable);
+    // AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects (Natives), the function holding its
+    // STAT_Fort_GameStateZoneApplyingPersistentEffects scope, and UObject::GetInterfaceAddress, which its callers need for
+    // an actor's IAbilitySystemInterface. False without either (1.x builds have no stat names).
+    bool ResolvePersistentGameplayEffectsLive();
     bool ResolvePoiVolumeLive();
     // AFortAthenaMapInfo::PickSupplyDropLocation and SpawnSupplyDropAtLocation (Natives), from 3.3. LlamaClassOffset:
     // AFortAthenaMapInfo's LlamaClass.

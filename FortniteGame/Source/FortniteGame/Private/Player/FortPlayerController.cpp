@@ -9,6 +9,7 @@
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "BackendRequest.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
@@ -487,6 +488,34 @@ void AFortPlayerController::Possess(APawn* InPawn)
     {
         UE_LOG(LogFort, Log, TEXT("Possess: %s plays %s, not a player pawn"), *GetNameSafe(this), *GetNameSafe(InPawn));
         return;
+    }
+
+    // The game state's gameplay modifiers on the player's new pawn (#399): a playlist's ModifierList (Soaring Solos' and
+    // Soaring 50's RedeployGlider_Modifier: GA_LTM_Player_Redeploy, which Jump in the air triggers, and
+    // GE_Athena_Glider_Redeploy's Athena.Ability.RedeployGlider, which lets the glider open again) and a Save the World
+    // zone's. The pawn took the player state's ability system in the Possess above (AFortPlayerPawn::PossessedBy, 5.41
+    // 0x11894F0, through InitAbilitySystemComponent to InitAbilitySystemComponentFromPlayerState, 0x1180940). An actor
+    // whose ability system is ready hands it to AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects
+    // (5.41 0xE81110), which applies every active modifier: AFortAIPawn's (0x115EA50, from its PostInitializeComponents)
+    // and the building actors' (0xC9A230) still do. The player pawn's call is compiled out of every client build checked
+    // (1.8.1, 4.2, 5.21, 5.41 and 6.00 have only those two callers), so after the playlist loaded
+    // (AFortGameStateAthena::UpdatePlaylistDependentData, 0xC08BC0, registers the modifiers and applies them to the
+    // player pawns there are then) a pawn got nothing. The functions it sits in are intact and run on clients too
+    // (OnRep_PlayerState), so Core makes the call here, once the possession that readied the pawn's ability system is done.
+    // Not for a pawn taken back from the remote-controlled pawn (returned above): it had them already. What it grants is
+    // the player state's and outlives the pawn: the pawn the player leaves the bus with gets no second ability (the ability
+    // set skips one the ability system has), only a second instance of the effect, which grants the same tag.
+    UAbilitySystemComponent* const PawnAbilitySystem = PossessedPlayerPawn && !bDisguisePossess ? static_cast<UAbilitySystemComponent*>(PossessedPlayerPawn->AbilitySystemComponent) : nullptr;
+    UWorld* const PawnWorld = PawnAbilitySystem ? GetWorld() : nullptr;
+    AFortGameStateZone* const GameStateZone = PawnWorld ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(PawnWorld->GetGameState())) : nullptr;
+    if (GameStateZone && Finder::ResolvePersistentGameplayEffectsLive())
+    {
+        static UClass* const AbilitySystemInterfaceClass = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemInterface");
+        void* const PawnInterface = AbilitySystemInterfaceClass ? Natives::UObject_GetInterfaceAddress(PossessedPlayerPawn, AbilitySystemInterfaceClass) : nullptr;
+        if (GameStateZone->OnAbilitySystemInterfaceReadyForPersistentGameplayEffects(static_cast<IAbilitySystemInterface*>(PawnInterface)))
+        {
+            UE_LOG(LogFort, Log, TEXT("Possess: %s's %s has the game state's gameplay modifiers"), *GetNameSafe(this), *GetNameSafe(PossessedPlayerPawn));
+        }
     }
 
     AFortPlayerControllerAthena* AthenaController = !bDisguisePossess && Role == ROLE_Authority && MyFortPawn && AFortGameModeAthena::GetCurrent(this) ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;

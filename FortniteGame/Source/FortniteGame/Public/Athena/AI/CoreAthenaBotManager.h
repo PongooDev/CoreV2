@@ -3,6 +3,7 @@
 #include <chrono>
 
 #include "Athena/AI/CoreAthenaBotController.h"
+#include "Engine/EngineBaseTypes.h"
 #include "Math/Vector.h"
 #include "UObject/WeakObjectPtr.h"
 
@@ -15,6 +16,7 @@
 
 class ABuildingContainer;
 class AController;
+class FCoreAthenaBotManager;
 class AFortAthenaAircraft;
 class AFortGameModeAthena;
 class AFortGameStateAthena;
@@ -78,14 +80,27 @@ struct FCoreAthenaBotLandingSpot
 // Core's backport of Epic's UFortServerBotManagerAthena (8.30: the game mode's ServerBotManager, which registers each
 // bot's controller, puts it on a team and handles its death), with 21.40's AFortGameModeAthena bot functions
 // (PlaceBotOnTeam, AddToAliveBots, RemoveFromAliveBots, CheckWinConditionLastManStanding) for the bots' share of the
-// match's counts. Not a UObject (3.0 has no such class): one per Battle Royale game mode, updated every frame by a timer
-// on the world's timer manager while the match has bots (SetTickEnabled).
+// match's counts. Not a UObject (3.0 has no such class): one per Battle Royale game mode, updated every frame by its
+// tick function while the match has bots (SetTickEnabled).
 //
 // Bots only exist on builds without Epic's own (every build before 8.30, which has AFortAthenaAIBotController): a build
 // with native player bots never uses this backport (HasNativePlayerBots). They're off unless the admin panel's "Force
 // player AIs" (bots on teams of their own) or "Fill players' teams with bots" (bots in the empty places of players' teams
 // in duos and squads, PlayerTeamSlots) is on. The second is for every build: on one with native player bots it is the
 // native system's to do, which Core doesn't drive yet, so this backport leaves it alone there too.
+//
+// The manager's tick function: the bots think every frame, as 8.30's do in their AAIController's components (the
+// behaviour tree's and the path following's tick functions). Registered with the match's persistent level while the
+// match has bots, in TG_PrePhysics as an actor's tick is (FCoreAthenaBotManager::SetTickEnabled).
+class FCoreAthenaBotManagerTickFunction : public FCoreTickFunction
+{
+public:
+    FCoreAthenaBotManager* Target = nullptr;
+
+    void ExecuteTick(float DeltaTime) override;
+    std::wstring DiagnosticMessage() const override;
+};
+
 class FCoreAthenaBotManager
 {
 public:
@@ -109,11 +124,12 @@ public:
     // Whether the warmup keeps its full length (CoreV2 #256): the bots come in over it, one at a time, so the game's early
     // countdown (15 s once the match's players are all in) would leave them no room. Bots on (the backend's bots block).
     bool ShouldKeepFullWarmup() const { return bEnabled; }
-    // Once a frame, from the update's world timer: from when the backend turns the match's bots on (SetSettings) until
-    // the match ends, or until the bots are off and gone.
+    // Once a frame, from the manager's tick function: from when the backend turns the match's bots on (SetSettings)
+    // until the match ends, or until the bots are off and gone.
     void Tick();
-    // Starts or stops the update's timer, a looping timer on the game mode's world's timer manager (Epic's bots think
-    // in their components' ticks, every frame).
+    // Registers or unregisters the manager's tick function with the match's persistent level. Where the build's
+    // FTickFunction registration isn't found (FTickFunction::ResolveNatives), a looping timer on the world's timer
+    // manager runs the update instead.
     void SetTickEnabled(bool bTickEnabled);
 
     // The bots still in the match (riding the aircraft, falling or on the ground).
@@ -338,6 +354,8 @@ private:
     float NextLootRefresh = 0.0f;
     float NextSummaryLog = 0.0f;
     float LastTickTime = -1.0f;
+    // The bots' update (SetTickEnabled); not made where the build's FTickFunction registration wasn't found.
+    FCoreAthenaBotManagerTickFunction PrimaryManagerTick;
     float NextRegisterTime = 0.0f;
     // Paced spawning in the warmup (CoreV2 #256): the next bot's time, the last spawn's time and the frames since it (one
     // bot at most every MinSpawnInterval seconds and MinSpawnFrames frames), the bots still to come quickly after a

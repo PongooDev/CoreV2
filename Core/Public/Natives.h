@@ -840,6 +840,15 @@ namespace Natives
     inline ptrdiff_t UGameInstance_TimerManager = -1;
     inline ptrdiff_t UWorld_TimerManager = -1;
     inline void (*FTimerManager_InternalSetTimer)(void* TimerManager, void* InOutHandle, void* InDelegate, float InRate, bool InbLoop, float InFirstDelay) = nullptr;
+
+    // FTickFunction::ResolveNatives, from FTickTaskManager::Get (the "dumpticks" command its constructor registers):
+    // FTickFunction's RegisterTickFunction(ULevel*), UnRegisterTickFunction() and SetTickFunctionEnable(bool), and its
+    // bRegistered (a byte from 3.x, Mask 0; a bit of +0xC's bitfield before, 1.8.1's 0x40).
+    inline void (*FTickFunction_RegisterTickFunction)(void* This, void* Level) = nullptr;
+    inline void (*FTickFunction_UnRegisterTickFunction)(void* This) = nullptr;
+    inline void (*FTickFunction_SetTickFunctionEnable)(void* This, bool bInEnabled) = nullptr;
+    inline ptrdiff_t FTickFunction_bRegistered = -1;
+    inline uint8_t FTickFunction_bRegisteredMask = 0;
 }
 
 namespace Sites

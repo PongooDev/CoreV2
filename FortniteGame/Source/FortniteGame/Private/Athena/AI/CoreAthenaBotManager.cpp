@@ -13,6 +13,7 @@
 #include "Athena/FortPoiVolume.h"
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Configuration.h"
+#include "Engine/Level.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -400,13 +401,14 @@ namespace
     constexpr float SpawnDoneBeforeBus = 20.0f;
     constexpr float LootRefreshInterval = 3.0f;
 
-    // The bots' update runs once a frame, as 8.30's bots think: each AFortAthenaAIBotController is an AAIController whose
-    // behaviour tree and path following components tick with the world. It is a looping timer on the world's timer
-    // manager due more often than any server frame (Core's run at 30 Hz, #109; one left at a player's frame rate limit
-    // runs at that), so it comes due in every frame. FTimerManager::Tick calls a looping timer once for each of its
-    // periods a frame took, and the update takes the frame's first (Tick).
+    // Only where the build's FTickFunction registration isn't found (FTickFunction::ResolveNatives): the update runs
+    // from a looping timer on the world's timer manager, due more often than any server frame (Core's run at 30 Hz,
+    // #109; one left at a player's frame rate limit runs at that) so it comes due in every frame. FTimerManager::Tick
+    // calls a looping timer once for each of its periods a frame took, and the update takes the frame's first (Tick).
     constexpr float UpdateTimerRate = 1.0f / 240.0f;
     FTimerHandle UpdateTimerHandle;
+    // Set when a level didn't take the manager's tick function: the timer runs the update from then on.
+    bool bTickFunctionRefused = false;
 
     void UpdateManager()
     {
@@ -507,10 +509,13 @@ void FCoreAthenaBotManager::Create(AFortGameModeAthena* GameMode)
     }
     // A new game mode is a new world (the server reloads the map after a match): nothing of the last match's bots is
     // kept. Their controllers and pawns went with the old world; Core only ever holds them weakly. The last match's
-    // update, if it still ran, stops (the game instance's timer manager outlives the world). This match's starts when
-    // the backend turns its bots on (SetSettings).
+    // update, if it still ran, stops: its tick function is unregistered as the manager goes (its level, when gone, has
+    // already let it go), and a fallback timer is cleared (the game instance's timer manager outlives the world). This
+    // match's starts when the backend turns its bots on (SetSettings).
     World->GetTimerManager().ClearTimer(UpdateTimerHandle);
     Instance.reset(new FCoreAthenaBotManager(GameMode));
+    Log::Info(L"Battle Royale bots: the bots' update is {}", Instance->PrimaryManagerTick.GetTickFunction()
+        ? L"the manager's tick function, registered with the match's level while it has bots" : L"a world timer (this build's FTickFunction registration wasn't found)");
     BotKills.clear();
     NativeKillTargets.clear();
     UAthenaNavSystem::ResetForNewMatch();
@@ -538,6 +543,36 @@ FCoreAthenaBotManager* FCoreAthenaBotManager::Get()
 FCoreAthenaBotManager::FCoreAthenaBotManager(AFortGameModeAthena* InGameMode)
     : GameMode(InGameMode)
 {
+#if WITH_SERVER_CODE
+    // Set up as an actor's PrimaryActorTick is: every frame in TG_PrePhysics, on a dedicated server too, not while the
+    // game is paused.
+    PrimaryManagerTick.Target = this;
+    if (FTickFunction* TickFunction = PrimaryManagerTick.Initialize() ? PrimaryManagerTick.GetTickFunction() : nullptr)
+    {
+        TickFunction->TickGroup = TG_PrePhysics;
+        TickFunction->EndTickGroup = TG_PrePhysics;
+        TickFunction->bCanEverTick = true;
+        TickFunction->bStartWithTickEnabled = true;
+        TickFunction->bAllowTickOnDedicatedServer = true;
+        TickFunction->bTickEvenWhenPaused = false;
+        TickFunction->TickInterval = 0.0f;
+    }
+#endif
+}
+
+void FCoreAthenaBotManagerTickFunction::ExecuteTick(float)
+{
+    // Epic's FActorTickFunction::ExecuteTick runs its target's TickActor; the manager computes its own delta from the
+    // world's time (Tick).
+    if (Target && Target->GetGameMode())
+    {
+        Target->Tick();
+    }
+}
+
+std::wstring FCoreAthenaBotManagerTickFunction::DiagnosticMessage() const
+{
+    return L"FCoreAthenaBotManager[Tick]";
 }
 
 bool FCoreAthenaBotManager::HasNativePlayerBots()
@@ -558,7 +593,36 @@ void FCoreAthenaBotManager::SetTickEnabled(bool bTickEnabled)
 #if WITH_SERVER_CODE
     AFortGameModeAthena* Athena = GetGameMode();
     UWorld* World = Athena ? Athena->GetWorld() : nullptr;
-    if (!World || bTickEnabled == UpdateTimerHandle.IsValid())
+    ULevel* Level = World ? static_cast<ULevel*>(World->PersistentLevel) : nullptr;
+    if (!World)
+    {
+        return;
+    }
+    if (FTickFunction* TickFunction = bTickFunctionRefused ? nullptr : PrimaryManagerTick.GetTickFunction())
+    {
+        if (bTickEnabled == TickFunction->IsTickFunctionRegistered() || (bTickEnabled && !Level))
+        {
+            return;
+        }
+        if (!bTickEnabled)
+        {
+            TickFunction->UnRegisterTickFunction();
+            return;
+        }
+        // A fresh start: no frame before it is measured, and the first update's bots move no time on.
+        LastTickTime = -1.0f;
+        LastFrameStart = {};
+        // AActor::RegisterActorTickFunctions' order: enabled, then registered with the actor's level.
+        TickFunction->SetTickFunctionEnable(true);
+        TickFunction->RegisterTickFunction(Level);
+        if (TickFunction->IsTickFunctionRegistered())
+        {
+            return;
+        }
+        Log::Error(L"Battle Royale bots: the manager's tick function wasn't registered with {}, the bots' update runs from a world timer", Level->GetName());
+        bTickFunctionRefused = true;
+    }
+    if (bTickEnabled == UpdateTimerHandle.IsValid())
     {
         return;
     }
@@ -567,7 +631,6 @@ void FCoreAthenaBotManager::SetTickEnabled(bool bTickEnabled)
         World->GetTimerManager().ClearTimer(UpdateTimerHandle);
         return;
     }
-    // A fresh start: no frame before it is measured, and the first update's bots move no time on.
     LastTickTime = -1.0f;
     LastFrameStart = {};
     World->GetTimerManager().SetTimer(UpdateTimerHandle, FTimerDelegate::CreateLambda([]() { UpdateManager(); }), UpdateTimerRate, true);
@@ -943,7 +1006,7 @@ void FCoreAthenaBotManager::Tick()
         return;
     }
     const float Now = World->GetTimeSeconds();
-    // Once a frame: the update's timer comes due more than once in a frame longer than its rate.
+    // Once a frame: the tick function runs once a frame, the fallback timer can come due more than once in one.
     if (Now == LastTickTime)
     {
         return;

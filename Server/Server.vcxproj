@@ -498,6 +498,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\PrimitiveComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ReplicationDriver.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\TickTaskManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\TimerManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\UnrealEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp" />

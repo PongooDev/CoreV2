@@ -2012,6 +2012,141 @@ namespace
     }
 }
 
+namespace
+{
+    struct FTeamSwitchWatch
+    {
+        std::chrono::steady_clock::time_point NextCheck{};
+        // Each player state's team at the last check.
+        std::map<const UObject*, uint8_t> Teams;
+        bool bLoggedPlaylist = false;
+    };
+
+    // A player state the game moved to another team since the last check joins the new team's squad: a player's squad
+    // on it (else a bot's, else one no player state has), and the team's other player states without it (bots, whose
+    // own teams have none) join it too, as a Playground team is one squad (MaxSquads 1). Replicated at once, so the
+    // clients' OnRep_SquadId moves the player between squad bars.
+    void CheckTeamSwitches(AFortGameModeAthena* GameMode, FTeamSwitchWatch& Watch)
+    {
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        if (!Playlist || !Playlist->bAllowTeamSwitching)
+        {
+            Watch.Teams.clear();
+            return;
+        }
+        if (!Watch.bLoggedPlaylist)
+        {
+            Watch.bLoggedPlaylist = true;
+            Log::Info(L"Battle Royale: the playlist allows team switching, so a player who changes teams joins the new team's squad");
+        }
+        const uint8_t Spectator = EFortTeam::GetSpectator();
+        std::vector<AFortPlayerStateAthena*> States;
+        for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+        {
+            if (AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState)))
+            {
+                States.push_back(AthenaState);
+            }
+        }
+        std::map<const UObject*, uint8_t> Teams;
+        for (AFortPlayerStateAthena* State : States)
+        {
+            const uint8_t Team = static_cast<uint8_t>(State->TeamIndex);
+            Teams[State] = Team;
+            const auto Known = Watch.Teams.find(State);
+            if (Known == Watch.Teams.end() || Known->second == Team || Known->second == Spectator || Team == Spectator)
+            {
+                continue;
+            }
+            const auto IsPlayer = [](AFortPlayerStateAthena* Other) { return Cast<APlayerController>(reinterpret_cast<UObject*>(Other->GetOwner())) != nullptr; };
+            uint8_t Squad = 0;
+            uint8_t BotSquad = 0;
+            std::set<uint8_t> Used;
+            for (AFortPlayerStateAthena* Other : States)
+            {
+                const uint8_t OtherSquad = static_cast<uint8_t>(Other->SquadId);
+                if (Other == State || OtherSquad == 0)
+                {
+                    continue;
+                }
+                Used.insert(OtherSquad);
+                if (static_cast<uint8_t>(Other->TeamIndex) != Team)
+                {
+                    continue;
+                }
+                uint8_t& Found = IsPlayer(Other) ? Squad : BotSquad;
+                if (Found == 0)
+                {
+                    Found = OtherSquad;
+                }
+            }
+            Squad = Squad ? Squad : BotSquad;
+            for (uint32_t Candidate = 255; Squad == 0 && Candidate > 0; --Candidate)
+            {
+                Squad = Used.contains(static_cast<uint8_t>(Candidate)) ? 0 : static_cast<uint8_t>(Candidate);
+            }
+            if (Squad == 0)
+            {
+                continue;
+            }
+            const uint8_t OldSquad = static_cast<uint8_t>(State->SquadId);
+            int32_t Joined = 0;
+            for (AFortPlayerStateAthena* Other : States)
+            {
+                if ((Other == State || static_cast<uint8_t>(Other->TeamIndex) == Team) && static_cast<uint8_t>(Other->SquadId) != Squad
+                    && (Other == State || static_cast<uint8_t>(Other->SquadId) == 0 || !IsPlayer(Other)))
+                {
+                    Other->SquadId = Squad;
+                    Other->ForceNetUpdate();
+                    Joined += Other == State ? 0 : 1;
+                }
+            }
+            Log::Info(L"Battle Royale: {} switched from {} to {}, so they leave squad {} for squad {}{}", State->GetPlayerName().ToStdString(), EFortTeam{ Known->second }.ToString(),
+                EFortTeam{ Team }.ToString(), OldSquad, Squad, Joined > 0 ? std::format(L" ({} of the team's bots join it too)", Joined) : std::wstring());
+        }
+        Watch.Teams = std::move(Teams);
+    }
+
+    void WatchTeamSwitchingOf(FWeakObjectPtr GameMode, std::shared_ptr<FTeamSwitchWatch> Watch)
+    {
+        GameThread::Enqueue([GameMode, Watch]()
+        {
+            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
+            if (!Athena)
+            {
+                return;
+            }
+            const auto Now = std::chrono::steady_clock::now();
+            if (Now >= Watch->NextCheck)
+            {
+                Watch->NextCheck = Now + std::chrono::milliseconds(250);
+                CheckTeamSwitches(Athena, *Watch);
+            }
+            WatchTeamSwitchingOf(GameMode, Watch);
+        });
+    }
+}
+
+void AFortGameModeAthena::WatchTeamSwitching()
+{
+#if WITH_SERVER_CODE
+    // Playground's team switching (4.2 onwards; UFortPlaylistAthena's bAllowTeamSwitching). The switch is the game's:
+    // 5.10's AFortPlayerControllerAthena::SetTeam_Implementation (0xC0DD10) calls the game mode's ChangeTeam (slot 0xA80,
+    // 0xDC1310), whose AttemptChangeTeamInfoForController (0xDC1410) has SetTeamInfo (0xDE8240) take the controller out
+    // of the old AFortTeamInfo (RemoveFromTeam, 0xED0C00: TeamMembers and the AFortTeamPrivateInfo's entry) and into
+    // the new one (AddToTeam, 0xEB9120: TeamMembers, the player state's SetPlayerTeam with PlayerTeam, PlayerTeamPrivate
+    // and TeamIndex, and the new AFortTeamPrivateInfo's entry, whose health and shield the game mode's
+    // ReplicateHealthAndShield keeps up), then kills the pawn so the player comes back on the new team. Nothing in it
+    // changes the player state's SquadId, which the match assignment gave (each team's players in squad index + 1).
+    if (!AFortPlayerStateAthena::HasSquadId() || !UFortPlaylistAthena::HasAllowTeamSwitching() || !AFortGameStateAthena::HasCurrentPlaylistData())
+    {
+        return;
+    }
+    WatchTeamSwitchingOf(FWeakObjectPtr(this), std::make_shared<FTeamSwitchWatch>());
+#endif
+}
+
 bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerState)
 {
     // 4.2 0xA19780: bAllowRespawning (an unreflected flag OnPlaylistDataLoaded, 0xA1BE40, sets when the loaded playlist's

@@ -9,6 +9,7 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Athena/FortPlaylistAthena.h"
 #include "Athena/FortPoiVolume.h"
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Configuration.h"
@@ -1082,8 +1083,15 @@ int32_t FCoreAthenaBotManager::MatchCapacity() const
     // The playlist's most players, not its team slots: the beacon's NumTeams x NumPlayersPerTeam is 100 x 2 in duos and
     // 100 x 4 in squads (GetMaxTeamInfoForPlaylist), while every Battle Royale playlist of these seasons takes 100
     // players (FortPlaylistAthena MaxPlayers: solo, duos, squads and 50v50). Duos and squads with bots went past 100.
-    constexpr int32_t PlaylistMaxPlayers = 100;
+    // The playlist's own MaxPlayers, where the build has one (3.5 onwards): Playground's 4 teams of 4 take 4 players
+    // (CoreV2 #374: the beacon's 16 slots filled it with bots on teams of their own), every other playlist 100.
     AFortGameModeAthena* Athena = GetGameMode();
+    int32_t PlaylistMaxPlayers = 100;
+    AFortGameStateAthena* GameState = UFortPlaylist::HasMaxPlayers() && AFortGameStateAthena::HasCurrentPlaylistData() ? AthenaGameStateOf(Athena) : nullptr;
+    if (const UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr; Playlist && Playlist->MaxPlayers > 0)
+    {
+        PlaylistMaxPlayers = std::min(static_cast<int32_t>(Playlist->MaxPlayers), PlaylistMaxPlayers);
+    }
     const int32_t Slots = PlaylistTeams > 0 ? PlaylistTeams * PlaylistTeamSize : Athena ? Athena->GetMatchCapacity() : 0;
     return Slots > 0 ? std::min(Slots, PlaylistMaxPlayers) : 0;
 }
@@ -2790,13 +2798,15 @@ void FCoreAthenaBotManager::ReplicateHealthAndShield()
     // MaxShield, then the team's copy of them (AFortTeamPrivateInfo::SetHealthAndShield). A client's squad bar reads a
     // squadmate's health from that copy, not from the player state (3.5.1 0xF703D0 reads the player state only for the
     // local player): with the player state alone, a bot teammate's bar stayed at the game pass's 0 (CoreV2 #264, #275).
-    if (!AFortPlayerStateZone::HasHealthAndShield() || !GetGameMode())
+    if (!AFortPlayerStateZone::HasHealthAndShield() || !GetGameMode() || PlayerBots.empty())
     {
         return;
     }
+    // Also a bot of a team of its own that a player has joined since (Playground's team switching, CoreV2 #374).
+    const std::set<uint8_t> Humans = HumanTeams();
     for (const auto& Bot : PlayerBots)
     {
-        AFortPlayerPawnAthena* Pawn = Bot->IsAlive() && Bot->IsOnPlayersTeam() ? Bot->GetPawn() : nullptr;
+        AFortPlayerPawnAthena* Pawn = Bot->IsAlive() && (Bot->IsOnPlayersTeam() || Humans.contains(Bot->GetTeam())) ? Bot->GetPawn() : nullptr;
         AFortPlayerStateAthena* State = Pawn && !Pawn->bIsDying ? Bot->GetPlayerState() : nullptr;
         if (!State)
         {

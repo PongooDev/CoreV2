@@ -7776,10 +7776,28 @@ void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
         return;
     }
     RespawnTime = -1.0f;
-    // Alive again to the clients (IsDead reads DeathInfo's bInitialized, which the death set).
-    if (PlayerState && AFortPlayerStateAthena::HasEliminator() && FDeathInfo::HasInitialized())
+    // Alive again to the clients (IsDead reads DeathInfo's bInitialized, which the death set): the death info cleared,
+    // as AFortPlayerControllerAthena::RespawnPlayerAfterDeath (4.2 0xA57AD0) clears a player's once they are back. Every
+    // change of DeathInfo replicates as OnRep_DeathInfo, which adds a kill feed line whenever its FinisherOrDowner is set
+    // (5.10 0xC492D0 checks nothing else): with only bInitialized cleared, the respawn wrote the bot's elimination to the
+    // kill feed a second time (CoreV2 #374).
+    if (PlayerState && AFortPlayerStateAthena::HasEliminator())
     {
-        PlayerState->DeathInfo.bInitialized = false;
+        FDeathInfo& DeathInfo = PlayerState->DeathInfo;
+        DeathInfo.FinisherOrDowner = nullptr;
+        DeathInfo.bDBNO = false;
+        if (FDeathInfo::HasDistance())
+        {
+            DeathInfo.Distance = 0.0f;
+        }
+        if (FDeathInfo::HasDeathLocation())
+        {
+            DeathInfo.DeathLocation = FVector(0.0f, 0.0f, 0.0f);
+        }
+        if (FDeathInfo::HasInitialized())
+        {
+            DeathInfo.bInitialized = false;
+        }
         PlayerState->ForceNetUpdate();
     }
     State = ECoreAthenaBotState::Skydiving;

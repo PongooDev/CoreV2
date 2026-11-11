@@ -195,6 +195,13 @@ public:
     // (Core-Backend #122), as long as the game mode is there.
     void WatchWarmup();
 
+    // A playlist with team switching (Playground's bAllowTeamSwitching): a player the game moved to another team
+    // (SetTeam_Implementation -> ChangeTeam, which changes their AFortTeamInfo, AFortTeamPrivateInfo and TeamIndex)
+    // joins that team's squad (AFortPlayerStateAthena::SquadId), which the game leaves as it was: the squad bar, the
+    // teammates' name tags and their map markers follow the squad (OnRep_SquadId), so the new team's players stayed
+    // strangers and the old team's stayed squadmates (CoreV2 #374). As long as the game mode is there.
+    void WatchTeamSwitching();
+
     // Has the server and its players fetch the event calendar again (AFortGameState::Client_RefreshEventCalendar) as soon
     // as the admin panel changes it (Core-Backend's calendar revision), so that a running match sees an admin's event
     // change (4.5's rocket launch) at once, not at the calendar's cacheExpire. Builds without the function do nothing.

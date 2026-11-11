@@ -28,6 +28,10 @@ public:
     // playlist with teams of 20 at most as Teams of 20, and one with bigger teams as 50v50.
     DefineUProperty(int32_t, MaxTeamSize)
     static bool HasMaxTeamSize() { return Member_MaxTeamSize.IsAvailable(); }
+    // The most players in the match: 100 on every Battle Royale playlist of these seasons, 4 on Playground (5.10's
+    // Playlist_Playground: 4 teams of up to 4, MaxPlayers 4). Battle Royale's player bots fill no further (CoreV2 #374).
+    DefineUProperty(int32_t, MaxPlayers)
+    static bool HasMaxPlayers() { return Member_MaxPlayers.IsAvailable(); }
 };
 
 // Whether the players of a playlist come back after they die (from 3.5; 4.2's Playground: InfiniteRespawnExceptStorm).
@@ -94,6 +98,12 @@ public:
     // servers run Core's (Building/BuildingContainer.cpp), and nothing else in them reads it.
     DefineUProperty(int32_t, LootDropRounds)
     static bool HasLootDropRounds() { return Member_LootDropRounds.IsAvailable(); }
+    // Set on Playground: its players change teams with the pause menu's team select (TeamSelectWidget, which calls
+    // AFortPlayerControllerAthena::SetTeam, a server RPC; 5.10's SetTeam_Implementation 0xC0DD10 checks the team is in
+    // the playlist's DefaultFirstTeam..DefaultLastTeam and calls the game mode's ChangeTeam, slot 0xA80). Read by
+    // AFortGameModeAthena::WatchTeamSwitching (CoreV2 #374).
+    DefineUProperty(bool, bAllowTeamSwitching)
+    static bool HasAllowTeamSwitching() { return Member_bAllowTeamSwitching.IsAvailable(); }
 };
 
 // The game mode's playlists (AFortGameMode's PlaylistManager): every Battle Royale playlist the build has.

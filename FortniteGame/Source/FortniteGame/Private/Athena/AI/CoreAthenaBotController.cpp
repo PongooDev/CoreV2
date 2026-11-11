@@ -5600,6 +5600,12 @@ namespace
         return Classes[Piece][MaterialKind];
     }
 
+    UBuildingStructuralSupportSystem* StructuralSupportSystemOf(UWorld* World)
+    {
+        AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        return GameState ? static_cast<UBuildingStructuralSupportSystem*>(GameState->StructuralSupportSystem) : nullptr;
+    }
+
     // The building grid's cell at Location, as the game finds a player's piece's: the structural support system's
     // K2_GetGridBoxFromWorldLoc (3.5.1 0xAF7590) rounds X and Y to the nearest cell centre (the grid origin plus whole
     // 512 uu cells, so a cell's edges are half a cell off the origin's) and floors Z to a 384 uu level above the origin.
@@ -5607,8 +5613,7 @@ namespace
     bool GetBuildingGridCell(UWorld* World, const FVector& Location, FVector& OutCellMin)
     {
         static UFunction* GetGridBox = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.BuildingStructuralSupportSystem:K2_GetGridBoxFromWorldLoc");
-        AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-        UBuildingStructuralSupportSystem* SupportSystem = GameState ? static_cast<UBuildingStructuralSupportSystem*>(GameState->StructuralSupportSystem) : nullptr;
+        UBuildingStructuralSupportSystem* SupportSystem = StructuralSupportSystemOf(World);
         static bool bLogged = false;
         if (!GetGridBox || !SupportSystem)
         {
@@ -5633,6 +5638,50 @@ namespace
                 Box->Min.X, Box->Min.Y, Box->Min.Z, Box->Max.X, Box->Max.Y, Box->Max.Z);
         }
         return true;
+    }
+
+    // What the structural grid says about a bot's piece, asked as a player's is: ServerCreateBuildingActor's
+    // AFortPlayerController::CanPlaceBuildableClassInStructuralGrid asks UBuildingStructuralSupportSystem's
+    // CanAddBuildingActorClassToGrid with the piece's class, place and rotation, unmirrored, without static overlap. A
+    // grid slot holds one piece: one already there, of any material and whichever way round (ExistingActor), keeps the
+    // bot's out. InvalidActor when the grid can't be asked (no support system; before 3.5 the build reflects no query).
+    EFortStructuralGridQueryResults::Type QueryStructuralGrid(UObject* WorldContextObject, UWorld* World, UClass* PieceClass, const FVector& Origin, float Yaw)
+    {
+        UBuildingStructuralSupportSystem* SupportSystem = StructuralSupportSystemOf(World);
+        if (!SupportSystem || !PieceClass || !UBuildingStructuralSupportSystem::HasCanAddBuildingActorToGrid())
+        {
+            return EFortStructuralGridQueryResults::InvalidActor;
+        }
+        return SupportSystem->CanAddBuildingActorClassToGrid(WorldContextObject, PieceClass, Origin, FRotator(0.0f, Yaw, 0.0f), false, nullptr, false);
+    }
+
+    const wchar_t* StructuralGridQueryResultName(EFortStructuralGridQueryResults::Type Result)
+    {
+        switch (Result)
+        {
+        case EFortStructuralGridQueryResults::CanAdd:
+            return L"CanAdd";
+        case EFortStructuralGridQueryResults::ExistingActor:
+            return L"ExistingActor";
+        case EFortStructuralGridQueryResults::Obstructed:
+            return L"Obstructed";
+        case EFortStructuralGridQueryResults::NoStructuralSupport:
+            return L"NoStructuralSupport";
+        case EFortStructuralGridQueryResults::InvalidActor:
+            return L"InvalidActor";
+        case EFortStructuralGridQueryResults::ReachedLimit:
+            return L"ReachedLimit";
+        case EFortStructuralGridQueryResults::NoEditPermission:
+            return L"NoEditPermission";
+        default:
+            return L"a layout requirement";
+        }
+    }
+
+    // The piece's class: the queue's material, the descriptor's piece (0 wall, 1 ramp, 2 cone).
+    UClass* PieceClassFor(ECoreOrientedConstructionBuildingType Type, int32_t MaterialKind)
+    {
+        return PlayerBuildingClass(IsWallPiece(Type) ? 0 : Type == ECoreOrientedConstructionBuildingType::RampForward ? 1 : 2, MaterialKind);
     }
 }
 
@@ -6133,6 +6182,22 @@ bool FCoreAthenaBotController::IsPiecePlaceClear(const FCoreAthenaBotBuildDescri
     {
         return false;
     }
+    // Its grid slot free, as the structural grid has it for a player's piece: a piece of any material already there
+    // keeps it out, whichever way round (CoreV2 #390: a bot's ramp went up inside another of a different material, which
+    // the traces above the slope below ran clear of). Its support may still come from the build's earlier pieces (a
+    // box's cone on its walls, the upper ramp on the lower), so no support yet doesn't keep it out of the queue; the
+    // grid is asked again as it goes up (BuildPiece).
+    const EFortStructuralGridQueryResults::Type GridResult =
+        QueryStructuralGrid(Pawn, Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr, PieceClassFor(Descriptor.BuildingType, BuildQueue.MaterialKind), Origin, Yaw);
+    if (GridResult != EFortStructuralGridQueryResults::CanAdd && GridResult != EFortStructuralGridQueryResults::NoStructuralSupport && GridResult != EFortStructuralGridQueryResults::InvalidActor)
+    {
+        static int32_t LoggedTaken = 0;
+        if (LoggedTaken++ < 12)
+        {
+            Log::Info(L"Battle Royale bots: {} leaves a {} out of {}: the structural grid says {}", BotName, PieceName(Descriptor.BuildingType), BuildQueue.Reason, StructuralGridQueryResultName(GridResult));
+        }
+        return false;
+    }
     // Ground under it, a step below the build's at most (not hanging over a drop): under a wall's middle, under a ramp's
     // or a cone's cell centre (half a cell along their +Y from the origin's edge). The grid's level can be partly in
     // the ground (as a player's piece is on a slope), so it is looked for from the level's top down.
@@ -6144,6 +6209,21 @@ bool FCoreAthenaBotController::IsPiecePlaceClear(const FCoreAthenaBotBuildDescri
         UObject* GroundComponent = nullptr;
         if (!UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Probe.X, Probe.Y, Origin.Z + BuildingLevelHeight), FVector(Probe.X, Probe.Y, Origin.Z - 250.0f), 0, false, true, Ground, GroundActor, GroundComponent)
             || (GroundActor && Cast<APawn>(GroundActor)) || (IsWallPiece(Descriptor.BuildingType) && Ground.Z < Origin.Z - MaxWallGroundGap))
+        {
+            return false;
+        }
+    }
+    // Where the grid can't be asked (before 3.5, whose support system reflects no query), the slot is looked at
+    // instead: a ramp or a cone takes its cell's middle, so a piece already in the cell, of any material and whichever
+    // way round, is found going down through the middle, from under the level's top to well above its floor. A wall
+    // already on the edge is in the way of the traces across it below.
+    if (GridResult == EFortStructuralGridQueryResults::InvalidActor && !IsWallPiece(Descriptor.BuildingType))
+    {
+        FVector Hit;
+        UObject* HitActor = nullptr;
+        UObject* HitComponent = nullptr;
+        if (UKismetSystemLibrary::LineTraceSingle(Pawn, FVector(Probe.X, Probe.Y, Origin.Z + BuildingLevelHeight - 20.0f), FVector(Probe.X, Probe.Y, Origin.Z + 50.0f), 0, false, true, Hit, HitActor, HitComponent)
+            && HitActor && Cast<ABuildingSMActor>(HitActor))
         {
             return false;
         }
@@ -6201,9 +6281,9 @@ bool FCoreAthenaBotController::BuildPiece(const FCoreAthenaBotBuildDescriptor& D
 #if WITH_SERVER_CODE
     // A player's piece goes through AFortPlayerController::ServerCreateBuildingActor, whose checks (CanAffordTo...,
     // CanPlaceBuildableClassInStructuralGrid) are the player controller's own virtuals; a bot's controller is an
-    // AAIController. So the bot's piece is spawned and initialized the way that body does it after its checks
-    // (SetMirrored, InitializeBuildingActor, PostInitializeSpawnedBuildingActor), with the bot's team, and the navmesh
-    // around it is rebuilt.
+    // AAIController. So the bot's piece asks the structural grid what CanPlaceBuildableClassInStructuralGrid asks it,
+    // and is spawned and initialized the way that body does it after its checks (SetMirrored, InitializeBuildingActor,
+    // PostInitializeSpawnedBuildingActor), with the bot's team, and the navmesh around it is rebuilt.
     AFortPlayerPawnAthena* Pawn = GetPawn();
     UWorld* World = Manager->GetGameMode() ? Manager->GetGameMode()->GetWorld() : nullptr;
     const int32_t Kind = BuildQueue.MaterialKind;
@@ -6212,12 +6292,25 @@ bool FCoreAthenaBotController::BuildPiece(const FCoreAthenaBotBuildDescriptor& D
     {
         return false;
     }
-    const int32_t Piece = IsWallPiece(Descriptor.BuildingType) ? 0 : Descriptor.BuildingType == ECoreOrientedConstructionBuildingType::RampForward ? 1 : 2;
-    UClass* PieceClass = PlayerBuildingClass(Piece, Kind);
+    UClass* PieceClass = PieceClassFor(Descriptor.BuildingType, Kind);
     FVector Origin;
     float Yaw = 0.0f;
     if (!PieceClass || !GetPiecePlacement(Descriptor, Origin, Yaw))
     {
+        return false;
+    }
+    // Only where the grid would take a player's piece, asked right before the spawn as ServerCreateBuildingActor and
+    // AFortAIController::CreateBuildingActor (5.40 0xA28B40) ask it: anything but CanAdd leaves the piece out (a
+    // piece already in the slot, or nothing to hold it up). InvalidActor: the grid can't be asked (before 3.5), and
+    // IsPiecePlaceClear's look at the slot stands for it.
+    const EFortStructuralGridQueryResults::Type GridResult = QueryStructuralGrid(Pawn, World, PieceClass, Origin, Yaw);
+    if (GridResult != EFortStructuralGridQueryResults::CanAdd && GridResult != EFortStructuralGridQueryResults::InvalidActor)
+    {
+        static int32_t LoggedRefused = 0;
+        if (LoggedRefused++ < 12)
+        {
+            Log::Info(L"Battle Royale bots: {} leaves a {} out of {}: the structural grid says {}", BotName, PieceName(Descriptor.BuildingType), BuildQueue.Reason, StructuralGridQueryResultName(GridResult));
+        }
         return false;
     }
     FActorSpawnParameters SpawnParameters;

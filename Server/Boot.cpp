@@ -344,6 +344,7 @@ static void InstallHooks()
             AFortPlayerControllerAthena::HookCallSites();
             AFortPlayerControllerAthena::HookVTables();
             AFortPlayerPawnAthena::HookNatives();
+            AFortPlayerPawnAthena::HookVTables();
             AFortAthenaSupplyDrop::HookNatives();
             AFortAthenaVehicle::HookVTables();
             Finder::ResolveAthenaHeroLive();

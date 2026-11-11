@@ -140,9 +140,10 @@ public:
     bool ShouldPersistInInventoryWhenFinalStackEmpty() const { return Member_bPersistInInventoryWhenFinalStackEmpty.IsAvailable() && bPersistInInventoryWhenFinalStackEmpty; }
     // The item wears down (its entries carry a durability); false where the build doesn't reflect the flag.
     bool ItemHasDurability() const { return Member_bItemHasDurability.IsAvailable() && bItemHasDurability; }
-    // The item leaves its carrier when they go down (5.40's The Getaway jewel, Athena_Bling_Pack). The server's drop is
-    // stripped: AFortPlayerControllerAthena::DropItemsOnDBNO. False where the build doesn't reflect the flag.
+    // The item leaves its carrier when they go down (from 5.40: The Getaway's jewel, Athena_Bling_Pack). The server's
+    // drop is cut out of the build: AFortPlayerPawnAthena::StartDBNO. False where the build doesn't reflect the flag.
     DefineBitfieldUProperty(bDropOnDBNO)
+    static bool HasDropOnDBNO() { return Member_bDropOnDBNO.IsAvailable(); }
     bool ShouldDropOnDBNO() const { return Member_bDropOnDBNO.IsAvailable() && bDropOnDBNO; }
     // Focusing the item's quickbar slot activates (equips) it. True where the build doesn't reflect the flag.
     bool ShouldActivateWhenFocused() const { return !Member_bShouldActivateWhenFocused.IsAvailable() || bShouldActivateWhenFocused; }

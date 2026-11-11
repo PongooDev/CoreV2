@@ -6567,6 +6567,8 @@ void FCoreAthenaBotController::EnterDBNO(AFortPlayerStateAthena* InDowner, float
         AController* DownerController = InDowner ? Cast<AController>(reinterpret_cast<UObject*>(InDowner->GetOwner())) : nullptr;
         bAbility = SendGameplayEvent(reinterpret_cast<AActor*>(Pawn), L"Event.Damage.DiedAthena", reinterpret_cast<UObject*>(DownerController));
     }
+    // The server part of the pawn's StartDBNO, which a player's knock runs after the build's: what drops on DBNO.
+    Pawn->StartDBNO();
     OnEnteredDBNO(InDowner, Now, true);
     Log::Info(L"Battle Royale bots: {} is down (DBNO){}, {:.0f} health, the DBNO ability {}", BotName, InDowner ? std::format(L", knocked by {}", InDowner->GetPlayerName().ToStdString()) : std::wstring(),
         Pawn->GetHealth(), bAbility ? L"triggered" : L"not triggered");

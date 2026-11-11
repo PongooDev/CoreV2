@@ -128,8 +128,6 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         AFortPoiManager::WatchInitialization(GetWorld());
         ABuildingContainer::LogWorldContainers(GetWorld());
         Athena->WatchMatchResults();
-        Athena->WatchScoring();
-        Athena->WatchGetaway();
         Athena->WatchWarmup();
         Athena->WatchTeamSwitching();
         Athena->WatchEventCalendar();

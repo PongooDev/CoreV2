@@ -128,24 +128,11 @@ public:
     // The kills of the player's whole team (not replicated): 21.40's AFortPlayerStateAthena::SetKillScore keeps it for
     // each of the team's players.
     DefineUProperty(int32_t, TeamKillScore)
-    // Score Royale's (5.30): what the player scored with, each count followed by an unreflected int32 of the points it
-    // gave (AFortPlayerStateAthena 0xC4B5A0 counts a container's or coin's scoring event, 0xC3C460 prices it from the
-    // playlist's ScoringData), and the sum of those points with the eliminations' (0xC3C540, which adds what it gained to
-    // the player's AFortTeamInfoAthena score).
-    DefineUProperty(int32_t, NumChestsOpened)
-    DefineUProperty(int32_t, NumAmmoCansOpened)
-    DefineUProperty(int32_t, NumSupplyDropsOpened)
-    DefineUProperty(int32_t, NumLlamasOpened)
-    DefineUProperty(int32_t, NumForagedItemsConsumed)
-    DefineUProperty(int32_t, NumBronzeCoinsCollected)
-    DefineUProperty(int32_t, NumSilverCoinsCollected)
-    DefineUProperty(int32_t, NumGoldCoinsCollected)
+    // Score Royale's (5.30): the player's points, the sum of what their scoring events gave (AFortPlayerStateAthena
+    // 0xC4B5A0 counts a container's or coin's, 0xC3C460 prices it from the playlist's ScoringData) and their eliminations'
+    // (0xC3C540, which adds what it gained to the player's AFortTeamInfoAthena score).
     DefineUProperty(int32_t, TotalPlayerScore)
-    // The team's score and its place by score, which AFortGameModeAthena's score check (5.30 0xBD9E80) copies to each of
-    // the team's players.
-    DefineUProperty(int32_t, TeamScore)
-    DefineUProperty(int32_t, TeamScorePlacement)
-    static bool HasTotalPlayerScore() { return Member_TotalPlayerScore.IsAvailable() && Member_NumGoldCoinsCollected.IsAvailable(); }
+    static bool HasTotalPlayerScore() { return Member_TotalPlayerScore.IsAvailable(); }
     DefineUStructProperty(FDeathInfo, DeathInfo)
     // 1.11: the player's squad within their team, 0 for none (OnRep_SquadId adds the squad's player states to the
     // owning controller's SquadMembers). AFortGameModeAthena::PlacePlayerOnTeam (2.1 0x444780) sets it from the

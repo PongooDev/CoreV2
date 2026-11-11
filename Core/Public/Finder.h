@@ -222,6 +222,8 @@ namespace Finder
     bool ResolveAthenaHUDPawnBinding();
     bool ResolveMcpProfileQuery();
     bool ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOffset);
+    // AFortPlayerPawn::StartDBNO's slot in AFortPlayerPawnAthena's vtable (the function that sets bIsDBNO), or -1.
+    int32_t StartDBNOIndex(ptrdiff_t IsDBNOOffset);
     // UStatManager::GetStatValue, which the end-of-match screen's stats are read with (Natives::UStatManager_GetStatValue).
     bool ResolveMatchStatsLive();
     // The slot of AFortPlayerControllerAthena's pawn-death handler when the build strips it (1.9.1), else -1.

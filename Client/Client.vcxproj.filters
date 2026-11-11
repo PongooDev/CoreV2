@@ -1132,9 +1132,6 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaMapInfo.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
-    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaMutator_Heist.h">
-      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
-    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaPlaylistBase.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
@@ -1773,6 +1770,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPlayerControllerAthenaQuickChat.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPlayerPawnAthena.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPoiVolume.cpp">

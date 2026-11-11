@@ -35,18 +35,6 @@ struct FAthenaPlaylistDataTableSet
     static bool HasFortAthenaPlaylistClass() { return Member_FortAthenaPlaylistClass.IsAvailable(); }
 };
 
-// One of the playlist's UFortSpawnActorInfo (its SpawnActorInfoList, Score Royale's coins) as the game mode spawns it:
-// 5.30's AFortGameModeAthena 0xBE8400 lists them when the playlist's data has loaded (OnPlaylistDataLoaded), spawning
-// a PostPlaylistLoad one at once, OnGamePhaseStepChanged (0xBEAFE0) spawns a StartOfStormHoldTime one when the storm
-// holds at its SafeZoneIndex, and Tick (0xBFDF70) spawns the rest of one after its DelayBetweenSpawns (0xBF8830).
-struct FFortSpawnActorData
-{
-    DefineUnrealStruct(FFortSpawnActorData, FortniteGame)
-    DefineUProperty(UObject*, SpawnActorInfo)
-    DefineUProperty(int32_t, NumSpawnsRemaining)
-    DefineUProperty(TArray<AActor*>, SpawnedFortSpawnActors)
-};
-
 // Battle Royale's game mode (from 1.7.2; Athena_GameMode_C on Athena_Terrain). Its flow (warmup, aircraft, safe zones,
 // end game) is native; what the shipping exe stripped from it is restored here (Core-Docs Athena-Gameplay-1.7.2.md).
 class AFortGameModeAthena : public AFortGameModeZone
@@ -108,12 +96,6 @@ public:
     // AFortGameMode's (the match options), then the game state's playlist, the match's player count and its warmup's
     // required players. 5.30 strips it (Core's restoration; 5.21 0xBD59E0 is the game's own).
     void OnGivenMatchAssignment(bool bSuccess, const void* MatchOptions);
-
-    // The playlist's spawned actors (FFortSpawnActorData) and its modifiers' mutators (AFortAthenaMutator: Score
-    // Royale's AthenaMutator_Score_C, whose OnGamePhaseStepChanged tells the players a batch of coins is coming).
-    DefineUStructArrayProperty(FFortSpawnActorData, SpawnActorDataList)
-    DefineUProperty(TArray<AActor*>, GameplayMutators)
-    static bool HasSpawnActorDataList() { return Member_SpawnActorDataList.IsAvailable() && Member_GameplayMutators.IsAvailable(); }
 
     // The most players a match here can have (the playlist's teams x their size; 0 when unknown), and the players
     // connected now (from their login on). Battle Royale's player bots fill the difference (FCoreAthenaBotManager).
@@ -185,17 +167,6 @@ public:
     // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,
     // for Battle Royale's stats (Core-Backend #59), as long as the game mode is there.
     void WatchMatchResults();
-
-    // Core's log of a FirstToGoalScore match (Score Royale, 5.30), whose scoring and win are the game's own: the
-    // players' scores as they change, the coins as they spawn and the win, as "Score Royale:" lines, as long as the game
-    // mode is there. Other playlists log nothing.
-    void WatchScoring();
-
-    // The Getaway (5.40's Playlist_Bling_*: AFortAthenaMutator_Heist), whose jewel drops, vans and wins are the game's
-    // own: a downed carrier drops the jewel (the stripped bDropOnDBNO drop, AFortPlayerControllerAthena::DropItemsOnDBNO),
-    // and the jewel pickups and drops, the vans, the storm's losses and the teams that get away are logged as "Getaway:"
-    // lines, as long as the game mode is there. Other playlists stop being watched once the storm is up.
-    void WatchGetaway();
 
     // Keeps the warmup at the admin panel's length and, with late joining on, takes more players during it
     // (Core-Backend #122), as long as the game mode is there.

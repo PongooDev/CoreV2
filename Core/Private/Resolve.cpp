@@ -10206,6 +10206,37 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
     return true;
 }
 
+int32_t Finder::StartDBNOIndex(ptrdiff_t IsDBNOOffset)
+{
+    // 21.40's AFortPlayerPawn::StartDBNO, the pawn going down (5.40 AFortPlayerPawnAthena slot 0x1BD, 0xC68250; 5.30
+    // slot 0x1B1, 0xC58D50): the death info with bDBNO, then bIsDBNO, the DBNO collision, a gameplay event to the pawn's
+    // ability system and, from 5.40, OnPlayerStartDBNO. It is the only one of AFortPlayerPawnAthena's functions that
+    // stores 1 to bIsDBNO ("mov byte ptr [rdi+8F0h], 1", 0xC68879); a pawn whose team has nobody standing is finished off
+    // there instead (slot 0x1E2), without it.
+    void** PawnVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena");
+    const int32_t Index = IsDBNOOffset > 0 ? FirstVTableIndexWhere(PawnVTable, [IsDBNOOffset](uintptr_t Entry)
+    {
+        const uintptr_t End = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        for (uintptr_t Site = Entry; End && Site + 7 <= End; ++Site)
+        {
+            // mov byte ptr [reg+IsDBNOOffset], 1 (C6 /0, disp32, imm8, no SIB).
+            const uint8_t ModRm = Byte(Site + 1);
+            if (Byte(Site) == 0xC6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 2) == IsDBNOOffset && Byte(Site + 6) == 1)
+            {
+                return true;
+            }
+        }
+        return false;
+    }) : -1;
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortPlayerPawn::StartDBNO not found in AFortPlayerPawnAthena (bIsDBNO +0x{:X})", IsDBNOOffset);
+        return -1;
+    }
+    Log::Info(L"Finder: AFortPlayerPawn::StartDBNO is AFortPlayerPawnAthena slot 0x{:X} (0x{:X})", Index, VTableEntry(PawnVTable, Index) - Finder::ImageBase());
+    return Index;
+}
+
 bool Finder::ResolveDecoSpawnedLive()
 {
     static bool bSearched = false;

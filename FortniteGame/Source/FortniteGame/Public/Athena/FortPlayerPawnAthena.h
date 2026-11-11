@@ -49,8 +49,18 @@ public:
     // trap or a resource picks it up.
     void OnCapsuleBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32_t OtherBodyIndex, bool bFromSweep, const void* SweepResult);
 
+    // FortPlayerPawnAthena.cpp: the server part of AFortPlayerPawn::StartDBNO (the pawn going down), which the build cuts
+    // out: the items whose definition has bDropOnDBNO (5.40's The Getaway jewel) leave the downed pawn. The build's own
+    // StartDBNO runs first (StartDBNOHK); Core's knock for a bot (FCoreAthenaBotController::EnterDBNO) calls it too.
+    void StartDBNO();
+
     static void HookNatives();
+    // From 5.40 (UFortWorldItemDefinition's bDropOnDBNO): StartDBNO's slot, so the server part runs after the build's.
+    static void HookVTables();
 
 private:
     DECLARE_FUNCTION(execOnCapsuleBeginOverlap);
+
+    static void StartDBNOHK(AFortPlayerPawnAthena* This);
+    static inline void (*StartDBNOOG)(AFortPlayerPawnAthena* This) = nullptr;
 };

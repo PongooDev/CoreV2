@@ -24,7 +24,12 @@ class AFortGameStateAthena : public AFortGameStateZone
 
 public:
     // Set by AFortGameModeAthena's phase changes. After Warmup a dead player is out of the match: the pawn-death handler
-    // (1.7.2 0x437C30) only takes a player out of the alive players from Aircraft on.
+    // (1.7.2 0x437C30) only takes a player out of the alive players from Aircraft on. GamePhaseStep follows on its own,
+    // on the server too: the game state's Tick (5.40 0xC061E0) works it out every frame from the phase, the warmup
+    // countdown, the aircraft and the safe zone indicator's times (0xC06E10) and broadcasts GamePhaseStepChanged when it
+    // changes (AFortGameModeAthena's and the mutators' OnGamePhaseStepChanged). Its gate, CanUpdateGamePhaseStep
+    // (0xBE0640, 5.30 0xBD98A0), is false only while UFortGameInstance's loading screen manager (the TWeakPtr that
+    // UFortGlobalUIContext::IsCurrentlyShowingLoadingScreen reads) shows one, so it is true on Core's servers.
     DefineUProperty(EAthenaGamePhase, GamePhase)
     DefineUProperty(int32_t, PlayersLeft)
     // The most players the match had: AddToAlivePlayers (1.10 0x42A4A0) raises it to the alive players' count.
@@ -73,13 +78,4 @@ public:
     static bool HasAircrafts() { return Member_AirCraftBehavior.IsAvailable() && Member_Aircrafts.IsAvailable(); }
 
     static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
-
-    // A FirstToGoalScore playlist's (Score Royale, 5.30): the best team score and its team, which AFortGameModeAthena's
-    // score check (0xBD9E80) keeps up to date, and the winning team's score and team once one reaches the GoalScore
-    // (WinningScore is -1 until then, the game state's constructor's).
-    DefineUProperty(int32_t, CurrentHighScore)
-    DefineUProperty(int32_t, CurrentHighScoreTeam)
-    DefineUProperty(int32_t, WinningScore)
-    DefineUProperty(int32_t, WinningTeam)
-    static bool HasWinningScore() { return Member_CurrentHighScore.IsAvailable() && Member_CurrentHighScoreTeam.IsAvailable() && Member_WinningScore.IsAvailable() && Member_WinningTeam.IsAvailable(); }
 };

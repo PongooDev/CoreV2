@@ -325,69 +325,6 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
 #endif
 }
 
-int32_t AFortPlayerControllerAthena::DropItemsOnDBNO(AFortPawn* DBNOPawn)
-{
-    int32_t Dropped = 0;
-#if WITH_SERVER_CODE
-    // The definition's bDropOnDBNO (5.40's Athena_Bling_Pack, The Getaway's jewel: "Bring this to a Getaway van!") is
-    // never read by the build: its DBNO start (AFortPlayerPawnAthena 0xC68250, which sets bIsDBNO) drops nothing, and no
-    // code tests the flag's byte (UFortWorldItemDefinition +0x758, with bDropOnDeath and bDropOnLogout), so a downed
-    // carrier kept the jewel. The items go as a death's do: whole stacks, each its own pickup tossed around the pawn.
-    AFortInventory* Inventory = Role == ROLE_Authority ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
-    if (!Inventory || !DBNOPawn)
-    {
-        return 0;
-    }
-
-    std::vector<FGuid> Drops;
-    TArray<UFortWorldItem*>& Instances = Inventory->Inventory.ItemInstances;
-    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
-    {
-        FFortItemEntry* ItemEntry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
-        const UFortWorldItemDefinition* ItemDefinition = ItemEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition)) : nullptr;
-        if (ItemDefinition && ItemDefinition->ShouldDropOnDBNO() && ItemEntry->Count > 0)
-        {
-            Drops.push_back(ItemEntry->ItemGuid);
-        }
-    }
-    if (Drops.empty())
-    {
-        return 0;
-    }
-
-    const FVector DownLocation = DBNOPawn->GetTransform().GetLocation();
-    const std::vector<FVector> Spots = GetInventoryDropSpots(DBNOPawn, DownLocation, static_cast<int32_t>(Drops.size()));
-    UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
-    std::vector<uint8_t> EntryStorage(EntryStruct->GetStructureSize(), 0);
-    FFortItemEntry* DropEntry = reinterpret_cast<FFortItemEntry*>(EntryStorage.data());
-    for (size_t Index = 0; Index < Drops.size(); ++Index)
-    {
-        UFortWorldItem* WorldItem = Inventory->FindWorldItem(Drops[Index]);
-        if (!WorldItem)
-        {
-            continue;
-        }
-        FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
-        const int32_t Count = ItemEntry.Count;
-        EntryStruct->InitializeStruct(DropEntry);
-        EntryStruct->CopyScriptStruct(DropEntry, &ItemEntry);
-        if (RemoveInventoryItem(Drops[Index], Count, false, true))
-        {
-            if (AFortPickup* Pickup = SpawnDropPickup(*DropEntry, &DownLocation, nullptr))
-            {
-                Pickup->PawnWhoDroppedPickup = DBNOPawn;
-                Pickup->TossOntoFloor(Spots[Index], DBNOPawn);
-                UE_LOG(LogFort, Log, TEXT("DropItemsOnDBNO: %s went down and dropped %s as %s"), *GetName(),
-                    *static_cast<UFortItemDefinition*>(DropEntry->ItemDefinition)->GetName(), *Pickup->GetName());
-                ++Dropped;
-            }
-        }
-        EntryStruct->DestroyStruct(DropEntry);
-    }
-#endif
-    return Dropped;
-}
-
 std::vector<FVector> AFortPlayerControllerAthena::GetInventoryDropSpots(AActor* DeadPawn, const FVector& DeathLocation, int32_t Count)
 {
     // The pickups are tossed from the body to their own spots around it. A ring 80 out with 50 between them left a pile

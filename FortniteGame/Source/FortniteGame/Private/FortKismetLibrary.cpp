@@ -220,6 +220,31 @@ int32_t UFortKismetLibrary::K2_RemoveItemFromPlayer(AFortPlayerController* Playe
 #endif
 }
 
+int32_t UFortKismetLibrary::K2_RemoveItemFromPlayerByGuid(AFortPlayerController* PlayerController, const FGuid& ItemGuid, int32_t AmountToRemove, bool bForceRemoval)
+{
+#if WITH_SERVER_CODE
+    // 5.40's native (CL-4352937 0xEBD4D0) keeps only its check, a controller and a valid guid, around a call to the shared
+    // return-0 stub, so a Blueprint's removal by guid took nothing. The Grappler's is one: GA_Athena_HookDestroy (granted
+    // while it is held, by GA_Athena_HookPassive's GE_Athena_HookPassive, and triggered by each shot's Event.Weapons.Fire)
+    // finds the magazine at 0 at the grapple travel montage's notify, plays the gun toss and, at its notify, removes the
+    // gun with K2_RemoveItemFromPlayerByGuid(its controller, the weapon's GetInventoryGUID, 1, true). The spent Grappler
+    // stayed in the inventory at 0 (#391).
+    AFortInventory* Inventory = PlayerController && ItemGuid.IsValid() ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+    UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+    if (!WorldItem || !AFortPlayerController::HasInventoryRemovalHook())
+    {
+        return 0;
+    }
+
+    // As K2_RemoveItemFromPlayer takes from each stack: the stack's count at most, all of it for a negative amount.
+    const int32_t Count = static_cast<FFortItemEntry&>(WorldItem->ItemEntry).Count;
+    const int32_t Taken = AmountToRemove < 0 ? Count : std::min(Count, AmountToRemove);
+    return PlayerController->RemoveInventoryItem(ItemGuid, Taken, true, bForceRemoval) ? Taken : 0;
+#else
+    return 0;
+#endif
+}
+
 uint8_t UFortKismetLibrary::GetActorTeam(const AActor* Actor)
 {
     UFunction* Function = FindStaticFunction_GetActorTeam();
@@ -458,6 +483,27 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromPlayer)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromPlayerByGuid)
+{
+    // 5.40's exec (0x145A840) reads the four parameters and calls the native.
+    P_GET_OBJECT(AFortPlayerController, Z_Param_PlayerController);
+    P_GET_STRUCT(FGuid, Z_Param_ItemGuid);
+    P_GET_PROPERTY(UIntProperty, Z_Param_AmountToRemove);
+    P_GET_UBOOL(Z_Param_bForceRemoval);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    // As K2_RemoveItemFromPlayer's: a consumable a Blueprint spends stays for "cheat infiniteconsumables" (#155), and a
+    // gadget's charge for "cheat nocooldown" (#148), the use counting as paid.
+    const bool bKeep = Z_Param_PlayerController && Z_Param_AmountToRemove > 0
+        && (UFortCheatManager::KeepsConsumable(Z_Param_PlayerController, Z_Param_ItemGuid) || UFortCheatManager::KeepsAbilityCharge(Z_Param_PlayerController, Z_Param_ItemGuid));
+#else
+    const bool bKeep = false;
+#endif
+    *static_cast<int32_t*>(RESULT_PARAM) = bKeep ? Z_Param_AmountToRemove : K2_RemoveItemFromPlayerByGuid(Z_Param_PlayerController, Z_Param_ItemGuid, Z_Param_AmountToRemove, Z_Param_bForceRemoval);
+    P_NATIVE_END;
+}
+
 DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromAllPlayers)
 {
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);
@@ -567,6 +613,8 @@ void UFortKismetLibrary::HookNatives()
              std::tuple{ StaticFunction_K2_GiveItemToPlayer(), &execK2_GiveItemToPlayer, L"UFortKismetLibrary::K2_GiveItemToPlayer" },
              std::tuple{ StaticFunction_K2_GiveItemToAllPlayers(), &execK2_GiveItemToAllPlayers, L"UFortKismetLibrary::K2_GiveItemToAllPlayers" },
              std::tuple{ StaticFunction_K2_RemoveItemFromPlayer(), &execK2_RemoveItemFromPlayer, L"UFortKismetLibrary::K2_RemoveItemFromPlayer" },
+             // From 5.40 (CL-4352937) only; older builds have no such UFunction.
+             std::tuple{ FindStaticFunction_K2_RemoveItemFromPlayerByGuid(), &execK2_RemoveItemFromPlayerByGuid, L"UFortKismetLibrary::K2_RemoveItemFromPlayerByGuid" },
              std::tuple{ StaticFunction_K2_RemoveItemFromAllPlayers(), &execK2_RemoveItemFromAllPlayers, L"UFortKismetLibrary::K2_RemoveItemFromAllPlayers" },
              std::tuple{ StaticFunction_K2_SpawnPickupInWorld(), &execK2_SpawnPickupInWorld, L"UFortKismetLibrary::K2_SpawnPickupInWorld" } })
     {

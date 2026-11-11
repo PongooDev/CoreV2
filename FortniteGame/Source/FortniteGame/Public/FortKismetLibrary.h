@@ -11,6 +11,7 @@ class AFortAIDirector;
 class AFortAIGoalManager;
 class AFortPickup;
 class AFortPlayerController;
+struct FGuid;
 struct FVector;
 class IAbilitySystemInterface;
 class IFortInventoryOwnerInterface;
@@ -30,6 +31,7 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(K2_GiveItemToPlayer)
     DefineUFunction(K2_GiveItemToAllPlayers)
     DefineUFunction(K2_RemoveItemFromPlayer)
+    DefineUFunction(K2_RemoveItemFromPlayerByGuid)
     DefineUFunction(K2_RemoveItemFromAllPlayers)
     DefineUFunction(K2_SpawnPickupInWorld)
     DefineUFunction(PickLootDrops)
@@ -52,6 +54,8 @@ public:
     static void K2_GiveItemToAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer);
     // bForceRemoval (3.2 added it): an item its definition keeps at 0 (3.3's Remote Explosives detonator) goes too.
     static int32_t K2_RemoveItemFromPlayer(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove, bool bForceRemoval = false);
+    // 5.40 added it: the one stack ItemGuid names, AmountToRemove of it (all of it when negative). Returns how many went.
+    static int32_t K2_RemoveItemFromPlayerByGuid(AFortPlayerController* PlayerController, const FGuid& ItemGuid, int32_t AmountToRemove, bool bForceRemoval = false);
     static void K2_RemoveItemFromAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove);
     // bToss from 1.8, bRandomRotation from 3.0, bBlockedFromAutoPickup from 5.30 (their exec reads each only where the
     // build's UFunction has it).
@@ -67,6 +71,7 @@ public:
     DECLARE_FUNCTION(execK2_GiveItemToPlayer);
     DECLARE_FUNCTION(execK2_GiveItemToAllPlayers);
     DECLARE_FUNCTION(execK2_RemoveItemFromPlayer);
+    DECLARE_FUNCTION(execK2_RemoveItemFromPlayerByGuid);
     DECLARE_FUNCTION(execK2_RemoveItemFromAllPlayers);
     DECLARE_FUNCTION(execK2_SpawnPickupInWorld);
 

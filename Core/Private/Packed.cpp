@@ -371,13 +371,17 @@ void Packed::WaitForCodeCheck(bool bUntilTicking)
 
     Log::Info(L"Packed exe: holding the hooks until the engine has loaded, so the packer's check sees clean code");
 
+    // No deadline that patches anyway: on a slow or busy PC the initial load has taken over 5 minutes (6.00 with
+    // several servers running: GetGameData alone took 370 s), and patching before the packer's check crashes the
+    // process. A load that never ends hangs either way, so the wait only says, once, that it is still waiting.
     const DWORD Deadline = GetTickCount() + CheckTimeoutMs;
+    bool bReportedSlow = false;
     while (!*Natives::GEngine)
     {
-        if (GetTickCount() > Deadline)
+        if (!bReportedSlow && GetTickCount() > Deadline)
         {
-            Log::Error(L"Packed exe: no engine after {}s, enabling hooks anyway", CheckTimeoutMs / 1000);
-            return;
+            bReportedSlow = true;
+            Log::Warning(L"Packed exe: no engine after {}s; the load is slow, still holding the hooks until it is up", CheckTimeoutMs / 1000);
         }
         Sleep(PollMs);
     }
@@ -390,10 +394,10 @@ void Packed::WaitForCodeCheck(bool bUntilTicking)
     {
         while (!*Natives::GWorld)
         {
-            if (GetTickCount() > Deadline)
+            if (!bReportedSlow && GetTickCount() > Deadline)
             {
-                Log::Error(L"Packed exe: no world after {}s, enabling hooks anyway", CheckTimeoutMs / 1000);
-                return;
+                bReportedSlow = true;
+                Log::Warning(L"Packed exe: no world after {}s; the load is slow, still holding the hooks until it is up", CheckTimeoutMs / 1000);
             }
             Sleep(PollMs);
         }

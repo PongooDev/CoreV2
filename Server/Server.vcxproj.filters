@@ -256,6 +256,15 @@
     <Filter Include="Engine\Source\Runtime\Online\HTTP\Public\Interfaces">
       <UniqueIdentifier>{10c1b750-84cc-4637-9dc7-876767915af9}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\SlateCore">
+      <UniqueIdentifier>{45b45e4d-12f5-4f41-931e-3b77b7b8d97c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\SlateCore\Public">
+      <UniqueIdentifier>{d284352d-5459-4768-bf25-cc2cc0a4aa5a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\SlateCore\Public\Styling">
+      <UniqueIdentifier>{4be0dcb9-ac88-461d-a7dc-00d7458f96fc}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame">
       <UniqueIdentifier>{9ca04556-5415-4dad-9c07-cce1ff866849}</UniqueIdentifier>
     </Filter>
@@ -571,9 +580,6 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateBase.h">
       <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
     </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\IDelegateInstance.h">
-      <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
-    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateInstanceInterface.h">
       <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
     </ClInclude>
@@ -581,6 +587,9 @@
       <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateSignatureImpl.inl">
+      <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\IDelegateInstance.h">
       <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\MulticastDelegateBase.h">
@@ -668,6 +677,9 @@
       <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\CoreMiscDefines.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\DateTime.h">
       <Filter>Engine\Source\Runtime\Core\Public\Misc</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Misc\DefaultValueHelper.h">
@@ -1009,6 +1021,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Online\HTTP\Public\Interfaces\IHttpRequest.h">
       <Filter>Engine\Source\Runtime\Online\HTTP\Public\Interfaces</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\SlateCore\Public\Styling\SlateBrush.h">
+      <Filter>Engine\Source\Runtime\SlateCore\Public\Styling</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public\OnlineSubsystemImpl.h">
       <Filter>FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public</Filter>
     </ClInclude>
@@ -1067,6 +1082,9 @@
       <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRuntimeOptions.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpecialActorReplicationInfo.h">
       <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpottableActorInterface.h">
@@ -1142,6 +1160,15 @@
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaAircraft.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaExitCraft.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaExitCraftInfo.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaExitCraftSpawner.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaMapInfo.h">
@@ -1733,6 +1760,9 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortMissionTimerComponent.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private</Filter>
     </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortSpecialActorReplicationInfo.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private</Filter>
+    </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortTeamInfo.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private</Filter>
     </ClCompile>
@@ -1774,6 +1804,12 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbility.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Abilities</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaExitCraft.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaExitCraftSpawner.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaMapInfo.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>

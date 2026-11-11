@@ -14086,3 +14086,193 @@ bool Finder::ResolveTeamRemoveLive()
     Log::Info(L"Finder: AFortTeamInfo::RemoveFromTeam at 0x{:X}", Remove - Finder::ImageBase());
     return true;
 }
+
+namespace
+{
+    // mov reg, [base+disp32] (Opcode 8B) or mov [base+disp32], reg (89), 64-bit: REX.W (48, or 49 for a base of r8 to
+    // r15) and ModRM 10 reg base, not rsp's SIB form. RegField is the ModRM reg field (0 rax, 1 rcx, 2 rdx).
+    bool IsDisp32Mov(uintptr_t Site, uint8_t Opcode, uint8_t RegField, ptrdiff_t Displacement)
+    {
+        const uint8_t Rex = Byte(Site);
+        const uint8_t ModRm = Byte(Site + 2);
+        return (Rex == 0x48 || Rex == 0x49) && Byte(Site + 1) == Opcode && (ModRm & 0xF8) == (0x80 | (RegField << 3)) && (ModRm & 7) != 4
+            && *reinterpret_cast<const int32_t*>(Site + 3) == static_cast<int32_t>(Displacement);
+    }
+
+    uintptr_t FindDisp32Mov(uintptr_t Begin, uintptr_t End, uint8_t Opcode, uint8_t RegField, ptrdiff_t Displacement)
+    {
+        for (uintptr_t Site = Begin; Begin && Site + 7 <= End; ++Site)
+        {
+            if (IsDisp32Mov(Site, Opcode, RegField, Displacement))
+            {
+                return Site;
+            }
+        }
+        return 0;
+    }
+
+    // lea rcx or rdx (RegField 1 or 2), [rsp+disp8]: 48 8D 4C/54 24 XX. Its disp8, or -1.
+    int32_t RspLeaDisplacement(uintptr_t Site, uint8_t RegField)
+    {
+        return Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D && Byte(Site + 2) == (0x44 | (RegField << 3)) && Byte(Site + 3) == 0x24 ? Byte(Site + 4) : -1;
+    }
+}
+
+bool Finder::ResolveSpecialActorReplicationLive(ptrdiff_t SpawnerSpecialActorIDOffset, ptrdiff_t CraftSpecialActorIDOffset, ptrdiff_t SpecialActorDataOffset)
+{
+    static bool bSearched = false;
+    const auto Resolved = []
+    {
+        return Natives::AFortSpecialActorReplicationInfo_AddActorToReplicationList && Natives::AFortSpecialActorReplicationInfo_RemoveActorFromReplicationList
+            && Natives::FSpecialActorInitData_FSpecialActorInitData && Natives::FSpecialActorInitData_Destructor;
+    };
+    if (bSearched)
+    {
+        return Resolved();
+    }
+    bSearched = true;
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+
+    // AFortAthenaExitCraftSpawner::RegisterSpawnerSpecialActor (5.40 0xBC4A10, 5.41 0xBC5AF0) names the spawner "%s_%s"
+    // (its SpecialActorSpawnerTag, its name) into an FSpecialActorInitData on its stack, which it constructs first
+    // (lea rcx, [rsp+50h]; ...; call FSpecialActorInitData::FSpecialActorInitData, 5.40 0xECE8A0), adds to the game
+    // state's list (lea rdx, [rsp+50h]; mov rcx, [r14+0F28h], SpecialActorData; call AddActorToReplicationList,
+    // 0xED2470), keeps the id when the index isn't -1 (cmp eax, 0FFFFFFFFh; jz; mov rax, [rsp+58h]; mov [rsi+360h],
+    // rax, SpawnerSpecialActorID) and destroys (lea rcx, [rsp+50h]; call 0xBA5D80). Of the functions with that format,
+    // the only one to store into SpawnerSpecialActorID.
+    uintptr_t Register = 0;
+    uintptr_t AddCall = 0;
+    uintptr_t Store = 0;
+    int32_t Registers = 0;
+    for (const uintptr_t Ref : SpawnerSpecialActorIDOffset > 0 ? Finder::StringRefs(L"%s_%s") : std::vector<uintptr_t>())
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+        const uintptr_t Found = End ? FindDisp32Mov(Function, End, 0x89, 0, SpawnerSpecialActorIDOffset) : 0;
+        const uintptr_t Call = Found ? FindInstruction(Found - 0x18, Found, { 0xE8, -1, -1, -1, -1, 0x83, 0xF8, 0xFF }) : 0;
+        if (Call && Function != Register)
+        {
+            Register = Function;
+            AddCall = Call;
+            Store = Found;
+            ++Registers;
+        }
+    }
+    const uintptr_t Add = Registers == 1 ? Finder::RelativeTarget(AddCall, 1, 5) : 0;
+    int32_t InitData = -1;
+    for (uintptr_t Site = Add ? AddCall - 0x40 : 0; Site && Site < AddCall && InitData < 0; ++Site)
+    {
+        InitData = RspLeaDisplacement(Site, 2);
+    }
+    const bool bAddsToSpecialActorData = InitData >= 0 && FindDisp32Mov(AddCall - 0x40, AddCall, 0x8B, 1, SpecialActorDataOffset) != 0;
+    uintptr_t Destructor = 0;
+    for (uintptr_t Site = bAddsToSpecialActorData ? Store : 0; Site && Site < Store + 0x20 && !Destructor; ++Site)
+    {
+        Destructor = RspLeaDisplacement(Site, 1) == InitData && Byte(Site + 5) == 0xE8 ? Finder::RelativeTarget(Site + 5, 1, 5) : 0;
+    }
+    uintptr_t Constructor = 0;
+    for (uintptr_t Site = Destructor ? Register : 0; Site && Site < AddCall && !Constructor; ++Site)
+    {
+        const uintptr_t Call = RspLeaDisplacement(Site, 1) == InitData ? FindRawCall(Site + 5, Site + 0x20) : 0;
+        Constructor = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+    }
+
+    // AFortSpecialActorReplicationInfo::RemoveActorFromReplicationList(FName UniqueID) (5.40 0xEEB5B0): AFortAthenaExitCraft's
+    // departure (0xBB2610) takes the van off as it leaves, with the game state's SpecialActorData in rcx
+    // (mov rcx, [rdi+0F28h]; test rcx, rcx; jz) and its CraftSpecialActorID in rdx (mov rdx, [rbx+908h]; call). The only
+    // code that reads CraftSpecialActorID.
+    std::vector<uintptr_t> Removes;
+    for (const auto& [Begin, End] : CraftSpecialActorIDOffset > 0 && SpecialActorDataOffset > 0 ? Finder::ExecutableSections() : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        for (uintptr_t Site = Begin; Site + 12 <= End; ++Site)
+        {
+            if (Byte(Site + 1) != 0x8B || Byte(Site + 7) != 0xE8 || !IsDisp32Mov(Site, 0x8B, 2, CraftSpecialActorIDOffset)
+                || !FindDisp32Mov(std::max(Begin, Site - 0x18), Site, 0x8B, 1, SpecialActorDataOffset))
+            {
+                continue;
+            }
+            const uintptr_t Target = Finder::RelativeTarget(Site + 7, 1, 5);
+            if (IsInText(Target) && std::find(Removes.begin(), Removes.end(), Target) == Removes.end())
+            {
+                Removes.push_back(Target);
+            }
+        }
+    }
+    const uintptr_t Remove = Removes.size() == 1 && Removes.front() != Add ? Removes.front() : 0;
+
+    if (!Add || !Constructor || !Destructor || !Remove)
+    {
+        Log::Error(L"Finder: the special actor list's natives not found (RegisterSpawnerSpecialActor 0x{:X} of {}, AddActorToReplicationList 0x{:X}, init data at rsp+0x{:X} built 0x{:X} destroyed 0x{:X}, RemoveActorFromReplicationList 0x{:X} of {})",
+            Rva(Register), Registers, Rva(Add), InitData, Rva(Constructor), Rva(Destructor), Rva(Remove), Removes.size());
+        return false;
+    }
+    Natives::AFortSpecialActorReplicationInfo_AddActorToReplicationList = reinterpret_cast<decltype(Natives::AFortSpecialActorReplicationInfo_AddActorToReplicationList)>(Add);
+    Natives::AFortSpecialActorReplicationInfo_RemoveActorFromReplicationList = reinterpret_cast<decltype(Natives::AFortSpecialActorReplicationInfo_RemoveActorFromReplicationList)>(Remove);
+    Natives::FSpecialActorInitData_FSpecialActorInitData = reinterpret_cast<decltype(Natives::FSpecialActorInitData_FSpecialActorInitData)>(Constructor);
+    Natives::FSpecialActorInitData_Destructor = reinterpret_cast<decltype(Natives::FSpecialActorInitData_Destructor)>(Destructor);
+    Log::Info(L"Finder: AFortSpecialActorReplicationInfo::AddActorToReplicationList 0x{:X}, RemoveActorFromReplicationList 0x{:X}, FSpecialActorInitData 0x{:X} / 0x{:X} (RegisterSpawnerSpecialActor 0x{:X})",
+        Rva(Add), Rva(Remove), Rva(Constructor), Rva(Destructor), Rva(Register));
+    return true;
+}
+
+std::vector<uint8_t*> Finder::ExitCraftSpawnTimerBinds(UFunction* StartExitCraftSpawnTimer, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset)
+{
+    std::vector<uint8_t*> Binds;
+    const auto SharedEmpty = reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
+    const auto SetTimer = reinterpret_cast<uintptr_t>(Natives::FTimerManager_InternalSetTimer);
+    if (!SharedEmpty || !SetTimer || ExitCraftInfoOffset <= 0)
+    {
+        return Binds;
+    }
+
+    // StartExitCraftSpawnTimer's exec (5.40 0x13BED00) steps nothing and jumps to its body (0xBCAF80).
+    const uintptr_t Exec = StartExitCraftSpawnTimer ? reinterpret_cast<uintptr_t>(StartExitCraftSpawnTimer->GetNativeFunc()) : 0;
+    std::vector<uintptr_t> Candidates;
+    for (uintptr_t Site = IsInText(Exec) ? Exec : 0; Site && Site < Exec + 0x30 && Candidates.empty(); ++Site)
+    {
+        const uintptr_t Target = (Byte(Site) == 0xE8 || Byte(Site) == 0xE9) ? Finder::RelativeTarget(Site, 1, 5) : 0;
+        if (IsInText(Target) && Finder::FunctionStart(Target) == Target)
+        {
+            Candidates.push_back(Target);
+        }
+    }
+    // The spawner's BeginPlay (5.40 0xBAACB0) sets the same timer, inlined: the slots the spawner overrides (from 1; 0 is
+    // its destructor), up to the end of AActor's vtable.
+    for (int32_t Index = 1; SpawnerVTable && ActorVTable && Index < 0x200; ++Index)
+    {
+        const uintptr_t Entry = VTableEntry(SpawnerVTable, Index);
+        const uintptr_t ActorEntry = VTableEntry(ActorVTable, Index);
+        if (!Entry || !ActorEntry)
+        {
+            break;
+        }
+        if (Entry != ActorEntry && std::find(Candidates.begin(), Candidates.end(), Entry) == Candidates.end())
+        {
+            Candidates.push_back(Entry);
+        }
+    }
+
+    for (const uintptr_t Function : Candidates)
+    {
+        const uintptr_t End = Finder::FunctionEnd(Function);
+        // Both read the craft info (its ExitCraftSpawnDelay, the timer's rate): mov rcx, [rcx+348h].
+        bool bReadsExitCraftInfo = false;
+        for (uintptr_t Load = End ? FindInstruction(Function, End, { -1, 0x8B, -1 }) : 0; Load && !bReadsExitCraftInfo; Load = FindInstruction(Load + 1, End, { -1, 0x8B, -1 }))
+        {
+            bReadsExitCraftInfo = (Byte(Load) == 0x48 || Byte(Load) == 0x49 || Byte(Load) == 0x4C || Byte(Load) == 0x4D) && (Byte(Load + 2) & 0xC0) == 0x80
+                && (Byte(Load + 2) & 7) != 4 && *reinterpret_cast<const int32_t*>(Load + 3) == static_cast<int32_t>(ExitCraftInfoOffset);
+        }
+        // The delegate instance's method: lea rax, [shared empty function]; mov [reg+10h], rax (5.40 0xBAAF21, 0xBCB043),
+        // then the timer is set with it (call FTimerManager::InternalSetTimer).
+        for (uintptr_t Lea = bReadsExitCraftInfo ? FindInstruction(Function, End, { 0x48, 0x8D, 0x05 }) : 0; Lea; Lea = FindInstruction(Lea + 1, End, { 0x48, 0x8D, 0x05 }))
+        {
+            const uint8_t ModRm = Byte(Lea + 9);
+            if (Finder::RelativeTarget(Lea, 3, 7) == SharedEmpty && (Byte(Lea + 7) == 0x48 || Byte(Lea + 7) == 0x49) && Byte(Lea + 8) == 0x89 && (ModRm & 0xF8) == 0x40
+                && (ModRm & 7) != 4 && Byte(Lea + 10) == 0x10 && CallWithin(Lea, 0x100, SetTimer))
+            {
+                Binds.push_back(reinterpret_cast<uint8_t*>(Lea));
+            }
+        }
+    }
+    return Binds;
+}

@@ -191,6 +191,31 @@ bool Hooks::RedirectCall(std::wstring_view Name, uint8_t* CallSite, void* Destin
     return WriteBytes(Name, CallSite, std::span<const uint8_t>(Bytes, bImportCall ? 6 : 5));
 }
 
+bool Hooks::RedirectAddress(std::wstring_view Name, uint8_t* LeaSite, void* Destination)
+{
+    // lea r64, [rip+rel32]: REX.W (48, or 4C for r8 to r15), 8D, ModRM 00 reg 101; the rel32 at +3 counts from +7.
+    if (!LeaSite || (LeaSite[0] != 0x48 && LeaSite[0] != 0x4C) || LeaSite[1] != 0x8D || (LeaSite[2] & 0xC7) != 0x05)
+    {
+        Log::Error(L"Hook {}: 0x{:X} is not a rip-relative lea", Name, reinterpret_cast<uintptr_t>(LeaSite));
+        return false;
+    }
+
+    void* Target = Destination;
+    if (!IsRel32Reachable(LeaSite + 7, Target))
+    {
+        Target = CreateJumpStub(LeaSite, Destination);
+        if (!Target)
+        {
+            Log::Error(L"Hook {}: no memory near the lea for a jump stub", Name);
+            return false;
+        }
+    }
+
+    uint8_t Displacement[4] = {};
+    *reinterpret_cast<int32_t*>(Displacement) = static_cast<int32_t>(reinterpret_cast<uint8_t*>(Target) - (LeaSite + 7));
+    return WriteBytes(Name, LeaSite + 3, Displacement);
+}
+
 bool Hooks::WriteBytes(std::wstring_view Name, void* Address, std::span<const uint8_t> Bytes)
 {
     {

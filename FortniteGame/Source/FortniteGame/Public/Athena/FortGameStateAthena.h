@@ -5,6 +5,7 @@
 
 class AFortAthenaAircraft;
 class AFortAthenaMapInfo;
+class AFortSpecialActorReplicationInfo;
 class UFortPlaylistAthena;
 
 class EAthenaGamePhase
@@ -107,4 +108,10 @@ public:
     static bool HasAirCraftBehavior() { return Member_AirCraftBehavior.IsAvailable(); }
 
     static bool HasWarmupCountdown() { return Member_WarmupCountdownStartTime.IsAvailable() && Member_WarmupCountdownEndTime.IsAvailable(); }
+
+    // From 5.40: the list of the actors every map and compass shows (The Getaway's jewels, carriers, van spawners and
+    // vans). Replicated; the actors register themselves with it on the server (AddActorToReplicationList).
+    DefineUProperty(AFortSpecialActorReplicationInfo*, SpecialActorData)
+    static bool HasSpecialActorData() { return Member_SpecialActorData.IsAvailable(); }
+    static ptrdiff_t SpecialActorDataOffset() { return HasSpecialActorData() ? Member_SpecialActorData.GetOffsetChecked() : -1; }
 };

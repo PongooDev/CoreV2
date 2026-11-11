@@ -58,7 +58,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public;$(ProjectDir)..\Engine\Source\Runtime\AIModule\Classes;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTags\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTasks\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public;$(ProjectDir)..\Engine\Source\Runtime\AIModule\Classes;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTags\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTasks\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\Engine\Source\Runtime\SlateCore\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -79,7 +79,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public;$(ProjectDir)..\Engine\Source\Runtime\AIModule\Classes;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTags\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTasks\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public;$(ProjectDir)..\Engine\Source\Runtime\AIModule\Classes;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTags\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTasks\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\Engine\Source\Runtime\SlateCore\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization>MaxSpeed</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -281,6 +281,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Launch\Public\LaunchEngineLoop.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Online\HTTP\Public\Interfaces\IHttpBase.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Online\HTTP\Public\Interfaces\IHttpRequest.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\SlateCore\Public\Styling\SlateBrush.h" />
     <ClInclude Include="..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public\OnlineSubsystemImpl.h" />
     <ClInclude Include="..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public\OnlineVoiceImpl.h" />
     <ClInclude Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public\McpServiceConfig.h" />
@@ -301,6 +302,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortMissionTimerComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRewardReport.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRuntimeOptions.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpecialActorReplicationInfo.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpottableActorInterface.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortTeamInfo.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortTheaterInfo.h" />
@@ -326,6 +328,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortArenaCamera.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaAircraft.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaExitCraft.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaExitCraftInfo.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaExitCraftSpawner.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaMapInfo.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaPlaylistBase.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaSupplyDrop.h" />
@@ -527,6 +532,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGlobals.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortKismetLibrary.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortMissionTimerComponent.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortSpecialActorReplicationInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortTeamInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityManager.cpp" />
@@ -541,6 +547,8 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\FortQueryGenerators.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\Navigation\FortNavigationGraph.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbility.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaExitCraft.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaExitCraftSpawner.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaMapInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaSupplyDrop.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaVehicle.cpp" />

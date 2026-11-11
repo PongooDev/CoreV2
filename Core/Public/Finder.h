@@ -315,4 +315,15 @@ namespace Finder
     // From 3.5: the delegate instance vtable of ABuildingItemCollectorActor::CheckDepositGoalReached's output timer
     // (Natives::ABuildingItemCollectorActor_GrantOutputDelegateVTable), from CollectorDefault's interact.
     bool ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UClass* InteractInterface);
+    // From 5.40 (The Getaway): AFortSpecialActorReplicationInfo::AddActorToReplicationList and the constructor and
+    // destructor of the FSpecialActorInitData it takes, from AFortAthenaExitCraftSpawner::RegisterSpawnerSpecialActor
+    // (the "%s_%s" function that stores Add's id into SpawnerSpecialActorIDOffset), and RemoveActorFromReplicationList,
+    // from AFortAthenaExitCraft's departure (the call that passes CraftSpecialActorIDOffset); both load the list off the
+    // game state's SpecialActorDataOffset. Logged once; false where any is missing.
+    bool ResolveSpecialActorReplicationLive(ptrdiff_t SpawnerSpecialActorIDOffset, ptrdiff_t CraftSpecialActorIDOffset, ptrdiff_t SpecialActorDataOffset);
+    // From 5.40: the `lea rax, [shared empty function]` sites that bind the stripped method of AFortAthenaExitCraftSpawner's
+    // ExitCraftTimerHandle timer (the delegate instance's method, mov [reg+10h], rax, before FTimerManager::
+    // InternalSetTimer): in StartExitCraftSpawnTimer's body and in the spawner's BeginPlay (its slots that differ from
+    // ActorVTable's and read ExitCraftInfoOffset). Empty where none is found.
+    std::vector<uint8_t*> ExitCraftSpawnTimerBinds(UFunction* StartExitCraftSpawnTimer, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset);
 }

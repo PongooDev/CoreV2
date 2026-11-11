@@ -44,6 +44,8 @@ class AFortGameModeAthena;
 class AFortAthenaMapInfo;
 class AFortGameStateAthena;
 class AFortAthenaSupplyDrop;
+class AFortSpecialActorReplicationInfo;
+struct FSpecialActorInitData;
 class APlayerState;
 class APlayerController;
 class AFortPlayerState;
@@ -863,6 +865,16 @@ namespace Natives
     // UWorld::AddOnActorSpawnedHandler: the world's unreflected OnActorSpawned, which UWorld::SpawnActor broadcasts last
     // (1.8.1 +0x390, 3.2, 4.4 and 5.0-5.40 +0x3E0).
     inline ptrdiff_t UWorld_OnActorSpawned = -1;
+
+    // From 5.40 (The Getaway), Finder::ResolveSpecialActorReplicationLive: the game state's special actor list, which
+    // every client's map and compass draw (AFortSpecialActorReplicationInfo::AddActorToReplicationList and
+    // RemoveActorFromReplicationList(FName UniqueID)), and the constructor and destructor of what Add takes.
+    inline int32_t (*AFortSpecialActorReplicationInfo_AddActorToReplicationList)(AFortSpecialActorReplicationInfo* This, const FSpecialActorInitData* InitData) = nullptr;
+    inline void (*AFortSpecialActorReplicationInfo_RemoveActorFromReplicationList)(AFortSpecialActorReplicationInfo* This, FName UniqueID) = nullptr;
+    inline FSpecialActorInitData* (*FSpecialActorInitData_FSpecialActorInitData)(FSpecialActorInitData* This) = nullptr;
+    inline void (*FSpecialActorInitData_Destructor)(FSpecialActorInitData* This) = nullptr;
+    // AFortAthenaExitCraftSpawner's unreflected OnExitCraftSpawned, its first member (5.40 and 5.41 +0x328, after AActor).
+    inline ptrdiff_t AFortAthenaExitCraftSpawner_OnExitCraftSpawned = -1;
 }
 
 namespace Sites

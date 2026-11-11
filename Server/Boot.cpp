@@ -23,6 +23,7 @@
 #include "FortGameInstance.h"
 #include "FortGameMode.h"
 #include "FortGameModeZone.h"
+#include "Athena/FortAthenaExitCraftSpawner.h"
 #include "Athena/FortAthenaSupplyDrop.h"
 #include "Athena/FortAthenaVehicle.h"
 #include "Athena/FortGameModeAthena.h"
@@ -352,6 +353,7 @@ static void InstallHooks()
             AFortPlayerPawnAthena::HookNatives();
             AFortPlayerPawnAthena::HookVTables();
             AFortAthenaSupplyDrop::HookNatives();
+            AFortAthenaExitCraftSpawner::HookNatives();
             ABGAConsumableSpawner::HookNatives();
             AFortPoiManager::HookNatives();
             AFortAthenaVehicle::HookVTables();

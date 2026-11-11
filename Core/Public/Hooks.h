@@ -9,6 +9,12 @@ namespace Hooks
     bool Detour(std::wstring_view Name, void* Target, void* Replacement, void** Original);
     bool SwapVTable(std::wstring_view Name, void** VTable, int32_t Index, void* Replacement, void** Original = nullptr);
     bool RedirectCall(std::wstring_view Name, uint8_t* CallSite, void* Destination);
+    /// <summary>
+    /// The redirect for a stripped function the game binds rather than calls: a `lea r64, [rip+rel32]` that takes its
+    /// address (a timer's or an event's delegate stores it as the method it calls) takes Destination's instead, through a
+    /// jump stub near the site when Destination is out of rel32 reach.
+    /// </summary>
+    bool RedirectAddress(std::wstring_view Name, uint8_t* LeaSite, void* Destination);
     bool WriteBytes(std::wstring_view Name, void* Address, std::span<const uint8_t> Bytes);
     bool SkipBranch(std::wstring_view Name, uint8_t* Branch);
     bool EnableAll();

@@ -448,7 +448,9 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_RemoveItemFromPlayer)
     P_NATIVE_BEGIN;
 #if WITH_SERVER_CODE
     // A Blueprint spending a consumable it used: "cheat infiniteconsumables" (#155) keeps it, and the use counts as paid.
-    const bool bKeep = Z_Param_AmountToRemove > 0 && UFortCheatManager::KeepsConsumable(Z_Param_PlayerController, Z_Param_ItemDefinition);
+    // So does a gadget's charge for "cheat nocooldown" (#148).
+    const bool bKeep = Z_Param_AmountToRemove > 0
+        && (UFortCheatManager::KeepsConsumable(Z_Param_PlayerController, Z_Param_ItemDefinition) || UFortCheatManager::KeepsAbilityCharge(Z_Param_PlayerController, Z_Param_ItemDefinition));
 #else
     const bool bKeep = false;
 #endif

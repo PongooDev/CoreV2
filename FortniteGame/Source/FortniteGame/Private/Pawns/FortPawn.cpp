@@ -369,7 +369,6 @@ namespace
     };
 
     std::vector<FCheatMoveSpeed> CheatMoveSpeeds;
-    bool bWatchingCheatMoveSpeeds = false;
 
     std::array<FFortGameplayAttributeData*, 3> MovementSpeeds(UFortMovementSet* Set)
     {
@@ -403,11 +402,13 @@ namespace
     }
 
     // A dead pawn's speed table goes with it, but its player state keeps the movement set: that gets its speeds back.
-    void ForgetDeadPawns()
+    // bDying too: a pawn that died and is still there (AFortPlayerController::Possess's next pawn).
+    void ForgetDeadPawns(bool bDying = false)
     {
-        std::erase_if(CheatMoveSpeeds, [](const FCheatMoveSpeed& Entry)
+        std::erase_if(CheatMoveSpeeds, [bDying](const FCheatMoveSpeed& Entry)
         {
-            if (Entry.Pawn.IsValid())
+            const AFortPawn* const Pawn = Entry.Pawn.Get();
+            if (Pawn && !(bDying && Pawn->IsDead()))
             {
                 return false;
             }
@@ -416,12 +417,18 @@ namespace
         });
     }
 
+#if !WITH_SERVER_CODE
+    // The client's own copy of the set, which it scales for its predicted movement: it has no Possess to go by, so a
+    // frame task still waits for the pawn to be gone there.
+    bool bWatchingCheatMoveSpeeds = false;
+
     void WatchCheatMoveSpeeds()
     {
         ForgetDeadPawns();
         const bool bAnyMovementSet = std::any_of(CheatMoveSpeeds.begin(), CheatMoveSpeeds.end(), [](const FCheatMoveSpeed& Entry) { return Entry.MovementSet.IsValid(); });
         bWatchingCheatMoveSpeeds = bAnyMovementSet && GameThread::Enqueue(&WatchCheatMoveSpeeds);
     }
+#endif
 
     float SetMovementSetSpeed(AFortPawn* Pawn, UFortMovementSet* Set, FCheatMoveSpeed* State, float Speed)
     {
@@ -454,10 +461,14 @@ namespace
             Speeds[Index]->BaseValue = State->OwnSpeeds[Index][0] * Scale;
             Speeds[Index]->CurrentValue = State->OwnSpeeds[Index][1] * Scale;
         }
+        // The set outlives the pawn: the server's AFortPlayerController::Possess gives it its own speeds back once the
+        // player has a new pawn (AFortPawn::RestoreCheatMoveSpeedsOfDeadPawns).
+#if !WITH_SERVER_CODE
         if (!bWatchingCheatMoveSpeeds)
         {
             bWatchingCheatMoveSpeeds = GameThread::Enqueue(&WatchCheatMoveSpeeds);
         }
+#endif
         return OwnSpeed;
     }
 
@@ -668,6 +679,15 @@ float AFortPawn::GetCheatSpeedMultiplier() const
 {
     const FCheatSpeedMultiplier* Entry = FindSpeedMultiplier(this);
     return Entry ? Entry->Multiplier : 1.0f;
+}
+
+void AFortPawn::RestoreCheatMoveSpeedsOfDeadPawns()
+{
+    // A frame task used to wait for the pawn to be gone. The set only moves a pawn its controller has possessed, so the
+    // controller's next Possess is where it has to be the player's own again, before the new pawn moves with it (or a
+    // "cheat speed" kept through the respawn scales it, UFortCheatManager::ReapplyBoosts). A pawn that is still alive
+    // (the player's own, parked while they play a disguise) keeps its speeds.
+    ForgetDeadPawns(true);
 }
 
 float AFortPawn::SetCheatMoveSpeed(float Speed)

@@ -279,6 +279,8 @@ namespace
             // keeps the last answer, if there was one.
             const std::string Allowed = Status == 200 ? BackendRequest::JsonField(Body, "allowed") : std::string();
             const std::string Mode = Status == 200 ? BackendRequest::JsonField(Body, "mode") : std::string();
+            // The answer comes on the request's own thread; the waiting cheats run on the game thread, once (what an
+            // FHttpModule request's completion delegate or AsyncTask(ENamedThreads::GameThread) gives Epic's code).
             GameThread::Enqueue([Key, Status, Allowed, Mode]()
             {
                 FCheatPermission& Permission = CheatPermissions[Key];
@@ -422,6 +424,14 @@ void AFortPlayerController::Possess(APawn* InPawn)
     {
         AddCheats(true);
         UE_LOG(LogFort, Log, TEXT("Possess: %s has cheat manager %s"), *GetNameSafe(this), *GetNameSafe(static_cast<UObject*>(CheatManager)));
+    }
+
+    // The player's cheats on the pawn they play now, whatever it is (a disguise's too): a dead pawn's cheat speed leaves
+    // the player state's movement set, and the boosts, speed and nocooldown's charges go on the new pawn (next tick).
+    if (Role == ROLE_Authority)
+    {
+        AFortPawn::RestoreCheatMoveSpeedsOfDeadPawns();
+        UFortCheatManager::ReapplyBoosts(this);
     }
 
     AFortPlayerState* FortPlayerState = Role == ROLE_Authority && MyFortPawn ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
@@ -1520,6 +1530,9 @@ bool AFortPlayerController::HandleItemZeroDurability(const FGuid& ItemGuid)
     const bool bRemoved = RemoveInventoryItem(ItemGuid, -1, true);
     if (bEquipped && Weapon->IsA(AFortWeaponRanged::StaticClass()))
     {
+        // Once, on the next tick (Epic's FTimerManager::SetTimerForNextTick): this runs inside the gun's fire ability,
+        // whose ApplyCost wore the weapon out (AFortWeapon::UseWeaponDurability), so ending that ability here would end it
+        // in the middle of its own commit.
         GameThread::Enqueue([PlayerController = TWeakObjectPtr<AFortPlayerController>(this), BrokenWeapon = TWeakObjectPtr<AFortWeapon>(Weapon)]()
         {
             AFortPlayerController* Controller = PlayerController.Get();
@@ -2443,7 +2456,9 @@ bool AFortPlayerController::RemoveInventoryItemHK(void* InventoryOwner, const FG
     // use, an ability's item cost). For a player with it on, that use takes nothing and counts as done, so the entry,
     // the quick bar and the HUD keep the count, and the last one stays. Core's own removals (drops, deaths, the
     // aircraft's reset) call RemoveInventoryItem directly and still take it.
-    if (Count > 0 && PlayerController->Role == ROLE_Authority && UFortCheatManager::KeepsConsumable(PlayerController, ItemGuid))
+    // "cheat nocooldown" (#148, #155): an ability's Item cost and a gadget's charge are kept the same way.
+    if (Count > 0 && PlayerController->Role == ROLE_Authority
+        && (UFortCheatManager::KeepsConsumable(PlayerController, ItemGuid) || UFortCheatManager::KeepsAbilityCharge(PlayerController, ItemGuid)))
     {
         return true;
     }

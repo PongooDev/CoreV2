@@ -10,6 +10,7 @@
 #include "Log.h"
 #include "Missions/FortMissionLibrary.h"
 #include "Natives.h"
+#include "Player/FortCheatManager.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
@@ -76,6 +77,10 @@ void AFortPlayerControllerZone::ServerAcknowledgePossession_Implementation(APawn
 {
     // Super: APlayerController's, which sets AcknowledgedPawn.
     ServerAcknowledgePossession_ImplementationSuper(this, P);
+#if WITH_SERVER_CODE
+    // "cheat disguise" and "cheat possessplayer" (#154): the client has taken the pawn they gave it.
+    UFortCheatManager::RestoreKeptView(this, P);
+#endif
 }
 
 AFortGameStateZone* AFortPlayerControllerZone::GetVoteGameState(const FUniqueNetIdRepl*& OutPlayerNetId) const

@@ -125,6 +125,9 @@ public:
     // also after a "cheat walk"; a flying speed ("fly 3000") goes first while it flies. Returns its own running speed.
     float SetCheatSpeedMultiplier(float Multiplier);
     float GetCheatSpeedMultiplier() const;
+    // From AFortPlayerController::Possess: the movement set (a Save the World player state's) a dead or destroyed pawn's
+    // cheat speed scaled gets its own speeds back.
+    static void RestoreCheatMoveSpeedsOfDeadPawns();
     // The pawn's speeds are its movement set's (a Save the World player's: replicated to its client with the player
     // state), not its stats row's (Battle Royale's, which each machine reads on its own).
     bool MovesWithMovementSet() const;

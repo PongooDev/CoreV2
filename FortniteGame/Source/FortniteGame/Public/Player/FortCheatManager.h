@@ -11,6 +11,7 @@
 
 class ACharacter;
 class AFortPlayerController;
+class APawn;
 class UFortItemDefinition;
 class UFortWorldItemDefinition;
 struct FGuid;
@@ -172,8 +173,14 @@ public:
     void TpActor(const FString& Arguments);
     // Core's own command, "cheat nocooldown [on | off]" (#148; "cheat ToggleNoCoolDown" too): the player's hero abilities
     // and gadgets have no cooldown until it is turned off, respawns included. The game's ToggleNoCoolDown only sets a flag
-    // nothing in a shipping build reads; Core takes each cooldown effect off as soon as it is applied.
+    // nothing in a shipping build reads; Core takes each cooldown effect off as soon as it is applied, and keeps the
+    // charges the abilities spend full (KeepsAbilityCharge).
     void NoCooldown(const FString& Arguments);
+    // Server: true when the game's removal of this item (by definition, or by the player's item with that guid) is an
+    // ability spending a charge that nocooldown keeps: the player has it on and the item is a gadget's or an ability's
+    // charge (an Item cost, or ammo with a RegenCooldown).
+    static bool KeepsAbilityCharge(AFortPlayerController* PlayerController, const UFortItemDefinition* ItemDefinition);
+    static bool KeepsAbilityCharge(AFortPlayerController* PlayerController, const FGuid& ItemGuid);
     // Core's own commands, "cheat stoptimer [on | off]" and "cheat resumetimer" (#186): Save the World's mission timer,
     // the countdown at the top of the screen, stops where it is and can't run out (the mission can't fail on time) until
     // it is resumed, from the time it had left. Every countdown of the world's missions and their objectives goes through
@@ -313,6 +320,13 @@ public:
     // From Possess once the pawn's attributes are reset to the hero's (a respawn, Battle Royale's drop from the aircraft):
     // the maximum health and shield "cheat maxhealth" and "cheat setmaxshield" chose.
     static void ReapplyMaxHealthAndShield(AFortPlayerController* PlayerController);
+    // From Possess, for any pawn the controller takes (a disguise's too): on the next tick, the effects "cheat firerate",
+    // "weapondamage", "infinitemag" and Battle Royale's "speed" put on the player's ability system, Save the World's
+    // "speed" on its movement set, and "nocooldown"'s full gadget charges.
+    static void ReapplyBoosts(AFortPlayerController* PlayerController);
+    // From the client's ServerAcknowledgePossession where Core has it (AFortPlayerControllerZone's, 5.0+): a disguise
+    // or possession's pawn the client has now taken looks the way the player looked before it (#154).
+    static void RestoreKeptView(AFortPlayerController* PlayerController, APawn* AcknowledgedPawn);
     // Client (#137): every frame, the player's own puppet sits on their pawn (the server sends this client none of its
     // movement), every disguise loses its collision here, and the camera pulls back for a disguise bigger than the
     // player and moves with the pawn's scale ("cheat setscale", #185). Nothing is hooked: Core's game thread tick,

@@ -33,6 +33,7 @@
 #include "Pawns/FortPawn.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerControllerZone.h"
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -846,7 +847,10 @@ namespace
     constexpr ULONGLONG KeepViewMs = 5000;
 
     // Once the client has taken the pawn (its ServerAcknowledgePossession, from ClientRestart, set AcknowledgedPawn), it
-    // looks the way it did again: whatever its restart did to its rotation is behind it by then.
+    // looks the way it did again: whatever its restart did to its rotation is behind it by then. Where Core has the
+    // acknowledgement (AFortPlayerControllerZone::ServerAcknowledgePossession_Implementation, restored on 5.0+), that is
+    // where it happens (UFortCheatManager::RestoreKeptView). Before 5.0 the RPC's body is the engine's own
+    // APlayerController one, intact, so this frame task watches AcknowledgedPawn for up to KeepViewMs instead.
     void WatchKeptViews()
     {
         const ULONGLONG Now = GetTickCount64();
@@ -890,7 +894,7 @@ namespace
         Kept.Pawn = TWeakObjectPtr<APawn>(Pawn);
         Kept.Rotation = View;
         Kept.GiveUpAt = GetTickCount64() + KeepViewMs;
-        if (!bWatchingKeptViews)
+        if (!AFortPlayerControllerZone::HasServerAcknowledgePossession() && !bWatchingKeptViews)
         {
             bWatchingKeptViews = GameThread::Enqueue(&WatchKeptViews);
         }
@@ -1094,6 +1098,11 @@ namespace
         return false;
     }
 
+    // Kept as a frame task (disguises are Core's own; Epic's cheat manager has none). Most of it is per-frame by nature,
+    // what an actor's Tick would do: a puppet plays the hidden pawn's velocity and movement mode, and the parked pawn of
+    // a possessed disguise follows it. The ends it sees (the disguise or the pawn died, the player left or respawned,
+    // the aircraft took them) have no notice Core can take: the pawns' OnDied and OnDestroyed are Blueprint delegates,
+    // which only bind to a UFunction, and Core has none of its own to bind.
     void WatchDisguises()
     {
         for (size_t Index = 0; Index < Disguises.size();)
@@ -1388,6 +1397,32 @@ void UFortCheatManager::ReapplySkin(AFortPlayerController* PlayerController)
         PlayerState->ForceNetUpdate();
         UE_LOG(LogFortDisguise, Log, TEXT("ReapplySkin: %s wears %s again"), *GetNameSafe(PlayerController), *HeroType->GetName());
     }
+#endif
+}
+
+void UFortCheatManager::RestoreKeptView(AFortPlayerController* PlayerController, APawn* AcknowledgedPawn)
+{
+#if WITH_SERVER_CODE
+    // The acknowledgement has just set AcknowledgedPawn: the client's restart is behind it, so the view it had before the
+    // disguise or possession goes back (PossessForDisguise). An acknowledgement of another pawn ends the wait as well.
+    std::erase_if(KeptViews, [PlayerController, AcknowledgedPawn](const FKeptView& Kept)
+    {
+        AFortPlayerController* const Controller = Kept.Controller.Get();
+        APawn* const Pawn = Kept.Pawn.Get();
+        if (!Controller || !Pawn)
+        {
+            return true;
+        }
+        if (Controller != PlayerController)
+        {
+            return false;
+        }
+        if (Pawn == AcknowledgedPawn && Controller->GetPawn() == Pawn && static_cast<APawn*>(Controller->AcknowledgedPawn) == Pawn)
+        {
+            reinterpret_cast<AControllerFunctions*>(Controller)->SetViewRotation(Kept.Rotation);
+        }
+        return true;
+    });
 #endif
 }
 
@@ -1787,6 +1822,9 @@ namespace
         return bEvery;
     }
 
+    // Kept as a frame task: it waits on the net driver's own state (each connection's channel for the actor, its
+    // LastUpdateTime and unacknowledged reliable bunches), which the engine keeps without telling anyone, and forces the
+    // actor's net update until every connection has it.
     void TickScaleReplications()
     {
         const auto Now = std::chrono::steady_clock::now();
@@ -2226,6 +2264,9 @@ namespace
         return false;
     }
 
+    // Kept as a frame task, as WatchDisguises is (possessplayer is Core's own): the parked pawn's place follows the
+    // possessed one every frame, the owner's view target is checked again every PossessionViewCheckMs, and the ends
+    // (someone left, the pawn died, a respawn, the aircraft) have no notice Core can bind to.
     void WatchPossessions()
     {
         for (size_t Index = 0; Index < Possessions.size();)

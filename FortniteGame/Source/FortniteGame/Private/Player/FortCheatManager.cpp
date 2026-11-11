@@ -2340,17 +2340,27 @@ namespace
         return Items;
     }
 
+    // A stack of uses nocooldown keeps full (#148, #155): an ammo item with a RegenCooldown (AmmoDataBotTurret: 240 s),
+    // or one of the player's abilities' Item costs (AbilityChargeItems).
+    bool IsAbilityCharge(const UFortItemDefinition* Definition, const std::vector<UFortItemDefinition*>& ChargeItems)
+    {
+        const UFortAmmoItemDefinition* AmmoDefinition = Cast<UFortAmmoItemDefinition>(Definition);
+        return Definition && ((AmmoDefinition && AmmoDefinition->RegenCooldown > 0.0f)
+            || std::find(ChargeItems.begin(), ChargeItems.end(), Definition) != ChargeItems.end());
+    }
+
     // The ability charge items each nocooldown player has had (#155), so one whose last charge was spent and that left the
     // inventory with it comes back.
     std::vector<std::pair<TWeakObjectPtr<AFortPlayerController>, std::vector<TWeakObjectPtr<UFortWorldItemDefinition>>>> KnownChargeItems;
 
-    // Recharges the player's gadgets and ability charges (#148, #155): every stack of uses an ability spends is kept full,
-    // so it never runs out. Those are the items the player's abilities spend as an Item cost (AbilityChargeItems), and
-    // every ammo item with a RegenCooldown (AmmoDataBotTurret: 240 s), whose world item keeps a timer while its count is
-    // under the regen stack. Each one under its stack size is set full through the inventory, as that timer does: the
-    // world item's own SetItemCount clears the timer once the count is full, and the count replicates, so the client's
-    // slot shows the gadget ready. One the player had that is gone from the inventory is given back. How many items it
-    // refilled.
+    // Recharges the player's gadgets and ability charges (#148, #155): every stack of uses an ability spends is full.
+    // Those are the items the player's abilities spend as an Item cost (AbilityChargeItems), and every ammo item with a
+    // RegenCooldown (AmmoDataBotTurret: 240 s), whose world item keeps a timer while its count is under the regen stack.
+    // Each one under its stack size is set full through the inventory, as that timer does: the world item's own
+    // SetItemCount clears the timer once the count is full, and the count replicates, so the client's slot shows the
+    // gadget ready. One the player had that is gone from the inventory is given back. Once they are full, a use doesn't
+    // take from them (UFortCheatManager::KeepsAbilityCharge); this fills them when nocooldown goes on and when the player
+    // gets a pawn (ReapplyBoosts: a respawn's hero kit). How many items it refilled.
     int32_t RechargeGadgets(AFortPlayerController* PlayerController)
     {
         AFortInventory* Inventory = PlayerController->WorldInventory;
@@ -2381,10 +2391,7 @@ namespace
             {
                 continue;
             }
-            UFortAmmoItemDefinition* AmmoDefinition = Cast<UFortAmmoItemDefinition>(Definition);
-            const bool bRegenerates = AmmoDefinition && AmmoDefinition->RegenCooldown > 0.0f;
-            const bool bAbilityCharge = std::find(ChargeItems.begin(), ChargeItems.end(), Definition) != ChargeItems.end();
-            if (!bRegenerates && !bAbilityCharge)
+            if (!IsAbilityCharge(Definition, ChargeItems))
             {
                 continue;
             }
@@ -2419,22 +2426,60 @@ namespace
         return Recharged;
     }
 
-    // Every frame on the game thread while a player has no cooldowns: a cooldown applied since the last frame comes off,
-    // and a gadget used since then is recharged. Nothing is hooked: the abilities commit their cooldowns and spend their
-    // gadget ammo as ever, and the engine's own removal and the inventory's own count update undo them.
+    // Every frame on the game thread while a player has no cooldowns: a cooldown applied since the last frame comes off.
+    // Kept as a frame task because nothing Core may use tells it when one is applied. Epic's own switch for this,
+    // AFortPlayerController::bNoCoolDown, is tested in UFortGameplayAbility::CheckCooldown only outside shipping builds
+    // (9b714eb), on the server and on the client alike, so the client refuses an activation while the effect's tags are
+    // on it and the effect itself has to go. The effect is applied by UGameplayAbility::CommitAbilityCooldown and
+    // ApplyCooldown, which are intact engine code, and the ability system's notice of it, OnActiveGameplayEffectAddedDelegate
+    // ToSelf, is a native delegate Core can't bind to. The gadget charges the abilities spend are kept at the spend
+    // instead (UFortCheatManager::KeepsAbilityCharge, through the inventory owner's RemoveInventoryItem); only a build
+    // where Core has no RemoveInventoryItem refills them here every frame, as before.
     void TickNoCooldown()
     {
         std::erase_if(NoCooldownPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
         std::erase_if(KnownChargeItems, [](const auto& Entry) { return !HasNoCooldown(Entry.first.Get()); });
+        const bool bRechargeEveryFrame = !AFortPlayerController::HasInventoryRemovalHook();
         for (const TWeakObjectPtr<AFortPlayerController>& Known : NoCooldownPlayers)
         {
             ClearCooldowns(Known.Get());
-            RechargeGadgets(Known.Get());
+            if (bRechargeEveryFrame)
+            {
+                RechargeGadgets(Known.Get());
+            }
         }
         bClearingCooldowns = !NoCooldownPlayers.empty() && GameThread::Enqueue(&TickNoCooldown);
     }
 }
 #endif
+
+bool UFortCheatManager::KeepsAbilityCharge(AFortPlayerController* PlayerController, const UFortItemDefinition* ItemDefinition)
+{
+#if WITH_SERVER_CODE
+    // An ability's Item cost (1.9 0x28D370, UFortGameplayAbility::ApplyCost) and a weapon's ammo use spend through the
+    // inventory owner's RemoveInventoryItem, and a Blueprint's through UFortKismetLibrary::K2_RemoveItemFromPlayer, as
+    // infiniteconsumables' KeepsConsumable relies on. A nocooldown player's charge stays full: no refill a frame later,
+    // no last charge that leaves the slot and comes back as a new item.
+    return ItemDefinition && HasNoCooldown(PlayerController) && IsAbilityCharge(ItemDefinition, AbilityChargeItems(PlayerController));
+#else
+    return false;
+#endif
+}
+
+bool UFortCheatManager::KeepsAbilityCharge(AFortPlayerController* PlayerController, const FGuid& ItemGuid)
+{
+#if WITH_SERVER_CODE
+    if (!HasNoCooldown(PlayerController))
+    {
+        return false;
+    }
+    AFortInventory* Inventory = PlayerController->WorldInventory;
+    UFortWorldItem* WorldItem = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+    return WorldItem && KeepsAbilityCharge(PlayerController, static_cast<UFortItemDefinition*>(static_cast<FFortItemEntry&>(WorldItem->ItemEntry).ItemDefinition));
+#else
+    return false;
+#endif
+}
 
 void UFortCheatManager::NoCooldown(const FString& Arguments)
 {
@@ -2547,7 +2592,12 @@ namespace
     }
 
     // Every frame on the game thread while the timers are stopped: a countdown the mission starts since (its next phase,
-    // a new objective's) stops too. Nothing is hooked; the mission sets its timers as ever.
+    // a new objective's) stops too. Nothing is hooked; the mission sets its timers as ever. Kept as a frame task: Epic's
+    // cheat manager has no mission timer pause (stoptimer is Core's own), and a countdown starts when the mission's
+    // blueprint calls UFortMissionTimerComponent::SetMissionTimer, intact game code, from wherever its graph does (an
+    // objective's start, a mission event, a delay after either), so no restored function sees every start. The
+    // component's own notice, OnMissionTimerComponentUpdated, is a Blueprint delegate, which only binds to a UFunction,
+    // and Core has none of its own to bind.
     void TickStopTimers()
     {
         UWorld* const World = TimerStoppedWorld.Get();
@@ -3532,12 +3582,7 @@ namespace
         }
     }
 
-    // Every frame on the game thread while a player has infinitemag, a fire rate, a weapon damage, a maximum health or
-    // shield, or a speed, or just after bInfiniteAmmo changed: the magazine is topped up as soon as a shot takes from it,
-    // a respawned pawn gets the effects and the speed again, the maximum health and shield hold on the pawn Possess gave
-    // them to (UFortCheatManager::ReapplyMaxHealthAndShield), and the HUD's reserve catches up with the flag
-    // (RefreshAmmoView). Nothing is hooked.
-    void TickWeaponCheats()
+    void ForgetPlayersWhoLeft()
     {
         std::erase_if(InfiniteMagPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
         std::erase_if(InfiniteConsumablesPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
@@ -3545,13 +3590,36 @@ namespace
         std::erase_if(MaxHealths, [](const FMaxHealth& Entry) { return !Entry.Player.Get(); });
         std::erase_if(MaxShields, [](const FMaxShield& Entry) { return !Entry.Player.Get(); });
         std::erase_if(SpeedPlayers, [](const FSpeedPlayer& Entry) { return !Entry.Player.Get(); });
+    }
+
+    bool HasRowSpeed()
+    {
+        return std::any_of(AttributeBoosts.begin(), AttributeBoosts.end(), [](const FAttributeBoost& Boost) { return Boost.Kind == &MoveSpeedBoost; });
+    }
+
+    // Every frame on the game thread while a player has infinitemag, a maximum health or shield, or a Battle Royale
+    // speed, or just after bInfiniteAmmo changed. A respawned pawn gets the effects and the speed again when the
+    // controller possesses it instead (UFortCheatManager::ReapplyBoosts). What stays here has nothing that says when:
+    // - infinitemag: a shot takes its rounds in the weapon's own ammo use (1.9 0x939490), intact game code. The game's
+    //   ammo saving (AmmoSaveBoost) keeps the shots it covers from taking any; the magazine is topped up through ModAmmo
+    //   at once for what it doesn't (a weapon equipped part empty, a build without the effect).
+    // - the maximum health and shield hold on the pawn Possess gave them to (UFortCheatManager::ReapplyMaxHealthAndShield):
+    //   any effect on the attribute works its value out again from the aggregator, whose change notice (the ability
+    //   system's GetGameplayAttributeValueChangeDelegate) is a native delegate Core can't bind to.
+    // - Battle Royale's speed follows the RunSpeed multiplier any effect gives, for the same reason, as the owning client
+    //   does (StartSpeedView).
+    // - the HUD's reserve catches up with the flag a moment after it (RefreshAmmoView), a delay Core's own code can't
+    //   put on the world's timer manager (UKismetSystemLibrary::K2_SetTimer only calls a UFunction).
+    // Nothing is hooked.
+    void TickWeaponCheats()
+    {
+        ForgetPlayersWhoLeft();
         for (const TWeakObjectPtr<AFortPlayerController>& Known : InfiniteMagPlayers)
         {
             FillMagazine(Known.Get());
         }
         for (FAttributeBoost& Boost : AttributeBoosts)
         {
-            KeepBoost(Boost);
             if (Boost.Kind == &MoveSpeedBoost)
             {
                 KeepRowSpeed(Boost);
@@ -3564,10 +3632,6 @@ namespace
         for (FMaxShield& Entry : MaxShields)
         {
             KeepMaxShield(Entry);
-        }
-        for (FSpeedPlayer& Entry : SpeedPlayers)
-        {
-            KeepSpeed(Entry);
         }
         const ULONGLONG Now = GetTickCount64();
         std::erase_if(AmmoViews, [Now](const FAmmoView& View)
@@ -3583,8 +3647,8 @@ namespace
             RefreshAmmoView(View.Player.Get());
             return true;
         });
-        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || !AttributeBoosts.empty() || !MaxHealths.empty() || !MaxShields.empty() || !SpeedPlayers.empty()
-            || !AmmoViews.empty()) && GameThread::Enqueue(&TickWeaponCheats);
+        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || HasRowSpeed() || !MaxHealths.empty() || !MaxShields.empty() || !AmmoViews.empty())
+            && GameThread::Enqueue(&TickWeaponCheats);
     }
 
     void StartWeaponCheatTick()
@@ -3596,6 +3660,58 @@ namespace
     }
 }
 #endif
+
+void UFortCheatManager::ReapplyBoosts(AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
+    // The pawn the controller possessed (a respawn, Battle Royale's drop from the aircraft, a disguise and its end) gets the
+    // player's cheats again. They used to wait for a frame task to see the new pawn; Possess is where the pawn changes,
+    // as Epic's later AController::OnPossess is. It runs on the next tick (Epic's FTimerManager::SetTimerForNextTick), as
+    // the frame task did: Possess is still setting the pawn up (the hero, the attribute reset, the starting items and the
+    // hero kit) when it gets here.
+    const auto IsPlayers = [PlayerController](const auto& Entry) { return Entry.Player.Get() == PlayerController; };
+    if (!PlayerController || (std::none_of(AttributeBoosts.begin(), AttributeBoosts.end(), IsPlayers) && std::none_of(SpeedPlayers.begin(), SpeedPlayers.end(), IsPlayers)
+            && !HasNoCooldown(PlayerController)))
+    {
+        return;
+    }
+    GameThread::Enqueue([Player = TWeakObjectPtr<AFortPlayerController>(PlayerController)]()
+    {
+        ForgetPlayersWhoLeft();
+        AFortPlayerController* const Controller = Player.Get();
+        if (!Controller)
+        {
+            return;
+        }
+        // firerate, weapondamage, infinitemag's ammo saving and Battle Royale's speed: their effects on the new pawn's
+        // ability system, unless the old one is still its own (the player state's), and the row speed they give.
+        for (FAttributeBoost& Boost : AttributeBoosts)
+        {
+            if (Boost.Player.Get() == Controller)
+            {
+                KeepBoost(Boost);
+                if (Boost.Kind == &MoveSpeedBoost)
+                {
+                    KeepRowSpeed(Boost);
+                }
+            }
+        }
+        // Save the World's speed: the movement set's speeds for the new pawn.
+        for (FSpeedPlayer& Entry : SpeedPlayers)
+        {
+            if (Entry.Player.Get() == Controller)
+            {
+                KeepSpeed(Entry);
+            }
+        }
+        // nocooldown: the gadgets a respawn's hero kit gives start full.
+        if (HasNoCooldown(Controller))
+        {
+            RechargeGadgets(Controller);
+        }
+    });
+#endif
+}
 
 void UFortCheatManager::InfiniteMag(const FString& Arguments)
 {
@@ -3776,6 +3892,7 @@ namespace
     FString RunBoostCommand(AFortPlayerController* PlayerController, const FBoostKind& Kind, const std::wstring& Command, const FString& Arguments, float Max,
         const wchar_t* Example, const wchar_t* ResetReply)
     {
+        ForgetPlayersWhoLeft();
         const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
         const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
         const bool bReset = Word == L"reset" || Word == L"off";
@@ -3810,8 +3927,8 @@ namespace
         {
             return FString::Printf(TEXT("Can't change your %s: %s"), Kind.Name, **Error);
         }
+        // Kept through respawns by ReapplyBoosts, from Possess.
         AttributeBoosts.push_back(std::move(Boost));
-        StartWeaponCheatTick();
 
         const FBoostResult& Applied = std::get<FBoostResult>(Result);
         std::wstring Reply;
@@ -4647,6 +4764,7 @@ void UFortCheatManager::Speed(const FString& Arguments)
 #if WITH_SERVER_CODE
     // Up to 1000x (#155: 10 was too few); ParseMultiplier turns away anything not finite or under 0.05.
     constexpr float MaxMultiplier = 1000.0f;
+    ForgetPlayersWhoLeft();
     const std::vector<std::wstring> Words = SplitWords(Arguments.ToStdString());
     const std::wstring Word = Words.size() == 1 ? Lower(Words[0]) : std::wstring();
     const bool bReset = Word == L"reset" || Word == L"off";
@@ -4696,8 +4814,8 @@ void UFortCheatManager::Speed(const FString& Arguments)
         Entry.Player = PlayerController;
         Entry.Pawn = Pawn;
         Entry.Multiplier = *Multiplier;
+        // A new pawn takes it from Possess (ReapplyBoosts); the set replicates by itself.
         const float OwnSpeed = Pawn->SetCheatSpeedMultiplier(*Multiplier);
-        StartWeaponCheatTick();
         UE_LOG(LogFortCheats, Log, TEXT("Speed: %s moves at %.2fx (movement set, own run speed %.0f)"), *GetNameSafe(PlayerController), *Multiplier, OwnSpeed);
         Reply(FString::Printf(TEXT("Speed set to %.2fx: running at %.0f, your own %.0f (speed reset: your own speed)"), *Multiplier, OwnSpeed * *Multiplier, OwnSpeed));
         return;

@@ -56,4 +56,8 @@ private:
     static void ServerAcknowledgePossession_ImplementationHK(AFortPlayerControllerZone* This, APawn* P);
     // The super class's (AFortPlayerController's, which is APlayerController's) ServerAcknowledgePossession_Implementation.
     static inline void (*ServerAcknowledgePossession_ImplementationSuper)(AFortPlayerControllerZone* This, APawn* P) = nullptr;
+
+public:
+    // Core runs the controllers' ServerAcknowledgePossession_Implementation (5.0+), so it sees a client take its pawn.
+    static bool HasServerAcknowledgePossession() { return ServerAcknowledgePossession_ImplementationSuper != nullptr; }
 };

@@ -440,6 +440,13 @@ void AFortPlayerController::Possess(APawn* InPawn)
         AthenaPawn->BindPlayerStartDBNO();
     }
 
+    // Battle Royale: the match hears when this pawn dies and when the player leaves (their results), and a player the
+    // game moved to another team comes back in its squad.
+    if (AFortGameModeAthena* Athena = Role == ROLE_Authority ? AFortGameModeAthena::GetCurrent(this) : nullptr)
+    {
+        Athena->OnPlayerPossessedPawn(this, InPawn);
+    }
+
     AFortPlayerState* FortPlayerState = Role == ROLE_Authority && MyFortPawn ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
     if (FortPlayerState && !FortPlayerState->bHasStartedPlaying)
     {

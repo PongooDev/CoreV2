@@ -101,7 +101,7 @@ public:
     // Set on Playground: its players change teams with the pause menu's team select (TeamSelectWidget, which calls
     // AFortPlayerControllerAthena::SetTeam, a server RPC; 5.10's SetTeam_Implementation 0xC0DD10 checks the team is in
     // the playlist's DefaultFirstTeam..DefaultLastTeam and calls the game mode's ChangeTeam, slot 0xA80). Read by
-    // AFortGameModeAthena::WatchTeamSwitching (CoreV2 #374).
+    // AFortGameModeAthena's team switches, at the switched pawn's death and its player's next Possess (CoreV2 #374).
     DefineUProperty(bool, bAllowTeamSwitching)
     static bool HasAllowTeamSwitching() { return Member_bAllowTeamSwitching.IsAvailable(); }
 };

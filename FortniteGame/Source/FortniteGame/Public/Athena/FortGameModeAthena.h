@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FortGameModeZone.h"
+#include "UObject/Stack.h"
 
 #include <cstdint>
 #include <string>
@@ -11,6 +12,7 @@ class AController;
 class AFortSafeZoneIndicator;
 class AActor;
 class ABuildingSMActor;
+class AFortPlayerController;
 class AFortPlayerControllerAthena;
 class AFortPlayerStateAthena;
 class AFortPawn;
@@ -153,46 +155,67 @@ public:
 
     // Has the map info roll the placed vending machines' rarities and what they sell (AFortAthenaMapInfo::
     // SpawnVendingMachines, from 3.5, #257) with the match's playlist's tables: at once where they are already in place,
-    // else once the game state has that playlist (WatchPlaylistDataTables, #291) or the bus is under way.
+    // else once the game state has that playlist (HandleCurrentPlaylistLoaded, #291) or the bus is under way.
     void SpawnVendingMachines();
 
     // Has the world's BGA consumable spawners (ABGAConsumableSpawner, from 4.0's Hop Rocks, #278) roll and place their
     // building gameplay actors, with the world's loot tables. Builds without them do nothing.
     void SpawnBGAConsumables();
 
-    // Has the map info spawn the match's Supply Llamas (AFortAthenaMapInfo::SpawnLlamas, from 3.3, #243) once the bus is
-    // under way. Builds without them do nothing.
-    void WatchLlamas();
+    // Binds the match's events Core works from (FinishWorldInitialization, once the game state is there): the game
+    // state's GamePhaseChanged (HandleGamePhaseChanged) and, from 4.4, its OnCurrentPlaylistLoaded
+    // (HandleCurrentPlaylistLoaded). Each player's pawn and player state are bound as the player gets a pawn
+    // (OnPlayerPossessedPawn).
+    void BindMatchEvents();
+
+    // The game state's GamePhaseChanged (from 1.7.2; AFortGameStateAthena::OnRep_GamePhase broadcasts it, and the server's
+    // SetGamePhase calls that on each change: 1.8.1 0x4251A0, 3.2 0x9BD5B0, 5.40 0xBEDB40): the phase-driven work, the
+    // tick after (outside the game mode's StartWarmupPhase or StartAircraftPhase). When the bus is under way the chests' and ammo boxes' spawn percents (ApplyContainerSpawnPercents) and the Supply
+    // Llamas (AFortAthenaMapInfo::SpawnLlamas, from 3.3, #243), whose call went with the stripped server code, and the
+    // vending machines still waiting for the match's playlist; the warmup's report, room and length (StartWarmupReports);
+    // and the match's results (StartMatchResults).
+    void HandleGamePhaseChanged();
+
+    // From 4.4: the game state's OnCurrentPlaylistLoaded, which AFortGameStateAthena::OnPlaylistDataLoadCompleted
+    // (5.40 0xBF32A0, "Server AND Client") broadcasts after the game mode's OnPlaylistDataLoaded. Once the match's
+    // assignment gives the world another playlist, applies that playlist's tables (from 3.5 with the default loot rows
+    // of the tier groups and packages they have none of, #292) and, when its loot tables are other ones, rolls the
+    // world's loot again, as long as the match hasn't left its warmup.
+    void HandleCurrentPlaylistLoaded();
+
+    // A pawn of the match died (AFortPawn::OnDied, which the pawn's death broadcasts on the server; Epic's own
+    // AFortTeamInfo::AddSpottedActor binds it too): its team may be out, and the game may have moved its player to
+    // another team. Looked at the tick after, once the death handler has given the places.
+    void HandlePawnDied();
+
+    // A player's player state is going away (AActor::OnDestroyed: APlayerState::Destroyed, after the game mode's Logout
+    // has taken the player out of the match): the player's place, kills and time alive as they leave.
+    void HandlePlayerStateDestroyed(AActor* DestroyedActor);
+
+    // AFortPlayerController::Possess on the server: the player's pawn and player state tell the match when the pawn dies
+    // and when the player leaves, and a player the game moved to another team comes back in its squad.
+    void OnPlayerPossessedPawn(AFortPlayerController* Player, APawn* Pawn);
 
     // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,
-    // for Battle Royale's stats (Core-Backend #59), as long as the game mode is there.
-    void WatchMatchResults();
+    // for Battle Royale's stats (Core-Backend #59): looked at when a pawn of the match dies, a player leaves and the game
+    // phase changes.
+    void StartMatchResults();
 
     // Keeps the warmup at the admin panel's length and, with late joining on, takes more players during it
-    // (Core-Backend #122), as long as the game mode is there.
-    void WatchWarmup();
-
-    // A playlist with team switching (Playground's bAllowTeamSwitching): a player the game moved to another team
-    // (SetTeam_Implementation -> ChangeTeam, which changes their AFortTeamInfo, AFortTeamPrivateInfo and TeamIndex)
-    // joins that team's squad (AFortPlayerStateAthena::SquadId), which the game leaves as it was: the squad bar, the
-    // teammates' name tags and their map markers follow the squad (OnRep_SquadId), so the new team's players stayed
-    // strangers and the old team's stayed squadmates (CoreV2 #374). As long as the game mode is there.
-    void WatchTeamSwitching();
+    // (Core-Backend #122): reports to the backend from the world's start, again each time it answers and at each phase
+    // change, until the bus has left.
+    void StartWarmupReports();
 
     // Has the server and its players fetch the event calendar again (AFortGameState::Client_RefreshEventCalendar) as soon
     // as the admin panel changes it (Core-Backend's calendar revision), so that a running match sees an admin's event
-    // change (4.5's rocket launch) at once, not at the calendar's cacheExpire. Builds without the function do nothing.
-    void WatchEventCalendar();
+    // change (4.5's rocket launch) at once, not at the calendar's cacheExpire. Asks again a while after each answer.
+    // Builds without the function do nothing.
+    void AskEventCalendarRevision();
 
     // The game's own ApplyPlaylistDataTables (from 1.11), once per game mode, before the world's first loot roll: it
     // restores the default loot tables and copies the playlist's over them (the playlist the map URL gave, until the
     // match is assigned). Builds without it keep their tables.
     void ApplyPlaylistDataTablesOnce();
-
-    // Once the match's assignment gives it another playlist, applies that playlist's tables (from 3.5 with the default
-    // loot rows of the tier groups and packages they have none of, #292) and, when its loot tables are other ones, rolls
-    // the world's loot again, as long as the match hasn't left its warmup.
-    void WatchPlaylistDataTables();
 
     static void HookVTables();
     static void HookCallSites();
@@ -201,6 +224,15 @@ public:
     static void HookMatchAssignmentVTables();
 
 private:
+    // Core's natives the game's Blueprint delegates call (UClass::AddNativeFunction at boot, with each delegate's
+    // signature): GamePhaseChanged, OnCurrentPlaylistLoaded, a pawn's OnDied and a player state's OnDestroyed, all bound
+    // to the game mode. None where the build has no such delegate or Core can't add a native.
+    static void AddDelegateHandlers();
+    DECLARE_FUNCTION(execHandleGamePhaseChanged);
+    DECLARE_FUNCTION(execHandleCurrentPlaylistLoaded);
+    DECLARE_FUNCTION(execHandlePawnDied);
+    DECLARE_FUNCTION(execHandlePlayerStateDestroyed);
+
     static void OnGivenMatchAssignmentHK(AFortGameModeAthena* This, bool bSuccess, const void* MatchOptions);
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeAthena* This, AController* NewPlayer, AActor* StartSpot);
     // The arguments are AFortPlayerController::ActivateSlot's; the 1.7.2 call it also takes passes only the controller.

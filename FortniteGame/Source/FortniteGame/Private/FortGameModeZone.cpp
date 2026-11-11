@@ -163,16 +163,16 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         Athena->ApplyContainerSpawnPercents();
         Athena->SpawnVendingMachines();
         Athena->SpawnBGAConsumables();
-        Athena->WatchLlamas();
         // 3.0's POI volumes: their brush is stripped from the client paks (FortPoiVolume.cpp).
         AFortPoiVolume::RestorePoiVolumes(GetWorld());
         AFortPoiManager::WatchInitialization(GetWorld());
         ABuildingContainer::LogWorldContainers(GetWorld());
-        Athena->WatchMatchResults();
-        Athena->WatchWarmup();
-        Athena->WatchTeamSwitching();
-        Athena->WatchEventCalendar();
-        Athena->WatchPlaylistDataTables();
+        Athena->StartMatchResults();
+        Athena->StartWarmupReports();
+        Athena->AskEventCalendarRevision();
+        // The llamas, the spawn percents, the warmup's reports and the results from the game state's GamePhaseChanged,
+        // the match's playlist from its OnCurrentPlaylistLoaded.
+        Athena->BindMatchEvents();
         FCoreAthenaBotManager::Create(Athena);
         return;
     }

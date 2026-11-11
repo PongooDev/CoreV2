@@ -1,6 +1,7 @@
 #pragma once
 
 #include "FortGameState.h"
+#include "UObject/ScriptDelegates.h"
 
 class AFortAthenaAircraft;
 class AFortAthenaMapInfo;
@@ -31,6 +32,15 @@ public:
     // (0xBE0640, 5.30 0xBD98A0), is false only while UFortGameInstance's loading screen manager (the TWeakPtr that
     // UFortGlobalUIContext::IsCurrentlyShowingLoadingScreen reads) shows one, so it is true on Core's servers.
     DefineUProperty(EAthenaGamePhase, GamePhase)
+    // What OnRep_GamePhase broadcasts (from 1.7.2; one EAthenaGamePhase parameter), on the server too: the game mode's
+    // phase changes set GamePhase and call OnRep_GamePhase themselves (1.8.1's StartWarmupPhase 0x439A20; 5.40's
+    // SetGamePhase 0xBFF510, whose OnRep_GamePhase 0xBEDB40 broadcasts it at its end).
+    DefineUProperty(FMulticastScriptDelegate, GamePhaseChanged)
+    static bool HasGamePhaseChanged() { return Member_GamePhaseChanged.IsAvailable(); }
+    // From 4.4: what OnPlaylistDataLoadCompleted broadcasts once the match's playlist has loaded (PlaylistName and its
+    // gameplay tags), after the game mode's OnPlaylistDataLoaded applied its tables (5.40 0xBF32A0).
+    DefineUProperty(FMulticastScriptDelegate, OnCurrentPlaylistLoaded)
+    static bool HasCurrentPlaylistLoaded() { return Member_OnCurrentPlaylistLoaded.IsAvailable(); }
     DefineUProperty(int32_t, PlayersLeft)
     // The most players the match had: AddToAlivePlayers (1.10 0x42A4A0) raises it to the alive players' count.
     DefineUProperty(int32_t, TotalPlayers)

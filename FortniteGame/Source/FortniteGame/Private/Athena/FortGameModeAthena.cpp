@@ -47,14 +47,17 @@
 #include "Player/FortCheatManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/Class.h"
+#include "UObject/ScriptDelegates.h"
+#include "UObject/Stack.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
 #include <cctype>
-#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -204,48 +207,108 @@ namespace
         }
     }
 
-    // Runs Then once the bus is under way, the match's playlist final by then.
-    void WhenAircraftPhase(FWeakObjectPtr GameMode, void (*Then)(AFortGameModeAthena*))
+    AFortGameStateAthena* AthenaGameStateOf(AFortGameModeAthena* GameMode)
     {
-        GameThread::Enqueue([GameMode, Then]()
+        UWorld* World = GameMode->GetWorld();
+        return World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    }
+
+    // Core's record of this world's match: the work that waits for one of the game's events, and the timers Core set on
+    // the world's timer manager. Each timer is a one-off that sets itself again while it is needed, so it stops with the
+    // game mode (the game instance's timer manager outlives the world). A new game mode starts it over.
+    struct FMatchEvents
+    {
+        FWeakObjectPtr GameMode;
+        // The game phase HandleGamePhaseChanged last handled.
+        uint8_t HandledPhase = 0xFF;
+        // Whether the game state's GamePhaseChanged calls HandleGamePhaseChanged, and the pawns' OnDied HandlePawnDied.
+        bool bPhaseBound = false;
+        bool bPawnsBound = false;
+        // ApplyContainerSpawnPercents left the spawn percents to the bus.
+        bool bSpawnPercentsWaitForAircraft = false;
+        bool bAircraftHandled = false;
+        // The tick after GamePhaseChanged (RunGamePhase); where it can't be bound, CheckGamePhase's.
+        FTimerHandle PhaseTimer;
+        // The tick after a pawn of the match died or a player left (CheckMatchPlayers).
+        FTimerHandle PlayersTimer;
+        // The tick after OnCurrentPlaylistLoaded; before 4.4, CheckMatchPlaylist's.
+        FTimerHandle PlaylistTimer;
+    };
+
+    // A delegate's work runs the tick after the game's broadcast, outside the game function that broadcast it (the
+    // game mode's StartAircraftPhase, a pawn's death, the game state's OnPlaylistDataLoadCompleted), as Core's timers do.
+    constexpr float NextTickDelay = 0.001f;
+    FMatchEvents MatchEvents;
+
+    // Core's natives on the Battle Royale game mode's class, which the game's delegates call
+    // (AFortGameModeAthena::AddDelegateHandlers, at boot); null where the build has no such delegate or Core couldn't
+    // add one.
+    UFunction* GamePhaseChangedHandler = nullptr;
+    UFunction* CurrentPlaylistLoadedHandler = nullptr;
+    UFunction* PawnDiedHandler = nullptr;
+    UFunction* PlayerStateDestroyedHandler = nullptr;
+
+    FMatchEvents& MatchEventsOf(const AFortGameModeAthena* GameMode)
+    {
+        if (MatchEvents.GameMode.Get() != GameMode)
         {
-            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
-            UWorld* World = Athena ? Athena->GetWorld() : nullptr;
-            if (!World)
-            {
-                return;
-            }
-            AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
-            if (GameState && GameState->GamePhase >= EAthenaGamePhase::GetAircraft())
+            MatchEvents = FMatchEvents();
+            MatchEvents.GameMode = FWeakObjectPtr(GameMode);
+        }
+        return MatchEvents;
+    }
+
+    // A one-off timer on the game mode's world (its game instance's timer manager): Then runs Delay seconds from now, as
+    // long as the game mode is still there. A timer already in Handle is replaced.
+    void SetGameModeTimer(AFortGameModeAthena* GameMode, FTimerHandle& Handle, float Delay, void (*Then)(AFortGameModeAthena*))
+    {
+        UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+        if (!World)
+        {
+            return;
+        }
+        const FWeakObjectPtr WeakGameMode(GameMode);
+        World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([WeakGameMode, Then]()
+        {
+            if (AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(WeakGameMode.Get()))
             {
                 Then(Athena);
-                return;
             }
-            WhenAircraftPhase(GameMode, Then);
-        });
+        }), Delay, false);
     }
-}
 
-void AFortGameModeAthena::WatchLlamas()
-{
-#if WITH_SERVER_CODE
+    void ClearGameModeTimer(AFortGameModeAthena* GameMode, FTimerHandle& Handle)
+    {
+        UWorld* World = GameMode && Handle.IsValid() ? GameMode->GetWorld() : nullptr;
+        if (World)
+        {
+            World->GetTimerManager().ClearTimer(Handle);
+        }
+        Handle.Invalidate();
+    }
+
+    // The signature of Class's Blueprint delegate PropertyName (its UMulticastDelegateProperty's SignatureFunction), or
+    // null where the class has no such delegate.
+    const UFunction* DelegateSignature(UClass* Class, const wchar_t* PropertyName)
+    {
+        const UProperty* Property = Class ? Class->FindPropertyByName(FName(PropertyName)) : nullptr;
+        return Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+            ? static_cast<UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+    }
+
     // Core's: Epic's call to AFortAthenaMapInfo::SpawnLlamas went with the stripped server code. 3.3 keeps no call to it
     // (no call to the shared empty function has the map info as this), so it can't be redirected. The llamas are placed
-    // when the bus is under way, the match's playlist final by then: their quantity rows are AthenaGameData's, which a
-    // playlist's own game data replaces (as for the spawn percents), and the match's playlist comes with its assignment.
-    if (AFortAthenaMapInfo::HasLlamas())
+    // when the bus is under way (HandleGamePhaseChanged), the match's playlist final by then: their quantity rows are
+    // AthenaGameData's, which a playlist's own game data replaces (as for the spawn percents), and the match's playlist
+    // comes with its assignment.
+    void SpawnMapLlamas(AFortGameModeAthena* GameMode)
     {
-        WhenAircraftPhase(FWeakObjectPtr(this), [](AFortGameModeAthena* Athena)
+        AFortGameStateAthena* GameState = AFortAthenaMapInfo::HasLlamas() ? AthenaGameStateOf(GameMode) : nullptr;
+        if (AFortAthenaMapInfo* MapInfo = GameState ? static_cast<AFortAthenaMapInfo*>(GameState->MapInfo) : nullptr)
         {
-            UWorld* World = Athena->GetWorld();
-            AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-            if (AFortAthenaMapInfo* MapInfo = GameState ? static_cast<AFortAthenaMapInfo*>(GameState->MapInfo) : nullptr)
-            {
-                MapInfo->SpawnLlamas();
-            }
-        });
+            MapInfo->SpawnLlamas();
+        }
     }
-#endif
 }
 
 void AFortGameModeAthena::ApplyContainerSpawnPercents()
@@ -262,11 +325,12 @@ void AFortGameModeAthena::ApplyContainerSpawnPercents()
     // own game data replaces them: ApplyPlaylistDataTables copies its GameData over AthenaGameData ("Patched Game Data
     // with %s", 3.2 0x9AEF10, the curve table at the playlist class default +0x360), as Teams of 20's does (#238: chests
     // 60-80%, ammo boxes 75-90%). The world starts on the map URL's playlist and the match's comes with its assignment,
-    // so on those builds the percents wait for the bus, when the playlist is the match's and its game data in place.
-    // Nobody is near the map's containers then (the bus flies at AthenaGameData's Default.Aircraft.Height, 80000 on 3.2).
+    // so on those builds the percents wait for the bus, when the playlist is the match's and its game data in place
+    // (HandleGamePhaseChanged). Nobody is near the map's containers then (the bus flies at AthenaGameData's
+    // Default.Aircraft.Height, 80000 on 3.2).
     if (Finder::ResolvePlaylistDataTablesLive())
     {
-        WhenAircraftPhase(FWeakObjectPtr(this), &ApplySpawnPercents);
+        MatchEventsOf(this).bSpawnPercentsWaitForAircraft = true;
         return;
     }
     ApplySpawnPercents(this);
@@ -438,8 +502,8 @@ namespace
 
     struct FMatchResults
     {
+        FWeakObjectPtr GameMode;
         std::map<std::wstring, FMatchPlayer> Players;
-        std::chrono::steady_clock::time_point NextCheck;
         // Whether the backend should count a place 1 as the win: the build doesn't report its winners itself.
         bool bCountWins = false;
         // The match's own id, new for each match, so the backend pays its V-Bucks rewards once (Core-Backend #100).
@@ -480,6 +544,35 @@ namespace
         }
     }
 
+    // A player of the match as their player state has them now (none for a bot, which has no account): their team,
+    // time alive, place and, where the server doesn't count kills, who eliminated them.
+    FMatchPlayer* UpdateMatchPlayer(FMatchResults& Results, AFortPlayerStateAthena* AthenaState)
+    {
+        const std::wstring AccountId = AthenaState ? AthenaState->UniqueId.ToString().ToStdString() : std::wstring();
+        if (!IsAccountId(AccountId))
+        {
+            return nullptr;
+        }
+        FMatchPlayer& Player = Results.Players[AccountId];
+        if (Player.bReported)
+        {
+            return nullptr;
+        }
+        Player.Team = AthenaState->TeamIndex;
+        Player.SecondsAlive = AthenaState->SecondsAlive;
+        Player.Place = std::max<int32_t>(AthenaState->Place, 0);
+        if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty())
+        {
+            AFortPlayerStateAthena* Eliminator = AthenaState->GetEliminator();
+            const std::wstring EliminatorId = Eliminator && Eliminator != AthenaState ? Eliminator->UniqueId.ToString().ToStdString() : std::wstring();
+            if (IsAccountId(EliminatorId))
+            {
+                Player.EliminatedBy = EliminatorId;
+            }
+        }
+        return &Player;
+    }
+
     // Brings the players up to date from their player states and reports those whose team has a place.
     void CheckMatchResults(AFortGameModeAthena* GameMode, FMatchResults& Results)
     {
@@ -493,29 +586,7 @@ namespace
         const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
         for (APlayerState* PlayerState : PlayerArray)
         {
-            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
-            const std::wstring AccountId = AthenaState ? AthenaState->UniqueId.ToString().ToStdString() : std::wstring();
-            if (!IsAccountId(AccountId))
-            {
-                continue;
-            }
-            FMatchPlayer& Player = Results.Players[AccountId];
-            if (Player.bReported)
-            {
-                continue;
-            }
-            Player.Team = AthenaState->TeamIndex;
-            Player.SecondsAlive = AthenaState->SecondsAlive;
-            Player.Place = std::max<int32_t>(AthenaState->Place, 0);
-            if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty())
-            {
-                AFortPlayerStateAthena* Eliminator = AthenaState->GetEliminator();
-                const std::wstring EliminatorId = Eliminator && Eliminator != AthenaState ? Eliminator->UniqueId.ToString().ToStdString() : std::wstring();
-                if (IsAccountId(EliminatorId))
-                {
-                    Player.EliminatedBy = EliminatorId;
-                }
-            }
+            UpdateMatchPlayer(Results, Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState)));
         }
 
         // The kills, final by the time the player's team has a place. On 1.8 they are the other teams' players the
@@ -607,27 +678,16 @@ namespace
         }
     }
 
-    void WatchResults(FWeakObjectPtr GameMode, std::shared_ptr<FMatchResults> Results)
+    // This world's match results (StartMatchResults).
+    std::shared_ptr<FMatchResults> MatchResults;
+
+    FMatchResults* MatchResultsOf(const AFortGameModeAthena* GameMode)
     {
-        GameThread::Enqueue([GameMode, Results]()
-        {
-            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
-            if (!Athena)
-            {
-                return;
-            }
-            const auto Now = std::chrono::steady_clock::now();
-            if (Now >= Results->NextCheck)
-            {
-                Results->NextCheck = Now + std::chrono::seconds(1);
-                CheckMatchResults(Athena, *Results);
-            }
-            WatchResults(GameMode, Results);
-        });
+        return MatchResults && MatchResults->GameMode.Get() == GameMode ? MatchResults.get() : nullptr;
     }
 }
 
-void AFortGameModeAthena::WatchMatchResults()
+void AFortGameModeAthena::StartMatchResults()
 {
 #if WITH_SERVER_CODE
     // Epic's stats service kept Battle Royale's stats (Balance/DataTables/LeaderboardStats: br_placetop<n>, br_kills,
@@ -635,14 +695,17 @@ void AFortGameModeAthena::WatchMatchResults()
     // its winners (battleroyale/recordwin, 0x72E130): UFortMcpUtils::RecordUserStatsUrl (/api/stats/bulk?ownertype=1)
     // has no caller left, so wins were the only stat. The rest comes from the player states: Place is set for every
     // player of a team when the team is out (TeamsLeft then, 0x44A870, from the death handler 0x437C30) or has won (1,
-    // 0x400490 and 0x4008F0), with SecondsAlive and the player's Kills final by then. They are read once a second and
-    // each player is reported once, with the DedicatedServer client's token. Core-Backend counts the win from recordwin,
-    // which 1.8 doesn't have (Core-Backend #81): from a build without it, the report says to count a place 1 as the win.
+    // 0x400490 and 0x4008F0), with SecondsAlive and the player's Kills final by then. So they are read when a pawn of the
+    // match dies (HandlePawnDied, the tick after its death handler), when a player leaves (HandlePlayerStateDestroyed)
+    // and at each game phase (HandleGamePhaseChanged: the win ends the match), and each player is reported once, with
+    // the DedicatedServer client's token. Core-Backend counts the win from recordwin, which 1.8 doesn't have
+    // (Core-Backend #81): from a build without it, the report says to count a place 1 as the win.
     auto Results = std::make_shared<FMatchResults>();
+    Results->GameMode = FWeakObjectPtr(this);
     Results->bCountWins = Finder::StringRefs(L"/api/game/v2/battleroyale/recordwin").empty();
     const FGuid MatchGuid = FGuid::NewGuid();
     Results->MatchId = std::format("{:08X}{:08X}{:08X}{:08X}", MatchGuid.A, MatchGuid.B, MatchGuid.C, MatchGuid.D);
-    WatchResults(FWeakObjectPtr(this), Results);
+    MatchResults = Results;
     Log::Info(L"Battle Royale: reporting the match's results to {} ({}{})", Configuration::Get().Backend,
         Results->bCountWins ? L"with its wins" : L"its wins through the build's recordwin",
         AFortPlayerStateAthena::CountsKills() ? L"" : AFortPlayerStateAthena::HasEliminator() ? L", kills counted by Core" : L", no kills: no DeathInfo");
@@ -651,22 +714,28 @@ void AFortGameModeAthena::WatchMatchResults()
 
 namespace
 {
-    // How often the server asks for the admin panel's settings before its warmup, and reports during it.
-    constexpr auto WarmupAskInterval = std::chrono::seconds(30);
-    constexpr auto WarmupReportInterval = std::chrono::seconds(1);
-    constexpr auto ReserveInterval = std::chrono::milliseconds(100);
+    // How long after the backend's answer the server asks again for the admin panel's settings before its warmup, and
+    // reports again during it. The admin panel and the backend's matchmaking queue change on their own, and Core-Backend
+    // has no way to tell the server (no connection of its own to it), so the server has to ask: the next report is set
+    // when the last one is answered, and a phase change reports at once.
+    constexpr float WarmupAskInterval = 30.0f;
+    constexpr float WarmupReportInterval = 1.0f;
+    // How often a late player's reservation is looked at between their login and their joining the game.
+    constexpr float LatePlayerInterval = 0.1f;
 
     struct FWarmupWatch
     {
-        std::chrono::steady_clock::time_point NextAsk{};
-        std::chrono::steady_clock::time_point NextReserve{};
+        FWeakObjectPtr GameMode;
         bool bAsking = false;
+        // A phase changed while a report was out: it is reported again as soon as that one is answered.
+        bool bReportAgain = false;
         // The backend has no such route (one from before Core-Backend #122): it isn't asked again.
         bool bUnsupported = false;
         // The bus has left and the backend has heard so.
         bool bReportedEnd = false;
-        // The phase the last check saw: a new one is reported at once.
-        uint8_t LastPhase = 0xFF;
+        // The next report, and the late players' next look.
+        FTimerHandle ReportTimer;
+        FTimerHandle LatePlayersTimer;
 
         // The backend's answer: the warmup's length (0: the game's own), whether it answered and has late joining on,
         // whether the matchmaking service sends parties here, the match's room, and the late parties it sent (their
@@ -712,6 +781,11 @@ namespace
         // session has been given it back.
         int32_t SessionRoom = 0;
         bool bLoggedSessionRoom = false;
+        // The session's room at the world's start, and its looks until the game creates its online session
+        // (CheckSessionRoom).
+        int32_t StartRoom = -1;
+        int32_t SessionRoomChecks = 0;
+        FTimerHandle SessionRoomTimer;
     };
 
     std::string NarrowId(const std::wstring& Id)
@@ -762,12 +836,6 @@ namespace
             }
         }
         return Parties;
-    }
-
-    AFortGameStateAthena* AthenaGameStateOf(AFortGameModeAthena* GameMode)
-    {
-        UWorld* World = GameMode->GetWorld();
-        return World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
     }
 
     // The reservation beacon's state (AFortGameSession's ReservationBeaconHost), or null.
@@ -917,6 +985,8 @@ namespace
         return OutSettings.Count > 0 || OutSettings.bFillPlayerTeams;
     }
 
+    void WarmupAnswered(const std::shared_ptr<FWarmupWatch>& Watch);
+
     void ReportWarmup(const std::shared_ptr<FWarmupWatch>& Watch, const std::wstring& Phase, const std::vector<std::wstring>& AccountIds, float SecondsLeft)
     {
         std::string Ids;
@@ -960,17 +1030,17 @@ namespace
                     Watch->bUnsupported = true;
                     Log::Warning(L"Battle Royale: the backend has no warmup settings (Core-Backend #122), so the match keeps the game's warmup and takes no late players");
                 }
-                if (!bAnswered)
+                if (bAnswered)
                 {
-                    return;
+                    Watch->WarmupSeconds = WarmupSeconds;
+                    Watch->bAnswered = true;
+                    Watch->bLateJoin = bLateJoin;
+                    Watch->bOpen = bOpen;
+                    Watch->MaxPlayers = MaxPlayers;
+                    Watch->Parties = std::move(Parties);
+                    Watch->NoFill = std::set<std::wstring>(NoFill.begin(), NoFill.end());
                 }
-                Watch->WarmupSeconds = WarmupSeconds;
-                Watch->bAnswered = true;
-                Watch->bLateJoin = bLateJoin;
-                Watch->bOpen = bOpen;
-                Watch->MaxPlayers = MaxPlayers;
-                Watch->Parties = std::move(Parties);
-                Watch->NoFill = std::set<std::wstring>(NoFill.begin(), NoFill.end());
+                WarmupAnswered(Watch);
             });
         });
     }
@@ -1394,7 +1464,63 @@ namespace
         }
     }
 
-    void CheckWarmup(AFortGameModeAthena* GameMode, const std::shared_ptr<FWarmupWatch>& Watch, std::chrono::steady_clock::time_point Now)
+    // This world's warmup reports (StartWarmupReports).
+    std::shared_ptr<FWarmupWatch> Warmup;
+
+    std::shared_ptr<FWarmupWatch> WarmupOf(const AFortGameModeAthena* GameMode)
+    {
+        return Warmup && Warmup->GameMode.Get() == GameMode ? Warmup : nullptr;
+    }
+
+    // KeepSessionRoom keeps the room the game gave the game session. The game gives it when it creates its online
+    // session, a few seconds after the world's start (3.3: MaxPlayers 4, the config's, at FinishWorldInitialization and
+    // 100 some 8 s later), and the match assignment lowers it to the players it reserved, which can come right after
+    // (a player already in the queue). Both happen inside the game session (AFortGameSession's session creation and its
+    // MMS assignment), with nothing broadcast that Core can bind, so the room is looked at every SessionRoomInterval
+    // from the world's start until it changes (the session is created), the warmup starts or SessionRoomLooks are over.
+    constexpr float SessionRoomInterval = 0.5f;
+    constexpr int32_t SessionRoomLooks = 120;
+
+    void CheckSessionRoom(AFortGameModeAthena* GameMode)
+    {
+        std::shared_ptr<FWarmupWatch> Watch = WarmupOf(GameMode);
+        AGameSession* Session = Watch && AGameSession::HasMaxPlayers() ? static_cast<AGameSession*>(GameMode->GameSession) : nullptr;
+        AFortGameStateAthena* GameState = Session ? AthenaGameStateOf(GameMode) : nullptr;
+        if (!GameState)
+        {
+            return;
+        }
+        Watch->SessionRoomTimer.Invalidate();
+        const int32_t Room = Session->MaxPlayers;
+        Watch->StartRoom = Watch->StartRoom < 0 ? Room : Watch->StartRoom;
+        if (GameState->GamePhase >= EAthenaGamePhase::GetWarmup())
+        {
+            return;
+        }
+        Watch->SessionRoom = std::max(Watch->SessionRoom, Room);
+        if (Room == Watch->StartRoom && ++Watch->SessionRoomChecks < SessionRoomLooks)
+        {
+            SetGameModeTimer(GameMode, Watch->SessionRoomTimer, SessionRoomInterval, &CheckSessionRoom);
+        }
+        else if (Room != Watch->StartRoom)
+        {
+            Log::Info(L"Battle Royale: the game session has room for {} players (it had {} at the world's start)", Room, Watch->StartRoom);
+        }
+    }
+
+    // Whether a player who came during the warmup without a reservation still has to join the game (or, from 1.11, to
+    // get their squad).
+    bool HasUnsettledLatePlayers(const FWarmupWatch& Watch)
+    {
+        return std::any_of(Watch.LateIds.begin(), Watch.LateIds.end(), [&](const std::wstring& Id) { return !Watch.Settled.contains(Id); });
+    }
+
+    void UpdateLatePlayers(AFortGameModeAthena* GameMode);
+
+    // What the server keeps up from the backend's answer and the game phase: the game session's room, the warmup's
+    // length, the match opened to late players and their reservations. Each answer, phase change and late player's look
+    // runs it.
+    void UpdateWarmup(AFortGameModeAthena* GameMode, FWarmupWatch& Watch)
     {
         AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
         UWorld* World = GameMode->GetWorld();
@@ -1404,41 +1530,64 @@ namespace
         }
         const uint8_t Phase = GameState->GamePhase;
         const bool bWarmup = Phase == EAthenaGamePhase::GetWarmup();
-        const float WorldNow = World->GetTimeSeconds();
-        if (Phase != Watch->LastPhase)
-        {
-            Watch->LastPhase = Phase;
-            Watch->NextAsk = Now;
-        }
 
-        KeepSessionRoom(GameMode, *Watch, Phase);
+        KeepSessionRoom(GameMode, Watch, Phase);
         if (Phase <= EAthenaGamePhase::GetWarmup())
         {
-            ApplyWarmupLength(GameMode, GameState, *Watch, WorldNow);
+            ApplyWarmupLength(GameMode, GameState, Watch, World->GetTimeSeconds());
         }
-        if (bWarmup && Watch->bOpen)
+        if (bWarmup && Watch.bOpen)
         {
-            OpenMatch(GameMode, *Watch);
+            OpenMatch(GameMode, Watch);
         }
-        if (Watch->bOpened && Now >= Watch->NextReserve)
-        {
-            Watch->NextReserve = Now + ReserveInterval;
-            ReserveLatePlayers(GameMode, *Watch, bWarmup);
-        }
-
-        // Every 30 seconds before the warmup (the settings), every second during it (the match's players and time left),
-        // once after.
-        if (Watch->bAsking || Watch->bUnsupported || Watch->bReportedEnd || Now < Watch->NextAsk)
+        if (!Watch.bOpened)
         {
             return;
         }
+        ReserveLatePlayers(GameMode, Watch, bWarmup);
+        // A late player is reserved a place as soon as a report sees their connection, and has to keep it until PickTeam
+        // has given them its team: their Login, after they have loaded the map. No event Core can bind comes in between
+        // on every build (AGameModeBase's PreLogin and PostLogin events, FGameModeEvents, are static native delegates), so
+        // while one is between the two the reservations are looked at every LatePlayerInterval (ReserveLatePlayers), up
+        // to the storm: everyone who came during the warmup is in the game by then.
+        if (HasUnsettledLatePlayers(Watch) && Phase <= EAthenaGamePhase::GetAircraft())
+        {
+            if (!Watch.LatePlayersTimer.IsValid())
+            {
+                SetGameModeTimer(GameMode, Watch.LatePlayersTimer, LatePlayerInterval, &UpdateLatePlayers);
+            }
+        }
+    }
+
+    void UpdateLatePlayers(AFortGameModeAthena* GameMode)
+    {
+        if (std::shared_ptr<FWarmupWatch> Watch = WarmupOf(GameMode))
+        {
+            Watch->LatePlayersTimer.Invalidate();
+            UpdateWarmup(GameMode, *Watch);
+        }
+    }
+
+    // Every 30 seconds before the warmup (the settings), every second during it (the match's players and time left),
+    // once after.
+    void ReportWarmupNow(AFortGameModeAthena* GameMode)
+    {
+        std::shared_ptr<FWarmupWatch> Watch = WarmupOf(GameMode);
+        AFortGameStateAthena* GameState = Watch ? AthenaGameStateOf(GameMode) : nullptr;
+        UWorld* World = GameMode->GetWorld();
+        if (!GameState || !World || Watch->bAsking || Watch->bUnsupported || Watch->bReportedEnd)
+        {
+            return;
+        }
+        ClearGameModeTimer(GameMode, Watch->ReportTimer);
+        const uint8_t Phase = GameState->GamePhase;
+        const bool bWarmup = Phase == EAthenaGamePhase::GetWarmup();
         const bool bAfter = Phase > EAthenaGamePhase::GetWarmup();
-        Watch->NextAsk = Now + (bWarmup ? WarmupReportInterval : WarmupAskInterval);
         Watch->bReportedEnd = bAfter;
         float SecondsLeft = 0.0f;
         if (bWarmup && AFortGameStateAthena::HasWarmupCountdown())
         {
-            SecondsLeft = GameState->WarmupCountdownEndTime >= 0.0f ? GameState->WarmupCountdownEndTime - WorldNow
+            SecondsLeft = GameState->WarmupCountdownEndTime >= 0.0f ? GameState->WarmupCountdownEndTime - World->GetTimeSeconds()
                 : AFortGameModeAthena::HasWarmupLength() ? GameMode->WarmupCountdownDuration : 0.0f;
         }
         if (bAfter)
@@ -1448,24 +1597,61 @@ namespace
         ReportWarmup(Watch, GameState->GamePhase.ToString(), ConnectedAccounts(GameMode), SecondsLeft);
     }
 
-    void WatchWarmupOf(FWeakObjectPtr GameMode, std::shared_ptr<FWarmupWatch> Watch)
+    // The report's timer: its handle is spent once it runs.
+    void ReportWarmupOnTimer(AFortGameModeAthena* GameMode)
     {
-        GameThread::Enqueue([GameMode, Watch]()
+        if (std::shared_ptr<FWarmupWatch> Watch = WarmupOf(GameMode))
         {
-            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
-            AFortGameStateAthena* GameState = Athena ? AthenaGameStateOf(Athena) : nullptr;
-            // Ends with the match, or once the storm is up: everyone who came during the warmup is in the game by then.
-            if (!Athena || (GameState && GameState->GamePhase > EAthenaGamePhase::GetAircraft() && Watch->bReportedEnd))
-            {
-                return;
-            }
-            CheckWarmup(Athena, Watch, std::chrono::steady_clock::now());
-            WatchWarmupOf(GameMode, Watch);
-        });
+            Watch->ReportTimer.Invalidate();
+            ReportWarmupNow(GameMode);
+        }
+    }
+
+    // The backend answered (or the request failed): the server takes the answer, then reports again, at once when a
+    // phase changed meanwhile, else after the interval of the phase it is in.
+    void WarmupAnswered(const std::shared_ptr<FWarmupWatch>& Watch)
+    {
+        AFortGameModeAthena* GameMode = static_cast<AFortGameModeAthena*>(Watch->GameMode.Get());
+        AFortGameStateAthena* GameState = GameMode && WarmupOf(GameMode) == Watch ? AthenaGameStateOf(GameMode) : nullptr;
+        if (!GameState)
+        {
+            return;
+        }
+        UpdateWarmup(GameMode, *Watch);
+        if (Watch->bUnsupported || Watch->bReportedEnd)
+        {
+            return;
+        }
+        if (Watch->bReportAgain)
+        {
+            Watch->bReportAgain = false;
+            ReportWarmupNow(GameMode);
+            return;
+        }
+        const bool bWarmup = GameState->GamePhase == EAthenaGamePhase::GetWarmup();
+        SetGameModeTimer(GameMode, Watch->ReportTimer, bWarmup ? WarmupReportInterval : WarmupAskInterval, &ReportWarmupOnTimer);
+    }
+
+    // A new game phase: the server keeps its room and length up, and the backend hears of it at once (after the report
+    // that is out, if one is).
+    void WarmupPhaseChanged(AFortGameModeAthena* GameMode)
+    {
+        std::shared_ptr<FWarmupWatch> Watch = WarmupOf(GameMode);
+        if (!Watch)
+        {
+            return;
+        }
+        UpdateWarmup(GameMode, *Watch);
+        if (Watch->bAsking)
+        {
+            Watch->bReportAgain = true;
+            return;
+        }
+        ReportWarmupNow(GameMode);
     }
 }
 
-void AFortGameModeAthena::WatchWarmup()
+void AFortGameModeAthena::StartWarmupReports()
 {
 #if WITH_SERVER_CODE
     // Core-Backend #122: the admin panel's warmup length and late joining. The warmup lasts the game mode's
@@ -1477,85 +1663,84 @@ void AFortGameModeAthena::WatchWarmup()
     // matchmakingservice/warmup) from its world's start and sets the warmup's length; with late joining on it opens
     // its match during the warmup, reports its players and time left every second so the backend sends it the parties
     // that queue, and gives each of them a team.
-    WatchWarmupOf(FWeakObjectPtr(this), std::make_shared<FWarmupWatch>());
+    Warmup = std::make_shared<FWarmupWatch>();
+    Warmup->GameMode = FWeakObjectPtr(this);
+    UpdateWarmup(this, *Warmup);
+    CheckSessionRoom(this);
+    ReportWarmupNow(this);
 #endif
 }
 
 namespace
 {
-    // How often a match asks for the calendar's revision.
-    constexpr auto EventCalendarAskInterval = std::chrono::seconds(5);
+    // How long after each answer a match asks for the calendar's revision again. Epic's calendar changed only on its
+    // own schedule, which a running match fetched again at the calendar's cacheExpire; Core-Backend's admin panel
+    // changes it whenever an admin does, and the backend has no way to tell the server, so the server asks.
+    constexpr float EventCalendarAskInterval = 5.0f;
 
     struct FEventCalendarWatch
     {
-        std::chrono::steady_clock::time_point NextAsk{};
+        FWeakObjectPtr GameMode;
         bool bAsking = false;
         // The backend has no such route (one from before it): it isn't asked again.
         bool bUnsupported = false;
         // The revision of the calendar the server last fetched (empty until the first answer).
         std::string Revision;
+        FTimerHandle AskTimer;
     };
 
-    void AskEventCalendarRevision(FWeakObjectPtr GameMode, const std::shared_ptr<FEventCalendarWatch>& Watch)
-    {
-        Watch->bAsking = true;
-        BackendRequest::GetJson(L"event calendar revision", L"/fortnite/api/game/v2/calendar/revision",
-            FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [GameMode, Watch](uint32_t Status, const std::string& Body)
-        {
-            std::string Revision = Status == 200 ? BackendRequest::JsonField(Body, "revision") : std::string();
-            GameThread::Enqueue([GameMode, Watch, Status, Revision = std::move(Revision)]()
-            {
-                Watch->bAsking = false;
-                if (Status == 404)
-                {
-                    Watch->bUnsupported = true;
-                    Log::Info(L"Event calendar: the backend has no calendar revision, so a running match fetches the calendar only at its cacheExpire");
-                    return;
-                }
-                if (Revision.empty() || Revision == Watch->Revision)
-                {
-                    return;
-                }
-                // The first answer is the calendar the server fetched as it started.
-                const bool bChanged = !Watch->Revision.empty();
-                Watch->Revision = Revision;
-                AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
-                AFortGameState* GameState = Athena ? static_cast<AFortGameState*>(AthenaGameStateOf(Athena)) : nullptr;
-                if (bChanged && GameState && GameState->Client_RefreshEventCalendar())
-                {
-                    Log::Info(L"Event calendar: the admin panel changed it, so the server and its players fetch it again");
-                }
-            });
-        });
-    }
-
-    void WatchEventCalendarOf(FWeakObjectPtr GameMode, std::shared_ptr<FEventCalendarWatch> Watch)
-    {
-        GameThread::Enqueue([GameMode, Watch]()
-        {
-            if (!GameMode.Get() || Watch->bUnsupported)
-            {
-                return;
-            }
-            const auto Now = std::chrono::steady_clock::now();
-            if (!Watch->bAsking && Now >= Watch->NextAsk)
-            {
-                Watch->NextAsk = Now + EventCalendarAskInterval;
-                AskEventCalendarRevision(GameMode, Watch);
-            }
-            WatchEventCalendarOf(GameMode, Watch);
-        });
-    }
+    // This world's (AskEventCalendarRevision).
+    std::shared_ptr<FEventCalendarWatch> EventCalendar;
 }
 
-void AFortGameModeAthena::WatchEventCalendar()
+void AFortGameModeAthena::AskEventCalendarRevision()
 {
 #if WITH_SERVER_CODE
     if (!AFortGameState::FindStaticFunction_Client_RefreshEventCalendar())
     {
         return;
     }
-    WatchEventCalendarOf(FWeakObjectPtr(this), std::make_shared<FEventCalendarWatch>());
+    if (!EventCalendar || EventCalendar->GameMode.Get() != this)
+    {
+        EventCalendar = std::make_shared<FEventCalendarWatch>();
+        EventCalendar->GameMode = FWeakObjectPtr(this);
+    }
+    const std::shared_ptr<FEventCalendarWatch> Watch = EventCalendar;
+    if (Watch->bAsking || Watch->bUnsupported)
+    {
+        return;
+    }
+    Watch->bAsking = true;
+    Watch->AskTimer.Invalidate();
+    BackendRequest::GetJson(L"event calendar revision", L"/fortnite/api/game/v2/calendar/revision",
+        FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [Watch](uint32_t Status, const std::string& Body)
+    {
+        std::string Revision = Status == 200 ? BackendRequest::JsonField(Body, "revision") : std::string();
+        GameThread::Enqueue([Watch, Status, Revision = std::move(Revision)]()
+        {
+            Watch->bAsking = false;
+            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(Watch->GameMode.Get());
+            if (!Athena || EventCalendar != Watch)
+            {
+                return;
+            }
+            if (Status == 404)
+            {
+                Watch->bUnsupported = true;
+                Log::Info(L"Event calendar: the backend has no calendar revision, so a running match fetches the calendar only at its cacheExpire");
+                return;
+            }
+            // The first answer is the calendar the server fetched as it started.
+            const bool bChanged = !Revision.empty() && !Watch->Revision.empty() && Revision != Watch->Revision;
+            Watch->Revision = Revision.empty() ? Watch->Revision : Revision;
+            AFortGameState* GameState = static_cast<AFortGameState*>(AthenaGameStateOf(Athena));
+            if (bChanged && GameState && GameState->Client_RefreshEventCalendar())
+            {
+                Log::Info(L"Event calendar: the admin panel changed it, so the server and its players fetch it again");
+            }
+            SetGameModeTimer(Athena, Watch->AskTimer, EventCalendarAskInterval, [](AFortGameModeAthena* GameMode) { GameMode->AskEventCalendarRevision(); });
+        });
+    });
 #endif
 }
 
@@ -1822,54 +2007,74 @@ namespace
         Log::Info(L"Battle Royale: the aircraft paths were built for playlist {}, so the game builds them again for the match's playlist {}", WorldPlaylistId, PlaylistId);
     }
 
-    void WatchPlaylistDataTablesOf(FWeakObjectPtr GameMode)
+    // The match's playlist, once its assignment gives the world another one than its tables are: the tables are
+    // applied (the game's ApplyPlaylistDataTables; the game mode's own call to it is the same rows), and the loot is
+    // rolled again with them before the players come. Only while the match is in its warmup or before.
+    void ApplyMatchPlaylist(AFortGameModeAthena* Athena)
     {
-        GameThread::Enqueue([GameMode]()
+        AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+        if (TablesGameMode.Get() != Athena || !GameState || GameState->GamePhase >= EAthenaGamePhase::GetAircraft())
         {
-            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
-            AFortGameStateAthena* GameState = Athena ? AthenaGameStateOf(Athena) : nullptr;
-            // The match is assigned before its players come, in the warmup at the latest.
-            if (!Athena || TablesGameMode.Get() != Athena || !GameState)
-            {
-                return;
-            }
-            if (GameState->GamePhase >= EAthenaGamePhase::GetAircraft())
-            {
-                SpawnWaitingVendingMachines(Athena, L"from the default tables: the bus is under way and the game state has no playlist");
-                return;
-            }
-            // The match's playlist is CurrentPlaylistId once the matchmaking service's assignment is being handled
-            // (HandlingMatchAssignment), but OnGivenMatchAssignment, which ends with ApplyPlaylistDataTables, runs only
-            // when the server has answered it (Finished), some 20 s later on 2.4.2. The tables are applied now, the same
-            // way, so the loot is rolled again before the players come; OnGivenMatchAssignment's copy is the same rows.
-            // From 3.5 the tables wait for the game state's playlist (AppliedPlaylistId).
-            const int32_t PlaylistId = AppliedPlaylistId(Athena);
-            if (PlaylistId != TablesPlaylistId && PlaylistId >= 0)
-            {
-                const int32_t Previous = TablesPlaylistId;
-                TablesPlaylistId = PlaylistId;
-                RebuildFlightPathsFor(Athena, PlaylistId, Previous);
-                Natives::AFortGameModeAthena_ApplyPlaylistDataTables(Athena);
-                MergeDefaultLootRows(PlaylistId);
-                // 5.0+: the searches and floor loot pick this many times (Building/BuildingContainer.cpp, #357).
-                if (UFortPlaylistAthena* Playlist = UFortPlaylistAthena::HasLootDropRounds() && AFortGameStateAthena::HasCurrentPlaylistData() ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
-                    Playlist && Playlist->LootDropRounds > 1)
-                {
-                    Log::Info(L"Battle Royale: playlist {}'s loot drops {} rounds a search and floor loot spot", PlaylistId, static_cast<int32_t>(Playlist->LootDropRounds));
-                }
-                const std::pair<UDataTable*, UDataTable*> Tables = PlaylistLootTables(Athena, PlaylistId);
-                const bool bOtherTables = Tables != TablesLoot;
-                TablesLoot = Tables;
-                if (bOtherTables)
-                {
-                    Log::Info(L"Battle Royale: the match's playlist {} has other loot tables than playlist {}, so the world's loot is rolled again", PlaylistId, Previous);
-                    ABuildingContainer::RollAthenaLootAgain(Athena->GetWorld());
-                    ABGAConsumableSpawner::SpawnWorldConsumables(Athena->GetWorld());
-                }
-                SpawnWaitingVendingMachines(Athena, std::format(L"from the match's playlist {}'s tables", PlaylistId));
-            }
-            WatchPlaylistDataTablesOf(GameMode);
-        });
+            return;
+        }
+        const int32_t PlaylistId = AppliedPlaylistId(Athena);
+        if (PlaylistId == TablesPlaylistId || PlaylistId < 0)
+        {
+            return;
+        }
+        const int32_t Previous = TablesPlaylistId;
+        TablesPlaylistId = PlaylistId;
+        RebuildFlightPathsFor(Athena, PlaylistId, Previous);
+        Natives::AFortGameModeAthena_ApplyPlaylistDataTables(Athena);
+        MergeDefaultLootRows(PlaylistId);
+        // 5.0+: the searches and floor loot pick this many times (Building/BuildingContainer.cpp, #357).
+        if (UFortPlaylistAthena* Playlist = UFortPlaylistAthena::HasLootDropRounds() && AFortGameStateAthena::HasCurrentPlaylistData() ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+            Playlist && Playlist->LootDropRounds > 1)
+        {
+            Log::Info(L"Battle Royale: playlist {}'s loot drops {} rounds a search and floor loot spot", PlaylistId, static_cast<int32_t>(Playlist->LootDropRounds));
+        }
+        const std::pair<UDataTable*, UDataTable*> Tables = PlaylistLootTables(Athena, PlaylistId);
+        const bool bOtherTables = Tables != TablesLoot;
+        TablesLoot = Tables;
+        if (bOtherTables)
+        {
+            Log::Info(L"Battle Royale: the match's playlist {} has other loot tables than playlist {}, so the world's loot is rolled again", PlaylistId, Previous);
+            ABuildingContainer::RollAthenaLootAgain(Athena->GetWorld());
+            ABGAConsumableSpawner::SpawnWorldConsumables(Athena->GetWorld());
+        }
+        SpawnWaitingVendingMachines(Athena, std::format(L"from the match's playlist {}'s tables", PlaylistId));
+    }
+
+    // How often the match's playlist is looked for where the game state broadcasts nothing when it has it (before 4.4).
+    constexpr float MatchPlaylistCheckInterval = 0.5f;
+
+    // Before 4.4: Epic applies the match's playlist's tables in the game mode's OnGivenMatchAssignment (to 3.3) or its
+    // OnPlaylistDataLoaded (3.5 to 4.2), virtual functions the game session and the game state call, which those builds
+    // keep (Core doesn't hook intact code), and the game state broadcasts nothing then: OnCurrentPlaylistLoaded comes with
+    // 4.4. The match's playlist is CurrentPlaylistId once the matchmaking service's assignment is being handled
+    // (HandlingMatchAssignment), but OnGivenMatchAssignment runs only when the server has answered it (Finished), some
+    // 20 s later on 2.4.2; from 3.5 the tables wait for the game state's playlist (AppliedPlaylistId). So until the warmup
+    // ends the playlist is looked for every MatchPlaylistCheckInterval, and applied as soon as it is there, so the loot is
+    // rolled again before the players come. The bus leaving with no playlist rolls the vending machines from the
+    // default tables (HandleGamePhaseChanged).
+    void CheckMatchPlaylist(AFortGameModeAthena* Athena)
+    {
+        FMatchEvents& Events = MatchEventsOf(Athena);
+        Events.PlaylistTimer.Invalidate();
+        AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+        if (TablesGameMode.Get() != Athena || !GameState || GameState->GamePhase >= EAthenaGamePhase::GetAircraft())
+        {
+            return;
+        }
+        ApplyMatchPlaylist(Athena);
+        SetGameModeTimer(Athena, Events.PlaylistTimer, MatchPlaylistCheckInterval, &CheckMatchPlaylist);
+    }
+
+    // From 4.4, the tick after the game state's OnCurrentPlaylistLoaded.
+    void AfterCurrentPlaylistLoaded(AFortGameModeAthena* Athena)
+    {
+        MatchEventsOf(Athena).PlaylistTimer.Invalidate();
+        ApplyMatchPlaylist(Athena);
     }
 }
 
@@ -1877,18 +2082,46 @@ namespace
 {
     struct FTeamSwitchWatch
     {
-        std::chrono::steady_clock::time_point NextCheck{};
+        FWeakObjectPtr GameMode;
         // Each player state's team at the last check.
         std::map<const UObject*, uint8_t> Teams;
         bool bLoggedPlaylist = false;
     };
 
+    // This world's.
+    FTeamSwitchWatch TeamSwitches;
+
+    // Playground's team switching (4.2 onwards; UFortPlaylistAthena's bAllowTeamSwitching). The switch is the game's:
+    // 5.10's AFortPlayerControllerAthena::SetTeam_Implementation (0xC0DD10) calls the game mode's ChangeTeam (slot 0xA80,
+    // 0xDC1310), whose AttemptChangeTeamInfoForController (0xDC1410) has SetTeamInfo (0xDE8240) take the controller out
+    // of the old AFortTeamInfo (RemoveFromTeam, 0xED0C00: TeamMembers and the AFortTeamPrivateInfo's entry) and into
+    // the new one (AddToTeam, 0xEB9120: TeamMembers, the player state's SetPlayerTeam with PlayerTeam, PlayerTeamPrivate
+    // and TeamIndex, and the new AFortTeamPrivateInfo's entry, whose health and shield the game mode's
+    // ReplicateHealthAndShield keeps up), then kills the pawn so the player comes back on the new team. Nothing in it
+    // changes the player state's SquadId, which the match assignment gave (each team's players in squad index + 1), and
+    // nothing in it broadcasts (the player state's OnRep_TeamIndex, 5.40 0xC60330, is the client's alone): so the switch
+    // is seen at the pawn's death (HandlePawnDied) and as the player comes back (OnPlayerPossessedPawn).
+    bool HasTeamSwitching()
+    {
+        return AFortPlayerStateAthena::HasSquadId() && UFortPlaylistAthena::HasAllowTeamSwitching() && AFortGameStateAthena::HasCurrentPlaylistData();
+    }
+
     // A player state the game moved to another team since the last check joins the new team's squad: a player's squad
     // on it (else a bot's, else one no player state has), and the team's other player states without it (bots, whose
     // own teams have none) join it too, as a Playground team is one squad (MaxSquads 1). Replicated at once, so the
     // clients' OnRep_SquadId moves the player between squad bars.
-    void CheckTeamSwitches(AFortGameModeAthena* GameMode, FTeamSwitchWatch& Watch)
+    void CheckTeamSwitches(AFortGameModeAthena* GameMode)
     {
+        if (!HasTeamSwitching())
+        {
+            return;
+        }
+        FTeamSwitchWatch& Watch = TeamSwitches;
+        if (Watch.GameMode.Get() != GameMode)
+        {
+            Watch = FTeamSwitchWatch();
+            Watch.GameMode = FWeakObjectPtr(GameMode);
+        }
         AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
         UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
         if (!Playlist || !Playlist->bAllowTeamSwitching)
@@ -1968,44 +2201,6 @@ namespace
         }
         Watch.Teams = std::move(Teams);
     }
-
-    void WatchTeamSwitchingOf(FWeakObjectPtr GameMode, std::shared_ptr<FTeamSwitchWatch> Watch)
-    {
-        GameThread::Enqueue([GameMode, Watch]()
-        {
-            AFortGameModeAthena* Athena = static_cast<AFortGameModeAthena*>(GameMode.Get());
-            if (!Athena)
-            {
-                return;
-            }
-            const auto Now = std::chrono::steady_clock::now();
-            if (Now >= Watch->NextCheck)
-            {
-                Watch->NextCheck = Now + std::chrono::milliseconds(250);
-                CheckTeamSwitches(Athena, *Watch);
-            }
-            WatchTeamSwitchingOf(GameMode, Watch);
-        });
-    }
-}
-
-void AFortGameModeAthena::WatchTeamSwitching()
-{
-#if WITH_SERVER_CODE
-    // Playground's team switching (4.2 onwards; UFortPlaylistAthena's bAllowTeamSwitching). The switch is the game's:
-    // 5.10's AFortPlayerControllerAthena::SetTeam_Implementation (0xC0DD10) calls the game mode's ChangeTeam (slot 0xA80,
-    // 0xDC1310), whose AttemptChangeTeamInfoForController (0xDC1410) has SetTeamInfo (0xDE8240) take the controller out
-    // of the old AFortTeamInfo (RemoveFromTeam, 0xED0C00: TeamMembers and the AFortTeamPrivateInfo's entry) and into
-    // the new one (AddToTeam, 0xEB9120: TeamMembers, the player state's SetPlayerTeam with PlayerTeam, PlayerTeamPrivate
-    // and TeamIndex, and the new AFortTeamPrivateInfo's entry, whose health and shield the game mode's
-    // ReplicateHealthAndShield keeps up), then kills the pawn so the player comes back on the new team. Nothing in it
-    // changes the player state's SquadId, which the match assignment gave (each team's players in squad index + 1).
-    if (!AFortPlayerStateAthena::HasSquadId() || !UFortPlaylistAthena::HasAllowTeamSwitching() || !AFortGameStateAthena::HasCurrentPlaylistData())
-    {
-        return;
-    }
-    WatchTeamSwitchingOf(FWeakObjectPtr(this), std::make_shared<FTeamSwitchWatch>());
-#endif
 }
 
 bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerState)
@@ -2081,7 +2276,7 @@ void AFortGameModeAthena::SpawnVendingMachines()
     // ApplyPlaylistDataTables (3.5.1 0x9DC890) replaces with the playlist's own (Snipers, High Explosives and Sky Supply
     // have no machines, Solid Gold only Legendary ones, Playground its own weights and costs). From 3.5 the game state
     // has that playlist only from the match's assignment on, so the machines rolled at the world's creation took the
-    // default tables in every LTM (#291). They wait for it (WatchPlaylistDataTables), or for the bus if it never comes.
+    // default tables in every LTM (#291). They wait for it (HandleCurrentPlaylistLoaded), or for the bus if it never comes.
     // A playlist without vending loot of its own (Blitz) gets the default rows back (MergeDefaultLootRows).
     ApplyPlaylistDataTablesOnce();
     if (TablesGameMode.Get() == this && TablesPlaylistId < 0 && AFortAthenaMapInfo::StaticClass() && AFortAthenaMapInfo::HasVendingMachines())
@@ -2094,18 +2289,294 @@ void AFortGameModeAthena::SpawnVendingMachines()
 #endif
 }
 
-void AFortGameModeAthena::WatchPlaylistDataTables()
+namespace
+{
+    // How often the game phase is compared where GamePhaseChanged can't call Core (CheckGamePhase).
+    constexpr float GamePhaseCheckInterval = 1.0f;
+
+    // The match's pawns, the players' and the bots', tell the game mode when they die (AFortPawn::OnDied): a player's from
+    // their Possess (OnPlayerPossessedPawn), a bot's once one of the match's events finds it with a pawn. Each is bound
+    // once (AddUniqueDynamic).
+    void BindMatchPawns(AFortGameModeAthena* Athena)
+    {
+        AFortGameStateAthena* GameState = PawnDiedHandler ? AthenaGameStateOf(Athena) : nullptr;
+        if (!GameState)
+        {
+            return;
+        }
+        const FName Handler = PawnDiedHandler->GetFName();
+        for (APlayerState* PlayerState : static_cast<const TArray<APlayerState*>&>(GameState->PlayerArray))
+        {
+            AController* Controller = PlayerState ? Cast<AController>(reinterpret_cast<UObject*>(PlayerState->GetOwner())) : nullptr;
+            AFortPawn* Pawn = Controller ? Cast<AFortPawn>(reinterpret_cast<UObject*>(static_cast<APawn*>(Controller->Pawn))) : nullptr;
+            if (Pawn)
+            {
+                FMulticastScriptDelegate& OnDied = Pawn->OnDied;
+                OnDied.AddUniqueDynamic(Athena, Handler);
+            }
+        }
+    }
+
+    // The tick after a pawn of the match died or a player left, the game's death handler or Logout done: the places
+    // they gave, and a player the game moved to another team (the switch kills the pawn).
+    void CheckMatchPlayers(AFortGameModeAthena* Athena)
+    {
+        MatchEventsOf(Athena).PlayersTimer.Invalidate();
+        if (FMatchResults* Results = MatchResultsOf(Athena))
+        {
+            CheckMatchResults(Athena, *Results);
+        }
+        CheckTeamSwitches(Athena);
+        BindMatchPawns(Athena);
+    }
+
+    // The game phase the game state is in, when it isn't the one handled last: the bus under way (the chests' and ammo
+    // boxes' spawn percents, the Supply Llamas, the vending machines still waiting for the match's playlist), the
+    // match's playlist by the warmup, the warmup's report, room and length, and the match's results.
+    void RunGamePhase(AFortGameModeAthena* Athena)
+    {
+        FMatchEvents& Events = MatchEventsOf(Athena);
+        AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+        const uint8_t Phase = GameState ? static_cast<uint8_t>(GameState->GamePhase) : Events.HandledPhase;
+        if (Phase == Events.HandledPhase)
+        {
+            return;
+        }
+        Events.HandledPhase = Phase;
+
+        // The bus is under way: the match's playlist is final, and nobody is near the map's containers.
+        if (Phase >= EAthenaGamePhase::GetAircraft() && !Events.bAircraftHandled)
+        {
+            Events.bAircraftHandled = true;
+            if (Events.bSpawnPercentsWaitForAircraft)
+            {
+                Events.bSpawnPercentsWaitForAircraft = false;
+                ApplySpawnPercents(Athena);
+            }
+            SpawnMapLlamas(Athena);
+            ClearGameModeTimer(Athena, Events.PlaylistTimer);
+            SpawnWaitingVendingMachines(Athena, L"from the default tables: the bus is under way and the game state has no playlist");
+        }
+        else if (Phase == EAthenaGamePhase::GetWarmup())
+        {
+            // The match is assigned before its players come: its playlist is the world's by the warmup, whatever told
+            // Core.
+            ApplyMatchPlaylist(Athena);
+        }
+
+        WarmupPhaseChanged(Athena);
+        if (FMatchResults* Results = MatchResultsOf(Athena))
+        {
+            CheckMatchResults(Athena, *Results);
+        }
+        CheckTeamSwitches(Athena);
+        BindMatchPawns(Athena);
+    }
+
+    // The tick after the game state's GamePhaseChanged.
+    void AfterGamePhaseChanged(AFortGameModeAthena* Athena)
+    {
+        MatchEventsOf(Athena).PhaseTimer.Invalidate();
+        RunGamePhase(Athena);
+    }
+
+    // Where the build has no GamePhaseChanged, or Core couldn't add its native to the game mode's class (no
+    // UClass::FuncMap): the game state's phase is compared every GamePhaseCheckInterval, and without the pawns' OnDied
+    // the match's results and team switches are looked at then too. Epic's way is the broadcast BindMatchEvents binds.
+    void CheckGamePhase(AFortGameModeAthena* Athena)
+    {
+        FMatchEvents& Events = MatchEventsOf(Athena);
+        Events.PhaseTimer.Invalidate();
+        RunGamePhase(Athena);
+        if (!Events.bPawnsBound)
+        {
+            if (FMatchResults* Results = MatchResultsOf(Athena))
+            {
+                CheckMatchResults(Athena, *Results);
+            }
+            CheckTeamSwitches(Athena);
+        }
+        SetGameModeTimer(Athena, Events.PhaseTimer, GamePhaseCheckInterval, &CheckGamePhase);
+    }
+}
+
+void AFortGameModeAthena::BindMatchEvents()
 {
 #if WITH_SERVER_CODE
-    if (TablesGameMode.Get() == this)
+    FMatchEvents& Events = MatchEventsOf(this);
+    AFortGameStateAthena* GameState = AthenaGameStateOf(this);
+    Events.HandledPhase = GameState ? static_cast<uint8_t>(GameState->GamePhase) : 0xFF;
+    Events.bPawnsBound = PawnDiedHandler != nullptr;
+
+    if (GameState && GamePhaseChangedHandler && AFortGameStateAthena::HasGamePhaseChanged())
     {
-        WatchPlaylistDataTablesOf(FWeakObjectPtr(this));
+        FMulticastScriptDelegate& GamePhaseChanged = GameState->GamePhaseChanged;
+        GamePhaseChanged.AddUniqueDynamic(this, GamePhaseChangedHandler->GetFName());
+        Events.bPhaseBound = true;
+    }
+    else
+    {
+        Log::Warning(L"Battle Royale: the game state's GamePhaseChanged can't call Core ({}), so the game phase is looked at every {:.0f} s",
+            !GameState ? L"no game state" : !AFortGameStateAthena::HasGamePhaseChanged() ? L"not in this build" : L"Core's handler couldn't be added", GamePhaseCheckInterval);
+        SetGameModeTimer(this, Events.PhaseTimer, GamePhaseCheckInterval, &CheckGamePhase);
+    }
+
+    // The match's playlist, once its assignment gives the world another one (ApplyPlaylistDataTablesOnce took the map
+    // URL's): from 4.4 when it has loaded, before that looked for (CheckMatchPlaylist).
+    const bool bPlaylistTables = TablesGameMode.Get() == this;
+    const bool bPlaylistLoaded = bPlaylistTables && GameState && CurrentPlaylistLoadedHandler && AFortGameStateAthena::HasCurrentPlaylistLoaded();
+    if (bPlaylistLoaded)
+    {
+        FMulticastScriptDelegate& OnCurrentPlaylistLoaded = GameState->OnCurrentPlaylistLoaded;
+        OnCurrentPlaylistLoaded.AddUniqueDynamic(this, CurrentPlaylistLoadedHandler->GetFName());
+    }
+    else if (bPlaylistTables)
+    {
+        CheckMatchPlaylist(this);
+    }
+    Log::Info(L"Battle Royale: the match runs from the game state's GamePhaseChanged{}{}{}", Events.bPhaseBound ? L"" : L" (looked at)",
+        bPlaylistLoaded ? L", its OnCurrentPlaylistLoaded" : bPlaylistTables ? L", the match's playlist looked for until the warmup ends" : L"",
+        PawnDiedHandler ? L", the pawns' OnDied and the player states' OnDestroyed" : L", the match's results and team switches looked at with the phase");
+#endif
+}
+
+void AFortGameModeAthena::HandleGamePhaseChanged()
+{
+#if WITH_SERVER_CODE
+    FMatchEvents& Events = MatchEventsOf(this);
+    if (!Events.PhaseTimer.IsValid())
+    {
+        SetGameModeTimer(this, Events.PhaseTimer, NextTickDelay, &AfterGamePhaseChanged);
     }
 #endif
 }
 
+void AFortGameModeAthena::HandleCurrentPlaylistLoaded()
+{
+#if WITH_SERVER_CODE
+    FMatchEvents& Events = MatchEventsOf(this);
+    if (!Events.PlaylistTimer.IsValid())
+    {
+        SetGameModeTimer(this, Events.PlaylistTimer, NextTickDelay, &AfterCurrentPlaylistLoaded);
+    }
+#endif
+}
+
+void AFortGameModeAthena::HandlePawnDied()
+{
+#if WITH_SERVER_CODE
+    FMatchEvents& Events = MatchEventsOf(this);
+    if (!Events.PlayersTimer.IsValid())
+    {
+        SetGameModeTimer(this, Events.PlayersTimer, NextTickDelay, &CheckMatchPlayers);
+    }
+#endif
+}
+
+void AFortGameModeAthena::HandlePlayerStateDestroyed(AActor* DestroyedActor)
+{
+#if WITH_SERVER_CODE
+    // The player's place as they leave: a player who leaves the match alive is out of it (AFortGameModeAthena's Logout
+    // takes them out of the alive players, RemoveFromAlivePlayers), and their team's place comes with it when they were
+    // its last. Their player state has left the game state's PlayerArray by now (APlayerState::Destroyed), so it is read
+    // here, and the match's results are looked at the tick after.
+    AFortPlayerStateAthena* State = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(DestroyedActor));
+    FMatchResults* Results = State ? MatchResultsOf(this) : nullptr;
+    if (!Results)
+    {
+        return;
+    }
+    if (FMatchPlayer* Player = UpdateMatchPlayer(*Results, State))
+    {
+        Player->Kills = State->GetKills();
+        Player->BotKills = std::min(FCoreAthenaBotManager::BotKillsOf(State), std::max(Player->Kills, 0));
+    }
+    HandlePawnDied();
+#endif
+}
+
+void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, APawn* Pawn)
+{
+#if WITH_SERVER_CODE
+    if (!Player)
+    {
+        return;
+    }
+    if (AFortPawn* FortPawn = PawnDiedHandler ? Cast<AFortPawn>(reinterpret_cast<UObject*>(Pawn)) : nullptr)
+    {
+        FMulticastScriptDelegate& OnDied = FortPawn->OnDied;
+        OnDied.AddUniqueDynamic(this, PawnDiedHandler->GetFName());
+    }
+    if (AActor* PlayerState = PlayerStateDestroyedHandler ? reinterpret_cast<AActor*>(static_cast<APlayerState*>(Player->PlayerState)) : nullptr)
+    {
+        FMulticastScriptDelegate& OnDestroyed = PlayerState->OnDestroyed;
+        OnDestroyed.AddUniqueDynamic(this, PlayerStateDestroyedHandler->GetFName());
+    }
+    CheckTeamSwitches(this);
+#endif
+}
+
+DEFINE_FUNCTION(AFortGameModeAthena::execHandleGamePhaseChanged)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortGameModeAthena*>(Context)->HandleGamePhaseChanged();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortGameModeAthena::execHandleCurrentPlaylistLoaded)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortGameModeAthena*>(Context)->HandleCurrentPlaylistLoaded();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortGameModeAthena::execHandlePawnDied)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortGameModeAthena*>(Context)->HandlePawnDied();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortGameModeAthena::execHandlePlayerStateDestroyed)
+{
+    P_GET_OBJECT(AActor, DestroyedActor);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortGameModeAthena*>(Context)->HandlePlayerStateDestroyed(DestroyedActor);
+    P_NATIVE_END;
+}
+
+void AFortGameModeAthena::AddDelegateHandlers()
+{
+    // The game's broadcasts call each bound UFunction through ProcessEvent (ProcessMulticastDelegate, 5.40 0x2ECA90), so
+    // Core's natives go on the Battle Royale game mode's class, the object they are bound with, with each delegate's own
+    // parameters.
+    UClass* AthenaClass = StaticClass();
+    if (!AthenaClass)
+    {
+        return;
+    }
+    const auto Add = [AthenaClass](const wchar_t* Name, FNativeFuncPtr Thunk, UClass* DelegateClass, const wchar_t* DelegateName) -> UFunction*
+    {
+        const UFunction* Signature = DelegateSignature(DelegateClass, DelegateName);
+        return Signature ? AthenaClass->AddNativeFunction(Name, Thunk, Signature) : nullptr;
+    };
+    GamePhaseChangedHandler = Add(L"HandleGamePhaseChanged", &execHandleGamePhaseChanged, AFortGameStateAthena::StaticClass(), L"GamePhaseChanged");
+    CurrentPlaylistLoadedHandler = Add(L"HandleCurrentPlaylistLoaded", &execHandleCurrentPlaylistLoaded, AFortGameStateAthena::StaticClass(), L"OnCurrentPlaylistLoaded");
+    PawnDiedHandler = Add(L"HandlePawnDied", &execHandlePawnDied, AFortPawn::StaticClass(), L"OnDied");
+    // Only with the pawns' OnDied: without it the results are looked at with the phase, the leaving player's among them.
+    PlayerStateDestroyedHandler = PawnDiedHandler ? Add(L"HandlePlayerStateDestroyed", &execHandlePlayerStateDestroyed, AActor::StaticClass(), L"OnDestroyed") : nullptr;
+    Log::Info(L"Battle Royale: Core's handlers for GamePhaseChanged {}, OnCurrentPlaylistLoaded {}, OnDied {}, OnDestroyed {}", GamePhaseChangedHandler ? L"added" : L"none",
+        CurrentPlaylistLoadedHandler ? L"added" : L"none", PawnDiedHandler ? L"added" : L"none", PlayerStateDestroyedHandler ? L"added" : L"none");
+}
+
 void AFortGameModeAthena::HookVTables()
 {
+    AddDelegateHandlers();
+
     UClass* AthenaClass = StaticClass();
     UObject* ZoneDefault = AthenaClass ? AFortGameModeZone::StaticClass()->GetDefaultObject(false) : nullptr;
     void** ZoneVTable = ZoneDefault ? *reinterpret_cast<void***>(ZoneDefault) : nullptr;

@@ -398,11 +398,12 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     APawn* FinisherPawn = Instigator && Instigator != this ? KillerPawn : nullptr;
     AFortPawn* FinisherFortPawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(FinisherPawn));
     AFortWeapon* FinishingWeapon = FinisherFortPawn ? static_cast<AFortWeapon*>(FinisherFortPawn->CurrentWeapon) : nullptr;
+    UFortWeaponItemDefinition* FinishingWeaponData = FinishingWeapon ? static_cast<UFortWeaponItemDefinition*>(FinishingWeapon->WeaponData) : nullptr;
     Natives::AFortGameModeAthena_RemoveFromAlivePlayers(GameMode, this, Instigator ? static_cast<APlayerState*>(Instigator->PlayerState) : nullptr, FinisherPawn,
-        FinishingWeapon ? static_cast<UFortWeaponItemDefinition*>(FinishingWeapon->WeaponData) : nullptr, DeathCause);
+        FinishingWeaponData, DeathCause);
     if (BotManager)
     {
-        BotManager->OnPlayerRemoved(AthenaStateOf(Instigator));
+        BotManager->OnPlayerRemoved(AthenaStateOf(Instigator), FinisherPawn, FinishingWeaponData, DeathCause);
     }
     UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s is out (place %d, %d players and %d teams left)"), *GetName(), static_cast<int32_t>(AthenaState->Place), static_cast<int32_t>(GameState->PlayersLeft), static_cast<int32_t>(GameState->TeamsLeft));
     GameMode->SendOutliveStatEvents(DeadPawn);

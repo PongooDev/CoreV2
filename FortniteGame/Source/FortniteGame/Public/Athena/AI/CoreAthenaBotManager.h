@@ -23,6 +23,7 @@ class AFortPlayerControllerAthena;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class APawn;
+class UFortWeaponItemDefinition;
 class UObject;
 struct FGameplayTagContainer;
 
@@ -163,7 +164,8 @@ public:
     // Core's death handler took a player out (AFortPlayerControllerAthena::OnPawnDied): whether the game's own win check
     // must be kept from running (bots still in the match), and the bots' recount and win check after it.
     bool ShouldHoldNativeWinCheck() const;
-    void OnPlayerRemoved(AFortPlayerStateAthena* KillerState);
+    // The finisher's pawn, its weapon and the death cause are the elimination's, for the win it may end the match with.
+    void OnPlayerRemoved(AFortPlayerStateAthena* KillerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause);
 
     // Server: the enemies a bot can fight, and the loot it can take (shared by every bot each tick).
     const std::vector<TWeakObjectPtr<AFortPawn>>& GetEnemyPawns() const { return EnemyPawns; }
@@ -276,7 +278,9 @@ private:
     // A large team game's players left on each team (the game state's TeamXPlayersLeft, which the HUD and the map show):
     // the game mode's alive players of each team, and its bots.
     void UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, AFortGameStateAthena* GameState);
-    void CheckWinConditionLastManStanding();
+    // The finisher's pawn, its weapon and the death cause are those of the elimination that left a team alone, as the
+    // game's check has them from RemoveFromAlivePlayers: StartEndGamePhase hands them to the winner's ClientNotifyWon.
+    void CheckWinConditionLastManStanding(APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause);
     void RefreshEnemies(float Now);
     void RefreshLoot(float Now);
     void GatherContainers();

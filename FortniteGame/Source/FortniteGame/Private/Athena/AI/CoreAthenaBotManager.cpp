@@ -738,14 +738,14 @@ bool FCoreAthenaBotManager::ShouldHoldNativeWinCheck() const
     return HasAliveBots();
 }
 
-void FCoreAthenaBotManager::OnPlayerRemoved(AFortPlayerStateAthena* KillerState)
+void FCoreAthenaBotManager::OnPlayerRemoved(AFortPlayerStateAthena* KillerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause)
 {
     if (FCoreAthenaBotController* Killer = FindBot(KillerState))
     {
         Killer->AddKill();
     }
     UpdateCounts();
-    CheckWinConditionLastManStanding();
+    CheckWinConditionLastManStanding(FinisherPawn, FinishingWeapon, DeathCause);
 }
 
 bool FCoreAthenaBotManager::GetSafeZone(FVector& OutCenter, float& OutRadius) const
@@ -990,7 +990,7 @@ void FCoreAthenaBotManager::Tick()
     if (bAircraftStarted && !bMatchEnded)
     {
         UpdateCounts();
-        CheckWinConditionLastManStanding();
+        CheckWinConditionLastManStanding(nullptr, nullptr, EDeathCause::GetUnspecified());
     }
     const double BotsMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - FrameStart).count();
     BotsMsSum += BotsMs;
@@ -2457,8 +2457,16 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
     }
     if (Athena)
     {
+        // The elimination's finisher (the killer's pawn and the weapon it holds) and the death cause the bot's death
+        // stored, as RemoveFromAlivePlayers hands a player's to the game's check: the winner's ClientNotifyWon plays its
+        // win effects (the victory music and the slow motion, Athena_PlayerController's PlayWinEffects) only with a
+        // finisher's pawn (5.10 0xBF1560, CoreV2 #376).
+        AFortPlayerPawn* FinisherPawn = KillerState && KillerState != State ? KillerState->GetCurrentPawn() : nullptr;
+        AFortWeapon* FinishingWeapon = FinisherPawn ? static_cast<AFortWeapon*>(FinisherPawn->CurrentWeapon) : nullptr;
+        const uint8_t DeathCause = State && AFortPlayerStateAthena::HasEliminator() && AFortPlayerStateAthena::HasToDeathCause()
+            ? State->DeathInfo.DeathCause : EDeathCause::GetUnspecified();
         UpdateCounts();
-        CheckWinConditionLastManStanding();
+        CheckWinConditionLastManStanding(FinisherPawn, FinishingWeapon ? static_cast<UFortWeaponItemDefinition*>(FinishingWeapon->WeaponData) : nullptr, DeathCause);
     }
 #endif
 }
@@ -2836,7 +2844,7 @@ AFortPlayerStateAthena* FCoreAthenaBotManager::LastBotAttackerOf(const AFortPawn
     return nullptr;
 }
 
-void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
+void FCoreAthenaBotManager::CheckWinConditionLastManStanding(APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause)
 {
 #if WITH_SERVER_CODE
     // 21.40's AFortGameModeAthena::CheckWinConditionLastManStanding, for a match with bots in it: the game's own check
@@ -2878,7 +2886,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding()
                     State->ForceNetUpdate();
                 }
             }
-            Natives::AFortGameModeAthena_StartEndGamePhase(Athena, Winner, nullptr, nullptr, EDeathCause::GetUnspecified());
+            Natives::AFortGameModeAthena_StartEndGamePhase(Athena, Winner, FinisherPawn, FinishingWeapon, DeathCause);
             return;
         }
         bool bPlayersTeamWon = false;

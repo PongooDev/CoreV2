@@ -128,6 +128,7 @@ public:
     DefineBitfieldUProperty(bCanBeDepositedInStorageVault)
     DefineBitfieldUProperty(bPersistInInventoryWhenFinalStackEmpty)
     DefineBitfieldUProperty(bItemHasDurability)
+    DefineBitfieldUProperty(bShouldActivateWhenFocused)
     DefineUProperty(int32_t, PreferredQuickbarSlot)
     DefineUStructProperty(FDataTableCategoryHandle, LootLevelData)
     DefineUProperty(uint8_t, AccumulatingStatType)
@@ -143,6 +144,8 @@ public:
     // stripped: AFortPlayerControllerAthena::DropItemsOnDBNO. False where the build doesn't reflect the flag.
     DefineBitfieldUProperty(bDropOnDBNO)
     bool ShouldDropOnDBNO() const { return Member_bDropOnDBNO.IsAvailable() && bDropOnDBNO; }
+    // Focusing the item's quickbar slot activates (equips) it. True where the build doesn't reflect the flag.
+    bool ShouldActivateWhenFocused() const { return !Member_bShouldActivateWhenFocused.IsAvailable() || bShouldActivateWhenFocused; }
 
     bool ServerExecute(const UFortItem* Item, AFortPlayerController* Controller);
     float GetMaxDurability(int32_t ItemLevel) const;

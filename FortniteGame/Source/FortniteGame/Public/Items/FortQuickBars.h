@@ -92,6 +92,9 @@ public:
     void ServerRemoveItemInternal(const FGuid& Item, bool bFindReplacement, bool bForce);
     void ServerRemoveItemInternal_Implementation(const FGuid& Item, bool bFindReplacement, bool bForce);
     void ActivateReplacementSlot();
+    // Moves the focus of the focused bar Direction slots on, to the first slot FocusSlot takes, and activates that slot's
+    // item when it activates on focus (AFortQuickBars::CycleSlot, 5.10 0xF59860, AFortQuickBars slot 0xD0).
+    void CycleSlot(float ActivateDelay, int32_t Direction);
     void SetupQuickbar(EFortQuickBars InQuickBar, const FQuickBarData& QuickBarData);
 
     // A weapon swapped in for the held one, on a quickbar the client doesn't have (#269). The client's own quickbar moves

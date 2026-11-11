@@ -4,9 +4,14 @@
 #include "Engine/ReplicationDriver.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "GameplayTagContainer.h"
 #include "Hooks.h"
+#include "Items/FortInventory.h"
+#include "Items/FortItem.h"
+#include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Natives.h"
+#include "ObjectLayout.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
@@ -258,7 +263,79 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
     }
     else if (bRemovedFocusedItem)
     {
-        ActivateReplacementSlot();
+        // As AFortQuickBarsAthena's own ServerRemoveItemInternal_Implementation (5.10 0xC5B3E0) does for its held item: the
+        // focus cycles on to the next slot (CycleSlot(Delay, 1), 0xF59860), which activates there. Its activation is
+        // delayed by 0.1s while the player can't change equipment (CanPerformAction(Gameplay.Action.Player.ChangeEquipment)
+        // false), as the execute it sends would be dropped then (AFortPlayerController::ExecuteInventoryItem, 0x1142880,
+        // "blocked ActionPlayerChangeEquipment tag"). Save the World's inventory screen sends this remove when the
+        // equipped weapon goes back to the backpack (UFortInventoryContext::RemoveItemFromQuickBar, 0x2CD86A0); the
+        // previous slot or the harvesting tool's activated instead left the weapon in the player's hand (#379).
+        float ActivateDelay = 0.0f;
+        if (Controller && Natives::AFortPlayerController_CanPerformActionIndex >= 0)
+        {
+            const FGameplayTag ChangeEquipment{ FName(L"Gameplay.Action.Player.ChangeEquipment") };
+            if (!CallVirtual<bool>(Controller, Natives::AFortPlayerController_CanPerformActionIndex, &ChangeEquipment))
+            {
+                ActivateDelay = 0.1f;
+            }
+        }
+        CycleSlot(ActivateDelay, 1);
+    }
+#endif
+}
+
+void AFortQuickBars::CycleSlot(float ActivateDelay, int32_t Direction)
+{
+#if WITH_SERVER_CODE
+    const EFortQuickBars Bar = GetCurrentQuickBar();
+    if (Bar == EFortQuickBars::GetMax_None())
+    {
+        return;
+    }
+    FQuickBar& QuickBar = GetQuickBar(Bar);
+    const int32_t NumSlots = QuickBar.Slots.Num();
+    const int32_t CurrentSlot = QuickBar.CurrentFocusedSlot;
+    if (NumSlots <= 0)
+    {
+        return;
+    }
+
+    // The first slot on from the focused one that FocusSlot takes, all the way round to it at most.
+    int32_t Slot = -1;
+    for (int32_t Step = 1; Step <= NumSlots; ++Step)
+    {
+        const int32_t Candidate = ((CurrentSlot + Step * Direction) % NumSlots + NumSlots) % NumSlots;
+        if (Candidate == CurrentSlot)
+        {
+            return;
+        }
+        if (FocusSlot(Bar, Candidate, true) != -1)
+        {
+            Slot = Candidate;
+            break;
+        }
+    }
+    if (Slot < 0)
+    {
+        return;
+    }
+
+    // The game activates the slot only for an item that activates on focus (bShouldActivateWhenFocused); for any other,
+    // its Save the World controllers unequip the pawn's weapon instead (0xF59A7E), which Core doesn't do.
+    AFortPlayerController* Controller = Cast<AFortPlayerController>(GetOwner());
+    const TArray<FGuid>& Items = GetSlot(Bar, Slot).Items;
+    AFortInventory* Inventory = Controller ? static_cast<AFortInventory*>(Controller->WorldInventory) : nullptr;
+    UFortWorldItem* WorldItem = Inventory && Items.Num() > 0 ? Inventory->FindWorldItem(Items[0]) : nullptr;
+    FFortItemEntry* ItemEntry = WorldItem ? &static_cast<FFortItemEntry&>(WorldItem->ItemEntry) : nullptr;
+    const UFortWorldItemDefinition* ItemDefinition = ItemEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition)) : nullptr;
+    if (ItemDefinition && ItemDefinition->ShouldActivateWhenFocused())
+    {
+        Log::Info(L"Quickbar: {} activates slot {} after its focused item was removed{}", GetNameSafe(Controller).ToStdString(), Slot, ActivateDelay > 0.0f ? L" (delayed, equipment change blocked)" : L"");
+        ServerActivateSlotInternal(Bar, Slot, ActivateDelay, true);
+    }
+    else
+    {
+        Log::Info(L"Quickbar: {} focuses slot {} after its focused item was removed; its item doesn't activate on focus", GetNameSafe(Controller).ToStdString(), Slot);
     }
 #endif
 }

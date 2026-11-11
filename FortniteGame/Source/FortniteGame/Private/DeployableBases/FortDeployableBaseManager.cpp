@@ -3,12 +3,12 @@
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameModeZone.h"
-#include "GameThread.h"
 #include "Log.h"
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionInfo.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/ObjectMacros.h"
 #include "UObject/UObjectIterator.h"
@@ -16,7 +16,6 @@
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
-#include <chrono>
 #include <initializer_list>
 #include <vector>
 #include <format>
@@ -105,7 +104,6 @@ namespace
     struct FHordeWatch
     {
         FWeakObjectPtr GameMode;
-        std::chrono::steady_clock::time_point NextCheck{};
         int32_t Plots = -1;
         int32_t PendingPlayers = -1;
         bool bWorldInitialized = false;
@@ -222,26 +220,24 @@ namespace
         }
     }
 
+    // Core's Horde log: what the manager, the primary mission's waves and the storm shields are at, once a second on a
+    // timer on the world's timer manager, until the zone ends. Logging only, with no Epic counterpart: the waves run in
+    // the mission blueprint (GenMission_TieredWaves), whose calls into the game (AFortMission::OnWaveCompleted) are
+    // intact, so there is nothing stripped to restore there, and its events are dynamic delegates, which only a
+    // blueprint function can be bound to.
     void Watch(std::shared_ptr<FHordeWatch> State)
     {
-        GameThread::Enqueue([State]()
+        AFortGameModeZone* GameMode = static_cast<AFortGameModeZone*>(State->GameMode.Get());
+        UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+        if (!World)
         {
-            AFortGameModeZone* GameMode = static_cast<AFortGameModeZone*>(State->GameMode.Get());
-            UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
-            if (!World)
-            {
-                return;
-            }
-            const auto Now = std::chrono::steady_clock::now();
-            if (Now >= State->NextCheck)
-            {
-                State->NextCheck = Now + std::chrono::seconds(1);
-                CheckManager(*State, World);
-                CheckMission(*State, World);
-                CheckStormShields(*State, World);
-            }
-            Watch(State);
-        });
+            return;
+        }
+        CheckManager(*State, World);
+        CheckMission(*State, World);
+        CheckStormShields(*State, World);
+        FTimerHandle WatchTimerHandle;
+        World->GetTimerManager().SetTimer(WatchTimerHandle, FTimerDelegate::CreateLambda([State]() { Watch(State); }), 1.0f, false);
     }
 }
 

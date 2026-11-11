@@ -6,6 +6,7 @@
 #include <cstdint>
 
 class AFortAIPawn;
+class UWorld;
 class UFortWorldItem;
 
 // The defender post (Trap_Floor_Defender_Master_C; an ABuildingTrapFloor). Its blueprint's DeployDefender, which
@@ -40,8 +41,13 @@ public:
 
 private:
     // A supplied defender gives its weapon and ammo back once it leaves its post: unsummoned, replaced, killed, or the
-    // post gone. The post's blueprint clears its DefenderPawn when it lets the defender go (SetDefenderPawn(None), before
-    // the defender teleports out), so that is what is watched for.
+    // post gone. The post's blueprint clears its DefenderPawn when it lets the defender go (its ClearCurrentDefender:
+    // AFortGameStateZone::OnDefenderRemoved, then SetDefenderPawn(None), before the defender teleports out; and from the
+    // defender's OnEndPlay, which it binds), so that is what is looked for, on a timer (QueueReturnCheck) while supplied
+    // defenders stand. Kept as a check: everything the post runs at that moment is intact (OnDefenderRemoved too, 5.30
+    // 0xE83C00), so there is nothing stripped to restore there, and the defender's OnEndPlay is a dynamic delegate,
+    // which only a blueprint function can be bound to.
     static void WatchDefender(ABuildingTrapDefender* Trap, AFortAIPawn* Defender);
+    static void QueueReturnCheck(UWorld* World);
     static void ReturnLeftDefendersItems();
 };

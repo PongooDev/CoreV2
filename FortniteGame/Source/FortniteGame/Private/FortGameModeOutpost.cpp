@@ -8,6 +8,7 @@
 #include "Logging/LogMacros.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
@@ -22,15 +23,16 @@ DEFINE_LOG_CATEGORY_STATIC(LogFortOutpost, Log, All);
 
 namespace
 {
-    // How often a running Storm Shield asks again, so a change in the admin panel reaches it, and how long it waits for
-    // its zone theme before saying it has none.
+    // How often a running Storm Shield checks its structure limit (a timer on the world's timer manager), how often it
+    // asks the backend again, so a change in the admin panel reaches it, and how long it waits for its zone theme before
+    // saying it has none.
+    constexpr float CheckInterval = 1.0f;
     constexpr auto AskInterval = std::chrono::seconds(30);
     constexpr auto ThemeWait = std::chrono::seconds(60);
 
     struct FStructureLimitWatch
     {
         std::chrono::steady_clock::time_point Started = std::chrono::steady_clock::now();
-        std::chrono::steady_clock::time_point NextCheck{};
         std::chrono::steady_clock::time_point NextAsk{};
         // The Storm Shield's outpost item, Outpost:outpostcore_pve_0N, once its zone theme is known.
         std::wstring TemplateId;
@@ -70,6 +72,7 @@ namespace
             const std::string Field = Status == 200 ? BackendRequest::JsonField(Body, "maxStructures") : std::string();
             const bool bAnswered = Field == "null" || (!Field.empty() && std::isdigit(static_cast<unsigned char>(Field[0])));
             const int32_t Limit = bAnswered && Field != "null" ? std::clamp(std::atoi(Field.c_str()), 0, 100000) : 0;
+            // The answer comes on the HTTP thread: once onto the game thread with it.
             GameThread::Enqueue([Watch, Status, bAnswered, Limit]()
             {
                 Watch->bAsking = false;
@@ -136,24 +139,18 @@ namespace
         }
     }
 
-    void WatchStructureLimit(FWeakObjectPtr GameMode, std::shared_ptr<FStructureLimitWatch> State)
+    // The check, then the next one CheckInterval seconds on, until the zone ends.
+    void CheckStructureLimit(FWeakObjectPtr GameMode, std::shared_ptr<FStructureLimitWatch> State)
     {
-        GameThread::Enqueue([GameMode, State]()
+        AFortGameModeOutpost* Outpost = static_cast<AFortGameModeOutpost*>(GameMode.Get());
+        UWorld* World = Outpost ? Outpost->GetWorld() : nullptr;
+        if (!World)
         {
-            // Ends with the zone.
-            AFortGameModeOutpost* Outpost = static_cast<AFortGameModeOutpost*>(GameMode.Get());
-            if (!Outpost)
-            {
-                return;
-            }
-            const auto Now = std::chrono::steady_clock::now();
-            if (Now >= State->NextCheck)
-            {
-                State->NextCheck = Now + std::chrono::seconds(1);
-                Check(Outpost, State, Now);
-            }
-            WatchStructureLimit(GameMode, State);
-        });
+            return;
+        }
+        Check(Outpost, State, std::chrono::steady_clock::now());
+        FTimerHandle CheckTimerHandle;
+        World->GetTimerManager().SetTimer(CheckTimerHandle, FTimerDelegate::CreateLambda([GameMode, State]() { CheckStructureLimit(GameMode, State); }), CheckInterval, false);
     }
 }
 
@@ -169,6 +166,8 @@ void AFortGameModeOutpost::KeepStructureLimit()
     // every Storm Shield. So the server asks the backend for its Storm Shield's limit, by the zone theme's
     // CloudSaveItemDefinition (Outpost:outpostcore_pve_01..04: Stonewood to Twine Peaks), and keeps the game state at it,
     // checked once a second and asked again every 30 seconds. Without one the game's own limit stays.
-    WatchStructureLimit(FWeakObjectPtr(this), std::make_shared<FStructureLimitWatch>());
+    // The checks run on a timer: the limit is Core's (Epic's game has no admin limit to keep), and the game's own store
+    // (ApplyStructureLimit, once the match starts) broadcasts nothing Core can bind to.
+    CheckStructureLimit(FWeakObjectPtr(this), std::make_shared<FStructureLimitWatch>());
 #endif
 }

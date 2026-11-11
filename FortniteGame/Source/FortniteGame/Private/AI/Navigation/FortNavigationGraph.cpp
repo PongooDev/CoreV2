@@ -7,14 +7,12 @@
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortWorldSettings.h"
-#include "GameThread.h"
 #include "HAL/UnrealMemory.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Math/Transform.h"
 #include "Templates/Casts.h"
 #include "UObject/UObjectIterator.h"
-#include "UObject/WeakObjectPtr.h"
 
 #include <chrono>
 #include <cmath>
@@ -28,7 +26,6 @@ namespace
     constexpr int32_t MaxGridCells = 256;
     constexpr int32_t BlockShift[3] = { 3, 3, 2 };
     constexpr uint32_t SuspendBlockUpdates = 1;
-    constexpr int32_t BlocksPerTick = 64;
     constexpr size_t PathSearchSize = 0x90;
     constexpr int32_t WorldCellsHeader = 0x7FFFFFFF;
     constexpr int32_t WorldCellsVersion = 1;
@@ -572,38 +569,20 @@ void AFortNavigationGraph::OnWorldInitialized()
         }
     }
     Log::Info(L"AFortNavigationGraph: {} terrain cells, {} cells in {} blocks", TerrainCells, Grid.Cells.Num(), Blocks.Num());
-    BuildLinks(Blocks, 0, NowMs() - Started);
-#endif
-}
 
-void AFortNavigationGraph::BuildLinks(TArray<int32_t> Blocks, int32_t Next, double ElapsedMs)
-{
-    const double Started = NowMs();
+    // Every block's links in one go, as Epic's OnWorldInitialized builds them (5.30 0xAF46E0: a loop over the blocks
+    // calling the block link builder, then the log below, timed from its start): the intact dirty-block update (5.30
+    // 0xAFD470) runs that builder for each dirty block, then empties the list.
     TArray<int32_t>& Dirty = DirtyBlocks;
-    const int32_t End = Next + BlocksPerTick < Blocks.Num() ? Next + BlocksPerTick : Blocks.Num();
-    for (int32_t Index = Next; Index < End; ++Index)
+    for (const int32_t Block : Blocks)
     {
-        Dirty.Add(Blocks[Index]);
+        Dirty.Add(Block);
     }
     Natives::AFortNavigationGraph_UpdateDirtyBlocks(this);
-    ElapsedMs += NowMs() - Started;
-
-    if (End < Blocks.Num())
-    {
-        FWeakObjectPtr WeakGraph(reinterpret_cast<UObject*>(this));
-        GameThread::Enqueue([WeakGraph, Blocks, End, ElapsedMs]()
-        {
-            if (AFortNavigationGraph* Graph = static_cast<AFortNavigationGraph*>(WeakGraph.Get()))
-            {
-                Graph->BuildLinks(Blocks, End, ElapsedMs);
-            }
-        });
-        return;
-    }
+    const double ElapsedMs = NowMs() - Started;
 
     GraphFlags = GraphFlags & ~SuspendBlockUpdates;
 
-    const FNavGraphCells& Grid = Cells;
     const TArray<TArray<uint32_t>>& Links = BlockLinks;
     size_t Bytes = static_cast<size_t>(Grid.Cells.Max()) * sizeof(FNavGraphCell) + static_cast<size_t>(Grid.BlockCells.Max()) * sizeof(int32_t) + static_cast<size_t>(Links.Max()) * sizeof(TArray<uint32_t>);
     for (const TArray<uint32_t>& BlockLinkList : Links)
@@ -611,4 +590,5 @@ void AFortNavigationGraph::BuildLinks(TArray<int32_t> Blocks, int32_t Next, doub
         Bytes += static_cast<size_t>(BlockLinkList.Max()) * sizeof(uint32_t);
     }
     UE_LOG(LogNavigation, Log, TEXT("AFortNavigationGraph::OnWorldInitialized time:%.3fms memory:%.1fkB"), ElapsedMs, static_cast<double>(Bytes) / 1024.0);
+#endif
 }

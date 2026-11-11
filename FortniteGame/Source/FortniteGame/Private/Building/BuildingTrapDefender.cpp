@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "Building/BuildingTrapDefender.h"
+#include "Engine/World.h"
 #include "Finder.h"
 #include "FortKismetLibrary.h"
-#include "GameThread.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Log.h"
@@ -10,6 +10,7 @@
 #include "Pawns/FortAIPawn.h"
 #include "Player/FortPlayerController.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
 #include "UObject/WeakObjectPtr.h"
@@ -29,6 +30,9 @@ namespace
 
     std::vector<FSuppliedDefender> SuppliedDefenders;
     bool bReturnQueued = false;
+
+    // How often the supplied defenders are looked at, on a timer on the world's timer manager, while there are any.
+    constexpr float ReturnCheckInterval = 0.25f;
 
     std::vector<UFortWorldItem*> FindItems(AFortInventory* Inventory, bool (*Matches)(UFortItemDefinition* Definition))
     {
@@ -194,15 +198,24 @@ void ABuildingTrapDefender::WatchDefender(ABuildingTrapDefender* Trap, AFortAIPa
     {
         SuppliedDefenders.push_back({ TWeakObjectPtr<ABuildingTrapDefender>(Trap), WeakDefender });
     }
-    if (!bReturnQueued)
+    QueueReturnCheck(Trap ? Trap->GetWorld() : nullptr);
+}
+
+void ABuildingTrapDefender::QueueReturnCheck(UWorld* World)
+{
+    if (bReturnQueued || !World)
     {
-        bReturnQueued = GameThread::Enqueue(&ABuildingTrapDefender::ReturnLeftDefendersItems);
+        return;
     }
+    bReturnQueued = true;
+    FTimerHandle ReturnTimerHandle;
+    World->GetTimerManager().SetTimer(ReturnTimerHandle, FTimerDelegate::CreateLambda([]() { ReturnLeftDefendersItems(); }), ReturnCheckInterval, false);
 }
 
 void ABuildingTrapDefender::ReturnLeftDefendersItems()
 {
     bReturnQueued = false;
+    UWorld* World = nullptr;
     for (auto It = SuppliedDefenders.begin(); It != SuppliedDefenders.end();)
     {
         // A defender destroyed this tick (its post's force kill) is still readable until garbage collection.
@@ -210,6 +223,7 @@ void ABuildingTrapDefender::ReturnLeftDefendersItems()
         ABuildingTrapDefender* Trap = It->Trap.Get();
         if (Defender && Trap && !Defender->IsPendingKill() && static_cast<AFortAIPawn*>(Trap->DefenderPawn) == Defender)
         {
+            World = World ? World : Trap->GetWorld();
             ++It;
             continue;
         }
@@ -219,9 +233,9 @@ void ABuildingTrapDefender::ReturnLeftDefendersItems()
         }
         It = SuppliedDefenders.erase(It);
     }
-    if (!SuppliedDefenders.empty() && !bReturnQueued)
+    if (!SuppliedDefenders.empty())
     {
-        bReturnQueued = GameThread::Enqueue(&ABuildingTrapDefender::ReturnLeftDefendersItems);
+        QueueReturnCheck(World);
     }
 }
 

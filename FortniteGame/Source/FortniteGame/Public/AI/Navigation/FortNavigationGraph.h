@@ -70,5 +70,4 @@ public:
 private:
     bool AreCellsInitialized() const;
     int32_t LoadTerrainCells(UWorld* World);
-    void BuildLinks(TArray<int32_t> Blocks, int32_t Next, double ElapsedMs);
 };

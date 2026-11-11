@@ -32,7 +32,9 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "GameThread.h"
+#include "HAL/IConsoleManager.h"
 #include "Math/Rotator.h"
+#include "Math/UnrealMathUtility.h"
 #include "Math/Transform.h"
 #include "Misc/Guid.h"
 #include "Finder.h"
@@ -749,6 +751,10 @@ namespace
         // The match's players whose party plays without fill (the answer's noFill: the party leader's
         // player.option.fillTeam=false), who don't share a squad with others.
         std::set<std::wstring> NoFill;
+        // Storm Destruction (CoreV2 #395): the answer's share of matches that get the mega storm (-1: none sent), and
+        // whether this match has rolled for it (RollMegaStorm).
+        int32_t MegaStormPercent = -1;
+        bool bMegaStormRolled = false;
 
         // The game's own warmup lengths, from before Core first changed them (-1 until then), and the length the game
         // mode has now (0: the game's).
@@ -1013,7 +1019,12 @@ namespace
             // The match's no-fill players (Core-Backend's top-level noFill, #242; a backend from before it sends them only
             // in the bots block).
             std::vector<std::wstring> NoFill = bAnswered ? JsonStringArray(Body, "noFill") : std::vector<std::wstring>();
-            GameThread::Enqueue([Watch, AccountIds, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings, NoFill = std::move(NoFill)]() mutable
+            // The share of matches with Storm Destruction (CoreV2 #395; a backend from before it sends none).
+            const std::string StormPercent = bAnswered ? BackendRequest::JsonField(Body, "stormDestructionPercent") : std::string();
+            const int32_t MegaStormPercent = !StormPercent.empty() && std::isdigit(static_cast<unsigned char>(StormPercent[0]))
+                ? std::clamp(std::atoi(StormPercent.c_str()), 0, 100) : -1;
+            GameThread::Enqueue([Watch, AccountIds, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings, NoFill = std::move(NoFill),
+                MegaStormPercent]() mutable
             {
                 Watch->bAsking = false;
                 if (bAnswered)
@@ -1039,6 +1050,7 @@ namespace
                     Watch->MaxPlayers = MaxPlayers;
                     Watch->Parties = std::move(Parties);
                     Watch->NoFill = std::set<std::wstring>(NoFill.begin(), NoFill.end());
+                    Watch->MegaStormPercent = MegaStormPercent;
                 }
                 WarmupAnswered(Watch);
             });
@@ -1607,6 +1619,55 @@ namespace
         }
     }
 
+    // Storm Destruction (CoreV2 #395, Core-Backend's events/stormdestruction.js): 5.40's mega storm, whose circles on the
+    // storm's edge flash and destroy the structures there in the last four circles. The game runs all of it:
+    // AFortGameModeAthena::HandleMatchHasStarted (5.40 0xBEEAD0) spawns its MegaStormManagerClass, StartNewSafeZonePhase
+    // (0xC030B0) starts the circles for a circle whose MegaStormGridCellThickness is 1 or more (AthenaGameData's
+    // Default.SafeZone.06 to 09) while FortAthenaGameModeCVars::bMegaStormEnabled, the console variable
+    // Athena.bMegaStormEnabled, is set, and AMegaStormManager::Tick (0xC364C0) destroys what they gather. That variable is
+    // Epic's switch: 5.40's and 5.41's DefaultEngine.ini set it, 6.00's clears it, and Core-Backend's hotfix sets it by
+    // Epic's dates or the admin panel. Epic rolled no chance per match (its "about 10% of matches" was the share that got
+    // that far), so the admin panel's share of matches is Core's own: each match rolls once against the warmup answer's
+    // stormDestructionPercent while the switch is on, and one that doesn't get it has the switch off until the next match
+    // rolls. It rolls when the storm starts (the safe zones phase), as the game only reads the switch at each new circle
+    // and the server's hotfix can land after the first answers (a 5.40 bots-only match: its [ConsoleVariables] 5 s after
+    // HandleMatchHasStarted). A build without the mega storm (no MegaStormManager class) and a switch the hotfix or the
+    // paks left off are left as they are.
+    void RollMegaStorm(AFortGameModeAthena* GameMode, FWarmupWatch& Watch)
+    {
+        AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
+        if (Watch.bMegaStormRolled || Watch.MegaStormPercent < 0 || !GameState || static_cast<uint8_t>(GameState->GamePhase) < EAthenaGamePhase::GetSafeZones())
+        {
+            return;
+        }
+        Watch.bMegaStormRolled = true;
+        static UClass* MegaStormManagerClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.MegaStormManager");
+        IConsoleVariable* MegaStormEnabled = MegaStormManagerClass ? IConsoleManager::Get().FindConsoleVariable(L"Athena.bMegaStormEnabled") : nullptr;
+        if (!MegaStormEnabled)
+        {
+            return;
+        }
+        // The switch as the hotfix (or the paks) set it: the value it has now, unless it is still the one Core last set.
+        static int32_t SwitchValue = -1;
+        static int32_t CoreValue = -1;
+        const int32_t Value = MegaStormEnabled->GetInt() != 0 ? 1 : 0;
+        if (CoreValue < 0 || Value != CoreValue)
+        {
+            SwitchValue = Value;
+        }
+        if (!SwitchValue)
+        {
+            Log::Info(L"Battle Royale: no Storm Destruction (Athena.bMegaStormEnabled is off)");
+            return;
+        }
+        const int32_t Percent = Watch.MegaStormPercent;
+        const bool bThisMatch = Percent >= 100 || (Percent > 0 && FMath::FRand() * 100.0f < static_cast<float>(Percent));
+        MegaStormEnabled->SetWithCurrentPriority(bThisMatch ? 1 : 0);
+        CoreValue = MegaStormEnabled->GetInt() != 0 ? 1 : 0;
+        Log::Info(L"Battle Royale: Storm Destruction {} this match ({}% of matches; Athena.bMegaStormEnabled {})", bThisMatch ? L"comes" : L"doesn't come",
+            Percent, CoreValue);
+    }
+
     // The backend answered (or the request failed): the server takes the answer, then reports again, at once when a
     // phase changed meanwhile, else after the interval of the phase it is in.
     void WarmupAnswered(const std::shared_ptr<FWarmupWatch>& Watch)
@@ -1633,7 +1694,7 @@ namespace
     }
 
     // A new game phase: the server keeps its room and length up, and the backend hears of it at once (after the report
-    // that is out, if one is).
+    // that is out, if one is). The storm starting rolls the match's Storm Destruction.
     void WarmupPhaseChanged(AFortGameModeAthena* GameMode)
     {
         std::shared_ptr<FWarmupWatch> Watch = WarmupOf(GameMode);
@@ -1641,6 +1702,7 @@ namespace
         {
             return;
         }
+        RollMegaStorm(GameMode, *Watch);
         UpdateWarmup(GameMode, *Watch);
         if (Watch->bAsking)
         {

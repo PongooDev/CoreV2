@@ -465,8 +465,9 @@ private:
     bool PlayEmote(float Now, float Duration);
     // Ends the emote the bot is playing (a player's emote ends as they move): its emote ability's instance ends.
     void StopEmote();
-    // A boogie bomb's dance (GA_DanceGrenade_Stun, which the grenade activates by its ability tag on the pawns it hits):
-    // the bot stands, dancing, until it ends.
+    // A boogie bomb's dance (GA_DanceGrenade_Stun, which the grenade activates by its ability tag on the pawns it hits,
+    // and its GE_DanceStun's Gameplay.Action.Player.DanceStunned on the ability system): the bot stands, dancing, and
+    // doesn't shoot until it ends.
     bool IsDanceStunned() const;
     // Materials (the community list: bots gather materials and drop them on death): out of a fight with few materials,
     // the bot swings its pickaxe at a tree, rock or wall next to it, and a stuck bot breaks what is in its way. The

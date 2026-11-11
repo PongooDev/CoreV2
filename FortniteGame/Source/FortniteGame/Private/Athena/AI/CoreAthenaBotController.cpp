@@ -3806,10 +3806,29 @@ void FCoreAthenaBotController::StopEmote()
 
 bool FCoreAthenaBotController::IsDanceStunned() const
 {
+    // The dance as the game holds it on the pawn's ability system (5.30): GA_DanceGrenade_Stun holsters the weapon and
+    // applies GE_DanceStun, whose granted tag Gameplay.Action.Player.DanceStunned stays while the pawn dances (its
+    // MaxAcceleration and JumpZVelocity at 0) and goes with the effect: at its end, or at the dancer's first damage
+    // (GAT_DanceGrenade, which the effect grants, removes it on Event.Damage.Received, as for a player). The ability's
+    // own activation counts as well: for the quarter second before it applies the effect, and on builds without the tag.
     AFortPlayerPawnAthena* Pawn = GetPawn();
     UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    if (!AbilitySystem)
+    {
+        return false;
+    }
+    static const FName DanceStunnedTag(L"Gameplay.Action.Player.DanceStunned", FNAME_Find);
+    if (!DanceStunnedTag.IsNone())
+    {
+        FGameplayTagContainer DanceStunned;
+        DanceStunned.GameplayTags.Add(FGameplayTag{ DanceStunnedTag });
+        if (AbilitySystem->HasAllMatchingGameplayTags(DanceStunned))
+        {
+            return true;
+        }
+    }
     UClass* AbilityClass = DanceStunAbilityClass();
-    FGameplayAbilitySpec* Spec = AbilitySystem && AbilityClass ? AbilitySystem->FindAbilitySpecFromClass(AbilityClass) : nullptr;
+    FGameplayAbilitySpec* Spec = AbilityClass ? AbilitySystem->FindAbilitySpecFromClass(AbilityClass) : nullptr;
     return Spec && Spec->ActiveCount > 0;
 }
 

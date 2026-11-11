@@ -81,6 +81,7 @@ public:
     // What AActor::Destroyed broadcasts as the actor goes (one parameter, DestroyedActor), after the class's own
     // Destroyed (a player state's takes it out of the game state's PlayerArray first).
     DefineUProperty(FMulticastScriptDelegate, OnDestroyed)
+    static bool HasOnDestroyed() { return StaticClass() && Member_OnDestroyed.IsAvailable(); }
     DefineUFunction(GetTransform)
     DefineUFunction(GetActorBounds)
     DefineUFunction(K2_SetActorLocation)

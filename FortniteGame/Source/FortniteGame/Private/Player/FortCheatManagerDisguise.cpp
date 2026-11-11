@@ -37,6 +37,7 @@
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/ScriptInterface.h"
 #include "UObject/UObjectGlobals.h"
@@ -751,6 +752,10 @@ namespace
         // Puppet: its half height (its capsule centre over the player's feet) and the movement mode it shows.
         float PuppetHalfHeight = 0.0f;
         uint8_t PuppetMovementMode = MOVE_Walking;
+        // The actors whose OnDestroyed (and a pawn's OnDied and OnWeaponEquippedDelegate) tell the player's cheat manager
+        // (BindDisguise): the controller, the player's own pawn and the disguise.
+        TWeakObjectPtr<UFortCheatManager> CheatManager;
+        std::vector<TWeakObjectPtr<AActor>> BoundActors;
     };
     std::vector<FDisguise> Disguises;
     bool bWatchingDisguises = false;
@@ -1002,10 +1007,42 @@ namespace
         }
     }
 
-    // Once a tick while anyone is disguised: the hidden pawn stays hidden, a puppet follows it, a possessed disguise is
-    // followed by it, and a disguise that died, lost its player or was replaced (a respawn) ends without leaving anything
-    // behind. Returns false when it ended.
-    bool TickDisguise(FDisguise& Disguise)
+    // What a disguise does every frame, what an actor's Tick would do: a puppet plays the hidden pawn's velocity and
+    // movement mode (MovePuppet), and the parked pawn of a possessed disguise follows it. Nothing while the disguise
+    // isn't played as it was (CheckDisguise ends it on the next tick).
+    void FollowDisguise(FDisguise& Disguise)
+    {
+        AFortPlayerController* PlayerController = Disguise.Controller.Get();
+        APawn* Original = Disguise.Original.Get();
+        AActor* Actor = Disguise.Actor.Get();
+        APawn* Current = PlayerController ? PlayerController->GetPawn() : nullptr;
+        if (!Original || !Actor)
+        {
+            return;
+        }
+        if (Disguise.Kind == EDisguiseKind::Puppet)
+        {
+            if (Current == Original && !IsDeadPawn(Original) && !IsDeadPawn(static_cast<APawn*>(Actor)))
+            {
+                MovePuppet(Disguise, Original, Actor);
+            }
+            return;
+        }
+        APawn* DisguisePawn = static_cast<APawn*>(Actor);
+        if (Disguise.Kind == EDisguiseKind::Possessed && Current == DisguisePawn && !IsDeadPawn(DisguisePawn))
+        {
+            Disguise.LastLocation = ActorLocation(DisguisePawn);
+            Disguise.LastFeet = FeetOf(DisguisePawn);
+            if (FVector::DistSquared(ActorLocation(Original), Disguise.LastLocation) > 1.0f)
+            {
+                Original->SetActorLocation(Disguise.LastLocation, false, true);
+            }
+        }
+    }
+
+    // The hidden pawn stays hidden (its weapon too), and a disguise that died, lost its player or was replaced (a
+    // respawn) ends without leaving anything behind. Returns false when it ended.
+    bool CheckDisguise(FDisguise& Disguise)
     {
         AFortPlayerController* PlayerController = Disguise.Controller.Get();
         APawn* Original = Disguise.Original.Get();
@@ -1045,10 +1082,6 @@ namespace
                 Original->SetActorHiddenInGame(true);
             }
             HideWeapon(Disguise, Original);
-            if (Disguise.Kind == EDisguiseKind::Puppet)
-            {
-                MovePuppet(Disguise, Original, Actor);
-            }
             return true;
         }
 
@@ -1056,12 +1089,6 @@ namespace
         const bool bDisguiseDied = DisguisePawn && IsDeadPawn(DisguisePawn);
         if (DisguisePawn && !bDisguiseDied && Current == DisguisePawn)
         {
-            Disguise.LastLocation = ActorLocation(DisguisePawn);
-            Disguise.LastFeet = FeetOf(DisguisePawn);
-            if (Original && FVector::DistSquared(ActorLocation(Original), Disguise.LastLocation) > 1.0f)
-            {
-                Original->SetActorLocation(Disguise.LastLocation, false, true);
-            }
             return true;
         }
 
@@ -1098,17 +1125,103 @@ namespace
         return false;
     }
 
-    // Kept as a frame task (disguises are Core's own; Epic's cheat manager has none). Most of it is per-frame by nature,
-    // what an actor's Tick would do: a puppet plays the hidden pawn's velocity and movement mode, and the parked pawn of
-    // a possessed disguise follows it. The ends it sees (the disguise or the pawn died, the player left or respawned,
-    // the aircraft took them) have no notice Core can take: the pawns' OnDied and OnDestroyed are Blueprint delegates,
-    // which only bind to a UFunction, and Core has none of its own to bind.
+    // Disguises are Core's own (Epic's cheat manager has none). Their ends come from the game's notices: the controller,
+    // the player's own pawn and the disguise each tell the player's cheat manager when they are destroyed
+    // (AActor::OnDestroyed: the player left, the aircraft took the disguise) or a pawn dies (AFortPawn::OnDied), the
+    // hidden pawn when it equips a weapon (AFortPawn::OnWeaponEquippedDelegate, which shows up in its hand), and
+    // AFortPlayerController::Possess when the player takes another pawn (a respawn: UFortCheatManager::
+    // OnPossessedForDisguises). Each of them has CheckDisguise run on the next tick. What is per-frame by nature, a
+    // puppet's and a possessed disguise's following (FollowDisguise), runs from a looping timer on the world's timer
+    // manager at the server's 30 Hz (UGameEngine::SetServerTickRate), while there is one.
+    UFunction* DisguiseActorDestroyed = nullptr;
+    UFunction* DisguisePawnDied = nullptr;
+    UFunction* DisguiseWeaponEquipped = nullptr;
+    bool bCheckingDisguises = false;
+    FTimerHandle FollowDisguisesHandle;
+    TWeakObjectPtr<UWorld> FollowDisguisesWorld;
+    constexpr float FollowInterval = 1.0f / 30.0f;
+
+    UFortCheatManager* CheatManagerOf(AFortPlayerController* PlayerController)
+    {
+        return PlayerController ? Cast<UFortCheatManager>(static_cast<UObject*>(static_cast<UCheatManager*>(PlayerController->CheatManager))) : nullptr;
+    }
+
+    bool CanBindDisguises()
+    {
+        return DisguiseActorDestroyed && DisguisePawnDied && DisguiseWeaponEquipped && AActor::HasOnDestroyed() && AFortPawn::HasOnDied() && AFortPawn::HasOnWeaponEquippedDelegate();
+    }
+
+    // Actor's OnDestroyed (a pawn's OnDied and, with bWeapons, OnWeaponEquippedDelegate too) calls the cheat manager's
+    // Destroyed, Died and WeaponEquipped natives.
+    void BindActorEnds(UFortCheatManager* CheatManager, AActor* Actor, UFunction* Destroyed, UFunction* Died, UFunction* WeaponEquipped, std::vector<TWeakObjectPtr<AActor>>& BoundActors)
+    {
+        if (!CheatManager || !Actor)
+        {
+            return;
+        }
+        FMulticastScriptDelegate& OnDestroyed = Actor->OnDestroyed;
+        OnDestroyed.AddUniqueDynamic(CheatManager, Destroyed->GetFName());
+        if (AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(Actor)))
+        {
+            FMulticastScriptDelegate& OnDied = Pawn->OnDied;
+            OnDied.AddUniqueDynamic(CheatManager, Died->GetFName());
+            if (WeaponEquipped)
+            {
+                FMulticastScriptDelegate& OnWeaponEquipped = Pawn->OnWeaponEquippedDelegate;
+                OnWeaponEquipped.AddUniqueDynamic(CheatManager, WeaponEquipped->GetFName());
+            }
+        }
+        BoundActors.emplace_back(Actor);
+    }
+
+    void UnbindActorEnds(UFortCheatManager* CheatManager, UFunction* Destroyed, UFunction* Died, UFunction* WeaponEquipped, std::vector<TWeakObjectPtr<AActor>>& BoundActors)
+    {
+        for (const TWeakObjectPtr<AActor>& Known : std::exchange(BoundActors, {}))
+        {
+            AActor* Actor = Known.Get();
+            if (!Actor || !CheatManager)
+            {
+                continue;
+            }
+            FMulticastScriptDelegate& OnDestroyed = Actor->OnDestroyed;
+            OnDestroyed.RemoveDynamic(CheatManager, Destroyed->GetFName());
+            if (AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(Actor)))
+            {
+                FMulticastScriptDelegate& OnDied = Pawn->OnDied;
+                OnDied.RemoveDynamic(CheatManager, Died->GetFName());
+                if (WeaponEquipped)
+                {
+                    FMulticastScriptDelegate& OnWeaponEquipped = Pawn->OnWeaponEquippedDelegate;
+                    OnWeaponEquipped.RemoveDynamic(CheatManager, WeaponEquipped->GetFName());
+                }
+            }
+        }
+    }
+
+    void BindDisguise(FDisguise& Disguise)
+    {
+        AFortPlayerController* PlayerController = Disguise.Controller.Get();
+        UFortCheatManager* CheatManager = CheatManagerOf(PlayerController);
+        Disguise.CheatManager = CheatManager;
+        BindActorEnds(CheatManager, PlayerController, DisguiseActorDestroyed, DisguisePawnDied, nullptr, Disguise.BoundActors);
+        BindActorEnds(CheatManager, Disguise.Original.Get(), DisguiseActorDestroyed, DisguisePawnDied, Disguise.Kind != EDisguiseKind::Possessed ? DisguiseWeaponEquipped : nullptr, Disguise.BoundActors);
+        BindActorEnds(CheatManager, Disguise.Actor.Get(), DisguiseActorDestroyed, DisguisePawnDied, nullptr, Disguise.BoundActors);
+    }
+
+    void UnbindDisguise(FDisguise& Disguise)
+    {
+        UnbindActorEnds(Disguise.CheatManager.Get(), DisguiseActorDestroyed, DisguisePawnDied, DisguiseWeaponEquipped, Disguise.BoundActors);
+    }
+
+    // The fallback, where the build's delegates (or Core's natives for them) aren't there: every frame, each disguise is
+    // checked and followed.
     void WatchDisguises()
     {
         for (size_t Index = 0; Index < Disguises.size();)
         {
-            if (TickDisguise(Disguises[Index]))
+            if (CheckDisguise(Disguises[Index]))
             {
+                FollowDisguise(Disguises[Index]);
                 ++Index;
             }
             else
@@ -1119,12 +1232,84 @@ namespace
         bWatchingDisguises = !Disguises.empty() && GameThread::Enqueue(&WatchDisguises);
     }
 
+    void FollowDisguises();
+
+    // On the next tick after one of the game's notices: the disguises it may have ended end.
+    void CheckDisguises()
+    {
+        for (size_t Index = 0; Index < Disguises.size();)
+        {
+            if (CheckDisguise(Disguises[Index]))
+            {
+                ++Index;
+            }
+            else
+            {
+                UnbindDisguise(Disguises[Index]);
+                Disguises.erase(Disguises.begin() + static_cast<ptrdiff_t>(Index));
+            }
+        }
+        FollowDisguises();
+    }
+
+    void QueueDisguiseCheck(const UObject* WorldContextObject)
+    {
+        if (!Disguises.empty())
+        {
+            UFortCheatManager::QueueForNextTick(WorldContextObject, bCheckingDisguises, &CheckDisguises);
+        }
+    }
+
+    // The looping timer runs while a disguise needs following, and stops (its rate 0 clears it) once none does.
+    void FollowDisguises()
+    {
+        const auto NeedsFollowing = [](const FDisguise& Disguise) { return Disguise.Kind != EDisguiseKind::Prop && Disguise.Controller.Get(); };
+        auto Followed = std::find_if(Disguises.begin(), Disguises.end(), NeedsFollowing);
+        AFortPlayerController* PlayerController = Followed != Disguises.end() ? Followed->Controller.Get() : nullptr;
+        UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;
+        UWorld* TimerWorld = FollowDisguisesWorld.Get();
+        if (World == TimerWorld && (World != nullptr) == FollowDisguisesHandle.IsValid())
+        {
+            return;
+        }
+        if (TimerWorld && FollowDisguisesHandle.IsValid())
+        {
+            TimerWorld->GetTimerManager().ClearTimer(FollowDisguisesHandle);
+        }
+        FollowDisguisesHandle.Invalidate();
+        FollowDisguisesWorld = World;
+        if (World)
+        {
+            World->GetTimerManager().SetTimer(FollowDisguisesHandle, FTimerDelegate::CreateLambda([]()
+            {
+                for (FDisguise& Disguise : Disguises)
+                {
+                    FollowDisguise(Disguise);
+                }
+            }), FollowInterval, true);
+        }
+    }
+
+    // The disguise just added (Disguises.back()) ends by the game's notices, or the fallback watches it.
     void StartWatchingDisguises()
     {
-        if (!bWatchingDisguises)
+        if (!CanBindDisguises())
         {
-            bWatchingDisguises = GameThread::Enqueue(&WatchDisguises);
+            if (!bWatchingDisguises)
+            {
+                bWatchingDisguises = GameThread::Enqueue(&WatchDisguises);
+            }
+            return;
         }
+        BindDisguise(Disguises.back());
+        FollowDisguises();
+    }
+
+    void EndDisguiseAt(size_t Index)
+    {
+        UnbindDisguise(Disguises[Index]);
+        Disguises.erase(Disguises.begin() + static_cast<ptrdiff_t>(Index));
+        FollowDisguises();
     }
 
     // Where the game keeps the classes a disguise usually is: husks and other monsters, the player pawn classes (the
@@ -1740,7 +1925,7 @@ void UFortCheatManager::Undisguise(const FString& Arguments)
     {
         EndShownDisguise(*Disguise);
     }
-    Disguises.erase(Disguises.begin() + (Disguise - Disguises.data()));
+    EndDisguiseAt(static_cast<size_t>(Disguise - Disguises.data()));
     Reply(bEnded ? FString::Printf(TEXT("You are no longer disguised as %s"), Name.c_str())
                  : FString::Printf(TEXT("Your own pawn is gone, so you stay %s"), Name.c_str()));
 #endif
@@ -1822,9 +2007,26 @@ namespace
         return bEvery;
     }
 
-    // Kept as a frame task: it waits on the net driver's own state (each connection's channel for the actor, its
-    // LastUpdateTime and unacknowledged reliable bunches), which the engine keeps without telling anyone, and forces the
-    // actor's net update until every connection has it.
+    // Kept as a per-frame check: it waits on the net driver's own state (each connection's channel for the actor, its
+    // LastUpdateTime and unacknowledged reliable bunches), which the engine keeps without a notice of its own: no engine
+    // delegate says a connection sent an actor or had a bunch acknowledged (UActorChannel::ReplicateActor and
+    // UNetConnection::ReceivedAck broadcast nothing, and AActor::PreReplication runs once a frame for every connection
+    // at once). It forces the actor's net update every frame until every connection has it, from a looping timer on the
+    // world's timer manager at the server's 30 Hz (UGameEngine::SetServerTickRate), as long as there is a scale to send.
+    FTimerHandle ScaleReplicationsHandle;
+    TWeakObjectPtr<UWorld> ScaleReplicationsWorld;
+    constexpr float ScaleReplicationInterval = 1.0f / 30.0f;
+
+    void StopScaleReplicationTimer()
+    {
+        if (UWorld* World = ScaleReplicationsWorld.Get(); World && ScaleReplicationsHandle.IsValid())
+        {
+            World->GetTimerManager().ClearTimer(ScaleReplicationsHandle);
+        }
+        ScaleReplicationsHandle.Invalidate();
+        ScaleReplicationsWorld = TWeakObjectPtr<UWorld>();
+    }
+
     void TickScaleReplications()
     {
         const auto Now = std::chrono::steady_clock::now();
@@ -1855,10 +2057,23 @@ namespace
                 static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(Elapsed).count()), Sent, Viewers);
             return true;
         });
-        if (!ScaleReplications.empty())
+        if (ScaleReplications.empty())
         {
-            GameThread::Enqueue(&TickScaleReplications);
+            StopScaleReplicationTimer();
         }
+    }
+
+    // The timer on the actor's world, unless it runs there already.
+    void StartScaleReplicationTimer(AActor* Actor)
+    {
+        UWorld* World = Actor ? Actor->GetWorld() : nullptr;
+        if (!World || (ScaleReplicationsWorld.Get() == World && ScaleReplicationsHandle.IsValid()))
+        {
+            return;
+        }
+        StopScaleReplicationTimer();
+        ScaleReplicationsWorld = World;
+        World->GetTimerManager().SetTimer(ScaleReplicationsHandle, FTimerDelegate::CreateLambda([]() { TickScaleReplications(); }), ScaleReplicationInterval, true);
     }
 
     void ReplicateScale(AActor* Actor)
@@ -1882,12 +2097,8 @@ namespace
             {
                 Component->SetIsReplicated(true);
             }
-            const bool bIdle = ScaleReplications.empty();
             ScaleReplications.push_back({ TWeakObjectPtr<AActor>(Actor), TWeakObjectPtr<USceneComponent>(Root), bStopReplicating, ChangedAt, std::chrono::steady_clock::now() });
-            if (bIdle)
-            {
-                GameThread::Enqueue(&TickScaleReplications);
-            }
+            StartScaleReplicationTimer(Actor);
         }
         else if (Known == ScaleReplications.end())
         {
@@ -1991,6 +2202,10 @@ namespace
         FString OwnerName;
         FString PossessorName;
         ULONGLONG NextViewCheck = 0;
+        // The actors whose OnDestroyed (and a pawn's OnDied) tell the possessor's cheat manager (BindPossession): both
+        // controllers, the possessed pawn and the possessor's parked one.
+        TWeakObjectPtr<UFortCheatManager> CheatManager;
+        std::vector<TWeakObjectPtr<AActor>> BoundActors;
         // The possessor's own look, given back when the possession ends: meanwhile their player state (which the pawn
         // takes) wears the owner's.
         std::optional<FLook> PossessorLook;
@@ -2220,30 +2435,42 @@ namespace
             *GetNameSafe(Possessed), *GetNameSafe(OwnPawn));
     }
 
-    // Once a tick while anyone is possessed: the owner keeps watching their pawn, and a possession whose possessor,
-    // owner or pawn went (left the game, died, respawned, the aircraft) ends. Returns false when it ended.
-    bool TickPossession(FPossession& Possession)
+    bool IsPlayingPossession(const FPossession& Possession)
     {
         AFortPlayerController* Possessor = Possession.Possessor.Get();
         AFortPlayerController* Owner = Possession.Owner.Get();
         APawn* Possessed = Possession.Possessed.Get();
-        const bool bPlaying = Possessor && Owner && Possessed && !IsDeadPawn(Possessed) && Possessor->GetPawn() == Possessed && !Owner->GetPawn();
-        if (bPlaying)
+        return Possessor && Owner && Possessed && !IsDeadPawn(Possessed) && Possessor->GetPawn() == Possessed && !Owner->GetPawn();
+    }
+
+    // The owner keeps watching their pawn: the server's view target back on the pawn if anything moved it, and the
+    // client's told again (a client that already views the pawn ignores it, one that lost it views it again: it took the
+    // pawn before the pawn's new state reached it, or a spectator input moved it).
+    void KeepPossessionView(FPossession& Possession)
+    {
+        if (!IsPlayingPossession(Possession))
         {
-            Possession.Parking.LastLocation = ActorLocation(Possessed);
-            const ULONGLONG Now = GetTickCount64();
-            // The server's view target back on the pawn if anything moved it, and the client's told again: a client that
-            // already views the pawn ignores it, one that lost it (it took the pawn before the pawn's new state reached
-            // it, or a spectator input moved it) views it again.
-            if (Now >= Possession.NextViewCheck)
-            {
-                Possession.NextViewCheck = Now + PossessionViewCheckMs;
-                if (ViewTargetOf(Owner) != static_cast<AActor*>(Possessed))
-                {
-                    SetViewTarget(Owner, Possessed);
-                }
-                ClientSetViewTarget(Owner, Possessed);
-            }
+            return;
+        }
+        AFortPlayerController* Owner = Possession.Owner.Get();
+        APawn* Possessed = Possession.Possessed.Get();
+        Possession.Parking.LastLocation = ActorLocation(Possessed);
+        if (ViewTargetOf(Owner) != static_cast<AActor*>(Possessed))
+        {
+            SetViewTarget(Owner, Possessed);
+        }
+        ClientSetViewTarget(Owner, Possessed);
+    }
+
+    // A possession whose possessor, owner or pawn went (left the game, died, respawned, the aircraft) ends. Returns false
+    // when it ended.
+    bool CheckPossession(FPossession& Possession)
+    {
+        AFortPlayerController* Possessor = Possession.Possessor.Get();
+        AFortPlayerController* Owner = Possession.Owner.Get();
+        APawn* Possessed = Possession.Possessed.Get();
+        if (IsPlayingPossession(Possession))
+        {
             return true;
         }
 
@@ -2264,26 +2491,223 @@ namespace
         return false;
     }
 
-    // Kept as a frame task, as WatchDisguises is (possessplayer is Core's own): the parked pawn's place follows the
-    // possessed one every frame, the owner's view target is checked again every PossessionViewCheckMs, and the ends
-    // (someone left, the pawn died, a respawn, the aircraft) have no notice Core can bind to.
+    // possessplayer is Core's own, as disguises are. Its ends come from the game's notices, as a disguise's do: both
+    // controllers, the possessed pawn and the possessor's parked one tell the possessor's cheat manager when they are
+    // destroyed (someone left, the aircraft) or a pawn dies (AActor::OnDestroyed, AFortPawn::OnDied), and
+    // AFortPlayerController::Possess when either player takes another pawn (a respawn). Each has CheckPossession run on
+    // the next tick. The owner's view is checked again every second, from a looping timer on the world's timer manager.
+    UFunction* PossessionActorDestroyed = nullptr;
+    UFunction* PossessionPawnDied = nullptr;
+    bool bCheckingPossessions = false;
+    FTimerHandle PossessionViewHandle;
+    TWeakObjectPtr<UWorld> PossessionViewWorld;
+    constexpr float PossessionViewCheckInterval = static_cast<float>(PossessionViewCheckMs) / 1000.0f;
+
+    bool CanBindPossessions()
+    {
+        return PossessionActorDestroyed && PossessionPawnDied && AActor::HasOnDestroyed() && AFortPawn::HasOnDied();
+    }
+
+    void BindPossession(FPossession& Possession)
+    {
+        UFortCheatManager* CheatManager = CheatManagerOf(Possession.Possessor.Get());
+        Possession.CheatManager = CheatManager;
+        for (AActor* Actor : { static_cast<AActor*>(Possession.Possessor.Get()), static_cast<AActor*>(Possession.Owner.Get()), static_cast<AActor*>(Possession.Possessed.Get()),
+                 static_cast<AActor*>(Possession.OwnPawn.Get()) })
+        {
+            BindActorEnds(CheatManager, Actor, PossessionActorDestroyed, PossessionPawnDied, nullptr, Possession.BoundActors);
+        }
+    }
+
+    void UnbindPossession(FPossession& Possession)
+    {
+        UnbindActorEnds(Possession.CheatManager.Get(), PossessionActorDestroyed, PossessionPawnDied, nullptr, Possession.BoundActors);
+    }
+
+    // The fallback, where the build's delegates (or Core's natives for them) aren't there: every frame, each possession is
+    // checked, and its owner's view every PossessionViewCheckMs.
     void WatchPossessions()
+    {
+        const ULONGLONG Now = GetTickCount64();
+        for (size_t Index = 0; Index < Possessions.size();)
+        {
+            FPossession& Possession = Possessions[Index];
+            if (!CheckPossession(Possession))
+            {
+                Possessions.erase(Possessions.begin() + static_cast<ptrdiff_t>(Index));
+                continue;
+            }
+            Possession.Parking.LastLocation = ActorLocation(Possession.Possessed.Get());
+            if (Now >= Possession.NextViewCheck)
+            {
+                Possession.NextViewCheck = Now + PossessionViewCheckMs;
+                KeepPossessionView(Possession);
+            }
+            ++Index;
+        }
+        bWatchingPossessions = !Possessions.empty() && GameThread::Enqueue(&WatchPossessions);
+    }
+
+    // The view timer runs while there is a possession, and stops (its rate 0 clears it) once there is none.
+    void KeepPossessionViews()
+    {
+        AFortPlayerController* Possessor = Possessions.empty() ? nullptr : Possessions.front().Possessor.Get();
+        UWorld* World = Possessor ? Possessor->GetWorld() : nullptr;
+        UWorld* TimerWorld = PossessionViewWorld.Get();
+        if (World == TimerWorld && (World != nullptr) == PossessionViewHandle.IsValid())
+        {
+            return;
+        }
+        if (TimerWorld && PossessionViewHandle.IsValid())
+        {
+            TimerWorld->GetTimerManager().ClearTimer(PossessionViewHandle);
+        }
+        PossessionViewHandle.Invalidate();
+        PossessionViewWorld = World;
+        if (World)
+        {
+            World->GetTimerManager().SetTimer(PossessionViewHandle, FTimerDelegate::CreateLambda([]()
+            {
+                for (FPossession& Possession : Possessions)
+                {
+                    KeepPossessionView(Possession);
+                }
+            }), PossessionViewCheckInterval, true);
+        }
+    }
+
+    // On the next tick after one of the game's notices: the possessions it may have ended end.
+    void CheckPossessions()
     {
         for (size_t Index = 0; Index < Possessions.size();)
         {
-            if (TickPossession(Possessions[Index]))
+            if (CheckPossession(Possessions[Index]))
             {
                 ++Index;
             }
             else
             {
+                UnbindPossession(Possessions[Index]);
                 Possessions.erase(Possessions.begin() + static_cast<ptrdiff_t>(Index));
             }
         }
-        bWatchingPossessions = !Possessions.empty() && GameThread::Enqueue(&WatchPossessions);
+        KeepPossessionViews();
+    }
+
+    void QueuePossessionCheck(const UObject* WorldContextObject)
+    {
+        if (!Possessions.empty())
+        {
+            UFortCheatManager::QueueForNextTick(WorldContextObject, bCheckingPossessions, &CheckPossessions);
+        }
+    }
+
+    // The possession just added (Possessions.back()) ends by the game's notices, or the fallback watches it.
+    void StartWatchingPossessions()
+    {
+        if (!CanBindPossessions())
+        {
+            if (!bWatchingPossessions)
+            {
+                bWatchingPossessions = GameThread::Enqueue(&WatchPossessions);
+            }
+            return;
+        }
+        BindPossession(Possessions.back());
+        KeepPossessionViews();
+    }
+
+    void EndPossessionAt(size_t Index)
+    {
+        UnbindPossession(Possessions[Index]);
+        Possessions.erase(Possessions.begin() + static_cast<ptrdiff_t>(Index));
+        KeepPossessionViews();
     }
 }
 #endif
+
+// Context, for each of these: the cheat manager of the player whose disguise or possession the actor is part of. The game
+// is still in the middle of what it broadcast for (the actor's destruction, the pawn's death, the weapon's equip), so the
+// check runs on the next tick.
+DEFINE_FUNCTION(UFortCheatManager::execHandleDisguiseActorDestroyed)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    QueueDisguiseCheck(Context);
+#endif
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execHandleDisguisePawnDied)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    QueueDisguiseCheck(Context);
+#endif
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execHandleDisguiseWeaponEquipped)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    // The hidden pawn's new weapon is hidden too (CheckDisguise's HideWeapon).
+    QueueDisguiseCheck(Context);
+#endif
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execHandlePossessionActorDestroyed)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    QueuePossessionCheck(Context);
+#endif
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execHandlePossessionPawnDied)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    QueuePossessionCheck(Context);
+#endif
+    P_NATIVE_END;
+}
+
+void UFortCheatManager::HookDisguiseNatives()
+{
+#if WITH_SERVER_CODE
+    DisguiseActorDestroyed = AddDelegateNative(StaticClass(), L"HandleDisguiseActorDestroyed", &execHandleDisguiseActorDestroyed, AActor::StaticClass(), L"OnDestroyed");
+    DisguisePawnDied = AddDelegateNative(StaticClass(), L"HandleDisguisePawnDied", &execHandleDisguisePawnDied, AFortPawn::StaticClass(), L"OnDied");
+    DisguiseWeaponEquipped = AddDelegateNative(StaticClass(), L"HandleDisguiseWeaponEquipped", &execHandleDisguiseWeaponEquipped, AFortPawn::StaticClass(), L"OnWeaponEquippedDelegate");
+    PossessionActorDestroyed = AddDelegateNative(StaticClass(), L"HandlePossessionActorDestroyed", &execHandlePossessionActorDestroyed, AActor::StaticClass(), L"OnDestroyed");
+    PossessionPawnDied = AddDelegateNative(StaticClass(), L"HandlePossessionPawnDied", &execHandlePossessionPawnDied, AFortPawn::StaticClass(), L"OnDied");
+#endif
+}
+
+void UFortCheatManager::OnPossessedForDisguises(AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
+    if (!PlayerController)
+    {
+        return;
+    }
+    if (FindDisguise(PlayerController) && CanBindDisguises())
+    {
+        QueueDisguiseCheck(PlayerController);
+    }
+    if ((FindPossession(PlayerController, true) || FindPossession(PlayerController, false)) && CanBindPossessions())
+    {
+        QueuePossessionCheck(PlayerController);
+    }
+#endif
+}
 
 bool UFortCheatManager::IsInPossession(const AFortPlayerController* PlayerController)
 {
@@ -2362,7 +2786,7 @@ void UFortCheatManager::PossessPlayer(const FString& Arguments)
         const FString PreviousName = Previous->OwnerName;
         AFortPlayerController* PreviousOwner = Previous->Owner.Get();
         EndPossession(*Previous);
-        Possessions.erase(Possessions.begin() + (Previous - Possessions.data()));
+        EndPossessionAt(static_cast<size_t>(Previous - Possessions.data()));
         if (PreviousOwner)
         {
             Tell(PreviousOwner, FString::Printf(TEXT("%s gave your pawn back"), *PlayerNameOf(PlayerController)));
@@ -2450,10 +2874,7 @@ void UFortCheatManager::PossessPlayer(const FString& Arguments)
     SpectatePawn(Owner, Target);
     Possession.bOwnerSpectating = true;
     Possessions.push_back(std::move(Possession));
-    if (!bWatchingPossessions)
-    {
-        bWatchingPossessions = GameThread::Enqueue(&WatchPossessions);
-    }
+    StartWatchingPossessions();
 
     UE_LOG(LogFortDisguise, Log, TEXT("PossessPlayer: %s controls %s's pawn %s (own pawn %s parked)"), *GetNameSafe(PlayerController), *OwnerName, *GetNameSafe(Target), *GetNameSafe(OwnPawn));
     Tell(Owner, FString::Printf(TEXT("%s controls your pawn for now: you watch it until they give it back"), *Possessions.back().PossessorName));
@@ -2477,7 +2898,7 @@ void UFortCheatManager::Unpossess(const FString& Arguments)
     const FString PossessorName = Possession->PossessorName;
     AFortPlayerController* Owner = Possession->Owner.Get();
     EndPossession(*Possession);
-    Possessions.erase(Possessions.begin() + (Possession - Possessions.data()));
+    EndPossessionAt(static_cast<size_t>(Possession - Possessions.data()));
     if (Owner)
     {
         Tell(Owner, FString::Printf(TEXT("%s gave your pawn back"), *PossessorName));

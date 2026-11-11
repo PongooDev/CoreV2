@@ -229,3 +229,11 @@ void FTimerManager::SetTimer(FTimerHandle& InOutHandle, FTimerDelegate const& In
         bFallbackQueued = GameThread::Enqueue(&RunFallbackTimers);
     }
 }
+
+FTimerHandle FTimerManager::SetTimerForNextTick(FTimerDelegate const& InDelegate)
+{
+    // A timer due a microsecond from now: the timer manager's next tick is past it however short the frame.
+    FTimerHandle Handle;
+    SetTimer(Handle, InDelegate, 0.000001f, false);
+    return Handle;
+}

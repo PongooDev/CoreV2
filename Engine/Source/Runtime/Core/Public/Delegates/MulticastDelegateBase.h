@@ -39,6 +39,23 @@ public:
         CompactInvocationList(false);
     }
 
+    // Whether the memory at Address is a multicast delegate as Epic's constructor leaves it (no allocation, no entries,
+    // compaction threshold 2, not locked): what an unreflected delegate member of a class default object is. Core checks
+    // an offset a finder read off a broadcast with it before it binds anything there.
+    static bool IsDefaultConstructedAt(const void* Address)
+    {
+        if (!Address)
+        {
+            return false;
+        }
+        const FMulticastDelegateBase& Delegate = *static_cast<const FMulticastDelegateBase*>(Address);
+        const bool bNoAllocation = DelegateBase::UsesHeapAllocator() ? !Delegate.Heap().Data : !Delegate.Inline().InvocationList.Allocator.SecondaryData;
+        // The inline list's capacity is 0 or its one inline entry, as the build's TArray starts it.
+        const int32_t Max = Delegate.ArrayMax();
+        return bNoAllocation && Delegate.ArrayNum() == 0 && (Max == 0 || (Max == 1 && !DelegateBase::UsesHeapAllocator())) && Delegate.CompactionThreshold() == 2
+            && Delegate.InvocationListLockCount() == 0;
+    }
+
     bool IsBound() const
     {
         for (int32_t Index = 0; Index < ArrayNum(); ++Index)

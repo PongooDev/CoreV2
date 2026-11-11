@@ -59,6 +59,11 @@ public:
     static bool HasCurrentWeapon() { return Member_CurrentWeapon.IsAvailable(); }
     DefineUProperty(TArray<AFortWeapon*>, CurrentWeaponList)
     DefineUProperty(FMulticastScriptDelegate, OnDied)
+    static bool HasOnDied() { return Member_OnDied.IsAvailable(); }
+    // From 3.0 at least: the pawn equipped a weapon (5.30 0x117BDC0, with the new and the previous one), on the server
+    // too. A Blueprint delegate.
+    DefineUProperty(FMulticastScriptDelegate, OnWeaponEquippedDelegate)
+    static bool HasOnWeaponEquippedDelegate() { return Member_OnWeaponEquippedDelegate.IsAvailable(); }
     DefineUProperty(FName, SpottedEvent)
     // Down But Not Out: knocked down until a teammate revives the pawn or it bleeds out.
     DefineUProperty(bool, bIsDBNO)

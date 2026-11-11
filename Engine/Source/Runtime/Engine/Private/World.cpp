@@ -6,6 +6,7 @@
 #include "Engine/LevelStreaming.h"
 #include "Engine/NetDriver.h"
 #include "Engine/Player.h"
+#include "Finder.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
 #include "Misc/CommandLine.h"
@@ -117,6 +118,48 @@ FTimerManager& UWorld::GetTimerManager() const
 void UWorld::AddNetworkActor(AActor* Actor)
 {
     Natives::UWorld_AddNetworkActor(this, Actor);
+}
+
+FDelegateHandle UWorld::AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate&& InHandler)
+{
+    return ResolveOnActorSpawned() ? OnActorSpawned.Add(std::move(InHandler)) : FDelegateHandle();
+}
+
+bool UWorld::ResolveOnActorSpawned()
+{
+    // UWorld::SpawnActor (5.30 0x2583120, 5.40 0x25BBF60, 4.4 0x22005B0, 3.2 0x2136730, 1.8.1 0x225B5F0) ends with
+    // OnActorSpawned.Broadcast(Actor): inlined from UE 4.21 (5.0-5.40 +0x3E0), a call before (4.4 and 3.2 +0x3E0, 1.8.1
+    // +0x390). Its offset is the world's, inside UWorld.
+    static const bool bFound = []
+    {
+        // 1.9.1's moved code starts with a jump to the body.
+        const uintptr_t SpawnActor = Natives::UWorld_SpawnActor ? Finder::Unthunk(reinterpret_cast<uintptr_t>(Natives::UWorld_SpawnActor)) : 0;
+        const ptrdiff_t Offset = SpawnActor ? Finder::LastBroadcastDelegateOffset(SpawnActor) : -1;
+        const int32_t WorldSize = StaticClass() ? StaticClass()->GetPropertiesSize() : 0;
+        // The world's default object has it as Epic's constructor left it.
+        UObject* WorldDefault = StaticClass() ? StaticClass()->GetDefaultObject(false) : nullptr;
+        const bool bLooksLikeDelegate = WorldDefault && Offset > 0x28 && Offset < WorldSize
+            && FMulticastDelegateBase::IsDefaultConstructedAt(reinterpret_cast<const uint8_t*>(WorldDefault) + Offset);
+        if (!bLooksLikeDelegate)
+        {
+            UE_LOG(LogWorld, Error, TEXT("Finder: UWorld::OnActorSpawned not found (SpawnActor 0x%llX, broadcast +0x%llX, UWorld 0x%X bytes)"),
+                static_cast<unsigned long long>(SpawnActor ? SpawnActor - Finder::ImageBase() : 0), static_cast<long long>(Offset), WorldSize);
+            return false;
+        }
+        Natives::UWorld_OnActorSpawned = Offset;
+        UE_LOG(LogWorld, Log, TEXT("Finder: UWorld::OnActorSpawned +0x%llX (UWorld::SpawnActor 0x%llX)"), static_cast<long long>(Offset),
+            static_cast<unsigned long long>(SpawnActor - Finder::ImageBase()));
+        return true;
+    }();
+    return bFound;
+}
+
+void UWorld::RemoveOnActorSpawnedHandler(FDelegateHandle InHandle)
+{
+    if (Natives::UWorld_OnActorSpawned > 0)
+    {
+        OnActorSpawned.Remove(InHandle);
+    }
 }
 
 ULevelStreaming* UWorld::GetLevelStreamingForPackageName(FName InPackageName)

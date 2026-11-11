@@ -852,6 +852,17 @@ namespace Natives
     inline void (*FTickFunction_SetTickFunctionEnable)(void* This, bool bInEnabled) = nullptr;
     inline ptrdiff_t FTickFunction_bRegistered = -1;
     inline uint8_t FTickFunction_bRegisteredMask = 0;
+
+    // UAbilitySystemComponent::ResolveNatives: the ability system's unreflected OnActiveGameplayEffectAddedDelegateToSelf
+    // (FActiveGameplayEffectsContainer::AddActiveGameplayEffectGrantedTagsAndModifiers broadcasts it last: 1.8.1 +0x2C0,
+    // 3.2 +0x2D0, 4.4 +0x220, 5.0 +0x220, 5.21-5.40 +0x210) and FActiveGameplayEffectsContainer::
+    // RegisterGameplayAttributeEvent(FGameplayAttribute Attribute), the FindOrAdd on AttributeChangeDelegates that
+    // InternalUpdateNumericalAttribute broadcasts (the attribute goes by pointer to a copy the callee destroys).
+    inline ptrdiff_t UAbilitySystemComponent_OnActiveGameplayEffectAddedDelegateToSelf = -1;
+    inline void* (*FActiveGameplayEffectsContainer_RegisterGameplayAttributeEvent)(void* This, void* Attribute) = nullptr;
+    // UWorld::AddOnActorSpawnedHandler: the world's unreflected OnActorSpawned, which UWorld::SpawnActor broadcasts last
+    // (1.8.1 +0x390, 3.2, 4.4 and 5.0-5.40 +0x3E0).
+    inline ptrdiff_t UWorld_OnActorSpawned = -1;
 }
 
 namespace Sites

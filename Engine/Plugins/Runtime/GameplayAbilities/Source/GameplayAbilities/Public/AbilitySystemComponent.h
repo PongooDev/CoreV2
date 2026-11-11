@@ -1,9 +1,12 @@
 #pragma once
 
 #include "AttributeSet.h"
+#include "Delegates/Delegate.h"
 #include "GameplayAbilitySpec.h"
+#include "GameplayEffect.h"
 #include "GameplayPrediction.h"
 #include "GameplayTasksComponent.h"
+#include "Natives.h"
 
 class AActor;
 class UGameplayAbility;
@@ -15,6 +18,15 @@ class UAbilitySystemComponent : public UGameplayTasksComponent
     DefineUnrealClass(UAbilitySystemComponent, GameplayAbilities)
 
 public:
+    // DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnGameplayEffectAppliedDelegate, UAbilitySystemComponent*,
+    // const FGameplayEffectSpec&, FActiveGameplayEffectHandle).
+    using FOnGameplayEffectAppliedDelegate = TMulticastDelegate<UAbilitySystemComponent*, const FGameplayEffectSpec&, FActiveGameplayEffectHandle>;
+
+    // Called on both client and server whenever a duration based effect is added (Epic's comment): an effect's
+    // modifiers and granted tags go on (FActiveGameplayEffectsContainer::AddActiveGameplayEffectGrantedTagsAndModifiers),
+    // an ability's cooldown among them. Unreflected: only where ResolveNatives found it (HasOnActiveGameplayEffectAdded).
+    DefineNativeObject(FOnGameplayEffectAppliedDelegate, OnActiveGameplayEffectAddedDelegateToSelf, UAbilitySystemComponent_OnActiveGameplayEffectAddedDelegateToSelf)
+    DefineUStructProperty(FActiveGameplayEffectsContainer, ActiveGameplayEffects)
     DefineUStructProperty(FGameplayAbilitySpecContainer, ActivatableAbilities)
     DefineUProperty(AActor*, OwnerActor)
     // Reflected from UE 4.21 (5.0) on; older builds keep them unreflected (IsAvailable).
@@ -66,6 +78,20 @@ public:
 
     void IncrementAbilityListLock();
     void DecrementAbilityListLock();
+
+    // Epic's inline accessor: ActiveGameplayEffects.RegisterGameplayAttributeEvent(Attribute), the delegate the
+    // attribute's every change of current value broadcasts (an effect added, removed or changed, its base value set).
+    // Null where the build's FindOrAdd wasn't found.
+    FOnGameplayAttributeChange* RegisterGameplayAttributeEvent(FGameplayAttribute Attribute);
+
+    // Finds what the delegates above need in the build, once (game thread; logged): OnActiveGameplayEffectAddedDelegate
+    // ToSelf's offset from AddActiveGameplayEffectGrantedTagsAndModifiers' broadcast (its log line "...called with null
+    // Def!"), and FActiveGameplayEffectsContainer::RegisterGameplayAttributeEvent from InternalUpdateNumericalAttribute's
+    // ("Property %s new value is: %.2f") lookup of AttributeChangeDelegates. False where either isn't found.
+    static bool ResolveNatives();
+    // Each of the two, and the build's delegate instance layout Core binds with (TMulticastDelegate::Add refuses without).
+    static bool HasOnActiveGameplayEffectAdded() { ResolveNatives(); return Natives::UAbilitySystemComponent_OnActiveGameplayEffectAddedDelegateToSelf > 0 && Natives::IDelegateInstance_GetHandleIndexResolved; }
+    static bool HasGameplayAttributeEvents() { ResolveNatives(); return Natives::FActiveGameplayEffectsContainer_RegisterGameplayAttributeEvent && Natives::IDelegateInstance_GetHandleIndexResolved; }
 
     static void HookVTables();
 

@@ -2,6 +2,7 @@
 
 #include "Containers/UnrealString.h"
 #include "GameFramework/CheatManager.h"
+#include "UObject/Class.h"
 #include "UObject/NameTypes.h"
 #include "UObject/Stack.h"
 
@@ -410,6 +411,37 @@ private:
     static void FlyHK(UFortCheatManager* This);
     static void GodHK(UFortCheatManager* This);
     static void TeleportHK(UFortCheatManager* This);
+
+public:
+    // Core's natives for the game's Blueprint delegates the cheats bind, added at boot (UClass::AddNativeFunction, from
+    // HookNatives) with each delegate's own signature. Those on UFortCheatManager are bound to the player's cheat manager
+    // (the Context they run with): infinitemag's to the pawn's AFortPawn::OnWeaponEquippedDelegate and the weapon's
+    // AFortWeapon::OnLocalAmmoChanged; the disguises' and possessions' to AActor::OnDestroyed and AFortPawn::OnDied of the
+    // pawns and controllers they hang on, and to the hidden pawn's OnWeaponEquippedDelegate (FortCheatManagerDisguise.cpp).
+    DECLARE_FUNCTION(execHandleInfiniteMagWeaponEquipped);
+    DECLARE_FUNCTION(execHandleInfiniteMagAmmoChanged);
+    DECLARE_FUNCTION(execHandleDisguiseActorDestroyed);
+    DECLARE_FUNCTION(execHandleDisguisePawnDied);
+    DECLARE_FUNCTION(execHandleDisguiseWeaponEquipped);
+    DECLARE_FUNCTION(execHandlePossessionActorDestroyed);
+    DECLARE_FUNCTION(execHandlePossessionPawnDied);
+    // On UFortMissionTimerComponent, bound to the component itself: stoptimer's, for its OnMissionTimerComponentUpdated.
+    DECLARE_FUNCTION(execHandleStoppedMissionTimerUpdated);
+    // FortCheatManagerDisguise.cpp: the disguises' and possessions' natives (HookNatives calls it).
+    static void HookDisguiseNatives();
+    // A native of Core's for DelegateClass's Blueprint delegate DelegateName, added to Class as Name with the delegate's
+    // signature (UClass::AddNativeFunction, at boot). Null (logged) where the build has no such delegate or the native
+    // can't be added: the cheat that binds it keeps its frame task there.
+    static UFunction* AddDelegateNative(UClass* Class, const wchar_t* Name, FNativeFuncPtr Native, UClass* DelegateClass, const wchar_t* DelegateName);
+    // Work runs on the next tick of the world's timer manager (FTimerManager::SetTimerForNextTick), once however often
+    // it is asked for before then (bQueued). What the cheats' delegate handlers do: the game is still in the middle of
+    // what it broadcast for (an effect being applied, the ammo being changed, an actor being destroyed).
+    static void QueueForNextTick(const UObject* WorldContextObject, bool& bQueued, void (*Work)());
+
+private:
+    // FortCheatManagerDisguise.cpp: from ReapplyBoosts (AFortPlayerController::Possess), a disguise or possession the
+    // controller is in sees whether the possession ended it, on the next tick.
+    static void OnPossessedForDisguises(AFortPlayerController* PlayerController);
 
     void Reply(const FString& Message) const;
     // The player, when they have an inventory to give items to.

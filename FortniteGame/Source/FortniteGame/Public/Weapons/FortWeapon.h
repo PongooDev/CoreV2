@@ -16,6 +16,10 @@ public:
     DefineUProperty(UFortWeaponItemDefinition*, WeaponData)
     DefineUProperty(FGuid, ItemEntryGuid)
     DefineUProperty(int32_t, AmmoCount)
+    // From 3.0 at least: the weapon's ammo changed (5.30 0x13056D0, which every change of the magazine count runs, the
+    // server's ModAmmo included, with the magazine and reserve counts), a Blueprint delegate.
+    DefineUProperty(FMulticastScriptDelegate, OnLocalAmmoChanged)
+    static bool HasOnLocalAmmoChanged() { return Member_OnLocalAmmoChanged.IsAvailable(); }
     // The fire ability the weapon gave its owner's ability system when equipped (its primary fire), and the one running.
     DefineUProperty(FGameplayAbilitySpecHandle, PrimaryAbilitySpecHandle)
     DefineUProperty(UObject*, ActiveAbility)

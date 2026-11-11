@@ -516,6 +516,112 @@ uintptr_t Finder::RelativeTarget(uintptr_t Instruction, uint32_t OperandOffset, 
     return Instruction + InstructionLength + *reinterpret_cast<const int32_t*>(Instruction + OperandOffset);
 }
 
+namespace
+{
+    // `lea r64, [base+disp32]` off a register that isn't rsp or rbp (a member of an object, not a local): the destination
+    // register (0-15), or -1.
+    int32_t MemberLeaDestination(const hde64s& Instruction)
+    {
+        const bool bLea = Instruction.opcode == 0x8D && Instruction.rex_w && Instruction.modrm_mod == 2 && Instruction.modrm_rm != 4;
+        const int32_t Base = Instruction.modrm_rm | (Instruction.rex_b << 3);
+        return bLea && Base != 4 && Base != 5 ? Instruction.modrm_reg | (Instruction.rex_r << 3) : -1;
+    }
+
+    // Calls Visit(Address, Instruction) for each instruction of the function's pieces, in order, until one doesn't
+    // decode.
+    template <typename VisitorType>
+    void ForEachInstruction(uintptr_t Function, VisitorType&& Visit)
+    {
+        std::vector<std::pair<uintptr_t, uintptr_t>> Pieces = Finder::FunctionChunks(Function);
+        if (Pieces.empty() && Function)
+        {
+            Pieces.emplace_back(Function, Finder::FunctionEnd(Function));
+        }
+        for (const auto& [Begin, End] : Pieces)
+        {
+            for (uintptr_t Address = Begin; Address < End;)
+            {
+                hde64s Instruction{};
+                const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+                if (!Length || (Instruction.flags & F_ERROR))
+                {
+                    break;
+                }
+                Visit(Address, Instruction);
+                Address += Length;
+            }
+        }
+    }
+}
+
+std::vector<std::pair<ptrdiff_t, uintptr_t>> Finder::MemberThisCalls(uintptr_t Function)
+{
+    std::vector<std::pair<ptrdiff_t, uintptr_t>> Calls;
+    int32_t LeaDestination = -1;
+    ptrdiff_t LeaDisplacement = 0;
+    ForEachInstruction(Function, [&](uintptr_t Address, const hde64s& Instruction)
+    {
+        if (Instruction.opcode == 0xE8 && LeaDestination == 1)
+        {
+            Calls.emplace_back(LeaDisplacement, RelativeTarget(Address, 1, 5));
+        }
+        LeaDestination = MemberLeaDestination(Instruction);
+        LeaDisplacement = static_cast<int32_t>(Instruction.disp.disp32);
+    });
+    return Calls;
+}
+
+ptrdiff_t Finder::LastBroadcastDelegateOffset(uintptr_t Function)
+{
+    // The invocation list's lock count: +0x14 in the heap layout (4.2 on), +0x64 in the inline one (TInlineAllocator<1>).
+    // The call may come a few moves after the lea (the other arguments: mov rdx, rbx), as long as none writes rcx.
+    constexpr int32_t MaxMovesBeforeCall = 3;
+    ptrdiff_t Inlined = -1;
+    ptrdiff_t Called = -1;
+    int32_t LeaDestination = -1;
+    ptrdiff_t LeaDisplacement = 0;
+    int32_t ThisLoaded = -1;
+    ptrdiff_t ThisDisplacement = 0;
+    ForEachInstruction(Function, [&](uintptr_t, const hde64s& Instruction)
+    {
+        if (LeaDestination >= 0)
+        {
+            const int32_t Base = Instruction.modrm_rm == 4 && (Instruction.flags & F_SIB) ? (Instruction.sib_base | (Instruction.rex_b << 3)) : (Instruction.modrm_rm | (Instruction.rex_b << 3));
+            const bool bIncrement = Instruction.opcode == 0xFF && Instruction.modrm_reg == 0 && !Instruction.rex_w && Instruction.modrm_mod == 1 && Base == LeaDestination
+                && (Instruction.disp.disp8 == 0x14 || Instruction.disp.disp8 == 0x64);
+            if (bIncrement)
+            {
+                Inlined = LeaDisplacement;
+            }
+        }
+        if (ThisLoaded >= 0)
+        {
+            // mov/lea r64 into another register (8B, 8D, or 89 register to register), or xor r32, r32 (31, 33).
+            const int32_t Reg = Instruction.modrm_reg | (Instruction.rex_r << 3);
+            const int32_t Rm = Instruction.modrm_rm | (Instruction.rex_b << 3);
+            const int32_t Written = Instruction.opcode == 0x8B || Instruction.opcode == 0x8D || Instruction.opcode == 0x33 ? Reg
+                : (Instruction.opcode == 0x89 || Instruction.opcode == 0x31) && Instruction.modrm_mod == 3 ? Rm : 1;
+            if (Instruction.opcode == 0xE8)
+            {
+                Called = ThisDisplacement;
+                ThisLoaded = -1;
+            }
+            else if (Written == 1 || ++ThisLoaded > MaxMovesBeforeCall)
+            {
+                ThisLoaded = -1;
+            }
+        }
+        LeaDestination = MemberLeaDestination(Instruction);
+        LeaDisplacement = static_cast<int32_t>(Instruction.disp.disp32);
+        if (LeaDestination == 1)
+        {
+            ThisLoaded = 0;
+            ThisDisplacement = LeaDisplacement;
+        }
+    });
+    return Inlined >= 0 ? Inlined : Called;
+}
+
 uintptr_t Finder::NextCall(uintptr_t From, size_t MaxDistance)
 {
     if (!From)

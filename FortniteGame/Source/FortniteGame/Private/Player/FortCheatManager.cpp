@@ -52,7 +52,9 @@
 #include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
@@ -2426,29 +2428,156 @@ namespace
         return Recharged;
     }
 
-    // Every frame on the game thread while a player has no cooldowns: a cooldown applied since the last frame comes off.
-    // Kept as a frame task because nothing Core may use tells it when one is applied. Epic's own switch for this,
-    // AFortPlayerController::bNoCoolDown, is tested in UFortGameplayAbility::CheckCooldown only outside shipping builds
-    // (9b714eb), on the server and on the client alike, so the client refuses an activation while the effect's tags are
-    // on it and the effect itself has to go. The effect is applied by UGameplayAbility::CommitAbilityCooldown and
-    // ApplyCooldown, which are intact engine code, and the ability system's notice of it, OnActiveGameplayEffectAddedDelegate
-    // ToSelf, is a native delegate Core can't bind to. The gadget charges the abilities spend are kept at the spend
-    // instead (UFortCheatManager::KeepsAbilityCharge, through the inventory owner's RemoveInventoryItem); only a build
-    // where Core has no RemoveInventoryItem refills them here every frame, as before.
+    // Epic's own switch for nocooldown, AFortPlayerController::bNoCoolDown, is tested in UFortGameplayAbility::CheckCooldown
+    // only outside shipping builds (9b714eb), on the server and on the client alike, so the client refuses an activation
+    // while the effect's tags are on it and the effect itself has to go. UGameplayAbility::CommitAbilityCooldown and
+    // ApplyCooldown (intact engine code) apply it to the ability's owner, whose FActiveGameplayEffectsContainer::
+    // AddActiveGameplayEffectGrantedTagsAndModifiers then broadcasts its OnActiveGameplayEffectAddedDelegateToSelf: Core
+    // binds each nocooldown player's ability systems to it, and a cooldown that is added comes off on the next tick (the
+    // container is still adding it then, under its scope lock).
+    struct FCooldownBinding
+    {
+        TWeakObjectPtr<AFortPlayerController> Player;
+        TWeakObjectPtr<UAbilitySystemComponent> AbilitySystem;
+        FDelegateHandle Handle;
+    };
+    std::vector<FCooldownBinding> CooldownBindings;
+
+    // The cooldowns added since the last tick, to take off.
+    struct FAddedCooldown
+    {
+        TWeakObjectPtr<AFortPlayerController> Player;
+        TWeakObjectPtr<UAbilitySystemComponent> AbilitySystem;
+        FActiveGameplayEffectHandle Handle;
+    };
+    std::vector<FAddedCooldown> AddedCooldowns;
+    bool bRemovingAddedCooldowns = false;
+
+    // Whether Effect is the cooldown of one of AbilitySystem's abilities (its CooldownGameplayEffectClass, as
+    // ClearCooldowns finds them).
+    bool IsAbilityCooldown(UAbilitySystemComponent* AbilitySystem, const UGameplayEffect* Effect)
+    {
+        UClass* const EffectClass = Effect ? Effect->GetClass() : nullptr;
+        TStructArray<FGameplayAbilitySpec>& Specs = AbilitySystem->ActivatableAbilities.Items;
+        for (int32_t Index = 0; EffectClass && Index < Specs.Num(); ++Index)
+        {
+            UGameplayAbility* Ability = Specs[Index].Ability;
+            if (Ability && static_cast<UClass*>(Ability->CooldownGameplayEffectClass) == EffectClass)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void RemoveAddedCooldowns()
+    {
+        UFunction* Remove = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemComponent:RemoveActiveGameplayEffect");
+        for (const FAddedCooldown& Added : std::exchange(AddedCooldowns, {}))
+        {
+            UAbilitySystemComponent* AbilitySystem = Added.AbilitySystem.Get();
+            // FActiveGameplayEffectHandle's 8 bytes, as RemoveBoostEffects passes Core's own effects' handles.
+            uint64_t Handle = 0;
+            std::memcpy(&Handle, &Added.Handle, sizeof(Handle));
+            Reflection::FParams Params(Remove, true);
+            if (AbilitySystem && HasNoCooldown(Added.Player.Get()) && Params.Set(L"Handle", Handle) && Params.Set(L"StacksToRemove", -1))
+            {
+                Params.Call(AbilitySystem);
+            }
+        }
+    }
+
+    // OnActiveGameplayEffectAddedDelegateToSelf of a nocooldown player's ability system.
+    void OnCooldownAdded(TWeakObjectPtr<AFortPlayerController> Player, UAbilitySystemComponent* AbilitySystem, const FGameplayEffectSpec& Spec, FActiveGameplayEffectHandle Handle)
+    {
+        AFortPlayerController* PlayerController = Player.Get();
+        if (!PlayerController || !AbilitySystem || !HasNoCooldown(PlayerController) || !Handle.IsValid() || !IsAbilityCooldown(AbilitySystem, Spec.Def))
+        {
+            return;
+        }
+        AddedCooldowns.push_back({ Player, TWeakObjectPtr<UAbilitySystemComponent>(AbilitySystem), Handle });
+        UFortCheatManager::QueueForNextTick(PlayerController, bRemovingAddedCooldowns, &RemoveAddedCooldowns);
+    }
+
+    // The player's ability systems (a new pawn's too) take their cooldowns off as they are added. False where the build's
+    // OnActiveGameplayEffectAddedDelegateToSelf wasn't found: TickNoCooldown does it then.
+    bool BindCooldownRemoval(AFortPlayerController* PlayerController)
+    {
+        if (!UAbilitySystemComponent::HasOnActiveGameplayEffectAdded())
+        {
+            return false;
+        }
+        std::erase_if(CooldownBindings, [](const FCooldownBinding& Binding) { return !Binding.Player.Get() || !Binding.AbilitySystem.Get(); });
+        bool bBound = true;
+        for (UAbilitySystemComponent* AbilitySystem : PlayerAbilitySystems(PlayerController))
+        {
+            const bool bKnown = std::any_of(CooldownBindings.begin(), CooldownBindings.end(), [PlayerController, AbilitySystem](const FCooldownBinding& Binding)
+            {
+                return Binding.Player.Get() == PlayerController && Binding.AbilitySystem.Get() == AbilitySystem;
+            });
+            if (bKnown)
+            {
+                continue;
+            }
+            const TWeakObjectPtr<AFortPlayerController> Player(PlayerController);
+            const FDelegateHandle Handle = AbilitySystem->OnActiveGameplayEffectAddedDelegateToSelf.AddLambda([Player](UAbilitySystemComponent* Owner, const FGameplayEffectSpec& Spec, FActiveGameplayEffectHandle EffectHandle)
+            {
+                OnCooldownAdded(Player, Owner, Spec, EffectHandle);
+            });
+            if (!Handle.IsValid())
+            {
+                bBound = false;
+                continue;
+            }
+            CooldownBindings.push_back({ Player, TWeakObjectPtr<UAbilitySystemComponent>(AbilitySystem), Handle });
+        }
+        return bBound;
+    }
+
+    void UnbindCooldownRemoval(AFortPlayerController* PlayerController)
+    {
+        std::erase_if(CooldownBindings, [PlayerController](const FCooldownBinding& Binding)
+        {
+            if (Binding.Player.Get() && Binding.Player.Get() != PlayerController)
+            {
+                return false;
+            }
+            if (UAbilitySystemComponent* AbilitySystem = Binding.AbilitySystem.Get())
+            {
+                AbilitySystem->OnActiveGameplayEffectAddedDelegateToSelf.Remove(Binding.Handle);
+            }
+            return true;
+        });
+    }
+
+    // The fallbacks, every frame on the game thread while a player has no cooldowns: where the build's
+    // OnActiveGameplayEffectAddedDelegateToSelf wasn't found (or Core can't bind native delegates), a cooldown applied
+    // since the last frame comes off here; and the gadget charges the abilities spend, which are kept at the spend
+    // (UFortCheatManager::KeepsAbilityCharge, through the inventory owner's RemoveInventoryItem), are refilled here on a
+    // build where Core has no RemoveInventoryItem.
     void TickNoCooldown()
     {
         std::erase_if(NoCooldownPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
         std::erase_if(KnownChargeItems, [](const auto& Entry) { return !HasNoCooldown(Entry.first.Get()); });
+        const bool bClearEveryFrame = !UAbilitySystemComponent::HasOnActiveGameplayEffectAdded();
         const bool bRechargeEveryFrame = !AFortPlayerController::HasInventoryRemovalHook();
         for (const TWeakObjectPtr<AFortPlayerController>& Known : NoCooldownPlayers)
         {
-            ClearCooldowns(Known.Get());
+            if (bClearEveryFrame)
+            {
+                ClearCooldowns(Known.Get());
+            }
             if (bRechargeEveryFrame)
             {
                 RechargeGadgets(Known.Get());
             }
         }
-        bClearingCooldowns = !NoCooldownPlayers.empty() && GameThread::Enqueue(&TickNoCooldown);
+        bClearingCooldowns = !NoCooldownPlayers.empty() && (bClearEveryFrame || bRechargeEveryFrame) && GameThread::Enqueue(&TickNoCooldown);
+    }
+
+    bool NeedsNoCooldownTick()
+    {
+        return !UAbilitySystemComponent::HasOnActiveGameplayEffectAdded() || !AFortPlayerController::HasInventoryRemovalHook();
     }
 }
 #endif
@@ -2516,16 +2645,19 @@ void UFortCheatManager::NoCooldown(const FString& Arguments)
     if (!bEnable)
     {
         std::erase_if(KnownChargeItems, [PlayerController](const auto& Entry) { return Entry.first.Get() == PlayerController; });
+        UnbindCooldownRemoval(PlayerController);
         Reply(TEXT("No cooldown OFF: the next ability or gadget you use cools down and spends its charge again"));
         return;
     }
     const int32_t AbilitySystems = ClearCooldowns(PlayerController);
     const int32_t Recharged = RechargeGadgets(PlayerController);
-    if (!bClearingCooldowns)
+    const bool bBound = BindCooldownRemoval(PlayerController);
+    if (!bClearingCooldowns && NeedsNoCooldownTick())
     {
         bClearingCooldowns = GameThread::Enqueue(&TickNoCooldown);
     }
-    UE_LOG(LogFortCheats, Log, TEXT("NoCooldown: %s on, %d ability systems, %d gadgets recharged"), *GetNameSafe(PlayerController), AbilitySystems, Recharged);
+    UE_LOG(LogFortCheats, Log, TEXT("NoCooldown: %s on, %d ability systems (%s), %d gadgets recharged"), *GetNameSafe(PlayerController), AbilitySystems,
+        bBound ? TEXT("cooldowns come off as they are added") : TEXT("cooldowns come off every frame"), Recharged);
     Reply(AbilitySystems > 0 ? TEXT("No cooldown ON: your abilities and gadgets are ready again as soon as you use them, their charges always full (nocooldown off: normal again)")
                              : TEXT("No cooldown ON (nocooldown off: normal again); you have no abilities yet, and they'll have none once you do"));
 #endif
@@ -2566,38 +2698,151 @@ namespace
         return Timers;
     }
 
-    // Pauses every countdown that runs, the game's own PauseMissionTimer: the timer manager keeps its remaining time and
-    // the paused flag replicates, so the HUD's countdown stops where it is. Returns the timers it paused.
+    // Pauses the countdown if it runs, the game's own PauseMissionTimer: the timer manager keeps its remaining time and the
+    // paused flag replicates, so the HUD's countdown stops where it is. Whether it paused it.
+    bool StopMissionTimer(UFortMissionTimerComponent* Timer)
+    {
+        if (!Timer || !Timer->IsMissionTimerSet() || Timer->IsMissionTimerPaused())
+        {
+            return false;
+        }
+        Timer->PauseMissionTimer();
+        if (!Timer->IsMissionTimerPaused())
+        {
+            return false;
+        }
+        if (std::none_of(StoppedTimers.begin(), StoppedTimers.end(), [Timer](const TWeakObjectPtr<UFortMissionTimerComponent>& Known) { return Known.Get() == Timer; }))
+        {
+            StoppedTimers.emplace_back(Timer);
+        }
+        return true;
+    }
+
+    // Pauses every countdown that runs. Returns the timers it paused.
     std::vector<UFortMissionTimerComponent*> StopMissionTimers(const UObject* WorldContextObject)
     {
         std::vector<UFortMissionTimerComponent*> Stopped;
         for (UFortMissionTimerComponent* Timer : MissionTimers(WorldContextObject))
         {
-            if (!Timer->IsMissionTimerSet() || Timer->IsMissionTimerPaused())
+            if (StopMissionTimer(Timer))
             {
-                continue;
-            }
-            Timer->PauseMissionTimer();
-            if (!Timer->IsMissionTimerPaused())
-            {
-                continue;
-            }
-            Stopped.push_back(Timer);
-            if (std::none_of(StoppedTimers.begin(), StoppedTimers.end(), [Timer](const TWeakObjectPtr<UFortMissionTimerComponent>& Known) { return Known.Get() == Timer; }))
-            {
-                StoppedTimers.emplace_back(Timer);
+                Stopped.push_back(Timer);
             }
         }
         return Stopped;
     }
 
-    // Every frame on the game thread while the timers are stopped: a countdown the mission starts since (its next phase,
-    // a new objective's) stops too. Nothing is hooked; the mission sets its timers as ever. Kept as a frame task: Epic's
+    // A countdown the mission starts while the timers are stopped (its next phase, a new objective's) stops too. Epic's
     // cheat manager has no mission timer pause (stoptimer is Core's own), and a countdown starts when the mission's
     // blueprint calls UFortMissionTimerComponent::SetMissionTimer, intact game code, from wherever its graph does (an
-    // objective's start, a mission event, a delay after either), so no restored function sees every start. The
-    // component's own notice, OnMissionTimerComponentUpdated, is a Blueprint delegate, which only binds to a UFunction,
-    // and Core has none of its own to bind.
+    // objective's start, a mission event, a delay after either). What it does broadcast is the component's own
+    // OnMissionTimerComponentUpdated (5.30 0xEC68A0, right after SetMissionTimer sets the timer, and after a pause): Core's
+    // HandleStoppedMissionTimerUpdated, added to the component's class, is bound to every timer component of the stopped
+    // world, and to those of the missions and objectives the world spawns meanwhile (UWorld::OnActorSpawned), and stops
+    // the countdown on the next tick. Nothing is hooked.
+    UFunction* StoppedMissionTimerUpdated = nullptr;
+    FDelegateHandle StoppedWorldSpawnHandle;
+    TWeakObjectPtr<UWorld> StoppedSpawnWorld;
+    std::vector<TWeakObjectPtr<UFortMissionTimerComponent>> BoundTimers;
+    std::vector<TWeakObjectPtr<UFortMissionTimerComponent>> UpdatedTimers;
+    bool bStoppingUpdatedTimers = false;
+
+    void StopUpdatedTimers()
+    {
+        UWorld* const World = TimerStoppedWorld.Get();
+        for (const TWeakObjectPtr<UFortMissionTimerComponent>& Updated : std::exchange(UpdatedTimers, {}))
+        {
+            UFortMissionTimerComponent* Timer = Updated.Get();
+            if (World && Timer && Timer->GetWorld() == World)
+            {
+                StopMissionTimer(Timer);
+            }
+        }
+    }
+
+    void BindStoppedMissionTimer(UFortMissionTimerComponent* Timer)
+    {
+        if (!Timer || std::any_of(BoundTimers.begin(), BoundTimers.end(), [Timer](const TWeakObjectPtr<UFortMissionTimerComponent>& Known) { return Known.Get() == Timer; }))
+        {
+            return;
+        }
+        FMulticastScriptDelegate& Updated = Timer->OnMissionTimerComponentUpdated;
+        Updated.AddUniqueDynamic(Timer, StoppedMissionTimerUpdated->GetFName());
+        BoundTimers.emplace_back(Timer);
+    }
+
+    // Whether the world's countdowns stop as they start (the timer components' and the world's delegates are there):
+    // every timer component in it is bound, and the world's spawns bind theirs.
+    bool BindStoppedWorld(UWorld* World)
+    {
+        if (!StoppedMissionTimerUpdated || !UFortMissionTimerComponent::HasOnMissionTimerComponentUpdated())
+        {
+            return false;
+        }
+        // A world that is gone (the match moved on) took its handler with it.
+        if (StoppedSpawnWorld.Get() != World)
+        {
+            StoppedWorldSpawnHandle = FDelegateHandle();
+            std::erase_if(BoundTimers, [](const TWeakObjectPtr<UFortMissionTimerComponent>& Known) { return !Known.Get(); });
+        }
+        if (!StoppedWorldSpawnHandle.IsValid())
+        {
+            StoppedSpawnWorld = World;
+            StoppedWorldSpawnHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([](AActor* Actor)
+            {
+                if (!TimerStoppedWorld.Get() || !Actor)
+                {
+                    return;
+                }
+                UFortMissionTimerComponent* Timer = nullptr;
+                if (AFortMission* Mission = Cast<AFortMission>(reinterpret_cast<UObject*>(Actor)); Mission && AFortMission::HasTimerComponent())
+                {
+                    Timer = Mission->TimerComponent;
+                }
+                else if (AFortObjectiveBase* Objective = Cast<AFortObjectiveBase>(reinterpret_cast<UObject*>(Actor)); Objective && AFortObjectiveBase::HasTimerComponent())
+                {
+                    Timer = Objective->TimerComponent;
+                }
+                BindStoppedMissionTimer(Timer);
+            }));
+            if (!StoppedWorldSpawnHandle.IsValid())
+            {
+                return false;
+            }
+        }
+        for (TObjectIterator<UFortMissionTimerComponent> It(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)); It; ++It)
+        {
+            UFortMissionTimerComponent* Timer = *It;
+            if (Timer->GetWorld() == World)
+            {
+                BindStoppedMissionTimer(Timer);
+            }
+        }
+        return true;
+    }
+
+    void UnbindStoppedWorld(UWorld* World)
+    {
+        for (const TWeakObjectPtr<UFortMissionTimerComponent>& Known : std::exchange(BoundTimers, {}))
+        {
+            if (UFortMissionTimerComponent* Timer = Known.Get())
+            {
+                FMulticastScriptDelegate& Updated = Timer->OnMissionTimerComponentUpdated;
+                Updated.RemoveDynamic(Timer, StoppedMissionTimerUpdated->GetFName());
+            }
+        }
+        if (World && World == StoppedSpawnWorld.Get() && StoppedWorldSpawnHandle.IsValid())
+        {
+            World->RemoveOnActorSpawnedHandler(StoppedWorldSpawnHandle);
+        }
+        StoppedWorldSpawnHandle = FDelegateHandle();
+        StoppedSpawnWorld = TWeakObjectPtr<UWorld>();
+        UpdatedTimers.clear();
+    }
+
+    // The fallback, every frame on the game thread while the timers are stopped, where the delegates aren't there (the
+    // build has no OnMissionTimerComponentUpdated, Core couldn't add its native, or the world's OnActorSpawned wasn't
+    // found): every countdown of the missions and their active objectives that runs stops.
     void TickStopTimers()
     {
         UWorld* const World = TimerStoppedWorld.Get();
@@ -2673,6 +2918,7 @@ void UFortCheatManager::StopTimer(const FString& Arguments)
             ++Resumed;
         }
         StoppedTimers.clear();
+        UnbindStoppedWorld(World);
         TimerStoppedWorld = TWeakObjectPtr<UWorld>();
         UE_LOG(LogFortCheats, Log, TEXT("StopTimer: off, %d mission timers resumed"), Resumed);
         Reply(Resumed == 0 ? FString(TEXT("Mission timer running again (none was stopped)"))
@@ -2681,13 +2927,19 @@ void UFortCheatManager::StopTimer(const FString& Arguments)
         return;
     }
 
+    if (UWorld* Previous = TimerStoppedWorld.Get(); Previous && Previous != World)
+    {
+        UnbindStoppedWorld(Previous);
+    }
     TimerStoppedWorld = World;
     const std::vector<UFortMissionTimerComponent*> Stopped = StopMissionTimers(World);
-    if (!bStoppingTimers)
+    const bool bBound = BindStoppedWorld(World);
+    if (!bBound && !bStoppingTimers)
     {
         bStoppingTimers = GameThread::Enqueue(&TickStopTimers);
     }
-    UE_LOG(LogFortCheats, Log, TEXT("StopTimer: on, %d mission timers paused"), static_cast<int32_t>(Stopped.size()));
+    UE_LOG(LogFortCheats, Log, TEXT("StopTimer: on, %d mission timers paused (%s)"), static_cast<int32_t>(Stopped.size()),
+        bBound ? TEXT("countdowns stop as they start") : TEXT("countdowns stop every frame"));
     if (Stopped.empty())
     {
         Reply(TEXT("Mission timer stopped: no countdown runs now, and one that starts stops too (resumetimer: it runs on)"));
@@ -2709,6 +2961,23 @@ void UFortCheatManager::ResumeTimer(const FString& Arguments)
     }
     StopTimer(FString(L"off"));
 #endif
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execHandleStoppedMissionTimerUpdated)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    // Context: the timer component whose OnMissionTimerComponentUpdated it is. Its SetMissionTimer is still running.
+    UFortMissionTimerComponent* const Timer = static_cast<UFortMissionTimerComponent*>(Context);
+    UWorld* const World = TimerStoppedWorld.Get();
+    if (World && Timer->GetWorld() == World)
+    {
+        UpdatedTimers.emplace_back(Timer);
+        QueueForNextTick(Timer, bStoppingUpdatedTimers, &StopUpdatedTimers);
+    }
+#endif
+    P_NATIVE_END;
 }
 
 #if WITH_SERVER_CODE
@@ -2776,14 +3045,9 @@ namespace
     // inventory changes (UAthenaEquippedItemBase's OnLocalAmmoChanged and OnWeaponEquipped), so a flag flipped while a
     // gun is out kept the old reserve on screen until the next shot or reload. Resending the player's ammo and weapon
     // entries a moment after the flag (both replicate, the flag first) has the client's inventory change, as an ammo
-    // pickup does, and the HUD reads the new reserve. Nothing changes in the entries.
-    constexpr ULONGLONG AmmoViewDelayMs = 400;
-    struct FAmmoView
-    {
-        TWeakObjectPtr<AFortPlayerController> Player;
-        ULONGLONG Due = 0;
-    };
-    std::vector<FAmmoView> AmmoViews;
+    // pickup does, and the HUD reads the new reserve. Nothing changes in the entries. The moment is a timer on the world's
+    // timer manager.
+    constexpr float AmmoViewDelay = 0.4f;
 
     void StartWeaponCheatTick();
 
@@ -2828,9 +3092,17 @@ namespace
         }
         PlayerController->bInfiniteAmmo = bInfinite;
         PlayerController->ForceNetUpdate();
-        std::erase_if(AmmoViews, [PlayerController](const FAmmoView& View) { return !View.Player.Get() || View.Player.Get() == PlayerController; });
-        AmmoViews.push_back({ TWeakObjectPtr<AFortPlayerController>(PlayerController), GetTickCount64() + AmmoViewDelayMs });
-        StartWeaponCheatTick();
+        if (UWorld* World = PlayerController->GetWorld())
+        {
+            FTimerHandle AmmoViewHandle;
+            World->GetTimerManager().SetTimer(AmmoViewHandle, FTimerDelegate::CreateLambda([Player = TWeakObjectPtr<AFortPlayerController>(PlayerController)]()
+            {
+                if (AFortPlayerController* Controller = Player.Get())
+                {
+                    RefreshAmmoView(Controller);
+                }
+            }), AmmoViewDelay, false);
+        }
     }
 
     // Tops the equipped weapon's magazine up through its own ModAmmo: on the server that sets the replicated AmmoCount
@@ -2845,6 +3117,236 @@ namespace
         {
             Weapon->ModAmmo(BulletsPerClip - AmmoCount);
         }
+    }
+
+    // infinitemag's top-up runs when the game says the magazine may be short: the player's pawn equipped a weapon
+    // (AFortPawn::OnWeaponEquippedDelegate, 5.30 0x117BDC0, on the server too) or the weapon's ammo changed
+    // (AFortWeapon::OnLocalAmmoChanged, 5.30 0x13056D0, which the server's ModAmmo and ammo use run). Both are Blueprint
+    // delegates, bound to the player's cheat manager with Core's natives (HandleInfiniteMagWeaponEquipped and
+    // HandleInfiniteMagAmmoChanged); the magazine is filled on the next tick, out of the ammo change it hears about.
+    UFunction* InfiniteMagWeaponEquipped = nullptr;
+    UFunction* InfiniteMagAmmoChanged = nullptr;
+
+    struct FInfiniteMagBinding
+    {
+        TWeakObjectPtr<AFortPlayerController> Player;
+        TWeakObjectPtr<UFortCheatManager> CheatManager;
+        TWeakObjectPtr<AFortPawn> Pawn;
+        std::vector<TWeakObjectPtr<AFortWeapon>> Weapons;
+    };
+    std::vector<FInfiniteMagBinding> InfiniteMagBindings;
+    std::vector<TWeakObjectPtr<AFortPlayerController>> MagazinesToFill;
+    bool bFillingMagazines = false;
+
+    UFortCheatManager* CheatManagerOf(AFortPlayerController* PlayerController)
+    {
+        return PlayerController ? Cast<UFortCheatManager>(static_cast<UObject*>(static_cast<UCheatManager*>(PlayerController->CheatManager))) : nullptr;
+    }
+
+    FInfiniteMagBinding* FindInfiniteMagBinding(const AFortPlayerController* PlayerController)
+    {
+        auto Found = std::find_if(InfiniteMagBindings.begin(), InfiniteMagBindings.end(), [PlayerController](const FInfiniteMagBinding& Binding) { return Binding.Player.Get() == PlayerController; });
+        return Found != InfiniteMagBindings.end() ? &*Found : nullptr;
+    }
+
+    // The player's pawn and the weapon it holds tell their cheat manager (a pawn or weapon it had before lets go). False
+    // where the delegates or Core's natives aren't there: TickWeaponCheats tops the magazine up every frame then.
+    bool BindInfiniteMag(AFortPlayerController* PlayerController)
+    {
+        UFortCheatManager* CheatManager = CheatManagerOf(PlayerController);
+        if (!InfiniteMagWeaponEquipped || !InfiniteMagAmmoChanged || !AFortPawn::HasOnWeaponEquippedDelegate() || !AFortWeapon::HasOnLocalAmmoChanged() || !CheatManager)
+        {
+            return false;
+        }
+        FInfiniteMagBinding* Binding = FindInfiniteMagBinding(PlayerController);
+        if (!Binding)
+        {
+            Binding = &InfiniteMagBindings.emplace_back();
+            Binding->Player = PlayerController;
+            Binding->CheatManager = CheatManager;
+        }
+        AFortPawn* Pawn = PlayerController->MyFortPawn;
+        if (Binding->Pawn.Get() != Pawn)
+        {
+            if (AFortPawn* OldPawn = Binding->Pawn.Get())
+            {
+                FMulticastScriptDelegate& OldEquipped = OldPawn->OnWeaponEquippedDelegate;
+                OldEquipped.RemoveDynamic(CheatManager, InfiniteMagWeaponEquipped->GetFName());
+            }
+            Binding->Pawn = Pawn;
+            if (Pawn)
+            {
+                FMulticastScriptDelegate& Equipped = Pawn->OnWeaponEquippedDelegate;
+                Equipped.AddUniqueDynamic(CheatManager, InfiniteMagWeaponEquipped->GetFName());
+            }
+        }
+        std::erase_if(Binding->Weapons, [](const TWeakObjectPtr<AFortWeapon>& Known) { return !Known.Get(); });
+        AFortWeapon* Weapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        if (Weapon && std::none_of(Binding->Weapons.begin(), Binding->Weapons.end(), [Weapon](const TWeakObjectPtr<AFortWeapon>& Known) { return Known.Get() == Weapon; }))
+        {
+            FMulticastScriptDelegate& AmmoChanged = Weapon->OnLocalAmmoChanged;
+            AmmoChanged.AddUniqueDynamic(CheatManager, InfiniteMagAmmoChanged->GetFName());
+            Binding->Weapons.emplace_back(Weapon);
+        }
+        return true;
+    }
+
+    void UnbindInfiniteMag(AFortPlayerController* PlayerController)
+    {
+        std::erase_if(InfiniteMagBindings, [PlayerController](FInfiniteMagBinding& Binding)
+        {
+            if (Binding.Player.Get() && Binding.Player.Get() != PlayerController)
+            {
+                return false;
+            }
+            UFortCheatManager* CheatManager = Binding.CheatManager.Get();
+            AFortPawn* Pawn = Binding.Pawn.Get();
+            if (CheatManager && Pawn)
+            {
+                FMulticastScriptDelegate& Equipped = Pawn->OnWeaponEquippedDelegate;
+                Equipped.RemoveDynamic(CheatManager, InfiniteMagWeaponEquipped->GetFName());
+            }
+            for (const TWeakObjectPtr<AFortWeapon>& Known : Binding.Weapons)
+            {
+                if (AFortWeapon* Weapon = Known.Get(); Weapon && CheatManager)
+                {
+                    FMulticastScriptDelegate& AmmoChanged = Weapon->OnLocalAmmoChanged;
+                    AmmoChanged.RemoveDynamic(CheatManager, InfiniteMagAmmoChanged->GetFName());
+                }
+            }
+            return true;
+        });
+    }
+
+    void FillQueuedMagazines()
+    {
+        for (const TWeakObjectPtr<AFortPlayerController>& Queued : std::exchange(MagazinesToFill, {}))
+        {
+            AFortPlayerController* PlayerController = Queued.Get();
+            if (PlayerController && HasInfiniteMag(PlayerController))
+            {
+                // A weapon it equipped is bound now.
+                BindInfiniteMag(PlayerController);
+                FillMagazine(PlayerController);
+            }
+        }
+    }
+
+    void QueueMagazineFill(AFortPlayerController* PlayerController)
+    {
+        if (!PlayerController || !HasInfiniteMag(PlayerController))
+        {
+            return;
+        }
+        if (std::none_of(MagazinesToFill.begin(), MagazinesToFill.end(), [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; }))
+        {
+            MagazinesToFill.emplace_back(PlayerController);
+        }
+        UFortCheatManager::QueueForNextTick(PlayerController, bFillingMagazines, &FillQueuedMagazines);
+    }
+
+    // ---- The attributes the cheats keep ------------------------------------------------------------------------------
+
+    // An attribute's change notice Core is bound to on an ability system: the delegate UAbilitySystemComponent::
+    // RegisterGameplayAttributeEvent gives (AttributeChangeDelegates), which FActiveGameplayEffectsContainer::
+    // InternalUpdateNumericalAttribute broadcasts each time the attribute's current value is worked out again (an effect
+    // on it added, removed or changed, its base value set).
+    struct FAttributeChangeBinding
+    {
+        TWeakObjectPtr<UAbilitySystemComponent> AbilitySystem;
+        UProperty* Attribute = nullptr;
+        FDelegateHandle Handle;
+
+        bool IsBound() const { return Handle.IsValid() && AbilitySystem.Get(); }
+    };
+
+    void UnbindAttributeChange(FAttributeChangeBinding& Binding)
+    {
+        UAbilitySystemComponent* AbilitySystem = Binding.AbilitySystem.Get();
+        FOnGameplayAttributeChange* Delegate = AbilitySystem && Binding.Attribute && Binding.Handle.IsValid() ? AbilitySystem->RegisterGameplayAttributeEvent(FGameplayAttribute(Binding.Attribute)) : nullptr;
+        if (Delegate)
+        {
+            Delegate->Remove(Binding.Handle);
+        }
+        Binding = FAttributeChangeBinding();
+    }
+
+    // The players one of whose kept attributes (maximum health and shield, Battle Royale's row speed) changed: each is
+    // set back on the next tick (KeepChangedAttributes), out of the effect application that changed it.
+    std::vector<TWeakObjectPtr<AFortPlayerController>> ChangedAttributePlayers;
+    bool bKeepingChangedAttributes = false;
+    void KeepChangedAttributes();
+
+    void OnKeptAttributeChanged(const TWeakObjectPtr<AFortPlayerController>& Player)
+    {
+        AFortPlayerController* PlayerController = Player.Get();
+        if (!PlayerController)
+        {
+            return;
+        }
+        if (std::none_of(ChangedAttributePlayers.begin(), ChangedAttributePlayers.end(), [PlayerController](const TWeakObjectPtr<AFortPlayerController>& Known) { return Known.Get() == PlayerController; }))
+        {
+            ChangedAttributePlayers.emplace_back(PlayerController);
+        }
+        UFortCheatManager::QueueForNextTick(PlayerController, bKeepingChangedAttributes, &KeepChangedAttributes);
+    }
+
+    // Binding hears Attribute change on AbilitySystem for the player (a binding it had elsewhere lets go). False where it
+    // can't: the build's RegisterGameplayAttributeEvent wasn't found, or no ability system has the attribute.
+    bool BindAttributeChange(FAttributeChangeBinding& Binding, AFortPlayerController* PlayerController, UAbilitySystemComponent* AbilitySystem, UProperty* Attribute)
+    {
+        if (Binding.IsBound() && Binding.AbilitySystem.Get() == AbilitySystem && Binding.Attribute == Attribute)
+        {
+            return true;
+        }
+        UnbindAttributeChange(Binding);
+        FOnGameplayAttributeChange* Delegate = PlayerController && AbilitySystem && Attribute && UAbilitySystemComponent::HasGameplayAttributeEvents()
+            ? AbilitySystem->RegisterGameplayAttributeEvent(FGameplayAttribute(Attribute)) : nullptr;
+        const FDelegateHandle Handle = Delegate ? Delegate->AddLambda([Player = TWeakObjectPtr<AFortPlayerController>(PlayerController)](float, const FGameplayEffectModCallbackData*)
+        {
+            OnKeptAttributeChanged(Player);
+        }) : FDelegateHandle();
+        if (!Handle.IsValid())
+        {
+            return false;
+        }
+        Binding.AbilitySystem = AbilitySystem;
+        Binding.Attribute = Attribute;
+        Binding.Handle = Handle;
+        return true;
+    }
+
+    // The ability system the pawn's attribute set is on: its own, or its player state's (a player's).
+    UAbilitySystemComponent* AbilitySystemWithSet(AFortPawn* Pawn, const UAttributeSet* Set)
+    {
+        if (!Pawn || !Set)
+        {
+            return nullptr;
+        }
+        UAbilitySystemComponent* Candidates[] = { UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Pawn), Pawn->AbilitySystemComponent, nullptr };
+        if (AFortPlayerState* PlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Pawn->PlayerState))))
+        {
+            Candidates[2] = PlayerState->AbilitySystemComponent;
+        }
+        for (UAbilitySystemComponent* AbilitySystem : Candidates)
+        {
+            if (!AbilitySystem)
+            {
+                continue;
+            }
+            const TArray<UAttributeSet*>& Sets = AbilitySystem->SpawnedAttributes;
+            if (std::find(Sets.begin(), Sets.end(), Set) != Sets.end())
+            {
+                return AbilitySystem;
+            }
+        }
+        return nullptr;
+    }
+
+    UProperty* HealthSetAttribute(const wchar_t* Name)
+    {
+        UClass* HealthSetClass = UFortHealthSet::StaticClass();
+        return HealthSetClass ? HealthSetClass->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
     }
 
     // ---- Weapon attribute boosts: fire rate and damage -------------------------------------------------------------
@@ -2935,6 +3437,8 @@ namespace
         float Multiplier = 1.0f;
         // FActiveGameplayEffectHandle (an int32 handle and a bool, 8 bytes) of each effect Core applied.
         std::vector<uint64_t> Handles;
+        // Battle Royale's speed: RunSpeed's change on the ability system its effects are on (KeepRowSpeed).
+        FAttributeChangeBinding RunSpeedChange;
     };
     std::vector<FAttributeBoost> AttributeBoosts;
 
@@ -3425,6 +3929,8 @@ namespace
         TWeakObjectPtr<AFortPawn> Pawn;
         float Wanted = 0.0f;
         float Own = 0.0f;
+        // MaxHealth's change on the ability system of the pawn's health set (KeepMaxHealth).
+        FAttributeChangeBinding Change;
     };
     std::vector<FMaxHealth> MaxHealths;
 
@@ -3466,9 +3972,12 @@ namespace
     // A possessed pawn gets the maximum again, and its health with it: Possess has just reset its attributes to the hero's
     // (ResetGameplayAttributes), which puts MaxHealth's base back (CoreV2 #165: Battle Royale's drop from the aircraft
     // possesses a new pawn, and the maximum was gone after it).
+    bool BindMaxHealth(FMaxHealth& Entry);
+
     void ReapplyMaxHealth(FMaxHealth& Entry, AFortPawn* Pawn)
     {
         Entry.Pawn = Pawn;
+        BindMaxHealth(Entry);
         const float Current = Pawn->GetMaxHealth();
         if (std::fabs(Current - Entry.Wanted) > 0.5f && Current > 0.0f)
         {
@@ -3503,6 +4012,8 @@ namespace
         TWeakObjectPtr<AFortPawn> Pawn;
         float Wanted = 0.0f;
         float Own = 0.0f;
+        // Shield's change on the ability system of the pawn's health set (KeepMaxShield).
+        FAttributeChangeBinding Change;
     };
     std::vector<FMaxShield> MaxShields;
 
@@ -3514,9 +4025,12 @@ namespace
 
     // A possessed pawn gets the maximum shield again, once Possess has reset its attributes to the hero's (#165). A new
     // pawn's own maximum is what reset gives back.
+    bool BindMaxShield(FMaxShield& Entry);
+
     void ReapplyMaxShield(FMaxShield& Entry, AFortPawn* Pawn)
     {
         Entry.Pawn = Pawn;
+        BindMaxShield(Entry);
         const float Current = Pawn->GetMaxShield();
         if (std::fabs(Current - Entry.Wanted) > 0.5f)
         {
@@ -3526,8 +4040,8 @@ namespace
         UE_LOG(LogFortCheats, Log, TEXT("SetMaxShield: %s's new pawn %s gets %.0f maximum shield"), *GetNameSafe(Entry.Player.Get()), *GetNameSafe(Pawn), Entry.Wanted);
     }
 
-    // Every frame: an effect on Shield that works its value out again (the pawn's starting effects) is set back to the
-    // maximum asked for, on the pawn that was given it.
+    // An effect on Shield that works its value out again (the pawn's starting effects) is set back to the maximum asked
+    // for, on the pawn that was given it.
     void KeepMaxShield(FMaxShield& Entry)
     {
         AFortPlayerController* PlayerController = Entry.Player.Get();
@@ -3582,78 +4096,144 @@ namespace
         }
     }
 
+    // The maximum health and shield hold on the pawn Possess gave them to (UFortCheatManager::ReapplyMaxHealthAndShield):
+    // any effect on the attribute works its value out again from the aggregator, which InternalUpdateNumericalAttribute
+    // broadcasts. The binding is on the ability system the pawn's health set is on.
+    bool BindMaxHealth(FMaxHealth& Entry)
+    {
+        AFortPawn* Pawn = Entry.Pawn.Get();
+        UAbilitySystemComponent* AbilitySystem = Pawn ? AbilitySystemWithSet(Pawn, static_cast<UFortHealthSet*>(Pawn->HealthSet)) : nullptr;
+        return BindAttributeChange(Entry.Change, Entry.Player.Get(), AbilitySystem, HealthSetAttribute(L"MaxHealth"));
+    }
+
+    bool BindMaxShield(FMaxShield& Entry)
+    {
+        AFortPawn* Pawn = Entry.Pawn.Get();
+        UAbilitySystemComponent* AbilitySystem = Pawn && UFortHealthSet::HasShield() ? AbilitySystemWithSet(Pawn, static_cast<UFortHealthSet*>(Pawn->HealthSet)) : nullptr;
+        return BindAttributeChange(Entry.Change, Entry.Player.Get(), AbilitySystem, HealthSetAttribute(L"Shield"));
+    }
+
+    // Battle Royale's speed follows the RunSpeed multiplier any effect gives, as the owning client does (StartSpeedView):
+    // RunSpeed's change on the ability system Core's speed effects are on.
+    bool BindRowSpeed(FAttributeBoost& Boost)
+    {
+        AFortPlayerController* PlayerController = Boost.Player.Get();
+        return BindAttributeChange(Boost.RunSpeedChange, PlayerController, BoostAbilitySystem(PlayerController, MoveSpeedStages[0]), BoostAttribute(MoveSpeedStages[0]));
+    }
+
+    void KeepChangedAttributes()
+    {
+        for (const TWeakObjectPtr<AFortPlayerController>& Changed : std::exchange(ChangedAttributePlayers, {}))
+        {
+            AFortPlayerController* PlayerController = Changed.Get();
+            if (!PlayerController)
+            {
+                continue;
+            }
+            if (FMaxHealth* Entry = FindMaxHealth(PlayerController))
+            {
+                KeepMaxHealth(*Entry);
+            }
+            if (FMaxShield* Entry = FindMaxShield(PlayerController))
+            {
+                KeepMaxShield(*Entry);
+            }
+            if (FAttributeBoost* Boost = FindBoost(PlayerController, MoveSpeedBoost))
+            {
+                KeepRowSpeed(*Boost);
+            }
+        }
+    }
+
     void ForgetPlayersWhoLeft()
     {
         std::erase_if(InfiniteMagPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
+        UnbindInfiniteMag(nullptr);
         std::erase_if(InfiniteConsumablesPlayers, [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !Known.Get(); });
-        std::erase_if(AttributeBoosts, [](const FAttributeBoost& Boost) { return !Boost.Player.Get(); });
-        std::erase_if(MaxHealths, [](const FMaxHealth& Entry) { return !Entry.Player.Get(); });
-        std::erase_if(MaxShields, [](const FMaxShield& Entry) { return !Entry.Player.Get(); });
+        std::erase_if(AttributeBoosts, [](FAttributeBoost& Boost)
+        {
+            if (Boost.Player.Get())
+            {
+                return false;
+            }
+            UnbindAttributeChange(Boost.RunSpeedChange);
+            return true;
+        });
+        std::erase_if(MaxHealths, [](FMaxHealth& Entry)
+        {
+            if (Entry.Player.Get())
+            {
+                return false;
+            }
+            UnbindAttributeChange(Entry.Change);
+            return true;
+        });
+        std::erase_if(MaxShields, [](FMaxShield& Entry)
+        {
+            if (Entry.Player.Get())
+            {
+                return false;
+            }
+            UnbindAttributeChange(Entry.Change);
+            return true;
+        });
         std::erase_if(SpeedPlayers, [](const FSpeedPlayer& Entry) { return !Entry.Player.Get(); });
     }
 
-    bool HasRowSpeed()
+    // What TickWeaponCheats still has to do every frame: the cheats whose notices aren't bound.
+    bool HasUnboundWeaponCheats()
     {
-        return std::any_of(AttributeBoosts.begin(), AttributeBoosts.end(), [](const FAttributeBoost& Boost) { return Boost.Kind == &MoveSpeedBoost; });
+        const bool bMagazines = std::any_of(InfiniteMagPlayers.begin(), InfiniteMagPlayers.end(), [](const TWeakObjectPtr<AFortPlayerController>& Known) { return !FindInfiniteMagBinding(Known.Get()); });
+        const bool bRowSpeeds = std::any_of(AttributeBoosts.begin(), AttributeBoosts.end(), [](const FAttributeBoost& Boost) { return Boost.Kind == &MoveSpeedBoost && !Boost.RunSpeedChange.IsBound(); });
+        const bool bMaxHealths = std::any_of(MaxHealths.begin(), MaxHealths.end(), [](const FMaxHealth& Entry) { return !Entry.Change.IsBound(); });
+        const bool bMaxShields = std::any_of(MaxShields.begin(), MaxShields.end(), [](const FMaxShield& Entry) { return !Entry.Change.IsBound(); });
+        return bMagazines || bRowSpeeds || bMaxHealths || bMaxShields;
     }
 
-    // Every frame on the game thread while a player has infinitemag, a maximum health or shield, or a Battle Royale
-    // speed, or just after bInfiniteAmmo changed. A respawned pawn gets the effects and the speed again when the
-    // controller possesses it instead (UFortCheatManager::ReapplyBoosts). What stays here has nothing that says when:
-    // - infinitemag: a shot takes its rounds in the weapon's own ammo use (1.9 0x939490), intact game code. The game's
-    //   ammo saving (AmmoSaveBoost) keeps the shots it covers from taking any; the magazine is topped up through ModAmmo
-    //   at once for what it doesn't (a weapon equipped part empty, a build without the effect).
-    // - the maximum health and shield hold on the pawn Possess gave them to (UFortCheatManager::ReapplyMaxHealthAndShield):
-    //   any effect on the attribute works its value out again from the aggregator, whose change notice (the ability
-    //   system's GetGameplayAttributeValueChangeDelegate) is a native delegate Core can't bind to.
-    // - Battle Royale's speed follows the RunSpeed multiplier any effect gives, for the same reason, as the owning client
-    //   does (StartSpeedView).
-    // - the HUD's reserve catches up with the flag a moment after it (RefreshAmmoView), a delay Core's own code can't
-    //   put on the world's timer manager (UKismetSystemLibrary::K2_SetTimer only calls a UFunction).
-    // Nothing is hooked.
+    // The fallback, every frame on the game thread, for what the game's notices can't drive here: infinitemag where the
+    // pawn's and weapon's delegates (or Core's natives for them) aren't there, and a maximum health or shield or Battle
+    // Royale speed whose attribute change Core couldn't bind (the build's RegisterGameplayAttributeEvent not found, or
+    // Core can't bind native delegates). The rest runs from the game's own broadcasts: QueueMagazineFill and
+    // OnKeptAttributeChanged. A respawned pawn gets the effects and the speed again when the controller possesses it
+    // (UFortCheatManager::ReapplyBoosts). Nothing is hooked.
     void TickWeaponCheats()
     {
         ForgetPlayersWhoLeft();
         for (const TWeakObjectPtr<AFortPlayerController>& Known : InfiniteMagPlayers)
         {
-            FillMagazine(Known.Get());
+            if (!FindInfiniteMagBinding(Known.Get()))
+            {
+                FillMagazine(Known.Get());
+            }
         }
         for (FAttributeBoost& Boost : AttributeBoosts)
         {
-            if (Boost.Kind == &MoveSpeedBoost)
+            if (Boost.Kind == &MoveSpeedBoost && !Boost.RunSpeedChange.IsBound())
             {
                 KeepRowSpeed(Boost);
             }
         }
         for (FMaxHealth& Entry : MaxHealths)
         {
-            KeepMaxHealth(Entry);
+            if (!Entry.Change.IsBound())
+            {
+                KeepMaxHealth(Entry);
+            }
         }
         for (FMaxShield& Entry : MaxShields)
         {
-            KeepMaxShield(Entry);
+            if (!Entry.Change.IsBound())
+            {
+                KeepMaxShield(Entry);
+            }
         }
-        const ULONGLONG Now = GetTickCount64();
-        std::erase_if(AmmoViews, [Now](const FAmmoView& View)
-        {
-            if (!View.Player.Get())
-            {
-                return true;
-            }
-            if (Now < View.Due)
-            {
-                return false;
-            }
-            RefreshAmmoView(View.Player.Get());
-            return true;
-        });
-        bTickingWeaponCheats = (!InfiniteMagPlayers.empty() || HasRowSpeed() || !MaxHealths.empty() || !MaxShields.empty() || !AmmoViews.empty())
-            && GameThread::Enqueue(&TickWeaponCheats);
+        bTickingWeaponCheats = HasUnboundWeaponCheats() && GameThread::Enqueue(&TickWeaponCheats);
     }
 
+    // Starts the fallback where one of the weapon cheats has a notice it couldn't bind.
     void StartWeaponCheatTick()
     {
-        if (!bTickingWeaponCheats)
+        if (!bTickingWeaponCheats && HasUnboundWeaponCheats())
         {
             bTickingWeaponCheats = GameThread::Enqueue(&TickWeaponCheats);
         }
@@ -3669,6 +4249,8 @@ void UFortCheatManager::ReapplyBoosts(AFortPlayerController* PlayerController)
     // as Epic's later AController::OnPossess is. It runs on the next tick (Epic's FTimerManager::SetTimerForNextTick), as
     // the frame task did: Possess is still setting the pawn up (the hero, the attribute reset, the starting items and the
     // hero kit) when it gets here.
+    // A disguise or possession the controller is in sees whether this possession (a respawn) ended it.
+    OnPossessedForDisguises(PlayerController);
     const auto IsPlayers = [PlayerController](const auto& Entry) { return Entry.Player.Get() == PlayerController; };
     if (!PlayerController || (std::none_of(AttributeBoosts.begin(), AttributeBoosts.end(), IsPlayers) && std::none_of(SpeedPlayers.begin(), SpeedPlayers.end(), IsPlayers)
             && !HasNoCooldown(PlayerController)))
@@ -3692,10 +4274,18 @@ void UFortCheatManager::ReapplyBoosts(AFortPlayerController* PlayerController)
                 KeepBoost(Boost);
                 if (Boost.Kind == &MoveSpeedBoost)
                 {
+                    BindRowSpeed(Boost);
                     KeepRowSpeed(Boost);
                 }
             }
         }
+        // infinitemag: the new pawn's weapon equips and its weapons' ammo changes top the magazine up.
+        if (HasInfiniteMag(Controller))
+        {
+            BindInfiniteMag(Controller);
+            QueueMagazineFill(Controller);
+        }
+        StartWeaponCheatTick();
         // Save the World's speed: the movement set's speeds for the new pawn.
         for (FSpeedPlayer& Entry : SpeedPlayers)
         {
@@ -3704,10 +4294,12 @@ void UFortCheatManager::ReapplyBoosts(AFortPlayerController* PlayerController)
                 KeepSpeed(Entry);
             }
         }
-        // nocooldown: the gadgets a respawn's hero kit gives start full.
+        // nocooldown: the gadgets a respawn's hero kit gives start full, and the new pawn's ability system (where it has
+        // its own) takes its cooldowns off as they are added.
         if (HasNoCooldown(Controller))
         {
             RechargeGadgets(Controller);
+            BindCooldownRemoval(Controller);
         }
     });
 #endif
@@ -3747,6 +4339,7 @@ void UFortCheatManager::InfiniteMag(const FString& Arguments)
     }
     if (!bEnable)
     {
+        UnbindInfiniteMag(PlayerController);
         Reply(TEXT("Infinite magazine OFF: your shots use up the magazine again"));
         return;
     }
@@ -3763,10 +4356,36 @@ void UFortCheatManager::InfiniteMag(const FString& Arguments)
     }
     AttributeBoosts.push_back(std::move(AmmoSave));
     FillMagazine(PlayerController);
+    // The top-up from then on comes with the game's own notices of a weapon equipped or its ammo changed; without them,
+    // every frame.
+    const bool bBound = BindInfiniteMag(PlayerController);
     StartWeaponCheatTick();
-    UE_LOG(LogFortCheats, Log, TEXT("InfiniteMag: %s on"), *GetNameSafe(PlayerController));
+    UE_LOG(LogFortCheats, Log, TEXT("InfiniteMag: %s on (%s)"), *GetNameSafe(PlayerController),
+        bBound ? TEXT("the magazine is topped up as a weapon is equipped or its ammo changes") : TEXT("the magazine is topped up every frame"));
     Reply(TEXT("Infinite magazine ON: your weapon stays loaded and never needs a reload (infinitemag off: normal again)"));
 #endif
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execHandleInfiniteMagWeaponEquipped)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    // Context: the cheat manager of the player whose pawn's OnWeaponEquippedDelegate it is.
+    QueueMagazineFill(static_cast<UFortCheatManager*>(Context)->GetPlayerController());
+#endif
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(UFortCheatManager::execHandleInfiniteMagAmmoChanged)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+#if WITH_SERVER_CODE
+    // Context: the cheat manager of the player whose weapon's OnLocalAmmoChanged it is. ModAmmo is still running.
+    QueueMagazineFill(static_cast<UFortCheatManager*>(Context)->GetPlayerController());
+#endif
+    P_NATIVE_END;
 }
 
 void UFortCheatManager::UnlimitedHealth(const FString& Arguments)
@@ -3911,6 +4530,7 @@ namespace
         if (Existing)
         {
             RemoveBoostEffects(*Existing);
+            UnbindAttributeChange(Existing->RunSpeedChange);
             std::erase_if(AttributeBoosts, [Existing](const FAttributeBoost& Boost) { return &Boost == Existing; });
         }
         if (bReset || *Multiplier == 1.0f)
@@ -4034,6 +4654,7 @@ void UFortCheatManager::MaxHealth(const FString& Arguments)
             return;
         }
         const float Own = Existing->Own;
+        UnbindAttributeChange(Existing->Change);
         MaxHealths.erase(MaxHealths.begin() + (Existing - MaxHealths.data()));
         const float Health = Pawn->GetHealth();
         const float Got = ApplyMaxHealth(Pawn, Own).value_or(Pawn->GetMaxHealth());
@@ -4058,8 +4679,10 @@ void UFortCheatManager::MaxHealth(const FString& Arguments)
     Existing->Pawn = Pawn;
     Existing->Wanted = Value;
     Existing->Own = Own;
+    BindMaxHealth(*Existing);
     StartWeaponCheatTick();
-    UE_LOG(LogFortCheats, Log, TEXT("MaxHealth: %s asked for %.0f, has %.0f (own %.0f), health %.0f"), *GetNameSafe(PlayerController), Value, *Got, Own, Pawn->GetHealth());
+    UE_LOG(LogFortCheats, Log, TEXT("MaxHealth: %s asked for %.0f, has %.0f (own %.0f), health %.0f (%s)"), *GetNameSafe(PlayerController), Value, *Got, Own, Pawn->GetHealth(),
+        Existing->Change.IsBound() ? TEXT("kept as MaxHealth changes") : TEXT("kept every frame"));
     Reply(FString::Printf(TEXT("Max health set to %.0f, health %.0f/%.0f%s (your own: %.0f; maxhealth reset gives it back)"), *Got, Pawn->GetHealth(), Pawn->GetMaxHealth(),
         std::fabs(*Got - Value) > 0.5f ? TEXT(", the game won't let it go further") : TEXT(""), Own));
 #endif
@@ -4538,6 +5161,7 @@ void UFortCheatManager::SetMaxShield(const FString& Arguments)
             return;
         }
         const float Own = Existing->Own;
+        UnbindAttributeChange(Existing->Change);
         MaxShields.erase(MaxShields.begin() + (Existing - MaxShields.data()));
         Pawn->ForceMaxShield(Own);
         Reply(FString::Printf(TEXT("Your maximum shield is your own again: %.0f, shield %.0f"), Pawn->GetMaxShield(), Pawn->GetShield()));
@@ -4554,8 +5178,10 @@ void UFortCheatManager::SetMaxShield(const FString& Arguments)
     Existing->Pawn = Pawn;
     Existing->Wanted = Value;
     Existing->Own = Own;
+    BindMaxShield(*Existing);
     StartWeaponCheatTick();
-    UE_LOG(LogFortCheats, Log, TEXT("SetMaxShield: %s asked for %.0f, has %.0f (own %.0f)"), *GetNameSafe(PlayerController), Value, Pawn->GetMaxShield(), Own);
+    UE_LOG(LogFortCheats, Log, TEXT("SetMaxShield: %s asked for %.0f, has %.0f (own %.0f; %s)"), *GetNameSafe(PlayerController), Value, Pawn->GetMaxShield(), Own,
+        Existing->Change.IsBound() ? TEXT("kept as Shield changes") : TEXT("kept every frame"));
     Reply(FString::Printf(TEXT("Max shield set to %.0f, shield %.0f/%.0f (your own: %.0f; setmaxshield reset gives it back, setshield fills it)"),
         Value, Pawn->GetShield(), Pawn->GetMaxShield(), Own));
 #endif
@@ -4798,6 +5424,7 @@ void UFortCheatManager::Speed(const FString& Arguments)
     if (RowSpeed)
     {
         RemoveBoostEffects(*RowSpeed);
+        UnbindAttributeChange(RowSpeed->RunSpeedChange);
         std::erase_if(AttributeBoosts, [RowSpeed](const FAttributeBoost& Boost) { return &Boost == RowSpeed; });
     }
     Pawn->SetCheatSpeedMultiplier(1.0f);
@@ -4833,6 +5460,8 @@ void UFortCheatManager::Speed(const FString& Arguments)
         return;
     }
     AttributeBoosts.push_back(std::move(Boost));
+    // The row speed follows RunSpeed's changes from then on; without them, every frame.
+    BindRowSpeed(AttributeBoosts.back());
     StartWeaponCheatTick();
     const std::optional<float> Applied = CurrentBoostMultiplier(BoostAbilitySystem(PlayerController, MoveSpeedStages[0]), MoveSpeedStages[0]);
     const float Moved = Applied && *Applied > 0.01f ? *Applied : *Multiplier;
@@ -6260,6 +6889,35 @@ namespace
     }
 }
 
+UFunction* UFortCheatManager::AddDelegateNative(UClass* Class, const wchar_t* Name, FNativeFuncPtr Native, UClass* DelegateClass, const wchar_t* DelegateName)
+{
+    const UProperty* Property = Class && DelegateClass ? DelegateClass->FindPropertyByName(FName(DelegateName, FNAME_Find)) : nullptr;
+    const UFunction* Signature = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+        ? static_cast<UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+    UFunction* Function = Signature ? Class->AddNativeFunction(Name, Native, Signature) : nullptr;
+    if (!Function)
+    {
+        Log::Warning(L"Cheats: {}.{} {}, so the cheat that binds it keeps its frame task", DelegateClass ? DelegateClass->GetName().ToStdString() : std::wstring(L"?"), DelegateName,
+            Signature ? L"can't call Core's native" : L"isn't in this build");
+    }
+    return Function;
+}
+
+void UFortCheatManager::QueueForNextTick(const UObject* WorldContextObject, bool& bQueued, void (*Work)())
+{
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    if (bQueued || !World)
+    {
+        return;
+    }
+    bQueued = true;
+    World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([&bQueued, Work]()
+    {
+        bQueued = false;
+        Work();
+    }));
+}
+
 void UFortCheatManager::HookNatives()
 {
     // Each of these is stripped on 1.2, 1.7.2 and 1.8 alike (Cheats.md): GiveWeapon, GiveAmmo, GiveTrap, GiveGadget(s),
@@ -6369,5 +7027,18 @@ void UFortCheatManager::HookNatives()
     // So is UFortCheatManager::Teleport on 5.21 and 5.30 (#370); before, the slot is UCheatManager's own and stays.
     RestoreStubbedOverride(StaticClass(), Finder::ImplementationIndex(FindStaticFunction_Teleport()), reinterpret_cast<void*>(&TeleportHK), L"UFortCheatManager::Teleport");
     Finder::ResolveAssetManagerLive();
+
+#if WITH_SERVER_CODE
+    // The natives the cheats bind the game's Blueprint delegates to (UClass::AddNativeFunction: at boot, before anything
+    // looks a function up by these names). Where one isn't added, the cheat keeps its frame task.
+    InfiniteMagWeaponEquipped = AddDelegateNative(StaticClass(), L"HandleInfiniteMagWeaponEquipped", &execHandleInfiniteMagWeaponEquipped, AFortPawn::StaticClass(), L"OnWeaponEquippedDelegate");
+    InfiniteMagAmmoChanged = AddDelegateNative(StaticClass(), L"HandleInfiniteMagAmmoChanged", &execHandleInfiniteMagAmmoChanged, AFortWeapon::StaticClass(), L"OnLocalAmmoChanged");
+    StoppedMissionTimerUpdated = AddDelegateNative(UFortMissionTimerComponent::StaticClass(), L"HandleStoppedMissionTimerUpdated", &execHandleStoppedMissionTimerUpdated,
+        UFortMissionTimerComponent::StaticClass(), L"OnMissionTimerComponentUpdated");
+    HookDisguiseNatives();
+    // The native delegates the cheats bind, looked for now so the boot log says whether the build has them.
+    UAbilitySystemComponent::ResolveNatives();
+    UWorld::ResolveOnActorSpawned();
+#endif
 }
 

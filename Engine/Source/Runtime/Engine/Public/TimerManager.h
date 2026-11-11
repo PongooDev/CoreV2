@@ -31,6 +31,11 @@ public:
         InHandle.Invalidate();
     }
 
+    // Epic's SetTimerForNextTick: InDelegate runs once, on the timer manager's next tick. Core's goes through
+    // InternalSetTimer at a rate any tick passes (the build's InternalSetTimerForNextTick isn't looked for), so one set
+    // while the timer manager ticks runs on the tick after, as Epic's does.
+    FTimerHandle SetTimerForNextTick(FTimerDelegate const& InDelegate);
+
     // Finds InternalSetTimer and the timer manager pointers UWorld::GetTimerManager reads, from
     // UKismetSystemLibrary::K2_SetTimerDelegate (the function that logs "SetTimer passed a bad function (%s) or object
     // (%s)"). Run on the game thread, once the engine's reflection is up. False where they weren't found: SetTimer then

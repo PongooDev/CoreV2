@@ -103,6 +103,14 @@ namespace Finder
     std::vector<std::pair<uintptr_t, uintptr_t>> FunctionChunks(uintptr_t FunctionStart);
 
     uintptr_t RelativeTarget(uintptr_t Instruction, uint32_t OperandOffset, uint32_t InstructionLength);
+    // Every `lea rcx, [reg+disp32]` (not off rsp or rbp) right before a `call rel32` in the function's pieces, in code
+    // order: the displacement and the call's target. A member passed as `this` (a container in its owner, a delegate).
+    std::vector<std::pair<ptrdiff_t, uintptr_t>> MemberThisCalls(uintptr_t Function);
+    // The offset of the native multicast delegate the function broadcasts last, from the object it loads it off (an
+    // unreflected TMulticastDelegate member): an inlined TMulticastDelegate::Broadcast (UE 4.21: lea r14, [r15+210h];
+    // inc dword ptr [r14+14h], the invocation list's lock count) wins over a call of the out-of-line one (UE 4.16-4.20:
+    // lea rcx, [rdx+2D0h]; call). -1 when neither is there.
+    ptrdiff_t LastBroadcastDelegateOffset(uintptr_t Function);
     uintptr_t NextCall(uintptr_t From, size_t MaxDistance);
     std::vector<std::pair<uintptr_t, uintptr_t>> DirectCalls(uintptr_t Begin, uintptr_t End);
     std::vector<uintptr_t> CallsTo(uintptr_t Target, bool bIncludeJumps);

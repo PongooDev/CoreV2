@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AttributeSet.h"
+#include "Delegates/Delegate.h"
 #include "Engine/CurveTable.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
@@ -62,4 +63,44 @@ class UGameplayEffect : public UObject
 
 public:
     DefineUStructArrayProperty(FGameplayModifierInfo, Modifiers)
+};
+
+struct FGameplayEffectModCallbackData;
+
+// Epic's FActiveGameplayEffectHandle: an active effect's handle. 8 bytes, so it goes by value in a register.
+struct FActiveGameplayEffectHandle
+{
+    int32_t Handle = -1;
+    bool bPassedFiltersAndWasExecuted = false;
+
+    bool IsValid() const { return Handle != -1; }
+};
+
+static_assert(sizeof(FActiveGameplayEffectHandle) == 8);
+
+// Epic's FGameplayEffectSpec: an effect to apply or applied, its definition (Def, the effect class's default object) with
+// the level, context and magnitudes it was made with.
+struct FGameplayEffectSpec
+{
+    DefineUnrealStruct(FGameplayEffectSpec, GameplayAbilities)
+    DefineUProperty(UGameplayEffect*, Def)
+};
+
+// DECLARE_MULTICAST_DELEGATE_TwoParams(FOnGameplayAttributeChange, float, const FGameplayEffectModCallbackData*): an
+// attribute's current value was worked out again (FActiveGameplayEffectsContainer::InternalUpdateNumericalAttribute, after
+// SetNumericAttribute_Internal), with the new value. The one UE 4.16 has; 4.17 adds FOnGameplayAttributeValueChange
+// beside it, and every build up to 5.40 broadcasts both.
+using FOnGameplayAttributeChange = TMulticastDelegate<float, const FGameplayEffectModCallbackData*>;
+
+// Epic's FActiveGameplayEffectsContainer (UAbilitySystemComponent::ActiveGameplayEffects): the active effects, the
+// attributes' aggregators and the delegates their changes broadcast.
+struct FActiveGameplayEffectsContainer
+{
+    DefineUnrealStruct(FActiveGameplayEffectsContainer, GameplayAbilities)
+
+public:
+    // AttributeChangeDelegates.FindOrAdd(Attribute), through the build's own (UAbilitySystemComponent::ResolveNatives):
+    // the delegate InternalUpdateNumericalAttribute broadcasts each time the attribute's current value is worked out
+    // again. Null where it wasn't found.
+    FOnGameplayAttributeChange* RegisterGameplayAttributeEvent(FGameplayAttribute Attribute);
 };

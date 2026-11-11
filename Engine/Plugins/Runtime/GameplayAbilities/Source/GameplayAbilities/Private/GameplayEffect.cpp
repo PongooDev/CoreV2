@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "GameplayEffect.h"
+#include "Natives.h"
 #include "ReflectionParams.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -28,6 +29,22 @@ float FScalableFloat::GetValueAtLevel(float Level) const
         return BaseValue;
     }
     return BaseValue * Params.Take<float>(L"OutXY");
+}
+
+FOnGameplayAttributeChange* FActiveGameplayEffectsContainer::RegisterGameplayAttributeEvent(FGameplayAttribute Attribute)
+{
+    if (!Natives::FActiveGameplayEffectsContainer_RegisterGameplayAttributeEvent)
+    {
+        return nullptr;
+    }
+    // The attribute goes by value: a copy of the caller's, which the callee destroys (frees its name). The copy keeps the
+    // name empty, so nothing of Core's is freed by the engine: the map matches and hashes an attribute by its property
+    // alone (FGameplayAttribute's operator== and GetTypeHash, PointerHash(Attribute)).
+    alignas(8) uint8_t Argument[sizeof(FGameplayAttribute)] = {};
+    FGameplayAttribute* const Copy = reinterpret_cast<FGameplayAttribute*>(Argument);
+    Copy->Attribute = Attribute.Attribute;
+    Copy->AttributeOwner = Attribute.AttributeOwner;
+    return static_cast<FOnGameplayAttributeChange*>(Natives::FActiveGameplayEffectsContainer_RegisterGameplayAttributeEvent(this, Copy));
 }
 
 float FGameplayModifierInfo::GetAdditiveConstant(const UProperty* InAttribute) const

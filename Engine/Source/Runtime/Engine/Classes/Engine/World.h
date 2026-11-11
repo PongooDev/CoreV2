@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreGlobals.h"
+#include "Delegates/Delegate.h"
 #include "ObjectLayout.h"
 #include "Engine/EngineBaseTypes.h"
 #include "Engine/EngineTypes.h"
@@ -78,6 +79,9 @@ public:
 
 inline UWorldProxy GWorld;
 
+// DECLARE_MULTICAST_DELEGATE_OneParam(FOnActorSpawned, AActor*): UWorld::SpawnActor's last act, with the new actor.
+using FOnActorSpawned = TMulticastDelegate<AActor*>;
+
 class UWorld final : public UObject, public FNetworkNotify
 {
     DefineUnrealClass(UWorld, Engine)
@@ -95,8 +99,18 @@ class UWorld final : public UObject, public FNetworkNotify
     DefineNativeMember(float, NextSwitchCountdown, UWorld_NextSwitchCountdown)
     DefineNativeMember(float, TimeSeconds, UWorld_TimeSeconds)
     DefineNativeMember(FTimerManager*, TimerManager, UWorld_TimerManager)
+    // Unreflected: where AddOnActorSpawnedHandler found it (Natives::UWorld_OnActorSpawned).
+    DefineNativeObject(FOnActorSpawned, OnActorSpawned, UWorld_OnActorSpawned)
 
 public:
+    // Epic's: InHandler runs after each actor the world spawns (OnActorSpawned.Add), until RemoveOnActorSpawnedHandler.
+    // The first call finds OnActorSpawned in the build, from the broadcast UWorld::SpawnActor (Natives::UWorld_SpawnActor)
+    // ends with; an invalid handle where it isn't found or Core can't bind to native delegates (logged once).
+    FDelegateHandle AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate&& InHandler);
+    void RemoveOnActorSpawnedHandler(FDelegateHandle InHandle);
+    // Finds OnActorSpawned in the build once (game thread; logged). False where it isn't found.
+    static bool ResolveOnActorSpawned();
+
     bool Listen(FURL& InURL);
 
     ENetMode GetNetMode() const;

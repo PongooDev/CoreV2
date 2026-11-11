@@ -1451,6 +1451,9 @@
     <ClCompile Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private\AbilitySystemBlueprintLibrary.cpp">
       <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private\AbilitySystemComponent.cpp">
+      <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private</Filter>
+    </ClCompile>
     <ClCompile Include="..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private\AbilitySystemComponent_Abilities.cpp">
       <Filter>Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Private</Filter>
     </ClCompile>

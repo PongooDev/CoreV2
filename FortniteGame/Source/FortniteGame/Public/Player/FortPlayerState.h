@@ -85,6 +85,21 @@ struct FFortExperienceDelta
     }
 };
 
+// The player state's character parts from 5.41 (AFortPlayerState::CharacterParts, until then the array of parts
+// itself): Parts, one per EFortCustomPartType, and which of them the server sent. The struct has no NetSerialize (its
+// struct ops copy only) and replicates by its properties. The server's AFortPlayerState::PreReplication (5.41 0x120A360,
+// 6.00 0x125AB50) sets WasReplicatedFlags from the parts it holds before every send, so whoever writes Parts leaves the
+// flags alone; a client's OnRep_CharacterParts (5.41 0x1207860) sets bReplicationFailed when a flagged part didn't
+// arrive, which only clients read (0x1190280, below ROLE_Authority).
+struct FCustomCharacterParts
+{
+    DefineUnrealStruct(FCustomCharacterParts, FortniteGame)
+    DefineUProperty(uint8_t, WasReplicatedFlags)
+    DefineUProperty(UCustomCharacterPart*, Parts)
+
+    static bool HasParts() { return Member_Parts.IsAvailable(); }
+};
+
 // One EFortReplicatedStat's count and the score it earned (AFortPlayerState::ReplicatedStats_Campaign and _Zone, one
 // per stat type).
 struct FReplicatedStatValues
@@ -117,11 +132,17 @@ public:
     DefineUFunction(OnRep_CharacterParts)
     DefineUFunction(GetCurrentPawn)
 
-    UCustomCharacterPart*& GetCharacterPart(EFortCustomPartType PartType)
-    {
-        UCustomCharacterPart*& Parts = CharacterParts;
-        return (&Parts)[static_cast<uint8_t>(PartType)];
-    }
+private:
+    // 5.41 makes CharacterParts an FCustomCharacterParts (the same UE property, the parts in its Parts), where 1.1-5.40
+    // have the array of parts itself (CharacterParts above).
+    static inline Reflection::FMemberInfo Member_CharacterPartsStruct{ &StaticReflectionOwner, TEXT("CharacterParts"), 0, Reflection::EMemberKind::Struct, &FCustomCharacterParts::StaticReflectionOwner };
+
+public:
+    // Whether the build reflects the player state's parts in a form Core knows (the array, or 5.41's struct).
+    static bool HasCharacterParts();
+    // The part slot of that type: CharacterParts[PartType] before 5.41, CharacterParts.Parts[PartType] from 5.41. On a
+    // build with neither form it is an empty slot of no player state's, so a read finds no part and a write goes nowhere.
+    UCustomCharacterPart*& GetCharacterPart(EFortCustomPartType PartType);
 
     void SetHeroType(UFortHero* Hero);
     // Whether SetHeroType can run here (the server found the native).

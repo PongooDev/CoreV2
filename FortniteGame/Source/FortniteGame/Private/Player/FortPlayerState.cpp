@@ -21,12 +21,43 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
+bool AFortPlayerState::HasCharacterParts()
+{
+    return Member_CharacterParts.IsAvailable() || (Member_CharacterPartsStruct.IsAvailable() && FCustomCharacterParts::HasParts());
+}
+
+UCustomCharacterPart*& AFortPlayerState::GetCharacterPart(EFortCustomPartType PartType)
+{
+    // 1.1-5.40 first, then 5.41's FCustomCharacterParts (a 5.41 Battle Royale server died here, "Member
+    // FortPlayerState::CharacterParts is not available", as a player loaded in: CoreV2 #394).
+    if (Member_CharacterParts.IsAvailable())
+    {
+        UCustomCharacterPart*& Parts = CharacterParts;
+        return (&Parts)[static_cast<uint8_t>(PartType)];
+    }
+    if (Member_CharacterPartsStruct.IsAvailable() && FCustomCharacterParts::HasParts())
+    {
+        UCustomCharacterPart*& Parts = Reflection::AccessMember<FCustomCharacterParts>(this, Member_CharacterPartsStruct).Parts;
+        return (&Parts)[static_cast<uint8_t>(PartType)];
+    }
+
+    static bool bReported = false;
+    if (!bReported)
+    {
+        bReported = true;
+        UE_LOG(LogFort, Error, TEXT("AFortPlayerState::CharacterParts has a form Core doesn't know, so Core leaves the player states' parts as they are"));
+    }
+    static UCustomCharacterPart* Unavailable = nullptr;
+    Unavailable = nullptr;
+    return Unavailable;
+}
+
 void AFortPlayerState::SetHeroType(UFortHero* Hero)
 {
     SetHeroTypeOG(this, Hero);
 
 #if WITH_SERVER_CODE
-    if (Role != ROLE_Authority || !Hero)
+    if (Role != ROLE_Authority || !Hero || !HasCharacterParts())
     {
         return;
     }
@@ -115,7 +146,7 @@ void AFortPlayerState::ApplyCharacterCustomization(AFortPlayerPawn* Pawn)
     Natives::AFortPlayerState_ApplyCharacterCustomization(this, Pawn);
 
     const EFortCustomPartType NumTypes = EFortCustomPartType::GetNumTypes();
-    const auto PartOf = [this, NumTypes](EFortCustomPartType PartType) { return PartType < NumTypes ? GetCharacterPart(PartType) : nullptr; };
+    const auto PartOf = [this, NumTypes](EFortCustomPartType PartType) { return PartType < NumTypes && HasCharacterParts() ? GetCharacterPart(PartType) : nullptr; };
     UE_LOG(LogFort, Log, TEXT("ApplyCharacterCustomization: %s wears %s, %s, backpack %s"), *GetName(), *GetNameSafe(PartOf(EFortCustomPartType::GetHead())),
         *GetNameSafe(PartOf(EFortCustomPartType::GetBody())), *GetNameSafe(PartOf(EFortCustomPartType::GetBackpack())));
 #endif

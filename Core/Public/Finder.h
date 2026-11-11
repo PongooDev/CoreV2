@@ -253,6 +253,10 @@ namespace Finder
     int32_t StrippedAthenaPrepareDeathReportIndex(ptrdiff_t KillerPlayerStateOffset);
     bool ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsAliveOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t DeathInfoDBNOOffset, ptrdiff_t TeamMembersOffset);
     uint8_t* PawnDiedInventoryDropCall();
+    // From 6.00 (Shadow Stones): AFortPlayerControllerGameplay::StartGhostMode's call to the stripped
+    // UFortKismetLibrary::GiveItemToInventoryOwner, which gives the controller the ghost mode item. Null on builds without
+    // StartGhostMode.
+    uint8_t* StartGhostModeGiveItemCall();
     // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player
     // bots. IsSkydivingOffset: AFortPlayerPawnAthena's bIsSkydiving, which it checks first.
     bool ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset);

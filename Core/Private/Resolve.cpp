@@ -10775,6 +10775,41 @@ uint8_t* Finder::PawnDiedInventoryDropCall()
     return nullptr;
 }
 
+uint8_t* Finder::StartGhostModeGiveItemCall()
+{
+    // 6.00's AFortPlayerControllerGameplay::StartGhostMode (CL-4395664 0x1268130, the call after its exec's parameter):
+    // on the authority it gives the item providing ghost mode to the controller as its IFortInventoryOwnerInterface,
+    // UFortKismetLibrary::GiveItemToInventoryOwner({this, interface}, Item, 1, true) (0x1268186), then sets
+    // GhostModeRepData (bInGhostMode, GhostModeItemDef) and calls OnRep_GhostModeRepData. GiveItemToInventoryOwner's
+    // native is server code: the call goes to the shared empty function its exec (0x14AB400) also ends in, and it is the
+    // body's only direct call to a stub. Older builds have no StartGhostMode.
+    UFunction* StartGhostMode = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerControllerGameplay:StartGhostMode");
+    if (!StartGhostMode)
+    {
+        return nullptr;
+    }
+    const uintptr_t ExecCall = reinterpret_cast<uintptr_t>(Finder::ImplementationCall(StartGhostMode));
+    const uintptr_t Native = ExecCall ? Finder::RelativeTarget(ExecCall, 1, 5) : 0;
+    const uintptr_t NativeEnd = Native && Finder::FunctionStart(Native) == Native ? Finder::FunctionEnd(Native) : 0;
+    std::vector<uintptr_t> StubCalls;
+    for (const auto& [Site, Target] : NativeEnd ? Finder::DirectCalls(Native, NativeEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (Finder::IsStubFunction(Target))
+        {
+            StubCalls.push_back(Site);
+        }
+    }
+    if (StubCalls.size() != 1)
+    {
+        Log::Error(L"Finder: AFortPlayerControllerGameplay::StartGhostMode's stripped GiveItemToInventoryOwner was not found (native {}, {} stub calls), a Shadow Stone gives no shadow form",
+            Native != 0, StubCalls.size());
+        return nullptr;
+    }
+    Log::Info(L"Finder: AFortPlayerControllerGameplay::StartGhostMode (0x{:X}) gives its item with the stripped GiveItemToInventoryOwner at 0x{:X}", Native - Finder::ImageBase(),
+        StubCalls[0] - Finder::ImageBase());
+    return reinterpret_cast<uint8_t*>(StubCalls[0]);
+}
+
 bool Finder::ResolveServerMoveLive()
 {
     static bool bSearched = false;

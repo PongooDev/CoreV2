@@ -268,6 +268,11 @@ int32_t UFortKismetLibrary::K2_RemoveItemFromPlayerHK(AFortPlayerController* Pla
     return K2_RemoveItemFromPlayer(PlayerController, ItemDefinition, AmountToRemove, HasForceRemoval() && bForceRemoval);
 }
 
+void UFortKismetLibrary::GiveItemToInventoryOwnerHK(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer)
+{
+    GiveItemToInventoryOwner(InventoryOwner, ItemDefinition, NumberToGive, bNotifyPlayer);
+}
+
 void UFortKismetLibrary::K2_RemoveItemFromAllPlayers(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove)
 {
 #if WITH_SERVER_CODE
@@ -603,6 +608,17 @@ void UFortKismetLibrary::HookNatives()
         {
             Hooks::RedirectCall(L"UFortKismetLibrary::K2_RemoveItemFromPlayer", reinterpret_cast<uint8_t*>(Site), reinterpret_cast<void*>(&K2_RemoveItemFromPlayerHK));
         }
+    }
+
+    // 6.00's Shadow Stones (#400). A stone's GA_Consume_SpookyMist applies GE_CBGA_SpookyMist at its montage's notify and
+    // calls the controller's AFortPlayerControllerGameplay::StartGhostMode(AGID_SpookyMist), which gives that gadget with
+    // GiveItemToInventoryOwner before it sets GhostModeRepData. That call reaches the stripped native, so nothing was
+    // given: no shadow form ability set (GA_SpookyMist_PassiveSetup, GA_SpookyMist_Travel's Phase, the speed and
+    // fall-damage effects), no shadow body, and the client's OnRep_GhostModeRepData waited for an item that never came
+    // (CheckGhostModeItemReplicated). EndGhostMode's removal goes through the K2_RemoveItemFromPlayer native above.
+    if (uint8_t* GiveItemCall = Finder::StartGhostModeGiveItemCall())
+    {
+        Hooks::RedirectCall(L"AFortPlayerControllerGameplay::StartGhostMode -> UFortKismetLibrary::GiveItemToInventoryOwner", GiveItemCall, reinterpret_cast<void*>(&GiveItemToInventoryOwnerHK));
     }
 #endif
 

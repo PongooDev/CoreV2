@@ -82,4 +82,6 @@ private:
     // The folded native's callers (ABuildingItemCollectorActor's deposit): 3.2's native takes bForceRemoval, older ones
     // leave the register unset.
     static int32_t K2_RemoveItemFromPlayerHK(AFortPlayerController* PlayerController, UFortWorldItemDefinition* ItemDefinition, int32_t AmountToRemove, bool bForceRemoval);
+    // The stripped native's callers (6.00's AFortPlayerControllerGameplay::StartGhostMode): the game's four parameters.
+    static void GiveItemToInventoryOwnerHK(TScriptInterface<IFortInventoryOwnerInterface> InventoryOwner, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToGive, bool bNotifyPlayer);
 };

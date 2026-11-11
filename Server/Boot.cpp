@@ -315,6 +315,7 @@ static void InstallHooks()
         UFortDeployableBaseLibrary::HookNatives();
         AFortQuickBars::HookVTables();
         AFortPickup::HookVTables();
+        AFortPickup::HookNatives();
         AFortObjectiveBase::HookVTables();
         UFortSchematicItem::HookVTables();
         UFortWorldItem::HookVTables();

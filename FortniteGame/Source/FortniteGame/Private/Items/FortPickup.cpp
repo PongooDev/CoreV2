@@ -3,6 +3,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Components/SceneComponent.h"
 #include "Curves/CurveBase.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
@@ -27,7 +28,11 @@
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
+#include "UObject/ScriptDelegates.h"
+#include "UObject/Stack.h"
+#include "UObject/UnrealType.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 #include "Weapons/FortWeapon.h"
@@ -35,7 +40,6 @@
 #include <algorithm>
 #include <cmath>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -265,7 +269,7 @@ namespace
     }
 
     // How close two pickups of the same item must lie to merge, and how long the one flies into the other. The search
-    // that picks them is server code no client build has (CombinePickups), so both are chosen: pickups are 60 across.
+    // that picks them is server code no client build has (FindExistingPickupNear), so both are chosen: pickups are 60 across.
     // A player's drop is tossed 512 ahead of the pawn and falls short (TossOntoFloor), coming down 60 to 140 ahead, so two
     // drops from one spot facing different ways lie up to 280 apart: at 200, a second drop made after turning round
     // (135 to 180 degrees) came down 230 to 280 from the first and stayed apart. 300 reaches any two drops from one spot,
@@ -273,18 +277,66 @@ namespace
     constexpr float CombineRadius = 300.0f;
     constexpr float CombineFlyTime = 0.25f;
 
+    // A combine in flight: the pickup flying into its target, the count it brings, and the timer that ends it when
+    // CombineFlyTime is up (AFortPickup::EndCombine), with the serial its timer calls back with.
     struct FPickupCombine
     {
         TWeakObjectPtr<AFortPickup> Pickup;
         TWeakObjectPtr<AFortPickup> Target;
         int32_t Count;
-        float EndTime;
+        FTimerHandle TimerHandle;
+        uint64_t Serial;
     };
-
-    std::vector<TWeakObjectPtr<AFortPickup>> TossedPickups;
-    std::vector<TWeakObjectPtr<AFortPickup>> RestingPickups;
     std::vector<FPickupCombine> PickupCombines;
-    bool bCombinePickupsQueued = false;
+
+    // What the pickups flying into Target bring.
+    int32_t GetIncomingCount(const AFortPickup* Target)
+    {
+        int32_t Count = 0;
+        for (const FPickupCombine& Combine : PickupCombines)
+        {
+            if (Combine.Target.Get(true) == Target)
+            {
+                Count += Combine.Count;
+            }
+        }
+        return Count;
+    }
+
+    // Room for any build's FHitResult (0x88 bytes in UE 4.21), for a delegate parameter Core doesn't get.
+    constexpr size_t HitResultStorageSize = 0x200;
+
+    // The pickups at rest that can take more, by item and cell of CombineRadius, so a pickup coming to rest looks only at
+    // the cells around it (AFortPickup::FindExistingPickupNear). A pickup goes in where its toss completes and stays
+    // there; those gone, picked up, full or flying into another drop out as their cells are looked at.
+    std::unordered_map<uint64_t, std::vector<TWeakObjectPtr<AFortPickup>>> RestingPickupCells;
+
+    // The fallback's tossed pickups (AFortPickup::WatchTossedPickups).
+    std::vector<TWeakObjectPtr<AFortPickup>> TossedPickups;
+    bool bWatchTossedPickupsQueued = false;
+
+    // Where a native Core added for a delegate (or the build's own OnServerStopCallback) finds its parameters: the
+    // broadcast (ProcessMulticastDelegate) calls it through ProcessEvent, which copies the signature's parameter struct
+    // to the frame's Locals. A parameter passed by reference (the hit, the impact velocity) isn't copied out by
+    // stepping (StepExplicitProperty only points at it), so it is read there, at its property's offset.
+    const void* GetDelegateParameter(const FFrame& Stack, const UFunction* Function, int32_t Index)
+    {
+        const UField* Field = Function ? static_cast<UField*>(Function->Children) : nullptr;
+        for (; Field && Index > 0; --Index)
+        {
+            Field = Field->Next;
+        }
+        uint8_t* const Locals = Natives::FFrame_Locals >= 0 ? Stack.Locals : nullptr;
+        return Field && Locals ? Locals + reinterpret_cast<const UProperty*>(Field)->GetOffset_ForInternal() : nullptr;
+    }
+
+    // The signature of a class's BlueprintAssignable delegate (a UMulticastDelegateProperty's SignatureFunction), or null.
+    const UFunction* GetDelegateSignature(const UClass* Class, const wchar_t* PropertyName)
+    {
+        const UProperty* Property = Class ? Class->FindPropertyByName(FName(PropertyName, FNAME_Find)) : nullptr;
+        return Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+            ? static_cast<UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+    }
 
     int32_t GetPickupMaxStackSize(const FFortItemEntry& Entry)
     {
@@ -296,8 +348,9 @@ namespace
     // comes 5s after the pickup stops: outside a pickup target or a combine, the stop (0x662120) is called from the
     // pickup's tick once its movement has had no velocity for 5s (0x684A70). Measured on a 1.7.2 server, a drop lay still
     // 0.65s after it was tossed and was AtRest at 5.5s, so a second drop lay apart from the first for 5.5s before it
-    // merged. The projectile stops simulating when it comes to rest (StopSimulating clears its UpdatedComponent) and
-    // doesn't move again, so that ends the toss too: a second drop now merges about 0.9s after it is made.
+    // merged. The projectile stops simulating when it comes to rest (StopSimulating clears its UpdatedComponent, then
+    // broadcasts OnProjectileStop: OnServerStopCallback) and doesn't move again, so that ends the toss too: a second drop
+    // merges about 0.9s after it is made.
     bool IsTossOver(AFortPickup* Pickup)
     {
         UProjectileMovementComponent* Movement = Pickup->MovementComponent;
@@ -431,7 +484,15 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
         Params.Set(L"bToss", bToss);
     }
     Params.Call(this);
-    WatchForCombine();
+#if WITH_SERVER_CODE
+    // Core's tosses merge into a pickup of the same stack near where they land (CombinePickups), as 21.40's server sets
+    // a toss to (SetCombinePickupsWhenTossCompletes).
+    if (Role == ROLE_Authority)
+    {
+        SetCombinePickupsWhenTossCompletes(true);
+        BindServerMovementCallbacks();
+    }
+#endif
 }
 
 void AFortPickup::TossFromContainer(const FVector& FinalLocation, const FVector& LaunchVelocity)
@@ -570,9 +631,97 @@ void AFortPickup::OnRep_PickupLocationData()
     Params.Call(this);
 }
 
-void AFortPickup::WatchForCombine()
+void AFortPickup::SetCombinePickupsWhenTossCompletes(bool bInCombinePickupsWhenTossCompletes)
+{
+    if (Member_bCombinePickupsWhenTossCompletes.IsAvailable())
+    {
+        bCombinePickupsWhenTossCompletes = bInCombinePickupsWhenTossCompletes;
+    }
+}
+
+void AFortPickup::BindServerMovementCallbacks()
 {
 #if WITH_SERVER_CODE
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+    // 4.0's PostInitializeComponents binds the server's stop callback as the pickup spawns; that function is intact and
+    // Core doesn't hook it, so Core binds the callbacks the build doesn't as it tosses the pickup, before the toss can end.
+    UProjectileMovementComponent* Movement = MovementComponent;
+    if (bBindServerStopCallback && Movement)
+    {
+        FMulticastScriptDelegate& StopDelegate = Movement->OnProjectileStop;
+        StopDelegate.AddUniqueDynamic(this, OnServerStopCallbackFunction->GetFName());
+    }
+    else if (!OnServerStopCallbackFunction)
+    {
+        // Nothing can tell Core the toss ended (WatchTossedPickups says why).
+        TossedPickups.push_back(this);
+        if (!bWatchTossedPickupsQueued)
+        {
+            bWatchTossedPickupsQueued = GameThread::Enqueue(&AFortPickup::WatchTossedPickups);
+        }
+    }
+    if (OnServerBounceCallbackFunction && Movement)
+    {
+        FMulticastScriptDelegate& BounceDelegate = Movement->OnProjectileBounce;
+        BounceDelegate.AddUniqueDynamic(this, OnServerBounceCallbackFunction->GetFName());
+    }
+#endif
+}
+
+void AFortPickup::OnServerStopCallback(const FHitResult& Hit)
+{
+    // 4.0 on, the build's own (4.1 0xD87880, 4.5 0xDC2DB0, 5.40 0xFA2520), all of it a client build keeps: on the server,
+    // with a movement component, bServerStoppedSimulation goes on, and its OnRep stops a client's simulation of the toss.
+    if (OnServerStopCallbackIndex >= 0)
+    {
+        CallVirtual<void>(this, OnServerStopCallbackIndex, &Hit);
+    }
+#if WITH_SERVER_CODE
+    // The rest is server code: a toss that combines when it completes merges into a pickup near where it came to rest.
+    // Before 4.0 Core binds this to its own tosses alone, and each of those combines.
+    if (Role == ROLE_Authority && (!Member_bCombinePickupsWhenTossCompletes.IsAvailable() || bCombinePickupsWhenTossCompletes))
+    {
+        CombinePickups();
+    }
+#endif
+}
+
+void AFortPickup::OnServerBounceCallback(const FHitResult& Hit, const FVector& ImpactVelocity)
+{
+#if WITH_SERVER_CODE
+    // 4.5 to 5.40 have no OnServerBounceCallback (21.40's, bound to the movement's OnProjectileBounce on the server), and
+    // nothing in a client build bumps ServerImpactSoundFlash: the bump is server code. The pickup's NotifyHit decides on
+    // the landed sound (4.5 0xDC1410, 5.40 0xFA0A60): a hit the pickup moved itself into, a second after the last sound,
+    // and on 5.40 one whose Z force passes LandSoundZForceThreshold; where it plays the sound it sets
+    // LastLandedSoundPlayTime to the world's time. The server's own NotifyHit runs for the hit as the move that made it
+    // ends, before the movement's HandleImpact broadcasts the bounce, so a bounce whose hit played the sound finds
+    // LastLandedSoundPlayTime at this moment's time, and clients that don't simulate the pickup play it from the flash.
+    UWorld* World = GetWorld();
+    if (Role != ROLE_Authority || !World || LastLandedSoundPlayTime != World->GetTimeSeconds())
+    {
+        return;
+    }
+    ServerImpactSoundFlash = static_cast<uint8_t>(ServerImpactSoundFlash + 1);
+#endif
+}
+
+void AFortPickup::CombinePickups(const AFortPickup* Except)
+{
+#if WITH_SERVER_CODE
+    // Pickups of the same item that come to rest near each other merge into one (pickup combining did nothing). The client
+    // half is in every build: PickupLocationData's CombineTarget sends OnRep_PickupLocationData (1.7.2 0x67A7A0; 1.2
+    // 0x1405EA760, 1.8 0x690DD0) to its combine branch (0x681C30), which stops the toss (0x662120) and sets a timer for
+    // FlyTime, and the pickup's tick (0x6832A0 -> 0x684B10) moves it from LootInitialPosition into the target over
+    // FlyTime; while it has a target it can't be picked up (0x6783E0). The server half is server code a client build
+    // doesn't have: the timer is bound to the shared empty function, and nothing sets a CombineTarget. It starts as the
+    // toss completes (OnServerStopCallback): the pickup flies into the nearest resting pickup of the same stack within
+    // CombineRadius with room for it (FindExistingPickupNear), and when FlyTime is up the target takes what fits of its
+    // count (EndCombine). What doesn't fit stays in the pickup, which goes back to where it landed (CancelCombine). A
+    // landed pickup stays one of the resting ones, so two pickups are compared when the later of them comes to rest,
+    // wherever the earlier one landed.
     static const bool bCombineAvailable = []()
     {
         const bool bAvailable = Member_PickupLocationData.IsAvailable() && Member_bPickedUp.IsAvailable() && StaticFunction_OnRep_PickupLocationData()
@@ -583,203 +732,191 @@ void AFortPickup::WatchForCombine()
         }
         return bAvailable;
     }();
-    if (!bCombineAvailable || Role != ROLE_Authority)
+    if (!bCombineAvailable || !CanCombine(this))
     {
         return;
     }
-    TossedPickups.push_back(this);
-    if (!bCombinePickupsQueued)
+
+    // One of the resting pickups from now on, in the cell it lies in.
+    const UFortItemDefinition* Definition = static_cast<FFortItemEntry&>(PrimaryPickupItemEntry).ItemDefinition;
+    std::vector<TWeakObjectPtr<AFortPickup>>& Cell = RestingPickupCells[CombineCell(Definition, GetPickupLocation(this), 0, 0)];
+    const TWeakObjectPtr<AFortPickup> WeakThis(this);
+    if (std::find(Cell.begin(), Cell.end(), WeakThis) == Cell.end())
     {
-        bCombinePickupsQueued = GameThread::Enqueue(&AFortPickup::CombinePickups);
+        Cell.push_back(WeakThis);
+    }
+
+    // A pickup that others fly into stays.
+    if (GetIncomingCount(this) > 0)
+    {
+        return;
+    }
+    if (AFortPickup* Target = FindExistingPickupNear(Except))
+    {
+        StartCombine(Target);
     }
 #endif
 }
 
-void AFortPickup::CombinePickups()
+AFortPickup* AFortPickup::FindExistingPickupNear(const AFortPickup* Except)
 {
-#if WITH_SERVER_CODE
-    // Pickups of the same item that land near each other merge into one (pickup combining did nothing). The client half
-    // is in every build: PickupLocationData's CombineTarget sends OnRep_PickupLocationData (1.7.2 0x67A7A0; 1.2
-    // 0x1405EA760, 1.8 0x690DD0) to its combine branch (0x681C30), which stops the toss (0x662120) and sets a timer for
-    // FlyTime, and the pickup's tick (0x6832A0 -> 0x684B10) moves it from LootInitialPosition into the target over
-    // FlyTime; while it has a target it can't be picked up (0x6783E0). The server half is server code a client build
-    // doesn't have: the timer is bound to the shared empty function, and nothing sets a CombineTarget. Core's tossed
-    // pickups are watched until their toss is over (IsTossOver), then each flies into the nearest resting pickup of the
-    // same stack within CombineRadius with room for it (CanCombine, IsSameStack), and when FlyTime is up the target takes
-    // what fits of its count. What doesn't fit stays in the pickup, which goes back to where it landed (the toss branch
-    // of the same OnRep, with no target). A landed pickup stays one of the resting ones, so two pickups are compared when
-    // the later of them comes to rest, wherever the earlier one landed.
-    bCombinePickupsQueued = false;
-    std::unordered_map<AFortPickup*, int32_t> Incoming;
-    std::vector<std::pair<AFortPickup*, AFortPickup*>> Finished;
-    std::vector<std::pair<AFortPickup*, AFortPickup*>> Cancelled;
-    std::erase_if(PickupCombines, [&](const FPickupCombine& Combine)
+    FFortItemEntry& Entry = PrimaryPickupItemEntry;
+    const UFortItemDefinition* Definition = Entry.ItemDefinition;
+    const int32_t MaxStackSize = GetPickupMaxStackSize(Entry);
+    const FVector Location = GetPickupLocation(this);
+    AFortPickup* Nearest = nullptr;
+    float NearestDistanceSquared = CombineRadius * CombineRadius;
+    // The closest pickup of the item it passed over, and why, for the line below when a pawn's drop merges with none
+    // (loot lying a little apart from loot of the same item is common, and stays quiet).
+    AFortPickup* Missed = nullptr;
+    float MissedDistanceSquared = 4.0f * CombineRadius * CombineRadius;
+    const wchar_t* MissedReason = nullptr;
+    for (int32_t OffsetX = -1; OffsetX <= 1; ++OffsetX)
     {
-        AFortPickup* Pickup = Combine.Pickup.Get();
-        UWorld* World = Pickup ? Pickup->GetWorld() : nullptr;
-        if (!World)
+        for (int32_t OffsetY = -1; OffsetY <= 1; ++OffsetY)
         {
-            return true;
-        }
-        // The pickup's tick moves it toward its target's location as it is now (5.0 CL-4204761 0xF55420: VInterpTo from
-        // LootInitialPosition to the CombineTarget's root, then SetActorLocation), on the server and on each client. A
-        // target that a pawn picks up flies to the pawn and the pickup followed it there (#344): light bullets from a chest
-        // flying into floor ammo the player then walked over ended up at the player. A pickup whose target is picked up
-        // or gone stops at once and goes back.
-        AFortPickup* Target = Combine.Target.Get();
-        if (!Target || Target->bPickedUp)
-        {
-            Cancelled.emplace_back(Pickup, Target);
-            return true;
-        }
-        if (World->GetTimeSeconds() < Combine.EndTime)
-        {
-            Incoming[Target] += Combine.Count;
-            return false;
-        }
-        Finished.emplace_back(Pickup, Target);
-        return true;
-    });
-    for (const auto& [Pickup, Target] : Cancelled)
-    {
-        const FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
-        const UFortItemDefinition* Definition = Entry.ItemDefinition;
-        Log::Info(L"Pickup: {} {} was flying into {}, which {}, so it goes back", static_cast<int32_t>(Entry.Count), Definition ? Definition->GetName().ToStdString() : L"None",
-            Target ? Target->GetName().ToStdString() : L"a pickup", Target ? L"was picked up" : L"is gone");
-        Pickup->CancelCombine();
-    }
-    for (const auto& [Pickup, Target] : Finished)
-    {
-        Pickup->FinishCombine(Target);
-    }
-
-    std::vector<AFortPickup*> Landed;
-    std::erase_if(TossedPickups, [&](const TWeakObjectPtr<AFortPickup>& Tossed)
-    {
-        AFortPickup* Pickup = Tossed.Get();
-        if (Pickup && !Pickup->bPickedUp && !IsTossOver(Pickup))
-        {
-            return false;
-        }
-        if (Pickup && CanCombine(Pickup))
-        {
-            Landed.push_back(Pickup);
-            RestingPickups.push_back(Pickup);
-        }
-        return true;
-    });
-
-    if (!Landed.empty())
-    {
-        // The resting pickups of the landed ones' items that can take more, by cell of CombineRadius, so each landed
-        // pickup looks only at the cells around it.
-        std::unordered_set<const UFortItemDefinition*> Definitions;
-        for (AFortPickup* Pickup : Landed)
-        {
-            Definitions.insert(static_cast<FFortItemEntry&>(Pickup->PrimaryPickupItemEntry).ItemDefinition);
-        }
-        std::unordered_set<AFortPickup*> Seen;
-        std::unordered_map<uint64_t, std::vector<std::pair<AFortPickup*, FVector>>> Cells;
-        std::erase_if(RestingPickups, [&](const TWeakObjectPtr<AFortPickup>& Resting)
-        {
-            AFortPickup* Pickup = Resting.Get();
-            if (!Pickup || !Seen.insert(Pickup).second || !CanCombine(Pickup))
-            {
-                return true;
-            }
-            const UFortItemDefinition* Definition = static_cast<FFortItemEntry&>(Pickup->PrimaryPickupItemEntry).ItemDefinition;
-            if (Definitions.contains(Definition))
-            {
-                const FVector Location = GetPickupLocation(Pickup);
-                Cells[CombineCell(Definition, Location, 0, 0)].emplace_back(Pickup, Location);
-            }
-            return false;
-        });
-
-        for (AFortPickup* Pickup : Landed)
-        {
-            // A pickup that others fly into, or one that is flying, stays.
-            if (Incoming.contains(Pickup) || !CanCombine(Pickup))
+            const auto Cell = RestingPickupCells.find(CombineCell(Definition, Location, OffsetX, OffsetY));
+            if (Cell == RestingPickupCells.end())
             {
                 continue;
             }
-            FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
-            const UFortItemDefinition* Definition = Entry.ItemDefinition;
-            const int32_t MaxStackSize = GetPickupMaxStackSize(Entry);
-            const FVector Location = GetPickupLocation(Pickup);
-            AFortPickup* Nearest = nullptr;
-            float NearestDistanceSquared = CombineRadius * CombineRadius;
-            // The closest pickup of the item it passed over, and why, for the line below when a pawn's drop merges with none
-            // (loot lying a little apart from loot of the same item is common, and stays quiet).
-            AFortPickup* Missed = nullptr;
-            float MissedDistanceSquared = 4.0f * CombineRadius * CombineRadius;
-            const wchar_t* MissedReason = nullptr;
-            for (int32_t OffsetX = -1; OffsetX <= 1; ++OffsetX)
+            std::erase_if(Cell->second, [](const TWeakObjectPtr<AFortPickup>& Resting)
             {
-                for (int32_t OffsetY = -1; OffsetY <= 1; ++OffsetY)
+                AFortPickup* Pickup = Resting.Get();
+                return !Pickup || !CanCombine(Pickup);
+            });
+            for (const TWeakObjectPtr<AFortPickup>& Resting : Cell->second)
+            {
+                AFortPickup* Other = Resting.Get();
+                if (Other == this || Other == Except)
                 {
-                    const auto Cell = Cells.find(CombineCell(Definition, Location, OffsetX, OffsetY));
-                    if (Cell == Cells.end())
-                    {
-                        continue;
-                    }
-                    for (const auto& [Other, OtherLocation] : Cell->second)
-                    {
-                        if (Other == Pickup)
-                        {
-                            continue;
-                        }
-                        const float DistanceSquared = FMath::Square(OtherLocation.X - Location.X) + FMath::Square(OtherLocation.Y - Location.Y) + FMath::Square(OtherLocation.Z - Location.Z);
-                        const auto OtherIncoming = Incoming.find(Other);
-                        const int32_t OtherCount = static_cast<FFortItemEntry&>(Other->PrimaryPickupItemEntry).Count + (OtherIncoming != Incoming.end() ? OtherIncoming->second : 0);
-                        const wchar_t* Reason = DistanceSquared > CombineRadius * CombineRadius ? L"out of reach"
-                            : OtherCount >= MaxStackSize ? L"full"
-                            : !CanCombine(Other) ? L"flying into another"
-                            : !IsSameStack(Pickup, Other) ? L"another level, durability, owner or mission"
-                            : nullptr;
-                        if (!Reason && DistanceSquared <= NearestDistanceSquared)
-                        {
-                            Nearest = Other;
-                            NearestDistanceSquared = DistanceSquared;
-                        }
-                        else if (Reason && DistanceSquared < MissedDistanceSquared)
-                        {
-                            Missed = Other;
-                            MissedDistanceSquared = DistanceSquared;
-                            MissedReason = Reason;
-                        }
-                    }
+                    continue;
+                }
+                const FVector OtherLocation = GetPickupLocation(Other);
+                const float DistanceSquared = FMath::Square(OtherLocation.X - Location.X) + FMath::Square(OtherLocation.Y - Location.Y) + FMath::Square(OtherLocation.Z - Location.Z);
+                const int32_t OtherCount = static_cast<FFortItemEntry&>(Other->PrimaryPickupItemEntry).Count + GetIncomingCount(Other);
+                const wchar_t* Reason = DistanceSquared > CombineRadius * CombineRadius ? L"out of reach"
+                    : OtherCount >= MaxStackSize ? L"full"
+                    : !IsSameStack(this, Other) ? L"another item, level, durability, owner or mission"
+                    : nullptr;
+                if (!Reason && DistanceSquared <= NearestDistanceSquared)
+                {
+                    Nearest = Other;
+                    NearestDistanceSquared = DistanceSquared;
+                }
+                else if (Reason && DistanceSquared < MissedDistanceSquared)
+                {
+                    Missed = Other;
+                    MissedDistanceSquared = DistanceSquared;
+                    MissedReason = Reason;
                 }
             }
-            if (Nearest)
+            if (Cell->second.empty())
             {
-                Incoming[Nearest] += Entry.Count;
-                Pickup->StartCombine(Nearest);
-            }
-            else if (Missed && static_cast<AFortPawn*>(Pickup->PawnWhoDroppedPickup))
-            {
-                Log::Info(L"Pickup: {} {} came to rest {:.0f} from {} and stays apart ({})", static_cast<int32_t>(Entry.Count), Definition ? Definition->GetName().ToStdString() : L"None", std::sqrt(MissedDistanceSquared), Missed->GetName().ToStdString(), MissedReason);
+                RestingPickupCells.erase(Cell);
             }
         }
     }
-
-    if (!bCombinePickupsQueued && (!PickupCombines.empty() || !TossedPickups.empty()))
+    if (!Nearest && Missed && static_cast<AFortPawn*>(PawnWhoDroppedPickup))
     {
-        bCombinePickupsQueued = GameThread::Enqueue(&AFortPickup::CombinePickups);
+        Log::Info(L"Pickup: {} {} came to rest {:.0f} from {} and stays apart ({})", static_cast<int32_t>(Entry.Count), Definition ? Definition->GetName().ToStdString() : L"None", std::sqrt(MissedDistanceSquared), Missed->GetName().ToStdString(), MissedReason);
     }
-#endif
+    return Nearest;
 }
 
 void AFortPickup::StartCombine(AFortPickup* Target)
 {
     UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
     FFortPickupLocationData& LocationData = PickupLocationData;
     LocationData.CombineTarget = Target;
     LocationData.LootInitialPosition = GetTransform().GetLocation();
     LocationData.FlyTime = CombineFlyTime;
     OnRep_PickupLocationData();
     ForceNetUpdate();
-    PickupCombines.push_back({ this, Target, static_cast<FFortItemEntry&>(PrimaryPickupItemEntry).Count, World->GetTimeSeconds() + CombineFlyTime });
+
+    // The combine branch's timer for FlyTime runs here too, but it is bound to server code a client build doesn't have
+    // (the shared empty function): Core's ends the combine (EndCombine). The serial tells a combine from a later one of
+    // the same pickup.
+    static uint64_t LastSerial = 0;
+    const uint64_t Serial = ++LastSerial;
+    FPickupCombine Combine{ this, Target, static_cast<FFortItemEntry&>(PrimaryPickupItemEntry).Count, {}, Serial };
+    World->GetTimerManager().SetTimer(Combine.TimerHandle, FTimerDelegate::CreateLambda([WeakPickup = TWeakObjectPtr<AFortPickup>(this), Serial]()
+    {
+        if (AFortPickup* Pickup = WeakPickup.Get())
+        {
+            Pickup->EndCombine(Serial);
+        }
+        else
+        {
+            std::erase_if(PickupCombines, [Serial](const FPickupCombine& Ended) { return Ended.Serial == Serial; });
+        }
+    }), CombineFlyTime, false);
+    PickupCombines.push_back(Combine);
+
+    // A pawn starting to pick the target up sends this one back at once (HandleCombineTargetPickupAttempted): the
+    // pickup's tick moves it toward the target as it is now (5.0 CL-4204761 0xF55420: VInterpTo from LootInitialPosition
+    // to the CombineTarget's root, then SetActorLocation), on the server and on each client, so it would follow the
+    // target to the pawn (#344: light bullets from a chest flying into floor ammo the player then walked over ended up at
+    // the player).
+    if (HandleCombineTargetPickupAttemptedFunction)
+    {
+        FMulticastScriptDelegate& TargetPickupAttempted = Target->OnPickupAttempted;
+        TargetPickupAttempted.AddUniqueDynamic(this, HandleCombineTargetPickupAttemptedFunction->GetFName());
+    }
+}
+
+AFortPickup* AFortPickup::TakeCombine(bool& bOutFound, uint64_t Serial)
+{
+    bOutFound = false;
+    const auto Found = std::find_if(PickupCombines.begin(), PickupCombines.end(), [this, Serial](const FPickupCombine& Combine)
+    {
+        return Combine.Pickup.Get(true) == this && (Serial == 0 || Combine.Serial == Serial);
+    });
+    if (Found == PickupCombines.end())
+    {
+        return nullptr;
+    }
+    bOutFound = true;
+    AFortPickup* Target = Found->Target.Get();
+    FTimerHandle TimerHandle = Found->TimerHandle;
+    PickupCombines.erase(Found);
+    // The timer's own call (Serial) has nothing left to clear; an early end clears it (InRate 0).
+    UWorld* World = Serial == 0 && TimerHandle.IsValid() ? GetWorld() : nullptr;
+    if (World)
+    {
+        World->GetTimerManager().SetTimer(TimerHandle, FTimerDelegate(), 0.0f, false);
+    }
+    if (Target && HandleCombineTargetPickupAttemptedFunction)
+    {
+        FMulticastScriptDelegate& TargetPickupAttempted = Target->OnPickupAttempted;
+        TargetPickupAttempted.RemoveDynamic(this, HandleCombineTargetPickupAttemptedFunction->GetFName());
+    }
+    return Target;
+}
+
+void AFortPickup::EndCombine(uint64_t Serial)
+{
+    bool bFound = false;
+    AFortPickup* Target = TakeCombine(bFound, Serial);
+    if (!bFound)
+    {
+        return;
+    }
+    // A target picked up where its OnPickupAttempted couldn't send this one back, or one that is gone.
+    if (!Target || Target->bPickedUp)
+    {
+        const FFortItemEntry& Entry = PrimaryPickupItemEntry;
+        const UFortItemDefinition* Definition = Entry.ItemDefinition;
+        Log::Info(L"Pickup: {} {} was flying into {}, which {}, so it goes back", static_cast<int32_t>(Entry.Count), Definition ? Definition->GetName().ToStdString() : L"None",
+            Target ? Target->GetName().ToStdString() : L"a pickup", Target ? L"was picked up" : L"is gone");
+        CancelCombine();
+        return;
+    }
+    FinishCombine(Target);
 }
 
 void AFortPickup::FinishCombine(AFortPickup* Target)
@@ -810,15 +947,19 @@ void AFortPickup::FinishCombine(AFortPickup* Target)
     CancelCombine();
 }
 
-void AFortPickup::CancelCombine()
+void AFortPickup::CancelCombine(const AFortPickup* Except)
 {
+    // Off the combines in flight, if it still is: its timer cleared, its target's OnPickupAttempted no longer bound.
+    bool bFound = false;
+    TakeCombine(bFound, 0);
+
     // With no target, OnRep_PickupLocationData takes the toss branch (AFortPickup::SetupForMovementCompToss, 4.5 0xDC75B0,
     // 5.0 0xF533F0). A toss still InProgress there is launched again, from where the pickup is, at a velocity solved from
     // LootInitialPosition to LootFinalPosition: a pickup that had followed its target to a player was thrown out from the
     // player (#344). A toss AtRest stops the movement and puts the pickup on FinalTossRestLocation, on the server and on
-    // each client. Core's combine starts once the pickup lies still (IsTossOver), well before the 5s after which its tick
-    // sets AtRest, so it was still InProgress. The pickup now goes back AtRest to where it lay when the combine started
-    // (StartCombine's LootInitialPosition).
+    // each client. Core's combine starts once the pickup lies still (its movement's OnProjectileStop), well before the 5s
+    // after which its tick sets AtRest, so it was still InProgress. The pickup now goes back AtRest to where it lay when the
+    // combine started (StartCombine's LootInitialPosition).
     FFortPickupLocationData& LocationData = PickupLocationData;
     const FVector RestLocation = LocationData.LootInitialPosition;
     LocationData.CombineTarget = nullptr;
@@ -834,7 +975,65 @@ void AFortPickup::CancelCombine()
         SetActorLocation(RestLocation, false, true);
     }
     ForceNetUpdate();
-    WatchForCombine();
+    // At rest again where it lay: it may merge into another.
+    CombinePickups(Except);
+}
+
+void AFortPickup::HandleCombineTargetPickupAttempted(AFortPickup* AttemptedPickup)
+{
+#if WITH_SERVER_CODE
+    // SetPickupTarget broadcasts it before it sets bPickedUp, so the target is left out of the pickup's next search.
+    const AFortPickup* CombineTarget = static_cast<FFortPickupLocationData&>(PickupLocationData).CombineTarget;
+    if (Role != ROLE_Authority || !AttemptedPickup || CombineTarget != AttemptedPickup)
+    {
+        if (AttemptedPickup && HandleCombineTargetPickupAttemptedFunction)
+        {
+            FMulticastScriptDelegate& TargetPickupAttempted = AttemptedPickup->OnPickupAttempted;
+            TargetPickupAttempted.RemoveDynamic(this, HandleCombineTargetPickupAttemptedFunction->GetFName());
+        }
+        return;
+    }
+    const FFortItemEntry& Entry = PrimaryPickupItemEntry;
+    const UFortItemDefinition* Definition = Entry.ItemDefinition;
+    Log::Info(L"Pickup: {} {} was flying into {}, which is being picked up, so it goes back", static_cast<int32_t>(Entry.Count), Definition ? Definition->GetName().ToStdString() : L"None",
+        AttemptedPickup->GetName().ToStdString());
+    CancelCombine(AttemptedPickup);
+#endif
+}
+
+void AFortPickup::WatchTossedPickups()
+{
+#if WITH_SERVER_CODE
+    // The fallback where nothing tells Core a toss ended: before 4.0 the build has no OnServerStopCallback (4.0's
+    // PostInitializeComponents binds it to the movement's OnProjectileStop on the server), and here Core couldn't add its
+    // own (no UClass::FuncMap, logged at boot); from 4.0 the build's couldn't be taken over. Core's tossed pickups are
+    // looked at each frame until their toss is over: the projectile stops simulating when it comes to rest
+    // (StopSimulating clears its UpdatedComponent), or the pickup's tick sets AtRest 5s after it stopped moving (1.7.2
+    // 0x684A70 -> 0x662120).
+    bWatchTossedPickupsQueued = false;
+    std::vector<AFortPickup*> Landed;
+    std::erase_if(TossedPickups, [&Landed](const TWeakObjectPtr<AFortPickup>& Tossed)
+    {
+        AFortPickup* Pickup = Tossed.Get();
+        if (Pickup && !Pickup->bPickedUp && !IsTossOver(Pickup))
+        {
+            return false;
+        }
+        if (Pickup)
+        {
+            Landed.push_back(Pickup);
+        }
+        return true;
+    });
+    for (AFortPickup* Pickup : Landed)
+    {
+        Pickup->CombinePickups();
+    }
+    if (!TossedPickups.empty() && !bWatchTossedPickupsQueued)
+    {
+        bWatchTossedPickupsQueued = GameThread::Enqueue(&AFortPickup::WatchTossedPickups);
+    }
+#endif
 }
 
 void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
@@ -1049,6 +1248,106 @@ ptrdiff_t AFortPickup::PrimaryPickupItemEntryOffset()
 ptrdiff_t AFortPickup::PickedUpOffset()
 {
     return Member_bPickedUp.GetOffsetChecked();
+}
+
+DEFINE_FUNCTION(AFortPickup::execOnServerStopCallback)
+{
+    // The hit, the signature's one parameter, by reference: read where ProcessEvent put it (GetDelegateParameter).
+    // Neither the build's part nor Core's reads it.
+    alignas(16) static const uint8_t NoHit[HitResultStorageSize] = {};
+    const void* Hit = GetDelegateParameter(P_STACK, OnServerStopCallbackFunction, 0);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPickup*>(Context)->OnServerStopCallback(*static_cast<const FHitResult*>(Hit ? Hit : NoHit));
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortPickup::execOnServerBounceCallback)
+{
+    // FOnProjectileBounceDelegate's hit and impact velocity, both by reference.
+    alignas(16) static const uint8_t NoHit[HitResultStorageSize] = {};
+    static const FVector NoVelocity(0.0f, 0.0f, 0.0f);
+    const void* Hit = GetDelegateParameter(P_STACK, OnServerBounceCallbackFunction, 0);
+    const void* ImpactVelocity = GetDelegateParameter(P_STACK, OnServerBounceCallbackFunction, 1);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPickup*>(Context)->OnServerBounceCallback(*static_cast<const FHitResult*>(Hit ? Hit : NoHit), ImpactVelocity ? *static_cast<const FVector*>(ImpactVelocity) : NoVelocity);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortPickup::execHandleCombineTargetPickupAttempted)
+{
+    // OnPickupAttempted's first parameter, the pickup a pawn is picking up; the pawn (and the item and where it goes,
+    // where the build passes them) aren't read.
+    P_GET_OBJECT(AFortPickup, Z_Param_Pickup);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPickup*>(Context)->HandleCombineTargetPickupAttempted(Z_Param_Pickup);
+    P_NATIVE_END;
+}
+
+void AFortPickup::HookNatives()
+{
+#if WITH_SERVER_CODE
+    UClass* PickupClass = StaticClass();
+    const UClass* MovementClass = UProjectileMovementComponent::StaticClass();
+    if (!PickupClass || !MovementClass)
+    {
+        return;
+    }
+
+    // A toss's end on the server. From 4.0 the pickup's PostInitializeComponents (4.1 0xD70660, 4.5 0xDAB1E0, 5.40
+    // 0xF903B0) binds OnServerStopCallback to its movement's OnProjectileStop where it has authority
+    // (AddDynamic(this, &AFortPickup::OnServerStopCallback)), and StopSimulating's broadcast reaches it through the
+    // UFunction's exec (5.40 0x14BB4F0), which calls the virtual (5.40 slot 0xC6). Core's exec takes the UFunction's place
+    // and calls Core's OnServerStopCallback, which runs the build's virtual first.
+    if (UFunction* StopFunction = FindStaticFunction_OnServerStopCallback())
+    {
+        const int32_t Index = Finder::ImplementationIndex(StopFunction);
+        if (Index >= 0 && (Natives::FFrame_Locals >= 0 || Finder::ResolveScriptFrame()))
+        {
+            OnServerStopCallbackIndex = Index;
+            OnServerStopCallbackFunction = StopFunction;
+            StopFunction->SetNativeFunc(&execOnServerStopCallback);
+            Log::Info(L"Pickup: OnServerStopCallback (slot 0x{:X}) runs Core's server part after the build's", Index);
+        }
+        else
+        {
+            Log::Error(L"Finder: AFortPickup::OnServerStopCallback's slot not found (exec 0x{:X})", reinterpret_cast<uintptr_t>(StopFunction->GetNativeFunc()) - Finder::ImageBase());
+        }
+    }
+    // Before 4.0 nothing binds the movement's OnProjectileStop: Core adds OnServerStopCallback, 4.0's name, with the
+    // delegate's signature, and binds it to its own tosses (BindServerMovementCallbacks).
+    else if (const UFunction* StopSignature = GetDelegateSignature(MovementClass, L"OnProjectileStop"))
+    {
+        OnServerStopCallbackFunction = PickupClass->AddNativeFunction(L"OnServerStopCallback", &execOnServerStopCallback, StopSignature);
+        bBindServerStopCallback = OnServerStopCallbackFunction != nullptr;
+    }
+    if (!OnServerStopCallbackFunction)
+    {
+        Log::Warning(L"Pickup: no OnServerStopCallback hears a toss end, so Core's tossed pickups are watched each frame to combine");
+    }
+
+    // 4.5 on: ServerImpactSoundFlash, rung from the movement's bounces (OnServerBounceCallback).
+    if (Member_ServerImpactSoundFlash.IsAvailable() && Member_LastLandedSoundPlayTime.IsAvailable())
+    {
+        if (const UFunction* BounceSignature = GetDelegateSignature(MovementClass, L"OnProjectileBounce"))
+        {
+            OnServerBounceCallbackFunction = PickupClass->AddNativeFunction(L"OnServerBounceCallback", &execOnServerBounceCallback, BounceSignature);
+        }
+        if (!OnServerBounceCallbackFunction)
+        {
+            Log::Warning(L"Pickup: OnServerBounceCallback can't be added, so clients that don't simulate a pickup hear no landing");
+        }
+    }
+
+    // A combine target being picked up sends what flies into it back at once (HandleCombineTargetPickupAttempted). Without
+    // OnPickupAttempted it goes back when its fly time is up (EndCombine).
+    if (const UFunction* AttemptedSignature = GetDelegateSignature(PickupClass, L"OnPickupAttempted"))
+    {
+        HandleCombineTargetPickupAttemptedFunction = PickupClass->AddNativeFunction(L"HandleCombineTargetPickupAttempted", &execHandleCombineTargetPickupAttempted, AttemptedSignature);
+    }
+#endif
 }
 
 void AFortPickup::HookVTables()

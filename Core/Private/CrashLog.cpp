@@ -17,9 +17,28 @@ namespace
     std::atomic<int> LoggedExceptions = 0;
     thread_local bool bInHandler = false;
 
-    bool IsCrash(DWORD Code)
+    // The engine's fatal errors (UE_LOG Fatal, a failed check, LowLevelFatalError, Core's own check) end in
+    // FPlatformMisc::RaiseException(1) (1.8.1 0x135B6C0, from FOutputDeviceWindowsError::Serialize and
+    // FDebug::AssertFailed). A 1.8.1 server died with none of the codes below and nothing in its Core log (CoreV2 #352).
+    constexpr DWORD EngineFatalErrorCode = 1;
+    // MSVC's C++ throw. Core catches none, so one Core throws ends the process.
+    constexpr DWORD CppExceptionCode = 0xE06D7363;
+
+    [[maybe_unused]] bool IsThrownByCore(const EXCEPTION_RECORD* Record)
     {
-        switch (Code)
+        // ExceptionInformation[3] is the image base of the module that threw (x64).
+        static const ULONG_PTR CoreBase = []
+        {
+            HMODULE Module = nullptr;
+            GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCWSTR>(&IsThrownByCore), &Module);
+            return reinterpret_cast<ULONG_PTR>(Module);
+        }();
+        return Record->NumberParameters >= 4 && CoreBase && Record->ExceptionInformation[3] == CoreBase;
+    }
+
+    bool IsCrash(const EXCEPTION_RECORD* Record)
+    {
+        switch (Record->ExceptionCode)
         {
         case EXCEPTION_ACCESS_VIOLATION:
         case EXCEPTION_ILLEGAL_INSTRUCTION:
@@ -27,8 +46,30 @@ namespace
         case EXCEPTION_INT_DIVIDE_BY_ZERO:
         case EXCEPTION_IN_PAGE_ERROR:
             return true;
+#if WITH_SERVER_CODE
+        case EXCEPTION_STACK_OVERFLOW:
+        case EngineFatalErrorCode:
+            return true;
+        case CppExceptionCode:
+            return IsThrownByCore(Record);
+#endif
         default:
             return false;
+        }
+    }
+
+    const wchar_t* KindOf(DWORD Code)
+    {
+        switch (Code)
+        {
+        case EXCEPTION_STACK_OVERFLOW:
+            return L" (stack overflow)";
+        case EngineFatalErrorCode:
+            return L" (engine fatal error, the reason is in FortniteGame.log)";
+        case CppExceptionCode:
+            return L" (C++ exception thrown by Core)";
+        default:
+            return L"";
         }
     }
 
@@ -49,7 +90,7 @@ namespace
     LONG CALLBACK OnException(PEXCEPTION_POINTERS Pointers)
     {
         const EXCEPTION_RECORD* Record = Pointers ? Pointers->ExceptionRecord : nullptr;
-        if (!Record || !Pointers->ContextRecord || !IsCrash(Record->ExceptionCode) || bInHandler || LoggedExceptions.fetch_add(1) >= MaxLoggedExceptions)
+        if (!Record || !Pointers->ContextRecord || !IsCrash(Record) || bInHandler || LoggedExceptions.fetch_add(1) >= MaxLoggedExceptions)
         {
             return EXCEPTION_CONTINUE_SEARCH;
         }
@@ -57,7 +98,7 @@ namespace
 
         // Logged when raised, before any handler: one the game catches and survives is logged too, hence "exception",
         // and only the first few are.
-        std::wstring Text = std::format(L"Exception 0x{:08X} at {} (thread {})", Record->ExceptionCode, Describe(reinterpret_cast<DWORD64>(Record->ExceptionAddress)), GetCurrentThreadId());
+        std::wstring Text = std::format(L"Exception 0x{:08X}{} at {} (thread {})", Record->ExceptionCode, KindOf(Record->ExceptionCode), Describe(reinterpret_cast<DWORD64>(Record->ExceptionAddress)), GetCurrentThreadId());
         if ((Record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION || Record->ExceptionCode == EXCEPTION_IN_PAGE_ERROR) && Record->NumberParameters >= 2)
         {
             const ULONG_PTR Operation = Record->ExceptionInformation[0];
@@ -122,6 +163,12 @@ namespace
 
 void CrashLog::Install()
 {
+#if WITH_SERVER_CODE
+    // On an unpacked build Install runs on the main (game) thread: a stack overflow there leaves the handler this much
+    // stack to log it with.
+    ULONG StackGuarantee = 64 * 1024;
+    SetThreadStackGuarantee(&StackGuarantee);
+#endif
     if (!AddVectoredExceptionHandler(1, &OnException))
     {
         Log::Warning(L"CrashLog: AddVectoredExceptionHandler failed ({}), crashes won't be logged", GetLastError());

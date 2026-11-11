@@ -91,7 +91,9 @@ class UFortAIAssignment : public UObject
 
 public:
     DefineUProperty(UObject*, AssignmentSettings)
+    DefineUStructProperty(FFortAIAssignmentIdentifier, AssignmentIdentifier)
 
+    static bool HasAssignmentIdentifier() { return Member_AssignmentIdentifier.IsAvailable(); }
     UObject* GetAssignmentSettings() const { return Member_AssignmentSettings.IsAvailable() ? AssignmentSettings : nullptr; }
 };
 
@@ -129,6 +131,9 @@ public:
     void SetFrustrationDiscouragement(AFortAIController* AI, float DiscouragementDuration);
 
     static AFortAIGoalManager* GetCurrent(const UObject* WorldContextObject);
+    // GetCurrent for 5.0+'s encounter primary assignment lookup, which inlines FindAssignment (Finder::GoalManagerGetCurrentCalls).
+    // Logs the encounter's assignments whenever they change, so a mission's spawn queries show what they measure from.
+    static AFortAIGoalManager* GetCurrentForEncounterAssignments(const UObject* EncounterInfo);
     static void SetCurrentGoalDiscouragement(UObject* WorldContext, AFortAIController* AI);
     static void HookCallSites();
     static void HookNatives();

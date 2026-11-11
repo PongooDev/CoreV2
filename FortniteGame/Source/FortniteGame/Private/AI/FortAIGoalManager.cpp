@@ -11,8 +11,14 @@
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
+#include "Containers/ScriptArray.h"
+#include "Math/Vector.h"
+#include "UObject/WeakObjectPtr.h"
 
 #include <cstring>
+#include <format>
+#include <string>
+#include <unordered_map>
 
 AFortAIGoalManager* AFortAIGoalManager::GetCurrent(const UObject* WorldContextObject)
 {
@@ -23,6 +29,67 @@ AFortAIGoalManager* AFortAIGoalManager::GetCurrent(const UObject* WorldContextOb
 #else
     return nullptr;
 #endif
+}
+
+namespace
+{
+    // The encounter's assignments as its primary assignment lookup sees them: type, team and goals (the first goal's actor
+    // or location). Its spawn queries (EncounterMinDistanceNavGraph and the rest) generate around and measure from the
+    // primary assignment's goals (FortQueryContext_EncounterTargetObjective), so an encounter that spawns no husks shows
+    // here whether it had any.
+    std::wstring DescribeEncounterAssignments(const AFortAIGoalManager* GoalManager, UFortAIEncounterInfo* Encounter)
+    {
+        TArray<UObject*>& Assignments = Encounter->EncounterAssignments;
+        std::wstring Description = std::format(L"goal manager {}, {} assignments", GoalManager ? GoalManager->GetName().ToStdString() : std::wstring(L"none"), Assignments.Num());
+        const int32_t GoalSize = FFortAIGoal::StaticStruct() ? FFortAIGoal::StaticStruct()->GetStructureSize() : 0;
+        for (UObject* Assignment : Assignments)
+        {
+            if (!Assignment)
+            {
+                Description += L"; null";
+                continue;
+            }
+            Description += L"; " + Assignment->GetName().ToStdString();
+            if (UFortAIAssignment::HasAssignmentIdentifier())
+            {
+                const FFortAIAssignmentIdentifier& Identifier = static_cast<UFortAIAssignment*>(Assignment)->AssignmentIdentifier;
+                Description += std::format(L" ({}, team {})", Identifier.AssignmentType.ToString(), Identifier.AssignmentTeam.ToString());
+            }
+            if (Natives::UFortAIAssignment_Goals < 0 || GoalSize <= 0)
+            {
+                continue;
+            }
+            const FScriptArray& Goals = *reinterpret_cast<const FScriptArray*>(reinterpret_cast<uint8_t*>(Assignment) + Natives::UFortAIAssignment_Goals);
+            Description += std::format(L" {} goals", Goals.Num());
+            if (Goals.Num() > 0)
+            {
+                const uint8_t* Goal = static_cast<const uint8_t*>(Goals.GetData());
+                const UObject* Actor = reinterpret_cast<const FWeakObjectPtr*>(Goal)->Get();
+                const FVector& Location = *reinterpret_cast<const FVector*>(Goal + 8);
+                Description += Actor ? std::format(L", first {}", Actor->GetName().ToStdString()) : std::format(L", first at ({:.0f}, {:.0f}, {:.0f})", Location.X, Location.Y, Location.Z);
+            }
+        }
+        return Description;
+    }
+}
+
+AFortAIGoalManager* AFortAIGoalManager::GetCurrentForEncounterAssignments(const UObject* EncounterInfo)
+{
+    AFortAIGoalManager* GoalManager = GetCurrent(EncounterInfo);
+#if WITH_SERVER_CODE
+    static std::unordered_map<const UObject*, std::wstring> LastDescriptions;
+    if (UFortAIEncounterInfo* Encounter = Cast<UFortAIEncounterInfo>(const_cast<UObject*>(EncounterInfo)))
+    {
+        std::wstring Description = DescribeEncounterAssignments(GoalManager, Encounter);
+        std::wstring& Last = LastDescriptions[EncounterInfo];
+        if (Last != Description)
+        {
+            Log::Info(L"AFortAIGoalManager: encounter {} primary assignment lookup: {}", Encounter->GetName().ToStdString(), Description);
+            Last = std::move(Description);
+        }
+    }
+#endif
+    return GoalManager;
 }
 
 TStructArray<FAIDiscouragedGoalTimer>& FAIAssignmentInfo::GetDiscouragedGoalTimers() const
@@ -163,9 +230,15 @@ void AFortAIGoalManager::HookCallSites()
 
     uintptr_t Stub = 0;
     std::vector<uint8_t*> DirectorCalls;
-    for (uint8_t* Call : Finder::GoalManagerGetCurrentCalls(GoalManagerVTable, DirectorVTable, StaticClass()->GetPropertiesSize(), AFortAIDirector::StaticClass()->GetPropertiesSize(), AActor::StaticClass()->GetPropertiesSize(), Natives::UObject_GetWorldIndex, Stub, DirectorCalls))
+    std::vector<uint8_t*> EncounterCalls;
+    for (uint8_t* Call : Finder::GoalManagerGetCurrentCalls(GoalManagerVTable, DirectorVTable, StaticClass()->GetPropertiesSize(), AFortAIDirector::StaticClass()->GetPropertiesSize(), AActor::StaticClass()->GetPropertiesSize(), Natives::UObject_GetWorldIndex, UFortAIEncounterInfo::EncounterAssignmentsOffset(), Stub, DirectorCalls, EncounterCalls))
     {
         Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrent));
+    }
+    // 5.0+: the encounter's primary assignment lookup (FindAssignment inlined), which its spawn queries' contexts use.
+    for (uint8_t* Call : EncounterCalls)
+    {
+        Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent (encounter assignments)", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrentForEncounterAssignments));
     }
     for (uint8_t* Call : DirectorCalls)
     {

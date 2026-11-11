@@ -140,6 +140,57 @@ namespace
             && Bytes[6] == 0x48 && Bytes[7] == 0x8B && Bytes[8] == 0xC8;
     }
 
+    // 5.0+ (UE 4.21) inlines AFortAIGoalManager::FindAssignment into the lookup of an encounter's primary assignment (5.30
+    // 0xA5CB10, 5.21 0xA4B640), which the encounter's spawn queries, its EQS contexts and its query description use:
+    //     mov rbx, rcx; call GetCurrent; test rax, rax; jz ...; mov rdi, [rbx+EncounterAssignments]; movsxd rax, [rbx+...+8]
+    // GetCurrent's result is only null-checked, so the votes see nothing; what marks it is the world context (the encounter,
+    // saved in a callee-saved register just before the call) having its EncounterAssignments read afterwards. 1.1-4.5 call
+    // FindAssignment with the goal manager (4.5 0x8DA090 -> 0x911A50), which the votes already classify.
+    bool ReadsEncounterAssignmentsOfContext(uintptr_t Site, uintptr_t End, int32_t EncounterAssignmentsOffset)
+    {
+        constexpr uint32_t CalleeSaved = (1u << 3) | (1u << 5) | (1u << 6) | (1u << 7) | (1u << 12) | (1u << 13) | (1u << 14) | (1u << 15);
+        const uint8_t* Before = reinterpret_cast<const uint8_t*>(Site - 3);
+        if (EncounterAssignmentsOffset < 0 || (Before[0] != 0x48 && Before[0] != 0x4C) || Before[1] != 0x8B || (Before[2] & 0xC7) != 0xC1)
+        {
+            return false;
+        }
+        const int32_t Saved = ((Before[2] >> 3) & 7) | (Before[0] == 0x4C ? 8 : 0);
+        if (!(CalleeSaved & (1u << Saved)))
+        {
+            return false;
+        }
+
+        for (uintptr_t Address = Site + 5; Address < End && Address < Site + 0x100;)
+        {
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                return false;
+            }
+            if (Instruction.flags & F_MODRM)
+            {
+                const FOperand Rm = RmOperand(Instruction);
+                if (Rm.bMemory && Rm.Base == Saved && Rm.bHasDisplacement
+                    && (Rm.Displacement == EncounterAssignmentsOffset || Rm.Displacement == EncounterAssignmentsOffset + 8))
+                {
+                    return true;
+                }
+                // mov/lea into the saved register: it no longer holds the encounter.
+                if (Instruction.opcode != 0x0F && (Instruction.opcode == 0x8B || Instruction.opcode == 0x8D) && RegOperand(Instruction) == Saved)
+                {
+                    return false;
+                }
+            }
+            if (Instruction.opcode == 0xC3 || Instruction.opcode == 0xC2)
+            {
+                return false;
+            }
+            Address += Length;
+        }
+        return false;
+    }
+
     uintptr_t VTableAt(void** VTable, int32_t Index)
     {
         const uintptr_t Entry = VTable ? reinterpret_cast<uintptr_t>(VTable[Index]) : 0;
@@ -408,11 +459,12 @@ namespace
     }
 }
 
-std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t DirectorSize, int32_t ActorSize, int32_t GetWorldIndex, uintptr_t& OutStub, std::vector<uint8_t*>& OutDirectorCalls)
+std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t DirectorSize, int32_t ActorSize, int32_t GetWorldIndex, int32_t EncounterAssignmentsOffset, uintptr_t& OutStub, std::vector<uint8_t*>& OutDirectorCalls, std::vector<uint8_t*>& OutEncounterCalls)
 {
     const auto StartTime = std::chrono::steady_clock::now();
     OutStub = 0;
     OutDirectorCalls.clear();
+    OutEncounterCalls.clear();
     std::vector<uint8_t*> Result;
     const auto AnchorReferences = Finder::StringRefs(L"%s failed due to NULL WorldContextObject.  Without WorldContextObject, cannot find Goal Manager!  Assignment Identifier: %s.");
     const uintptr_t Anchor = AnchorReferences.empty() ? 0 : Finder::FunctionStart(AnchorReferences.front());
@@ -487,8 +539,13 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
             OutDirectorCalls.push_back(reinterpret_cast<uint8_t*>(Site));
             Log::Info(L"Finder: AFortAIDirector::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);
         }
+        else if (!Votes.GoalManager && !Votes.Director && !Votes.Other && ReadsEncounterAssignmentsOfContext(Site, End, EncounterAssignmentsOffset))
+        {
+            OutEncounterCalls.push_back(reinterpret_cast<uint8_t*>(Site));
+            Log::Info(L"Finder: AFortAIGoalManager::GetCurrent call site +0x{:X} in +0x{:X} (inlined FindAssignment on the encounter's EncounterAssignments)", Site - ImageBase, Begin - ImageBase);
+        }
     }
     const auto Milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - StartTime).count();
-    Log::Info(L"Finder: {} AFortAIGoalManager::GetCurrent and {} AFortAIDirector::GetCurrent call sites classified in {} ms", Result.size(), OutDirectorCalls.size(), Milliseconds);
+    Log::Info(L"Finder: {} AFortAIGoalManager::GetCurrent (+{} encounter assignment lookups) and {} AFortAIDirector::GetCurrent call sites classified in {} ms", Result.size(), OutEncounterCalls.size(), OutDirectorCalls.size(), Milliseconds);
     return Result;
 }

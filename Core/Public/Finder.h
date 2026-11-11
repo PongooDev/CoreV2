@@ -265,7 +265,7 @@ namespace Finder
     bool ResolveItemEntryStateLive();
     bool ResolveNeverPersistItemDefinitionLive();
     bool ResolveDisassemblyLive(UFunction* ServerDisassembleInventoryItem, UObject* PlayerControllerDefault);
-    std::vector<uint8_t*> GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t DirectorSize, int32_t ActorSize, int32_t GetWorldIndex, uintptr_t& OutStub, std::vector<uint8_t*>& OutDirectorCalls);
+    std::vector<uint8_t*> GoalManagerGetCurrentCalls(void** GoalManagerVTable, void** DirectorVTable, int32_t GoalManagerSize, int32_t DirectorSize, int32_t ActorSize, int32_t GetWorldIndex, int32_t EncounterAssignmentsOffset, uintptr_t& OutStub, std::vector<uint8_t*>& OutDirectorCalls, std::vector<uint8_t*>& OutEncounterCalls);
     uint8_t* FirstCallInImplementation(UFunction* Function, uintptr_t Target);
     uint8_t* ImplementationCall(UFunction* Function);
     bool ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinishedOffset, ptrdiff_t ZoneCompletedOffset, ptrdiff_t EndOfZoneRemainTimeOffset, ptrdiff_t ActiveSpawnPadOffset);

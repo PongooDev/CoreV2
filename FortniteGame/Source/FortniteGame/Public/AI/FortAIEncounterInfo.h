@@ -132,6 +132,7 @@ class UFortAIEncounterInfo : public UObject
 
 public:
     DefineUProperty(TArray<UObject*>, EncounterAssignments)
+    static int32_t EncounterAssignmentsOffset() { return Member_EncounterAssignments.IsAvailable() ? static_cast<int32_t>(Member_EncounterAssignments.GetOffsetChecked()) : -1; }
     DefineUStructArrayProperty(FFortAISpawnGroupUpgrade, AvailableUpgrades)
     DefineUStructArrayProperty(FSpawnGroupInstanceInfo, ActiveSpawnGroups)
     // 4.0: the director's BaseLootDropData and the LootDropModifiers rows whose requirements the encounter meets, copied

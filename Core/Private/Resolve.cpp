@@ -12913,7 +12913,8 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
     // sets a timer with a lambda's delegate instance, stored as `lea rax, [vtable]; mov [rdi], rax` twice: the functor
     // base's vtable (0x32CDE70), then the instance's own (0x32CDEB8). The instance's CreateCopy (slot 6, 0xA87F90) does
     // the same, so its last vtable is the instance's own; its Execute (slot 7, 0xA8A4E0) reads the three weak pointers
-    // (three calls to FWeakObjectPtr::Get) and then only the controller's MyFortPawn: the GrantOutput call is gone.
+    // (three calls to FWeakObjectPtr::Get) and then only the controller's MyFortPawn: the GrantOutput call is gone. 6.00's
+    // reads only the three weak pointers, the last one as a tail jmp.
     void* Interface = CollectorDefault && InteractInterface && ResolveServerOnAttemptInteractLive() ? Natives::UObject_GetInterfaceAddress(CollectorDefault, InteractInterface) : nullptr;
     void** InterfaceVTable = Interface ? *reinterpret_cast<void***>(Interface) : nullptr;
     const uintptr_t Interact = VTableEntry(InterfaceVTable, Natives::IFortInteractInterface_ServerOnAttemptInteractIndex);
@@ -12953,11 +12954,23 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
         {
             return false;
         }
+        // 6.00 (CL-4402180; 0xCF8AA0 on CL-4395664) drops the MyFortPawn read too, so the third FWeakObjectPtr::Get is
+        // Execute's tail jmp: it counts with the calls.
+        const auto TailJumpsTo = [Execute, ExecuteEnd](uintptr_t Target)
+        {
+            int32_t Jumps = 0;
+            for (uintptr_t Jump = FindInstruction(Execute, ExecuteEnd, { 0xE9 }); Jump && Jump + 5 <= ExecuteEnd; Jump = FindInstruction(Jump + 1, ExecuteEnd, { 0xE9 }))
+            {
+                Jumps += Finder::RelativeTarget(Jump, 1, 5) == Target ? 1 : 0;
+            }
+            return Jumps;
+        };
         int32_t MostCallsToOne = 0;
         const std::vector<std::pair<uintptr_t, uintptr_t>> ExecuteCalls = Finder::DirectCalls(Execute, ExecuteEnd);
         for (const auto& [Site, Target] : ExecuteCalls)
         {
-            MostCallsToOne = std::max(MostCallsToOne, static_cast<int32_t>(std::count_if(ExecuteCalls.begin(), ExecuteCalls.end(), [Target](const auto& Call) { return Call.second == Target; })));
+            const int32_t Calls = static_cast<int32_t>(std::count_if(ExecuteCalls.begin(), ExecuteCalls.end(), [Target](const auto& Call) { return Call.second == Target; }));
+            MostCallsToOne = std::max(MostCallsToOne, Calls == 2 ? Calls + TailJumpsTo(Target) : Calls);
         }
         return MostCallsToOne == 3;
     };

@@ -245,4 +245,14 @@ public:
     // playlist's elimination points are scored in OnRep_Kills, so there the server, whose points count, calls it itself
     // (the Unreal way to run a RepNotify on the server).
     void SetKillScore(int32_t NewKillScore);
+
+    // Whether the match's playlist scores its players' events: Score Royale's FirstToGoalScore (IsScoringPlaylist).
+    bool IsScoringMatch();
+    // Score Royale's scoring of an event with these tags (5.30 0xC4B5A0, 5.40 0xC5A4F0; the 21.40 exports don't name it,
+    // the name is Core's): each of the playlist's ScoringData entries whose EventInclusionTags the tags match counts the
+    // event (NumChestsOpened, NumAmmoCansOpened, ...), the points go into TotalPlayerScore and the team's score, which
+    // AFortGameModeAthena's Tick checks against the GoalScore. The build's own; the server only. AFortPlayerController::
+    // ServerAttemptInteract_Implementation calls it with the receiving actor's own tags once an interaction succeeds
+    // (a chest's Building.Type.Container.TreasureChest, an ammo box's .Ammobox), so a player bot's search does too.
+    void HandleScoringEvent(const FGameplayTagContainer& EventTags);
 };

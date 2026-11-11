@@ -13075,6 +13075,49 @@ bool Finder::ResolveMatchStatsLive()
     return true;
 }
 
+bool Finder::ResolveScoringEventLive()
+{
+    if (Natives::AFortPlayerStateAthena_HandleScoringEvent)
+    {
+        return true;
+    }
+    static bool bTried = false;
+    if (bTried)
+    {
+        return false;
+    }
+    bTried = true;
+
+    // Score Royale's scoring of a tagged event (5.30 0xC4B5A0, 5.40 0xC5A4F0): the player state's own function that counts
+    // the event of each of the playlist's ScoringData entries whose EventInclusionTags the tags match, prices it (5.30
+    // 0xC3C460) and adds what the player gained to TotalPlayerScore and the team's score (0xC3C540). Its callers are
+    // AFortPlayerController::ServerAttemptInteract_Implementation (0x11C63C0, the receiving actor's own tags) and two
+    // reflected natives that end in it with their actor's tags: AFortSpawnedScoreActor::OnScoreActorCollected (0xC51D70,
+    // a coin's, for the player state it is given) and AFortAthenaSupplyDrop::SpawningLootOnDestruction (0xBC4650, a
+    // supply drop's or llama's, for the pawn's player state). Both are its last call (5.40: 0xC61120 and 0xBCAF10).
+    const auto LastCall = [](uintptr_t Function) -> uintptr_t
+    {
+        const uintptr_t End = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        uintptr_t Target = 0;
+        for (uintptr_t Call = End ? FindRawCall(Function, End) : 0; Call; Call = FindRawCall(Call + 1, End))
+        {
+            Target = Finder::RelativeTarget(Call, 1, 5);
+        }
+        return Target;
+    };
+    const uintptr_t FromCoin = LastCall(ExecImplementation(L"/Script/FortniteGame.FortSpawnedScoreActor:OnScoreActorCollected"));
+    const uintptr_t FromSupplyDrop = LastCall(ExecImplementation(L"/Script/FortniteGame.FortAthenaSupplyDrop:SpawningLootOnDestruction"));
+    if (!FromCoin || FromCoin != FromSupplyDrop)
+    {
+        Log::Error(L"Finder: AFortPlayerStateAthena::HandleScoringEvent not found (the coin's scoring calls 0x{:X}, the supply drop's 0x{:X})",
+            FromCoin ? FromCoin - Finder::ImageBase() : 0, FromSupplyDrop ? FromSupplyDrop - Finder::ImageBase() : 0);
+        return false;
+    }
+    Natives::AFortPlayerStateAthena_HandleScoringEvent = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_HandleScoringEvent)>(FromCoin);
+    Log::Info(L"Finder: AFortPlayerStateAthena::HandleScoringEvent 0x{:X}", FromCoin - Finder::ImageBase());
+    return true;
+}
+
 int32_t Finder::StrippedAthenaPawnDiedIndex()
 {
     static bool bSearched = false;

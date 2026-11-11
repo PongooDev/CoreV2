@@ -624,6 +624,9 @@ namespace Natives
     // From 3.5 it is 21.40's static AFortPlayerStateAthena::ToDeathCause (3.5.1 0xA754E0, 3.6 0xA835B0, 4.0 0xAA41A0,
     // 4.1 0xAB04B0): the damage tags and whether the pawn was DBNO, no pawn. Only one of the two is set.
     inline uint8_t (*AFortPlayerStateAthena_ToDeathCause)(const FGameplayTagContainer& InTags, bool bWasDBNO) = nullptr;
+    // Score Royale's scoring of a tagged event, on the player state (5.30 0xC4B5A0, 5.40 0xC5A4F0): Finder::
+    // ResolveScoringEventLive, AFortPlayerStateAthena::HandleScoringEvent.
+    inline void (*AFortPlayerStateAthena_HandleScoringEvent)(AFortPlayerStateAthena* This, const FGameplayTagContainer& EventTags) = nullptr;
     inline int32_t AFortPlayerControllerAthena_UpdateTeamMembersIndex = -1;
     inline int32_t (*AFortPlayerControllerAthena_CountTeammatesOut)(AFortPlayerControllerAthena* This) = nullptr;
     inline ptrdiff_t AFortGameStateAthena_StartingPlayers = -1;

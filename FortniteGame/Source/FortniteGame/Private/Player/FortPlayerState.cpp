@@ -291,10 +291,7 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
 #if WITH_SERVER_CODE
         // Score Royale's eliminations (5.30's OnRep_Kills, 0xC4FA60: the playlist's Elimination points for each kill,
         // into TotalPlayerScore and the team's score, which AFortGameModeAthena's Tick checks against the GoalScore).
-        UWorld* World = GetWorld();
-        AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-        UFortPlaylistAthena* Playlist = GameState && AFortGameStateAthena::HasCurrentPlaylistData() ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
-        UFunction* OnRep = Role == ROLE_Authority && Playlist && Playlist->IsScoringPlaylist() ? FindStaticFunction_OnRep_Kills() : nullptr;
+        UFunction* OnRep = Role == ROLE_Authority && IsScoringMatch() ? FindStaticFunction_OnRep_Kills() : nullptr;
         if (OnRep)
         {
             const int32_t ScoreBefore = HasTotalPlayerScore() ? static_cast<int32_t>(TotalPlayerScore) : 0;
@@ -360,6 +357,32 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
             Member->TeamKillScore = TeamKills;
         }
     }
+}
+
+bool AFortPlayerStateAthena::IsScoringMatch()
+{
+    UWorld* World = GetWorld();
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    UFortPlaylistAthena* Playlist = GameState && AFortGameStateAthena::HasCurrentPlaylistData() ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+    return Playlist && Playlist->IsScoringPlaylist();
+}
+
+void AFortPlayerStateAthena::HandleScoringEvent(const FGameplayTagContainer& EventTags)
+{
+#if WITH_SERVER_CODE
+    // The build's function checks the playlist's win condition itself; a build without it has no scoring to run.
+    if (Role != ROLE_Authority || !Finder::ResolveScoringEventLive())
+    {
+        return;
+    }
+    const int32_t ScoreBefore = HasTotalPlayerScore() ? static_cast<int32_t>(TotalPlayerScore) : 0;
+    Natives::AFortPlayerStateAthena_HandleScoringEvent(this, EventTags);
+    if (HasTotalPlayerScore() && static_cast<int32_t>(TotalPlayerScore) != ScoreBefore)
+    {
+        Log::Info(L"Score Royale: {} scored {} points (score {} -> {})", GetPlayerName().ToStdString(), static_cast<int32_t>(TotalPlayerScore) - ScoreBefore, ScoreBefore,
+            static_cast<int32_t>(TotalPlayerScore));
+    }
+#endif
 }
 
 void FFortSpectatorAthenaArray::AddSpectatingPlayer(AFortPlayerStateAthena* Spectator)

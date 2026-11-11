@@ -229,6 +229,9 @@ namespace Finder
     int32_t StartDBNOIndex(ptrdiff_t IsDBNOOffset);
     // UStatManager::GetStatValue, which the end-of-match screen's stats are read with (Natives::UStatManager_GetStatValue).
     bool ResolveMatchStatsLive();
+    // From 5.30: Score Royale's scoring of a tagged event on the player state (Natives::
+    // AFortPlayerStateAthena_HandleScoringEvent), the last call of the coin's and the supply drop's scoring natives.
+    bool ResolveScoringEventLive();
     // The slot of AFortPlayerControllerAthena's pawn-death handler when the build strips it (1.9.1), else -1.
     int32_t StrippedAthenaPawnDiedIndex();
     // The slot of AFortPlayerControllerAthena's PrepareDeathReport override when the build strips its Athena game mode

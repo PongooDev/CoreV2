@@ -4956,6 +4956,25 @@ bool FCoreAthenaBotController::GetSquadLeash(FVector& OutAround, float& OutRadiu
     return Nearest < 1e9f;
 }
 
+namespace
+{
+    // The actor's own gameplay tags when it has IGameplayTagAssetInterface (ServerAttemptInteract's
+    // Cast<IGameplayTagAssetInterface>): its reflected GetOwnedGameplayTags, which UFunction::Invoke calls on the actor's
+    // interface. A building actor's are its StaticGameplayTags.
+    bool GetOwnedGameplayTags(UObject* Actor, FGameplayTagContainer& OutTags)
+    {
+        static UClass* Interface = FindObject<UClass>(nullptr, L"/Script/GameplayTags.GameplayTagAssetInterface");
+        static UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/GameplayTags.GameplayTagAssetInterface:GetOwnedGameplayTags");
+        Reflection::FParams Params(Function, true);
+        if (!Actor || !Interface || !Function || !UKismetSystemLibrary::DoesImplementInterface(Actor, Interface) || !Params.Call(Actor))
+        {
+            return false;
+        }
+        OutTags = Params.Take<FGameplayTagContainer>(L"TagContainer");
+        return true;
+    }
+}
+
 bool FCoreAthenaBotController::SearchContainer(float Now, float MaxDistance)
 {
 #if WITH_SERVER_CODE
@@ -5053,6 +5072,15 @@ bool FCoreAthenaBotController::SearchContainer(float Now, float MaxDistance)
         const bool bLoot = Target->ServerOnAttemptInteract(reinterpret_cast<AFortPawn*>(Pawn));
         ++ContainersSearched;
         Log::Info(L"Battle Royale bots: {} searches {}{}", BotName, NameOf(reinterpret_cast<UObject*>(Target)), bLoot ? L"" : L" (nothing came out)");
+        // A successful search scores as a player's does (CoreV2 #387): AFortPlayerController::
+        // ServerAttemptInteract_Implementation (5.30 0x11C63C0) hands the receiving actor's own tags to its player
+        // state's scoring once the interaction succeeds, which Score Royale counts as a chest or an ammo box.
+        AFortPlayerStateAthena* PlayerState = bLoot ? GetPlayerState() : nullptr;
+        FGameplayTagContainer ContainerTags;
+        if (PlayerState && PlayerState->IsScoringMatch() && GetOwnedGameplayTags(reinterpret_cast<UObject*>(Target), ContainerTags))
+        {
+            PlayerState->HandleScoringEvent(ContainerTags);
+        }
         Manager->OnContainerSearched(Target);
         ContainerTarget = nullptr;
         LootTarget = nullptr;

@@ -12,11 +12,11 @@ class UBuildingStructuralSupportSystem : public UObject
 public:
     DefineUProperty(AFortNavigationGraph*, NavGraph)
 
-    void InitializeGrid(const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ);
+    void InitializeGrid(const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ, int32_t MinCellZ);
     bool GetGrid(FVector& OutOrigin, int32_t OutSize[3]) const;
 
     static void Hook();
 
 private:
-    static void InitializeGridHK(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ);
+    static void InitializeGridHK(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ, int32_t MinCellZ);
 };

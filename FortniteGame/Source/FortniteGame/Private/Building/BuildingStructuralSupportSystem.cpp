@@ -8,7 +8,9 @@
 
 namespace
 {
-    void (*InitializeGridOG)(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ) = nullptr;
+    // 5.0+ added MinCellZ (the grid origin's Z is 384 * MinCellZ; 1.1-4.5 hard-code -3840). It is passed on every build:
+    // the six-argument function never reads the seventh slot.
+    void (*InitializeGridOG)(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ, int32_t MinCellZ) = nullptr;
 }
 
 bool UBuildingStructuralSupportSystem::GetGrid(FVector& OutOrigin, int32_t OutSize[3]) const
@@ -27,9 +29,9 @@ bool UBuildingStructuralSupportSystem::GetGrid(FVector& OutOrigin, int32_t OutSi
     return OutSize[0] > 0 && OutSize[1] > 0 && OutSize[2] > 0;
 }
 
-void UBuildingStructuralSupportSystem::InitializeGrid(const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ)
+void UBuildingStructuralSupportSystem::InitializeGrid(const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ, int32_t MinCellZ)
 {
-    InitializeGridOG(this, GridCenter, TileCells, TilesX, TilesY, CellsZ);
+    InitializeGridOG(this, GridCenter, TileCells, TilesX, TilesY, CellsZ, MinCellZ);
 
 #if WITH_SERVER_CODE
     FVector GridOrigin;
@@ -54,7 +56,7 @@ void UBuildingStructuralSupportSystem::Hook()
     Hooks::Detour(L"UBuildingStructuralSupportSystem::InitializeGrid", reinterpret_cast<void*>(Natives::UBuildingStructuralSupportSystem_InitializeGrid), &InitializeGridHK, &InitializeGridOG);
 }
 
-void UBuildingStructuralSupportSystem::InitializeGridHK(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ)
+void UBuildingStructuralSupportSystem::InitializeGridHK(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ, int32_t MinCellZ)
 {
-    This->InitializeGrid(GridCenter, TileCells, TilesX, TilesY, CellsZ);
+    This->InitializeGrid(GridCenter, TileCells, TilesX, TilesY, CellsZ, MinCellZ);
 }

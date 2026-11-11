@@ -451,7 +451,8 @@ namespace Natives
     inline ptrdiff_t FRecastNavMeshGenerator_DestNavMesh = -1;
     inline ptrdiff_t FRecastNavMeshGenerator_ActiveTiles = -1;
     inline ptrdiff_t FRecastNavMeshGenerator_NumActiveTiles = -1;
-    inline void (*UBuildingStructuralSupportSystem_InitializeGrid)(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ) = nullptr;
+    // MinCellZ is 5.0+'s seventh argument (the grid's bottom Z in cells); the six-argument 1.1-4.5 function never reads it.
+    inline void (*UBuildingStructuralSupportSystem_InitializeGrid)(UBuildingStructuralSupportSystem* This, const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ, int32_t MinCellZ) = nullptr;
     inline ptrdiff_t UBuildingStructuralSupportSystem_GridSize = -1;
     inline ptrdiff_t UBuildingStructuralSupportSystem_GridOrigin = -1;
     inline ptrdiff_t AFortNavigationGraph_Cells = -1;

@@ -18,6 +18,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <initializer_list>
 
 DEFINE_LOG_CATEGORY_STATIC(LogNavigation, Log, All);
@@ -64,6 +65,40 @@ namespace
             }
         }
         return 0;
+    }
+
+    // The same for 5.0+, whose BuildBlockLinks keeps `this` in rsi: `48 Opcode modrm(rsi) disp32`.
+    uintptr_t RsiDisplacement(uintptr_t Begin, uintptr_t End, uint8_t Opcode, uint8_t Reg)
+    {
+        for (uintptr_t Site = Begin; Site + 7 <= End; ++Site)
+        {
+            if (Byte(Site) == 0x48 && Byte(Site + 1) == Opcode && Byte(Site + 2) == (0x80 | (Reg << 3) | 6) && Byte(Site + 5) == 0x00 && Byte(Site + 6) == 0x00)
+            {
+                return Site + 3;
+            }
+        }
+        return 0;
+    }
+
+    // FGraphAStar<FNavGraphCells>'s constructor (FNavGraphPathSearch, 0x90 bytes), which 5.0+ inlines into its users (5.30
+    // 0xAEE2EB): Graph; NodePool, a TSet of search nodes (Elements' FirstFreeIndex -1); OpenList, which refers to NodePool and
+    // sorts with a predicate that refers to it too. 1.1-4.5 call the game's own copy (4.5 0x957CB0); its Reserve(64) calls
+    // only presize the node pool and the open list, which grow on first use without them.
+    void* ConstructNavGraphPathSearch(void* Memory, AFortNavigationGraph* Graph)
+    {
+        if (!Memory)
+        {
+            return nullptr;
+        }
+        uint8_t* Search = static_cast<uint8_t*>(Memory);
+        std::memset(Search, 0, PathSearchSize);
+        uint8_t* NodePool = Search + 0x08;
+        *reinterpret_cast<AFortNavigationGraph**>(Search) = Graph;
+        *reinterpret_cast<int32_t*>(NodePool + 0x40) = -1;
+        *reinterpret_cast<uint8_t**>(Search + 0x68) = NodePool;
+        *reinterpret_cast<uint8_t**>(Search + 0x80) = NodePool;
+        *reinterpret_cast<uint8_t**>(Search + 0x88) = Search + 0x68;
+        return Memory;
     }
 
     uintptr_t FindPattern(uintptr_t Begin, uintptr_t End, std::initializer_list<int32_t> Pattern)
@@ -158,20 +193,50 @@ bool AFortNavigationGraph::ResolveNatives()
     }
 
     const uintptr_t GridOriginZ = FindUnique({ 0xC7, 0x81, -1, -1, 0x00, 0x00, 0x00, 0x00, 0x70, 0xC5 });
-    const uintptr_t InitializeGrid = GridOriginZ ? Finder::FunctionStart(GridOriginZ) : 0;
-    const int32_t GridOrigin = GridOriginZ ? Displacement(GridOriginZ + 2) - 8 : -1;
-    const uintptr_t GridOriginStore = InitializeGrid ? FindPattern(InitializeGrid, GridOriginZ, { 0xF2, 0x0F, 0x11, 0x81, GridOrigin & 0xFF, (GridOrigin >> 8) & 0xFF, 0x00, 0x00 }) : 0;
+    uintptr_t InitializeGrid = GridOriginZ ? Finder::FunctionStart(GridOriginZ) : 0;
+    int32_t GridOrigin = GridOriginZ ? Displacement(GridOriginZ + 2) - 8 : -1;
+    uintptr_t GridOriginStore = InitializeGrid ? FindPattern(InitializeGrid, GridOriginZ, { 0xF2, 0x0F, 0x11, 0x81, GridOrigin & 0xFF, (GridOrigin >> 8) & 0xFF, 0x00, 0x00 }) : 0;
+    if (!GridOriginZ)
+    {
+        // 5.0+ (UE 4.21) has no hard-coded -3840 Z: InitializeGrid takes the grid's bottom cell (Origin.Z = 384 * MinCellZ) as a
+        // seventh argument. Its opening stores the grid center: or [this+flags], 1; movsd xmm0, [rdx];
+        // movsd [this+GridOrigin], xmm0; mov eax, [rdx+8] (5.30 0xD259FD, 5.21 0xD07C9D, 5.0 0xCE2E1D).
+        const uintptr_t CenterStore = FindUnique({ 0x83, 0x89, -1, -1, 0x00, 0x00, 0x01, 0xF2, 0x0F, 0x10, 0x02, 0xF2, 0x0F, 0x11, 0x81, -1, -1, 0x00, 0x00, 0x8B, 0x42, 0x08 });
+        InitializeGrid = CenterStore ? Finder::FunctionStart(CenterStore) : 0;
+        GridOrigin = CenterStore ? Displacement(CenterStore + 15) : -1;
+        GridOriginStore = InitializeGrid ? CenterStore + 11 : 0;
+    }
 
-    const uintptr_t UpdateDirtyBlocks = FindUnique({ 0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x33, 0xFF, 0x48, 0xC7, 0x81, -1, -1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9, 0x39, 0xB9 });
+    // mov [rsp+10h], rbx; push rdi; sub rsp, 20h on 1.1-4.5; 5.0+ saves four registers first, so only the body after the
+    // prologue is the same: xor edi, edi; mov qword [rcx+DirtyBlocks+18h], 0; mov rbx, rcx; cmp [rcx+DirtyBlocks+8], edi.
+    const std::initializer_list<int32_t> UpdateDirtyBlocksBody = { 0x33, 0xFF, 0x48, 0xC7, 0x81, -1, -1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9, 0x39, 0xB9 };
+    uintptr_t UpdateDirtyBlocks = FindUnique({ 0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x33, 0xFF, 0x48, 0xC7, 0x81, -1, -1, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x48, 0x8B, 0xD9, 0x39, 0xB9 });
+    uintptr_t UpdateDirtyBlocksBodyStart = UpdateDirtyBlocks ? UpdateDirtyBlocks + 10 : 0;
+    if (!UpdateDirtyBlocks)
+    {
+        UpdateDirtyBlocksBodyStart = FindUnique(UpdateDirtyBlocksBody);
+        UpdateDirtyBlocks = UpdateDirtyBlocksBodyStart ? Finder::FunctionStart(UpdateDirtyBlocksBodyStart) : 0;
+    }
     const uintptr_t UpdateDirtyBlocksEnd = UpdateDirtyBlocks ? Finder::FunctionEnd(UpdateDirtyBlocks) : 0;
-    const int32_t DirtyBlocks = UpdateDirtyBlocks ? Displacement(UpdateDirtyBlocks + 28) - 8 : -1;
+    const int32_t DirtyBlocks = UpdateDirtyBlocks ? Displacement(UpdateDirtyBlocksBodyStart + 18) - 8 : -1;
     const uintptr_t ClearDirtyFlag = UpdateDirtyBlocksEnd ? FindPattern(UpdateDirtyBlocks, UpdateDirtyBlocksEnd, { 0x83, 0xA3, -1, -1, 0x00, 0x00, 0xFD }) : 0;
     const uintptr_t BuildBlockLinks = UpdateDirtyBlocks ? FirstCallTarget(UpdateDirtyBlocks, 0x60) : 0;
-    // add rcx, [this+BlockLinks]; mov rax, [this+Cells.BlockCells].
-    const uintptr_t BlockLinksAdd = BuildBlockLinks ? ThisDisplacement(BuildBlockLinks, BuildBlockLinks + 0x80, 0x03, 1) : 0;
-    const uintptr_t BlockCellsLoad = BuildBlockLinks ? ThisDisplacement(BuildBlockLinks, BuildBlockLinks + 0x100, 0x8B, 0) : 0;
+    // add rcx, [this+BlockLinks]; mov rax, [this+Cells.BlockCells]. 5.0+ keeps `this` in rsi (5.30 0xAF5FD0, 0xAF5FF1).
+    uintptr_t BlockLinksAdd = BuildBlockLinks ? ThisDisplacement(BuildBlockLinks, BuildBlockLinks + 0x80, 0x03, 1) : 0;
+    uintptr_t BlockCellsLoad = BuildBlockLinks ? ThisDisplacement(BuildBlockLinks, BuildBlockLinks + 0x100, 0x8B, 0) : 0;
+    if (BuildBlockLinks && (!BlockLinksAdd || !BlockCellsLoad))
+    {
+        BlockLinksAdd = RsiDisplacement(BuildBlockLinks, BuildBlockLinks + 0x80, 0x03, 1);
+        BlockCellsLoad = RsiDisplacement(BuildBlockLinks, BuildBlockLinks + 0x100, 0x8B, 0);
+    }
 
-    const uintptr_t CellIndexBody = FindUnique({ 0x8B, 0x52, 0x08, 0x8B, 0x49, 0x38, 0xD3, 0xFA, 0x0F, 0xAF, 0x53, 0x1C });
+    uintptr_t CellIndexBody = FindUnique({ 0x8B, 0x52, 0x08, 0x8B, 0x49, 0x38, 0xD3, 0xFA, 0x0F, 0xAF, 0x53, 0x1C });
+    if (!CellIndexBody)
+    {
+        // 5.0+ loads the coordinates into other registers and allocates a missing block inline: mov ecx, [rcx+38h] (BlockShift
+        // Z) ... sar r8d, cl; imul r8d, [rsi+1Ch] (Blocks Y) (5.30 0xAE7CE0).
+        CellIndexBody = FindUnique({ 0x8B, 0x49, 0x38, -1, -1, -1, -1, -1, -1, -1, -1, 0xD3, -1, -1, 0x0F, 0xAF, -1, 0x1C });
+    }
     const std::initializer_list<int32_t> PathSearchPattern = { 0x48, 0x8D, 0x59, 0x08, 0x48, 0x89, 0x11, 0x33, 0xF6, 0x48, 0x8B, 0xF9, 0x48, 0x89, 0x33 };
     uintptr_t PathSearchBody = FindUnique(PathSearchPattern);
     if (!PathSearchBody)
@@ -190,6 +255,19 @@ bool AFortNavigationGraph::ResolveNatives()
             }
         }
         PathSearchBody = Matches == 1 ? PathSearchBody : 0;
+    }
+    bool bConstructPathSearch = false;
+    if (!PathSearchBody)
+    {
+        // 5.0+ inlines the constructor into its users (5.30 0xAEE2EB, 0xAF48C3): FGraphAStar's same 0x90 bytes, built in place
+        // by Core's FNavGraphPathSearch constructor. Take it only when the inlined copy shows the layout:
+        // mov dword [rbx+40h], -1 (NodePool's FirstFreeIndex) ... cmp dword [rbx+0Ch], 40h ... mov [rsi+68h], rbx (OpenList).
+        const std::initializer_list<int32_t> InlinedLayout = { 0xC7, 0x43, 0x40, 0xFF, 0xFF, 0xFF, 0xFF };
+        for (uintptr_t Site = FindPattern(Finder::TextBegin(), Finder::TextEnd(), InlinedLayout); Site && !bConstructPathSearch; Site = FindPattern(Site + 1, Finder::TextEnd(), InlinedLayout))
+        {
+            const uintptr_t Reserve = FindPattern(Site, Site + 0x20, { 0x83, 0x7B, 0x0C, 0x40 });
+            bConstructPathSearch = Reserve && FindPattern(Reserve, Reserve + 0x20, { 0x48, 0x89, -1, 0x68 }) && PathSearchSize == 0x90;
+        }
     }
     uintptr_t FloodFill = FindUnique({ 0x40, 0x57, 0x41, 0x56, 0x48, 0x83, 0xEC, 0x48, 0x48, 0x8B, 0xF9, 0x4D, 0x8B, 0xF0, 0x48, 0x8B, 0x89 });
     uintptr_t PathSearchLoad = FloodFill ? FloodFill + 17 : 0;
@@ -217,10 +295,10 @@ bool AFortNavigationGraph::ResolveNatives()
         }
     }
 
-    if (!InitializeGrid || !GridOriginStore || !UpdateDirtyBlocksEnd || !ClearDirtyFlag || !BlockLinksAdd || !BlockCellsLoad || !CellIndexBody || !PathSearchBody || !FloodFill || !RequestRegistration)
+    if (!InitializeGrid || !GridOriginStore || !UpdateDirtyBlocksEnd || !ClearDirtyFlag || !BlockLinksAdd || !BlockCellsLoad || !CellIndexBody || (!PathSearchBody && !bConstructPathSearch) || !FloodFill || !RequestRegistration)
     {
         Log::Error(L"Finder: AFortNavigationGraph natives not found (grid {}, origin {}, dirty {}, flags {}, links {}, cells {}, cell index {}, path search {}, flood fill {}, registration {})",
-            InitializeGrid != 0, GridOriginStore != 0, UpdateDirtyBlocksEnd != 0, ClearDirtyFlag != 0, BlockLinksAdd != 0, BlockCellsLoad != 0, CellIndexBody != 0, PathSearchBody != 0, FloodFill != 0, RequestRegistration != 0);
+            InitializeGrid != 0, GridOriginStore != 0, UpdateDirtyBlocksEnd != 0, ClearDirtyFlag != 0, BlockLinksAdd != 0, BlockCellsLoad != 0, CellIndexBody != 0, PathSearchBody != 0 || bConstructPathSearch, FloodFill != 0, RequestRegistration != 0);
         return false;
     }
 
@@ -234,7 +312,7 @@ bool AFortNavigationGraph::ResolveNatives()
     Natives::AFortNavigationGraph_PathSearch = Displacement(PathSearchLoad);
     Natives::AFortNavigationGraph_UpdateDirtyBlocks = reinterpret_cast<decltype(Natives::AFortNavigationGraph_UpdateDirtyBlocks)>(UpdateDirtyBlocks);
     Natives::FNavGraphCells_GetCellIndex = reinterpret_cast<decltype(Natives::FNavGraphCells_GetCellIndex)>(Finder::FunctionStart(CellIndexBody));
-    Natives::FNavGraphPathSearch_Construct = reinterpret_cast<decltype(Natives::FNavGraphPathSearch_Construct)>(Finder::FunctionStart(PathSearchBody));
+    Natives::FNavGraphPathSearch_Construct = PathSearchBody ? reinterpret_cast<decltype(Natives::FNavGraphPathSearch_Construct)>(Finder::FunctionStart(PathSearchBody)) : &ConstructNavGraphPathSearch;
     Natives::UNavigationSystem_RequestRegistration = reinterpret_cast<decltype(Natives::UNavigationSystem_RequestRegistration)>(RequestRegistration);
     Log::Info(L"Finder: AFortNavigationGraph cells +0x{:X}, block links +0x{:X}, dirty blocks +0x{:X}, flags +0x{:X}, path search +0x{:X}; support grid size +0x{:X}, origin +0x{:X}",
         Natives::AFortNavigationGraph_Cells, Natives::AFortNavigationGraph_BlockLinks, Natives::AFortNavigationGraph_DirtyBlocks, Natives::AFortNavigationGraph_Flags, Natives::AFortNavigationGraph_PathSearch,

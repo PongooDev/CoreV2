@@ -13,7 +13,6 @@
 #include "Finder.h"
 #include "FortGameState.h"
 #include "GameFramework/GameModeBase.h"
-#include "GameThread.h"
 #include "Hooks.h"
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
@@ -24,13 +23,13 @@
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
-#include <chrono>
 #include <cwctype>
 #include <deque>
 #include <optional>
@@ -44,9 +43,11 @@ namespace
 {
     void (*SendStatEventWithTagsOG)(UFortQuestManager* This, const void* CustomStatName, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush) = nullptr;
 
-    // Battle Royale quest managers holding progress from events that asked for no flush, and when it is saved.
-    std::vector<std::pair<FWeakObjectPtr, std::chrono::steady_clock::time_point>> DueSaves;
-    constexpr auto SaveDelay = std::chrono::seconds(5);
+    // Battle Royale quest managers holding progress from events that asked for no flush. Each is saved by a one-off
+    // timer on the world's timer manager, SaveDelay seconds after its first such event, as 21.40's UFortQuestManager
+    // flushes its batched stat events from a timer (DamageEventFlushDelaySeconds and the others).
+    std::vector<FWeakObjectPtr> DueSaves;
+    constexpr float SaveDelay = 5.0f;
 
     // Whether the last event Core's SendStatEventWithTags took flushed (it asked to, or it completed an objective), for
     // SendStatEventWithTagsHK. The builds that keep the native one leave it false.
@@ -89,28 +90,23 @@ namespace
 #endif
     }
 
-    void SaveWhenDue()
+    void SaveWhenDue(UWorld* World, UFortQuestManager* QuestManager)
     {
-        GameThread::Enqueue([]
+        const FWeakObjectPtr Weak(QuestManager);
+        if (!World || std::find(DueSaves.begin(), DueSaves.end(), Weak) != DueSaves.end())
         {
-            const auto Now = std::chrono::steady_clock::now();
-            std::erase_if(DueSaves, [Now](const auto& Due)
+            return;
+        }
+        DueSaves.push_back(Weak);
+        FTimerHandle SaveTimerHandle;
+        World->GetTimerManager().SetTimer(SaveTimerHandle, FTimerDelegate::CreateLambda([Weak]()
+        {
+            std::erase(DueSaves, Weak);
+            if (UFortQuestManager* DueQuestManager = static_cast<UFortQuestManager*>(Weak.Get()))
             {
-                if (Due.second > Now)
-                {
-                    return false;
-                }
-                if (UFortQuestManager* QuestManager = static_cast<UFortQuestManager*>(Due.first.Get()))
-                {
-                    SaveProgress(QuestManager);
-                }
-                return true;
-            });
-            if (!DueSaves.empty())
-            {
-                SaveWhenDue();
+                SaveProgress(DueQuestManager);
             }
-        });
+        }), SaveDelay, false);
     }
 }
 
@@ -1466,16 +1462,7 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
         SaveProgress(This);
         return;
     }
-    const FWeakObjectPtr Weak(This);
-    if (std::none_of(DueSaves.begin(), DueSaves.end(), [&Weak](const auto& Due) { return Due.first == Weak; }))
-    {
-        const bool bIdle = DueSaves.empty();
-        DueSaves.emplace_back(Weak, std::chrono::steady_clock::now() + SaveDelay);
-        if (bIdle)
-        {
-            SaveWhenDue();
-        }
-    }
+    SaveWhenDue(GameMode->GetWorld(), This);
 #else
     SendStatEventWithTagsOG(This, CustomStatName, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
 #endif

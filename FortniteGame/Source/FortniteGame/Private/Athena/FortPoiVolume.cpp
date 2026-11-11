@@ -10,12 +10,12 @@
 #include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "Finder.h"
-#include "GameThread.h"
 #include "Kismet/GameplayStatics.h"
 #include "Log.h"
 #include "Math/Quat.h"
 #include "Math/Transform.h"
 #include "Natives.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/WeakObjectPtr.h"
@@ -826,50 +826,56 @@ AFortPoiManager* AFortPoiManager::Get(UWorld* World)
 
 namespace
 {
-    void WatchPoiManagerOf(FWeakObjectPtr Manager)
-    {
-        GameThread::Enqueue([Manager]()
-        {
-            AFortPoiManager* PoiManager = static_cast<AFortPoiManager*>(Manager.Get());
-            if (!PoiManager)
-            {
-                return;
-            }
-            TArray<AFortPoiVolume*>& AllPoiVolumes = PoiManager->AllPoiVolumes;
-            if (AllPoiVolumes.Num() == 0)
-            {
-                WatchPoiManagerOf(Manager);
-                return;
-            }
+    // The volumes Core shaped are put right in the manager's list once the match has started, as a wait on a timer,
+    // InitializationCheckInterval seconds apart. InitalizePoiManger (3.2 0xA29530) runs from the game mode's intact
+    // HandleMatchHasStarted and broadcasts nothing, and its ShouldTickUpdate (3.2 0xA3C3B0) reads the volume's actor
+    // bounds (AActor::GetActorBounds: registered components only), which Core's shapes can't give without registering
+    // the brush component, and so giving the volume the physics and render state its cooked-out one never had.
+    constexpr float InitializationCheckInterval = 0.25f;
 
-            // InitalizePoiManger has run (HandleMatchHasStarted). It put a volume in SmallTickUpdatedPoi when
-            // ShouldTickUpdate held: LargeGameVolume squared above the squared diagonal of the volume's actor bounds. The
-            // volumes Core shaped have no brush component for those bounds, so their test is done again on their box.
-            TArray<AFortPoiVolume*>& SmallTickUpdatedPoi = PoiManager->SmallTickUpdatedPoi;
-            for (AFortPoiVolume* Volume : AllPoiVolumes)
+    void CheckPoiManagerInitialization(FWeakObjectPtr Manager)
+    {
+        AFortPoiManager* PoiManager = static_cast<AFortPoiManager*>(Manager.Get());
+        UWorld* World = PoiManager ? PoiManager->GetWorld() : nullptr;
+        if (!World)
+        {
+            return;
+        }
+        TArray<AFortPoiVolume*>& AllPoiVolumes = PoiManager->AllPoiVolumes;
+        if (AllPoiVolumes.Num() == 0)
+        {
+            FTimerHandle CheckTimerHandle;
+            World->GetTimerManager().SetTimer(CheckTimerHandle, FTimerDelegate::CreateLambda([Manager]() { CheckPoiManagerInitialization(Manager); }), InitializationCheckInterval, false);
+            return;
+        }
+
+        // InitalizePoiManger has run (HandleMatchHasStarted). It put a volume in SmallTickUpdatedPoi when
+        // ShouldTickUpdate held: LargeGameVolume squared above the squared diagonal of the volume's actor bounds. The
+        // volumes Core shaped have no registered component for those bounds, so their test is done again on their box.
+        TArray<AFortPoiVolume*>& SmallTickUpdatedPoi = PoiManager->SmallTickUpdatedPoi;
+        for (AFortPoiVolume* Volume : AllPoiVolumes)
+        {
+            const FBox Box = Volume ? Volume->GetFallbackBox() : FBox();
+            if (!Box.IsValid)
             {
-                const FBox Box = Volume ? Volume->GetFallbackBox() : FBox();
-                if (!Box.IsValid)
+                continue;
+            }
+            const float LargeGameVolume = Volume->LargeGameVolume;
+            const bool bShouldTickUpdate = LargeGameVolume * LargeGameVolume > (Box.Max - Box.Min).SizeSquared();
+            for (int32_t Index = SmallTickUpdatedPoi.Num() - 1; Index >= 0; --Index)
+            {
+                if (SmallTickUpdatedPoi[Index] == Volume)
                 {
-                    continue;
-                }
-                const float LargeGameVolume = Volume->LargeGameVolume;
-                const bool bShouldTickUpdate = LargeGameVolume * LargeGameVolume > (Box.Max - Box.Min).SizeSquared();
-                for (int32_t Index = SmallTickUpdatedPoi.Num() - 1; Index >= 0; --Index)
-                {
-                    if (SmallTickUpdatedPoi[Index] == Volume)
-                    {
-                        SmallTickUpdatedPoi.RemoveAt(Index);
-                    }
-                }
-                if (bShouldTickUpdate)
-                {
-                    SmallTickUpdatedPoi.Add(Volume);
+                    SmallTickUpdatedPoi.RemoveAt(Index);
                 }
             }
-            Log::Info(L"POI: the match's POI manager has {} volumes, {} tested for Visit each tick ({} players a frame)", AllPoiVolumes.Num(), SmallTickUpdatedPoi.Num(),
-                PoiManager->MaxNumTestsPerFrame);
-        });
+            if (bShouldTickUpdate)
+            {
+                SmallTickUpdatedPoi.Add(Volume);
+            }
+        }
+        Log::Info(L"POI: the match's POI manager has {} volumes, {} tested for Visit each tick ({} players a frame)", AllPoiVolumes.Num(), SmallTickUpdatedPoi.Num(),
+            PoiManager->MaxNumTestsPerFrame);
     }
 }
 
@@ -882,6 +888,6 @@ void AFortPoiManager::WatchInitialization(UWorld* World)
         return;
     }
     Log::Info(L"POI: {} lists the volumes when the match starts", Manager->GetName().ToStdString());
-    WatchPoiManagerOf(FWeakObjectPtr(Manager));
+    CheckPoiManagerInitialization(FWeakObjectPtr(Manager));
 #endif
 }

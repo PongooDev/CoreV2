@@ -620,6 +620,19 @@ void UFortKismetLibrary::HookNatives()
     {
         Hooks::RedirectCall(L"AFortPlayerControllerGameplay::StartGhostMode -> UFortKismetLibrary::GiveItemToInventoryOwner", GiveItemCall, reinterpret_cast<void*>(&GiveItemToInventoryOwnerHK));
     }
+
+    // 6.01's Disco Domination. A player who dies while the mode still respawns its players leaves a share of each ammo
+    // stack where they fell (Disco.AmmoDropPercent), and keeps the rest with everything else they held: the Disco
+    // mutator's AFortGameModeAthena_OnPawnDeathBeforeRespawning spawns those pickups with K2_SpawnPickupInWorld, a call
+    // that reaches the stripped native, so nothing dropped. It passes the native's nine parameters, the ones
+    // K2_SpawnPickupInWorld takes here. The exec below still has the game's own function at this point: the finder reads
+    // the stub from it.
+    if (uint8_t* SpawnPickupCall = Finder::DiscoPawnDeathSpawnPickupCall(StaticFunction_K2_SpawnPickupInWorld()))
+    {
+        using FSpawnPickupInWorld = AFortPickup* (*)(UObject*, UFortWorldItemDefinition*, int32_t, const FVector&, const FVector&, int32_t, bool, bool, bool);
+        Hooks::RedirectCall(L"AFortAthenaMutator_Disco::AFortGameModeAthena_OnPawnDeathBeforeRespawning -> UFortKismetLibrary::K2_SpawnPickupInWorld", SpawnPickupCall,
+            reinterpret_cast<void*>(static_cast<FSpawnPickupInWorld>(&K2_SpawnPickupInWorld)));
+    }
 #endif
 
     for (const auto& [Function, Native, Name] : {

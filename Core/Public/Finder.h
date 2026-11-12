@@ -273,6 +273,11 @@ namespace Finder
     // UFortKismetLibrary::GiveItemToInventoryOwner, which gives the controller the ghost mode item. Null on builds without
     // StartGhostMode.
     uint8_t* StartGhostModeGiveItemCall();
+    // From 6.01 (Disco Domination): the call to the stripped UFortKismetLibrary::K2_SpawnPickupInWorld in
+    // AFortAthenaMutator_Disco's AFortGameModeAthena_OnPawnDeathBeforeRespawning, which drops a share of a dead player's
+    // ammo while the mode respawns its players. SpawnPickupInWorld: the UFunction, still with the game's exec. Null on
+    // builds without the mutator or its CachedPercentAmmoToDrop.
+    uint8_t* DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld);
     // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player
     // bots. IsSkydivingOffset: AFortPlayerPawnAthena's bIsSkydiving, which it checks first.
     bool ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset);

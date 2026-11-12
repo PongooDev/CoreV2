@@ -11211,6 +11211,64 @@ uint8_t* Finder::StartGhostModeGiveItemCall()
     return reinterpret_cast<uint8_t*>(StubCalls[0]);
 }
 
+uint8_t* Finder::DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld)
+{
+    // 6.01's Disco Domination. While its players respawn, a dead one leaves a share of each ammo stack behind:
+    // AFortAthenaMutator_Disco's AFortGameModeAthena_OnPawnDeathBeforeRespawning (21.40's name for the mutators'
+    // virtual; 6.01 CL-4424678 0xC6CE00, 6.02 CL-4461277 0xC6F790, slot 0xC5), which the pawn's death reaches through
+    // the game mode's walk of its mutators (6.02 0xC48A10 -> 0xBD3820). For every ammo item of the dead player's
+    // inventory it takes the count times CachedPercentAmmoToDrop ("mulss xmm0, [r14+490h]") and calls
+    // UFortKismetLibrary::K2_SpawnPickupInWorld(GetWorld(), ItemDefinition, Count, PawnLocation, Direction, 0, true,
+    // true, false) (6.02 0xC6FA6B). That native is server code: the call goes to the return-null stub its exec (6.02
+    // 0x14A73A6) calls with the same nine parameters, and it is the only call to that stub in the mutator's own
+    // functions. Builds whose Disco mutator has no CachedPercentAmmoToDrop (6.00) or no Disco mutator have none.
+    UClass* DiscoClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_Disco");
+    const UProperty* PercentProperty = DiscoClass ? DiscoClass->FindPropertyByName(FName(L"CachedPercentAmmoToDrop", FNAME_Find)) : nullptr;
+    if (!PercentProperty)
+    {
+        return nullptr;
+    }
+    void** DiscoVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator_Disco");
+    void** MutatorVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator");
+    const uintptr_t ExecCall = reinterpret_cast<uintptr_t>(Finder::ImplementationCall(SpawnPickupInWorld));
+    const uintptr_t Stub = ExecCall ? Finder::RelativeTarget(ExecCall, 1, 5) : 0;
+    const int32_t Percent = PercentProperty->GetOffset_ForInternal();
+    std::vector<uintptr_t> StubCalls;
+    uintptr_t Function = 0;
+    for (int32_t Slot = 0; DiscoVTable && MutatorVTable && Finder::IsStubFunction(Stub) && Slot < 0x200; ++Slot)
+    {
+        const uintptr_t Own = reinterpret_cast<uintptr_t>(DiscoVTable[Slot]);
+        const uintptr_t Base = reinterpret_cast<uintptr_t>(MutatorVTable[Slot]);
+        if (!IsInText(Own) || !IsInText(Base))
+        {
+            break;
+        }
+        // The mutator's own overrides, each looked at once.
+        const uintptr_t OwnEnd = Own != Base && Own != Function && Finder::FunctionStart(Own) == Own ? Finder::FunctionEnd(Own) : 0;
+        if (OwnEnd <= Own || !FindInstruction(Own, OwnEnd, { Percent & 0xFF, (Percent >> 8) & 0xFF, (Percent >> 16) & 0xFF, (Percent >> 24) & 0xFF }))
+        {
+            continue;
+        }
+        for (const auto& [Site, Target] : Finder::DirectCalls(Own, OwnEnd))
+        {
+            if (Target == Stub)
+            {
+                StubCalls.push_back(Site);
+                Function = Own;
+            }
+        }
+    }
+    if (StubCalls.size() != 1)
+    {
+        Log::Error(L"Finder: AFortAthenaMutator_Disco's stripped K2_SpawnPickupInWorld was not found (the exec's stub {}, {} calls to it in the mutator's functions that read CachedPercentAmmoToDrop +0x{:X}), Disco Domination's dead leave no ammo",
+            Finder::IsStubFunction(Stub) ? L"found" : L"not found", StubCalls.size(), Percent);
+        return nullptr;
+    }
+    Log::Info(L"Finder: AFortAthenaMutator_Disco::AFortGameModeAthena_OnPawnDeathBeforeRespawning (0x{:X}) drops its ammo with the stripped K2_SpawnPickupInWorld at 0x{:X}",
+        Function - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase());
+    return reinterpret_cast<uint8_t*>(StubCalls[0]);
+}
+
 bool Finder::ResolveServerMoveLive()
 {
     static bool bSearched = false;

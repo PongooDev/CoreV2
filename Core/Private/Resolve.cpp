@@ -9831,6 +9831,70 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
     return true;
 }
 
+bool Finder::ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, ptrdiff_t AllowRespawningOffset, uint8_t AllowRespawningMask)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortGameModeAthena_IsRespawningAllowedIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena*) (6.01 CL-4424678 0xBCF370, 6.02 CL-4461277
+    // 0xBD08A0, slot 0x135 in both; the mutators' side of it is 21.40's FortGameStateAthena_IsRespawningAllowed). It
+    // asks each of the game mode's GameplayMutators ("mov rbx, [rcx+0F10h]", their slot 0xC0) and returns the answer of
+    // the first that has one; else false unless the game state's bAllowRespawning is set ("test byte ptr [rbx+1B00h],
+    // 1"); else true, unless the playlist is InfiniteRespawnExceptStorm and the player died outside the safe zone. Other
+    // game mode functions read the mutators (Tick, PlayerCanRestart, FinishRestartPlayer), none of them tests the flag.
+    void** VTable = CdoVTable(L"/Script/FortniteGame.FortGameModeAthena");
+    const int32_t Mutators = static_cast<int32_t>(GameplayMutatorsOffset);
+    const int32_t AllowRespawning = static_cast<int32_t>(AllowRespawningOffset);
+    int32_t Index = -1;
+    int32_t Count = 0;
+    uintptr_t Function = 0;
+    for (int32_t Slot = 0; VTable && Mutators > 0 && AllowRespawning > 0 && AllowRespawningMask && Slot < 0x400; ++Slot)
+    {
+        const uintptr_t Entry = reinterpret_cast<uintptr_t>(VTable[Slot]);
+        // The vtable's end; a slot Core has swapped holds one of its own functions.
+        if (!IsInText(Entry) && !IsCoreFunction(Entry))
+        {
+            break;
+        }
+        const uintptr_t End = IsInText(Entry) && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        if (End <= Entry || End - Entry > 0x400)
+        {
+            continue;
+        }
+        bool bReadsMutators = false;
+        bool bTestsAllowRespawning = false;
+        for (uintptr_t Address = Entry; Address + 7 <= End; ++Address)
+        {
+            // mov r64, [reg+GameplayMutators]
+            bReadsMutators = bReadsMutators || ((Byte(Address) & 0xF8) == 0x48 && Byte(Address + 1) == 0x8B && (Byte(Address + 2) & 0xC0) == 0x80 && (Byte(Address + 2) & 0x07) != 0x04
+                && *reinterpret_cast<const int32_t*>(Address + 3) == Mutators);
+            // test byte ptr [reg+bAllowRespawning], mask
+            bTestsAllowRespawning = bTestsAllowRespawning || (Byte(Address) == 0xF6 && (Byte(Address + 1) & 0xF8) == 0x80 && (Byte(Address + 1) & 0x07) != 0x04
+                && *reinterpret_cast<const int32_t*>(Address + 2) == AllowRespawning && Byte(Address + 6) == AllowRespawningMask);
+        }
+        // The first slot holding it: the vtables sit back to back, so a subclass's that follows repeats it.
+        if (bReadsMutators && bTestsAllowRespawning && FindVirtualCall(Entry, End) && Entry != Function)
+        {
+            Index = Count == 0 ? Slot : Index;
+            Function = Count == 0 ? Entry : Function;
+            ++Count;
+        }
+    }
+    if (Count != 1)
+    {
+        Log::Error(L"Finder: AFortGameModeAthena::IsRespawningAllowed not found ({} functions read GameplayMutators +0x{:X} and test bAllowRespawning +0x{:X}), a death asks the playlist's RespawnType only",
+            Count, Mutators > 0 ? Mutators : 0, AllowRespawning > 0 ? AllowRespawning : 0);
+        return false;
+    }
+    Natives::AFortGameModeAthena_IsRespawningAllowedIndex = Index;
+    Log::Info(L"Finder: AFortGameModeAthena::IsRespawningAllowed is slot 0x{:X} (0x{:X} asks the game mode's mutators, then the game state's bAllowRespawning)", Index, Function - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolvePersistentGameplayEffectsLive()
 {
     static bool bSearched = false;

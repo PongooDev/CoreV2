@@ -143,6 +143,16 @@ public:
     // the fall damage, 0xC00470, the time of day at the match's start, 0xC27290, the items a death drops, 0xC26970).
     DefineUProperty(TArray<UObject*>, GameplayMutators)
     static ptrdiff_t GameplayMutatorsOffset() { return Member_GameplayMutators.IsAvailable() ? Member_GameplayMutators.GetOffsetChecked() : -1; }
+    // Whether the match brings its players back after they die. Reflected (and replicated) from 6.01; an unreflected
+    // flag of the game state before (from 4.2). The game mode's OnPlaylistDataLoaded sets it when the loaded playlist's
+    // RespawnType isn't None (6.02 0xBD3A03), and a mutator that respawns players by itself sets and clears it
+    // (AFortAthenaMutator_Disco: set at BeginPlay, 0xC70B7D, then at each game phase step, 0xC92753). The game mode's
+    // IsRespawningAllowed reads it.
+    DefineBitfieldUProperty(bAllowRespawning)
+    static bool HasAllowRespawning() { return Member_bAllowRespawning.IsAvailable(); }
+    // The flag's byte in the game state and its bit in that byte; -1 and 0 on a build that doesn't reflect it.
+    static ptrdiff_t AllowRespawningOffset() { return HasAllowRespawning() ? Member_bAllowRespawning.GetOffsetChecked() : -1; }
+    static uint8_t AllowRespawningMask() { return HasAllowRespawning() ? Member_bAllowRespawning.GetByteMask() : 0; }
     // Core's log of what became of the match's property overrides, once the playlist's modifiers have registered (the
     // game mode's HandleCurrentPlaylistLoaded): for each, the mutator of its scope and the value its property has now,
     // or that no mutator of that scope spawned. Nothing to say on a match without overrides.

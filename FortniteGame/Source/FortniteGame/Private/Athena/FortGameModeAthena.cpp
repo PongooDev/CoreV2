@@ -2273,9 +2273,20 @@ namespace
 
 bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerState)
 {
+    // From 6.01 the build's own, intact and virtual (HookVTables finds its slot), which is what the pawn's death handler
+    // goes by when it has the player respawn (6.02 AFortPlayerPawnAthena 0xC486D0: "call [rax+9A8h]", then the respawn
+    // time and RespawnPlayerAfterDeath's timer). Core's reading of the playlist below said no for a playlist whose
+    // mutator brings the players back (Playlist_Disco has no RespawnType), so each death in Disco Domination was also
+    // an elimination: a place, the alive players' count and the spectating, for a player the game then respawned. And
+    // it said yes where a mutator says no on a playlist that has a RespawnType (AFortAthenaMutator_Barrier answers by
+    // team, 6.02 0xC780C0): the game respawned nobody, and the player was never out.
+    if (const int32_t Index = Natives::AFortGameModeAthena_IsRespawningAllowedIndex; Index >= 0)
+    {
+        return CallVirtual<bool>(this, Index, PlayerState);
+    }
     // 4.2 0xA19780: bAllowRespawning (an unreflected flag OnPlaylistDataLoaded, 0xA1BE40, sets when the loaded playlist's
     // RespawnType isn't None), then true unless the playlist is InfiniteRespawnExceptStorm and the player died in the
-    // storm. The playlist's RespawnType stands in for the flag: Core can't read it.
+    // storm. The playlist's RespawnType stands in for the flag: Core can't read it before 6.01.
     AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylist() && UFortPlaylistAthena::HasRespawnType() ? AthenaGameStateOf(this) : nullptr;
     UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
     if (!Playlist || Playlist->RespawnType == EAthenaRespawnType::GetNone())
@@ -2552,6 +2563,17 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded()
     if (AFortGameStateAthena* GameState = AthenaGameStateOf(this))
     {
         GameState->ReportPropertyOverrides();
+        // The mutators the playlist's modifiers spawned, as the game mode and the game state heard of them: the lists
+        // the game's own code asks (a death's respawn, Disco Domination's score and dance floors). Nothing to say on a
+        // playlist without mutators.
+        const int32_t ModeMutators = GameplayMutatorsOffset() >= 0 ? GetMember_GameplayMutators().Num() : 0;
+        const int32_t StateMutators = AFortGameStateAthena::GameplayMutatorsOffset() >= 0 ? GameState->GetMember_GameplayMutators().Num() : 0;
+        if (ModeMutators > 0 || StateMutators > 0)
+        {
+            UFortPlaylistAthena* Playlist = GameState->GetCurrentPlaylist();
+            Log::Info(L"PLAYLIST: {}'s mutators: {} answer for the game mode, {} for the game state{}", Playlist ? static_cast<FName>(Playlist->PlaylistName).ToStdString() : std::wstring(L"the playlist"),
+                ModeMutators, StateMutators, AFortGameStateAthena::HasAllowRespawning() ? (GameState->bAllowRespawning ? L"; bAllowRespawning is set" : L"; bAllowRespawning isn't set") : L"");
+        }
     }
     // A playlist that brings its players back says how far over their death once, as it loads (#411).
     if (IsRespawningAllowed(nullptr))
@@ -2715,6 +2737,12 @@ void AFortGameModeAthena::AddDelegateHandlers()
 void AFortGameModeAthena::HookVTables()
 {
     AddDelegateHandlers();
+    // IsRespawningAllowed's own slot (from 6.01), on a Battle Royale server: only a build whose game state reflects
+    // bAllowRespawning is looked at.
+    if (Configuration::Get().IsBattleRoyale() && StaticClass() && AFortGameStateAthena::HasAllowRespawning())
+    {
+        Finder::ResolveIsRespawningAllowedLive(GameplayMutatorsOffset(), AFortGameStateAthena::AllowRespawningOffset(), AFortGameStateAthena::AllowRespawningMask());
+    }
 
     UClass* AthenaClass = StaticClass();
     UObject* ZoneDefault = AthenaClass ? AFortGameModeZone::StaticClass()->GetDefaultObject(false) : nullptr;

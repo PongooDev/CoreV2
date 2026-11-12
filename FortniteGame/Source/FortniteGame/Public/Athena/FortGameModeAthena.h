@@ -133,11 +133,21 @@ public:
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
 
+    // The mutators that change the game mode's answers (from 5.21), spawned by the playlist's modifiers: the game mode
+    // hears of each as a mutator observer (it registers in InitGameState, 6.02 0xBCF6F0; 0xBD3470 adds the mutator) and
+    // its own code walks the list for each answer (Tick, PlayerCanRestart, FinishRestartPlayer, IsRespawningAllowed).
+    DefineUProperty(TArray<UObject*>, GameplayMutators)
+    static ptrdiff_t GameplayMutatorsOffset() { return Member_GameplayMutators.IsAvailable() ? Member_GameplayMutators.GetOffsetChecked() : -1; }
+
     // 4.2 0xA19780: whether the match's playlist brings its players back after they die (EAthenaRespawnType), and with
     // InfiniteRespawnExceptStorm not one the storm killed (PlayerState's DeathInfo). The pawn's death handler (4.2
     // AFortPlayerPawnAthena 0xA81B50, after its controller's) then has the controller's RespawnPlayerAfterDeath run once
     // the death penalty's respawn countdown is over, and ChoosePlayerStart (0xA0AE70) and PlayerCanRestart (0xA1E6F0)
     // let it restart in the safe zones phase. False before 3.5.
+    // From 6.01 it is the build's own virtual (6.02 0xBD08A0, slot 0x135), the one the pawn's death handler asks
+    // (6.02 AFortPlayerPawnAthena 0xC486D0): the game mode's mutators answer first (Disco Domination's while the storm
+    // is no further than its last respawn circle, AFortAthenaMutator_Disco 0xC78130; AFortAthenaMutator_Barrier's by
+    // team), then the game state's bAllowRespawning, then the playlist's RespawnType as before.
     bool IsRespawningAllowed(AFortPlayerStateAthena* PlayerState);
     // How far over where they died a respawning player (or player bot) starts skydiving: the match's playlist's
     // RespawnHeight where the playlist has one (from 5.41) and it comes to more than 1000, else DefaultRespawnHeight. The

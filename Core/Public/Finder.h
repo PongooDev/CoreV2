@@ -229,6 +229,11 @@ namespace Finder
     // "return the answer it was given" and AFortPlayerControllerAthena with a function reading the game state's
     // GameplayMutators. GameplayMutatorsOffset: AFortGameStateAthena's GameplayMutators. False where there is none.
     bool ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset);
+    // From 6.01: the slot of AFortGameModeAthena's IsRespawningAllowed (Natives), the one function of its vtable that
+    // both reads the game mode's GameplayMutators and tests the game state's bAllowRespawning. GameplayMutatorsOffset:
+    // AFortGameModeAthena's GameplayMutators; AllowRespawningOffset and AllowRespawningMask: the byte and the bit of
+    // AFortGameStateAthena's bAllowRespawning. False where there is none, or more than one.
+    bool ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, ptrdiff_t AllowRespawningOffset, uint8_t AllowRespawningMask);
     // AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects (Natives), the function holding its
     // STAT_Fort_GameStateZoneApplyingPersistentEffects scope, and UObject::GetInterfaceAddress, which its callers need for
     // an actor's IAbilitySystemInterface. False without either (1.x builds have no stat names).

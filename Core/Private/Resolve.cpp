@@ -14156,9 +14156,8 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
     // function that stores CurrentMovementStyle: "movzx eax, byte ptr [rdx]; mov rbx, rcx; mov [rcx + CurrentMovementStyle],
     // al", then the character movement's MaxWalkSpeed and its other speeds from GetMovementSpeed for the new style. The
     // pawn's movement style update (5.10 0x112B010) calls it through the vtable (slot 0x8C8 on 5.10).
-    const auto StoresStyle = [CurrentMovementStyleOffset](uintptr_t Entry)
+    const auto StoresStyleItself = [CurrentMovementStyleOffset](uintptr_t Body)
     {
-        const uintptr_t Body = Finder::Unthunk(Entry);
         if (!Body || !Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30))
         {
             return false;
@@ -14179,7 +14178,22 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
         }
         return false;
     };
-    const int32_t Index = CurrentMovementStyleOffset > 0 ? FirstVTableIndexWhere(CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena"), StoresStyle) : -1;
+    const auto StoresStyle = [&StoresStyleItself](uintptr_t Entry) { return StoresStyleItself(Finder::Unthunk(Entry)); };
+    // 6.00's player pawn overrides it (CL-4395664 0x11DBBA0): it keeps the old style, calls AFortPawn's (0x11BAB30, the
+    // store) first, then handles the change to and from style 4. The player pawn's vtable holds the override, so where no
+    // slot stores the style itself, the slot whose first call does is the one.
+    const auto OverrideStoresStyle = [&StoresStyleItself](uintptr_t Entry)
+    {
+        const uintptr_t Body = Finder::Unthunk(Entry);
+        const uintptr_t SuperCall = Body && Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30) ? FindRawCall(Body, Body + 0x28) : 0;
+        return SuperCall && StoresStyleItself(Finder::Unthunk(Finder::RelativeTarget(SuperCall, 1, 5)));
+    };
+    void** PawnVTable = CurrentMovementStyleOffset > 0 ? CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena") : nullptr;
+    int32_t Index = PawnVTable ? FirstVTableIndexWhere(PawnVTable, StoresStyle) : -1;
+    if (Index < 0 && PawnVTable)
+    {
+        Index = FirstVTableIndexWhere(PawnVTable, OverrideStoresStyle);
+    }
     if (Index < 0)
     {
         Log::Warning(L"Finder: AFortPawn::SetCurrentMovementStyle not found (CurrentMovementStyle 0x{:X}), player bots set their movement style without its speeds",

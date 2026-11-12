@@ -47,6 +47,8 @@ class AFortGameStateAthena;
 class AFortAthenaSupplyDrop;
 class AFortSpecialActorReplicationInfo;
 struct FSpecialActorInitData;
+class ABuildingFoundation;
+struct FFortBuildingRandomList;
 class APlayerState;
 class APlayerController;
 class AFortPlayerState;
@@ -882,6 +884,16 @@ namespace Natives
     inline void (*FSpecialActorInitData_Destructor)(FSpecialActorInitData* This) = nullptr;
     // AFortAthenaExitCraftSpawner's unreflected OnExitCraftSpawned, its first member (5.40 and 5.41 +0x328, after AActor).
     inline ptrdiff_t AFortAthenaExitCraftSpawner_OnExitCraftSpawned = -1;
+
+    // From 6.00 (dynamic foundations, the floating island's), Finder::ResolveBuildingFoundationLive, off
+    // ABuildingFoundation::PostUpdate (6.00 0xD11960): SelectAndSetupMyBuildingLevel(RandomList) (0xD142E0, which picks
+    // the plot's level and streams it in), and the unreflected bTransformSet and bPostUpdateCalled bits (21.40's names;
+    // 6.00 +0xBB1 masks 8 and 4). The bits' byte, as DefineNativeBitfield reads a uint32 from it.
+    inline bool (*ABuildingFoundation_SelectAndSetupMyBuildingLevel)(ABuildingFoundation* This, FFortBuildingRandomList* RandomList) = nullptr;
+    inline ptrdiff_t ABuildingFoundation_bTransformSet = -1;
+    inline uint32_t ABuildingFoundation_bTransformSetMask = 0;
+    inline ptrdiff_t ABuildingFoundation_bPostUpdateCalled = -1;
+    inline uint32_t ABuildingFoundation_bPostUpdateCalledMask = 0;
 }
 
 namespace Sites

@@ -332,6 +332,10 @@ namespace Finder
     // from AFortAthenaExitCraft's departure (the call that passes CraftSpecialActorIDOffset); both load the list off the
     // game state's SpecialActorDataOffset. Logged once; false where any is missing.
     bool ResolveSpecialActorReplicationLive(ptrdiff_t SpawnerSpecialActorIDOffset, ptrdiff_t CraftSpecialActorIDOffset, ptrdiff_t SpecialActorDataOffset);
+    // From 6.00: ABuildingFoundation::SelectAndSetupMyBuildingLevel and the bTransformSet and bPostUpdateCalled bits, off
+    // the foundation's PostUpdate (its vtable's ABuildingSMActor::PostUpdate slot), which tests the first where it reads
+    // DynamicFoundationType and sets the second last. False on builds without dynamic foundations.
+    bool ResolveBuildingFoundationLive(void** FoundationVTable, ptrdiff_t DynamicFoundationTypeOffset);
     // From 5.40: the `lea rax, [shared empty function]` sites that bind the stripped method of AFortAthenaExitCraftSpawner's
     // ExitCraftTimerHandle timer (the delegate instance's method, mov [reg+10h], rax, before FTimerManager::
     // InternalSetTimer): in StartExitCraftSpawnTimer's body and in the spawner's BeginPlay (its slots that differ from

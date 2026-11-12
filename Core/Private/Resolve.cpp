@@ -14368,6 +14368,79 @@ bool Finder::ResolveSpecialActorReplicationLive(ptrdiff_t SpawnerSpecialActorIDO
     return true;
 }
 
+bool Finder::ResolveBuildingFoundationLive(void** FoundationVTable, ptrdiff_t DynamicFoundationTypeOffset)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::ABuildingFoundation_SelectAndSetupMyBuildingLevel != nullptr;
+    }
+    bSearched = true;
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+    if (Natives::ABuildingSMActor_PostUpdateIndex < 0)
+    {
+        Finder::ResolveBuildingLootLive();
+    }
+
+    // ABuildingFoundation::PostUpdate (6.00 0xD11960) streams the plot's level in once the world manager has updated it:
+    //   call ABuildingSMActor::PostUpdate
+    //   test byte ptr [rbx+0BB0h], 1              ; bConditionalFoundation: the quota streams those
+    //   jnz done
+    //   cmp byte ptr [rbx+0BB2h], 0               ; DynamicFoundationType, Static
+    //   jz select
+    //   test byte ptr [rbx+0BB1h], 8              ; bTransformSet: a dynamic one waits for its transform
+    //   jz done
+    // select:
+    //   call SelectAndSetupMyBuildingLevel        ; 0xD142E0 (this, RandomList)
+    // done:
+    //   or byte ptr [rbx+0BB1h], 4                ; bPostUpdateCalled
+    // Each is matched by its opcode and ModRM ([reg+disp32], no SIB), whatever the register.
+    const auto Disp32 = [](uintptr_t At) { return static_cast<ptrdiff_t>(*reinterpret_cast<const int32_t*>(At)); };
+    const auto IsDisp32Operand = [](uintptr_t At, uint8_t Reg) { return (Byte(At) & 0xF8) == (0x80 | (Reg << 3)) && (Byte(At) & 7) != 4; };
+    const uintptr_t PostUpdate = Natives::ABuildingSMActor_PostUpdateIndex >= 0 ? VTableEntry(FoundationVTable, Natives::ABuildingSMActor_PostUpdateIndex) : 0;
+    const uintptr_t End = PostUpdate ? Finder::FunctionEnd(PostUpdate) : 0;
+    uintptr_t TypeCheck = 0;
+    for (uintptr_t At = DynamicFoundationTypeOffset > 0 ? PostUpdate : 0; At && At + 7 <= End && !TypeCheck; ++At)
+    {
+        TypeCheck = Byte(At) == 0x80 && IsDisp32Operand(At + 1, 7) && Disp32(At + 2) == DynamicFoundationTypeOffset && Byte(At + 6) == 0 ? At : 0;
+    }
+    uintptr_t TransformSetTest = 0;
+    for (uintptr_t At = TypeCheck ? TypeCheck + 7 : 0; At && At + 7 <= End && At < TypeCheck + 0x20 && !TransformSetTest; ++At)
+    {
+        TransformSetTest = Byte(At) == 0xF6 && IsDisp32Operand(At + 1, 0) ? At : 0;
+    }
+    const uintptr_t SelectCall = TransformSetTest ? FindRawCall(TransformSetTest + 7, End) : 0;
+    uintptr_t PostUpdateCalledSet = 0;
+    for (uintptr_t At = SelectCall ? SelectCall + 5 : 0; At && At + 7 <= End && !PostUpdateCalledSet; ++At)
+    {
+        PostUpdateCalledSet = Byte(At) == 0x80 && IsDisp32Operand(At + 1, 1) ? At : 0;
+    }
+    const uintptr_t Select = SelectCall ? Finder::RelativeTarget(SelectCall, 1, 5) : 0;
+    // Where the build still logs it, the selection is the function with SelectAndSetupMyBuildingLevel's own message.
+    const uintptr_t Logged = FunctionOf(L"ABuildingFoundation::SelectAndSetupMyBuildingLevel - Cannot get WorldManager!!");
+    const uint8_t TransformSetBit = TransformSetTest ? Byte(TransformSetTest + 6) : 0;
+    const uint8_t PostUpdateCalledBit = PostUpdateCalledSet ? Byte(PostUpdateCalledSet + 6) : 0;
+    const auto SingleBit = [](uint8_t Bit) { return Bit && (Bit & (Bit - 1)) == 0; };
+    if (!Select || (Logged && Logged != Select) || !SingleBit(TransformSetBit) || !SingleBit(PostUpdateCalledBit))
+    {
+        Log::Error(L"Finder: ABuildingFoundation's dynamic foundation streaming not found (PostUpdate 0x{:X} slot {}, DynamicFoundationType +0x{:X} read 0x{:X}, bTransformSet 0x{:X}, SelectAndSetupMyBuildingLevel 0x{:X} (logged 0x{:X}), bPostUpdateCalled 0x{:X})",
+            Rva(PostUpdate), Natives::ABuildingSMActor_PostUpdateIndex, DynamicFoundationTypeOffset, Rva(TypeCheck), Rva(TransformSetTest), Rva(Select), Rva(Logged), Rva(PostUpdateCalledSet));
+        return false;
+    }
+
+    // DefineNativeBitfield reads a uint32: its offset is the bit's byte rounded down to 4, its mask shifted to match.
+    const ptrdiff_t TransformSetByte = Disp32(TransformSetTest + 2);
+    const ptrdiff_t PostUpdateCalledByte = Disp32(PostUpdateCalledSet + 2);
+    Natives::ABuildingFoundation_bTransformSet = TransformSetByte & ~ptrdiff_t(3);
+    Natives::ABuildingFoundation_bTransformSetMask = static_cast<uint32_t>(TransformSetBit) << (8 * (TransformSetByte & 3));
+    Natives::ABuildingFoundation_bPostUpdateCalled = PostUpdateCalledByte & ~ptrdiff_t(3);
+    Natives::ABuildingFoundation_bPostUpdateCalledMask = static_cast<uint32_t>(PostUpdateCalledBit) << (8 * (PostUpdateCalledByte & 3));
+    Natives::ABuildingFoundation_SelectAndSetupMyBuildingLevel = reinterpret_cast<decltype(Natives::ABuildingFoundation_SelectAndSetupMyBuildingLevel)>(Select);
+    Log::Info(L"Finder: ABuildingFoundation::PostUpdate 0x{:X}: SelectAndSetupMyBuildingLevel 0x{:X}, bTransformSet +0x{:X} & 0x{:X}, bPostUpdateCalled +0x{:X} & 0x{:X}",
+        Rva(PostUpdate), Rva(Select), TransformSetByte, TransformSetBit, PostUpdateCalledByte, PostUpdateCalledBit);
+    return true;
+}
+
 std::vector<uint8_t*> Finder::ExitCraftSpawnTimerBinds(UFunction* StartExitCraftSpawnTimer, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset)
 {
     std::vector<uint8_t*> Binds;

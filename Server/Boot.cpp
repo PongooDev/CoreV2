@@ -48,6 +48,7 @@
 #include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingActor.h"
 #include "Building/BuildingContainer.h"
+#include "Building/BuildingFoundation.h"
 #include "Building/BuildingItemCollectorActor.h"
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "Building/BuildingTrap.h"
@@ -354,6 +355,7 @@ static void InstallHooks()
             AFortPlayerPawnAthena::HookVTables();
             AFortAthenaSupplyDrop::HookNatives();
             AFortAthenaExitCraftSpawner::HookNatives();
+            ABuildingFoundation::HookNatives();
             ABGAConsumableSpawner::HookNatives();
             AFortPoiManager::HookNatives();
             AFortAthenaVehicle::HookVTables();

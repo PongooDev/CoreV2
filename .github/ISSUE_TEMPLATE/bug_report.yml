@@ -44,6 +44,7 @@ body:
         - "5.40"
         - "5.41"
         - "6.00"
+        - "6.01"
         - Other (say which below)
     validations:
       required: true

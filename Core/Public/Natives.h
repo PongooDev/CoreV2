@@ -337,6 +337,12 @@ namespace Natives
     inline int32_t UNetDriver_IsServerIndex = -1;
     inline int32_t UNetDriver_ServerReplicateActorsIndex = -1;
     inline int32_t UReplicationDriver_ServerReplicateActorsIndex = -1;
+    // UE 4.21's replication graph (6.00 to 6.02, Finder::ResolveReplicationGraphActorInfoLive): where a
+    // UNetReplicationGraphConnection keeps its per-actor infos (ActorInfoMap's ActorMap, keyed by the actor's address;
+    // -1 unknown), and the engine's own remove-by-key of that map's type (TMap<pointer, TSharedPtr<
+    // FConnectionReplicationActorInfo>>::Remove, the one NotifyActorChannelCleanedUp calls on the ChannelMap beside it).
+    inline ptrdiff_t UNetReplicationGraphConnection_ActorMapOffset = -1;
+    inline int32_t (*FPerConnectionActorInfoMap_RemoveByKey)(void* Map, const void* Key) = nullptr;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
     // 8 up to UE 4.19 (2.4.2); UE 4.20 (2.5) drops five delegate instance virtuals and has GetHandle at 4.
     inline int32_t IDelegateInstance_GetHandleIndex = 8;

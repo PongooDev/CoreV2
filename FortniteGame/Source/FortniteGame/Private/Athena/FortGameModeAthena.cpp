@@ -26,6 +26,7 @@
 #include "Engine/EngineTypes.h"
 #include "Engine/NetConnection.h"
 #include "Engine/NetDriver.h"
+#include "Engine/ReplicationDriver.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameSession.h"
@@ -49,6 +50,7 @@
 #include "Online/FortPartyBeaconHost.h"
 #include "Player/FortCheatManager.h"
 #include "ReflectionParams.h"
+#include "ReplicationGraph.h"
 #include "Templates/Casts.h"
 #include "TimerManager.h"
 #include "UObject/UObjectGlobals.h"
@@ -2909,17 +2911,26 @@ void AFortGameModeAthena::HandlePlayerStateDestroyed(AActor* DestroyedActor)
 void AFortGameModeAthena::HandlePawnDestroyed(AActor* DestroyedActor)
 {
 #if WITH_SERVER_CODE
-    // A dead pawn's only: the warmup pawns the aircraft phase destroys, alive, would be a line for every player at once.
     AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(DestroyedActor));
     if (!Pawn)
     {
         return;
     }
+    // The replication graph's connections forget the pawn, as a later engine's RemoveNetworkActor has them do for every
+    // actor it removes (UReplicationGraph::RemoveActorInfoFromConnections, #411): a dead pawn's entry keeps its tear-off
+    // flag, and the next pawn spawned at its address was opened and closed on that connection every frame. Core is told
+    // of the match's pawns only (their OnDestroyed), so another torn off actor's entry stays as the build leaves it.
+    UWorld* World = GetWorld();
+    UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
+    UReplicationGraph* Graph = Driver && Driver->HasReplicationDriver() ? Cast<UReplicationGraph>(reinterpret_cast<UObject*>(static_cast<UReplicationDriver*>(Driver->ReplicationDriver))) : nullptr;
+    const int32_t Removed = Graph ? Graph->RemoveActorInfoFromConnections(Pawn) : -1;
+    // A dead pawn's line only: the warmup pawns the aircraft phase destroys, alive, would be a line for every player at once.
     const bool bTornOff = Pawn->bTearOff;
     const bool bDying = Pawn->bIsDying;
     if (bTornOff || bDying)
     {
-        Log::Info(L"Battle Royale: the dead pawn {} (0x{:X}) is destroyed, {}", Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn), bTornOff ? L"torn off" : L"not torn off");
+        Log::Info(L"Battle Royale: the dead pawn {} (0x{:X}) is destroyed, {}; {}", Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn), bTornOff ? L"torn off" : L"not torn off",
+            Removed >= 0 ? std::format(L"{} connections forget it", Removed) : std::wstring(Graph ? L"the connections' entries for it are left as they are" : L"no replication graph"));
     }
 #endif
 }

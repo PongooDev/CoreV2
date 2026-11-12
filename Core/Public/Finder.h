@@ -312,6 +312,14 @@ namespace Finder
     // the player state's PlayerTeamPrivate (PlayerTeamPrivateOffset). For Battle Royale's player bots' squad bar health.
     bool ResolveTeamPrivateHealthAndShieldLive(ptrdiff_t PlayerTeamPrivateOffset, ptrdiff_t MaxShieldOffset);
     bool ResolveReplicationDriverLive();
+    // The replication graph's per-connection actor infos (Natives::UNetReplicationGraphConnection_ActorMapOffset and
+    // FPerConnectionActorInfoMap_RemoveByKey), for UReplicationGraph::RemoveActorInfoFromConnections (CoreV2 #411).
+    // GraphVTable is the live graph's. Only where every piece is where 6.00, 6.01 and 6.02 have it: CL-4395664 to
+    // CL-4461277,
+    // UNetReplicationGraphConnection::NotifyActorChannelCleanedUp's ChannelMap lookup, its remove and the three stores
+    // that clear the info it found, and UReplicationGraph::NotifyActorTearOff's lookup in the map 0x50 before that one
+    // and its tear-off flag store. Anything else leaves the build as it is and says so once.
+    bool ResolveReplicationGraphActorInfoLive(void** GraphVTable);
     bool ResolveDecoSpawnedLive();
     bool ResolveScoreBuildingConstructionLive();
     bool ResolveGetPoiTagsForLive();

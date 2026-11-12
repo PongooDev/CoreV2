@@ -14996,6 +14996,136 @@ bool Finder::ResolveReplicationDriverLive()
     return true;
 }
 
+bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
+{
+    static bool bSearched = false;
+    if (bSearched || Natives::FPerConnectionActorInfoMap_RemoveByKey)
+    {
+        return Natives::FPerConnectionActorInfoMap_RemoveByKey != nullptr;
+    }
+    bSearched = true;
+
+    // CoreV2 #411. UE 4.21's replication graph keeps, for each connection, an info for every actor it replicated
+    // (UNetReplicationGraphConnection's ActorInfoMap: ActorMap by the actor's address, then ChannelMap by its channel,
+    // both TMap<pointer, TSharedPtr<FConnectionReplicationActorInfo>>). UReplicationGraph::NotifyActorTearOff (6.00
+    // CL-4395664 0x7D5A40) sets the info's bTearOff (+0x1D bit 1), ReplicateSingleActor (0x7DF520) closes the channel
+    // right after replicating whenever that is set, and nothing ever takes the entry out again: NotifyActorChannelCleanedUp
+    // (0x7D5060) only removes the ChannelMap's and clears Channel and the frame counters, RemoveNetworkActor (0x7DE420)
+    // only the graph's own maps. An actor spawned at a dead, torn off actor's address finds that entry and is opened and
+    // closed on that connection every time it replicates. Later engines end RemoveNetworkActor with the missing step
+    // (8.30 0x8E1C70: for each of Connections, ActorMap.Remove(Actor), a call of the same remove-by-key as the
+    // ChannelMap's, 0x38A1C0), which UReplicationGraph::RemoveActorInfoFromConnections does here with the build's own.
+    //
+    // That function is found as NotifyActorChannelCleanedUp's second call, and nothing is resolved unless the code
+    // around it is what 6.00, 6.01 (CL-4424678 0x78A1D0, 0x78ABB0) and 6.02 (CL-4461277 0x78AD60, 0x78B740) have:
+    //   NotifyActorChannelCleanedUp: lea r14, [rcx+80h] (the ChannelMap); call FindId; ...; mov rdx, rsi (the channel);
+    //     mov rcx, r14; call Remove; mov [rdi], r15; mov [rdi+0Ch], r15; mov [rdi+14h], r15 (the info's Channel and its
+    //     frame counters, so the 0x20 byte info whose flags are at +0x1D)
+    //   NotifyActorTearOff: lea rcx, [rsi+30h] (the ActorMap, 0x50 before the ChannelMap: one TMap); call the same
+    //     FindId; ...; or byte ptr [rax+1Dh], 2
+    // A build before 6.00 or after 6.02 was never looked at, and one whose code differs (8.30's info is 0x30 bytes with
+    // its flags at +0x28, and its engine does this itself) keeps what it has.
+    constexpr uint32_t FirstVerifiedChangelist = 4395664;
+    constexpr uint32_t LastVerifiedChangelist = 4461277;
+    constexpr ptrdiff_t MapSize = 0x50;
+    const uint32_t Changelist = Packed::Changelist();
+    const auto LeftAsIs = [Changelist](const wchar_t* Why)
+    {
+        Log::Warning(L"Finder: the replication graph's per-connection actor infos are left as CL-{} has them ({}), so a pawn spawned at a dead pawn's address may not reach its player (#411)", Changelist, Why);
+        return false;
+    };
+    if (Changelist < FirstVerifiedChangelist || Changelist > LastVerifiedChangelist)
+    {
+        return LeftAsIs(L"only 6.00 to 6.02, CL-4395664 to CL-4461277, were checked");
+    }
+
+    const std::vector<uintptr_t> CleanedUpRefs = Finder::StringRefs(L"UNetReplicationGraphConnection_NotifyActorChannelCleanedUp");
+    const uintptr_t CleanedUp = CleanedUpRefs.size() == 1 ? Finder::FunctionStart(CleanedUpRefs[0]) : 0;
+    const uintptr_t CleanedUpEnd = CleanedUp ? Finder::FunctionEnd(CleanedUp) : 0;
+    if (!CleanedUp || CleanedUpEnd <= CleanedUp || CleanedUpEnd - CleanedUp > 0x400)
+    {
+        return LeftAsIs(L"NotifyActorChannelCleanedUp not found");
+    }
+
+    const std::vector<std::pair<uintptr_t, uintptr_t>> CleanedUpCalls = Finder::DirectCalls(CleanedUp, CleanedUpEnd);
+    if (CleanedUpCalls.size() != 3)
+    {
+        return LeftAsIs(L"NotifyActorChannelCleanedUp doesn't make its three calls");
+    }
+    // lea r64, [rcx+disp32], before the first call: the ChannelMap, kept in a register for the two calls.
+    ptrdiff_t ChannelMapOffset = -1;
+    int32_t MapRegister = -1;
+    for (uintptr_t Address = CleanedUp; Address + 7 <= CleanedUpCalls[0].first; ++Address)
+    {
+        const uint8_t* Code = reinterpret_cast<const uint8_t*>(Address);
+        if ((Code[0] == 0x48 || Code[0] == 0x4C) && Code[1] == 0x8D && (Code[2] & 0xC7) == 0x81)
+        {
+            if (ChannelMapOffset >= 0)
+            {
+                return LeftAsIs(L"NotifyActorChannelCleanedUp takes more than one member's address");
+            }
+            ChannelMapOffset = *reinterpret_cast<const int32_t*>(Code + 3);
+            MapRegister = ((Code[2] >> 3) & 7) | (Code[0] == 0x4C ? 8 : 0);
+        }
+    }
+    const uintptr_t FindId = CleanedUpCalls[0].second;
+    const uintptr_t RemoveSite = CleanedUpCalls[1].first;
+    const uintptr_t Remove = CleanedUpCalls[1].second;
+    const uint8_t* BeforeRemove = reinterpret_cast<const uint8_t*>(RemoveSite - 6);
+    const uint8_t* AfterRemove = reinterpret_cast<const uint8_t*>(RemoveSite + 5);
+    // mov rdx, r64 (the key, by value); mov rcx, <the map's register>.
+    const bool bRemoveArguments = RemoveSite - 6 > CleanedUpCalls[0].first && (BeforeRemove[0] == 0x48 || BeforeRemove[0] == 0x49) && BeforeRemove[1] == 0x8B && (BeforeRemove[2] & 0xF8) == 0xD0
+        && (BeforeRemove[3] == 0x48 || BeforeRemove[3] == 0x49) && BeforeRemove[4] == 0x8B && (BeforeRemove[5] & 0xF8) == 0xC8
+        && ((BeforeRemove[5] & 7) | (BeforeRemove[3] == 0x49 ? 8 : 0)) == MapRegister;
+    // mov [r], r; mov [r+0Ch], r; mov [r+14h], r: the found info's Channel and frame counters cleared.
+    const bool bInfoCleared = RemoveSite + 5 + 11 <= CleanedUpEnd && (AfterRemove[0] & 0xF8) == 0x48 && AfterRemove[1] == 0x89 && (AfterRemove[2] & 0xC0) == 0x00
+        && (AfterRemove[3] & 0xF8) == 0x48 && AfterRemove[4] == 0x89 && (AfterRemove[5] & 0xC0) == 0x40 && AfterRemove[6] == 0x0C
+        && (AfterRemove[7] & 0xF8) == 0x48 && AfterRemove[8] == 0x89 && (AfterRemove[9] & 0xC0) == 0x40 && AfterRemove[10] == 0x14;
+    if (ChannelMapOffset < MapSize || !bRemoveArguments || !bInfoCleared || !FindId || !Remove || Remove == FindId)
+    {
+        return LeftAsIs(L"NotifyActorChannelCleanedUp isn't 6.00's");
+    }
+
+    // UReplicationGraph::NotifyActorTearOff: the graph's override of the driver's pure virtual of that name.
+    const std::vector<uintptr_t> TearOffRefs = Finder::StringRefs(L"UReplicationDriver::NotifyActorTearOff");
+    const uintptr_t TearOffStub = TearOffRefs.size() == 1 ? Finder::FunctionStart(TearOffRefs[0]) : 0;
+    const int32_t TearOffIndex = TearOffStub ? Finder::VTableIndex(CdoVTable(L"/Script/Engine.ReplicationDriver"), reinterpret_cast<void*>(TearOffStub), 0x400) : -1;
+    const uintptr_t TearOff = GraphVTable && TearOffIndex >= 0 ? reinterpret_cast<uintptr_t>(GraphVTable[TearOffIndex]) : 0;
+    const uintptr_t TearOffEnd = TearOff && TearOff != TearOffStub && Finder::FunctionStart(TearOff) == TearOff ? Finder::FunctionEnd(TearOff) : 0;
+    if (TearOffEnd <= TearOff || TearOffEnd - TearOff > 0x800)
+    {
+        return LeftAsIs(L"the graph's NotifyActorTearOff not found");
+    }
+    // lea rcx, [r64+disp8]; call FindId: the lookup in the ActorMap.
+    ptrdiff_t ActorMapOffset = -1;
+    for (const auto& [Site, Callee] : Finder::DirectCalls(TearOff, TearOffEnd))
+    {
+        const uint8_t* Lea = reinterpret_cast<const uint8_t*>(Site - 4);
+        if (Callee == FindId && Site - 4 >= TearOff && (Lea[0] == 0x48 || Lea[0] == 0x49) && Lea[1] == 0x8D && (Lea[2] & 0xF8) == 0x48)
+        {
+            ActorMapOffset = static_cast<int8_t>(Lea[3]);
+            break;
+        }
+    }
+    // or byte ptr [r64+1Dh], 2: bTearOff.
+    bool bTearOffFlag = false;
+    for (uintptr_t Address = TearOff; Address + 4 <= TearOffEnd && !bTearOffFlag; ++Address)
+    {
+        const uint8_t* Code = reinterpret_cast<const uint8_t*>(Address);
+        bTearOffFlag = Code[0] == 0x80 && (Code[1] & 0xF8) == 0x48 && Code[2] == 0x1D && Code[3] == 0x02;
+    }
+    if (ActorMapOffset <= 0 || ActorMapOffset != ChannelMapOffset - MapSize || !bTearOffFlag)
+    {
+        return LeftAsIs(L"the graph's NotifyActorTearOff isn't 6.00's");
+    }
+
+    Natives::UNetReplicationGraphConnection_ActorMapOffset = ActorMapOffset;
+    Natives::FPerConnectionActorInfoMap_RemoveByKey = reinterpret_cast<decltype(Natives::FPerConnectionActorInfoMap_RemoveByKey)>(Remove);
+    Log::Info(L"Finder: the replication graph's per-connection actor infos: ActorMap +0x{:X} (ChannelMap +0x{:X}), their remove-by-key 0x{:X} (NotifyActorChannelCleanedUp 0x{:X}, NotifyActorTearOff slot 0x{:X}, 0x{:X})",
+        ActorMapOffset, ChannelMapOffset, Remove - Finder::ImageBase(), CleanedUp - Finder::ImageBase(), TearOffIndex * 8, TearOff - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
 {
     static bool bSearched = false;

@@ -1120,6 +1120,16 @@ void AFortWorldManager::HookCallSites()
 
     HookWorldLoot();
 
+    // 6.10 (CL-4480234) has no exploration actors: the world manager's ExplorationActorClass, NumExplorationActors,
+    // distance range, required tags and SpawnedExplorationActors, the game mode's
+    // bSpawnExplorationActorsAtWorldInitialization and the RespawnOutlanderFragments mission event are all gone from the
+    // build, so there is no SpawnExplorationActors to give its placement finder back to.
+    if (!Member_ExplorationActorDistanceRangeMin.IsAvailable() || !Member_ExplorationActorDistanceRangeMax.IsAvailable())
+    {
+        Log::Info(L"AFortWorldManager::SpawnExplorationActors: this build's world manager has no exploration actors");
+        return;
+    }
+
     // The offsets resolve in their own statements: the arguments are evaluated right to left.
     const ptrdiff_t DistanceRangeMinOffset = Member_ExplorationActorDistanceRangeMin.GetOffsetChecked();
     const ptrdiff_t DistanceRangeMaxOffset = Member_ExplorationActorDistanceRangeMax.GetOffsetChecked();

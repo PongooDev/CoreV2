@@ -147,7 +147,9 @@ public:
     // From 6.01 it is the build's own virtual (6.02 0xBD08A0, slot 0x135), the one the pawn's death handler asks
     // (6.02 AFortPlayerPawnAthena 0xC486D0): the game mode's mutators answer first (Disco Domination's while the storm
     // is no further than its last respawn circle, AFortAthenaMutator_Disco 0xC78130; AFortAthenaMutator_Barrier's by
-    // team), then the game state's bAllowRespawning, then the playlist's RespawnType as before.
+    // team), then the game state's bAllowRespawning, then the playlist's RespawnType as before. The build's own storm
+    // rule is the stored death's location against the safe zone, for a death stored as the game stores one
+    // (DeathInfo.bInitialized, AFortPlayerStateAthena::SetDeathInfo); Core's reading of the death cause stays under it.
     bool IsRespawningAllowed(AFortPlayerStateAthena* PlayerState);
     // How far over where they died a respawning player (or player bot) starts skydiving: the match's playlist's
     // RespawnHeight where the playlist has one (from 5.41) and it comes to more than 1000, else DefaultRespawnHeight. The

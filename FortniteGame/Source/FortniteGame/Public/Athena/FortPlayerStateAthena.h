@@ -47,16 +47,21 @@ struct FDeathInfo
     // Where the player died (from 3.5). AFortPlayerControllerAthena::RespawnPlayerAfterDeath (4.2 0xA57AD0) clears the
     // death info, this with it, once the player is back.
     DefineUProperty(FVector, DeathLocation)
-    // Set once the death info holds a death. The player state's IsDead (4.5 0xAE25A0) is bInitialized && !bDBNO &&
-    // (FinisherOrDowner || DeathCause != Unspecified): the squad bar's dead state (UAthenaPlayerInfoBase::SetPlayerState,
-    // 0x2997B00, DeadStateChanged), the squad's count of teammates standing (0xA99E30) and their map markers read it.
-    // The game's death handling sets it as it stores a death (0xAE1C40); a death report written field by field doesn't.
+    // Set once the death info holds a death (from 4.4). The player state's IsDead (4.5 0xAE25A0) is bInitialized &&
+    // !bDBNO && (FinisherOrDowner || DeathCause != Unspecified): the squad bar's dead state (UAthenaPlayerInfoBase::
+    // SetPlayerState, 0x2997B00, DeadStateChanged), the squad's count of teammates standing (0xA99E30) and their map
+    // markers read it. The game's death handling sets it as it stores a death (0xAE1C40, AFortPlayerStateAthena::
+    // SetDeathInfo); a death report written field by field doesn't.
     DefineUProperty(bool, bInitialized)
+    // Flags of how the player died (from 4.5; not a UENUM): what the pawn's vehicle and tags said as the death was
+    // stored (Natives::AFortPlayerPawnAthena_GetDeathCircumstance). The client's kill feed reads it for a fall.
+    DefineUProperty(int32_t, DeathCircumstance)
 
 public:
     static bool HasDistance() { return Member_Distance.IsAvailable(); }
     static bool HasDeathLocation() { return Member_DeathLocation.IsAvailable(); }
     static bool HasInitialized() { return Member_bInitialized.IsAvailable(); }
+    static bool HasDeathCircumstance() { return Member_DeathCircumstance.IsAvailable(); }
     static bool IsReadable()
     {
         return Member_FinisherOrDowner.IsAvailable() && Member_bDBNO.IsAvailable();
@@ -64,6 +69,31 @@ public:
 
     static ptrdiff_t DeathCauseOffset() { return Member_DeathCause.GetOffsetChecked(); }
     static ptrdiff_t DBNOOffset() { return Member_bDBNO.GetOffsetChecked(); }
+    static ptrdiff_t InitializedOffset() { return HasInitialized() ? Member_bInitialized.GetOffsetChecked() : -1; }
+    static ptrdiff_t DeathCircumstanceOffset() { return HasDeathCircumstance() ? Member_DeathCircumstance.GetOffsetChecked() : -1; }
+};
+
+// Where a player who died comes back, and whether both sides are ready for it (from 6.02; not replicated). The pawn's
+// death handler works the place out as it starts the respawn (6.02 0xC48A10: the game mode's respawn location, a
+// mutator's first) and stores it with AFortPlayerControllerAthena::ServerSetRespawnData (0xC24EE0). The client is ready
+// at once when the place is within the controller's RespawnLevelStreamDistance of the death and the playlist doesn't
+// force the camera fade; else PrepareClientForRespawning sends it ClientStartRespawnPreparation and its
+// ServerClientIsReadyToRespawn says so. RespawnPlayerAfterDeath (0xC23990) sets bServerIsReady and waits for both, and
+// the game mode's FinishRestartPlayer (0xBC7430) moves the new pawn there and clears it, for a death that is stored
+// (DeathInfo.bInitialized). All of it is the build's own; Core only reads it for its log.
+struct FFortRespawnData
+{
+    DefineUnrealStruct(FFortRespawnData, FortniteGame)
+    DefineUProperty(bool, bRespawnDataAvailable)
+    DefineUProperty(bool, bClientIsReady)
+    DefineUProperty(bool, bServerIsReady)
+    DefineUProperty(FVector, RespawnLocation)
+
+public:
+    static bool IsReadable()
+    {
+        return Member_bRespawnDataAvailable.IsAvailable() && Member_bClientIsReady.IsAvailable() && Member_bServerIsReady.IsAvailable() && Member_RespawnLocation.IsAvailable();
+    }
 };
 
 // One of the player states watching a player (21.40's FFortSpectatorZoneItem).
@@ -134,6 +164,9 @@ public:
     DefineUProperty(int32_t, TotalPlayerScore)
     static bool HasTotalPlayerScore() { return Member_TotalPlayerScore.IsAvailable(); }
     DefineUStructProperty(FDeathInfo, DeathInfo)
+    // 6.02: the respawn place of the death in DeathInfo (FFortRespawnData).
+    DefineUStructProperty(FFortRespawnData, RespawnData)
+    static bool HasRespawnData() { return Member_RespawnData.IsAvailable() && FFortRespawnData::IsReadable(); }
     // 1.11: the player's squad within their team, 0 for none (OnRep_SquadId adds the squad's player states to the
     // owning controller's SquadMembers). AFortGameModeAthena::PlacePlayerOnTeam (2.1 0x444780) sets it from the
     // dedicated session's squads, which the match assignment's teams[i] made squad i + 1 (0x738440).
@@ -229,6 +262,13 @@ public:
     {
         return Member_DeathInfo.IsAvailable() && FDeathInfo::IsReadable();
     }
+
+    // The player state's own store of a death (6.02 0xC4A090, 6.01 0xC478B0; the 21.40 exports don't name it, the name is
+    // Core's): InDeathInfo copied whole over DeathInfo and bInitialized set, which is what makes it a death to the game's
+    // own code (IsPlayerDead, IsRespawningAllowed's storm rule, FinishRestartPlayer's move to the respawn place). The
+    // build's own function, called; only where Finder::ResolveSetDeathInfoLive found it (from 6.01).
+    static bool HasSetDeathInfo() { return Natives::AFortPlayerStateAthena_SetDeathInfo != nullptr && Member_DeathInfo.IsAvailable() && FDeathInfo::StaticStruct() != nullptr; }
+    void SetDeathInfo(const FDeathInfo& InDeathInfo) { Natives::AFortPlayerStateAthena_SetDeathInfo(this, InDeathInfo); }
 
     // Who eliminated the player (DeathInfo, 1.8): nullptr while they're in the match or DBNO, themselves when nobody did.
     AFortPlayerStateAthena* GetEliminator()

@@ -14226,6 +14226,111 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     return true;
 }
 
+bool Finder::ResolveSetDeathInfoLive(ptrdiff_t DeathInfoOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t InitializedOffset, ptrdiff_t DeathCircumstanceOffset)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortPlayerStateAthena_SetDeathInfo != nullptr;
+    }
+    bSearched = true;
+
+    // The pawn's DBNO handling (AFortPlayerPawnAthena 6.02 CL-4461277 0xC5B8A0, 6.01 CL-4424678 0xC59030) builds the
+    // knock's FDeathInfo on its stack and hands it to the player state's store:
+    //   xor edx, edx; call ToDeathCause; mov rcx, rdi; mov [rsp + Info.DeathCause], al;
+    //   call <the death circumstance, of the pawn in rcx>; mov [rsp + Info.DeathCircumstance], eax; ...;
+    //   mov byte ptr [rsp + Info.bDBNO], 1; ...; lea rdx, [rsp + Info]; mov rcx, r13; call <the store>
+    // (6.02 0xC5BE23 to 0xC5BF7C, 6.01 0xC595B3 to 0xC5970C). The store (6.02 0xC4A090, 6.01 0xC478B0) begins with the
+    // copy over the player state's ("movups [rcx + DeathInfo], xmm0") and "mov byte ptr [rcx + DeathInfo.bInitialized],
+    // 1": only a callee that has both is taken. The circumstance's function (6.02 0xC5F320, 6.01 0xC5CAB0) tests the
+    // pawn it is given for null before anything else ("test rcx, rcx").
+    const auto Rva = [](uintptr_t Address) { return Address ? Address - Finder::ImageBase() : 0; };
+    const uintptr_t ToDeathCause = reinterpret_cast<uintptr_t>(Natives::AFortPlayerStateAthena_ToDeathCause);
+    const ptrdiff_t CauseInInfo = DeathCauseOffset - DeathInfoOffset;
+    const ptrdiff_t CircumstanceInInfo = DeathCircumstanceOffset > DeathInfoOffset ? DeathCircumstanceOffset - DeathInfoOffset : -1;
+    const auto IsStore = [DeathInfoOffset, InitializedOffset](uintptr_t Callee)
+    {
+        bool bCopies = false;
+        bool bInitializes = false;
+        for (uintptr_t Site = Callee; IsInText(Callee) && IsInText(Callee + 0x80) && Site < Callee + 0x60; ++Site)
+        {
+            // movups [rcx + DeathInfo], xmm
+            bCopies = bCopies || (Byte(Site) == 0x0F && Byte(Site + 1) == 0x11 && (Byte(Site + 2) & 0xC7) == 0x81 && *reinterpret_cast<const int32_t*>(Site + 3) == DeathInfoOffset);
+            // mov byte ptr [rcx + DeathInfo.bInitialized], 1
+            bInitializes = bInitializes || (IsDisp32Access(Site, 0xC6, 0, InitializedOffset) && (Byte(Site + 1) & 0x07) == 0x01 && Byte(Site + 6) == 0x01);
+        }
+        return bCopies && bInitializes;
+    };
+    uintptr_t Handling = 0;
+    uintptr_t SetDeathInfo = 0;
+    uintptr_t GetDeathCircumstance = 0;
+    int32_t InfoSlot = -1;
+    void** PawnVTable = ToDeathCause && DeathInfoOffset > 0 && InitializedOffset > DeathInfoOffset && CauseInInfo > 0 && CauseInInfo < 0x40 ? CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena") : nullptr;
+    FirstVTableIndexWhere(PawnVTable, [&](uintptr_t Entry)
+    {
+        const uintptr_t End = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        for (const auto& [Site, Target] : End > Entry ? Finder::DirectCalls(Entry, End) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (Target != ToDeathCause || Site + 0x20 > End)
+            {
+                continue;
+            }
+            // mov rcx, r64 (the pawn, for the circumstance's call), then the cause's store on the stack.
+            const bool bMovesPawn = (Byte(Site + 5) & 0xFE) == 0x48 && Byte(Site + 6) == 0x8B && (Byte(Site + 7) & 0xF8) == 0xC8;
+            const uintptr_t CauseStore = Site + 5 + (bMovesPawn ? 3 : 0);
+            const int32_t Slot = Byte(CauseStore) == 0x88 && Byte(CauseStore + 1) == 0x44 && Byte(CauseStore + 2) == 0x24 && Byte(CauseStore + 3) < 0x80
+                ? static_cast<int32_t>(Byte(CauseStore + 3)) - static_cast<int32_t>(CauseInInfo) : -1;
+            if (Slot < 0)
+            {
+                continue;
+            }
+            // lea rdx, [rsp + Info]; (mov rcx, r64;) call
+            uintptr_t Store = 0;
+            for (uintptr_t Lea = FindInstruction(CauseStore + 4, std::min(End, CauseStore + 0x400), { 0x48, 0x8D, 0x54, 0x24, Slot }); Lea && !Store;
+                Lea = FindInstruction(Lea + 1, std::min(End, CauseStore + 0x400), { 0x48, 0x8D, 0x54, 0x24, Slot }))
+            {
+                const bool bMovesState = (Byte(Lea + 5) & 0xFE) == 0x48 && Byte(Lea + 6) == 0x8B && (Byte(Lea + 7) & 0xF8) == 0xC8;
+                const uintptr_t Call = Lea + 5 + (bMovesState ? 3 : 0);
+                const uintptr_t Callee = Call + 5 <= End && Byte(Call) == 0xE8 ? Finder::RelativeTarget(Call, 1, 5) : 0;
+                Store = Callee && IsStore(Callee) ? Callee : 0;
+            }
+            if (!Store)
+            {
+                continue;
+            }
+            Handling = Entry;
+            SetDeathInfo = Store;
+            InfoSlot = Slot;
+            // call; mov [rsp + Info.DeathCircumstance], eax
+            const uintptr_t CircumstanceCall = CauseStore + 4;
+            const uintptr_t Circumstance = bMovesPawn && CircumstanceInInfo > 0 && Byte(CircumstanceCall) == 0xE8 ? Finder::RelativeTarget(CircumstanceCall, 1, 5) : 0;
+            if (Circumstance && Circumstance != ToDeathCause && IsInText(Circumstance) && IsInText(Circumstance + 0x40) && Byte(CircumstanceCall + 5) == 0x89 && Byte(CircumstanceCall + 6) == 0x44
+                && Byte(CircumstanceCall + 7) == 0x24 && Byte(CircumstanceCall + 8) < 0x80 && static_cast<int32_t>(Byte(CircumstanceCall + 8)) == Slot + static_cast<int32_t>(CircumstanceInInfo)
+                && FindInstruction(Circumstance, Circumstance + 0x20, { 0x48, 0x85, 0xC9 }))
+            {
+                GetDeathCircumstance = Circumstance;
+            }
+            return true;
+        }
+        return false;
+    });
+    if (!SetDeathInfo)
+    {
+        Log::Error(L"Finder: the player state's death store not found (ToDeathCause 0x{:X}, DeathInfo +0x{:X}, bInitialized +0x{:X}): a player's death is stored field by field, without bInitialized, so the game's own respawn code doesn't move a respawned player to its respawn place",
+            Rva(ToDeathCause), DeathInfoOffset > 0 ? DeathInfoOffset : 0, InitializedOffset > 0 ? InitializedOffset : 0);
+        return false;
+    }
+    Natives::AFortPlayerStateAthena_SetDeathInfo = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_SetDeathInfo)>(SetDeathInfo);
+    Natives::AFortPlayerPawnAthena_GetDeathCircumstance = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_GetDeathCircumstance)>(GetDeathCircumstance);
+    Log::Info(L"Finder: the player state's death store is 0x{:X} (the pawn's DBNO handling 0x{:X} hands it the FDeathInfo at rsp+0x{:X}; it sets bInitialized +0x{:X}), the death circumstance 0x{:X}",
+        Rva(SetDeathInfo), Rva(Handling), InfoSlot, InitializedOffset, Rva(GetDeathCircumstance));
+    if (!GetDeathCircumstance && CircumstanceInInfo > 0)
+    {
+        Log::Warning(L"Finder: the death circumstance's function not found, a death is stored with the circumstance it had");
+    }
+    return true;
+}
+
 bool Finder::ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceVTable)
 {
     static bool bSearched = false;

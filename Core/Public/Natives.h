@@ -115,6 +115,7 @@ struct FFastArraySerializer;
 struct FFortItemEntry;
 struct FRotator;
 struct FVector;
+struct FDeathInfo;
 class AFortPawn;
 class AFortPickup;
 class UFortItemDefinition;
@@ -663,6 +664,17 @@ namespace Natives
     // From 3.5 it is 21.40's static AFortPlayerStateAthena::ToDeathCause (3.5.1 0xA754E0, 3.6 0xA835B0, 4.0 0xAA41A0,
     // 4.1 0xAB04B0): the damage tags and whether the pawn was DBNO, no pawn. Only one of the two is set.
     inline uint8_t (*AFortPlayerStateAthena_ToDeathCause)(const FGameplayTagContainer& InTags, bool bWasDBNO) = nullptr;
+    // From 6.01 (Finder::ResolveSetDeathInfoLive): the player state's own store of a death (6.02 CL-4461277 0xC4A090,
+    // 6.01 CL-4424678 0xC478B0; the 21.40 exports don't name it, the name is Core's). It copies the FDeathInfo it is
+    // given over the player state's DeathInfo, sets bInitialized, writes the kill feed line of a recorded replay and of
+    // the spectator broadcast when one is on, and nothing else. The pawn's DBNO handling is its one caller left (6.02
+    // 0xC5BF7C); the controller's pawn-death handler, which was the other, is stripped. Null where it isn't found.
+    inline void (*AFortPlayerStateAthena_SetDeathInfo)(AFortPlayerStateAthena* This, const FDeathInfo& InDeathInfo) = nullptr;
+    // From 6.01, found with it: what FDeathInfo::DeathCircumstance holds for a pawn (6.02 0xC5F320, 6.01 0xC5CAB0; not
+    // named in the 21.40 exports either), a static that takes the pawn and may be given none. Bit 0 is a tag of the
+    // pawn's own, bits 1 and 2 tags of the vehicle it was last in (VehicleStateLastTick): OnRep_DeathInfo's kill feed
+    // reads bit 1 for a fall ("needs a cleanup in aisle 3", a shopping cart's). Null where it isn't found.
+    inline int32_t (*AFortPlayerPawnAthena_GetDeathCircumstance)(const AFortPlayerPawnAthena* Pawn) = nullptr;
     // Score Royale's scoring of a tagged event, on the player state (5.30 0xC4B5A0, 5.40 0xC5A4F0): Finder::
     // ResolveScoringEventLive, AFortPlayerStateAthena::HandleScoringEvent.
     inline void (*AFortPlayerStateAthena_HandleScoringEvent)(AFortPlayerStateAthena* This, const FGameplayTagContainer& EventTags) = nullptr;

@@ -165,6 +165,17 @@ void AFortPlayerControllerAthena::HookVTables()
         return;
     }
     SwapStripped(L"AFortPlayerControllerAthena::OnPawnDied", Index, reinterpret_cast<void*>(&OnPawnDiedHK));
+    // The player state's own store of a death, which the restored handler hands its FDeathInfo to (OnPawnDied). From
+    // 6.01 only, the builds whose game state reflects bAllowRespawning (as AFortGameModeAthena's IsRespawningAllowed
+    // finder has it): every reader of a stored death was read in 6.01's and 6.02's images, no older build's, and
+    // bInitialized (from 4.4) changes what each of them does. Older builds keep the report written field by field.
+    if (AFortGameStateAthena::HasAllowRespawning() && FDeathInfo::HasInitialized() && Natives::AFortPlayerStateAthena_ToDeathCause)
+    {
+        const ptrdiff_t DeathInfoOffset = AFortPlayerStateAthena::DeathInfoOffset();
+        const ptrdiff_t DeathCircumstanceOffset = FDeathInfo::DeathCircumstanceOffset();
+        Finder::ResolveSetDeathInfoLive(DeathInfoOffset, DeathInfoOffset + FDeathInfo::DeathCauseOffset(), DeathInfoOffset + FDeathInfo::InitializedOffset(),
+            DeathCircumstanceOffset >= 0 ? DeathInfoOffset + DeathCircumstanceOffset : -1);
+    }
 #endif
 }
 
@@ -261,7 +272,25 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     {
         // The death report the death screen shows (OnRep_DeathInfo): how the player died, and who downed them, else who
         // eliminated them, else themselves. The eliminator's client gets its kill feed line.
-        FDeathInfo& DeathInfo = AthenaState->DeathInfo;
+        // From 6.01 it is stored as the game stores one (HasSetDeathInfo): built apart, as the pawn's DBNO handling
+        // builds a knock's on its stack (6.02 0xC5BE12), and handed whole to the player state's own store (0xC4A090),
+        // which sets bInitialized. The stripped handler was that store's other caller: its kill feed line prints bDBNO
+        // as true or false, and the knock, the one caller left, only ever stores true. Without bInitialized the death is
+        // none to the code that brings a player back (the playlists that do have no DBNO, so nothing else set it):
+        // IsRespawningAllowed's storm rule (6.02 0xBD08A0), which the pawn's death handler asks right after this one
+        // (0xC486D0), FinishRestartPlayer's move of the new pawn to the respawn place (0xBC7430: the place the death
+        // handler worked out and sent the client to load, a mutator's in Disco Domination, 0xC77900), the playspace
+        // manager's (0x1262560, 0x1280EC0), and to IsPlayerDead (0xC4AC80: the squad bar, spectating's next teammate).
+        // The fields start from the player state's, so one this handler leaves alone is stored as it was.
+        const bool bSetDeathInfo = AFortPlayerStateAthena::HasSetDeathInfo();
+        FDeathInfo& StoredDeathInfo = AthenaState->DeathInfo;
+        std::vector<uint8_t> NewDeathInfo;
+        if (bSetDeathInfo)
+        {
+            const uint8_t* const Stored = reinterpret_cast<const uint8_t*>(&StoredDeathInfo);
+            NewDeathInfo.assign(Stored, Stored + FDeathInfo::StaticStruct()->GetStructureSize());
+        }
+        FDeathInfo& DeathInfo = bSetDeathInfo ? *reinterpret_cast<FDeathInfo*>(NewDeathInfo.data()) : StoredDeathInfo;
         if (DeadPawn && AFortPlayerStateAthena::HasToDeathCause())
         {
             DeathCause = AFortPlayerStateAthena::ToDeathCause(DeadPawn, DamageTags, DeadPawn->bIsDBNO);
@@ -291,6 +320,20 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         if (FDeathInfo::HasDeathLocation() && DeadPawn)
         {
             DeathInfo.DeathLocation = DeadPawn->GetTransform().GetLocation();
+        }
+        if (bSetDeathInfo)
+        {
+            // A death, whoever caused it: IsPlayerDead is bInitialized && !bDBNO, and a player who went down first has
+            // the knock's bDBNO in what the fields started from.
+            DeathInfo.bDBNO = false;
+            if (FDeathInfo::HasDeathCircumstance() && Natives::AFortPlayerPawnAthena_GetDeathCircumstance)
+            {
+                DeathInfo.DeathCircumstance = Natives::AFortPlayerPawnAthena_GetDeathCircumstance(Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(DeadPawn)));
+            }
+            AthenaState->SetDeathInfo(DeathInfo);
+            const FVector DeathLocation = FDeathInfo::HasDeathLocation() ? static_cast<FVector>(DeathInfo.DeathLocation) : FVector(0.0f, 0.0f, 0.0f);
+            UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s's death is stored by the player state's own store (cause %d, at (%.0f, %.0f, %.0f), circumstance %d)"), *GetName(),
+                static_cast<int32_t>(DeathCause), DeathLocation.X, DeathLocation.Y, DeathLocation.Z, FDeathInfo::HasDeathCircumstance() ? static_cast<int32_t>(DeathInfo.DeathCircumstance) : 0);
         }
     }
 

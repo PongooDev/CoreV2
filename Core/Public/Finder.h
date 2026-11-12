@@ -268,6 +268,11 @@ namespace Finder
     // part (1.9.1, 1.10), else -1. KillerPlayerStateOffset: PlayerDeathReport's KillerPlayerState in the controller.
     int32_t StrippedAthenaPrepareDeathReportIndex(ptrdiff_t KillerPlayerStateOffset);
     bool ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsAliveOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t DeathInfoDBNOOffset, ptrdiff_t TeamMembersOffset);
+    // From 6.01: the player state's own store of a death and FDeathInfo::DeathCircumstance's value for a pawn (Natives),
+    // the two calls the pawn's DBNO handling makes for the FDeathInfo it builds on the stack, after ToDeathCause (which
+    // ResolveAthenaPawnDiedLive found). The offsets are the player state's: its DeathInfo, and DeathInfo's DeathCause,
+    // bInitialized and DeathCircumstance. False unless the store is found; the circumstance is looked for with it.
+    bool ResolveSetDeathInfoLive(ptrdiff_t DeathInfoOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t InitializedOffset, ptrdiff_t DeathCircumstanceOffset);
     uint8_t* PawnDiedInventoryDropCall();
     // From 6.00 (Shadow Stones): AFortPlayerControllerGameplay::StartGhostMode's call to the stripped
     // UFortKismetLibrary::GiveItemToInventoryOwner, which gives the controller the ghost mode item. Null on builds without

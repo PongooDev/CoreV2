@@ -420,17 +420,44 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
     FVector RespawnLocation;
     float RespawnHeight = 0.0f;
     bool bRespawnInAir = false;
+    // What the game's FinishRestartPlayer does with the pawn next, for the log.
+    std::wstring GameRespawnPlace;
     if (!Aircraft && StartSpot && NewPlayer && FDeathInfo::HasDeathLocation() && AFortPlayerStateAthena::HasEliminator())
     {
         UWorld* SpotWorld = GetWorld();
         AFortGameStateAthena* GameState = SpotWorld ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(SpotWorld->GetGameState())) : nullptr;
         AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(NewPlayer->PlayerState)));
-        if (GameState && AthenaState && GameState->GamePhase == EAthenaGamePhase::GetSafeZones() && IsRespawningAllowed(AthenaState))
+        // From 6.01 the death is stored as the game stores one (AFortPlayerControllerAthena::OnPawnDied), and the game's
+        // own FinishRestartPlayer (6.02 0xBC7430, 6.01 0xBC5DB0) then moves the pawn spawned here: TeleportTo the respawn
+        // place the death handler worked out (6.02's RespawnData; 6.01 works it out there), a mutator's (Disco
+        // Domination's, by the team's side of the current circle) or else the death's location, raised by the
+        // playlist's RespawnHeight where the playlist has bRespawnInAir, up to 55000. That place comes from the stored
+        // DeathLocation, not from where this pawn is, so the height isn't added twice: Playground's ends where it is
+        // spawned here, Disco Domination's at the mutator's place. The spawn in the air stays, as where the pawn is
+        // left should that move fail (TeleportTo checks the place), and it is given whenever the game will make the
+        // move, which is for a stored death (bInitialized) and not what IsRespawningAllowed says now: its storm rule
+        // was asked as the player died, and says no once the storm has passed over where that was.
+        const bool bStoredDeath = AthenaState && AFortPlayerStateAthena::HasSetDeathInfo() && FDeathInfo::HasInitialized() && AthenaState->DeathInfo.bInitialized && !AthenaState->DeathInfo.bDBNO;
+        if (GameState && AthenaState && GameState->GamePhase == EAthenaGamePhase::GetSafeZones() && (bStoredDeath || IsRespawningAllowed(AthenaState)))
         {
             const FVector DeathLocation = AthenaState->DeathInfo.DeathLocation;
             bRespawnInAir = DeathLocation.X != 0.0f || DeathLocation.Y != 0.0f || DeathLocation.Z != 0.0f;
             RespawnHeight = GetRespawnHeight();
             RespawnLocation = DeathLocation + FVector(0.0f, 0.0f, RespawnHeight);
+            if (bStoredDeath && AFortPlayerStateAthena::HasRespawnData() && AthenaState->RespawnData.bRespawnDataAvailable)
+            {
+                const FFortRespawnData& RespawnData = AthenaState->RespawnData;
+                const FVector Place = RespawnData.RespawnLocation;
+                // FinishRestartPlayer makes the move once both sides are ready (RespawnPlayerAfterDeath waits for that).
+                const bool bClientIsReady = RespawnData.bClientIsReady;
+                const bool bServerIsReady = RespawnData.bServerIsReady;
+                GameRespawnPlace = std::format(L"; the death's respawn place is ({:.0f}, {:.0f}, {:.0f}), where the game {} (the client {} ready for it, the server {})", Place.X, Place.Y, Place.Z,
+                    bClientIsReady && bServerIsReady ? L"moves it next" : L"doesn't move it", bClientIsReady ? L"is" : L"isn't", bServerIsReady ? L"is" : L"isn't");
+            }
+            else if (bStoredDeath)
+            {
+                GameRespawnPlace = L"; the game then moves it to the respawn place it works out for the stored death";
+            }
         }
     }
     UClass* PawnClass = (Aircraft || bRespawnInAir) && NewPlayer ? GetDefaultPawnClassForController(NewPlayer) : nullptr;
@@ -451,8 +478,8 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
         if (Pawn && !Aircraft)
         {
             // The pawn's address goes with it: HandlePawnDestroyed logs each dead pawn's (#411).
-            Log::Info(L"Battle Royale: {} respawns in the air as {} (0x{:X}) at ({:.0f}, {:.0f}, {:.0f}), {:.0f} over where they died", NewPlayer->GetName().ToStdString(),
-                Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn), RespawnLocation.X, RespawnLocation.Y, RespawnLocation.Z, RespawnHeight);
+            Log::Info(L"Battle Royale: {} respawns in the air as {} (0x{:X}) at ({:.0f}, {:.0f}, {:.0f}), {:.0f} over where they died{}", NewPlayer->GetName().ToStdString(),
+                Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn), RespawnLocation.X, RespawnLocation.Y, RespawnLocation.Z, RespawnHeight, GameRespawnPlace);
         }
         else if (Pawn)
         {
@@ -2295,12 +2322,17 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
         // From 6.01 the build's own yes stands: a mutator's (Playlist_Disco has no RespawnType).
         return Index >= 0;
     }
-    // The storm rule stays Core's reading of the death cause, from 6.01 too. The build's own (the end of 6.02 0xBD08A0)
-    // is the death's location against the safe zone, and only for a death the game stored: DeathInfo.bInitialized,
-    // which the function storing a death sets (6.02 0xC4A090; the one call of it left in the build is the pawn going
-    // down, 0xC5BF7C) and Core's OnPawnDied, writing the report field by field, doesn't. So for a player who was never
-    // down (Playlist_Playground is InfiniteRespawnExceptStorm with bNoDBNO) the build's own says yes to a death in the
-    // storm, and that player would never be out of the match.
+    // The storm rule: Core's reading of the death cause, from 6.01 on top of the build's own (the end of 6.02 0xBD08A0),
+    // which is the death's location against the safe zone as it is now (0xBD04A0: the game mode's SafeZoneIndicator, its
+    // place and Radius), in the safe zones phase, and only for a death the game stored: DeathInfo.bInitialized. Core's
+    // OnPawnDied stores a player's death that way from 6.01 (the player state's own store, 0xC4A090), so the build's
+    // own no was asked above, and it is the answer the pawn's death handler goes by too (0xC486D0 calls the build's
+    // function, not this one): a player the storm killed outside the circle isn't respawned by the game any more while
+    // Core has them out. The cause's rule stays under it for a death that isn't stored (a build before 6.01, a store
+    // that wasn't found) and for a storm death the build's own would let back: that the storm's damage and 0xBD04A0
+    // always agree on who is outside isn't something the image shows (the damage isn't applied through 0xBD04A0, whose
+    // other caller is a pickup's despawn, 0xFC30A0), and a player who died to the storm must be out or a Playground
+    // match never ends. Where the two disagree the game still respawns a player Core has out.
     return !PlayerState || !AFortPlayerStateAthena::HasEliminator() || Playlist->RespawnType != EAthenaRespawnType::GetInfiniteRespawnExceptStorm()
         || PlayerState->DeathInfo.DeathCause != EDeathCause::GetOutsideSafeZone();
 }

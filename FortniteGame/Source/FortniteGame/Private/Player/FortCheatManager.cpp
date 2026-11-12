@@ -1322,6 +1322,35 @@ void UFortCheatManager::RespawnPlayerServer()
         Reply(TEXT("RespawnPlayerServer respawns a dead player; you are alive"));
         return;
     }
+    // From 6.01 a player's death is stored as the game stores one (AFortPlayerControllerAthena::OnPawnDied), and the game
+    // mode's FinishRestartPlayer moves a pawn whose player has a stored death to the death's respawn place (6.02
+    // 0xBC7430: over where they died, the playlist's RespawnHeight up, to 55000). Only RespawnPlayerAfterDeath, which
+    // isn't how this cheat brings the player back, clears it, once they are back (0xC23BF4: every field as the player
+    // state's constructor has it). Cleared here first, the player starts where the game mode starts every player, as
+    // before, and isn't dead to the squad bar afterwards (IsPlayerDead). FinisherOrDowner goes with it, so the change
+    // writes no kill feed line (OnRep_DeathInfo).
+    AFortPlayerStateAthena* AthenaState = AFortPlayerStateAthena::HasSetDeathInfo() ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
+    if (AthenaState && FDeathInfo::HasInitialized() && AthenaState->DeathInfo.bInitialized)
+    {
+        FDeathInfo& DeathInfo = AthenaState->DeathInfo;
+        DeathInfo.FinisherOrDowner = nullptr;
+        DeathInfo.bDBNO = false;
+        DeathInfo.DeathCause = EDeathCause::GetUnspecified();
+        if (FDeathInfo::HasDistance())
+        {
+            DeathInfo.Distance = 0.0f;
+        }
+        if (FDeathInfo::HasDeathLocation())
+        {
+            DeathInfo.DeathLocation = FVector(0.0f, 0.0f, 0.0f);
+        }
+        DeathInfo.bInitialized = false;
+        if (FDeathInfo::HasDeathCircumstance())
+        {
+            DeathInfo.DeathCircumstance = 0;
+        }
+        AthenaState->ForceNetUpdate();
+    }
     GameMode->RestartPlayer(PlayerController);
     Reply(TEXT("Respawned"));
 #endif

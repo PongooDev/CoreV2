@@ -311,6 +311,10 @@ namespace Finder
     bool ResolveGetPoiTagsForLive();
     bool ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset);
     bool OnlyLoadsEmoteAnimation(uintptr_t Implementation, ptrdiff_t AnimationOffset);
+    // UAbilitySystemComponent::GiveAbilityAndActivateOnce and FGameplayAbilitySpecHandle::GenerateNewHandle's counter
+    // (Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce, Natives::FGameplayAbilitySpecHandle_GHandleID): the
+    // engine's, for every spec Core gives (restored emotes, sprays and rides, Battle Royale's player bots' abilities).
+    bool ResolveAbilitySpecLive();
     bool ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOffset);
     bool ResolvePersonalVehicleLive(UFunction* IsPersonalVehicleAvailable, ptrdiff_t MainMcpProfileOffset);
     bool ResolveServerMoveLive();

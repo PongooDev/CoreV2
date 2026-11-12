@@ -227,7 +227,7 @@ namespace Natives
     inline void (*UAbilitySystemComponent_IncrementAbilityListLock)(UAbilitySystemComponent* This) = nullptr;
     inline void (*UAbilitySystemComponent_DecrementAbilityListLock)(UAbilitySystemComponent* This) = nullptr;
     // GiveAbilityAndActivateOnce(const FGameplayAbilitySpec&) returns its handle through Result, and the static counter
-    // FGameplayAbilitySpecHandle::GenerateNewHandle takes handles from (Finder::ResolveEmoteLive).
+    // FGameplayAbilitySpecHandle::GenerateNewHandle takes handles from (Finder::ResolveAbilitySpecLive).
     inline FGameplayAbilitySpecHandle* (*UAbilitySystemComponent_GiveAbilityAndActivateOnce)(UAbilitySystemComponent* This, FGameplayAbilitySpecHandle* Result, const FGameplayAbilitySpec& Spec) = nullptr;
     inline int32_t* FGameplayAbilitySpecHandle_GHandleID = nullptr;
     // 3.0's AFortPlayerController::GetCurrentlySelectedPersonalVehicle (0xE31910): the MainMcpProfile's campaign loadout

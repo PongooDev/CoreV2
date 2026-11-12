@@ -158,13 +158,33 @@ void UAbilitySystemComponent::MarkAbilitySpecDirty(FGameplayAbilitySpec& Spec)
 
 void FGameplayAbilitySpecHandle::GenerateNewHandle()
 {
+    // Epic's takes GHandle++ from its own static counter. Core takes the engine's, so its handles never meet the game's.
+    // It is found where it is first needed: a build that keeps its emote body (1.1 to 1.8.2) never runs the emote
+    // restoration that used to find it, and a player bot's first ability read it through null (CoreV2 #352, 1.8.1).
+    if (!Natives::FGameplayAbilitySpecHandle_GHandleID)
+    {
+        Finder::ResolveAbilitySpecLive();
+    }
+    if (!Natives::FGameplayAbilitySpecHandle_GHandleID)
+    {
+        // Not found: the handle stays invalid, and the caller gives nothing with it.
+        Handle = INDEX_NONE;
+        return;
+    }
     Handle = (*Natives::FGameplayAbilitySpecHandle_GHandleID)++;
 }
 
 FGameplayAbilitySpecHandle UAbilitySystemComponent::GiveAbilityAndActivateOnce(const FGameplayAbilitySpec& Spec)
 {
     FGameplayAbilitySpecHandle Handle;
-    Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce(this, &Handle, Spec);
+    if (!Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce)
+    {
+        Finder::ResolveAbilitySpecLive();
+    }
+    if (Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce)
+    {
+        Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce(this, &Handle, Spec);
+    }
     return Handle;
 }
 

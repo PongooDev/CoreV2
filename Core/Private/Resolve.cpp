@@ -13297,7 +13297,7 @@ bool Finder::OnlyLoadsEmoteAnimation(uintptr_t Implementation, ptrdiff_t Animati
             || IsSharedEmptyBody(Implementation));
 }
 
-bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOffset)
+bool Finder::ResolveAbilitySpecLive()
 {
     static bool bSearched = false;
     static bool bResolved = false;
@@ -13306,15 +13306,18 @@ bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOf
         return bResolved;
     }
     bSearched = true;
-    MissingCount = 0;
+    // Looked for where Core first builds a spec, not only by the emote restoration: 1.1 to 1.8.2 keep their emote body,
+    // so that restoration never ran there and a player bot's first ability read the counter through null (CoreV2 #352,
+    // 1.8.1). Called on its own or from another live resolver, whose count it leaves as it was.
+    const int32_t MissingBefore = MissingCount;
 
-    // 1.8.2's play body gives the pawn's ability system the emote ability with GiveAbilityAndActivateOnce (1.8.2
-    // 0x3E58D50, 1.9 0x3E882C0, 1.9.1 0x3EA93F0), which the engine keeps.
+    // The emote play body (1.8.2's) gives the pawn's ability system the emote ability with GiveAbilityAndActivateOnce
+    // (1.8.1 0x3E4FC90, 1.8.2 0x3E58D50, 1.9 0x3E882C0, 1.9.1 0x3EA93F0), which the engine keeps.
     Require(L"UAbilitySystemComponent::GiveAbilityAndActivateOnce", Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce, FunctionOf(L"GiveAbilityAndActivateOnce called on ability %s on the client, not allowed!"));
 
     // The spec it builds takes a new handle inline (FGameplayAbilitySpecHandle::GenerateNewHandle: Handle = GHandleID++).
-    // The constructor from a spec def does the same: mov eax, [GHandleID] ... inc [GHandleID] (1.8.2 0x3D8A2C6,
-    // 1.9 0x3DB9D56, 1.9.1 0x3DDA616).
+    // The constructor from a spec def does the same: mov eax, [GHandleID] ... inc [GHandleID] (1.8.1 0x3D814D6 and
+    // 0x3D814DF, counter 0x51902BC; 1.8.2 0x3D8A2C6, 1.9 0x3DB9D56, 1.9.1 0x3DDA616).
     const uintptr_t SpecFromDef = FunctionOf(L"FGameplayAbilitySpec::FGameplayAbilitySpec for %s from %s");
     const uintptr_t SpecFromDefEnd = SpecFromDef ? Finder::FunctionEnd(SpecFromDef) : 0;
     uintptr_t HandleID = 0;
@@ -13336,6 +13339,33 @@ bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOf
     }
     Require(L"FGameplayAbilitySpecHandle::GenerateNewHandle's counter", Natives::FGameplayAbilitySpecHandle_GHandleID, HandleID);
 
+    bResolved = MissingCount == MissingBefore;
+    MissingCount = MissingBefore;
+    if (bResolved)
+    {
+        Log::Info(L"Finder: UAbilitySystemComponent::GiveAbilityAndActivateOnce 0x{:X}, FGameplayAbilitySpecHandle::GenerateNewHandle's counter 0x{:X}",
+            reinterpret_cast<uintptr_t>(Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce) - Finder::ImageBase(), HandleID - Finder::ImageBase());
+    }
+    return bResolved;
+}
+
+bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOffset)
+{
+    static bool bSearched = false;
+    static bool bResolved = false;
+    if (bSearched)
+    {
+        return bResolved;
+    }
+    bSearched = true;
+    MissingCount = 0;
+
+    // The play body gives the emote ability with GiveAbilityAndActivateOnce, in a spec with a new handle.
+    if (!Finder::ResolveAbilitySpecLive())
+    {
+        ++MissingCount;
+    }
+
     // The play body first asks CanPerformAction(Gameplay.Action.Player.InteractUse). AFortPlayerController's (1.8.2 slot
     // 0x26C 0x81D9E0, 1.9 0x26D 0x8297D0, 1.9.1 0x270 0x82BB30) asks the pawn, unless there is none or it is in stasis:
     // mov rcx, [rcx+MyFortPawn]; test rcx, rcx; jz; cmp byte [rcx+StasisMode], 0. It is the controller's only slot that
@@ -13355,7 +13385,8 @@ bool Finder::ResolveEmoteLive(ptrdiff_t MyFortPawnOffset, ptrdiff_t StasisModeOf
 
     Log::Info(L"Finder: emote helpers: GiveAbilityAndActivateOnce 0x{:X}, spec handle counter 0x{:X}, AFortPlayerController CanPerformAction 0x{:X}, {} missing",
         Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce ? reinterpret_cast<uintptr_t>(Natives::UAbilitySystemComponent_GiveAbilityAndActivateOnce) - Finder::ImageBase() : 0,
-        HandleID ? HandleID - Finder::ImageBase() : 0, Natives::AFortPlayerController_CanPerformActionIndex, MissingCount);
+        Natives::FGameplayAbilitySpecHandle_GHandleID ? reinterpret_cast<uintptr_t>(Natives::FGameplayAbilitySpecHandle_GHandleID) - Finder::ImageBase() : 0,
+        Natives::AFortPlayerController_CanPerformActionIndex, MissingCount);
     bResolved = MissingCount == 0;
     return bResolved;
 }

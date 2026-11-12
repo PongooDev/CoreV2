@@ -1024,12 +1024,24 @@ namespace
         {
             return;
         }
+        // A new handle from the engine's counter, as FGameplayAbilitySpec's constructor takes one. Without the counter
+        // the bot goes without the ability rather than hold a handle the game may give out too.
+        FGameplayAbilitySpecHandle NewHandle;
+        NewHandle.GenerateNewHandle();
+        if (!NewHandle.IsValid())
+        {
+            static bool bLogged = false;
+            if (!bLogged)
+            {
+                bLogged = true;
+                Log::Error(L"Battle Royale bots: FGameplayAbilitySpecHandle's counter wasn't found, so the bots go without a player's abilities ({} first)", NameOf(AbilityClass));
+            }
+            return;
+        }
         UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
         std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
         SpecStruct->InitializeStruct(SpecStorage.data());
         FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
-        FGameplayAbilitySpecHandle NewHandle;
-        NewHandle.GenerateNewHandle();
         Spec.Handle = NewHandle;
         Spec.Ability = static_cast<UGameplayAbility*>(AbilityClass->GetDefaultObject());
         Spec.Level = 1;
@@ -3989,6 +4001,14 @@ bool FCoreAthenaBotController::PlayEmote(float Now, float Duration)
     {
         return false;
     }
+    // A new handle from the engine's counter (1.1 to 1.8.2, which keep their emote body, find it only here: CoreV2 #352);
+    // without one the bot doesn't emote.
+    FGameplayAbilitySpecHandle NewHandle;
+    NewHandle.GenerateNewHandle();
+    if (!NewHandle.IsValid())
+    {
+        return false;
+    }
     UFortMontageItemDefinitionBase* Emote = EmoteAssets[static_cast<size_t>(FMath::Rand()) % EmoteAssets.size()];
     Emote->Animation.LoadSynchronous();
     StopFiring();
@@ -3996,8 +4016,6 @@ bool FCoreAthenaBotController::PlayEmote(float Now, float Duration)
     std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);
     SpecStruct->InitializeStruct(SpecStorage.data());
     FGameplayAbilitySpec& Spec = *reinterpret_cast<FGameplayAbilitySpec*>(SpecStorage.data());
-    FGameplayAbilitySpecHandle NewHandle;
-    NewHandle.GenerateNewHandle();
     Spec.Handle = NewHandle;
     Spec.Ability = Ability;
     Spec.Level = 1;

@@ -16,6 +16,15 @@ enum EChannelType
     CHTYPE_MAX = 8,
 };
 
+// 6.10 (UE 4.22's networking) names its channels, and UNetConnection::CreateChannelByName takes these in place of
+// bOpenedLocally. The game's own callers pass 2 for a channel they open (lea r8d, [r9+3] with r9d -1, CL-4480234
+// 0x26F9CC7) and 1 for one the other side opened (UNetConnection::ReceivedPacket, 0x2702013).
+enum class EChannelCreateFlags : uint32_t
+{
+    None = (1 << 0),
+    OpenedLocally = (1 << 1),
+};
+
 struct FPacketIdRange
 {
     int32_t First = -1;

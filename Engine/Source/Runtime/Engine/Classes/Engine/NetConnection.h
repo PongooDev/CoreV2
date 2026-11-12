@@ -86,7 +86,9 @@ public:
             : static_cast<const TArray<FName>*>(VisibleLevelNames)->Contains(LevelName);
     }
 
+    // From 6.10 (UE 4.22's named channels) this is the engine's deprecated wrapper, which forwards to CreateChannelByName.
     UChannel* CreateChannel(EChannelType Type, bool bOpenedLocally, int32_t ChannelIndex = -1);
+    UChannel* CreateChannelByName(const FName& ChName, EChannelCreateFlags CreateFlags, int32_t ChannelIndex = -1);
     int32_t IsNetReady(bool Saturate);
     bool ClientHasInitializedLevelFor(const UObject* TestObject) const;
     void FlushDormancy(AActor* Actor);

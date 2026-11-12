@@ -263,6 +263,9 @@ namespace Natives
     inline bool (*UActorChannel_ReplicateActor)(UActorChannel* This) = nullptr;
     inline void (*UActorChannel_SetChannelActor)(UActorChannel* This, AActor* InActor) = nullptr;
     inline UChannel* (*UNetConnection_CreateChannel)(UNetConnection* This, int32_t Type, bool bOpenedLocally, int32_t ChannelIndex) = nullptr;
+    // 6.10 (UE 4.22's networking) names its channels and has no CreateChannel by type: CreateChannelByName(const FName&
+    // ChName, EChannelCreateFlags CreateFlags, int32 ChannelIndex) (CL-4480234 0x26EDF50). Null on the builds before it.
+    inline UChannel* (*UNetConnection_CreateChannelByName)(UNetConnection* This, const FName& ChName, uint32_t CreateFlags, int32_t ChannelIndex) = nullptr;
     inline FNetViewer* (*FNetViewer_FNetViewer)(FNetViewer* This, UNetConnection* InConnection, float DeltaSeconds) = nullptr;
     inline void (*AActor_CallPreReplication)(AActor* This, UNetDriver* NetDriver) = nullptr;
     inline void (*AActor_ReceiveTick)(AActor* This, float DeltaSeconds) = nullptr;

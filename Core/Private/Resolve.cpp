@@ -2761,13 +2761,25 @@ namespace
         // tried first so builds with it don't warn about the older one being absent.
         uintptr_t CreateChannel = 0;
         const uintptr_t SequencedCreate = First(Finder::StringRefs(L"      Bunch Create %i: ChType %i, ChSequence: %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i"));
-        const uintptr_t BunchCreate = SequencedCreate ? SequencedCreate : OnlyRef(L"      Bunch Create %i: ChType %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
-        const uintptr_t BunchCreateEnd = BunchCreate + (SequencedCreate ? 0x80 : 0x40);
+        // 6.10 (CL-4480234, UE 4.22's networking) names its channels: the log prints ChName, and the call under it
+        // (0x270201E, 0x46 past the string) is CreateChannelByName(const FName& ChName, EChannelCreateFlags CreateFlags,
+        // int32 ChannelIndex) (0x26EDF50). There is no CreateChannel by type left. Looked up only where the ChType
+        // string is absent, and before the oldest string so 6.10 doesn't warn about that one.
+        const uintptr_t NamedCreate = SequencedCreate ? 0 : First(Finder::StringRefs(L"      Bunch Create %i: ChName %s, ChSequence: %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i"));
+        const uintptr_t BunchCreate = SequencedCreate ? SequencedCreate : NamedCreate ? NamedCreate : OnlyRef(L"      Bunch Create %i: ChType %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
+        const uintptr_t BunchCreateEnd = BunchCreate + (SequencedCreate || NamedCreate ? 0x80 : 0x40);
         // 2.4.2 sizes Channels by MaxChannelSize (a TArray, as in 4.20) and logs when no index is free (0x1B0C510).
         const uintptr_t NoFreeChannel = FunctionOf(L"No free channel could be found in the channel list (current limit is %d channels). Consider increasing the max channels allowed using CVarMaxChannelSize.");
         for (uintptr_t Site = BunchCreate ? FindRawCall(BunchCreate, BunchCreateEnd) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, BunchCreateEnd))
         {
             const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+            if (NamedCreate)
+            {
+                // The flags of a channel the other side opened are EChannelCreateFlags::None (1), not a cleared r8d
+                // (mov edi, 1; mov r8d, edi), so the by-name function is known by the "No free channel" log it holds.
+                CreateChannel = NoFreeChannel && Target == NoFreeChannel ? Target : 0;
+                continue;
+            }
             // CreateChannel looks for a free index below MAX_CHANNELS: 10240 (0x2800) up to 2.1, 32767 (0x7FFF) on 2.2.
             const bool bMaxChannels = FindInstruction(Target, Target + 0x80, { 0x00, 0x28, 0x00, 0x00 }) || FindInstruction(Target, Target + 0x80, { 0xFF, 0x7F, 0x00, 0x00 }) || (NoFreeChannel && Target == NoFreeChannel);
             if (FindInstruction(Site - 0x10, Site, { 0x45, 0x33, 0xC0 }) && bMaxChannels)
@@ -2775,7 +2787,14 @@ namespace
                 CreateChannel = Target;
             }
         }
-        Require(L"UNetConnection::CreateChannel", Natives::UNetConnection_CreateChannel, CreateChannel);
+        if (NamedCreate)
+        {
+            Require(L"UNetConnection::CreateChannelByName", Natives::UNetConnection_CreateChannelByName, CreateChannel);
+        }
+        else
+        {
+            Require(L"UNetConnection::CreateChannel", Natives::UNetConnection_CreateChannel, CreateChannel);
+        }
 
         const uintptr_t DemoReplicate = FunctionOf(L"DemoReplicateActor: bMustReplicate is true but nothing was sent: %s");
         uintptr_t PreReplication = 0;
@@ -3424,8 +3443,11 @@ namespace
             {
                 continue;
             }
+            // 6.10's by-name call builds its FName(NAME_Actor) between the two (mov qword ptr [rbp+5Fh], 66h; lea rdx,
+            // [rbp+5Fh]), so IsLevelInitializedForActor's call is 0x27 before it (0x26F9CA4 and 0x26F9CCB).
+            const uintptr_t Window = NamedCreate ? 0x30 : 0x20;
             uintptr_t Nearest = 0;
-            for (uintptr_t Call = FindVirtualCall(Site - 0x20, Site); Call; Call = FindVirtualCall(Call + 1, Site))
+            for (uintptr_t Call = FindVirtualCall(Site - Window, Site); Call; Call = FindVirtualCall(Call + 1, Site))
             {
                 Nearest = Call;
             }
@@ -4026,6 +4048,10 @@ namespace
             }
         }
         RequireOffset(L"UNetConnection::Channels", Natives::UNetConnection_Channels, Channels);
+        if (NamedCreate && CreateChannel)
+        {
+            Log::Info(L"Finder: channels are made by name (UE 4.22's): UNetConnection::CreateChannelByName +0x{:X}, Channels +0x{:X}, UNetDriver::IsLevelInitializedForActor slot 0x{:X}", CreateChannel - Finder::ImageBase(), Channels, LevelInitialized);
+        }
 
         ptrdiff_t IsPeer = 0;
         size_t IsPeerSites = 0;

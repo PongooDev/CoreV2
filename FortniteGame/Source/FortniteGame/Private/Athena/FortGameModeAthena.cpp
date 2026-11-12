@@ -2280,9 +2280,10 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
     // an elimination: a place, the alive players' count and the spectating, for a player the game then respawned. And
     // it said yes where a mutator says no on a playlist that has a RespawnType (AFortAthenaMutator_Barrier answers by
     // team, 6.02 0xC780C0): the game respawned nobody, and the player was never out.
-    if (const int32_t Index = Natives::AFortGameModeAthena_IsRespawningAllowedIndex; Index >= 0)
+    const int32_t Index = Natives::AFortGameModeAthena_IsRespawningAllowedIndex;
+    if (Index >= 0 && !CallVirtual<bool>(this, Index, PlayerState))
     {
-        return CallVirtual<bool>(this, Index, PlayerState);
+        return false;
     }
     // 4.2 0xA19780: bAllowRespawning (an unreflected flag OnPlaylistDataLoaded, 0xA1BE40, sets when the loaded playlist's
     // RespawnType isn't None), then true unless the playlist is InfiniteRespawnExceptStorm and the player died in the
@@ -2291,8 +2292,15 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
     UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
     if (!Playlist || Playlist->RespawnType == EAthenaRespawnType::GetNone())
     {
-        return false;
+        // From 6.01 the build's own yes stands: a mutator's (Playlist_Disco has no RespawnType).
+        return Index >= 0;
     }
+    // The storm rule stays Core's reading of the death cause, from 6.01 too. The build's own (the end of 6.02 0xBD08A0)
+    // is the death's location against the safe zone, and only for a death the game stored: DeathInfo.bInitialized,
+    // which the function storing a death sets (6.02 0xC4A090; the one call of it left in the build is the pawn going
+    // down, 0xC5BF7C) and Core's OnPawnDied, writing the report field by field, doesn't. So for a player who was never
+    // down (Playlist_Playground is InfiniteRespawnExceptStorm with bNoDBNO) the build's own says yes to a death in the
+    // storm, and that player would never be out of the match.
     return !PlayerState || !AFortPlayerStateAthena::HasEliminator() || Playlist->RespawnType != EAthenaRespawnType::GetInfiniteRespawnExceptStorm()
         || PlayerState->DeathInfo.DeathCause != EDeathCause::GetOutsideSafeZone();
 }

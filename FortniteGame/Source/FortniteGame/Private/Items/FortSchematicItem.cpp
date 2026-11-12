@@ -154,7 +154,7 @@ int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerCo
         }
     }
 
-    UFortQuestManager* QuestManager = PlayerController->GetQuestManager();
+    UFortQuestManager* QuestManager = PlayerController->GetQuestManager(ESubGame::GetCampaign());
     if (ResultDefinition->MaxStackSize > 1)
     {
         UFortKismetLibrary::K2_GiveItemToPlayer(PlayerController, ResultDefinition, QuantityProduced, true);

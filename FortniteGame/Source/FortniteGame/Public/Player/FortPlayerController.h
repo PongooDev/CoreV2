@@ -25,6 +25,7 @@ class UFortMcpProfileCampaign;
 class UFortMontageItemDefinitionBase;
 class UFortPersonalVehicleItem;
 class UFortQuestManager;
+class ESubGame;
 class UFortRegisteredPlayerInfo;
 class UFortSchematicItem;
 class UAthenaSprayItemDefinition;
@@ -147,6 +148,7 @@ public:
     DefineUFunction(ServerModifyStat)
     DefineUFunction(TogglePersonalVehicle)
     DefineUFunction(IsPersonalVehicleAvailable)
+    DefineUFunction(GetQuestManager)
 
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
@@ -231,7 +233,9 @@ public:
     bool DisassembleInventoryItem(const FGuid& ItemGuid, int32_t Count = 1);
     void EndWeaponAbilities(AFortWeapon* Weapon);
     int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
-    UFortQuestManager* GetQuestManager() const;
+    // The player's quest manager of a sub game, or with ESubGame::Invalid of the current one (Battle Royale's in Battle
+    // Royale), as the game's own stat event senders ask for it.
+    UFortQuestManager* GetQuestManager(ESubGame SubGame) const;
     UFortSchematicItem* GetSchematicForItem(const UFortItemDefinition* ItemDefinition);
     // Match stats (FortPlayerControllerMatchStats.cpp): the player's end-of-match screen gets their stats once they are
     // out of the match (1.10: once their place is final, which its stats hold), and from 1.11 their team's place once

@@ -32,7 +32,11 @@ void UFortItemCollectedParams::SendItemCollected(AFortPlayerController* Collecte
         Params->SetParams(CollectedItemDefinition, CollectedBy, AmountCollected);
         UFortMissionLibrary::ExecuteMissionEvent(CollectedBy, FName(L"ItemCollected", FNAME_Find), Params);
     }
-    if (UFortQuestManager* QuestManager = CollectedBy->GetQuestManager())
+    // The Collect event goes to the current sub game's quest manager, as the game's own senders send theirs: Battle
+    // Royale's challenges count it there (6.00's "Pickup a Legendary Item in different matches", collect_legendary_rarity_item:
+    // Collect with the item's Rarity.SuperRare; Season 3's collect_building_resources_*). It went to Save the World's
+    // quest manager in every mode, so no Battle Royale Collect objective ever moved (#407).
+    if (UFortQuestManager* QuestManager = CollectedBy->GetQuestManager(ESubGame::GetInvalid()))
     {
         QuestManager->SendItemStatEvent(EFortQuestObjectiveStatEvent::GetCollect(), CollectedItemDefinition, AmountCollected);
     }

@@ -575,7 +575,7 @@ void AFortWorldManager::LoadQuestDrivenMissionsForPlayer(AFortPlayerController* 
     UWorld* World = GetWorld();
     AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
     AFortMissionManager* MissionManager = GameState ? static_cast<AFortMissionManager*>(GameState->MissionManager) : nullptr;
-    UFortQuestManager* QuestManager = PlayerController ? PlayerController->GetQuestManager() : nullptr;
+    UFortQuestManager* QuestManager = PlayerController ? PlayerController->GetQuestManager(ESubGame::GetCampaign()) : nullptr;
     if (!bHasCreatedMissions || !MissionManager || !QuestManager)
     {
         return;

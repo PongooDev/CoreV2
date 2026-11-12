@@ -147,7 +147,7 @@ void AFortMissionManager::OnZoneEnd(bool bZoneCompleted)
                 PlayerState->ForceNetUpdate();
             }
 
-            UFortQuestManager* QuestManager = PlayerController->GetQuestManager();
+            UFortQuestManager* QuestManager = PlayerController->GetQuestManager(ESubGame::GetCampaign());
             if (QuestManager && Status == EFortMissionStatus::GetSucceeded() && Info)
             {
                 SendMissionCompleteStat(QuestManager, Mission, Info);
@@ -289,7 +289,7 @@ void AFortMissionManager::OnMissionStatusChange(AFortMission* Mission, EFortMiss
     {
         for (AFortPlayerController* PlayerController : Mission->GetParticipatingMissionControllers())
         {
-            if (UFortQuestManager* QuestManager = PlayerController ? PlayerController->GetQuestManager() : nullptr)
+            if (UFortQuestManager* QuestManager = PlayerController ? PlayerController->GetQuestManager(ESubGame::GetCampaign()) : nullptr)
             {
                 SendMissionCompleteStat(QuestManager, Mission, Info);
             }

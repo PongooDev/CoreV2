@@ -214,8 +214,11 @@ namespace
         DefineUProperty(bool, bAthenaMustCompleteInSingleMatch)
         // 3.0: how many of the objectives complete the quest (Land at different named locations: 10 of 18), else all.
         DefineUProperty(int32_t, ObjectiveCompletionCount)
+        // 5.40: a Battle Royale challenge done "in different matches" moves its objectives once a match.
+        DefineUProperty(bool, bAthenaUpdateObjectiveOncePerMatch)
         static bool HasSingleMatch() { return Member_bAthenaMustCompleteInSingleMatch.IsAvailable(); }
         static bool HasObjectiveCompletionCount() { return Member_ObjectiveCompletionCount.IsAvailable(); }
+        static bool HasUpdateObjectiveOncePerMatch() { return Member_bAthenaUpdateObjectiveOncePerMatch.IsAvailable(); }
     };
 
     class UFortMcpProfileSubgame : public UObject
@@ -741,6 +744,37 @@ namespace
         return bAdd ? &SavesInFlight.emplace_back(FSaveRequests{ Weak, {} }) : nullptr;
     }
 
+    // The objectives of bAthenaUpdateObjectiveOncePerMatch quests (5.40) a quest manager moved in the current match, the
+    // match being its world's game mode (a server reloads its map for the next match, and a player who plays it again
+    // may keep the quest manager).
+    struct FObjectivesUpdatedThisMatch
+    {
+        FWeakObjectPtr QuestManager;
+        FWeakObjectPtr GameMode;
+        std::vector<FName> BackendNames;
+    };
+    std::vector<FObjectivesUpdatedThisMatch> ObjectivesUpdatedThisMatch;
+
+    std::vector<FName>& ObjectivesUpdatedThisMatchOf(UFortQuestManager* QuestManager, UObject* GameMode)
+    {
+        std::erase_if(ObjectivesUpdatedThisMatch, [](const FObjectivesUpdatedThisMatch& Entry) { return !Entry.QuestManager.Get(); });
+        const FWeakObjectPtr WeakQuestManager(QuestManager);
+        const FWeakObjectPtr WeakGameMode(GameMode);
+        for (FObjectivesUpdatedThisMatch& Entry : ObjectivesUpdatedThisMatch)
+        {
+            if (Entry.QuestManager == WeakQuestManager)
+            {
+                if (!(Entry.GameMode == WeakGameMode))
+                {
+                    Entry.GameMode = WeakGameMode;
+                    Entry.BackendNames.clear();
+                }
+                return Entry.BackendNames;
+            }
+        }
+        return ObjectivesUpdatedThisMatch.emplace_back(FObjectivesUpdatedThisMatch{ WeakQuestManager, WeakGameMode, {} }).BackendNames;
+    }
+
     // 1.9.1 0x8BC420.
     int32_t CountInFlight(UFortQuestManager* QuestManager, const std::wstring& StatName)
     {
@@ -1046,6 +1080,7 @@ namespace
             : Type == EFortQuestObjectiveStatEvent::GetCollect() ? static_cast<uint8_t>(EFortQuestObjectiveItemEvent::GetCollect()) : NoItemEvent;
         std::optional<FConditionContext> Conditions;
         static std::unordered_set<std::wstring> ReportedConditions;
+        std::vector<FName>* UpdatedThisMatch = nullptr;
 
         std::vector<FName> Processed;
         const TArray<UFortQuestItem*>& Quests = This->CurrentQuests;
@@ -1061,6 +1096,13 @@ namespace
             }
             const std::wstring DefinitionName = Definition->GetName().ToStdString();
             const int32_t CurrentStage = Quest->CurrentStage;
+            // 5.40's "... in different matches" challenges (bAthenaUpdateObjectiveOncePerMatch, 6.00's "Pickup a Legendary
+            // Item in different matches"): an objective moves by one the first time an event matches it in a match, and no
+            // further in that match. Epic's check isn't in any build on hand (SendStatEventWithTags and SaveStatEvents are
+            // stripped from 6.00, 7.00 and 8.30 alike), so this follows the flag's name. Epic's server held a match's
+            // Battle Royale progress until the match's end; Core saves it during the match (SendStatEventWithTagsHK), so
+            // it keeps which objectives the quest manager moved in this match.
+            const bool bOncePerMatch = UFortQuestItemDefinitionObjectives::HasUpdateObjectiveOncePerMatch() && static_cast<bool>(Definition->bAthenaUpdateObjectiveOncePerMatch);
             TStructArray<FFortMcpQuestObjectiveInfo>& Objectives = Definition->Objectives;
             for (int32_t ObjectiveIndex = 0; ObjectiveIndex < Objectives.Num(); ++ObjectiveIndex)
             {
@@ -1117,6 +1159,20 @@ namespace
                     {
                         continue;
                     }
+                    if (bOncePerMatch)
+                    {
+                        if (!UpdatedThisMatch)
+                        {
+                            UWorld* World = PlayerController->GetWorld();
+                            UpdatedThisMatch = &ObjectivesUpdatedThisMatchOf(This, World ? reinterpret_cast<UObject*>(World->GetAuthGameMode()) : nullptr);
+                        }
+                        if (std::find(UpdatedThisMatch->begin(), UpdatedThisMatch->end(), BackendName) != UpdatedThisMatch->end())
+                        {
+                            Log::Info(L"SendStatEvent for {}: {}'s {} already moved this match (bAthenaUpdateObjectiveOncePerMatch)", This->GetName().ToStdString(), DefinitionName,
+                                BackendName.ToString().ToStdString());
+                            continue;
+                        }
+                    }
                 }
 
                 // The objective's count: the profile's, the requests not yet answered, and the progress pending.
@@ -1132,7 +1188,11 @@ namespace
                 {
                     Processed.push_back(BackendName);
                     Entry = &AddPending(This, StatName);
-                    Entry->Count = Entry->Count + Count;
+                    Entry->Count = Entry->Count + (bOncePerMatch ? 1 : Count);
+                    if (bOncePerMatch && UpdatedThisMatch)
+                    {
+                        UpdatedThisMatch->push_back(BackendName);
+                    }
                 }
                 if (!Entry)
                 {

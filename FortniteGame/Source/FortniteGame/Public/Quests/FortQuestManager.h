@@ -48,6 +48,16 @@ class EFortQuestObjectiveStatEvent
     DefineUEnumValue(Max_None)
 };
 
+// 1.8: the sub game a quest manager belongs to (UFortRegisteredPlayerInfo::QuestManagers' key). Invalid asks for the
+// current one (AFortPlayerController::GetQuestManager).
+class ESubGame
+{
+    DefineUnrealEnum(ESubGame, FortniteGame)
+    DefineUEnumValue(Campaign)
+    DefineUEnumValue(Athena)
+    DefineUEnumValue(Invalid)
+};
+
 class EFortQuestState
 {
     DefineUnrealEnum(EFortQuestState, FortniteGame)

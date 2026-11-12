@@ -11,6 +11,7 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 #include "BackendRequest.h"
+#include "Configuration.h"
 #include "Engine/World.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
@@ -2073,10 +2074,30 @@ bool AFortPlayerController::ResolveDurability()
         AFortWeapon::PendingDestroyDueToDurabilityOffset(), AFortWeapon::PendingDestroyDueToDurabilityMask());
 }
 
-UFortQuestManager* AFortPlayerController::GetQuestManager() const
+// The game's own: its exec (6.00 0x1524540) calls the virtual (vtable +0x1948) that the native stat event senders call
+// with ESubGame::Invalid (dl 2), which in Battle Royale gives the Athena quest manager. Builds without the function (or
+// the enum) get the player info's, the current sub game's being Battle Royale's when this server runs it.
+UFortQuestManager* AFortPlayerController::GetQuestManager(ESubGame SubGame) const
 {
+    const uint8_t SubGameValue = static_cast<uint8_t>(SubGame);
+    if (UFunction* Function = SubGameValue != Reflection::InvalidEnumValue ? FindStaticFunction_GetQuestManager() : nullptr)
+    {
+        Reflection::FParams Params(Function);
+        if (Params.Has(L"SubGame") && Params.Set(L"SubGame", SubGameValue) && Params.Call(const_cast<AFortPlayerController*>(this)))
+        {
+            return Params.Take<UFortQuestManager*>(L"ReturnValue");
+        }
+    }
+
     UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
-    return PlayerInfo ? PlayerInfo->GetCampaignQuestManager() : nullptr;
+    if (!PlayerInfo)
+    {
+        return nullptr;
+    }
+    const bool bAthena = SubGameValue == Reflection::InvalidEnumValue || SubGameValue == static_cast<uint8_t>(ESubGame::GetInvalid())
+        ? Configuration::Get().IsBattleRoyale() : SubGameValue == static_cast<uint8_t>(ESubGame::GetAthena());
+    UFortQuestManager* AthenaQuestManager = bAthena ? PlayerInfo->GetAthenaQuestManager() : nullptr;
+    return AthenaQuestManager ? AthenaQuestManager : PlayerInfo->GetCampaignQuestManager();
 }
 
 UFortSchematicItem* AFortPlayerController::GetSchematicForItem(const UFortItemDefinition* ItemDefinition)

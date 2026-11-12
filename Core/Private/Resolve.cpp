@@ -1750,8 +1750,19 @@ namespace
         const uintptr_t SerialNumbers = FunctionOf(L"UObject serial numbers overflowed (trying to allocate serial number %d).");
         const uintptr_t NullTest = SerialNumbers ? FindInstruction(SerialNumbers, SerialNumbers + 0x20, { 0x48, 0x85, 0xD2 }) : 0;
         const uintptr_t IndexCopy = NullTest ? FindInstruction(NullTest, NullTest + 0x14, { 0x8B, 0x4A, 0x0C, 0x89 }) : 0;
+        bool bAssign = IndexCopy && (Byte(IndexCopy + 4) & 0xF8) == 0x08;
+        // 6.10 (CL-4480234 0x18F2600) keeps the index in eax and stores it through rcx: mov eax, [rdx+0Ch]; mov [rcx],
+        // eax. Whichever register carries it, the object's index loaded and stored straight through a pointer is the
+        // assignment; AllocateSerialNumber itself takes the index in edx and never reads through rdx.
+        for (uintptr_t Site = bAssign ? 0 : NullTest; Site && Site < NullTest + 0x14 && !bAssign; ++Site)
+        {
+            const uint8_t Load = Byte(Site + 1);
+            const uint8_t Store = Byte(Site + 4);
+            bAssign = Byte(Site) == 0x8B && (Load & 0xC7) == 0x42 && Byte(Site + 2) == 0x0C && Byte(Site + 3) == 0x89
+                && (Store & 0xC0) == 0x00 && (Store & 0x38) == (Load & 0x38) && (Store & 0x07) != 0x04 && (Store & 0x07) != 0x05;
+        }
         Natives::FWeakObjectPtr_Assign = nullptr;
-        if (IndexCopy && (Byte(IndexCopy + 4) & 0xF8) == 0x08)
+        if (bAssign)
         {
             Natives::FWeakObjectPtr_Assign = reinterpret_cast<decltype(Natives::FWeakObjectPtr_Assign)>(SerialNumbers);
             Log::Info(L"Finder: FUObjectArray::AllocateSerialNumber is inlined into FWeakObjectPtr::operator= (+0x{:X}), which Core calls", SerialNumbers - Finder::ImageBase());

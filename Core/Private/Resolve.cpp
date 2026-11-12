@@ -8221,14 +8221,32 @@ bool Finder::ResolveAddNavigationSystemToWorldLive(ptrdiff_t WorldNavigationSyst
     const std::initializer_list<int32_t> Pattern = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20,
         0x48, 0x83, 0xB9, Bytes(World, 0), Bytes(World, 1), Bytes(World, 2), Bytes(World, 3), 0x00, 0x41, 0x0F, 0xB6, 0xF0, 0x0F, 0xB6, 0xFA, 0x48, 0x8B, 0xD9, 0x75, -1,
         0x41, 0xB0, 0x01, 0x33, 0xD2, 0xE8, -1, -1, -1, -1, 0x48, 0x85, 0xC0, 0x74, -1, 0x48, 0x8B, 0x88, Bytes(Config, 0), Bytes(Config, 1), Bytes(Config, 2), Bytes(Config, 3) };
+    // 6.00 (0x232AFD0) takes the config third, AddNavigationSystemToWorld(UWorld&, RunMode, UNavigationSystemConfig*,
+    // bInitializeForWorld), and falls back on the world settings' NavigationSystemConfigOverride, then their config:
+    //   ...; cmp qword ptr [rcx+World.NavigationSystem], 0; movzx esi, r9b; movzx edi, dl; mov rbx, rcx; jnz;
+    //   test r8, r8; jnz; mov r8b, 1; xor edx, edx; call UWorld::GetWorldSettings; test rax, rax; jz;
+    //   mov r8, [rax+NavigationSystemConfigOverride]; test r8, r8; jnz; mov r8, [rax+WorldSettings.NavigationSystemConfig]
+    const std::initializer_list<int32_t> ConfigPattern = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20,
+        0x48, 0x83, 0xB9, Bytes(World, 0), Bytes(World, 1), Bytes(World, 2), Bytes(World, 3), 0x00, 0x41, 0x0F, 0xB6, 0xF1, 0x0F, 0xB6, 0xFA, 0x48, 0x8B, 0xD9, 0x75, -1,
+        0x4D, 0x85, 0xC0, 0x75, -1, 0x41, 0xB0, 0x01, 0x33, 0xD2, 0xE8, -1, -1, -1, -1, 0x48, 0x85, 0xC0, 0x74, -1, 0x4C, 0x8B, 0x80, -1, -1, -1, -1,
+        0x4D, 0x85, 0xC0, 0x75, -1, 0x4C, 0x8B, 0x80, Bytes(Config, 0), Bytes(Config, 1), Bytes(Config, 2), Bytes(Config, 3) };
     uintptr_t Found = 0;
     int32_t Matches = 0;
-    for (const auto& [Begin, End] : Finder::ExecutableSections())
+    bool bTakesConfig = false;
+    for (const auto* Form : { &Pattern, &ConfigPattern })
     {
-        for (uintptr_t Site = FindInstruction(Begin, End, Pattern); Site; Site = FindInstruction(Site + 1, End, Pattern))
+        for (const auto& [Begin, End] : Finder::ExecutableSections())
         {
-            Found = Site;
-            ++Matches;
+            for (uintptr_t Site = FindInstruction(Begin, End, *Form); Site; Site = FindInstruction(Site + 1, End, *Form))
+            {
+                Found = Site;
+                ++Matches;
+            }
+        }
+        if (Matches)
+        {
+            bTakesConfig = Form == &ConfigPattern;
+            break;
         }
     }
     if (Matches != 1)
@@ -8237,7 +8255,8 @@ bool Finder::ResolveAddNavigationSystemToWorldLive(ptrdiff_t WorldNavigationSyst
         return false;
     }
     Natives::FNavigationSystem_AddNavigationSystemToWorld = reinterpret_cast<decltype(Natives::FNavigationSystem_AddNavigationSystemToWorld)>(Found);
-    Log::Info(L"Finder: FNavigationSystem::AddNavigationSystemToWorld at 0x{:X}", Found - Finder::ImageBase());
+    Natives::FNavigationSystem_AddNavigationSystemToWorldTakesConfig = bTakesConfig;
+    Log::Info(L"Finder: FNavigationSystem::AddNavigationSystemToWorld at 0x{:X}{}", Found - Finder::ImageBase(), bTakesConfig ? L" (takes the config)" : L"");
     return true;
 }
 

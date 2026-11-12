@@ -68,6 +68,13 @@ bool FNavigationSystem::AddNavigationSystemToWorld(UWorld& WorldOwner, FNavigati
     {
         return false;
     }
+    if (Natives::FNavigationSystem_AddNavigationSystemToWorldTakesConfig)
+    {
+        // 6.00's takes the config third; null uses the world settings' own.
+        using FAddWithConfig = void (*)(UWorld& WorldOwner, uint8_t RunMode, void* NavigationSystemConfig, bool bInitializeForWorld);
+        reinterpret_cast<FAddWithConfig>(Natives::FNavigationSystem_AddNavigationSystemToWorld)(WorldOwner, RunMode, nullptr, bInitializeForWorld);
+        return true;
+    }
     Natives::FNavigationSystem_AddNavigationSystemToWorld(WorldOwner, RunMode, bInitializeForWorld);
     return true;
 }

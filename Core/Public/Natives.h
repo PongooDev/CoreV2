@@ -450,6 +450,10 @@ namespace Natives
     // world settings' NavigationSystemConfig (UNavigationSystemConfig::CreateAndConfigureNavigationSystem, then
     // UWorld::SetNavigationSystem), then runs the system's InitializeForWorld(World, Mode).
     inline void (*FNavigationSystem_AddNavigationSystemToWorld)(UWorld& WorldOwner, uint8_t RunMode, bool bInitializeForWorld) = nullptr;
+    // From 6.00 it takes the config third, AddNavigationSystemToWorld(UWorld&, RunMode, UNavigationSystemConfig*
+    // NavigationSystemConfig, bInitializeForWorld) (6.00 0x232AFD0): a null config is the world settings'
+    // NavigationSystemConfigOverride, else their NavigationSystemConfig. The pointer above is then this one.
+    inline bool FNavigationSystem_AddNavigationSystemToWorldTakesConfig = false;
     // Battle Royale's navmesh tile cache (UAthenaNavSystem), from FRecastNavMeshGenerator::AddGeneratedTiles: Detour's
     // dtNavMesh::addTile (dtStatus, 64-bit tile refs), ARecastNavMesh's RecastNavMeshImpl, FPImplRecastNavMesh's
     // DetourNavMesh and the generator's DestNavMesh, ActiveTiles and NumActiveTiles.

@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Engine/NetSerialization.h"
 #include "GameplayEffect.h"
+#include "StructArray.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Object.h"
 
@@ -9,8 +11,8 @@ class UWorld;
 
 // A playlist's settings as a data asset (from 3.5, where it replaced AFortAthenaPlaylistBase and the game mode's
 // PlaylistDataTables). AFortGameStateAthena::SetCurrentPlaylistId (3.5.1 0x9FA020) looks the match's up by its id and
-// keeps it as CurrentPlaylistData; ApplyPlaylistDataTables (0x9DC890) loads its tables and copies them over the
-// default ones.
+// keeps it as CurrentPlaylistData (from 6.01 in CurrentPlaylistInfo, an FPlaylistPropertyArray); ApplyPlaylistDataTables
+// (0x9DC890) loads its tables and copies them over the default ones.
 class UFortPlaylist : public UObject
 {
     DefineUnrealClass(UFortPlaylist, FortniteGame)
@@ -103,8 +105,60 @@ public:
     // AFortPlayerControllerAthena::SetTeam, a server RPC; 5.10's SetTeam_Implementation 0xC0DD10 checks the team is in
     // the playlist's DefaultFirstTeam..DefaultLastTeam and calls the game mode's ChangeTeam, slot 0xA80). Read by
     // AFortGameModeAthena's team switches, at the switched pawn's death and its player's next Possess (CoreV2 #374).
-    DefineUProperty(bool, bAllowTeamSwitching)
+    // A bool of its own up to 6.00; 6.01 (CL-4424678) packs it into a byte of flags with bEnableCreativeMode,
+    // bEnablePlayspaceManager and bAllowLayoutRequirementsFeature (bit 2 of +0x4A8), so it is read by its mask.
+    DefineBitfieldUProperty(bAllowTeamSwitching)
     static bool HasAllowTeamSwitching() { return Member_bAllowTeamSwitching.IsAvailable(); }
+};
+
+// One of a match's changes to its playlist's properties (from 6.01), an item of FPlaylistPropertyArray.
+struct FPropertyOverride : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FPropertyOverride, FortniteGame)
+};
+
+// From 6.01 (CL-4424678): the match's playlist as the game state has and replicates it, AFortGameStateAthena's
+// CurrentPlaylistInfo, which took the place of the CurrentPlaylistData pointer. 21.40's layout, which 6.01's matches:
+// the fast array of PropertyOverrides, PlaylistReplicationKey, BasePlaylist, OverridePlaylist, PropertyOverrideScopes.
+// Its NetDeltaSerialize (6.01 0xEF6450) writes a bit, then the key and BasePlaylist when the key isn't the one the
+// connection's last state has (21.40's FNetPlaylistPropertyArrayState: ArrayState and PlaylistReplicationKey; a new
+// connection has none), then the overrides' own fast array delta (0xEDB300). A client reads BasePlaylist from that,
+// builds OverridePlaylist from the overrides it received and runs OnRep_CurrentPlaylistInfo.
+struct FPlaylistPropertyArray : public FFastArraySerializer
+{
+    DefineUnrealStruct(FPlaylistPropertyArray, FortniteGame)
+    DefineUStructArrayProperty(FPropertyOverride, PropertyOverrides)
+    DefineUProperty(UFortPlaylistAthena*, BasePlaylist)
+    DefineUProperty(UFortPlaylistAthena*, OverridePlaylist)
+    // 6.01 doesn't reflect it: the int32 between PropertyOverrides and BasePlaylist (+0xC0; the game state's
+    // constructor, 0xBF8331, starts it at -1).
+    DefineUProperty(int32_t, PlaylistReplicationKey)
+
+public:
+    static bool IsAvailable() { return Member_BasePlaylist.IsAvailable() && Member_OverridePlaylist.IsAvailable(); }
+    // -1 when the build's layout has no room for the key where 6.01 and 21.40 have it.
+    static ptrdiff_t PlaylistReplicationKeyOffset()
+    {
+        if (Member_PlaylistReplicationKey.IsAvailable())
+        {
+            return Member_PlaylistReplicationKey.GetOffsetChecked();
+        }
+        if (!Member_PropertyOverrides.IsAvailable() || !Member_BasePlaylist.IsAvailable())
+        {
+            return -1;
+        }
+        const ptrdiff_t AfterOverrides = Member_PropertyOverrides.GetOffsetChecked() + static_cast<ptrdiff_t>(sizeof(FScriptArray));
+        return Member_BasePlaylist.GetOffsetChecked() - AfterOverrides == static_cast<ptrdiff_t>(sizeof(void*)) ? AfterOverrides : -1;
+    }
+
+    // The playlist the match plays: the copy its overrides made when there is one, else the playlist itself. The game
+    // has no function for it, every reader inlines the two loads (6.01's OnRep_CurrentPlaylistInfo, 0xC1DFF9:
+    // "mov rcx, [rcx+18F0h]; test rcx, rcx; jnz; mov rcx, [rbx+18E8h]"; LoadCurrentPlaylistData, 0xC185D0, the same).
+    UFortPlaylistAthena* GetCurrentPlaylist() const
+    {
+        UFortPlaylistAthena* Override = OverridePlaylist;
+        return Override ? Override : static_cast<UFortPlaylistAthena*>(BasePlaylist);
+    }
 };
 
 // The game mode's playlists (AFortGameMode's PlaylistManager): every Battle Royale playlist the build has.

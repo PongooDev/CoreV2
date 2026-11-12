@@ -60,9 +60,9 @@ namespace
     // #344). False before 3.5, whose playlists aren't data assets.
     bool IgnoresDefaultQuests(AFortGameModeAthena* GameMode)
     {
-        UWorld* World = GameMode && AFortGameStateAthena::HasCurrentPlaylistData() && UFortPlaylistAthena::HasIgnoreDefaultQuests() ? GameMode->GetWorld() : nullptr;
+        UWorld* World = GameMode && AFortGameStateAthena::HasCurrentPlaylist() && UFortPlaylistAthena::HasIgnoreDefaultQuests() ? GameMode->GetWorld() : nullptr;
         AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
         return Playlist && Playlist->bIgnoreDefaultQuests;
     }
 

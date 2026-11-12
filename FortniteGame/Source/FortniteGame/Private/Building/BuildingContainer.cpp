@@ -94,12 +94,12 @@ namespace
     // that leaves it at 0.
     int32_t GetLootDropRounds(UWorld* World)
     {
-        if (!UFortPlaylistAthena::HasLootDropRounds() || !AFortGameStateAthena::HasCurrentPlaylistData() || !World)
+        if (!UFortPlaylistAthena::HasLootDropRounds() || !AFortGameStateAthena::HasCurrentPlaylist() || !World)
         {
             return 1;
         }
         AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
-        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
         return Playlist ? std::clamp(static_cast<int32_t>(Playlist->LootDropRounds), 1, 10) : 1;
     }
 

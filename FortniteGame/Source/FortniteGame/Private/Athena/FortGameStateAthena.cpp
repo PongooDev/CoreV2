@@ -30,12 +30,12 @@ namespace
     }
 
     // What both of SetCurrentPlaylistId's copies in 5.21's OnGivenMatchAssignment do with the playlist they found (from
-    // 0xBD5DEA): it becomes CurrentPlaylistData with its aircraft behaviour, the game mode takes its AI settings, then
-    // the game state's values from it (0xBD2710) and LoadCurrentPlaylistData (0xBD3AD0), then its additional levels
-    // (0xBE7080).
+    // 0xBD5DEA): it becomes CurrentPlaylistData (6.01: CurrentPlaylistInfo's) with its aircraft behaviour, the game mode
+    // takes its AI settings, then the game state's values from it (0xBD2710) and LoadCurrentPlaylistData (0xBD3AD0),
+    // then its additional levels (0xBE7080).
     void TakePlaylist(AFortGameStateAthena* GameState, AFortGameModeAthena* GameMode, UFortPlaylistAthena* Playlist)
     {
-        GameState->CurrentPlaylistData = Playlist;
+        GameState->SetCurrentPlaylist(Playlist);
         if (AFortGameStateAthena::HasAirCraftBehavior())
         {
             GameState->AirCraftBehavior = Playlist->AirCraftBehavior;
@@ -50,25 +50,79 @@ namespace
                 PlaylistAISettings->GetName().ToStdString());
         }
         // 0xBD2710 and LoadCurrentPlaylistData are what OnRep_CurrentPlaylistData does (5.21 0xBD7770, 5.30 0xBEC6C0),
-        // whose "(Client Only)" log shows on the server.
-        if (UFunction* OnRep = AFortGameStateAthena::FindStaticFunction_OnRep_CurrentPlaylistData())
+        // whose "(Client Only)" log shows on the server. 6.01's is OnRep_CurrentPlaylistInfo (0xC1DFF0), the same steps.
+        UFunction* OnRep = AFortGameStateAthena::FindStaticFunction_OnRep_CurrentPlaylistData();
+        if (!OnRep)
+        {
+            OnRep = AFortGameStateAthena::FindStaticFunction_OnRep_CurrentPlaylistInfo();
+        }
+        if (OnRep)
         {
             Reflection::FParams Params(OnRep);
             Params.Call(GameState);
         }
         else
         {
-            Log::Error(L"PLAYLIST: AFortGameStateAthena::OnRep_CurrentPlaylistData isn't on this build, so {} doesn't load", static_cast<FName>(Playlist->PlaylistName).ToStdString());
+            Log::Error(L"PLAYLIST: AFortGameStateAthena has neither OnRep_CurrentPlaylistData nor OnRep_CurrentPlaylistInfo on this build, so {} doesn't load",
+                static_cast<FName>(Playlist->PlaylistName).ToStdString());
         }
         GameState->StreamAdditionalPlaylistLevels();
     }
 #endif
 }
 
+UFortPlaylistAthena* AFortGameStateAthena::GetCurrentPlaylist() const
+{
+    if (Member_CurrentPlaylistData.IsAvailable())
+    {
+        return CurrentPlaylistData;
+    }
+    if (HasCurrentPlaylistInfo())
+    {
+        return static_cast<FPlaylistPropertyArray&>(CurrentPlaylistInfo).GetCurrentPlaylist();
+    }
+    return nullptr;
+}
+
+bool AFortGameStateAthena::SetCurrentPlaylist(UFortPlaylistAthena* Playlist)
+{
+#if WITH_SERVER_CODE
+    if (Member_CurrentPlaylistData.IsAvailable())
+    {
+        CurrentPlaylistData = Playlist;
+        return true;
+    }
+    if (!HasCurrentPlaylistInfo())
+    {
+        return false;
+    }
+    FPlaylistPropertyArray& Info = CurrentPlaylistInfo;
+    Info.BasePlaylist = Playlist;
+    Info.OverridePlaylist = nullptr;
+    const ptrdiff_t KeyOffset = FPlaylistPropertyArray::PlaylistReplicationKeyOffset();
+    if (KeyOffset >= 0)
+    {
+        ++*reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(&Info) + KeyOffset);
+    }
+    else
+    {
+        static bool bLogged = false;
+        if (!bLogged)
+        {
+            bLogged = true;
+            Log::Warning(L"PLAYLIST: FPlaylistPropertyArray's PlaylistReplicationKey isn't where 6.01 has it, so a playlist set after a player joined reaches only the players who join later");
+        }
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
 void AFortGameStateAthena::SetCurrentPlaylistId(int32_t PlaylistId)
 {
 #if WITH_SERVER_CODE
-    if (!HasCurrentPlaylistData())
+    if (!HasCurrentPlaylist())
     {
         return;
     }
@@ -86,7 +140,7 @@ void AFortGameStateAthena::SetCurrentPlaylistId(int32_t PlaylistId)
     {
         bStormReachedFinalPosition = false;
     }
-    UFortPlaylistAthena* Current = CurrentPlaylistData;
+    UFortPlaylistAthena* Current = GetCurrentPlaylist();
     const int32_t CurrentId = HasCurrentPlaylistId() ? static_cast<int32_t>(CurrentPlaylistId) : Current ? static_cast<int32_t>(Current->PlaylistId) : -1;
     if (Role != ROLE_Authority || (CurrentId == PlaylistId && IsPlaylistLoadedOrLoading(this)))
     {
@@ -113,14 +167,14 @@ void AFortGameStateAthena::SetCurrentPlaylistId(int32_t PlaylistId)
 void AFortGameStateAthena::SetCurrentPlaylistId(FName PlaylistName)
 {
 #if WITH_SERVER_CODE
-    if (!HasCurrentPlaylistData() || PlaylistName.IsNone())
+    if (!HasCurrentPlaylist() || PlaylistName.IsNone())
     {
         return;
     }
     // 5.21's copy of the name's (0xBD5B68): unless the game state has the playlist of that name already, loaded or
     // loading, the game mode's playlist manager's of that name becomes its playlist, and its id the game state's and the
     // game mode's CurrentPlaylistId.
-    UFortPlaylistAthena* Current = CurrentPlaylistData;
+    UFortPlaylistAthena* Current = GetCurrentPlaylist();
     if (Current && static_cast<FName>(Current->PlaylistName) == PlaylistName && IsPlaylistLoadedOrLoading(this))
     {
         return;
@@ -147,7 +201,7 @@ void AFortGameStateAthena::SetCurrentPlaylistId(FName PlaylistName)
 void AFortGameStateAthena::StreamAdditionalPlaylistLevels()
 {
 #if WITH_SERVER_CODE
-    UFortPlaylistAthena* Playlist = HasCurrentPlaylistData() && UFortPlaylist::HasAdditionalLevels() && Role == ROLE_Authority ? static_cast<UFortPlaylistAthena*>(CurrentPlaylistData) : nullptr;
+    UFortPlaylistAthena* Playlist = HasCurrentPlaylist() && UFortPlaylist::HasAdditionalLevels() && Role == ROLE_Authority ? GetCurrentPlaylist() : nullptr;
     if (!Playlist)
     {
         return;

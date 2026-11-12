@@ -394,7 +394,7 @@ bool AFortPlayerStateAthena::IsScoringMatch()
 {
     UWorld* World = GetWorld();
     AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-    UFortPlaylistAthena* Playlist = GameState && AFortGameStateAthena::HasCurrentPlaylistData() ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+    UFortPlaylistAthena* Playlist = GameState && AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
     return Playlist && Playlist->IsScoringPlaylist();
 }
 

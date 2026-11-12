@@ -1,12 +1,12 @@
 #pragma once
 
+#include "Athena/FortPlaylistAthena.h"
 #include "FortGameState.h"
 #include "UObject/ScriptDelegates.h"
 
 class AFortAthenaAircraft;
 class AFortAthenaMapInfo;
 class AFortSpecialActorReplicationInfo;
-class UFortPlaylistAthena;
 
 class EAthenaGamePhase
 {
@@ -62,11 +62,27 @@ public:
     // The map's AFortAthenaMapInfo, set by AFortGameModeAthena's own FinishWorldInitialization (1.7.2 0x3CF860).
     DefineUProperty(AFortAthenaMapInfo*, MapInfo)
 
-    // 3.5: the match's playlist, set by SetCurrentPlaylistId (3.5.1 0x9FA020) from the game mode's playlist list.
-    // ApplyPlaylistDataTables (0x9DC890) copies its tables over the default ones.
+    // 3.5 to 6.00: the match's playlist, set by SetCurrentPlaylistId (3.5.1 0x9FA020) from the game mode's playlist
+    // list. ApplyPlaylistDataTables (0x9DC890) copies its tables over the default ones.
     DefineUProperty(UFortPlaylistAthena*, CurrentPlaylistData)
-    static bool HasCurrentPlaylistData() { return Member_CurrentPlaylistData.IsAvailable(); }
-    // Up to 5.21 the playlist's id is the game state's too (5.30 has none).
+    // From 6.01 (CL-4424678) the playlist is in CurrentPlaylistInfo instead (+0x1820; BasePlaylist +0x18E8,
+    // OverridePlaylist +0x18F0), which replicates it with the match's overrides of its properties.
+    DefineUStructProperty(FPlaylistPropertyArray, CurrentPlaylistInfo)
+    static bool HasCurrentPlaylistInfo() { return Member_CurrentPlaylistInfo.IsAvailable() && FPlaylistPropertyArray::IsAvailable(); }
+    // Whether the game state has the match's playlist as an object (from 3.5), in either of the two.
+    static bool HasCurrentPlaylist() { return Member_CurrentPlaylistData.IsAvailable() || HasCurrentPlaylistInfo(); }
+    // The match's playlist: CurrentPlaylistData, or CurrentPlaylistInfo's (its OverridePlaylist, else its BasePlaylist,
+    // as the game reads it everywhere). Null while the game state has none, and on a build before 3.5.
+    UFortPlaylistAthena* GetCurrentPlaylist() const;
+    // Makes Playlist the game state's, where the build keeps it. 3.5 to 6.00: CurrentPlaylistData, which replicates as
+    // the pointer it is. From 6.01: CurrentPlaylistInfo's BasePlaylist, which FPlaylistPropertyArray::NetDeltaSerialize
+    // (6.01 0xEF6450) sends to a connection whose last state has another PlaylistReplicationKey (every new connection
+    // has none), so the key moves on for the players already in; and no OverridePlaylist, as the match overrides none
+    // of the playlist's properties. Epic's own store is stripped with SetCurrentPlaylistId (6.01 has no writer of the
+    // three left but the game state's constructor, 0xBF8331, and the client's read), so this is what the serializer
+    // and the readers need. False on a build before 3.5.
+    bool SetCurrentPlaylist(UFortPlaylistAthena* Playlist);
+    // Up to 5.21 the playlist's id is the game state's too (5.30 to 6.00 have none; 6.01's has it again, +0x115C).
     DefineUProperty(int32_t, CurrentPlaylistId)
     static bool HasCurrentPlaylistId() { return Member_CurrentPlaylistId.IsAvailable(); }
     // Whether the playlist's assets have loaded (LoadCurrentPlaylistData, then OnPlaylistDataLoadCompleted), or are
@@ -78,6 +94,9 @@ public:
     // after setting it (5.21's AFortGameModeAthena::OnGivenMatchAssignment, 0xBD59E0): the game state's values from it
     // (0xBD2710), then LoadCurrentPlaylistData (0xBD3AD0). 4.5's (0xA77500) and 5.0's (0xBC4050) do the same.
     DefineUFunction(OnRep_CurrentPlaylistData)
+    // 6.01's, for CurrentPlaylistInfo (0xC1DFF0): on the server TeamCount is the playlist's MaxTeamCount, then
+    // TotalFinalCountdownTime its FinalWinConditionTime and LoadCurrentPlaylistData (0xC185D0).
+    DefineUFunction(OnRep_CurrentPlaylistInfo)
     // From 3.5; SetCurrentPlaylistId clears it (4.4 0xA922C0, 5.21 0xBD5CC7).
     DefineUProperty(bool, bStormReachedFinalPosition)
     static bool HasStormReachedFinalPosition() { return Member_bStormReachedFinalPosition.IsAvailable(); }
@@ -87,7 +106,8 @@ public:
     // OnPlaylistDataLoaded build the aircraft paths and apply the playlist's tables, then the playlist's additional
     // levels. Nothing when the game state has that playlist already, loaded or loading. The game's own on 3.5 to 4.5
     // (4.2 0xA592E0, 4.5 0xA7FF10); 5.0 to 5.21 inline it into AFortGameModeAthena::OnGivenMatchAssignment (5.21
-    // 0xBD5CBA), and 5.30 strips it with that, so Core runs its steps there.
+    // 0xBD5CBA), and 5.30 strips it with that, so Core runs its steps there. From 6.01 the playlist goes into
+    // CurrentPlaylistInfo: its BasePlaylist, with a new PlaylistReplicationKey so the connected clients get it too.
     void SetCurrentPlaylistId(int32_t PlaylistId);
     // The same with the playlist's name, which OnGivenMatchAssignment uses when the game mode has it (4.5 0xA800A0, a
     // function of its own that logs as the id's does; 5.21 0xBD5B68, inlined). Core's steps on every build.

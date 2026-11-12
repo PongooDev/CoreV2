@@ -1908,7 +1908,7 @@ namespace
     // keep the game's own rows.
     bool MergesDefaultLootRows()
     {
-        return !AFortGameModeAthena::HasPlaylistDataTables() && AFortGameStateAthena::HasCurrentPlaylistData();
+        return !AFortGameModeAthena::HasPlaylistDataTables() && AFortGameStateAthena::HasCurrentPlaylist();
     }
 
     // Copies the default tables' rows, once per process, before the first playlist's tables replace them.
@@ -1989,8 +1989,8 @@ namespace
         if (!AFortGameModeAthena::HasPlaylistDataTables())
         {
             // 3.5: ApplyPlaylistDataTables (3.5.1 0x9DC890) loads the game state's CurrentPlaylistData's tables.
-            AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylistData() ? AthenaGameStateOf(GameMode) : nullptr;
-            UFortPlaylistAthena* Playlist = GameState ? GameState->CurrentPlaylistData : nullptr;
+            AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylist() ? AthenaGameStateOf(GameMode) : nullptr;
+            UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
             if (Playlist && Playlist->PlaylistId == PlaylistId)
             {
                 return { Playlist->LootTierData.LoadSynchronous(), Playlist->LootPackages.LoadSynchronous() };
@@ -2030,12 +2030,12 @@ namespace
     // default loot.
     int32_t AppliedPlaylistId(AFortGameModeAthena* GameMode)
     {
-        if (AFortGameModeAthena::HasPlaylistDataTables() || !AFortGameStateAthena::HasCurrentPlaylistData())
+        if (AFortGameModeAthena::HasPlaylistDataTables() || !AFortGameStateAthena::HasCurrentPlaylist())
         {
             return GameMode->CurrentPlaylistId;
         }
         AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
-        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
         return Playlist ? static_cast<int32_t>(Playlist->PlaylistId) : -1;
     }
 
@@ -2091,7 +2091,7 @@ namespace
         Natives::AFortGameModeAthena_ApplyPlaylistDataTables(Athena);
         MergeDefaultLootRows(PlaylistId);
         // 5.0+: the searches and floor loot pick this many times (Building/BuildingContainer.cpp, #357).
-        if (UFortPlaylistAthena* Playlist = UFortPlaylistAthena::HasLootDropRounds() && AFortGameStateAthena::HasCurrentPlaylistData() ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        if (UFortPlaylistAthena* Playlist = UFortPlaylistAthena::HasLootDropRounds() && AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
             Playlist && Playlist->LootDropRounds > 1)
         {
             Log::Info(L"Battle Royale: playlist {}'s loot drops {} rounds a search and floor loot spot", PlaylistId, static_cast<int32_t>(Playlist->LootDropRounds));
@@ -2166,7 +2166,7 @@ namespace
     // is seen at the pawn's death (HandlePawnDied) and as the player comes back (OnPlayerPossessedPawn).
     bool HasTeamSwitching()
     {
-        return AFortPlayerStateAthena::HasSquadId() && UFortPlaylistAthena::HasAllowTeamSwitching() && AFortGameStateAthena::HasCurrentPlaylistData();
+        return AFortPlayerStateAthena::HasSquadId() && UFortPlaylistAthena::HasAllowTeamSwitching() && AFortGameStateAthena::HasCurrentPlaylist();
     }
 
     // A player state the game moved to another team since the last check joins the new team's squad: a player's squad
@@ -2186,7 +2186,7 @@ namespace
             Watch.GameMode = FWeakObjectPtr(GameMode);
         }
         AFortGameStateAthena* GameState = AthenaGameStateOf(GameMode);
-        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
         if (!Playlist || !Playlist->bAllowTeamSwitching)
         {
             Watch.Teams.clear();
@@ -2271,8 +2271,8 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
     // 4.2 0xA19780: bAllowRespawning (an unreflected flag OnPlaylistDataLoaded, 0xA1BE40, sets when the loaded playlist's
     // RespawnType isn't None), then true unless the playlist is InfiniteRespawnExceptStorm and the player died in the
     // storm. The playlist's RespawnType stands in for the flag: Core can't read it.
-    AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylistData() && UFortPlaylistAthena::HasRespawnType() ? AthenaGameStateOf(this) : nullptr;
-    UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+    AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylist() && UFortPlaylistAthena::HasRespawnType() ? AthenaGameStateOf(this) : nullptr;
+    UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
     if (!Playlist || Playlist->RespawnType == EAthenaRespawnType::GetNone())
     {
         return false;

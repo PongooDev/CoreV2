@@ -1132,7 +1132,7 @@ void FCoreAthenaBotManager::StartBotMatchIfAsked()
             // left to OnGivenMatchAssignment (4.2 0xA1B5F0, 5.21 0xBD59E0; 5.30 strips it), so the world had no playlist
             // data: no aircraft paths, no safe zone locations (OnPlaylistDataLoaded, 0xA1BE40). The assignment's own call
             // runs here, on the world's playlist.
-            if (AFortGameStateAthena::HasCurrentPlaylistData() && !static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) && Athena->CurrentPlaylistId >= 0)
+            if (AFortGameStateAthena::HasCurrentPlaylist() && !GameState->GetCurrentPlaylist() && Athena->CurrentPlaylistId >= 0)
             {
                 Log::Info(L"Battle Royale bots: -CoreBotMatch: the game state has no playlist, so it takes the world's playlist {}", static_cast<int32_t>(Athena->CurrentPlaylistId));
                 GameState->SetCurrentPlaylistId(static_cast<int32_t>(Athena->CurrentPlaylistId));
@@ -1206,8 +1206,8 @@ int32_t FCoreAthenaBotManager::MatchCapacity() const
     // (CoreV2 #374: the beacon's 16 slots filled it with bots on teams of their own), every other playlist 100.
     AFortGameModeAthena* Athena = GetGameMode();
     int32_t PlaylistMaxPlayers = 100;
-    AFortGameStateAthena* GameState = UFortPlaylist::HasMaxPlayers() && AFortGameStateAthena::HasCurrentPlaylistData() ? AthenaGameStateOf(Athena) : nullptr;
-    if (const UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr; Playlist && Playlist->MaxPlayers > 0)
+    AFortGameStateAthena* GameState = UFortPlaylist::HasMaxPlayers() && AFortGameStateAthena::HasCurrentPlaylist() ? AthenaGameStateOf(Athena) : nullptr;
+    if (const UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr; Playlist && Playlist->MaxPlayers > 0)
     {
         PlaylistMaxPlayers = std::min(static_cast<int32_t>(Playlist->MaxPlayers), PlaylistMaxPlayers);
     }

@@ -51,7 +51,7 @@ namespace
         {
             return GameMode->bSquadPlay;
         }
-        UFortPlaylist* Playlist = AFortGameStateAthena::HasCurrentPlaylistData() && UFortPlaylist::HasMaxTeamSize() ? static_cast<UFortPlaylist*>(GameState->CurrentPlaylistData) : nullptr;
+        UFortPlaylist* Playlist = AFortGameStateAthena::HasCurrentPlaylist() && UFortPlaylist::HasMaxTeamSize() ? static_cast<UFortPlaylist*>(GameState->GetCurrentPlaylist()) : nullptr;
         return Playlist && Playlist->MaxTeamSize > 1;
     }
 

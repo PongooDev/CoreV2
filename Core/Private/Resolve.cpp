@@ -14310,13 +14310,13 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
     // function that stores CurrentMovementStyle: "movzx eax, byte ptr [rdx]; mov rbx, rcx; mov [rcx + CurrentMovementStyle],
     // al", then the character movement's MaxWalkSpeed and its other speeds from GetMovementSpeed for the new style. The
     // pawn's movement style update (5.10 0x112B010) calls it through the vtable (slot 0x8C8 on 5.10).
-    const auto StoresStyleItself = [CurrentMovementStyleOffset](uintptr_t Body)
+    const auto StoresStyleWithin = [CurrentMovementStyleOffset](uintptr_t Body, uintptr_t LoadWindow)
     {
-        if (!Body || !Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30))
+        if (!Body || !Finder::IsReadable(reinterpret_cast<const void*>(Body), LoadWindow + 0x18))
         {
             return false;
         }
-        for (uintptr_t Load = Body; Load < Body + 0x18; ++Load)
+        for (uintptr_t Load = Body; Load < Body + LoadWindow; ++Load)
         {
             if (Byte(Load) != 0x0F || Byte(Load + 1) != 0xB6 || Byte(Load + 2) != 0x02)
             {
@@ -14332,6 +14332,7 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
         }
         return false;
     };
+    const auto StoresStyleItself = [&StoresStyleWithin](uintptr_t Body) { return StoresStyleWithin(Body, 0x18); };
     const auto StoresStyle = [&StoresStyleItself](uintptr_t Entry) { return StoresStyleItself(Finder::Unthunk(Entry)); };
     // 6.00's player pawn overrides it (CL-4395664 0x11DBBA0): it keeps the old style, calls AFortPawn's (0x11BAB30, the
     // store) first, then handles the change to and from style 4. The player pawn's vtable holds the override, so where no
@@ -14342,11 +14343,20 @@ bool Finder::ResolveMovementStyleLive(ptrdiff_t CurrentMovementStyleOffset)
         const uintptr_t SuperCall = Body && Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x30) ? FindRawCall(Body, Body + 0x28) : 0;
         return SuperCall && StoresStyleItself(Finder::Unthunk(Finder::RelativeTarget(SuperCall, 1, 5)));
     };
+    // 6.01's override (CL-4424678 0x11B3FD0) has AFortPawn's (0x11B3E80) inlined instead of called: it stores the style
+    // itself again, behind a longer prologue that first keeps the movement component and the old style ("mov rsi,
+    // [rcx+390h]; mov rdi, rcx; movzx eax, byte ptr [rdx]; movzx ebx, byte ptr [rcx+7D4h]; mov [rcx+7D4h], al"), so its
+    // load is at +0x19, just past the 0x18 bytes of the first search. Looked for last, so the builds above keep their slot.
+    const auto OverrideStoresStyleItself = [&StoresStyleWithin](uintptr_t Entry) { return StoresStyleWithin(Finder::Unthunk(Entry), 0x28); };
     void** PawnVTable = CurrentMovementStyleOffset > 0 ? CdoVTable(L"/Script/FortniteGame.FortPlayerPawnAthena") : nullptr;
     int32_t Index = PawnVTable ? FirstVTableIndexWhere(PawnVTable, StoresStyle) : -1;
     if (Index < 0 && PawnVTable)
     {
         Index = FirstVTableIndexWhere(PawnVTable, OverrideStoresStyle);
+    }
+    if (Index < 0 && PawnVTable)
+    {
+        Index = FirstVTableIndexWhere(PawnVTable, OverrideStoresStyleItself);
     }
     if (Index < 0)
     {

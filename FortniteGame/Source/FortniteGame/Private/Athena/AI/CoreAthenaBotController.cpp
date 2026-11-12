@@ -1450,10 +1450,10 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     {
         Pawn->bTeamMembersAlwaysRelevant = GameMode->bIsLargeTeamGame && !GameMode->bFiftyFiftySquadPlay;
     }
-    else if (AFortPlayerPawnAthena::HasTeamMembersAlwaysRelevant() && AFortGameStateAthena::HasLargeTeamGame() && AFortGameStateAthena::HasCurrentPlaylistData() && UFortPlaylist::HasMaxTeamSize())
+    else if (AFortPlayerPawnAthena::HasTeamMembersAlwaysRelevant() && AFortGameStateAthena::HasLargeTeamGame() && AFortGameStateAthena::HasCurrentPlaylist() && UFortPlaylist::HasMaxTeamSize())
     {
         AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
-        UFortPlaylistAthena* Playlist = GameState ? static_cast<UFortPlaylistAthena*>(GameState->CurrentPlaylistData) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
         Pawn->bTeamMembersAlwaysRelevant = GameState && GameState->bIsLargeTeamGame && Playlist && Playlist->MaxTeamSize <= 20;
     }
     bTargeting = false;

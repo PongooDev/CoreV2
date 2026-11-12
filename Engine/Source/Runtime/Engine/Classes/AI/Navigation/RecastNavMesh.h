@@ -23,6 +23,10 @@ public:
     DefineUProperty(float, AgentRadius)
     DefineUProperty(float, AgentHeight)
     static bool HasTileSettings() { return Member_TileSizeUU.IsAvailable() && Member_CellSize.IsAvailable() && Member_CellHeight.IsAvailable() && Member_AgentRadius.IsAvailable() && Member_AgentHeight.IsAvailable(); }
+    // From 6.00: where the navmesh's tile grid starts. The generator copies it (in Recast's axes) into its
+    // RcNavMeshOrigin, the dtNavMesh's origin, only when it rebuilds everything (FRecastNavMeshGenerator::RebuildAll).
+    DefineUProperty(FVector, NavMeshOriginOffset)
+    static bool HasNavMeshOriginOffset() { return Member_NavMeshOriginOffset.IsAvailable(); }
 
     // Detour's navmesh (dtNavMesh): FPImplRecastNavMesh's DetourNavMesh (RecastNavMeshImpl), once the generator has made
     // it. Needs Finder::ResolveRecastNavMeshLive.

@@ -1472,11 +1472,41 @@ void UAthenaNavSystem::Tick(UWorld* World)
     NavSys->ConditionalPopulateNavOctree();
     const double OctreeMs = NowMs() - OctreeStarted;
     const double LockStarted = NowMs();
+    // The release rebuilds the navigation data when it is what unlocks the building (UNavigationSystem::
+    // RemoveNavigationBuildLock). The game's own UAthenaNavSystem can get there first: on 6.02 (CL-4461277) its world
+    // bring-up (0xAD7090: the pending bounds, OnWorldInitDone, ReleaseInitialBuildingLock, the octree) runs between
+    // the navmesh's spawn and here, and its ReleaseInitialBuildingLock (0xADEC50, the navigation system's slot 0x58;
+    // the same override is in 4.2 to 6.01) only clears the lock unless a flag no code left in the build sets is on. So
+    // the lock was open already, and nothing rebuilt the navmesh. From 6.00 that matters: the generator's RebuildAll
+    // (6.02 0x2C00C70) is the only code that gives it its origin (from the navmesh's NavMeshOriginOffset; its
+    // constructor, 0x2BC2540, leaves RcNavMeshOrigin as the heap had it), and the dtNavMesh the first dirty tiles then
+    // made took whatever was there: (0, 0, 1.5e28) one match, harmless denormals the next. The rebuild the release
+    // left out runs here, the navigation system's own.
+    const bool bWasLocked = NavSys->IsNavigationBuildingLocked();
     NavSys->ReleaseInitialBuildingLock();
-    Log::Info(L"Battle Royale navigation: {} registered (main {}); octree {:.0f} ms, lock release {:.0f} ms, build lock 0x{:X}", NameOf(NavData),
-        NameOf(reinterpret_cast<UObject*>(static_cast<ANavigationData*>(NavSys->MainNavData))), OctreeMs, NowMs() - LockStarted, static_cast<int32_t>(NavSys->NavBuildingLockFlags));
+    const bool bRebuildLeftOut = !bWasLocked && ARecastNavMesh::HasNavMeshOriginOffset();
+    if (bRebuildLeftOut)
+    {
+        NavSys->RebuildAll();
+    }
+    Log::Info(L"Battle Royale navigation: {} registered (main {}); octree {:.0f} ms, lock release {:.0f} ms{}, build lock 0x{:X}", NameOf(NavData),
+        NameOf(reinterpret_cast<UObject*>(static_cast<ANavigationData*>(NavSys->MainNavData))), OctreeMs, NowMs() - LockStarted,
+        bRebuildLeftOut ? L" (already released by the game without a rebuild: rebuilt now)" : L"", static_cast<int32_t>(NavSys->NavBuildingLockFlags));
     // Registered, so its generator and dtNavMesh exist and its settings are the ones its tiles are built with.
     StartTileCache(World, NavData);
+    if (bRebuildLeftOut)
+    {
+        // The dtNavMesh's origin in Recast's axes (-X, Z, -Y of NavMeshOriginOffset), where Core reads dtNavMesh.
+        const FVector OriginOffset = reinterpret_cast<ARecastNavMesh*>(NavData)->NavMeshOriginOffset;
+        const uint8_t* DetourNavMesh = static_cast<const uint8_t*>(reinterpret_cast<ARecastNavMesh*>(NavData)->GetRecastMesh());
+        float Origin[3] = {};
+        if (DetourNavMesh)
+        {
+            std::memcpy(Origin, DetourNavMesh + Detour::NavMeshOrig, sizeof(Origin));
+        }
+        Log::Info(L"Battle Royale navigation: {}'s origin offset is ({:g}, {:g}, {:g}){}", NameOf(NavData), OriginOffset.X, OriginOffset.Y, OriginOffset.Z,
+            DetourNavMesh ? std::format(L", its dtNavMesh's origin ({:g}, {:g}, {:g})", Origin[0], Origin[1], Origin[2]) : std::wstring(L"; no dtNavMesh to read"));
+    }
 #endif
 }
 

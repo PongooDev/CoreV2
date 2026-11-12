@@ -96,20 +96,21 @@ public:
     }
 };
 
-// One of the player states watching a player (21.40's FFortSpectatorZoneItem).
-struct FFortSpectatorAthenaItem : public FFastArraySerializerItem
+// One of the player states watching a player. 6.10 (CL-4480234) moved spectating from the Athena classes to their Zone
+// parents and renamed the two structs with it: FFortSpectatorAthenaItem and FFortSpectatorAthenaArray up to 6.02.
+struct FFortSpectatorZoneItem : public FFastArraySerializerItem
 {
-    DefineUnrealStruct(FFortSpectatorAthenaItem, FortniteGame)
+    DefineRenamedUnrealStruct(FFortSpectatorZoneItem, FFortSpectatorAthenaItem, FortniteGame)
     DefineUProperty(AFortPlayerStateAthena*, PlayerState)
 };
 
-// A player state's Spectators (21.40's FFortSpectatorZoneArray), replicated as a fast array: on the watched player's
+// A player state's Spectators, replicated as a fast array: on the watched player's
 // the player states spectating them, whose number is the HUD's "N spectating" (GetSpectatorCount, 3.3 0x11449B0, is
 // SpectatorArray.Num()); on a spectator's, itself and the others watching the same player (BeginSpectating).
-struct FFortSpectatorAthenaArray : public FFastArraySerializer
+struct FFortSpectatorZoneArray : public FFastArraySerializer
 {
-    DefineUnrealStruct(FFortSpectatorAthenaArray, FortniteGame)
-    DefineUStructArrayProperty(FFortSpectatorAthenaItem, SpectatorArray)
+    DefineRenamedUnrealStruct(FFortSpectatorZoneArray, FFortSpectatorAthenaArray, FortniteGame)
+    DefineUStructArrayProperty(FFortSpectatorZoneItem, SpectatorArray)
 
 public:
     static bool IsWritable() { return Member_SpectatorArray.IsAvailable() && (Natives::FFastArraySerializer_MarkArrayDirty || Natives::FFastArraySerializer_ItemMapReset); }
@@ -206,8 +207,8 @@ public:
     // spectating it (Spectators). The server's AFortPlayerControllerAthena::SpectateOnDeath (3.3 0xA31650) sets them
     // through BeginSpectating when bEnableSpectatorUpdates is on.
     DefineUProperty(AFortPlayerStateAthena*, SpectatingTarget)
-    DefineUStructProperty(FFortSpectatorAthenaArray, Spectators)
-    static bool HasSpectators() { return Member_SpectatingTarget.IsAvailable() && Member_Spectators.IsAvailable() && FFortSpectatorAthenaArray::IsWritable(); }
+    DefineUStructProperty(FFortSpectatorZoneArray, Spectators)
+    static bool HasSpectators() { return Member_SpectatingTarget.IsAvailable() && Member_Spectators.IsAvailable() && FFortSpectatorZoneArray::IsWritable(); }
 
     // 3.3 0xA12BB0 (21.40's AFortPlayerStateZone::BeginSpectating): ends the current spectating, then watches
     // PlayerToSpectate: in its Spectators, and in those of the others watching it, who are added to this one's, with

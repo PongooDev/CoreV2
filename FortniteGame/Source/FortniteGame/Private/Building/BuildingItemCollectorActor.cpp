@@ -41,10 +41,10 @@ void ABuildingItemCollectorActor::FinishItemSelectionSetup()
     const int32_t WorldLevel = GameState ? static_cast<int32_t>(GameState->WorldLevel) : -1;
     const int32_t LootTier = StartingGoalLevel;
     std::vector<UFortItemDefinition*> Offered;
-    TStructArray<FColletorUnitInfo>& Collections = ItemCollections;
+    TStructArray<FCollectorUnitInfo>& Collections = ItemCollections;
     for (int32_t Index = 0; Index < Collections.Num(); ++Index)
     {
-        FColletorUnitInfo& Collection = Collections[Index];
+        FCollectorUnitInfo& Collection = Collections[Index];
         if (Collection.bUseDefinedOutputItem)
         {
             continue;
@@ -109,8 +109,8 @@ void ABuildingItemCollectorActor::GrantOutput(AFortPlayerController* PlayerContr
         return;
     }
 
-    TStructArray<FColletorUnitInfo>& Collections = ItemCollections;
-    FColletorUnitInfo* Collection = nullptr;
+    TStructArray<FCollectorUnitInfo>& Collections = ItemCollections;
+    FCollectorUnitInfo* Collection = nullptr;
     for (int32_t Index = 0; Index < Collections.Num() && !Collection; ++Index)
     {
         Collection = static_cast<UFortWorldItemDefinition*>(Collections[Index].InputItem) == InputItem ? &Collections[Index] : nullptr;

@@ -12,11 +12,12 @@
 class AFortPlayerController;
 class UFortWorldItemDefinition;
 
-// One of a collector's inputs (Epic's spelling): the item it takes, how many (InputCount at the collector's
-// StartingGoalLevel, 3.5.1 0xA8D970), and what it gives for them.
-struct FColletorUnitInfo
+// One of a collector's inputs: the item it takes, how many (InputCount at the collector's StartingGoalLevel, 3.5.1
+// 0xA8D970), and what it gives for them. Epic spelled it FColletorUnitInfo up to 6.02 and corrected it in 6.10
+// (CL-4480234).
+struct FCollectorUnitInfo
 {
-    DefineUnrealStruct(FColletorUnitInfo, FortniteGame)
+    DefineRenamedUnrealStruct(FCollectorUnitInfo, FColletorUnitInfo, FortniteGame)
 
 public:
     DefineUProperty(UFortWorldItemDefinition*, InputItem)
@@ -40,7 +41,7 @@ class ABuildingItemCollectorActor : public ABuildingActor
 
 public:
     DefineUProperty(FName, DefaultItemLootTierGroupName)
-    DefineUStructArrayProperty(FColletorUnitInfo, ItemCollections)
+    DefineUStructArrayProperty(FCollectorUnitInfo, ItemCollections)
     DefineUProperty(UFortWorldItemDefinition*, ActiveInputItem)
     DefineUProperty(FVector, LootSpawnLocation)
     DefineUProperty(FRotator, LootTossDirection)
@@ -51,7 +52,7 @@ public:
     // of UpdateCollectorsActiveItem, 0 Common to 4 Legendary). BeginPlay sets it to 0 (0xA84BEA); nothing else does.
     DefineUProperty(int32_t, StartingGoalLevel)
 
-    static bool HasOutputItems() { return Member_ItemCollections.IsAvailable() && Member_StartingGoalLevel.IsAvailable() && FColletorUnitInfo::StaticStruct(); }
+    static bool HasOutputItems() { return Member_ItemCollections.IsAvailable() && Member_StartingGoalLevel.IsAvailable() && FCollectorUnitInfo::StaticStruct(); }
 
     // 21.40's name, server only: rolls each input's OutputItemEntry from the rarity's loot tier group where the tables
     // have one, else its own (the input's OverrideOutputItemLootTierGroupName, else DefaultItemLootTierGroupName) at the

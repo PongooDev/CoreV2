@@ -416,18 +416,18 @@ void AFortPlayerStateAthena::HandleScoringEvent(const FGameplayTagContainer& Eve
 #endif
 }
 
-void FFortSpectatorAthenaArray::AddSpectatingPlayer(AFortPlayerStateAthena* Spectator)
+void FFortSpectatorZoneArray::AddSpectatingPlayer(AFortPlayerStateAthena* Spectator)
 {
-    FFortSpectatorAthenaItem& Item = SpectatorArray.AddDefaulted();
+    FFortSpectatorZoneItem& Item = SpectatorArray.AddDefaulted();
     Item.ReplicationID = INDEX_NONE;
     Item.ReplicationKey = INDEX_NONE;
     Item.PlayerState = Spectator;
     MarkArrayDirty();
 }
 
-void FFortSpectatorAthenaArray::RemoveSpectatingPlayer(AFortPlayerStateAthena* Spectator)
+void FFortSpectatorZoneArray::RemoveSpectatingPlayer(AFortPlayerStateAthena* Spectator)
 {
-    TStructArray<FFortSpectatorAthenaItem>& Items = SpectatorArray;
+    TStructArray<FFortSpectatorZoneItem>& Items = SpectatorArray;
     for (int32_t Index = Items.Num() - 1; Index >= 0; --Index)
     {
         if (static_cast<AFortPlayerStateAthena*>(Items[Index].PlayerState) == Spectator)
@@ -453,7 +453,7 @@ void AFortPlayerStateAthena::BeginSpectating(AFortPlayerStateAthena* PlayerToSpe
     }
     SpectatingTarget = PlayerToSpectate;
     // The others watching the same player see this one, and it sees them (the count every one of them shows).
-    TStructArray<FFortSpectatorAthenaItem>& Watchers = PlayerToSpectate->Spectators.SpectatorArray;
+    TStructArray<FFortSpectatorZoneItem>& Watchers = PlayerToSpectate->Spectators.SpectatorArray;
     for (int32_t Index = 0; Index < Watchers.Num(); ++Index)
     {
         AFortPlayerStateAthena* Other = Watchers[Index].PlayerState;
@@ -478,7 +478,7 @@ void AFortPlayerStateAthena::EndSpectating()
     if (AFortPlayerStateAthena* Target = SpectatingTarget)
     {
         Target->Spectators.RemoveSpectatingPlayer(this);
-        TStructArray<FFortSpectatorAthenaItem>& Watchers = Target->Spectators.SpectatorArray;
+        TStructArray<FFortSpectatorZoneItem>& Watchers = Target->Spectators.SpectatorArray;
         for (int32_t Index = 0; Index < Watchers.Num(); ++Index)
         {
             if (AFortPlayerStateAthena* Other = Watchers[Index].PlayerState)
@@ -488,7 +488,7 @@ void AFortPlayerStateAthena::EndSpectating()
         }
         SpectatingTarget = nullptr;
     }
-    FFortSpectatorAthenaArray& Own = Spectators;
+    FFortSpectatorZoneArray& Own = Spectators;
     Own.SpectatorArray.Empty();
     Own.MarkArrayDirty();
 #endif

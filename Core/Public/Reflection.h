@@ -204,6 +204,14 @@ public: \
     static UScriptStruct* StaticStruct() { return TypeInfo_##StructName.GetScriptStruct(); } \
     static UStruct* StaticReflectionOwner() { return TypeInfo_##StructName.Get(); }
 
+// A struct Epic renamed: StructName is its current name (as 21.40 has it), FormerName the one older builds reflect it by.
+#define DefineRenamedUnrealStruct(StructName, FormerName, Package) \
+private: \
+    static inline Reflection::FTypeInfo TypeInfo_##StructName{ TEXT(#Package), TEXT(#StructName), Reflection::ETypeKind::ScriptStruct, TEXT(#FormerName) }; \
+public: \
+    static UScriptStruct* StaticStruct() { return TypeInfo_##StructName.GetScriptStruct(); } \
+    static UStruct* StaticReflectionOwner() { return TypeInfo_##StructName.Get(); }
+
 #define DefineUProperty(Type, Name) \
 private: \
     static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<Type> }; \

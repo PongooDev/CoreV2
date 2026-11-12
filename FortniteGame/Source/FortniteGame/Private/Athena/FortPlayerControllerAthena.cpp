@@ -281,7 +281,12 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
         return;
     }
 
+    // From 6.01 the game state's mutators have a say in each item (ShouldDropItem; 21.40's death drop asks
+    // ShouldDropOrDestroyByItemType the same way): Playground's "Drop Items When Eliminated" set to Off is its
+    // CreativeMutator_ItemDropOverride's DropAllItemsOverride at ForceKeep, and the player respawns with what they held.
+    // What can't be dropped at all still isn't.
     std::vector<UFortWorldItem*> Drops;
+    int32_t Kept = 0;
     FFortItemList& ItemList = Inventory->Inventory;
     TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
     for (int32_t Index = 0; Index < Instances.Num(); ++Index)
@@ -291,8 +296,19 @@ void AFortPlayerControllerAthena::DropInventoryOnDeath(AFortPawn* DeadPawn)
         UFortWorldItemDefinition* ItemDefinition = ItemEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry->ItemDefinition)) : nullptr;
         if (ItemDefinition && ItemDefinition->bCanBeDropped && ItemEntry->Count > 0)
         {
-            Drops.push_back(WorldItem);
+            if (ShouldDropItem(ItemDefinition, true))
+            {
+                Drops.push_back(WorldItem);
+            }
+            else
+            {
+                ++Kept;
+            }
         }
+    }
+    if (Kept > 0)
+    {
+        UE_LOG(LogFort, Log, TEXT("DropInventoryOnDeath: %s keeps %d items, the game state's mutators say so"), *GetName(), Kept);
     }
 
     const FVector DeathLocation = DeadPawn->GetTransform().GetLocation();
@@ -535,6 +551,12 @@ void AFortPlayerControllerAthena::HookCallSites()
         Log::Info(L"Battle Royale: the end-of-match screen takes FAthenaMatchStats ({}{}), the match report {}, the player state {}", FAthenaMatchStats::IsReflected() ? L"reflected" : L"not reflected",
             FAthenaMatchStats::HasStatSlots() ? L", 21.40's Stats slots and WeaponStats" : L"", UAthenaPlayerMatchReport::HasStats() && HasMatchReport() ? L"holds them" : L"is missing",
             AFortPlayerStateAthena::HasDownScore() ? L"has DownScore" : L"has no DownScore");
+    }
+    // ShouldDropItem (from 6.01), which the death's item drop asks: only a build with the mutator that answers it has
+    // the virtual.
+    if (FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_ItemDropOverride"))
+    {
+        Finder::ResolveShouldDropItemLive(AFortGameStateAthena::GameplayMutatorsOffset());
     }
 #endif
 

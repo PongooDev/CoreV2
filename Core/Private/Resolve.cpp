@@ -9724,6 +9724,95 @@ bool Finder::ResolveMatchAssignmentLive(void** GameModeVTable)
     const auto Where = [](uintptr_t Function) { return Function ? std::format(L"0x{:X}", Function - Finder::ImageBase()) : std::wstring(L"none on this build"); };
     Log::Info(L"Finder: AFortGameMode::OnGivenMatchAssignment is slot 0x{:X} (0x{:X}), SetCurrentPlaylistName {}, StartStreamingAdditionalPlaylistLevel {}",
         Index, OnGivenMatchAssignment - Finder::ImageBase(), Where(SetCurrentPlaylistName), Where(StartStreaming));
+
+    // From 6.01 OnGivenMatchAssignment (CL-4424678 0xE481D0) also takes the party's custom match options: 0xE4C2A0
+    // copies the assignment's options and adds each "<key>=<value>" of match.option.customMatchOptions as a pair of its
+    // own (unless UFortRuntimeOptions disables matchmaking knobs, or that one), and the game state, when it is an
+    // AFortGameState, is given the lot: the next call that is a member's assignment, 0xE9A910 ("add rcx, 5F0h; jmp" to
+    // the map's copy; 21.40 names the member MatchOptions). No client build reads the map back.
+    const uintptr_t CustomMatchOptions = FunctionOf(L"match.option.customMatchOptions");
+    const uintptr_t End = CustomMatchOptions ? Finder::FunctionEnd(OnGivenMatchAssignment) : 0;
+    bool bOptionsTaken = false;
+    for (const auto& [Site, Target] : End ? Finder::DirectCalls(OnGivenMatchAssignment, End) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (Target == CustomMatchOptions)
+        {
+            bOptionsTaken = true;
+        }
+        else if (bOptionsTaken && Byte(Target) == 0x48 && Byte(Target + 1) == 0x81 && Byte(Target + 2) == 0xC1 && Byte(Target + 7) == 0xE9)
+        {
+            const int32_t Offset = *reinterpret_cast<const int32_t*>(Target + 3);
+            if (Offset > 0 && Offset < 0x4000)
+            {
+                Natives::AFortGameState_MatchOptions = Offset;
+                Log::Info(L"Finder: AFortGameState::MatchOptions at +0x{:X} (SetMatchOptions 0x{:X}, the custom match options from 0x{:X})", Offset, Target - Finder::ImageBase(),
+                    CustomMatchOptions - Finder::ImageBase());
+            }
+            break;
+        }
+    }
+    if (CustomMatchOptions && Natives::AFortGameState_MatchOptions < 0)
+    {
+        Log::Error(L"Finder: AFortGameState::MatchOptions not found (the custom match options at 0x{:X} {}), a party's custom match options won't reach its playlist",
+            CustomMatchOptions - Finder::ImageBase(), bOptionsTaken ? L"are taken, but the game state isn't given them by a member's assignment" : L"aren't called from OnGivenMatchAssignment");
+    }
+    return true;
+}
+
+bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortPlayerController_ShouldDropItemIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortPlayerController's virtual that says whether an item drops (6.01 CL-4424678 slot 0x31D; the mutators' side of
+    // it is 21.40's FortGameStateAthena_ShouldDropItem): (the item's definition, the answer otherwise) and returns the
+    // answer. AFortPlayerController's and Zone's return what they were given ("movzx eax, r8b; ret", 0xC58580, in no
+    // other slot of the vtable); AFortPlayerControllerAthena's (0xC26970) asks each active mutator of the game state's
+    // GameplayMutators ("mov rbx, [rsi+1AF0h]") through its own virtual (slot 0xD7) and stops at the first that
+    // overrides. Its caller, the death's item drop, is stripped, so nothing in the build calls it.
+    void** ControllerVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerController");
+    void** AthenaVTable = CdoVTable(L"/Script/FortniteGame.FortPlayerControllerAthena");
+    const int32_t Mutators = static_cast<int32_t>(GameplayMutatorsOffset);
+    int32_t Index = -1;
+    uintptr_t Function = 0;
+    for (int32_t Slot = 0; ControllerVTable && AthenaVTable && Mutators > 0 && Slot < 0x400 && Index < 0; ++Slot)
+    {
+        const uintptr_t Base = reinterpret_cast<uintptr_t>(ControllerVTable[Slot]);
+        const uintptr_t Athena = reinterpret_cast<uintptr_t>(AthenaVTable[Slot]);
+        // The vtables' ends; a slot Core has swapped holds one of its own functions.
+        if ((!IsInText(Base) && !IsCoreFunction(Base)) || (!IsInText(Athena) && !IsCoreFunction(Athena)))
+        {
+            break;
+        }
+        if (!IsInText(Base) || !IsInText(Athena) || Athena == Base || !Finder::BodyIs(Base, { 0x41, 0x0F, 0xB6, 0xC0, 0xC3 }))
+        {
+            continue;
+        }
+        const uintptr_t AthenaEnd = Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
+        bool bReadsMutators = false;
+        for (uintptr_t Load = AthenaEnd > Athena && AthenaEnd - Athena <= 0x200 ? Athena : 0; Load && Load + 7 <= AthenaEnd && !bReadsMutators; ++Load)
+        {
+            bReadsMutators = (Byte(Load) & 0xF8) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC0) == 0x80 && (Byte(Load + 2) & 0x07) != 0x04
+                && *reinterpret_cast<const int32_t*>(Load + 3) == Mutators;
+        }
+        if (bReadsMutators && FindVirtualCall(Athena, AthenaEnd))
+        {
+            Index = Slot;
+            Function = Athena;
+        }
+    }
+    if (Index < 0)
+    {
+        Log::Error(L"Finder: AFortPlayerController::ShouldDropItem not found (GameplayMutators +0x{:X}), the game state's mutators aren't asked which items an eliminated player drops",
+            GameplayMutatorsOffset > 0 ? static_cast<int32_t>(GameplayMutatorsOffset) : 0);
+        return false;
+    }
+    Natives::AFortPlayerController_ShouldDropItemIndex = Index;
+    Log::Info(L"Finder: AFortPlayerController::ShouldDropItem is slot 0x{:X} (Athena's 0x{:X} asks the game state's mutators)", Index, Function - Finder::ImageBase());
     return true;
 }
 

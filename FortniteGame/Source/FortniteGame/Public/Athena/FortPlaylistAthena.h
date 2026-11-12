@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Containers/Map.h"
+#include "Containers/UnrealString.h"
 #include "Engine/NetSerialization.h"
 #include "GameplayEffect.h"
 #include "StructArray.h"
@@ -7,6 +9,7 @@
 #include "UObject/Object.h"
 
 class UDataTable;
+class UPlaylistUserOptions;
 class UWorld;
 
 // A playlist's settings as a data asset (from 3.5, where it replaced AFortAthenaPlaylistBase and the game mode's
@@ -34,6 +37,10 @@ public:
     // Playlist_Playground: 4 teams of up to 4, MaxPlayers 4). Battle Royale's player bots fill no further (CoreV2 #374).
     DefineUProperty(int32_t, MaxPlayers)
     static bool HasMaxPlayers() { return Member_MaxPlayers.IsAvailable(); }
+    // The options the playlist's players set in the lobby (from 6.01; Playlist_Playground's Playgrounds_UserKnobsV1),
+    // none on most playlists.
+    DefineUProperty(UPlaylistUserOptions*, UserOptions)
+    static bool HasUserOptions() { return Member_UserOptions.IsAvailable(); }
 };
 
 // Whether the players of a playlist come back after they die (from 3.5; 4.2's Playground: InfiniteRespawnExceptStorm).
@@ -111,10 +118,20 @@ public:
     static bool HasAllowTeamSwitching() { return Member_bAllowTeamSwitching.IsAvailable(); }
 };
 
-// One of a match's changes to its playlist's properties (from 6.01), an item of FPlaylistPropertyArray.
+// One of a match's changes to its playlist's properties (from 6.01), an item of FPlaylistPropertyArray: the property
+// PropertyName takes the text PropertyData. With no PropertyScope it is a property of the playlist itself, which every
+// machine changes on its own copy of the playlist (OverridePlaylist; a client as the item replicates, CL-4424678
+// 0xEDB300). With one it is a property of the objects whose class is in the package of that short name
+// (CreativeMutator_Gravity), which take it when they ask the array (the game state's mutators as they spawn).
 struct FPropertyOverride : public FFastArraySerializerItem
 {
     DefineUnrealStruct(FPropertyOverride, FortniteGame)
+    DefineUProperty(FString, PropertyScope)
+    DefineUProperty(FString, PropertyName)
+    DefineUProperty(FString, PropertyData)
+
+public:
+    static bool IsAvailable() { return StaticStruct() && Member_PropertyScope.IsAvailable() && Member_PropertyName.IsAvailable() && Member_PropertyData.IsAvailable(); }
 };
 
 // From 6.01 (CL-4424678): the match's playlist as the game state has and replicates it, AFortGameStateAthena's
@@ -159,6 +176,24 @@ public:
         UFortPlaylistAthena* Override = OverridePlaylist;
         return Override ? Override : static_cast<UFortPlaylistAthena*>(BasePlaylist);
     }
+
+    // 21.40's name, on the server: the match's overrides become the ones its players chose for Playlist's UserOptions.
+    // MatchOptions is the game state's (AFortGameState::GetMatchOptions), where AFortGameMode::OnGivenMatchAssignment
+    // left each of the party's custom match options under its option's scoped key ("<scope>:<OptionKey>"); each of the
+    // playlist's options found there becomes an item (PropertyScope the scope, PropertyName the OptionKey, PropertyData
+    // the value's text), marked dirty so it replicates. An option of the playlist's own properties (no scope) is left
+    // out. Returns how many it set.
+    //
+    // The build keeps both ends of this and strips the middle. The options reach the game state (CL-4424678 0xE481D0,
+    // 0xE4C2A0, 0xE9A910), and AFortGameStateAthena's mutator observer (0xC19B80, on the authority) has this array give
+    // each mutator that spawns the items of its scope (0xEE38F0: the items whose PropertyScope is the short name of the
+    // mutator's class's package, each imported as text into the property it names, 0xEF3AA0), after which the game's
+    // own code reads the mutators. But nothing left in the build reads the game state's MatchOptions or adds an item:
+    // the functions that logged "PLAYLIST: Applied property override %s - %s" are gone.
+    // 🟡 Inferred: that the stripped step takes the playlist's own options only (not any "<scope>:<name>" pair the
+    // match options have), and that it runs when the playlist becomes the game state's. Both ends fix what an item
+    // must hold; which pairs Epic's server accepted, and where it checked their values, can't be read from the build.
+    int32_t SetPropertyOverrides(const UFortPlaylistAthena* Playlist, const TMap<FString, FString>* MatchOptions);
 };
 
 // The game mode's playlists (AFortGameMode's PlaylistManager): every Battle Royale playlist the build has.

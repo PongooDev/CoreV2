@@ -2517,6 +2517,12 @@ void AFortGameModeAthena::HandleGamePhaseChanged()
 void AFortGameModeAthena::HandleCurrentPlaylistLoaded()
 {
 #if WITH_SERVER_CODE
+    // The game state broadcasts it right after the playlist's modifiers registered (OnPlaylistDataLoadCompleted, 6.01
+    // 0xC1C6A0, after UpdatePlaylistDependentData), so their mutators have taken the match's property overrides.
+    if (AFortGameStateAthena* GameState = AthenaGameStateOf(this))
+    {
+        GameState->ReportPropertyOverrides();
+    }
     FMatchEvents& Events = MatchEventsOf(this);
     if (!Events.PlaylistTimer.IsValid())
     {

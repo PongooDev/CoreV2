@@ -187,6 +187,14 @@ public:
     // ApplyGadgetData calls DropAllItems on the server. 4.1 strips both bodies.
     void DropAllItems(const UFortItemDefinition* IgnoreItemDef);
     void ServerDropAllItems_Implementation(const UFortItemDefinition* IgnoreItemDef);
+    // The game's own virtual (from 6.01, CL-4424678 slot 0x31D; the mutators' side of it is 21.40's
+    // FortGameStateAthena_ShouldDropItem): whether the player's death drops an item of this definition, bShouldDrop
+    // being what it would do otherwise. AFortPlayerController's returns that; AFortPlayerControllerAthena's (0xC26970)
+    // asks the game state's active mutators, the first to override deciding (AFortAthenaMutator_ItemDropOverride,
+    // 0xC78A90: its DropAllItemsOverride, else the one of the item's type, ForceDrop or ForceKeep, for ammo,
+    // consumables, ingredients, Battle Royale gadgets, traps, weapons and resources). The death's item drop that called
+    // it is stripped, so Core's asks. bShouldDrop where the build has no such virtual.
+    bool ShouldDropItem(const UFortWorldItemDefinition* ItemDefinition, bool bShouldDrop);
     void ServerSpotActor_Implementation(AActor* NewlySpottedActor);
     void ServerDisassembleInventoryItem_Implementation(const FGuid& ItemGuid);
     void ServerDisassembleInventoryItems_Implementation(const TArray<FGuid>& ItemGuids, const TArray<int32_t>& ItemCounts);

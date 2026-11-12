@@ -77,10 +77,11 @@ public:
     // Makes Playlist the game state's, where the build keeps it. 3.5 to 6.00: CurrentPlaylistData, which replicates as
     // the pointer it is. From 6.01: CurrentPlaylistInfo's BasePlaylist, which FPlaylistPropertyArray::NetDeltaSerialize
     // (6.01 0xEF6450) sends to a connection whose last state has another PlaylistReplicationKey (every new connection
-    // has none), so the key moves on for the players already in; and no OverridePlaylist, as the match overrides none
-    // of the playlist's properties. Epic's own store is stripped with SetCurrentPlaylistId (6.01 has no writer of the
-    // three left but the game state's constructor, 0xBF8331, and the client's read), so this is what the serializer
-    // and the readers need. False on a build before 3.5.
+    // has none), so the key moves on for the players already in; no OverridePlaylist, as the match overrides none of
+    // the playlist's own properties; and the match's overrides of its mutators' (FPlaylistPropertyArray::
+    // SetPropertyOverrides: the party's custom match options, from MatchOptions). Epic's own store is stripped with
+    // SetCurrentPlaylistId (6.01 has no writer of the three left but the game state's constructor, 0xBF8331, and the
+    // client's read), so this is what the serializer and the readers need. False on a build before 3.5.
     bool SetCurrentPlaylist(UFortPlaylistAthena* Playlist);
     // Up to 5.21 the playlist's id is the game state's too (5.30 to 6.00 have none; 6.01's has it again, +0x115C).
     DefineUProperty(int32_t, CurrentPlaylistId)
@@ -134,4 +135,16 @@ public:
     DefineUProperty(AFortSpecialActorReplicationInfo*, SpecialActorData)
     static bool HasSpecialActorData() { return Member_SpecialActorData.IsAvailable(); }
     static ptrdiff_t SpecialActorDataOffset() { return HasSpecialActorData() ? Member_SpecialActorData.GetOffsetChecked() : -1; }
+
+    // The mutators that change the game state's answers (AFortAthenaMutator's bMutatesGameState), spawned by the
+    // playlist's modifiers. The game state hears of each as its mutator observer (6.01 0xC19B80): on the authority
+    // CurrentPlaylistInfo first gives the mutator the match's property overrides of its scope, then it joins this list,
+    // which the game's own code walks for each answer (a new pawn's health and shield, 0xC0A540, its gravity, 0xC00510,
+    // the fall damage, 0xC00470, the time of day at the match's start, 0xC27290, the items a death drops, 0xC26970).
+    DefineUProperty(TArray<UObject*>, GameplayMutators)
+    static ptrdiff_t GameplayMutatorsOffset() { return Member_GameplayMutators.IsAvailable() ? Member_GameplayMutators.GetOffsetChecked() : -1; }
+    // Core's log of what became of the match's property overrides, once the playlist's modifiers have registered (the
+    // game mode's HandleCurrentPlaylistLoaded): for each, the mutator of its scope and the value its property has now,
+    // or that no mutator of that scope spawned. Nothing to say on a match without overrides.
+    void ReportPropertyOverrides() const;
 };

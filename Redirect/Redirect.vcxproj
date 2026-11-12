@@ -303,6 +303,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGlobals.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortKismetLibrary.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortMissionTimerComponent.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortPlaylistUserOptions.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRewardReport.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortRuntimeOptions.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortSpecialActorReplicationInfo.h" />
@@ -539,6 +540,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGlobals.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortKismetLibrary.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortMissionTimerComponent.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortPlaylistUserOptions.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortSpecialActorReplicationInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortTeamInfo.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortVisibilityComponent.cpp" />
@@ -565,6 +567,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPlayerControllerAthenaDeath.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPlayerControllerAthenaQuickChat.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPlayerPawnAthena.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPlaylistAthena.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortPoiVolume.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortSafeZoneIndicator.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AI\AthenaNavSystem.cpp" />

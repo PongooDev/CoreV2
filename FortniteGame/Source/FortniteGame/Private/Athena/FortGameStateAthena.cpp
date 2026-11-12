@@ -99,6 +99,11 @@ bool AFortGameStateAthena::SetCurrentPlaylist(UFortPlaylistAthena* Playlist)
     FPlaylistPropertyArray& Info = CurrentPlaylistInfo;
     Info.BasePlaylist = Playlist;
     Info.OverridePlaylist = nullptr;
+    // The match's overrides: what its party chose for the playlist's user options, which the game mode's
+    // OnGivenMatchAssignment left in MatchOptions before it gave the game state the playlist. They have to be in the
+    // array before the playlist's modifiers register (UpdatePlaylistDependentData, once its assets have loaded), as each
+    // mutator takes the ones of its scope when it spawns.
+    Info.SetPropertyOverrides(Playlist, GetMatchOptions());
     const ptrdiff_t KeyOffset = FPlaylistPropertyArray::PlaylistReplicationKeyOffset();
     if (KeyOffset >= 0)
     {
@@ -195,6 +200,65 @@ void AFortGameStateAthena::SetCurrentPlaylistId(FName PlaylistName)
     }
     GameMode->CurrentPlaylistId = Playlist->PlaylistId;
     TakePlaylist(this, GameMode, Playlist);
+#endif
+}
+
+void AFortGameStateAthena::ReportPropertyOverrides() const
+{
+#if WITH_SERVER_CODE
+    if (!HasCurrentPlaylistInfo() || GameplayMutatorsOffset() < 0 || !FPropertyOverride::IsAvailable())
+    {
+        return;
+    }
+    const FPlaylistPropertyArray& Info = CurrentPlaylistInfo;
+    const TStructArray<FPropertyOverride>& Overrides = Info.PropertyOverrides;
+    const TArray<UObject*>& Mutators = GameplayMutators;
+    for (int32_t Index = 0; Index < Overrides.Num(); ++Index)
+    {
+        const FPropertyOverride& Override = Overrides[Index];
+        const FString& Scope = Override.PropertyScope;
+        const FString& PropertyName = Override.PropertyName;
+        const FString& PropertyData = Override.PropertyData;
+        // An object's scope as FPlaylistPropertyArray has it (6.01 0xEF1FF0): the short name of its class's package.
+        UObject* Taker = nullptr;
+        for (int32_t MutatorIndex = 0; MutatorIndex < Mutators.Num() && !Taker; ++MutatorIndex)
+        {
+            UObject* Mutator = Mutators[MutatorIndex];
+            UObject* Package = Mutator ? Mutator->GetClass()->GetOutermost() : nullptr;
+            const std::wstring PackageName = Package ? Package->GetName().ToStdString() : std::wstring();
+            const size_t Slash = PackageName.rfind(L'/');
+            if (Package && _wcsicmp(PackageName.c_str() + (Slash == std::wstring::npos ? 0 : Slash + 1), *Scope) == 0)
+            {
+                Taker = Mutator;
+            }
+        }
+        if (!Taker)
+        {
+            Log::Warning(L"PLAYLIST: property override {}:{} has no mutator of its scope among the game state's {}, so nothing took it", Scope.ToStdString(), PropertyName.ToStdString(),
+                Mutators.Num());
+            continue;
+        }
+        const UProperty* Property = Taker->GetClass()->FindPropertyByName(FName(*PropertyName, FNAME_Find));
+        const uint8_t* Value = Property ? reinterpret_cast<const uint8_t*>(Taker) + Property->GetOffset_ForInternal() : nullptr;
+        std::wstring ValueText = L"not a property of its class";
+        if (Value && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UFloatProperty))
+        {
+            ValueText = std::format(L"{:.2f}", *reinterpret_cast<const float*>(Value));
+        }
+        else if (Value && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UIntProperty))
+        {
+            ValueText = std::to_wstring(*reinterpret_cast<const int32_t*>(Value));
+        }
+        else if (Value && Property->ElementSize == 1)
+        {
+            ValueText = std::to_wstring(static_cast<int32_t>(*Value));
+        }
+        else if (Value)
+        {
+            ValueText = L"of a type Core's log doesn't read";
+        }
+        Log::Info(L"PLAYLIST: {}'s {} is {} (the match's property override: {})", Taker->GetName().ToStdString(), PropertyName.ToStdString(), ValueText, PropertyData.ToStdString());
+    }
 #endif
 }
 

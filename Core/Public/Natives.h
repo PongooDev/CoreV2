@@ -569,6 +569,15 @@ namespace Natives
     inline int32_t AFortGameMode_OnGivenMatchAssignmentIndex = -1;
     inline void (*AFortGameMode_SetCurrentPlaylistName)(AFortGameMode* This, FName PlaylistName) = nullptr;
     inline void (*AFortGameState_StartStreamingAdditionalPlaylistLevel)(AFortGameState* This, FName LevelName) = nullptr;
+    // From 6.01 (Finder::ResolveMatchAssignmentLive): AFortGameState::MatchOptions (21.40's name; unreflected, 6.01
+    // +0x5F0), the TMap<FString, FString> AFortGameMode::OnGivenMatchAssignment leaves the assignment's match options in,
+    // with the party's custom match options as pairs of their own (0xE4C2A0 splits match.option.customMatchOptions).
+    // -1 where the game mode gives the game state none.
+    inline ptrdiff_t AFortGameState_MatchOptions = -1;
+    // From 6.01 (Finder::ResolveShouldDropItemLive): AFortPlayerController's virtual that says whether an item drops,
+    // given what it would otherwise do (slot 0x31D; AFortPlayerControllerAthena's, 0xC26970, asks the game state's
+    // mutators). -1 where the build has none.
+    inline int32_t AFortPlayerController_ShouldDropItemIndex = -1;
     // Finder::ResolvePersistentGameplayEffectsLive. AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects
     // (21.40's name; 4.2 0xC3D5E0, 5.21 0xE5FC60, 5.41 0xE81110, 6.00 0xEC4B30): every active gameplay modifier's
     // persistent effects and ability sets (the playlist's ModifierList, a Save the World zone's modifiers) on an actor

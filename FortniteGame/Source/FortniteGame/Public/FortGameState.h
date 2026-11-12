@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Containers/Map.h"
+#include "Containers/UnrealString.h"
 #include "GameFramework/GameState.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "Misc/DateTime.h"
@@ -114,6 +116,11 @@ public:
     // again at once, not at its cacheExpire (4.5's _Implementation, 0xC77C70, has the seasonal event manager's calendar
     // download it, 0xF20400). False where the build has no such function.
     bool Client_RefreshEventCalendar();
+
+    // 21.40's MatchOptions (from 6.01; not reflected): the assignment's match options as the game mode's
+    // OnGivenMatchAssignment left them, with each of the party's custom match options as a pair of its own
+    // ("<scope>:<OptionKey>" and the value's text). Null where the game state has none (Natives::AFortGameState_MatchOptions).
+    const TMap<FString, FString>* GetMatchOptions() const;
 
     static ptrdiff_t MissionManagerOffset();
 };

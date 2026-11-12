@@ -222,8 +222,13 @@ namespace Finder
     bool ResolveSetCurrentPlaylistIdLive(ptrdiff_t StormReachedFinalPositionOffset);
     // AFortGameMode::OnGivenMatchAssignment and its slot in AFortGameMode's vtable, AFortGameMode::SetCurrentPlaylistName
     // and AFortGameState::StartStreamingAdditionalPlaylistLevel (Natives), from their strings. False without the first.
+    // From 6.01 also AFortGameState's MatchOptions, which OnGivenMatchAssignment fills.
     // GameModeVTable: AFortGameMode's default object's.
     bool ResolveMatchAssignmentLive(void** GameModeVTable);
+    // From 6.01: the slot of AFortPlayerController's ShouldDropItem (Natives), the one AFortPlayerController fills with
+    // "return the answer it was given" and AFortPlayerControllerAthena with a function reading the game state's
+    // GameplayMutators. GameplayMutatorsOffset: AFortGameStateAthena's GameplayMutators. False where there is none.
+    bool ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset);
     // AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects (Natives), the function holding its
     // STAT_Fort_GameStateZoneApplyingPersistentEffects scope, and UObject::GetInterfaceAddress, which its callers need for
     // an actor's IAbilitySystemInterface. False without either (1.x builds have no stat names).

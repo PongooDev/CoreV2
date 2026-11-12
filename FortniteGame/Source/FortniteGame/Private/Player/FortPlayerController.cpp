@@ -1427,6 +1427,12 @@ void AFortPlayerController::ServerDropAllItems_Implementation(const UFortItemDef
 #endif
 }
 
+bool AFortPlayerController::ShouldDropItem(const UFortWorldItemDefinition* ItemDefinition, bool bShouldDrop)
+{
+    const int32_t Index = Natives::AFortPlayerController_ShouldDropItemIndex;
+    return Index >= 0 && ItemDefinition ? CallVirtual<bool>(this, Index, ItemDefinition, bShouldDrop) : bShouldDrop;
+}
+
 void AFortPlayerController::ServerSpotActor_Implementation(AActor* NewlySpottedActor)
 {
 #if WITH_SERVER_CODE

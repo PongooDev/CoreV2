@@ -33,6 +33,12 @@ bool AFortGameState::Client_RefreshEventCalendar()
     return true;
 }
 
+const TMap<FString, FString>* AFortGameState::GetMatchOptions() const
+{
+    const ptrdiff_t Offset = Natives::AFortGameState_MatchOptions;
+    return Offset > 0 ? reinterpret_cast<const TMap<FString, FString>*>(reinterpret_cast<const uint8_t*>(this) + Offset) : nullptr;
+}
+
 UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const
 {
     const TAssetSubclassOf<UFortMissionGenerator>& GeneratorClass = MissionGeneratorClass;

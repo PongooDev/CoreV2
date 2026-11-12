@@ -8084,7 +8084,9 @@ void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
             DeathLocation = Stored;
         }
     }
-    const FVector Start(DeathLocation.X, DeathLocation.Y, DeathLocation.Z + AFortGameModeAthena::RespawnHeight);
+    // The playlist's RespawnHeight where it has one (AFortGameModeAthena::GetRespawnHeight), as a player's respawn.
+    const float RespawnHeight = GameMode->GetRespawnHeight();
+    const FVector Start(DeathLocation.X, DeathLocation.Y, DeathLocation.Z + RespawnHeight);
 
     // The body goes, as the restarted player's old pawn does.
     if (AFortPlayerPawnAthena* OldPawn = GetPawn())
@@ -8146,7 +8148,7 @@ void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
     LandedTime = 0.0f;
     NextLogTime = Now + 3.0f;
     LastKnownPosition = Start;
-    Log::Info(L"Battle Royale bots: {} respawns in the air at ({:.0f}, {:.0f}, {:.0f})", BotName, Start.X, Start.Y, Start.Z);
+    Log::Info(L"Battle Royale bots: {} respawns in the air at ({:.0f}, {:.0f}, {:.0f}), {:.0f} over where it died", BotName, Start.X, Start.Y, Start.Z, RespawnHeight);
 #endif
 }
 

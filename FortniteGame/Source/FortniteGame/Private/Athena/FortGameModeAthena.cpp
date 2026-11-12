@@ -249,6 +249,7 @@ namespace
     UFunction* CurrentPlaylistLoadedHandler = nullptr;
     UFunction* PawnDiedHandler = nullptr;
     UFunction* PlayerStateDestroyedHandler = nullptr;
+    UFunction* PawnDestroyedHandler = nullptr;
 
     FMatchEvents& MatchEventsOf(const AFortGameModeAthena* GameMode)
     {
@@ -414,8 +415,10 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
     // A respawn in the safe zones phase (4.2's Playground, #308): ChoosePlayerStart (4.2 0xA0AE70) gives the engine's
     // player start, on the warmup island, and RespawnPlayerAfterDeath (0xA57AD0) has the new pawn BeginSkydiving there.
     // The playlist's RespawnLocation is Air, which no code left in the build reads: the pawn starts in the air over
-    // where the player died, at TeleportToSkyDive's height (0xA98690), and skydives from there.
+    // where the player died, at the playlist's RespawnHeight (GetRespawnHeight; TeleportToSkyDive's height, 0xA98690,
+    // where the playlist has none), and skydives from there.
     FVector RespawnLocation;
+    float RespawnHeight = 0.0f;
     bool bRespawnInAir = false;
     if (!Aircraft && StartSpot && NewPlayer && FDeathInfo::HasDeathLocation() && AFortPlayerStateAthena::HasEliminator())
     {
@@ -426,6 +429,7 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
         {
             const FVector DeathLocation = AthenaState->DeathInfo.DeathLocation;
             bRespawnInAir = DeathLocation.X != 0.0f || DeathLocation.Y != 0.0f || DeathLocation.Z != 0.0f;
+            RespawnHeight = GetRespawnHeight();
             RespawnLocation = DeathLocation + FVector(0.0f, 0.0f, RespawnHeight);
         }
     }
@@ -446,8 +450,9 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
         APawn* Pawn = Cast<APawn>(World->SpawnActor(PawnClass, &SpawnTransform, SpawnInfo));
         if (Pawn && !Aircraft)
         {
-            Log::Info(L"Battle Royale: {} respawns in the air as {} at ({:.0f}, {:.0f}, {:.0f})", NewPlayer->GetName().ToStdString(), Pawn->GetName().ToStdString(),
-                RespawnLocation.X, RespawnLocation.Y, RespawnLocation.Z);
+            // The pawn's address goes with it: HandlePawnDestroyed logs each dead pawn's (#411).
+            Log::Info(L"Battle Royale: {} respawns in the air as {} (0x{:X}) at ({:.0f}, {:.0f}, {:.0f}), {:.0f} over where they died", NewPlayer->GetName().ToStdString(),
+                Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn), RespawnLocation.X, RespawnLocation.Y, RespawnLocation.Z, RespawnHeight);
         }
         else if (Pawn)
         {
@@ -2281,6 +2286,25 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
         || PlayerState->DeathInfo.DeathCause != EDeathCause::GetOutsideSafeZone();
 }
 
+float AFortGameModeAthena::GetRespawnHeight()
+{
+    // The playlist's RespawnHeight is a scalable float over its own game data (6.00's Playlist_Playground: Value 1 times
+    // the row Playground.RespawnHeight, 15000), read at level 0 as the playlist's other rows are. A playlist without the
+    // property (before 5.41) keeps TeleportToSkyDive's 10000, and so does one whose value is no height to skydive from:
+    // TeleportToSkyDive's own rule (6.00 0xC9D2C0: any height up to 1000 is 10000), which also covers an unset one (0)
+    // and a Value left without its row.
+    constexpr float MinRespawnHeight = 1000.0f;
+    AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylist() && UFortPlaylistAthena::HasRespawnHeight() ? AthenaGameStateOf(this) : nullptr;
+    UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
+    if (!Playlist)
+    {
+        return DefaultRespawnHeight;
+    }
+    const FScalableFloat& PlaylistHeight = Playlist->RespawnHeight;
+    const float Height = PlaylistHeight.GetValueAtLevel(0.0f);
+    return Height > MinRespawnHeight ? Height : DefaultRespawnHeight;
+}
+
 bool AFortGameModeAthena::InitializeFlightPath()
 {
 #if WITH_SERVER_CODE
@@ -2376,6 +2400,12 @@ namespace
             {
                 FMulticastScriptDelegate& OnDied = Pawn->OnDied;
                 OnDied.AddUniqueDynamic(Athena, Handler);
+                // And when it is destroyed (HandlePawnDestroyed's log line).
+                if (PawnDestroyedHandler)
+                {
+                    FMulticastScriptDelegate& OnDestroyed = Pawn->OnDestroyed;
+                    OnDestroyed.AddUniqueDynamic(Athena, PawnDestroyedHandler->GetFName());
+                }
             }
         }
     }
@@ -2523,6 +2553,12 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded()
     {
         GameState->ReportPropertyOverrides();
     }
+    // A playlist that brings its players back says how far over their death once, as it loads (#411).
+    if (IsRespawningAllowed(nullptr))
+    {
+        Log::Info(L"Battle Royale: the match's playlist brings its players back {:.0f} over where they died ({})", GetRespawnHeight(),
+            UFortPlaylistAthena::HasRespawnHeight() ? L"the playlist's RespawnHeight, or 10000 where that is no height to skydive from" : L"this build's playlists have no RespawnHeight");
+    }
     FMatchEvents& Events = MatchEventsOf(this);
     if (!Events.PlaylistTimer.IsValid())
     {
@@ -2564,6 +2600,24 @@ void AFortGameModeAthena::HandlePlayerStateDestroyed(AActor* DestroyedActor)
 #endif
 }
 
+void AFortGameModeAthena::HandlePawnDestroyed(AActor* DestroyedActor)
+{
+#if WITH_SERVER_CODE
+    // A dead pawn's only: the warmup pawns the aircraft phase destroys, alive, would be a line for every player at once.
+    AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(DestroyedActor));
+    if (!Pawn)
+    {
+        return;
+    }
+    const bool bTornOff = Pawn->bTearOff;
+    const bool bDying = Pawn->bIsDying;
+    if (bTornOff || bDying)
+    {
+        Log::Info(L"Battle Royale: the dead pawn {} (0x{:X}) is destroyed, {}", Pawn->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Pawn), bTornOff ? L"torn off" : L"not torn off");
+    }
+#endif
+}
+
 void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, APawn* Pawn)
 {
 #if WITH_SERVER_CODE
@@ -2575,6 +2629,11 @@ void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, A
     {
         FMulticastScriptDelegate& OnDied = FortPawn->OnDied;
         OnDied.AddUniqueDynamic(this, PawnDiedHandler->GetFName());
+        if (PawnDestroyedHandler)
+        {
+            FMulticastScriptDelegate& PawnOnDestroyed = FortPawn->OnDestroyed;
+            PawnOnDestroyed.AddUniqueDynamic(this, PawnDestroyedHandler->GetFName());
+        }
     }
     if (AActor* PlayerState = PlayerStateDestroyedHandler ? reinterpret_cast<AActor*>(static_cast<APlayerState*>(Player->PlayerState)) : nullptr)
     {
@@ -2618,6 +2677,15 @@ DEFINE_FUNCTION(AFortGameModeAthena::execHandlePlayerStateDestroyed)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(AFortGameModeAthena::execHandlePawnDestroyed)
+{
+    P_GET_OBJECT(AActor, DestroyedActor);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortGameModeAthena*>(Context)->HandlePawnDestroyed(DestroyedActor);
+    P_NATIVE_END;
+}
+
 void AFortGameModeAthena::AddDelegateHandlers()
 {
     // The game's broadcasts call each bound UFunction through ProcessEvent (ProcessMulticastDelegate, 5.40 0x2ECA90), so
@@ -2638,8 +2706,10 @@ void AFortGameModeAthena::AddDelegateHandlers()
     PawnDiedHandler = Add(L"HandlePawnDied", &execHandlePawnDied, AFortPawn::StaticClass(), L"OnDied");
     // Only with the pawns' OnDied: without it the results are looked at with the phase, the leaving player's among them.
     PlayerStateDestroyedHandler = PawnDiedHandler ? Add(L"HandlePlayerStateDestroyed", &execHandlePlayerStateDestroyed, AActor::StaticClass(), L"OnDestroyed") : nullptr;
-    Log::Info(L"Battle Royale: Core's handlers for GamePhaseChanged {}, OnCurrentPlaylistLoaded {}, OnDied {}, OnDestroyed {}", GamePhaseChangedHandler ? L"added" : L"none",
-        CurrentPlaylistLoadedHandler ? L"added" : L"none", PawnDiedHandler ? L"added" : L"none", PlayerStateDestroyedHandler ? L"added" : L"none");
+    // The same delegate on the pawns themselves, bound where their OnDied is.
+    PawnDestroyedHandler = PawnDiedHandler && AActor::HasOnDestroyed() ? Add(L"HandlePawnDestroyed", &execHandlePawnDestroyed, AActor::StaticClass(), L"OnDestroyed") : nullptr;
+    Log::Info(L"Battle Royale: Core's handlers for GamePhaseChanged {}, OnCurrentPlaylistLoaded {}, OnDied {}, OnDestroyed {} (a pawn's {})", GamePhaseChangedHandler ? L"added" : L"none",
+        CurrentPlaylistLoadedHandler ? L"added" : L"none", PawnDiedHandler ? L"added" : L"none", PlayerStateDestroyedHandler ? L"added" : L"none", PawnDestroyedHandler ? L"added" : L"none");
 }
 
 void AFortGameModeAthena::HookVTables()

@@ -95,6 +95,12 @@ public:
     // isn't None; IsRespawningAllowed (0xA19780) reads it again for InfiniteRespawnExceptStorm.
     DefineUProperty(EAthenaRespawnType, RespawnType)
     static bool HasRespawnType() { return Member_RespawnType.IsAvailable(); }
+    // How far over the death a respawning player comes back (from 5.41, and still the playlist's own on 6.01 and 6.02).
+    // 6.00's Playlist_Playground has its game data's row Playground.RespawnHeight, 15000. Only the server read it: the
+    // client builds keep no reader (6.00's AFortGameModeAthena::SpawnDefaultPawnFor_Implementation, 0xC35C70, is the
+    // stripped stub, and nothing else in the game mode's or the controller's code takes the member's address).
+    DefineUStructProperty(FScalableFloat, RespawnHeight)
+    static bool HasRespawnHeight() { return Member_RespawnHeight.IsAvailable(); }
     // Set on Playground (4.5's Playlist_Playground, unlike Solo, Duo, Squad and 50v50): the match makes no progress on
     // the profile's quests, the battle pass and daily challenges. The build reads it only for the playlist's context
     // tags (4.5 AFortGameStateAthena::GetAthenaPlaylistContextTags, 0xA6A670); the quest progress the server sent from

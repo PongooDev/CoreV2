@@ -139,8 +139,13 @@ public:
     // the death penalty's respawn countdown is over, and ChoosePlayerStart (0xA0AE70) and PlayerCanRestart (0xA1E6F0)
     // let it restart in the safe zones phase. False before 3.5.
     bool IsRespawningAllowed(AFortPlayerStateAthena* PlayerState);
+    // How far over where they died a respawning player (or player bot) starts skydiving: the match's playlist's
+    // RespawnHeight where the playlist has one (from 5.41) and it comes to more than 1000, else DefaultRespawnHeight. The
+    // 21.40 exports name a GetRespawnHeight beside IsRespawningAllowed; its class and signature aren't in them, and the
+    // builds' own reader went with the stripped server code.
+    float GetRespawnHeight();
     // TeleportToSkyDive's height above a spot (AFortPlayerPawnAthena 4.2 0xA98690: 10000 for any height up to 1000).
-    static constexpr float RespawnHeight = 10000.0f;
+    static constexpr float DefaultRespawnHeight = 10000.0f;
 
     // Battle Royale's changes to a dead player's death report, after AFortPlayerControllerZone::PrepareDeathReport
     // filled it (AFortPlayerControllerAthena's override calls it; 1.9.1 and 1.10 strip it).
@@ -193,8 +198,14 @@ public:
     // has taken the player out of the match): the player's place, kills and time alive as they leave.
     void HandlePlayerStateDestroyed(AActor* DestroyedActor);
 
+    // A player's pawn is destroyed (AActor::OnDestroyed, which AActor::Destroyed broadcasts): a dead one's name and
+    // address go to the log, beside the address of each pawn a respawn spawns, so that a log shows whether a new pawn
+    // took a dead pawn's address (#411: the replication graph keeps each connection's per-actor info by the actor's
+    // address, a dead pawn's with its tear-off flag).
+    void HandlePawnDestroyed(AActor* DestroyedActor);
+
     // AFortPlayerController::Possess on the server: the player's pawn and player state tell the match when the pawn dies
-    // and when the player leaves, and a player the game moved to another team comes back in its squad.
+    // or is destroyed and when the player leaves, and a player the game moved to another team comes back in its squad.
     void OnPlayerPossessedPawn(AFortPlayerController* Player, APawn* Pawn);
 
     // Reports each player's place, kills and time alive to Core-Backend once their team is out of the match or has won,
@@ -226,13 +237,14 @@ public:
 
 private:
     // Core's natives the game's Blueprint delegates call (UClass::AddNativeFunction at boot, with each delegate's
-    // signature): GamePhaseChanged, OnCurrentPlaylistLoaded, a pawn's OnDied and a player state's OnDestroyed, all bound
-    // to the game mode. None where the build has no such delegate or Core can't add a native.
+    // signature): GamePhaseChanged, OnCurrentPlaylistLoaded, a pawn's OnDied and OnDestroyed and a player state's
+    // OnDestroyed, all bound to the game mode. None where the build has no such delegate or Core can't add a native.
     static void AddDelegateHandlers();
     DECLARE_FUNCTION(execHandleGamePhaseChanged);
     DECLARE_FUNCTION(execHandleCurrentPlaylistLoaded);
     DECLARE_FUNCTION(execHandlePawnDied);
     DECLARE_FUNCTION(execHandlePlayerStateDestroyed);
+    DECLARE_FUNCTION(execHandlePawnDestroyed);
 
     static void OnGivenMatchAssignmentHK(AFortGameModeAthena* This, bool bSuccess, const void* MatchOptions);
     static APawn* SpawnDefaultPawnFor_ImplementationHK(AFortGameModeAthena* This, AController* NewPlayer, AActor* StartSpot);

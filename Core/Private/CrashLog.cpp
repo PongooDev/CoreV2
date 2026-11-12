@@ -2,8 +2,19 @@
 #include "CrashLog.h"
 #include "Log.h"
 
+#if WITH_SERVER_CODE
+#include "Engine/ActorChannel.h"
+#include "Natives.h"
+#include "Templates/Casts.h"
+#include "UObject/Class.h"
+#include "UObject/Object.h"
+#include "UObject/UObjectArray.h"
+#endif
+
+#include <algorithm>
 #include <atomic>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -144,6 +155,122 @@ namespace
         }
     }
 
+#if WITH_SERVER_CODE
+    // The addresses say where a crash happened, not on what. A 6.02 server died in FObjectReplicator::ReplicateProperties
+    // (0x250DF1B, CoreV2 #413), on an actor channel's replicator that had been freed: the report had the code's
+    // addresses and five registers, and neither the channel (r12 there) nor its actor, so which actor it was, and
+    // whether it was destroyed, could not be read from it. After the report, the registers it leaves out and the
+    // objects that the registers and the faulting frames' stack point to are named: class, name, and whether the object
+    // is pending kill. An actor channel's actor is named with it.
+    constexpr int32_t MaxObjectStackSlots = 512;
+    constexpr int32_t MaxListedObjects = 40;
+
+    // Memory that may be anything is read without faulting.
+    template <typename T>
+    bool SafeRead(uintptr_t Address, T& Out)
+    {
+        SIZE_T Read = 0;
+        return Address >= 0x10000 && ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(Address), &Out, sizeof(T), &Read) && Read == sizeof(T);
+    }
+
+    // A live object's address is the one its InternalIndex's entry of GUObjectArray holds (UObjectBase: the vtable,
+    // ObjectFlags, then InternalIndex at +0xC); a freed object's entry is empty or another object's.
+    const FUObjectItem* ObjectItemAt(uintptr_t Value)
+    {
+        constexpr uintptr_t InternalIndexOffset = sizeof(void*) + sizeof(int32_t);
+        const FUObjectArray* Array = Natives::GUObjectArray;
+        int32_t Index = -1;
+        if (!Array || (Value & 7) != 0 || !SafeRead(Value + InternalIndexOffset, Index) || Index < 0 || Index >= Array->GetObjectArrayNum())
+        {
+            return nullptr;
+        }
+        const FUObjectItem* Item = Array->IndexToObject(Index);
+        uintptr_t Object = 0;
+        return Item && SafeRead(reinterpret_cast<uintptr_t>(Item) + offsetof(FUObjectItem, Object), Object) && Object == Value ? Item : nullptr;
+    }
+
+    std::wstring DescribeObject(uintptr_t Value, const FUObjectItem* Item)
+    {
+        const UObject* Object = reinterpret_cast<const UObject*>(Value);
+        const UClass* Class = Object->GetClass();
+        const bool bClass = Class && ObjectItemAt(reinterpret_cast<uintptr_t>(Class));
+        std::wstring Text = std::format(L"{} {}", bClass ? Class->GetName().ToStdString() : std::wstring(L"(no class)"), Object->GetName().ToStdString());
+        if (Item->IsPendingKill())
+        {
+            Text += L" (pending kill)";
+        }
+        if (Item->IsUnreachable())
+        {
+            Text += L" (unreachable)";
+        }
+        return Text;
+    }
+
+    void LogObjectsUnguarded(const CONTEXT& Fault)
+    {
+        std::wstring Text = std::format(L"The exception's other registers, and the objects its registers and stack point to:\n    rbx {:X} rbp {:X} rsi {:X} rdi {:X} r10 {:X} r11 {:X} r12 {:X} r13 {:X} r14 {:X} r15 {:X}",
+            Fault.Rbx, Fault.Rbp, Fault.Rsi, Fault.Rdi, Fault.R10, Fault.R11, Fault.R12, Fault.R13, Fault.R14, Fault.R15);
+        std::vector<uintptr_t> Seen;
+        int32_t Listed = 0;
+        const auto List = [&Text, &Seen, &Listed](const std::wstring& Where, uintptr_t Value)
+        {
+            const FUObjectItem* Item = Listed < MaxListedObjects && std::find(Seen.begin(), Seen.end(), Value) == Seen.end() ? ObjectItemAt(Value) : nullptr;
+            if (!Item)
+            {
+                return;
+            }
+            Seen.push_back(Value);
+            ++Listed;
+            Text += std::format(L"\n    {} {:X} is {}", Where, Value, DescribeObject(Value, Item));
+            // The actor a channel replicates is what a crash in its replication is about.
+            UActorChannel* Channel = Cast<UActorChannel>(reinterpret_cast<UObject*>(Value));
+            const uintptr_t Actor = Channel ? reinterpret_cast<uintptr_t>(static_cast<AActor*>(Channel->Actor)) : 0;
+            if (const FUObjectItem* ActorItem = Actor ? ObjectItemAt(Actor) : nullptr)
+            {
+                Text += std::format(L", whose actor {:X} is {}", Actor, DescribeObject(Actor, ActorItem));
+            }
+            else if (Channel)
+            {
+                Text += Actor ? std::format(L", whose actor {:X} is no live object", Actor) : std::wstring(L", which has no actor");
+            }
+        };
+        const std::pair<const wchar_t*, DWORD64> Registers[] = {
+            { L"rax", Fault.Rax }, { L"rbx", Fault.Rbx }, { L"rcx", Fault.Rcx }, { L"rdx", Fault.Rdx }, { L"rsi", Fault.Rsi }, { L"rdi", Fault.Rdi }, { L"rbp", Fault.Rbp },
+            { L"r8", Fault.R8 }, { L"r9", Fault.R9 }, { L"r10", Fault.R10 }, { L"r11", Fault.R11 }, { L"r12", Fault.R12 }, { L"r13", Fault.R13 }, { L"r14", Fault.R14 }, { L"r15", Fault.R15 } };
+        for (const auto& [Name, Value] : Registers)
+        {
+            List(Name, static_cast<uintptr_t>(Value));
+        }
+        for (int32_t Slot = 0; Slot < MaxObjectStackSlots; ++Slot)
+        {
+            uintptr_t Value = 0;
+            if (!SafeRead(static_cast<uintptr_t>(Fault.Rsp) + Slot * sizeof(uintptr_t), Value))
+            {
+                break;
+            }
+            List(std::format(L"[rsp+{:X}]", Slot * sizeof(uintptr_t)), Value);
+        }
+        if (Listed == 0)
+        {
+            Text += L"\n    none of them is an object";
+        }
+        Log::Error(L"{}", Text);
+    }
+
+    // The names are the game's (FName::ToString, on the game's allocator), in a process that has just faulted: a second
+    // fault in here ends this part only, the report itself is in the log by then.
+    void LogObjects(const CONTEXT* Fault)
+    {
+        __try
+        {
+            LogObjectsUnguarded(*Fault);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+        }
+    }
+#endif
+
     LONG CALLBACK OnException(PEXCEPTION_POINTERS Pointers)
     {
         const EXCEPTION_RECORD* Record = Pointers ? Pointers->ExceptionRecord : nullptr;
@@ -224,6 +351,13 @@ namespace
         }
 
         Log::Error(L"{}", Text);
+#if WITH_SERVER_CODE
+        // A fault in code (not a stack overflow, which leaves no room for it, nor a report the code raised itself).
+        if (bCrash && Record->ExceptionCode != EXCEPTION_STACK_OVERFLOW && Record->ExceptionCode != EngineErrorReportCode && Record->ExceptionCode != CppExceptionCode)
+        {
+            LogObjects(&Fault);
+        }
+#endif
         bInHandler = false;
         return EXCEPTION_CONTINUE_SEARCH;
     }

@@ -48,6 +48,14 @@ public:
     DefineUProperty(AFortSafeZoneIndicator*, SafeZoneIndicator)
     // Each safe zone's center, picked when the storm starts (index: the phase).
     DefineUProperty(TArray<FVector>, SafeZoneLocations)
+    // Whether the storm circle is there (the game mode spawned it, SafeZonePhase 0), and whether its phases are held.
+    DefineUProperty(bool, bSafeZoneActive)
+    DefineUProperty(bool, bSafeZonePaused)
+    static bool HasSafeZoneActive() { return Member_bSafeZoneActive.IsAvailable() && Member_bSafeZonePaused.IsAvailable(); }
+    // From 4.1: what StartNewSafeZonePhase broadcasts at its end (no parameters; 6.00 0xC386D0), the storm circle's
+    // times and next place set for the new SafeZonePhase.
+    DefineUProperty(FMulticastScriptDelegate, OnSafeZoneUpdated)
+    static bool HasSafeZoneUpdated() { return Member_OnSafeZoneUpdated.IsAvailable(); }
     // Up to 4.2; 4.4 reads its playlist's MaxTeamSize instead.
     DefineUProperty(bool, bSquadPlay)
     static bool HasSquadPlay() { return Member_bSquadPlay.IsAvailable(); }
@@ -194,6 +202,16 @@ public:
     // and the match's results (StartMatchResults).
     void HandleGamePhaseChanged();
 
+    // The game state's GamePhaseStepChanged (from 3.0), which its Tick broadcasts on the server too each time the step
+    // it works out changes, and the game mode's OnSafeZoneUpdated (from 4.1), which StartNewSafeZonePhase broadcasts:
+    // the server's log says what the timer under the minimap has to work from then (ReportGamePhaseStep; CoreV2 #412).
+    void HandleGamePhaseStepChanged();
+    void HandleSafeZoneUpdated();
+    // One log line: the step and the time left as the server's game state has them, and what every client's works its
+    // own out from (the phase, the storm circle the game state replicates, its hold and shrink times, the bus's drop
+    // times), with Event as what happened.
+    void ReportGamePhaseStep(const wchar_t* Event);
+
     // From 4.4: the game state's OnCurrentPlaylistLoaded, which AFortGameStateAthena::OnPlaylistDataLoadCompleted
     // (5.40 0xBF32A0, "Server AND Client") broadcasts after the game mode's OnPlaylistDataLoaded. Once the match's
     // assignment gives the world another playlist, applies that playlist's tables (from 3.5 with the default loot rows
@@ -253,6 +271,8 @@ private:
     // OnDestroyed, all bound to the game mode. None where the build has no such delegate or Core can't add a native.
     static void AddDelegateHandlers();
     DECLARE_FUNCTION(execHandleGamePhaseChanged);
+    DECLARE_FUNCTION(execHandleGamePhaseStepChanged);
+    DECLARE_FUNCTION(execHandleSafeZoneUpdated);
     DECLARE_FUNCTION(execHandleCurrentPlaylistLoaded);
     DECLARE_FUNCTION(execHandlePawnDied);
     DECLARE_FUNCTION(execHandlePlayerStateDestroyed);

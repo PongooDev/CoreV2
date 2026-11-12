@@ -6,6 +6,7 @@
 
 class AFortAthenaAircraft;
 class AFortAthenaMapInfo;
+class AFortSafeZoneIndicator;
 class AFortSpecialActorReplicationInfo;
 
 class EAthenaGamePhase
@@ -16,6 +17,24 @@ class EAthenaGamePhase
     DefineUEnumValue(Warmup)
     DefineUEnumValue(Aircraft)
     DefineUEnumValue(SafeZones)
+    DefineUEnumValue(EndGame)
+};
+
+// What the timer under the minimap counts down to (from 3.0): AFortGameStateAthena::GamePhaseStep.
+class EAthenaGamePhaseStep
+{
+    DefineUnrealEnum(EAthenaGamePhaseStep, FortniteGame)
+    DefineUEnumValue(None)
+    DefineUEnumValue(Setup)
+    DefineUEnumValue(Warmup)
+    DefineUEnumValue(GetReady)
+    DefineUEnumValue(BusLocked)
+    DefineUEnumValue(BusFlying)
+    DefineUEnumValue(StormForming)
+    DefineUEnumValue(StormHolding)
+    DefineUEnumValue(StormShrinking)
+    DefineUEnumValue(Countdown)
+    DefineUEnumValue(FinalCountdown)
     DefineUEnumValue(EndGame)
 };
 
@@ -38,6 +57,33 @@ public:
     // SetGamePhase 0xBFF510, whose OnRep_GamePhase 0xBEDB40 broadcasts it at its end).
     DefineUProperty(FMulticastScriptDelegate, GamePhaseChanged)
     static bool HasGamePhaseChanged() { return Member_GamePhaseChanged.IsAvailable(); }
+    // From 3.0: what the timer under the minimap shows (UAthenaGamePhaseWidgetBase: the step's icon, and
+    // GamePhaseStepTimeRemaining as m:ss). Neither replicates: each client's game state works them out in its own Tick,
+    // as the server's does, from what does replicate (6.00 0xC3C470):
+    //   Warmup: WarmupCountdownStartTime and WarmupCountdownEndTime (Setup, Warmup, GetReady in the last 10 s);
+    //   Aircraft: each of Aircrafts' DropStartTime (BusLocked until then) and DropEndTime (BusFlying until then);
+    //   SafeZones: bIsInFinalCountdown and bIsInCountdown (PlaylistTimeRemaining), else SafeZoneIndicator's
+    //     SafeZoneStartShrinkTime (StormHolding until then) and SafeZoneFinishShrinkTime (StormShrinking until then),
+    //     and with no indicator yet SafeZonesStartTime (StormForming until then);
+    //   EndGame: EndGameKickPlayerTime.
+    // Every time is the server's world time (GetServerWorldTimeSeconds). A phase whose times have all passed is step
+    // None with 0 left, and the widget (AthenaGamePhaseWidget's OnGamePhaseStepChanged) keeps the icon it had.
+    DefineUProperty(EAthenaGamePhaseStep, GamePhaseStep)
+    DefineUProperty(float, GamePhaseStepTimeRemaining)
+    // What the game state's Tick broadcasts when its step changes (one EAthenaGamePhaseStep parameter), on the server
+    // too.
+    DefineUProperty(FMulticastScriptDelegate, GamePhaseStepChanged)
+    static bool HasGamePhaseStep() { return Member_GamePhaseStep.IsAvailable() && Member_GamePhaseStepTimeRemaining.IsAvailable() && Member_GamePhaseStepChanged.IsAvailable(); }
+    // The storm circle, replicated: the game mode's own, which it gives the game state as it spawns it (6.00 0xC364A0).
+    DefineUProperty(AFortSafeZoneIndicator*, SafeZoneIndicator)
+    static bool HasSafeZoneIndicator() { return Member_SafeZoneIndicator.IsAvailable(); }
+    // When the storm circle comes (the server's world time, replicated): the game mode spawns it once this has passed.
+    DefineUProperty(float, SafeZonesStartTime)
+    static bool HasSafeZonesStartTime() { return Member_SafeZonesStartTime.IsAvailable(); }
+    // The playlist's own countdowns (replicated), which take the timer over while they run.
+    DefineUProperty(bool, bIsInCountdown)
+    DefineUProperty(bool, bIsInFinalCountdown)
+    static bool HasCountdowns() { return Member_bIsInCountdown.IsAvailable() && Member_bIsInFinalCountdown.IsAvailable(); }
     // From 4.4: what OnPlaylistDataLoadCompleted broadcasts once the match's playlist has loaded (PlaylistName and its
     // gameplay tags), after the game mode's OnPlaylistDataLoaded applied its tables (5.40 0xBF32A0).
     DefineUProperty(FMulticastScriptDelegate, OnCurrentPlaylistLoaded)

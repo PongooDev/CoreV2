@@ -5,6 +5,7 @@
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortAthenaPlaylistBase.h"
 #include "Athena/FortPlaylistAthena.h"
+#include "Athena/FortSafeZoneIndicator.h"
 #include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingContainer.h"
 #include "Items/FortInventory.h"
@@ -246,6 +247,8 @@ namespace
     // (AFortGameModeAthena::AddDelegateHandlers, at boot); null where the build has no such delegate or Core couldn't
     // add one.
     UFunction* GamePhaseChangedHandler = nullptr;
+    UFunction* GamePhaseStepChangedHandler = nullptr;
+    UFunction* SafeZoneUpdatedHandler = nullptr;
     UFunction* CurrentPlaylistLoadedHandler = nullptr;
     UFunction* PawnDiedHandler = nullptr;
     UFunction* PlayerStateDestroyedHandler = nullptr;
@@ -2474,6 +2477,28 @@ namespace
         BindMatchPawns(Athena);
     }
 
+    // How long each of the match's storm circles holds and shrinks for, as the map info's definitions read now (the
+    // match's playlist's game data): what StartNewSafeZonePhase sets the storm circle's times from.
+    void ReportSafeZoneDefinitions(AFortGameModeAthena* Athena)
+    {
+        AFortGameStateAthena* GameState = AFortAthenaMapInfo::HasSafeZoneDefinitions() ? AthenaGameStateOf(Athena) : nullptr;
+        AFortAthenaMapInfo* MapInfo = GameState ? static_cast<AFortAthenaMapInfo*>(GameState->MapInfo) : nullptr;
+        if (!MapInfo)
+        {
+            return;
+        }
+        const TStructArray<FFortSafeZoneDefinition>& Definitions = MapInfo->SafeZoneDefinitions;
+        std::wstring Circles;
+        for (int32_t Index = 0; Index < Definitions.Num(); ++Index)
+        {
+            const FFortSafeZoneDefinition& Definition = Definitions[Index];
+            Circles += std::format(L"{}{}: {:.0f}+{:.0f} (radius {:.0f})", Index ? L", " : L"", Index, Definition.WaitTime.GetValueAtLevel(0.0f),
+                Definition.ShrinkTime.GetValueAtLevel(0.0f), Definition.Radius.GetValueAtLevel(0.0f));
+        }
+        Log::Info(L"Battle Royale: the storm's circles hold and shrink for, in seconds, {}; the first comes {:.0f} s after the safe zones start", Circles,
+            MapInfo->SafeZoneStartDelay.GetValueAtLevel(0.0f));
+    }
+
     // The game phase the game state is in, when it isn't the one handled last: the bus under way (the chests' and ammo
     // boxes' spawn percents, the Supply Llamas, the vending machines still waiting for the match's playlist), the
     // match's playlist by the warmup, the warmup's report, room and length, and the match's results.
@@ -2487,6 +2512,11 @@ namespace
             return;
         }
         Events.HandledPhase = Phase;
+        // The storm's circles as the match's playlist has them, once the bus is under way and again as the storm starts.
+        if (Phase == EAthenaGamePhase::GetAircraft() || Phase == EAthenaGamePhase::GetSafeZones())
+        {
+            ReportSafeZoneDefinitions(Athena);
+        }
 
         // The bus is under way: the match's playlist is final, and nobody is near the map's containers.
         if (Phase >= EAthenaGamePhase::GetAircraft() && !Events.bAircraftHandled)
@@ -2564,6 +2594,17 @@ void AFortGameModeAthena::BindMatchEvents()
             !GameState ? L"no game state" : !AFortGameStateAthena::HasGamePhaseChanged() ? L"not in this build" : L"Core's handler couldn't be added", GamePhaseCheckInterval);
         SetGameModeTimer(this, Events.PhaseTimer, GamePhaseCheckInterval, &CheckGamePhase);
     }
+    // The timer under the minimap: a log line at each of the game state's steps and of the storm's circles.
+    if (GameState && GamePhaseStepChangedHandler && AFortGameStateAthena::HasGamePhaseStep())
+    {
+        FMulticastScriptDelegate& GamePhaseStepChanged = GameState->GamePhaseStepChanged;
+        GamePhaseStepChanged.AddUniqueDynamic(this, GamePhaseStepChangedHandler->GetFName());
+    }
+    if (SafeZoneUpdatedHandler && HasSafeZoneUpdated())
+    {
+        FMulticastScriptDelegate& SafeZoneUpdated = OnSafeZoneUpdated;
+        SafeZoneUpdated.AddUniqueDynamic(this, SafeZoneUpdatedHandler->GetFName());
+    }
 
     // The match's playlist, once its assignment gives the world another one (ApplyPlaylistDataTablesOnce took the map
     // URL's): from 4.4 when it has loaded, before that looked for (CheckMatchPlaylist).
@@ -2592,6 +2633,107 @@ void AFortGameModeAthena::HandleGamePhaseChanged()
     {
         SetGameModeTimer(this, Events.PhaseTimer, NextTickDelay, &AfterGamePhaseChanged);
     }
+#endif
+}
+
+void AFortGameModeAthena::HandleGamePhaseStepChanged()
+{
+#if WITH_SERVER_CODE
+    ReportGamePhaseStep(L"the game state's step changed");
+#endif
+}
+
+void AFortGameModeAthena::HandleSafeZoneUpdated()
+{
+#if WITH_SERVER_CODE
+    ReportGamePhaseStep(L"a new storm circle");
+#endif
+}
+
+void AFortGameModeAthena::ReportGamePhaseStep(const wchar_t* Event)
+{
+#if WITH_SERVER_CODE
+    AFortGameStateAthena* GameState = AthenaGameStateOf(this);
+    UWorld* World = GetWorld();
+    if (!GameState || !World || !AFortGameStateAthena::HasGamePhaseStep())
+    {
+        return;
+    }
+    const float Now = World->GetTimeSeconds();
+    // A time against now: "12 s ahead", "3 s ago".
+    const auto Against = [Now](float Time) { return Time >= Now ? std::format(L"{:.0f} s ahead", Time - Now) : std::format(L"{:.0f} s ago", Now - Time); };
+
+    // The storm circle: the game mode's own, and the one the game state replicates, which the clients' timers read.
+    AFortSafeZoneIndicator* Indicator = static_cast<AFortSafeZoneIndicator*>(SafeZoneIndicator);
+    AFortSafeZoneIndicator* Replicated = AFortGameStateAthena::HasSafeZoneIndicator() ? static_cast<AFortSafeZoneIndicator*>(GameState->SafeZoneIndicator) : Indicator;
+    std::wstring Circle = L"no storm circle yet";
+    if (Indicator)
+    {
+        AFortAthenaMapInfo* MapInfo = AFortAthenaMapInfo::HasSafeZoneDefinitions() ? static_cast<AFortAthenaMapInfo*>(GameState->MapInfo) : nullptr;
+        Circle = std::format(L"storm circle {}{}", static_cast<int32_t>(SafeZonePhase), MapInfo ? std::format(L" of {}", MapInfo->SafeZoneDefinitions.Num()) : std::wstring());
+        if (AFortSafeZoneIndicator::HasShrinkTimes())
+        {
+            const float Start = Indicator->SafeZoneStartShrinkTime;
+            const float Finish = Indicator->SafeZoneFinishShrinkTime;
+            Circle += std::format(L", it starts to shrink {} and has shrunk {}", Against(Start), Against(Finish));
+        }
+        if (AFortSafeZoneIndicator::HasNextCenter())
+        {
+            Circle += std::format(L", radius {:.0f} to {:.0f}", static_cast<float>(Indicator->Radius), static_cast<float>(Indicator->NextRadius));
+        }
+        if (AFortSafeZoneIndicator::HasPausedForPreview() && Indicator->bPausedForPreview)
+        {
+            Circle += L", only shown for now (bPausedForPreview)";
+        }
+        if (HasSafeZoneActive() && bSafeZonePaused)
+        {
+            Circle += L", its phases held (bSafeZonePaused)";
+        }
+        Circle += Replicated == Indicator ? L"; the game state replicates it" : Replicated ? L"; the game state replicates ANOTHER one" : L"; the game state replicates NONE";
+        // Which clients have it: a client without an actor channel for it has no storm circle at all (#412: nothing on
+        // its map, and its timer at 0:00 from the bus on). A circle spawned this frame has none yet.
+        if (UNetDriver* Driver = Natives::UNetConnection_ActorChannels >= 0 ? World->GetNetDriver() : nullptr)
+        {
+            int32_t Open = 0;
+            int32_t WithChannel = 0;
+            for (UNetConnection* Connection : static_cast<const TArray<UNetConnection*>&>(Driver->ClientConnections))
+            {
+                if (Connection && Connection->State == USOCK_Open)
+                {
+                    ++Open;
+                    WithChannel += Connection->ActorChannels.FindRef(Indicator) ? 1 : 0;
+                }
+            }
+            Circle += std::format(L", and {} of {} clients have a channel for it", WithChannel, Open);
+        }
+    }
+    if (AFortGameStateAthena::HasSafeZonesStartTime())
+    {
+        Circle += std::format(L"; SafeZonesStartTime {}", Against(GameState->SafeZonesStartTime));
+    }
+    if (AFortGameStateAthena::HasCountdowns() && (GameState->bIsInCountdown || GameState->bIsInFinalCountdown))
+    {
+        Circle += GameState->bIsInFinalCountdown ? L"; the playlist's final countdown runs" : L"; the playlist's countdown runs";
+    }
+
+    // The bus's drop times, which the aircraft phase's steps are.
+    std::wstring Bus;
+    if (static_cast<uint8_t>(GameState->GamePhase) == EAthenaGamePhase::GetAircraft() && AFortGameStateAthena::HasAircrafts() && AFortAthenaAircraft::HasDropTimes())
+    {
+        for (AFortAthenaAircraft* Aircraft : static_cast<const TArray<AFortAthenaAircraft*>&>(GameState->Aircrafts))
+        {
+            if (Aircraft)
+            {
+                Bus += std::format(L"; a bus's drop starts {} and ends {}", Against(Aircraft->DropStartTime), Against(Aircraft->DropEndTime));
+            }
+        }
+    }
+
+    UFortPlaylistAthena* Playlist = AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
+    const std::wstring StartUp = Playlist && UFortPlaylistAthena::HasSafeZoneStartUp()
+        ? std::format(L"; {}'s SafeZoneStartUp {}", static_cast<FName>(Playlist->PlaylistName).ToStdString(), static_cast<int32_t>(static_cast<uint8_t>(Playlist->SafeZoneStartUp))) : std::wstring();
+    Log::Info(L"Battle Royale: the timer's step is {} with {:.0f} s left ({}), phase {}, at {:.1f} s: {}{}{}", GameState->GamePhaseStep.ToString(),
+        static_cast<float>(GameState->GamePhaseStepTimeRemaining), Event, GameState->GamePhase.ToString(), Now, Circle, Bus, StartUp);
 #endif
 }
 
@@ -2714,6 +2856,22 @@ DEFINE_FUNCTION(AFortGameModeAthena::execHandleGamePhaseChanged)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(AFortGameModeAthena::execHandleGamePhaseStepChanged)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortGameModeAthena*>(Context)->HandleGamePhaseStepChanged();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortGameModeAthena::execHandleSafeZoneUpdated)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortGameModeAthena*>(Context)->HandleSafeZoneUpdated();
+    P_NATIVE_END;
+}
+
 DEFINE_FUNCTION(AFortGameModeAthena::execHandleCurrentPlaylistLoaded)
 {
     P_FINISH;
@@ -2764,6 +2922,8 @@ void AFortGameModeAthena::AddDelegateHandlers()
         return Signature ? AthenaClass->AddNativeFunction(Name, Thunk, Signature) : nullptr;
     };
     GamePhaseChangedHandler = Add(L"HandleGamePhaseChanged", &execHandleGamePhaseChanged, AFortGameStateAthena::StaticClass(), L"GamePhaseChanged");
+    GamePhaseStepChangedHandler = Add(L"HandleGamePhaseStepChanged", &execHandleGamePhaseStepChanged, AFortGameStateAthena::StaticClass(), L"GamePhaseStepChanged");
+    SafeZoneUpdatedHandler = Add(L"HandleSafeZoneUpdated", &execHandleSafeZoneUpdated, AthenaClass, L"OnSafeZoneUpdated");
     CurrentPlaylistLoadedHandler = Add(L"HandleCurrentPlaylistLoaded", &execHandleCurrentPlaylistLoaded, AFortGameStateAthena::StaticClass(), L"OnCurrentPlaylistLoaded");
     PawnDiedHandler = Add(L"HandlePawnDied", &execHandlePawnDied, AFortPawn::StaticClass(), L"OnDied");
     // Only with the pawns' OnDied: without it the results are looked at with the phase, the leaving player's among them.

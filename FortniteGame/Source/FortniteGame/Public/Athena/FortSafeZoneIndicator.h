@@ -20,6 +20,11 @@ public:
     DefineUProperty(float, SafeZoneStartShrinkTime)
     DefineUProperty(float, SafeZoneFinishShrinkTime)
     static bool HasShrinkTimes() { return Member_SafeZoneStartShrinkTime.IsAvailable() && Member_SafeZoneFinishShrinkTime.IsAvailable(); }
+    // From 3.2, replicated: the circle only shows itself, on a playlist whose storm comes with the warmup or the bus
+    // (ESafeZoneStartUp). The game mode's safe zone update sets it in those phases and clears it in the safe zones
+    // phase (6.00 0xC3DDD0), and the indicator's Tick moves nothing while it is set (0xC9E450).
+    DefineUProperty(bool, bPausedForPreview)
+    static bool HasPausedForPreview() { return Member_bPausedForPreview.IsAvailable(); }
     // The storm circle's centre now (it moves while the circle shrinks); Radius is its radius now.
     FVector GetSafeZoneCenter() const;
 };

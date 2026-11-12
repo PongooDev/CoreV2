@@ -9,6 +9,18 @@ class AVolume;
 struct FRotator;
 struct FVector;
 
+// One storm circle of a match (AFortAthenaMapInfo::SafeZoneDefinitions, index: the game mode's SafeZonePhase): how long
+// it holds before it shrinks, and how long it shrinks for (AthenaGameData's Default.SafeZone.NN.WaitTime and ShrinkTime
+// rows, which a playlist's own game data replaces).
+struct FFortSafeZoneDefinition
+{
+    DefineUnrealStruct(FFortSafeZoneDefinition, FortniteGame)
+    DefineUStructProperty(FScalableFloat, Radius)
+    DefineUStructProperty(FScalableFloat, WaitTime)
+    DefineUStructProperty(FScalableFloat, ShrinkTime)
+    static bool IsAvailable() { return StaticStruct() && Member_Radius.IsAvailable() && Member_WaitTime.IsAvailable() && Member_ShrinkTime.IsAvailable(); }
+};
+
 // Battle Royale's map settings (from 1.7.2; DefaultMapInfo_C, placed in Athena_Terrain). AFortGameModeAthena's own
 // FinishWorldInitialization (1.7.2 0x3CF860) finds it and sets AFortGameStateAthena::MapInfo.
 class AFortAthenaMapInfo : public AActor
@@ -40,6 +52,11 @@ public:
     // TraceStartZ, Min as TraceEndZ).
     DefineUStructProperty(FScalableFloat, SupplyDropMinPlacementHeight)
     DefineUStructProperty(FScalableFloat, SupplyDropMaxPlacementHeight)
+    // The match's storm circles, and how long after the safe zones start the first one comes (AthenaGameData's
+    // Default.SafeZone.StartDelay).
+    DefineUStructArrayProperty(FFortSafeZoneDefinition, SafeZoneDefinitions)
+    DefineUStructProperty(FScalableFloat, SafeZoneStartDelay)
+    static bool HasSafeZoneDefinitions() { return Member_SafeZoneDefinitions.IsAvailable() && FFortSafeZoneDefinition::IsAvailable(); }
     // Where the bus may drop players: the island, which PickSupplyDropLocation keeps its points in.
     DefineUProperty(FBox2D, AircraftDropZone)
     DefineUProperty(AVolume*, AircraftDropVolume)

@@ -81,6 +81,10 @@ public:
     // own playlists have none.
     DefineUProperty(UObject*, AISettings)
     static bool HasAISettings() { return Member_AISettings.IsAvailable(); }
+    // ESafeZoneStartUp, when the storm circle comes: 0 UseDefaultGameBehavior (after the bus), 1
+    // StartsWithWarmUp, 2 StartsWithAirCraft (50v50's, whose final circle shows on the map from the bus on).
+    DefineUProperty(uint8_t, SafeZoneStartUp)
+    static bool HasSafeZoneStartUp() { return Member_SafeZoneStartUp.IsAvailable(); }
     // The game's own code plays a FirstToGoalScore playlist (5.30): AFortPlayerStateAthena scores the playlist's events
     // into TotalPlayerScore and its AFortTeamInfoAthena's score (a searched container's tags in
     // AFortPlayerController::ServerAttemptInteract, a supply drop's or llama's in AFortAthenaSupplyDrop::

@@ -648,8 +648,9 @@ namespace
             Log::Info(L"Battle Royale: {} placed {} with {} kills, {} s alive", AccountId, Player.Place, Player.Kills, Player.SecondsAlive);
         }
 
-        // The end-of-match screen of each player still here whose place is final, its kills counted above
-        // (AFortPlayerController::SendMatchStatsForPlayer sends it once).
+        // The end-of-match screen of each player still here whose place is final, its kills counted above: their stats
+        // if they haven't gone yet (a player out of the match had theirs as they went out, from 1.11) and their team's
+        // place (AFortPlayerController::SendMatchStatsForPlayer sends each once).
         for (APlayerState* PlayerState : PlayerArray)
         {
             AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));

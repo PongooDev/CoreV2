@@ -382,6 +382,10 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     }
     UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s is out (place %d, %d players and %d teams left)"), *GetName(), static_cast<int32_t>(AthenaState->Place), static_cast<int32_t>(GameState->PlayersLeft), static_cast<int32_t>(GameState->TeamsLeft));
     GameMode->SendOutliveStatEvents(DeadPawn);
+    // The player's own end-of-match stats, their team still in or not: the screen shows them under "Team Still Alive"
+    // until the team's place and the rewards come with the match's results (#403). The tick after, as the game mode's
+    // results are looked at, once the death's handling is over.
+    World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateUObject(static_cast<AFortPlayerController*>(this), &AFortPlayerController::SendMatchStatsForPlayer));
 
     Reflection::FParams Params(StaticFunction_ClientFinishedInteractionInZone());
     Params.Call(this);

@@ -233,8 +233,9 @@ public:
     int32_t GetItemQuantity(const UFortItemDefinition* ItemDefinition);
     UFortQuestManager* GetQuestManager() const;
     UFortSchematicItem* GetSchematicForItem(const UFortItemDefinition* ItemDefinition);
-    // Match stats (FortPlayerControllerMatchStats.cpp): the player's end-of-match screen gets their stats once their
-    // place is final (21.40's AFortPlayerController::SendMatchStatsForPlayer; 1.10's is stripped).
+    // Match stats (FortPlayerControllerMatchStats.cpp): the player's end-of-match screen gets their stats once they are
+    // out of the match (1.10: once their place is final, which its stats hold), and from 1.11 their team's place once
+    // it is final (21.40's AFortPlayerController::SendMatchStatsForPlayer; 1.10's is stripped). Each goes once.
     void SendMatchStatsForPlayer();
     // Then their rewards, which end the screen's wait: the match's XP as the backend gave it (battleroyale/recordresults'
     // answer for the player, RewardResultJson), or none when it gave nothing.

@@ -151,8 +151,10 @@ public:
     // 5.30: the player thanked the bus driver, replicated to everyone. AFortPlayerControllerAthena::
     // ServerThankBusDriver_Implementation (5.30 0xC289A0) only sets it, on its PlayerState when that is an
     // AFortPlayerStateAthena; each client's OnRep_ThankedBusDriver (0xC510B0) puts "<{VictimStyle}>{PlayerName}</> has
-    // thanked the bus driver" (Athena.ThankedBusDriver, TeamVictim for a teammate) in its feed.
-    DefineUProperty(bool, bThankedBusDriver)
+    // thanked the bus driver" (Athena.ThankedBusDriver, TeamVictim for a teammate) in its feed. One bit of a byte of
+    // flags on every build that has it (5.30 to 6.01: bit 1, after bInAircraft's), so it is read and set by its mask:
+    // as a whole byte it read true for anyone in the aircraft and its store set bInAircraft instead.
+    DefineBitfieldUProperty(bThankedBusDriver)
     static bool HasThankedBusDriver() { return Member_bThankedBusDriver.IsAvailable(); }
 
 private:

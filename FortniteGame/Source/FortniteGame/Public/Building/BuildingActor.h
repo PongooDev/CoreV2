@@ -64,7 +64,7 @@ public:
     DefineBitfieldUProperty(bDestroyOnPlayerBuildingPlacement)
     DefineUProperty(FMulticastScriptDelegate, OnDied)
     DefineBitfieldUProperty(bPlayerPlaced)
-    DefineUProperty(bool, bFireBuiltAndDestroyedEvents)
+    DefineBitfieldUProperty(bFireBuiltAndDestroyedEvents)
     // The piece's UFortBuildingActorSet (its BuildTime and RepairTime), made with its ability system.
     DefineUProperty(UFortBuildingActorSet*, BuildingAttributeSet)
     static bool HasBuildingAttributeSet() { return Member_BuildingAttributeSet.IsAvailable(); }

@@ -6,12 +6,15 @@
 #include "Engine/LevelStreaming.h"
 #include "Engine/NetDriver.h"
 #include "Engine/Player.h"
+#include "Engine/ReplicationDriver.h"
 #include "Finder.h"
 #include "Hooks.h"
 #include "Logging/LogMacros.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Natives.h"
+#include "ReplicationGraph.h"
+#include "Templates/Casts.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorld, Log, All);
@@ -86,6 +89,18 @@ bool UWorld::Listen(FURL& InURL)
     const UPlayer* PlayerDefault = UPlayer::StaticClass() ? static_cast<const UPlayer*>(UPlayer::StaticClass()->GetDefaultObject()) : nullptr;
     UE_LOG(LogWorld, Log, TEXT("Listen: clients are sent up to %d bytes a second (the game's MaxClientRate %d), clients ask for %d"), NetDriver->MaxClientRate,
         IniClientRate, PlayerDefault ? static_cast<int32_t>(PlayerDefault->ConfiguredInternetSpeed) : -1);
+
+    // Core (CoreV2 #412): the replication graph's connections forget whatever they still hold at the address of each
+    // actor this world spawns (UReplicationGraph::HandleActorSpawned), on the builds whose graph leaves a destroyed
+    // actor's info with them and whose code for it the finder knows (6.00 to 6.02). The handler goes with the world; a
+    // net driver without a replication graph, and a graph of another build, get none.
+    if (UReplicationGraph* Graph = NetDriver->HasReplicationDriver() ? Cast<UReplicationGraph>(reinterpret_cast<UObject*>(static_cast<UReplicationDriver*>(NetDriver->ReplicationDriver))) : nullptr;
+        Graph && UReplicationGraph::HasConnections() && Finder::ResolveReplicationGraphActorInfoLive(*reinterpret_cast<void***>(Graph)))
+    {
+        const FDelegateHandle Handle = AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([](AActor* Actor) { UReplicationGraph::HandleActorSpawned(Actor); }));
+        UE_LOG(LogWorld, Log, TEXT("Listen: the replication graph's connections %s (UWorld::OnActorSpawned)"),
+            Handle.IsValid() ? TEXT("forget a destroyed actor's info when a new actor is spawned at its address") : TEXT("keep a destroyed actor's info: the world's OnActorSpawned wasn't found"));
+    }
 
     NextSwitchCountdown = NetDriver->ServerTravelPause;
     return true;

@@ -2919,7 +2919,8 @@ void AFortGameModeAthena::HandlePawnDestroyed(AActor* DestroyedActor)
     // The replication graph's connections forget the pawn, as a later engine's RemoveNetworkActor has them do for every
     // actor it removes (UReplicationGraph::RemoveActorInfoFromConnections, #411): a dead pawn's entry keeps its tear-off
     // flag, and the next pawn spawned at its address was opened and closed on that connection every frame. Core is told
-    // of the match's pawns only (their OnDestroyed), so another torn off actor's entry stays as the build leaves it.
+    // of the match's pawns only (their OnDestroyed); any other actor's entry goes when the world spawns an actor at its
+    // address (UReplicationGraph::HandleActorSpawned, #412).
     UWorld* World = GetWorld();
     UNetDriver* Driver = World ? World->GetNetDriver() : nullptr;
     UReplicationGraph* Graph = Driver && Driver->HasReplicationDriver() ? Cast<UReplicationGraph>(reinterpret_cast<UObject*>(static_cast<UReplicationDriver*>(Driver->ReplicationDriver))) : nullptr;

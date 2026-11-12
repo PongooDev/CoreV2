@@ -427,6 +427,10 @@ namespace Natives
     inline bool (*UFortAIAssignment_CanPawnUse)(UObject* This, APawn* Pawn) = nullptr;
     inline bool (*FFortAIGoal_CanAIUse)(const void* Goal, UObject* AI, UObject* Settings) = nullptr;
     inline void* (*AFortAIGoalManager_GetAssignmentInfo)(UObject* This, UObject* AI) = nullptr;
+    // 5.0+ keeps AFortAIGoalManager::SetFrustrationDiscouragement(AFortAIController*, float) (6.00 CL-4395664 0xA93B00,
+    // 5.41 0xA6C840, 5.30 0xA69490): the BT task's intact ExecuteTask calls it; only SetCurrentGoalDiscouragement's exec
+    // is stripped. Null on 1.1-4.5, where Core restores both.
+    inline bool (*AFortAIGoalManager_SetFrustrationDiscouragement)(UObject* This, UObject* AI, float DiscouragementDuration) = nullptr;
     inline ptrdiff_t FAIAssignmentInfo_DiscouragedGoalTimers = -1;
     inline int32_t UBTTaskNode_ExecuteTaskIndex = -1;
     inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;

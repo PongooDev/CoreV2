@@ -32,6 +32,8 @@ class UFortBTTask_SetFrustrationDiscouragement : public UBTTaskNode
 public:
     DefineUProperty(float, DiscouragementDuration)
 
+    static ptrdiff_t DiscouragementDurationOffset() { return Member_DiscouragementDuration.IsAvailable() ? Member_DiscouragementDuration.GetOffsetChecked() : -1; }
+
     EBTNodeResult ExecuteTask(UBrainComponent& OwnerComp, uint8_t* NodeMemory);
 
     static void HookVTables();

@@ -6786,6 +6786,41 @@ bool Finder::ResolveGoalDiscouragementLive()
     {
         return true;
     }
+    // Every frustrated AI asks (GAB_Hunting's SetCurrentGoalDiscouragement, BT_HuskBase's task): once the classes are
+    // there, search and log once.
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return false;
+    }
+
+    // 5.0+ (UE 4.21): the test's RunTest calls the count of times its goal was discouraged itself (6.00 0xA863A0, 5.41
+    // 0xA5F130, 5.30 0xA5C0F0), with the timers reader inlined: the assignment info lookup's result stays in a
+    // callee-saved register and its DiscouragedGoalTimers are indexed from there (FAIDiscouragedGoalTimer is 0x28 bytes):
+    //   call GetAssignmentInfo; mov rsi, rax; test rax, rax; ...; lea rcx, [rsi+68h]; ...; lea rcx, [rax+rax*4]
+    const auto InlinedTimersReader = [](uintptr_t Target, uintptr_t TargetEnd, uintptr_t& OutLookup) -> int32_t
+    {
+        const uintptr_t First = TargetEnd > Target && TargetEnd - Target < 0x200 ? FindRawCall(Target, TargetEnd) : 0;
+        const uintptr_t Save = First ? First + 5 : 0;
+        if (!Save || (Byte(Save) != 0x48 && Byte(Save) != 0x4C) || Byte(Save + 1) != 0x8B || (Byte(Save + 2) & 0xC7) != 0xC0
+            || !FindInstruction(Save, TargetEnd, { 0x48, 0x8D, 0x0C, 0x80 }))
+        {
+            return -1;
+        }
+        const int32_t Saved = ((Byte(Save + 2) >> 3) & 7) | (Byte(Save) == 0x4C ? 8 : 0);
+        for (uintptr_t Site = Save + 3; Site + 4 <= TargetEnd; ++Site)
+        {
+            const uint8_t Rex = Byte(Site);
+            const uint8_t ModRm = Byte(Site + 2);
+            if ((Rex == 0x48 || Rex == 0x49) && Byte(Site + 1) == 0x8D && (ModRm & 0xF8) == 0x48 && (ModRm & 0x07) != 0x04
+                && ((ModRm & 0x07) | (Rex == 0x49 ? 8 : 0)) == Saved)
+            {
+                OutLookup = Finder::RelativeTarget(First, 1, 5);
+                return Byte(Site + 3);
+            }
+        }
+        return -1;
+    };
 
     void** TestVTable = CdoVTable(L"/Script/FortniteGame.FortQueryTest_GoalFrustrationDiscouragement");
     void** TestBaseVTable = CdoVTable(L"/Script/AIModule.EnvQueryTest");
@@ -6816,6 +6851,25 @@ bool Finder::ResolveGoalDiscouragementLive()
             }
         }
     }
+    // The timers sit in FAIAssignmentInfo's unreflected tail, after CurrentGoal (6.00: +0x68 of 0x80).
+    const UScriptStruct* AssignmentInfo = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.AIAssignmentInfo");
+    const int32_t InfoSize = AssignmentInfo ? AssignmentInfo->GetStructureSize() : 0;
+    for (int32_t Index = 1; TestVTable && TestBaseVTable && Index < 0x80 && TimersOffset < 0; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(TestVTable, Index);
+        const uintptr_t FunctionEnd = Function && Function != VTableEntry(TestBaseVTable, Index) ? Finder::FunctionEnd(Function) : 0;
+        for (const auto& [Call, Target] : FunctionEnd > Function ? Finder::DirectCalls(Function, FunctionEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+            const int32_t Offset = InlinedTimersReader(Target, TargetEnd, Lookup);
+            if (Offset >= 0x20 && Offset + 0x10 <= InfoSize)
+            {
+                TimersOffset = Offset;
+                break;
+            }
+            Lookup = 0;
+        }
+    }
 
     void** TaskVTable = CdoVTable(L"/Script/FortniteGame.FortBTTask_SetFrustrationDiscouragement");
     void** TaskNodeVTable = CdoVTable(L"/Script/AIModule.BTTaskNode");
@@ -6831,6 +6885,7 @@ bool Finder::ResolveGoalDiscouragementLive()
 
     if (!Lookup || TimersOffset < 0 || ExecuteTaskIndex < 0)
     {
+        bSearched = TestVTable && TaskVTable;
         Log::Error(L"Finder: goal discouragement not found (assignment info {}, timers {}, ExecuteTask slot {})", Lookup != 0, TimersOffset, ExecuteTaskIndex);
         return false;
     }
@@ -6838,6 +6893,49 @@ bool Finder::ResolveGoalDiscouragementLive()
     Natives::FAIAssignmentInfo_DiscouragedGoalTimers = TimersOffset;
     Natives::UBTTaskNode_ExecuteTaskIndex = ExecuteTaskIndex;
     Log::Info(L"Finder: AFortAIGoalManager assignment info lookup at 0x{:X}, FAIAssignmentInfo discouraged goal timers +0x{:X}, UBTTaskNode::ExecuteTask slot 0x{:X}", Lookup - Finder::ImageBase(), TimersOffset, ExecuteTaskIndex);
+    return true;
+}
+
+bool Finder::ResolveFrustrationDiscouragementLive(void** TaskVTable, ptrdiff_t DurationOffset)
+{
+    if (Natives::AFortAIGoalManager_SetFrustrationDiscouragement)
+    {
+        return true;
+    }
+
+    // ExecuteTask is the task's first slot that BTTaskNode's differs in, as ResolveGoalDiscouragementLive finds it.
+    void** TaskNodeVTable = CdoVTable(L"/Script/AIModule.BTTaskNode");
+    uintptr_t ExecuteTask = 0;
+    for (int32_t Index = 1; TaskVTable && TaskNodeVTable && Index < 0x80 && !ExecuteTask; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(TaskVTable, Index);
+        ExecuteTask = Function && Function != VTableEntry(TaskNodeVTable, Index) ? Function : 0;
+    }
+
+    // 5.0+ (6.00 CL-4395664 0xAACE60, 5.41 0xA85A90, 5.30 0xA825C0) keeps Epic's body; only GetCurrent is stripped:
+    //   AI = Cast<AFortAIController>(OwnerComp.AIOwner); GoalManager = AFortAIGoalManager::GetCurrent(AI->GetWorld());
+    //   movss xmm2, [rdi+DiscouragementDuration]; mov rdx, AI; mov rcx, GoalManager; call SetFrustrationDiscouragement
+    //   return succeeded ? EBTNodeResult::Succeeded : EBTNodeResult::Failed
+    const uintptr_t End = ExecuteTask && DurationOffset > 0 && DurationOffset < 0x80 ? Finder::FunctionEnd(ExecuteTask) : 0;
+    uintptr_t SetFrustration = 0;
+    for (uintptr_t Site = ExecuteTask; End && Site + 6 <= End && !SetFrustration; ++Site)
+    {
+        const uintptr_t Opcode = Site + 1 + (Byte(Site + 1) >= 0x40 && Byte(Site + 1) <= 0x4F ? 1 : 0);
+        const uint8_t ModRm = Byte(Opcode + 2);
+        if (Byte(Site) == 0xF3 && Byte(Opcode) == 0x0F && Byte(Opcode + 1) == 0x10 && (ModRm & 0xF8) == 0x50 && (ModRm & 0x07) != 0x04 && Byte(Opcode + 3) == DurationOffset)
+        {
+            const uintptr_t Call = FindRawCall(Opcode + 4, std::min(End, Opcode + 4 + 0x10));
+            SetFrustration = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+        }
+    }
+    if (!SetFrustration)
+    {
+        // 1.1-4.5: the task's ExecuteTask is stripped too, Core restores it.
+        Log::Info(L"Finder: UFortBTTask_SetFrustrationDiscouragement::ExecuteTask is stripped (no DiscouragementDuration +0x{:X} call)", DurationOffset);
+        return false;
+    }
+    Natives::AFortAIGoalManager_SetFrustrationDiscouragement = reinterpret_cast<decltype(Natives::AFortAIGoalManager_SetFrustrationDiscouragement)>(SetFrustration);
+    Log::Info(L"Finder: AFortAIGoalManager::SetFrustrationDiscouragement at 0x{:X} (UFortBTTask_SetFrustrationDiscouragement::ExecuteTask 0x{:X} is the build's own)", SetFrustration - Finder::ImageBase(), ExecuteTask - Finder::ImageBase());
     return true;
 }
 

@@ -15,7 +15,10 @@
 
 #include <cfloat>
 #include <cstring>
+#include <format>
 #include <new>
+#include <set>
+#include <string>
 
 namespace
 {
@@ -70,6 +73,19 @@ namespace
         return Location.X != FLT_MAX || Location.Y != FLT_MAX || Location.Z != FLT_MAX;
     }
 
+    // Core's diagnostics (#406): what a pawn class's goal queries got from an assignment, once per pawn class, assignment
+    // and outcome, so a match log shows why an AI that sleeps had no goal to pick.
+    void LogAssignmentGoals(const APawn* Pawn, const FFortAIAssignmentIdentifier& Identifier, const wchar_t* Outcome, int32_t Usable, int32_t Total)
+    {
+        static std::set<std::wstring> Logged;
+        const std::wstring PawnClass = Pawn ? reinterpret_cast<const UObject*>(Pawn)->GetClass()->GetName().ToStdString() : std::wstring(L"none");
+        const std::wstring Assignment = std::format(L"{}, team {}", Identifier.AssignmentType.ToString(), Identifier.AssignmentTeam.ToString());
+        if (Logged.size() < 200 && Logged.insert(PawnClass + L"|" + Assignment + L"|" + Outcome).second)
+        {
+            Log::Info(L"UFortQueryGenerator_SpecificAssignmentGoals: {}'s goal query, assignment ({}): {}, {} of {} goals usable", PawnClass, Assignment, Outcome, Usable, Total);
+        }
+    }
+
     TArray<AActor*> PerceivedHostileActors(AFortAIController* Controller)
     {
         UObject* Perception = Controller->PerceptionComponent;
@@ -110,13 +126,24 @@ void UFortQueryGenerator_Enemies::GenerateItems(void* QueryInstance) const
         }
     }
 
+    int32_t Added = 0;
     for (AActor* Enemy : Enemies)
     {
         AFortPawn* EnemyPawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(Enemy));
         if (Enemy && !(EnemyPawn && EnemyPawn->IsDead()))
         {
             AddGoalItem(QueryInstance, Enemy, nullptr, nullptr);
+            ++Added;
         }
+    }
+
+    // Core's diagnostics (#406): whether a pawn class's goal queries see enemies at all (its perception's hostile
+    // actors), once per pawn class and outcome.
+    static std::set<std::wstring> Logged;
+    const std::wstring PawnClass = reinterpret_cast<UObject*>(Pawn)->GetClass()->GetName().ToStdString();
+    if (Logged.size() < 200 && Logged.insert(PawnClass + (bPerceivedEnemiesOnly ? L"|perceived" : L"|all") + (Added ? L"|some" : L"|none")).second)
+    {
+        Log::Info(L"UFortQueryGenerator_Enemies: {}'s goal query: {} {} enemies", PawnClass, Added, bPerceivedEnemiesOnly ? L"perceived" : L"living player");
     }
 #endif
 }
@@ -138,6 +165,7 @@ void UFortQueryGenerator_SpecificAssignmentGoals::GenerateItems(void* QueryInsta
     UObject* Assignment = GoalManager->FindAssignment(Identifier, Encounter);
     if (!Assignment)
     {
+        LogAssignmentGoals(Pawn, Identifier, Type == EAssignmentType::GetEncounter() && !Encounter ? L"no encounter" : L"no such assignment", 0, 0);
         return;
     }
 
@@ -146,22 +174,26 @@ void UFortQueryGenerator_SpecificAssignmentGoals::GenerateItems(void* QueryInsta
     // falling through to its next option, such as AllEnemiesAndDefaultWorld's enemies after a world assignment of
     // placement actors (#143: a mimic spawned with no perceived enemy got no target and turned back into a chest).
     const bool bChecksGoals = Natives::UFortAIAssignment_CanPawnUse && Natives::FFortAIGoal_CanAIUse;
+    const FScriptArray& Goals = *reinterpret_cast<const FScriptArray*>(reinterpret_cast<uint8_t*>(Assignment) + Natives::UFortAIAssignment_Goals);
     if (bChecksGoals && !Natives::UFortAIAssignment_CanPawnUse(Assignment, Pawn))
     {
+        LogAssignmentGoals(Pawn, Identifier, L"the assignment doesn't take this pawn", 0, Goals.Num());
         return;
     }
     UObject* Settings = static_cast<UFortAIAssignment*>(Assignment)->GetAssignmentSettings();
 
-    const FScriptArray& Goals = *reinterpret_cast<const FScriptArray*>(reinterpret_cast<uint8_t*>(Assignment) + Natives::UFortAIAssignment_Goals);
     const int32_t GoalSize = FFortAIGoal::StaticStruct()->GetStructureSize();
+    int32_t Usable = 0;
     for (int32_t Index = 0; Index < Goals.Num(); ++Index)
     {
         const uint8_t* Goal = static_cast<const uint8_t*>(Goals.GetData()) + static_cast<size_t>(Index) * GoalSize;
         if (HasValidGoal(Goal) && (!bChecksGoals || Natives::FFortAIGoal_CanAIUse(Goal, Controller, Settings)))
         {
             AddGoalItem(QueryInstance, reinterpret_cast<AActor*>(reinterpret_cast<const FWeakObjectPtr*>(Goal)->Get()), Assignment, Goal);
+            ++Usable;
         }
     }
+    LogAssignmentGoals(Pawn, Identifier, Usable ? L"goals generated" : L"every goal rejected", Usable, Goals.Num());
 #endif
 }
 

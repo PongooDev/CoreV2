@@ -128,13 +128,18 @@ public:
 
     UObject* FindAssignment(const FFortAIAssignmentIdentifier& Identifier, UObject* EncounterInfo);
     FAIAssignmentInfo* GetAssignmentInfo(AFortAIController* AI);
-    void SetFrustrationDiscouragement(AFortAIController* AI, float DiscouragementDuration);
+    // Marks the AI's current goal discouraged for DiscouragementDuration; false without its assignment info.
+    bool SetFrustrationDiscouragement(AFortAIController* AI, float DiscouragementDuration);
 
     static AFortAIGoalManager* GetCurrent(const UObject* WorldContextObject);
     // GetCurrent for 5.0+'s encounter primary assignment lookup, which inlines FindAssignment (Finder::GoalManagerGetCurrentCalls).
     // Logs the encounter's assignments whenever they change, so a mission's spawn queries show what they measure from.
     static AFortAIGoalManager* GetCurrentForEncounterAssignments(const UObject* EncounterInfo);
     static void SetCurrentGoalDiscouragement(UObject* WorldContext, AFortAIController* AI);
+    // Core's diagnostics, from the frustration triggers (GAB_Hunting's SetCurrentGoalDiscouragement, BT_HuskBase's
+    // FortBTTask_SetFrustrationDiscouragement): the goal the AI gave up on, its perception and movement state and the
+    // navigation path to the goal, rate-limited.
+    static void LogFrustratedAI(AFortAIController* AI, const wchar_t* Reason);
     static void HookCallSites();
     static void HookNatives();
 

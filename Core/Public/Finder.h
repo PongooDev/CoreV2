@@ -184,6 +184,9 @@ namespace Finder
     bool ResolveGameSessionVerifyAuthLive(void** SessionVTable);
     bool ResolveGoalManagerLive();
     bool ResolveGoalDiscouragementLive();
+    // 5.0+: the build's own AFortAIGoalManager::SetFrustrationDiscouragement, from UFortBTTask_SetFrustrationDiscouragement's
+    // ExecuteTask (TaskVTable) passing DiscouragementDuration (at DurationOffset) third. False where ExecuteTask is stripped.
+    bool ResolveFrustrationDiscouragementLive(void** TaskVTable, ptrdiff_t DurationOffset);
     bool ResolveQueryGeneratorsLive(void** EnemiesVTable);
     // 4.0: AFortAIPawn's death handler's slot in PawnVTable (AFortAIPawn's), from the bUsesDBNO test in it.
     bool ResolveAIPawnDeathLive(void** PawnVTable, ptrdiff_t UsesDBNOOffset, uint8_t UsesDBNOMask);

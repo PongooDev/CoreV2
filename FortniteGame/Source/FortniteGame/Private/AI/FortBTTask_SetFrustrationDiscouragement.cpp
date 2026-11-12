@@ -15,6 +15,8 @@ EBTNodeResult UFortBTTask_SetFrustrationDiscouragement::ExecuteTask(UBrainCompon
     if (GoalManager)
     {
         GoalManager->SetFrustrationDiscouragement(AI, DiscouragementDuration);
+        // BT_HuskBase's "Can't Reach Anything" sequence: the move to the goal failed.
+        AFortAIGoalManager::LogFrustratedAI(AI, L"can't reach");
         return EBTNodeResult::Succeeded;
     }
 #endif
@@ -25,7 +27,9 @@ void UFortBTTask_SetFrustrationDiscouragement::HookVTables()
 {
     UObject* TaskDefault = StaticClass()->GetDefaultObject(false);
     void** TaskVTable = TaskDefault ? *reinterpret_cast<void***>(TaskDefault) : nullptr;
-    if (!TaskVTable || !Finder::ResolveGoalDiscouragementLive())
+    const bool bDiscouragement = TaskVTable && Finder::ResolveGoalDiscouragementLive();
+    // 5.0+ keeps Epic's ExecuteTask (only its AFortAIGoalManager::GetCurrent is stripped, which HookCallSites redirects).
+    if (!TaskVTable || Finder::ResolveFrustrationDiscouragementLive(TaskVTable, DiscouragementDurationOffset()) || !bDiscouragement)
     {
         return;
     }

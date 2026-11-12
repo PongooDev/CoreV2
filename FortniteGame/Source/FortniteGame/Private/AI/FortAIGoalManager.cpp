@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "AI/FortAIGoalManager.h"
 #include "AI/FortAIDirector.h"
+#include "AI/Navigation/NavigationSystem.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "Finder.h"
 #include "FortGameModeZone.h"
 #include "Hooks.h"
@@ -17,6 +19,7 @@
 
 #include <cstring>
 #include <format>
+#include <functional>
 #include <string>
 #include <unordered_map>
 
@@ -71,6 +74,152 @@ namespace
         }
         return Description;
     }
+
+    // Calls Object's reflected function by name and takes its ReturnValue; false when the build has no such function.
+    template <typename T>
+    bool CallReflected(UObject* Object, const wchar_t* FunctionName, T& OutValue, const std::function<void(Reflection::FParams&)>& SetParameters = nullptr)
+    {
+        const FName Name(FunctionName, FNAME_Find);
+        UFunction* Function = Object && !Name.IsNone() ? Object->FindFunction(Name) : nullptr;
+        if (!Function)
+        {
+            return false;
+        }
+        Reflection::FParams Params(Function, true);
+        if (SetParameters)
+        {
+            SetParameters(Params);
+        }
+        if (!Params.Call(Object))
+        {
+            return false;
+        }
+        OutValue = Params.Take<T>(L"ReturnValue");
+        return true;
+    }
+
+    UObject* ClassDefault(const wchar_t* ClassPath)
+    {
+        UClass* Class = FindObject<UClass>(nullptr, ClassPath);
+        return Class ? Class->GetDefaultObject() : nullptr;
+    }
+
+    std::wstring Named(const UObject* Object)
+    {
+        return Object ? Object->GetName().ToStdString() : std::wstring(L"none");
+    }
+
+    // The AI's blackboard value KeyName (GoalActorIsVisible, GoalActorAlwaysPerceived), as text.
+    std::wstring BlackboardBool(UObject* Blackboard, const wchar_t* KeyName)
+    {
+        bool bValue = false;
+        const FName Key(KeyName, FNAME_Find);
+        if (!Blackboard || Key.IsNone() || !CallReflected(Blackboard, L"GetValueAsBool", bValue, [&Key](Reflection::FParams& Params) { Params.Set(L"KeyName", Key); }))
+        {
+            return L"?";
+        }
+        return bValue ? L"yes" : L"no";
+    }
+}
+
+void AFortAIGoalManager::LogFrustratedAI(AFortAIController* AI, const wchar_t* Reason)
+{
+#if WITH_SERVER_CODE
+    // Core's diagnostics (#406), at the game's own frustration triggers: what an AI saw when it gave up on its goal, so a
+    // match log shows whether the goal was perceived, whether the pawn moved and whether the navigation data had a path.
+    // The first time an AI gives up on a goal, then every 20th time; at most 300 lines a server.
+    struct FFrustration
+    {
+        const UObject* Goal = nullptr;
+        int32_t Count = 0;
+    };
+    static std::unordered_map<const UObject*, FFrustration> Frustrations;
+    static int32_t Lines = 0;
+    APawn* Pawn = AI ? AI->GetPawn() : nullptr;
+    if (!Pawn || Lines >= 300)
+    {
+        return;
+    }
+
+    AActor* GoalActor = nullptr;
+    CallReflected(AI, L"GetGoalActor", GoalActor);
+    FFrustration& Frustration = Frustrations[AI];
+    Frustration.Count = Frustration.Goal == GoalActor ? Frustration.Count + 1 : 1;
+    Frustration.Goal = GoalActor;
+    if (Frustration.Count != 1 && Frustration.Count % 20 != 0)
+    {
+        return;
+    }
+    ++Lines;
+
+    UObject* Blackboard = nullptr;
+    if (UObject* Helpers = ClassDefault(L"/Script/AIModule.AIBlueprintHelperLibrary"))
+    {
+        CallReflected(Helpers, L"GetBlackboard", Blackboard, [AI](Reflection::FParams& Params) { Params.Set(L"Target", reinterpret_cast<AActor*>(static_cast<AController*>(AI))); });
+    }
+    UObject* Movement = nullptr;
+    float MaxSpeed = -1.0f;
+    CallReflected(Pawn, L"GetMovementComponent", Movement);
+    CallReflected(Movement, L"GetMaxSpeed", MaxSpeed);
+    uint8_t MoveStatus = 0xFF;
+    CallReflected(AI, L"GetMoveStatus", MoveStatus);
+    FVector PawnLocation(0, 0, 0);
+    CallReflected(Pawn, L"K2_GetActorLocation", PawnLocation);
+
+    // UNavigationSystem::FindPathToActorSynchronously with the pawn as the pathfinding context (its agent's navmesh).
+    std::wstring PathText = L"no goal actor";
+    UObject* Path = nullptr;
+    if (GoalActor && CallReflected(UNavigationSystem::StaticClass()->GetDefaultObject(), L"FindPathToActorSynchronously", Path, [&](Reflection::FParams& Params) {
+            Params.Set(L"WorldContextObject", reinterpret_cast<UObject*>(Pawn));
+            Params.Set(L"PathStart", PawnLocation);
+            Params.Set(L"GoalActor", GoalActor);
+            Params.Set(L"TetherDistance", 50.0f);
+            Params.Set(L"PathfindingContext", reinterpret_cast<AActor*>(Pawn));
+        }))
+    {
+        bool bValid = false;
+        bool bPartial = false;
+        float Length = 0.0f;
+        CallReflected(Path, L"IsValid", bValid);
+        CallReflected(Path, L"IsPartial", bPartial);
+        CallReflected(Path, L"GetPathLength", Length);
+        PathText = !Path ? L"none" : !bValid ? L"invalid" : std::format(L"{} {:.0f}", bPartial ? L"partial" : L"complete", Length);
+    }
+
+    UWorld* World = Pawn->GetWorld();
+    UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
+    std::wstring NavText = L"no navigation system";
+    if (NavSys)
+    {
+        const TArray<ANavigationData*>& NavDataSet = NavSys->NavDataSet;
+        NavText = std::format(L"{} navigation data", NavDataSet.Num());
+        for (ANavigationData* NavData : NavDataSet)
+        {
+            NavText += L" " + Named(reinterpret_cast<UObject*>(NavData));
+        }
+        NavText += UNavigationSystem::IsNavigationBeingBuilt(reinterpret_cast<UObject*>(World)) ? L", being built" : L", built";
+    }
+
+    int32_t TimesDiscouraged = 0;
+    FAIAssignmentInfo* AssignmentInfo = GetCurrent(AI) ? GetCurrent(AI)->GetAssignmentInfo(AI) : nullptr;
+    if (AssignmentInfo)
+    {
+        TStructArray<FAIDiscouragedGoalTimer>& Timers = AssignmentInfo->GetDiscouragedGoalTimers();
+        for (int32_t Index = 0; Index < Timers.Num(); ++Index)
+        {
+            if (Timers[Index].DiscouragedGoalInfo.Actor.Get() == reinterpret_cast<UObject*>(GoalActor))
+            {
+                TimesDiscouraged = static_cast<int32_t>(Timers[Index].NumberOfTimesMarkedForDiscouragement);
+            }
+        }
+    }
+
+    Log::Info(L"AFortAIGoalManager: {} ({}) {} goal {} ({} times in a row): visible {}, always perceived {}, distance {:.0f}; pawn speed {:.0f} of {:.0f}, move status {}; path {}; {}; discouraged {}",
+        Named(reinterpret_cast<UObject*>(static_cast<AController*>(AI))), Named(reinterpret_cast<UObject*>(Pawn)->GetClass()), Reason, Named(reinterpret_cast<UObject*>(GoalActor)), Frustration.Count,
+        BlackboardBool(Blackboard, L"GoalActorIsVisible"), BlackboardBool(Blackboard, L"GoalActorAlwaysPerceived"), GoalActor ? Pawn->GetDistanceTo(GoalActor) : -1.0f,
+        Pawn->GetVelocity().Size(), MaxSpeed, static_cast<int32_t>(MoveStatus), PathText, NavText,
+        AssignmentInfo ? std::format(L"{} times", TimesDiscouraged) : std::wstring(L"unavailable (no assignment info lookup)"));
+#endif
 }
 
 AFortAIGoalManager* AFortAIGoalManager::GetCurrentForEncounterAssignments(const UObject* EncounterInfo)
@@ -118,14 +267,20 @@ FAIAssignmentInfo* AFortAIGoalManager::GetAssignmentInfo(AFortAIController* AI)
     return static_cast<FAIAssignmentInfo*>(Natives::AFortAIGoalManager_GetAssignmentInfo(this, AI));
 }
 
-void AFortAIGoalManager::SetFrustrationDiscouragement(AFortAIController* AI, float DiscouragementDuration)
+bool AFortAIGoalManager::SetFrustrationDiscouragement(AFortAIController* AI, float DiscouragementDuration)
 {
 #if WITH_SERVER_CODE
+    if (Natives::AFortAIGoalManager_SetFrustrationDiscouragement)
+    {
+        // 5.0+ keeps Epic's (it also passes the pawn's location to the world's UFortNavSystem first).
+        return Natives::AFortAIGoalManager_SetFrustrationDiscouragement(this, AI, DiscouragementDuration);
+    }
+
     FAIAssignmentInfo* AssignmentInfo = GetAssignmentInfo(AI);
     UWorld* World = AssignmentInfo ? GetWorld() : nullptr;
     if (!World)
     {
-        return;
+        return false;
     }
 
     const double CurrentTime = World->GetTimeSeconds();
@@ -141,7 +296,7 @@ void AFortAIGoalManager::SetFrustrationDiscouragement(AFortAIController* AI, flo
         {
             Timer.ExpirationTime = CurrentTime + DiscouragementDuration;
             Timer.NumberOfTimesMarkedForDiscouragement = Timer.NumberOfTimesMarkedForDiscouragement + 1;
-            return;
+            return true;
         }
     }
 
@@ -150,6 +305,9 @@ void AFortAIGoalManager::SetFrustrationDiscouragement(AFortAIController* AI, flo
     std::memcpy(&DiscouragedGoalInfo, &CurrentGoal, FFortAIGoalInfo::StaticStruct()->GetStructureSize());
     Timer.ExpirationTime = CurrentTime + DiscouragementDuration;
     Timer.NumberOfTimesMarkedForDiscouragement = 1;
+    return true;
+#else
+    return false;
 #endif
 }
 
@@ -160,6 +318,8 @@ void AFortAIGoalManager::SetCurrentGoalDiscouragement(UObject* WorldContext, AFo
     if (AFortAIGoalManager* GoalManager = GetCurrent(WorldContext))
     {
         GoalManager->SetFrustrationDiscouragement(AI, DefaultDiscouragementDuration);
+        // GAB_Hunting's call: the hunt found no way to its goal (the pawn or the goal distance stopped changing).
+        LogFrustratedAI(AI, L"gave up hunting");
     }
 #endif
 }

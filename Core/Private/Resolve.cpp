@@ -7501,32 +7501,46 @@ bool Finder::ResolveCraftingLive()
         Previous = Target;
     }
 
-    // 5.0 (UE 4.21, CL-4204761 CanCraftSchematic 0xF344E0) inlines GetSchematicQuantityProduced (0xF44900): a missing
-    // ingredient's schematic is "call GetSchematicForItem (0x1134100); call [rdx+398h] (GetItemDefinitionBP); call
-    // UFortSchematicItemDefinition::StaticClass; call 0xF44570; call 0xF43A70", then CanCraftSchematic calls itself for
-    // it. So no call to QuantityProduced followed GetSchematicForItem and crafting went unresolved on 5.0's STW. Here
-    // GetSchematicForItem is the last call before that recursion that isn't QuantityProduced or one of its callees.
+    // From 5.0 (UE 4.21) CanCraftSchematic inlines GetSchematicQuantityProduced, so no call to it follows
+    // GetSchematicForItem. A missing ingredient's schematic is then (5.0 CL-4204761 0xF347F2, 6.02 CL-4461277 0xFA5FE2)
+    // "call GetSchematicForItem; mov r12, rax; test rax, rax; jz; mov rdx, [rax]; mov rcx, rax; call [rdx+398h]": the
+    // GetItemDefinitionBP call GetSchematicQuantityProduced opens with, made on the schematic just found. The rest of the
+    // inlined body follows, and then CanCraftSchematic calls itself for that schematic. So GetSchematicForItem is the
+    // direct call right before the last such virtual call ahead of the recursion.
+    // The rule this replaces took the last direct call before the recursion that GetSchematicQuantityProduced doesn't
+    // make itself. That was never GetSchematicForItem: 5.0 to 5.40 and 6.01 leave GetSchematicQuantityProduced through a
+    // jmp, which isn't a call, so its target was taken (5.0 0xF43A70, the quantity read); 6.00 and 6.02 inline that too,
+    // the function outgrew the size the rule read it up to, and the last call left was FMemory::Free (6.02 0x161BB70),
+    // called on the player controller when a craft was short of an ingredient that has its own schematic.
     if (CanCraftEnd && !GetSchematicForItem)
     {
         const uintptr_t QuantityProducedEnd = Finder::FunctionEnd(QuantityProduced);
-        std::vector<uintptr_t> QuantityProducedCallees{ QuantityProduced };
-        for (const auto& [Site, Target] : QuantityProducedEnd > QuantityProduced && QuantityProducedEnd - QuantityProduced <= 0x100 ? Finder::DirectCalls(QuantityProduced, QuantityProducedEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
-        {
-            QuantityProducedCallees.push_back(Target);
-        }
+        const int32_t GetItemDefinitionIndex = QuantityProducedEnd ? VirtualSlot(FindVirtualCall(QuantityProduced, QuantityProducedEnd)) : -1;
 
-        uintptr_t PreviousOwn = 0;
+        uintptr_t Recursion = 0;
         for (const auto& [Site, Target] : Finder::DirectCalls(CanCraft, CanCraftEnd))
         {
             if (Target == CanCraft)
             {
-                GetSchematicForItem = PreviousOwn;
+                Recursion = Site;
                 break;
             }
-            if (std::find(QuantityProducedCallees.begin(), QuantityProducedCallees.end(), Target) == QuantityProducedCallees.end())
+        }
+
+        uintptr_t IngredientSchematicDefinition = 0;
+        for (uintptr_t Site = Recursion && GetItemDefinitionIndex >= 0 ? FindVirtualCall(CanCraft, Recursion) : 0; Site; Site = FindVirtualCall(Site + 1, Recursion))
+        {
+            if (VirtualSlot(Site) == GetItemDefinitionIndex)
             {
-                PreviousOwn = Target;
+                IngredientSchematicDefinition = Site;
             }
+        }
+
+        // The call's result is tested and becomes the virtual call's object: 23 bytes apart in 5.0 to 6.02.
+        constexpr uintptr_t MaxBytesToVirtualCall = 0x30;
+        for (const auto& [Site, Target] : IngredientSchematicDefinition ? Finder::DirectCalls(CanCraft, IngredientSchematicDefinition) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            GetSchematicForItem = Site + MaxBytesToVirtualCall >= IngredientSchematicDefinition && Target != CanCraft && Target != QuantityProduced ? Target : 0;
         }
     }
 
@@ -7538,7 +7552,8 @@ bool Finder::ResolveCraftingLive()
     Natives::UFortSchematicItem_ServerCraftSchematicIndex = CraftIndex;
     Natives::UFortSchematicItem_CanCraftSchematic = reinterpret_cast<decltype(Natives::UFortSchematicItem_CanCraftSchematic)>(CanCraft);
     Natives::AFortPlayerController_GetSchematicForItem = reinterpret_cast<decltype(Natives::AFortPlayerController_GetSchematicForItem)>(GetSchematicForItem);
-    Log::Info(L"Finder: UFortSchematicItem::ServerCraftSchematic is slot 0x{:X}", CraftIndex);
+    Log::Info(L"Finder: UFortSchematicItem::ServerCraftSchematic is slot 0x{:X} (CanCraftSchematic 0x{:X}, AFortPlayerController::GetSchematicForItem 0x{:X})",
+        CraftIndex, CanCraft - Finder::ImageBase(), GetSchematicForItem - Finder::ImageBase());
     return true;
 }
 

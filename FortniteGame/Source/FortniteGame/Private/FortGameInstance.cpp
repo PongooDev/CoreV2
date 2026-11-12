@@ -26,6 +26,13 @@ void UFortGameInstance::Hook()
 
     // The function that names the chatroom, then the function the piece holding the name jumps back into.
     std::vector<uintptr_t> Candidates;
+    // 6.10 (CL-4480234): the packer put the piece inside another function's .pdata range (lea at 0x89C097, in 0x89BE20's
+    // 0x89BE20-0x89C129), and that function is a virtual three vtable slots hold, so the reference's function passed for
+    // Init: Core swapped those three slots and left Init (0xE81770) alone, and the server died at the game state's
+    // session id change for want of the dedicated server's analytics provider. Init is the function the piece provably
+    // belongs to: the one it jumps back into (0xE81957), whose own jmp to the piece (0xE81946 to 0x89C091, the mov r8d,
+    // 1 before the lea) sits right before that return address. Those functions are tried before the others.
+    std::vector<uintptr_t> Owners;
     for (uintptr_t Reference : Finder::StringRefs(L"TeamChatroom"))
     {
         Candidates.push_back(Finder::FunctionStart(Reference));
@@ -39,7 +46,18 @@ void UFortGameInstance::Hook()
         {
             if (*reinterpret_cast<const uint8_t*>(Jump) == 0xE9)
             {
-                Candidates.push_back(Finder::FunctionStart(Finder::RelativeTarget(Jump, 1, 5)));
+                const uintptr_t Return = Finder::RelativeTarget(Jump, 1, 5);
+                const uintptr_t Owner = Finder::FunctionStart(Return);
+                Candidates.push_back(Owner);
+                for (uintptr_t Leave = Owner && Return - Owner >= 0x20 ? Return - 0x20 : 0; Leave && Leave + 5 <= Return; ++Leave)
+                {
+                    const uintptr_t Piece = *reinterpret_cast<const uint8_t*>(Leave) == 0xE9 ? Finder::RelativeTarget(Leave, 1, 5) : 0;
+                    if (Piece && Piece <= Reference && Reference - Piece <= 0x10)
+                    {
+                        Owners.push_back(Owner);
+                        break;
+                    }
+                }
                 break;
             }
         }
@@ -57,7 +75,8 @@ void UFortGameInstance::Hook()
     {
         uintptr_t Init = 0;
         std::vector<void**> Slots;
-        for (const uintptr_t Candidate : Candidates)
+        Owners.insert(Owners.end(), Candidates.begin(), Candidates.end());
+        for (const uintptr_t Candidate : Owners)
         {
             Slots = Finder::ReadOnlySlotsHolding(Candidate);
             if (!Slots.empty())

@@ -52,6 +52,36 @@ void UNavigationSystem::RequestRegistration(ANavigationData* NavData, bool bTrig
     }
 }
 
+bool UNavigationSystem::CanSpawnMissingNavigationData()
+{
+    return Natives::UNavigationSystem_SpawnMissingNavigationDataIndex >= 0
+        && (Natives::UNavigationSystem_ProcessRegistrationCandidatesIndex >= 0 || Natives::UNavigationSystem_ProcessRegistrationCandidates);
+}
+
+void UNavigationSystem::SpawnMissingNavigationData()
+{
+    if (Natives::UNavigationSystem_SpawnMissingNavigationDataIndex >= 0)
+    {
+        using FSpawnMissingNavigationData = void (*)(UNavigationSystem* This);
+        void** VTable = *reinterpret_cast<void***>(this);
+        reinterpret_cast<FSpawnMissingNavigationData>(VTable[Natives::UNavigationSystem_SpawnMissingNavigationDataIndex])(this);
+    }
+}
+
+void UNavigationSystem::ProcessRegistrationCandidates()
+{
+    if (Natives::UNavigationSystem_ProcessRegistrationCandidatesIndex >= 0)
+    {
+        using FProcessRegistrationCandidates = void (*)(UNavigationSystem* This);
+        void** VTable = *reinterpret_cast<void***>(this);
+        reinterpret_cast<FProcessRegistrationCandidates>(VTable[Natives::UNavigationSystem_ProcessRegistrationCandidatesIndex])(this);
+    }
+    else if (Natives::UNavigationSystem_ProcessRegistrationCandidates)
+    {
+        Natives::UNavigationSystem_ProcessRegistrationCandidates(this);
+    }
+}
+
 bool UNavigationSystem::InitializeForWorld(UWorld* World, FNavigationSystemRunMode::Type Mode)
 {
     if (!Natives::UNavigationSystem_InitializeForWorld || !World)

@@ -63,6 +63,23 @@ class UObjectPropertyBase : public UProperty
     DefinePropertyLayoutMember(UClass*, PropertyClass, UObjectPropertyBase_PropertyClass)
 };
 
+// A hard object reference (UClassProperty is one too): its value is the object pointer itself.
+class UObjectProperty : public UObjectPropertyBase
+{
+    DefineUnrealClass(UObjectProperty, CoreUObject)
+
+public:
+    UObject* GetObjectPropertyValue(const void* PropertyValueAddress) const
+    {
+        return *static_cast<UObject* const*>(PropertyValueAddress);
+    }
+
+    void SetObjectPropertyValue(void* PropertyValueAddress, UObject* Value) const
+    {
+        *static_cast<UObject**>(PropertyValueAddress) = Value;
+    }
+};
+
 class UStructProperty : public UProperty
 {
     DefineUnrealClass(UStructProperty, CoreUObject)

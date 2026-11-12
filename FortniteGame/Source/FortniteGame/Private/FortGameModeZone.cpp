@@ -189,6 +189,42 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
     if (NavSys)
     {
+        // The supported agents' navigation data: FortNavMesh-Husk and FortNavMesh-Smasher, the husks' navmeshes (their
+        // agents' navigation data and the system's main one), and the graph. Up to 4.5 the navigation system spawns them
+        // by itself once the zone's unit NavMeshBoundsVolume is in the world (bAutoCreateNavigationData). From 5.0 (UE
+        // 4.21) it doesn't: the world settings' UNavigationSystemModuleConfig takes the navigation system class default's
+        // flags only when its class is UNavigationSystemV1 itself (PostInitProperties, 6.00 CL-4395664 0x2BF82A0), so a
+        // FortNavSystem config keeps bAutoSpawnMissingNavData false and the system is made with bAutoCreateNavigationData
+        // off (CreateAndConfigureNavigationSystem, 0x2BCFF10). A zone whose map saves its navmeshes still gets those
+        // registered at world init. A generated zone had none (5.30's Zone_Temperate_Suburban logs "Unable to find
+        // RecastNavMesh instance" where 4.4's has a FortNavMesh-Husk): the husks' agent had no navmesh, the system had no
+        // main navigation data, and every hunt ended without a path (#408).
+        //
+        // Epic's server spawns them in UFortNavSystem::PrepareBoundsAndUnlock (6.00 0xAF37E0, 4.5 0x93E760), the virtual
+        // its stripped world-ready code gives the grid's bounds to: with no navigation data yet,
+        // SpawnMissingNavigationData then ProcessRegistrationCandidates; with no graph, SpawnMissingNavigationData; then
+        // the octree lock, ConditionalPopulateNavOctree, the graph's OnWorldInitialized and ReleaseInitialBuildingLock.
+        // Core's graph is spawned earlier (when the support grid is laid out), so neither test would pass here: Core asks
+        // for whatever is missing. SpawnMissingNavigationData spawns only the agents with no data, so an older build's
+        // navmeshes, a map's saved ones and the graph stay as they are. It comes before the octree, as in Epic's:
+        // ConditionalPopulateNavOctree makes one only when a registered navigation data supports runtime generation (the
+        // navmeshes do, the graph doesn't), and the navmeshes build their tiles from it.
+        if (UNavigationSystem::CanSpawnMissingNavigationData())
+        {
+            const TArray<ANavigationData*>& NavDataSet = NavSys->NavDataSet;
+            const int32_t NumNavData = NavDataSet.Num();
+            NavSys->SpawnMissingNavigationData();
+            NavSys->ProcessRegistrationCandidates();
+            std::wstring Names;
+            for (ANavigationData* NavData : NavDataSet)
+            {
+                Names += (Names.empty() ? L"" : L", ") + (NavData ? reinterpret_cast<UObject*>(NavData)->GetName().ToStdString() : std::wstring(L"none"));
+            }
+            ANavigationData* MainNavData = NavSys->GetDefaultNavDataInstance();
+            UE_LOG(LogNavigation, Log, TEXT("Navigation data for %d agents: %s (%d spawned); main %s"), NavSys->SupportedAgents.Num(), Names.c_str(), NavDataSet.Num() - NumNavData,
+                MainNavData ? *reinterpret_cast<UObject*>(MainNavData)->GetName() : TEXT("none"));
+        }
+
         NavSys->SetNavigationOctreeLock(false);
         NavSys->ConditionalPopulateNavOctree();
 
@@ -262,6 +298,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
             UE_LOG(LogNavigation, Log, TEXT("Navigation bounds (%.0f, %.0f, %.0f) - (%.0f, %.0f, %.0f) from %d building actors"), WorldMin.X, WorldMin.Y, WorldMin.Z, WorldMax.X, WorldMax.Y, WorldMax.Z, NumBuildings);
         }
 
+        int32_t NumBoundsVolumes = 0;
         for (TObjectIterator<ANavMeshBoundsVolume> It; It && bHasWorldBounds; ++It)
         {
             ANavMeshBoundsVolume* NavBounds = *It;
@@ -276,6 +313,7 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
             {
                 UE_LOG(LogNavigation, Log, TEXT("Keeping %s's own navigation bounds (%.0f, %.0f, %.0f) - (%.0f, %.0f, %.0f)"), *NavBounds->GetFullName(),
                     Origin.X - Extent.X, Origin.Y - Extent.Y, Origin.Z - Extent.Z, Origin.X + Extent.X, Origin.Y + Extent.Y, Origin.Z + Extent.Z);
+                ++NumBoundsVolumes;
                 continue;
             }
             if (USceneComponent* Root = NavBounds->GetRootComponent())
@@ -285,6 +323,14 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
             NavBounds->SetActorScale3D(WorldMax - WorldMin);
             NavBounds->SetActorLocation((WorldMin + WorldMax) * 0.5f);
             NavSys->OnNavigationBoundsUpdated(NavBounds);
+            ++NumBoundsVolumes;
+        }
+        if (bHasWorldBounds && NumBoundsVolumes == 0)
+        {
+            // The navmeshes build inside the navigation bounds only. A zone map streams /Game/Maps/NavMeshBounds for its
+            // unit volume (Zone_Temperate_Suburban and Zone_Onboarding_Suburban_a prestream it on 5.30 and 6.00), which is
+            // what gets the zone's size above; a zone without one shows here.
+            UE_LOG(LogNavigation, Warning, TEXT("No NavMeshBoundsVolume in the world: the navmeshes have no bounds to build in"));
         }
 
         const double Started = NowMs();

@@ -7,10 +7,48 @@
 #include "Missions/FortMissionInterface.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
 
 #include <algorithm>
 #include <vector>
+
+namespace
+{
+    // The mission event params initialization, for the builds that have no copy of it to call: 5.30 to 6.01 inline it
+    // into AFortMissionState::PostInitializeComponents (6.00 CL-4395664 0x10145B0, 5.41 0xFD4140). For each
+    // UObjectProperty of the object's class, its supers' included, whose PropertyClass is a UFortMissionEventParams and
+    // whose value isn't one: SetObjectPropertyValue(NewObject<UObject>(Object, PropertyClass)).
+    void InitializeMissionEventParams(UObject* Object)
+    {
+        static UClass* ParamsClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortMissionEventParams");
+        if (!Object || !ParamsClass || Object->HasAnyFlags(RF_ClassDefaultObject))
+        {
+            return;
+        }
+        for (TFieldIterator<UProperty> It(Object->GetClass()); It; ++It)
+        {
+            // TFieldIterator<UObjectProperty>, as 6.00's (0x1010910): the fields whose class has the cast flag.
+            if (!It->GetClass()->HasAnyCastFlag(CASTCLASS_UObjectProperty))
+            {
+                continue;
+            }
+            const UObjectProperty* Property = static_cast<const UObjectProperty*>(*It);
+            UClass* PropertyClass = Property->PropertyClass;
+            if (!PropertyClass || !PropertyClass->IsChildOf(ParamsClass))
+            {
+                continue;
+            }
+            void* PropertyValueAddress = Property->ContainerPtrToValuePtr<void>(Object);
+            const UObject* Value = Property->GetObjectPropertyValue(PropertyValueAddress);
+            if (!Value || !Value->IsA(ParamsClass))
+            {
+                Property->SetObjectPropertyValue(PropertyValueAddress, NewObject<UObject>(Object, PropertyClass));
+            }
+        }
+    }
+}
 
 void ABuildingActor::PostInitializeComponents()
 {
@@ -24,9 +62,23 @@ void ABuildingActor::PostInitializeComponents()
     // GenDeposit->SetParams(Player) then ExecuteMissionEventEx(TryDepositItem, Params: GenDeposit). With GenDeposit
     // null the event carried no params and no instigator, so Gen_Deposit's TryDepositItem had no player to take the
     // BluGlo from and interacting did nothing (CoreV2 #219).
+    //
+    // An encampment (EncampmentBase_Parent, a building) starts its Gen_ClearEncounter objective the same way:
+    // StartClearAIEncounter->SetParams(its encounter settings, the mission's ClearObjectiveText, ...), then
+    // ExecuteMissionEventEx(StartObjective, Params). Without the params object the objective took its deprecated path
+    // (default encounter settings, no text) and the objective tracker showed its placeholder text,
+    // "GenericObjective_TextDisplay", for "Kill all encampment enemies" (CoreV2 #408, on the builds that inline the
+    // initialization, where Core found nothing to call).
     if (UKismetSystemLibrary::DoesImplementInterface(this, UFortMissionInterface::StaticClass()))
     {
-        Natives::InitializeMissionEventParams(this);
+        if (Natives::InitializeMissionEventParams)
+        {
+            Natives::InitializeMissionEventParams(this);
+        }
+        else
+        {
+            InitializeMissionEventParams(this);
+        }
     }
 #endif
 }

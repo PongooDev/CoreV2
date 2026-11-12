@@ -354,22 +354,57 @@ AFortNavigationGraph* AFortNavigationGraph::FindOrSpawn(UWorld* World)
         return nullptr;
     }
 
+    // The agent the graph is the navigation data of: the zone's FortNavSystem has one (Graph), a Battle Royale world's
+    // navigation system has none.
+    TStructArray<FNavDataConfig>& SupportedAgents = NavSys->SupportedAgents;
+    int32_t GraphAgent = -1;
+    for (int32_t Index = 0; Index < SupportedAgents.Num() && GraphAgent < 0; ++Index)
+    {
+        if (SupportedAgents[Index].NavigationDataClass == StaticClass())
+        {
+            GraphAgent = Index;
+        }
+    }
+
+    // No graph: the navigation system hasn't spawned its agents' navigation data. Up to 4.5 it does by itself
+    // (bAutoCreateNavigationData); from 5.0 (UE 4.21) a FortNavSystem is made with that off, and Epic's server asks for
+    // them in UFortNavSystem::PrepareBoundsAndUnlock (6.00 CL-4395664 0xAF37E0: "if (!NavGraphData)
+    // SpawnMissingNavigationData()"). The system's own SpawnMissingNavigationData spawns every supported agent's missing
+    // data: FortNavMesh-Husk and FortNavMesh-Smasher, the husks' navmeshes, with the graph. Core needs the graph now,
+    // when the support grid is laid out, so the buildings registered from here on fill its cells; the navmeshes come
+    // with it, as they are there from world init on the older builds (#408: with only the graph, the husks' agent had no
+    // navmesh and nothing could path).
+    if (GraphAgent >= 0 && UNavigationSystem::CanSpawnMissingNavigationData())
+    {
+        const TArray<ANavigationData*>& NavDataSet = NavSys->NavDataSet;
+        const int32_t NumNavData = NavDataSet.Num();
+        NavSys->SpawnMissingNavigationData();
+        NavSys->ProcessRegistrationCandidates();
+        std::wstring Names;
+        for (ANavigationData* NavData : NavDataSet)
+        {
+            Names += (Names.empty() ? L"" : L", ") + (NavData ? reinterpret_cast<UObject*>(NavData)->GetName().ToStdString() : std::wstring(L"none"));
+        }
+        ANavigationData* MainNavData = NavSys->GetDefaultNavDataInstance();
+        Log::Info(L"AFortNavigationGraph: the navigation system had no graph, SpawnMissingNavigationData: {} navigation data for {} agents ({} new): {}; main {}", NavDataSet.Num(),
+            SupportedAgents.Num(), NavDataSet.Num() - NumNavData, Names, MainNavData ? reinterpret_cast<UObject*>(MainNavData)->GetName().ToStdString() : std::wstring(L"none"));
+        if (AFortNavigationGraph* Graph = GetCurrent(World))
+        {
+            return Graph;
+        }
+    }
+
+    // The graph by hand, where the system's SpawnMissingNavigationData isn't found or doesn't spawn one.
     AFortNavigationGraph* Graph = World->SpawnActor<AFortNavigationGraph>(StaticClass());
     if (!Graph)
     {
         return nullptr;
     }
 
-    TStructArray<FNavDataConfig>& SupportedAgents = NavSys->SupportedAgents;
-    for (int32_t Index = 0; Index < SupportedAgents.Num(); ++Index)
+    if (GraphAgent >= 0)
     {
-        FNavDataConfig& Agent = SupportedAgents[Index];
-        if (Agent.NavigationDataClass == StaticClass())
-        {
-            FNavDataConfig::StaticStruct()->CopyScriptStruct(&Graph->NavDataConfig, &Agent);
-            NavSys->RequestRegistration(Graph, true);
-            break;
-        }
+        FNavDataConfig::StaticStruct()->CopyScriptStruct(&Graph->NavDataConfig, &SupportedAgents[GraphAgent]);
+        NavSys->RequestRegistration(Graph, true);
     }
     return Graph;
 #else
@@ -591,4 +626,45 @@ void AFortNavigationGraph::OnWorldInitialized()
     }
     UE_LOG(LogNavigation, Log, TEXT("AFortNavigationGraph::OnWorldInitialized time:%.3fms memory:%.1fkB"), ElapsedMs, static_cast<double>(Bytes) / 1024.0);
 #endif
+}
+
+std::wstring AFortNavigationGraph::DescribeCellAt(const FVector& Location, bool& bOutBuilt) const
+{
+    bOutBuilt = false;
+    if (!AreCellsInitialized())
+    {
+        return L"no cells";
+    }
+
+    // The cell index FNavGraphCells::GetCellIndex works out (6.00 CL-4395664 0xB13940), without allocating the block it
+    // allocates when the block is missing: block (x >> ShiftX) + BlocksX * ((y >> ShiftY) + BlocksY * (z >> ShiftZ)), then
+    // the cell in it (x & MaskX) | (y & MaskY) << ShiftX | (z & MaskZ) << (ShiftX + ShiftY).
+    const FNavGraphCells& Grid = Cells;
+    const int32_t Coords[3] = {
+        static_cast<int32_t>(std::floor(Location.X / CellSizeXY)) - Grid.Origin[0],
+        static_cast<int32_t>(std::floor(Location.Y / CellSizeXY)) - Grid.Origin[1],
+        static_cast<int32_t>(std::floor(Location.Z / CellSizeZ)) - Grid.Origin[2],
+    };
+    std::wstring Description = std::format(L"({}, {}, {})", Coords[0], Coords[1], Coords[2]);
+    if (Coords[0] < 0 || Coords[0] >= Grid.Size[0] || Coords[1] < 0 || Coords[1] >= Grid.Size[1] || Coords[2] < 0 || Coords[2] >= Grid.Size[2])
+    {
+        return Description + L" outside the grid";
+    }
+    const int32_t Block = (Coords[0] >> Grid.BlockShift[0]) + Grid.Blocks[0] * ((Coords[1] >> Grid.BlockShift[1]) + Grid.Blocks[1] * (Coords[2] >> Grid.BlockShift[2]));
+    const int32_t FirstCell = Block >= 0 && Block < Grid.BlockCells.Num() ? Grid.BlockCells[Block] : -1;
+    if (FirstCell < 0)
+    {
+        return Description + std::format(L" in empty block {}", Block);
+    }
+    bOutBuilt = true;
+    const int32_t CellIndex = FirstCell + ((Coords[0] & Grid.BlockMask[0]) | ((Coords[1] & Grid.BlockMask[1]) << Grid.BlockShift[0]) | ((Coords[2] & Grid.BlockMask[2]) << (Grid.BlockShift[0] + Grid.BlockShift[1])));
+    if (CellIndex < 0 || CellIndex >= Grid.Cells.Num())
+    {
+        return Description + std::format(L" in block {}, cell {} past the {} cells", Block, CellIndex, Grid.Cells.Num());
+    }
+    const FNavGraphCell& Cell = Grid.Cells[CellIndex];
+    const TArray<TArray<uint32_t>>& Links = BlockLinks;
+    const int32_t BlockLinkCount = Block < Links.Num() ? Links[Block].Num() : -1;
+    return Description + std::format(L" in block {} ({} links): ground links 0x{:02X}, steps 0x{:04X}, floors 0x{:02X}, walls 0x{:02X}, ramp/floor links {}/{}",
+        Block, BlockLinkCount, Cell.GroundLinks, Cell.GroundSteps, Cell.Floors, Cell.Walls, Cell.RampLinkCount, Cell.FloorLinkCount);
 }

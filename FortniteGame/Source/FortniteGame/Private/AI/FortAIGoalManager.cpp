@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "AI/FortAIGoalManager.h"
 #include "AI/FortAIDirector.h"
+#include "AI/Navigation/FortNavigationGraph.h"
 #include "AI/Navigation/NavigationSystem.h"
+#include "AI/Navigation/RecastNavMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "Finder.h"
@@ -13,6 +15,7 @@
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UnrealType.h"
 #include "Containers/ScriptArray.h"
 #include "Math/Vector.h"
 #include "UObject/WeakObjectPtr.h"
@@ -120,6 +123,103 @@ namespace
         }
         return bValue ? L"yes" : L"no";
     }
+
+    // An object pointer member of Object, by its reflected name (a property Core has no wrapper for).
+    UObject* ObjectProperty(UObject* Object, const wchar_t* Name)
+    {
+        UProperty* Property = Object ? Object->GetClass()->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        return Property && Property->ElementSize == sizeof(UObject*) ? *reinterpret_cast<UObject**>(reinterpret_cast<uint8_t*>(Object) + Property->GetOffset_ForInternal()) : nullptr;
+    }
+
+    // Whether NavData has anything at Point: K2_ProjectPointToNavigation within the data's default query extent (the zero
+    // extent the parameters start with is INVALID_NAVEXTENT).
+    bool ProjectsToNavigation(APawn* Pawn, const FVector& Point, ANavigationData* NavData)
+    {
+        bool bProjected = false;
+        CallReflected(UNavigationSystem::StaticClass()->GetDefaultObject(), L"K2_ProjectPointToNavigation", bProjected, [&](Reflection::FParams& Params) {
+            Params.Set(Params.Has(L"WorldContextObject") ? L"WorldContextObject" : L"WorldContext", reinterpret_cast<UObject*>(Pawn));
+            Params.Set(L"Point", Point);
+            Params.Set(L"NavData", NavData);
+        });
+        return bProjected;
+    }
+
+    // Core's diagnostics (#408): the step of the pawn's way to its goal that fails.
+    // - The navigation data. The pawn's is its path following component's MyNavData (UNavigationSystem::GetNavDataForProps
+    //   for its agent: what its move requests and EQS_Hunting's grid projection and pathfinding test use), else the
+    //   system's main one. A husk's is FortNavMesh-Husk. Without the navmeshes GetNavDataForProps gives it the
+    //   best-fitting agent's data, the graph, or none: no navmesh to walk on. That is reported as the failure, with the
+    //   graph's cells under both ends (an empty graph region shows there).
+    // - Projecting the start, then the goal, onto the navmesh: no tile there yet, or off the navmesh.
+    // - The search itself (FindPathToLocationSynchronously on that navigation data). The engine's synchronous search
+    //   returns no path object, before searching at all, while the system has no main navigation data.
+    std::wstring DescribeHuntingPath(AFortAIController* AI, APawn* Pawn, AActor* GoalActor, const FVector& PawnLocation, UNavigationSystem* NavSys)
+    {
+        if (!GoalActor)
+        {
+            return L"no goal actor";
+        }
+        if (!NavSys)
+        {
+            return L"fails at the navigation system (the world has none)";
+        }
+
+        UObject* PathFollowing = nullptr;
+        CallReflected(AI, L"GetPathFollowingComponent", PathFollowing);
+        ANavigationData* AgentNavData = reinterpret_cast<ANavigationData*>(ObjectProperty(PathFollowing, L"MyNavData"));
+        ANavigationData* MainNavData = NavSys->GetDefaultNavDataInstance();
+        ANavigationData* NavData = AgentNavData ? AgentNavData : MainNavData;
+        FVector GoalLocation(0, 0, 0);
+        CallReflected(GoalActor, L"K2_GetActorLocation", GoalLocation);
+
+        AFortNavigationGraph* Graph = AFortNavigationGraph::GetCurrent(Pawn->GetWorld());
+        bool bStartBuilt = false;
+        bool bGoalBuilt = false;
+        const std::wstring GraphText = Graph ? std::format(L"graph cells: start {}, goal {}", Graph->DescribeCellAt(PawnLocation, bStartBuilt), Graph->DescribeCellAt(GoalLocation, bGoalBuilt)) : std::wstring(L"no graph");
+        const std::wstring DataText = std::format(L"the agent's navigation data {}, main {}", Named(reinterpret_cast<UObject*>(AgentNavData)), Named(reinterpret_cast<UObject*>(MainNavData)));
+
+        if (!NavData)
+        {
+            return std::format(L"fails at the navigation data (none for the pawn's agent, no main one); {}", GraphText);
+        }
+        if (!reinterpret_cast<UObject*>(NavData)->IsA(ARecastNavMesh::StaticClass()))
+        {
+            // Nothing is asked of it: the graph has no FindPathImplementation (6.00's constructor, 0xB0B170, sets none),
+            // so a path request on it calls a null pointer.
+            return std::format(L"fails at {}; {}; {}", Graph && (!bStartBuilt || !bGoalBuilt) ? L"an empty graph region, and the pawn's navigation data is no navmesh (none for its agent)"
+                : L"the navigation data (no navmesh for the pawn's agent)", DataText, GraphText);
+        }
+
+        const bool bStartProjected = ProjectsToNavigation(Pawn, PawnLocation, NavData);
+        const bool bGoalProjected = ProjectsToNavigation(Pawn, GoalLocation, NavData);
+
+        std::wstring SearchText = L"not run";
+        bool bFound = false;
+        UObject* Path = nullptr;
+        if (MainNavData && CallReflected(UNavigationSystem::StaticClass()->GetDefaultObject(), L"FindPathToLocationSynchronously", Path, [&](Reflection::FParams& Params) {
+                Params.Set(Params.Has(L"WorldContextObject") ? L"WorldContextObject" : L"WorldContext", reinterpret_cast<UObject*>(Pawn));
+                Params.Set(L"PathStart", PawnLocation);
+                Params.Set(L"PathEnd", GoalLocation);
+                Params.Set(L"PathfindingContext", reinterpret_cast<AActor*>(NavData));
+            }))
+        {
+            bool bValid = false;
+            bool bPartial = false;
+            float Length = 0.0f;
+            CallReflected(Path, L"IsValid", bValid);
+            CallReflected(Path, L"IsPartial", bPartial);
+            CallReflected(Path, L"GetPathLength", Length);
+            bFound = Path && bValid;
+            SearchText = !Path ? L"no path object" : !bValid ? L"no path" : std::format(L"{} {:.0f}", bPartial ? L"partial" : L"complete", Length);
+        }
+
+        const wchar_t* Failure = !bStartProjected ? L"projecting the start"
+            : !bGoalProjected ? L"projecting the goal"
+            : !MainNavData ? L"the search (not run: the system has no main navigation data)"
+            : !bFound ? L"the search"
+            : L"nothing (a path exists)";
+        return std::format(L"fails at {}; {}, start projected {}, goal projected {}, search {}; {}", Failure, DataText, bStartProjected ? L"yes" : L"no", bGoalProjected ? L"yes" : L"no", SearchText, GraphText);
+    }
 }
 
 void AFortAIGoalManager::LogFrustratedAI(AFortAIController* AI, const wchar_t* Reason)
@@ -166,28 +266,9 @@ void AFortAIGoalManager::LogFrustratedAI(AFortAIController* AI, const wchar_t* R
     FVector PawnLocation(0, 0, 0);
     CallReflected(Pawn, L"K2_GetActorLocation", PawnLocation);
 
-    // UNavigationSystem::FindPathToActorSynchronously with the pawn as the pathfinding context (its agent's navmesh).
-    std::wstring PathText = L"no goal actor";
-    UObject* Path = nullptr;
-    if (GoalActor && CallReflected(UNavigationSystem::StaticClass()->GetDefaultObject(), L"FindPathToActorSynchronously", Path, [&](Reflection::FParams& Params) {
-            Params.Set(L"WorldContextObject", reinterpret_cast<UObject*>(Pawn));
-            Params.Set(L"PathStart", PawnLocation);
-            Params.Set(L"GoalActor", GoalActor);
-            Params.Set(L"TetherDistance", 50.0f);
-            Params.Set(L"PathfindingContext", reinterpret_cast<AActor*>(Pawn));
-        }))
-    {
-        bool bValid = false;
-        bool bPartial = false;
-        float Length = 0.0f;
-        CallReflected(Path, L"IsValid", bValid);
-        CallReflected(Path, L"IsPartial", bPartial);
-        CallReflected(Path, L"GetPathLength", Length);
-        PathText = !Path ? L"none" : !bValid ? L"invalid" : std::format(L"{} {:.0f}", bPartial ? L"partial" : L"complete", Length);
-    }
-
     UWorld* World = Pawn->GetWorld();
     UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
+    const std::wstring PathText = DescribeHuntingPath(AI, Pawn, GoalActor, PawnLocation, NavSys);
     std::wstring NavText = L"no navigation system";
     if (NavSys)
     {
@@ -197,7 +278,12 @@ void AFortAIGoalManager::LogFrustratedAI(AFortAIController* AI, const wchar_t* R
         {
             NavText += L" " + Named(reinterpret_cast<UObject*>(NavData));
         }
-        NavText += UNavigationSystem::IsNavigationBeingBuilt(reinterpret_cast<UObject*>(World)) ? L", being built" : L", built";
+        // The build lock, not UNavigationSystem::IsNavigationBeingBuilt: that one crashed the server when it was asked
+        // while a zone's navmesh was building (8f07680), which is when a husk gives up now that the navmeshes exist.
+        if (Natives::UNavigationSystem_NavBuildingLockFlags >= 0)
+        {
+            NavText += std::format(L", build lock 0x{:X}", static_cast<int32_t>(NavSys->NavBuildingLockFlags));
+        }
     }
 
     int32_t TimesDiscouraged = 0;
@@ -214,7 +300,7 @@ void AFortAIGoalManager::LogFrustratedAI(AFortAIController* AI, const wchar_t* R
         }
     }
 
-    Log::Info(L"AFortAIGoalManager: {} ({}) {} goal {} ({} times in a row): visible {}, always perceived {}, distance {:.0f}; pawn speed {:.0f} of {:.0f}, move status {}; path {}; {}; discouraged {}",
+    Log::Info(L"AFortAIGoalManager: {} ({}) {} goal {} ({} times in a row): visible {}, always perceived {}, distance {:.0f}; pawn speed {:.0f} of {:.0f}, move status {}; path: {}; {}; discouraged {}",
         Named(reinterpret_cast<UObject*>(static_cast<AController*>(AI))), Named(reinterpret_cast<UObject*>(Pawn)->GetClass()), Reason, Named(reinterpret_cast<UObject*>(GoalActor)), Frustration.Count,
         BlackboardBool(Blackboard, L"GoalActorIsVisible"), BlackboardBool(Blackboard, L"GoalActorAlwaysPerceived"), GoalActor ? Pawn->GetDistanceTo(GoalActor) : -1.0f,
         Pawn->GetVelocity().Size(), MaxSpeed, static_cast<int32_t>(MoveStatus), PathText, NavText,

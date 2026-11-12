@@ -7637,9 +7637,14 @@ bool Finder::ResolveMissionEventLive()
 // the call there whose callee loads the UFortMissionEventParams class (its StaticClass, "mov rax, [rip+X]; test rax,
 // rax"). That slot is AActor::PostInitializeComponents. 2.2 to 2.4.2's ABuildingActor::PostInitializeComponents calls it
 // too, for buildings that implement UFortMissionInterface (2.4.2 0x472580); 2.5's (0x9F69F0) does not.
+//
+// 5.30 to 6.01 inline it into AFortMissionState::PostInitializeComponents (6.00 CL-4395664 0x10145B0, 5.41 0xFD4140:
+// Super, then the loop over the class's object properties, which calls UFortMissionEventParams::StaticClass and
+// StaticConstructObject_Internal itself), so there is no function to call. The override that does all three gives the
+// slot, Natives::InitializeMissionEventParams stays null, and the caller runs its own copy of the loop.
 bool Finder::ResolveMissionEventParamsLive()
 {
-    if (Natives::InitializeMissionEventParams && Natives::AActor_PostInitializeComponentsIndex >= 0)
+    if (Natives::AActor_PostInitializeComponentsIndex >= 0)
     {
         return true;
     }
@@ -7694,14 +7699,50 @@ bool Finder::ResolveMissionEventParamsLive()
         }
     }
 
-    if (Matches != 1)
+    // The inlined form, only where no build function was found: the override that calls Super, loads the
+    // UFortMissionEventParams class itself and constructs the objects itself.
+    int32_t InlinedMatches = 0;
+    const uintptr_t Construct = reinterpret_cast<uintptr_t>(Natives::StaticConstructObject_Internal);
+    for (int32_t Index = 0; Matches == 0 && Construct && ParamsClass && ActorVTable && MissionStateVTable && Index < 0x200; ++Index)
     {
-        Log::Error(L"Finder: mission event params initialization not found ({} matches)", Matches);
+        const uintptr_t Entry = VTableEntry(MissionStateVTable, Index);
+        const uintptr_t Super = VTableEntry(ActorVTable, Index);
+        if (!Entry || !Super)
+        {
+            break;
+        }
+        const uintptr_t EntryEnd = Entry != Super ? Finder::FunctionEnd(Entry) : 0;
+        if (!EntryEnd || EntryEnd - Entry >= 0x400)
+        {
+            continue;
+        }
+
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Entry, EntryEnd);
+        const bool bCallsSuper = std::any_of(Calls.begin(), Calls.end(), [Super](const auto& Call) { return Call.second == Super; });
+        const bool bConstructs = std::any_of(Calls.begin(), Calls.end(), [Construct](const auto& Call) { return Call.second == Construct; });
+        if (bCallsSuper && bConstructs && LoadsParamsClass(Entry))
+        {
+            PostInitializeIndex = Index;
+            ++InlinedMatches;
+        }
+    }
+
+    if (Matches != 1 && InlinedMatches != 1)
+    {
+        Log::Error(L"Finder: mission event params initialization not found ({} matches, {} inlined)", Matches, InlinedMatches);
         return false;
     }
     Natives::AActor_PostInitializeComponentsIndex = PostInitializeIndex;
     Natives::InitializeMissionEventParams = reinterpret_cast<decltype(Natives::InitializeMissionEventParams)>(Initialize);
-    Log::Info(L"Finder: mission event params initialization at +0x{:X}, AActor::PostInitializeComponents slot 0x{:X}", Initialize - Finder::ImageBase(), PostInitializeIndex);
+    if (Initialize)
+    {
+        Log::Info(L"Finder: mission event params initialization at +0x{:X}, AActor::PostInitializeComponents slot 0x{:X}", Initialize - Finder::ImageBase(), PostInitializeIndex);
+    }
+    else
+    {
+        Log::Info(L"Finder: mission event params initialization is inlined into AFortMissionState::PostInitializeComponents (+0x{:X}), AActor::PostInitializeComponents slot 0x{:X}",
+            VTableEntry(MissionStateVTable, PostInitializeIndex) - Finder::ImageBase(), PostInitializeIndex);
+    }
     return true;
 }
 
@@ -8247,7 +8288,15 @@ bool Finder::ResolveNavigationSystemLive()
     Natives::UNavigationSystem_RebuildAll = reinterpret_cast<decltype(Natives::UNavigationSystem_RebuildAll)>(RebuildAll);
     Natives::UNavigationSystem_ConditionalPopulateNavOctree = reinterpret_cast<decltype(Natives::UNavigationSystem_ConditionalPopulateNavOctree)>(PopulateNavOctree);
     Natives::UNavigationSystem_bNavOctreeLock = OctreeLockOffset;
-    Log::Info(L"Finder: UNavigationSystem::Build is slot 0x{:X}, NavBuildingLockFlags +0x{:X}, RebuildAll +0x{:X}, ConditionalPopulateNavOctree +0x{:X}, bNavOctreeLock +0x{:X}", BuildSlot, LockFlagsOffset, RebuildAll - Finder::ImageBase(), PopulateNavOctree - Finder::ImageBase(), OctreeLockOffset);
+    // Build spawns the agents' missing navigation data and registers the queue before it rebuilds: the virtual call after
+    // the lock test is SpawnMissingNavigationData, the call right after it ProcessRegistrationCandidates.
+    Natives::UNavigationSystem_SpawnMissingNavigationDataIndex = SpawnMissingSlot;
+    Natives::UNavigationSystem_ProcessRegistrationCandidatesIndex = ProcessCandidatesSlot;
+    Natives::UNavigationSystem_ProcessRegistrationCandidates = ProcessCandidatesSlot < 0 && IsInText(ProcessCandidatesTarget)
+        ? reinterpret_cast<decltype(Natives::UNavigationSystem_ProcessRegistrationCandidates)>(ProcessCandidatesTarget) : nullptr;
+    Log::Info(L"Finder: UNavigationSystem::Build is slot 0x{:X}, NavBuildingLockFlags +0x{:X}, RebuildAll +0x{:X}, ConditionalPopulateNavOctree +0x{:X}, bNavOctreeLock +0x{:X}, SpawnMissingNavigationData slot 0x{:X}, ProcessRegistrationCandidates {}",
+        BuildSlot, LockFlagsOffset, RebuildAll - Finder::ImageBase(), PopulateNavOctree - Finder::ImageBase(), OctreeLockOffset, SpawnMissingSlot,
+        ProcessCandidatesSlot >= 0 ? std::format(L"slot 0x{:X}", ProcessCandidatesSlot) : Natives::UNavigationSystem_ProcessRegistrationCandidates ? std::format(L"+0x{:X}", ProcessCandidatesTarget - Finder::ImageBase()) : std::wstring(L"not found"));
     return true;
 }
 

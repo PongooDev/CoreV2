@@ -398,6 +398,7 @@ namespace Natives
     inline void* (*AFortWorldManager_GetTheaterMapData)(AFortWorldManager* This) = nullptr;
     inline int32_t AFortObjectiveBase_ActivateObjectiveIndex = -1;
     // Creates Object's missing UFortMissionEventParams objects (2.5 0xC720E0); see Finder::ResolveMissionEventParamsLive.
+    // Null where the build inlines it into AFortMissionState::PostInitializeComponents (5.30 to 6.01), with the slot found.
     inline void (*InitializeMissionEventParams)(UObject* Object) = nullptr;
     inline int32_t AActor_PostInitializeComponentsIndex = -1;
     inline ptrdiff_t UFortGameData_MissionGenerationData = -1;
@@ -446,6 +447,12 @@ namespace Natives
     inline void (*UNavigationSystem_ConditionalPopulateNavOctree)(UNavigationSystem* This) = nullptr;
     inline ptrdiff_t UNavigationSystem_bNavOctreeLock = -1;
     inline void (*UNavigationSystem_RequestRegistration)(UNavigationSystem* This, ANavigationData* NavData, bool bTriggerRegistrationProcessing) = nullptr;
+    // UNavigationSystem::Build's two calls before RebuildAll (6.00 CL-4395664 0x2BC9AD7 "call [rax+308h]", 0x2BC9AE3 "call
+    // [rax+2B0h]"): SpawnMissingNavigationData's slot, and ProcessRegistrationCandidates' slot (virtual from 4.2) or, on
+    // older builds, the function itself.
+    inline int32_t UNavigationSystem_SpawnMissingNavigationDataIndex = -1;
+    inline int32_t UNavigationSystem_ProcessRegistrationCandidatesIndex = -1;
+    inline void (*UNavigationSystem_ProcessRegistrationCandidates)(UNavigationSystem* This) = nullptr;
     // static UNavigationSystem::InitializeForWorld(UWorld*, FNavigationSystemRunMode): makes the world's navigation system
     // (CreateNavigationSystem) when it has none and its settings enable navigation, then runs its OnWorldInitDone.
     inline void (*UNavigationSystem_InitializeForWorld)(UWorld* World, uint8_t Mode) = nullptr;

@@ -84,6 +84,9 @@ class UNavigationSystem : public UObject
     DefineUProperty(uint8_t, DataGatheringMode)
 
 public:
+    // The main navigation data, what an agent with no data of its own falls back to (null on a build that doesn't
+    // reflect MainNavData).
+    ANavigationData* GetDefaultNavDataInstance() const { return Member_MainNavData.IsAvailable() ? static_cast<ANavigationData*>(MainNavData) : nullptr; }
     bool IsNavigationBuildingLocked() const { return NavBuildingLockFlags != 0; }
     void RemoveNavigationBuildLock(uint8_t Flags);
     void ReleaseInitialBuildingLock();
@@ -93,6 +96,12 @@ public:
     void ConditionalPopulateNavOctree();
     void OnNavigationBoundsUpdated(ANavMeshBoundsVolume* NavVolume);
     void RequestRegistration(ANavigationData* NavData, bool bTriggerRegistrationProcessing = true);
+    // Spawns navigation data for every supported agent the world has none for (each of the agents' class, unless its
+    // default can't be spawned on rebuild or is static) and queues it for registration. The build's own virtual.
+    void SpawnMissingNavigationData();
+    // Registers the queued navigation data now and picks the main one (GetDefaultNavDataInstance). The build's own.
+    void ProcessRegistrationCandidates();
+    static bool CanSpawnMissingNavigationData();
 
     // An actor around which navigation is generated (TileGenerationRadius) and kept (TileRemovalRadius), while it lives.
     void RegisterNavigationInvoker(AActor* Invoker, float TileGenerationRadius, float TileRemovalRadius);

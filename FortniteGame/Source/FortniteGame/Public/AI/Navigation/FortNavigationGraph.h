@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 class UBuildingStructuralSupportSystem;
 class UWorld;
@@ -66,6 +67,10 @@ public:
 
     bool InitializeCells(UBuildingStructuralSupportSystem* SupportSystem);
     void OnWorldInitialized();
+
+    // Core's diagnostics (#408): the graph cell under Location, as "(x, y, z) ..." with whether it lies outside the grid,
+    // in a block the graph never built, or in a built block and with which links. bOutBuilt is true only for a built block.
+    std::wstring DescribeCellAt(const FVector& Location, bool& bOutBuilt) const;
 
 private:
     bool AreCellsInitialized() const;

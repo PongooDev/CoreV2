@@ -14,6 +14,7 @@
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectArray.h"
 #include "UObject/UObjectGlobals.h"
+#include "../../ThirdParty/MinHook/src/hde/hde64.h"
 
 #include <algorithm>
 #include <cstring>
@@ -9850,6 +9851,7 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
 namespace
 {
     std::vector<uint8_t*> StrippedStatEventCalls;
+    std::vector<uint8_t*> StrippedTeamStatEventCalls;
 
     // A call with SendStatEventWithTags' typed wrapper's eight arguments: since the last call before it, four stack
     // arguments were stored (mov [rsp+20h/28h/30h/38h], of any width), and no fifth. SendEndPrimaryMission's place (7
@@ -9875,6 +9877,49 @@ namespace
             }
         }
         return Stored == 0xF;
+    }
+
+    // Whether the eight arguments of a stat event call start with the event type in cl rather than a quest manager in
+    // rcx: the last instruction since the call before it that writes rcx writes only its low byte (mov cl, imm8;
+    // mov cl, r/m8; movzx ecx, r/m8). 6.00 (CL-4395664) adds EFortQuestObjectiveStatEvent::TeamInteract and a static
+    // sender for the instigator's team, which AFortPlayerController::ServerAttemptInteract_Implementation (0x1223EF0)
+    // calls after the instigator's own Interact (0x1224327): `mov rdx, rsi; mov cl, 13h; call` at 0x1224354, the
+    // controller second. It is stripped to the shared empty function as the typed wrapper is, so it looked like one
+    // more sender, and Core's SendStatEventCall read the type byte (and whatever rcx held above it) as the quest manager
+    // (#402). A typed wrapper call's rcx is the quest manager pointer (mov rcx, r64 / lea / load), never a byte.
+    bool IsTeamStatEventCall(uintptr_t Site)
+    {
+        uintptr_t Begin = 0;
+        for (uintptr_t Call = FindRawCall(Site > 0x60 ? Site - 0x60 : Site, Site); Call; Call = FindRawCall(Call + 1, Site))
+        {
+            Begin = Call + 5;
+        }
+        bool bTypeInCl = false;
+        uintptr_t Address = Begin;
+        while (Address && Address < Site)
+        {
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                return false;
+            }
+            const uint8_t Opcode = Instruction.opcode;
+            const bool bModRm = (Instruction.flags & F_MODRM) != 0;
+            const bool bRegIsRcx = bModRm && Instruction.modrm_reg == 1 && !Instruction.rex_r;
+            const bool bRmIsRcx = bModRm && Instruction.modrm_mod == 3 && Instruction.modrm_rm == 1 && !Instruction.rex_b;
+            if ((Opcode == 0xB1 && !Instruction.rex_b) || (Opcode == 0x8A && bRegIsRcx) || (Opcode == 0x0F && Instruction.opcode2 == 0xB6 && bRegIsRcx))
+            {
+                bTypeInCl = true;
+            }
+            else if (((Opcode == 0x8B || Opcode == 0x8D || (Opcode == 0x0F && Instruction.opcode2 == 0xB7)) && bRegIsRcx) || ((Opcode == 0x89 || Opcode == 0x31 || Opcode == 0x33) && bRmIsRcx)
+                || ((Opcode == 0xB9 || Opcode == 0xC7) && !Instruction.rex_b && (Opcode == 0xB9 || bRmIsRcx)))
+            {
+                bTypeInCl = false;
+            }
+            Address += Length;
+        }
+        return Address == Site && bTypeInCl;
     }
 
     // The displacement of the last call through a register's vtable (`call [reg+disp32]`) in [Begin, End), or -1.
@@ -9950,6 +9995,7 @@ namespace
             return std::any_of(EndMissionChunks.begin(), EndMissionChunks.end(), [Site](const auto& Chunk) { return Site >= Chunk.first && Site < Chunk.second; });
         };
         std::vector<uint8_t*> Calls;
+        std::vector<uint8_t*> TeamCalls;
         for (const uintptr_t Site : Finder::CallsTo(SharedEmpty, false))
         {
             const uintptr_t Function = Byte(Site) == 0xE8 && IsStatEventCall(Site) && !IsInEndMission(Site) ? Finder::FunctionStart(Site) : 0;
@@ -9963,7 +10009,7 @@ namespace
                 }
                 if (bCallsGetter)
                 {
-                    Calls.push_back(reinterpret_cast<uint8_t*>(Site));
+                    (IsTeamStatEventCall(Site) ? TeamCalls : Calls).push_back(reinterpret_cast<uint8_t*>(Site));
                 }
             }
         }
@@ -9974,15 +10020,24 @@ namespace
         }
 
         StrippedStatEventCalls = std::move(Calls);
+        StrippedTeamStatEventCalls = std::move(TeamCalls);
         Natives::UFortQuestManager_SendCustomStatEvent = reinterpret_cast<decltype(Natives::UFortQuestManager_SendCustomStatEvent)>(SendCustomStatEvent);
         Natives::UFortQuestManager_bStatEventsStripped = true;
-        std::wstring Sites;
-        for (const uint8_t* Call : StrippedStatEventCalls)
+        const auto Describe = [](const std::vector<uint8_t*>& List)
         {
-            Sites += std::format(L"{}0x{:X}", Sites.empty() ? L"" : L", ", reinterpret_cast<uintptr_t>(Call) - Finder::ImageBase());
-        }
+            std::wstring Sites;
+            for (const uint8_t* Call : List)
+            {
+                Sites += std::format(L"{}0x{:X}", Sites.empty() ? L"" : L", ", reinterpret_cast<uintptr_t>(Call) - Finder::ImageBase());
+            }
+            return Sites;
+        };
         Log::Info(L"Finder: UFortQuestManager::SendStatEventWithTags and SaveStatEvents are stripped, Core sends the stat events: SendCustomStatEvent at 0x{:X}, quest manager getter [vtable+0x{:X}], {} sender call(s): {}",
-            SendCustomStatEvent - Finder::ImageBase(), GetterDisplacement, StrippedStatEventCalls.size(), Sites);
+            SendCustomStatEvent - Finder::ImageBase(), GetterDisplacement, StrippedStatEventCalls.size(), Describe(StrippedStatEventCalls));
+        if (!StrippedTeamStatEventCalls.empty())
+        {
+            Log::Info(L"Finder: {} team stat event sender call(s) (the type in cl, the instigating controller second): {}", StrippedTeamStatEventCalls.size(), Describe(StrippedTeamStatEventCalls));
+        }
         return true;
     }
 }
@@ -9990,6 +10045,11 @@ namespace
 const std::vector<uint8_t*>& Finder::StrippedQuestStatEventCalls()
 {
     return StrippedStatEventCalls;
+}
+
+const std::vector<uint8_t*>& Finder::StrippedQuestTeamStatEventCalls()
+{
+    return StrippedTeamStatEventCalls;
 }
 
 bool Finder::ResolveQuestStatEvents()

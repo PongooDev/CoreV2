@@ -151,7 +151,7 @@ public:
     bool InitializeMcpProfile(const void* OnComplete);
     void ActivateSlot(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
     void GivePlayerAmmo(int32_t AmmoCount);
-    void SwapQuickBarFocus(EFortQuickBars InQuickBar);
+    void SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride = -1);
     void ClientReportDamagedResourceBuilding(ABuildingSMActor* BuildingSMActor, uint8_t PotentialResourceType, int32_t PotentialResourceCount, bool bDestroyed, bool bJustHitWeakspot);
     // bActivateSlotAfterSettingFocused (3.5): the client sends ServerExecuteInventoryItem for the item it focused and
     // equipped. A server slot activation sets it (ServerActivateSlotInternal_Implementation 3.5.2 0xD08860 -> 0xD09920

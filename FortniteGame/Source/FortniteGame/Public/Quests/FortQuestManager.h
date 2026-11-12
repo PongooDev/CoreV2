@@ -155,6 +155,9 @@ private:
     // Builds that strip the stat events: the calls the game makes in place of SendStatEventWithTags (the typed wrapper's
     // arguments), and SendCustomStatEvent, which validates the stat and then sends nothing.
     static void SendStatEventCall(UFortQuestManager* This, uint8_t Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
+    // 6.00's stripped static sender of a team event (TeamInteract): the event goes to the quest manager of each player on
+    // the instigating controller's team.
+    static void SendTeamStatEvent(uint8_t Type, AFortPlayerController* PlayerController, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
     static void SendCustomStatEventHK(UFortQuestManager* This, const void* ObjectiveStat, int32_t Count, bool bForceFlush);
 };
 

@@ -233,6 +233,9 @@ namespace Finder
     // When ResolveQuestStatEvents found the stat events stripped: the call sites that call the shared empty function with
     // SendStatEventWithTags' typed wrapper's arguments (the quest manager, type, target, three tag containers, count, flush).
     const std::vector<uint8_t*>& StrippedQuestStatEventCalls();
+    // And the calls to the shared empty function in place of the stripped static team sender (6.00's TeamInteract): the
+    // event's type, the instigating player controller, then the target, three tag containers, count and flush.
+    const std::vector<uint8_t*>& StrippedQuestTeamStatEventCalls();
     bool ResolveAthenaHeroLive();
     uint8_t* AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset);
     bool ResolveAthenaMenuHero();

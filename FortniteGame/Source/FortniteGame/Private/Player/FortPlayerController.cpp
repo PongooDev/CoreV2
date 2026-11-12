@@ -1837,10 +1837,21 @@ void AFortPlayerController::HookVTables()
         GivePlayerAmmoFunction->SetNativeFunc(&execGivePlayerAmmo);
         Log::Info(L"Hook AFortPlayerController::GivePlayerAmmo: native");
     }
+    // SwapQuickBarFocus is stripped only where its exec calls a stub (Cert's, 0xA313C0). Other builds keep their own
+    // (3.3 0xED0250: QuickBars->SwapQuickBarFocus(InQuickBar, -1)), and 5.10 adds SlotOverride to it (5.30 0x11D3170,
+    // 5.41 0x11E0640, 6.00 0x1230E00); those stay. Core's took their place too, and stepped only InQuickBar (#405).
     if (UFunction* SwapQuickBarFocusFunction = StaticFunction_SwapQuickBarFocus(); SwapQuickBarFocusFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
     {
-        SwapQuickBarFocusFunction->SetNativeFunc(&execSwapQuickBarFocus);
-        Log::Info(L"Hook AFortPlayerController::SwapQuickBarFocus: native");
+        const uint8_t* SwapCall = Finder::ImplementationCall(SwapQuickBarFocusFunction);
+        if (SwapCall && !Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(SwapCall), 1, 5)))
+        {
+            Log::Info(L"Hook AFortPlayerController::SwapQuickBarFocus: the build's own (not stripped)");
+        }
+        else
+        {
+            SwapQuickBarFocusFunction->SetNativeFunc(&execSwapQuickBarFocus);
+            Log::Info(L"Hook AFortPlayerController::SwapQuickBarFocus: native");
+        }
     }
 
     if (Finder::ResolveInventoryOwnerLive(StaticFunction_ServerRemoveInventoryItem(), PlayerControllerDefault, Member_WorldInventory.GetOffsetChecked()))
@@ -2125,13 +2136,13 @@ DEFINE_FUNCTION(AFortPlayerController::execGivePlayerAmmo)
     P_NATIVE_END;
 }
 
-void AFortPlayerController::SwapQuickBarFocus(EFortQuickBars InQuickBar)
+void AFortPlayerController::SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride)
 {
 #if WITH_SERVER_CODE
     AFortQuickBars* Bars = QuickBars;
     if (Bars && Bars->GetCurrentQuickBar() != InQuickBar)
     {
-        Bars->SwapQuickBarFocus(InQuickBar, -1);
+        Bars->SwapQuickBarFocus(InQuickBar, SlotOverride);
     }
 #endif
 }
@@ -2165,9 +2176,19 @@ void AFortPlayerController::ClientExecuteInventoryItem(const FGuid& ItemGuid, fl
 DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)
 {
     P_GET_PROPERTY(UByteProperty, Z_Param_InQuickBar);
+    // Where the function takes SlotOverride (5.10), it's stepped as well: a native that leaves an argument unread
+    // leaves the caller's script inside it. BP_PlayerSpawnTeleportPad's TeleportAllPlayers passes (Primary, -1) at the
+    // end-of-zone teleport, and the -1's bytes then ran as script ("Unknown code token" is fatal), #405.
+    static UFunction* const Function = StaticFunction_SwapQuickBarFocus();
+    static const bool bHasSlotOverride = Function && Function->FindPropertyByName(FName(L"SlotOverride", FNAME_Find));
+    int32_t Z_Param_SlotOverride = -1;
+    if (bHasSlotOverride)
+    {
+        P_STACK.StepCompiledIn<UIntProperty>(&Z_Param_SlotOverride);
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
-    static_cast<AFortPlayerController*>(Context)->SwapQuickBarFocus(EFortQuickBars{ Z_Param_InQuickBar });
+    static_cast<AFortPlayerController*>(Context)->SwapQuickBarFocus(EFortQuickBars{ Z_Param_InQuickBar }, Z_Param_SlotOverride);
     P_NATIVE_END;
 }
 

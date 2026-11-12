@@ -12,7 +12,9 @@
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameState.h"
+#include "FortTeamInfo.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerState.h"
 #include "Hooks.h"
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
@@ -21,6 +23,7 @@
 #include "Online/FortMcpProfileWorld.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "TimerManager.h"
@@ -1359,6 +1362,10 @@ void UFortQuestManager::Hook()
     {
         Hooks::RedirectCall(L"UFortQuestManager::SendStatEventWithTags (stripped)", Call, reinterpret_cast<void*>(&SendStatEventCall));
     }
+    for (uint8_t* Call : Finder::StrippedQuestTeamStatEventCalls())
+    {
+        Hooks::RedirectCall(L"UFortQuestManager::SendTeamStatEvent (stripped)", Call, reinterpret_cast<void*>(&SendTeamStatEvent));
+    }
     Hooks::Detour(L"UFortQuestManager::SendCustomStatEvent (stripped)", reinterpret_cast<void*>(Natives::UFortQuestManager_SendCustomStatEvent), &SendCustomStatEventHK, nullptr);
 #endif
 }
@@ -1369,6 +1376,38 @@ void UFortQuestManager::SendStatEventCall(UFortQuestManager* This, uint8_t Type,
     // The typed wrapper (1.9.1 0x8CBE10): no custom stat.
     const FDataTableRowHandle* NoCustomStat = nullptr;
     SendStatEventWithTagsHK(This, NoCustomStat, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
+#endif
+}
+
+// 6.00 (CL-4395664) adds EFortQuestObjectiveStatEvent::TeamInteract. AFortPlayerController::ServerAttemptInteract_
+// Implementation (0x1223EF0) sends the instigator's Interact to their quest manager (0x1224327) and then TeamInteract
+// through a static sender for their team (0x1224354), with the same target, the target's tags and the instigator's
+// source and context tags, count 1, flushed. 5.41's (0x11D36D0) sends only the Interact. The sender is stripped to the
+// shared empty function, so the binary keeps no name for it (this one is Core's). The game mode's own team sender, which
+// the build keeps (0xE88B30, its per-member typed call at 0xE88D20), shows the flow: the instigator's team (the team
+// info of the team they are on), each member that is a player controller, the instigator included, and that member's
+// current sub game quest manager (GetQuestManager(ESubGame::Invalid), [vtable+0x1948] with dl 2).
+void UFortQuestManager::SendTeamStatEvent(uint8_t Type, AFortPlayerController* PlayerController, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerState* PlayerState = PlayerController ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
+    AFortTeamInfo* Team = PlayerState ? static_cast<AFortTeamInfo*>(PlayerState->PlayerTeam) : nullptr;
+    if (!Team || !AFortTeamInfo::HasTeamMembers())
+    {
+        return;
+    }
+    const bool bBattleRoyale = Configuration::Get().IsBattleRoyale();
+    const TArray<AController*>& Members = Team->TeamMembers;
+    for (int32_t Index = 0; Index < Members.Num(); ++Index)
+    {
+        AFortPlayerController* Member = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(Members[Index]));
+        UFortRegisteredPlayerInfo* PlayerInfo = Member ? static_cast<UFortRegisteredPlayerInfo*>(Member->MyPlayerInfo) : nullptr;
+        UFortQuestManager* QuestManager = !PlayerInfo ? nullptr : bBattleRoyale ? PlayerInfo->GetAthenaQuestManager() : PlayerInfo->GetCampaignQuestManager();
+        if (QuestManager)
+        {
+            SendStatEventCall(QuestManager, Type, TargetObject, TargetTags, SourceTags, ContextTags, Count, bFlush);
+        }
+    }
 #endif
 }
 

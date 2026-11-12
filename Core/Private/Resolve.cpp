@@ -10768,8 +10768,15 @@ bool Finder::ResolveGetPoiTagsForLive()
         Log::Info(L"Finder: AFortGameMode::GetPoiTagsFor not looked for (no Athena game mode, or the stat events aren't stripped)");
         return false;
     }
+    // The team sender's calls count too: GetPoiTagsFor comes before them as before the others (6.00's TeamInteract,
+    // after the same interaction's Interact, both under ServerAttemptInteract_Implementation's [vtable+0xA50] at
+    // CL-4395664 0x12242F3). Before they were told apart (#402) they were in the typed list, and 6.00's tally was 6 of 14
+    // for 0xA50 against 5 for the next slots called there ([vtable+0xA48], and the controller's quest manager getter
+    // [vtable+0x1948], which reads past the game modes' vtables); without them the getter's 5 could tie the 5 left.
+    std::vector<const uint8_t*> SenderCalls(StrippedStatEventCalls.begin(), StrippedStatEventCalls.end());
+    SenderCalls.insert(SenderCalls.end(), StrippedTeamStatEventCalls.begin(), StrippedTeamStatEventCalls.end());
     std::unordered_map<int32_t, int32_t> Senders;
-    for (const uint8_t* Call : StrippedStatEventCalls)
+    for (const uint8_t* Call : SenderCalls)
     {
         const uintptr_t Site = reinterpret_cast<uintptr_t>(Call);
         std::vector<int32_t> Slots;
@@ -10804,7 +10811,7 @@ bool Finder::ResolveGetPoiTagsForLive()
 
     Natives::AFortGameMode_GetPoiTagsForIndex = Index;
     Log::Info(L"Finder: AFortGameMode::GetPoiTagsFor is slot 0x{:X} (Athena's 0x{:X}), called by {} of the {} stat senders", Index, VTableEntry(AthenaVTable, Index) - Finder::ImageBase(),
-        Most, StrippedStatEventCalls.size());
+        Most, SenderCalls.size());
     return true;
 }
 

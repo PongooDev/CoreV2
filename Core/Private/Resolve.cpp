@@ -7117,7 +7117,8 @@ bool Finder::ResolveFrustrationDiscouragementLive(void** TaskVTable, ptrdiff_t D
     }
     if (!SetFrustration)
     {
-        // 1.1-4.5: the task's ExecuteTask is stripped too, Core restores it.
+        // 1.1-4.5: the task's ExecuteTask is stripped too, Core restores it. 6.21 (CL-4526925 0xAE2920) as well: its
+        // compiler drops everything past the stripped GetCurrent (the body only casts the AI and returns Failed).
         Log::Info(L"Finder: UFortBTTask_SetFrustrationDiscouragement::ExecuteTask is stripped (no DiscouragementDuration +0x{:X} call)", DurationOffset);
         return false;
     }

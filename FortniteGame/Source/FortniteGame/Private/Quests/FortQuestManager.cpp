@@ -1561,6 +1561,13 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     // player pawn hit, the weapon's groupings), and the controller's flush of it (0x1203940) sends one Damage event per
     // entry, about the controller's pawn, from AFortGameModeZone::Killed (0xE57EA3) and PawnPendingDestroy
     // (0x11FE48E). Whether the player has left AlivePlayers by then or not, that pawn's match is over.
+    // 6.20's Fortnitemares "Damage Cube Fragments" (damage_athena_deimos_monsterspawner, source DamageDone.Deimos.Spawner)
+    // has no grouping to come from: RecordDamage (6.20 0x1238690) makes only the five DamageDone groupings (Total,
+    // Player, AI, PlayerWithDiamond, Building) and the target and weapon tags UFortGameData allows, no code or data of the
+    // build names DamageDone.Deimos.Spawner, and a building's damage reaches RecordDamage only when a player placed the
+    // building (0xD1D4B6), which a Cube Fragment (BP_DeimosRift) isn't. Epic's 6.21 (CL-4526925) records a building
+    // with the native tag Deimos.Spawner too (0xD27D74), lets Deimos.Spawner through DamageDoneTargetQuest_AllowedTags,
+    // and asks for Deimos.Spawner and Gameplay.Damage in the row.
     const AFortPlayerControllerAthena* PlayerController = reinterpret_cast<AFortPlayerControllerAthena*>(PlayerControllerOf(PlayerInfo));
     const bool bPawnDamageDone = Type == EFortQuestObjectiveStatEvent::GetDamage() && TargetObject && PlayerController
         && TargetObject == reinterpret_cast<UObject*>(PlayerController->GetPawn());

@@ -11173,6 +11173,20 @@ namespace
     // have, 1.9.1's 0x6BBA24/0x85C102): the quest manager getter they call through (`mov dl, 2; call [rax+1678h]`,
     // AFortPlayerController::GetQuestManager) is the vtable displacement every sender's function calls through, and every
     // eight-argument call to the shared empty function in such a function is a sender.
+    // The game mode's team sender (6.20 0xEECD70) sends AFortGameModeZone::Killed's TeamKill and the building events:
+    // Build, Destroy, BuildingEdit, BuildingRepair and BuildingUpgrade. A building that runs out of health
+    // (ABuildingActor::HandleOutOfHealth, 6.20 0xD1DA20, slot 0xF9) is scored by the game mode with the controller that
+    // destroyed it, AFortGameMode::ScoreBuildingDestruction (slot 0x13F, 0xEEBA90, called at 0xD1DE44), which hands
+    // ScoreBuildingEvent (0xEEC000) the type Destroy (0x14): its target tags are the building's own
+    // (IGameplayTagAssetInterface::GetOwnedGameplayTags: a ghost decoration's Building.Type.Prop.Athena.GhostDeco, a
+    // BP_DeimosRift's Deimos.Spawner.Static) and its building type's tag, and the team sender gives the event to each
+    // player on the instigator's team, with the instigator's source tags (their location among them) and the game mode's
+    // GameContextTags, through the call at 0xEECF75, whose type comes from a register (movzx edx, r13b). 6.21
+    // (CL-4526925) gives Battle Royale its own ScoreBuildingEvent (AFortGameModeAthena's slot 0x144, 0xC8E710), which
+    // sends the event to the instigator alone (0xC8E893). Both calls are among the senders found here, so the Fortnitemares
+    // Challenges' Destroy objectives (the ghost decorations, the Cube Fragments, and 6.21's haunted furniture, whose
+    // Building.Type.Prop.Athena.HauntedItem is a gameplay effect's on the prop) move from the game's own call: there is
+    // no sender of Core's for them.
     bool ResolveStrippedQuestStatEvents()
     {
         // GetSourceAndContextTags is looked up by reflection, which needs the objects (a build that boots Core before

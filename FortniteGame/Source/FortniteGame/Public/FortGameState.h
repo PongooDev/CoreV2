@@ -153,6 +153,10 @@ public:
     DefineUProperty(AFortVisibilityManager*, VisibilityManager)
     DefineUProperty(EFortGameplayState, GameplayState)
     DefineUFunction(Client_RefreshEventCalendar)
+    // The playlist's AdditionalLevels that have streamed in, by package name: OnFinishedStreamingAdditionalPlaylistLevel
+    // adds each as its level is shown (the server's own list, replicated).
+    DefineUProperty(TArray<FName>, AdditionalPlaylistLevelsStreamed)
+    static bool HasAdditionalPlaylistLevelsStreamed() { return Member_AdditionalPlaylistLevelsStreamed.IsAvailable(); }
 
     void SpawnMissionManager(const FFortMissionManagerRecord& MissionManagerRecord);
     // The game's own multicast (Net, NetReliable, NetMulticast): the server and every client fetch the event calendar

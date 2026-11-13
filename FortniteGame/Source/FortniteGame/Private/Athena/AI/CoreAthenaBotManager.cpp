@@ -1448,8 +1448,10 @@ void FCoreAthenaBotManager::TickWarmup(float Now)
     }
     // The navigation (its octree and first build take a quarter of a second in one frame) and the assets the bots load
     // on first use (emotes) are set up as soon as the first bots are in, not as the bus leaves with every player on
-    // the server ("ping spikes" with bots on, #233).
-    if (!bNavigationTried && Wanted + TeamBots > 0 && GetAliveBotCount() > 0)
+    // the server ("ping spikes" with bots on, #233). Once the playlist's additional levels are in: one can bring the
+    // island's navmesh (6.20's Deimos_Gameplay, UAthenaNavSystem::InitializeForBots).
+    const AFortGameStateAthena* NavigationGameState = AthenaGameStateOf(GetGameMode());
+    if (!bNavigationTried && Wanted + TeamBots > 0 && GetAliveBotCount() > 0 && (!NavigationGameState || NavigationGameState->HasStreamedAdditionalPlaylistLevels()))
     {
         bNavigationTried = true;
         FCoreAthenaBotController::PreloadAssets();

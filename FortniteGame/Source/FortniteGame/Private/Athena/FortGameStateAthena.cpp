@@ -262,6 +262,24 @@ void AFortGameStateAthena::ReportPropertyOverrides() const
 #endif
 }
 
+bool AFortGameStateAthena::HasStreamedAdditionalPlaylistLevels() const
+{
+    UFortPlaylistAthena* Playlist = HasCurrentPlaylist() && UFortPlaylist::HasAdditionalLevels() && HasAdditionalPlaylistLevelsStreamed() ? GetCurrentPlaylist() : nullptr;
+    if (!Playlist)
+    {
+        return true;
+    }
+    // Counted, not matched by name: the name each streamed level is listed under is the game's to choose.
+    const TArray<TAssetPtr<UWorld>>& Levels = Playlist->AdditionalLevels;
+    int32_t Wanted = 0;
+    for (int32_t Index = 0; Index < Levels.Num(); ++Index)
+    {
+        Wanted += SoftElementAt(Levels, Index).ToStringReference().IsValid() ? 1 : 0;
+    }
+    const TArray<FName>& Streamed = AdditionalPlaylistLevelsStreamed;
+    return Streamed.Num() >= Wanted;
+}
+
 void AFortGameStateAthena::StreamAdditionalPlaylistLevels()
 {
 #if WITH_SERVER_CODE

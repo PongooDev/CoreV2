@@ -53,6 +53,8 @@ namespace
     bool bInitialized = false;
     bool bReady = false;
     bool bTried = false;
+    // The bots path on a navmesh the match's levels brought built (6.20's Deimos playlists), not on Core's own.
+    bool bLevelNavData = false;
     FWeakObjectPtr NavDataPtr;
 
     double NowMs()
@@ -719,6 +721,56 @@ namespace
         }
     }
 
+    // Every tile with data in the dtNavMesh: each chain of its position lookup walked once.
+    int32_t CountBuiltTiles(const uint8_t* NavMesh)
+    {
+        const uint8_t* const* Lookup = NavMesh ? *reinterpret_cast<const uint8_t* const* const*>(NavMesh + Detour::NavMeshPosLookup) : nullptr;
+        const int32_t Mask = NavMesh ? *reinterpret_cast<const int32_t*>(NavMesh + Detour::NavMeshTileLutMask) : -1;
+        int32_t Count = 0;
+        for (int32_t Hash = 0; Lookup && Mask >= 0 && Hash <= Mask; ++Hash)
+        {
+            for (const uint8_t* Tile = Lookup[Hash]; Tile; Tile = *reinterpret_cast<const uint8_t* const*>(Tile + Detour::TileNext))
+            {
+                Count += *reinterpret_cast<const uint8_t* const*>(Tile + Detour::TileHeader) ? 1 : 0;
+            }
+        }
+        return Count;
+    }
+
+    // A registered recast navmesh of Agent's that came built with its level (its tiles are there before any generation
+    // ran), and how many tiles it has; null when the world has none.
+    ANavigationData* FindBuiltNavData(UNavigationSystem* NavSys, FNavDataConfig& Agent, int32_t& OutTiles)
+    {
+        static UClass* RecastClass = ARecastNavMesh::StaticClass();
+        OutTiles = 0;
+        // The navmesh's Detour mesh (GetRecastMesh) is read through offsets this finds once.
+        if (!Finder::ResolveRecastNavMeshLive())
+        {
+            return nullptr;
+        }
+        for (ANavigationData* NavData : static_cast<TArray<ANavigationData*>&>(NavSys->NavDataSet))
+        {
+            if (!NavData || !RecastClass || !reinterpret_cast<UObject*>(NavData)->IsA(RecastClass))
+            {
+                continue;
+            }
+            FNavDataConfig& Config = NavData->NavDataConfig;
+            const bool bSameAgent = static_cast<FName>(Config.Name) == static_cast<FName>(Agent.Name)
+                || (std::fabs(Config.AgentRadius - Agent.AgentRadius) < 1.0f && std::fabs(Config.AgentHeight - Agent.AgentHeight) < 1.0f);
+            const uint8_t* DetourNavMesh = static_cast<const uint8_t*>(reinterpret_cast<ARecastNavMesh*>(NavData)->GetRecastMesh());
+            const int32_t Tiles = bSameAgent ? CountBuiltTiles(DetourNavMesh) : 0;
+            Log::Info(L"Battle Royale navigation: the world has {} for agent {} (radius {:.0f}, height {:.0f}){}", NameOf(reinterpret_cast<UObject*>(NavData)),
+                static_cast<FName>(Config.Name).ToString().ToStdString(), static_cast<float>(Config.AgentRadius), static_cast<float>(Config.AgentHeight),
+                !bSameAgent ? std::wstring(L", not the bots'") : DetourNavMesh ? std::format(L", {} tiles built", Tiles) : std::wstring(L", no Detour navmesh yet"));
+            if (Tiles > 0)
+            {
+                OutTiles = Tiles;
+                return NavData;
+            }
+        }
+        return nullptr;
+    }
+
     bool HasTileAt(const uint8_t* NavMesh, uint64_t Key)
     {
         bool bAny = false;
@@ -1335,6 +1387,7 @@ void UAthenaNavSystem::ResetForNewMatch()
     bInitialized = false;
     bReady = false;
     bTried = false;
+    bLevelNavData = false;
     NavDataPtr = FWeakObjectPtr();
     ResetTileCacheForNewMatch();
 }
@@ -1369,6 +1422,27 @@ bool UAthenaNavSystem::InitializeForBots(UWorld* World, const FBox& IslandBounds
     }
     FNavDataConfig& Agent = NavSys->SupportedAgents[AgentIndex];
     UClass* DataClass = Agent.NavigationDataClass;
+
+    // 6.20's Fortnitemares (the Deimos playlists): their additional level, Deimos_Gameplay, brings the island's navmesh
+    // built for this agent (AthenaNavMesh-Fiend, 51,211 tiles in the CL's Core-ServerAssets pak; the PC cook's copy of the
+    // level has the actor without them), and the game sets the world's navigation up for it: no invokers, auto-created
+    // data (the playlist's match starts "invokers only false, auto create true"; Battle Royale's own starts invokers only,
+    // with no nav data). The Cube Monsters walk on it, and their fragments' queries project onto it (Deimos_EQS_RiftSlots,
+    // a fragment's spawn slots; Deimos_EQS_RiftDrop, where a dynamic fragment lands). The invoker-only generation below
+    // would drop its built tiles away from the bots (a match measured 35 of the 35 fragments on it as the first bot
+    // spawned, none 30 s later), so the bots path on that navmesh, as it is: no navmesh of Core's, no tile cache.
+    int32_t LevelTiles = 0;
+    if (ANavigationData* LevelNavData = FindBuiltNavData(NavSys, Agent, LevelTiles))
+    {
+        NavDataPtr = FWeakObjectPtr(reinterpret_cast<UObject*>(LevelNavData));
+        bLevelNavData = true;
+        bInitialized = true;
+        bReady = true;
+        TileCache.bDisabled = true;
+        Log::Info(L"Battle Royale navigation: the match's levels brought {} built for agent {} ({} tiles, runtime generation {}), the bots path on it", NameOf(reinterpret_cast<UObject*>(LevelNavData)),
+            AgentIndex, LevelTiles, ANavigationData::HasRuntimeGeneration() ? static_cast<int32_t>(LevelNavData->RuntimeGeneration) : -1);
+        return true;
+    }
 
     // 8.30's UAthenaNavSystemConfig: bUseNavigationInvokers and bLazyOctree. Set before any navmesh makes its generator
     // (FRecastNavMeshGenerator reads the invoker flag when it is made), and no other agent's data is spawned by itself.
@@ -1531,7 +1605,8 @@ ANavigationData* UAthenaNavSystem::GetNavData(UWorld* World)
 
 void UAthenaNavSystem::RegisterNavigationInvoker(AActor* Invoker)
 {
-    UWorld* World = Invoker && bInitialized ? Invoker->GetWorld() : nullptr;
+    // A navmesh the match's levels brought is built over the island already: no generation around anyone.
+    UWorld* World = Invoker && bInitialized && !bLevelNavData ? Invoker->GetWorld() : nullptr;
     if (UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr)
     {
         NavSys->RegisterNavigationInvoker(Invoker, InvokerGenerationRadius, InvokerRemovalRadius);

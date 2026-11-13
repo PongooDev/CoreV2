@@ -162,6 +162,9 @@ public:
     // The playlist's additional levels stream in, on the server (21.40's name; 5.21 0xBE7080, which 5.30 strips):
     // AFortGameState::StartStreamingAdditionalPlaylistLevel with each one's package name.
     void StreamAdditionalPlaylistLevels();
+    // Whether every one of the game state's playlist's AdditionalLevels is in AdditionalPlaylistLevelsStreamed (true
+    // with none, or no playlist; Core's name). 6.20's Deimos_Gameplay brings the island's navmesh with it.
+    bool HasStreamedAdditionalPlaylistLevels() const;
     // 3.5: the playlist's bIsLargeTeamGame, on the game state (the game mode's before 3.5, with bFiftyFiftySquadPlay,
     // which 3.5 dropped).
     DefineUProperty(bool, bIsLargeTeamGame)

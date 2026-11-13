@@ -15017,16 +15017,19 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     // ChannelMap's, 0x38A1C0), which UReplicationGraph::RemoveActorInfoFromConnections does here with the build's own.
     //
     // That function is found as NotifyActorChannelCleanedUp's second call, and nothing is resolved unless the code
-    // around it is what 6.00, 6.01 (CL-4424678 0x78A1D0, 0x78ABB0) and 6.02 (CL-4461277 0x78AD60, 0x78B740) have:
+    // around it is what 6.00, 6.01 (CL-4424678 0x78A1D0, 0x78ABB0), 6.02 (CL-4461277 0x78AD60, 0x78B740), 6.10
+    // (CL-4480234 0x7A3920, 0x7A4300) and 6.20 (CL-4497486 0x740FE0, 0x7419D0) have:
     //   NotifyActorChannelCleanedUp: lea r14, [rcx+80h] (the ChannelMap); call FindId; ...; mov rdx, rsi (the channel);
-    //     mov rcx, r14; call Remove; mov [rdi], r15; mov [rdi+0Ch], r15; mov [rdi+14h], r15 (the info's Channel and its
-    //     frame counters, so the 0x20 byte info whose flags are at +0x1D)
+    //     mov rcx, r14; call Remove; mov [rdi], r15; mov [rdi+0Ch], r15 (the info's Channel and its frame counters);
+    //     then the rest of the info it clears, which says how big the info is and where its flags are:
+    //       6.00 to 6.10: mov [rdi+14h], r15 (a 0x20 byte info, flags at +0x1D)
+    //       6.20: mov [rdi+24h], r15d; mov [rdi+18h], r15 (a 0x30 byte info, flags at +0x28, as 8.30's)
     //   NotifyActorTearOff: lea rcx, [rsi+30h] (the ActorMap, 0x50 before the ChannelMap: one TMap); call the same
-    //     FindId; ...; or byte ptr [rax+1Dh], 2
-    // A build before 6.00 or after 6.02 was never looked at, and one whose code differs (8.30's info is 0x30 bytes with
-    // its flags at +0x28, and its engine does this itself) keeps what it has.
+    //     FindId; ...; or byte ptr [rax+<the flags>], 2
+    // 6.20's RemoveNetworkActor (0x74A3D0) still doesn't take the connections' infos out. A build before 6.00 or after
+    // 6.20 was never looked at, and one whose code differs (8.30's engine does this itself) keeps what it has.
     constexpr uint32_t FirstVerifiedChangelist = 4395664;
-    constexpr uint32_t LastVerifiedChangelist = 4461277;
+    constexpr uint32_t LastVerifiedChangelist = 4497486;
     constexpr ptrdiff_t MapSize = 0x50;
     const uint32_t Changelist = Packed::Changelist();
     const auto LeftAsIs = [Changelist](const wchar_t* Why)
@@ -15036,7 +15039,7 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     };
     if (Changelist < FirstVerifiedChangelist || Changelist > LastVerifiedChangelist)
     {
-        return LeftAsIs(L"only 6.00 to 6.02, CL-4395664 to CL-4461277, were checked");
+        return LeftAsIs(L"only 6.00 to 6.20, CL-4395664 to CL-4497486, were checked");
     }
 
     const std::vector<uintptr_t> CleanedUpRefs = Finder::StringRefs(L"UNetReplicationGraphConnection_NotifyActorChannelCleanedUp");
@@ -15077,13 +15080,27 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     const bool bRemoveArguments = RemoveSite - 6 > CleanedUpCalls[0].first && (BeforeRemove[0] == 0x48 || BeforeRemove[0] == 0x49) && BeforeRemove[1] == 0x8B && (BeforeRemove[2] & 0xF8) == 0xD0
         && (BeforeRemove[3] == 0x48 || BeforeRemove[3] == 0x49) && BeforeRemove[4] == 0x8B && (BeforeRemove[5] & 0xF8) == 0xC8
         && ((BeforeRemove[5] & 7) | (BeforeRemove[3] == 0x49 ? 8 : 0)) == MapRegister;
-    // mov [r], r; mov [r+0Ch], r; mov [r+14h], r: the found info's Channel and frame counters cleared.
-    const bool bInfoCleared = RemoveSite + 5 + 11 <= CleanedUpEnd && (AfterRemove[0] & 0xF8) == 0x48 && AfterRemove[1] == 0x89 && (AfterRemove[2] & 0xC0) == 0x00
-        && (AfterRemove[3] & 0xF8) == 0x48 && AfterRemove[4] == 0x89 && (AfterRemove[5] & 0xC0) == 0x40 && AfterRemove[6] == 0x0C
-        && (AfterRemove[7] & 0xF8) == 0x48 && AfterRemove[8] == 0x89 && (AfterRemove[9] & 0xC0) == 0x40 && AfterRemove[10] == 0x14;
-    if (ChannelMapOffset < MapSize || !bRemoveArguments || !bInfoCleared || !FindId || !Remove || Remove == FindId)
+    // mov [r+Displacement], r64 (REX.W) or r32 (a REX without W: r8d to r15d); [r] when Displacement is 0.
+    const auto IsStore = [](const uint8_t* Code, bool bQword, uint8_t Displacement)
     {
-        return LeftAsIs(L"NotifyActorChannelCleanedUp isn't 6.00's");
+        return (Code[0] & 0xF8) == (bQword ? 0x48 : 0x40) && Code[1] == 0x89 && (Displacement ? (Code[2] & 0xC0) == 0x40 && Code[3] == Displacement : (Code[2] & 0xC0) == 0x00);
+    };
+    // The found info's Channel and frame counters cleared, and the rest of what is cleared, which says where its flags are.
+    ptrdiff_t InfoFlagsOffset = -1;
+    if (RemoveSite + 5 + 7 <= CleanedUpEnd && IsStore(AfterRemove, true, 0) && IsStore(AfterRemove + 3, true, 0x0C))
+    {
+        if (RemoveSite + 5 + 11 <= CleanedUpEnd && IsStore(AfterRemove + 7, true, 0x14))
+        {
+            InfoFlagsOffset = 0x1D;
+        }
+        else if (RemoveSite + 5 + 15 <= CleanedUpEnd && IsStore(AfterRemove + 7, false, 0x24) && IsStore(AfterRemove + 11, true, 0x18))
+        {
+            InfoFlagsOffset = 0x28;
+        }
+    }
+    if (ChannelMapOffset < MapSize || !bRemoveArguments || InfoFlagsOffset < 0 || !FindId || !Remove || Remove == FindId)
+    {
+        return LeftAsIs(L"NotifyActorChannelCleanedUp isn't 6.00's or 6.20's");
     }
 
     // UReplicationGraph::NotifyActorTearOff: the graph's override of the driver's pure virtual of that name.
@@ -15107,22 +15124,22 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
             break;
         }
     }
-    // or byte ptr [r64+1Dh], 2: bTearOff.
+    // or byte ptr [r64+<the info's flags>], 2: bTearOff.
     bool bTearOffFlag = false;
     for (uintptr_t Address = TearOff; Address + 4 <= TearOffEnd && !bTearOffFlag; ++Address)
     {
         const uint8_t* Code = reinterpret_cast<const uint8_t*>(Address);
-        bTearOffFlag = Code[0] == 0x80 && (Code[1] & 0xF8) == 0x48 && Code[2] == 0x1D && Code[3] == 0x02;
+        bTearOffFlag = Code[0] == 0x80 && (Code[1] & 0xF8) == 0x48 && Code[2] == InfoFlagsOffset && Code[3] == 0x02;
     }
     if (ActorMapOffset <= 0 || ActorMapOffset != ChannelMapOffset - MapSize || !bTearOffFlag)
     {
-        return LeftAsIs(L"the graph's NotifyActorTearOff isn't 6.00's");
+        return LeftAsIs(L"the graph's NotifyActorTearOff isn't 6.00's or 6.20's");
     }
 
     Natives::UNetReplicationGraphConnection_ActorMapOffset = ActorMapOffset;
     Natives::FPerConnectionActorInfoMap_RemoveByKey = reinterpret_cast<decltype(Natives::FPerConnectionActorInfoMap_RemoveByKey)>(Remove);
-    Log::Info(L"Finder: the replication graph's per-connection actor infos: ActorMap +0x{:X} (ChannelMap +0x{:X}), their remove-by-key 0x{:X} (NotifyActorChannelCleanedUp 0x{:X}, NotifyActorTearOff slot 0x{:X}, 0x{:X})",
-        ActorMapOffset, ChannelMapOffset, Remove - Finder::ImageBase(), CleanedUp - Finder::ImageBase(), TearOffIndex * 8, TearOff - Finder::ImageBase());
+    Log::Info(L"Finder: the replication graph's per-connection actor infos: ActorMap +0x{:X} (ChannelMap +0x{:X}), their remove-by-key 0x{:X} (NotifyActorChannelCleanedUp 0x{:X}, NotifyActorTearOff slot 0x{:X}, 0x{:X}; the info's flags +0x{:X})",
+        ActorMapOffset, ChannelMapOffset, Remove - Finder::ImageBase(), CleanedUp - Finder::ImageBase(), TearOffIndex * 8, TearOff - Finder::ImageBase(), InfoFlagsOffset);
     return true;
 }
 

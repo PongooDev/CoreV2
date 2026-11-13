@@ -19,8 +19,8 @@ public:
     // The last step of a later engine's UReplicationGraph::RemoveNetworkActor (8.30 0x8E1B80, from 0x8E1C70):
     //     for (UNetReplicationGraphConnection* ConnectionManager : Connections)
     //         ConnectionManager->ActorInfoMap.RemoveActor(Actor);      // ActorMap.Remove(Actor), 0x38A1C0
-    // which UE 4.21's (6.00 0x7DE420, 6.01 and 6.02 the same) doesn't have: there a connection's info for an actor
-    // stays in its ActorMap, keyed by the actor's address, after the actor is gone. A torn off actor's keeps bTearOff,
+    // which UE 4.21's (6.00 0x7DE420, 6.01 to 6.10 the same, 6.20 0x74A3D0) doesn't have: there a connection's info
+    // for an actor stays in its ActorMap, keyed by the actor's address, after the actor is gone. A torn off actor's keeps bTearOff,
     // and UReplicationGraph::ReplicateSingleActor (6.00 0x7DF520) closes the channel right after replicating whenever
     // that is set: an actor spawned at that address later is opened and closed on that connection every time it
     // replicates (CoreV2 #411: a Playground respawn's pawn at a dead pawn's address never reached its player).
@@ -31,7 +31,7 @@ public:
     // channel is still closing stays alive in the ChannelMap, which shares it, until the channel is cleaned up, as in
     // 8.30. Like 8.30's, Connections only, not PendingConnections.
     //
-    // Returns how many connections had an entry, or -1 where nothing was done: a build whose code isn't what 6.00 to 6.02
+    // Returns how many connections had an entry, or -1 where nothing was done: a build whose code isn't what 6.00 to 6.20
     // have (Finder::ResolveReplicationGraphActorInfoLive) keeps its maps untouched.
     int32_t RemoveActorInfoFromConnections(AActor* Actor);
 
@@ -43,9 +43,9 @@ public:
     // address is a destroyed actor's, and goes then.
     //
     // A torn off actor's info is one kind that does harm (#411). A dormant actor's is the other: an actor destroyed
-    // while it was dormant on a connection leaves bDormantOnConnection set (+0x1D bit 0, set by
-    // NotifyActorFullyDormantForConnection, 6.00 0x7D59B0, 6.02 0x78B6B0; cleared only by that actor's own dormancy
-    // flush, FlushNetDormancy 0x7CEDC0, and only for an actor that wants to be dormant), and the graph skips an actor
+    // while it was dormant on a connection leaves bDormantOnConnection set (+0x1D bit 0, +0x28 on 6.20, set by
+    // NotifyActorFullyDormantForConnection, 6.00 0x7D59B0, 6.02 0x78B6B0, 6.20 0x741940; cleared only by that actor's
+    // own dormancy flush, FlushNetDormancy 0x7CEDC0, and only for an actor that wants to be dormant), and the graph skips an actor
     // whose info has it before any other check (6.00 0x7DE8AC, 6.02 0x7945AC). An actor that is never dormant, spawned
     // at that address, is never sent to that connection at all, and nothing about it is in either log.
     //

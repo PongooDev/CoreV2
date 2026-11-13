@@ -474,6 +474,8 @@ void AFortPlayerController::Possess(APawn* InPawn)
     }
 
     AFortPlayerState* FortPlayerState = Role == ROLE_Authority && MyFortPawn ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
+    // A pawn that takes the place of one the player already played (a respawn), before the first one marks them playing.
+    const bool bReplacesPlayedPawn = FortPlayerState && FortPlayerState->bHasStartedPlaying;
     if (FortPlayerState && !FortPlayerState->bHasStartedPlaying)
     {
         FortPlayerState->bHasStartedPlaying = true;
@@ -599,7 +601,38 @@ void AFortPlayerController::Possess(APawn* InPawn)
             UE_LOG(LogFort, Log, TEXT("Possess: %s had the building bar focused, it holds the harvesting tool"), *GetNameSafe(this));
             ActivatedSlot = 0;
         }
-        Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), ActivatedSlot, 0.0f, false);
+
+        // Save the World's respawn (#424): the quickbar showed the weapon and the new pawn held nothing. The activation
+        // equips nothing on the server: AFortQuickBars::ServerActivateSlotInternal_Implementation (6.02 CL-4461277 0xFBF380)
+        // focuses the slot and calls AFortPlayerController::ExecuteInventoryItem (0x11E04C0), which sends the client
+        // ClientExecuteInventoryItem only while CanPerformAction(Gameplay.Action.Player.ChangeEquipment) holds (0x11D2FA0:
+        // a pawn out of stasis whose ability system doesn't block the tag; "Cannot execute inventory item - due to blocked
+        // ActionPlayerChangeEquipment tag" otherwise, a Verbose line). The client's ClientExecuteInventoryItem_Implementation
+        // (0x11D4840) checks the same against the pawn it has, keeps the item pending while it can't (its PlayerTick,
+        // 0x1213A40, tries again) and then sends ServerExecuteInventoryItem, whose ServerExecute (the weapon's, 0x136CA30)
+        // equips the server's pawn. At a respawn both checks meet a pawn in passing: on the server the new pawn on the
+        // ability system the dead one leaves behind (the player state's), on the client the dead pawn, or none, until the
+        // new one and its health have replicated. Battle Royale's respawn equips the slot itself below, as the pawn is
+        // skydiving. 4.0's bForceExecution is the game's own way past both checks: the client runs the execute as it
+        // arrives, and a weapon's ClientExecute (0x29E340, false) sends ServerExecuteInventoryItem for the server's pawn,
+        // whichever pawn the client has yet. Only for a weapon: a gadget's execute is its ability.
+        bool bForceExecution = false;
+        TStructArray<FQuickBarSlot>& ActivatedSlots = PrimaryQuickBar.Slots;
+        if (!AthenaController && bReplacesPlayedPawn && !bDisguisePossess && ActivatedSlot >= 0 && ActivatedSlot < ActivatedSlots.Num())
+        {
+            const TArray<FGuid>& SlotItems = ActivatedSlots[ActivatedSlot].Items;
+            AFortInventory* Inventory = WorldInventory;
+            UFortWorldItem* SlotItem = Inventory && SlotItems.Num() > 0 ? Inventory->FindWorldItem(SlotItems[0]) : nullptr;
+            FFortItemEntry* SlotEntry = SlotItem ? &static_cast<FFortItemEntry&>(SlotItem->ItemEntry) : nullptr;
+            UFortItemDefinition* SlotDefinition = SlotEntry ? static_cast<UFortItemDefinition*>(SlotEntry->ItemDefinition) : nullptr;
+            bForceExecution = Cast<UFortWeaponItemDefinition>(SlotDefinition) != nullptr;
+            if (bForceExecution)
+            {
+                UE_LOG(LogFort, Log, TEXT("Possess: %s's new pawn %s takes slot %d's %s (forced execution)"), *GetNameSafe(this), *GetNameSafe(static_cast<AFortPawn*>(MyFortPawn)),
+                    ActivatedSlot, *GetNameSafe(SlotDefinition));
+            }
+        }
+        Bars->ServerActivateSlotInternal(EFortQuickBars::GetPrimary(), ActivatedSlot, 0.0f, false, bForceExecution);
 
         // A pawn leaving the aircraft is already skydiving here (Battle Royale's Possess, 1.7.2 0x441AD0, exits the
         // aircraft). The activation above only asks the client to equip the slot's item (ClientExecuteInventoryItem,

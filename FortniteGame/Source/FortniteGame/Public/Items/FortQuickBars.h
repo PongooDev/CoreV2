@@ -84,7 +84,10 @@ public:
     bool IsReplicatedToOwner();
 
     void EnableSlot(EFortQuickBars InQuickBar, int32_t SlotIndex);
-    void ServerActivateSlotInternal(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot);
+    // bForceExecution is 4.0's (6.02 _Implementation 0xFBF380 hands it to AFortPlayerController::ExecuteInventoryItem,
+    // 0x11E04C0, as bForceExecute): the server sends the execute without its ChangeEquipment check, and the client runs it
+    // without its own. Builds before 4.0 have no such parameter, and it is left out there.
+    void ServerActivateSlotInternal(EFortQuickBars InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot, bool bForceExecution = false);
     void ServerAddItemInternal(const FGuid& Item, EFortQuickBars InQuickBar, int32_t Slot);
     FQuickBarSlot& GetSlot(EFortQuickBars InQuickBar, int32_t SlotIndex);
     const FQuickBarSlotData& GetSlotData(EFortQuickBars InQuickBar, int32_t SlotIndex);

@@ -48,6 +48,22 @@ namespace
         return Finder::FunctionStart(First(Finder::StringRefs(Text)));
     }
 
+    // FunctionOf, except that a reference with no function around it (a piece of the packer's moved code, which has no
+    // .pdata) passes the search on to the next reference. Index is the reference used and Count how many there are.
+    uintptr_t FunctionOfFirstRef(const wchar_t* Text, size_t& Index, size_t& Count)
+    {
+        const std::vector<uintptr_t> Refs = Finder::StringRefs(Text);
+        Count = Refs.size();
+        for (Index = 0; Index < Refs.size(); ++Index)
+        {
+            if (const uintptr_t Function = Finder::FunctionStart(Refs[Index]))
+            {
+                return Function;
+            }
+        }
+        return 0;
+    }
+
     template <typename T>
     void Require(const wchar_t* Name, T& Destination, uintptr_t Address)
     {
@@ -160,7 +176,13 @@ namespace
         {
             UObjectBaseInit = FunctionOf(L"%s for max %d objects, including %i objects not considered by GC, pre-allocating %i bytes for permanent pool.");
         }
-        const uintptr_t AllocatePool = FunctionOf(L"Max UObject count is invalid. It must be a number that is greater than 0.");
+        size_t AllocatePoolRef = 0;
+        size_t AllocatePoolRefs = 0;
+        const uintptr_t AllocatePool = FunctionOfFirstRef(L"Max UObject count is invalid. It must be a number that is greater than 0.", AllocatePoolRef, AllocatePoolRefs);
+        if (AllocatePool && AllocatePoolRef > 0)
+        {
+            Log::Info(L"Finder: FUObjectArray::AllocateObjectPool +0x{:X} from reference {} of {} (the first is in no function)", AllocatePool - Finder::ImageBase(), AllocatePoolRef + 1, AllocatePoolRefs);
+        }
         const uintptr_t End = Finder::FunctionEnd(UObjectBaseInit);
 
         uintptr_t Array = 0;
@@ -261,7 +283,9 @@ namespace
             // Fortnite's chunks hold 0x10400 items, not UE's 64K: the inlined IndexToObject divides by them (imul eax,
             // edx, 10400h after the 7E07E07Fh reciprocal) right before it loads the chunk table, mov rax,
             // [GUObjectArray+ObjObjects] (CL-4214610 0x287C51B, in KismetSystemLibrary::execIsValidClass). The size
-            // most such reads agree on counts.
+            // most such reads agree on counts. 6.10 (CL-4480234) is back to UE's 64K and divides with a shift, sar
+            // ecx, 10h, before mov rax, [GUObjectArray+ObjObjects] (0x2AE7C1, 1131 reads): that counts for 64K, so
+            // "0 reads agree" means the reads weren't found rather than that the build shifts.
             const uintptr_t ChunkTable = Array + ObjObjects;
             std::unordered_map<int32_t, int32_t> ChunkSizes;
             for (uintptr_t Load = ObjectLayout::Current.bChunkedObjectArray ? FindInstruction(Finder::TextBegin(), Finder::TextEnd(), { -1, 0x8B, -1, -1, -1, -1, -1 }) : 0; Load; Load = FindInstruction(Load + 1, Finder::TextEnd(), { -1, 0x8B, -1, -1, -1, -1, -1 }))
@@ -270,12 +294,23 @@ namespace
                 {
                     continue;
                 }
+                bool bMultiplied = false;
                 for (uintptr_t Multiply = Load - 0x30; Multiply + 6 <= Load; ++Multiply)
                 {
                     const int32_t Size = *reinterpret_cast<const int32_t*>(Multiply + 2);
                     if (Byte(Multiply) == 0x69 && (Byte(Multiply + 1) & 0xC0) == 0xC0 && Size >= 0x1000 && Size <= 0x100000)
                     {
                         ++ChunkSizes[Size];
+                        bMultiplied = true;
+                        break;
+                    }
+                }
+                // sar or shr r32, 10h (C1 /7 or /5 with a register operand, ib 10).
+                for (uintptr_t Shift = Load - 0x30; !bMultiplied && Shift + 3 <= Load; ++Shift)
+                {
+                    if (Byte(Shift) == 0xC1 && ((Byte(Shift + 1) & 0xF8) == 0xF8 || (Byte(Shift + 1) & 0xF8) == 0xE8) && Byte(Shift + 2) == 0x10)
+                    {
+                        ++ChunkSizes[64 * 1024];
                         break;
                     }
                 }
@@ -330,17 +365,53 @@ namespace
         Require(L"FLogCategoryBase::FLogCategoryBase", Natives::FLogCategoryBase_FLogCategoryBase, CategoryCtor);
     }
 
+    // "+0x.. (reference i of n)" for a finder's log line, or "not found" with the reference count.
+    std::wstring DescribeFromRef(uintptr_t Address, size_t Index, size_t Count)
+    {
+        return Address ? std::format(L"+0x{:X} (reference {} of {})", Address - Finder::ImageBase(), Index + 1, Count) : std::format(L"not found ({} references)", Count);
+    }
+
+    // The StaticConstructObject_Internal a NewObject calls after its inlined empty-name check, whose log text is at Ref:
+    // the first call within Window bytes of Ref whose target calls StaticAllocate within AllocateWindow bytes (6.10
+    // CL-4480234: FEngineLoop::Init's NewObject<UGameEngine> calls 0x190BA10 0x33 bytes on, which calls
+    // StaticAllocateObject at +0xC1). Failing that, the first such call met reading on from Ref through the packer's jumps
+    // (Finder::TraceFind), as ResolveLogging reads a UE_LOG the packer split. A moved function's entry is a jump, so a
+    // target is also read where it leads (Finder::Unthunk).
+    uintptr_t ConstructCalledAfter(uintptr_t Ref, size_t Window, size_t AllocateWindow, uintptr_t StaticAllocate)
+    {
+        const auto CallsAllocate = [&](uintptr_t Target)
+        {
+            const uintptr_t Body = Finder::Unthunk(Target);
+            return CallWithin(Target, AllocateWindow, StaticAllocate) || (Body != Target && IsInMovedCode(Body) && CallWithin(Body, AllocateWindow, StaticAllocate));
+        };
+        for (uintptr_t Site = FindRawCall(Ref, Ref + Window); Site; Site = FindRawCall(Site + 5, Ref + Window))
+        {
+            if (CallsAllocate(Finder::RelativeTarget(Site, 1, 5)))
+            {
+                return Finder::RelativeTarget(Site, 1, 5);
+            }
+        }
+        const uintptr_t Site = Finder::TraceFind(Ref, 32, [&](uintptr_t Instruction)
+        {
+            return Byte(Instruction) == 0xE8 && IsInText(Finder::RelativeTarget(Instruction, 1, 5)) && CallsAllocate(Finder::RelativeTarget(Instruction, 1, 5));
+        });
+        return Site ? Finder::RelativeTarget(Site, 1, 5) : 0;
+    }
+
     void ResolveObjectGlobals()
     {
         // 1.10's MakeUniqueObjectName (0xDE9010, 20 callers) inlines the same check; StaticFindObject (0xDEFCB0) has 218.
         uintptr_t FindObject = 0;
         size_t FindObjectCallers = 0;
-        for (const uintptr_t Ref : Finder::StringRefs(L"Illegal call to StaticFindObject() while serializing object data!"))
+        size_t FindObjectRef = 0;
+        const std::vector<uintptr_t> FindObjectRefs = Finder::StringRefs(L"Illegal call to StaticFindObject() while serializing object data!");
+        for (size_t Index = 0; Index < FindObjectRefs.size(); ++Index)
         {
-            const uintptr_t Function = Finder::FunctionStart(Ref);
+            const uintptr_t Function = Finder::FunctionStart(FindObjectRefs[Index]);
             if (!FindObject)
             {
                 FindObject = Function;
+                FindObjectRef = Index;
             }
             else if (Function && Function != FindObject)
             {
@@ -350,15 +421,24 @@ namespace
                 {
                     FindObject = Function;
                     FindObjectCallers = Callers;
+                    FindObjectRef = Index;
                 }
             }
         }
         Require(L"StaticFindObject", Natives::StaticFindObject, FindObject);
-        Require(L"StaticLoadObject", Natives::StaticLoadObject, FunctionOf(L"Calling StaticLoadObject during PostLoad may result in hitches during streaming."));
+        size_t LoadObjectRef = 0;
+        size_t LoadObjectRefs = 0;
+        const uintptr_t LoadObject = FunctionOfFirstRef(L"Calling StaticLoadObject during PostLoad may result in hitches during streaming.", LoadObjectRef, LoadObjectRefs);
+        Require(L"StaticLoadObject", Natives::StaticLoadObject, LoadObject);
 
-        const uintptr_t StaticAllocate = FunctionOf(L"Objects have the same fully qualified name but different paths.\n\tNew Object: %s %s.%s\n\tExisting Object: %s");
+        // StaticAllocateObject isn't a native Core calls, only how StaticConstructObject_Internal is told apart.
+        size_t AllocateRef = 0;
+        size_t AllocateRefs = 0;
+        const uintptr_t StaticAllocate = FunctionOfFirstRef(L"Objects have the same fully qualified name but different paths.\n\tNew Object: %s %s.%s\n\tExisting Object: %s", AllocateRef, AllocateRefs);
         uintptr_t Construct = 0;
-        const uintptr_t Ref = First(Finder::StringRefs(L"NewObject with empty name can't be used to create default subobjects (inside of UObject derived class constructor) as it produces inconsistent object names. Use ObjectInitializer.CreateDefaultSuobject<> instead."));
+        std::wstring ConstructFrom;
+        const std::vector<uintptr_t> Refs = Finder::StringRefs(L"NewObject with empty name can't be used to create default subobjects (inside of UObject derived class constructor) as it produces inconsistent object names. Use ObjectInitializer.CreateDefaultSuobject<> instead.");
+        const uintptr_t Ref = First(Refs);
         if (StaticAllocate && Ref)
         {
             for (uintptr_t Site = FindRawCall(Ref, Ref + 0x80); Site && !Construct; Site = FindRawCall(Site + 5, Ref + 0x80))
@@ -367,10 +447,70 @@ namespace
                 if (CallWithin(Target, 0x200, StaticAllocate))
                 {
                     Construct = Target;
+                    ConstructFrom = std::format(L"called 0x{:X} bytes after reference 1 of {}", Site - Ref, Refs.size());
                 }
             }
         }
+
+        // The check is inlined into every NewObject (915 references on 6.10 CL-4480234, 904 on 6.02), and the first is
+        // FEngineLoop::Init's NewObject<UGameEngine>, a function the packer moves and splits into pieces joined by jumps
+        // at places that differ from exe to exe. 6.10 CL-4464155 split it so that no call within 0x80 bytes of that
+        // reference reached a function calling StaticAllocateObject, and with it missing neither the client's
+        // redirect nor the gameserver started (Core-Backend #340). So when the first reference fails, the first
+        // MaxConstructRefs references each name the function they call (with the same check, then slightly wider
+        // windows), and the one most of them name is taken. A single caller of StaticAllocateObject other than it can
+        // pass the check too (6.02 0x18A0A00, reached from one reference of 904), so it has to win at least two of them
+        // and more than half.
+        constexpr size_t MaxConstructRefs = 64;
+        struct FConstructWindows
+        {
+            size_t Call;
+            size_t Allocate;
+        };
+        for (const FConstructWindows Windows : { FConstructWindows{ 0x80, 0x200 }, FConstructWindows{ 0x100, 0x300 } })
+        {
+            if (Construct || !StaticAllocate || Refs.size() < 2)
+            {
+                break;
+            }
+            std::unordered_map<uintptr_t, int32_t> Votes;
+            std::unordered_map<uintptr_t, size_t> FirstVoter;
+            int32_t Cast = 0;
+            uintptr_t Best = 0;
+            int32_t BestVotes = 0;
+            const size_t Read = std::min(Refs.size(), MaxConstructRefs);
+            for (size_t Index = 0; Index < Read; ++Index)
+            {
+                const uintptr_t Target = ConstructCalledAfter(Refs[Index], Windows.Call, Windows.Allocate, StaticAllocate);
+                if (!Target)
+                {
+                    continue;
+                }
+                ++Cast;
+                FirstVoter.emplace(Target, Index);
+                if (++Votes[Target] > BestVotes)
+                {
+                    Best = Target;
+                    BestVotes = Votes[Target];
+                }
+            }
+            if (Best && BestVotes >= 2 && BestVotes * 2 > Cast)
+            {
+                Construct = Best;
+                ConstructFrom = std::format(L"reference 1 of {} reaches no function that calls StaticAllocateObject within 0x80 bytes; {} of references 1 to {} call this one within 0x{:X} bytes, first reference {}",
+                    Refs.size(), BestVotes, Read, Windows.Call, FirstVoter[Best] + 1);
+            }
+            else
+            {
+                Log::Warning(L"Finder: StaticConstructObject_Internal: references 1 to {} of {} name no function most of them call within 0x{:X} bytes ({} of {} for +0x{:X})",
+                    Read, Refs.size(), Windows.Call, BestVotes, Cast, Best ? Best - Finder::ImageBase() : 0);
+            }
+        }
         Require(L"StaticConstructObject_Internal", Natives::StaticConstructObject_Internal, Construct);
+
+        Log::Info(L"Finder: object globals: StaticFindObject {}, StaticLoadObject {}, StaticAllocateObject {}, StaticConstructObject_Internal {}",
+            DescribeFromRef(FindObject, FindObjectRef, FindObjectRefs.size()), DescribeFromRef(LoadObject, LoadObjectRef, LoadObjectRefs), DescribeFromRef(StaticAllocate, AllocateRef, AllocateRefs),
+            Construct ? std::format(L"+0x{:X} ({})", Construct - Finder::ImageBase(), ConstructFrom) : std::format(L"not found ({} references)", Refs.size()));
     }
 
     uintptr_t FindBackward(uintptr_t Reference, size_t MaxDistance, std::initializer_list<int32_t> Pattern)

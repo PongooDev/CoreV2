@@ -9411,9 +9411,40 @@ bool Finder::ResolveItemEntryStateLive()
         LastCall = Call;
     }
     uintptr_t SetStateValue = Targets.size() == 4 && Targets[0] == Targets[2] && Targets[1] == Targets[3] && Targets[0] != Targets[1] ? Targets[1] : 0;
+    if (!SetStateValue && Targets.size() == 3)
+    {
+        // The call scan reads E8 bytes, and an E8 inside an instruction reads as a call too: 6.20's implementation
+        // (0x12C00A0) clears its pending fabrication with mov qword ptr [rbx+1FE8h], 0 after SetStateValue, whose
+        // displacement holds one (a "call" into the middle of a jz at 0x12C00F7). Read the function an instruction at a
+        // time then, and keep the calls that start an instruction.
+        std::vector<uintptr_t> InstructionTargets;
+        uintptr_t LastInstructionCall = 0;
+        for (uintptr_t Address = Implementation; Address && Address < ImplementationEnd;)
+        {
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                InstructionTargets.clear();
+                break;
+            }
+            if (Byte(Address) == 0xE8 && Length == 5)
+            {
+                InstructionTargets.push_back(Finder::RelativeTarget(Address, 1, 5));
+                LastInstructionCall = Address;
+            }
+            Address += Length;
+        }
+        if (InstructionTargets.size() == 2)
+        {
+            Targets = InstructionTargets;
+            LastCall = LastInstructionCall;
+        }
+    }
     if (!SetStateValue && Targets.size() == 2 && Targets[0] != Targets[1] && FindInstruction(LastCall - 0x10, LastCall, { 0xBA, 0x02, 0x00, 0x00, 0x00 }))
     {
-        // 1.10 (0x8E0300) keeps one pending fabrication: its entry, then SetStateValue(Entry, 2, 1) (0x6AFFF0).
+        // 1.10 (0x8E0300) keeps one pending fabrication: its entry, then SetStateValue(Entry, 2, 1) (0x6AFFF0). 6.20
+        // (0x12C00A0) the same, with lea r8d, [rdx-1] for the 1 after mov edx, 2.
         SetStateValue = Targets[1];
     }
 

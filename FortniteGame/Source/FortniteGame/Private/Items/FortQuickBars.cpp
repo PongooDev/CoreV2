@@ -37,11 +37,11 @@ EFortQuickBars AFortQuickBars::GetCurrentQuickBar()
     return EFortQuickBars::GetMax_None();
 }
 
-void AFortQuickBars::SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride)
+void AFortQuickBars::SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride, bool bForceExecution)
 {
     if (Natives::AFortQuickBars_SwapQuickBarFocus || Finder::ResolveQuickBarFocusLive())
     {
-        Natives::AFortQuickBars_SwapQuickBarFocus(this, static_cast<int32_t>(InQuickBar), SlotOverride);
+        Natives::AFortQuickBars_SwapQuickBarFocus(this, static_cast<int32_t>(InQuickBar), SlotOverride, bForceExecution);
     }
 }
 

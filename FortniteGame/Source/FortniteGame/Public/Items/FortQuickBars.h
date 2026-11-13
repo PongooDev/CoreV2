@@ -67,7 +67,7 @@ public:
 
     FQuickBar& GetQuickBar(EFortQuickBars InQuickBar) { return InQuickBar == EFortQuickBars::GetPrimary() ? PrimaryQuickBar : SecondaryQuickBar; }
     EFortQuickBars GetCurrentQuickBar();
-    void SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride);
+    void SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride, bool bForceExecution = false);
     int32_t FocusSlot(EFortQuickBars InQuickBar, int32_t Slot, bool bUpdatePreviousFocusedSlot);
     // Focuses the slot that holds the item, on the primary bar or else the secondary one (3.5.2 0xD0D890). The client's
     // ClientExecuteInventoryItem_Implementation (0xEB8F50) focuses an item it executes this way before it sends

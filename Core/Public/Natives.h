@@ -452,7 +452,9 @@ namespace Natives
     inline int32_t UBTTaskNode_ExecuteTaskIndex = -1;
     inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;
     inline int32_t UEnvQueryContext_ProvideContextIndex = -1;
-    inline void (*AFortQuickBars_SwapQuickBarFocus)(UObject* This, int32_t InQuickBar, int32_t SlotOverride) = nullptr;
+    // 6.21 (CL-4526925, 0x1068E10) adds bForceExecution, which it hands on to the slot activation ([vtable+0x680]); the
+    // builds before it never read r9 there.
+    inline void (*AFortQuickBars_SwapQuickBarFocus)(UObject* This, int32_t InQuickBar, int32_t SlotOverride, bool bForceExecution) = nullptr;
     inline int32_t (*AFortQuickBars_FocusSlot)(UObject* This, int32_t InQuickBar, int32_t Slot, bool bUpdatePreviousFocusedSlot) = nullptr;
     inline int32_t IFortSpottableActorInterface_CanBeSpottedByIndex = -1;
     inline void* (*UObject_GetInterfaceAddress)(UObject* This, UClass* InterfaceClass) = nullptr;

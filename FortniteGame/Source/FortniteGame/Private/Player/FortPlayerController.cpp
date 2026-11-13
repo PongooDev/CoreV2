@@ -2196,13 +2196,13 @@ DEFINE_FUNCTION(AFortPlayerController::execGivePlayerAmmo)
     P_NATIVE_END;
 }
 
-void AFortPlayerController::SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride)
+void AFortPlayerController::SwapQuickBarFocus(EFortQuickBars InQuickBar, int32_t SlotOverride, bool bForceExecution)
 {
 #if WITH_SERVER_CODE
     AFortQuickBars* Bars = QuickBars;
     if (Bars && Bars->GetCurrentQuickBar() != InQuickBar)
     {
-        Bars->SwapQuickBarFocus(InQuickBar, SlotOverride);
+        Bars->SwapQuickBarFocus(InQuickBar, SlotOverride, bForceExecution);
     }
 #endif
 }
@@ -2239,16 +2239,23 @@ DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)
     // Where the function takes SlotOverride (5.10), it's stepped as well: a native that leaves an argument unread
     // leaves the caller's script inside it. BP_PlayerSpawnTeleportPad's TeleportAllPlayers passes (Primary, -1) at the
     // end-of-zone teleport, and the -1's bytes then ran as script ("Unknown code token" is fatal), #405.
+    // 6.21 adds bForceExecution (its exec, 0x15D6F20, steps all three).
     static UFunction* const Function = StaticFunction_SwapQuickBarFocus();
     static const bool bHasSlotOverride = Function && Function->FindPropertyByName(FName(L"SlotOverride", FNAME_Find));
+    static const bool bHasForceExecution = Function && Function->FindPropertyByName(FName(L"bForceExecution", FNAME_Find));
     int32_t Z_Param_SlotOverride = -1;
     if (bHasSlotOverride)
     {
         P_STACK.StepCompiledIn<UIntProperty>(&Z_Param_SlotOverride);
     }
+    uint32_t Z_Param_bForceExecution = 0;
+    if (bHasForceExecution)
+    {
+        P_STACK.StepCompiledIn<UBoolProperty>(&Z_Param_bForceExecution);
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
-    static_cast<AFortPlayerController*>(Context)->SwapQuickBarFocus(EFortQuickBars{ Z_Param_InQuickBar }, Z_Param_SlotOverride);
+    static_cast<AFortPlayerController*>(Context)->SwapQuickBarFocus(EFortQuickBars{ Z_Param_InQuickBar }, Z_Param_SlotOverride, !!Z_Param_bForceExecution);
     P_NATIVE_END;
 }
 

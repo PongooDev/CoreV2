@@ -8,12 +8,16 @@
 bool UFortPlaylist::IsShowdownPlaylist() const
 {
     // CL-4480234 0x11A7750: the playlist name against the three, without case (towlower), each its EFortShowdownMatchType.
+    // 6.20's (CL-4497486 0x11E9D90) compares three more after them, Fortnitemares' tournament playlists (CoreV2 #427: a
+    // Playlist_Deimos_SoloShow match sent no eliminations, so its players saw no elimination points). No other build has
+    // playlists of those names.
     if (!Member_PlaylistName.IsAvailable())
     {
         return false;
     }
     const std::wstring Name = static_cast<FName>(PlaylistName).ToStdString();
-    for (const wchar_t* Showdown : { L"Playlist_Showdown_Solo", L"Playlist_Showdown_Duos", L"Playlist_Showdown_Squads" })
+    for (const wchar_t* Showdown : { L"Playlist_Showdown_Solo", L"Playlist_Showdown_Duos", L"Playlist_Showdown_Squads", L"Playlist_Deimos_SoloShow",
+             L"Playlist_Deimos_DuoShow", L"Playlist_Deimos_SquadShow" })
     {
         if (_wcsicmp(Name.c_str(), Showdown) == 0)
         {

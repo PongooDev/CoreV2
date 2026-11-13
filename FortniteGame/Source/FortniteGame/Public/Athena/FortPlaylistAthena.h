@@ -48,12 +48,14 @@ public:
 
     // A Showdown playlist, one of 6.10's in-game tournaments' (CL-4480234; Playlist_Showdown_Solo, _Duos and _Squads,
     // 58071 to 58073): the playlist name is one the tournament manager gives a match type, as its own lookup has it
-    // (UFortTournamentManager, CL-4480234 0x11A7750 and 6.20 CL-4497486 0x11E9D90: the three names, compared without their
-    // case, give EFortShowdownMatchType Solo, Duos and Squads, any other Unknown). Their matches are the tournaments'
-    // (the client adds the scoring HUD alert as the playlist's UI extension, and Core-Backend scores their matches for the
-    // event they play in), and their server tells their players the team's eliminations and when its stats are final
+    // (UFortTournamentManager, CL-4480234 0x11A7750: the three names, compared without their case, give
+    // EFortShowdownMatchType Solo, Duos and Squads, any other Unknown). 6.20's (CL-4497486 0x11E9D90) also names
+    // Fortnitemares' tournament playlists, Playlist_Deimos_SoloShow, _DuoShow and _SquadShow (59071 to 59073, bIsTournament,
+    // with the same ShowdownScoringHUD UI extension). Their matches are the tournaments' (the client adds the scoring HUD
+    // alert as the playlist's UI extension, and Core-Backend scores their matches for the event they play in), and their
+    // server tells their players the team's eliminations and when its stats are final
     // (AFortPlayerStateAthena::ClientReportTeamKill and ClientNotifyTournamentStatsFinal). The name is Core's; no build
-    // before 6.10 has the three playlists.
+    // before 6.10 has the three playlists, none before 6.20 the Fortnitemares ones.
     bool IsShowdownPlaylist() const;
 };
 

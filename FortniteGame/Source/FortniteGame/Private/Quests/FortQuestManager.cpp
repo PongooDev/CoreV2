@@ -889,8 +889,10 @@ namespace
 
     // Core-Backend counts two kinds of Battle Royale objectives from the match's results (battleroyale/recordresults,
     // profiles/athena.js countedFromResults) and skips them in UpdateQuests, so a match counts once: placement
-    // (AthenaRank rows) and eliminations with any weapon (a Kill row whose SourceTags are just Homebase.Class, with no
-    // condition: killingblow_athena_player, "Eliminate opponents").
+    // (AthenaRank rows) and eliminations of players with any weapon (a Kill row whose SourceTags and TargetTags are just
+    // Homebase.Class, with no condition: killingblow_athena_player, "Eliminate opponents"). The results count players
+    // only: 6.20's Fortnitemares kills of Cube Monsters (killingblow_athena_deimos_monster, _fiend, _brute: the same
+    // source, an NPC.CharacterType target) are the quest manager's, and held back here they never reached the profile.
     bool IsCountedFromResults(FFortMcpQuestObjectiveInfo& Objective, const wchar_t* ContextString)
     {
         const FFortQuestObjectiveStatTableRow* Row = StatRowOf(Objective.ObjectiveStatHandle, ContextString);
@@ -903,7 +905,10 @@ namespace
         {
             const FString& SourceTags = Row->SourceTags;
             const FString& Condition = Row->Condition;
-            return SourceTags.ToStdString() == L"Homebase.Class" && Condition.Len() == 0;
+            const FString& TargetTags = Row->TargetTags;
+            const std::vector<FName> Targets = ParseTagNames(TargetTags);
+            const bool bPlayerTarget = Targets.size() == 1 && Targets[0] == FName(L"Homebase.Class", FNAME_Find);
+            return SourceTags.ToStdString() == L"Homebase.Class" && bPlayerTarget && Condition.Len() == 0;
         }
         return EFortQuestObjectiveStatEvent{ Type }.ToString().ends_with(L"AthenaRank");
     }
@@ -1494,7 +1499,9 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     // event with a flush) never reached the athena profile, for two reasons.
     // First, the event's context is the game mode's GameContextTags, which nothing fills in Battle Royale, and the
     // objectives ask for the playlist there (AFortGameModeAthena::AddPlaylistContextTag): the game mode gets it, and so
-    // does the event, whose tags were copied from it before.
+    // does the event, whose tags were copied from it before. From 4.4 the game mode also holds the playlist's own
+    // context tags, which the game state passes it once the playlist has loaded (SetPlaylistContextTags: 6.20's
+    // Athena.Playlist.Deimos.Solo for the Fortnitemares Challenges).
     UFortRegisteredPlayerInfo* PlayerInfo = Cast<UFortRegisteredPlayerInfo>(This ? This->GetOuter() : nullptr);
     AFortGameModeAthena* GameMode = PlayerInfo && PlayerInfo->GetAthenaQuestManager() == This ? AFortGameModeAthena::GetCurrent(GWorld) : nullptr;
     if (!GameMode)

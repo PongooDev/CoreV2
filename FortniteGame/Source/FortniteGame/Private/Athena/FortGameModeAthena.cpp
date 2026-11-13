@@ -243,6 +243,9 @@ namespace
         FTimerHandle PlayersTimer;
         // The tick after OnCurrentPlaylistLoaded; before 4.4, CheckMatchPlaylist's.
         FTimerHandle PlaylistTimer;
+        // The playlist context tags SetPlaylistContextTags put in the game mode's GameContextTags, which the next
+        // playlist's replace.
+        std::vector<FName> PlaylistContextTagNames;
     };
 
     // A delegate's work runs the tick after the game's broadcast, outside the game function that broadcast it (the
@@ -2847,9 +2850,54 @@ void AFortGameModeAthena::ReportGamePhaseStep(const wchar_t* Event)
 #endif
 }
 
-void AFortGameModeAthena::HandleCurrentPlaylistLoaded()
+void AFortGameModeAthena::SetPlaylistContextTags(const FGameplayTagContainer& PlaylistContextTags)
 {
 #if WITH_SERVER_CODE
+    // Every quest stat event of the match has the game mode's GameContextTags for its context (AFortGameMode::
+    // GetGameContextTags, slot 0x12C on 6.20, 0xC6F330: +0x5B0): UFortQuestManager::GetSourceAndContextTags (0x12F7590)
+    // asks the world's AFortGameMode for them, AFortGameModeZone::Killed (0xEEC130) passes them to its Kill and
+    // KillContribution, and the controller's flush of its pawn's damage (0x1286380) to its Damage. In Battle Royale
+    // nothing native left in the builds fills them (OnInitWorldRecordComplete, 0xEE2AE0, is Save the World's world
+    // record). The client's quest manager, with no game mode, takes them from the game state instead (slot 0xE4,
+    // 0xC6FAA0): AFortGameStateAthena::GetAthenaPlaylistContextTags (0xC6EF90), the playlist's GameplayTagContainer with
+    // the tag of its team size (Solo, Duo, Squad; all of them for a playlist with bIgnoreDefaultQuests), which is also
+    // what the game state's OnCurrentPlaylistLoaded passes the game mode once the playlist has loaded
+    // (OnPlaylistDataLoadCompleted, 0xC7A3D0, right after AFortGameModeAthena::OnPlaylistDataLoaded). Fortnitemares'
+    // challenges count only there: their objectives' context is Athena.Playlist.Deimos (killingblow_athena_deimos_monster,
+    // damage_athena_deimos_*, visit_location_sevenseals_fortnitemares, dance_location_fortnitemares_gargoyle_*), a parent
+    // of Playlist_Deimos_Solo's Athena.Playlist.Deimos.Solo, which Core's playlist-id tag (AddPlaylistContextTag) never
+    // named, so none of them moved. The previous playlist's tags (the map URL's, before the match's assignment) go.
+    FMatchEvents& Events = MatchEventsOf(this);
+    FGameplayTagContainer& Context = GameContextTags;
+    FGameplayTagContainer Kept;
+    for (const FGameplayTag& Tag : Context.GameplayTags)
+    {
+        if (std::find(Events.PlaylistContextTagNames.begin(), Events.PlaylistContextTagNames.end(), Tag.TagName) == Events.PlaylistContextTagNames.end())
+        {
+            Kept.AddTag(Tag);
+        }
+    }
+    Kept.AppendTags(PlaylistContextTags);
+    Context = Kept;
+    Events.PlaylistContextTagNames.clear();
+    std::wstring Names;
+    for (const FGameplayTag& Tag : PlaylistContextTags.GameplayTags)
+    {
+        Events.PlaylistContextTagNames.push_back(Tag.TagName);
+        Names += (Names.empty() ? L"" : L", ") + Tag.TagName.ToStdString();
+    }
+    Log::Info(L"Quests: the match's playlist {} gives its quest events the context tags [{}] (the game state's GetAthenaPlaylistContextTags), {} tag(s) with their parents in the game mode's "
+        L"GameContextTags now", static_cast<int32_t>(CurrentPlaylistId), Names, Context.GameplayTags.Num());
+#endif
+}
+
+void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContainer* PlaylistContextTags)
+{
+#if WITH_SERVER_CODE
+    if (PlaylistContextTags)
+    {
+        SetPlaylistContextTags(*PlaylistContextTags);
+    }
     // The game state broadcasts it right after the playlist's modifiers registered (OnPlaylistDataLoadCompleted, 6.01
     // 0xC1C6A0, after UpdatePlaylistDependentData), so their mutators have taken the match's property overrides.
     if (AFortGameStateAthena* GameState = AthenaGameStateOf(this))
@@ -3019,9 +3067,24 @@ DEFINE_FUNCTION(AFortGameModeAthena::execHandleSafeZoneUpdated)
 
 DEFINE_FUNCTION(AFortGameModeAthena::execHandleCurrentPlaylistLoaded)
 {
+    // The signature's PlaylistContextTags (6.20: PlaylistName, then PlaylistContextTags), read where the broadcast put
+    // it, the frame's Locals (ProcessEvent's copy of the parameter struct), by name: a build whose signature has no such
+    // parameter passes none.
+    const FGameplayTagContainer* PlaylistContextTags = nullptr;
+    const FName ParameterName(L"PlaylistContextTags", FNAME_Find);
+    uint8_t* const Locals = Natives::FFrame_Locals >= 0 ? P_STACK.Locals : nullptr;
+    for (const UField* Field = Locals && CurrentPlaylistLoadedHandler && !ParameterName.IsNone() ? static_cast<UField*>(CurrentPlaylistLoadedHandler->Children) : nullptr;
+         Field && !PlaylistContextTags; Field = Field->Next)
+    {
+        const UProperty* Property = reinterpret_cast<const UProperty*>(Field);
+        if (Field->GetFName() == ParameterName && Field->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty) && Property->GetSize() == static_cast<int32_t>(sizeof(FGameplayTagContainer)))
+        {
+            PlaylistContextTags = reinterpret_cast<const FGameplayTagContainer*>(Locals + Property->GetOffset_ForInternal());
+        }
+    }
     P_FINISH;
     P_NATIVE_BEGIN;
-    static_cast<AFortGameModeAthena*>(Context)->HandleCurrentPlaylistLoaded();
+    static_cast<AFortGameModeAthena*>(Context)->HandleCurrentPlaylistLoaded(PlaylistContextTags);
     P_NATIVE_END;
 }
 

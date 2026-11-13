@@ -231,8 +231,13 @@ public:
     // (5.40 0xBF32A0, "Server AND Client") broadcasts after the game mode's OnPlaylistDataLoaded. Once the match's
     // assignment gives the world another playlist, applies that playlist's tables (from 3.5 with the default loot rows
     // of the tier groups and packages they have none of, #292) and, when its loot tables are other ones, rolls the
-    // world's loot again, as long as the match hasn't left its warmup.
-    void HandleCurrentPlaylistLoaded();
+    // world's loot again, as long as the match hasn't left its warmup. PlaylistContextTags, the broadcast's own
+    // parameter (null where the build's signature has none), become the quest events' context (SetPlaylistContextTags).
+    void HandleCurrentPlaylistLoaded(const FGameplayTagContainer* PlaylistContextTags);
+
+    // The match's playlist's context tags (AFortGameStateAthena::GetAthenaPlaylistContextTags) in the game mode's
+    // GameContextTags, in place of the previous playlist's: the context every quest stat event of the match carries.
+    void SetPlaylistContextTags(const FGameplayTagContainer& PlaylistContextTags);
 
     // A pawn of the match died (AFortPawn::OnDied, which the pawn's death broadcasts on the server; Epic's own
     // AFortTeamInfo::AddSpottedActor binds it too): its team may be out, and the game may have moved its player to

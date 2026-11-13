@@ -90,8 +90,18 @@ public:
     // check (3.3 0xE6AB30) makes every hit 0 while it, or bCanBeDamaged off, says so.
     DefineBitfieldUProperty(bIsInvulnerable)
     static bool HasInvulnerable() { return Member_bIsInvulnerable.IsAvailable(); }
+    // The pawn's weapon is put away (replicated, OnRep_bWeaponHolstered) while any holster id is in its WeaponHolsterIds:
+    // AFortPlayerPawnAthena::Tick adds HolsterSkydiving while bLocalIsSkydiving is set (6.20 0x1240170, slot 0x83,
+    // SetHolsterWeapon at 0x12411E0, not on a simulated proxy), and the skydive's end takes it out (0x1216670). In the
+    // SDKs from 3.0 on; reflection decides on older builds.
+    DefineBitfieldUProperty(bWeaponHolstered)
+    static bool HasWeaponHolstered() { return Member_bWeaponHolstered.IsAvailable(); }
 
     bool IsDead() const;
+    // AFortPawn::IsWeaponHolstered (6.20: execIsWeaponHolstered 0x1499890 -> 0xC4AA90, bWeaponHolstered). What
+    // AFortWeapon::CanFire asks of its Instigator (6.20 0x13D0E50, weapon vtable slot 0xDA; AFortWeaponRanged's 0x1411CF0
+    // calls it): a holstered pawn's weapon doesn't fire. False on a build without the property.
+    bool IsWeaponHolstered() const;
     // Server: the current weapon starts or stops firing in FireModeNum, as a player's held fire button does.
     void PawnStartFire(uint8_t FireModeNum = 0);
     void PawnStopFire(uint8_t FireModeNum = 0);

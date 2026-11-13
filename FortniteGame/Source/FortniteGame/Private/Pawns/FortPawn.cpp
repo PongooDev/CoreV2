@@ -31,6 +31,11 @@ bool AFortPawn::IsDead() const
     return Params.Call(const_cast<AFortPawn*>(this)) && Params.Take<bool>(L"ReturnValue");
 }
 
+bool AFortPawn::IsWeaponHolstered() const
+{
+    return HasWeaponHolstered() && bWeaponHolstered;
+}
+
 void AFortPawn::PawnStartFire(uint8_t FireModeNum)
 {
     Reflection::FParams Params(StaticFunction_PawnStartFire(), true);

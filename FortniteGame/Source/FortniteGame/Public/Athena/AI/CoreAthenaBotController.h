@@ -640,6 +640,11 @@ private:
     // Aiming down sights as a player does with a gun in a fight: the pawn's replicated bIsTargeting (AFortPlayerPawn,
     // OnRep_IsTargeting), which other clients' animation reads for the aiming pose.
     void SetTargeting(bool bNewTargeting);
+    // Whether the pawn's weapon can fire at all, the game's own state: not while its weapon is holstered (what
+    // AFortWeapon::CanFire asks of its pawn: AFortPawn::IsWeaponHolstered, which skydiving sets), nor while it
+    // skydives or glides (bIsSkydiving, bIsParachuteOpen), for a build without the holster or a glide the game didn't
+    // holster for (CoreV2 #429: bots shot from their gliders).
+    bool CanFireWeapon() const;
     // One shot at the target: the weapon's fire for everyone to see, the magazine, and its hit, by Core (no player
     // controller aims a bot's weapon ability, so the game's own fire neither spends ammo nor hits).
     void FireShot(AFortPawn* Target, float Distance);

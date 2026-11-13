@@ -3466,6 +3466,22 @@ void FCoreAthenaBotController::SetTargeting(bool bNewTargeting)
     Pawn->ForceNetUpdate();
 }
 
+bool FCoreAthenaBotController::CanFireWeapon() const
+{
+    // A player's weapon fires only where AFortWeapon::CanFire allows it (6.20 0x13D0E50), which wants its pawn's weapon
+    // out (AFortPawn::IsWeaponHolstered). The skydive holsters it: AFortPlayerPawnAthena::Tick adds HolsterSkydiving on
+    // the server while bLocalIsSkydiving is set, and the skydive's end takes it out (6.20 0x1240170, 0x1216670). Core's
+    // bot shot doesn't go through the weapon's CanFire (FireShot: the weapon's ability refuses a bot), so the bot asks the
+    // pawn itself. The pawn's own skydive and glider flags count too, for a build that doesn't reflect the holster (the
+    // SDKs from 3.0 on all do) and an open glider the game didn't holster for.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn)
+    {
+        return false;
+    }
+    return !Pawn->IsWeaponHolstered() && !Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen;
+}
+
 bool FCoreAthenaBotController::ActivateWeaponFire(AFortWeapon* Weapon)
 {
 #if WITH_SERVER_CODE
@@ -3867,6 +3883,19 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
     const FVector TargetLocation = LocationOf(Target);
     const float Distance = (TargetLocation - Location).Size();
     const bool bArmed = HasUsableWeapon();
+    // Skydiving or gliding (its weapon holstered, CanFireWeapon), a bot neither shoots, swings nor aims down sights, as a
+    // player can't (CoreV2 #429): it keeps after its target and fires once it has landed.
+    const bool bCanFire = CanFireWeapon();
+    if (!bCanFire)
+    {
+        StopFiring();
+        static int32_t LoggedHeld = 0;
+        if (LoggedHeld++ < 5)
+        {
+            Log::Info(L"Battle Royale bots: {} holds its fire at {} (weapon holstered {}, skydiving {}, glider {})", BotName, NameOf(Target), Pawn->IsWeaponHolstered() ? L"yes" : L"no",
+                Pawn->bIsSkydiving ? L"yes" : L"no", Pawn->bIsParachuteOpen ? L"open" : L"closed");
+        }
+    }
     // A player who boxed themselves in: the bot saw them a moment ago, and what blocks the view now is a player's
     // build right around them. It keeps at them and shoots through the walls (a shot a build stops damages the piece),
     // or swings its pickaxe at them, until they break.
@@ -3883,7 +3912,7 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
             }
             StopFiring();
             FaceTowards(FVector(LastSeenTargetLocation.X, LastSeenTargetLocation.Y, LastSeenTargetLocation.Z + 20.0f), Now, 0.5f);
-            SetTargeting(!bPickaxeEquipped && ReloadUntil <= 0.0f && FacingError() < 45.0f);
+            SetTargeting(bCanFire && !bPickaxeEquipped && ReloadUntil <= 0.0f && FacingError() < 45.0f);
             if (Dist2D(Location, LastSeenTargetLocation) > 300.0f)
             {
                 MoveTowards(LastSeenTargetLocation, Now, 250.0f);
@@ -4009,13 +4038,13 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
         EndShot();
     }
     // A player aims down sights with a gun beyond arm's reach, not while reloading.
-    SetTargeting(bArmed && !bPickaxeEquipped && ReloadUntil <= 0.0f && Distance > 400.0f && FacingError() < 45.0f);
+    SetTargeting(bCanFire && bArmed && !bPickaxeEquipped && ReloadUntil <= 0.0f && Distance > 400.0f && FacingError() < 45.0f);
     // A player turns to face a target before shooting at it.
     const FCoreAthenaBotWeapon* Ready = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
     const bool bGunReady = bPickaxeEquipped || (Now >= EquipReadyTime && (!Ready || Now >= Ready->ReadyTime));
     const bool bReady = Now >= TargetAcquiredTime + AIBotSkills.MaxTrackingReactionTime && Now >= NextShotTime && bGunReady && ReloadUntil <= 0.0f && FacingError() < 20.0f;
     const bool bLoaded = bPickaxeEquipped ? Distance < 250.0f : (EquippedWeapon.Get() && EquippedWeapon.Get()->AmmoCount > 0);
-    if (bReady && bLoaded && !bFiring)
+    if (bReady && bLoaded && bCanFire && !bFiring)
     {
         FireShot(Target, Distance);
         bFiring = true;

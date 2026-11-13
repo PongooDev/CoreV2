@@ -282,6 +282,7 @@ static void InstallHooks()
 
     GameThread::Enqueue([]
     {
+        FCommandLine::CheckServerSwitches();
         // Battle Royale servers register with the matchmaking service after "Dedicated Server Ready!" (Core-Docs
         // Athena-Boot-1.7.2.md §1 B7).
         if (Configuration::Get().IsBattleRoyale())

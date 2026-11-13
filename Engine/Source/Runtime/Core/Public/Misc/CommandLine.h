@@ -11,4 +11,7 @@ struct FCommandLine
     // Before the engine starts: lets -nullrhi, -nosplash, -nosound, -log and -saveddirsuffix through the shipping build's
     // whitelist.
     static void ApproveServerSwitches();
+    // Once the engine has its command line: where ApproveServerSwitches found no whitelist, says whether the engine kept
+    // -nullrhi anyway (an exe without one, 6.21) or dropped it.
+    static void CheckServerSwitches();
 };

@@ -13,6 +13,9 @@ namespace
     // FCommandLine's CmdLine buffer (UE 4.16 CommandLine.cpp: TCHAR CmdLine[16384]).
     constexpr size_t CommandLineCapacity = 16384;
 
+    // ApproveServerSwitches found no whitelist string to change.
+    bool bWhitelistNotFound = false;
+
     bool HasSwitch(const wchar_t* CommandLine, const wchar_t* Switch)
     {
         int32_t Count = 0;
@@ -74,7 +77,11 @@ void FCommandLine::ApproveServerSwitches()
     }
     if (!Whitelist)
     {
-        Log::Warning(L"FCommandLine: whitelist not found; -nullrhi and -saveddirsuffix may be dropped");
+        // 6.21 (CL-4526925) is built without the whitelist: its startup log prints "%sCommand Line: %s" with a constant
+        // empty prefix (0x173EF86) where 6.20 picked "Filtered " (0x1728FA7), and FCommandLine keeps every switch. The
+        // engine's command line, once set, tells which (CheckServerSwitches).
+        bWhitelistNotFound = true;
+        Log::Info(L"FCommandLine: no whitelist to change in this exe; the engine's command line is checked for -nullrhi once it is set");
         return;
     }
     DWORD Protection = 0;
@@ -86,6 +93,23 @@ void FCommandLine::ApproveServerSwitches()
     std::memcpy(Whitelist, Server, Size);
     VirtualProtect(Whitelist, Size, Protection, &Protection);
     Log::Info(L"FCommandLine: whitelisted -log -nosplash -nosound -nullrhi -saveddirsuffix -unattended");
+}
+
+void FCommandLine::CheckServerSwitches()
+{
+    if (!bWhitelistNotFound || !HasSwitch(GetCommandLineW(), L"nullrhi"))
+    {
+        return;
+    }
+    const wchar_t* CommandLine = Get();
+    if (CommandLine && HasSwitch(CommandLine, L"nullrhi"))
+    {
+        Log::Info(L"FCommandLine: the engine kept -nullrhi without a whitelist change: this exe has no whitelist");
+    }
+    else
+    {
+        Log::Warning(L"FCommandLine: whitelist not found and the engine dropped -nullrhi; -saveddirsuffix may be dropped too");
+    }
 }
 
 void FCommandLine::AddSwitch(const wchar_t* Switch)

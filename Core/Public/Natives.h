@@ -392,6 +392,9 @@ namespace Natives
     inline void** ABuildingItemCollectorActor_GrantOutputDelegateVTable = nullptr;
     inline int32_t ABuildingItemCollectorActor_GrantOutputDelegateExecuteIndex = -1;
     inline int32_t AFortGameModeZone_CreateAIDirectorIndex = -1;
+    // AFortGameModeZone::CreateAIGoalManager's slot (intact; 6.20 CL-4497486 0xECF550, slot 0x181), the call
+    // AFortGameModeZone::PostInitializeComponents makes right after CreateAIDirector's (Finder::ResolveAIDirectorLive).
+    inline int32_t AFortGameModeZone_CreateAIGoalManagerIndex = -1;
     inline void (*AFortAIDirector_StopEncounter)(UObject* This, UObject* EncounterToStop, uint8_t EncounterStopReason, bool bForceKillAI, bool bBroadcastStop) = nullptr;
     inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;
     inline FFortMissionManagerRecord* (*FFortMissionManagerRecord_FFortMissionManagerRecord)(FFortMissionManagerRecord* This, UClass* InMissionManagerClass) = nullptr;

@@ -108,6 +108,13 @@ public:
     DefineUProperty(float, FailedMatchAssignmentTimeout)
     DefineUProperty(UObject*, AISettings)
     static bool HasAISettings() { return Member_AISettings.IsAvailable(); }
+    static ptrdiff_t AISettingsOffset() { return HasAISettings() ? Member_AISettings.GetOffsetChecked() : -1; }
+
+    // 21.40's name (5.21 CL-4288479 0xBD80F0): the match's AI settings, the playlist's AISettings (a UAthenaAISettings;
+    // 6.20's Deimos playlists, the Fortnitemares Cube Monsters, have Athena_AI_Settings), which OnGivenMatchAssignment
+    // gives the game mode with the playlist. 5.30 strips it with that part of OnGivenMatchAssignment
+    // (AFortGameStateAthena::SetCurrentPlaylistId's steps, Core's restoration).
+    void SetAISettings(UObject* InAISettings);
 
     // The matchmaking service's assignment of a match to the server (the game session's delegate, on its vtable slot):
     // AFortGameMode's (the match options), then the game state's playlist, the match's player count and its warmup's

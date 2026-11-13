@@ -8182,6 +8182,7 @@ bool Finder::ResolveAIDirectorLive()
     void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
     const uintptr_t CreateAIGoalManager = FunctionOf(L"nullptr AI Goal Manager class specified by Game Data; created default AI Goal manager anyway, but some settings may be missing.");
     int32_t DirectorIndex = -1;
+    int32_t GoalManagerIndex = -1;
     for (int32_t Index = 0; ZoneVTable && CreateAIGoalManager && Index < 0x400 && DirectorIndex < 0; ++Index)
     {
         const uintptr_t Function = VTableEntry(ZoneVTable, Index);
@@ -8193,6 +8194,7 @@ bool Finder::ResolveAIDirectorLive()
             if (Slot >= 0 && VTableEntry(ZoneVTable, Slot) == CreateAIGoalManager && PreviousSlot >= 0 && reinterpret_cast<void*>(VTableEntry(ZoneVTable, PreviousSlot)) == Natives::SharedEmptyFunction)
             {
                 DirectorIndex = PreviousSlot;
+                GoalManagerIndex = Slot;
                 break;
             }
             PreviousSlot = Slot;
@@ -8205,8 +8207,50 @@ bool Finder::ResolveAIDirectorLive()
         return false;
     }
     Natives::AFortGameModeZone_CreateAIDirectorIndex = DirectorIndex;
+    Natives::AFortGameModeZone_CreateAIGoalManagerIndex = GoalManagerIndex;
     Log::Info(L"Finder: AFortGameModeZone::CreateAIDirector is slot 0x{:X}", DirectorIndex);
     return true;
+}
+
+uint8_t* Finder::AthenaCreateAIDirectorSuperCall(ptrdiff_t AISettingsOffset)
+{
+    // 6.20 (CL-4497486) gives Battle Royale an AI of its own for the Fortnitemares Cube Monsters (the Deimos playlists'
+    // AISettings, Athena_AI_Settings). AFortGameModeAthena overrides CreateAIDirector (0xC67A90, slot 0x180): when the
+    // game mode's AISettings allow an AI director ("test byte ptr [rax+30h], 1", bAllowAIDirector), it calls
+    // AFortGameModeZone::CreateAIDirector directly ("call 0x2A96C0" at 0xC67AAB, the stripped function folded into the
+    // shared empty one), then sets the director's MaxActiveAlive from the game mode's MaxActiveAIActors ("setting
+    // initial MaxActiveAlive override"). The zone's slot is swapped to Core's restoration; this direct call can't be,
+    // so it is the call that is redirected. Builds whose Athena game mode has no AISettings (before 5.0), or no
+    // CreateAIDirector of its own, have none.
+    const int32_t DirectorIndex = Natives::AFortGameModeZone_CreateAIDirectorIndex;
+    void** AthenaVTable = DirectorIndex >= 0 && AISettingsOffset > 0 ? CdoVTable(L"/Script/FortniteGame.FortGameModeAthena") : nullptr;
+    const uintptr_t Own = AthenaVTable ? VTableEntry(AthenaVTable, DirectorIndex) : 0;
+    if (!Own || reinterpret_cast<void*>(Own) == Natives::SharedEmptyFunction || IsCoreFunction(Own) || !IsInText(Own))
+    {
+        return nullptr;
+    }
+    if (!Finder::ReadsMemberAt(Own, static_cast<int32_t>(AISettingsOffset)))
+    {
+        Log::Info(L"Finder: AFortGameModeAthena's CreateAIDirector (0x{:X}) doesn't read its AISettings (+0x{:X}), so it isn't 6.20's, and calls no stripped AFortGameModeZone::CreateAIDirector",
+            Own - Finder::ImageBase(), AISettingsOffset);
+        return nullptr;
+    }
+    std::vector<uintptr_t> StubCalls;
+    for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Own))
+    {
+        if (reinterpret_cast<void*>(Target) == Natives::SharedEmptyFunction)
+        {
+            StubCalls.push_back(Site);
+        }
+    }
+    if (StubCalls.size() != 1)
+    {
+        Log::Error(L"Finder: AFortGameModeAthena::CreateAIDirector (0x{:X}) makes {} calls to the shared empty function, not the one to the stripped AFortGameModeZone::CreateAIDirector, "
+            L"so Battle Royale's AI playlists get no AI director", Own - Finder::ImageBase(), StubCalls.size());
+        return nullptr;
+    }
+    Log::Info(L"Finder: AFortGameModeAthena::CreateAIDirector (0x{:X}) calls the stripped AFortGameModeZone::CreateAIDirector at 0x{:X}", Own - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase());
+    return reinterpret_cast<uint8_t*>(StubCalls[0]);
 }
 
 bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)

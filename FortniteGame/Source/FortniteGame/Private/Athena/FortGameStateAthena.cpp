@@ -40,14 +40,14 @@ namespace
         {
             GameState->AirCraftBehavior = Playlist->AirCraftBehavior;
         }
-        // AFortGameModeAthena::SetAISettings (5.21 0xBD80F0), stripped with it from 5.30, also hands them to the world's
-        // AI system; Battle Royale's playlists have none.
+        // AFortGameModeAthena::SetAISettings (5.21 0xBD80F0), stripped with it from 5.30: Battle Royale's own playlists
+        // have none; 6.20's Fortnitemares (the Deimos playlists) bring the Cube Monsters' AI director with theirs.
         UObject* PlaylistAISettings = UFortPlaylistAthena::HasAISettings() ? static_cast<UObject*>(Playlist->AISettings) : nullptr;
         if (PlaylistAISettings && GameMode && AFortGameModeAthena::HasAISettings())
         {
-            GameMode->AISettings = PlaylistAISettings;
-            Log::Warning(L"PLAYLIST: {} has AI settings ({}); the game mode takes them, the world's AI system doesn't", static_cast<FName>(Playlist->PlaylistName).ToStdString(),
+            Log::Info(L"PLAYLIST: {} has AI settings ({}), the game mode takes them", static_cast<FName>(Playlist->PlaylistName).ToStdString(),
                 PlaylistAISettings->GetName().ToStdString());
+            GameMode->SetAISettings(PlaylistAISettings);
         }
         // 0xBD2710 and LoadCurrentPlaylistData are what OnRep_CurrentPlaylistData does (5.21 0xBD7770, 5.30 0xBEC6C0),
         // whose "(Client Only)" log shows on the server. 6.01's is OnRep_CurrentPlaylistInfo (0xC1DFF0), the same steps.

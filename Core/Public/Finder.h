@@ -113,6 +113,12 @@ namespace Finder
     ptrdiff_t LastBroadcastDelegateOffset(uintptr_t Function);
     uintptr_t NextCall(uintptr_t From, size_t MaxDistance);
     std::vector<std::pair<uintptr_t, uintptr_t>> DirectCalls(uintptr_t Begin, uintptr_t End);
+    // Every `call rel32` of the function's pieces, decoded instruction by instruction (a byte scan also takes an E8 inside
+    // another instruction's displacement for one): the call's address and its target.
+    std::vector<std::pair<uintptr_t, uintptr_t>> DecodedDirectCalls(uintptr_t Function);
+    // Whether an instruction of the function's pieces addresses memory at [reg+Displacement] (disp32, not off rbp): a
+    // member of an object it reads or writes.
+    bool ReadsMemberAt(uintptr_t Function, int32_t Displacement);
     std::vector<uintptr_t> CallsTo(uintptr_t Target, bool bIncludeJumps);
 
     int32_t VTableIndex(void** VTable, void* Function, int32_t MaxSlots);
@@ -165,6 +171,11 @@ namespace Finder
     bool ResolvePlayerDropPickupLive();
     bool ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset);
     bool ResolveAIDirectorLive();
+    // From 6.20 (Battle Royale's AI, the Fortnitemares Cube Monsters): the direct call AFortGameModeAthena's own
+    // CreateAIDirector makes to AFortGameModeZone::CreateAIDirector (Super::), stripped into the shared empty function.
+    // AISettingsOffset: AFortGameModeAthena's AISettings, which the function tests first. Null where the build's Athena
+    // game mode has no CreateAIDirector of its own (the zone's slot, already swapped) or none of that shape.
+    uint8_t* AthenaCreateAIDirectorSuperCall(ptrdiff_t AISettingsOffset);
     bool ResolveLoginLive();
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();

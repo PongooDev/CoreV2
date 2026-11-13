@@ -1,5 +1,7 @@
 ﻿#include "pch.h"
 #include "Athena/FortGameModeAthena.h"
+#include "AI/FortAIDirector.h"
+#include "AI/FortAIGoalManager.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
@@ -3208,6 +3210,51 @@ void AFortGameModeAthena::ScoreBuildingConstructionHK(AFortGameModeAthena* This,
     }
 #endif
     ScoreBuildingConstructionOG(This, Builder, Building);
+}
+
+void AFortGameModeAthena::SetAISettings(UObject* InAISettings)
+{
+#if WITH_SERVER_CODE
+    // 5.21's (0xBD80F0): the game mode keeps them, and hands them to the world's navigation system when it is a
+    // UAthenaNavSystem (0xA25260, a timer of its own; Core's Battle Royale navigation is its own, AthenaNavSystem.cpp).
+    if (!HasAISettings())
+    {
+        return;
+    }
+    AISettings = InAISettings;
+    if (!InAISettings)
+    {
+        return;
+    }
+    // 6.20's (CL-4497486) Battle Royale AI is the match's own: AFortGameModeAthena::CreateAIDirector (0xC67A90, slot
+    // 0x180) makes the zone's AI director (AFortGameModeZone::CreateAIDirector, the AIDirectors entry the constructor
+    // picks, OverrideAIDirectorIndex 2: Deimos_AIDirector) only when AISettings' bAllowAIDirector is set, and
+    // CreateAIGoalManager (0xC67B20, slot 0x181) the goal manager only with bAllowAIGoalManager (UAthenaAISettings' own
+    // defaults, 0xA7FB60: a director, no goal manager). AFortGameModeZone::PostInitializeComponents (0xEE5DA0) is the
+    // build's only caller of the two, before any playlist, so the game mode has no AISettings then and neither is made.
+    // 🟡 Inferred: that Epic's 6.20 makes them here, once the playlist's settings arrive, the way PostInitializeComponents
+    // does (each only while the game mode has none). The function that did it is stripped with OnGivenMatchAssignment's
+    // playlist part; the settings' two flags and the director's "initial MaxActiveAlive override" are read nowhere else.
+    // A director made now still gets its WorldReady: the world manager's Tick hands it to every actor that registered
+    // since, while it runs (AFortWorldManager, 0xFD5970 case WMS_Running -> 0xFEB580).
+    const int32_t DirectorIndex = Natives::AFortGameModeZone_CreateAIDirectorIndex;
+    const int32_t GoalManagerIndex = Natives::AFortGameModeZone_CreateAIGoalManagerIndex;
+    void** VTable = *reinterpret_cast<void***>(this);
+    using FCreate = void (*)(AFortGameModeAthena*);
+    if (DirectorIndex >= 0 && !static_cast<AFortAIDirector*>(AIDirector))
+    {
+        reinterpret_cast<FCreate>(VTable[DirectorIndex])(this);
+    }
+    if (GoalManagerIndex >= 0 && !static_cast<AFortAIGoalManager*>(AIGoalManager))
+    {
+        reinterpret_cast<FCreate>(VTable[GoalManagerIndex])(this);
+    }
+    AFortAIDirector* Director = AIDirector;
+    AFortAIGoalManager* GoalManager = AIGoalManager;
+    Log::Info(L"Battle Royale AI: the match's AI settings are {}: AI director {}, goal manager {}", InAISettings->GetName().ToStdString(),
+        Director ? reinterpret_cast<UObject*>(Director)->GetFullName().ToStdString() : std::wstring(DirectorIndex >= 0 ? L"none (the settings allow none)" : L"none (CreateAIDirector's slot wasn't found)"),
+        GoalManager ? reinterpret_cast<UObject*>(GoalManager)->GetName().ToStdString() : std::wstring(L"none"));
+#endif
 }
 
 void AFortGameModeAthena::OnGivenMatchAssignment(bool bSuccess, const void* MatchOptions)

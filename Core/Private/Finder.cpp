@@ -636,6 +636,30 @@ uintptr_t Finder::NextCall(uintptr_t From, size_t MaxDistance)
     return Call.GetRelativeTarget(1, 5).Get();
 }
 
+std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedDirectCalls(uintptr_t Function)
+{
+    std::vector<std::pair<uintptr_t, uintptr_t>> Calls;
+    ForEachInstruction(Function, [&](uintptr_t Address, const hde64s& Instruction)
+    {
+        if (Instruction.opcode == 0xE8 && !(Instruction.flags & F_PREFIX_66))
+        {
+            Calls.emplace_back(Address, RelativeTarget(Address, 1, 5));
+        }
+    });
+    return Calls;
+}
+
+bool Finder::ReadsMemberAt(uintptr_t Function, int32_t Displacement)
+{
+    bool bReads = false;
+    ForEachInstruction(Function, [&](uintptr_t, const hde64s& Instruction)
+    {
+        const bool bMemory = (Instruction.flags & F_MODRM) && Instruction.modrm_mod == 2 && Instruction.modrm_rm != 5;
+        bReads = bReads || (bMemory && static_cast<int32_t>(Instruction.disp.disp32) == Displacement);
+    });
+    return bReads;
+}
+
 std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DirectCalls(uintptr_t Begin, uintptr_t End)
 {
     return Memcury::Scanner::FindDirectCalls(Begin, End);

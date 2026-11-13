@@ -537,6 +537,19 @@ void AFortGameModeZone::CreateAIDirector()
     UClass* const AIDirectorClass = DetermineAIDirectorClass();
     if (AIDirectorClass == AFortAIDirector::StaticClass())
     {
+        // Battle Royale's, for a playlist's AI (6.20: AFortGameModeAthena's constructor sets OverrideAIDirectorIndex 2,
+        // DefaultGameData's /Game/Athena/Deimos/AIDirector/Deimos_AIDirector), is a server asset too: the CL's
+        // Core-ServerAssets pak has it.
+        AFortGameModeAthena* Athena = Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(this));
+        if (Athena && AFortGameModeAthena::HasAISettings() && static_cast<UObject*>(Athena->AISettings))
+        {
+            UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+            const TArray<TAssetSubclassOf<AFortAIDirector>>* AIDirectors = GameData ? &static_cast<const TArray<TAssetSubclassOf<AFortAIDirector>>&>(GameData->AIDirectors) : nullptr;
+            const int32_t Index = OverrideAIDirectorIndex;
+            const std::wstring Wanted = AIDirectors && Index >= 0 && Index < AIDirectors->Num() ? SoftElementAt(*AIDirectors, Index).ToStringReference().ToString().ToStdString() : std::wstring(L"none");
+            UE_LOG(LogFort, Warning, TEXT("AIDirector: Battle Royale's AI director %s (AIDirectors[%d]) didn't load, so Core's stand-in with Save the World's settings is used (the build's server assets pak has the real one)"),
+                Wanted.c_str(), Index);
+        }
         const FTransform SpawnTransform;
         AFortAIDirector* NewAIDirector = Cast<AFortAIDirector>(UGameplayStatics::BeginDeferredActorSpawnFromClass(this, AIDirectorClass, SpawnTransform));
         if (NewAIDirector)
@@ -1002,6 +1015,12 @@ void AFortGameModeZone::HookVTables()
         {
             Hooks::SwapVTable(L"AFortGameModeZone::CreateAIDirector", VTable, DirectorIndex, reinterpret_cast<void*>(&CreateAIDirectorHK));
         }
+    }
+    // From 6.20 (the Fortnitemares Cube Monsters' playlists): Battle Royale's own CreateAIDirector, once the match's AI
+    // settings allow one, calls this function as its Super:: (a direct call, which the swap above doesn't reach).
+    if (uint8_t* AthenaSuperCall = Finder::AthenaCreateAIDirectorSuperCall(AFortGameModeAthena::AISettingsOffset()))
+    {
+        Hooks::RedirectCall(L"AFortGameModeAthena::CreateAIDirector -> AFortGameModeZone::CreateAIDirector", AthenaSuperCall, reinterpret_cast<void*>(&CreateAIDirectorHK));
     }
 
     UObject* ZoneDefault = StaticClass()->GetDefaultObject(false);

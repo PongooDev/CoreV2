@@ -21,6 +21,7 @@ public:
     DefineUProperty(bool, bIsParachuteOpen)
     DefineUProperty(bool, bIsSkydivingFromBus)
     static ptrdiff_t IsSkydivingOffset() { return Member_bIsSkydiving.GetOffsetChecked(); }
+    static bool HasIsSkydiving() { return Member_bIsSkydiving.IsAvailable(); }
     // 1.8: the controller's loadout, copied by its Possess (0x444480). Every client sets up the glider of every pawn's
     // (OnRep_CustomizationLoadout, 0x43D4A0), and an empty one crashes them all.
     DefineUStructProperty(FFortAthenaLoadout, CustomizationLoadout)

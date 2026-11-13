@@ -28,6 +28,18 @@ class UObject;
 class UFortWeaponItemDefinition;
 class FCoreAthenaBotManager;
 
+// A bot's look for the match (8.30's bot customization loadout, AFortAthenaAIBotController::GetCosmeticLoadout's): an
+// outfit and a glider, pickaxe, contrail and back bling, their item definitions (loaded). Null where a build or the choice
+// has none (the default pickaxe then).
+struct FCoreAthenaBotLoadout
+{
+    UObject* Character = nullptr;
+    UObject* Glider = nullptr;
+    UAthenaPickaxeItemDefinition* Pickaxe = nullptr;
+    UObject* Contrail = nullptr;
+    UObject* Backpack = nullptr;
+};
+
 // Core's backport of Epic's Battle Royale player bots for builds before 8.30 (CoreV2 #233, Core-Docs
 // Athena-Bots-Plan.md), named after Epic's design but under Core names: Epic's own names (AFortAthenaAIBotController,
 // UFortServerBotManagerAthena, ...) are kept for the wrappers over the game's real classes from 8.30. Epic's
@@ -332,6 +344,15 @@ public:
     // Loads what the bots use later (the emotes, their animations and the emote ability) up front, so no bot's first
     // use of one loads it in the middle of a match.
     static void PreloadAssets();
+    // PreloadAssets' heavy assets (the emotes' montages and the emote ability), for loading in the background instead.
+    static void GetPreloadAssetPaths(std::vector<std::wstring>& OutPaths);
+    // A loadout chosen at random (ChooseLoadout), the one a bot wears (SetLoadout, before its first pawn; SpawnPawnAt
+    // chooses one itself for a bot that has none), and what its spawn would load, for loading ahead: the outfit hero's
+    // specializations and the pickaxe's weapon (GetLoadoutAssetPaths), then a loaded specialization's character parts.
+    static FCoreAthenaBotLoadout ChooseLoadout();
+    void SetLoadout(const FCoreAthenaBotLoadout& Loadout);
+    static void GetLoadoutAssetPaths(const FCoreAthenaBotLoadout& Loadout, std::vector<std::wstring>& OutPaths);
+    static void GetSpecializationPartPaths(UObject* Specialization, std::vector<std::wstring>& OutPaths);
     // A new match (FCoreAthenaBotManager::Create): the last match's per-match state is dropped (the hot drop spot,
     // the weapons' fire cues and whether the game's fire works for them).
     static void ResetForNewMatch();

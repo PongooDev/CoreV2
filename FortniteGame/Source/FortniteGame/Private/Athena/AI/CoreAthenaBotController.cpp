@@ -35,6 +35,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerState.h"
+#include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
 #include "Kismet/GameplayStatics.h"
 #include "Items/FortItem.h"
@@ -48,6 +49,7 @@
 #include "Player/FortCheatManager.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "UObject/AssetPtr.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
@@ -73,6 +75,51 @@ namespace
             Object->AddToRoot();
         }
         return Asset;
+    }
+
+    // A soft reference's path, once in OutPaths, for loading ahead (FCoreAthenaBotManager's background loads).
+    void AddSoftPath(const FStringAssetReference& Reference, std::vector<std::wstring>& OutPaths)
+    {
+        if (!Reference.IsValid())
+        {
+            return;
+        }
+        std::wstring Path = Reference.ToString().ToStdString();
+        if (std::find(OutPaths.begin(), OutPaths.end(), Path) == OutPaths.end())
+        {
+            OutPaths.push_back(std::move(Path));
+        }
+    }
+
+    // The paths of Object's soft object or class member Name (TSoftObjectPtr, TSoftClassPtr, or an array of them), read
+    // through its property: nothing where the build's class has no such member.
+    void AddSoftMemberPaths(UObject* Object, const wchar_t* Name, std::vector<std::wstring>& OutPaths)
+    {
+        UProperty* Property = Object ? Object->GetClass()->FindPropertyByName(FName(Name, FNAME_Find)) : nullptr;
+        if (!Property)
+        {
+            return;
+        }
+        const size_t SoftSize = sizeof(TAssetPtr<UObject>) + (ObjectLayout::Current.bSoftObjectPaths ? Reflection::SoftPathGrowth<TAssetPtr<UObject>> : 0);
+        const uint8_t* Value = reinterpret_cast<const uint8_t*>(Object) + Property->GetOffset_ForInternal();
+        if (Property->GetClass()->HasAnyCastFlag(CASTCLASS_UArrayProperty))
+        {
+            UProperty* Inner = static_cast<UArrayProperty*>(Property)->Inner;
+            if (!Inner || static_cast<size_t>(Inner->ElementSize) != SoftSize)
+            {
+                return;
+            }
+            const TArray<TAssetPtr<UObject>>& Elements = *reinterpret_cast<const TArray<TAssetPtr<UObject>>*>(Value);
+            for (int32_t Index = 0; Index < Elements.Num(); ++Index)
+            {
+                AddSoftPath(SoftElementAt(Elements, Index).ToStringReference(), OutPaths);
+            }
+            return;
+        }
+        if (static_cast<size_t>(Property->ElementSize) == SoftSize)
+        {
+            AddSoftPath(reinterpret_cast<const TAssetPtr<UObject>*>(Value)->ToStringReference(), OutPaths);
+        }
     }
 
     // The engine's online interface (UOnlineEngineInterface::Get(): its one OnlineEngineInterfaceImpl object).
@@ -1309,21 +1356,11 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     if (Pawn->HasCustomizationLoadout())
     {
         FFortAthenaLoadout& Loadout = Pawn->CustomizationLoadout;
-        // A whole locker's loadout, as a player brings: an outfit and a random glider, pickaxe, contrail and back bling
-        // of the build's, chosen once for the match.
-        UClass* GliderClass = UAthenaGliderItemDefinition::StaticClass();
-        UClass* PickaxeClass = UAthenaPickaxeItemDefinition::StaticClass();
+        // Chosen once for the match: by the manager ahead of the bot's spawn, with its assets loaded in the background
+        // (FCoreAthenaBotManager::PrepareBotLoadouts), else here.
         if (!bLoadoutChosen)
         {
-            bLoadoutChosen = true;
-            LoadoutCharacter = reinterpret_cast<UObject*>(RandomCharacter());
-            UObject* Glider = FFortAthenaLoadout::HasGlider() ? RandomCosmetic(L"AthenaGlider") : nullptr;
-            LoadoutGlider = Glider && GliderClass && Glider->IsA(GliderClass) ? Glider : reinterpret_cast<UObject*>(DefaultGlider());
-            UObject* RandomPickaxe = RandomCosmetic(L"AthenaPickaxe");
-            UAthenaPickaxeItemDefinition* Pickaxe = RandomPickaxe && PickaxeClass && RandomPickaxe->IsA(PickaxeClass) ? reinterpret_cast<UAthenaPickaxeItemDefinition*>(RandomPickaxe) : nullptr;
-            LoadoutPickaxe = Pickaxe && static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) ? Pickaxe : nullptr;
-            LoadoutContrail = FFortAthenaLoadout::HasSkyDiveContrail() ? RandomCosmetic(L"AthenaSkyDiveContrail") : nullptr;
-            BackpackDefinition = FFortAthenaLoadout::HasBackpack() && FMath::FRand() < 0.6f ? RandomCosmetic(L"AthenaBackpack") : nullptr;
+            SetLoadout(ChooseLoadout());
         }
         UAthenaCharacterItemDefinition* Character = reinterpret_cast<UAthenaCharacterItemDefinition*>(LoadoutCharacter);
         HeroObject = Character ? reinterpret_cast<UObject*>(static_cast<UFortHeroType*>(Character->HeroDefinition)) : nullptr;
@@ -4112,15 +4149,108 @@ void FCoreAthenaBotController::PreloadAssets()
 {
 #if WITH_SERVER_CODE
     const auto Started = std::chrono::steady_clock::now();
+    // Kept loaded as the emotes are: nothing else holds a montage, so the first collection after the warmup freed them
+    // and the next bot to dance loaded its montage again in the middle of the match (CoreV2 #427).
     for (UFortMontageItemDefinitionBase* Emote : BotEmotes())
     {
-        Emote->Animation.LoadSynchronous();
+        KeepLoaded(Emote->Animation.LoadSynchronous());
     }
     if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
     {
-        GameData->EmoteGameplayAbility.LoadSynchronous();
+        KeepLoaded(GameData->EmoteGameplayAbility.LoadSynchronous());
     }
     Log::Info(L"Battle Royale bots: {} emotes loaded up front ({:.0f} ms)", BotEmotes().size(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count());
+#endif
+}
+
+void FCoreAthenaBotController::GetPreloadAssetPaths(std::vector<std::wstring>& OutPaths)
+{
+#if WITH_SERVER_CODE
+    // PreloadAssets' heavy part, for loading in the background: the emotes' montages and the emote ability (the emotes'
+    // own definitions are small and load at once).
+    for (UFortMontageItemDefinitionBase* Emote : BotEmotes())
+    {
+        AddSoftPath(Emote->Animation.ToStringReference(), OutPaths);
+    }
+    if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+    {
+        AddSoftPath(GameData->EmoteGameplayAbility.ToStringReference(), OutPaths);
+    }
+#endif
+}
+
+FCoreAthenaBotLoadout FCoreAthenaBotController::ChooseLoadout()
+{
+    // A whole locker's loadout, as a player brings: an outfit and a random glider, pickaxe, contrail and back bling of
+    // the build's, chosen once for the match (their item definitions are small and load at once; what they point at is
+    // GetLoadoutAssetPaths').
+    FCoreAthenaBotLoadout Loadout;
+#if WITH_SERVER_CODE
+    UClass* GliderClass = UAthenaGliderItemDefinition::StaticClass();
+    UClass* PickaxeClass = UAthenaPickaxeItemDefinition::StaticClass();
+    Loadout.Character = reinterpret_cast<UObject*>(RandomCharacter());
+    UObject* Glider = FFortAthenaLoadout::HasGlider() ? RandomCosmetic(L"AthenaGlider") : nullptr;
+    Loadout.Glider = Glider && GliderClass && Glider->IsA(GliderClass) ? Glider : reinterpret_cast<UObject*>(DefaultGlider());
+    UObject* RandomPickaxe = RandomCosmetic(L"AthenaPickaxe");
+    UAthenaPickaxeItemDefinition* Pickaxe = RandomPickaxe && PickaxeClass && RandomPickaxe->IsA(PickaxeClass) ? reinterpret_cast<UAthenaPickaxeItemDefinition*>(RandomPickaxe) : nullptr;
+    Loadout.Pickaxe = Pickaxe && static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) ? Pickaxe : nullptr;
+    Loadout.Contrail = FFortAthenaLoadout::HasSkyDiveContrail() ? RandomCosmetic(L"AthenaSkyDiveContrail") : nullptr;
+    Loadout.Backpack = FFortAthenaLoadout::HasBackpack() && FMath::FRand() < 0.6f ? RandomCosmetic(L"AthenaBackpack") : nullptr;
+#endif
+    return Loadout;
+}
+
+void FCoreAthenaBotController::SetLoadout(const FCoreAthenaBotLoadout& Loadout)
+{
+    bLoadoutChosen = true;
+    LoadoutCharacter = Loadout.Character;
+    LoadoutGlider = Loadout.Glider;
+    LoadoutPickaxe = Loadout.Pickaxe;
+    LoadoutContrail = Loadout.Contrail;
+    BackpackDefinition = Loadout.Backpack;
+}
+
+void FCoreAthenaBotController::GetLoadoutAssetPaths(const FCoreAthenaBotLoadout& Loadout, std::vector<std::wstring>& OutPaths)
+{
+#if WITH_SERVER_CODE
+    // What the bot's spawn loads (SpawnPawnAt): the outfit's hero names its specializations softly, which the look hero
+    // (CreateLookHero) loads and whose character parts SetHeroType loads (GetSpecializationPartPaths, once a
+    // specialization is in); and the pickaxe's weapon, which EquipWeaponDefinition spawns from its actor class, with its
+    // mesh and its abilities. Each was a synchronous load in the frame the bot came in.
+    UAthenaCharacterItemDefinition* Character = reinterpret_cast<UAthenaCharacterItemDefinition*>(Loadout.Character);
+    UFortHeroType* HeroType = Character ? static_cast<UFortHeroType*>(Character->HeroDefinition) : nullptr;
+    if (HeroType && UFortHeroType::HasSpecializations())
+    {
+        const TArray<TAssetPtr<UFortHeroSpecialization>>& Specializations = HeroType->Specializations;
+        for (int32_t Index = 0; Index < Specializations.Num(); ++Index)
+        {
+            AddSoftPath(SoftElementAt(Specializations, Index).ToStringReference(), OutPaths);
+        }
+    }
+    UAthenaPickaxeItemDefinition* Pickaxe = Loadout.Pickaxe ? Loadout.Pickaxe : DefaultPickaxe();
+    UObject* Weapon = Pickaxe ? reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition)) : nullptr;
+    for (const wchar_t* Member : { L"WeaponActorClass", L"WeaponMeshOverride", L"PrimaryFireAbility" })
+    {
+        AddSoftMemberPaths(Weapon, Member, OutPaths);
+    }
+    AddSoftMemberPaths(Weapon, L"EquippedAbilities", OutPaths);
+#endif
+}
+
+void FCoreAthenaBotController::GetSpecializationPartPaths(UObject* Specialization, std::vector<std::wstring>& OutPaths)
+{
+#if WITH_SERVER_CODE
+    UClass* SpecializationClass = UFortHeroSpecialization::HasCharacterParts() ? UFortHeroSpecialization::StaticClass() : nullptr;
+    UFortHeroSpecialization* Loaded = Specialization && SpecializationClass && Specialization->IsA(SpecializationClass) ? reinterpret_cast<UFortHeroSpecialization*>(Specialization) : nullptr;
+    if (!Loaded)
+    {
+        return;
+    }
+    const TArray<TAssetPtr<UCustomCharacterPart>>& Parts = Loaded->CharacterParts;
+    for (int32_t Index = 0; Index < Parts.Num(); ++Index)
+    {
+        AddSoftPath(SoftElementAt(Parts, Index).ToStringReference(), OutPaths);
+    }
 #endif
 }
 
@@ -4154,7 +4284,7 @@ bool FCoreAthenaBotController::PlayEmote(float Now, float Duration)
         return false;
     }
     UFortMontageItemDefinitionBase* Emote = EmoteAssets[static_cast<size_t>(FMath::Rand()) % EmoteAssets.size()];
-    Emote->Animation.LoadSynchronous();
+    KeepLoaded(Emote->Animation.LoadSynchronous());
     StopFiring();
     UScriptStruct* SpecStruct = FGameplayAbilitySpec::StaticStruct();
     std::vector<uint8_t> SpecStorage(SpecStruct->GetStructureSize(), 0);

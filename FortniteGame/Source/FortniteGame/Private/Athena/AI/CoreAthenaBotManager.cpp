@@ -22,6 +22,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
 #include "GameplayTagContainer.h"
+#include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
@@ -37,6 +38,7 @@
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "TimerManager.h"
+#include "UObject/AssetPtr.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "Weapons/FortWeapon.h"
@@ -49,6 +51,12 @@
 namespace
 {
     std::unique_ptr<FCoreAthenaBotManager> Instance;
+    // Core's native the latent action manager resumes a finished background load with (AddAsyncLoadHandler).
+    UFunction* AsyncLoadCompleteFunction = nullptr;
+    // How long the next bot waits for its look to finish loading before it comes in anyway (what's missing then loads in
+    // its spawn), and how many bots' looks load ahead.
+    constexpr float LoadoutLoadTimeout = 6.0f;
+    constexpr size_t LoadoutsAhead = 3;
 
     // The bots each player eliminated (their match results add them), and the bot pawns the game itself sent kill quest
     // events for, with each event's type.
@@ -517,6 +525,22 @@ void FCoreAthenaBotManager::Create(AFortGameModeAthena* GameMode)
     // match's starts when the backend turns its bots on (SetSettings).
     World->GetTimerManager().ClearTimer(UpdateTimerHandle);
     Instance.reset(new FCoreAthenaBotManager(GameMode));
+    static bool bPreparedOnce = false;
+    if (!bPreparedOnce && !HasNativePlayerBots())
+    {
+        bPreparedOnce = true;
+        AddAsyncLoadHandler();
+        // The finders the bots' play reaches first at play time, resolved now, as the match's world starts and before
+        // anyone can join: each reads the bodies of functions the server hasn't run, whose pages are no longer in memory
+        // by the time a match is on. AFortPawn::SetCurrentMovementStyle's vtable search, on a bot's first step in the
+        // warmup, held the server for 6.9 s on a host PC (CoreV2 #427), and BeginSkydiving's held the first bot's arrival.
+        const auto Started = std::chrono::steady_clock::now();
+        const bool bMovementStyle = AFortPawn::CurrentMovementStyleOffset() > 0 && Finder::ResolveMovementStyleLive(AFortPawn::CurrentMovementStyleOffset());
+        const bool bSkydive = AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
+        const bool bTeams = Finder::ResolveTeamChangeLive() && Finder::ResolveTeamRemoveLive();
+        Log::Info(L"Battle Royale bots: the bots' finders resolved as the world starts ({:.0f} ms; movement style {}, skydiving {}, teams {})",
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count(), bMovementStyle, bSkydive, bTeams);
+    }
     Log::Info(L"Battle Royale bots: the bots' update is {}", Instance->PrimaryManagerTick.GetTickFunction()
         ? L"the manager's tick function, registered with the match's level while it has bots" : L"a world timer (this build's FTickFunction registration wasn't found)");
     BotKills.clear();
@@ -541,6 +565,199 @@ void FCoreAthenaBotManager::Create(AFortGameModeAthena* GameMode)
 FCoreAthenaBotManager* FCoreAthenaBotManager::Get()
 {
     return Instance.get();
+}
+
+FCoreAthenaBotManager::~FCoreAthenaBotManager()
+{
+    for (FWeakObjectPtr& Held : HeldAssets)
+    {
+        if (UObject* Asset = Held.Get())
+        {
+            Asset->RemoveFromRoot();
+        }
+    }
+}
+
+bool FCoreAthenaBotManager::CanLoadAsync()
+{
+    return AsyncLoadCompleteFunction != nullptr;
+}
+
+void FCoreAthenaBotManager::AddAsyncLoadHandler()
+{
+#if WITH_SERVER_CODE
+    // A finished UKismetSystemLibrary::LoadAsset resumes its FLatentActionInfo: the latent action manager calls the
+    // callback target's ExecutionFunction with the Linkage as its one int32 parameter, as it resumes a Blueprint's
+    // ExecuteUbergraph(EntryPoint). Core's native for it goes on the Battle Royale game mode's class (the game mode is the
+    // callback target), with UObject::ExecuteUbergraph's parameters.
+    UClass* AthenaClass = AFortGameModeAthena::StaticClass();
+    UFunction* Signature = AthenaClass && UKismetSystemLibrary::HasLoadAsset() ? UObject::StaticClass()->FindFunctionByName(FName(L"ExecuteUbergraph", FNAME_Find)) : nullptr;
+    if (Signature && Signature->ParmsSize == sizeof(int32_t))
+    {
+        AsyncLoadCompleteFunction = AthenaClass->AddNativeFunction(L"HandleBotAsyncLoadComplete", &execHandleBotAsyncLoadComplete, Signature);
+    }
+    Log::Info(L"Battle Royale bots: the bots' assets load {}", AsyncLoadCompleteFunction ? L"in the background (UKismetSystemLibrary::LoadAsset)"
+        : L"as they are used (this build has no UKismetSystemLibrary::LoadAsset)");
+#endif
+}
+
+DEFINE_FUNCTION(FCoreAthenaBotManager::execHandleBotAsyncLoadComplete)
+{
+    P_GET_PROPERTY(UIntProperty, Linkage);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    if (Instance && reinterpret_cast<UObject*>(Instance->GetGameMode()) == Context)
+    {
+        Instance->HandleAsyncLoadComplete(Linkage);
+    }
+    P_NATIVE_END;
+}
+
+bool FCoreAthenaBotManager::RequestAsyncLoad(int32_t LoadoutId, const std::wstring& Path, bool bSpecialization, bool bKeepLoaded)
+{
+#if WITH_SERVER_CODE
+    AFortGameModeAthena* Athena = GetGameMode();
+    if (!Athena || !CanLoadAsync() || Path.empty())
+    {
+        return false;
+    }
+    const int32_t RequestId = NextAsyncLoadId++;
+    AsyncLoadRequests.emplace(RequestId, FAsyncLoadRequest{ LoadoutId, Path, bSpecialization, bKeepLoaded });
+    // One already in memory (another bot's, or the game's) is asked for all the same: its handle is complete at the next
+    // latent update, and it is held (and a specialization's parts asked for) like any other.
+    const FLatentActionInfo LatentInfo{ RequestId, RequestId, AsyncLoadCompleteFunction->GetFName(), reinterpret_cast<UObject*>(Athena) };
+    if (!UKismetSystemLibrary::LoadAsset(reinterpret_cast<UObject*>(Athena), FString(Path.c_str()), LatentInfo))
+    {
+        AsyncLoadRequests.erase(RequestId);
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+void FCoreAthenaBotManager::HandleAsyncLoadComplete(int32_t RequestId)
+{
+#if WITH_SERVER_CODE
+    const auto Found = AsyncLoadRequests.find(RequestId);
+    if (Found == AsyncLoadRequests.end())
+    {
+        return;
+    }
+    const FAsyncLoadRequest Request = Found->second;
+    AsyncLoadRequests.erase(Found);
+    // The load's object, in memory now (null: it failed to load, and the bot's spawn tries again as it always did).
+    UObject* Loaded = FindObject<UObject>(nullptr, Request.Path.c_str());
+    HoldAsset(Loaded, Request.bKeepLoaded);
+    const auto Load = std::find_if(LoadoutLoads.begin(), LoadoutLoads.end(), [&Request](const FBotLoadoutLoad& Entry) { return Entry.Id == Request.LoadoutId; });
+    if (Load == LoadoutLoads.end())
+    {
+        return;
+    }
+    if (Request.bSpecialization && Loaded)
+    {
+        std::vector<std::wstring> Parts;
+        FCoreAthenaBotController::GetSpecializationPartPaths(Loaded, Parts);
+        for (const std::wstring& Part : Parts)
+        {
+            if (RequestAsyncLoad(Load->Id, Part, false, false))
+            {
+                ++Load->PendingLoads;
+                ++Load->Assets;
+            }
+        }
+    }
+    Load->PendingLoads = std::max(Load->PendingLoads - 1, 0);
+    if (Load->PendingLoads == 0)
+    {
+        Load->Loaded = std::chrono::steady_clock::now();
+    }
+#endif
+}
+
+void FCoreAthenaBotManager::HoldAsset(UObject* Asset, bool bKeepLoaded)
+{
+    if (!Asset || Asset->IsRooted())
+    {
+        return;
+    }
+    Asset->AddToRoot();
+    if (!bKeepLoaded)
+    {
+        HeldAssets.emplace_back(Asset);
+    }
+}
+
+void FCoreAthenaBotManager::PreloadBotAssets()
+{
+#if WITH_SERVER_CODE
+    std::vector<std::wstring> Paths;
+    if (CanLoadAsync())
+    {
+        FCoreAthenaBotController::GetPreloadAssetPaths(Paths);
+    }
+    int32_t Requested = 0;
+    for (const std::wstring& Path : Paths)
+    {
+        Requested += RequestAsyncLoad(0, Path, false, true) ? 1 : 0;
+    }
+    if (Requested == 0)
+    {
+        FCoreAthenaBotController::PreloadAssets();
+        return;
+    }
+    Log::Info(L"Battle Royale bots: the emotes' {} assets load in the background", Requested);
+#endif
+}
+
+void FCoreAthenaBotManager::PrepareBotLoadouts(int32_t Missing, float Now)
+{
+#if WITH_SERVER_CODE
+    // One a frame, a few ahead of the bots still to come.
+    if (!CanLoadAsync() || Now == LastLoadoutStart || LoadoutLoads.size() >= std::min(LoadoutsAhead, static_cast<size_t>(std::max(Missing, 0))))
+    {
+        return;
+    }
+    LastLoadoutStart = Now;
+    FBotLoadoutLoad& Load = LoadoutLoads.emplace_back();
+    Load.Id = NextLoadoutId++;
+    Load.StartTime = Now;
+    Load.Started = std::chrono::steady_clock::now();
+    Load.Loadout = FCoreAthenaBotController::ChooseLoadout();
+    std::vector<std::wstring> Paths;
+    FCoreAthenaBotController::GetLoadoutAssetPaths(Load.Loadout, Paths);
+    // The outfit hero's specializations, whose character parts are asked for once each is in.
+    UAthenaCharacterItemDefinition* Character = reinterpret_cast<UAthenaCharacterItemDefinition*>(Load.Loadout.Character);
+    UFortHeroType* HeroType = Character ? static_cast<UFortHeroType*>(Character->HeroDefinition) : nullptr;
+    std::vector<std::wstring> Specializations;
+    if (HeroType && UFortHeroType::HasSpecializations())
+    {
+        const TArray<TAssetPtr<UFortHeroSpecialization>>& Soft = HeroType->Specializations;
+        for (int32_t Index = 0; Index < Soft.Num(); ++Index)
+        {
+            Specializations.push_back(SoftElementAt(Soft, Index).ToStringReference().ToString().ToStdString());
+        }
+    }
+    for (const std::wstring& Path : Paths)
+    {
+        const bool bSpecialization = std::find(Specializations.begin(), Specializations.end(), Path) != Specializations.end();
+        if (RequestAsyncLoad(Load.Id, Path, bSpecialization, false))
+        {
+            ++Load.PendingLoads;
+            ++Load.Assets;
+        }
+    }
+#endif
+}
+
+bool FCoreAthenaBotManager::IsNextLoadoutLoaded(float Now) const
+{
+    if (!CanLoadAsync())
+    {
+        return true;
+    }
+    return !LoadoutLoads.empty() && (LoadoutLoads.front().PendingLoads == 0 || Now - LoadoutLoads.front().StartTime >= LoadoutLoadTimeout);
 }
 
 FCoreAthenaBotManager::FCoreAthenaBotManager(AFortGameModeAthena* InGameMode)
@@ -1418,7 +1635,10 @@ void FCoreAthenaBotManager::TickWarmup(float Now)
                 NextPacedSpawn = std::min(NextPacedSpawn, Now);
             }
             LastHumanCount = Humans;
-            if (Now >= NextPacedSpawn && Now - LastSpawnTime >= MinSpawnInterval && FramesSinceSpawn >= MinSpawnFrames)
+            // The next bots' looks load in the background while they wait their turn; a bot whose turn has come waits
+            // for its own to finish (a few frames at most, and LoadoutLoadTimeout at the longest).
+            PrepareBotLoadouts(Missing, Now);
+            if (Now >= NextPacedSpawn && Now - LastSpawnTime >= MinSpawnInterval && FramesSinceSpawn >= MinSpawnFrames && IsNextLoadoutLoaded(Now))
             {
                 const float EndTime = GameState && AFortGameStateAthena::HasWarmupCountdown() ? static_cast<float>(GameState->WarmupCountdownEndTime) : 0.0f;
                 // Spread evenly over the time left to 20 s before the bus (the warmup's countdown); with no countdown
@@ -1454,7 +1674,7 @@ void FCoreAthenaBotManager::TickWarmup(float Now)
     if (!bNavigationTried && Wanted + TeamBots > 0 && GetAliveBotCount() > 0 && (!NavigationGameState || NavigationGameState->HasStreamedAdditionalPlaylistLevels()))
     {
         bNavigationTried = true;
-        FCoreAthenaBotController::PreloadAssets();
+        PreloadBotAssets();
         RefreshLoot(Now);
         GatherContainers();
         InitializeNavigation();
@@ -1837,6 +2057,26 @@ bool FCoreAthenaBotManager::RegisterBot(float Now, uint8_t Team, uint8_t Squad, 
     Bot->AssignDisplayName(Name);
     PlaceBotOnTeam(Bot.get());
     Bot->InitializeSkills(Settings.Level);
+    // Its look, chosen and loaded ahead (PrepareBotLoadouts).
+    if (!LoadoutLoads.empty())
+    {
+        const FBotLoadoutLoad Load = LoadoutLoads.front();
+        LoadoutLoads.pop_front();
+        Bot->SetLoadout(Load.Loadout);
+        if (LoadoutsLogged < 3 || Load.PendingLoads > 0)
+        {
+            ++LoadoutsLogged;
+            if (Load.PendingLoads > 0)
+            {
+                Log::Info(L"Battle Royale bots: {}'s look has {} of its {} assets still loading after {:.0f} s, so they load as it comes in", Name, Load.PendingLoads, Load.Assets, LoadoutLoadTimeout);
+            }
+            else
+            {
+                Log::Info(L"Battle Royale bots: {}'s look loaded ahead: {} assets in the background in {:.0f} ms", Name, Load.Assets,
+                    std::chrono::duration<double, std::milli>((Load.Assets > 0 ? Load.Loaded : Load.Started) - Load.Started).count());
+            }
+        }
+    }
     FVector Spot = WarmupSpots[static_cast<size_t>(FMath::Rand()) % WarmupSpots.size()];
     // A bot on a player's team (squad) comes in by its player, when they have a pawn on the island.
     if (AFortGameStateAthena* GameState = bPlayersTeam ? AthenaGameStateOf(Athena) : nullptr)

@@ -5,9 +5,11 @@
 #include "Athena/AI/CoreAthenaBotController.h"
 #include "Engine/EngineBaseTypes.h"
 #include "Math/Vector.h"
+#include "UObject/Stack.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <set>
@@ -260,8 +262,56 @@ public:
 
     static FCoreAIBotSkills SkillsForLevel(int32_t Level);
 
+    // The assets the manager kept loaded for the match's bots (HoldAsset) are let go with it.
+    ~FCoreAthenaBotManager();
+
 private:
     explicit FCoreAthenaBotManager(AFortGameModeAthena* InGameMode);
+
+    // The bots' assets, loaded in the background (CoreV2 #427). Each was a synchronous load in the frame that first used it:
+    // a bot coming onto the warmup island loaded its outfit's parts and its pickaxe there and then, 0.4 to 1.6 s of a frame
+    // on a host PC, about once a second for the whole warmup. Instead each load goes to the asset manager's
+    // FStreamableManager (UKismetSystemLibrary::LoadAsset, the Blueprint "Async Load Asset": off the game thread, its
+    // objects' post-load spread over frames), and the world's latent action manager resumes it on the game mode
+    // (HandleBotAsyncLoadComplete) once it is in. Where the build has no such function, everything loads as before.
+    struct FBotLoadoutLoad
+    {
+        int32_t Id = 0;
+        FCoreAthenaBotLoadout Loadout;
+        // Loads not done yet, and the assets asked for in all.
+        int32_t PendingLoads = 0;
+        int32_t Assets = 0;
+        float StartTime = 0.0f;
+        // When it was asked for, and when its last load finished (for the first bots' log line).
+        std::chrono::steady_clock::time_point Started;
+        std::chrono::steady_clock::time_point Loaded;
+    };
+    struct FAsyncLoadRequest
+    {
+        // The loadout it is for (0: the bots' shared assets, PreloadBotAssets).
+        int32_t LoadoutId = 0;
+        std::wstring Path;
+        // An outfit's specialization: its character parts load next.
+        bool bSpecialization = false;
+        // Kept loaded for good (the emotes' montages, as the emotes are), not just for the match.
+        bool bKeepLoaded = false;
+    };
+    static bool CanLoadAsync();
+    static void AddAsyncLoadHandler();
+    DECLARE_FUNCTION(execHandleBotAsyncLoadComplete);
+    // Asks for Path in the background (one already loaded is only held). False when it couldn't be asked for.
+    bool RequestAsyncLoad(int32_t LoadoutId, const std::wstring& Path, bool bSpecialization, bool bKeepLoaded);
+    void HandleAsyncLoadComplete(int32_t RequestId);
+    // A loaded asset the match's bots will use: rooted until the manager goes (or for good, bKeepLoaded), so no collection
+    // frees it between its load and its use.
+    void HoldAsset(UObject* Asset, bool bKeepLoaded);
+    // The emotes' assets (FCoreAthenaBotController::PreloadAssets), in the background where the build can.
+    void PreloadBotAssets();
+    // The next few bots' looks (21.40's bots have theirs in their spawner data, loaded before they spawn), chosen one a
+    // frame and loading in the background while they wait their turn; and whether the next bot's has (or has been
+    // loading too long to wait for: what's missing then loads in its spawn, as before).
+    void PrepareBotLoadouts(int32_t Missing, float Now);
+    bool IsNextLoadoutLoaded(float Now) const;
 
     void TickWarmup(float Now);
     void StartBotMatchIfAsked();
@@ -421,4 +471,11 @@ private:
         float DownedAt = 0.0f;
     };
     std::vector<FDBNODown> DBNODowned;
+    std::deque<FBotLoadoutLoad> LoadoutLoads;
+    std::map<int32_t, FAsyncLoadRequest> AsyncLoadRequests;
+    int32_t NextAsyncLoadId = 1;
+    int32_t NextLoadoutId = 1;
+    float LastLoadoutStart = -1.0f;
+    int32_t LoadoutsLogged = 0;
+    std::vector<FWeakObjectPtr> HeldAssets;
 };

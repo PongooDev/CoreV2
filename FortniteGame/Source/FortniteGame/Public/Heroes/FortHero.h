@@ -24,6 +24,7 @@ class UFortHeroSpecialization : public UObject
 
 public:
     DefineUProperty(TArray<TAssetPtr<UCustomCharacterPart>>, CharacterParts)
+    static bool HasCharacterParts() { return Member_CharacterParts.IsAvailable(); }
     DefineUStructArrayProperty(FFortSpecializationSlot, SpecializationSlots)
     DefineUStructArrayProperty(FFortSpecializationSlot, TacticalAbilitySlots)
 };

@@ -32,6 +32,7 @@ public:
     DefineUStructArrayProperty(FGameplayEffectApplicationInfo, CombinedStatGEs)
     // The hero's specializations (HS_*): its character parts and its perks' and abilities' kits.
     DefineUProperty(TArray<TAssetPtr<UFortHeroSpecialization>>, Specializations)
+    static bool HasSpecializations() { return Member_Specializations.IsAvailable(); }
     // UFortWorkerType's EFortCustomGender (1 female, 2 male).
     DefineUProperty(uint8_t, Gender)
     // UFortAccountItemDefinition's: the highest level a hero of this type reaches.

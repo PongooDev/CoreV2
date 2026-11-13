@@ -1,6 +1,9 @@
 #include "pch.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "ObjectLayout.h"
 #include "ReflectionParams.h"
+#include "UObject/AssetPtr.h"
+#include "UObject/UnrealType.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <cstring>
@@ -94,6 +97,32 @@ bool UKismetSystemLibrary::K2_SetTimer(UObject* Object, const wchar_t* FunctionN
     {
         return false;
     }
+    return Params.Call(StaticClass()->GetDefaultObject());
+}
+
+bool UKismetSystemLibrary::LoadAsset(UObject* WorldContextObject, const FString& AssetPath, const FLatentActionInfo& LatentInfo)
+{
+    // KismetSystemLibrary.cpp's LoadAsset: a FLoadAssetActionBase (its constructor's RequestAsyncLoad) added to the world's
+    // latent action manager under LatentInfo's CallbackTarget and UUID; each frame's ProcessLatentActions asks its handle
+    // whether the load is done, then runs OnLoaded (the OnLoaded delegate, left unbound here) and resumes LatentInfo.
+    UFunction* Function = FindStaticFunction_LoadAsset();
+    if (!Function || !WorldContextObject || AssetPath.Len() == 0)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
+    // TSoftObjectPtr<UObject> (FSoftObjectPtr, 0x28 bytes from 1.10; TAssetPtr's 0x20 before): the path goes into its
+    // FSoftObjectPath in the build's layout.
+    UProperty* AssetProperty = Function->FindPropertyByName(FName(L"Asset", FNAME_Find));
+    const size_t AssetSize = sizeof(TAssetPtr<UObject>) + (ObjectLayout::Current.bSoftObjectPaths ? Reflection::SoftPathGrowth<TAssetPtr<UObject>> : 0);
+    TAssetPtr<UObject>* Asset = AssetProperty && static_cast<size_t>(AssetProperty->ElementSize) == AssetSize ? static_cast<TAssetPtr<UObject>*>(Params.GetAddress(L"Asset")) : nullptr;
+    FLatentActionInfo* Info = Params.Get<FLatentActionInfo>(L"LatentInfo");
+    if (!Asset || !Info || !Params.Set(L"WorldContextObject", WorldContextObject))
+    {
+        return false;
+    }
+    Asset->SetPath(AssetPath);
+    *Info = LatentInfo;
     return Params.Call(StaticClass()->GetDefaultObject());
 }
 

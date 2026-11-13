@@ -11373,6 +11373,37 @@ uint8_t* Finder::PawnDiedInventoryDropCall()
                 }
             }
         }
+        // Not every virtual call there is on the controller: 6.20's (0x12B7450) also asks the killer's pawn for its health
+        // and shield for the death report (mov rcx, rbx; call [rax+0C38h], at 0x12B7731), and the controller's own slot
+        // 0x187 happens to be the shared empty function. With more than one candidate, keep the calls made on the
+        // controller itself: the register the handler copies this into (mov rdi, rcx at 0x12B749C) is moved into rcx
+        // right before the call (mov rcx, rdi; call [rax+18F0h] at 0x12B7610, the drop).
+        if (StubCalls.size() > 1 && Index >= 0)
+        {
+            int32_t ThisRegister = -1;
+            for (uintptr_t Site = Function; Site + 3 <= End && Site < Function + 0x60 && ThisRegister < 0; ++Site)
+            {
+                const uint8_t ModRm = Byte(Site + 2);
+                if ((Byte(Site) == 0x48 || Byte(Site) == 0x4C) && Byte(Site + 1) == 0x8B && (ModRm & 0xC7) == 0xC1 && (ModRm & 0x38) != 0x08 && (ModRm & 0x38) != 0x20)
+                {
+                    ThisRegister = ((ModRm >> 3) & 0x07) | (Byte(Site) == 0x4C ? 0x08 : 0x00);
+                }
+            }
+            std::vector<uintptr_t> ControllerCalls;
+            for (const uintptr_t Site : ThisRegister >= 0 ? StubCalls : std::vector<uintptr_t>{})
+            {
+                // mov rcx, ThisRegister: 48 8B C8+r (49 8B C8+r for r8-r15).
+                const std::initializer_list<int32_t> MoveThis = { ThisRegister >= 8 ? 0x49 : 0x48, 0x8B, 0xC8 | (ThisRegister & 0x07) };
+                if (FindInstruction(Site > 0x10 ? Site - 0x10 : Site, Site, MoveThis))
+                {
+                    ControllerCalls.push_back(Site);
+                }
+            }
+            if (ControllerCalls.size() == 1)
+            {
+                StubCalls = ControllerCalls;
+            }
+        }
         if (StubCalls.size() == 1)
         {
             Log::Info(L"Finder: AFortPlayerControllerZone's pawn-death handler is slot 0x{:X} (0x{:X}), its inventory drop is stripped at 0x{:X}", Index, Function - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase());

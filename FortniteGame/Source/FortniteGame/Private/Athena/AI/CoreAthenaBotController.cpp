@@ -8279,8 +8279,9 @@ void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
             DeathLocation = Stored;
         }
     }
-    // The playlist's RespawnHeight where it has one (AFortGameModeAthena::GetRespawnHeight), as a player's respawn.
-    const float RespawnHeight = GameMode->GetRespawnHeight();
+    // The playlist's RespawnHeight where it has one, before 5.41 the bus's height (AFortGameModeAthena::GetRespawnHeight),
+    // as a player's respawn.
+    const float RespawnHeight = GameMode->GetRespawnHeight(DeathLocation);
     const FVector Start(DeathLocation.X, DeathLocation.Y, DeathLocation.Z + RespawnHeight);
 
     // The body goes, as the restarted player's old pawn does.

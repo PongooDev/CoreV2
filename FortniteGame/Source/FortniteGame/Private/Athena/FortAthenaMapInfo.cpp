@@ -24,6 +24,18 @@ bool AFortAthenaMapInfo::HasLlamas()
         && Finder::ResolveSupplyDropSpawnLive(Member_LlamaClass.GetOffsetChecked());
 }
 
+float AFortAthenaMapInfo::GetAircraftFlightHeight()
+{
+    // 4.5 0xA3F020: "movaps xmm1, [RootComponent+190h]" (the map info's location), then GetValueAtLevel(&AircraftHeight,
+    // 0) plus that location's Z is the height every FlightStartLocation gets.
+    if (!HasAircraftHeight())
+    {
+        return -1.0f;
+    }
+    const FScalableFloat& Height = AircraftHeight;
+    return GetTransform().GetLocation().Z + Height.GetValueAtLevel(0.0f);
+}
+
 FVector AFortAthenaMapInfo::PickSupplyDropLocation(const FVector& Center, float Radius)
 {
     FVector Result = Center;

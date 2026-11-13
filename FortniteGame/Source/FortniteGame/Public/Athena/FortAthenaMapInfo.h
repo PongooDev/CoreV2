@@ -60,12 +60,20 @@ public:
     // Where the bus may drop players: the island, which PickSupplyDropLocation keeps its points in.
     DefineUProperty(FBox2D, AircraftDropZone)
     DefineUProperty(AVolume*, AircraftDropVolume)
+    // How high the bus flies over the map info (AthenaGameData's Default.Aircraft.Height row, which a playlist's own game
+    // data replaces from 1.11).
+    DefineUStructProperty(FScalableFloat, AircraftHeight)
+    static bool HasAircraftHeight() { return Member_AircraftHeight.IsAvailable(); }
 
     static bool HasTreasureChestSpawnPercent() { return Member_TreasureChestClass.IsAvailable() && Member_TreasureChestMinSpawnPercent.IsAvailable() && Member_TreasureChestMaxSpawnPercent.IsAvailable(); }
     static bool HasAmmoBoxSpawnPercent() { return Member_AmmoBoxClass.IsAvailable() && Member_AmmoBoxMinSpawnPercent.IsAvailable() && Member_AmmoBoxMaxSpawnPercent.IsAvailable(); }
     // Whether the build has Supply Llamas (3.3 on) and the native code that places them (Finder::ResolveSupplyDropSpawnLive).
     static bool HasLlamas();
 
+    // The height the bus flies at in the world: AFortAthenaMapInfo::InitializeFlightPath (4.5 0xA3F020) starts every
+    // aircraft path at the map info's own location's Z plus AircraftHeight at level 0. The game works it out inline; the
+    // name is Core's. -1 where the build has no AircraftHeight.
+    float GetAircraftFlightHeight();
     // A random point within Radius of Center (at its height) inside AircraftDropVolume, or Center when 1000 tries find none.
     FVector PickSupplyDropLocation(const FVector& Center, float Radius);
     // Spawns a SupplyDropClass on the ground under Location (AFortAthenaSupplyDrop::FindGroundLocationAt). From 3.6 its

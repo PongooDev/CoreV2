@@ -64,7 +64,7 @@ namespace
     // FTimerHandle no build reflects), so a later death's timer replaces the last one's.
     std::vector<std::pair<TWeakObjectPtr<AFortPlayerControllerAthena>, FTimerHandle>> SpectateOnDeathTimerHandles;
 
-    FTimerHandle& SpectateOnDeathTimerHandleOf(AFortPlayerControllerAthena* Controller)
+    FTimerHandle* FindSpectateOnDeathTimerHandle(AFortPlayerControllerAthena* Controller)
     {
         std::erase_if(SpectateOnDeathTimerHandles, [](const auto& Entry) { return !Entry.first.Get(true); });
         const TWeakObjectPtr<AFortPlayerControllerAthena> WeakController(Controller);
@@ -72,10 +72,16 @@ namespace
         {
             if (Owner == WeakController)
             {
-                return Handle;
+                return &Handle;
             }
         }
-        return SpectateOnDeathTimerHandles.emplace_back(WeakController, FTimerHandle()).second;
+        return nullptr;
+    }
+
+    FTimerHandle& SpectateOnDeathTimerHandleOf(AFortPlayerControllerAthena* Controller)
+    {
+        FTimerHandle* Found = FindSpectateOnDeathTimerHandle(Controller);
+        return Found ? *Found : SpectateOnDeathTimerHandles.emplace_back(TWeakObjectPtr<AFortPlayerControllerAthena>(Controller), FTimerHandle()).second;
     }
 
     AFortPlayerStateAthena* AthenaStateOf(AController* Controller)
@@ -100,6 +106,29 @@ void AFortPlayerControllerAthena::SpectateOnDeath()
 {
     Reflection::FParams Params(StaticFunction_SpectateOnDeath());
     Params.Call(this);
+}
+
+void AFortPlayerControllerAthena::StopSpectatingOnDeath()
+{
+#if WITH_SERVER_CODE
+    // The death's timer loops (rate 2) until the controller goes: once the player is back, each run would only find a
+    // view target that is alive (4.5 0xAAC400 returns there unless that pawn drives a remote-controlled one).
+    UWorld* World = GetWorld();
+    FTimerHandle* Handle = World ? FindSpectateOnDeathTimerHandle(this) : nullptr;
+    if (Handle && Handle->IsValid())
+    {
+        World->GetTimerManager().ClearTimer(*Handle);
+    }
+    // SpectateOnDeath's BeginSpectating (4.5 0xAC1630, with bEnableSpectatorUpdates) put the player among the watched
+    // player's spectators, the HUD's "N spectating"; nothing in the respawn takes them out (the game's only other
+    // EndSpectating caller, 4.5 0xA7CC40, is the game mode's logout).
+    AFortPlayerStateAthena* AthenaState = AthenaStateOf(this);
+    if (AthenaState && AFortPlayerStateAthena::HasSpectators() && static_cast<AFortPlayerStateAthena*>(AthenaState->SpectatingTarget))
+    {
+        UE_LOG(LogFortDeath, Log, TEXT("StopSpectatingOnDeath: %s is back and stops spectating %s"), *GetName(), *static_cast<AFortPlayerStateAthena*>(AthenaState->SpectatingTarget)->GetPlayerName());
+        AthenaState->EndSpectating();
+    }
+#endif
 }
 
 // Every player still in the match outlived the one who is out: an EFortQuestObjectiveStatEvent::AthenaOutlive event
@@ -364,12 +393,20 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         return;
     }
     AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this);
-    // A playlist that brings its players back (4.2's Playground, #308): the pawn's death handler (4.2 0xA81B50, after this
-    // one) asks the game mode the same, with the death cause set above, and has RespawnPlayerAfterDeath run once the
-    // respawn countdown is over. The player stays in the match and doesn't spectate meanwhile.
+    // A playlist that brings its players back (4.2's Playground, #308): the pawn's death handler (4.2 0xA81B50, 4.5
+    // 0xA9B930, after this one) asks the game mode the same, with the death cause set above, and has
+    // RespawnPlayerAfterDeath run once the death penalty's respawn countdown is over. The player stays in the match.
     const bool bRespawning = GameMode && AthenaState && GameMode->IsRespawningAllowed(AthenaState);
     APawn* KillerPawn = Instigator ? Instigator->GetPawn() : nullptr;
-    if (GameMode && GameMode->bAllowSpectateAfterDeath && !bRespawning)
+    // A player who will respawn spectates meanwhile too, as one who is out does (#426: on Epic's 4.5 Playground the
+    // camera went to another player until the respawn). The game's respawn is built for it: before its timer the pawn's
+    // death handler (4.5 0xA9B930) sets the controller's bPlayerIsWaiting (+0x510 bit 0x10; the engine's "waiting to
+    // respawn, only valid in Spectating state"), which is what lets RespawnPlayerAfterDeath's ServerRestartPlayer (4.5
+    // 0xAA8410 calls slot 0x7E0, APlayerController's 0x23A7400) restart a controller SpectateOnDeath has put in the
+    // Spectating state; without it that restart only takes an Inactive one. So the first spectate comes five seconds
+    // after the death, before a 10 s countdown (5.0's Anthem_DeathPenalty, AthenaRespawnDelayOverTime) is over, and not
+    // at all where the countdown is shorter (6.01 and later, 3 s): the respawn stops it (StopSpectatingOnDeath).
+    if (GameMode && GameMode->bAllowSpectateAfterDeath)
     {
         if (Instigator)
         {
@@ -393,7 +430,12 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     }
     if (bRespawning)
     {
-        UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s respawns, the playlist brings its players back"), *GetName());
+        // The countdown the client shows (the death report's ServerTimeForRespawn, which AFortPlayerControllerZone's
+        // PrepareDeathReport filled above), against the spectating's first five seconds.
+        const float RespawnIn = Member_PlayerDeathReport.IsAvailable() && FFortPlayerDeathReport::HasServerTimeForRespawn()
+            ? static_cast<FFortPlayerDeathReport&>(PlayerDeathReport).ServerTimeForRespawn - World->GetTimeSeconds() : -1.0f;
+        UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s respawns, the playlist brings its players back (the death report's countdown: %.1f s; spectating from %.0f s)"), *GetName(),
+            RespawnIn, GameMode->bAllowSpectateAfterDeath ? SpectateFirstDelay : -1.0f);
         return;
     }
     AthenaState->SecondsAlive = Natives::AFortPlayerStateAthena_GetSecondsAlive(AthenaState);

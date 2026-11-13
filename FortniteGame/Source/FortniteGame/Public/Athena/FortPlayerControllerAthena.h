@@ -125,9 +125,13 @@ public:
     // Server: who SpectateOnDeath watches first after a death, the eliminator's pawn.
     DefineUProperty(APawn*, PlayerToSpectateOnDeath)
     DefineUFunction(SpectateOnDeath)
-    // The build's SpectateOnDeath (1.9 0x438550, 3.3 0xA31650, 5.40 0xC34710), through its UFunction: what the death's
-    // spectate timer calls (OnPawnDied).
+    // The build's SpectateOnDeath (1.9 0x438550, 3.3 0xA31650, 4.5 0xAAC400, 5.40 0xC34710), through its UFunction: what
+    // the death's spectate timer calls (OnPawnDied).
     void SpectateOnDeath();
+    // Server: a player who is back in play (a respawn, or a warmup restart) stops spectating after their death: the
+    // death's spectate timer goes and the player state stops watching anyone (Core's: the game's RespawnPlayerAfterDeath,
+    // 4.5 0xAA8410, leaves both alone, and SpectateOnDeath only returns early for a view target that is alive).
+    void StopSpectatingOnDeath();
     // AFortPlayerControllerZone's: the report of the player's last death, which ClientOnPawnDied sends.
     DefineUStructProperty(FFortPlayerDeathReport, PlayerDeathReport)
     // 1.10: the player's report of their match (AthenaPlayerMatchReport.h), made in BeginPlay on the server too.

@@ -13,9 +13,13 @@ struct FFortPlayerDeathReport
 {
     DefineUnrealStruct(FFortPlayerDeathReport, FortniteGame)
     DefineUProperty(AFortPlayerState*, KillerPlayerState)
+    // The server's world time the player comes back at, which Athena's respawn countdown on the client counts down to
+    // (4.5 AFortPlayerControllerAthena 0xA9AB10: ServerTimeForRespawn less the game state's server world time).
+    DefineUProperty(float, ServerTimeForRespawn)
 
 public:
     static ptrdiff_t KillerPlayerStateOffset() { return Member_KillerPlayerState.GetOffsetChecked(); }
+    static bool HasServerTimeForRespawn() { return Member_ServerTimeForRespawn.IsAvailable(); }
 };
 
 class AFortPlayerControllerZone : public AFortPlayerController

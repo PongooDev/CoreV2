@@ -172,11 +172,13 @@ public:
     // rule is the stored death's location against the safe zone, for a death stored as the game stores one
     // (DeathInfo.bInitialized, AFortPlayerStateAthena::SetDeathInfo); Core's reading of the death cause stays under it.
     bool IsRespawningAllowed(AFortPlayerStateAthena* PlayerState);
-    // How far over where they died a respawning player (or player bot) starts skydiving: the match's playlist's
-    // RespawnHeight where the playlist has one (from 5.41) and it comes to more than 1000, else DefaultRespawnHeight. The
-    // 21.40 exports name a GetRespawnHeight beside IsRespawningAllowed; its class and signature aren't in them, and the
-    // builds' own reader went with the stripped server code.
-    float GetRespawnHeight();
+    // How far over DeathLocation, where they died, a respawning player (or player bot) starts skydiving: the match's
+    // playlist's RespawnHeight where the playlist has one (from 5.41) and it comes to more than 1000, else
+    // DefaultRespawnHeight. Before 5.41 the playlist has only RespawnLocation Air, and the player comes back as high as
+    // the bus flies (the map info's GetAircraftFlightHeight), where that is more than 1000 over DeathLocation, else
+    // DefaultRespawnHeight. The 21.40 exports name a GetRespawnHeight beside IsRespawningAllowed; its class and
+    // signature aren't in them, and the builds' own reader went with the stripped server code.
+    float GetRespawnHeight(const FVector& DeathLocation);
     // TeleportToSkyDive's height above a spot (AFortPlayerPawnAthena 4.2 0xA98690: 10000 for any height up to 1000).
     static constexpr float DefaultRespawnHeight = 10000.0f;
 

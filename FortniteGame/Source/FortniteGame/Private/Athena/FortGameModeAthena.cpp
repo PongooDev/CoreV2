@@ -422,11 +422,17 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
     // aircraft spawns the pawn where it is, whatever is there, as the engine's default spawn does (the spot's location and
     // yaw); the warmup island's spots keep AFortGameMode's spawn.
     AFortAthenaAircraft* Aircraft = Cast<AFortAthenaAircraft>(StartSpot);
+    // A player who gets a pawn here is back in play (RespawnPlayerAfterDeath's restart, or a warmup one): the spectating
+    // their death started ends with it (#426).
+    if (AFortPlayerControllerAthena* AthenaController = !Aircraft && NewPlayer ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(NewPlayer)) : nullptr)
+    {
+        AthenaController->StopSpectatingOnDeath();
+    }
     // A respawn in the safe zones phase (4.2's Playground, #308): ChoosePlayerStart (4.2 0xA0AE70) gives the engine's
     // player start, on the warmup island, and RespawnPlayerAfterDeath (0xA57AD0) has the new pawn BeginSkydiving there.
     // The playlist's RespawnLocation is Air, which no code left in the build reads: the pawn starts in the air over
-    // where the player died, at the playlist's RespawnHeight (GetRespawnHeight; TeleportToSkyDive's height, 0xA98690,
-    // where the playlist has none), and skydives from there.
+    // where the player died, at the playlist's RespawnHeight (GetRespawnHeight; before 5.41, as high as the bus flies),
+    // and skydives from there.
     FVector RespawnLocation;
     float RespawnHeight = 0.0f;
     bool bRespawnInAir = false;
@@ -452,7 +458,7 @@ APawn* AFortGameModeAthena::SpawnDefaultPawnFor_Implementation(AController* NewP
         {
             const FVector DeathLocation = AthenaState->DeathInfo.DeathLocation;
             bRespawnInAir = DeathLocation.X != 0.0f || DeathLocation.Y != 0.0f || DeathLocation.Z != 0.0f;
-            RespawnHeight = GetRespawnHeight();
+            RespawnHeight = GetRespawnHeight(DeathLocation);
             RespawnLocation = DeathLocation + FVector(0.0f, 0.0f, RespawnHeight);
             if (bStoredDeath && AFortPlayerStateAthena::HasRespawnData() && AthenaState->RespawnData.bRespawnDataAvailable)
             {
@@ -2423,22 +2429,32 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
         || PlayerState->DeathInfo.DeathCause != EDeathCause::GetOutsideSafeZone();
 }
 
-float AFortGameModeAthena::GetRespawnHeight()
+float AFortGameModeAthena::GetRespawnHeight(const FVector& DeathLocation)
 {
     // The playlist's RespawnHeight is a scalable float over its own game data (6.00's Playlist_Playground: Value 1 times
-    // the row Playground.RespawnHeight, 15000), read at level 0 as the playlist's other rows are. A playlist without the
-    // property (before 5.41) keeps TeleportToSkyDive's 10000, and so does one whose value is no height to skydive from:
-    // TeleportToSkyDive's own rule (6.00 0xC9D2C0: any height up to 1000 is 10000), which also covers an unset one (0)
-    // and a Value left without its row.
+    // the row Playground.RespawnHeight, 15000), read at level 0 as the playlist's other rows are. A value that is no
+    // height to skydive from keeps TeleportToSkyDive's 10000: TeleportToSkyDive's own rule (6.00 0xC9D2C0, 4.5 0xAADE20:
+    // any height up to 1000 is 10000), which also covers an unset one (0) and a Value left without its row.
     constexpr float MinRespawnHeight = 1000.0f;
-    AFortGameStateAthena* GameState = AFortGameStateAthena::HasCurrentPlaylist() && UFortPlaylistAthena::HasRespawnHeight() ? AthenaGameStateOf(this) : nullptr;
-    UFortPlaylistAthena* Playlist = GameState ? GameState->GetCurrentPlaylist() : nullptr;
-    if (!Playlist)
+    AFortGameStateAthena* GameState = AthenaGameStateOf(this);
+    if (UFortPlaylistAthena::HasRespawnHeight())
     {
-        return DefaultRespawnHeight;
+        UFortPlaylistAthena* Playlist = GameState && AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
+        if (!Playlist)
+        {
+            return DefaultRespawnHeight;
+        }
+        const FScalableFloat& PlaylistHeight = Playlist->RespawnHeight;
+        const float Height = PlaylistHeight.GetValueAtLevel(0.0f);
+        return Height > MinRespawnHeight ? Height : DefaultRespawnHeight;
     }
-    const FScalableFloat& PlaylistHeight = Playlist->RespawnHeight;
-    const float Height = PlaylistHeight.GetValueAtLevel(0.0f);
+    // Before 5.41 (#426, 4.5's Playground): the playlist says only RespawnLocation Air, which no code left in the build
+    // reads (4.5's two readers of the playlist's +0x332 are a struct copy and a pickup's field), and nothing native
+    // calls TeleportToSkyDive (4.5 0xAADE20, reached only through its exec thunk), so the height Epic's server used isn't
+    // in the image. #426's reporter played Epic's Playground: a respawn came as high as the bus flies. That height is the
+    // map info's (InitializeFlightPath's, 4.5 0xA3F020), where it is a height to skydive from over the death.
+    AFortAthenaMapInfo* MapInfo = GameState ? static_cast<AFortAthenaMapInfo*>(GameState->MapInfo) : nullptr;
+    const float Height = MapInfo ? MapInfo->GetAircraftFlightHeight() - DeathLocation.Z : 0.0f;
     return Height > MinRespawnHeight ? Height : DefaultRespawnHeight;
 }
 
@@ -2863,8 +2879,21 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded()
     // A playlist that brings its players back says how far over their death once, as it loads (#411).
     if (IsRespawningAllowed(nullptr))
     {
-        Log::Info(L"Battle Royale: the match's playlist brings its players back {:.0f} over where they died ({})", GetRespawnHeight(),
-            UFortPlaylistAthena::HasRespawnHeight() ? L"the playlist's RespawnHeight, or 10000 where that is no height to skydive from" : L"this build's playlists have no RespawnHeight");
+        // Before 5.41 the height is the bus's over each death: said as the bus's height in the world.
+        UWorld* LogWorld = GetWorld();
+        AFortGameStateAthena* LogState = LogWorld ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(LogWorld->GetGameState())) : nullptr;
+        AFortAthenaMapInfo* MapInfo = LogState ? static_cast<AFortAthenaMapInfo*>(LogState->MapInfo) : nullptr;
+        const float FlightHeight = MapInfo ? MapInfo->GetAircraftFlightHeight() : -1.0f;
+        if (UFortPlaylistAthena::HasRespawnHeight())
+        {
+            Log::Info(L"Battle Royale: the match's playlist brings its players back {:.0f} over where they died (the playlist's RespawnHeight, or 10000 where that is no height to "
+                L"skydive from; the bus flies at {:.0f})", GetRespawnHeight(FVector(0.0f, 0.0f, 0.0f)), FlightHeight);
+        }
+        else
+        {
+            Log::Info(L"Battle Royale: the match's playlist brings its players back as high as the bus flies, {:.0f} ({}; 10000 over a death where that is no height to skydive from)",
+                FlightHeight, FlightHeight >= 0.0f ? L"the map info's AircraftHeight over the map info" : L"this build's map info has no AircraftHeight");
+        }
     }
     FMatchEvents& Events = MatchEventsOf(this);
     if (!Events.PlaylistTimer.IsValid())

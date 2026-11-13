@@ -71,6 +71,7 @@
 #include "Player/FortPlayerState.h"
 #include "FortGlobals.h"
 #include "FortKismetLibrary.h"
+#include "Abilities/FortAbilitySystemComponent.h"
 #include "Abilities/FortGameplayAbility.h"
 #include "Missions/FortMissionLibrary.h"
 #include "AbilitySystemComponent.h"
@@ -304,6 +305,7 @@ static void InstallHooks()
         AFortGameModeAthena::HookVTables();
         UFortVisibilityComponent::HookVTables();
         UAbilitySystemComponent::HookVTables();
+        UFortAbilitySystemComponent::HookCallSites();
         UFortKismetLibrary::HookNatives();
         ABuildingSMActor::HookVTables();
         ABuildingContainer::HookVTables();

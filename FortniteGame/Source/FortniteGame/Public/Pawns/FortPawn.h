@@ -11,6 +11,7 @@
 
 class AFortWeapon;
 class UAbilitySystemComponent;
+class UAnimSequenceBase;
 class UFortWeaponItemDefinition;
 
 // A row of a pawn's stats table (AFortPawn::PawnStatHandle). Battle Royale's pawn moves at its speeds
@@ -101,6 +102,11 @@ public:
     bool EquipDefaultWeapon();
     void RemoveAbilityWeapon(AFortWeapon* Weapon);
     void TriggerFeedbackEvent(FName EventName, AFortPawn* InstigatorPawn, AFortPawn* Recipient, float OverriddenDelay);
+    // The game's (6.20 CL-4497486 0x1241770, an AFortPawn virtual): the ability whose current montage is Animation
+    // generates its target data and sends it (ApplicationTag), what a montage's UFortAnimNotify_TriggerGameplayAbility
+    // asks of its pawn where an attack's hit lands. Locally controlled pawns only. Nothing where Core didn't find its slot
+    // (Finder::ResolveSharedAnimLive).
+    void TriggerAbilityFromAnimation(UAnimSequenceBase* Animation, FGameplayTag ApplicationTag, FName MontageSectionIfBlocked, bool bSetNextSectionIfBlocked);
     float GetHealth() const;
     float GetMaxHealth() const;
     float GetShield() const;

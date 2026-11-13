@@ -31,6 +31,7 @@ public:
     DefineUProperty(AActor*, OwnerActor)
     // Reflected from UE 4.21 (5.0) on; older builds keep them unreflected (IsAvailable).
     DefineUProperty(AActor*, AvatarActor)
+    static bool HasAvatarActor() { return Member_AvatarActor.IsAvailable(); }
     DefineUProperty(bool, UserAbilityActivationInhibited)
     DefineUProperty(TArray<uint8_t>, BlockedAbilityBindings)
     DefineUProperty(TArray<UAttributeSet*>, SpawnedAttributes)

@@ -7,6 +7,9 @@
 #include "Templates/SharedPointerInternals.h"
 
 class FOutputDevice;
+class UFortAbilitySystemComponent;
+struct FGameplayAbilityActivationInfo;
+struct FGameplayAbilityRepSharedAnim;
 struct FWeakObjectPtr;
 class UNavigationSystem;
 class ANavigationData;
@@ -733,6 +736,13 @@ namespace Natives
     // slot 0x8C8): it sets CurrentMovementStyle and then the character movement's speeds for that style (MaxWalkSpeed and
     // the rest, from GetMovementSpeed). A bot's sprint goes through it: Finder::ResolveMovementStyleLive.
     inline int32_t AFortPawn_SetCurrentMovementStyleIndex = -1;
+    // From 6.x, the AI pawns that animate through the animation sharing system (Finder::ResolveSharedAnimLive): what the
+    // build keeps of UFortAbilitySystemComponent::PlaySharedAnim (6.20 CL-4497486 0xA70D50: RepSharedAnimInfo = SharedAnim,
+    // return 0; the ability and its activation info go unused), its calls in the abilities' animation tasks, and
+    // AFortPawn::TriggerAbilityFromAnimation's slot (6.20 0x1241770, slot 0x171).
+    inline float (*UFortAbilitySystemComponent_PlaySharedAnim)(UFortAbilitySystemComponent* This, UGameplayAbility* AnimatingAbility, const FGameplayAbilityActivationInfo* ActivationInfo, const FGameplayAbilityRepSharedAnim* SharedAnim) = nullptr;
+    inline std::vector<uint8_t*> UFortAbilitySystemComponent_PlaySharedAnimCalls;
+    inline int32_t AFortPawn_TriggerAbilityFromAnimationIndex = -1;
     // AFortGameMode::AttemptChangeTeamInfoForController(uint8 Team, AFortPlayerController* Controller)'s slot (3.2 0xA88,
     // 0xB526C0; 21.40's name and signature): PlacePlayerOnTeam's change of a joining player's team, which puts the
     // controller in the team's AFortTeamInfo and its player state on the team. It takes any controller whose player

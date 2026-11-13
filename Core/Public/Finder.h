@@ -176,6 +176,12 @@ namespace Finder
     // AISettingsOffset: AFortGameModeAthena's AISettings, which the function tests first. Null where the build's Athena
     // game mode has no CreateAIDirector of its own (the zone's slot, already swapped) or none of that shape.
     uint8_t* AthenaCreateAIDirectorSuperCall(ptrdiff_t AISettingsOffset);
+    // From 6.x (AI pawns that animate through the animation sharing system: 6.20's Fortnitemares Cube Monsters): what
+    // the build keeps of UFortAbilitySystemComponent::PlaySharedAnim (a call of UFortAbilityTask_PlayAnimWaitTarget's
+    // overrides whose target only writes RepSharedAnimInfoOffset), every call of it, and AFortPawn::
+    // TriggerAbilityFromAnimation's slot: Natives::UFortAbilitySystemComponent_PlaySharedAnim(Calls),
+    // AFortPawn_TriggerAbilityFromAnimationIndex. False (quietly) on builds without the task.
+    bool ResolveSharedAnimLive(ptrdiff_t RepSharedAnimInfoOffset);
     bool ResolveLoginLive();
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();

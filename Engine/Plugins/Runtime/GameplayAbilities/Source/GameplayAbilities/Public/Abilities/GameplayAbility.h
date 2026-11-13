@@ -3,6 +3,8 @@
 #include "GameplayTagContainer.h"
 #include "UObject/Object.h"
 
+class UAnimMontage;
+
 class UGameplayAbility : public UObject
 {
     DefineUnrealClass(UGameplayAbility, GameplayAbilities)
@@ -18,6 +20,11 @@ public:
     DefineUProperty(FGameplayTagContainer, ActivationRequiredTags)
     DefineUProperty(uint8_t, NetExecutionPolicy)
     DefineUProperty(uint8_t, InstancingPolicy)
+    // The montage the ability plays (Epic's SetCurrentMontage, which UAbilitySystemComponent::PlayMontage calls), what
+    // AFortPawn::TriggerAbilityFromAnimation finds the ability by.
+    DefineUProperty(UAnimMontage*, CurrentMontage)
+    // Set while the (instanced) ability is active, from its ActivateAbility to its EndAbility.
+    DefineUProperty(bool, bIsActive)
 
     // DoesAbilitySatisfyTagRequirements' owner checks, in words: the owned tags among ActivationBlockedTags and the
     // ActivationRequiredTags the owner lacks (empty when both pass or the build doesn't reflect them).

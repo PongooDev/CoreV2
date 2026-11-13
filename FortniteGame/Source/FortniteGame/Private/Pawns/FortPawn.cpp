@@ -72,6 +72,15 @@ void AFortPawn::TriggerFeedbackEvent(FName EventName, AFortPawn* InstigatorPawn,
     Params.Call(this);
 }
 
+void AFortPawn::TriggerAbilityFromAnimation(UAnimSequenceBase* Animation, FGameplayTag ApplicationTag, FName MontageSectionIfBlocked, bool bSetNextSectionIfBlocked)
+{
+    // FGameplayTag and FName go by value in a register each, as the notify's own call (6.20 0xA6CD08) passes them.
+    if (Natives::AFortPawn_TriggerAbilityFromAnimationIndex >= 0)
+    {
+        CallVirtual<void>(this, Natives::AFortPawn_TriggerAbilityFromAnimationIndex, Animation, ApplicationTag, MontageSectionIfBlocked, bSetNextSectionIfBlocked);
+    }
+}
+
 namespace
 {
     float CallFloatGetter(const AFortPawn* Pawn, UFunction* Function)

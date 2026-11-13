@@ -8254,6 +8254,113 @@ uint8_t* Finder::AthenaCreateAIDirectorSuperCall(ptrdiff_t AISettingsOffset)
     return reinterpret_cast<uint8_t*>(StubCalls[0]);
 }
 
+bool Finder::ResolveSharedAnimLive(ptrdiff_t RepSharedAnimInfoOffset)
+{
+    // 6.x gives AI pawns the animation sharing system (bUseSharedAnimation; 6.20's Fortnitemares Cube Monsters). Such a
+    // pawn's ability plays its montage through UFortAbilityTask_PlayAnimWaitTarget (or _PlayAnimAndWait), whose Activate
+    // (6.20 CL-4497486 0xA84EE0; 0xA84B40) hands UFortAbilitySystemComponent's shared-animation counterpart of
+    // PlayMontage the ability, its activation info and the shared animation (calls at 0xA85425 and 0xA84E6A). The build
+    // keeps only its replicated part, `movups xmm0, [r9]; movups [rcx+1330h], xmm0; xorps xmm0, xmm0; retn` (0xA70D50):
+    // a leaf (no .pdata entry, so it is decoded from its first byte) that writes RepSharedAnimInfo and returns within a
+    // few instructions, without a call or a jump.
+    if (Natives::UFortAbilitySystemComponent_PlaySharedAnim)
+    {
+        return true;
+    }
+    void** TaskVTable = RepSharedAnimInfoOffset > 0 ? CdoVTable(L"/Script/GameplayAbilities.AbilityTask") : nullptr;
+    void** WaitTargetVTable = TaskVTable ? CdoVTable(L"/Script/FortniteGame.FortAbilityTask_PlayAnimWaitTarget") : nullptr;
+    if (!WaitTargetVTable)
+    {
+        return false;
+    }
+
+    const auto IsSharedAnimSetter = [RepSharedAnimInfoOffset](uintptr_t Target)
+    {
+        bool bWritesMember = false;
+        for (uintptr_t Address = Target; IsInText(Address) && Address < Target + 0x20;)
+        {
+            const uint8_t* Code = reinterpret_cast<const uint8_t*>(Address);
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(Code, &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                return false;
+            }
+            if (Code[0] == 0xC3)
+            {
+                return bWritesMember;
+            }
+            const bool bBranch = Code[0] == 0xE8 || Code[0] == 0xE9 || Code[0] == 0xEB || Code[0] == 0xFF || (Code[0] >= 0x70 && Code[0] <= 0x7F) || (Code[0] == 0x0F && Code[1] >= 0x80 && Code[1] <= 0x8F);
+            if (bBranch)
+            {
+                return false;
+            }
+            bWritesMember = bWritesMember || ((Instruction.flags & F_MODRM) && Instruction.modrm_mod == 2 && Instruction.modrm_rm != 5
+                && static_cast<int32_t>(Instruction.disp.disp32) == static_cast<int32_t>(RepSharedAnimInfoOffset));
+            Address += Length;
+        }
+        return false;
+    };
+    std::vector<uintptr_t> Setters;
+    int32_t Overrides = 0;
+    int32_t CallsSeen = 0;
+    for (int32_t Index = 0; Index < 0x60; ++Index)
+    {
+        const uintptr_t Own = VTableEntry(WaitTargetVTable, Index);
+        const uintptr_t Base = VTableEntry(TaskVTable, Index);
+        Overrides += Own && Own != Base ? 1 : 0;
+        for (const auto& [Site, Target] : Own && Own != Base ? Finder::DecodedDirectCalls(Own) : decltype(Finder::DecodedDirectCalls(0)){})
+        {
+            ++CallsSeen;
+            if (std::find(Setters.begin(), Setters.end(), Target) == Setters.end() && IsSharedAnimSetter(Target))
+            {
+                Setters.push_back(Target);
+            }
+        }
+    }
+    if (Setters.size() != 1)
+    {
+        Log::Error(L"Finder: UFortAbilityTask_PlayAnimWaitTarget's {} overrides make {} calls, to {} functions that only write UFortAbilitySystemComponent::RepSharedAnimInfo (+0x{:X}), "
+            L"not one, so the shared animations' gameplay notifies (an AI pawn's attack hit) don't fire on the server", Overrides, CallsSeen, Setters.size(), RepSharedAnimInfoOffset);
+        return false;
+    }
+
+    // Every call of it, each one decoded in its function (a byte scan also meets an E8 inside a displacement).
+    std::vector<uint8_t*> Calls;
+    for (const uintptr_t Site : Finder::CallsTo(Setters[0], false))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Site);
+        const auto Decoded = Function ? Finder::DecodedDirectCalls(Function) : decltype(Finder::DecodedDirectCalls(0)){};
+        if (std::any_of(Decoded.begin(), Decoded.end(), [Site](const auto& Call) { return Call.first == Site; }))
+        {
+            Calls.push_back(reinterpret_cast<uint8_t*>(Site));
+        }
+    }
+
+    // The pawn's TriggerAbilityFromAnimation, the call a montage's UFortAnimNotify_TriggerGameplayAbility makes (6.20
+    // 0xA6CC90: `call qword ptr [rax+0B88h]`), by its log line.
+    const uintptr_t Trigger = FunctionOf(L"TriggerAbilityFromAnimation: Failed on %s, can't find ability for montage %s!");
+    const int32_t TriggerIndex = FirstVTableIndex(CdoVTable(L"/Script/FortniteGame.FortPawn"), Trigger);
+    if (Calls.empty() || TriggerIndex < 0)
+    {
+        Log::Error(L"Finder: UFortAbilitySystemComponent's shared-animation call (0x{:X}) has {} calls, AFortPawn::TriggerAbilityFromAnimation (0x{:X}) slot {}: "
+            L"the shared animations' gameplay notifies don't fire on the server", Setters[0] - Finder::ImageBase(), Calls.size(), Trigger ? Trigger - Finder::ImageBase() : 0, TriggerIndex);
+        return false;
+    }
+
+    Natives::UFortAbilitySystemComponent_PlaySharedAnim = reinterpret_cast<decltype(Natives::UFortAbilitySystemComponent_PlaySharedAnim)>(Setters[0]);
+    Natives::UFortAbilitySystemComponent_PlaySharedAnimCalls = Calls;
+    Natives::AFortPawn_TriggerAbilityFromAnimationIndex = TriggerIndex;
+    std::wstring Sites;
+    for (const uint8_t* Call : Calls)
+    {
+        Sites += std::format(L"{}0x{:X}", Sites.empty() ? L"" : L", ", reinterpret_cast<uintptr_t>(Call) - Finder::ImageBase());
+    }
+    Log::Info(L"Finder: UFortAbilitySystemComponent::PlaySharedAnim keeps only RepSharedAnimInfo (+0x{:X}) at 0x{:X}, called at {}; AFortPawn::TriggerAbilityFromAnimation is slot 0x{:X} (0x{:X})",
+        RepSharedAnimInfoOffset, Setters[0] - Finder::ImageBase(), Sites, TriggerIndex, Trigger - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
 {
     const uintptr_t GameModeHandleMatchHasStarted = FunctionOf(L"BugLoc");

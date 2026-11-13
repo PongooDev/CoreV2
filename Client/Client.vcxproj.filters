@@ -469,6 +469,15 @@
     <Filter Include="ThirdParty\MinHook\src\hde">
       <UniqueIdentifier>{32d8d9d2-1baa-445a-b0d7-67705115ab1c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Public\Animation">
+      <UniqueIdentifier>{d471d398-0373-41f3-b139-15640be162b6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Classes\Animation">
+      <UniqueIdentifier>{e555e7b4-b968-44cb-8609-823ac59ce7d5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies">
+      <UniqueIdentifier>{21aba734-7bda-41e8-adde-0bd6c1f960e6}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Boot.h" />
@@ -1171,6 +1180,27 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySet.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySystemComponent.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Animation\FortAnimNotify_TriggerGameplayAbility.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimLinkableElement.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimMontage.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimSequenceBase.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimTypes.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies\AnimNotify.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
@@ -1840,6 +1870,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\Navigation\FortNavigationGraph.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\AI\Navigation</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortAbilitySystemComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Abilities</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbility.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Abilities</Filter>

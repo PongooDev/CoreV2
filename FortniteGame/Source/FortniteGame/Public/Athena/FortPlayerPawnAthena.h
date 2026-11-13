@@ -14,6 +14,7 @@ class AFortPlayerPawnAthena : public AFortPlayerPawn
 {
     DefineUnrealClass(AFortPlayerPawnAthena, FortniteGame)
     DefineUFunction(OnCapsuleBeginOverlap)
+    DefineUFunction(ForceReviveFromDBNO)
 
 public:
     // From leaving the aircraft (0x415D90) until landing (0x41AB80).
@@ -65,6 +66,14 @@ public:
     // a player plays). Nothing where HookVTables added no HandlePlayerStartDBNO.
     void BindPlayerStartDBNO();
 
+    // From 6.21 (CL-4526925; Final, BlueprintAuthorityOnly, no parameters; 21.40 gives it an AController*
+    // EventInstigator): gets a downed pawn up without a reviver. The Butterfly's mutator
+    // (AFortAthenaMutator_ButterflyEvent) calls it for every downed player it gathers before the event takes them to
+    // the In-Between. The build strips it (FortPlayerPawnAthena.cpp); Core's body is inferred.
+    void ForceReviveFromDBNO();
+
+    // FortPlayerPawnAthena.cpp: ForceReviveFromDBNO's exec and its stripped call, then the pickup natives
+    // (HookPickupNatives).
     static void HookNatives();
     // From 5.40 (UFortWorldItemDefinition's bDropOnDBNO): Core's HandlePlayerStartDBNO, the native OnPlayerStartDBNO
     // calls. Where it can't be added, StartDBNO's slot instead, so the server part runs after the build's.
@@ -73,6 +82,11 @@ public:
 private:
     DECLARE_FUNCTION(execOnCapsuleBeginOverlap);
     DECLARE_FUNCTION(execHandlePlayerStartDBNO);
+    DECLARE_FUNCTION(execForceReviveFromDBNO);
+
+    // FortPlayerPawnPickup.cpp: the stripped auto pickup (OnCapsuleBeginOverlap), restored.
+    static void HookPickupNatives();
+    static void ForceReviveFromDBNOHK(AFortPlayerPawnAthena* This);
 
     static inline UFunction* HandlePlayerStartDBNOFunction = nullptr;
 

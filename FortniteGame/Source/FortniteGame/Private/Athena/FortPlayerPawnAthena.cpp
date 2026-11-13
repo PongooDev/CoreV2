@@ -9,9 +9,11 @@
 #include "Items/FortPickup.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
+#include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UnrealType.h"
+#include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
 
 #include <vector>
@@ -159,4 +161,94 @@ void AFortPlayerPawnAthena::HookVTables()
             Hooks::SwapVTable(L"AFortPlayerPawn::StartDBNO", VTable, Index, reinterpret_cast<void*>(&StartDBNOHK));
         }
     }
+}
+
+void AFortPlayerPawnAthena::ForceReviveFromDBNO()
+{
+#if WITH_SERVER_CODE
+    // 6.21 (CL-4526925) adds ForceReviveFromDBNO (Final, BlueprintAuthorityOnly, no parameters), and its body is server
+    // code: the exec (0x9F9440, shared with UFortCheatManager::EndDeimosSpawning) steps the frame and tail-jumps to the
+    // shared empty function, and so does its one caller, AFortAthenaMutator_ButterflyEvent's pawn readying (0xD39600,
+    // the call at 0xD3971B, behind `if (Pawn->bIsDBNO)`). No asset calls it (6.21's client paks and its server-assets
+    // pak). 21.40 keeps it with an AController* EventInstigator and a cheat of the same name on UFortCheatManager.
+    // 🟡 The body is inferred: "force" is a revive nobody performs, and the build's own revive with the pawn's own
+    // controller as the reviver is that (a self revive). It goes through Epic's ReviveFromDBNO (0x15ED220: ProcessEvent
+    // of the ServerReviveFromDBNO RPC, which on the server runs ServerReviveFromDBNO_Implementation in place: Core's
+    // restored one where the build strips it, 6.21 among them). Its CanReviveFromDBNO (AFortPlayerPawnAthena slot 0x1DF,
+    // 0xCD43C0) takes the pawn's own AFortPlayerControllerAthena on the server: the controller's pawn is this one, on
+    // its own team, and the server is the authority. GE_Athena_Revive_Self (PlayerPawn_Athena's SelfReviveGameplayEffect)
+    // gets it up, as a self revive.
+    if (Role != ROLE_Authority || !bIsDBNO)
+    {
+        return;
+    }
+    AController* const PawnController = static_cast<AController*>(Controller);
+    static UFunction* const Revive = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawn:ReviveFromDBNO");
+    Reflection::FParams Params(Revive, true);
+    if (!PawnController || !Revive || !Params.Set(L"EventInstigator", PawnController) || !Params.Call(this))
+    {
+        UE_LOG(LogFort, Warning, TEXT("ForceReviveFromDBNO: %s can't be revived (controller %s, ReviveFromDBNO %s)"), *GetName(), *GetNameSafe(PawnController),
+            Revive ? TEXT("found") : TEXT("not found"));
+        return;
+    }
+    UE_LOG(LogFort, Log, TEXT("ForceReviveFromDBNO: %s %s"), *GetName(), bIsDBNO ? TEXT("is still down (its controller's revive was refused)") : TEXT("is up"));
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerPawnAthena::execForceReviveFromDBNO)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerPawnAthena*>(Context)->ForceReviveFromDBNO();
+    P_NATIVE_END;
+}
+
+void AFortPlayerPawnAthena::ForceReviveFromDBNOHK(AFortPlayerPawnAthena* This)
+{
+    This->ForceReviveFromDBNO();
+}
+
+void AFortPlayerPawnAthena::HookNatives()
+{
+    // ForceReviveFromDBNO (6.21 on). Its exec steps the frame (no parameters) and tail-jumps to the native: the shared
+    // empty function where the build strips it. Core's exec takes the UFunction (BlueprintAuthorityOnly callers), and
+    // the Butterfly mutator's direct call (Finder::ButterflyEventForceReviveCall) goes to Core's body, when it goes to
+    // the same stub the exec ends in. Builds without it (1.1 to 6.20) and builds that keep it are left alone.
+    if (UFunction* ForceRevive = FindStaticFunction_ForceReviveFromDBNO())
+    {
+        const uintptr_t Exec = reinterpret_cast<uintptr_t>(ForceRevive->GetNativeFunc());
+        uintptr_t ExecNative = 0;
+        for (uintptr_t Site = Exec; Exec >= Finder::TextBegin() && Site + 5 <= Exec + 0x40 && Site + 5 <= Finder::TextEnd() && !ExecNative; ++Site)
+        {
+            if (*reinterpret_cast<const uint8_t*>(Site) == 0xE9)
+            {
+                const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
+                ExecNative = Target >= Finder::TextBegin() && Target < Finder::TextEnd() ? Target : 0;
+            }
+        }
+        if (!ExecNative || !Finder::IsStubFunction(ExecNative))
+        {
+            Log::Info(L"Finder: AFortPlayerPawnAthena::ForceReviveFromDBNO is {} in this build (exec +0x{:X})", ExecNative ? L"native" : L"not a tail jump",
+                Exec ? Exec - Finder::ImageBase() : 0);
+        }
+        else
+        {
+            ForceRevive->SetNativeFunc(&execForceReviveFromDBNO);
+            Log::Info(L"Hook AFortPlayerPawnAthena::ForceReviveFromDBNO: native (the build's exec +0x{:X} ends in the stub +0x{:X})", Exec - Finder::ImageBase(),
+                ExecNative - Finder::ImageBase());
+            uint8_t* ReviveCall = Finder::ButterflyEventForceReviveCall(IsDBNOOffset());
+            if (ReviveCall && Finder::RelativeTarget(reinterpret_cast<uintptr_t>(ReviveCall), 1, 5) == ExecNative)
+            {
+                Hooks::RedirectCall(L"AFortAthenaMutator_ButterflyEvent::UpdatePawnBroadcasting -> AFortPlayerPawnAthena::ForceReviveFromDBNO", ReviveCall,
+                    reinterpret_cast<void*>(&ForceReviveFromDBNOHK));
+            }
+            else if (ReviveCall)
+            {
+                Log::Error(L"Finder: AFortAthenaMutator_ButterflyEvent's revive call (+0x{:X}) goes to +0x{:X}, not ForceReviveFromDBNO's stub, so it is left as it is",
+                    reinterpret_cast<uintptr_t>(ReviveCall) - Finder::ImageBase(), Finder::RelativeTarget(reinterpret_cast<uintptr_t>(ReviveCall), 1, 5) - Finder::ImageBase());
+            }
+        }
+    }
+
+    HookPickupNatives();
 }

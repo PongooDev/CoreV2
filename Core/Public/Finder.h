@@ -322,6 +322,10 @@ namespace Finder
     // ammo while the mode respawns its players. SpawnPickupInWorld: the UFunction, still with the game's exec. Null on
     // builds without the mutator or its CachedPercentAmmoToDrop.
     uint8_t* DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld);
+    // From 6.21 (the Butterfly): the call to the stripped AFortPlayerPawnAthena::ForceReviveFromDBNO in
+    // AFortAthenaMutator_ButterflyEvent's pawn gathering, made for a downed pawn (its bIsDBNO at IsDBNOOffset). Null on
+    // builds without the mutator, without ForceReviveFromDBNO, or that keep it.
+    uint8_t* ButterflyEventForceReviveCall(ptrdiff_t IsDBNOOffset);
     // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player
     // bots. IsSkydivingOffset: AFortPlayerPawnAthena's bIsSkydiving, which it checks first.
     bool ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset);

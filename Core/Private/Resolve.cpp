@@ -12252,6 +12252,78 @@ uint8_t* Finder::DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld)
     return reinterpret_cast<uint8_t*>(StubCalls[0]);
 }
 
+uint8_t* Finder::ButterflyEventForceReviveCall(ptrdiff_t IsDBNOOffset)
+{
+    // 6.21's Butterfly (CL-4526925). AFortAthenaMutator_ButterflyEvent::StartGatheringPawns (0xD3D950) runs
+    // UpdatePawnBroadcasting (0xD40A40) at once and on an FTimerManager timer (UpdatePawnBroadcastTimer, every
+    // PawnGatherFrequency): every AFortPlayerControllerAthena not yet in BroadcastedControllers goes to
+    // PendingControllers, and each pending one's pawn is readied (0xD39600, not named in 21.40) before OnPawnBroadcast
+    // hands the ready pawns to BP_Butterfly. The readying takes the pawn out of a remote-controlled pawn and a vehicle,
+    // ends the controller's ghost mode, and for a downed pawn (cmp byte ptr [rdi+908h], 0: AFortPawn::bIsDBNO) calls
+    // AFortPlayerPawnAthena::ForceReviveFromDBNO, whose body is server code: the call goes to the shared empty function
+    // (0xD3971B), its only call to a stub. UpdatePawnBroadcasting has no parameters, so its exec steps nothing and
+    // tail-jumps to the native. Builds without the mutator or without ForceReviveFromDBNO have none.
+    UFunction* UpdatePawnBroadcasting = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_ButterflyEvent:UpdatePawnBroadcasting");
+    UFunction* ForceRevive = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerPawnAthena:ForceReviveFromDBNO");
+    if (!UpdatePawnBroadcasting || !ForceRevive || IsDBNOOffset <= 0)
+    {
+        return nullptr;
+    }
+    const uintptr_t Exec = reinterpret_cast<uintptr_t>(UpdatePawnBroadcasting->GetNativeFunc());
+    uintptr_t Native = 0;
+    for (uintptr_t Site = Exec; IsInText(Exec) && Site + 5 <= Exec + 0x40 && !Native; ++Site)
+    {
+        const uintptr_t Target = (Byte(Site) == 0xE9 || Byte(Site) == 0xE8) ? Finder::RelativeTarget(Site, 1, 5) : 0;
+        if (IsInText(Target) && Finder::FunctionStart(Target) == Target)
+        {
+            Native = Target;
+        }
+    }
+
+    // cmp byte ptr [reg+IsDBNOOffset], 0 (80 /7 disp32 ib, an optional REX before it) in the bytes before the call.
+    const auto ComparesDBNO = [IsDBNOOffset](uintptr_t Call)
+    {
+        for (uintptr_t Site = Call - 0x18; Site + 7 <= Call; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 1);
+            if (Byte(Site) == 0x80 && (ModRm & 0xC0) == 0x80 && ((ModRm >> 3) & 7) == 7 && (ModRm & 7) != 4
+                && *reinterpret_cast<const int32_t*>(Site + 2) == static_cast<int32_t>(IsDBNOOffset) && Byte(Site + 6) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    std::vector<uintptr_t> StubCalls;
+    std::vector<uintptr_t> Seen;
+    uintptr_t Readying = 0;
+    for (const auto& [Site, Callee] : Native ? Finder::DecodedDirectCalls(Native) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (!IsInText(Callee) || Finder::FunctionStart(Callee) != Callee || std::find(Seen.begin(), Seen.end(), Callee) != Seen.end())
+        {
+            continue;
+        }
+        Seen.push_back(Callee);
+        for (const auto& [Call, Target] : Finder::DecodedDirectCalls(Callee))
+        {
+            if (Finder::IsStubFunction(Target) && ComparesDBNO(Call))
+            {
+                StubCalls.push_back(Call);
+                Readying = Callee;
+            }
+        }
+    }
+    if (StubCalls.size() != 1)
+    {
+        Log::Error(L"Finder: AFortAthenaMutator_ButterflyEvent's stripped ForceReviveFromDBNO was not found (UpdatePawnBroadcasting {}, {} stub calls after a bIsDBNO (+0x{:X}) check), the Butterfly takes downed players to the In-Between still down",
+            Native ? std::format(L"0x{:X}", Native - Finder::ImageBase()) : std::wstring(L"not found"), StubCalls.size(), IsDBNOOffset);
+        return nullptr;
+    }
+    Log::Info(L"Finder: AFortAthenaMutator_ButterflyEvent::UpdatePawnBroadcasting (0x{:X}) readies each pawn at 0x{:X}, which revives a downed one with the stripped ForceReviveFromDBNO at 0x{:X}",
+        Native - Finder::ImageBase(), Readying - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase());
+    return reinterpret_cast<uint8_t*>(StubCalls[0]);
+}
+
 bool Finder::ResolveServerMoveLive()
 {
     static bool bSearched = false;

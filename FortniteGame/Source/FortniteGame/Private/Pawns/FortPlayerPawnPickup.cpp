@@ -348,7 +348,7 @@ DEFINE_FUNCTION(AFortPlayerPawnAthena::execOnCapsuleBeginOverlap)
     P_NATIVE_END;
 }
 
-void AFortPlayerPawnAthena::HookNatives()
+void AFortPlayerPawnAthena::HookPickupNatives()
 {
     UFunction* OverlapFunction = FindStaticFunction_OnCapsuleBeginOverlap();
     if (!OverlapFunction || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))

@@ -7300,6 +7300,14 @@ bool FCoreAthenaBotController::ReviveTeammate(float Now)
             Tags.GameplayTags.Add(FGameplayTag{ DBNOTag });
             Natives::UAbilitySystemComponent_CancelAbilities(AbilitySystem, &Tags, nullptr, nullptr);
         }
+        // From 6.00 a player's squad shows them down from their player state's death info, which the game's knock (the
+        // pawn's StartDBNO) stores: cleared as the restored revive clears a player's (CoreV2 #425).
+        AFortPlayerStateAthena* DownedState = AFortPlayerStateAthena::HasDeathInfoSquadStates() ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Downed->PlayerState))) : nullptr;
+        if (DownedState && DownedState->DeathInfo.bDBNO)
+        {
+            DownedState->ClearDeathInfo();
+            Log::Info(L"Battle Royale bots: {}'s death info cleared (bDBNO {}), its squad no longer sees it down", TargetName(), DownedState->DeathInfo.bDBNO ? L"true" : L"false");
+        }
     }
     // Up: out of its "being revived" state, as AFortPlayerPawnAthena's ServerReviveFromDBNO ends it after a player's.
     EndReviveInteraction();

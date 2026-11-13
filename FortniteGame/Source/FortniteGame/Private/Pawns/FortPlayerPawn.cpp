@@ -5,6 +5,7 @@
 #include "Configuration.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameMode.h"
@@ -411,12 +412,32 @@ void AFortPlayerPawn::ServerReviveFromDBNO_Implementation(AController* EventInst
     UE_LOG(LogFort, Log, TEXT("ServerReviveFromDBNO: %s revives %s"), *GetNameSafe(EventInstigator), *GetNameSafe(this));
     ReviveFromDBNO(EventInstigator);
 
+    AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(this);
+    if (!AthenaPawn || bIsDBNO)
+    {
+        return;
+    }
+
+    // From 6.00 the squad sees the player down for as long as their player state's death info holds the knock
+    // (HasDeathInfoSquadStates: the team member widget reads its bInitialized && bDBNO, not the pawn), which the pawn's
+    // StartDBNO stored. The revive is what ends it, and this override is stripped with it (6.20: AFortPlayerPawnAthena
+    // slot 0x198 is the shared empty function, as AFortPlayerPawn's): in 6.00 and 6.20 only RespawnPlayerAfterDeath and
+    // the player state's Reset clear the death info, and neither runs for a revive. Left as it was, a revived player
+    // stood up while their squad's HUD kept showing them down (CoreV2 #425) until they died or came back. A death info
+    // without bDBNO is a death's or none, and stays.
+    AFortPlayerStateAthena* AthenaState = AFortPlayerStateAthena::HasDeathInfoSquadStates() ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
+    if (AthenaState && AthenaState->DeathInfo.bDBNO)
+    {
+        AthenaState->ClearDeathInfo();
+        UE_LOG(LogFort, Log, TEXT("ServerReviveFromDBNO: %s's death info cleared (bDBNO %s, bInitialized %s), the squad no longer sees them down"), *GetNameSafe(this),
+            AthenaState->DeathInfo.bDBNO ? TEXT("true") : TEXT("false"), AthenaState->DeathInfo.bInitialized ? TEXT("true") : TEXT("false"));
+    }
+
     // AFortPlayerPawnAthena's override (1.8 0x44B4F0) then ends the pawn's "being revived" state once it's up: no
     // revivers, no Gameplay.Status.DBNOBeingRevived tag, no GameplayCue.Athena.Player.BeingRevivedFromDBNO.
     // ServerDBNOReviveInterrupted_Implementation does exactly that when its last reviver stops, without using the
     // controller it runs on.
-    AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(this);
-    if (!AthenaPawn || bIsDBNO || Natives::AFortPlayerControllerAthena_ServerDBNOReviveInterruptedIndex < 0)
+    if (Natives::AFortPlayerControllerAthena_ServerDBNOReviveInterruptedIndex < 0)
     {
         return;
     }
@@ -468,6 +489,9 @@ void AFortPlayerPawn::HookVTables()
             Hooks::SwapVTable(L"AFortPlayerPawn::ServerReviveFromDBNO_Implementation", VTable, Index, reinterpret_cast<void*>(&ServerReviveFromDBNO_ImplementationHK));
         }
     }
+    Log::Info(L"DBNO revive: {}", AFortPlayerStateAthena::HasDeathInfoSquadStates()
+        ? L"the squad sees a player down from their player state's death info (6.00+), which the revive clears"
+        : L"the squad sees a player down from their pawn's bIsDBNO, the revive leaves the death info as it is");
 }
 
 void AFortPlayerPawn::ServerReviveFromDBNO_ImplementationHK(AFortPlayerPawn* This, AController* EventInstigator)

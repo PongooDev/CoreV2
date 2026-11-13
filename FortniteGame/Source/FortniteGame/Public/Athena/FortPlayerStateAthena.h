@@ -297,6 +297,26 @@ public:
     static bool HasSetDeathInfo() { return Natives::AFortPlayerStateAthena_SetDeathInfo != nullptr && Member_DeathInfo.IsAvailable() && FDeathInfo::StaticStruct() != nullptr; }
     void SetDeathInfo(const FDeathInfo& InDeathInfo) { Natives::AFortPlayerStateAthena_SetDeathInfo(this, InDeathInfo); }
 
+    // From 6.00 (CL-4402180) the squad bar's states are the death info's: the player state's GetDeathInfo, IsPlayerDead
+    // and IsSquadDead are new there, and the HUD's team member widget (UAthenaPlayerInfoBase::SetPlayerState, 6.00
+    // 0x2D53130, 6.20 0x2E19ED0) shows a teammate down while DeathInfo has bInitialized && bDBNO (6.00 0xC8B1E0, 6.20
+    // 0xCD6E60), then follows the player state's cache of that (6.20 0xCCA9F0: the DBNO delegate at +0xEA0 that its
+    // DBNOStateChanged is bound to, the being-revived and dead ones with it), which AFortPlayerControllerAthena's slot 0x83
+    // (0xCBB660) refreshes for its SquadMembers (0xC9AF80). The pawn's StartDBNO stores the knock there (6.20 0xCE8D20 calls
+    // the store, 0xCD6520, with bDBNO set). Up to 5.41 that widget reads the pawn's bIsDBNO instead (3.2 0x9EEB90, 5.21
+    // 0xC5CFB0, 5.41 0xC57D40).
+    DefineUFunction(GetDeathInfo)
+    static bool HasDeathInfoSquadStates()
+    {
+        return FindStaticFunction_GetDeathInfo() != nullptr && HasEliminator() && FDeathInfo::HasInitialized();
+    }
+
+    // The death info as the player state's constructor has it, every field, replicated at once. The build writes it inline
+    // (Core's name): AFortPlayerControllerAthena::RespawnPlayerAfterDeath once the player is back (6.20 0xCB3DA4, 6.00
+    // 0xC67506) and the player state's Reset (6.20 0xCE5452); nothing else in 6.00 or 6.20 clears bInitialized. With no
+    // FinisherOrDowner the change writes no kill feed line (OnRep_DeathInfo, 6.20 0xCDAA90, reads that first).
+    void ClearDeathInfo();
+
     // Who eliminated the player (DeathInfo, 1.8): nullptr while they're in the match or DBNO, themselves when nobody did.
     AFortPlayerStateAthena* GetEliminator()
     {

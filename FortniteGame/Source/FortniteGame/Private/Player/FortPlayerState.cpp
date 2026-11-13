@@ -293,6 +293,37 @@ void AFortPlayerStateAthena::SetTeamMemberState(uint8_t NewState)
 #endif
 }
 
+void AFortPlayerStateAthena::ClearDeathInfo()
+{
+#if WITH_SERVER_CODE
+    if (!HasEliminator() || Role != ROLE_Authority)
+    {
+        return;
+    }
+    FDeathInfo& Info = DeathInfo;
+    Info.FinisherOrDowner = nullptr;
+    Info.bDBNO = false;
+    Info.DeathCause = EDeathCause::GetUnspecified();
+    if (FDeathInfo::HasDistance())
+    {
+        Info.Distance = 0.0f;
+    }
+    if (FDeathInfo::HasDeathLocation())
+    {
+        Info.DeathLocation = FVector(0.0f, 0.0f, 0.0f);
+    }
+    if (FDeathInfo::HasInitialized())
+    {
+        Info.bInitialized = false;
+    }
+    if (FDeathInfo::HasDeathCircumstance())
+    {
+        Info.DeathCircumstance = 0;
+    }
+    ForceNetUpdate();
+#endif
+}
+
 void AFortPlayerStateAthena::ClientReportKill(AFortPlayerStateAthena* KilledPlayer)
 {
     UFunction* Function = FindStaticFunction_ClientReportKill();

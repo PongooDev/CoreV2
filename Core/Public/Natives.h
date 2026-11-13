@@ -586,6 +586,14 @@ namespace Natives
     // (6.01 0xBCF370, 6.02 0xBD08A0, both slot 0x135), which the pawn's death asks before it has the player respawn.
     // -1 where it isn't found: the builds before 6.01, whose game state doesn't reflect bAllowRespawning.
     inline int32_t AFortGameModeAthena_IsRespawningAllowedIndex = -1;
+    // From 5.21 (Finder::ResolveLootDataTablesLive): the slots of AFortGameMode::GetLootTierDataTables and
+    // GetLootPackageDataTables (21.40's names; 6.02 slots 0x132 and 0x133), the loot tables every roll reads. The game
+    // mode's own (6.02 0xE43050, 0xE43030) are the game data's LootTierDataTables and LootPackageDataTables;
+    // AFortGameModeAthena's (6.02 0xBCB900, 0xBCB830) are the game state's playlist's LootTierData and LootPackages,
+    // else its Super's. -1 where they aren't found: before 5.21 ApplyPlaylistDataTables copies the playlist's rows into
+    // the default tables instead.
+    inline int32_t AFortGameMode_GetLootTierDataTablesIndex = -1;
+    inline int32_t AFortGameMode_GetLootPackageDataTablesIndex = -1;
     // Finder::ResolvePersistentGameplayEffectsLive. AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects
     // (21.40's name; 4.2 0xC3D5E0, 5.21 0xE5FC60, 5.41 0xE81110, 6.00 0xEC4B30): every active gameplay modifier's
     // persistent effects and ability sets (the playlist's ModifierList, a Save the World zone's modifiers) on an actor

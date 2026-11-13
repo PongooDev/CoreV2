@@ -15,7 +15,8 @@ class UWorld;
 // A playlist's settings as a data asset (from 3.5, where it replaced AFortAthenaPlaylistBase and the game mode's
 // PlaylistDataTables). AFortGameStateAthena::SetCurrentPlaylistId (3.5.1 0x9FA020) looks the match's up by its id and
 // keeps it as CurrentPlaylistData (from 6.01 in CurrentPlaylistInfo, an FPlaylistPropertyArray); ApplyPlaylistDataTables
-// (0x9DC890) loads its tables and copies them over the default ones.
+// (0x9DC890) loads its tables and copies them over the default ones. From 5.21 it copies the loot tables no more: the
+// game mode's GetLootTierDataTables and GetLootPackageDataTables give the playlist's own (AFortGameMode).
 class UFortPlaylist : public UObject
 {
     DefineUnrealClass(UFortPlaylist, FortniteGame)
@@ -29,6 +30,9 @@ public:
     static bool HasAdditionalLevels() { return Member_AdditionalLevels.IsAvailable(); }
     DefineUProperty(TAssetPtr<UDataTable>, LootTierData)
     DefineUProperty(TAssetPtr<UDataTable>, LootPackages)
+    static bool HasLootTables() { return Member_LootTierData.IsAvailable() && Member_LootPackages.IsAvailable(); }
+    static ptrdiff_t LootTierDataOffset() { return Member_LootTierData.GetOffsetChecked(); }
+    static ptrdiff_t LootPackagesOffset() { return Member_LootPackages.GetOffsetChecked(); }
     // The most players on a team. AFortGameModeAthena's FinishRestartPlayer (3.5.1 0x9E43D0) treats a large team game's
     // playlist with teams of 20 at most as Teams of 20, and one with bigger teams as 50v50.
     DefineUProperty(int32_t, MaxTeamSize)

@@ -10,6 +10,7 @@ class AController;
 class AFortGameSession;
 class AFortPlayerController;
 class AFortWorldManager;
+class UDataTable;
 class UFortSharedMissionLists;
 class UFortPlaylistManager;
 class APawn;
@@ -75,6 +76,13 @@ public:
     void GetPoiTagsFor(AActor* Actor, FGameplayTagContainer& OutTags);
     // The game mode's own quickbars (1.7.2's native quickbar setup, 0x6813D0, reads them before GameData's).
     bool OverridesQuickBars();
+    // The loot tables the loot rolls read (from 5.21; 21.40's names): the game mode's virtuals, the game data's tables,
+    // and in Battle Royale the game state's playlist's LootTierData and LootPackages while it has them
+    // (AFortGameModeAthena's overrides). HasLootDataTables: whether the build has them (Finder::ResolveLootDataTablesLive);
+    // before 5.21 ApplyPlaylistDataTables copies the playlist's rows into the game data's tables instead.
+    static bool HasLootDataTables();
+    void GetLootTierDataTables(TArray<UDataTable*>& OutLootTierDataTables);
+    void GetLootPackageDataTables(TArray<UDataTable*>& OutLootPackageDataTables);
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
     {
         const FQuickBarData& Definitions = QuickBarDefinitions;

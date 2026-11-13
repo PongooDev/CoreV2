@@ -1926,7 +1926,8 @@ namespace
 
     // The default Athena loot tables' rows, copied before any playlist's tables replaced them. From 3.5 ApplyPlaylistDataTables
     // (3.5.1 0x9DC890) empties AthenaLootTierData_Client and AthenaLootPackages_Client and copies the playlist's rows in
-    // (UDataTable::CreateTableFromOtherTable, 0x20FA4F0, which starts with EmptyTable, 0x20FE5E0). A playlist's tables
+    // (UDataTable::CreateTableFromOtherTable, 0x20FA4F0, which starts with EmptyTable, 0x20FE5E0); from 5.21 it leaves
+    // them alone and the rolls read the playlist's own tables (AFortGameMode::GetLootTierDataTables). A playlist's tables
     // are older copies of the defaults: none has 4.0's Hop Rocks (Loot_ForagedItem_GravityRocks) or meteor drops, and
     // Blitz has no vending or llama loot. Their rows come back from the defaults for the tier groups (and loot packages)
     // the playlist's tables have none of, so nothing rolls into nothing (#291, #292); the playlist's own groups stay its.
@@ -1974,11 +1975,27 @@ namespace
         }
     }
 
-    // Adds back the default rows whose key (a tier row's TierGroup, a package row's LootPackageID) the table has no row of.
-    template <class RowType, class KeyOf>
-    int32_t MergeDefaultRows(const FDefaultLootRows& Defaults, KeyOf Key)
+    // The table the match's loot rolls read: from 5.21 the playlist's own (PlaylistTable, which the game mode's
+    // GetLootTierDataTables gives them), before that the default one its rows were copied into.
+    UDataTable* RolledLootTable(const FDefaultLootRows& Defaults, UDataTable* PlaylistTable)
     {
-        UDataTable* Table = Defaults.Struct ? LoadObject<UDataTable>(nullptr, Defaults.Path) : nullptr;
+        if (!Defaults.Struct)
+        {
+            return nullptr;
+        }
+        UDataTable* Table = AFortGameMode::HasLootDataTables() && PlaylistTable ? PlaylistTable : LoadObject<UDataTable>(nullptr, Defaults.Path);
+        // The rows added to it stay only while it does (#218).
+        if (Table && !Table->IsRooted())
+        {
+            Table->AddToRoot();
+        }
+        return Table;
+    }
+
+    // Adds back the default rows whose key (a tier row's TierGroup, a package row's LootPackageID) Table has no row of.
+    template <class RowType, class KeyOf>
+    int32_t MergeDefaultRows(const FDefaultLootRows& Defaults, UDataTable* Table, KeyOf Key)
+    {
         if (!Table || static_cast<UScriptStruct*>(Table->RowStruct) != Defaults.Struct)
         {
             return 0;
@@ -2004,14 +2021,17 @@ namespace
         return Added;
     }
 
-    void MergeDefaultLootRows(int32_t PlaylistId)
+    // PlaylistTables: the playlist's own loot tables (PlaylistLootTables).
+    void MergeDefaultLootRows(int32_t PlaylistId, const std::pair<UDataTable*, UDataTable*>& PlaylistTables)
     {
         if (!MergesDefaultLootRows())
         {
             return;
         }
-        const int32_t Tiers = MergeDefaultRows<FFortLootTierData>(DefaultTierRows, [](FFortLootTierData& Row) { return static_cast<FName>(Row.TierGroup); });
-        const int32_t Packages = MergeDefaultRows<FFortLootPackageData>(DefaultPackageRows, [](FFortLootPackageData& Row) { return static_cast<FName>(Row.LootPackageID); });
+        const int32_t Tiers = MergeDefaultRows<FFortLootTierData>(DefaultTierRows, RolledLootTable(DefaultTierRows, PlaylistTables.first),
+            [](FFortLootTierData& Row) { return static_cast<FName>(Row.TierGroup); });
+        const int32_t Packages = MergeDefaultRows<FFortLootPackageData>(DefaultPackageRows, RolledLootTable(DefaultPackageRows, PlaylistTables.second),
+            [](FFortLootPackageData& Row) { return static_cast<FName>(Row.LootPackageID); });
         if (Tiers > 0 || Packages > 0)
         {
             Log::Info(L"Battle Royale: playlist {}'s loot tables get {} loot tier and {} loot package rows of the defaults, for the tier groups and packages they have none of", PlaylistId, Tiers, Packages);
@@ -2124,14 +2144,19 @@ namespace
         TablesPlaylistId = PlaylistId;
         RebuildFlightPathsFor(Athena, PlaylistId, Previous);
         Natives::AFortGameModeAthena_ApplyPlaylistDataTables(Athena);
-        MergeDefaultLootRows(PlaylistId);
+        const std::pair<UDataTable*, UDataTable*> Tables = PlaylistLootTables(Athena, PlaylistId);
+        MergeDefaultLootRows(PlaylistId, Tables);
+        if (AFortGameMode::HasLootDataTables() && (Tables.first || Tables.second))
+        {
+            Log::Info(L"Battle Royale: the loot rolls read playlist {}'s own tables ({}, {}), the game mode's GetLootTierDataTables and GetLootPackageDataTables give them", PlaylistId,
+                Tables.first ? Tables.first->GetPathName().ToStdString() : std::wstring(L"default loot tiers"), Tables.second ? Tables.second->GetPathName().ToStdString() : std::wstring(L"default loot packages"));
+        }
         // 5.0+: the searches and floor loot pick this many times (Building/BuildingContainer.cpp, #357).
         if (UFortPlaylistAthena* Playlist = UFortPlaylistAthena::HasLootDropRounds() && AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
             Playlist && Playlist->LootDropRounds > 1)
         {
             Log::Info(L"Battle Royale: playlist {}'s loot drops {} rounds a search and floor loot spot", PlaylistId, static_cast<int32_t>(Playlist->LootDropRounds));
         }
-        const std::pair<UDataTable*, UDataTable*> Tables = PlaylistLootTables(Athena, PlaylistId);
         const bool bOtherTables = Tables != TablesLoot;
         TablesLoot = Tables;
         if (bOtherTables)
@@ -2397,11 +2422,11 @@ void AFortGameModeAthena::ApplyPlaylistDataTablesOnce()
     TablesPlaylistId = AppliedPlaylistId(this);
     TakeDefaultLootRows();
     Natives::AFortGameModeAthena_ApplyPlaylistDataTables(this);
+    TablesLoot = PlaylistLootTables(this, TablesPlaylistId);
     if (TablesPlaylistId >= 0)
     {
-        MergeDefaultLootRows(TablesPlaylistId);
+        MergeDefaultLootRows(TablesPlaylistId, TablesLoot);
     }
-    TablesLoot = PlaylistLootTables(this, TablesPlaylistId);
     const auto [LootTierData, LootPackages] = TablesLoot;
     Log::Info(L"Battle Royale: the world's loot tables are {} ({}, {})", TablesPlaylistId >= 0 ? std::format(L"playlist {}'s", TablesPlaylistId)
         : std::wstring(L"the defaults until the game state has the match's playlist"), LootTierData ? LootTierData->GetPathName().ToStdString() : std::wstring(L"default loot tiers"),

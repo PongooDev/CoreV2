@@ -234,6 +234,12 @@ namespace Finder
     // AFortGameModeAthena's GameplayMutators; AllowRespawningOffset and AllowRespawningMask: the byte and the bit of
     // AFortGameStateAthena's bAllowRespawning. False where there is none, or more than one.
     bool ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, ptrdiff_t AllowRespawningOffset, uint8_t AllowRespawningMask);
+    // From 5.21: the slots of AFortGameMode::GetLootTierDataTables and GetLootPackageDataTables (Natives), the two
+    // AFortGameModeAthena overrides that load the playlist's LootTierData and LootPackages and call their Super, the game
+    // mode's own GetLootTierDataTables reading the game data's LootTierDataTables. GameDataLootTierDataTablesOffset:
+    // UFortGameData's LootTierDataTables; PlaylistLootTierDataOffset and PlaylistLootPackagesOffset: UFortPlaylist's
+    // LootTierData and LootPackages. False where they aren't found.
+    bool ResolveLootDataTablesLive(ptrdiff_t GameDataLootTierDataTablesOffset, ptrdiff_t PlaylistLootTierDataOffset, ptrdiff_t PlaylistLootPackagesOffset);
     // AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects (Natives), the function holding its
     // STAT_Fort_GameStateZoneApplyingPersistentEffects scope, and UObject::GetInterfaceAddress, which its callers need for
     // an actor's IAbilitySystemInterface. False without either (1.x builds have no stat names).

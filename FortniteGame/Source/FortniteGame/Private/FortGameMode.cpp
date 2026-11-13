@@ -5,6 +5,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortPlaylistAthena.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
@@ -66,6 +67,33 @@ void AFortGameMode::FinishWorldInitialization(AFortWorldManager* WorldManager)
 bool AFortGameMode::OverridesQuickBars()
 {
     return Member_bOverrideQuickBars.IsAvailable() && bOverrideQuickBars;
+}
+
+bool AFortGameMode::HasLootDataTables()
+{
+    // Looked for once, the first time a loot roll asks for its tables; only where a playlist names its own (3.5 on).
+    static const bool bHas = UFortPlaylist::HasLootTables() && UFortGameData::HasLootTierDataTablesMember()
+        && Finder::ResolveLootDataTablesLive(UFortGameData::LootTierDataTablesOffset(), UFortPlaylist::LootTierDataOffset(), UFortPlaylist::LootPackagesOffset());
+    return bHas;
+}
+
+void AFortGameMode::GetLootTierDataTables(TArray<UDataTable*>& OutLootTierDataTables)
+{
+    // The build's own, intact: AFortGameModeAthena's (6.02 0xBCB900) adds the game state's playlist's LootTierData, and
+    // when that gives none, AFortGameMode's (0xE43050) the game data's LootTierDataTables.
+    if (HasLootDataTables())
+    {
+        CallVirtual<void>(this, Natives::AFortGameMode_GetLootTierDataTablesIndex, &OutLootTierDataTables);
+    }
+}
+
+void AFortGameMode::GetLootPackageDataTables(TArray<UDataTable*>& OutLootPackageDataTables)
+{
+    // AFortGameModeAthena's (6.02 0xBCB830) the playlist's LootPackages, else AFortGameMode's (0xE43030) the game data's.
+    if (HasLootDataTables())
+    {
+        CallVirtual<void>(this, Natives::AFortGameMode_GetLootPackageDataTablesIndex, &OutLootPackageDataTables);
+    }
 }
 
 UFortSharedMissionLists* AFortGameMode::GetSharedMissionLists()

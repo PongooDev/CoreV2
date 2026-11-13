@@ -94,6 +94,8 @@ public:
     FFortLootTierData* FindLootTierDataRow(FName LootTierKey, const wchar_t* ContextString);
 
     static ptrdiff_t ConditionalFoundationQuotaOffset() { return Member_ConditionalFoundationQuota.GetOffsetChecked(); }
+    static bool HasLootTierDataTablesMember() { return Member_LootTierDataTables.IsAvailable(); }
+    static ptrdiff_t LootTierDataTablesOffset() { return Member_LootTierDataTables.GetOffsetChecked(); }
 
     const FQuickBarData& GetQuickBarDefinition(EFortQuickBars InQuickBar) const
     {

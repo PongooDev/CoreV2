@@ -9949,6 +9949,118 @@ bool Finder::ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, pt
     return true;
 }
 
+bool Finder::ResolveLootDataTablesLive(ptrdiff_t GameDataLootTierDataTablesOffset, ptrdiff_t PlaylistLootTierDataOffset, ptrdiff_t PlaylistLootPackagesOffset)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortGameMode_GetLootTierDataTablesIndex >= 0 && Natives::AFortGameMode_GetLootPackageDataTablesIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortGameMode::GetLootTierDataTables and GetLootPackageDataTables(TArray<UDataTable*>&) (21.40's names), the tables
+    // the server's loot rolls read. The game mode's own (6.02 CL-4461277 0xE43050, slot 0x132) loads the game data's
+    // LootTierDataTables ("lea rcx, [rax+0E98h]" after UFortGlobals' game data), its packages one (0xE43030, slot 0x133)
+    // the LootPackageDataTables. AFortGameModeAthena's (0xBCB900 and 0xBCB830) load the game state's playlist's
+    // LootTierData ("lea rcx, [rax+170h]") and LootPackages ("lea rcx, [rax+198h]"), and call their Super when it has
+    // none. From 5.21 that is how a playlist's loot reaches the rolls: up to 5.10 ApplyPlaylistDataTables copies the
+    // playlist's rows into the default tables ("Patched Loot Tier with %s"), 5.21's and later's patch only the ranged
+    // weapons, game data and resource rates (6.02 0xBB59D0).
+    void** GameModeVTable = CdoVTable(L"/Script/FortniteGame.FortGameMode");
+    void** AthenaVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeAthena");
+    const auto SlotCount = [](void** VTable)
+    {
+        int32_t Count = 0;
+        while (VTable && Count < 0x400 && (IsInText(reinterpret_cast<uintptr_t>(VTable[Count])) || IsCoreFunction(reinterpret_cast<uintptr_t>(VTable[Count]))))
+        {
+            ++Count;
+        }
+        return Count;
+    };
+    // A function's first piece, when Entry starts one no bigger than MaxSize.
+    const auto BodyEnd = [](uintptr_t Entry, uintptr_t MaxSize) -> uintptr_t
+    {
+        const uintptr_t End = IsInText(Entry) && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        return End > Entry && End - Entry <= MaxSize ? End : 0;
+    };
+    // lea r64, [reg+Offset]
+    const auto LoadsAddressAt = [](uintptr_t Begin, uintptr_t End, int32_t Offset)
+    {
+        for (uintptr_t Address = Begin; Offset > 0 && Address + 7 <= End; ++Address)
+        {
+            if ((Byte(Address) & 0xFA) == 0x48 && Byte(Address + 1) == 0x8D && (Byte(Address + 2) & 0xC0) == 0x80 && (Byte(Address + 2) & 0x07) != 0x04
+                && *reinterpret_cast<const int32_t*>(Address + 3) == Offset)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    // call or jmp Target
+    const auto CallsDirectly = [](uintptr_t Begin, uintptr_t End, uintptr_t Target)
+    {
+        for (uintptr_t Address = Begin; Address + 5 <= End; ++Address)
+        {
+            if ((Byte(Address) == 0xE8 || Byte(Address) == 0xE9) && Finder::RelativeTarget(Address, 1, 5) == Target)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    const int32_t Slots = std::min(SlotCount(GameModeVTable), SlotCount(AthenaVTable));
+    int32_t TierIndex = -1;
+    int32_t PackageIndex = -1;
+    int32_t TierCount = 0;
+    int32_t PackageCount = 0;
+    uintptr_t TierFunction = 0;
+    uintptr_t PackageFunction = 0;
+    for (int32_t Slot = 0; Slot < Slots; ++Slot)
+    {
+        const uintptr_t Athena = reinterpret_cast<uintptr_t>(AthenaVTable[Slot]);
+        const uintptr_t Super = reinterpret_cast<uintptr_t>(GameModeVTable[Slot]);
+        const uintptr_t AthenaEnd = Athena != Super ? BodyEnd(Athena, 0x200) : 0;
+        if (!AthenaEnd || !CallsDirectly(Athena, AthenaEnd, Super))
+        {
+            continue;
+        }
+        const uintptr_t SuperEnd = BodyEnd(Super, 0x80);
+        if (SuperEnd && LoadsAddressAt(Athena, AthenaEnd, static_cast<int32_t>(PlaylistLootTierDataOffset))
+            && LoadsAddressAt(Super, SuperEnd, static_cast<int32_t>(GameDataLootTierDataTablesOffset)) && Athena != TierFunction)
+        {
+            TierIndex = TierCount == 0 ? Slot : TierIndex;
+            TierFunction = TierCount == 0 ? Athena : TierFunction;
+            ++TierCount;
+        }
+        if (LoadsAddressAt(Athena, AthenaEnd, static_cast<int32_t>(PlaylistLootPackagesOffset)) && Athena != PackageFunction)
+        {
+            PackageIndex = PackageCount == 0 ? Slot : PackageIndex;
+            PackageFunction = PackageCount == 0 ? Athena : PackageFunction;
+            ++PackageCount;
+        }
+    }
+    if (TierCount != 1 || PackageCount != 1)
+    {
+        // Up to 5.10 the default tables hold the playlist's rows, so the game data's are the match's.
+        if (!First(Finder::StringRefs(L"PLAYLIST: Patched Loot Tier with %s")) && !First(Finder::StringRefs(L"Patched Loot Tier with %s")))
+        {
+            Log::Error(L"Finder: AFortGameMode::GetLootTierDataTables not found ({} Athena overrides load the playlist's LootTierData +0x{:X}, {} its LootPackages +0x{:X}), the loot rolls read the default tables",
+                TierCount, PlaylistLootTierDataOffset, PackageCount, PlaylistLootPackagesOffset);
+        }
+        else
+        {
+            Log::Info(L"Finder: no AFortGameModeAthena::GetLootTierDataTables, ApplyPlaylistDataTables copies the playlist's loot rows into the default tables");
+        }
+        return false;
+    }
+    Natives::AFortGameMode_GetLootTierDataTablesIndex = TierIndex;
+    Natives::AFortGameMode_GetLootPackageDataTablesIndex = PackageIndex;
+    Log::Info(L"Finder: AFortGameMode::GetLootTierDataTables is slot 0x{:X}, GetLootPackageDataTables slot 0x{:X} (AFortGameModeAthena's 0x{:X} and 0x{:X} give the playlist's LootTierData and LootPackages)",
+        TierIndex, PackageIndex, TierFunction - Finder::ImageBase(), PackageFunction - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolvePersistentGameplayEffectsLive()
 {
     static bool bSearched = false;

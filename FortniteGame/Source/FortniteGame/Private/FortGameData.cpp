@@ -1,9 +1,14 @@
 #include "pch.h"
 #include "FortGameData.h"
 #include "Engine/DataTable.h"
+#include "Engine/World.h"
+#include "FortGameMode.h"
+#include "GameFramework/GameModeBase.h"
 #include "Items/FortLootPackage.h"
 #include "Items/FortLootTablesCert.h"
 #include "Logging/LogMacros.h"
+#include "Natives.h"
+#include "Templates/Casts.h"
 #include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortLoot, Log, All);
@@ -30,17 +35,69 @@ namespace
         }
         return Loaded;
     }
+
+    // From 5.21 the loot rolls take their tables from the server world's game mode (AFortGameMode::GetLootTierDataTables
+    // and GetLootPackageDataTables), whose Battle Royale override gives the match's playlist's own: 5.21's
+    // ApplyPlaylistDataTables no longer copies them over the default ones. Read from the game data, every playlist's
+    // chests, floor loot, supply drops, llamas and vending machines rolled the default tables: Playground's Spike supply
+    // drops (AthenaSupplyDrop_Squad, Loot_AthenaBlingDrop_Squad, weight 0 there and 1 in Playground's) opened onto
+    // nothing (#414). Null before 5.21, with no game mode yet (a level's loading), or outside the server's world.
+    AFortGameMode* LootTablesGameMode()
+    {
+        if (!AFortGameMode::HasLootDataTables() || !Natives::GWorld)
+        {
+            return nullptr;
+        }
+        UWorld* World = GWorld;
+        return World ? Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+    }
+
+    // The tables the game mode gave, kept loaded as LoadTables keeps the game data's (a playlist's are soft references too).
+    std::vector<UDataTable*> KeepLoaded(const TArray<UDataTable*>& Tables)
+    {
+        std::vector<UDataTable*> Loaded;
+        for (int32_t Index = 0; Index < Tables.Num(); ++Index)
+        {
+            if (UDataTable* DataTable = Tables[Index])
+            {
+                if (!DataTable->IsRooted())
+                {
+                    DataTable->AddToRoot();
+                }
+                Loaded.push_back(DataTable);
+            }
+        }
+        return Loaded;
+    }
 }
 
 std::vector<UDataTable*> UFortGameData::GetLootTierDataTables()
 {
     FortLootTablesCert::CreateMissingTables(this);
+    if (AFortGameMode* GameMode = LootTablesGameMode())
+    {
+        TArray<UDataTable*> Tables;
+        GameMode->GetLootTierDataTables(Tables);
+        if (Tables.Num() > 0)
+        {
+            return KeepLoaded(Tables);
+        }
+    }
     return LoadTables(LootTierDataTables);
 }
 
 std::vector<UDataTable*> UFortGameData::GetLootPackageDataTables()
 {
     FortLootTablesCert::CreateMissingTables(this);
+    if (AFortGameMode* GameMode = LootTablesGameMode())
+    {
+        TArray<UDataTable*> Tables;
+        GameMode->GetLootPackageDataTables(Tables);
+        if (Tables.Num() > 0)
+        {
+            return KeepLoaded(Tables);
+        }
+    }
     return LoadTables(LootPackageDataTables);
 }
 

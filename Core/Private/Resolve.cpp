@@ -12252,6 +12252,68 @@ uint8_t* Finder::DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld)
     return reinterpret_cast<uint8_t*>(StubCalls[0]);
 }
 
+Finder::FGadgetOverrideCalls Finder::GadgetOverrideCalls(ptrdiff_t GadgetPriorityOffset, ptrdiff_t AnimBPOverrideOffset, ptrdiff_t FootstepBankOverrideOffset)
+{
+    // UFortGadgetItemDefinition::ApplyGadgetData (6.21 0x1021AA0) ends, on the authority and with the controller's pawn,
+    // in Pawn->PushAnimBPOverride(GadgetPriority, AnimBPOverride.LoadSynchronous() as a UFortAnimInstance class) and
+    // Pawn->PushFootstepBankOverride(GadgetPriority, FootstepBankOverride.LoadSynchronous()); RemoveGadgetData
+    // (0x103CE00) pops them the same way. Both natives are server code: each call goes to the shared empty function, the
+    // gadget's priority loaded into edx right before it (mov edx, [reg+GadgetPriority]). The anim one comes first,
+    // after the AnimBPOverride's load (lea rdx, [reg+AnimBPOverride]); the footstep one after the bank's.
+    FGadgetOverrideCalls Calls;
+    const auto Find = [&](const wchar_t* Text, uint8_t*& Anim, uint8_t*& Footstep)
+    {
+        const uintptr_t Function = FunctionOf(Text);
+        if (!Function)
+        {
+            return;
+        }
+        std::vector<uintptr_t> Sites;
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Function))
+        {
+            bool bPriority = false;
+            for (uintptr_t At = Site - 0x14; At + 6 <= Site && !bPriority; ++At)
+            {
+                const uint8_t ModRm = Byte(At + 1);
+                bPriority = Byte(At) == 0x8B && (ModRm & 0xC0) == 0x80 && ((ModRm >> 3) & 7) == 2 && (ModRm & 7) != 4
+                    && *reinterpret_cast<const int32_t*>(At + 2) == static_cast<int32_t>(GadgetPriorityOffset);
+            }
+            if (bPriority && Finder::IsStubFunction(Target))
+            {
+                Sites.push_back(Site);
+            }
+        }
+        // Which load comes last before each site: the anim Blueprint's or the footstep bank's.
+        const auto LastLoad = [&](uintptr_t Site)
+        {
+            ptrdiff_t Last = 0;
+            for (uintptr_t At = Site - 0x60; At + 7 <= Site; ++At)
+            {
+                // lea r64, [reg+disp32]: REX.W, 8D, mod 10.
+                const int32_t Disp = *reinterpret_cast<const int32_t*>(At + 3);
+                if ((Byte(At) & 0xF8) == 0x48 && Byte(At + 1) == 0x8D && (Byte(At + 2) & 0xC0) == 0x80 && (Byte(At + 2) & 7) != 4
+                    && (Disp == static_cast<int32_t>(AnimBPOverrideOffset) || Disp == static_cast<int32_t>(FootstepBankOverrideOffset)))
+                {
+                    Last = Disp;
+                }
+            }
+            return Last;
+        };
+        if (Sites.size() == 2 && LastLoad(Sites[0]) == AnimBPOverrideOffset && LastLoad(Sites[1]) == FootstepBankOverrideOffset)
+        {
+            Anim = reinterpret_cast<uint8_t*>(Sites[0]);
+            Footstep = reinterpret_cast<uint8_t*>(Sites[1]);
+        }
+        else
+        {
+            Log::Error(L"Finder: {} at 0x{:X}: {} stub calls with the gadget's priority, not the anim and footstep overrides", Text, Function - Finder::ImageBase(), Sites.size());
+        }
+    };
+    Find(L"UFortGadgetItemDefinition::ApplyGadgetData - Applying Gadget Data for Gadget Item [%s]!", Calls.PushAnim, Calls.PushFootstep);
+    Find(L"UFortGadgetItemDefinition::RemoveGadgetData - Removing Gadget Data for Gadget Item [%s]!", Calls.PopAnim, Calls.PopFootstep);
+    return Calls;
+}
+
 uint8_t* Finder::ButterflyEventForceReviveCall(ptrdiff_t IsDBNOOffset)
 {
     // 6.21's Butterfly (CL-4526925). AFortAthenaMutator_ButterflyEvent::StartGatheringPawns (0xD3D950) runs

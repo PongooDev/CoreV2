@@ -348,6 +348,7 @@ static void InstallHooks()
         ABuildingTrapDefender::HookNatives();
         AFortPlayerPawn::HookVTables();
         AFortPlayerPawn::HookPickupVTables();
+        AFortPlayerPawn::HookNatives();
         UNetDriver::AddPreReplicationCallback(&AFortPawn::RemoveDestroyedWeaponsFromLists);
         ACharacter::HookCheatMovement();
         ACharacter::OnCheatMovement = &UFortCheatManager::OnCheatMovement;

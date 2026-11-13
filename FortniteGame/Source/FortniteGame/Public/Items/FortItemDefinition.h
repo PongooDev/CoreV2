@@ -182,6 +182,16 @@ public:
     // Taking the gadget drops everything else its taker carries (4.1's Infinity Gauntlet; #297).
     DefineUProperty(bool, bDropAllOnEquip)
     static bool HasDropAllOnEquip() { return Member_bDropAllOnEquip.IsAvailable(); }
+    // From 6.00 (ApplyGadgetData pushes them on the taker's pawn): the gadget's priority over other overrides, the anim
+    // Blueprint its taker's pawn plays while it is held (6.21's AGID_Butterfly: Fortnite_Butterfly_Ghost_AnimBlueprint)
+    // and the footstep bank. Only their offsets are read (Finder::GadgetOverrideCalls).
+    DefineUProperty(int32_t, GadgetPriority)
+    DefineUProperty(TAssetPtr<UClass>, AnimBPOverride)
+    DefineUProperty(TAssetPtr<UObject>, FootstepBankOverride)
+    static bool HasOverrides() { return Member_GadgetPriority.IsAvailable() && Member_AnimBPOverride.IsAvailable() && Member_FootstepBankOverride.IsAvailable(); }
+    static ptrdiff_t GadgetPriorityOffset() { return Member_GadgetPriority.GetOffsetChecked(); }
+    static ptrdiff_t AnimBPOverrideOffset() { return Member_AnimBPOverride.GetOffsetChecked(); }
+    static ptrdiff_t FootstepBankOverrideOffset() { return Member_FootstepBankOverride.GetOffsetChecked(); }
 };
 
 // An item used up as it is used. StaticClass is null on a build without the class.

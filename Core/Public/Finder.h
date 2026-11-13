@@ -326,6 +326,17 @@ namespace Finder
     // AFortAthenaMutator_ButterflyEvent's pawn gathering, made for a downed pawn (its bIsDBNO at IsDBNOOffset). Null on
     // builds without the mutator, without ForceReviveFromDBNO, or that keep it.
     uint8_t* ButterflyEventForceReviveCall(ptrdiff_t IsDBNOOffset);
+    // UFortGadgetItemDefinition::ApplyGadgetData's and RemoveGadgetData's calls to the stripped AFortPlayerPawn::
+    // PushAnimBPOverride / PushFootstepBankOverride and PopAnimBPOverride / PopFootstepBankOverride (6.21: 0x1022025,
+    // 0x1022045, 0x103D194, 0x103D1B3), each made with the gadget's GadgetPriority. Null where not found.
+    struct FGadgetOverrideCalls
+    {
+        uint8_t* PushAnim = nullptr;
+        uint8_t* PushFootstep = nullptr;
+        uint8_t* PopAnim = nullptr;
+        uint8_t* PopFootstep = nullptr;
+    };
+    FGadgetOverrideCalls GadgetOverrideCalls(ptrdiff_t GadgetPriorityOffset, ptrdiff_t AnimBPOverrideOffset, ptrdiff_t FootstepBankOverrideOffset);
     // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player
     // bots. IsSkydivingOffset: AFortPlayerPawnAthena's bIsSkydiving, which it checks first.
     bool ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset);

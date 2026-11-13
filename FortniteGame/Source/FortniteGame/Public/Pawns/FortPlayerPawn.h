@@ -3,6 +3,7 @@
 #include "GameplayEffect.h"
 #include "GameplayTagContainer.h"
 #include "Pawns/FortPawn.h"
+#include "UObject/Stack.h"
 #include "UObject/WeakObjectPtr.h"
 
 class AController;
@@ -27,6 +28,12 @@ class AFortPlayerPawn : public AFortPawn
     DefineUFunction(ServerReviveFromDBNO)
     DefineUFunction(ServerHandlePickup)
     DefineUFunction(IsUsingPersonalVehicle)
+    DefineUFunction(PushAnimBPOverride)
+    DefineUFunction(PopAnimBPOverride)
+    DefineUFunction(PushFootstepBankOverride)
+    DefineUFunction(PopFootstepBankOverride)
+    DefineUFunction(OnRep_AnimBPOverride)
+    DefineUFunction(OnRep_FootstepBankOverride)
 
 public:
     DefineUProperty(FGuid, LastEquippedWeaponGUID)
@@ -50,6 +57,10 @@ public:
     // cancels the ability, and its end calls SetInVortex(false).
     DefineUProperty(bool, bIsInVortex)
     DefineUProperty(FVortexParams, VortexParams)
+    // From 6.00: the anim Blueprint and footstep bank a held gadget gives the pawn (replicated; their OnReps swap the
+    // mesh's anim class, keeping OriginalAnimBP, and the footsteps' bank, on the server and each client).
+    DefineUProperty(UClass*, AnimBPOverride)
+    DefineUProperty(UObject*, FootstepBankOverride)
 
     // Epic's getter (5.41 0x11820E0). False where the build has no remote-controlled pawns.
     bool IsBeingRepossessed() const { return Member_bBeingRepossessed.IsAvailable() && bBeingRepossessed; }
@@ -83,12 +94,30 @@ public:
 
     static ptrdiff_t LastEquippedWeaponGUIDOffset();
     static ptrdiff_t StasisModeOffset() { return Member_StasisMode.GetOffsetChecked(); }
+    // From 6.00 (the gadgets' anim and footstep overrides: Shadow Stones, 6.21's Butterfly ghost): the pawn's priority
+    // stacks of overrides, the highest on top (FortPlayerPawn.cpp). UFortGadgetItemDefinition::ApplyGadgetData pushes a
+    // held gadget's, RemoveGadgetData pops them. The client builds strip all four.
+    void PushAnimBPOverride(int32_t Priority, UClass* InAnimBPOverride);
+    void PopAnimBPOverride(int32_t Priority, UClass* InAnimBPOverride);
+    void PushFootstepBankOverride(int32_t Priority, UObject* InFootstepBankOverride);
+    void PopFootstepBankOverride(int32_t Priority, UObject* InFootstepBankOverride);
+
     static void HookVTables();
     static void HookPickupVTables();
+    // The four override natives and the gadget data's calls to them, where the build strips them.
+    static void HookNatives();
 
 private:
     void ReviveFromDBNO(AController* EventInstigator);
 
     static void ServerReviveFromDBNO_ImplementationHK(AFortPlayerPawn* This, AController* EventInstigator);
+    DECLARE_FUNCTION(execPushAnimBPOverride);
+    DECLARE_FUNCTION(execPopAnimBPOverride);
+    DECLARE_FUNCTION(execPushFootstepBankOverride);
+    DECLARE_FUNCTION(execPopFootstepBankOverride);
+    static void PushAnimBPOverrideHK(AFortPlayerPawn* This, int32_t Priority, UClass* InAnimBPOverride);
+    static void PopAnimBPOverrideHK(AFortPlayerPawn* This, int32_t Priority, UClass* InAnimBPOverride);
+    static void PushFootstepBankOverrideHK(AFortPlayerPawn* This, int32_t Priority, UObject* InFootstepBankOverride);
+    static void PopFootstepBankOverrideHK(AFortPlayerPawn* This, int32_t Priority, UObject* InFootstepBankOverride);
     static void ServerHandlePickup_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
 };

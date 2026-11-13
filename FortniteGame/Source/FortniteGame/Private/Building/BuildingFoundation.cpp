@@ -6,6 +6,8 @@
 #include "Natives.h"
 #include "ReflectionParams.h"
 #include "UObject/Class.h"
+#include "Engine/LevelStreaming.h"
+#include "UObject/UObjectGlobals.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortBuilding, Log, All);
 
@@ -106,8 +108,32 @@ void ABuildingFoundation::SetDynamicFoundationEnabled(bool bEnabled)
     {
         SelectAndSetupMyBuildingLevel(nullptr);
     }
+    // The server's own level follows too. OnRep_FoundationEnabled(true) only shows the plot's LOD actors and registers the
+    // plot with each client's streaming, and its false branch (0xD65660, then the world's foundation streaming) only
+    // hides them and unregisters it: a client streams the level out itself, the server kept it. Checked on 6.21 with
+    // the island scripting's swap played by hand: LF_Lake1's Athena_POI_Lake_002 and LF_FloatingIsland's
+    // Athena_POI_LakeIsland_003 were still loaded on the server 20 s after they were turned off, and with them the
+    // island's land and the vortex's funnel (BGA_DudeBro_Area_Effect, placed in LakeIsland_003): after the Butterfly
+    // players still bumped into the island and were lifted where the vortex had been (CoreV2 #439). So the plot's level
+    // streaming (ULevelStreaming::SetShouldBeLoaded and SetShouldBeVisible, the engine's) follows the plot: out when it
+    // is turned off, back in when a plot that had it is turned on again.
+    ULevelStreaming* const Streaming = LevelStreamInfo;
+    const bool bStreamFollows = Streaming && !bStreamIn && (!bEnabled || (Natives::ABuildingFoundation_bPostUpdateCalled >= 0 && bPostUpdateCalled));
+    if (bStreamFollows)
+    {
+        for (const wchar_t* FunctionName : { L"/Script/Engine.LevelStreaming:SetShouldBeVisible", L"/Script/Engine.LevelStreaming:SetShouldBeLoaded" })
+        {
+            UFunction* Function = FindObject<UFunction>(nullptr, FunctionName);
+            Reflection::FParams Params(Function);
+            if (Function && Params.Set(Function->GetName().ToStdString() == L"SetShouldBeVisible" ? L"bInShouldBeVisible" : L"bInShouldBeLoaded", bEnabled))
+            {
+                Params.Call(reinterpret_cast<UObject*>(Streaming));
+            }
+        }
+    }
     UE_LOG(LogFortBuilding, Log, TEXT("SetDynamicFoundationEnabled: %s is %s%s"), *GetName(), bEnabled ? TEXT("on") : TEXT("off"),
-        bStreamIn ? (LevelStreamInfo ? TEXT(", its level streaming in") : TEXT(", its level not streamed (no level picked)")) : TEXT(""));
+        bStreamIn ? (LevelStreamInfo ? TEXT(", its level streaming in") : TEXT(", its level not streamed (no level picked)"))
+        : bStreamFollows ? (bEnabled ? TEXT(", its level streaming in again") : TEXT(", its level streaming out")) : TEXT(""));
 #endif
 }
 

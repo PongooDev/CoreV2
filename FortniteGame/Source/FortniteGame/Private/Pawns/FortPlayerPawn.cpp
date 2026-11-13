@@ -12,6 +12,7 @@
 #include "FortGameState.h"
 #include "GameFramework/Controller.h"
 #include "Hooks.h"
+#include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Missions/FortMissionLibrary.h"
@@ -26,6 +27,12 @@
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/WeakObjectPtr.h"
+
+#include <algorithm>
+#include <tuple>
+#include <unordered_map>
+#include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
@@ -497,4 +504,253 @@ void AFortPlayerPawn::HookVTables()
 void AFortPlayerPawn::ServerReviveFromDBNO_ImplementationHK(AFortPlayerPawn* This, AController* EventInstigator)
 {
     This->ServerReviveFromDBNO_Implementation(EventInstigator);
+}
+
+namespace
+{
+    // The pawn's override stacks: AFortPlayerPawn keeps them in members the build doesn't reflect (6.21 +0x1780, cleared
+    // by its constructor 0x121C5E0 next to AnimBPOverride +0x1798 and OriginalAnimBP +0x17A0), so Core keeps them per
+    // pawn, checked against a weak pointer so a new pawn at a freed one's address starts empty.
+    struct FOverrideStack
+    {
+        TWeakObjectPtr<UObject> Pawn;
+        std::vector<std::pair<int32_t, UObject*>> Entries;
+    };
+    std::unordered_map<const UObject*, FOverrideStack> AnimBPOverrideStacks;
+    std::unordered_map<const UObject*, FOverrideStack> FootstepBankOverrideStacks;
+
+    FOverrideStack& StackOf(std::unordered_map<const UObject*, FOverrideStack>& Stacks, UObject* Pawn)
+    {
+        FOverrideStack& Stack = Stacks[Pawn];
+        if (Stack.Pawn.Get() != Pawn)
+        {
+            Stack.Pawn = TWeakObjectPtr<UObject>(Pawn);
+            Stack.Entries.clear();
+        }
+        return Stack;
+    }
+
+    // The top: the highest priority, the latest pushed among equals. Null when empty.
+    UObject* TopOf(const FOverrideStack& Stack)
+    {
+        const std::pair<int32_t, UObject*>* Top = nullptr;
+        for (const auto& Entry : Stack.Entries)
+        {
+            if (!Top || Entry.first >= Top->first)
+            {
+                Top = &Entry;
+            }
+        }
+        return Top ? Top->second : nullptr;
+    }
+
+    void RemoveEntry(FOverrideStack& Stack, int32_t Priority, UObject* Value)
+    {
+        const auto Found = std::find(Stack.Entries.begin(), Stack.Entries.end(), std::pair<int32_t, UObject*>(Priority, Value));
+        if (Found != Stack.Entries.end())
+        {
+            Stack.Entries.erase(Found);
+        }
+    }
+}
+
+void AFortPlayerPawn::PushAnimBPOverride(int32_t Priority, UClass* InAnimBPOverride)
+{
+#if WITH_SERVER_CODE
+    // 6.00's (CL-4395664 on; 21.40 has neither, its gadgets use anim layers): the client builds keep the UFunctions
+    // and strip the bodies (6.21: Push's and Pop's exec 0x15EFA60 steps the two parameters and calls the shared empty
+    // function, and so do UFortGadgetItemDefinition::ApplyGadgetData's and RemoveGadgetData's calls). What is left shows
+    // what they did: AnimBPOverride is replicated, and its OnRep (6.21 0x12400B0) runs on the server too (it logs
+    // "[SERVER] ... OnRep_AnimBPOverride - Saving Original Anim BP"): it keeps the mesh's anim class in OriginalAnimBP and
+    // plays AnimBPOverride, or the original again once it is null. 🟡 So the body is inferred: the pawn's override is the
+    // top of a priority stack, and a change of the top sets it and runs the OnRep here. Without it 6.21's Butterfly ghost
+    // (AGID_Butterfly's Fortnite_Butterfly_Ghost_AnimBlueprint) hung in the In-Between in the default pose (CoreV2 #439).
+    if (Role != ROLE_Authority || !InAnimBPOverride || !Member_AnimBPOverride.IsAvailable())
+    {
+        return;
+    }
+    FOverrideStack& Stack = StackOf(AnimBPOverrideStacks, this);
+    Stack.Entries.emplace_back(Priority, InAnimBPOverride);
+    UClass* const Top = static_cast<UClass*>(TopOf(Stack));
+    if (static_cast<UClass*>(AnimBPOverride) != Top)
+    {
+        FlushNetDormancy();
+        AnimBPOverride = Top;
+        Reflection::FParams(StaticFunction_OnRep_AnimBPOverride()).Call(this);
+    }
+    UE_LOG(LogFort, Log, TEXT("PushAnimBPOverride: %s plays %s (priority %d pushed)"), *GetName(), *GetNameSafe(Top), Priority);
+#endif
+}
+
+void AFortPlayerPawn::PopAnimBPOverride(int32_t Priority, UClass* InAnimBPOverride)
+{
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority || !Member_AnimBPOverride.IsAvailable())
+    {
+        return;
+    }
+    FOverrideStack& Stack = StackOf(AnimBPOverrideStacks, this);
+    RemoveEntry(Stack, Priority, InAnimBPOverride);
+    UClass* const Top = static_cast<UClass*>(TopOf(Stack));
+    if (static_cast<UClass*>(AnimBPOverride) != Top)
+    {
+        FlushNetDormancy();
+        AnimBPOverride = Top;
+        Reflection::FParams(StaticFunction_OnRep_AnimBPOverride()).Call(this);
+    }
+    UE_LOG(LogFort, Log, TEXT("PopAnimBPOverride: %s plays %s (priority %d popped)"), *GetName(), Top ? *GetNameSafe(Top) : TEXT("its own anim Blueprint"), Priority);
+#endif
+}
+
+void AFortPlayerPawn::PushFootstepBankOverride(int32_t Priority, UObject* InFootstepBankOverride)
+{
+#if WITH_SERVER_CODE
+    // The footsteps' twin of PushAnimBPOverride (🟡 inferred the same way): FootstepBankOverride is replicated with its
+    // own OnRep.
+    if (Role != ROLE_Authority || !InFootstepBankOverride || !Member_FootstepBankOverride.IsAvailable())
+    {
+        return;
+    }
+    FOverrideStack& Stack = StackOf(FootstepBankOverrideStacks, this);
+    Stack.Entries.emplace_back(Priority, InFootstepBankOverride);
+    UObject* const Top = TopOf(Stack);
+    if (static_cast<UObject*>(FootstepBankOverride) != Top)
+    {
+        FlushNetDormancy();
+        FootstepBankOverride = Top;
+        Reflection::FParams(StaticFunction_OnRep_FootstepBankOverride()).Call(this);
+    }
+#endif
+}
+
+void AFortPlayerPawn::PopFootstepBankOverride(int32_t Priority, UObject* InFootstepBankOverride)
+{
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority || !Member_FootstepBankOverride.IsAvailable())
+    {
+        return;
+    }
+    FOverrideStack& Stack = StackOf(FootstepBankOverrideStacks, this);
+    RemoveEntry(Stack, Priority, InFootstepBankOverride);
+    UObject* const Top = TopOf(Stack);
+    if (static_cast<UObject*>(FootstepBankOverride) != Top)
+    {
+        FlushNetDormancy();
+        FootstepBankOverride = Top;
+        Reflection::FParams(StaticFunction_OnRep_FootstepBankOverride()).Call(this);
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortPlayerPawn::execPushAnimBPOverride)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_Priority);
+    P_GET_OBJECT(UClass, Z_Param_InAnimBPOverride);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerPawn*>(Context)->PushAnimBPOverride(Z_Param_Priority, Z_Param_InAnimBPOverride);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortPlayerPawn::execPopAnimBPOverride)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_Priority);
+    P_GET_OBJECT(UClass, Z_Param_InAnimBPOverride);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerPawn*>(Context)->PopAnimBPOverride(Z_Param_Priority, Z_Param_InAnimBPOverride);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortPlayerPawn::execPushFootstepBankOverride)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_Priority);
+    P_GET_OBJECT(UObject, Z_Param_InFootstepBankOverride);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerPawn*>(Context)->PushFootstepBankOverride(Z_Param_Priority, Z_Param_InFootstepBankOverride);
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortPlayerPawn::execPopFootstepBankOverride)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_Priority);
+    P_GET_OBJECT(UObject, Z_Param_InFootstepBankOverride);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortPlayerPawn*>(Context)->PopFootstepBankOverride(Z_Param_Priority, Z_Param_InFootstepBankOverride);
+    P_NATIVE_END;
+}
+
+void AFortPlayerPawn::PushAnimBPOverrideHK(AFortPlayerPawn* This, int32_t Priority, UClass* InAnimBPOverride)
+{
+    This->PushAnimBPOverride(Priority, InAnimBPOverride);
+}
+
+void AFortPlayerPawn::PopAnimBPOverrideHK(AFortPlayerPawn* This, int32_t Priority, UClass* InAnimBPOverride)
+{
+    This->PopAnimBPOverride(Priority, InAnimBPOverride);
+}
+
+void AFortPlayerPawn::PushFootstepBankOverrideHK(AFortPlayerPawn* This, int32_t Priority, UObject* InFootstepBankOverride)
+{
+    This->PushFootstepBankOverride(Priority, InFootstepBankOverride);
+}
+
+void AFortPlayerPawn::PopFootstepBankOverrideHK(AFortPlayerPawn* This, int32_t Priority, UObject* InFootstepBankOverride)
+{
+    This->PopFootstepBankOverride(Priority, InFootstepBankOverride);
+}
+
+void AFortPlayerPawn::HookNatives()
+{
+    // The four overrides (6.00 on): each UFunction whose exec calls a stub gets Core's, and the gadget data's direct
+    // calls (Finder::GadgetOverrideCalls) go to Core's bodies when they reach that same stub. Builds without them, or
+    // that keep them, are left alone.
+    UFunction* const Push = FindStaticFunction_PushAnimBPOverride();
+    if (!Push || !FindStaticFunction_OnRep_AnimBPOverride() || !Member_AnimBPOverride.IsAvailable() || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))
+    {
+        return;
+    }
+    const auto StubOf = [](UFunction* Function)
+    {
+        uint8_t* NativeCall = Function ? Finder::ImplementationCall(Function) : nullptr;
+        const uintptr_t Target = NativeCall ? Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5) : 0;
+        return Finder::IsStubFunction(Target) ? Target : 0;
+    };
+    const uintptr_t Stub = StubOf(Push);
+    if (!Stub)
+    {
+        Log::Info(L"Finder: AFortPlayerPawn::PushAnimBPOverride is native in this build");
+        return;
+    }
+    for (const auto& [Function, Native, Name] : {
+             std::tuple{ Push, &execPushAnimBPOverride, L"AFortPlayerPawn::PushAnimBPOverride" },
+             std::tuple{ FindStaticFunction_PopAnimBPOverride(), &execPopAnimBPOverride, L"AFortPlayerPawn::PopAnimBPOverride" },
+             std::tuple{ FindStaticFunction_PushFootstepBankOverride(), &execPushFootstepBankOverride, L"AFortPlayerPawn::PushFootstepBankOverride" },
+             std::tuple{ FindStaticFunction_PopFootstepBankOverride(), &execPopFootstepBankOverride, L"AFortPlayerPawn::PopFootstepBankOverride" } })
+    {
+        if (Function && StubOf(Function))
+        {
+            Function->SetNativeFunc(Native);
+            Log::Info(L"Hook {}: native", Name);
+        }
+    }
+    if (!UFortGadgetItemDefinition::HasOverrides() || !FindStaticFunction_OnRep_FootstepBankOverride() || !Member_FootstepBankOverride.IsAvailable())
+    {
+        return;
+    }
+    const Finder::FGadgetOverrideCalls Calls = Finder::GadgetOverrideCalls(UFortGadgetItemDefinition::GadgetPriorityOffset(),
+        UFortGadgetItemDefinition::AnimBPOverrideOffset(), UFortGadgetItemDefinition::FootstepBankOverrideOffset());
+    for (const auto& [Site, Destination, Name] : {
+             std::tuple{ Calls.PushAnim, reinterpret_cast<void*>(&PushAnimBPOverrideHK), L"UFortGadgetItemDefinition::ApplyGadgetData -> AFortPlayerPawn::PushAnimBPOverride" },
+             std::tuple{ Calls.PushFootstep, reinterpret_cast<void*>(&PushFootstepBankOverrideHK), L"UFortGadgetItemDefinition::ApplyGadgetData -> AFortPlayerPawn::PushFootstepBankOverride" },
+             std::tuple{ Calls.PopAnim, reinterpret_cast<void*>(&PopAnimBPOverrideHK), L"UFortGadgetItemDefinition::RemoveGadgetData -> AFortPlayerPawn::PopAnimBPOverride" },
+             std::tuple{ Calls.PopFootstep, reinterpret_cast<void*>(&PopFootstepBankOverrideHK), L"UFortGadgetItemDefinition::RemoveGadgetData -> AFortPlayerPawn::PopFootstepBankOverride" } })
+    {
+        if (Site && Finder::RelativeTarget(reinterpret_cast<uintptr_t>(Site), 1, 5) == Stub)
+        {
+            Hooks::RedirectCall(Name, Site, Destination);
+        }
+    }
 }

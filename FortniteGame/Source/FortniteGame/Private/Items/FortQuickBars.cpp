@@ -237,7 +237,11 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
     AFortPlayerController* Controller = Cast<AFortPlayerController>(GetOwner());
     AFortPawn* Pawn = Controller ? static_cast<AFortPawn*>(Controller->MyFortPawn) : nullptr;
     AFortWeapon* CurrentWeapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
-    const bool bWeaponReactivatesSlot = CurrentWeapon && CurrentWeapon->IsPendingDestroyDueToDurability() && static_cast<FGuid&>(CurrentWeapon->ItemEntryGuid) == Item;
+    const bool bRemovedHeldItem = CurrentWeapon && static_cast<FGuid&>(CurrentWeapon->ItemEntryGuid) == Item;
+    const bool bWeaponReactivatesSlot = bRemovedHeldItem && CurrentWeapon->IsPendingDestroyDueToDurability();
+    // The held weapon's own item went while its pawn is alive: a consumable used up by its own ability, or the held item
+    // dropped. The game then destroys the weapon (below), and only another item's equip takes it out of the pawn's hands.
+    const bool bHeldItemReplaced = bRemovedHeldItem && !Pawn->IsDead();
     if (bRemovedFocusedItem && KeepFocusOnRemoveCount > 0)
     {
         Log::Info(L"Quickbar: {} keeps slot {} focused while its item is replaced", GetNameSafe(Controller).ToStdString(), static_cast<int32_t>(GetQuickBar(FocusedBar).CurrentFocusedSlot));
@@ -255,7 +259,7 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
             }
         }
     }
-    else if (bRemovedFocusedItem && !IsReplicatedToOwner())
+    else if (bRemovedFocusedItem && !IsReplicatedToOwner() && !bHeldItemReplaced)
     {
         // The client's own quickbar moves its focus on to the next slot and activates it (3.5.2 0xA75070 -> 0xD03200).
         // An activation from here would send it a second item to equip.
@@ -270,6 +274,23 @@ void AFortQuickBars::ServerRemoveItemInternal_Implementation(const FGuid& Item, 
         // "blocked ActionPlayerChangeEquipment tag"). Save the World's inventory screen sends this remove when the
         // equipped weapon goes back to the backpack (UFortInventoryContext::RemoveItemFromQuickBar, 0x2CD86A0); the
         // previous slot or the harvesting tool's activated instead left the weapon in the player's hand (#379).
+        //
+        // Where the client has a quickbar of its own (3.4+ Battle Royale) this runs for the held item as well (#413,
+        // #419). Once that item has left the inventory, the game marks the weapon bPendingDestroyDueToDurabilityOrStackCount
+        // (its inventory update handler, 6.01 0x1362B70); when its ability ends it activates the server's focused slot 0.1s
+        // later and gives the weapon an 8s lifespan (AFortPawn's ability-ended handler 0x11A74A0 -> 0x1340D90). Nothing
+        // takes a destroyed weapon out of the pawn's hands or its dependent actors: only AFortPawn::EquipWeapon (0x11A2E70)
+        // does, through the static weapon-changed delegate (0x4E35460) UFortReplicationGraph's handler (0x111FC90) is
+        // bound to, which swaps the old weapon for the new one in the pawn's dependent actor list. The
+        // Rift-To-Go's portal starts GA_Rift_Athena_Skydive in the frame of its cost, and Gameplay.Action.Player.Skydive
+        // blocks ChangeEquipment until the player lands (AbilityTagRelationshipMapping): the client's own move, which only
+        // starts when the inventory change reaches it, and the game's 0.1s activation were both dropped, the jar was
+        // destroyed in the player's hands, and the replication graph opened a channel on it again as the pawn's dependent.
+        // UActorChannel::ReplicateActor freed that channel's replicator for the pending kill actor and the next frame read
+        // it (FObjectReplicator::ReplicateProperties, 6.01 0x2507D00). The activation from here goes out with the cost,
+        // ahead of the skydive (ServerActivateSlotInternal -> ExecuteInventoryItem 0x11DC3E0 -> ClientExecuteInventoryItem),
+        // and the client's ServerExecuteInventoryItem equips the slot's item (UFortWeaponItemDefinition::ServerExecute,
+        // 0x1368680, asks no tag). It is the slot the client's quickbar moves to as well, so its own execute changes nothing.
         float ActivateDelay = 0.0f;
         if (Controller && Natives::AFortPlayerController_CanPerformActionIndex >= 0)
         {

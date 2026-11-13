@@ -110,6 +110,11 @@ public:
     // Whether the server has finished loading for this player (replicated, OnRep_bHasServerFinishedLoading): the
     // client's CheckFinishedLoading waits for it before its SetHasFinishedLoading and OnReadyToStartMatch.
     DefineUProperty(bool, bHasServerFinishedLoading)
+    // Where AFortGameMode::SpawnDefaultPawnFor_Implementation spawns the player's pawn (the start spot raised by the
+    // pawn's half height and 24), and whether that spawn failed (replicated).
+    DefineUProperty(FVector, SpawnLoc)
+    DefineBitfieldUProperty(bFailedToRespawn)
+    static bool HasSpawnLoc() { return Member_SpawnLoc.IsAvailable() && Member_bFailedToRespawn.IsAvailable(); }
     DefineUFunction(ServerExecuteInventoryItem)
     DefineUFunction(ServerSpawnInventoryDrop)
     // 3.2 renames it, with the same parameters.

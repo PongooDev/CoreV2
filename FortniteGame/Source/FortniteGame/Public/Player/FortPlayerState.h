@@ -131,6 +131,11 @@ public:
     DefineBitfieldUProperty(bHasStartedPlaying)
     DefineUFunction(OnRep_CharacterParts)
     DefineUFunction(GetCurrentPawn)
+    // The actor the player's home is bound to: the start spot of their first spawn (a Save the World spawn pad, an
+    // FortHomeTeleporterInterface actor), which AFortGameMode::SpawnDefaultPawnFor_Implementation binds while it is null.
+    DefineUProperty(AActor*, HomeActor)
+    static bool HasHomeActor() { return Member_HomeActor.IsAvailable(); }
+    static ptrdiff_t HomeActorOffset() { return Member_HomeActor.IsAvailable() ? Member_HomeActor.GetOffsetChecked() : -1; }
 
 private:
     // 5.41 makes CharacterParts an FCustomCharacterParts (the same UE property, the parts in its Parts), where 1.1-5.40
@@ -165,6 +170,13 @@ public:
     static bool HasFinalizingExperience();
     // Takes out the experience deltas still waiting for an earnScore notification, returning how many there were.
     int32_t RemoveUnscoredExperienceDeltas();
+
+    // The game's home actor setter (Natives::AFortPlayerState_SetHomeActor; 21.40's exports give it no name, so it is
+    // named for the property it sets): tells the old home actor it is unbound and the new one it is bound
+    // (IFortHomeTeleporterInterface's OnHomeTeleporterUnboundServer and OnHomeTeleporterBoundServer) and forces a net
+    // update. CanSetHomeActor: whether the server found it.
+    static bool CanSetHomeActor();
+    void SetHomeActor(AActor* NewHomeActor);
 
     static void Hook();
 

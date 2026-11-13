@@ -349,6 +349,9 @@ namespace Finder
     uint8_t* AbilityEndCleanupCall(ptrdiff_t AbilityGrantedWeaponItemOffset);
     bool ResolveConditionalFoundationQuotaLive(ptrdiff_t QuotaOffset, FConditionalFoundationQuotaSites& OutSites);
     bool ResolvePlayerSpawnQueriesLive(FPlayerSpawnQuerySites& OutSites);
+    // AFortPlayerState's home actor setter (Natives::AFortPlayerState_SetHomeActor), the call in
+    // AFortGameMode::SpawnDefaultPawnFor_Implementation that both reads and writes the player state's HomeActor.
+    bool ResolveSetHomeActorLive(ptrdiff_t HomeActorOffset);
     bool ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff_t LastEquippedWeaponGuidOffset);
     bool ResolveWeaponAmmoLive(ptrdiff_t AmmoCountOffset, ptrdiff_t ItemEntryGuidOffset);
     bool IsStubFunction(uintptr_t Function);

@@ -12046,6 +12046,70 @@ bool Finder::ResolvePlayerSpawnQueriesLive(FPlayerSpawnQuerySites& OutSites)
     return true;
 }
 
+bool Finder::ResolveSetHomeActorLive(ptrdiff_t HomeActorOffset)
+{
+    if (Natives::AFortPlayerState_SetHomeActor)
+    {
+        return true;
+    }
+
+    // AFortGameMode::SpawnDefaultPawnFor_Implementation binds the start spot as the player's home actor when they have
+    // none (6.02 0xE5CAFD: call the getter, mov rax, [rcx+8C8h]; ret; then 0xE5CB0D: call the setter with the player
+    // state and the start spot). The setter is the one callee that reads the old home actor and writes the new one
+    // (6.02 0x1244330, 6.10 0x128B260, 6.20 0x130D950: mov r64, [r64+HomeActor] ... mov [r64+HomeActor], r64); the
+    // getter only reads it.
+    const auto CountAccesses = [HomeActorOffset](uintptr_t Begin, uintptr_t End, uint8_t Opcode)
+    {
+        // REX.W mov with a [base+disp32] operand: not a SIB form (rm 100) and not off rbp (rm 101 without REX.B).
+        int32_t Count = 0;
+        for (uintptr_t Site = Begin; Site + 7 <= End; ++Site)
+        {
+            const uint8_t Rex = Byte(Site);
+            const uint8_t ModRM = Byte(Site + 2);
+            const bool bRbp = (ModRM & 0x07) == 0x05 && (Rex & 0x01) == 0;
+            if ((Rex & 0xF8) == 0x48 && Byte(Site + 1) == Opcode && (ModRM & 0xC0) == 0x80 && (ModRM & 0x07) != 0x04 && !bRbp
+                && *reinterpret_cast<const int32_t*>(Site + 3) == static_cast<int32_t>(HomeActorOffset))
+            {
+                ++Count;
+            }
+        }
+        return Count;
+    };
+
+    const uintptr_t SpawnPawn = reinterpret_cast<uintptr_t>(Natives::AFortGameMode_SpawnDefaultPawnFor);
+    uintptr_t SetHomeActor = 0;
+    bool bAmbiguous = false;
+    for (const auto& [ChunkBegin, ChunkEnd] : SpawnPawn && HomeActorOffset > 0 ? Finder::FunctionChunks(SpawnPawn) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        for (const auto& [Call, Target] : Finder::DirectCalls(ChunkBegin, ChunkEnd))
+        {
+            int32_t Loads = 0;
+            int32_t Stores = 0;
+            size_t Size = 0;
+            for (const auto& [TargetBegin, TargetEnd] : Finder::FunctionStart(Target) == Target ? Finder::FunctionChunks(Target) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                Size += TargetEnd - TargetBegin;
+                Loads += Size <= 0x400 ? CountAccesses(TargetBegin, TargetEnd, 0x8B) : 0;
+                Stores += Size <= 0x400 ? CountAccesses(TargetBegin, TargetEnd, 0x89) : 0;
+            }
+            if (Size <= 0x400 && Loads > 0 && Stores > 0)
+            {
+                bAmbiguous |= SetHomeActor && SetHomeActor != Target;
+                SetHomeActor = Target;
+            }
+        }
+    }
+
+    if (!SetHomeActor || bAmbiguous)
+    {
+        Log::Error(L"Finder: AFortPlayerState's home actor setter not found in AFortGameMode::SpawnDefaultPawnFor_Implementation{}", bAmbiguous ? L" (more than one candidate)" : L"");
+        return false;
+    }
+    Natives::AFortPlayerState_SetHomeActor = reinterpret_cast<decltype(Natives::AFortPlayerState_SetHomeActor)>(SetHomeActor);
+    Log::Info(L"Finder: AFortPlayerState home actor setter at 0x{:X} (HomeActor +0x{:X})", SetHomeActor - Finder::ImageBase(), HomeActorOffset);
+    return true;
+}
+
 bool Finder::ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff_t LastEquippedWeaponGuidOffset)
 {
     if (Natives::AFortPlayerPawn_EquipLastWeaponIndex >= 0 && Natives::AFortPawn_EquipDefaultWeaponIndex >= 0)

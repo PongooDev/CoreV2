@@ -33,7 +33,11 @@
 #include "Building/BuildingActor.h"
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingStructuralSupportSystem.h"
+#include "Configuration.h"
+#include "GameFramework/Character.h"
 #include "Kismet/GameplayStatics.h"
+#include "Pawns/FortPawn.h"
+#include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "TimerManager.h"
 #include "UObject/WeakObjectPtr.h"
@@ -55,6 +59,31 @@
 #include <utility>
 #include <vector>
 
+DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogFortPlacement, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogNavigation, Log, All);
+
+namespace
+{
+    // AFortGameMode::SpawnDefaultPawnFor_Implementation's rule for a spot someone is standing on (6.02 0xE5CD63, 6.20
+    // 0xEF1DA3): another player controller's live AFortPawn less than 6 units from it, across the ground (X and Y).
+    constexpr float SpawnSpotTakenDistanceSquared = 36.0f;
+    // How far above the start spot that spawn puts the pawn, over its half height (6.02 0xE5CA21's constant).
+    constexpr float SpawnHeightAboveSpot = 24.0f;
+    // The player sockets of the pad's mesh, SpawnPads' Player1-4, where the pad has no MaximumNumberOfPlayers of its own.
+    constexpr int32_t DefaultSpawnPadPlayers = 4;
+
+    bool IsSpawnSpotTaken(const std::vector<FVector>& PlayerLocations, const FVector& Spot)
+    {
+        return std::any_of(PlayerLocations.begin(), PlayerLocations.end(), [&Spot](const FVector& Location)
+        {
+            const float DX = Location.X - Spot.X;
+            const float DY = Location.Y - Spot.Y;
+            return DX * DX + DY * DY < SpawnSpotTakenDistanceSquared;
+        });
+    }
+}
+
 APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
 {
 #if WITH_SERVER_CODE
@@ -63,15 +92,144 @@ APawn* AFortGameModeZone::SpawnDefaultPawnFor_Implementation(AController* NewPla
         return nullptr;
     }
 
+    // The client builds strip the zone's override down to its first checks (6.02 0xE5D050: the start spot, the player,
+    // GetDefaultPawnClassForController, the AFortPlayerController cast, GetWorld, then return null). 21.40 names what
+    // it had for the spawn pad, GetLocationAndRotationForSpawnPad and TrySpawnDefaultPawn, but no build keeps their
+    // bodies. Core's reading, for the spawn pad only: the pad's own spot while no other player stands on it, as
+    // AFortGameMode's spawn gives; with someone on it, a free player socket of the same pad, before AFortGameMode's spawn
+    // turns the pad down and ChoosePlayerStart falls back to the backup spots (on the Canny Valley outpost those are the
+    // husk spawners in the canyon, outside the storm shield: #423).
+    if (Member_ActiveSpawnPad.IsAvailable() && StartSpot == static_cast<AActor*>(ActiveSpawnPad) && AFortPlayerController::HasSpawnLoc() && AFortPlayerState::CanSetHomeActor())
+    {
+        FVector Location;
+        FRotator Rotation;
+        if (GetLocationAndRotationForSpawnPad(NewPlayer, Location, Rotation))
+        {
+            if (APawn* Pawn = TrySpawnDefaultPawn(NewPlayer, StartSpot, Location, Rotation))
+            {
+                return Pawn;
+            }
+            UE_LOG(LogFortPlacement, Warning, TEXT("SpawnDefaultPawnFor: couldn't spawn %s on the spawn pad's free spot, trying the game's spots"), *NewPlayer->GetName());
+        }
+    }
+
     return AFortGameMode::SpawnDefaultPawnFor_Implementation(NewPlayer, StartSpot);
 #else
     return nullptr;
 #endif
 }
 
-DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
-DEFINE_LOG_CATEGORY_STATIC(LogFortPlacement, Log, All);
-DEFINE_LOG_CATEGORY_STATIC(LogNavigation, Log, All);
+bool AFortGameModeZone::GetLocationAndRotationForSpawnPad(AController* Player, FVector& OutLocation, FRotator& OutRotation)
+{
+#if WITH_SERVER_CODE
+    // The pad Blueprint's own placement of its players (BP_PlayerSpawnTeleportPad: MaximumNumberOfPlayers 4, and
+    // GetPlayerTeleportTransform(PlayerIndex), the world transform of its mesh's "Player<PlayerIndex + 1>" socket, which
+    // its TeleportAllPlayers puts each player on at the mission's end). A pad without it keeps the game's spawn.
+    AActor* SpawnPad = Member_ActiveSpawnPad.IsAvailable() ? static_cast<AActor*>(ActiveSpawnPad) : nullptr;
+    UFunction* GetPlayerTeleportTransform = SpawnPad ? SpawnPad->FindFunction(FName(L"GetPlayerTeleportTransform", FNAME_Find)) : nullptr;
+    UWorld* World = GetWorld();
+    if (!GetPlayerTeleportTransform || !World)
+    {
+        return false;
+    }
+
+    // Where the other players are, as AFortGameMode's spawn checks them: their controllers' live AFortPawns.
+    std::vector<FVector> PlayerLocations;
+    for (TObjectIterator<AFortPlayerController> It; It; ++It)
+    {
+        AFortPlayerController* Other = *It;
+        if (Other == Player || Other->GetWorld() != World || Other->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject))
+        {
+            continue;
+        }
+        AFortPawn* Pawn = Cast<AFortPawn>(reinterpret_cast<UObject*>(static_cast<APawn*>(Other->Pawn)));
+        if (Pawn && !Pawn->IsDead())
+        {
+            PlayerLocations.push_back(Pawn->GetTransform().GetLocation());
+        }
+    }
+
+    // The pad's own spot is free: AFortGameMode's spawn puts the player there, as it always has.
+    const FVector PadSpot = SpawnPad->GetTransform().GetLocation();
+    if (!IsSpawnSpotTaken(PlayerLocations, PadSpot))
+    {
+        return false;
+    }
+
+    // bUseAllSocketsInSpawnPad (true only on BP_DeployableBaseGameMode, Challenge the Horde) is left alone: its readers
+    // are stripped with the rest, and what Epic did with it false (every other game mode, the outposts too) isn't known.
+    const UProperty* MaximumNumberOfPlayers = SpawnPad->GetClass()->FindPropertyByName(FName(L"MaximumNumberOfPlayers", FNAME_Find));
+    const bool bHasMaximum = MaximumNumberOfPlayers && MaximumNumberOfPlayers->GetClass()->HasAnyCastFlag(CASTCLASS_UIntProperty) && MaximumNumberOfPlayers->GetSize() == sizeof(int32_t);
+    const int32_t NumPlayerSpots = bHasMaximum ? *MaximumNumberOfPlayers->ContainerPtrToValuePtr<int32_t>(SpawnPad) : DefaultSpawnPadPlayers;
+    for (int32_t PlayerIndex = 0; PlayerIndex < std::min(NumPlayerSpots, 16); ++PlayerIndex)
+    {
+        Reflection::FParams Params(GetPlayerTeleportTransform, true);
+        Params.Set(L"PlayerIndex", PlayerIndex);
+        if (!Params.Call(SpawnPad))
+        {
+            return false;
+        }
+        const FTransform TeleportTransform = Params.Take<FTransform>(L"Teleport Transform");
+        const FVector Spot = TeleportTransform.GetLocation();
+        // A socket the mesh doesn't have is the mesh's own transform (USceneComponent::GetSocketTransform).
+        const FVector FromPad = Spot - PadSpot;
+        if (FromPad.X * FromPad.X + FromPad.Y * FromPad.Y + FromPad.Z * FromPad.Z < 1.0f || IsSpawnSpotTaken(PlayerLocations, Spot))
+        {
+            continue;
+        }
+        OutLocation = Spot;
+        OutRotation = FRotator(0.0f, TeleportTransform.Rotation.Rotator().Yaw, 0.0f);
+        UE_LOG(LogFortPlacement, Log, TEXT("SpawnDefaultPawnFor: a player stands on %s, %s spawns on its player spot %d"), *SpawnPad->GetName(), Player ? *Player->GetName() : TEXT("None"), PlayerIndex + 1);
+        return true;
+    }
+    UE_LOG(LogFortPlacement, Log, TEXT("SpawnDefaultPawnFor: %s and all %d of its player spots are taken"), *SpawnPad->GetName(), NumPlayerSpots);
+#endif
+    return false;
+}
+
+APawn* AFortGameModeZone::TrySpawnDefaultPawn(AController* NewPlayer, AActor* StartSpot, const FVector& Location, const FRotator& Rotation)
+{
+#if WITH_SERVER_CODE
+    // AFortGameMode::SpawnDefaultPawnFor_Implementation's spawn at one spot (6.02 0xE5C890, 6.20 0xEF18D0), at the given
+    // place instead of the start spot's: the controller's SpawnLoc raised by the pawn's default half height and 24 (Core
+    // reads that half height as ACharacter::GetDefaultHalfHeight does, from the class default's capsule), the start spot
+    // bound as the player's home actor while they have none, the pawn spawned with the game mode's instigator and
+    // AdjustIfPossibleButDontSpawnIfColliding, facing the spot's yaw, and bFailedToRespawn set from the result.
+    AFortPlayerController* PlayerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(NewPlayer));
+    UClass* PawnClass = PlayerController ? GetDefaultPawnClassForController(NewPlayer) : nullptr;
+    UWorld* World = PawnClass ? GetWorld() : nullptr;
+    AFortPlayerState* PlayerState = PlayerController ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
+    if (!World || !AFortPlayerController::HasSpawnLoc() || !AFortPlayerState::CanSetHomeActor())
+    {
+        return nullptr;
+    }
+
+    const ACharacter* PawnDefault = Cast<ACharacter>(PawnClass->GetDefaultObject(false));
+    const float HalfHeight = PawnDefault ? PawnDefault->GetDefaultHalfHeight() : 0.0f;
+    const FVector SpawnLoc(Location.X, Location.Y, Location.Z + HalfHeight + SpawnHeightAboveSpot);
+    PlayerController->SpawnLoc = SpawnLoc;
+
+    if (PlayerState && !static_cast<AActor*>(PlayerState->HomeActor))
+    {
+        PlayerState->SetHomeActor(StartSpot);
+    }
+
+    const float HalfYaw = Rotation.Yaw * (3.1415926535897932f / 360.0f);
+    FTransform SpawnTransform;
+    SpawnTransform.Rotation.Z = std::sin(HalfYaw);
+    SpawnTransform.Rotation.W = std::cos(HalfYaw);
+    SpawnTransform.SetLocation(SpawnLoc);
+
+    FActorSpawnParameters SpawnInfo;
+    SpawnInfo.Instigator = Instigator;
+    SpawnInfo.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding;
+    APawn* Pawn = Cast<APawn>(World->SpawnActor(PawnClass, &SpawnTransform, SpawnInfo));
+    PlayerController->bFailedToRespawn = Pawn == nullptr;
+    return Pawn;
+#else
+    return nullptr;
+#endif
+}
 
 namespace
 {
@@ -774,6 +932,13 @@ void AFortGameModeZone::HookVTables()
     const UFunction* QueryFinishedSignature = Finder::ResolveClassFunctionMap() ? UEnvQueryInstanceBlueprintWrapper::GetQueryFinishedSignature() : nullptr;
     OnPlayerSpawnPadQueryFinishedFunction = QueryFinishedSignature && StaticClass()
         ? StaticClass()->AddNativeFunction(L"OnPlayerSpawnPadQueryFinished", &execOnPlayerSpawnPadQueryFinished, QueryFinishedSignature) : nullptr;
+
+    // What a spawn on the spawn pad's player spots binds the player's home with, as AFortGameMode's spawn does
+    // (TrySpawnDefaultPawn). Without it the pad's spawns stay AFortGameMode's.
+    if (!Configuration::Get().IsBattleRoyale() && AFortPlayerState::HasHomeActor() && Natives::AFortGameMode_SpawnDefaultPawnFor)
+    {
+        Finder::ResolveSetHomeActorLive(AFortPlayerState::HomeActorOffset());
+    }
 
     if (!Finder::ResolveGameModeZoneLive())
     {

@@ -13,6 +13,7 @@
 #include "UObject/Object.h"
 #include "UObject/ScriptDelegates.h"
 
+class APawn;
 class ULevel;
 class UNetDriver;
 class UActorChannel;
@@ -65,6 +66,8 @@ public:
     DefineUProperty(TEnumAsByte<ENetRole>, Role)
     DefineUProperty(TEnumAsByte<ENetRole>, RemoteRole)
     DefineUProperty(AActor*, Owner)
+    // The pawn responsible for what the actor does (a game mode's is the one its spawns are instigated by).
+    DefineUProperty(APawn*, Instigator)
     DefineUProperty(int32_t, NetTag)
     DefineUProperty(float, NetUpdateFrequency)
     DefineUProperty(float, MinNetUpdateFrequency)

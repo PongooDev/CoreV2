@@ -203,6 +203,9 @@ namespace Natives
     inline UClass** (*AFortGameMode_GetGameSessionClass)(const AFortGameMode* This, UClass** Result) = nullptr;
     inline APawn* (*AFortGameMode_SpawnDefaultPawnFor)(AFortGameMode* This, AController* NewPlayer, AActor* StartSpot) = nullptr;
     inline APawn* (*AFortGameModeZone_SpawnDefaultPawnFor)(AFortGameModeZone* This, AController* NewPlayer, AActor* StartSpot) = nullptr;
+    // What AFortGameMode::SpawnDefaultPawnFor_Implementation binds a player's start spot with when they have no home
+    // actor yet (6.02 0x1244330, 6.10 0x128B260, 6.20 0x130D950): Finder::ResolveSetHomeActorLive.
+    inline void (*AFortPlayerState_SetHomeActor)(AFortPlayerState* This, AActor* NewHomeActor) = nullptr;
     inline AActor* (*AFortGameMode_PickPlayerSpawnActor)(AFortGameMode* This, AController* Player, UClass* PawnClass, TArray<AActor*>* Candidates, float DangerExclusionRadius, float ObjectiveExclusionRadius) = nullptr;
     inline int32_t AFortGameMode_GetFriendlyPlayerPawnsIndex = -1;
     inline void (*AFortGameMode_FinishWorldInitialization)(AFortGameMode* This, AFortWorldManager* WorldManager) = nullptr;

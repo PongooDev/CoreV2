@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "GameFramework/Character.h"
+#include "Components/CapsuleComponent.h"
 #include "Finder.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Hooks.h"
@@ -15,6 +16,13 @@ namespace
     // EMovementMode.
     constexpr uint8_t MoveFalling = 3;
     constexpr uint8_t MoveFlying = 5;
+}
+
+float ACharacter::GetDefaultHalfHeight() const
+{
+    const ACharacter* Default = Member_CapsuleComponent.IsAvailable() ? static_cast<const ACharacter*>(GetClass()->GetDefaultObject(false)) : nullptr;
+    const UCapsuleComponent* DefaultCapsule = Default ? static_cast<UCapsuleComponent*>(Default->CapsuleComponent) : nullptr;
+    return DefaultCapsule ? DefaultCapsule->GetScaledCapsuleHalfHeight() : 0.0f;
 }
 
 void ACharacter::Jump()

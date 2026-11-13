@@ -4,6 +4,7 @@
 
 #include <cstdint>
 
+class UCapsuleComponent;
 class UCharacterMovementComponent;
 
 enum class ECheatMovement : uint8_t
@@ -25,8 +26,13 @@ class ACharacter : public APawn
 
 public:
     DefineUProperty(UCharacterMovementComponent*, CharacterMovement)
+    DefineUProperty(UCapsuleComponent*, CapsuleComponent)
     // How many jumps the character may make before landing (replicated; 1 by default).
     DefineUProperty(int32_t, JumpMaxCount)
+
+    // ACharacter::GetDefaultHalfHeight: the half height of the class default's capsule, with its scale (what a spawn
+    // raises the pawn's location by); 0 without one.
+    float GetDefaultHalfHeight() const;
 
     // The body of ClientCheatWalk, ClientCheatFly or ClientCheatGhost.
     void ApplyCheatMovement(ECheatMovement Movement);

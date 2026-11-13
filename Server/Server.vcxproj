@@ -211,6 +211,7 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\RecastNavMesh.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\ActorComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\BrushComponent.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\CapsuleComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\PrimitiveComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\SceneComponent.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Curves\CurveBase.h" />
@@ -478,6 +479,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Actor.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ActorReplication.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AssetManager.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CapsuleComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Character.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CharacterMovementComponent.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CheatManager.cpp" />

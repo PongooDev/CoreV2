@@ -258,6 +258,19 @@ int32_t AFortPlayerState::RemoveUnscoredExperienceDeltas()
     return Removed;
 }
 
+bool AFortPlayerState::CanSetHomeActor()
+{
+    return Natives::AFortPlayerState_SetHomeActor != nullptr;
+}
+
+void AFortPlayerState::SetHomeActor(AActor* NewHomeActor)
+{
+    if (Natives::AFortPlayerState_SetHomeActor)
+    {
+        Natives::AFortPlayerState_SetHomeActor(this, NewHomeActor);
+    }
+}
+
 void AFortPlayerState::Hook()
 {
     Hooks::Detour(L"AFortPlayerState::SetHeroType", reinterpret_cast<void*>(Natives::AFortPlayerState_SetHeroType), &SetHeroTypeHK, &SetHeroTypeOG);

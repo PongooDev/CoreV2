@@ -43,6 +43,11 @@ public:
     static bool HasOnHandleMatchHasStarted() { return StaticClass() && Member_OnHandleMatchHasStarted.IsAvailable(); }
 
     APawn* SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot);
+    // 21.40's names for the zone's own pad spawn, whose bodies the client builds strip (SpawnDefaultPawnFor_Implementation
+    // above). GetLocationAndRotationForSpawnPad: where on the active spawn pad the player spawns, when it isn't the pad's
+    // own spot. TrySpawnDefaultPawn: the player's pawn spawned there as AFortGameMode's spawn spawns one at a start spot.
+    bool GetLocationAndRotationForSpawnPad(AController* Player, FVector& OutLocation, FRotator& OutRotation);
+    APawn* TrySpawnDefaultPawn(AController* NewPlayer, AActor* StartSpot, const FVector& Location, const FRotator& Rotation);
     UClass* DetermineAIDirectorClass() const;
     void CreateAIDirector();
     void PostInitializeComponents();

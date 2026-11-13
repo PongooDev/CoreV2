@@ -1,4 +1,4 @@
-﻿#include "pch.h"
+#include "pch.h"
 #include "Athena/FortGameModeAthena.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIGoalManager.h"
@@ -14,6 +14,7 @@
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortLootPackage.h"
+#include "Minigame/FortMinigameState.h"
 #include "Pawns/FortPawn.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
@@ -2793,6 +2794,8 @@ void AFortGameModeAthena::BindMatchEvents()
     Log::Info(L"Battle Royale: the match runs from the game state's GamePhaseChanged{}{}{}", Events.bPhaseBound ? L"" : L" (looked at)",
         bPlaylistLoaded ? L", its OnCurrentPlaylistLoaded" : bPlaylistTables ? L", the match's playlist looked for until the warmup ends" : L"",
         PawnDiedHandler ? L", the pawns' OnDied and the player states' OnDestroyed" : L", the match's results and team switches looked at with the phase");
+    // 6.20's Playground minigames: their final scores to their leaderboards (only where RecordScore was restored).
+    AFortMinigameState::BindWorld(GetWorld());
 #endif
 }
 

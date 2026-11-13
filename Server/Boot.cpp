@@ -50,6 +50,8 @@
 #include "Building/BuildingContainer.h"
 #include "Building/BuildingFoundation.h"
 #include "Building/BuildingItemCollectorActor.h"
+#include "Minigame/FortMinigameScoreRegistry.h"
+#include "Minigame/FortMinigameState.h"
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "Building/BuildingTrap.h"
 #include "Building/BuildingTrapDefender.h"
@@ -371,6 +373,8 @@ static void InstallHooks()
             Finder::ResolveAthenaHeroLive();
             ABuildingTrap::HookVTables();
             ABuildingItemCollectorActor::HookVTables();
+            AFortMinigameScoreRegistry::HookNatives();
+            AFortMinigameState::HookNatives();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
             AFortGameModeAthena::HookMatchAssignmentVTables();

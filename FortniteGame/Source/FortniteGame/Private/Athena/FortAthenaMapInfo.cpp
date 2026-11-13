@@ -14,9 +14,17 @@
 #include "Natives.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
 #include <vector>
+
+namespace
+{
+    // The world whose placed vending machines SpawnVendingMachines set up: the machines it brings in later get theirs as
+    // they begin play (SetUpLateVendingMachine).
+    TWeakObjectPtr<UWorld> VendingWorld;
+}
 
 bool AFortAthenaMapInfo::HasLlamas()
 {
@@ -196,18 +204,8 @@ void AFortAthenaMapInfo::SpawnVendingMachines()
         return;
     }
 
-    // The row's levels are the weights: level 0 no machine, level N rarity N - 1 (the inputs' cost rows have 5 levels).
-    constexpr int32_t RarityCount = 5;
-    float Weights[RarityCount + 1] = {};
-    float TotalWeight = 0.0f;
-    const FScalableFloat& RarityWeights = VendingMachineRarityCount;
-    for (int32_t Level = 0; Level <= RarityCount; ++Level)
-    {
-        Weights[Level] = std::max(RarityWeights.GetValueAtLevel(static_cast<float>(Level)), 0.0f);
-        TotalWeight += Weights[Level];
-    }
-
     UWorld* World = GetWorld();
+    constexpr int32_t RarityCount = 5;
     int32_t Placed = 0;
     int32_t Destroyed = 0;
     int32_t ByRarity[RarityCount] = {};
@@ -220,18 +218,10 @@ void AFortAthenaMapInfo::SpawnVendingMachines()
         }
         ++Placed;
 
-        int32_t Level = RarityCount;
-        float Roll = FMath::FRand() * TotalWeight;
-        for (int32_t Candidate = 0; Candidate < RarityCount; ++Candidate)
-        {
-            if (Roll < Weights[Candidate])
-            {
-                Level = Candidate;
-                break;
-            }
-            Roll -= Weights[Candidate];
-        }
-        if (Level == 0 && TotalWeight > 0.0f)
+        // A machine whose ItemCollectorHandle row gives its rarity (6.20's Playground) stands.
+        const FItemCollectorRow* Row = Machine->GetItemCollectorRow();
+        const int32_t Level = RollVendingMachineLevel(!Row || !Row->bUseOverrideRarity);
+        if (Level == 0)
         {
             // ABuildingActor's K2_DestroyActor kills the building (bDestroyed, hidden; it replicates).
             Machine->K2_DestroyActor();
@@ -239,12 +229,68 @@ void AFortAthenaMapInfo::SpawnVendingMachines()
             continue;
         }
 
-        Machine->StartingGoalLevel = std::max(Level, 1) - 1;
+        Machine->StartingGoalLevel = Level - 1;
         Machine->FinishItemSelectionSetup();
         Machine->ForceNetUpdate();
-        ++ByRarity[std::max(Level, 1) - 1];
+        ++ByRarity[std::clamp<int32_t>(Machine->StartingGoalLevel, 0, RarityCount - 1)];
     }
+    VendingWorld = World;
     Log::Info(L"Battle Royale: {} of {} vending machines spawn ({} Common, {} Uncommon, {} Rare, {} Epic, {} Legendary), {} destroyed",
         Placed - Destroyed, Placed, ByRarity[0], ByRarity[1], ByRarity[2], ByRarity[3], ByRarity[4], Destroyed);
+#endif
+}
+
+int32_t AFortAthenaMapInfo::RollVendingMachineLevel(bool bMayBeNone)
+{
+    // The row's levels are the weights: level 0 no machine, level N rarity N - 1 (the inputs' cost rows have 5 levels).
+    constexpr int32_t RarityCount = 5;
+    float Weights[RarityCount + 1] = {};
+    float TotalWeight = 0.0f;
+    const FScalableFloat& RarityWeights = VendingMachineRarityCount;
+    for (int32_t Level = bMayBeNone ? 0 : 1; Level <= RarityCount; ++Level)
+    {
+        Weights[Level] = std::max(RarityWeights.GetValueAtLevel(static_cast<float>(Level)), 0.0f);
+        TotalWeight += Weights[Level];
+    }
+    if (TotalWeight <= 0.0f)
+    {
+        return RarityCount;
+    }
+    float Roll = FMath::FRand() * TotalWeight;
+    for (int32_t Level = 0; Level < RarityCount; ++Level)
+    {
+        if (Roll < Weights[Level])
+        {
+            return Level;
+        }
+        Roll -= Weights[Level];
+    }
+    return RarityCount;
+}
+
+void AFortAthenaMapInfo::SetUpLateVendingMachine(ABuildingItemCollectorActor* Machine)
+{
+#if WITH_SERVER_CODE
+    // Only once the world's machines are set up: before that SpawnVendingMachines does this machine too.
+    UWorld* World = Machine ? Machine->GetWorld() : nullptr;
+    if (!World || VendingWorld.Get() != World || Machine->Role != ROLE_Authority || Machine->bDestroyed || !ABuildingItemCollectorActor::HasOutputItems())
+    {
+        return;
+    }
+    AFortAthenaMapInfo* MapInfo = nullptr;
+    for (TObjectIterator<AFortAthenaMapInfo> It; It && !MapInfo; ++It)
+    {
+        MapInfo = It->GetWorld() == World && !It->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)) ? *It : nullptr;
+    }
+    UClass* VendingMachine = MapInfo && HasVendingMachines() ? static_cast<UClass*>(MapInfo->VendingMachineClass) : nullptr;
+    if (!VendingMachine || !Machine->IsA(VendingMachine))
+    {
+        return;
+    }
+    Machine->StartingGoalLevel = MapInfo->RollVendingMachineLevel(false) - 1;
+    Machine->FinishItemSelectionSetup();
+    Machine->ForceNetUpdate();
+    Log::Info(L"Battle Royale: vending machine {} began play after the others were set up (its level streamed in), rarity {}", Machine->GetName().ToStdString(),
+        static_cast<int32_t>(Machine->StartingGoalLevel));
 #endif
 }

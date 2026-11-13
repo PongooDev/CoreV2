@@ -1,6 +1,9 @@
 #include "pch.h"
 #include "Building/BuildingItemCollectorActor.h"
+#include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Engine/AssetManager.h"
+#include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameState.h"
@@ -22,7 +25,87 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
+#include <utility>
 #include <vector>
+
+namespace
+{
+    // An item by its primary asset id (FItemCollectorOverrideItemRow's: "Weapon:Athena_PlaysetGrenade_Instance_BuildTheTower"),
+    // through the asset manager's list of that primary asset type.
+    UFortWorldItemDefinition* LoadPrimaryAssetItem(const FItemCollectorPrimaryAssetId& Id)
+    {
+        UAssetManager* Manager = GEngine ? static_cast<UAssetManager*>(GEngine->AssetManager) : nullptr;
+        TArray<FAssetData> AssetDataList;
+        if (!Manager || Id.PrimaryAssetName.IsNone() || !Manager->GetPrimaryAssetDataList(Id.PrimaryAssetType, AssetDataList))
+        {
+            return nullptr;
+        }
+        for (int32_t Index = 0; Index < AssetDataList.Num(); ++Index)
+        {
+            const FAssetData& AssetData = AssetDataList[Index];
+            if (AssetData.AssetName == Id.PrimaryAssetName)
+            {
+                return LoadObject<UFortWorldItemDefinition>(nullptr, *AssetData.ObjectPath.ToString(), nullptr, static_cast<uint32_t>(LOAD_NoWarn | LOAD_Quiet));
+            }
+        }
+        return nullptr;
+    }
+}
+
+const FItemCollectorRow* ABuildingItemCollectorActor::GetItemCollectorRow() const
+{
+    if (!Member_ItemCollectorHandle.IsAvailable() || !FItemCollectorRow::StaticStruct())
+    {
+        return nullptr;
+    }
+    FDataTableRowHandle& Handle = ItemCollectorHandle;
+    UDataTable* Table = Handle.DataTable;
+    const FName RowName = Handle.RowName;
+    if (!Table || RowName.IsNone() || static_cast<UScriptStruct*>(Table->RowStruct) != FItemCollectorRow::StaticStruct())
+    {
+        return nullptr;
+    }
+    return reinterpret_cast<const FItemCollectorRow*>(Table->FindRowUnchecked(RowName));
+}
+
+bool ABuildingItemCollectorActor::ApplyOverrideItems(const FItemCollectorRow& Row)
+{
+    // The row's items in its table's row order (Item.01, Item.02, Item.03): the first for the first input (wood), and so
+    // on. Its OverrideGoal is the price, which the game's own GetDepositGoal reads from the row (6.21 0xD5D9D0).
+    UDataTable* Table = Row.OverrideItemsTable;
+    if (!Row.bOverrideLootRules || !Table || !FItemCollectorOverrideItemRow::StaticStruct() || static_cast<UScriptStruct*>(Table->RowStruct) != FItemCollectorOverrideItemRow::StaticStruct())
+    {
+        return false;
+    }
+    std::vector<std::pair<std::wstring, const FItemCollectorOverrideItemRow*>> Rows;
+    for (auto& Pair : Table->GetRowMap())
+    {
+        Rows.emplace_back(Pair.Key.ToString().ToStdString(), reinterpret_cast<const FItemCollectorOverrideItemRow*>(Pair.Value));
+    }
+    std::sort(Rows.begin(), Rows.end(), [](const auto& Left, const auto& Right) { return Left.first < Right.first; });
+
+    TStructArray<FCollectorUnitInfo>& Collections = ItemCollections;
+    for (int32_t Index = 0; Index < Collections.Num(); ++Index)
+    {
+        FCollectorUnitInfo& Collection = Collections[Index];
+        TStructArray<FFortItemEntry>& Output = Collection.OutputItemEntry;
+        Output.Empty();
+        const FItemCollectorOverrideItemRow* ItemRow = Index < static_cast<int32_t>(Rows.size()) ? Rows[Index].second : nullptr;
+        UFortWorldItemDefinition* Item = ItemRow ? LoadPrimaryAssetItem(ItemRow->ItemPrimaryAssetId) : nullptr;
+        const int32_t Quantity = ItemRow ? std::max<int32_t>(ItemRow->Quantity, 1) : 0;
+        if (Item)
+        {
+            const int32_t EntryIndex = Output.Add(1, TStructArray<FFortItemEntry>::ElementSize());
+            FFortItemEntry::Construct(&Output[EntryIndex], Item, Quantity, 0);
+            Output[EntryIndex].LoadFullClip();
+        }
+        UFortWorldItemDefinition* Input = Collection.InputItem;
+        Log::Info(L"Vending machine: {} sells {} x{} ({} of {}) for {}", GetName().ToStdString(), Item ? Item->GetName().ToStdString() : L"nothing", Quantity,
+            ItemRow ? Rows[Index].first : std::wstring(L"no row"), Table->GetName().ToStdString(), Input ? Input->GetName().ToStdString() : L"nothing");
+    }
+    return true;
+}
 
 void ABuildingItemCollectorActor::FinishItemSelectionSetup()
 {
@@ -30,6 +113,24 @@ void ABuildingItemCollectorActor::FinishItemSelectionSetup()
     if (Role != ROLE_Authority || !HasOutputItems())
     {
         return;
+    }
+
+    // From 6.20: a collector with an ItemCollectorHandle row (the Playground's machines: ItemCollectorData's
+    // ItemCollector.ChallengeGames.01 to .05, .SpikeArena_01 to _03, .PlaygroundGun...) takes its rarity
+    // (bUseOverrideRarity: OverrideRarity, EFortRarity's Handmade to Fine for Common to Legendary, the one GetOverrideRarity
+    // gives its screen) and, with bOverrideLootRules, sells its OverrideItemsTable's items (ItemCollectorOverrideItemRow:
+    // a primary asset id and a quantity) for OverrideGoal, the challenge grenades at 0. Rolled from the loot tables,
+    // these sold whatever the playlist's vending rows gave, or nothing (CoreV2 #436, #440).
+    if (const FItemCollectorRow* Row = GetItemCollectorRow())
+    {
+        if (Row->bUseOverrideRarity)
+        {
+            StartingGoalLevel = std::min<int32_t>(Row->OverrideRarity, 4);
+        }
+        if (ApplyOverrideItems(*Row))
+        {
+            return;
+        }
     }
 
     // The loot tier of the collector's level (a vending machine's Loot_AthenaVending rows: tier 0 Common to 4
@@ -239,6 +340,32 @@ void ABuildingItemCollectorActor::HookVTables()
     const int32_t Index = Natives::ABuildingItemCollectorActor_GrantOutputDelegateExecuteIndex;
     Hooks::SwapVTable(L"ABuildingItemCollectorActor output timer Execute", VTable, Index, reinterpret_cast<void*>(&GrantOutputDelegateExecuteHK));
     Hooks::SwapVTable(L"ABuildingItemCollectorActor output timer ExecuteIfSafe", VTable, Index + 1, reinterpret_cast<void*>(&GrantOutputDelegateExecuteIfSafeHK));
+
+    // From 6.20 (ItemCollectorHandle; the Playground's playsets bring vending machines with their streamed levels, the
+    // Spiky Stadium's among them): the machines that begin play after the match's machines were set up
+    // (AFortAthenaMapInfo::SpawnVendingMachines, at the match's playlist) were never set up, so they sold nothing
+    // (CoreV2 #440). The game's own moment is FinishItemSelectionSetup, which BeginPlay calls at once when the playlist's
+    // tables are applied (else binds it to their delegate, the machines SpawnVendingMachines then does): the builds keep
+    // its client half (the first active input) and strip the server's selection of what each input sells.
+    if (!Member_ItemCollectorHandle.IsAvailable() || !Member_ItemCollectorBehavior.IsAvailable())
+    {
+        return;
+    }
+    // ItemSelectionHandle (21.40's name, unreflected): the FDelegateHandle that leads the collector's members, 0x20 before
+    // ItemCollectorBehavior (6.21 +0x740).
+    uint8_t* SetupCall = Finder::ResolveItemCollectorSelectionSetupLive(*reinterpret_cast<void***>(CollectorDefault), Member_ItemCollectorBehavior.GetOffsetChecked() - 0x20);
+    if (SetupCall)
+    {
+        Hooks::RedirectCall(L"ABuildingItemCollectorActor::BeginPlay -> FinishItemSelectionSetup", SetupCall, reinterpret_cast<void*>(&FinishItemSelectionSetupHK));
+    }
+#endif
+}
+
+void ABuildingItemCollectorActor::FinishItemSelectionSetupHK(ABuildingItemCollectorActor* This)
+{
+    Natives::ABuildingItemCollectorActor_FinishItemSelectionSetup(reinterpret_cast<UObject*>(This));
+#if WITH_SERVER_CODE
+    AFortAthenaMapInfo::SetUpLateVendingMachine(This);
 #endif
 }
 

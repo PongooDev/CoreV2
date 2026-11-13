@@ -101,6 +101,23 @@ namespace
         CallVirtual<void>(Building, Natives::ABuildingSMActor_SetEditingPlayerIndex, EditingPlayer);
     }
 
+    // A player's piece is player built (IsPlayerBuilt: an OwnerPersistentID or bPlayerPlaced). InitializeBuildingActor
+    // (6.21 0xD29550) sets bPlayerPlaced itself for a placer with a WorldPlayerId, which Save the World's players have and
+    // Battle Royale's don't (-1, see AFortGameModeAthena::ScoreBuildingConstructionHK), so a Battle Royale piece never
+    // was. 6.20 and 6.21 keep a setter of the bit alone with no caller left (6.21 0x144F090, 6.20 0x143B650: `or byte ptr
+    // [rcx+514h], 40h`), the stripped placement body's. What reads it: AFortPlayspace::ClearPlayspace (6.21 slot 0x136,
+    // 0x12F4EC0) kills the player-built pieces in a Playground playspace when its minigame is reset or restarted, and
+    // passed over every Battle Royale piece, so a building challenge's pieces stayed (CoreV2 #435); the zone's structure
+    // count (InitializeBuildingActor counts a player-built piece, OnDeathServer takes it off), so it is set before
+    // InitializeBuildingActor runs; Core's bots, which leave player pieces unharvested.
+    void MarkPlayerPlaced(ABuildingSMActor* Building)
+    {
+        if (Building && ABuildingActor::HasPlayerPlaced())
+        {
+            Building->bPlayerPlaced = true;
+        }
+    }
+
     // Diagnostic for #300 (a player's piece starting at full health): what decides whether a newly placed piece builds up.
     // InitializeBuildingActor (4.1 0xAFE680) sends Gameplay.Effect.Building.Create to the placer's ability system, whose
     // GA_DefaultPlayer_BuildingCreated applies GE_DefaultPlayer_BuildTime to the piece (BuildTime divided by the placer's
@@ -304,6 +321,7 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     CallVirtual<void>(Building, Natives::ABuildingSMActor_SetMirroredIndex, bMirrored);
     AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(PlayerStateOf(this)));
     const int32_t WorldPlayerId = FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -1;
+    MarkPlayerPlaced(Building);
     CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, EFortBuildingInitializationReason::Spawned, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
     CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, EFortBuildingInitializationReason::Spawned);
     LogPlacedPieceBuildUp(Building, FortPlayerState);
@@ -335,8 +353,15 @@ void AFortPlayerController::ServerEditBuildingActor_Implementation(ABuildingSMAc
     SetEditingPlayer(Building, nullptr);
     // Replacement type 1 (edited): the new piece takes the old one's place and team (ReplaceBuildingActor, 1.8.1 0x4A3760).
     const int32_t BuildingLevel = Building->CurrentBuildingLevel;
+    const bool bWasPlayerPlaced = ABuildingActor::HasPlayerPlaced() && Building->bPlayerPlaced;
     UAthenaNavSystem::AddDirtyArea(Building);
-    CallVirtual<ABuildingSMActor*>(Building, Natives::ABuildingSMActor_ReplaceBuildingActorIndex, static_cast<uint8_t>(1), NewBuildingClass, BuildingLevel, RotationIterations, bMirrored, this);
+    ABuildingSMActor* NewBuilding = CallVirtual<ABuildingSMActor*>(Building, Natives::ABuildingSMActor_ReplaceBuildingActorIndex, static_cast<uint8_t>(1), NewBuildingClass, BuildingLevel, RotationIterations, bMirrored, this);
+    // The edited piece is still the player's (ReplaceBuildingActor initializes it with the old one's OwnerPersistentID,
+    // -1 in Battle Royale, so it doesn't carry the flag over itself).
+    if (bWasPlayerPlaced)
+    {
+        MarkPlayerPlaced(NewBuilding);
+    }
     if (UObject* GameMode = AuthGameModeOf(this))
     {
         CallVirtual<void>(GameMode, Natives::AFortGameMode_ScoreBuildingEditIndex, static_cast<AController*>(this), Building);

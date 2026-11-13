@@ -4,6 +4,7 @@
 #include "GameplayEffect.h"
 #include "Math/Box.h"
 
+class ABuildingItemCollectorActor;
 class AFortAthenaSupplyDrop;
 class AVolume;
 struct FRotator;
@@ -86,4 +87,11 @@ public:
     // destroyed), or Common to Legendary, which sets its StartingGoalLevel (prices 100 to 500 a material, its colour) and
     // the loot tier of the three items it sells (from 3.5; the server step is stripped, Core supplies it).
     void SpawnVendingMachines();
+    // A vending machine that begins play after the world's machines were set up (a Playground playset's, streamed in with
+    // its level): its rarity rolled from the same weights (never none: it stays) and what it sells. Nothing before then.
+    static void SetUpLateVendingMachine(ABuildingItemCollectorActor* Machine);
+
+private:
+    // The rarity roll (level 0 none, then Common to Legendary): level 1 to 5 when bMayBeNone is false.
+    int32_t RollVendingMachineLevel(bool bMayBeNone);
 };

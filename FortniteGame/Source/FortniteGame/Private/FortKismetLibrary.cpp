@@ -4,6 +4,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "AI/FortAIGoalManager.h"
 #include "Abilities/FortAbilitySet.h"
+#include "Building/BuildingSMActor.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "Hooks.h"
@@ -292,6 +293,51 @@ void UFortKismetLibrary::K2_RemoveItemFromAllPlayers(UObject* WorldContextObject
 #endif
 }
 
+UFortWorldItemDefinition* UFortKismetLibrary::K2_GetResourceItemDefinition(uint8_t ResourceType)
+{
+    // The game data's item of each resource type, as a harvested piece gives (ABuildingSMActor::OnDamageServer).
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    if (!GameData)
+    {
+        return nullptr;
+    }
+    if (ResourceType == EFortResourceType::GetWood())
+    {
+        return GameData->WoodItemDefinition;
+    }
+    if (ResourceType == EFortResourceType::GetStone())
+    {
+        return GameData->StoneItemDefinition;
+    }
+    if (ResourceType == EFortResourceType::GetMetal())
+    {
+        return GameData->MetalItemDefinition;
+    }
+    if (ResourceType == EFortResourceType::GetPermanite())
+    {
+        return GameData->PermaniteItemDefinition;
+    }
+    return nullptr;
+}
+
+void UFortKismetLibrary::K2_GiveBuildingResource(AFortPlayerController* Controller, uint8_t ResourceType, int32_t ResourceAmount)
+{
+#if WITH_SERVER_CODE
+    // The client builds strip its body: 6.21's exec (0x1553060) steps its three parameters and calls the shared empty
+    // function. 6.20's and 6.21's Playground building challenges (MinigameMode_BuildTheStructure: Build The Box, Ramp,
+    // Tower and Llama) call it from their K2_PreGameTransitionEvent's GiveWood: K2_RemoveItemFromPlayer takes all of the
+    // player's wood, then this gives AmmountOfWood (500) of it back. Stripped, starting a building challenge only took
+    // the player's wood (CoreV2 #438). 🟡 The body is inferred from its parameters: the resource type's item, given as a
+    // harvest gives it.
+    UFortWorldItemDefinition* ResourceItem = K2_GetResourceItemDefinition(ResourceType);
+    if (!Controller || !ResourceItem || ResourceAmount <= 0)
+    {
+        return;
+    }
+    K2_GiveItemToPlayer(Controller, ResourceItem, ResourceAmount, false);
+#endif
+}
+
 AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss, bool bRandomRotation, bool bBlockedFromAutoPickup)
 {
     // bBlockedFromAutoPickup (5.30): 5.30's native is cut (the exec calls a return-0 stub) and its AFortPickup has no
@@ -564,6 +610,18 @@ DEFINE_FUNCTION(UFortKismetLibrary::execK2_SpawnPickupInWorld)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(UFortKismetLibrary::execK2_GiveBuildingResource)
+{
+    // 6.21's exec (0x1553060): the controller, the EFortResourceType byte and the amount.
+    P_GET_OBJECT(AFortPlayerController, Z_Param_Controller);
+    P_GET_PROPERTY(UByteProperty, Z_Param_ResourceType);
+    P_GET_PROPERTY(UIntProperty, Z_Param_ResourceAmount);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    K2_GiveBuildingResource(Z_Param_Controller, Z_Param_ResourceType, Z_Param_ResourceAmount);
+    P_NATIVE_END;
+}
+
 void UFortKismetLibrary::HookNatives()
 {
     if (!Natives::FFrame_Step && !Finder::ResolveScriptFrame())
@@ -653,4 +711,21 @@ void UFortKismetLibrary::HookNatives()
             Log::Info(L"Hook {}: native", Name);
         }
     }
+
+#if WITH_SERVER_CODE
+    // Only where the build's exec calls a stub (6.21's calls the shared empty function); a build with the body keeps it.
+    if (UFunction* GiveBuildingResource = FindStaticFunction_K2_GiveBuildingResource())
+    {
+        uint8_t* NativeCall = Finder::ImplementationCall(GiveBuildingResource);
+        if (NativeCall && Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5)))
+        {
+            GiveBuildingResource->SetNativeFunc(&execK2_GiveBuildingResource);
+            Log::Info(L"Hook UFortKismetLibrary::K2_GiveBuildingResource: native");
+        }
+        else
+        {
+            Log::Info(L"Finder: UFortKismetLibrary::K2_GiveBuildingResource is native in this build");
+        }
+    }
+#endif
 }

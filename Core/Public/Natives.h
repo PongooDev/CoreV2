@@ -1002,6 +1002,18 @@ namespace Natives
     inline uint32_t ABuildingFoundation_bTransformSetMask = 0;
     inline ptrdiff_t ABuildingFoundation_bPostUpdateCalled = -1;
     inline uint32_t ABuildingFoundation_bPostUpdateCalledMask = 0;
+
+    // From 6.20 (the Playground's leaderboards), off UFortPlaysetItemDefinition::SpawnOrGetMinigameScoreRegistry's native
+    // (6.21 0xDE8E40): the registry's record of a score by name (6.21 0x1092680, 6.20's in the same place), which seeds the
+    // playset's HighScorePresets rows. On the authority it adds the entry (the name, the score, the time, bHasScore),
+    // marks it dirty and puts it in the high scores; true when it ranks there.
+    inline bool (*AFortMinigameScoreRegistry_RecordScore)(UObject* This, const FString& PlayerName, float Score) = nullptr;
+
+    // From 3.5 (vending machines), Finder::ResolveItemCollectorSelectionSetupLive, off the collector's BeginPlay (6.21
+    // slot 0x5F, 0xD52510): FinishItemSelectionSetup (6.21 0xD5B380), the client half the builds keep: it unbinds the
+    // playlist-tables delegate, sets bHasFinishedSelectionSetup and picks the first active input. BeginPlay calls it at
+    // once when the playlist's tables are applied (the call Core redirects), else binds it to their delegate.
+    inline void (*ABuildingItemCollectorActor_FinishItemSelectionSetup)(UObject* This) = nullptr;
 }
 
 namespace Sites

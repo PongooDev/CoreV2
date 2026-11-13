@@ -14790,6 +14790,68 @@ bool Finder::ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UCla
     return true;
 }
 
+uint8_t* Finder::ResolveItemCollectorSelectionSetupLive(void** CollectorVTable, int32_t ItemSelectionHandleOffset)
+{
+    // ABuildingItemCollectorActor's BeginPlay (6.21 slot 0x5F, 0xD52510) runs FinishItemSelectionSetup (0xD5B380) at once
+    // when the game mode's playlist tables are applied (a direct call, 0xD52613), else binds it to their delegate (its
+    // address taken, lea at 0xD5261F) and keeps the handle in ItemSelectionHandle (+0x740). FinishItemSelectionSetup
+    // first unbinds that handle, reading it. So: the slot whose body both calls (6.21: a tail jump) and takes the address
+    // of one function that reads ItemSelectionHandle; the call is the site.
+    if (!CollectorVTable || ItemSelectionHandleOffset <= 0)
+    {
+        return nullptr;
+    }
+    uint8_t* Site = nullptr;
+    uintptr_t Setup = 0;
+    int32_t Matches = 0;
+    int32_t Slot = -1;
+    for (int32_t Index = 0; Index < 0x100; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(CollectorVTable, Index);
+        const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        if (!FunctionEnd || FunctionEnd <= Function || FunctionEnd - Function > 0x1000)
+        {
+            continue;
+        }
+        std::vector<uintptr_t> Taken;
+        for (uintptr_t Address = Function; Address + 7 <= FunctionEnd; ++Address)
+        {
+            const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Address);
+            if ((Bytes[0] == 0x48 || Bytes[0] == 0x4C) && Bytes[1] == 0x8D && (Bytes[2] & 0xC7) == 0x05)
+            {
+                Taken.push_back(Finder::RelativeTarget(Address, 3, 7));
+            }
+        }
+        // A call, or (6.21's) a tail jump: `jmp FinishItemSelectionSetup` at 0xD52613.
+        for (uintptr_t Address = Function; !Taken.empty() && Address + 5 <= FunctionEnd; ++Address)
+        {
+            const uint8_t Opcode = *reinterpret_cast<const uint8_t*>(Address);
+            const uintptr_t Target = Opcode == 0xE8 || Opcode == 0xE9 ? Finder::RelativeTarget(Address, 1, 5) : 0;
+            if (Target && std::find(Taken.begin(), Taken.end(), Target) != Taken.end() && Finder::ReadsMemberAt(Target, ItemSelectionHandleOffset)
+                && Finder::ReadsMemberAt(Function, ItemSelectionHandleOffset))
+            {
+                if (Target != Setup)
+                {
+                    ++Matches;
+                }
+                Setup = Target;
+                Site = reinterpret_cast<uint8_t*>(Address);
+                Slot = Index;
+                break;
+            }
+        }
+    }
+    if (Matches != 1)
+    {
+        Log::Error(L"Finder: ABuildingItemCollectorActor::FinishItemSelectionSetup not found off BeginPlay ({} candidates, ItemSelectionHandle +0x{:X})", Matches, ItemSelectionHandleOffset);
+        return nullptr;
+    }
+    Natives::ABuildingItemCollectorActor_FinishItemSelectionSetup = reinterpret_cast<void (*)(UObject*)>(Setup);
+    Log::Info(L"Finder: ABuildingItemCollectorActor::FinishItemSelectionSetup 0x{:X}, called by BeginPlay (slot 0x{:X}) at 0x{:X}", Setup - Finder::ImageBase(), Slot,
+        reinterpret_cast<uintptr_t>(Site) - Finder::ImageBase());
+    return Site;
+}
+
 namespace
 {
     // "Opcode ModRM disp32" at Site, addressing [base + disp32] (ModRM mod 10, no SIB byte), with ModRM's reg field Reg

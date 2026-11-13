@@ -418,6 +418,10 @@ namespace Finder
     // From 3.5: the delegate instance vtable of ABuildingItemCollectorActor::CheckDepositGoalReached's output timer
     // (Natives::ABuildingItemCollectorActor_GrantOutputDelegateVTable), from CollectorDefault's interact.
     bool ResolveItemCollectorGrantOutputLive(UObject* CollectorDefault, UClass* InteractInterface);
+    // From 6.20: BeginPlay's direct call of ABuildingItemCollectorActor::FinishItemSelectionSetup (the client half the
+    // builds keep; Natives::ABuildingItemCollectorActor_FinishItemSelectionSetup), off the collector's vtable and its
+    // ItemSelectionHandle's offset. Null where it isn't found.
+    uint8_t* ResolveItemCollectorSelectionSetupLive(void** CollectorVTable, int32_t ItemSelectionHandleOffset);
     // From 5.40 (The Getaway): AFortSpecialActorReplicationInfo::AddActorToReplicationList and the constructor and
     // destructor of the FSpecialActorInitData it takes, from AFortAthenaExitCraftSpawner::RegisterSpawnerSpecialActor
     // (the "%s_%s" function that stores Add's id into SpawnerSpecialActorIDOffset), and RemoveActorFromReplicationList,

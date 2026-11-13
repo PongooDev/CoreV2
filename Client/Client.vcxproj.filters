@@ -178,6 +178,12 @@
     <Filter Include="Engine\Source\Runtime\Engine\Classes\AI\Navigation">
       <UniqueIdentifier>{621334d2-c2bd-4d99-b4d5-ac5e10910840}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Classes\Animation">
+      <UniqueIdentifier>{e555e7b4-b968-44cb-8609-823ac59ce7d5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies">
+      <UniqueIdentifier>{21aba734-7bda-41e8-adde-0bd6c1f960e6}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Source\Runtime\Engine\Classes\Components">
       <UniqueIdentifier>{6c046c2a-96c2-496a-a5fb-4676fec8179b}</UniqueIdentifier>
     </Filter>
@@ -364,6 +370,9 @@
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Items">
       <UniqueIdentifier>{533d95e0-fa57-4238-bbc3-790e11ab799b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Private\Minigame">
+      <UniqueIdentifier>{b7e5ad38-b3db-472e-844b-22b5d2c2d121}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Missions">
       <UniqueIdentifier>{7f7c281a-0624-4b5d-9ba4-8164b0fc29d0}</UniqueIdentifier>
     </Filter>
@@ -400,6 +409,9 @@
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Abilities">
       <UniqueIdentifier>{e655b499-adac-443a-adbc-affa1f410d2d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Public\Animation">
+      <UniqueIdentifier>{d471d398-0373-41f3-b139-15640be162b6}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Athena">
       <UniqueIdentifier>{cb6ad887-feef-4bef-abe7-91d95d5660c6}</UniqueIdentifier>
     </Filter>
@@ -423,6 +435,9 @@
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Items">
       <UniqueIdentifier>{40b3ca9e-ebcf-4967-ba61-cee6f8316cb1}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Public\Minigame">
+      <UniqueIdentifier>{1485cf72-2d1a-4eaf-a689-773aaccd6f6e}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\Missions">
       <UniqueIdentifier>{a95152af-72ff-4571-9df1-06defa052840}</UniqueIdentifier>
@@ -468,15 +483,6 @@
     </Filter>
     <Filter Include="ThirdParty\MinHook\src\hde">
       <UniqueIdentifier>{32d8d9d2-1baa-445a-b0d7-67705115ab1c}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="FortniteGame\Source\FortniteGame\Public\Animation">
-      <UniqueIdentifier>{d471d398-0373-41f3-b139-15640be162b6}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Engine\Source\Runtime\Engine\Classes\Animation">
-      <UniqueIdentifier>{e555e7b4-b968-44cb-8609-823ac59ce7d5}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies">
-      <UniqueIdentifier>{21aba734-7bda-41e8-adde-0bd6c1f960e6}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -828,6 +834,21 @@
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\RecastNavMesh.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\AI\Navigation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimLinkableElement.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimMontage.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimSequenceBase.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimTypes.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies\AnimNotify.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Components\ActorComponent.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Components</Filter>
@@ -1186,24 +1207,6 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortAbilitySystemComponent.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
-    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Animation\FortAnimNotify_TriggerGameplayAbility.h">
-      <Filter>FortniteGame\Source\FortniteGame\Public\Animation</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimLinkableElement.h">
-      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimMontage.h">
-      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimSequenceBase.h">
-      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimTypes.h">
-      <Filter>Engine\Source\Runtime\Engine\Classes\Animation</Filter>
-    </ClInclude>
-    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies\AnimNotify.h">
-      <Filter>Engine\Source\Runtime\Engine\Classes\Animation\AnimNotifies</Filter>
-    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortGameplayAbility.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
     </ClInclude>
@@ -1212,6 +1215,9 @@
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Abilities</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Animation\FortAnimNotify_TriggerGameplayAbility.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Animation</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortArenaCamera.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
@@ -1374,6 +1380,12 @@
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Items\FortSchematicItemDefinition.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Items</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigameScoreRegistry.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Minigame</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Minigame\FortMinigameState.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Minigame</Filter>
     </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Missions\FortItemCollectedParams.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Missions</Filter>
@@ -2011,6 +2023,12 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortSchematicItemDefinition.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigameScoreRegistry.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Minigame</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Minigame\FortMinigameState.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Minigame</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Missions\FortItemCollectedParams.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Missions</Filter>

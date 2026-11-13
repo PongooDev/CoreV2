@@ -10018,18 +10018,34 @@ bool Finder::ResolveLootDataTablesLive(ptrdiff_t GameDataLootTierDataTablesOffse
         }
         return Count;
     };
-    // A function's first piece, when Entry starts one no bigger than MaxSize.
+    // A function's first piece, when Entry starts one no bigger than MaxSize. 6.20 (CL-4497486) splits AFortGameModeAthena's
+    // overrides into pieces whose first holds only the prologue (0xC726B0: C726B0-C726BA, then C726BA-C7272A,
+    // C7272A-C72763 and C7276E-C72784, each chained to the first), so with a first piece that short the body runs to its
+    // last piece's end.
     const auto BodyEnd = [](uintptr_t Entry, uintptr_t MaxSize) -> uintptr_t
     {
-        const uintptr_t End = IsInText(Entry) && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        uintptr_t End = IsInText(Entry) && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        if (End > Entry && End - Entry < 0x20)
+        {
+            for (const auto& [ChunkBegin, ChunkEnd] : Finder::FunctionChunks(Entry))
+            {
+                End = ChunkBegin >= Entry && ChunkEnd - Entry <= MaxSize ? std::max(End, ChunkEnd) : End;
+            }
+        }
         return End > Entry && End - Entry <= MaxSize ? End : 0;
     };
-    // lea r64, [reg+Offset]
+    // lea r64, [reg+Offset], or 6.20's add r64, Offset (add rcx, 198h at 0xC72723, the playlist's LootTierData).
     const auto LoadsAddressAt = [](uintptr_t Begin, uintptr_t End, int32_t Offset)
     {
         for (uintptr_t Address = Begin; Offset > 0 && Address + 7 <= End; ++Address)
         {
             if ((Byte(Address) & 0xFA) == 0x48 && Byte(Address + 1) == 0x8D && (Byte(Address + 2) & 0xC0) == 0x80 && (Byte(Address + 2) & 0x07) != 0x04
+                && *reinterpret_cast<const int32_t*>(Address + 3) == Offset)
+            {
+                return true;
+            }
+            // Not add rsp, imm32: a stack frame's size can equal the offset.
+            if ((Byte(Address) & 0xFE) == 0x48 && Byte(Address + 1) == 0x81 && (Byte(Address + 2) & 0xF8) == 0xC0 && Byte(Address + 2) != 0xC4
                 && *reinterpret_cast<const int32_t*>(Address + 3) == Offset)
             {
                 return true;

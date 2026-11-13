@@ -3142,41 +3142,51 @@ namespace
         }
         RequireOffset(L"sizeof(FOutBunch)", Natives::FOutBunch_Size, BunchSize > BunchReliable && BunchSize <= static_cast<ptrdiff_t>(FOutBunch::StorageSize) ? BunchSize : 0);
 
-        const uintptr_t Overflowed = FunctionOf(L"FBitWriter overflowed! (WriteLen: %i, Remaining: %i, Max: %i)");
-        const uintptr_t OverflowedEnd = Overflowed ? Finder::FunctionEnd(Overflowed) : 0;
+        // FBitWriter's overflow report (Max - Num, then ArIsError's bit set). Up to 6.10 the string has one user, the
+        // writer's out-of-line overflow function (6.10 0x1731B90: mov rax, [rcx+Max]; sub r8, [rcx+Num]). 6.20 also
+        // inlines the report into FBitWriter::SerializeIntPacked (0x17855E0, whose Max - Num is register to register),
+        // and that copy is the first reference, so each function holding the string is read in turn, the first first.
         ptrdiff_t ErrorByte = 0;
         uint32_t ErrorMask = 0;
-        for (uintptr_t Or = OverflowedEnd ? FindInstruction(Overflowed, OverflowedEnd, { 0x80, -1, -1, -1 }) : 0; Or && !ErrorMask; Or = FindInstruction(Or + 1, OverflowedEnd, { 0x80, -1, -1, -1 }))
+        ptrdiff_t WriterNum = 0;
+        const std::initializer_list<int32_t> SubtractNum = { -1, 0x2B, -1, -1, -1, -1, -1 };
+        const std::initializer_list<int32_t> LoadMax = { 0x48, 0x8B, -1, -1, -1, -1, -1 };
+        for (const uintptr_t OverflowRef : Finder::StringRefs(L"FBitWriter overflowed! (WriteLen: %i, Remaining: %i, Max: %i)"))
         {
-            if ((Byte(Or + 1) & 0xF8) == 0x48 && (Byte(Or + 1) & 0x07) != 0x04 && Byte(Or + 3) && (Byte(Or + 3) & (Byte(Or + 3) - 1)) == 0)
+            const uintptr_t Overflowed = Finder::FunctionStart(OverflowRef);
+            const uintptr_t OverflowedEnd = Overflowed ? Finder::FunctionEnd(Overflowed) : 0;
+            for (uintptr_t Or = OverflowedEnd && !ErrorMask ? FindInstruction(Overflowed, OverflowedEnd, { 0x80, -1, -1, -1 }) : 0; Or && !ErrorMask; Or = FindInstruction(Or + 1, OverflowedEnd, { 0x80, -1, -1, -1 }))
             {
-                ErrorByte = Byte(Or + 2);
-                ErrorMask = Byte(Or + 3);
+                if ((Byte(Or + 1) & 0xF8) == 0x48 && (Byte(Or + 1) & 0x07) != 0x04 && Byte(Or + 3) && (Byte(Or + 3) & (Byte(Or + 3) - 1)) == 0)
+                {
+                    ErrorByte = Byte(Or + 2);
+                    ErrorMask = Byte(Or + 3);
+                }
+            }
+            for (uintptr_t Sub = OverflowedEnd && !WriterNum ? FindInstruction(Overflowed, OverflowedEnd, SubtractNum) : 0; Sub && !WriterNum; Sub = FindInstruction(Sub + 1, OverflowedEnd, SubtractNum))
+            {
+                const uint8_t ModRm = Byte(Sub + 2);
+                if ((Byte(Sub) & 0xF8) != 0x48 || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04)
+                {
+                    continue;
+                }
+                const ptrdiff_t Num = *reinterpret_cast<const int32_t*>(Sub + 3);
+                const uintptr_t From = Sub > Overflowed + 0x20 ? Sub - 0x20 : Overflowed;
+                for (uintptr_t Load = FindInstruction(From, Sub, LoadMax); Load && !WriterNum; Load = FindInstruction(Load + 1, Sub, LoadMax))
+                {
+                    if ((Byte(Load + 2) & 0xC7) == (0x80 | (ModRm & 0x07)) && *reinterpret_cast<const int32_t*>(Load + 3) == Num + 8)
+                    {
+                        WriterNum = Num;
+                    }
+                }
+            }
+            if (ErrorMask && WriterNum)
+            {
+                break;
             }
         }
         RequireOffset(L"FArchive::ArIsError", Natives::FArchive_ArIsError, ErrorByte);
         Natives::FArchive_ArIsErrorMask = ErrorMask;
-
-        ptrdiff_t WriterNum = 0;
-        const std::initializer_list<int32_t> SubtractNum = { -1, 0x2B, -1, -1, -1, -1, -1 };
-        const std::initializer_list<int32_t> LoadMax = { 0x48, 0x8B, -1, -1, -1, -1, -1 };
-        for (uintptr_t Sub = OverflowedEnd ? FindInstruction(Overflowed, OverflowedEnd, SubtractNum) : 0; Sub && !WriterNum; Sub = FindInstruction(Sub + 1, OverflowedEnd, SubtractNum))
-        {
-            const uint8_t ModRm = Byte(Sub + 2);
-            if ((Byte(Sub) & 0xF8) != 0x48 || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04)
-            {
-                continue;
-            }
-            const ptrdiff_t Num = *reinterpret_cast<const int32_t*>(Sub + 3);
-            const uintptr_t From = Sub > Overflowed + 0x20 ? Sub - 0x20 : Overflowed;
-            for (uintptr_t Load = FindInstruction(From, Sub, LoadMax); Load && !WriterNum; Load = FindInstruction(Load + 1, Sub, LoadMax))
-            {
-                if ((Byte(Load + 2) & 0xC7) == (0x80 | (ModRm & 0x07)) && *reinterpret_cast<const int32_t*>(Load + 3) == Num + 8)
-                {
-                    WriterNum = Num;
-                }
-            }
-        }
         RequireOffset(L"FBitWriter::Num", Natives::FBitWriter_Num, WriterNum);
         Log::Info(L"Finder: FOutBunch is 0x{:X} bytes, bClose +0x{:X} & 0x{:X}, bDormant +0x{:X} & 0x{:X}, bReliable +0x{:X} & 0x{:X}, Num +0x{:X}, ArIsError +0x{:X} & 0x{:X}, UChannel::ChIndex +0x{:X}", BunchSize, BunchClose, CloseMask, BunchDormant, DormantMask, BunchReliable, ReliableMask, WriterNum, ErrorByte, ErrorMask, ChIndex);
 

@@ -10,7 +10,9 @@
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortRuntimeOptions.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/PlayerState.h"
 #include "GameplayTagContainer.h"
 #include "HAL/IConsoleManager.h"
 #include "Hooks.h"
@@ -380,8 +382,19 @@ void AFortPlayerController::SendSprayStatEvent(UAthenaSprayItemDefinition* Spray
 // CueToPlayWhenExpired and dies.
 //
 // So this counts the summon, takes back the player's toy of the same class when one is still out, fades the oldest toys
-// out until fort.NumToysAlivePerPlayer leave room, and spawns a new one owned by the controller, initialized with the
-// summon count and handed back.
+// out until fort.NumToysAlivePerPlayer leave room, and spawns a new one owned by the player's state, initialized with
+// the summon count and handed back.
+//
+// The toy's owner is the thrower's player state, not the controller (#441). Every toy blueprint reads it that way:
+// B_Toy_Tomato_Base's OnPawnTouchedMe only counts a pawn whose Controller->PlayerState isn't GetOwner(), then casts
+// GetOwner() to AFortPlayerState for CreateMessage(BallOwner, OtherPlayer) (gated on UFortRuntimeOptions
+// bToyMessagingEnabled, +0x43E on 6.21, which the constructor 0x141E760 turns on) and for its quest
+// (GetFortPlayerControllerFromActor(GetOwner())); B_Toy_BeachBall_Base's RecordPlayerPawnHit compares Controller->PlayerState == GetOwner() and
+// its CreateMessage takes Cast<AFortPlayerState>(GetOwner()). The message replicates (OnRep_MessageContents) and each
+// client prints it through UFortToyContext::ConditionalPrintToMessageFeed: "{ThrowerPlayerName} splatted
+// {ImpactPlayerName} with a {ToyDisplayName} ({Distance}m)". Owned by the controller, the cast failed and no toy put a
+// line in the feed. Nothing else sets the owner (GAB_ToyThrow_Base only spawns, makes dormant and launches), and the
+// player state's own owner is the controller, so the toy's net owner is the same connection as before.
 //
 // A toy taken back plays its reuse cue where it is and then dies silently, as StartToyFadeOutDueToNewPlacement's own
 // cue-then-SilentDie does; it is not moved to the new spot (#344). The ability attaches whatever it gets to the hand
@@ -468,7 +481,7 @@ AActor* AFortPlayerController::SpawnToyInstance(UClass* ToyClass, const FTransfo
     }
 
     FActorSpawnParameters SpawnParameters;
-    SpawnParameters.Owner = this;
+    SpawnParameters.Owner = PlayerState ? static_cast<AActor*>(PlayerState) : static_cast<AActor*>(this);
     SpawnParameters.Instigator = MyFortPawn;
     SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     AActor* NewToy = World->SpawnActor(ToyClass, &SpawnPosition, SpawnParameters);
@@ -480,7 +493,16 @@ AActor* AFortPlayerController::SpawnToyInstance(UClass* ToyClass, const FTransfo
 
     Active.Add(NewToy);
     CallToyEvent(NewToy, L"InitializeToyInstance", this, NumTimesSummoned);
-    Log::Info(L"Toy: {} summons {} (summon {})", GetName().ToStdString(), NewToy->GetName().ToStdString(), NumTimesSummoned);
+    Log::Info(L"Toy: {} summons {} (summon {}), owned by {}", GetName().ToStdString(), NewToy->GetName().ToStdString(), NumTimesSummoned,
+        SpawnParameters.Owner->GetName().ToStdString());
+    static bool bLoggedToyMessaging = false;
+    if (!bLoggedToyMessaging)
+    {
+        bLoggedToyMessaging = true;
+        const UFortRuntimeOptions* Options = UFortRuntimeOptions::Get();
+        Log::Info(L"Toy: the runtime options' bToyMessagingEnabled is {} (toy hits and keep-ups go to the message feed when on)",
+            Options && UFortRuntimeOptions::HasToyMessaging() ? (Options->bToyMessagingEnabled ? L"on" : L"off") : L"unknown");
+    }
     return NewToy;
 #else
     return nullptr;

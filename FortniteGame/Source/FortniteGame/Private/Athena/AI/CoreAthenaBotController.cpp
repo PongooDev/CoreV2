@@ -1280,12 +1280,7 @@ void FCoreAthenaBotController::AssignDisplayName(const std::wstring& Name)
     {
         State->PlayerId = (*Natives::AGameSession_NextPlayerID)++;
     }
-    static int32_t LoggedIds = 0;
     const bool bHasId = AssignUniqueId(State, std::format(L"CoreBot{}{}", BotIndex, Name));
-    if (LoggedIds++ < 2 || !bHasId)
-    {
-        Log::Info(L"Battle Royale bots: {}'s id: {} (PlayerId {})", Name, State->UniqueId.ToString().ToStdString(), APlayerState::HasPlayerId() ? static_cast<int32_t>(State->PlayerId) : -1);
-    }
     State->PlayerName = FString(Name.c_str());
     if (APlayerState::HasPlayerNamePrivate())
     {
@@ -1309,6 +1304,15 @@ void FCoreAthenaBotController::AssignDisplayName(const std::wstring& Name)
                 State->PlayerNamePrivate = FString(Name.c_str());
             }
         }
+    }
+    // What a client gets to show the name by: the replicated UniqueId it files the name under, and the replicated name
+    // (PlayerNamePrivate as stored, PlayerName before 1.9).
+    static int32_t LoggedIds = 0;
+    if (LoggedIds++ < 2 || !bHasId)
+    {
+        const FString& Replicated = APlayerState::HasPlayerNamePrivate() ? State->GetMember_PlayerNamePrivate() : State->GetMember_PlayerName();
+        Log::Info(L"Battle Royale bots: {}'s id: {} (PlayerId {}), replicated name \"{}\"", Name, State->UniqueId.ToString().ToStdString(),
+            APlayerState::HasPlayerId() ? static_cast<int32_t>(State->PlayerId) : -1, Replicated.ToStdString());
     }
     // Its team is the manager's to give, as the game mode gives a player theirs (FCoreAthenaBotManager::PlaceBotOnTeam).
     State->bIsABot = true;

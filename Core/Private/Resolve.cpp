@@ -15173,6 +15173,31 @@ bool Finder::ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceV
             return true;
         }
     }
+    // 6.20 (CL-4497486 0x432F00, slot 0x278; 6.21's 0x435930 the same) is 5.0's code, but the identity's
+    // CreateUniquePlayerId has moved down the interface: "mov r8, r14; call [rax+100h]" (6.02 and 6.10.2 still call
+    // [rax+0D0h]). Without it 6.20's bots had no ids, and clients, which file every player's name under the player state's
+    // UniqueId (6.20's AFortPlayerState::SetPlayerNameInternal 0x10CA090 files it, through 0x10C6EE0, in a map at
+    // 0x54D8D00 keyed by +0x380; GetPlayerNameCustom 0x10C7630, which APlayerState::GetPlayerName 0x2872310 calls for the
+    // HUD and GetPlayerNameForStreaming, reads it back by the same key), showed one name for every bot (CoreV2 #428). Its
+    // own pass after the shapes above, so a build they match keeps the slot it had.
+    for (int32_t Index = 0x40; OnlineEngineInterfaceVTable && Index < 0x60; ++Index)
+    {
+        const uintptr_t Function = reinterpret_cast<uintptr_t>(OnlineEngineInterfaceVTable[Index]);
+        if (!IsInText(Function) || !IsInText(Function + 0x80))
+        {
+            continue;
+        }
+        const uintptr_t KeepR14String = FindInstruction(Function, Function + 0x30, { 0x4D, 0x8B, 0xF0 });
+        const uintptr_t IsLoadedR14 = KeepR14String ? FindInstruction(KeepR14String, KeepR14String + 0x20, { 0x48, 0x8B, 0x01, 0x49, 0x8B, 0xD1, 0xFF, 0x90 }) : 0;
+        const uintptr_t Call = IsLoadedR14 ? FindInstruction(IsLoadedR14 + 8, Function + 0x80, { 0x4D, 0x8B, 0xC6, 0xFF, 0x90 }) : 0;
+        if (Call)
+        {
+            Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex = Index;
+            Log::Info(L"Finder: UOnlineEngineInterface::CreateUniquePlayerId is slot 0x{:X} (0x{:X}; the identity's CreateUniquePlayerId at +0x{:X})", Index * 8,
+                Function - Finder::ImageBase(), *reinterpret_cast<const uint32_t*>(Call + 5));
+            return true;
+        }
+    }
     Log::Warning(L"Finder: UOnlineEngineInterface::CreateUniquePlayerId not found, player bots go without ids");
     return false;
 }

@@ -761,6 +761,7 @@ namespace Natives
     // UOnlineEngineInterface::CreateUniquePlayerId(const FString& Str) (3.1 UOnlineEngineInterfaceImpl's 0x316930, slot
     // 0x268; 2.5 and 3.0 the same slot): the identity interface's CreateUniquePlayerId, as a connection's id is made when
     // it replicates. UE 4.20 (3.3 0x328DE0, slot 0x278) adds FName Type: NAME_None is the default online subsystem's.
+    // 6.20 (0x432F00, the same slot) calls the identity's CreateUniquePlayerId at +0x100 instead of +0xD0.
     // Battle Royale's player bots get their account-like ids from it: Finder::ResolveCreateUniquePlayerIdLive.
     inline int32_t UOnlineEngineInterface_CreateUniquePlayerIdIndex = -1;
     // AGameSession::GetNextPlayerID's static NextPlayerID (UE 4.20: "static int32 NextPlayerID = 256; return

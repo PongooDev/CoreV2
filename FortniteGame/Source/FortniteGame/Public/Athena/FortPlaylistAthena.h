@@ -45,6 +45,16 @@ public:
     // none on most playlists.
     DefineUProperty(UPlaylistUserOptions*, UserOptions)
     static bool HasUserOptions() { return Member_UserOptions.IsAvailable(); }
+
+    // A Showdown playlist, one of 6.10's in-game tournaments' (CL-4480234; Playlist_Showdown_Solo, _Duos and _Squads,
+    // 58071 to 58073): the playlist name is one the tournament manager gives a match type, as its own lookup has it
+    // (UFortTournamentManager, CL-4480234 0x11A7750 and 6.20 CL-4497486 0x11E9D90: the three names, compared without their
+    // case, give EFortShowdownMatchType Solo, Duos and Squads, any other Unknown). Their matches are the tournaments'
+    // (the client adds the scoring HUD alert as the playlist's UI extension, and Core-Backend scores their matches for the
+    // event they play in), and their server tells their players the team's eliminations and when its stats are final
+    // (AFortPlayerStateAthena::ClientReportTeamKill and ClientNotifyTournamentStatsFinal). The name is Core's; no build
+    // before 6.10 has the three playlists.
+    bool IsShowdownPlaylist() const;
 };
 
 // Whether the players of a playlist come back after they die (from 3.5; 4.2's Playground: InfiniteRespawnExceptStorm).

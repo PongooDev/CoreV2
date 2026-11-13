@@ -5,6 +5,24 @@
 
 #include <cwchar>
 
+bool UFortPlaylist::IsShowdownPlaylist() const
+{
+    // CL-4480234 0x11A7750: the playlist name against the three, without case (towlower), each its EFortShowdownMatchType.
+    if (!Member_PlaylistName.IsAvailable())
+    {
+        return false;
+    }
+    const std::wstring Name = static_cast<FName>(PlaylistName).ToStdString();
+    for (const wchar_t* Showdown : { L"Playlist_Showdown_Solo", L"Playlist_Showdown_Duos", L"Playlist_Showdown_Squads" })
+    {
+        if (_wcsicmp(Name.c_str(), Showdown) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 int32_t FPlaylistPropertyArray::SetPropertyOverrides(const UFortPlaylistAthena* Playlist, const TMap<FString, FString>* MatchOptions)
 {
     int32_t Set = 0;

@@ -474,11 +474,14 @@ namespace
     }
 
     // An elimination for Team: each of its players' team eliminations (AFortPlayerStateAthena::TeamKillScore, the HUD's).
+    // A build with KillScore has the elimination in the killer's KillScore by now (a bot's AddKill and a player's kill
+    // of a bot both go through SetKillScore), and SetKillScore has set every teammate's TeamKillScore to the team's sum
+    // with it: adding it here too counted it twice (CoreV2 #418: 6.10's tournament alerts follow the count).
     void AddTeamKillScore(AFortGameModeAthena* GameMode, uint8_t Team)
     {
         UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
         AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
-        if (!AFortPlayerStateAthena::HasTeamKillScore() || !GameState)
+        if (!AFortPlayerStateAthena::HasTeamKillScore() || AFortPlayerStateAthena::HasKillScore() || !GameState)
         {
             return;
         }

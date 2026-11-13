@@ -584,6 +584,42 @@ namespace
         }
     }
 
+    // 6.10's in-game tournaments (CoreV2 #418): a tournament's game server reported each team's match once its placement
+    // was final (FortMcpUtils' ReportTournamentStatsUrl, an FMcpTournamentStats of the team's account ids, eliminations
+    // and final placement) and told its players so (AFortPlayerStateAthena::ClientNotifyTournamentStatsFinal), whose
+    // clients then tell their party to ask for the event window's history again. Both callers are compiled out of the
+    // client builds. Core's report is battleroyale/recordresults, which Core-Backend scores for the event a Showdown
+    // playlist's match plays in (tournaments/showdown.js; the matchmaking assignment names no tournament, so the server
+    // has none to put in Epic's report): once it has the reported players' match, each still here is told.
+    void NotifyTournamentStatsFinal(AFortGameModeAthena* GameMode, const std::vector<std::wstring>& Reported)
+    {
+        if (!AFortPlayerStateAthena::FindStaticFunction_ClientNotifyTournamentStatsFinal())
+        {
+            return;
+        }
+        UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+        AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+        UFortPlaylistAthena* Playlist = GameState && AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
+        if (!Playlist || !Playlist->IsShowdownPlaylist())
+        {
+            return;
+        }
+        int32_t Told = 0;
+        for (APlayerState* PlayerState : GameState->PlayerArray)
+        {
+            AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+            const std::wstring AccountId = AthenaState ? AthenaState->UniqueId.ToString().ToStdString() : std::wstring();
+            if (AthenaState && Cast<AFortPlayerController>(reinterpret_cast<UObject*>(AthenaState->GetOwner()))
+                && std::find(Reported.begin(), Reported.end(), AccountId) != Reported.end())
+            {
+                AthenaState->ClientNotifyTournamentStatsFinal();
+                ++Told;
+            }
+        }
+        Log::Info(L"Tournament: {} reported players' stats are final in {}, {} told (ClientNotifyTournamentStatsFinal)", Reported.size(),
+            static_cast<FName>(Playlist->PlaylistName).ToStdString(), Told);
+    }
+
     // A player of the match as their player state has them now (none for a bot, which has no account): their team,
     // time alive, place and, where the server doesn't count kills, who eliminated them.
     FMatchPlayer* UpdateMatchPlayer(FMatchResults& Results, AFortPlayerStateAthena* AthenaState)
@@ -711,9 +747,14 @@ namespace
                     Results.bCountWins ? "true" : "false", Results.MatchId),
                 FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [WeakGameMode, Reported](uint32_t Status, const std::string& Answer)
             {
-                GameThread::Enqueue([WeakGameMode, Reported, Answer = Status == 200 ? Answer : std::string()]()
+                GameThread::Enqueue([WeakGameMode, Reported, bRecorded = Status == 200, Answer = Status == 200 ? Answer : std::string()]()
                 {
-                    SendMatchRewards(static_cast<AFortGameModeAthena*>(WeakGameMode.Get()), Reported, Answer);
+                    AFortGameModeAthena* ReportedGameMode = static_cast<AFortGameModeAthena*>(WeakGameMode.Get());
+                    SendMatchRewards(ReportedGameMode, Reported, Answer);
+                    if (bRecorded)
+                    {
+                        NotifyTournamentStatsFinal(ReportedGameMode, Reported);
+                    }
                 });
             });
         }
@@ -2804,6 +2845,15 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded()
             UFortPlaylistAthena* Playlist = GameState->GetCurrentPlaylist();
             Log::Info(L"PLAYLIST: {}'s mutators: {} answer for the game mode, {} for the game state{}", Playlist ? static_cast<FName>(Playlist->PlaylistName).ToStdString() : std::wstring(L"the playlist"),
                 ModeMutators, StateMutators, AFortGameStateAthena::HasAllowRespawning() ? (GameState->bAllowRespawning ? L"; bAllowRespawning is set" : L"; bAllowRespawning isn't set") : L"");
+        }
+        // 6.10's in-game tournaments (CoreV2 #418): a Showdown playlist's match is a tournament's, once, as it loads.
+        UFortPlaylistAthena* Playlist = AFortPlayerStateAthena::FindStaticFunction_ClientReportTeamKill() && AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
+        if (Playlist && Playlist->IsShowdownPlaylist())
+        {
+            Log::Info(L"Tournament: {} is a tournament's playlist: each team's eliminations go to its players as they grow (ClientReportTeamKill), its stats once "
+                L"its match is reported ({}), and its placement as the game state's TeamsLeft and the players' Place replicate",
+                static_cast<FName>(Playlist->PlaylistName).ToStdString(), AFortPlayerStateAthena::FindStaticFunction_ClientNotifyTournamentStatsFinal()
+                    ? L"ClientNotifyTournamentStatsFinal" : L"this build has no ClientNotifyTournamentStatsFinal");
         }
     }
     // A playlist that brings its players back says how far over their death once, as it loads (#411).

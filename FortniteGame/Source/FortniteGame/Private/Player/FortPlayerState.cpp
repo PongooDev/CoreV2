@@ -309,6 +309,34 @@ void AFortPlayerStateAthena::ClientReportKill(AFortPlayerStateAthena* KilledPlay
     }
 }
 
+void AFortPlayerStateAthena::ClientReportTeamKill(int32_t TeamKills)
+{
+    UFunction* Function = FindStaticFunction_ClientReportTeamKill();
+    Reflection::FParams Params(Function);
+    if (Function && Params.Set(L"TeamKills", TeamKills))
+    {
+        Params.Call(this);
+    }
+}
+
+void AFortPlayerStateAthena::ClientNotifyTournamentStatsFinal()
+{
+    UFunction* Function = FindStaticFunction_ClientNotifyTournamentStatsFinal();
+    if (Function)
+    {
+        Reflection::FParams Params(Function);
+        Params.Call(this);
+    }
+}
+
+bool AFortPlayerStateAthena::IsTournamentMatch()
+{
+    UWorld* World = GetWorld();
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    UFortPlaylistAthena* Playlist = GameState && AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
+    return Playlist && Playlist->IsShowdownPlaylist();
+}
+
 void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
 {
     if (!Member_KillScore.IsAvailable())
@@ -380,13 +408,35 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
             TeamKills += Member->KillScore;
         }
     }
+    // From 6.10, in a tournament's match, each of the team's players' client is told the team's count as it grows
+    // (ClientReportTeamKill), which the Showdown scoring HUD alert scores; TeamKillScore isn't replicated in these builds,
+    // so the RPC is how a client hears it. The alert wants a tier's keyValue exactly, and Core's results can count two
+    // eliminations at once (a squad wiped in one frame), so each count on the way is sent, in order (the RPC is
+    // reliable): every elimination gets its tier's alert, as one counted at a time does.
+    const bool bReportTeamKills = Role == ROLE_Authority && FindStaticFunction_ClientReportTeamKill() && IsTournamentMatch();
+    int32_t ReportedPlayers = 0;
     for (APlayerState* PlayerState : PlayerArray)
     {
         AFortPlayerStateAthena* Member = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
         if (Member && IsTeammate(Member))
         {
+            const int32_t Before = Member->TeamKillScore;
             Member->TeamKillScore = TeamKills;
+            // A player's own client: a bot's state (an AI controller's) would run the client's side here on the server.
+            if (!bReportTeamKills || TeamKills <= Before || !Cast<AFortPlayerController>(reinterpret_cast<UObject*>(Member->GetOwner())))
+            {
+                continue;
+            }
+            for (int32_t Count = std::max(Before, 0) + 1; Count <= TeamKills; ++Count)
+            {
+                Member->ClientReportTeamKill(Count);
+            }
+            ++ReportedPlayers;
         }
+    }
+    if (ReportedPlayers > 0)
+    {
+        Log::Info(L"Tournament: team {} has {} eliminations, sent to its {} players (ClientReportTeamKill)", static_cast<int32_t>(Team), TeamKills, ReportedPlayers);
     }
 }
 

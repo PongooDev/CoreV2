@@ -223,6 +223,27 @@ public:
     // highlights and broadcasts it to the HUD, 0x460180).
     void ClientReportKill(AFortPlayerStateAthena* KilledPlayer);
 
+    // 6.10's in-game tournaments (CL-4480234; 6.20 the same), two client RPCs new in 6.10 whose server callers are
+    // compiled out of the client builds (nothing refers to their FNames but the FName's own initializer: CL-4480234
+    // 0x1417C0 and 0x141760, 6.20 0x147230 and 0x1471D0).
+    // ClientReportTeamKill (reliable): the team's eliminations so far, for each of its players. The client's
+    // _Implementation (CL-4480234 0xC7ACB0, 6.20 0xCCC0F0) broadcasts the owning AFortPlayerControllerAthena's native team
+    // kills delegate (+0x2380, 21.40's FOnPlayerTeamKillsChanged), whose only listener in 6.10 is the Showdown playlists'
+    // scoring HUD alert (UFortShowdownScoringHUDAlert, bound in its NativeConstruct, 0x3069710): above the count it last
+    // alerted (+0x248, from 0) it looks up the current event's TEAM_ELIMS_STAT_INDEX rule for a reward tier whose keyValue
+    // is the count, adds the tier to the tournament manager's history of the window and plays its "+N POINTS"
+    // (0x3072420, ScorePointAlert). A count that has no tier, or one sent past, shows nothing.
+    DefineUFunction(ClientReportTeamKill)
+    void ClientReportTeamKill(int32_t TeamKills);
+    // ClientNotifyTournamentStatsFinal (reliable): the team's match is reported. The client's _Implementation
+    // (CL-4480234 0xC7A560, 6.20 0xCCB8A0) sends the members of its party, from the local one, the XMPP message
+    // com.epicgames.tournaments.complete (with UFortRuntimeOptions' bEnableShowdownXmppNotify), on which their tournament
+    // managers ask the backend for the event window's history again (UFortTournamentManager::HandleXmppReceived).
+    DefineUFunction(ClientNotifyTournamentStatsFinal)
+    void ClientNotifyTournamentStatsFinal();
+    // Whether the match is a tournament's: its playlist a Showdown one (UFortPlaylist::IsShowdownPlaylist).
+    bool IsTournamentMatch();
+
     static ptrdiff_t PlaceOffset() { return Member_Place.GetOffsetChecked(); }
     static ptrdiff_t SecondsAliveOffset() { return Member_SecondsAlive.GetOffsetChecked(); }
     static ptrdiff_t DeathInfoOffset() { return Member_DeathInfo.GetOffsetChecked(); }

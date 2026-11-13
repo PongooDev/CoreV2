@@ -230,6 +230,9 @@ namespace
         // ApplyContainerSpawnPercents left the spawn percents to the bus.
         bool bSpawnPercentsWaitForAircraft = false;
         bool bAircraftHandled = false;
+        // A player left since the last CheckMatchPlayers (HandlePlayerStateDestroyed): the game's Logout took them out of
+        // the alive players, which is one of the moments the game checks the win.
+        bool bPlayerLeft = false;
         // The tick after GamePhaseChanged (RunGamePhase); where it can't be bound, CheckGamePhase's.
         FTimerHandle PhaseTimer;
         // The tick after a pawn of the match died or a player left (CheckMatchPlayers).
@@ -2267,6 +2270,7 @@ namespace
             }
         }
         std::map<const UObject*, uint8_t> Teams;
+        bool bSwitched = false;
         for (AFortPlayerStateAthena* State : States)
         {
             const uint8_t Team = static_cast<uint8_t>(State->TeamIndex);
@@ -2276,6 +2280,7 @@ namespace
             {
                 continue;
             }
+            bSwitched = true;
             const auto IsPlayer = [](AFortPlayerStateAthena* Other) { return Cast<APlayerController>(reinterpret_cast<UObject*>(Other->GetOwner())) != nullptr; };
             uint8_t Squad = 0;
             uint8_t BotSquad = 0;
@@ -2323,6 +2328,14 @@ namespace
                 EFortTeam{ Team }.ToString(), OldSquad, Squad, Joined > 0 ? std::format(L" ({} of the team's bots join it too)", Joined) : std::wstring());
         }
         Watch.Teams = std::move(Teams);
+        // The game's SetTeam (6.00 0xE8C990) took the player out of the alive players without a win check
+        // (PreTeamChange, 0xC2C980) and put them back on the new team (PostTeamChange, 0xC2C4C0): the bots' manager
+        // counts the teams again, and checks no win (#411's log: a switch to the bots' team ended the match).
+        FCoreAthenaBotManager* BotManager = bSwitched ? FCoreAthenaBotManager::Get() : nullptr;
+        if (BotManager)
+        {
+            BotManager->PostTeamChange();
+        }
     }
 }
 
@@ -2493,13 +2506,24 @@ namespace
     // they gave, and a player the game moved to another team (the switch kills the pawn).
     void CheckMatchPlayers(AFortGameModeAthena* Athena)
     {
-        MatchEventsOf(Athena).PlayersTimer.Invalidate();
+        FMatchEvents& Events = MatchEventsOf(Athena);
+        Events.PlayersTimer.Invalidate();
         if (FMatchResults* Results = MatchResultsOf(Athena))
         {
             CheckMatchResults(Athena, *Results);
         }
         CheckTeamSwitches(Athena);
         BindMatchPawns(Athena);
+        // A player who left: AFortGameModeAthena::Logout's RemoveFromAlivePlayers ends in the game's win check (6.00
+        // 0xC27408, death cause LoggedOut), and the bots' share of it runs here (a team left alone, or every player gone).
+        if (Events.bPlayerLeft)
+        {
+            Events.bPlayerLeft = false;
+            if (FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get())
+            {
+                BotManager->OnPlayerRemoved(nullptr, nullptr, nullptr, EDeathCause::GetUnspecified());
+            }
+        }
     }
 
     // How long each of the match's storm circles holds and shrinks for, as the map info's definitions read now (the
@@ -2813,18 +2837,21 @@ void AFortGameModeAthena::HandlePlayerStateDestroyed(AActor* DestroyedActor)
     // The player's place as they leave: a player who leaves the match alive is out of it (AFortGameModeAthena's Logout
     // takes them out of the alive players, RemoveFromAlivePlayers), and their team's place comes with it when they were
     // its last. Their player state has left the game state's PlayerArray by now (APlayerState::Destroyed), so it is read
-    // here, and the match's results are looked at the tick after.
+    // here, and the match's results, and the bots' share of Logout's win check, are looked at the tick after.
     AFortPlayerStateAthena* State = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(DestroyedActor));
-    FMatchResults* Results = State ? MatchResultsOf(this) : nullptr;
-    if (!Results)
+    if (!State)
     {
         return;
     }
-    if (FMatchPlayer* Player = UpdateMatchPlayer(*Results, State))
+    if (FMatchResults* Results = MatchResultsOf(this))
     {
-        Player->Kills = State->GetKills();
-        Player->BotKills = std::min(FCoreAthenaBotManager::BotKillsOf(State), std::max(Player->Kills, 0));
+        if (FMatchPlayer* Player = UpdateMatchPlayer(*Results, State))
+        {
+            Player->Kills = State->GetKills();
+            Player->BotKills = std::min(FCoreAthenaBotManager::BotKillsOf(State), std::max(Player->Kills, 0));
+        }
     }
+    MatchEventsOf(this).bPlayerLeft = true;
     HandlePawnDied();
 #endif
 }

@@ -842,6 +842,31 @@ void FCoreAthenaBotManager::OnPlayerRemoved(AFortPlayerStateAthena* KillerState,
     CheckWinConditionLastManStanding(FinisherPawn, FinishingWeapon, DeathCause);
 }
 
+void FCoreAthenaBotManager::PostTeamChange()
+{
+#if WITH_SERVER_CODE
+    // 21.40's AFortGameMode::PostTeamChange, the bots' share. A Playground team switch (6.00's
+    // AFortPlayerControllerAthena::SetTeam_Implementation, 0xC694D0: the playlist's teams, IsRespawningAllowed, the game
+    // mode's AttemptChangeTeam, then the pawn's ForceKill with Gameplay.Damage.TeamSwitchSuicide) moves the player in
+    // SetTeam (0xE8C990): PreTeamChange (AFortGameModeAthena's, 0xC2C980) takes them out of the alive players with
+    // RemoveFromAlivePlayers (0xC307B0; death cause TeamSwitchSuicide and its last parameter true, which skips the win
+    // check, CheckWinConditionLastManStanding 0xC155A0 or a mutator's), and PostTeamChange (0xC2C4C0) puts them back on
+    // the new team (AddToAlivePlayers, 0xC13760). The switch's death is a respawn, never an elimination: the game's
+    // PawnPendingDestroy (controller slot 0xD3, 0xC656F0) leaves a TeamSwitchSuicide death alone too. So the switch only
+    // changes which teams are in: the counts, and the most teams the match has had (MostTeamsAlive), no win check. The
+    // same on 6.02 (PreTeamChange 0xBD7220).
+    if (!bAircraftStarted || bMatchEnded)
+    {
+        return;
+    }
+    UpdateCounts();
+    const int32_t TeamsNow = static_cast<int32_t>(AliveTeams(true).size());
+    MostTeamsAlive = std::max(MostTeamsAlive, TeamsNow);
+    Log::Info(L"Battle Royale bots: a player changed teams: {} teams are in the match, {} at most since the bus left; no win check, as the game's PreTeamChange has none",
+        TeamsNow, MostTeamsAlive);
+#endif
+}
+
 bool FCoreAthenaBotManager::GetSafeZone(FVector& OutCenter, float& OutRadius) const
 {
     AFortGameModeAthena* Athena = GetGameMode();
@@ -972,10 +997,13 @@ bool FCoreAthenaBotManager::HasPlayersConnected() const
 
 std::set<uint8_t> FCoreAthenaBotManager::AliveTeams(bool bIncludeHumans) const
 {
+    // A bot the playlist brings back is still in, as a respawning player stays among the alive players and in their
+    // team's count (only a player the game doesn't bring back is taken out, RemoveFromAlivePlayers): a team whose bots
+    // all wait to respawn isn't a team gone.
     std::set<uint8_t> Teams;
     for (const auto& Bot : PlayerBots)
     {
-        if (Bot->IsAlive())
+        if (Bot->IsInMatch())
         {
             Teams.insert(Bot->GetTeam());
         }
@@ -1091,10 +1119,12 @@ void FCoreAthenaBotManager::Tick()
             SlowestBotTick = PlayerBots[Index]->GetBotName();
         }
     }
+    // The counts only: the win is checked where the game checks it, as someone is taken out (OnPlayerRemoved,
+    // RemoveFromAliveBots), not every frame. A frame's look at the teams also saw a Playground team switch as a team
+    // gone and ended the match with a win (#411's log; PostTeamChange).
     if (bAircraftStarted && !bMatchEnded)
     {
         UpdateCounts();
-        CheckWinConditionLastManStanding(nullptr, nullptr, EDeathCause::GetUnspecified());
     }
     const double BotsMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - FrameStart).count();
     BotsMsSum += BotsMs;
@@ -3018,12 +3048,14 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding(APawn* FinisherPawn
         return;
     }
     const std::set<uint8_t> Teams = AliveTeams(true);
-    // The game's check (4.5 0xA5FCB0) runs only as someone is taken out (RemoveFromAlivePlayers, which hands it the
-    // count from before): its solo win needs that count above 1, its team win TeamsLeft brought down to 1. A match that
-    // only ever had one team (Playground's "1 teams of 4", a player and their fill bots) never has a last team standing:
-    // declaring one as the bus left ended it with a win the game never gives.
+    // The game's check (4.5 0xA5FCB0, 6.00 0xC155A0) runs only as someone is taken out (RemoveFromAlivePlayers, which
+    // hands it the count from before; a Playground team switch's removal skips it), and so does this one: a player's
+    // elimination or leaving (OnPlayerRemoved), a bot's (RemoveFromAliveBots). Its solo win needs that count above 1,
+    // its team win TeamsLeft brought down to 1. A match that only ever had one team (Playground's "1 teams of 4", a
+    // player and their fill bots) never has a last team standing: declaring one as the bus left ended it with a win the
+    // game never gives. Once nobody is left at all, the match is over all the same.
     MostTeamsAlive = std::max(MostTeamsAlive, static_cast<int32_t>(Teams.size()));
-    if (MostTeamsAlive <= 1)
+    if (MostTeamsAlive <= 1 && !Teams.empty())
     {
         return;
     }
@@ -3052,7 +3084,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding(APawn* FinisherPawn
             // Its bots (a player's team filled with bots) win with it.
             for (const auto& Bot : PlayerBots)
             {
-                AFortPlayerStateAthena* State = Bot->IsAlive() && Teams.contains(Bot->GetTeam()) ? Bot->GetPlayerState() : nullptr;
+                AFortPlayerStateAthena* State = Bot->IsInMatch() && Teams.contains(Bot->GetTeam()) ? Bot->GetPlayerState() : nullptr;
                 if (State)
                 {
                     State->Place = 1;
@@ -3074,7 +3106,7 @@ void FCoreAthenaBotManager::CheckWinConditionLastManStanding(APawn* FinisherPawn
         bool bPlayersTeamWon = false;
         for (const auto& Bot : PlayerBots)
         {
-            if (Bot->IsAlive())
+            if (Bot->IsInMatch())
             {
                 if (AFortPlayerStateAthena* State = Bot->GetPlayerState())
                 {

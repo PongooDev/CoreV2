@@ -667,7 +667,12 @@ namespace Natives
     inline void (*AFortPlayerControllerZone_PrepareDeathReport)(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack) = nullptr;
     // From 4.4 it also takes the finisher's pawn, weapon and the death cause, which it hands to the win checks and on to
     // ClientNotifyWon (4.5 0xA7B630; Logout's call, 0xA747C1, passes null, null, Unspecified). Earlier builds ignore them.
-    inline void (*AFortGameModeAthena_RemoveFromAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause) = nullptr;
+    // 6.00, 6.01, 6.02 and 6.10 (6.00 0xC307B0, 6.02 0xBDAD80; earlier builds not looked at) take one more, true only
+    // from the game mode's PreTeamChange (a Playground team switch, 6.00 0xC2C980, death cause TeamSwitchSuicide): it
+    // skips the win check at the end (the mutators' or CheckWinConditionLastManStanding, 0xC155A0). Logout (0xC27408)
+    // and PawnPendingDestroy (0xC6596B) pass false. Left out, the callee read whatever the caller's stack held there, so
+    // an elimination could skip the game's win check; a build without it ignores it.
+    inline void (*AFortGameModeAthena_RemoveFromAlivePlayers)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Player, APlayerState* KillerPlayerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause, bool bTeamChange) = nullptr;
     inline void (*AFortPlayerControllerAthena_SetTeamPlace)(AFortPlayerControllerAthena* This, int32_t Place) = nullptr;
     inline int32_t (*AFortPlayerStateAthena_GetSecondsAlive)(AFortPlayerStateAthena* This) = nullptr;
     // The death cause up to 3.3 (1.9.1 0x43AE20), on the pawn.

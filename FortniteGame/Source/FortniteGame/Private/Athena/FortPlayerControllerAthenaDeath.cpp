@@ -418,7 +418,7 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     AFortWeapon* FinishingWeapon = FinisherFortPawn ? static_cast<AFortWeapon*>(FinisherFortPawn->CurrentWeapon) : nullptr;
     UFortWeaponItemDefinition* FinishingWeaponData = FinishingWeapon ? static_cast<UFortWeaponItemDefinition*>(FinishingWeapon->WeaponData) : nullptr;
     Natives::AFortGameModeAthena_RemoveFromAlivePlayers(GameMode, this, Instigator ? static_cast<APlayerState*>(Instigator->PlayerState) : nullptr, FinisherPawn,
-        FinishingWeaponData, DeathCause);
+        FinishingWeaponData, DeathCause, false);
     if (BotManager)
     {
         BotManager->OnPlayerRemoved(AthenaStateOf(Instigator), FinisherPawn, FinishingWeaponData, DeathCause);

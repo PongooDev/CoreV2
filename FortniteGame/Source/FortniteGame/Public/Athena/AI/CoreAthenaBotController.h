@@ -294,6 +294,8 @@ public:
     // height (AFortGameModeAthena::GetRespawnHeight) over where it died, as Core respawns a player there
     // (SpawnDefaultPawnFor_Implementation).
     bool IsRespawnPending() const { return RespawnTime >= 0.0f; }
+    // Alive, or dead and coming back: still in the match, as a respawning player stays among the game mode's alive players.
+    bool IsInMatch() const { return IsAlive() || IsRespawnPending(); }
     void RespawnPlayerAfterDeath(float Now);
     static constexpr float RespawnDelay = 10.0f;
     void AddKill();

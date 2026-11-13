@@ -186,7 +186,13 @@ public:
     // must be kept from running (bots still in the match), and the bots' recount and win check after it.
     bool ShouldHoldNativeWinCheck() const;
     // The finisher's pawn, its weapon and the death cause are the elimination's, for the win it may end the match with.
+    // Also for a player who left (the game's Logout took them out): AFortGameModeAthena::HandlePlayerStateDestroyed's,
+    // the tick after, with none.
     void OnPlayerRemoved(AFortPlayerStateAthena* KillerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause);
+    // A player changed teams (Playground's team switching, seen by the game mode as the switch's death is handled): the
+    // counts and the teams the match has had, with no win check, as the game's PreTeamChange takes the player out
+    // without one and its PostTeamChange puts them back on the new team.
+    void PostTeamChange();
 
     // Server: the enemies a bot can fight, and the loot it can take (shared by every bot each tick).
     const std::vector<TWeakObjectPtr<AFortPawn>>& GetEnemyPawns() const { return EnemyPawns; }
@@ -303,6 +309,7 @@ private:
     void UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, AFortGameStateAthena* GameState);
     // The finisher's pawn, its weapon and the death cause are those of the elimination that left a team alone, as the
     // game's check has them from RemoveFromAlivePlayers: StartEndGamePhase hands them to the winner's ClientNotifyWon.
+    // Only as someone is taken out (OnPlayerRemoved, RemoveFromAliveBots), as the game runs its own.
     void CheckWinConditionLastManStanding(APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause);
     void RefreshEnemies(float Now);
     void RefreshLoot(float Now);
@@ -348,6 +355,7 @@ private:
     int32_t PlaylistTeamSize = 0;
     int32_t HumansAtStart = 0;
     // The most teams in the match since the bus left, players' and bots': with one (Playground), nobody is left standing.
+    // Grown at the win check and by a player's team switch (PostTeamChange).
     int32_t MostTeamsAlive = 0;
     int32_t LastPlayersLeft = -1;
     int32_t LastTeamsLeft = -1;

@@ -11464,7 +11464,27 @@ bool Finder::ResolveScoreBuildingConstructionLive()
     {
         return Entry && FindInstruction(Entry, Entry + 13, { 0x4D, 0x8B, 0xC8, 0x4C, 0x8B, 0xC2, 0xB2, -1, 0xE9 }) == Entry ? Finder::RelativeTarget(Entry + 8, 1, 5) : 0;
     };
+    // 6.21 (CL-4526925) makes the scorer a virtual, 21.40's AFortGameMode::ScoreBuildingEvent (slot 0x144): each thunk
+    // loads the vtable first and jumps through it, mov rax, [rcx]; mov r9, r8; mov r8, rdx; mov dl, Type;
+    // jmp qword ptr [rax+0A20h] (0xEF9C00, 0xEF9D50, 0xEF9D70), and ScoreBuildingConstruction (0xEF93C0, slot 0x13E)
+    // ends with call qword ptr [rax+0A20h], dl 9. This gives the scorer's slot.
+    const auto ScoreThunkSlot = [](uintptr_t Entry) -> int32_t
+    {
+        return Entry && FindInstruction(Entry, Entry + 14, { 0x48, 0x8B, 0x01, 0x4D, 0x8B, 0xC8, 0x4C, 0x8B, 0xC2, 0xB2, -1, 0x48, 0xFF, 0xA0 }) == Entry ? VirtualSlot(Entry + 12) : -1;
+    };
+    const auto CallsSlot = [](uintptr_t Begin, uintptr_t End, int32_t Slot)
+    {
+        for (uintptr_t Site = Slot >= 0 && End > Begin ? FindVirtualCall(Begin, End) : 0; Site; Site = FindVirtualCall(Site + 1, End))
+        {
+            if (VirtualSlot(Site) == Slot)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
     int32_t ScorerIndex = -1;
+    int32_t ScoreEventIndex = -1;
     for (int32_t Slot = 2; AthenaVTable && Slot + 2 < 0x400 && ScorerIndex < 0; ++Slot)
     {
         const uintptr_t Upgrade = VTableEntry(AthenaVTable, Slot);
@@ -11477,15 +11497,19 @@ bool Finder::ResolveScoreBuildingConstructionLive()
             break;
         }
         const uintptr_t Scorer = ScoreThunkTarget(Upgrade);
-        if (!Scorer || ScoreThunkTarget(VTableEntry(AthenaVTable, Slot + 1)) != Scorer || ScoreThunkTarget(VTableEntry(AthenaVTable, Slot + 2)) != Scorer)
+        const int32_t ScorerSlot = Scorer ? -1 : ScoreThunkSlot(Upgrade);
+        if (Scorer ? ScoreThunkTarget(VTableEntry(AthenaVTable, Slot + 1)) != Scorer || ScoreThunkTarget(VTableEntry(AthenaVTable, Slot + 2)) != Scorer
+                   : ScorerSlot < 0 || ScoreThunkSlot(VTableEntry(AthenaVTable, Slot + 1)) != ScorerSlot || ScoreThunkSlot(VTableEntry(AthenaVTable, Slot + 2)) != ScorerSlot)
         {
             continue;
         }
         const uintptr_t Construction = VTableEntry(AthenaVTable, Slot - 2);
         const uintptr_t ConstructionEnd = Construction && Finder::FunctionStart(Construction) == Construction ? Finder::FunctionEnd(Construction) : 0;
-        if (ConstructionEnd > Construction && ConstructionEnd - Construction < 0x200 && CallWithin(Construction, ConstructionEnd - Construction, Scorer))
+        if (ConstructionEnd > Construction && ConstructionEnd - Construction < 0x200
+            && (Scorer ? CallWithin(Construction, ConstructionEnd - Construction, Scorer) : CallsSlot(Construction, ConstructionEnd, ScorerSlot)))
         {
             ScorerIndex = Slot - 2;
+            ScoreEventIndex = ScorerSlot;
         }
     }
     if (ScorerIndex < 0)
@@ -11496,8 +11520,9 @@ bool Finder::ResolveScoreBuildingConstructionLive()
     }
 
     Natives::AFortGameMode_ScoreBuildingConstructionIndex = ScorerIndex;
-    Log::Info(L"Finder: AFortGameMode::ScoreBuildingConstruction is slot 0x{:X} (0x{:X}), from the game mode's scorer thunks (this build's ServerEditBuildingActor_Implementation is 0x{:X} and scores slot {})",
-        ScorerIndex, VTableEntry(AthenaVTable, ScorerIndex) - Finder::ImageBase(), Edit ? Edit - Finder::ImageBase() : 0, EditIndex);
+    Log::Info(L"Finder: AFortGameMode::ScoreBuildingConstruction is slot 0x{:X} (0x{:X}), from the game mode's scorer thunks{} (this build's ServerEditBuildingActor_Implementation is 0x{:X} and scores slot {})",
+        ScorerIndex, VTableEntry(AthenaVTable, ScorerIndex) - Finder::ImageBase(),
+        ScoreEventIndex >= 0 ? std::format(L", through the virtual ScoreBuildingEvent slot 0x{:X}", ScoreEventIndex) : std::wstring(), Edit ? Edit - Finder::ImageBase() : 0, EditIndex);
     return true;
 }
 

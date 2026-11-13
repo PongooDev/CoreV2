@@ -10413,25 +10413,49 @@ namespace
     // A call with SendStatEventWithTags' typed wrapper's eight arguments: since the last call before it, four stack
     // arguments were stored (mov [rsp+20h/28h/30h/38h], of any width), and no fifth. SendEndPrimaryMission's place (7
     // arguments, 1.10 0x6FDF1B) and the other calls to the shared empty function don't have this.
-    bool IsStatEventCall(uintptr_t Site)
+    // A store to [rsp+40h] is no fifth argument when the same stretch also takes that slot's address (lea reg,
+    // [rsp+40h]): it is a local that one of the arguments points at. From 6.00 the flush of a player's pawn's damage
+    // (AFortPlayerController's, 6.02 0x1203940: an unflushed Damage event for each DamageDone entry of the pawn, sent by
+    // AFortGameModeZone::Killed at 0xE57EA3 and by PawnPendingDestroy at 0x11FE48E) builds the event's empty target tags
+    // there and passes them in r9 (0x1203A4F, 0x1203A7B). Taken for a fifth argument, its call (6.02 0x1203A96; 6.00
+    // 0x12202F6, 6.01 0x11FF9B6, 6.10 0x1249C16, 6.20 0x12864D6) was left to the shared empty function, and no "Deal
+    // damage" challenge moved (#420). Of all the calls to the shared empty function in those five images, this lets in
+    // that one alone.
+    bool IsStatEventCall(uintptr_t Site, bool* bOutFifthSlotIsLocal = nullptr)
     {
         uintptr_t Begin = Site > 0x60 ? Site - 0x60 : Site;
         for (uintptr_t Call = FindRawCall(Begin, Site); Call; Call = FindRawCall(Call + 1, Site))
         {
             Begin = Call + 5;
         }
+        constexpr uint8_t FifthSlot = 0x40;
         uint32_t Stored = 0;
+        bool bFifthSlotAddressTaken = false;
         for (uintptr_t Address = Begin; Address + 4 <= Site; ++Address)
         {
             const uint8_t Opcode = Byte(Address);
             if ((Opcode == 0x88 || Opcode == 0x89 || Opcode == 0xC6 || Opcode == 0xC7) && (Byte(Address + 1) & 0xC7) == 0x44 && Byte(Address + 2) == 0x24)
             {
                 const uint8_t Displacement = Byte(Address + 3);
-                if (Displacement >= 0x20 && Displacement <= 0x40 && Displacement % 8 == 0)
+                if (Displacement >= 0x20 && Displacement <= FifthSlot && Displacement % 8 == 0)
                 {
                     Stored |= 1u << ((Displacement - 0x20) / 8);
                 }
             }
+            else if (Opcode == 0x8D && (Byte(Address + 1) & 0xC7) == 0x44 && Byte(Address + 2) == 0x24 && Byte(Address + 3) == FifthSlot)
+            {
+                bFifthSlotAddressTaken = true;
+            }
+        }
+        constexpr uint32_t FifthSlotBit = 1u << ((FifthSlot - 0x20) / 8);
+        const bool bFifthSlotIsLocal = (Stored & FifthSlotBit) != 0 && bFifthSlotAddressTaken;
+        if (bFifthSlotIsLocal)
+        {
+            Stored &= ~FifthSlotBit;
+        }
+        if (bOutFifthSlotIsLocal)
+        {
+            *bOutFifthSlotIsLocal = bFifthSlotIsLocal;
         }
         return Stored == 0xF;
     }
@@ -10553,9 +10577,11 @@ namespace
         };
         std::vector<uint8_t*> Calls;
         std::vector<uint8_t*> TeamCalls;
+        std::vector<uint8_t*> LocalFifthSlotCalls;
         for (const uintptr_t Site : Finder::CallsTo(SharedEmpty, false))
         {
-            const uintptr_t Function = Byte(Site) == 0xE8 && IsStatEventCall(Site) && !IsInEndMission(Site) ? Finder::FunctionStart(Site) : 0;
+            bool bFifthSlotIsLocal = false;
+            const uintptr_t Function = Byte(Site) == 0xE8 && IsStatEventCall(Site, &bFifthSlotIsLocal) && !IsInEndMission(Site) ? Finder::FunctionStart(Site) : 0;
             if (Function && Function < Site)
             {
                 bool bCallsGetter = false;
@@ -10567,6 +10593,10 @@ namespace
                 if (bCallsGetter)
                 {
                     (IsTeamStatEventCall(Site) ? TeamCalls : Calls).push_back(reinterpret_cast<uint8_t*>(Site));
+                    if (bFifthSlotIsLocal)
+                    {
+                        LocalFifthSlotCalls.push_back(reinterpret_cast<uint8_t*>(Site));
+                    }
                 }
             }
         }
@@ -10594,6 +10624,10 @@ namespace
         if (!StrippedTeamStatEventCalls.empty())
         {
             Log::Info(L"Finder: {} team stat event sender call(s) (the type in cl, the instigating controller second): {}", StrippedTeamStatEventCalls.size(), Describe(StrippedTeamStatEventCalls));
+        }
+        if (!LocalFifthSlotCalls.empty())
+        {
+            Log::Info(L"Finder: {} of them store [rsp+40h] as a local their arguments point at, not as a fifth argument: {}", LocalFifthSlotCalls.size(), Describe(LocalFifthSlotCalls));
         }
         return true;
     }

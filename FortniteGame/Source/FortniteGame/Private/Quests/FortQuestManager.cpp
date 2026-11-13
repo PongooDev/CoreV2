@@ -1549,14 +1549,21 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
     // client goes back to the lobby within seconds, taking the quest manager with it before a delayed save comes round:
     // the Damage events sent at a player's death (DamageDone.Total for "Deal damage to opponents", the weapon ones) and
     // what completed in the last seconds never reached the profile (#274).
+    // And the damage the player's pawn did, which the game sends only as the pawn's life ends (#420): the pawn adds up
+    // what it deals by tag grouping (AFortPawn::RecordDamage, 6.02 0x11B5A90: DamageDone.Total, DamageDone.Player for a
+    // player pawn hit, the weapon's groupings), and the controller's flush of it (0x1203940) sends one Damage event per
+    // entry, about the controller's pawn, from AFortGameModeZone::Killed (0xE57EA3) and PawnPendingDestroy
+    // (0x11FE48E). Whether the player has left AlivePlayers by then or not, that pawn's match is over.
     const AFortPlayerControllerAthena* PlayerController = reinterpret_cast<AFortPlayerControllerAthena*>(PlayerControllerOf(PlayerInfo));
+    const bool bPawnDamageDone = Type == EFortQuestObjectiveStatEvent::GetDamage() && TargetObject && PlayerController
+        && TargetObject == reinterpret_cast<UObject*>(PlayerController->GetPawn());
     const TArray<AFortPlayerControllerAthena*>& Alive = GameMode->AlivePlayers;
     bool bInMatch = false;
     for (int32_t Index = 0; Index < Alive.Num() && !bInMatch; ++Index)
     {
         bInMatch = Alive[Index] == PlayerController;
     }
-    if (bFlush || bLastEventFlushed || !bInMatch)
+    if (bFlush || bLastEventFlushed || !bInMatch || bPawnDamageDone)
     {
         SaveProgress(This);
         return;

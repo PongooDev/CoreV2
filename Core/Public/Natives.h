@@ -658,7 +658,8 @@ namespace Natives
     inline void (*AFortPawn_ForgetPawnForAllAI)(AFortPawn* This) = nullptr;
     inline int32_t AFortPlayerControllerZone_OnPawnRevivedIndex = -1;
     inline int32_t AFortPlayerControllerZone_ApplyResurrectDurabilityPenaltyIndex = -1;
-    inline void (*AFortPlayerController_RefocusQuickBars)(AFortPlayerController* This) = nullptr;
+    // 6.21 (CL-4526925) adds the bool (true: then back to the primary bar); the builds before it never read dl there.
+    inline void (*AFortPlayerController_RefocusQuickBars)(AFortPlayerController* This, bool bSwapToPrimaryQuickBar) = nullptr;
     // Set only where StartAircraftPhase's call to it is compiled in (2.2 0x85DCA0), see Finder::AircraftPhasePlayerCleanupCall.
     inline void (*AFortPlayerController_ActivateSlot)(AFortPlayerController* This, uint8_t InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot) = nullptr;
     inline void* (*UStatManager_FindStat)(UObject* This, FName StatName, uint8_t Type) = nullptr;

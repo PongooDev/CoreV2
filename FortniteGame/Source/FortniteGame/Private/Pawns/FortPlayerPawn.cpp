@@ -368,7 +368,7 @@ void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)
         CallVirtual<void>(PlayerController, Natives::AFortPlayerControllerZone_OnPawnRevivedIndex, EventInstigator);
         if (Natives::AFortPlayerController_RefocusQuickBars)
         {
-            Natives::AFortPlayerController_RefocusQuickBars(PlayerController);
+            Natives::AFortPlayerController_RefocusQuickBars(PlayerController, false);
         }
         // Save the World's death penalty takes durability off the weapons, except at the end of the zone.
         AFortGameMode* GameMode = Cast<AFortGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode()));

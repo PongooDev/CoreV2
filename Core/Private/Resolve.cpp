@@ -11247,14 +11247,18 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
     const int32_t DurabilityPenaltyIndex = DurabilityPenalty && !Finder::IsStubFunction(DurabilityPenalty) && ReadsQuickBars(DurabilityPenalty, 0x8B, 0xC7, 0x81) ? OnPawnRevivedIndex + 1 : -1;
 
     // RefocusQuickBars (1.8 0x844170): the call of AFortPlayerControllerZone::ClientOnPawnDied_Implementation (0x86A660)
-    // that starts with "cmp qword ptr [rcx + QuickBars], 0", the quickbar focus a player gets back.
+    // that starts with "cmp qword ptr [rcx + QuickBars], 0", the quickbar focus a player gets back. 6.21 (CL-4526925,
+    // 0x129A790) gives it a bool, which swaps a player on the secondary bar back to the primary one afterwards
+    // (AFortPlayerPawn::OnRep_InVehicle's 0x1240960 passes true), and starts mov rcx, [rcx+QuickBars]; test rcx, rcx:
+    // ClientOnPawnDied (0x12BB0D0) and ClientRestart (0x12BBC00) call it with xor edx, edx, as the revive does here.
     UFunction* ClientOnPawnDied = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerControllerZone:ClientOnPawnDied");
     const uintptr_t PawnDied = ClientOnPawnDied ? VTableEntry(ZoneVTable, Finder::ImplementationIndex(ClientOnPawnDied)) : 0;
     const uintptr_t PawnDiedEnd = PawnDied ? Finder::FunctionEnd(PawnDied) : 0;
     uintptr_t RefocusQuickBars = 0;
     for (const auto& [Site, Target] : PawnDiedEnd ? Finder::DirectCalls(PawnDied, PawnDiedEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
     {
-        if (ReadsQuickBars(Target, 0x83, 0xFF, 0xB9))
+        const bool bFalseArgument = Site >= PawnDied + 8 && FindInstruction(Site - 8, Site, { 0x33, 0xD2 });
+        if (ReadsQuickBars(Target, 0x83, 0xFF, 0xB9) || (bFalseArgument && ReadsQuickBars(Target, 0x8B, 0xFF, 0x89)))
         {
             RefocusQuickBars = Target;
             break;

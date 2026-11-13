@@ -63,6 +63,41 @@
 
 namespace
 {
+    // One step of a bot's update for its slow-update line (#427): the game's code run on what the bot does, timed with
+    // the bytes the server read from the game's files meanwhile. A step inside another (an equip inside a pickup) counts
+    // its own and is taken out of the outer one's. Steps are on the game thread, one at a time.
+    class FBotUpdateStep
+    {
+    public:
+        FBotUpdateStep(FCoreAthenaBotController& InBot, const wchar_t* InKind, const UObject* InSubject)
+            : Bot(InBot), Kind(InKind), Subject(InSubject), Parent(Current), Start(std::chrono::steady_clock::now()), IoStart(FCoreAthenaBotManager::ProcessIo())
+        {
+            Current = this;
+        }
+        ~FBotUpdateStep();
+        FBotUpdateStep(const FBotUpdateStep&) = delete;
+        FBotUpdateStep& operator=(const FBotUpdateStep&) = delete;
+
+    private:
+        static inline FBotUpdateStep* Current = nullptr;
+        FCoreAthenaBotController& Bot;
+        const wchar_t* Kind;
+        const UObject* Subject;
+        FBotUpdateStep* Parent;
+        std::chrono::steady_clock::time_point Start;
+        FCoreAthenaBotManager::FProcessIo IoStart;
+        double ChildMs = 0.0;
+        FCoreAthenaBotManager::FProcessIo ChildIo;
+    };
+
+    // Runs Function as one update step of Bot's (FBotUpdateStep) and returns what it returns.
+    template <class TFunction>
+    auto TimedStep(FCoreAthenaBotController& Bot, const wchar_t* Kind, const void* Subject, TFunction&& Function)
+    {
+        FBotUpdateStep Step(Bot, Kind, static_cast<const UObject*>(Subject));
+        return Function();
+    }
+
     // An asset the bots keep a pointer to across garbage collections and matches (an outfit, emote, weapon or class):
     // rooted, so the collector never frees it under Core's caches, the map reload after a match included. Never a
     // world's object: a rooted one would keep its world alive.
@@ -547,6 +582,27 @@ namespace
     std::wstring NameOf(const UObject* Object)
     {
         return Object ? Object->GetName().ToStdString() : std::wstring(L"none");
+    }
+
+    FBotUpdateStep::~FBotUpdateStep()
+    {
+        Current = Parent;
+        const double Ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
+        const FCoreAthenaBotManager::FProcessIo Io = FCoreAthenaBotManager::ProcessIo().Since(IoStart);
+        if (Parent)
+        {
+            Parent->ChildMs += Ms;
+            Parent->ChildIo.ReadBytes += Io.ReadBytes;
+            Parent->ChildIo.PageFaults += Io.PageFaults;
+        }
+        // Only what could show in a slow update (the line lists the biggest): the subject is named while it is still
+        // there (a broken piece goes at the next collection).
+        const double OwnMs = std::max(Ms - ChildMs, 0.0);
+        const FCoreAthenaBotManager::FProcessIo OwnIo = Io.Since(ChildIo);
+        if (OwnMs >= 5.0 || OwnIo.ReadBytes >= 64 * 1024)
+        {
+            Bot.AddUpdateStep(std::format(L"{} {}", Kind, NameOf(Subject)), OwnMs, OwnIo);
+        }
     }
 
     // The outfits bots wear: Battle Royale's default characters (8.30 reads the bot's from its customization loadout).
@@ -1581,7 +1637,7 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
         UAthenaPickaxeItemDefinition* Pickaxe = (LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe());
         if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
         {
-            EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
+            EquippedWeapon = TimedStep(*this, L"equip", PickaxeWeapon, [&] { return Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid()); });
             bPickaxeEquipped = EquippedWeapon.Get() != nullptr;
         }
         if (!WeaponList.empty())
@@ -2008,6 +2064,51 @@ void FCoreAthenaBotController::AddKill()
 namespace
 {
     bool HasDBNOAbilityActive(AFortPlayerPawnAthena* Pawn);
+}
+
+void FCoreAthenaBotController::AddUpdateStep(std::wstring What, double Ms, const FCoreProcessIo& Io)
+{
+    // The same step again this frame (a shotgun's pellets, two pieces of a box) adds up.
+    for (FUpdateStep& Step : UpdateSteps)
+    {
+        if (Step.What == What)
+        {
+            Step.Ms += Ms;
+            Step.Io.ReadBytes += Io.ReadBytes;
+            Step.Io.PageFaults += Io.PageFaults;
+            return;
+        }
+    }
+    if (UpdateSteps.size() < 16)
+    {
+        UpdateSteps.push_back({ std::move(What), Ms, Io });
+    }
+}
+
+void FCoreAthenaBotController::LogSlowUpdate(double UpdateMs, const FCoreProcessIo& Io) const
+{
+    // #427: the reporter's endgame hitches (6.20, the game on a hard drive) were single bots' updates of 0.25 to 1 s right
+    // as one equipped a picked-up weapon, started a bandage, built or broke a piece; another PC took 40 to 78 ms for such
+    // a piece. The line names the steps that took the time and what each read from the game's files (a synchronous load
+    // reads them).
+    std::vector<FUpdateStep> Steps = UpdateSteps;
+    std::sort(Steps.begin(), Steps.end(), [](const FUpdateStep& A, const FUpdateStep& B) { return A.Ms > B.Ms; });
+    std::wstring Listed;
+    double StepsMs = 0.0;
+    for (size_t Index = 0; Index < Steps.size(); ++Index)
+    {
+        StepsMs += Steps[Index].Ms;
+        if (Index < 4)
+        {
+            Listed += std::format(L"{}{} {:.0f} ms ({:.1f} MB, {} faults)", Listed.empty() ? L"" : L", ", Steps[Index].What, Steps[Index].Ms,
+                static_cast<double>(Steps[Index].Io.ReadBytes) / (1024.0 * 1024.0), Steps[Index].Io.PageFaults);
+        }
+    }
+    static constexpr const wchar_t* StateNames[] = { L"warmup", L"in the aircraft", L"skydiving", L"landed", L"out" };
+    const size_t StateIndex = static_cast<size_t>(State);
+    Log::Info(L"Battle Royale bots: {}'s update took {:.0f} ms, its steps {:.1f} MB read from files and {} page faults ({}, goal {}): {}{}the rest {:.0f} ms", BotName, UpdateMs,
+        static_cast<double>(Io.ReadBytes) / (1024.0 * 1024.0), Io.PageFaults, StateIndex < std::size(StateNames) ? StateNames[StateIndex] : L"?", GoalName(Goal), Listed, Listed.empty() ? L"" : L"; ",
+        std::max(UpdateMs - StepsMs, 0.0));
 }
 
 void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
@@ -2989,7 +3090,7 @@ void FCoreAthenaBotController::EquipWeapon(int32_t Index)
     StopFiring();
     CancelReload();
     FCoreAthenaBotWeapon& Entry = WeaponList[static_cast<size_t>(Index)];
-    AFortWeapon* Weapon = Pawn->EquipWeaponDefinition(Entry.WeaponDefinition, Entry.ItemGuid);
+    AFortWeapon* Weapon = TimedStep(*this, L"equip", Entry.WeaponDefinition, [&] { return Pawn->EquipWeaponDefinition(Entry.WeaponDefinition, Entry.ItemGuid); });
     if (!Weapon)
     {
         Log::Warning(L"Battle Royale bots: {} couldn't equip {}", BotName, NameOf(Entry.WeaponDefinition));
@@ -3866,7 +3967,7 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
             if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
             {
                 StopFiring();
-                EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
+                EquippedWeapon = TimedStep(*this, L"equip", PickaxeWeapon, [&] { return Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid()); });
                 bPickaxeEquipped = true;
                 EquippedIndex = -1;
             }
@@ -4324,6 +4425,7 @@ bool FCoreAthenaBotController::PlayEmote(float Now, float Duration)
 void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
 {
 #if WITH_SERVER_CODE
+    FBotUpdateStep Step(*this, L"pick up", reinterpret_cast<const UObject*>(Pickup->PrimaryPickupItemEntry.ItemDefinition));
     // Into the bot's own inventory (8.30 keeps it in the controller's AFortInventory; Core's brain holds it), and the
     // pickup is gone as when a player takes it.
     FFortItemEntry& Entry = Pickup->PrimaryPickupItemEntry;
@@ -5504,7 +5606,7 @@ bool FCoreAthenaBotController::SearchContainer(float Now, float MaxDistance)
             return true;
         }
         SearchUntil = 0.0f;
-        const bool bLoot = Target->ServerOnAttemptInteract(reinterpret_cast<AFortPawn*>(Pawn));
+        const bool bLoot = TimedStep(*this, L"search", Target, [&] { return Target->ServerOnAttemptInteract(reinterpret_cast<AFortPawn*>(Pawn)); });
         ++ContainersSearched;
         Log::Info(L"Battle Royale bots: {} searches {}{}", BotName, NameOf(reinterpret_cast<UObject*>(Target)), bLoot ? L"" : L" (nothing came out)");
         // A successful search scores as a player's does (CoreV2 #387): AFortPlayerController::
@@ -5555,7 +5657,7 @@ void FCoreAthenaBotController::EquipPickaxe()
     }
     StopFiring();
     CancelReload();
-    EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
+    EquippedWeapon = TimedStep(*this, L"equip", PickaxeWeapon, [&] { return Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid()); });
     bPickaxeEquipped = true;
     EquippedIndex = -1;
 #endif
@@ -5683,6 +5785,8 @@ void FCoreAthenaBotController::EndMontageAfterSection(UObject* Montage)
 bool FCoreAthenaBotController::ApplyWeaponDamageEffect(UObject* TargetActor, AFortWeapon* Weapon, bool bMelee, const FVector* HitFrom)
 {
 #if WITH_SERVER_CODE
+    // The game's handling of the hit runs in it: a piece's harvest and its destruction, a pawn's damage and elimination.
+    FBotUpdateStep Step(*this, L"hit", TargetActor);
     // A weapon's hit as its ability applies it: the weapon's damage effect (GE_Ranged_GenericDamage for a gun, the
     // pickaxe's GE_Melee_GenericDamage), made on the bot's ability system and applied to the target's. Its execution,
     // UFortDamageFormulaExecutionCalculation (3.1 0xC49090), takes the base damage from the context's damage source:
@@ -6757,6 +6861,7 @@ bool FCoreAthenaBotController::BuildPiece(const FCoreAthenaBotBuildDescriptor& D
         }
         return false;
     }
+    FBotUpdateStep Step(*this, L"build", reinterpret_cast<const UObject*>(PieceClass));
     FActorSpawnParameters SpawnParameters;
     SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
     FTransform SpawnTransform;
@@ -7915,6 +8020,7 @@ void FCoreAthenaBotController::TakeStormDamage(float Now)
 void FCoreAthenaBotController::DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo, const FVector* DeathSpot)
 {
 #if WITH_SERVER_CODE
+    FBotUpdateStep Step(*this, L"drop", reinterpret_cast<const UObject*>(Definition));
     AFortPlayerPawnAthena* Pawn = GetPawn();
     AFortGameModeAthena* GameMode = Manager->GetGameMode();
     UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
@@ -8110,7 +8216,7 @@ bool FCoreAthenaBotController::Heal(float Now)
     // The item in the bot's hands while it uses it, as players see a player's.
     if (UFortWeaponItemDefinition* ItemWeapon = Cast<UFortWeaponItemDefinition>(Best))
     {
-        if (AFortWeapon* Held = Pawn->EquipWeaponDefinition(ItemWeapon, FGuid::NewGuid()))
+        if (AFortWeapon* Held = TimedStep(*this, L"equip", ItemWeapon, [&] { return Pawn->EquipWeaponDefinition(ItemWeapon, FGuid::NewGuid()); }))
         {
             EquippedWeapon = Held;
             EquippedIndex = -1;
@@ -8118,6 +8224,7 @@ bool FCoreAthenaBotController::Heal(float Now)
         }
         // Its use as players see it: the fire ability's montage (GA_Athena_Bandage's AnimMontageInfo: WrapBandages_Athena
         // at 0.75).
+        FBotUpdateStep Step(*this, L"use animation of", reinterpret_cast<const UObject*>(ItemWeapon));
         UProperty* AbilityProperty = reinterpret_cast<UObject*>(ItemWeapon)->GetClass()->FindPropertyByName(FName(L"PrimaryFireAbility", FNAME_Find));
         UClass* AbilityClass = AbilityProperty ? reinterpret_cast<TAssetSubclassOf<UObject>*>(reinterpret_cast<uint8_t*>(ItemWeapon) + AbilityProperty->GetOffset_ForInternal())->LoadSynchronous() : nullptr;
         float PlayRate = 1.0f;
@@ -8154,7 +8261,7 @@ void FCoreAthenaBotController::CancelHeal()
         UAthenaPickaxeItemDefinition* Pickaxe = LoadoutPickaxe ? LoadoutPickaxe : DefaultPickaxe();
         if (UFortWeaponItemDefinition* PickaxeWeapon = Pickaxe ? static_cast<UFortWeaponItemDefinition*>(Pickaxe->WeaponDefinition) : nullptr)
         {
-            EquippedWeapon = Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid());
+            EquippedWeapon = TimedStep(*this, L"equip", PickaxeWeapon, [&] { return Pawn->EquipWeaponDefinition(PickaxeWeapon, FGuid::NewGuid()); });
             bPickaxeEquipped = true;
             EquippedIndex = -1;
         }

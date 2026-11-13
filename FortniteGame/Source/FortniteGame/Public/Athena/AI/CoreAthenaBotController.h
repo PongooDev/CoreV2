@@ -28,6 +28,22 @@ class UObject;
 class UFortWeaponItemDefinition;
 class FCoreAthenaBotManager;
 
+// What the server's process has read from files so far (GetProcessIoCounters' ReadTransferCount: the game's paks, which a
+// synchronous load reads on the game thread, and the async loader's reads) and its page faults (GetProcessMemoryInfo's
+// PageFaultCount: memory or code the process touches that isn't in its working set, the soft ones and the hard ones read
+// back from the disk). The bots' slow-update lines (CoreV2 #427, FCoreAthenaBotManager::ProcessIo) give the difference
+// across a frame or a bot's step.
+struct FCoreProcessIo
+{
+    uint64_t ReadBytes = 0;
+    uint64_t PageFaults = 0;
+    // What happened between Earlier and this.
+    FCoreProcessIo Since(const FCoreProcessIo& Earlier) const
+    {
+        return { ReadBytes > Earlier.ReadBytes ? ReadBytes - Earlier.ReadBytes : 0, PageFaults > Earlier.PageFaults ? PageFaults - Earlier.PageFaults : 0 };
+    }
+};
+
 // A bot's look for the match (8.30's bot customization loadout, AFortAthenaAIBotController::GetCosmeticLoadout's): an
 // outfit and a glider, pickaxe, contrail and back bling, their item definitions (loaded). Null where a build or the choice
 // has none (the default pickaxe then).
@@ -290,6 +306,26 @@ public:
 
     void Tick(float Now, float DeltaSeconds);
 
+    // A slow update named (CoreV2 #427): the steps of this frame's update that ran the game's code on what the bot does
+    // (an equip, a hit, a piece built, an item dropped or picked up), each with its time and the bytes the server read
+    // from the game's files meanwhile (a synchronous load). BeginUpdateSteps clears them as the manager starts the bot's
+    // update; AddUpdateStep keeps a step's own time (a step inside another counts in its own, not in the outer's);
+    // LogSlowUpdate names the biggest when the manager finds the update slow.
+    void BeginUpdateSteps() { UpdateSteps.clear(); }
+    // What this frame's steps read and faulted in, together.
+    FCoreProcessIo GetUpdateStepsIo() const
+    {
+        FCoreProcessIo Io;
+        for (const FUpdateStep& Step : UpdateSteps)
+        {
+            Io.ReadBytes += Step.Io.ReadBytes;
+            Io.PageFaults += Step.Io.PageFaults;
+        }
+        return Io;
+    }
+    void AddUpdateStep(std::wstring What, double Ms, const FCoreProcessIo& Io);
+    void LogSlowUpdate(double UpdateMs, const FCoreProcessIo& Io) const;
+
     // The pawn died: Core's OnPossesedPawnDied (21.40's AFortAthenaAIBotController::OnPossesedPawnDied).
     void OnPossesedPawnDied(AFortPlayerStateAthena* KillerState);
     // Out of the match, a bot a player eliminated spectates that player, as an eliminated player's SpectateOnDeath does
@@ -365,6 +401,15 @@ public:
     static int32_t MaterialKindOf(const UFortItemDefinition* Definition);
 
 private:
+    // This frame's update steps (AddUpdateStep), for LogSlowUpdate.
+    struct FUpdateStep
+    {
+        std::wstring What;
+        double Ms = 0.0;
+        FCoreProcessIo Io;
+    };
+    std::vector<FUpdateStep> UpdateSteps;
+
     // The warmup island (Core's: 8.30's bots spawned after the bus). Players there stand around, look about, walk a
     // little, dance, and now and then pick up the island's weapons and fight; one eliminated comes back a few seconds
     // later at a warmup spot, which counts for nothing. A fall from a height opens the glider, as a player redeploys it

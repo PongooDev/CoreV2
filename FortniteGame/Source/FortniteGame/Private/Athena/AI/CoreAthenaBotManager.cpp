@@ -43,6 +43,8 @@
 #include "UObject/UObjectGlobals.h"
 #include "Weapons/FortWeapon.h"
 
+#include <Psapi.h>
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -803,6 +805,22 @@ bool FCoreAthenaBotManager::HasNativePlayerBots()
     return bNative;
 }
 
+FCoreAthenaBotManager::FProcessIo FCoreAthenaBotManager::ProcessIo()
+{
+    FProcessIo Io;
+    IO_COUNTERS Counters = {};
+    if (GetProcessIoCounters(GetCurrentProcess(), &Counters))
+    {
+        Io.ReadBytes = Counters.ReadTransferCount;
+    }
+    PROCESS_MEMORY_COUNTERS Memory = {};
+    if (K32GetProcessMemoryInfo(GetCurrentProcess(), &Memory, sizeof(Memory)))
+    {
+        Io.PageFaults = Memory.PageFaultCount;
+    }
+    return Io;
+}
+
 AFortGameModeAthena* FCoreAthenaBotManager::GetGameMode() const
 {
     return static_cast<AFortGameModeAthena*>(GameMode.Get());
@@ -1264,15 +1282,21 @@ void FCoreAthenaBotManager::Tick()
     LastTickTime = Now;
     // The server's frame (wall clock, the 30 Hz cap included) and the bots' share of it, for the summary.
     const auto FrameStart = std::chrono::steady_clock::now();
+    const FProcessIo FrameIo = ProcessIo();
     if (LastFrameStart.time_since_epoch().count() != 0)
     {
         const double FrameMs = std::chrono::duration<double, std::milli>(FrameStart - LastFrameStart).count();
         FrameMsSum += FrameMs;
-        FrameMsMax = std::max(FrameMsMax, FrameMs);
+        if (FrameMs > FrameMsMax)
+        {
+            FrameMsMax = FrameMs;
+            FrameMaxIo = FrameIo.Since(LastFrameIo);
+        }
         FrameSpikes += FrameMs >= 50.0 ? 1 : 0;
         ++FrameCount;
     }
     LastFrameStart = FrameStart;
+    LastFrameIo = FrameIo;
     if (!bEnabled && PlayerBots.empty())
     {
         // The backend turned the bots off and the warmup's are gone: nothing to update until it turns them on again.
@@ -1333,11 +1357,26 @@ void FCoreAthenaBotManager::Tick()
     for (size_t Index = 0; Index < PlayerBots.size() && !bMatchEnded; ++Index)
     {
         const auto BotStart = std::chrono::steady_clock::now();
+        PlayerBots[Index]->BeginUpdateSteps();
         PlayerBots[Index]->Tick(Now, DeltaSeconds);
-        if (const double BotMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - BotStart).count(); BotMs > BotTickMsMax)
+        const double BotMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - BotStart).count();
+        if (BotMs > BotTickMsMax)
         {
             BotTickMsMax = BotMs;
             SlowestBotTick = PlayerBots[Index]->GetBotName();
+        }
+        // A bot's update that held the server (#427's endgame hitches: 0.25 to 1 s for an equip, a bandage, a piece
+        // broken or built, on a host whose game files are on a hard drive), or whose steps waited on a read of the game's
+        // files (a synchronous load: quick where the files are cached, slow on a hard drive), is named with its steps, a
+        // few a match.
+        if (BotMs >= LoadingUpdateMs && SlowUpdatesLogged < MaxSlowUpdateLogs)
+        {
+            const FProcessIo BotIo = PlayerBots[Index]->GetUpdateStepsIo();
+            if (BotMs >= SlowUpdateMs || BotIo.ReadBytes >= LoadingUpdateBytes)
+            {
+                ++SlowUpdatesLogged;
+                PlayerBots[Index]->LogSlowUpdate(BotMs, BotIo);
+            }
         }
     }
     // The counts only: the win is checked where the game checks it, as someone is taken out (OnPlayerRemoved,
@@ -1612,6 +1651,7 @@ void FCoreAthenaBotManager::TickWarmup(float Now)
     }
     RemoveSurplusBots(Wanted, TeamSlots);
     LastWantedTotal = Wanted + TeamBots;
+    LastWantedOwnTeams = Wanted;
     ++FramesSinceSpawn;
     const int32_t Missing = std::max(Wanted - CountAliveBots(false), 0) + std::max(TeamBots - CountAliveBots(true), 0);
     if (Missing > 0)
@@ -2619,7 +2659,17 @@ void FCoreAthenaBotManager::UpdateCounts()
     }
     // Each team's count too, until the last bot that was in it is gone (the warmup's surplus bots leave).
     UpdateTeamPlayersLeft(Athena, GameState);
-    if ((bAircraftStarted && BotsAtStart == 0) || (!bAircraftStarted && PlayerBots.empty()))
+    // A tournament's warmup (CoreV2 #427): 6.10's and later clients take every change of the game state's TeamsLeft for
+    // their team's placement. The Showdown HUD's alert (UFortShowdownScoringHUDAlert, its OnTeamPlacementChanged bound to
+    // OnTeamsLeftChanged, which OnRep_TeamsLeft broadcasts, 6.20 0xC7BF50) plays a placement tier the moment the count
+    // equals its keyValue and is below the last one played (0x7FFFFFFF at first, 0x309E0C0), and adds it to the window's
+    // score. Bots come in one at a time over the warmup, so the count went 1, 2, 3...: the player alone on the island
+    // was "Victory Royale" (or Top 10 as the tenth team came in), and with that the match's real placements below it
+    // were never played. While a tournament's bots are coming, the count is the teams the match is for: those in and
+    // those still to come.
+    UFortPlaylistAthena* Playlist = AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
+    const bool bTournamentWarmup = !bAircraftStarted && LastWantedOwnTeams > 0 && Playlist && Playlist->IsShowdownPlaylist();
+    if ((bAircraftStarted && BotsAtStart == 0) || (!bAircraftStarted && PlayerBots.empty() && !bTournamentWarmup))
     {
         return;
     }
@@ -2630,7 +2680,12 @@ void FCoreAthenaBotManager::UpdateCounts()
     {
         GameState->TotalPlayers = PlayersLeft;
     }
-    const int32_t TeamsLeft = static_cast<int32_t>(AliveTeams(true).size());
+    int32_t TeamsLeft = static_cast<int32_t>(AliveTeams(true).size());
+    if (bTournamentWarmup)
+    {
+        const int32_t TeamSize = std::max(PlaylistTeamSize, 1);
+        TeamsLeft += (std::max(LastWantedOwnTeams - CountAliveBots(false), 0) + TeamSize - 1) / TeamSize;
+    }
     if (GameState->PlayersLeft != PlayersLeft || GameState->TeamsLeft != TeamsLeft)
     {
         GameState->PlayersLeft = PlayersLeft;
@@ -3540,12 +3595,18 @@ void FCoreAthenaBotManager::LogSummary(float Now)
         }
     }
     AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+    const FProcessIo SummaryIoNow = ProcessIo();
+    const FProcessIo WindowIo = SummaryIoNow.Since(SummaryIo);
     Log::Info(L"Battle Royale bots: {} in the warmup, {} in the aircraft, {} skydiving, {} landed ({} on the navmesh), {} out; {} loot pickups seen; players left {}, teams left {}; "
-        L"frame {:.1f} ms average, {:.1f} ms max, {} over 50 ms; bots {:.2f} ms a frame, {:.1f} ms max (one bot {:.1f} ms: {}, loot list {:.1f} ms, a spawn {:.1f} ms)",
+        L"frame {:.1f} ms average, {:.1f} ms max ({:.1f} MB read from files and {} page faults in it; {:.1f} MB and {} page faults in all), {} over 50 ms; bots {:.2f} ms a frame, {:.1f} ms max (one bot {:.1f} ms: {}, loot list {:.1f} ms, a spawn {:.1f} ms)",
         ByState[0], ByState[1], ByState[2], ByState[3], OnNavMesh, ByState[4], Loot.size(), GameState ? static_cast<int32_t>(GameState->PlayersLeft) : 0, GameState ? static_cast<int32_t>(GameState->TeamsLeft) : 0,
-        FrameCount ? FrameMsSum / FrameCount : 0.0, FrameMsMax, FrameSpikes, FrameCount ? BotsMsSum / FrameCount : 0.0, BotsMsMax, BotTickMsMax, SlowestBotTick, LootRefreshMsMax, SpawnMsMax);
+        FrameCount ? FrameMsSum / FrameCount : 0.0, FrameMsMax, static_cast<double>(FrameMaxIo.ReadBytes) / (1024.0 * 1024.0), FrameMaxIo.PageFaults,
+        static_cast<double>(WindowIo.ReadBytes) / (1024.0 * 1024.0), WindowIo.PageFaults, FrameSpikes, FrameCount ? BotsMsSum / FrameCount : 0.0, BotsMsMax, BotTickMsMax,
+        SlowestBotTick, LootRefreshMsMax, SpawnMsMax);
+    SummaryIo = SummaryIoNow;
     FrameMsSum = 0.0;
     FrameMsMax = 0.0;
+    FrameMaxIo = {};
     BotsMsSum = 0.0;
     FrameCount = 0;
     FrameSpikes = 0;

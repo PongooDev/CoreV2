@@ -116,6 +116,10 @@ public:
     // Whether the build has Epic's own player bots (AFortAthenaAIBotController, 8.x on).
     static bool HasNativePlayerBots();
 
+    // The server process's reads from files and page faults so far (FCoreProcessIo), for the slow-frame lines (#427).
+    using FProcessIo = FCoreProcessIo;
+    static FProcessIo ProcessIo();
+
     // The backend's settings, from each warmup answer (null: off).
     void SetSettings(bool bEnabled, const FCoreAthenaBotSettings& InSettings);
     // The players a warmup answer was for (the report's accountIds): the backend has said whether their party fills, so
@@ -425,6 +429,8 @@ private:
     int32_t JoinBotsLeft = 0;
     int32_t LastHumanCount = 0;
     int32_t LastWantedTotal = 0;
+    // The warmup's bots on teams of their own (TickWarmup's Wanted), for a tournament's warmup team count (UpdateCounts).
+    int32_t LastWantedOwnTeams = 0;
     double SpawnMsMax = 0.0;
     bool bLoggedSpawnStart = false;
     // -CoreBotMatch: the world's playlist was asked for, the match started (once that playlist loaded), the bus left.
@@ -448,6 +454,18 @@ private:
     std::chrono::steady_clock::time_point LastFrameStart;
     double FrameMsSum = 0.0;
     double FrameMsMax = 0.0;
+    // The process's reads and page faults at the last frame's start, and during the summary window's slowest frame (#427).
+    FProcessIo LastFrameIo;
+    FProcessIo FrameMaxIo;
+    // Slow bot updates named so far this match (LogSlowUpdate): from SlowUpdateMs, or from LoadingUpdateMs with
+    // LoadingUpdateBytes read from the game's files meanwhile; up to MaxSlowUpdateLogs a match.
+    static constexpr double SlowUpdateMs = 150.0;
+    static constexpr double LoadingUpdateMs = 20.0;
+    static constexpr uint64_t LoadingUpdateBytes = 1024 * 1024;
+    static constexpr int32_t MaxSlowUpdateLogs = 40;
+    int32_t SlowUpdatesLogged = 0;
+    // The process's reads and page faults at the last summary (the summary gives the window's).
+    FProcessIo SummaryIo;
     double BotsMsSum = 0.0;
     int32_t FrameCount = 0;
     // Hitches in the summary's window: frames over 50 ms, the bots' worst frame, and what took longest in it.

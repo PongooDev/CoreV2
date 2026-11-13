@@ -182,6 +182,9 @@ namespace Finder
     // TriggerAbilityFromAnimation's slot: Natives::UFortAbilitySystemComponent_PlaySharedAnim(Calls),
     // AFortPawn_TriggerAbilityFromAnimationIndex. False (quietly) on builds without the task.
     bool ResolveSharedAnimLive(ptrdiff_t RepSharedAnimInfoOffset);
+    // From 6.x: UAthenaAIPerceptionManager::OnAISettingsUpdated, the call UAthenaAISystem::StartPlay makes with the game
+    // mode's AISettings (Natives::UAthenaAIPerceptionManager_OnAISettingsUpdated). False (quietly) without UAthenaAISystem.
+    bool ResolveAthenaAIPerceptionLive();
     bool ResolveLoginLive();
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();

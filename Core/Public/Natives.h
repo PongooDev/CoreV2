@@ -8,6 +8,7 @@
 
 class FOutputDevice;
 class UFortAbilitySystemComponent;
+class UAthenaAIPerceptionManager;
 struct FGameplayAbilityActivationInfo;
 struct FGameplayAbilityRepSharedAnim;
 struct FWeakObjectPtr;
@@ -743,6 +744,10 @@ namespace Natives
     inline float (*UFortAbilitySystemComponent_PlaySharedAnim)(UFortAbilitySystemComponent* This, UGameplayAbility* AnimatingAbility, const FGameplayAbilityActivationInfo* ActivationInfo, const FGameplayAbilityRepSharedAnim* SharedAnim) = nullptr;
     inline std::vector<uint8_t*> UFortAbilitySystemComponent_PlaySharedAnimCalls;
     inline int32_t AFortPawn_TriggerAbilityFromAnimationIndex = -1;
+    // From 6.x: UAthenaAIPerceptionManager::OnAISettingsUpdated (21.40's name; 6.20 CL-4497486 0xA9DEA0), the footstep
+    // hearing settings from a UAthenaAISettings, which UAthenaAISystem::StartPlay (0xAABEA0) hands it:
+    // Finder::ResolveAthenaAIPerceptionLive.
+    inline void (*UAthenaAIPerceptionManager_OnAISettingsUpdated)(UAthenaAIPerceptionManager* This, const UObject* Settings) = nullptr;
     // AFortGameMode::AttemptChangeTeamInfoForController(uint8 Team, AFortPlayerController* Controller)'s slot (3.2 0xA88,
     // 0xB526C0; 21.40's name and signature): PlacePlayerOnTeam's change of a joining player's team, which puts the
     // controller in the team's AFortTeamInfo and its player state on the team. It takes any controller whose player

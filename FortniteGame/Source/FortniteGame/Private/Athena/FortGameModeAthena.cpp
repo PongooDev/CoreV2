@@ -2,6 +2,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIGoalManager.h"
+#include "Athena/AI/AthenaAISystem.h"
 #include "Athena/AI/CoreAthenaBotManager.h"
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
@@ -3317,6 +3318,15 @@ void AFortGameModeAthena::SetAISettings(UObject* InAISettings)
     if (!InAISettings)
     {
         return;
+    }
+    // 6.x's Battle Royale AI hears the players' footsteps through the world's UAthenaAISystem, whose StartPlay (6.20
+    // CL-4497486 0xAABEA0) hands the game mode's AISettings to its perception manager as the world begins play. Here
+    // they come later (the match's playlist, after the map loaded), so the perception manager takes them now, the way
+    // 21.40's UAthenaAISystem::OnAISettingsUpdated has it. Without them it makes no footstep noise, and the Cube
+    // Monsters only went for a player who hit them or bumped into them (#428).
+    if (UAthenaAISystem* AthenaAISystem = UAthenaAISystem::Get(GetWorld()))
+    {
+        AthenaAISystem->OnAISettingsUpdated(InAISettings);
     }
     // 6.20's (CL-4497486) Battle Royale AI is the match's own: AFortGameModeAthena::CreateAIDirector (0xC67A90, slot
     // 0x180) makes the zone's AI director (AFortGameModeZone::CreateAIDirector, the AIDirectors entry the constructor

@@ -8361,6 +8361,72 @@ bool Finder::ResolveSharedAnimLive(ptrdiff_t RepSharedAnimInfoOffset)
     return true;
 }
 
+bool Finder::ResolveAthenaAIPerceptionLive()
+{
+    // 6.x's UAthenaAISystem::StartPlay (6.20 CL-4497486 0xAABEA0) runs UAISystem's, then, when the world's game mode is
+    // an AFortGameModeAthena with AISettings, hands them to its PerceptionManager: UAthenaAIPerceptionManager::
+    // OnAISettingsUpdated (21.40's name; 0xA9DEA0), which clamps the four footstep settings into the manager
+    // (`maxss` three times, `minss` once) and calls nothing directly.
+    static bool bTried = false;
+    if (Natives::UAthenaAIPerceptionManager_OnAISettingsUpdated || bTried)
+    {
+        return Natives::UAthenaAIPerceptionManager_OnAISettingsUpdated != nullptr;
+    }
+    bTried = true;
+    void** SystemVTable = CdoVTable(L"/Script/FortniteGame.AthenaAISystem");
+    void** BaseVTable = SystemVTable ? CdoVTable(L"/Script/AIModule.AISystem") : nullptr;
+    if (!BaseVTable)
+    {
+        return false;
+    }
+
+    const auto IsSettingsUpdate = [](uintptr_t Target)
+    {
+        int32_t Maxss = 0;
+        int32_t Minss = 0;
+        for (uintptr_t Address = Target; IsInText(Address) && Address < Target + 0x100;)
+        {
+            const uint8_t* Code = reinterpret_cast<const uint8_t*>(Address);
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(Code, &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR) || Code[0] == 0xE8 || Code[0] == 0xCC)
+            {
+                return false;
+            }
+            if (Code[0] == 0xC3)
+            {
+                return Maxss >= 3 && Minss >= 1;
+            }
+            Maxss += Code[0] == 0xF3 && Code[1] == 0x0F && Code[2] == 0x5F ? 1 : 0;
+            Minss += Code[0] == 0xF3 && Code[1] == 0x0F && Code[2] == 0x5D ? 1 : 0;
+            Address += Length;
+        }
+        return false;
+    };
+    std::vector<uintptr_t> Updates;
+    for (int32_t Index = 0; Index < 0x60; ++Index)
+    {
+        const uintptr_t Own = VTableEntry(SystemVTable, Index);
+        const uintptr_t Base = VTableEntry(BaseVTable, Index);
+        for (const auto& [Site, Target] : Own && Own != Base ? Finder::DecodedDirectCalls(Own) : decltype(Finder::DecodedDirectCalls(0)){})
+        {
+            if (std::find(Updates.begin(), Updates.end(), Target) == Updates.end() && IsSettingsUpdate(Target))
+            {
+                Updates.push_back(Target);
+            }
+        }
+    }
+    if (Updates.size() != 1)
+    {
+        Log::Error(L"Finder: UAthenaAISystem's overrides call {} functions shaped like UAthenaAIPerceptionManager::OnAISettingsUpdated, not one, so the Battle Royale AI "
+            L"hears no player's footsteps once its settings come after the world began play", Updates.size());
+        return false;
+    }
+    Natives::UAthenaAIPerceptionManager_OnAISettingsUpdated = reinterpret_cast<decltype(Natives::UAthenaAIPerceptionManager_OnAISettingsUpdated)>(Updates[0]);
+    Log::Info(L"Finder: UAthenaAIPerceptionManager::OnAISettingsUpdated is at 0x{:X} (UAthenaAISystem::StartPlay's call)", Updates[0] - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
 {
     const uintptr_t GameModeHandleMatchHasStarted = FunctionOf(L"BugLoc");

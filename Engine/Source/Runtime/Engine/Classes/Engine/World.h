@@ -22,6 +22,7 @@ class ULevelStreaming;
 class UGameInstance;
 class UNetDriver;
 class UNavigationSystem;
+class UAISystemBase;
 class FTimerManager;
 struct FTransform;
 
@@ -96,6 +97,9 @@ class UWorld final : public UObject, public FNetworkNotify
     DefineUProperty(ULevel*, CurrentLevelPendingVisibility)
     DefineUProperty(ULevel*, CurrentLevelPendingInvisibility)
     DefineUProperty(UNavigationSystem*, NavigationSystem)
+    // The world's AI system (UAISystemBase; Battle Royale's from 6.x is a UAthenaAISystem: AFortWorldSettings::
+    // GetAISystemClassName, 6.20 CL-4497486 0xFF0050, gives it to an Athena game mode's world).
+    DefineUProperty(UAISystemBase*, AISystem)
     DefineNativeMember(float, NextSwitchCountdown, UWorld_NextSwitchCountdown)
     DefineNativeMember(float, TimeSeconds, UWorld_TimeSeconds)
     DefineNativeMember(FTimerManager*, TimerManager, UWorld_TimerManager)
@@ -125,6 +129,7 @@ public:
     AGameModeBase* GetAuthGameMode() const { return AuthorityGameMode; }
     AGameStateBase* GetGameState() const { return GameState; }
     UNavigationSystem* GetNavigationSystem() const { return NavigationSystem; }
+    UAISystemBase* GetAISystem() const { return Member_AISystem.IsAvailable() ? static_cast<UAISystemBase*>(AISystem) : nullptr; }
     // The owning game instance's timer manager, else the world's own (Epic's inline UWorld::GetTimerManager). Where
     // FTimerManager::ResolveNatives failed, Core's (FTimerManager::Fallback).
     FTimerManager& GetTimerManager() const;

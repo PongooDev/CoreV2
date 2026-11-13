@@ -8,6 +8,7 @@
 #include "Natives.h"
 #include "StructArray.h"
 #include "Player/FortPlayerState.h"
+#include "Templates/Casts.h"
 
 class AFortPlayerStateAthena;
 
@@ -31,11 +32,13 @@ class EDeathCause
 // How a Battle Royale player was last downed or eliminated, which the death screen shows (OnRep_DeathInfo). The death
 // handler (1.7.2 0x437D2F, 1.8 0x43BAFE) sets it when the player is eliminated: not DBNO, and the eliminator's player
 // state, or the player's own when nobody eliminated them (the storm, a fall). Its first member is Killer up to 1.7.2,
-// FinisherOrDowner from 1.8; only 1.8's is read (GetEliminator, for AFortGameModeAthena's results).
+// FinisherOrDowner from 1.8; only 1.8's is read (GetEliminator, for AFortGameModeAthena's results). FinisherOrDowner
+// is an AFortPlayerStateAthena up to 6.10 and an AActor from 6.20 (21.40's too): 6.20's DBNO handling (0xCE8D20) stores
+// the finisher's player state, else its pawn (an AI with none, a Cube monster), else the player's own.
 struct FDeathInfo
 {
     DefineUnrealStruct(FDeathInfo, FortniteGame)
-    DefineUProperty(AFortPlayerStateAthena*, FinisherOrDowner)
+    DefineUProperty(AActor*, FinisherOrDowner)
     DefineUProperty(bool, bDBNO)
     // EDeathCause (from 1.8): OutsideSafeZone, FallDamage, Pistol, ... Trap, DBNOTimeout, ..., Unspecified.
     DefineUProperty(uint8_t, DeathCause)
@@ -66,6 +69,8 @@ public:
     {
         return Member_FinisherOrDowner.IsAvailable() && Member_bDBNO.IsAvailable();
     }
+    // From 6.20 FinisherOrDowner takes any actor (its reflected class is AActor), not only a player state.
+    static bool FinisherOrDownerIsAnyActor();
 
     static ptrdiff_t DeathCauseOffset() { return Member_DeathCause.GetOffsetChecked(); }
     static ptrdiff_t DBNOOffset() { return Member_bDBNO.GetOffsetChecked(); }
@@ -300,7 +305,7 @@ public:
             return nullptr;
         }
         FDeathInfo& Info = DeathInfo;
-        return Info.bDBNO ? nullptr : Info.FinisherOrDowner;
+        return Info.bDBNO ? nullptr : Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(Info.FinisherOrDowner));
     }
 
     // 21.40's SetKillScore: the player's KillScore, and TeamKillScore for every player of their team (the sum of the

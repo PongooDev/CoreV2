@@ -84,6 +84,18 @@ namespace
     }
 }
 
+bool FDeathInfo::FinisherOrDownerIsAnyActor()
+{
+    static const bool bAnyActor = []
+    {
+        UScriptStruct* const Struct = FDeathInfo::StaticStruct();
+        const UProperty* const Property = Struct ? Struct->FindPropertyByName(FName(L"FinisherOrDowner", FNAME_Find)) : nullptr;
+        return Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UObjectProperty)
+            && static_cast<const UObjectProperty*>(Property)->PropertyClass == AActor::StaticClass();
+    }();
+    return bAnyActor;
+}
+
 void AFortPlayerControllerAthena::SpectateOnDeath()
 {
     Reflection::FParams Params(StaticFunction_SpectateOnDeath());
@@ -306,7 +318,16 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         }
         if (Instigator)
         {
-            DeathInfo.FinisherOrDowner = AthenaStateOf(Downer ? Downer : Instigator);
+            AController* const Finisher = Downer ? Downer : Instigator;
+            DeathInfo.FinisherOrDowner = AthenaStateOf(Finisher);
+            // From 6.20 (an AActor there) the game stores the finisher's player state, else its pawn, else the player's
+            // own (the DBNO handling's knock, 0xCE8D20), so an AI without a player state, a Cube monster, is named too.
+            if (FDeathInfo::FinisherOrDownerIsAnyActor())
+            {
+                APlayerState* const FinisherState = Finisher->PlayerState;
+                APawn* const FinisherPawn = Finisher->GetPawn();
+                DeathInfo.FinisherOrDowner = FinisherState ? reinterpret_cast<AActor*>(FinisherState) : FinisherPawn ? reinterpret_cast<AActor*>(FinisherPawn) : AthenaState;
+            }
             DeathInfo.bDBNO = false;
             if (AFortPlayerStateAthena* KillerState = AthenaStateOf(Instigator))
             {

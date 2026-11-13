@@ -86,6 +86,10 @@ public:
     DefineUProperty(FGameplayTagContainer, AITagsContainer)
     // 4.2's one multiplier, for its row's ItemDropChance.
     DefineUProperty(float, ItemDropChanceMultiplier)
+    // 6.20 (CL-4497486): the world items the pawns with the row's tags drop instead of their base row's, when set.
+    DefineUProperty(FName, WorldItemLootTierGroup)
+
+    static bool HasWorldItemLootTierGroup() { return Member_WorldItemLootTierGroup.IsAvailable(); }
 };
 
 // 4.0's FFortAIPawnLootDropData (a pending spawn's LootDropData): what a pawn may drop when it dies. 4.2 has one

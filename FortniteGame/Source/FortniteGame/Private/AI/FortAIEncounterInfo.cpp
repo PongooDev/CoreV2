@@ -117,6 +117,13 @@ void UFortAIEncounterInfo::GetAIPawnLootDropData(const FGameplayTagContainer& AI
 
     OutLootDropData.WorldItemTierGroup = BaseRow->WorldItemLootTierGroup;
     OutLootDropData.AccountItemTierGroup = BaseRow->AccountItemLootTierGroup;
+    // 6.20's (0xAC09D0, "UFortAIEncounterInfo::GetAIPawnLootDropData found multiple modifier rows of the same priority"):
+    // the modifier row's WorldItemLootTierGroup, when it has one, is the world tier group ("mov rax, [modifier+10h]; test
+    // rax, rax; jnz", else the base row's +10h).
+    if (ModifierRow && FFortAILootDropModifierRow::HasWorldItemLootTierGroup() && !static_cast<FName>(ModifierRow->WorldItemLootTierGroup).IsNone())
+    {
+        OutLootDropData.WorldItemTierGroup = ModifierRow->WorldItemLootTierGroup;
+    }
     if (FFortAIBaseLootDropRow::HasItemDropChance())
     {
         // 4.2 (0x8B3AE0): one chance, the modifier's ItemDropChanceMultiplier times the row's ItemDropChance.

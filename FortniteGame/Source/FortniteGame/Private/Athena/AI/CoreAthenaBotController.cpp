@@ -20,6 +20,7 @@
 #include "Finder.h"
 #include "GameplayCueInterface.h"
 #include "GameplayTagContainer.h"
+#include "Athena/FortAthenaLowGravZone.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlaylistAthena.h"
@@ -35,6 +36,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Heroes/FortHeroType.h"
+#include "Kismet/GameplayStatics.h"
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
@@ -2354,6 +2356,9 @@ void FCoreAthenaBotController::JumpOffBus(float Now)
         DropTarget.X, DropTarget.Y, Dist2D(Start, DropTarget) / 100.0f, Pawn && Pawn->bIsSkydiving ? L"yes" : L"no");
     NextLogTime = Now + 3.0f;
     LandedTime = 0.0f;
+    FallLowestZTime = 0.0f;
+    bLeavingVortex = false;
+    HeldInAirCount = 0;
 #endif
 }
 
@@ -2381,6 +2386,33 @@ void FCoreAthenaBotController::FreeFalling(float Now)
     AFortPlayerPawnAthena* Pawn = GetPawn();
     const FVector Location = LocationOf(Pawn);
     LastKnownPosition = Location;
+
+    // What holds the pawn up in the air, before it steers (both move its destination). From 6.00 the cube's vortex under
+    // the floating island lifts a pawn in it: its funnel puts the pawn in the vortex (AFortPlayerPawn::IsInVortex), where
+    // the movement's gravity turns the glider's fall into a climb (6.10 0x10431D0: the vortex's own control params, and
+    // VortexParams' gravity floor below them), and its top takes it out again, to glide down into it again. A player
+    // rides it up to the island or steers out of it. A bot whose landing spot lay under the island gave no input over its
+    // spot and bobbed at the funnel's top under its glider until it won the match (#417's log: two bots on 6.10 at Z 6900
+    // and 7900, their height swinging 1 m either way, -680 to 500 u/s, one for 20 minutes). As 21.40's _FreeFalling does
+    // in a sky tube (ComputeDestinationInSkyTube), the bot lands past the vortex instead.
+    if (Pawn->IsInVortex() && !bLeavingVortex)
+    {
+        ComputeDestinationInVortex(Location);
+        FallLowestZ = Location.Z;
+        FallLowestZTime = Now;
+    }
+    // Anything else that keeps it up: a fall that hasn't gone 3 m lower in 15 s (30 s while it leaves a vortex) lands
+    // elsewhere (21.40's SkyTubeDivingStuckTimeThreshold for a sky tube). A skydive drops 12 m a second, a glider 5.
+    if (FallLowestZTime <= 0.0f || Location.Z < FallLowestZ - 300.0f)
+    {
+        FallLowestZ = Location.Z;
+        FallLowestZTime = Now;
+    }
+    else if (Now - FallLowestZTime > (bLeavingVortex ? 30.0f : 15.0f))
+    {
+        ComputeDestinationWhenStuck(Now, Location);
+    }
+
     const FVector Direction = Direction2D(Location, DropTarget);
     const float Distance = Dist2D(Location, DropTarget);
     // A player dives at their spot. The skydive's fast fall is its active air control (UFortMovementComp_CharacterAthena's
@@ -2423,9 +2455,10 @@ void FCoreAthenaBotController::FreeFalling(float Now)
     {
         NextLogTime = Now + 5.0f;
         AAIController* AIController = Controller.Get();
-        Log::Info(L"Battle Royale bots: {} falls at ({:.0f}, {:.0f}, {:.0f}), {:.0f} m from its spot, {:.0f} u/s down, view pitch {:.0f} (skydiving {}, parachute {}, movement {})", BotName, Location.X, Location.Y, Location.Z,
+        Log::Info(L"Battle Royale bots: {} falls at ({:.0f}, {:.0f}, {:.0f}), {:.0f} m from its spot, {:.0f} u/s down, view pitch {:.0f} (skydiving {}, parachute {}, movement {}{}, {:.0f} s since it last came 3 m lower)", BotName, Location.X, Location.Y, Location.Z,
             Distance / 100.0f, Movement ? -static_cast<float>(static_cast<FVector>(Movement->Velocity).Z) : 0.0f, AIController ? static_cast<FRotator>(AIController->ControlRotation).Pitch : 0.0f,
-            Pawn->bIsSkydiving ? L"yes" : L"no", Pawn->bIsParachuteOpen ? L"open" : L"closed", Movement ? static_cast<int32_t>(Movement->MovementMode) : -1);
+            Pawn->bIsSkydiving ? L"yes" : L"no", Pawn->bIsParachuteOpen ? L"open" : L"closed", Movement ? static_cast<int32_t>(Movement->MovementMode) : -1,
+            Pawn->IsInVortex() ? L", in a vortex" : L"", Now - FallLowestZTime);
     }
     if (bWalking && !Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen)
     {
@@ -2439,6 +2472,9 @@ void FCoreAthenaBotController::FreeFalling(float Now)
             NextLogTime = Now + 5.0f;
             bDiving = false;
             bHasFacingYaw = false;
+            bLeavingVortex = false;
+            FallLowestZTime = 0.0f;
+            HeldInAirCount = 0;
             if (!EquippedWeapon.Get())
             {
                 EquipPickaxe();
@@ -2455,6 +2491,69 @@ void FCoreAthenaBotController::FreeFalling(float Now)
     {
         LandedTime = 0.0f;
     }
+#endif
+}
+
+void FCoreAthenaBotController::ComputeDestinationInVortex(const FVector& Location)
+{
+#if WITH_SERVER_CODE
+    // The vortex's axis is its zone's (AFortAthenaLowGravZone: BGA_DudeBro_Area_Effect_C's funnel is a cone round it,
+    // 74 m round at its top). The bot lands 90 m out from it, straight away from it (the game takes the pawn out of the
+    // vortex as it crosses the funnel's side), or 150 m on along its heading when no zone is near or it is on the axis.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    FVector Axis = Location;
+    float AxisDistance = 30000.0f;
+    bool bHasAxis = false;
+    if (UClass* ZoneClass = AFortAthenaLowGravZone::StaticClass())
+    {
+        for (AActor* Zone : UGameplayStatics::GetAllActorsOfClass(Pawn, ZoneClass))
+        {
+            const FVector ZoneLocation = LocationOf(Zone);
+            if (Zone && !Zone->IsPendingKill() && Dist2D(ZoneLocation, Location) < AxisDistance)
+            {
+                AxisDistance = Dist2D(ZoneLocation, Location);
+                Axis = ZoneLocation;
+                bHasAxis = true;
+            }
+        }
+    }
+    const bool bAwayFromAxis = bHasAxis && AxisDistance > 100.0f;
+    const FVector Away = bAwayFromAxis ? Direction2D(Axis, Location) : DiveHeading.SizeSquared() > 0.01f ? DiveHeading : FVector(1.0f, 0.0f, 0.0f);
+    const FVector From = bAwayFromAxis ? Axis : Location;
+    const float Out = bAwayFromAxis ? std::max(9000.0f, AxisDistance + 3000.0f) : 15000.0f;
+    const FVector Past(From.X + Away.X * Out, From.Y + Away.Y * Out, Location.Z);
+    if (!Manager->FindGroundNear(Past, 300.0f, DropTarget))
+    {
+        DropTarget = FVector(Past.X, Past.Y, DropTarget.Z);
+    }
+    bLeavingVortex = true;
+    const FVortexParams Floor = AFortPlayerPawn::HasVortexParams() ? static_cast<FVortexParams>(Pawn->VortexParams) : FVortexParams{};
+    Log::Info(L"Battle Royale bots: {} is in a vortex at ({:.0f}, {:.0f}, {:.0f}), {} (its gravity floor {:.0f} to {:.0f}, gravity x{:.1f}), and lands past it at ({:.0f}, {:.0f}, {:.0f})", BotName,
+        Location.X, Location.Y, Location.Z, bHasAxis ? std::format(L"{:.0f} m from its axis at ({:.0f}, {:.0f}, {:.0f})", AxisDistance / 100.0f, Axis.X, Axis.Y, Axis.Z) : std::wstring(L"no zone near"),
+        Floor.GravityFloorAltitude, Floor.GravityFloorAltitude + Floor.GravityFloorWidth, Floor.GravityFloorGravityScalar, DropTarget.X, DropTarget.Y, DropTarget.Z);
+#endif
+}
+
+void FCoreAthenaBotController::ComputeDestinationWhenStuck(float Now, const FVector& Location)
+{
+#if WITH_SERVER_CODE
+    // Held up in the air: the bot lands 60 m off instead, along its heading, and a quarter turn further each time it is
+    // held again, so it doesn't head back into what held it.
+    ++HeldInAirCount;
+    const FVector Heading = DiveHeading.SizeSquared() > 0.01f ? DiveHeading : FVector(1.0f, 0.0f, 0.0f);
+    const FVector Away = HeldInAirCount > 1 ? RotateYaw(Heading, 90.0f) : Heading;
+    const FVector Far(Location.X + Away.X * 6000.0f, Location.Y + Away.Y * 6000.0f, Location.Z);
+    const FVector Previous = DropTarget;
+    if (!Manager->FindGroundNear(Far, 1000.0f, DropTarget))
+    {
+        DropTarget = FVector(Far.X, Far.Y, DropTarget.Z);
+    }
+    FallLowestZ = Location.Z;
+    FallLowestZTime = Now;
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    Log::Info(L"Battle Royale bots: {} hasn't come down in {:.0f} s at ({:.0f}, {:.0f}, {:.0f}), {:.0f} m from its spot at ({:.0f}, {:.0f}, {:.0f}) (skydiving {}, parachute {}{}): it lands at ({:.0f}, {:.0f}, {:.0f}) instead", BotName,
+        bLeavingVortex ? 30.0f : 15.0f, Location.X, Location.Y, Location.Z, Dist2D(Location, Previous) / 100.0f, Previous.X, Previous.Y, Previous.Z, Pawn->bIsSkydiving ? L"yes" : L"no",
+        Pawn->bIsParachuteOpen ? L"open" : L"closed", Pawn->IsInVortex() ? L", in a vortex" : L"", DropTarget.X, DropTarget.Y, DropTarget.Z);
 #endif
 }
 
@@ -8234,6 +8333,9 @@ void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
     }
     State = ECoreAthenaBotState::Skydiving;
     LandedTime = 0.0f;
+    FallLowestZTime = 0.0f;
+    bLeavingVortex = false;
+    HeldInAirCount = 0;
     NextLogTime = Now + 3.0f;
     LastKnownPosition = Start;
     Log::Info(L"Battle Royale bots: {} respawns in the air at ({:.0f}, {:.0f}, {:.0f}), {:.0f} over where it died", BotName, Start.X, Start.Y, Start.Z, RespawnHeight);

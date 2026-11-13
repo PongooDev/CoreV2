@@ -365,6 +365,11 @@ private:
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus / _FreeFalling.
     void JumpOffBus(float Now);
     void FreeFalling(float Now);
+    // _FreeFalling in what holds a pawn up in the air, as 21.40's does in a sky tube (ComputeDestinationInSkyTube, and
+    // its SkyTubeDivingStuckTimeThreshold): a destination out of 6.x's vortex once the game puts the pawn in it
+    // (AFortPlayerPawn::IsInVortex), and one away from wherever else the bot hasn't come down for a while.
+    void ComputeDestinationInVortex(const FVector& Location);
+    void ComputeDestinationWhenStuck(float Now, const FVector& Location);
     // On the bus (from 5.30), some bots thank the bus driver as a player does: AFortPlayerControllerAthena::
     // ServerThankBusDriver_Implementation's work on the bot's player state, which every client's feed shows.
     void ThankBusDriver();
@@ -862,6 +867,13 @@ private:
     // Skydiving: diving (the skydive's active control), and the heading it dives along.
     bool bDiving = false;
     FVector DiveHeading;
+    // The bot was put in a vortex and lands past it.
+    bool bLeavingVortex = false;
+    // The fall's progress down: the lowest the pawn has been (0 time: not measured yet) and when it got there; how often
+    // the bot was held up in the air and chose a destination elsewhere.
+    float FallLowestZ = 0.0f;
+    float FallLowestZTime = 0.0f;
+    int32_t HeldInAirCount = 0;
 
     // The game's own fire (ActivateWeaponFire): the shot waiting to show whether it spent ammo.
     bool bWeaponFireActive = false;

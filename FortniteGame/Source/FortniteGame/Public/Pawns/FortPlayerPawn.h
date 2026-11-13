@@ -9,6 +9,18 @@ class AController;
 class AFortPickup;
 class UFortHero;
 
+// From 6.00: what AFortPlayerPawn::SetInVortex gives a pawn in a vortex (FVortexParams, the same 16 bytes on 6.00 to
+// 6.20). In a vortex the skydive's and the glider's gravity (UFortMovementComp_Character, 6.10 0x10431D0) is the vortex's
+// own control params' (a glider climbs), and below GravityFloorAltitude + GravityFloorWidth it blends towards
+// GravityFloorGravityScalar.
+struct FVortexParams
+{
+    float GravityFloorAltitude;
+    float GravityFloorWidth;
+    float GravityFloorGravityScalar;
+    float GravityFloorTerminalVelocity;
+};
+
 class AFortPlayerPawn : public AFortPawn
 {
     DefineUnrealClass(AFortPlayerPawn, FortniteGame)
@@ -32,9 +44,18 @@ public:
     // Guided Missile's; AFortRemoteControlledPawnAthena, 5.41 0x1234EA0 around its Possess). The pawn isn't new to the
     // player then: AFortPlayerPawnAthena::PossessedBy (5.41 0xC63200) skips the game mode's effects while it is set.
     DefineUProperty(bool, bBeingRepossessed)
+    // From 6.00: whether the pawn is in a vortex (the cube's, under the floating island: BGA_DudeBro_Area_Effect's funnel
+    // gives an entering pawn GE_DudeBro_Area_Effect, whose GA_DudeBro_Vortex calls SetInVortex, 6.10 0x11FE900, the
+    // pawn's virtual), and the gravity floor its movement has there. The funnel's end overlap removes the effect, which
+    // cancels the ability, and its end calls SetInVortex(false).
+    DefineUProperty(bool, bIsInVortex)
+    DefineUProperty(FVortexParams, VortexParams)
 
     // Epic's getter (5.41 0x11820E0). False where the build has no remote-controlled pawns.
     bool IsBeingRepossessed() const { return Member_bBeingRepossessed.IsAvailable() && bBeingRepossessed; }
+    // Epic's getter (AFortPlayerPawn::IsInVortex, 6.10 0x158E8C0's native). False before 6.00, which has no vortex.
+    bool IsInVortex() const { return Member_bIsInVortex.IsAvailable() && bIsInVortex; }
+    static bool HasVortexParams() { return Member_VortexParams.IsAvailable(); }
 
     void ResetGameplayAttributes();
     bool EquipLastWeapon();

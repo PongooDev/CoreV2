@@ -53,6 +53,7 @@
 #include "Building/BuildingStructuralSupportSystem.h"
 #include "Building/BuildingTrap.h"
 #include "Building/BuildingTrapDefender.h"
+#include "AI/FortBTContext_SuppressGoalUpdate.h"
 #include "AI/FortBTTask_SetFrustrationDiscouragement.h"
 #include "AI/FortQueryContexts.h"
 #include "AI/FortQueryGenerators.h"
@@ -339,6 +340,10 @@ static void InstallHooks()
         UFortBTTask_SetFrustrationDiscouragement::HookVTables();
         UFortQueryGenerator_Enemies::HookVTables();
         UFortQueryContext_EncounterPrimaryAssignmentGoals::HookVTables();
+        // After the two above, which find the EQS slots and the goal checks these need.
+        UFortQueryGenerator_AssignmentGoal::HookVTables();
+        UFortQueryContext_AllGoals::HookVTables();
+        UFortBTContext_SuppressGoalUpdate::HookVTables();
         AFortAIPawn::HookVTables();
         ABuildingTrapDefender::HookNatives();
         AFortPlayerPawn::HookVTables();

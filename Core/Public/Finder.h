@@ -212,6 +212,19 @@ namespace Finder
     bool ResolveAIPawnDeathLive(void** PawnVTable, ptrdiff_t UsesDBNOOffset, uint8_t UsesDBNOMask);
     bool ResolveAssignmentGoalChecksLive(ptrdiff_t MaxAIForAssignmentOffset, ptrdiff_t MaxAIPerGoalOffset);
     bool ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTable, UClass* GoalItemType);
+    // Whether Function (a vtable entry of a goal manager user) has lost its AFortAIGoalManager::GetCurrent: its body can
+    // be read and calls neither GetCurrent's stub nor a call site AFortAIGoalManager::HookCallSites redirected. 6.21
+    // CL-4526925's compiler (and 3.2's) folds such a body down to the casts before the call.
+    bool IsFoldedGoalManagerUser(uintptr_t Function);
+    // AFortAIGoalManager::RegisterAIForGoalDetection, from AFortAIController's Possess (AIControllerVTable is its own),
+    // and UnregisterAIForGoalDetection, from AFortAIController::UnregisterForGoalDetection.
+    bool ResolveGoalDetectionLive(void** AIControllerVTable);
+    // AFortAIGoalManager::OnReceiveGoalQueryResult's query result handling and FAIAssignmentInfo::LastQueryResult, from
+    // AFortAIController::OnReceiveGoalQueryResult; SuppressGoalUpdatesOffset checks its bSuppressGoalUpdates test.
+    bool ResolveGoalQueryResultLive(ptrdiff_t SuppressGoalUpdatesOffset);
+    // UFortBTService_ContextOverride::ApplyValueOverrides / RevertValueOverrides slots, from its OnBecomeRelevant and
+    // OnCeaseRelevant (ContextOverrideVTable is its own).
+    bool ResolveContextOverrideLive(void** ContextOverrideVTable);
     bool ResolveQuickBarFocusLive();
     bool ResolveSpottingLive(UClass* SpottableActorInterface);
     bool ResolveNavigationSystemLive();

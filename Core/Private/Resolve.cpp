@@ -7456,6 +7456,295 @@ bool Finder::ResolveQueryContextsLive(void** EncounterPrimaryAssignmentGoalsVTab
     return true;
 }
 
+namespace
+{
+    // Whether the rel32 call at Site (to Target) calls AFortAIGoalManager::GetCurrent: its stub, or a call site Core
+    // redirected (a packed build may still hold that write, so the site can read either way).
+    bool IsGoalManagerGetCurrentCall(uintptr_t Site, uintptr_t Target)
+    {
+        const auto& Calls = Natives::AFortAIGoalManager_GetCurrentCalls;
+        return (Natives::AFortAIGoalManager_GetCurrentStub && Target == Natives::AFortAIGoalManager_GetCurrentStub)
+            || std::find(Calls.begin(), Calls.end(), reinterpret_cast<uint8_t*>(Site)) != Calls.end();
+    }
+
+    // The end of the piece of Function (its first, or a chained .pdata piece) that holds Site.
+    uintptr_t PieceEndAt(uintptr_t Function, uintptr_t Site)
+    {
+        std::vector<std::pair<uintptr_t, uintptr_t>> Pieces = Finder::FunctionChunks(Function);
+        if (Pieces.empty())
+        {
+            Pieces.emplace_back(Function, Finder::FunctionEnd(Function));
+        }
+        for (const auto& [Begin, End] : Pieces)
+        {
+            if (Site >= Begin && Site < End)
+            {
+                return End;
+            }
+        }
+        return 0;
+    }
+
+    // The goal manager method called on what the AFortAIGoalManager::GetCurrent call at Call (in Function) returned: the
+    // first rel32 call or tail jump after "mov rcx, rax" (6.21 CL-4526925 0xAA6BD5: call GetCurrent; test rax, rax; jz;
+    // mov rdx, rbx; mov rcx, rax; add rsp, 20h; pop rbx; jmp UnregisterAIForGoalDetection). 0 without one.
+    uintptr_t GoalManagerMethodAfter(uintptr_t Function, uintptr_t Call)
+    {
+        const uintptr_t End = PieceEndAt(Function, Call);
+        bool bGoalManagerInRcx = false;
+        uintptr_t Address = Call + 5;
+        for (int32_t Count = 0; Count < 32 && Address < End; ++Count)
+        {
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                break;
+            }
+            const bool bMovRcxRax = Instruction.rex_w && !Instruction.rex_r && !Instruction.rex_b
+                && ((Instruction.opcode == 0x8B && Instruction.modrm == 0xC8) || (Instruction.opcode == 0x89 && Instruction.modrm == 0xC1));
+            if (bMovRcxRax)
+            {
+                bGoalManagerInRcx = true;
+            }
+            else if (bGoalManagerInRcx && Length == 5 && (Instruction.opcode == 0xE8 || Instruction.opcode == 0xE9))
+            {
+                const uintptr_t Method = Finder::RelativeTarget(Address, 1, 5);
+                return IsInText(Method) ? Method : 0;
+            }
+            Address += Length;
+        }
+        return 0;
+    }
+
+    // The goal manager method Function calls on what AFortAIGoalManager::GetCurrent returned (GoalManagerMethodAfter), at
+    // the first of its GetCurrent calls whose method Accept takes: the stub is the build's shared "return 0", which other
+    // calls in Function may share. 0 without one.
+    uintptr_t GoalManagerCallAfterGetCurrent(uintptr_t Function, const std::function<bool(uintptr_t Method)>& Accept = nullptr)
+    {
+        const bool bReadable = Function && Finder::FunctionStart(Function) == Function && Finder::FunctionEnd(Function) > Function;
+        for (const auto& [Call, Target] : bReadable ? Finder::DecodedDirectCalls(Function) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            if (!IsGoalManagerGetCurrentCall(Call, Target))
+            {
+                continue;
+            }
+            const uintptr_t Method = GoalManagerMethodAfter(Function, Call);
+            if (Method && (!Accept || Accept(Method)))
+            {
+                return Method;
+            }
+        }
+        return 0;
+    }
+
+    // The first rel32 call or jump a short function makes (a parameterless exec's tail jump to its implementation, 6.21
+    // CL-4526925 0x1486265).
+    uintptr_t FirstRelativeTarget(uintptr_t Function, int32_t MaxInstructions)
+    {
+        uintptr_t Address = Function;
+        for (int32_t Count = 0; Address && IsInText(Address) && Count < MaxInstructions; ++Count)
+        {
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                return 0;
+            }
+            if (Length == 5 && (Instruction.opcode == 0xE8 || Instruction.opcode == 0xE9))
+            {
+                const uintptr_t Target = Finder::RelativeTarget(Address, 1, 5);
+                return IsInText(Target) ? Target : 0;
+            }
+            Address += Length;
+        }
+        return 0;
+    }
+
+    uintptr_t FirstDirectCallTarget(uintptr_t Function)
+    {
+        const bool bReadable = Function && Finder::FunctionStart(Function) == Function && Finder::FunctionEnd(Function) > Function;
+        const auto Calls = bReadable ? Finder::DecodedDirectCalls(Function) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+        return Calls.empty() ? 0 : Calls.front().second;
+    }
+}
+
+bool Finder::IsFoldedGoalManagerUser(uintptr_t Function)
+{
+    if (!Function || (!Natives::AFortAIGoalManager_GetCurrentStub && Natives::AFortAIGoalManager_GetCurrentCalls.empty()))
+    {
+        return false;
+    }
+    if (Finder::FunctionStart(Function) != Function || Finder::FunctionEnd(Function) <= Function)
+    {
+        return false;
+    }
+    for (const auto& [Call, Target] : Finder::DecodedDirectCalls(Function))
+    {
+        if (IsGoalManagerGetCurrentCall(Call, Target))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Finder::ResolveGoalDetectionLive(void** AIControllerVTable)
+{
+    if (Natives::AFortAIGoalManager_RegisterAIForGoalDetection && Natives::AFortAIGoalManager_UnregisterAIForGoalDetection)
+    {
+        return true;
+    }
+
+    // Both look the AI up in the goal manager's ActiveAIAssignments first, with the same map search as
+    // GetCurrentAssignmentInfoForAI (6.21 CL-4526925 0xAE30F0, 6.20 0xABFE50, 3.2 0x89F3A0).
+    const uintptr_t AssignmentLookup = Finder::ResolveGoalDiscouragementLive() ? FirstDirectCallTarget(reinterpret_cast<uintptr_t>(Natives::AFortAIGoalManager_GetAssignmentInfo)) : 0;
+    const auto LooksUpAssignments = [AssignmentLookup](uintptr_t Method)
+    {
+        return Method && AssignmentLookup && FirstDirectCallTarget(Method) == AssignmentLookup;
+    };
+
+    // AFortAIController::UnregisterForGoalDetection (BlueprintCallable; 6.21 0xAA6BC0, its exec 0x1486250 a tail jump to it)
+    // calls it on GetCurrent's result.
+    UFunction* UnregisterForGoalDetection = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortAIController:UnregisterForGoalDetection");
+    const uintptr_t UnregisterExec = UnregisterForGoalDetection ? reinterpret_cast<uintptr_t>(UnregisterForGoalDetection->GetNativeFunc()) : 0;
+    uintptr_t Unregister = IsInText(UnregisterExec) ? GoalManagerCallAfterGetCurrent(UnregisterExec, LooksUpAssignments) : 0;
+    if (!Unregister && IsInText(UnregisterExec))
+    {
+        Unregister = GoalManagerCallAfterGetCurrent(FirstRelativeTarget(UnregisterExec, 12), LooksUpAssignments);
+    }
+
+    // AFortAIController's Possess (6.21 0xA9F360, slot 0xD1) calls it on GetCurrent's result, or (3.2 0x87BE10) calls the
+    // small function that does (0x87D9A0).
+    UFunction* Possess = FindObject<UFunction>(nullptr, L"/Script/Engine.Controller:Possess");
+    const int32_t PossessIndex = Possess ? Finder::ImplementationIndex(Possess) : -1;
+    const uintptr_t AIPossess = VTableEntry(AIControllerVTable, PossessIndex);
+    uintptr_t Register = GoalManagerCallAfterGetCurrent(AIPossess, LooksUpAssignments);
+    const bool bPossessReadable = AIPossess && Finder::FunctionStart(AIPossess) == AIPossess && Finder::FunctionEnd(AIPossess) > AIPossess;
+    for (const auto& [Call, Target] : !Register && bPossessReadable ? Finder::DecodedDirectCalls(AIPossess) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        const uintptr_t TargetEnd = Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        const uintptr_t Candidate = TargetEnd > Target && TargetEnd - Target < 0x80 ? GoalManagerCallAfterGetCurrent(Target, LooksUpAssignments) : 0;
+        if (Candidate)
+        {
+            Register = Candidate;
+            break;
+        }
+    }
+
+    if (!LooksUpAssignments(Register) || !LooksUpAssignments(Unregister) || Register == Unregister)
+    {
+        Log::Error(L"Finder: AFortAIGoalManager goal detection registration not found (assignment lookup {}, Possess slot {}, register 0x{:X}, unregister 0x{:X})",
+            AssignmentLookup != 0, PossessIndex, Register ? Register - Finder::ImageBase() : 0, Unregister ? Unregister - Finder::ImageBase() : 0);
+        return false;
+    }
+    Natives::AFortAIGoalManager_RegisterAIForGoalDetection = reinterpret_cast<decltype(Natives::AFortAIGoalManager_RegisterAIForGoalDetection)>(Register);
+    Natives::AFortAIGoalManager_UnregisterAIForGoalDetection = reinterpret_cast<decltype(Natives::AFortAIGoalManager_UnregisterAIForGoalDetection)>(Unregister);
+    Log::Info(L"Finder: AFortAIGoalManager::RegisterAIForGoalDetection at 0x{:X}, UnregisterAIForGoalDetection at 0x{:X}", Register - Finder::ImageBase(), Unregister - Finder::ImageBase());
+    return true;
+}
+
+bool Finder::ResolveGoalQueryResultLive(ptrdiff_t SuppressGoalUpdatesOffset)
+{
+    if (Natives::AFortAIGoalManager_HandleGoalQueryResult && Natives::FAIAssignmentInfo_LastQueryResult >= 0)
+    {
+        return true;
+    }
+
+    // AFortAIController::OnReceiveGoalQueryResult hands the result to AFortAIGoalManager::OnReceiveGoalQueryResult (6.21
+    // CL-4526925 0xAF24B0, 6.20 0xACD180, 3.2 0x8AF190):
+    //   call GetCurrentAssignmentInfoForAI; test rax, rax; jz; cmp byte [rax+55h], 0 (bSuppressGoalUpdates);
+    //   mov byte [rax+54h], 0 (bWaitingForQueryResponse); jz handle;
+    //   suppressed: lea rcx, [rax+58h] (LastQueryResult) and the assignment inlined (6.x), or jmp
+    //     FAIAssignmentInfo::SetLastQueryResult, which does add rcx, 58h (3.2 0x8B51A0);
+    //   handle: mov r9, Result; mov r8, rax; mov rdx, AI; mov rcx, this; call <handling>
+    const uintptr_t ControllerHandler = FunctionOf(L"OnReceiveGoalQueryResult received by AFortAIController when no Goal Manager exists!");
+    const bool bResolvedInfo = Finder::ResolveGoalDiscouragementLive();
+    const uintptr_t AssignmentInfoLookup = bResolvedInfo ? reinterpret_cast<uintptr_t>(Natives::AFortAIGoalManager_GetAssignmentInfo) : 0;
+    const uintptr_t Handler = ControllerHandler ? GoalManagerCallAfterGetCurrent(ControllerHandler, [AssignmentInfoLookup](uintptr_t Method) { return AssignmentInfoLookup && FirstDirectCallTarget(Method) == AssignmentInfoLookup; }) : 0;
+    const uintptr_t HandlerEnd = Handler && Finder::FunctionStart(Handler) == Handler ? Finder::FunctionEnd(Handler) : 0;
+    const bool bInfoLookup = HandlerEnd != 0;
+
+    const uintptr_t SuppressTest = HandlerEnd ? FindInstruction(Handler, HandlerEnd, { 0x80, 0x78, -1, 0x00 }) : 0;
+    const bool bSuppressTest = SuppressTest && SuppressGoalUpdatesOffset > 0 && Byte(SuppressTest + 2) == SuppressGoalUpdatesOffset;
+
+    ptrdiff_t LastQueryResultOffset = -1;
+    if (const uintptr_t Lea = HandlerEnd ? FindInstruction(Handler, HandlerEnd, { 0x48, 0x8D, 0x48, -1 }) : 0)
+    {
+        LastQueryResultOffset = Byte(Lea + 3);
+    }
+    for (uintptr_t Site = SuppressTest; Site && LastQueryResultOffset < 0 && Site + 5 <= HandlerEnd; ++Site)
+    {
+        const uintptr_t Setter = Byte(Site) == 0xE9 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+        const uintptr_t Add = IsInText(Setter) ? FindInstruction(Setter, Setter + 0x20, { 0x48, 0x83, 0xC1, -1 }) : 0;
+        LastQueryResultOffset = Add ? Byte(Add + 3) : -1;
+    }
+
+    uintptr_t Handling = 0;
+    const uintptr_t InfoArgument = HandlerEnd ? FindInstruction(Handler, HandlerEnd, { 0x4C, 0x8B, 0xC0 }) : 0;
+    for (uintptr_t Site = InfoArgument; Site && !Handling && Site + 5 <= std::min(HandlerEnd, InfoArgument + 0x10); ++Site)
+    {
+        Handling = Byte(Site) == 0xE8 && IsInText(Finder::RelativeTarget(Site, 1, 5)) ? Finder::RelativeTarget(Site, 1, 5) : 0;
+    }
+
+    if (!bInfoLookup || !bSuppressTest || LastQueryResultOffset <= SuppressGoalUpdatesOffset || !Handling)
+    {
+        Log::Error(L"Finder: AFortAIGoalManager::OnReceiveGoalQueryResult not read (handler 0x{:X}, assignment info lookup {}, bSuppressGoalUpdates test {}, LastQueryResult {}, handling {})",
+            Handler ? Handler - Finder::ImageBase() : 0, bInfoLookup, bSuppressTest, LastQueryResultOffset, Handling != 0);
+        return false;
+    }
+    Natives::AFortAIGoalManager_HandleGoalQueryResult = reinterpret_cast<decltype(Natives::AFortAIGoalManager_HandleGoalQueryResult)>(Handling);
+    Natives::FAIAssignmentInfo_LastQueryResult = LastQueryResultOffset;
+    Log::Info(L"Finder: AFortAIGoalManager::OnReceiveGoalQueryResult at 0x{:X} hands results to 0x{:X}, FAIAssignmentInfo LastQueryResult +0x{:X}",
+        Handler - Finder::ImageBase(), Handling - Finder::ImageBase(), LastQueryResultOffset);
+    return true;
+}
+
+bool Finder::ResolveContextOverrideLive(void** ContextOverrideVTable)
+{
+    if (Natives::UFortBTService_ContextOverride_ApplyValueOverridesIndex >= 0 && Natives::UFortBTService_ContextOverride_RevertValueOverridesIndex >= 0)
+    {
+        return true;
+    }
+
+    // OnBecomeRelevant and OnCeaseRelevant only forward (6.21 CL-4526925 slots 0x51/0x52, 0xAF08D0/0xAF0C10; 3.2
+    // 0x8ADC20/0x214F7D0): mov rax, [rcx]; jmp qword ptr [rax+2B0h] / [rax+2B8h].
+    const auto ForwardedSlot = [](uintptr_t Entry) -> int32_t
+    {
+        const uintptr_t Body = Entry ? Finder::Unthunk(Entry) : 0;
+        if (!Body || !IsInText(Body) || Byte(Body) != 0x48 || Byte(Body + 1) != 0x8B || Byte(Body + 2) != 0x01)
+        {
+            return -1;
+        }
+        const uintptr_t Jump = Body + 3 + (Byte(Body + 3) == 0x48 ? 1 : 0);
+        if (Byte(Jump) != 0xFF)
+        {
+            return -1;
+        }
+        const int32_t Displacement = Byte(Jump + 1) == 0xA0 ? *reinterpret_cast<const int32_t*>(Jump + 2) : Byte(Jump + 1) == 0x60 ? Byte(Jump + 2) : -1;
+        return Displacement > 0 && Displacement % 8 == 0 ? Displacement / 8 : -1;
+    };
+
+    int32_t ApplyIndex = -1;
+    for (int32_t Index = 1; ContextOverrideVTable && Index + 1 < 0x100 && ApplyIndex < 0; ++Index)
+    {
+        const int32_t Apply = ForwardedSlot(VTableEntry(ContextOverrideVTable, Index));
+        if (Apply > Index + 1 && ForwardedSlot(VTableEntry(ContextOverrideVTable, Index + 1)) == Apply + 1)
+        {
+            ApplyIndex = Apply;
+        }
+    }
+    if (ApplyIndex < 0)
+    {
+        Log::Error(L"Finder: UFortBTService_ContextOverride::ApplyValueOverrides not found (vtable {})", ContextOverrideVTable != nullptr);
+        return false;
+    }
+    Natives::UFortBTService_ContextOverride_ApplyValueOverridesIndex = ApplyIndex;
+    Natives::UFortBTService_ContextOverride_RevertValueOverridesIndex = ApplyIndex + 1;
+    Log::Info(L"Finder: UFortBTService_ContextOverride::ApplyValueOverrides is slot 0x{:X}, RevertValueOverrides slot 0x{:X}", ApplyIndex, ApplyIndex + 1);
+    return true;
+}
+
 bool Finder::ResolveGameSessionVerifyAuthLive(void** SessionVTable)
 {
     // AFortGameSession::OnVerifyAuthComplete (2.4 0x70A130, 2.3 0x70D630) logs this before it kicks the player whose

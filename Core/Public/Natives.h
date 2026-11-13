@@ -453,6 +453,24 @@ namespace Natives
     // is stripped. Null on 1.1-4.5, where Core restores both.
     inline bool (*AFortAIGoalManager_SetFrustrationDiscouragement)(UObject* This, UObject* AI, float DiscouragementDuration) = nullptr;
     inline ptrdiff_t FAIAssignmentInfo_DiscouragedGoalTimers = -1;
+    // AFortAIGoalManager::GetCurrent's stripped body (return 0), and the calls to it AFortAIGoalManager::HookCallSites
+    // redirected (they may still read as calls to the stub while a packed build holds code writes). A function that
+    // calls neither lost its GetCurrent to the compiler, and everything after it (6.21 CL-4526925, 3.2).
+    inline uintptr_t AFortAIGoalManager_GetCurrentStub = 0;
+    inline std::vector<uint8_t*> AFortAIGoalManager_GetCurrentCalls;
+    // AFortAIGoalManager::RegisterAIForGoalDetection / UnregisterAIForGoalDetection(AFortAIController*) (6.21 CL-4526925
+    // 0xAF6C30 / 0xAFC520, 6.20 CL-4497486 0xACEAA0 / 0xAD7480): an AI's entry in the goal manager's assignments.
+    inline void (*AFortAIGoalManager_RegisterAIForGoalDetection)(UObject* This, UObject* AI) = nullptr;
+    inline void (*AFortAIGoalManager_UnregisterAIForGoalDetection)(UObject* This, UObject* AI) = nullptr;
+    // What AFortAIGoalManager::OnReceiveGoalQueryResult does with a goal query's result when the AI's goal updates aren't
+    // suppressed (6.21 0xAEEA70, 6.20 0xAC6E00): (AI, its FAIAssignmentInfo, const TSharedPtr<FEnvQueryResult>&).
+    inline void (*AFortAIGoalManager_HandleGoalQueryResult)(UObject* This, UObject* AI, void* AssignmentInfo, const void* Result) = nullptr;
+    // FAIAssignmentInfo's unreflected TSharedPtr<FEnvQueryResult> LastQueryResult (+0x58 on 3.2 to 6.21).
+    inline ptrdiff_t FAIAssignmentInfo_LastQueryResult = -1;
+    // UFortBTService_ContextOverride::ApplyValueOverrides / RevertValueOverrides, which its OnBecomeRelevant and
+    // OnCeaseRelevant forward to (slots 0x56 / 0x57 on 3.2 to 6.21).
+    inline int32_t UFortBTService_ContextOverride_ApplyValueOverridesIndex = -1;
+    inline int32_t UFortBTService_ContextOverride_RevertValueOverridesIndex = -1;
     inline int32_t UBTTaskNode_ExecuteTaskIndex = -1;
     inline int32_t UEnvQueryGenerator_GenerateItemsIndex = -1;
     inline int32_t UEnvQueryContext_ProvideContextIndex = -1;

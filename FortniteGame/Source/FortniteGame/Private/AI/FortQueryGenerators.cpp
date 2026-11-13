@@ -5,6 +5,7 @@
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Pawns/FortAIPawn.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
@@ -195,6 +196,92 @@ void UFortQueryGenerator_SpecificAssignmentGoals::GenerateItems(void* QueryInsta
     }
     LogAssignmentGoals(Pawn, Identifier, Usable ? L"goals generated" : L"every goal rejected", Usable, Goals.Num());
 #endif
+}
+
+void UFortAIAssignment::AddValidGoalsForAIToEQI(AFortAIController* AI, AFortAIPawn* Pawn, void* QueryInstance)
+{
+#if WITH_SERVER_CODE
+    if (Natives::UFortAIAssignment_Goals < 0 || !Natives::FFortAIGoal_CanAIUse)
+    {
+        return;
+    }
+    const FScriptArray& Goals = *reinterpret_cast<const FScriptArray*>(reinterpret_cast<uint8_t*>(this) + Natives::UFortAIAssignment_Goals);
+    UObject* Settings = GetAssignmentSettings();
+    const int32_t GoalSize = FFortAIGoal::StaticStruct()->GetStructureSize();
+    for (int32_t Index = 0; Index < Goals.Num(); ++Index)
+    {
+        const uint8_t* Goal = static_cast<const uint8_t*>(Goals.GetData()) + static_cast<size_t>(Index) * GoalSize;
+        if (Natives::FFortAIGoal_CanAIUse(Goal, reinterpret_cast<UObject*>(static_cast<AController*>(AI)), Settings))
+        {
+            AddGoalItem(QueryInstance, reinterpret_cast<AActor*>(reinterpret_cast<const FWeakObjectPtr*>(Goal)->Get()), this, Goal);
+        }
+    }
+#endif
+}
+
+void UFortQueryGenerator_AssignmentGoal::GenerateItems(void* QueryInstance) const
+{
+#if WITH_SERVER_CODE
+    if (Natives::FEnvQueryInstance_Owner < 0)
+    {
+        return;
+    }
+    UObject* QueryOwner = reinterpret_cast<const FWeakObjectPtr*>(static_cast<uint8_t*>(QueryInstance) + Natives::FEnvQueryInstance_Owner)->Get();
+    AFortAIPawn* Pawn = Cast<AFortAIPawn>(QueryOwner);
+    AFortAIController* AI = Cast<AFortAIController>(Pawn ? reinterpret_cast<UObject*>(static_cast<AController*>(Pawn->Controller)) : QueryOwner);
+    AFortAIGoalManager* GoalManager = AI ? AFortAIGoalManager::GetCurrent(reinterpret_cast<UObject*>(static_cast<AController*>(AI))) : nullptr;
+    if (!GoalManager)
+    {
+        return;
+    }
+
+    const FScriptArray& RawData = *reinterpret_cast<const FScriptArray*>(static_cast<uint8_t*>(QueryInstance) + Natives::FEnvQueryInstance_RawData);
+    const int32_t RawDataBefore = RawData.Num();
+    GoalManager->AddValidGoalsForAIToEQI(Pawn, QueryInstance);
+
+    // Core's diagnostics: what a pawn class's assignment goal query got, once per pawn class and outcome.
+    const uint16_t ValueSize = *reinterpret_cast<const uint16_t*>(static_cast<uint8_t*>(QueryInstance) + Natives::FEnvQueryInstance_ValueSize);
+    const int32_t Added = ValueSize ? (RawData.Num() - RawDataBefore) / ValueSize : 0;
+    static std::set<std::wstring> Logged;
+    const std::wstring PawnClass = Pawn ? reinterpret_cast<UObject*>(Pawn)->GetClass()->GetName().ToStdString() : std::wstring(L"none");
+    if (Logged.size() < 200 && Logged.insert(PawnClass + (Added ? L"|some" : L"|none")).second)
+    {
+        Log::Info(L"UFortQueryGenerator_AssignmentGoal: {}'s goal query: {} goals from its encounter's and the world's assignments", PawnClass, Added);
+    }
+#endif
+}
+
+void UFortQueryGenerator_AssignmentGoal::HookVTables()
+{
+    UClass* Class = StaticClass();
+    UObject* Default = Class ? Class->GetDefaultObject(false) : nullptr;
+    void** VTable = Default ? *reinterpret_cast<void***>(Default) : nullptr;
+    const int32_t Index = Natives::UEnvQueryGenerator_GenerateItemsIndex;
+    if (!VTable || Index < 0)
+    {
+        return;
+    }
+
+    // 6.02 to 6.20 keep Epic's body, whose AFortAIGoalManager::GetCurrent call HookCallSites redirects.
+    const uintptr_t GenerateItems = reinterpret_cast<uintptr_t>(VTable[Index]);
+    if (!Finder::IsFoldedGoalManagerUser(GenerateItems))
+    {
+        Log::Info(L"UFortQueryGenerator_AssignmentGoal::GenerateItems (0x{:X}) is the build's own: it calls AFortAIGoalManager::GetCurrent", GenerateItems - Finder::ImageBase());
+        return;
+    }
+    if (!Natives::UFortAIAssignment_CanPawnUse || !Natives::FFortAIGoal_CanAIUse || Natives::UFortAIAssignment_Goals < 0 || !Natives::FEnvQueryInstance_AddItemData
+        || !Natives::UObject_GetInterfaceAddress || Natives::IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex < 0)
+    {
+        Log::Error(L"UFortQueryGenerator_AssignmentGoal::GenerateItems (0x{:X}) lost its goal manager calls, but the assignment and goal checks or the encounter lookup weren't found; not restored", GenerateItems - Finder::ImageBase());
+        return;
+    }
+    Log::Info(L"UFortQueryGenerator_AssignmentGoal::GenerateItems (0x{:X}) lost everything after AFortAIGoalManager::GetCurrent; Core restores it", GenerateItems - Finder::ImageBase());
+    Hooks::SwapVTable(L"UFortQueryGenerator_AssignmentGoal::GenerateItems", VTable, Index, reinterpret_cast<void*>(&GenerateItemsHK));
+}
+
+void UFortQueryGenerator_AssignmentGoal::GenerateItemsHK(UFortQueryGenerator_AssignmentGoal* This, void* QueryInstance)
+{
+    This->GenerateItems(QueryInstance);
 }
 
 void UFortQueryGenerator_Enemies::HookVTables()

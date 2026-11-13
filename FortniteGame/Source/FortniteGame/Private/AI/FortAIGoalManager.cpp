@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "AI/FortAIGoalManager.h"
 #include "AI/FortAIDirector.h"
+#include "AI/FortQueryContexts.h"
 #include "AI/Navigation/FortNavigationGraph.h"
 #include "AI/Navigation/NavigationSystem.h"
 #include "AI/Navigation/RecastNavMesh.h"
@@ -11,6 +12,8 @@
 #include "Hooks.h"
 #include "Log.h"
 #include "Natives.h"
+#include "ObjectLayout.h"
+#include "Pawns/FortAIPawn.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -353,6 +356,139 @@ FAIAssignmentInfo* AFortAIGoalManager::GetAssignmentInfo(AFortAIController* AI)
     return static_cast<FAIAssignmentInfo*>(Natives::AFortAIGoalManager_GetAssignmentInfo(this, AI));
 }
 
+namespace
+{
+    // IFortAIEncounterInfoOwnerInterface::GetEncounterInfo on Pawn, as the goal manager asks an AFortAIPawn for its
+    // encounter (6.20 CL-4497486 0xAC6B20 calls the interface's slot 2 at pawn +0x780).
+    UFortAIEncounterInfo* GetEncounterInfoOf(AFortAIPawn* Pawn)
+    {
+        if (!Pawn || !Natives::UObject_GetInterfaceAddress || Natives::IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex < 0)
+        {
+            return nullptr;
+        }
+        void* EncounterInfoOwner = Natives::UObject_GetInterfaceAddress(reinterpret_cast<UObject*>(Pawn), UFortAIEncounterInfoOwnerInterface::StaticClass());
+        return EncounterInfoOwner ? CallVirtual<UFortAIEncounterInfo*>(EncounterInfoOwner, Natives::IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex) : nullptr;
+    }
+
+    AFortAIController* AIControllerOf(AFortAIPawn* Pawn)
+    {
+        return Pawn ? Cast<AFortAIController>(reinterpret_cast<UObject*>(static_cast<AController*>(Pawn->Controller))) : nullptr;
+    }
+
+    UObject* AsObject(AFortAIController* AI)
+    {
+        return reinterpret_cast<UObject*>(static_cast<AController*>(AI));
+    }
+}
+
+void AFortAIGoalManager::AddValidGoalsForAIToEQI(AFortAIPawn* Pawn, void* QueryInstance)
+{
+#if WITH_SERVER_CODE
+    if (!Pawn)
+    {
+        return;
+    }
+    // 6.20 copies the encounter's assignments before it walks them; nothing on the way changes them.
+    if (UFortAIEncounterInfo* EncounterInfo = GetEncounterInfoOf(Pawn))
+    {
+        AddValidGoalsForAIToEQI(Pawn, EncounterInfo->EncounterAssignments, QueryInstance);
+    }
+    AddValidGoalsForAIToEQI(Pawn, WorldAssignments, QueryInstance);
+#endif
+}
+
+void AFortAIGoalManager::AddValidGoalsForAIToEQI(AFortAIPawn* Pawn, const TArray<UObject*>& Assignments, void* QueryInstance)
+{
+#if WITH_SERVER_CODE
+    AFortAIController* AI = AIControllerOf(Pawn);
+    if (!AI || !Natives::UFortAIAssignment_CanPawnUse)
+    {
+        return;
+    }
+    for (UObject* Assignment : Assignments)
+    {
+        if (Assignment && Natives::UFortAIAssignment_CanPawnUse(Assignment, Pawn))
+        {
+            static_cast<UFortAIAssignment*>(Assignment)->AddValidGoalsForAIToEQI(AI, Pawn, QueryInstance);
+        }
+    }
+#endif
+}
+
+void AFortAIGoalManager::AddValidGoalsForAI(AFortAIPawn* Pawn, TArray<FFortAIAssignmentGoalInfo>& OutGoals)
+{
+#if WITH_SERVER_CODE
+    if (!Pawn)
+    {
+        return;
+    }
+    if (UFortAIEncounterInfo* EncounterInfo = GetEncounterInfoOf(Pawn))
+    {
+        AddValidGoalsForAI(Pawn, EncounterInfo->EncounterAssignments, OutGoals);
+    }
+    AddValidGoalsForAI(Pawn, WorldAssignments, OutGoals);
+#endif
+}
+
+void AFortAIGoalManager::AddValidGoalsForAI(AFortAIPawn* Pawn, const TArray<UObject*>& Assignments, TArray<FFortAIAssignmentGoalInfo>& OutGoals)
+{
+#if WITH_SERVER_CODE
+    AFortAIController* AI = AIControllerOf(Pawn);
+    if (!AI || !Natives::UFortAIAssignment_CanPawnUse)
+    {
+        return;
+    }
+    for (UObject* Assignment : Assignments)
+    {
+        if (Assignment && Natives::UFortAIAssignment_CanPawnUse(Assignment, Pawn))
+        {
+            static_cast<UFortAIAssignment*>(Assignment)->AddValidGoalsForAI(AI, Pawn, OutGoals);
+        }
+    }
+#endif
+}
+
+void AFortAIGoalManager::SuppressGoalUpdates(AFortAIController* AI, bool bSuppress)
+{
+#if WITH_SERVER_CODE
+    FAIAssignmentInfo* AssignmentInfo = GetAssignmentInfo(AI);
+    if (!AssignmentInfo || Natives::FAIAssignmentInfo_LastQueryResult < 0)
+    {
+        return;
+    }
+    if (!bSuppress && AssignmentInfo->bSuppressGoalUpdates && AssignmentInfo->LastQueryResult.IsValid())
+    {
+        const TSharedPtr<FEnvQueryResult> LastQueryResult = AssignmentInfo->LastQueryResult;
+        const bool bHasPawn = AFortAIController::HasMyFortPawn() ? AI->MyFortPawn != nullptr : AI->GetPawn() != nullptr;
+        if (bHasPawn && Natives::AFortAIGoalManager_HandleGoalQueryResult)
+        {
+            Natives::AFortAIGoalManager_HandleGoalQueryResult(this, AsObject(AI), AssignmentInfo, &LastQueryResult);
+        }
+    }
+    AssignmentInfo->bSuppressGoalUpdates = bSuppress;
+    if (!bSuppress)
+    {
+        AssignmentInfo->LastQueryResult = TSharedPtr<FEnvQueryResult>();
+    }
+#endif
+}
+
+void AFortAIGoalManager::RegisterAIForGoalDetection(AFortAIController* AI)
+{
+    if (AI && Natives::AFortAIGoalManager_RegisterAIForGoalDetection)
+    {
+        Natives::AFortAIGoalManager_RegisterAIForGoalDetection(this, AsObject(AI));
+    }
+}
+
+void AFortAIGoalManager::UnregisterAIForGoalDetection(AFortAIController* AI)
+{
+    if (AI && Natives::AFortAIGoalManager_UnregisterAIForGoalDetection)
+    {
+        Natives::AFortAIGoalManager_UnregisterAIForGoalDetection(this, AsObject(AI));
+    }
+}
+
 bool AFortAIGoalManager::SetFrustrationDiscouragement(AFortAIController* AI, float DiscouragementDuration)
 {
 #if WITH_SERVER_CODE
@@ -479,13 +615,21 @@ void AFortAIGoalManager::HookCallSites()
     std::vector<uint8_t*> EncounterCalls;
     for (uint8_t* Call : Finder::GoalManagerGetCurrentCalls(GoalManagerVTable, DirectorVTable, StaticClass()->GetPropertiesSize(), AFortAIDirector::StaticClass()->GetPropertiesSize(), AActor::StaticClass()->GetPropertiesSize(), Natives::UObject_GetWorldIndex, UFortAIEncounterInfo::EncounterAssignmentsOffset(), Stub, DirectorCalls, EncounterCalls))
     {
-        Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrent));
+        if (Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrent)))
+        {
+            Natives::AFortAIGoalManager_GetCurrentCalls.push_back(Call);
+        }
     }
     // 5.0+: the encounter's primary assignment lookup (FindAssignment inlined), which its spawn queries' contexts use.
     for (uint8_t* Call : EncounterCalls)
     {
-        Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent (encounter assignments)", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrentForEncounterAssignments));
+        if (Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent (encounter assignments)", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrentForEncounterAssignments)))
+        {
+            Natives::AFortAIGoalManager_GetCurrentCalls.push_back(Call);
+        }
     }
+    // What tells a goal manager user the compiler kept apart from one it folded past GetCurrent (Finder::IsFoldedGoalManagerUser).
+    Natives::AFortAIGoalManager_GetCurrentStub = Stub;
     for (uint8_t* Call : DirectorCalls)
     {
         Hooks::RedirectCall(L"AFortAIDirector::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIDirector::GetCurrent));
@@ -500,9 +644,10 @@ void AFortAIGoalManager::HookCallSites()
              L"/Script/FortniteGame.FortMission:RemoveGoalsFromEncounterAssignment" })
     {
         UFunction* Function = FindObject<UFunction>(nullptr, FunctionPath);
-        if (uint8_t* Call = Stub && Function ? Finder::FirstCallInImplementation(Function, Stub) : nullptr)
+        uint8_t* Call = Stub && Function ? Finder::FirstCallInImplementation(Function, Stub) : nullptr;
+        if (Call && Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrent)))
         {
-            Hooks::RedirectCall(L"AFortAIGoalManager::GetCurrent", Call, reinterpret_cast<void*>(&AFortAIGoalManager::GetCurrent));
+            Natives::AFortAIGoalManager_GetCurrentCalls.push_back(Call);
         }
     }
 

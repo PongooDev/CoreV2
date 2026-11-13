@@ -966,7 +966,13 @@ FCoreAIBotSkills FCoreAthenaBotManager::SkillsForLevel(int32_t Level)
 
 int32_t FCoreAthenaBotManager::GetAliveBotCount() const
 {
-    return static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [](const auto& Bot) { return Bot->IsAlive(); }));
+    // 21.40's AliveBots, which RemoveFromAliveBots leaves a bot the playlist brings back in, as a player's death only
+    // takes them out of AlivePlayers when they won't respawn (Core's AFortPlayerControllerAthena::OnPawnDied returns
+    // before RemoveFromAlivePlayers when IsRespawningAllowed says so; 21.40 asks the mutators' ShouldRemoveFromAlivePlayers).
+    // A respawning bot was counted out between its death and its respawn: the game state's PlayersLeft, which
+    // UpdateCounts sets from this each frame, dropped by one and came back (CoreV2 #432). Where the playlist doesn't
+    // bring players back, no bot waits to respawn and this is the bots alive.
+    return static_cast<int32_t>(std::count_if(PlayerBots.begin(), PlayerBots.end(), [](const auto& Bot) { return Bot->IsInMatch(); }));
 }
 
 FCoreAthenaBotController* FCoreAthenaBotManager::FindBot(const UObject* PawnOrPlayerState) const
@@ -2721,10 +2727,11 @@ void FCoreAthenaBotManager::UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, A
         return;
     }
     const uint8_t FirstTeam = EFortTeam::GetHumanPvP_Team1();
+    // A bot waiting to respawn stays in its team's count, as a respawning player stays in TeamAlivePlayers (#432).
     std::map<int32_t, int32_t> Bots;
     for (const auto& Bot : PlayerBots)
     {
-        if (Bot->IsAlive() && Bot->GetTeam() >= FirstTeam)
+        if (Bot->IsInMatch() && Bot->GetTeam() >= FirstTeam)
         {
             ++Bots[Bot->GetTeam() - FirstTeam];
         }
@@ -2871,9 +2878,9 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
     }
 
     // A player's team is out once its players are out too (Core's death handler left its place to its bots then); in a
-    // large team game any of the team's players.
+    // large team game any of the team's players. A teammate waiting to respawn keeps it in, as in AliveTeams (#432).
     const bool bPlayersTeam = Bot->IsOnPlayersTeam() || (HasSquadsInTeams() && HumanTeams().contains(Bot->GetTeam()));
-    const bool bTeamOut = std::none_of(PlayerBots.begin(), PlayerBots.end(), [Bot](const auto& Other) { return Other.get() != Bot && Other->IsAlive() && Other->GetTeam() == Bot->GetTeam(); })
+    const bool bTeamOut = std::none_of(PlayerBots.begin(), PlayerBots.end(), [Bot](const auto& Other) { return Other.get() != Bot && Other->IsInMatch() && Other->GetTeam() == Bot->GetTeam(); })
         && !(bPlayersTeam && HasAlivePlayerOnTeam(Athena, Bot->GetTeam()));
     Bot->OnPossesedPawnDied(KillerState);
     // A playlist that brings its players back (Playground, CoreV2 #344): the bot is still in the match, as a respawning
@@ -3146,8 +3153,9 @@ bool FCoreAthenaBotManager::HasStandingTeammate(const FCoreAthenaBotController* 
 
 bool FCoreAthenaBotManager::HasPlayersTeamBotsLeft(uint8_t Team) const
 {
+    // A bot waiting to respawn is still the team's (#432).
     const bool bSquads = HasSquadsInTeams();
-    return std::any_of(PlayerBots.begin(), PlayerBots.end(), [Team, bSquads](const auto& Bot) { return Bot->IsAlive() && (bSquads || Bot->IsOnPlayersTeam()) && Bot->GetTeam() == Team; });
+    return std::any_of(PlayerBots.begin(), PlayerBots.end(), [Team, bSquads](const auto& Bot) { return Bot->IsInMatch() && (bSquads || Bot->IsOnPlayersTeam()) && Bot->GetTeam() == Team; });
 }
 
 void FCoreAthenaBotManager::SetPlayersTeamPlace(uint8_t Team, int32_t Place)

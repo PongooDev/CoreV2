@@ -138,7 +138,9 @@ public:
     // manager runs the update instead.
     void SetTickEnabled(bool bTickEnabled);
 
-    // The bots still in the match (riding the aircraft, falling or on the ground).
+    // The bots still in the match (riding the aircraft, falling or on the ground), and on a playlist that brings its
+    // players back those waiting to respawn (CoreV2 #432), as the game mode keeps a respawning player among its alive
+    // players.
     int32_t GetAliveBotCount() const;
     bool HasAliveBots() const { return GetAliveBotCount() > 0; }
     // The playlist's team size (1 solo, 2 duos, 4 squads, 20 Teams of 20, 50 50v50), and a bot's teammates still in the

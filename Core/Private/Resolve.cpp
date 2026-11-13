@@ -11131,8 +11131,13 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
     }
 
     // StopNativeAction (slot 0x154): the pawn's slot jumps to UFortAbilitySystemComponent's (by its log string, 1.8
-    // 0x2ACEF0) with the pawn's AbilitySystemComponent.
-    const uintptr_t AbilitySystemStop = FunctionOf(L"Can't stop native action %s, not active!");
+    // 0x2ACEF0) with the pawn's AbilitySystemComponent. 6.21 (CL-4526925, 0xA787F0) logs the owner's net role too and
+    // the old text is gone from the exe.
+    uintptr_t AbilitySystemStop = FunctionOf(L"Can't stop native action %s, not active!");
+    if (!AbilitySystemStop)
+    {
+        AbilitySystemStop = FunctionOf(L"Native Action Role(%s) Can't stop %s, not active!");
+    }
     const int32_t StopIndex = AbilitySystemStop ? FirstVTableIndexWhere(PawnVTable, [AbilitySystemStop](uintptr_t Entry)
     {
         for (uintptr_t Site = Entry; Site < Entry + 0x10; ++Site)

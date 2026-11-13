@@ -12,6 +12,7 @@
 #include "GameFramework/Volume.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Packed.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
@@ -261,7 +262,13 @@ namespace
     constexpr double TileCacheSummaryIntervalMs = 30000.0;
 
     // UE 4.20's Detour, the same in 2.5, 3.0, 3.1 and 3.2: dtNavMesh (dtNavMesh::init 3.1 0x1C7BB40, getTileRefAt 0x1C7B670)
-    // and dtMeshTile (176 bytes; getTile 0x1C7B310) and dtMeshHeader.
+    // and dtMeshTile (176 bytes; getTile 0x1C7B310) and dtMeshHeader. UE 4.21's (5.0 to 6.21) is the same: dtNavMesh::init
+    // (5.41 0x2B2B080, 6.02 0x2B93140, 6.10 0x2BF41D0, 6.20 0x2C52E70, 6.21 0x2C68D80) fills m_orig +28, m_tileWidth +40,
+    // m_tileHeight +44, m_tileLutMask +56, m_posLookup +128, m_tiles +144 (176 each); dtNavMesh::addTile (5.41 0x2B1C240,
+    // 6.02 0x2B84300, 6.10 0x2BE5370, 6.20 0x2C44010, 6.21 0x2C59F20) takes the same arguments, wants DT_NAVMESH_MAGIC and
+    // DT_NAVMESH_VERSION 7, hashes x and y with the same constants, compares the header's x +8, y +12 and layer +16 (an
+    // int), and points the tile's header +8 and data +88 at the blob, dataSize +96, flags +100, next +104; removeTile
+    // (6.20 0x2C57400) frees the data only with DT_TILE_FREE_DATA.
     namespace Detour
     {
         constexpr ptrdiff_t NavMeshOrig = 28;
@@ -360,25 +367,6 @@ namespace
             Crc = Table[(Crc ^ Data[Index]) & 0xFF] ^ (Crc >> 8);
         }
         return ~Crc;
-    }
-
-    // The build's changelist, from its build version string in .rdata ("++Fortnite+Release-3.1-CL-3915963", FApp's);
-    // 0 when it isn't there.
-    uint32_t BuildChangelist()
-    {
-        static const uint32_t Changelist = []
-        {
-            static constexpr wchar_t Prefix[] = L"++Fortnite+";
-            const uintptr_t Found = Finder::FindReadOnly(Prefix, sizeof(Prefix) - sizeof(wchar_t));
-            std::wstring Version;
-            for (const wchar_t* Char = reinterpret_cast<const wchar_t*>(Found); Found && Version.size() < 128 && Finder::IsReadable(Char, sizeof(wchar_t)) && *Char; ++Char)
-            {
-                Version.push_back(*Char);
-            }
-            const size_t At = Version.find(L"-CL-");
-            return At == std::wstring::npos ? 0u : static_cast<uint32_t>(std::wcstoul(Version.c_str() + At + 4, nullptr, 10));
-        }();
-        return Changelist;
     }
 
     // Core.dll's folder: Core's own, kept between matches and launches.
@@ -697,6 +685,11 @@ namespace
         // Cached tiles Core kept active ahead of a bot (each one the engine would have built again).
         std::unordered_set<uint64_t> KeptActive;
         int32_t AddFailures = 0;
+        // Tiles that became active with no navmesh there, since when: the wait for the engine's tile, which a cached
+        // tile kept active doesn't have.
+        std::unordered_map<uint64_t, double> WaitingSince;
+        double EngineWaitMs = 0.0;
+        int32_t EngineWaits = 0;
     };
     FTileCache TileCache;
 
@@ -918,6 +911,12 @@ namespace
             return;
         }
         TileCache.Changed.erase(Key);
+        if (const auto Waiting = TileCache.WaitingSince.find(Key); Waiting != TileCache.WaitingSince.end())
+        {
+            TileCache.EngineWaitMs += NowMs() - Waiting->second;
+            ++TileCache.EngineWaits;
+            TileCache.WaitingSince.erase(Waiting);
+        }
         if (Layers.empty())
         {
             return;
@@ -1041,6 +1040,10 @@ namespace
             const uint64_t Key = TileKey(Coord.X, Coord.Y);
             if (Active.insert(Key).second)
             {
+                if (!TileCache.LastActive.contains(Key) && !HasTileAt(TileCache.DetourNavMesh, Key))
+                {
+                    TileCache.WaitingSince.try_emplace(Key, Now);
+                }
                 InspectTile(Key, true);
             }
         }
@@ -1049,6 +1052,7 @@ namespace
             if (!Active.contains(Key))
             {
                 TileCache.LeftActive[Key] = Now + TileCacheLeftActiveWatchMs;
+                TileCache.WaitingSince.erase(Key);
             }
         }
         for (auto It = TileCache.LeftActive.begin(); It != TileCache.LeftActive.end();)
@@ -1128,6 +1132,9 @@ namespace
         TileCache.TilesRestored = 0;
         TileCache.KeptActive.clear();
         TileCache.AddFailures = 0;
+        TileCache.WaitingSince.clear();
+        TileCache.EngineWaitMs = 0.0;
+        TileCache.EngineWaits = 0;
     }
 
     // The match's navmesh has its key: the file is read on the worker (once per process and key).
@@ -1142,7 +1149,9 @@ namespace
             return;
         }
         FTileCacheKey Key;
-        Key.Changelist = BuildChangelist();
+        // The build's changelist from its version string (FApp's): the first copy with "-CL-", since from 5.0 the first
+        // is the bare branch name ("++Fortnite+Release-5.0").
+        Key.Changelist = Packed::Changelist();
         Key.Map = NameOf(reinterpret_cast<UObject*>(World));
         Key.AgentRadius = RecastNavMesh->AgentRadius;
         Key.AgentHeight = RecastNavMesh->AgentHeight;
@@ -1269,6 +1278,7 @@ namespace
             TileCache.Seen.clear();
             TileCache.LastActive.clear();
             TileCache.LeftActive.clear();
+            TileCache.WaitingSince.clear();
             TileCache.bPreloadStarted = false;
             TileCache.bPreloadDone = false;
             TileCache.DetourNavMesh = DetourNavMesh;
@@ -1369,8 +1379,13 @@ namespace
         {
             if (TileCache.NextSummary > 0.0 && (TileCache.TilesSaved || TileCache.TilesRebuilt || TileCache.TilesRestored))
             {
-                Log::Info(L"Battle Royale navigation: navmesh cache this match: {} new tiles saved ({} cached), {} built again, {} cached tiles put back, {} kept active ahead of the bots{}", TileCache.TilesSaved,
-                    TileCache.Base.size(), TileCache.TilesRebuilt, TileCache.TilesRestored, TileCache.KeptActive.size(), TileCache.AddFailures ? std::format(L", {} refused", TileCache.AddFailures) : std::wstring());
+                // The time saved: each cached tile kept active was in the navmesh as its bot came near, where an
+                // engine-built tile arrives this long after it becomes active (measured this match, to Core's next look).
+                const double EngineWait = TileCache.EngineWaits ? TileCache.EngineWaitMs / TileCache.EngineWaits : 0.0;
+                Log::Info(L"Battle Royale navigation: navmesh cache this match: {} new tiles saved ({} cached), {} built again, {} cached tiles put back, {} kept active ahead of the bots{}; "
+                    L"the engine's tiles came {:.0f} ms after they became active ({} measured), the {} kept active were there at once", TileCache.TilesSaved, TileCache.Base.size(), TileCache.TilesRebuilt,
+                    TileCache.TilesRestored, TileCache.KeptActive.size(), TileCache.AddFailures ? std::format(L", {} refused", TileCache.AddFailures) : std::wstring(), EngineWait, TileCache.EngineWaits,
+                    TileCache.KeptActive.size());
             }
             TileCache.NextSummary = Now + TileCacheSummaryIntervalMs;
         }

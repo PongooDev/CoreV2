@@ -490,6 +490,9 @@ namespace Natives
     inline void (*AFortNavigationGraph_UpdateDirtyBlocks)(AFortNavigationGraph* This) = nullptr;
     inline int32_t (*FNavGraphCells_GetCellIndex)(FNavGraphCells* This, const int32_t* Coords) = nullptr;
     inline void* (*FNavGraphPathSearch_Construct)(void* This, AFortNavigationGraph* Graph) = nullptr;
+    // The game's terrain loader, which AFortNavigationGraph::OnWorldInitialized calls (6.02 CL-4461277 0xAD4620 from
+    // 0xAD84C0): every loaded level's AFortWorldSettings::WorldCells into the graph's cells. Null where it isn't found.
+    inline void (*AFortNavigationGraph_LoadTerrainCells)(UWorld* World, UBuildingStructuralSupportSystem* SupportSystem, AFortNavigationGraph* Graph) = nullptr;
     inline ptrdiff_t UFortMcpProfileWorld_Inventory = -1;
     inline ptrdiff_t UFortMcpProfileWorld_bIsInventoryInitialized = -1;
     // AFortPlayerController slots BindToPlayerController hands a rejoining player's existing inventory to (-1 when the

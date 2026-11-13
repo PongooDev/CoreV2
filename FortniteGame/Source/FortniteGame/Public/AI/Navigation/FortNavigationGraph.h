@@ -74,5 +74,10 @@ public:
 
 private:
     bool AreCellsInitialized() const;
+    // The terrain's cells: the game's own loader where Finder finds it (ResolveTerrainLoader), Core's decoding of
+    // WorldCells otherwise. Returns the number of cells with ground navigation.
     int32_t LoadTerrainCells(UWorld* World);
+    // Core's decoding, for the builds whose loader isn't found: ground links and steps only.
+    int32_t DecodeTerrainCells(UWorld* World);
+    static bool ResolveTerrainLoader();
 };

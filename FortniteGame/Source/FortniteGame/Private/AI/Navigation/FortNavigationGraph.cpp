@@ -6,6 +6,7 @@
 #include "Engine/LevelStreaming.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "FortGameState.h"
 #include "FortWorldSettings.h"
 #include "HAL/UnrealMemory.h"
 #include "Log.h"
@@ -314,6 +315,8 @@ bool AFortNavigationGraph::ResolveNatives()
     Log::Info(L"Finder: AFortNavigationGraph cells +0x{:X}, block links +0x{:X}, dirty blocks +0x{:X}, flags +0x{:X}, path search +0x{:X}; support grid size +0x{:X}, origin +0x{:X}",
         Natives::AFortNavigationGraph_Cells, Natives::AFortNavigationGraph_BlockLinks, Natives::AFortNavigationGraph_DirtyBlocks, Natives::AFortNavigationGraph_Flags, Natives::AFortNavigationGraph_PathSearch,
         Natives::UBuildingStructuralSupportSystem_GridSize, Natives::UBuildingStructuralSupportSystem_GridOrigin);
+    // Looked for with the rest (it needs the cells' offset), so a server's start shows whether the game's loader is used.
+    ResolveTerrainLoader();
     return true;
 }
 
@@ -482,7 +485,147 @@ bool AFortNavigationGraph::InitializeCells(UBuildingStructuralSupportSystem* Sup
 #endif
 }
 
+bool AFortNavigationGraph::ResolveTerrainLoader()
+{
+    static const bool bResolved = []
+    {
+        // AFortNavigationGraph::OnWorldInitialized (6.02 CL-4461277 0xAD84C0, 6.10 CL-4480234 0xB07860, 6.20 CL-4497486
+        // 0xB5FDF0), the function that logs its own time, keeps `this` from its prologue (mov rbx, rcx), lays the cells out
+        // over the support grid's bounds (lea rcx, [rbx+Cells]; call, 0xAD20A0) and then hands the terrain to its loader
+        // with the world, the support system and itself (mov r8, rbx; mov rdx, rsi; mov rcx, r13; call 0xAD4620; 6.10
+        // 0xB038E0, 6.20 0xB5BE70): the function that warns of misaligned terrain. Core lays its cells out earlier (when the
+        // support grid is, so the buildings registered from then on fill them), which is why the loader is called on its
+        // own; the rest of OnWorldInitialized is Core's (OnWorldInitialized below).
+        const std::vector<uintptr_t> WorldInitRefs = Finder::StringRefs(L"AFortNavigationGraph::OnWorldInitialized time:%.3fms memory:%.1fkB");
+        const std::vector<uintptr_t> LoaderRefs = Finder::StringRefs(L"Misaligned terrain data found in level [%s]!");
+        const uintptr_t WorldInit = WorldInitRefs.size() == 1 ? Finder::FunctionStart(WorldInitRefs[0]) : 0;
+        const uintptr_t WorldInitEnd = WorldInit ? Finder::FunctionEnd(WorldInit) : 0;
+        if (!WorldInitEnd || LoaderRefs.empty() || Natives::AFortNavigationGraph_Cells < 0)
+        {
+            Log::Info(L"Finder: AFortNavigationGraph's terrain loader not looked for (OnWorldInitialized {}, {} loader string refs), Core decodes the terrain", WorldInit != 0, LoaderRefs.size());
+            return false;
+        }
+
+        // The register `this` is kept in: mov r64, rcx (REX.W 8B /r, rm = rcx).
+        int32_t ThisRegister = -1;
+        for (uintptr_t Site = WorldInit; Site + 3 <= WorldInit + 0x20 && ThisRegister < 0; ++Site)
+        {
+            const uint8_t Rex = Byte(Site);
+            const uint8_t ModRm = Byte(Site + 2);
+            if ((Rex == 0x48 || Rex == 0x4C) && Byte(Site + 1) == 0x8B && (ModRm & 0xC7) == 0xC1)
+            {
+                ThisRegister = ((ModRm >> 3) & 7) | (Rex & 0x04 ? 8 : 0);
+            }
+        }
+        const auto IsLoader = [&LoaderRefs](uintptr_t Target)
+        {
+            for (const uintptr_t Ref : LoaderRefs)
+            {
+                if (Finder::FunctionStart(Ref) == Target)
+                {
+                    return true;
+                }
+                for (const auto& [Begin, End] : Finder::FunctionChunks(Target))
+                {
+                    if (Ref >= Begin && Ref < End)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        // mov <reg>, <reg> with REX.W: Rex is 48 or 49 (4C or 4D for r8 as the destination), Reg the destination.
+        const auto IsMovTo = [](uintptr_t Site, bool bExtendedDestination, uint8_t Reg, int32_t& OutSource)
+        {
+            const uint8_t Rex = Byte(Site);
+            const uint8_t ModRm = Byte(Site + 2);
+            if ((Rex & 0xFE) != (bExtendedDestination ? 0x4C : 0x48) || Byte(Site + 1) != 0x8B || (ModRm & 0xF8) != (0xC0 | (Reg << 3)))
+            {
+                return false;
+            }
+            OutSource = (ModRm & 7) | (Rex & 0x01 ? 8 : 0);
+            return true;
+        };
+        // lea rcx, [<this>+Cells] (disp32), the cells' layout, within the 0x60 bytes before the loader's call (6.02: 0x35).
+        const auto LoadsCells = [ThisRegister](uintptr_t CallSite)
+        {
+            for (uintptr_t Site = CallSite - 0x60; Site + 7 <= CallSite; ++Site)
+            {
+                const uint8_t Rex = Byte(Site);
+                const uint8_t ModRm = Byte(Site + 2);
+                if ((Rex == 0x48 || Rex == 0x49) && Byte(Site + 1) == 0x8D && (ModRm & 0xF8) == 0x88 && ((ModRm & 7) | (Rex & 0x01 ? 8 : 0)) == ThisRegister
+                    && (ModRm & 7) != 4 && Displacement(Site + 3) == static_cast<int32_t>(Natives::AFortNavigationGraph_Cells))
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        uintptr_t Loader = 0;
+        int32_t Matches = 0;
+        for (const auto& [Site, Target] : ThisRegister >= 0 ? Finder::DirectCalls(WorldInit, WorldInitEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            int32_t GraphSource = -1;
+            int32_t Ignored = -1;
+            if (Site >= WorldInit + 9 && IsLoader(Target) && IsMovTo(Site - 9, true, 0, GraphSource) && GraphSource == ThisRegister && IsMovTo(Site - 6, false, 2, Ignored)
+                && IsMovTo(Site - 3, false, 1, Ignored) && LoadsCells(Site))
+            {
+                Loader = Target;
+                ++Matches;
+            }
+        }
+        if (Matches != 1)
+        {
+            Log::Info(L"Finder: AFortNavigationGraph's terrain loader not found in OnWorldInitialized (0x{:X}, {} matching calls, this in register {}), Core decodes the terrain",
+                WorldInit - Finder::ImageBase(), Matches, ThisRegister);
+            return false;
+        }
+        Natives::AFortNavigationGraph_LoadTerrainCells = reinterpret_cast<decltype(Natives::AFortNavigationGraph_LoadTerrainCells)>(Loader);
+        Log::Info(L"Finder: AFortNavigationGraph's terrain loader 0x{:X}, called by OnWorldInitialized 0x{:X}", Loader - Finder::ImageBase(), WorldInit - Finder::ImageBase());
+        return true;
+    }();
+    return bResolved;
+}
+
 int32_t AFortNavigationGraph::LoadTerrainCells(UWorld* World)
+{
+#if WITH_SERVER_CODE
+    // #424: husks came up under the ground. The encounters' spawn queries (EncounterRandomDirectionQuery's
+    // FortQueryGenerator_PointsFromNavGraph, GenerateItems 6.02 CL-4461277 0xA69A70) take only flat cells by default
+    // (bOnlyFlatSurface, the class default's 0xCA at +0x198): a cell whose byte +18 is set is left out (0xA6A239). That
+    // byte is the top byte of a WorldCells entry's location word, turned with the level, which the game's loader writes
+    // with the rest of the entry: the ground links (+15), the steps (+6), the jumps (+16, the fourth word's low byte) and
+    // bit 28 of the links word (+19), and it then links the cells the links word's bits 20-27 point to (0xAD59B0) and works
+    // out the climbs (+17, 0xAE2B30). Core's decoding had the links and steps only, so a sloped terrain cell (a cave
+    // ramp: Arid_3x3_Terrain_a's cell (0,0,1) has 0x6F there) counted as flat. The generator puts its points half a cell
+    // up and projects them with a capsule trace down (ProjectionData: ExtentZ 160, PostProjectionVerticalOffset -140); on
+    // a slope the capsule starts inside the ground, the trace hits where it starts, and the husk spawned 140 under it.
+    AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    UBuildingStructuralSupportSystem* SupportSystem = GameState ? static_cast<UBuildingStructuralSupportSystem*>(GameState->StructuralSupportSystem) : nullptr;
+    if (!SupportSystem || static_cast<AFortNavigationGraph*>(SupportSystem->NavGraph) != this || !ResolveTerrainLoader())
+    {
+        return DecodeTerrainCells(World);
+    }
+
+    Natives::AFortNavigationGraph_LoadTerrainCells(World, SupportSystem, this);
+    // The cells with ground navigation, as the game tests a cell for it (0xA781D0).
+    int32_t Loaded = 0;
+    for (const FNavGraphCell& Cell : Cells.Cells)
+    {
+        if (Cell.GroundLinks || Cell.GroundSteps || Cell.GroundJumps || (Cell.Reserved19 & 1))
+        {
+            ++Loaded;
+        }
+    }
+    return Loaded;
+#else
+    return 0;
+#endif
+}
+
+int32_t AFortNavigationGraph::DecodeTerrainCells(UWorld* World)
 {
     int32_t Loaded = 0;
     for (TObjectIterator<AFortWorldSettings> It; It; ++It)
@@ -603,7 +746,8 @@ void AFortNavigationGraph::OnWorldInitialized()
             Blocks.Add(Block);
         }
     }
-    Log::Info(L"AFortNavigationGraph: {} terrain cells, {} cells in {} blocks", TerrainCells, Grid.Cells.Num(), Blocks.Num());
+    Log::Info(L"AFortNavigationGraph: {} terrain cells ({}), {} cells in {} blocks", TerrainCells,
+        Natives::AFortNavigationGraph_LoadTerrainCells ? L"the game's loader, cells with ground navigation" : L"Core's decoding", Grid.Cells.Num(), Blocks.Num());
 
     // Every block's links in one go, as Epic's OnWorldInitialized builds them (5.30 0xAF46E0: a loop over the blocks
     // calling the block link builder, then the log below, timed from its start): the intact dirty-block update (5.30

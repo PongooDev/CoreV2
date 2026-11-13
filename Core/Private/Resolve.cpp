@@ -15160,18 +15160,19 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     //
     // That function is found as NotifyActorChannelCleanedUp's second call, and nothing is resolved unless the code
     // around it is what 6.00, 6.01 (CL-4424678 0x78A1D0, 0x78ABB0), 6.02 (CL-4461277 0x78AD60, 0x78B740), 6.10
-    // (CL-4480234 0x7A3920, 0x7A4300) and 6.20 (CL-4497486 0x740FE0, 0x7419D0) have:
+    // (CL-4480234 0x7A3920, 0x7A4300), 6.20 (CL-4497486 0x740FE0, 0x7419D0) and 6.21 (CL-4526925 0x7439F0, 0x7443E0)
+    // have:
     //   NotifyActorChannelCleanedUp: lea r14, [rcx+80h] (the ChannelMap); call FindId; ...; mov rdx, rsi (the channel);
     //     mov rcx, r14; call Remove; mov [rdi], r15; mov [rdi+0Ch], r15 (the info's Channel and its frame counters);
     //     then the rest of the info it clears, which says how big the info is and where its flags are:
     //       6.00 to 6.10: mov [rdi+14h], r15 (a 0x20 byte info, flags at +0x1D)
-    //       6.20: mov [rdi+24h], r15d; mov [rdi+18h], r15 (a 0x30 byte info, flags at +0x28, as 8.30's)
+    //       6.20 and 6.21: mov [rdi+24h], r15d; mov [rdi+18h], r15 (a 0x30 byte info, flags at +0x28, as 8.30's)
     //   NotifyActorTearOff: lea rcx, [rsi+30h] (the ActorMap, 0x50 before the ChannelMap: one TMap); call the same
     //     FindId; ...; or byte ptr [rax+<the flags>], 2
     // 6.20's RemoveNetworkActor (0x74A3D0) still doesn't take the connections' infos out. A build before 6.00 or after
-    // 6.20 was never looked at, and one whose code differs (8.30's engine does this itself) keeps what it has.
+    // 6.21 was never looked at, and one whose code differs (8.30's engine does this itself) keeps what it has.
     constexpr uint32_t FirstVerifiedChangelist = 4395664;
-    constexpr uint32_t LastVerifiedChangelist = 4497486;
+    constexpr uint32_t LastVerifiedChangelist = 4526925;
     constexpr ptrdiff_t MapSize = 0x50;
     const uint32_t Changelist = Packed::Changelist();
     const auto LeftAsIs = [Changelist](const wchar_t* Why)
@@ -15181,7 +15182,7 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     };
     if (Changelist < FirstVerifiedChangelist || Changelist > LastVerifiedChangelist)
     {
-        return LeftAsIs(L"only 6.00 to 6.20, CL-4395664 to CL-4497486, were checked");
+        return LeftAsIs(L"only 6.00 to 6.21, CL-4395664 to CL-4526925, were checked");
     }
 
     const std::vector<uintptr_t> CleanedUpRefs = Finder::StringRefs(L"UNetReplicationGraphConnection_NotifyActorChannelCleanedUp");

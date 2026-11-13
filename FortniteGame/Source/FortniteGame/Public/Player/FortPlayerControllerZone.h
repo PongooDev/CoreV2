@@ -29,8 +29,10 @@ class AFortPlayerControllerZone : public AFortPlayerController
 public:
     void ServerTriggerSetupTeleportCameraEvent_Implementation();
     // Mission Control's votes (5.0+, used from 5.10): the player's widget asks for them, and the game state, for the player's net id
-    // (their player state's UniqueId), runs them.
+    // (their player state's UniqueId), runs them. Begin takes the vote's settings alone on 5.0-5.21, an FFortVoteConfig
+    // from 5.30.
     void ServerBeginGameplayVote_Implementation(EFortVoteType VoteType, float VoteDuration, float FailedVoteLockOutDuration, EFortVoteArbitratorType VoteArbitratorType);
+    void ServerBeginGameplayVote_Implementation(EFortVoteType VoteType, const FFortVoteConfig& VoteConfig);
     void ServerSubmitGameplayVote_Implementation(EFortVoteType VoteType, int32_t VoteDecision);
     void ServerEndGameplayVote_Implementation(EFortVoteType VoteType);
     // The client's ServerAcknowledgePossession, sent once it has taken a new pawn (APlayerController::ClientRestart).
@@ -46,6 +48,8 @@ private:
     // _Implementations, which only pass the player's net id to them, call Core's.
     static void HookGameplayVoteVTables();
     static void ServerBeginGameplayVote_ImplementationHK(AFortPlayerControllerZone* This, uint8_t VoteType, float VoteDuration, float FailedVoteLockOutDuration, uint8_t VoteArbitratorType);
+    // 5.30+: the exec passes a pointer to its copy of the RPC's FFortVoteConfig.
+    static void ServerBeginGameplayVoteConfig_ImplementationHK(AFortPlayerControllerZone* This, uint8_t VoteType, const FFortVoteConfig* VoteConfig);
     static void ServerSubmitGameplayVote_ImplementationHK(AFortPlayerControllerZone* This, uint8_t VoteType, int32_t VoteDecision);
     static void ServerEndGameplayVote_ImplementationHK(AFortPlayerControllerZone* This, uint8_t VoteType);
     // The player's game state and net id, as the _Implementations find them (5.10 0x11AF870: the world's game mode's

@@ -15226,6 +15226,14 @@ bool Finder::ResolveBuildingFoundationLive(void** FoundationVTable, ptrdiff_t Dy
     {
         TypeCheck = Byte(At) == 0x80 && IsDisp32Operand(At + 1, 7) && Disp32(At + 2) == DynamicFoundationTypeOffset && Byte(At + 6) == 0 ? At : 0;
     }
+    // 6.20 (0xD66F80) adds Dynamic_StartDisabled (2), which streams once bFoundationEnabled is set, so the type is loaded
+    // and compared in a register instead: movzx eax, byte ptr [rbx+0C6Ah]; test al, al; jz select; cmp al, 1; jnz
+    // disabled; test byte ptr [rbx+0C69h], 8 (bTransformSet); ... select: call SelectAndSetupMyBuildingLevel (0xD69A10);
+    // done: or byte ptr [rbx+0C69h], 4. The first test after the load is Dynamic_StartEnabled's bTransformSet, as before.
+    for (uintptr_t At = !TypeCheck && DynamicFoundationTypeOffset > 0 ? PostUpdate : 0; At && At + 7 <= End && !TypeCheck; ++At)
+    {
+        TypeCheck = Byte(At) == 0x0F && Byte(At + 1) == 0xB6 && (Byte(At + 2) & 0xC0) == 0x80 && (Byte(At + 2) & 0x07) != 0x04 && Disp32(At + 3) == DynamicFoundationTypeOffset ? At : 0;
+    }
     uintptr_t TransformSetTest = 0;
     for (uintptr_t At = TypeCheck ? TypeCheck + 7 : 0; At && At + 7 <= End && At < TypeCheck + 0x20 && !TransformSetTest; ++At)
     {

@@ -862,6 +862,8 @@ namespace
         // The running countdown was set to AppliedSeconds.
         bool bCountdownSet = false;
         bool bWarnedNoWarmupLength = false;
+        // The admin panel has the player bots off in the match's mode (Core-Backend #352), said once.
+        bool bLoggedBotsModeOff = false;
 
         // Late joining: the match was opened (MaxPlayerCount raised), the players who connected during the warmup
         // without a reservation, and those known to have their team (a reservation, and a player controller: PickTeam
@@ -1085,9 +1087,55 @@ namespace
         return OutSettings.Count > 0 || OutSettings.bFillPlayerTeams;
     }
 
+    // The answer's "botsMode": {id, enabled}, the match's game mode as the admin panel names it and whether its player bots
+    // play there (Core-Backend #352). True, with the mode's id, when the panel has them off in it; a backend from before
+    // the setting sends none, and null when it doesn't know the match's mode: bots as the "bots" block says.
+    bool JsonBotsModeOff(const std::string& Json, std::wstring& OutMode)
+    {
+        const size_t Key = Json.find("\"botsMode\"");
+        const size_t Open = Key == std::string::npos ? std::string::npos : Json.find_first_not_of(" \t\r\n:", Key + 10);
+        if (Open == std::string::npos || Json[Open] != '{')
+        {
+            return false;
+        }
+        const size_t Close = Json.find('}', Open);
+        const std::string Mode = Json.substr(Open, Close == std::string::npos ? std::string::npos : Close - Open + 1);
+        if (BackendRequest::JsonField(Mode, "enabled") != "false")
+        {
+            return false;
+        }
+        OutMode = WidenId(BackendRequest::JsonField(Mode, "id"));
+        return true;
+    }
+
+    // The match's playlist for the warmup report (Core-Backend #352: the panel's player bots by game mode): the game mode's
+    // CurrentPlaylistId, the MCP id its match was assigned, and its CurrentPlaylistName where the build reflects one
+    // (5.30's assignment names the playlist and leaves the id 0). Only a name's own characters go in the JSON.
+    std::string ReportedPlaylist(AFortGameModeAthena* GameMode)
+    {
+        const int32_t PlaylistId = GameMode ? static_cast<int32_t>(GameMode->CurrentPlaylistId) : 0;
+        std::string Name;
+        if (GameMode && AFortGameMode::HasCurrentPlaylistName())
+        {
+            const FName PlaylistName = GameMode->CurrentPlaylistName;
+            if (!PlaylistName.IsNone())
+            {
+                for (const char Char : NarrowId(PlaylistName.ToStdString()))
+                {
+                    if (std::isalnum(static_cast<unsigned char>(Char)) || Char == '_' || Char == '-' || Char == '.')
+                    {
+                        Name += Char;
+                    }
+                }
+            }
+        }
+        return std::format(",\"playlistId\":{}{}", std::max(PlaylistId, 0), Name.empty() ? std::string() : std::format(",\"playlistName\":\"{}\"", Name));
+    }
+
     void WarmupAnswered(const std::shared_ptr<FWarmupWatch>& Watch);
 
-    void ReportWarmup(const std::shared_ptr<FWarmupWatch>& Watch, const std::wstring& Phase, const std::vector<std::wstring>& AccountIds, float SecondsLeft)
+    void ReportWarmup(const std::shared_ptr<FWarmupWatch>& Watch, const std::wstring& Phase, const std::vector<std::wstring>& AccountIds, float SecondsLeft,
+        const std::string& Playlist)
     {
         std::string Ids;
         for (const std::wstring& Id : AccountIds)
@@ -1096,7 +1144,7 @@ namespace
         }
         Watch->bAsking = true;
         BackendRequest::PostJson(L"Battle Royale warmup report", L"/fortnite/api/game/v2/matchmakingservice/warmup",
-            std::format("{{\"phase\":\"{}\",\"accountIds\":[{}],\"secondsLeft\":{:.1f}}}", NarrowId(Phase), Ids, std::max(SecondsLeft, 0.0f)),
+            std::format("{{\"phase\":\"{}\",\"accountIds\":[{}],\"secondsLeft\":{:.1f}{}}}", NarrowId(Phase), Ids, std::max(SecondsLeft, 0.0f), Playlist),
             FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [Watch, AccountIds](uint32_t Status, const std::string& Body)
         {
             // {warmupSeconds: a number or null, lateJoin, sessionId, open, maxPlayers, parties}. Anything else (no
@@ -1109,7 +1157,11 @@ namespace
             const int32_t MaxPlayers = bAnswered ? std::clamp(std::atoi(BackendRequest::JsonField(Body, "maxPlayers").c_str()), 0, 1000) : 0;
             auto Parties = bAnswered ? JsonParties(Body) : std::vector<std::vector<std::wstring>>();
             FCoreAthenaBotSettings BotSettings;
-            const bool bBots = bAnswered && JsonBots(Body, BotSettings);
+            // A mode the admin panel has the bots off in gets none, whatever the bots block (Core-Backend #352; the backend
+            // sends none then too).
+            std::wstring BotsModeOff;
+            const bool bModeOff = bAnswered && JsonBotsModeOff(Body, BotsModeOff);
+            const bool bBots = bAnswered && !bModeOff && JsonBots(Body, BotSettings);
             // The match's no-fill players (Core-Backend's top-level noFill, #242; a backend from before it sends them only
             // in the bots block).
             std::vector<std::wstring> NoFill = bAnswered ? JsonStringArray(Body, "noFill") : std::vector<std::wstring>();
@@ -1118,9 +1170,14 @@ namespace
             const int32_t MegaStormPercent = !StormPercent.empty() && std::isdigit(static_cast<unsigned char>(StormPercent[0]))
                 ? std::clamp(std::atoi(StormPercent.c_str()), 0, 100) : -1;
             GameThread::Enqueue([Watch, AccountIds, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings, NoFill = std::move(NoFill),
-                MegaStormPercent]() mutable
+                MegaStormPercent, bModeOff, BotsModeOff = std::move(BotsModeOff)]() mutable
             {
                 Watch->bAsking = false;
+                if (bModeOff && !Watch->bLoggedBotsModeOff)
+                {
+                    Watch->bLoggedBotsModeOff = true;
+                    Log::Info(L"Battle Royale bots: the admin panel has player bots off in this match's mode ({}), so it gets none", BotsModeOff.empty() ? L"?" : BotsModeOff);
+                }
                 if (bAnswered)
                 {
                     if (FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get())
@@ -1700,7 +1757,7 @@ namespace
         {
             Watch->bOpen = false;
         }
-        ReportWarmup(Watch, GameState->GamePhase.ToString(), ConnectedAccounts(GameMode), SecondsLeft);
+        ReportWarmup(Watch, GameState->GamePhase.ToString(), ConnectedAccounts(GameMode), SecondsLeft, ReportedPlaylist(GameMode));
     }
 
     // The report's timer: its handle is spent once it runs.

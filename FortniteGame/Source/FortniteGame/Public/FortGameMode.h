@@ -48,6 +48,7 @@ public:
     // the server was assigned ("Fortnite:Fortnite:<netcl>:0:<region>:<playlist>...", which the game session keeps here
     // from the assignment) and the game mode's playlists.
     DefineUProperty(FName, CurrentPlaylistName)
+    static bool HasCurrentPlaylistName() { return Member_CurrentPlaylistName.IsAvailable(); }
     DefineUProperty(FString, CurrentBucketId)
     DefineUProperty(UFortPlaylistManager*, PlaylistManager)
     // From 4.0 the game mode keeps the asset's path in DefaultDeathPenaltyData and the loaded asset in DeathPenaltyData.

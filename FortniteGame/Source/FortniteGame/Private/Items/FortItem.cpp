@@ -5,6 +5,8 @@
 #include "Hooks.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
+#include "Log.h"
+#include "Logging/LogMacros.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
 #include "Templates/Casts.h"
@@ -14,6 +16,10 @@
 #include "UObject/UnrealType.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
+#include <algorithm>
+#include <vector>
+
+DEFINE_LOG_CATEGORY_STATIC(LogFortLoot, Log, All);
 
 UFortItem* UFortItemDefinition::CreateTemporaryItemInstanceBP(int32_t Count, int32_t Level) const
 {
@@ -128,19 +134,48 @@ bool FFortItemEntry::LoadFullClip()
     // its magazine only from its item's LoadedAmmo (0x90B510, through the item's getter 0x66F050). Nothing native fills
     // it for loot any more, so a Battle Royale weapon came out of a chest empty (#85). Weapons that are their own ammo
     // (Athena_Grenade) fire from their stack instead.
+    //
+    // 6.21's Balloons (Athena_Balloons) are a ranged weapon definition with ItemType Consumable, and their charges are a
+    // magazine too: GA_Athena_Balloons costs 1 from AmmoMagazine, its AmmoData is a separate, invisible
+    // UFortAmmoItemDefinition (AthenaAmmoDataBalloons) and it has no reload ability, so the clip of its
+    // WeaponStatHandle row is all it gets. The weapon takes that from the item on the server (6.21 0x13FC350: Role ==
+    // ROLE_Authority, AmmoCount +0x9F0 = the world item's GetLoadedAmmo, slot 0x338), with no item-type check, so a
+    // looted stack with LoadedAmmo 0 had no balloons (#431). A consumable is loaded only when its AmmoData is such a
+    // separate ammo item; consumables that are their own ammo (bandages, shields) and every other type are unchanged.
     UFortWeaponItemDefinition* WeaponDefinition = Cast<UFortWeaponItemDefinition>(static_cast<UFortItemDefinition*>(ItemDefinition));
-    if (!WeaponDefinition || WeaponDefinition->ItemType != EFortItemType::GetWeaponRanged())
+    if (!WeaponDefinition)
+    {
+        return false;
+    }
+    const EFortItemType ItemType = static_cast<EFortItemType>(WeaponDefinition->ItemType);
+    const EFortItemType Consumable = EFortItemType::GetConsumable();
+    const bool bRanged = ItemType == EFortItemType::GetWeaponRanged();
+    if (!bRanged && (Consumable == Reflection::InvalidEnumValue || ItemType != Consumable))
     {
         return false;
     }
     const TAssetPtr<UFortWorldItemDefinition>& Ammo = WeaponDefinition->AmmoData;
-    const int32_t ClipSize = Ammo.LoadSynchronous() != WeaponDefinition ? WeaponDefinition->GetClipSize() : 0;
+    UFortWorldItemDefinition* AmmoDefinition = Ammo.LoadSynchronous();
+    if (!bRanged && !Cast<UFortAmmoItemDefinition>(AmmoDefinition))
+    {
+        return false;
+    }
+    const int32_t ClipSize = AmmoDefinition != WeaponDefinition ? WeaponDefinition->GetClipSize() : 0;
     if (ClipSize <= 0 || LoadedAmmo == ClipSize)
     {
         return false;
     }
     LoadedAmmo = ClipSize;
     bIsDirty = true;
+    if (!bRanged)
+    {
+        static std::vector<const UFortWeaponItemDefinition*> Logged;
+        if (std::find(Logged.begin(), Logged.end(), WeaponDefinition) == Logged.end())
+        {
+            Logged.push_back(WeaponDefinition);
+            UE_LOG(LogFortLoot, Log, TEXT("%s (consumable) loads its magazine: %d of %s"), *WeaponDefinition->GetName(), ClipSize, *AmmoDefinition->GetName());
+        }
+    }
     return true;
 }
 

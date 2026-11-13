@@ -53,7 +53,8 @@ public:
     bool ShouldShowItemToast() const;
     void SetNewItemCount(int32_t NewItemCount, bool bShouldShowItemToast);
     void AddNewItemCount(int32_t Count, bool bShouldShowItemToast);
-    // Loads a ranged weapon's full magazine (Battle Royale's loot). False for anything else.
+    // Loads a ranged weapon's full magazine (Battle Royale's loot), and a consumable weapon's whose charges are a separate
+    // ammo item (6.21's Balloons). False for anything else.
     bool LoadFullClip();
 
     // The entry's perks (alterations): AlterationDefinitions, their template ids ("Alteration:AID_Ele_Fire_T01"), which

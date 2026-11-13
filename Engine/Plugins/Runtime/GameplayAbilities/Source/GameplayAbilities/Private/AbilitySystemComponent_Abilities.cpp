@@ -315,6 +315,42 @@ bool UAbilitySystemComponent::RemoveActiveGameplayEffectBySourceEffect(UClass* G
     return Params.Call(this);
 }
 
+int32_t UAbilitySystemComponent::GetGameplayEffectCount(UClass* SourceGameplayEffect, UAbilitySystemComponent* OptionalInstigatorFilterComponent, bool bEnforceOnGoingCheck)
+{
+    UFunction* Function = FindStaticFunction_GetGameplayEffectCount();
+    if (!Function)
+    {
+        return -1;
+    }
+    Reflection::FParams Params(Function);
+    Params.Set(L"SourceGameplayEffect", SourceGameplayEffect);
+    Params.Set(L"OptionalInstigatorFilterComponent", OptionalInstigatorFilterComponent);
+    Params.Set(L"bEnforceOnGoingCheck", bEnforceOnGoingCheck);
+    return Params.Call(this) ? Params.Take<int32_t>(L"ReturnValue") : -1;
+}
+
+bool UAbilitySystemComponent::SetActiveGameplayEffectLevelUsingQuery(UClass* EffectDefinition, int32_t NewLevel)
+{
+    UFunction* Function = FindStaticFunction_SetActiveGameplayEffectLevelUsingQuery();
+    UProperty* QueryProperty = Function ? Function->FindPropertyByName(FName(L"Query", FNAME_Find)) : nullptr;
+    if (!QueryProperty || !EffectDefinition || !QueryProperty->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty))
+    {
+        return false;
+    }
+    // The query as FGameplayEffectQuery's constructor makes it (it matches every effect), narrowed to the effect's
+    // definition: FGameplayEffectQuery::Matches compares EffectDefinition with the active effect's Def's class.
+    UProperty* DefinitionProperty = static_cast<UStructProperty*>(QueryProperty)->Struct->FindPropertyByName(FName(L"EffectDefinition", FNAME_Find));
+    if (!DefinitionProperty)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
+    uint8_t* Query = static_cast<uint8_t*>(Params.GetAddress(L"Query"));
+    *reinterpret_cast<UClass**>(Query + DefinitionProperty->GetOffset_ForInternal()) = EffectDefinition;
+    Params.Set(L"NewLevel", NewLevel);
+    return Params.Call(this);
+}
+
 void UAbilitySystemComponent::IncrementAbilityListLock()
 {
     Natives::UAbilitySystemComponent_IncrementAbilityListLock(this);

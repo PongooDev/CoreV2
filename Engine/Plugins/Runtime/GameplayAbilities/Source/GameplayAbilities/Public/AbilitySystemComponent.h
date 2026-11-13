@@ -38,6 +38,8 @@ public:
     DefineUFunction(ServerTryActivateAbility)
     DefineUFunction(ServerSetInputReleased)
     DefineUFunction(RemoveActiveGameplayEffectBySourceEffect)
+    DefineUFunction(GetGameplayEffectCount)
+    DefineUFunction(SetActiveGameplayEffectLevelUsingQuery)
     DefineUFunction(TryActivateAbilitiesByTag)
 
     template <class T>
@@ -78,6 +80,12 @@ public:
     // Removes StacksToRemove stacks (-1: all) of every active effect of the class, from any instigator. Server only; false
     // when the build reflects no such function.
     bool RemoveActiveGameplayEffectBySourceEffect(UClass* GameplayEffect, UAbilitySystemComponent* InstigatorAbilitySystemComponent = nullptr, int32_t StacksToRemove = -1);
+    // How many active effects of the class the ability system has (the engine's, BlueprintCallable): with
+    // bEnforceOnGoingCheck, only those whose ongoing tag requirements hold. -1 where the build reflects no such function.
+    int32_t GetGameplayEffectCount(UClass* SourceGameplayEffect, UAbilitySystemComponent* OptionalInstigatorFilterComponent = nullptr, bool bEnforceOnGoingCheck = true);
+    // Sets the level of every active effect of the class (the engine's SetActiveGameplayEffectLevelUsingQuery with a query
+    // on the effect's definition). Server only; false where the build reflects no such function.
+    bool SetActiveGameplayEffectLevelUsingQuery(UClass* EffectDefinition, int32_t NewLevel);
     // The ability's input was let go (a server RPC: on the server it runs here, AbilitySpecInputReleased): an active
     // ability waiting for its release (an automatic weapon's fire) ends.
     void ServerSetInputReleased(FGameplayAbilitySpecHandle AbilityHandle);

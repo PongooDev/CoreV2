@@ -211,7 +211,7 @@ public:
     // When the storm finishes closing in on the next safe zone (the indicator's SafeZoneFinishShrinkTime, world
     // seconds), -1 when unknown.
     float GetSafeZoneFinishShrinkTime() const;
-    // The storm's damage a second to a pawn outside the circle, for the safe zone phase.
+    // Core's stand-in storm damage a second to a bot pawn outside the circle without the game's storm, for the phase.
     float GetStormDamagePerSecond() const;
     // A random spot on the ground near Around (a trace down from the sky), or false.
     bool FindGroundNear(const FVector& Around, float Radius, FVector& OutLocation) const;

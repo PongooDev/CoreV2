@@ -910,8 +910,9 @@ float FCoreAthenaBotManager::GetSafeZoneFinishShrinkTime() const
 
 float FCoreAthenaBotManager::GetStormDamagePerSecond() const
 {
-    // Battle Royale's storm hurts 1 a second in its first circles, more later 🟡 (the game's GE_OutsideSafeZone
-    // damage by phase isn't read here).
+    // Core's stand-in, for a bot pawn the game's storm doesn't reach (TakeStormDamage): 1 a second in the first circles,
+    // more later 🟡. The game's own is GE_OutsideSafeZone's MaxHealth × AthenaGameData's Default.SafeZone.Damage at the
+    // circle's level, which a bot whose possession gave it the effect takes instead.
     AFortGameModeAthena* Athena = GetGameMode();
     const int32_t Phase = Athena ? static_cast<int32_t>(Athena->SafeZonePhase) : 0;
     return Phase <= 2 ? 1.0f : Phase <= 4 ? 2.0f : Phase <= 6 ? 5.0f : 10.0f;

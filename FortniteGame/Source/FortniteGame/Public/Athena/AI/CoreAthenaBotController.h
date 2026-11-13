@@ -434,8 +434,8 @@ private:
     // 21.40's _Loot for containers: walk to the nearest unsearched chest or ammo box and search it (its own
     // ServerOnAttemptInteract), then take what comes out. A new one is looked for within MaxDistance.
     bool SearchContainer(float Now, float MaxDistance = 5000.0f);
-    // The storm hurts a bot outside its circle as it does players (Core's, when the game's own storm damage doesn't
-    // reach the bot's pawn).
+    // Core's stand-in for the storm's damage, for a pawn the game's storm doesn't reach (bGameStormDamage false): outside
+    // the circle, a few health a second by circle. A pawn the game's storm hurts is only logged, once a circle.
     void TakeStormDamage(float Now);
 
     bool HasUsableWeapon() const;
@@ -715,6 +715,11 @@ private:
     float NextDeathCheck = 0.0f;
     float NextStormTick = 0.0f;
     float LastStormHealth = -1.0f;
+    // The pawn has the game's storm (the game mode's GE_OutsideSafeZone on its ability system, from its possession): the
+    // game hurts it outside the circle as it does a player, and TakeStormDamage stands aside.
+    bool bGameStormDamage = false;
+    // The last circle whose storm the log says hurt the bot (TakeStormDamage).
+    int32_t LoggedStormPhase = -1;
     float NextLootSearch = 0.0f;
     float NextWanderTime = 0.0f;
     float NextShotTime = 0.0f;

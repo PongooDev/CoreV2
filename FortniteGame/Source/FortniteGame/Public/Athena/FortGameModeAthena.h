@@ -52,6 +52,12 @@ public:
     DefineUProperty(bool, bSafeZoneActive)
     DefineUProperty(bool, bSafeZonePaused)
     static bool HasSafeZoneActive() { return Member_bSafeZoneActive.IsAvailable() && Member_bSafeZonePaused.IsAvailable(); }
+    // The storm's damage (GE_OutsideSafeZoneDamage_C: infinite, every second the target's MaxHealth times AthenaGameData's
+    // Default.SafeZone.Damage at the effect's level, held off while the pawn has Gameplay.InsideSafeZone). The pawn's
+    // possession puts it on the pawn's ability system (AFortPlayerPawnAthena::PossessedBy, 6.10 0xC91EA0), and each new
+    // circle raises it to SafeZonePhase (StartNewSafeZonePhase, 0xC327B0).
+    DefineUProperty(UClass*, GE_OutsideSafeZone)
+    static bool HasOutsideSafeZoneEffect() { return Member_GE_OutsideSafeZone.IsAvailable(); }
     // From 4.1: what StartNewSafeZonePhase broadcasts at its end (no parameters; 6.00 0xC386D0), the storm circle's
     // times and next place set for the new SafeZonePhase.
     DefineUProperty(FMulticastScriptDelegate, OnSafeZoneUpdated)

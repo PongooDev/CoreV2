@@ -1355,6 +1355,23 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
         }
     }
 
+    // The pawn has its player state's ability system before the possession, as a player's has it there. A player's comes
+    // in AFortPlayerPawn::PossessedBy (6.10 0x11F9380, 6.20 0x1236390), which gives a player controller's pawn
+    // its player state and ability system and then, the ability system there, the Gameplay.InsideSafeZone tag; then
+    // AFortPlayerPawnAthena::PossessedBy (6.10 0xC91EA0, 6.20 0xCE2D70) puts the game mode's GE_OutsideSafeZone on a pawn
+    // whose ability system is there and keeps its handle on the pawn (21.40's GE_OutsideSafeZone_Handle, 6.10 +0x1084),
+    // which each new circle raises to its level (StartNewSafeZonePhase, 0xC327B0) and the pawn's EndPlay takes off
+    // (AFortPlayerPawn's, 0x11D9E90). The storm's damage is that effect, held off by the tag, which SafeZoneInsideChecks
+    // (0xC2DDC0, the game mode's timer) takes off every Athena player pawn outside the circle, an AI controller's too. An
+    // AI controller's possession skips the first part (the controller isn't an AFortPlayerController), so a bot's pawn
+    // had no ability system in either and the storm never hurt it: Core's stand-in (TakeStormDamage) did, only once it had
+    // landed, and a bot left gliding over its landing spot stayed in the storm untouched until it won (CoreV2 #417). The
+    // pawn takes it here, through OnRep_PlayerState as below, and the possession gives it the storm.
+    if (!static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) && static_cast<APlayerState*>(AIController->PlayerState))
+    {
+        Pawn->PlayerState = static_cast<APlayerState*>(AIController->PlayerState);
+        Pawn->OnRep_PlayerState();
+    }
     AIController->Possess(Pawn);
     PlayerBotPawn = Pawn;
     MovementStyle = 0xFF;
@@ -1369,7 +1386,8 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     LastHurtTime = -100.0f;
     // A player pawn takes its ability system (its player state's) in OnRep_PlayerState (AFortPlayerPawn's, 3.0
     // 0xDF4E10), which on the server only AFortPlayerController's possession runs: an AI controller's doesn't, and a
-    // weapon equipped without one crashes giving its abilities.
+    // weapon equipped without one crashes giving its abilities. Given before the possession above; again here for a pawn
+    // that didn't take it then.
     if (!static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent))
     {
         Pawn->OnRep_PlayerState();
@@ -1382,6 +1400,31 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
         PlayerBotPawn = nullptr;
         return false;
     }
+    // The storm, as the possession gave it: the game hurts the bot outside the circle as it does a player, whatever it is
+    // doing (skydiving too), and Core's TakeStormDamage stands aside. A pawn that comes while the storm is up (a respawn)
+    // has the effect at the circle's level, as AFortGameModeAthena::FinishRestartPlayer (6.10 0xC179A0) sets a restarted
+    // player's (SafeZonePhase, while bSafeZoneActive); the circles after raise it as they do everyone's.
+    {
+        UAbilitySystemComponent* AbilitySystem = static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent);
+        UClass* StormEffect = AFortGameModeAthena::HasOutsideSafeZoneEffect() ? static_cast<UClass*>(GameMode->GE_OutsideSafeZone) : nullptr;
+        const int32_t StormEffects = StormEffect ? AbilitySystem->GetGameplayEffectCount(StormEffect, nullptr, false) : -1;
+        bGameStormDamage = StormEffects > 0;
+        const bool bStormUp = bGameStormDamage && AFortGameModeAthena::HasSafeZoneActive() && GameMode->bSafeZoneActive;
+        if (bStormUp)
+        {
+            AbilitySystem->SetActiveGameplayEffectLevelUsingQuery(StormEffect, GameMode->SafeZonePhase);
+        }
+        static int32_t LoggedStorm = 0;
+        if (LoggedStorm < 4 || StormEffects != 1)
+        {
+            ++LoggedStorm;
+            Log::Info(L"Battle Royale bots: {}'s {} pawn {}{}", BotName, bSkydive ? L"skydiving" : L"new",
+                StormEffects > 0 ? std::format(L"has the storm's {} from its possession ({} of it)", StormEffect->GetName().ToStdString(), StormEffects)
+                    : std::format(L"doesn't have the storm's effect ({}): Core's TakeStormDamage hurts it outside the circle", StormEffect ? StormEffect->GetName().ToStdString() : std::wstring(L"the game mode has none")),
+                bStormUp ? std::format(L", at circle {}'s level", static_cast<int32_t>(GameMode->SafeZonePhase)) : std::wstring());
+        }
+    }
+    LastStormHealth = -1.0f;
     ApplyStartingHealth();
     // The warmup island hurts nobody: AFortGameModeAthena's restart of a player in the warmup turns the new pawn's
     // bCanBeDamaged off (3.1 0x9B3FD7, GamePhase == Warmup), so hits show their numbers and take nothing. The pawn the
@@ -1979,6 +2022,8 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
     if (State == ECoreAthenaBotState::Skydiving)
     {
         FreeFalling(Now);
+        // The storm hurts a skydiver as it does anyone outside the circle (only the distance across the map counts).
+        TakeStormDamage(Now);
         return;
     }
 
@@ -7592,6 +7637,22 @@ void FCoreAthenaBotController::TakeStormDamage(float Now)
         LastStormHealth = -1.0f;
         return;
     }
+    // The game's storm hurts the pawn (its possession gave it GE_OutsideSafeZone, SpawnPawnAt): only said in the log, the
+    // first time a circle is seen taking the bot's health. Core's stand-in below is for a pawn it didn't reach: a build
+    // whose game mode has no such effect, or one whose possession didn't put it on.
+    if (bGameStormDamage)
+    {
+        AFortGameModeAthena* GameMode = Manager->GetGameMode();
+        const int32_t Phase = GameMode ? static_cast<int32_t>(GameMode->SafeZonePhase) : 0;
+        if (LastStormHealth >= 0.0f && Health < LastStormHealth - 0.1f && LoggedStormPhase != Phase)
+        {
+            LoggedStormPhase = Phase;
+            Log::Info(L"Battle Royale bots: the storm of circle {} hurts {} {:.0f} m outside it ({:.0f} health, {:.0f} in the last second{})", Phase, BotName,
+                (Dist2D(LocationOf(Pawn), Center) - Radius) / 100.0f, Health, LastStormHealth - Health, State == ECoreAthenaBotState::Skydiving ? L", skydiving" : L"");
+        }
+        LastStormHealth = Health;
+        return;
+    }
     // Outside: the game's own storm took some since the last second, or Core takes it.
     const bool bGameHurts = LastStormHealth >= 0.0f && Health < LastStormHealth - 0.1f;
     if (!bGameHurts)
@@ -8007,6 +8068,13 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
         {
             AbilitySystem->RemoveActiveGameplayEffectBySourceEffect(BleedEffect, nullptr, -1);
         }
+        // The storm's effect, which the pawn's EndPlay takes off when the body goes (AFortPlayerPawn's, 6.10 0x11D9E90):
+        // the body stays, and the effect is on the player state's ability system, which a respawned bot's next pawn shares.
+        AFortGameModeAthena* Athena = bGameStormDamage && AFortGameModeAthena::HasOutsideSafeZoneEffect() ? Manager->GetGameMode() : nullptr;
+        if (UClass* StormEffect = AbilitySystem && Athena ? static_cast<UClass*>(Athena->GE_OutsideSafeZone) : nullptr)
+        {
+            AbilitySystem->RemoveActiveGameplayEffectBySourceEffect(StormEffect, nullptr, -1);
+        }
     }
     if (AAIController* AIController = Controller.Get())
     {
@@ -8014,6 +8082,7 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     }
     bPathFollowing = false;
     bHasMoveGoal = false;
+    bool bStormDeath = false;
     if (PlayerState && AFortPlayerStateAthena::HasEliminator())
     {
         FDeathInfo& DeathInfo = PlayerState->DeathInfo;
@@ -8022,6 +8091,7 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
         if (Pawn && AFortPlayerStateAthena::HasToDeathCause())
         {
             DeathInfo.DeathCause = AFortPlayerStateAthena::ToDeathCause(Pawn, Pawn->DeathTags, false);
+            bStormDeath = DeathInfo.DeathCause == EDeathCause::GetOutsideSafeZone();
         }
         if (FDeathInfo::HasDistance())
         {
@@ -8047,8 +8117,8 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     State = ECoreAthenaBotState::Dead;
     CurrentTarget = nullptr;
     LootTarget = nullptr;
-    Log::Info(L"Battle Royale bots: {} died at ({:.0f}, {:.0f}, {:.0f}){}", BotName, LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z,
-        KillerState ? std::format(L", eliminated by {}", KillerState->GetPlayerName().ToStdString()) : std::wstring(L" (nobody's elimination)"));
+    Log::Info(L"Battle Royale bots: {} died at ({:.0f}, {:.0f}, {:.0f}){}{}", BotName, LastKnownPosition.X, LastKnownPosition.Y, LastKnownPosition.Z,
+        bStormDeath ? L" in the storm" : L"", KillerState ? std::format(L", eliminated by {}", KillerState->GetPlayerName().ToStdString()) : std::wstring(L" (nobody's elimination)"));
     // A playlist that brings its players back (Playground, CoreV2 #344): the bot stays in the match and doesn't spectate,
     // as a respawning player doesn't (Core's AFortPlayerControllerAthena death handler asks the same).
     AFortGameModeAthena* GameMode = Manager->GetGameMode();

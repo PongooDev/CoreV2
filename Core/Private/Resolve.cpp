@@ -12516,9 +12516,34 @@ bool Finder::ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t Allow
     }
     const int32_t AttemptSpawnResourcesIndex = After ? VirtualSlot(FindVirtualCall(After, After + 0x40)) : -1;
 
-    // ABuildingSMActor::DetermineMaxResourcesToSpawn survives in 1.2.
-    const uintptr_t DetermineMaxResourcesToSpawn = FunctionOf(L"ABuildingSMActor::DetermineMaxResourcesToSpawn");
-    const int32_t DetermineMaxResourcesToSpawnIndex = FirstVTableIndex(SMActorVTable, DetermineMaxResourcesToSpawn);
+    // ABuildingSMActor::DetermineMaxResourcesToSpawn survives in 1.2. Its name is the context string it hands FindRow: a
+    // function-local static FString up to 6.10, built on the first call inside the function (6.10 0xCF7C94 in 0xCF7A30).
+    // 6.20 builds that FString at startup instead (0xDB610: mov rcx, [FString's data]; lea rdx, name), and the function
+    // (slot 0x13B, 0xD4C0E0) passes the FString itself: lea rdx, [FString] (0x4F66E40).
+    const wchar_t* const DetermineMaxResourcesToSpawnName = L"ABuildingSMActor::DetermineMaxResourcesToSpawn";
+    const uintptr_t DetermineMaxResourcesToSpawn = FunctionOf(DetermineMaxResourcesToSpawnName);
+    int32_t DetermineMaxResourcesToSpawnIndex = FirstVTableIndex(SMActorVTable, DetermineMaxResourcesToSpawn);
+    for (const uintptr_t Ref : DetermineMaxResourcesToSpawnIndex < 0 ? Finder::StringRefs(DetermineMaxResourcesToSpawnName) : std::vector<uintptr_t>{})
+    {
+        const uintptr_t Load = Ref - 7;
+        if (Byte(Load) != 0x48 || Byte(Load + 1) != 0x8B || (Byte(Load + 2) & 0xC7) != 0x05)
+        {
+            continue;
+        }
+        const uintptr_t StaticName = Finder::RelativeTarget(Load, 3, 7);
+        for (const uintptr_t Site : Finder::AddressRefs(StaticName))
+        {
+            DetermineMaxResourcesToSpawnIndex = FirstVTableIndex(SMActorVTable, Finder::FunctionStart(Site));
+            if (DetermineMaxResourcesToSpawnIndex >= 0)
+            {
+                break;
+            }
+        }
+        if (DetermineMaxResourcesToSpawnIndex >= 0)
+        {
+            break;
+        }
+    }
 
     if (AttemptSpawnResourcesIndex < 0 || DetermineMaxResourcesToSpawnIndex < 0)
     {

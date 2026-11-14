@@ -1604,9 +1604,19 @@ namespace
         return false;
     }
 
+    // Whether the branch at After (right after the null check) skips the call when the member is set: jnz/jne, short or
+    // near. GetDefaultObject's `if (ClassDefaultObject == nullptr && bCreateIfNeeded) CreateDefaultObject();` calls only
+    // when the member is null; a `jz` there means the call runs on a set member, so it isn't that check.
+    bool SkipsCallWhenSet(uintptr_t After)
+    {
+        return Byte(After) == 0x75 || (Byte(After) == 0x0F && Byte(After + 1) == 0x85);
+    }
+
     // Votes on the vtable slot called right after the inlined UClass::GetDefaultObject's null check of the CDO at DefaultObject.
     // bSameObject counts only the sites whose call goes through the vtable of the object that was checked.
-    bool VoteCreateDefaultObject(int32_t DefaultObject, int32_t& OutWinner, int32_t& OutWinnerVotes, int32_t& OutTotal, bool bSameObject = false)
+    // bCallsWhenNull counts only the sites whose branch skips the call when the member is set (SkipsCallWhenSet).
+    bool VoteCreateDefaultObject(int32_t DefaultObject, int32_t& OutWinner, int32_t& OutWinnerVotes, int32_t& OutTotal, bool bSameObject = false,
+                                 bool bCallsWhenNull = false)
     {
         const uintptr_t Begin = Finder::TextBegin();
         const uintptr_t End = Finder::TextEnd();
@@ -1621,12 +1631,16 @@ namespace
         };
         static std::unordered_map<int32_t, FVotes> Cache;
         static std::unordered_map<int32_t, FVotes> SameObjectCache;
+        // The same two, with only the sites that call when the member is null (bCallsWhenNull).
+        static std::unordered_map<int32_t, FVotes> WhenNullCache;
+        static std::unordered_map<int32_t, FVotes> WhenNullSameObjectCache;
         static bool bScanned = false;
         constexpr int32_t MinOffset = 0xC0;
         constexpr int32_t MaxOffset = 0x140;
         if (bScanned && DefaultObject >= MinOffset && DefaultObject <= MaxOffset)
         {
-            const FVotes& Cached = bSameObject ? SameObjectCache[DefaultObject] : Cache[DefaultObject];
+            const FVotes& Cached = bCallsWhenNull ? (bSameObject ? WhenNullSameObjectCache[DefaultObject] : WhenNullCache[DefaultObject])
+                                                  : (bSameObject ? SameObjectCache[DefaultObject] : Cache[DefaultObject]);
             int32_t CachedWinner = -1;
             int32_t CachedWinnerVotes = 0;
             for (const auto& [Displacement, Count] : Cached.Votes)
@@ -1675,17 +1689,32 @@ namespace
                 {
                     if (bFill)
                     {
+                        const int32_t Slot = *reinterpret_cast<const int32_t*>(Call + 2);
+                        const bool bSame = CallsSameObject(At, Length, Call);
+                        const bool bWhenNull = SkipsCallWhenSet(At + Length);
                         FVotes& Entry = Cache[Displacement];
-                        ++Entry.Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
+                        ++Entry.Votes[Slot];
                         ++Entry.Total;
-                        if (CallsSameObject(At, Length, Call))
+                        if (bSame)
                         {
                             FVotes& SameObjectEntry = SameObjectCache[Displacement];
-                            ++SameObjectEntry.Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
+                            ++SameObjectEntry.Votes[Slot];
                             ++SameObjectEntry.Total;
                         }
+                        if (bWhenNull)
+                        {
+                            FVotes& WhenNullEntry = WhenNullCache[Displacement];
+                            ++WhenNullEntry.Votes[Slot];
+                            ++WhenNullEntry.Total;
+                            if (bSame)
+                            {
+                                FVotes& WhenNullSameObjectEntry = WhenNullSameObjectCache[Displacement];
+                                ++WhenNullSameObjectEntry.Votes[Slot];
+                                ++WhenNullSameObjectEntry.Total;
+                            }
+                        }
                     }
-                    else if (!bSameObject || CallsSameObject(At, Length, Call))
+                    else if ((!bSameObject || CallsSameObject(At, Length, Call)) && (!bCallsWhenNull || SkipsCallWhenSet(At + Length)))
                     {
                         ++Votes[*reinterpret_cast<const int32_t*>(Call + 2)];
                         ++Total;
@@ -1697,7 +1726,7 @@ namespace
         if (bFill)
         {
             bScanned = true;
-            return VoteCreateDefaultObject(DefaultObject, OutWinner, OutWinnerVotes, OutTotal, bSameObject);
+            return VoteCreateDefaultObject(DefaultObject, OutWinner, OutWinnerVotes, OutTotal, bSameObject, bCallsWhenNull);
         }
 
         int32_t Winner = -1;
@@ -1723,7 +1752,8 @@ namespace
         int32_t WinnerVotes = 0;
         int32_t Total = 0;
         bool bPassed = VoteCreateDefaultObject(ObjectLayout::Current.UClass_ClassDefaultObject, Winner, WinnerVotes, Total);
-        if (!bPassed)
+        // The offsets around the default one, each voted on (bCallsWhenNull: only the sites that call when the member is null).
+        const auto VoteOffsets = [&](bool bCallsWhenNull)
         {
             // 1.10's UClass holds the CDO at +0xF8: the true offset carries hundreds of agreeing sites, every other a handful.
             // Each offset's vote is kept for the 5.0 rule below, so every offset is scanned once.
@@ -1745,7 +1775,7 @@ namespace
                 }
                 FOffsetVote& Vote = OffsetVotes.emplace_back();
                 Vote.Offset = Offset;
-                Vote.bPassed = VoteCreateDefaultObject(Offset, Vote.Winner, Vote.Votes, Vote.Total);
+                Vote.bPassed = VoteCreateDefaultObject(Offset, Vote.Winner, Vote.Votes, Vote.Total, false, bCallsWhenNull);
                 if (Vote.bPassed && Vote.Votes >= 100 && Vote.Votes > WinnerVotes)
                 {
                     ObjectLayout::Current.UClass_ClassDefaultObject = Offset;
@@ -1785,14 +1815,14 @@ namespace
                     int32_t SameWinner = -1;
                     int32_t SameVotes = 0;
                     int32_t SameTotal = 0;
-                    const bool bBestSame = VoteCreateDefaultObject(Best->Offset, SameWinner, SameVotes, SameTotal, true) && SameWinner == Best->Winner;
+                    const bool bBestSame = VoteCreateDefaultObject(Best->Offset, SameWinner, SameVotes, SameTotal, true, bCallsWhenNull) && SameWinner == Best->Winner;
                     int32_t SameRunnerUp = 0;
                     for (const FOffsetVote& Vote : OffsetVotes)
                     {
                         int32_t OtherWinner = -1;
                         int32_t OtherVotes = 0;
                         int32_t OtherTotal = 0;
-                        if (&Vote != Best && Vote.bPassed && VoteCreateDefaultObject(Vote.Offset, OtherWinner, OtherVotes, OtherTotal, true))
+                        if (&Vote != Best && Vote.bPassed && VoteCreateDefaultObject(Vote.Offset, OtherWinner, OtherVotes, OtherTotal, true, bCallsWhenNull))
                         {
                             SameRunnerUp = (std::max)(SameRunnerUp, OtherVotes);
                         }
@@ -1812,6 +1842,18 @@ namespace
             {
                 Log::Info(L"Object layout: UClass::ClassDefaultObject at +0x{:X}", ObjectLayout::Current.UClass_ClassDefaultObject);
             }
+        };
+        if (!bPassed)
+        {
+            VoteOffsets(false);
+        }
+        if (!bPassed)
+        {
+            // 6.30 (CL-4573096): +0xF8 has 46 sites and only 37 call slot 0x65. The other 9 belong to other classes'
+            // members at +0xF8 and call only when the member is set (`jz` past the call), which GetDefaultObject's
+            // `if (ClassDefaultObject == nullptr) CreateDefaultObject();` never does. Counting only the sites that
+            // call when the member is null, +0xF8 has 37 of 38 on slot 0x65.
+            VoteOffsets(true);
         }
 
         if (bPassed)
@@ -2044,10 +2086,15 @@ namespace
             }
         }
         // 1.10's PreInit guards a second movie player call (0x291B32) as well. Like the regular-client block, these are
-        // only patched on a build that isn't packed; a packed one without the block has no use for them.
-        if (Sites::PreInitRegularClient || !Packed::IsPacked())
+        // only patched on a build that isn't packed (Boot calls FEngineLoop::Hook only then); a packed one has no use
+        // for them. 6.30 (CL-4573096) is packed and its block matches, with 4 checks: they stay unpatched, as before.
+        if (!Packed::IsPacked())
         {
             RequireChecks(L"FEngineLoop::PreInit", Sites::PreInitDedicatedServerChecks, std::move(PreInitChecks), 5, 6);
+        }
+        else if (Sites::PreInitRegularClient)
+        {
+            Log::Info(L"Finder: PreInit's regular-client block and its {} dedicated-server checks are unused on a packed build (PreInit has run before Core starts)", PreInitChecks.size());
         }
         RequireChecks(L"UEngine::Init", Sites::EngineInitDedicatedServerChecks, CommandletChecks(FunctionOf(L"Initializing Engine...")), 2);
         std::vector<uint8_t*> TickChecks = CommandletChecks(reinterpret_cast<uintptr_t>(Natives::UGameEngine_Tick));
@@ -3331,8 +3378,9 @@ namespace
         Log::Info(L"Finder: FOutBunch is 0x{:X} bytes, bClose +0x{:X} & 0x{:X}, bDormant +0x{:X} & 0x{:X}, bReliable +0x{:X} & 0x{:X}, Num +0x{:X}, ArIsError +0x{:X} & 0x{:X}, UChannel::ChIndex +0x{:X}", BunchSize, BunchClose, CloseMask, BunchDormant, DormantMask, BunchReliable, ReliableMask, WriterNum, ErrorByte, ErrorMask, ChIndex);
 
         ptrdiff_t NumOutRec = 0;
-        // 3.3 (0x2074B10) times the replication first (QueryPerformanceCounter), which moves the test to +0xB9.
-        const uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x100, { 0x0F, 0xBA, -1, 0x08 }) : 0;
+        // 3.3 (0x2074B10) times the replication first (QueryPerformanceCounter), which moves the test to +0xB9; 6.30
+        // (CL-4573096 0x262BEE0) sets more up before it, at +0x15A.
+        const uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x180, { 0x0F, 0xBA, -1, 0x08 }) : 0;
         for (uintptr_t Compare = PausedTest && (Byte(PausedTest + 2) & 0x38) == 0x20 ? FindInstruction(PausedTest + 4, PausedTest + 0x14, { 0x83, -1, -1, 0x00 }) : 0; Compare && !NumOutRec; Compare = FindInstruction(Compare + 1, PausedTest + 0x14, { 0x83, -1, -1, 0x00 }))
         {
             if ((Byte(Compare + 1) & 0xF8) == 0x78 && (Byte(Compare + 1) & 0x07) != 0x04)
@@ -3354,6 +3402,12 @@ namespace
             {
                 NumOutRec = Byte(Compare + (bSib ? 3 : 2));
             }
+        }
+        // 6.30 compares the channel in r12 with an immediate 0: cmp dword ptr [r12+54h], 0 (41 83 7C 24 54 00;
+        // CL-4573096 0x262C040).
+        for (uintptr_t Compare = PausedTest && !NumOutRec && (Byte(PausedTest + 2) & 0x38) == 0x20 ? FindInstruction(PausedTest + 4, PausedTest + 0x14, { 0x41, 0x83, 0x7C, 0x24, -1, 0x00 }) : 0; Compare && !NumOutRec; Compare = FindInstruction(Compare + 1, PausedTest + 0x14, { 0x41, 0x83, 0x7C, 0x24, -1, 0x00 }))
+        {
+            NumOutRec = Byte(Compare + 4);
         }
         RequireOffset(L"UChannel::NumOutRec", Natives::UChannel_NumOutRec, NumOutRec);
 
@@ -4763,6 +4817,67 @@ namespace
         RequireOffset(L"FMcpServiceConfig::ServicePermissions", Natives::FMcpServiceConfig_ServicePermissions, PermissionAdds >= 2 ? PermissionsArray : 0);
     }
 
+    // 6.30 (CL-4573096) adds FOnlineError overloads of FOnlineSubsystemMcp's QueueRequest: the bodies that log "Queuing
+    // Mcp request for ..." take an FOnlineError& OutError, and the FString& overloads Core calls are small wrappers that
+    // build an FOnlineError, call the body and copy its raw error out (client 0x626820 -> 0x626610, user 0x6264F0 ->
+    // 0x626940). UFortMcpResource's dispatch calls the client wrapper; UMcpProfileGroup::SendRequestNow calls the user
+    // body (through a jmp thunk) with its own FOnlineError. Each wrapper is the one small function whose first call
+    // builds the FOnlineError (ErrorConstructor, when given) and whose second is the body. 0 when there is none, as on
+    // every build before 6.30.
+    uintptr_t QueueRequestWrapperOf(uintptr_t Body, uintptr_t ErrorConstructor)
+    {
+        uintptr_t Wrapper = 0;
+        for (uintptr_t Call : Body ? Finder::CallsTo(Body, false) : std::vector<uintptr_t>{})
+        {
+            const uintptr_t Caller = Finder::FunctionStart(Call);
+            const uintptr_t CallerEnd = Caller ? Finder::FunctionEnd(Caller) : 0;
+            if (!CallerEnd || CallerEnd - Caller > 0x200)
+            {
+                continue;
+            }
+            const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DecodedDirectCalls(Caller);
+            const bool bShape = Calls.size() >= 2 && Calls[1].second == Body && (!ErrorConstructor || Calls[0].second == ErrorConstructor);
+            if (bShape && Wrapper && Wrapper != Caller)
+            {
+                return 0;
+            }
+            Wrapper = bShape ? Caller : Wrapper;
+        }
+        return Wrapper;
+    }
+
+    // Core calls QueueRequest's FString overloads (Natives.h): where the build has FOnlineError ones too, the found
+    // functions (the logging bodies) are swapped for their wrappers, the ones the game's own FString callers use.
+    void ResolveMcpQueueRequestOverloads(uintptr_t Dispatch)
+    {
+        const uintptr_t ClientBody = reinterpret_cast<uintptr_t>(Natives::FOnlineSubsystemMcp_QueueRequestForClient);
+        const uintptr_t ClientWrapper = ClientBody ? QueueRequestWrapperOf(ClientBody, 0) : 0;
+        bool bDispatchCallsWrapper = false;
+        for (const auto& [Call, Target] : ClientWrapper && Dispatch ? Finder::DecodedDirectCalls(Dispatch) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+        {
+            bDispatchCallsWrapper |= Target == ClientWrapper;
+        }
+        if (!bDispatchCallsWrapper)
+        {
+            return;
+        }
+        const std::vector<std::pair<uintptr_t, uintptr_t>> WrapperCalls = Finder::DecodedDirectCalls(ClientWrapper);
+        const uintptr_t ErrorConstructor = WrapperCalls.empty() ? 0 : WrapperCalls[0].second;
+        uintptr_t UserBody = reinterpret_cast<uintptr_t>(Natives::FOnlineSubsystemMcp_QueueRequestForUser);
+        UserBody = UserBody && Byte(UserBody) == 0xE9 ? Finder::RelativeTarget(UserBody, 1, 5) : UserBody;
+        const uintptr_t UserWrapper = ErrorConstructor ? QueueRequestWrapperOf(UserBody, ErrorConstructor) : 0;
+        if (!UserWrapper)
+        {
+            Log::Error(L"Finder: FOnlineSubsystemMcp::QueueRequest's FString overloads: the client's is 0x{:X}, the user's wasn't found", ClientWrapper - Finder::ImageBase());
+            ++MissingCount;
+            return;
+        }
+        Natives::FOnlineSubsystemMcp_QueueRequestForClient = reinterpret_cast<decltype(Natives::FOnlineSubsystemMcp_QueueRequestForClient)>(ClientWrapper);
+        Natives::FOnlineSubsystemMcp_QueueRequestForUser = reinterpret_cast<decltype(Natives::FOnlineSubsystemMcp_QueueRequestForUser)>(UserWrapper);
+        Log::Info(L"Finder: FOnlineSubsystemMcp::QueueRequest has FOnlineError overloads; Core calls the FString ones, client 0x{:X} (body 0x{:X}), user 0x{:X} (body 0x{:X})",
+            ClientWrapper - Finder::ImageBase(), ClientBody - Finder::ImageBase(), UserWrapper - Finder::ImageBase(), UserBody - Finder::ImageBase());
+    }
+
     void ResolveMcpProfile()
     {
         const uintptr_t SendRequestNow = FunctionOf(L"FATAL: Should not be possible to issue dedicated server commands without WITH_SERVER_CODE");
@@ -4780,8 +4895,19 @@ namespace
         // mov r8d, [rdx+64h]; mov rdx, rbx; ...; call [rax+270h] (their PrepareRequest uses rdx as the IHttpRequest).
         const uintptr_t ObjectPass = bHttpRequestCopy ? 0 : Scan({ 0x48, 0x8B, 0x0A, 0x48, 0x85, 0xC9, 0x74, -1, 0x48, 0x8B, -1, -1, 0x44, 0x8B, 0x42, -1, 0x48, 0x8B, -1 });
         const bool bObjectPass = ObjectPass && (Byte(ObjectPass + 10) & 0xC7) == 0x42 && Byte(ObjectPass + 18) == (0xD0 | ((Byte(ObjectPass + 10) >> 3) & 0x07));
+        // Where the request object is loaded in that shape (mov rbx, [rdx+50h]).
+        uintptr_t ObjectPassLoad = bObjectPass ? ObjectPass + 8 : 0;
+        // 6.30 (CL-4573096 0x96C910) saves registers between the profile load and its test: mov rcx, [rdx]; mov r14, rdx;
+        // mov [rax-28h], r15; test rcx, rcx; jz; mov rdi, [rdx+18h]; mov r8d, [rdx+2Ch]; mov rdx, rdi; ...; call [rax+290h].
+        const std::initializer_list<int32_t> ObjectPassTest = { 0x48, 0x85, 0xC9, 0x74, -1, 0x48, 0x8B, -1, -1, 0x44, 0x8B, 0x42, -1, 0x48, 0x8B, -1 };
+        for (uintptr_t Test = !bHttpRequestCopy && !bObjectPass ? Scan(ObjectPassTest) : 0; Test && !ObjectPassLoad; Test = FindInstruction(Test + 1, SendRequestNowEnd, ObjectPassTest))
+        {
+            const bool bRequestLoad = (Byte(Test + 7) & 0xC7) == 0x42 && Byte(Test + 15) == (0xD0 | ((Byte(Test + 7) >> 3) & 0x07));
+            const bool bProfileLoad = FindInstruction(Test > SendRequestNow + 0x18 ? Test - 0x18 : SendRequestNow, Test, { 0x48, 0x8B, 0x0A }) != 0;
+            ObjectPassLoad = bRequestLoad && bProfileLoad ? Test + 5 : 0;
+        }
 
-        if (Scan({ 0x48, 0x83, 0x3A, 0x00 }) || bObjectPass)
+        if (Scan({ 0x48, 0x83, 0x3A, 0x00 }) || ObjectPassLoad)
         {
             Natives::FProfileHttpRequest_Profile = 0;
         }
@@ -4791,8 +4917,8 @@ namespace
             ++MissingCount;
         }
 
-        const uintptr_t HttpRequestLoad = bHttpRequestCopy ? HttpRequestCopy : (bObjectPass ? ObjectPass + 8 : 0);
-        Natives::UMcpProfile_PrepareRequestTakesObject = !bHttpRequestCopy && bObjectPass;
+        const uintptr_t HttpRequestLoad = bHttpRequestCopy ? HttpRequestCopy : ObjectPassLoad;
+        Natives::UMcpProfile_PrepareRequestTakesObject = !bHttpRequestCopy && ObjectPassLoad;
         RequireOffset(L"FProfileHttpRequest::HttpRequest", Natives::FProfileHttpRequest_HttpRequest, HttpRequestLoad ? Byte(HttpRequestLoad + 3) : 0);
 
         const uintptr_t PrepareCall = HttpRequestLoad ? FindVirtualCall(HttpRequestLoad, HttpRequestLoad + 0x40) : 0;
@@ -4831,11 +4957,58 @@ namespace
                 }
             }
         }
+        if (!bService)
+        {
+            // 6.30 (CL-4573096 0x96C9D6) keeps the profile group in rbx, and its lea takes a 32-bit displacement:
+            // mov rcx, [rbx+0E0h]; lea rdx, [rbp+120h]; mov [rsp+2D8h], rsi; call 0x613970 (mov rax, [rcx+298h] ...
+            // mov rcx, [rcx+2A0h]).
+            const std::initializer_list<int32_t> GroupLoad = { 0x48, 0x8B, -1, -1, -1, -1, -1, 0x48, 0x8D, 0x95 };
+            const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = SendRequestNowEnd ? Finder::DecodedDirectCalls(SendRequestNow) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+            for (uintptr_t Load = Scan(GroupLoad); Load && !bService; Load = FindInstruction(Load + 1, SendRequestNowEnd, GroupLoad))
+            {
+                const uint8_t ModRm = Byte(Load + 2);
+                if ((ModRm & 0xF8) != 0x88 || (ModRm & 0x07) == 0x04 || (ModRm & 0x07) == 0x05)
+                {
+                    continue;
+                }
+                uintptr_t Getter = 0;
+                for (const auto& [Call, Target] : Calls)
+                {
+                    Getter = !Getter && Call >= Load + 14 && Call < Load + 0x20 ? Target : Getter;
+                }
+                const uintptr_t Read = Getter ? FindInstruction(Getter, Getter + 0x10, { 0x48, 0x8B, 0x81 }) : 0;
+                const int32_t Object = Read ? *reinterpret_cast<const int32_t*>(Read + 3) : 0;
+                for (uintptr_t Candidate = Read ? FindInstruction(Read + 7, Read + 0x40, { 0x48, 0x8B }) : 0; Candidate && !bService; Candidate = FindInstruction(Candidate + 1, Read + 0x40, { 0x48, 0x8B }))
+                {
+                    if ((Byte(Candidate + 2) & 0xC7) == 0x81 && *reinterpret_cast<const int32_t*>(Candidate + 3) == Object + 8)
+                    {
+                        ServiceObject = Object;
+                        McpSubsystem = *reinterpret_cast<const int32_t*>(Load + 3);
+                        bService = true;
+                    }
+                }
+            }
+        }
         RequireOffset(L"UMcpProfileGroup::McpSubsystem", Natives::UMcpProfileGroup_McpSubsystem, bService ? McpSubsystem : 0);
         RequireOffset(L"FOnlineSubsystemMcp::McpGameService", Natives::FOnlineSubsystemMcp_McpGameService, bService ? ServiceObject : 0);
 
         const uintptr_t ContextSwitch = Scan({ 0x8B, 0x4F, -1, 0x33, 0xDB, 0x48, 0x89, 0x5D, -1, 0x8B, 0xD3, 0x48, 0x89, 0x5D, -1, 0x85, 0xC9, 0x0F, 0x84 });
-        RequireOffset(L"FProfileHttpRequest::ContextCredentials", Natives::FProfileHttpRequest_ContextCredentials, ContextSwitch ? Byte(ContextSwitch + 2) : 0);
+        ptrdiff_t ContextCredentials = ContextSwitch ? Byte(ContextSwitch + 2) : 0;
+        // 6.30 (CL-4573096 0x96C9FD) keeps the request in r14: mov ecx, [r14+28h]; mov edi, 0FFFFFFFFh; test ecx, ecx; jz;
+        // sub ecx, 1; jz (the switch on the request's context).
+        const std::initializer_list<int32_t> ContextTest = { 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x83, 0xE9, 0x01, 0x0F, 0x84 };
+        for (uintptr_t Test = !ContextCredentials ? Scan(ContextTest) : 0; Test && !ContextCredentials; Test = FindInstruction(Test + 1, SendRequestNowEnd, ContextTest))
+        {
+            for (uintptr_t Load = Test - 3; Load + 0x10 >= Test && !ContextCredentials; --Load)
+            {
+                const uint8_t ModRm = Byte(Load + 1);
+                if (Byte(Load) == 0x8B && (ModRm & 0xF8) == 0x48 && (ModRm & 0x07) != 0x04 && (ModRm & 0x07) != 0x05)
+                {
+                    ContextCredentials = Byte(Load + 2);
+                }
+            }
+        }
+        RequireOffset(L"FProfileHttpRequest::ContextCredentials", Natives::FProfileHttpRequest_ContextCredentials, ContextCredentials);
 
         uintptr_t CredentialsCheck = Scan({ 0x49, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 });
         if (!CredentialsCheck)
@@ -4843,10 +5016,26 @@ namespace
             // 1.10's reads the credentials from rsi (mov rcx, [rsi+180h] at 0x2E317D2).
             CredentialsCheck = Scan({ 0x48, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 });
         }
+        uintptr_t QueueForUserCallEnd = CredentialsCheck ? CredentialsCheck + 0x60 : 0;
+        if (!CredentialsCheck)
+        {
+            // 6.30 (CL-4573096 0x96CF66) keeps the profile group in rbx (mov rcx, [rbx+150h]), and its call of the user's
+            // QueueRequest is 0x62 bytes on.
+            const std::initializer_list<int32_t> AnyCredentialsCheck = { -1, 0x8B, -1, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 };
+            for (uintptr_t Check = Scan(AnyCredentialsCheck); Check && !CredentialsCheck; Check = FindInstruction(Check + 1, SendRequestNowEnd, AnyCredentialsCheck))
+            {
+                const uint8_t ModRm = Byte(Check + 2);
+                if ((Byte(Check) == 0x48 || Byte(Check) == 0x49) && (ModRm & 0xF8) == 0x88 && (ModRm & 0x07) != 0x04 && (ModRm & 0x07) != 0x05)
+                {
+                    CredentialsCheck = Check;
+                    QueueForUserCallEnd = Check + 0x80;
+                }
+            }
+        }
         const ptrdiff_t CredentialsNetId = CredentialsCheck ? *reinterpret_cast<const int32_t*>(CredentialsCheck + 3) : 0;
         RequireOffset(L"UMcpProfileGroup::CredentialsAccountId", Natives::UMcpProfileGroup_CredentialsAccountId, CredentialsNetId > static_cast<ptrdiff_t>(sizeof(void*)) ? CredentialsNetId - static_cast<ptrdiff_t>(sizeof(void*)) : 0);
         RequireSlot(L"FUniqueNetId::IsValid", Natives::FUniqueNetId_IsValidIndex, CredentialsCheck && Byte(CredentialsCheck + 21) % 8 == 0 ? Byte(CredentialsCheck + 21) / 8 : -1);
-        const uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + 24, CredentialsCheck + 0x60) : 0;
+        const uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + 24, QueueForUserCallEnd) : 0;
         Require(L"FOnlineSubsystemMcp::QueueRequest (user)", Natives::FOnlineSubsystemMcp_QueueRequestForUser, QueueForUser ? Finder::RelativeTarget(QueueForUser, 1, 5) : 0);
 
         uintptr_t AccountInventoryChanged = FunctionOf(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged trying to initialize ability system actor");
@@ -4876,6 +5065,19 @@ namespace
             // 1.10 (0x7C0609) loads the service, then lea rdx, name; add rcx, 18h; call.
             const uintptr_t ConfigAdd = FindInstruction(Dispatch, ClientCall, { 0x48, 0x8D, 0x15, -1, -1, -1, -1, 0x48, 0x83, 0xC1, -1, 0xE8 });
             ServiceConfig = ConfigAdd ? Byte(ConfigAdd + 10) : 0;
+        }
+        if (!ClientCall && QueueForClient && DispatchEnd)
+        {
+            // 6.30 (CL-4573096): the dispatch calls the FString overload, a wrapper of the logging body
+            // (ResolveMcpQueueRequestOverloads); the service config is set up before that call the same way.
+            const uintptr_t Wrapper = QueueRequestWrapperOf(QueueForClient, 0);
+            for (const auto& [Call, Target] : Wrapper ? Finder::DecodedDirectCalls(Dispatch) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+            {
+                ClientCall = !ClientCall && Target == Wrapper ? Call : ClientCall;
+            }
+            const uintptr_t ConfigAdd = ClientCall ? FindInstruction(Dispatch, ClientCall, { 0x48, 0x8D, 0x15, -1, -1, -1, -1, 0x48, 0x83, 0xC1, -1, 0xE8 }) : 0;
+            ServiceConfig = ConfigAdd ? Byte(ConfigAdd + 10) : ServiceConfig;
+            ResolveMcpQueueRequestOverloads(Dispatch);
         }
         RequireOffset(L"FGameServiceMcp::ServiceConfig", Natives::FGameServiceMcp_ServiceConfig, ServiceConfig);
     }
@@ -7750,6 +7952,14 @@ bool Finder::ResolveGameSessionVerifyAuthLive(void** SessionVTable)
     // AFortGameSession::OnVerifyAuthComplete (2.4 0x70A130, 2.3 0x70D630) logs this before it kicks the player whose
     // UniqueId matches AuthToken.AccountId; it is the slot whose code runs into that log (2.3 and 2.4 slot 0xDC).
     const uintptr_t KickRef = First(Finder::StringRefs(L"User auth check failed. Server requesting to kick user to login screen UserId=%s bSuccess=%d Error=%s"));
+    // 6.30 (CL-4573096 0x113D520) hands it an FOnlineError instead of bWasSuccessful and an FString: it kicks only when
+    // the error's result (+0x40, which the FOnlineError constructor 0x37BC30 sets) is 5 (cmp byte ptr [r9+40h], 5; jnz
+    // to the return), so a successful verify kicks nobody, and its log has no bSuccess. Nothing to put back.
+    if (!KickRef && First(Finder::StringRefs(L"User auth check failed. Server requesting to kick user to login screen UserId=%s Error=%s")))
+    {
+        Log::Info(L"Finder: AFortGameSession::OnVerifyAuthComplete takes an FOnlineError and kicks only on a failed verify; it is left as it is");
+        return false;
+    }
     int32_t VerifyIndex = -1;
     uintptr_t Verify = 0;
     for (int32_t Index = 0; KickRef && Index < 0x400 && VerifyIndex < 0; ++Index)
@@ -14364,6 +14574,17 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
             ++PermissionCandidates;
         }
     }
+    // 6.30 (CL-4573096): the improvement (the RPC's one caller, now 0xDA5FB0) no longer asks IsBeingPlayerEdited first,
+    // so the slot is the one controller slot below CanAffordToPlaceBuildableClass both it and begin editing ask
+    // (0x2F9, seven before CanAfford's 0x300, as 6.22's 0x2F7 and 0x2FE).
+    for (const int32_t Slot : PermissionCandidates == 0 && Candidates == 1 && !Has(ImproveSlots, IsBeingEdited) ? ImproveSlots : std::vector<int32_t>())
+    {
+        if (Slot != IsBeingEdited && Slot != HasPermission && Slot < CanAfford && Slot >= CanAfford - 0x10 && Has(BeginEditSlots, Slot))
+        {
+            HasPermission = Slot;
+            ++PermissionCandidates;
+        }
+    }
 
     // 21.40's ABuildingSMActor order: ReplaceBuildingActor, SupportsEditing, CanBePlayerEdited, IsBeingEdited,
     // GetEditingPlayer, SetEditingPlayer (1.8 and 1.8.1 0x149-0x14E), and OnServerAttemptBuildingUpgrade right before
@@ -15885,19 +16106,19 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     //
     // That function is found as NotifyActorChannelCleanedUp's second call, and nothing is resolved unless the code
     // around it is what 6.00, 6.01 (CL-4424678 0x78A1D0, 0x78ABB0), 6.02 (CL-4461277 0x78AD60, 0x78B740), 6.10
-    // (CL-4480234 0x7A3920, 0x7A4300), 6.20 (CL-4497486 0x740FE0, 0x7419D0), 6.21 (CL-4526925 0x7439F0, 0x7443E0) and
-    // 6.22 (CL-4543176 0x745430, 0x745E20) have:
+    // (CL-4480234 0x7A3920, 0x7A4300), 6.20 (CL-4497486 0x740FE0, 0x7419D0), 6.21 (CL-4526925 0x7439F0, 0x7443E0),
+    // 6.22 (CL-4543176 0x745430, 0x745E20) and 6.30 (CL-4573096 0x7624C0, 0x762EB0) have:
     //   NotifyActorChannelCleanedUp: lea r14, [rcx+80h] (the ChannelMap); call FindId; ...; mov rdx, rsi (the channel);
     //     mov rcx, r14; call Remove; mov [rdi], r15; mov [rdi+0Ch], r15 (the info's Channel and its frame counters);
     //     then the rest of the info it clears, which says how big the info is and where its flags are:
     //       6.00 to 6.10: mov [rdi+14h], r15 (a 0x20 byte info, flags at +0x1D)
-    //       6.20 to 6.22: mov [rdi+24h], r15d; mov [rdi+18h], r15 (a 0x30 byte info, flags at +0x28, as 8.30's)
+    //       6.20 to 6.30: mov [rdi+24h], r15d; mov [rdi+18h], r15 (a 0x30 byte info, flags at +0x28, as 8.30's)
     //   NotifyActorTearOff: lea rcx, [rsi+30h] (the ActorMap, 0x50 before the ChannelMap: one TMap); call the same
     //     FindId; ...; or byte ptr [rax+<the flags>], 2
     // 6.20's RemoveNetworkActor (0x74A3D0) still doesn't take the connections' infos out. A build before 6.00 or after
-    // 6.22 was never looked at, and one whose code differs (8.30's engine does this itself) keeps what it has.
+    // 6.30 was never looked at, and one whose code differs (8.30's engine does this itself) keeps what it has.
     constexpr uint32_t FirstVerifiedChangelist = 4395664;
-    constexpr uint32_t LastVerifiedChangelist = 4543176;
+    constexpr uint32_t LastVerifiedChangelist = 4573096;
     constexpr ptrdiff_t MapSize = 0x50;
     const uint32_t Changelist = Packed::Changelist();
     const auto LeftAsIs = [Changelist](const wchar_t* Why)
@@ -15907,7 +16128,7 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     };
     if (Changelist < FirstVerifiedChangelist || Changelist > LastVerifiedChangelist)
     {
-        return LeftAsIs(L"only 6.00 to 6.22, CL-4395664 to CL-4543176, were checked");
+        return LeftAsIs(L"only 6.00 to 6.30, CL-4395664 to CL-4573096, were checked");
     }
 
     const std::vector<uintptr_t> CleanedUpRefs = Finder::StringRefs(L"UNetReplicationGraphConnection_NotifyActorChannelCleanedUp");

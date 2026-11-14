@@ -206,4 +206,9 @@ public:
     // game mode's HandleCurrentPlaylistLoaded): for each, the mutator of its scope and the value its property has now,
     // or that no mutator of that scope spawned. Nothing to say on a match without overrides.
     void ReportPropertyOverrides() const;
+
+    // From 6.20: AddManagedCharacterMovementComponent and RemoveManagedCharacterMovementComponent hand a character's
+    // movement to the active AI mutator before AFortGameState's own list; the mutator's two are stripped, and their
+    // calls go to Core's (AFortAthenaMutator_AI). Left alone on builds without them or that keep the mutator's.
+    static void HookCallSites();
 };

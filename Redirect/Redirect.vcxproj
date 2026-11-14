@@ -364,6 +364,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AI\AthenaNavSystem.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AI\CoreAthenaBotController.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AI\CoreAthenaBotManager.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_AI.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BGAConsumableSpawner.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingContainer.h" />
@@ -416,6 +417,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortPartyBeaconHost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortAIPawn.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortMovementComp_Character.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortPlayerPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortCheatManager.h" />
@@ -592,6 +594,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AI\AthenaNavSystem.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AI\CoreAthenaBotController.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AI\CoreAthenaBotManager.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_AI.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BGAConsumableSpawner.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingActor.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingContainer.cpp" />

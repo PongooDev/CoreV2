@@ -51,6 +51,18 @@ namespace Finder
         bool bRollsModifiers = false;
     };
 
+    // From 6.20 (Fortnitemares): where AFortGameStateAthena's Add/RemoveManagedCharacterMovementComponent offer the
+    // component to the game state's active AI mutator (AFortAthenaMutator_AI::FortGameStateAthena_*ManagedCharacter-
+    // MovementComponent). A call is null where the mutator's function is the build's own (not the stripped stub).
+    struct FManagedCharacterMovementSites
+    {
+        uint8_t* AddMutatorCall = nullptr;
+        uint8_t* RemoveMutatorCall = nullptr;
+        // The game state's AI mutator (unreflected) and UFortMovementComp_Character::ManagedTickIndex (unreflected).
+        ptrdiff_t AIMutatorOffset = -1;
+        ptrdiff_t ManagedTickIndexOffset = -1;
+    };
+
     struct FPlayerSpawnQuerySites
     {
         uintptr_t PickSpawnActor = 0;
@@ -437,4 +449,8 @@ namespace Finder
     // InternalSetTimer): in StartExitCraftSpawnTimer's body and in the spawner's BeginPlay (its slots that differ from
     // ActorVTable's and read ExitCraftInfoOffset). Empty where none is found.
     std::vector<uint8_t*> ExitCraftSpawnTimerBinds(UFunction* StartExitCraftSpawnTimer, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset);
+    // AFortGameStateAthena's Add/RemoveManagedCharacterMovementComponent off its vtable: the two slots that hand the
+    // component to the AI mutator before AFortGameState's own (see FManagedCharacterMovementSites). False on builds
+    // without them (before 6.20).
+    bool ResolveManagedCharacterMovementLive(void** GameStateVTable, FManagedCharacterMovementSites& OutSites);
 }

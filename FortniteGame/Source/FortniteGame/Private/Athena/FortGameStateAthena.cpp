@@ -2,12 +2,15 @@
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlaylistAthena.h"
+#include "Athena/Mutators/FortAthenaMutator_AI.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "GameFramework/Actor.h"
+#include "Hooks.h"
 #include "Log.h"
 #include "Misc/StringAssetReference.h"
 #include "Natives.h"
+#include "Pawns/FortMovementComp_Character.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/AssetPtr.h"
@@ -304,5 +307,38 @@ void AFortGameStateAthena::StreamAdditionalPlaylistLevels()
             Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel(reinterpret_cast<AFortGameState*>(this), FName(*PackageName));
         }
     }
+#endif
+}
+
+void AFortGameStateAthena::HookCallSites()
+{
+#if WITH_SERVER_CODE
+    // The Cube Monsters' movement (6.20 to 6.22): AFortGameStateAthena::AddManagedCharacterMovementComponent (6.22
+    // 0xC6F230) asks the active AI mutator to take the component and adds it to AFortGameState's
+    // ManagedCharMovementComponents when the mutator says no; the mutator's FortGameStateAthena_AddManagedCharacter-
+    // MovementComponent always said no (the shared `xor al, al; ret`), so AFortAthenaMutator_AI's DeimosMoveComponents
+    // stayed empty and its batched movement (FortGameStateAthena_TickActor) never moved one. Both calls go to Core's, or
+    // neither: a component the mutator took must also come out of its list.
+    UClass* Class = StaticClass();
+    UObject* Default = Class ? Class->GetDefaultObject(false) : nullptr;
+    if (!Default || !AFortAthenaMutator_AI::HasDeimosMoveComponents() || !UFortMovementComp_AIChar::HasDeimos())
+    {
+        return;
+    }
+    Finder::FManagedCharacterMovementSites Sites;
+    if (!Finder::ResolveManagedCharacterMovementLive(*reinterpret_cast<void***>(Default), Sites))
+    {
+        return;
+    }
+    if (!Sites.AddMutatorCall || !Sites.RemoveMutatorCall)
+    {
+        Log::Info(L"Finder: AFortAthenaMutator_AI's character movement hand-over is {} on this build, left as it is", !Sites.AddMutatorCall && !Sites.RemoveMutatorCall ? L"the build's own" : L"only half stripped");
+        return;
+    }
+    Natives::UFortMovementComp_Character_ManagedTickIndex = Sites.ManagedTickIndexOffset;
+    Hooks::RedirectCall(L"AFortGameStateAthena::AddManagedCharacterMovementComponent -> AFortAthenaMutator_AI::FortGameStateAthena_AddManagedCharacterMovementComponent", Sites.AddMutatorCall,
+        reinterpret_cast<void*>(&AFortAthenaMutator_AI::AddManagedCharacterMovementComponentHK));
+    Hooks::RedirectCall(L"AFortGameStateAthena::RemoveManagedCharacterMovementComponent -> AFortAthenaMutator_AI::FortGameStateAthena_RemoveManagedCharacterMovementComponent", Sites.RemoveMutatorCall,
+        reinterpret_cast<void*>(&AFortAthenaMutator_AI::RemoveManagedCharacterMovementComponentHK));
 #endif
 }

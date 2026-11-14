@@ -483,6 +483,10 @@ namespace Natives
     inline int32_t IFortAIEncounterInfoOwnerInterface_GetEncounterInfoIndex = -1;
     inline void (*UFortQueryItemType_Goal_SetContextHelper)(void* ContextData, const FScriptArray& Goals) = nullptr;
     inline ptrdiff_t UNavigationSystem_NavBuildingLockFlags = -1;
+    // From 6.20: UFortMovementComp_Character::ManagedTickIndex, the component's place in the list that ticks it
+    // (AFortGameState::ManagedCharMovementComponents, or the AI mutator's DeimosMoveComponents), off the clear in
+    // AFortGameState::RemoveManagedCharacterMovementComponent (Finder::ResolveManagedCharacterMovementLive).
+    inline ptrdiff_t UFortMovementComp_Character_ManagedTickIndex = -1;
     inline void (*UNavigationSystem_RebuildAll)(UNavigationSystem* This, bool bIsLoadTime) = nullptr;
     inline void (*UNavigationSystem_ConditionalPopulateNavOctree)(UNavigationSystem* This) = nullptr;
     inline ptrdiff_t UNavigationSystem_bNavOctreeLock = -1;

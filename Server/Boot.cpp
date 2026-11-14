@@ -27,6 +27,7 @@
 #include "Athena/FortAthenaSupplyDrop.h"
 #include "Athena/FortAthenaVehicle.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPoiManager.h"
@@ -377,6 +378,7 @@ static void InstallHooks()
             AFortMinigameState::HookNatives();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
+            AFortGameStateAthena::HookCallSites();
             AFortGameModeAthena::HookMatchAssignmentVTables();
             UNetDriver::AddPreReplicationCallback(&AFortPlayerController::ReplicateServerFinishedLoadingAfterGameState);
             UCharacterMovementComponent::HookServerMove(L"/Script/FortniteGame.FortMovementComp_CharacterAthena");

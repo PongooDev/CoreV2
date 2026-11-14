@@ -16758,3 +16758,134 @@ std::vector<uint8_t*> Finder::ExitCraftSpawnTimerBinds(UFunction* StartExitCraft
     }
     return Binds;
 }
+
+bool Finder::ResolveManagedCharacterMovementLive(void** GameStateVTable, FManagedCharacterMovementSites& OutSites)
+{
+    // AFortGameStateAthena's AddManagedCharacterMovementComponent and RemoveManagedCharacterMovementComponent (6.20 slots
+    // 0xF0 0xC63C30 and 0xF1 0xC813D0, 6.21 0xC6D240 and 0xC8B2B0, 6.22 0xC6F230 and 0xC8D2A0) offer the component to the
+    // game state's AI mutator first, when it is active, and to AFortGameState's own list only when the mutator turns it
+    // down:
+    //   mov rcx, [rcx+Mutator]; test rcx, rcx; jz Base; call IsMutatorActive; test al, al; jz Base
+    //   mov rcx, [rbx+Mutator]; mov r8, rdi; mov rdx, rbx; call AFortAthenaMutator_AI::FortGameStateAthena_*; test al, al; jnz Done
+    //   Base: mov rdx, rdi; mov rcx, rbx; call AFortGameState::*ManagedCharacterMovementComponent
+    // The mutator's two are stripped to the shared `xor al, al; ret` (6.20 0x2AB5E0, 6.21 0x2AC7B0, 6.22 0x2ACA20). Of the
+    // two, Remove is the one whose AFortGameState body (6.22 0xF43930) clears the component's ManagedTickIndex
+    // (mov dword ptr [reg+ManagedTickIndex], -1); Add's (0xF25270) stores the new index there.
+    OutSites = FManagedCharacterMovementSites();
+    if (!GameStateVTable)
+    {
+        return false;
+    }
+    struct FCandidate
+    {
+        int32_t Slot = -1;
+        uint8_t* MutatorCall = nullptr;
+        uintptr_t Base = 0;
+        ptrdiff_t Mutator = -1;
+    };
+    std::vector<FCandidate> Candidates;
+    for (int32_t Index = 0; Index < 0x200; ++Index)
+    {
+        const uintptr_t Function = VTableEntry(GameStateVTable, Index);
+        if (!Function || !IsInText(Function + 0x60))
+        {
+            continue;
+        }
+        const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Function);
+        for (int32_t First = 0; First < 0x20; ++First)
+        {
+            // mov rcx, [rcx+disp32]
+            if (Bytes[First] != 0x48 || Bytes[First + 1] != 0x8B || Bytes[First + 2] != 0x89)
+            {
+                continue;
+            }
+            const int32_t Mutator = *reinterpret_cast<const int32_t*>(Bytes + First + 3);
+            for (int32_t Second = First + 7; Second < 0x40; ++Second)
+            {
+                // mov rcx, [rbx+disp32]; mov r8, rdi; mov rdx, rbx; call rel32; test al, al; jnz rel8; mov rdx, rdi; mov rcx, rbx; call rel32
+                static constexpr uint8_t Shape[] = { 0x4C, 0x8B, 0xC7, 0x48, 0x8B, 0xD3, 0xE8 };
+                static constexpr uint8_t BaseShape[] = { 0x84, 0xC0, 0x75 };
+                static constexpr uint8_t BaseCall[] = { 0x48, 0x8B, 0xD7, 0x48, 0x8B, 0xCB, 0xE8 };
+                const uint8_t* Load = Bytes + Second;
+                if (Load[0] != 0x48 || Load[1] != 0x8B || Load[2] != 0x8B || *reinterpret_cast<const int32_t*>(Load + 3) != Mutator
+                    || std::memcmp(Load + 7, Shape, sizeof(Shape)) != 0 || std::memcmp(Load + 18, BaseShape, sizeof(BaseShape)) != 0
+                    || std::memcmp(Load + 22, BaseCall, sizeof(BaseCall)) != 0)
+                {
+                    continue;
+                }
+                const uintptr_t CallSite = reinterpret_cast<uintptr_t>(Load + 13);
+                const uintptr_t Target = Finder::RelativeTarget(CallSite, 1, 5);
+                const uintptr_t Base = Finder::RelativeTarget(reinterpret_cast<uintptr_t>(Load + 28), 1, 5);
+                if (IsInText(Base))
+                {
+                    Candidates.push_back({ Index, Finder::IsStubFunction(Target) ? reinterpret_cast<uint8_t*>(CallSite) : nullptr, Base, Mutator });
+                }
+                break;
+            }
+            break;
+        }
+    }
+    // The base bodies: Remove's clears the index (C7 8x disp32 FF FF FF FF), Add's stores one there (89 8x disp32).
+    const auto ClearedIndex = [](uintptr_t Base) -> ptrdiff_t
+    {
+        const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Base);
+        for (int32_t At = 0; At < 0x60 && IsInText(Base + At + 10); ++At)
+        {
+            if (Bytes[At] == 0xC7 && (Bytes[At + 1] & 0xF8) == 0x80 && (Bytes[At + 1] & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Bytes + At + 6) == -1)
+            {
+                return *reinterpret_cast<const int32_t*>(Bytes + At + 2);
+            }
+        }
+        return -1;
+    };
+    const auto StoresIndex = [](uintptr_t Base, ptrdiff_t Offset)
+    {
+        const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Base);
+        // 6.20 to 6.22: mov [rdi+ManagedTickIndex], esi at +0x92, after the list grows.
+        for (int32_t At = 0; At < 0x120 && IsInText(Base + At + 6); ++At)
+        {
+            if (Bytes[At] == 0x89 && (Bytes[At + 1] & 0xC0) == 0x80 && (Bytes[At + 1] & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Bytes + At + 2) == Offset)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const FCandidate* Add = nullptr;
+    const FCandidate* Remove = nullptr;
+    for (const FCandidate& Candidate : Candidates)
+    {
+        const ptrdiff_t Cleared = ClearedIndex(Candidate.Base);
+        if (Cleared > 0 && !Remove)
+        {
+            Remove = &Candidate;
+            OutSites.ManagedTickIndexOffset = Cleared;
+        }
+    }
+    for (const FCandidate& Candidate : Candidates)
+    {
+        if (&Candidate != Remove && Remove && Candidate.Mutator == Remove->Mutator && StoresIndex(Candidate.Base, OutSites.ManagedTickIndexOffset))
+        {
+            Add = &Candidate;
+            break;
+        }
+    }
+    if (!Add || !Remove)
+    {
+        Log::Info(L"Finder: AFortGameStateAthena hands no character movement to a mutator on this build ({} candidates)", Candidates.size());
+        OutSites = FManagedCharacterMovementSites();
+        return false;
+    }
+    OutSites.AddMutatorCall = Add->MutatorCall;
+    OutSites.RemoveMutatorCall = Remove->MutatorCall;
+    OutSites.AIMutatorOffset = Add->Mutator;
+    const auto Where = [](const uint8_t* Call)
+    {
+        return Call ? std::format(L"calls the stub 0x{:X} at 0x{:X}", Finder::RelativeTarget(reinterpret_cast<uintptr_t>(Call), 1, 5) - Finder::ImageBase(), reinterpret_cast<uintptr_t>(Call) - Finder::ImageBase())
+                    : std::wstring(L"keeps the mutator's own");
+    };
+    Log::Info(L"Finder: AFortGameStateAthena::AddManagedCharacterMovementComponent slot 0x{:X} 0x{:X} {}; RemoveManagedCharacterMovementComponent slot 0x{:X} 0x{:X} {}; "
+        L"AI mutator +0x{:X}, UFortMovementComp_Character::ManagedTickIndex +0x{:X}", Add->Slot, VTableEntry(GameStateVTable, Add->Slot) - Finder::ImageBase(), Where(Add->MutatorCall),
+        Remove->Slot, VTableEntry(GameStateVTable, Remove->Slot) - Finder::ImageBase(), Where(Remove->MutatorCall), OutSites.AIMutatorOffset, OutSites.ManagedTickIndexOffset);
+    return true;
+}

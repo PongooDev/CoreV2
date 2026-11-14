@@ -50,6 +50,7 @@ body:
         - "6.20"
         - "6.21"
         - "6.22"
+        - "6.30"
         - Other (say which below)
     validations:
       required: true

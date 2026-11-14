@@ -9,6 +9,7 @@
 #include "Items/FortPickup.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
+#include "Natives.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
@@ -19,6 +20,42 @@
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
+
+void AFortPlayerPawnAthena::BeginSkydiving(bool bFromBus)
+{
+#if WITH_SERVER_CODE
+    if (!Natives::AFortPlayerPawnAthena_BeginSkydiving)
+    {
+        return;
+    }
+    // 1.8.1 and 1.8.2 (CoreV2 #449): the build's BeginSkydiving sets the skydive up (bIsSkydiving, the tag, the contrail,
+    // the movement's skydiving mode) and then, with authority, records where and when the player left the bus from
+    // Cast<AFortPlayerControllerAthena>(Controller) with no null check: a player bot's AI controller made it read through
+    // null (1.8.2 0x415301 into 0x420264), the server died at the first bot's warmup glide or bus exit. Epic's fix is 1.9's
+    // BeginSkydiving (0x417110): that record only from the bus and only for a player controller, the flag before it
+    // (1.8.2 +0x848) still set. Core can't change the build's code, so for a pawn that isn't a player's it runs the build's
+    // function as the pawn's owning client would (ROLE_AutonomousProxy: everything but the server part, which only that
+    // Role check gates), puts the authority back, and sets the flag as 1.9 does.
+    const ptrdiff_t ServerFlag = Natives::AFortPlayerPawnAthena_BeginSkydiving_UnguardedServerFlagOffset;
+    UObject* PawnController = reinterpret_cast<UObject*>(static_cast<AController*>(Controller));
+    if (ServerFlag < 0 || Role != ROLE_Authority || Cast<AFortPlayerControllerAthena>(PawnController))
+    {
+        Natives::AFortPlayerPawnAthena_BeginSkydiving(this, bFromBus);
+        return;
+    }
+    Role = TEnumAsByte<ENetRole>(ROLE_AutonomousProxy);
+    Natives::AFortPlayerPawnAthena_BeginSkydiving(this, bFromBus);
+    Role = TEnumAsByte<ENetRole>(ROLE_Authority);
+    *(reinterpret_cast<uint8_t*>(this) + ServerFlag) = 1;
+    static bool bLogged = false;
+    if (!bLogged)
+    {
+        bLogged = true;
+        Log::Info(L"Battle Royale: {} skydives without BeginSkydiving's player-controller part, as on 1.9 (controller {}, flag +0x{:X})", GetName().ToStdString(),
+            PawnController ? PawnController->GetName().ToStdString() : std::wstring(L"none"), ServerFlag);
+    }
+#endif
+}
 
 void AFortPlayerPawnAthena::StartDBNO()
 {

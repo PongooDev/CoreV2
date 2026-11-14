@@ -1673,7 +1673,7 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
 
     if (bSkydive && Natives::AFortPlayerPawnAthena_BeginSkydiving)
     {
-        Natives::AFortPlayerPawnAthena_BeginSkydiving(Pawn, true);
+        Pawn->BeginSkydiving(true);
     }
     return true;
 #else
@@ -2008,7 +2008,7 @@ bool FCoreAthenaBotController::WarmupGlide(float Now)
     StopEmote();
     StopFiring();
     StopMoving();
-    Natives::AFortPlayerPawnAthena_BeginSkydiving(Pawn, false);
+    Pawn->BeginSkydiving(false);
     Pawn->ForceNetUpdate();
     ++WarmupGlides;
     Log::Info(L"Battle Royale bots: {} falls off the warmup island's heights and opens its glider (skydiving {}, glider {})", BotName,

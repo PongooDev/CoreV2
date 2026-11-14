@@ -16232,6 +16232,40 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     return true;
 }
 
+namespace
+{
+    // BeginSkydiving's server part, on the builds that run it for any controller (Natives::
+    // AFortPlayerPawnAthena_BeginSkydiving_UnguardedServerFlagOffset, CoreV2 #449). 1.8.2's (0x4151E0):
+    //   0x4152AB  cmp byte ptr [rdi + Role], 3; jne end           (80 BF disp32 03 0F 85 rel32)
+    //   0x4152B8  mov rbx, [rdi + Controller]; mov [rsp+60h], rsi
+    //   0x4152C4  mov byte ptr [rdi + 0x848], 1                    (C6 87 disp32 01)
+    //   0x4152CB  test rbx, rbx; je; the AFortPlayerControllerAthena cast; jz 0x4152FE
+    //   0x4152FC  xor ebx, ebx; mov rcx, rbx; call 0x420260       (33 DB 48 8B CB E8: called with the failed cast)
+    // 1.8.1's (0x414830) is the same, with the call at 0x414951. 1.9's (0x417110) and later jump past the part when the
+    // cast fails, so they have no such call and keep -1. The function's .pdata entry ends at the rsi save (1.8.2
+    // 0x4152BF, a chained entry covers the rest), so the part is read in fixed windows: the check at +0xCB, the call 0x51
+    // after it.
+    void ResolveBeginSkydivingServerPart(uintptr_t Function)
+    {
+        const uintptr_t Body = Function ? Finder::Unthunk(Function) : 0;
+        const uintptr_t Window = Body && Finder::IsReadable(reinterpret_cast<const void*>(Body), 0x200) ? Body + 0x200 : 0;
+        const uintptr_t Authority = Window ? FindInstruction(Body, Body + 0x180, { 0x80, 0xBF, -1, -1, 0x00, 0x00, 0x03, 0x0F, 0x85 }) : 0;
+        if (!Authority)
+        {
+            return;
+        }
+        const uintptr_t Unguarded = FindInstruction(Authority, std::min(Window, Authority + 0x80), { 0x33, 0xDB, 0x48, 0x8B, 0xCB, 0xE8 });
+        const uintptr_t Flag = FindInstruction(Authority + 13, Authority + 13 + 0x20, { 0xC6, 0x87, -1, -1, 0x00, 0x00, 0x01 });
+        if (!Unguarded || !Flag || Flag > Unguarded)
+        {
+            return;
+        }
+        Natives::AFortPlayerPawnAthena_BeginSkydiving_UnguardedServerFlagOffset = *reinterpret_cast<const int32_t*>(Flag + 2);
+        Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving's server part takes the controller as a player's without a null check (0x{:X}); a bot's skydive runs without it and sets +0x{:X} itself",
+            Unguarded - Finder::ImageBase(), Natives::AFortPlayerPawnAthena_BeginSkydiving_UnguardedServerFlagOffset);
+    }
+}
+
 bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
 {
     static bool bSearched = false;
@@ -16305,6 +16339,7 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         {
             Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(Target);
             Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X})", Target - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());
+            ResolveBeginSkydivingServerPart(Target);
             return true;
         }
         // 4.4.2's packer moved BeginSkydiving's body: ExitAircraft (0xA80200) still does "mov dl, 1; mov rcx, rbx; call
@@ -16342,6 +16377,7 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(Found);
         Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X}), {}", Found - Finder::ImageBase(), ExitAircraft - Finder::ImageBase(),
             MovedTarget ? L"its body moved by the packer" : L"the call after ExitAircraft's AFortPlayerPawnAthena cast");
+        ResolveBeginSkydivingServerPart(Found);
         return true;
     }
     Log::Error(L"Finder: AFortPlayerPawnAthena::BeginSkydiving not found (ExitAircraft 0x{:X}), player bots can't leave the aircraft ({})", ExitAircraft ? ExitAircraft - Finder::ImageBase() : 0, Diagnostics.empty() ? L"no mov dl, 1 sites" : Diagnostics);

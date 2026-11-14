@@ -1143,9 +1143,21 @@ namespace
         {
             Ids += std::format("{}\"{}\"", Ids.empty() ? "" : ",", NarrowId(Id));
         }
+        // The names the bots may take, until the backend has said which are registered players' (CoreV2 #446). A backend
+        // from before it ignores them.
+        std::string BotNames;
+        FCoreAthenaBotManager* NamesManager = FCoreAthenaBotManager::Get();
+        if (NamesManager && !NamesManager->HasTakenBotNames())
+        {
+            for (const std::wstring& Name : NamesManager->CandidateBotNames())
+            {
+                BotNames += std::format("{}\"{}\"", BotNames.empty() ? "" : ",", NarrowId(Name));
+            }
+            BotNames = std::format(",\"botNames\":[{}]", BotNames);
+        }
         Watch->bAsking = true;
         BackendRequest::PostJson(L"Battle Royale warmup report", L"/fortnite/api/game/v2/matchmakingservice/warmup",
-            std::format("{{\"phase\":\"{}\",\"accountIds\":[{}],\"secondsLeft\":{:.1f}{}}}", NarrowId(Phase), Ids, std::max(SecondsLeft, 0.0f), Playlist),
+            std::format("{{\"phase\":\"{}\",\"accountIds\":[{}],\"secondsLeft\":{:.1f}{}{}}}", NarrowId(Phase), Ids, std::max(SecondsLeft, 0.0f), Playlist, BotNames),
             FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [Watch, AccountIds](uint32_t Status, const std::string& Body)
         {
             // {warmupSeconds: a number or null, lateJoin, sessionId, open, maxPlayers, parties}. Anything else (no
@@ -1163,6 +1175,9 @@ namespace
             std::wstring BotsModeOff;
             const bool bModeOff = bAnswered && JsonBotsModeOff(Body, BotsModeOff);
             const bool bBots = bAnswered && !bModeOff && JsonBots(Body, BotSettings);
+            // The bot names registered players have (CoreV2 #446; a backend from before it sends no takenBotNames).
+            const bool bTakenBotNames = bAnswered && Body.find("\"takenBotNames\"") != std::string::npos;
+            std::vector<std::wstring> TakenBotNames = bTakenBotNames ? JsonStringArray(Body, "takenBotNames") : std::vector<std::wstring>();
             // The match's no-fill players (Core-Backend's top-level noFill, #242; a backend from before it sends them only
             // in the bots block).
             std::vector<std::wstring> NoFill = bAnswered ? JsonStringArray(Body, "noFill") : std::vector<std::wstring>();
@@ -1171,7 +1186,7 @@ namespace
             const int32_t MegaStormPercent = !StormPercent.empty() && std::isdigit(static_cast<unsigned char>(StormPercent[0]))
                 ? std::clamp(std::atoi(StormPercent.c_str()), 0, 100) : -1;
             GameThread::Enqueue([Watch, AccountIds, Status, bAnswered, WarmupSeconds, bLateJoin, bOpen, MaxPlayers, Parties = std::move(Parties), bBots, BotSettings, NoFill = std::move(NoFill),
-                MegaStormPercent, bModeOff, BotsModeOff = std::move(BotsModeOff)]() mutable
+                MegaStormPercent, bModeOff, BotsModeOff = std::move(BotsModeOff), bTakenBotNames, TakenBotNames = std::move(TakenBotNames)]() mutable
             {
                 Watch->bAsking = false;
                 if (bModeOff && !Watch->bLoggedBotsModeOff)
@@ -1186,6 +1201,10 @@ namespace
                         BotManager->SetSettings(bBots, BotSettings);
                         // The players this report named: their fill choice is in this answer (CoreV2 #330).
                         BotManager->SetFillAnswered(AccountIds);
+                        if (bTakenBotNames)
+                        {
+                            BotManager->SetTakenBotNames(TakenBotNames);
+                        }
                     }
                 }
                 if (Status == 404 && !Watch->bUnsupported)

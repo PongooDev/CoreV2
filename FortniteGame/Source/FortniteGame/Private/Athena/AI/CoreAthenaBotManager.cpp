@@ -50,6 +50,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cwctype>
 #include <format>
 
 namespace
@@ -400,6 +401,13 @@ namespace
         L"G_u_l_l_06", L"K1ttiwake", L"T3rn_Around", L"N0ddy_x",
     };
     constexpr int32_t NumBotNames = static_cast<int32_t>(sizeof(BotNames) / sizeof(BotNames[0]));
+
+    // A display name compared without case, as the backend keeps its accounts' (the names are ASCII).
+    std::wstring LowerName(std::wstring Name)
+    {
+        std::transform(Name.begin(), Name.end(), Name.begin(), [](wchar_t Char) { return Char < 0x80 ? static_cast<wchar_t>(std::towlower(Char)) : Char; });
+        return Name;
+    }
 
     // Bots spawned in the warmup (CoreV2 #256): one at a time, at most one every MinSpawnInterval seconds and MinSpawnFrames
     // frames (a third of a second at the server's 30 Hz, longer when its frames run long). Each spawn is a controller, a
@@ -919,6 +927,49 @@ void FCoreAthenaBotManager::SetSettings(bool bInEnabled, const FCoreAthenaBotSet
     {
         Log::Info(L"Battle Royale bots: Force player AIs and Fill players' teams with bots are off");
     }
+}
+
+void FCoreAthenaBotManager::ShuffleBotNames()
+{
+    if (!NameOrder.empty())
+    {
+        return;
+    }
+    for (int32_t Index = 0; Index < NumBotNames; ++Index)
+    {
+        NameOrder.push_back(Index);
+    }
+    for (int32_t Index = NumBotNames - 1; Index > 0; --Index)
+    {
+        std::swap(NameOrder[static_cast<size_t>(Index)], NameOrder[static_cast<size_t>(FMath::Rand()) % static_cast<size_t>(Index + 1)]);
+    }
+}
+
+std::vector<std::wstring> FCoreAthenaBotManager::CandidateBotNames()
+{
+    // The first names of this match's order: a match has at most 100 bots, and the rest leave room for names the backend
+    // says are taken (the list has thousands, so it isn't sent whole).
+    ShuffleBotNames();
+    std::vector<std::wstring> Names;
+    for (int32_t Slot = 0; Slot < std::min(NumBotNames, CheckedBotNames); ++Slot)
+    {
+        Names.emplace_back(BotNames[NameOrder[static_cast<size_t>(Slot)]]);
+    }
+    return Names;
+}
+
+void FCoreAthenaBotManager::SetTakenBotNames(const std::vector<std::wstring>& Names)
+{
+    TakenBotNames.clear();
+    for (const std::wstring& Name : Names)
+    {
+        TakenBotNames.insert(LowerName(Name));
+    }
+    if (!bHasTakenBotNames)
+    {
+        Log::Info(L"Battle Royale bots: {} of the bot names are registered players' display names, so no bot takes them", TakenBotNames.size());
+    }
+    bHasTakenBotNames = true;
 }
 
 void FCoreAthenaBotManager::SetFillAnswered(const std::vector<std::wstring>& AccountIds)
@@ -2089,19 +2140,40 @@ bool FCoreAthenaBotManager::RegisterBot(float Now, uint8_t Team, uint8_t Squad, 
     auto Bot = std::make_unique<FCoreAthenaBotController>(this, Controller, BotIndex, Team);
     Bot->SetSquad(Squad);
     Bot->SetOnPlayersTeam(bPlayersTeam);
-    if (NameOrder.empty())
+    ShuffleBotNames();
+    // Its name: the next in this match's order that no registered player has as their display name (the backend's
+    // answer, SetTakenBotNames) and no one in the match goes by, compared without case (CoreV2 #446: a bot could share
+    // a player's name). Picked now, so a player registered since the last match is passed over from this one on.
+    std::set<std::wstring> InUse;
+    if (AFortGameStateAthena* NameState = AthenaGameStateOf(GetGameMode()))
     {
-        for (int32_t Index = 0; Index < NumBotNames; ++Index)
+        for (APlayerState* Other : static_cast<const TArray<APlayerState*>&>(NameState->PlayerArray))
         {
-            NameOrder.push_back(Index);
-        }
-        for (int32_t Index = NumBotNames - 1; Index > 0; --Index)
-        {
-            std::swap(NameOrder[static_cast<size_t>(Index)], NameOrder[static_cast<size_t>(FMath::Rand()) % static_cast<size_t>(Index + 1)]);
+            if (Other && reinterpret_cast<UObject*>(Other) != reinterpret_cast<UObject*>(PlayerState))
+            {
+                InUse.insert(LowerName(Other->GetPlayerName().ToStdString()));
+            }
         }
     }
-    const wchar_t* const BaseName = BotNames[NameOrder[static_cast<size_t>(BotIndex % NumBotNames)]];
-    const std::wstring Name = BotIndex < NumBotNames ? std::wstring(BaseName) : std::format(L"{}{}", BaseName, BotIndex / NumBotNames + 1);
+    for (const auto& Other : PlayerBots)
+    {
+        InUse.insert(LowerName(Other->GetBotName()));
+    }
+    std::wstring Name;
+    for (int32_t Tries = 0; Tries < NumBotNames && Name.empty(); ++Tries, ++NextNameSlot)
+    {
+        const wchar_t* const BaseName = BotNames[NameOrder[static_cast<size_t>(NextNameSlot % NumBotNames)]];
+        std::wstring Candidate = NextNameSlot < NumBotNames ? std::wstring(BaseName) : std::format(L"{}{}", BaseName, NextNameSlot / NumBotNames + 1);
+        const std::wstring Lower = LowerName(Candidate);
+        if (!TakenBotNames.contains(Lower) && !InUse.contains(Lower))
+        {
+            Name = std::move(Candidate);
+        }
+    }
+    if (Name.empty())
+    {
+        Name = std::format(L"{}{}", BotNames[NameOrder[static_cast<size_t>(BotIndex % NumBotNames)]], 100 + BotIndex);
+    }
     Bot->AssignDisplayName(Name);
     PlaceBotOnTeam(Bot.get());
     Bot->InitializeSkills(Settings.Level);

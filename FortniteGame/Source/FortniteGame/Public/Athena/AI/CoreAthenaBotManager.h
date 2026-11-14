@@ -126,6 +126,14 @@ public:
     // their teams may take bots (PlayerTeamSlots). CoreV2 #330.
     void SetFillAnswered(const std::vector<std::wstring>& AccountIds);
     const FCoreAthenaBotSettings& GetSettings() const { return Settings; }
+    // Bot names and registered players (CoreV2 #446): the names bots take first this match (the first CheckedBotNames of
+    // its shuffled order of the list), which the warmup report asks the backend about until it answers; and
+    // the backend's answer, the ones a registered account has as its display name (compared without case). A backend
+    // from before it answers nothing, and the bots then only pass over the names of the players in the match.
+    std::vector<std::wstring> CandidateBotNames();
+    static constexpr int32_t CheckedBotNames = 160;
+    bool HasTakenBotNames() const { return bHasTakenBotNames; }
+    void SetTakenBotNames(const std::vector<std::wstring>& Names);
     bool IsEnabled() const { return bEnabled; }
     // Whether the warmup keeps its full length (CoreV2 #256): the bots come in over it, one at a time, so the game's early
     // countdown (15 s once the match's players are all in) would leave them no room. Bots on (the backend's bots block).
@@ -404,6 +412,12 @@ private:
     int32_t NextBotIndex = 0;
     // This match's shuffled order of the name list.
     std::vector<int32_t> NameOrder;
+    void ShuffleBotNames();
+    // The next place in that order (with its round's suffix) a bot's name is looked for at, the registered players' names
+    // the backend gave (lower case), and whether it has.
+    int32_t NextNameSlot = 0;
+    std::set<std::wstring> TakenBotNames;
+    bool bHasTakenBotNames = false;
     std::vector<FVector> WarmupSpots;
     uint8_t LastPhase = 0xFF;
     bool bAircraftStarted = false;

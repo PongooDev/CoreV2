@@ -427,6 +427,45 @@ namespace
         }
         Params.Call(Toy);
     }
+
+    // A rotation a UFunction returns (ReturnValue), or none when the object's class has no such function.
+    bool CallRotation(UObject* Object, const wchar_t* FunctionName, FRotator& Out)
+    {
+        UFunction* Function = Object ? Object->GetClass()->FindFunctionByName(FName(FunctionName, FNAME_Find)) : nullptr;
+        if (!Function)
+        {
+            return false;
+        }
+        Reflection::FParams Params(Function);
+        Params.Call(Object);
+        const FRotator* Value = Params.Get<FRotator>(L"ReturnValue");
+        if (Value)
+        {
+            Out = *Value;
+        }
+        return Value != nullptr;
+    }
+
+    // #444: a toy sometimes left in a direction the player wasn't looking, for a stretch of throws. GAB_ToyThrow_Base's
+    // LaunchBall takes the direction from the pawn's GetBaseAimRotation (AFortPlayerPawn's, 6.22 0x122D0E0), which on the
+    // server is the controller's GetPlayerViewPoint (0x288C710): the camera manager's cached view, which only the client
+    // fills (ServerUpdateCamera, 0x2898280, sent with its moves), or, before the first one, the view target's actor
+    // rotation. None of it is stripped or Core's. This logs the four rotations at each summon (the release is the same
+    // montage's notify 0.158 s later, Toy_TomatoLarge_Throw_M), so a log from a bad stretch shows which one is off.
+    void LogToyAim(AFortPlayerController* Controller)
+    {
+        APawn* Pawn = Controller->GetPawn();
+        FRotator Control, Camera, Aim, Body;
+        const bool bControl = CallRotation(Controller, L"GetControlRotation", Control);
+        const bool bCamera = CallRotation(reinterpret_cast<UObject*>(static_cast<APlayerCameraManager*>(Controller->PlayerCameraManager)), L"GetCameraRotation", Camera);
+        const bool bAim = CallRotation(Pawn, L"GetBaseAimRotation", Aim);
+        const bool bBody = CallRotation(Pawn, L"K2_GetActorRotation", Body);
+        auto Text = [](bool bHas, const FRotator& R) {
+            return bHas ? std::format(L"pitch {:.1f} yaw {:.1f}", R.Pitch, R.Yaw) : std::wstring(L"unknown");
+        };
+        Log::Info(L"Toy: {}'s aim: base aim {} (what the throw uses), camera {}, control {}, pawn {}", Controller->GetName().ToStdString(),
+            Text(bAim, Aim), Text(bCamera, Camera), Text(bControl, Control), Text(bBody, Body));
+    }
 }
 
 AActor* AFortPlayerController::SpawnToyInstance(UClass* ToyClass, const FTransform& SpawnPosition)
@@ -495,6 +534,7 @@ AActor* AFortPlayerController::SpawnToyInstance(UClass* ToyClass, const FTransfo
     CallToyEvent(NewToy, L"InitializeToyInstance", this, NumTimesSummoned);
     Log::Info(L"Toy: {} summons {} (summon {}), owned by {}", GetName().ToStdString(), NewToy->GetName().ToStdString(), NumTimesSummoned,
         SpawnParameters.Owner->GetName().ToStdString());
+    LogToyAim(this);
     static bool bLoggedToyMessaging = false;
     if (!bLoggedToyMessaging)
     {

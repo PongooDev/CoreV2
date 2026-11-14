@@ -36,6 +36,7 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(K2_SpawnPickupInWorld)
     DefineUFunction(PickLootDrops)
     DefineUFunction(GetActorTeam)
+    DefineUFunction(GetTeamAffiliation)
     DefineUFunction(K2_GiveBuildingResource)
 
 public:
@@ -43,6 +44,10 @@ public:
     // EFortTeam_MAX. A trap's blueprint compares its own Team with the local controller's this way (Trap_Floor_Spikes_C's
     // ChangeToFriendlyMaterial). Reflection::InvalidEnumValue where the build has no GetActorTeam.
     static uint8_t GetActorTeam(const AActor* Actor);
+    // The game's attitude of ActorA towards ActorB (EFortTeamAffiliation: Friendly 0, Neutral 1, Hostile 2; 6.20
+    // 0xF651A0 compares each one's GetActorTeam through the game state's team attitudes): Monster is Hostile to the
+    // HumanPvP teams. Reflection::InvalidEnumValue where the build has no GetTeamAffiliation.
+    static uint8_t GetTeamAffiliation(const AActor* ActorA, const AActor* ActorB);
     static void EquipFortAbilitySet(TScriptInterface<IAbilitySystemInterface> AbilitySystemInterfaceActor, UFortAbilitySet* AbilitySet, UObject* OverrideSourceObject, FFortAbilitySetHandle& OutHandle);
     static AFortAIDirector* GetAIDirector(UObject* WorldContextObject);
     static AFortAIGoalManager* GetAIGoalManager(UObject* WorldContextObject);

@@ -31,6 +31,8 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Log.h"
 #include "Natives.h"
+#include "FortKismetLibrary.h"
+#include "Pawns/FortAIPawn.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortCheatManager.h"
 #include "Player/FortPlayerState.h"
@@ -3284,6 +3286,9 @@ void FCoreAthenaBotManager::UpdatePlayerTeamBots(float Now)
             Jumped.try_emplace(SquadKey(static_cast<uint8_t>(State->TeamIndex), bSquads ? static_cast<uint8_t>(State->SquadId) : 0), Pawn);
         }
     }
+    // Each squad's spots taken so far this tick: its player's, then each following bot's (CoreV2 #446: the bots landed
+    // on the player's own roof, so the squad looted one building).
+    std::map<uint16_t, std::vector<FVector>> Taken;
     for (const auto& Bot : PlayerBots)
     {
         const bool bFalling = Bot->GetState() == ECoreAthenaBotState::InAircraft || Bot->GetState() == ECoreAthenaBotState::Skydiving;
@@ -3291,10 +3296,62 @@ void FCoreAthenaBotManager::UpdatePlayerTeamBots(float Now)
         if (Player != Jumped.end())
         {
             AFortPlayerPawnAthena* Pawn = Player->second;
-            Bot->FollowTeammateDrop(LocationOf(reinterpret_cast<const AActor*>(Pawn)), !Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen, Now);
+            const FVector Where = LocationOf(reinterpret_cast<const AActor*>(Pawn));
+            std::vector<FVector>& Spots = Taken.try_emplace(Player->first, std::vector<FVector>{ Where }).first->second;
+            const FVector Spot = SquadDropSpot(Where, Spots, Bot->GetBotIndex());
+            Spots.push_back(Spot);
+            Bot->FollowTeammateDrop(Where, Spot, !Pawn->bIsSkydiving && !Pawn->bIsParachuteOpen, Now);
         }
     }
 #endif
+}
+
+FVector FCoreAthenaBotManager::SquadDropSpot(const FVector& PlayerLocation, const std::vector<FVector>& Taken, int32_t BotIndex) const
+{
+    // Where a bot following its player's drop lands: in the same area as them, but at another building's loot (a chest or
+    // ammo box, else a floor weapon) at least SquadDropSpacing from the player's spot and from each squadmate bot's, the
+    // nearest such to the player within SquadDropAreaRange. None there: a spot SquadDropSpacing out, to the bot's own side.
+    constexpr float SquadDropSpacing = 1500.0f;
+    constexpr float SquadDropAreaRange = 8000.0f;
+    const auto Dist2DSquared = [](const FVector& A, const FVector& B) { return (A.X - B.X) * (A.X - B.X) + (A.Y - B.Y) * (A.Y - B.Y); };
+    const auto Free = [&](const FVector& Spot)
+    {
+        return std::all_of(Taken.begin(), Taken.end(), [&](const FVector& Other) { return Dist2DSquared(Spot, Other) >= SquadDropSpacing * SquadDropSpacing; });
+    };
+    float Best = SquadDropAreaRange * SquadDropAreaRange;
+    const FVector* Found = nullptr;
+    const auto Consider = [&](const FVector& Spot)
+    {
+        const float Distance = Dist2DSquared(Spot, PlayerLocation);
+        if (Distance < Best && Free(Spot))
+        {
+            Best = Distance;
+            Found = &Spot;
+        }
+    };
+    for (const FCoreAthenaBotContainer& Container : Containers)
+    {
+        if (Container.Container.Get())
+        {
+            Consider(Container.Location);
+        }
+    }
+    if (!Found)
+    {
+        for (const FCoreAthenaBotLoot& Entry : Loot)
+        {
+            if (Entry.bWeapon && Entry.Pickup.Get())
+            {
+                Consider(Entry.Location);
+            }
+        }
+    }
+    if (Found)
+    {
+        return *Found;
+    }
+    const float Angle = static_cast<float>(BotIndex % 8) * 0.785398f + static_cast<float>(Taken.size()) * 1.3f;
+    return FVector(PlayerLocation.X + std::cos(Angle) * SquadDropSpacing * 1.5f, PlayerLocation.Y + std::sin(Angle) * SquadDropSpacing * 1.5f, PlayerLocation.Z);
 }
 
 void FCoreAthenaBotManager::ReplicateHealthAndShield()
@@ -3479,6 +3536,28 @@ void FCoreAthenaBotManager::RefreshEnemies(float Now)
             EnemyPawns.emplace_back(Pawn);
         }
     }
+    // The AI pawns (CoreV2 #446: bots took the Cube Monsters' hits and never fought back). AFortAIPawn is every build's
+    // (Save the World's husks), but a Battle Royale match has such pawns only where its playlist spawns them (6.20-6.22's
+    // Deimos playlists: the AI director's Deimos_Fiend and Deimos_Brute, team Monster); elsewhere the list stays empty
+    // and the bots' targeting is unchanged. Looked up twice a second (the world's actors of the class) rather than every
+    // frame.
+    if (Now >= NextMonsterRefresh)
+    {
+        NextMonsterRefresh = Now + 0.5f;
+        MonsterPawns.clear();
+        UClass* AIPawnClass = AFortAIPawn::StaticClass();
+        if (AIPawnClass && UFortKismetLibrary::FindStaticFunction_GetTeamAffiliation())
+        {
+            for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(Athena, AIPawnClass))
+            {
+                AFortPawn* Monster = Actor ? Cast<AFortPawn>(reinterpret_cast<UObject*>(Actor)) : nullptr;
+                if (Monster && !Monster->bIsDying && !Monster->IsPendingKill() && Monster->GetHealth() > 0.0f)
+                {
+                    MonsterPawns.emplace_back(Monster);
+                }
+            }
+        }
+    }
     // DBNO timing (CoreV2 #233): note when each downed pawn (player or bot) was knocked and forget it once it is revived,
     // eliminated or gone, so a bot can give a knocked enemy a few seconds before thirsting it.
     std::erase_if(DBNODowned, [](const FDBNODown& Down) { AFortPawn* Pawn = Down.Pawn.Get(); return !Pawn || !Pawn->bIsDBNO || Pawn->IsPendingKill(); });
@@ -3490,6 +3569,12 @@ void FCoreAthenaBotManager::RefreshEnemies(float Now)
             DBNODowned.push_back({ TWeakObjectPtr<AFortPawn>(Pawn), Now });
         }
     }
+}
+
+bool FCoreAthenaBotManager::IsHostileTo(const AFortPawn* BotPawn, const AFortPawn* Other)
+{
+    // EFortTeamAffiliation::Hostile.
+    return BotPawn && Other && UFortKismetLibrary::GetTeamAffiliation(reinterpret_cast<const AActor*>(BotPawn), reinterpret_cast<const AActor*>(Other)) == 2;
 }
 
 float FCoreAthenaBotManager::DBNODownedElapsed(const AFortPawn* Pawn, float Now) const

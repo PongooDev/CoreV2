@@ -967,6 +967,10 @@ namespace
     // stimulus until its max age, and the bot aims at and closes in on its last known position meanwhile (21.40's
     // GetLastKnownPosition). Core's 🟡: 5 s.
     constexpr float TargetMemoryAge = 5.0f;
+    // A hostile AI pawn (6.20-6.22's Cube Monsters) is fought within this distance, or from as far as the bot sees when it
+    // is the one hitting it (CoreV2 #446, Core's 🟡: 25 m, a fiend's dash). Sorted this much farther than a player or a
+    // bot, so one of those within the same distance stays the target.
+    constexpr float MonsterThreatRange = 2500.0f;
     // A bot heads for a player within this distance (Core's 🟡: 100 m), at most this many bots for one player.
     constexpr float HuntRange = 10000.0f;
     constexpr int32_t MaxHuntersPerPlayer = 3;
@@ -1282,6 +1286,27 @@ namespace
             }
         }
         return nullptr;
+    }
+
+    // Whether Pawn's newest damager is Attacker (an AI pawn has no player state for KillerOf): the damage causer is the
+    // attacker, its controller, or something it owns.
+    bool IsLastDamagedBy(AFortPawn* Pawn, const AFortPawn* Attacker)
+    {
+        TStructArray<FDamagerInfo>& Damagers = Pawn->Damagers;
+        AActor* Causer = Damagers.Num() > 0 ? static_cast<AActor*>(Damagers[Damagers.Num() - 1].DamageCauser) : nullptr;
+        if (AController* CauserController = Causer ? Cast<AController>(reinterpret_cast<UObject*>(Causer)) : nullptr)
+        {
+            return reinterpret_cast<const UObject*>(CauserController->GetPawn()) == reinterpret_cast<const UObject*>(Attacker);
+        }
+        for (int32_t Depth = 0; Causer && Depth < 3; ++Depth)
+        {
+            if (reinterpret_cast<const UObject*>(Causer) == reinterpret_cast<const UObject*>(Attacker))
+            {
+                return true;
+            }
+            Causer = Causer->GetOwner();
+        }
+        return false;
     }
 }
 
@@ -2757,6 +2782,30 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
         float Sorted = Distance + (bDowned ? 2000.0f : 0.0f) + (OtherBot ? 1500.0f : 0.0f);
         Sorted *= Other == Previous ? 0.7f : 1.0f;
         Candidates.push_back({ Other, Sorted, bDowned });
+    }
+    // A Cube Monster (an AI pawn the game's attitude says is hostile to this bot: team Monster against the HumanPvP teams)
+    // that comes close, or that is the one hitting it, is fought like an enemy (CoreV2 #446: the bots let the fiends and
+    // brutes beat them). Only in a match that has such pawns (FCoreAthenaBotManager::GetMonsterPawns); a player or a
+    // bot as close is still taken first (sorted MonsterThreatRange farther).
+    if (State != ECoreAthenaBotState::Warmup)
+    {
+        const bool bRecentlyHurt = Now - LastHurtTime < 5.0f;
+        for (const TWeakObjectPtr<AFortPawn>& Weak : Manager->GetMonsterPawns())
+        {
+            AFortPawn* Monster = Weak.Get();
+            if (!Monster || Monster->bIsDying || Monster->IsPendingKill())
+            {
+                continue;
+            }
+            const float Distance = (LocationOf(Monster) - Location).Size();
+            const bool bThreat = Distance <= MonsterThreatRange || (bRecentlyHurt && Distance <= AIBotSkills.SightRange && IsLastDamagedBy(reinterpret_cast<AFortPawn*>(Pawn), Monster));
+            if (!bThreat || !FCoreAthenaBotManager::IsHostileTo(reinterpret_cast<AFortPawn*>(Pawn), Monster))
+            {
+                continue;
+            }
+            bHasStandingCandidate = true;
+            Candidates.push_back({ Monster, (Distance + MonsterThreatRange) * (Monster == Previous ? 0.7f : 1.0f), false });
+        }
     }
     // Don't thirst a knocked enemy right away: while a standing enemy is also in reach, drop a downed one the bot should
     // still be giving time (so a teammate can revive it), and fight the standing enemy (a reviver among them) instead. A
@@ -8376,19 +8425,19 @@ void FCoreAthenaBotController::SetLandingSpot(const FVector& Spot, float Radius,
     JumpTime = InJumpTime;
 }
 
-void FCoreAthenaBotController::FollowTeammateDrop(const FVector& Where, bool bLanded, float Now)
+void FCoreAthenaBotController::FollowTeammateDrop(const FVector& Where, const FVector& Spot, bool bLanded, float Now)
 {
     // Teammates drop together: on the bus, the bot jumps a moment after its player, aiming for the weapons around where
-    // they are (JumpOffBus); falling, it heads for them, a few metres to its own side so the team doesn't land in a pile.
-    const float Angle = static_cast<float>(BotIndex % 8) * 0.785398f;
-    const FVector Beside(Where.X + std::cos(Angle) * 400.0f, Where.Y + std::sin(Angle) * 400.0f, Where.Z);
+    // they are (JumpOffBus); falling, it heads for its own spot in their area (another building's loot, apart from the
+    // player's and the other bots', SquadDropSpot), so the team lands in the same place but not in one building (CoreV2
+    // #446: the bots landed on the player's roof).
     if (State == ECoreAthenaBotState::InAircraft)
     {
         if (!bFollowingDrop)
         {
             bFollowingDrop = true;
             bHasLandingSpot = true;
-            LandingSpot = Beside;
+            LandingSpot = Spot;
             LandingRadius = 2500.0f;
             JumpTime = std::min(JumpTime, Now + RandomRange(0.3f, 1.5f));
             Log::Info(L"Battle Royale bots: {} jumps after its player teammate", BotName);
@@ -8397,9 +8446,18 @@ void FCoreAthenaBotController::FollowTeammateDrop(const FVector& Where, bool bLa
     }
     if (State == ECoreAthenaBotState::Skydiving)
     {
+        if (!bFollowingDrop || Dist2D(Spot, DropTarget) > 500.0f)
+        {
+            static int32_t Logged = 0;
+            if (bLanded && Logged++ < 20)
+            {
+                Log::Info(L"Battle Royale bots: {} lands near its player teammate, {:.0f} m from them", BotName, Dist2D(Spot, Where) / 100.0f);
+            }
+        }
         bFollowingDrop = true;
-        // Its height is the ground's once the player is down; until then the spot keeps the height it had.
-        DropTarget = FVector(Beside.X, Beside.Y, bLanded ? Where.Z : DropTarget.Z);
+        // A loot spot has its height; the fallback spot beside the player takes the ground's once the player is down,
+        // until then the target keeps the height it had.
+        DropTarget = FVector(Spot.X, Spot.Y, bLanded ? Spot.Z : DropTarget.Z);
     }
 }
 

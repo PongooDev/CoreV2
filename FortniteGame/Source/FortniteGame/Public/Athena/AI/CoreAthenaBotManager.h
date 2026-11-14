@@ -204,6 +204,12 @@ public:
 
     // Server: the enemies a bot can fight, and the loot it can take (shared by every bot each tick).
     const std::vector<TWeakObjectPtr<AFortPawn>>& GetEnemyPawns() const { return EnemyPawns; }
+    // The world's AI pawns that are alive (AFortAIPawn: 6.20-6.22's Cube Monsters, Deimos_Fiend and Deimos_Brute), for a
+    // bot to fight back at one hostile to it (IsHostileTo). Empty where a match has none, and where the build has no
+    // UFortKismetLibrary::GetTeamAffiliation to ask the attitude with.
+    const std::vector<TWeakObjectPtr<AFortPawn>>& GetMonsterPawns() const { return MonsterPawns; }
+    // The game's own attitude (UFortKismetLibrary::GetTeamAffiliation) of a bot's pawn towards Other is Hostile.
+    static bool IsHostileTo(const AFortPawn* BotPawn, const AFortPawn* Other);
     const std::vector<FCoreAthenaBotLoot>& GetLoot() const { return Loot; }
     void ForgetLoot(AFortPickup* Pickup);
     // The island's unsearched chests and ammo boxes, and a container a bot searched (its loot is looked for next tick).
@@ -334,6 +340,9 @@ private:
     int32_t CountAliveBots(bool bPlayersTeams) const;
     // After the bus: the players' teams' bots jump with their players and land by them; and each takes its team's squad.
     void UpdatePlayerTeamBots(float Now);
+    // Where a bot that follows its player's drop lands (CoreV2 #446): in the player's area, at another building's loot,
+    // apart from the spots in Taken (the player's and its squadmate bots').
+    FVector SquadDropSpot(const FVector& PlayerLocation, const std::vector<FVector>& Taken, int32_t BotIndex) const;
     // AFortGameModeZone::ReplicateHealthAndShield for the players' teams' bots: their pawns' health and shield on their
     // player states, for their squadmates' squad bar. The game's own pass (every game mode tick) gives a controller
     // that isn't a player's 0 health, so this runs after it, as the frame's actors replicate.
@@ -440,6 +449,8 @@ private:
     bool bBotMatchStarted = false;
     bool bBotMatchAircraftStarted = false;
     std::vector<TWeakObjectPtr<AFortPawn>> EnemyPawns;
+    std::vector<TWeakObjectPtr<AFortPawn>> MonsterPawns;
+    float NextMonsterRefresh = 0.0f;
     std::vector<FCoreAthenaBotLoot> Loot;
     std::vector<FCoreAthenaBotContainer> Containers;
     std::vector<FCoreAthenaBotLandingSpot> LandingSpots;

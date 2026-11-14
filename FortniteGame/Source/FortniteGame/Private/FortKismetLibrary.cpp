@@ -258,6 +258,18 @@ uint8_t UFortKismetLibrary::GetActorTeam(const AActor* Actor)
     return Params.Take<uint8_t>(L"ReturnValue");
 }
 
+uint8_t UFortKismetLibrary::GetTeamAffiliation(const AActor* ActorA, const AActor* ActorB)
+{
+    UFunction* Function = FindStaticFunction_GetTeamAffiliation();
+    UObject* LibraryDefault = Function ? StaticClass()->GetDefaultObject(false) : nullptr;
+    Reflection::FParams Params(Function);
+    if (!LibraryDefault || !Params.Set(L"ActorA", ActorA) || !Params.Set(L"ActorB", ActorB) || !Params.Call(LibraryDefault))
+    {
+        return Reflection::InvalidEnumValue;
+    }
+    return Params.Take<uint8_t>(L"ReturnValue");
+}
+
 bool UFortKismetLibrary::HasForceRemoval()
 {
     static const bool bHasForceRemoval = StaticFunction_K2_RemoveItemFromPlayer()->FindPropertyByName(FName(L"bForceRemoval", FNAME_Find)) != nullptr;

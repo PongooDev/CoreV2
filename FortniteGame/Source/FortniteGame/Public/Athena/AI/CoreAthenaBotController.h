@@ -352,9 +352,10 @@ public:
     // loot-rich spot near the bus's path) and when it jumps to get there.
     void SetLandingSpot(const FVector& Spot, float Radius, float InJumpTime);
     bool HasLandingSpot() const { return bHasLandingSpot; }
-    // A bot on a player's team: its player teammate left the bus (a pawn at Where): the bot jumps after them and heads for
-    // them while it falls (bLanded: they are on the ground).
-    void FollowTeammateDrop(const FVector& Where, bool bLanded, float Now);
+    // A bot on a player's team: its player teammate left the bus (a pawn at Where): the bot jumps after them and, while it
+    // falls, heads for Spot, its own building near them (FCoreAthenaBotManager::SquadDropSpot; bLanded: they are on the
+    // ground).
+    void FollowTeammateDrop(const FVector& Where, const FVector& Spot, bool bLanded, float Now);
     bool IsFollowingTeammateDrop() const { return bFollowingDrop; }
 
     // ABuildingSMActor::AttemptSpawnResources with the bot's pawn as instigator: the materials its hit gave (a player's

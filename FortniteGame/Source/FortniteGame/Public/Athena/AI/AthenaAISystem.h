@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "Natives.h"
 #include "UObject/Object.h"
 
+class AAthenaAIController;
 class UWorld;
 
 // From 6.x, the AI perception of Battle Royale's AI (6.20's Fortnitemares Cube Monsters): each tick (6.20 CL-4497486
@@ -34,6 +36,15 @@ class UAthenaAISystem : public UObject
 
 public:
     DefineUProperty(UAthenaAIPerceptionManager*, PerceptionManager)
+    // The Athena AI controllers it ticks (UAthenaAISystem::RegisterManagedController, 21.40's name, from the controller's
+    // Possess): a UPROPERTY, so the garbage collector clears the entry of one left in it pending kill.
+    DefineUProperty(TArray<AAthenaAIController*>, AIControllers)
+
+    static bool HasAIControllers() { return StaticClass() && Member_AIControllers.IsAvailable(); }
+    static ptrdiff_t AIControllersOffset() { return Member_AIControllers.GetOffsetChecked(); }
+    const TArray<AAthenaAIController*>& GetManagedControllers() const { return AIControllers; }
+    bool IsManagedController(const AAthenaAIController* Controller) const;
+    int32_t NumManagedControllers() const { return GetManagedControllers().Num(); }
 
     // The world's AI system when it is a UAthenaAISystem, else null (builds before 6.x, Save the World's worlds).
     static UAthenaAISystem* Get(const UWorld* World);

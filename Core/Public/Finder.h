@@ -197,6 +197,9 @@ namespace Finder
     // From 6.x: UAthenaAIPerceptionManager::OnAISettingsUpdated, the call UAthenaAISystem::StartPlay makes with the game
     // mode's AISettings (Natives::UAthenaAIPerceptionManager_OnAISettingsUpdated). False (quietly) without UAthenaAISystem.
     bool ResolveAthenaAIPerceptionLive();
+    // UAthenaAISystem::UnregisterManagedController (Natives), from AAthenaAIController's UnPossess slot: its one direct
+    // call that reads the system's AIControllers array and count (AIControllersOffset and +8).
+    bool ResolveAthenaAIControllerUnregisterLive(ptrdiff_t AIControllersOffset);
     bool ResolveLoginLive();
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();

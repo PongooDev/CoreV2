@@ -9,6 +9,7 @@
 class FOutputDevice;
 class UFortAbilitySystemComponent;
 class UAthenaAIPerceptionManager;
+class AAthenaAIController;
 struct FGameplayAbilityActivationInfo;
 struct FGameplayAbilityRepSharedAnim;
 struct FWeakObjectPtr;
@@ -776,6 +777,11 @@ namespace Natives
     // hearing settings from a UAthenaAISettings, which UAthenaAISystem::StartPlay (0xAABEA0) hands it:
     // Finder::ResolveAthenaAIPerceptionLive.
     inline void (*UAthenaAIPerceptionManager_OnAISettingsUpdated)(UAthenaAIPerceptionManager* This, const UObject* Settings) = nullptr;
+    // From 6.x: UAthenaAISystem::UnregisterManagedController (21.40's name), as AAthenaAIController's UnPossess calls it
+    // (6.21 CL-4526925 0xAA6D80, 6.20 CL-4497486 0xAADC60, 6.22 0xAA8920): the controller only, whose world's AI system
+    // it takes the controller (and its behavior tree and path following components) out of, each where its index isn't
+    // -1. Finder::ResolveAthenaAIControllerUnregisterLive.
+    inline void (*UAthenaAISystem_UnregisterManagedController)(AAthenaAIController* Controller) = nullptr;
     // AFortGameMode::AttemptChangeTeamInfoForController(uint8 Team, AFortPlayerController* Controller)'s slot (3.2 0xA88,
     // 0xB526C0; 21.40's name and signature): PlacePlayerOnTeam's change of a joining player's team, which puts the
     // controller in the team's AFortTeamInfo and its player state on the team. It takes any controller whose player

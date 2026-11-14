@@ -8926,6 +8926,48 @@ bool Finder::ResolveAthenaAIPerceptionLive()
     return true;
 }
 
+bool Finder::ResolveAthenaAIControllerUnregisterLive(ptrdiff_t AIControllersOffset)
+{
+    // AAthenaAIController's UnPossess (6.21 CL-4526925 slot 0xD2, 0xAA6A90; 6.20 CL-4497486 0xAAD970; 6.22 0xAA8630):
+    // with a pawn (6.21/6.22: and its index not -1) it calls UAthenaAISystem::UnregisterManagedController (21.40's name;
+    // 6.21 0xAA6D80, 6.20 0xAADC60, 6.22 0xAA8920) with the controller, then the squad's and AFortAIController's
+    // UnPossess. The unregister is the call whose target reads the system's AIControllers (a TArray: data, then count at
+    // +8); it swaps the controller's entry out with the last one (RemoveAtSwap) and takes its behavior tree and path
+    // following components out of the two lists after it the same way.
+    static bool bTried = false;
+    if (Natives::UAthenaAISystem_UnregisterManagedController || bTried)
+    {
+        return Natives::UAthenaAISystem_UnregisterManagedController != nullptr;
+    }
+    bTried = true;
+    void** ControllerVTable = AIControllersOffset > 0 ? CdoVTable(L"/Script/FortniteGame.AthenaAIController") : nullptr;
+    UFunction* UnPossess = ControllerVTable ? FindObject<UFunction>(nullptr, L"/Script/Engine.Controller:UnPossess") : nullptr;
+    const int32_t UnPossessIndex = UnPossess ? Finder::ImplementationIndex(UnPossess) : -1;
+    const uintptr_t AthenaUnPossess = VTableEntry(ControllerVTable, UnPossessIndex);
+    const bool bReadable = AthenaUnPossess && Finder::FunctionStart(AthenaUnPossess) == AthenaUnPossess && Finder::FunctionEnd(AthenaUnPossess) > AthenaUnPossess;
+    std::vector<uintptr_t> Unregisters;
+    for (const auto& [Call, Target] : bReadable ? Finder::DecodedDirectCalls(AthenaUnPossess) : std::vector<std::pair<uintptr_t, uintptr_t>>{})
+    {
+        const bool bWhole = Finder::FunctionStart(Target) == Target && Finder::FunctionEnd(Target) > Target;
+        if (bWhole && std::find(Unregisters.begin(), Unregisters.end(), Target) == Unregisters.end()
+            && Finder::ReadsMemberAt(Target, static_cast<int32_t>(AIControllersOffset)) && Finder::ReadsMemberAt(Target, static_cast<int32_t>(AIControllersOffset + 8)))
+        {
+            Unregisters.push_back(Target);
+        }
+    }
+    if (Unregisters.size() != 1)
+    {
+        Log::Error(L"Finder: UAthenaAISystem::UnregisterManagedController not found (AAthenaAIController's UnPossess slot {} at 0x{:X} calls {} functions that read AIControllers +0x{:X}), "
+            L"so an Athena AI controller destroyed without a pawn stays in its AI system's list", UnPossessIndex, AthenaUnPossess ? AthenaUnPossess - Finder::ImageBase() : 0,
+            Unregisters.size(), AIControllersOffset);
+        return false;
+    }
+    Natives::UAthenaAISystem_UnregisterManagedController = reinterpret_cast<decltype(Natives::UAthenaAISystem_UnregisterManagedController)>(Unregisters[0]);
+    Log::Info(L"Finder: UAthenaAISystem::UnregisterManagedController is at 0x{:X} (AAthenaAIController's UnPossess, slot 0x{:X} 0x{:X})", Unregisters[0] - Finder::ImageBase(),
+        UnPossessIndex, AthenaUnPossess - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveMissionManagerLive(ptrdiff_t GameStateMissionManagerOffset)
 {
     const uintptr_t GameModeHandleMatchHasStarted = FunctionOf(L"BugLoc");

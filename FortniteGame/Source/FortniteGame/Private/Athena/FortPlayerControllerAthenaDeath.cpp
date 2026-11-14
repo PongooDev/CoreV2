@@ -424,6 +424,12 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
 
     // Out of the match, once the aircraft is under way, if the player was in it.
     AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
+    // A death on 6.30's warmup island, which hurts (bAllowDamageInWarmup, #452): the game brings the player back there,
+    // and the killer the death stored isn't an elimination in the match's results.
+    if (GameState && AthenaState && GameState->GamePhase <= EAthenaGamePhase::GetWarmup() && AFortGameModeAthena::AllowsDamageInWarmup(GameMode))
+    {
+        GameMode->NoteWarmupDeath(AthenaState);
+    }
     if (!GameState || !GameMode || GameState->GamePhase <= EAthenaGamePhase::GetWarmup() || !bMarkedAlive || !AthenaState)
     {
         return;

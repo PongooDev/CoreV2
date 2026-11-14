@@ -552,6 +552,11 @@ namespace
         // Who eliminated the player (their account id), on a build whose server doesn't count kills (1.8): empty while
         // the player is alive or was out by the storm or a fall.
         std::wstring EliminatedBy;
+        // The player's last death on the warmup island (6.30's island hurts, #452), as their player state stored it: no
+        // elimination, they came back there. Its eliminator isn't taken while the stored death is still that one.
+        bool bWarmupDeath = false;
+        AFortPlayerStateAthena* WarmupEliminator = nullptr;
+        FVector WarmupDeathLocation;
         bool bReported = false;
     };
 
@@ -635,6 +640,21 @@ namespace
             static_cast<FName>(Playlist->PlaylistName).ToStdString(), Told);
     }
 
+    // Whether the death the player state holds is still the warmup death NoteWarmupDeath saw (same eliminator, same place).
+    bool IsWarmupDeath(const FMatchPlayer& Player, AFortPlayerStateAthena* AthenaState)
+    {
+        if (!Player.bWarmupDeath || AthenaState->GetEliminator() != Player.WarmupEliminator)
+        {
+            return false;
+        }
+        if (!FDeathInfo::HasDeathLocation())
+        {
+            return true;
+        }
+        const FVector Location = static_cast<FVector>(AthenaState->DeathInfo.DeathLocation);
+        return Location.X == Player.WarmupDeathLocation.X && Location.Y == Player.WarmupDeathLocation.Y && Location.Z == Player.WarmupDeathLocation.Z;
+    }
+
     // A player of the match as their player state has them now (none for a bot, which has no account): their team,
     // time alive, place and, where the server doesn't count kills, who eliminated them.
     FMatchPlayer* UpdateMatchPlayer(FMatchResults& Results, AFortPlayerStateAthena* AthenaState)
@@ -652,7 +672,7 @@ namespace
         Player.Team = AthenaState->TeamIndex;
         Player.SecondsAlive = AthenaState->SecondsAlive;
         Player.Place = std::max<int32_t>(AthenaState->Place, 0);
-        if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty())
+        if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty() && !IsWarmupDeath(Player, AthenaState))
         {
             AFortPlayerStateAthena* Eliminator = AthenaState->GetEliminator();
             const std::wstring EliminatorId = Eliminator && Eliminator != AthenaState ? Eliminator->UniqueId.ToString().ToStdString() : std::wstring();
@@ -3049,6 +3069,28 @@ void AFortGameModeAthena::HandlePawnDied()
     {
         SetGameModeTimer(this, Events.PlayersTimer, NextTickDelay, &CheckMatchPlayers);
     }
+#endif
+}
+
+void AFortGameModeAthena::NoteWarmupDeath(AFortPlayerStateAthena* PlayerState)
+{
+#if WITH_SERVER_CODE
+    // A death on the warmup island, where 6.30 lets players hurt each other (bAllowDamageInWarmup, #452): the player
+    // comes back there and stays in the match, so the killer the death stored isn't their eliminator in the match's
+    // results (EliminatedBy, which the kills are counted from where the server doesn't count them).
+    FMatchResults* Results = PlayerState ? MatchResultsOf(this) : nullptr;
+    const std::wstring AccountId = Results ? PlayerState->UniqueId.ToString().ToStdString() : std::wstring();
+    if (!IsAccountId(AccountId))
+    {
+        return;
+    }
+    FMatchPlayer& Player = Results->Players[AccountId];
+    Player.bWarmupDeath = true;
+    Player.WarmupEliminator = PlayerState->GetEliminator();
+    Player.WarmupDeathLocation = FDeathInfo::HasDeathLocation() ? static_cast<FVector>(PlayerState->DeathInfo.DeathLocation) : FVector(0.0f, 0.0f, 0.0f);
+    AFortPlayerStateAthena* Eliminator = Player.WarmupEliminator;
+    Log::Info(L"Battle Royale: {} died on the warmup island (by {}): no elimination, they come back there", PlayerState->GetPlayerName().ToStdString(),
+        Eliminator && Eliminator != PlayerState ? Eliminator->GetPlayerName().ToStdString() : std::wstring(L"nobody"));
 #endif
 }
 

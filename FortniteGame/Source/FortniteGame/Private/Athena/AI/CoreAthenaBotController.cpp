@@ -1553,9 +1553,13 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     // The warmup island hurts nobody: AFortGameModeAthena's restart of a player in the warmup turns the new pawn's
     // bCanBeDamaged off (3.1 0x9B3FD7, GamePhase == Warmup), so hits show their numbers and take nothing. The pawn the
     // bot leaves the bus with is a new one, which can be damaged.
+    // 6.30's restart (FinishRestartPlayer, 0xC9F370) does it only while the game mode's bAllowDamageInWarmup is off, and
+    // 6.30's DefaultGame.ini turns it on: players hurt each other on the island and come back there (#452), so a bot's
+    // pawn is hurt as theirs is, and TickWarmup brings the bot back (RespawnInWarmup).
+    const bool bWarmupDamage = AFortGameModeAthena::AllowsDamageInWarmup(GameMode);
     if (!bSkydive && State == ECoreAthenaBotState::Warmup)
     {
-        Pawn->bCanBeDamaged = false;
+        Pawn->bCanBeDamaged = bWarmupDamage;
         // A player arriving on the island has no spawn animation here: the bot stands a moment instead, as if it were
         // loading in (TickWarmup).
         bWarmupArrivalHold = true;
@@ -1786,14 +1790,16 @@ void FCoreAthenaBotController::TickWarmup(float Now, float DeltaSeconds)
 {
 #if WITH_SERVER_CODE
     // Nobody can be hurt on the warmup island (the pawn spawns with bCanBeDamaged off, SpawnPawnAt), so a bot never
-    // dies there; a pawn that is gone all the same (out of the world) is put back at a warmup spot.
+    // dies there; a pawn that is gone all the same (out of the world) is put back at a warmup spot. From 6.30 the island
+    // hurts where the game mode's bAllowDamageInWarmup says so (#452): a bot killed there comes back the same way, as a
+    // player does, and is no elimination.
     AFortPlayerPawnAthena* Pawn = GetPawn();
-    if (!Pawn || Pawn->IsPendingKill() || Pawn->bIsDying || WarmupRespawnTime >= 0.0f)
+    if (!Pawn || Pawn->IsPendingKill() || Pawn->bIsDying || WarmupRespawnTime >= 0.0f || (Pawn->IsDead() && !Pawn->bIsDBNO))
     {
         RespawnInWarmup(Now);
         return;
     }
-    if (Pawn->bCanBeDamaged)
+    if (Pawn->bCanBeDamaged && !AFortGameModeAthena::AllowsDamageInWarmup(Manager->GetGameMode()))
     {
         Pawn->bCanBeDamaged = false;
     }

@@ -67,6 +67,11 @@ public:
     static bool HasSquadPlay() { return Member_bSquadPlay.IsAvailable(); }
     // Whether a dead player goes on to spectate (SpectateOnDeath).
     DefineUProperty(bool, bAllowSpectateAfterDeath)
+    // 6.30 (CL-4573096): whether the warmup island hurts. A config bit (DefaultGame.ini sets it true); the game's
+    // FinishRestartPlayer (6.30 0xC9F370) turns a warmup pawn's bCanBeDamaged off only while it is false, where earlier
+    // builds always did (3.1 0x9B3FD7). A warmup death is no elimination: the player comes back on the island.
+    DefineBitfieldUProperty(bAllowDamageInWarmup)
+    static bool AllowsDamageInWarmup(const AFortGameModeAthena* GameMode) { return GameMode && Member_bAllowDamageInWarmup.IsAvailable() && GameMode->bAllowDamageInWarmup; }
     // Who PreLogin lets in ("Match is full" at it, 1.9 0x4319F0): the assigned players (OnGivenMatchAssignment,
     // 0x42D2B0).
     DefineUProperty(int32_t, MaxPlayerCount)
@@ -189,6 +194,8 @@ public:
     // Every player still in the match outlived the one who is out (a player, or a player bot, CoreV2 #233): an
     // EFortQuestObjectiveStatEvent::AthenaOutlive event for each, as 1.8's game mode sends one per death (0x599DA0).
     void SendOutliveStatEvents(AFortPawn* DeadPawn);
+    // Core's: a death on the warmup island where it hurts (bAllowDamageInWarmup), kept out of the match's results (#452).
+    void NoteWarmupDeath(AFortPlayerStateAthena* PlayerState);
 
     // Removes the placed chests and ammo boxes this match doesn't keep, from the map info's spawn percents (#205): once the
     // bus is under way on builds whose playlists bring their own game data (from 1.11, #238), at once before them.

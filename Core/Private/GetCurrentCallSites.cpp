@@ -131,13 +131,83 @@ namespace
             || Finder::BodyIs(Function, { 0x48, 0x33, 0xC0, 0xC3 });
     }
 
-    bool IsGetCurrentOfWorld(uintptr_t Site, int32_t GetWorldIndex)
+    // call [r+GetWorld*8] (6 bytes, any base but rsp) at Address.
+    bool IsGetWorldCall(const uint8_t* Bytes, int32_t GetWorldIndex)
     {
+        return Bytes[0] == 0xFF && (Bytes[1] & 0xF8) == 0x90 && (Bytes[1] & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Bytes + 2) == GetWorldIndex * 8;
+    }
+
+    bool IsGetCurrentOfWorld(uintptr_t Site, uintptr_t Begin, int32_t GetWorldIndex)
+    {
+        if (GetWorldIndex < 0)
+        {
+            return false;
+        }
+        // GetCurrent(GetWorld()): call [r+GetWorld]; mov rcx, rax; call GetCurrent.
         const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Site - 9);
-        return GetWorldIndex >= 0
-            && Bytes[0] == 0xFF && (Bytes[1] & 0xF8) == 0x90 && (Bytes[1] & 0x07) != 0x04
-            && *reinterpret_cast<const int32_t*>(Bytes + 2) == GetWorldIndex * 8
-            && Bytes[6] == 0x48 && Bytes[7] == 0x8B && Bytes[8] == 0xC8;
+        if (IsGetWorldCall(Bytes, GetWorldIndex) && Bytes[6] == 0x48 && Bytes[7] == 0x8B && Bytes[8] == 0xC8)
+        {
+            return true;
+        }
+        // The world kept in a stack slot from the function's start: 6.22 (CL-4543176) ABuildingActor's damage handling
+        // (0xD298E0) does "call [rax+140h]; mov [rbp-60h], rax" first, and ends with "mov rcx, [rbp-60h]; call
+        // GetCurrent" (0xD2A259), where 6.21 (0xD278F0) called GetWorld again. The slot is read just before the call
+        // (mov rcx, [rbp|rsp+disp8|disp32]), and the only store into it before the site is GetWorld's result.
+        int32_t SlotBase = -1;
+        int32_t SlotDisplacement = 0;
+        const uint8_t* RbpDisp8 = reinterpret_cast<const uint8_t*>(Site - 4);   // 48 8B 4D disp8
+        const uint8_t* RspDisp8 = reinterpret_cast<const uint8_t*>(Site - 5);   // 48 8B 4C 24 disp8
+        const uint8_t* RbpDisp32 = reinterpret_cast<const uint8_t*>(Site - 7);  // 48 8B 8D disp32
+        const uint8_t* RspDisp32 = reinterpret_cast<const uint8_t*>(Site - 8);  // 48 8B 8C 24 disp32
+        if (RbpDisp8[0] == 0x48 && RbpDisp8[1] == 0x8B && RbpDisp8[2] == 0x4D)
+        {
+            SlotBase = Rbp;
+            SlotDisplacement = static_cast<int8_t>(RbpDisp8[3]);
+        }
+        else if (RspDisp8[0] == 0x48 && RspDisp8[1] == 0x8B && RspDisp8[2] == 0x4C && RspDisp8[3] == 0x24)
+        {
+            SlotBase = Rsp;
+            SlotDisplacement = static_cast<int8_t>(RspDisp8[4]);
+        }
+        else if (RbpDisp32[0] == 0x48 && RbpDisp32[1] == 0x8B && RbpDisp32[2] == 0x8D)
+        {
+            SlotBase = Rbp;
+            SlotDisplacement = *reinterpret_cast<const int32_t*>(RbpDisp32 + 3);
+        }
+        else if (RspDisp32[0] == 0x48 && RspDisp32[1] == 0x8B && RspDisp32[2] == 0x8C && RspDisp32[3] == 0x24)
+        {
+            SlotBase = Rsp;
+            SlotDisplacement = *reinterpret_cast<const int32_t*>(RspDisp32 + 4);
+        }
+        if (SlotBase < 0 || !Begin || Begin >= Site)
+        {
+            return false;
+        }
+        int32_t WorldStores = 0;
+        for (uintptr_t Address = Begin; Address < Site;)
+        {
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                return false;
+            }
+            if (Instruction.opcode == 0x89 && (Instruction.flags & F_MODRM))
+            {
+                const FOperand Rm = RmOperand(Instruction);
+                if (Rm.bMemory && Rm.Base == SlotBase && Rm.Displacement == SlotDisplacement)
+                {
+                    const uint8_t* Before = reinterpret_cast<const uint8_t*>(Address - 6);
+                    if (RegOperand(Instruction) != 0 || Instruction.rex_w == 0 || !IsGetWorldCall(Before, GetWorldIndex))
+                    {
+                        return false;
+                    }
+                    ++WorldStores;
+                }
+            }
+            Address += Length;
+        }
+        return WorldStores == 1;
     }
 
     // 5.0+ (UE 4.21) inlines AFortAIGoalManager::FindAssignment into the lookup of an encounter's primary assignment (5.30
@@ -534,7 +604,7 @@ std::vector<uint8_t*> Finder::GoalManagerGetCurrentCalls(void** GoalManagerVTabl
             Result.push_back(reinterpret_cast<uint8_t*>(Site));
             Log::Info(L"Finder: AFortAIGoalManager::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);
         }
-        else if (Votes.Director && !Votes.GoalManager && !Votes.Other && IsGetCurrentOfWorld(Site, GetWorldIndex))
+        else if (Votes.Director && !Votes.GoalManager && !Votes.Other && IsGetCurrentOfWorld(Site, Begin, GetWorldIndex))
         {
             OutDirectorCalls.push_back(reinterpret_cast<uint8_t*>(Site));
             Log::Info(L"Finder: AFortAIDirector::GetCurrent call site +0x{:X} in +0x{:X}", Site - ImageBase, Begin - ImageBase);

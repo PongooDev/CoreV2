@@ -468,7 +468,7 @@ AFortPickup* AFortPickup::CreatePickup(UWorld* World, const FFortItemEntry& Item
     return Natives::AFortPickup_CreatePickup(World, ItemEntry, SpawnLocation, SpawnRotation, OptionalOwner, OverrideClass, 0, 0, 0);
 }
 
-void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss)
+void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss, uint8_t InPickupSourceTypeFlags)
 {
     // 1.8 added bToss (execTossPickup, 0xB47C70, reads four parameters and passes the last to 0x698240). Without it the
     // toss (0x67D9E0, AFortPickup slot 0x678) starts the pickup at FinalLocation instead of where it is, so its launch
@@ -483,7 +483,11 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
     // launch speed, about 500 to 650) is drawn 50 to 65 units above where it is. The server's bounces (Bounciness 0.6
     // under Battle Royale's gravity of 2800: 5 to 20 units, measured on 5.40) are smaller than that, so the effect lands
     // without turning back up. That is the game's own toss and the client's own smoothing, not something Core changes.
+    //
+    // 6.22 adds InPickupSourceTypeFlags (execTossPickup, CL-4543176 0x15C92E0, reads five parameters; the toss 0x106B630
+    // ors the last into PickupSourceTypeFlags +0x4A0 after its slot 0xD6 toss).
     static const bool bHasToss = StaticFunction_TossPickup()->FindPropertyByName(FName(L"bToss", FNAME_Find)) != nullptr;
+    static const bool bHasSourceTypeFlags = StaticFunction_TossPickup()->FindPropertyByName(FName(L"InPickupSourceTypeFlags", FNAME_Find)) != nullptr;
     Reflection::FParams Params(StaticFunction_TossPickup());
     Params.Set(L"FinalLocation", FinalLocation);
     Params.Set(L"ItemOwner", ItemOwner);
@@ -491,6 +495,10 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
     if (bHasToss)
     {
         Params.Set(L"bToss", bToss);
+    }
+    if (bHasSourceTypeFlags)
+    {
+        Params.Set(L"InPickupSourceTypeFlags", InPickupSourceTypeFlags);
     }
     Params.Call(this);
 #if WITH_SERVER_CODE

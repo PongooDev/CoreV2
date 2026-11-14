@@ -116,7 +116,8 @@ public:
     static void CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory);
     static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
     // bToss false (1.8 on) puts the pickup at FinalLocation instead of tossing it there; before 1.8 a toss always flies.
-    void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss = true);
+    // InPickupSourceTypeFlags (6.22 on: EFortPickupSourceTypeFlag bits, or'd into PickupSourceTypeFlags) is 0, Other.
+    void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss = true, uint8_t InPickupSourceTypeFlags = 0);
     // Tosses a container's loot from where it is at LaunchVelocity (the container's toss), headed for FinalLocation, marked
     // as tossed from it.
     void TossFromContainer(const FVector& FinalLocation, const FVector& LaunchVelocity);

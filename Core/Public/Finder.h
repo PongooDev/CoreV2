@@ -362,8 +362,8 @@ namespace Finder
     bool ResolveReplicationDriverLive();
     // The replication graph's per-connection actor infos (Natives::UNetReplicationGraphConnection_ActorMapOffset and
     // FPerConnectionActorInfoMap_RemoveByKey), for UReplicationGraph::RemoveActorInfoFromConnections (CoreV2 #411).
-    // GraphVTable is the live graph's. Only where every piece is where 6.00, 6.01, 6.02, 6.10, 6.20 and 6.21 have it:
-    // CL-4395664 to CL-4526925, UNetReplicationGraphConnection::NotifyActorChannelCleanedUp's ChannelMap lookup, its
+    // GraphVTable is the live graph's. Only where every piece is where 6.00, 6.01, 6.02, 6.10, 6.20, 6.21 and 6.22 have
+    // it: CL-4395664 to CL-4543176, UNetReplicationGraphConnection::NotifyActorChannelCleanedUp's ChannelMap lookup, its
     // remove and the stores that clear the info it found (6.00 to 6.10's 0x20 byte info or 6.20's 0x30 byte one), and
     // UReplicationGraph::NotifyActorTearOff's lookup in the map 0x50 before that one and its tear-off flag store at
     // that info's flags. Anything else leaves the build as it is and says so once.

@@ -57,6 +57,20 @@ UFortMissionGenerator* AFortGameStateZone::GetMissionGenerator() const
 // each deposit and which refuses a tier above the zone's difficulty row's NumDifficultyIncreases. 3.0's own reader
 // left is the mission status analytics (0xCA1140); its EndPrimaryMission sender is stripped (the FName is only made,
 // 0xFFF10), so Core's sends it.
+bool AFortGameStateZone::IsRespawningAllowed(AFortPlayerState* PlayerState) const
+{
+    UFunction* Function = FindStaticFunction_IsRespawningAllowed();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function);
+    Params.Set(L"PlayerState", PlayerState);
+    Params.Call(const_cast<AFortGameStateZone*>(this));
+    const bool* Result = Params.Get<bool>(L"ReturnValue");
+    return Result && *Result;
+}
+
 int32_t AFortGameStateZone::GetDifficultyIncreaseRewardTier() const
 {
     return Member_DifficultyIncreaseRewardTier.IsAvailable() ? DifficultyIncreaseRewardTier : 0;

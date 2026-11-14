@@ -10,6 +10,7 @@
 #include "UObject/AssetPtr.h"
 
 class AFortMissionManager;
+class AFortPlayerState;
 class AFortVisibilityManager;
 class IAbilitySystemInterface;
 class AFortWorldManager;
@@ -191,6 +192,13 @@ public:
     DefineUFunction(OnRep_GameplayVotes)
     DefineUFunction(NotifyEndFailedGameplayVoteLockout)
     DefineUFunction(ServerSubmitGameplayVote)
+    // 6.30+ (CL-4573096): whether PlayerState's player comes back after dying, a reflected virtual the game mode's
+    // IsRespawningAllowed only passes on to (0xCA9560). Battle Royale's (AFortGameStateAthena 0xCA95E0) asks the game
+    // state's mutators, then the playlist's RespawnType and, for InfiniteRespawnExceptStorm, the storm. Builds before
+    // keep the answer in the game mode and the game state's bAllowRespawning.
+    DefineUFunction(IsRespawningAllowed)
+    static bool HasIsRespawningAllowed() { return FindStaticFunction_IsRespawningAllowed() != nullptr; }
+    bool IsRespawningAllowed(AFortPlayerState* PlayerState) const;
 
     UFortMissionGenerator* GetMissionGenerator() const;
     // The difficulty increase tier the zone's BluGlo Difficulty Pylon reached, which EndPrimaryMission reports; 0 when it

@@ -2466,6 +2466,16 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
     {
         return false;
     }
+    // 6.30 (CL-4573096) moves the answer to the game state: the game mode's IsRespawningAllowed (slot 0x137, 0xCA9560)
+    // only returns GameState->IsRespawningAllowed(PlayerState), now reflected (AFortGameStateAthena's 0xCA95E0 asks the
+    // game state's GameplayMutators, then the playlist's RespawnType and the storm), and bAllowRespawning is gone, so
+    // the slot above isn't looked for. The game state's own answer is asked through its UFunction.
+    AFortGameStateAthena* OwnGameState = Index < 0 && AFortGameStateZone::HasIsRespawningAllowed() ? AthenaGameStateOf(this) : nullptr;
+    if (OwnGameState && !OwnGameState->IsRespawningAllowed(PlayerState))
+    {
+        return false;
+    }
+    const bool bOwnAnswer = Index >= 0 || OwnGameState;
     // 4.2 0xA19780: bAllowRespawning (an unreflected flag OnPlaylistDataLoaded, 0xA1BE40, sets when the loaded playlist's
     // RespawnType isn't None), then true unless the playlist is InfiniteRespawnExceptStorm and the player died in the
     // storm. The playlist's RespawnType stands in for the flag: Core can't read it before 6.01.
@@ -2474,7 +2484,7 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
     if (!Playlist || Playlist->RespawnType == EAthenaRespawnType::GetNone())
     {
         // From 6.01 the build's own yes stands: a mutator's (Playlist_Disco has no RespawnType).
-        return Index >= 0;
+        return bOwnAnswer;
     }
     // The storm rule: Core's reading of the death cause, from 6.01 on top of the build's own (the end of 6.02 0xBD08A0),
     // which is the death's location against the safe zone as it is now (0xBD04A0: the game mode's SafeZoneIndicator, its

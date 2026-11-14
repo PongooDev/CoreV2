@@ -303,19 +303,19 @@ UFortWorldItemDefinition* UFortKismetLibrary::K2_GetResourceItemDefinition(uint8
     }
     if (ResourceType == EFortResourceType::GetWood())
     {
-        return GameData->WoodItemDefinition;
+        return GameData->GetWoodItemDefinition();
     }
     if (ResourceType == EFortResourceType::GetStone())
     {
-        return GameData->StoneItemDefinition;
+        return GameData->GetStoneItemDefinition();
     }
     if (ResourceType == EFortResourceType::GetMetal())
     {
-        return GameData->MetalItemDefinition;
+        return GameData->GetMetalItemDefinition();
     }
     if (ResourceType == EFortResourceType::GetPermanite())
     {
-        return GameData->PermaniteItemDefinition;
+        return GameData->GetPermaniteItemDefinition();
     }
     return nullptr;
 }

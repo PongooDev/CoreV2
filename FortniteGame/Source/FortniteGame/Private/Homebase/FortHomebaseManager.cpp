@@ -38,6 +38,16 @@ void UFortHomebaseManager::GetOwnedNodeAbilityKits(const UFortMcpProfileCampaign
     }
 
     // 5.0 inlines this into GetSelectableGadgetItems; the same loop as 4.5's (0xCCA4D0).
+    if (!HasHomebaseNodeDataTable())
+    {
+        static bool bLogged = false;
+        if (!bLogged)
+        {
+            bLogged = true;
+            UE_LOG(LogHomebase, Warning, TEXT("This build has no skill tree (no HomebaseNodeDataTable): no gadgets come from owned nodes"));
+        }
+        return;
+    }
     for (const FName& NodeId : GetOwnedNodes(AccountProfile))
     {
         if (NodeId.IsNone())

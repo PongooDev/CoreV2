@@ -105,7 +105,7 @@ public:
     DefineBitfieldUProperty(bAllowMultipleStacks)
     DefineBitfieldUProperty(bInventorySizeLimited)
     DefineUProperty(FGameplayTagContainer, GameplayTags)
-    DefineUProperty(bool, bCalculateRarityFromQualityAndTier)
+    DefineBitfieldUProperty(bCalculateRarityFromQualityAndTier)
     DefineUProperty(uint8_t, Quality)
     DefineUProperty(uint8_t, Tier)
     DefineUProperty(uint8_t, Rarity)
@@ -180,7 +180,7 @@ class UFortGadgetItemDefinition : public UFortWorldItemDefinition
 
 public:
     // Taking the gadget drops everything else its taker carries (4.1's Infinity Gauntlet; #297).
-    DefineUProperty(bool, bDropAllOnEquip)
+    DefineBitfieldUProperty(bDropAllOnEquip)
     static bool HasDropAllOnEquip() { return Member_bDropAllOnEquip.IsAvailable(); }
     // From 6.00 (ApplyGadgetData pushes them on the taker's pawn): the gadget's priority over other overrides, the anim
     // Blueprint its taker's pawn plays while it is held (6.21's AGID_Butterfly: Fortnite_Butterfly_Ghost_AnimBlueprint)

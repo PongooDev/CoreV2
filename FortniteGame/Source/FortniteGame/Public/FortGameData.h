@@ -86,6 +86,30 @@ public:
     // Save the World's BluGlo (BluGloWorldItemData, a never-persist world item).
     DefineUProperty(UFortWorldItemDefinition*, BluGloItemDefinition)
 
+private:
+    // 6.30 (CL-4573096) keeps these as soft pointers (TSoftObjectPtr) where earlier builds hold the object, like
+    // SharedMissionListsClass on 4.2. The getters below read whichever the build has.
+    static inline Reflection::FMemberInfo Member_LootQuotaDataPath{ &StaticReflectionOwner, TEXT("LootQuotaData"), sizeof(TAssetPtr<UDataTable>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UDataTable>> };
+    static inline Reflection::FMemberInfo Member_StoneItemDefinitionPath{ &StaticReflectionOwner, TEXT("StoneItemDefinition"), sizeof(TAssetPtr<UFortWorldItemDefinition>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UFortWorldItemDefinition>> };
+    static inline Reflection::FMemberInfo Member_WoodItemDefinitionPath{ &StaticReflectionOwner, TEXT("WoodItemDefinition"), sizeof(TAssetPtr<UFortWorldItemDefinition>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UFortWorldItemDefinition>> };
+    static inline Reflection::FMemberInfo Member_MetalItemDefinitionPath{ &StaticReflectionOwner, TEXT("MetalItemDefinition"), sizeof(TAssetPtr<UFortWorldItemDefinition>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UFortWorldItemDefinition>> };
+    static inline Reflection::FMemberInfo Member_PermaniteItemDefinitionPath{ &StaticReflectionOwner, TEXT("PermaniteItemDefinition"), sizeof(TAssetPtr<UFortWorldItemDefinition>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UFortWorldItemDefinition>> };
+    static inline Reflection::FMemberInfo Member_BluGloItemDefinitionPath{ &StaticReflectionOwner, TEXT("BluGloItemDefinition"), sizeof(TAssetPtr<UFortWorldItemDefinition>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UFortWorldItemDefinition>> };
+
+    UFortWorldItemDefinition* GetItemDefinitionMember(Reflection::FMemberInfo& SoftMember, Reflection::FMemberInfo& ObjectMember) const;
+
+public:
+    // The game data's resource and BluGlo items, loading them from their paths on 6.30+.
+    UFortWorldItemDefinition* GetStoneItemDefinition() const { return GetItemDefinitionMember(Member_StoneItemDefinitionPath, Member_StoneItemDefinition); }
+    UFortWorldItemDefinition* GetWoodItemDefinition() const { return GetItemDefinitionMember(Member_WoodItemDefinitionPath, Member_WoodItemDefinition); }
+    UFortWorldItemDefinition* GetMetalItemDefinition() const { return GetItemDefinitionMember(Member_MetalItemDefinitionPath, Member_MetalItemDefinition); }
+    UFortWorldItemDefinition* GetPermaniteItemDefinition() const { return GetItemDefinitionMember(Member_PermaniteItemDefinitionPath, Member_PermaniteItemDefinition); }
+    UFortWorldItemDefinition* GetBluGloItemDefinition() const { return GetItemDefinitionMember(Member_BluGloItemDefinitionPath, Member_BluGloItemDefinition); }
+    // LootQuotaData as the game data holds it (loaded from its path on 6.30+), without GetLootQuotaData's fallbacks.
+    UDataTable* GetLootQuotaDataMember() const;
+    // Points LootQuotaData at Table (on 6.30+ at its path; the table must stay loaded, as Core's rooted ones do).
+    void SetLootQuotaDataMember(UDataTable* Table);
+
     std::vector<UDataTable*> GetLootTierDataTables();
     std::vector<UDataTable*> GetLootPackageDataTables();
     bool HasLootTierDataTables();

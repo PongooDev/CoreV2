@@ -211,11 +211,11 @@ namespace
     public:
         DefineUStructArrayProperty(FFortMcpQuestObjectiveInfo, Objectives)
         // 3.0: a Battle Royale challenge done "in a single match" keeps no progress from a match that didn't complete it.
-        DefineUProperty(bool, bAthenaMustCompleteInSingleMatch)
+        DefineBitfieldUProperty(bAthenaMustCompleteInSingleMatch)
         // 3.0: how many of the objectives complete the quest (Land at different named locations: 10 of 18), else all.
         DefineUProperty(int32_t, ObjectiveCompletionCount)
         // 5.40: a Battle Royale challenge done "in different matches" moves its objectives once a match.
-        DefineUProperty(bool, bAthenaUpdateObjectiveOncePerMatch)
+        DefineBitfieldUProperty(bAthenaUpdateObjectiveOncePerMatch)
         static bool HasSingleMatch() { return Member_bAthenaMustCompleteInSingleMatch.IsAvailable(); }
         static bool HasObjectiveCompletionCount() { return Member_ObjectiveCompletionCount.IsAvailable(); }
         static bool HasUpdateObjectiveOncePerMatch() { return Member_bAthenaUpdateObjectiveOncePerMatch.IsAvailable(); }

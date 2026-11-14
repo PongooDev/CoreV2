@@ -3060,9 +3060,9 @@ int32_t FCoreAthenaBotController::MaterialKindOf(const UFortItemDefinition* Defi
     {
         if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
         {
-            Resources[0] = GameData->WoodItemDefinition;
-            Resources[1] = GameData->StoneItemDefinition;
-            Resources[2] = GameData->MetalItemDefinition;
+            Resources[0] = GameData->GetWoodItemDefinition();
+            Resources[1] = GameData->GetStoneItemDefinition();
+            Resources[2] = GameData->GetMetalItemDefinition();
         }
     }
     if (!Definition)
@@ -5973,7 +5973,7 @@ void FCoreAthenaBotController::OnResourcesHarvested(ABuildingSMActor* Building, 
     {
         return;
     }
-    const int32_t Kind = ResourceItem == GameData->WoodItemDefinition ? 0 : ResourceItem == GameData->StoneItemDefinition ? 1 : ResourceItem == GameData->MetalItemDefinition ? 2 : -1;
+    const int32_t Kind = ResourceItem == GameData->GetWoodItemDefinition() ? 0 : ResourceItem == GameData->GetStoneItemDefinition() ? 1 : ResourceItem == GameData->GetMetalItemDefinition() ? 2 : -1;
     if (Kind < 0)
     {
         return;
@@ -8125,9 +8125,9 @@ void FCoreAthenaBotController::DropInventory()
     }
     if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
     {
-        AddDrop(GameData->WoodItemDefinition, Materials[0], 0);
-        AddDrop(GameData->StoneItemDefinition, Materials[1], 0);
-        AddDrop(GameData->MetalItemDefinition, Materials[2], 0);
+        AddDrop(GameData->GetWoodItemDefinition(), Materials[0], 0);
+        AddDrop(GameData->GetStoneItemDefinition(), Materials[1], 0);
+        AddDrop(GameData->GetMetalItemDefinition(), Materials[2], 0);
     }
     if (AFortPlayerPawnAthena* Pawn = GetPawn(); Pawn && !Drops.empty())
     {

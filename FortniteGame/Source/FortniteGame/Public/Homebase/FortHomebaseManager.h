@@ -25,6 +25,9 @@ class UFortHomebaseManager : public UObject
 
 public:
     DefineUProperty(UDataTable*, HomebaseNodeDataTable)
+    // 6.30 (CL-4573096) replaced the skill tree with the Upgrades page: the manager has no node table, and FHomebaseNode
+    // is gone.
+    static bool HasHomebaseNodeDataTable() { return Member_HomebaseNodeDataTable.IsAvailable(); }
 
     TArray<FName> GetOwnedNodes(const UFortMcpProfileCampaign* McpProfile) const;
     void GetSelectableGadgetItems(const UFortMcpProfileCampaign* AccountProfile, IAbilitySystemInterface* AbilitySystem, TStructArray<FFortItemEntry>& OutItems) const;

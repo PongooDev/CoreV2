@@ -1068,9 +1068,9 @@ void UFortCheatManager::GiveResources(int32_t Amount)
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
     if (GameData)
     {
-        GiveResource(GameData->WoodItemDefinition, Amount);
-        GiveResource(GameData->StoneItemDefinition, Amount);
-        GiveResource(GameData->MetalItemDefinition, Amount);
+        GiveResource(GameData->GetWoodItemDefinition(), Amount);
+        GiveResource(GameData->GetStoneItemDefinition(), Amount);
+        GiveResource(GameData->GetMetalItemDefinition(), Amount);
     }
 }
 
@@ -1382,7 +1382,7 @@ void UFortCheatManager::GiveBluGlo(int32_t Amount)
 {
     // Empty in shipping builds. The game data names the BluGlo item (BluGloWorldItemData) on every build.
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    UFortWorldItemDefinition* BluGlo = GameData ? static_cast<UFortWorldItemDefinition*>(GameData->BluGloItemDefinition) : nullptr;
+    UFortWorldItemDefinition* BluGlo = GameData ? static_cast<UFortWorldItemDefinition*>(GameData->GetBluGloItemDefinition()) : nullptr;
     if (!BluGlo)
     {
         Reply(TEXT("This build's game data has no BluGlo item"));
@@ -6289,7 +6289,7 @@ DEFINE_FUNCTION(UFortCheatManager::execGiveWood)
     P_FINISH;
     P_NATIVE_BEGIN;
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    static_cast<UFortCheatManager*>(Context)->GiveResource(GameData ? static_cast<UFortWorldItemDefinition*>(GameData->WoodItemDefinition) : nullptr, Z_Param_Amount);
+    static_cast<UFortCheatManager*>(Context)->GiveResource(GameData ? static_cast<UFortWorldItemDefinition*>(GameData->GetWoodItemDefinition()) : nullptr, Z_Param_Amount);
     P_NATIVE_END;
 }
 
@@ -6299,7 +6299,7 @@ DEFINE_FUNCTION(UFortCheatManager::execGiveStone)
     P_FINISH;
     P_NATIVE_BEGIN;
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    static_cast<UFortCheatManager*>(Context)->GiveResource(GameData ? static_cast<UFortWorldItemDefinition*>(GameData->StoneItemDefinition) : nullptr, Z_Param_Amount);
+    static_cast<UFortCheatManager*>(Context)->GiveResource(GameData ? static_cast<UFortWorldItemDefinition*>(GameData->GetStoneItemDefinition()) : nullptr, Z_Param_Amount);
     P_NATIVE_END;
 }
 
@@ -6309,7 +6309,7 @@ DEFINE_FUNCTION(UFortCheatManager::execGiveMetal)
     P_FINISH;
     P_NATIVE_BEGIN;
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    static_cast<UFortCheatManager*>(Context)->GiveResource(GameData ? static_cast<UFortWorldItemDefinition*>(GameData->MetalItemDefinition) : nullptr, Z_Param_Amount);
+    static_cast<UFortCheatManager*>(Context)->GiveResource(GameData ? static_cast<UFortWorldItemDefinition*>(GameData->GetMetalItemDefinition()) : nullptr, Z_Param_Amount);
     P_NATIVE_END;
 }
 

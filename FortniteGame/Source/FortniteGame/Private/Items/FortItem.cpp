@@ -2,6 +2,7 @@
 #include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Finder.h"
+#include "GameplayEffect.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
@@ -250,7 +251,9 @@ bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerC
 
 ptrdiff_t UFortAmmoItemDefinition::RegenCooldownOffset()
 {
-    return Member_RegenCooldown.GetOffsetChecked();
+    // 6.30 (CL-4573096) makes RegenCooldown an FScalableFloat, whose Value comes first: the offset is the same field.
+    static Reflection::FMemberInfo ScalableRegenCooldown{ &UFortAmmoItemDefinition::StaticReflectionOwner, TEXT("RegenCooldown"), 0, Reflection::EMemberKind::Struct, &FScalableFloat::StaticReflectionOwner };
+    return Member_RegenCooldown.IsAvailable() || !ScalableRegenCooldown.IsAvailable() ? Member_RegenCooldown.GetOffsetChecked() : ScalableRegenCooldown.GetOffsetChecked();
 }
 
 UFortItemDefinition* UFortItem::GetItemDefinitionBP() const

@@ -261,19 +261,19 @@ void ABuildingSMActor::AttemptSpawnResources(AFortPawn* InstigatorPawn, float Da
     {
         if (Resource == EFortResourceType::GetWood())
         {
-            ResourceItem = GameData->WoodItemDefinition;
+            ResourceItem = GameData->GetWoodItemDefinition();
         }
         else if (Resource == EFortResourceType::GetStone())
         {
-            ResourceItem = GameData->StoneItemDefinition;
+            ResourceItem = GameData->GetStoneItemDefinition();
         }
         else if (Resource == EFortResourceType::GetMetal())
         {
-            ResourceItem = GameData->MetalItemDefinition;
+            ResourceItem = GameData->GetMetalItemDefinition();
         }
         else if (Resource == EFortResourceType::GetPermanite())
         {
-            ResourceItem = GameData->PermaniteItemDefinition;
+            ResourceItem = GameData->GetPermaniteItemDefinition();
         }
     }
 

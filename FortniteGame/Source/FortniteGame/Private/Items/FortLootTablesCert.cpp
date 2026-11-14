@@ -226,7 +226,7 @@ void FortLootTablesCert::CreateMissingTables(UFortGameData* GameData)
     bChecked = true;
 
     // All three must be missing: on Cert the real assets load and the embedded rows are never read.
-    if (GameData->LootQuotaData || !IsMissing(GameData->LootTierDataTables, LootTierDataPath) || !IsMissing(GameData->LootPackageDataTables, LootPackagesPath))
+    if (GameData->GetLootQuotaDataMember() || !IsMissing(GameData->LootTierDataTables, LootTierDataPath) || !IsMissing(GameData->LootPackageDataTables, LootPackagesPath))
     {
         return;
     }
@@ -234,9 +234,9 @@ void FortLootTablesCert::CreateMissingTables(UFortGameData* GameData)
     Log::Info(L"Loot tables missing from this build's pak: using the embedded Cert tables (3532353)");
     UDataTable* TierTable = CreateTierTable();
     UDataTable* PackageTable = CreatePackageTable();
-    GameData->LootQuotaData = CreateQuotaTable();
+    GameData->SetLootQuotaDataMember(CreateQuotaTable());
     Log::Info(L"Embedded Cert tables: {} ({} rows), {} ({} rows), {} ({} rows)",
         LootTierDataPath, TierTable ? TierTable->GetRowMap().Num() : 0,
         LootPackagesPath, PackageTable ? PackageTable->GetRowMap().Num() : 0,
-        LootQuotaDataPath, GameData->LootQuotaData ? static_cast<UDataTable*>(GameData->LootQuotaData)->GetRowMap().Num() : 0);
+        LootQuotaDataPath, GameData->GetLootQuotaDataMember() ? GameData->GetLootQuotaDataMember()->GetRowMap().Num() : 0);
 }

@@ -118,17 +118,45 @@ UDataTable* UFortGameData::GetLootQuotaData()
     // server's table (Core-ServerAssets' list) is only found by its path. Tried once, after the Cert fallback, which
     // stands down when the game data already has a quota table.
     static bool bTriedServerAssets = false;
-    if (!LootQuotaData && !bTriedServerAssets)
+    if (!GetLootQuotaDataMember() && !bTriedServerAssets)
     {
         bTriedServerAssets = true;
         if (UDataTable* Table = LoadObject<UDataTable>(nullptr, L"/Game/Items/Datatables/LootQuotaData.LootQuotaData"))
         {
             Table->AddToRoot();
-            LootQuotaData = Table;
+            SetLootQuotaDataMember(Table);
             UE_LOG(LogFortLoot, Log, TEXT("Loot quotas: the server's LootQuotaData from the installed server assets (%d rows)"), Table->GetRowMap().Num());
         }
     }
-    return LootQuotaData;
+    return GetLootQuotaDataMember();
+}
+
+UDataTable* UFortGameData::GetLootQuotaDataMember() const
+{
+    if (Member_LootQuotaDataPath.IsAvailable())
+    {
+        return Reflection::AccessMember<TAssetPtr<UDataTable>>(this, Member_LootQuotaDataPath).LoadSynchronous();
+    }
+    return Member_LootQuotaData.IsAvailable() ? static_cast<UDataTable*>(LootQuotaData) : nullptr;
+}
+
+void UFortGameData::SetLootQuotaDataMember(UDataTable* Table)
+{
+    if (Member_LootQuotaDataPath.IsAvailable())
+    {
+        Reflection::AccessMember<TAssetPtr<UDataTable>>(this, Member_LootQuotaDataPath).SetPath(Table ? Table->GetPathName() : FString());
+        return;
+    }
+    LootQuotaData = Table;
+}
+
+UFortWorldItemDefinition* UFortGameData::GetItemDefinitionMember(Reflection::FMemberInfo& SoftMember, Reflection::FMemberInfo& ObjectMember) const
+{
+    if (SoftMember.IsAvailable())
+    {
+        return Reflection::AccessMember<TAssetPtr<UFortWorldItemDefinition>>(this, SoftMember).LoadSynchronous();
+    }
+    return ObjectMember.IsAvailable() ? Reflection::AccessMember<UFortWorldItemDefinition*>(this, ObjectMember) : nullptr;
 }
 
 FFortLootTierData* UFortGameData::FindLootTierDataRow(FName LootTierKey, const wchar_t* ContextString)

@@ -1566,7 +1566,7 @@ bool AFortPlayerController::RemoveInventoryItem(const FGuid& ItemGuid, int32_t C
         }
         return true;
     };
-    if (Count >= 0 && Remaining <= 0 && AmmoDefinition && AmmoDefinition->RegenCooldown > 0.0f)
+    if (Count >= 0 && Remaining <= 0 && AmmoDefinition && AmmoDefinition->GetRegenCooldown() > 0.0f)
     {
         Inventory->UpdateWorldItemCount(WorldItem, 0);
     }

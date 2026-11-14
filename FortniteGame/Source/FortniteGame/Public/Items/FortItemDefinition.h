@@ -265,4 +265,8 @@ public:
     DefineUProperty(float, RegenCooldown)
 
     static ptrdiff_t RegenCooldownOffset();
+
+    // The ammo's regen cooldown in seconds: the float up to 6.22, the FScalableFloat's value at level 0 from 6.30
+    // (CL-4573096), as 21.40's RegenCooldown still is. Read it through here, not Member_RegenCooldown (CoreV2 #455).
+    float GetRegenCooldown() const;
 };

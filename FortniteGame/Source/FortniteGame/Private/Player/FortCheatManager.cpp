@@ -2376,7 +2376,7 @@ namespace
     bool IsAbilityCharge(const UFortItemDefinition* Definition, const std::vector<UFortItemDefinition*>& ChargeItems)
     {
         const UFortAmmoItemDefinition* AmmoDefinition = Cast<UFortAmmoItemDefinition>(Definition);
-        return Definition && ((AmmoDefinition && AmmoDefinition->RegenCooldown > 0.0f)
+        return Definition && ((AmmoDefinition && AmmoDefinition->GetRegenCooldown() > 0.0f)
             || std::find(ChargeItems.begin(), ChargeItems.end(), Definition) != ChargeItems.end());
     }
 

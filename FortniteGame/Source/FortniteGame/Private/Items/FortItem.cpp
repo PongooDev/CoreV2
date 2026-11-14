@@ -256,6 +256,18 @@ ptrdiff_t UFortAmmoItemDefinition::RegenCooldownOffset()
     return Member_RegenCooldown.IsAvailable() || !ScalableRegenCooldown.IsAvailable() ? Member_RegenCooldown.GetOffsetChecked() : ScalableRegenCooldown.GetOffsetChecked();
 }
 
+float UFortAmmoItemDefinition::GetRegenCooldown() const
+{
+    // 6.30's float RegenCooldown is gone (a 6.30 Battle Royale server died on "Member FortAmmoItemDefinition::RegenCooldown
+    // is not available" as a player's ammo ran out: CoreV2 #455), so its FScalableFloat is read at level 0.
+    if (Member_RegenCooldown.IsAvailable())
+    {
+        return RegenCooldown;
+    }
+    const auto* Bytes = reinterpret_cast<const uint8_t*>(this);
+    return reinterpret_cast<const FScalableFloat*>(Bytes + RegenCooldownOffset())->GetValueAtLevel(0.0f);
+}
+
 UFortItemDefinition* UFortItem::GetItemDefinitionBP() const
 {
     Reflection::FParams Params(StaticFunction_GetItemDefinitionBP());

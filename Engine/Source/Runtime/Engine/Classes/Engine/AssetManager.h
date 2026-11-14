@@ -20,6 +20,9 @@ struct FAssetDataTagMap;
 // bSoftObjectPaths marks 4.19), from AssetName on.
 struct FAssetData
 {
+    DefineUnrealStruct(FAssetData, AssetRegistry)
+
+public:
     FName ObjectPath;
     FName PackageName;
     FName PackagePath;
@@ -36,8 +39,12 @@ struct FAssetData
     uint32_t& GetPackageFlags() const { return Member<uint32_t>(0x48); }
     __declspec(property(get = GetPackageFlags)) uint32_t PackageFlags;
 
-    // The build's size: 4.16's 0x58 or 4.19's 0x50.
-    static size_t GetStructureSize() { return ObjectLayout::Current.bSoftObjectPaths ? 0x50 : 0x58; }
+    // The build's size: 4.16's 0x58 or 4.19's 0x50, or the reflected struct's where it says otherwise (6.30,
+    // CL-4573096: 0x70, its members past AssetClass in another layout).
+    static size_t GetStructureSize();
+    // Destroys Count elements in place: by the members below on the layouts Core knows, else through the reflected
+    // struct (its C++ destructor).
+    static void DestroyElements(uint8_t* Data, int32_t Count);
 
     FAssetData() = delete;
     FAssetData(const FAssetData&) = delete;
@@ -83,10 +90,7 @@ public:
 
     void Empty()
     {
-        for (int32_t Index = 0; Index < ArrayNum; ++Index)
-        {
-            (*this)[Index].DestroyInPlace();
-        }
+        FAssetData::DestroyElements(Data, ArrayNum);
         FMemory::Free(Data);
         Data = nullptr;
         ArrayNum = 0;

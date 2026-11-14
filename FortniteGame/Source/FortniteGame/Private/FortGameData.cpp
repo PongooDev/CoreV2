@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "FortGameData.h"
+#include "Curves/CurveBase.h"
 #include "Engine/DataTable.h"
 #include "Engine/World.h"
 #include "FortGameMode.h"
@@ -148,6 +149,15 @@ void UFortGameData::SetLootQuotaDataMember(UDataTable* Table)
         return;
     }
     LootQuotaData = Table;
+}
+
+UCurveVector* UFortGameData::GetPickupSplineCurve() const
+{
+    if (Member_PickupSplineCurvePath.IsAvailable())
+    {
+        return Reflection::AccessMember<TAssetPtr<UCurveVector>>(this, Member_PickupSplineCurvePath).LoadSynchronous();
+    }
+    return Member_PickupSplineCurve.IsAvailable() ? static_cast<UCurveVector*>(PickupSplineCurve) : nullptr;
 }
 
 UFortWorldItemDefinition* UFortGameData::GetItemDefinitionMember(Reflection::FMemberInfo& SoftMember, Reflection::FMemberInfo& ObjectMember) const

@@ -89,6 +89,8 @@ public:
 private:
     // 6.30 (CL-4573096) keeps these as soft pointers (TSoftObjectPtr) where earlier builds hold the object, like
     // SharedMissionListsClass on 4.2. The getters below read whichever the build has.
+    // 6.30 (CL-4573096) keeps the pickups' toss curve as a TSoftObjectPtr<UCurveVector> too (+0x1380).
+    static inline Reflection::FMemberInfo Member_PickupSplineCurvePath{ &StaticReflectionOwner, TEXT("PickupSplineCurve"), sizeof(TAssetPtr<UCurveVector>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UCurveVector>> };
     static inline Reflection::FMemberInfo Member_LootQuotaDataPath{ &StaticReflectionOwner, TEXT("LootQuotaData"), sizeof(TAssetPtr<UDataTable>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UDataTable>> };
     static inline Reflection::FMemberInfo Member_StoneItemDefinitionPath{ &StaticReflectionOwner, TEXT("StoneItemDefinition"), sizeof(TAssetPtr<UFortWorldItemDefinition>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UFortWorldItemDefinition>> };
     static inline Reflection::FMemberInfo Member_WoodItemDefinitionPath{ &StaticReflectionOwner, TEXT("WoodItemDefinition"), sizeof(TAssetPtr<UFortWorldItemDefinition>), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<TAssetPtr<UFortWorldItemDefinition>> };
@@ -105,6 +107,8 @@ public:
     UFortWorldItemDefinition* GetMetalItemDefinition() const { return GetItemDefinitionMember(Member_MetalItemDefinitionPath, Member_MetalItemDefinition); }
     UFortWorldItemDefinition* GetPermaniteItemDefinition() const { return GetItemDefinitionMember(Member_PermaniteItemDefinitionPath, Member_PermaniteItemDefinition); }
     UFortWorldItemDefinition* GetBluGloItemDefinition() const { return GetItemDefinitionMember(Member_BluGloItemDefinitionPath, Member_BluGloItemDefinition); }
+    // The curve a tossed pickup flies along (AFortPickup::GetRandomFlyTime), loaded from its path on 6.30+.
+    UCurveVector* GetPickupSplineCurve() const;
     // LootQuotaData as the game data holds it (loaded from its path on 6.30+), without GetLootQuotaData's fallbacks.
     UDataTable* GetLootQuotaDataMember() const;
     // Points LootQuotaData at Table (on 6.30+ at its path; the table must stay loaded, as Core's rooted ones do).

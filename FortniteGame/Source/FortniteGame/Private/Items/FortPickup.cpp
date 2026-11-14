@@ -1245,7 +1245,7 @@ void AFortPickup::GivePickupToAI(AFortAIPawn* AIPawn, IFortInventoryOwnerInterfa
 float AFortPickup::GetRandomFlyTime()
 {
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    UCurveVector* SplineCurve = GameData ? static_cast<UCurveVector*>(GameData->PickupSplineCurve) : nullptr;
+    UCurveVector* SplineCurve = GameData ? GameData->GetPickupSplineCurve() : nullptr;
     if (!SplineCurve)
     {
         return 1.5f;

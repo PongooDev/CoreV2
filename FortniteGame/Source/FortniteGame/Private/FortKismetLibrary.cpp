@@ -703,6 +703,16 @@ void UFortKismetLibrary::HookNatives()
         Hooks::RedirectCall(L"AFortAthenaMutator_Disco::AFortGameModeAthena_OnPawnDeathBeforeRespawning -> UFortKismetLibrary::K2_SpawnPickupInWorld", SpawnPickupCall,
             reinterpret_cast<void*>(static_cast<FSpawnPickupInWorld>(&K2_SpawnPickupInWorld)));
     }
+
+    // 6.31's Team Rumble. A dead player leaves some of their ammo and a stack of wood, stone or metal: the
+    // ItemDropOnDeath mutator's AFortGameModeAthena_OnPawnDeathBeforeRespawning spawns them with the same nine-parameter
+    // K2_SpawnPickupInWorld call, and gives each pickup it gets back its despawn time.
+    for (uint8_t* SpawnPickupCall : Finder::ItemDropOnDeathSpawnPickupCalls(StaticFunction_K2_SpawnPickupInWorld()))
+    {
+        using FSpawnPickupInWorld = AFortPickup* (*)(UObject*, UFortWorldItemDefinition*, int32_t, const FVector&, const FVector&, int32_t, bool, bool, bool);
+        Hooks::RedirectCall(L"AFortAthenaMutator_ItemDropOnDeath::AFortGameModeAthena_OnPawnDeathBeforeRespawning -> UFortKismetLibrary::K2_SpawnPickupInWorld", SpawnPickupCall,
+            reinterpret_cast<void*>(static_cast<FSpawnPickupInWorld>(&K2_SpawnPickupInWorld)));
+    }
 #endif
 
     for (const auto& [Function, Native, Name] : {

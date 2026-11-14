@@ -334,6 +334,10 @@ namespace Finder
     // ammo while the mode respawns its players. SpawnPickupInWorld: the UFunction, still with the game's exec. Null on
     // builds without the mutator or its CachedPercentAmmoToDrop.
     uint8_t* DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld);
+    // From 6.31 (Team Rumble): the two calls to the stripped UFortKismetLibrary::K2_SpawnPickupInWorld in
+    // AFortAthenaMutator_ItemDropOnDeath's AFortGameModeAthena_OnPawnDeathBeforeRespawning, which drop a dead player's
+    // ammo and the mutator's ItemsToDrop (materials). Empty on builds without the mutator.
+    std::vector<uint8_t*> ItemDropOnDeathSpawnPickupCalls(UFunction* SpawnPickupInWorld);
     // From 6.21 (the Butterfly): the call to the stripped AFortPlayerPawnAthena::ForceReviveFromDBNO in
     // AFortAthenaMutator_ButterflyEvent's pawn gathering, made for a downed pawn (its bIsDBNO at IsDBNOOffset). Null on
     // builds without the mutator, without ForceReviveFromDBNO, or that keep it.
@@ -374,8 +378,8 @@ namespace Finder
     bool ResolveReplicationDriverLive();
     // The replication graph's per-connection actor infos (Natives::UNetReplicationGraphConnection_ActorMapOffset and
     // FPerConnectionActorInfoMap_RemoveByKey), for UReplicationGraph::RemoveActorInfoFromConnections (CoreV2 #411).
-    // GraphVTable is the live graph's. Only where every piece is where 6.00, 6.01, 6.02, 6.10, 6.20, 6.21, 6.22 and 6.30 have
-    // it: CL-4395664 to CL-4573096, UNetReplicationGraphConnection::NotifyActorChannelCleanedUp's ChannelMap lookup, its
+    // GraphVTable is the live graph's. Only where every piece is where 6.00, 6.01, 6.02, 6.10, 6.20, 6.21, 6.22, 6.30 and 6.31
+    // have it: CL-4395664 to CL-4573279, UNetReplicationGraphConnection::NotifyActorChannelCleanedUp's ChannelMap lookup, its
     // remove and the stores that clear the info it found (6.00 to 6.10's 0x20 byte info or 6.20's 0x30 byte one), and
     // UReplicationGraph::NotifyActorTearOff's lookup in the map 0x50 before that one and its tear-off flag store at
     // that info's flags. Anything else leaves the build as it is and says so once.

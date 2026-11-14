@@ -12489,6 +12489,70 @@ uint8_t* Finder::DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld)
     return reinterpret_cast<uint8_t*>(StubCalls[0]);
 }
 
+std::vector<uint8_t*> Finder::ItemDropOnDeathSpawnPickupCalls(UFunction* SpawnPickupInWorld)
+{
+    // 6.31's Team Rumble (Playlist_Respawn_24, its RespawnItemsToDropOnDeathMutator). 6.31 moves what 6.30's
+    // AFortAthenaMutator_TDM did when a player died (its slot 0xC9 override, 6.30 CL-4573096 0xD2D4C0) into a mutator of
+    // its own, AFortAthenaMutator_ItemDropOnDeath. Its AFortGameModeAthena_OnPawnDeathBeforeRespawning (6.31 CL-4573279
+    // 0xD30000, slot 0xC9, the Disco mutator's slot) drops up to MaxAmmoTypeDrops of the dead player's ammo stacks
+    // (PercentAmmoToDrop of each), then each of ItemsToDrop (the 120 wood / 90 stone / 60 metal stacks), with
+    // UFortKismetLibrary::K2_SpawnPickupInWorld(GetWorld(), ItemDefinition, Count, PawnLocation, Direction, 0, true,
+    // true, false) (0xD3034F and 0xD30962), and gives each pickup its despawn time. Both calls reach the stripped native's
+    // return-null stub. They are the stub calls in the mutator's own overrides that read ItemsToDrop. Builds without the
+    // mutator (6.30 and earlier) have none.
+    std::vector<uint8_t*> Sites;
+    UClass* DropClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_ItemDropOnDeath");
+    const UProperty* ItemsProperty = DropClass ? DropClass->FindPropertyByName(FName(L"ItemsToDrop", FNAME_Find)) : nullptr;
+    if (!ItemsProperty)
+    {
+        return Sites;
+    }
+    void** DropVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator_ItemDropOnDeath");
+    void** MutatorVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator");
+    const uintptr_t ExecCall = reinterpret_cast<uintptr_t>(Finder::ImplementationCall(SpawnPickupInWorld));
+    const uintptr_t Stub = ExecCall ? Finder::RelativeTarget(ExecCall, 1, 5) : 0;
+    const int32_t Items = ItemsProperty->GetOffset_ForInternal();
+    uintptr_t Function = 0;
+    std::vector<uintptr_t> Seen;
+    for (int32_t Slot = 0; DropVTable && MutatorVTable && Finder::IsStubFunction(Stub) && Slot < 0x200; ++Slot)
+    {
+        const uintptr_t Own = reinterpret_cast<uintptr_t>(DropVTable[Slot]);
+        const uintptr_t Base = reinterpret_cast<uintptr_t>(MutatorVTable[Slot]);
+        if (!IsInText(Own) || !IsInText(Base))
+        {
+            break;
+        }
+        if (Own == Base || std::find(Seen.begin(), Seen.end(), Own) != Seen.end() || Finder::FunctionStart(Own) != Own)
+        {
+            continue;
+        }
+        Seen.push_back(Own);
+        const uintptr_t OwnEnd = Finder::FunctionEnd(Own);
+        if (OwnEnd <= Own || !FindInstruction(Own, OwnEnd, { Items & 0xFF, (Items >> 8) & 0xFF, (Items >> 16) & 0xFF, (Items >> 24) & 0xFF }))
+        {
+            continue;
+        }
+        for (const auto& [Site, Target] : Finder::DirectCalls(Own, OwnEnd))
+        {
+            if (Target == Stub)
+            {
+                Sites.push_back(reinterpret_cast<uint8_t*>(Site));
+                Function = Own;
+            }
+        }
+    }
+    if (Sites.size() != 2)
+    {
+        Log::Error(L"Finder: AFortAthenaMutator_ItemDropOnDeath's stripped K2_SpawnPickupInWorld calls were not found (the exec's stub {}, {} calls to it in the mutator's functions that read ItemsToDrop +0x{:X}, 2 expected), Team Rumble's dead leave no ammo or materials",
+            Finder::IsStubFunction(Stub) ? L"found" : L"not found", Sites.size(), Items);
+        Sites.clear();
+        return Sites;
+    }
+    Log::Info(L"Finder: AFortAthenaMutator_ItemDropOnDeath::AFortGameModeAthena_OnPawnDeathBeforeRespawning (0x{:X}) drops its ammo and items with the stripped K2_SpawnPickupInWorld at 0x{:X} and 0x{:X}",
+        Function - Finder::ImageBase(), reinterpret_cast<uintptr_t>(Sites[0]) - Finder::ImageBase(), reinterpret_cast<uintptr_t>(Sites[1]) - Finder::ImageBase());
+    return Sites;
+}
+
 Finder::FGadgetOverrideCalls Finder::GadgetOverrideCalls(ptrdiff_t GadgetPriorityOffset, ptrdiff_t AnimBPOverrideOffset, ptrdiff_t FootstepBankOverrideOffset)
 {
     // UFortGadgetItemDefinition::ApplyGadgetData (6.21 0x1021AA0) ends, on the authority and with the controller's pawn,
@@ -16107,18 +16171,19 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     // That function is found as NotifyActorChannelCleanedUp's second call, and nothing is resolved unless the code
     // around it is what 6.00, 6.01 (CL-4424678 0x78A1D0, 0x78ABB0), 6.02 (CL-4461277 0x78AD60, 0x78B740), 6.10
     // (CL-4480234 0x7A3920, 0x7A4300), 6.20 (CL-4497486 0x740FE0, 0x7419D0), 6.21 (CL-4526925 0x7439F0, 0x7443E0),
-    // 6.22 (CL-4543176 0x745430, 0x745E20) and 6.30 (CL-4573096 0x7624C0, 0x762EB0) have:
+    // 6.22 (CL-4543176 0x745430, 0x745E20), 6.30 (CL-4573096 0x7624C0, 0x762EB0) and 6.31 (CL-4573279 0x763D50,
+    // 0x764740) have:
     //   NotifyActorChannelCleanedUp: lea r14, [rcx+80h] (the ChannelMap); call FindId; ...; mov rdx, rsi (the channel);
     //     mov rcx, r14; call Remove; mov [rdi], r15; mov [rdi+0Ch], r15 (the info's Channel and its frame counters);
     //     then the rest of the info it clears, which says how big the info is and where its flags are:
     //       6.00 to 6.10: mov [rdi+14h], r15 (a 0x20 byte info, flags at +0x1D)
-    //       6.20 to 6.30: mov [rdi+24h], r15d; mov [rdi+18h], r15 (a 0x30 byte info, flags at +0x28, as 8.30's)
+    //       6.20 to 6.31: mov [rdi+24h], r15d; mov [rdi+18h], r15 (a 0x30 byte info, flags at +0x28, as 8.30's)
     //   NotifyActorTearOff: lea rcx, [rsi+30h] (the ActorMap, 0x50 before the ChannelMap: one TMap); call the same
     //     FindId; ...; or byte ptr [rax+<the flags>], 2
     // 6.20's RemoveNetworkActor (0x74A3D0) still doesn't take the connections' infos out. A build before 6.00 or after
-    // 6.30 was never looked at, and one whose code differs (8.30's engine does this itself) keeps what it has.
+    // 6.31 was never looked at, and one whose code differs (8.30's engine does this itself) keeps what it has.
     constexpr uint32_t FirstVerifiedChangelist = 4395664;
-    constexpr uint32_t LastVerifiedChangelist = 4573096;
+    constexpr uint32_t LastVerifiedChangelist = 4573279;
     constexpr ptrdiff_t MapSize = 0x50;
     const uint32_t Changelist = Packed::Changelist();
     const auto LeftAsIs = [Changelist](const wchar_t* Why)
@@ -16128,7 +16193,7 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     };
     if (Changelist < FirstVerifiedChangelist || Changelist > LastVerifiedChangelist)
     {
-        return LeftAsIs(L"only 6.00 to 6.30, CL-4395664 to CL-4573096, were checked");
+        return LeftAsIs(L"only 6.00 to 6.31, CL-4395664 to CL-4573279, were checked");
     }
 
     const std::vector<uintptr_t> CleanedUpRefs = Finder::StringRefs(L"UNetReplicationGraphConnection_NotifyActorChannelCleanedUp");

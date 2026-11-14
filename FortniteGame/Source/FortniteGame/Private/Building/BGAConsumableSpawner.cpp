@@ -59,6 +59,12 @@ namespace
     };
     FSpawnTally Tally;
 
+    // Each spawner's placement query of the current roll. A roll again (the match's playlist has other loot tables) can
+    // come while the first roll's queries are still running, as in a -CoreBotMatch on a playlist with its own tables (6.22
+    // Team Terror, 4 s after the world's roll): their late ends would spawn the new roll's consumables a second time and
+    // count in the new roll's tally, so only the spawner's current query is taken.
+    std::map<const UObject*, FWeakObjectPtr> CurrentQueries;
+
     void LogTallyWhenDone()
     {
         if (--Tally.Pending > 0)
@@ -148,6 +154,7 @@ void ABGAConsumableSpawner::SpawnWorldConsumables(UWorld* World)
     }
     Spawned.World = World;
     Spawned.Actors.clear();
+    CurrentQueries.clear();
     Tally = FSpawnTally();
     Tally.Pending = 1;
 
@@ -201,6 +208,7 @@ void ABGAConsumableSpawner::SpawnConsumables(int32_t WorldLevel)
     // Where: the placement query's points around the spawner, best (random) score first.
     UEnvQuery* Query = QueryTemplate;
     UEnvQueryInstanceBlueprintWrapper* QueryInstance = Query ? UEnvQueryManager::RunEQSQuery(this, Query, this, EEnvQueryRunMode::AllMatching, nullptr) : nullptr;
+    CurrentQueries[this] = FWeakObjectPtr(QueryInstance);
     ++Tally.Pending;
     if (!QueryInstance)
     {
@@ -243,6 +251,12 @@ void ABGAConsumableSpawner::SpawnConsumables(int32_t WorldLevel)
 void ABGAConsumableSpawner::OnQueryFinished(UEnvQueryInstanceBlueprintWrapper* QueryInstance)
 {
 #if WITH_SERVER_CODE
+    // An earlier roll's query, ended after the roll again: that roll's consumables are gone, and so is its tally.
+    const auto Current = CurrentQueries.find(this);
+    if (QueryInstance && (Current == CurrentQueries.end() || Current->second.Get() != reinterpret_cast<UObject*>(QueryInstance)))
+    {
+        return;
+    }
     // Each consumable on its own point; without the query's points, on the spawner, as many as the roll asks for.
     const TArray<FVector> Locations = QueryInstance ? QueryInstance->GetResultsAsLocations() : TArray<FVector>();
     UWorld* World = GetWorld();

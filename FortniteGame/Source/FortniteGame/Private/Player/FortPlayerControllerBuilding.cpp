@@ -103,8 +103,8 @@ namespace
 
     // A player's piece is player built (IsPlayerBuilt: an OwnerPersistentID or bPlayerPlaced). InitializeBuildingActor
     // (6.21 0xD29550) sets bPlayerPlaced itself for a placer with a WorldPlayerId, which Save the World's players have and
-    // Battle Royale's don't (-1, see AFortGameModeAthena::ScoreBuildingConstructionHK), so a Battle Royale piece never
-    // was. 6.20 and 6.21 keep a setter of the bit alone with no caller left (6.21 0x144F090, 6.20 0x143B650: `or byte ptr
+    // Battle Royale's lack where the Athena game mode's Login doesn't reach AFortGameModeZone::Login (-1, see
+    // AFortGameModeAthena::ScoreBuildingConstructionHK; 6.20+ reach it, CoreV2 #443), so such a piece never was. 6.20 and 6.21 keep a setter of the bit alone with no caller left (6.21 0x144F090, 6.20 0x143B650: `or byte ptr
     // [rcx+514h], 40h`), the stripped placement body's. What reads it: AFortPlayspace::ClearPlayspace (6.21 slot 0x136,
     // 0x12F4EC0) kills the player-built pieces in a Playground playspace when its minigame is reset or restarted, and
     // passed over every Battle Royale piece, so a building challenge's pieces stayed (CoreV2 #435); the zone's structure

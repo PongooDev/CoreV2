@@ -591,10 +591,16 @@ APlayerController* AFortGameModeZone::Login(UPlayer* NewPlayer, ENetRole InRemot
     UWorld* World = GetWorld();
     AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
     AFortWorldManager* WorldManager = GameState ? static_cast<AFortWorldManager*>(GameState->WorldManager) : nullptr;
+    // The player's index in the world record's SavedPlayers. Battle Royale has one too: with no world id to query, the
+    // world manager makes a fresh record (6.21 0xFD2A80, then WorldQueryComplete). The id is whose building a piece is:
+    // InitializeBuildingActor gives it to the piece (OwnerPersistentID, and bPlayerPlaced), and
+    // ABuildingActor::GetOwningPlayerState (6.21 0xD24B20) finds the player state with it, which is how the Playground
+    // building challenges' guides (AthenaLayoutBuildRequirement's StartProgress) credit the builder (CoreV2 #443).
     if (PlayerState && WorldManager)
     {
         const FString PlayerName = PlayerState->GetPlayerName();
         PlayerState->WorldPlayerId = WorldManager->GetOrAllocatePlayerID(UniqueId.ToString(), PlayerName);
+        UE_LOG(LogFort, Log, TEXT("Login: %s is world player %d"), *PlayerName, static_cast<int32_t>(PlayerState->WorldPlayerId));
     }
 
     // The escape menu's team (UFortPartyContext::GetLocalTeamTeamMemberInfo, UFortUITeamInfo::GetTeamMembers) lists the
@@ -988,6 +994,11 @@ void AFortGameModeZone::HookVTables()
         UObject* ZoneDefault = StaticClass()->GetDefaultObject(false);
         void* const ZoneLogin = ZoneDefault ? (*reinterpret_cast<void***>(ZoneDefault))[LoginIndex] : nullptr;
         LoginOG = reinterpret_cast<decltype(LoginOG)>(ZoneLogin);
+        // A subclass's own Login reaches this one through Super::Login, a direct call: 6.21's AFortGameModeAthena::Login
+        // (slot 0xE2, 0xC826D0) adds the split-screen options and calls AFortGameModeZone::Login (0xEED620) at 0xC82A19,
+        // so the vtable swap alone left Battle Royale's players without the WorldPlayerId the stripped half gives them
+        // (CoreV2 #443, below). Builds whose subclass Login doesn't call it (1.7.2's Athena Login, 0x3F2450) keep theirs.
+        std::vector<uintptr_t> SubclassLogins;
         for (TObjectIterator<UClass> It; ZoneLogin && It; ++It)
         {
             UClass* Class = *It;
@@ -996,6 +1007,26 @@ void AFortGameModeZone::HookVTables()
             if (VTable && VTable[LoginIndex] == ZoneLogin)
             {
                 Hooks::SwapVTable(L"AFortGameModeZone::Login", VTable, LoginIndex, reinterpret_cast<void*>(&LoginHK));
+            }
+            else if (VTable && VTable[LoginIndex] != reinterpret_cast<void*>(&LoginHK)
+                && std::find(SubclassLogins.begin(), SubclassLogins.end(), reinterpret_cast<uintptr_t>(VTable[LoginIndex])) == SubclassLogins.end())
+            {
+                SubclassLogins.push_back(reinterpret_cast<uintptr_t>(VTable[LoginIndex]));
+            }
+        }
+        for (const uintptr_t SubclassLogin : SubclassLogins)
+        {
+            const uintptr_t SubclassLoginEnd = Finder::FunctionEnd(SubclassLogin);
+            if (SubclassLoginEnd <= SubclassLogin || SubclassLoginEnd - SubclassLogin > 0x2000)
+            {
+                continue;
+            }
+            for (const auto& [Call, Target] : Finder::DecodedDirectCalls(SubclassLogin))
+            {
+                if (Target == reinterpret_cast<uintptr_t>(ZoneLogin))
+                {
+                    Hooks::RedirectCall(L"AFortGameModeZone subclass Login -> Super::Login", reinterpret_cast<uint8_t*>(Call), reinterpret_cast<void*>(&LoginHK));
+                }
             }
         }
     }

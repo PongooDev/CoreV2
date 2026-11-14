@@ -310,7 +310,9 @@ void AFortPlayerPawnAthena::OnCapsuleBeginOverlap(UPrimitiveComponent* Overlappe
     if (!Pickup->CanInteract(this))
     {
         // The Athena pickup's CanInteract (1.8.2 0x69DB90) wants IT_Simple, a pickup not picked up and not in its short
-        // interaction lock, and its OptionalOwnerID equal to the requester's WorldPlayerId (-1 for both in Battle Royale).
+        // interaction lock, and its OptionalOwnerID equal to the requester's WorldPlayerId when it has one (6.21 0x104DAD0:
+        // a pickup Core makes has none, -1, so anyone may take it; Battle Royale players have ids where the game mode's
+        // Login reaches AFortGameModeZone::Login, CoreV2 #443).
         // 4.5's (0xDAAA00, AFortPickup's and AFortPickupAthena's) also wants the requesting pawn's controller to be an
         // AFortPlayerController (0xCFD350), and then room for the item in that controller's inventory: a bot's
         // AIController always fails it, so bots pick up through their own controller instead.

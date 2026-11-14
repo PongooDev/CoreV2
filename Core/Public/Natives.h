@@ -754,9 +754,10 @@ namespace Natives
     // the bots-only test match (-CoreBotMatch) calls it, the warmup's countdown having nobody to start the bus for.
     inline bool (*AFortGameModeAthena_StartAircraftPhase)(AFortGameModeAthena* This) = nullptr;
     // AFortPlayerPawnAthena::BeginSkydiving(bool bFromBus) (3.0 0x9D7F70), which AFortPlayerControllerAthena's ExitAircraft
-    // calls on the new pawn: Finder::ResolveBotSkydiveLive. A player bot leaving the aircraft takes the same path.
+    // calls on the new pawn: Finder::ResolveBotSkydiveLive. A player bot leaving the aircraft takes the same path. 1.7.2's
+    // and 1.8's (1.8 0x41DD60) take no bFromBus yet; the extra argument in rdx goes unread there.
     inline void (*AFortPlayerPawnAthena_BeginSkydiving)(AFortPlayerPawnAthena* This, bool bFromBus) = nullptr;
-    // 1.8.1 and 1.8.2 (CoreV2 #449): BeginSkydiving's server part (Role == ROLE_Authority) takes the pawn's controller
+    // 1.7.2 to 1.8.2 (CoreV2 #449): BeginSkydiving's server part (Role == ROLE_Authority) takes the pawn's controller
     // as an AFortPlayerControllerAthena with no null check, so an AI controller's pawn crashes it (1.8.2 0x4152FC:
     // "xor ebx, ebx; mov rcx, rbx; call" into the world context lookup 0x420260, which reads [rcx]). 1.9 (0x4171E8) only
     // runs that part from the bus and for a player controller. The offset of the flag the part sets first (1.8.2

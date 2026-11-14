@@ -28,7 +28,7 @@ void AFortPlayerPawnAthena::BeginSkydiving(bool bFromBus)
     {
         return;
     }
-    // 1.8.1 and 1.8.2 (CoreV2 #449): the build's BeginSkydiving sets the skydive up (bIsSkydiving, the tag, the contrail,
+    // 1.7.2 to 1.8.2 (CoreV2 #449; 1.7.2 0x415E8C, 1.8 0x41DE6A): the build's BeginSkydiving sets the skydive up (bIsSkydiving, the tag, the contrail,
     // the movement's skydiving mode) and then, with authority, records where and when the player left the bus from
     // Cast<AFortPlayerControllerAthena>(Controller) with no null check: a player bot's AI controller made it read through
     // null (1.8.2 0x415301 into 0x420264), the server died at the first bot's warmup glide or bus exit. Epic's fix is 1.9's

@@ -54,7 +54,7 @@ public:
 
     // The build's BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving, 21.40's AFortPlayerPawn::BeginSkydiving),
     // which ExitAircraft calls on a player's new pawn; Core's player bots skydive through it. FortPlayerPawnAthena.cpp:
-    // on 1.8.1 and 1.8.2 it runs as 1.9's does for a pawn whose controller isn't a player's.
+    // on 1.7.2 to 1.8.2 it runs as 1.9's does for a pawn whose controller isn't a player's.
     void BeginSkydiving(bool bFromBus);
 
     // 1.8.1's auto pickup (0x42A570), restored where the build strips it (1.8.2): the capsule's overlap with ammo, a

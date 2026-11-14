@@ -11744,10 +11744,29 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
 
     // ForgetPawnForAllAI (1.8 0x2FDC20): AFortAIPawn's ReviveFromDBNO (0x7B5620) calls it right before it gets the
     // gameplay tags, adds the DBNO one to a container and cancels those abilities: the call before those two that it
-    // makes once.
+    // makes once. It takes the pawn (this): 6.21 (CL-4526925 0x120ADD0) moves this into rsi at the top and calls it with
+    // mov rcx, rsi (0x120B047) after the AI controller's two calls. 6.22 (CL-4543176 0x120D7A0) calls it (0xAE5AF0, at
+    // 0x120D9D2) before the controller's calls instead and gives the controller a third, so the last call made once
+    // there is the controller's (0xA94D30, mov rcx, rdi at 0x120DA2D), which read the pawn as a controller and crashed
+    // every revive. Of the calls made once, the last one given this wins; the last one at all where none is.
     const uintptr_t AIRevive = ExecNative(L"/Script/FortniteGame.FortAIPawn:ReviveFromDBNO");
     const uintptr_t AIReviveEnd = FunctionAndFragmentsEnd(AIRevive);
     const std::vector<std::pair<uintptr_t, uintptr_t>> AIReviveCalls = AIReviveEnd ? Finder::DirectCalls(AIRevive, AIReviveEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    // The register ReviveFromDBNO keeps this in: its first mov r64, rcx (not rcx or rsp).
+    int32_t AIReviveThis = -1;
+    for (uintptr_t Site = AIRevive; AIRevive && Site + 3 <= AIReviveEnd && Site < AIRevive + 0x60 && AIReviveThis < 0; ++Site)
+    {
+        const uint8_t ModRm = Byte(Site + 2);
+        if ((Byte(Site) == 0x48 || Byte(Site) == 0x4C) && Byte(Site + 1) == 0x8B && (ModRm & 0xC7) == 0xC1 && (ModRm & 0x38) != 0x08 && (ModRm & 0x38) != 0x20)
+        {
+            AIReviveThis = ((ModRm >> 3) & 0x07) | (Byte(Site) == 0x4C ? 0x08 : 0x00);
+        }
+    }
+    // mov rcx, AIReviveThis right before the call: 48 8B C8+r (49 8B C8+r for r8-r15).
+    const auto PassesThis = [AIReviveThis](uintptr_t Site)
+    {
+        return AIReviveThis >= 0 && Byte(Site - 3) == (AIReviveThis >= 8 ? 0x49 : 0x48) && Byte(Site - 2) == 0x8B && Byte(Site - 1) == (0xC8 | (AIReviveThis & 0x07));
+    };
     uintptr_t ForgetPawn = 0;
     for (size_t Cancel = 2; CancelAbilities && Cancel < AIReviveCalls.size(); ++Cancel)
     {
@@ -11755,15 +11774,23 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
         {
             continue;
         }
+        uintptr_t LastOnce = 0;
         for (size_t Index = Cancel - 2; Index-- > 0;)
         {
+            const uintptr_t Site = AIReviveCalls[Index].first;
             const uintptr_t Target = AIReviveCalls[Index].second;
-            if (std::count_if(AIReviveCalls.begin(), AIReviveCalls.end(), [Target](const std::pair<uintptr_t, uintptr_t>& Call) { return Call.second == Target; }) == 1)
+            if (std::count_if(AIReviveCalls.begin(), AIReviveCalls.end(), [Target](const std::pair<uintptr_t, uintptr_t>& Call) { return Call.second == Target; }) != 1)
+            {
+                continue;
+            }
+            LastOnce = LastOnce ? LastOnce : Target;
+            if (PassesThis(Site))
             {
                 ForgetPawn = Target;
                 break;
             }
         }
+        ForgetPawn = ForgetPawn ? ForgetPawn : LastOnce;
         break;
     }
 

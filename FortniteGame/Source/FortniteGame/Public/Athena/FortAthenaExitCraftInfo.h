@@ -14,6 +14,9 @@ struct FExitCraftInfo
     // How long the spawner stands before its craft comes (VanInfo.SpawnDelay): the spawner's BeginPlay (5.40 0xBAACB0)
     // and StartExitCraftSpawnTimer (0xBCAF80) set its ExitCraftTimerHandle for it.
     DefineUStructProperty(FScalableFloat, ExitCraftSpawnDelay)
+    // How long the spawner waits between the building pieces it clears from its landing spot (the spawner's
+    // DestroyBlockingActors; its BeginPlay starts the clearing after SpawnDestructionInitialDelay).
+    DefineUStructProperty(FScalableFloat, SpawnDestructionDelayBetweenPieces)
     // How high above its spawner the craft appears (VanInfo.SpawnHeight): the van comes out of a portal in the sky and
     // falls to the spawner's spot (its Spawned state, 0xBD5830, waits for it to slow to MinLandingSpeed).
     DefineUStructProperty(FScalableFloat, ExitCraftZOffset)

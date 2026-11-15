@@ -17040,29 +17040,26 @@ bool Finder::ResolveBuildingFoundationLive(void** FoundationVTable, ptrdiff_t Dy
     return true;
 }
 
-std::vector<uint8_t*> Finder::ExitCraftSpawnTimerBinds(UFunction* StartExitCraftSpawnTimer, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset)
+// The jump or call targets in an exec's first bytes (an exec without parameters steps nothing and jumps to its body).
+static std::vector<uintptr_t> ExecTargets(UFunction* Function)
 {
-    std::vector<uint8_t*> Binds;
-    const auto SharedEmpty = reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
-    const auto SetTimer = reinterpret_cast<uintptr_t>(Natives::FTimerManager_InternalSetTimer);
-    if (!SharedEmpty || !SetTimer || ExitCraftInfoOffset <= 0)
-    {
-        return Binds;
-    }
-
-    // StartExitCraftSpawnTimer's exec (5.40 0x13BED00) steps nothing and jumps to its body (0xBCAF80).
-    const uintptr_t Exec = StartExitCraftSpawnTimer ? reinterpret_cast<uintptr_t>(StartExitCraftSpawnTimer->GetNativeFunc()) : 0;
-    std::vector<uintptr_t> Candidates;
-    for (uintptr_t Site = IsInText(Exec) ? Exec : 0; Site && Site < Exec + 0x30 && Candidates.empty(); ++Site)
+    std::vector<uintptr_t> Targets;
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    for (uintptr_t Site = IsInText(Exec) ? Exec : 0; Site && Site < Exec + 0x30; ++Site)
     {
         const uintptr_t Target = (Byte(Site) == 0xE8 || Byte(Site) == 0xE9) ? Finder::RelativeTarget(Site, 1, 5) : 0;
-        if (IsInText(Target) && Finder::FunctionStart(Target) == Target)
+        if (IsInText(Target) && std::find(Targets.begin(), Targets.end(), Target) == Targets.end())
         {
-            Candidates.push_back(Target);
+            Targets.push_back(Target);
         }
     }
-    // The spawner's BeginPlay (5.40 0xBAACB0) sets the same timer, inlined: the slots the spawner overrides (from 1; 0 is
-    // its destructor), up to the end of AActor's vtable.
+    return Targets;
+}
+
+// The spawner's own slots (from 1; 0 is its destructor) up to the end of AActor's vtable: its BeginPlay (5.40 0xBAACB0)
+// among them, which sets its timers inline.
+static void AddSpawnerOverrides(std::vector<uintptr_t>& Candidates, void** SpawnerVTable, void** ActorVTable)
+{
     for (int32_t Index = 1; SpawnerVTable && ActorVTable && Index < 0x200; ++Index)
     {
         const uintptr_t Entry = VTableEntry(SpawnerVTable, Index);
@@ -17076,30 +17073,102 @@ std::vector<uint8_t*> Finder::ExitCraftSpawnTimerBinds(UFunction* StartExitCraft
             Candidates.push_back(Entry);
         }
     }
+}
+
+// The binds of one of the methods in Methods as an exit craft spawner timer's method, in those of Candidates that read
+// the craft info (the timers' rates are its delays: mov rcx, [rcx+348h]): lea rax, [method]; mov [reg+10h], rax (the
+// delegate instance's method; 5.40 0xBAADB1, 0xBAAF21, 0xBCB043), then call FTimerManager::InternalSetTimer with the
+// handle in rdx (lea rdx, [rbx+370h], 0xBAAE05).
+static std::vector<Finder::FExitCraftSpawnerTimerBind> SpawnerTimerBinds(const std::vector<uintptr_t>& Candidates, ptrdiff_t ExitCraftInfoOffset, const std::vector<uintptr_t>& Methods)
+{
+    std::vector<Finder::FExitCraftSpawnerTimerBind> Binds;
+    const auto SetTimer = reinterpret_cast<uintptr_t>(Natives::FTimerManager_InternalSetTimer);
+    if (!SetTimer || ExitCraftInfoOffset <= 0 || Methods.empty())
+    {
+        return Binds;
+    }
 
     for (const uintptr_t Function : Candidates)
     {
         const uintptr_t End = Finder::FunctionEnd(Function);
-        // Both read the craft info (its ExitCraftSpawnDelay, the timer's rate): mov rcx, [rcx+348h].
         bool bReadsExitCraftInfo = false;
         for (uintptr_t Load = End ? FindInstruction(Function, End, { -1, 0x8B, -1 }) : 0; Load && !bReadsExitCraftInfo; Load = FindInstruction(Load + 1, End, { -1, 0x8B, -1 }))
         {
             bReadsExitCraftInfo = (Byte(Load) == 0x48 || Byte(Load) == 0x49 || Byte(Load) == 0x4C || Byte(Load) == 0x4D) && (Byte(Load + 2) & 0xC0) == 0x80
                 && (Byte(Load + 2) & 7) != 4 && *reinterpret_cast<const int32_t*>(Load + 3) == static_cast<int32_t>(ExitCraftInfoOffset);
         }
-        // The delegate instance's method: lea rax, [shared empty function]; mov [reg+10h], rax (5.40 0xBAAF21, 0xBCB043),
-        // then the timer is set with it (call FTimerManager::InternalSetTimer).
         for (uintptr_t Lea = bReadsExitCraftInfo ? FindInstruction(Function, End, { 0x48, 0x8D, 0x05 }) : 0; Lea; Lea = FindInstruction(Lea + 1, End, { 0x48, 0x8D, 0x05 }))
         {
             const uint8_t ModRm = Byte(Lea + 9);
-            if (Finder::RelativeTarget(Lea, 3, 7) == SharedEmpty && (Byte(Lea + 7) == 0x48 || Byte(Lea + 7) == 0x49) && Byte(Lea + 8) == 0x89 && (ModRm & 0xF8) == 0x40
-                && (ModRm & 7) != 4 && Byte(Lea + 10) == 0x10 && CallWithin(Lea, 0x100, SetTimer))
+            const uintptr_t Method = Finder::RelativeTarget(Lea, 3, 7);
+            if (std::find(Methods.begin(), Methods.end(), Method) == Methods.end() || (Byte(Lea + 7) != 0x48 && Byte(Lea + 7) != 0x49) || Byte(Lea + 8) != 0x89
+                || (ModRm & 0xF8) != 0x40 || (ModRm & 7) == 4 || Byte(Lea + 10) != 0x10
+                || std::any_of(Binds.begin(), Binds.end(), [Lea](const Finder::FExitCraftSpawnerTimerBind& Bind) { return Bind.Lea == reinterpret_cast<uint8_t*>(Lea); }))
             {
-                Binds.push_back(reinterpret_cast<uint8_t*>(Lea));
+                continue;
             }
+            uintptr_t Call = 0;
+            for (uintptr_t Site = FindRawCall(Lea, Lea + 0x100); Site && !Call; Site = FindRawCall(Site + 1, Lea + 0x100))
+            {
+                Call = Finder::RelativeTarget(Site, 1, 5) == SetTimer ? Site : 0;
+            }
+            if (!Call)
+            {
+                continue;
+            }
+            // The handle: the last lea rdx, [r64+disp32] (not rsp or rbp based) before the call.
+            Finder::FExitCraftSpawnerTimerBind Bind;
+            Bind.Lea = reinterpret_cast<uint8_t*>(Lea);
+            for (uintptr_t Site = Call - 7; Site > Lea && Bind.Handle < 0; --Site)
+            {
+                const uint8_t HandleModRm = Byte(Site + 2);
+                if ((Byte(Site) == 0x48 || Byte(Site) == 0x49) && Byte(Site + 1) == 0x8D && (HandleModRm & 0xF8) == 0x90 && (HandleModRm & 7) != 4 && (HandleModRm & 7) != 5)
+                {
+                    const int32_t Handle = *reinterpret_cast<const int32_t*>(Site + 3);
+                    Bind.Handle = Handle > 0 && Handle < 0x4000 ? Handle : -1;
+                }
+            }
+            Binds.push_back(Bind);
         }
     }
     return Binds;
+}
+
+std::vector<uint8_t*> Finder::ExitCraftSpawnTimerBinds(UFunction* StartExitCraftSpawnTimer, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset)
+{
+    std::vector<uint8_t*> Binds;
+    const auto SharedEmpty = reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
+    if (!SharedEmpty)
+    {
+        return Binds;
+    }
+
+    // StartExitCraftSpawnTimer's exec (5.40 0x13BED00) steps nothing and jumps to its body (0xBCAF80); the spawner's
+    // BeginPlay sets the same timer, inlined. Both bind the shared empty function (5.40 0xBAAF21, 0xBCB043).
+    std::vector<uintptr_t> Candidates;
+    for (const uintptr_t Target : ExecTargets(StartExitCraftSpawnTimer))
+    {
+        if (Candidates.empty() && Finder::FunctionStart(Target) == Target)
+        {
+            Candidates.push_back(Target);
+        }
+    }
+    AddSpawnerOverrides(Candidates, SpawnerVTable, ActorVTable);
+    for (const FExitCraftSpawnerTimerBind& Bind : SpawnerTimerBinds(Candidates, ExitCraftInfoOffset, { SharedEmpty }))
+    {
+        Binds.push_back(Bind.Lea);
+    }
+    return Binds;
+}
+
+std::vector<Finder::FExitCraftSpawnerTimerBind> Finder::DestroyBlockingActorsBinds(UFunction* DestroyBlockingActors, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset)
+{
+    // DestroyBlockingActors' exec (5.40 0x13BDD40) steps nothing and jumps to what the build keeps of it (0xBB2710, a
+    // leaf without unwind data: BuildingActorsToDestroy.Reset()), which the spawner's BeginPlay binds to
+    // DestroyBuildingActorHandle with SpawnDestructionInitialDelay (lea rax, loc_BB2710 at 0xBAADB1).
+    std::vector<uintptr_t> Candidates;
+    AddSpawnerOverrides(Candidates, SpawnerVTable, ActorVTable);
+    return SpawnerTimerBinds(Candidates, ExitCraftInfoOffset, ExecTargets(DestroyBlockingActors));
 }
 
 bool Finder::ResolveManagedCharacterMovementLive(void** GameStateVTable, FManagedCharacterMovementSites& OutSites)

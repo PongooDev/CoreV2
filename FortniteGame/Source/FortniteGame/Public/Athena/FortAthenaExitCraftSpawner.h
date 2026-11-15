@@ -1,9 +1,13 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "Delegates/Delegate.h"
+#include "Engine/EngineTypes.h"
 #include "GameFramework/Actor.h"
 #include "ObjectLayout.h"
+#include "UObject/Stack.h"
 
+class ABuildingSMActor;
 class AFortAthenaExitCraft;
 class AFortAthenaExitCraftSpawner;
 class UFortAthenaExitCraftInfo;
@@ -20,15 +24,21 @@ class AFortAthenaExitCraftSpawner : public AActor
 {
     DefineUnrealClass(AFortAthenaExitCraftSpawner, FortniteGame)
     DefineUFunction(StartExitCraftSpawnTimer)
+    DefineUFunction(DestroyBlockingActors)
 
 public:
     DefineUProperty(UPrimitiveComponent*, DestructionOverlapCapsule)
     DefineUProperty(UFortAthenaExitCraftInfo*, ExitCraftInfo)
+    // The building pieces in the way of the van, which DestroyBlockingActors clears one at a time.
+    DefineUProperty(TArray<ABuildingSMActor*>, BuildingActorsToDestroy)
     // The id the spawner's special actor has on the game state's list, which RegisterSpawnerSpecialActor sets.
     DefineUProperty(FName, SpawnerSpecialActorID)
     static ptrdiff_t SpawnerSpecialActorIDOffset() { return StaticClass() && Member_SpawnerSpecialActorID.IsAvailable() ? Member_SpawnerSpecialActorID.GetOffsetChecked() : -1; }
     // Its first member (unreflected): what the mutator's OnExitCraftSpawned (5.40 0xC5A150) is bound to.
     DefineNativeObject(FOnExitCraftSpawned, OnExitCraftSpawned, AFortAthenaExitCraftSpawner_OnExitCraftSpawned)
+    // Unreflected (21.40's member after ExitCraftTimerHandle): the timer DestroyBlockingActors runs on. Its offset is
+    // the handle the build's BeginPlay sets that timer with (Finder::DestroyBlockingActorsBinds).
+    DefineNativeObject(FTimerHandle, DestroyBuildingActorHandle, AFortAthenaExitCraftSpawner_DestroyBuildingActorHandle)
 
     // The van comes: what ExitCraftTimerHandle calls once ExitCraftSpawnDelay is up. The client builds strip its body
     // (5.40 and 5.41 bind the shared empty function in its place), so no van came. It spawns the craft info's van
@@ -38,12 +48,20 @@ public:
     void SpawnExitCraft();
     // Takes the spawner's icon off every map and compass, as the supply drop's unregister does its own (5.40 0xBCC820).
     void UnregisterSpawnerSpecialActor();
+    // Clears the van's landing spot before it comes: the building pieces (trees, rocks, walls, player builds) inside
+    // DestructionOverlapCapsule die, one every SpawnDestructionDelayBetweenPieces, on DestroyBuildingActorHandle. The
+    // client builds keep only its last line (BuildingActorsToDestroy.Reset(), 5.40 0xBB2710), so nothing was cleared
+    // and the van fell into whatever stood there.
+    void DestroyBlockingActors();
+    DECLARE_FUNCTION(execDestroyBlockingActors);
 
     // From 5.40: SpawnExitCraft where the build's BeginPlay and StartExitCraftSpawnTimer bind the stripped body to
-    // ExitCraftTimerHandle (Hooks::RedirectAddress). Nothing on builds without exit crafts.
+    // ExitCraftTimerHandle, and DestroyBlockingActors where BeginPlay binds the build's to DestroyBuildingActorHandle
+    // (Hooks::RedirectAddress), and as DestroyBlockingActors' native. Nothing on builds without exit crafts.
     static void HookNatives();
 
 private:
-    // The method the timer's delegate calls (this in rcx, as a member function's).
+    // The methods the timers' delegates call (this in rcx, as a member function's).
     static void SpawnExitCraftHK(AFortAthenaExitCraftSpawner* This);
+    static void DestroyBlockingActorsHK(AFortAthenaExitCraftSpawner* This);
 };

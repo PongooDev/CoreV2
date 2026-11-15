@@ -1,8 +1,10 @@
 #pragma once
 
+#include "Containers/Array.h"
 #include "Math/Vector.h"
 #include "UObject/Object.h"
 
+class AActor;
 class USceneComponent;
 
 // Epic's FLatentActionInfo (Engine/LatentActionManager.h): where a latent action resumes once it is done. The world's
@@ -26,8 +28,14 @@ class UKismetSystemLibrary : public UObject
     DefineUFunction(K2_ClearTimer)
     DefineUFunction(DoesImplementInterface)
     DefineUFunction(LoadAsset)
+    DefineUFunction(CapsuleOverlapActors)
 
 public:
+    // The actors of ActorClassFilter (any when null) with a component of one of ObjectTypes (EObjectTypeQuery values:
+    // the collision profile's object type channels, in its order) inside an upright capsule, but those in
+    // ActorsToIgnore: the world's overlap query (UWorld::OverlapMultiByObjectType) with the capsule's shape. Empty when
+    // nothing is there or the build has no such function.
+    static TArray<AActor*> CapsuleOverlapActors(UObject* WorldContextObject, const FVector& CapsulePos, float Radius, float HalfHeight, const TArray<uint8_t>& ObjectTypes, UClass* ActorClassFilter, const TArray<AActor*>& ActorsToIgnore);
     // The Blueprint "Async Load Asset" (UKismetSystemLibrary::LoadAsset, 3.0's to 6.21's): AssetPath ("/Game/Package.Asset")
     // loads on the asset manager's FStreamableManager (RequestAsyncLoad, off the game thread, its objects' post-load spread
     // over frames), and once it has (or failed to), the world's latent action manager resumes LatentInfo. False where the

@@ -1015,6 +1015,9 @@ namespace Natives
     inline void (*FSpecialActorInitData_Destructor)(FSpecialActorInitData* This) = nullptr;
     // AFortAthenaExitCraftSpawner's unreflected OnExitCraftSpawned, its first member (5.40 and 5.41 +0x328, after AActor).
     inline ptrdiff_t AFortAthenaExitCraftSpawner_OnExitCraftSpawned = -1;
+    // Its unreflected DestroyBuildingActorHandle (5.40 +0x370): the handle its BeginPlay sets DestroyBlockingActors'
+    // timer with, Finder::DestroyBlockingActorsBinds.
+    inline ptrdiff_t AFortAthenaExitCraftSpawner_DestroyBuildingActorHandle = -1;
 
     // From 6.00 (dynamic foundations, the floating island's), Finder::ResolveBuildingFoundationLive, off
     // ABuildingFoundation::PostUpdate (6.00 0xD11960): SelectAndSetupMyBuildingLevel(RandomList) (0xD142E0, which picks

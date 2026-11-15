@@ -464,6 +464,19 @@ namespace Finder
     // InternalSetTimer): in StartExitCraftSpawnTimer's body and in the spawner's BeginPlay (its slots that differ from
     // ActorVTable's and read ExitCraftInfoOffset). Empty where none is found.
     std::vector<uint8_t*> ExitCraftSpawnTimerBinds(UFunction* StartExitCraftSpawnTimer, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset);
+    // A bind of a spawner timer's method: the `lea rax, [method]` site and the timer handle's offset in the spawner
+    // (the `lea rdx, [reg+handle]` InternalSetTimer is called with).
+    struct FExitCraftSpawnerTimerBind
+    {
+        uint8_t* Lea = nullptr;
+        ptrdiff_t Handle = -1;
+    };
+    // From 5.40: the sites in the spawner's BeginPlay (its slots that differ from ActorVTable's and read
+    // ExitCraftInfoOffset) that bind AFortAthenaExitCraftSpawner::DestroyBlockingActors to DestroyBuildingActorHandle's
+    // timer: `lea rax, [body]; mov [reg+10h], rax`, then InternalSetTimer. The body is where DestroyBlockingActors' exec
+    // jumps (5.40 0x13BDD40 to 0xBB2710, which the build keeps as BuildingActorsToDestroy.Reset()). Empty where none is
+    // found.
+    std::vector<FExitCraftSpawnerTimerBind> DestroyBlockingActorsBinds(UFunction* DestroyBlockingActors, void** SpawnerVTable, void** ActorVTable, ptrdiff_t ExitCraftInfoOffset);
     // AFortGameStateAthena's Add/RemoveManagedCharacterMovementComponent off its vtable: the two slots that hand the
     // component to the AI mutator before AFortGameState's own (see FManagedCharacterMovementSites). False on builds
     // without them (before 6.20).

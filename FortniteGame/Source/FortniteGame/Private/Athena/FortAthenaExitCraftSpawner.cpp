@@ -3,11 +3,17 @@
 #include "Athena/FortAthenaExitCraft.h"
 #include "Athena/FortAthenaExitCraftInfo.h"
 #include "Athena/FortGameStateAthena.h"
+#include "Building/BuildingActor.h"
+#include "Building/BuildingFoundation.h"
+#include "Building/BuildingSMActor.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortSpecialActorReplicationInfo.h"
+#include "GameplayTagContainer.h"
 #include "Hooks.h"
 #include "Kismet/GameplayStatics.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Log.h"
 #include "Logging/LogMacros.h"
 #include "Natives.h"
@@ -15,9 +21,45 @@
 #include "TimerManager.h"
 #include "UObject/Class.h"
 
+#include <algorithm>
+#include <cstring>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogAthenaExitCraftSpawner, Log, All);
+
+class AController;
+
+namespace
+{
+    // A building piece the clearing takes: one still standing, and neither a plot (ABuildingFoundation: its whole
+    // streamed building or POI goes with it) nor a piece the map keeps invulnerable.
+    bool IsBlockingPiece(ABuildingSMActor* Piece)
+    {
+        return Piece && !Piece->IsPendingKill() && !Piece->bDestroyed && !(ABuildingFoundation::StaticClass() && Piece->IsA(ABuildingFoundation::StaticClass()))
+            && !(ABuildingActor::HasInvulnerable() && Piece->bIsInvulnerable);
+    }
+
+    // The piece dies as a prop or tree in the way of a player's new piece does (AFortPlayerController's building:
+    // ABuildingActor::Die with Gameplay.Effect.InstantDeath.StructuralSupport, a gameplay tag passed by value), so every
+    // client sees it break. Where the build's Die isn't found it is just destroyed.
+    void KillPiece(ABuildingSMActor* Piece)
+    {
+        if (Natives::ABuildingActor_DieIndex < 0)
+        {
+            Finder::ResolveBuildingRestorationLive(ABuildingSMActor::EditingPlayerOffset());
+        }
+        if (Natives::ABuildingActor_DieIndex < 0)
+        {
+            Piece->K2_DestroyActor();
+            return;
+        }
+        const FGameplayTag StructuralDeath{ FName(L"Gameplay.Effect.InstantDeath.StructuralSupport") };
+        uint64_t TagBits = 0;
+        static_assert(sizeof(StructuralDeath) == sizeof(TagBits));
+        std::memcpy(&TagBits, &StructuralDeath, sizeof(TagBits));
+        CallVirtual<void>(Piece, Natives::ABuildingActor_DieIndex, TagBits, static_cast<AController*>(nullptr), static_cast<AActor*>(nullptr));
+    }
+}
 
 void AFortAthenaExitCraftSpawner::SpawnExitCraft()
 {
@@ -85,9 +127,113 @@ void AFortAthenaExitCraftSpawner::UnregisterSpawnerSpecialActor()
 #endif
 }
 
+void AFortAthenaExitCraftSpawner::DestroyBlockingActors()
+{
+#if WITH_SERVER_CODE
+    // The van's landing spot was never cleared (#458): the spawner's BeginPlay (5.40 0xBAACB0) sets
+    // DestroyBuildingActorHandle to call this after the craft info's SpawnDestructionInitialDelay, before the van is due,
+    // but the client builds keep only its last line (0xBB2710: BuildingActorsToDestroy.Reset()). Nothing else in 5.40 or
+    // 5.41 reads DestructionOverlapCapsule (made in the spawner's constructor, 0xBA3210), fills BuildingActorsToDestroy or
+    // reads SpawnDestructionDelayBetweenPieces, so those were this function's. Without it the van, a physics body that
+    // falls from ExitCraftZOffset (its Spawned state, 0xBD5830, lands it only once it has slowed to MinLandingSpeed, and
+    // only then do the next states lift it and turn it upright), came down on whatever stood at the safe zone, trees and
+    // houses (#458's van lay on its roof among trees). The pieces inside the capsule die one every
+    // SpawnDestructionDelayBetweenPieces, on DestroyBuildingActorHandle, as the members say; where the build gives no
+    // delay (or the handle wasn't found) they go at once.
+    UFortAthenaExitCraftInfo* Info = ExitCraftInfo;
+    UWorld* World = GetWorld();
+    if (Role != ROLE_Authority || !World || !Member_BuildingActorsToDestroy.IsAvailable())
+    {
+        return;
+    }
+
+    TArray<ABuildingSMActor*>& Pieces = GetMember_BuildingActorsToDestroy();
+    if (Pieces.Num() == 0)
+    {
+        // The pieces in the capsule: the world's overlap query with its shape (its bounds: the spawner turns only about
+        // Z, so the capsule stands upright), over every object type, for the building actors among what it finds.
+        UPrimitiveComponent* Capsule = DestructionOverlapCapsule;
+        FVector Origin;
+        FVector Extent;
+        float SphereRadius = 0.0f;
+        UKismetSystemLibrary::GetComponentBounds(Capsule, Origin, Extent, SphereRadius);
+        const float Radius = std::min(Extent.X, Extent.Y);
+        if (!Capsule || Radius <= 0.0f || Extent.Z <= 0.0f)
+        {
+            UE_LOG(LogAthenaExitCraftSpawner, Warning, TEXT("DestroyBlockingActors: %s has no capsule to clear"), *GetName());
+            return;
+        }
+        TArray<uint8_t> ObjectTypes;
+        for (uint8_t ObjectType = 0; ObjectType < 32; ++ObjectType)
+        {
+            ObjectTypes.Add(ObjectType);
+        }
+        TArray<AActor*> Ignored;
+        Ignored.Add(this);
+        TArray<AActor*> Found = UKismetSystemLibrary::CapsuleOverlapActors(this, Origin, Radius, Extent.Z, ObjectTypes, ABuildingSMActor::StaticClass(), Ignored);
+        for (int32_t Index = 0; Index < Found.Num(); ++Index)
+        {
+            ABuildingSMActor* Piece = Cast<ABuildingSMActor>(Found[Index]);
+            if (IsBlockingPiece(Piece))
+            {
+                Pieces.Add(Piece);
+            }
+        }
+        UE_LOG(LogAthenaExitCraftSpawner, Log, TEXT("DestroyBlockingActors: %s clears %d building pieces (capsule %.0f x %.0f at (%.0f, %.0f, %.0f))"), *GetName(), Pieces.Num(),
+            Radius, Extent.Z, Origin.X, Origin.Y, Origin.Z);
+    }
+
+    float Delay = 0.0f;
+    if (Info)
+    {
+        const FExitCraftInfo& CraftInfo = Info->ExitCraftInfo;
+        const FScalableFloat& DelayBetweenPieces = CraftInfo.SpawnDestructionDelayBetweenPieces;
+        Delay = DelayBetweenPieces.GetValueAtLevel(0.0f);
+    }
+    const bool bOneAtATime = Delay > 0.0f && Natives::AFortAthenaExitCraftSpawner_DestroyBuildingActorHandle >= 0;
+    while (Pieces.Num() > 0)
+    {
+        ABuildingSMActor* Piece = Pieces[Pieces.Num() - 1];
+        Pieces.RemoveAt(Pieces.Num() - 1);
+        if (IsBlockingPiece(Piece))
+        {
+            KillPiece(Piece);
+            if (bOneAtATime)
+            {
+                break;
+            }
+        }
+    }
+
+    if (Pieces.Num() > 0)
+    {
+        World->GetTimerManager().SetTimer(DestroyBuildingActorHandle, FTimerDelegate::CreateUObject(this, &AFortAthenaExitCraftSpawner::DestroyBlockingActors), Delay, false);
+        return;
+    }
+#endif
+    // What the build keeps: the list is done with.
+    if (Member_BuildingActorsToDestroy.IsAvailable())
+    {
+        GetMember_BuildingActorsToDestroy().Reset();
+    }
+}
+
+DEFINE_FUNCTION(AFortAthenaExitCraftSpawner::execDestroyBlockingActors)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortAthenaExitCraftSpawner*>(Context)->DestroyBlockingActors();
+    P_NATIVE_END;
+}
+
 void AFortAthenaExitCraftSpawner::SpawnExitCraftHK(AFortAthenaExitCraftSpawner* This)
 {
     This->SpawnExitCraft();
+}
+
+void AFortAthenaExitCraftSpawner::DestroyBlockingActorsHK(AFortAthenaExitCraftSpawner* This)
+{
+    This->DestroyBlockingActors();
 }
 
 void AFortAthenaExitCraftSpawner::HookNatives()
@@ -135,6 +281,37 @@ void AFortAthenaExitCraftSpawner::HookNatives()
     for (uint8_t* Bind : Binds)
     {
         Hooks::RedirectAddress(L"AFortAthenaExitCraftSpawner::SpawnExitCraft (ExitCraftTimerHandle)", Bind, reinterpret_cast<void*>(&SpawnExitCraftHK));
+    }
+
+    // The landing spot's clearing: BeginPlay binds what the build keeps of DestroyBlockingActors to
+    // DestroyBuildingActorHandle; DestroyBlockingActors takes its place there and sets that handle again for each next
+    // piece. Read before its native is replaced below (the finder follows the exec's jump).
+    UFunction* DestroyFunction = FindStaticFunction_DestroyBlockingActors();
+    const std::vector<Finder::FExitCraftSpawnerTimerBind> DestroyBinds = DestroyFunction && FTimerManager::ResolveNatives() && Member_ExitCraftInfo.IsAvailable()
+        ? Finder::DestroyBlockingActorsBinds(DestroyFunction, SpawnerVTable, ActorVTable, Member_ExitCraftInfo.GetOffsetChecked())
+        : std::vector<Finder::FExitCraftSpawnerTimerBind>();
+    const ptrdiff_t ActorSize = static_cast<ptrdiff_t>(ActorClass->GetPropertiesSize());
+    const ptrdiff_t SpawnerSize = static_cast<ptrdiff_t>(Class->GetPropertiesSize());
+    for (const Finder::FExitCraftSpawnerTimerBind& Bind : DestroyBinds)
+    {
+        // The handle is one of the spawner's own members.
+        if (Bind.Handle >= ActorSize && Bind.Handle + static_cast<ptrdiff_t>(sizeof(FTimerHandle)) <= SpawnerSize)
+        {
+            Natives::AFortAthenaExitCraftSpawner_DestroyBuildingActorHandle = Bind.Handle;
+        }
+        Hooks::RedirectAddress(L"AFortAthenaExitCraftSpawner::DestroyBlockingActors (DestroyBuildingActorHandle)", Bind.Lea, reinterpret_cast<void*>(&DestroyBlockingActorsHK));
+    }
+    if (DestroyBinds.empty())
+    {
+        Log::Error(L"Getaway: the van spawners' DestroyBlockingActors timer wasn't found, so their landing spots aren't cleared");
+    }
+    else
+    {
+        Log::Info(L"Getaway: DestroyBlockingActors bound at {} places, DestroyBuildingActorHandle +0x{:X}", DestroyBinds.size(), Natives::AFortAthenaExitCraftSpawner_DestroyBuildingActorHandle);
+    }
+    if (DestroyFunction && (Natives::FFrame_Code >= 0 || Finder::ResolveScriptFrame()))
+    {
+        DestroyFunction->SetNativeFunc(&execDestroyBlockingActors);
     }
 
     // The map icons the van and its spawner swap.

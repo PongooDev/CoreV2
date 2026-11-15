@@ -89,6 +89,20 @@ bool UKismetSystemLibrary::LineTraceSingle(UObject* WorldContextObject, const FV
     return true;
 }
 
+TArray<AActor*> UKismetSystemLibrary::CapsuleOverlapActors(UObject* WorldContextObject, const FVector& CapsulePos, float Radius, float HalfHeight, const TArray<uint8_t>& ObjectTypes, UClass* ActorClassFilter, const TArray<AActor*>& ActorsToIgnore)
+{
+    // ObjectTypes is a TArray<TEnumAsByte<EObjectTypeQuery>>, a byte each.
+    UFunction* Function = FindStaticFunction_CapsuleOverlapActors();
+    Reflection::FParams Params(Function, true);
+    if (!Function || !WorldContextObject || !Params.Set(L"WorldContextObject", WorldContextObject) || !Params.Set(L"CapsulePos", CapsulePos) || !Params.Set(L"Radius", Radius)
+        || !Params.Set(L"HalfHeight", HalfHeight) || !Params.Set(L"ObjectTypes", ObjectTypes) || !Params.Set(L"ActorClassFilter", ActorClassFilter)
+        || !Params.Set(L"ActorsToIgnore", ActorsToIgnore) || !Params.Call(StaticClass()->GetDefaultObject()))
+    {
+        return TArray<AActor*>();
+    }
+    return Params.Take<TArray<AActor*>>(L"OutActors");
+}
+
 bool UKismetSystemLibrary::K2_SetTimer(UObject* Object, const wchar_t* FunctionName, float Time, bool bLooping)
 {
     UFunction* Function = FindStaticFunction_K2_SetTimer();

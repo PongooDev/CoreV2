@@ -37,7 +37,13 @@ class AFortAthenaVehicle : public APawn
     // vehicle's ServerStartFire (21.40 AFortAthenaVehicle::ServerStartFire_Implementation, slot after ServerUsingRiftPortal).
     DefineUFunction(ServerStartFire)
     DefineUFunction(GetDriver)
+    // The vehicle's seat exit broadcasts (21.40: OnPawnExitedVehicleSeat 0x770, OnPawnExitedVehicleFromSeat 0x780).
+    // 6.31's player controller has no OnFullyExitVehicle, so these are the exit trigger there.
+    DefineUProperty(FMulticastScriptDelegate, OnPawnExitedVehicleSeat)
+    DefineUProperty(FMulticastScriptDelegate, OnPawnExitedVehicleFromSeat)
     DefineUStructProperty(FReplicatedAthenaVehicleInputState, ReplicatedInputParams)
+    static bool HasOnPawnExitedVehicleSeat() { return Member_OnPawnExitedVehicleSeat.IsAvailable(); }
+    static bool HasOnPawnExitedVehicleFromSeat() { return Member_OnPawnExitedVehicleFromSeat.IsAvailable(); }
 
 public:
     void ServerUpdatePhysicsParams_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState);

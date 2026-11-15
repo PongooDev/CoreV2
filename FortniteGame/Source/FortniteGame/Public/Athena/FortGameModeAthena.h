@@ -15,6 +15,7 @@ class ABuildingSMActor;
 class AFortPlayerController;
 class AFortPlayerControllerAthena;
 class AFortPlayerStateAthena;
+class AFortAthenaVehicle;
 class AFortPawn;
 class APawn;
 class UObject;
@@ -302,8 +303,10 @@ private:
     static void BindVehicleEvents(AFortPlayerController* Player);
     static void RecordVehicleForPlayer(AFortPlayerController* Player);
     static void CleanupVehicleSeatWeapon(AFortPlayerController* Player);
+    static void CleanupVehicleSeatWeapon(AFortAthenaVehicle* Vehicle, AFortPlayerController* Player, int32_t SeatIndex);
     DECLARE_FUNCTION(execHandleVehicleChanged);
     DECLARE_FUNCTION(execHandleVehicleFullyExited);
+    DECLARE_FUNCTION(execHandleVehicleSeatExited);
     DECLARE_FUNCTION(execHandleGamePhaseChanged);
     DECLARE_FUNCTION(execHandleGamePhaseStepChanged);
     DECLARE_FUNCTION(execHandleSafeZoneUpdated);

@@ -402,7 +402,7 @@ namespace Finder
     uint8_t* SharedEmptyCallInImplementation(UFunction* Function);
     bool ResolveInventoryLive();
     bool ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff_t WorldItemEntryOffset);
-    bool ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t ItemEntryOffset);
+    bool ResolveWorldItemSetNumInStackLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t ItemEntryOffset);
     bool ResolveItemEntryStateLive();
     bool ResolveNeverPersistItemDefinitionLive();
     bool ResolveDisassemblyLive(UFunction* ServerDisassembleInventoryItem, UObject* PlayerControllerDefault);

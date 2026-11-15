@@ -10229,9 +10229,9 @@ bool Finder::ResolveBackpackLive(ptrdiff_t PrimaryPickupItemEntryOffset, ptrdiff
     return true;
 }
 
-bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t ItemEntryOffset)
+bool Finder::ResolveWorldItemSetNumInStackLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t ItemEntryOffset)
 {
-    if (Natives::UFortWorldItem_SetItemCountIndex >= 0)
+    if (Natives::UFortWorldItem_SetNumInStackIndex >= 0)
     {
         return true;
     }
@@ -10271,7 +10271,7 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
     void** WorldItemVTable = CdoVTable(L"/Script/FortniteGame.FortWorldItem");
     // What the slot's body is: it loads the item's entry, and tests the definition's type (cmp byte ptr [rax], 3).
     // lea reg, [reg+ItemEntry]: lea rdi, [rbx+...] (48 8D BB) up to 1.7.2, lea rcx, [rdi+...] (48 8D 8F) on 1.8.
-    const auto IsSetItemCountBody = [ItemEntryOffset](uintptr_t Function, uintptr_t End)
+    const auto IsSetNumInStackBody = [ItemEntryOffset](uintptr_t Function, uintptr_t End)
     {
         if (!Function || End <= Function)
         {
@@ -10285,15 +10285,15 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
         }
         return bLoadsItemEntry && FindInstruction(Function, End, { 0x80, 0x38, 0x03 }) != 0;
     };
-    const auto IsSetItemCountSlot = [WorldItemVTable, &IsSetItemCountBody](int32_t Slot)
+    const auto IsSetNumInStackSlot = [WorldItemVTable, &IsSetNumInStackBody](int32_t Slot)
     {
         const uintptr_t Function = VTableEntry(WorldItemVTable, Slot);
-        return Function && IsSetItemCountBody(Function, Finder::FunctionEnd(Function));
+        return Function && IsSetNumInStackBody(Function, Finder::FunctionEnd(Function));
     };
 
     const uintptr_t CountCall = RegenCompare ? FindInstruction(RegenCompare, RegenFunctionEnd, { 0xFF, 0x93 }) : 0;
     int32_t Index = CountCall ? VirtualSlot(CountCall) : -1;
-    if (Index > 0 && !IsSetItemCountSlot(Index))
+    if (Index > 0 && !IsSetNumInStackSlot(Index))
     {
         Index = -1;
     }
@@ -10311,7 +10311,7 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
             const uintptr_t Anchor = End > Function ? FindDisplacement(Function, End, { 0x48, 0x8D, -1 }, RegenCooldownOffset) : 0;
             for (uintptr_t Call = Anchor ? FindVirtualCall(Anchor, End) : 0; Call; Call = FindVirtualCall(Call + 1, End))
             {
-                if (IsSetItemCountSlot(VirtualSlot(Call)))
+                if (IsSetNumInStackSlot(VirtualSlot(Call)))
                 {
                     Index = VirtualSlot(Call);
                     break;
@@ -10324,20 +10324,20 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
     // class's vtable ends, so a subclass that inherits the same function meets it first.
     if (Index < 0 && !bAmbiguous)
     {
-        Index = FirstVTableIndexWhere(WorldItemVTable, [&IsSetItemCountBody](uintptr_t Function)
+        Index = FirstVTableIndexWhere(WorldItemVTable, [&IsSetNumInStackBody](uintptr_t Function)
         {
-            return IsSetItemCountBody(Function, Finder::FunctionEnd(Function));
+            return IsSetNumInStackBody(Function, Finder::FunctionEnd(Function));
         });
     }
 
     if (bAmbiguous || Index < 0)
     {
-        Log::Error(L"Finder: UFortWorldItem::SetItemCount slot not found");
+        Log::Error(L"Finder: UFortWorldItem::SetNumInStack slot not found");
         return false;
     }
 
-    Natives::UFortWorldItem_SetItemCountIndex = Index;
-    Log::Info(L"Finder: UFortWorldItem::SetItemCount is slot 0x{:X}", Index);
+    Natives::UFortWorldItem_SetNumInStackIndex = Index;
+    Log::Info(L"Finder: UFortWorldItem::SetNumInStack is slot 0x{:X}", Index);
     return true;
 }
 

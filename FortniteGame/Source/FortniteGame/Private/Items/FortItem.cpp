@@ -387,15 +387,15 @@ void UFortWorldItem::SetOwningControllerForTemporaryItem(AFortPlayerController* 
     Params.Call(this);
 }
 
-bool UFortWorldItem::SetItemCount(int32_t NewCount)
+bool UFortWorldItem::SetNumInStack(int32_t NewCount)
 {
-    if (Natives::UFortWorldItem_SetItemCountIndex < 0 && !Finder::ResolveWorldItemCountLive(UFortAmmoItemDefinition::RegenCooldownOffset(), ItemEntryOffset()))
+    if (Natives::UFortWorldItem_SetNumInStackIndex < 0 && !Finder::ResolveWorldItemSetNumInStackLive(UFortAmmoItemDefinition::RegenCooldownOffset(), ItemEntryOffset()))
     {
         return false;
     }
 
-    using FSetItemCount = bool (*)(UFortWorldItem* This, int32_t NewCount);
-    return reinterpret_cast<FSetItemCount>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItem_SetItemCountIndex])(this, NewCount);
+    using FSetNumInStack = bool (*)(UFortWorldItem* This, int32_t NewCount);
+    return reinterpret_cast<FSetNumInStack>((*reinterpret_cast<void* const* const*>(this))[Natives::UFortWorldItem_SetNumInStackIndex])(this, NewCount);
 }
 
 ptrdiff_t UFortWorldItem::ItemEntryOffset()

@@ -107,7 +107,7 @@ void AFortInventory::UpdateWorldItemCount(UFortWorldItem* WorldItem, int32_t New
         return;
     }
 
-    WorldItem->SetItemCount(NewCount);
+    WorldItem->SetNumInStack(NewCount);
     HandleInventoryLocalUpdate();
 #endif
 }

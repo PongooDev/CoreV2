@@ -2388,7 +2388,7 @@ namespace
     // Those are the items the player's abilities spend as an Item cost (AbilityChargeItems), and every ammo item with a
     // RegenCooldown (AmmoDataBotTurret: 240 s), whose world item keeps a timer while its count is under the regen stack.
     // Each one under its stack size is set full through the inventory, as that timer does: the world item's own
-    // SetItemCount clears the timer once the count is full, and the count replicates, so the client's slot shows the
+    // SetNumInStack clears the timer once the count is full, and the count replicates, so the client's slot shows the
     // gadget ready. One the player had that is gone from the inventory is given back. Once they are full, a use doesn't
     // take from them (UFortCheatManager::KeepsAbilityCharge); this fills them when nocooldown goes on and when the player
     // gets a pawn (ReapplyBoosts: a respawn's hero kit). How many items it refilled.

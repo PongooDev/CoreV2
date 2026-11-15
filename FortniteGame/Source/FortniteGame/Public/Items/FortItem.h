@@ -118,7 +118,7 @@ public:
     DefineUFunction(SetOwningControllerForTemporaryItem)
 
     void SetOwningControllerForTemporaryItem(AFortPlayerController* InController);
-    bool SetItemCount(int32_t NewCount);
+    bool SetNumInStack(int32_t NewCount);
     bool SetLoadedAmmo(int32_t NewLoadedAmmo);
     bool SetDurability(float NewDurability);
 

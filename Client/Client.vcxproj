@@ -337,6 +337,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortHomebaseSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Abilities\FortPlayerAttrSet.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Animation\FortAnimNotify_TriggerGameplayAbility.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBarrierFlag.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBarrierObjective.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBigBaseWall.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortArenaCamera.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaAircraft.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\FortAthenaExitCraft.h" />
@@ -363,6 +366,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AI\CoreAthenaBotController.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AI\CoreAthenaBotManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_AI.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Barrier.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BGAConsumableSpawner.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingActor.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Building\BuildingContainer.h" />
@@ -571,6 +575,9 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AI\Navigation\FortNavigationGraph.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortAbilitySystemComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Abilities\FortGameplayAbility.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierFlag.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierObjective.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBigBaseWall.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaExitCraft.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaExitCraftSpawner.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\FortAthenaMapInfo.cpp" />
@@ -591,6 +598,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AI\CoreAthenaBotController.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AI\CoreAthenaBotManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_AI.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Barrier.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BGAConsumableSpawner.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingActor.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Building\BuildingContainer.cpp" />

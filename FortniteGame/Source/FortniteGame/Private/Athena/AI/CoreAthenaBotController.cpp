@@ -27,6 +27,7 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Athena/Mutators/FortAthenaMutator_Barrier.h"
 #include "Engine/AssetManager.h"
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
@@ -1609,6 +1610,20 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
                     bChanged = true;
                     break;
                 }
+            }
+        }
+        // The playlist's mutators' parts over the outfit's, as a player's ApplyCharacterCustomization takes them from the
+        // game state (its GatherCustomCharacterPartOverrides), which it asks only for a player controller's player
+        // state: 6.30's Food Fight hats, the team's burger or tomato (CoreV2 #451).
+        std::vector<UCustomCharacterPart*> OverrideParts;
+        AFortAthenaMutator_Barrier::GatherCustomCharacterPartOverrides(World, static_cast<uint8_t>(State->TeamIndex), OverrideParts);
+        for (UCustomCharacterPart* Part : OverrideParts)
+        {
+            const EFortCustomPartType PartType = static_cast<EFortCustomPartType>(Part->CharacterPartType);
+            if (PartType < EFortCustomPartType::GetNumTypes() && State->GetCharacterPart(PartType) != Part)
+            {
+                State->GetCharacterPart(PartType) = Part;
+                bChanged = true;
             }
         }
         if (bChanged)

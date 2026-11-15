@@ -1300,6 +1300,18 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AI\CoreAthenaBotManager.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena\AI</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBarrierFlag.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBarrierObjective.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\AthenaBigBaseWall.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_Barrier.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Athena\Mutators</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Athena\Mutators\FortAthenaMutator_AI.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Athena\Mutators</Filter>
     </ClInclude>
@@ -1969,6 +1981,18 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AI\CoreAthenaBotManager.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena\AI</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierFlag.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBarrierObjective.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\AthenaBigBaseWall.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_Barrier.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Athena\Mutators\FortAthenaMutator_AI.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Athena\Mutators</Filter>

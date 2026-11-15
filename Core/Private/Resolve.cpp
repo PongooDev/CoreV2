@@ -12533,6 +12533,58 @@ uint8_t* Finder::StartGhostModeGiveItemCall()
     return reinterpret_cast<uint8_t*>(StubCalls[0]);
 }
 
+namespace
+{
+    // The calls to the stripped UFortKismetLibrary::K2_SpawnPickupInWorld in a mutator's own overrides that read its
+    // property PropertyName: the return-null stub the native's exec calls (SpawnPickupInWorld still has the game's exec),
+    // looked for only in the functions of ClassPath's vtable that differ from AFortAthenaMutator's and read the property
+    // ("mulss xmm0, [r14+490h]" and the like). OutFunction: the override the calls are in (the last one, where several
+    // have them). Empty where the class or the property isn't in the build.
+    std::vector<uintptr_t> MutatorSpawnPickupInWorldCalls(const wchar_t* ClassPath, const wchar_t* PropertyName, UFunction* SpawnPickupInWorld, uintptr_t& OutStub, uintptr_t& OutFunction)
+    {
+        std::vector<uintptr_t> StubCalls;
+        OutStub = 0;
+        OutFunction = 0;
+        UClass* MutatorClass = FindObject<UClass>(nullptr, ClassPath);
+        const UProperty* Property = MutatorClass ? MutatorClass->FindPropertyByName(FName(PropertyName, FNAME_Find)) : nullptr;
+        if (!Property)
+        {
+            return StubCalls;
+        }
+        void** OwnVTable = CdoVTable(ClassPath);
+        void** MutatorVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator");
+        const uintptr_t ExecCall = reinterpret_cast<uintptr_t>(Finder::ImplementationCall(SpawnPickupInWorld));
+        OutStub = ExecCall ? Finder::RelativeTarget(ExecCall, 1, 5) : 0;
+        const int32_t Offset = Property->GetOffset_ForInternal();
+        uintptr_t Function = 0;
+        for (int32_t Slot = 0; OwnVTable && MutatorVTable && Finder::IsStubFunction(OutStub) && Slot < 0x200; ++Slot)
+        {
+            const uintptr_t Own = reinterpret_cast<uintptr_t>(OwnVTable[Slot]);
+            const uintptr_t Base = reinterpret_cast<uintptr_t>(MutatorVTable[Slot]);
+            if (!IsInText(Own) || !IsInText(Base))
+            {
+                break;
+            }
+            // The mutator's own overrides, each looked at once.
+            const uintptr_t OwnEnd = Own != Base && Own != Function && Finder::FunctionStart(Own) == Own ? Finder::FunctionEnd(Own) : 0;
+            if (OwnEnd <= Own || !FindInstruction(Own, OwnEnd, { Offset & 0xFF, (Offset >> 8) & 0xFF, (Offset >> 16) & 0xFF, (Offset >> 24) & 0xFF }))
+            {
+                continue;
+            }
+            for (const auto& [Site, Target] : Finder::DirectCalls(Own, OwnEnd))
+            {
+                if (Target == OutStub)
+                {
+                    StubCalls.push_back(Site);
+                    Function = Own;
+                }
+            }
+        }
+        OutFunction = Function;
+        return StubCalls;
+    }
+}
+
 uint8_t* Finder::DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld)
 {
     // 6.01's Disco Domination. While its players respawn, a dead one leaves a share of each ammo stack behind:
@@ -12550,40 +12602,13 @@ uint8_t* Finder::DiscoPawnDeathSpawnPickupCall(UFunction* SpawnPickupInWorld)
     {
         return nullptr;
     }
-    void** DiscoVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator_Disco");
-    void** MutatorVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator");
-    const uintptr_t ExecCall = reinterpret_cast<uintptr_t>(Finder::ImplementationCall(SpawnPickupInWorld));
-    const uintptr_t Stub = ExecCall ? Finder::RelativeTarget(ExecCall, 1, 5) : 0;
-    const int32_t Percent = PercentProperty->GetOffset_ForInternal();
-    std::vector<uintptr_t> StubCalls;
+    uintptr_t Stub = 0;
     uintptr_t Function = 0;
-    for (int32_t Slot = 0; DiscoVTable && MutatorVTable && Finder::IsStubFunction(Stub) && Slot < 0x200; ++Slot)
-    {
-        const uintptr_t Own = reinterpret_cast<uintptr_t>(DiscoVTable[Slot]);
-        const uintptr_t Base = reinterpret_cast<uintptr_t>(MutatorVTable[Slot]);
-        if (!IsInText(Own) || !IsInText(Base))
-        {
-            break;
-        }
-        // The mutator's own overrides, each looked at once.
-        const uintptr_t OwnEnd = Own != Base && Own != Function && Finder::FunctionStart(Own) == Own ? Finder::FunctionEnd(Own) : 0;
-        if (OwnEnd <= Own || !FindInstruction(Own, OwnEnd, { Percent & 0xFF, (Percent >> 8) & 0xFF, (Percent >> 16) & 0xFF, (Percent >> 24) & 0xFF }))
-        {
-            continue;
-        }
-        for (const auto& [Site, Target] : Finder::DirectCalls(Own, OwnEnd))
-        {
-            if (Target == Stub)
-            {
-                StubCalls.push_back(Site);
-                Function = Own;
-            }
-        }
-    }
+    const std::vector<uintptr_t> StubCalls = MutatorSpawnPickupInWorldCalls(L"/Script/FortniteGame.FortAthenaMutator_Disco", L"CachedPercentAmmoToDrop", SpawnPickupInWorld, Stub, Function);
     if (StubCalls.size() != 1)
     {
         Log::Error(L"Finder: AFortAthenaMutator_Disco's stripped K2_SpawnPickupInWorld was not found (the exec's stub {}, {} calls to it in the mutator's functions that read CachedPercentAmmoToDrop +0x{:X}), Disco Domination's dead leave no ammo",
-            Finder::IsStubFunction(Stub) ? L"found" : L"not found", StubCalls.size(), Percent);
+            Finder::IsStubFunction(Stub) ? L"found" : L"not found", StubCalls.size(), PercentProperty->GetOffset_ForInternal());
         return nullptr;
     }
     Log::Info(L"Finder: AFortAthenaMutator_Disco::AFortGameModeAthena_OnPawnDeathBeforeRespawning (0x{:X}) drops its ammo with the stripped K2_SpawnPickupInWorld at 0x{:X}",
@@ -12653,6 +12678,43 @@ std::vector<uint8_t*> Finder::ItemDropOnDeathSpawnPickupCalls(UFunction* SpawnPi
     Log::Info(L"Finder: AFortAthenaMutator_ItemDropOnDeath::AFortGameModeAthena_OnPawnDeathBeforeRespawning (0x{:X}) drops its ammo and items with the stripped K2_SpawnPickupInWorld at 0x{:X} and 0x{:X}",
         Function - Finder::ImageBase(), reinterpret_cast<uintptr_t>(Sites[0]) - Finder::ImageBase(), reinterpret_cast<uintptr_t>(Sites[1]) - Finder::ImageBase());
     return Sites;
+}
+
+std::vector<uint8_t*> Finder::BarrierPawnDeathSpawnPickupCalls(UFunction* SpawnPickupInWorld)
+{
+    // 6.30's Food Fight (Playlist_Barrier). A player who dies while their team still respawns leaves PercentAmmoToDrop of
+    // each ammo stack and the mutator's ItemsToDrop (Mutator_Barrier_C: AthenaCompositeGD_Barrier's
+    // Default.ResourceToDrop.Metal, .Stone and .Wood) where they fell: AFortAthenaMutator_Barrier's
+    // AFortGameModeAthena_OnPawnDeathBeforeRespawning (6.30 CL-4573096 0xD2CBC0, slot 0xC9), which the pawn's death
+    // reaches through the game mode's walk of its mutators (0xCAC1C0, from 0xD07AE0). It reads PercentAmmoToDrop,
+    // AmmoDespawnTime and AmmoStormDespawnTime first (+0x718, +0x738, +0x758), acts only for a team whose FBarrierTeamState
+    // has bRespawnEnabled, and for each ammo stack and each ItemsToDrop entry calls
+    // UFortKismetLibrary::K2_SpawnPickupInWorld(GetWorld(), ItemDefinition, Count, PawnLocation, Direction, 0, true,
+    // true, false) (0xD2CF24 and 0xD2D0D9), then gives the pickup the despawn times (0x109ACE0). Both calls go to the
+    // native's return-null stub, so nothing dropped. Builds without the mutator have none, nor do those whose mutator
+    // has no PercentAmmoToDrop yet (6.22 CL-4543176 has the class, without it or a playlist that uses it).
+    std::vector<uint8_t*> Calls;
+    UClass* BarrierClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_Barrier");
+    if (!BarrierClass || !BarrierClass->FindPropertyByName(FName(L"PercentAmmoToDrop", FNAME_Find)))
+    {
+        return Calls;
+    }
+    uintptr_t Stub = 0;
+    uintptr_t Function = 0;
+    const std::vector<uintptr_t> StubCalls = MutatorSpawnPickupInWorldCalls(L"/Script/FortniteGame.FortAthenaMutator_Barrier", L"PercentAmmoToDrop", SpawnPickupInWorld, Stub, Function);
+    if (StubCalls.size() != 2)
+    {
+        Log::Error(L"Finder: AFortAthenaMutator_Barrier's stripped K2_SpawnPickupInWorld calls were not found (the exec's stub {}, {} calls to it in the mutator's functions that read PercentAmmoToDrop), Food Fight's dead leave no ammo or materials",
+            Finder::IsStubFunction(Stub) ? L"found" : L"not found", StubCalls.size());
+        return Calls;
+    }
+    Log::Info(L"Finder: AFortAthenaMutator_Barrier::AFortGameModeAthena_OnPawnDeathBeforeRespawning (0x{:X}) drops the ammo and the materials with the stripped K2_SpawnPickupInWorld at 0x{:X} and 0x{:X}",
+        Function - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase(), StubCalls[1] - Finder::ImageBase());
+    for (const uintptr_t Site : StubCalls)
+    {
+        Calls.push_back(reinterpret_cast<uint8_t*>(Site));
+    }
+    return Calls;
 }
 
 Finder::FGadgetOverrideCalls Finder::GadgetOverrideCalls(ptrdiff_t GadgetPriorityOffset, ptrdiff_t AnimBPOverrideOffset, ptrdiff_t FootstepBankOverrideOffset)

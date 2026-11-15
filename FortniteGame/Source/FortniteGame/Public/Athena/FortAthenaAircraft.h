@@ -1,6 +1,19 @@
 #pragma once
 
 #include "GameFramework/Actor.h"
+#include "Math/Rotator.h"
+#include "Math/Vector.h"
+
+// One bus's path (AFortGameStateAthena's TeamFlightPaths and FlightPathMidLine): where it starts (an
+// FVector_NetQuantize100, an FVector), its heading, and how long it flies.
+struct FAircraftFlightInfo
+{
+    DefineUnrealStruct(FAircraftFlightInfo, FortniteGame)
+    DefineUProperty(FVector, FlightStartLocation)
+    DefineUProperty(FRotator, FlightStartRotation)
+    DefineUProperty(float, FlightSpeed)
+    DefineUProperty(float, TimeTillFlightEnd)
+};
 
 // Battle Royale's battle bus (from 1.7.2; AthenaAircraft_C). While it flies it is the start spot of every player in it
 // (AFortGameModeAthena::ChoosePlayerStart, 0x3CA260), when they jump and at the forced drop at the end of its path.

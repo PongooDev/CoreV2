@@ -341,6 +341,11 @@ namespace Finder
     // AFortAthenaMutator_ItemDropOnDeath's AFortGameModeAthena_OnPawnDeathBeforeRespawning, which drop a dead player's
     // ammo and the mutator's ItemsToDrop (materials). Empty on builds without the mutator.
     std::vector<uint8_t*> ItemDropOnDeathSpawnPickupCalls(UFunction* SpawnPickupInWorld);
+    // From 6.30 (Food Fight): the two calls to the stripped UFortKismetLibrary::K2_SpawnPickupInWorld in
+    // AFortAthenaMutator_Barrier's AFortGameModeAthena_OnPawnDeathBeforeRespawning, which drop a share of a dead player's
+    // ammo and the mutator's ItemsToDrop (the materials) while their team still respawns. Empty on builds without the
+    // mutator, or where the two weren't found.
+    std::vector<uint8_t*> BarrierPawnDeathSpawnPickupCalls(UFunction* SpawnPickupInWorld);
     // From 6.21 (the Butterfly): the call to the stripped AFortPlayerPawnAthena::ForceReviveFromDBNO in
     // AFortAthenaMutator_ButterflyEvent's pawn gathering, made for a downed pawn (its bIsDBNO at IsDBNOOffset). Null on
     // builds without the mutator, without ForceReviveFromDBNO, or that keep it.

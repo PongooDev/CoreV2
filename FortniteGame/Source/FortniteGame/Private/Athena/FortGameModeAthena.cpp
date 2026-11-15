@@ -10,6 +10,7 @@
 #include "Athena/FortAthenaVehicle.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
+#include "Athena/Mutators/FortAthenaMutator_Barrier.h"
 #include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingContainer.h"
 #include "Items/FortInventory.h"
@@ -2936,6 +2937,14 @@ void AFortGameModeAthena::HandleGamePhaseStepChanged()
 {
 #if WITH_SERVER_CODE
     ReportGamePhaseStep(L"the game state's step changed");
+    // Food Fight (6.30): the same broadcast is the one the Barrier mutator's own OnGamePhaseStepChanged hears (its
+    // BeginPlay binds it); its server part, which the build doesn't have, runs from here.
+    AFortGameStateAthena* StepGameState = AthenaGameStateOf(this);
+    if (StepGameState && AFortGameStateAthena::HasGamePhaseStep())
+    {
+        AFortAthenaMutator_Barrier::ForEachBarrierMutator(this, [](AFortAthenaMutator_Barrier* Barrier, AFortGameModeAthena* GameMode, uint8_t Step) { Barrier->OnGamePhaseStepChanged(GameMode, Step); },
+            static_cast<uint8_t>(StepGameState->GamePhaseStep));
+    }
 #endif
 }
 

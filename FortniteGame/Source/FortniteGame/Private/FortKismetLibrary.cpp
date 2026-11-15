@@ -713,6 +713,18 @@ void UFortKismetLibrary::HookNatives()
         Hooks::RedirectCall(L"AFortAthenaMutator_ItemDropOnDeath::AFortGameModeAthena_OnPawnDeathBeforeRespawning -> UFortKismetLibrary::K2_SpawnPickupInWorld", SpawnPickupCall,
             reinterpret_cast<void*>(static_cast<FSpawnPickupInWorld>(&K2_SpawnPickupInWorld)));
     }
+
+    // 6.30's Food Fight. A player who dies while their team still respawns leaves Barrier.PercentAmmoToDrop of each ammo
+    // stack and the mutator's ItemsToDrop (30 wood, 30 stone and 60 metal from AthenaCompositeGD_Barrier) where they
+    // fell, and keeps everything else: the Barrier mutator's AFortGameModeAthena_OnPawnDeathBeforeRespawning spawns those
+    // pickups with K2_SpawnPickupInWorld, two calls that reach the stripped native, so nothing dropped. They pass the
+    // native's nine parameters, as Disco's does.
+    for (uint8_t* SpawnPickupCall : Finder::BarrierPawnDeathSpawnPickupCalls(StaticFunction_K2_SpawnPickupInWorld()))
+    {
+        using FSpawnPickupInWorld = AFortPickup* (*)(UObject*, UFortWorldItemDefinition*, int32_t, const FVector&, const FVector&, int32_t, bool, bool, bool);
+        Hooks::RedirectCall(L"AFortAthenaMutator_Barrier::AFortGameModeAthena_OnPawnDeathBeforeRespawning -> UFortKismetLibrary::K2_SpawnPickupInWorld", SpawnPickupCall,
+            reinterpret_cast<void*>(static_cast<FSpawnPickupInWorld>(&K2_SpawnPickupInWorld)));
+    }
 #endif
 
     for (const auto& [Function, Native, Name] : {

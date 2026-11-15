@@ -1,10 +1,10 @@
 #pragma once
 
+#include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "FortGameState.h"
 #include "UObject/ScriptDelegates.h"
 
-class AFortAthenaAircraft;
 class AFortAthenaMapInfo;
 class AFortSafeZoneIndicator;
 class AFortSpecialActorReplicationInfo;
@@ -39,6 +39,18 @@ class EAthenaGamePhaseStep
 };
 
 // Battle Royale's game state (from 1.7.2; Athena_GameState_C).
+// What a mutator tells the match's clients (from 6.01): the game state replicates it, and each client's
+// OnRep_MutatorEventData broadcasts MutatorGameplayEvent, which the mode's mutator binds (AFortAthenaMutator_Barrier's
+// OnMutatorGameplayEvent, 6.30 0xD47B30, shows the GameMsg of the EventId). The server only sets it.
+struct FGameplayMutatorEventData
+{
+    DefineUnrealStruct(FGameplayMutatorEventData, FortniteGame)
+    DefineUProperty(int32_t, EventId)
+    DefineUProperty(int32_t, EventParam1)
+    DefineUProperty(int32_t, EventParam2)
+    DefineUProperty(int32_t, EventParam3)
+};
+
 class AFortGameStateAthena : public AFortGameStateZone
 {
     DefineUnrealClass(AFortGameStateAthena, FortniteGame)
@@ -192,6 +204,13 @@ public:
     // the fall damage, 0xC00470, the time of day at the match's start, 0xC27290, the items a death drops, 0xC26970).
     DefineUProperty(TArray<UObject*>, GameplayMutators)
     static ptrdiff_t GameplayMutatorsOffset() { return Member_GameplayMutators.IsAvailable() ? Member_GameplayMutators.GetOffsetChecked() : -1; }
+    // From 6.30 (Food Fight's OpposingAirCraftForEachTeam): a bus path for each of the playlist's teams, in their order,
+    // and the line between them, along which the Barrier mutator's wall stands. Replicated.
+    DefineUStructArrayProperty(FAircraftFlightInfo, TeamFlightPaths)
+    DefineUStructProperty(FAircraftFlightInfo, FlightPathMidLine)
+    static bool HasTeamFlightPaths() { return Member_TeamFlightPaths.IsAvailable() && Member_FlightPathMidLine.IsAvailable(); }
+    DefineUStructProperty(FGameplayMutatorEventData, MutatorEventData)
+    static bool HasMutatorEventData() { return Member_MutatorEventData.IsAvailable(); }
     // Whether the match brings its players back after they die. Reflected (and replicated) from 6.01; an unreflected
     // flag of the game state before (from 4.2). The game mode's OnPlaylistDataLoaded sets it when the loaded playlist's
     // RespawnType isn't None (6.02 0xBD3A03), and a mutator that respawns players by itself sets and clears it

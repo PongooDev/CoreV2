@@ -2132,7 +2132,7 @@ bool FCoreAthenaBotManager::RegisterBot(float Now, uint8_t Team, uint8_t Squad, 
     {
         Log::Error(L"Battle Royale bots: {} has no Athena player state ({}), so it can't play", Controller->GetName().ToStdString(),
             Controller->PlayerState ? static_cast<APlayerState*>(Controller->PlayerState)->GetClass()->GetName().ToStdString() : std::wstring(L"none"));
-        Controller->K2_DestroyActor();
+        FCoreAthenaBotController::DestroyController(Controller);
         return false;
     }
 

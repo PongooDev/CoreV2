@@ -303,6 +303,8 @@ public:
     AActor* GetAircraft() const { return reinterpret_cast<AActor*>(BoardedAircraft.Get()); }
     // Leaves the match (a surplus bot, or the match ending): its pawn and controller are destroyed.
     void Destroy();
+    // Destroys a bot's controller (AActor::Destroy; its K2_DestroyActor does nothing) and with it its player state.
+    static void DestroyController(AAIController* AIController);
 
     void Tick(float Now, float DeltaSeconds);
 

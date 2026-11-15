@@ -16710,6 +16710,65 @@ bool Finder::ResolveTeamRemoveLive()
     return true;
 }
 
+bool Finder::ResolveActorDestroyLive()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AActor_Destroy != nullptr;
+    }
+    bSearched = true;
+
+    // AActor::execK2_DestroyActor is P_FINISH and the virtual call "mov rax, [rcx]; jmp [rax+disp32]" (6.21 0x2A64310,
+    // slot 0x5A; 1.8.2 0x2689300, slot 0x56), the jump with a REX.W prefix (48 FF A0). AActor's own K2_DestroyActor in that slot (6.21 0xA89A80, 1.8.2 0x2BEA90) is
+    // Destroy() with its defaults: "mov r8b, 1; xor edx, edx; jmp AActor::Destroy" (bShouldModifyLevel true, bNetForce
+    // false). AController's override in the slot is the shared empty function ("retn 0", 6.21 0x2AA890, 1.8.2 0x1691180):
+    // "do nothing, disallow destroying controller from Blueprints" (Controller.cpp), so Destroy is what a controller has.
+    const UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/Engine.Actor:K2_DestroyActor");
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t Call = Exec ? Finder::TraceFind(Exec, 16, [](uintptr_t Instruction)
+    {
+        const uintptr_t Op = Instruction + ((Byte(Instruction) & 0xF0) == 0x40 ? 1 : 0);
+        const uint8_t ModRm = Byte(Op + 1);
+        return Byte(Op) == 0xFF && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && ((ModRm & 0x38) == 0x10 || (ModRm & 0x38) == 0x20);
+    }) : 0;
+    const int32_t Slot = Call ? VirtualSlot(Call + ((Byte(Call) & 0xF0) == 0x40 ? 1 : 0)) : -1;
+    void** ActorVTable = Slot > 0 ? CdoVTable(L"/Script/Engine.Actor") : nullptr;
+    const uintptr_t Entry = ActorVTable ? VTableEntry(ActorVTable, Slot) : 0;
+    // The two argument moves in either order (moved code may put a jump after each), then the tail call.
+    uintptr_t At = Entry ? Finder::Unthunk(Entry) : 0;
+    bool bModifiesLevel = false;
+    bool bNoNetForce = false;
+    for (int32_t Step = 0; At && Step < 2; ++Step)
+    {
+        if (!bModifiesLevel && Byte(At) == 0x41 && Byte(At + 1) == 0xB0 && Byte(At + 2) == 0x01)
+        {
+            bModifiesLevel = true;
+            At = Finder::Unthunk(At + 3);
+        }
+        else if (!bNoNetForce && (Byte(At) == 0x33 || Byte(At) == 0x31) && Byte(At + 1) == 0xD2)
+        {
+            bNoNetForce = true;
+            At = Finder::Unthunk(At + 2);
+        }
+    }
+    // Without moved code the jump is still to be read; with it, Unthunk has already followed it to Destroy's code.
+    const uintptr_t Destroy = bModifiesLevel && bNoNetForce ? (Byte(At) == 0xE9 ? Finder::RelativeTarget(At, 1, 5) : (Finder::HasMovedCode() ? At : 0)) : 0;
+    if (!Destroy || (!IsInText(Destroy) && !IsInMovedCode(Destroy)))
+    {
+        Log::Warning(L"Finder: AActor::Destroy not found (execK2_DestroyActor 0x{:X}, slot 0x{:X}, AActor's 0x{:X}), a player bot's controller is destroyed through K2_DestroyActor, which a controller ignores",
+            Exec ? Exec - Finder::ImageBase() : 0, Slot >= 0 ? Slot * 8 : -1, Entry ? Entry - Finder::ImageBase() : 0);
+        return false;
+    }
+    Natives::AActor_Destroy = reinterpret_cast<decltype(Natives::AActor_Destroy)>(Destroy);
+    void** ControllerVTable = CdoVTable(L"/Script/AIModule.AIController");
+    const uintptr_t ControllerEntry = ControllerVTable ? VTableEntry(ControllerVTable, Slot) : 0;
+    Log::Info(L"Finder: AActor::Destroy at 0x{:X} (AActor's K2_DestroyActor 0x{:X}, slot 0x{:X}; AAIController's 0x{:X}{})", Destroy - Finder::ImageBase(),
+        Entry - Finder::ImageBase(), Slot * 8, ControllerEntry ? ControllerEntry - Finder::ImageBase() : 0,
+        ControllerEntry && Finder::BodyIs(ControllerEntry, { 0xC2, 0x00, 0x00 }) ? L", empty" : ControllerEntry && Finder::BodyIs(ControllerEntry, { 0xC3 }) ? L", empty" : L"");
+    return true;
+}
+
 namespace
 {
     // mov reg, [base+disp32] (Opcode 8B) or mov [base+disp32], reg (89), 64-bit: REX.W (48, or 49 for a base of r8 to

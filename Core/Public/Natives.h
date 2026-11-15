@@ -280,6 +280,9 @@ namespace Natives
     inline UNetDriver* (*AActor_GetNetDriver)(const AActor* This) = nullptr;
     inline void (*AActor_FlushNetDormancy)(AActor* This) = nullptr;
     inline void (*AActor_SetNetDormancy)(AActor* This, int32_t NewDormancy) = nullptr;
+    // AActor::Destroy(bool bNetForce, bool bShouldModifyLevel) (6.21 0x23FBBC0, 1.8.2 0x1F3E6B0): World->DestroyActor.
+    // AActor::K2_DestroyActor (6.21 0xA89A80) is "mov r8b, 1; xor edx, edx; jmp" to it: Finder::ResolveActorDestroyLive.
+    inline bool (*AActor_Destroy)(AActor* This, bool bNetForce, bool bShouldModifyLevel) = nullptr;
     inline void (*FNetworkObjectList_Remove)(FNetworkObjectList* This, AActor* Actor) = nullptr;
     // FNetworkObjectInfo's members after Actor: 1.8 adds a TWeakObjectPtr<AActor> after it, moving them all by 8.
     inline ptrdiff_t FNetworkObjectInfo_NextUpdateTime = 0x8;

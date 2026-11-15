@@ -133,6 +133,10 @@ public:
     // The actor's root follows Parent's root from now on. Clients attach it too when the actor replicates its movement.
     void AttachToActor(AActor* Parent, EAttachmentRule LocationRule, EAttachmentRule RotationRule, EAttachmentRule ScaleRule);
     void K2_DestroyActor();
+    // Server: the world's DestroyActor (AActor::Destroy, Natives::AActor_Destroy): what K2_DestroyActor does for an actor
+    // whose class doesn't override it. A controller's K2_DestroyActor does nothing, so a controller goes through this.
+    // K2_DestroyActor where the build's Destroy isn't found. True once the actor is pending kill.
+    bool Destroy(bool bNetForce = false, bool bShouldModifyLevel = true);
     TArray<UActorComponent*> GetComponentsByClass(UClass* ComponentClass) const;
     FVector GetVelocity() const;
     // The distance between the two actors' locations, in cm; 0 without OtherActor.

@@ -368,6 +368,9 @@ namespace Finder
     // AFortTeamInfo::RemoveFromTeam (Natives::AFortTeamInfo_RemoveFromTeam), from its log line, for Battle Royale's player
     // bots: one leaving the match leaves its team as a player changing teams does.
     bool ResolveTeamRemoveLive();
+    // AActor::Destroy (Natives::AActor_Destroy), from AActor's own K2_DestroyActor (the slot execK2_DestroyActor calls, in
+    // AActor's vtable), which jumps to it: for actors whose class overrides K2_DestroyActor with nothing (AController).
+    bool ResolveActorDestroyLive();
     // UOnlineEngineInterface::CreateUniquePlayerId's slot (Natives::UOnlineEngineInterface_CreateUniquePlayerIdIndex) in
     // the engine's online interface object's vtable, for Battle Royale's player bots' ids.
     bool ResolveCreateUniquePlayerIdLive(void* const* OnlineEngineInterfaceVTable);

@@ -34,6 +34,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/GameMode.h"
 #include "GameFramework/PlayerState.h"
 #include "Heroes/FortHero.h"
 #include "Heroes/FortHeroType.h"
@@ -1765,10 +1766,43 @@ void FCoreAthenaBotController::Destroy()
                 }
             }
         }
-        AIController->K2_DestroyActor();
+        DestroyController(AIController);
     }
     PlayerBotPawn = nullptr;
     State = ECoreAthenaBotState::Dead;
+}
+
+void FCoreAthenaBotController::DestroyController(AAIController* AIController)
+{
+    // The controller goes as any actor does, through AActor::Destroy: AController's K2_DestroyActor is empty ("do nothing,
+    // disallow destroying controller from Blueprints", Controller.cpp; the shared "retn 0" in its slot on 1.8.2 and 6.21),
+    // so calling it left every bot that left the match in the world, its player state in the game state's PlayerArray.
+    // Destroy runs AController::Destroyed (1.8.2 0x212D8D0, 6.21 0x2597E10): with a player state, the game mode's
+    // Logout(Controller), then CleanupPlayerState (PlayerState->Destroy(), which takes it out of the PlayerArray, and
+    // PlayerState = nullptr); then UnPossess and the world's RemoveController.
+    if (!AIController)
+    {
+        return;
+    }
+    // AFortGameModeAthena::Logout (1.8.2 0x4295F0, 6.21 0xC82A60) restarts the session when GetNumPlayers() is 0 once the
+    // match has started ("FortGameModeAthena: Logout called on final player.  Restarting session."), whoever logs out.
+    // GetNumPlayers counts player controllers alone, so a bot leaving a server no player is on (-CoreBotMatch, or the
+    // admin panel's bot count lowered before anyone joins) would restart it. Logout has nothing else for an AI
+    // controller (its player-controller branches are behind casts; AGameModeBase's is the K2_OnLogout event), so with
+    // no players (or no NumPlayers to read) the player state goes first, by CleanupPlayerState's own two steps, and
+    // Destroyed has no Logout to run.
+    UWorld* World = AIController->GetWorld();
+    AGameMode* GameMode = World && AGameMode::HasNumPlayers() ? Cast<AGameMode>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+    APlayerState* BotState = AIController->PlayerState;
+    const int32_t Players = GameMode ? GameMode->GetNumPlayers() : -1;
+    if (BotState && Players <= 0)
+    {
+        reinterpret_cast<AActor*>(BotState)->Destroy();
+        AIController->PlayerState = nullptr;
+    }
+    const bool bDestroyed = reinterpret_cast<AActor*>(AIController)->Destroy();
+    Log::Info(L"Battle Royale bots: {} {} ({}; {} players in the game)", AIController->GetName().ToStdString(), bDestroyed ? L"is destroyed" : L"wasn't destroyed",
+        !BotState ? L"no player state" : Players <= 0 ? L"its player state destroyed first" : L"the game mode's Logout takes its player state", Players);
 }
 
 void FCoreAthenaBotController::ClearInventory()

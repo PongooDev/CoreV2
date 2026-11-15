@@ -6,6 +6,7 @@
 #include "Engine/Level.h"
 #include "Engine/NetDriver.h"
 #include "Engine/World.h"
+#include "Finder.h"
 #include "Hooks.h"
 #include "Natives.h"
 #include "Templates/Casts.h"
@@ -146,6 +147,16 @@ void AActor::K2_DestroyActor()
 {
     Reflection::FParams Params(StaticFunction_K2_DestroyActor());
     Params.Call(this);
+}
+
+bool AActor::Destroy(bool bNetForce, bool bShouldModifyLevel)
+{
+    if (Finder::ResolveActorDestroyLive())
+    {
+        return Natives::AActor_Destroy(this, bNetForce, bShouldModifyLevel);
+    }
+    K2_DestroyActor();
+    return IsPendingKill();
 }
 
 FVector AActor::GetVelocity() const

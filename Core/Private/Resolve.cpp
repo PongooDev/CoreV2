@@ -10268,27 +10268,76 @@ bool Finder::ResolveWorldItemCountLive(ptrdiff_t RegenCooldownOffset, ptrdiff_t 
         }
     }
 
-    const uintptr_t CountCall = RegenCompare ? FindInstruction(RegenCompare, RegenFunctionEnd, { 0xFF, 0x93 }) : 0;
-    const int32_t Displacement = CountCall ? *reinterpret_cast<const int32_t*>(CountCall + 2) : 0;
-    const int32_t SetItemCountIndex = Displacement > 0 && Displacement % 8 == 0 ? Displacement / 8 : -1;
-    const uintptr_t SetItemCount = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortWorldItem"), SetItemCountIndex);
-    const uintptr_t SetItemCountEnd = SetItemCount ? Finder::FunctionEnd(SetItemCount) : 0;
+    void** WorldItemVTable = CdoVTable(L"/Script/FortniteGame.FortWorldItem");
+    // What the slot's body is: it loads the item's entry, and tests the definition's type (cmp byte ptr [rax], 3).
     // lea reg, [reg+ItemEntry]: lea rdi, [rbx+...] (48 8D BB) up to 1.7.2, lea rcx, [rdi+...] (48 8D 8F) on 1.8.
-    bool bLoadsItemEntry = false;
-    for (uintptr_t Site = SetItemCountEnd > SetItemCount ? FindInstruction(SetItemCount, SetItemCountEnd, { 0x48, 0x8D }) : 0; Site && !bLoadsItemEntry; Site = FindInstruction(Site + 1, SetItemCountEnd, { 0x48, 0x8D }))
+    const auto IsSetItemCountBody = [ItemEntryOffset](uintptr_t Function, uintptr_t End)
     {
-        const uint8_t ModRm = Byte(Site + 2);
-        bLoadsItemEntry = Site + 7 <= SetItemCountEnd && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 3) == ItemEntryOffset;
+        if (!Function || End <= Function)
+        {
+            return false;
+        }
+        bool bLoadsItemEntry = false;
+        for (uintptr_t Site = FindInstruction(Function, End, { 0x48, 0x8D }); Site && !bLoadsItemEntry; Site = FindInstruction(Site + 1, End, { 0x48, 0x8D }))
+        {
+            const uint8_t ModRm = Byte(Site + 2);
+            bLoadsItemEntry = Site + 7 <= End && (ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 3) == ItemEntryOffset;
+        }
+        return bLoadsItemEntry && FindInstruction(Function, End, { 0x80, 0x38, 0x03 }) != 0;
+    };
+    const auto IsSetItemCountSlot = [WorldItemVTable, &IsSetItemCountBody](int32_t Slot)
+    {
+        const uintptr_t Function = VTableEntry(WorldItemVTable, Slot);
+        return Function && IsSetItemCountBody(Function, Finder::FunctionEnd(Function));
+    };
+
+    const uintptr_t CountCall = RegenCompare ? FindInstruction(RegenCompare, RegenFunctionEnd, { 0xFF, 0x93 }) : 0;
+    int32_t Index = CountCall ? VirtualSlot(CountCall) : -1;
+    if (Index > 0 && !IsSetItemCountSlot(Index))
+    {
+        Index = -1;
     }
-    const bool bSetItemCount = bLoadsItemEntry && FindInstruction(SetItemCount, SetItemCountEnd, { 0x80, 0x38, 0x03 });
-    if (bAmbiguous || !bSetItemCount)
+
+    // 6.30 made RegenCooldown an FScalableFloat (#455): the regen function no longer compares it where it sits
+    // (comiss xmm0, [reg+RegenCooldown]). It hands the member to the scalable float's getter and compares what that
+    // returns, so the compare above finds nothing there. The member is still addressed by a lea, and the count call
+    // follows it: any virtual call after that lea whose target is the slot's body gives the slot.
+    if (Index < 0 && !bAmbiguous && RegenCooldownOffset > 0)
+    {
+        for (int32_t Slot = 0; AmmoVTable && Slot < 0x100 && Index < 0; ++Slot)
+        {
+            const uintptr_t Function = VTableEntry(AmmoVTable, Slot);
+            const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+            const uintptr_t Anchor = End > Function ? FindDisplacement(Function, End, { 0x48, 0x8D, -1 }, RegenCooldownOffset) : 0;
+            for (uintptr_t Call = Anchor ? FindVirtualCall(Anchor, End) : 0; Call; Call = FindVirtualCall(Call + 1, End))
+            {
+                if (IsSetItemCountSlot(VirtualSlot(Call)))
+                {
+                    Index = VirtualSlot(Call);
+                    break;
+                }
+            }
+        }
+    }
+
+    // With no regen chain to follow at all, the slot is the one whose body validates. The scan stops where the
+    // class's vtable ends, so a subclass that inherits the same function meets it first.
+    if (Index < 0 && !bAmbiguous)
+    {
+        Index = FirstVTableIndexWhere(WorldItemVTable, [&IsSetItemCountBody](uintptr_t Function)
+        {
+            return IsSetItemCountBody(Function, Finder::FunctionEnd(Function));
+        });
+    }
+
+    if (bAmbiguous || Index < 0)
     {
         Log::Error(L"Finder: UFortWorldItem::SetItemCount slot not found");
         return false;
     }
 
-    Natives::UFortWorldItem_SetItemCountIndex = SetItemCountIndex;
-    Log::Info(L"Finder: UFortWorldItem::SetItemCount is slot 0x{:X}", SetItemCountIndex);
+    Natives::UFortWorldItem_SetItemCountIndex = Index;
+    Log::Info(L"Finder: UFortWorldItem::SetItemCount is slot 0x{:X}", Index);
     return true;
 }
 

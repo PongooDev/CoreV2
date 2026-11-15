@@ -7,6 +7,7 @@
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortAthenaMapInfo.h"
 #include "Athena/FortAthenaPlaylistBase.h"
+#include "Athena/FortAthenaVehicle.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Building/BGAConsumableSpawner.h"
@@ -16,6 +17,7 @@
 #include "Items/FortLootPackage.h"
 #include "Minigame/FortMinigameState.h"
 #include "Pawns/FortPawn.h"
+#include "Pawns/FortPlayerPawn.h"
 #include "Misc/CommandLine.h"
 #include "Misc/Parse.h"
 #include "Athena/FortGameSessionDedicatedAthena.h"
@@ -53,6 +55,7 @@
 #include "Online/FortGameSession.h"
 #include "Online/FortPartyBeaconHost.h"
 #include "Player/FortCheatManager.h"
+#include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "ReplicationGraph.h"
 #include "Templates/Casts.h"
@@ -77,6 +80,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -132,6 +136,68 @@ TSubclassOf<AGameSession> AFortGameModeAthena::GetGameSessionClass() const
 
 namespace
 {
+    // The seat a player last entered or left, kept from the controller's own vehicle events until its OnFullyExitVehicle.
+    // The controller's delegates carry no arguments, so the vehicle and seat are read while the pawn still has them.
+    struct FVehicleSeatState
+    {
+        AFortAthenaVehicle* Vehicle = nullptr;
+        int32_t SeatIndex = -1;
+    };
+    std::unordered_map<AFortPlayerController*, FVehicleSeatState> VehicleSeatStates;
+    UFunction* VehicleChangedHandler = nullptr;
+    UFunction* VehicleFullyExitedHandler = nullptr;
+
+    // The weapon a vehicle's seat mounts: WeaponSeatDefinitions is a TArray<FWeaponSeatDefinition>, whose layout differs
+    // between builds, so its fields are read through the reflected property rather than a guessed struct. Null for a
+    // vehicle with no seat weapon (the shopping cart and the rest) and for a build without the component.
+    UFortItemDefinition* SeatWeaponFor(AFortAthenaVehicle* Vehicle, int32_t SeatIndex)
+    {
+        if (!Vehicle || SeatIndex < 0)
+        {
+            return nullptr;
+        }
+        UClass* ComponentClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortVehicleSeatWeaponComponent");
+        if (!ComponentClass)
+        {
+            return nullptr;
+        }
+
+        for (UActorComponent* Component : Vehicle->GetComponentsByClass(ComponentClass))
+        {
+            UProperty* DefinitionsProperty = Component ? ComponentClass->FindPropertyByName(FName(L"WeaponSeatDefinitions", FNAME_Find)) : nullptr;
+            if (!DefinitionsProperty || !DefinitionsProperty->IsA(UArrayProperty::StaticClass()))
+            {
+                continue;
+            }
+            UArrayProperty* Definitions = static_cast<UArrayProperty*>(DefinitionsProperty);
+            UStructProperty* ElementProperty = Definitions->Inner && Definitions->Inner->IsA(UStructProperty::StaticClass())
+                ? static_cast<UStructProperty*>(Definitions->Inner) : nullptr;
+            UScriptStruct* ElementStruct = ElementProperty ? ElementProperty->Struct : nullptr;
+            UProperty* SeatIndexProperty = ElementStruct ? ElementStruct->FindPropertyByName(FName(L"SeatIndex", FNAME_Find)) : nullptr;
+            UProperty* WeaponProperty = ElementStruct ? ElementStruct->FindPropertyByName(FName(L"VehicleWeapon", FNAME_Find)) : nullptr;
+            if (!SeatIndexProperty || SeatIndexProperty->ElementSize != sizeof(int32_t) || !WeaponProperty || WeaponProperty->ElementSize != sizeof(UObject*))
+            {
+                continue;
+            }
+
+            uint8_t* const ArrayAddress = static_cast<uint8_t*>(DefinitionsProperty->ContainerPtrToValuePtr<void>(Component));
+            uint8_t* const Data = ArrayAddress ? *reinterpret_cast<uint8_t**>(ArrayAddress) : nullptr;
+            const int32_t Count = ArrayAddress ? *reinterpret_cast<int32_t*>(ArrayAddress + sizeof(void*)) : 0;
+            const int32_t Stride = ElementProperty->ElementSize;
+            for (int32_t Index = 0; Data && Stride > 0 && Index < Count; ++Index)
+            {
+                uint8_t* const Element = Data + static_cast<size_t>(Index) * static_cast<size_t>(Stride);
+                if (*reinterpret_cast<const int32_t*>(Element + SeatIndexProperty->GetOffset_ForInternal()) != SeatIndex)
+                {
+                    continue;
+                }
+                UObject* const WeaponObject = *reinterpret_cast<UObject* const*>(Element + WeaponProperty->GetOffset_ForInternal());
+                return Cast<UFortItemDefinition>(WeaponObject);
+            }
+        }
+        return nullptr;
+    }
+
     AFortAthenaMapInfo* FindMapInfo(UWorld* World)
     {
         AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
@@ -3154,6 +3220,7 @@ void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, A
     {
         return;
     }
+    BindVehicleEvents(Player);
     if (AFortPawn* FortPawn = PawnDiedHandler ? Cast<AFortPawn>(reinterpret_cast<UObject*>(Pawn)) : nullptr)
     {
         FMulticastScriptDelegate& OnDied = FortPawn->OnDied;
@@ -3246,6 +3313,136 @@ DEFINE_FUNCTION(AFortGameModeAthena::execHandlePawnDestroyed)
     P_NATIVE_END;
 }
 
+DEFINE_FUNCTION(AFortGameModeAthena::execHandleVehicleChanged)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    AFortGameModeAthena::RecordVehicleForPlayer(static_cast<AFortPlayerController*>(Context));
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortGameModeAthena::execHandleVehicleFullyExited)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    AFortGameModeAthena::CleanupVehicleSeatWeapon(static_cast<AFortPlayerController*>(Context));
+    P_NATIVE_END;
+}
+
+void AFortGameModeAthena::RecordVehicleForPlayer(AFortPlayerController* Player)
+{
+#if WITH_SERVER_CODE
+    if (!Player)
+    {
+        return;
+    }
+    AFortPlayerPawn* Pawn = Cast<AFortPlayerPawn>(Player->Pawn);
+    AFortAthenaVehicle* Vehicle = Pawn ? Cast<AFortAthenaVehicle>(Pawn->GetVehicleActor()) : nullptr;
+    if (!Vehicle)
+    {
+        // OnExitVehicle can arrive after the pawn has left: keep the seat its enter event recorded.
+        return;
+    }
+
+    VehicleSeatStates[Player] = { Vehicle, Pawn->GetVehicleSeatIndex() };
+#endif
+}
+
+void AFortGameModeAthena::CleanupVehicleSeatWeapon(AFortPlayerController* Player)
+{
+#if WITH_SERVER_CODE
+    if (!Player)
+    {
+        return;
+    }
+    const auto Found = VehicleSeatStates.find(Player);
+    if (Found == VehicleSeatStates.end())
+    {
+        return;
+    }
+    const FVehicleSeatState State = Found->second;
+    VehicleSeatStates.erase(Found);
+
+    UFortItemDefinition* const SeatWeapon = SeatWeaponFor(State.Vehicle, State.SeatIndex);
+    if (!SeatWeapon)
+    {
+        return;
+    }
+
+    // The game's exit leaves the mounted weapon in the player's world inventory (the turret's seat weapon is not part of
+    // their loadout); take it out before putting their own weapon back in hand.
+    if (AFortInventory* Inventory = Player->WorldInventory)
+    {
+        TStructArray<FFortItemEntry>& Entries = Inventory->Inventory.ReplicatedEntries;
+        for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+        {
+            FFortItemEntry& Entry = Entries[Index];
+            if (Entry.ItemDefinition != SeatWeapon)
+            {
+                continue;
+            }
+            if (AFortPlayerController::HasInventoryRemovalHook())
+            {
+                Player->RemoveInventoryItem(Entry.ItemGuid, Entry.Count, true, true);
+            }
+            else if (UFortWorldItem* WorldItem = Inventory->FindWorldItem(Entry.ItemGuid))
+            {
+                Inventory->RemoveWorldItem(WorldItem);
+            }
+            break;
+        }
+    }
+
+    if (AFortPlayerPawn* Pawn = Cast<AFortPlayerPawn>(Player->Pawn))
+    {
+        if (!Pawn->EquipLastWeapon())
+        {
+            Pawn->EquipDefaultWeapon();
+        }
+    }
+#endif
+}
+
+void AFortGameModeAthena::BindVehicleEvents(AFortPlayerController* Player)
+{
+#if WITH_SERVER_CODE
+    if (!Player)
+    {
+        return;
+    }
+    const auto Bind = [Player](FMulticastScriptDelegate& Delegate, UFunction* Handler)
+    {
+        if (Handler)
+        {
+            Delegate.AddUniqueDynamic(Player, Handler->GetFName());
+        }
+    };
+
+    // Driver and passenger entries both record the seat; the exit event refreshes it while the vehicle is still on the pawn,
+    // and OnFullyExitVehicle (after the game's exit) removes the seat weapon. Each property is gated: a build without one
+    // simply doesn't bind it.
+    if (VehicleChangedHandler)
+    {
+        if (AFortPlayerController::HasOnEnterVehicleDriver())
+        {
+            Bind(Player->OnEnterVehicleDriver, VehicleChangedHandler);
+        }
+        if (AFortPlayerController::HasOnEnterVehiclePassenger())
+        {
+            Bind(Player->OnEnterVehiclePassenger, VehicleChangedHandler);
+        }
+        if (AFortPlayerController::HasOnExitVehicle())
+        {
+            Bind(Player->OnExitVehicle, VehicleChangedHandler);
+        }
+    }
+    if (VehicleFullyExitedHandler && AFortPlayerController::HasOnFullyExitVehicle())
+    {
+        Bind(Player->OnFullyExitVehicle, VehicleFullyExitedHandler);
+    }
+#endif
+}
+
 void AFortGameModeAthena::AddDelegateHandlers()
 {
     // The game's broadcasts call each bound UFunction through ProcessEvent (ProcessMulticastDelegate, 5.40 0x2ECA90), so
@@ -3270,8 +3467,24 @@ void AFortGameModeAthena::AddDelegateHandlers()
     PlayerStateDestroyedHandler = PawnDiedHandler ? Add(L"HandlePlayerStateDestroyed", &execHandlePlayerStateDestroyed, AActor::StaticClass(), L"OnDestroyed") : nullptr;
     // The same delegate on the pawns themselves, bound where their OnDied is.
     PawnDestroyedHandler = PawnDiedHandler && AActor::HasOnDestroyed() ? Add(L"HandlePawnDestroyed", &execHandlePawnDestroyed, AActor::StaticClass(), L"OnDestroyed") : nullptr;
-    Log::Info(L"Battle Royale: Core's handlers for GamePhaseChanged {}, OnCurrentPlaylistLoaded {}, OnDied {}, OnDestroyed {} (a pawn's {})", GamePhaseChangedHandler ? L"added" : L"none",
-        CurrentPlaylistLoadedHandler ? L"added" : L"none", PawnDiedHandler ? L"added" : L"none", PlayerStateDestroyedHandler ? L"added" : L"none", PawnDestroyedHandler ? L"added" : L"none");
+
+    // The vehicle seat events are BFortPlayerController's, and the controller itself is the object they call (so Core's
+    // native knows whose pawn to look at). The signature is the same no-argument one for all three entry/exit delegates.
+    UClass* ControllerClass = AFortPlayerController::StaticClass();
+    const auto AddTo = [](UClass* Class, const wchar_t* Name, FNativeFuncPtr Thunk, UClass* DelegateClass, const wchar_t* DelegateName) -> UFunction*
+    {
+        const UFunction* Signature = Class && DelegateClass ? DelegateSignature(DelegateClass, DelegateName) : nullptr;
+        return Signature ? Class->AddNativeFunction(Name, Thunk, Signature) : nullptr;
+    };
+    const wchar_t* RecordDelegate = AFortPlayerController::HasOnEnterVehicleDriver() ? L"OnEnterVehicleDriver"
+        : AFortPlayerController::HasOnEnterVehiclePassenger() ? L"OnEnterVehiclePassenger"
+        : AFortPlayerController::HasOnExitVehicle() ? L"OnExitVehicle" : nullptr;
+    VehicleChangedHandler = RecordDelegate ? AddTo(ControllerClass, L"CoreVehicleSeatChanged", &execHandleVehicleChanged, ControllerClass, RecordDelegate) : nullptr;
+    VehicleFullyExitedHandler = AFortPlayerController::HasOnFullyExitVehicle()
+        ? AddTo(ControllerClass, L"CoreVehicleFullyExited", &execHandleVehicleFullyExited, ControllerClass, L"OnFullyExitVehicle") : nullptr;
+    Log::Info(L"Battle Royale: Core's handlers for GamePhaseChanged {}, OnCurrentPlaylistLoaded {}, OnDied {}, OnDestroyed {} (a pawn's {}), vehicle seats {} / fully exited {}", GamePhaseChangedHandler ? L"added" : L"none",
+        CurrentPlaylistLoadedHandler ? L"added" : L"none", PawnDiedHandler ? L"added" : L"none", PlayerStateDestroyedHandler ? L"added" : L"none", PawnDestroyedHandler ? L"added" : L"none",
+        VehicleChangedHandler ? L"added" : L"none", VehicleFullyExitedHandler ? L"added" : L"none");
 }
 
 void AFortGameModeAthena::HookVTables()

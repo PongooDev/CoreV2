@@ -60,6 +60,16 @@ public:
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
+    // The game's vehicle seat events (21.40 offsets 0xEA8-0xED8). They carry no arguments; the controller itself is the
+    // object the delegate calls, and its pawn's GetVehicleActor/GetVehicleSeatIndex tell Core which seat to clean up.
+    DefineUProperty(FMulticastScriptDelegate, OnEnterVehicleDriver)
+    DefineUProperty(FMulticastScriptDelegate, OnEnterVehiclePassenger)
+    DefineUProperty(FMulticastScriptDelegate, OnExitVehicle)
+    DefineUProperty(FMulticastScriptDelegate, OnFullyExitVehicle)
+    static bool HasOnEnterVehicleDriver() { return Member_OnEnterVehicleDriver.IsAvailable(); }
+    static bool HasOnEnterVehiclePassenger() { return Member_OnEnterVehiclePassenger.IsAvailable(); }
+    static bool HasOnExitVehicle() { return Member_OnExitVehicle.IsAvailable(); }
+    static bool HasOnFullyExitVehicle() { return Member_OnFullyExitVehicle.IsAvailable(); }
     // The player's gameplay stats (SelfRevives, RevivesFromTeammate, TeammateRevives, the damage, shots, distance and
     // materials the end-of-match screen shows, ...).
     DefineUProperty(UStatManager*, StatManager)

@@ -34,6 +34,8 @@ class AFortPlayerPawn : public AFortPawn
     DefineUFunction(PopFootstepBankOverride)
     DefineUFunction(OnRep_AnimBPOverride)
     DefineUFunction(OnRep_FootstepBankOverride)
+    DefineUFunction(GetVehicleActor)
+    DefineUFunction(GetVehicleSeatIndex)
 
 public:
     DefineUProperty(FGuid, LastEquippedWeaponGUID)
@@ -73,6 +75,10 @@ public:
     // 3.0 and later: whether the pawn rides its personal vehicle (movement style PersonalVehicle, which the pawn sets while
     // it has Gameplay.Action.Player.PersonalVehicle). False where the build has no such function.
     bool IsUsingPersonalVehicle() const;
+    // The vehicle the pawn is in and its seat (21.40 AFortPlayerPawn::GetVehicleActor/GetVehicleSeatIndex), null/-1 where
+    // the build has neither.
+    AActor* GetVehicleActor() const;
+    int32_t GetVehicleSeatIndex() const;
     // A long interaction's animation (holding interact on a container or a downed teammate), which the controller's
     // long-interaction start asks of its pawn after OnStartLongInteract unless that skips it: the pawn's virtual (5.30
     // AFortPlayerPawnAthena slot 0x1B8, 0x117EAE0; 5.40 slot 0x1C4, 0x118B8E0) activates the abilities tagged

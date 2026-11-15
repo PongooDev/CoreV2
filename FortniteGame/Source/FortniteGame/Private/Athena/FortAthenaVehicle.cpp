@@ -9,6 +9,9 @@
 #include "Math/Rotator.h"
 #include "Math/Transform.h"
 #include "Natives.h"
+#include "Pawns/FortPawn.h"
+#include "ReflectionParams.h"
+#include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -176,7 +179,9 @@ void AFortAthenaVehicle::ServerUpdateInputParams_Implementation(const FReplicate
 namespace
 {
     // Swaps Implementation into every vehicle class whose slot for Function's _Implementation is the shared empty
-    // function (the stripped server side). Builds before 4.x have no vehicles; builds that keep the body are left alone.
+    // function (the stripped server side). The base class is not a gate: a build can keep the base body and leave a
+    // subclass's slot empty, so each class's own vtable is looked at. Builds before 4.x have no vehicles; classes that
+    // keep their body (native or a Blueprint override) are left alone.
     void RestoreStrippedImplementation(const wchar_t* Name, UFunction* Function, void* Implementation)
     {
         if (!Function)
@@ -185,38 +190,77 @@ namespace
         }
 
         const int32_t Index = Finder::ImplementationIndex(Function);
-        UObject* VehicleDefault = AFortAthenaVehicle::StaticClass()->GetDefaultObject(false);
-        void** VehicleVTable = VehicleDefault ? *reinterpret_cast<void***>(VehicleDefault) : nullptr;
-        if (Index < 0 || !VehicleVTable)
+        if (Index < 0)
         {
             Log::Error(L"Finder: {} slot not found", Name);
             return;
         }
-        if (VehicleVTable[Index] != Natives::SharedEmptyFunction)
+
+        UClass* const VehicleClass = AFortAthenaVehicle::StaticClass();
+        if (!VehicleClass)
         {
-            Log::Info(L"Finder: {} (slot 0x{:X}) is native in this build", Name, Index);
             return;
         }
 
         int32_t Swapped = 0;
+        int32_t Native = 0;
         for (TObjectIterator<UClass> It; It; ++It)
         {
             UClass* Class = *It;
-            UObject* ClassDefault = Class->IsChildOf(AFortAthenaVehicle::StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            UObject* ClassDefault = Class->IsChildOf(VehicleClass) ? Class->GetDefaultObject(false) : nullptr;
             void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-            if (VTable && VTable[Index] == Natives::SharedEmptyFunction)
+            if (!VTable)
+            {
+                continue;
+            }
+            if (VTable[Index] == Natives::SharedEmptyFunction)
             {
                 Hooks::SwapVTable(Name, VTable, Index, Implementation);
                 ++Swapped;
             }
+            else if (VTable[Index])
+            {
+                ++Native;
+            }
         }
-        Log::Info(L"Finder: {} slot 0x{:X}, restored in {} vehicle classes", Name, Index, Swapped);
+        if (Swapped)
+        {
+            Log::Info(L"Finder: {} slot 0x{:X}, restored in {} vehicle classes ({} not stripped)", Name, Index, Swapped, Native);
+        }
+        else
+        {
+            Log::Info(L"Finder: {} (slot 0x{:X}) is native in this build", Name, Index);
+        }
     }
+}
+
+// A mounted turret's trigger never reached its weapon: builds that strip ServerStartFire_Implementation lose Epic's
+// body (21.40's calls the driver's PawnStartFire), and the turret's seat weapon is a vehicle weapon, not the pawn's own.
+// The server only heard ServerUpdateInputParams and so never fired the turret; the client's predicted seat weapon then
+// survived the exit until the server's next correction. The player's own trigger RPC is the game's call site: restore
+// the body, and let PawnStartFire run the weapon's normal fire path on the server.
+void AFortAthenaVehicle::ServerStartFire_Implementation(uint8_t FireModeNum)
+{
+#if WITH_SERVER_CODE
+    UFunction* Function = FindStaticFunction_GetDriver();
+    if (!Function)
+    {
+        return;
+    }
+
+    Reflection::FParams Params(Function);
+    APawn* Driver = Params.Call(this) ? Params.Take<APawn*>(L"ReturnValue") : nullptr;
+    if (AFortPawn* FortDriver = Cast<AFortPawn>(Driver))
+    {
+        FortDriver->PawnStartFire(FireModeNum);
+    }
+#endif
 }
 
 void AFortAthenaVehicle::HookVTables()
 {
     RestoreStrippedImplementation(L"AFortAthenaVehicle::ServerUpdatePhysicsParams_Implementation", FindStaticFunction_ServerUpdatePhysicsParams(), reinterpret_cast<void*>(&ServerUpdatePhysicsParams_ImplementationHK));
+    RestoreStrippedImplementation(L"AFortAthenaVehicle::ServerStartFire_Implementation", FindStaticFunction_ServerStartFire(), reinterpret_cast<void*>(&ServerStartFire_ImplementationHK));
 
     // ReplicatedInputParams is a reflected struct: without it (or its struct) there is nothing to restore into.
     if (FindStaticFunction_ServerUpdateInputParams())
@@ -238,4 +282,9 @@ void AFortAthenaVehicle::ServerUpdatePhysicsParams_ImplementationHK(AFortAthenaV
 void AFortAthenaVehicle::ServerUpdateInputParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehicleInputState& InState)
 {
     This->ServerUpdateInputParams_Implementation(InState);
+}
+
+void AFortAthenaVehicle::ServerStartFire_ImplementationHK(AFortAthenaVehicle* This, uint8_t FireModeNum)
+{
+    This->ServerStartFire_Implementation(FireModeNum);
 }

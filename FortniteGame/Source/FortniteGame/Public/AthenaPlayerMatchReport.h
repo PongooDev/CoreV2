@@ -178,12 +178,27 @@ struct FAthenaMatchXpMultiplierGroup
     DefineUProperty(int32_t, Amount)
 };
 
+// An MCP loot entry (McpProfileSys.McpLootEntry): an item a reward group gave. ItemType is its template id, ItemGuid the
+// athena profile item's id, Quantity its count, and ItemProfile the profile it went to ("athena" for a victory umbrella).
+// Attributes (the item's own, from 4.5) aren't read: Core's match rewards carry none.
+struct FMcpLootEntry
+{
+    DefineUnrealStruct(FMcpLootEntry, McpProfileSys)
+    DefineUProperty(FString, ItemType)
+    DefineUProperty(FString, ItemGuid)
+    DefineUProperty(int32_t, Quantity)
+    DefineUProperty(FString, ItemProfile)
+};
+
 // What one source gave the player (ERewardSource: 1 MinutesPlayed "Survival Time", 3 TeamKills "Kills", 4 Placement,
-// ...), with its MCP loot. From 1.11 also its Score, SeasonXp and BookXp; 1.10's has the source and loot only.
+// ...), with its MCP loot. From 1.11 also its Score, SeasonXp and BookXp; 1.10's has the source and loot only. A victory's
+// FirstWin group (ERewardSource 8) carries the season's umbrella as Items, the way Epic told the screen what it unlocked
+// (Core-Backend #373).
 struct FAthenaAwardGroup
 {
     DefineUnrealStruct(FAthenaAwardGroup, FortniteGame)
     DefineUProperty(uint8_t, RewardSource)
+    DefineUStructArrayProperty(FMcpLootEntry, Items)
     DefineUProperty(int32_t, Score)
     DefineUProperty(float, SeasonXp)
     DefineUProperty(int32_t, BookXp)
@@ -191,6 +206,7 @@ struct FAthenaAwardGroup
 public:
     static bool HasScore() { return Member_Score.IsAvailable() && Member_SeasonXp.IsAvailable(); }
     static bool HasBookXp() { return Member_BookXp.IsAvailable(); }
+    static bool HasItems() { return Member_Items.IsAvailable() && FMcpLootEntry::StaticStruct() != nullptr; }
 };
 
 // The rewards of a match, which MCP's EndBattleRoyaleGame answered with (UFortMcpProfileAthena::EndBattleRoyaleGame);

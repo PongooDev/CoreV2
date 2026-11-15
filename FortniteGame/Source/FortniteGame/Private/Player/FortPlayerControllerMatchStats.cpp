@@ -208,21 +208,45 @@ namespace
         }
     }
 
-    // The objects of Json's array Name, each as its own text: the backend's are flat ({"source":1,"amount":10}).
+    // The objects of Json's array Name, each as its own text. An object may hold arrays of its own (a reward group's
+    // Items), so both its closing brace and the array's closing bracket are found by depth, with quoted text skipped.
     std::vector<std::string> JsonObjects(const std::string& Json, const std::string& Name)
     {
         std::vector<std::string> Objects;
         const size_t Key = Json.find("\"" + Name + "\"");
-        size_t At = Key == std::string::npos ? std::string::npos : Json.find('[', Key);
-        const size_t End = At == std::string::npos ? std::string::npos : Json.find(']', At);
-        while (At != std::string::npos && End != std::string::npos)
+        const size_t Start = Key == std::string::npos ? std::string::npos : Json.find('[', Key);
+        if (Start == std::string::npos) return Objects;
+
+        const auto Scanned = [&Json](size_t From, char Open, char Close)
+        {
+            int32_t Depth = 0;
+            bool InString = false, Escaped = false;
+            for (size_t Index = From; Index < Json.size(); ++Index)
+            {
+                const char Character = Json[Index];
+                if (InString)
+                {
+                    if (Escaped) Escaped = false;
+                    else if (Character == '\\') Escaped = true;
+                    else if (Character == '"') InString = false;
+                    continue;
+                }
+                if (Character == '"') InString = true;
+                else if (Character == Open && ++Depth == 1) continue;
+                else if (Character == Close && --Depth == 0) return Index;
+            }
+            return std::string::npos;
+        };
+        const size_t End = Scanned(Start, '[', ']');
+        if (End == std::string::npos) return Objects;
+
+        size_t At = Start;
+        while (At < End)
         {
             const size_t Open = Json.find('{', At);
-            const size_t Close = Open == std::string::npos ? std::string::npos : Json.find('}', Open);
-            if (Open == std::string::npos || Close == std::string::npos || Close > End)
-            {
-                break;
-            }
+            if (Open == std::string::npos || Open >= End) break;
+            const size_t Close = Scanned(Open, '{', '}');
+            if (Close == std::string::npos || Close > End) break;
             Objects.push_back(Json.substr(Open, Close - Open + 1));
             At = Close + 1;
         }
@@ -417,6 +441,7 @@ void AFortPlayerController::SendEndBattleRoyaleMatchForPlayer(const std::string&
     FAthenaRewardResult* Result = reinterpret_cast<FAthenaRewardResult*>(ResultStorage.data());
     ResultStruct->InitializeStruct(Result);
     const auto Int = [](const std::string& Json, const char* Name) { return std::atoi(BackendRequest::JsonField(Json, Name).c_str()); };
+    const auto Wide = [](const std::string& Text) { return std::wstring(Text.begin(), Text.end()); };
     Result->SetReward(FAthenaRewardResult::RewardLevelsGained(), Int(RewardResultJson, "levelsGained"));
     Result->SetReward(FAthenaRewardResult::RewardBookLevelsGained(), Int(RewardResultJson, "bookLevelsGained"));
     Result->SetReward(FAthenaRewardResult::RewardTotalSeasonXpGained(), Int(RewardResultJson, "totalSeasonXpGained"));
@@ -435,18 +460,31 @@ void AFortPlayerController::SendEndBattleRoyaleMatchForPlayer(const std::string&
             Multiplier.Amount = Int(Group, "amount");
         }
     }
-    // 1.10's groups hold MCP loot only, which the backend doesn't answer: its XP isn't listed.
-    if (FAthenaRewardResult::HasRewards() && FAthenaAwardGroup::HasScore())
+    // The groups' XP from 1.11, and their MCP loot on every build: a victory's FirstWin group carries the umbrellas the
+    // backend granted (Core-Backend #373), which the screen shows as unlocked. 1.10's groups hold the loot only.
+    if (FAthenaRewardResult::HasRewards())
     {
         for (const std::string& Group : JsonObjects(RewardResultJson, "rewards"))
         {
             FAthenaAwardGroup& Award = Result->GetMember_Rewards().AddDefaulted();
             Award.RewardSource = static_cast<uint8_t>(Int(Group, "rewardSource"));
-            Award.Score = Int(Group, "score");
-            Award.SeasonXp = static_cast<float>(Int(Group, "seasonXp"));
-            if (FAthenaAwardGroup::HasBookXp())
+            if (FAthenaAwardGroup::HasScore())
             {
-                Award.BookXp = Int(Group, "bookXp");
+                Award.Score = Int(Group, "score");
+                Award.SeasonXp = static_cast<float>(Int(Group, "seasonXp"));
+                if (FAthenaAwardGroup::HasBookXp())
+                {
+                    Award.BookXp = Int(Group, "bookXp");
+                }
+            }
+            if (!FAthenaAwardGroup::HasItems()) continue;
+            for (const std::string& Item : JsonObjects(Group, "items"))
+            {
+                FMcpLootEntry& Loot = Award.GetMember_Items().AddDefaulted();
+                Loot.ItemType = FString(Wide(BackendRequest::JsonField(Item, "itemType")));
+                Loot.ItemGuid = FString(Wide(BackendRequest::JsonField(Item, "itemGuid")));
+                Loot.Quantity = Int(Item, "quantity");
+                Loot.ItemProfile = FString(Wide(BackendRequest::JsonField(Item, "itemProfile")));
             }
         }
     }

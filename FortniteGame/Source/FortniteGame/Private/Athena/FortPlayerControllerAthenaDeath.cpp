@@ -397,6 +397,20 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     // 0xA9B930, after this one) asks the game mode the same, with the death cause set above, and has
     // RespawnPlayerAfterDeath run once the death penalty's respawn countdown is over. The player stays in the match.
     const bool bRespawning = GameMode && AthenaState && GameMode->IsRespawningAllowed(AthenaState);
+    AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
+    // Team Rumble keeps its players in the match, so OnPawnDied returns before the game mode's RemoveFromAlivePlayers and
+    // its kill/team-score update. The TDM mode's own score is the team's eliminations; count the respawning kill here so
+    // the HUD's kill count and TeamScore follow, while the player comes back.
+    if (bRespawning && AthenaState && GameState && GameState->GamePhase > EAthenaGamePhase::GetWarmup() && bMarkedAlive && AthenaState->IsTeamDeathmatch())
+    {
+        AController* Finisher = Downer ? Downer : Instigator;
+        AFortPlayerStateAthena* KillerState = Finisher && Finisher != this ? AthenaStateOf(Finisher) : nullptr;
+        if (KillerState && KillerState != AthenaState && static_cast<uint8_t>(KillerState->TeamIndex) != static_cast<uint8_t>(AthenaState->TeamIndex)
+            && AFortPlayerStateAthena::HasKillScore())
+        {
+            KillerState->SetKillScore(KillerState->GetKills() + 1);
+        }
+    }
     APawn* KillerPawn = Instigator ? Instigator->GetPawn() : nullptr;
     // A player who will respawn spectates meanwhile too, as one who is out does (#426: on Epic's 4.5 Playground the
     // camera went to another player until the respawn). The game's respawn is built for it: before its timer the pawn's
@@ -423,7 +437,6 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     }
 
     // Out of the match, once the aircraft is under way, if the player was in it.
-    AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
     // A death on 6.30's warmup island, which hurts (bAllowDamageInWarmup, #452): the game brings the player back there,
     // and the killer the death stored isn't an elimination in the match's results.
     if (GameState && AthenaState && GameState->GamePhase <= EAthenaGamePhase::GetWarmup() && AFortGameModeAthena::AllowsDamageInWarmup(GameMode))

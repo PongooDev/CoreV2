@@ -164,6 +164,10 @@ public:
     // The kills of the player's whole team (not replicated): 21.40's AFortPlayerStateAthena::SetKillScore keeps it for
     // each of the team's players.
     DefineUProperty(int32_t, TeamKillScore)
+    // The team's score, replicated to every player of the team for the HUD's team score (5.0+). Team Rumble's TDM
+    // mutator holds the eliminations in it; Core's restored respawning death path never reached the game's score update.
+    DefineUProperty(int32_t, TeamScore)
+    static bool HasTeamScore() { return Member_TeamScore.IsAvailable(); }
     // Score Royale's (5.30): the player's points, the sum of what their scoring events gave (AFortPlayerStateAthena
     // 0xC4B5A0 counts a container's or coin's, 0xC3C460 prices it from the playlist's ScoringData) and their eliminations'
     // (0xC3C540, which adds what it gained to the player's AFortTeamInfoAthena score).
@@ -248,6 +252,8 @@ public:
     void ClientNotifyTournamentStatsFinal();
     // Whether the match is a tournament's: its playlist a Showdown one (UFortPlaylist::IsShowdownPlaylist).
     bool IsTournamentMatch();
+    // Whether the match is a two-team TDM (Team Rumble): its AFortAthenaMutator_TDM, or its Respawn_24 playlist.
+    bool IsTeamDeathmatch();
 
     static ptrdiff_t PlaceOffset() { return Member_Place.GetOffsetChecked(); }
     static ptrdiff_t SecondsAliveOffset() { return Member_SecondsAlive.GetOffsetChecked(); }

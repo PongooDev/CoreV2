@@ -2,6 +2,7 @@
 #include "Player/FortPlayerState.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "Athena/FortGameStateAthena.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
@@ -381,6 +382,46 @@ bool AFortPlayerStateAthena::IsTournamentMatch()
     return Playlist && Playlist->IsShowdownPlaylist();
 }
 
+bool AFortPlayerStateAthena::IsTeamDeathmatch()
+{
+    UWorld* World = GetWorld();
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    if (!GameState)
+    {
+        return false;
+    }
+    // 6.31's Team Rumble is Playlist_Respawn_24; the mutator is its mode signal on every build that has it.
+    UFortPlaylistAthena* Playlist = AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
+    if (Playlist && Playlist->PlaylistId == 24)
+    {
+        return true;
+    }
+    UClass* TdmClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_TDM");
+    if (!TdmClass)
+    {
+        return false;
+    }
+    const auto HasTdm = [TdmClass](const TArray<UObject*>& Mutators)
+    {
+        for (UObject* Mutator : Mutators)
+        {
+            if (Mutator && Mutator->IsA(TdmClass))
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    // The playlist's TDM mutator changes the game state's answers, so it is in its GameplayMutators; keep the game
+    // mode's list too for a build whose mutator only changes the mode's.
+    if (GameState->GameplayMutatorsOffset() >= 0 && HasTdm(GameState->GetMember_GameplayMutators()))
+    {
+        return true;
+    }
+    AFortGameModeAthena* GameMode = Cast<AFortGameModeAthena>(reinterpret_cast<UObject*>(World->GetAuthGameMode()));
+    return GameMode && AFortGameModeAthena::GameplayMutatorsOffset() >= 0 && HasTdm(GameMode->GetMember_GameplayMutators());
+}
+
 void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
 {
     if (!Member_KillScore.IsAvailable())
@@ -458,6 +499,7 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
     // eliminations at once (a squad wiped in one frame), so each count on the way is sent, in order (the RPC is
     // reliable): every elimination gets its tier's alert, as one counted at a time does.
     const bool bReportTeamKills = Role == ROLE_Authority && FindStaticFunction_ClientReportTeamKill() && IsTournamentMatch();
+    const bool bTeamDeathmatch = HasTeamScore() && !IsScoringMatch() && IsTeamDeathmatch();
     int32_t ReportedPlayers = 0;
     for (APlayerState* PlayerState : PlayerArray)
     {
@@ -466,6 +508,19 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
         {
             const int32_t Before = Member->TeamKillScore;
             Member->TeamKillScore = TeamKills;
+            // Team Rumble's HUD reads the replicated TeamScore, not TeamKillScore. The game's TDM mutator would have
+            // scored the elimination with its gameplay event; Core's respawning death path returns before that, so keep
+            // its score current here, on every teammate's state (the client watches its own OnRep_TeamScore).
+            if (bTeamDeathmatch && Member->Member_TeamScore.IsAvailable())
+            {
+                // A player who leaves takes their KillScore with them; the team's score is not theirs to take back.
+                const int32_t NewTeamScore = std::max(static_cast<int32_t>(Member->TeamScore), TeamKills);
+                if (NewTeamScore != static_cast<int32_t>(Member->TeamScore))
+                {
+                    Member->TeamScore = NewTeamScore;
+                    Member->ForceNetUpdate();
+                }
+            }
             // A player's own client: a bot's state (an AI controller's) would run the client's side here on the server.
             if (!bReportTeamKills || TeamKills <= Before || !Cast<AFortPlayerController>(reinterpret_cast<UObject*>(Member->GetOwner())))
             {

@@ -3403,13 +3403,18 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     }
     PlayFireMontage();
     const FCoreAthenaBotWeapon* Held = !bPickaxeEquipped && EquippedIndex >= 0 && EquippedIndex < static_cast<int32_t>(WeaponList.size()) ? &WeaponList[static_cast<size_t>(EquippedIndex)] : nullptr;
+    // CoreV2 #452: a bot's warmup brawl is for show. Its shots and swings still play and show their fire and hit cues,
+    // but take no health from another bot or a player: the game mode's bAllowDamageInWarmup is the players' own damage,
+    // and a bot's hit there is Core's. So neither the game's fire (its ability hits and damages by itself) nor the pawn's
+    // fire input runs in the warmup, only Core's shot below, which stops before its damage.
+    const bool bWarmupBrawl = State == ECoreAthenaBotState::Warmup;
 
     // The game's own shot where its fire works for the weapon (or isn't known yet): its ability aims along the
     // controller's rotation (the focal point, with the aim error in it), spends the ammo, hits and shows the shot.
     const auto Known = Held ? WeaponFireWorks.find(Held->WeaponDefinition) : WeaponFireWorks.end();
     // Once one weapon's ability refuses a bot (3.0: no inventory owner), none is tried again.
     static bool bGameFireRefused = false;
-    const bool bTryGameFire = !bGameFireRefused && Weapon && Held && Weapon->AmmoCount > 0 && (Known == WeaponFireWorks.end() || Known->second == 1);
+    const bool bTryGameFire = !bWarmupBrawl && !bGameFireRefused && Weapon && Held && Weapon->AmmoCount > 0 && (Known == WeaponFireWorks.end() || Known->second == 1);
     if (bTryGameFire)
     {
         const int32_t AmmoBefore = Weapon->AmmoCount;
@@ -3434,7 +3439,7 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     // there the input starts the pickaxe's own melee ability (GAB_Melee_ImpactCombo_Athena activates for a bot, seen on
     // a headless 5.30), whose swing plays the same montage as PlayFireMontage above, and two plays of one montage in a
     // frame cancel out for the other players (PlayFireMontage, CoreV2 #389).
-    if (!bPickaxeEquipped)
+    if (!bPickaxeEquipped && !bWarmupBrawl)
     {
         Pawn->PawnStartFire(0);
     }
@@ -3519,10 +3524,8 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     {
         return;
     }
-    // CoreV2 #452: a bot's warmup brawl is for show. Its shots and swings still fire and show their hit cues, but take no
-    // health from another bot or a player: the game mode's bAllowDamageInWarmup is the players' own damage, and a bot's
-    // hit there is Core's.
-    if (State == ECoreAthenaBotState::Warmup)
+    // The warmup brawl's hit takes no health (bWarmupBrawl above, #452).
+    if (bWarmupBrawl)
     {
         return;
     }

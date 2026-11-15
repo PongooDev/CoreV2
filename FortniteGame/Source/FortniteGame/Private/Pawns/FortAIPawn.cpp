@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Pawns/FortAIPawn.h"
 #include "AI/FortAIDirector.h"
+#include "Athena/FortGameModeAthena.h"
 #include "BlueprintGameplayTagLibrary.h"
 #include "Finder.h"
 #include "FortGameState.h"
@@ -12,6 +13,7 @@
 #include "Math/Rotator.h"
 #include "Items/FortInventory.h"
 #include "Items/FortInventoryOwnerInterface.h"
+#include "Items/FortItem.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortPickup.h"
 #include "Log.h"
@@ -214,6 +216,13 @@ void AFortAIPawn::DropLoot(const FFortAIPawnLootDropData& LootDropData, const FG
             if (!Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry.ItemDefinition)))
             {
                 continue;
+            }
+            // Battle Royale's looted weapons come loaded (#85), and a Cube Monster's drop is loot like any other:
+            // the roll's entry starts with an empty magazine, so its gun was picked up and had to be reloaded (#462).
+            // Save the World's enemy drops are left as they are, as the other loot sites leave them.
+            if (AFortGameModeAthena::GetCurrent(World))
+            {
+                Entry.LoadFullClip();
             }
             if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &Location, &Rotation))
             {

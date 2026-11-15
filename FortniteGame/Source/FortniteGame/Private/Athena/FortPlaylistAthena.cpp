@@ -45,15 +45,18 @@ bool UFortPlaylist::IsShowdownPlaylist() const
 {
     // CL-4480234 0x11A7750: the playlist name against the three, without case (towlower), each its EFortShowdownMatchType.
     // 6.20's (CL-4497486 0x11E9D90) compares three more after them, Fortnitemares' tournament playlists (CoreV2 #427: a
-    // Playlist_Deimos_SoloShow match sent no eliminations, so its players saw no elimination points). No other build has
-    // playlists of those names.
+    // Playlist_Deimos_SoloShow match sent no eliminations, so its players saw no elimination points). The ShowdownAlt
+    // playlists are the newer content's Arena tournaments, which a 6.30 server can be assigned: they carry the same scoring
+    // HUD (CoreV2 #463: a ShowdownAlt_Solo match sent no eliminations, so its players saw no scoring alerts). No build of
+    // these years has playlists of those names.
     if (!Member_PlaylistName.IsAvailable())
     {
         return false;
     }
     const std::wstring Name = static_cast<FName>(PlaylistName).ToStdString();
     for (const wchar_t* Showdown : { L"Playlist_Showdown_Solo", L"Playlist_Showdown_Duos", L"Playlist_Showdown_Squads", L"Playlist_Deimos_SoloShow",
-             L"Playlist_Deimos_DuoShow", L"Playlist_Deimos_SquadShow" })
+             L"Playlist_Deimos_DuoShow", L"Playlist_Deimos_SquadShow", L"Playlist_ShowdownAlt_Solo", L"Playlist_ShowdownAlt_Duos",
+             L"Playlist_ShowdownAlt_Squads" })
     {
         if (_wcsicmp(Name.c_str(), Showdown) == 0)
         {

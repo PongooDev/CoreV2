@@ -398,9 +398,11 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     // RespawnPlayerAfterDeath run once the death penalty's respawn countdown is over. The player stays in the match.
     const bool bRespawning = GameMode && AthenaState && GameMode->IsRespawningAllowed(AthenaState);
     AFortGameStateAthena* GameState = Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState()));
-    // Team Rumble keeps its players in the match, so OnPawnDied returns before the game mode's RemoveFromAlivePlayers and
-    // its kill/team-score update. The TDM mode's own score is the team's eliminations; count the respawning kill here so
-    // the HUD's kill count and TeamScore follow, while the player comes back.
+    // Fallback, not Epic's trigger: 6.31's Team Rumble handles the elimination in
+    // AFortAthenaMutator_TDM::OnMutatorGameplayEvent, which the stripped game-mode death path broadcasts. Core's restored
+    // 1.9 handler has no call site for that event, and its EventId and parameters are not reflected, so the killer's own
+    // count is advanced through AFortPlayerStateAthena::SetKillScore, Epic's setter, while the player comes back.
+    // Team Rumble keeps its players in the match, so this handler returns before RemoveFromAlivePlayers.
     if (bRespawning && AthenaState && GameState && GameState->GamePhase > EAthenaGamePhase::GetWarmup() && bMarkedAlive && AthenaState->IsTeamDeathmatch())
     {
         AController* Finisher = Downer ? Downer : Instigator;

@@ -390,12 +390,8 @@ bool AFortPlayerStateAthena::IsTeamDeathmatch()
     {
         return false;
     }
-    // 6.31's Team Rumble is Playlist_Respawn_24; the mutator is its mode signal on every build that has it.
-    UFortPlaylistAthena* Playlist = AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
-    if (Playlist && Playlist->PlaylistId == 24)
-    {
-        return true;
-    }
+    // The mutator is Team Rumble's mode signal on every build that has it; the playlist's name is Core's guess and
+    // not the game's own answer.
     UClass* TdmClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_TDM");
     if (!TdmClass)
     {
@@ -508,9 +504,12 @@ void AFortPlayerStateAthena::SetKillScore(int32_t NewKillScore)
         {
             const int32_t Before = Member->TeamKillScore;
             Member->TeamKillScore = TeamKills;
-            // Team Rumble's HUD reads the replicated TeamScore, not TeamKillScore. The game's TDM mutator would have
-            // scored the elimination with its gameplay event; Core's respawning death path returns before that, so keep
-            // its score current here, on every teammate's state (the client watches its own OnRep_TeamScore).
+            // Fallback, not Epic's trigger: 6.31's Team Rumble scores an elimination in
+            // AFortAthenaMutator_TDM::OnMutatorGameplayEvent, which the game's death path broadcasts. Core restores the
+            // stripped 1.9 AFortPlayerControllerAthena::OnPawnDied, which predates that call and returns before
+            // RemoveFromAlivePlayers for a respawn; the mutator event's EventId and parameters are not reflected, so it
+            // cannot be replayed here. Keep the HUD's replicated TeamScore current on every teammate's state (the client
+            // watches its own OnRep_TeamScore) until the game's call site can be used.
             if (bTeamDeathmatch && Member->Member_TeamScore.IsAvailable())
             {
                 // A player who leaves takes their KillScore with them; the team's score is not theirs to take back.

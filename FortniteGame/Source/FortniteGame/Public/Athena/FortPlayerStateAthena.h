@@ -252,7 +252,7 @@ public:
     void ClientNotifyTournamentStatsFinal();
     // Whether the match is a tournament's: its playlist a Showdown one (UFortPlaylist::IsShowdownPlaylist).
     bool IsTournamentMatch();
-    // Whether the match is a two-team TDM (Team Rumble): its AFortAthenaMutator_TDM, or its Respawn_24 playlist.
+    // Whether the match runs AFortAthenaMutator_TDM (Team Rumble): the game's own mode signal.
     bool IsTeamDeathmatch();
 
     static ptrdiff_t PlaceOffset() { return Member_Place.GetOffsetChecked(); }

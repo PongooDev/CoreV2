@@ -1789,10 +1789,9 @@ void FCoreAthenaBotController::ClearInventory()
 void FCoreAthenaBotController::TickWarmup(float Now, float DeltaSeconds)
 {
 #if WITH_SERVER_CODE
-    // Nobody can be hurt on the warmup island (the pawn spawns with bCanBeDamaged off, SpawnPawnAt), so a bot never
-    // dies there; a pawn that is gone all the same (out of the world) is put back at a warmup spot. From 6.30 the island
-    // hurts where the game mode's bAllowDamageInWarmup says so (#452): a bot killed there comes back the same way, as a
-    // player does, and is no elimination.
+    // From 6.30 the island hurts where the game mode's bAllowDamageInWarmup says so (#452): a bot killed there by a
+    // player comes back the same way, as a player does, and is no elimination. The bots' own brawl there is for show:
+    // FireShot leaves out its damage while the bot is in the warmup, so no bot takes health from another bot's hit.
     AFortPlayerPawnAthena* Pawn = GetPawn();
     if (!Pawn || Pawn->IsPendingKill() || Pawn->bIsDying || WarmupRespawnTime >= 0.0f || (Pawn->IsDead() && !Pawn->bIsDBNO))
     {
@@ -1811,7 +1810,8 @@ void FCoreAthenaBotController::TickWarmup(float Now, float DeltaSeconds)
         return;
     }
 
-    // Hurt by someone: the bot fights back (a player who shoots a bot there gets shot at).
+    // Hurt by someone: the bot fights back. Its shots and swings there take no health (FireShot skips the damage in
+    // the warmup), so the brawl stays a show (#452).
     const float HealthShield = Pawn->GetHealth() + Pawn->GetShield();
     if (LastHealthShield >= 0.0f && HealthShield < LastHealthShield - 0.5f)
     {
@@ -1877,7 +1877,7 @@ void FCoreAthenaBotController::TickWarmup(float Now, float DeltaSeconds)
     case EWarmupActivity::Brawl:
     {
         // A fight: a weapon from the island's floor if one lies close, then the nearest enemy close by (a bot or a
-        // player), the ground game's own fighting.
+        // player), the ground game's own fighting. Its hits take no health in the warmup (#452).
         if (Now >= NextPerceptionTime)
         {
             NextPerceptionTime = Now + 0.25f;
@@ -1919,7 +1919,8 @@ void FCoreAthenaBotController::ChooseWarmupActivity(float Now, bool bFightBack)
 {
 #if WITH_SERVER_CODE
     // What players did on the warmup island: mostly standing about and walking a little, a dance, and every so often a
-    // fight with the island's weapons (more often a bot that was hit fights back).
+    // fight with the island's weapons (more often a bot that was hit fights back). The brawl's hits take no health
+    // (#452), so it stays a show.
     StopEmote();
     if (WarmupActivity == EWarmupActivity::Brawl)
     {
@@ -2747,6 +2748,10 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
     std::vector<FCandidate> Candidates;
     bool bHasStandingCandidate = false;
     AFortPawn* Previous = CurrentTarget.Get();
+    // CoreV2 #452: on the warmup island a bot fights only bots. The game mode's bAllowDamageInWarmup lets players hurt
+    // each other, but a bot choosing to fight a player there is Core's AI, not the game's, and the player comes back on
+    // the island (GildedTyphoon_99 eliminated a player with its pickaxe in the reported log).
+    const bool bWarmup = State == ECoreAthenaBotState::Warmup;
     // A teammate down: the enemies around are dealt with before the revive, other bots included, whatever the engage roll
     // (CoreV2 #373: bots let enemy bots be and walked over to revive in front of them).
     bool bTeammateDown = false;
@@ -2768,13 +2773,17 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
         {
             continue;
         }
+        if (bWarmup && !FCoreAthenaBotManager::IsBotPawn(reinterpret_cast<const UObject*>(Other)))
+        {
+            continue;
+        }
         const float Distance = (LocationOf(Other) - Location).Size();
         if (Distance > AIBotSkills.SightRange)
         {
             continue;
         }
         // Players come first: after the bus, a bot is passed by unless it is after this one (or the roll says fight), and
-        // sorted 15 m farther than a player (the warmup island's brawls are anyone's).
+        // sorted 15 m farther than a player (on the warmup island every bot is fair game and players are left out, #452).
         FCoreAthenaBotController* OtherBot = State != ECoreAthenaBotState::Warmup ? Manager->FindBot(reinterpret_cast<UObject*>(Other)) : nullptr;
         if (OtherBot && Other != Previous && !(bTeammateDown && Distance < ReviveEngageRange) && !WillEngageBot(OtherBot, Now))
         {
@@ -2829,6 +2838,10 @@ void FCoreAthenaBotController::UpdateCurrentTarget(float Now)
     for (const TWeakObjectPtr<AFortPawn>& Weak : Manager->GetEnemyPawns())
     {
         AFortPawn* Other = Weak.Get();
+        if (bWarmup && !FCoreAthenaBotManager::IsBotPawn(reinterpret_cast<const UObject*>(Other)))
+        {
+            continue;
+        }
         if (Attacker && Other && reinterpret_cast<UObject*>(static_cast<APlayerState*>(Other->PlayerState)) == reinterpret_cast<UObject*>(Attacker) && Manager->TeamOfPawn(Other) != Team
             && (Now - LastHurtTime < 10.0f || !Manager->FindBot(reinterpret_cast<UObject*>(Other))))
         {
@@ -3457,6 +3470,13 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     {
         return;
     }
+    // CoreV2 #452: a bot's warmup brawl is for show. Its shots and swings still fire and show their hit cues, but take no
+    // health from another bot or a player: the game mode's bAllowDamageInWarmup is the players' own damage, and a bot's
+    // hit there is Core's.
+    if (State == ECoreAthenaBotState::Warmup)
+    {
+        return;
+    }
     float Damage = bPickaxeEquipped ? 20.0f : Held ? Held->Damage : 20.0f;
     int32_t PelletsHit = 1;
     if (Held && Held->Pellets > 1)
@@ -3932,6 +3952,15 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
     AAIController* AIController = Controller.Get();
     if (!Target || !AIController || Target->bIsDying || !Pawn)
     {
+        return false;
+    }
+    if (State == ECoreAthenaBotState::Warmup && !FCoreAthenaBotManager::IsBotPawn(reinterpret_cast<const UObject*>(Target)))
+    {
+        // CoreV2 #452: a bot never fights a player on the warmup island (UpdateCurrentTarget leaves players out; a
+        // remembered one is dropped here too).
+        CurrentTarget = nullptr;
+        StopFiring();
+        SetTargeting(false);
         return false;
     }
     const FVector Location = LocationOf(Pawn);

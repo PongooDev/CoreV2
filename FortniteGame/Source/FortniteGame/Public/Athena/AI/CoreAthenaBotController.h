@@ -412,9 +412,10 @@ private:
     std::vector<FUpdateStep> UpdateSteps;
 
     // The warmup island (Core's: 8.30's bots spawned after the bus). Players there stand around, look about, walk a
-    // little, dance, and now and then pick up the island's weapons and fight; one eliminated comes back a few seconds
-    // later at a warmup spot, which counts for nothing. A fall from a height opens the glider, as a player redeploys it
-    // there (AFortPlayerPawnAthena::BeginSkydiving: the movement opens the parachute below its forced-deploy height).
+    // little and dance; the bots also brawl there, but a bot's hit during a warmup brawl takes no health (#452). One
+    // eliminated comes back a few seconds later at a warmup spot, which counts for nothing. A fall from a height opens
+    // the glider, as a player redeploys it there (AFortPlayerPawnAthena::BeginSkydiving: the movement opens the parachute
+    // below its forced-deploy height).
     enum class EWarmupActivity : uint8_t
     {
         Idle,

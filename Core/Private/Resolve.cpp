@@ -4034,6 +4034,17 @@ namespace
         const ptrdiff_t NetDormancy = DormancyLoad && (Byte(DormancyLoad + 2) & 0xC0) == 0x80 && (Byte(DormancyLoad + 2) & 0x07) != 0x04 ? *reinterpret_cast<const int32_t*>(DormancyLoad + 3) : 0;
         RequireOffset(L"AActor::NetDormancy", Natives::AActor_NetDormancy, NetDormancy);
 
+        // 5.0 (CL-4214610) moved AActor's network floats to the same slots 6.31 (CL-4573279) has: NetDormancy is at
+        // +0x119, NetUpdateFrequency at +0x130 and MinNetUpdateFrequency at +0x134 (the 6.31 SDK's AActor layout).
+        // The 6.31 server strips the two reflected properties from AActor's class while its native fields stay; the
+        // properties are read through these offsets only when reflection can't find them. Older builds are unchanged.
+        if (NetDormancy == 0x119)
+        {
+            Natives::AActor_NetUpdateFrequency = NetDormancy + 0x17;
+            Natives::AActor_MinNetUpdateFrequency = NetDormancy + 0x1B;
+            Log::Info(L"Finder: AActor::NetUpdateFrequency +0x{:X}, MinNetUpdateFrequency +0x{:X} (native fallback)", Natives::AActor_NetUpdateFrequency, Natives::AActor_MinNetUpdateFrequency);
+        }
+
         const uintptr_t WorldCall = FlushDormancyEnd ? FindVirtualCall(FlushDormancy, FlushDormancyEnd) : 0;
         const uintptr_t AddActorCall = WorldCall ? FindRawCall(WorldCall + 6, FlushDormancyEnd) : 0;
         const uintptr_t AddNetworkActor = AddActorCall ? Finder::RelativeTarget(AddActorCall, 1, 5) : 0;

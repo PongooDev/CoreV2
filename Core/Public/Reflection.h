@@ -64,7 +64,7 @@ namespace Reflection
     class FMemberInfo
     {
     public:
-        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct = nullptr, size_t InSoftPathGrowth = 0);
+        FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct = nullptr, size_t InSoftPathGrowth = 0, const std::ptrdiff_t* InNativeOffset = nullptr);
 
         int32_t GetOffsetChecked();
         // Whether the build reflects this member, for members a build may not have (no error once checked).
@@ -83,6 +83,8 @@ namespace Reflection
         EMemberKind Kind;
         FOwnerGetter StructType;
         size_t SoftPathGrowth;
+        // A member the build can strip from reflection but keeps at a known native offset (Epic's direct access).
+        const std::ptrdiff_t* NativeOffset;
         int32_t Offset = UnresolvedOffset;
         uint8_t FieldMask = 0;
         uint8_t ByteMask = 0;
@@ -215,6 +217,16 @@ public: \
 #define DefineUProperty(Type, Name) \
 private: \
     static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<Type> }; \
+public: \
+    Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
+    void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \
+    __declspec(property(get = GetMember_##Name, put = SetMember_##Name)) Type Name;
+
+// A reflected property that the game may strip from the class but keep at a native offset (5.0's AActor::NetUpdateFrequency
+// and MinNetUpdateFrequency). Reflection stays first; older builds and builds that reflect it are unchanged.
+#define DefineUPropertyOrNative(Type, Name, NativeOffset) \
+private: \
+    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<Type>, &(NativeOffset) }; \
 public: \
     Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
     void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \

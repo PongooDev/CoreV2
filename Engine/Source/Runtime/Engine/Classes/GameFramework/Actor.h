@@ -69,8 +69,8 @@ public:
     // The pawn responsible for what the actor does (a game mode's is the one its spawns are instigated by).
     DefineUProperty(APawn*, Instigator)
     DefineUProperty(int32_t, NetTag)
-    DefineUProperty(float, NetUpdateFrequency)
-    DefineUProperty(float, MinNetUpdateFrequency)
+    DefineUPropertyOrNative(float, NetUpdateFrequency, Natives::AActor_NetUpdateFrequency)
+    DefineUPropertyOrNative(float, MinNetUpdateFrequency, Natives::AActor_MinNetUpdateFrequency)
     // SetLifeSpan's lifespan (0 for none).
     DefineUProperty(float, InitialLifeSpan)
     DefineNativeMember(TEnumAsByte<ENetDormancy>, NetDormancy, AActor_NetDormancy)

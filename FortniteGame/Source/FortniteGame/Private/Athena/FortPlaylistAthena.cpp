@@ -1,9 +1,45 @@
 #include "pch.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "FortPlaylistUserOptions.h"
+#include "UObject/UnrealType.h"
 #include "Log.h"
 
 #include <cwchar>
+
+std::wstring UFortPlaylist::PlaylistNameText() const
+{
+    if (Member_PlaylistName.IsAvailable())
+    {
+        return static_cast<FName>(PlaylistName).ToStdString();
+    }
+    // 4.1's UFortPlaylist keeps its name as an FString. It is read here by its property name, and the property's own class
+    // says how: a build that reflects neither type answers "none" instead of ending the server on the lookup.
+    UProperty* Property = GetClass()->FindPropertyByName(FName(L"PlaylistName", FNAME_Find));
+    if (!Property)
+    {
+        return std::wstring(L"none");
+    }
+    const std::wstring Type = Property->GetClass()->GetName().ToStdString();
+    const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(this) + Property->GetOffset_ForInternal();
+    if (Type == L"StrProperty")
+    {
+        return reinterpret_cast<const FString*>(Bytes)->ToStdString();
+    }
+    if (Type == L"NameProperty")
+    {
+        return reinterpret_cast<const FName*>(Bytes)->ToStdString();
+    }
+    return std::wstring(L"none");
+}
+
+bool UFortPlaylist::IsPlaylistNamed(FName Name) const
+{
+    if (Member_PlaylistName.IsAvailable())
+    {
+        return static_cast<FName>(PlaylistName) == Name;
+    }
+    return _wcsicmp(PlaylistNameText().c_str(), Name.ToStdString().c_str()) == 0;
+}
 
 bool UFortPlaylist::IsShowdownPlaylist() const
 {
@@ -42,7 +78,7 @@ int32_t FPlaylistPropertyArray::SetPropertyOverrides(const UFortPlaylistAthena* 
 
     UPlaylistUserOptions* UserOptions = Playlist && MatchOptions && MatchOptions->Num() > 0 && UFortPlaylist::HasUserOptions() ? static_cast<UPlaylistUserOptions*>(Playlist->UserOptions) : nullptr;
     const TArray<UPlaylistUserOptionBase*>* Options = UserOptions ? &static_cast<TArray<UPlaylistUserOptionBase*>&>(UserOptions->Options) : nullptr;
-    const std::wstring PlaylistText = Playlist ? static_cast<FName>(Playlist->PlaylistName).ToStdString() : std::wstring(L"none");
+    const std::wstring PlaylistText = Playlist ? Playlist->PlaylistNameText() : std::wstring(L"none");
     for (int32_t Index = 0; Options && Index < Options->Num(); ++Index)
     {
         // The key the lobby sent the option's value under, and so the one AFortGameMode::OnGivenMatchAssignment gave the

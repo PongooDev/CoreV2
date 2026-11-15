@@ -1656,7 +1656,30 @@ void UAthenaNavSystem::AddDirtyArea(const AActor* Actor)
 bool UAthenaNavSystem::ProjectPointToNavigation(UWorld* World, const FVector& Point, FVector& OutLocation, const FVector& Extent)
 {
     ANavigationData* NavData = GetNavData(World);
-    return NavData && UNavigationSystem::K2_ProjectPointToNavigation(reinterpret_cast<UObject*>(World), Point, OutLocation, NavData, Extent);
+    if (!NavData)
+    {
+        return false;
+    }
+    if (UNavigationSystem::K2_ProjectPointToNavigation(reinterpret_cast<UObject*>(World), Point, OutLocation, NavData, Extent))
+    {
+        return true;
+    }
+    // 1.8.2's shipping build reflects no K2_ProjectPointToNavigation (its BlueprintCallable functions are stripped; asking
+    // for it there stopped the server at the bots' first path request, CoreV2's crash report). Core has no other projection
+    // to fall back on, so the point is taken as it is: a bot's path search then answers, and one that is off the navmesh
+    // steers back from what it says, rather than the server dying on the lookup.
+    if (!UNavigationSystem::FindStaticFunction_K2_ProjectPointToNavigation())
+    {
+        static bool bLogged = false;
+        if (!bLogged)
+        {
+            bLogged = true;
+            Log::Info(L"BOTS: this build reflects no K2_ProjectPointToNavigation (1.8.2 strips it), so a point is taken as it is");
+        }
+        OutLocation = Point;
+        return true;
+    }
+    return false;
 }
 
 bool UAthenaNavSystem::IsOnNavMesh(UWorld* World, const FVector& Location)

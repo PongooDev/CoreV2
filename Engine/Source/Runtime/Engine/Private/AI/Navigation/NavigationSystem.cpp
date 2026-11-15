@@ -127,7 +127,15 @@ void UNavigationSystem::RegisterNavigationInvoker(AActor* Invoker, float TileGen
 
 bool UNavigationSystem::K2_ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, FVector& ProjectedLocation, ANavigationData* NavData, const FVector& QueryExtent)
 {
-    Reflection::FParams Params(StaticFunction_K2_ProjectPointToNavigation(), true);
+    // A build that doesn't reflect it has nothing to call: 1.8.2's shipping build strips its BlueprintCallable functions, and
+    // asking for it there stopped the server at the bots' first path request (CoreV2's crash report). False, so the caller
+    // takes its own fallback rather than dying on the lookup.
+    UFunction* Function = FindStaticFunction_K2_ProjectPointToNavigation();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
     Params.Set(L"WorldContextObject", WorldContextObject);
     Params.Set(L"Point", Point);
     Params.Set(L"NavData", reinterpret_cast<UObject*>(NavData));

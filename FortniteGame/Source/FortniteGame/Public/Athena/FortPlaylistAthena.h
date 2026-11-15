@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "Containers/Map.h"
 #include "Containers/UnrealString.h"
 #include "Engine/NetSerialization.h"
@@ -25,6 +27,13 @@ public:
     // The name the playlist manager finds it by (Playlist_DefaultSolo), the one the matchmaking service's assignment
     // gives from 5.30 (HandleAssignMatchMessage's "PlaylistName: %s").
     DefineUProperty(FName, PlaylistName)
+    // The name as text: the FName 5.30's and later keep it as, or the FString 4.1 keeps it as. There the member is read by
+    // its property name, and the property's size tells the two apart. "none" where the build reflects neither: 4.1's first
+    // run stopped on the member's lookup (CoreV2's crash report), so nothing here may go through the checked accessor.
+    std::wstring PlaylistNameText() const;
+    // Whether this playlist is the one PlaylistName names: the FName comparison, or the text's without case on a build whose
+    // PlaylistName is an FString.
+    bool IsPlaylistNamed(FName Name) const;
     // The levels the match streams in with the playlist (AFortGameState::StartStreamingAdditionalPlaylistLevel).
     DefineUProperty(TArray<TAssetPtr<UWorld>>, AdditionalLevels)
     static bool HasAdditionalLevels() { return Member_AdditionalLevels.IsAvailable(); }
@@ -236,7 +245,7 @@ public:
     {
         for (UFortPlaylistAthena* Playlist : static_cast<TArray<UFortPlaylistAthena*>&>(AthenaPlaylists))
         {
-            if (Playlist && static_cast<FName>(Playlist->PlaylistName) == PlaylistName)
+            if (Playlist && Playlist->IsPlaylistNamed(PlaylistName))
             {
                 return Playlist;
             }

@@ -48,7 +48,7 @@ namespace
         UObject* PlaylistAISettings = UFortPlaylistAthena::HasAISettings() ? static_cast<UObject*>(Playlist->AISettings) : nullptr;
         if (PlaylistAISettings && GameMode && AFortGameModeAthena::HasAISettings())
         {
-            Log::Info(L"PLAYLIST: {} has AI settings ({}), the game mode takes them", static_cast<FName>(Playlist->PlaylistName).ToStdString(),
+            Log::Info(L"PLAYLIST: {} has AI settings ({}), the game mode takes them", Playlist->PlaylistNameText(),
                 PlaylistAISettings->GetName().ToStdString());
             GameMode->SetAISettings(PlaylistAISettings);
         }
@@ -67,7 +67,7 @@ namespace
         else
         {
             Log::Error(L"PLAYLIST: AFortGameStateAthena has neither OnRep_CurrentPlaylistData nor OnRep_CurrentPlaylistInfo on this build, so {} doesn't load",
-                static_cast<FName>(Playlist->PlaylistName).ToStdString());
+                Playlist->PlaylistNameText());
         }
         GameState->StreamAdditionalPlaylistLevels();
     }
@@ -164,10 +164,10 @@ void AFortGameStateAthena::SetCurrentPlaylistId(int32_t PlaylistId)
     if (!Playlist)
     {
         Log::Warning(L"PLAYLIST: playlist {} isn't one of the game mode's playlist manager's, so the game state's stays {}", PlaylistId,
-            Current ? static_cast<FName>(Current->PlaylistName).ToStdString() : std::wstring(L"none"));
+            Current ? Current->PlaylistNameText() : std::wstring(L"none"));
         return;
     }
-    Log::Info(L"PLAYLIST: Playlist Object found in AFortGameStateAthena::SetCurrentPlaylistId() PlaylistName is {} (Server Only)", static_cast<FName>(Playlist->PlaylistName).ToStdString());
+    Log::Info(L"PLAYLIST: Playlist Object found in AFortGameStateAthena::SetCurrentPlaylistId() PlaylistName is {} (Server Only)", Playlist->PlaylistNameText());
     TakePlaylist(this, GameMode, Playlist);
 #endif
 }
@@ -183,7 +183,7 @@ void AFortGameStateAthena::SetCurrentPlaylistId(FName PlaylistName)
     // loading, the game mode's playlist manager's of that name becomes its playlist, and its id the game state's and the
     // game mode's CurrentPlaylistId.
     UFortPlaylistAthena* Current = GetCurrentPlaylist();
-    if (Current && static_cast<FName>(Current->PlaylistName) == PlaylistName && IsPlaylistLoadedOrLoading(this))
+    if (Current && Current->IsPlaylistNamed(PlaylistName) && IsPlaylistLoadedOrLoading(this))
     {
         return;
     }
@@ -193,7 +193,7 @@ void AFortGameStateAthena::SetCurrentPlaylistId(FName PlaylistName)
     if (!Playlist)
     {
         Log::Warning(L"PLAYLIST: {} isn't one of the game mode's playlist manager's, so the game state's stays {}", PlaylistName.ToStdString(),
-            Current ? static_cast<FName>(Current->PlaylistName).ToStdString() : std::wstring(L"none"));
+            Current ? Current->PlaylistNameText() : std::wstring(L"none"));
         return;
     }
     Log::Info(L"PLAYLIST: Playlist Object found in AFortGameStateAthena::SetCurrentPlaylistId() PlaylistName is {} (Server Only)", PlaylistName.ToStdString());
@@ -295,7 +295,7 @@ void AFortGameStateAthena::StreamAdditionalPlaylistLevels()
     if (Levels.Num() > 0 && !Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel)
     {
         Log::Error(L"PLAYLIST: AFortGameState::StartStreamingAdditionalPlaylistLevel wasn't found, so {}'s {} additional levels don't stream in",
-            static_cast<FName>(Playlist->PlaylistName).ToStdString(), Levels.Num());
+            Playlist->PlaylistNameText(), Levels.Num());
         return;
     }
     for (int32_t Index = 0; Index < Levels.Num(); ++Index)

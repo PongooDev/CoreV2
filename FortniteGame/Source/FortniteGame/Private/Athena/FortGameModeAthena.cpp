@@ -637,7 +637,7 @@ namespace
             }
         }
         Log::Info(L"Tournament: {} reported players' stats are final in {}, {} told (ClientNotifyTournamentStatsFinal)", Reported.size(),
-            static_cast<FName>(Playlist->PlaylistName).ToStdString(), Told);
+            Playlist->PlaylistNameText(), Told);
     }
 
     // Whether the death the player state holds is still the warmup death NoteWarmupDeath saw (same eliminator, same place).
@@ -2954,7 +2954,7 @@ void AFortGameModeAthena::ReportGamePhaseStep(const wchar_t* Event)
 
     UFortPlaylistAthena* Playlist = AFortGameStateAthena::HasCurrentPlaylist() ? GameState->GetCurrentPlaylist() : nullptr;
     const std::wstring StartUp = Playlist && UFortPlaylistAthena::HasSafeZoneStartUp()
-        ? std::format(L"; {}'s SafeZoneStartUp {}", static_cast<FName>(Playlist->PlaylistName).ToStdString(), static_cast<int32_t>(static_cast<uint8_t>(Playlist->SafeZoneStartUp))) : std::wstring();
+        ? std::format(L"; {}'s SafeZoneStartUp {}", Playlist->PlaylistNameText(), static_cast<int32_t>(static_cast<uint8_t>(Playlist->SafeZoneStartUp))) : std::wstring();
     Log::Info(L"Battle Royale: the timer's step is {} with {:.0f} s left ({}), phase {}, at {:.1f} s: {}{}{}", GameState->GamePhaseStep.ToString(),
         static_cast<float>(GameState->GamePhaseStepTimeRemaining), Event, GameState->GamePhase.ToString(), Now, Circle, Bus, StartUp);
 #endif
@@ -3021,7 +3021,7 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContaine
         if (ModeMutators > 0 || StateMutators > 0)
         {
             UFortPlaylistAthena* Playlist = GameState->GetCurrentPlaylist();
-            Log::Info(L"PLAYLIST: {}'s mutators: {} answer for the game mode, {} for the game state{}", Playlist ? static_cast<FName>(Playlist->PlaylistName).ToStdString() : std::wstring(L"the playlist"),
+            Log::Info(L"PLAYLIST: {}'s mutators: {} answer for the game mode, {} for the game state{}", Playlist ? Playlist->PlaylistNameText() : std::wstring(L"the playlist"),
                 ModeMutators, StateMutators, AFortGameStateAthena::HasAllowRespawning() ? (GameState->bAllowRespawning ? L"; bAllowRespawning is set" : L"; bAllowRespawning isn't set") : L"");
         }
         // 6.10's in-game tournaments (CoreV2 #418): a Showdown playlist's match is a tournament's, once, as it loads.
@@ -3030,7 +3030,7 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContaine
         {
             Log::Info(L"Tournament: {} is a tournament's playlist: each team's eliminations go to its players as they grow (ClientReportTeamKill), its stats once "
                 L"its match is reported ({}), and its placement as the game state's TeamsLeft and the players' Place replicate",
-                static_cast<FName>(Playlist->PlaylistName).ToStdString(), AFortPlayerStateAthena::FindStaticFunction_ClientNotifyTournamentStatsFinal()
+                Playlist->PlaylistNameText(), AFortPlayerStateAthena::FindStaticFunction_ClientNotifyTournamentStatsFinal()
                     ? L"ClientNotifyTournamentStatsFinal" : L"this build has no ClientNotifyTournamentStatsFinal");
         }
     }

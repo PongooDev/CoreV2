@@ -515,7 +515,7 @@ void ABuildingContainer::InitializeTierGroupData(EFortBuildingPersistentState St
             const FChosenQuotaInfo& ChosenQuota = SearchLootTierChosenQuotaInfo;
             if (ChosenQuota.IsSet() && !bAthena)
             {
-                ContainerLootTierKey = ChosenQuota.LootTierKey;
+                ContainerLootTierKey = ChosenQuota.GetLootTierKey();
                 LootTier = ChosenQuota.LootTier;
             }
             else

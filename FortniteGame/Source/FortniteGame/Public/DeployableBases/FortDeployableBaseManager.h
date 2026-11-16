@@ -76,6 +76,10 @@ public:
     DefineUStructArrayProperty(FPendingDeployableBaseUser, PendingUsers)
     DefineBitfieldUProperty(bWorldInitialized)
 
+    // bWorldInitialized's offset and bit, for the finder that reads the code setting it; false when the build doesn't
+    // reflect it.
+    static bool WorldInitializedBit(int32_t& OutOffset, uint8_t& OutMask);
+
     static AFortDeployableBaseManager* GetCurrent(UObject* WorldContextObject);
     ADeployableBasePlot* GetDeployableBasePlotFromLocation(const FVector& Location) const;
 

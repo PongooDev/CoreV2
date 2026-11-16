@@ -4,6 +4,7 @@
 #include "Containers/UnrealString.h"
 #include "GameFramework/OnlineReplStructs.h"
 #include "GameplayTagContainer.h"
+#include "ObjectLayout.h"
 #include "StructArray.h"
 #include "UObject/Object.h"
 #include "UObject/WeakObjectPtr.h"
@@ -119,7 +120,16 @@ private:
 public:
     int32_t GetCompletionCount(FName BackendName)
     {
-        return Member_CompletionCounts.IsAvailable() ? Reflection::AccessMember<TMap<FName, int32_t>>(this, Member_CompletionCounts).FindRef(BackendName) : 0;
+        if (!Member_CompletionCounts.IsAvailable())
+        {
+            return 0;
+        }
+        // 7.00's (UE 4.22) map elements are 0x14 bytes: its FName isn't 8-byte aligned.
+        if (ObjectLayout::IsNameAligned4())
+        {
+            return Reflection::AccessMember<TMap<FPackedName, int32_t>>(this, Member_CompletionCounts).FindRef(FPackedName(BackendName));
+        }
+        return Reflection::AccessMember<TMap<FName, int32_t>>(this, Member_CompletionCounts).FindRef(BackendName);
     }
 
     // The quest's UFortQuestItemDefinition (UFortItem::GetItemDefinitionBP).

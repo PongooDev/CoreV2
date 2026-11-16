@@ -527,6 +527,13 @@ namespace
     // Func +0xC0 (UFunction::Bind 0x1869390; 6.31's 0x188AAF0 has +0x88 and +0xB0). UClass's own members don't move.
     void ResolveStructBaseChain()
     {
+        // The members are moved once: ResolveRuntime may run again in the same module.
+        static bool bSearched = false;
+        if (bSearched)
+        {
+            return;
+        }
+        bSearched = true;
         const uintptr_t Begin = Finder::TextBegin();
         const uintptr_t End = Finder::TextEnd();
         std::unordered_map<int32_t, int32_t> Votes;
@@ -3329,6 +3336,21 @@ namespace
                     }
                 }
             }
+            // 7.00 (CL-4629139) takes the map's address once into another register for both removals: lea rbp, [rcx+1718h]
+            // (0x281DADB in 0x281DAC0). Read a lea into any register, only when no lea into rcx was found.
+            for (const auto& [Site, Target] : Found.empty() ? NotifyCalls : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
+                for (uintptr_t Lea = Target; TargetEnd && TargetEnd - Target < 0x200 && Lea + 7 <= TargetEnd; ++Lea)
+                {
+                    const ptrdiff_t Offset = *reinterpret_cast<const int32_t*>(Lea + 3);
+                    if (Byte(Lea) == 0x48 && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xC0) == 0x80 && (Byte(Lea + 2) & 0x07) != 0x04 && Offset > ActorChannels && Offset != ConnectionDestroyedActors && Offset < ConnectionDestroyedActors + 0x100
+                        && std::find(Found.begin(), Found.end(), Offset) == Found.end())
+                    {
+                        Found.push_back(Offset);
+                    }
+                }
+            }
             if (Found.size() == 1)
             {
                 DormantReplicators = Found[0];
@@ -3824,7 +3846,10 @@ namespace
         const uintptr_t LevelInitializedBody = LevelInitializedSites >= 1 ? VTableEntry(NetDriverVTable, LevelInitialized) : 0;
         RequireSlot(L"UNetDriver::IsLevelInitializedForActor", Natives::UNetDriver_IsLevelInitializedForActorIndex, LevelInitializedBody ? LevelInitialized : -1);
 
-        const int32_t ClientHasInitializedLevelFor = LevelInitializedBody ? VirtualSlot(FindVirtualCall(LevelInitializedBody, LevelInitializedBody + 0x40)) : -1;
+        // 7.00 (CL-4629139) compares the two FNames half by half, which puts the call at +0x4A (0x282D29A in 0x282D250).
+        uintptr_t LevelForCall = LevelInitializedBody ? FindVirtualCall(LevelInitializedBody, LevelInitializedBody + 0x40) : 0;
+        LevelForCall = LevelForCall || !LevelInitializedBody ? LevelForCall : FindVirtualCall(LevelInitializedBody, LevelInitializedBody + 0x60);
+        const int32_t ClientHasInitializedLevelFor = LevelForCall ? VirtualSlot(LevelForCall) : -1;
         // cmp [Connection+ClientWorldPackageName], reg: 48 39 on 1.1 and 1.2, 49 39 on 1.7.2 (through r8).
         ptrdiff_t ClientWorldPackageName = 0;
         for (uintptr_t Compare = LevelInitializedBody ? FindInstruction(LevelInitializedBody, LevelInitializedBody + 0x40, { -1, 0x39 }) : 0; Compare && !ClientWorldPackageName; Compare = FindInstruction(Compare + 1, LevelInitializedBody + 0x40, { -1, 0x39 }))
@@ -3832,6 +3857,15 @@ namespace
             if ((Byte(Compare) & 0xF8) == 0x48 && (Byte(Compare + 2) & 0xC0) == 0x80 && (Byte(Compare + 2) & 0x07) != 0x04)
             {
                 ClientWorldPackageName = *reinterpret_cast<const int32_t*>(Compare + 3);
+            }
+        }
+        // 7.00 loads the connection's name first and compares its halves in registers: mov r9, [r8+1858h] (4D 8B 88,
+        // 0x282D270), the connection being the third argument. Read that load, before the call, when no compare was found.
+        for (uintptr_t Load = !ClientWorldPackageName && LevelForCall ? LevelInitializedBody : 0; Load && Load + 7 <= LevelForCall && !ClientWorldPackageName; ++Load)
+        {
+            if ((Byte(Load) & 0xFB) == 0x49 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC7) == 0x80)
+            {
+                ClientWorldPackageName = *reinterpret_cast<const int32_t*>(Load + 3);
             }
         }
         RequireOffset(L"UNetConnection::ClientWorldPackageName", Natives::UNetConnection_ClientWorldPackageName, ClientWorldPackageName);
@@ -3917,7 +3951,9 @@ namespace
         {
             const uintptr_t Target = Finder::RelativeTarget(Jump, 1, 5);
             const uintptr_t TargetEnd = IsInText(Target) && Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
-            if (!TargetEnd || !FindInstruction(Target, TargetEnd, { -1, 0x8B, -1, PackageName & 0xFF, (PackageName >> 8) & 0xFF, (PackageName >> 16) & 0xFF, (PackageName >> 24) & 0xFF }))
+            // 7.00 compares the name's halves in place: cmp eax, [rdi+185Ch]; cmp edx, [rdi+1858h] (0x283E909 in 0x283E8C0).
+            if (!TargetEnd || (!FindInstruction(Target, TargetEnd, { -1, 0x8B, -1, PackageName & 0xFF, (PackageName >> 8) & 0xFF, (PackageName >> 16) & 0xFF, (PackageName >> 24) & 0xFF })
+                && !FindInstruction(Target, TargetEnd, { 0x3B, -1, PackageName & 0xFF, (PackageName >> 8) & 0xFF, (PackageName >> 16) & 0xFF, (PackageName >> 24) & 0xFF })))
             {
                 continue;
             }
@@ -3980,20 +4016,26 @@ namespace
         // mov rcx, [rcx+GuidCache]; call; add rbx, Map up to 2.4.2 (0x1B0C9F0); 2.5 (UE 4.20, 0x2105A20) is a static
         // with the driver in rdx: mov rcx, [rsi+GuidCache], four stores, call (+0x1E); lea rbx, [rsi+Map].
         uintptr_t GuidCacheLoad = 0;
-        for (uintptr_t Load = CreateDestructionInfo; Load && Load < CreateDestructionInfo + 0x48 && !GuidCacheLoad; ++Load)
+        // 7.00 (CL-4629139) holds the driver in r15: mov rcx, [r15+150h] (49 8B 8F, 0x28213BB in 0x2821390), then lea rbx,
+        // [r15+360h] for the map. Taken only when no load through rax..rdi is found; the map's lea then has the same REX.
+        for (const uint8_t Rex : { static_cast<uint8_t>(0x48), static_cast<uint8_t>(0x49) })
         {
-            if (Byte(Load) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04)
+            for (uintptr_t Load = CreateDestructionInfo; Load && Load < CreateDestructionInfo + 0x48 && !GuidCacheLoad; ++Load)
             {
-                GuidCacheLoad = Load;
+                if (Byte(Load) == Rex && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04)
+                {
+                    GuidCacheLoad = Load;
+                }
             }
         }
+        const uint8_t DriverRex = GuidCacheLoad ? Byte(GuidCacheLoad) : 0;
         const uintptr_t AssignGuid = GuidCacheLoad ? FindRawCall(GuidCacheLoad + 7, GuidCacheLoad + 0x30) : 0;
         ptrdiff_t DestroyedActors = 0;
         uintptr_t DestroyedActorsBase = 0;
         for (uintptr_t Base = AssignGuid ? AssignGuid + 5 : 0; Base && Base < AssignGuid + 0x10 && !DestroyedActors; ++Base)
         {
-            const bool bAdd = Byte(Base) == 0x48 && Byte(Base + 1) == 0x81 && (Byte(Base + 2) & 0xF8) == 0xC0;
-            const bool bLea = Byte(Base) == 0x48 && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
+            const bool bAdd = Byte(Base) == DriverRex && Byte(Base + 1) == 0x81 && (Byte(Base + 2) & 0xF8) == 0xC0;
+            const bool bLea = Byte(Base) == DriverRex && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
             DestroyedActors = bAdd || bLea ? *reinterpret_cast<const int32_t*>(Base + 3) : 0;
             DestroyedActorsBase = DestroyedActors ? Base : 0;
         }
@@ -4001,7 +4043,7 @@ namespace
         // comes before the map: lea rbx, [rsi+240h] (0x228B143).
         for (uintptr_t Base = AssignGuid && !DestroyedActors ? AssignGuid + 5 : 0; Base && Base < AssignGuid + 0xA0 && !DestroyedActors; ++Base)
         {
-            const bool bLea = Byte(Base) == 0x48 && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
+            const bool bLea = Byte(Base) == DriverRex && Byte(Base + 1) == 0x8D && (Byte(Base + 2) & 0xC0) == 0x80 && (Byte(Base + 2) & 0x07) != 0x04 && (Byte(Base + 2) & 0x07) == (Byte(GuidCacheLoad + 2) & 0x07);
             DestroyedActors = bLea ? *reinterpret_cast<const int32_t*>(Base + 3) : 0;
             DestroyedActorsBase = DestroyedActors ? Base : 0;
         }
@@ -4841,6 +4883,15 @@ namespace
                 TagAssetInterface = FindBackward(Call, 0x30, { 0x4C, 0x8D, 0x86 | Register << 3 });
                 // 2.2 (0x5F8659) bases it on r15: lea r13, [r15+170h].
                 TagAssetInterface = TagAssetInterface ? TagAssetInterface : FindBackward(Call, 0x30, { 0x4D, 0x8D, 0x87 | Register << 3 });
+                // 7.00 (CL-4629139) bases it on r13 before the loop: lea r12, [r13+168h] (4D 8D A5, 0xF09171); then
+                // mov rax, [r12]; lea rdx, [rdi+28h]; mov rcx, r12; call [rax+20h]. Any base from r8 to r15 but r12.
+                for (uintptr_t Lea = TagAssetInterface ? 0 : Call - 0x30; Lea && Lea + 7 <= Call; ++Lea)
+                {
+                    if (Byte(Lea) == 0x4D && Byte(Lea + 1) == 0x8D && (Byte(Lea + 2) & 0xF8) == (0x80 | Register << 3) && (Byte(Lea + 2) & 0x07) != 0x04)
+                    {
+                        TagAssetInterface = Lea;
+                    }
+                }
                 HasAll = Call + 3;
             }
         }
@@ -10999,6 +11050,35 @@ bool Finder::ResolveMatchAssignmentLive(void** GameModeVTable)
             break;
         }
     }
+    // 7.00 (CL-4629139, OnGivenMatchAssignment 0xED7290) inlines the assignment after the game state's cast: lea rcx,
+    // [rbx+618h]; lea rdx, [rbp-39h]; call 0x4800A0 (0xED75C6, the map's copy that 6.31's "add rcx, 608h; jmp" reaches).
+    // The first call after the custom options whose this is a member's address and whose source a local's, when no
+    // assignment thunk was found.
+    bOptionsTaken = false;
+    for (const auto& [Site, Target] : End && Natives::AFortGameState_MatchOptions < 0 ? Finder::DirectCalls(OnGivenMatchAssignment, End) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        if (Target == CustomMatchOptions)
+        {
+            bOptionsTaken = true;
+            continue;
+        }
+        // lea rdx, [rbp+disp8] (4 bytes) or [rsp+disp8] (5) right before the call, and lea rcx, [r64+disp32] before that.
+        const uintptr_t Source = Byte(Site - 4) == 0x48 && Byte(Site - 3) == 0x8D && Byte(Site - 2) == 0x55 ? Site - 4
+            : Byte(Site - 5) == 0x48 && Byte(Site - 4) == 0x8D && Byte(Site - 3) == 0x54 && Byte(Site - 2) == 0x24 ? Site - 5 : 0;
+        const uintptr_t Member = Source ? Source - 7 : 0;
+        if (!bOptionsTaken || !Member || (Byte(Member) & 0xFE) != 0x48 || Byte(Member + 1) != 0x8D || (Byte(Member + 2) & 0xF8) != 0x88 || (Byte(Member + 2) & 0x07) == 0x04)
+        {
+            continue;
+        }
+        const int32_t Offset = *reinterpret_cast<const int32_t*>(Member + 3);
+        if (Offset > 0 && Offset < 0x4000)
+        {
+            Natives::AFortGameState_MatchOptions = Offset;
+            Log::Info(L"Finder: AFortGameState::MatchOptions at +0x{:X} (its assignment inlined at 0x{:X}, the custom match options from 0x{:X})", Offset, Site - Finder::ImageBase(),
+                CustomMatchOptions - Finder::ImageBase());
+        }
+        break;
+    }
     if (CustomMatchOptions && Natives::AFortGameState_MatchOptions < 0)
     {
         Log::Error(L"Finder: AFortGameState::MatchOptions not found (the custom match options at 0x{:X} {}), a party's custom match options won't reach its playlist",
@@ -15093,6 +15173,42 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
             ++PlaceCandidates;
         }
     }
+    // 7.00 (CL-4629139) asks it from neither: the build preview's helper does (0x12986B0, called from 0x12A58DB), which
+    // asks IsBuildingRestricted (CanAfford + 2, 0x30B at 0x1298845) and then CanPlaceBuildableClassInStructuralGrid (0x315
+    // at 0x1298AEE), and the place function (0x1294FC0) only asks GetErrorMessageFromStructuralQuery (0x318) about the
+    // preview's result. So, when the rules above find none, take the slot past the run whose third next slot the place
+    // function asks and that a function asks together with IsBuildingRestricted.
+    const auto AsksWith = [](int32_t Slot, int32_t OtherSlot)
+    {
+        const int32_t Displacement = Slot * static_cast<int32_t>(sizeof(void*));
+        const int32_t Other = OtherSlot * static_cast<int32_t>(sizeof(void*));
+        const std::initializer_list<int32_t> Call = { 0xFF, -1, Displacement & 0xFF, (Displacement >> 8) & 0xFF, (Displacement >> 16) & 0xFF, (Displacement >> 24) & 0xFF };
+        const std::initializer_list<int32_t> OtherCall = { 0xFF, -1, Other & 0xFF, (Other >> 8) & 0xFF, (Other >> 16) & 0xFF, (Other >> 24) & 0xFF };
+        const auto IsCall = [](uintptr_t Site) { return (Byte(Site + 1) & 0xF8) == 0x90 && (Byte(Site + 1) & 0x07) != 0x04; };
+        for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), Call); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), Call))
+        {
+            for (const auto& [Begin, End] : IsCall(Site) ? Finder::FunctionChunks(Finder::FunctionStart(Site)) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                for (uintptr_t Asked = FindInstruction(Begin, End, OtherCall); Asked; Asked = FindInstruction(Asked + 1, End, OtherCall))
+                {
+                    if (IsCall(Asked))
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    for (const int32_t Slot : Candidates == 1 && PlaceCandidates == 0 ? PlaceSlots : std::vector<int32_t>())
+    {
+        const int32_t Query = Slot - 3;
+        if (Query != CanPlace && Query > CanAfford + 3 && AsksWith(Query, CanAfford + 2))
+        {
+            CanPlace = Query;
+            ++PlaceCandidates;
+        }
+    }
 
     void** BuildingVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
 
@@ -15762,18 +15878,29 @@ bool Finder::ResolveMatchStatsLive()
         const uintptr_t Lookup = ModifyCalls.empty() ? 0 : ModifyCalls.front().second;
         uintptr_t GetStatValue = 0;
         int32_t Candidates = 0;
-        for (const uintptr_t Site : Lookup ? Finder::CallsTo(Lookup, false) : std::vector<uintptr_t>())
+        const std::vector<uintptr_t> LookupSites = Lookup ? Finder::CallsTo(Lookup, false) : std::vector<uintptr_t>();
+        // 7.00 (CL-4629139, 0x13586C0) saves a register and keeps the map's address first, so the lookup is 0x1D bytes in and
+        // the rounding 0x49 past it: the wider windows are tried when the tighter ones find nothing.
+        struct FStatWindows
         {
-            const uintptr_t Function = Finder::FunctionStart(Site);
-            if (!Function || Function == ModifyStat || Function == GetStatValue || Site - Function > 0x10)
+            uintptr_t Call;
+            uintptr_t Round;
+        };
+        for (const FStatWindows Windows : { FStatWindows{ 0x10, 0x40 }, FStatWindows{ 0x20, 0x60 } })
+        {
+            for (const uintptr_t Site : Candidates == 0 ? LookupSites : std::vector<uintptr_t>())
             {
-                continue;
-            }
-            const uintptr_t Round = FindInstruction(Site, Site + 0x40, { 0xF3, 0x0F, 0x2D, -1, 0xD1, 0xF8 });
-            if (Round)
-            {
-                GetStatValue = Function;
-                ++Candidates;
+                const uintptr_t Function = Finder::FunctionStart(Site);
+                if (!Function || Function == ModifyStat || Function == GetStatValue || Site - Function > Windows.Call)
+                {
+                    continue;
+                }
+                const uintptr_t Round = FindInstruction(Site, Site + Windows.Round, { 0xF3, 0x0F, 0x2D, -1, 0xD1, 0xF8 });
+                if (Round)
+                {
+                    GetStatValue = Function;
+                    ++Candidates;
+                }
             }
         }
         if (Candidates == 1)
@@ -16731,6 +16858,15 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
         Log::Warning(L"Finder: the replication graph's per-connection actor infos are left as CL-{} has them ({}), so a pawn spawned at a dead pawn's address may not reach its player (#411)", Changelist, Why);
         return false;
     };
+    // 7.00 (CL-4629139) has the engine's own fix: its UReplicationGraph::RemoveNetworkActor (0x75D020) ends by removing
+    // the actor from each of Connections' ActorMap (+0x30) with the remove-by-key the ChannelMap's uses (0x30F0F0 at
+    // 0x75D10A), as 8.30's does, so nothing is left behind to take out.
+    constexpr uint32_t EngineRemovesChangelist = 4629139;
+    if (Changelist >= EngineRemovesChangelist)
+    {
+        Log::Info(L"Finder: the replication graph's per-connection actor infos are taken out by the engine's UReplicationGraph::RemoveNetworkActor on CL-{} (#411)", Changelist);
+        return false;
+    }
     if (Changelist < FirstVerifiedChangelist || Changelist > LastVerifiedChangelist)
     {
         return LeftAsIs(L"only 6.00 to 6.31, CL-4395664 to CL-4573279, were checked");
@@ -16892,6 +17028,7 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
     void** PawnVTable = nullptr;
     uintptr_t MovedTarget = 0;
     uintptr_t CastTarget = 0;
+    uintptr_t ChildOfTarget = 0;
     // What each mov dl, 1 site and its callee hold, for the log when nothing is found.
     std::wstring Diagnostics;
     int32_t DiagnosedSites = 0;
@@ -16963,11 +17100,20 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         // start; a jmp whose hops all stay in executable code (Finder::Unthunk only follows those) is taken as well.
         // A B2 01 pair inside another instruction has no callee: 5.40's ExitAircraft (0xC21350) has one in the call at
         // 0xC21524 (E8 77 8B B2 01), before the real site (0xC21603), and reading its null target crashed the server (#386).
+        // 7.00 (UE 4.22, ExitAircraft 0xC4A560) inlines the cast's IsChildOf over the struct base chain instead:
+        // cmp [rax+rcx*8], r8; jnz; mov dl, 1; mov rcx, rbx; call 0x124A3F0 (0xC4A7D8), a jmp into the body's pieces.
+        const bool bAfterChildOf = (Byte(Site - 10) & 0xF0) == 0x40 && Byte(Site - 9) == 0x39 && (Byte(Site - 8) & 0xC7) == 0x04 && (Byte(Site - 7) >> 6) == 3
+            && Byte(Site - 6) == 0x0F && Byte(Site - 5) == 0x85;
         const bool bAfterCast = Byte(Site - 8) == 0x84 && Byte(Site - 7) == 0xC0 && Byte(Site - 6) == 0x0F && Byte(Site - 5) == 0x84;
         const bool bJumpsToCode = Target && Byte(Target) == 0xE9 && Finder::Unthunk(Target) != Target;
-        if (!CastTarget && bCallShape && bAfterCast && (IsInMovedCode(Finder::Unthunk(Target)) || Finder::FunctionStart(Target) == Target || bJumpsToCode))
+        const bool bCallee = bCallShape && (IsInMovedCode(Finder::Unthunk(Target)) || Finder::FunctionStart(Target) == Target || bJumpsToCode);
+        if (!CastTarget && bCallee && bAfterCast)
         {
             CastTarget = Target;
+        }
+        if (!ChildOfTarget && bCallee && bAfterChildOf)
+        {
+            ChildOfTarget = Target;
         }
         if (DiagnosedSites++ < 4)
         {
@@ -17002,6 +17148,15 @@ bool Finder::ResolveBotSkydiveLive(ptrdiff_t IsSkydivingOffset)
         Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X}), the version without bFromBus", Target - Finder::ImageBase(),
             ExitAircraft - Finder::ImageBase());
         ResolveBeginSkydivingServerPart(Target);
+        return true;
+    }
+    // 7.00 (UE 4.22): the call after the cast's inlined IsChildOf (bAfterChildOf above), looked for last.
+    if (ChildOfTarget)
+    {
+        Natives::AFortPlayerPawnAthena_BeginSkydiving = reinterpret_cast<decltype(Natives::AFortPlayerPawnAthena_BeginSkydiving)>(ChildOfTarget);
+        Log::Info(L"Finder: AFortPlayerPawnAthena::BeginSkydiving at 0x{:X} (ExitAircraft 0x{:X}), the call after ExitAircraft's AFortPlayerPawnAthena IsChildOf",
+            ChildOfTarget - Finder::ImageBase(), ExitAircraft - Finder::ImageBase());
+        ResolveBeginSkydivingServerPart(ChildOfTarget);
         return true;
     }
     Log::Error(L"Finder: AFortPlayerPawnAthena::BeginSkydiving not found (ExitAircraft 0x{:X}), player bots can't leave the aircraft ({})", ExitAircraft ? ExitAircraft - Finder::ImageBase() : 0, Diagnostics.empty() ? L"no mov dl, 1 sites" : Diagnostics);

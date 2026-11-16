@@ -45,6 +45,30 @@ inline uint32_t GetTypeHash(const FName& Name)
     return static_cast<uint32_t>(Name.ComparisonIndex + Name.Number);
 }
 
+// An FName as UE 4.22 lays it out (7.00, CL-4629139): its two int32s with no uint64 beside them, so 4-byte aligned. Up to
+// UE 4.21 a union with a uint64 made it 8-byte aligned, as Core's FName is. Only for reading an engine container whose
+// elements hold an FName next to 4-byte members (TMap<FName, int32>: 0x14-byte elements there, 0x18 before), on the
+// builds ObjectLayout::IsNameAligned4 says so.
+struct FPackedName
+{
+    int32_t ComparisonIndex = 0;
+    int32_t Number = 0;
+
+    FPackedName() = default;
+
+    FPackedName(const FName& Name)
+        : ComparisonIndex(Name.ComparisonIndex), Number(Name.Number)
+    {
+    }
+
+    bool operator==(const FPackedName& Other) const = default;
+};
+
+inline uint32_t GetTypeHash(const FPackedName& Name)
+{
+    return static_cast<uint32_t>(Name.ComparisonIndex + Name.Number);
+}
+
 template <>
 struct std::hash<FName>
 {

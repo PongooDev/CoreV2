@@ -77,6 +77,26 @@ TArray<AActor*>& ULevel::GetActors() const
                 return static_cast<ptrdiff_t>(Num) - 8;
             }
         }
+        // 7.00 (CL-4629139) counts in eax: mov [r13+0A0h], eax; cmp eax, [r13+0A4h] (41 89 85, 41 3B 85; 0x27AD127). Any
+        // register, the same one in both, tried last.
+        for (uintptr_t Site = Spawn; End && Site + 16 <= End; ++Site)
+        {
+            const uint8_t MovRex = (Byte(Site) & 0xF0) == 0x40 ? Byte(Site) : 0;
+            const uintptr_t Mov = Site + (MovRex ? 1 : 0);
+            const uint8_t ModRm = Byte(Mov + 1);
+            if (Byte(Mov) != 0x89 || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04 || (MovRex & 0x08))
+            {
+                continue;
+            }
+            const int32_t Num = *reinterpret_cast<const int32_t*>(Mov + 2);
+            const uint8_t CmpRex = (Byte(Mov + 6) & 0xF0) == 0x40 ? Byte(Mov + 6) : 0;
+            const uintptr_t Cmp = Mov + 6 + (CmpRex ? 1 : 0);
+            if (Byte(Cmp) == 0x3B && Byte(Cmp + 1) == ModRm && (CmpRex & 0x0D) == (MovRex & 0x0D) && *reinterpret_cast<const int32_t*>(Cmp + 2) == Num + 4)
+            {
+                UE_LOG(LogLevel, Log, TEXT("ULevel::Actors +0x%X (UWorld::SpawnActor, any register)"), Num - 8);
+                return static_cast<ptrdiff_t>(Num) - 8;
+            }
+        }
         UE_LOG(LogLevel, Error, TEXT("ULevel::Actors not found in UWorld::SpawnActor, using OwningWorld - 0x10"));
         return static_cast<ptrdiff_t>(-1);
     }();

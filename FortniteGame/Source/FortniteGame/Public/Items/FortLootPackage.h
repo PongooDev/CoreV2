@@ -86,13 +86,16 @@ public:
     static void GetLootQuotasForCategory(const FName& QuotaCategory, FFortTileLootData& OutLootData, int32_t WorldLevel);
 };
 
-// Transient and without reflected members; the layout is read from the code that fills and reads it.
+// Transient. LootTier is at +0; LootTierKey follows it, padded to +8 while FName is 8-byte aligned (to UE 4.21, as 6.31
+// reflects it) and right after at +4 from UE 4.22 (7.00, CL-4629139: 0xC bytes, as 21.40). So the key is read where the
+// build's reflection puts it, and at +8 where it isn't reflected.
 struct FChosenQuotaInfo
 {
     DefineUnrealStruct(FChosenQuotaInfo, FortniteGame)
 
 public:
-    bool IsSet() const { return !LootTierKey.IsNone(); }
+    bool IsSet() const { return !GetLootTierKey().IsNone(); }
+    FName GetLootTierKey() const;
 
     int32_t LootTier = -1;
     int32_t Pad = 0;

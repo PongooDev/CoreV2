@@ -49,6 +49,9 @@ namespace ObjectLayout
     // Current with the UProperty members read from the build's own reflection data, the first time a property is read
     // (UProperty is 0x78 bytes with Offset_Internal at +0x50 on 1.1 and 1.2, 0x70 with it at +0x44 on 1.7.2).
     const FObjectLayout& Properties();
+
+    // Whether the build's FName is 4-byte aligned (UE 4.22, 7.00 on) rather than 8 (FPackedName).
+    bool IsNameAligned4();
 }
 
 #define DefineLayoutMember(Type, Name, LayoutField) \

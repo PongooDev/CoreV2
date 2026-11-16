@@ -77,6 +77,28 @@ namespace
     }
 }
 
+bool ObjectLayout::IsNameAligned4()
+{
+    // A struct of one FName has FName's alignment: FPrimaryAssetType's MinAlignment is 8 on 3.3 and 6.31, 4 on 7.00.
+    // Unknown until CoreUObject's structs exist, so a miss is asked again.
+    static std::atomic<int32_t> Aligned4 = -1;
+    if (Aligned4.load(std::memory_order_acquire) < 0)
+    {
+        const UObject* Struct = StaticFindObject(nullptr, nullptr, L"/Script/CoreUObject.PrimaryAssetType", false);
+        if (!Struct)
+        {
+            return false;
+        }
+        const int32_t MinAlignment = static_cast<const UStruct*>(Struct)->GetMinAlignment();
+        Aligned4.store(MinAlignment == 4 ? 1 : 0, std::memory_order_release);
+        if (MinAlignment == 4)
+        {
+            Log::Info(L"Object layout: FName is 4-byte aligned (FPrimaryAssetType's MinAlignment, UE 4.22)");
+        }
+    }
+    return Aligned4.load(std::memory_order_acquire) == 1;
+}
+
 const FObjectLayout& ObjectLayout::Properties()
 {
     static std::atomic<bool> bDetected = false;

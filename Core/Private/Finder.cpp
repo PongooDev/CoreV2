@@ -577,23 +577,37 @@ ptrdiff_t Finder::LastBroadcastDelegateOffset(uintptr_t Function)
     // The call may come a few moves after the lea (the other arguments: mov rdx, rbx), as long as none writes rcx.
     constexpr int32_t MaxMovesBeforeCall = 3;
     ptrdiff_t Inlined = -1;
+    ptrdiff_t InlinedAfterOne = -1;
     ptrdiff_t Called = -1;
     int32_t LeaDestination = -1;
     ptrdiff_t LeaDisplacement = 0;
+    // 7.00 (CL-4629139) puts an unrelated instruction between the lea and the increment: lea r14, [rbx+2F8h];
+    // xor r15b, r15b; inc dword ptr [r14+14h] (UWorld::SpawnActor 0x27AD266). The lea one instruction back, kept while
+    // the instruction in between doesn't name its register; taken only when no increment follows a lea directly.
+    int32_t EarlierLeaDestination = -1;
+    ptrdiff_t EarlierLeaDisplacement = 0;
+    const auto IsLockIncrement = [](const hde64s& Instruction, int32_t Register)
+    {
+        const int32_t Base = Instruction.modrm_rm == 4 && (Instruction.flags & F_SIB) ? (Instruction.sib_base | (Instruction.rex_b << 3)) : (Instruction.modrm_rm | (Instruction.rex_b << 3));
+        return Instruction.opcode == 0xFF && Instruction.modrm_reg == 0 && !Instruction.rex_w && Instruction.modrm_mod == 1 && Base == Register
+            && (Instruction.disp.disp8 == 0x14 || Instruction.disp.disp8 == 0x64);
+    };
     int32_t ThisLoaded = -1;
     ptrdiff_t ThisDisplacement = 0;
     ForEachInstruction(Function, [&](uintptr_t, const hde64s& Instruction)
     {
-        if (LeaDestination >= 0)
+        if (LeaDestination >= 0 && IsLockIncrement(Instruction, LeaDestination))
         {
-            const int32_t Base = Instruction.modrm_rm == 4 && (Instruction.flags & F_SIB) ? (Instruction.sib_base | (Instruction.rex_b << 3)) : (Instruction.modrm_rm | (Instruction.rex_b << 3));
-            const bool bIncrement = Instruction.opcode == 0xFF && Instruction.modrm_reg == 0 && !Instruction.rex_w && Instruction.modrm_mod == 1 && Base == LeaDestination
-                && (Instruction.disp.disp8 == 0x14 || Instruction.disp.disp8 == 0x64);
-            if (bIncrement)
-            {
-                Inlined = LeaDisplacement;
-            }
+            Inlined = LeaDisplacement;
         }
+        if (EarlierLeaDestination >= 0 && IsLockIncrement(Instruction, EarlierLeaDestination))
+        {
+            InlinedAfterOne = EarlierLeaDisplacement;
+        }
+        const bool bNamesLeaRegister = (Instruction.flags & F_MODRM) && ((Instruction.modrm_reg | (Instruction.rex_r << 3)) == LeaDestination
+            || (Instruction.modrm_rm | (Instruction.rex_b << 3)) == LeaDestination);
+        EarlierLeaDestination = LeaDestination >= 0 && (Instruction.flags & F_MODRM) && !bNamesLeaRegister && Instruction.opcode != 0xE8 ? LeaDestination : -1;
+        EarlierLeaDisplacement = LeaDisplacement;
         if (ThisLoaded >= 0)
         {
             // mov/lea r64 into another register (8B, 8D, or 89 register to register), or xor r32, r32 (31, 33).
@@ -619,7 +633,7 @@ ptrdiff_t Finder::LastBroadcastDelegateOffset(uintptr_t Function)
             ThisDisplacement = LeaDisplacement;
         }
     });
-    return Inlined >= 0 ? Inlined : Called;
+    return Inlined >= 0 ? Inlined : InlinedAfterOne >= 0 ? InlinedAfterOne : Called;
 }
 
 uintptr_t Finder::NextCall(uintptr_t From, size_t MaxDistance)

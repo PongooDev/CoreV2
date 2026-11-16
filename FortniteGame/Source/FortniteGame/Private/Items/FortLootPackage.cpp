@@ -369,6 +369,19 @@ bool UFortLootTier::GetLootPackageCategoryCounts(const FFortLootTierData& TierDa
     return true;
 }
 
+FName FChosenQuotaInfo::GetLootTierKey() const
+{
+    static const int32_t Offset = []
+    {
+        const UScriptStruct* Struct = StaticStruct();
+        const UProperty* Key = Struct ? Struct->FindPropertyByName(FName(L"LootTierKey", FNAME_Find)) : nullptr;
+        return Key ? Key->GetOffset_ForInternal() : 8;
+    }();
+    FName Key;
+    memcpy(&Key, reinterpret_cast<const uint8_t*>(this) + Offset, sizeof(int32_t) * 2);
+    return Key;
+}
+
 bool UFortLootPackage::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, int32_t WorldLevel, FName LootTierKey, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops, bool bPreview)
 {
     if (LootTierKey.IsNone())

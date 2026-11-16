@@ -23,6 +23,24 @@
 #include <optional>
 #include <unordered_map>
 
+bool AFortDeployableBaseManager::WorldInitializedBit(int32_t& OutOffset, uint8_t& OutMask)
+{
+    if (!Member_bWorldInitialized.IsAvailable())
+    {
+        return false;
+    }
+    // The offset first: the mask is only read with it (CoreV2 finder pitfall 2).
+    const int32_t Offset = Member_bWorldInitialized.GetOffsetChecked();
+    const uint8_t Mask = Member_bWorldInitialized.GetFieldMask();
+    if (Offset <= 0 || !Mask)
+    {
+        return false;
+    }
+    OutOffset = Offset;
+    OutMask = Mask;
+    return true;
+}
+
 AFortDeployableBaseManager* AFortDeployableBaseManager::GetCurrent(UObject* WorldContextObject)
 {
     Reflection::FParams Params(StaticFunction_GetCurrent());
@@ -338,11 +356,20 @@ namespace
 
         // The game mode's FinishWorldInitialization: a short call to GetCurrent, then a jmp to the manager's. 5.21
         // (CL-4288479 0xE004D0) calls the manager's when there is one (0xDE0350) and jumps to Super's after, so the
-        // target taken is the first call or jump whose body sets bWorldInitialized: or dword ptr [this+550h], 2.
-        const auto SetsWorldInitialized = [](uintptr_t Function)
+        // target taken is the first call or jump whose body sets bWorldInitialized: or dword ptr [this+550h], 2. 7.00
+        // (CL-4629139) has the member at +0x558, so its reflected offset and bit are used where the build has them.
+        int32_t InitializedOffset = 0x550;
+        uint8_t InitializedMask = 0x02;
+        if (!AFortDeployableBaseManager::WorldInitializedBit(InitializedOffset, InitializedMask))
+        {
+            InitializedOffset = 0x550;
+            InitializedMask = 0x02;
+        }
+        const auto SetsWorldInitialized = [InitializedOffset, InitializedMask](uintptr_t Function)
         {
             const uintptr_t FunctionEnd = Function ? Finder::FunctionEnd(Function) : 0;
-            return FunctionEnd && ContainsBytes(Function, FunctionEnd, { 0x83, -1, 0x50, 0x05, 0x00, 0x00, 0x02 });
+            return FunctionEnd && ContainsBytes(Function, FunctionEnd, { 0x83, -1, InitializedOffset & 0xFF, (InitializedOffset >> 8) & 0xFF, (InitializedOffset >> 16) & 0xFF,
+                (InitializedOffset >> 24) & 0xFF, InitializedMask });
         };
         const uintptr_t Finish = reinterpret_cast<uintptr_t>(GameModeFinish);
         const uintptr_t FinishEnd = Finish ? Finder::FunctionEnd(Finish) : 0;

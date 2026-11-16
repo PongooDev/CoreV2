@@ -227,6 +227,11 @@ namespace Natives
     // Null from 5.0, which inlines it into GetSelectableGadgetItems (Core then does it from GetOwnedNodes).
     inline void (*UFortHomebaseManager_GetOwnedNodeAbilityKits)(const UFortHomebaseManager* This, const UFortMcpProfileCampaign* AccountProfile, TArray<UFortAbilityKit*>& OutKits) = nullptr;
     inline TArray<FName>* (*UFortHomebaseManager_GetOwnedNodes)(const UFortHomebaseManager* This, TArray<FName>* Result, const UFortMcpProfileCampaign* McpProfile) = nullptr;
+    // 6.30+ (no skill tree, no GetOwnedNodes): the account's items of an EFortItemType that are UFortHomebaseNodeItems
+    // with a definition (6.31 0xF8F210; OutItems is emptied first), and a node item's ability kits, those of its
+    // FHomebaseNodeLevels up to its level (0x10679D0, returned by value). Both are what GetSelectableGadgetItems calls.
+    inline void (*UFortMcpProfile_GetHomebaseNodeItemsByType)(const UFortMcpProfileCampaign* This, uint8_t ItemType, TArray<UObject*>& OutItems) = nullptr;
+    inline TArray<UFortAbilityKit*>* (*UFortHomebaseNodeItem_GetAbilityKits)(const UObject* This, TArray<UFortAbilityKit*>* Result) = nullptr;
     inline void (*UFortGlobals_ApplyHeroEffectsAndAbilities)(UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles, FScriptArray& OutAbilitySetHandles) = nullptr;
     inline void* (*FScopedPredictionWindow_FScopedPredictionWindow)(void* This, UAbilitySystemComponent* AbilitySystemComponent, void* InPredictionKey, bool InSetReplicatedPredictionKey) = nullptr;
     inline void (*FScopedPredictionWindow_Destructor)(void* This) = nullptr;

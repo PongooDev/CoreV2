@@ -8631,7 +8631,8 @@ bool Finder::ResolveTheaterMapDataLive()
 
 bool Finder::ResolveHomebaseGadgetsLive()
 {
-    if (Natives::UFortMcpProfileCampaign_GetModeLoadout && Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface && Natives::UFortHomebaseManager_GetSelectableGadgetItems && Natives::UFortHomebaseManager_GetOwnedNodes)
+    if (Natives::UFortMcpProfileCampaign_GetModeLoadout && Natives::UFortRegisteredPlayerInfo_GetAbilitySystemInterface && Natives::UFortHomebaseManager_GetSelectableGadgetItems
+        && (Natives::UFortHomebaseManager_GetOwnedNodes || Natives::UFortHomebaseNodeItem_GetAbilityKits))
     {
         return true;
     }
@@ -8647,18 +8648,32 @@ bool Finder::ResolveHomebaseGadgetsLive()
     };
     const uintptr_t OwnedNodes = ImplementationOf(L"/Script/FortniteGame.FortHomebaseManager:GetOwnedNodes");
     const uintptr_t SelectableGadgets = ImplementationOf(L"/Script/FortniteUI.FortFrontEndContext:GetSelectableGadgets");
-    const uintptr_t SelectableGadgetsEnd = OwnedNodes && IsInText(SelectableGadgets) ? Finder::FunctionEnd(SelectableGadgets) : 0;
+    const uintptr_t SelectableGadgetsEnd = IsInText(SelectableGadgets) ? Finder::FunctionEnd(SelectableGadgets) : 0;
+    // 6.30 (CL-4573096) replaced the skill tree with the Upgrades page and has no GetOwnedNodes: its
+    // GetSelectableGadgetItems (6.31 CL-4573279 0xFB05A0) asks the account for its HomebaseNode items (mov dl, the
+    // EFortItemType; call 0xF8F210, which keeps the UFortHomebaseNodeItems with a definition) and each item for its
+    // ability kits (the next call, 0x10679D0: the AbilityKit of every FHomebaseNodeLevel up to the item's level), then
+    // takes the kits' gadgets as before.
+    // Only where the node items have levels (UFortHomebaseNodeItemDefinition::LevelData, 6.30+), so no build before is
+    // searched this way.
+    static Reflection::FEnumInfo ItemTypeEnum(L"FortniteGame", L"EFortItemType");
+    UClass* const NodeItemDefinitionClass = OwnedNodes ? nullptr : FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortHomebaseNodeItemDefinition");
+    const bool bHasNodeLevels = NodeItemDefinitionClass && NodeItemDefinitionClass->FindPropertyByName(FName(L"LevelData", FNAME_Find))
+        && FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortHomebaseNodeItem");
+    const uint8_t HomebaseNodeItemType = bHasNodeLevels ? ItemTypeEnum.FindValue(L"HomebaseNode") : Reflection::InvalidEnumValue;
 
     uintptr_t AbilitySystemInterface = 0;
     uintptr_t GadgetItems = 0;
     uintptr_t OwnedNodeKits = 0;
+    uintptr_t NodeItemsByType = 0;
+    uintptr_t NodeItemAbilityKits = 0;
     uintptr_t Previous = 0;
     for (uintptr_t Call = SelectableGadgetsEnd ? FindRawCall(SelectableGadgets, SelectableGadgetsEnd) : 0; Call && !GadgetItems; Call = FindRawCall(Call + 1, SelectableGadgetsEnd))
     {
         const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
         const uintptr_t First = FindRawCall(Target, Target + 0x80);
         const uintptr_t FirstTarget = First ? Finder::RelativeTarget(First, 1, 5) : 0;
-        if (FirstTarget && CallWithin(FirstTarget, 0x40, OwnedNodes))
+        if (OwnedNodes && FirstTarget && CallWithin(FirstTarget, 0x40, OwnedNodes))
         {
             AbilitySystemInterface = Previous;
             GadgetItems = Target;
@@ -8666,10 +8681,35 @@ bool Finder::ResolveHomebaseGadgetsLive()
         }
         // 5.0 inlines GetOwnedNodeAbilityKits: GetSelectableGadgetItems calls GetOwnedNodes itself (5.0 +0x86, past
         // an AbilitySystem->GetAbilitySystemComponent() call). Core then builds the kits from GetOwnedNodes.
-        else if (IsInText(Target) && CallWithin(Target, 0xC0, OwnedNodes))
+        else if (OwnedNodes && IsInText(Target) && CallWithin(Target, 0xC0, OwnedNodes))
         {
             AbilitySystemInterface = Previous;
             GadgetItems = Target;
+        }
+        else if (!OwnedNodes && HomebaseNodeItemType != Reflection::InvalidEnumValue && IsInText(Target))
+        {
+            // The type's mov dl, imm8 comes within 0x40 bytes before its call (6.31 0xFB0603, call 0xFB0631).
+            for (const auto& [Site, Callee] : Finder::DirectCalls(Target, Target + 0x100))
+            {
+                bool bPassesNodeType = false;
+                for (uintptr_t Mov = Site >= Target + 0x40 ? Site - 0x40 : Target; Mov + 2 <= Site && !bPassesNodeType; ++Mov)
+                {
+                    bPassesNodeType = Byte(Mov) == 0xB2 && Byte(Mov + 1) == HomebaseNodeItemType;
+                }
+                if (!bPassesNodeType)
+                {
+                    continue;
+                }
+                const uintptr_t Next = FindRawCall(Site + 5, Site + 0x80);
+                if (IsInText(Callee) && Next)
+                {
+                    AbilitySystemInterface = Previous;
+                    GadgetItems = Target;
+                    NodeItemsByType = Callee;
+                    NodeItemAbilityKits = Finder::RelativeTarget(Next, 1, 5);
+                }
+                break;
+            }
         }
         Previous = Target;
     }
@@ -8687,9 +8727,10 @@ bool Finder::ResolveHomebaseGadgetsLive()
         ModeLoadout = 0;
     }
 
-    if (!AbilitySystemInterface || !GadgetItems || !ModeLoadout)
+    if (!AbilitySystemInterface || !GadgetItems || !ModeLoadout || (!OwnedNodes && !NodeItemAbilityKits))
     {
-        Log::Error(L"Finder: homebase gadgets not found (owned nodes {}, selectable gadgets {}, gadget items {}, mode loadout {})", OwnedNodes != 0, SelectableGadgets != 0, GadgetItems != 0, ModeLoadout != 0);
+        Log::Error(L"Finder: homebase gadgets not found (owned nodes {}, selectable gadgets {}, gadget items {}, mode loadout {}, node item kits {})", OwnedNodes != 0, SelectableGadgets != 0, GadgetItems != 0, ModeLoadout != 0,
+            NodeItemAbilityKits != 0);
         return false;
     }
     Natives::UFortMcpProfileCampaign_GetModeLoadout = reinterpret_cast<decltype(Natives::UFortMcpProfileCampaign_GetModeLoadout)>(ModeLoadout);
@@ -8697,7 +8738,17 @@ bool Finder::ResolveHomebaseGadgetsLive()
     Natives::UFortHomebaseManager_GetSelectableGadgetItems = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetSelectableGadgetItems)>(GadgetItems);
     Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetOwnedNodeAbilityKits)>(OwnedNodeKits);
     Natives::UFortHomebaseManager_GetOwnedNodes = reinterpret_cast<decltype(Natives::UFortHomebaseManager_GetOwnedNodes)>(OwnedNodes);
-    Log::Info(L"Finder: homebase gadgets found{}", OwnedNodeKits ? L"" : L" (GetOwnedNodeAbilityKits inlined)");
+    Natives::UFortMcpProfile_GetHomebaseNodeItemsByType = reinterpret_cast<decltype(Natives::UFortMcpProfile_GetHomebaseNodeItemsByType)>(NodeItemsByType);
+    Natives::UFortHomebaseNodeItem_GetAbilityKits = reinterpret_cast<decltype(Natives::UFortHomebaseNodeItem_GetAbilityKits)>(NodeItemAbilityKits);
+    if (NodeItemAbilityKits)
+    {
+        Log::Info(L"Finder: homebase gadgets found, from the account's HomebaseNode items (GetSelectableGadgetItems +0x{:X}, node items +0x{:X}, node item kits +0x{:X})", GadgetItems - Finder::ImageBase(),
+            NodeItemsByType - Finder::ImageBase(), NodeItemAbilityKits - Finder::ImageBase());
+    }
+    else
+    {
+        Log::Info(L"Finder: homebase gadgets found{}", OwnedNodeKits ? L"" : L" (GetOwnedNodeAbilityKits inlined)");
+    }
     return true;
 }
 

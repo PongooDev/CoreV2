@@ -3661,6 +3661,18 @@ namespace
                 ++LastUpdateTimesStores;
             }
         }
+        // 7.10 (CL-4667333 0x26F1C7E) holds the channel in rsi, which takes no REX prefix: movsd [rsi+88h], xmm0
+        // (F2 0F 11 86 88 00 00 00). Only when neither the channel store nor the connection's map was found; a frame or
+        // stack slot ([rbp+...], [rsp+...]) is no channel.
+        for (uintptr_t Store = LastUpdateStores == 0 && LastUpdateTimesStores == 0 && ReplicateActorEnd ? FindInstruction(ReplicateActor, ReplicateActorEnd, MapTimeStore) : 0; Store; Store = FindInstruction(Store + 1, ReplicateActorEnd, MapTimeStore))
+        {
+            const uint8_t ModRm = Byte(Store + 6);
+            if ((ModRm & 0xC0) == 0x80 && (ModRm & 0x07) != 0x04 && (ModRm & 0x07) != 0x05)
+            {
+                LastUpdateTime = *reinterpret_cast<const int32_t*>(Store + 7);
+                ++LastUpdateStores;
+            }
+        }
         if (LastUpdateStores == 0 && LastUpdateTimesStores == 1)
         {
             RequireOffset(L"UNetConnection::LastUpdateTimes", Natives::UNetConnection_LastUpdateTimes, LastUpdateTimes);
@@ -13222,6 +13234,37 @@ std::vector<uint8_t*> Finder::ItemDropOnDeathSpawnPickupCalls(UFunction* SpawnPi
             }
         }
     }
+    // 7.10 (CL-4667333) takes the drop out of the vtable: the body 6.31 and 7.00 had in the slot is a function of its own
+    // (0xCEB200, the same two stub calls at 0xCEB531 and 0xCEBB52), which no vtable holds, and two small overrides call it
+    // (0xCCCEC0 and 0xCCCEE0), each for its own values of the mutator's new RespawnRequirements (+0x378). 7.10's Disco and
+    // Food Fight mutators lost their own drop (no CachedPercentAmmoToDrop or PercentAmmoToDrop): this mutator has it. So
+    // when no override holds the calls, the overrides' direct callees are looked at the same way, each once.
+    std::vector<uintptr_t> Callees;
+    for (const uintptr_t Own : Sites.empty() ? Seen : std::vector<uintptr_t>())
+    {
+        const uintptr_t OwnEnd = Finder::FunctionEnd(Own);
+        for (const auto& [CallSite, Callee] : OwnEnd > Own ? Finder::DirectCalls(Own, OwnEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (Callee == Stub || std::find(Callees.begin(), Callees.end(), Callee) != Callees.end() || Finder::FunctionStart(Callee) != Callee)
+            {
+                continue;
+            }
+            Callees.push_back(Callee);
+            const uintptr_t CalleeEnd = Finder::FunctionEnd(Callee);
+            if (CalleeEnd <= Callee || !FindInstruction(Callee, CalleeEnd, { Items & 0xFF, (Items >> 8) & 0xFF, (Items >> 16) & 0xFF, (Items >> 24) & 0xFF }))
+            {
+                continue;
+            }
+            for (const auto& [Site, Target] : Finder::DirectCalls(Callee, CalleeEnd))
+            {
+                if (Target == Stub)
+                {
+                    Sites.push_back(reinterpret_cast<uint8_t*>(Site));
+                    Function = Callee;
+                }
+            }
+        }
+    }
     if (Sites.size() != 2)
     {
         Log::Error(L"Finder: AFortAthenaMutator_ItemDropOnDeath's stripped K2_SpawnPickupInWorld calls were not found (the exec's stub {}, {} calls to it in the mutator's functions that read ItemsToDrop +0x{:X}, 2 expected), Team Rumble's dead leave no ammo or materials",
@@ -13825,7 +13868,15 @@ bool Finder::ResolveAbilityWeaponLive(ptrdiff_t CurrentWeaponListOffset, ptrdiff
         return true;
     }
 
-    const int32_t EquipLastIndex = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortPlayerPawn"), 0x200, { LastEquippedWeaponGuidOffset }, true);
+    int32_t EquipLastIndex = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortPlayerPawn"), 0x200, { LastEquippedWeaponGuidOffset }, true);
+    // 7.10 (CL-4667333) has a second small pawn virtual that reads the GUID (slot 0x1C6, 0x128BD80). EquipLastWeapon (slot
+    // 0x1D1, 0x1276190; 7.00 0x1CE, 0x124E420) is the one that first asks whether it is valid, reading its four words:
+    // mov eax, [rcx+1504h]; or eax, [rcx+1500h]; or eax, [rcx+14FCh]; or eax, [rcx+14F8h].
+    if (EquipLastIndex < 0)
+    {
+        const ptrdiff_t Guid = LastEquippedWeaponGuidOffset;
+        EquipLastIndex = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortPlayerPawn"), 0x200, { Guid, Guid + 4, Guid + 8, Guid + 12 }, true);
+    }
     const int32_t EquipDefaultIndex = UniqueSlotReferencing(CdoVTable(L"/Script/FortniteGame.FortPawn"), 0x40, { CurrentWeaponListOffset, CurrentWeaponListOffset + 8 }, true);
     if (EquipLastIndex < 0 || EquipDefaultIndex < 0)
     {
@@ -15619,7 +15670,14 @@ bool Finder::ResolvePersonalVehicleLive(UFunction* IsPersonalVehicleAvailable, p
     const int32_t AvailableIndex = ImplementationIndex(IsPersonalVehicleAvailable);
     const uintptr_t Available = VTableEntry(ControllerVTable, AvailableIndex);
     const uintptr_t Call = Available ? FindRawCall(Available, Available + 0x10) : 0;
-    const uintptr_t VirtualCall = Available && !Call ? FindVirtualCall(Available, Available + 0x10) : 0;
+    uintptr_t VirtualCall = Available && !Call ? FindVirtualCall(Available, Available + 0x10) : 0;
+    // 7.10 (CL-4667333 slot 0x2F7, 0x12D1AE0) saves registers and reserves a frame first, as it goes on to ask more than
+    // the vehicle, so its virtual call comes at +0x13: mov rax, [rcx]; mov rbx, rcx; call [rax+17A0h] (slot 0x2F4,
+    // 0x12C3BA0, which still begins by reading MainMcpProfile). Only looked for where the call isn't in the first bytes.
+    if (Available && !Call && !VirtualCall)
+    {
+        VirtualCall = FindVirtualCall(Available, Available + 0x20);
+    }
     const uintptr_t Selected = Call ? Finder::RelativeTarget(Call, 1, 5) : VirtualCall ? VTableEntry(ControllerVTable, VirtualSlot(VirtualCall)) : 0;
     const int32_t M = static_cast<int32_t>(MainMcpProfileOffset);
     const bool bReadsProfile = Selected && M > 0

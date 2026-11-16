@@ -37,6 +37,8 @@ class AFortPlayerPawn : public AFortPawn
 
 public:
     DefineUProperty(FGuid, LastEquippedWeaponGUID)
+    // 7.10's name for it (CL-4667333 +0x14F8): gadgets count as the last equipped item too.
+    DefineUProperty(FGuid, LastEquippedWeaponOrGadgetGUID)
     // A DBNO revive applies one of these, healing to SetByCallerReviveHealth, then sends EventReviveTag, which plays the
     // getting-up ability (Battle Royale: GAB_AthenaDBNORevive on Event.RevivedAthena).
     DefineUProperty(UClass*, SelfReviveGameplayEffect)

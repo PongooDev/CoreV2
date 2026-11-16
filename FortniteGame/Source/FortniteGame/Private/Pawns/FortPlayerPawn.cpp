@@ -209,9 +209,10 @@ bool AFortPlayerPawn::EquipLastWeapon()
     return CallVirtual<bool>(this, Natives::AFortPlayerPawn_EquipLastWeaponIndex, false);
 }
 
+// 7.10 renamed LastEquippedWeaponGUID to LastEquippedWeaponOrGadgetGUID (EquipLastWeapon still reads it).
 ptrdiff_t AFortPlayerPawn::LastEquippedWeaponGUIDOffset()
 {
-    return Member_LastEquippedWeaponGUID.GetOffsetChecked();
+    return Member_LastEquippedWeaponGUID.IsAvailable() ? Member_LastEquippedWeaponGUID.GetOffsetChecked() : Member_LastEquippedWeaponOrGadgetGUID.GetOffsetChecked();
 }
 
 void AFortPlayerPawn::ReviveFromDBNO(AController* EventInstigator)

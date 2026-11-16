@@ -114,11 +114,18 @@ namespace
     // players' voice) and bEnableDefaultServiceTracker, and the launcher's [XMPP] bEnabled=False (Core-Launcher
     // ServerConfig). DedicatedServerEngine.ini's map and game mode are in DefaultEngine.ini too, and its [Core.Log] is
     // only log verbosity.
+    // The identity service's Protocol goes back to the shipped https. The launcher's NoRedist\DefaultEngine.ini sets it to
+    // http for the client's purchase page (Core-Launcher PurchaseFlowConfig: Protocol://RedirectUrl/exchange), which a
+    // server never shows, and from 7.10 (CL-4667333) FBaseServiceMcp::GetBaseUrl (slot 10, 0x4B8BC0) has its config check
+    // the URL first (0x60D5A0): unless Protocol is https and ISslCertificateManager::IsDomainPinned(Domain), it calls
+    // FPlatformMisc::RequestExit(false), so the server quit as its game mode's auto login built the login URL. CoreRedirect
+    // sends the identity service's requests to the backend whatever their scheme.
     void CombineServerConfig()
     {
         FConfigCacheIni::CombineIntoEngineIni(L"Server config",
             L"[OnlineSubsystem]\r\nbHasVoiceEnabled=true\r\n"
             L"[OnlineSubsystemMcp]\r\nbEnableDefaultServiceTracker=false\r\n"
+            L"[OnlineSubsystemMcp.OnlineIdentityMcp]\r\nProtocol=https\r\n"
             L"[XMPP]\r\nbEnabled=false\r\n");
     }
 }

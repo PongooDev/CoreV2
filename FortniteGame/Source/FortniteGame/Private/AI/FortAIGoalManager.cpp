@@ -196,6 +196,32 @@ namespace
         const bool bStartProjected = ProjectsToNavigation(Pawn, PawnLocation, NavData);
         const bool bGoalProjected = ProjectsToNavigation(Pawn, GoalLocation, NavData);
 
+        // #469 (6.31): with the grid right, every husk still failed to project both ends, everywhere and for minutes, so the
+        // navmesh seems to have no tiles at all. Whether it builds at runtime (its RuntimeGeneration: 0 Static, 1
+        // DynamicModifiersOnly, 2 Dynamic, 3 LegacyGeneration), whether the system is still building, and whether
+        // UFortNavSystem::IsNavmeshInRadiusInitialized (a reflected static, 6.x) has tiles around the start.
+        std::wstring NavMeshText;
+        if (const UProperty* Generation = !bStartProjected ? reinterpret_cast<UObject*>(NavData)->GetClass()->FindPropertyByName(FName(L"RuntimeGeneration", FNAME_Find)) : nullptr)
+        {
+            NavMeshText += std::format(L", runtime generation {}", *Generation->ContainerPtrToValuePtr<uint8_t>(reinterpret_cast<UObject*>(NavData)));
+        }
+        bool bBeingBuilt = false;
+        if (!bStartProjected && CallReflected(UNavigationSystem::StaticClass()->GetDefaultObject(), L"IsNavigationBeingBuilt", bBeingBuilt, [&](Reflection::FParams& Params) {
+                Params.Set(L"WorldContextObject", reinterpret_cast<UObject*>(Pawn));
+            }))
+        {
+            NavMeshText += std::format(L", being built {}", bBeingBuilt ? L"yes" : L"no");
+        }
+        bool bInitialized = false;
+        if (!bStartProjected && CallReflected(ClassDefault(L"/Script/FortniteGame.FortNavSystem"), L"IsNavmeshInRadiusInitialized", bInitialized, [&](Reflection::FParams& Params) {
+                Params.Set(L"WorldContext", reinterpret_cast<UObject*>(Pawn));
+                Params.Set(L"TestLocation", PawnLocation);
+                Params.Set(L"TestRadius", 500.0f);
+            }))
+        {
+            NavMeshText += std::format(L", navmesh initialized around the start {}", bInitialized ? L"yes" : L"no");
+        }
+
         std::wstring SearchText = L"not run";
         bool bFound = false;
         UObject* Path = nullptr;
@@ -221,7 +247,7 @@ namespace
             : !MainNavData ? L"the search (not run: the system has no main navigation data)"
             : !bFound ? L"the search"
             : L"nothing (a path exists)";
-        return std::format(L"fails at {}; {}, start projected {}, goal projected {}, search {}; {}", Failure, DataText, bStartProjected ? L"yes" : L"no", bGoalProjected ? L"yes" : L"no", SearchText, GraphText);
+        return std::format(L"fails at {}; {}{}, start projected {}, goal projected {}, search {}; {}", Failure, DataText, NavMeshText, bStartProjected ? L"yes" : L"no", bGoalProjected ? L"yes" : L"no", SearchText, GraphText);
     }
 }
 

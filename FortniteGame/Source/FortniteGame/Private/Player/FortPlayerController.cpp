@@ -8,7 +8,9 @@
 #include "Athena/FortPlayerStateAthena.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
+#include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
+#include "AttributeSet.h"
 #include "AbilitySystemInterface.h"
 #include "BackendRequest.h"
 #include "Configuration.h"
@@ -63,6 +65,39 @@ DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
 
 namespace
 {
+    // #469 diagnostics: the homebase stats the server's homebase effects gave the player, which the in-game power level is
+    // worked out from (UHomeBaseContext::GetTotalHomebaseRating, 6.31 0xFB5880, sums four of them for the player's
+    // registered player info), against the lobby's, which the client works out from the same profile. Each stat the
+    // player's ability system has, its personal value (FortCharacterAttrSet) and its team value (FortPlayerAttrSet's _Team),
+    // each FGameplayAttributeData's CurrentValue (+0xC). Logged once a Save the World pawn has its homebase gadgets.
+    void LogHomebaseStats(AFortPlayerController* PlayerController)
+    {
+        AFortPawn* Pawn = PlayerController ? static_cast<AFortPawn*>(PlayerController->MyFortPawn) : nullptr;
+        UAbilitySystemComponent* AbilitySystem = Pawn ? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Pawn) : nullptr;
+        if (!AbilitySystem)
+        {
+            return;
+        }
+        std::wstring Text;
+        for (const wchar_t* Stat : { L"Fortitude", L"Offense", L"Resistance", L"Tech" })
+        {
+            for (const std::wstring& Name : { std::wstring(Stat), std::wstring(Stat) + L"_Team" })
+            {
+                const FName PropertyName(Name.c_str(), FNAME_Find);
+                for (UAttributeSet* Set : static_cast<const TArray<UAttributeSet*>&>(AbilitySystem->SpawnedAttributes))
+                {
+                    const UProperty* Property = Set && !PropertyName.IsNone() ? reinterpret_cast<UObject*>(Set)->GetClass()->FindPropertyByName(PropertyName) : nullptr;
+                    if (Property && Property->ElementSize >= 0x10)
+                    {
+                        const float Current = *reinterpret_cast<const float*>(Property->ContainerPtrToValuePtr<uint8_t>(reinterpret_cast<UObject*>(Set)) + 0xC);
+                        Text += std::format(L"{}{} {:.1f}", Text.empty() ? L"" : L", ", Name, Current);
+                    }
+                }
+            }
+        }
+        UE_LOG(LogFort, Log, TEXT("Possess: %s's homebase stats: %s"), *PlayerController->GetName(), Text.empty() ? TEXT("none on the pawn's ability system") : Text.c_str());
+    }
+
     // UFortAbilityKit::Gadgets holds object pointers on 1.1 and 1.2, TAssetPtrs (0x20-byte entries) from 1.7.2 and
     // TSoftObjectPtrs (0x28-byte entries, the FSoftObjectPath is 8 bytes longer) on 1.10.
     std::vector<UFortGadgetItemDefinition*> KitGadgets(UFortAbilityKit* Kit)
@@ -586,6 +621,7 @@ void AFortPlayerController::Possess(APawn* InPawn)
             AddHeroAbilityKitGadgetsToQuickBars();
             ApplyHarvestingTool();
             ApplyHomebaseGadgets();
+            LogHomebaseStats(this);
         }
 
         // A Battle Royale player spawns holding the harvesting tool (slot 0) when the building bar has the focus. Both

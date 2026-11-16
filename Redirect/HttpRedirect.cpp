@@ -264,11 +264,29 @@ namespace
         const uintptr_t End = Init && Init != static_cast<uintptr_t>(-1) ? Finder::FunctionEnd(Init) : 0;
         uintptr_t Get = 0;
         int32_t Offset = -1;
-        for (uintptr_t Site = Init; End && Site + 10 <= End && Offset < 0; ++Site)
+        // 7.00 (CL-4629139, UE 4.22) has a bigger FHttpModule, so both take 4-byte displacements: cmp dword ptr [rax+0A0h], 1;
+        // jle; mov rdx, [rax+98h] (83 B8 A0 00 00 00 01 7E 25 48 8B 90 98 00 00 00, 0x2CC19BB in 0x2CC16A0).
+        const auto ProxyRead = [](const uint8_t* Code) -> int32_t
+        {
+            if (Code[0] == 0x83 && Code[1] == 0x78 && Code[3] == 0x01 && Code[4] == 0x7E && Code[6] == 0x48 && Code[7] == 0x8B
+                && (Code[8] & 0xC7) == 0x40 && Code[9] + 8 == Code[2])
+            {
+                return Code[9];
+            }
+            const int32_t Count = *reinterpret_cast<const int32_t*>(Code + 2);
+            const int32_t Data = *reinterpret_cast<const int32_t*>(Code + 12);
+            if (Code[0] == 0x83 && Code[1] == 0xB8 && Code[6] == 0x01 && Code[7] == 0x7E && Code[9] == 0x48 && Code[10] == 0x8B
+                && (Code[11] & 0xC7) == 0x80 && Data + 8 == Count && Data > 0 && Data < 0x1000)
+            {
+                return Data;
+            }
+            return -1;
+        };
+        for (uintptr_t Site = Init; End && Site + 16 <= End && Offset < 0; ++Site)
         {
             const auto* Code = reinterpret_cast<const uint8_t*>(Site);
-            if (Code[0] != 0x83 || Code[1] != 0x78 || Code[3] != 0x01 || Code[4] != 0x7E || Code[6] != 0x48 || Code[7] != 0x8B
-                || (Code[8] & 0xC7) != 0x40 || Code[9] + 8 != Code[2])
+            const int32_t Data = ProxyRead(Code);
+            if (Data < 0)
             {
                 continue;
             }
@@ -278,7 +296,7 @@ namespace
                 if (Target >= Finder::TextBegin() && Target < Finder::TextEnd() && Finder::FunctionStart(Target) == Target)
                 {
                     Get = Target;
-                    Offset = Code[9];
+                    Offset = Data;
                     break;
                 }
             }

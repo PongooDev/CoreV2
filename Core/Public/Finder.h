@@ -156,6 +156,10 @@ namespace Finder
     bool ResolvePlayerControllerConsole();
     bool ResolvePlayerControllerCheats();
     bool ResolveVoiceConfig();
+    // IModularFeatures::Get (Natives::IModularFeatures_Get), from AFortGameModeZone's own lookups of its "VoiceChatToken"
+    // feature: the call right before both GetModularFeatureImplementationCount (slot 1) and GetModularFeatureImplementation
+    // (slot 2). False (logged once) where the game never looks the feature up (before 1.7.2) or the lookups aren't found.
+    bool ResolveModularFeaturesLive();
     // GConfig, GEngineIni, FConfigCacheIni::Find and FConfigFile::CombineFromBuffer (the online hotfix's ini merge).
     bool ResolveConfigCombine();
     // FOnlineSubsystemImpl::IsDedicated and the number of candidates (one when found); ResolveServer requires it.

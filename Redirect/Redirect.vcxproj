@@ -58,7 +58,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public;$(ProjectDir)..\Engine\Plugins\Runtime\ReplicationGraph\Source\Public;$(ProjectDir)..\Engine\Source\Runtime\AIModule\Classes;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTags\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTasks\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\Engine\Source\Runtime\SlateCore\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public;$(ProjectDir)..\Engine\Plugins\Runtime\ReplicationGraph\Source\Public;$(ProjectDir)..\Engine\Source\Runtime\AIModule\Classes;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTags\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTasks\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\Engine\Source\Runtime\SlateCore\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Public;$(ProjectDir)..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
     <Link>
@@ -79,7 +79,7 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public;$(ProjectDir)..\Engine\Plugins\Runtime\ReplicationGraph\Source\Public;$(ProjectDir)..\Engine\Source\Runtime\AIModule\Classes;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTags\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTasks\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\Engine\Source\Runtime\SlateCore\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\Core\Public;$(ProjectDir)..\Engine\Plugins\Runtime\GameplayAbilities\Source\GameplayAbilities\Public;$(ProjectDir)..\Engine\Plugins\Runtime\ReplicationGraph\Source\Public;$(ProjectDir)..\Engine\Source\Runtime\AIModule\Classes;$(ProjectDir)..\Engine\Source\Runtime\Core\Public;$(ProjectDir)..\Engine\Source\Runtime\CoreUObject\Public;$(ProjectDir)..\Engine\Source\Runtime\Engine\Classes;$(ProjectDir)..\Engine\Source\Runtime\Engine\Public;$(ProjectDir)..\Engine\Source\Runtime\EngineSettings\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTags\Classes;$(ProjectDir)..\Engine\Source\Runtime\GameplayTasks\Classes;$(ProjectDir)..\Engine\Source\Runtime\InputCore\Classes;$(ProjectDir)..\Engine\Source\Runtime\Launch\Public;$(ProjectDir)..\Engine\Source\Runtime\Online\HTTP\Public;$(ProjectDir)..\Engine\Source\Runtime\SlateCore\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public;$(ProjectDir)..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Public;$(ProjectDir)..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Public;$(ProjectDir)..\FortniteGame\Source\FortniteGame\Public;$(ProjectDir)..\ThirdParty\MinHook\include;$(ProjectDir)..\ThirdParty\Memcury;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization>MaxSpeed</Optimization>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
@@ -143,6 +143,8 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\DelegateSignatureImpl.inl" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\IDelegateInstance.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\MulticastDelegateBase.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Features\IModularFeature.h" />
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Features\IModularFeatures.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\IConsoleManager.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\Platform.h" />
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformMisc.h" />
@@ -299,6 +301,7 @@
     <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public\McpProfile.h" />
     <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Public\McpProfileGroup.h" />
     <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Public\SidecarSys.h" />
+    <ClInclude Include="..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Public\VivoxVoiceChatToken.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCertData.inl" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AthenaPlayerMatchReport.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortAssetManager.h" />
@@ -427,6 +430,7 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileCampaign.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortMcpProfileWorld.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortPartyBeaconHost.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\VoiceChatTokenFeature.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortAIPawn.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Pawns\FortMovementComp_Character.h" />
@@ -482,6 +486,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\EnvironmentQuery\EnvQueryInstanceBlueprintWrapper.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\EnvironmentQuery\EnvQueryManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\Perception\AISense_Hearing.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Features\ModularFeatures.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ConsoleManager.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\PlatformMisc.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ThreadingBase.cpp" />
@@ -561,6 +566,7 @@
     <ClCompile Include="..\FortniteGame\Plugins\Online\OnlineSubsystemMcp\Source\Private\OnlineSubsystemMcp.cpp" />
     <ClCompile Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Private\McpProfileGroup.cpp" />
     <ClCompile Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Private\SidecarSys.cpp" />
+    <ClCompile Include="..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Private\VivoxVoiceChatToken.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortAssetManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameData.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameInstance.cpp" />

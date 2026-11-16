@@ -81,6 +81,7 @@
 #include "Abilities/FortGameplayAbility.h"
 #include "Missions/FortMissionLibrary.h"
 #include "AbilitySystemComponent.h"
+#include "VivoxVoiceChatToken.h"
 
 namespace
 {
@@ -359,6 +360,9 @@ static void InstallHooks()
         ACharacter::OnCheatMovement = &UFortCheatManager::OnCheatMovement;
         UFortCheatManager::HookNatives();
         Finder::ResolveNavigationSystemLive();
+        // The server-only plugin that gives the game mode its players' Vivox tokens (the "VoiceChatToken" modular
+        // feature), which the client builds lack: registered once the backend has shared its Vivox signing.
+        FVivoxVoiceChatTokenModule::StartupModule();
         if (Configuration::Get().IsBattleRoyale())
         {
             Finder::ResolveLootTierRedirectLive();

@@ -7,6 +7,7 @@
 #include "Templates/SharedPointerInternals.h"
 
 class FOutputDevice;
+class IModularFeatures;
 class UFortAbilitySystemComponent;
 class UAthenaAIPerceptionManager;
 class AAthenaAIController;
@@ -155,6 +156,9 @@ namespace Natives
     inline FName* (*FName_Construct)(FName* This, const wchar_t* Name, int32_t FindType) = nullptr;
     inline void (*FName_AppendString)(const FName* This, FString& Out) = nullptr;
     inline FString* (*FName_ToString)(const FName* This, FString* Out) = nullptr;
+    // IModularFeatures::Get (Core's Features/ModularFeatures.cpp: the static FModularFeatures), from the game's own lookups
+    // of its "VoiceChatToken" feature (Finder::ResolveModularFeaturesLive). 7.00 0x16F3FC0, 6.31 0x1703DE0, 7.10 0x174B6F0.
+    inline IModularFeatures& (*IModularFeatures_Get)() = nullptr;
 
     inline int (*CRT_rand)() = nullptr;
     inline float (*FMath_SRand)() = nullptr;

@@ -17985,3 +17985,96 @@ bool Finder::ResolveManagedCharacterMovementLive(void** GameStateVTable, FManage
         Remove->Slot, VTableEntry(GameStateVTable, Remove->Slot) - Finder::ImageBase(), Where(Remove->MutatorCall), OutSites.AIMutatorOffset, OutSites.ManagedTickIndexOffset);
     return true;
 }
+
+bool Finder::ResolveModularFeaturesLive()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::IModularFeatures_Get != nullptr;
+    }
+    bSearched = true;
+
+    // AFortGameModeZone's voice login and channel join (1.7.2 on; 7.00 0xEE0690, 0xEE0480, AFortGameModeAthena's
+    // 0xC23490) each make the FName "VoiceChatToken" (a static of its own, the string's only references), then look the
+    // feature up as the engine's IsModularFeatureAvailable and GetModularFeature do, each time through
+    // IModularFeatures::Get (7.00 0x16F3FC0: "lea rax, [FModularFeatures]", the singleton's thread-safe static):
+    //   call IModularFeatures::Get; mov rdx, rbx; mov rcx, rax; mov r8, [rax]; call [r8+8]      the count (7.00 0xEE06EF)
+    //   call IModularFeatures::Get; xor r8d, r8d; ...; mov r9, [rax]; call [r9+10h]              implementation 0 (0xEE071A)
+    // 6.31 (0x1703DE0) and 7.10 (0x174B6F0) are the same. The function that is called right before both slots is Get, and
+    // those slots (1 and 2) are where Features/IModularFeatures.h has the two, so its RegisterModularFeature (3) is too.
+    const std::vector<uintptr_t> Refs = Finder::StringRefs("VoiceChatToken");
+    if (Refs.empty())
+    {
+        Log::Info(L"Finder: the game never looks up a \"VoiceChatToken\" modular feature on this build (Vivox's in-match voice came in 1.7.2)");
+        return false;
+    }
+    const auto IsCall = [](uintptr_t Instruction)
+    {
+        const uintptr_t Op = Instruction + ((Byte(Instruction) & 0xF0) == 0x40 ? 1 : 0);
+        return Byte(Instruction) == 0xE8 || (Byte(Op) == 0xFF && (Byte(Op + 1) & 0x38) == 0x10);
+    };
+    // The disp8 of a virtual call "call [reg+disp8]" (FF /2, mod 01, no SIB), or -1.
+    const auto VirtualCallDisplacement = [](uintptr_t Instruction)
+    {
+        const uintptr_t Op = Instruction + ((Byte(Instruction) & 0xF0) == 0x40 ? 1 : 0);
+        const uint8_t ModRm = Byte(Op + 1);
+        return Byte(Op) == 0xFF && (ModRm & 0x38) == 0x10 && (ModRm & 0xC0) == 0x40 && (ModRm & 0x07) != 0x04 ? static_cast<int32_t>(static_cast<int8_t>(Byte(Op + 2))) : -1;
+    };
+    std::unordered_map<uintptr_t, uint32_t> SlotsAfter;
+    size_t Functions = 0;
+    for (const uintptr_t Ref : Refs)
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        if (!Function)
+        {
+            continue;
+        }
+        ++Functions;
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Function))
+        {
+            const uintptr_t Next = Finder::TraceFind(Site + 5, 6, IsCall);
+            const int32_t Displacement = Next ? VirtualCallDisplacement(Next) : -1;
+            if (Displacement == 0x08 || Displacement == 0x10)
+            {
+                SlotsAfter[Target] |= Displacement == 0x08 ? 1u : 2u;
+            }
+        }
+    }
+    uintptr_t Get = 0;
+    size_t Candidates = 0;
+    for (const auto& [Target, Slots] : SlotsAfter)
+    {
+        if (Slots == 3u)
+        {
+            Get = Target;
+            ++Candidates;
+        }
+    }
+    // The registry it hands back: an object whose vtable's first five slots (the destructor to UnregisterModularFeature)
+    // are code.
+    void* const* VTable = nullptr;
+    bool bCodeSlots = false;
+    if (Candidates == 1)
+    {
+        void* Registry = reinterpret_cast<void* (*)()>(Get)();
+        VTable = Registry && Finder::IsReadable(Registry, sizeof(void*)) ? *reinterpret_cast<void* const* const*>(Registry) : nullptr;
+        bCodeSlots = VTable && Finder::IsReadable(VTable, 5 * sizeof(void*));
+        for (int32_t Slot = 0; bCodeSlots && Slot < 5; ++Slot)
+        {
+            const uintptr_t Entry = reinterpret_cast<uintptr_t>(VTable[Slot]);
+            const auto& Sections = Finder::ExecutableSections();
+            bCodeSlots = std::any_of(Sections.begin(), Sections.end(), [&](const auto& Section) { return Entry >= Section.first && Entry < Section.second; });
+        }
+    }
+    if (Candidates != 1 || !bCodeSlots)
+    {
+        Log::Warning(L"Finder: IModularFeatures::Get not found ({} candidates in {} of the {} \"VoiceChatToken\" functions, registry vtable {}), Core registers no VoiceChatToken feature",
+            Candidates, Functions, Refs.size(), Candidates != 1 ? L"not read" : VTable ? L"not code" : L"unreadable");
+        return false;
+    }
+    Natives::IModularFeatures_Get = reinterpret_cast<decltype(Natives::IModularFeatures_Get)>(Get);
+    Log::Info(L"Finder: IModularFeatures::Get at 0x{:X} (from {} \"VoiceChatToken\" lookups), RegisterModularFeature 0x{:X}", Get - Finder::ImageBase(), Functions,
+        reinterpret_cast<uintptr_t>(VTable[3]) - Finder::ImageBase());
+    return true;
+}

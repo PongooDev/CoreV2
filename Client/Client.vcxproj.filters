@@ -106,6 +106,9 @@
     <Filter Include="Engine\Source\Runtime\Core\Private">
       <UniqueIdentifier>{4b7a51ad-af1f-4be9-a2ba-1bc9005e5935}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\Core\Private\Features">
+      <UniqueIdentifier>{08bdec53-34c1-4b65-8534-333f638e4d07}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Private\HAL">
       <UniqueIdentifier>{59f1f225-582b-4d5f-8fd6-2b1dc99910ba}</UniqueIdentifier>
     </Filter>
@@ -132,6 +135,9 @@
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\Delegates">
       <UniqueIdentifier>{cd677bcf-36d1-4cf9-ae06-dc711e921699}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Core\Public\Features">
+      <UniqueIdentifier>{469226dd-e4ba-40b3-a5f3-8a5eb8724390}</UniqueIdentifier>
     </Filter>
     <Filter Include="Engine\Source\Runtime\Core\Public\HAL">
       <UniqueIdentifier>{2514caa8-c195-4c6e-a659-f952f8a2a804}</UniqueIdentifier>
@@ -339,6 +345,21 @@
     </Filter>
     <Filter Include="FortniteGame\Plugins\Online\OnlineSubsystem\Source\Public">
       <UniqueIdentifier>{9374de1f-adeb-4824-aaf0-caa19d02c972}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\Vivox">
+      <UniqueIdentifier>{905fda90-2aa3-4b52-883f-36f14c431484}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\Vivox\Source">
+      <UniqueIdentifier>{5e168e47-72f9-49a2-9361-0f0762b8bbec}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken">
+      <UniqueIdentifier>{09e8a644-3c09-475b-a6e2-9eaa18c3dd81}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Private">
+      <UniqueIdentifier>{40644208-79a9-4e22-b8e4-48b20746b937}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Public">
+      <UniqueIdentifier>{ff266a9d-d4b2-484f-8760-0414c1ae0a15}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source">
       <UniqueIdentifier>{7cbffd71-4506-4e8f-9ac9-21787f8d718b}</UniqueIdentifier>
@@ -648,6 +669,12 @@
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Delegates\MulticastDelegateBase.h">
       <Filter>Engine\Source\Runtime\Core\Public\Delegates</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Features\IModularFeature.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Features</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Features\IModularFeatures.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Features</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\IConsoleManager.h">
       <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
@@ -1117,6 +1144,9 @@
     <ClInclude Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Public\SidecarSys.h">
       <Filter>FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Public</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Public\VivoxVoiceChatToken.h">
+      <Filter>FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Public</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCertData.inl">
       <Filter>FortniteGame\Source\FortniteGame\Private\Items</Filter>
     </ClInclude>
@@ -1501,6 +1531,9 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\FortPartyBeaconHost.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Online</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\VoiceChatTokenFeature.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\Online</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees\FortMcpConfig.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\Online\NotForLicensees</Filter>
     </ClInclude>
@@ -1642,6 +1675,9 @@
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\AIModule\Private\Perception\AISense_Hearing.cpp">
       <Filter>Engine\Source\Runtime\AIModule\Private\Perception</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\Features\ModularFeatures.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\Features</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ConsoleManager.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
@@ -1879,6 +1915,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Private\SidecarSys.cpp">
       <Filter>FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Private\VivoxVoiceChatToken.cpp">
+      <Filter>FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortAssetManager.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private</Filter>

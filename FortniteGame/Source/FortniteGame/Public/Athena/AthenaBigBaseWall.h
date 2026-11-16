@@ -2,6 +2,7 @@
 
 #include "Building/BuildingActor.h"
 #include "Delegates/Delegate.h"
+#include "GameplayEffect.h"
 
 class UClass;
 class UWorld;
@@ -29,6 +30,8 @@ class AAthenaBigBaseWall : public ABuildingActor
 
 public:
     DefineUProperty(EBarrierState, BarrierState)
+    // How low the wall's origin goes before it is down (Barrier.Wall.KillZlevel).
+    DefineUStructProperty(FScalableFloat, ZKillLevel)
 
     // The wall's two native delegates (DECLARE_MULTICAST_DELEGATE, no parameters), the last of its unreflected members:
     // the one SetWallDropTimer's timer broadcasts as the wall starts to fall (6.30 0xC42539: "lea rcx, [rax+790h]"),

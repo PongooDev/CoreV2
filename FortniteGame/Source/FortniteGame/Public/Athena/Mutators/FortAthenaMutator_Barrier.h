@@ -81,6 +81,9 @@ public:
     // restaurants at BusLocked, the step the build's own sends GameMsg_Intro at ("The enemy team is preparing to attack
     // your restaurant. Build a fort around it!"), once the buses' paths are chosen and before their drop.
     void OnGamePhaseStepChanged(AFortGameModeAthena* GameMode, uint8_t GamePhaseStep);
+    // The game mode's OnSafeZoneUpdated (Core's HandleSafeZoneUpdated passes it on): the storm's circles are picked, so
+    // the restaurants can stand around the play area's centre.
+    void OnSafeZoneUpdated(AFortGameModeAthena* GameMode);
 
     // 21.40's FortGameStateAthena_GatherCustomCharacterPartOverrides: the parts a member of TeamNum wears over their
     // outfit's, its food's PartsToSwapIn (none before SetupTeamStates gave the teams their food). The build's own (6.30
@@ -96,13 +99,21 @@ public:
     static void ForEachBarrierMutator(AFortGameModeAthena* GameMode, void (*Visit)(AFortAthenaMutator_Barrier*, AFortGameModeAthena*, uint8_t), uint8_t GamePhaseStep);
 
 private:
-    // The wall along the game state's FlightPathMidLine, on the ground at its middle (AAthenaBigBaseWall::CreateWall),
-    // and the mutator's side of its two delegates.
+    // Half the width of a restaurant (TeamObjective_Food1_C's floor pieces reach 1024 from its middle).
+    static constexpr float RestaurantHalfExtent = 1024.0f;
+    // A building step's height (a wall's 384 is three; Core's reading of ObjectiveZOffset's 3).
+    static constexpr float BuildingStepHeight = 128.0f;
+
+    // The wall and the restaurants, once: from BusLocked on and once the storm's circles are picked.
+    void SpawnModeObjects(AFortGameModeAthena* GameMode);
+    // The wall along the game state's FlightPathMidLine (AAthenaBigBaseWall::CreateWall), its foot at the lowest ground
+    // along the line, and the mutator's side of its two delegates.
     void SpawnBigBaseWall(AFortGameModeAthena* GameMode);
-    // Each team's restaurant (ObjectiveFlag) ObjectiveDistanceFromWall off the wall's middle, on the side its bus flies,
-    // facing the wall; its mascot's destroyed delegate, and the team's CheckHealthThreshold timer.
-    void SpawnObjectives(AFortGameModeAthena* GameMode);
-    void SpawnObjective(FBarrierTeamState& TeamState, const FVector& Location, float Yaw);
+    // Each team's restaurant (ObjectiveFlag) ObjectiveDistanceFromWall off the wall, either side of the point of its line
+    // nearest the play area's centre (storm circle SafeZoneIndex's), on the side its bus flies, the mascots facing each
+    // other; the mascot's destroyed delegate, the team's CheckHealthThreshold timer and the HUD's objective entry.
+    void SpawnObjectives(AFortGameModeAthena* GameMode, const FVector& SafeZoneCenter, int32_t SafeZoneIndex);
+    void SpawnObjective(FBarrierTeamState& TeamState, const FVector& Location, float Yaw, int32_t ObjectId);
     // The build's CheckHealthThreshold(TeamNum) (0xD30510): the mascot's damage state from its health against
     // ObjectiveHealthTiers, and the game message of a new one.
     void CheckHealthThreshold(uint8_t TeamNum);

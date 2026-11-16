@@ -51,6 +51,23 @@ struct FGameplayMutatorEventData
     DefineUProperty(int32_t, EventParam3)
 };
 
+// One object a mutator shows the clients (from 6.01; FGameplayMutatorObjectDataArray's items): Disco's capture points,
+// Food Fight's restaurants (AAthenaBarrierFlag), with the mutator's id and two values for it.
+struct FGameplayMutatorObjectData : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FGameplayMutatorObjectData, FortniteGame)
+    DefineUProperty(UObject*, TheObject)
+    DefineUProperty(int32_t, ObjectId)
+    DefineUProperty(int32_t, ObjectValue1)
+    DefineUProperty(int32_t, ObjectValue2)
+};
+
+struct FGameplayMutatorObjectDataArray : public FFastArraySerializer
+{
+    DefineUnrealStruct(FGameplayMutatorObjectDataArray, FortniteGame)
+    DefineUStructArrayProperty(FGameplayMutatorObjectData, ObjectDataList)
+};
+
 class AFortGameStateAthena : public AFortGameStateZone
 {
     DefineUnrealClass(AFortGameStateAthena, FortniteGame)
@@ -211,6 +228,10 @@ public:
     static bool HasTeamFlightPaths() { return Member_TeamFlightPaths.IsAvailable() && Member_FlightPathMidLine.IsAvailable(); }
     DefineUStructProperty(FGameplayMutatorEventData, MutatorEventData)
     static bool HasMutatorEventData() { return Member_MutatorEventData.IsAvailable(); }
+    // The mutators' objects every client's mode HUD reads (replicated, a fast array): UBarrierWidgetBase's objective bars
+    // (6.30 0x2EC2970) take the two AAthenaBarrierFlags from it.
+    DefineUStructProperty(FGameplayMutatorObjectDataArray, MutatorObjectDataArray)
+    static bool HasMutatorObjectDataArray() { return Member_MutatorObjectDataArray.IsAvailable() && FGameplayMutatorObjectData::StaticStruct(); }
     // Whether the match brings its players back after they die. Reflected (and replicated) from 6.01; an unreflected
     // flag of the game state before (from 4.2). The game mode's OnPlaylistDataLoaded sets it when the loaded playlist's
     // RespawnType isn't None (6.02 0xBD3A03), and a mutator that respawns players by itself sets and clears it

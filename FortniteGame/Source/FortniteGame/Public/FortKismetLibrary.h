@@ -34,6 +34,7 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(K2_RemoveItemFromPlayerByGuid)
     DefineUFunction(K2_RemoveItemFromAllPlayers)
     DefineUFunction(K2_SpawnPickupInWorld)
+    DefineUFunction(GetSafeZoneLocation)
     DefineUFunction(PickLootDrops)
     DefineUFunction(GetActorTeam)
     DefineUFunction(GetTeamAffiliation)
@@ -71,6 +72,10 @@ public:
     // build's UFunction has it).
     static AFortPickup* K2_SpawnPickupInWorld(UObject* WorldContextObject, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount, bool bToss = true, bool bRandomRotation = false, bool bBlockedFromAutoPickup = false);
     static bool PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier);
+    // The game's own GetSafeZoneLocation (6.30 0xFA82D0, in the build): the Battle Royale game mode's SafeZoneLocations
+    // entry for SafeZoneIndex, the centre the storm's circle of that phase closes on. False outside Battle Royale, before
+    // the storm has picked them, for an index it hasn't, and on builds without the function.
+    static bool GetSafeZoneLocation(UObject* WorldContextObject, int32_t SafeZoneIndex, FVector& OutLocation);
     // 5.0 (UE 4.21) added WorldContextObject as the first parameter; its exec passes it to the native first.
     static bool PickLootDrops(UObject* WorldContextObject, TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier);
     static bool PickLootTierKeyAndLootTierFromTierGroup(FName& OutLootTierKey, int32_t& OutLootTier, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier, const FGameplayTagContainer& ContextTags);

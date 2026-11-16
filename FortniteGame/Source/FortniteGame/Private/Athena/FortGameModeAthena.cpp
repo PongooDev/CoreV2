@@ -2952,6 +2952,8 @@ void AFortGameModeAthena::HandleSafeZoneUpdated()
 {
 #if WITH_SERVER_CODE
     ReportGamePhaseStep(L"a new storm circle");
+    // Food Fight (6.30): the storm has its circles now, which the restaurants stand around.
+    AFortAthenaMutator_Barrier::ForEachBarrierMutator(this, [](AFortAthenaMutator_Barrier* Barrier, AFortGameModeAthena* GameMode, uint8_t) { Barrier->OnSafeZoneUpdated(GameMode); }, 0);
 #endif
 }
 

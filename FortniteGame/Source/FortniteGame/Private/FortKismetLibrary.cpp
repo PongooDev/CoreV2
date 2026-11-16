@@ -462,6 +462,29 @@ bool UFortKismetLibrary::PickLootDrops(UObject* WorldContextObject, TStructArray
     return PickLootDrops(OutLootToDrop, TierGroupName, WorldLevel, ForcedLootTier);
 }
 
+bool UFortKismetLibrary::GetSafeZoneLocation(UObject* WorldContextObject, int32_t SafeZoneIndex, FVector& OutLocation)
+{
+    // The build's own, through its UFunction on the class default object (a static BlueprintCallable).
+    UFunction* Function = FindStaticFunction_GetSafeZoneLocation();
+    UObject* Default = Function && StaticClass() ? StaticClass()->GetDefaultObject() : nullptr;
+    if (!Default)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
+    Params.Set(L"WorldContextObject", WorldContextObject);
+    Params.Set(L"SafeZoneIndex", SafeZoneIndex);
+    Params.Call(Default);
+    const bool* Result = Params.Get<bool>(L"ReturnValue");
+    const FVector* Location = Params.Get<FVector>(L"OutLocation");
+    if (!Result || !*Result || !Location)
+    {
+        return false;
+    }
+    OutLocation = *Location;
+    return true;
+}
+
 DEFINE_FUNCTION(UFortKismetLibrary::execGetAIDirector)
 {
     P_GET_OBJECT(UObject, Z_Param_WorldContextObject);

@@ -428,7 +428,12 @@ namespace
         Require(L"StaticFindObject", Natives::StaticFindObject, FindObject);
         size_t LoadObjectRef = 0;
         size_t LoadObjectRefs = 0;
-        const uintptr_t LoadObject = FunctionOfFirstRef(L"Calling StaticLoadObject during PostLoad may result in hitches during streaming.", LoadObjectRef, LoadObjectRefs);
+        uintptr_t LoadObject = FunctionOfFirstRef(L"Calling StaticLoadObject during PostLoad may result in hitches during streaming.", LoadObjectRef, LoadObjectRefs);
+        if (!LoadObject)
+        {
+            // 7.00 (CL-4629139) names the object being post-loaded, as later engines do (0x19A90F0).
+            LoadObject = FunctionOfFirstRef(L"Calling StaticLoadObject during PostLoad of %s may result in hitches during streaming.", LoadObjectRef, LoadObjectRefs);
+        }
         Require(L"StaticLoadObject", Natives::StaticLoadObject, LoadObject);
 
         // StaticAllocateObject isn't a native Core calls, only how StaticConstructObject_Internal is told apart.
@@ -511,6 +516,86 @@ namespace
         Log::Info(L"Finder: object globals: StaticFindObject {}, StaticLoadObject {}, StaticAllocateObject {}, StaticConstructObject_Internal {}",
             DescribeFromRef(FindObject, FindObjectRef, FindObjectRefs.size()), DescribeFromRef(LoadObject, LoadObjectRef, LoadObjectRefs), DescribeFromRef(StaticAllocate, AllocateRef, AllocateRefs),
             Construct ? std::format(L"+0x{:X} ({})", Construct - Finder::ImageBase(), ConstructFrom) : std::format(L"not found ({} references)", Refs.size()));
+    }
+
+    // Where UStruct::IsChildOf's FStructBaseChain is (USTRUCT_ISCHILDOF_STRUCTARRAY, inlined in every Cast and IsA): the
+    // parent's chain is lea rA, [rP+Chain], its depth movsxd rC, [rP+Chain+8] (or [rA+8]); the child's depth is compared
+    // with cmp eC, [rD+Chain+8], then its array is loaded, mov rE, [rD+Chain], and cmp [rE+rC*8], rA. UE 4.22 (7.00,
+    // CL-4629139) moved the chain from UClass, past UStruct's own members (+0x88 on 6.31, 13856 sites), to right after
+    // UField (+0x30, 18744 sites), so UStruct's members and UFunction's are 0x10 further on: SuperStruct +0x40, Children
+    // +0x48, PropertiesSize +0x50, MinAlignment +0x54 (Epic's IsChildOf in 0x281DFB0), UFunction::FunctionFlags +0x98 and
+    // Func +0xC0 (UFunction::Bind 0x1869390; 6.31's 0x188AAF0 has +0x88 and +0xB0). UClass's own members don't move.
+    void ResolveStructBaseChain()
+    {
+        const uintptr_t Begin = Finder::TextBegin();
+        const uintptr_t End = Finder::TextEnd();
+        std::unordered_map<int32_t, int32_t> Votes;
+        int32_t Total = 0;
+        int32_t Winner = -1;
+        int32_t WinnerVotes = 0;
+        for (uintptr_t Compare = Begin + 0x40; Compare + 3 <= End && !(WinnerVotes >= 256 && WinnerVotes * 10 >= Total * 9); ++Compare)
+        {
+            // cmp [rE+rC*8], rA: REX 39 /r, mod 00 and r/m 100 (a SIB), the SIB scaling by 8.
+            const uint8_t Rex = Byte(Compare - 1);
+            if (Byte(Compare) != 0x39 || (Rex & 0xF0) != 0x40 || (Byte(Compare + 1) & 0xC7) != 0x04 || (Byte(Compare + 2) >> 6) != 3)
+            {
+                continue;
+            }
+            const uint8_t Array = static_cast<uint8_t>((Byte(Compare + 2) & 0x07) | ((Rex & 0x01) << 3));
+            for (uintptr_t Load = Compare - 2; Load + 0x18 > Compare; --Load)
+            {
+                // mov rE, [rD+Chain] (REX.W 8B, disp8 or disp32), E being the array register.
+                const uint8_t LoadRex = Byte(Load);
+                const uint8_t ModRm = Byte(Load + 2);
+                if ((LoadRex & 0xF8) != 0x48 || Byte(Load + 1) != 0x8B || (((ModRm >> 3) & 0x07) | ((LoadRex & 0x04) << 1)) != Array || (ModRm & 0x07) == 0x04 || (ModRm >> 6) == 0 || (ModRm >> 6) == 3)
+                {
+                    continue;
+                }
+                const int32_t Chain = (ModRm >> 6) == 1 ? static_cast<int8_t>(Byte(Load + 3)) : *reinterpret_cast<const int32_t*>(Load + 3);
+                const uint8_t Struct = static_cast<uint8_t>((ModRm & 0x07) | ((LoadRex & 0x01) << 3));
+                // cmp eC, [rD+Chain+8] within 0x18 bytes before it, through the same register.
+                bool bDepthCompare = false;
+                for (uintptr_t Depth = Load - 0x18; Depth < Load && !bDepthCompare; ++Depth)
+                {
+                    const bool bRex = (Byte(Depth) & 0xF0) == 0x40;
+                    const uintptr_t Opcode = bRex ? Depth + 1 : Depth;
+                    const uint8_t DepthModRm = Byte(Opcode + 1);
+                    const uint8_t Base = static_cast<uint8_t>((DepthModRm & 0x07) | (bRex ? (Byte(Depth) & 0x01) << 3 : 0));
+                    if (Byte(Opcode) != 0x3B || (DepthModRm & 0x07) == 0x04 || Base != Struct)
+                    {
+                        continue;
+                    }
+                    bDepthCompare = ((DepthModRm >> 6) == 1 && static_cast<int8_t>(Byte(Opcode + 2)) == Chain + 8) ||
+                                    ((DepthModRm >> 6) == 2 && *reinterpret_cast<const int32_t*>(Opcode + 2) == Chain + 8);
+                }
+                if (bDepthCompare)
+                {
+                    ++Total;
+                    if (++Votes[Chain] > WinnerVotes)
+                    {
+                        Winner = Chain;
+                        WinnerVotes = Votes[Chain];
+                    }
+                }
+                break;
+            }
+        }
+
+        constexpr int32_t StructBaseChainSize = 0x10;
+        const int32_t FieldSize = ObjectLayout::Current.UField_Next + static_cast<int32_t>(sizeof(void*));
+        if (Winner != FieldSize || WinnerVotes < 100 || WinnerVotes * 10 < Total * 9)
+        {
+            return;
+        }
+        FObjectLayout& Layout = ObjectLayout::Current;
+        for (int32_t* Member : { &Layout.UStruct_SuperStruct, &Layout.UStruct_Children, &Layout.UStruct_PropertiesSize, &Layout.UStruct_MinAlignment,
+                                 &Layout.UFunction_FunctionFlags, &Layout.UFunction_NumParms, &Layout.UFunction_ParmsSize, &Layout.UFunction_ReturnValueOffset,
+                                 &Layout.UFunction_Func })
+        {
+            *Member += StructBaseChainSize;
+        }
+        Log::Info(L"Object layout: UStruct's FStructBaseChain follows UField (+0x{:X}, {} of {} IsChildOf sites, UE 4.22): SuperStruct +0x{:X}, Children +0x{:X}, PropertiesSize +0x{:X}, UFunction::FunctionFlags +0x{:X}, Func +0x{:X}",
+            Winner, WinnerVotes, Total, Layout.UStruct_SuperStruct, Layout.UStruct_Children, Layout.UStruct_PropertiesSize, Layout.UFunction_FunctionFlags, Layout.UFunction_Func);
     }
 
     uintptr_t FindBackward(uintptr_t Reference, size_t MaxDistance, std::initializer_list<int32_t> Pattern)
@@ -1855,6 +1940,23 @@ namespace
             // call when the member is null, +0xF8 has 37 of 38 on slot 0x65.
             VoteOffsets(true);
         }
+        if (!bPassed)
+        {
+            // 7.00 (CL-4629139): the CDO is at the default +0x100 again, where 35 of 42 sites call slot 0x66. The other 7
+            // are other classes' members at +0x100 that the same rule as 6.30's sets aside, but VoteOffsets skips the
+            // default offset. Counting only the sites that call when the member is null, +0x100 has 35 of 35.
+            int32_t WhenNullWinner = -1;
+            int32_t WhenNullVotes = 0;
+            int32_t WhenNullTotal = 0;
+            if (VoteCreateDefaultObject(ObjectLayout::Current.UClass_ClassDefaultObject, WhenNullWinner, WhenNullVotes, WhenNullTotal, false, true) && WhenNullVotes >= 30)
+            {
+                Winner = WhenNullWinner;
+                WinnerVotes = WhenNullVotes;
+                Total = WhenNullTotal;
+                bPassed = true;
+                Log::Info(L"Object layout: UClass::ClassDefaultObject at +0x{:X}", ObjectLayout::Current.UClass_ClassDefaultObject);
+            }
+        }
 
         if (bPassed)
         {
@@ -2186,6 +2288,7 @@ bool Finder::ResolveRuntime()
         return false;
     }
     ResolveNames();
+    ResolveStructBaseChain();
     ResolveObjectGlobals();
 
     // UE 4.18's FSoftObjectPath (1.10) replaces FStringAssetReference, whose name 1.1-1.9.1 hold instead.
@@ -5820,6 +5923,8 @@ bool Finder::ResolveProcessEvent()
 {
     if (void** ObjectVTable = CdoVTable(L"/Script/CoreUObject.Object"))
     {
+        // test [Function+FunctionFlags], FUNC_Native: FunctionFlags is +0x88, or +0x98 with UE 4.22's UStruct (7.00).
+        const int32_t Flags = ObjectLayout::Current.UFunction_FunctionFlags;
         for (int32_t Index = 0; Index < 0x80; ++Index)
         {
             const uintptr_t Function = reinterpret_cast<uintptr_t>(ObjectVTable[Index]);
@@ -5827,7 +5932,7 @@ bool Finder::ResolveProcessEvent()
             {
                 break;
             }
-            if (FindInstruction(Function, Function + 0x200, { 0xF7, -1, 0x88, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00 }))
+            if (FindInstruction(Function, Function + 0x200, { 0xF7, -1, Flags & 0xFF, (Flags >> 8) & 0xFF, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00 }))
             {
                 Natives::ProcessEventIndex = Index;
                 break;

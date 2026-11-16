@@ -18,6 +18,14 @@ namespace
     constexpr int32_t SetContentSlot = 11;
     constexpr int32_t ProcessRequestSlot = 15;
     constexpr int32_t RequestSlots = 23;
+    // 7.00 (CL-4629139) has UE 4.22's request payloads: IHttpRequest gained SetContentAsStreamedFile and
+    // SetContentFromStream after SetContentAsString, so ProcessRequest is slot 17 while SetURL stays slot 10, and
+    // SetContent builds an FRequestPayloadInMemory instead of assigning the content array. IHttpBase's GetContentLength
+    // and GetContent forward to that payload.
+    constexpr int32_t PayloadProcessRequestSlot = 17;
+    constexpr int32_t PayloadRequestSlots = 25;
+    constexpr int32_t GetContentLengthSlot = 5;
+    constexpr int32_t GetContentSlot = 6;
 
     using FSetURL = void (*)(IHttpRequest*, const FString&);
 
@@ -30,16 +38,39 @@ namespace
         return Code[0] == 0x48 && Code[2] == 0xC1 && ((Code[1] == 0x83 && Code[4] == 0xE9) || (Code[1] == 0x81 && Code[7] == 0xE9));
     }
 
+    // The payload member a getter forwards to: mov rcx, [rcx+Payload]; mov rax, [rcx]; jmp [rax+disp8]. 0 if it doesn't.
+    int32_t ForwardedPayload(const void* Function)
+    {
+        const auto* Code = static_cast<const uint8_t*>(Function);
+        const bool bForwards = Code[0] == 0x48 && Code[1] == 0x8B && Code[2] == 0x89 && Code[7] == 0x48 && Code[8] == 0x8B && Code[9] == 0x01 &&
+            Code[10] == 0x48 && Code[11] == 0xFF && Code[12] == 0x60;
+        return bForwards ? *reinterpret_cast<const int32_t*>(Code + 3) : 0;
+    }
+
     void** RequestVTable(const wchar_t* ProcessRequestText)
     {
         const std::vector<uintptr_t> Refs = Finder::StringRefs(ProcessRequestText);
-        void** VTable = Refs.size() == 1 ? Finder::VTableContaining(Finder::FunctionStart(Refs.front()), ProcessRequestSlot, RequestSlots) : nullptr;
-        if (VTable && !IsMemberAssign(VTable[SetContentSlot]))
+        const uintptr_t ProcessRequest = Refs.size() == 1 ? Finder::FunctionStart(Refs.front()) : 0;
+        void** VTable = Finder::VTableContaining(ProcessRequest, ProcessRequestSlot, RequestSlots);
+        if (VTable && IsMemberAssign(VTable[SetContentSlot]))
+        {
+            return VTable;
+        }
+        if (void** PayloadVTable = Finder::VTableContaining(ProcessRequest, PayloadProcessRequestSlot, PayloadRequestSlots))
+        {
+            const int32_t Payload = ForwardedPayload(PayloadVTable[GetContentLengthSlot]);
+            if (Payload && ForwardedPayload(PayloadVTable[GetContentSlot]) == Payload)
+            {
+                Log::Info(L"Redirect: the request vtable at 0x{:X} has UE 4.22's payload layout (content at +0x{:X}, ProcessRequest slot {})",
+                    reinterpret_cast<uintptr_t>(PayloadVTable), Payload, PayloadProcessRequestSlot);
+                return PayloadVTable;
+            }
+        }
+        if (VTable)
         {
             Log::Error(L"Redirect: the request vtable at 0x{:X} does not have the IHttpRequest layout", reinterpret_cast<uintptr_t>(VTable));
-            return nullptr;
         }
-        return VTable;
+        return nullptr;
     }
 
     bool IsEpicHost(std::wstring Host)

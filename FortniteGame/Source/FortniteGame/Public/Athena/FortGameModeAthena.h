@@ -297,13 +297,6 @@ private:
     // signature): GamePhaseChanged, OnCurrentPlaylistLoaded, a pawn's OnDied and OnDestroyed and a player state's
     // OnDestroyed, all bound to the game mode. None where the build has no such delegate or Core can't add a native.
     static void AddDelegateHandlers();
-    // Binds the player controller's own vehicle seat events, so the seat weapon the game leaves behind on exit is removed
-    // and the player's previous weapon is equipped.
-    static void BindVehicleEvents(AFortPlayerController* Player);
-    static void RecordVehicleForPlayer(AFortPlayerController* Player);
-    static void CleanupVehicleSeatWeapon(AFortPlayerController* Player);
-    DECLARE_FUNCTION(execHandleVehicleChanged);
-    DECLARE_FUNCTION(execHandleVehicleFullyExited);
     DECLARE_FUNCTION(execHandleGamePhaseChanged);
     DECLARE_FUNCTION(execHandleGamePhaseStepChanged);
     DECLARE_FUNCTION(execHandleSafeZoneUpdated);

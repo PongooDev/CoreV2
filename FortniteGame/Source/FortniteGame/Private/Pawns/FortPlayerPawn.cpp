@@ -199,28 +199,6 @@ void AFortPlayerPawn::StopItemInteractionAbility()
     AbilitySystem->CancelAbilities(&Tags, nullptr, nullptr);
 }
 
-AActor* AFortPlayerPawn::GetVehicleActor() const
-{
-    UFunction* Function = FindStaticFunction_GetVehicleActor();
-    if (!Function)
-    {
-        return nullptr;
-    }
-    Reflection::FParams Params(Function);
-    return Params.Call(const_cast<AFortPlayerPawn*>(this)) ? Params.Take<AActor*>(L"ReturnValue") : nullptr;
-}
-
-int32_t AFortPlayerPawn::GetVehicleSeatIndex() const
-{
-    UFunction* Function = FindStaticFunction_GetVehicleSeatIndex();
-    if (!Function)
-    {
-        return -1;
-    }
-    Reflection::FParams Params(Function);
-    return Params.Call(const_cast<AFortPlayerPawn*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : -1;
-}
-
 bool AFortPlayerPawn::EquipLastWeapon()
 {
     if (!Finder::ResolveAbilityWeaponLive(CurrentWeaponListOffset(), LastEquippedWeaponGUIDOffset()))

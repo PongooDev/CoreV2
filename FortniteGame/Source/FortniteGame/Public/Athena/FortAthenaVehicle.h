@@ -33,21 +33,15 @@ class AFortAthenaVehicle : public APawn
     DefineUnrealClass(AFortAthenaVehicle, FortniteGame)
     DefineUFunction(ServerUpdatePhysicsParams)
     DefineUFunction(ServerUpdateInputParams)
-    // The turret's fire input: the mounted turret's weapon is a seat weapon, and the client sends its trigger through the
-    // vehicle's ServerStartFire (21.40 AFortAthenaVehicle::ServerStartFire_Implementation, slot after ServerUsingRiftPortal).
-    DefineUFunction(ServerStartFire)
-    DefineUFunction(GetDriver)
     DefineUStructProperty(FReplicatedAthenaVehicleInputState, ReplicatedInputParams)
 
 public:
     void ServerUpdatePhysicsParams_Implementation(const FReplicatedAthenaVehiclePhysicsState& InState);
     void ServerUpdateInputParams_Implementation(const FReplicatedAthenaVehicleInputState& InState);
-    void ServerStartFire_Implementation(uint8_t FireModeNum = 0);
 
     static void HookVTables();
 
 private:
     static void ServerUpdatePhysicsParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehiclePhysicsState& InState);
     static void ServerUpdateInputParams_ImplementationHK(AFortAthenaVehicle* This, const FReplicatedAthenaVehicleInputState& InState);
-    static void ServerStartFire_ImplementationHK(AFortAthenaVehicle* This, uint8_t FireModeNum);
 };

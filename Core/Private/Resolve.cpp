@@ -16110,7 +16110,31 @@ int32_t Finder::StrippedAthenaPawnDiedIndex()
             MapCursorRemoval = IsShortWithoutRemove(Calls[2].second) ? Calls[2].second : 0;
         }
     }
-    const bool bStripped = Athena == Zone || bJumpsToZone || Finder::IsStubFunction(Athena) || MapCursorRemoval;
+    // 7.00 (CL-4629139, slot 0x399, 0xC5C980) makes the marker's removal's two steps itself, after the same report and
+    // Zone's handler: "call 0xB218A0; ...; call Zone; cmp byte ptr [rsi + Role], ROLE_Authority; jnz; mov rcx, rsi; call
+    // 0x1618840 (the ServerRemoveMapCursor RPC); mov rbx, [rsi + PlayerState]; ...; the AFortPlayerStateAthena cast
+    // (call 0x1636AD0, StaticClass); mov rdx, [FVector2D::ZeroVector]; mov rcx, rbx; call 0xC99610" (MapIndicatorPos set:
+    // 6.31's 0xCDA5D0 holds both). Read as stripped like 5.0's; Core's handler makes the two calls.
+    uintptr_t ServerRemoveMapCursor = 0;
+    uintptr_t SetMapIndicatorPos = 0;
+    if (!MapCursorRemoval && AthenaEnd > Athena && AthenaEnd - Athena <= 0x100)
+    {
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Athena, AthenaEnd);
+        bool bCallsRemove = false;
+        for (const auto& [Site, Target] : Calls)
+        {
+            bCallsRemove = bCallsRemove || Target == Remove;
+        }
+        // The set's vector comes from a global just before its call: mov rdx, [rip+disp32].
+        const bool bVectorFromGlobal = Calls.size() == 5 && Byte(Calls[4].first - 10) == 0x48 && Byte(Calls[4].first - 9) == 0x8B && Byte(Calls[4].first - 8) == 0x15;
+        if (Calls.size() == 5 && Calls[0].second != Zone && Calls[1].second == Zone && !bCallsRemove && bVectorFromGlobal
+            && IsShortWithoutRemove(Calls[2].second) && IsShortWithoutRemove(Calls[4].second))
+        {
+            ServerRemoveMapCursor = Calls[2].second;
+            SetMapIndicatorPos = Calls[4].second;
+        }
+    }
+    const bool bStripped = Athena == Zone || bJumpsToZone || Finder::IsStubFunction(Athena) || MapCursorRemoval || (ServerRemoveMapCursor && SetMapIndicatorPos);
     if (!bStripped)
     {
         const uintptr_t AthenaEnd = Remove && Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
@@ -16125,10 +16149,14 @@ int32_t Finder::StrippedAthenaPawnDiedIndex()
 
     Natives::AFortPlayerControllerZone_OnPawnDied = reinterpret_cast<decltype(Natives::AFortPlayerControllerZone_OnPawnDied)>(Zone);
     Natives::AFortPlayerControllerAthena_RemoveMapCursor = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_RemoveMapCursor)>(MapCursorRemoval);
+    Natives::AFortPlayerControllerAthena_ServerRemoveMapCursor = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_ServerRemoveMapCursor)>(ServerRemoveMapCursor);
+    Natives::AFortPlayerStateAthena_SetMapIndicatorPos = reinterpret_cast<decltype(Natives::AFortPlayerStateAthena_SetMapIndicatorPos)>(SetMapIndicatorPos);
     StrippedIndex = Index;
     Log::Info(L"Finder: AFortPlayerControllerAthena's pawn-death handler is stripped: slot 0x{:X} holds 0x{:X} ({}AFortPlayerControllerZone's 0x{:X}{}), which never calls RemoveFromAlivePlayers",
-        Index, Athena - Finder::ImageBase(), bJumpsToZone ? L"a jump to " : Athena == Zone ? L"" : MapCursorRemoval ? L"a call to " : L"a stub, not ", Zone - Finder::ImageBase(),
-        MapCursorRemoval ? std::format(L" and the map marker's removal, 0x{:X}", MapCursorRemoval - Finder::ImageBase()) : std::wstring());
+        Index, Athena - Finder::ImageBase(), bJumpsToZone ? L"a jump to " : Athena == Zone ? L"" : (MapCursorRemoval || ServerRemoveMapCursor) ? L"a call to " : L"a stub, not ", Zone - Finder::ImageBase(),
+        MapCursorRemoval ? std::format(L" and the map marker's removal, 0x{:X}", MapCursorRemoval - Finder::ImageBase())
+        : ServerRemoveMapCursor ? std::format(L", ServerRemoveMapCursor 0x{:X} and the player state's MapIndicatorPos set 0x{:X}", ServerRemoveMapCursor - Finder::ImageBase(), SetMapIndicatorPos - Finder::ImageBase())
+        : std::wstring());
     return StrippedIndex;
 }
 

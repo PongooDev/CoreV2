@@ -121,6 +121,7 @@ struct FFastArraySerializer;
 struct FFortItemEntry;
 struct FRotator;
 struct FVector;
+struct FVector2D;
 struct FDeathInfo;
 class AFortPawn;
 class AFortPickup;
@@ -733,6 +734,11 @@ namespace Natives
     // (3.5.1 0xA1B160: ServerRemoveMapCursor, then the player state's MapIndicatorPos zeroed). Null where the slot is a
     // jump to Zone's.
     inline void (*AFortPlayerControllerAthena_RemoveMapCursor)(AFortPlayerControllerAthena* This) = nullptr;
+    // 7.00 (CL-4629139) makes the same two steps in the stripped handler itself (0xC5C980): the ServerRemoveMapCursor RPC's
+    // thunk (0x1618840), then, for an AFortPlayerStateAthena, its MapIndicatorPos set to FVector2D::ZeroVector (0xC99610,
+    // the vector by value in rdx). Null elsewhere.
+    inline void (*AFortPlayerControllerAthena_ServerRemoveMapCursor)(AFortPlayerControllerAthena* This) = nullptr;
+    inline void (*AFortPlayerStateAthena_SetMapIndicatorPos)(AFortPlayerStateAthena* This, FVector2D InMapIndicatorPos) = nullptr;
     // AFortPlayerControllerZone's death report (1.10 0x8DB450), which AFortPlayerControllerAthena's override calls first
     // where its Athena part is stripped (1.9.1, 1.10): Finder::StrippedAthenaPrepareDeathReportIndex.
     inline void (*AFortPlayerControllerZone_PrepareDeathReport)(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack) = nullptr;

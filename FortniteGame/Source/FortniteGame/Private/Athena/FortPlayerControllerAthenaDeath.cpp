@@ -304,6 +304,15 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     {
         Natives::AFortPlayerControllerAthena_RemoveMapCursor(this);
     }
+    // 7.00 (0xC5C980) makes the same two steps one by one: the ServerRemoveMapCursor RPC, then the player state's marker.
+    else if (Natives::AFortPlayerControllerAthena_ServerRemoveMapCursor && Natives::AFortPlayerStateAthena_SetMapIndicatorPos && Role == ROLE_Authority)
+    {
+        Natives::AFortPlayerControllerAthena_ServerRemoveMapCursor(this);
+        if (AFortPlayerStateAthena* MarkerState = AthenaStateOf(this))
+        {
+            Natives::AFortPlayerStateAthena_SetMapIndicatorPos(MarkerState, FVector2D(0.0f, 0.0f));
+        }
+    }
 
 #if WITH_SERVER_CODE
     AFortPawn* DeadPawn = MyFortPawn;

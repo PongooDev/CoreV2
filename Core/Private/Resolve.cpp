@@ -15213,42 +15213,6 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
             ++PlaceCandidates;
         }
     }
-    // 7.00 (CL-4629139) asks it from neither: the build preview's helper does (0x12986B0, called from 0x12A58DB), which
-    // asks IsBuildingRestricted (CanAfford + 2, 0x30B at 0x1298845) and then CanPlaceBuildableClassInStructuralGrid (0x315
-    // at 0x1298AEE), and the place function (0x1294FC0) only asks GetErrorMessageFromStructuralQuery (0x318) about the
-    // preview's result. So, when the rules above find none, take the slot past the run whose third next slot the place
-    // function asks and that a function asks together with IsBuildingRestricted.
-    const auto AsksWith = [](int32_t Slot, int32_t OtherSlot)
-    {
-        const int32_t Displacement = Slot * static_cast<int32_t>(sizeof(void*));
-        const int32_t Other = OtherSlot * static_cast<int32_t>(sizeof(void*));
-        const std::initializer_list<int32_t> Call = { 0xFF, -1, Displacement & 0xFF, (Displacement >> 8) & 0xFF, (Displacement >> 16) & 0xFF, (Displacement >> 24) & 0xFF };
-        const std::initializer_list<int32_t> OtherCall = { 0xFF, -1, Other & 0xFF, (Other >> 8) & 0xFF, (Other >> 16) & 0xFF, (Other >> 24) & 0xFF };
-        const auto IsCall = [](uintptr_t Site) { return (Byte(Site + 1) & 0xF8) == 0x90 && (Byte(Site + 1) & 0x07) != 0x04; };
-        for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), Call); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), Call))
-        {
-            for (const auto& [Begin, End] : IsCall(Site) ? Finder::FunctionChunks(Finder::FunctionStart(Site)) : std::vector<std::pair<uintptr_t, uintptr_t>>())
-            {
-                for (uintptr_t Asked = FindInstruction(Begin, End, OtherCall); Asked; Asked = FindInstruction(Asked + 1, End, OtherCall))
-                {
-                    if (IsCall(Asked))
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
-    };
-    for (const int32_t Slot : Candidates == 1 && PlaceCandidates == 0 ? PlaceSlots : std::vector<int32_t>())
-    {
-        const int32_t Query = Slot - 3;
-        if (Query != CanPlace && Query > CanAfford + 3 && AsksWith(Query, CanAfford + 2))
-        {
-            CanPlace = Query;
-            ++PlaceCandidates;
-        }
-    }
 
     void** BuildingVTable = CdoVTable(L"/Script/FortniteGame.BuildingSMActor");
 
@@ -15346,6 +15310,33 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
         }
     }
 
+    // 7.00 (CL-4629139) asks CanPlaceBuildableClassInStructuralGrid from neither the place function nor a slot of its own:
+    // 6.31's build preview query (slot 0x30D, 0x12DD330) became a function of its own (0x12986B0), and CanPlace moved past
+    // the run: PayBuildableClassPlacementCost 0x316, PayBuildingRepairCost 0x317, GetErrorMessageFromStructuralQuery 0x318
+    // (which the place function, 0x1294FC0, asks), then CanPlace 0x319, where 6.31 has 0x30E to 0x311 with CanPlace first.
+    // So, when the rules above find none: GetErrorMessage is the place function's slot past the run with a slot within
+    // four of it whose body asks HasPermissionToEditWorld and its class argument's CreateDefaultObject, as CanPlace's does on
+    // every build (6.31 0x12BC380, 7.00 0x1274060); the payments are the two slots before GetErrorMessage.
+    int32_t PayPlacement = CanPlace >= 0 ? CanPlace + 1 : -1;
+    const int32_t CreateDefaultObject = Natives::UClass_CreateDefaultObjectIndex;
+    for (const int32_t Slot : Candidates == 1 && PlaceCandidates == 0 && PermissionCandidates == 1 && ControllerVTable && CreateDefaultObject >= 0 ? PlaceSlots : std::vector<int32_t>())
+    {
+        for (int32_t Query = Slot - 4; Slot > CanAfford + 3 && Query <= Slot + 4; ++Query)
+        {
+            if (Query <= CanAfford + 3 || Query == Slot || Query == CanPlace)
+            {
+                continue;
+            }
+            const std::vector<int32_t> QuerySlots = Slots(VTableEntry(ControllerVTable, Query));
+            if (Has(QuerySlots, HasPermission) && Has(QuerySlots, CreateDefaultObject))
+            {
+                CanPlace = Query;
+                PayPlacement = Slot - 2;
+                ++PlaceCandidates;
+            }
+        }
+    }
+
     // 21.40's ABuildingSMActor order: ReplaceBuildingActor, SupportsEditing, CanBePlayerEdited, IsBeingEdited,
     // GetEditingPlayer, SetEditingPlayer (1.8 and 1.8.1 0x149-0x14E), and OnServerAttemptBuildingUpgrade right before
     // IsBeingPlayerEdited (0xCC, 0xCD). ReplaceBuildingActor spawns the new piece, SetEditingPlayer stores the player
@@ -15421,8 +15412,8 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     Natives::AFortPlayerController_IsBuildingRestrictedIndex = CanAfford + 2;
     Natives::AFortPlayerController_HasRequiredBuildingLevelIndex = CanAfford + 3;
     Natives::AFortPlayerController_CanPlaceBuildableClassInStructuralGridIndex = CanPlace;
-    Natives::AFortPlayerController_PayBuildableClassPlacementCostIndex = CanPlace + 1;
-    Natives::AFortPlayerController_PayBuildingRepairCostIndex = CanPlace + 2;
+    Natives::AFortPlayerController_PayBuildableClassPlacementCostIndex = PayPlacement;
+    Natives::AFortPlayerController_PayBuildingRepairCostIndex = PayPlacement + 1;
     Natives::ABuildingActor_DieIndex = Die;
     Natives::ABuildingActor_InitializeBuildingActorIndex = AfterSpawn[1];
     Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex = AfterSpawn[2];
@@ -15436,9 +15427,9 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     Natives::ABuildingSMActor_NeedsRepairIndex = NeedsRepair;
     Natives::ABuildingSMActor_RepairBuildingIndex = RepairBuilding;
     Log::Info(L"Finder: building helpers: AFortPlayerController CanPerformAction 0x{:X}, HasPermissionToEditWorld 0x{:X}, CanAfford..HasRequiredBuildingLevel 0x{:X}-0x{:X}, "
-        L"CanPlace..PayBuildingRepairCost 0x{:X}-0x{:X}; ABuildingSMActor Die 0x{:X}, Initialize 0x{:X} 0x{:X}, SetMirrored 0x{:X}, Upgrade 0x{:X}, IsBeingPlayerEdited 0x{:X}, "
+        L"CanPlace 0x{:X}, PayBuildableClassPlacementCost..PayBuildingRepairCost 0x{:X}-0x{:X}; ABuildingSMActor Die 0x{:X}, Initialize 0x{:X} 0x{:X}, SetMirrored 0x{:X}, Upgrade 0x{:X}, IsBeingPlayerEdited 0x{:X}, "
         L"Replace 0x{:X}, CanBePlayerEdited 0x{:X}, EditingPlayer 0x{:X} 0x{:X}, NeedsRepair 0x{:X}, Repair 0x{:X}; AFortGameMode scores 0x{:X} 0x{:X} 0x{:X}",
-        CanPerformAction, HasPermission, CanAfford, CanAfford + 3, CanPlace, CanPlace + 2, Die, AfterSpawn[1], AfterSpawn[2], SetMirrored, Upgrade, IsBeingEdited, Replace, GetEditing - 2,
+        CanPerformAction, HasPermission, CanAfford, CanAfford + 3, CanPlace, PayPlacement, PayPlacement + 1, Die, AfterSpawn[1], AfterSpawn[2], SetMirrored, Upgrade, IsBeingEdited, Replace, GetEditing - 2,
         GetEditing, SetEditing, NeedsRepair, RepairBuilding, ScoreConstruction, ScoreConstruction + 3, ScoreConstruction + 4);
     return true;
 }

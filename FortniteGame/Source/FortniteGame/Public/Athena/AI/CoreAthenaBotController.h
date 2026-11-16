@@ -659,9 +659,10 @@ private:
     // Gameplay.Application.Hit and Gameplay.Application.Explode containers (GA_Ranged_GenericProjectileExplosive's), made
     // for the bot's ability system with the weapon as the damage source. The projectile replicates to every player, flies
     // and explodes the game's way, and its explosion is the shot's damage. HomingTarget is the actor the shot is aimed
-    // at, as the game passes its trace's. False for a weapon that traces its shots, or where a piece is missing (Core's
-    // traced shot is used then).
-    bool FireProjectile(AFortWeapon* Weapon, const FVector& Start, const FVector& Direction, AActor* HomingTarget);
+    // at, as the game passes its trace's. bForShow (the warmup brawl, #452): the rocket carries none of the effects, so it
+    // flies and goes off without hurting anyone. False for a weapon that traces its shots, or where a piece is missing
+    // (Core's traced shot is used then).
+    bool FireProjectile(AFortWeapon* Weapon, const FVector& Start, const FVector& Direction, AActor* HomingTarget, bool bForShow = false);
     // The weapon's own fire: its primary fire ability (PrimaryAbilitySpecHandle), activated on the bot's ability system
     // as a player's input does, so the shot, its ammo, its hit and its effects are the game's. False when it didn't
     // activate (Core's shot is used then).

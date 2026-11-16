@@ -3555,9 +3555,11 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
         RecordShot(Held->Type, Distance, bHit);
     }
     // A launcher's shot is its rocket, the game's projectile (FireProjectile, Core-Backend #371: the bots' rockets were
-    // traced shots, unseen, that hurt without an explosion). Not in the warmup brawl, whose hits are for show (#452): the
-    // rocket's explosion is the game's damage, which the island takes where the game mode allows warmup damage.
-    if (Weapon && Held && !bWarmupBrawl && RayLength > 1.0f && FireProjectile(Weapon, Eye, Ray * (1.0f / RayLength), bHit ? reinterpret_cast<AActor*>(Target) : nullptr))
+    // traced shots, unseen, that hurt without an explosion). The warmup brawl's is too, but for show (#452): its rocket
+    // carries none of the fire ability's effects, so it flies and goes off without hurting anyone, where the game mode
+    // allows warmup damage too. A 3.6 player's whole report was the warmup island's brawl, whose launchers fired traced
+    // shots with no rocket.
+    if (Weapon && Held && RayLength > 1.0f && FireProjectile(Weapon, Eye, Ray * (1.0f / RayLength), bHit ? reinterpret_cast<AActor*>(Target) : nullptr, bWarmupBrawl))
     {
         // The launch as the others hear and see it, the fire ability's WeaponFireCue (its sound and muzzle flash). The
         // rocket shows its own flight and explosion, so no impact cue goes with it.
@@ -3638,7 +3640,7 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
 #endif
 }
 
-bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector& Start, const FVector& Direction, AActor* HomingTarget)
+bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector& Start, const FVector& Direction, AActor* HomingTarget, bool bForShow)
 {
 #if WITH_SERVER_CODE
     // What a player's launcher shot runs on the server: the fire ability (GA_Ranged_GenericProjectileExplosive_Athena, a
@@ -3674,8 +3676,9 @@ bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector
     static UClass* AbilityLibrary = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
     const FName HitTag(L"Gameplay.Application.Hit", FNAME_Find);
     const FName ExplodeTag(L"Gameplay.Application.Explode", FNAME_Find);
-    if (!Ability || !ContainerStruct || !SpecStruct || !TargetSpecsProperty || !TargetSpecsProperty->GetClass()->HasAnyCastFlag(CASTCLASS_UArrayProperty) || !GetEffectContext
-        || !AbilityLibrary || ExplodeTag.IsNone())
+    // The warmup brawl's rocket (bForShow) carries no effect: its specs stay empty, so it needs none of the pieces below.
+    if (!bForShow && (!Ability || !ContainerStruct || !SpecStruct || !TargetSpecsProperty || !TargetSpecsProperty->GetClass()->HasAnyCastFlag(CASTCLASS_UArrayProperty) || !GetEffectContext
+        || !AbilityLibrary || ExplodeTag.IsNone()))
     {
         Refused[Definition] = true;
         Log::Warning(L"Battle Royale bots: {}'s {} has projectile {}, but its shot can't be made the game's way (fire ability {}, containers {}, specs {}, GetEffectContext {}, Explode tag {}): Core traces it",
@@ -3691,8 +3694,8 @@ bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector
     int32_t Effects[2] = {};
     const FName Tags[2] = { HitTag, ExplodeTag };
     FStructValue* Specs[2] = { &HitSpec, &ExplodeSpec };
-    UObject* LibraryDefault = AbilityLibrary->GetDefaultObject();
-    for (int32_t Index = 0; Index < 2; ++Index)
+    UObject* LibraryDefault = !bForShow ? AbilityLibrary->GetDefaultObject() : nullptr;
+    for (int32_t Index = 0; Index < 2 && !bForShow; ++Index)
     {
         if (Tags[Index].IsNone())
         {
@@ -3722,7 +3725,7 @@ bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector
         }
     }
     // An explosion without an effect would be for show only; Core's traced shot deals the damage then.
-    if (Effects[0] + Effects[1] == 0)
+    if (!bForShow && Effects[0] + Effects[1] == 0)
     {
         Refused[Definition] = true;
         Log::Warning(L"Battle Royale bots: {}'s fire ability {} gives its projectile no hit or explosion effect: Core traces {}'s shots", BotName, NameOf(AbilityObject), NameOf(Definition));
@@ -3735,20 +3738,22 @@ bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector
     const FRotator Rotation = Direction.Rotation();
     AActor* Projectile = UFortKismetLibrary::SpawnProjectile(ProjectileClass, reinterpret_cast<AActor*>(Weapon), SpawnLocation, Rotation, Rotation, HitSpec.Get(), ExplodeSpec.Get(),
         true, HomingTarget, 0.0f, 1.0f, 0.0f);
-    static std::map<const UObject*, int32_t> Logged;
+    // Logged once each: a weapon's first rocket for show and its first one in the match.
+    static std::map<std::pair<const UObject*, bool>, int32_t> Logged;
+    int32_t& Count = Logged[{ Definition, bForShow }];
     if (!Projectile)
     {
-        if (Logged[Definition]++ < 2)
+        if (Count++ < 2)
         {
             Log::Warning(L"Battle Royale bots: {}'s {} spawned no {} (UFortKismetLibrary::SpawnProjectile): Core traces the shot", BotName, NameOf(Definition), NameOf(reinterpret_cast<UObject*>(ProjectileClass)));
         }
         return false;
     }
-    if (Logged[Definition]++ < 1)
+    if (Count++ < 1)
     {
         APawn* ProjectileInstigator = Projectile->Instigator;
-        Log::Info(L"Battle Royale bots: {}'s {} fires {} the game's way ({} hit and {} explosion effects, instigator {})", BotName, NameOf(Definition), NameOf(reinterpret_cast<UObject*>(Projectile)),
-            Effects[0], Effects[1], NameOf(reinterpret_cast<UObject*>(ProjectileInstigator)));
+        Log::Info(L"Battle Royale bots: {}'s {} fires {} the game's way ({}instigator {})", BotName, NameOf(Definition), NameOf(reinterpret_cast<UObject*>(Projectile)),
+            bForShow ? std::wstring(L"for show in the warmup, no effects; ") : std::format(L"{} hit and {} explosion effects; ", Effects[0], Effects[1]), NameOf(reinterpret_cast<UObject*>(ProjectileInstigator)));
     }
     return true;
 #else
@@ -4386,7 +4391,16 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
     // GA_Ranged_GenericProjectileExplosive_Athena hits pawns in a 5 m sphere without leaving out the instigator. A player
     // doesn't fire one into a target at their feet, so a bot holds it until it has backed off (it backs off inside 6 m,
     // above); a headless 6.30 bot match saw a bot rocket a target 3 m away and go out with it (Core-Backend #371).
-    const bool bLauncherTooClose = Ready && Ready->Type == ECoreAthenaBotWeaponType::Launcher && Distance < 600.0f;
+    bool bLauncherTooClose = Ready && Ready->Type == ECoreAthenaBotWeaponType::Launcher && Distance < 600.0f;
+    // Nor into a wall, a floor or a ceiling right in front of it: a 7.00 High Explosives bot match saw a bot under a floor
+    // fire up at a target 6 m away and go out with it, the rocket going off on the floor above its head.
+    if (!bLauncherTooClose && Ready && Ready->Type == ECoreAthenaBotWeaponType::Launcher && bReady && bLoaded && bCanFire && !bFiring)
+    {
+        const FVector Eye(Location.X, Location.Y, Location.Z + 60.0f);
+        UObject* Blocker = nullptr;
+        FVector BlockedAt;
+        bLauncherTooClose = !HasClearShot(Pawn, Eye, FVector(TargetLocation.X, TargetLocation.Y, TargetLocation.Z + 20.0f), Target, &Blocker, &BlockedAt) && (BlockedAt - Eye).Size() < 600.0f;
+    }
     if (bReady && bLoaded && bCanFire && !bFiring && !bLauncherTooClose)
     {
         FireShot(Target, Distance);

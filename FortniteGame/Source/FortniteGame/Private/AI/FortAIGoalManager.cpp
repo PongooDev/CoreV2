@@ -23,9 +23,11 @@
 #include "Math/Vector.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <cmath>
 #include <cstring>
 #include <format>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -83,7 +85,7 @@ namespace
 
     // Calls Object's reflected function by name and takes its ReturnValue; false when the build has no such function.
     template <typename T>
-    bool CallReflected(UObject* Object, const wchar_t* FunctionName, T& OutValue, const std::function<void(Reflection::FParams&)>& SetParameters = nullptr)
+    bool CallReflected(UObject* Object, const wchar_t* FunctionName, T& OutValue, const std::function<void(Reflection::FParams&)>& SetParameters = nullptr, const wchar_t* OutName = L"ReturnValue")
     {
         const FName Name(FunctionName, FNAME_Find);
         UFunction* Function = Object && !Name.IsNone() ? Object->FindFunction(Name) : nullptr;
@@ -100,7 +102,7 @@ namespace
         {
             return false;
         }
-        OutValue = Params.Take<T>(L"ReturnValue");
+        OutValue = Params.Take<T>(OutName);
         return true;
     }
 
@@ -145,6 +147,58 @@ namespace
             Params.Set(L"NavData", NavData);
         });
         return bProjected;
+    }
+
+    // #469 diagnostics, where the navmesh has tiles around a point that doesn't project: the navmesh in the point's whole
+    // column (K2_ProjectPointToNavigation with the agent's 278 uu across and 10000 uu up and down), and any navigable
+    // point within 3000 uu (K2_GetRandomPointInNavigableRadius), each with its height against the point's.
+    std::wstring DescribeNavMeshNear(UObject* WorldContext, const FVector& Point, ANavigationData* NavData)
+    {
+        UObject* const NavSysDefault = UNavigationSystem::StaticClass()->GetDefaultObject();
+        // Calls a reflected bool query and takes its FVector out parameter OutName.
+        const auto Query = [&](const wchar_t* FunctionName, const wchar_t* OutName, const std::function<void(Reflection::FParams&)>& SetParameters, FVector& OutLocation) -> std::optional<bool>
+        {
+            UFunction* Function = NavSysDefault ? NavSysDefault->FindFunction(FName(FunctionName, FNAME_Find)) : nullptr;
+            if (!Function)
+            {
+                return std::nullopt;
+            }
+            Reflection::FParams Params(Function, true);
+            SetParameters(Params);
+            if (!Params.Call(NavSysDefault))
+            {
+                return std::nullopt;
+            }
+            OutLocation = Params.Take<FVector>(OutName);
+            return Params.Take<bool>(L"ReturnValue");
+        };
+
+        std::wstring Text;
+        FVector Projected(0, 0, 0);
+        const std::optional<bool> bInColumn = Query(L"K2_ProjectPointToNavigation", L"ProjectedLocation", [&](Reflection::FParams& Params) {
+            Params.Set(Params.Has(L"WorldContextObject") ? L"WorldContextObject" : L"WorldContext", WorldContext);
+            Params.Set(L"Point", Point);
+            Params.Set(L"NavData", NavData);
+            Params.Set(L"QueryExtent", FVector(278.0f, 278.0f, 10000.0f));
+        }, Projected);
+        if (bInColumn)
+        {
+            Text += *bInColumn ? std::format(L"navmesh in the column at Z {:.0f} ({:+.0f})", Projected.Z, Projected.Z - Point.Z) : std::wstring(L"no navmesh in the column (+-10000)");
+        }
+        FVector Random(0, 0, 0);
+        const std::optional<bool> bRandom = Query(L"K2_GetRandomPointInNavigableRadius", L"RandomLocation", [&](Reflection::FParams& Params) {
+            Params.Set(L"WorldContextObject", WorldContext);
+            Params.Set(L"Origin", Point);
+            Params.Set(L"Radius", 3000.0f);
+            Params.Set(L"NavData", NavData);
+        }, Random);
+        if (bRandom)
+        {
+            const float Distance = std::sqrt((Random.X - Point.X) * (Random.X - Point.X) + (Random.Y - Point.Y) * (Random.Y - Point.Y));
+            Text += *bRandom ? std::format(L", a navigable point within 3000 at ({:.0f}, {:.0f}, {:.0f}), {:.0f} away, Z {:+.0f}", Random.X, Random.Y, Random.Z, Distance, Random.Z - Point.Z)
+                             : std::wstring(L", no navigable point within 3000");
+        }
+        return Text;
     }
 
     // Core's diagnostics (#408): the step of the pawn's way to its goal that fails.
@@ -220,6 +274,10 @@ namespace
             }))
         {
             NavMeshText += std::format(L", navmesh initialized around the start {}", bInitialized ? L"yes" : L"no");
+        }
+        if (!bStartProjected)
+        {
+            NavMeshText += L" (" + DescribeNavMeshNear(reinterpret_cast<UObject*>(Pawn), PawnLocation, NavData) + L")";
         }
 
         std::wstring SearchText = L"not run";

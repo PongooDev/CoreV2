@@ -55,6 +55,7 @@
 #include <cfloat>
 #include <chrono>
 #include <cmath>
+#include <format>
 #include <optional>
 #include <unordered_map>
 #include <utility>
@@ -579,8 +580,22 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
             };
             AActor* SpawnPad = Member_ActiveSpawnPad.IsAvailable() ? static_cast<AActor*>(Zone->ActiveSpawnPad) : nullptr;
             const FVector PadLocation = SpawnPad ? SpawnPad->GetTransform().GetLocation() : FVector(0, 0, 0);
-            UE_LOG(LogNavigation, Log, TEXT("Navmesh 30 s on: tiles at the grid's centre (%.0f, %.0f, %.0f) %s, at the spawn pad %s; being built %s"), GridCentre.X, GridCentre.Y, GridCentre.Z,
-                IsInitialized(GridCentre).c_str(), SpawnPad ? IsInitialized(PadLocation).c_str() : TEXT("(no pad)"), UNavigationSystem::IsNavigationBeingBuilt(Zone) ? TEXT("yes") : TEXT("no"));
+            // Whether the pad's spot projects onto the main navmesh (the husks'), with the agent's own extent and with one
+            // 10000 uu tall (#469: on 6.31 the tiles were there but no husk's spot projected).
+            UNavigationSystem* ZoneNavSys = ZoneWorld->GetNavigationSystem();
+            ANavigationData* MainNavData = ZoneNavSys ? ZoneNavSys->GetDefaultNavDataInstance() : nullptr;
+            std::wstring PadProjection = L"(no pad or navmesh)";
+            if (SpawnPad && MainNavData)
+            {
+                FVector Projected(0, 0, 0);
+                const bool bProjects = UNavigationSystem::K2_ProjectPointToNavigation(Zone, PadLocation, Projected, MainNavData, FVector(0, 0, 0));
+                FVector Column(0, 0, 0);
+                const bool bInColumn = UNavigationSystem::K2_ProjectPointToNavigation(Zone, PadLocation, Column, MainNavData, FVector(278.0f, 278.0f, 10000.0f));
+                PadProjection = std::format(L"{}, in its column {}", bProjects ? L"yes" : L"no", bInColumn ? std::format(L"at Z {:.0f} ({:+.0f})", Column.Z, Column.Z - PadLocation.Z) : std::wstring(L"none"));
+            }
+            UE_LOG(LogNavigation, Log, TEXT("Navmesh 30 s on: tiles at the grid's centre (%.0f, %.0f, %.0f) %s, at the spawn pad %s; being built %s; the pad (%.0f, %.0f, %.0f) projects onto %s: %s"), GridCentre.X, GridCentre.Y, GridCentre.Z,
+                IsInitialized(GridCentre).c_str(), SpawnPad ? IsInitialized(PadLocation).c_str() : TEXT("(no pad)"), UNavigationSystem::IsNavigationBeingBuilt(Zone) ? TEXT("yes") : TEXT("no"),
+                PadLocation.X, PadLocation.Y, PadLocation.Z, MainNavData ? *reinterpret_cast<UObject*>(MainNavData)->GetName() : TEXT("no navmesh"), PadProjection.c_str());
         }), 30.0f, false);
     }
 

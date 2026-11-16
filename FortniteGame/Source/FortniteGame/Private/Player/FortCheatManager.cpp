@@ -4997,6 +4997,18 @@ void UFortCheatManager::BuildWith(const FString& Arguments)
         return;
     }
 
+    // The game's BuildWith always sets the material and level it is given. Later builds compile its body out: 6.22
+    // (0xF00280), 6.30 (0xF341E0) and 6.31 (0xF3F6C0) only free the string, on the server and in the player's game alike,
+    // so nothing changed and the old reply named the old material and "no level 3 pieces" (#469).
+    if (bSelection && ((Material >= 0 && static_cast<int32_t>(PlayerController->CurrentResourceType) != Material)
+        || (Level >= 0 && static_cast<int32_t>(PlayerController->CurrentResourceLevel) != Level)))
+    {
+        UE_LOG(LogFortCheats, Log, TEXT("BuildWith: \"%s\" changed nothing for %s: this build's BuildWith is compiled out"), GameArguments.c_str(), *GetNameSafe(PlayerController));
+        Reply(TEXT("This build's BuildWith cheat is compiled out of the game, on the server and in your game, so it can't change the material or level you build with. "
+                   "In Save the World, upgrade a piece by interacting with it; the levels you can upgrade to come from your account's upgrades"));
+        return;
+    }
+
     const bool bOtherPlayer = ReplyTo && ReplyTo != PlayerController;
     const wchar_t* const OwnGame = bOtherPlayer ? TEXT(". Their game picks the pieces they place, so those only change when they type it themselves") : TEXT("");
     if (!bSelection)

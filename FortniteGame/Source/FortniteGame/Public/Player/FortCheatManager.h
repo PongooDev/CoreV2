@@ -230,7 +230,9 @@ public:
     // "cheat buildwith <wood | stone | metal> [1-3]" (#155): the game's BuildWith, which sets the material and level the
     // build tool places and brings it out, run on the server and answered there (the game's answers nothing). The class
     // a piece is built as is picked on the player's own machine, so their client runs the game's BuildWith too
-    // (RunClientBuildWith); the server builds the level it chose even above their MaxBuildLevel (BuildWithLevel).
+    // (RunClientBuildWith); the server builds the level it chose even above their MaxBuildLevel (BuildWithLevel). Builds
+    // that compile the game's BuildWith out (6.22, 6.30 and 6.31 among them) change nothing on either machine, and the
+    // reply says so (#469).
     void BuildWith(const FString& Arguments);
     // Client: "cheat buildwith ..." for this player also runs the game's BuildWith on their own controller, so their
     // HUD, build preview and the pieces they send are of that material and level. The server still runs it and answers.

@@ -238,6 +238,17 @@ int32_t UFortWeaponItemDefinition::GetClipSize() const
     return Stats ? static_cast<int32_t>(Stats->ClipSize) : 0;
 }
 
+UClass* UFortWeaponRangedItemDefinition::GetProjectileTemplate() const
+{
+    UFunction* Function = FindStaticFunction_GetProjectileTemplate();
+    if (!Function)
+    {
+        return nullptr;
+    }
+    Reflection::FParams Params(Function, true);
+    return Params.Call(const_cast<UFortWeaponRangedItemDefinition*>(this)) ? Params.Take<UClass*>(L"ReturnValue") : nullptr;
+}
+
 bool UFortWorldItemDefinition::ServerExecute(const UFortItem* Item, AFortPlayerController* Controller)
 {
     if (Natives::UFortWorldItemDefinition_ServerExecuteIndex < 0 && !Finder::ResolveWorldItemDefinitionLive())

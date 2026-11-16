@@ -652,6 +652,16 @@ private:
     // One shot at the target: the weapon's fire for everyone to see, the magazine, and its hit, by Core (no player
     // controller aims a bot's weapon ability, so the game's own fire neither spends ammo nor hits).
     void FireShot(AFortPawn* Target, float Distance);
+    // A launcher's shot as the game's fire makes it for a player (Core-Backend #371: the bots' rockets were traced shots
+    // that nobody saw): the weapon's projectile (UFortWeaponRangedItemDefinition::GetProjectileTemplate) spawned from
+    // Start along Direction the way AFortWeaponRanged::SpawnProjectile spawns it (1.11 0x9C20A0, through
+    // UFortKismetLibrary::SpawnProjectile, the weapon as RequestedBy), carrying the effects of the fire ability's
+    // Gameplay.Application.Hit and Gameplay.Application.Explode containers (GA_Ranged_GenericProjectileExplosive's), made
+    // for the bot's ability system with the weapon as the damage source. The projectile replicates to every player, flies
+    // and explodes the game's way, and its explosion is the shot's damage. HomingTarget is the actor the shot is aimed
+    // at, as the game passes its trace's. False for a weapon that traces its shots, or where a piece is missing (Core's
+    // traced shot is used then).
+    bool FireProjectile(AFortWeapon* Weapon, const FVector& Start, const FVector& Direction, AActor* HomingTarget);
     // The weapon's own fire: its primary fire ability (PrimaryAbilitySpecHandle), activated on the bot's ability system
     // as a player's input does, so the shot, its ammo, its hit and its effects are the game's. False when it didn't
     // activate (Core's shot is used then).

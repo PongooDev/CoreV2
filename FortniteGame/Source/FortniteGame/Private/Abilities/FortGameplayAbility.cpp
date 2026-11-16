@@ -21,6 +21,28 @@ AFortPawn* UFortGameplayAbility::GetActivatingPawn() const
     return Params.Call(const_cast<UFortGameplayAbility*>(this)) ? Params.Take<AFortPawn*>(L"ReturnValue") : nullptr;
 }
 
+bool UFortGameplayAbility::BP_GetGameplayEffectContainer(const FGameplayTag& ApplicationTag, void* OutContainer) const
+{
+    UFunction* Function = FindStaticFunction_BP_GetGameplayEffectContainer();
+    UScriptStruct* ContainerStruct = FFortGameplayEffectContainer::StaticStruct();
+    if (!Function || !ContainerStruct || !OutContainer)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
+    if (!Params.Set(L"ApplicationTag", ApplicationTag) || !Params.Call(const_cast<UFortGameplayAbility*>(this)))
+    {
+        return false;
+    }
+    const void* Found = Params.GetAddress(L"ReturnValue");
+    if (!Found)
+    {
+        return false;
+    }
+    ContainerStruct->CopyScriptStruct(OutContainer, Found);
+    return true;
+}
+
 int32_t UFortGameplayAbility::IncludeEnemyTargets()
 {
     // EffectContainers is a fixed array: its property says how many there are and how far apart.

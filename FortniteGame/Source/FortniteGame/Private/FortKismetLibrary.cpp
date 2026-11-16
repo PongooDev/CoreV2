@@ -4,6 +4,7 @@
 #include "Athena/FortGameModeAthena.h"
 #include "AI/FortAIGoalManager.h"
 #include "Abilities/FortAbilitySet.h"
+#include "Abilities/FortGameplayAbility.h"
 #include "Building/BuildingSMActor.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -268,6 +269,82 @@ uint8_t UFortKismetLibrary::GetTeamAffiliation(const AActor* ActorA, const AActo
         return Reflection::InvalidEnumValue;
     }
     return Params.Take<uint8_t>(L"ReturnValue");
+}
+
+bool UFortKismetLibrary::MakeGameplayEffectContainerSpecFromAbilityComponent(const void* EffectContainer, UAbilitySystemComponent* AbilityComp, int32_t GameplayEffectLevel, void* OutSpec)
+{
+    UFunction* Function = FindStaticFunction_MakeGameplayEffectContainerSpecFromAbilityComponent();
+    UObject* LibraryDefault = Function ? StaticClass()->GetDefaultObject(false) : nullptr;
+    UScriptStruct* SpecStruct = FFortGameplayEffectContainerSpec::StaticStruct();
+    if (!LibraryDefault || !SpecStruct || !EffectContainer || !AbilityComp || !OutSpec)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
+    if (!Params.CopyStruct(L"EffectContainer", EffectContainer) || !Params.Set(L"AbilityComp", AbilityComp) || !Params.Set(L"GameplayEffectLevel", GameplayEffectLevel)
+        || !Params.Call(LibraryDefault))
+    {
+        return false;
+    }
+    const void* Spec = Params.GetAddress(L"ReturnValue");
+    if (!Spec)
+    {
+        return false;
+    }
+    SpecStruct->CopyScriptStruct(OutSpec, Spec);
+    return true;
+}
+
+AActor* UFortKismetLibrary::SpawnProjectile(UClass* ProjectileClass, AActor* RequestedBy, const FVector& SpawnLocation, const FRotator& SpawnRotation, const FRotator& SpawnDirection,
+    const void* EffectContainerSpecToApplyOnHit, const void* EffectContainerSpecToApplyOnExplode, bool bUseDefaultPhysics, AActor* HomingTarget, float InitialSpeed,
+    float GravityScale, float ChargePercent)
+{
+    UFunction* Function = FindStaticFunction_SpawnProjectile();
+    UObject* LibraryDefault = Function ? StaticClass()->GetDefaultObject(false) : nullptr;
+    if (!LibraryDefault || !ProjectileClass || !RequestedBy)
+    {
+        return nullptr;
+    }
+    Reflection::FParams Params(Function, true);
+    if (!Params.Set(L"ProjectileClass", ProjectileClass) || !Params.Set(L"RequestedBy", RequestedBy) || !Params.Set(L"SpawnLocation", SpawnLocation)
+        || !Params.Set(L"SpawnRotation", SpawnRotation))
+    {
+        return nullptr;
+    }
+    // The rest as each build's function has them (1.11 has every one; 21.40 adds OptionalAssociatedItemDef, left null).
+    if (Params.Has(L"SpawnDirection"))
+    {
+        Params.Set(L"SpawnDirection", SpawnDirection);
+    }
+    if (EffectContainerSpecToApplyOnHit && Params.Has(L"EffectContainerSpecToApplyOnHit"))
+    {
+        Params.CopyStruct(L"EffectContainerSpecToApplyOnHit", EffectContainerSpecToApplyOnHit);
+    }
+    if (EffectContainerSpecToApplyOnExplode && Params.Has(L"EffectContainerSpecToApplyOnExplode"))
+    {
+        Params.CopyStruct(L"EffectContainerSpecToApplyOnExplode", EffectContainerSpecToApplyOnExplode);
+    }
+    if (Params.Has(L"bUseDefaultPhysics"))
+    {
+        Params.Set(L"bUseDefaultPhysics", bUseDefaultPhysics);
+    }
+    if (Params.Has(L"HomingTarget"))
+    {
+        Params.Set(L"HomingTarget", HomingTarget);
+    }
+    if (Params.Has(L"InitialSpeed"))
+    {
+        Params.Set(L"InitialSpeed", InitialSpeed);
+    }
+    if (Params.Has(L"GravityScale"))
+    {
+        Params.Set(L"GravityScale", GravityScale);
+    }
+    if (Params.Has(L"ChargePercent"))
+    {
+        Params.Set(L"ChargePercent", ChargePercent);
+    }
+    return Params.Call(LibraryDefault) ? Params.Take<AActor*>(L"ReturnValue") : nullptr;
 }
 
 bool UFortKismetLibrary::HasForceRemoval()

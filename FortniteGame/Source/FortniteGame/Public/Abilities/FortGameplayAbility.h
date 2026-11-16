@@ -49,6 +49,14 @@ public:
     DefineUStructProperty(FFortAbilityTargetSelectionList, TargetSelection)
 };
 
+// An effect container made ready for its targets (1.11: its TargetSelection, a spec of each effect in
+// TargetGameplayEffectSpecs and OwnerGameplayEffectSpecs, its cues): what a projectile applies where it hits and where it
+// explodes (AFortProjectileBase's EffectContainerSpecToApplyOnHit and EffectContainerSpecToApplyOnExplode).
+struct FFortGameplayEffectContainerSpec
+{
+    DefineUnrealStruct(FFortGameplayEffectContainerSpec, FortniteGame)
+};
+
 class EFortAbilityCostSource
 {
     DefineUnrealEnum(EFortAbilityCostSource, FortniteGame)
@@ -71,6 +79,7 @@ class UFortGameplayAbility : public UGameplayAbility
     DefineUnrealClass(UFortGameplayAbility, FortniteGame)
     DefineUFunction(EquipAbilityWeapon)
     DefineUFunction(GetActivatingPawn)
+    DefineUFunction(BP_GetGameplayEffectContainer)
 
 public:
     DefineUProperty(UTexture2D*, SmallPreviewImageOverride)
@@ -82,6 +91,12 @@ public:
 
     // Lets every target selection in its effect containers keep enemy pawns; how many filters it changed.
     int32_t IncludeEnemyTargets();
+
+    // The effect container with ApplicationTag, copied into OutContainer (an FFortGameplayEffectContainer's storage):
+    // 1.11's execBP_GetGameplayEffectContainer (0xA533A0) returns what GetGameplayEffectContainer finds among the
+    // EffectContainers, an empty container where none has the tag. It reads nothing but the ability's defaults, so a
+    // class default object answers for its blueprint. False where the build has no such function.
+    bool BP_GetGameplayEffectContainer(const FGameplayTag& ApplicationTag, void* OutContainer) const;
 
     AFortPawn* GetActivatingPawn() const;
     void EquipAbilityWeapon(UFortWeaponItemDefinition* WeaponDefinition, int32_t ItemLevel);

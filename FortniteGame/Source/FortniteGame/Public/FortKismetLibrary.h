@@ -12,8 +12,11 @@ class AFortAIGoalManager;
 class AFortPickup;
 class AFortPlayerController;
 struct FGuid;
+struct FRotator;
 struct FVector;
 class IAbilitySystemInterface;
+class UAbilitySystemComponent;
+class UClass;
 class IFortInventoryOwnerInterface;
 class UFortWorldItemDefinition;
 class UFortAbilitySet;
@@ -39,6 +42,8 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(GetActorTeam)
     DefineUFunction(GetTeamAffiliation)
     DefineUFunction(K2_GiveBuildingResource)
+    DefineUFunction(MakeGameplayEffectContainerSpecFromAbilityComponent)
+    DefineUFunction(SpawnProjectile)
 
 public:
     // The game's team of Actor (3.5.1 0xC35E40): its IFortTeamActorInterface's GetTeam, else its Instigator's, else
@@ -79,6 +84,20 @@ public:
     // 5.0 (UE 4.21) added WorldContextObject as the first parameter; its exec passes it to the native first.
     static bool PickLootDrops(UObject* WorldContextObject, TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier);
     static bool PickLootTierKeyAndLootTierFromTierGroup(FName& OutLootTierKey, int32_t& OutLootTier, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier, const FGameplayTagContainer& ContextTags);
+    // EffectContainer (an FFortGameplayEffectContainer) made into OutSpec (an FFortGameplayEffectContainerSpec's storage)
+    // for AbilityComp at GameplayEffectLevel, as an ability makes its own (1.11 0x6346C0 hands it to the container's
+    // 0x2BE8F0): its target selection and cues, and a spec of each of its effects in a context of the ability system's.
+    // False where the build has no such function.
+    static bool MakeGameplayEffectContainerSpecFromAbilityComponent(const void* EffectContainer, UAbilitySystemComponent* AbilityComp, int32_t GameplayEffectLevel, void* OutSpec);
+    // A projectile of ProjectileClass for RequestedBy, from SpawnLocation along SpawnDirection (1.11 0x63E6A0, which
+    // AFortWeaponRanged::SpawnProjectile, 0x9C20A0, calls for a player's shot with the weapon as RequestedBy). Server
+    // only: it spawns nothing unless RequestedBy has authority. The projectile's owner is RequestedBy and its Instigator
+    // RequestedBy's; it keeps the two specs (FFortGameplayEffectContainerSpec, either may be null for none) to apply where
+    // it hits and where it explodes. bUseDefaultPhysics: the projectile's own speed, else InitialSpeed. Null where the
+    // build has no such function or nothing spawned.
+    static AActor* SpawnProjectile(UClass* ProjectileClass, AActor* RequestedBy, const FVector& SpawnLocation, const FRotator& SpawnRotation, const FRotator& SpawnDirection,
+        const void* EffectContainerSpecToApplyOnHit, const void* EffectContainerSpecToApplyOnExplode, bool bUseDefaultPhysics, AActor* HomingTarget, float InitialSpeed,
+        float GravityScale, float ChargePercent);
 
     DECLARE_FUNCTION(execGetAIDirector);
     DECLARE_FUNCTION(execGetAIGoalManager);

@@ -3,6 +3,7 @@
 #include "AIController.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/FortAbilitySet.h"
+#include "Abilities/FortGameplayAbility.h"
 #include "Abilities/FortPlayerAttrSet.h"
 #include "Abilities/GameplayAbility.h"
 #include "Athena/AI/AthenaNavSystem.h"
@@ -16,6 +17,7 @@
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "FortGameState.h"
+#include "FortKismetLibrary.h"
 #include "Customization/CustomCharacterPart.h"
 #include "Finder.h"
 #include "GameplayCueInterface.h"
@@ -45,6 +47,7 @@
 #include "Items/FortPickup.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Log.h"
+#include "Math/Rotator.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
 #include "Pawns/FortPawn.h"
@@ -314,6 +317,65 @@ namespace
             *reinterpret_cast<FVector*>(Location) = ImpactLocation;
         }
     }
+
+    // A weapon hit's effect context (FFortGameplayEffectContext, behind an FGameplayEffectContextHandle) as a player's shot
+    // has it: the weapon as the damage source, whose stats row the damage execution reads (UFortDamageFormulaExecution
+    // Calculation, 3.1 0xC49090: a context without one deals 0), the pawn as instigator and the weapon as causer. The bot's
+    // ability system is its player state's, so the ability system's own context names the player state, and the victim's
+    // damage cue (AFortPawn::GameplayCue_Damage, 3.1 0xDECD40) reads the instigator as a pawn: its controller and its
+    // location for the hit's direction.
+    bool SetWeaponShotContext(void* ContextHandle, AFortPlayerPawnAthena* Pawn, AFortWeapon* Weapon)
+    {
+        static UScriptStruct* FortContext = FindObject<UScriptStruct>(nullptr, L"/Script/FortniteGame.FortGameplayEffectContext");
+        static UProperty* DamageSourceProperty = FortContext ? FortContext->FindPropertyByName(FName(L"DamageSourceObject", FNAME_Find)) : nullptr;
+        static UProperty* InstigatorProperty = FortContext ? FortContext->FindPropertyByName(FName(L"Instigator", FNAME_Find)) : nullptr;
+        static UProperty* CauserProperty = FortContext ? FortContext->FindPropertyByName(FName(L"EffectCauser", FNAME_Find)) : nullptr;
+        // Its shared FGameplayEffectContext follows the handle's vtable. The ability system globals make Fortnite's
+        // context (UFortAbilitySystemGlobals::AllocGameplayEffectContext, 0xC8 bytes on 3.1).
+        uint8_t* ContextData = ContextHandle ? static_cast<uint8_t**>(ContextHandle)[1] : nullptr;
+        if (!ContextData || !DamageSourceProperty || !Weapon)
+        {
+            return false;
+        }
+        *reinterpret_cast<FWeakObjectPtr*>(ContextData + DamageSourceProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Weapon);
+        if (InstigatorProperty && CauserProperty)
+        {
+            *reinterpret_cast<FWeakObjectPtr*>(ContextData + InstigatorProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Pawn);
+            *reinterpret_cast<FWeakObjectPtr*>(ContextData + CauserProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Weapon);
+        }
+        return true;
+    }
+
+    // A script struct's value Core holds between two of the game's calls (an effect container, a container spec), made
+    // and torn down by the struct's own code.
+    class FStructValue
+    {
+    public:
+        explicit FStructValue(UScriptStruct* InStruct)
+            : Struct(InStruct)
+            , Storage(InStruct ? static_cast<size_t>(InStruct->GetStructureSize()) : 0, 0)
+        {
+            if (Struct)
+            {
+                Struct->InitializeStruct(Storage.data());
+            }
+        }
+        ~FStructValue()
+        {
+            if (Struct)
+            {
+                Struct->DestroyStruct(Storage.data());
+            }
+        }
+        FStructValue(const FStructValue&) = delete;
+        FStructValue& operator=(const FStructValue&) = delete;
+
+        void* Get() { return Struct ? Storage.data() : nullptr; }
+
+    private:
+        UScriptStruct* Struct;
+        std::vector<uint8_t> Storage;
+    };
 
     // EMovementMode: walking on the ground.
     constexpr uint8_t MoveWalking = 1;
@@ -1282,6 +1344,13 @@ namespace
                 Owner = Owner->GetOwner();
             }
             APawn* Killer = Owner ? Cast<APawn>(reinterpret_cast<UObject*>(Owner)) : nullptr;
+            // A projectile that went off (a rocket) is destroyed soon after, and UWorld::DestroyActor takes its owner away;
+            // it still names the pawn that fired it, its Instigator (the engine's "pawn responsible for damage caused by
+            // this actor"), which UFortKismetLibrary::SpawnProjectile gives it (RequestedBy's, 1.11 0x63E6A0).
+            if (!Killer && Causer)
+            {
+                Killer = static_cast<APawn*>(Causer->Instigator);
+            }
             if (Killer && Killer != reinterpret_cast<APawn*>(Pawn))
             {
                 return Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Killer->PlayerState)));
@@ -1299,6 +1368,11 @@ namespace
         if (AController* CauserController = Causer ? Cast<AController>(reinterpret_cast<UObject*>(Causer)) : nullptr)
         {
             return reinterpret_cast<const UObject*>(CauserController->GetPawn()) == reinterpret_cast<const UObject*>(Attacker);
+        }
+        // A projectile's owner is gone once it went off; its Instigator stays (KillerOf).
+        if (Causer && reinterpret_cast<const UObject*>(static_cast<APawn*>(Causer->Instigator)) == reinterpret_cast<const UObject*>(Attacker))
+        {
+            return true;
         }
         for (int32_t Depth = 0; Causer && Depth < 3; ++Depth)
         {
@@ -3480,6 +3554,16 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
     {
         RecordShot(Held->Type, Distance, bHit);
     }
+    // A launcher's shot is its rocket, the game's projectile (FireProjectile, Core-Backend #371: the bots' rockets were
+    // traced shots, unseen, that hurt without an explosion). Not in the warmup brawl, whose hits are for show (#452): the
+    // rocket's explosion is the game's damage, which the island takes where the game mode allows warmup damage.
+    if (Weapon && Held && !bWarmupBrawl && RayLength > 1.0f && FireProjectile(Weapon, Eye, Ray * (1.0f / RayLength), bHit ? reinterpret_cast<AActor*>(Target) : nullptr))
+    {
+        // The launch as the others hear and see it, the fire ability's WeaponFireCue (its sound and muzzle flash). The
+        // rocket shows its own flight and explosion, so no impact cue goes with it.
+        PlayWeaponFireCue(Weapon, bHit ? Center : !bClear ? BlockedAt : Eye + Ray * (5000.0f / RayLength));
+        return;
+    }
     if (Weapon && Held)
     {
         const FVector ShotImpact = bHit ? Center : !bClear ? BlockedAt : Eye + (RayLength > 1.0f ? Ray * (5000.0f / RayLength) : FVector());
@@ -3551,6 +3635,124 @@ void FCoreAthenaBotController::FireShot(AFortPawn* Target, float Distance)
         }
     }
     Manager->ApplyBotDamage(this, Target, Damage, Held ? Held->WeaponDefinition : nullptr);
+#endif
+}
+
+bool FCoreAthenaBotController::FireProjectile(AFortWeapon* Weapon, const FVector& Start, const FVector& Direction, AActor* HomingTarget)
+{
+#if WITH_SERVER_CODE
+    // What a player's launcher shot runs on the server: the fire ability (GA_Ranged_GenericProjectileExplosive_Athena, a
+    // UFortGameplayAbility_RangedWeapon) makes the specs of its Hit and Explode containers and hands them, with the
+    // shot's target data, to AFortWeaponRanged::SpawnProjectile (1.11 0x9C20A0): the weapon data's projectile template,
+    // UFortKismetLibrary::SpawnProjectile from the trace's start along its direction (both rotations the direction's,
+    // bUseDefaultPhysics, the trace's hit actor as the homing target, no initial speed, gravity 1). A bot's fire ability
+    // doesn't activate (FireShot), so Core makes the specs from the containers for the bot's ability system
+    // (UFortKismetLibrary::MakeGameplayEffectContainerSpecFromAbilityComponent) and calls the same spawn.
+    FBotUpdateStep Step(*this, L"projectile", reinterpret_cast<UObject*>(Weapon));
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
+    UObject* Definition = Weapon ? reinterpret_cast<UObject*>(static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData)) : nullptr;
+    // The weapons whose shot can't be made the game's way (logged once each): Core traces theirs.
+    static std::map<const UObject*, bool> Refused;
+    if (!Definition || !AbilitySystem || Refused.contains(Definition))
+    {
+        return false;
+    }
+    UFortWeaponRangedItemDefinition* RangedDefinition = Cast<UFortWeaponRangedItemDefinition>(Definition);
+    // A weapon that traces its shots has no projectile (AFortWeaponRanged::IsProjectileWeapon).
+    UClass* ProjectileClass = RangedDefinition ? RangedDefinition->GetProjectileTemplate() : nullptr;
+    if (!ProjectileClass)
+    {
+        return false;
+    }
+    const UObject* AbilityObject = WeaponFireAbilityOf(Pawn, Weapon);
+    const UFortGameplayAbility* Ability = AbilityObject && AbilityObject->IsA(UFortGameplayAbility::StaticClass()) ? reinterpret_cast<const UFortGameplayAbility*>(AbilityObject) : nullptr;
+    UScriptStruct* ContainerStruct = FFortGameplayEffectContainer::StaticStruct();
+    UScriptStruct* SpecStruct = FFortGameplayEffectContainerSpec::StaticStruct();
+    UProperty* TargetSpecsProperty = SpecStruct ? SpecStruct->FindPropertyByName(FName(L"TargetGameplayEffectSpecs", FNAME_Find)) : nullptr;
+    static UFunction* GetEffectContext = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:GetEffectContext");
+    static UClass* AbilityLibrary = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
+    const FName HitTag(L"Gameplay.Application.Hit", FNAME_Find);
+    const FName ExplodeTag(L"Gameplay.Application.Explode", FNAME_Find);
+    if (!Ability || !ContainerStruct || !SpecStruct || !TargetSpecsProperty || !TargetSpecsProperty->GetClass()->HasAnyCastFlag(CASTCLASS_UArrayProperty) || !GetEffectContext
+        || !AbilityLibrary || ExplodeTag.IsNone())
+    {
+        Refused[Definition] = true;
+        Log::Warning(L"Battle Royale bots: {}'s {} has projectile {}, but its shot can't be made the game's way (fire ability {}, containers {}, specs {}, GetEffectContext {}, Explode tag {}): Core traces it",
+            BotName, NameOf(Definition), NameOf(reinterpret_cast<UObject*>(ProjectileClass)), NameOf(AbilityObject), ContainerStruct ? L"found" : L"missing",
+            SpecStruct && TargetSpecsProperty ? L"found" : L"missing", GetEffectContext ? L"found" : L"missing", ExplodeTag.IsNone() ? L"missing" : L"found");
+        return false;
+    }
+
+    // The two containers' specs, each effect's context made the weapon's shot's (SetWeaponShotContext), as the ability's
+    // own context has it for a player: the explosion's damage then comes from the weapon's stats row, by the bot.
+    FStructValue HitSpec(SpecStruct);
+    FStructValue ExplodeSpec(SpecStruct);
+    int32_t Effects[2] = {};
+    const FName Tags[2] = { HitTag, ExplodeTag };
+    FStructValue* Specs[2] = { &HitSpec, &ExplodeSpec };
+    UObject* LibraryDefault = AbilityLibrary->GetDefaultObject();
+    for (int32_t Index = 0; Index < 2; ++Index)
+    {
+        if (Tags[Index].IsNone())
+        {
+            continue;
+        }
+        FStructValue Container(ContainerStruct);
+        if (!Ability->BP_GetGameplayEffectContainer(FGameplayTag{ Tags[Index] }, Container.Get())
+            || !UFortKismetLibrary::MakeGameplayEffectContainerSpecFromAbilityComponent(Container.Get(), AbilitySystem, 1, Specs[Index]->Get()))
+        {
+            Refused[Definition] = true;
+            Log::Warning(L"Battle Royale bots: {}'s fire ability {} made no spec of its {} container (BP_GetGameplayEffectContainer, MakeGameplayEffectContainerSpecFromAbilityComponent): Core traces {}'s shots",
+                BotName, NameOf(AbilityObject), Tags[Index].ToString().ToStdString(), NameOf(Definition));
+            return false;
+        }
+        // TargetGameplayEffectSpecs: a TArray of FGameplayEffectSpecHandle, read as its bytes.
+        const TArray<uint8_t>& SpecHandles = *TargetSpecsProperty->ContainerPtrToValuePtr<TArray<uint8_t>>(Specs[Index]->Get());
+        UProperty* HandleProperty = static_cast<UArrayProperty*>(TargetSpecsProperty)->Inner;
+        const int32_t HandleSize = HandleProperty ? static_cast<int32_t>(HandleProperty->ElementSize) : 0;
+        for (int32_t Handle = 0; Handle < SpecHandles.Num() && HandleSize > 0; ++Handle)
+        {
+            Reflection::FParams Context(GetEffectContext, true);
+            const void* SpecHandle = SpecHandles.GetData() + static_cast<size_t>(Handle) * static_cast<size_t>(HandleSize);
+            if (Context.CopyStruct(L"SpecHandle", SpecHandle) && Context.Call(LibraryDefault) && SetWeaponShotContext(Context.GetAddress(L"ReturnValue"), Pawn, Weapon))
+            {
+                ++Effects[Index];
+            }
+        }
+    }
+    // An explosion without an effect would be for show only; Core's traced shot deals the damage then.
+    if (Effects[0] + Effects[1] == 0)
+    {
+        Refused[Definition] = true;
+        Log::Warning(L"Battle Royale bots: {}'s fire ability {} gives its projectile no hit or explosion effect: Core traces {}'s shots", BotName, NameOf(AbilityObject), NameOf(Definition));
+        return false;
+    }
+
+    // Started just ahead of the bot (Core's 🟡: the game starts it at the trace's start, the player's view), clear of its
+    // own capsule.
+    const FVector SpawnLocation = Start + Direction * 80.0f;
+    const FRotator Rotation = Direction.Rotation();
+    AActor* Projectile = UFortKismetLibrary::SpawnProjectile(ProjectileClass, reinterpret_cast<AActor*>(Weapon), SpawnLocation, Rotation, Rotation, HitSpec.Get(), ExplodeSpec.Get(),
+        true, HomingTarget, 0.0f, 1.0f, 0.0f);
+    static std::map<const UObject*, int32_t> Logged;
+    if (!Projectile)
+    {
+        if (Logged[Definition]++ < 2)
+        {
+            Log::Warning(L"Battle Royale bots: {}'s {} spawned no {} (UFortKismetLibrary::SpawnProjectile): Core traces the shot", BotName, NameOf(Definition), NameOf(reinterpret_cast<UObject*>(ProjectileClass)));
+        }
+        return false;
+    }
+    if (Logged[Definition]++ < 1)
+    {
+        APawn* ProjectileInstigator = Projectile->Instigator;
+        Log::Info(L"Battle Royale bots: {}'s {} fires {} the game's way ({} hit and {} explosion effects, instigator {})", BotName, NameOf(Definition), NameOf(reinterpret_cast<UObject*>(Projectile)),
+            Effects[0], Effects[1], NameOf(reinterpret_cast<UObject*>(ProjectileInstigator)));
+    }
+    return true;
+#else
+    return false;
 #endif
 }
 
@@ -5990,25 +6192,13 @@ bool FCoreAthenaBotController::ApplyWeaponDamageEffect(UObject* TargetActor, AFo
     {
         return false;
     }
-    // FGameplayEffectContextHandle: its shared FGameplayEffectContext follows the handle's vtable. The ability system
-    // globals make Fortnite's context (UFortAbilitySystemGlobals::AllocGameplayEffectContext, 0xC8 bytes on 3.1).
+    // The weapon as the damage source, the pawn as instigator and the weapon as causer, as for a player's shot
+    // (SetWeaponShotContext): the bot's ability system is owned by its player state (OnRep_PlayerState), so
+    // MakeEffectContext names the player state.
     void* ContextHandle = Context.GetAddress(L"ReturnValue");
-    uint8_t* ContextData = ContextHandle ? static_cast<uint8_t**>(ContextHandle)[1] : nullptr;
-    if (!ContextData)
+    if (!SetWeaponShotContext(ContextHandle, Pawn, Weapon))
     {
         return false;
-    }
-    *reinterpret_cast<FWeakObjectPtr*>(ContextData + DamageSourceProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Weapon);
-    // The instigator is the pawn and the causer the weapon, as for a player's shot: the bot's ability system is owned by
-    // its player state (OnRep_PlayerState), so MakeEffectContext names the player state, and the victim's damage cue
-    // (AFortPawn::GameplayCue_Damage, 3.1 0xDECD40) reads the instigator as a pawn: its controller and its location
-    // for the hit's direction.
-    static UProperty* InstigatorProperty = FortContext->FindPropertyByName(FName(L"Instigator", FNAME_Find));
-    static UProperty* CauserProperty = FortContext->FindPropertyByName(FName(L"EffectCauser", FNAME_Find));
-    if (InstigatorProperty && CauserProperty)
-    {
-        *reinterpret_cast<FWeakObjectPtr*>(ContextData + InstigatorProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Pawn);
-        *reinterpret_cast<FWeakObjectPtr*>(ContextData + CauserProperty->GetOffset_ForInternal()) = reinterpret_cast<UObject*>(Weapon);
     }
     if (HitFrom)
     {

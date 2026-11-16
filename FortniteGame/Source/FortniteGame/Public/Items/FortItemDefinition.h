@@ -257,6 +257,20 @@ public:
     int32_t GetClipSize() const;
 };
 
+// A gun's or a launcher's definition.
+class UFortWeaponRangedItemDefinition : public UFortWeaponItemDefinition
+{
+    DefineUnrealClass(UFortWeaponRangedItemDefinition, FortniteGame)
+    DefineUFunction(GetProjectileTemplate)
+
+public:
+    // The projectile the weapon's shots are (its ProjectileTemplate, loaded: 1.11's execGetProjectileTemplate, 0xB3F780),
+    // null for a weapon that traces its shots. A rocket launcher's (WID_Launcher_Rocket_Athena_*) is
+    // B_Prj_Ranged_Rocket_Athena, which AFortWeaponRanged::SpawnProjectile spawns for a player's shot (1.11 0x9C20A0).
+    // Null where the build has no such function.
+    UClass* GetProjectileTemplate() const;
+};
+
 class UFortAmmoItemDefinition : public UFortWorldItemDefinition
 {
     DefineUnrealClass(UFortAmmoItemDefinition, FortniteGame)

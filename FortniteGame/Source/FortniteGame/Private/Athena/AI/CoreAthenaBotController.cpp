@@ -4382,7 +4382,12 @@ bool FCoreAthenaBotController::RangeAttack(float Now)
     const bool bGunReady = bPickaxeEquipped || (Now >= EquipReadyTime && (!Ready || Now >= Ready->ReadyTime));
     const bool bReady = Now >= TargetAcquiredTime + AIBotSkills.MaxTrackingReactionTime && Now >= NextShotTime && bGunReady && ReloadUntil <= 0.0f && FacingError() < 20.0f;
     const bool bLoaded = bPickaxeEquipped ? Distance < 250.0f : (EquippedWeapon.Get() && EquippedWeapon.Get()->AmmoCount > 0);
-    if (bReady && bLoaded && bCanFire && !bFiring)
+    // A launcher's shot is the game's projectile (FireProjectile), whose explosion takes its shooter too: Battle Royale's
+    // GA_Ranged_GenericProjectileExplosive_Athena hits pawns in a 5 m sphere without leaving out the instigator. A player
+    // doesn't fire one into a target at their feet, so a bot holds it until it has backed off (it backs off inside 6 m,
+    // above); a headless 6.30 bot match saw a bot rocket a target 3 m away and go out with it (Core-Backend #371).
+    const bool bLauncherTooClose = Ready && Ready->Type == ECoreAthenaBotWeaponType::Launcher && Distance < 600.0f;
+    if (bReady && bLoaded && bCanFire && !bFiring && !bLauncherTooClose)
     {
         FireShot(Target, Distance);
         bFiring = true;

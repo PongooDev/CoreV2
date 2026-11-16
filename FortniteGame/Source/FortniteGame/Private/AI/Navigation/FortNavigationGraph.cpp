@@ -133,6 +133,43 @@ namespace
         return Matches == 1 ? Found : 0;
     }
 
+    // UBuildingStructuralSupportSystem's MaxGridSizeX (21.40's name; MaxGridSizeY and MaxGridSizeZ follow it), from where
+    // InitializeGrid stores the X and Y cell counts: mov [this+MaxGridSizeX], ecx, then mov [this+MaxGridSizeX+4], edx, with
+    // `this` in any register but rsp (6.22 CL-4543176 0xDDA850 / 0xDDA86D, 6.31 CL-4573279 0xE0A9A7 / 0xE0A9D8, both rsi).
+    // Up to 6.22 the three sizes end right where GridOrigin begins. 6.30 (CL-4573096) put FloorIndexOffset, the cells of one
+    // floor (X * Y, 6.31 0xE0AA2A), between MaxGridSizeZ and GridOrigin, as 21.40 still has it, so the sizes start 16 bytes
+    // before GridOrigin there. -1 when the stores aren't found.
+    int32_t FindGridSizeOffset(uintptr_t InitializeGrid, int32_t GridOrigin)
+    {
+        const uintptr_t End = InitializeGrid ? Finder::FunctionEnd(InitializeGrid) : 0;
+        // A REX prefix with R set would make the source r9d or r10d.
+        const auto HasRexR = [](uintptr_t Site) { const uint8_t Prefix = Byte(Site - 1); return (Prefix & 0xF0) == 0x40 && (Prefix & 0x04) != 0; };
+        for (uintptr_t Site = InitializeGrid + 1; End && Site + 6 <= End; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 1);
+            // mov r/m32, r32 with a disp32 base (mod 10), source ecx (reg 001), not through a SIB byte (rm 100).
+            if (Byte(Site) != 0x89 || (ModRm & 0xF8) != 0x88 || (ModRm & 7) == 4 || HasRexR(Site))
+            {
+                continue;
+            }
+            const int32_t SizeX = Displacement(Site + 2);
+            if (SizeX != GridOrigin - 12 && SizeX != GridOrigin - 16)
+            {
+                continue;
+            }
+            // mov [same base+SizeX+4], edx (reg 010).
+            const uint8_t SizeYModRm = static_cast<uint8_t>(0x90 | (ModRm & 7));
+            for (uintptr_t Other = InitializeGrid + 1; Other + 6 <= End; ++Other)
+            {
+                if (Byte(Other) == 0x89 && Byte(Other + 1) == SizeYModRm && !HasRexR(Other) && Displacement(Other + 2) == SizeX + 4)
+                {
+                    return SizeX;
+                }
+            }
+        }
+        return -1;
+    }
+
     uintptr_t FirstCallTarget(uintptr_t Function, size_t MaxDistance)
     {
         for (uintptr_t Site = Function; Function && Site + 5 <= Function + MaxDistance; ++Site)
@@ -302,7 +339,11 @@ bool AFortNavigationGraph::ResolveNatives()
 
     Natives::UBuildingStructuralSupportSystem_InitializeGrid = reinterpret_cast<decltype(Natives::UBuildingStructuralSupportSystem_InitializeGrid)>(InitializeGrid);
     Natives::UBuildingStructuralSupportSystem_GridOrigin = GridOrigin;
-    Natives::UBuildingStructuralSupportSystem_GridSize = GridOrigin - 12;
+    // Read on 6.30+ as 12 bytes before GridOrigin, the sizes came out as (Y, Z, X * Y): a 100x100x60 grid was taken for
+    // 100x60x10000, the graph's cells covered only part of the zone and the navigation bounds were cut to it, so husks
+    // had no path to the players, encounters found no spawn spots (#469). Builds whose stores aren't found keep 12.
+    const int32_t GridSize = FindGridSizeOffset(InitializeGrid, GridOrigin);
+    Natives::UBuildingStructuralSupportSystem_GridSize = GridSize >= 0 ? GridSize : GridOrigin - 12;
     Natives::AFortNavigationGraph_DirtyBlocks = DirtyBlocks;
     Natives::AFortNavigationGraph_Flags = Displacement(ClearDirtyFlag + 2);
     Natives::AFortNavigationGraph_BlockLinks = Displacement(BlockLinksAdd);

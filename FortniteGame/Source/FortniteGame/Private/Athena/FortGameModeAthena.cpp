@@ -147,13 +147,6 @@ namespace
     std::unordered_map<AFortPlayerController*, FVehicleSeatState> VehicleSeatStates;
     UFunction* VehicleChangedHandler = nullptr;
     UFunction* VehicleFullyExitedHandler = nullptr;
-    UFunction* VehicleSeatExitHandler = nullptr;
-    // FVehicleSeatEvent's first parameter (TScriptInterface<IFortVehicleInterface> const&, 21.40); only the pawn and seat
-    // are needed, but the parameter still has to be stepped over to reach them.
-    struct FVehicleSeatEventInterface
-    {
-        uint8_t Interface[0x10];
-    };
 
     // The weapon a vehicle's seat mounts: WeaponSeatDefinitions is a TArray<FWeaponSeatDefinition>, whose layout differs
     // between builds, so its fields are read through the reflected property rather than a guessed struct. Null for a
@@ -3347,26 +3340,6 @@ DEFINE_FUNCTION(AFortGameModeAthena::execHandleVehicleFullyExited)
     P_NATIVE_END;
 }
 
-DEFINE_FUNCTION(AFortGameModeAthena::execHandleVehicleSeatExited)
-{
-    // FVehicleSeatEvent: (TScriptInterface<IFortVehicleInterface> const&, AFortPawn*, int32).
-    P_GET_STRUCT(FVehicleSeatEventInterface, VehicleInterface);
-    P_GET_OBJECT(AFortPawn, Pawn);
-    P_GET_PROPERTY(UIntProperty, SeatIndex);
-    P_FINISH;
-    P_NATIVE_BEGIN;
-    (void)VehicleInterface;
-    AFortAthenaVehicle* const Vehicle = Cast<AFortAthenaVehicle>(Context);
-    AFortPlayerController* const Player = Pawn ? Cast<AFortPlayerController>(Pawn->Controller) : nullptr;
-    // The controller's OnFullyExitVehicle may have run first and erased the record; only the event that still owns a seat
-    // cleans it up. The vehicle event itself is the 6.31 path, where that controller delegate does not exist.
-    if (Vehicle && Player && VehicleSeatStates.erase(Player) > 0)
-    {
-        CleanupVehicleSeatWeapon(Vehicle, Player, SeatIndex);
-    }
-    P_NATIVE_END;
-}
-
 void AFortGameModeAthena::RecordVehicleForPlayer(AFortPlayerController* Player)
 {
 #if WITH_SERVER_CODE
@@ -3383,20 +3356,6 @@ void AFortGameModeAthena::RecordVehicleForPlayer(AFortPlayerController* Player)
     }
 
     VehicleSeatStates[Player] = { Vehicle, Pawn->GetVehicleSeatIndex() };
-
-    // 6.31's controller has only OnEnterVehicleDriver; its vehicle has the seat exit broadcasts. Bind one here as well, so
-    // the cleanup has a server event even where the controller's OnFullyExitVehicle does not exist.
-    if (VehicleSeatExitHandler)
-    {
-        if (AFortAthenaVehicle::HasOnPawnExitedVehicleFromSeat())
-        {
-            Vehicle->OnPawnExitedVehicleFromSeat.AddUniqueDynamic(Vehicle, VehicleSeatExitHandler->GetFName());
-        }
-        else if (AFortAthenaVehicle::HasOnPawnExitedVehicleSeat())
-        {
-            Vehicle->OnPawnExitedVehicleSeat.AddUniqueDynamic(Vehicle, VehicleSeatExitHandler->GetFName());
-        }
-    }
 #endif
 }
 
@@ -3414,18 +3373,8 @@ void AFortGameModeAthena::CleanupVehicleSeatWeapon(AFortPlayerController* Player
     }
     const FVehicleSeatState State = Found->second;
     VehicleSeatStates.erase(Found);
-    CleanupVehicleSeatWeapon(State.Vehicle, Player, State.SeatIndex);
-#endif
-}
 
-void AFortGameModeAthena::CleanupVehicleSeatWeapon(AFortAthenaVehicle* Vehicle, AFortPlayerController* Player, int32_t SeatIndex)
-{
-#if WITH_SERVER_CODE
-    if (!Vehicle || !Player)
-    {
-        return;
-    }
-    UFortItemDefinition* const SeatWeapon = SeatWeaponFor(Vehicle, SeatIndex);
+    UFortItemDefinition* const SeatWeapon = SeatWeaponFor(State.Vehicle, State.SeatIndex);
     if (!SeatWeapon)
     {
         return;
@@ -3544,15 +3493,9 @@ void AFortGameModeAthena::AddDelegateHandlers()
     VehicleChangedHandler = RecordDelegate ? AddTo(ControllerClass, L"CoreVehicleSeatChanged", &execHandleVehicleChanged, ControllerClass, RecordDelegate) : nullptr;
     VehicleFullyExitedHandler = AFortPlayerController::HasOnFullyExitVehicle()
         ? AddTo(ControllerClass, L"CoreVehicleFullyExited", &execHandleVehicleFullyExited, ControllerClass, L"OnFullyExitVehicle") : nullptr;
-    // 6.31's vehicle has the seat exit broadcasts even though its controller has no OnFullyExitVehicle. The FromSeat one is
-    // the later of the two and is preferred when both exist.
-    const wchar_t* SeatExitDelegate = AFortAthenaVehicle::HasOnPawnExitedVehicleFromSeat() ? L"OnPawnExitedVehicleFromSeat"
-        : AFortAthenaVehicle::HasOnPawnExitedVehicleSeat() ? L"OnPawnExitedVehicleSeat" : nullptr;
-    VehicleSeatExitHandler = SeatExitDelegate
-        ? AddTo(AFortAthenaVehicle::StaticClass(), L"CoreVehicleSeatExited", &execHandleVehicleSeatExited, AFortAthenaVehicle::StaticClass(), SeatExitDelegate) : nullptr;
-    Log::Info(L"Battle Royale: Core's handlers for GamePhaseChanged {}, OnCurrentPlaylistLoaded {}, OnDied {}, OnDestroyed {} (a pawn's {}), vehicle seats {} / fully exited {} / seat exit {}", GamePhaseChangedHandler ? L"added" : L"none",
+    Log::Info(L"Battle Royale: Core's handlers for GamePhaseChanged {}, OnCurrentPlaylistLoaded {}, OnDied {}, OnDestroyed {} (a pawn's {}), vehicle seats {} / fully exited {}", GamePhaseChangedHandler ? L"added" : L"none",
         CurrentPlaylistLoadedHandler ? L"added" : L"none", PawnDiedHandler ? L"added" : L"none", PlayerStateDestroyedHandler ? L"added" : L"none", PawnDestroyedHandler ? L"added" : L"none",
-        VehicleChangedHandler ? L"added" : L"none", VehicleFullyExitedHandler ? L"added" : L"none", VehicleSeatExitHandler ? L"added" : L"none");
+        VehicleChangedHandler ? L"added" : L"none", VehicleFullyExitedHandler ? L"added" : L"none");
 }
 
 void AFortGameModeAthena::HookVTables()

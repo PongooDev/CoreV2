@@ -35,8 +35,6 @@ class AFortPlayerPawn : public AFortPawn
     DefineUFunction(OnRep_AnimBPOverride)
     DefineUFunction(OnRep_FootstepBankOverride)
     DefineUFunction(GetVehicleActor)
-    DefineUFunction(GetVehicle)
-    DefineUFunction(BP_GetVehicle)
     DefineUFunction(GetVehicleSeatIndex)
 
 public:

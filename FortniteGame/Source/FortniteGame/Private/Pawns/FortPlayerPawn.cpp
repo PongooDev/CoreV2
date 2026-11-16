@@ -201,17 +201,7 @@ void AFortPlayerPawn::StopItemInteractionAbility()
 
 AActor* AFortPlayerPawn::GetVehicleActor() const
 {
-    // GetVehicleActor was added after 6.31; GetVehicle and BP_GetVehicle are the names that build uses. The finders are
-    // additive, so each build resolves the one it has and the others stay null.
     UFunction* Function = FindStaticFunction_GetVehicleActor();
-    if (!Function)
-    {
-        Function = FindStaticFunction_GetVehicle();
-    }
-    if (!Function)
-    {
-        Function = FindStaticFunction_BP_GetVehicle();
-    }
     if (!Function)
     {
         return nullptr;
@@ -228,27 +218,7 @@ int32_t AFortPlayerPawn::GetVehicleSeatIndex() const
         return -1;
     }
     Reflection::FParams Params(Function);
-    if (!Params.Call(const_cast<AFortPlayerPawn*>(this)))
-    {
-        return -1;
-    }
-
-    // 6.31 reports a byte and later builds an int; read the reflected return width instead of assuming either.
-    UProperty* const ReturnProperty = Function->FindPropertyByName(FName(L"ReturnValue", FNAME_Find));
-    void* const ReturnAddress = Params.GetAddress(L"ReturnValue");
-    if (!ReturnProperty || !ReturnAddress)
-    {
-        return -1;
-    }
-    if (ReturnProperty->ElementSize == sizeof(uint8_t))
-    {
-        return static_cast<int32_t>(*static_cast<uint8_t*>(ReturnAddress));
-    }
-    if (ReturnProperty->ElementSize == sizeof(int32_t))
-    {
-        return *static_cast<int32_t*>(ReturnAddress);
-    }
-    return -1;
+    return Params.Call(const_cast<AFortPlayerPawn*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : -1;
 }
 
 bool AFortPlayerPawn::EquipLastWeapon()

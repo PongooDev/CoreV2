@@ -4832,6 +4832,19 @@ namespace
             Log::Info(L"Finder: AFortPlayerState::ApplyCharacterCustomization isn't in this build (before 1.9); Core dresses the player state itself");
         }
         Require(L"UFortGlobals::ApplyHeroEffectsAndAbilities", Natives::UFortGlobals_ApplyHeroEffectsAndAbilities, FunctionOf(L"ApplyHeroEffectsAndAbilities succeeded"));
+        // Which argument is the ability system: the function first tests it for null and calls its GetAbilitySystemComponent.
+        // 6.31 (0xF66A20) tests the second, test rdx, rdx (48 85 D2); 7.00 (0xF08FF0), with the hero loadout first, tests the
+        // third, test r8, r8 (4D 85 C0), and its callers pass the loadout (0xEC3D5D) or null (0x13B5B01: xor ecx, ecx).
+        if (const uintptr_t ApplyHeroEntry = reinterpret_cast<uintptr_t>(Natives::UFortGlobals_ApplyHeroEffectsAndAbilities))
+        {
+            const uintptr_t SecondTest = FindInstruction(ApplyHeroEntry, ApplyHeroEntry + 0x40, { 0x48, 0x85, 0xD2 });
+            const uintptr_t ThirdTest = FindInstruction(ApplyHeroEntry, ApplyHeroEntry + 0x40, { 0x4D, 0x85, 0xC0 });
+            Natives::UFortGlobals_ApplyHeroEffectsAndAbilitiesTakesHeroLoadout = ThirdTest && (!SecondTest || ThirdTest < SecondTest);
+            if (Natives::UFortGlobals_ApplyHeroEffectsAndAbilitiesTakesHeroLoadout)
+            {
+                Log::Info(L"Finder: UFortGlobals::ApplyHeroEffectsAndAbilities takes the hero loadout first (the ability system is its third argument)");
+            }
+        }
 
         const auto OnlyCaller = [](uintptr_t Function)
         {

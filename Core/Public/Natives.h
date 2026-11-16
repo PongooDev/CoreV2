@@ -233,6 +233,9 @@ namespace Natives
     inline void (*UFortMcpProfile_GetHomebaseNodeItemsByType)(const UFortMcpProfileCampaign* This, uint8_t ItemType, TArray<UObject*>& OutItems) = nullptr;
     inline TArray<UFortAbilityKit*>* (*UFortHomebaseNodeItem_GetAbilityKits)(const UObject* This, TArray<UFortAbilityKit*>* Result) = nullptr;
     inline void (*UFortGlobals_ApplyHeroEffectsAndAbilities)(UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles, FScriptArray& OutAbilitySetHandles) = nullptr;
+    // 7.00 (CL-4629139) on: ApplyHeroEffectsAndAbilities takes the account's UFortCampaignHeroLoadoutItem first (null for
+    // a player with none), so the hero is the second argument and the ability system the third (CoreV2 #472).
+    inline bool UFortGlobals_ApplyHeroEffectsAndAbilitiesTakesHeroLoadout = false;
     inline void* (*FScopedPredictionWindow_FScopedPredictionWindow)(void* This, UAbilitySystemComponent* AbilitySystemComponent, void* InPredictionKey, bool InSetReplicatedPredictionKey) = nullptr;
     inline void (*FScopedPredictionWindow_Destructor)(void* This) = nullptr;
     inline bool (*UAbilitySystemComponent_InternalTryActivateAbility)(UAbilitySystemComponent* This, FGameplayAbilitySpecHandle AbilityToActivate, const void* InPredictionKey, UGameplayAbility** OutInstancedAbility, void* OnGameplayAbilityEndedDelegate, const FGameplayEventData* TriggerEventData) = nullptr;

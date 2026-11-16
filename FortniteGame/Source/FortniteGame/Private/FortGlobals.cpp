@@ -14,7 +14,18 @@
 void UFortGlobals::ApplyHeroEffectsAndAbilities(UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles, FScriptArray& OutAbilitySetHandles)
 {
     ApplyHeroEffectsAndAbilitiesOG(Hero, AbilitySystem, OutEffectHandles, OutAbilitySetHandles);
+    EquipGenericPlayerAbilitySet(AbilitySystem, OutAbilitySetHandles);
+}
 
+void UFortGlobals::ApplyHeroEffectsAndAbilities(UFortCampaignHeroLoadoutItem* HeroLoadout, UFortHero* Hero, IAbilitySystemInterface* AbilitySystem, TArray<FActiveGameplayEffectHandle>& OutEffectHandles,
+    FScriptArray& OutAbilitySetHandles)
+{
+    ApplyHeroEffectsAndAbilitiesWithLoadoutOG(HeroLoadout, Hero, AbilitySystem, OutEffectHandles, OutAbilitySetHandles);
+    EquipGenericPlayerAbilitySet(AbilitySystem, OutAbilitySetHandles);
+}
+
+void UFortGlobals::EquipGenericPlayerAbilitySet(IAbilitySystemInterface* AbilitySystem, FScriptArray& OutAbilitySetHandles)
+{
 #if WITH_SERVER_CODE
     UAbilitySystemComponent* AbilitySystemComponent = AbilitySystem ? AbilitySystem->GetAbilitySystemComponent() : nullptr;
     AActor* OwnerActor = AbilitySystemComponent ? AbilitySystemComponent->OwnerActor : nullptr;
@@ -39,5 +50,13 @@ void UFortGlobals::ApplyHeroEffectsAndAbilities(UFortHero* Hero, IAbilitySystemI
 
 void UFortGlobals::Hook()
 {
-    Hooks::Detour(L"UFortGlobals::ApplyHeroEffectsAndAbilities", reinterpret_cast<void*>(Natives::UFortGlobals_ApplyHeroEffectsAndAbilities), &ApplyHeroEffectsAndAbilities, &ApplyHeroEffectsAndAbilitiesOG);
+    // 7.00 (CL-4629139) takes the hero loadout first: the detour has to read the game's arguments where they are (#472).
+    if (Natives::UFortGlobals_ApplyHeroEffectsAndAbilitiesTakesHeroLoadout)
+    {
+        void (*const Detour)(UFortCampaignHeroLoadoutItem*, UFortHero*, IAbilitySystemInterface*, TArray<FActiveGameplayEffectHandle>&, FScriptArray&) = &ApplyHeroEffectsAndAbilities;
+        Hooks::Detour(L"UFortGlobals::ApplyHeroEffectsAndAbilities", reinterpret_cast<void*>(Natives::UFortGlobals_ApplyHeroEffectsAndAbilities), Detour, &ApplyHeroEffectsAndAbilitiesWithLoadoutOG);
+        return;
+    }
+    void (*const Detour)(UFortHero*, IAbilitySystemInterface*, TArray<FActiveGameplayEffectHandle>&, FScriptArray&) = &ApplyHeroEffectsAndAbilities;
+    Hooks::Detour(L"UFortGlobals::ApplyHeroEffectsAndAbilities", reinterpret_cast<void*>(Natives::UFortGlobals_ApplyHeroEffectsAndAbilities), Detour, &ApplyHeroEffectsAndAbilitiesOG);
 }

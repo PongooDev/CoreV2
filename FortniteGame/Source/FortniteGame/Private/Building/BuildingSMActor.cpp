@@ -465,12 +465,24 @@ void ABuildingSMActor::HookVTables()
     }
     for (const uintptr_t Override : Overrides)
     {
-        for (const auto& [Site, Target] : Finder::DirectCalls(Override, Finder::FunctionEnd(Override)))
+        const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Finder::DirectCalls(Override, Finder::FunctionEnd(Override));
+        bool bRedirected = false;
+        for (const auto& [Site, Target] : Calls)
         {
             if (Target == Stripped)
             {
                 Hooks::RedirectCall(L"ABuildingSMActor::PostUpdate (Super)", reinterpret_cast<uint8_t*>(Site), reinterpret_cast<void*>(&PostUpdateHK));
+                bRedirected = true;
             }
+        }
+        // 7.00 (CL-4629139): ABuildingFoundation's override (0xD30260, AWorldTileFoundation's too) makes its Super::PostUpdate
+        // call into the shared empty function the stripped body was folded into: "mov rdi, r8; mov rbx, rcx; call 0x29E850"
+        // as its first call, where 6.31's (0xD81DD0) calls the stripped function. Only an override's first call, made
+        // before anything else could take rcx.
+        if (!bRedirected && !Calls.empty() && Natives::SharedEmptyFunction && Calls.front().second == reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction)
+            && Calls.front().first - Override <= 0x20)
+        {
+            Hooks::RedirectCall(L"ABuildingSMActor::PostUpdate (Super, the empty function)", reinterpret_cast<uint8_t*>(Calls.front().first), reinterpret_cast<void*>(&PostUpdateHK));
         }
     }
 }

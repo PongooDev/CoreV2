@@ -964,9 +964,6 @@ namespace Natives
     inline ptrdiff_t UActorChannel_Bits = -1;
     inline ptrdiff_t FObjectReplicator_OwningChannel = -1;
     inline ptrdiff_t AActor_NetDormancy = -1;
-    // 5.0+ (4214610): NetDormancy's next floats; a build may strip the properties but keep Epic's fields.
-    inline ptrdiff_t AActor_NetUpdateFrequency = -1;
-    inline ptrdiff_t AActor_MinNetUpdateFrequency = -1;
     inline ptrdiff_t AActor_bActorInitialized = -1;
     inline uint32_t AActor_bActorInitializedMask = 0;
     inline ptrdiff_t ULevel_bIsAssociatingLevel = -1;

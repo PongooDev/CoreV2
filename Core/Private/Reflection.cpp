@@ -80,8 +80,8 @@ UScriptStruct* Reflection::FTypeInfo::GetScriptStruct()
     return Kind == ETypeKind::ScriptStruct ? static_cast<UScriptStruct*>(Get()) : nullptr;
 }
 
-Reflection::FMemberInfo::FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct, size_t InSoftPathGrowth, const std::ptrdiff_t* InNativeOffset)
-    : Owner(InOwner), Name(InName), Size(InSize), Kind(InKind), StructType(InStruct), SoftPathGrowth(InSoftPathGrowth), NativeOffset(InNativeOffset)
+Reflection::FMemberInfo::FMemberInfo(FOwnerGetter InOwner, const wchar_t* InName, size_t InSize, EMemberKind InKind, FOwnerGetter InStruct, size_t InSoftPathGrowth)
+    : Owner(InOwner), Name(InName), Size(InSize), Kind(InKind), StructType(InStruct), SoftPathGrowth(InSoftPathGrowth)
 {
     Members().push_back(this);
 }
@@ -160,7 +160,7 @@ bool Reflection::FMemberInfo::IsAvailable()
     {
         Resolve();
     }
-    return Offset >= 0 || (NativeOffset && *NativeOffset >= 0);
+    return Offset >= 0;
 }
 
 int32_t Reflection::FMemberInfo::GetOffsetChecked()
@@ -168,12 +168,6 @@ int32_t Reflection::FMemberInfo::GetOffsetChecked()
     if (Offset == UnresolvedOffset)
     {
         Resolve();
-    }
-
-    if (Offset < 0 && NativeOffset && *NativeOffset >= 0)
-    {
-        // The build strips this property from the class but keeps Epic's native field (5.0's NetUpdateFrequency).
-        return static_cast<int32_t>(*NativeOffset);
     }
 
     if (Offset < 0)

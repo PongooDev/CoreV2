@@ -9,7 +9,8 @@ class AActor;
 class UNetConnection;
 
 // The engine allocates these (0xC8 bytes up to 1.7.2, 0xD0 from 1.8); Core only reads and updates them in place. Every
-// member after Actor is at the offset ResolveReplication found: 1.8 puts a TWeakObjectPtr<AActor> right after Actor.
+// member after Actor is at the offset ResolveReplication found: 1.8 puts a TWeakObjectPtr<AActor> right after Actor, and
+// 6.30 moves the bitfield from before the two connection sets to after them.
 struct FNetworkObjectInfo
 {
     using FConnectionSet = TSet<TWeakObjectPtr<UNetConnection>>;

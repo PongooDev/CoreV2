@@ -3056,7 +3056,58 @@ namespace
         {
             Log::Warning(L"Finder: FNetworkObjectInfo's size not found (0x{:X}); assuming 1.7.2's layout", InfoSize);
         }
-        Log::Info(L"Finder: FNetworkObjectInfo is 0x{:X} bytes, DormantConnections +0x{:X}", InfoSize, Natives::FNetworkObjectInfo_DormantConnections);
+
+        // 6.30 (CL-4573096) keeps the 0xD0 size but moves the bitfield (bPendingNetUpdate, bDirtyForReplay) from before
+        // the two connection sets to after them: DormantConnections +0x28, RecentlyDormantConnections +0x78, the bits
+        // +0xC8 (6.31 CL-4573279 the same). 6.22 (CL-4543176 0x2795465) still clears them first at +0x28
+        // (and dword ptr [rbx+28h], 0FFFFFFFCh) with the sets at +0x30 and +0x80. Reading 6.22's layout on 6.30 and 6.31
+        // made IsActorDormant read DormantConnections 8 bytes late, taking the hash's uninitialized upper half as its
+        // pointer (a 6.31 Save the World zone crashed there as the first player joined, #457), and bPendingNetUpdate
+        // wrote into DormantConnections' element pointer. FindOrAdd's inlined constructor shows where each member is:
+        // a set's sparse array starts its FirstFreeIndex at -1 (+0x30 into the set), and the bits are cleared with an
+        // and (6.31 0x27FD931: mov dword ptr [rbx+58h], -1; 0x27FD95B: mov dword ptr [rbx+0A8h], -1; 0x27FD978: and
+        // byte ptr [rbx+0C8h], 0F8h). Only a constructor that clears the bits after both sets moves the offsets, so
+        // builds with the bits first (and those whose constructor isn't inlined, as 1.8's) keep the size's layout.
+        if (InfoSize == 0xD0)
+        {
+            constexpr ptrdiff_t FirstFreeIndexInSet = 0x30;
+            ptrdiff_t FirstFreeStores[2] = { 0, 0 };
+            size_t NumFirstFreeStores = 0;
+            ptrdiff_t BitsCleared = 0;
+            uintptr_t Address = Allocate + 10;
+            for (int32_t Count = 0; Count < 48 && Address < FindOrAddEnd && !BitsCleared; ++Count)
+            {
+                hde64s Instruction{};
+                const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+                if (!Length || (Instruction.flags & F_ERROR) || Instruction.opcode == 0xEB || Instruction.opcode == 0xE9 || Instruction.opcode == 0xC3)
+                {
+                    break;
+                }
+                const bool bMemoryOperand = (Instruction.modrm_mod == 1 || Instruction.modrm_mod == 2) && Instruction.modrm_rm != 4;
+                const ptrdiff_t Displacement = Instruction.modrm_mod == 1 ? static_cast<int8_t>(Instruction.disp.disp8) : static_cast<int32_t>(Instruction.disp.disp32);
+                if (bMemoryOperand && Instruction.opcode == 0xC7 && Instruction.modrm_reg == 0 && !Instruction.rex_w && Instruction.imm.imm32 == 0xFFFFFFFF && NumFirstFreeStores < 2)
+                {
+                    FirstFreeStores[NumFirstFreeStores++] = Displacement;
+                }
+                else if (bMemoryOperand && (Instruction.opcode == 0x80 || Instruction.opcode == 0x83) && Instruction.modrm_reg == 4)
+                {
+                    BitsCleared = Displacement;
+                }
+                Address += Length;
+            }
+
+            const ptrdiff_t Dormant = FirstFreeStores[0] - FirstFreeIndexInSet;
+            const ptrdiff_t RecentlyDormant = FirstFreeStores[1] - FirstFreeIndexInSet;
+            if (NumFirstFreeStores == 2 && BitsCleared && Dormant > Natives::FNetworkObjectInfo_LastNetUpdateTime
+                && RecentlyDormant - Dormant == 0x50 /* sizeof(TSet) */ && BitsCleared > FirstFreeStores[1] && BitsCleared < InfoSize)
+            {
+                Natives::FNetworkObjectInfo_DormantConnections = Dormant;
+                Natives::FNetworkObjectInfo_RecentlyDormantConnections = RecentlyDormant;
+                Natives::FNetworkObjectInfo_Flags = BitsCleared;
+            }
+        }
+        Log::Info(L"Finder: FNetworkObjectInfo is 0x{:X} bytes, DormantConnections +0x{:X}, RecentlyDormantConnections +0x{:X}, bPendingNetUpdate +0x{:X}", InfoSize,
+            Natives::FNetworkObjectInfo_DormantConnections, Natives::FNetworkObjectInfo_RecentlyDormantConnections, Natives::FNetworkObjectInfo_Flags);
 
         ptrdiff_t ActorChannels = 0;
         int32_t ActorChannelLookups = 0;
@@ -4033,17 +4084,6 @@ namespace
         const uintptr_t DormancyLoad = ClientCheck ? FindInstruction(ClientCheck, ClientCheck + 0x10, { 0x0F, 0xB6 }) : 0;
         const ptrdiff_t NetDormancy = DormancyLoad && (Byte(DormancyLoad + 2) & 0xC0) == 0x80 && (Byte(DormancyLoad + 2) & 0x07) != 0x04 ? *reinterpret_cast<const int32_t*>(DormancyLoad + 3) : 0;
         RequireOffset(L"AActor::NetDormancy", Natives::AActor_NetDormancy, NetDormancy);
-
-        // 5.0 (CL-4214610) moved AActor's network floats to the same slots 6.31 (CL-4573279) has: NetDormancy is at
-        // +0x119, NetUpdateFrequency at +0x130 and MinNetUpdateFrequency at +0x134 (the 6.31 SDK's AActor layout).
-        // The 6.31 server strips the two reflected properties from AActor's class while its native fields stay; the
-        // properties are read through these offsets only when reflection can't find them. Older builds are unchanged.
-        if (NetDormancy == 0x119)
-        {
-            Natives::AActor_NetUpdateFrequency = NetDormancy + 0x17;
-            Natives::AActor_MinNetUpdateFrequency = NetDormancy + 0x1B;
-            Log::Info(L"Finder: AActor::NetUpdateFrequency +0x{:X}, MinNetUpdateFrequency +0x{:X} (native fallback)", Natives::AActor_NetUpdateFrequency, Natives::AActor_MinNetUpdateFrequency);
-        }
 
         const uintptr_t WorldCall = FlushDormancyEnd ? FindVirtualCall(FlushDormancy, FlushDormancyEnd) : 0;
         const uintptr_t AddActorCall = WorldCall ? FindRawCall(WorldCall + 6, FlushDormancyEnd) : 0;

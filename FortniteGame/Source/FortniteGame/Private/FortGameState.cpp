@@ -349,8 +349,13 @@ void AFortGameStateZone::ServerSubmitGameplayVote(EFortVoteType VoteType, int32_
             Vote->NumVotersWithMaxVotes = Vote->NumVotersWithMaxVotes + 1;
         }
     }
-    Vote->VoteStatus = EFortVoteStatus::GetUpdate();
-
+    // VoteStatus stays Begin: a vote only replicates Begin and End. Update is what OnRep_GameplayVotes tells the delegates
+    // itself when the status is unchanged and a voter's VoteDecision differs from their LastVoteDecision (5.10 0xE13A05,
+    // 6.22 0xF3D9A7, 6.31 0xF7DEAC: the decisions copied over, then the broadcast with status 1), as it tells BeginLockout
+    // after a failed End. VoteStartTime and VoteEndTime are RepSkip: each client sets them when OnRep sees Begin, and End
+    // (6.31 0xF7DEEA, 0xF7DF42), and GetTimeRemainingToEndVote (0xF780B0) counts down from that VoteStartTime. Set to
+    // Update here, the instigator's yes (sent with ServerBeginGameplayVote, so handled in the same frame) meant the
+    // clients never saw Begin: their VoteStartTime stayed zero and the vote's timer showed 0 the whole vote (#469).
     int32_t NumVoted = 0;
     for (int32_t Index = 0; Index < Voters.Num(); ++Index)
     {

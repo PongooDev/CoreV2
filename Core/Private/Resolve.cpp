@@ -11479,6 +11479,7 @@ bool Finder::ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t 
     const std::initializer_list<int32_t> NotWhenRespawning = { 0x80, -1, ByteOf(DBNOType, 0), ByteOf(DBNOType, 8), ByteOf(DBNOType, 16), ByteOf(DBNOType, 24), 0x02 };
     const std::initializer_list<int32_t> Off = { 0x80, -1, ByteOf(DBNOType, 0), ByteOf(DBNOType, 8), ByteOf(DBNOType, 16), ByteOf(DBNOType, 24), 0x01 };
     std::vector<uintptr_t> Functions;
+    std::vector<uintptr_t> Comparers;
     for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), NotWhenRespawning); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), NotWhenRespawning))
     {
         const uintptr_t Function = ComparesDBNOType(Site) ? Finder::FunctionStart(Site) : 0;
@@ -11500,6 +11501,32 @@ bool Finder::ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t 
                 && *reinterpret_cast<const int32_t*>(At + 3) == Mutators;
         }
         if (bComparesOff && bReadsMutators)
+        {
+            Functions.push_back(Function);
+        }
+        else if (bComparesOff)
+        {
+            Comparers.push_back(Function);
+        }
+    }
+    // 7.10 (CL-4667333 0xC25080, the same three arguments) asks the mutators through a function of its own (0xC28D20,
+    // which reads GameplayMutators: mov rcx, [r15+11C0h]; then each mutator's slot 0xD1). So where no function reads them
+    // itself, the one with both compares whose direct callee reads them.
+    for (const uintptr_t Function : Functions.empty() ? Comparers : std::vector<uintptr_t>())
+    {
+        bool bCalleeReadsMutators = false;
+        for (const auto& [Call, Target] : Finder::DirectCalls(Function, Finder::FunctionEnd(Function)))
+        {
+            for (const auto& [Begin, End] : Finder::FunctionStart(Target) == Target ? Finder::FunctionChunks(Target) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                for (uintptr_t At = Begin; At + 7 <= End && !bCalleeReadsMutators; ++At)
+                {
+                    bCalleeReadsMutators = (Byte(At) & 0xF8) == 0x48 && Byte(At + 1) == 0x8B && (Byte(At + 2) & 0xC0) == 0x80 && (Byte(At + 2) & 0x07) != 0x04
+                        && *reinterpret_cast<const int32_t*>(At + 3) == Mutators;
+                }
+            }
+        }
+        if (bCalleeReadsMutators)
         {
             Functions.push_back(Function);
         }

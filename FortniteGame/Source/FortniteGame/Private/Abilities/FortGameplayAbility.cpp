@@ -99,12 +99,22 @@ void UFortGameplayAbility::EquipAbilityWeapon(UFortWeaponItemDefinition* WeaponD
     }
 
     WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
+
+    // A player in a mounted turret couldn't fire it (#461). The weapon gets its magazine from its item: on the server,
+    // AFortWeapon sets AmmoCount (+0x794) to the world item's GetLoadedAmmo (6.31 0x1457650, the item's slot 0x67). A
+    // new item's magazine is empty (#85), so this item came with none. MountedTurret_Weapon is meant to stay loaded:
+    // ClipSize 1,000,000, InitialClips 1, no ReloadAbility, and AmmoInfinite as its AmmoData, which no player carries.
+    // So it could neither fire nor reload. The item is loaded before it goes into the inventory, so the replicated
+    // entry has the rounds too. Melee and other non-ranged ability weapons are left as they are.
+    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
+    ItemEntry.LoadFullClip();
     Inventory->AddWorldItem(WorldItem);
     GetAbilityGrantedWeaponItem() = TWeakObjectPtr<UFortWorldItem>(WorldItem);
 
-    FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     const FGuid ItemGuid = ItemEntry.ItemGuid;
-    Pawn->EquipWeaponDefinition(WeaponDefinition, ItemGuid);
+    AFortWeapon* Weapon = Pawn->EquipWeaponDefinition(WeaponDefinition, ItemGuid);
+    Log::Info(L"Ability weapon: {} gives {} {} ({} rounds loaded){}", GetName().ToStdString(), Pawn->GetName().ToStdString(), WeaponDefinition->GetName().ToStdString(),
+        static_cast<int32_t>(ItemEntry.LoadedAmmo), Weapon ? L"" : L", but the pawn equipped nothing");
 #endif
 }
 
@@ -126,7 +136,10 @@ void UFortGameplayAbility::RemoveAbilityWeapon()
         AFortWeapon* Weapon = Weapons[Index];
         if (Weapon && Weapon->ItemEntryGuid == ItemGuid)
         {
+            const bool bHeld = static_cast<AFortWeapon*>(Pawn->CurrentWeapon) == Weapon;
             Pawn->RemoveAbilityWeapon(Weapon);
+            Log::Info(L"Ability weapon: {} takes {} from {} ({})", GetName().ToStdString(), Weapon->GetName().ToStdString(), Pawn->GetName().ToStdString(),
+                bHeld ? L"it was in hand, the pawn's previous weapon is equipped" : L"it wasn't in hand");
             return;
         }
     }

@@ -1664,22 +1664,36 @@ bool UAthenaNavSystem::ProjectPointToNavigation(UWorld* World, const FVector& Po
     {
         return true;
     }
-    // 1.8.2's shipping build reflects no K2_ProjectPointToNavigation (its BlueprintCallable functions are stripped; asking
-    // for it there stopped the server at the bots' first path request, CoreV2's crash report). Core has no other projection
-    // to fall back on, so the point is taken as it is: a bot's path search then answers, and one that is off the navmesh
-    // steers back from what it says, rather than the server dying on the lookup.
-    if (!UNavigationSystem::FindStaticFunction_K2_ProjectPointToNavigation())
+    if (UNavigationSystem::FindStaticFunction_K2_ProjectPointToNavigation())
     {
-        static bool bLogged = false;
-        if (!bLogged)
+        return false;
+    }
+    // Before 1.10 (UE 4.16 to 4.18) there is no K2_ProjectPointToNavigation yet: UE 4.19 added it beside the older
+    // ProjectPointToNavigation, the only one 1.1 to 1.9.1 reflect (1.7.2 0x2A57150). That one returns the projected point,
+    // or the point it was given when there is no navigation within the extent, so a found point can't be told from a miss
+    // when the point already lies on the navmesh. It is asked for the point one unit higher: a projection always puts that
+    // back down on the navmesh, and an answer equal to it is a miss.
+    if (UNavigationSystem::FindStaticFunction_ProjectPointToNavigation())
+    {
+        const FVector Lifted(Point.X, Point.Y, Point.Z + 1.0f);
+        const FVector Projected = UNavigationSystem::ProjectPointToNavigation(reinterpret_cast<UObject*>(World), Lifted, NavData, Extent);
+        if (Projected.X == Lifted.X && Projected.Y == Lifted.Y && Projected.Z == Lifted.Z)
         {
-            bLogged = true;
-            Log::Info(L"BOTS: this build reflects no K2_ProjectPointToNavigation (1.8.2 strips it), so a point is taken as it is");
+            return false;
         }
-        OutLocation = Point;
+        OutLocation = Projected;
         return true;
     }
-    return false;
+    // A build that reflects neither (none is known): the point is taken as it is, so a bot's path search still answers
+    // and one off the navmesh steers back from what it says.
+    static bool bLogged = false;
+    if (!bLogged)
+    {
+        bLogged = true;
+        Log::Warning(L"BOTS: this build reflects neither K2_ProjectPointToNavigation nor ProjectPointToNavigation, so a point is taken as it is");
+    }
+    OutLocation = Point;
+    return true;
 }
 
 bool UAthenaNavSystem::IsOnNavMesh(UWorld* World, const FVector& Location)

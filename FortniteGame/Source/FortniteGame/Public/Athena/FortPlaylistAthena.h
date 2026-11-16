@@ -25,14 +25,15 @@ class UFortPlaylist : public UObject
 
 public:
     // The name the playlist manager finds it by (Playlist_DefaultSolo), the one the matchmaking service's assignment
-    // gives from 5.30 (HandleAssignMatchMessage's "PlaylistName: %s").
+    // gives from 5.30 (HandleAssignMatchMessage's "PlaylistName: %s"). UFortPlaylist's own from 4.4 (4.4.2 +0x30); 3.5 to
+    // 4.2 keep it on UFortPlaylistAthena (below), so it isn't found here on those builds.
     DefineUProperty(FName, PlaylistName)
-    // The name as text: the FName 5.30's and later keep it as, or the FString 4.1 keeps it as. There the member is read by
-    // its property name, and the property's size tells the two apart. "none" where the build reflects neither: 4.1's first
-    // run stopped on the member's lookup (CoreV2's crash report), so nothing here may go through the checked accessor.
+    // The name as text, from whichever class the build keeps PlaylistName in: UFortPlaylist's from 4.4, else
+    // UFortPlaylistAthena's (3.5 to 4.2). "none" where neither has it, so nothing here goes through a checked accessor
+    // that isn't there (4.1's first run stopped on UFortPlaylist's lookup).
     std::wstring PlaylistNameText() const;
-    // Whether this playlist is the one PlaylistName names: the FName comparison, or the text's without case on a build whose
-    // PlaylistName is an FString.
+    // Whether this playlist is the one PlaylistName names (the FName comparison, as UFortPlaylistManager::GetPlaylist
+    // makes it); false where the build has no PlaylistName.
     bool IsPlaylistNamed(FName Name) const;
     // The levels the match streams in with the playlist (AFortGameState::StartStreamingAdditionalPlaylistLevel).
     DefineUProperty(TArray<TAssetPtr<UWorld>>, AdditionalLevels)
@@ -101,6 +102,10 @@ class UFortPlaylistAthena : public UFortPlaylist
     DefineUnrealClass(UFortPlaylistAthena, FortniteGame)
 
 public:
+    // 3.5 to 4.2's PlaylistName, an FName of this class (3.5.1, 3.6 and 4.0 +0x178, 4.1 and 4.2 +0x188), before 4.4 moved
+    // it up to UFortPlaylist. The class's reflection looks through its super, so on 4.4 and later this finds UFortPlaylist's.
+    DefineUProperty(FName, PlaylistName)
+    static bool HasPlaylistName() { return Member_PlaylistName.IsAvailable(); }
     DefineUProperty(int32_t, PlaylistId)
     // EAirCraftBehavior (1: OpposingAirCraftForEachTeam), which the game state takes with the playlist.
     DefineUProperty(uint8_t, AirCraftBehavior)

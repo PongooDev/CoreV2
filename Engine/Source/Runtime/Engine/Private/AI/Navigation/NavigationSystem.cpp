@@ -127,9 +127,8 @@ void UNavigationSystem::RegisterNavigationInvoker(AActor* Invoker, float TileGen
 
 bool UNavigationSystem::K2_ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, FVector& ProjectedLocation, ANavigationData* NavData, const FVector& QueryExtent)
 {
-    // A build that doesn't reflect it has nothing to call: 1.8.2's shipping build strips its BlueprintCallable functions, and
-    // asking for it there stopped the server at the bots' first path request (CoreV2's crash report). False, so the caller
-    // takes its own fallback rather than dying on the lookup.
+    // UE 4.19 (1.10) added it: builds before 1.10 have only the older ProjectPointToNavigation (below), and asking for this
+    // one there stopped a 1.8.2 server at the bots' first path request. False, so the caller takes the older one.
     UFunction* Function = FindStaticFunction_K2_ProjectPointToNavigation();
     if (!Function)
     {
@@ -146,4 +145,22 @@ bool UNavigationSystem::K2_ProjectPointToNavigation(UObject* WorldContextObject,
     }
     ProjectedLocation = Params.Take<FVector>(L"ProjectedLocation");
     return true;
+}
+
+FVector UNavigationSystem::ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, ANavigationData* NavData, const FVector& QueryExtent)
+{
+    // UE 4.16's body: FNavLocation ProjectedPoint(Point), the system's ProjectPointToNavigation on NavData (the main data
+    // when none is given) within QueryExtent (INVALID_NAVEXTENT when it is zero) and the filter class's query filter, then
+    // ProjectedPoint.Location: Point itself when the projection found nothing. The filter class is left at none.
+    UFunction* Function = FindStaticFunction_ProjectPointToNavigation();
+    if (!Function)
+    {
+        return Point;
+    }
+    Reflection::FParams Params(Function, true);
+    Params.Set(L"WorldContextObject", WorldContextObject);
+    Params.Set(L"Point", Point);
+    Params.Set(L"NavData", reinterpret_cast<UObject*>(NavData));
+    Params.Set(L"QueryExtent", QueryExtent);
+    return Params.Call(StaticClass()->GetDefaultObject()) ? Params.Take<FVector>(L"ReturnValue") : Point;
 }

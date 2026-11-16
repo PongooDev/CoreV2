@@ -73,6 +73,8 @@ class UNavigationSystem : public UObject
     DefineUFunction(IsNavigationBeingBuilt)
     DefineUFunction(RegisterNavigationInvoker)
     DefineUFunction(K2_ProjectPointToNavigation)
+    // UE 4.16 to 4.18's (1.1 to 1.9.1) only projection for scripts, which 4.19 (1.10) deprecated for K2_ProjectPointToNavigation.
+    DefineUFunction(ProjectPointToNavigation)
     DefineUStructArrayProperty(FNavDataConfig, SupportedAgents)
     DefineUProperty(ANavigationData*, MainNavData)
     DefineUProperty(TArray<ANavigationData*>, NavDataSet)
@@ -112,5 +114,9 @@ public:
     // its OnWorldInitDone(Mode). False when the engine function wasn't found.
     static bool InitializeForWorld(UWorld* World, FNavigationSystemRunMode::Type Mode);
     // The point on the navigation data within QueryExtent of Point, or false when there is none there (no tile yet).
+    // From 1.10 (UE 4.19); false on older builds, which don't have it.
     static bool K2_ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, FVector& ProjectedLocation, ANavigationData* NavData, const FVector& QueryExtent);
+    // The older one (UE 4.16's, 1.7.2 0x2A57150 builds its reflection): the point on the navigation data within
+    // QueryExtent of Point, or Point itself when there is none there. Point too where the build doesn't reflect it.
+    static FVector ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, ANavigationData* NavData, const FVector& QueryExtent);
 };

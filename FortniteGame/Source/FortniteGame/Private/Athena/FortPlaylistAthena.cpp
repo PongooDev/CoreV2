@@ -12,22 +12,11 @@ std::wstring UFortPlaylist::PlaylistNameText() const
     {
         return static_cast<FName>(PlaylistName).ToStdString();
     }
-    // 4.1's UFortPlaylist keeps its name as an FString. It is read here by its property name, and the property's own class
-    // says how: a build that reflects neither type answers "none" instead of ending the server on the lookup.
-    UProperty* Property = GetClass()->FindPropertyByName(FName(L"PlaylistName", FNAME_Find));
-    if (!Property)
+    // 3.5 to 4.2 keep PlaylistName on UFortPlaylistAthena, an FName there too (4.1 +0x188).
+    UClass* AthenaClass = UFortPlaylistAthena::StaticClass();
+    if (AthenaClass && UFortPlaylistAthena::HasPlaylistName() && IsA(AthenaClass))
     {
-        return std::wstring(L"none");
-    }
-    const std::wstring Type = Property->GetClass()->GetName().ToStdString();
-    const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(this) + Property->GetOffset_ForInternal();
-    if (Type == L"StrProperty")
-    {
-        return reinterpret_cast<const FString*>(Bytes)->ToStdString();
-    }
-    if (Type == L"NameProperty")
-    {
-        return reinterpret_cast<const FName*>(Bytes)->ToStdString();
+        return static_cast<FName>(static_cast<const UFortPlaylistAthena*>(this)->PlaylistName).ToStdString();
     }
     return std::wstring(L"none");
 }
@@ -38,7 +27,12 @@ bool UFortPlaylist::IsPlaylistNamed(FName Name) const
     {
         return static_cast<FName>(PlaylistName) == Name;
     }
-    return _wcsicmp(PlaylistNameText().c_str(), Name.ToStdString().c_str()) == 0;
+    UClass* AthenaClass = UFortPlaylistAthena::StaticClass();
+    if (AthenaClass && UFortPlaylistAthena::HasPlaylistName() && IsA(AthenaClass))
+    {
+        return static_cast<FName>(static_cast<const UFortPlaylistAthena*>(this)->PlaylistName) == Name;
+    }
+    return false;
 }
 
 bool UFortPlaylist::IsShowdownPlaylist() const

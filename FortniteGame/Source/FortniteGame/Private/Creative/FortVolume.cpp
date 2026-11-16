@@ -50,13 +50,19 @@ AFortVolume* AFortVolumeManager::GetVolumeForActor(const AActor* Actor)
     return Result ? *Result : nullptr;
 }
 
-void AFortVolumeManager::ResetVolumeAndLevelRecord(AFortVolume* Volume)
+void AFortVolumeManager::ResetVolumeAndLevelRecord(AFortVolume* Volume, AFortPlayerController* RequestingFortPC)
 {
     Reflection::FParams Params(FindStaticFunction_ResetVolumeAndLevelRecord(), true);
-    if (Volume && Params.Set(L"Volume", Volume))
+    if (!Volume || !Params.Set(L"Volume", Volume))
     {
-        Params.Call(this);
+        return;
     }
+    // 7.10 (CL-4667333) also takes the player who asked for it; a reset of the server's own (an unload, a reload) has none.
+    if (RequestingFortPC && Params.Has(L"RequestingFortPC"))
+    {
+        Params.Set(L"RequestingFortPC", RequestingFortPC);
+    }
+    Params.Call(this);
 }
 
 AFortVolumeManager* AFortVolumeManager::Get(const UObject* WorldContextObject)

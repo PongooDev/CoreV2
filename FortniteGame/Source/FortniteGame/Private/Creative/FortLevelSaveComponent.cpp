@@ -126,7 +126,28 @@ bool ULevelSaveRecord::ReadFromBuffer(const std::string& Bytes)
 
 void ULevelSaveBaseComponent::ApplySaveToWorld()
 {
-    CallNoParams(this, FindStaticFunction_ApplySaveToWorld());
+    // 7.10 (CL-4667333) takes bComplexShouldSpawn; the game's own native call of it (0x13649A3) passes false.
+    UFunction* Function = FindStaticFunction_ApplySaveToWorld();
+    Reflection::FParams Params(Function, true);
+    if (Function && Params.Has(L"bComplexShouldSpawn"))
+    {
+        Params.Set(L"bComplexShouldSpawn", false);
+    }
+    if (Function)
+    {
+        Params.Call(this);
+    }
+}
+
+const TAssetPtr<UObject>* UFortCreativeRealEstatePlotItem::GetBasePlayset() const
+{
+    UObject* Definition = ItemDefinition;
+    UClass* DefinitionClass = UFortCreativeRealEstatePlotItemDefinition::StaticClass();
+    if (!Definition || !DefinitionClass || !Definition->IsA(DefinitionClass))
+    {
+        return nullptr;
+    }
+    return &static_cast<const TAssetPtr<UObject>&>(static_cast<UFortCreativeRealEstatePlotItemDefinition*>(Definition)->BasePlayset);
 }
 
 void ULevelSaveBaseComponent::ConstructNewLevelRecord(AActor* Owner)
@@ -246,8 +267,30 @@ void UFortLevelSaveComponent::LoadPlotForUser(const FUniqueNetIdRepl& UserId, UF
         const FMulticastScriptDelegate& OnStart = OnStartPlotLoadForUser;
         OnStart.ProcessMulticastDelegate(&Started.Get());
     }
-    // The island's own level first, as the volume's BeginPlay does it for a plot it is given (0xF363B0).
-    CallNoParams(this, FindStaticFunction_OnAsyncLoadingOfPlaysetComplete());
+    // The island's own level first, as the volume's BeginPlay does it for a plot it is given (0xF363B0). 7.10
+    // (CL-4667333) passes the playset its async load brought in (PlaysetPtr): the plot's BasePlayset.
+    {
+        UFunction* PlaysetComplete = FindStaticFunction_OnAsyncLoadingOfPlaysetComplete();
+        Reflection::FParams Params(PlaysetComplete, true);
+        if (PlaysetComplete && Params.Has(L"PlaysetPtr"))
+        {
+            const TAssetPtr<UObject>* Playset = PlotItem->GetBasePlayset();
+            // The engine's TSoftObjectPtr is longer than Core's TAssetPtr (its FSoftObjectPath); SetPath writes the build's.
+            TAssetPtr<UObject>* Slot = static_cast<TAssetPtr<UObject>*>(Params.GetAddress(L"PlaysetPtr"));
+            if (Playset && Slot && Playset->ToStringReference().IsValid())
+            {
+                Slot->SetPath(Playset->ToStringReference().ToString());
+            }
+            else
+            {
+                Log::Warning(L"Creative: {}'s plot {} has no playset to stream in", User, PlotItem->GetItemId().ToStdString());
+            }
+        }
+        if (PlaysetComplete)
+        {
+            Params.Call(this);
+        }
+    }
 
     UWorld* World = Volume->GetWorld();
     UFortGameInstance* GameInstance = World && UFortGameInstance::HasSidecarSys() ? Cast<UFortGameInstance>(reinterpret_cast<UObject*>(static_cast<UGameInstance*>(World->OwningGameInstance))) : nullptr;

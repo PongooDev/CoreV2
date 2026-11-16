@@ -5,12 +5,14 @@
 #include "GameFramework/OnlineReplStructs.h"
 #include "Internationalization/Text.h"
 #include "Reflection.h"
+#include "UObject/AssetPtr.h"
 #include "UObject/ScriptDelegates.h"
 
 #include <cstdint>
 #include <string>
 
 class AActor;
+class AFortPlayerController;
 class AFortVolume;
 class UFortCreativeRealEstatePlotItem;
 
@@ -31,6 +33,8 @@ class UFortCreativeRealEstatePlotItemDefinition : public UObject
 
 public:
     DefineUProperty(FText, UIDisplayName)
+    // The island's playset (7.10 passes it to UFortLevelSaveComponent::OnAsyncLoadingOfPlaysetComplete).
+    DefineUProperty(TAssetPtr<UObject>, BasePlayset)
 };
 
 // A player's Creative island (from 7.00; the creative profile's CreativePlot items, Temperate_Medium: the island's
@@ -50,6 +54,8 @@ public:
     // The island's name as the player sees it: its own (islandName, once named), else its template's UIDisplayName with
     // its number ("Island 2").
     FText GetIslandDisplayName() const;
+    // The plot's playset, from its definition (null without one).
+    const TAssetPtr<UObject>* GetBasePlayset() const;
 };
 
 // The record of what was built on an island (from 6.20's playspaces): the actors the playset came with and those placed,

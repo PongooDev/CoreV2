@@ -404,7 +404,7 @@ void AFortPlayerControllerAthena::ResetMyCurrentCreativePlot_Implementation()
         Log::Warning(L"Creative: {}'s ResetMyCurrentCreativePlot refused: {}", PlayerNameOf(this), !Volume ? L"not on an island" : L"the island isn't theirs");
         return;
     }
-    Manager->ResetVolumeAndLevelRecord(Volume);
+    Manager->ResetVolumeAndLevelRecord(Volume, reinterpret_cast<AFortPlayerController*>(this));
     Log::Info(L"Creative: {} resets their island {}", PlayerNameOf(this), Volume->GetName().ToStdString());
 #endif
 }

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 
+class AFortPlayerController;
 class AFortPlayerStartCreative;
 class UFortPlaysetItemDefinition;
 class UWorld;
@@ -49,8 +50,8 @@ class AFortVolumeManager : public AInfo
 public:
     AFortVolume* GetVolumeForActor(const AActor* Actor);
     // The game's own reset of an island (7.00 0xDA0E70): what was built goes, the record with it, and the playset's
-    // own actors come back.
-    void ResetVolumeAndLevelRecord(AFortVolume* Volume);
+    // own actors come back. 7.10 adds the player who asked for it (RequestingFortPC).
+    void ResetVolumeAndLevelRecord(AFortVolume* Volume, AFortPlayerController* RequestingFortPC = nullptr);
 
     static AFortVolumeManager* Get(const UObject* WorldContextObject);
 };

@@ -7,6 +7,7 @@
 #include "Misc/Guid.h"
 #include "Natives.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
+#include "UObject/Class.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <cwchar>
@@ -25,7 +26,28 @@ namespace
         uint8_t Padding[6];
     };
     static_assert(sizeof(FSidecarFileInfoValue) == 0x58);
-    using FFileInfoMap = TMap<FString, FSidecarFileInfoValue>;
+    // 7.10 (CL-4667333) adds CheckoutGuid, an FString, after them: 0x68 bytes, so the map's elements are 0x10 longer.
+    struct FSidecarFileInfoValueWithGuid
+    {
+        FSidecarFileInfoValue Info;
+        uint8_t CheckoutGuid[0x10];
+    };
+    static_assert(sizeof(FSidecarFileInfoValueWithGuid) == 0x68);
+
+    // The entry whose key is Key, case-insensitively (FString keys match without case), in a map of the build's layout.
+    template <typename TValue>
+    FSidecarFileInfo* FindInMap(void* MapStorage, const std::wstring& Key)
+    {
+        TMap<FString, TValue>& Map = *reinterpret_cast<TMap<FString, TValue>*>(MapStorage);
+        for (auto& Pair : Map)
+        {
+            if (_wcsicmp(Pair.Key.ToStdString().c_str(), Key.c_str()) == 0)
+            {
+                return reinterpret_cast<FSidecarFileInfo*>(&Pair.Value);
+            }
+        }
+        return nullptr;
+    }
 
     std::wstring ReplaceToken(std::wstring Text, std::wstring_view Token, const std::wstring& Value)
     {
@@ -58,14 +80,19 @@ FSidecarFileInfo* USidecarSys::FindFileInfo(const FString& AppName, const FStrin
     // The map's key is "%s/%s" of the two (the upload's and the meta setter's own key, 0x2DF4530 and 0x2DF5C40), and
     // FString keys match without case.
     const std::wstring Key = AppName.ToStdString() + L"/" + FilePath.ToStdString();
-    FFileInfoMap& Map = *reinterpret_cast<FFileInfoMap*>(&GetMember_FileInfoMap());
-    for (auto& Pair : Map)
+    // The map's elements follow the build's FSidecarFileInfo (7.00 0x58 bytes, 7.10 0x68).
+    UScriptStruct* InfoStruct = FSidecarFileInfo::StaticStruct();
+    const int32_t InfoSize = InfoStruct ? InfoStruct->GetStructureSize() : static_cast<int32_t>(sizeof(FSidecarFileInfoValue));
+    void* Map = &GetMember_FileInfoMap();
+    if (InfoSize == static_cast<int32_t>(sizeof(FSidecarFileInfoValue)))
     {
-        if (_wcsicmp(Pair.Key.ToStdString().c_str(), Key.c_str()) == 0)
-        {
-            return reinterpret_cast<FSidecarFileInfo*>(&Pair.Value);
-        }
+        return FindInMap<FSidecarFileInfoValue>(Map, Key);
     }
+    if (InfoSize == static_cast<int32_t>(sizeof(FSidecarFileInfoValueWithGuid)))
+    {
+        return FindInMap<FSidecarFileInfoValueWithGuid>(Map, Key);
+    }
+    Log::Error(L"Creative: FSidecarFileInfo is 0x{:X} bytes in this build, a layout Core doesn't know, so the sidecar's FileInfoMap isn't read", InfoSize);
     return nullptr;
 }
 

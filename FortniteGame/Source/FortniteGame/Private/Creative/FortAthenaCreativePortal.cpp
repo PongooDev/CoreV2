@@ -62,13 +62,62 @@ void AFortAthenaCreativePortal::SetOwningPlayerState(AFortPlayerState* NewOwner)
 {
     // A replicated, RepNotify member (OnRep_OwningPlayerState: the rift's name plate and who may use it). The server
     // calls its own OnRep as Epic's server code does after setting one.
-    OwningPlayerState = NewOwner;
-    if (UFunction* OnRep = FindStaticFunction_OnRep_OwningPlayerState())
+    if (Member_OwningPlayerState.IsAvailable())
     {
-        Reflection::FParams Params(OnRep, true);
-        Params.Call(this);
+        OwningPlayerState = NewOwner;
+        if (UFunction* OnRep = FindStaticFunction_OnRep_OwningPlayerState())
+        {
+            Reflection::FParams Params(OnRep, true);
+            Params.Call(this);
+        }
+    }
+    // 7.10: the owner's id (OnRep_OwningPlayer), copied through the build's own struct. No owner leaves it as it is:
+    // ReleasePortal clears it.
+    else if (Member_OwningPlayer.IsAvailable() && NewOwner)
+    {
+        UScriptStruct* NetIdStruct = FUniqueNetIdRepl::StaticStruct();
+        const FUniqueNetIdRepl& Id = reinterpret_cast<APlayerState*>(NewOwner)->UniqueId;
+        if (!NetIdStruct || !Id.IsValid())
+        {
+            Log::Warning(L"Creative: {} gets no owner: {}", GetName().ToStdString(), !NetIdStruct ? L"FUniqueNetIdRepl wasn't found" : L"the player has no id");
+            return;
+        }
+        NetIdStruct->CopyScriptStruct(&static_cast<FUniqueNetIdRepl&>(OwningPlayer), &Id);
+        if (UFunction* OnRep = FindStaticFunction_OnRep_OwningPlayer())
+        {
+            Reflection::FParams Params(OnRep, true);
+            Params.Call(this);
+        }
     }
     ForceNetUpdate();
+}
+
+bool AFortAthenaCreativePortal::HasOwner() const
+{
+    if (Member_OwningPlayerState.IsAvailable())
+    {
+        return static_cast<AFortPlayerState*>(OwningPlayerState) != nullptr;
+    }
+    return Member_OwningPlayer.IsAvailable() && static_cast<const FUniqueNetIdRepl&>(OwningPlayer).IsValid();
+}
+
+bool AFortAthenaCreativePortal::IsOwnedBy(const AFortPlayerState* PlayerState) const
+{
+    if (!PlayerState)
+    {
+        return false;
+    }
+    if (Member_OwningPlayerState.IsAvailable())
+    {
+        return static_cast<AFortPlayerState*>(OwningPlayerState) == PlayerState;
+    }
+    if (!Member_OwningPlayer.IsAvailable())
+    {
+        return false;
+    }
+    const FUniqueNetIdRepl& Owner = OwningPlayer;
+    const FUniqueNetIdRepl& Id = reinterpret_cast<const APlayerState*>(PlayerState)->UniqueId;
+    return Owner.IsValid() && Id.IsValid() && Owner.ToString().ToStdString() == Id.ToString().ToStdString();
 }
 
 void AFortAthenaCreativePortal::NotifyTeleportedPlayerPawn(AFortPlayerPawn* PlayerPawn)
@@ -298,7 +347,7 @@ AFortAthenaCreativePortal* AFortCreativePortalManager::ClaimPortal(AFortPlayerCo
     AFortAthenaCreativePortal* Portal = nullptr;
     for (AFortAthenaCreativePortal* Candidate : Available)
     {
-        if (Candidate && !Candidate->bReturnToCreativeHub && static_cast<AFortVolume*>(Candidate->LinkedVolume) && !static_cast<AFortPlayerState*>(Candidate->OwningPlayerState))
+        if (Candidate && !Candidate->bReturnToCreativeHub && static_cast<AFortVolume*>(Candidate->LinkedVolume) && !Candidate->HasOwner())
         {
             Portal = Candidate;
             break;
@@ -331,7 +380,7 @@ void AFortCreativePortalManager::ReleasePlayerPortal(AFortPlayerState* PlayerSta
     const TArray<AFortAthenaCreativePortal*> Used = UsedPortals;
     for (AFortAthenaCreativePortal* Portal : Used)
     {
-        if (!Portal || static_cast<AFortPlayerState*>(Portal->OwningPlayerState) != PlayerState)
+        if (!Portal || !Portal->IsOwnedBy(PlayerState))
         {
             continue;
         }

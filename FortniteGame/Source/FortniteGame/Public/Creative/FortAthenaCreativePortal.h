@@ -27,6 +27,7 @@ class AFortAthenaCreativePortal : public ABuildingActor
     DefineUFunction(TeleportPlayerToLinkedVolume)
     DefineUFunction(NotifyTeleportedPlayerPawn)
     DefineUFunction(OnRep_OwningPlayerState)
+    DefineUFunction(OnRep_OwningPlayer)
     DefineUFunction(OnRep_PortalOpen)
 
 public:
@@ -35,6 +36,9 @@ public:
     DefineUProperty(bool, bReturnToCreativeHub)
     DefineUProperty(AFortVolume*, LinkedVolume)
     DefineUProperty(AFortPlayerState*, OwningPlayerState)
+    // 7.10 (CL-4667333) keeps the owner's id instead (replicated, OnRep_OwningPlayer), with the player state only as a
+    // private cache the rift fills itself (CachedOwningPlayerState, GetPlayerState).
+    DefineUStructProperty(FUniqueNetIdRepl, OwningPlayer)
     DefineUProperty(bool, bPortalOpen)
     DefineUProperty(FVector, TeleportLocation)
 
@@ -51,6 +55,9 @@ public:
 
     UFortLevelSaveComponent* GetLevelSaveComponent() const;
     void SetOwningPlayerState(AFortPlayerState* NewOwner);
+    // Whether the rift has an owner, and whether it is PlayerState's, by the player state (7.00) or its id (7.10).
+    bool HasOwner() const;
+    bool IsOwnedBy(const AFortPlayerState* PlayerState) const;
 
     DECLARE_FUNCTION(execTeleportPlayer);
     DECLARE_FUNCTION(execTeleportPlayerToLinkedVolume);

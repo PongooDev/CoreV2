@@ -6008,6 +6008,41 @@ namespace
         }
         return 0;
     }
+
+    // Whether a function's first block reads its second argument (rdx) before anything writes it: test with rdx, or
+    // mov r, rdx. AFortGameModeZone::OnZoneEnd takes none; 7.00's slot 0xC5 (0xEC7500), which also holds the zone's
+    // offsets, takes an object and starts mov rdi, rdx; mov rsi, rcx; test rdx, rdx.
+    bool ReadsSecondArgument(uintptr_t Function)
+    {
+        uintptr_t Address = Function;
+        for (int32_t Count = 0; Function && Count < 16; ++Count)
+        {
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            if (!Length || (Instruction.flags & F_ERROR))
+            {
+                return false;
+            }
+            const uint8_t Opcode = Instruction.opcode;
+            const bool bModRm = (Instruction.flags & F_MODRM) != 0;
+            const bool bRegister = bModRm && Instruction.modrm_mod == 3;
+            const bool bRegIsRdx = bModRm && Instruction.modrm_reg == 2 && !Instruction.rex_r;
+            const bool bRmIsRdx = bRegister && Instruction.modrm_rm == 2 && !Instruction.rex_b;
+            if ((Opcode == 0x85 && (bRegIsRdx || bRmIsRdx)) || (Opcode == 0x89 && bRegIsRdx) || (Opcode == 0x8B && bRmIsRdx))
+            {
+                return true;
+            }
+            // A branch, call or return ends the block; mov/lea/xor into rdx (or edx) writes it.
+            const bool bEnd = Opcode == 0xE8 || Opcode == 0xE9 || Opcode == 0xEB || Opcode == 0xC3 || Opcode == 0xC2 || Opcode == 0xCC || Opcode == 0xFF || Opcode == 0x0F || (Opcode >= 0x70 && Opcode <= 0x7F);
+            const bool bWritesRdx = ((Opcode == 0x8B || Opcode == 0x8D || Opcode == 0x33) && bRegIsRdx) || ((Opcode == 0x89 || Opcode == 0x31) && bRmIsRdx) || Opcode == 0xBA;
+            if (bEnd || bWritesRdx)
+            {
+                return false;
+            }
+            Address += Length;
+        }
+        return false;
+    }
 }
 
 bool Finder::ResolveProcessEvent()
@@ -7254,11 +7289,17 @@ bool Finder::ResolveZoneEndLive(ptrdiff_t MissionInfoOffset, ptrdiff_t ZoneFinis
     // AFortGameModeZone::OnZoneEnd holds the zone's EndOfZoneRemainTime and ActiveSpawnPad offsets. 3.5 and 3.6 have an
     // inherited slot (0xC4, 3.6 0xC02E20) holding them before the zone end (0x15F, 3.5.2 0xC10710, 3.6 0xC18430), so the
     // slot taken is the first of them whose start calls AFortGameMode::SendStayWithParty, which the zone end does on
-    // 3.3 to 4.0 and no other slot holding the offsets does. A build where none does takes the first of them, as before.
+    // 3.3 to 4.0 and no other slot holding the offsets does. A build where none does takes the first of them that takes
+    // no argument (Core calls it with none): 7.00's slot 0xC5 (0xEC7500) holds both offsets but takes an object, and its
+    // zone end is 0x174 (0xED8B90; 6.31 0x172, 0xF335F0, the same body). Then the first of them, as before.
     void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
     const std::vector<std::vector<int32_t>> ZoneOffsets{ Bytes32(EndOfZoneRemainTimeOffset), Bytes32(ActiveSpawnPadOffset) };
     const int32_t StaySlot = ClientStayWithPartySlot();
     int32_t GameModeIndex = StaySlot >= 0 ? FirstEntryContaining(ZoneVTable, ZoneOffsets, Contains, [StaySlot](uintptr_t Function) { return ZoneEndStayWithParty(Function, StaySlot) != 0; }) : -1;
+    if (GameModeIndex < 0)
+    {
+        GameModeIndex = FirstEntryContaining(ZoneVTable, ZoneOffsets, Contains, [](uintptr_t Function) { return !ReadsSecondArgument(Function); });
+    }
     if (GameModeIndex < 0)
     {
         GameModeIndex = FirstEntryContaining(ZoneVTable, ZoneOffsets, Contains, AnyEntry);

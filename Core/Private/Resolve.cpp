@@ -16724,7 +16724,13 @@ bool Finder::ResolveTeamChangeLive()
     std::vector<int32_t> Slots;
     for (uintptr_t Call = Place ? FindVirtualCall(Place, End) : 0; Call; Call = FindVirtualCall(Call + 6, End))
     {
-        Slots.push_back(VirtualSlot(Call));
+        // 1.7.2's (0x584190) has PickTeam (0xA78) and AttemptChangeTeamInfoForController (0xA60, 0x5842EA) as well, but its
+        // log's lea at 0x584207 ("48 8D 3D CA FF 96 03") holds the bytes of one more such call, with a negative
+        // displacement: no slot, so it isn't counted (CoreV2 #465).
+        if (VirtualSlot(Call) > 0)
+        {
+            Slots.push_back(VirtualSlot(Call));
+        }
     }
     // (The team interface's GetTeam before them is a short call, [rax+28h].) In the vtable PickTeam comes right after
     // PlacePlayerOnTeam, which comes after AttemptChangeTeamInfoForController and CreateTeam: 3 slots apart.

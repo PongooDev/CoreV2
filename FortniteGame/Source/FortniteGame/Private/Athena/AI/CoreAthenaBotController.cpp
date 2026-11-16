@@ -4339,7 +4339,8 @@ namespace
     {
         static std::vector<UFortMontageItemDefinitionBase*> EmoteAssets;
         static bool bLoaded = false;
-        if (!bLoaded)
+        // 1.7.2 has no UFortMontageItemDefinitionBase (its emotes are ServerEmote's): no emotes for the bots there.
+        if (!bLoaded && UFortMontageItemDefinitionBase::StaticClass())
         {
             bLoaded = true;
             for (const wchar_t* Path : { L"/Game/Athena/Items/Cosmetics/Dances/EID_DanceMoves.EID_DanceMoves", L"/Game/Athena/Items/Cosmetics/Dances/EID_Floss.EID_Floss",
@@ -4366,7 +4367,7 @@ void FCoreAthenaBotController::StopEmote()
     EmoteUntil = 0.0f;
     AFortPlayerPawnAthena* Pawn = GetPawn();
     UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
-    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UFortGameData* GameData = UFortGameData::HasEmoteGameplayAbility() ? UFortAssetManager::Get().GetGameData() : nullptr;
     UClass* AbilityClass = GameData ? GameData->EmoteGameplayAbility.LoadSynchronous() : nullptr;
     FGameplayAbilitySpec* Spec = AbilitySystem && AbilityClass ? AbilitySystem->FindAbilitySpecFromClass(AbilityClass) : nullptr;
     if (!Spec)
@@ -4425,7 +4426,9 @@ void FCoreAthenaBotController::PreloadAssets()
     {
         KeepLoaded(Emote->Animation.LoadSynchronous());
     }
-    if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+    // 1.7.2 has no emote ability (and no emotes for the bots: BotEmotes finds none); asking for it ended the server at
+    // the first bot (CoreV2 #465).
+    if (UFortGameData* GameData = UFortGameData::HasEmoteGameplayAbility() ? UFortAssetManager::Get().GetGameData() : nullptr)
     {
         KeepLoaded(GameData->EmoteGameplayAbility.LoadSynchronous());
     }
@@ -4442,7 +4445,7 @@ void FCoreAthenaBotController::GetPreloadAssetPaths(std::vector<std::wstring>& O
     {
         AddSoftPath(Emote->Animation.ToStringReference(), OutPaths);
     }
-    if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+    if (UFortGameData* GameData = UFortGameData::HasEmoteGameplayAbility() ? UFortAssetManager::Get().GetGameData() : nullptr)
     {
         AddSoftPath(GameData->EmoteGameplayAbility.ToStringReference(), OutPaths);
     }
@@ -4530,7 +4533,7 @@ bool FCoreAthenaBotController::PlayEmote(float Now, float Duration)
     std::vector<UFortMontageItemDefinitionBase*>& EmoteAssets = BotEmotes();
     AFortPlayerPawnAthena* Pawn = GetPawn();
     UAbilitySystemComponent* AbilitySystem = Pawn ? static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent) : nullptr;
-    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UFortGameData* GameData = UFortGameData::HasEmoteGameplayAbility() ? UFortAssetManager::Get().GetGameData() : nullptr;
     UClass* AbilityClass = GameData ? GameData->EmoteGameplayAbility.LoadSynchronous() : nullptr;
     UGameplayAbility* Ability = AbilityClass && AbilityClass->IsChildOf(UGameplayAbility::StaticClass()) ? static_cast<UGameplayAbility*>(AbilityClass->GetDefaultObject()) : nullptr;
     if (!AbilitySystem || !Ability || EmoteAssets.empty())

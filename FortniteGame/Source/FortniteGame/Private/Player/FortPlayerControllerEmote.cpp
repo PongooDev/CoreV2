@@ -108,7 +108,7 @@ void AFortPlayerController::ServerPlayEmoteItem_Implementation(UFortMontageItemD
     // UFortGameData::EmoteGameplayAbility.
     UClass* ToyItemClass = UAthenaToyItemDefinition::StaticClass();
     UAthenaToyItemDefinition* Toy = ToyItemClass && UAthenaToyItemDefinition::HasToySpawnAbility() && EmoteAsset->IsA(ToyItemClass) ? static_cast<UAthenaToyItemDefinition*>(EmoteAsset) : nullptr;
-    UFortGameData* GameData = Toy ? nullptr : UFortAssetManager::Get().GetGameData();
+    UFortGameData* GameData = Toy || !UFortGameData::HasEmoteGameplayAbility() ? nullptr : UFortAssetManager::Get().GetGameData();
     UClass* AbilityClass = Toy ? Toy->ToySpawnAbility.LoadSynchronous() : GameData ? GameData->EmoteGameplayAbility.LoadSynchronous() : nullptr;
     UGameplayAbility* Ability = AbilityClass && AbilityClass->IsChildOf(UGameplayAbility::StaticClass()) ? static_cast<UGameplayAbility*>(AbilityClass->GetDefaultObject()) : nullptr;
     if (!Ability)

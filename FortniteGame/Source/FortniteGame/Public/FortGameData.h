@@ -54,8 +54,10 @@ public:
     DefineUProperty(TArray<TAssetPtr<UFortWorldItemDefinition>>, CheatInventoryItems)
     DefineUStructProperty(FFortPlayerSpawnPadPlacementData, DefaultPlayerSpawnPadPlacementData)
     DefineUProperty(TAssetPtr<UFortAbilitySet>, GenericPlayerAbilitySet)
-    // The ability an emote plays through (its montage comes from the spec's source object, the emote item).
+    // The ability an emote plays through (its montage comes from the spec's source object, the emote item). From 1.8;
+    // 1.7.2 has none (its emotes are AFortPlayerController::ServerEmote's, with no UFortMontageItemDefinitionBase).
     DefineUProperty(TAssetSubclassOf<UGameplayAbility>, EmoteGameplayAbility)
+    static bool HasEmoteGameplayAbility() { return Member_EmoteGameplayAbility.IsAvailable(); }
     // 4.0: the ability a spray plays through (GAB_Spray_Generic; the spray is the spec's source object).
     DefineUProperty(TAssetSubclassOf<UGameplayAbility>, SprayGameplayAbility)
     DefineUProperty(TAssetPtr<UFortWorldItemDefinition>, EditToolItem)

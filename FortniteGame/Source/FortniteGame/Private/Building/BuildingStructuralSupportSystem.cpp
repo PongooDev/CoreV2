@@ -4,7 +4,10 @@
 #include "Building/BuildingSMActor.h"
 #include "Containers/Array.h"
 #include "Engine/World.h"
+#include "Finder.h"
 #include "Hooks.h"
+#include "Log.h"
+#include "Math/Box.h"
 #include "Math/Rotator.h"
 #include "Math/Vector.h"
 #include "Natives.h"
@@ -97,6 +100,35 @@ bool UBuildingStructuralSupportSystem::GetGrid(FVector& OutOrigin, int32_t OutSi
         OutSize[Axis] = Size[Axis];
     }
     return OutSize[0] > 0 && OutSize[1] > 0 && OutSize[2] > 0;
+}
+
+bool UBuildingStructuralSupportSystem::GetGridBounds(FBox& OutBounds) const
+{
+    static const ptrdiff_t GridBounds = []() -> ptrdiff_t
+    {
+        // GridOrigin (12 bytes) is followed by GridBounds on every build that has the field; the offset is taken only
+        // when the graph's OnWorldInitialized reads it there: movups xmm0, [reg+GridOrigin+0Ch] (0F 10, mod 10).
+        const ptrdiff_t Expected = Natives::UBuildingStructuralSupportSystem_GridOrigin >= 0 ? Natives::UBuildingStructuralSupportSystem_GridOrigin + 12 : -1;
+        const std::vector<uintptr_t> Refs = Finder::StringRefs(L"AFortNavigationGraph::OnWorldInitialized time:%.3fms memory:%.1fkB");
+        const uintptr_t WorldInit = Refs.size() == 1 ? Finder::FunctionStart(Refs[0]) : 0;
+        for (uintptr_t Site = WorldInit; Expected >= 0 && WorldInit && Site + 7 <= WorldInit + 0x140; ++Site)
+        {
+            const uint8_t* Code = reinterpret_cast<const uint8_t*>(Site);
+            if (Code[0] == 0x0F && Code[1] == 0x10 && (Code[2] & 0xC7) != 0x84 && (Code[2] & 0xC0) == 0x80 && *reinterpret_cast<const int32_t*>(Code + 3) == Expected)
+            {
+                Log::Info(L"Finder: UBuildingStructuralSupportSystem::GridBounds +0x{:X} (read by AFortNavigationGraph::OnWorldInitialized +0x{:X})", Expected, Site - Finder::ImageBase());
+                return Expected;
+            }
+        }
+        Log::Info(L"Finder: UBuildingStructuralSupportSystem::GridBounds not found (OnWorldInitialized {})", WorldInit != 0);
+        return -1;
+    }();
+    if (GridBounds < 0)
+    {
+        return false;
+    }
+    OutBounds = *reinterpret_cast<const FBox*>(reinterpret_cast<const uint8_t*>(this) + GridBounds);
+    return OutBounds.IsValid != 0;
 }
 
 void UBuildingStructuralSupportSystem::InitializeGrid(const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ, int32_t MinCellZ)

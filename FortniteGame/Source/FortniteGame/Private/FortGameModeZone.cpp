@@ -8,6 +8,7 @@
 #include "Player/FortPlayerStateOutpost.h"
 #include "AI/FortAIDirector.h"
 #include "AI/FortAIGoalManager.h"
+#include "AI/FortNavSystem.h"
 #include "AI/Navigation/FortNavigationGraph.h"
 #include "AI/Navigation/NavigationSystem.h"
 #include "AI/Navigation/NavMeshBoundsVolume.h"
@@ -345,8 +346,52 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     UWorld* World = GetWorld();
     ABuildingContainer::LogWorldContainers(World);
     UNavigationSystem* NavSys = World ? World->GetNavigationSystem() : nullptr;
-    if (NavSys)
+    AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    UBuildingStructuralSupportSystem* SupportSystem = GameState ? static_cast<UBuildingStructuralSupportSystem*>(GameState->StructuralSupportSystem) : nullptr;
+
+    // Epic's world-ready step gives the building grid's bounds to UFortNavSystem::PrepareBoundsAndUnlock (6.31 0xB433E0,
+    // a virtual whose caller is stripped): the grid's GridBounds, for every agent, in the persistent level, which its
+    // GatherNavigationBounds override (6.31 0xB36A20) adds to the system's bounds when that level is valid. It then does
+    // what the steps below restored one by one (the missing navigation data, the octree, the initial building lock, whose
+    // release rebuilds the navmeshes inside those bounds) and gives the main navmesh the AI system's hot spot manager,
+    // which they didn't. Bounds and unlock are its own, so they are used wherever it is there intact (#469: on 6.31, with
+    // the unit NavMeshBoundsVolume sized by hand, no husk ever projected onto FortNavMesh-Husk). 21.40 has
+    // GridNavBounds and ShouldAddGridNavBound; which UniqueID Epic gives the grid's bounds isn't known: the support
+    // system's (one no volume has). The graph's OnWorldInitialized it runs returns at once, its cells being laid out
+    // (Core's, from the grid, 6.31 0xB80AEB), so Core's own below still loads the terrain.
+    bool bPreparedBounds = false;
+    UFortNavSystem* const FortNavSys = NavSys ? Cast<UFortNavSystem>(reinterpret_cast<UObject*>(NavSys)) : nullptr;
+    FBox GridBounds;
+    if (FortNavSys && SupportSystem && SupportSystem->GetGridBounds(GridBounds))
     {
+        FNavigationBounds Bounds;
+        Bounds.UniqueID = SupportSystem->GetUniqueID();
+        Bounds.AreaBox = GridBounds;
+        Bounds.Level = FWeakObjectPtr(reinterpret_cast<UObject*>(static_cast<ULevel*>(World->PersistentLevel)));
+        const TArray<ANavigationData*>& NavDataSet = NavSys->NavDataSet;
+        const int32_t NumNavData = NavDataSet.Num();
+        const double Started = NowMs();
+        bPreparedBounds = FortNavSys->PrepareBoundsAndUnlock(Bounds);
+        if (bPreparedBounds)
+        {
+            const double Elapsed = NowMs() - Started;
+            std::wstring Names;
+            for (ANavigationData* NavData : NavDataSet)
+            {
+                Names += (Names.empty() ? L"" : L", ") + (NavData ? reinterpret_cast<UObject*>(NavData)->GetName().ToStdString() : std::wstring(L"none"));
+            }
+            ANavigationData* MainNavData = NavSys->GetDefaultNavDataInstance();
+            UE_LOG(LogNavigation, Log, TEXT("PrepareBoundsAndUnlock: navigation bounds (%.0f, %.0f, %.0f) - (%.0f, %.0f, %.0f) from the building grid, %.3fms; navigation data for %d agents: %s (%d spawned); main %s; build lock 0x%X, octree lock %d"),
+                GridBounds.Min.X, GridBounds.Min.Y, GridBounds.Min.Z, GridBounds.Max.X, GridBounds.Max.Y, GridBounds.Max.Z, Elapsed, NavSys->SupportedAgents.Num(), Names.c_str(),
+                NavDataSet.Num() - NumNavData, MainNavData ? *reinterpret_cast<UObject*>(MainNavData)->GetName() : TEXT("none"), static_cast<uint32_t>(NavSys->NavBuildingLockFlags),
+                NavSys->IsNavigationOctreeLocked() ? 1 : 0);
+        }
+    }
+
+    if (NavSys && !bPreparedBounds)
+    {
+        // Where PrepareBoundsAndUnlock isn't there (1.1's body is stripped), its steps one by one.
+        //
         // The supported agents' navigation data: FortNavMesh-Husk and FortNavMesh-Smasher, the husks' navmeshes (their
         // agents' navigation data and the system's main one), and the graph. Up to 4.5 the navigation system spawns them
         // by itself once the zone's unit NavMeshBoundsVolume is in the world (bAutoCreateNavigationData). From 5.0 (UE
@@ -386,8 +431,6 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
         NavSys->SetNavigationOctreeLock(false);
         NavSys->ConditionalPopulateNavOctree();
 
-        AFortGameStateZone* GameState = World ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-        UBuildingStructuralSupportSystem* SupportSystem = GameState ? static_cast<UBuildingStructuralSupportSystem*>(GameState->StructuralSupportSystem) : nullptr;
         FVector GridMin(0, 0, 0);
         int32_t GridSize[3] = {};
         const bool bHasGrid = SupportSystem && SupportSystem->GetGrid(GridMin, GridSize);
@@ -499,6 +542,46 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     if (AFortNavigationGraph* NavGraph = AFortNavigationGraph::GetCurrent(World))
     {
         NavGraph->OnWorldInitialized();
+    }
+
+    // #469 diagnostics, once: whether the husks' navmesh has tiles half a minute after the build was let go, at the
+    // grid's centre and at the spawn pad (UFortNavSystem::IsNavmeshInRadiusInitialized, a reflected static), and whether
+    // the system is still building.
+    if (World && FortNavSys)
+    {
+        const TWeakObjectPtr<AFortGameModeZone> WeakThis(this);
+        const FVector GridCentre = bPreparedBounds ? GridBounds.GetCenter() : FVector(0, 0, 0);
+        FTimerHandle NavMeshCheckHandle;
+        World->GetTimerManager().SetTimer(NavMeshCheckHandle, FTimerDelegate::CreateLambda([WeakThis, GridCentre]()
+        {
+            AFortGameModeZone* Zone = WeakThis.Get();
+            UWorld* ZoneWorld = Zone ? Zone->GetWorld() : nullptr;
+            UClass* NavSysClass = UFortNavSystem::StaticClass();
+            UFunction* Initialized = NavSysClass ? NavSysClass->FindFunctionByName(FName(L"IsNavmeshInRadiusInitialized", FNAME_Find)) : nullptr;
+            if (!ZoneWorld)
+            {
+                return;
+            }
+            const auto IsInitialized = [&](const FVector& Location) -> std::wstring
+            {
+                if (!Initialized)
+                {
+                    return L"?";
+                }
+                Reflection::FParams Params(Initialized, true);
+                bool* Result = Params.Get<bool>(L"ReturnValue");
+                if (!Result || !Params.Set(L"WorldContext", reinterpret_cast<UObject*>(Zone)) || !Params.Set(L"TestLocation", Location) || !Params.Set(L"TestRadius", 2000.0f)
+                    || !Params.Call(NavSysClass->GetDefaultObject()))
+                {
+                    return L"?";
+                }
+                return *Result ? L"yes" : L"no";
+            };
+            AActor* SpawnPad = Member_ActiveSpawnPad.IsAvailable() ? static_cast<AActor*>(Zone->ActiveSpawnPad) : nullptr;
+            const FVector PadLocation = SpawnPad ? SpawnPad->GetTransform().GetLocation() : FVector(0, 0, 0);
+            UE_LOG(LogNavigation, Log, TEXT("Navmesh 30 s on: tiles at the grid's centre (%.0f, %.0f, %.0f) %s, at the spawn pad %s; being built %s"), GridCentre.X, GridCentre.Y, GridCentre.Z,
+                IsInitialized(GridCentre).c_str(), SpawnPad ? IsInitialized(PadLocation).c_str() : TEXT("(no pad)"), UNavigationSystem::IsNavigationBeingBuilt(Zone) ? TEXT("yes") : TEXT("no"));
+        }), 30.0f, false);
     }
 
     if (AFortGameModeOutpost* Outpost = Cast<AFortGameModeOutpost>(reinterpret_cast<UObject*>(this)))

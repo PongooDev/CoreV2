@@ -39,6 +39,11 @@ public:
 
     void InitializeGrid(const FVector* GridCenter, int32_t TileCells, int32_t TilesX, int32_t TilesY, int32_t CellsZ, int32_t MinCellZ);
     bool GetGrid(FVector& OutOrigin, int32_t OutSize[3]) const;
+    // GridBounds (21.40's name, an FBox right after GridOrigin): the box InitializeGrid lays the grid out in, half a cell
+    // past its outer cells' centres in X and Y. The navigation graph's OnWorldInitialized copies it as its own bounds
+    // (6.22 0xB5A686, 6.30 0xB7F0E6, 6.31 0xB80B66: movups xmm0, [support system+GridBounds]), which is what the offset
+    // is checked against. False where it isn't found or the grid isn't laid out.
+    bool GetGridBounds(struct FBox& OutBounds) const;
 
     // Whether a piece of BuildingSMActorClassToCheck may go at Location and Rotation: the grid's own query, which
     // AFortPlayerController::CanPlaceBuildableClassInStructuralGrid (5.40 0x1199920, after its permission and limit

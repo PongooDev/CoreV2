@@ -77,9 +77,10 @@ public:
     DefineUStructProperty(FScalableFloat, PercentAmmoToDrop)
 
     // The server's part of the mutator's OnGamePhaseStepChanged, from the game state's GamePhaseStepChanged (Core's
-    // AFortGameModeAthena::HandleGamePhaseStepChanged hears the same broadcast and passes the step on): the wall and the
-    // restaurants at BusLocked, the step the build's own sends GameMsg_Intro at ("The enemy team is preparing to attack
-    // your restaurant. Build a fort around it!"), once the buses' paths are chosen and before their drop.
+    // AFortGameModeAthena::HandleGamePhaseStepChanged hears the same broadcast and passes the step on): the wall from the
+    // warmup on (its line, the buses' midline, is known from the playlist's load), the restaurants at BusLocked, the step
+    // the build's own sends GameMsg_Intro at ("The enemy team is preparing to attack your restaurant. Build a fort around
+    // it!"), once the storm has its circles.
     void OnGamePhaseStepChanged(AFortGameModeAthena* GameMode, uint8_t GamePhaseStep);
     // The game mode's OnSafeZoneUpdated (Core's HandleSafeZoneUpdated passes it on): the storm's circles are picked, so
     // the restaurants can stand around the play area's centre.
@@ -101,10 +102,11 @@ public:
 private:
     // Half the width of a restaurant (TeamObjective_Food1_C's floor pieces reach 1024 from its middle).
     static constexpr float RestaurantHalfExtent = 1024.0f;
-    // A building step's height (a wall's 384 is three; Core's reading of ObjectiveZOffset's 3).
-    static constexpr float BuildingStepHeight = 128.0f;
+    // The player building grid: 512 uu cells, 384 uu a level.
+    static constexpr float BuildingCellSize = 512.0f;
+    static constexpr float BuildingLevelHeight = 384.0f;
 
-    // The wall and the restaurants, once: from BusLocked on and once the storm's circles are picked.
+    // The restaurants, once: from BusLocked on and once the storm's circles are picked.
     void SpawnModeObjects(AFortGameModeAthena* GameMode);
     // The wall along the game state's FlightPathMidLine (AAthenaBigBaseWall::CreateWall), its foot at the lowest ground
     // along the line, and the mutator's side of its two delegates.
@@ -113,7 +115,7 @@ private:
     // nearest the play area's centre (storm circle SafeZoneIndex's), on the side its bus flies, the mascots facing each
     // other; the mascot's destroyed delegate, the team's CheckHealthThreshold timer and the HUD's objective entry.
     void SpawnObjectives(AFortGameModeAthena* GameMode, const FVector& SafeZoneCenter, int32_t SafeZoneIndex);
-    void SpawnObjective(FBarrierTeamState& TeamState, const FVector& Location, float Yaw, int32_t ObjectId);
+    void SpawnObjective(FBarrierTeamState& TeamState, const FVector& Location, float HeadYaw, int32_t ObjectId);
     // The build's CheckHealthThreshold(TeamNum) (0xD30510): the mascot's damage state from its health against
     // ObjectiveHealthTiers, and the game message of a new one.
     void CheckHealthThreshold(uint8_t TeamNum);

@@ -167,6 +167,13 @@ void AFortAthenaMutator_Barrier::ForEachBarrierMutator(AFortGameModeAthena* Game
 void AFortAthenaMutator_Barrier::OnGamePhaseStepChanged(AFortGameModeAthena* GameMode, uint8_t GamePhaseStep)
 {
 #if WITH_SERVER_CODE
+    // The barrier stands from the warmup on: its line is the game state's FlightPathMidLine, which the game mode's
+    // OnPlaylistDataLoaded (6.30 0xCAC3F0, slot 0x1A4) works out with the buses' paths (0xC4C780) before the warmup
+    // starts. The restaurants come at BusLocked, once the storm has its circles.
+    if (!BigBaseWall && GamePhaseStep >= EAthenaGamePhaseStep::GetWarmup())
+    {
+        SpawnBigBaseWall(GameMode);
+    }
     if (GamePhaseStep == EAthenaGamePhaseStep::GetBusLocked())
     {
         SpawnModeObjects(GameMode);
@@ -184,17 +191,21 @@ void AFortAthenaMutator_Barrier::OnSafeZoneUpdated(AFortGameModeAthena* GameMode
 void AFortAthenaMutator_Barrier::SpawnModeObjects(AFortGameModeAthena* GameMode)
 {
 #if WITH_SERVER_CODE
-    // Once the storm has its circles: the restaurants stand around the play area's centre (GetSafeZoneLocation), and the
-    // game mode picks every circle's centre as the storm starts, at BusLocked.
+    // The restaurants, once the storm has its circles (the game mode picks every circle's centre as the storm starts,
+    // at BusLocked): they stand around the play area's centre (GetSafeZoneLocation).
     AFortGameStateAthena* GameState = GameStateOf(GameMode);
+    const FBarrierTeamState& Team0 = Team_0_State;
     FVector SafeZoneCenter;
     const int32_t SafeZoneIndex = LastSafeZoneWithRadius(GameState);
-    if (BigBaseWall || !GameState || GameState->GamePhase < EAthenaGamePhase::GetAircraft() || SafeZoneIndex < 0
+    if (Team0.ObjectiveFlag || !GameState || GameState->GamePhase < EAthenaGamePhase::GetAircraft() || SafeZoneIndex < 0
         || !UFortKismetLibrary::GetSafeZoneLocation(GameMode, SafeZoneIndex, SafeZoneCenter))
     {
         return;
     }
-    SpawnBigBaseWall(GameMode);
+    if (!BigBaseWall)
+    {
+        SpawnBigBaseWall(GameMode);
+    }
     SpawnObjectives(GameMode, SafeZoneCenter, SafeZoneIndex);
 #endif
 }
@@ -286,17 +297,23 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
         Team0Side = ((TeamMiddle - Center) | Right) >= 0.0f ? 1.0f : -1.0f;
     }
     FBarrierTeamState* States[2] = { &static_cast<FBarrierTeamState&>(Team_0_State), &static_cast<FBarrierTeamState&>(Team_1_State) };
-    const FVector Forward(std::cos(Yaw), std::sin(Yaw), 0.0f);
     for (int32_t Index = 0; Index < 2; ++Index)
     {
         const float Side = Index == 0 ? Team0Side : -Team0Side;
-        const FVector Spot = Center + Right * (Distance * Side);
-        // Above the highest of the ground under the restaurant's floor (its corners, RestaurantHalfExtent each way, and
-        // its middle), so no part of it is buried on a slope, then ObjectiveZOffset building steps higher.
+        const FVector Wanted = Center + Right * (Distance * Side);
+        // On the player building grid, unturned, so its pieces are cells players build onto and trap: TeamObjective_Food1_C's
+        // floors sit at (512, -256), (512, 256) and the like from its origin, and a grid floor's origin is the middle of its
+        // cell's -Y edge (the floor mesh spans X -256..256, Y 0..512; Core's bot floors, from the build tool, the same).
+        // So the restaurant's origin is a cell's middle.
+        const FVector Spot(std::floor(Wanted.X / BuildingCellSize) * BuildingCellSize + BuildingCellSize * 0.5f,
+            std::floor(Wanted.Y / BuildingCellSize) * BuildingCellSize + BuildingCellSize * 0.5f, 0.0f);
+        // Its floor (the pieces' tops are at its origin) on the first building level at or over the highest of the ground
+        // under it (its corners, RestaurantHalfExtent each way, and its middle) and ObjectiveZOffset, so no part of it is
+        // buried on a slope.
         float FloorZ = 0.0f;
         bool bFoundGround = false;
-        for (const FVector& Offset : { FVector(0.0f, 0.0f, 0.0f), (Forward + Right) * RestaurantHalfExtent, (Forward - Right) * RestaurantHalfExtent,
-                 (Right - Forward) * RestaurantHalfExtent, (Forward + Right) * -RestaurantHalfExtent })
+        for (const FVector& Offset : { FVector(0.0f, 0.0f, 0.0f), FVector(RestaurantHalfExtent, RestaurantHalfExtent, 0.0f), FVector(RestaurantHalfExtent, -RestaurantHalfExtent, 0.0f),
+                 FVector(-RestaurantHalfExtent, RestaurantHalfExtent, 0.0f), FVector(-RestaurantHalfExtent, -RestaurantHalfExtent, 0.0f) })
         {
             FVector Ground;
             if (GroundUnder(this, Spot + Offset, Ground) && (!bFoundGround || Ground.Z > FloorZ))
@@ -305,8 +322,8 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
                 bFoundGround = true;
             }
         }
-        const FVector Location(Spot.X, Spot.Y, FloorZ + ZOffset * BuildingStepHeight);
-        // Facing the other restaurant, across the wall.
+        const FVector Location(Spot.X, Spot.Y, std::ceil((FloorZ + ZOffset) / BuildingLevelHeight) * BuildingLevelHeight);
+        // The mascot faces the barrier (and the other team's mascot across it).
         const float FacingYaw = std::atan2(-Right.Y * Side, -Right.X * Side) * RadiansToDegrees;
         SpawnObjective(*States[Index], Location, FacingYaw, Index);
     }
@@ -316,7 +333,7 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
 #endif
 }
 
-void AFortAthenaMutator_Barrier::SpawnObjective(FBarrierTeamState& TeamState, const FVector& Location, float Yaw, int32_t ObjectId)
+void AFortAthenaMutator_Barrier::SpawnObjective(FBarrierTeamState& TeamState, const FVector& Location, float HeadYaw, int32_t ObjectId)
 {
 #if WITH_SERVER_CODE
     UWorld* World = GetWorld();
@@ -328,8 +345,9 @@ void AFortAthenaMutator_Barrier::SpawnObjective(FBarrierTeamState& TeamState, co
     FActorSpawnParameters SpawnParameters;
     SpawnParameters.Owner = this;
     SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    // The restaurant itself isn't turned (the grid's axes); only its mascot's head is.
     FTransform SpawnTransform;
-    SpawnTransform.Rotation = FRotator(0.0f, Yaw, 0.0f).Quaternion();
+    SpawnTransform.Rotation = FRotator(0.0f, 0.0f, 0.0f).Quaternion();
     SpawnTransform.SetLocation(Location);
     AAthenaBarrierFlag* Flag = Cast<AAthenaBarrierFlag>(World->SpawnActor(FlagClass, &SpawnTransform, SpawnParameters));
     if (!Flag)
@@ -347,7 +365,7 @@ void AFortAthenaMutator_Barrier::SpawnObjective(FBarrierTeamState& TeamState, co
         Objective->FoodTeam = TeamState.FoodTeam;
         // TeamGenerator_C's OnHeadRotationSet turns the head to HeadRotationYaw + 90 (its mesh faces the side): so it
         // looks along Yaw, at the other team's mascot.
-        Objective->HeadRotationYaw = Yaw - 90.0f;
+        Objective->HeadRotationYaw = HeadYaw - 90.0f;
         Objective->SetAllowDamage(false);
         Objective->ForceNetUpdate();
         TMulticastDelegate<AAthenaBarrierObjective*>* Destroyed = Objective->GetOnObjectiveDestroyed();
@@ -379,7 +397,7 @@ void AFortAthenaMutator_Barrier::SpawnObjective(FBarrierTeamState& TeamState, co
             FTimerDelegate::CreateUObject(this, &AFortAthenaMutator_Barrier::CheckHealthThreshold, static_cast<uint8_t>(TeamState.TeamNum)), HealthCheckRate, true);
     }
     Log::Info(L"Food Fight: team {}'s restaurant {} at ({:.0f}, {:.0f}, {:.0f}), facing {:.0f}; its mascot {} ({} of {} health); {} mutator objects for the HUD", TeamState.TeamNum.ToString(),
-        Flag->GetName().ToStdString(), Location.X, Location.Y, Location.Z, Yaw, Objective ? Objective->GetName().ToStdString() : std::wstring(L"none"),
+        Flag->GetName().ToStdString(), Location.X, Location.Y, Location.Z, HeadYaw, Objective ? Objective->GetName().ToStdString() : std::wstring(L"none"),
         Objective ? Objective->GetHealth() : 0.0f, Objective ? Objective->GetMaxHealth() : 0.0f,
         GameState && AFortGameStateAthena::HasMutatorObjectDataArray() ? static_cast<TStructArray<FGameplayMutatorObjectData>&>(static_cast<FGameplayMutatorObjectDataArray&>(GameState->MutatorObjectDataArray).ObjectDataList).Num() : -1);
 #endif
@@ -440,6 +458,15 @@ void AFortAthenaMutator_Barrier::OnObjectiveDestroyed(AAthenaBarrierObjective* O
     }
     FBarrierTeamState& Winner = Loser == &Team0 ? Team1 : Team0;
     Loser->bRespawnEnabled = false;
+    // Its restaurant's icon goes red: the flag's minimap and compass brushes are FoodDisplayData's Enabled ones while its
+    // CurrentState is FlagUp and the Disabled ones (tinted red) otherwise (AAthenaBarrierFlag 0xC48D40, which the
+    // mutator's FortGameStateAthena_OnDrawSpecialActorIconsOnMap draws, 0xD2A6B0). Replicated; the clients'
+    // OnRep_CurrentState plays the flag's OnStateChange.
+    if (AAthenaBarrierFlag* LoserFlag = Loser->ObjectiveFlag)
+    {
+        LoserFlag->CurrentState = EBarrierFlagState::GetFlagDown();
+        LoserFlag->ForceNetUpdate();
+    }
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(Team0.GetHealthCheckTimerHandle());

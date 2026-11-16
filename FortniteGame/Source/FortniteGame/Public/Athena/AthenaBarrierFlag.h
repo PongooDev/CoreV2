@@ -3,6 +3,13 @@
 #include "Athena/AthenaBarrierObjective.h"
 #include "Building/BuildingActor.h"
 
+class EBarrierFlagState
+{
+    DefineUnrealEnum(EBarrierFlagState, FortniteGame)
+    DefineUEnumValue(FlagUp)
+    DefineUEnumValue(FlagDown)
+};
+
 // A team's restaurant in Food Fight (from 6.30; TeamObjective_Food1_C, the Barrier mutator's ObjectiveFlag): the
 // under-construction building (its AthenaBuildingActorChildComponents, TeamObjective_Floor and _Roof) with the team's
 // mascot (a ChildActorComponent with TeamGenerator_C, an AAthenaBarrierObjective) on it. An ABuildingGameplayActor (Core
@@ -14,6 +21,8 @@ class AAthenaBarrierFlag : public ABuildingActor
 
 public:
     DefineUProperty(EBarrierFoodTeam, FoodTeam)
+    // FlagUp while its mascot stands, FlagDown once it is destroyed (replicated; its map icons go red).
+    DefineUProperty(EBarrierFlagState, CurrentState)
 
     // The restaurant's mascot: its blueprint's GetObjectiveActor (the ChildActorComponent's ChildActor).
     AAthenaBarrierObjective* GetObjectiveActor() const;

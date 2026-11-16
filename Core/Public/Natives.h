@@ -642,6 +642,11 @@ namespace Natives
     // (6.01 0xBCF370, 6.02 0xBD08A0, both slot 0x135), which the pawn's death asks before it has the player respawn.
     // -1 where it isn't found: the builds before 6.01, whose game state doesn't reflect bAllowRespawning.
     inline int32_t AFortGameModeAthena_IsRespawningAllowedIndex = -1;
+    // Where Finder::ResolveDBNOEnabledLive finds it (6.31 0xC9B300): the game mode's DBNO check for a player, which the
+    // player pawn's knock asks (AFortPlayerPawnAthena 0xD1C4A0) before it downs one. The game mode's mutators first, then
+    // the playlist's DBNOType: no knock for NotWhenRespawning while the player would respawn (the game mode's
+    // IsRespawningAllowed, slot 0x137), nor for Off. bDBNOEnabled without a game state.
+    inline bool (*AFortGameModeAthena_GetDBNOEnabled)(AFortGameModeAthena* This, AFortPlayerState* PlayerState, AFortGameStateAthena* GameState) = nullptr;
     // From 5.21 (Finder::ResolveLootDataTablesLive): the slots of AFortGameMode::GetLootTierDataTables and
     // GetLootPackageDataTables (21.40's names; 6.02 slots 0x132 and 0x133), the loot tables every roll reads. The game
     // mode's own (6.02 0xE43050, 0xE43030) are the game data's LootTierDataTables and LootPackageDataTables;

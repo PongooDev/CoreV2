@@ -289,6 +289,10 @@ namespace Finder
     // AFortGameModeAthena's GameplayMutators; AllowRespawningOffset and AllowRespawningMask: the byte and the bit of
     // AFortGameStateAthena's bAllowRespawning. False where there is none, or more than one.
     bool ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, ptrdiff_t AllowRespawningOffset, uint8_t AllowRespawningMask);
+    // The game mode's DBNO check for a player (Natives::AFortGameModeAthena_GetDBNOEnabled): the one function that compares
+    // the playlist's DBNOType (at PlaylistDBNOTypeOffset) with NotWhenRespawning (2) and Off (1) and reads the game mode's
+    // GameplayMutators (at GameplayMutatorsOffset). False where there is none, or more than one.
+    bool ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t GameplayMutatorsOffset);
     // From 5.21: the slots of AFortGameMode::GetLootTierDataTables and GetLootPackageDataTables (Natives), the two
     // AFortGameModeAthena overrides that load the playlist's LootTierData and LootPackages and call their Super, the game
     // mode's own GetLootTierDataTables reading the game data's LootTierDataTables. GameDataLootTierDataTablesOffset:

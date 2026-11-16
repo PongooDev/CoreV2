@@ -26,6 +26,7 @@ class EDeathCause
 {
     DefineUnrealEnum(EDeathCause, FortniteGame)
     DefineUEnumValue(OutsideSafeZone)
+    DefineUEnumValue(FallDamage)
     DefineUEnumValue(Unspecified)
 };
 

@@ -2959,21 +2959,25 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
             Location.empty() ? std::wstring() : std::format(L", at {}", Location));
     }
 
-    // The killer earned the kill, a player or a bot of another team, once the bus has left: the game state's mutators
-    // hear of it (Team Rumble's adds it to the killer's team score), as for a player's death (AFortPlayerControllerAthena::
-    // OnPawnDied).
-    AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
-    if (GameState && bAircraftStarted && State && KillerState && KillerState != State && static_cast<uint8_t>(KillerState->TeamIndex) != static_cast<uint8_t>(State->TeamIndex))
-    {
-        GameState->OnPostEarnedKill(KillerState);
-    }
-
     // A player's team is out once its players are out too (Core's death handler left its place to its bots then); in a
     // large team game any of the team's players. A teammate waiting to respawn keeps it in, as in AliveTeams (#432).
     const bool bPlayersTeam = Bot->IsOnPlayersTeam() || (HasSquadsInTeams() && HumanTeams().contains(Bot->GetTeam()));
     const bool bTeamOut = std::none_of(PlayerBots.begin(), PlayerBots.end(), [Bot](const auto& Other) { return Other.get() != Bot && Other->IsInMatch() && Other->GetTeam() == Bot->GetTeam(); })
         && !(bPlayersTeam && HasAlivePlayerOnTeam(Athena, Bot->GetTeam()));
     Bot->OnPossesedPawnDied(KillerState);
+    // The killer earned the kill, a player or a bot of another team, once the bus has left: the game state's mutators
+    // hear of it (Team Rumble's adds it to the killer's team score), as for a player's death (AFortPlayerControllerAthena::
+    // OnPawnDied). Not for a death to the storm or a fall: the bot's eliminator is whoever hurt it last, but a player's
+    // death there names no one else (the storm's damage names the victim's own controller), so nobody earned it and
+    // 6.31's Team Rumble gives no team a point for it. The death cause is the one OnPossesedPawnDied just stored.
+    AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+    const uint8_t DeathCause = State && AFortPlayerStateAthena::HasEliminator() && AFortPlayerStateAthena::HasToDeathCause() ? static_cast<uint8_t>(State->DeathInfo.DeathCause) : EDeathCause::GetUnspecified();
+    const bool bEnvironmentDeath = DeathCause == EDeathCause::GetOutsideSafeZone() || DeathCause == EDeathCause::GetFallDamage();
+    if (GameState && bAircraftStarted && State && KillerState && KillerState != State && !bEnvironmentDeath
+        && static_cast<uint8_t>(KillerState->TeamIndex) != static_cast<uint8_t>(State->TeamIndex))
+    {
+        GameState->OnPostEarnedKill(KillerState);
+    }
     // A playlist that brings its players back (Playground, CoreV2 #344): the bot is still in the match, as a respawning
     // player stays among the alive players; no place, no outlive events, the counts stay.
     if (Bot->IsRespawnPending())

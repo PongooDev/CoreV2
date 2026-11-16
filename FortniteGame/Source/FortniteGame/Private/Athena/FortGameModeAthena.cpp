@@ -2555,6 +2555,28 @@ bool AFortGameModeAthena::IsRespawningAllowed(AFortPlayerStateAthena* PlayerStat
         || PlayerState->DeathInfo.DeathCause != EDeathCause::GetOutsideSafeZone();
 }
 
+bool AFortGameModeAthena::GetDBNOEnabled(AFortPlayerStateAthena* PlayerState)
+{
+    AFortGameStateAthena* GameState = AthenaGameStateOf(this);
+    if (Natives::AFortGameModeAthena_GetDBNOEnabled)
+    {
+        return Natives::AFortGameModeAthena_GetDBNOEnabled(this, reinterpret_cast<AFortPlayerState*>(PlayerState), GameState);
+    }
+    // The same rule from the playlist (6.31 0xC9B300 without the game mode's mutators): a playlist without DBNO, or one
+    // without it while the player respawns.
+    UFortPlaylist* Playlist = GameState && UFortPlaylist::HasDBNOType() && AFortGameStateAthena::HasCurrentPlaylist() ? static_cast<UFortPlaylist*>(GameState->GetCurrentPlaylist()) : nullptr;
+    if (!Playlist)
+    {
+        return true;
+    }
+    const uint8_t DBNOType = Playlist->DBNOType;
+    if (DBNOType == EDBNOType::GetOff())
+    {
+        return false;
+    }
+    return DBNOType != EDBNOType::GetNotWhenRespawning() || !IsRespawningAllowed(PlayerState);
+}
+
 float AFortGameModeAthena::GetRespawnHeight(const FVector& DeathLocation)
 {
     // The playlist's RespawnHeight is a scalable float over its own game data (6.00's Playlist_Playground: Value 1 times
@@ -3333,6 +3355,11 @@ void AFortGameModeAthena::HookVTables()
     if (Configuration::Get().IsBattleRoyale() && StaticClass() && AFortGameStateAthena::HasAllowRespawning())
     {
         Finder::ResolveIsRespawningAllowedLive(GameplayMutatorsOffset(), AFortGameStateAthena::AllowRespawningOffset(), AFortGameStateAthena::AllowRespawningMask());
+    }
+    // The game mode's DBNO check for a player (6.31), which Core's player bots ask before they go down.
+    if (Configuration::Get().IsBattleRoyale() && StaticClass() && UFortPlaylist::HasDBNOType() && GameplayMutatorsOffset() >= 0)
+    {
+        Finder::ResolveDBNOEnabledLive(UFortPlaylist::DBNOTypeOffset(), GameplayMutatorsOffset());
     }
 
     UClass* AthenaClass = StaticClass();

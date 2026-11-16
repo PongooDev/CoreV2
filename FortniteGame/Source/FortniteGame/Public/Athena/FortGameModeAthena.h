@@ -177,6 +177,12 @@ public:
     // rule is the stored death's location against the safe zone, for a death stored as the game stores one
     // (DeathInfo.bInitialized, AFortPlayerStateAthena::SetDeathInfo); Core's reading of the death cause stays under it.
     bool IsRespawningAllowed(AFortPlayerStateAthena* PlayerState);
+    // Whether PlayerState's pawn is knocked down before it is out, as the game mode decides it for a player's pawn
+    // (21.40's GetDBNOEnabled is the mode's own answer; 6.31's, 0xC9B300, takes the player, which AFortPlayerPawnAthena's
+    // knock asks). The build's own where Finder::ResolveDBNOEnabledLive found it. Elsewhere Core reads the playlist's
+    // DBNOType the same way: Off is no, NotWhenRespawning is no while IsRespawningAllowed says yes. Core's player bots ask
+    // it before they go down (6.31's Team Rumble: NotWhenRespawning, so nobody is knocked).
+    bool GetDBNOEnabled(AFortPlayerStateAthena* PlayerState);
     // How far over DeathLocation, where they died, a respawning player (or player bot) starts skydiving: the match's
     // playlist's RespawnHeight where the playlist has one (from 5.41) and it comes to more than 1000, else
     // DefaultRespawnHeight. Before 5.41 the playlist has only RespawnLocation Air, and the player comes back as high as

@@ -55,6 +55,11 @@ public:
     // none on most playlists.
     DefineUProperty(UPlaylistUserOptions*, UserOptions)
     static bool HasUserOptions() { return Member_UserOptions.IsAvailable(); }
+    // Whether a player is knocked down before they are out (EDBNOType; 6.31's Team Rumble, Playlist_Respawn_24:
+    // NotWhenRespawning). The game mode's DBNO check reads it (AFortGameModeAthena::GetDBNOEnabled).
+    DefineUProperty(uint8_t, DBNOType)
+    static bool HasDBNOType() { return Member_DBNOType.IsAvailable(); }
+    static ptrdiff_t DBNOTypeOffset() { return Member_DBNOType.IsAvailable() ? Member_DBNOType.GetOffsetChecked() : -1; }
 
     // A Showdown playlist, one of 6.10's in-game tournaments' (CL-4480234; Playlist_Showdown_Solo, _Duos and _Squads,
     // 58071 to 58073): the playlist name is one the tournament manager gives a match type, as its own lookup has it
@@ -69,6 +74,16 @@ public:
     // ClientNotifyTournamentStatsFinal). The name is Core's; no build before 6.10 has the three Showdown playlists, none
     // before 6.20 the Fortnitemares ones.
     bool IsShowdownPlaylist() const;
+};
+
+// A playlist's DBNO: On (knocked down while a teammate stands), Off, or NotWhenRespawning (off while the match brings
+// the player back).
+class EDBNOType
+{
+    DefineUnrealEnum(EDBNOType, FortniteGame)
+    DefineUEnumValue(On)
+    DefineUEnumValue(Off)
+    DefineUEnumValue(NotWhenRespawning)
 };
 
 // Whether the players of a playlist come back after they die (from 3.5; 4.2's Playground: InfiniteRespawnExceptStorm).

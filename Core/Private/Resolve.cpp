@@ -11100,6 +11100,75 @@ bool Finder::ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, pt
     return true;
 }
 
+bool Finder::ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t GameplayMutatorsOffset)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortGameModeAthena_GetDBNOEnabled != nullptr;
+    }
+    bSearched = true;
+
+    // The game mode's DBNO check for a player (6.31 CL-4573279 0xC9B300: the game mode, the player state, the game
+    // state). AFortPlayerPawnAthena's knock (0xD1C4A0) asks it before it downs the pawn. It asks each active mutator of
+    // the game mode's GameplayMutators first ("mov rbx, [rcx+1110h]", their slot 0xCD; the first that answers decides).
+    // Then it reads the playlist's DBNOType: with NotWhenRespawning ("cmp byte ptr [rbx+0F4h], 2") no knock while the
+    // game mode's IsRespawningAllowed (slot 0x137) says the player comes back; with Off ("cmp byte ptr [rbx+0F4h], 1")
+    // none at all. With no game state it is the game mode's bDBNOEnabled. 21.40's AFortGameMode::GetDBNOEnabled is the
+    // mode's own answer, with no player; 6.31's takes the player. Found as the one function with both compares that
+    // loads GameplayMutators.
+    const int32_t DBNOType = static_cast<int32_t>(PlaylistDBNOTypeOffset);
+    const int32_t Mutators = static_cast<int32_t>(GameplayMutatorsOffset);
+    if (DBNOType <= 0 || Mutators <= 0)
+    {
+        return false;
+    }
+    const auto ByteOf = [](int32_t Value, int32_t Shift) { return (Value >> Shift) & 0xFF; };
+    // cmp byte ptr [reg+DBNOType], Value (80 /7, mod 10, no SIB).
+    const auto ComparesDBNOType = [&](uintptr_t Site)
+    {
+        const uint8_t ModRm = Byte(Site + 1);
+        return (ModRm & 0xF8) == 0xB8 && (ModRm & 0x07) != 0x04;
+    };
+    const std::initializer_list<int32_t> NotWhenRespawning = { 0x80, -1, ByteOf(DBNOType, 0), ByteOf(DBNOType, 8), ByteOf(DBNOType, 16), ByteOf(DBNOType, 24), 0x02 };
+    const std::initializer_list<int32_t> Off = { 0x80, -1, ByteOf(DBNOType, 0), ByteOf(DBNOType, 8), ByteOf(DBNOType, 16), ByteOf(DBNOType, 24), 0x01 };
+    std::vector<uintptr_t> Functions;
+    for (uintptr_t Site = FindInstruction(Finder::TextBegin(), Finder::TextEnd(), NotWhenRespawning); Site; Site = FindInstruction(Site + 1, Finder::TextEnd(), NotWhenRespawning))
+    {
+        const uintptr_t Function = ComparesDBNOType(Site) ? Finder::FunctionStart(Site) : 0;
+        const uintptr_t End = Function ? Finder::FunctionEnd(Function) : 0;
+        if (!End || End - Function > 0x400 || std::find(Functions.begin(), Functions.end(), Function) != Functions.end())
+        {
+            continue;
+        }
+        bool bComparesOff = false;
+        for (uintptr_t At = FindInstruction(Function, End, Off); At && !bComparesOff; At = FindInstruction(At + 1, End, Off))
+        {
+            bComparesOff = ComparesDBNOType(At);
+        }
+        // mov r64, [reg+GameplayMutators] (REX.W, 8B, mod 10, no SIB).
+        bool bReadsMutators = false;
+        for (uintptr_t At = Function; At + 7 <= End && !bReadsMutators; ++At)
+        {
+            bReadsMutators = (Byte(At) & 0xFB) == 0x48 && Byte(At + 1) == 0x8B && (Byte(At + 2) & 0xC0) == 0x80 && (Byte(At + 2) & 0x07) != 0x04
+                && *reinterpret_cast<const int32_t*>(At + 3) == Mutators;
+        }
+        if (bComparesOff && bReadsMutators)
+        {
+            Functions.push_back(Function);
+        }
+    }
+    if (Functions.size() != 1)
+    {
+        Log::Info(L"Finder: the game mode's DBNO check wasn't found ({} functions compare the playlist's DBNOType +0x{:X} and read GameplayMutators +0x{:X}, 1 expected), so Core reads the playlist's DBNOType itself",
+            Functions.size(), DBNOType, Mutators);
+        return false;
+    }
+    Natives::AFortGameModeAthena_GetDBNOEnabled = reinterpret_cast<decltype(Natives::AFortGameModeAthena_GetDBNOEnabled)>(Functions.front());
+    Log::Info(L"Finder: the game mode's DBNO check for a player is 0x{:X} (its mutators, then the playlist's DBNOType)", Functions.front() - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveLootDataTablesLive(ptrdiff_t GameDataLootTierDataTablesOffset, ptrdiff_t PlaylistLootTierDataOffset, ptrdiff_t PlaylistLootPackagesOffset)
 {
     static bool bSearched = false;

@@ -7499,8 +7499,15 @@ bool FCoreAthenaBotController::CanGoDBNO() const
 {
     // Battle Royale's DBNO (GAB_AthenaDBNO): in a team playlist a player whose teammate is still up goes down instead of
     // out; a team all down is eliminated. The teammate is the game's (FCoreAthenaBotManager::HasStandingTeammate), so a
-    // bot Core's damage knocks and one a player's knocks go down alike.
-    return Manager->GetTeamSize() > 1 && IsAlive() && !IsDBNO() && Manager->HasStandingTeammate(this);
+    // bot Core's damage knocks and one a player's knocks go down alike. And only where the game mode would knock a player
+    // down (its DBNO check, which the player pawn's knock asks): 6.31's Team Rumble has none while its players respawn
+    // (NotWhenRespawning), so a bot there is out at once, as a player is.
+    if (Manager->GetTeamSize() <= 1 || !IsAlive() || IsDBNO() || !Manager->HasStandingTeammate(this))
+    {
+        return false;
+    }
+    AFortGameModeAthena* GameMode = Manager->GetGameMode();
+    return !GameMode || GameMode->GetDBNOEnabled(GetPlayerState());
 }
 
 namespace

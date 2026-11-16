@@ -116,7 +116,8 @@ public:
     // The point on the navigation data within QueryExtent of Point, or false when there is none there (no tile yet).
     // From 1.10 (UE 4.19); false on older builds, which don't have it.
     static bool K2_ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, FVector& ProjectedLocation, ANavigationData* NavData, const FVector& QueryExtent);
-    // The older one (UE 4.16's, 1.7.2 0x2A57150 builds its reflection): the point on the navigation data within
+    // The older one (UE 4.16's, 1.7.2 0x2A57150 and 1.8 0x2AD4610 build its reflection, its context parameter named
+    // WorldContext): the point on the navigation data within
     // QueryExtent of Point, or Point itself when there is none there. Point too where the build doesn't reflect it.
     static FVector ProjectPointToNavigation(UObject* WorldContextObject, const FVector& Point, ANavigationData* NavData, const FVector& QueryExtent);
 };

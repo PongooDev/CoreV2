@@ -157,8 +157,15 @@ FVector UNavigationSystem::ProjectPointToNavigation(UObject* WorldContextObject,
     {
         return Point;
     }
+    // UE 4.16 names its world context parameter WorldContext (1.7.2's reflection, 0x2A57150, and 1.8's, 0x2AD4610: Point,
+    // NavData, FilterClass, QueryExtent, WorldContext), as IsNavigationBeingBuilt does on those builds. Set as
+    // WorldContextObject, it stayed null, and the world context lookup called GetWorld on it (1.8 0x13DB060,
+    // "mov rax, [rcx]"): a 1.8 server died as its first bot landed (CoreV2 #473). With neither name it isn't called.
     Reflection::FParams Params(Function, true);
-    Params.Set(L"WorldContextObject", WorldContextObject);
+    if (!Params.Set(Params.Has(L"WorldContextObject") ? L"WorldContextObject" : L"WorldContext", WorldContextObject))
+    {
+        return Point;
+    }
     Params.Set(L"Point", Point);
     Params.Set(L"NavData", reinterpret_cast<UObject*>(NavData));
     Params.Set(L"QueryExtent", QueryExtent);

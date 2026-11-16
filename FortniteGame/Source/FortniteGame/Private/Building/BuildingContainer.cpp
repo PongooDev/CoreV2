@@ -384,6 +384,9 @@ void ABuildingContainer::RollAthenaLootAgain(UWorld* World)
     const int32_t WorldLevel = GameState && GameState->WorldManager ? static_cast<int32_t>(GameState->WorldLevel) : -1;
 
     int32_t Containers = 0;
+    int32_t Emptied = 0;
+    // SetSearched and HideContainer are slots found with SpawnLoot's (Finder::ResolveBuildingLootLive).
+    const bool bCanEmpty = Natives::ABuildingContainer_SpawnLootIndex >= 0 || Finder::ResolveBuildingLootLive();
     for (TObjectIterator<ABuildingContainer> It; It; ++It)
     {
         ABuildingContainer* Container = *It;
@@ -399,6 +402,24 @@ void ABuildingContainer::RollAthenaLootAgain(UWorld* World)
         if (!PickedKey.IsNone())
         {
             Container->SelectMeshSet(LootTier);
+        }
+        // As InitializeTierGroupData's roll of a new container: a tier that drops nothing (the match's playlist has no
+        // live row in the group: Sniper Shootout's Loot_AthenaAmmoLarge, every weight 0, on 1.11 to 3.2) leaves the
+        // container searched and hidden, so it doesn't stand there opening onto nothing (CoreV2 #216).
+        if (bCanEmpty && !Container->bAlwaysMaintainLoot && !UFortLootTier::ShouldDropLoot(PickedKey, L"ABuildingContainer::RollAthenaLootAgain"))
+        {
+            Container->ContainerLootTierKey = FName();
+            Container->SetSearched(nullptr);
+            AFortWorldManager* WorldManager = Container->GetWorldManager();
+            if (Container->bPersistToWorld && WorldManager)
+            {
+                Container->UpdateActorRecord(WorldManager, EFortBuildingPersistentState::GetSearched(), false);
+            }
+            if (!Container->bAlwaysShowContainer)
+            {
+                Container->HideContainer();
+            }
+            ++Emptied;
         }
         Container->UpdateReplicatedLootTier();
         ++Containers;
@@ -425,8 +446,8 @@ void ABuildingContainer::RollAthenaLootAgain(UWorld* World)
         Spot.Pickups.clear();
         SpawnFloorLootAt(Spot, World, WorldLevel);
     }
-    UE_LOG(LogFortBuilding, Log, TEXT("Loot rolled again (loot level %d): %d containers' tiers; floor loot: %d pickups removed, %d containers spawned %d pickups (%d loaded weapons)"),
-        WorldLevel, Containers, Removed, FloorLootContainers, FloorLootPickups, FloorLootLoadedWeapons);    FloorLootContainers = 0;
+    UE_LOG(LogFortBuilding, Log, TEXT("Loot rolled again (loot level %d): %d containers' tiers (%d drop nothing now, searched and hidden); floor loot: %d pickups removed, %d containers spawned %d pickups (%d loaded weapons)"),
+        WorldLevel, Containers, Emptied, Removed, FloorLootContainers, FloorLootPickups, FloorLootLoadedWeapons);    FloorLootContainers = 0;
     FloorLootPickups = 0;
     FloorLootLoadedWeapons = 0;
 #endif

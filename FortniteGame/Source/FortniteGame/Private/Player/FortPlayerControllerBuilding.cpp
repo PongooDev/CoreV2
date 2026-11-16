@@ -5,6 +5,7 @@
 #include "AbilitySystemComponent.h"
 #include "Athena/AI/AthenaNavSystem.h"
 #include "Building/BuildingSMActor.h"
+#include "Building/BuildingStructuralSupportSystem.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortAssetManager.h"
@@ -284,7 +285,16 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     const bool bCanAfford = CallVirtual<bool>(this, Natives::AFortPlayerController_CanAffordToPlaceBuildableClassIndex, &AffordClassData);
     const bool bHasRequiredLevel = HasRequiredBuildingLevel(BuildingClassData);
     TArray<ABuildingActor*> ExistingBuildings;
-    const int32_t QueryResult = CallVirtual<int32_t>(this, Natives::AFortPlayerController_CanPlaceBuildableClassInStructuralGridIndex, BuildingClass, &BuildLoc, &BuildRot, bMirrored, &ExistingBuildings);
+    // 7.00 (CL-4629139) gives CanPlaceBuildableClassInStructuralGrid a sixth argument, the grid query's
+    // MarkerOptionalAdjustment out parameter (the build preview query 0x12965B0 hands on its caller's, 0x140EE00 and
+    // 0x141D010 pass a local's). AFortPlayerControllerAthena's (0xC40A30) and AFortPlayerController's (0x1274060) hand it
+    // to UBuildingStructuralSupportSystem::CanAddBuildingActorToGrid (0xD81760), whose grid search can store
+    // FreeWallPieceOnTop in it (0xD8607E). Without it the grid wrote through whatever the stack slot held, and the server
+    // crashed as players built (#419, #479). It is passed on every build: before 7.00 (6.31 0x12BC380) the five-argument
+    // function never reads the sixth slot.
+    EFortBuildPreviewMarkerOptionalAdjustment MarkerOptionalAdjustment = EFortBuildPreviewMarkerOptionalAdjustment::None;
+    const int32_t QueryResult = CallVirtual<int32_t>(this, Natives::AFortPlayerController_CanPlaceBuildableClassInStructuralGridIndex, BuildingClass, &BuildLoc, &BuildRot, bMirrored, &ExistingBuildings,
+        &MarkerOptionalAdjustment);
     UWorld* World = GetWorld();
     if (!bCanAfford || !bHasRequiredLevel || QueryResult != 0 || !World)
     {

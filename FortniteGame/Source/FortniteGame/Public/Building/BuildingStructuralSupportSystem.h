@@ -30,6 +30,16 @@ namespace EFortStructuralGridQueryResults
     };
 }
 
+// How the grid moved a piece's build preview marker (7.00's reflected values, CL-4629139): the grid's query gives it back
+// from 7.00 on (CanAddBuildingActorClassToGrid's MarkerOptionalAdjustment out parameter, which
+// AFortPlayerController::CanPlaceBuildableClassInStructuralGrid takes too).
+enum class EFortBuildPreviewMarkerOptionalAdjustment : uint8_t
+{
+    None = 0,
+    FreeWallPieceOnTop = 1,
+    FreeWallPieceOnBottom = 2,
+};
+
 class UBuildingStructuralSupportSystem : public UObject
 {
     DefineUnrealClass(UBuildingStructuralSupportSystem, FortniteGame)

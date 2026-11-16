@@ -154,16 +154,20 @@ namespace
     }
 
     // Keeps a share of the world's placed ContainerClass between the two spawn percents, picked at random once a match,
-    // and destroys the rest, picked at random. The rows' units differ: AthenaGameData's Default.TreasureChest rows are
-    // percents (50 and 70) and its Default.AmmoBox rows fractions (0.65 and 0.8), so a value over 1 is read as a percent.
-    void ApplySpawnPercent(UWorld* World, UClass* ContainerClass, const FScalableFloat& MinSpawnPercent, const FScalableFloat& MaxSpawnPercent, const wchar_t* What)
+    // and destroys the rest, picked at random. A treasure chest's are percents: the map info's TreasureChest floats
+    // (Default__DefaultMapInfo_C, Value 1 on 2.4.2 to 7.00) read AthenaGameData's Default.TreasureChest rows, percents in
+    // every playlist's game data of the builds read for CoreV2 #216 (2.4.2, 2.5, 3.0 to 3.5, 6.21 to 7.00): 50 and 70,
+    // Blitz 80 and 90, Sky Supply 1 and 1 on 3.0 to 3.3 and 0 and 0 on 3.5. An ammo box's rows are fractions (0.65 and
+    // 0.8) read through the map info's own scale (65 and 80 on 6.30), so its value is read by its size: over 1 a percent.
+    // Read that way, Sky Supply's 1% of the chests was every chest.
+    void ApplySpawnPercent(UWorld* World, UClass* ContainerClass, const FScalableFloat& MinSpawnPercent, const FScalableFloat& MaxSpawnPercent, bool bPercent, const wchar_t* What)
     {
         if (!ContainerClass)
         {
             Log::Info(L"Battle Royale: the map info has no {} class, every placed one spawns", What);
             return;
         }
-        const auto ToFraction = [](float Percent) { return FMath::Clamp(Percent > 1.0f ? Percent / 100.0f : Percent, 0.0f, 1.0f); };
+        const auto ToFraction = [bPercent](float Value) { return FMath::Clamp(bPercent || Value > 1.0f ? Value / 100.0f : Value, 0.0f, 1.0f); };
         const float MinFraction = ToFraction(MinSpawnPercent.GetValueAtLevel(0.0f));
         const float MaxFraction = ToFraction(MaxSpawnPercent.GetValueAtLevel(0.0f));
         const float SpawnFraction = MinFraction + (std::max(MaxFraction, MinFraction) - MinFraction) * FMath::FRand();
@@ -210,11 +214,11 @@ namespace
         Log::Info(L"Battle Royale: the chests' and ammo boxes' spawn percents are playlist {}'s", static_cast<int32_t>(GameMode->CurrentPlaylistId));
         if (AFortAthenaMapInfo::HasTreasureChestSpawnPercent())
         {
-            ApplySpawnPercent(World, MapInfo->TreasureChestClass, MapInfo->TreasureChestMinSpawnPercent, MapInfo->TreasureChestMaxSpawnPercent, L"treasure chests");
+            ApplySpawnPercent(World, MapInfo->TreasureChestClass, MapInfo->TreasureChestMinSpawnPercent, MapInfo->TreasureChestMaxSpawnPercent, true, L"treasure chests");
         }
         if (AFortAthenaMapInfo::HasAmmoBoxSpawnPercent())
         {
-            ApplySpawnPercent(World, MapInfo->AmmoBoxClass, MapInfo->AmmoBoxMinSpawnPercent, MapInfo->AmmoBoxMaxSpawnPercent, L"ammo boxes");
+            ApplySpawnPercent(World, MapInfo->AmmoBoxClass, MapInfo->AmmoBoxMinSpawnPercent, MapInfo->AmmoBoxMaxSpawnPercent, false, L"ammo boxes");
         }
     }
 

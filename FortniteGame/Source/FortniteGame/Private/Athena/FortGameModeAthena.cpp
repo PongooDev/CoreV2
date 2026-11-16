@@ -2666,9 +2666,10 @@ void AFortGameModeAthena::SpawnVendingMachines()
     // Whether a machine stands, its rarity, cost and what it sells are the match's playlist's: the rarity weights and
     // costs are AthenaGameData's Default.VendingMachine rows and the items its Loot_AthenaVending rows, which
     // ApplyPlaylistDataTables (3.5.1 0x9DC890) replaces with the playlist's own (Snipers, High Explosives and Sky Supply
-    // have no machines, Solid Gold only Legendary ones, Playground its own weights and costs). From 3.5 the game state
-    // has that playlist only from the match's assignment on, so the machines rolled at the world's creation took the
-    // default tables in every LTM (#291). They wait for it (HandleCurrentPlaylistLoaded), or for the bus if it never comes.
+    // have no machines, 6.30's Wild West and Food Fight none either, every weight 0, Solid Gold only Legendary ones,
+    // Playground its own weights and costs). From 3.5 the game state has that playlist only from the match's assignment
+    // on, so the machines rolled at the world's creation took the default tables in every LTM (#291). They wait for it
+    // (HandleCurrentPlaylistLoaded), or for the bus if it never comes.
     // A playlist without vending loot of its own (Blitz) gets the default rows back (MergeDefaultLootRows).
     ApplyPlaylistDataTablesOnce();
     if (TablesGameMode.Get() == this && TablesPlaylistId < 0 && AFortAthenaMapInfo::StaticClass() && AFortAthenaMapInfo::HasVendingMachines())

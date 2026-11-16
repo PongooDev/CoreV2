@@ -92,6 +92,7 @@ public:
     static void SetUpLateVendingMachine(ABuildingItemCollectorActor* Machine);
 
 private:
-    // The rarity roll (level 0 none, then Common to Legendary): level 1 to 5 when bMayBeNone is false.
+    // The rarity roll (level 0 none, then Common to Legendary): level 1 to 5 when bMayBeNone is false. A row whose weights
+    // are all 0 (a playlist without machines) gives none, or Legendary when bMayBeNone is false.
     int32_t RollVendingMachineLevel(bool bMayBeNone);
 };

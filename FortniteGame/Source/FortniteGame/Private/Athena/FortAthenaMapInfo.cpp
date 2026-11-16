@@ -252,9 +252,14 @@ int32_t AFortAthenaMapInfo::RollVendingMachineLevel(bool bMayBeNone)
         Weights[Level] = std::max(RarityWeights.GetValueAtLevel(static_cast<float>(Level)), 0.0f);
         TotalWeight += Weights[Level];
     }
+    // A row of zero weights picks nothing, so no machine stands. That is how some playlists take the machines out of
+    // their match: 6.30's Wild West (Playlist_WW_*) and Food Fight (AthenaCompositeGD_Barrier) set every level to 0,
+    // where High Explosives keeps only level 0. Taken as the top rarity, every machine of those matches stood as a
+    // Legendary one selling the playlist's untouched vending rows, normal shotguns among them (CoreV2 #216). A machine
+    // that has to stand keeps the top rarity, as before.
     if (TotalWeight <= 0.0f)
     {
-        return RarityCount;
+        return bMayBeNone ? 0 : RarityCount;
     }
     float Roll = FMath::FRand() * TotalWeight;
     for (int32_t Level = 0; Level < RarityCount; ++Level)

@@ -22,6 +22,7 @@
 #include "Athena/FortGameSessionDedicatedAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Creative/FortCreativePortalManager.h"
 #include "Athena/FortPlayerStateAthena.h"
 #include "BackendRequest.h"
 #include "Building/BuildingSMActor.h"
@@ -246,6 +247,8 @@ namespace
         FTimerHandle PlayersTimer;
         // The tick after OnCurrentPlaylistLoaded; before 4.4, CheckMatchPlaylist's.
         FTimerHandle PlaylistTimer;
+        // Creative's hub, logged once its levels are in.
+        FTimerHandle CreativeHubTimer;
         // The playlist context tags SetPlaylistContextTags put in the game mode's GameContextTags, which the next
         // playlist's replace.
         std::vector<FName> PlaylistContextTagNames;
@@ -2340,6 +2343,7 @@ namespace
 
     // How often the match's playlist is looked for where the game state broadcasts nothing when it has it (before 4.4).
     constexpr float MatchPlaylistCheckInterval = 0.5f;
+    constexpr float CreativeHubLogDelay = 30.0f;
 
     // Before 4.4: Epic applies the match's playlist's tables in the game mode's OnGivenMatchAssignment (to 3.3) or its
     // OnPlaylistDataLoaded (3.5 to 4.2), virtual functions the game session and the game state call, which those builds
@@ -3101,6 +3105,12 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContaine
         }
     }
     FMatchEvents& Events = MatchEventsOf(this);
+    // 7.00's Creative, for the log only: what the hub has once the playlist's levels (Athena_Playground,
+    // PG_Island_GroupMaster, StarterIsland) have streamed in and their rifts registered (each as it begins play).
+    if (AFortPlayerControllerAthena::IsCreativeMatch(this) && !Events.CreativeHubTimer.IsValid())
+    {
+        SetGameModeTimer(this, Events.CreativeHubTimer, CreativeHubLogDelay, [](AFortGameModeAthena* GameMode) { AFortCreativePortalManager::LogHub(GameMode); });
+    }
     if (!Events.PlaylistTimer.IsValid())
     {
         SetGameModeTimer(this, Events.PlaylistTimer, NextTickDelay, &AfterCurrentPlaylistLoaded);
@@ -3189,6 +3199,8 @@ void AFortGameModeAthena::HandlePlayerStateDestroyed(AActor* DestroyedActor)
     }
     MatchEventsOf(this).bPlayerLeft = true;
     HandlePawnDied();
+    // Creative (7.00): the leaving player's island is saved and checked in, and their rift is free again.
+    AFortPlayerControllerAthena::ReleaseCreativePortal(reinterpret_cast<AFortPlayerState*>(State));
 #endif
 }
 
@@ -3243,6 +3255,11 @@ void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, A
         OnDestroyed.AddUniqueDynamic(this, PlayerStateDestroyedHandler->GetFName());
     }
     CheckTeamSwitches(this);
+    // Creative (7.00): the player's rift of the hub, with their last used island loading into it.
+    if (AFortPlayerControllerAthena* AthenaPlayer = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Player)))
+    {
+        AthenaPlayer->ClaimCreativePortal();
+    }
 #endif
 }
 

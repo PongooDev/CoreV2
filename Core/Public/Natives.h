@@ -77,6 +77,7 @@ class UMcpProfileGroup;
 struct FMcpServiceConfig;
 struct FProfileHttpRequest;
 class FString;
+struct FUniqueNetIdRepl;
 class UActorChannel;
 class UChannel;
 class UNetConnection;
@@ -1059,6 +1060,21 @@ namespace Natives
     // playlist-tables delegate, sets bHasFinishedSelectionSetup and picks the first active input. BeginPlay calls it at
     // once when the playlist's tables are applied (the call Core redirects), else binds it to their delegate.
     inline void (*ABuildingItemCollectorActor_FinishItemSelectionSetup)(UObject* This) = nullptr;
+
+    // From 7.00 (Creative), Finder::ResolveCreativeLive. The island's level record and its cloud save:
+    // ULevelSaveRecord::ReadFromBuffer (7.00 0x1089B60, ReadFromDisk's 0x1069320 call with the file's bytes; it reads
+    // them through ReadFromArchive 0x10898F0), and UFortLevelSaveComponent's cloud save (0xF5ADB0, the function that logs
+    // "Unable to start cloud save. Authority=%s, Busy=%s"): the plot, its owner and bCheckin (false: the sidecar's upload,
+    // true: its checkin). USidecarSys's meta setter (0x2DF5C40, called by the save for "serialized-at" and the actor
+    // counts) adds the file to the sidecar's FileInfoMap as it sets the key.
+    inline void (*ULevelSaveRecord_ReadFromBuffer)(UObject* This, const TArray<uint8_t>& Buffer) = nullptr;
+    inline void (*UFortLevelSaveComponent_CloudSave)(UObject* This, UObject* Plot, const FUniqueNetIdRepl& UserId, bool bCheckin) = nullptr;
+    inline void (*USidecarSys_SetMeta)(UObject* This, const FString& AppName, const FString& FilePath, const FString& Key, const FString& Value) = nullptr;
+    // From 7.00: AFortPlayerControllerAthena::ServerLoadPlotForPortal_Implementation (0xC65E80, slot 0x3E6), the game's
+    // own load of a plot into a rift: the call Core redirects to AFortAthenaCreativePortal::LoadPlotForUser is in it.
+    // And the plot item's id getter it uses (UMcpItem's virtual, slot 0x83 on 7.00), which names the island's file.
+    inline void (*AFortPlayerControllerAthena_ServerLoadPlotForPortal)(UObject* This, UObject* Portal, const FString& PlotItemId) = nullptr;
+    inline int32_t UMcpItem_GetItemIdIndex = -1;
 }
 
 namespace Sites

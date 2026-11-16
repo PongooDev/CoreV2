@@ -207,6 +207,24 @@ public:
         return Contains(InUserObject, InFunctionName);
     }
 
+    // Epic's ProcessMulticastDelegate (5.40 0x2ECA90): each bound object's function, through FindFunction and
+    // ProcessEvent, with Parameters (the signature's parameter struct), over a copy of the list as the engine takes one
+    // (a call may bind or unbind). For a broadcast Core makes where the game's own code that made it was stripped.
+    void ProcessMulticastDelegate(void* Parameters) const
+    {
+        const FInvocationList Bindings = InvocationList;
+        for (int32_t Index = 0; Index < Bindings.Num(); ++Index)
+        {
+            const TScriptDelegate<TWeakPtr>& Binding = Bindings[Index];
+            UObject* Object = Binding.GetUObject();
+            UFunction* Function = Object ? Object->FindFunction(Binding.GetFunctionName()) : nullptr;
+            if (Function)
+            {
+                Object->ProcessEvent(Function, Parameters);
+            }
+        }
+    }
+
 private:
     int32_t IndexOf(const UObject* InObject, FName InFunctionName) const
     {

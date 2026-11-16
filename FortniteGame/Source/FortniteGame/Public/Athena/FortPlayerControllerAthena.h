@@ -11,6 +11,11 @@
 
 class AActor;
 class AController;
+class AFortAthenaCreativePortal;
+class AFortPlayerState;
+class UFortWorldItemDefinition;
+class AFortVolume;
+class UFortCreativeRealEstatePlotItem;
 class APawn;
 class AFortPawn;
 class AFortPlayerPawnAthena;
@@ -23,6 +28,17 @@ struct FAthenaMatchStats;
 struct FAthenaMatchTeamStats;
 struct FAthenaRewardResult;
 struct FGameplayTagContainer;
+struct FFortItemEntry;
+struct FGuid;
+
+// One of a player's Creative islands as the controller replicates it (from 7.00): its name and its plot item's id.
+struct FCreativeIslandData
+{
+    DefineUnrealStruct(FCreativeIslandData, FortniteGame)
+
+public:
+    DefineUProperty(FString, McpId)
+};
 
 // A Battle Royale outfit (from 1.8; CID_*): the hero it plays (HID_*_Athena_Commando_*).
 class UAthenaCharacterItemDefinition : public UFortItemDefinition
@@ -200,6 +216,45 @@ public:
     // Where the build strips ServerPlaySquadQuickChatMessage_Implementation (3.5.1: its body only destroys SenderID).
     static void HookQuickChatVTables();
 
+    // Creative (from 7.00; FortPlayerControllerAthenaCreative.cpp). The player's islands, replicated from their creative
+    // profile, the last one they used, their rift of the hub and the island space it is linked to.
+    DefineUStructArrayProperty(FCreativeIslandData, CreativeIslands)
+    DefineUProperty(FString, LastUsedCreativeIsland)
+    DefineUProperty(AFortVolume*, CreativePlotLinkedVolume)
+    DefineUProperty(AFortAthenaCreativePortal*, OwnedPortal)
+    static bool HasOwnedPortal() { return Member_OwnedPortal.IsAvailable() && Member_CreativePlotLinkedVolume.IsAvailable(); }
+    DefineUFunction(ServerGiveCreativeItem)
+    DefineUFunction(ServerLoadPlotForPortal)
+    DefineUFunction(ServerReloadCreativePlot)
+    DefineUFunction(ServerStopSavingCreativePlot)
+    DefineUFunction(ResetMyCurrentCreativePlot)
+    DefineUFunction(ServerTeleportToPlaygroundIslandDock)
+    DefineUFunction(ServerTeleportToPlaygroundLobbyIsland)
+    DefineUFunction(ClientCycleQuickBarToCreativeItem)
+
+    AFortAthenaCreativePortal* GetOwnedPortal() const { return HasOwnedPortal() ? static_cast<AFortAthenaCreativePortal*>(OwnedPortal) : nullptr; }
+    void SetOwnedPortal(AFortAthenaCreativePortal* Portal, AFortVolume* LinkedVolume);
+    // Restored _Implementations (7.00's are the shared empty function: slots 0x419, 0x437, 0x439, 0x43D, 0x43F, 0x441).
+    void ServerGiveCreativeItem_Implementation(const FFortItemEntry& CreativeItem);
+    void ServerReloadCreativePlot_Implementation();
+    void ServerStopSavingCreativePlot_Implementation();
+    void ResetMyCurrentCreativePlot_Implementation();
+    void ServerTeleportToPlaygroundIslandDock_Implementation();
+    void ServerTeleportToPlaygroundLobbyIsland_Implementation();
+    void ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef);
+    // The game's own ServerLoadPlotForPortal_Implementation (7.00 0xC65E80): finds PlotItemId in the player's creative
+    // profile, loads it into Portal's island (through the call Core restores) and makes it their last used plot.
+    void LoadPlotForPortal(AFortAthenaCreativePortal* Portal, const FString& PlotItemId);
+    // The player's rift as they come into a Creative match (their first pawn), with their last used island loading
+    // into it; given back as they leave.
+    void ClaimCreativePortal();
+    static void ReleaseCreativePortal(AFortPlayerState* PlayerState);
+    // Whether the world's match is a Creative playlist's (bEnableCreativeMode, from 6.01).
+    static bool IsCreativeMatch(const UObject* WorldContextObject);
+    // From 7.00, where the build strips them: the Creative RPCs above, and the redirect of ServerLoadPlotForPortal's
+    // stripped call.
+    static void HookCreativeVTables();
+
     static void HookCallSites();
     // Restores the pawn-death handler (OnPawnDied) and the Athena part of PrepareDeathReport where the build strips them
     // (1.9.1).
@@ -211,6 +266,16 @@ private:
     // _Implementation's parameters by value: the caller's copies, which the callee destroys (the original's body does).
     static void ServerPlaySquadQuickChatMessage_ImplementationHK(AFortPlayerControllerAthena* This, FAthenaQuickChatActiveEntry* ChatEntry, void* SenderID);
     static inline void (*ServerPlaySquadQuickChatMessage_ImplementationOG)(AFortPlayerControllerAthena* This, FAthenaQuickChatActiveEntry* ChatEntry, void* SenderID) = nullptr;
+
+    static void ServerGiveCreativeItem_ImplementationHK(AFortPlayerControllerAthena* This, const FFortItemEntry& CreativeItem);
+    static void ServerReloadCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This);
+    static void ServerStopSavingCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This);
+    static void ResetMyCurrentCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This);
+    static void ServerTeleportToPlaygroundIslandDock_ImplementationHK(AFortPlayerControllerAthena* This);
+    static void ServerTeleportToPlaygroundLobbyIsland_ImplementationHK(AFortPlayerControllerAthena* This);
+    // The player's island space: the one they stand in when it is theirs to edit, else their rift's.
+    AFortVolume* GetCreativeVolume();
+    bool TeleportPawnTo(const FVector& Location, const FRotator& Rotation, const wchar_t* Where);
 
     static void PawnDiedInventoryDropCall(AFortPlayerController* Controller, void* Unused, const FGameplayTagContainer* DamageTags, AFortPawn* DeadPawn, bool* bOutDroppedBackpack);
 

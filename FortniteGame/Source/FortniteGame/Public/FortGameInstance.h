@@ -4,6 +4,7 @@
 #include "Engine/GameInstance.h"
 
 class UFortRegisteredPlayerInfo;
+class USidecarSys;
 
 class UFortGameInstance : public UGameInstance
 {
@@ -12,6 +13,13 @@ class UFortGameInstance : public UGameInstance
 public:
     DefineUProperty(UObject*, TooltipManager)
     DefineUProperty(TArray<UFortRegisteredPlayerInfo*>, RegisteredPlayers)
+    // From 7.00: the DSS client Creative's islands are saved through (Transient, +0x330 on 7.00).
+    DefineUProperty(USidecarSys*, SidecarSys)
+    static bool HasSidecarSys() { return StaticClass() && Member_SidecarSys.IsAvailable(); }
+    // Config (DefaultGame.ini): whether a player's registration gives them their creative profile, which the server's
+    // controller copies (AFortPlayerController::CreativeModeProfile, from UFortRegisteredPlayerInfo +0x108 on 7.00).
+    DefineUProperty(bool, bCreativeModeProfileEnabled)
+    static bool HasCreativeModeProfileEnabled() { return StaticClass() && Member_bCreativeModeProfileEnabled.IsAvailable(); }
 
     void Init();
 

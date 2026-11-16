@@ -83,6 +83,14 @@ void AFortMinigameScoreRegistry::HookNatives()
     UFunction* SpawnOrGet = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlaysetItemDefinition:SpawnOrGetMinigameScoreRegistry");
     uint8_t* SpawnOrGetCall = SpawnOrGet ? Finder::ImplementationCall(SpawnOrGet) : nullptr;
     const uintptr_t SpawnOrGetNative = SpawnOrGetCall ? Finder::RelativeTarget(reinterpret_cast<uintptr_t>(SpawnOrGetCall), 1, 5) : 0;
+    if (!SpawnOrGet && FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortMinigame"))
+    {
+        // 7.00 moves the minigames into AFortMinigame, whose scores are its stats (AddStatToPlayer and the rest, intact
+        // natives): no playset spawns a registry any more (SpawnOrGetMinigameScoreRegistry is gone) and nothing records
+        // into one.
+        Log::Info(L"Hook AFortMinigameScoreRegistry::RecordScore: not needed, this build's minigames score in AFortMinigame's stats (no SpawnOrGetMinigameScoreRegistry)");
+        return;
+    }
     if (!HasScores() || !SpawnOrGetNative)
     {
         Log::Error(L"Hook AFortMinigameScoreRegistry::RecordScore: not restored (Scores, ScoreTemplate or SpawnOrGetMinigameScoreRegistry not found), so no minigame score reaches its leaderboard");

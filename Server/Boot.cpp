@@ -36,6 +36,8 @@
 #include "FortWorldManager.h"
 #include "GameThread.h"
 #include "McpProfileGroup.h"
+#include "Creative/FortAthenaCreativePortal.h"
+#include "Minigame/FortMinigame.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
 #include "OnlineVoiceImpl.h"
@@ -376,6 +378,10 @@ static void InstallHooks()
             ABuildingItemCollectorActor::HookVTables();
             AFortMinigameScoreRegistry::HookNatives();
             AFortMinigameState::HookNatives();
+            // 7.00's Creative: the rifts, the islands' load and save, the Creative RPCs and the minigames' start.
+            AFortAthenaCreativePortal::HookNatives();
+            AFortPlayerControllerAthena::HookCreativeVTables();
+            AFortMinigame::HookNatives();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();
             AFortGameStateAthena::HookCallSites();

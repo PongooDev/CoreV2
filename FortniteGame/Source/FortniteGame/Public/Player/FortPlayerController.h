@@ -60,6 +60,10 @@ public:
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
+    // From 7.00: the player's creative profile on the server, copied from their registration (UFortRegisteredPlayerInfo
+    // +0x108 on 7.00, 0x12AB7FF), which ServerLoadPlotForPortal finds their plot items in.
+    DefineUProperty(UObject*, CreativeModeProfile)
+    static bool HasCreativeModeProfile() { return StaticClass() && Member_CreativeModeProfile.IsAvailable(); }
     // The player's gameplay stats (SelfRevives, RevivesFromTeammate, TeammateRevives, the damage, shots, distance and
     // materials the end-of-match screen shows, ...).
     DefineUProperty(UStatManager*, StatManager)

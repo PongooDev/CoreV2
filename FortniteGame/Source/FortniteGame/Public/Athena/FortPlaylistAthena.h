@@ -173,6 +173,10 @@ public:
     // bEnablePlayspaceManager and bAllowLayoutRequirementsFeature (bit 2 of +0x4A8), so it is read by its mask.
     DefineBitfieldUProperty(bAllowTeamSwitching)
     static bool HasAllowTeamSwitching() { return Member_bAllowTeamSwitching.IsAvailable(); }
+    // From 6.01, a bit of the same byte: the playlist is Creative's (7.00's Playlist_PlaygroundV2, PlaylistId 35) or a
+    // Playground with its island tools (6.x).
+    DefineBitfieldUProperty(bEnableCreativeMode)
+    static bool HasEnableCreativeMode() { return Member_bEnableCreativeMode.IsAvailable(); }
 };
 
 // One of a match's changes to its playlist's properties (from 6.01), an item of FPlaylistPropertyArray: the property

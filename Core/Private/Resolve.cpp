@@ -16146,7 +16146,37 @@ int32_t Finder::StrippedAthenaPawnDiedIndex()
     // Zone's handler: "call 0xB218A0; ...; call Zone; cmp byte ptr [rsi + Role], ROLE_Authority; jnz; mov rcx, rsi; call
     // 0x1618840 (the ServerRemoveMapCursor RPC); mov rbx, [rsi + PlayerState]; ...; the AFortPlayerStateAthena cast
     // (call 0x1636AD0, StaticClass); mov rdx, [FVector2D::ZeroVector]; mov rcx, rbx; call 0xC99610" (MapIndicatorPos set:
-    // 6.31's 0xCDA5D0 holds both). Read as stripped like 5.0's; Core's handler makes the two calls.
+    // 6.31's 0xCDA5D0 holds both). Read as stripped like 5.0's; Core's handler makes the two calls. The set is a leaf
+    // with no unwind data, so no .pdata entry: "movq xmm1, rdx (the vector, by value); ...; movsd [rcx + MapIndicatorPos],
+    // xmm1; ...; jmp" (the replication marker), or ret when unchanged. Straight code to its ret or tail jump within 0x80
+    // bytes, calling nothing and not jumping to RemoveFromAlivePlayers, stands for the short function there.
+    const auto IsLeafWithoutRemove = [Remove](uintptr_t Function)
+    {
+        if (!Function || !Remove || Finder::FunctionStart(Function))
+        {
+            return false;
+        }
+        for (uintptr_t Address = Function; Address < Function + 0x80;)
+        {
+            hde64s Instruction{};
+            const uint32_t Length = hde64_disasm(reinterpret_cast<const void*>(Address), &Instruction);
+            const uint8_t Opcode = Instruction.opcode;
+            if (!Length || (Instruction.flags & F_ERROR) || Opcode == 0xE8 || Opcode == 0xCC || (Opcode == 0xFF && Instruction.modrm_reg >= 2 && Instruction.modrm_reg <= 5))
+            {
+                return false;
+            }
+            if (Opcode == 0xC3 || Opcode == 0xC2 || Opcode == 0xEB)
+            {
+                return true;
+            }
+            if (Opcode == 0xE9)
+            {
+                return Finder::RelativeTarget(Address, 1, 5) != Remove;
+            }
+            Address += Length;
+        }
+        return false;
+    };
     uintptr_t ServerRemoveMapCursor = 0;
     uintptr_t SetMapIndicatorPos = 0;
     if (!MapCursorRemoval && AthenaEnd > Athena && AthenaEnd - Athena <= 0x100)
@@ -16160,7 +16190,7 @@ int32_t Finder::StrippedAthenaPawnDiedIndex()
         // The set's vector comes from a global just before its call: mov rdx, [rip+disp32].
         const bool bVectorFromGlobal = Calls.size() == 5 && Byte(Calls[4].first - 10) == 0x48 && Byte(Calls[4].first - 9) == 0x8B && Byte(Calls[4].first - 8) == 0x15;
         if (Calls.size() == 5 && Calls[0].second != Zone && Calls[1].second == Zone && !bCallsRemove && bVectorFromGlobal
-            && IsShortWithoutRemove(Calls[2].second) && IsShortWithoutRemove(Calls[4].second))
+            && IsShortWithoutRemove(Calls[2].second) && (IsShortWithoutRemove(Calls[4].second) || IsLeafWithoutRemove(Calls[4].second)))
         {
             ServerRemoveMapCursor = Calls[2].second;
             SetMapIndicatorPos = Calls[4].second;

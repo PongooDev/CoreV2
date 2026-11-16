@@ -170,9 +170,26 @@ void FOnlineVoiceImpl::RegisterLocalTalker(uint32_t LocalUserNum)
     {
         return;
     }
+    // The function is taken from the vtable Core resolved (Natives::FOnlineVoiceImpl_VTable, which starts at Init), not
+    // from the object's own vtable pointer with Core's index. Where Init is the vtable's first slot (1.7.2, the build
+    // voice chat was made on) the two are the same function. From 7.00 (UE 4.22) the vtable has three slots before Init
+    // (0x38F4AD8: Init at +0x18, the scalar deleting destructor right after it at +0x20), so Core's index 4 read through
+    // the object's pointer was the destructor (0x426310), with LocalUserNum 0 as its "don't free" flag: the voice
+    // interface was destroyed in place, its vtable pointer back to IOnlineVoice's. The engine's next voice call,
+    // ToggleSpeaking's StartNetworkedVoice (UOnlineEngineInterfaceImpl 0x44EAC0, slot 5 of the real vtable), then hit a
+    // pure virtual function (Core-Backend #375: the client crashed as Core opened the microphone).
+    void** const ObjectVTable = *reinterpret_cast<void***>(LocalVoice);
+    void** const VoiceVTable = Natives::FOnlineVoiceImpl_VTable;
+    // A voice interface Core can call is still an FOnlineVoiceImpl: its vtable pointer is at or a few slots before the
+    // one Core resolved. Anything else (one the engine has destroyed) is left alone.
+    if (!VoiceVTable || ObjectVTable > VoiceVTable || VoiceVTable - ObjectVTable > 8)
+    {
+        Log::Warning(L"Voice chat: the voice interface isn't the one Core knows (its vtable 0x{:X}), so the local talker isn't registered",
+            reinterpret_cast<uintptr_t>(ObjectVTable) - Finder::ImageBase());
+        return;
+    }
     using FRegisterLocalTalker = bool (*)(FOnlineVoiceImpl*, uint32_t);
-    void** VTable = *reinterpret_cast<void***>(LocalVoice);
-    bRegistered = reinterpret_cast<FRegisterLocalTalker>(VTable[Natives::FOnlineVoiceImpl_RegisterLocalTalkerIndex])(LocalVoice, LocalUserNum);
+    bRegistered = reinterpret_cast<FRegisterLocalTalker>(VoiceVTable[Natives::FOnlineVoiceImpl_RegisterLocalTalkerIndex])(LocalVoice, LocalUserNum);
     Log::Info(L"Voice chat: local talker {} {}", LocalUserNum, bRegistered ? L"registered" : L"failed to register (no voice engine, or no account id yet)");
 }
 

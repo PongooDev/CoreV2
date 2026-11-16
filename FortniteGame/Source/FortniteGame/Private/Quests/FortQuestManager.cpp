@@ -1300,6 +1300,25 @@ bool UFortQuestManager::HasActiveQuest(UFortQuestItemDefinition* Definition)
     return Quest && Quest->quest_state == EFortQuestState::GetActive();
 }
 
+// Battle Royale's challenges don't move while the match is on its warmup island. 21.40 gates them in the Athena quest
+// manager component's CanMakeQuestProgression (UFortQuestManagerComponent_Athena, which the quest manager asks through
+// OnCanMakeQuestProgression), and its Blueprints wait for progression on the game state's phase
+// (UFortAsyncAction_WaitQuestProgressionEnabled::HandleGamePhaseChanged, an EAthenaGamePhase). Only a quest whose
+// definition allows it moves there (UFortQuestItemDefinition::CanProgressInBRWarmup), and no build Core supports has that.
+// 7.00's quest manager has no components and its SendStatEventWithTags is stripped (Core's SendStatEventWithTagsCore), and
+// the stat rows don't keep the warmup out by themselves: collect_common_rarity_item (Collect, target Rarity.Common, source
+// Homebase.Class, context Athena.Playlist) matches a pickup on the island, because the game mode's GameContextTags hold
+// the playlist's tags from its load (the game state's GetAthenaPlaylistContextTags, 0xC4CB90, reads no phase). So every
+// weapon picked up there counted (#475). 1.8.2's own SendStatEventWithTags (0x8984E0) reads no game phase (its tests are
+// the authority, the event type and the quests' states): Epic took Battle Royale's challenges from the match's stats then.
+bool UFortQuestManager::CanMakeQuestProgression() const
+{
+    AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(GWorld);
+    UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    return !GameState || static_cast<uint8_t>(GameState->GamePhase) > EAthenaGamePhase::GetWarmup();
+}
+
 void UFortQuestManager::SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush)
 {
     // Builds that strip the stat events (1.10) have the shared empty function as the typed wrapper.
@@ -1535,6 +1554,19 @@ void UFortQuestManager::SendStatEventWithTagsHK(UFortQuestManager* This, const v
             return;
         }
         FCoreAthenaBotManager::AddKillEventTags(TargetObject, reinterpret_cast<AController*>(PlayerControllerOf(PlayerInfo)), EventTargetTags, EventSourceTags);
+    }
+    // The warmup island moves no challenge (CanMakeQuestProgression, #475): a weapon picked up, a chest opened or a player
+    // eliminated there before the aircraft goes nowhere, not to the profile and not to the client's quest display.
+    if (!This->CanMakeQuestProgression())
+    {
+        static FWeakObjectPtr LoggedFor;
+        if (!(LoggedFor == FWeakObjectPtr(GameMode)))
+        {
+            LoggedFor = FWeakObjectPtr(GameMode);
+            Log::Info(L"Battle Royale: the match is in its warmup, its stat events advance no challenge until the aircraft (first: {} for {})",
+                EFortQuestObjectiveStatEvent{ Type }.ToString(), This->GetName().ToStdString());
+        }
+        return;
     }
     GameMode->AddPlaylistContextTag(static_cast<FGameplayTagContainer&>(GameMode->GameContextTags));
     FGameplayTagContainer EventContextTags = ContextTags;

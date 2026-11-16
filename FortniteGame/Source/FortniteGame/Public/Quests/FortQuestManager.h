@@ -154,6 +154,9 @@ public:
     void GetSourceAndContextTags(FGameplayTagContainer& OutSourceTags, FGameplayTagContainer& OutContextTags);
     UFortQuestItem* GetQuestWithDefinition(UFortQuestItemDefinition* Definition);
     bool HasActiveQuest(UFortQuestItemDefinition* Definition);
+    // Server, Battle Royale: whether stat events may move the challenges now, which they don't while the match is still
+    // on the warmup island (#475).
+    bool CanMakeQuestProgression() const;
     static bool HasCurrentQuests() { return Member_CurrentQuests.IsAvailable() && Member_PendingChanges.IsAvailable(); }
     // Server ("cheat progressquest", #155): the objective of Quest moves Count on the way SendStatEventWithTags moves it
     // (1.9 0x8A5FB0): Count joins the manager's pending progress for the objective's BackendName, the flush sends it

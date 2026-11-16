@@ -434,8 +434,27 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     {
         return;
     }
+    // The elimination is the eliminator's earned kill when they are of another team (the eliminator the death stored,
+    // FinisherOrDowner). The game state's mutators hear of it (21.40's FortGameStateAthena_OnPostEarnedKill), which is how
+    // 6.31's Team Rumble scores its teams. Its HUD and the game mode's own Tick (the team placements, the win at 100)
+    // read that score. Before the player is taken out, so a win check that follows sees the score.
+    AController* const Eliminator = Downer ? Downer : Instigator;
+    AFortPlayerStateAthena* const EliminatorState = Eliminator && Eliminator != this ? AthenaStateOf(Eliminator) : nullptr;
+    AFortPlayerStateAthena* const KillerState = EliminatorState && EliminatorState != AthenaState
+        && static_cast<uint8_t>(EliminatorState->TeamIndex) != static_cast<uint8_t>(AthenaState->TeamIndex) ? EliminatorState : nullptr;
+    if (KillerState)
+    {
+        GameState->OnPostEarnedKill(KillerState);
+    }
     if (bRespawning)
     {
+        // Still in the match: the elimination is the killer's, not the player's way out of it (Core's match results; a
+        // bot that did it counts it too).
+        GameMode->NoteRespawnDeath(AthenaState, KillerState);
+        if (FCoreAthenaBotManager* BotManager = FCoreAthenaBotManager::Get(); BotManager && KillerState)
+        {
+            BotManager->OnRespawningPlayerKilled(KillerState);
+        }
         // The countdown the client shows (the death report's ServerTimeForRespawn, which AFortPlayerControllerZone's
         // PrepareDeathReport filled above), against the spectating's first five seconds.
         const float RespawnIn = Member_PlayerDeathReport.IsAvailable() && FFortPlayerDeathReport::HasServerTimeForRespawn()

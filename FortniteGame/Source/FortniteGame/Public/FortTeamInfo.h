@@ -67,3 +67,10 @@ public:
 
     void AddSpottedActor(AFortPlayerController* Spotter, AActor* SpottedActor);
 };
+
+// Battle Royale's team. Its score is native (21.40's CurrentTeamScore, PrevTeamScore, PrevPlacement, bTeamIsDead,
+// TeamPlacement; 6.31 +0x428 on): Natives::AFortTeamInfoAthena_CurrentTeamScore, where found.
+class AFortTeamInfoAthena : public AFortTeamInfo
+{
+    DefineUnrealClass(AFortTeamInfoAthena, FortniteGame)
+};

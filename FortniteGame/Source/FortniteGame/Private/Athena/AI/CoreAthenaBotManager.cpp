@@ -1139,6 +1139,14 @@ void FCoreAthenaBotManager::OnPlayerRemoved(AFortPlayerStateAthena* KillerState,
     CheckWinConditionLastManStanding(FinisherPawn, FinishingWeapon, DeathCause);
 }
 
+void FCoreAthenaBotManager::OnRespawningPlayerKilled(AFortPlayerStateAthena* KillerState)
+{
+    if (FCoreAthenaBotController* Killer = FindBot(KillerState))
+    {
+        Killer->AddKill();
+    }
+}
+
 void FCoreAthenaBotManager::PostTeamChange()
 {
 #if WITH_SERVER_CODE
@@ -2949,6 +2957,15 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
             !Settings.bEliminationsCountForQuests ? L"off" : bNativeKill ? L"the game's event" : !QuestManager ? L"no quest manager"
                 : bNativeContribution ? L"the game's KillContribution, Core's Kill" : L"Core's events",
             Location.empty() ? std::wstring() : std::format(L", at {}", Location));
+    }
+
+    // The killer earned the kill, a player or a bot of another team, once the bus has left: the game state's mutators
+    // hear of it (Team Rumble's adds it to the killer's team score), as for a player's death (AFortPlayerControllerAthena::
+    // OnPawnDied).
+    AFortGameStateAthena* GameState = AthenaGameStateOf(Athena);
+    if (GameState && bAircraftStarted && State && KillerState && KillerState != State && static_cast<uint8_t>(KillerState->TeamIndex) != static_cast<uint8_t>(State->TeamIndex))
+    {
+        GameState->OnPostEarnedKill(KillerState);
     }
 
     // A player's team is out once its players are out too (Core's death handler left its place to its bots then); in a

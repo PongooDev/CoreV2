@@ -1,7 +1,9 @@
 #include "pch.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
 #include "Athena/FortPlaylistAthena.h"
+#include "Athena/Mutators/FortAthenaMutator.h"
 #include "Athena/Mutators/FortAthenaMutator_AI.h"
 #include "Engine/World.h"
 #include "Finder.h"
@@ -11,10 +13,13 @@
 #include "Misc/StringAssetReference.h"
 #include "Natives.h"
 #include "Pawns/FortMovementComp_Character.h"
+#include "Player/FortPlayerController.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/Class.h"
+#include "UObject/WeakObjectPtr.h"
 
 namespace
 {
@@ -306,6 +311,64 @@ void AFortGameStateAthena::StreamAdditionalPlaylistLevels()
             const FString PackageName = Level.GetLongPackageName();
             Natives::AFortGameState_StartStreamingAdditionalPlaylistLevel(reinterpret_cast<AFortGameState*>(this), FName(*PackageName));
         }
+    }
+#endif
+}
+
+void AFortGameStateAthena::OnPostEarnedKill(AFortPlayerStateAthena* KillerPlayerState)
+{
+#if WITH_SERVER_CODE
+    if (!KillerPlayerState || Role != ROLE_Authority || GameplayMutatorsOffset() < 0 || !AFortAthenaMutator::HasOnPostEarnedKill())
+    {
+        return;
+    }
+    // 6.31 hands the mutators the killer's controller. A player bot's is a stock AAIController, which the TDM mutator's
+    // override can't read a team from, so Team Rumble's mutator scores a bot's kill by Core's copy of it.
+    AFortPlayerController* const KillerController = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(KillerPlayerState->GetOwner()));
+    UClass* const TdmClass = AFortAthenaMutator_TDM::StaticClass();
+    // Each active mutator of the list, as the game state's other loops over it ask them (OnPlaylistTimerTicked, 6.31
+    // 0xCAF640: skip a null one or one whose IsMutatorActive is false). A copy, as a mutator's answer may change the list.
+    const TArray<UObject*> Mutators = GameplayMutators;
+    UClass* const MutatorClass = AFortAthenaMutator::StaticClass();
+    bool bTeamScores = false;
+    for (int32_t Index = 0; Index < Mutators.Num(); ++Index)
+    {
+        AFortAthenaMutator* Mutator = Mutators[Index] && Mutators[Index]->IsA(MutatorClass) ? reinterpret_cast<AFortAthenaMutator*>(Mutators[Index]) : nullptr;
+        if (!Mutator || (AFortAthenaMutator::HasMutatorActive() && !Mutator->bMutatorActive))
+        {
+            continue;
+        }
+        bTeamScores = bTeamScores || (TdmClass && Mutators[Index]->IsA(TdmClass));
+        if (KillerController)
+        {
+            Mutator->FortGameStateAthena_OnPostEarnedKill(KillerController);
+        }
+        else if (TdmClass && Mutators[Index]->IsA(TdmClass))
+        {
+            reinterpret_cast<AFortAthenaMutator_TDM*>(Mutator)->ScoreBotKill(this, KillerPlayerState);
+        }
+    }
+    // Team Rumble's two scores, as its HUD shows them (team 2's, the other team's, of the eliminations that win). Nothing to
+    // say in a match without its mutator.
+    if (!bTeamScores)
+    {
+        return;
+    }
+    Log::Info(L"OnPostEarnedKill: {} (team {}) earned a kill; the mutators' team scores are {} and {} of {}", KillerPlayerState->GetPlayerName().ToStdString(),
+        static_cast<int32_t>(static_cast<uint8_t>(KillerPlayerState->TeamIndex)), static_cast<int32_t>(MutatorGenericInt_0), static_cast<int32_t>(MutatorGenericInt_1),
+        static_cast<int32_t>(MutatorGenericInt_2));
+    // And the game mode's own ranking of that score, once its Tick has run (the best team's score and team).
+    UWorld* World = HasCurrentHighScore() ? GetWorld() : nullptr;
+    if (World)
+    {
+        const TWeakObjectPtr<AFortGameStateAthena> WeakThis(this);
+        World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakThis]
+        {
+            if (AFortGameStateAthena* GameState = WeakThis.Get())
+            {
+                Log::Info(L"OnPostEarnedKill: the game mode's Tick has team {} best, with {}", static_cast<int32_t>(GameState->CurrentHighScoreTeam), static_cast<int32_t>(GameState->CurrentHighScore));
+            }
+        }));
     }
 #endif
 }

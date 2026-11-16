@@ -629,6 +629,15 @@ namespace Natives
     // given what it would otherwise do (slot 0x31D; AFortPlayerControllerAthena's, 0xC26970, asks the game state's
     // mutators). -1 where the build has none.
     inline int32_t AFortPlayerController_ShouldDropItemIndex = -1;
+    // Where Finder::ResolveOnPostEarnedKillLive finds it (6.31): the slot of AFortAthenaMutator's
+    // FortGameStateAthena_OnPostEarnedKill (21.40's name; 6.31 CL-4573279 slot 0xD4, the empty function in AFortAthenaMutator,
+    // AFortAthenaMutator_TDM's 0xD3C1B0), which 6.31 calls with the killer's controller. The game state's mutators hear
+    // of a kill through it, and Team Rumble's scores it. Nothing in the client build calls it; the server's call was
+    // stripped with its kill handling. -1 where not found.
+    inline int32_t AFortAthenaMutator_OnPostEarnedKillIndex = -1;
+    // With it: AFortTeamInfoAthena's CurrentTeamScore (21.40's name; unreflected, 6.31 +0x428), the team's score that the
+    // TDM mutator adds its kills to and the game mode's Tick ranks the teams by. -1 where not found.
+    inline ptrdiff_t AFortTeamInfoAthena_CurrentTeamScore = -1;
     // From 6.01 (Finder::ResolveIsRespawningAllowedLive): the slot of AFortGameModeAthena's own IsRespawningAllowed
     // (6.01 0xBCF370, 6.02 0xBD08A0, both slot 0x135), which the pawn's death asks before it has the player respawn.
     // -1 where it isn't found: the builds before 6.01, whose game state doesn't reflect bAllowRespawning.

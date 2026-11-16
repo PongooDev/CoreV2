@@ -10925,6 +10925,117 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
     return true;
 }
 
+bool Finder::ResolveOnPostEarnedKillLive(ptrdiff_t MutatorGenericInt0Offset, ptrdiff_t MutatorGenericInt1Offset, ptrdiff_t PlayerControllerSize)
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortAthenaMutator_OnPostEarnedKillIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortAthenaMutator::FortGameStateAthena_OnPostEarnedKill (21.40's name): a game state mutator hears that a player
+    // earned a kill. In 6.31 CL-4573279 it is slot 0xD4, and AFortAthenaMutator has the shared empty function there
+    // (0x2B1160, ret 0). 21.40 passes the killer's AFortPlayerStateAthena; 6.31 passes the killer's controller. Team
+    // Rumble's AFortAthenaMutator_TDM override (0xD3C1B0) reads the earner's team through the interface right after
+    // APlayerController's members ("lea rsi, [rdx+678h]" and its slot 5, AFortPlayerController's team member
+    // interface). The game state's GetTeamInfo (slot 0x103) gives it the team's AFortTeamInfoAthena, whose
+    // CurrentTeamScore (21.40's name; "inc dword ptr [rbx+428h]") it adds the kill to. With bIsTwoTeamTDM it also copies
+    // that score to the game state's MutatorGenericInt_0 for team 2 and MutatorGenericInt_1 for the other team
+    // ("mov [rcx+1B38h], edx" and "mov [rcx+1B3Ch], edx"). The HUD shows those two against MutatorGenericInt_2
+    // (RespawnHUD_TwoTeamScores, a UTwoTeamScoreWidgetBase: 0x2ECF5B0 reads 1B38h/1B3Ch/1B40h). The game mode's own Tick
+    // ranks the teams by CurrentTeamScore: AFortGameModeAthena::Tick (0xCBF860) -> 0xCC1ED0 -> 0xC99050. That gives
+    // each player's TeamScore and TeamScorePlacement, and the win once a team reaches the mutator's goal (its
+    // GetScoringModeWinningGoal, 0xD3A0C0, ActualNumKillsForVictory). Nothing in the client build calls the slot. The
+    // server's call was stripped with the kill handling.
+    void** MutatorVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator");
+    void** TdmVTable = CdoVTable(L"/Script/FortniteGame.FortAthenaMutator_TDM");
+    const int32_t Int0 = static_cast<int32_t>(MutatorGenericInt0Offset);
+    const int32_t Int1 = static_cast<int32_t>(MutatorGenericInt1Offset);
+    // mov [reg+disp32], r32 storing to that member (89 /r, mod 10, no SIB).
+    const auto Stores = [](uintptr_t Begin, uintptr_t End, int32_t Offset)
+    {
+        for (uintptr_t At = Begin; At + 6 <= End; ++At)
+        {
+            if (Byte(At) == 0x89 && (Byte(At + 1) & 0xC0) == 0x80 && (Byte(At + 1) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(At + 2) == Offset)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    int32_t Index = -1;
+    int32_t Found = 0;
+    uintptr_t Function = 0;
+    for (int32_t Slot = 0; MutatorVTable && TdmVTable && Int0 > 0 && Int1 > 0 && Slot < 0x200; ++Slot)
+    {
+        const uintptr_t Base = reinterpret_cast<uintptr_t>(MutatorVTable[Slot]);
+        const uintptr_t Own = reinterpret_cast<uintptr_t>(TdmVTable[Slot]);
+        if (!IsInText(Base) || !IsInText(Own))
+        {
+            break;
+        }
+        if (Own == Base || (Byte(Base) != 0xC3 && !IsSharedEmptyBody(Base)) || Finder::FunctionStart(Own) != Own)
+        {
+            continue;
+        }
+        const uintptr_t OwnEnd = Finder::FunctionEnd(Own);
+        if (OwnEnd > Own && OwnEnd - Own <= 0x400 && Stores(Own, OwnEnd, Int0) && Stores(Own, OwnEnd, Int1))
+        {
+            Index = Slot;
+            Function = Own;
+            ++Found;
+        }
+    }
+    if (Found != 1)
+    {
+        // Builds without the TDM mutator or the members have nothing to find. One whose TDM keeps no score there (none of
+        // its overrides stores both) has no Team Rumble scores to keep.
+        if (Found > 1)
+        {
+            Log::Error(L"Finder: AFortAthenaMutator::FortGameStateAthena_OnPostEarnedKill not found ({} AFortAthenaMutator_TDM overrides store MutatorGenericInt_0 +0x{:X} and _1 +0x{:X}, 1 expected), Team Rumble's eliminations aren't scored",
+                Found, Int0, Int1);
+        }
+        else if (TdmVTable && Int0 > 0)
+        {
+            Log::Warning(L"Finder: no AFortAthenaMutator_TDM override stores MutatorGenericInt_0 +0x{:X} and _1 +0x{:X}, so the build's mutators aren't told of eliminations (FortGameStateAthena_OnPostEarnedKill)",
+                Int0, Int1);
+        }
+        return false;
+    }
+    const uintptr_t End = Finder::FunctionEnd(Function);
+    // The earner: lea r64, [rdx+disp32] at APlayerController's size (REX.W, 8D, mod 10, r/m rdx), so the parameter is the
+    // killer's player controller. A build whose override takes something else isn't called with one.
+    bool bTakesController = false;
+    for (uintptr_t At = Function; At + 7 <= End && !bTakesController; ++At)
+    {
+        bTakesController = (Byte(At) & 0xFB) == 0x48 && Byte(At + 1) == 0x8D && (Byte(At + 2) & 0xC7) == 0x82
+            && *reinterpret_cast<const int32_t*>(At + 3) == static_cast<int32_t>(PlayerControllerSize);
+    }
+    // The team's CurrentTeamScore: the override's one inc dword ptr [reg+disp32] (FF /0, mod 10, no SIB).
+    int32_t ScoreOffset = -1;
+    int32_t Increments = 0;
+    for (uintptr_t At = Function; At + 6 <= End; ++At)
+    {
+        if (Byte(At) == 0xFF && (Byte(At + 1) & 0xF8) == 0x80 && (Byte(At + 1) & 0x07) != 0x04)
+        {
+            ScoreOffset = *reinterpret_cast<const int32_t*>(At + 2);
+            ++Increments;
+        }
+    }
+    if (!bTakesController || Increments != 1 || ScoreOffset <= 0)
+    {
+        Log::Error(L"Finder: AFortAthenaMutator_TDM's FortGameStateAthena_OnPostEarnedKill (0x{:X}) doesn't read its earner as a player controller (+0x{:X}: {}) or has {} score increments (1 expected), Team Rumble's eliminations aren't scored",
+            Function - Finder::ImageBase(), static_cast<int32_t>(PlayerControllerSize), bTakesController ? L"yes" : L"no", Increments);
+        return false;
+    }
+    Natives::AFortAthenaMutator_OnPostEarnedKillIndex = Index;
+    Natives::AFortTeamInfoAthena_CurrentTeamScore = ScoreOffset;
+    Log::Info(L"Finder: AFortAthenaMutator::FortGameStateAthena_OnPostEarnedKill is slot 0x{:X} (AFortAthenaMutator_TDM's 0x{:X} adds the killer controller's kill to its team's CurrentTeamScore, +0x{:X})",
+        Index, Function - Finder::ImageBase(), ScoreOffset);
+    return true;
+}
+
 bool Finder::ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, ptrdiff_t AllowRespawningOffset, uint8_t AllowRespawningMask)
 {
     static bool bSearched = false;

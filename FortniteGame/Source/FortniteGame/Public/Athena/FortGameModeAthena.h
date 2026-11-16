@@ -196,6 +196,10 @@ public:
     void SendOutliveStatEvents(AFortPawn* DeadPawn);
     // Core's: a death on the warmup island where it hurts (bAllowDamageInWarmup), kept out of the match's results (#452).
     void NoteWarmupDeath(AFortPlayerStateAthena* PlayerState);
+    // Core's: a death the playlist brings the player back from (Team Rumble, Playground). It isn't the player's
+    // elimination out of the match in the match's results. When KillerPlayerState (a player of another team) did it, it
+    // is one more of their kills.
+    void NoteRespawnDeath(AFortPlayerStateAthena* PlayerState, AFortPlayerStateAthena* KillerPlayerState);
 
     // Removes the placed chests and ammo boxes this match doesn't keep, from the map info's spawn percents (#205): once the
     // bus is under way on builds whose playlists bring their own game data (from 1.11, #238), at once before them.

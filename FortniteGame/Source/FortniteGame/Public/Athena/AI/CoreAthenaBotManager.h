@@ -205,6 +205,10 @@ public:
     // Also for a player who left (the game's Logout took them out): AFortGameModeAthena::HandlePlayerStateDestroyed's,
     // the tick after, with none.
     void OnPlayerRemoved(AFortPlayerStateAthena* KillerState, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause);
+    // Core's death handler kept a player in the match to respawn (a playlist that brings its players back): a bot that
+    // eliminated them counts the kill, as it does one who is out (OnPlayerRemoved). No recount and no win check: the
+    // player is still in.
+    void OnRespawningPlayerKilled(AFortPlayerStateAthena* KillerState);
     // A player changed teams (Playground's team switching, seen by the game mode as the switch's death is handled): the
     // counts and the teams the match has had, with no win check, as the game's PreTeamChange takes the player out
     // without one and its PostTeamChange puts them back on the new team.

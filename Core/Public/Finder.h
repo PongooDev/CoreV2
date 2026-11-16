@@ -277,6 +277,13 @@ namespace Finder
     // "return the answer it was given" and AFortPlayerControllerAthena with a function reading the game state's
     // GameplayMutators. GameplayMutatorsOffset: AFortGameStateAthena's GameplayMutators. False where there is none.
     bool ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset);
+    // From 6.31 (Team Rumble): the slot of AFortAthenaMutator's FortGameStateAthena_OnPostEarnedKill and
+    // AFortTeamInfoAthena's CurrentTeamScore (Natives). The slot is the one that is an empty function in
+    // AFortAthenaMutator's vtable and, in AFortAthenaMutator_TDM's, a function that writes both of the game state's
+    // MutatorGenericInt_0 and MutatorGenericInt_1 (the two teams' scores). That function must read its parameter as a
+    // player controller (the interface at PlayerControllerSize, APlayerController's size), and its one increment is
+    // the score. False where there is none, or more than one.
+    bool ResolveOnPostEarnedKillLive(ptrdiff_t MutatorGenericInt0Offset, ptrdiff_t MutatorGenericInt1Offset, ptrdiff_t PlayerControllerSize);
     // From 6.01: the slot of AFortGameModeAthena's IsRespawningAllowed (Natives), the one function of its vtable that
     // both reads the game mode's GameplayMutators and tests the game state's bAllowRespawning. GameplayMutatorsOffset:
     // AFortGameModeAthena's GameplayMutators; AllowRespawningOffset and AllowRespawningMask: the byte and the bit of

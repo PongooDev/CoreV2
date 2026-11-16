@@ -553,11 +553,15 @@ namespace
         // Who eliminated the player (their account id), on a build whose server doesn't count kills (1.8): empty while
         // the player is alive or was out by the storm or a fall.
         std::wstring EliminatedBy;
-        // The player's last death on the warmup island (6.30's island hurts, #452), as their player state stored it: no
-        // elimination, they came back there. Its eliminator isn't taken while the stored death is still that one.
-        bool bWarmupDeath = false;
-        AFortPlayerStateAthena* WarmupEliminator = nullptr;
-        FVector WarmupDeathLocation;
+        // The player's last death that kept them in the match, as their player state stored it: one on the warmup island
+        // (6.30's island hurts, #452), or one the playlist brought them back from (Team Rumble, Playground). It isn't an
+        // elimination out of the match, so its eliminator isn't taken while the stored death is still that one.
+        bool bStayingDeath = false;
+        AFortPlayerStateAthena* StayingDeathEliminator = nullptr;
+        FVector StayingDeathLocation;
+        // The other teams' players they eliminated who came back (NoteRespawnDeath), one at each elimination. EliminatedBy
+        // has only the eliminations that took a player out, and only a player's first.
+        int32_t RespawnKills = 0;
         bool bReported = false;
     };
 
@@ -641,10 +645,11 @@ namespace
             Playlist->PlaylistNameText(), Told);
     }
 
-    // Whether the death the player state holds is still the warmup death NoteWarmupDeath saw (same eliminator, same place).
-    bool IsWarmupDeath(const FMatchPlayer& Player, AFortPlayerStateAthena* AthenaState)
+    // Whether the death the player state holds is still the one NoteWarmupDeath or NoteRespawnDeath saw (same eliminator,
+    // same place).
+    bool IsStayingDeath(const FMatchPlayer& Player, AFortPlayerStateAthena* AthenaState)
     {
-        if (!Player.bWarmupDeath || AthenaState->GetEliminator() != Player.WarmupEliminator)
+        if (!Player.bStayingDeath || AthenaState->GetEliminator() != Player.StayingDeathEliminator)
         {
             return false;
         }
@@ -653,7 +658,15 @@ namespace
             return true;
         }
         const FVector Location = static_cast<FVector>(AthenaState->DeathInfo.DeathLocation);
-        return Location.X == Player.WarmupDeathLocation.X && Location.Y == Player.WarmupDeathLocation.Y && Location.Z == Player.WarmupDeathLocation.Z;
+        return Location.X == Player.StayingDeathLocation.X && Location.Y == Player.StayingDeathLocation.Y && Location.Z == Player.StayingDeathLocation.Z;
+    }
+
+    // The player's stored death is one they stay in the match after.
+    void NoteStayingDeath(FMatchPlayer& Player, AFortPlayerStateAthena* AthenaState)
+    {
+        Player.bStayingDeath = true;
+        Player.StayingDeathEliminator = AthenaState->GetEliminator();
+        Player.StayingDeathLocation = FDeathInfo::HasDeathLocation() ? static_cast<FVector>(AthenaState->DeathInfo.DeathLocation) : FVector(0.0f, 0.0f, 0.0f);
     }
 
     // A player of the match as their player state has them now (none for a bot, which has no account): their team,
@@ -673,7 +686,7 @@ namespace
         Player.Team = AthenaState->TeamIndex;
         Player.SecondsAlive = AthenaState->SecondsAlive;
         Player.Place = std::max<int32_t>(AthenaState->Place, 0);
-        if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty() && !IsWarmupDeath(Player, AthenaState))
+        if (!AFortPlayerStateAthena::CountsKills() && Player.EliminatedBy.empty() && !IsStayingDeath(Player, AthenaState))
         {
             AFortPlayerStateAthena* Eliminator = AthenaState->GetEliminator();
             const std::wstring EliminatorId = Eliminator && Eliminator != AthenaState ? Eliminator->UniqueId.ToString().ToStdString() : std::wstring();
@@ -716,10 +729,11 @@ namespace
             FMatchPlayer& Player = Found->second;
             if (!AFortPlayerStateAthena::CountsKills())
             {
+                // With the eliminations of players who came back (a respawn playlist's), which EliminatedBy doesn't have.
                 const int32_t Kills = static_cast<int32_t>(std::count_if(Results.Players.begin(), Results.Players.end(), [&](const auto& Other)
                 {
                     return Other.second.EliminatedBy == AccountId && Other.second.Team != Player.Team;
-                }));
+                })) + Player.RespawnKills;
                 // With the kills the player's "cheat killscore" added (Core-Backend #145), and the player bots they
                 // eliminated (CoreV2 #233; bots have no account, so they aren't among the match's players here).
                 AthenaState->SetKillScore(std::max(Kills + UFortCheatManager::KillScoreOffset(AthenaState) + FCoreAthenaBotManager::BotKillsOf(AthenaState), 0));
@@ -3096,12 +3110,38 @@ void AFortGameModeAthena::NoteWarmupDeath(AFortPlayerStateAthena* PlayerState)
         return;
     }
     FMatchPlayer& Player = Results->Players[AccountId];
-    Player.bWarmupDeath = true;
-    Player.WarmupEliminator = PlayerState->GetEliminator();
-    Player.WarmupDeathLocation = FDeathInfo::HasDeathLocation() ? static_cast<FVector>(PlayerState->DeathInfo.DeathLocation) : FVector(0.0f, 0.0f, 0.0f);
-    AFortPlayerStateAthena* Eliminator = Player.WarmupEliminator;
+    NoteStayingDeath(Player, PlayerState);
+    AFortPlayerStateAthena* Eliminator = Player.StayingDeathEliminator;
     Log::Info(L"Battle Royale: {} died on the warmup island (by {}): no elimination, they come back there", PlayerState->GetPlayerName().ToStdString(),
         Eliminator && Eliminator != PlayerState ? Eliminator->GetPlayerName().ToStdString() : std::wstring(L"nobody"));
+#endif
+}
+
+void AFortGameModeAthena::NoteRespawnDeath(AFortPlayerStateAthena* PlayerState, AFortPlayerStateAthena* KillerPlayerState)
+{
+#if WITH_SERVER_CODE
+    // The player comes back (the playlist's respawn), so the killer the death stored isn't their eliminator out of the
+    // match (EliminatedBy, which holds one per player). The elimination is still the killer's: one more of their kills,
+    // which the next look at the results gives their KillScore (the HUD's eliminations). A bot that did it counts its
+    // own; one the player left is still theirs.
+    FMatchResults* Results = PlayerState && !AFortPlayerStateAthena::CountsKills() ? MatchResultsOf(this) : nullptr;
+    if (!Results)
+    {
+        return;
+    }
+    const std::wstring AccountId = PlayerState->UniqueId.ToString().ToStdString();
+    if (IsAccountId(AccountId))
+    {
+        NoteStayingDeath(Results->Players[AccountId], PlayerState);
+    }
+    const std::wstring KillerId = KillerPlayerState ? KillerPlayerState->UniqueId.ToString().ToStdString() : std::wstring();
+    if (IsAccountId(KillerId))
+    {
+        FMatchPlayer& Killer = Results->Players[KillerId];
+        ++Killer.RespawnKills;
+        Log::Info(L"Battle Royale: {} eliminated {}, who comes back ({} such eliminations)", KillerPlayerState->GetPlayerName().ToStdString(), PlayerState->GetPlayerName().ToStdString(),
+            Killer.RespawnKills);
+    }
 #endif
 }
 

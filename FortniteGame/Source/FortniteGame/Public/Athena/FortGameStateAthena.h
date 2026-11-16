@@ -6,6 +6,7 @@
 #include "UObject/ScriptDelegates.h"
 
 class AFortAthenaMapInfo;
+class AFortPlayerStateAthena;
 class AFortSafeZoneIndicator;
 class AFortSpecialActorReplicationInfo;
 
@@ -232,6 +233,28 @@ public:
     // (6.30 0x2EC2970) take the two AAthenaBarrierFlags from it.
     DefineUStructProperty(FGameplayMutatorObjectDataArray, MutatorObjectDataArray)
     static bool HasMutatorObjectDataArray() { return Member_MutatorObjectDataArray.IsAvailable() && FGameplayMutatorObjectData::StaticStruct(); }
+    // Three replicated ints a mutator uses for its HUD (from 6.01; OnRep_MutatorGenericInt broadcasts
+    // MutatorGenericIntegerUpdated). 6.31's Team Rumble (AFortAthenaMutator_TDM) keeps team 2's eliminations in _0 and the
+    // other team's in _1 (its FortGameStateAthena_OnPostEarnedKill, 0xD3C1B0), and the eliminations that win in _2 (its
+    // BeginPlay, 0xD32710). UTwoTeamScoreWidgetBase draws the two bars from them (0x2ECF5B0).
+    DefineUProperty(int32_t, MutatorGenericInt_0)
+    DefineUProperty(int32_t, MutatorGenericInt_1)
+    DefineUProperty(int32_t, MutatorGenericInt_2)
+    static bool HasMutatorGenericInts() { return Member_MutatorGenericInt_0.IsAvailable() && Member_MutatorGenericInt_1.IsAvailable() && Member_MutatorGenericInt_2.IsAvailable(); }
+    static ptrdiff_t MutatorGenericInt0Offset() { return Member_MutatorGenericInt_0.IsAvailable() ? Member_MutatorGenericInt_0.GetOffsetChecked() : -1; }
+    static ptrdiff_t MutatorGenericInt1Offset() { return Member_MutatorGenericInt_1.IsAvailable() ? Member_MutatorGenericInt_1.GetOffsetChecked() : -1; }
+    // From 6.31 (ranked by the score playlists' win check in AFortGameModeAthena's Tick, 0xC99050): the best team's score
+    // and its team.
+    DefineUProperty(int32_t, CurrentHighScore)
+    DefineUProperty(int32_t, CurrentHighScoreTeam)
+    static bool HasCurrentHighScore() { return Member_CurrentHighScore.IsAvailable() && Member_CurrentHighScoreTeam.IsAvailable(); }
+    // KillerPlayerState earned a kill: each active mutator of GameplayMutators hears of it (AFortAthenaMutator::
+    // FortGameStateAthena_OnPostEarnedKill, with the player state's controller as 6.31 passes it). 21.40 names only the
+    // mutators' side. By the naming of those virtuals (FortGameStateAthena_IsRespawningAllowed is what
+    // AFortGameStateAthena::IsRespawningAllowed asks), the game state asks it. The caller is stripped from the client
+    // builds with the server's kill handling. A player bot's kill, which has no player controller, is Team Rumble's by
+    // AFortAthenaMutator_TDM::ScoreBotKill. Server only; nothing where the mutators' slot isn't found (before 6.31).
+    void OnPostEarnedKill(AFortPlayerStateAthena* KillerPlayerState);
     // Whether the match brings its players back after they die. Reflected (and replicated) from 6.01; an unreflected
     // flag of the game state before (from 4.2). The game mode's OnPlaylistDataLoaded sets it when the loaded playlist's
     // RespawnType isn't None (6.02 0xBD3A03), and a mutator that respawns players by itself sets and clears it

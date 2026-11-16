@@ -259,6 +259,15 @@
     <Filter Include="Engine\Source\Runtime\InputCore\Classes">
       <UniqueIdentifier>{245e6d75-c9cf-473d-b2b1-1e93a47c93d3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\Json">
+      <UniqueIdentifier>{e7d1cd70-a20f-476c-ad86-acc48e12ed50}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Json\Public">
+      <UniqueIdentifier>{d7499ea5-ec5b-4283-8bb5-7c10170e0484}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\Json\Public\Dom">
+      <UniqueIdentifier>{e427f6b0-b452-4bdc-a12a-cc014051c4b9}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Source\Runtime\Launch">
       <UniqueIdentifier>{f560c6e5-168b-4239-b26c-5a023d086a4d}</UniqueIdentifier>
     </Filter>
@@ -697,6 +706,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\UnrealMemory.h">
       <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Internationalization\Text.h">
+      <Filter>Engine\Source\Runtime\Core\Public\Internationalization</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\Internationalization\TextLocalizationManager.h">
       <Filter>Engine\Source\Runtime\Core\Public\Internationalization</Filter>
     </ClInclude>
@@ -1072,6 +1084,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetSystemLibrary.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Kismet</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Kismet\KismetTextLibrary.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Kismet</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Materials\MaterialInstanceDynamic.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Materials</Filter>
     </ClInclude>
@@ -1113,6 +1128,9 @@
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\InputCore\Classes\InputCoreTypes.h">
       <Filter>Engine\Source\Runtime\InputCore\Classes</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Json\Public\Dom\JsonValue.h">
+      <Filter>Engine\Source\Runtime\Json\Public\Dom</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Launch\Public\LaunchEngineLoop.h">
       <Filter>Engine\Source\Runtime\Launch\Public</Filter>
@@ -1821,6 +1839,9 @@
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\KismetNodeHelperLibrary.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\KismetTextLibrary.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Level.cpp">

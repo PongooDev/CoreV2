@@ -16,6 +16,7 @@
 #include "Items/FortItemDefinition.h"
 #include "Kismet/GameplayStatics.h"
 #include "Log.h"
+#include "McpProfile.h"
 #include "Natives.h"
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
@@ -121,8 +122,8 @@ void AFortPlayerControllerAthena::ClaimCreativePortal()
 #if WITH_SERVER_CODE
     // A player comes into a Creative match: the hub's rift for them, which their last used island loads into (the
     // plot the game keeps as LastUsedCreativeIsland, from the creative profile's last_used_plot; their first island
-    // when they have none yet). Without one the rift waits for them to pick an island ("Set Rift Destination",
-    // ServerLoadPlotForPortal).
+    // when they have none yet) once LoadCreativePlots has their islands. They can pick another at the rift ("Set Rift
+    // Destination", ServerLoadPlotForPortal), from the CreativeIslands it fills.
     if (Role != ROLE_Authority || !IsCreativeMatch(this) || GetOwnedPortal())
     {
         return;
@@ -137,13 +138,121 @@ void AFortPlayerControllerAthena::ClaimCreativePortal()
         }
         return;
     }
-    if (AFortPlayerController::HasCreativeModeProfile() && !static_cast<UObject*>(CreativeModeProfile))
+    UMcpProfile* Profile = GetCreativeProfile();
+    if (!Profile)
     {
         UWorld* World = GetWorld();
         UFortGameInstance* GameInstance = World ? Cast<UFortGameInstance>(reinterpret_cast<UObject*>(static_cast<UGameInstance*>(World->OwningGameInstance))) : nullptr;
         Log::Warning(L"Creative: the server has no creative profile for {} (the registration gives one when UFortGameInstance::bCreativeModeProfileEnabled is set: {}), so the "
             L"game can't find their islands' plot items", PlayerNameOf(this),
             GameInstance && UFortGameInstance::HasCreativeModeProfileEnabled() ? (GameInstance->bCreativeModeProfileEnabled ? L"set" : L"not set") : L"unknown");
+        return;
+    }
+    // The profile was queried as the player registered (QueryProfile?profileId=creative); its answer may come before or
+    // after this. Its items arriving (and any later change to them) broadcast its ItemsUpdatedDelegate, which loads the
+    // islands and the last used one into the rift; an answer that is already in is read now.
+    if (UMcpProfile::HasItemsUpdatedDelegate())
+    {
+        UMcpProfile::FOnItemsUpdated& ItemsUpdated = Profile->ItemsUpdatedDelegate;
+        ItemsUpdated.AddUObject(this, &AFortPlayerControllerAthena::OnCreativeProfileItemsUpdated);
+    }
+    else
+    {
+        Log::Warning(L"Creative: UMcpProfile's ItemsUpdatedDelegate wasn't found, so {}'s islands are only read now, as they come in", PlayerNameOf(this));
+    }
+    if (Profile->ProfileRevision < 0)
+    {
+        Log::Info(L"Creative: {}'s creative profile hasn't come in yet; their islands load into their rift when it does", PlayerNameOf(this));
+        return;
+    }
+    LoadCreativePlots();
+    LoadLastUsedPlotIntoPortal();
+#endif
+}
+
+UMcpProfile* AFortPlayerControllerAthena::GetCreativeProfile() const
+{
+    UObject* Profile = AFortPlayerController::HasCreativeModeProfile() ? static_cast<UObject*>(CreativeModeProfile) : nullptr;
+    return Profile && UMcpProfile::StaticClass() && Profile->IsA(UMcpProfile::StaticClass()) ? static_cast<UMcpProfile*>(Profile) : nullptr;
+}
+
+void AFortPlayerControllerAthena::LoadCreativePlots()
+{
+#if WITH_SERVER_CODE
+    // 7.00's client has no code that writes CreativeIslands (only the controller's constructor and destructor touch it)
+    // or reads the profile's last_used_plot (its name has no reference): the server's half, which 21.40 still has as
+    // AFortPlayerControllerAthena::LoadCreativePlots. The plots are the creative profile's CreativePlot items, which the
+    // profile makes with itself as their outer; their order is their number (islandIndex, "Island 1" first).
+    UMcpProfile* Profile = GetCreativeProfile();
+    if (!Profile || !Member_CreativeIslands.IsAvailable() || !UFortCreativeRealEstatePlotItem::StaticClass())
+    {
+        return;
+    }
+    std::vector<UFortCreativeRealEstatePlotItem*> Plots;
+    for (TObjectIterator<UFortCreativeRealEstatePlotItem> It; It; ++It)
+    {
+        if (It->GetOuter() == Profile)
+        {
+            Plots.push_back(*It);
+        }
+    }
+    std::stable_sort(Plots.begin(), Plots.end(), [](UFortCreativeRealEstatePlotItem* A, UFortCreativeRealEstatePlotItem* B) { return A->IslandIndex < B->IslandIndex; });
+
+    TStructArray<FCreativeIslandData>& Islands = CreativeIslands;
+    Islands.Empty();
+    std::vector<std::wstring> Ids;
+    for (UFortCreativeRealEstatePlotItem* Plot : Plots)
+    {
+        // An item a later whole-profile answer replaced lingers until the next garbage collection: one island per id.
+        const FString Id = Plot->GetItemId();
+        if (Id.ToStdString().empty() || std::find(Ids.begin(), Ids.end(), Id.ToStdString()) != Ids.end())
+        {
+            continue;
+        }
+        FText Name = Plot->GetIslandDisplayName();
+        FCreativeIslandData& Island = Islands.AddDefaulted();
+        if (Name.HasTextData())
+        {
+            Island.IslandName = std::move(Name);
+        }
+        Island.McpId = Id;
+        Ids.push_back(Id.ToStdString());
+    }
+
+    // The profile's last_used_plot stat (the server's SetLastUsedCreativePlot sets it as the player picks an island at
+    // their rift), when it is one of their islands.
+    FString LastUsed;
+    const TSharedPtr<FJsonValue, ESPMode::Fast> LastUsedStat = Profile->GetStat(FString(L"last_used_plot"));
+    if (LastUsedStat.IsValid())
+    {
+        LastUsedStat->TryGetString(LastUsed);
+    }
+    const std::wstring LastUsedId = LastUsed.ToStdString();
+    const bool bLastUsedIsIsland = std::find(Ids.begin(), Ids.end(), LastUsedId) != Ids.end();
+    if (bLastUsedIsIsland && Member_LastUsedCreativeIsland.IsAvailable())
+    {
+        LastUsedCreativeIsland = LastUsed;
+    }
+    ForceNetUpdate();
+    Log::Info(L"Creative: {} has {} island(s) in their creative profile (revision {}), last used {}", PlayerNameOf(this), Ids.size(), static_cast<int64_t>(Profile->ProfileRevision),
+        bLastUsedIsIsland ? LastUsedId : LastUsedId.empty() ? std::wstring(L"none yet") : std::format(L"{} (not one of them)", LastUsedId));
+    if (Ids.empty())
+    {
+        Log::Warning(L"Creative: {}'s creative profile has no CreativePlot items, so they have no island to load (the backend gives them once the account may play Creative)",
+            PlayerNameOf(this));
+    }
+#endif
+}
+
+void AFortPlayerControllerAthena::LoadLastUsedPlotIntoPortal()
+{
+#if WITH_SERVER_CODE
+    AFortAthenaCreativePortal* Portal = GetOwnedPortal();
+    AFortVolume* Volume = Portal ? static_cast<AFortVolume*>(Portal->LinkedVolume) : nullptr;
+    UFortLevelSaveComponent* SaveComponent = UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume));
+    if (!Portal || (SaveComponent && static_cast<UFortCreativeRealEstatePlotItem*>(SaveComponent->LoadedPlot)))
+    {
+        return;
     }
     FString PlotItemId = Member_LastUsedCreativeIsland.IsAvailable() ? static_cast<FString>(LastUsedCreativeIsland) : FString();
     if (PlotItemId.ToStdString().empty() && Member_CreativeIslands.IsAvailable())
@@ -156,11 +265,20 @@ void AFortPlayerControllerAthena::ClaimCreativePortal()
     }
     if (PlotItemId.ToStdString().empty())
     {
-        Log::Info(L"Creative: {}'s rift waits for them to pick an island (no last used island yet)", PlayerNameOf(this));
+        Log::Info(L"Creative: {}'s rift waits for them to pick an island (they have none)", PlayerNameOf(this));
         return;
     }
-    Log::Info(L"Creative: {}'s last used island {} loads into their rift", PlayerNameOf(this), PlotItemId.ToStdString());
+    Log::Info(L"Creative: {}'s {} island {} loads into their rift", PlayerNameOf(this),
+        Member_LastUsedCreativeIsland.IsAvailable() && !static_cast<FString>(LastUsedCreativeIsland).ToStdString().empty() ? L"last used" : L"first", PlotItemId.ToStdString());
     LoadPlotForPortal(Portal, PlotItemId);
+#endif
+}
+
+void AFortPlayerControllerAthena::OnCreativeProfileItemsUpdated(int64_t UpdateArgument)
+{
+#if WITH_SERVER_CODE
+    LoadCreativePlots();
+    LoadLastUsedPlotIntoPortal();
 #endif
 }
 
@@ -493,6 +611,53 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
             }
         }
     }
+    // The creative profile, which LoadCreativePlots reads (McpProfileSys, intact). UMcpProfile::GetStat: the second call
+    // after the creative profile's plot permissions getter (0x1132C70) names "creative_plot_permissions" (the first is
+    // the name's copy into its FString), the one whose answer's EJson type it checks next (cmp dword ptr [reg+8], 6).
+    for (const uintptr_t Ref : Finder::StringRefs(L"creative_plot_permissions"))
+    {
+        const uintptr_t Function = Finder::FunctionStart(Ref);
+        int32_t CallsAfter = 0;
+        for (const auto& [Site, Target] : Function ? Finder::DecodedDirectCalls(Function) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (Site <= Ref || ++CallsAfter < 2)
+            {
+                continue;
+            }
+            for (const uint8_t* Code = reinterpret_cast<const uint8_t*>(Site + 5); Code < reinterpret_cast<const uint8_t*>(Site + 0x30) && Finder::IsReadable(Code, 4); ++Code)
+            {
+                if (Code[0] == 0x83 && (Code[1] & 0xF8) == 0x78 && (Code[1] & 7) != 4 && Code[2] == 0x08 && Code[3] == 0x06)
+                {
+                    Natives::UMcpProfile_GetStat = reinterpret_cast<decltype(Natives::UMcpProfile_GetStat)>(Target);
+                    break;
+                }
+            }
+            break;
+        }
+        if (Natives::UMcpProfile_GetStat)
+        {
+            break;
+        }
+    }
+    // UMcpProfile's ItemsUpdatedDelegate: the member HandleProfileUpdate (0x955BE0, the function that logs its lock
+    // expiration) broadcasts last, after the changed items' own delegates (lea rcx, [r15+0F8h]; call 0x2E4F40), inside
+    // the profile's reflected size.
+    const uintptr_t HandleProfileUpdate = FunctionReferencing(L"UMcpProfile::HandleProfileUpdate updated lock expiration on Account %s for ProfileId %s to %s");
+    const std::vector<std::pair<ptrdiff_t, uintptr_t>> ProfileMemberCalls = HandleProfileUpdate ? Finder::MemberThisCalls(HandleProfileUpdate) : std::vector<std::pair<ptrdiff_t, uintptr_t>>();
+    UClass* ProfileClass = UMcpProfile::StaticClass();
+    const ptrdiff_t ProfileSize = ProfileClass ? ProfileClass->GetPropertiesSize() : 0;
+    if (!ProfileMemberCalls.empty() && ProfileMemberCalls.back().first >= 0x28 && ProfileMemberCalls.back().first + 0x10 <= ProfileSize)
+    {
+        Natives::UMcpProfile_ItemsUpdatedDelegate = ProfileMemberCalls.back().first;
+    }
+    Log::Info(L"Finder: Creative's profile: UMcpProfile::GetStat 0x{:X}, UMcpProfile::ItemsUpdatedDelegate +0x{:X} (HandleProfileUpdate 0x{:X}, {} member call(s))",
+        Natives::UMcpProfile_GetStat ? reinterpret_cast<uintptr_t>(Natives::UMcpProfile_GetStat) - Finder::ImageBase() : 0, Natives::UMcpProfile_ItemsUpdatedDelegate,
+        HandleProfileUpdate ? HandleProfileUpdate - Finder::ImageBase() : 0, ProfileMemberCalls.size());
+    if (!Natives::UMcpProfile_GetStat || Natives::UMcpProfile_ItemsUpdatedDelegate <= 0)
+    {
+        Log::Error(L"Finder: Creative's profile reader is missing a part, so players' last used islands or their late profiles aren't read (see the line above)");
+    }
+
     const auto Address = [](const void* Function) { return Function ? reinterpret_cast<uintptr_t>(Function) - Finder::ImageBase() : 0; };
     Log::Info(L"Finder: Creative's island record: ULevelSaveRecord::ReadFromBuffer 0x{:X}, UFortLevelSaveComponent's cloud save 0x{:X}, USidecarSys's meta setter 0x{:X}",
         Address(reinterpret_cast<const void*>(Natives::ULevelSaveRecord_ReadFromBuffer)), Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_CloudSave)),

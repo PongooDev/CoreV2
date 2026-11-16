@@ -3,6 +3,7 @@
 #include "Components/ActorComponent.h"
 #include "Containers/UnrealString.h"
 #include "GameFramework/OnlineReplStructs.h"
+#include "Internationalization/Text.h"
 #include "Reflection.h"
 #include "UObject/ScriptDelegates.h"
 
@@ -23,16 +24,32 @@ public:
     DefineUProperty(FString, ErrorCode)
 };
 
+// A Creative island's template (from 7.00; Temperate_Medium: "Island {islandIndex}", its BasePlayset and size).
+class UFortCreativeRealEstatePlotItemDefinition : public UObject
+{
+    DefineUnrealClass(UFortCreativeRealEstatePlotItemDefinition, FortniteGame)
+
+public:
+    DefineUProperty(FText, UIDisplayName)
+};
+
 // A player's Creative island (from 7.00; the creative profile's CreativePlot items, Temperate_Medium: the island's
-// template, its BasePlayset and size). The item's id names the island's file in the DSS.
+// template, its BasePlayset and size). The item's id names the island's file in the DSS. The profile makes its items
+// with itself as their outer (UFortMcpProfile's item factory, slot 0x4F 0x113AD80 -> NewObject(this, Class), 0x94C670).
 class UFortCreativeRealEstatePlotItem : public UObject
 {
     DefineUnrealClass(UFortCreativeRealEstatePlotItem, FortniteGame)
 
 public:
     DefineUProperty(int32_t, IslandIndex)
+    DefineUProperty(FString, IslandName)
+    // UFortAccountItem's: the item's template.
+    DefineUProperty(UObject*, ItemDefinition)
     // The item's id, through UMcpItem's virtual getter (the one ServerLoadPlotForPortal_Implementation names the plot by).
     FString GetItemId() const;
+    // The island's name as the player sees it: its own (islandName, once named), else its template's UIDisplayName with
+    // its number ("Island 2").
+    FText GetIslandDisplayName() const;
 };
 
 // The record of what was built on an island (from 6.20's playspaces): the actors the playset came with and those placed,

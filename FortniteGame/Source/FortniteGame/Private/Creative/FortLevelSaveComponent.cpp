@@ -4,6 +4,7 @@
 #include "Engine/World.h"
 #include "FortGameInstance.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/KismetTextLibrary.h"
 #include "Log.h"
 #include "Natives.h"
 #include "ReflectionParams.h"
@@ -13,6 +14,8 @@
 #include "UObject/WeakObjectPtr.h"
 
 #include <format>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace
@@ -76,6 +79,33 @@ FString UFortCreativeRealEstatePlotItem::GetItemId() const
     void** VTable = *reinterpret_cast<void** const*>(this);
     reinterpret_cast<FGetItemId>(VTable[Natives::UMcpItem_GetItemIdIndex])(this, &Result);
     return Result;
+}
+
+FText UFortCreativeRealEstatePlotItem::GetIslandDisplayName() const
+{
+    // The item's islandName attribute once the island has a name of its own (the client's SetCreativePlotIslandName,
+    // which 7.00 can't send, so none has); else the template's "Island {islandIndex}" with the item's number.
+    std::wstring Name = Member_IslandName.IsAvailable() ? IslandName.ToStdString() : std::wstring();
+    if (Name.empty())
+    {
+        UObject* Definition = Member_ItemDefinition.IsAvailable() ? static_cast<UObject*>(ItemDefinition) : nullptr;
+        UFortCreativeRealEstatePlotItemDefinition* PlotDefinition = Cast<UFortCreativeRealEstatePlotItemDefinition>(Definition);
+        if (PlotDefinition)
+        {
+            Name = UKismetTextLibrary::Conv_TextToString(PlotDefinition->UIDisplayName).ToStdString();
+        }
+        const std::wstring Number = std::to_wstring(Member_IslandIndex.IsAvailable() ? static_cast<int32_t>(IslandIndex) : 0);
+        constexpr std::wstring_view Token = L"{islandIndex}";
+        for (size_t At = Name.find(Token); At != std::wstring::npos; At = Name.find(Token, At + Number.size()))
+        {
+            Name.replace(At, Token.size(), Number);
+        }
+    }
+    if (Name.empty())
+    {
+        Name = GetItemId().ToStdString();
+    }
+    return UKismetTextLibrary::Conv_StringToText(FString(Name.c_str()));
 }
 
 bool ULevelSaveRecord::ReadFromBuffer(const std::string& Bytes)

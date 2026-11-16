@@ -1085,6 +1085,12 @@ namespace Natives
     // And the plot item's id getter it uses (UMcpItem's virtual, slot 0x83 on 7.00), which names the island's file.
     inline void (*AFortPlayerControllerAthena_ServerLoadPlotForPortal)(UObject* This, UObject* Portal, const FString& PlotItemId) = nullptr;
     inline int32_t UMcpItem_GetItemIdIndex = -1;
+    // From 7.00 (Creative), AFortPlayerControllerAthena::HookCreativeVTables. UMcpProfile::GetStat (0x9530D0: the profile
+    // state's stat by name, a TSharedPtr<FJsonValue> returned through OutValue), the call the creative profile's plot
+    // permissions getter (0x1132C70) makes with "creative_plot_permissions"; and the offset of UMcpProfile's
+    // ItemsUpdatedDelegate (+0xF8), the delegate UMcpProfile::HandleProfileUpdate (0x955BE0) broadcasts last.
+    inline void* (*UMcpProfile_GetStat)(const UMcpProfile* This, void* OutValue, const FString& StatName) = nullptr;
+    inline ptrdiff_t UMcpProfile_ItemsUpdatedDelegate = -1;
 }
 
 namespace Sites

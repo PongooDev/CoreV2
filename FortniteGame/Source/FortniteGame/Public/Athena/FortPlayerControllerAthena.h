@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Containers/Array.h"
+#include "Internationalization/Text.h"
 #include "Items/FortItemDefinition.h"
 #include "Math/Vector.h"
 #include "Player/FortPlayerController.h"
@@ -16,6 +17,7 @@ class AFortPlayerState;
 class UFortWorldItemDefinition;
 class AFortVolume;
 class UFortCreativeRealEstatePlotItem;
+class UMcpProfile;
 class APawn;
 class AFortPawn;
 class AFortPlayerPawnAthena;
@@ -37,6 +39,7 @@ struct FCreativeIslandData
     DefineUnrealStruct(FCreativeIslandData, FortniteGame)
 
 public:
+    DefineUProperty(FText, IslandName)
     DefineUProperty(FString, McpId)
 };
 
@@ -248,6 +251,10 @@ public:
     // The player's rift as they come into a Creative match (their first pawn), with their last used island loading
     // into it; given back as they leave.
     void ClaimCreativePortal();
+    // Restored (7.00 strips it; 21.40 has it by this name): the player's islands from their creative profile into
+    // CreativeIslands, which replicates to them (the rift's "Set Rift Destination" list and the island menu read it), and
+    // their last used one (the profile's last_used_plot stat) into LastUsedCreativeIsland.
+    void LoadCreativePlots();
     static void ReleaseCreativePortal(AFortPlayerState* PlayerState);
     // Whether the world's match is a Creative playlist's (bEnableCreativeMode, from 6.01).
     static bool IsCreativeMatch(const UObject* WorldContextObject);
@@ -275,6 +282,13 @@ private:
     static void ServerTeleportToPlaygroundLobbyIsland_ImplementationHK(AFortPlayerControllerAthena* This);
     // The player's island space: the one they stand in when it is theirs to edit, else their rift's.
     AFortVolume* GetCreativeVolume();
+    // The creative profile's ItemsUpdatedDelegate (its query's answer, or a command that changed its plots): the islands
+    // again, and the last used one into the player's rift if it has none yet.
+    void OnCreativeProfileItemsUpdated(int64_t UpdateArgument);
+    // The player's last used island (else their first) into their rift, unless the rift's island space has one loaded.
+    void LoadLastUsedPlotIntoPortal();
+    // The player's creative profile on the server (AFortPlayerController::CreativeModeProfile), null without one.
+    UMcpProfile* GetCreativeProfile() const;
     bool TeleportPawnTo(const FVector& Location, const FRotator& Rotation, const wchar_t* Where);
 
     static void PawnDiedInventoryDropCall(AFortPlayerController* Controller, void* Unused, const FGameplayTagContainer* DamageTags, AFortPawn* DeadPawn, bool* bOutDroppedBackpack);

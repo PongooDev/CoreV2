@@ -11202,8 +11202,8 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
             continue;
         }
         const uintptr_t AthenaEnd = Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
-        // Whether a function of up to 0x200 bytes loads GameplayMutators and calls a virtual: the loop over the mutators.
-        const auto AsksMutators = [Mutators](uintptr_t Begin, uintptr_t End)
+        // Whether a function of up to 0x200 bytes loads GameplayMutators.
+        const auto ReadsMutators = [Mutators](uintptr_t Begin, uintptr_t End)
         {
             bool bReadsMutators = false;
             for (uintptr_t Load = End > Begin && End - Begin <= 0x200 ? Begin : 0; Load && Load + 7 <= End && !bReadsMutators; ++Load)
@@ -11211,7 +11211,12 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
                 bReadsMutators = (Byte(Load) & 0xF8) == 0x48 && Byte(Load + 1) == 0x8B && (Byte(Load + 2) & 0xC0) == 0x80 && (Byte(Load + 2) & 0x07) != 0x04
                     && *reinterpret_cast<const int32_t*>(Load + 3) == Mutators;
             }
-            return bReadsMutators && FindVirtualCall(Begin, End) != 0;
+            return bReadsMutators;
+        };
+        // And calls a virtual too: the loop over the mutators.
+        const auto AsksMutators = [&ReadsMutators](uintptr_t Begin, uintptr_t End)
+        {
+            return ReadsMutators(Begin, End) && FindVirtualCall(Begin, End) != 0;
         };
         bool bAsksMutators = AsksMutators(Athena, AthenaEnd);
         // 6.10 (CL-4480234) keeps the loop in the game state's own function (0xC2F9E0: mov rbx, [rcx+1B10h], each
@@ -11220,6 +11225,18 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
         for (const auto& [Call, Target] : !bAsksMutators && AthenaEnd > Athena && AthenaEnd - Athena <= 0x200 ? Finder::DirectCalls(Athena, AthenaEnd) : decltype(Finder::DirectCalls(0, 0)){})
         {
             if (IsInText(Target) && Finder::FunctionStart(Target) == Target && AsksMutators(Target, Finder::FunctionEnd(Target)))
+            {
+                bAsksMutators = true;
+                break;
+            }
+        }
+        // 7.00 (CL-4629139, slot 0x329, 0xC6B1D0) gathers the mutators that apply to the controller with a helper of the
+        // game state's (0xC52860: GameplayMutators, "mov rdx, [rbp+1BF0h]", into an array) and loops over that list itself
+        // (each mutator's slot 0xE3, "call [rax+718h]"). So the loop is in the override and the GameplayMutators read is
+        // in the callee. Looked at only when neither shape above is there, so 6.01 to 6.31 resolve as they did.
+        for (const auto& [Call, Target] : !bAsksMutators && AthenaEnd > Athena && AthenaEnd - Athena <= 0x200 && FindVirtualCall(Athena, AthenaEnd) != 0 ? Finder::DirectCalls(Athena, AthenaEnd) : decltype(Finder::DirectCalls(0, 0)){})
+        {
+            if (IsInText(Target) && Finder::FunctionStart(Target) == Target && ReadsMutators(Target, Finder::FunctionEnd(Target)))
             {
                 bAsksMutators = true;
                 break;

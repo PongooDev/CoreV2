@@ -552,9 +552,15 @@ void AFortPlayerControllerAthena::HookCallSites()
             FAthenaMatchStats::HasStatSlots() ? L", 21.40's Stats slots and WeaponStats" : L"", UAthenaPlayerMatchReport::HasStats() && HasMatchReport() ? L"holds them" : L"is missing",
             AFortPlayerStateAthena::HasDownScore() ? L"has DownScore" : L"has no DownScore");
     }
-    // ShouldDropItem (from 6.01), which the death's item drop asks: only a build with the mutator that answers it has
-    // the virtual.
-    if (FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_ItemDropOverride"))
+    // ShouldDropItem (from 6.01), which the death's item drop asks: only a build with a mutator that answers it has the
+    // virtual. Up to 6.2x that is AFortAthenaMutator_ItemDropOverride (Playground's "Drop Items When Eliminated"). 6.30
+    // drops that class; AFortAthenaMutator_InventoryOverride answers instead. Its FortGameStateAthena_ShouldDropItem
+    // (6.31 0xD3C4C0, slot 0xE2) keeps every weapon, ammo, material, trap, gadget and consumable when its
+    // DropAllItemsOverride is ForceKeep, as 6.31's Team Rumble has it (RespawnInventoryDropMutator). The game state asks
+    // its mutators at 0xCBAD80, and AFortPlayerControllerAthena's override (0xCEF46A) calls that. Without this the
+    // finder never ran on 6.30+, and a Team Rumble player dropped their whole inventory on each death.
+    if (FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_ItemDropOverride")
+        || FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_InventoryOverride"))
     {
         Finder::ResolveShouldDropItemLive(AFortGameStateAthena::GameplayMutatorsOffset());
     }

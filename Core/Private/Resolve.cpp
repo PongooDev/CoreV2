@@ -2505,6 +2505,33 @@ namespace
                 }
             }
         }
+        // 7.00 (CL-4629139) has no significance manager handler. The input manager's ("showdebug INPUTMANAGER", 0x306140)
+        // goes into the same delegate on 6.31 and 7.00, as a UObject method instance added inline: lea rax, Handler
+        // (0x2DA3CC); ...; lea rcx, [Entries] (0x2DA417); ...; movsxd rsi, [Entries+8] (ArrayNum, 0x2DA43D); the instance's
+        // vtables are loaded 0x23 and 0x52 bytes after the handler's lea.
+        uintptr_t InlineScan = 0x20;
+        if (!Entries)
+        {
+            const uintptr_t InputHandler = FunctionOf(L"showdebug INPUTMANAGER");
+            int32_t LeaMatches = 0;
+            const uintptr_t HandlerLea = InputHandler ? ScanRipTarget({ 0x48, 0x8D, 0x05 }, 3, 7, InputHandler, LeaMatches) : 0;
+            for (uintptr_t Lea = LeaMatches == 1 ? FindInstruction(HandlerLea + 7, HandlerLea + 0x80, { 0x48, 0x8D, 0x0D }) : 0; Lea && !Entries; Lea = FindInstruction(Lea + 1, HandlerLea + 0x80, { 0x48, 0x8D, 0x0D }))
+            {
+                const uintptr_t Delegate = Finder::RelativeTarget(Lea, 3, 7);
+                for (uintptr_t Num = Lea + 7; !IsInText(Delegate) && Num + 7 <= Lea + 0x40 && !Entries; ++Num)
+                {
+                    // movsxd r64, [rip+ArrayNum]
+                    if ((Byte(Num) & 0xFB) == 0x48 && Byte(Num + 1) == 0x63 && (Byte(Num + 2) & 0xC7) == 0x05 && Finder::RelativeTarget(Num, 3, 7) == Delegate + 0x08)
+                    {
+                        Natives::NumDelegateInlineBytes = 0;
+                        Entries = Delegate;
+                        InlineBind = HandlerLea;
+                        InlineScan = 0x60;
+                        Log::Info(L"Finder: UConsole::RegisterConsoleAutoCompleteEntries from the input manager's handler (delegates use the heap allocator)");
+                    }
+                }
+            }
+        }
         RequireAddress(L"UConsole::RegisterConsoleAutoCompleteEntries", reinterpret_cast<uintptr_t&>(Natives::UConsole_RegisterConsoleAutoCompleteEntries), Entries);
 
         // The delegate instance layout, from the static instance AddStatic binds the handler with (2.5 0x6A8610, 2.4.2
@@ -2513,7 +2540,7 @@ namespace
         // 4.2's inline instance: its vtable is the lea after the handler's (0x6E9462).
         const uintptr_t AddStaticCall = Entries && !InlineBind ? FindRawCall(Bind + 7, Bind + 0x20) : 0;
         const uintptr_t AddStatic = AddStaticCall ? Finder::RelativeTarget(AddStaticCall, 1, 5) : InlineBind ? InlineBind + 7 : 0;
-        const uintptr_t AddStaticScanEnd = InlineBind ? InlineBind + 0x20 : AddStatic + 0x100;
+        const uintptr_t AddStaticScanEnd = InlineBind ? InlineBind + InlineScan : AddStatic + 0x100;
         int32_t GetHandleIndex = -1;
         for (uintptr_t Lea = AddStatic ? FindInstruction(AddStatic, AddStaticScanEnd, { 0x48, 0x8D, 0x05 }) : 0; Lea && GetHandleIndex < 0; Lea = FindInstruction(Lea + 1, AddStaticScanEnd, { 0x48, 0x8D, 0x05 }))
         {

@@ -355,8 +355,9 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     // GatherNavigationBounds override (6.31 0xB36A20) adds to the system's bounds when that level is valid. It then does
     // what the steps below restored one by one (the missing navigation data, the octree, the initial building lock, whose
     // release rebuilds the navmeshes inside those bounds) and gives the main navmesh the AI system's hot spot manager,
-    // which they didn't. Bounds and unlock are its own, so they are used wherever it is there intact (#469: on 6.31, with
-    // the unit NavMeshBoundsVolume sized by hand, no husk ever projected onto FortNavMesh-Husk). 21.40 has
+    // which they didn't. Bounds and unlock are its own, so they are used wherever it is there intact. (#469's husks that
+    // never projected onto FortNavMesh-Husk, on 6.31 and 7.00 either way, had a navmesh with no geometry to build on:
+    // the static meshes' missing navigation collision, UNavCollision::CreateOnServer.) 21.40 has
     // GridNavBounds and ShouldAddGridNavBound; which UniqueID Epic gives the grid's bounds isn't known: the support
     // system's (one no volume has). The graph's OnWorldInitialized it runs returns at once, its cells being laid out
     // (Core's, from the grid, 6.31 0xB80AEB), so Core's own below still loads the terrain.

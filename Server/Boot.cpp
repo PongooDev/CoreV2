@@ -18,6 +18,7 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
+#include "AI/Navigation/NavCollision.h"
 #include "UObject/Linker.h"
 #include "UObject/Object.h"
 #include "FortGameInstance.h"
@@ -368,6 +369,12 @@ static void InstallHooks()
         ACharacter::OnCheatMovement = &UFortCheatManager::OnCheatMovement;
         UFortCheatManager::HookNatives();
         Finder::ResolveNavigationSystemLive();
+        // Save the World (#469): the zones' static meshes get the navigation collision a server's have, which the husks'
+        // navmeshes are built on. Battle Royale's bots build their own navmesh (UAthenaNavSystem) and keep theirs as it is.
+        if (!Configuration::Get().IsBattleRoyale())
+        {
+            UNavCollision::CreateOnServer();
+        }
         // The server-only plugin that gives the game mode its players' Vivox tokens (the "VoiceChatToken" modular
         // feature), which the client builds lack: registered once the backend has shared its Vivox signing.
         FVivoxVoiceChatTokenModule::StartupModule();

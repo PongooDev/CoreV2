@@ -889,6 +889,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\NavigationData.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\AI\Navigation</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\NavCollision.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\AI\Navigation</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\AI\Navigation\NavigationSystem.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\AI\Navigation</Filter>
     </ClInclude>
@@ -1001,6 +1004,9 @@
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\ReplicationDriver.h">
+      <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\StaticMesh.h">
       <Filter>Engine\Source\Runtime\Engine\Classes\Engine</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Engine\Classes\Engine\World.h">
@@ -1892,6 +1898,9 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\ShowFlags.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\StaticMesh.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\TickTaskManager.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
     </ClCompile>
@@ -1903,6 +1912,9 @@
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\World.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AI\Navigation\NavCollision.cpp">
+      <Filter>Engine\Source\Runtime\Engine\Private\AI\Navigation</Filter>
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\AI\Navigation\NavigationSystem.cpp">
       <Filter>Engine\Source\Runtime\Engine\Private\AI\Navigation</Filter>

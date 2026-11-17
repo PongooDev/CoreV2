@@ -121,16 +121,20 @@ namespace
     // the URL first (0x60D5A0): unless Protocol is https and ISslCertificateManager::IsDomainPinned(Domain), it calls
     // FPlatformMisc::RequestExit(false), so the server quit as its game mode's auto login built the login URL. CoreRedirect
     // sends the identity service's requests to the backend whatever their scheme.
-    // The sidecar service goes through the same check from 7.10: USidecarSys's island upload and checkin (7.10 0x2E60800)
-    // take the base URL from the OnlineSidecarServiceMcp service's GetBaseUrl (its vtable 0x39B2B38, slot 10 = 0x4B8BE0;
-    // 7.20 0x3ACE940, slot 10 = 0x4D7060 with the check at 0x60F0A0). The build ships it as http://127.0.0.1:8000 (Epic's
-    // servers had a sidecar process beside them), which fails both halves of the check, so the first island save of a
-    // 7.10+ Creative server would quit it. It gets https and a host under .ol.epicgames.com, which the build pins (the
-    // pin list is built in, no ini has [SSL] PinnedPublicKeys; account-public-service-prod03.ol.epicgames.com passes it
-    // through that entry), and CoreRedirect sends its requests to the backend's /api/dss/v1 routes. Core-Backend's hotfix
-    // sends the same section to 7.10+ (services/fortnite/cloudstorage.js sidecarSection). 7.00 keeps the shipped one,
-    // which Core's HTTP proxy takes to the backend.
-    constexpr uint32_t FirstPinnedServicesChangelist = 4667333;
+    // The sidecar service, which USidecarSys's island upload and checkin take their base URL from (7.00 CL-4629139 on,
+    // Creative), gets https and a host under .ol.epicgames.com, which CoreRedirect sends to the backend's /api/dss/v1
+    // routes; Core-Backend's hotfix sends the same section (services/fortnite/cloudstorage.js sidecarSection). The build
+    // ships it as http://127.0.0.1:8000 (Epic's servers had a sidecar process beside them).
+    // - 7.00 (#485): with the backend's own address (Protocol=http, Domain=<address>:<port>, the hotfix before #485) the
+    //   upload went to "https://127.0.0.1:<port>.ol.epicgames.com/api/dss/v1/...", which libcurl refuses ("Port number
+    //   ended with '.'"; LogSidecar "DssUpload failed: errors.com.epicgames.online.generic.connection_failure"), so no
+    //   island was saved and every checkout found none.
+    // - 7.10 (CL-4667333) and later: the base URL comes from the service's GetBaseUrl (its vtable 0x39B2B38, slot 10 =
+    //   0x4B8BE0; 7.20 0x3ACE940, slot 10 = 0x4D7060 with the check at 0x60F0A0), whose check (above) fails both halves of
+    //   the shipped URL, so the first island save of a 7.10+ Creative server would quit it. The build pins every host under
+    //   .ol.epicgames.com (the pin list is built in, no ini has [SSL] PinnedPublicKeys; account-public-service-prod03.
+    //   ol.epicgames.com passes it through that entry).
+    constexpr uint32_t FirstSidecarChangelist = 4629139;
 
     void CombineServerConfig()
     {
@@ -139,7 +143,7 @@ namespace
             L"[OnlineSubsystemMcp]\r\nbEnableDefaultServiceTracker=false\r\n"
             L"[OnlineSubsystemMcp.OnlineIdentityMcp]\r\nProtocol=https\r\n"
             L"[XMPP]\r\nbEnabled=false\r\n");
-        if (Packed::Changelist() >= FirstPinnedServicesChangelist)
+        if (Packed::Changelist() >= FirstSidecarChangelist)
         {
             FConfigCacheIni::CombineIntoEngineIni(L"Sidecar service config",
                 L"[OnlineSubsystemMcp.OnlineSidecarServiceMcp]\r\nProtocol=https\r\n"

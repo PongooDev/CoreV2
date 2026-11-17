@@ -6,6 +6,7 @@
 #include "GameFramework/PlayerState.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Athena/FortPlayerPawnAthena.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
@@ -13,6 +14,7 @@
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
+#include <format>
 #include <unordered_map>
 
 TArray<AFortPlayerState*> AFortMinigame::GetParticipatingPlayers()
@@ -83,6 +85,7 @@ void AFortMinigame::TeleportPlayersToStartLocations()
         return;
     }
     int32_t Moved = 0;
+    int32_t Skydiving = 0;
     const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
     for (AFortPlayerState* PlayerState : Players)
     {
@@ -98,10 +101,22 @@ void AFortMinigame::TeleportPlayersToStartLocations()
         if (reinterpret_cast<AActor*>(Pawn)->TeleportTo(Location, Rotation))
         {
             ++Moved;
+            // SpawnLocationSetting's Sky (#485): DetermineSpawnLocation gives a point in the air (GetAirSpawnLocation,
+            // 7.00 0x1075A20) and bShouldSkydive, and the player starts the game in a skydive from there, as from the bus
+            // (AFortPlayerPawnAthena::BeginSkydiving, bFromBus false). Without it they fell from that height as a walking
+            // pawn, to their death with fall damage on.
+            AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Pawn));
+            if (bShouldSkydive && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving()
+                && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset()))
+            {
+                AthenaPawn->BeginSkydiving(false);
+                ++Skydiving;
+            }
         }
         FinishPlayerTeleportedForMinigameStart(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
     }
-    Log::Info(L"Minigame: {} takes {} of its {} players to their start", GetName().ToStdString(), Moved, Players.Num());
+    Log::Info(L"Minigame: {} takes {} of its {} players to their start{}", GetName().ToStdString(), Moved, Players.Num(),
+        Skydiving ? std::format(L", {} of them skydiving from the air", Skydiving) : std::wstring());
 #endif
 }
 

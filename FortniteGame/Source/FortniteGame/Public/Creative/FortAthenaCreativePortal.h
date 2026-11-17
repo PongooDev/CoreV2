@@ -57,6 +57,12 @@ public:
     // rift becomes UserId's and its island loads PlotItem.
     void LoadPlotForUser(const FUniqueNetIdRepl& UserId, UFortCreativeRealEstatePlotItem* PlotItem);
 
+    // Restored (7.10's ServerLoadPlotForPortalFromMnemonic_Implementation, 0xC84E10, calls the shared empty function
+    // there, once it has checked the rift and has the player's id): the island of the code Mnemonic, a published island,
+    // loads into the rift's island space for UserId (UFortLevelSaveComponent::LoadPlotFromMnemonic).
+    void LoadPlotFromMnemonicForUser(const FUniqueNetIdRepl& UserId, const FString& Mnemonic);
+    static void LoadPlotFromMnemonicForUserHK(AFortAthenaCreativePortal* This, const FUniqueNetIdRepl& UserId, const FString& Mnemonic);
+
     UFortLevelSaveComponent* GetLevelSaveComponent() const;
     // The game's rift refresh (Natives::AFortAthenaCreativePortal_RefreshPortal): its island's name, open state and
     // CurrentPopulation counted again.

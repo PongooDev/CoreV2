@@ -1156,6 +1156,10 @@ namespace Natives
     // the records tidied after the read, the read flag cleared and OnFinishedRead broadcast (bSucceeded, else
     // "read_failed"). The other function that logs "read_failed" is ReadFromDisk.
     inline void (*ULevelSaveRecord_NotifyFinishedRead)(UObject* This, bool bSucceeded) = nullptr;
+    // From 7.10 (CL-4667333; PongooDev/CoreV2#488), AFortPlayerControllerAthena::HookCreativeIslandTools: the component's
+    // load of a published island by its code (0xF7EF90, the function that logs "Attempting to load plot from mnemonic
+    // %s"; its BeginPlay, 0xF5E610, calls it for the featured rifts' CuratedLinkCodes): (this, the user's id, the code).
+    inline void (*UFortLevelSaveComponent_LoadPlotFromMnemonic)(UObject* This, const FUniqueNetIdRepl& UserId, const FString& Mnemonic) = nullptr;
 }
 
 namespace Sites

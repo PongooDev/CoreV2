@@ -421,6 +421,8 @@ static void InstallHooks()
             // 7.00's Creative: the rifts, the islands' load and save, the Creative RPCs and the minigames' start.
             AFortAthenaCreativePortal::HookNatives();
             AFortPlayerControllerAthena::HookCreativeVTables();
+            // 7.10's island codes, publishing and backups (#488).
+            AFortPlayerControllerAthena::HookCreativeIslandTools();
             AFortMinigame::HookNatives();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();

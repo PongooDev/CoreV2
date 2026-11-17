@@ -231,6 +231,41 @@ void AFortAthenaCreativePortal::LoadPlotForUserHK(AFortAthenaCreativePortal* Thi
     }
 }
 
+void AFortAthenaCreativePortal::LoadPlotFromMnemonicForUser(const FUniqueNetIdRepl& UserId, const FString& Mnemonic)
+{
+#if WITH_SERVER_CODE
+    // ServerLoadPlotForPortalFromMnemonic_Implementation (7.10 0xC84E10) checked the rift is no other player's and has
+    // the player's id: the code's island loads into the rift's island space (PongooDev/CoreV2#488), the way the featured
+    // rifts load theirs. The component's own load rejects what it can't take ("Rejecting plot load for mnemonic %s: %s":
+    // not_authorized, invalid_mnemonic, queue_busy, cloudstorage_unavailable), and the links service's answer a code
+    // that isn't published.
+    UFortLevelSaveComponent* SaveComponent = GetLevelSaveComponent();
+    if (!SaveComponent || Role != ROLE_Authority)
+    {
+        Log::Warning(L"Creative: {} can't load the island {}: {}", GetName().ToStdString(), Mnemonic.ToStdString(),
+            !static_cast<AFortVolume*>(LinkedVolume) ? L"it has no linked volume" : L"its volume has no UFortLevelSaveComponent");
+        return;
+    }
+    // Shut while the island loads, as for a player's island: the load's end opens it.
+    bPortalOpen = false;
+    if (UFunction* OnRep = FindStaticFunction_OnRep_PortalOpen())
+    {
+        Reflection::FParams Params(OnRep, true);
+        Params.Call(this);
+    }
+    Log::Info(L"Creative: {} loads the island {} into {}", UserId.ToString().ToStdString(), Mnemonic.ToStdString(), GetName().ToStdString());
+    SaveComponent->LoadPlotFromMnemonic(UserId, Mnemonic);
+#endif
+}
+
+void AFortAthenaCreativePortal::LoadPlotFromMnemonicForUserHK(AFortAthenaCreativePortal* This, const FUniqueNetIdRepl& UserId, const FString& Mnemonic)
+{
+    if (This)
+    {
+        This->LoadPlotFromMnemonicForUser(UserId, Mnemonic);
+    }
+}
+
 DEFINE_FUNCTION(AFortAthenaCreativePortal::execTeleportPlayer)
 {
     // 7.00's exec (0x14D4580): the pawn, then the rotation, as the stripped body takes them.

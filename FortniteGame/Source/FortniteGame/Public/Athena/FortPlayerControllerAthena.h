@@ -43,6 +43,16 @@ public:
     DefineUProperty(FString, McpId)
 };
 
+// What a player publishes their island with (7.10's island menu, Publish Island: UFortCreativePublishModal):
+// FCreativePublishOptions (7.10 SDK, 0x30 bytes), which PublishMyCurrentCreativePlot takes by value.
+struct FCreativePublishOptions
+{
+    FString UserTitle;
+    FString UserDescription;
+    FString UserLocale;
+};
+static_assert(sizeof(FCreativePublishOptions) == 0x30);
+
 // A Battle Royale outfit (from 1.8; CID_*): the hero it plays (HID_*_Athena_Commando_*).
 class UAthenaCharacterItemDefinition : public UFortItemDefinition
 {
@@ -274,6 +284,45 @@ public:
     // From 7.00, where the build strips them: the Creative RPCs above, and the redirect of ServerLoadPlotForPortal's
     // stripped call.
     static void HookCreativeVTables();
+
+    // 7.10's (CL-4667333) island tools (PongooDev/CoreV2#488; FortPlayerControllerAthenaCreativeIslands.cpp): Publish
+    // Island, Backup Island and Restore of the island menu, and an island code entered at a rift. Nothing on builds
+    // without them (7.00 has none of these RPCs).
+    DefineUProperty(bool, bIsAllowedToPublish)
+    DefineUFunction(PublishMyCurrentCreativePlot)
+    DefineUFunction(ClientPublishMyCurrentCreativePlotComplete)
+    DefineUFunction(ServerSaveIslandCheckpoint)
+    DefineUFunction(ServerLoadIslandCheckpoint)
+    DefineUFunction(ServerLoadPlotForPortalFromMnemonic)
+    // Restored (7.10 strips its body: 0x3918A0 only destroys the by-value options): the island the player is on, when it
+    // is theirs, is saved and published through the links service; the client hears ClientPublishMyCurrentCreativePlotComplete.
+    void PublishMyCurrentCreativePlot_Implementation(const FCreativePublishOptions& MyPublishOptions);
+    void ClientPublishMyCurrentCreativePlotComplete(const FString& ResultErrorCode, const FString& LinkJson);
+    // Restored (7.10's are the shared empty function, slots 0x3FC and 0x3FA): the island's checkpoint, its backup.
+    void ServerSaveIslandCheckpoint_Implementation(AFortAthenaCreativePortal* Portal);
+    void ServerLoadIslandCheckpoint_Implementation(AFortAthenaCreativePortal* Portal);
+    // As 7.10 has them (0xC84F20, the same check as ServerLoadPlotForPortal's, and 0xC84E10), where a build strips them.
+    bool ServerLoadPlotForPortalFromMnemonic_Validate(AFortAthenaCreativePortal* Portal, const FString& Mnemonic);
+    void ServerLoadPlotForPortalFromMnemonic_Implementation(AFortAthenaCreativePortal* Portal, const FString& Mnemonic);
+    // Whether the player may publish (an enabled Support-A-Creator creator on Core-Backend): bIsAllowedToPublish, which
+    // the island menu shows Publish Island for. Asked as the player comes into a Creative match.
+    void QueryPublishingPermission();
+    static void HookCreativeIslandTools();
+    // The featured rifts' codes from Core-Backend into UFortRuntimeOptions' CuratedLinkCodes, before the hub begins play.
+    static void LoadCuratedLinkCodes();
+
+private:
+    static void PublishMyCurrentCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This, FCreativePublishOptions* MyPublishOptions);
+    static inline void (*PublishMyCurrentCreativePlot_ImplementationOG)(AFortPlayerControllerAthena* This, FCreativePublishOptions* MyPublishOptions) = nullptr;
+    static void ServerSaveIslandCheckpoint_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);
+    static void ServerLoadIslandCheckpoint_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);
+    static bool ServerIslandCheckpoint_ValidateHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);
+    static bool ServerLoadPlotForPortalFromMnemonic_ValidateHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& Mnemonic);
+    static void ServerLoadPlotForPortalFromMnemonic_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& Mnemonic);
+    // The island the player is on, when it is theirs and loaded (its component), else null with Why set.
+    class UFortLevelSaveComponent* GetOwnLoadedIsland(AFortAthenaCreativePortal* Portal, const wchar_t*& Why);
+
+public:
 
     static void HookCallSites();
     // Restores the pawn-death handler (OnPawnDied) and the Athena part of PrepareDeathReport where the build strips them

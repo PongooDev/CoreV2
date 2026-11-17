@@ -1,13 +1,16 @@
 #include "pch.h"
 #include "Creative/FortLevelSaveComponent.h"
 #include "AsyncTaskQueue.h"
+#include "BackendRequest.h"
 #include "Creative/FortVolume.h"
 #include "Engine/World.h"
 #include "FortGameInstance.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/KismetTextLibrary.h"
 #include "Log.h"
+#include "GameThread.h"
 #include "Natives.h"
+#include "Online/NotForLicensees/FortMcpConfig.h"
 #include "PlaysetLevelStreamComponent.h"
 #include "ReflectionParams.h"
 #include "SidecarSys.h"
@@ -16,6 +19,7 @@
 #include "UObject/Class.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <cstdlib>
 #include <format>
 #include <string>
 #include <string_view>
@@ -219,6 +223,69 @@ FString UFortLevelSaveComponent::GetCloudSaveFileName() const
         return FString();
     }
     return FString(std::format(L"islands/personal/{}/{}.island", Owner.ToString().ToStdString(), Plot->GetItemId().ToStdString()).c_str());
+}
+
+FString UFortLevelSaveComponent::GetCheckpointFileName() const
+{
+    // 7.10's 0xF76CE0 with its checkpoint flag: islands/personal/%s/%s.%s, "checkpoint.island" in place of "island".
+    UFortCreativeRealEstatePlotItem* Plot = LoadedPlot;
+    const FUniqueNetIdRepl& Owner = AccountIdOfOwner;
+    if (!Plot || !Owner.IsValid())
+    {
+        return FString();
+    }
+    return FString(std::format(L"islands/personal/{}/{}.checkpoint.island", Owner.ToString().ToStdString(), Plot->GetItemId().ToStdString()).c_str());
+}
+
+void UFortLevelSaveComponent::LoadPlotFromMnemonic(const FUniqueNetIdRepl& UserId, const FString& Mnemonic)
+{
+#if WITH_SERVER_CODE
+    if (!Natives::UFortLevelSaveComponent_LoadPlotFromMnemonic)
+    {
+        Log::Error(L"Creative: the island {} can't load: UFortLevelSaveComponent's mnemonic load wasn't found", Mnemonic.ToStdString());
+        return;
+    }
+    Natives::UFortLevelSaveComponent_LoadPlotFromMnemonic(this, UserId, Mnemonic);
+#endif
+}
+
+void UFortLevelSaveComponent::RefreshCheckpointDate()
+{
+#if WITH_SERVER_CODE
+    // Core-Backend's DSS answers ?info=true with the file's last write (updatedUnixMs), not its bytes; no checkpoint is
+    // a 404, and the date stays empty (the menu's Restore stays off).
+    if (!Member_LastCheckpointDateUtc.IsAvailable() || !Member_BackupSaveState.IsAvailable())
+    {
+        return;
+    }
+    const std::wstring File = GetCheckpointFileName().ToStdString();
+    if (File.empty())
+    {
+        return;
+    }
+    const FWeakObjectPtr WeakThis(this);
+    BackendRequest::GetJson(std::format(L"checkpoint date of {}", File), std::format(L"/api/dss/v1/creative/{}?info=true", File),
+        FFortMcpConfig::DedicatedServerClientId, FFortMcpConfig::DedicatedServerClientSecret, [WeakThis](uint32_t Status, const std::string& Body)
+    {
+        const long long UnixMs = Status == 200 ? std::atoll(BackendRequest::JsonField(Body, "updatedUnixMs").c_str()) : 0;
+        GameThread::Enqueue([WeakThis, UnixMs]()
+        {
+            UFortLevelSaveComponent* Component = static_cast<UFortLevelSaveComponent*>(WeakThis.Get());
+            if (!Component)
+            {
+                return;
+            }
+            FDateTime Date;
+            // FDateTime's ticks: 100 ns since 0001-01-01, the Unix epoch at 621355968000000000.
+            Date.Ticks = UnixMs > 0 ? 621355968000000000LL + UnixMs * 10000LL : 0;
+            Component->LastCheckpointDateUtc = Date;
+            if (AActor* Owner = reinterpret_cast<AActor*>(Component->GetVolume()))
+            {
+                Owner->ForceNetUpdate();
+            }
+        });
+    });
+#endif
 }
 
 void UFortLevelSaveComponent::LoadPlotForUser(const FUniqueNetIdRepl& UserId, UFortCreativeRealEstatePlotItem* PlotItem)
@@ -492,6 +559,8 @@ void UFortLevelSaveComponent::FinishPlotLoad(bool bSucceeded, const std::wstring
     if (bSucceeded)
     {
         StartPeriodicSaveTimer();
+        // 7.10's island menu offers Restore by the checkpoint's date (PongooDev/CoreV2#488).
+        RefreshCheckpointDate();
     }
     Log::Info(L"Creative: {}'s island {} {}", AccountIdOfOwner.ToString().ToStdString(), GetCloudSaveFileName().ToStdString(),
         bSucceeded ? (bIsLoaded ? L"is loaded; it saves to the DSS on the volume's timer and as the volume goes read-only for a game"

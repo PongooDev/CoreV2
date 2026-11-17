@@ -452,6 +452,8 @@ void AFortPlayerControllerAthena::ClaimCreativePortal()
     {
         return;
     }
+    // 7.10's Publish Island is for the players who may publish (FortPlayerControllerAthenaCreativeIslands.cpp).
+    QueryPublishingPermission();
     AFortCreativePortalManager* Manager = AFortCreativePortalManager::Get(this);
     AFortAthenaCreativePortal* Portal = Manager ? Manager->ClaimPortal(this) : nullptr;
     if (!Portal)

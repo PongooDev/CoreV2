@@ -5,6 +5,7 @@
 #include "GameFramework/OnlineReplStructs.h"
 #include "Internationalization/Text.h"
 #include "Reflection.h"
+#include "Misc/DateTime.h"
 #include "UObject/AssetPtr.h"
 #include "UObject/ScriptDelegates.h"
 
@@ -124,6 +125,29 @@ public:
     DefineUProperty(FString, LoadedPlotInstanceId)
     DefineUProperty(bool, bIsLoaded)
     DefineUProperty(bool, bIsSaving)
+    // 7.10's (CL-4667333; PongooDev/CoreV2#488): the save in progress (bIsSaving's new name: the cloud save sets it,
+    // 0xF887F3), the island menu's backup and restore states (EBackupSaveState Ready 0, InProgress 1, OnCooldown 2) and
+    // the checkpoint's date, which replicate to the island's players, and the save's end.
+    DefineUProperty(bool, bIsAutoSaving)
+    DefineUProperty(uint8_t, BackupSaveState)
+    DefineUProperty(uint8_t, RestoringState)
+    DefineUProperty(FDateTime, LastCheckpointDateUtc)
+    DefineUProperty(int32_t, PublishRateLimitSeconds)
+    DefineUProperty(int32_t, BackupRateLimitSeconds)
+    DefineUProperty(int32_t, RestoreRateLimitSeconds)
+    DefineUProperty(FMulticastScriptDelegate, OnFinishedWritingCloudFiles)
+    static bool HasBackupStates() { return Member_BackupSaveState.IsAvailable() && Member_RestoringState.IsAvailable(); }
+    static bool HasLastCheckpointDate() { return Member_LastCheckpointDateUtc.IsAvailable(); }
+    static bool HasOnFinishedWritingCloudFiles() { return Member_OnFinishedWritingCloudFiles.IsAvailable(); }
+    bool IsAutoSaving() const { return Member_bIsAutoSaving.IsAvailable() && bIsAutoSaving; }
+    // The island tools' rate limits (config: 0 publish, 1 backup, 2 restore), or Fallback where the build has none.
+    int32_t GetToolRateLimitSeconds(int32_t Tool, int32_t Fallback) const
+    {
+        if (Tool == 0 && Member_PublishRateLimitSeconds.IsAvailable()) return PublishRateLimitSeconds;
+        if (Tool == 1 && Member_BackupRateLimitSeconds.IsAvailable()) return BackupRateLimitSeconds;
+        if (Tool == 2 && Member_RestoreRateLimitSeconds.IsAvailable()) return RestoreRateLimitSeconds;
+        return Fallback;
+    }
 
     static bool IsAvailable() { return StaticClass() && Member_LoadedPlot.IsAvailable() && Member_AccountIdOfOwner.IsAvailable(); }
     // Whether the island's playset comes with its plot (bLoadPlaysetFromPlot: the stream component streams the plot's).
@@ -162,6 +186,15 @@ public:
     void ResetLevelRecord();
     // The island's file, as the game names it (0xF476E0): islands/personal/<owner's account id>/<plot item id>.island.
     FString GetCloudSaveFileName() const;
+    // Its checkpoint, the island menu's backup (7.10's "islands/personal/%s/%s.%s" with "checkpoint.island", 0xF76CE0).
+    FString GetCheckpointFileName() const;
+    // 7.10's (0xF7EF90, "Attempting to load plot from mnemonic %s"): a published island by its code, loaded for UserId
+    // on the volume's queue (the links service's link, its playset, its file from the DSS), as the game's own featured
+    // rifts load theirs (the component's BeginPlay, 0xF5E610).
+    void LoadPlotFromMnemonic(const FUniqueNetIdRepl& UserId, const FString& Mnemonic);
+    // Core's (PongooDev/CoreV2#488): the checkpoint's date from the DSS into LastCheckpointDateUtc, as the island loads,
+    // so the island menu offers Restore for a backup made in an earlier match.
+    void RefreshCheckpointDate();
 
     AFortVolume* GetVolume() const;
     // The volume's own component (one per island space).

@@ -23,6 +23,10 @@ public:
     // Toys: whether a toy's CreateMessage (B_Toy_Tomato_Base's hit, B_Toy_BeachBall_Base's keep-up) fills the message it
     // replicates for the clients' message feed. On by default (6.21's constructor, 0x141E760, sets +0x43E).
     DefineUProperty(bool, bToyMessagingEnabled)
+    // 7.10+ (PongooDev/CoreV2#488): the hub's featured rifts' island codes, in rift order. Each featured island space's
+    // UFortLevelSaveComponent picks its own (LinkCodeNumberToAutoLoad) as it begins play (7.10 0xF5E610).
+    DefineUProperty(TArray<FString>, CuratedLinkCodes)
+    static bool HasCuratedLinkCodes() { return Member_CuratedLinkCodes.IsAvailable(); }
     static bool HasMissionActivationVote() { return Member_bEnableMissionActivationVote.IsAvailable(); }
     static bool HasToyMessaging() { return Member_bToyMessagingEnabled.IsAvailable(); }
     static bool HasSTWLootDrops() { return Member_bEnableSTWLootDrops.IsAvailable(); }

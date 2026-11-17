@@ -246,8 +246,14 @@ public:
     void ServerTeleportToPlaygroundLobbyIsland_Implementation();
     void ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef);
     // The game's own ServerLoadPlotForPortal_Implementation (7.00 0xC65E80): finds PlotItemId in the player's creative
-    // profile, loads it into Portal's island (through the call Core restores) and makes it their last used plot.
+    // profile, loads it into Portal's island (through the call Core restores) and makes it their last used plot. 7.20
+    // strips it, and this is Core's restored one.
     void LoadPlotForPortal(AFortAthenaCreativePortal* Portal, const FString& PlotItemId);
+    // Restored where the build strips both halves of the RPC (7.20: its exec, 0x175C530, calls the return-zero stub as
+    // _Validate, slot 0x3FC, and the empty one as _Implementation, slot 0x3FD), as 7.10 has them (0xC84F20 and
+    // 0xC84FC0, slots 0x3FF and 0x400).
+    bool ServerLoadPlotForPortal_Validate(AFortAthenaCreativePortal* Portal, const FString& PlotItemId);
+    void ServerLoadPlotForPortal_Implementation(AFortAthenaCreativePortal* Portal, const FString& PlotItemId);
     // The player's rift as they come into a Creative match (their first pawn), with their last used island loading
     // into it; given back as they leave.
     void ClaimCreativePortal();
@@ -280,6 +286,10 @@ private:
     static void ResetMyCurrentCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This);
     static void ServerTeleportToPlaygroundIslandDock_ImplementationHK(AFortPlayerControllerAthena* This);
     static void ServerTeleportToPlaygroundLobbyIsland_ImplementationHK(AFortPlayerControllerAthena* This);
+    static bool ServerLoadPlotForPortal_ValidateHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& PlotItemId);
+    static void ServerLoadPlotForPortal_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& PlotItemId);
+    // Whether Core restored ServerLoadPlotForPortal_Implementation (7.20), which LoadPlotForPortal then calls.
+    static inline bool bServerLoadPlotForPortalRestored = false;
     // The player's island space: the one they stand in when it is theirs to edit, else their rift's.
     AFortVolume* GetCreativeVolume();
     // The creative profile's ItemsUpdatedDelegate (its query's answer, or a command that changed its plots): the islands

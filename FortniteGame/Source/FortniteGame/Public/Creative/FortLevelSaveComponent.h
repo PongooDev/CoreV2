@@ -47,8 +47,9 @@ class UFortCreativeRealEstatePlotItem : public UObject
 public:
     DefineUProperty(int32_t, IslandIndex)
     DefineUProperty(FString, IslandName)
-    // UFortAccountItem's: the item's template.
+    // UFortAccountItem's: the item's template, and its id (the MCP item's instance id), which GetInstanceId returns.
     DefineUProperty(UObject*, ItemDefinition)
+    DefineUProperty(FString, InstanceId)
     // The item's id, through UMcpItem's virtual getter (the one ServerLoadPlotForPortal_Implementation names the plot by).
     FString GetItemId() const;
     // The island's name as the player sees it: its own (islandName, once named), else its template's UIDisplayName with

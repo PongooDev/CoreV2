@@ -19,6 +19,7 @@
 #include "Log.h"
 #include "McpProfile.h"
 #include "Natives.h"
+#include "Online/FortMcpProfileCreative.h"
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -46,6 +47,22 @@ namespace
         return PlayerState ? &static_cast<const FUniqueNetIdRepl&>(PlayerState->UniqueId) : nullptr;
     }
 
+    // Swaps Stub at slot Index for Replacement in the controller's class and every class of its with the stub there.
+    void SwapStubInSubclasses(int32_t Index, void* Stub, void* Replacement, const std::wstring& HookName)
+    {
+        UClass* AthenaClass = AFortPlayerControllerAthena::StaticClass();
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(AthenaClass) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[Index] == Stub)
+            {
+                Hooks::SwapVTable(HookName, VTable, Index, Replacement);
+            }
+        }
+    }
+
     // Swaps the stub at Function's _Implementation slot for Replacement in the controller's class and every class of its
     // with the stub there.
     void RestoreImplementation(UFunction* Function, void* Replacement, const wchar_t* Name)
@@ -65,17 +82,26 @@ namespace
             Log::Info(L"Finder: AFortPlayerControllerAthena::{}_Implementation (slot 0x{:X}) is native in this build", Name, Index);
             return;
         }
-        const std::wstring HookName = std::format(L"AFortPlayerControllerAthena::{}_Implementation", Name);
-        for (TObjectIterator<UClass> It; It; ++It)
+        SwapStubInSubclasses(Index, Stub, Replacement, std::format(L"AFortPlayerControllerAthena::{}_Implementation", Name));
+    }
+
+    // The creative profile's plot item by its id: UMcpProfile::FindItem (7.10 0x961C10: the profile's item map, whose
+    // FString keys compare case-insensitively), reached through the items themselves, which the profile makes with
+    // itself as their outer (as LoadCreativePlots finds them).
+    UFortCreativeRealEstatePlotItem* FindPlotItem(UMcpProfile* Profile, const FString& PlotItemId)
+    {
+        if (!Profile || !UFortCreativeRealEstatePlotItem::StaticClass())
         {
-            UClass* Class = *It;
-            UObject* ClassDefault = Class->IsChildOf(AthenaClass) ? Class->GetDefaultObject(false) : nullptr;
-            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
-            if (VTable && VTable[Index] == Stub)
+            return nullptr;
+        }
+        for (TObjectIterator<UFortCreativeRealEstatePlotItem> It; It; ++It)
+        {
+            if (It->GetOuter() == Profile && _wcsicmp(*It->GetItemId(), *PlotItemId) == 0)
             {
-                Hooks::SwapVTable(HookName, VTable, Index, Replacement);
+                return *It;
             }
         }
+        return nullptr;
     }
 
     // The function that contains the code reference to Text (its first), or 0.
@@ -275,6 +301,78 @@ void AFortPlayerControllerAthena::LoadPlotForPortal(AFortAthenaCreativePortal* P
     {
         Natives::AFortPlayerControllerAthena_ServerLoadPlotForPortal(this, Portal, PlotItemId);
     }
+    else if (Portal && bServerLoadPlotForPortalRestored)
+    {
+        ServerLoadPlotForPortal_Implementation(Portal, PlotItemId);
+    }
+}
+
+bool AFortPlayerControllerAthena::ServerLoadPlotForPortal_Validate(AFortAthenaCreativePortal* Portal, const FString& PlotItemId)
+{
+#if WITH_SERVER_CODE
+    // 7.10's (0xC84F20): a rift with an island space (its LinkedVolume, 0xBCA0C0), an item id, and a rift that is no
+    // player's building or the player's own (ABuildingActor::GetOwningPlayerState, 0xD11970, against their player
+    // state). False rejects the RPC (RPC_ValidateFailed), which disconnects the client.
+    if (!Portal || !static_cast<AFortVolume*>(Portal->LinkedVolume) || PlotItemId.IsEmpty())
+    {
+        return false;
+    }
+    AFortPlayerState* RiftOwner = Portal->GetOwningPlayerState();
+    APlayerState* PlayerState = static_cast<APlayerState*>(reinterpret_cast<AController*>(this)->PlayerState);
+    return !RiftOwner || reinterpret_cast<UObject*>(RiftOwner) == reinterpret_cast<UObject*>(PlayerState);
+#else
+    return true;
+#endif
+}
+
+void AFortPlayerControllerAthena::ServerLoadPlotForPortal_Implementation(AFortAthenaCreativePortal* Portal, const FString& PlotItemId)
+{
+#if WITH_SERVER_CODE
+    // 7.10's (0xC84FC0): the rift's owner checked again, the plot item found in the player's creative profile, its
+    // island loaded into the rift for the player, then the plot made their last used one.
+    if (!Portal || PlotItemId.IsEmpty())
+    {
+        return;
+    }
+    AFortPlayerState* RiftOwner = Portal->GetOwningPlayerState();
+    APlayerState* PlayerState = static_cast<APlayerState*>(reinterpret_cast<AController*>(this)->PlayerState);
+    if (RiftOwner && reinterpret_cast<UObject*>(RiftOwner) != reinterpret_cast<UObject*>(PlayerState))
+    {
+        Log::Warning(L"Creative: {} can't load an island into {}: it is another player's", PlayerNameOf(this), Portal->GetName().ToStdString());
+        return;
+    }
+    // The profile's item by that id (UMcpProfile::FindItem, 0x961C10), when it is a plot with a template
+    // (UFortAccountItem::GetItemDefinition, slot 0x73).
+    UMcpProfile* Profile = GetCreativeProfile();
+    UFortCreativeRealEstatePlotItem* PlotItem = FindPlotItem(Profile, PlotItemId);
+    if (!PlotItem || !static_cast<UObject*>(PlotItem->ItemDefinition))
+    {
+        Log::Warning(L"Creative: {} picked the island {}, which {}", PlayerNameOf(this), PlotItemId.ToStdString(),
+            !Profile ? L"the server can't look up: it has no creative profile for them" : !PlotItem ? L"isn't a CreativePlot item of their creative profile" : L"has no item definition");
+        return;
+    }
+    // The player's id (0x12C45F0: their player state's UniqueId on a server), which the rift and its island's save keep.
+    const FUniqueNetIdRepl* UserId = UniqueIdOf(this);
+    if (!UserId)
+    {
+        return;
+    }
+    Portal->LoadPlotForUser(*UserId, PlotItem);
+    // The plot becomes the player's last used one, here and in their profile's last_used_plot (SetLastUsedCreativePlot,
+    // 0x1608550), unless it already is (FString's case-insensitive compare); the plot item's id is its GetInstanceId
+    // (slot 0x83).
+    const FString ItemId = PlotItem->GetItemId();
+    if (Member_LastUsedCreativeIsland.IsAvailable() && _wcsicmp(*static_cast<FString&>(LastUsedCreativeIsland), *ItemId) != 0)
+    {
+        UFortMcpProfileCreative* CreativeProfile = Cast<UFortMcpProfileCreative>(static_cast<UObject*>(Profile));
+        if (!CreativeProfile || !CreativeProfile->SetLastUsedCreativePlot(ItemId))
+        {
+            Log::Warning(L"Creative: {}'s last used island isn't saved to their profile: UFortMcpProfileCreative::SetLastUsedCreativePlot wasn't found", PlayerNameOf(this));
+        }
+        LastUsedCreativeIsland = ItemId;
+    }
+    Log::Info(L"Creative: {} loads their island {} into {}", PlayerNameOf(this), ItemId.ToStdString(), Portal->GetName().ToStdString());
+#endif
 }
 
 void AFortPlayerControllerAthena::ClaimCreativePortal()
@@ -674,6 +772,16 @@ void AFortPlayerControllerAthena::ServerTeleportToPlaygroundLobbyIsland_Implemen
     This->ServerTeleportToPlaygroundLobbyIsland_Implementation();
 }
 
+bool AFortPlayerControllerAthena::ServerLoadPlotForPortal_ValidateHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& PlotItemId)
+{
+    return This->ServerLoadPlotForPortal_Validate(Portal, PlotItemId);
+}
+
+void AFortPlayerControllerAthena::ServerLoadPlotForPortal_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& PlotItemId)
+{
+    This->ServerLoadPlotForPortal_Implementation(Portal, PlotItemId);
+}
+
 void AFortPlayerControllerAthena::HookCreativeVTables()
 {
 #if WITH_SERVER_CODE
@@ -708,7 +816,35 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
             break;
         }
     }
-    if (StrippedCall)
+    if (LoadImplementation && Finder::IsStubFunction(LoadImplementation))
+    {
+        // 7.20 strips both halves: the exec (0x175C530) calls the return-zero stub as _Validate (slot 0x3FC, call
+        // [rax+1FE0h]; test al, al), so every pick at a rift was RPC_ValidateFailed, and the empty one as _Implementation
+        // (slot 0x3FD). Both are restored as 7.10 has them (Core's ServerLoadPlotForPortal_Validate/_Implementation).
+        void** DefaultVTable = *reinterpret_cast<void***>(Default);
+        const int32_t ValidateIndex = Finder::ValidateIndex(LoadForPortal);
+        void* const ValidateStub = ValidateIndex >= 0 && ValidateIndex < LoadIndex ? DefaultVTable[ValidateIndex] : nullptr;
+        const bool bValidateStripped = ValidateStub && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(ValidateStub));
+        if (bValidateStripped)
+        {
+            SwapStubInSubclasses(ValidateIndex, ValidateStub, reinterpret_cast<void*>(&ServerLoadPlotForPortal_ValidateHK),
+                L"AFortPlayerControllerAthena::ServerLoadPlotForPortal_Validate");
+        }
+        RestoreImplementation(LoadForPortal, reinterpret_cast<void*>(&ServerLoadPlotForPortal_ImplementationHK), L"ServerLoadPlotForPortal");
+        bServerLoadPlotForPortalRestored = true;
+        Log::Info(L"Finder: AFortPlayerControllerAthena::ServerLoadPlotForPortal is stripped (_Validate slot 0x{:X} {}, _Implementation slot 0x{:X}): restored; "
+            L"ABuildingActor::GetOwningPlayerState {}, UFortMcpProfileCreative::SetLastUsedCreativePlot {}, the plot item's id {}",
+            ValidateIndex, !ValidateStub ? L"not found" : bValidateStripped ? L"a stub" : L"native", LoadIndex,
+            ABuildingActor::FindStaticFunction_GetOwningPlayerState() ? L"found" : L"missing",
+            UFortMcpProfileCreative::FindStaticFunction_SetLastUsedCreativePlot() ? L"found" : L"missing",
+            Natives::UMcpItem_GetItemIdIndex >= 0 ? std::format(L"slot 0x{:X}", Natives::UMcpItem_GetItemIdIndex) : std::wstring(L"UFortAccountItem::InstanceId"));
+        if (!ValidateStub || !ABuildingActor::FindStaticFunction_GetOwningPlayerState() || !UFortMcpProfileCreative::FindStaticFunction_SetLastUsedCreativePlot())
+        {
+            Log::Error(L"Finder: AFortPlayerControllerAthena::ServerLoadPlotForPortal's restoration is missing a part, so a pick at a rift {} (see the line above)",
+                !ValidateStub ? L"is refused and disconnects the player" : L"doesn't check the rift's owner or save the last used island");
+        }
+    }
+    else if (StrippedCall)
     {
         Natives::AFortPlayerControllerAthena_ServerLoadPlotForPortal = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_ServerLoadPlotForPortal)>(LoadImplementation);
         // The id getter: the first `call qword ptr [rax+disp32]` after the stripped call.

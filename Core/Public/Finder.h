@@ -184,6 +184,9 @@ namespace Finder
     bool ResolveGameModeZoneLive();
     bool ResolveAbilitySystemLive();
     int32_t ImplementationIndex(UFunction* Function);
+    // A NetValidate RPC's _Validate slot: the exec's first virtual call whose answer it tests (call [rax+disp32];
+    // test al, al), before ImplementationIndex's. -1 when the exec has none.
+    int32_t ValidateIndex(UFunction* Function);
     bool ResolveWorldItemDefinitionLive();
     bool ResolvePickupLive();
     bool ResolvePickupGiveLive();

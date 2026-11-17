@@ -6913,6 +6913,22 @@ int32_t Finder::ImplementationIndex(UFunction* Function)
     return Index;
 }
 
+int32_t Finder::ValidateIndex(UFunction* Function)
+{
+    // The exec steps the parameters, calls _Validate and tests it (7.20 ServerLoadPlotForPortal's 0x175C530: call
+    // [rax+1FE0h]; test al, al; RPC_ValidateFailed when it is false), then calls _Implementation.
+    const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    for (uintptr_t Site = ExecEnd ? FindVirtualCall(Exec, ExecEnd) : 0; Site; Site = FindVirtualCall(Site + 1, ExecEnd))
+    {
+        if ((Byte(Site + 1) & 0x38) == 0x10 && Site + 8 <= ExecEnd && Byte(Site + 6) == 0x84 && Byte(Site + 7) == 0xC0)
+        {
+            return VirtualSlot(Site);
+        }
+    }
+    return -1;
+}
+
 bool Finder::ResolveInventoryOwnerLive(UFunction* ServerRemoveInventoryItem, UObject* PlayerControllerDefault, ptrdiff_t WorldInventoryOffset)
 {
     void** PlayerControllerVTable = PlayerControllerDefault ? *reinterpret_cast<void***>(PlayerControllerDefault) : nullptr;

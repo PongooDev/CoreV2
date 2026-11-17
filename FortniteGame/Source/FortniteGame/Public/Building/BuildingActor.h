@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "UObject/ScriptDelegates.h"
 
+class AFortPlayerState;
 class UAbilitySystemComponent;
 class UFortBuildingActorSet;
 
@@ -42,6 +43,7 @@ class ABuildingActor : public AActor
     DefineUFunction(GetHealth)
     DefineUFunction(GetMaxHealth)
     DefineUFunction(GetCentroid)
+    DefineUFunction(GetOwningPlayerState)
 
 public:
     DefineUProperty(int32_t, OwnerPersistentID)
@@ -81,6 +83,10 @@ public:
     bool CountsTowardStructureLimit() const;
     float GetMaxHealth() const;
     FVector GetCentroid() const;
+    // The player whose building this is: the match's player state whose WorldPlayerId is the building's
+    // OwnerPersistentID (a player who left: the game mode's inactive ones, by their CachedPreviousWorldPlayerId). A
+    // reflected native (7.10 0xD11970, 7.20 0xDED150); null without an owner, or on a build without the function.
+    AFortPlayerState* GetOwningPlayerState() const;
 
     void PostInitializeComponents();
     static void HookVTables();

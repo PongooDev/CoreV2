@@ -152,6 +152,13 @@ FVector ABuildingActor::GetCentroid() const
     return Params.Call(const_cast<ABuildingActor*>(this)) ? Params.Take<FVector>(L"ReturnValue") : FVector();
 }
 
+AFortPlayerState* ABuildingActor::GetOwningPlayerState() const
+{
+    UFunction* Function = FindStaticFunction_GetOwningPlayerState();
+    Reflection::FParams Params(Function, true);
+    return Function && Params.Call(const_cast<ABuildingActor*>(this)) ? Params.Take<AFortPlayerState*>(L"ReturnValue") : nullptr;
+}
+
 bool ABuildingActor::CountsTowardStructureLimit() const
 {
     if (!Member_bFireBuiltAndDestroyedEvents.IsAvailable() || !Member_bPlayerPlaced.IsAvailable() || !Member_bDestroyed.IsAvailable())

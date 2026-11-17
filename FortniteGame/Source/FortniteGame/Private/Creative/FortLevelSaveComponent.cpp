@@ -76,6 +76,12 @@ FString UFortCreativeRealEstatePlotItem::GetItemId() const
     FString Result;
     if (Natives::UMcpItem_GetItemIdIndex < 0)
     {
+        // 7.20 strips ServerLoadPlotForPortal_Implementation, where Core finds the getter's slot: the getter
+        // (UFortAccountItem::GetInstanceId, 7.20 slot 0x83 0x85E350: lea rdx, [rcx+0B8h]) copies the reflected InstanceId.
+        if (Member_InstanceId.IsAvailable())
+        {
+            Result = InstanceId;
+        }
         return Result;
     }
     using FGetItemId = FString* (*)(const UObject* This, FString* Out);

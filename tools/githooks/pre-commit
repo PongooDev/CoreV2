@@ -80,7 +80,7 @@ BEGIN { begin = "-----BEG" "IN" }
 !inhunk && /^\+\+\+ /{ f = substr($0, 7); sub(/\t.*$/, "", f); proj = (f ~ /\.(vcxproj|filters|sln|props|targets)$/); next }
 inhunk && /^\+/{
     c = substr($0, 2)
-    if (index(c, begin) && c ~ /PRIVATE KEY-----/ && !(f in priv)) { priv[f] = 1; print "P" f }
+    if ((i = index(c, begin)) && substr(c, i + length(begin)) ~ /^[A-Z ]*PRIVATE KEY-----/ && !(f in priv)) { priv[f] = 1; print "P" f }
     if (length(c) < 20000 && !(f in key) && hexcheck(c)) { key[f] = 1; print "K" f }
     if (proj && (c ~ /<PlatformToolset>v(14[4-9]|1[5-9][0-9]|[2-9][0-9][0-9])/ || c ~ /<VCProjectVersion>(1[89]|[2-9][0-9])/ || c ~ /ToolsVersion="(1[89]|[2-9][0-9])/ || c ~ /Visual Studio Version (1[89]|[2-9][0-9])/ || c ~ /^VisualStudioVersion = (1[89]|[2-9][0-9])\./ || c ~ /VCTargetsPath(1[89]|[2-9][0-9])/) && !(f in tseen)) { tseen[f] = 1; print "T" f }
 }')

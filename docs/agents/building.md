@@ -30,7 +30,7 @@ All three projects compile the shared tree. Add a new `.cpp`/`.h` to `Server/Ser
 `Client/Client.vcxproj`, `Redirect/Redirect.vcxproj` and their `.vcxproj.filters`, or regenerate them:
 
 ```
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\sync_vcxproj.py <worktree>
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\sync_vcxproj.py <worktree>
 ```
 
 Review the diff it makes; commit only the project files your change needs.
@@ -38,19 +38,19 @@ Review the diff it makes; commit only the project files your change needs.
 ## Getting a fix to the owner (deploying main's build)
 
 The owner's launcher loads `Core.dll` and `CoreRedirect.dll` from the main checkout's `x64\Release`
-(`C:\Users\tkenn\Documents\GitHub\CoreV2`), so a pushed fix reaches the owner only when main is pulled and rebuilt
+(`%USERPROFILE%\Documents\GitHub\CoreV2`), so a pushed fix reaches the owner only when main is pulled and rebuilt
 there. A running game holds the PDBs there open, and a failed link deletes the DLLs, so never build directly into it.
 
 Preferred: the core MCP's `deploy_main_build`. Fallback, only after your commit is on `origin/main`:
 
-1. `git -C C:\Users\tkenn\Documents\GitHub\CoreV2 pull --ff-only`. If it fails (local changes, diverged), stop and
+1. `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 pull --ff-only`. If it fails (local changes, diverged), stop and
    write it in `H:\CoreWork\HANDOFF.md`.
 2. Build the main checkout into a separate folder:
    ```
-   cd C:\Users\tkenn\Documents\GitHub\CoreV2
+   cd $env:USERPROFILE\Documents\GitHub\CoreV2
    "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Core.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo -nodeReuse:false -p:OutDir=H:\CoreWork\mainbuild\
    ```
 3. Copy `Core.dll`, `CoreClient.dll` and `CoreRedirect.dll` from `H:\CoreWork\mainbuild\` into
-   `C:\Users\tkenn\Documents\GitHub\CoreV2\x64\Release\`.
+   `%USERPROFILE%\Documents\GitHub\CoreV2\x64\Release\`.
 4. Copy the PDBs only when no `FortniteClient*` process is running; otherwise note in `HANDOFF.md` that the PDBs
    are stale.

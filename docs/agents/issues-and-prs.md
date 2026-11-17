@@ -55,14 +55,40 @@ gh issue close <n> -R PongooDev/CoreV2 --reason "not planned" --comment "<why>"
 gh issue reopen <n> -R PongooDev/CoreV2 --comment "<why>"
 ```
 
-## Pull requests
+## Pull requests: review, fix, merge
 
-- Review the diff for correctness against the rules (Epic's place and names, no polling, no intact-engine hooks, no
-  client changes, gated for old builds) and for security (downloads, paths, process launches, secrets).
-- Test it merged onto main in a detached worktree: build, and boot where it touches start-up code.
-- Merging is the owner's decision (or the session the owner runs). Post your review as a comment; merge only when
-  told to. The standing practice when merging a PR that isn't perfect: merge it with the author credited and fix the
-  problems in follow-up commits, instead of requesting changes and waiting.
+The owner's rule: agents review every open PR, make it right, and merge it themselves. Don't leave a PR waiting on
+"changes requested". The `review-and-merge-pr` skill has the same steps.
+
+1. List open PRs: `gh pr list -R PongooDev/CoreV2 --state open`. Read each: `gh pr view <n> -R PongooDev/CoreV2 --comments`,
+   `gh pr diff <n> -R PongooDev/CoreV2`. Check `H:\CoreWork\HANDOFF.md` that nobody is already on it.
+2. Check it out in a worktree under `H:\CoreWork`:
+   ```
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\pr-<n> origin/main
+   cd H:\CoreWork\pr-<n>
+   gh pr checkout <n> -R PongooDev/CoreV2
+   git submodule update --init
+   ```
+3. Review it against the rules (AGENTS.md sections 1, 6 and 8):
+   - Epic's names, places (class and file) and flow, checked in the 21.40 PDB and the build's IDB;
+   - only stripped functions restored, from the game's own trigger; no polling loops; no hooks on intact engine code;
+   - finders additive (old patterns first); members and UFunctions gated; 1.1+ kept working;
+   - no CoreClient change without the owner's OK; security (downloads, paths, process launches, secrets).
+4. Rework anything that isn't Epic-accurate or is wrong:
+   - if maintainers can edit the PR's branch (`gh pr view <n> --json maintainerCanModify`), commit the fixes on it and
+     `git push` (gh set the branch's remote);
+   - otherwise merge first (step 6), then fix on main right after, in the same session.
+   Keep the author's commits and credit; your fix commits follow the normal message and trailer rules.
+5. Build (full `Core.sln`, VS 2022 MSBuild) and boot-test where it touches start-up, finders or shared code
+   (`headless-server-testing.md`; regression boots as in the definition of done).
+6. Merge with the repo's usual method, a merge commit: `gh pr merge <n> -R PongooDev/CoreV2 --merge`.
+7. Comment on the PR: what you changed and why (each Epic-accuracy rework with its evidence), what was verified live
+   and what only statically.
+8. Deploy for the owner (`deploy_main_build`), remove the worktree.
+
+**Reject** a PR only when it adds something the project has ruled out: player-bot features beyond the Phoebe scope,
+CoreClient changes without the owner's OK, client-side fixes for the build's own behaviour. Comment why and close it
+(`gh pr close <n> -R PongooDev/CoreV2 --comment "<why>"`). Everything else gets fixed and merged.
 
 ## Core-ServerAssets submissions
 

@@ -19,7 +19,7 @@ name, pending kill). Read that first: it often answers the question without symb
 ## 2. Build that commit's PDB (in a worktree, never in the main checkout)
 
 ```
-git -C C:\Users\tkenn\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\sym-<commit> <commit>
+git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\sym-<commit> <commit>
 cd H:\CoreWork\sym-<commit>
 git submodule update --init
 "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Core.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo
@@ -59,4 +59,4 @@ member unless the log has a `[Fatal]` line naming it.
 Frames in the game's exe (`FortniteClient-Win64-Shipping.exe+0x...`) are read in that build's IDB at
 image base + offset (the IDB's base is shown by `project_status` or IDA).
 
-Remove the worktree when done: `git -C C:\Users\tkenn\Documents\GitHub\CoreV2 worktree remove H:\CoreWork\sym-<commit>`.
+Remove the worktree when done: `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree remove H:\CoreWork\sym-<commit>`.

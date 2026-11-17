@@ -38,7 +38,7 @@ as such.
    copy of `run_server_dev.py` in your own scratch folder with its two `5711`s changed.
 4. Boot, gated, in one PowerShell command (build folder first; game arguments after `--`):
    ```
-   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I C:\Users\tkenn\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
+   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
    ```
    - Battle Royale: `-- -CoreMode=BattleRoyale`. Without it the server stays on `FortniteEmptyDedicated` and the
      Battle Royale code (loot, POIs) never runs.
@@ -46,7 +46,7 @@ as such.
    - The script loads `CoreRedirect.dll` first and passes `-httpproxy=127.0.0.1:5711` and
      `-CoreBackend=http://127.0.0.1:5711`, so nothing reaches Epic or the 5595 backend.
    - It prints the last 3000 characters of the Core log, writes the whole log to
-     `C:\Users\tkenn\Documents\Core-Docs\Tools\run_server_dev.py.last.txt`, and terminates the server.
+     `%USERPROFILE%\Documents\Core-Docs\Tools\run_server_dev.py.last.txt`, and terminates the server.
 5. Read the full log (`run_server_dev.py.last.txt`, or `Server_log_<pid>.txt` next to the exe). The engine's own
    log is `%LOCALAPPDATA%\FortniteGame\Saved_CoreServer\Logs\FortniteGame.log` (other agents' servers share that
    folder, so check the timestamp).

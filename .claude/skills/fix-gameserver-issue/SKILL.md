@@ -15,8 +15,8 @@ Rules: AGENTS.md sections 1 and 2 apply in full. Depth: `docs/agents/*.md`.
    close as not planned (`docs/agents/issues-and-prs.md`). Stop.
 5. Make a worktree:
    ```
-   git -C C:\Users\tkenn\Documents\GitHub\CoreV2 fetch origin
-   git -C C:\Users\tkenn\Documents\GitHub\CoreV2 worktree add -b fix-<n> H:\CoreWork\wt-<n> origin/main
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 fetch origin
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add -b fix-<n> H:\CoreWork\wt-<n> origin/main
    git -C H:\CoreWork\wt-<n> submodule update --init
    ```
 6. Find the cause with evidence:
@@ -34,7 +34,8 @@ Rules: AGENTS.md sections 1 and 2 apply in full. Depth: `docs/agents/*.md`.
 11. Run the `pre-commit-review` skill. Fix anything it finds.
 12. Stage only your files (`git add <paths>`, never `-A`) and commit. Message: cause, evidence, fix, gating, what was
     verified live vs statically. Freebuff/Codebuff commits end with `Agent: Freebuff` (no Claude Co-Authored-By
-    line); Claude uses its own Co-Authored-By line.
+    line); Claude uses its own Co-Authored-By line. The pre-commit hook (`tools/githooks/pre-commit`) runs: never
+    `--no-verify`; fix what it flags.
 13. `git fetch origin`, `git rebase origin/main`, rebuild if the rebase brought changes, `git push origin HEAD:main`.
 14. Comment and close: `gh issue close <n> -R PongooDev/CoreV2 --comment "Fixed in <commit>: <cause, fix, verified live/static>"`.
 15. Deploy for the owner: `deploy_main_build` (if available), else note it in `HANDOFF.md`.

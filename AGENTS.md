@@ -8,6 +8,9 @@ it before the first change. Open the linked `docs/agents/*.md` files when a task
 Hard rules are marked **must** or **never**. If a rule here and a request seem to conflict, follow the rule and say
 why in your report.
 
+Paths: `%USERPROFILE%` is the owner's Windows user folder. In PowerShell write it as `$env:USERPROFILE`, as the
+command examples do.
+
 ## 0. Start of every session
 
 1. Read `H:\CoreWork\HANDOFF.md` (local, shared by every agent, not committed). Don't redo or undo work listed in it.
@@ -15,13 +18,13 @@ why in your report.
    range, the installed builds, the SDKs and which IDA port holds which exe. Without it, read the README status
    table, Core-Launcher's `src/Core.Launcher.Hosting/Builds/KnownBuilds.cs`, and the knowledge base below.
 3. Work in your own git worktree under `H:\CoreWork` (see section 5). Never edit the main checkout at
-   `C:\Users\tkenn\Documents\GitHub\CoreV2` directly.
+   `%USERPROFILE%\Documents\GitHub\CoreV2` directly.
 4. If you can't finish in this session, update `H:\CoreWork\HANDOFF.md` before you stop: what is in progress, the
    branch or worktree, what was verified (live or static), what's next.
 
 **Read-only knowledge base for per-build facts** (paths, IDA ports, CLs, past findings):
-`C:\Users\tkenn\.claude\projects\C--Users-tkenn-Documents-GitHub-CoreV2\memory\MEMORY.md` and the files it links.
-Agents may read it. **Never edit it.**
+`%USERPROFILE%\.claude\projects\<the CoreV2 project folder>\memory\MEMORY.md` and the files it links. The folder name
+is the CoreV2 checkout's path with `\` and `:` turned into `-`. Agents may read it. **Never edit it.**
 
 ## 1. Project rules (copy of CLAUDE.md)
 
@@ -66,7 +69,14 @@ These protect the owner's machine, builds and live setup. They apply to every ag
   installed build folders. Core's own logs next to the exe (`Server_log_<pid>.txt`, `Redirect_log_<pid>.txt`) are the
   only files that may appear there.
 - **Never** kill a process you didn't start. Stop every process you did start (servers, test backends, IDA servers,
-  test runs) before you finish.
+  test runs) before you finish. The one exception is restarting the owner's Core-Backend on 5595 after a backend
+  change on main, by the exact procedure in Core-Backend's `docs/agents/restarting-the-live-backend.md`.
+- **Pre-commit hooks:** `tools/githooks/pre-commit` runs on every commit (enabled per clone with
+  `git config core.hooksPath tools/githooks`; this checkout has it on). It blocks pak AES keys, private keys, files
+  over 5 MB, build output and dependency folders, binaries, game files, agent-local files (`.claude/settings.local.json`,
+  `.claude/worktrees`, `.freebuff/project-id`) and project files saved with a newer toolset than v143 (Visual
+  Studio 18), and warns when a new source file isn't in the projects. **Never** bypass it (`--no-verify`); fix what it
+  flags.
 - **No CoreClient.dll changes** unless the owner explicitly OKs that specific change. Fix it on the server
   (`Core.dll`) or in Core-Backend instead. If only a client change would fix it, say so on the issue.
 - **Never** print, copy or commit pak AES keys.
@@ -94,7 +104,8 @@ adds its own folder and defines (`UE_SERVER=1;WITH_SERVER_CODE=1` for the server
 | `Client/` | `CoreClient.dll` target. No changes without the owner's OK |
 | `Redirect/` | `CoreRedirect.dll` target: HTTP redirect to Core-Backend, XMPP |
 | `ThirdParty/` | MinHook (git submodule), Memcury |
-| `.github/workflows/build.yml` | CI: every push to `main` builds Release x64 and publishes a `build-N` release |
+| `.github/workflows/build.yml` | CI: builds Release x64 for pull requests and pushes; a push to `main` also publishes a `build-N` release |
+| `tools/githooks/pre-commit` | the pre-commit guardrails (section 2) |
 | `.github/ISSUE_TEMPLATE/` | Issue forms (their build dropdown gets each new build) |
 
 **Epic-style placement.** A method of `AFortGameModeAthena` goes in
@@ -104,7 +115,7 @@ its module and name. Core-only glue (finders, hook installers, cheats, bots) sti
 
 **Adding a source file:** add it to all three projects and their filters (`Server/Server.vcxproj`,
 `Client/Client.vcxproj`, `Redirect/Redirect.vcxproj` and each `.vcxproj.filters`).
-`C:\Users\tkenn\Documents\Core-Docs\Tools\sync_vcxproj.py <worktree>` regenerates them from the folder tree.
+`python -I $env:USERPROFILE\Documents\Core-Docs\Tools\sync_vcxproj.py <worktree>` regenerates them from the folder tree.
 
 ## 4. Build and test commands
 
@@ -145,8 +156,8 @@ build's IDB and SDK, and a headless boot of the affected builds (`docs/agents/he
    way in that version), it's rejected, not fixed (`docs/agents/issues-and-prs.md`).
 3. Make a worktree from a fresh `origin/main`:
    ```
-   git -C C:\Users\tkenn\Documents\GitHub\CoreV2 fetch origin
-   git -C C:\Users\tkenn\Documents\GitHub\CoreV2 worktree add -b fix-<issue> H:\CoreWork\wt-<issue> origin/main
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 fetch origin
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add -b fix-<issue> H:\CoreWork\wt-<issue> origin/main
    ```
 4. Find the cause with evidence, not names alone:
    - symbolise a crash offset against the matching commit's PDB (`docs/agents/crash-symbolising.md`);
@@ -204,6 +215,15 @@ A change is done only when all of these hold:
   "should work now", without a commit, or without a comment. Reopen it if the reporter says it still happens.
 - Rejected issues (the build's own behaviour, out of scope) get a short comment saying why, then close as not planned.
 - Unfinished work goes in `H:\CoreWork\HANDOFF.md`, never in a pushed WIP commit or branch.
+
+**Pull requests: review, fix, merge.** Agents review every open PR, make it right and merge it themselves (the
+owner's rule). Check it out in a worktree (`gh pr checkout`), review it against sections 1 and 6 (Epic's names,
+places and flow from the 21.40 PDB and IDA; only stripped functions restored; no polling; additive finders; 1.1+ kept
+working), rework anything that isn't Epic-accurate or is wrong (push to the PR branch when maintainers can edit it;
+otherwise merge first and fix on main right after, in the same session), build and boot-test where relevant, merge
+with `gh pr merge`, and comment on the PR with what was changed and why. Reject a PR only when it adds something the
+project has ruled out (bot features beyond the Phoebe scope, CoreClient changes without the owner's OK), with a
+comment. Steps: the `review-and-merge-pr` skill and `docs/agents/issues-and-prs.md`.
 
 ## 8. Mistakes made here before (don't repeat them)
 
@@ -286,12 +306,12 @@ a folder exists before planning a boot on it.
 | [docs/agents/crash-symbolising.md](docs/agents/crash-symbolising.md) | a crash log with `Core.dll+0x...` frames |
 | [docs/agents/building.md](docs/agents/building.md) | build failures, deploying main's build |
 | [docs/agents/new-build-bringup.md](docs/agents/new-build-bringup.md) | the owner says "start supporting X" |
-| [docs/agents/issues-and-prs.md](docs/agents/issues-and-prs.md) | triaging, commenting, closing, merging |
+| [docs/agents/issues-and-prs.md](docs/agents/issues-and-prs.md) | triaging, commenting, closing; reviewing, fixing and merging PRs |
 
-Skills in `.claude/skills/` (loaded by name): `fix-gameserver-issue`, `add-finder`, `restore-stripped-function`,
-`boot-test-server`, `symbolize-crash`, `new-build-bringup`, `pre-commit-review`.
+Skills in `.claude/skills/` (loaded by name): `fix-gameserver-issue`, `review-and-merge-pr`, `add-finder`,
+`restore-stripped-function`, `boot-test-server`, `symbolize-crash`, `new-build-bringup`, `pre-commit-review`.
 
 Related repos: [Core-Backend](https://github.com/PongooDev/Core-Backend) (Node backend),
 [Core-Launcher](https://github.com/PongooDev/Core-Launcher) (C# launcher, `KnownBuilds.cs`),
 [Core-ServerAssets](https://github.com/PongooDev/Core-ServerAssets) (server-only asset paks). Local notes and tools:
-`C:\Users\tkenn\Documents\Core-Docs` (not a git repo; `Tools\` has the scripts named in these docs).
+`%USERPROFILE%\Documents\Core-Docs` (not a git repo; `Tools\` has the scripts named in these docs).

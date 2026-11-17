@@ -13,7 +13,7 @@ Depth: `docs/agents/crash-symbolising.md`.
 3. Preferred: the core MCP's `symbolize_crash` (DLL path, offsets) with a DLL built from that commit. Else:
 4. Build that commit in a detached worktree:
    ```
-   git -C C:\Users\tkenn\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\sym-<commit> <commit>
+   git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\sym-<commit> <commit>
    git -C H:\CoreWork\sym-<commit> submodule update --init
    cd H:\CoreWork\sym-<commit>
    "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Core.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo
@@ -27,7 +27,7 @@ Depth: `docs/agents/crash-symbolising.md`.
    ```
 7. Check the frames form one call path and the faulting instruction matches the log
    (`dumpbin /disasm /range:<va>,<va+0x40>`).
-8. Remove the worktree: `git -C C:\Users\tkenn\Documents\GitHub\CoreV2 worktree remove H:\CoreWork\sym-<commit>`.
+8. Remove the worktree: `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree remove H:\CoreWork\sym-<commit>`.
 
 Done when: every Core frame has a name and line on one consistent path. Then diagnose from the build's code; don't
 call it a missing member without a `[Fatal]` line naming it.

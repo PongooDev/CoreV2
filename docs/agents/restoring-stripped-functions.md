@@ -20,7 +20,7 @@ Before restoring anything, in the IDB of each build you target (read-only, see `
 2. Check the slot's target in **each class that overrides it**: is it the shared empty function or a return-zero
    stub? The base class may keep a body while a subclass folds into the stub, or the other way round.
 3. Check older and newer builds too: stripped in 6.31 doesn't mean stripped in 6.22.
-4. `C:\Users\tkenn\Documents\Core-Docs\Tools\stripdiff.py --old <port> --new <port> --out <file>` lists the slots
+4. `python -I $env:USERPROFILE\Documents\Core-Docs\Tools\stripdiff.py --old <port> --new <port> --out <file>` lists the slots
    and execs that became stubs between two builds.
 
 If the function has a real body in the build, it is **not** stripped: don't restore it. Find out why the game's own

@@ -94,10 +94,10 @@ Builds change the parameters of functions Core calls or replaces. Each miss was 
 Args are always: the CoreV2 worktree, the new SDK folder, the previous SDK folder (folders in `C:\Dumper-7`).
 
 ```
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\sdk_member_check.py <repo> <new SDK> <old SDK>
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\sdk_member_class_check.py <repo> <new SDK> <old SDK>
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\sdk_func_check.py <repo> <new SDK> <old SDK>
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\sdk_type_check.py <repo> <new SDK> <old SDK>
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\sdk_member_check.py <repo> <new SDK> <old SDK>
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\sdk_member_class_check.py <repo> <new SDK> <old SDK>
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\sdk_func_check.py <repo> <new SDK> <old SDK>
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\sdk_type_check.py <repo> <new SDK> <old SDK>
 ```
 
 The name-only checks miss a member that keeps its name but changes type or size (5.41's `CharacterParts`, 6.01's

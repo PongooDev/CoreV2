@@ -33,7 +33,7 @@ The owner keeps IDA instances open with the IDA MCP plugin, one build per port, 
 holds which build changes** when a new build starts: run the core MCP's `project_status` first, or check the port:
 
 ```
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\ida.py --port=13339 health
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\ida.py --port=13339 health
 ```
 
 Agents with MCP access use the `ida-<port>` servers directly. Allowed: decompile, disasm, xrefs, find, lookups,
@@ -43,9 +43,9 @@ or save (`idb_save`): the IDBs are shared with the owner and other agents.
 `ida.py` (fallback client) commands:
 
 ```
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\ida.py --port=<port> decompile 0x12F4400
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\ida.py --port=<port> py <read-only-snippet.py>
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\ida.py --port=<port> call <tool> "<json arguments>"
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\ida.py --port=<port> decompile 0x12F4400
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\ida.py --port=<port> py <read-only-snippet.py>
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\ida.py --port=<port> call <tool> "<json arguments>"
 ```
 
 Keep snippets bounded (each call has a time limit) and write them in your own scratch folder, not in `Core-Docs\Tools`.
@@ -55,7 +55,7 @@ each). Serve one headless on a free port (13350 and up) and stop it when you are
 
 ```
 cd H:\CoreWork
-python -I C:\Users\tkenn\Documents\Core-Docs\Tools\idaserve.py H:\CoreWork\idb\6.21\<file>.i64 13350
+python -I $env:USERPROFILE\Documents\Core-Docs\Tools\idaserve.py H:\CoreWork\idb\6.21\<file>.i64 13350
 ```
 
 Run it from outside `Core-Docs\Tools` (a `dis.py` there breaks IDA's Python). Run at most two IDA instances of
@@ -88,7 +88,7 @@ never print, copy or commit them.
 
 - Core's log: `Server_log_<pid>.txt` next to the exe during a run; the owner's launcher moves it to
   `%LOCALAPPDATA%\Core-Launcher\Logs\Core\` afterwards. `run_server_dev.py` also copies the last one to
-  `C:\Users\tkenn\Documents\Core-Docs\Tools\run_server_dev.py.last.txt`.
+  `%USERPROFILE%\Documents\Core-Docs\Tools\run_server_dev.py.last.txt`.
 - The game's own engine log: `%LOCALAPPDATA%\FortniteGame\Saved\Logs\FortniteGame.log` (client), and
   `%LOCALAPPDATA%\FortniteGame\Saved_<suffix>\Logs\` for servers started with `-saveddirsuffix=<suffix>`. It is not
   in the build folder. Diff a broken run's log against a working build's to find where they diverge.

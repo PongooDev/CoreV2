@@ -53,7 +53,8 @@ for X must keep 1.1 onwards working.
 ## 4. Backend data (Core-Backend)
 
 The build's game data (`gamedata/<CL>`), version name, events and patch-note changes: see Core-Backend's
-`docs/agents/gamedata.md` and its `add-build-gamedata` skill.
+`docs/agents/gamedata.md` and its `add-build-gamedata` skill. Once it is on main, restart the owner's 5595 backend
+(core MCP `restart_backend`, or Core-Backend's `docs/agents/restarting-the-live-backend.md`).
 
 ## 5. Server assets
 

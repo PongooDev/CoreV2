@@ -40,5 +40,10 @@ until fixed or explained in the message. Rules: AGENTS.md sections 1, 2 and 8.
 17. Subject `<build or area> (<#issue>): <change>`; body: cause, evidence, fix, gating, verification.
 18. Trailer: Freebuff/Codebuff end with `Agent: Freebuff` and no Claude Co-Authored-By line; Claude uses its own.
 
+**The hook.** `tools/githooks/pre-commit` runs on `git commit` (`git config core.hooksPath tools/githooks` turns it on
+in a clone that lacks it). It blocks keys, secrets, files over 5 MB, build output, binaries, game files, agent-local
+files and VS 18 project changes. Never commit with `--no-verify`; fix what it reports and commit again. Its warning
+about a source file missing from the projects means: run `sync_vcxproj.py` and stage the project files.
+
 After the commit: rebase on `origin/main`, push, comment on the issue naming the commit, and update `HANDOFF.md` if
 anything is left.

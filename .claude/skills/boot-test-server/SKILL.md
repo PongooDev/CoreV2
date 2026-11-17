@@ -18,10 +18,10 @@ copying or changing anything in `F:\Builds` or `D:\Fortnite Builds`, killing a p
    `node src/main.js --port 5711 --data H:\CoreWork\<task>-data --local-only --qos-ping-port 0 --vivox-sip-port 0`
 5. Boot, gated, in one PowerShell command:
    ```
-   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I C:\Users\tkenn\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
+   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
    ```
    Save the World: leave out `-- -CoreMode=BattleRoyale`.
-6. Read the full log: `C:\Users\tkenn\Documents\Core-Docs\Tools\run_server_dev.py.last.txt`.
+6. Read the full log: `%USERPROFILE%\Documents\Core-Docs\Tools\run_server_dev.py.last.txt`.
 7. Check:
    - `Server ready` present;
    - every `Finder: ... resolved, N missing` and `Reflection: ... N missing` has N = 0;

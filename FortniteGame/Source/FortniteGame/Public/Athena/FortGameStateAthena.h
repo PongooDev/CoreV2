@@ -130,6 +130,14 @@ public:
     // other playlists leave it empty.
     DefineUProperty(TArray<int32_t>, TeamXPlayersLeft)
     static bool HasTeamXPlayersLeft() { return Member_TeamXPlayersLeft.IsAvailable(); }
+    // Before TeamXPlayersLeft (3.0), 50v50's two sides' players left (2.4.2 and 2.5 have them, 1.9 doesn't). 2.5's
+    // AddToAlivePlayers and RemoveFromAlivePlayers (0x9903D0, 0x9B1620) count a player into Team1's when their team is
+    // HumanPvP_Team1 and into Team2's for any other team, while the game mode's CurrentPlaylistId is 50v50's (11). The
+    // HUD (0x26B1300, redrawn when PlayersLeft changes) shows them with bFiftyFiftySquadGame set, as
+    // "<Team>{YourTeamAlive}</> : <EnemyTeam>{EnemyTeamAlive}</>": Team1's first for a HumanPvP_Team1 player, else Team2's.
+    DefineUProperty(int32_t, FiftyFiftyTeam1PlayersLeft)
+    DefineUProperty(int32_t, FiftyFiftyTeam2PlayersLeft)
+    static bool HasFiftyFiftyTeamPlayersLeft() { return Member_FiftyFiftyTeam1PlayersLeft.IsAvailable() && Member_FiftyFiftyTeam2PlayersLeft.IsAvailable(); }
     // The warmup's countdown in the world's time, replicated for the clients' timer: set when the warmup starts
     // (UpdateWarmupPhase, 1.9 0x43D9A0, the end -1 until then), and the bus leaves at the end.
     DefineUProperty(float, WarmupCountdownStartTime)

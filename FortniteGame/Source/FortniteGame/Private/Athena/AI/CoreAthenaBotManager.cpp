@@ -2796,15 +2796,26 @@ void FCoreAthenaBotManager::UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, A
     // whenever the game state's bIsLargeTeamGame is set and TeamXPlayersLeft has two teams or more, in place of
     // PlayersLeft, and its AddToAlivePlayers (0x9DBFB0) counts a player into TeamXPlayersLeft on the same flag. 50v50's
     // two sides were left out here, so its HUD stayed at the players' "1 : 0" as the bots came in and went.
-    if (!AFortGameStateAthena::HasTeamXPlayersLeft() || !AFortGameModeAthena::HasTeamAlivePlayers())
+    // Before 3.0 there is no TeamXPlayersLeft: 50v50's HUD (2.5 0x26B1300) shows the game state's
+    // FiftyFiftyTeam1PlayersLeft and FiftyFiftyTeam2PlayersLeft instead, which AddToAlivePlayers (0x9903D0) and
+    // RemoveFromAlivePlayers (0x9B1620) count players into only while the game mode's CurrentPlaylistId is 50v50's
+    // ("cmp dword ptr [GameMode + 0x428], 11"). Those were never given the bots, so 2.5's 50v50 stayed at "1 : 0" with
+    // the player's bot squadmates beside them (#482).
+    if (!AFortGameModeAthena::HasTeamAlivePlayers())
     {
         return;
     }
-    TArray<int32_t>& TeamXPlayersLeft = GameState->GetMember_TeamXPlayersLeft();
+    constexpr int32_t FiftyFiftyPlaylistId = 11;
+    const bool bTeamXPlayersLeft = AFortGameStateAthena::HasTeamXPlayersLeft();
+    const bool bFiftyFiftyTeams = !bTeamXPlayersLeft && AFortGameStateAthena::HasFiftyFiftyTeamPlayersLeft() && Athena->CurrentPlaylistId == FiftyFiftyPlaylistId;
+    if (!bTeamXPlayersLeft && !bFiftyFiftyTeams)
+    {
+        return;
+    }
     // Not a large team game's: the game state doesn't say it is one, and no player was counted into it (before 3.5 the
     // gate was the playlist's or the game type's, 3.2 0x9AE8D0).
     const bool bLargeTeamGame = AFortGameStateAthena::HasLargeTeamGame() && GameState->bIsLargeTeamGame;
-    if (!bLargeTeamGame && TeamXPlayersLeft.Num() == 0)
+    if (bTeamXPlayersLeft && !bLargeTeamGame && GameState->GetMember_TeamXPlayersLeft().Num() == 0)
     {
         return;
     }
@@ -2818,6 +2829,26 @@ void FCoreAthenaBotManager::UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, A
             ++Bots[Bot->GetTeam() - FirstTeam];
         }
     }
+    if (bFiftyFiftyTeams)
+    {
+        // As AddToAlivePlayers counts them: HumanPvP_Team1's into Team1's, every other team's into Team2's.
+        int32_t Team1 = 0;
+        int32_t Team2 = 0;
+        for (int32_t Index = 0; Index < 100; ++Index)
+        {
+            const auto Found = Bots.find(Index);
+            int32_t& Side = Index == 0 ? Team1 : Team2;
+            Side += Athena->GetTeamAlivePlayers(Index) + (Found != Bots.end() ? Found->second : 0);
+        }
+        if (GameState->FiftyFiftyTeam1PlayersLeft != Team1 || GameState->FiftyFiftyTeam2PlayersLeft != Team2)
+        {
+            GameState->FiftyFiftyTeam1PlayersLeft = Team1;
+            GameState->FiftyFiftyTeam2PlayersLeft = Team2;
+            GameState->ForceNetUpdate();
+        }
+        return;
+    }
+    TArray<int32_t>& TeamXPlayersLeft = GameState->GetMember_TeamXPlayersLeft();
     const int32_t Teams = std::max(PlaylistTeams, Bots.empty() ? 0 : Bots.rbegin()->first + 1);
     if (TeamXPlayersLeft.Num() < Teams)
     {

@@ -381,8 +381,9 @@ private:
     void AddToAliveBots(FCoreAthenaBotController* Bot);
     void OnAircraftPhaseStarted(float Now);
     void UpdateCounts();
-    // A large team game's players left on each team (the game state's TeamXPlayersLeft, which the HUD and the map show):
-    // the game mode's alive players of each team, and its bots.
+    // A large team game's players left on each team (the game state's TeamXPlayersLeft, which the HUD and the map show;
+    // before 3.0, 50v50's FiftyFiftyTeam1PlayersLeft and FiftyFiftyTeam2PlayersLeft): the game mode's alive players of
+    // each team, and its bots.
     void UpdateTeamPlayersLeft(AFortGameModeAthena* Athena, AFortGameStateAthena* GameState);
     // The finisher's pawn, its weapon and the death cause are those of the elimination that left a team alone, as the
     // game's check has them from RemoveFromAlivePlayers: StartEndGamePhase hands them to the winner's ClientNotifyWon.

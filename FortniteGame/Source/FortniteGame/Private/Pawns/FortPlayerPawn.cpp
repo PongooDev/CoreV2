@@ -507,6 +507,96 @@ void AFortPlayerPawn::ServerReviveFromDBNO_ImplementationHK(AFortPlayerPawn* Thi
     This->ServerReviveFromDBNO_Implementation(EventInstigator);
 }
 
+void AFortPlayerPawn::ServerSendZiplineState_Implementation(const FZiplinePawnState& InZiplineState)
+{
+#if WITH_SERVER_CODE
+    // 7.10's (0x129AAB0): the client's state, when newer than the server's (its AuthoritativeValue, which the client raises
+    // with each change), replaces the server's; a jump off the line launches the pawn; then OnRep_ZiplineState, which
+    // puts the pawn in (or out of) the zipline movement on the server too.
+    FZiplinePawnState& State = ZiplineState;
+    UScriptStruct* const StateStruct = FZiplinePawnState::StaticStruct();
+    if (StateStruct && InZiplineState.AuthoritativeValue > State.AuthoritativeValue)
+    {
+        // 7.20's two times are RepSkip, so the RPC doesn't carry them: they are kept, and set as the client's own begin
+        // (0x136F89D: the world's time) and end (0x1373B98: the time for a jump, else -1) set them.
+        const bool bWasZiplining = State.bIsZiplining;
+        const bool bHasRideTimes = FZiplinePawnState::HasRideTimes();
+        const float Began = bHasRideTimes ? static_cast<float>(State.TimeZipliningBegan) : 0.0f;
+        const float EndedFromJump = bHasRideTimes ? static_cast<float>(State.TimeZipliningEndedFromJump) : 0.0f;
+        memcpy(&State, &InZiplineState, StateStruct->GetStructureSize());
+        UWorld* World = GetWorld();
+        const float Now = World ? World->GetTimeSeconds() : 0.0f;
+        if (bHasRideTimes)
+        {
+            State.TimeZipliningBegan = State.bIsZiplining && !bWasZiplining ? Now : Began;
+            State.TimeZipliningEndedFromJump = bWasZiplining && !State.bIsZiplining ? (State.bJumped ? Now : -1.0f) : EndedFromJump;
+        }
+        if (!State.bIsZiplining && State.bJumped)
+        {
+            // The jump off (7.10 0x1277A90; 7.20's client end path, 0x13738DC): the pawn's velocity along the ground
+            // times ZiplineJumpDampening, each axis within 750, and ZiplineJumpStrength up; the Z override only when
+            // falling; no fall damage skipped, the feedback event played.
+            const FVector Velocity = GetVelocity();
+            const float Dampening = ZiplineJumpDampening.GetValueAtLevel(0.0f);
+            const float Strength = ZiplineJumpStrength.GetValueAtLevel(0.0f);
+            const FVector Launch(std::clamp(Dampening * Velocity.X, -750.0f, 750.0f), std::clamp(Dampening * Velocity.Y, -750.0f, 750.0f), Strength);
+            LaunchCharacterJump(Launch, false, Velocity.Z < 0.0f, false, true);
+        }
+    }
+    Reflection::FParams Params(StaticFunction_OnRep_ZiplineState(), true);
+    Params.Call(this);
+#endif
+}
+
+void AFortPlayerPawn::ServerSendZiplineState_ImplementationHK(AFortPlayerPawn* This, const FZiplinePawnState& InZiplineState)
+{
+    This->ServerSendZiplineState_Implementation(InZiplineState);
+}
+
+void AFortPlayerPawn::HookZiplineVTables()
+{
+#if WITH_SERVER_CODE
+    // 7.20 (CL-4727874) strips ServerSendZiplineState_Implementation (slot 0x1BA, the shared empty function in
+    // AFortPlayerPawn, AFortPlayerPawnAthena and AFortRemoteControlledPawnAthena), the server half of every zipline ride:
+    // the server never took the rider's state, so it kept them in walking movement (corrections, other players not seeing
+    // the ride, no launch off the line). 7.00 and 7.10 keep it (7.10 0x129AAB0) and are left alone.
+    UFunction* SendZiplineState = FindStaticFunction_ServerSendZiplineState();
+    const int32_t Index = SendZiplineState ? Finder::ImplementationIndex(SendZiplineState) : -1;
+    UObject* PawnDefault = Index >= 0 && StaticClass() ? StaticClass()->GetDefaultObject(false) : nullptr;
+    void** PawnVTable = PawnDefault ? *reinterpret_cast<void***>(PawnDefault) : nullptr;
+    if (!PawnVTable)
+    {
+        if (SendZiplineState)
+        {
+            Log::Error(L"Finder: AFortPlayerPawn::ServerSendZiplineState_Implementation slot not found");
+        }
+        return;
+    }
+    if (!Finder::IsStubFunction(reinterpret_cast<uintptr_t>(PawnVTable[Index])))
+    {
+        Log::Info(L"Finder: AFortPlayerPawn::ServerSendZiplineState_Implementation (slot 0x{:X}) is native in this build", Index);
+        return;
+    }
+    if (!FZiplinePawnState::StaticStruct() || !FindStaticFunction_OnRep_ZiplineState())
+    {
+        Log::Error(L"Zipline: ServerSendZiplineState_Implementation is stripped and FZiplinePawnState or OnRep_ZiplineState wasn't found, so the server never takes a zipline ride");
+        return;
+    }
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[Index])))
+        {
+            Hooks::SwapVTable(L"AFortPlayerPawn::ServerSendZiplineState_Implementation", VTable, Index, reinterpret_cast<void*>(&ServerSendZiplineState_ImplementationHK));
+        }
+    }
+    Log::Info(L"Zipline: ServerSendZiplineState_Implementation (slot 0x{:X}) is stripped, restored{}", Index,
+        FindStaticFunction_LaunchCharacterJump() ? L"" : L" without the jump's launch (no LaunchCharacterJump)");
+#endif
+}
+
 namespace
 {
     // The pawn's override stacks: AFortPlayerPawn keeps them in members the build doesn't reflect (6.21 +0x1780, cleared

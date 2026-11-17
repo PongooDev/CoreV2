@@ -22,10 +22,29 @@ struct FVortexParams
     float GravityFloorTerminalVelocity;
 };
 
+// The pawn's zipline ride (AFortPlayerPawn::ZiplineState), as 7.20 (CL-4727874) has it (0x28 bytes): the zipline, whether
+// the pawn rides it and whether it jumped off, the counter the owning client raises with each change it sends
+// (ServerSendZiplineState), where on the line it hangs, and two times the client keeps for itself (RepSkip, so the RPC
+// doesn't carry them): when the ride began and when a jump ended it.
+struct FZiplinePawnState
+{
+    DefineUnrealStruct(FZiplinePawnState, FortniteGame)
+
+public:
+    DefineUProperty(bool, bIsZiplining)
+    DefineUProperty(bool, bJumped)
+    DefineUProperty(int32_t, AuthoritativeValue)
+    DefineUProperty(float, TimeZipliningBegan)
+    DefineUProperty(float, TimeZipliningEndedFromJump)
+    static bool HasRideTimes() { return Member_TimeZipliningBegan.IsAvailable() && Member_TimeZipliningEndedFromJump.IsAvailable(); }
+};
+
 class AFortPlayerPawn : public AFortPawn
 {
     DefineUnrealClass(AFortPlayerPawn, FortniteGame)
     DefineUFunction(ServerReviveFromDBNO)
+    DefineUFunction(ServerSendZiplineState)
+    DefineUFunction(OnRep_ZiplineState)
     DefineUFunction(ServerHandlePickup)
     DefineUFunction(IsUsingPersonalVehicle)
     DefineUFunction(PushAnimBPOverride)
@@ -104,8 +123,18 @@ public:
     void PushFootstepBankOverride(int32_t Priority, UObject* InFootstepBankOverride);
     void PopFootstepBankOverride(int32_t Priority, UObject* InFootstepBankOverride);
 
+    // From 7.00 (ziplines): the ride's state, replicated (OnRep_ZiplineState sets the zipline movement), and the jump off
+    // it, which the server launches as the client does.
+    DefineUStructProperty(FZiplinePawnState, ZiplineState)
+    DefineUStructProperty(FScalableFloat, ZiplineJumpDampening)
+    DefineUStructProperty(FScalableFloat, ZiplineJumpStrength)
+    // Restored (7.20 strips it, 7.10 0x129AAB0): the owning client's ride state, taken when newer than the server's.
+    void ServerSendZiplineState_Implementation(const FZiplinePawnState& InZiplineState);
+
     static void HookVTables();
     static void HookPickupVTables();
+    // ServerSendZiplineState_Implementation where the build strips it (7.20).
+    static void HookZiplineVTables();
     // The four override natives and the gadget data's calls to them, where the build strips them.
     static void HookNatives();
 
@@ -113,6 +142,7 @@ private:
     void ReviveFromDBNO(AController* EventInstigator);
 
     static void ServerReviveFromDBNO_ImplementationHK(AFortPlayerPawn* This, AController* EventInstigator);
+    static void ServerSendZiplineState_ImplementationHK(AFortPlayerPawn* This, const FZiplinePawnState& InZiplineState);
     DECLARE_FUNCTION(execPushAnimBPOverride);
     DECLARE_FUNCTION(execPopAnimBPOverride);
     DECLARE_FUNCTION(execPushFootstepBankOverride);

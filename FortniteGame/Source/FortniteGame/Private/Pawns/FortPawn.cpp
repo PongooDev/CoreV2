@@ -52,6 +52,22 @@ void AFortPawn::ForceKill(const FGameplayTag& DeathReason, AController* KillerCo
     Params.Call(this);
 }
 
+bool AFortPawn::LaunchCharacterJump(const FVector& LaunchVelocity, bool bXYOverride, bool bZOverride, bool bIgnoreFallDamage, bool bPlayFeedbackEvent)
+{
+    UFunction* Function = FindStaticFunction_LaunchCharacterJump();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function, true);
+    Params.Set(L"LaunchVelocity", LaunchVelocity);
+    Params.Set(L"bXYOverride", bXYOverride);
+    Params.Set(L"bZOverride", bZOverride);
+    Params.Set(L"bIgnoreFallDamage", bIgnoreFallDamage);
+    Params.Set(L"bPlayFeedbackEvent", bPlayFeedbackEvent);
+    return Params.Call(this);
+}
+
 void AFortPawn::PawnStopFire(uint8_t FireModeNum)
 {
     Reflection::FParams Params(StaticFunction_PawnStopFire(), true);

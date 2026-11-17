@@ -45,6 +45,7 @@ class AFortPawn : public APawn
     DefineUFunction(PawnStartFire)
     DefineUFunction(PawnStopFire)
     DefineUFunction(ForceKill)
+    DefineUFunction(LaunchCharacterJump)
     DefineUFunction(IsDead)
     DefineUFunction(EquipWeaponDefinition)
     DefineUFunction(TriggerFeedbackEvent)
@@ -108,6 +109,9 @@ public:
     // Server: the pawn dies at once, KillerController's elimination (its death runs as any other: the controller's
     // OnPawnDied with KillerController as the instigator), DeathReason its damage tag.
     void ForceKill(const FGameplayTag& DeathReason, AController* KillerController, AActor* KillerActor);
+    // ACharacter::LaunchCharacter with the pawn's own handling of the jump (its fall damage and feedback event), by its
+    // UFunction (from 4.0); false where the build has none.
+    bool LaunchCharacterJump(const FVector& LaunchVelocity, bool bXYOverride, bool bZOverride, bool bIgnoreFallDamage, bool bPlayFeedbackEvent);
     AFortWeapon* EquipWeaponDefinition(const UFortWeaponItemDefinition* WeaponData, const FGuid& ItemEntryGuid);
     bool EquipDefaultWeapon();
     void RemoveAbilityWeapon(AFortWeapon* Weapon);

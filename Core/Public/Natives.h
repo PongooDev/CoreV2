@@ -730,7 +730,9 @@ namespace Natives
     // 6.21 (CL-4526925) adds the bool (true: then back to the primary bar); the builds before it never read dl there.
     inline void (*AFortPlayerController_RefocusQuickBars)(AFortPlayerController* This, bool bSwapToPrimaryQuickBar) = nullptr;
     // Set only where StartAircraftPhase's call to it is compiled in (2.2 0x85DCA0), see Finder::AircraftPhasePlayerCleanupCall.
-    inline void (*AFortPlayerController_ActivateSlot)(AFortPlayerController* This, uint8_t InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot) = nullptr;
+    // 7.20 (CL-4727874 0x1397820) adds bForceExecution, which it passes to ServerActivateSlotInternal ([rsp+30h]); builds
+    // before it take five and ignore it.
+    inline void (*AFortPlayerController_ActivateSlot)(AFortPlayerController* This, uint8_t InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot, bool bForceExecution) = nullptr;
     inline void* (*UStatManager_FindStat)(UObject* This, FName StatName, uint8_t Type) = nullptr;
     inline void (*FStat_Increment)(void* Stat, int32_t Amount, int32_t Flags) = nullptr;
     // 1.10's stat change (0x904520) takes its amount as a double, in xmm1 (Finder::ResolveDBNOReviveLive sees the movsd

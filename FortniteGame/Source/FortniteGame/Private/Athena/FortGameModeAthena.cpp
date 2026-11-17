@@ -3493,7 +3493,8 @@ void AFortGameModeAthena::AircraftPhasePlayerCleanupCall(AController* Controller
     // Where the call was ActivateSlot's (2.2), the harvesting tool's slot is still activated, once the warmup items are gone.
     if (Natives::AFortPlayerController_ActivateSlot)
     {
-        Natives::AFortPlayerController_ActivateSlot(reinterpret_cast<AFortPlayerController*>(Controller), InQuickBar, Slot, ActivateDelay, bUpdatePreviousFocusedSlot);
+        // bForceExecution false, as 7.20's StartAircraftPhase passes it (0xD1C7B8).
+        Natives::AFortPlayerController_ActivateSlot(reinterpret_cast<AFortPlayerController*>(Controller), InQuickBar, Slot, ActivateDelay, bUpdatePreviousFocusedSlot, false);
     }
 }
 

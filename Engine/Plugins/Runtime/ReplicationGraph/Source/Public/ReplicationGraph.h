@@ -31,8 +31,13 @@ public:
     // channel is still closing stays alive in the ChannelMap, which shares it, until the channel is cleaned up, as in
     // 8.30. Like 8.30's, Connections only, not PendingConnections.
     //
-    // Returns how many connections had an entry, or -1 where nothing was done: a build whose code isn't what 6.00 to 6.20
-    // have (Finder::ResolveReplicationGraphActorInfoLive) keeps its maps untouched.
+    // UE 4.20's (4.1 and 4.2, CoreV2 #477) keeps the info by value in a TMap<AActor*, FConnectionReplicationActorInfo>
+    // and takes it out only when a channel that wasn't closed for dormancy is cleaned up (UNetReplicationGraphConnection::
+    // NotifyActorChannelCleanedUp, 4.1 0x6EFAC0); its RemoveNetworkActor (0x6F7940) leaves the connections alone. There the
+    // build has no remove-by-key of that map, so its FindId and TSet::Remove(FSetElementId) do it, the two halves of one.
+    //
+    // Returns how many connections had an entry, or -1 where nothing was done: a build whose code isn't what 4.1, 4.2 or
+    // 6.00 to 6.31 have (Finder::ResolveReplicationGraphActorInfoLive) keeps its maps untouched.
     int32_t RemoveActorInfoFromConnections(AActor* Actor);
 
     // Core's (CoreV2 #412): the same step for each actor the world spawns, on a server whose net driver has a
@@ -59,5 +64,17 @@ public:
     // 6.02), so they collected no garbage during a match and no actor's address was used twice in one. What reads it
     // went with the stripped server code (the build only sets and restores it: the playlist's GCSettingsOverrideList,
     // 6.00 0xC28790 and 0xC14800), and a Core server collects every gc.TimeBetweenPurgingPendingKillObjects (61 s).
+    //
+    // 4.1 and 4.2 (UE 4.20, CoreV2 #477) are the same, with one more kind of leftover: the graph makes an info for every
+    // actor it gathers for a connection, the actor's class's CullDistanceSquared in it, before it culls it by distance
+    // (ReplicateActorListsForConnection, 4.1 0x6F9140; the dormant skip 0x6F9A7E, the cull 0x6F9B7A), and an actor that
+    // never had a channel there leaves that info behind too. A storm circle (SafeZoneIndicator_C, 0x570 bytes on 4.1,
+    // 0x580 on 4.2; an AFortPickupAthena is 0x578 and 0x588, the same 1632 byte block) spawned on such an address is
+    // never sent to that player (a dormant pickup's info) or only while they stand within a pickup's cull distance of it
+    // (a culled one's). Without the circle, a client's timer in the safe zones phase falls back to SafeZonesStartTime
+    // (4.1 0xA740D0), which the Infinity Gauntlet's 0 s start delay puts in the past, so it stays on the bus's icon at
+    // 0:00. Player bots take a pickup by destroying it (FCoreAthenaBotController::TakePickup) while it is still dormant,
+    // which a player's pickup, woken to fly by SetPickupTarget's ForceNetUpdate (4.1 0xD8D3A0), isn't, and they loot all
+    // match, so a match with bots leaves many more of them.
     static void HandleActorSpawned(AActor* Actor);
 };

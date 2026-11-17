@@ -408,7 +408,10 @@ namespace Finder
     // have it: CL-4395664 to CL-4573279, UNetReplicationGraphConnection::NotifyActorChannelCleanedUp's ChannelMap lookup, its
     // remove and the stores that clear the info it found (6.00 to 6.10's 0x20 byte info or 6.20's 0x30 byte one), and
     // UReplicationGraph::NotifyActorTearOff's lookup in the map 0x50 before that one and its tear-off flag store at
-    // that info's flags. Anything else leaves the build as it is and says so once.
+    // that info's flags. On 4.1 and 4.2 (CL-4053532, CL-4072250; UE 4.20, #477) Natives::FPerConnectionActorInfoMap_
+    // FindId and _RemoveId in its place: the lookup the graph's NotifyActorFullyDormantForConnection and
+    // NotifyActorTearOff make in the connection's map, and the removal UNetReplicationGraphConnection::
+    // NotifyActorChannelCleanedUp makes from it. Anything else leaves the build as it is and says so once.
     bool ResolveReplicationGraphActorInfoLive(void** GraphVTable);
     bool ResolveDecoSpawnedLive();
     bool ResolveScoreBuildingConstructionLive();

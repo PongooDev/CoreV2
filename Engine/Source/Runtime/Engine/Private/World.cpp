@@ -90,10 +90,10 @@ bool UWorld::Listen(FURL& InURL)
     UE_LOG(LogWorld, Log, TEXT("Listen: clients are sent up to %d bytes a second (the game's MaxClientRate %d), clients ask for %d"), NetDriver->MaxClientRate,
         IniClientRate, PlayerDefault ? static_cast<int32_t>(PlayerDefault->ConfiguredInternetSpeed) : -1);
 
-    // Core (CoreV2 #412): the replication graph's connections forget whatever they still hold at the address of each
-    // actor this world spawns (UReplicationGraph::HandleActorSpawned), on the builds whose graph leaves a destroyed
-    // actor's info with them and whose code for it the finder knows (6.00 to 6.20). The handler goes with the world; a
-    // net driver without a replication graph, and a graph of another build, get none.
+    // Core (CoreV2 #412, #477): the replication graph's connections forget whatever they still hold at the address of
+    // each actor this world spawns (UReplicationGraph::HandleActorSpawned), on the builds whose graph leaves a destroyed
+    // actor's info with them and whose code for it the finder knows (4.1, 4.2, 6.00 to 6.31). The handler goes with the
+    // world; a net driver without a replication graph, and a graph of another build, get none.
     if (UReplicationGraph* Graph = NetDriver->HasReplicationDriver() ? Cast<UReplicationGraph>(reinterpret_cast<UObject*>(static_cast<UReplicationDriver*>(NetDriver->ReplicationDriver))) : nullptr;
         Graph && UReplicationGraph::HasConnections() && Finder::ResolveReplicationGraphActorInfoLive(*reinterpret_cast<void***>(Graph)))
     {

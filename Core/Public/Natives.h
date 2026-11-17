@@ -362,12 +362,19 @@ namespace Natives
     inline int32_t UNetDriver_IsServerIndex = -1;
     inline int32_t UNetDriver_ServerReplicateActorsIndex = -1;
     inline int32_t UReplicationDriver_ServerReplicateActorsIndex = -1;
-    // UE 4.21's replication graph (6.00 to 6.20, Finder::ResolveReplicationGraphActorInfoLive): where a
-    // UNetReplicationGraphConnection keeps its per-actor infos (ActorInfoMap's ActorMap, keyed by the actor's address;
-    // -1 unknown), and the engine's own remove-by-key of that map's type (TMap<pointer, TSharedPtr<
-    // FConnectionReplicationActorInfo>>::Remove, the one NotifyActorChannelCleanedUp calls on the ChannelMap beside it).
+    // The replication graph (Finder::ResolveReplicationGraphActorInfoLive): where a UNetReplicationGraphConnection keeps
+    // its per-actor infos (ActorInfoMap's map keyed by the actor's address; -1 unknown). UE 4.21's (6.00 to 6.31) with
+    // the engine's own remove-by-key of that map's type (TMap<pointer, TSharedPtr<FConnectionReplicationActorInfo>>::
+    // Remove, the one NotifyActorChannelCleanedUp calls on the ChannelMap beside it).
     inline ptrdiff_t UNetReplicationGraphConnection_ActorMapOffset = -1;
     inline int32_t (*FPerConnectionActorInfoMap_RemoveByKey)(void* Map, const void* Key) = nullptr;
+    // UE 4.20's (4.1 CL-4053532, 4.2 CL-4072250): the infos are the map's values (TMap<AActor*,
+    // FConnectionReplicationActorInfo>), and the build has no remove-by-key of that type, only its two halves:
+    // TSet::FindId (the lookup NotifyActorTearOff and NotifyActorFullyDormantForConnection make; the FSetElementId, an
+    // int32 index, -1 for none, comes back through a return pointer) and TSet::Remove(FSetElementId) (the removal
+    // NotifyActorChannelCleanedUp's iterator makes).
+    inline int32_t* (*FPerConnectionActorInfoMap_FindId)(void* Map, int32_t* Result, const void* Key) = nullptr;
+    inline void (*FPerConnectionActorInfoMap_RemoveId)(void* Map, int32_t ElementId) = nullptr;
     inline int32_t UConsole_BuildRuntimeAutoCompleteListIndex = -1;
     // 8 up to UE 4.19 (2.4.2); UE 4.20 (2.5) drops five delegate instance virtuals and has GetHandle at 4.
     inline int32_t IDelegateInstance_GetHandleIndex = 8;

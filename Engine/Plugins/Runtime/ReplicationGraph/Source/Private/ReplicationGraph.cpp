@@ -22,11 +22,24 @@ int32_t UReplicationGraph::RemoveActorInfoFromConnections(AActor* Actor)
     int32_t Removed = 0;
     for (UObject* ConnectionManager : static_cast<const TArray<UObject*>&>(Connections))
     {
-        if (ConnectionManager)
+        if (!ConnectionManager)
+        {
+            continue;
+        }
+        void* ActorMap = reinterpret_cast<uint8_t*>(ConnectionManager) + Natives::UNetReplicationGraphConnection_ActorMapOffset;
+        if (Natives::FPerConnectionActorInfoMap_RemoveByKey)
         {
             // ConnectionManager->ActorInfoMap.RemoveActor(Actor): TMap::Remove, the number of entries it removed.
-            void* ActorMap = reinterpret_cast<uint8_t*>(ConnectionManager) + Natives::UNetReplicationGraphConnection_ActorMapOffset;
             Removed += Natives::FPerConnectionActorInfoMap_RemoveByKey(ActorMap, Actor);
+            continue;
+        }
+        // UE 4.20 (4.1, 4.2): TMap::Remove's two halves, the build's own FindId and TSet::Remove(FSetElementId).
+        int32_t ElementId = -1;
+        Natives::FPerConnectionActorInfoMap_FindId(ActorMap, &ElementId, Actor);
+        if (ElementId != -1)
+        {
+            Natives::FPerConnectionActorInfoMap_RemoveId(ActorMap, ElementId);
+            ++Removed;
         }
     }
     return Removed;
@@ -54,7 +67,7 @@ void UReplicationGraph::HandleActorSpawned(AActor* Actor)
     const int32_t OfClass = ++Forgotten[ClassName];
     if (OfClass == 1 || OfClass % 100 == 0)
     {
-        Log::Info(L"ReplicationGraph: {} is spawned at 0x{:X}, where {} connection{} still had a destroyed actor's info (a dormant or torn off one's would keep the new actor from that player): forgotten ({} for {} so far, {} in all)",
+        Log::Info(L"ReplicationGraph: {} is spawned at 0x{:X}, where {} connection{} still had a destroyed actor's info (a dormant, torn off or culled one's would keep the new actor from that player): forgotten ({} for {} so far, {} in all)",
             Actor->GetName().ToStdString(), reinterpret_cast<uintptr_t>(Actor), Removed, Removed == 1 ? L"" : L"s", OfClass, ClassName, Total);
     }
 #endif

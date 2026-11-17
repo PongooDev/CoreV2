@@ -17047,12 +17047,157 @@ bool Finder::ResolveReplicationDriverLive()
     return true;
 }
 
+namespace
+{
+    // UE 4.20's replication graph (CoreV2 #477), checked in 4.1's IDB (CL-4053532). A UNetReplicationGraphConnection's
+    // ActorInfoMap (+0x30) is a TMap<AActor*, FConnectionReplicationActorInfo>: a 0x38 byte element, the key, the 0x28
+    // byte info by value (Channel +0, CullDistanceSquared +8, bDormantOnConnection +0x20, bTearOff +0x21), the hash links.
+    // UReplicationGraph::ReplicateActorListsForConnection (0x6F9140) finds or adds an actor's info (0x6E3FD0, initialised
+    // from the actor's class settings) for every actor it gathers, then skips the actor when bDormantOnConnection is set
+    // (0x6F9A7E) and culls it at the info's CullDistanceSquared (0x6F9B7A). Only one thing takes an info out:
+    // UNetReplicationGraphConnection::NotifyActorChannelCleanedUp (0x6EFAC0), when a channel that wasn't closed for
+    // dormancy is cleaned up (TSet::Remove(FSetElementId), 0x6F63F0; one closed for dormancy only has its Channel cleared).
+    // RemoveNetworkActor (0x6F7940) leaves the connections' maps alone. So an actor destroyed while dormant on a
+    // connection, or one the connection gathered and culled without ever opening a channel, leaves its info keyed by an
+    // address the allocator hands out again.
+    //   the graph's NotifyActorFullyDormantForConnection (0x6F0560): lea rbx, [rcx+30h]; mov rcx, rbx; lea rdx, [rsp+..];
+    //     call FindId (0x1804310); ...; imul rax, 38h; ...; mov byte ptr [rcx+20h], 1
+    //   the graph's NotifyActorTearOff (0x6F05E0): lea rcx, [rdi+30h]; call FindId; ...; mov byte ptr [rax+21h], 1
+    //   the connection's NotifyActorChannelCleanedUp: lea r15, [rcx+30h]; ...; test byte ptr [rsi+30h], 4 (the
+    //     channel's Dormant); jz; ...; mov qword ptr [rcx+rax+8], 0 (the info's Channel); ...; mov rcx, [rbp+..]; call Remove
+    //   the graph's RemoveNetworkActor: no call of either
+    // 4.2 (CL-4072250) is the same code at other addresses: ReplicateActorListsForConnection 0x6E4790 (the dormant skip
+    // 0x6E50D1), NotifyActorFullyDormantForConnection 0x6DB590, NotifyActorTearOff 0x6DB610, NotifyActorChannelCleanedUp
+    // 0x6DA890, FindId 0x6D5460, Remove 0x6E1A80, RemoveNetworkActor 0x6E30A0.
+    // Returns why not, or null with Natives::UNetReplicationGraphConnection_ActorMapOffset, FPerConnectionActorInfoMap_
+    // FindId and FPerConnectionActorInfoMap_RemoveId set.
+    const wchar_t* ResolveReplicationGraphActorInfo420(void** GraphVTable)
+    {
+        void** DriverVTable = CdoVTable(L"/Script/Engine.ReplicationDriver");
+        // A pure virtual's stub (its "Pure virtual not implemented" string) in the base class's vtable, and the override
+        // in Overrides at the same slot.
+        const auto Override = [](void** BaseVTable, void** Overrides, const wchar_t* PureVirtual, uintptr_t& OutEnd) -> uintptr_t
+        {
+            const std::vector<uintptr_t> Refs = Finder::StringRefs(PureVirtual);
+            const uintptr_t Stub = Refs.size() == 1 ? Finder::FunctionStart(Refs[0]) : 0;
+            const int32_t Index = Stub && BaseVTable ? Finder::VTableIndex(BaseVTable, reinterpret_cast<void*>(Stub), 0x400) : -1;
+            const uintptr_t Function = Overrides && Index >= 0 ? reinterpret_cast<uintptr_t>(Overrides[Index]) : 0;
+            OutEnd = Function && Function != Stub && Finder::FunctionStart(Function) == Function ? Finder::FunctionEnd(Function) : 0;
+            return OutEnd > Function && OutEnd - Function <= 0x800 ? Function : 0;
+        };
+        // lea r64, [rcx+disp8]: the map's offset in the connection, -1 when there is none.
+        const auto MapLea = [](uintptr_t Begin, uintptr_t End) -> std::pair<uintptr_t, ptrdiff_t>
+        {
+            for (uintptr_t Address = Begin; Address + 4 <= End; ++Address)
+            {
+                if ((Byte(Address) == 0x48 || Byte(Address) == 0x4C) && Byte(Address + 1) == 0x8D && (Byte(Address + 2) & 0xC7) == 0x41)
+                {
+                    return { Address, static_cast<int8_t>(Byte(Address + 3)) };
+                }
+            }
+            return { 0, -1 };
+        };
+        // mov byte ptr [r64+disp8], 1 at that disp8 (C6 /0, no SIB byte).
+        const auto HasFlagStore = [](uintptr_t Begin, uintptr_t End, ptrdiff_t Offset)
+        {
+            for (uintptr_t Address = Begin; Offset > 0 && Offset < 0x80 && Address + 4 <= End; ++Address)
+            {
+                if (Byte(Address) == 0xC6 && (Byte(Address + 1) & 0xF8) == 0x40 && (Byte(Address + 1) & 7) != 4 && Byte(Address + 2) == Offset && Byte(Address + 3) == 0x01)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+        // imul r64, r64, imm8: the map's element size.
+        const auto ElementSize = [](uintptr_t Begin, uintptr_t End, int32_t Size)
+        {
+            for (uintptr_t Address = Begin; Address + 4 <= End; ++Address)
+            {
+                if ((Byte(Address) & 0xF8) == 0x48 && Byte(Address + 1) == 0x6B && (Byte(Address + 2) & 0xC0) == 0xC0 && Byte(Address + 3) == Size)
+                {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        uintptr_t DormantEnd = 0;
+        const uintptr_t Dormant = Override(DriverVTable, GraphVTable, L"UReplicationDriver::NotifyActorFullyDormantForConnection", DormantEnd);
+        if (!Dormant)
+        {
+            return L"the graph's NotifyActorFullyDormantForConnection not found";
+        }
+        const auto [DormantLea, MapOffset] = MapLea(Dormant, DormantEnd);
+        uintptr_t FindId = 0;
+        for (const auto& [Site, Callee] : DormantLea ? Finder::DirectCalls(DormantLea, DormantEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            FindId = Callee;
+            break;
+        }
+        constexpr int32_t InfoElementSize = 0x38;
+        constexpr ptrdiff_t DormantFlagOffset = 0x20;
+        if (MapOffset <= 0 || !FindId || !IsInText(FindId) || !ElementSize(Dormant, DormantEnd, InfoElementSize) || !HasFlagStore(Dormant, DormantEnd, DormantFlagOffset))
+        {
+            return L"the graph's NotifyActorFullyDormantForConnection isn't 4.1's or 4.2's";
+        }
+
+        uintptr_t TearOffEnd = 0;
+        const uintptr_t TearOff = Override(DriverVTable, GraphVTable, L"UReplicationDriver::NotifyActorTearOff", TearOffEnd);
+        bool bTearOffLookup = false;
+        for (const auto& [Site, Callee] : TearOff ? Finder::DirectCalls(TearOff, TearOffEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            // lea rcx, [r64+MapOffset]; call FindId.
+            bTearOffLookup = bTearOffLookup || (Callee == FindId && Site - 4 >= TearOff && (Byte(Site - 4) == 0x48 || Byte(Site - 4) == 0x49) && Byte(Site - 3) == 0x8D
+                && (Byte(Site - 2) & 0xF8) == 0x48 && static_cast<int8_t>(Byte(Site - 1)) == MapOffset);
+        }
+        if (!bTearOffLookup || !HasFlagStore(TearOff, TearOffEnd, DormantFlagOffset + 1))
+        {
+            return L"the graph's NotifyActorTearOff isn't 4.1's or 4.2's";
+        }
+
+        uintptr_t CleanedUpEnd = 0;
+        const uintptr_t CleanedUp = Override(CdoVTable(L"/Script/Engine.ReplicationConnectionDriver"), CdoVTable(L"/Script/ReplicationGraph.NetReplicationGraphConnection"),
+            L"UReplicationConnectionDriver::NotifyActorChannelCleanedUp", CleanedUpEnd);
+        const auto [CleanedUpLea, CleanedUpMapOffset] = CleanedUp ? MapLea(CleanedUp, CleanedUpEnd) : std::pair<uintptr_t, ptrdiff_t>{ 0, -1 };
+        // test byte ptr [r64+disp8], 4 (UChannel::Dormant); jz rel8 to the removal: mov rcx, [rbp+disp8]; call Remove. Before
+        // it, the dormant branch clears the info's Channel: mov qword ptr [rcx+rax+8], 0.
+        const uintptr_t DormantTest = CleanedUpLea ? FindInstruction(CleanedUpLea, CleanedUpEnd, { 0xF6, -1, -1, 0x04, 0x74 }) : 0;
+        const uintptr_t Removal = DormantTest && (Byte(DormantTest + 1) & 0xF8) == 0x40 && (Byte(DormantTest + 1) & 7) != 4 ? DormantTest + 6 + static_cast<int8_t>(Byte(DormantTest + 5)) : 0;
+        const bool bChannelCleared = Removal > DormantTest && FindInstruction(DormantTest + 6, Removal, { 0x48, 0xC7, 0x44, -1, 0x08, 0x00, 0x00, 0x00, 0x00 }) != 0;
+        const uintptr_t RemoveId = bChannelCleared && Removal + 9 <= CleanedUpEnd && Byte(Removal) == 0x48 && Byte(Removal + 1) == 0x8B && Byte(Removal + 2) == 0x4D && Byte(Removal + 4) == 0xE8
+            ? Finder::RelativeTarget(Removal + 4, 1, 5) : 0;
+        const uintptr_t RemoveIdEnd = RemoveId && IsInText(RemoveId) && Finder::FunctionStart(RemoveId) == RemoveId ? Finder::FunctionEnd(RemoveId) : 0;
+        if (CleanedUpMapOffset != MapOffset || RemoveIdEnd <= RemoveId || RemoveIdEnd - RemoveId > 0x200 || RemoveId == FindId || !ElementSize(RemoveId, RemoveIdEnd, InfoElementSize))
+        {
+            return L"the connection's NotifyActorChannelCleanedUp isn't 4.1's or 4.2's";
+        }
+
+        // A build whose graph takes the infos out itself (as UE 4.22's RemoveNetworkActor does) needs nothing.
+        uintptr_t RemoveActorEnd = 0;
+        const uintptr_t RemoveActor = Override(DriverVTable, GraphVTable, L"UReplicationDriver::RemoveNetworkActor", RemoveActorEnd);
+        const std::vector<std::pair<uintptr_t, uintptr_t>> RemoveActorCalls = RemoveActor ? Finder::DirectCalls(RemoveActor, RemoveActorEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+        if (!RemoveActor || std::any_of(RemoveActorCalls.begin(), RemoveActorCalls.end(), [FindId, RemoveId](const auto& Call) { return Call.second == FindId || Call.second == RemoveId; }))
+        {
+            return L"the graph's RemoveNetworkActor isn't 4.1's or 4.2's";
+        }
+
+        Natives::UNetReplicationGraphConnection_ActorMapOffset = MapOffset;
+        Natives::FPerConnectionActorInfoMap_FindId = reinterpret_cast<decltype(Natives::FPerConnectionActorInfoMap_FindId)>(FindId);
+        Natives::FPerConnectionActorInfoMap_RemoveId = reinterpret_cast<decltype(Natives::FPerConnectionActorInfoMap_RemoveId)>(RemoveId);
+        Log::Info(L"Finder: the replication graph's per-connection actor infos (UE 4.20): ActorInfoMap +0x{:X}, its FindId 0x{:X} and Remove 0x{:X} (NotifyActorFullyDormantForConnection 0x{:X}, NotifyActorTearOff 0x{:X}, NotifyActorChannelCleanedUp 0x{:X})",
+            MapOffset, FindId - Finder::ImageBase(), RemoveId - Finder::ImageBase(), Dormant - Finder::ImageBase(), TearOff - Finder::ImageBase(), CleanedUp - Finder::ImageBase());
+        return nullptr;
+    }
+}
+
 bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
 {
     static bool bSearched = false;
-    if (bSearched || Natives::FPerConnectionActorInfoMap_RemoveByKey)
+    const auto Resolved = []() { return Natives::FPerConnectionActorInfoMap_RemoveByKey || (Natives::FPerConnectionActorInfoMap_FindId && Natives::FPerConnectionActorInfoMap_RemoveId); };
+    if (bSearched || Resolved())
     {
-        return Natives::FPerConnectionActorInfoMap_RemoveByKey != nullptr;
+        return Resolved();
     }
     bSearched = true;
 
@@ -17087,7 +17232,7 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
     const uint32_t Changelist = Packed::Changelist();
     const auto LeftAsIs = [Changelist](const wchar_t* Why)
     {
-        Log::Warning(L"Finder: the replication graph's per-connection actor infos are left as CL-{} has them ({}), so a pawn spawned at a dead pawn's address may not reach its player (#411)", Changelist, Why);
+        Log::Warning(L"Finder: the replication graph's per-connection actor infos are left as CL-{} has them ({}), so an actor spawned at a destroyed actor's address may not reach a player (#411, #412, #477)", Changelist, Why);
         return false;
     };
     // 7.00 (CL-4629139) has the engine's own fix: its UReplicationGraph::RemoveNetworkActor (0x75D020) ends by removing
@@ -17099,9 +17244,17 @@ bool Finder::ResolveReplicationGraphActorInfoLive(void** GraphVTable)
         Log::Info(L"Finder: the replication graph's per-connection actor infos are taken out by the engine's UReplicationGraph::RemoveNetworkActor on CL-{} (#411)", Changelist);
         return false;
     }
+    // UE 4.20 (CoreV2 #477): 4.1's and 4.2's graphs leave the same infos behind, in a map of another shape
+    // (ResolveReplicationGraphActorInfo420). The other UE 4.20 builds with a graph (3.4 to 4.5) weren't looked at.
+    constexpr uint32_t UE420VerifiedChangelists[] = { 4053532, 4072250 };
+    if (std::find(std::begin(UE420VerifiedChangelists), std::end(UE420VerifiedChangelists), Changelist) != std::end(UE420VerifiedChangelists))
+    {
+        const wchar_t* Why = ResolveReplicationGraphActorInfo420(GraphVTable);
+        return Why ? LeftAsIs(Why) : true;
+    }
     if (Changelist < FirstVerifiedChangelist || Changelist > LastVerifiedChangelist)
     {
-        return LeftAsIs(L"only 6.00 to 6.31, CL-4395664 to CL-4573279, were checked");
+        return LeftAsIs(L"only 4.1, 4.2 (CL-4053532, CL-4072250) and 6.00 to 6.31 (CL-4395664 to CL-4573279) were checked");
     }
 
     const std::vector<uintptr_t> CleanedUpRefs = Finder::StringRefs(L"UNetReplicationGraphConnection_NotifyActorChannelCleanedUp");

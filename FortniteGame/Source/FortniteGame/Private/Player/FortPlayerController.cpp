@@ -96,6 +96,43 @@ namespace
             }
         }
         UE_LOG(LogFort, Log, TEXT("Possess: %s's homebase stats: %s"), *PlayerController->GetName(), Text.empty() ? TEXT("none on the pawn's ability system") : Text.c_str());
+
+        // What the stats effect's stat step reads (AFortGameState::ApplyPersonalHomebaseData, 7.00 0xEC3E60, through
+        // 0xF34270; 6.31 0xF97D60): the account profile's quantity of each Stat: item, asked with the profile's own
+        // virtual that step calls (`call [rax+248h]` on 6.31 and 7.00, its slot read from the call after the
+        // "Stat:fortitude" reference). Against the stats above it tells whether the profile or the effect loses them.
+        static const int32_t QuantitySlot = []
+        {
+            for (const uintptr_t Ref : Finder::StringRefs("Stat:fortitude"))
+            {
+                const uint8_t* Code = reinterpret_cast<const uint8_t*>(Ref);
+                for (int32_t Offset = 0; Offset < 0x40; ++Offset)
+                {
+                    if (Code[Offset] == 0xFF && Code[Offset + 1] == 0x90)
+                    {
+                        const int32_t Displacement = *reinterpret_cast<const int32_t*>(Code + Offset + 2);
+                        // Only the slot checked on 6.31 and 7.00: another build's call there is unchecked.
+                        return Displacement == 0x248 ? Displacement / 8 : -1;
+                    }
+                }
+            }
+            return -1;
+        }();
+        UFortRegisteredPlayerInfo* PlayerInfo = static_cast<UFortRegisteredPlayerInfo*>(PlayerController->MyPlayerInfo);
+        UFortMcpProfileCampaign* AccountProfile = PlayerInfo ? static_cast<UFortMcpProfileCampaign*>(PlayerInfo->AccountProfile) : nullptr;
+        if (QuantitySlot < 0 || !AccountProfile)
+        {
+            UE_LOG(LogFort, Log, TEXT("Possess: %s's profile Stat items: %s"), *PlayerController->GetName(), QuantitySlot < 0 ? TEXT("the quantity getter wasn't found (checked on 6.31 and 7.00 only)") : TEXT("no account profile"));
+            return;
+        }
+        std::wstring Items;
+        for (const wchar_t* Template : { L"Stat:fortitude", L"Stat:fortitude_team", L"Stat:offense", L"Stat:offense_team", L"Stat:resistance", L"Stat:resistance_team", L"Stat:technology", L"Stat:technology_team" })
+        {
+            const FString TemplateId(Template);
+            const int32_t Quantity = CallVirtual<int32_t, UFortMcpProfileCampaign, const FString&>(AccountProfile, QuantitySlot, TemplateId);
+            Items += std::format(L"{}{} {}", Items.empty() ? L"" : L", ", Template, Quantity);
+        }
+        UE_LOG(LogFort, Log, TEXT("Possess: %s's profile Stat items (slot 0x%X of %s): %s"), *PlayerController->GetName(), QuantitySlot, *AccountProfile->GetName(), Items.c_str());
     }
 
     // UFortAbilityKit::Gadgets holds object pointers on 1.1 and 1.2, TAssetPtrs (0x20-byte entries) from 1.7.2 and

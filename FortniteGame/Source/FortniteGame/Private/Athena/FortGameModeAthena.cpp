@@ -10,6 +10,7 @@
 #include "Athena/FortPlaylistAthena.h"
 #include "Athena/FortSafeZoneIndicator.h"
 #include "Athena/Mutators/FortAthenaMutator_Barrier.h"
+#include "Athena/Mutators/FortMutatorListComponent.h"
 #include "Building/BGAConsumableSpawner.h"
 #include "Building/BuildingContainer.h"
 #include "Items/FortInventory.h"
@@ -3057,6 +3058,16 @@ void AFortGameModeAthena::SetPlaylistContextTags(const FGameplayTagContainer& Pl
 #endif
 }
 
+TArray<UObject*>* AFortGameModeAthena::GetGameplayMutatorList() const
+{
+    if (GameplayMutatorsOffset() >= 0)
+    {
+        return &GetMember_GameplayMutators();
+    }
+    UFortMutatorListComponent* List = Member_MutatorListComponent.IsAvailable() && UFortMutatorListComponent::HasMutators() ? MutatorListComponent : nullptr;
+    return List ? &List->GetMember_Mutators() : nullptr;
+}
+
 void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContainer* PlaylistContextTags)
 {
 #if WITH_SERVER_CODE
@@ -3072,8 +3083,10 @@ void AFortGameModeAthena::HandleCurrentPlaylistLoaded(const FGameplayTagContaine
         // The mutators the playlist's modifiers spawned, as the game mode and the game state heard of them: the lists
         // the game's own code asks (a death's respawn, Disco Domination's score and dance floors). Nothing to say on a
         // playlist without mutators.
-        const int32_t ModeMutators = GameplayMutatorsOffset() >= 0 ? GetMember_GameplayMutators().Num() : 0;
-        const int32_t StateMutators = AFortGameStateAthena::GameplayMutatorsOffset() >= 0 ? GameState->GetMember_GameplayMutators().Num() : 0;
+        const TArray<UObject*>* ModeList = GetGameplayMutatorList();
+        const TArray<UObject*>* StateList = GameState->GetGameplayMutatorList();
+        const int32_t ModeMutators = ModeList ? ModeList->Num() : 0;
+        const int32_t StateMutators = StateList ? StateList->Num() : 0;
         if (ModeMutators > 0 || StateMutators > 0)
         {
             UFortPlaylistAthena* Playlist = GameState->GetCurrentPlaylist();
@@ -3379,9 +3392,12 @@ void AFortGameModeAthena::HookVTables()
         Finder::ResolveIsRespawningAllowedLive(GameplayMutatorsOffset(), AFortGameStateAthena::AllowRespawningOffset(), AFortGameStateAthena::AllowRespawningMask());
     }
     // The game mode's DBNO check for a player (6.31), which Core's player bots ask before they go down.
-    if (Configuration::Get().IsBattleRoyale() && StaticClass() && UFortPlaylist::HasDBNOType() && GameplayMutatorsOffset() >= 0)
+    // 7.20 (CL-4727874) keeps the game mode's mutators in its mutator list component, which the check walks through a
+    // mutator iterator (each component's Mutators).
+    const ptrdiff_t ListOffset = GameplayMutatorsOffset() >= 0 ? GameplayMutatorsOffset() : (HasMutatorListComponent() ? UFortMutatorListComponent::MutatorsOffset() : -1);
+    if (Configuration::Get().IsBattleRoyale() && StaticClass() && UFortPlaylist::HasDBNOType() && ListOffset >= 0)
     {
-        Finder::ResolveDBNOEnabledLive(UFortPlaylist::DBNOTypeOffset(), GameplayMutatorsOffset());
+        Finder::ResolveDBNOEnabledLive(UFortPlaylist::DBNOTypeOffset(), ListOffset, GameplayMutatorsOffset() < 0);
     }
 
     UClass* AthenaClass = StaticClass();

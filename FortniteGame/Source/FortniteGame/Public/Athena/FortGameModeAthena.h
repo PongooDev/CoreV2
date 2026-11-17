@@ -20,6 +20,7 @@ class APawn;
 class UObject;
 struct FFortPlayerDeathReport;
 class UDataTable;
+class UFortMutatorListComponent;
 
 // A playlist's data tables (from 1.11; Athena_GameMode_C's PlaylistDataTables): the tables whose rows
 // ApplyPlaylistDataTables copies over the default ones (AthenaLootTierData_Client, AthenaLootPackages_Client and the rest)
@@ -164,6 +165,12 @@ public:
     // its own code walks the list for each answer (Tick, PlayerCanRestart, FinishRestartPlayer, IsRespawningAllowed).
     DefineUProperty(TArray<UObject*>, GameplayMutators)
     static ptrdiff_t GameplayMutatorsOffset() { return Member_GameplayMutators.IsAvailable() ? Member_GameplayMutators.GetOffsetChecked() : -1; }
+    // 7.20 (CL-4727874) has no GameplayMutators: the game mode's mutators are in its mutator list component (a default
+    // subobject, UFortMutatorListComponent::Mutators). GetGameplayMutatorList is whichever of the two lists the build
+    // has (null with neither).
+    DefineUProperty(UFortMutatorListComponent*, MutatorListComponent)
+    static bool HasMutatorListComponent() { return Member_MutatorListComponent.IsAvailable(); }
+    TArray<UObject*>* GetGameplayMutatorList() const;
 
     // 4.2 0xA19780: whether the match's playlist brings its players back after they die (EAthenaRespawnType), and with
     // InfiniteRespawnExceptStorm not one the storm killed (PlayerState's DeathInfo). The pawn's death handler (4.2

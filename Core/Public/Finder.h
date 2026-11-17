@@ -299,7 +299,9 @@ namespace Finder
     // The game mode's DBNO check for a player (Natives::AFortGameModeAthena_GetDBNOEnabled): the one function that compares
     // the playlist's DBNOType (at PlaylistDBNOTypeOffset) with NotWhenRespawning (2) and Off (1) and reads the game mode's
     // GameplayMutators (at GameplayMutatorsOffset). False where there is none, or more than one.
-    bool ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t GameplayMutatorsOffset);
+    // bMutatorListComponent: the game mode has no GameplayMutators and GameplayMutatorsOffset is its mutator list
+    // component's (7.20), whose mutators the check walks through a mutator iterator.
+    bool ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t GameplayMutatorsOffset, bool bMutatorListComponent = false);
     // From 5.21: the slots of AFortGameMode::GetLootTierDataTables and GetLootPackageDataTables (Natives), the two
     // AFortGameModeAthena overrides that load the playlist's LootTierData and LootPackages and call their Super, the game
     // mode's own GetLootTierDataTables reading the game data's LootTierDataTables. GameDataLootTierDataTablesOffset:

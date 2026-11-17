@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Athena/Mutators/FortMutatorListComponent.h"
 #include "Abilities/FortHomebaseSet.h"
 #include "AthenaPlayerMatchReport.h"
 #include "Athena/FortGameModeAthena.h"
@@ -562,7 +563,10 @@ void AFortPlayerControllerAthena::HookCallSites()
     if (FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_ItemDropOverride")
         || FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaMutator_InventoryOverride"))
     {
-        Finder::ResolveShouldDropItemLive(AFortGameStateAthena::GameplayMutatorsOffset());
+        // 7.20 (CL-4727874, slot 0x32D, 0xD67710) walks a mutator iterator in the override, which reads each mutator list
+        // component's Mutators (mov rcx, [rdx+110h], 0xD6780F).
+        Finder::ResolveShouldDropItemLive(AFortGameStateAthena::GameplayMutatorsOffset() >= 0 ? AFortGameStateAthena::GameplayMutatorsOffset()
+            : (AFortGameStateAthena::HasMutatorListComponent() ? UFortMutatorListComponent::MutatorsOffset() : -1));
     }
 #endif
 

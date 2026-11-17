@@ -11516,7 +11516,7 @@ bool Finder::ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, pt
     return true;
 }
 
-bool Finder::ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t GameplayMutatorsOffset)
+bool Finder::ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t GameplayMutatorsOffset, bool bMutatorListComponent)
 {
     static bool bSearched = false;
     if (bSearched)
@@ -11600,6 +11600,14 @@ bool Finder::ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t 
         {
             Functions.push_back(Function);
         }
+    }
+    // 7.20 (CL-4727874 0xCFF0E0, the same three arguments) keeps the game mode's mutators in its mutator list component and
+    // walks a mutator iterator over the player's minigame and the game mode (0xD2DA70; each mutator's slot 0xD1), which
+    // finds each one's component by class (UFortMutatorListComponent, 0xD636B0): no code reads the component's member
+    // there. So on such a build, the one function with both compares.
+    if (Functions.empty() && bMutatorListComponent && Comparers.size() == 1)
+    {
+        Functions.push_back(Comparers.front());
     }
     if (Functions.size() != 1)
     {

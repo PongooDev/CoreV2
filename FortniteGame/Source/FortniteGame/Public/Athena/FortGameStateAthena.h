@@ -9,6 +9,7 @@ class AFortAthenaMapInfo;
 class AFortPlayerStateAthena;
 class AFortSafeZoneIndicator;
 class AFortSpecialActorReplicationInfo;
+class UFortMutatorListComponent;
 
 class EAthenaGamePhase
 {
@@ -230,6 +231,12 @@ public:
     // the fall damage, 0xC00470, the time of day at the match's start, 0xC27290, the items a death drops, 0xC26970).
     DefineUProperty(TArray<UObject*>, GameplayMutators)
     static ptrdiff_t GameplayMutatorsOffset() { return Member_GameplayMutators.IsAvailable() ? Member_GameplayMutators.GetOffsetChecked() : -1; }
+    // 7.20 (CL-4727874) has no GameplayMutators: the game state's mutators are in its own mutator list component (a
+    // default subobject, UFortMutatorListComponent::Mutators), which its code reads as it read the list (0xD70628).
+    // GetGameplayMutatorList is whichever of the two lists the build has (null with neither).
+    DefineUProperty(UFortMutatorListComponent*, MutatorListComponent)
+    static bool HasMutatorListComponent() { return Member_MutatorListComponent.IsAvailable(); }
+    TArray<UObject*>* GetGameplayMutatorList() const;
     // From 6.30 (Food Fight's OpposingAirCraftForEachTeam): a bus path for each of the playlist's teams, in their order,
     // and the line between them, along which the Barrier mutator's wall stands. Replicated.
     DefineUStructArrayProperty(FAircraftFlightInfo, TeamFlightPaths)

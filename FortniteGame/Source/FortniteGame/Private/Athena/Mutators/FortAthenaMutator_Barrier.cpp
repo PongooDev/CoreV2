@@ -134,11 +134,12 @@ void AFortAthenaMutator_Barrier::FortGameStateAthena_GatherCustomCharacterPartOv
 void AFortAthenaMutator_Barrier::GatherCustomCharacterPartOverrides(UWorld* World, uint8_t TeamNum, std::vector<UCustomCharacterPart*>& OutParts)
 {
     AFortGameStateAthena* GameState = World && StaticClass() ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
-    if (!GameState || AFortGameStateAthena::GameplayMutatorsOffset() < 0)
+    const TArray<UObject*>* MutatorList = GameState ? GameState->GetGameplayMutatorList() : nullptr;
+    if (!MutatorList)
     {
         return;
     }
-    const TArray<UObject*>& Mutators = GameState->GameplayMutators;
+    const TArray<UObject*>& Mutators = *MutatorList;
     for (int32_t Index = 0; Index < Mutators.Num(); ++Index)
     {
         if (const AFortAthenaMutator_Barrier* Barrier = Cast<AFortAthenaMutator_Barrier>(Mutators[Index]))
@@ -150,11 +151,12 @@ void AFortAthenaMutator_Barrier::GatherCustomCharacterPartOverrides(UWorld* Worl
 
 void AFortAthenaMutator_Barrier::ForEachBarrierMutator(AFortGameModeAthena* GameMode, void (*Visit)(AFortAthenaMutator_Barrier*, AFortGameModeAthena*, uint8_t), uint8_t GamePhaseStep)
 {
-    if (!GameMode || !StaticClass() || AFortGameModeAthena::GameplayMutatorsOffset() < 0)
+    const TArray<UObject*>* MutatorList = GameMode && StaticClass() ? GameMode->GetGameplayMutatorList() : nullptr;
+    if (!MutatorList)
     {
         return;
     }
-    const TArray<UObject*>& Mutators = GameMode->GameplayMutators;
+    const TArray<UObject*>& Mutators = *MutatorList;
     for (int32_t Index = 0; Index < Mutators.Num(); ++Index)
     {
         if (AFortAthenaMutator_Barrier* Barrier = Cast<AFortAthenaMutator_Barrier>(Mutators[Index]))

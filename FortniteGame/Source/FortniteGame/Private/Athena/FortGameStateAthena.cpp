@@ -5,6 +5,7 @@
 #include "Athena/FortPlaylistAthena.h"
 #include "Athena/Mutators/FortAthenaMutator.h"
 #include "Athena/Mutators/FortAthenaMutator_AI.h"
+#include "Athena/Mutators/FortMutatorListComponent.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "GameFramework/Actor.h"
@@ -211,16 +212,27 @@ void AFortGameStateAthena::SetCurrentPlaylistId(FName PlaylistName)
 #endif
 }
 
+TArray<UObject*>* AFortGameStateAthena::GetGameplayMutatorList() const
+{
+    if (GameplayMutatorsOffset() >= 0)
+    {
+        return &GetMember_GameplayMutators();
+    }
+    UFortMutatorListComponent* List = Member_MutatorListComponent.IsAvailable() && UFortMutatorListComponent::HasMutators() ? MutatorListComponent : nullptr;
+    return List ? &List->GetMember_Mutators() : nullptr;
+}
+
 void AFortGameStateAthena::ReportPropertyOverrides() const
 {
 #if WITH_SERVER_CODE
-    if (!HasCurrentPlaylistInfo() || GameplayMutatorsOffset() < 0 || !FPropertyOverride::IsAvailable())
+    const TArray<UObject*>* MutatorList = GetGameplayMutatorList();
+    if (!HasCurrentPlaylistInfo() || !MutatorList || !FPropertyOverride::IsAvailable())
     {
         return;
     }
     const FPlaylistPropertyArray& Info = CurrentPlaylistInfo;
     const TStructArray<FPropertyOverride>& Overrides = Info.PropertyOverrides;
-    const TArray<UObject*>& Mutators = GameplayMutators;
+    const TArray<UObject*>& Mutators = *MutatorList;
     for (int32_t Index = 0; Index < Overrides.Num(); ++Index)
     {
         const FPropertyOverride& Override = Overrides[Index];
@@ -318,7 +330,8 @@ void AFortGameStateAthena::StreamAdditionalPlaylistLevels()
 void AFortGameStateAthena::OnPostEarnedKill(AFortPlayerStateAthena* KillerPlayerState)
 {
 #if WITH_SERVER_CODE
-    if (!KillerPlayerState || Role != ROLE_Authority || GameplayMutatorsOffset() < 0 || !AFortAthenaMutator::HasOnPostEarnedKill())
+    const TArray<UObject*>* MutatorList = GetGameplayMutatorList();
+    if (!KillerPlayerState || Role != ROLE_Authority || !MutatorList || !AFortAthenaMutator::HasOnPostEarnedKill())
     {
         return;
     }
@@ -328,7 +341,7 @@ void AFortGameStateAthena::OnPostEarnedKill(AFortPlayerStateAthena* KillerPlayer
     UClass* const TdmClass = AFortAthenaMutator_TDM::StaticClass();
     // Each active mutator of the list, as the game state's other loops over it ask them (OnPlaylistTimerTicked, 6.31
     // 0xCAF640: skip a null one or one whose IsMutatorActive is false). A copy, as a mutator's answer may change the list.
-    const TArray<UObject*> Mutators = GameplayMutators;
+    const TArray<UObject*> Mutators = *MutatorList;
     UClass* const MutatorClass = AFortAthenaMutator::StaticClass();
     bool bTeamScores = false;
     for (int32_t Index = 0; Index < Mutators.Num(); ++Index)

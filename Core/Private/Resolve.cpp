@@ -15378,7 +15378,7 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     const uintptr_t Place = OnlyCaller(RpcStub(L"ServerCreateBuildingActor"));
     const uintptr_t Improve = OnlyCaller(RpcStub(L"ServerRepairBuildingActor"));
     const uintptr_t BeginEdit = OnlyCaller(RpcStub(L"ServerBeginEditingBuildingActor"));
-    const std::vector<int32_t> PlaceSlots = Slots(Place);
+    std::vector<int32_t> PlaceSlots = Slots(Place);
     const std::vector<int32_t> ImproveSlots = Slots(Improve);
     const std::vector<int32_t> BeginEditSlots = Slots(BeginEdit);
 
@@ -15387,6 +15387,31 @@ bool Finder::ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset)
     int32_t CanAfford = -1;
     int32_t Candidates = 0;
     for (const int32_t Slot : PlaceSlots)
+    {
+        if (Slot != CanAfford && Has(ImproveSlots, Slot) && Has(ImproveSlots, Slot + 1) && Has(PlaceSlots, Slot + 2))
+        {
+            CanAfford = Slot;
+            ++Candidates;
+        }
+    }
+    // 7.20 (CL-4727874) moves the class checks out of the place function (0x13BD310) into a helper it calls with the
+    // controller (0x139CBA0: CanAffordToPlaceBuildableClass 0x30A, the class default object, slot 0x311), which leaves the
+    // place function only IsBuildingRestricted (0x30C) of the run. So where the place function's own slots give no
+    // candidate, its direct callees' slots count as its own.
+    const uintptr_t PlaceBodyEnd = Place && Finder::FunctionStart(Place) == Place ? Finder::FunctionEnd(Place) : 0;
+    for (const auto& [Site, Target] : Candidates == 0 && PlaceBodyEnd ? Finder::DirectCalls(Place, PlaceBodyEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+    {
+        for (const int32_t Nested : Finder::FunctionStart(Target) == Target ? Slots(Target) : std::vector<int32_t>())
+        {
+            PlaceSlots.push_back(Nested);
+        }
+    }
+    if (Candidates == 0 && PlaceBodyEnd)
+    {
+        std::sort(PlaceSlots.begin(), PlaceSlots.end());
+        PlaceSlots.erase(std::unique(PlaceSlots.begin(), PlaceSlots.end()), PlaceSlots.end());
+    }
+    for (const int32_t Slot : Candidates == 0 && PlaceBodyEnd ? PlaceSlots : std::vector<int32_t>())
     {
         if (Slot != CanAfford && Has(ImproveSlots, Slot) && Has(ImproveSlots, Slot + 1) && Has(PlaceSlots, Slot + 2))
         {

@@ -3677,9 +3677,10 @@ void AFortGameModeAthena::OnGivenMatchAssignment(bool bSuccess, const void* Matc
     // restarting session.") 5.30 strips too, names the positional voice channel (confctl-d-%s), which Core's voice chat
     // doesn't use, and keeps the match options' isMatchStatsDisabled, isProgressionDisabled and custom key in flags the
     // build doesn't reflect (AFortGameMode's own took the custom key above).
-    Log::Info(L"AFortGameModeAthena::OnGivenMatchAssignment: MaxPlayerCount: {}, NumTeams: {}, WarmupRequiredPlayerCount: {}, Timeout: {:.2f}",
+    // 7.20 (CL-4727874) has no failed assignment timer: its timeout is gone with the member.
+    Log::Info(L"AFortGameModeAthena::OnGivenMatchAssignment: MaxPlayerCount: {}, NumTeams: {}, WarmupRequiredPlayerCount: {}{}",
         static_cast<int32_t>(MaxPlayerCount), static_cast<int32_t>(static_cast<uint8_t>(NumTeams)), static_cast<int32_t>(WarmupRequiredPlayerCount),
-        static_cast<float>(FailedMatchAssignmentTimeout));
+        HasFailedMatchAssignmentTimeout() ? std::format(L", Timeout: {:.2f}", static_cast<float>(FailedMatchAssignmentTimeout)) : std::wstring());
 #endif
 }
 

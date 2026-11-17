@@ -111,7 +111,9 @@ public:
     // (config) and the match's AI (UAthenaAISettings), which OnGivenMatchAssignment sets.
     DefineUProperty(uint8_t, NumTeams)
     DefineUProperty(int32_t, WarmupRequiredPlayerCount)
+    // Gone in 7.20 (CL-4727874), with the failed assignment's handler ("Failed match assignment, restarting session.").
     DefineUProperty(float, FailedMatchAssignmentTimeout)
+    static bool HasFailedMatchAssignmentTimeout() { return Member_FailedMatchAssignmentTimeout.IsAvailable(); }
     DefineUProperty(UObject*, AISettings)
     static bool HasAISettings() { return Member_AISettings.IsAvailable(); }
     static ptrdiff_t AISettingsOffset() { return HasAISettings() ? Member_AISettings.GetOffsetChecked() : -1; }

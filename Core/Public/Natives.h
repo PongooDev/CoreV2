@@ -1084,7 +1084,7 @@ namespace Natives
     // "Unable to start cloud save. Authority=%s, Busy=%s"): the plot, its owner and bCheckin (false: the sidecar's upload,
     // true: its checkin). USidecarSys's meta setter (0x2DF5C40, called by the save for "serialized-at" and the actor
     // counts) adds the file to the sidecar's FileInfoMap as it sets the key.
-    inline void (*ULevelSaveRecord_ReadFromBuffer)(UObject* This, const TArray<uint8_t>& Buffer) = nullptr;
+    inline bool (*ULevelSaveRecord_ReadFromBuffer)(UObject* This, const TArray<uint8_t>& Buffer) = nullptr;
     inline void (*UFortLevelSaveComponent_CloudSave)(UObject* This, UObject* Plot, const FUniqueNetIdRepl& UserId, bool bCheckin) = nullptr;
     // 7.10 (CL-4667333): the cloud save reads the plot and its owner from the component and takes only bCheckin:
     // bool (UObject* This, bool bCheckin).
@@ -1101,6 +1101,35 @@ namespace Natives
     // ItemsUpdatedDelegate (+0xF8), the delegate UMcpProfile::HandleProfileUpdate (0x955BE0) broadcasts last.
     inline void* (*UMcpProfile_GetStat)(const UMcpProfile* This, void* OutValue, const FString& StatName) = nullptr;
     inline ptrdiff_t UMcpProfile_ItemsUpdatedDelegate = -1;
+    // From 7.00 (Creative), AFortPlayerControllerAthena::HookCreativeVTables: what an island's load runs on and with, the
+    // way the game's own loads and resets do (UFortLevelSaveComponent::BeginRestrictedPlotLoad 0xF363B0,
+    // AFortVolumeManager::ResetVolumeAndLevelRecord 0xDA0E70). AFortVolume::GetTaskQueue (0xD8F7A0; 7.10 0xDB2400), the
+    // reset's first call; UAsyncTaskQueue::Add (0xBA90E0; 7.10 0xBBED60: the owner's weak pointer and the step's
+    // delegate, both by reference), the call the reset makes once per step, the one of them that makes an object;
+    // UAsyncTaskQueue's start (0xBADE10; 7.10 0xBC3E90: cmp qword ptr [rcx+CurrentTask], 0; je ExecuteNextTask), the
+    // queue's ExecuteNextTask being the function that binds "&UAsyncTaskQueue::OnAsyncTaskFinished" (0xBADFD0).
+    inline UObject* (*AFortVolume_GetTaskQueue)(UObject* This) = nullptr;
+    inline void (*UAsyncTaskQueue_Add)(UObject* This, const FWeakObjectPtr& Owner, const void* Task) = nullptr;
+    inline void (*UAsyncTaskQueue_Start)(UObject* This) = nullptr;
+    // The game's own queue steps (each returns the dynamic delegate its end broadcasts, or null when it is done at once):
+    // the volume's clear (0xD83860; 7.10 0xDA5ED0), the reset's step that returns OnFinishVolumeClear;
+    // UFortLevelSaveComponent::LoadPlaysetAsync (0xF54660; 7.10 0xF7EA90, "Start playset async load for user %s,
+    // cloudsave=%s."): the plot's playset loaded, then OnAsyncLoadingOfPlaysetComplete; UPlaysetLevelStreamComponent's
+    // LoadPlaysetAsyncNoCallback (0x1325850; 7.10 0x1364750) and UnloadPlaysetAsyncNoCallback (0x1338210; 7.10
+    // 0x13775D0), the callers of LoadPlayset ("UPlaysetLevelStreamComponent::LoadPlayset Error: no owner for %s") and
+    // UnloadPlayset ("UPlaysetLevelStreamComponent::UnloadPlayset %s") that return lea rax, [rbx+disp32] after the call.
+    inline void* (*AFortVolume_ClearVolumeOnServer)(UObject* This) = nullptr;
+    inline void* (*UFortLevelSaveComponent_LoadPlaysetAsync)(UObject* This) = nullptr;
+    inline void* (*UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)(UObject* This) = nullptr;
+    inline void* (*UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)(UObject* This) = nullptr;
+    // UFortLevelSaveComponent::ResetLevelRecord (0xF5AAC0; 7.10 0xF88310, the function that sets the island file's
+    // "last-reset" meta): the base's reset (0x108BBA0: the volume's playset's own record, else a new one; bValidRecord)
+    // and the file's reset time. The reset's step of the same name calls it.
+    inline void (*UFortLevelSaveComponent_ResetLevelRecord)(UObject* This) = nullptr;
+    // ULevelSaveRecord's end of a read (0x1073950; 7.10 0x10A37A0; Core's name, after the reflected NotifyFinishedSpawning):
+    // the records tidied after the read, the read flag cleared and OnFinishedRead broadcast (bSucceeded, else
+    // "read_failed"). The other function that logs "read_failed" is ReadFromDisk.
+    inline void (*ULevelSaveRecord_NotifyFinishedRead)(UObject* This, bool bSucceeded) = nullptr;
 }
 
 namespace Sites

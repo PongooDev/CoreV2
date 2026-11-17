@@ -128,6 +128,9 @@ namespace Finder
     // Every `call rel32` of the function's pieces, decoded instruction by instruction (a byte scan also takes an E8 inside
     // another instruction's displacement for one): the call's address and its target.
     std::vector<std::pair<uintptr_t, uintptr_t>> DecodedDirectCalls(uintptr_t Function);
+    // Every `lea r64, [rip+disp32]` of the function's pieces, decoded instruction by instruction: the lea's address and the
+    // address it takes (a function bound into a delegate, a string, a global).
+    std::vector<std::pair<uintptr_t, uintptr_t>> DecodedAddressesTaken(uintptr_t Function);
     // Whether an instruction of the function's pieces addresses memory at [reg+Displacement] (disp32, not off rbp): a
     // member of an object it reads or writes.
     bool ReadsMemberAt(uintptr_t Function, int32_t Displacement);

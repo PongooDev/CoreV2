@@ -4,11 +4,13 @@
 #include "GameFramework/Info.h"
 #include "GameplayTagContainer.h"
 #include "Reflection.h"
+#include "UObject/ScriptDelegates.h"
 
 #include <cstdint>
 
 class AFortPlayerController;
 class AFortPlayerStartCreative;
+class UAsyncTaskQueue;
 class UFortPlaysetItemDefinition;
 class UWorld;
 
@@ -32,6 +34,20 @@ class AFortVolume : public ABuildingActor
 public:
     DefineUProperty(UFortPlaysetItemDefinition*, CurrentPlayset)
     DefineUProperty(uint8_t, VolumeState)
+    DefineUProperty(UAsyncTaskQueue*, TaskQueue)
+    DefineUProperty(FMulticastScriptDelegate, OnFinishVolumeClear)
+
+    // The volume's task queue, which its island's loads and resets run on (the game's own getter, 7.00 0xD8F7A0: TaskQueue,
+    // made on first use). Null where the build's getter wasn't found.
+    UAsyncTaskQueue* GetTaskQueue();
+    // The queue step that empties the volume of what an island put there (the game's own, 7.00 0xD83860, the first step
+    // of AFortVolumeManager::ResetVolumeAndLevelRecord after the read-only state): on the authority it clears the volume's
+    // actors and returns OnFinishVolumeClear, which it broadcasts once they are gone; null elsewhere.
+    FMulticastScriptDelegate* ClearVolumeOnServer();
+
+    // TaskQueue's and OnFinishVolumeClear's offsets (-1 without them), for the finders of the two natives.
+    static int32_t TaskQueueOffset();
+    static int32_t OnFinishVolumeClearOffset();
 
     // Whether Location is inside the volume's box (its actor bounds, as the volume manager's GetVolumeForLocation).
     bool ContainsLocation(const FVector& Location) const;

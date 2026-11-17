@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Creative/FortLevelSaveComponent.h"
+#include "AsyncTaskQueue.h"
 #include "Creative/FortVolume.h"
 #include "Engine/World.h"
 #include "FortGameInstance.h"
@@ -7,9 +8,11 @@
 #include "Kismet/KismetTextLibrary.h"
 #include "Log.h"
 #include "Natives.h"
+#include "PlaysetLevelStreamComponent.h"
 #include "ReflectionParams.h"
 #include "SidecarSys.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/WeakObjectPtr.h"
 
@@ -120,8 +123,16 @@ bool ULevelSaveRecord::ReadFromBuffer(const std::string& Bytes)
     {
         Buffer.Add(static_cast<uint8_t>(Byte));
     }
-    Natives::ULevelSaveRecord_ReadFromBuffer(this, Buffer);
-    return true;
+    // ReadFromArchive's answer (7.00 0x10898F0: false on data it can't decompress).
+    return Natives::ULevelSaveRecord_ReadFromBuffer(this, Buffer);
+}
+
+void ULevelSaveRecord::NotifyFinishedRead(bool bSucceeded)
+{
+    if (Natives::ULevelSaveRecord_NotifyFinishedRead)
+    {
+        Natives::ULevelSaveRecord_NotifyFinishedRead(this, bSucceeded);
+    }
 }
 
 void ULevelSaveBaseComponent::ApplySaveToWorld()
@@ -174,16 +185,6 @@ void ULevelSaveBaseComponent::StopPeriodicSaveTimer()
     CallNoParams(this, FindStaticFunction_StopPeriodicSaveTimer());
 }
 
-void ULevelSaveBaseComponent::ClearAppliedSave()
-{
-    // ApplySaveToWorld (7.00 0x106D5F0) tests and sets bit 0 of +0x138, the first byte after ActorToAddAfterWrite.
-    if (Member_ActorToAddAfterWrite.IsAvailable())
-    {
-        uint8_t* Flags = reinterpret_cast<uint8_t*>(this) + Member_ActorToAddAfterWrite.GetOffsetChecked() + sizeof(TArray<AActor*>);
-        *Flags &= ~1u;
-    }
-}
-
 AFortVolume* UFortLevelSaveComponent::GetVolume() const
 {
     return Cast<AFortVolume>(reinterpret_cast<UObject*>(GetOwner()));
@@ -219,12 +220,12 @@ void UFortLevelSaveComponent::LoadPlotForUser(const FUniqueNetIdRepl& UserId, UF
 #if WITH_SERVER_CODE
     // What the build keeps of the stripped load, its log lines (7.00 0x3C79350 to 0x3C799B0), in their order: the plot
     // checks, "Attempting to load playset plot for user %s, cloudsave=%s.", CloudLoadFinished bound, and the default
-    // record when the DSS has no file. The volume's own half is intact: OnAsyncLoadingOfPlaysetComplete (0xF55180)
-    // streams the plot's BasePlayset into the volume's UPlaysetLevelStreamComponent ("Playset load complete for user %s,
-    // cloudsave=%s."), and CloudLoadFinished (0xF38F80) sets bIsLoaded, makes the volume Ready and tells the rift
-    // (OnFinishedReadingCloudFiles, which opens it).
-    AActor* Volume = GetOwner();
-    if (!Volume || Volume->Role != ROLE_Authority || !IsAvailable())
+    // record when the DSS has no file. The steps run on the volume's task queue, as the game's own restricted plot load
+    // (BeginRestrictedPlotLoad, 0xF363B0) and reset (AFortVolumeManager::ResetVolumeAndLevelRecord, 0xDA0E70) run theirs:
+    // CloudLoadFinished (0xF38F80) ends the load only once the queue is empty (bIsLoaded, the volume Ready, the rift told
+    // through OnFinishedReadingCloudFiles), so the load's steps go after any a reset left to run.
+    AFortVolume* Volume = GetVolume();
+    if (!Volume || reinterpret_cast<AActor*>(Volume)->Role != ROLE_Authority || !IsAvailable())
     {
         return;
     }
@@ -245,11 +246,20 @@ void UFortLevelSaveComponent::LoadPlotForUser(const FUniqueNetIdRepl& UserId, UF
         Log::Warning(L"Creative: Unable to load plot for user {}, requested plot doesn't match plot restriction.", User);
         return;
     }
-    if (UFortCreativeRealEstatePlotItem* Previous = LoadedPlot; Previous && Previous != PlotItem)
+    UAsyncTaskQueue* Queue = UAsyncTaskQueue::IsAvailable() ? Volume->GetTaskQueue() : nullptr;
+    if (!Queue || !Natives::AFortVolume_ClearVolumeOnServer || !Natives::UFortLevelSaveComponent_ResetLevelRecord || !Natives::ULevelSaveRecord_NotifyFinishedRead)
     {
-        UnloadPlotForUser();
+        Log::Error(L"Creative: {}'s island {} can't load: the volume's task queue or one of the island's steps wasn't found (see the \"Finder: Creative's island load\" line)",
+            User, PlotItem->GetItemId().ToStdString());
+        return;
     }
 
+    // The island the volume had is saved and checked in first; its actors go with the load's first step.
+    if (UFortCreativeRealEstatePlotItem* Previous = LoadedPlot; Previous && Previous != PlotItem)
+    {
+        CheckInLoadedPlot();
+    }
+    StopPeriodicSaveTimer();
     if (UScriptStruct* NetIdStruct = FUniqueNetIdRepl::StaticStruct())
     {
         NetIdStruct->CopyScriptStruct(&static_cast<FUniqueNetIdRepl&>(AccountIdOfOwner), &UserId);
@@ -259,99 +269,189 @@ void UFortLevelSaveComponent::LoadPlotForUser(const FUniqueNetIdRepl& UserId, UF
     bIsLoaded = false;
     reinterpret_cast<AActor*>(Volume)->ForceNetUpdate();
 
-    const FString FileName = GetCloudSaveFileName();
-    Log::Info(L"Creative: Attempting to load playset plot for user {}, cloudsave={}.", User, FileName.ToStdString());
+    Log::Info(L"Creative: Attempting to load playset plot for user {}, cloudsave={}.", User, GetCloudSaveFileName().ToStdString());
     FAsyncTaskResultStorage Started(true, L"");
     if (Started.IsValid())
     {
         const FMulticastScriptDelegate& OnStart = OnStartPlotLoadForUser;
         OnStart.ProcessMulticastDelegate(&Started.Get());
     }
-    // The island's own level first, as the volume's BeginPlay does it for a plot it is given (0xF363B0). 7.10
-    // (CL-4667333) passes the playset its async load brought in (PlaysetPtr): the plot's BasePlayset.
+
+    // The volume emptied of what the last island (or the template a reset put back) left there, by the volume's own
+    // clear: the step the game's reset starts with (0xD83860, ServerClearVolume; OnFinishVolumeClear once the deferred
+    // destroys are done).
+    Queue->Add(reinterpret_cast<UObject*>(Volume), UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(Volume, &AFortVolume::ClearVolumeOnServer));
+    // The island's own level, as BeginRestrictedPlotLoad queues a featured island's (bLoadPlaysetFromPlot): a playset the
+    // stream component already holds is set again (it is loaded), another one replaces the streamed one (the old level
+    // out, the plot's playset loaded and the volume's, its level in).
+    UPlaysetLevelStreamComponent* Stream = UPlaysetLevelStreamComponent::GetForActor(reinterpret_cast<AActor*>(Volume));
+    if (Stream && LoadsPlaysetFromPlot())
     {
-        UFunction* PlaysetComplete = FindStaticFunction_OnAsyncLoadingOfPlaysetComplete();
-        Reflection::FParams Params(PlaysetComplete, true);
-        if (PlaysetComplete && Params.Has(L"PlaysetPtr"))
+        const TAssetPtr<UObject>* Playset = PlotItem->GetBasePlayset();
+        const std::wstring PlaysetPath = Playset && Playset->ToStringReference().IsValid() ? Playset->ToStringReference().ToString().ToStdString() : std::wstring();
+        UObject* Current = Stream->CurrentPlayset;
+        if (Current && !PlaysetPath.empty() && _wcsicmp(Current->GetPathName().ToStdString().c_str(), PlaysetPath.c_str()) == 0)
         {
-            const TAssetPtr<UObject>* Playset = PlotItem->GetBasePlayset();
-            // The engine's TSoftObjectPtr is longer than Core's TAssetPtr (its FSoftObjectPath); SetPath writes the build's.
-            TAssetPtr<UObject>* Slot = static_cast<TAssetPtr<UObject>*>(Params.GetAddress(L"PlaysetPtr"));
-            if (Playset && Slot && Playset->ToStringReference().IsValid())
-            {
-                Slot->SetPath(Playset->ToStringReference().ToString());
-            }
-            else
-            {
-                Log::Warning(L"Creative: {}'s plot {} has no playset to stream in", User, PlotItem->GetItemId().ToStdString());
-            }
+            Stream->SetPlayset(Current);
         }
-        if (PlaysetComplete)
+        else
         {
-            Params.Call(this);
+            if (Current)
+            {
+                Queue->Add(reinterpret_cast<UObject*>(Stream),
+                    UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(Stream, &UPlaysetLevelStreamComponent::UnloadPlaysetAsyncNoCallback));
+            }
+            Queue->Add(this, UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(this, &UFortLevelSaveComponent::LoadPlaysetAsync));
+            Queue->Add(reinterpret_cast<UObject*>(Stream),
+                UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(Stream, &UPlaysetLevelStreamComponent::LoadPlaysetAsyncNoCallback));
         }
     }
+    else
+    {
+        Log::Warning(L"Creative: {}'s island streams no playset: the volume {} has {}", User, Volume->GetName().ToStdString(),
+            !Stream ? L"no UPlaysetLevelStreamComponent" : L"bLoadPlaysetFromPlot off");
+    }
+    // Then the island's file, last: its end (CloudLoadFinished) finds the queue empty and finishes the load.
+    Queue->Add(this, UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(this, &UFortLevelSaveComponent::LoadFromDssAsync));
+    Queue->Start();
+#endif
+}
 
-    UWorld* World = Volume->GetWorld();
+FMulticastScriptDelegate* UFortLevelSaveComponent::LoadPlaysetAsync()
+{
+    // 7.00 0xF54660: the plot's BasePlayset, loaded (RequestAsyncLoad) unless it is already, then
+    // OnAsyncLoadingOfPlaysetComplete (0xF55180) makes it the stream component's and the volume's and broadcasts
+    // OnFinishedPlaysetLoad, which it returns.
+    return Natives::UFortLevelSaveComponent_LoadPlaysetAsync
+        ? static_cast<FMulticastScriptDelegate*>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync(this)) : nullptr;
+}
+
+FMulticastScriptDelegate* UFortLevelSaveComponent::LoadFromDssAsync()
+{
+#if WITH_SERVER_CODE
+    const std::wstring User = AccountIdOfOwner.ToString().ToStdString();
+    const FString FileName = GetCloudSaveFileName();
+    AActor* Volume = GetOwner();
+    UWorld* World = Volume ? Volume->GetWorld() : nullptr;
     UFortGameInstance* GameInstance = World && UFortGameInstance::HasSidecarSys() ? Cast<UFortGameInstance>(reinterpret_cast<UObject*>(static_cast<UGameInstance*>(World->OwningGameInstance))) : nullptr;
     USidecarSys* Sidecar = GameInstance ? static_cast<USidecarSys*>(GameInstance->SidecarSys) : nullptr;
     if (!Sidecar)
     {
+        // The step ends on the next tick, once the queue waits for it.
         Log::Error(L"Creative: Unable to get sidecar when loading cloud save {} for user {}", FileName.ToStdString(), User);
-        FinishPlotLoad(false, L"no_sidecar");
-        return;
+        if (World)
+        {
+            const FWeakObjectPtr WeakThis(this);
+            World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakThis]()
+            {
+                if (UFortLevelSaveComponent* This = static_cast<UFortLevelSaveComponent*>(WeakThis.Get()))
+                {
+                    This->FinishPlotLoad(false, L"no_sidecar");
+                }
+            }));
+        }
+        return &static_cast<FMulticastScriptDelegate&>(OnFinishedLoadingCloudFiles);
     }
 
     const FWeakObjectPtr WeakThis(this);
-    const FWeakObjectPtr WeakPlot(reinterpret_cast<UObject*>(PlotItem));
+    const FWeakObjectPtr WeakPlot(reinterpret_cast<UObject*>(static_cast<UFortCreativeRealEstatePlotItem*>(LoadedPlot)));
     Sidecar->Checkout(FString(CreativeAppName), FileName, USidecarSys::GetCheckoutPid(), true,
         [WeakThis, WeakPlot, User, File = FileName.ToStdString()](bool bCheckedOut, uint32_t Status, const std::string& Contents)
     {
         UFortLevelSaveComponent* This = static_cast<UFortLevelSaveComponent*>(WeakThis.Get());
-        UObject* Plot = WeakPlot.Get();
-        if (!This || !Plot || reinterpret_cast<UObject*>(static_cast<UFortCreativeRealEstatePlotItem*>(This->LoadedPlot)) != Plot)
+        if (!This)
         {
-            // Another island took the volume meanwhile, or the player left.
+            return;
+        }
+        UObject* Plot = WeakPlot.Get();
+        if (!Plot || reinterpret_cast<UObject*>(static_cast<UFortCreativeRealEstatePlotItem*>(This->LoadedPlot)) != Plot)
+        {
+            // Another island took the volume meanwhile (its steps wait behind this one) or the player left: the step
+            // ends without touching the volume, and the queue goes on.
+            Log::Info(L"Creative: {}'s island {} was unloaded while it loaded; its file isn't read", User, File);
+            FAsyncTaskResultStorage Ended(false, L"plot_unloaded");
+            if (Ended.IsValid())
+            {
+                const FMulticastScriptDelegate& OnLoaded = This->OnFinishedLoadingCloudFiles;
+                OnLoaded.ProcessMulticastDelegate(&Ended.Get());
+            }
             return;
         }
         if (!bCheckedOut)
         {
-            Log::Error(L"Creative: Cloud failure while trying to read user file for load request: {} (HTTP {})", File, Status);
+            Log::Error(L"Creative: Failed to read user file {} - {} with error HTTP {}!", File, User, Status);
             This->FinishPlotLoad(false, L"checkout_failed");
             return;
         }
         if (Contents.empty())
         {
-            Log::Info(L"Creative: No cloud save found. Loading default record for user {} cloudsave={} - {}.", User, File, Status);
+            This->LoadFromDefault(Status);
+            return;
         }
-        else
-        {
-            if (!static_cast<ULevelSaveRecord*>(This->LevelRecord))
-            {
-                This->ConstructNewLevelRecord(This->GetOwner());
-            }
-            ULevelSaveRecord* Record = This->LevelRecord;
-            if (!Record || !Record->ReadFromBuffer(Contents))
-            {
-                Log::Error(L"Creative: {}'s island {} ({} bytes) couldn't be read into the volume's record ({})", User, File, Contents.size(),
-                    !Record ? L"no record" : L"ULevelSaveRecord::ReadFromBuffer not found");
-                This->FinishPlotLoad(false, L"read_failed");
-                return;
-            }
-            Log::Info(L"Creative: Successfully downloaded {} - {} ({} bytes): applying it to the island", File, User, Contents.size());
-            This->ClearAppliedSave();
-            This->ApplySaveToWorld();
-        }
-        This->FinishPlotLoad(true, L"");
+        This->FinalizeDownload(Contents);
     });
+    return &static_cast<FMulticastScriptDelegate&>(OnFinishedLoadingCloudFiles);
+#else
+    return nullptr;
 #endif
+}
+
+void UFortLevelSaveComponent::FinalizeDownload(const std::string& Contents)
+{
+#if WITH_SERVER_CODE
+    const std::wstring User = AccountIdOfOwner.ToString().ToStdString();
+    const std::wstring File = GetCloudSaveFileName().ToStdString();
+    Log::Info(L"Creative: Successfully downloaded {} - {}.", File, User);
+    // A new record of the volume's for the island (the last one goes with its bindings), read from the file, then the
+    // read's own end: the records tidied and OnFinishedRead, which the component answers (OnFinishedRecordRead:
+    // bValidRecord, so the island saves; on 7.00 the record applied when bApplySaveAfterLoad).
+    ConstructNewLevelRecord(GetOwner());
+    ULevelSaveRecord* Record = LevelRecord;
+    Log::Info(L"Creative: Loading level record of size {}", Contents.size());
+    if (!Record || !Record->ReadFromBuffer(Contents))
+    {
+        // No OnFinishedRead: the record stays invalid, so nothing overwrites the player's file.
+        Log::Error(L"Creative: {}'s island {} ({} bytes) couldn't be read into the volume's record ({})", User, File, Contents.size(),
+            !Record ? L"no record" : Natives::ULevelSaveRecord_ReadFromBuffer ? L"ULevelSaveRecord::ReadFromArchive failed" : L"ULevelSaveRecord::ReadFromBuffer not found");
+        FinishPlotLoad(false, L"read_failed");
+        return;
+    }
+    Record->NotifyFinishedRead(true);
+    if (!AppliesSaveAfterLoad())
+    {
+        ApplySaveToWorld();
+    }
+    FinishPlotLoad(true, L"");
+#endif
+}
+
+void UFortLevelSaveComponent::LoadFromDefault(uint32_t Status)
+{
+#if WITH_SERVER_CODE
+    // A new island: the record of its playset (the game's own reset of the record, which the reset's step of the same name
+    // calls: the volume's playset's record, else a new one, valid), applied as the reset applies it.
+    Log::Info(L"Creative: No cloud save found. Loading default record for user {} cloudsave={} - {}.", AccountIdOfOwner.ToString().ToStdString(),
+        GetCloudSaveFileName().ToStdString(), Status);
+    ResetLevelRecord();
+    ApplySaveToWorld();
+    FinishPlotLoad(true, L"");
+#endif
+}
+
+void UFortLevelSaveComponent::ResetLevelRecord()
+{
+    if (Natives::UFortLevelSaveComponent_ResetLevelRecord)
+    {
+        Natives::UFortLevelSaveComponent_ResetLevelRecord(this);
+    }
 }
 
 void UFortLevelSaveComponent::FinishPlotLoad(bool bSucceeded, const std::wstring& ErrorCode)
 {
 #if WITH_SERVER_CODE
-    // The game's own end of a load: CloudLoadFinished(Result) (bIsLoaded, the volume Ready, the rift told). Then the
-    // island is saved on the component's timer, by the game's own SaveOutLevelRecord (0xF5B8F0: the DSS upload).
+    // The game's own end of a load: CloudLoadFinished(Result) broadcasts OnFinishedLoadingCloudFiles (the queue's step
+    // ends) and, the queue empty, finishes it (bIsLoaded, the volume Ready, the rift told). The island is then saved on
+    // the component's timer, by the game's own SaveOutLevelRecord (0xF5B8F0: the DSS upload).
     FAsyncTaskResultStorage Result(bSucceeded, ErrorCode);
     Reflection::FParams Params(FindStaticFunction_CloudLoadFinished(), true);
     if (Result.IsValid() && Params.CopyStruct(L"Result", &Result.Get()))
@@ -363,38 +463,16 @@ void UFortLevelSaveComponent::FinishPlotLoad(bool bSucceeded, const std::wstring
         StartPeriodicSaveTimer();
     }
     Log::Info(L"Creative: {}'s island {} {}", AccountIdOfOwner.ToString().ToStdString(), GetCloudSaveFileName().ToStdString(),
-        bSucceeded ? L"is loaded; it saves to the DSS on the volume's timer and as the volume goes read-only for a game" : (L"didn't load: " + ErrorCode).c_str());
+        bSucceeded ? (bIsLoaded ? L"is loaded; it saves to the DSS on the volume's timer and as the volume goes read-only for a game"
+            : L"is read, but the volume's queue has steps left, so the load isn't finished") : (L"didn't load: " + ErrorCode).c_str());
 #endif
 }
 
-void UFortLevelSaveComponent::ReloadPlot()
+void UFortLevelSaveComponent::CheckInLoadedPlot()
 {
 #if WITH_SERVER_CODE
     UFortCreativeRealEstatePlotItem* Plot = LoadedPlot;
-    AFortVolume* Volume = GetVolume();
-    if (!Plot || !Volume)
-    {
-        return;
-    }
-    // The owner stays in AccountIdOfOwner, which the load copies onto itself.
-    const FUniqueNetIdRepl& Owner = AccountIdOfOwner;
-    // The island as last saved: the volume back to its playset, then the user's file again.
-    StopPeriodicSaveTimer();
-    if (AFortVolumeManager* Manager = AFortVolumeManager::Get(Volume))
-    {
-        Manager->ResetVolumeAndLevelRecord(Volume);
-    }
-    LoadedPlot = nullptr;
-    LoadPlotForUser(Owner, Plot);
-#endif
-}
-
-void UFortLevelSaveComponent::UnloadPlotForUser()
-{
-#if WITH_SERVER_CODE
-    UFortCreativeRealEstatePlotItem* Plot = LoadedPlot;
-    AFortVolume* Volume = GetVolume();
-    if (!Plot || !Volume)
+    if (!Plot)
     {
         return;
     }
@@ -416,6 +494,35 @@ void UFortLevelSaveComponent::UnloadPlotForUser()
     }
     Log::Info(L"Creative: {}'s island {} unloads{}", Owner.ToString().ToStdString(), File,
         bIsLoaded ? (Natives::UFortLevelSaveComponent_CloudSave ? L": saved and checked in" : L" unsaved: the cloud save wasn't found") : L" before it loaded: nothing to save");
+#endif
+}
+
+void UFortLevelSaveComponent::ReloadPlot()
+{
+#if WITH_SERVER_CODE
+    UFortCreativeRealEstatePlotItem* Plot = LoadedPlot;
+    if (!Plot || !GetVolume())
+    {
+        return;
+    }
+    // The island as last saved: the same plot loaded again (the volume cleared, the file read again). The owner stays in
+    // AccountIdOfOwner, which the load copies onto itself.
+    const FUniqueNetIdRepl& Owner = AccountIdOfOwner;
+    LoadPlotForUser(Owner, Plot);
+#endif
+}
+
+void UFortLevelSaveComponent::UnloadPlotForUser()
+{
+#if WITH_SERVER_CODE
+    UFortCreativeRealEstatePlotItem* Plot = LoadedPlot;
+    AFortVolume* Volume = GetVolume();
+    if (!Plot || !Volume)
+    {
+        return;
+    }
+    CheckInLoadedPlot();
+    // The volume back to its template for the next player: the game's own reset, on the volume's queue.
     if (AFortVolumeManager* Manager = AFortVolumeManager::Get(Volume))
     {
         Manager->ResetVolumeAndLevelRecord(Volume);

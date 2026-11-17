@@ -1,11 +1,33 @@
 #include "pch.h"
 #include "Creative/FortVolume.h"
+#include "AsyncTaskQueue.h"
 #include "Kismet/GameplayStatics.h"
+#include "Natives.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 
 #include <limits>
+
+UAsyncTaskQueue* AFortVolume::GetTaskQueue()
+{
+    return Natives::AFortVolume_GetTaskQueue ? static_cast<UAsyncTaskQueue*>(Natives::AFortVolume_GetTaskQueue(this)) : nullptr;
+}
+
+FMulticastScriptDelegate* AFortVolume::ClearVolumeOnServer()
+{
+    return Natives::AFortVolume_ClearVolumeOnServer ? static_cast<FMulticastScriptDelegate*>(Natives::AFortVolume_ClearVolumeOnServer(this)) : nullptr;
+}
+
+int32_t AFortVolume::TaskQueueOffset()
+{
+    return Member_TaskQueue.IsAvailable() ? Member_TaskQueue.GetOffsetChecked() : -1;
+}
+
+int32_t AFortVolume::OnFinishVolumeClearOffset()
+{
+    return Member_OnFinishVolumeClear.IsAvailable() ? Member_OnFinishVolumeClear.GetOffsetChecked() : -1;
+}
 
 bool AFortVolume::ContainsLocation(const FVector& Location) const
 {

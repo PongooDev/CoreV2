@@ -663,6 +663,20 @@ std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedDirectCalls(uintptr_
     return Calls;
 }
 
+std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedAddressesTaken(uintptr_t Function)
+{
+    std::vector<std::pair<uintptr_t, uintptr_t>> Taken;
+    ForEachInstruction(Function, [&](uintptr_t Address, const hde64s& Instruction)
+    {
+        // lea r64, [rip+disp32]: modrm mod 0, rm 5.
+        if (Instruction.opcode == 0x8D && Instruction.rex_w && (Instruction.flags & F_MODRM) && Instruction.modrm_mod == 0 && Instruction.modrm_rm == 5)
+        {
+            Taken.emplace_back(Address, Address + Instruction.len + static_cast<int32_t>(Instruction.disp.disp32));
+        }
+    });
+    return Taken;
+}
+
 bool Finder::ReadsMemberAt(uintptr_t Function, int32_t Displacement)
 {
     bool bReads = false;

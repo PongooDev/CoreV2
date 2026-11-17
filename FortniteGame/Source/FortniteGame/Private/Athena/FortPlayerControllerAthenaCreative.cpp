@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "AsyncTaskQueue.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlaylistAthena.h"
@@ -82,6 +83,165 @@ namespace
     {
         const std::vector<uintptr_t> Refs = Finder::StringRefs(Text);
         return Refs.empty() ? 0 : Finder::FunctionStart(Refs.front());
+    }
+
+    // Every function with a code reference to Text.
+    std::set<uintptr_t> FunctionsReferencing(const wchar_t* Text)
+    {
+        std::set<uintptr_t> Functions;
+        for (const uintptr_t Ref : Finder::StringRefs(Text))
+        {
+            if (const uintptr_t Function = Finder::FunctionStart(Ref))
+            {
+                Functions.insert(Function);
+            }
+        }
+        return Functions;
+    }
+
+    bool IsExecutable(uintptr_t Address)
+    {
+        for (const auto& [Begin, End] : Finder::ExecutableSections())
+        {
+            if (Address >= Begin && Address < End)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // The queue step that calls Function and returns a member of the object it was called on (lea rax, [rbx+disp32]
+    // right after the call): UPlaysetLevelStreamComponent's LoadPlaysetAsyncNoCallback and UnloadPlaysetAsyncNoCallback
+    // (7.00 0x1325850, 0x1338210; 7.10 0x1364750, 0x13775D0, both returning +0x148 / +0x168).
+    uintptr_t StepCalling(uintptr_t Function)
+    {
+        for (const uintptr_t Site : Function ? Finder::CallsTo(Function, false) : std::vector<uintptr_t>())
+        {
+            const auto* Next = reinterpret_cast<const uint8_t*>(Site + 5);
+            const uintptr_t Start = Finder::FunctionStart(Site);
+            if (Start && Site - Start < 0x30 && Finder::IsReadable(Next, 3) && Next[0] == 0x48 && Next[1] == 0x8D && (Next[2] & 0xF8) == 0x80 && (Next[2] & 7) != 4)
+            {
+                return Start;
+            }
+        }
+        return 0;
+    }
+
+    // From 7.00: what an island's load runs on and with (Natives::AFortVolume_GetTaskQueue and the rest), off the game's
+    // own reset of an island (AFortVolumeManager::ResetVolumeAndLevelRecord, 0xDA0E70; 7.10 0xDC4320, the function that
+    // logs "... Task Queue was not valid and empty") and the steps' own log lines.
+    void ResolveIslandLoad()
+    {
+        const uintptr_t Reset = FunctionReferencing(L"AFortVolumeManager::ResetVolumeAndLevelRecord Task Queue was not valid and empty");
+        const std::vector<std::pair<uintptr_t, uintptr_t>> ResetCalls = Reset ? Finder::DecodedDirectCalls(Reset) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+        // AFortVolume::GetTaskQueue: the reset's first call, the getter that reads TaskQueue (made on first use).
+        const int32_t TaskQueueOffset = AFortVolume::TaskQueueOffset();
+        if (!ResetCalls.empty() && TaskQueueOffset > 0 && Finder::ReadsMemberAt(ResetCalls.front().second, TaskQueueOffset))
+        {
+            Natives::AFortVolume_GetTaskQueue = reinterpret_cast<decltype(Natives::AFortVolume_GetTaskQueue)>(ResetCalls.front().second);
+        }
+        // UAsyncTaskQueue::Add: the call the reset makes once per step (7 on 7.00), the one of them that makes an object
+        // (the step's UAsyncTask). The reset's other repeated calls are the delegate's allocations and the weak pointers.
+        std::map<uintptr_t, int32_t> Counts;
+        for (const auto& [Site, Target] : ResetCalls)
+        {
+            ++Counts[Target];
+        }
+        const uintptr_t ConstructObject = reinterpret_cast<uintptr_t>(Natives::StaticConstructObject_Internal);
+        for (const auto& [Target, Count] : Counts)
+        {
+            if (Count < 3 || !ConstructObject || Target == reinterpret_cast<uintptr_t>(Natives::AFortVolume_GetTaskQueue))
+            {
+                continue;
+            }
+            const std::vector<std::pair<uintptr_t, uintptr_t>> Inner = Finder::DecodedDirectCalls(Target);
+            if (std::any_of(Inner.begin(), Inner.end(), [ConstructObject](const auto& Call) { return Call.second == ConstructObject; }))
+            {
+                Natives::UAsyncTaskQueue_Add = reinterpret_cast<decltype(Natives::UAsyncTaskQueue_Add)>(Target);
+                break;
+            }
+        }
+        // The volume's clear: the step the reset binds (lea) that returns OnFinishVolumeClear.
+        const int32_t ClearOffset = AFortVolume::OnFinishVolumeClearOffset();
+        for (const auto& [Site, Taken] : Reset && ClearOffset > 0 ? Finder::DecodedAddressesTaken(Reset) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (IsExecutable(Taken) && Finder::FunctionStart(Taken) == Taken && Finder::ReadsMemberAt(Taken, ClearOffset))
+            {
+                Natives::AFortVolume_ClearVolumeOnServer = reinterpret_cast<decltype(Natives::AFortVolume_ClearVolumeOnServer)>(Taken);
+                break;
+            }
+        }
+        // The queue's start: cmp qword ptr [rcx+CurrentTask], 0; je ExecuteNextTask, where ExecuteNextTask is one of the
+        // two functions that bind "&UAsyncTaskQueue::OnAsyncTaskFinished" (the other is OnAsyncTaskFinished itself).
+        const std::set<uintptr_t> NextTask = FunctionsReferencing(L"&UAsyncTaskQueue::OnAsyncTaskFinished");
+        const int32_t CurrentTaskOffset = UAsyncTaskQueue::CurrentTaskOffset();
+        uintptr_t ExecuteNextTask = 0;
+        for (const auto& [Begin, End] : !NextTask.empty() && CurrentTaskOffset > 0 && CurrentTaskOffset < 0x80 ? Finder::ExecutableSections() : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            const auto* Bytes = reinterpret_cast<const uint8_t*>(Begin);
+            for (size_t Index = 0; Index + 11 <= End - Begin && !Natives::UAsyncTaskQueue_Start; ++Index)
+            {
+                if (Bytes[Index] != 0x48 || Bytes[Index + 1] != 0x83 || Bytes[Index + 2] != 0x79 || Bytes[Index + 3] != CurrentTaskOffset || Bytes[Index + 4] != 0
+                    || Bytes[Index + 5] != 0x0F || Bytes[Index + 6] != 0x84)
+                {
+                    continue;
+                }
+                const uintptr_t Site = Begin + Index;
+                const uintptr_t Target = Finder::RelativeTarget(Site + 5, 2, 6);
+                if (NextTask.contains(Target))
+                {
+                    ExecuteNextTask = Target;
+                    Natives::UAsyncTaskQueue_Start = reinterpret_cast<decltype(Natives::UAsyncTaskQueue_Start)>(Site);
+                }
+            }
+        }
+        // The steps of the island's own: the plot's playset loaded, and the stream component's level in and out.
+        Natives::UFortLevelSaveComponent_LoadPlaysetAsync = reinterpret_cast<decltype(Natives::UFortLevelSaveComponent_LoadPlaysetAsync)>(
+            FunctionReferencing(L"Start playset async load for user %s, cloudsave=%s."));
+        Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback = reinterpret_cast<decltype(Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)>(
+            StepCalling(FunctionReferencing(L"UPlaysetLevelStreamComponent::LoadPlayset Error: no owner for %s")));
+        Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback = reinterpret_cast<decltype(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)>(
+            StepCalling(FunctionReferencing(L"UPlaysetLevelStreamComponent::UnloadPlayset %s")));
+        // UFortLevelSaveComponent::ResetLevelRecord: the function that sets the island file's "last-reset" meta, one of
+        // the component's virtuals.
+        const uintptr_t ResetRecord = FunctionReferencing(L"last-reset");
+        UObject* SaveDefault = UFortLevelSaveComponent::StaticClass() ? UFortLevelSaveComponent::StaticClass()->GetDefaultObject(false) : nullptr;
+        const int32_t ResetSlot = ResetRecord && SaveDefault ? Finder::VTableIndex(*reinterpret_cast<void***>(SaveDefault), reinterpret_cast<void*>(ResetRecord), 0x200) : -1;
+        if (ResetSlot >= 0)
+        {
+            Natives::UFortLevelSaveComponent_ResetLevelRecord = reinterpret_cast<decltype(Natives::UFortLevelSaveComponent_ResetLevelRecord)>(ResetRecord);
+        }
+        // ULevelSaveRecord's end of a read: the function that logs "read_failed" and isn't ReadFromDisk (which logs
+        // "ULevelSaveRecord::ReadFromDisk Invalid File" and calls ReadFromBuffer itself).
+        const uintptr_t ReadFromDisk = FunctionReferencing(L"ULevelSaveRecord::ReadFromDisk Invalid File");
+        for (const uintptr_t Function : FunctionsReferencing(L"read_failed"))
+        {
+            const std::vector<std::pair<uintptr_t, uintptr_t>> Inner = Finder::DecodedDirectCalls(Function);
+            const uintptr_t ReadFromBuffer = reinterpret_cast<uintptr_t>(Natives::ULevelSaveRecord_ReadFromBuffer);
+            if (Function != ReadFromDisk && std::none_of(Inner.begin(), Inner.end(), [ReadFromBuffer](const auto& Call) { return Call.second == ReadFromBuffer; }))
+            {
+                Natives::ULevelSaveRecord_NotifyFinishedRead = reinterpret_cast<decltype(Natives::ULevelSaveRecord_NotifyFinishedRead)>(Function);
+                break;
+            }
+        }
+
+        const auto Address = [](const void* Function) { return Function ? reinterpret_cast<uintptr_t>(Function) - Finder::ImageBase() : 0; };
+        Log::Info(L"Finder: Creative's island load: AFortVolume::GetTaskQueue 0x{:X}, UAsyncTaskQueue::Add 0x{:X}, its start 0x{:X} (ExecuteNextTask 0x{:X}), the volume's clear 0x{:X}, "
+            L"UFortLevelSaveComponent::LoadPlaysetAsync 0x{:X}, UPlaysetLevelStreamComponent::LoadPlaysetAsyncNoCallback 0x{:X} and UnloadPlaysetAsyncNoCallback 0x{:X}, "
+            L"UFortLevelSaveComponent::ResetLevelRecord 0x{:X} (slot 0x{:X}), ULevelSaveRecord's end of a read 0x{:X}",
+            Address(reinterpret_cast<const void*>(Natives::AFortVolume_GetTaskQueue)), Address(reinterpret_cast<const void*>(Natives::UAsyncTaskQueue_Add)),
+            Address(reinterpret_cast<const void*>(Natives::UAsyncTaskQueue_Start)), ExecuteNextTask ? ExecuteNextTask - Finder::ImageBase() : 0,
+            Address(reinterpret_cast<const void*>(Natives::AFortVolume_ClearVolumeOnServer)), Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync)),
+            Address(reinterpret_cast<const void*>(Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)),
+            Address(reinterpret_cast<const void*>(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)),
+            Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_ResetLevelRecord)), ResetSlot, Address(reinterpret_cast<const void*>(Natives::ULevelSaveRecord_NotifyFinishedRead)));
+        if (!Natives::AFortVolume_GetTaskQueue || !Natives::UAsyncTaskQueue_Add || !Natives::UAsyncTaskQueue_Start || !Natives::AFortVolume_ClearVolumeOnServer
+            || !Natives::UFortLevelSaveComponent_LoadPlaysetAsync || !Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback
+            || !Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback || !Natives::UFortLevelSaveComponent_ResetLevelRecord || !Natives::ULevelSaveRecord_NotifyFinishedRead)
+        {
+            Log::Error(L"Finder: Creative's island load is missing a part, so players' islands don't load (see the line above)");
+        }
     }
 }
 
@@ -629,6 +789,9 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
             }
         }
     }
+    // The island load's queue and steps (after ReadFromBuffer, which tells ULevelSaveRecord's end of a read from ReadFromDisk).
+    ResolveIslandLoad();
+
     // The creative profile, which LoadCreativePlots reads (McpProfileSys, intact). UMcpProfile::GetStat: the second call
     // after the creative profile's plot permissions getter (0x1132C70) names "creative_plot_permissions" (the first is
     // the name's copy into its FString), the one whose answer's EJson type it checks next (cmp dword ptr [reg+8], 6).

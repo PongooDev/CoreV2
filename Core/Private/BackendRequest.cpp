@@ -206,7 +206,8 @@ namespace
             }
             if (bAnswered)
             {
-                if (Response.Status != 200)
+                // Any 2xx is an answer (the DSS checkout of an island with no file yet is a 204).
+                if (Response.Status < 200 || Response.Status >= 300)
                 {
                     Log::Warning(L"Backend: {} failed (HTTP {}): {}", Request.What, Response.Status, Widen(Response.Body.substr(0, 300)));
                 }

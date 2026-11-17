@@ -13,6 +13,7 @@
 #include "Log.h"
 #include "Natives.h"
 #include "Pawns/FortPlayerPawn.h"
+#include "PlaysetLevelStreamComponent.h"
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
@@ -288,6 +289,7 @@ void AFortCreativePortalManager::LogHub(const UObject* WorldContextObject)
     int32_t HubRifts = 0;
     int32_t WithIsland = 0;
     int32_t WithSave = 0;
+    int32_t WithPlaysetStream = 0;
     for (AFortAthenaCreativePortal* Portal : All)
     {
         if (!Portal || Portal->bReturnToCreativeHub)
@@ -295,18 +297,25 @@ void AFortCreativePortalManager::LogHub(const UObject* WorldContextObject)
             continue;
         }
         ++HubRifts;
-        if (static_cast<AFortVolume*>(Portal->LinkedVolume))
+        AFortVolume* Volume = Portal->LinkedVolume;
+        if (Volume)
         {
             ++WithIsland;
         }
-        if (Portal->GetLevelSaveComponent())
+        UFortLevelSaveComponent* SaveComponent = Portal->GetLevelSaveComponent();
+        if (SaveComponent)
         {
             ++WithSave;
         }
+        // The island's own level streams in with its plot (LoadPlotForUser's playset steps).
+        if (SaveComponent && SaveComponent->LoadsPlaysetFromPlot() && UPlaysetLevelStreamComponent::GetForActor(reinterpret_cast<AActor*>(Volume)))
+        {
+            ++WithPlaysetStream;
+        }
     }
     const TArray<AFortAthenaCreativePortal*>& Available = Manager->AvailablePortals;
-    Log::Info(L"Creative: the hub has {} rifts ({} free), {} linked to an island space, {} with its UFortLevelSaveComponent; {} rifts in all with the islands' own",
-        HubRifts, Available.Num(), WithIsland, WithSave, All.Num());
+    Log::Info(L"Creative: the hub has {} rifts ({} free), {} linked to an island space, {} with its UFortLevelSaveComponent, {} streaming their plot's playset; {} rifts in all with the islands' own",
+        HubRifts, Available.Num(), WithIsland, WithSave, WithPlaysetStream, All.Num());
 #endif
 }
 

@@ -309,6 +309,8 @@
     <ClInclude Include="..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Public\VivoxVoiceChatToken.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Private\Items\FortLootTablesCertData.inl" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AthenaPlayerMatchReport.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AsyncTaskQueue.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\PlaysetLevelStreamComponent.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortAssetManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameData.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortGameInstance.h" />
@@ -570,6 +572,8 @@
     <ClCompile Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\McpProfileSys\Private\McpProfileGroup.cpp" />
     <ClCompile Include="..\FortniteGame\Plugins\OnlineGameplayFramework\Source\SidecarSys\Private\SidecarSys.cpp" />
     <ClCompile Include="..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Private\VivoxVoiceChatToken.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AsyncTaskQueue.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\PlaysetLevelStreamComponent.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortAssetManager.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameData.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortGameInstance.cpp" />

@@ -1171,6 +1171,12 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AthenaPlayerMatchReport.h">
       <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\AsyncTaskQueue.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\PlaysetLevelStreamComponent.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\FortAssetManager.h">
       <Filter>FortniteGame\Source\FortniteGame\Public</Filter>
     </ClInclude>
@@ -1939,6 +1945,12 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Private\VivoxVoiceChatToken.cpp">
       <Filter>FortniteGame\Plugins\Vivox\Source\VivoxVoiceChatToken\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\AsyncTaskQueue.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\PlaysetLevelStreamComponent.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\FortAssetManager.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private</Filter>

@@ -34,10 +34,23 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+        # GitHub's API sometimes refuses the release with "HTTP 403: Resource not accessible by integration" although the
+        # same token publishes the runs before and after it (build-777, build-780), so the publish is retried; a release
+        # an attempt half-made gets its files uploaded instead of being created again.
         run: |
-          gh release create "build-${{ github.run_number }}" \
-            x64/Release/Core.dll x64/Release/CoreClient.dll x64/Release/CoreRedirect.dll \
-            --target "${{ github.sha }}" \
-            --title "Build ${{ github.run_number }}" \
-            --notes "$(git log -1 --format='%s (%h)')" \
-            --latest
+          TAG="build-${{ github.run_number }}"
+          FILES="x64/Release/Core.dll x64/Release/CoreClient.dll x64/Release/CoreRedirect.dll"
+          for attempt in 1 2 3 4 5; do
+            if gh release view "$TAG" > /dev/null 2>&1; then
+              gh release upload "$TAG" $FILES --clobber && gh release edit "$TAG" --latest && exit 0
+            else
+              gh release create "$TAG" $FILES \
+                --target "${{ github.sha }}" \
+                --title "Build ${{ github.run_number }}" \
+                --notes "$(git log -1 --format='%s (%h)')" \
+                --latest && exit 0
+            fi
+            echo "Publish attempt $attempt failed; retrying in $((attempt * 30)) s"
+            sleep $((attempt * 30))
+          done
+          exit 1

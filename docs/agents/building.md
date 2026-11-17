@@ -11,7 +11,10 @@ Always the Visual Studio 2022 MSBuild, by full path, Release x64 (toolset v143):
 - While iterating: add `-t:Server` (only `Core.dll`). Before the final push: the full `Core.sln` once.
 - Output: `x64\Release\Core.dll`, `CoreClient.dll`, `CoreRedirect.dll` (+ PDBs) in the worktree.
 - A fresh worktree needs the MinHook submodule: `git submodule update --init`.
-- The core MCP's `build_corev2` (worktree path) runs this for you.
+- The core MCP's `build_corev2` runs this for you. It needs `worktree` (the worktree's path). A build outlasts one
+  call: the call waits up to about 100 s, then returns a `job_id`; call `build_corev2` again with just `job_id` until
+  it reports the result. Builds run one at a time: `build_corev2` and `deploy_main_build` share one slot, so a call
+  may wait for another agent's build first.
 
 ## Pitfalls seen here
 
@@ -41,7 +44,8 @@ The owner's launcher loads `Core.dll` and `CoreRedirect.dll` from the main check
 (`%USERPROFILE%\Documents\GitHub\CoreV2`), so a pushed fix reaches the owner only when main is pulled and rebuilt
 there. A running game holds the PDBs there open, and a failed link deletes the DLLs, so never build directly into it.
 
-Preferred: the core MCP's `deploy_main_build`. Fallback, only after your commit is on `origin/main`:
+Preferred: the core MCP's `deploy_main_build` (it returns a `job_id` to poll like `build_corev2`, and shares its build
+slot). Fallback, only after your commit is on `origin/main`:
 
 1. `git -C $env:USERPROFILE\Documents\GitHub\CoreV2 pull --ff-only`. If it fails (local changes, diverged), stop and
    write it in `H:\CoreWork\HANDOFF.md`.

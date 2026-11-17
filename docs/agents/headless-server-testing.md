@@ -22,8 +22,10 @@ as such.
 
 ## Preferred: the core MCP
 
-`boot_test_server` (build, mode, backend port) enforces the rules above and returns the log. Then
-`server_log_summary` (log path) pulls out the lines below.
+`boot_test_server` enforces the rules above and returns the log. It needs `build_path` (the installed build folder),
+`mode`, `backend_port` (a test port with a test backend on it) and `dll_dir` (your worktree's `x64\Release`). A boot
+outlasts one call: the call waits up to about 100 s and then returns a `job_id`; call `boot_test_server` again with
+just that `job_id` until it reports the result. Then `server_log_summary` (log path) pulls out the lines below.
 
 ## Fallback: by hand
 
@@ -34,17 +36,18 @@ as such.
    ```
    node src/main.js --port 5711 --data H:\CoreWork\<task>-data --local-only --qos-ping-port 0 --vivox-sip-port 0
    ```
-   Wait for `Listening on port 5711`. If 5711 is taken by another agent's backend, pick another free port and use a
-   copy of `run_server_dev.py` in your own scratch folder with its two `5711`s changed.
+   Wait for `Listening on port 5711`. If 5711 is taken by another agent's backend, pick another free port and pass it
+   to the script as `--backend-port <port>`.
 4. Boot, gated, in one PowerShell command (build folder first; game arguments after `--`):
    ```
-   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
+   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --backend-port 5711 --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
    ```
    - Battle Royale: `-- -CoreMode=BattleRoyale`. Without it the server stays on `FortniteEmptyDedicated` and the
      Battle Royale code (loot, POIs) never runs.
    - Save the World: no `-CoreMode`.
-   - The script loads `CoreRedirect.dll` first and passes `-httpproxy=127.0.0.1:5711` and
-     `-CoreBackend=http://127.0.0.1:5711`, so nothing reaches Epic or the 5595 backend.
+   - The script loads `CoreRedirect.dll` first and passes `-httpproxy=127.0.0.1:<port>` and
+     `-CoreBackend=http://127.0.0.1:<port>` (`--backend-port`, 5711 by default; it refuses 5595), so nothing reaches
+     Epic or the owner's backend.
    - It prints the last 3000 characters of the Core log, writes the whole log to
      `%USERPROFILE%\Documents\Core-Docs\Tools\run_server_dev.py.last.txt`, and terminates the server.
 5. Read the full log (`run_server_dev.py.last.txt`, or `Server_log_<pid>.txt` next to the exe). The engine's own

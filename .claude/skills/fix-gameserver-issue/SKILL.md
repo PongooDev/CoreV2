@@ -27,7 +27,7 @@ Rules: AGENTS.md sections 1 and 2 apply in full. Depth: `docs/agents/*.md`.
 7. Fix it in Epic's class and file with Epic's names (21.40 PDB: `pdb2140_find`). Make it run from the game's own
    trigger (`restore-stripped-function` skill). No polling loops, no hooks on intact engine code, no `Client/` change.
 8. Gate every new member, UFunction (`FindStaticFunction_X`, `IsAvailable()`) and finder (`add-finder` skill).
-9. Build: `build_corev2` (worktree path), else
+9. Build: `build_corev2` with `worktree` (poll its `job_id` until done; builds run one at a time), else
    `"C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" Core.sln /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo -t:Server`,
    then the full `Core.sln` once.
 10. Boot-test the affected build and the regression builds (`boot-test-server` skill). One server at a time.

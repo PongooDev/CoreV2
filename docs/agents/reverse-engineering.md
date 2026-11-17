@@ -13,11 +13,12 @@ Epic's function, class, struct and member names, signatures and virtual order co
 | `symbols_21.40.txt` | 1.2 MB | function names (`Class::Function`): grep it |
 | `types_21.40_index.tsv`, `types_21.40_index64.tsv` | ~78 MB | type lookup index: grep it |
 | `types_21.40.txt` | 154 MB | type records: grep, never open whole |
-| `types_21.40_layout.h`, `types_21.40_layout64.h` | ~3 GB each | class layouts and vtables: **only** grep with a narrow pattern, never read or open whole |
-| `AFortPawn_21.40.h`, `AFortPawn_21.40_64.h` | 45 KB | one class, a worked example |
+| `types_21.40_layout64.h` | ~3 GB | class layouts and vtables with 8-byte pointers, the right offsets: **only** grep with a narrow pattern, never read or open whole |
+| `types_21.40_layout.h` | ~3 GB | the same with 4-byte pointers: its offsets are **wrong** for these 64-bit builds; don't use it for offsets |
+| `AFortPawn_21.40_64.h` (and `AFortPawn_21.40.h`, 4-byte pointers) | 45 KB | one class, a worked example |
 
-Prefer the core MCP's `pdb2140_find` (query) tool if available. Fallback (PowerShell; `rg` isn't installed, and
-Git Bash's `grep -n -m 5` works too):
+Prefer the core MCP's `pdb2140_find` (query) tool if available; it reads `types_21.40_layout64.h`. Fallback
+(PowerShell; `rg` isn't installed, and Git Bash's `grep -n -m 5` works too):
 
 ```
 Select-String -Path D:\ResortWork\IDA\21.40\symbols_21.40.txt -Pattern "AFortGameModeAthena::OnGivenMatchAssignment" -SimpleMatch

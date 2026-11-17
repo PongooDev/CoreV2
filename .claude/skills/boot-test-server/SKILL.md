@@ -10,15 +10,18 @@ Depth: `docs/agents/headless-server-testing.md`.
 Never: a client launch, a full match (`-CoreBotMatch` without the owner's OK), port 5595, two servers at once,
 copying or changing anything in `F:\Builds` or `D:\Fortnite Builds`, killing a process you didn't start.
 
-1. Preferred: the core MCP's `boot_test_server` (build, mode `BattleRoyale` or Save the World, backend port), then
-   `server_log_summary` (log path). Skip to step 7.
+1. Preferred: the core MCP's `boot_test_server` with `build_path` (installed build folder), `mode` (`BattleRoyale` or
+   Save the World), `backend_port` (a test port with a test backend on it, never 5595) and `dll_dir`
+   (`<worktree>\x64\Release`). It returns a `job_id` if the boot outlasts the call (about 100 s): call it again with
+   just `job_id` until it reports the result. Then `server_log_summary` (log path). Skip to step 7.
 2. Find the installed build folder (`project_status`); check it exists. Don't copy it.
 3. Build your worktree (`<worktree>\x64\Release\Core.dll` and `CoreRedirect.dll`).
-4. Start a test backend in the background from a Core-Backend checkout and wait for `Listening on port 5711`:
+4. Start a test backend in the background from a Core-Backend checkout and wait for `Listening on port 5711`
+   (another free port if 5711 is taken):
    `node src/main.js --port 5711 --data H:\CoreWork\<task>-data --local-only --qos-ping-port 0 --vivox-sip-port 0`
-5. Boot, gated, in one PowerShell command:
+5. Boot, gated, in one PowerShell command (`--backend-port` = the test backend's port; default 5711):
    ```
-   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
+   if (Get-Process FortniteClient* -ErrorAction SilentlyContinue) { "A FortniteClient is running: not booting" } else { python -I $env:USERPROFILE\Documents\Core-Docs\Tools\run_server_dev.py "<build folder>" --backend-port 5711 --dll "<worktree>\x64\Release\Core.dll" --redirect "<worktree>\x64\Release\CoreRedirect.dll" --timeout 900 --linger 20 -- -CoreMode=BattleRoyale }
    ```
    Save the World: leave out `-- -CoreMode=BattleRoyale`.
 6. Read the full log: `%USERPROFILE%\Documents\Core-Docs\Tools\run_server_dev.py.last.txt`.

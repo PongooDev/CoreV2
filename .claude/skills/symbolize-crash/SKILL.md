@@ -10,7 +10,9 @@ Depth: `docs/agents/crash-symbolising.md`.
 1. Read the crash report's register and stack object names first (since 962da735): they may already answer it.
 2. Find the commit: the issue's Core commit, or `gh release view build-<N> -R PongooDev/CoreV2`. If unknown, date
    the log by lines a known commit added.
-3. Preferred: the core MCP's `symbolize_crash` (DLL path, offsets) with a DLL built from that commit. Else:
+3. Preferred: the core MCP's `symbolize_crash` (DLL path, offsets) with a DLL built from that commit and the PDB
+   built with that same DLL (it refuses a PDB whose GUID and age don't both match; rebuilds share a GUID and differ
+   in age). Else:
 4. Build that commit in a detached worktree:
    ```
    git -C $env:USERPROFILE\Documents\GitHub\CoreV2 worktree add --detach H:\CoreWork\sym-<commit> <commit>

@@ -30,7 +30,11 @@ A different size means a different commit or toolchain: the names would be wrong
 
 ## 3. Name the frames
 
-Prefer the core MCP's `symbolize_crash` (DLL path, offsets). Fallback: the tools in the VS 2022 MSVC bin folder.
+Prefer the core MCP's `symbolize_crash` (DLL path, offsets). It refuses a PDB whose GUID and age don't both match
+the DLL. Rebuilds of the same project share a GUID and differ only in age, so always symbolise against the PDB that
+was built together with that exact DLL (the one next to it in the same output folder), never a PDB from another
+build of the same commit. Give it your local build's `Core.dll` (whose size matched the release's), not the
+downloaded release DLL, which has no PDB of its own. Fallback: the tools in the VS 2022 MSVC bin folder.
 
 ```
 $B = "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.44.35207\bin\Hostx64\x64"

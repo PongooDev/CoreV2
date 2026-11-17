@@ -62,7 +62,7 @@ swaps are data writes and are safe.
 
 ## 4. Write the body
 
-1. Name, class, file and signature from the 21.40 PDB (`symbols_21.40.txt`, `types_21.40_layout.h`). Put it in
+1. Name, class, file and signature from the 21.40 PDB (`symbols_21.40.txt`, `types_21.40_layout64.h`). Put it in
    that class's `.cpp` under `FortniteGame/Source/FortniteGame/Private/<Area>/` or the engine module's folder.
 2. The **behaviour** comes from the build you target: read the intact code around the call, the callers, the data
    the build ships (FModel), and what the client reads (the HUD's Blueprint). 21.40 is the naming reference, not

@@ -124,13 +124,19 @@ Prefer the core MCP's tools (if available). The hand-typed commands are the fall
 | Task | core MCP tool | Fallback |
 | --- | --- | --- |
 | Learn the current state | `project_status` | README table, `KnownBuilds.cs`, MEMORY.md |
-| Build a worktree | `build_corev2` (worktree path) | MSBuild below |
-| Boot a headless test server | `boot_test_server` (build, mode, backend port) | `docs/agents/headless-server-testing.md` |
+| Build a worktree | `build_corev2` (`worktree` required) | MSBuild below |
+| Boot a headless test server | `boot_test_server` (`build_path`, `mode`, `backend_port`, `dll_dir` required) | `docs/agents/headless-server-testing.md` |
 | Read a server log | `server_log_summary` (log path) | grep for the lines in section 6 |
 | Name crash frames | `symbolize_crash` (DLL path, offsets) | `docs/agents/crash-symbolising.md` |
 | Find a type or member in an SDK | `sdk_find` (query, build or CL) | grep `C:\Dumper-7\<engine>-<CL>+++...\CppSDK\SDK` |
-| Find a 21.40 name | `pdb2140_find` (query) | grep `D:\ResortWork\IDA\21.40\symbols_21.40.txt` |
+| Find a 21.40 name or layout | `pdb2140_find` (query) | grep `D:\ResortWork\IDA\21.40\symbols_21.40.txt`, `types_21.40_layout64.h` |
 | Put main's build where the owner plays it | `deploy_main_build` | `docs/agents/building.md` |
+
+**Long-running tools return a `job_id`.** `build_corev2`, `deploy_main_build`, `boot_test_server` (and Core-Backend's
+`backend_tests` and `restart_backend`, Core-Launcher's `launcher_tests`) run in a worker process. A call waits up to
+about 100 s; if the job isn't done, it returns a `job_id`: call the same tool again with just `job_id` (the other
+arguments can be left out) until it reports the result. Jobs survive a restart of the MCP server. `build_corev2` and
+`deploy_main_build` share one build slot, so builds run one at a time.
 
 **Build (always the Visual Studio 2022 MSBuild, by full path, Release x64):**
 
@@ -279,8 +285,12 @@ Each of these happened in this repo and had to be reverted or redone.
 
 ## 9. Tools: MCP servers
 
+The servers are configured in `%USERPROFILE%\.agents\mcp.json`: `core`, `ida-13337` to `ida-13341`, and `fmodel`.
+
 - **core MCP** (if available): the tools in section 4. They enforce the PC rules (ports, one server, no clients),
-  so prefer them over hand-typed commands.
+  so prefer them over hand-typed commands. Long-running ones return a `job_id` to poll (section 4).
+  `symbolize_crash` refuses a PDB whose GUID and age don't both match the DLL; `pdb2140_find` reads the 64-bit
+  layouts (`types_21.40_layout64.h`).
 - **IDA MCPs** `ida-13337` to `ida-13341` (`http://127.0.0.1:<port>/mcp`), one per open IDB. Run
   `project_status` first to learn which port holds which build; ports move when the owner opens a new build.
   **Read-only:** decompile, disasm, xrefs, find, lookups, and `py_eval` only for reading. **Never** patch, rename,

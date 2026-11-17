@@ -69,14 +69,20 @@ public:
     // destroys it, and the result points there (null when the build has no GetSchematicRecipe).
     FRecipe* GetSchematicRecipe(Reflection::FParams& Recipe) const;
     int32_t GetSchematicQuantityProduced() const;
-    bool CanCraftSchematic(AFortPlayerController* PlayerController, uint8_t& OutFailCause, bool bConsiderReservedItems, int32_t Count);
+    // RequestedTier (7.10's): 0, or a tier at or above the schematic's own, is the schematic's own recipe.
+    bool CanCraftSchematic(AFortPlayerController* PlayerController, uint8_t& OutFailCause, bool bConsiderReservedItems, int32_t Count, uint8_t RequestedTier = 0);
     // The game calls it with the RPC's PostCraftSlot, the primary quick bar slot the crafted item goes to (-1: the first
-    // free one), as 2.2's AFortPlayerController::ServerCraftSchematic_Implementation (0x897AD0) does; 21.40's has
-    // CraftAmount and RequestedTier after it. Core crafts an ingredient's shortfall with a CraftAmount of its own.
-    int32_t ServerCraftSchematic(AFortPlayerController* PlayerController, int32_t PostCraftSlot, int32_t CraftAmount = 1);
+    // free one), as 2.2's AFortPlayerController::ServerCraftSchematic_Implementation (0x897AD0) does; 7.10's (0x12ECCA0)
+    // passes the RPC's RequestedTier after it; 21.40's has CraftAmount and RequestedTier. Core crafts an ingredient's
+    // shortfall with a CraftAmount of its own.
+    int32_t ServerCraftSchematic(AFortPlayerController* PlayerController, int32_t PostCraftSlot, int32_t CraftAmount = 1, uint8_t RequestedTier = 0);
+
+    // From 7.10 (CL-4667333, Down-Tier Crafting) crafting takes a tier: AFortPlayerController::ServerCraftSchematic has
+    // RequestedTier.
+    static bool TakesRequestedTier();
 
     static void HookVTables();
 
 private:
-    static int32_t ServerCraftSchematicHK(UFortSchematicItem* This, AFortPlayerController* PlayerController, int32_t PostCraftSlot);
+    static int32_t ServerCraftSchematicHK(UFortSchematicItem* This, AFortPlayerController* PlayerController, int32_t PostCraftSlot, uint8_t RequestedTier);
 };

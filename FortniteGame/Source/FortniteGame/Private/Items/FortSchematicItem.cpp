@@ -66,23 +66,53 @@ int32_t UFortSchematicItem::GetSchematicQuantityProduced() const
     return Params.Call(const_cast<UFortSchematicItem*>(this)) ? Params.Take<int32_t>(L"ReturnValue") : 0;
 }
 
-bool UFortSchematicItem::CanCraftSchematic(AFortPlayerController* PlayerController, uint8_t& OutFailCause, bool bConsiderReservedItems, int32_t Count)
+bool UFortSchematicItem::TakesRequestedTier()
+{
+    static const bool bTakesTier = []
+    {
+        UFunction* Rpc = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortPlayerController:ServerCraftSchematic");
+        return Rpc && Rpc->FindPropertyByName(FName(L"RequestedTier", FNAME_Find)) != nullptr;
+    }();
+    return bTakesTier;
+}
+
+bool UFortSchematicItem::CanCraftSchematic(AFortPlayerController* PlayerController, uint8_t& OutFailCause, bool bConsiderReservedItems, int32_t Count, uint8_t RequestedTier)
 {
     if (!Natives::UFortSchematicItem_CanCraftSchematic && !Finder::ResolveCraftingLive())
     {
         return false;
     }
+    // 7.10 (CL-4667333, 0x109FA70) takes the tier before the count: (PlayerController, OutFailCause,
+    // bConsiderReservedItems, Tier, Count). The tier picks the definition whose recipe is checked (0x10AFA20: the
+    // schematic's own for 0 or a tier at or above its own, else a lower tier's) and the count multiplies each cost. Its
+    // callers pass both ([rsp+20h] the tier, [rsp+28h] the count: 0x12B2A40, 0x10BD54E); 7.00's (0x106FAC0) take the count
+    // at [rsp+20h].
+    if (TakesRequestedTier())
+    {
+        using FCanCraftSchematicWithTier = bool (*)(UFortSchematicItem*, AFortPlayerController*, uint8_t*, bool, int32_t, int32_t);
+        return reinterpret_cast<FCanCraftSchematicWithTier>(Natives::UFortSchematicItem_CanCraftSchematic)(this, PlayerController, &OutFailCause, bConsiderReservedItems, RequestedTier, Count);
+    }
     return Natives::UFortSchematicItem_CanCraftSchematic(this, PlayerController, &OutFailCause, bConsiderReservedItems, Count);
 }
 
-int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerController, int32_t PostCraftSlot, int32_t CraftAmount)
+int32_t UFortSchematicItem::ServerCraftSchematic(AFortPlayerController* PlayerController, int32_t PostCraftSlot, int32_t CraftAmount, uint8_t RequestedTier)
 {
 #if WITH_SERVER_CODE
-    // The RPC (ItemId, PostCraftSlot, bIsQuickCrafted in every build Core supports) crafts once. The slot it passes on
-    // is where the item goes, never an amount: read as one, a quick bar slot above 0 crafted and charged that many times.
+    // The RPC (ItemId, PostCraftSlot, bIsQuickCrafted in every build Core supports, and RequestedTier from 7.10) crafts
+    // once. The slot it passes on is where the item goes, never an amount: read as one, a quick bar slot above 0 crafted
+    // and charged that many times.
     uint8_t FailCause = 0;
     const int32_t Count = CraftAmount > 0 ? CraftAmount : 1;
-    if (!PlayerController || !CanCraftSchematic(PlayerController, FailCause, false, Count))
+    // 7.10's Down-Tier Crafting: a tier below the schematic's own crafts the lower tier's item from its own recipe. Core
+    // only crafts the schematic's own tier, so a lower one is refused rather than charged and given as the higher.
+    const UFortItemDefinition* OwnDefinition = GetItemDefinitionBP();
+    if (RequestedTier != 0 && OwnDefinition && UFortItemDefinition::HasTier() && RequestedTier < static_cast<uint8_t>(OwnDefinition->Tier))
+    {
+        UE_LOG(LogFort, Warning, TEXT("ServerCraftSchematic: %s at tier %d, below its own %d: down-tier crafting isn't restored yet"), *GetName(), static_cast<int32_t>(RequestedTier),
+            static_cast<int32_t>(static_cast<uint8_t>(OwnDefinition->Tier)));
+        return 0;
+    }
+    if (!PlayerController || !CanCraftSchematic(PlayerController, FailCause, false, Count, RequestedTier))
     {
         UE_LOG(LogFort, Warning, TEXT("ServerCraftSchematic: cannot craft %s x%d (fail cause %d)"), *GetName(), Count, static_cast<int32_t>(FailCause));
         return 0;
@@ -245,7 +275,9 @@ void UFortSchematicItem::HookVTables()
     }
 }
 
-int32_t UFortSchematicItem::ServerCraftSchematicHK(UFortSchematicItem* This, AFortPlayerController* PlayerController, int32_t PostCraftSlot)
+int32_t UFortSchematicItem::ServerCraftSchematicHK(UFortSchematicItem* This, AFortPlayerController* PlayerController, int32_t PostCraftSlot, uint8_t RequestedTier)
 {
-    return This->ServerCraftSchematic(PlayerController, PostCraftSlot);
+    // RequestedTier is only there from 7.10 (the game's own call, 0x12ECD30: Schematic, PlayerController, PostCraftSlot,
+    // RequestedTier); before it r9 holds nothing of the call's.
+    return This->ServerCraftSchematic(PlayerController, PostCraftSlot, 1, TakesRequestedTier() ? RequestedTier : 0);
 }

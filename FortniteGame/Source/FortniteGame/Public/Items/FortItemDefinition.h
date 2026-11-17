@@ -108,6 +108,7 @@ public:
     DefineBitfieldUProperty(bCalculateRarityFromQualityAndTier)
     DefineUProperty(uint8_t, Quality)
     DefineUProperty(uint8_t, Tier)
+    static bool HasTier() { return Member_Tier.IsAvailable(); }
     DefineUProperty(uint8_t, Rarity)
     DefineUFunction(CreateTemporaryItemInstanceBP)
     DefineUFunction(GetPersistentName)

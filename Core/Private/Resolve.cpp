@@ -4775,6 +4775,79 @@ namespace
         return GetWorldSlot;
     }
 
+    // FUniqueNetId's IsValid and ToString slots, -1 where not found. The server's game mode, match results and MCP
+    // requests read player ids through them, and so does the client's voice HUD (Finder::ResolveAthenaMenuHero). Line
+    // names the log line they were read from.
+    struct FUniqueNetIdSlots
+    {
+        int32_t IsValid = -1;
+        int32_t ToString = -1;
+        const wchar_t* Line = nullptr;
+    };
+
+    // Both come from AFortPlayerController::InitializeMcpProfile's failure log, which prints the player's id. The long line
+    // goes first (1.1 to 3.2); the short one is the fallback for the builds that dropped the GameAccountId (3.3 on).
+    FUniqueNetIdSlots FindUniqueNetIdSlots()
+    {
+        const auto SlotOf = [](uintptr_t VirtualCall)
+        {
+            // call [rax+Slot*8]
+            return VirtualCall && Byte(VirtualCall + 2) % 8 == 0 ? Byte(VirtualCall + 2) / 8 : -1;
+        };
+        // IsValid comes before ToString in the id's vtable.
+        const auto Slots = [](int32_t IsValid, int32_t ToString, const wchar_t* Line)
+        {
+            return FUniqueNetIdSlots{ IsValid >= 0 && IsValid < ToString ? IsValid : -1, ToString, Line };
+        };
+
+        // 1.1 to 3.2: ToString is the virtual call nearest the string, and IsValid the `call [rax+18h]; test al, al` just
+        // before it (slot 3, ToString 4, on 1.1, 1.2, 1.7.2 and 1.8).
+        const wchar_t* const LongLine = L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]";
+        FUniqueNetIdSlots Found;
+        if (const uintptr_t ProfileFailed = Finder::StringRefs(LongLine).empty() ? 0 : OnlyRef(LongLine))
+        {
+            const uintptr_t ToString = FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 });
+            const uintptr_t IsValid = ToString ? FindBackward(ToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
+            Found = Slots(SlotOf(IsValid), SlotOf(ToString), L"\"UniqueId:[%s] GameAccountId=[%s]\"");
+        }
+
+        // 3.3 (0xB9D00C) drops the GameAccountId from the line and logs FUniqueNetIdWrapper::ToDebugString (0x347590, 4.5
+        // 0x33AC70), the last call before the line: IsValid (call [rax+20h]; test al, al), then "%s:%s" of the id's type and
+        // its ToDebugString (call [rax+30h]). The id's ToString is the slot before ToDebugString (21.40's FUniqueNetId:
+        // IsValid, ToString, ToDebugString; 3.2's ToString is the [rax+28h] the long line calls). Core read ToDebugString,
+        // which 4.0's prints whole but 4.4.2's and 4.5's redact to the first and last five characters ("d8b43...352c0"): no
+        // account id, so the match results skipped every player, the end-of-match screen got no stats and no rewards (all
+        // zeros, "Team Still Alive"), and the warmup reported no players.
+        // Only a call whose target asks IsValid counts: 5.30 (CL-4305896) has lea r8, [rbp-18h] (4C 8D 45 E8) after the
+        // call (0xE2DCD1), an E8 byte the raw scan took for a later call into .text.
+        if (Found.IsValid < 0 || Found.ToString < 0)
+        {
+            const uintptr_t ProfileFailed = First(Finder::StringRefs(L"Failed to initialize profile for player: UniqueId:[%s]"));
+            uintptr_t WrapperToDebugString = 0;
+            for (uintptr_t Call = ProfileFailed ? FindRawCall(ProfileFailed - 0x30, ProfileFailed) : 0; Call; Call = FindRawCall(Call + 5, ProfileFailed))
+            {
+                const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+                if (FindInstruction(Target, Target + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 }))
+                {
+                    WrapperToDebugString = Target;
+                }
+            }
+            const uintptr_t IsValid = WrapperToDebugString ? FindInstruction(WrapperToDebugString, WrapperToDebugString + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
+            const uintptr_t ToDebugString = IsValid ? FindInstruction(IsValid + 5, IsValid + 0x40, { 0xFF, 0x50, -1 }) : 0;
+            const int32_t ToDebugStringIndex = SlotOf(ToDebugString);
+            if (ToDebugStringIndex > 0)
+            {
+                Found = Slots(SlotOf(IsValid), ToDebugStringIndex - 1, L"\"UniqueId:[%s]\" (FUniqueNetIdWrapper::ToDebugString)");
+            }
+        }
+
+        if (Found.IsValid >= 0 && Found.ToString >= 0)
+        {
+            Log::Info(L"Finder: FUniqueNetId::IsValid is slot {}, ToString slot {}, from InitializeMcpProfile's line {}", Found.IsValid, Found.ToString, Found.Line);
+        }
+        return Found;
+    }
+
     void ResolveZone()
     {
         uintptr_t ZoneSpawnPawn = UniqueFunction({ 0x4D, 0x85, 0xC0, 0x74, 0x47, 0x48, 0x85, 0xD2, 0x74, 0x42, 0xE8 });
@@ -4851,50 +4924,15 @@ namespace
         }
         Require(L"AFortPlayerController::InitializeMcpProfile", Natives::AFortPlayerController_InitializeMcpProfile, InitializeMcpProfile);
 
-        uintptr_t UniqueIdToString = ProfileFailed && !ShortProfileFailed ? FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 }) : 0;
-        // IsValid is the `call [rax+18h]; test al, al` just before it (slot 3, ToString 4, on 1.1, 1.2, 1.7.2 and 1.8);
-        // AFortGameMode::ShouldPlayerEarnScore and the game session id ask it on the server.
-        uintptr_t UniqueIdIsValid = UniqueIdToString ? FindBackward(UniqueIdToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
-        // 3.3 logs FUniqueNetIdWrapper::ToDebugString (0x347590, 4.5 0x33AC70), the last call before the line: IsValid
-        // (call [rax+20h]; test al, al), then "%s:%s" of the id's type and its ToDebugString (call [rax+30h]). The id's
-        // ToString is the slot before ToDebugString (21.40's FUniqueNetId: IsValid, ToString, ToDebugString; 3.2's
-        // ToString is the [rax+28h] the long line calls). Core read ToDebugString, which 4.0's prints whole but 4.4.2's and
-        // 4.5's redact to the first and last five characters ("d8b43...352c0"): no account id, so the match results
-        // skipped every player, the end-of-match screen got no stats and no rewards (all zeros, "Team Still Alive"), and
-        // the warmup reported no players.
-        // Only a call whose target asks IsValid counts: 5.30 (CL-4305896) has lea r8, [rbp-18h] (4C 8D 45 E8) after
-        // the call (0xE2DCD1), an E8 byte the raw scan took for a later call into .text.
-        uintptr_t WrapperToDebugString = 0;
-        for (uintptr_t Call = ShortProfileFailed ? FindRawCall(ShortProfileFailed - 0x30, ShortProfileFailed) : 0; Call; Call = FindRawCall(Call + 5, ShortProfileFailed))
-        {
-            const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
-            if (FindInstruction(Target, Target + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 }))
-            {
-                WrapperToDebugString = Target;
-            }
-        }
-        int32_t UniqueIdToDebugStringIndex = -1;
-        if (WrapperToDebugString)
-        {
-            UniqueIdIsValid = FindInstruction(WrapperToDebugString, WrapperToDebugString + 0x40, { 0xFF, 0x50, -1, 0x84, 0xC0 });
-            const uintptr_t UniqueIdToDebugString = UniqueIdIsValid ? FindInstruction(UniqueIdIsValid + 5, UniqueIdIsValid + 0x40, { 0xFF, 0x50, -1 }) : 0;
-            UniqueIdToDebugStringIndex = UniqueIdToDebugString && Byte(UniqueIdToDebugString + 2) % 8 == 0 ? Byte(UniqueIdToDebugString + 2) / 8 : -1;
-            UniqueIdToString = 0;
-        }
-        if (UniqueIdToDebugStringIndex >= 0)
-        {
-            Natives::FUniqueNetId_ToStringIndex = UniqueIdToDebugStringIndex - 1;
-        }
-        else
-        {
-            Natives::FUniqueNetId_ToStringIndex = UniqueIdToString && Byte(UniqueIdToString + 2) % 8 == 0 ? Byte(UniqueIdToString + 2) / 8 : -1;
-        }
+        // AFortGameMode::ShouldPlayerEarnScore and the game session id ask the id's IsValid on the server, and the match
+        // results its ToString.
+        const FUniqueNetIdSlots UniqueIdSlots = FindUniqueNetIdSlots();
+        Natives::FUniqueNetId_ToStringIndex = UniqueIdSlots.ToString;
         if (Natives::FUniqueNetId_ToStringIndex < 0)
         {
             Log::Error(L"Finder: FUniqueNetId::ToString slot not found");
         }
-        const int32_t UniqueIdIsValidIndex = UniqueIdIsValid && Byte(UniqueIdIsValid + 2) % 8 == 0 ? Byte(UniqueIdIsValid + 2) / 8 : -1;
-        Natives::FUniqueNetId_IsValidIndex = UniqueIdIsValidIndex >= 0 && UniqueIdIsValidIndex < Natives::FUniqueNetId_ToStringIndex ? UniqueIdIsValidIndex : -1;
+        Natives::FUniqueNetId_IsValidIndex = UniqueIdSlots.IsValid;
         if (Natives::FUniqueNetId_IsValidIndex < 0)
         {
             Log::Error(L"Finder: FUniqueNetId::IsValid slot not found");
@@ -12435,22 +12473,19 @@ bool Finder::ResolveAthenaMenuHero()
     // FUniqueNetId's IsValid and ToString slots, which the voice HUD also reads: resolved even when the lobby picks no
     // random hero (1.8 shows the player's Athena loadout instead, 0x79EB60). Builds without Battle Royale's HUD (1.1, 1.2)
     // keep leaving them to the pick, as before.
+    // The client used to read them from the long line only, which 3.3 on don't have, so its voice HUD never matched a
+    // teammate's voice packets to them and their talking icon stayed off (#182). It now falls back to the short line, as
+    // the server does.
     const auto ResolveUniqueNetIdSlots = []
     {
-        // AFortPlayerController::InitializeMcpProfile's failure log prints the player's id: IsValid (`call [rax+18h];
-        // test al, al`), then ToString, the virtual call nearest the string.
-        const uintptr_t ProfileFailed = OnlyRef(L"Failed to initialize profile for player: UniqueId:[%s] GameAccountId=[%s]");
-        const uintptr_t ToString = ProfileFailed ? FindBackward(ProfileFailed, 0x60, { 0xFF, 0x50, -1 }) : 0;
-        const uintptr_t IsValid = ToString ? FindBackward(ToString, 0x20, { 0xFF, 0x50, -1, 0x84, 0xC0 }) : 0;
-        const int32_t ToStringIndex = ToString && Byte(ToString + 2) % 8 == 0 ? Byte(ToString + 2) / 8 : -1;
-        const int32_t IsValidIndex = IsValid && Byte(IsValid + 2) % 8 == 0 ? Byte(IsValid + 2) / 8 : -1;
-        if (ToStringIndex < 0 || IsValidIndex < 0 || IsValidIndex >= ToStringIndex)
+        const FUniqueNetIdSlots Slots = FindUniqueNetIdSlots();
+        if (Slots.IsValid < 0 || Slots.ToString < 0)
         {
             Log::Error(L"Finder: FUniqueNetId::IsValid and ToString slots not found");
             return false;
         }
-        Natives::FUniqueNetId_IsValidIndex = IsValidIndex;
-        Natives::FUniqueNetId_ToStringIndex = ToStringIndex;
+        Natives::FUniqueNetId_IsValidIndex = Slots.IsValid;
+        Natives::FUniqueNetId_ToStringIndex = Slots.ToString;
         return true;
     };
 

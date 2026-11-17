@@ -730,6 +730,9 @@ namespace Natives
     // 6.21 (CL-4526925) adds the bool (true: then back to the primary bar); the builds before it never read dl there.
     inline void (*AFortPlayerController_RefocusQuickBars)(AFortPlayerController* This, bool bSwapToPrimaryQuickBar) = nullptr;
     // Set only where StartAircraftPhase's call to it is compiled in (2.2 0x85DCA0), see Finder::AircraftPhasePlayerCleanupCall.
+    // 7.20 (CL-4727874 0x137B7F0): AFortPlayerPawn::OnRep_ZiplineState, a native function there (the pawn's zipline
+    // movement and tags from ZiplineState).
+    inline void (*AFortPlayerPawn_OnRep_ZiplineState)(UObject* This) = nullptr;
     // 7.20 (CL-4727874 0x1397820) adds bForceExecution, which it passes to ServerActivateSlotInternal ([rsp+30h]); builds
     // before it take five and ignore it.
     inline void (*AFortPlayerController_ActivateSlot)(AFortPlayerController* This, uint8_t InQuickBar, int32_t Slot, float ActivateDelay, bool bUpdatePreviousFocusedSlot, bool bForceExecution) = nullptr;

@@ -543,8 +543,16 @@ void AFortPlayerPawn::ServerSendZiplineState_Implementation(const FZiplinePawnSt
             LaunchCharacterJump(Launch, false, Velocity.Z < 0.0f, false, true);
         }
     }
-    Reflection::FParams Params(StaticFunction_OnRep_ZiplineState(), true);
-    Params.Call(this);
+    // OnRep_ZiplineState is a native function on 7.20, not a UFunction.
+    if (UFunction* OnRep = FindStaticFunction_OnRep_ZiplineState())
+    {
+        Reflection::FParams Params(OnRep, true);
+        Params.Call(this);
+    }
+    else if (Natives::AFortPlayerPawn_OnRep_ZiplineState)
+    {
+        Natives::AFortPlayerPawn_OnRep_ZiplineState(this);
+    }
 #endif
 }
 
@@ -577,7 +585,7 @@ void AFortPlayerPawn::HookZiplineVTables()
         Log::Info(L"Finder: AFortPlayerPawn::ServerSendZiplineState_Implementation (slot 0x{:X}) is native in this build", Index);
         return;
     }
-    if (!FZiplinePawnState::StaticStruct() || !FindStaticFunction_OnRep_ZiplineState())
+    if (!FZiplinePawnState::StaticStruct() || (!FindStaticFunction_OnRep_ZiplineState() && !Finder::ResolveZiplineStateLive()))
     {
         Log::Error(L"Zipline: ServerSendZiplineState_Implementation is stripped and FZiplinePawnState or OnRep_ZiplineState wasn't found, so the server never takes a zipline ride");
         return;

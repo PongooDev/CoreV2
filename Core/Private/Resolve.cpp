@@ -11532,6 +11532,54 @@ bool Finder::ResolveIsRespawningAllowedLive(ptrdiff_t GameplayMutatorsOffset, pt
     return true;
 }
 
+bool Finder::ResolveZiplineStateLive()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortPlayerPawn_OnRep_ZiplineState != nullptr;
+    }
+    bSearched = true;
+
+    // The RPC's wrapper (7.20 0x176E210) loads its FName (mov rdx, [rip+Name]); its callers, the owning client's
+    // BeginZiplining (0x136F830) and EndZiplining (0x1373840), call OnRep_ZiplineState (0x137B7F0) on their own state
+    // right before it: call OnRep; lea rdx, [rbx+ZiplineState]; mov rcx, rbx; call wrapper (0x1373BA0, 0x136FAA0).
+    uintptr_t OnRep = 0;
+    int32_t Callers = 0;
+    bool bAgree = true;
+    for (const uintptr_t Ref : Finder::StringRefs(L"ServerSendZiplineState"))
+    {
+        const uintptr_t Store = FindInstruction(Ref + 7, Ref + 0x10, { 0x48, 0x8D, 0x0D });
+        const uintptr_t NameGlobal = Store ? Finder::RelativeTarget(Store, 3, 7) : 0;
+        int32_t Matches = 0;
+        const uintptr_t Load = NameGlobal && !IsInText(NameGlobal) ? ScanRipTarget({ 0x48, 0x8B, 0x15 }, 3, 7, NameGlobal, Matches) : 0;
+        const uintptr_t Wrapper = Load && Matches == 1 ? Finder::FunctionStart(Load) : 0;
+        for (const uintptr_t Site : Wrapper ? Finder::CallsTo(Wrapper, false) : std::vector<uintptr_t>())
+        {
+            uintptr_t Previous = 0;
+            for (uintptr_t Call = FindRawCall(Site - 0x18, Site); Call; Call = FindRawCall(Call + 1, Site))
+            {
+                Previous = Finder::RelativeTarget(Call, 1, 5);
+            }
+            ++Callers;
+            bAgree = bAgree && Previous && (!OnRep || OnRep == Previous);
+            OnRep = Previous ? Previous : OnRep;
+        }
+        if (Wrapper)
+        {
+            break;
+        }
+    }
+    if (Callers < 2 || !bAgree || !IsInText(OnRep))
+    {
+        Log::Error(L"Finder: AFortPlayerPawn::OnRep_ZiplineState not found ({} callers of ServerSendZiplineState's wrapper{})", Callers, bAgree ? L"" : L", which call different functions before it");
+        return false;
+    }
+    Natives::AFortPlayerPawn_OnRep_ZiplineState = reinterpret_cast<decltype(Natives::AFortPlayerPawn_OnRep_ZiplineState)>(OnRep);
+    Log::Info(L"Finder: AFortPlayerPawn::OnRep_ZiplineState at 0x{:X} (called before ServerSendZiplineState by its {} callers)", OnRep - Finder::ImageBase(), Callers);
+    return true;
+}
+
 bool Finder::ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t GameplayMutatorsOffset, bool bMutatorListComponent)
 {
     static bool bSearched = false;

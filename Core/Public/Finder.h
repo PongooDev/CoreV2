@@ -305,6 +305,9 @@ namespace Finder
     // bMutatorListComponent: the game mode has no GameplayMutators and GameplayMutatorsOffset is its mutator list
     // component's (7.20), whose mutators the check walks through a mutator iterator.
     bool ResolveDBNOEnabledLive(ptrdiff_t PlaylistDBNOTypeOffset, ptrdiff_t GameplayMutatorsOffset, bool bMutatorListComponent = false);
+    // From 7.20, where ServerSendZiplineState_Implementation is stripped: AFortPlayerPawn::OnRep_ZiplineState (a native
+    // function, not a UFunction), which the owning client's begin and end paths call right before they send the state.
+    bool ResolveZiplineStateLive();
     // From 5.21: the slots of AFortGameMode::GetLootTierDataTables and GetLootPackageDataTables (Natives), the two
     // AFortGameModeAthena overrides that load the playlist's LootTierData and LootPackages and call their Super, the game
     // mode's own GetLootTierDataTables reading the game data's LootTierDataTables. GameDataLootTierDataTablesOffset:

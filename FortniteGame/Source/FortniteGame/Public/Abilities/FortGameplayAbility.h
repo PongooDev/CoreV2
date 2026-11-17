@@ -21,8 +21,9 @@ struct FFortTargetFilter
     DefineUnrealStruct(FFortTargetFilter, FortniteGame)
 
 public:
-    DefineUProperty(bool, bExcludePawnFriends)
-    DefineUProperty(bool, bExcludePawnEnemies)
+    // Bool bytes up to 7.10, uint8 :1 bits from 7.20 (CL-4727874, FFortTargetFilter 0x48 -> 0x40): read by reflection.
+    DefineBitfieldUProperty(bExcludePawnFriends)
+    DefineBitfieldUProperty(bExcludePawnEnemies)
 };
 
 struct FFortAbilityTargetSelection

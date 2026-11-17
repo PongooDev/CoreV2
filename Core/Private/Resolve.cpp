@@ -16551,21 +16551,43 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     // last call is now the check, which ends the match through StartEndGamePhaseTeam (0xA09BA0, "Team %d won the
     // match!") in a large team game, else StartEndGamePhase (0xA099C0, "%s won the match!") for the last player alive.
     // StartEndGamePhase is the old solo win (place 1, the time alive, the end game): the check's last direct call.
-    if (!SetTeamPlace && SoloWin)
+    const uintptr_t WonTheMatch = FunctionOf(L"FortGameModeAthena: %s won the match!");
+    const auto FindThroughCheck = [&](uintptr_t Check) -> std::pair<uintptr_t, uintptr_t>
     {
-        const std::vector<std::pair<uintptr_t, uintptr_t>> CheckCalls = CallsOf(SoloWin);
+        const std::vector<std::pair<uintptr_t, uintptr_t>> CheckCalls = CallsOf(Check);
         uintptr_t StartEndGamePhase = CheckCalls.empty() ? 0 : CheckCalls.back().second;
         // 5.10 (CL-4240749) calls another function (0xBC6940) after StartEndGamePhase (0xBDCA50): take the call to the
         // function that logs the win, if the check makes one.
-        const uintptr_t WonTheMatch = FunctionOf(L"FortGameModeAthena: %s won the match!");
         for (const auto& [CheckSite, Callee] : WonTheMatch ? CheckCalls : std::vector<std::pair<uintptr_t, uintptr_t>>())
         {
             StartEndGamePhase = Callee == WonTheMatch ? Callee : StartEndGamePhase;
         }
-        SetTeamPlace = FindSetTeamPlace(StartEndGamePhase);
+        return { StartEndGamePhase, FindSetTeamPlace(StartEndGamePhase) };
+    };
+    if (!SetTeamPlace && SoloWin)
+    {
+        const auto [StartEndGamePhase, Place] = FindThroughCheck(SoloWin);
+        SetTeamPlace = Place;
         if (SetTeamPlace)
         {
             Log::Info(L"Finder: RemoveFromAlivePlayers ends in CheckWinConditionLastManStanding (0x{:X}), whose StartEndGamePhase is 0x{:X}", Rva(SoloWin), Rva(StartEndGamePhase));
+            SoloWin = StartEndGamePhase;
+        }
+    }
+    // 7.20 (CL-4727874) frees a string after the check, in the function's last piece (0xD1509A, FMemory::Free after
+    // CheckWinConditionLastManStanding 0xCFCC40 at 0xD15063): the check is then an earlier call, the last one (by
+    // address) through which the win's place setter is reached.
+    for (auto Call = RemoveCalls.rbegin(); !SetTeamPlace && SoloWin && Call != RemoveCalls.rend(); ++Call)
+    {
+        if (Call == RemoveCalls.rbegin() || Call->second == SoloWin)
+        {
+            continue;
+        }
+        const auto [StartEndGamePhase, Place] = FindThroughCheck(Call->second);
+        if (Place)
+        {
+            Log::Info(L"Finder: RemoveFromAlivePlayers calls CheckWinConditionLastManStanding (0x{:X}) before its last call, whose StartEndGamePhase is 0x{:X}", Rva(Call->second), Rva(StartEndGamePhase));
+            SetTeamPlace = Place;
             SoloWin = StartEndGamePhase;
         }
     }

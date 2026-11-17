@@ -69,8 +69,11 @@ struct FFortCreatePickupData
     bool bOnlyRelevantToOwner = false;
     // EFortPickupSourceTypeFlag bits, or'd into AFortPickup::PickupSourceTypeFlags; Epic's callers pass Other (15).
     uint32_t PickupSourceTypeFlags = 15;
+    // From 7.20 (CL-4727874): EFortPickupSpawnSource, which CreateFromData (0x114BC20) copies into the pickup's
+    // PickupSpawnSource; the game's own caller (0x11C6850) leaves it Unset (0). Builds before 7.20 don't read it.
+    uint8_t PickupSpawnSource = 0;
 };
-static_assert(sizeof(FFortCreatePickupData) == 0x40);
+static_assert(sizeof(FFortCreatePickupData) == 0x48);
 
 class AFortPickup : public AActor
 {

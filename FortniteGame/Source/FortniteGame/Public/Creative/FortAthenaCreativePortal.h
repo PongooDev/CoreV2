@@ -41,6 +41,10 @@ public:
     DefineUStructProperty(FUniqueNetIdRepl, OwningPlayer)
     DefineUProperty(bool, bPortalOpen)
     DefineUProperty(FVector, TeleportLocation)
+    // The players on the rift's island (the controllers whose CreativePlotLinkedVolume is LinkedVolume), which the
+    // rift shows as its "x/y" (OnRep_PopulationChanged).
+    DefineUProperty(uint8_t, CurrentPopulation)
+    static int32_t CurrentPopulationOffset() { return Member_CurrentPopulation.IsAvailable() ? static_cast<int32_t>(Member_CurrentPopulation.GetOffsetChecked()) : -1; }
 
     // Restored natives (7.00 strips both: their execs call the shared empty function). The rift's Blueprint
     // (BGA_IslandPortal) sends a pawn that steps into an open rift through TeleportPlayerToLinkedVolume when it has an
@@ -54,6 +58,9 @@ public:
     void LoadPlotForUser(const FUniqueNetIdRepl& UserId, UFortCreativeRealEstatePlotItem* PlotItem);
 
     UFortLevelSaveComponent* GetLevelSaveComponent() const;
+    // The game's rift refresh (Natives::AFortAthenaCreativePortal_RefreshPortal): its island's name, open state and
+    // CurrentPopulation counted again.
+    void RefreshPortal();
     void SetOwningPlayerState(AFortPlayerState* NewOwner);
     // Whether the rift has an owner, and whether it is PlayerState's, by the player state (7.00) or its id (7.10).
     bool HasOwner() const;

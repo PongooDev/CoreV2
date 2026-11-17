@@ -305,16 +305,60 @@ bool AFortPlayerControllerAthena::IsCreativeMatch(const UObject* WorldContextObj
     return Playlist && Playlist->bEnableCreativeMode;
 }
 
-void AFortPlayerControllerAthena::SetOwnedPortal(AFortAthenaCreativePortal* Portal, AFortVolume* LinkedVolume)
+void AFortPlayerControllerAthena::SetOwnedPortal(AFortAthenaCreativePortal* Portal)
 {
     if (!HasOwnedPortal())
     {
         return;
     }
-    // Both replicate to the player: their HUD's island (GetCreativePlotLinkedVolume) and their rift.
+    // The player's rift, which replicates to them. Their island link (CreativePlotLinkedVolume) isn't the rift's: it is
+    // the island they are on, set as the rift teleports them onto it (#485: with it set here, the rift counted its owner
+    // as on the island while they stood in the hub, "1/1", and the HUD's island fallback,
+    // GetCurrentVolumeOrCreativePlotLinkedVolume as 21.40 names it, 7.00 0xCBFCD0, showed the island's memory bar in the
+    // hub).
     OwnedPortal = Portal;
-    CreativePlotLinkedVolume = LinkedVolume;
     ForceNetUpdate();
+}
+
+AFortVolume* AFortPlayerControllerAthena::GetOwnedIsland() const
+{
+    AFortAthenaCreativePortal* Portal = GetOwnedPortal();
+    return Portal ? static_cast<AFortVolume*>(Portal->LinkedVolume) : nullptr;
+}
+
+void AFortPlayerControllerAthena::SetCreativePlotLinkedVolume(AFortVolume* Volume)
+{
+#if WITH_SERVER_CODE
+    if (!HasOwnedPortal() || Role != ROLE_Authority)
+    {
+        return;
+    }
+    AFortVolume* const Previous = CreativePlotLinkedVolume;
+    if (Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume)
+    {
+        Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume(this, Volume);
+    }
+    else
+    {
+        CreativePlotLinkedVolume = Volume;
+    }
+    // The setter refreshes the old island's rifts; the new island's count the player once they are refreshed too.
+    if (Volume && Volume != Previous && AFortVolume::HasLinkedPortals())
+    {
+        for (AFortAthenaCreativePortal* Portal : static_cast<const TArray<AFortAthenaCreativePortal*>&>(Volume->LinkedPortals))
+        {
+            if (Portal)
+            {
+                Portal->RefreshPortal();
+            }
+        }
+    }
+    ForceNetUpdate();
+    if (Volume != Previous)
+    {
+        Log::Info(L"Creative: {} is {}", PlayerNameOf(this), Volume ? std::format(L"on the island {}", Volume->GetName().ToStdString()) : std::wstring(L"in the hub"));
+    }
+#endif
 }
 
 void AFortPlayerControllerAthena::LoadPlotForPortal(AFortAthenaCreativePortal* Portal, const FString& PlotItemId)
@@ -579,7 +623,7 @@ void AFortPlayerControllerAthena::ReleaseCreativePortal(AFortPlayerState* Player
 
 AFortVolume* AFortPlayerControllerAthena::GetCreativeVolume()
 {
-    AFortVolume* Own = HasOwnedPortal() ? static_cast<AFortVolume*>(CreativePlotLinkedVolume) : nullptr;
+    AFortVolume* Own = GetOwnedIsland();
     APawn* Pawn = GetPawn();
     AFortVolumeManager* Manager = Pawn ? AFortVolumeManager::Get(this) : nullptr;
     AFortVolume* Here = Manager ? Manager->GetVolumeForActor(reinterpret_cast<AActor*>(Pawn)) : nullptr;
@@ -642,7 +686,7 @@ void AFortPlayerControllerAthena::ServerReloadCreativePlot_Implementation()
 {
 #if WITH_SERVER_CODE
     // The island menu's reload: the player's island as it was last saved.
-    AFortVolume* Volume = HasOwnedPortal() ? static_cast<AFortVolume*>(CreativePlotLinkedVolume) : nullptr;
+    AFortVolume* Volume = GetOwnedIsland();
     UFortLevelSaveComponent* SaveComponent = UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume));
     const FUniqueNetIdRepl* UserId = UniqueIdOf(this);
     if (!SaveComponent || !UserId || !SaveComponent->IsOwnedBy(*UserId))
@@ -659,7 +703,7 @@ void AFortPlayerControllerAthena::ServerStopSavingCreativePlot_Implementation()
 {
 #if WITH_SERVER_CODE
     // The island stops saving on its timer (ULevelSaveBaseComponent::StopPeriodicSaveTimer).
-    AFortVolume* Volume = HasOwnedPortal() ? static_cast<AFortVolume*>(CreativePlotLinkedVolume) : nullptr;
+    AFortVolume* Volume = GetOwnedIsland();
     UFortLevelSaveComponent* SaveComponent = UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume));
     const FUniqueNetIdRepl* UserId = UniqueIdOf(this);
     if (SaveComponent && UserId && SaveComponent->IsOwnedBy(*UserId))
@@ -745,6 +789,8 @@ void AFortPlayerControllerAthena::ServerTeleportToPlaygroundLobbyIsland_Implemen
             Best = Start;
         }
     }
+    // The player leaves their island: the link goes (CreativePlotLinkedVolume, which the island's rifts count).
+    SetCreativePlotLinkedVolume(nullptr);
     if (Best)
     {
         const FTransform Transform = Best->GetTransform();
@@ -887,6 +933,43 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
     else
     {
         Log::Error(L"Finder: AFortPlayerControllerAthena::ServerLoadPlotForPortal_Implementation's stripped rift call not found, so no island loads");
+    }
+
+    // The island link's setter: the function that binds &AFortPlayerControllerAthena::OnMinigameVolumeStateChanged (one on
+    // 7.00, 7.10 and 7.20). Its last loop refreshes the old island's rifts: the one of its calls whose body clears the
+    // rift's CurrentPopulation (mov byte ptr [reg+CurrentPopulation], 0) before counting it again.
+    const std::set<uintptr_t> LinkSetters = FunctionsReferencing(L"&AFortPlayerControllerAthena::OnMinigameVolumeStateChanged");
+    const int32_t PopulationOffset = AFortAthenaCreativePortal::CurrentPopulationOffset();
+    if (LinkSetters.size() == 1 && PopulationOffset > 0)
+    {
+        const uintptr_t Setter = *LinkSetters.begin();
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Setter))
+        {
+            const auto* Code = reinterpret_cast<const uint8_t*>(Target);
+            bool bClearsPopulation = false;
+            for (int32_t At = 0; At + 7 <= 0x800 && !bClearsPopulation && Finder::IsReadable(Code + At, 7); ++At)
+            {
+                bClearsPopulation = Code[At] == 0xC6 && (Code[At + 1] & 0xF8) == 0x80 && (Code[At + 1] & 0x07) != 0x04
+                    && *reinterpret_cast<const int32_t*>(Code + At + 2) == PopulationOffset && Code[At + 6] == 0x00;
+            }
+            if (bClearsPopulation)
+            {
+                Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume = reinterpret_cast<decltype(Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume)>(Setter);
+                Natives::AFortAthenaCreativePortal_RefreshPortal = reinterpret_cast<decltype(Natives::AFortAthenaCreativePortal_RefreshPortal)>(Target);
+                break;
+            }
+        }
+    }
+    if (Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume)
+    {
+        Log::Info(L"Finder: AFortPlayerControllerAthena's CreativePlotLinkedVolume setter 0x{:X}, the rift refresh 0x{:X} (CurrentPopulation +0x{:X})",
+            reinterpret_cast<uintptr_t>(Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume) - Finder::ImageBase(),
+            reinterpret_cast<uintptr_t>(Natives::AFortAthenaCreativePortal_RefreshPortal) - Finder::ImageBase(), PopulationOffset);
+    }
+    else
+    {
+        Log::Error(L"Finder: AFortPlayerControllerAthena's CreativePlotLinkedVolume setter not found ({} candidate(s), CurrentPopulation +0x{:X}), so the rifts don't count who is on their island",
+            LinkSetters.size(), PopulationOffset);
     }
 
     // The island's record from its file's bytes: ULevelSaveRecord::ReadFromBuffer, the call ReadFromDisk (the function

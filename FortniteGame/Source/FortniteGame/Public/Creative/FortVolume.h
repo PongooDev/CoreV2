@@ -8,6 +8,7 @@
 
 #include <cstdint>
 
+class AFortAthenaCreativePortal;
 class AFortPlayerController;
 class AFortPlayerStartCreative;
 class UAsyncTaskQueue;
@@ -36,6 +37,9 @@ public:
     DefineUProperty(uint8_t, VolumeState)
     DefineUProperty(UAsyncTaskQueue*, TaskQueue)
     DefineUProperty(FMulticastScriptDelegate, OnFinishVolumeClear)
+    // The hub's rifts linked to the island (each rift's LinkedVolume registers it here).
+    DefineUProperty(TArray<AFortAthenaCreativePortal*>, LinkedPortals)
+    static bool HasLinkedPortals() { return Member_LinkedPortals.IsAvailable(); }
 
     // The volume's task queue, which its island's loads and resets run on (the game's own getter, 7.00 0xD8F7A0: TaskQueue,
     // made on first use). Null where the build's getter wasn't found.

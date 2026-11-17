@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Creative/FortAthenaCreativePortal.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Creative/FortCreativePortalManager.h"
 #include "Creative/FortLevelSaveComponent.h"
@@ -9,6 +10,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
+#include "Items/FortItemDefinition.h"
 #include "Kismet/GameplayStatics.h"
 #include "Log.h"
 #include "Natives.h"
@@ -57,6 +59,14 @@ UFortLevelSaveComponent* AFortAthenaCreativePortal::GetLevelSaveComponent() cons
 {
     AFortVolume* Volume = LinkedVolume;
     return UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume));
+}
+
+void AFortAthenaCreativePortal::RefreshPortal()
+{
+    if (Natives::AFortAthenaCreativePortal_RefreshPortal)
+    {
+        Natives::AFortAthenaCreativePortal_RefreshPortal(this);
+    }
 }
 
 void AFortAthenaCreativePortal::SetOwningPlayerState(AFortPlayerState* NewOwner)
@@ -173,6 +183,15 @@ void AFortAthenaCreativePortal::TeleportPlayerToLinkedVolume(AFortPlayerPawn* Pl
     }
     if (PawnActor->TeleportTo(Location, Rotation))
     {
+        // The player is on this island now (#485): their controller's CreativePlotLinkedVolume, through the game's own
+        // setter, whose server calls with an island 7.00 to 7.20 strip. It ties them to the island's state (their
+        // OnMinigameVolumeStateChanged) and counts them on its rifts (CurrentPopulation counts the controllers linked
+        // to a rift's island); the hub takes the link back (ServerTeleportToPlaygroundLobbyIsland).
+        AController* Controller = reinterpret_cast<APawn*>(PlayerPawn)->Controller;
+        if (AFortPlayerControllerAthena* PlayerController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)))
+        {
+            PlayerController->SetCreativePlotLinkedVolume(Volume);
+        }
         NotifyTeleportedPlayerPawn(PlayerPawn);
     }
     Log::Info(L"Creative: {} through {} onto the island {} at ({:.0f}, {:.0f}, {:.0f})", PawnActor->GetName().ToStdString(), GetName().ToStdString(), Volume->GetName().ToStdString(),
@@ -316,6 +335,19 @@ void AFortCreativePortalManager::LogHub(const UObject* WorldContextObject)
     const TArray<AFortAthenaCreativePortal*>& Available = Manager->AvailablePortals;
     Log::Info(L"Creative: the hub has {} rifts ({} free), {} linked to an island space, {} with its UFortLevelSaveComponent, {} streaming their plot's playset; {} rifts in all with the islands' own",
         HubRifts, Available.Num(), WithIsland, WithSave, WithPlaysetStream, All.Num());
+    // The game mode's StartingItems (#485: what a hub loadout would start from; the Creative phone and the pickaxe aren't
+    // among them on 7.00).
+    if (AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(WorldContextObject))
+    {
+        const TStructArray<FItemAndCount>& StartingItems = GameMode->StartingItems;
+        std::wstring Items;
+        for (int32_t Index = 0; Index < StartingItems.Num(); ++Index)
+        {
+            UFortItemDefinition* Item = StartingItems[Index].Item;
+            Items += std::format(L"{}{} x{}", Items.empty() ? L"" : L", ", Item ? Item->GetName().ToStdString() : L"None", static_cast<int32_t>(StartingItems[Index].Count));
+        }
+        Log::Info(L"Creative: the game mode's StartingItems: {}", Items.empty() ? L"none" : Items);
+    }
 #endif
 }
 
@@ -370,7 +402,7 @@ AFortAthenaCreativePortal* AFortCreativePortalManager::ClaimPortal(AFortPlayerCo
     }
     Portal->SetOwningPlayerState(reinterpret_cast<AFortPlayerState*>(PlayerState));
     MarkPortalUsed(Portal);
-    PlayerController->SetOwnedPortal(Portal, Portal->LinkedVolume);
+    PlayerController->SetOwnedPortal(Portal);
     Log::Info(L"Creative: {} takes the hub's rift {} (index {}), linked to the island {}", PlayerState->GetPlayerName().ToStdString(), Portal->GetName().ToStdString(),
         static_cast<int32_t>(Portal->PortalIndex), static_cast<AFortVolume*>(Portal->LinkedVolume)->GetName().ToStdString());
     return Portal;

@@ -1108,6 +1108,14 @@ namespace Natives
     // And the plot item's id getter it uses (UMcpItem's virtual, slot 0x83 on 7.00), which names the island's file.
     inline void (*AFortPlayerControllerAthena_ServerLoadPlotForPortal)(UObject* This, UObject* Portal, const FString& PlotItemId) = nullptr;
     inline int32_t UMcpItem_GetItemIdIndex = -1;
+    // From 7.00 (Creative), AFortPlayerControllerAthena::HookCreativeVTables. The player's island link
+    // (CreativePlotLinkedVolume) setter, the function that binds the controller's OnMinigameVolumeStateChanged to the
+    // island (7.00 0xC67A90, 7.10 0xC866B0, 7.20 0xD63370): every build keeps only its EndPlay call with null, the
+    // server's calls with an island are stripped. And the rift refresh it ends with for the old island's rifts (7.00
+    // 0xBCBBB0, 7.10 0xBE3800: VolumeDisplayName, bPortalOpen and CurrentPopulation, the controllers linked to the rift's
+    // island); its name isn't in the 21.40 exports.
+    inline void (*AFortPlayerControllerAthena_SetCreativePlotLinkedVolume)(UObject* This, UObject* Volume) = nullptr;
+    inline void (*AFortAthenaCreativePortal_RefreshPortal)(UObject* This) = nullptr;
     // From 7.00 (Creative), AFortPlayerControllerAthena::HookCreativeVTables. UMcpProfile::GetStat (0x9530D0: the profile
     // state's stat by name, a TSharedPtr<FJsonValue> returned through OutValue), the call the creative profile's plot
     // permissions getter (0x1132C70) makes with "creative_plot_permissions"; and the offset of UMcpProfile's

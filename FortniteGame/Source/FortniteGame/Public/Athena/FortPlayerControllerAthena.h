@@ -236,7 +236,14 @@ public:
     DefineUFunction(ClientCycleQuickBarToCreativeItem)
 
     AFortAthenaCreativePortal* GetOwnedPortal() const { return HasOwnedPortal() ? static_cast<AFortAthenaCreativePortal*>(OwnedPortal) : nullptr; }
-    void SetOwnedPortal(AFortAthenaCreativePortal* Portal, AFortVolume* LinkedVolume);
+    void SetOwnedPortal(AFortAthenaCreativePortal* Portal);
+    // The island the player is on (CreativePlotLinkedVolume, null in the hub), through the game's own setter
+    // (Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume): it binds the controller's
+    // OnMinigameVolumeStateChanged to the island's state and refreshes the old island's rifts. The new island's rifts are
+    // refreshed after it, so their CurrentPopulation counts the player. Assigns the property where the setter wasn't found.
+    void SetCreativePlotLinkedVolume(AFortVolume* Volume);
+    // The player's own island: their rift's (null without a rift).
+    AFortVolume* GetOwnedIsland() const;
     // Restored _Implementations (7.00's are the shared empty function: slots 0x419, 0x437, 0x439, 0x43D, 0x43F, 0x441).
     void ServerGiveCreativeItem_Implementation(const FFortItemEntry& CreativeItem);
     void ServerReloadCreativePlot_Implementation();

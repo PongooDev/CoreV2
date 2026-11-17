@@ -459,6 +459,8 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Player\FortPlayerStateOutpost.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\Quests\FortQuestManager.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\RemoteControlledPawn\FortRemoteControlledPawnAthena.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\STW\FortGameModeEndless.h" />
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\STW\FortGameModePvE.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\AthenaHUDContext.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FortAsyncAction_ShowPartyDialog.h" />
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\FortPartyContext.h" />
@@ -701,6 +703,7 @@
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerControllerZone.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Player\FortPlayerState.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Quests\FortQuestManager.cpp" />
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\STW\FortGameModeEndless.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\AthenaHUDContext.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\FortAsyncAction_ShowPartyDialog.cpp" />
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\FortPartyContext.cpp" />

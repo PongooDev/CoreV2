@@ -436,6 +436,9 @@
     <Filter Include="FortniteGame\Source\FortniteGame\Private\Quests">
       <UniqueIdentifier>{a248c593-f329-4198-b2f8-dca128eed8b2}</UniqueIdentifier>
     </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Private\STW">
+      <UniqueIdentifier>{a1377dc7-d716-4112-839e-5a4769d46fbe}</UniqueIdentifier>
+    </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Private\UI">
       <UniqueIdentifier>{3986b140-8ca9-4033-aeb8-9262907404ee}</UniqueIdentifier>
     </Filter>
@@ -510,6 +513,9 @@
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\RemoteControlledPawn">
       <UniqueIdentifier>{d27639d3-5720-4ac9-b31c-4afd15bb8112}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="FortniteGame\Source\FortniteGame\Public\STW">
+      <UniqueIdentifier>{e9ef7c22-b4b8-4cf2-9d12-a60951a73385}</UniqueIdentifier>
     </Filter>
     <Filter Include="FortniteGame\Source\FortniteGame\Public\UI">
       <UniqueIdentifier>{ed1ee13d-fe28-4a65-a5a3-575bddaad3af}</UniqueIdentifier>
@@ -1618,6 +1624,12 @@
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\RemoteControlledPawn\FortRemoteControlledPawnAthena.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\RemoteControlledPawn</Filter>
     </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\STW\FortGameModePvE.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\STW</Filter>
+    </ClInclude>
+    <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\STW\FortGameModeEndless.h">
+      <Filter>FortniteGame\Source\FortniteGame\Public\STW</Filter>
+    </ClInclude>
     <ClInclude Include="..\FortniteGame\Source\FortniteGame\Public\UI\AthenaHUDContext.h">
       <Filter>FortniteGame\Source\FortniteGame\Public\UI</Filter>
     </ClInclude>
@@ -2320,6 +2332,9 @@
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\Quests\FortQuestManager.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\Quests</Filter>
+    </ClCompile>
+    <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\STW\FortGameModeEndless.cpp">
+      <Filter>FortniteGame\Source\FortniteGame\Private\STW</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Source\FortniteGame\Private\UI\AthenaHUDContext.cpp">
       <Filter>FortniteGame\Source\FortniteGame\Private\UI</Filter>

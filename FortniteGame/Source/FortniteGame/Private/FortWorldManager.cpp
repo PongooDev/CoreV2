@@ -35,6 +35,7 @@
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
 #include "Quests/FortQuestManager.h"
+#include "STW/FortGameModeEndless.h"
 #include "Templates/Casts.h"
 #include "UI/FrontEnd/FortMissionGenerator.h"
 #include "UObject/UnrealType.h"
@@ -1205,6 +1206,14 @@ void AFortWorldManager::SendNewPlayerEventHK(AFortPlayerController* PlayerContro
     }
 #endif
     SendNewPlayerEventOG(PlayerController);
+
+#if WITH_SERVER_CODE
+    // Frostnite (7.10's AFortGameModeEndless) starts its primary mission once a player has begun play.
+    if (AFortGameModeEndless* EndlessGameMode = World ? Cast<AFortGameModeEndless>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr)
+    {
+        EndlessGameMode->HandleNewPlayerHasBegunPlay(PlayerController);
+    }
+#endif
 }
 
 bool AFortWorldManager::UpdatePlayerQuickBarRecordsCall(AFortWorldManager* This, AFortPlayerController* PlayerController)

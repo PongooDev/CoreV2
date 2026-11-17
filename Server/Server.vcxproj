@@ -87,6 +87,11 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <!-- Full link-time code generation, not the default /LTCG:incremental. An incremental relink of a checkout that had
+           built many commits made AFortPickup::CombinePickups keep its std::find iterator in r10 across a call to
+           FWeakObjectPtr::IsValid, whose FWeakObjectPtr::Get uses r10, so every 7.00 Battle Royale server crashed as
+           pickups landed (Core.dll+0x22AE68, reading 0x8); a clean build of the same commit was correct. -->
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
     </Link>

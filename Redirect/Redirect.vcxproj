@@ -87,6 +87,9 @@
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+      <!-- Full link-time code generation, not the default /LTCG:incremental, as Core.dll (Server.vcxproj): a stale
+           incremental relink miscompiled Core.dll's AFortPickup::CombinePickups (7e8c180e). -->
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
     </Link>

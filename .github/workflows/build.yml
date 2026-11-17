@@ -16,7 +16,9 @@ concurrency:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # windows-2022 has Visual Studio 2022 (the v143 toolset the projects and local builds use); windows-latest moved to
+    # Visual Studio 18, whose compiler differs from the owner's builds and whose PCH broke a mixed build (C1853).
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
         with:

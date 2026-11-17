@@ -197,6 +197,9 @@ void AFortPlayerControllerAthena::HookVTables()
     const int32_t Index = Finder::StrippedAthenaPawnDiedIndex();
     if (Index < 0)
     {
+        // The build's own handler takes a player out of the match and checks its win (1.8's RemoveFromAlivePlayers,
+        // 0x403060). Its StartEndGamePhase is still what the player bots' win ends the match with (CoreV2 #486).
+        Finder::ResolveStartEndGamePhaseLive();
         return;
     }
     if (!Finder::ResolveAthenaPawnDiedLive(AFortPlayerStateAthena::PlaceOffset(), AFortPlayerStateAthena::SecondsAliveOffset(),

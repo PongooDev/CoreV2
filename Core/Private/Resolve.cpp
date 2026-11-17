@@ -16925,6 +16925,38 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
     return true;
 }
 
+bool Finder::ResolveStartEndGamePhaseLive()
+{
+    // AFortGameModeAthena::StartEndGamePhase where the build keeps AFortPlayerControllerAthena's pawn-death handler (1.8
+    // CL-3724489, which has no stripped handler for ResolveAthenaPawnDiedLive to find it through): the function that logs
+    // "%s won the match!". 1.8's (0x408770) takes the game mode and the winning controller: with a winner it logs the win,
+    // gives them place 1 (0x44BC90), their time alive and what they outlived, and the "Winner! Winner!" notice; with none
+    // it only ends the match (the end game flag +0xAA5, then the game mode's end game virtual). Its RemoveFromAlivePlayers
+    // (0x403060, which logs "is the last player alive.  Starting end game.") calls it for the last player alive; 1.8 has
+    // no "wasn't in the AlivePlayers list" log for ResolveAthenaPawnDiedLive's search. Battle Royale's player bots end a
+    // match with it (FCoreAthenaBotManager::CheckWinConditionLastManStanding), so without it a player who outlived every
+    // bot never won (CoreV2 #486). The extra parameters later builds take are ignored there.
+    if (Natives::AFortGameModeAthena_StartEndGamePhase)
+    {
+        return true;
+    }
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return false;
+    }
+    bSearched = true;
+    const uintptr_t StartEndGamePhase = FunctionOf(L"FortGameModeAthena: %s won the match!");
+    if (!StartEndGamePhase)
+    {
+        Log::Warning(L"Finder: AFortGameModeAthena::StartEndGamePhase not found (no \"%s won the match!\"), a match with player bots has no win");
+        return false;
+    }
+    Natives::AFortGameModeAthena_StartEndGamePhase = reinterpret_cast<decltype(Natives::AFortGameModeAthena_StartEndGamePhase)>(StartEndGamePhase);
+    Log::Info(L"Finder: AFortGameModeAthena::StartEndGamePhase at 0x{:X} (\"%s won the match!\")", StartEndGamePhase - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveSetDeathInfoLive(ptrdiff_t DeathInfoOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t InitializedOffset, ptrdiff_t DeathCircumstanceOffset)
 {
     static bool bSearched = false;

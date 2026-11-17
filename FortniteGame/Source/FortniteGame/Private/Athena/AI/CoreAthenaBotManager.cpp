@@ -3031,7 +3031,12 @@ void FCoreAthenaBotManager::RemoveFromAliveBots(FCoreAthenaBotController* Bot, A
             SetPlayersTeamPlace(Bot->GetTeam(), TeamsBefore);
         }
     }
-    Log::Info(L"Battle Royale bots: {} is out{} ({} bots left)", Bot->GetBotName(), bTeamOut && bAircraftStarted ? std::format(L", place {}", TeamsBefore) : std::wstring(), GetAliveBotCount());
+    // Who the elimination went to (CoreV2 #486: on 1.8 a player's eliminations of bots weren't counted, and the log
+    // didn't say whether the bot's death found its eliminator).
+    const std::wstring EliminatedBy = KillerBot && KillerBot != Bot ? KillerBot->GetBotName()
+        : KillerPlayer ? KillerState->GetPlayerName().ToStdString() : KillerState && KillerState != State ? std::wstring(L"an unknown player state") : std::wstring(L"nobody");
+    Log::Info(L"Battle Royale bots: {} is out{}, eliminated by {} ({} bots left)", Bot->GetBotName(), bTeamOut && bAircraftStarted ? std::format(L", place {}", TeamsBefore) : std::wstring(),
+        EliminatedBy, GetAliveBotCount());
     // Every player still in the match outlived the bot ("Outlive opponents", AthenaOutlive), as they outlive a player who
     // is out, with the setting on.
     if (Athena && bAircraftStarted && Settings.bEliminationsCountForQuests)

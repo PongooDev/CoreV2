@@ -354,6 +354,9 @@ namespace Finder
     // part (1.9.1, 1.10), else -1. KillerPlayerStateOffset: PlayerDeathReport's KillerPlayerState in the controller.
     int32_t StrippedAthenaPrepareDeathReportIndex(ptrdiff_t KillerPlayerStateOffset);
     bool ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsAliveOffset, ptrdiff_t DeathCauseOffset, ptrdiff_t DeathInfoDBNOOffset, ptrdiff_t TeamMembersOffset);
+    // AFortGameModeAthena::StartEndGamePhase (Natives) where the pawn-death handler is intact (1.8), by its "%s won the
+    // match!" log; kept as ResolveAthenaPawnDiedLive found it where that ran.
+    bool ResolveStartEndGamePhaseLive();
     // From 6.01: the player state's own store of a death and FDeathInfo::DeathCircumstance's value for a pawn (Natives),
     // the two calls the pawn's DBNO handling makes for the FDeathInfo it builds on the stack, after ToDeathCause (which
     // ResolveAthenaPawnDiedLive found). The offsets are the player state's: its DeathInfo, and DeathInfo's DeathCause,

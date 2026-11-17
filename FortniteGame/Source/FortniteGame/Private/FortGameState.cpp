@@ -24,6 +24,47 @@ void AFortGameState::SpawnMissionManager(const FFortMissionManagerRecord& Missio
     }
 }
 
+TMulticastDelegate<>* AFortGameState::GetOnMissionManagerCreatedEvent()
+{
+    if (Natives::AFortGameState_OnMissionManagerCreatedEvent < 0)
+    {
+        // SpawnMissionManager's last broadcast (7.10 0xEEF970: it spawns the manager deferred, has it load its record's
+        // missions, finishes spawning it, then lea rcx, [rbx+678h]; call, the delegate's Broadcast). It is taken only as
+        // AFortGameState's own member, after MissionManager and inside the class (7.10: +0x678 of 0x690, the last one).
+        const ptrdiff_t MissionManager = MissionManagerOffset();
+        const uintptr_t Spawn = Natives::AFortGameState_SpawnMissionManager || Finder::ResolveMissionManagerLive(MissionManager) ? reinterpret_cast<uintptr_t>(Natives::AFortGameState_SpawnMissionManager) : 0;
+        const ptrdiff_t Offset = Spawn ? Finder::LastBroadcastDelegateOffset(Spawn) : -1;
+        UClass* Class = StaticClass();
+        const ptrdiff_t Size = Class ? Class->GetPropertiesSize() : 0;
+        const bool bValid = MissionManager > 0 && Offset > MissionManager && Offset + 0x18 <= Size;
+        Natives::AFortGameState_OnMissionManagerCreatedEvent = bValid ? Offset : 0;
+        if (bValid)
+        {
+            Log::Info(L"Finder: AFortGameState::OnMissionManagerCreatedEvent +0x{:X} (broadcast by SpawnMissionManager)", Offset);
+        }
+        else
+        {
+            Log::Info(L"Finder: AFortGameState::OnMissionManagerCreatedEvent not found (SpawnMissionManager {}, last broadcast offset {}), unused on this build", Spawn ? L"found" : L"missing", Offset);
+        }
+    }
+    const ptrdiff_t Offset = Natives::AFortGameState_OnMissionManagerCreatedEvent;
+    if (Offset <= 0)
+    {
+        return nullptr;
+    }
+    // Only while it looks like a TMulticastDelegate: its invocation list (a TArray, a handful of bindings at most), then
+    // CompactionThreshold and the lock count, not held by a broadcast.
+    uint8_t* const Delegate = reinterpret_cast<uint8_t*>(this) + Offset;
+    const int32_t ArrayNum = *reinterpret_cast<const int32_t*>(Delegate + 8);
+    const int32_t ArrayMax = *reinterpret_cast<const int32_t*>(Delegate + 12);
+    const int32_t LockCount = *reinterpret_cast<const int32_t*>(Delegate + 20);
+    if (ArrayNum < 0 || ArrayNum > 16 || ArrayMax < ArrayNum || ArrayMax > 64 || LockCount != 0)
+    {
+        return nullptr;
+    }
+    return reinterpret_cast<TMulticastDelegate<>*>(Delegate);
+}
+
 bool AFortGameState::Client_RefreshEventCalendar()
 {
     UFunction* Function = FindStaticFunction_Client_RefreshEventCalendar();

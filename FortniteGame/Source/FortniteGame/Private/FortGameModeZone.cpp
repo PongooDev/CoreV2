@@ -28,6 +28,7 @@
 #include "Online/FortLobbyBeaconHost.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerState.h"
+#include "STW/FortGameModeEndless.h"
 #include "FortWorldManager.h"
 #include "GameThread.h"
 #include "Logging/LogMacros.h"
@@ -338,6 +339,11 @@ void AFortGameModeZone::FinishWorldInitialization(AFortWorldManager* WorldManage
     }
 
     PlacePlayerSpawnPad(WorldManager);
+    if (AFortGameModeEndless* Endless = Cast<AFortGameModeEndless>(reinterpret_cast<UObject*>(this)))
+    {
+        // Frostnite's primary mission starts once it is loaded and a player has begun play, whichever comes second.
+        Endless->BindMissionManagerCreated();
+    }
     if (WorldManager)
     {
         WorldManager->CreateMissionManager();

@@ -430,6 +430,11 @@ namespace Natives
     inline void (*AFortWorldManager_ServerTickLoadingOrCreatingWorld)(AFortWorldManager* This) = nullptr;
     inline FFortMissionManagerRecord* (*FFortMissionManagerRecord_FFortMissionManagerRecord)(FFortMissionManagerRecord* This, UClass* InMissionManagerClass) = nullptr;
     inline void (*AFortGameState_SpawnMissionManager)(AFortGameState* This, const FFortMissionManagerRecord& MissionManagerRecord) = nullptr;
+    // AFortGameState::OnMissionManagerCreatedEvent (21.40's name; an unreflected TMulticastDelegate<void()>), which
+    // SpawnMissionManager broadcasts last, once the mission manager has loaded its record's missions (7.10 0xEEF970:
+    // lea rcx, [rbx+678h]; call). Read from SpawnMissionManager on first use (AFortGameState::GetOnMissionManagerCreatedEvent):
+    // -1 not read yet, 0 not there.
+    inline ptrdiff_t AFortGameState_OnMissionManagerCreatedEvent = -1;
     inline void* (*UFortMissionInfo_GenerateMissionDifficultyOptions)(UFortMissionInfo* This, void* Result, void* RandomStream, const void* GenerationParams) = nullptr;
     inline ptrdiff_t AFortWorldManager_MissionGenerationRandomStream = -1;
     inline int32_t AFortWorldManager_ConditionalFoundationRequestSize = 0;

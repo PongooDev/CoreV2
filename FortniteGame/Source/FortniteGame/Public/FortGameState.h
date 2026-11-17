@@ -2,6 +2,7 @@
 
 #include "Containers/Map.h"
 #include "Containers/UnrealString.h"
+#include "Delegates/Delegate.h"
 #include "Engine/EngineTypes.h"
 #include "GameFramework/GameState.h"
 #include "GameFramework/OnlineReplStructs.h"
@@ -160,6 +161,9 @@ public:
     static bool HasAdditionalPlaylistLevelsStreamed() { return Member_AdditionalPlaylistLevelsStreamed.IsAvailable(); }
 
     void SpawnMissionManager(const FFortMissionManagerRecord& MissionManagerRecord);
+    // 21.40's OnMissionManagerCreatedEvent: SpawnMissionManager broadcasts it once the mission manager it spawned has
+    // loaded its record's missions. Null where the build has none Core can read (Natives::AFortGameState_OnMissionManagerCreatedEvent).
+    TMulticastDelegate<>* GetOnMissionManagerCreatedEvent();
     // The game's own multicast (Net, NetReliable, NetMulticast): the server and every client fetch the event calendar
     // again at once, not at its cacheExpire (4.5's _Implementation, 0xC77C70, has the seasonal event manager's calendar
     // download it, 0xF20400). False where the build has no such function.

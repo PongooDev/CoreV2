@@ -15,8 +15,14 @@ public:
     // A player has begun play in the zone (the game's NewPlayerHasBegunPlay mission event, which Mission_Endless itself
     // answers with the player's starting inventory): starts Frostnite's primary mission once.
     void HandleNewPlayerHasBegunPlay(AFortPlayerController* PlayerController);
+    // Before the world's mission manager is spawned (AFortGameModeZone::FinishWorldInitialization): listens to the game
+    // state's OnMissionManagerCreatedEvent, so a primary mission that comes after the first player still starts.
+    void BindMissionManagerCreated();
 
 private:
+    // The game state's OnMissionManagerCreatedEvent: the primary mission is loaded. Starts it if a player has already
+    // begun play (StartPrimaryMission is sent once, by whichever of the two comes second).
+    void HandleMissionManagerCreated();
     // The StartPrimaryMission mission event that Mission_Endless's HandleMissionEvent_StartPrimaryMission waits for.
     void StartPrimaryMission();
 };

@@ -191,8 +191,12 @@ namespace
         {
             return;
         }
-        FDateTime Date;
-        Date.Ticks = UnixMs > 0 ? TicksOfUnixMs(UnixMs) : 0;
+        // No checkpoint is FDateTime::MaxValue, as the game has it (PongooDev/CoreV2#489).
+        FDateTime Date = FDateTime::MaxValue();
+        if (UnixMs > 0)
+        {
+            Date.Ticks = TicksOfUnixMs(UnixMs);
+        }
         Component->LastCheckpointDateUtc = Date;
         if (AActor* Owner = reinterpret_cast<AActor*>(Component->GetVolume()))
         {

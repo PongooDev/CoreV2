@@ -253,7 +253,11 @@ void UFortLevelSaveComponent::RefreshCheckpointDate()
 {
 #if WITH_SERVER_CODE
     // Core-Backend's DSS answers ?info=true with the file's last write (updatedUnixMs), not its bytes; no checkpoint is
-    // a 404, and the date stays empty (the menu's Restore stays off).
+    // a 404. No checkpoint is FDateTime::MaxValue, as the game has it (PongooDev/CoreV2#489): 7.10 sets that in the
+    // component's constructor (0xF580F0), as a load starts (0xF7DF50), on a reset (0xF88310) and when the island's file
+    // has no "checkpoint-at" meta (0xF80920). The island menu (UFortCreativePublishOptions, 0x30A46E0) shows
+    // "N Days ago" from UtcNow minus the date and hides the restore row when that is negative; an empty date (0 ticks,
+    // 0001-01-01) read as 739,936 days ago.
     if (!Member_LastCheckpointDateUtc.IsAvailable() || !Member_BackupSaveState.IsAvailable())
     {
         return;
@@ -275,9 +279,12 @@ void UFortLevelSaveComponent::RefreshCheckpointDate()
             {
                 return;
             }
-            FDateTime Date;
-            // FDateTime's ticks: 100 ns since 0001-01-01, the Unix epoch at 621355968000000000.
-            Date.Ticks = UnixMs > 0 ? 621355968000000000LL + UnixMs * 10000LL : 0;
+            FDateTime Date = FDateTime::MaxValue();
+            if (UnixMs > 0)
+            {
+                // FDateTime's ticks: 100 ns since 0001-01-01, the Unix epoch at 621355968000000000.
+                Date.Ticks = 621355968000000000LL + UnixMs * 10000LL;
+            }
             Component->LastCheckpointDateUtc = Date;
             if (AActor* Owner = reinterpret_cast<AActor*>(Component->GetVolume()))
             {

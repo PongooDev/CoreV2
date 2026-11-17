@@ -16,9 +16,9 @@ DEFINE_LOG_CATEGORY(LogNetDormancy);
 DEFINE_LOG_CATEGORY(LogNetFastTArray);
 DEFINE_LOG_CATEGORY(LogSecurity);
 
-void UChannel::Close()
+void UChannel::Close(EChannelCloseReason Reason)
 {
-    CallVirtual<void>(this, Natives::UChannel_CloseIndex);
+    CallVirtual<void>(this, Natives::UChannel_CloseIndex, Reason);
 }
 
 FPacketIdRange UChannel::SendBunch(FOutBunch* Bunch, bool Merge)
@@ -79,6 +79,13 @@ void UActorChannel::SetChannelActorForDestroy(FActorDestructionInfo* DestructInf
     check(CloseBunch.bClose);
     CloseBunch.bReliable = 1;
     CloseBunch.bDormant = 0;
+    // 4.22's networking (7.20): the bunch says why the channel closes. The engine's own (7.20 0x27DEA40) copies the
+    // destruction info's reason; the bunch's constructor starts it at Destroyed, which is kept where the info's reason
+    // wasn't found.
+    if (Natives::FOutBunch_CloseReason >= 0 && Natives::FActorDestructionInfo_Reason >= 0)
+    {
+        CloseBunch.CloseReason = DestructInfo->Reason;
+    }
 
     Connection->PackageMap->WriteObject(CloseBunch, DestructInfo->ObjOuter.Get(), DestructInfo->NetGUID, DestructInfo->PathName);
 

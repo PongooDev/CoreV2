@@ -25,6 +25,19 @@ enum class EChannelCreateFlags : uint32_t
     OpenedLocally = (1 << 1),
 };
 
+// UE 4.22's reasons for closing a channel (7.20, CL-4727874, and later): UChannel::Close takes one and sends it in the close
+// bunch (FOutBunch::CloseReason), where earlier builds sent only bDormant. 7.20's LexToString(EChannelCloseReason)
+// 0x19BF620 names them in this order.
+enum class EChannelCloseReason : uint8_t
+{
+    Destroyed,
+    Dormancy,
+    LevelUnloaded,
+    Relevancy,
+    TearOff,
+    MAX = 15,
+};
+
 struct FPacketIdRange
 {
     int32_t First = -1;
@@ -44,7 +57,8 @@ public:
     DefineNativeMember(int32_t, ChIndex, UChannel_ChIndex)
     DefineNativeMember(int32_t, NumOutRec, UChannel_NumOutRec)
 
-    void Close();
+    // 4.22's virtual int64 Close(EChannelCloseReason). Builds before 7.20 take no reason (void Close()) and ignore it.
+    void Close(EChannelCloseReason Reason);
     FPacketIdRange SendBunch(FOutBunch* Bunch, bool Merge);
     void StartBecomingDormant();
     int32_t IsNetReady(bool Saturate);

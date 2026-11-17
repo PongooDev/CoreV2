@@ -3386,7 +3386,13 @@ namespace
         }
         RequireOffset(L"UNetConnection::DormantReplicatorMap", Natives::UNetConnection_DormantReplicatorMap, DormantReplicatorRemoves == 1 ? DormantReplicators : 0);
 
-        const uintptr_t ActorChannelClose = FunctionOf(L"UActorChannel::Close: ChIndex: %d, Actor: %s");
+        // 7.20 (CL-4727874) has UE 4.22's close reasons: UActorChannel::Close(EChannelCloseReason) logs the reason too
+        // (0x27C04C0), and NotifyActorDestroyed passes Destroyed before the same and/call (xor edx, edx, 0x2979772).
+        uintptr_t ActorChannelClose = FunctionOf(L"UActorChannel::Close: ChIndex: %d, Actor: %s");
+        if (!ActorChannelClose)
+        {
+            ActorChannelClose = FunctionOf(L"UActorChannel::Close: ChIndex: %d, Actor: %s, Reason: %s");
+        }
         ptrdiff_t ActorChannelBits = 0;
         FCalledSlot ChannelClose;
         for (uintptr_t And = NotifyDestroyedEnd ? FindInstruction(NotifyDestroyed, NotifyDestroyedEnd, { 0x83, -1, -1, -1, 0x00, 0x00, 0xF7 }) : 0; And && !ChannelClose.VTable; And = FindInstruction(And + 1, NotifyDestroyedEnd, { 0x83, -1, -1, -1, 0x00, 0x00, 0xF7 }))
@@ -3402,7 +3408,9 @@ namespace
         RequireSlot(L"UChannel::Close", Natives::UChannel_CloseIndex, ChannelClose.Index);
         RequireSlot(L"UChannel::StartBecomingDormant", Natives::UChannel_StartBecomingDormantIndex, Finder::VTableIndex(ActorChannelVTable, reinterpret_cast<void*>(FunctionOf(L"StartBecomingDormant: %s")), 0x400));
 
-        const uintptr_t Close = FunctionOf(L"UChannel::Close: Sending CloseBunch. Dormant: %d, %s");
+        uintptr_t Close = FunctionOf(L"UChannel::Close: Sending CloseBunch. Dormant: %d, %s");
+        // 7.20's UChannel::Close(EChannelCloseReason Reason) (0x27C0670: movzx esi, dl) logs the reason in place of Dormant.
+        const bool bCloseTakesReason = !Close && (Close = FunctionOf(L"UChannel::Close: Sending CloseBunch. Reason: %s, %s")) != 0;
         const uintptr_t CloseEnd = Finder::FunctionEnd(Close);
         const uintptr_t ClosingTest = Close ? FindInstruction(Close, Close + 0x20, { 0xF6, 0x41, -1, 0x02 }) : 0;
         ptrdiff_t ChannelBits = ClosingTest ? Byte(ClosingTest + 2) : 0;
@@ -3419,6 +3427,14 @@ namespace
         for (uintptr_t Load = CloseEnd ? FindInstruction(Close, CloseEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x83, -1, 0x02, 0x83, -1, 0x01 }) : 0; Load && !State; Load = FindInstruction(Load + 1, CloseEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x83, -1, 0x02, 0x83, -1, 0x01 }))
         {
             if ((Byte(Load + 1) & 0xC0) == 0x80 && (Byte(Load + 1) & 0x07) != 0x04)
+            {
+                State = *reinterpret_cast<const int32_t*>(Load + 2);
+            }
+        }
+        // 7.20 compares in r8d: mov r8d, [rax+124h]; sub r8d, 2; cmp r8d, 1 (44 8B 80 24 01 00 00 41 83 E8 02 41 83 F8 01).
+        for (uintptr_t Load = CloseEnd && !State ? FindInstruction(Close, CloseEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x41, 0x83, -1, 0x02, 0x41, 0x83, -1, 0x01 }) : 0; Load && !State; Load = FindInstruction(Load + 1, CloseEnd, { 0x8B, -1, -1, -1, 0x00, 0x00, 0x41, 0x83, -1, 0x02, 0x41, 0x83, -1, 0x01 }))
+        {
+            if (Byte(Load - 1) == 0x44 && (Byte(Load + 1) & 0xC0) == 0x80 && (Byte(Load + 1) & 0x07) != 0x04)
             {
                 State = *reinterpret_cast<const int32_t*>(Load + 2);
             }
@@ -3532,6 +3548,46 @@ namespace
         }
         RequireOffset(L"sizeof(FOutBunch)", Natives::FOutBunch_Size, BunchSize > BunchReliable && BunchSize <= static_cast<ptrdiff_t>(FOutBunch::StorageSize) ? BunchSize : 0);
 
+        // 4.22's close reason (7.20): UChannel::Close keeps its Reason argument from the prologue (movzx esi, dl, 0x27C0680)
+        // and stores it into the close bunch after the constructor (mov [rsp+142h], sil with the bunch at rsp+50h, 0x27C0829:
+        // FOutBunch::CloseReason +0xF2, after the flag byte). The engine's own UActorChannel::SetChannelActorForDestroy
+        // (0x27DEA40) copies the destruction info's: movzx eax, byte [r14+38h]; mov [rbp+52h], al, right after the flags.
+        if (bCloseTakesReason && CloseBunch && BunchSize > 0)
+        {
+            const uintptr_t KeepReason = FindInstruction(Close, Close + 0x20, { 0x0F, 0xB6, -1 });
+            const bool bKeepsReason = KeepReason && (Byte(KeepReason + 2) & 0xC7) == 0xC2;
+            const uint8_t ReasonRegister = bKeepsReason ? ((Byte(KeepReason + 2) >> 3) & 0x07) | ((Byte(KeepReason - 1) & 0xF4) == 0x44 ? 0x08 : 0x00) : 0;
+            for (uintptr_t Store = bKeepsReason ? FindInstruction(CloseBunch + 12, CloseBunch + 0x60, { 0x88, -1, 0x24 }) : 0; Store && Natives::FOutBunch_CloseReason < 0; Store = FindInstruction(Store + 1, CloseBunch + 0x60, { 0x88, -1, 0x24 }))
+            {
+                const uint8_t Rex = (Byte(Store - 1) & 0xF0) == 0x40 ? Byte(Store - 1) : 0;
+                const uint8_t Register = ((Byte(Store + 1) >> 3) & 0x07) | ((Rex & 0x04) ? 0x08 : 0x00);
+                const ptrdiff_t Offset = static_cast<ptrdiff_t>(*reinterpret_cast<const int32_t*>(Store + 3)) - CloseBunchLocal;
+                if ((Byte(Store + 1) & 0xC7) == 0x84 && Register == ReasonRegister && (ReasonRegister < 4 || Rex) && Offset > BunchReliable && Offset < BunchSize)
+                {
+                    Natives::FOutBunch_CloseReason = Offset;
+                }
+            }
+            const std::vector<uintptr_t> ForDestroyRefs = Finder::StringRefs(L"SetChannelActorForDestroy: Channel %d. NetGUID <%s> Path: %s. Bits: %d");
+            const uintptr_t ForDestroy = ForDestroyRefs.empty() ? 0 : Finder::FunctionStart(ForDestroyRefs[0]);
+            const uintptr_t ForDestroyEnd = ForDestroy ? Finder::FunctionEnd(ForDestroy) : 0;
+            for (const auto& [Site, Target] : ForDestroyEnd && Natives::FOutBunch_CloseReason > 0 ? Finder::DirectCalls(ForDestroy, ForDestroyEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                // movzx eax, byte [reg+disp8] (REX.B allowed), then the store of al into the bunch.
+                const uintptr_t Load = Target == OutBunch ? FindInstruction(Site + 5, Site + 0x30, { 0x0F, 0xB6, -1, -1, 0x88 }) : 0;
+                if (Load && (Byte(Load + 2) & 0xF8) == 0x40 && (Byte(Load + 2) & 0x07) != 0x04 && (Byte(Load + 5) & 0x38) == 0x00
+                    && Byte(Load + 3) == Natives::FActorDestructionInfo_StreamingLevelName + 8)
+                {
+                    Natives::FActorDestructionInfo_Reason = Byte(Load + 3);
+                }
+                if (Target == OutBunch)
+                {
+                    break;
+                }
+            }
+            Log::Info(L"Finder: UChannel::Close takes a close reason (UE 4.22's networking): FOutBunch::CloseReason +0x{:X}, FActorDestructionInfo::Reason +0x{:X}",
+                Natives::FOutBunch_CloseReason > 0 ? Natives::FOutBunch_CloseReason : 0, Natives::FActorDestructionInfo_Reason > 0 ? Natives::FActorDestructionInfo_Reason : 0);
+        }
+
         // FBitWriter's overflow report (Max - Num, then ArIsError's bit set). Up to 6.10 the string has one user, the
         // writer's out-of-line overflow function (6.10 0x1731B90: mov rax, [rcx+Max]; sub r8, [rcx+Num]). 6.20 also
         // inlines the report into FBitWriter::SerializeIntPacked (0x17855E0, whose Max - Num is register to register),
@@ -3583,7 +3639,12 @@ namespace
         ptrdiff_t NumOutRec = 0;
         // 3.3 (0x2074B10) times the replication first (QueryPerformanceCounter), which moves the test to +0xB9; 6.30
         // (CL-4573096 0x262BEE0) sets more up before it, at +0x15A.
-        const uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x180, { 0x0F, 0xBA, -1, 0x08 }) : 0;
+        // 7.20 (CL-4727874 0x27D8EE0) sets up more again: the test is at +0x2A6.
+        uintptr_t PausedTest = ReplicateActor ? FindInstruction(ReplicateActor, ReplicateActor + 0x180, { 0x0F, 0xBA, -1, 0x08 }) : 0;
+        if (ReplicateActor && !PausedTest)
+        {
+            PausedTest = FindInstruction(ReplicateActor + 0x180, ReplicateActor + 0x300, { 0x0F, 0xBA, -1, 0x08 });
+        }
         for (uintptr_t Compare = PausedTest && (Byte(PausedTest + 2) & 0x38) == 0x20 ? FindInstruction(PausedTest + 4, PausedTest + 0x14, { 0x83, -1, -1, 0x00 }) : 0; Compare && !NumOutRec; Compare = FindInstruction(Compare + 1, PausedTest + 0x14, { 0x83, -1, -1, 0x00 }))
         {
             if ((Byte(Compare + 1) & 0xF8) == 0x78 && (Byte(Compare + 1) & 0x07) != 0x04)
@@ -3611,6 +3672,15 @@ namespace
         for (uintptr_t Compare = PausedTest && !NumOutRec && (Byte(PausedTest + 2) & 0x38) == 0x20 ? FindInstruction(PausedTest + 4, PausedTest + 0x14, { 0x41, 0x83, 0x7C, 0x24, -1, 0x00 }) : 0; Compare && !NumOutRec; Compare = FindInstruction(Compare + 1, PausedTest + 0x14, { 0x41, 0x83, 0x7C, 0x24, -1, 0x00 }))
         {
             NumOutRec = Byte(Compare + 4);
+        }
+        // 7.20 compares with a zeroed register and no REX, right after the test's jump: bt eax, 8; jnb; cmp [rsi+50h], edi
+        // (73 7F 39 7E 50, 0x27D918A).
+        for (uintptr_t Compare = PausedTest && !NumOutRec && (Byte(PausedTest + 2) & 0x38) == 0x20 && Byte(PausedTest + 4) == 0x73 ? PausedTest + 6 : 0; Compare && !NumOutRec; Compare = 0)
+        {
+            if (Byte(Compare) == 0x39 && (Byte(Compare + 1) & 0xC0) == 0x40 && (Byte(Compare + 1) & 0x07) != 0x04)
+            {
+                NumOutRec = Byte(Compare + 2);
+            }
         }
         RequireOffset(L"UChannel::NumOutRec", Natives::UChannel_NumOutRec, NumOutRec);
 

@@ -313,6 +313,8 @@ namespace Natives
     inline ptrdiff_t FActorDestructionInfo_PathName = 0x18;
     inline ptrdiff_t FActorDestructionInfo_StreamingLevelName = 0x28;
     inline size_t FActorDestructionInfo_Size = 0x30;
+    // 4.22's networking (7.20): why the destroyed actor's channel closes (EChannelCloseReason), after StreamingLevelName.
+    inline ptrdiff_t FActorDestructionInfo_Reason = -1;
     // SupportsObject(Object, const TWeakObjectPtr<UObject>* WeakObjectPtr): 1.8 (0x22B2090) reads WeakObjectPtr when it
     // isn't null, 1.7.2 (0x223CCA0) takes no such argument.
     inline bool (*FNetGUIDCache_SupportsObject)(const FNetGUIDCache* This, const UObject* Object, const void* WeakObjectPtr) = nullptr;
@@ -956,6 +958,8 @@ namespace Natives
     inline uint32_t FOutBunch_bCloseMask = 0;
     inline uint32_t FOutBunch_bDormantMask = 0;
     inline uint32_t FOutBunch_bReliableMask = 0;
+    // 4.22's networking (7.20): EChannelCloseReason CloseReason, after the flag bytes. -1 before it.
+    inline ptrdiff_t FOutBunch_CloseReason = -1;
     inline ptrdiff_t UChannel_ChIndex = -1;
     inline ptrdiff_t FFrame_Object = -1;
     inline ptrdiff_t FFastArraySerializer_IDCounter = -1;

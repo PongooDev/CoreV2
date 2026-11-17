@@ -498,7 +498,7 @@ int32_t UNetDriver::ServerReplicateActors_PrioritizeActors(UNetConnection* Conne
                 {
                     if (!bHasNullViewTarget && Channel && Time - Channel->RelevantTime >= RelevantTimeout)
                     {
-                        Channel->Close();
+                        Channel->Close(EChannelCloseReason::Relevancy);
                     }
                     continue;
                 }
@@ -700,7 +700,7 @@ int32_t UNetDriver::ServerReplicateActors_ProcessPrioritizedActors(UNetConnectio
         if ((!bIsRecentlyRelevant || Actor->bTearOff) && Channel && (!bLevelInitializedForActor || !Actor->IsNetStartupActor()))
         {
             UE_LOG(LogNetTraffic, Log, TEXT("- Closing channel for no longer relevant actor %s"), *Actor->GetName());
-            Channel->Close();
+            Channel->Close(Actor->bTearOff ? EChannelCloseReason::TearOff : EChannelCloseReason::Relevancy);
         }
     }
 

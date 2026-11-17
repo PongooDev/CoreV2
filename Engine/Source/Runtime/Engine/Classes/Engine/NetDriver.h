@@ -11,6 +11,8 @@
 
 #include <functional>
 
+enum class EChannelCloseReason : uint8_t;
+
 class AActor;
 class FNetGUIDCache;
 class FNetworkNotify;
@@ -31,6 +33,8 @@ struct FActorDestructionInfo
     DefineNativeMember(FNetworkGUID, NetGUID, FActorDestructionInfo_NetGUID)
     DefineNativeObject(FString, PathName, FActorDestructionInfo_PathName)
     DefineNativeMember(FName, StreamingLevelName, FActorDestructionInfo_StreamingLevelName)
+    // 4.22's networking (7.20) only: check Natives::FActorDestructionInfo_Reason first.
+    DefineNativeMember(EChannelCloseReason, Reason, FActorDestructionInfo_Reason)
 
     FActorDestructionInfo() = delete;
 };

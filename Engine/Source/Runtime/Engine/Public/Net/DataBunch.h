@@ -5,6 +5,7 @@
 #include <cstdint>
 
 class UChannel;
+enum class EChannelCloseReason : uint8_t;
 
 class FOutBunch
 {
@@ -27,6 +28,8 @@ public:
     DefineNativeBitfield(bClose, FOutBunch_bClose, Natives::FOutBunch_bCloseMask)
     DefineNativeBitfield(bDormant, FOutBunch_bDormant, Natives::FOutBunch_bDormantMask)
     DefineNativeBitfield(bReliable, FOutBunch_bReliable, Natives::FOutBunch_bReliableMask)
+    // 4.22's networking (7.20) only: check Natives::FOutBunch_CloseReason first.
+    DefineNativeMember(EChannelCloseReason, CloseReason, FOutBunch_CloseReason)
 
     bool IsError() const { return ArIsError; }
     int64_t GetNumBits() const { return Num; }

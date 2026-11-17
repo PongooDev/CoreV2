@@ -18,8 +18,19 @@
 #include <format>
 #include <string>
 
+// Epic's GetActivatingPawn is native C++ (Cast<AFortPawn>(CurrentActorInfo->AvatarActor)), so it's called directly
+// where the Finder found it (Natives::UFortGameplayAbility_GetActivatingPawn, HookNatives). The UFunction is only the
+// fallback: UObject::ProcessEvent returns without running anything on a pending-kill object (7.00 0x19A25C0 tests the
+// FUObjectItem's PendingKill bit first), and an ability can be that by the time its EndAbility cleanup runs
+// (UAbilitySystemComponent::NotifyAbilityEnded, inside Super::EndAbility, marks an InstancedPerExecution instance
+// pending kill; the cleanup comes after it, 7.00 0x9E8312). Then RemoveAbilityWeapon found no pawn when the turret or
+// the X-4 Stormwing was left, and the player kept the turret camera with nothing put back in their hands.
 AFortPawn* UFortGameplayAbility::GetActivatingPawn() const
 {
+    if (Natives::UFortGameplayAbility_GetActivatingPawn)
+    {
+        return Natives::UFortGameplayAbility_GetActivatingPawn(reinterpret_cast<const UGameplayAbility*>(this));
+    }
     Reflection::FParams Params(StaticFunction_GetActivatingPawn());
     return Params.Call(const_cast<UFortGameplayAbility*>(this)) ? Params.Take<AFortPawn*>(L"ReturnValue") : nullptr;
 }
@@ -152,7 +163,9 @@ void UFortGameplayAbility::RemoveAbilityWeapon()
     {
         if (WorldItem)
         {
-            Log::Warning(L"Ability weapon: {} ends with {} granted but no pawn with authority to take it from", GetName().ToStdString(), WorldItem->GetName().ToStdString());
+            Log::Warning(L"Ability weapon: {} ends with {} granted but no pawn with authority to take it from ({}; the ability is {}pending kill, GetActivatingPawn {})",
+                GetName().ToStdString(), WorldItem->GetName().ToStdString(), Pawn ? L"the pawn isn't the authority" : L"no pawn", IsPendingKill() ? L"" : L"not ",
+                Natives::UFortGameplayAbility_GetActivatingPawn ? L"called directly" : L"through ProcessEvent");
         }
         return;
     }
@@ -196,6 +209,33 @@ void UFortGameplayAbility::HookNatives()
     {
         Function->SetNativeFunc(&execEquipAbilityWeapon);
         Log::Info(L"Hook UFortGameplayAbility::EquipAbilityWeapon: native");
+    }
+
+    // GetActivatingPawn's exec thunk (P_FINISH, then one call) calls the C++ function, which starts by reading the
+    // ability's CurrentActorInfo (push rbx; sub rsp, 20h; mov rcx, [rcx+378h] on 6.31, 7.00, 7.10 and 7.20). A thunk
+    // with no single such call keeps the ProcessEvent path.
+    if (UFunction* Function = StaticFunction_GetActivatingPawn())
+    {
+        const uintptr_t Exec = reinterpret_cast<uintptr_t>(Function->GetNativeFunc());
+        const uintptr_t ExecEnd = Exec && Finder::IsReadable(reinterpret_cast<const void*>(Exec), 0x10) ? Finder::FunctionEnd(Exec) : 0;
+        const auto Calls = ExecEnd > Exec && ExecEnd - Exec < 0x80 ? Finder::DirectCalls(Exec, ExecEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>{};
+        const uintptr_t Target = Calls.size() == 1 ? Calls[0].second : 0;
+        const uintptr_t TargetEnd = Target && Finder::FunctionStart(Target) == Target ? Finder::FunctionEnd(Target) : 0;
+        bool bReadsActorInfo = false;
+        for (uintptr_t Site = Target; TargetEnd > Target && TargetEnd - Target < 0x100 && Site + 7 <= Target + 0x10 && !bReadsActorInfo; ++Site)
+        {
+            const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(Site);
+            bReadsActorInfo = Bytes[0] == 0x48 && Bytes[1] == 0x8B && (Bytes[2] & 0xC7) == 0x81;
+        }
+        if (bReadsActorInfo)
+        {
+            Natives::UFortGameplayAbility_GetActivatingPawn = reinterpret_cast<decltype(Natives::UFortGameplayAbility_GetActivatingPawn)>(Target);
+            Log::Info(L"Finder: UFortGameplayAbility::GetActivatingPawn at 0x{:X}, called directly", Target - Finder::ImageBase());
+        }
+        else
+        {
+            Log::Info(L"Finder: UFortGameplayAbility::GetActivatingPawn's thunk calls no getter Core knows ({} calls); it goes through ProcessEvent", Calls.size());
+        }
     }
 
     const ptrdiff_t AbilityGrantedWeaponItemOffset = Member_SmallPreviewImageOverride.GetOffsetChecked() + sizeof(UTexture2D*);

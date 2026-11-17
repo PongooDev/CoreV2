@@ -726,6 +726,10 @@ namespace Natives
     // where the build's EndAbility cleanup reads it to give the ability's weapon its lifespan (7.00 0x9ED226, 7.10
     // 0x9FEC16: lea rsi, [rdi+8F0h] ... SetLifeSpan(3.0)); -1 where the cleanup has no such step.
     inline ptrdiff_t UFortGameplayAbility_AbilityGrantedWeapon = -1;
+    // UFortGameplayAbility::GetActivatingPawn, the C++ function its exec thunk calls (6.31 0xA88B20, 7.00 0x9EDB60, 7.10
+    // 0x9FF550, 7.20 0xAD6CD0: Cast<AFortPawn>(CurrentActorInfo->AvatarActor)). Called directly, not through ProcessEvent,
+    // which rejects an ability that its EndAbility has already marked pending kill; null where the thunk doesn't call it.
+    inline AFortPawn* (*UFortGameplayAbility_GetActivatingPawn)(const UGameplayAbility* This) = nullptr;
     // The game code a DBNO revive runs (1.8 AFortPlayerPawn::ServerReviveFromDBNO_Implementation, 0x7FF160), for the
     // builds that strip that implementation (1.8.1): Finder::ResolveDBNOReviveLive.
     inline int32_t AFortPlayerPawn_CanReviveFromDBNOIndex = -1;

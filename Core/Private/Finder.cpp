@@ -688,6 +688,29 @@ bool Finder::ReadsMemberAt(uintptr_t Function, int32_t Displacement)
     return bReads;
 }
 
+bool Finder::KeepsSecondArgument(uintptr_t Function)
+{
+    // Up to the first call or return: mov r64, rdx (8B /r, rm rdx) or mov r/m64, rdx (89 /r, reg rdx: a home-space spill).
+    bool bDone = false;
+    bool bKeeps = false;
+    ForEachInstruction(Function, [&](uintptr_t, const hde64s& Instruction)
+    {
+        if (bDone || bKeeps)
+        {
+            return;
+        }
+        if (Instruction.opcode == 0xE8 || Instruction.opcode == 0xC3)
+        {
+            bDone = true;
+            return;
+        }
+        const bool bModRm = (Instruction.flags & F_MODRM) && Instruction.rex_w;
+        bKeeps = bModRm && ((Instruction.opcode == 0x8B && Instruction.modrm_mod == 3 && Instruction.modrm_rm == 2 && !Instruction.rex_b)
+            || (Instruction.opcode == 0x89 && Instruction.modrm_reg == 2 && !Instruction.rex_r));
+    });
+    return bKeeps;
+}
+
 bool Finder::TakesMemberAddressAt(uintptr_t Function, int32_t Displacement)
 {
     bool bTakes = false;

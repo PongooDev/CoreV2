@@ -1130,9 +1130,14 @@ namespace Natives
     // cloudsave=%s."): the plot's playset loaded, then OnAsyncLoadingOfPlaysetComplete; UPlaysetLevelStreamComponent's
     // LoadPlaysetAsyncNoCallback (0x1325850; 7.10 0x1364750) and UnloadPlaysetAsyncNoCallback (0x1338210; 7.10
     // 0x13775D0), the callers of LoadPlayset ("UPlaysetLevelStreamComponent::LoadPlayset Error: no owner for %s") and
-    // UnloadPlayset ("UPlaysetLevelStreamComponent::UnloadPlayset %s") that return lea rax, [rbx+disp32] after the call.
+    // UnloadPlayset ("UPlaysetLevelStreamComponent::UnloadPlayset %s") that return lea rax, [rbx+disp32] after the call;
+    // on 7.20 both are tail calls (0x144B740: jmp LoadPlayset; 0x145B140: mov dl, 1; jmp UnloadPlayset).
     inline void* (*AFortVolume_ClearVolumeOnServer)(UObject* This) = nullptr;
-    inline void* (*UFortLevelSaveComponent_LoadPlaysetAsync)(UObject* This) = nullptr;
+    // 7.10+ (0xF7EA90; 7.20 0x10646C0) take the playset to load, a TSoftObjectPtr<UFortPlaysetItemDefinition> by value
+    // (the plot's, the payload BeginRestrictedPlotLoad binds the step with; 7.20 0x1068AF0), where 7.00 reads the plot's
+    // itself: LoadPlaysetAsyncTakesPlayset, from the function keeping rdx before its first call (mov rdi, rdx).
+    inline void* (*UFortLevelSaveComponent_LoadPlaysetAsync)(UObject* This, void* PlaysetToLoad) = nullptr;
+    inline bool UFortLevelSaveComponent_LoadPlaysetAsyncTakesPlayset = false;
     inline void* (*UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)(UObject* This) = nullptr;
     inline void* (*UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)(UObject* This) = nullptr;
     // UFortLevelSaveComponent::ResetLevelRecord (0xF5AAC0; 7.10 0xF88310, the function that sets the island file's

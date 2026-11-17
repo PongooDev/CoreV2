@@ -73,6 +73,35 @@ private:
 
 static_assert(sizeof(TAssetPtr<UObject>) == sizeof(FAssetPtr));
 
+// FSoftObjectPtr by value, in UE 4.19+'s layout (ObjectLayout bSoftObjectPaths, 0x28 bytes): what Core hands a native
+// that takes a TSoftObjectPtr by value. MSVC passes such an argument as a pointer to the caller's copy, and the callee
+// destroys it, so the copy's SubPathString is freed by the game (Core's FString allocates with the game's GMalloc).
+struct FSoftObjectPtr
+{
+    struct FSoftObjectPath
+    {
+        FName AssetPathName;
+        FString SubPathString;
+    };
+
+    FSoftObjectPtr() = default;
+
+    // A copy of an engine TAssetPtr's object and path. Only for bSoftObjectPaths builds: Asset's path is read in 4.19's
+    // layout.
+    template <class T>
+    explicit FSoftObjectPtr(const TAssetPtr<T>& Asset)
+        : WeakPtr(reinterpret_cast<const UObject*>(Asset.Get())),
+          ObjectID(*reinterpret_cast<const FSoftObjectPath*>(&Asset.ToStringReference()))
+    {
+    }
+
+    FWeakObjectPtr WeakPtr;
+    int32_t TagAtLastTest = 0;
+    FSoftObjectPath ObjectID;
+};
+
+static_assert(sizeof(FSoftObjectPtr) == 0x28 && offsetof(FSoftObjectPtr, ObjectID) == 0x10);
+
 // FSoftObjectPtr (1.10) holds an FSoftObjectPath, 8 bytes longer, where FAssetPtr holds an FStringAssetReference.
 template <class T>
 inline constexpr size_t Reflection::SoftPathGrowth<TAssetPtr<T>> = 8;

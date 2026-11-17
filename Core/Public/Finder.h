@@ -134,6 +134,9 @@ namespace Finder
     // Whether an instruction of the function's pieces addresses memory at [reg+Displacement] (disp32, not off rbp): a
     // member of an object it reads or writes.
     bool ReadsMemberAt(uintptr_t Function, int32_t Displacement);
+    // Whether the function keeps its second argument (rdx) before its first call: mov r64, rdx, or a spill of rdx. A
+    // native that gained a parameter in a later build (UFortLevelSaveComponent::LoadPlaysetAsync's playset, 7.10+).
+    bool KeepsSecondArgument(uintptr_t Function);
     // Whether the function takes the address of a member at [reg+Displacement] (lea, disp32): what it hands a helper, a
     // TWeakObjectPtr's Get or IsValid among them.
     bool TakesMemberAddressAt(uintptr_t Function, int32_t Displacement);

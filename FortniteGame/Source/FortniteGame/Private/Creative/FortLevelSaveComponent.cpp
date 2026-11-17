@@ -253,7 +253,9 @@ void UFortLevelSaveComponent::LoadPlotForUser(const FUniqueNetIdRepl& UserId, UF
         return;
     }
     UAsyncTaskQueue* Queue = UAsyncTaskQueue::IsAvailable() ? Volume->GetTaskQueue() : nullptr;
-    if (!Queue || !Natives::AFortVolume_ClearVolumeOnServer || !Natives::UFortLevelSaveComponent_ResetLevelRecord || !Natives::ULevelSaveRecord_NotifyFinishedRead)
+    if (!Queue || !Natives::AFortVolume_ClearVolumeOnServer || !Natives::UFortLevelSaveComponent_ResetLevelRecord || !Natives::ULevelSaveRecord_NotifyFinishedRead
+        || !Natives::UFortLevelSaveComponent_LoadPlaysetAsync || !Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback
+        || !Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)
     {
         Log::Error(L"Creative: {}'s island {} can't load: the volume's task queue or one of the island's steps wasn't found (see the \"Finder: Creative's island load\" line)",
             User, PlotItem->GetItemId().ToStdString());
@@ -307,7 +309,16 @@ void UFortLevelSaveComponent::LoadPlotForUser(const FUniqueNetIdRepl& UserId, UF
                 Queue->Add(reinterpret_cast<UObject*>(Stream),
                     UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(Stream, &UPlaysetLevelStreamComponent::UnloadPlaysetAsyncNoCallback));
             }
-            Queue->Add(this, UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(this, &UFortLevelSaveComponent::LoadPlaysetAsync));
+            if (Natives::UFortLevelSaveComponent_LoadPlaysetAsyncTakesPlayset)
+            {
+                // 7.10+: the plot's playset is the step's payload, as BeginRestrictedPlotLoad binds it (7.20 0x1068AF0).
+                const FSoftObjectPtr PlaysetToLoad = Playset ? FSoftObjectPtr(*Playset) : FSoftObjectPtr();
+                Queue->Add(this, UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(this, &UFortLevelSaveComponent::LoadPlaysetAsync, PlaysetToLoad));
+            }
+            else
+            {
+                Queue->Add(this, UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(this, &UFortLevelSaveComponent::LoadPlaysetAsync));
+            }
             Queue->Add(reinterpret_cast<UObject*>(Stream),
                 UAsyncTaskQueue::FAsyncTaskDelegate::CreateUObject(Stream, &UPlaysetLevelStreamComponent::LoadPlaysetAsyncNoCallback));
         }
@@ -329,7 +340,21 @@ FMulticastScriptDelegate* UFortLevelSaveComponent::LoadPlaysetAsync()
     // OnAsyncLoadingOfPlaysetComplete (0xF55180) makes it the stream component's and the volume's and broadcasts
     // OnFinishedPlaysetLoad, which it returns.
     return Natives::UFortLevelSaveComponent_LoadPlaysetAsync
-        ? static_cast<FMulticastScriptDelegate*>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync(this)) : nullptr;
+        ? static_cast<FMulticastScriptDelegate*>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync(this, nullptr)) : nullptr;
+}
+
+FMulticastScriptDelegate* UFortLevelSaveComponent::LoadPlaysetAsync(FSoftObjectPtr PlaysetToLoad)
+{
+    // 7.10+ (0xF7EA90; 7.20 0x10646C0): the same with the playset handed in. The argument is by value, which MSVC passes
+    // as a pointer to the caller's copy that the callee destroys (7.20 frees its SubPathString on every return), so the
+    // native gets a copy of its own that Core doesn't destroy after it.
+    if (!Natives::UFortLevelSaveComponent_LoadPlaysetAsync)
+    {
+        return nullptr;
+    }
+    alignas(FSoftObjectPtr) uint8_t Argument[sizeof(FSoftObjectPtr)];
+    new (Argument) FSoftObjectPtr(PlaysetToLoad);
+    return static_cast<FMulticastScriptDelegate*>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync(this, Argument));
 }
 
 FMulticastScriptDelegate* UFortLevelSaveComponent::LoadFromDssAsync()

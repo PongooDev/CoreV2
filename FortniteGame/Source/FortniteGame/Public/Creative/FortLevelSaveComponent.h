@@ -145,6 +145,9 @@ public:
     // The plot's playset loaded (the game's own step, Natives::UFortLevelSaveComponent_LoadPlaysetAsync): returns
     // OnFinishedPlaysetLoad, which OnAsyncLoadingOfPlaysetComplete broadcasts once the playset is the volume's.
     FMulticastScriptDelegate* LoadPlaysetAsync();
+    // 7.10+'s (TSoftObjectPtr<UFortPlaysetItemDefinition> by value): the playset to load, the plot's, which the queue's
+    // delegate carries as its payload the way the game's own BeginRestrictedPlotLoad binds the step (7.20 0x1068AF0).
+    FMulticastScriptDelegate* LoadPlaysetAsync(FSoftObjectPtr PlaysetToLoad);
     // Restored step (21.40's name): the island's file checked out of the DSS with its bytes; its answer goes to
     // FinalizeDownload, or LoadFromDefault when the island has no file yet. Returns OnFinishedLoadingCloudFiles, which
     // CloudLoadFinished broadcasts.

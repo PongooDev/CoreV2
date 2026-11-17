@@ -151,6 +151,25 @@ namespace
                 return Start;
             }
         }
+        // 7.20: the step tail-calls Function, which returns the member itself (0x144B740: jmp LoadPlayset; 0x145B140:
+        // cmp qword ptr [rcx+158h], 0; jz; mov dl, 1; jmp UnloadPlayset). Such a stub has no unwind entry, so its start is
+        // the nearest 16-aligned address at or before the jmp, within 0x30, whose address a delegate binding takes
+        // (lea r64, [rip+X]: the game's own BeginRestrictedPlotLoad and reset bind it). Functions that end in a jmp to it
+        // after work of their own (7.20 0x142D6A0, a BeginPlay) are in vtables, not bound.
+        for (const uintptr_t Site : Function ? Finder::CallsTo(Function, true) : std::vector<uintptr_t>())
+        {
+            if (*reinterpret_cast<const uint8_t*>(Site) != 0xE9)
+            {
+                continue;
+            }
+            for (uintptr_t Start = Site & ~static_cast<uintptr_t>(0xF); Site - Start < 0x30; Start -= 0x10)
+            {
+                if (!Finder::AddressRefs(Start).empty())
+                {
+                    return Start;
+                }
+            }
+        }
         return 0;
     }
 
@@ -225,6 +244,8 @@ namespace
         // The steps of the island's own: the plot's playset loaded, and the stream component's level in and out.
         Natives::UFortLevelSaveComponent_LoadPlaysetAsync = reinterpret_cast<decltype(Natives::UFortLevelSaveComponent_LoadPlaysetAsync)>(
             FunctionReferencing(L"Start playset async load for user %s, cloudsave=%s."));
+        Natives::UFortLevelSaveComponent_LoadPlaysetAsyncTakesPlayset = Natives::UFortLevelSaveComponent_LoadPlaysetAsync
+            && Finder::KeepsSecondArgument(reinterpret_cast<uintptr_t>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync));
         Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback = reinterpret_cast<decltype(Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)>(
             StepCalling(FunctionReferencing(L"UPlaysetLevelStreamComponent::LoadPlayset Error: no owner for %s")));
         Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback = reinterpret_cast<decltype(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)>(
@@ -254,11 +275,12 @@ namespace
 
         const auto Address = [](const void* Function) { return Function ? reinterpret_cast<uintptr_t>(Function) - Finder::ImageBase() : 0; };
         Log::Info(L"Finder: Creative's island load: AFortVolume::GetTaskQueue 0x{:X}, UAsyncTaskQueue::Add 0x{:X}, its start 0x{:X} (ExecuteNextTask 0x{:X}), the volume's clear 0x{:X}, "
-            L"UFortLevelSaveComponent::LoadPlaysetAsync 0x{:X}, UPlaysetLevelStreamComponent::LoadPlaysetAsyncNoCallback 0x{:X} and UnloadPlaysetAsyncNoCallback 0x{:X}, "
+            L"UFortLevelSaveComponent::LoadPlaysetAsync 0x{:X}{}, UPlaysetLevelStreamComponent::LoadPlaysetAsyncNoCallback 0x{:X} and UnloadPlaysetAsyncNoCallback 0x{:X}, "
             L"UFortLevelSaveComponent::ResetLevelRecord 0x{:X} (slot 0x{:X}), ULevelSaveRecord's end of a read 0x{:X}",
             Address(reinterpret_cast<const void*>(Natives::AFortVolume_GetTaskQueue)), Address(reinterpret_cast<const void*>(Natives::UAsyncTaskQueue_Add)),
             Address(reinterpret_cast<const void*>(Natives::UAsyncTaskQueue_Start)), ExecuteNextTask ? ExecuteNextTask - Finder::ImageBase() : 0,
             Address(reinterpret_cast<const void*>(Natives::AFortVolume_ClearVolumeOnServer)), Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync)),
+            Natives::UFortLevelSaveComponent_LoadPlaysetAsyncTakesPlayset ? L" (takes the playset)" : L"",
             Address(reinterpret_cast<const void*>(Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)),
             Address(reinterpret_cast<const void*>(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)),
             Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_ResetLevelRecord)), ResetSlot, Address(reinterpret_cast<const void*>(Natives::ULevelSaveRecord_NotifyFinishedRead)));

@@ -334,6 +334,17 @@ void AFortPlayerControllerAthena::SetCreativePlotLinkedVolume(AFortVolume* Volum
         return;
     }
     AFortVolume* const Previous = CreativePlotLinkedVolume;
+    // Only a change of island goes to the setter (#485). The setter binds the controller to the new island's
+    // OnVolumeStateChanged and then unbinds it from the old island's, without checking that they differ (7.00 0xC67A90,
+    // 7.10 0xC866B0, 7.20 0xD63370). Given the island the player is already linked to, it took back the binding it had
+    // just made. A rift's teleport onto the island runs twice, so the player stayed linked to the island with nothing
+    // bound: a game's start (AFortMinigame::StartMinigame -> AFortVolumeManager::EnterReadOnlyForVolume) never reached
+    // their OnMinigameVolumeStateChanged and OnCreativePermissionsChanged, and Athena_PlayerController's
+    // PermissionsChanged -> HandlePermissions never ran RevokeItem(CreativeTool): the phone stayed.
+    if (Volume == Previous)
+    {
+        return;
+    }
     if (Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume)
     {
         Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume(this, Volume);
@@ -343,7 +354,7 @@ void AFortPlayerControllerAthena::SetCreativePlotLinkedVolume(AFortVolume* Volum
         CreativePlotLinkedVolume = Volume;
     }
     // The setter refreshes the old island's rifts; the new island's count the player once they are refreshed too.
-    if (Volume && Volume != Previous && AFortVolume::HasLinkedPortals())
+    if (Volume && AFortVolume::HasLinkedPortals())
     {
         for (AFortAthenaCreativePortal* Portal : static_cast<const TArray<AFortAthenaCreativePortal*>&>(Volume->LinkedPortals))
         {
@@ -354,10 +365,7 @@ void AFortPlayerControllerAthena::SetCreativePlotLinkedVolume(AFortVolume* Volum
         }
     }
     ForceNetUpdate();
-    if (Volume != Previous)
-    {
-        Log::Info(L"Creative: {} is {}", PlayerNameOf(this), Volume ? std::format(L"on the island {}", Volume->GetName().ToStdString()) : std::wstring(L"in the hub"));
-    }
+    Log::Info(L"Creative: {} is {}", PlayerNameOf(this), Volume ? std::format(L"on the island {}", Volume->GetName().ToStdString()) : std::wstring(L"in the hub"));
 #endif
 }
 

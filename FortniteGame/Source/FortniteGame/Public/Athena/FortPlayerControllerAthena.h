@@ -251,6 +251,7 @@ public:
     // (Natives::AFortPlayerControllerAthena_SetCreativePlotLinkedVolume): it binds the controller's
     // OnMinigameVolumeStateChanged to the island's state and refreshes the old island's rifts. The new island's rifts are
     // refreshed after it, so their CurrentPopulation counts the player. Assigns the property where the setter wasn't found.
+    // Does nothing when Volume is already the link: the setter would unbind the controller from that same island.
     void SetCreativePlotLinkedVolume(AFortVolume* Volume);
     // The player's own island: their rift's (null without a rift).
     AFortVolume* GetOwnedIsland() const;

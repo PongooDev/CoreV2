@@ -1,0 +1,123 @@
+#!/bin/sh
+# pre-commit guardrails for CoreV2. Enable once per clone: git config core.hooksPath tools/githooks
+# Runs on the staged content only and is meant to stay well under 5 seconds.
+# Blocks: pak AES keys, private keys, files over 5 MB, build/dependency folders, binaries,
+# and agent-local files.
+
+fail=0
+bad() { printf 'pre-commit: %s\n' "$1" >&2; fail=1; }
+warn() { printf 'pre-commit: warning: %s\n' "$1" >&2; }
+tab=$(printf '\t')
+MAXSIZE=5242880
+
+# Added/modified files: ":mode mode oldsha newsha status<TAB>path". No renames, so a moved file is checked as an add.
+raw=$(git -c core.quotepath=off diff --cached --raw --no-abbrev --no-renames --diff-filter=AM)
+[ -n "$raw" ] || exit 0
+
+sizein=""
+added=""
+while IFS="$tab" read -r meta path; do
+    [ -n "$path" ] || continue
+    set -- $meta
+    [ "$2" = 160000 ] && continue
+    [ "$5" = A ] && added="$added
+$path"
+    sizein="$sizein
+$4 $path"
+    case "/$path" in
+        */[Xx]64/*|*/[Bb]in/*|*/[Oo]bj/*|*/node_modules/*|*/.vs/*)
+            bad "$path is under a build or dependency folder (x64, bin, obj, node_modules, .vs); unstage it." ;;
+    esac
+    case "$path" in
+        *.[Pp][Dd][Bb]|*.[Dd][Ll][Ll]|*.[Ee][Xx][Ee])
+            bad "$path is a built binary (.pdb, .dll, .exe); unstage it." ;;
+        *.[Uu][Tt][Oo][Cc]|*.[Uu][Cc][Aa][Ss]|*.[Uu][Aa][Ss][Ss][Ee][Tt]|*.[Uu][Ee][Xx][Pp]|*.[Uu][Bb][Uu][Ll][Kk]|*.[Uu][Mm][Aa][Pp])
+            bad "$path is a game asset; unstage it, game files are never committed." ;;
+        *.[Pp][Aa][Kk])
+            bad "$path is a game pak; unstage it, paks are never committed here." ;;
+        .claude/settings.local.json|*/.claude/settings.local.json)
+            bad "$path is a local agent settings file; unstage it." ;;
+        .claude/worktrees|.claude/worktrees/*|*/.claude/worktrees/*)
+            bad "$path is an agent worktree; unstage it." ;;
+        .freebuff/project-id|*/.freebuff/project-id)
+            bad "$path is a local agent id file; unstage it." ;;
+    esac
+done <<EOT
+$raw
+EOT
+
+# Sizes of the staged blobs (one git process for all files).
+out=$(printf '%s\n' "$sizein" | sed '/^$/d' | git cat-file --batch-check='%(objectsize) %(rest)' |
+while read -r size p; do
+    case "$size" in ''|*[!0-9]*) continue ;; esac
+    if [ "$size" -gt "$MAXSIZE" ]; then
+        printf 'pre-commit: %s is over 5 MB (%s bytes); keep it out of git.\n' "$p" "$size" >&2
+        echo big
+    fi
+done)
+[ -n "$out" ] && fail=1
+
+# Added lines: pak AES keys (0x + 64 hex, or a bare 64-hex string on a line mentioning key or aes) and private keys.
+out=$(git -c core.quotepath=off diff --cached -U0 --no-color --no-ext-diff --no-renames --diff-filter=AM |
+awk '
+function hexcheck(c,   pos, s, start, n, pre, bare) {
+    bare = (tolower(c) ~ /key|aes/)
+    pos = 1
+    while (pos <= length(c)) {
+        s = substr(c, pos)
+        if (!match(s, /[0-9A-Fa-f]+/)) break
+        start = pos + RSTART - 1
+        n = RLENGTH
+        pre = (start > 2) ? substr(c, start - 2, 2) : ""
+        if (n == 64 && (pre == "0x" || pre == "0X" || bare)) return 1
+        pos = start + n
+    }
+    return 0
+}
+BEGIN { begin = "-----BEG" "IN" }
+/^diff --git /{ inhunk = 0; next }
+/^@@/{ inhunk = 1; next }
+!inhunk && /^\+\+\+ /{ f = substr($0, 7); sub(/\t.*$/, "", f); proj = (f ~ /\.(vcxproj|filters|sln|props|targets)$/); next }
+inhunk && /^\+/{
+    c = substr($0, 2)
+    if (index(c, begin) && c ~ /PRIVATE KEY-----/ && !(f in priv)) { priv[f] = 1; print "P" f }
+    if (length(c) < 20000 && !(f in key) && hexcheck(c)) { key[f] = 1; print "K" f }
+    if (proj && (c ~ /<PlatformToolset>v(14[4-9]|1[5-9][0-9]|[2-9][0-9][0-9])/ || c ~ /<VCProjectVersion>(1[89]|[2-9][0-9])/ || c ~ /ToolsVersion="(1[89]|[2-9][0-9])/ || c ~ /Visual Studio Version (1[89]|[2-9][0-9])/ || c ~ /^VisualStudioVersion = (1[89]|[2-9][0-9])\./ || c ~ /VCTargetsPath(1[89]|[2-9][0-9])/) && !(f in tseen)) { tseen[f] = 1; print "T" f }
+}')
+if [ -n "$out" ]; then
+    fail=1
+    printf '%s\n' "$out" | while read -r line; do
+        case "$line" in
+            P*) printf 'pre-commit: %s contains a private key; remove it and rotate it.\n' "${line#P}" >&2 ;;
+            T*) printf 'pre-commit: %s was saved with a newer toolset than v143 (VS 18); reopen it in VS 2022 or restore the v143 lines.\n' "${line#T}" >&2 ;;
+            K*) printf 'pre-commit: %s contains a pak AES key (64 hex characters); remove it, keys never go in git.\n' "${line#K}" >&2 ;;
+        esac
+    done
+fi
+
+# CoreV2: a new source or header should be listed in the projects (warning only).
+srvtxt=""; clitxt=""; redtxt=""; loaded=""
+printf '%s\n' "$added" | while read -r p; do
+    case "$p" in
+        *.cpp|*.c|*.h|*.hpp|*.inl) ;;
+        *) continue ;;
+    esac
+    case "$p" in
+        Core/*|Engine/*|FortniteGame/*) proj=Server; inc="Include=\"../$p\"" ;;
+        Server/*)   proj=Server;   inc="Include=\"${p#Server/}\"" ;;
+        Client/*)   proj=Client;   inc="Include=\"${p#Client/}\"" ;;
+        Redirect/*) proj=Redirect; inc="Include=\"${p#Redirect/}\"" ;;
+        *) continue ;;
+    esac
+    case "$loaded" in *" $proj "*) ;; *)
+        loaded="$loaded $proj "
+        eval "${proj}txt=\$(git show \":$proj/$proj.vcxproj\" 2>/dev/null | tr '\\\\' '/')" ;;
+    esac
+    eval "txt=\$${proj}txt"
+    case "$txt" in
+        *"$inc"*) ;;
+        *) printf 'pre-commit: warning: %s is not listed in %s/%s.vcxproj; run Core-Docs\\Tools\\sync_vcxproj.py and stage the project files.\n' "$p" "$proj" "$proj" >&2 ;;
+    esac
+done
+
+exit $fail

@@ -114,7 +114,10 @@ public:
     bool LaunchCharacterJump(const FVector& LaunchVelocity, bool bXYOverride, bool bZOverride, bool bIgnoreFallDamage, bool bPlayFeedbackEvent);
     AFortWeapon* EquipWeaponDefinition(const UFortWeaponItemDefinition* WeaponData, const FGuid& ItemEntryGuid);
     bool EquipDefaultWeapon();
-    void RemoveAbilityWeapon(AFortWeapon* Weapon);
+    // Server: takes an ability's weapon out of the pawn's hands and its weapon list, putting the last weapon (or the
+    // default one) back in hand when it was held. bDestroyWeapon false leaves the actor to whoever ends its life: an
+    // ability whose EndAbility gives it its lifespan (UFortGameplayAbility::RemoveAbilityWeapon).
+    void RemoveAbilityWeapon(AFortWeapon* Weapon, bool bDestroyWeapon = true);
     void TriggerFeedbackEvent(FName EventName, AFortPawn* InstigatorPawn, AFortPawn* Recipient, float OverriddenDelay);
     // The game's (6.20 CL-4497486 0x1241770, an AFortPawn virtual): the ability whose current montage is Animation
     // generates its target data and sends it (ApplicationTag), what a montage's UFortAnimNotify_TriggerGameplayAbility

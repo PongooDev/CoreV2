@@ -8,6 +8,7 @@
 #include <cstdint>
 
 class AFortPawn;
+class AFortWeapon;
 class UFortItemDefinition;
 class UFortWeaponItemDefinition;
 class UFortWorldItem;
@@ -104,6 +105,9 @@ public:
     void RemoveAbilityWeapon();
 
     TWeakObjectPtr<UFortWorldItem>& GetAbilityGrantedWeaponItem() const;
+    // AbilityGrantedWeapon, the weapon EquipAbilityWeapon equipped; null where the build's EndAbility cleanup doesn't read
+    // it (Natives::UFortGameplayAbility_AbilityGrantedWeapon).
+    TWeakObjectPtr<AFortWeapon>* GetAbilityGrantedWeapon() const;
 
     static void HookNatives();
 

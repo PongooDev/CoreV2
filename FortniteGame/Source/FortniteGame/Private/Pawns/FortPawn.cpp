@@ -262,7 +262,7 @@ bool AFortPawn::EquipDefaultWeapon()
     return CallVirtual<bool>(this, Natives::AFortPawn_EquipDefaultWeaponIndex);
 }
 
-void AFortPawn::RemoveAbilityWeapon(AFortWeapon* Weapon)
+void AFortPawn::RemoveAbilityWeapon(AFortWeapon* Weapon, bool bDestroyWeapon)
 {
 #if WITH_SERVER_CODE
     if (Role != ROLE_Authority || !Weapon)
@@ -287,7 +287,10 @@ void AFortPawn::RemoveAbilityWeapon(AFortWeapon* Weapon)
             EquipDefaultWeapon();
         }
     }
-    Weapon->K2_DestroyActor();
+    if (bDestroyWeapon)
+    {
+        Weapon->K2_DestroyActor();
+    }
 #endif
 }
 

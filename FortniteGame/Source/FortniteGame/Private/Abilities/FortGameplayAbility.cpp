@@ -15,6 +15,9 @@
 #include "UObject/UnrealType.h"
 #include "Weapons/FortWeapon.h"
 
+#include <format>
+#include <string>
+
 AFortPawn* UFortGameplayAbility::GetActivatingPawn() const
 {
     Reflection::FParams Params(StaticFunction_GetActivatingPawn());
@@ -76,6 +79,12 @@ TWeakObjectPtr<UFortWorldItem>& UFortGameplayAbility::GetAbilityGrantedWeaponIte
     return *reinterpret_cast<TWeakObjectPtr<UFortWorldItem>*>(reinterpret_cast<uintptr_t>(this) + Offset);
 }
 
+TWeakObjectPtr<AFortWeapon>* UFortGameplayAbility::GetAbilityGrantedWeapon() const
+{
+    const ptrdiff_t Offset = Natives::UFortGameplayAbility_AbilityGrantedWeapon;
+    return Offset > 0 ? reinterpret_cast<TWeakObjectPtr<AFortWeapon>*>(reinterpret_cast<uintptr_t>(this) + Offset) : nullptr;
+}
+
 void UFortGameplayAbility::EquipAbilityWeapon(UFortWeaponItemDefinition* WeaponDefinition, int32_t ItemLevel)
 {
 #if WITH_SERVER_CODE
@@ -113,11 +122,27 @@ void UFortGameplayAbility::EquipAbilityWeapon(UFortWeaponItemDefinition* WeaponD
 
     const FGuid ItemGuid = ItemEntry.ItemGuid;
     AFortWeapon* Weapon = Pawn->EquipWeaponDefinition(WeaponDefinition, ItemGuid);
+    // The weapon too (AbilityGrantedWeapon), which the build's EndAbility cleanup gives its lifespan when the ability ends.
+    if (TWeakObjectPtr<AFortWeapon>* GrantedWeapon = Weapon ? GetAbilityGrantedWeapon() : nullptr)
+    {
+        *GrantedWeapon = TWeakObjectPtr<AFortWeapon>(Weapon);
+    }
     Log::Info(L"Ability weapon: {} gives {} {} ({} rounds loaded){}", GetName().ToStdString(), Pawn->GetName().ToStdString(), WeaponDefinition->GetName().ToStdString(),
         static_cast<int32_t>(ItemEntry.LoadedAmmo), Weapon ? L"" : L", but the pawn equipped nothing");
 #endif
 }
 
+// The X-4 Stormwing's guns stayed in the player's view after they got out (#480: the camera stayed the plane gun's,
+// B_Ranged_Dual_Generic_FerretVehicle's CameraBase3PClass Athena_PlayerCameraModeMountedTurret). GA_FerretVehicleWeapon
+// gives them with EquipAbilityWeapon and its EndAbility takes them back, as the mounted turret's ability does (#461).
+// The game's own EndAbility cleanup (7.00 0x9ECFE0, 7.10 0x9FE9D0, run right after this) shows Epic's order: the held
+// weapon goes through the pawn's RemoveAbilityWeapon (7.00 slot 0x1CF: out of CurrentWeaponList, UnEquip, CurrentWeapon
+// cleared), a server-only step that is stripped (a return-zero stub, 7.00 0x2A0730 / 7.10 0x2A7140, called with the
+// player controller), the item leaves the inventory (the controller's RemoveInventoryItem, bForceRemoval), and then the
+// weapon in AbilityGrantedWeapon gets SetLifeSpan(3.0) (vtable +0x358): it isn't destroyed there and then. Core used to
+// destroy it at once, before the client had swapped to the weapon put back in its hands, and never set
+// AbilityGrantedWeapon. Where the cleanup reads AbilityGrantedWeapon (Natives::UFortGameplayAbility_AbilityGrantedWeapon,
+// HookNatives), the weapon is now left to that lifespan; elsewhere it is destroyed as before.
 void UFortGameplayAbility::RemoveAbilityWeapon()
 {
 #if WITH_SERVER_CODE
@@ -125,11 +150,16 @@ void UFortGameplayAbility::RemoveAbilityWeapon()
     AFortPawn* Pawn = WorldItem ? GetActivatingPawn() : nullptr;
     if (!Pawn || Pawn->Role != ROLE_Authority)
     {
+        if (WorldItem)
+        {
+            Log::Warning(L"Ability weapon: {} ends with {} granted but no pawn with authority to take it from", GetName().ToStdString(), WorldItem->GetName().ToStdString());
+        }
         return;
     }
 
     FFortItemEntry& ItemEntry = WorldItem->ItemEntry;
     const FGuid ItemGuid = ItemEntry.ItemGuid;
+    const bool bLifespanByCleanup = GetAbilityGrantedWeapon() != nullptr;
     TArray<AFortWeapon*>& Weapons = Pawn->CurrentWeaponList;
     for (int32_t Index = 0; Index < Weapons.Num(); ++Index)
     {
@@ -137,12 +167,16 @@ void UFortGameplayAbility::RemoveAbilityWeapon()
         if (Weapon && Weapon->ItemEntryGuid == ItemGuid)
         {
             const bool bHeld = static_cast<AFortWeapon*>(Pawn->CurrentWeapon) == Weapon;
-            Pawn->RemoveAbilityWeapon(Weapon);
-            Log::Info(L"Ability weapon: {} takes {} from {} ({})", GetName().ToStdString(), Weapon->GetName().ToStdString(), Pawn->GetName().ToStdString(),
-                bHeld ? L"it was in hand, the pawn's previous weapon is equipped" : L"it wasn't in hand");
+            Pawn->RemoveAbilityWeapon(Weapon, !bLifespanByCleanup);
+            AFortWeapon* Held = static_cast<AFortWeapon*>(Pawn->CurrentWeapon);
+            Log::Info(L"Ability weapon: {} takes {} from {} ({}; {})", GetName().ToStdString(), Weapon->GetName().ToStdString(), Pawn->GetName().ToStdString(),
+                bHeld ? std::format(L"it was in hand, {} is now", Held ? Held->GetName().ToStdString() : std::wstring(L"nothing")) : std::wstring(L"it wasn't in hand"),
+                bLifespanByCleanup ? L"EndAbility gives it its lifespan" : L"destroyed");
             return;
         }
     }
+    Log::Warning(L"Ability weapon: {} ends but {} has no weapon of its item {} ({} in its weapon list)", GetName().ToStdString(), Pawn->GetName().ToStdString(),
+        WorldItem->GetName().ToStdString(), Weapons.Num());
 #endif
 }
 
@@ -169,6 +203,22 @@ void UFortGameplayAbility::HookNatives()
     {
         EndAbilityCleanupOG = reinterpret_cast<decltype(EndAbilityCleanupOG)>(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(Call), 1, 5));
         Hooks::RedirectCall(L"UFortGameplayAbility::EndAbility -> RemoveAbilityWeapon", Call, reinterpret_cast<void*>(&EndAbilityCleanupCall));
+
+        // AbilityGrantedWeapon follows AbilityGrantedWeaponItem (21.40's layout). A build whose cleanup hands both weak
+        // pointers to their helpers (lea rcx, [rdi+8E8h] and lea rsi, [rdi+8F0h] on 7.00 and 7.10) gives the weapon its
+        // lifespan (RemoveAbilityWeapon above); one whose cleanup doesn't keeps Core's destroy.
+        const ptrdiff_t AbilityGrantedWeaponOffset = AbilityGrantedWeaponItemOffset + static_cast<ptrdiff_t>(sizeof(FWeakObjectPtr));
+        const uintptr_t Cleanup = reinterpret_cast<uintptr_t>(EndAbilityCleanupOG);
+        if (Finder::TakesMemberAddressAt(Cleanup, static_cast<int32_t>(AbilityGrantedWeaponItemOffset))
+            && Finder::TakesMemberAddressAt(Cleanup, static_cast<int32_t>(AbilityGrantedWeaponOffset)))
+        {
+            Natives::UFortGameplayAbility_AbilityGrantedWeapon = AbilityGrantedWeaponOffset;
+            Log::Info(L"Finder: UFortGameplayAbility::AbilityGrantedWeapon +0x{:X}, given its lifespan by the EndAbility cleanup", AbilityGrantedWeaponOffset);
+        }
+        else
+        {
+            Log::Info(L"Finder: the EndAbility cleanup reads no AbilityGrantedWeapon (+0x{:X}); ability weapons are destroyed when taken", AbilityGrantedWeaponOffset);
+        }
     }
 }
 

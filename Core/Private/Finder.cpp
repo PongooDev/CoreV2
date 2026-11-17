@@ -688,6 +688,17 @@ bool Finder::ReadsMemberAt(uintptr_t Function, int32_t Displacement)
     return bReads;
 }
 
+bool Finder::TakesMemberAddressAt(uintptr_t Function, int32_t Displacement)
+{
+    bool bTakes = false;
+    ForEachInstruction(Function, [&](uintptr_t, const hde64s& Instruction)
+    {
+        const bool bLea = Instruction.opcode == 0x8D && (Instruction.flags & F_MODRM) && Instruction.modrm_mod == 2 && Instruction.modrm_rm != 5;
+        bTakes = bTakes || (bLea && static_cast<int32_t>(Instruction.disp.disp32) == Displacement);
+    });
+    return bTakes;
+}
+
 std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DirectCalls(uintptr_t Begin, uintptr_t End)
 {
     return Memcury::Scanner::FindDirectCalls(Begin, End);

@@ -717,6 +717,10 @@ namespace Natives
     inline int32_t UCharacterMovementComponent_ServerMove_ImplementationIndex = -1;
     inline int32_t AFortPlayerPawn_EquipLastWeaponIndex = -1;
     inline int32_t AFortPawn_EquipDefaultWeaponIndex = -1;
+    // UFortGameplayAbility::AbilityGrantedWeapon (21.40: the TWeakObjectPtr<AFortWeapon> after AbilityGrantedWeaponItem),
+    // where the build's EndAbility cleanup reads it to give the ability's weapon its lifespan (7.00 0x9ED226, 7.10
+    // 0x9FEC16: lea rsi, [rdi+8F0h] ... SetLifeSpan(3.0)); -1 where the cleanup has no such step.
+    inline ptrdiff_t UFortGameplayAbility_AbilityGrantedWeapon = -1;
     // The game code a DBNO revive runs (1.8 AFortPlayerPawn::ServerReviveFromDBNO_Implementation, 0x7FF160), for the
     // builds that strip that implementation (1.8.1): Finder::ResolveDBNOReviveLive.
     inline int32_t AFortPlayerPawn_CanReviveFromDBNOIndex = -1;

@@ -404,7 +404,15 @@ void UFortLevelSaveComponent::UnloadPlotForUser()
     // The last save, with the checkin: the game's own cloud save as its EndPlay calls it (0xF41600, bCheckin true).
     if (Natives::UFortLevelSaveComponent_CloudSave && bIsLoaded)
     {
-        Natives::UFortLevelSaveComponent_CloudSave(this, Plot, Owner, true);
+        if (Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly)
+        {
+            // 7.10: the plot and its owner are the component's own (LoadedPlot, AccountIdOfOwner).
+            reinterpret_cast<bool (*)(UObject*, bool)>(Natives::UFortLevelSaveComponent_CloudSave)(this, true);
+        }
+        else
+        {
+            Natives::UFortLevelSaveComponent_CloudSave(this, Plot, Owner, true);
+        }
     }
     Log::Info(L"Creative: {}'s island {} unloads{}", Owner.ToString().ToStdString(), File,
         bIsLoaded ? (Natives::UFortLevelSaveComponent_CloudSave ? L": saved and checked in" : L" unsaved: the cloud save wasn't found") : L" before it loaded: nothing to save");

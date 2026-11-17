@@ -592,6 +592,24 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
     if (CloudSave)
     {
         Natives::UFortLevelSaveComponent_CloudSave = reinterpret_cast<decltype(Natives::UFortLevelSaveComponent_CloudSave)>(CloudSave);
+        // 7.00 (0xF5ADB0) takes (Plot, UserId, bCheckin) and keeps bCheckin from r9b (movzx edi, r9b); 7.10 (CL-4667333,
+        // 0xF88760) reads the plot and its owner from the component and takes bCheckin second (movzx r13d, dl). The first
+        // movzx of an argument byte in its prologue tells which.
+        const auto* Code = reinterpret_cast<const uint8_t*>(CloudSave);
+        for (int32_t At = 1; At + 3 <= 0x40; ++At)
+        {
+            if (Code[At] != 0x0F || Code[At + 1] != 0xB6 || (Code[At + 2] & 0xC0) != 0xC0)
+            {
+                continue;
+            }
+            const uint8_t Rex = (Code[At - 1] & 0xF0) == 0x40 ? Code[At - 1] : 0;
+            const int32_t Source = (Code[At + 2] & 0x07) | ((Rex & 0x01) << 3);
+            if (Source == 2 || Source == 9)
+            {
+                Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly = Source == 2;
+                break;
+            }
+        }
         std::set<uintptr_t> KeyFormatters;
         for (const uintptr_t Ref : Finder::StringRefs(L"%s/%s"))
         {
@@ -659,8 +677,9 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
     }
 
     const auto Address = [](const void* Function) { return Function ? reinterpret_cast<uintptr_t>(Function) - Finder::ImageBase() : 0; };
-    Log::Info(L"Finder: Creative's island record: ULevelSaveRecord::ReadFromBuffer 0x{:X}, UFortLevelSaveComponent's cloud save 0x{:X}, USidecarSys's meta setter 0x{:X}",
+    Log::Info(L"Finder: Creative's island record: ULevelSaveRecord::ReadFromBuffer 0x{:X}, UFortLevelSaveComponent's cloud save 0x{:X} ({}), USidecarSys's meta setter 0x{:X}",
         Address(reinterpret_cast<const void*>(Natives::ULevelSaveRecord_ReadFromBuffer)), Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_CloudSave)),
+        Natives::UFortLevelSaveComponent_CloudSaveTakesCheckinOnly ? L"takes bCheckin only" : L"takes the plot, its owner and bCheckin",
         Address(reinterpret_cast<const void*>(Natives::USidecarSys_SetMeta)));
     if (!Natives::ULevelSaveRecord_ReadFromBuffer || !Natives::UFortLevelSaveComponent_CloudSave || !Natives::USidecarSys_SetMeta)
     {

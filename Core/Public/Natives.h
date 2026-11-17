@@ -1079,6 +1079,9 @@ namespace Natives
     // counts) adds the file to the sidecar's FileInfoMap as it sets the key.
     inline void (*ULevelSaveRecord_ReadFromBuffer)(UObject* This, const TArray<uint8_t>& Buffer) = nullptr;
     inline void (*UFortLevelSaveComponent_CloudSave)(UObject* This, UObject* Plot, const FUniqueNetIdRepl& UserId, bool bCheckin) = nullptr;
+    // 7.10 (CL-4667333): the cloud save reads the plot and its owner from the component and takes only bCheckin:
+    // bool (UObject* This, bool bCheckin).
+    inline bool UFortLevelSaveComponent_CloudSaveTakesCheckinOnly = false;
     inline void (*USidecarSys_SetMeta)(UObject* This, const FString& AppName, const FString& FilePath, const FString& Key, const FString& Value) = nullptr;
     // From 7.00: AFortPlayerControllerAthena::ServerLoadPlotForPortal_Implementation (0xC65E80, slot 0x3E6), the game's
     // own load of a plot into a rift: the call Core redirects to AFortAthenaCreativePortal::LoadPlotForUser is in it.

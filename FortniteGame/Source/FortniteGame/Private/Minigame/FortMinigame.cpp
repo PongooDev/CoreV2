@@ -32,7 +32,19 @@ TArray<AFortPlayerState*> AFortMinigame::GetParticipatingPlayers()
 bool AFortMinigame::DetermineSpawnLocation(AController* PlayerController, FVector& OutLocation, FRotator& OutRotation, bool& bShouldSkydive)
 {
     Reflection::FParams Params(FindStaticFunction_DetermineSpawnLocation(), true);
-    if (!Params.Set(L"PlayerController", PlayerController) || !Params.Call(this))
+    // 7.20 (CL-4727874) takes the player's state and whether to claim the start it picks (PlayerState, bShouldClaim) in
+    // place of their controller. The game's other caller (0x1190EF0) claims it; so does the start of the game here.
+    bool bSet = false;
+    if (Params.Has(L"PlayerState"))
+    {
+        APlayerState* PlayerState = PlayerController ? static_cast<APlayerState*>(PlayerController->PlayerState) : nullptr;
+        bSet = PlayerState && Params.Set(L"PlayerState", reinterpret_cast<UObject*>(PlayerState)) && Params.Set(L"bShouldClaim", true);
+    }
+    else
+    {
+        bSet = Params.Set(L"PlayerController", PlayerController);
+    }
+    if (!bSet || !Params.Call(this))
     {
         return false;
     }

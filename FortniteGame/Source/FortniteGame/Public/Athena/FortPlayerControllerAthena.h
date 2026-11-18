@@ -291,8 +291,9 @@ public:
     // False where the build lacks any of it (nothing is sent then, and the caller teleports at once).
     bool StartDelayedTeleport(const FVector& Location, const FRotator& Rotation, const wchar_t* CameraBehavior, const FText* HUDReasonText);
     // Once both sides are ready, OnReady runs with the stored destination; then RespawnData and bDelayedTeleporting are
-    // cleared. TeleportVehicle's timer (7.20 0xC9C210) checks every 0.1 s (FTimerManager), sets bServerIsReady and waits
-    // for bClientIsReady.
+    // cleared, and the client's camera leaves its respawn camera actor for the pawn (ClientSetViewTarget).
+    // TeleportVehicle's timer (7.20 0xC9C210) checks every 0.1 s (FTimerManager), sets bServerIsReady and waits for
+    // bClientIsReady.
     void FinishDelayedTeleportWhenReady(std::function<void(AFortPlayerControllerAthena*, const FVector&, const FRotator&)> OnReady, int32_t Checks = 0);
     // 7.20's natives for the trip back to the hub (both execs call the shared empty function; 7.00 and 7.10 don't have
     // them). PreLobbyIslandTeleport shows the travel screen for the hub start stored in RespawnData; PostLobbyIslandTeleport

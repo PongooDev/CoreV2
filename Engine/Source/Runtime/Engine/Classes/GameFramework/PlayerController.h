@@ -21,6 +21,7 @@ public:
     DefineUFunction(ClientEnableNetworkVoice)
     DefineUFunction(ClientMessage)
     DefineUFunction(ServerAcknowledgePossession)
+    DefineUFunction(ClientSetViewTarget)
 
     void ConsoleKey(FKey Key);
     void SendToConsole(const FString& Command);
@@ -30,6 +31,10 @@ public:
     void ToggleSpeaking(bool bInSpeaking);
     FString ConsoleCommand(const FString& Command, bool bWriteToLog);
     void ClientMessage(const FString& S);
+    // Server: the client's camera views A at once (the engine's ClientSetViewTarget RPC, default transition: no blend).
+    // The server's camera manager sends it only when its own view target changes, so a view the client set on its own
+    // (a camera actor) is only left through this. False where the build has no such function.
+    bool ClientSetViewTarget(AActor* A);
 
     static void Hook();
     // Client: every local player controller gets its cheat manager as soon as it exists (#75), the way the controller's

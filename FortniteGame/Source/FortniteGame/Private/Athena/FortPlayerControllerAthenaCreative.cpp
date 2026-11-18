@@ -790,6 +790,18 @@ void AFortPlayerControllerAthena::FinishDelayedTeleportWhenReady(std::function<v
     RespawnData.bClientIsReady = false;
     RespawnData.bServerIsReady = false;
     bDelayedTeleporting = false;
+    // The client's camera back on the pawn (#497). Its preparation (7.20 0xD6A1E0, on the RespawnCameraData row's
+    // timer) spawns its own ACameraActor at RespawnData's place and views it (SetViewTargetWithBlend); the camera actor
+    // is 16:9-constrained, hence the bars on a 4:3 screen. Once ready (0xD38D80: ServerClientIsReadyToRespawn) it only
+    // fades back in when it has a pawn (0xD39210 -> 0xD60320): nothing on the client views the pawn again. A respawn
+    // after death gets that from the new pawn's possession (RespawnPlayerAfterDeath 0xD60080 -> ServerRestartPlayer
+    // -> RestartPlayer -> Possess -> ClientRestart -> SetViewTarget(Pawn)); a teleported pawn is the one the client
+    // already has, so the server sends the engine's ClientSetViewTarget, as its camera manager would for a view
+    // target change (the server's view target was the pawn all along, so it sends nothing by itself).
+    if (APawn* Pawn = GetPawn())
+    {
+        ClientSetViewTarget(reinterpret_cast<AActor*>(Pawn));
+    }
 #endif
 }
 

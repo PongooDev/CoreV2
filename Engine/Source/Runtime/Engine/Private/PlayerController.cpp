@@ -80,6 +80,12 @@ void APlayerController::ClientMessage(const FString& S)
     Params.Call(this);
 }
 
+bool APlayerController::ClientSetViewTarget(AActor* A)
+{
+    Reflection::FParams Params(FindStaticFunction_ClientSetViewTarget(), true);
+    return A && Params.Set(L"A", A) && Params.Call(this);
+}
+
 void APlayerController::SendToConsole(const FString& Command)
 {
 #if ALLOW_CONSOLE

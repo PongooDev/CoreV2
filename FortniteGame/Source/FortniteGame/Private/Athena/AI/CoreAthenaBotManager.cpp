@@ -1523,7 +1523,7 @@ void FCoreAthenaBotManager::StartBotMatchIfAsked()
                 Log::Info(L"Battle Royale bots: -CoreBotMatch: no playlist loaded, so the aircraft paths are built before the bus leaves");
             }
             Log::Info(L"Battle Royale bots: -CoreBotMatch: the bus leaves with {} bots", GetAliveBotCount());
-            Natives::AFortGameModeAthena_StartAircraftPhase(Athena);
+            Natives::AFortGameModeAthena_StartAircraftPhase(Athena, false);
         }
         else
         {

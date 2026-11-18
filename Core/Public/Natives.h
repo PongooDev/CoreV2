@@ -815,7 +815,12 @@ namespace Natives
     inline void (*AFortGameModeAthena_StartEndGamePhase)(AFortGameModeAthena* This, AFortPlayerControllerAthena* Winner, APawn* FinisherPawn, const UFortWeaponItemDefinition* FinishingWeapon, uint8_t DeathCause) = nullptr;
     // AFortGameModeAthena::StartAircraftPhase (3.0 0x9C4A60): Finder::AircraftPhasePlayerCleanupCall's function. Only
     // the bots-only test match (-CoreBotMatch) calls it, the warmup's countdown having nobody to start the bus for.
-    inline bool (*AFortGameModeAthena_StartAircraftPhase)(AFortGameModeAthena* This) = nullptr;
+    // 7.20's (CL-4727874, 0xD1BEC0) takes a bool: set, the phase starts without spawning the aircraft (its warmup-skip
+    // caller 0xD0C3E0 passes true, then starts the safe zones; the warmup's own 0xD09DD3 and the STARTAIRCRAFT command
+    // 0xD03255 pass false). Called with This alone it took whatever dl held, and on Playlist_Deimos_Solo_Winter the bus
+    // never spawned ("PlacePlayersInAircraft early out. Aircrafts TArray is empty", CoreV2 #490). Builds whose
+    // StartAircraftPhase has no such parameter ignore it.
+    inline bool (*AFortGameModeAthena_StartAircraftPhase)(AFortGameModeAthena* This, bool bSkipAircraft) = nullptr;
     // AFortPlayerPawnAthena::BeginSkydiving(bool bFromBus) (3.0 0x9D7F70), which AFortPlayerControllerAthena's ExitAircraft
     // calls on the new pawn: Finder::ResolveBotSkydiveLive. A player bot leaving the aircraft takes the same path. 1.7.2's
     // and 1.8's (1.8 0x41DD60) take no bFromBus yet; the extra argument in rdx goes unread there.

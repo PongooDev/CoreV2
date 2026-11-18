@@ -258,6 +258,63 @@ void AFortAIPawn::DropLoot(const FFortAIPawnLootDropData& LootDropData, const FG
 #endif
 }
 
+void AFortAIPawn::GiveAmmo(int32_t AmmoQuantity)
+{
+#if WITH_SERVER_CODE
+    // Core's: no client build keeps Epic's body. The ammo its current weapon loads (the weapon definition's AmmoData;
+    // the Gunner's Blueprint equips the weapon first) goes into the pawn's own inventory, its
+    // IFortInventoryOwnerInterface: the inventory the weapon's reload takes from and RemoveInventoryItem spends.
+    AFortWeapon* Weapon = CurrentWeapon;
+    UFortWeaponItemDefinition* WeaponDefinition = Weapon ? static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData) : nullptr;
+    UFortWorldItemDefinition* AmmoDefinition = WeaponDefinition ? static_cast<TAssetPtr<UFortWorldItemDefinition>&>(WeaponDefinition->AmmoData).LoadSynchronous() : nullptr;
+    IFortInventoryOwnerInterface* InventoryOwner = GetInventoryOwner();
+    if (Role != ROLE_Authority || AmmoQuantity <= 0 || !AmmoDefinition || !InventoryOwner)
+    {
+        return;
+    }
+    UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(this, InventoryOwner), AmmoDefinition, AmmoQuantity, false);
+
+    static bool bLogged = false;
+    if (!bLogged)
+    {
+        bLogged = true;
+        AFortInventory* Inventory = GetWorldInventory();
+        Log::Info(L"AFortAIPawn::GiveAmmo: {} gets {} {} for {} (inventory {})", GetName().ToStdString(), AmmoQuantity, AmmoDefinition->GetName().ToStdString(),
+            WeaponDefinition->GetName().ToStdString(), Inventory ? Inventory->GetName().ToStdString() : L"none");
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortAIPawn::execGiveAmmo)
+{
+    P_GET_PROPERTY(UIntProperty, Z_Param_AmmoQuantity);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortAIPawn*>(Context)->GiveAmmo(Z_Param_AmmoQuantity);
+    P_NATIVE_END;
+}
+
+void AFortAIPawn::HookNatives()
+{
+#if WITH_SERVER_CODE
+    // GiveAmmo came with 5.30 (no earlier SDK has it). Its exec steps the int and calls the shared empty function
+    // (6.31 0x14EDA70, 7.00 0x14BF390, 7.10 0x150AB80: nullsub_2).
+    UFunction* const Function = FindStaticFunction_GiveAmmo();
+    if (!Function || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))
+    {
+        return;
+    }
+    uint8_t* NativeCall = Finder::ImplementationCall(Function);
+    if (!NativeCall || !Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(NativeCall), 1, 5)))
+    {
+        Log::Info(L"Finder: AFortAIPawn::GiveAmmo is native in this build");
+        return;
+    }
+    Function->SetNativeFunc(&execGiveAmmo);
+    Log::Info(L"Hook AFortAIPawn::GiveAmmo: native");
+#endif
+}
+
 void AFortAIPawn::HandleDeathHK(AFortAIPawn* This, float Damage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, const void* HitInfo, void* Arg5)
 {
     // The handler's own tests (4.0 0xEEBAC0): nothing for a pawn already down or dying, and a pawn that uses DBNO is

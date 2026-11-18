@@ -380,6 +380,7 @@ static void InstallHooks()
         UFortQueryContext_AllGoals::HookVTables();
         UFortBTContext_SuppressGoalUpdate::HookVTables();
         AFortAIPawn::HookVTables();
+        AFortAIPawn::HookNatives();
         ABuildingTrapDefender::HookNatives();
         AFortPlayerPawn::HookVTables();
         AFortPlayerPawn::HookPickupVTables();

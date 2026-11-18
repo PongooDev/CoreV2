@@ -3,11 +3,13 @@
 #include "Containers/Array.h"
 #include "Internationalization/Text.h"
 #include "Items/FortItemDefinition.h"
+#include "Math/Rotator.h"
 #include "Math/Vector.h"
 #include "Player/FortPlayerController.h"
 #include "Player/FortPlayerControllerZone.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <functional>
 #include <vector>
 
 class AActor;
@@ -20,6 +22,7 @@ class UFortCreativeRealEstatePlotItem;
 class UMcpProfile;
 class APawn;
 class AFortPawn;
+class AFortPlayerPawn;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
 class UAthenaPlayerMatchReport;
@@ -262,6 +265,41 @@ public:
     void ResetMyCurrentCreativePlot_Implementation();
     void ServerTeleportToPlaygroundIslandDock_Implementation();
     void ServerTeleportToPlaygroundLobbyIsland_Implementation();
+
+    // Creative's travel screen (PongooDev/CoreV2#497): a trip from a rift to its island, or from an island back to the
+    // hub, goes through the respawn preparation the game uses for a respawn. The server stores the destination in the
+    // player state's RespawnData (ServerSetRespawnData), sends ClientStartRespawnPreparation with a camera behaviour row
+    // of RespawnCameraData (CreativePortal, TeleportToLobbyIsland) and, from 7.10, the HUD's text (ClientIslandTravelText
+    // "Traveling to Island...", ClientTravelToCreativeHubText "Traveling to Creative Hub..."). The client blacks the
+    // screen out, streams the place in and says it is ready (ServerClientIsReadyToRespawn, the build's own); the server
+    // then moves the pawn. bDelayedTeleporting holds the rift's Blueprint off the player meanwhile (BGA_IslandPortal
+    // returns at once for a controller that has it), and RespawnPlayerAfterDeath clears it (7.20 0xD60080).
+    DefineUProperty(bool, bDelayedTeleporting)
+    DefineUProperty(FText, ClientIslandTravelText)
+    DefineUProperty(FText, ClientTravelToCreativeHubText)
+    DefineUFunction(ClientStartRespawnPreparation)
+    DefineUFunction(ServerSetRespawnData)
+    static bool HasDelayedTeleport();
+    bool IsDelayedTeleporting() const { return Member_bDelayedTeleporting.IsAvailable() && static_cast<bool>(bDelayedTeleporting); }
+    // The HUD's texts (from 7.10), null where the build has none.
+    const FText* GetClientIslandTravelText() const { return Member_ClientIslandTravelText.IsAvailable() ? &GetMember_ClientIslandTravelText() : nullptr; }
+    const FText* GetClientTravelToCreativeHubText() const { return Member_ClientTravelToCreativeHubText.IsAvailable() ? &GetMember_ClientTravelToCreativeHubText() : nullptr; }
+    // The client RPC (7.00 has no HUDReasonText: HUDReasonText is left out there).
+    void ClientStartRespawnPreparation(const FVector& RespawnLoc, const FRotator& RespawnRot, float RespawnCameraDist, FName InRespawnCameraBehavior, const FText* HUDReasonText);
+    // The start of a delayed teleport to Location, as AFortAthenaCreativePortal::TeleportVehicle does it for a vehicle's
+    // players (7.20 0xCB26E0): the destination into RespawnData, ClientStartRespawnPreparation, bDelayedTeleporting.
+    // False where the build lacks any of it (nothing is sent then, and the caller teleports at once).
+    bool StartDelayedTeleport(const FVector& Location, const FRotator& Rotation, const wchar_t* CameraBehavior, const FText* HUDReasonText);
+    // Once both sides are ready, OnReady runs with the stored destination; then RespawnData and bDelayedTeleporting are
+    // cleared. TeleportVehicle's timer (7.20 0xC9C210) checks every 0.1 s (FTimerManager), sets bServerIsReady and waits
+    // for bClientIsReady.
+    void FinishDelayedTeleportWhenReady(std::function<void(AFortPlayerControllerAthena*, const FVector&, const FRotator&)> OnReady, int32_t Checks = 0);
+    // 7.20's natives for the trip back to the hub (both execs call the shared empty function; 7.00 and 7.10 don't have
+    // them). PreLobbyIslandTeleport shows the travel screen for the hub start stored in RespawnData; PostLobbyIslandTeleport
+    // moves PlayerPawn there once the client is ready, and the player is off their island.
+    void PreLobbyIslandTeleport();
+    void PostLobbyIslandTeleport(AFortPlayerPawn* PlayerPawn);
+
     void ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef);
     // The game's own ServerLoadPlotForPortal_Implementation (7.00 0xC65E80): finds PlotItemId in the player's creative
     // profile, loads it into Portal's island (through the call Core restores) and makes it their last used plot. 7.20

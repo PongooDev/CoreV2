@@ -9,6 +9,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
+#include "GameplayTagContainer.h"
 #include "Hooks.h"
 #include "Items/FortItemDefinition.h"
 #include "Kismet/GameplayStatics.h"
@@ -30,8 +31,9 @@ namespace
     // The island's spawn the rift sends a pawn to: from 7.10 a Player Spawner set as an island start (#485: the start
     // the game's own respawn place gives a player on the island outside a game, AFortVolume::FindIslandStart), else
     // (bUseSpawnTags) its Creative.Island.Spawn start, else any start of the island, else over the middle of the volume.
-    bool LinkedVolumeSpawn(AFortVolume* Volume, bool bUseSpawnTags, const FVector& From, FVector& OutLocation, FRotator& OutRotation, const wchar_t*& OutWhat)
+    bool LinkedVolumeSpawn(AFortVolume* Volume, bool bUseSpawnTags, const FVector& From, FVector& OutLocation, FRotator& OutRotation, const wchar_t*& OutWhat, bool& bOutInAir)
     {
+        bOutInAir = false;
         AFortPlayerStartCreative* Start = Volume->FindIslandStart();
         OutWhat = Start ? L"its island start" : L"its spawn";
         if (!Start && bUseSpawnTags)
@@ -58,7 +60,25 @@ namespace
         }
         OutLocation = FVector(Origin.X, Origin.Y, Origin.Z + Extent.Z);
         OutRotation = FRotator(0.0f, 0.0f, 0.0f);
+        OutWhat = L"the air over it";
+        bOutInAir = true;
         return true;
+    }
+
+    // The rift's skydive (#497): Abilities.Generic.Rift.Trigger, the event GA_Rift_Athena_Skydive triggers on (granted
+    // with GAS_DefaultPlayer), as BGA_IslandPortal sends it to a pawn it puts in the air (its NotifyTeleportedPlayerPawn
+    // with StartSkydiving, TeleportToLobbyIsland, a vehicle's passengers).
+    void TriggerRiftSkydive(AFortPlayerPawn* PlayerPawn)
+    {
+        static UFunction* Send = FindObject<UFunction>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary:SendGameplayEventToActor");
+        static UClass* LibraryClass = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemBlueprintLibrary");
+        UObject* Library = LibraryClass ? LibraryClass->GetDefaultObject() : nullptr;
+        const FName TagName(L"Abilities.Generic.Rift.Trigger", FNAME_Find);
+        Reflection::FParams Event(Send, true);
+        if (!Library || TagName.IsNone() || !Event.Set(L"Actor", reinterpret_cast<AActor*>(PlayerPawn)) || !Event.Set(L"EventTag", FGameplayTag{ TagName }) || !Event.Call(Library))
+        {
+            Log::Warning(L"Creative: the rift's skydive wasn't triggered ({})", TagName.IsNone() ? L"no Abilities.Generic.Rift.Trigger tag" : L"no SendGameplayEventToActor");
+        }
     }
 }
 
@@ -184,11 +204,54 @@ void AFortAthenaCreativePortal::TeleportPlayerToLinkedVolume(AFortPlayerPawn* Pl
     FVector Location;
     FRotator Rotation;
     const wchar_t* What = L"";
-    if (!LinkedVolumeSpawn(Volume, bUseSpawnTags, GetTransform().GetLocation(), Location, Rotation, What))
+    bool bInAir = false;
+    if (!LinkedVolumeSpawn(Volume, bUseSpawnTags, GetTransform().GetLocation(), Location, Rotation, What, bInAir))
     {
         Log::Warning(L"Creative: {} has no spawn on its island {}", GetName().ToStdString(), Volume->GetName().ToStdString());
         return;
     }
+    // A far island goes through the travel screen (#497), as TeleportVehicle sends a vehicle's players (7.20 0xCB26E0):
+    // further than MaxInstantTeleportDistance (in 2D), the destination is stored, the client hears
+    // ClientStartRespawnPreparation (CreativePortal, ClientIslandTravelText) and the pawn moves once it is ready.
+    AController* Controller = reinterpret_cast<APawn*>(PlayerPawn)->Controller;
+    AFortPlayerControllerAthena* PlayerController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller));
+    const FVector From = PawnActor->GetTransform().GetLocation();
+    const float MaxInstant = Member_MaxInstantTeleportDistance.IsAvailable() ? static_cast<float>(MaxInstantTeleportDistance) : 0.0f;
+    const float DistanceSquared2D = (Location.X - From.X) * (Location.X - From.X) + (Location.Y - From.Y) * (Location.Y - From.Y);
+    if (PlayerController && DistanceSquared2D > MaxInstant * MaxInstant)
+    {
+        // Already on the way: the Blueprint holds the player off its rifts meanwhile (bDelayedTeleporting).
+        if (PlayerController->IsDelayedTeleporting())
+        {
+            return;
+        }
+        if (PlayerController->StartDelayedTeleport(Location, Rotation, L"CreativePortal", PlayerController->GetClientIslandTravelText()))
+        {
+            const TWeakObjectPtr<AFortAthenaCreativePortal> WeakThis(this);
+            const TWeakObjectPtr<AFortPlayerPawn> WeakPawn(PlayerPawn);
+            const TWeakObjectPtr<AFortVolume> WeakVolume(Volume);
+            PlayerController->FinishDelayedTeleportWhenReady(
+                [WeakThis, WeakPawn, WeakVolume, bInAir, What](AFortPlayerControllerAthena* Ready, const FVector& ReadyLocation, const FRotator& ReadyRotation)
+                {
+                    AFortAthenaCreativePortal* Portal = WeakThis.Get();
+                    AFortPlayerPawn* Pawn = WeakPawn.Get();
+                    AFortVolume* Island = WeakVolume.Get();
+                    if (Portal && Pawn && Island && reinterpret_cast<APawn*>(Pawn)->Controller == reinterpret_cast<AController*>(Ready))
+                    {
+                        Portal->FinishTeleportToLinkedVolume(Pawn, Island, ReadyLocation, ReadyRotation, bInAir, What);
+                    }
+                });
+            return;
+        }
+    }
+    FinishTeleportToLinkedVolume(PlayerPawn, Volume, Location, Rotation, bInAir, What);
+#endif
+}
+
+void AFortAthenaCreativePortal::FinishTeleportToLinkedVolume(AFortPlayerPawn* PlayerPawn, AFortVolume* Volume, const FVector& Location, const FRotator& Rotation, bool bInAir, const wchar_t* What)
+{
+#if WITH_SERVER_CODE
+    AActor* PawnActor = reinterpret_cast<AActor*>(PlayerPawn);
     if (PawnActor->TeleportTo(Location, Rotation))
     {
         // The player is on this island now (#485): their controller's CreativePlotLinkedVolume, through the game's own
@@ -200,7 +263,25 @@ void AFortAthenaCreativePortal::TeleportPlayerToLinkedVolume(AFortPlayerPawn* Pl
         {
             PlayerController->SetCreativePlotLinkedVolume(Volume);
         }
-        NotifyTeleportedPlayerPawn(PlayerPawn);
+        // No Player Spawner or start to land on: the pawn is in the air over the island, and falls as from a rift (#497).
+        if (bInAir)
+        {
+            TriggerRiftSkydive(PlayerPawn);
+        }
+        // 7.20's OnPlayerPawnTeleported (intact, 0xCAA200) takes the pawn off the rift's TeleportingPawns and calls the
+        // Blueprint's NotifyTeleportedPlayerPawn (the exit effects and the quest); 7.00 and 7.10 have only the event.
+        if (UFunction* OnTeleported = FindStaticFunction_OnPlayerPawnTeleported())
+        {
+            Reflection::FParams Params(OnTeleported, true);
+            if (Params.Set(L"PlayerPawn", PlayerPawn))
+            {
+                Params.Call(this);
+            }
+        }
+        else
+        {
+            NotifyTeleportedPlayerPawn(PlayerPawn);
+        }
     }
     Log::Info(L"Creative: {} through {} onto the island {} at {} ({:.0f}, {:.0f}, {:.0f})", PawnActor->GetName().ToStdString(), GetName().ToStdString(), Volume->GetName().ToStdString(),
         What, Location.X, Location.Y, Location.Z);

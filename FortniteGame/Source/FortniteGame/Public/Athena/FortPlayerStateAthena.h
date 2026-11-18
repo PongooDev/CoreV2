@@ -3,6 +3,7 @@
 #include "Containers/Set.h"
 #include "Engine/NetSerialization.h"
 #include "FortTeamInfo.h"
+#include "Math/Rotator.h"
 #include "Math/Vector.h"
 #include "Math/Vector2D.h"
 #include "Natives.h"
@@ -86,7 +87,8 @@ public:
 // force the camera fade; else PrepareClientForRespawning sends it ClientStartRespawnPreparation and its
 // ServerClientIsReadyToRespawn says so. RespawnPlayerAfterDeath (0xC23990) sets bServerIsReady and waits for both, and
 // the game mode's FinishRestartPlayer (0xBC7430) moves the new pawn there and clears it, for a death that is stored
-// (DeathInfo.bInitialized). All of it is the build's own; Core only reads it for its log.
+// (DeathInfo.bInitialized). All of it is the build's own; Core reads it for its log, and a Creative trip through the
+// travel screen (#497, AFortPlayerControllerAthena::StartDelayedTeleport) stores its destination here as TeleportVehicle does.
 struct FFortRespawnData
 {
     DefineUnrealStruct(FFortRespawnData, FortniteGame)
@@ -94,6 +96,8 @@ struct FFortRespawnData
     DefineUProperty(bool, bClientIsReady)
     DefineUProperty(bool, bServerIsReady)
     DefineUProperty(FVector, RespawnLocation)
+    // Where a delayed Creative teleport (#497) faces the player, with its RespawnLocation.
+    DefineUProperty(FRotator, RespawnRotation)
 
 public:
     static bool IsReadable()

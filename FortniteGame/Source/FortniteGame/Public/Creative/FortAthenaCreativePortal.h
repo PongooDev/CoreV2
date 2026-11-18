@@ -26,6 +26,8 @@ class AFortAthenaCreativePortal : public ABuildingActor
     DefineUFunction(TeleportPlayer)
     DefineUFunction(TeleportPlayerToLinkedVolume)
     DefineUFunction(NotifyTeleportedPlayerPawn)
+    // 7.20: TeleportingPawns.Remove, then NotifyTeleportedPlayerPawn (intact, 0xCAA200).
+    DefineUFunction(OnPlayerPawnTeleported)
     DefineUFunction(OnRep_OwningPlayerState)
     DefineUFunction(OnRep_OwningPlayer)
     DefineUFunction(OnRep_PortalOpen)
@@ -41,6 +43,9 @@ public:
     DefineUStructProperty(FUniqueNetIdRepl, OwningPlayer)
     DefineUProperty(bool, bPortalOpen)
     DefineUProperty(FVector, TeleportLocation)
+    // How far a pawn may be from where a rift sends it and still go at once (Config); further, the trip goes through the
+    // travel screen (#497), as TeleportVehicle compares it (7.20 0xCB26E0, in 2D).
+    DefineUProperty(float, MaxInstantTeleportDistance)
     // The players on the rift's island (the controllers whose CreativePlotLinkedVolume is LinkedVolume), which the
     // rift shows as its "x/y" (OnRep_PopulationChanged).
     DefineUProperty(uint8_t, CurrentPopulation)
@@ -83,4 +88,7 @@ public:
 
 private:
     void NotifyTeleportedPlayerPawn(AFortPlayerPawn* PlayerPawn);
+    // The end of TeleportPlayerToLinkedVolume, at once or once the travel screen is up: the pawn onto the island, its
+    // link to it, the rift's skydive for an arrival in the air (bInAir) and OnPlayerPawnTeleported.
+    void FinishTeleportToLinkedVolume(AFortPlayerPawn* PlayerPawn, AFortVolume* Volume, const FVector& Location, const FRotator& Rotation, bool bInAir, const wchar_t* What);
 };

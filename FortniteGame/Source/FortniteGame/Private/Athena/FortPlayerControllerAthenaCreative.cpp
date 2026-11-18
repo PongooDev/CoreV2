@@ -2,6 +2,7 @@
 #include "AsyncTaskQueue.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "Creative/FortAthenaCreativePortal.h"
 #include "Creative/FortCreativePortalManager.h"
@@ -20,9 +21,11 @@
 #include "McpProfile.h"
 #include "Natives.h"
 #include "Online/FortMcpProfileCreative.h"
+#include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
@@ -674,6 +677,153 @@ bool AFortPlayerControllerAthena::TeleportPawnTo(const FVector& Location, const 
     return bMoved;
 }
 
+bool AFortPlayerControllerAthena::HasDelayedTeleport()
+{
+    // 7.00 has all of it but the HUD's text (6.02+ have the respawn preparation; bDelayedTeleporting is Creative's).
+    return Member_bDelayedTeleporting.IsAvailable() && AFortPlayerStateAthena::HasRespawnData() && FindStaticFunction_ClientStartRespawnPreparation();
+}
+
+void AFortPlayerControllerAthena::ClientStartRespawnPreparation(const FVector& RespawnLoc, const FRotator& RespawnRot, float RespawnCameraDist, FName InRespawnCameraBehavior, const FText* HUDReasonText)
+{
+    Reflection::FParams Params(FindStaticFunction_ClientStartRespawnPreparation(), true);
+    if (!Params.Set(L"RespawnLoc", RespawnLoc) || !Params.Set(L"RespawnRot", RespawnRot) || !Params.Set(L"RespawnCameraDist", RespawnCameraDist)
+        || !Params.Set(L"InRespawnCameraBehavior", InRespawnCameraBehavior))
+    {
+        return;
+    }
+    if (HUDReasonText && Params.Has(L"HUDReasonText"))
+    {
+        Params.Set(L"HUDReasonText", *HUDReasonText);
+    }
+    Params.Call(this);
+}
+
+bool AFortPlayerControllerAthena::StartDelayedTeleport(const FVector& Location, const FRotator& Rotation, const wchar_t* CameraBehavior, const FText* HUDReasonText)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(reinterpret_cast<AController*>(this)->PlayerState)));
+    if (!HasDelayedTeleport() || !AthenaState || !GetWorld())
+    {
+        return false;
+    }
+    // TeleportVehicle's order for each of the vehicle's players: ServerSetRespawnData_Implementation (7.20 0xD61FB0, the
+    // destination into the player state's RespawnData, camera distance 0), then ClientStartRespawnPreparation. The
+    // server RPC runs here, on the server, as the build's own _Implementation; its fields are written directly where it
+    // didn't store them.
+    Reflection::FParams SetData(FindStaticFunction_ServerSetRespawnData(), true);
+    if (SetData.Set(L"RespawnLoc", Location) && SetData.Set(L"RespawnRot", Rotation) && SetData.Set(L"RespawnCameraDist", 0.0f))
+    {
+        SetData.Call(this);
+    }
+    FFortRespawnData& RespawnData = AthenaState->RespawnData;
+    const FVector Stored = RespawnData.RespawnLocation;
+    if (!RespawnData.bRespawnDataAvailable || Stored.X != Location.X || Stored.Y != Location.Y || Stored.Z != Location.Z)
+    {
+        RespawnData.bClientIsReady = false;
+        RespawnData.bServerIsReady = false;
+        RespawnData.RespawnLocation = Location;
+        RespawnData.RespawnRotation = Rotation;
+        RespawnData.bRespawnDataAvailable = true;
+    }
+    // Without a camera behaviour the caller sends the preparation itself (PreLobbyIslandTeleport).
+    if (CameraBehavior)
+    {
+        ClientStartRespawnPreparation(Location, Rotation, 0.0f, FName(CameraBehavior), HUDReasonText);
+    }
+    bDelayedTeleporting = true;
+    Log::Info(L"Creative: {} sees the travel screen ({}) for ({:.0f}, {:.0f}, {:.0f})", PlayerNameOf(this), CameraBehavior ? CameraBehavior : L"TeleportToLobbyIsland", Location.X, Location.Y,
+        Location.Z);
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortPlayerControllerAthena::FinishDelayedTeleportWhenReady(std::function<void(AFortPlayerControllerAthena*, const FVector&, const FRotator&)> OnReady, int32_t Checks)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(reinterpret_cast<AController*>(this)->PlayerState)));
+    UWorld* World = GetWorld();
+    // A respawn after a death meanwhile (RespawnPlayerAfterDeath clears bDelayedTeleporting) has the data now.
+    if (!AthenaState || !World || !IsDelayedTeleporting())
+    {
+        return;
+    }
+    FFortRespawnData& RespawnData = AthenaState->RespawnData;
+    // TeleportVehicle's timer (7.20 0xC9C210): with RespawnData stored, bServerIsReady; until the client is ready too
+    // it sets itself again, 0.1 s later. Core's guard, which Epic's loop doesn't have: after 10 s the teleport goes ahead
+    // without the client's word (its RespawnCameraData row's SafetyTime, 5 s, turns its camera back on by then), so a
+    // client that never answers isn't left behind with bDelayedTeleporting holding every rift off it.
+    constexpr float CheckRate = 0.1f;
+    constexpr int32_t MaxChecks = 100;
+    if (RespawnData.bRespawnDataAvailable)
+    {
+        RespawnData.bServerIsReady = true;
+        if (!(RespawnData.bClientIsReady && RespawnData.bServerIsReady) && Checks < MaxChecks)
+        {
+            const TWeakObjectPtr<AFortPlayerControllerAthena> WeakThis(this);
+            FTimerHandle Handle;
+            World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([WeakThis, OnReady, Checks]()
+            {
+                if (AFortPlayerControllerAthena* Controller = WeakThis.Get())
+                {
+                    Controller->FinishDelayedTeleportWhenReady(OnReady, Checks + 1);
+                }
+            }), CheckRate, false);
+            return;
+        }
+        if (Checks >= MaxChecks)
+        {
+            Log::Warning(L"Creative: {}'s client didn't say it was ready to travel; teleporting anyway", PlayerNameOf(this));
+        }
+    }
+    // The move, with RespawnData still stored (PostLobbyIslandTeleport reads it), then the data cleared as
+    // TeleportVehicle's timer does after its move (0xD7C2F0: bRespawnDataAvailable, bClientIsReady, bServerIsReady),
+    // and bDelayedTeleporting as RespawnPlayerAfterDeath does.
+    if (RespawnData.bRespawnDataAvailable)
+    {
+        const FVector Location = RespawnData.RespawnLocation;
+        const FRotator Rotation = RespawnData.RespawnRotation;
+        OnReady(this, Location, Rotation);
+    }
+    RespawnData.bRespawnDataAvailable = false;
+    RespawnData.bClientIsReady = false;
+    RespawnData.bServerIsReady = false;
+    bDelayedTeleporting = false;
+#endif
+}
+
+void AFortPlayerControllerAthena::PreLobbyIslandTeleport()
+{
+#if WITH_SERVER_CODE
+    // The hub start ServerTeleportToPlaygroundLobbyIsland stored: the travel screen with the hub's text, the
+    // TeleportToLobbyIsland row of RespawnCameraData, and no rift on arrival.
+    AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(reinterpret_cast<AController*>(this)->PlayerState)));
+    if (!AthenaState || !AFortPlayerStateAthena::HasRespawnData() || !FindStaticFunction_ClientStartRespawnPreparation())
+    {
+        return;
+    }
+    const FFortRespawnData& RespawnData = AthenaState->RespawnData;
+    ClientStartRespawnPreparation(RespawnData.RespawnLocation, RespawnData.RespawnRotation, 0.0f, FName(L"TeleportToLobbyIsland"), GetClientTravelToCreativeHubText());
+    bDelayedTeleporting = true;
+#endif
+}
+
+void AFortPlayerControllerAthena::PostLobbyIslandTeleport(AFortPlayerPawn* PlayerPawn)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(reinterpret_cast<AController*>(this)->PlayerState)));
+    if (!PlayerPawn || !AthenaState || reinterpret_cast<APawn*>(PlayerPawn) != GetPawn())
+    {
+        return;
+    }
+    // The player leaves their island: the link goes (CreativePlotLinkedVolume, which the island's rifts count).
+    SetCreativePlotLinkedVolume(nullptr);
+    const FFortRespawnData& RespawnData = AthenaState->RespawnData;
+    TeleportPawnTo(RespawnData.RespawnLocation, RespawnData.RespawnRotation, L"the Creative hub");
+#endif
+}
+
 void AFortPlayerControllerAthena::ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef)
 {
     Reflection::FParams Params(FindStaticFunction_ClientCycleQuickBarToCreativeItem(), true);
@@ -825,14 +975,34 @@ void AFortPlayerControllerAthena::ServerTeleportToPlaygroundLobbyIsland_Implemen
             Best = Start;
         }
     }
-    // The player leaves their island: the link goes (CreativePlotLinkedVolume, which the island's rifts count).
-    SetCreativePlotLinkedVolume(nullptr);
     if (Best)
     {
         const FTransform Transform = Best->GetTransform();
-        TeleportPawnTo(Transform.GetLocation(), FRotator(0.0f, Transform.Rotation.Rotator().Yaw, 0.0f), L"the Creative hub");
+        const FVector Location = Transform.GetLocation();
+        const FRotator Rotation(0.0f, Transform.Rotation.Rotator().Yaw, 0.0f);
+        // The travel screen first (#497): the hub start into RespawnData, PreLobbyIslandTeleport, and the pawn moves in
+        // PostLobbyIslandTeleport once the client is ready. A trip already under way is left to finish.
+        if (IsDelayedTeleporting())
+        {
+            return;
+        }
+        if (StartDelayedTeleport(Location, Rotation, nullptr, nullptr))
+        {
+            PreLobbyIslandTeleport();
+            const TWeakObjectPtr<AFortPlayerPawn> WeakPawn(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
+            FinishDelayedTeleportWhenReady([WeakPawn](AFortPlayerControllerAthena* Controller, const FVector&, const FRotator&)
+            {
+                Controller->PostLobbyIslandTeleport(WeakPawn.Get());
+            });
+            return;
+        }
+        // A build without the respawn preparation: at once.
+        SetCreativePlotLinkedVolume(nullptr);
+        TeleportPawnTo(Location, Rotation, L"the Creative hub");
         return;
     }
+    // The player leaves their island: the link goes (CreativePlotLinkedVolume, which the island's rifts count).
+    SetCreativePlotLinkedVolume(nullptr);
     // A hub without the tagged starts: the rift's own way to the hub (BGA_IslandPortal's TeleportToLobbyIsland: over the
     // rift, at the hub's StarterIslandTeleportHeight).
     UFunction* TeleportToLobby = Portal ? reinterpret_cast<UObject*>(Portal)->FindFunction(FName(L"TeleportToLobbyIsland", FNAME_Find)) : nullptr;

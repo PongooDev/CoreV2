@@ -210,6 +210,13 @@ void AFortPlayerStateZone::OnRep_AccumulatedItems()
     Params.Call(this);
 }
 
+bool AFortPlayerStateZone::MulticastTriggerOnGadgetTrackedAttributeDestroyedFX(const UFortGadgetItemDefinition* GadgetItemDefinition)
+{
+    UFunction* Function = FindStaticFunction_MulticastTriggerOnGadgetTrackedAttributeDestroyedFX();
+    Reflection::FParams Params(Function);
+    return Function && Params.Set(L"GadgetItemDefinition", reinterpret_cast<UObject*>(const_cast<UFortGadgetItemDefinition*>(GadgetItemDefinition))) && Params.Call(this);
+}
+
 int32_t AFortPlayerState::GetStat(EFortReplicatedStat StatType, bool bCampaign)
 {
     return Natives::AFortPlayerState_GetStatIndex >= 0 ? CallVirtual<int32_t>(this, Natives::AFortPlayerState_GetStatIndex, static_cast<int32_t>(StatType), bCampaign) : 0;

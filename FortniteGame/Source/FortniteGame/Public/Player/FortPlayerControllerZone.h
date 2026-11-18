@@ -5,6 +5,7 @@
 #include "UObject/WeakObjectPtr.h"
 
 class AFortPlayerState;
+class UFortGadgetItemDefinition;
 
 // What a player's client is told of their death (ClientOnPawnDied), which the controller keeps as PlayerDeathReport.
 // PrepareDeathReport (1.10 0x8DB450) fills the killer from the death's instigating controller: none for a fall or the
@@ -44,8 +45,23 @@ public:
 
     static void HookVTables();
 
+    // 4.0+ gadgets with tracked attributes (7.20's Glider item: its charges). ApplyGadgetItemAttributeSet binds this
+    // to each tracked attribute's change delegate (the ability system's RegisterGameplayAttributeEvent): the item keeps
+    // its gadget's tracked attributes in its entry (GenericAttributeValues, GenericAttributeValueSet), which
+    // ApplyGadgetItemAttributeSet sets back on the next holder, and an item whose gadget has
+    // bDestroyGadgetWhenTrackedAttributesIsZero goes once one of them is used up. The build binds the shared empty
+    // function instead (server code); Core's name, 21.40 binds a lambda (IFortInventoryOwnerInterface::
+    // BindGadgetAttributeChangeDelegate).
+    void OnGadgetTrackedAttributeChanged(float NewValue, const void* ModCallbackData);
+
 private:
     static inline FWeakObjectPtr SetupTeleportOutCameraGameState;
+
+    static void HookGadgetTrackedAttributeDelegate();
+    static void OnGadgetTrackedAttributeChangedHK(AFortPlayerControllerZone* This, float NewValue, const void* ModCallbackData);
+    // The tracked attributes' item goes (on the next tick, out of the ability system's attribute update), and every
+    // client plays the gadget's destroy effects.
+    void DestroyGadgetTrackedAttributeItem(const FGuid& ItemGuid, const UFortGadgetItemDefinition* GadgetItemDefinition);
 
     static void ServerTriggerSetupTeleportCameraEvent_ImplementationHK(AFortPlayerControllerZone* This);
     // Where the game state's vote functions are stripped (AFortGameStateZone::AreGameplayVotesStripped), the three

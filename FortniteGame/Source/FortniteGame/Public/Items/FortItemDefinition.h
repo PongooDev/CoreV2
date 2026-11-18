@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AttributeSet.h"
 #include "Containers/UnrealString.h"
 #include "Engine/DataTable.h"
 #include "GameplayTagContainer.h"
@@ -193,6 +194,14 @@ public:
     static ptrdiff_t GadgetPriorityOffset() { return Member_GadgetPriority.GetOffsetChecked(); }
     static ptrdiff_t AnimBPOverrideOffset() { return Member_AnimBPOverride.GetOffsetChecked(); }
     static ptrdiff_t FootstepBankOverrideOffset() { return Member_FootstepBankOverride.GetOffsetChecked(); }
+    // From 4.0: the attributes of the gadget's AttributeSet that its item keeps (7.20's Athena_Glider_Item: the
+    // FortGliderPackSet's CurrentCharges), and whether the item goes when one of them is used up (the constructor sets
+    // it, 7.20 0x1115F70). AFortPlayerControllerZone::ApplyGadgetItemAttributeSet restores them from the item's entry
+    // (FFortItemEntry::GenericAttributeValues) and binds their changes (FortPlayerControllerZone.cpp).
+    DefineUProperty(TArray<FGameplayAttribute>, TrackedAttributes)
+    DefineBitfieldUProperty(bDestroyGadgetWhenTrackedAttributesIsZero)
+    static bool HasTrackedAttributes() { return Member_TrackedAttributes.IsAvailable() && Member_bDestroyGadgetWhenTrackedAttributesIsZero.IsAvailable(); }
+    static ptrdiff_t TrackedAttributesOffset() { return Member_TrackedAttributes.GetOffsetChecked(); }
 };
 
 // An item used up as it is used. StaticClass is null on a build without the class.

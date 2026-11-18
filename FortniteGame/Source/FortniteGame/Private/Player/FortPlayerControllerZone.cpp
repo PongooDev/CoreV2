@@ -1,18 +1,28 @@
 #include "pch.h"
 #include "Player/FortPlayerControllerZone.h"
+#include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemComponent.h"
+#include "AttributeSet.h"
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameState.h"
 #include "FortRuntimeOptions.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
+#include "Items/FortInventory.h"
+#include "Items/FortItem.h"
+#include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Missions/FortMissionLibrary.h"
 #include "Natives.h"
 #include "Player/FortCheatManager.h"
+#include "Player/FortPlayerState.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
+#include "UObject/WeakObjectPtr.h"
 
 void AFortPlayerControllerZone::ServerTriggerSetupTeleportCameraEvent_Implementation()
 {
@@ -213,10 +223,180 @@ void AFortPlayerControllerZone::HookGameplayVoteVTables()
 #endif
 }
 
+namespace
+{
+    // An element of the controller's map of applied gadgets with tracked attributes (TMap<const
+    // UFortGadgetItemDefinition*, FGuid>'s sparse array): the gadget, its item, then the hash's links.
+    struct FGadgetTrackedAttributeItem
+    {
+        const UFortGadgetItemDefinition* Gadget;
+        FGuid ItemGuid;
+        int32_t HashNextId;
+        int32_t HashIndex;
+    };
+    static_assert(sizeof(FGadgetTrackedAttributeItem) == 0x20);
+
+    // The attribute's base value on the ability system (what ApplyGadgetItemAttributeSet sets back, through
+    // SetNumericAttributeBase): the FGameplayAttributeData its property holds in the ability system's set of the
+    // attribute's class.
+    bool GetNumericAttributeBase(const UAbilitySystemComponent* AbilitySystemComponent, const FGameplayAttribute& Attribute, float& OutValue)
+    {
+        UProperty* Property = Attribute.Attribute;
+        UClass* AttributeOwner = reinterpret_cast<UClass*>(Attribute.AttributeOwner);
+        if (!Property || !AttributeOwner || !Property->IsA(UStructProperty::StaticClass()))
+        {
+            return false;
+        }
+        const TArray<UAttributeSet*>& Sets = AbilitySystemComponent->SpawnedAttributes;
+        for (int32_t Index = 0; Index < Sets.Num(); ++Index)
+        {
+            if (Sets[Index] && Sets[Index]->IsA(AttributeOwner))
+            {
+                OutValue = Property->ContainerPtrToValuePtr<FGameplayAttributeData>(Sets[Index])->GetBaseValue();
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+void AFortPlayerControllerZone::OnGadgetTrackedAttributeChangedHK(AFortPlayerControllerZone* This, float NewValue, const void* ModCallbackData)
+{
+    This->OnGadgetTrackedAttributeChanged(NewValue, ModCallbackData);
+}
+
+void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, const void* ModCallbackData)
+{
+#if WITH_SERVER_CODE
+    // The delegate gives only the new value (and, for an effect's execution, the modifier's data): every applied gadget's
+    // tracked attributes are read again from the ability system. Which item keeps them is the map's (the gadget's latest
+    // item), as ApplyGadgetItemAttributeSet records it.
+    const ptrdiff_t ItemInstanceIdsOffset = Natives::AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds;
+    AFortInventory* Inventory = Role == ROLE_Authority ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    AFortPawn* Pawn = MyFortPawn;
+    UAbilitySystemComponent* AbilitySystemComponent = Pawn ? UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(reinterpret_cast<AActor*>(Pawn)) : nullptr;
+    if (ItemInstanceIdsOffset < 0 || !Inventory || !AbilitySystemComponent)
+    {
+        return;
+    }
+
+    const TArray<FGadgetTrackedAttributeItem>& ItemInstanceIds = *reinterpret_cast<const TArray<FGadgetTrackedAttributeItem>*>(reinterpret_cast<const uint8_t*>(this) + ItemInstanceIdsOffset);
+    std::vector<std::pair<FGuid, const UFortGadgetItemDefinition*>> UsedUp;
+    for (int32_t Index = 0; Index < ItemInstanceIds.Num(); ++Index)
+    {
+        // A free slot of the sparse array holds its free list's indices where the gadget would be, which never is an
+        // item's definition: only the slots whose item the inventory holds with that definition are read further.
+        const FGadgetTrackedAttributeItem& Applied = ItemInstanceIds[Index];
+        UFortWorldItem* Item = Inventory->FindWorldItem(Applied.ItemGuid);
+        FFortItemEntry* Entry = Item ? &static_cast<FFortItemEntry&>(Item->ItemEntry) : nullptr;
+        const UFortGadgetItemDefinition* Gadget = Applied.Gadget;
+        if (!Entry || static_cast<UFortItemDefinition*>(Entry->ItemDefinition) != static_cast<const UFortItemDefinition*>(Gadget))
+        {
+            continue;
+        }
+
+        const TArray<FGameplayAttribute>& TrackedAttributes = Gadget->TrackedAttributes;
+        TArray<float>& Values = Entry->GenericAttributeValues;
+        if (Values.Num() < TrackedAttributes.Num())
+        {
+            Values.AddZeroed(TrackedAttributes.Num() - Values.Num());
+        }
+        bool bUsedUp = false;
+        for (int32_t Attribute = 0; Attribute < TrackedAttributes.Num(); ++Attribute)
+        {
+            float Value = 0.0f;
+            if (GetNumericAttributeBase(AbilitySystemComponent, TrackedAttributes[Attribute], Value))
+            {
+                Values[Attribute] = Value;
+                bUsedUp |= Value <= 0.0f;
+            }
+        }
+        Entry->SetStateValue(EFortItemEntryState::GetGenericAttributeValueSet(), 1);
+
+        static bool bLoggedOnce = false;
+        if (!bLoggedOnce)
+        {
+            bLoggedOnce = true;
+            Log::Info(L"Gadget: {}'s {} keeps its tracked attributes ({} attributes, the first now {:.0f})", GetName().ToStdString(), Gadget->GetName().ToStdString(),
+                TrackedAttributes.Num(), Values.Num() > 0 ? Values[0] : 0.0f);
+        }
+        // Core's: one used-up attribute is enough (7.20's gadgets track one).
+        if (bUsedUp && Gadget->bDestroyGadgetWhenTrackedAttributesIsZero)
+        {
+            UsedUp.emplace_back(static_cast<FGuid>(Entry->ItemGuid), Gadget);
+        }
+    }
+    for (const auto& [ItemGuid, Gadget] : UsedUp)
+    {
+        DestroyGadgetTrackedAttributeItem(ItemGuid, Gadget);
+    }
+#endif
+}
+
+void AFortPlayerControllerZone::DestroyGadgetTrackedAttributeItem(const FGuid& ItemGuid, const UFortGadgetItemDefinition* GadgetItemDefinition)
+{
+#if WITH_SERVER_CODE
+    // Core's: on the next tick (the engine's FTimerManager). The change comes in the middle of the ability system's
+    // attribute update, and the item's removal takes the gadget's ability set and this delegate's binding away
+    // (UFortGadgetItemDefinition::RemoveGadgetData).
+    UWorld* World = GetWorld();
+    if (!World)
+    {
+        return;
+    }
+    const TWeakObjectPtr<AFortPlayerControllerZone> WeakThis(this);
+    World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakThis, ItemGuid, GadgetItemDefinition]
+    {
+        AFortPlayerControllerZone* Controller = WeakThis.Get();
+        AFortInventory* Inventory = Controller ? static_cast<AFortInventory*>(Controller->WorldInventory) : nullptr;
+        UFortWorldItem* Item = Inventory ? Inventory->FindWorldItem(ItemGuid) : nullptr;
+        FFortItemEntry* Entry = Item ? &static_cast<FFortItemEntry&>(Item->ItemEntry) : nullptr;
+        // Gone already (a second change at 0 in the same tick).
+        if (!Entry || static_cast<UFortItemDefinition*>(Entry->ItemDefinition) != static_cast<const UFortItemDefinition*>(GadgetItemDefinition))
+        {
+            return;
+        }
+        // Still used up: nothing gave it back in between.
+        const TArray<float>& Values = Entry->GenericAttributeValues;
+        bool bUsedUp = false;
+        for (int32_t Index = 0; Index < Values.Num(); ++Index)
+        {
+            bUsedUp |= Values[Index] <= 0.0f;
+        }
+        if (!bUsedUp || !Controller->RemoveInventoryItem(ItemGuid, Entry->Count, true, true))
+        {
+            return;
+        }
+        AFortPlayerStateZone* FortPlayerState = Cast<AFortPlayerStateZone>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState)));
+        const bool bEffects = FortPlayerState && FortPlayerState->MulticastTriggerOnGadgetTrackedAttributeDestroyedFX(GadgetItemDefinition);
+        Log::Info(L"Gadget: {}'s {} is used up and goes{}", Controller->GetName().ToStdString(), GadgetItemDefinition->GetName().ToStdString(), bEffects ? L"" : L" (no destroy effects)");
+    }));
+#endif
+}
+
+void AFortPlayerControllerZone::HookGadgetTrackedAttributeDelegate()
+{
+    // 4.0+ (FFortItemEntry::GenericAttributeValues, the gadget's TrackedAttributes): restored only where the build binds
+    // the shared empty function (Finder::GadgetTrackedAttributeBind says which).
+    if (!UFortGadgetItemDefinition::HasTrackedAttributes() || !FFortItemEntry::HasGenericAttributeValues()
+        || EFortItemEntryState::GetGenericAttributeValueSet() == Reflection::InvalidEnumValue)
+    {
+        return;
+    }
+    const Finder::FGadgetTrackedAttributeBind Bind = Finder::GadgetTrackedAttributeBind(UFortGadgetItemDefinition::TrackedAttributesOffset());
+    if (!Bind.Lea || Bind.ItemInstanceIds < 0)
+    {
+        return;
+    }
+    Natives::AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds = Bind.ItemInstanceIds;
+    Hooks::RedirectAddress(L"AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged (ApplyGadgetItemAttributeSet's binding)", Bind.Lea, reinterpret_cast<void*>(&OnGadgetTrackedAttributeChangedHK));
+}
+
 void AFortPlayerControllerZone::HookVTables()
 {
     HookPossessionVTables();
     HookGameplayVoteVTables();
+    HookGadgetTrackedAttributeDelegate();
 
     const int32_t Index = Finder::ImplementationIndex(StaticFunction_ServerTriggerSetupTeleportCameraEvent());
     if (Index < 0)

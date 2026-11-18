@@ -27,6 +27,8 @@ class EFortItemEntryState
     DefineUEnumValue(OwnerBuildingHandle)
     DefineUEnumValue(FromDroppedPickup)
     DefineUEnumValue(CraftAndSlotTarget)
+    // 4.0+: the entry's GenericAttributeValues hold its gadget's tracked attributes.
+    DefineUEnumValue(GenericAttributeValueSet)
 };
 
 struct FFortItemEntryStateValue
@@ -79,6 +81,10 @@ public:
     DefineUProperty(bool, bIsDirty)
     DefineUProperty(FWeakObjectPtr, ParentInventory)
     DefineUStructArrayProperty(FFortItemEntryStateValue, StateValues)
+    // 4.0+ (Transient): a gadget item's tracked attributes (UFortGadgetItemDefinition::TrackedAttributes), in their order,
+    // kept with the item while nobody holds it (a pickup carries its entry), so the next holder gets them back.
+    DefineUProperty(TArray<float>, GenericAttributeValues)
+    static bool HasGenericAttributeValues() { return Member_GenericAttributeValues.IsAvailable(); }
 
 private:
     DefineUProperty(TArray<FString>, AlterationDefinitions)

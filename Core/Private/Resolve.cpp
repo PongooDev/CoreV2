@@ -13682,6 +13682,102 @@ Finder::FGadgetOverrideCalls Finder::GadgetOverrideCalls(ptrdiff_t GadgetPriorit
     return Calls;
 }
 
+Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t TrackedAttributesOffset)
+{
+    // UFortGadgetItemDefinition::ApplyGadgetData (7.20 0x111B1C0), on the authority and for a gadget whose AttributeSet
+    // is an attribute set, calls AFortPlayerControllerZone::ApplyGadgetItemAttributeSet(Gadget, Item) (0x13F3910). That
+    // gives the pawn's ability system the set and initialises it from AttributeInitKey, and when the gadget has
+    // TrackedAttributes (cmp [rsi+940h], r13d: their Num) records the gadget's item in the controller's map
+    // (lea rcx, [r14+1DF8h]; call FindId, then the same for its Add), binds each tracked attribute's change delegate to a
+    // method of the controller unless already bound (bDestroyGadgetWhenTrackedAttributesIsZero), and sets each attribute
+    // back to the item entry's GenericAttributeValues when the entry has GenericAttributeValueSet. The bound method is
+    // server code: lea rax, <the shared empty function> (0x13F3CC2), the only one in the function.
+    FGadgetTrackedAttributeBind Bind;
+    const auto SharedEmpty = reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
+    const uintptr_t ApplyGadgetData = FunctionOf(L"UFortGadgetItemDefinition::ApplyGadgetData - Applying Gadget Data for Gadget Item [%s]!");
+    if (!SharedEmpty || !ApplyGadgetData || TrackedAttributesOffset <= 0)
+    {
+        Log::Error(L"Finder: UFortGadgetItemDefinition::ApplyGadgetData not found, so a gadget's tracked attributes aren't kept");
+        return Bind;
+    }
+
+    // TArray's Num, 8 bytes in.
+    const int32_t TrackedAttributesNum = static_cast<int32_t>(TrackedAttributesOffset + 8);
+    std::vector<uintptr_t> Seen;
+    uintptr_t Function = 0;
+    int32_t Candidates = 0;
+    std::vector<uintptr_t> Leas;
+    for (const auto& [Site, Target] : Finder::DecodedDirectCalls(ApplyGadgetData))
+    {
+        if (std::find(Seen.begin(), Seen.end(), Target) != Seen.end() || !IsInText(Target) || Finder::FunctionStart(Target) != Target)
+        {
+            continue;
+        }
+        Seen.push_back(Target);
+        if (!Finder::ReadsMemberAt(Target, TrackedAttributesNum))
+        {
+            continue;
+        }
+        ++Candidates;
+        Function = Target;
+        Leas.clear();
+        for (const auto& [Lea, Taken] : Finder::DecodedAddressesTaken(Target))
+        {
+            if (Taken == SharedEmpty)
+            {
+                Leas.push_back(Lea);
+            }
+        }
+    }
+    if (Candidates != 1)
+    {
+        Log::Error(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet not found ({} of ApplyGadgetData's calls at 0x{:X} read the tracked attributes' Num +0x{:X})",
+            Candidates, ApplyGadgetData - Finder::ImageBase(), TrackedAttributesNum);
+        return Bind;
+    }
+    if (Leas.empty())
+    {
+        Log::Info(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet (0x{:X}) binds no stripped handler: the tracked attributes' handler is native in this build",
+            Function - Finder::ImageBase());
+        return Bind;
+    }
+    if (Leas.size() != 1)
+    {
+        Log::Error(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet (0x{:X}) takes the shared empty function's address {} times, not once", Function - Finder::ImageBase(), Leas.size());
+        return Bind;
+    }
+
+    // The map: the member passed as this to two different calls (its FindId and its Add), past AActor's members.
+    std::unordered_map<ptrdiff_t, std::vector<uintptr_t>> ThisCalls;
+    for (const auto& [Displacement, Callee] : Finder::MemberThisCalls(Function))
+    {
+        std::vector<uintptr_t>& Callees = ThisCalls[Displacement];
+        if (std::find(Callees.begin(), Callees.end(), Callee) == Callees.end())
+        {
+            Callees.push_back(Callee);
+        }
+    }
+    int32_t Maps = 0;
+    for (const auto& [Displacement, Callees] : ThisCalls)
+    {
+        if (Displacement >= 0x400 && Callees.size() >= 2)
+        {
+            ++Maps;
+            Bind.ItemInstanceIds = Displacement;
+        }
+    }
+    if (Maps != 1)
+    {
+        Log::Error(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet (0x{:X}): {} candidates for the map of applied gadgets", Function - Finder::ImageBase(), Maps);
+        Bind.ItemInstanceIds = -1;
+        return Bind;
+    }
+    Bind.Lea = reinterpret_cast<uint8_t*>(Leas.front());
+    Log::Info(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet (0x{:X}) binds the stripped tracked attribute handler at 0x{:X}, the applied gadgets at +0x{:X}",
+        Function - Finder::ImageBase(), Leas.front() - Finder::ImageBase(), Bind.ItemInstanceIds);
+    return Bind;
+}
+
 uint8_t* Finder::ButterflyEventForceReviveCall(ptrdiff_t IsDBNOOffset)
 {
     // 6.21's Butterfly (CL-4526925). AFortAthenaMutator_ButterflyEvent::StartGatheringPawns (0xD3D950) runs

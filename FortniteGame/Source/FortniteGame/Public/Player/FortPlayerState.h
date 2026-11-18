@@ -9,6 +9,7 @@ class AFortTeamInfo;
 class AFortTeamPrivateInfo;
 class UAbilitySystemComponent;
 class UFortHero;
+class UFortGadgetItemDefinition;
 class UFortItemDefinition;
 struct FVector;
 
@@ -207,6 +208,11 @@ public:
     DefineUProperty(float, CurrentShield)
     DefineUProperty(float, MaxShield)
     static bool HasHealthAndShield() { return Member_CurrentHealth.IsAvailable() && Member_MaxShield.IsAvailable(); }
+
+    // 4.0+ (NetMulticast): every client plays the gadget's OnDestroyParticleSystem and OnDestroySound on the player's
+    // pawn, as its item goes for a tracked attribute used up. False where the build has no such function.
+    DefineUFunction(MulticastTriggerOnGadgetTrackedAttributeDestroyedFX)
+    bool MulticastTriggerOnGadgetTrackedAttributeDestroyedFX(const UFortGadgetItemDefinition* GadgetItemDefinition);
 
     void AddAccumulatedItem(UFortItemDefinition* ItemDefinition, int32_t Delta);
     void ModifyStat(EFortReplicatedStat StatType, int32_t StatDelta, int32_t ScoreDelta, const FVector& Location);

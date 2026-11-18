@@ -261,26 +261,46 @@ void AFortAIPawn::DropLoot(const FFortAIPawnLootDropData& LootDropData, const FG
 void AFortAIPawn::GiveAmmo(int32_t AmmoQuantity)
 {
 #if WITH_SERVER_CODE
-    // Core's: no client build keeps Epic's body. The ammo its current weapon loads (the weapon definition's AmmoData;
-    // the Gunner's Blueprint equips the weapon first) goes into the pawn's own inventory, its
-    // IFortInventoryOwnerInterface: the inventory the weapon's reload takes from and RemoveInventoryItem spends.
+    // Core's: no client build keeps Epic's body. The Sentry's Blueprint (7.20's AITurretPawn_C, GA_AITurretPawn_Fire)
+    // reads it as a reload: after a burst that left the magazine empty it calls GiveAmmo(30) and plays the reload cue
+    // (GameplayCue.Abilities.Generic.BotTurret.Reload, the pawn's own PlayReload montage), and never calls the weapon's
+    // Reload. So the ammo goes straight into the current weapon's magazine, through the weapon's own ModAmmo (the
+    // replicated AmmoCount), up to a full magazine. EquipWeapon's Reload after its GiveAmmo then finds the magazine full.
+    // Before CoreV2 #503 the ammo went into the pawn's inventory for the weapon's reload ability to take, and that
+    // reload never finished: a headless 7.20 server with three Sentries (Trap_Floor_Backup's own GA_Trap_Spawn_Backup)
+    // had the AR's reload restarted and dropped every few seconds with the magazine at 0 (30 more ammo each time), and
+    // the tactical shotgun's shell-by-shell reload stuck with IsReloading true on a full magazine: the endless reload.
     AFortWeapon* Weapon = CurrentWeapon;
     UFortWeaponItemDefinition* WeaponDefinition = Weapon ? static_cast<UFortWeaponItemDefinition*>(Weapon->WeaponData) : nullptr;
-    UFortWorldItemDefinition* AmmoDefinition = WeaponDefinition ? static_cast<TAssetPtr<UFortWorldItemDefinition>&>(WeaponDefinition->AmmoData).LoadSynchronous() : nullptr;
-    IFortInventoryOwnerInterface* InventoryOwner = GetInventoryOwner();
-    if (Role != ROLE_Authority || AmmoQuantity <= 0 || !AmmoDefinition || !InventoryOwner)
+    if (Role != ROLE_Authority || AmmoQuantity <= 0 || !WeaponDefinition)
     {
         return;
     }
-    UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(this, InventoryOwner), AmmoDefinition, AmmoQuantity, false);
+    const int32_t BulletsPerClip = Weapon->GetBulletsPerClip();
+    const int32_t Loaded = static_cast<int32_t>(Weapon->AmmoCount);
+    const int32_t Added = std::min(AmmoQuantity, BulletsPerClip - Loaded);
+    if (BulletsPerClip > 0 && Added > 0)
+    {
+        Weapon->ModAmmo(Added);
+    }
+    // Where the weapon's ModAmmo wasn't found (Finder::ResolveWeaponAmmoLive), the ammo goes into the pawn's own
+    // inventory as before, its IFortInventoryOwnerInterface, for the weapon's reload to take.
+    if (Added > 0 && static_cast<int32_t>(Weapon->AmmoCount) == Loaded)
+    {
+        UFortWorldItemDefinition* AmmoDefinition = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(WeaponDefinition->AmmoData).LoadSynchronous();
+        IFortInventoryOwnerInterface* InventoryOwner = GetInventoryOwner();
+        if (AmmoDefinition && InventoryOwner)
+        {
+            UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(this, InventoryOwner), AmmoDefinition, AmmoQuantity, false);
+        }
+    }
 
     static bool bLogged = false;
     if (!bLogged)
     {
         bLogged = true;
-        AFortInventory* Inventory = GetWorldInventory();
-        Log::Info(L"AFortAIPawn::GiveAmmo: {} gets {} {} for {} (inventory {})", GetName().ToStdString(), AmmoQuantity, AmmoDefinition->GetName().ToStdString(),
-            WeaponDefinition->GetName().ToStdString(), Inventory ? Inventory->GetName().ToStdString() : L"none");
+        Log::Info(L"AFortAIPawn::GiveAmmo: {}'s {} loads {} of {} (magazine {} of {})", GetName().ToStdString(), WeaponDefinition->GetName().ToStdString(), std::max(Added, 0), AmmoQuantity,
+            static_cast<int32_t>(Weapon->AmmoCount), BulletsPerClip);
     }
 #endif
 }

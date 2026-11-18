@@ -16,6 +16,7 @@
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
 #include "Items/FortLootPackage.h"
+#include "Minigame/FortMinigame.h"
 #include "Minigame/FortMinigameState.h"
 #include "Pawns/FortPawn.h"
 #include "Misc/CommandLine.h"
@@ -2892,6 +2893,9 @@ void AFortGameModeAthena::BindMatchEvents()
         PawnDiedHandler ? L", the pawns' OnDied and the player states' OnDestroyed" : L", the match's results and team switches looked at with the phase");
     // 6.20's Playground minigames: their final scores to their leaderboards (only where RecordScore was restored).
     AFortMinigameState::BindWorld(GetWorld());
+    // 7.10's and 7.20's Creative games: their players' inventories reset as each starts and ends (only where
+    // ClearPlayerInventories was restored).
+    AFortMinigame::BindWorld(GetWorld());
 #endif
 }
 

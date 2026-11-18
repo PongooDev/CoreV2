@@ -1,11 +1,18 @@
 #include "pch.h"
 #include "Minigame/FortMinigame.h"
+#include "Engine/World.h"
 #include "Finder.h"
+#include "FortGameModeZone.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
+#include "Items/FortInventory.h"
+#include "Items/FortItem.h"
+#include "Items/FortItemDefinition.h"
 #include "Log.h"
 #include "Natives.h"
+#include "Athena/FortGameModeAthena.h"
+#include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerState.h"
@@ -13,9 +20,38 @@
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
+#include "UObject/WeakObjectPtr.h"
 
 #include <format>
 #include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace
+{
+    TWeakObjectPtr<UWorld> InventoryResetWorld;
+
+    // The build's shared empty exec: the one exec many UFunctions have is the empty native the build gives the
+    // server-only UFunctions it strips (7.00 0x1470620, 7.10 0x14BB380 for those without parameters and 0x14D99A0 for
+    // those with one object, which only steps over it).
+    bool HasStrippedExec(UFunction* Function)
+    {
+        const FNativeFuncPtr Exec = Function ? Function->GetNativeFunc() : nullptr;
+        if (!Exec)
+        {
+            return false;
+        }
+        int32_t Sharing = 0;
+        for (TObjectIterator<UFunction> It; It; ++It)
+        {
+            if ((*It)->GetNativeFunc() == Exec && ++Sharing > 16)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}
 
 TArray<AFortPlayerState*> AFortMinigame::GetParticipatingPlayers()
 {
@@ -128,31 +164,194 @@ DEFINE_FUNCTION(AFortMinigame::execTeleportPlayersToStartLocations)
     P_NATIVE_END;
 }
 
+void AFortMinigame::ClearPlayerInventories()
+{
+#if WITH_SERVER_CODE
+    // Who plays: the game's own list (GetParticipatingPlayers), as at the start's teleport.
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+    int32_t Cleared = 0;
+    const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
+    for (AFortPlayerState* PlayerState : Players)
+    {
+        AActor* Owner = PlayerState ? reinterpret_cast<AActor*>(PlayerState)->GetOwner() : nullptr;
+        AFortPlayerControllerAthena* Controller = Owner ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Owner)) : nullptr;
+        if (Controller)
+        {
+            ClearPlayerInventory(Controller);
+            ++Cleared;
+        }
+    }
+    Log::Info(L"Minigame: {} resets the inventories of {} of its {} players", GetName().ToStdString(), Cleared, Players.Num());
+#endif
+}
+
+void AFortMinigame::ClearPlayerInventory(AFortPlayerControllerAthena* PlayerController)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = PlayerController && Role == ROLE_Authority ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
+    if (!Inventory || !AFortPlayerController::HasInventoryRemovalHook())
+    {
+        return;
+    }
+    // The game mode's StartingItems stay (on Creative's: the building pieces, the edit tool and wood).
+    AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this);
+    const TStructArray<FItemAndCount>* StartingItems = GameMode ? &static_cast<const TStructArray<FItemAndCount>&>(GameMode->StartingItems) : nullptr;
+    const auto IsStartingItem = [StartingItems](const UFortItemDefinition* ItemDefinition)
+    {
+        for (int32_t Index = 0; StartingItems && Index < StartingItems->Num(); ++Index)
+        {
+            if (static_cast<UFortItemDefinition*>((*StartingItems)[Index].Item) == ItemDefinition)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // The whole stack of each, collected first: a removal changes the inventory's item list.
+    std::vector<std::pair<FGuid, int32_t>> Removals;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* Entry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        UFortWorldItemDefinition* ItemDefinition = Entry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)) : nullptr;
+        if (ItemDefinition && ItemDefinition->bCanBeDropped && !IsStartingItem(ItemDefinition))
+        {
+            Removals.emplace_back(Entry->ItemGuid, static_cast<int32_t>(Entry->Count));
+        }
+    }
+    for (const auto& [ItemGuid, Count] : Removals)
+    {
+        PlayerController->RemoveInventoryItem(ItemGuid, Count, true, true);
+    }
+    if (!Removals.empty())
+    {
+        Log::Info(L"Minigame: {} loses {} items as {}'s inventory is reset", PlayerController->GetName().ToStdString(), Removals.size(), GetName().ToStdString());
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortMinigame::execClearPlayerInventories)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->ClearPlayerInventories();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortMinigame::execClearPlayerInventory)
+{
+    P_GET_OBJECT(AFortPlayerControllerAthena, Z_Param_PlayerController);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->ClearPlayerInventory(Z_Param_PlayerController);
+    P_NATIVE_END;
+}
+
+void AFortMinigame::BindInventoryReset(AFortMinigame* Minigame)
+{
+    // As the game goes in progress and as it stops being in progress: the minigame's own broadcasts, calling its own
+    // ClearPlayerInventories. Once each (AddUniqueDynamic).
+    if (!Minigame || Minigame->Role != ROLE_Authority || !ClearPlayerInventoriesFunction)
+    {
+        return;
+    }
+    const FName Name = ClearPlayerInventoriesFunction->GetFName();
+    FMulticastScriptDelegate& Started = Minigame->MinigameStartedDelegate;
+    FMulticastScriptDelegate& Ended = Minigame->MinigameEndedDelegate;
+    Started.AddUniqueDynamic(Minigame, Name);
+    Ended.AddUniqueDynamic(Minigame, Name);
+}
+
+void AFortMinigame::BindWorld(UWorld* World)
+{
+#if WITH_SERVER_CODE
+    // Nothing in 7.10 calls ClearPlayerInventories any more: no Blueprint references it (none of the paks has the name),
+    // there is no FName or dynamic binding of it in the image, and its native callers went with the stripped server code,
+    // so there is no call left to restore. 7.01's patch notes put the reset "when a game is started and also after it
+    // finishes"; the game's own broadcasts at those two moments are the minigame's MinigameStartedDelegate
+    // (HandleMinigameStarted_Implementation, as SetMinigameState goes InProgress) and MinigameEndedDelegate (as it
+    // leaves InProgress: EndMinigame's PostGameEnd or PostGameAbandon). Each island volume's UFortMinigameVolumeComponent
+    // spawns its minigame (MinigameClass), so the world's spawns from now on are bound, and those already up.
+    if (!World || !ClearPlayerInventoriesFunction || InventoryResetWorld.Get() == World)
+    {
+        return;
+    }
+    InventoryResetWorld = World;
+    const FDelegateHandle Handle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([](AActor* Actor)
+    {
+        BindInventoryReset(Actor ? Cast<AFortMinigame>(reinterpret_cast<UObject*>(Actor)) : nullptr);
+    }));
+    int32_t Existing = 0;
+    for (TObjectIterator<AFortMinigame> It; It; ++It)
+    {
+        AFortMinigame* Minigame = *It;
+        if (Minigame && !Minigame->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) && Minigame->GetWorld() == World)
+        {
+            BindInventoryReset(Minigame);
+            ++Existing;
+        }
+    }
+    Log::Info(L"Minigame: the minigames {} ({} already up)", Handle.IsValid()
+        ? L"reset their players' inventories as their games start and end (UWorld::OnActorSpawned, then their MinigameStartedDelegate and MinigameEndedDelegate)"
+        : L"can't be bound as they spawn: the world's OnActorSpawned wasn't found", Existing);
+#endif
+}
+
 void AFortMinigame::HookNatives()
 {
 #if WITH_SERVER_CODE
     // 7.00's exec is the empty native the build gives the server-only UFunctions it strips (0x1470620, shared by 277 of
     // them): many UFunctions with the same Func is that exec.
     UFunction* Function = StaticClass() ? FindStaticFunction_TeleportPlayersToStartLocations() : nullptr;
-    const FNativeFuncPtr Exec = Function ? Function->GetNativeFunc() : nullptr;
-    if (!Exec)
-    {
-        return;
-    }
-    int32_t Sharing = 0;
-    for (TObjectIterator<UFunction> It; It; ++It)
-    {
-        if ((*It)->GetNativeFunc() == Exec && ++Sharing > 16)
-        {
-            break;
-        }
-    }
-    if (Sharing <= 16)
+    if (Function && !HasStrippedExec(Function))
     {
         Log::Info(L"Finder: AFortMinigame::TeleportPlayersToStartLocations is native in this build");
+    }
+    else if (Function)
+    {
+        Function->SetNativeFunc(&execTeleportPlayersToStartLocations);
+        Log::Info(L"Hook AFortMinigame::TeleportPlayersToStartLocations: native");
+    }
+
+    // 7.10 and 7.20 (CL-4667333, CL-4727874): the inventory reset's two natives are stripped (7.10's execs 0x14BB380 and
+    // 0x14D99A0). 7.00 has neither UFunction.
+    UFunction* ClearInventories = StaticClass() ? FindStaticFunction_ClearPlayerInventories() : nullptr;
+    UFunction* ClearInventory = ClearInventories ? FindStaticFunction_ClearPlayerInventory() : nullptr;
+    if (!ClearInventories || !ClearInventory)
+    {
         return;
     }
-    Function->SetNativeFunc(&execTeleportPlayersToStartLocations);
-    Log::Info(L"Hook AFortMinigame::TeleportPlayersToStartLocations: native");
+    if (!HasStrippedExec(ClearInventories))
+    {
+        Log::Info(L"Finder: AFortMinigame::ClearPlayerInventories is native in this build");
+        return;
+    }
+    if (!HasStartedAndEndedDelegates())
+    {
+        Log::Error(L"Hook AFortMinigame::ClearPlayerInventories: not restored (the minigame's MinigameStartedDelegate and MinigameEndedDelegate not found), so a Creative game doesn't reset its players' inventories");
+        return;
+    }
+    ClearInventories->SetNativeFunc(&execClearPlayerInventories);
+    ClearPlayerInventoriesFunction = ClearInventories;
+    Log::Info(L"Hook AFortMinigame::ClearPlayerInventories: native");
+    if (HasStrippedExec(ClearInventory))
+    {
+        ClearInventory->SetNativeFunc(&execClearPlayerInventory);
+        Log::Info(L"Hook AFortMinigame::ClearPlayerInventory: native");
+    }
+    // The game mode binds its world's minigames as it binds the match's events (AFortGameModeAthena::BindMatchEvents);
+    // where that came first, its world is bound here.
+    for (TObjectIterator<AFortGameModeAthena> It; It; ++It)
+    {
+        if (!It->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) && It->GetWorld())
+        {
+            BindWorld(It->GetWorld());
+        }
+    }
 #endif
 }

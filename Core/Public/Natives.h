@@ -175,6 +175,7 @@ namespace Natives
     inline IConsoleManager** IConsoleManager_Singleton = nullptr;
     inline void (*IConsoleManager_SetupSingleton)() = nullptr;
     inline FTextLocalizationManager** GTextLocalizationManager = nullptr;
+    inline FTextLocalizationManager& (*FTextLocalizationManager_Get)() = nullptr;
     inline void* (*FTextLocalizationManager_FindDisplayString)(const FTextLocalizationManager* This, void* Result, const FString* Namespace, const FString* Key, const FString* SourceString) = nullptr;
     inline void* UConsole_RegisterConsoleAutoCompleteEntries = nullptr;
 

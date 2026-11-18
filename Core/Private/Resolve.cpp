@@ -6549,6 +6549,35 @@ bool Finder::ResolveTextLocalizationManager()
         }
     }
 
+    // 7.20's FText::FindText takes FTextKeys, which UKismetTextLibrary::FindTextInLocalizationTable builds itself (7.20
+    // 0x28E2100: two FTextKey constructors, then xor r9d, r9d and a call to FindText at 0x189A260), so there is no tail
+    // jump to follow. Its FTextLocalizationManager::Get keeps the manager in a function-local static (TLazySingleton;
+    // 7.20 0x189C270: the thread-safe-static TLS check, then lea rax, Instance), with no manager pointer to read.
+    // FindText calls Get first and keeps the result (7.20 0x189A297: call Get; mov rdi, rax), so Core calls that Get.
+    // Before, with neither found, Core's Get dereferenced a null manager and the console crashed listing the show flags
+    // (#496).
+    const auto LazyGetOf = [](uintptr_t Candidate) -> uintptr_t
+    {
+        const uintptr_t GetCall = FindRawCall(Candidate, Candidate + 0x40);
+        const uintptr_t Get = GetCall ? Finder::RelativeTarget(GetCall, 1, 5) : 0;
+        const bool bKeepsResult = GetCall && Byte(GetCall + 5) == 0x48 && Byte(GetCall + 6) == 0x8B && (Byte(GetCall + 7) & 0xC7) == 0xC0;
+        return bKeepsResult && FindInstruction(Get, Get + 0x20, { 0x65, 0x48, 0x8B, 0x04, 0x25, 0x58, 0x00, 0x00, 0x00 }) ? Get : 0;
+    };
+    uintptr_t LazyGet = 0;
+    for (uintptr_t Call = Thunk && ThunkEnd && !FindText ? FindRawCall(Thunk, ThunkEnd) : 0; Call && !FindText; Call = FindRawCall(Call + 5, ThunkEnd))
+    {
+        const uintptr_t Target = Finder::RelativeTarget(Call, 1, 5);
+        const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
+        const uintptr_t NullSourceString = TargetEnd ? FindInstruction(Target, TargetEnd, { 0x45, 0x33, 0xC9 }) : 0;
+        const uintptr_t FindTextCall = NullSourceString ? FindRawCall(NullSourceString + 3, NullSourceString + 0x18) : 0;
+        if (FindTextCall && FindTextCall + 5 <= TargetEnd)
+        {
+            const uintptr_t Candidate = Finder::RelativeTarget(FindTextCall, 1, 5);
+            LazyGet = LazyGetOf(Candidate);
+            FindText = LazyGet ? Candidate : 0;
+        }
+    }
+
     uintptr_t ManagerLoad = FindText ? FindInstruction(FindText, FindText + 0x40, { 0x48, 0x8B, 0x05 }) : 0;
     const uintptr_t InlinedDisplayCall = FindText ? FindInstruction(FindText, FindText + 0x100, { 0x4C, 0x8B, 0xCF, 0x48, 0x89, 0x5C, 0x24, 0x20, 0x4C, 0x8B, 0xC6, 0x48, 0x8D, 0x55, -1, 0x48, 0x8B, 0xC8, 0xE8 }) : 0;
     uintptr_t DisplayCall = InlinedDisplayCall ? InlinedDisplayCall + 18 : 0;
@@ -6583,8 +6612,13 @@ bool Finder::ResolveTextLocalizationManager()
     {
         Natives::GTextLocalizationManager = reinterpret_cast<FTextLocalizationManager**>(Finder::RelativeTarget(ManagerLoad, 3, 7));
     }
+    else if (LazyGet)
+    {
+        Natives::FTextLocalizationManager_Get = reinterpret_cast<decltype(Natives::FTextLocalizationManager_Get)>(LazyGet);
+        Log::Info(L"Finder: FTextLocalizationManager::Get at 0x{:X} (its manager is a function-local static)", LazyGet - Finder::ImageBase());
+    }
 
-    if (!ManagerLoad || !DisplayCall)
+    if ((!ManagerLoad && !LazyGet) || !DisplayCall)
     {
         Log::Error(L"Finder: FTextLocalizationManager::FindDisplayString not found");
         return false;

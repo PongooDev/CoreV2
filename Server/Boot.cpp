@@ -157,7 +157,14 @@ void Boot::Initialize()
     Configuration::Load();
     Log::Initialize(L"Server");
     Log::KeepFromChildProcesses();
-    Log::Info(L"Core V2 starting");
+    // Which build this is, so a reporter's Server_log says whether a fix was in it: the release workflow passes the run
+    // number (the release's build-N tag) and the commit (its first seven hex digits) to the compiler. A local build has
+    // neither.
+#if defined(CORE_BUILD_NUMBER) && defined(CORE_COMMIT)
+    Log::Info(L"Core V2 starting (build-{}, commit {:07x})", CORE_BUILD_NUMBER, static_cast<uint32_t>(CORE_COMMIT));
+#else
+    Log::Info(L"Core V2 starting (a local build)");
+#endif
 
     // On a packed build the image is still ciphertext at this point and the stub would overwrite anything patched
     // into it, so hand the rest over to a watcher that runs once the stub has finished.

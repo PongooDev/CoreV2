@@ -205,6 +205,56 @@ namespace
         Log::Info(L"Battle Royale: {} of {} {} spawn ({:.0f}%, spawn percents {:.0f}-{:.0f}%), {} destroyed", Placed - Destroyed, Placed, What, SpawnFraction * 100.0f, MinFraction * 100.0f, MaxFraction * 100.0f, Destroyed);
     }
 
+    // The map's placed vehicles this match doesn't keep (#498). 7.20's placed vehicle spawners (Athena_VehicleSpawner_C,
+    // Athena_JackalSpawner_C among them: 30 of the map's levels place Driftboard spawners, a month before 7.40 brought
+    // the Driftboard) spawn their VehicleClass once the game mode's map info is initialized, with no check of their own;
+    // the check is the game mode's ShouldSpawnVehiclePostPlaylistLoad, intact but with no caller left in the client build
+    // (no Blueprint or native calls it). Each spawner's vehicle stays when it says so for the spawner's VehicleClass (the
+    // class the map info lists, whatever GetVehicleClassOverride gave it), else goes. 7.20's DefaultMapInfo lists the
+    // shopping cart and golf cart (20%), the Quadcrasher (100%), the Stormwing (80%) and, as the native
+    // FortAthenaJackalVehicle that no spawner spawns, the Driftboard (0%): no Driftboard stays. Not in Creative, whose
+    // islands' vehicles are the players' own.
+    void ApplyVehicleSpawnPercents(AFortGameModeAthena* GameMode)
+    {
+        if (!AFortGameModeAthena::HasShouldSpawnVehiclePostPlaylistLoad() || AFortPlayerControllerAthena::IsCreativeMatch(GameMode))
+        {
+            return;
+        }
+        UClass* SpawnerClass = FindObject<UClass>(nullptr, L"/Game/Athena/DrivableVehicles/Athena_VehicleSpawner.Athena_VehicleSpawner_C");
+        const UProperty* VehicleClassProperty = SpawnerClass ? SpawnerClass->FindPropertyByName(FName(L"VehicleClass", FNAME_Find)) : nullptr;
+        const UProperty* SpawnedVehicleProperty = SpawnerClass ? SpawnerClass->FindPropertyByName(FName(L"SpawnedVehicle", FNAME_Find)) : nullptr;
+        if (!VehicleClassProperty || !SpawnedVehicleProperty || VehicleClassProperty->GetSize() != sizeof(UClass*) || SpawnedVehicleProperty->GetSize() != sizeof(AActor*))
+        {
+            Log::Info(L"Battle Royale: no placed vehicle spawners, every vehicle stays");
+            return;
+        }
+        UWorld* World = GameMode->GetWorld();
+        int32_t Placed = 0;
+        int32_t Destroyed = 0;
+        for (TObjectIterator<AActor> It; It; ++It)
+        {
+            AActor* Spawner = *It;
+            if (Spawner->GetWorld() != World || Spawner->HasAnyFlags(static_cast<EObjectFlags>(RF_ClassDefaultObject | RF_ArchetypeObject)) || !Spawner->IsA(SpawnerClass))
+            {
+                continue;
+            }
+            uint8_t* const SpawnerData = reinterpret_cast<uint8_t*>(Spawner);
+            UClass* VehicleClass = *reinterpret_cast<UClass**>(SpawnerData + VehicleClassProperty->GetOffset_ForInternal());
+            AActor*& Vehicle = *reinterpret_cast<AActor**>(SpawnerData + SpawnedVehicleProperty->GetOffset_ForInternal());
+            if (!Vehicle || Vehicle->IsPendingKill())
+            {
+                continue;
+            }
+            ++Placed;
+            if (!GameMode->ShouldSpawnVehiclePostPlaylistLoad(VehicleClass) && Vehicle->Destroy())
+            {
+                Vehicle = nullptr;
+                ++Destroyed;
+            }
+        }
+        Log::Info(L"Battle Royale: {} of {} placed vehicles spawn (ShouldSpawnVehiclePostPlaylistLoad), {} destroyed", Placed - Destroyed, Placed, Destroyed);
+    }
+
     void ApplySpawnPercents(AFortGameModeAthena* GameMode)
     {
         UWorld* World = GameMode->GetWorld();
@@ -222,6 +272,7 @@ namespace
         {
             ApplySpawnPercent(World, MapInfo->AmmoBoxClass, MapInfo->AmmoBoxMinSpawnPercent, MapInfo->AmmoBoxMaxSpawnPercent, false, L"ammo boxes");
         }
+        ApplyVehicleSpawnPercents(GameMode);
     }
 
     AFortGameStateAthena* AthenaGameStateOf(AFortGameModeAthena* GameMode)
@@ -363,6 +414,16 @@ void AFortGameModeAthena::ApplyContainerSpawnPercents()
     }
     ApplySpawnPercents(this);
 #endif
+}
+
+bool AFortGameModeAthena::ShouldSpawnVehiclePostPlaylistLoad(UClass* VehicleClass)
+{
+    Reflection::FParams Params(FindStaticFunction_ShouldSpawnVehiclePostPlaylistLoad(), true);
+    if (!Params.Set(L"VehicleClass", VehicleClass) || !Params.Call(this))
+    {
+        return true;
+    }
+    return Params.Take<bool>(L"ReturnValue");
 }
 
 void AFortGameModeAthena::SpawnBGAConsumables()

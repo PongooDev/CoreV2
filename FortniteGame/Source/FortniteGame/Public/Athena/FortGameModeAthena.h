@@ -217,8 +217,18 @@ public:
     void NoteRespawnDeath(AFortPlayerStateAthena* PlayerState, AFortPlayerStateAthena* KillerPlayerState);
 
     // Removes the placed chests and ammo boxes this match doesn't keep, from the map info's spawn percents (#205): once the
-    // bus is under way on builds whose playlists bring their own game data (from 1.11, #238), at once before them.
+    // bus is under way on builds whose playlists bring their own game data (from 1.11, #238), at once before them. From
+    // 7.20 the map's placed vehicles too (ShouldSpawnVehiclePostPlaylistLoad, #498).
     void ApplyContainerSpawnPercents();
+
+    // Whether a vehicle of VehicleClass spawns in this match (from 7.20; the build's own, intact: 7.20 0xD19C10). It
+    // looks VehicleClass up in the game state's map info's VehicleClassDetails (exactly that class) and rolls between
+    // its VehicleMinSpawnPercent and VehicleMaxSpawnPercent (AthenaGameData's Default.<Vehicle>.Min/MaxSpawnPercent rows,
+    // which a playlist's own game data replaces); a class with no entry, or no map info, doesn't spawn. Its caller went
+    // with the stripped server code. True where the build has no such function.
+    DefineUFunction(ShouldSpawnVehiclePostPlaylistLoad)
+    static bool HasShouldSpawnVehiclePostPlaylistLoad() { return FindStaticFunction_ShouldSpawnVehiclePostPlaylistLoad() != nullptr; }
+    bool ShouldSpawnVehiclePostPlaylistLoad(UClass* VehicleClass);
 
     // Has the map info roll the placed vending machines' rarities and what they sell (AFortAthenaMapInfo::
     // SpawnVendingMachines, from 3.5, #257) with the match's playlist's tables: at once where they are already in place,

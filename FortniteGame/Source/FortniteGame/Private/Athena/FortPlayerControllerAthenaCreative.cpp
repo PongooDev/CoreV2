@@ -353,16 +353,42 @@ void AFortPlayerControllerAthena::SetCreativePlotLinkedVolume(AFortVolume* Volum
     {
         CreativePlotLinkedVolume = Volume;
     }
-    // The setter refreshes the old island's rifts; the new island's count the player once they are refreshed too.
+    // The setter refreshes the old island's rifts (its LinkedPortals, 7.20 0xD63370); the new island's count the player
+    // once they are refreshed too. A rift's CurrentPopulation is the controllers linked to the rift's LinkedVolume
+    // (AFortAthenaCreativePortal's refresh, 7.20 0xCB8CC0). The hub's rift of an island is linked to it from the map
+    // (its LinkedVolume), but it isn't always in the island's LinkedPortals (transient, filled at run time), and a rift
+    // left out kept its old count: a player on their own island showed 0 on their hub rift (#485, 7.20). So every rift
+    // of the portal manager whose island is the old or the new one is refreshed, and replicated with its new count.
+    std::vector<AFortAthenaCreativePortal*> Rifts;
+    const auto AddRift = [&Rifts](AFortAthenaCreativePortal* Portal)
+    {
+        if (Portal && std::find(Rifts.begin(), Rifts.end(), Portal) == Rifts.end())
+        {
+            Rifts.push_back(Portal);
+        }
+    };
     if (Volume && AFortVolume::HasLinkedPortals())
     {
         for (AFortAthenaCreativePortal* Portal : static_cast<const TArray<AFortAthenaCreativePortal*>&>(Volume->LinkedPortals))
         {
-            if (Portal)
+            AddRift(Portal);
+        }
+    }
+    if (AFortCreativePortalManager* Manager = (Volume || Previous) ? AFortCreativePortalManager::Get(this) : nullptr)
+    {
+        for (AFortAthenaCreativePortal* Portal : static_cast<const TArray<AFortAthenaCreativePortal*>&>(Manager->AllPortals))
+        {
+            AFortVolume* const Island = Portal ? static_cast<AFortVolume*>(Portal->LinkedVolume) : nullptr;
+            if (Island && (Island == Volume || Island == Previous))
             {
-                Portal->RefreshPortal();
+                AddRift(Portal);
             }
         }
+    }
+    for (AFortAthenaCreativePortal* Portal : Rifts)
+    {
+        Portal->RefreshPortal();
+        reinterpret_cast<AActor*>(Portal)->ForceNetUpdate();
     }
     ForceNetUpdate();
     Log::Info(L"Creative: {} is {}", PlayerNameOf(this), Volume ? std::format(L"on the island {}", Volume->GetName().ToStdString()) : std::wstring(L"in the hub"));

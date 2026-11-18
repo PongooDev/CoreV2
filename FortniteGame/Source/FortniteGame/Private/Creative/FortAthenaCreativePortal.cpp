@@ -22,6 +22,7 @@
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 
+#include <algorithm>
 #include <format>
 
 namespace
@@ -344,6 +345,8 @@ void AFortCreativePortalManager::LogHub(const UObject* WorldContextObject)
     int32_t WithIsland = 0;
     int32_t WithSave = 0;
     int32_t WithPlaysetStream = 0;
+    // Hub rifts in their island's LinkedPortals, the list the CreativePlotLinkedVolume setter refreshes (#485).
+    int32_t InIslandList = 0;
     for (AFortAthenaCreativePortal* Portal : All)
     {
         if (!Portal || Portal->bReturnToCreativeHub)
@@ -355,6 +358,11 @@ void AFortCreativePortalManager::LogHub(const UObject* WorldContextObject)
         if (Volume)
         {
             ++WithIsland;
+            if (AFortVolume::HasLinkedPortals())
+            {
+                const TArray<AFortAthenaCreativePortal*>& Listed = Volume->LinkedPortals;
+                InIslandList += std::find(Listed.begin(), Listed.end(), Portal) != Listed.end() ? 1 : 0;
+            }
         }
         UFortLevelSaveComponent* SaveComponent = Portal->GetLevelSaveComponent();
         if (SaveComponent)
@@ -368,8 +376,8 @@ void AFortCreativePortalManager::LogHub(const UObject* WorldContextObject)
         }
     }
     const TArray<AFortAthenaCreativePortal*>& Available = Manager->AvailablePortals;
-    Log::Info(L"Creative: the hub has {} rifts ({} free), {} linked to an island space, {} with its UFortLevelSaveComponent, {} streaming their plot's playset; {} rifts in all with the islands' own",
-        HubRifts, Available.Num(), WithIsland, WithSave, WithPlaysetStream, All.Num());
+    Log::Info(L"Creative: the hub has {} rifts ({} free), {} linked to an island space ({} in its LinkedPortals), {} with its UFortLevelSaveComponent, {} streaming their plot's playset; {} rifts in all with the islands' own",
+        HubRifts, Available.Num(), WithIsland, InIslandList, WithSave, WithPlaysetStream, All.Num());
     // The game mode's StartingItems (#485: what a hub loadout would start from; the Creative phone and the pickaxe aren't
     // among them on 7.00).
     if (AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(WorldContextObject))

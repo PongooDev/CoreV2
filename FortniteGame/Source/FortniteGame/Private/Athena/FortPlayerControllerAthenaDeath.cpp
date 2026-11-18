@@ -210,10 +210,15 @@ void AFortPlayerControllerAthena::HookVTables()
     }
     SwapStripped(L"AFortPlayerControllerAthena::OnPawnDied", Index, reinterpret_cast<void*>(&OnPawnDiedHK));
     // The player state's own store of a death, which the restored handler hands its FDeathInfo to (OnPawnDied). From
-    // 6.01 only, the builds whose game state reflects bAllowRespawning (as AFortGameModeAthena's IsRespawningAllowed
-    // finder has it): every reader of a stored death was read in 6.01's and 6.02's images, no older build's, and
-    // bInitialized (from 4.4) changes what each of them does. Older builds keep the report written field by field.
-    if (AFortGameStateAthena::HasAllowRespawning() && FDeathInfo::HasInitialized() && Natives::AFortPlayerStateAthena_ToDeathCause)
+    // 6.01 only: every reader of a stored death was read in 6.01's and 6.02's images, no older build's, and bInitialized
+    // (from 4.4) changes what each of them does. Older builds keep the report written field by field. 6.01 to 6.22 are
+    // the builds whose game state reflects bAllowRespawning; 6.30 (CL-4573096) drops it and reflects the game state's
+    // IsRespawningAllowed instead (AFortGameModeAthena::IsRespawningAllowed), and keeps every reader. Gated on the
+    // first alone, 6.30 to 7.20 stored no death the game's way, so the volume manager's respawn place for a player
+    // (7.10 0xDBAD80: the minigame of the volume the death is in, AFortMinigame::OverridePlayerSpawnLocation, whose
+    // ChoosePlayerStart takes the player's latest Creative checkpoint, a spawn pad or the air) was never asked, and the
+    // game mode's FinishRestartPlayer (7.10 0xC2AB10) never moved the respawned pawn (PongooDev/CoreV2#492).
+    if ((AFortGameStateAthena::HasAllowRespawning() || AFortGameStateZone::HasIsRespawningAllowed()) && FDeathInfo::HasInitialized() && Natives::AFortPlayerStateAthena_ToDeathCause)
     {
         const ptrdiff_t DeathInfoOffset = AFortPlayerStateAthena::DeathInfoOffset();
         const ptrdiff_t DeathCircumstanceOffset = FDeathInfo::DeathCircumstanceOffset();

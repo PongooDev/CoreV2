@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/Map.h"
 #include "Containers/UnrealString.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
@@ -68,6 +69,11 @@ public:
     DefineUProperty(int32_t, MinWorldLevel)
     DefineUProperty(int32_t, MaxWorldLevel)
     DefineUProperty(bool, bAllowBonusDrops)
+    // 7.x (7.10 +0x14): the name a picker's NamedWeightsMap multiplies the row's weight by (UFortKismetLibrary::
+    // PickLootDropsWithNamedWeights; Frostnite's supply drops pass TrapPatrolWard 0, so no Patrol Ward trap drops).
+    DefineUProperty(FName, NamedWeightMult)
+
+    static bool HasNamedWeightMult() { return Member_NamedWeightMult.IsAvailable(); }
 };
 
 struct FFortLootQuotaData
@@ -113,8 +119,10 @@ struct FFortLootTierRow
 class UFortLootPackage
 {
 public:
-    static bool PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, int32_t WorldLevel, FName LootTierKey, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops, bool bPreview);
-    static void PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>& OutLootToDrop, FName LootPackageName, int32_t WorldLevel, int32_t LootPackageCategory, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops);
+    // NamedWeightsMap (7.x): each package row whose NamedWeightMult it names has its weight multiplied by that value, in
+    // every package the pick calls into. Null: the rows' own weights.
+    static bool PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, int32_t WorldLevel, FName LootTierKey, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops, bool bPreview, const TMap<FName, float>* NamedWeightsMap = nullptr);
+    static void PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>& OutLootToDrop, FName LootPackageName, int32_t WorldLevel, int32_t LootPackageCategory, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops, const TMap<FName, float>* NamedWeightsMap = nullptr);
 };
 
 class UFortLootTier

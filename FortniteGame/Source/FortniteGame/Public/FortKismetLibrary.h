@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Containers/Map.h"
 #include "GameplayTagContainer.h"
 #include "StructArray.h"
 #include "UObject/Object.h"
@@ -39,6 +40,7 @@ class UFortKismetLibrary : public UObject
     DefineUFunction(K2_SpawnPickupInWorld)
     DefineUFunction(GetSafeZoneLocation)
     DefineUFunction(PickLootDrops)
+    DefineUFunction(PickLootDropsWithNamedWeights)
     DefineUFunction(GetActorTeam)
     DefineUFunction(GetTeamAffiliation)
     DefineUFunction(K2_GiveBuildingResource)
@@ -83,6 +85,10 @@ public:
     static bool GetSafeZoneLocation(UObject* WorldContextObject, int32_t SafeZoneIndex, FVector& OutLocation);
     // 5.0 (UE 4.21) added WorldContextObject as the first parameter; its exec passes it to the native first.
     static bool PickLootDrops(UObject* WorldContextObject, TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier);
+    // 7.x: PickLootDrops whose package rows NamedWeightsMap reweighs by their NamedWeightMult (7.10's exec, 0x15E0530,
+    // passes rcx = WorldContextObject, rdx = OutLootToDrop, r8 = TierGroupName, r9d = WorldLevel, then NamedWeightsMap and
+    // ForcedLootTier on the stack).
+    static bool PickLootDropsWithNamedWeights(UObject* WorldContextObject, TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, const TMap<FName, float>& NamedWeightsMap, int32_t ForcedLootTier);
     static bool PickLootTierKeyAndLootTierFromTierGroup(FName& OutLootTierKey, int32_t& OutLootTier, FName TierGroupName, int32_t WorldLevel, int32_t ForcedLootTier, const FGameplayTagContainer& ContextTags);
     // EffectContainer (an FFortGameplayEffectContainer) made into OutSpec (an FFortGameplayEffectContainerSpec's storage)
     // for AbilityComp at GameplayEffectLevel, as an ability makes its own (1.11 0x6346C0 hands it to the container's

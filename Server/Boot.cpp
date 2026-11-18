@@ -400,6 +400,9 @@ static void InstallHooks()
         // The server-only plugin that gives the game mode its players' Vivox tokens (the "VoiceChatToken" modular
         // feature), which the client builds lack: registered once the backend has shared its Vivox signing.
         FVivoxVoiceChatTokenModule::StartupModule();
+        // The supply drop's stripped pickup natives: Battle Royale's crates and Supply Llamas, and Save the World's Frostnite
+        // supply drops (EndlessModeSupplyDrop_C is an AthenaSupplyDrop_C).
+        AFortAthenaSupplyDrop::HookNatives();
         if (Configuration::Get().IsBattleRoyale())
         {
             Finder::ResolveLootTierRedirectLive();
@@ -408,7 +411,6 @@ static void InstallHooks()
             AFortPlayerControllerAthena::HookVTables();
             AFortPlayerPawnAthena::HookNatives();
             AFortPlayerPawnAthena::HookVTables();
-            AFortAthenaSupplyDrop::HookNatives();
             AFortAthenaExitCraftSpawner::HookNatives();
             ABuildingFoundation::HookNatives();
             ABGAConsumableSpawner::HookNatives();

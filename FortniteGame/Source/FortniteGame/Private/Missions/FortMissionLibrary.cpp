@@ -8,6 +8,7 @@
 #include "FortKismetLibrary.h"
 #include "FortWorldManager.h"
 #include "Items/FortItemDefinition.h"
+#include "Items/FortLootPackage.h"
 #include "Items/FortPickup.h"
 #include "Items/FortSchematicItemDefinition.h"
 #include "Log.h"
@@ -15,15 +16,21 @@
 #include "Natives.h"
 #include "Pawns/FortPawn.h"
 #include "Player/FortPlayerController.h"
+#include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "StructArray.h"
 #include "Templates/Casts.h"
 #include "UObject/Class.h"
+#include "UObject/ObjectMacros.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
+#include "UObject/UnrealType.h"
 
+#include <algorithm>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFortAIDirector, Log, All);
+DEFINE_LOG_CATEGORY_STATIC(LogFortMission, Log, All);
 
 namespace
 {
@@ -114,6 +121,107 @@ DEFINE_FUNCTION(UFortMissionLibrary::execSpawnAndCollectPlayerPickups)
     P_NATIVE_BEGIN;
     SpawnAndCollectPlayerPickups(Z_Param_WorldContextObject, Z_Param_PlayerController, Z_Param_StartPosition, Z_Param_LootTierGroup, Z_Param_LootTier);
     P_NATIVE_END;
+}
+
+void UFortMissionLibrary::GiveMissionRewardsToPlayer(UObject* WorldContextObject, AFortPlayerController* PlayerController, FName LootTierGroup, int32_t LootTier)
+{
+#if WITH_SERVER_CODE
+    // Cert's (0x61E660): the world's loot level, then for each player (the one given, else every player controller in
+    // the world) with a FortPlayerState, the tier group's key and tier (0x5DF790, ForcedLootTier = LootTier) and that
+    // tier's drops (0x5F1D70) with the player state's ability system and bonus drops allowed. Cert hands the drops'
+    // world level the tier the pick chose, not the loot level (edx = the picked tier at 0x61EBE1), and Core does too.
+    // The rest is cut even in Cert: the drops are rolled and released. Here they go to the player's world inventory as
+    // K2_GiveItemToPlayer gives them (with a notification), at their rolled level; account items can't go there.
+    UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
+    if (!World || LootTierGroup.IsNone())
+    {
+        return;
+    }
+
+    const int32_t WorldLevel = GetRewardWorldLevel(World);
+    std::vector<AFortPlayerController*> PlayerControllers;
+    if (PlayerController)
+    {
+        PlayerControllers.push_back(PlayerController);
+    }
+    else
+    {
+        for (TObjectIterator<AFortPlayerController> It; It; ++It)
+        {
+            if (It->GetWorld() == World)
+            {
+                PlayerControllers.push_back(*It);
+            }
+        }
+    }
+
+    for (AFortPlayerController* Controller : PlayerControllers)
+    {
+        AFortPlayerState* PlayerState = Controller ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState))) : nullptr;
+        if (!PlayerState)
+        {
+            continue;
+        }
+
+        FName LootTierKey;
+        int32_t PickedLootTier = LootTier;
+        const FGameplayTagContainer ContextTags;
+        if (!UFortKismetLibrary::PickLootTierKeyAndLootTierFromTierGroup(LootTierKey, PickedLootTier, LootTierGroup, WorldLevel, LootTier, ContextTags))
+        {
+            UE_LOG(LogFortMission, Warning, TEXT("GiveMissionRewardsToPlayer: no loot tier in %s for world level %d"), *LootTierGroup.ToString(), WorldLevel);
+            continue;
+        }
+
+        TStructArray<FFortItemEntry> LootToDrop{};
+        UFortLootPackage::PickLootDrops(LootToDrop, PickedLootTier, LootTierKey, PlayerState->AbilitySystemComponent, ContextTags, true, false);
+        int32_t Given = 0;
+        for (int32_t Index = 0; Index < LootToDrop.Num(); ++Index)
+        {
+            FFortItemEntry& Entry = LootToDrop[Index];
+            UFortItemDefinition* ItemDefinition = Entry.ItemDefinition;
+            UFortWorldItemDefinition* WorldItemDefinition = Cast<UFortWorldItemDefinition>(ItemDefinition);
+            if (WorldItemDefinition && Entry.Count > 0)
+            {
+                UFortKismetLibrary::K2_GiveItemToPlayer(Controller, WorldItemDefinition, Entry.Count, true, std::max(static_cast<int32_t>(Entry.Level), 1));
+                ++Given;
+            }
+        }
+        UE_LOG(LogFortMission, Log, TEXT("GiveMissionRewardsToPlayer: %s gets %d of %d drops from %s (%s)"), *Controller->GetName(), Given, LootToDrop.Num(), *LootTierGroup.ToString(), *LootTierKey.ToString());
+        LootToDrop.Empty();
+    }
+#endif
+}
+
+DEFINE_FUNCTION(UFortMissionLibrary::execGiveMissionRewardsToPlayer)
+{
+    // Its parameters differ between builds (7.x added RewardDisplayTime; the event's guid and the two texts only name the
+    // reward), so they are stepped by the build's own UFunction and read by name.
+    UFunction* Function = StaticFunction_GiveMissionRewardsToPlayer();
+    std::vector<uint8_t> Parms(std::max<size_t>(Function->ParmsSize, Function->GetPropertiesSize()) + sizeof(uint64_t), 0);
+    Function->InitializeStruct(Parms.data());
+    for (UField* Field = static_cast<UField*>(Function->Children); Field; Field = Field->Next)
+    {
+        UProperty* Property = static_cast<UProperty*>(Field);
+        if ((Property->PropertyFlags & (CPF_Parm | CPF_ReturnParm)) == CPF_Parm)
+        {
+            P_STACK.StepCompiledIn<UProperty>(Parms.data() + Property->GetOffset_ForInternal());
+        }
+    }
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    const auto Parm = [Function, &Parms](const wchar_t* Name, size_t Size) -> const void*
+    {
+        UProperty* Property = Function->FindPropertyByName(FName(Name, FNAME_Find));
+        return Property && static_cast<size_t>(Property->GetSize()) == Size ? Parms.data() + Property->GetOffset_ForInternal() : nullptr;
+    };
+    const void* WorldContextObject = Parm(L"WorldContextObject", sizeof(UObject*));
+    const void* PlayerController = Parm(L"PlayerController", sizeof(AFortPlayerController*));
+    const void* LootTierGroup = Parm(L"LootTierGroup", sizeof(FName));
+    const void* LootTier = Parm(L"LootTier", sizeof(int32_t));
+    GiveMissionRewardsToPlayer(WorldContextObject ? *static_cast<UObject* const*>(WorldContextObject) : nullptr, PlayerController ? *static_cast<AFortPlayerController* const*>(PlayerController) : nullptr,
+        LootTierGroup ? *static_cast<const FName*>(LootTierGroup) : FName(), LootTier ? *static_cast<const int32_t*>(LootTier) : -1);
+    P_NATIVE_END;
+    Function->DestroyStruct(Parms.data());
 }
 
 void UFortMissionLibrary::GiveMissionRewardsToPlayerAsPickups(UObject* WorldContextObject, const FGuid& MissionGUID, AFortPlayerController* PlayerController, const FVector& StartPosition, float Radius, FName LootTierGroup, int32_t LootTier)
@@ -286,6 +394,15 @@ void UFortMissionLibrary::HookNatives()
     {
         Function->SetNativeFunc(&execSpawnAndCollectPlayerPickups);
         Log::Info(L"Hook UFortMissionLibrary::SpawnAndCollectPlayerPickups: native");
+    }
+    // GiveMissionRewardsToPlayer's roll went with the rest of the loot code where the build's PickLootDrops is cut (1.2
+    // on): 7.10's (0x10DC270, from its exec 0x162C210) only formats the reward's title and description texts and gives
+    // nothing, so Frostnite's starting kit never came (#491). Cert's still rolls (the loot package pick and its FindRow
+    // context, "UFortLootPackage::PickLootDrops", are in the build), and is left alone.
+    if (UFunction* Function = FindStaticFunction_GiveMissionRewardsToPlayer(); Function && Finder::StringRefs(L"UFortLootPackage::PickLootDrops").empty())
+    {
+        Function->SetNativeFunc(&execGiveMissionRewardsToPlayer);
+        Log::Info(L"Hook UFortMissionLibrary::GiveMissionRewardsToPlayer: native");
     }
     if (UFunction* Function = StaticFunction_GiveMissionRewardsToPlayerAsPickups())
     {

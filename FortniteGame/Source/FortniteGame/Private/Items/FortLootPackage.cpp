@@ -382,7 +382,7 @@ FName FChosenQuotaInfo::GetLootTierKey() const
     return Key;
 }
 
-bool UFortLootPackage::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, int32_t WorldLevel, FName LootTierKey, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops, bool bPreview)
+bool UFortLootPackage::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop, int32_t WorldLevel, FName LootTierKey, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops, bool bPreview, const TMap<FName, float>* NamedWeightsMap)
 {
     if (LootTierKey.IsNone())
     {
@@ -430,7 +430,7 @@ bool UFortLootPackage::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop
             UE_LOG(LogFortLoot, Verbose, TEXT("Dropping %i loot packages from drop category %i"), Count, Category);
             for (int32_t Drop = 0; Drop < Count; ++Drop)
             {
-                PickLootDropsFromLootPackage(OutLootToDrop, LootPackage, WorldLevel, Category, AbilitySystemComponent, ContextTags, bAllowBonus);
+                PickLootDropsFromLootPackage(OutLootToDrop, LootPackage, WorldLevel, Category, AbilitySystemComponent, ContextTags, bAllowBonus, NamedWeightsMap);
             }
         }
     }
@@ -465,13 +465,38 @@ bool UFortLootPackage::PickLootDrops(TStructArray<FFortItemEntry>& OutLootToDrop
     return bDroppedAny;
 }
 
-void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>& OutLootToDrop, FName LootPackageName, int32_t WorldLevel, int32_t LootPackageCategory, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops)
+void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>& OutLootToDrop, FName LootPackageName, int32_t WorldLevel, int32_t LootPackageCategory, UAbilitySystemComponent* AbilitySystemComponent, const FGameplayTagContainer& ContextTags, bool bAllowBonusDrops, const TMap<FName, float>* NamedWeightsMap)
 {
     UFortGameData* GameData = GetGameData();
     if (!GameData)
     {
         return;
     }
+
+    // A row's weight, multiplied by the picker's named weight for its NamedWeightMult when there is one.
+    const bool bNamedWeights = NamedWeightsMap && NamedWeightsMap->Num() > 0 && FFortLootPackageData::HasNamedWeightMult();
+    const auto RowWeight = [NamedWeightsMap, bNamedWeights](FFortLootPackageData& Row)
+    {
+        const float Weight = Row.Weight;
+        if (!bNamedWeights)
+        {
+            return Weight;
+        }
+        const FName NamedWeightMult = Row.NamedWeightMult;
+        if (NamedWeightMult.IsNone())
+        {
+            return Weight;
+        }
+        // A Blueprint's map of a name or two (Frostnite's supply drops: TrapPatrolWard 0), looked through as it is.
+        for (const auto& Pair : *NamedWeightsMap)
+        {
+            if (Pair.Key == NamedWeightMult)
+            {
+                return Weight * Pair.Value;
+            }
+        }
+        return Weight;
+    };
 
     std::vector<FFortLootPackageData*> Rows;
     float TotalWeight = 0.0f;
@@ -488,7 +513,7 @@ void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>
             if (Row && PackageRowMatches(*Row, LootPackageName, LootPackageCategory, ContextTags, WorldLevel))
             {
                 Rows.push_back(Row);
-                TotalWeight += Row->Weight;
+                TotalWeight += RowWeight(*Row);
             }
         }
     }
@@ -508,7 +533,7 @@ void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>
     FFortLootPackageData* Selected = nullptr;
     for (FFortLootPackageData* Row : Rows)
     {
-        const float Weight = Row->Weight;
+        const float Weight = RowWeight(*Row);
         if (Roll <= Weight)
         {
             Selected = Row;
@@ -528,7 +553,7 @@ void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>
             const FName CalledPackage(*LootPackageCall);
             for (int32_t Call = 0; Call < Count; ++Call)
             {
-                PickLootDropsFromLootPackage(OutLootToDrop, CalledPackage, WorldLevel, -1, AbilitySystemComponent, ContextTags, false);
+                PickLootDropsFromLootPackage(OutLootToDrop, CalledPackage, WorldLevel, -1, AbilitySystemComponent, ContextTags, false, NamedWeightsMap);
             }
         }
         else if (Selected->ItemDefinition.ToStringReference().IsNull())
@@ -584,7 +609,7 @@ void UFortLootPackage::PickLootDropsFromLootPackage(TStructArray<FFortItemEntry>
         SourceTags.AppendTags(ContextTags);
         if (RollBonusChance(AbilitySystemComponent, PlayerAttribute(L"DoubleLootRollChance", DoubleLootRollChance), SourceTags))
         {
-            PickLootDropsFromLootPackage(OutLootToDrop, LootPackageName, WorldLevel, LootPackageCategory, AbilitySystemComponent, ContextTags, false);
+            PickLootDropsFromLootPackage(OutLootToDrop, LootPackageName, WorldLevel, LootPackageCategory, AbilitySystemComponent, ContextTags, false, NamedWeightsMap);
         }
     }
 }

@@ -21,6 +21,7 @@ class UFortMissionLibrary : public UObject
     DefineUFunction(ExecuteMissionEvent)
     DefineUFunction(LoadMission)
     DefineUFunction(SpawnAndCollectPlayerPickups)
+    DefineUFunction(GiveMissionRewardsToPlayer)
     DefineUFunction(GiveMissionRewardsToPlayerAsPickups)
     DefineUFunction(SpawnMissionItemPickupInWorld)
     DefineUFunction(GiveMissionSchematicItemDirectlyToPlayer)
@@ -32,12 +33,16 @@ public:
     static void LoadMission(UObject* WorldContextObject, UFortMissionInfo* MissionInfo);
     static void SpawnAndCollectPlayerPickups(UObject* WorldContextObject, AFortPlayerController* PlayerController, const FVector& StartPosition, FName LootTierGroup, int32_t LootTier);
 
+    // The loot LootTierGroup rolls for PlayerController (every player in the world when null), given to their world
+    // inventory. Frostnite's Mission_Endless gives each player its starting kit with it as they begin play (#491).
+    static void GiveMissionRewardsToPlayer(UObject* WorldContextObject, AFortPlayerController* PlayerController, FName LootTierGroup, int32_t LootTier);
     static void GiveMissionRewardsToPlayerAsPickups(UObject* WorldContextObject, const FGuid& MissionGUID, AFortPlayerController* PlayerController, const FVector& StartPosition, float Radius, FName LootTierGroup, int32_t LootTier);
     static AFortPickup* SpawnMissionItemPickupInWorld(UObject* WorldContextObject, const FGuid& MissionGuid, UFortWorldItemDefinition* ItemDefinition, int32_t NumberToSpawn, const FVector& Position, const FVector& Direction, int32_t OverrideMaxStackCount);
     static bool GiveMissionSchematicItemDirectlyToPlayer(UObject* WorldContextObject, AFortPlayerController* TargetPlayer, const FGuid& MissionGuid, UFortSchematicItemDefinition* SchematicDefinition);
     static void StopAIEncounter(UObject* WorldContextObject, UFortAIEncounterInfo* ActiveEncounter, EFortObjectiveStatus EncounterStopReason);
 
     DECLARE_FUNCTION(execSpawnAndCollectPlayerPickups);
+    DECLARE_FUNCTION(execGiveMissionRewardsToPlayer);
     DECLARE_FUNCTION(execGiveMissionRewardsToPlayerAsPickups);
     DECLARE_FUNCTION(execSpawnMissionItemPickupInWorld);
     DECLARE_FUNCTION(execGiveMissionSchematicItemDirectlyToPlayer);

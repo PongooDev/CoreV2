@@ -768,6 +768,12 @@ void AFortWorldManager::SpawnTileLoot(FFortTileLootData* TileLootData, const TAr
 
     const int32_t WorldLevel = GetWorldLevel();
     FFortBuildingRandomList* RandomList = GetLootRandomList();
+    size_t NumQuotaBuildings = 0;
+    for (const std::vector<FQuotaBuilding>& LevelBuildings : Buildings)
+    {
+        NumQuotaBuildings += LevelBuildings.size();
+    }
+    int32_t NumChosen = 0;
     for (int32_t QuotaLevel = NumQuotaLevels - 1; QuotaLevel >= 1; --QuotaLevel)
     {
         std::vector<FQuotaBuilding>& Candidates = Buildings[QuotaLevel];
@@ -793,6 +799,7 @@ void AFortWorldManager::SpawnTileLoot(FFortTileLootData* TileLootData, const TAr
             else if (UFortLootTier::PickLootTierForQuotaLevel(LootTierKey, LootTier, Candidate.LootTierRows, static_cast<uint8_t>(QuotaLevel), nullptr))
             {
                 --LootDrops;
+                ++NumChosen;
                 Building->SetChosenQuotaInfo(LootTierKey, LootTier);
             }
             else if (Building->CanSpawnAtLowerQuotaLevels())
@@ -839,6 +846,8 @@ void AFortWorldManager::SpawnTileLoot(FFortTileLootData* TileLootData, const TAr
             }
         }
     }
+    // Core's: a line per tile, so a server log shows the quota pieces (chests, ore, BluGlo) each tile got.
+    UE_LOG(LogFortLootQuota, Log, TEXT("Tile loot: %d of %d quota-bound buildings chosen (world level %d)"), NumChosen, static_cast<int32_t>(NumQuotaBuildings), WorldLevel);
 #endif
 }
 

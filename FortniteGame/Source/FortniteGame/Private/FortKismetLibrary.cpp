@@ -539,6 +539,22 @@ bool UFortKismetLibrary::PickLootDrops(UObject* WorldContextObject, TStructArray
     return PickLootDrops(OutLootToDrop, TierGroupName, WorldLevel, ForcedLootTier);
 }
 
+bool UFortKismetLibrary::PickLootDropsWithNamedWeights(UObject* WorldContextObject, TStructArray<FFortItemEntry>& OutLootToDrop, FName TierGroupName, int32_t WorldLevel, const TMap<FName, float>& NamedWeightsMap, int32_t ForcedLootTier)
+{
+#if WITH_SERVER_CODE
+    FName LootTierKey;
+    int32_t LootTier = -1;
+    const FGameplayTagContainer ContextTags;
+    if (!PickLootTierKeyAndLootTierFromTierGroup(LootTierKey, LootTier, TierGroupName, WorldLevel, ForcedLootTier, ContextTags))
+    {
+        return false;
+    }
+    return UFortLootPackage::PickLootDrops(OutLootToDrop, WorldLevel, LootTierKey, nullptr, ContextTags, false, false, &NamedWeightsMap);
+#else
+    return false;
+#endif
+}
+
 bool UFortKismetLibrary::GetSafeZoneLocation(UObject* WorldContextObject, int32_t SafeZoneIndex, FVector& OutLocation)
 {
     // The build's own, through its UFunction on the class default object (a static BlueprintCallable).
@@ -760,6 +776,14 @@ void UFortKismetLibrary::HookNatives()
         {
             GameData->GetLootTierDataTables();
         }
+    }
+
+    // 7.x's named-weight roll is cut the same way: 7.10's exec (0x15E0530) calls the shared return-false stub (0x2A7140),
+    // so Frostnite's supply drops and its BluGlo drop (EndlessModeSupplyDrop_C's SpawnLoot) rolled nothing (#491).
+    UFunction* PickLootDropsWithNamedWeightsFunction = FindStaticFunction_PickLootDropsWithNamedWeights();
+    if (uint8_t* Call = PickLootDropsWithNamedWeightsFunction ? Finder::ImplementationCall(PickLootDropsWithNamedWeightsFunction) : nullptr; Call && Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(Call), 1, 5)))
+    {
+        Hooks::RedirectCall(L"UFortKismetLibrary::PickLootDropsWithNamedWeights", Call, reinterpret_cast<void*>(&PickLootDropsWithNamedWeights));
     }
 
     // ABuildingItemCollectorActor's deposit calls the folded native directly instead of the UFunction.

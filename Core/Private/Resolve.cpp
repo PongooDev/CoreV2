@@ -14932,8 +14932,15 @@ bool Finder::ResolveWorldLootLive(ptrdiff_t DefaultLootQuotaCategoryOffset, ptrd
     }
 
     // The world manager fills its random lists from the world generation stream; the 2000-entry one is the loot list.
+    // Up to 6.x each fill is inlined (mov dword ptr [rcx+14h], 7D0h after lea rcx, [reg+list]); from 7.x a helper fills
+    // them (7.10 0xFF0730: lea rcx, [rbx+948h]; mov r8d, 7D0h; mov rdx, rdi; call 0xEE1EB0, the same list layout:
+    // count +0x14, index +0x10), so the count is its third argument.
     const uintptr_t InitRandomLists = FunctionOf(L"World Generation random stream initialized using seed %d");
-    const uintptr_t LootListSize = InitRandomLists ? FindInstruction(InitRandomLists, InitRandomLists + 0x200, { 0xC7, 0x41, 0x14, 0xD0, 0x07, 0x00, 0x00 }) : 0;
+    uintptr_t LootListSize = InitRandomLists ? FindInstruction(InitRandomLists, InitRandomLists + 0x200, { 0xC7, 0x41, 0x14, 0xD0, 0x07, 0x00, 0x00 }) : 0;
+    if (!LootListSize && InitRandomLists)
+    {
+        LootListSize = FindInstruction(InitRandomLists, InitRandomLists + 0x200, { 0x41, 0xB8, 0xD0, 0x07, 0x00, 0x00 });
+    }
     ptrdiff_t LootRandomList = -1;
     for (uintptr_t Site = LootListSize ? LootListSize - 0x20 : 0; Site && Site + 7 <= LootListSize; ++Site)
     {

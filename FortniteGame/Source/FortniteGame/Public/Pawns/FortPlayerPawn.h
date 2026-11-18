@@ -124,10 +124,12 @@ public:
     void PopFootstepBankOverride(int32_t Priority, UObject* InFootstepBankOverride);
 
     // From 7.00 (ziplines): the ride's state, replicated (OnRep_ZiplineState sets the zipline movement), and the jump off
-    // it, which the server launches as the client does.
+    // it, which the server launches as the client does. The jump's two are curve table rows (7.10 +0x1268, 7.20 +0x1270),
+    // not scalable floats; 7.00 has neither.
     DefineUStructProperty(FZiplinePawnState, ZiplineState)
-    DefineUStructProperty(FScalableFloat, ZiplineJumpDampening)
-    DefineUStructProperty(FScalableFloat, ZiplineJumpStrength)
+    DefineUStructProperty(FCurveTableRowHandle, ZiplineJumpDampening)
+    DefineUStructProperty(FCurveTableRowHandle, ZiplineJumpStrength)
+    static bool HasZiplineJump() { return Member_ZiplineJumpDampening.IsAvailable() && Member_ZiplineJumpStrength.IsAvailable(); }
     // Restored (7.20 strips it, 7.10 0x129AAB0): the owning client's ride state, taken when newer than the server's.
     void ServerSendZiplineState_Implementation(const FZiplinePawnState& InZiplineState);
 

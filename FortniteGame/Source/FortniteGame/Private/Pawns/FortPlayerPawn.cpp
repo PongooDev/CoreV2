@@ -531,14 +531,19 @@ void AFortPlayerPawn::ServerSendZiplineState_Implementation(const FZiplinePawnSt
             State.TimeZipliningBegan = State.bIsZiplining && !bWasZiplining ? Now : Began;
             State.TimeZipliningEndedFromJump = bWasZiplining && !State.bIsZiplining ? (State.bJumped ? Now : -1.0f) : EndedFromJump;
         }
-        if (!State.bIsZiplining && State.bJumped)
+        if (!State.bIsZiplining && State.bJumped && HasZiplineJump())
         {
-            // The jump off (7.10 0x1277A90; 7.20's client end path, 0x13738DC): the pawn's velocity along the ground
-            // times ZiplineJumpDampening, each axis within 750, and ZiplineJumpStrength up; the Z override only when
-            // falling; no fall damage skipped, the feedback event played.
+            // The jump off (7.10 0x1277A90; 7.20's AFortPlayerPawn::ForceLaunchPlayerZiplining, 0x1373840): the pawn's
+            // velocity along the ground times ZiplineJumpDampening, each axis within 750, and ZiplineJumpStrength up; the
+            // Z override only when falling; no fall damage skipped, the feedback event played. Both are curve table rows
+            // the game evaluates with FCurveTableRowHandle::Eval, each 0 when its row isn't found (CoreV2 #419: read as
+            // FScalableFloat, the member lookup failed and the server stopped at the first jump off a zipline).
             const FVector Velocity = GetVelocity();
-            const float Dampening = ZiplineJumpDampening.GetValueAtLevel(0.0f);
-            const float Strength = ZiplineJumpStrength.GetValueAtLevel(0.0f);
+            const wchar_t* const Context = L"AFortPlayerPawn::ForceLaunchPlayerZiplining";
+            float Dampening = 0.0f;
+            ZiplineJumpDampening.Eval(0.0f, &Dampening, Context);
+            float Strength = 0.0f;
+            ZiplineJumpStrength.Eval(0.0f, &Strength, Context);
             const FVector Launch(std::clamp(Dampening * Velocity.X, -750.0f, 750.0f), std::clamp(Dampening * Velocity.Y, -750.0f, 750.0f), Strength);
             LaunchCharacterJump(Launch, false, Velocity.Z < 0.0f, false, true);
         }

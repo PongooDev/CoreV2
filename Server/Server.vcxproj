@@ -533,6 +533,7 @@
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\Controller.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\DataChannel.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\DataReplication.cpp" />
+    <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\CurveTable.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\DataTable.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameEngine.cpp" />
     <ClCompile Include="..\Engine\Source\Runtime\Engine\Private\GameInstance.cpp" />

@@ -7,10 +7,12 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlaylistAthena.h"
+#include "Building/BuildingStructuralSupportSystem.h"
 #include "Engine/World.h"
 #include "FortKismetLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Log.h"
+#include "Math/Box.h"
 #include "Math/Rotator.h"
 #include "Math/Transform.h"
 #include "Math/Vector.h"
@@ -299,16 +301,22 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
         Team0Side = ((TeamMiddle - Center) | Right) >= 0.0f ? 1.0f : -1.0f;
     }
     FBarrierTeamState* States[2] = { &static_cast<FBarrierTeamState&>(Team_0_State), &static_cast<FBarrierTeamState&>(Team_1_State) };
+    UBuildingStructuralSupportSystem* SupportSystem = GameState->StructuralSupportSystem;
     for (int32_t Index = 0; Index < 2; ++Index)
     {
         const float Side = Index == 0 ? Team0Side : -Team0Side;
         const FVector Wanted = Center + Right * (Distance * Side);
         // On the player building grid, unturned, so its pieces are cells players build onto and trap: TeamObjective_Food1_C's
         // floors sit at (512, -256), (512, 256) and the like from its origin, and a grid floor's origin is the middle of its
-        // cell's -Y edge (the floor mesh spans X -256..256, Y 0..512; Core's bot floors, from the build tool, the same).
-        // So the restaurant's origin is a cell's middle.
-        const FVector Spot(std::floor(Wanted.X / BuildingCellSize) * BuildingCellSize + BuildingCellSize * 0.5f,
-            std::floor(Wanted.Y / BuildingCellSize) * BuildingCellSize + BuildingCellSize * 0.5f, 0.0f);
+        // cell's -Y edge (the floor mesh spans X -256..256, Y 0..512; ABuildingSMActor's BaseLocToPivotOffset is half a cell
+        // along -Y). So the restaurant's origin is a cell's middle: the structural support system's cell there
+        // (K2_GetGridBoxFromWorldLoc), whose centres are its GridOrigin plus whole cells. CoreV2 #506: cells counted from
+        // the world origin put the restaurant half a cell off the grid in X and Y.
+        const FBox Cell = SupportSystem ? SupportSystem->K2_GetGridBoxFromWorldLoc(Wanted) : FBox();
+        // Without the grid's own query (it is reflected on every build with the mode), the nearest whole cell from the
+        // world origin, which is where Athena's grid origin is in X and Y.
+        const FVector Spot = Cell.IsValid ? FVector(Cell.GetCenter().X, Cell.GetCenter().Y, 0.0f)
+                                          : FVector(std::round(Wanted.X / BuildingCellSize) * BuildingCellSize, std::round(Wanted.Y / BuildingCellSize) * BuildingCellSize, 0.0f);
         // Its floor (the pieces' tops are at its origin) on the first building level at or over the highest of the ground
         // under it (its corners, RestaurantHalfExtent each way, and its middle) and ObjectiveZOffset, so no part of it is
         // buried on a slope.
@@ -324,14 +332,26 @@ void AFortAthenaMutator_Barrier::SpawnObjectives(AFortGameModeAthena* GameMode, 
                 bFoundGround = true;
             }
         }
-        const FVector Location(Spot.X, Spot.Y, std::ceil((FloorZ + ZOffset) / BuildingLevelHeight) * BuildingLevelHeight);
+        // The level: the grid's own (its levels are 384 uu from GridOrigin's Z), the one whose bottom is at or over the floor wanted.
+        const float WantedZ = FloorZ + ZOffset;
+        float LevelZ = std::ceil(WantedZ / BuildingLevelHeight) * BuildingLevelHeight;
+        const FBox Level = SupportSystem ? SupportSystem->K2_GetGridBoxFromWorldLoc(FVector(Spot.X, Spot.Y, WantedZ)) : FBox();
+        if (Level.IsValid)
+        {
+            LevelZ = Level.Min.Z < WantedZ - 1.0f ? Level.Min.Z + BuildingLevelHeight : Level.Min.Z;
+        }
+        const FVector Location(Spot.X, Spot.Y, LevelZ);
         // The mascot faces the barrier (and the other team's mascot across it).
         const float FacingYaw = std::atan2(-Right.Y * Side, -Right.X * Side) * RadiansToDegrees;
         SpawnObjective(*States[Index], Location, FacingYaw, Index);
     }
     ForceNetUpdate();
-    Log::Info(L"Food Fight: the restaurants stand {:.0f} either side of ({:.0f}, {:.0f}), the barrier's line nearest storm circle {}'s centre ({:.0f}, {:.0f}, {:.0f} off the line), {} team paths",
-        Distance, Center.X, Center.Y, SafeZoneIndex, SafeZoneCenter.X, SafeZoneCenter.Y, std::sqrt(FVector::DistSquared(FlatCenter, Center)), TeamPaths.Num());
+    FVector GridOrigin;
+    int32_t GridSize[3] = {};
+    const bool bHasGrid = SupportSystem && SupportSystem->GetGrid(GridOrigin, GridSize);
+    Log::Info(L"Food Fight: the restaurants stand {:.0f} either side of ({:.0f}, {:.0f}), the barrier's line nearest storm circle {}'s centre ({:.0f}, {:.0f}, {:.0f} off the line), {} team paths; building grid origin {}",
+        Distance, Center.X, Center.Y, SafeZoneIndex, SafeZoneCenter.X, SafeZoneCenter.Y, std::sqrt(FVector::DistSquared(FlatCenter, Center)), TeamPaths.Num(),
+        bHasGrid ? std::format(L"({:.0f}, {:.0f}, {:.0f})", GridOrigin.X, GridOrigin.Y, GridOrigin.Z) : std::wstring(SupportSystem ? L"unknown" : L"none (no structural support system)"));
 #endif
 }
 

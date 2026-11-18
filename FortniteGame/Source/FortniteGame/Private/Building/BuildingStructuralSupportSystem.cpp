@@ -86,6 +86,22 @@ EFortStructuralGridQueryResults::Type UBuildingStructuralSupportSystem::CanAddBu
     return static_cast<EFortStructuralGridQueryResults::Type>(*Result);
 }
 
+FBox UBuildingStructuralSupportSystem::K2_GetGridBoxFromWorldLoc(const FVector& WorldLocation) const
+{
+    static UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.BuildingStructuralSupportSystem:K2_GetGridBoxFromWorldLoc");
+    if (!Function)
+    {
+        return FBox();
+    }
+    Reflection::FParams Params(Function);
+    FBox* Box = Params.Get<FBox>(L"ReturnValue");
+    if (!Box || !Params.Set(L"WorldLocation", WorldLocation) || !Params.Call(const_cast<UBuildingStructuralSupportSystem*>(this)))
+    {
+        return FBox();
+    }
+    return *Box;
+}
+
 bool UBuildingStructuralSupportSystem::GetGrid(FVector& OutOrigin, int32_t OutSize[3]) const
 {
     if (Natives::UBuildingStructuralSupportSystem_GridSize < 0 || Natives::UBuildingStructuralSupportSystem_GridOrigin < 0)

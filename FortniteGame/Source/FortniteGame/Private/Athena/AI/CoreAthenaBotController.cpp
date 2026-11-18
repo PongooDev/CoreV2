@@ -6549,18 +6549,17 @@ namespace
             }
             return false;
         }
-        Reflection::FParams Params(GetGridBox);
-        FBox* Box = Params.Get<FBox>(L"ReturnValue");
-        if (!Box || !Params.Set(L"WorldLocation", Location) || !Params.Call(reinterpret_cast<UObject*>(SupportSystem)) || !Box->IsValid)
+        const FBox Box = SupportSystem->K2_GetGridBoxFromWorldLoc(Location);
+        if (!Box.IsValid)
         {
             return false;
         }
-        OutCellMin = Box->Min;
+        OutCellMin = Box.Min;
         if (!bLogged)
         {
             bLogged = true;
             Log::Info(L"Battle Royale bots: the building grid's cell at ({:.0f}, {:.0f}, {:.0f}) is ({:.0f}, {:.0f}, {:.0f}) to ({:.0f}, {:.0f}, {:.0f})", Location.X, Location.Y, Location.Z,
-                Box->Min.X, Box->Min.Y, Box->Min.Z, Box->Max.X, Box->Max.Y, Box->Max.Z);
+                Box.Min.X, Box.Min.Y, Box.Min.Z, Box.Max.X, Box.Max.Y, Box.Max.Z);
         }
         return true;
     }

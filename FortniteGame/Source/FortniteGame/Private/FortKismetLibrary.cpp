@@ -459,10 +459,17 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
         Pickup->bRandomRotation = true;
     }
 
-    // Before 1.8 every pickup spawned here is tossed; 1.8 lets the caller choose (bToss).
-    if (Pickup && bToss)
+    // Every pickup spawned here goes through TossPickup, with the caller's bToss (1.8 gave both functions the parameter;
+    // before 1.8 every pickup spawned here is tossed). bToss false is a pickup placed on Position rather than flown
+    // there: the toss (7.20's AFortPickup slot 0xD6, 0x114AEF0) then starts it at FinalLocation instead of where it is.
+    // A pickup that never reaches the toss isn't set up as one: its constructor (7.20 0x1146930) spawns it dormant
+    // (NetDormancy DORM_DormantAll) with its TouchCapsule's collision off; only TossPickup wakes it (0x1165BB0), and
+    // only SetupForMovementCompToss (0x1164720) gives the capsule the FortPickup profile, on the server and, from the
+    // replicated PickupLocationData (OnRep_PickupLocationData, 0x115F660), on clients. 7.00+ Creative's Item Spawner
+    // (#485) spawns its items with bToss false, and players never got them.
+    if (Pickup)
     {
-        Pickup->TossPickup(Position, nullptr, OverrideMaxStackCount);
+        Pickup->TossPickup(Position, nullptr, OverrideMaxStackCount, bToss);
     }
 
     // 7.00+ Creative (#485): an Item Spawner's Minigame_Spawner_Component spawns its items here (its Spawn event, from

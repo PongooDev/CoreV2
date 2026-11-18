@@ -503,10 +503,12 @@ void AFortPickup::TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner,
     Params.Call(this);
 #if WITH_SERVER_CODE
     // Core's tosses merge into a pickup of the same stack near where they land (CombinePickups), as 21.40's server sets
-    // a toss to (SetCombinePickupsWhenTossCompletes).
+    // a toss to (SetCombinePickupsWhenTossCompletes). A pickup placed rather than tossed (bToss false, as K2_SpawnPickupInWorld
+    // passes it for 7.00+ Creative's Item Spawner, #485) stays its own: the spawner keeps the pickup it spawned
+    // (SpawnedPickups) until its OnPickup, so merging it into a drop nearby would leave the spawner waiting on it.
     if (Role == ROLE_Authority)
     {
-        SetCombinePickupsWhenTossCompletes(true);
+        SetCombinePickupsWhenTossCompletes(bToss);
         BindServerMovementCallbacks();
     }
 #endif

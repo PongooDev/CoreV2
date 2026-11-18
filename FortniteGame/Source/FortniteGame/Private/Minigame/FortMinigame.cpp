@@ -206,46 +206,16 @@ void AFortMinigame::ClearPlayerInventories()
 void AFortMinigame::ClearPlayerInventory(AFortPlayerControllerAthena* PlayerController)
 {
 #if WITH_SERVER_CODE
-    AFortInventory* Inventory = PlayerController && Role == ROLE_Authority ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
-    if (!Inventory || !AFortPlayerController::HasInventoryRemovalHook())
+    // The player's own reset (#499): AFortPlayerControllerAthena::ClearDroppableItems, 7.10's and 7.20's native that
+    // goes with this one (both stripped), which the trip back to the hub runs too.
+    if (!PlayerController || Role != ROLE_Authority)
     {
         return;
     }
-    // The game mode's StartingItems stay (on Creative's: the building pieces, the edit tool and wood).
-    AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this);
-    const TStructArray<FItemAndCount>* StartingItems = GameMode ? &static_cast<const TStructArray<FItemAndCount>&>(GameMode->StartingItems) : nullptr;
-    const auto IsStartingItem = [StartingItems](const UFortItemDefinition* ItemDefinition)
+    const int32_t Removed = PlayerController->ClearDroppableItems();
+    if (Removed > 0)
     {
-        for (int32_t Index = 0; StartingItems && Index < StartingItems->Num(); ++Index)
-        {
-            if (static_cast<UFortItemDefinition*>((*StartingItems)[Index].Item) == ItemDefinition)
-            {
-                return true;
-            }
-        }
-        return false;
-    };
-
-    // The whole stack of each, collected first: a removal changes the inventory's item list.
-    std::vector<std::pair<FGuid, int32_t>> Removals;
-    FFortItemList& ItemList = Inventory->Inventory;
-    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
-    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
-    {
-        FFortItemEntry* Entry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
-        UFortWorldItemDefinition* ItemDefinition = Entry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)) : nullptr;
-        if (ItemDefinition && ItemDefinition->bCanBeDropped && !IsStartingItem(ItemDefinition))
-        {
-            Removals.emplace_back(Entry->ItemGuid, static_cast<int32_t>(Entry->Count));
-        }
-    }
-    for (const auto& [ItemGuid, Count] : Removals)
-    {
-        PlayerController->RemoveInventoryItem(ItemGuid, Count, true, true);
-    }
-    if (!Removals.empty())
-    {
-        Log::Info(L"Minigame: {} loses {} items as {}'s inventory is reset", PlayerController->GetName().ToStdString(), Removals.size(), GetName().ToStdString());
+        Log::Info(L"Minigame: {} loses {} items as {}'s inventory is reset", PlayerController->GetName().ToStdString(), Removed, GetName().ToStdString());
     }
 #endif
 }
@@ -301,9 +271,9 @@ void AFortMinigame::RespawnMinigamePlayers()
     // Blueprint's OnPlayerTeleportedForMinigameStart, its effects). Each player is then held where they arrived for the
     // rest of the warmup (#485): the game's own PutPlayerIntoStasis, which works only in Warmup, and whose pawns the
     // warmup's end releases for either warmup type (7.10 0x10A4270's RemovePlayersFromStasis). A Stasis warmup puts its
-    // players into stasis where they stand (PutPlayersIntoStasis, 7.10 0x10B9AC0); a Respawn one did it here, after the
-    // move, since nothing else in StartMinigame holds them. A skydiver isn't held: NoMovementOrFalling would stop them in
-    // the sky.
+    // players into stasis where they stand (PutPlayersIntoStasis, 7.10 0x10B9AC0); a Respawn one does it here, just
+    // before the move (#499), since nothing else in StartMinigame holds them. A skydiver isn't held: NoMovementOrFalling
+    // would stop them in the sky.
     if (Role != ROLE_Authority)
     {
         return;
@@ -325,23 +295,35 @@ void AFortMinigame::RespawnMinigamePlayers()
         {
             continue;
         }
+        // The hold comes before the move (#499). Epic's respawn put a new pawn into stasis as it was possessed (the
+        // controller's pawn binding PutPlayerIntoStasis adds), before it ever moved. Moved first, the pawn was teleported
+        // a little above its spawner: the teleport (UCharacterMovementComponent::OnTeleported) sets Falling, and
+        // AFortPlayerPawn::OnMovementModeChanged (7.20 0x1380EB0) tags it Gameplay.Action.Player.Fall from Walking. Its
+        // ability system blocks InteractSearch while that tag is on (AbilityTagRelationshipMapping). The stasis then
+        // went Falling to None and its release None to Walking, and the tag only goes on a landing (from Falling).
+        // The player couldn't open a chest until they jumped: the server refused every GA_DefaultPlayer_InteractSearch.
+        // Held first, the pawn goes Walking to None to Falling, and nothing tags it. It settles onto the spawner
+        // (Falling to Walking) with its input still ignored until the warmup ends.
+        AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Pawn));
+        const bool bSkydive = bAir && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
+        const bool bHold = !bSkydive && bHoldInStasis;
+        if (bHold)
+        {
+            PutPlayerIntoStasis(Pawn);
+        }
         AActor* PawnActor = reinterpret_cast<AActor*>(Pawn);
         if (!PawnActor->TeleportTo(Location, PawnActor->GetActorRotation()))
         {
+            Held += bHold ? 1 : 0;
             continue;
         }
         ++Moved;
-        AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Pawn));
-        if (bAir && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset()))
+        if (bSkydive)
         {
             AthenaPawn->BeginSkydiving(false);
             ++Skydiving;
         }
-        else if (bHoldInStasis)
-        {
-            PutPlayerIntoStasis(Pawn);
-            ++Held;
-        }
+        Held += bHold ? 1 : 0;
         FinishPlayerTeleportedForMinigameStart(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
     }
     Log::Info(L"Minigame: {} respawns {} of its {} players for its warmup at their respawn place{}, {} held there until it ends", GetName().ToStdString(), Moved, Players.Num(),

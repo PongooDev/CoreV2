@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "AsyncTaskQueue.h"
+#include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
@@ -11,6 +12,7 @@
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameInstance.h"
+#include "FortGameModeZone.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
@@ -34,6 +36,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace
@@ -833,6 +836,64 @@ void AFortPlayerControllerAthena::PostLobbyIslandTeleport(AFortPlayerPawn* Playe
     SetCreativePlotLinkedVolume(nullptr);
     const FFortRespawnData& RespawnData = AthenaState->RespawnData;
     TeleportPawnTo(RespawnData.RespawnLocation, RespawnData.RespawnRotation, L"the Creative hub");
+    // What they picked up or took from the Creative inventory stays on the island (#499): a game's end resets its
+    // players (AFortMinigame::ClearPlayerInventory), but a player who leaves for the hub, during a game or outside one,
+    // isn't one of its players any more. 7.20 strips both this function and ClearDroppableItems, and nothing in the image
+    // calls ClearDroppableItems, so it is called here, where the player arrives in the hub.
+    if (FindStaticFunction_ClearDroppableItems())
+    {
+        if (const int32_t Removed = ClearDroppableItems(); Removed > 0)
+        {
+            Log::Info(L"Creative: {} leaves {} items behind for the hub", PlayerNameOf(this), Removed);
+        }
+    }
+#endif
+}
+
+int32_t AFortPlayerControllerAthena::ClearDroppableItems()
+{
+#if WITH_SERVER_CODE
+    // Core's reconstruction: 7.10 and 7.20 strip the body (the exec is the shared empty one, 7.20 0x83BA30).
+    AFortInventory* Inventory = Role == ROLE_Authority ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    if (!Inventory || !AFortPlayerController::HasInventoryRemovalHook())
+    {
+        return 0;
+    }
+    // The game mode's StartingItems stay (on Creative's: the building pieces, the edit tool and wood).
+    AFortGameModeAthena* GameMode = AFortGameModeAthena::GetCurrent(this);
+    const TStructArray<FItemAndCount>* StartingItems = GameMode ? &static_cast<const TStructArray<FItemAndCount>&>(GameMode->StartingItems) : nullptr;
+    const auto IsStartingItem = [StartingItems](const UFortItemDefinition* ItemDefinition)
+    {
+        for (int32_t Index = 0; StartingItems && Index < StartingItems->Num(); ++Index)
+        {
+            if (static_cast<UFortItemDefinition*>((*StartingItems)[Index].Item) == ItemDefinition)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // The whole stack of each, collected first: a removal changes the inventory's item list.
+    std::vector<std::pair<FGuid, int32_t>> Removals;
+    FFortItemList& ItemList = Inventory->Inventory;
+    TArray<UFortWorldItem*>& Instances = ItemList.ItemInstances;
+    for (int32_t Index = 0; Index < Instances.Num(); ++Index)
+    {
+        FFortItemEntry* Entry = Instances[Index] ? &static_cast<FFortItemEntry&>(Instances[Index]->ItemEntry) : nullptr;
+        UFortWorldItemDefinition* ItemDefinition = Entry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)) : nullptr;
+        if (ItemDefinition && ItemDefinition->bCanBeDropped && !IsStartingItem(ItemDefinition))
+        {
+            Removals.emplace_back(Entry->ItemGuid, static_cast<int32_t>(Entry->Count));
+        }
+    }
+    for (const auto& [ItemGuid, Count] : Removals)
+    {
+        RemoveInventoryItem(ItemGuid, Count, true, true);
+    }
+    return static_cast<int32_t>(Removals.size());
+#else
+    return 0;
 #endif
 }
 

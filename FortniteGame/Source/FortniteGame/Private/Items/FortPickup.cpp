@@ -1069,6 +1069,7 @@ void AFortPickup::GivePickupTo(IFortInventoryOwnerInterface* InventoryOwner)
     {
         GivePickupToPlayer(PlayerController);
     }
+    BroadcastOnPickup();
 
     // Each picked-up item flew in further round to the side than the last (#99). A pickup flying to a pawn adds an entry
     // to the pawn's PickupDirectionData when its path is built (0x681660 -> 0x779E30), at the last entry's angle plus 40,
@@ -1170,6 +1171,50 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         FQuickBar& PrimaryQuickBar = Bars->GetQuickBar(Primary);
         Log::Info(L"Battle Royale: after {}'s swap, quickbar slot {} is focused (previously {})", PlayerController->GetName().ToStdString(), static_cast<int32_t>(PrimaryQuickBar.CurrentFocusedSlot), static_cast<int32_t>(PrimaryQuickBar.PreviousFocusedSlot));
     }
+#endif
+}
+
+void AFortPickup::BroadcastOnPickup()
+{
+#if WITH_SERVER_CODE
+    if (!Member_OnPickup.IsAvailable() || !FFortPickupLocationData::HasPickupTarget())
+    {
+        return;
+    }
+    const FMulticastScriptDelegate& Delegate = OnPickup;
+    static const UFunction* const Signature = GetDelegateSignature(StaticClass(), L"OnPickup");
+    if (!Delegate.IsBound() || !Signature)
+    {
+        return;
+    }
+    // FPickupOnPickup (7.20, as 21.40 has it): the pickup, the pawn, the item's UFortWorldItemDefinition and an FVector,
+    // in that order. Another shape is left alone.
+    const UProperty* Parameters[4] = {};
+    int32_t Count = 0;
+    for (const UField* Field = static_cast<UField*>(Signature->Children); Field; Field = Field->Next)
+    {
+        if (Count < 4)
+        {
+            Parameters[Count] = reinterpret_cast<const UProperty*>(Field);
+        }
+        ++Count;
+    }
+    const auto IsObject = [](const UProperty* Property) { return Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UObjectProperty) && Property->ElementSize == sizeof(void*); };
+    if (Count != 4 || !IsObject(Parameters[0]) || !IsObject(Parameters[1]) || !IsObject(Parameters[2]) || !Parameters[3]->GetClass()->HasAnyCastFlag(CASTCLASS_UStructProperty)
+        || Parameters[3]->ElementSize != static_cast<int32_t>(sizeof(FVector)))
+    {
+        return;
+    }
+    const FFortPickupLocationData& LocationData = PickupLocationData;
+    UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(static_cast<FFortItemEntry&>(PrimaryPickupItemEntry).ItemDefinition));
+    const FVector Location = LocationData.LootFinalPosition;
+    std::vector<uint64_t> Storage((std::max<size_t>(Signature->ParmsSize, static_cast<size_t>(Signature->GetStructureSize())) + 7) / 8, 0);
+    uint8_t* Parms = reinterpret_cast<uint8_t*>(Storage.data());
+    *reinterpret_cast<AFortPickup**>(Parms + Parameters[0]->GetOffset_ForInternal()) = this;
+    *reinterpret_cast<AFortPawn**>(Parms + Parameters[1]->GetOffset_ForInternal()) = static_cast<AFortPawn*>(LocationData.PickupTarget);
+    *reinterpret_cast<UFortWorldItemDefinition**>(Parms + Parameters[2]->GetOffset_ForInternal()) = ItemDefinition;
+    *reinterpret_cast<FVector*>(Parms + Parameters[3]->GetOffset_ForInternal()) = Location;
+    Delegate.ProcessMulticastDelegate(Parms);
 #endif
 }
 

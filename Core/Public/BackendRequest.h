@@ -14,7 +14,10 @@ namespace BackendRequest
 
     // GETs Path the same way and hands OnAnswer the HTTP status and body, on the requests' thread (0 and nothing when
     // the backend didn't answer or gave no token). The game's objects belong to the game thread: GameThread::Enqueue.
-    void GetJson(std::wstring What, std::wstring Path, std::wstring ClientId, std::wstring Secret, std::function<void(uint32_t Status, const std::string& Body)> OnAnswer);
+    // bNotFoundIsAnswer: a 404 is one of the answers the caller expects (the resource may not exist yet), so it isn't
+    // logged as a failure.
+    void GetJson(std::wstring What, std::wstring Path, std::wstring ClientId, std::wstring Secret, std::function<void(uint32_t Status, const std::string& Body)> OnAnswer,
+        bool bNotFoundIsAnswer = false);
 
     // POSTs Body the same way and hands OnAnswer the answer, as GetJson does.
     void PostJson(std::wstring What, std::wstring Path, std::string Body, std::wstring ClientId, std::wstring Secret, std::function<void(uint32_t Status, const std::string& Body)> OnAnswer);

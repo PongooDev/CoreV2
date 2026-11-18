@@ -26,6 +26,7 @@ namespace
         // Set for a GET, which answers through it; a POST's answer is only logged, unless it is set too (bPost).
         std::function<void(uint32_t Status, const std::string& Body)> OnAnswer;
         bool bPost = false;
+        bool bNotFoundIsAnswer = false;
     };
 
     struct FResponse
@@ -207,7 +208,7 @@ namespace
             if (bAnswered)
             {
                 // Any 2xx is an answer (the DSS checkout of an island with no file yet is a 204).
-                if (Response.Status < 200 || Response.Status >= 300)
+                if ((Response.Status < 200 || Response.Status >= 300) && !(Request.bNotFoundIsAnswer && Response.Status == 404))
                 {
                     Log::Warning(L"Backend: {} failed (HTTP {}): {}", Request.What, Response.Status, Widen(Response.Body.substr(0, 300)));
                 }
@@ -273,9 +274,12 @@ void BackendRequest::PostJson(std::wstring What, std::wstring Path, std::string 
     Enqueue(std::move(Request));
 }
 
-void BackendRequest::GetJson(std::wstring What, std::wstring Path, std::wstring ClientId, std::wstring Secret, std::function<void(uint32_t Status, const std::string& Body)> OnAnswer)
+void BackendRequest::GetJson(std::wstring What, std::wstring Path, std::wstring ClientId, std::wstring Secret, std::function<void(uint32_t Status, const std::string& Body)> OnAnswer,
+    bool bNotFoundIsAnswer)
 {
-    Enqueue(FRequest{ std::move(What), std::move(Path), std::string(), std::move(ClientId), std::move(Secret), std::move(OnAnswer) });
+    FRequest Request{ std::move(What), std::move(Path), std::string(), std::move(ClientId), std::move(Secret), std::move(OnAnswer) };
+    Request.bNotFoundIsAnswer = bNotFoundIsAnswer;
+    Enqueue(std::move(Request));
 }
 
 std::string BackendRequest::JsonField(const std::string& Json, const std::string& Name)

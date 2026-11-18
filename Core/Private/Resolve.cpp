@@ -7807,6 +7807,22 @@ bool Finder::ResolveQuickBarFocusLive()
             Handlers.push_back(Handler);
         }
     }
+    // 7.20 (CL-4727874): the released binding (0x13CA860) picks the slot and tail-jumps to the handler that swaps
+    // (0x13CA610, which calls the swap, 0x119C8E0, with the quickbars at +0x1398). That handler is searched too.
+    for (size_t Index = 0, Count = Handlers.size(); Index < Count; ++Index)
+    {
+        const uintptr_t Handler = Handlers[Index];
+        const uintptr_t HandlerEnd = IsInText(Handler) ? Finder::FunctionEnd(Handler) : 0;
+        for (uintptr_t Site = Handler; HandlerEnd > Handler && Site + 5 <= HandlerEnd; ++Site)
+        {
+            const uintptr_t Target = Byte(Site) == 0xE9 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+            if (Target && (Target < Handler || Target >= HandlerEnd) && IsInText(Target) && Finder::FunctionStart(Target) == Target
+                && std::find(Handlers.begin(), Handlers.end(), Target) == Handlers.end())
+            {
+                Handlers.push_back(Target);
+            }
+        }
+    }
 
     // The handler's callee whose first three direct calls go to one function: AFortQuickBars::SwapQuickBarFocus, which
     // focuses through FocusSlot three times before anything else. (1.1 and 1.2 call the swap twice; 1.7.2 once.)
@@ -7841,7 +7857,13 @@ bool Finder::ResolveQuickBarFocusLive()
     }
     if (!Swap || !Focus)
     {
-        Log::Error(L"Finder: AFortQuickBars quickbar focus swap not found (handlers {}, swap {})", Handlers.size(), Swap != 0);
+        // Each focus asks again (AFortQuickBars::FocusSlot): said once.
+        static bool bReported = false;
+        if (!bReported)
+        {
+            bReported = true;
+            Log::Error(L"Finder: AFortQuickBars quickbar focus swap not found (handlers {}, swap {})", Handlers.size(), Swap != 0);
+        }
         return false;
     }
     Natives::AFortQuickBars_SwapQuickBarFocus = reinterpret_cast<decltype(Natives::AFortQuickBars_SwapQuickBarFocus)>(Swap);

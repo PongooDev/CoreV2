@@ -253,7 +253,7 @@ void UFortLevelSaveComponent::RefreshCheckpointDate()
 {
 #if WITH_SERVER_CODE
     // Core-Backend's DSS answers ?info=true with the file's last write (updatedUnixMs), not its bytes; no checkpoint is
-    // a 404. No checkpoint is FDateTime::MaxValue, as the game has it (PongooDev/CoreV2#489): 7.10 sets that in the
+    // a 404 (an expected answer, not logged as a failure). No checkpoint is FDateTime::MaxValue, as the game has it (PongooDev/CoreV2#489): 7.10 sets that in the
     // component's constructor (0xF580F0), as a load starts (0xF7DF50), on a reset (0xF88310) and when the island's file
     // has no "checkpoint-at" meta (0xF80920). The island menu (UFortCreativePublishOptions, 0x30A46E0) shows
     // "N Days ago" from UtcNow minus the date and hides the restore row when that is negative; an empty date (0 ticks,
@@ -291,7 +291,7 @@ void UFortLevelSaveComponent::RefreshCheckpointDate()
                 Owner->ForceNetUpdate();
             }
         });
-    });
+    }, true);
 #endif
 }
 

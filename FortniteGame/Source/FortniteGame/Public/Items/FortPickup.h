@@ -34,8 +34,10 @@ struct FFortPickupLocationData
     DefineUnrealStruct(FFortPickupLocationData, FortniteGame)
 
 public:
+    DefineUProperty(AFortPawn*, PickupTarget)
     DefineUProperty(AFortPickup*, CombineTarget)
     DefineUProperty(FVector, LootInitialPosition)
+    DefineUProperty(FVector, LootFinalPosition)
     DefineUProperty(float, FlyTime)
     DefineUProperty(EFortPickupTossState, TossState)
     // Where a pickup at rest lies: the toss branch of OnRep_PickupLocationData (AFortPickup::SetupForMovementCompToss,
@@ -46,6 +48,8 @@ public:
     static bool IsCombineAvailable();
     // Whether the build reflects FinalTossRestLocation and EFortPickupTossState's AtRest.
     static bool CanRestAt();
+    // Whether the build reflects the pawn a pickup flies to and where it goes (what OnPickup passes on).
+    static bool HasPickupTarget() { return Member_PickupTarget.IsAvailable() && Member_LootFinalPosition.IsAvailable(); }
 };
 
 // 4.1 (CL-4053532) on: what AFortPickup::CreateFromData (21.40's STAT_CreatePickupFromData; 4.1 0xD73420) takes in
@@ -113,6 +117,12 @@ public:
     // 0xFA6D46), before it sets bPickedUp: the pickup, the pawn, the item and where it goes (FPickupOnPickup, 36 bytes
     // on 2.4.2, 3.3 and 5.40).
     DefineUProperty(FMulticastScriptDelegate, OnPickupAttempted)
+    // FPickupOnPickup, the same parameters as OnPickupAttempted: broadcast once the pickup has been picked up. 7.20's
+    // image broadcasts only OnPickupAttempted (SetPickupTarget, 0x1162D90); nothing in it broadcasts this one, so it
+    // went with the stripped give (GivePickupTo), where Core broadcasts it (#499). The Creative item spawner's component
+    // (Minigame_Spawner_Component) binds it to each pickup it spawns: the ammo for a weapon (GiveAdditionalAmmo) and
+    // the room to spawn the next item (SpawnedPickups) come from it.
+    DefineUProperty(FMulticastScriptDelegate, OnPickup)
 
     // Merges entries of the same item and level up to its stack size, so a drop of five 1-plank rolls is one pickup of
     // five (CoreV2 #67). Without an inventory the stack size is the item's own.
@@ -158,6 +168,9 @@ public:
 private:
     void GivePickupToPlayer(AFortPlayerController* PlayerController);
     void GivePickupToAI(AFortAIPawn* AIPawn, IFortInventoryOwnerInterface* InventoryOwner);
+    // OnPickup's broadcast, as SetPickupTarget broadcasts OnPickupAttempted: this pickup, the pawn it flew to, its item
+    // and where it was going (PickupLocationData's PickupTarget and LootFinalPosition).
+    void BroadcastOnPickup();
     // Binds what the server's toss calls on Core's tosses: OnServerStopCallback before 4.0 (4.0 on, the build's
     // PostInitializeComponents binds it) and OnServerBounceCallback.
     void BindServerMovementCallbacks();

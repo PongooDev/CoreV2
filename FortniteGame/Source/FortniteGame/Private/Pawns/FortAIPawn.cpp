@@ -276,6 +276,32 @@ void AFortAIPawn::GiveAmmo(int32_t AmmoQuantity)
     {
         return;
     }
+    // The weapon is backed by an item in the pawn's own inventory (CoreV2 #504). EquipWeapon equips the definition with
+    // no item (EquipWeaponDefinition with an empty guid), and the weapon's fire ability (GA_Ranged_GenericDamage, a
+    // UFortGameplayAbility_RangedWeapon) has a durability cost: UFortGameplayAbility::CheckCost (7.20 0xACCEA0) looks
+    // the weapon's ItemEntryGuid up in its inventory owner's inventory (the AI pawn's, IFortInventoryOwnerInterface)
+    // and refuses the activation without it ("has a durability cost but the owner doesnt have the item!"). So the
+    // Sentry's PawnStartFire never fired a shot. The item is the game's own, given through
+    // UFortKismetLibrary::GiveItemToInventoryOwner, and the weapon takes its guid; its magazine below then counts as the
+    // item's loaded ammo too.
+    AFortInventory* Inventory = GetWorldInventory();
+    IFortInventoryOwnerInterface* InventoryOwner = GetInventoryOwner();
+    if (Inventory && InventoryOwner && !Inventory->FindWorldItem(static_cast<FGuid>(Weapon->ItemEntryGuid)))
+    {
+        UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(this, InventoryOwner), WeaponDefinition, 1, false);
+        TArray<UFortWorldItem*>& Instances = static_cast<FFortItemList&>(Inventory->Inventory).ItemInstances;
+        for (int32_t Index = Instances.Num() - 1; Index >= 0; --Index)
+        {
+            UFortWorldItem* Item = Instances[Index];
+            FFortItemEntry* Entry = Item ? &static_cast<FFortItemEntry&>(Item->ItemEntry) : nullptr;
+            if (Entry && static_cast<UFortItemDefinition*>(Entry->ItemDefinition) == WeaponDefinition)
+            {
+                Weapon->ItemEntryGuid = static_cast<FGuid>(Entry->ItemGuid);
+                break;
+            }
+        }
+    }
+
     const int32_t BulletsPerClip = Weapon->GetBulletsPerClip();
     const int32_t Loaded = static_cast<int32_t>(Weapon->AmmoCount);
     const int32_t Added = std::min(AmmoQuantity, BulletsPerClip - Loaded);
@@ -288,7 +314,6 @@ void AFortAIPawn::GiveAmmo(int32_t AmmoQuantity)
     if (Added > 0 && static_cast<int32_t>(Weapon->AmmoCount) == Loaded)
     {
         UFortWorldItemDefinition* AmmoDefinition = static_cast<TAssetPtr<UFortWorldItemDefinition>&>(WeaponDefinition->AmmoData).LoadSynchronous();
-        IFortInventoryOwnerInterface* InventoryOwner = GetInventoryOwner();
         if (AmmoDefinition && InventoryOwner)
         {
             UFortKismetLibrary::GiveItemToInventoryOwner(TScriptInterface<IFortInventoryOwnerInterface>(this, InventoryOwner), AmmoDefinition, AmmoQuantity, false);
@@ -299,8 +324,9 @@ void AFortAIPawn::GiveAmmo(int32_t AmmoQuantity)
     if (!bLogged)
     {
         bLogged = true;
-        Log::Info(L"AFortAIPawn::GiveAmmo: {}'s {} loads {} of {} (magazine {} of {})", GetName().ToStdString(), WeaponDefinition->GetName().ToStdString(), std::max(Added, 0), AmmoQuantity,
-            static_cast<int32_t>(Weapon->AmmoCount), BulletsPerClip);
+        Log::Info(L"AFortAIPawn::GiveAmmo: {}'s {} loads {} of {} (magazine {} of {}; its item {} in {})", GetName().ToStdString(), WeaponDefinition->GetName().ToStdString(), std::max(Added, 0),
+            AmmoQuantity, static_cast<int32_t>(Weapon->AmmoCount), BulletsPerClip, Inventory && Inventory->FindWorldItem(static_cast<FGuid>(Weapon->ItemEntryGuid)) ? L"is" : L"isn't",
+            Inventory ? Inventory->GetName().ToStdString() : L"no inventory");
     }
 #endif
 }

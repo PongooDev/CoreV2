@@ -54,9 +54,10 @@ public:
     // LootDropDenialQuery matches the damage tags of. Nothing on builds without loot drop rows.
     void DropLoot(const FFortAIPawnLootDropData& LootDropData, const FGameplayTagContainer& DamageTags);
 
-    // 5.30+ (CoreV2 #493, #503): up to AmmoQuantity rounds go straight into the pawn's current weapon's magazine (the
-    // weapon's ModAmmo, up to a full one). The Creative Gunner (7.10's AITurretPawn_C, 7.20's Sentry, from
-    // Trap_Floor_Backup's GA_Trap_Spawn_Backup) arms itself in GA_AITurretPawn_Fire's EquipWeapon: EquipWeaponDefinition,
+    // 5.30+ (CoreV2 #493, #503, #504): up to AmmoQuantity rounds go straight into the pawn's current weapon's magazine
+    // (the weapon's ModAmmo, up to a full one), and a weapon equipped without an item gets one in the pawn's own
+    // inventory, which its fire ability's durability cost looks for. The Creative Gunner (7.10's AITurretPawn_C, 7.20's
+    // Sentry, from Trap_Floor_Backup's GA_Trap_Spawn_Backup) arms itself in GA_AITurretPawn_Fire's EquipWeapon: EquipWeaponDefinition,
     // GiveAmmo(30), then CurrentWeapon->Reload(), and whenever a burst leaves the magazine empty it calls GiveAmmo(30)
     // and plays its reload cue, with no Reload of its own. The client builds strip the body: the exec steps the int and
     // calls nullsub_2 (6.31 0x14EDA70, 7.00 0x14BF390, 7.10 0x150AB80), so the Gunner never had ammo, reloaded forever

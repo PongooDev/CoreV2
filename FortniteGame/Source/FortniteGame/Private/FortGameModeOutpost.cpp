@@ -2,10 +2,13 @@
 #include "FortGameModeOutpost.h"
 #include "BackendRequest.h"
 #include "Engine/World.h"
+#include "Finder.h"
 #include "FortGameState.h"
 #include "FortZoneTheme.h"
 #include "GameThread.h"
 #include "Logging/LogMacros.h"
+#include "Natives.h"
+#include "ObjectLayout.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "Templates/Casts.h"
 #include "TimerManager.h"
@@ -152,6 +155,25 @@ namespace
         FTimerHandle CheckTimerHandle;
         World->GetTimerManager().SetTimer(CheckTimerHandle, FTimerDelegate::CreateLambda([GameMode, State]() { CheckStructureLimit(GameMode, State); }), CheckInterval, false);
     }
+}
+
+void AFortGameModeOutpost::OnLeaveOutpostAsParty()
+{
+#if WITH_SERVER_CODE
+    // Server code (the 21.40 PDB names it), so the client builds have no body for it. AFortGamePvPBase's own leave with
+    // party (7.10 0x1369AF0, 7.00 0x132A7C0, 6.31 0x136F4B0) is the same two calls: AFortGameMode::SendStayWithParty
+    // sends every primary AFortPlayerController ClientStayWithParty (a bool from 6.31, sent true; the client stores it
+    // on its game instance for the frontend, 7.10 0x12B6EA0), then ReturnToMainMenuHost sends each one
+    // ClientReturnToMainMenuWithTextReason. Nothing of it goes through the backend.
+    if (!Finder::ResolveLeaveOutpostLive())
+    {
+        return;
+    }
+
+    UE_LOG(LogFortOutpost, Log, TEXT("OnLeaveOutpostAsParty: %s sends everyone back to the main menu with the party"), *GetName());
+    Natives::AFortGameMode_SendStayWithParty(this);
+    CallVirtual<void>(this, Natives::AGameMode_ReturnToMainMenuHostIndex);
+#endif
 }
 
 void AFortGameModeOutpost::KeepStructureLimit()

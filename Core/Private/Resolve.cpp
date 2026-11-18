@@ -11027,7 +11027,15 @@ bool Finder::ResolveLeaveOutpostLive()
         return true;
     }
 
-    const int32_t ReturnIndex = Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameMode"), reinterpret_cast<void*>(FunctionOf(L"Ignoring ReturnToMainMenuHost, already in a level travel")), 0x400);
+    // AFortGameMode::ReturnToMainMenuHost logs "Ignoring ReturnToMainMenuHost, already in a level travel". By 6.31 the
+    // line ends ". TravelInitiated[%s]" (6.31 0xF38CF0, 7.00 0xEDC490, 7.10 0xF03600, slot 0xD7 on all three), and the
+    // exact match found no function: "return to main menu host slot -1" in #469's 7.20 log and in a 7.10 boot.
+    uintptr_t ReturnToMainMenuHost = FunctionOf(L"Ignoring ReturnToMainMenuHost, already in a level travel");
+    if (!ReturnToMainMenuHost)
+    {
+        ReturnToMainMenuHost = FunctionOf(L"Ignoring ReturnToMainMenuHost, already in a level travel. TravelInitiated[%s]");
+    }
+    const int32_t ReturnIndex = Finder::VTableIndex(CdoVTable(L"/Script/FortniteGame.FortGameMode"), reinterpret_cast<void*>(ReturnToMainMenuHost), 0x400);
     // The game mode zone's zone end calls it (ZoneEndStayWithParty). The slot is the first of the class's vtable that
     // calls a function with the ClientStayWithParty virtual call, so the zone end finder needn't have run.
     void** ZoneVTable = CdoVTable(L"/Script/FortniteGame.FortGameModeZone");
@@ -11037,6 +11045,37 @@ bool Finder::ResolveLeaveOutpostLive()
     {
         StayWithParty = ZoneEndStayWithParty(VTableEntry(ZoneVTable, Slot), StaySlot);
     }
+    // 6.31+ (and 7.20 in #469's log, "stay with party false"): the zone end (6.31 0xF335F0, 7.00 0xED8B90, 7.10 0xEFFBE0)
+    // has SendStayWithParty's loop inlined, so no zone slot calls it. The function itself (6.31 0xF41CB0, 7.00 0xEE43C0,
+    // 7.10 0xF0B5F0: every primary AFortPlayerController gets ClientStayWithParty(true)) is called only by AFortGamePvPBase's
+    // own leave with party, which the Battle Royale game mode inherits (6.31 slot 0x193 0x136F4B0, 7.00 and 7.10 slot
+    // 0x196 0x132A7C0 and 0x1369AF0): a 0x20-byte body that calls it, then jumps to ReturnToMainMenuHost's slot, the two
+    // calls the outpost's leave makes. That slot's call is taken.
+    const auto CallsSlot = [](uintptr_t Begin, uintptr_t End, int32_t Slot)
+    {
+        const int32_t Offset = Slot * 8;
+        for (uintptr_t Site = FindInstruction(Begin, End, { 0xFF, -1, Offset & 0xFF, (Offset >> 8) & 0xFF, (Offset >> 16) & 0xFF, 0x00 }); Site;
+             Site = FindInstruction(Site + 1, End, { 0xFF, -1, Offset & 0xFF, (Offset >> 8) & 0xFF, (Offset >> 16) & 0xFF, 0x00 }))
+        {
+            // call or jmp qword ptr [reg+disp32], not [rsp+...] (a SIB byte would follow)
+            const uint8_t ModRM = Byte(Site + 1);
+            if (((ModRM & 0xF8) == 0x90 || (ModRM & 0xF8) == 0xA0) && (ModRM & 7) != 4)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    void** AthenaVTable = !StayWithParty && StaySlot >= 0 && ReturnIndex >= 0 ? CdoVTable(L"/Script/FortniteGame.FortGameModeAthena") : nullptr;
+    int32_t PartyLeaveSlot = -1;
+    for (int32_t Slot = 0; AthenaVTable && Slot < 0x400 && !StayWithParty; ++Slot)
+    {
+        const uintptr_t Entry = VTableEntry(AthenaVTable, Slot);
+        const uintptr_t EntryEnd = Entry && Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
+        const uintptr_t Call = EntryEnd > Entry && EntryEnd - Entry < 0x40 ? FindRawCall(Entry, EntryEnd) : 0;
+        StayWithParty = Call && CallsSlot(Call + 5, EntryEnd, ReturnIndex) ? ZoneEndStayWithParty(Entry, StaySlot) : 0;
+        PartyLeaveSlot = StayWithParty ? Slot : -1;
+    }
     if (ReturnIndex < 0 || !StayWithParty)
     {
         Log::Error(L"Finder: leave outpost not found (return to main menu host slot {}, stay with party {})", ReturnIndex, StayWithParty != 0);
@@ -11045,7 +11084,14 @@ bool Finder::ResolveLeaveOutpostLive()
 
     Natives::AGameMode_ReturnToMainMenuHostIndex = ReturnIndex;
     Natives::AFortGameMode_SendStayWithParty = reinterpret_cast<decltype(Natives::AFortGameMode_SendStayWithParty)>(StayWithParty);
-    Log::Info(L"Finder: AGameMode::ReturnToMainMenuHost is slot 0x{:X}", ReturnIndex);
+    if (PartyLeaveSlot >= 0)
+    {
+        Log::Info(L"Finder: AGameMode::ReturnToMainMenuHost is slot 0x{:X}, AFortGameMode::SendStayWithParty +0x{:X} (the one AFortGamePvPBase's slot 0x{:X} calls)", ReturnIndex, StayWithParty - Finder::ImageBase(), PartyLeaveSlot);
+    }
+    else
+    {
+        Log::Info(L"Finder: AGameMode::ReturnToMainMenuHost is slot 0x{:X}, AFortGameMode::SendStayWithParty +0x{:X}", ReturnIndex, StayWithParty - Finder::ImageBase());
+    }
     return true;
 }
 

@@ -4,7 +4,7 @@
 #include "AbilitySystemComponent.h"
 #include "Engine/World.h"
 #include "Finder.h"
-#include "FortGameModeZone.h"
+#include "FortGameModeOutpost.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
 #include "Items/FortItemDefinition.h"
@@ -160,15 +160,14 @@ namespace
 void AFortPlayerControllerOutpost::ServerLeaveOutpostAsParty_Implementation()
 {
 #if WITH_SERVER_CODE
+    // The client sends it from the owner's Leave with Party (UFortOutpostContext::LeaveOutpostAsParty, 7.10 0x1249870,
+    // only while IsOutpostOwner), and the outpost game mode does the leave.
     UWorld* World = GetWorld();
-    AFortGameModeZone* GameMode = World ? Cast<AFortGameModeZone>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
-    if (!GameMode || !Finder::ResolveLeaveOutpostLive())
+    AFortGameModeOutpost* GameMode = World ? Cast<AFortGameModeOutpost>(reinterpret_cast<UObject*>(World->GetAuthGameMode())) : nullptr;
+    if (GameMode)
     {
-        return;
+        GameMode->OnLeaveOutpostAsParty();
     }
-
-    Natives::AFortGameMode_SendStayWithParty(GameMode);
-    CallVirtual<void>(GameMode, Natives::AGameMode_ReturnToMainMenuHostIndex);
 #endif
 }
 

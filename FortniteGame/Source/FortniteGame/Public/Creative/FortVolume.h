@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Building/BuildingActor.h"
+#include "Components/ActorComponent.h"
 #include "GameFramework/Info.h"
 #include "GameplayTagContainer.h"
 #include "Reflection.h"
@@ -58,6 +59,21 @@ public:
     // The Creative player starts in the volume with Tag in their PlayerStartTags (any of them with none), nearest first
     // to Near.
     AFortPlayerStartCreative* FindPlayerStart(const wchar_t* Tag, const FVector& Near) const;
+    // The island's start a player arriving on it takes (7.10 and 7.20, #485): its first player start set as an island
+    // start (bUseAsIslandStart: a Player Spawner's "Use as Island Start", on by default) and linked to this volume, the
+    // pick the game's own respawn place makes for a player on the island outside a game (7.20 0xE8BFF0, inlined in 7.10's
+    // 0xDBAD80). Null where there is none, and on 7.00, whose player starts have no such setting.
+    AFortPlayerStartCreative* FindIslandStart() const;
+};
+
+// What links a Creative actor to the island space it is in (from 7.00): the volume, once it is found (LinkedVolume).
+class UFortCreativeVolumeLinkComponent : public UActorComponent
+{
+    DefineUnrealClass(UFortCreativeVolumeLinkComponent, FortniteGame)
+
+public:
+    DefineUProperty(AFortVolume*, LinkedVolume)
+    static bool HasLinkedVolume() { return Member_LinkedVolume.IsAvailable(); }
 };
 
 // The match's island spaces (one per world, from 7.00): which volume an actor is in, and the resets and saves of each.
@@ -85,6 +101,12 @@ class AFortPlayerStartCreative : public AActor
 public:
     DefineUProperty(FGameplayTagContainer, PlayerStartTags)
     DefineUProperty(int32_t, PortalIndex)
+    // 7.10 and later: whether the start is one a player arriving on the island takes (MinigamePlayerStartPlate, the
+    // Player Spawner, sets its child start's from its UseAsIslandStart), and its link to the island space it is in.
+    DefineUProperty(bool, bUseAsIslandStart)
+    DefineUProperty(UFortCreativeVolumeLinkComponent*, CreativeLinkComponent)
+    static bool HasUseAsIslandStart() { return Member_bUseAsIslandStart.IsAvailable(); }
+    static bool HasCreativeLinkComponent() { return Member_CreativeLinkComponent.IsAvailable(); }
 
     bool HasTag(const wchar_t* Tag) const;
 };

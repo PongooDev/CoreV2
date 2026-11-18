@@ -111,6 +111,19 @@ void AFortMinigame::FinishPlayerTeleportedForMinigameStart(AFortPlayerPawn* Play
     }
 }
 
+void AFortMinigame::PutPlayerIntoStasis(APawn* PlayerPawn)
+{
+    // Intact on 7.10 and 7.20 (7.10 0x10B9920, 7.20 0x1192B60): in Warmup only, the pawn's SetStasisMode
+    // NoMovementOrFalling, kept in the game's list of pawns in stasis, and bound to the controller's next pawn too. The
+    // warmup's end (7.10 0x10A4270, StartMinigame's warmup timer) takes every pawn of that list out of stasis
+    // (RemovePlayersFromStasis, 7.10 0x10BAFA0), whatever the warmup's type.
+    Reflection::FParams Params(FindStaticFunction_PutPlayerIntoStasis(), true);
+    if (Params.Set(L"PlayerPawn", PlayerPawn))
+    {
+        Params.Call(this);
+    }
+}
+
 void AFortMinigame::TeleportPlayersToStartLocations()
 {
 #if WITH_SERVER_CODE
@@ -285,14 +298,21 @@ void AFortMinigame::RespawnMinigamePlayers()
     // OverridePlayerSpawnLocation, which the game asks in Warmup. 7.10's KillPlayer, which a death-and-respawn would go
     // through, is stripped too, so nobody is killed: each player's pawn goes to that place, skydiving for a game that
     // spawns in the air, and the game hears they arrived (FinishPlayerTeleportedForMinigameStart: the island
-    // Blueprint's OnPlayerTeleportedForMinigameStart, its effects).
+    // Blueprint's OnPlayerTeleportedForMinigameStart, its effects). Each player is then held where they arrived for the
+    // rest of the warmup (#485): the game's own PutPlayerIntoStasis, which works only in Warmup, and whose pawns the
+    // warmup's end releases for either warmup type (7.10 0x10A4270's RemovePlayersFromStasis). A Stasis warmup puts its
+    // players into stasis where they stand (PutPlayersIntoStasis, 7.10 0x10B9AC0); a Respawn one did it here, after the
+    // move, since nothing else in StartMinigame holds them. A skydiver isn't held: NoMovementOrFalling would stop them in
+    // the sky.
     if (Role != ROLE_Authority)
     {
         return;
     }
     const bool bAir = SpawnLocationSetting == EFortMinigamePlayerSpawnLocationSetting::GetAir();
+    const bool bHoldInStasis = FindStaticFunction_PutPlayerIntoStasis() != nullptr;
     int32_t Moved = 0;
     int32_t Skydiving = 0;
+    int32_t Held = 0;
     const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
     for (AFortPlayerState* PlayerState : Players)
     {
@@ -317,10 +337,15 @@ void AFortMinigame::RespawnMinigamePlayers()
             AthenaPawn->BeginSkydiving(false);
             ++Skydiving;
         }
+        else if (bHoldInStasis)
+        {
+            PutPlayerIntoStasis(Pawn);
+            ++Held;
+        }
         FinishPlayerTeleportedForMinigameStart(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
     }
-    Log::Info(L"Minigame: {} respawns {} of its {} players for its warmup at their respawn place{}", GetName().ToStdString(), Moved, Players.Num(),
-        Skydiving ? std::format(L", {} of them skydiving", Skydiving) : std::wstring());
+    Log::Info(L"Minigame: {} respawns {} of its {} players for its warmup at their respawn place{}, {} held there until it ends", GetName().ToStdString(), Moved, Players.Num(),
+        Skydiving ? std::format(L", {} of them skydiving", Skydiving) : std::wstring(), Held);
 #endif
 }
 

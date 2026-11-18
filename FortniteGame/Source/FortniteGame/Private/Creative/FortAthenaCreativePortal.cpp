@@ -27,11 +27,17 @@
 
 namespace
 {
-    // The island's spawn the rift sends a pawn to (bUseSpawnTags): its Creative.Island.Spawn start, else any start of
-    // the island, else over the middle of the volume.
-    bool LinkedVolumeSpawn(AFortVolume* Volume, bool bUseSpawnTags, const FVector& From, FVector& OutLocation, FRotator& OutRotation)
+    // The island's spawn the rift sends a pawn to: from 7.10 a Player Spawner set as an island start (#485: the start
+    // the game's own respawn place gives a player on the island outside a game, AFortVolume::FindIslandStart), else
+    // (bUseSpawnTags) its Creative.Island.Spawn start, else any start of the island, else over the middle of the volume.
+    bool LinkedVolumeSpawn(AFortVolume* Volume, bool bUseSpawnTags, const FVector& From, FVector& OutLocation, FRotator& OutRotation, const wchar_t*& OutWhat)
     {
-        AFortPlayerStartCreative* Start = bUseSpawnTags ? Volume->FindPlayerStart(L"Creative.Island.Spawn", From) : nullptr;
+        AFortPlayerStartCreative* Start = Volume->FindIslandStart();
+        OutWhat = Start ? L"its island start" : L"its spawn";
+        if (!Start && bUseSpawnTags)
+        {
+            Start = Volume->FindPlayerStart(L"Creative.Island.Spawn", From);
+        }
         if (!Start)
         {
             Start = Volume->FindPlayerStart(nullptr, From);
@@ -177,7 +183,8 @@ void AFortAthenaCreativePortal::TeleportPlayerToLinkedVolume(AFortPlayerPawn* Pl
     AActor* PawnActor = reinterpret_cast<AActor*>(PlayerPawn);
     FVector Location;
     FRotator Rotation;
-    if (!LinkedVolumeSpawn(Volume, bUseSpawnTags, GetTransform().GetLocation(), Location, Rotation))
+    const wchar_t* What = L"";
+    if (!LinkedVolumeSpawn(Volume, bUseSpawnTags, GetTransform().GetLocation(), Location, Rotation, What))
     {
         Log::Warning(L"Creative: {} has no spawn on its island {}", GetName().ToStdString(), Volume->GetName().ToStdString());
         return;
@@ -195,8 +202,8 @@ void AFortAthenaCreativePortal::TeleportPlayerToLinkedVolume(AFortPlayerPawn* Pl
         }
         NotifyTeleportedPlayerPawn(PlayerPawn);
     }
-    Log::Info(L"Creative: {} through {} onto the island {} at ({:.0f}, {:.0f}, {:.0f})", PawnActor->GetName().ToStdString(), GetName().ToStdString(), Volume->GetName().ToStdString(),
-        Location.X, Location.Y, Location.Z);
+    Log::Info(L"Creative: {} through {} onto the island {} at {} ({:.0f}, {:.0f}, {:.0f})", PawnActor->GetName().ToStdString(), GetName().ToStdString(), Volume->GetName().ToStdString(),
+        What, Location.X, Location.Y, Location.Z);
 #endif
 }
 

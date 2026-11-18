@@ -61,6 +61,37 @@ AFortPlayerStartCreative* AFortVolume::FindPlayerStart(const wchar_t* Tag, const
     return Best;
 }
 
+AFortPlayerStartCreative* AFortVolume::FindIslandStart() const
+{
+    // The game's pick (7.20 0xE8BFF0): the world's AFortPlayerStartCreative in actor order whose CreativeLinkComponent's
+    // LinkedVolume is the island and which is set as an island start. The game also skips a start it can't claim (full,
+    // or its spot blocked for the player's pawn: AFortPlayerStartCreative::Claim, 7.20 0x1084E40, and its check
+    // 0x1084900) and takes an unclaimed one before one claimed this frame; that occupancy isn't reflected, so it isn't
+    // read here, and the pawn's own TeleportTo finds it a free spot by the start instead. A start whose link has no
+    // volume yet is taken by the volume's box (ContainsLocation).
+    UClass* StartClass = AFortPlayerStartCreative::StaticClass();
+    if (!StartClass || !AFortPlayerStartCreative::HasUseAsIslandStart())
+    {
+        return nullptr;
+    }
+    const bool bLinked = AFortPlayerStartCreative::HasCreativeLinkComponent() && UFortCreativeVolumeLinkComponent::HasLinkedVolume();
+    for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(this, StartClass))
+    {
+        AFortPlayerStartCreative* Start = static_cast<AFortPlayerStartCreative*>(Actor);
+        if (!Start || !Start->bUseAsIslandStart)
+        {
+            continue;
+        }
+        UFortCreativeVolumeLinkComponent* Link = bLinked ? static_cast<UFortCreativeVolumeLinkComponent*>(Start->CreativeLinkComponent) : nullptr;
+        AFortVolume* Linked = Link ? static_cast<AFortVolume*>(Link->LinkedVolume) : nullptr;
+        if (Linked ? Linked == this : ContainsLocation(Start->GetTransform().GetLocation()))
+        {
+            return Start;
+        }
+    }
+    return nullptr;
+}
+
 AFortVolume* AFortVolumeManager::GetVolumeForActor(const AActor* Actor)
 {
     Reflection::FParams Params(FindStaticFunction_GetVolumeForActor(), true);

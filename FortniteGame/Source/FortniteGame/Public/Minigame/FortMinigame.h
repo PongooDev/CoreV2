@@ -52,6 +52,7 @@ class AFortMinigame : public AInfo
     DefineUFunction(ClearPlayerInventory)
     DefineUFunction(RespawnMinigamePlayers)
     DefineUFunction(OverridePlayerSpawnLocation)
+    DefineUFunction(PutPlayerIntoStasis)
 
 public:
     DefineUProperty(EFortMinigameWarmupType, WarmupType)
@@ -80,7 +81,8 @@ public:
     // Restored native (7.10 and 7.20 strip it; 7.00 doesn't have it, its island Blueprint calls
     // TeleportPlayersToStartLocations instead): a game whose WarmupType is Respawn puts each of its players where the
     // game's respawn path would (OverridePlayerSpawnLocation: their latest checkpoint, a spawn pad for their team, or the
-    // air) as its warmup starts. No build has the body; Core's reconstruction.
+    // air) as its warmup starts, and holds them there until the warmup ends (PutPlayerIntoStasis, the game's own). No
+    // build has the body; Core's reconstruction.
     void RespawnMinigamePlayers();
     // Core's native for the minigame's StateChangedDelegate (UClass::AddNativeFunction): RespawnMinigamePlayers where
     // StartMinigame (7.10 0x10BFC70) called it, as SetMinigameState puts a Respawn game in Warmup.
@@ -108,4 +110,5 @@ private:
     TArray<AFortPlayerState*> GetParticipatingPlayers();
     bool DetermineSpawnLocation(AController* PlayerController, FVector& OutLocation, FRotator& OutRotation, bool& bShouldSkydive);
     void FinishPlayerTeleportedForMinigameStart(AFortPlayerPawn* PlayerPawn);
+    void PutPlayerIntoStasis(APawn* PlayerPawn);
 };

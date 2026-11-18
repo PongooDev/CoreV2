@@ -3,6 +3,8 @@
 #include "Engine/World.h"
 #include "Finder.h"
 #include "FortGameModeZone.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
@@ -272,8 +274,9 @@ void AFortMinigame::RespawnMinigamePlayers()
     // rest of the warmup (#485): the game's own PutPlayerIntoStasis, which works only in Warmup, and whose pawns the
     // warmup's end releases for either warmup type (7.10 0x10A4270's RemovePlayersFromStasis). A Stasis warmup puts its
     // players into stasis where they stand (PutPlayersIntoStasis, 7.10 0x10B9AC0); a Respawn one does it here, just
-    // before the move (#499), since nothing else in StartMinigame holds them. A skydiver isn't held: NoMovementOrFalling
-    // would stop them in the sky.
+    // before the move (#499), since nothing else in StartMinigame holds them. A skydiver is held too (#502): the game's
+    // PutPlayerIntoStasis has no exception for one (7.20 0x1192B60), so a game that spawns in the air holds its players
+    // in the sky, in the skydive, until the countdown ends. Their hold comes after the skydive starts (below).
     if (Role != ROLE_Authority)
     {
         return;
@@ -305,16 +308,23 @@ void AFortMinigame::RespawnMinigamePlayers()
         // Held first, the pawn goes Walking to None to Falling, and nothing tags it. It settles onto the spawner
         // (Falling to Walking) with its input still ignored until the warmup ends.
         AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Pawn));
+        // A skydiver (#502) is held after the move and the skydive's start instead. BeginSkydiving (7.20 0x136F620) sets
+        // bIsSkydiving and the movement's custom Skydiving mode (SetMovementMode(MOVE_Custom, 4)), and the teleport sets
+        // Falling, either of which would take a pawn held first out of the stasis's MOVE_None, and it fell through the
+        // countdown. Held last, the stasis (AFortPlayerPawn::SetStasisMode 0x1389830, NoMovementOrFalling: the
+        // controller's move input ignored, StopMovementImmediately, DisableMovement) stops it where it is, and its
+        // bIsSkydiving keeps the skydive pose. HandleStateChangedForWarmup puts it back into the skydive's movement as
+        // the warmup's end releases it.
         const bool bSkydive = bAir && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
-        const bool bHold = !bSkydive && bHoldInStasis;
-        if (bHold)
+        const bool bHold = bHoldInStasis;
+        if (bHold && !bSkydive)
         {
             PutPlayerIntoStasis(Pawn);
         }
         AActor* PawnActor = reinterpret_cast<AActor*>(Pawn);
         if (!PawnActor->TeleportTo(Location, PawnActor->GetActorRotation()))
         {
-            Held += bHold ? 1 : 0;
+            Held += bHold && !bSkydive ? 1 : 0;
             continue;
         }
         ++Moved;
@@ -322,6 +332,10 @@ void AFortMinigame::RespawnMinigamePlayers()
         {
             AthenaPawn->BeginSkydiving(false);
             ++Skydiving;
+            if (bHold)
+            {
+                PutPlayerIntoStasis(Pawn);
+            }
         }
         Held += bHold ? 1 : 0;
         FinishPlayerTeleportedForMinigameStart(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
@@ -335,9 +349,56 @@ void AFortMinigame::HandleStateChangedForWarmup(uint8_t NewState)
 {
 #if WITH_SERVER_CODE
     // SetMinigameState broadcasts the new state as it sets it, before StartMinigame's warmup step.
-    if (Role == ROLE_Authority && NewState == EFortMinigameState::GetWarmup() && WarmupType == EFortMinigameWarmupType::GetRespawn())
+    if (Role != ROLE_Authority || WarmupType != EFortMinigameWarmupType::GetRespawn())
+    {
+        return;
+    }
+    if (NewState == EFortMinigameState::GetWarmup())
     {
         RespawnMinigamePlayers();
+    }
+    else if (NewState == EFortMinigameState::GetInProgress() && SpawnLocationSetting == EFortMinigamePlayerSpawnLocationSetting::GetAir())
+    {
+        ResumeSkydivingAfterWarmup();
+    }
+#endif
+}
+
+void AFortMinigame::ResumeSkydivingAfterWarmup()
+{
+#if WITH_SERVER_CODE
+    // The warmup's end (7.20 0x1181770) takes its pawns out of stasis (RemovePlayersFromStasis 0x11947E0:
+    // SetStasisMode(None), whose way out of NoMovementOrFalling is the movement's SetMovementMode(MOVE_Walking), vtable
+    // +0x568, the slot execSetMovementMode calls) and then runs StartMinigame, whose SetMinigameState(InProgress)
+    // broadcasts here in the same frame. A player held in the sky (#502) still has bIsSkydiving but now walks on air,
+    // and would drop out of the skydive. Epic's place for a player's skydive at a game's start is the island
+    // Blueprint's OnPlayerTeleportedForMinigameStart (Minigame_PlayerCreated: BeginSkydiving(false) when
+    // bTeleportedToSky), which FinishPlayerTeleportedForMinigameStart (7.20 0x1182B40) fires with the player's
+    // FMinigamePlayer::bWantsToSkydive; its caller went with the stripped RespawnMinigamePlayers. So each such pawn starts
+    // its skydive again here (BeginSkydiving: the custom Skydiving movement), and falls from where it was held.
+    if (Role != ROLE_Authority || !AFortPlayerPawnAthena::HasIsSkydiving() || !Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset()))
+    {
+        return;
+    }
+    constexpr uint8_t MOVE_Custom = 6;
+    int32_t Resumed = 0;
+    const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
+    for (AFortPlayerState* PlayerState : Players)
+    {
+        AActor* Owner = PlayerState ? reinterpret_cast<AActor*>(PlayerState)->GetOwner() : nullptr;
+        AController* Controller = Owner ? Cast<AController>(reinterpret_cast<UObject*>(Owner)) : nullptr;
+        APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+        AFortPlayerPawnAthena* AthenaPawn = Pawn ? Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Pawn)) : nullptr;
+        UCharacterMovementComponent* Movement = AthenaPawn ? static_cast<ACharacter*>(Pawn)->CharacterMovement : nullptr;
+        if (AthenaPawn && AthenaPawn->bIsSkydiving && Movement && Movement->MovementMode != MOVE_Custom)
+        {
+            AthenaPawn->BeginSkydiving(false);
+            ++Resumed;
+        }
+    }
+    if (Resumed > 0)
+    {
+        Log::Info(L"Minigame: {} starts, and {} of its players held in the sky skydive from there", GetName().ToStdString(), Resumed);
     }
 #endif
 }

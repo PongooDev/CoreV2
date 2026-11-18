@@ -20,6 +20,7 @@ class EFortMinigameState
 {
     DefineUnrealEnum(EFortMinigameState, FortniteGame)
     DefineUEnumValue(Warmup)
+    DefineUEnumValue(InProgress)
 };
 
 // What a game's warmup does with its players (7.10: Stasis, Respawn; the island games' Minigame_PlayerCreated has
@@ -83,8 +84,13 @@ public:
     // build has the body; Core's reconstruction.
     void RespawnMinigamePlayers();
     // Core's native for the minigame's StateChangedDelegate (UClass::AddNativeFunction): RespawnMinigamePlayers where
-    // StartMinigame (7.10 0x10BFC70) called it, as SetMinigameState puts a Respawn game in Warmup.
+    // StartMinigame (7.10 0x10BFC70) called it, as SetMinigameState puts a Respawn game in Warmup; and, as it goes
+    // InProgress after that warmup, ResumeSkydivingAfterWarmup for a game that spawns in the air.
     void HandleStateChangedForWarmup(uint8_t NewState);
+    // Core's (#502): the players a Respawn warmup held in the sky skydive again once the warmup's end releases them
+    // (its SetStasisMode(None) leaves them walking on air). Epic's place, the island Blueprint's
+    // OnPlayerTeleportedForMinigameStart with bWantsToSkydive, went with the stripped RespawnMinigamePlayers' caller.
+    void ResumeSkydivingAfterWarmup();
 
     DECLARE_FUNCTION(execTeleportPlayersToStartLocations);
     DECLARE_FUNCTION(execClearPlayerInventories);

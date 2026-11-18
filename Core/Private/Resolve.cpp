@@ -12243,6 +12243,9 @@ namespace
 {
     std::vector<uint8_t*> StrippedStatEventCalls;
     std::vector<uint8_t*> StrippedTeamStatEventCalls;
+    // The vtable slot of the quest manager getter the senders call through (AFortPlayerController::GetQuestManager), a
+    // player controller's slot: no game mode function is ever called there.
+    int32_t StrippedStatEventsGetterSlot = -1;
 
     // A call with SendStatEventWithTags' typed wrapper's eight arguments: since the last call before it, four stack
     // arguments were stored (mov [rsp+20h/28h/30h/38h], of any width), and no fifth. SendEndPrimaryMission's place (7
@@ -12456,6 +12459,7 @@ namespace
 
         StrippedStatEventCalls = std::move(Calls);
         StrippedTeamStatEventCalls = std::move(TeamCalls);
+        StrippedStatEventsGetterSlot = GetterDisplacement % 8 == 0 ? GetterDisplacement / 8 : -1;
         Natives::UFortQuestManager_SendCustomStatEvent = reinterpret_cast<decltype(Natives::UFortQuestManager_SendCustomStatEvent)>(SendCustomStatEvent);
         Natives::UFortQuestManager_bStatEventsStripped = true;
         const auto Describe = [](const std::vector<uint8_t*>& List)
@@ -13251,6 +13255,14 @@ bool Finder::ResolveGetPoiTagsForLive()
     // CL-4395664 0x12242F3). Before they were told apart (#402) they were in the typed list, and 6.00's tally was 6 of 14
     // for 0xA50 against 5 for the next slots called there ([vtable+0xA48], and the controller's quest manager getter
     // [vtable+0x1948], which reads past the game modes' vtables); without them the getter's 5 could tie the 5 left.
+    // The getter's slot is never a candidate: it is the player controller's, and on the game modes it reads past their
+    // vtables into whatever comes next. 2.5 (CL-3889387) has no GetPoiTagsFor (no call before its senders but the
+    // getter, [vtable+0x16D0], and slot 2, the same function in both game modes), so the getter was the only candidate
+    // left: slot 0x2DA, where the Zone game mode's vtable has run on into a vtable holding the shared empty function and
+    // the Athena game mode's into UFortMovementComp_CharacterAthena's (its slot 0xBE, 0xC94600, a movement function).
+    // Called on the game mode at a player's first bot elimination, it wrote a velocity over the game mode's
+    // AttachmentReplication.AttachComponent and Owner (+0x104 to +0x10F), and the next garbage collection crashed
+    // reading that NaN as an object (CoreV2 #507).
     std::vector<const uint8_t*> SenderCalls(StrippedStatEventCalls.begin(), StrippedStatEventCalls.end());
     SenderCalls.insert(SenderCalls.end(), StrippedTeamStatEventCalls.begin(), StrippedTeamStatEventCalls.end());
     std::unordered_map<int32_t, int32_t> Senders;
@@ -13261,7 +13273,7 @@ bool Finder::ResolveGetPoiTagsForLive()
         for (uintptr_t At = FindVirtualCall(Site - 0x90, Site); At; At = FindVirtualCall(At + 1, Site))
         {
             const int32_t Slot = VirtualSlot(At);
-            const uintptr_t Athena = VTableEntry(AthenaVTable, Slot);
+            const uintptr_t Athena = Slot != StrippedStatEventsGetterSlot ? VTableEntry(AthenaVTable, Slot) : 0;
             if (Athena && !Finder::IsStubFunction(Athena) && reinterpret_cast<void*>(VTableEntry(ZoneVTable, Slot)) == Natives::SharedEmptyFunction
                 && std::find(Slots.begin(), Slots.end(), Slot) == Slots.end())
             {
@@ -13281,6 +13293,12 @@ bool Finder::ResolveGetPoiTagsForLive()
         }
     }
     const bool bTied = std::count_if(Senders.begin(), Senders.end(), [Most](const auto& Entry) { return Entry.second == Most; }) > 1;
+    if (Senders.empty())
+    {
+        // 2.5's senders call no game mode function before they send: its events carry no location tags.
+        Log::Info(L"Finder: AFortGameMode::GetPoiTagsFor not looked for (the stat senders call no game mode function, so their events have no location tags)");
+        return false;
+    }
     if (Index < 0 || bTied)
     {
         Log::Error(L"Finder: AFortGameMode::GetPoiTagsFor not found ({} candidate slots{})", Senders.size(), bTied ? L", tied" : L"");

@@ -464,6 +464,17 @@ AFortPickup* UFortKismetLibrary::K2_SpawnPickupInWorld(UObject* WorldContextObje
     {
         Pickup->TossPickup(Position, nullptr, OverrideMaxStackCount);
     }
+
+    // 7.00+ Creative (#485): an Item Spawner's Minigame_Spawner_Component spawns its items here (its Spawn event, from
+    // the spawner's MinigameStartedDelegate and its SpawnTimer). Said in the log, so a report of a spawner that drops
+    // nothing shows whether the server spawned the item.
+    static UClass* const SpawnerComponentClass = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortMinigameSpawnerComponent");
+    if (SpawnerComponentClass && WorldContextObject->IsA(SpawnerComponentClass))
+    {
+        const FVector Where = Pickup ? Pickup->GetTransform().GetLocation() : Position;
+        Log::Info(L"Minigame: {}'s item spawner spawns {} {} as {} at ({:.0f}, {:.0f}, {:.0f})", GetNameSafe(WorldContextObject->GetOuter()).ToStdString(), NumberToSpawn,
+            ItemDefinition->GetName().ToStdString(), GetNameSafe(reinterpret_cast<UObject*>(Pickup)).ToStdString(), Where.X, Where.Y, Where.Z);
+    }
     return Pickup;
 #else
     return nullptr;

@@ -14,6 +14,8 @@
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
+#include "Athena/FortPlayerStateAthena.h"
+#include "UObject/UnrealType.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
@@ -252,19 +254,125 @@ DEFINE_FUNCTION(AFortMinigame::execClearPlayerInventory)
     P_NATIVE_END;
 }
 
-void AFortMinigame::BindInventoryReset(AFortMinigame* Minigame)
+bool AFortMinigame::OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation)
 {
-    // As the game goes in progress and as it stops being in progress: the minigame's own broadcasts, calling its own
-    // ClearPlayerInventories. Once each (AddUniqueDynamic).
-    if (!Minigame || Minigame->Role != ROLE_Authority || !ClearPlayerInventoriesFunction)
+    // The island game's answer in the game's respawn path (the volume manager's respawn place, 7.10 0xDBAD80, asks it for
+    // a death in the island): _Implementation (7.10 slot 201, 0x10B7620), intact. In Warmup and InProgress it is the
+    // SpawnLocationSetting's: ChoosePlayerStart (the player's highest checkpoint, else a spawn pad for their team), else
+    // the air (GetAirSpawnLocation).
+    Reflection::FParams Params(FindStaticFunction_OverridePlayerSpawnLocation(), true);
+    if (!Params.Set(L"PlayerPawn", PlayerPawn) || !Params.Set(L"PlayerState", reinterpret_cast<UObject*>(PlayerState)) || !Params.Call(this))
+    {
+        return false;
+    }
+    const FVector* Location = Params.Get<FVector>(L"OutLocation");
+    const bool* ReturnValue = Params.Get<bool>(L"ReturnValue");
+    if (!Location || !ReturnValue || !*ReturnValue)
+    {
+        return false;
+    }
+    OutLocation = *Location;
+    return true;
+}
+
+void AFortMinigame::RespawnMinigamePlayers()
+{
+#if WITH_SERVER_CODE
+    // Core's reconstruction: no build has this body (7.10 and 7.20 strip it, its exec is the shared empty one; 7.00 has
+    // no such function). Its place is StartMinigame's Respawn warmup (7.10 0x10BFC70: SetMinigameState(Warmup), then
+    // PutPlayersIntoStasis for a Stasis warmup, and for a Respawn one the call that went with the stripped body), and
+    // its players are put where the game's respawn path puts a player of the game: the island game's own
+    // OverridePlayerSpawnLocation, which the game asks in Warmup. 7.10's KillPlayer, which a death-and-respawn would go
+    // through, is stripped too, so nobody is killed: each player's pawn goes to that place, skydiving for a game that
+    // spawns in the air, and the game hears they arrived (FinishPlayerTeleportedForMinigameStart: the island
+    // Blueprint's OnPlayerTeleportedForMinigameStart, its effects).
+    if (Role != ROLE_Authority)
     {
         return;
     }
-    const FName Name = ClearPlayerInventoriesFunction->GetFName();
-    FMulticastScriptDelegate& Started = Minigame->MinigameStartedDelegate;
-    FMulticastScriptDelegate& Ended = Minigame->MinigameEndedDelegate;
-    Started.AddUniqueDynamic(Minigame, Name);
-    Ended.AddUniqueDynamic(Minigame, Name);
+    const bool bAir = SpawnLocationSetting == EFortMinigamePlayerSpawnLocationSetting::GetAir();
+    int32_t Moved = 0;
+    int32_t Skydiving = 0;
+    const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
+    for (AFortPlayerState* PlayerState : Players)
+    {
+        AActor* Owner = PlayerState ? reinterpret_cast<AActor*>(PlayerState)->GetOwner() : nullptr;
+        AController* Controller = Owner ? Cast<AController>(reinterpret_cast<UObject*>(Owner)) : nullptr;
+        APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
+        AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+        FVector Location;
+        if (!Pawn || !AthenaState || !OverridePlayerSpawnLocation(Pawn, AthenaState, Location))
+        {
+            continue;
+        }
+        AActor* PawnActor = reinterpret_cast<AActor*>(Pawn);
+        if (!PawnActor->TeleportTo(Location, PawnActor->GetActorRotation()))
+        {
+            continue;
+        }
+        ++Moved;
+        AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Pawn));
+        if (bAir && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset()))
+        {
+            AthenaPawn->BeginSkydiving(false);
+            ++Skydiving;
+        }
+        FinishPlayerTeleportedForMinigameStart(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
+    }
+    Log::Info(L"Minigame: {} respawns {} of its {} players for its warmup at their respawn place{}", GetName().ToStdString(), Moved, Players.Num(),
+        Skydiving ? std::format(L", {} of them skydiving", Skydiving) : std::wstring());
+#endif
+}
+
+void AFortMinigame::HandleStateChangedForWarmup(uint8_t NewState)
+{
+#if WITH_SERVER_CODE
+    // SetMinigameState broadcasts the new state as it sets it, before StartMinigame's warmup step.
+    if (Role == ROLE_Authority && NewState == EFortMinigameState::GetWarmup() && WarmupType == EFortMinigameWarmupType::GetRespawn())
+    {
+        RespawnMinigamePlayers();
+    }
+#endif
+}
+
+DEFINE_FUNCTION(AFortMinigame::execRespawnMinigamePlayers)
+{
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->RespawnMinigamePlayers();
+    P_NATIVE_END;
+}
+
+DEFINE_FUNCTION(AFortMinigame::execHandleStateChangedForWarmup)
+{
+    P_GET_PROPERTY(UByteProperty, Z_Param_NewState);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->HandleStateChangedForWarmup(Z_Param_NewState);
+    P_NATIVE_END;
+}
+
+void AFortMinigame::BindGameEvents(AFortMinigame* Minigame)
+{
+    // The minigame's own broadcasts, once each (AddUniqueDynamic): its ClearPlayerInventories as the game goes in
+    // progress and as it stops being in progress, and Core's warmup handler with each new state.
+    if (!Minigame || Minigame->Role != ROLE_Authority)
+    {
+        return;
+    }
+    if (ClearPlayerInventoriesFunction)
+    {
+        const FName Name = ClearPlayerInventoriesFunction->GetFName();
+        FMulticastScriptDelegate& Started = Minigame->MinigameStartedDelegate;
+        FMulticastScriptDelegate& Ended = Minigame->MinigameEndedDelegate;
+        Started.AddUniqueDynamic(Minigame, Name);
+        Ended.AddUniqueDynamic(Minigame, Name);
+    }
+    if (HandleStateChangedForWarmupFunction)
+    {
+        FMulticastScriptDelegate& StateChanged = Minigame->StateChangedDelegate;
+        StateChanged.AddUniqueDynamic(Minigame, HandleStateChangedForWarmupFunction->GetFName());
+    }
 }
 
 void AFortMinigame::BindWorld(UWorld* World)
@@ -277,14 +385,16 @@ void AFortMinigame::BindWorld(UWorld* World)
     // (HandleMinigameStarted_Implementation, as SetMinigameState goes InProgress) and MinigameEndedDelegate (as it
     // leaves InProgress: EndMinigame's PostGameEnd or PostGameAbandon). Each island volume's UFortMinigameVolumeComponent
     // spawns its minigame (MinigameClass), so the world's spawns from now on are bound, and those already up.
-    if (!World || !ClearPlayerInventoriesFunction || InventoryResetWorld.Get() == World)
+    // RespawnMinigamePlayers likewise (its only caller was StartMinigame's Respawn warmup): the game's broadcast at that
+    // moment is the minigame's StateChangedDelegate with Warmup.
+    if (!World || (!ClearPlayerInventoriesFunction && !HandleStateChangedForWarmupFunction) || InventoryResetWorld.Get() == World)
     {
         return;
     }
     InventoryResetWorld = World;
     const FDelegateHandle Handle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateLambda([](AActor* Actor)
     {
-        BindInventoryReset(Actor ? Cast<AFortMinigame>(reinterpret_cast<UObject*>(Actor)) : nullptr);
+        BindGameEvents(Actor ? Cast<AFortMinigame>(reinterpret_cast<UObject*>(Actor)) : nullptr);
     }));
     int32_t Existing = 0;
     for (TObjectIterator<AFortMinigame> It; It; ++It)
@@ -292,13 +402,15 @@ void AFortMinigame::BindWorld(UWorld* World)
         AFortMinigame* Minigame = *It;
         if (Minigame && !Minigame->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) && Minigame->GetWorld() == World)
         {
-            BindInventoryReset(Minigame);
+            BindGameEvents(Minigame);
             ++Existing;
         }
     }
-    Log::Info(L"Minigame: the minigames {} ({} already up)", Handle.IsValid()
-        ? L"reset their players' inventories as their games start and end (UWorld::OnActorSpawned, then their MinigameStartedDelegate and MinigameEndedDelegate)"
-        : L"can't be bound as they spawn: the world's OnActorSpawned wasn't found", Existing);
+    const std::wstring What = std::format(L"{}{}{}", ClearPlayerInventoriesFunction ? L"reset their players' inventories as their games start and end (MinigameStartedDelegate, MinigameEndedDelegate)" : L"",
+        ClearPlayerInventoriesFunction && HandleStateChangedForWarmupFunction ? L" and " : L"",
+        HandleStateChangedForWarmupFunction ? L"respawn their players for a Respawn warmup (StateChangedDelegate)" : L"");
+    Log::Info(L"Minigame: the minigames {} ({} already up)", Handle.IsValid() ? What + L", bound as they spawn (UWorld::OnActorSpawned)"
+        : std::wstring(L"can't be bound as they spawn: the world's OnActorSpawned wasn't found"), Existing);
 #endif
 }
 
@@ -322,28 +434,53 @@ void AFortMinigame::HookNatives()
     // 0x14D99A0). 7.00 has neither UFunction.
     UFunction* ClearInventories = StaticClass() ? FindStaticFunction_ClearPlayerInventories() : nullptr;
     UFunction* ClearInventory = ClearInventories ? FindStaticFunction_ClearPlayerInventory() : nullptr;
-    if (!ClearInventories || !ClearInventory)
-    {
-        return;
-    }
-    if (!HasStrippedExec(ClearInventories))
+    if (ClearInventories && ClearInventory && !HasStrippedExec(ClearInventories))
     {
         Log::Info(L"Finder: AFortMinigame::ClearPlayerInventories is native in this build");
-        return;
     }
-    if (!HasStartedAndEndedDelegates())
+    else if (ClearInventories && ClearInventory && !HasStartedAndEndedDelegates())
     {
         Log::Error(L"Hook AFortMinigame::ClearPlayerInventories: not restored (the minigame's MinigameStartedDelegate and MinigameEndedDelegate not found), so a Creative game doesn't reset its players' inventories");
-        return;
     }
-    ClearInventories->SetNativeFunc(&execClearPlayerInventories);
-    ClearPlayerInventoriesFunction = ClearInventories;
-    Log::Info(L"Hook AFortMinigame::ClearPlayerInventories: native");
-    if (HasStrippedExec(ClearInventory))
+    else if (ClearInventories && ClearInventory)
     {
-        ClearInventory->SetNativeFunc(&execClearPlayerInventory);
-        Log::Info(L"Hook AFortMinigame::ClearPlayerInventory: native");
+        ClearInventories->SetNativeFunc(&execClearPlayerInventories);
+        ClearPlayerInventoriesFunction = ClearInventories;
+        Log::Info(L"Hook AFortMinigame::ClearPlayerInventories: native");
+        if (HasStrippedExec(ClearInventory))
+        {
+            ClearInventory->SetNativeFunc(&execClearPlayerInventory);
+            Log::Info(L"Hook AFortMinigame::ClearPlayerInventory: native");
+        }
     }
+
+    // 7.10 and 7.20: the Respawn warmup's RespawnMinigamePlayers is stripped (7.10's exec 0x14BB380, 7.20's 0x83BA30).
+    // 7.00 has no such UFunction (nor WarmupType's Respawn). Core's native for the minigame's StateChangedDelegate (its
+    // OnStateChanged signature, the new EFortMinigameState) goes in the class's FuncMap.
+    UFunction* Respawn = StaticClass() ? FindStaticFunction_RespawnMinigamePlayers() : nullptr;
+    if (Respawn && !HasStrippedExec(Respawn))
+    {
+        Log::Info(L"Finder: AFortMinigame::RespawnMinigamePlayers is native in this build");
+    }
+    else if (Respawn)
+    {
+        const UProperty* Property = Finder::ResolveClassFunctionMap() ? StaticClass()->FindPropertyByName(FName(L"StateChangedDelegate")) : nullptr;
+        const UFunction* Signature = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+            ? static_cast<const UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+        const bool bReflected = FindStaticFunction_OverridePlayerSpawnLocation() && EFortMinigameState::StaticEnum() && EFortMinigameWarmupType::StaticEnum();
+        HandleStateChangedForWarmupFunction = Signature && bReflected ? StaticClass()->AddNativeFunction(L"HandleStateChangedForWarmup", &execHandleStateChangedForWarmup, Signature) : nullptr;
+        if (HandleStateChangedForWarmupFunction)
+        {
+            Respawn->SetNativeFunc(&execRespawnMinigamePlayers);
+            Log::Info(L"Hook AFortMinigame::RespawnMinigamePlayers: native (Core's reconstruction), from the minigames' StateChangedDelegate");
+        }
+        else
+        {
+            Log::Error(L"Hook AFortMinigame::RespawnMinigamePlayers: not restored (StateChangedDelegate's signature {}, OverridePlayerSpawnLocation and the minigame enums {}), so a Respawn warmup moves nobody to the spawn pads",
+                Signature ? L"found" : L"not found", bReflected ? L"found" : L"not found");
+        }
+    }
+
     // The game mode binds its world's minigames as it binds the match's events (AFortGameModeAthena::BindMatchEvents);
     // where that came first, its world is bound here.
     for (TObjectIterator<AFortGameModeAthena> It; It; ++It)

@@ -10,8 +10,31 @@ class AController;
 class AFortPlayerControllerAthena;
 class AFortPlayerPawn;
 class AFortPlayerState;
+class AFortPlayerStateAthena;
+class APawn;
 class UFunction;
 class UWorld;
+
+// A Creative game's state (7.10: PreGame, Warmup, InProgress, PostGameEnd, PostGameAbandon).
+class EFortMinigameState
+{
+    DefineUnrealEnum(EFortMinigameState, FortniteGame)
+    DefineUEnumValue(Warmup)
+};
+
+// What a game's warmup does with its players (7.10: Stasis, Respawn; the island games' Minigame_PlayerCreated has
+// Respawn and a 6 s WarmupDuration).
+class EFortMinigameWarmupType
+{
+    DefineUnrealEnum(EFortMinigameWarmupType, FortniteGame)
+    DefineUEnumValue(Respawn)
+};
+
+class EFortMinigamePlayerSpawnLocationSetting
+{
+    DefineUnrealEnum(EFortMinigamePlayerSpawnLocationSetting, FortniteGame)
+    DefineUEnumValue(Air)
+};
 
 // A Creative game (from 7.00, which moves 6.20's minigame state and its leaderboard into this one class): the game an
 // island's devices set up (its stats, end conditions and teams), started and ended from the island menu
@@ -27,8 +50,14 @@ class AFortMinigame : public AInfo
     DefineUFunction(TeleportPlayersToStartLocations)
     DefineUFunction(ClearPlayerInventories)
     DefineUFunction(ClearPlayerInventory)
+    DefineUFunction(RespawnMinigamePlayers)
+    DefineUFunction(OverridePlayerSpawnLocation)
 
 public:
+    DefineUProperty(EFortMinigameWarmupType, WarmupType)
+    DefineUProperty(EFortMinigamePlayerSpawnLocationSetting, SpawnLocationSetting)
+    // Broadcast by SetMinigameState (7.10 0x10BE210) with each new state, on the server too.
+    DefineUProperty(FMulticastScriptDelegate, StateChangedDelegate)
     // Broadcast by HandleMinigameStarted_Implementation (7.10 0x10B1830) as the game goes in progress, and by
     // HandleMinigameEnded as it stops being in progress (AFortMinigame::SetMinigameState, 7.10 0x10BE210), on the server.
     DefineUProperty(FMulticastScriptDelegate, MinigameStartedDelegate)
@@ -48,10 +77,20 @@ public:
     // HandlePermissions).
     void ClearPlayerInventories();
     void ClearPlayerInventory(AFortPlayerControllerAthena* PlayerController);
+    // Restored native (7.10 and 7.20 strip it; 7.00 doesn't have it, its island Blueprint calls
+    // TeleportPlayersToStartLocations instead): a game whose WarmupType is Respawn puts each of its players where the
+    // game's respawn path would (OverridePlayerSpawnLocation: their latest checkpoint, a spawn pad for their team, or the
+    // air) as its warmup starts. No build has the body; Core's reconstruction.
+    void RespawnMinigamePlayers();
+    // Core's native for the minigame's StateChangedDelegate (UClass::AddNativeFunction): RespawnMinigamePlayers where
+    // StartMinigame (7.10 0x10BFC70) called it, as SetMinigameState puts a Respawn game in Warmup.
+    void HandleStateChangedForWarmup(uint8_t NewState);
 
     DECLARE_FUNCTION(execTeleportPlayersToStartLocations);
     DECLARE_FUNCTION(execClearPlayerInventories);
     DECLARE_FUNCTION(execClearPlayerInventory);
+    DECLARE_FUNCTION(execRespawnMinigamePlayers);
+    DECLARE_FUNCTION(execHandleStateChangedForWarmup);
 
     // From 7.00, where the build's exec is the empty one.
     static void HookNatives();
@@ -60,8 +99,11 @@ public:
     static void BindWorld(UWorld* World);
 
 private:
-    static void BindInventoryReset(AFortMinigame* Minigame);
+    static void BindGameEvents(AFortMinigame* Minigame);
     static inline UFunction* ClearPlayerInventoriesFunction = nullptr;
+    static inline UFunction* HandleStateChangedForWarmupFunction = nullptr;
+
+    bool OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation);
 
     TArray<AFortPlayerState*> GetParticipatingPlayers();
     bool DetermineSpawnLocation(AController* PlayerController, FVector& OutLocation, FRotator& OutRotation, bool& bShouldSkydive);

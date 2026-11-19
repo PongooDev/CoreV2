@@ -3093,7 +3093,9 @@ namespace
         const uintptr_t BunchCreate = SequencedCreate ? SequencedCreate : NamedCreate ? NamedCreate : OnlyRef(L"      Bunch Create %i: ChType %i, bReliable: %i, bPartial: %i, bPartialInitial: %i, bPartialFinal: %i");
         const uintptr_t BunchCreateEnd = BunchCreate + (SequencedCreate || NamedCreate ? 0x80 : 0x40);
         // 2.4.2 sizes Channels by MaxChannelSize (a TArray, as in 4.20) and logs when no index is free (0x1B0C510).
-        const uintptr_t NoFreeChannel = FunctionOf(L"No free channel could be found in the channel list (current limit is %d channels). Consider increasing the max channels allowed using CVarMaxChannelSize.");
+        // 7.30 (CL-4834550) adds the connection's owner to it ("... channels) for connection with owner %s. ..."; 0x29B0C90).
+        uintptr_t NoFreeChannel = FunctionOf(L"No free channel could be found in the channel list (current limit is %d channels). Consider increasing the max channels allowed using CVarMaxChannelSize.");
+        NoFreeChannel = NoFreeChannel ? NoFreeChannel : FunctionOf(L"No free channel could be found in the channel list (current limit is %d channels) for connection with owner %s. Consider increasing the max channels allowed using CVarMaxChannelSize.");
         for (uintptr_t Site = BunchCreate ? FindRawCall(BunchCreate, BunchCreateEnd) : 0; Site && !CreateChannel; Site = FindRawCall(Site + 5, BunchCreateEnd))
         {
             const uintptr_t Target = Finder::RelativeTarget(Site, 1, 5);
@@ -4549,6 +4551,17 @@ namespace
             for (uintptr_t Count = FindInstruction(CreateChannel, CreateChannelEnd, { -1, 0x63 }); Count && !Channels; Count = FindInstruction(Count + 1, CreateChannelEnd, { -1, 0x63 }))
             {
                 if ((Byte(Count) & 0xF8) == 0x48 && (Byte(Count + 2) & 0xC0) == 0x80 && (Byte(Count + 2) & 0x07) == (Byte(Load + 2) & 0x07)
+                    && (Byte(Count) & 0x01) == (Byte(Load) & 0x01) && *reinterpret_cast<const int32_t*>(Count + 3) == Num)
+                {
+                    Channels = Data;
+                    Natives::UNetConnection_ChannelsIsArray = true;
+                }
+            }
+            // 7.30 (CL-4834550) reads Num as a 32-bit load, mov r8d, [rdi+15A8h] (44 8B 87), next to the Data load
+            // mov rax, [rdi+15A0h] (CreateChannelByName 0x29B0C90).
+            for (uintptr_t Count = Channels ? 0 : FindInstruction(CreateChannel, CreateChannelEnd, { -1, 0x8B }); Count && !Channels; Count = FindInstruction(Count + 1, CreateChannelEnd, { -1, 0x8B }))
+            {
+                if ((Byte(Count) & 0xF8) == 0x40 && (Byte(Count + 2) & 0xC0) == 0x80 && (Byte(Count + 2) & 0x07) == (Byte(Load + 2) & 0x07)
                     && (Byte(Count) & 0x01) == (Byte(Load) & 0x01) && *reinterpret_cast<const int32_t*>(Count + 3) == Num)
                 {
                     Channels = Data;

@@ -17981,6 +17981,48 @@ bool Finder::ResolveTeamPrivateHealthAndShieldLive(ptrdiff_t PlayerTeamPrivateOf
             return true;
         }
     }
+    // 7.00+ (CoreV2 #446): the pass compiles its "not a player controller's pawn" branch (0 health of 100, MaxShield 100)
+    // after the loop's body, at the function's end, so the team copy's call comes first in the code and the store after
+    // it: 7.20 0xD15D40 calls SetHealthAndShield (0x1458BA0) at +0x2A7 and stores MaxShield (+0xC20) at
+    // +0x315; 7.30 0xD2B730 and 7.40 0xD537C0 the same at +0x2A7/+0x315 (MaxShield +0xC80). The search above, which wants
+    // the store first, missed it, and a bot teammate's squad bar stayed empty on 7.x. Within the function's own bounds
+    // (its unwind data), the store anywhere and the team copy's call. The next function in 7.20 (0xD16070) calls another
+    // function the same way on PlayerTeamPrivate, so the bounds are required here.
+    for (int32_t Index = 0x120; GameModeVTable && PlayerTeamPrivateOffset > 0 && MaxShieldOffset > 0 && Index < 0x1A0; ++Index)
+    {
+        const uintptr_t Function = reinterpret_cast<uintptr_t>(GameModeVTable[Index]);
+        const uintptr_t End = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
+        if (!End || End <= Function + 16 || End - Function > 0x800 || !IsInText(End - 1))
+        {
+            continue;
+        }
+        bool bMaxShield = false;
+        for (uintptr_t Site = Function; Site + 10 <= End && !bMaxShield; ++Site)
+        {
+            bMaxShield = Byte(Site) == 0xC7 && (Byte(Site + 1) & 0xF8) == 0x80 && *reinterpret_cast<const int32_t*>(Site + 2) == static_cast<int32_t>(MaxShieldOffset)
+                && *reinterpret_cast<const uint32_t*>(Site + 6) == 0x42C80000;
+        }
+        for (uintptr_t Site = Function; bMaxShield && Site + 20 <= End; ++Site)
+        {
+            const uint8_t ModRM = Byte(Site + 2);
+            if (Byte(Site) != 0x48 || Byte(Site + 1) != 0x8B || (ModRM & 0xF8) != 0x88 || (ModRM & 7) == 4
+                || *reinterpret_cast<const int32_t*>(Site + 3) != static_cast<int32_t>(PlayerTeamPrivateOffset) || Byte(Site + 7) != 0x48 || Byte(Site + 8) != 0x85
+                || Byte(Site + 9) != 0xC9 || Byte(Site + 10) != 0x74 || Byte(Site + 12) != 0x48 || Byte(Site + 13) != 0x8B || Byte(Site + 14) != (0xD0 | (ModRM & 7))
+                || Byte(Site + 15) != 0xE8)
+            {
+                continue;
+            }
+            const uintptr_t SetHealthAndShield = Finder::RelativeTarget(Site + 15, 1, 5);
+            if (!IsInText(SetHealthAndShield))
+            {
+                break;
+            }
+            Natives::AFortTeamPrivateInfo_SetHealthAndShield = reinterpret_cast<decltype(Natives::AFortTeamPrivateInfo_SetHealthAndShield)>(SetHealthAndShield);
+            Log::Info(L"Finder: AFortGameModeAthena::ReplicateHealthAndShield is slot 0x{:X} (0x{:X}, its no-pawn MaxShield store after the loop), its AFortTeamPrivateInfo::SetHealthAndShield 0x{:X}",
+                Index * 8, Function - Finder::ImageBase(), SetHealthAndShield - Finder::ImageBase());
+            return true;
+        }
+    }
     Log::Warning(L"Finder: AFortTeamPrivateInfo::SetHealthAndShield not found, player bots' squad bar health stays empty");
     return false;
 }

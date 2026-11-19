@@ -9,16 +9,34 @@
 #include "UObject/Class.h"
 #include "UObject/ScriptDelegates.h"
 
+namespace
+{
+    bool ResolveSetHealthAndShieldFor(AFortPlayerStateZone* PlayerState)
+    {
+        if (!PlayerState || !AFortPlayerState::HasPlayerTeamPrivate() || !AFortPlayerStateZone::HasHealthAndShield())
+        {
+            return false;
+        }
+        const uint8_t* const State = reinterpret_cast<const uint8_t*>(PlayerState);
+        return Finder::ResolveTeamPrivateHealthAndShieldLive(reinterpret_cast<const uint8_t*>(&PlayerState->PlayerTeamPrivate) - State,
+            reinterpret_cast<const uint8_t*>(&PlayerState->MaxShield) - State);
+    }
+}
+
+bool AFortTeamPrivateInfo::ResolveSetHealthAndShield()
+{
+#if WITH_SERVER_CODE
+    UClass* StateClass = AFortPlayerStateZone::StaticClass();
+    return StateClass && ResolveSetHealthAndShieldFor(reinterpret_cast<AFortPlayerStateZone*>(StateClass->GetDefaultObject()));
+#else
+    return false;
+#endif
+}
+
 bool AFortTeamPrivateInfo::SetHealthAndShield(AFortPlayerStateZone* PlayerState)
 {
 #if WITH_SERVER_CODE
-    if (!PlayerState || !AFortPlayerState::HasPlayerTeamPrivate() || !AFortPlayerStateZone::HasHealthAndShield())
-    {
-        return false;
-    }
-    const uint8_t* const State = reinterpret_cast<const uint8_t*>(PlayerState);
-    if (!Finder::ResolveTeamPrivateHealthAndShieldLive(reinterpret_cast<const uint8_t*>(&PlayerState->PlayerTeamPrivate) - State,
-            reinterpret_cast<const uint8_t*>(&PlayerState->MaxShield) - State))
+    if (!ResolveSetHealthAndShieldFor(PlayerState))
     {
         return false;
     }

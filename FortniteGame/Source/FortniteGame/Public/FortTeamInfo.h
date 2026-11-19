@@ -45,6 +45,9 @@ public:
     // The player state's CurrentHealth, MaxHealth, CurrentShield and MaxShield into RepData (3.5.1 0xF83CB0). False where
     // the build's native wasn't found.
     bool SetHealthAndShield(AFortPlayerStateZone* PlayerState);
+    // Finds that native (Finder::ResolveTeamPrivateHealthAndShieldLive) from the player state's offsets, as the match's
+    // world starts: Battle Royale's player bots resolve it then, so its search doesn't hold their first frame.
+    static bool ResolveSetHealthAndShield();
 };
 
 class AFortTeamInfo : public AInfo

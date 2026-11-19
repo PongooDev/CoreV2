@@ -550,8 +550,9 @@ void FCoreAthenaBotManager::Create(AFortGameModeAthena* GameMode)
         const bool bMovementStyle = AFortPawn::CurrentMovementStyleOffset() > 0 && Finder::ResolveMovementStyleLive(AFortPawn::CurrentMovementStyleOffset());
         const bool bSkydive = AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
         const bool bTeams = Finder::ResolveTeamChangeLive() && Finder::ResolveTeamRemoveLive();
-        Log::Info(L"Battle Royale bots: the bots' finders resolved as the world starts ({:.0f} ms; movement style {}, skydiving {}, teams {})",
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count(), bMovementStyle, bSkydive, bTeams);
+        const bool bSquadBar = AFortTeamPrivateInfo::ResolveSetHealthAndShield();
+        Log::Info(L"Battle Royale bots: the bots' finders resolved as the world starts ({:.0f} ms; movement style {}, skydiving {}, teams {}, squad bar health {})",
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count(), bMovementStyle, bSkydive, bTeams, bSquadBar);
     }
     Log::Info(L"Battle Royale bots: the bots' update is {}", Instance->PrimaryManagerTick.GetTickFunction()
         ? L"the manager's tick function, registered with the match's level while it has bots" : L"a world timer (this build's FTickFunction registration wasn't found)");

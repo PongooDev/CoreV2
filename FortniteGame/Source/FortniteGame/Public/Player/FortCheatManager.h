@@ -347,6 +347,9 @@ public:
     static std::wstring ResolveCommandName(APlayerController* PlayerController, const std::wstring& Name, bool (*IsKnown)(const std::wstring&));
     // The player whose display name is Name (case-insensitive) or uniquely starts with it; else null and OutError says why.
     static AFortPlayerController* FindCheatTarget(const UObject* WorldContextObject, const FString& Name, FString& OutError);
+    // The same, but over every controller with a player state, Core's Battle Royale player bots included (#509): the
+    // bots' controllers are stock AAIControllers (or 8.30's bot controllers), not AFortPlayerControllers.
+    static AController* FindCheatTargetController(const UObject* WorldContextObject, const FString& Name, FString& OutError, bool bIncludeBots);
     // While a cheat runs on another player, Core's replies go to the player who typed it.
     static inline AFortPlayerController* ReplyTo = nullptr;
 

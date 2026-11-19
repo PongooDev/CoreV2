@@ -2142,7 +2142,8 @@ void UFortCheatManager::TeleportTo(const FString& Arguments)
         return;
     }
     FString Error;
-    AFortPlayerController* Target = FindCheatTarget(PlayerController, FString(Name.c_str()), Error);
+    // Bots too (#509): the name in the game is the bot's player state's, and its pawn is the one to go to.
+    AController* Target = FindCheatTargetController(PlayerController, FString(Name.c_str()), Error, true);
     if (!Target)
     {
         Reply(Error);
@@ -2150,7 +2151,7 @@ void UFortCheatManager::TeleportTo(const FString& Arguments)
     }
     const FString TargetName = PlayerNameOf(Target);
     APawn* TargetPawn = Target->GetPawn();
-    if (Target == PlayerController || TargetPawn == Pawn)
+    if (reinterpret_cast<UObject*>(Target) == reinterpret_cast<UObject*>(PlayerController) || TargetPawn == Pawn)
     {
         Reply(TEXT("That's you"));
         return;
@@ -6173,6 +6174,11 @@ void UFortCheatManager::OnCheatMovement(ACharacter* Character, ECheatMovement Mo
 
 AFortPlayerController* UFortCheatManager::FindCheatTarget(const UObject* WorldContextObject, const FString& Name, FString& OutError)
 {
+    return Cast<AFortPlayerController>(reinterpret_cast<UObject*>(FindCheatTargetController(WorldContextObject, Name, OutError, false)));
+}
+
+AController* UFortCheatManager::FindCheatTargetController(const UObject* WorldContextObject, const FString& Name, FString& OutError, bool bIncludeBots)
+{
     UWorld* World = WorldContextObject ? WorldContextObject->GetWorld() : nullptr;
     AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
     if (!GameState)
@@ -6182,12 +6188,17 @@ AFortPlayerController* UFortCheatManager::FindCheatTarget(const UObject* WorldCo
     }
 
     const std::wstring Wanted = Lower(Name.ToStdString());
-    std::vector<std::pair<AFortPlayerController*, FString>> Exact;
-    std::vector<std::pair<AFortPlayerController*, FString>> Prefixed;
+    std::vector<std::pair<AController*, FString>> Exact;
+    std::vector<std::pair<AController*, FString>> Prefixed;
     const TArray<APlayerState*>& PlayerArray = GameState->PlayerArray;
     for (APlayerState* PlayerState : PlayerArray)
     {
-        AFortPlayerController* Controller = PlayerState ? Cast<AFortPlayerController>(reinterpret_cast<UObject*>(PlayerState->GetOwner())) : nullptr;
+        UObject* Owner = PlayerState ? reinterpret_cast<UObject*>(PlayerState->GetOwner()) : nullptr;
+        AController* Controller = Owner ? Cast<AController>(Owner) : nullptr;
+        if (Controller && !bIncludeBots && !Cast<AFortPlayerController>(Owner))
+        {
+            Controller = nullptr;
+        }
         if (!Controller)
         {
             continue;
@@ -6204,7 +6215,7 @@ AFortPlayerController* UFortCheatManager::FindCheatTarget(const UObject* WorldCo
         }
     }
 
-    const std::vector<std::pair<AFortPlayerController*, FString>>& Matches = !Exact.empty() ? Exact : Prefixed;
+    const std::vector<std::pair<AController*, FString>>& Matches = !Exact.empty() ? Exact : Prefixed;
     if (Matches.size() == 1)
     {
         return Matches.front().first;

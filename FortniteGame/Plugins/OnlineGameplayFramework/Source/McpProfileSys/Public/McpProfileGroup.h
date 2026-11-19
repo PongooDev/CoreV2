@@ -34,9 +34,12 @@ public:
     DefineNativeObject(FUniqueNetIdRepl, CredentialsAccountId, UMcpProfileGroup_CredentialsAccountId)
 
     void SendRequestNow(FProfileHttpRequest& Request);
+    // 7.40 onwards: the request was prepared by the caller, and its context credentials come with it.
+    void SendRequestNow(const TSharedRef<IHttpRequest>& HttpRequest, EContextCredentials ContextCredentials);
 
     static void Hook();
 
 private:
     static void SendRequestNowHK(UMcpProfileGroup* This, FProfileHttpRequest& Request);
+    static void SendHttpRequestNowHK(UMcpProfileGroup* This, const TSharedRef<IHttpRequest>& HttpRequest, EContextCredentials ContextCredentials);
 };

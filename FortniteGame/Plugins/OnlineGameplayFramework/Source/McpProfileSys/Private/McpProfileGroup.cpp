@@ -18,20 +18,25 @@ void UMcpProfileGroup::SendRequestNow(FProfileHttpRequest& Request)
         Request.Profile->PrepareRequest(Request.HttpRequest.ToSharedRef(), Request.ResponseType);
     }
 
-    UE_LOG(LogProfileSys, Log, TEXT("MCP-Profile: Dispatching request to %s"), *Request.HttpRequest->GetURL());
+    SendRequestNow(Request.HttpRequest.ToSharedRef(), Request.ContextCredentials);
+}
+
+void UMcpProfileGroup::SendRequestNow(const TSharedRef<IHttpRequest>& HttpRequest, EContextCredentials ContextCredentials)
+{
+    UE_LOG(LogProfileSys, Log, TEXT("MCP-Profile: Dispatching request to %s"), *HttpRequest->GetURL());
 
     bool bStarted = false;
     FString ErrorStr;
     FGameServiceMcpPtr McpService = McpSubsystem->GetMcpGameService();
     const FUniqueNetIdRepl& AccountId = CredentialsAccountId;
 
-    switch (Request.ContextCredentials)
+    switch (ContextCredentials)
     {
     case CXC_Client:
     case CXC_Public:
         if (AccountId.IsValid())
         {
-            McpSubsystem->QueueRequest(*McpService, *AccountId, Request.HttpRequest.ToSharedRef(), ErrorStr);
+            McpSubsystem->QueueRequest(*McpService, *AccountId, HttpRequest, ErrorStr);
             bStarted = true;
         }
         else
@@ -57,7 +62,7 @@ void UMcpProfileGroup::SendRequestNow(FProfileHttpRequest& Request)
         }
         if (Permissions)
         {
-            bStarted = McpSubsystem->QueueRequest(*McpService, Permissions->Id, Request.HttpRequest.ToSharedRef(), ErrorStr);
+            bStarted = McpSubsystem->QueueRequest(*McpService, Permissions->Id, HttpRequest, ErrorStr);
         }
         else
         {
@@ -84,16 +89,26 @@ void UMcpProfileGroup::SendRequestNow(FProfileHttpRequest& Request)
     if (!bStarted)
     {
         UE_LOG(LogProfileSys, Warning, TEXT("Failed to start profile request."));
-        Request.HttpRequest->CancelRequest();
+        HttpRequest->CancelRequest();
     }
 }
 
 void UMcpProfileGroup::Hook()
 {
+    if (Natives::UMcpProfileGroup_SendRequestNowTakesHttpRequest)
+    {
+        Hooks::Detour(L"UMcpProfileGroup::SendRequestNow", reinterpret_cast<void*>(Natives::UMcpProfileGroup_SendRequestNow), &SendHttpRequestNowHK, nullptr);
+        return;
+    }
     Hooks::Detour(L"UMcpProfileGroup::SendRequestNow", reinterpret_cast<void*>(Natives::UMcpProfileGroup_SendRequestNow), &SendRequestNowHK, nullptr);
 }
 
 void UMcpProfileGroup::SendRequestNowHK(UMcpProfileGroup* This, FProfileHttpRequest& Request)
 {
     This->SendRequestNow(Request);
+}
+
+void UMcpProfileGroup::SendHttpRequestNowHK(UMcpProfileGroup* This, const TSharedRef<IHttpRequest>& HttpRequest, EContextCredentials ContextCredentials)
+{
+    This->SendRequestNow(HttpRequest, ContextCredentials);
 }

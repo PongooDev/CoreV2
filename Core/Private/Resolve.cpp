@@ -5373,11 +5373,29 @@ namespace
             ObjectPassLoad = bRequestLoad && bProfileLoad ? Test + 5 : 0;
         }
 
+        // 7.40 (CL-5046157 0xA7D080) is handed the HTTP request and its context credentials, its caller having prepared
+        // the request (0xA7C970 -> 0xA69280 calls the profile's PrepareRequest): mov ebx, r8d; mov r15, rdx; ...; mov rcx,
+        // [rdx] (the request, for the dispatch log's URL); ...; test ebx, ebx; jz; sub ebx, 1; jz (the switch on the
+        // context). No FProfileHttpRequest, so none of its members are read.
+        bool bTakesHttpRequest = false;
+        if (!bHttpRequestCopy && !ObjectPassLoad && !Scan({ 0x48, 0x83, 0x3A, 0x00 }) && SendRequestNowEnd)
+        {
+            uintptr_t ContextCopy = 0;
+            for (uintptr_t Move = FindInstruction(SendRequestNow, SendRequestNow + 0x40, { 0x41, 0x8B }); Move && !ContextCopy; Move = FindInstruction(Move + 1, SendRequestNow + 0x40, { 0x41, 0x8B }))
+            {
+                ContextCopy = (Byte(Move + 2) & 0xC7) == 0xC0 ? Move : 0;
+            }
+            const uint8_t Context = ContextCopy ? (Byte(ContextCopy + 2) >> 3) & 0x07 : 0;
+            const uintptr_t Switch = ContextCopy ? FindInstruction(ContextCopy, SendRequestNowEnd, { 0x85, static_cast<int32_t>(0xC0 | (Context << 3) | Context), 0x0F, 0x84, -1, -1, -1, -1, 0x83, static_cast<int32_t>(0xE8 | Context), 0x01, 0x0F, 0x84 }) : 0;
+            bTakesHttpRequest = Switch && Switch < ContextCopy + 0x100;
+        }
+        Natives::UMcpProfileGroup_SendRequestNowTakesHttpRequest = bTakesHttpRequest;
+
         if (Scan({ 0x48, 0x83, 0x3A, 0x00 }) || ObjectPassLoad)
         {
             Natives::FProfileHttpRequest_Profile = 0;
         }
-        else
+        else if (!bTakesHttpRequest)
         {
             Log::Error(L"Finder: FProfileHttpRequest::Profile not found");
             ++MissingCount;
@@ -5385,12 +5403,14 @@ namespace
 
         const uintptr_t HttpRequestLoad = bHttpRequestCopy ? HttpRequestCopy : ObjectPassLoad;
         Natives::UMcpProfile_PrepareRequestTakesObject = !bHttpRequestCopy && ObjectPassLoad;
-        RequireOffset(L"FProfileHttpRequest::HttpRequest", Natives::FProfileHttpRequest_HttpRequest, HttpRequestLoad ? Byte(HttpRequestLoad + 3) : 0);
-
         const uintptr_t PrepareCall = HttpRequestLoad ? FindVirtualCall(HttpRequestLoad, HttpRequestLoad + 0x40) : 0;
-        RequireSlot(L"UMcpProfile::PrepareRequest", Natives::UMcpProfile_PrepareRequestIndex, VirtualSlot(PrepareCall));
         const uintptr_t ResponseTypeLoad = PrepareCall ? FindInstruction(HttpRequestLoad, PrepareCall, { 0x44, 0x8B, 0x42, -1 }) : 0;
-        RequireOffset(L"FProfileHttpRequest::ResponseType", Natives::FProfileHttpRequest_ResponseType, ResponseTypeLoad ? Byte(ResponseTypeLoad + 3) : 0);
+        if (!bTakesHttpRequest)
+        {
+            RequireOffset(L"FProfileHttpRequest::HttpRequest", Natives::FProfileHttpRequest_HttpRequest, HttpRequestLoad ? Byte(HttpRequestLoad + 3) : 0);
+            RequireSlot(L"UMcpProfile::PrepareRequest", Natives::UMcpProfile_PrepareRequestIndex, VirtualSlot(PrepareCall));
+            RequireOffset(L"FProfileHttpRequest::ResponseType", Natives::FProfileHttpRequest_ResponseType, ResponseTypeLoad ? Byte(ResponseTypeLoad + 3) : 0);
+        }
 
         const uintptr_t ServiceCopy = Scan({ 0x49, 0x8B, 0x46, -1, -1, -1, -1, 0x48, 0x8B, 0xB0, -1, -1, -1, -1, 0x4C, 0x8B, 0xB8, -1, -1, -1, -1 });
         int32_t ServiceObject = ServiceCopy ? *reinterpret_cast<const int32_t*>(ServiceCopy + 17) : 0;
@@ -5474,7 +5494,10 @@ namespace
                 }
             }
         }
-        RequireOffset(L"FProfileHttpRequest::ContextCredentials", Natives::FProfileHttpRequest_ContextCredentials, ContextCredentials);
+        if (!bTakesHttpRequest)
+        {
+            RequireOffset(L"FProfileHttpRequest::ContextCredentials", Natives::FProfileHttpRequest_ContextCredentials, ContextCredentials);
+        }
 
         uintptr_t CredentialsCheck = Scan({ 0x49, 0x8B, 0x8E, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x0F, 0x84, -1, -1, -1, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 });
         if (!CredentialsCheck)
@@ -5498,10 +5521,30 @@ namespace
                 }
             }
         }
+        // Where the IsValid call's slot displacement and the code after the check are, from the check's start.
+        size_t IsValidSlotAt = 21;
+        size_t CheckLength = 24;
+        if (!CredentialsCheck)
+        {
+            // 7.40 (CL-5046157 0xA7D69B) jumps short past the call: mov rcx, [rsi+130h]; test rcx, rcx; jz short;
+            // mov rax, [rcx]; call [rax+20h]; test al, al; jz short, and calls the user's QueueRequest 0x38 bytes on.
+            const std::initializer_list<int32_t> ShortCredentialsCheck = { -1, 0x8B, -1, -1, -1, -1, -1, 0x48, 0x85, 0xC9, 0x74, -1, 0x48, 0x8B, 0x01, 0xFF, 0x50, -1, 0x84, 0xC0 };
+            for (uintptr_t Check = Scan(ShortCredentialsCheck); Check && !CredentialsCheck; Check = FindInstruction(Check + 1, SendRequestNowEnd, ShortCredentialsCheck))
+            {
+                const uint8_t ModRm = Byte(Check + 2);
+                if ((Byte(Check) == 0x48 || Byte(Check) == 0x49) && (ModRm & 0xF8) == 0x88 && (ModRm & 0x07) != 0x04 && (ModRm & 0x07) != 0x05)
+                {
+                    CredentialsCheck = Check;
+                    QueueForUserCallEnd = Check + 0x80;
+                    IsValidSlotAt = 17;
+                    CheckLength = 20;
+                }
+            }
+        }
         const ptrdiff_t CredentialsNetId = CredentialsCheck ? *reinterpret_cast<const int32_t*>(CredentialsCheck + 3) : 0;
         RequireOffset(L"UMcpProfileGroup::CredentialsAccountId", Natives::UMcpProfileGroup_CredentialsAccountId, CredentialsNetId > static_cast<ptrdiff_t>(sizeof(void*)) ? CredentialsNetId - static_cast<ptrdiff_t>(sizeof(void*)) : 0);
-        RequireSlot(L"FUniqueNetId::IsValid", Natives::FUniqueNetId_IsValidIndex, CredentialsCheck && Byte(CredentialsCheck + 21) % 8 == 0 ? Byte(CredentialsCheck + 21) / 8 : -1);
-        const uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + 24, QueueForUserCallEnd) : 0;
+        RequireSlot(L"FUniqueNetId::IsValid", Natives::FUniqueNetId_IsValidIndex, CredentialsCheck && Byte(CredentialsCheck + IsValidSlotAt) % 8 == 0 ? Byte(CredentialsCheck + IsValidSlotAt) / 8 : -1);
+        const uintptr_t QueueForUser = CredentialsCheck ? FindRawCall(CredentialsCheck + CheckLength, QueueForUserCallEnd) : 0;
         Require(L"FOnlineSubsystemMcp::QueueRequest (user)", Natives::FOnlineSubsystemMcp_QueueRequestForUser, QueueForUser ? Finder::RelativeTarget(QueueForUser, 1, 5) : 0);
 
         uintptr_t AccountInventoryChanged = FunctionOf(L"UFortRegisteredPlayerInfo::OnAccountInventoryChanged trying to initialize ability system actor");

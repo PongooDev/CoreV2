@@ -265,6 +265,9 @@ namespace Natives
     // only (Finder::ResolveMcpBasicAuth), where it tells Core which objects are MCP services.
     inline void* FBaseServiceMcp_GetBasicAuth = nullptr;
     inline void (*UMcpProfileGroup_SendRequestNow)(UMcpProfileGroup* This, FProfileHttpRequest& Request) = nullptr;
+    // 7.40 (CL-5046157 0xA7D080): SendRequestNow takes the HTTP request and its context credentials instead of an
+    // FProfileHttpRequest, its caller having prepared the request (0xA7C970 -> 0xA69280, the profile's PrepareRequest).
+    inline bool UMcpProfileGroup_SendRequestNowTakesHttpRequest = false;
     // UMcpProfile::QueryProfile(const FMcpQueryComplete& OnComplete): the profile's whole query, by whichever URL its group
     // needs (another account's: the public one). 2.5 (0x79D250) and 3.0 (0x7A1800) take FBaseUrlContext's
     // bImmediateMode too (r8b, false from every caller of the game's); a build whose QueryProfile has no third argument

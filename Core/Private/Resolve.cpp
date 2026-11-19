@@ -3169,6 +3169,31 @@ namespace
         }
         Require(L"AActor::CallPreReplication", Natives::AActor_CallPreReplication, PreReplicationSites >= 2 ? PreReplication : 0);
 
+        // What ReplicateActor returns, as the engine's own caller reads it. UDemoNetDriver::DemoReplicateActor calls it
+        // and tests the result: UE 4.22's int64 bits written, "call; test rax, rax; setg" (3.3 0x208872D, 4.5 0x211E5FD,
+        // 7.00 0x26A0F69, 7.20 0x27ED2D9), or 4.20's bool, "call; movzx r15d, al" (1.1 0x1F3CCA6, 2.2 0x199AC86, 3.0
+        // 0x1FEDB48). Read as a bool on a build that returns bits, a send of a multiple of 256 bits was taken for no send.
+        const uintptr_t DemoReplicateEnd = DemoReplicate && ReplicateActor ? Finder::FunctionEnd(DemoReplicate) : 0;
+        uintptr_t ReplicateActorCall = 0;
+        for (const auto& [Site, Target] : DemoReplicateEnd ? Finder::DirectCalls(DemoReplicate, DemoReplicateEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+        {
+            if (Target == ReplicateActor && Site + 8 <= DemoReplicateEnd)
+            {
+                ReplicateActorCall = Site;
+                break;
+            }
+        }
+        Natives::UActorChannel_bReplicateActorReturnsBits = ReplicateActorCall && Byte(ReplicateActorCall + 5) == 0x48 && Byte(ReplicateActorCall + 6) == 0x85 && Byte(ReplicateActorCall + 7) == 0xC0;
+        if (ReplicateActorCall)
+        {
+            Log::Info(L"Finder: UActorChannel::ReplicateActor returns {} (UDemoNetDriver::DemoReplicateActor's call at 0x{:X})",
+                Natives::UActorChannel_bReplicateActorReturnsBits ? L"the bits it wrote (int64)" : L"a bool", ReplicateActorCall - Finder::ImageBase());
+        }
+        else if (ReplicateActor)
+        {
+            Log::Warning(L"Finder: UDemoNetDriver::DemoReplicateActor's call to UActorChannel::ReplicateActor not found, its result is read as a bool");
+        }
+
         const uintptr_t NotifyDestroyed = FunctionOf(L"NotifyActorDestroyed %s - StartupActor");
         const uintptr_t NotifyDestroyedEnd = Finder::FunctionEnd(NotifyDestroyed);
         const std::vector<std::pair<uintptr_t, uintptr_t>> NotifyCalls = NotifyDestroyed && NotifyDestroyedEnd ? Finder::DirectCalls(NotifyDestroyed, NotifyDestroyedEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();

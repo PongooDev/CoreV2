@@ -55,9 +55,12 @@ double UActorChannel::GetLastUpdateTime() const
     return ChannelConnection && ChannelActor && Natives::UNetConnection_LastUpdateTimes >= 0 ? ChannelConnection->LastUpdateTimes.FindRef(ChannelActor) : 0.0;
 }
 
-bool UActorChannel::ReplicateActor()
+int64_t UActorChannel::ReplicateActor()
 {
-    return Natives::UActorChannel_ReplicateActor(this);
+    // The build's function returns int64 bits written (rax) from 3.3, a bool (al, the rest of rax undefined) on 3.0
+    // and older: only al is read there.
+    const int64_t Result = Natives::UActorChannel_ReplicateActor(this);
+    return Natives::UActorChannel_bReplicateActorReturnsBits ? Result : static_cast<int64_t>((Result & 0xFF) != 0);
 }
 
 void UActorChannel::SetChannelActor(AActor* InActor)

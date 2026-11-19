@@ -289,7 +289,13 @@ namespace Natives
     inline bool (*UFortUITeamInfo_GetTeamMemberInfo)(UFortUITeamInfo* This, UFortRegisteredPlayerInfo* PlayerInfo, FFortTeamMemberInfo& OutInfo) = nullptr;
     inline void (*UAthenaHUDContext_BindLocalPawn)(UAthenaHUDContext* This) = nullptr;
 
-    inline bool (*UActorChannel_ReplicateActor)(UActorChannel* This) = nullptr;
+    // int64 ReplicateActor() (UE 4.22's: the bits written), or bool on the builds where the flag below is false: only
+    // al is defined then.
+    inline int64_t (*UActorChannel_ReplicateActor)(UActorChannel* This) = nullptr;
+    // Whether ReplicateActor returns the bits it wrote (3.3 on) rather than a bool (3.0 and older), as the engine's own
+    // caller UDemoNetDriver::DemoReplicateActor reads it: "test rax, rax; setg" (3.3 0x208872D, 7.20 0x27ED2D9) against
+    // "movzx r15d, al" (3.0 0x1FEDB48, 1.1 0x1F3CCA6). False when that caller isn't found.
+    inline bool UActorChannel_bReplicateActorReturnsBits = false;
     inline void (*UActorChannel_SetChannelActor)(UActorChannel* This, AActor* InActor) = nullptr;
     inline UChannel* (*UNetConnection_CreateChannel)(UNetConnection* This, int32_t Type, bool bOpenedLocally, int32_t ChannelIndex) = nullptr;
     // 6.10 (UE 4.22's networking) names its channels and has no CreateChannel by type: CreateChannelByName(const FName&

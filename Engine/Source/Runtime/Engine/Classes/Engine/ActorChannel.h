@@ -21,7 +21,9 @@ public:
 
     AActor* GetActor() { return Actor; }
 
-    bool ReplicateActor();
+    // UE 4.22's signature: the bits written for the actor, 0 when nothing was sent. 3.0 and older (UE 4.20's bool) give
+    // 1 or 0 here (Natives::UActorChannel_bReplicateActorReturnsBits).
+    int64_t ReplicateActor();
     void SetChannelActor(AActor* InActor);
     void SetChannelActorForDestroy(FActorDestructionInfo* DestructInfo);
 };

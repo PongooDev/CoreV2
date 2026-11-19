@@ -398,7 +398,15 @@ void AFortPlayerControllerZone::HookVTables()
     HookGameplayVoteVTables();
     HookGadgetTrackedAttributeDelegate();
 
-    const int32_t Index = Finder::ImplementationIndex(StaticFunction_ServerTriggerSetupTeleportCameraEvent());
+    // 8.00 (CL-5203069) moves the RPC to AFortPlayerControllerPvE (its only declaration in the 8.00 SDK): the zone
+    // controller has no function to restore there, so Core's teleport camera setup is off in this build.
+    UFunction* TeleportCameraFunction = FindStaticFunction_ServerTriggerSetupTeleportCameraEvent();
+    if (!TeleportCameraFunction)
+    {
+        Log::Info(L"Finder: AFortPlayerControllerZone::ServerTriggerSetupTeleportCameraEvent moved to AFortPlayerControllerPvE in this build; the teleport camera hook is off");
+        return;
+    }
+    const int32_t Index = Finder::ImplementationIndex(TeleportCameraFunction);
     if (Index < 0)
     {
         Log::Error(L"Finder: AFortPlayerControllerZone::ServerTriggerSetupTeleportCameraEvent_Implementation slot not found");

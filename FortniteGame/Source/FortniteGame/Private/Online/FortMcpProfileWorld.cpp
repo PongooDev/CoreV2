@@ -21,7 +21,8 @@ void* UFortMcpProfileWorld::BindToPlayerController(AFortPlayerController* Player
 
 #if WITH_SERVER_CODE
     uint8_t* const Profile = reinterpret_cast<uint8_t*>(this);
-    if (*reinterpret_cast<void**>(Profile + Natives::UFortMcpProfileWorld_Inventory))
+    // 8.00 has no bIsInventoryInitialized to set: its bind clears the inventory's own flag (Natives stays -1).
+    if (Natives::UFortMcpProfileWorld_bIsInventoryInitialized >= 0 && *reinterpret_cast<void**>(Profile + Natives::UFortMcpProfileWorld_Inventory))
     {
         Profile[Natives::UFortMcpProfileWorld_bIsInventoryInitialized] = 1;
     }

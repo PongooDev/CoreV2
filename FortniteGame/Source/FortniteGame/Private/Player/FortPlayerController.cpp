@@ -1177,7 +1177,8 @@ void AFortPlayerController::ApplyHeroAbilityKitItems(UFortHero* Hero)
     };
 
     UAbilitySystemComponent* AbilitySystemComponent = FortPlayerState->AbilitySystemComponent;
-    if (UFortHeroType* HeroType = Hero->GetHeroTypeBP(); HeroType && AbilitySystemComponent)
+    // 8.00 dropped UFortHeroType::AbilityKits: the hero loadout system grants the hero's kits itself there.
+    if (UFortHeroType* HeroType = Hero->GetHeroTypeBP(); HeroType && AbilitySystemComponent && UFortHeroType::HasAbilityKits())
     {
         TStructArray<FHeroAbilityKit>& HeroTypeKits = HeroType->AbilityKits;
         for (int32_t Index = 0; Index < HeroTypeKits.Num(); ++Index)
@@ -2413,7 +2414,13 @@ ptrdiff_t AFortPlayerController::QuickBarsOffset()
 
 bool AFortPlayerController::ResolveDurability()
 {
-    return Finder::ResolveDurabilityLive(StaticFunction_ServerModDurability(), StaticClass()->GetDefaultObject(false), FFortItemEntry::DurabilityOffset(),
+    // 8.00 drops the ServerModDurability RPC (its item entries carry the durability themselves): nothing to resolve.
+    UFunction* Function = FindStaticFunction_ServerModDurability();
+    if (!Function)
+    {
+        return false;
+    }
+    return Finder::ResolveDurabilityLive(Function, StaticClass()->GetDefaultObject(false), FFortItemEntry::DurabilityOffset(),
         AFortWeapon::PendingDestroyDueToDurabilityOffset(), AFortWeapon::PendingDestroyDueToDurabilityMask());
 }
 
@@ -3002,7 +3009,11 @@ void AFortPlayerController::HookClientNatives()
 void AFortPlayerController::Hook()
 {
     Hooks::Detour(L"AFortPlayerController::InitializeMcpProfile", reinterpret_cast<void*>(Natives::AFortPlayerController_InitializeMcpProfile), &InitializeMcpProfileHK, &InitializeMcpProfileOG);
-    Hooks::Detour(L"AFortPlayerController::TrySetHeroImplementation", reinterpret_cast<void*>(Natives::AFortPlayerController_TrySetHeroImplementation), &TrySetHeroImplementationHK, &TrySetHeroImplementationOG);
+    // 8.00 has no TrySetHeroImplementation (its hero loadout system sets heroes): CanTrySetHero stays false there.
+    if (Natives::AFortPlayerController_TrySetHeroImplementation)
+    {
+        Hooks::Detour(L"AFortPlayerController::TrySetHeroImplementation", reinterpret_cast<void*>(Natives::AFortPlayerController_TrySetHeroImplementation), &TrySetHeroImplementationHK, &TrySetHeroImplementationOG);
+    }
 }
 
 bool AFortPlayerController::InitializeMcpProfileHK(AFortPlayerController* This, const void* OnComplete)

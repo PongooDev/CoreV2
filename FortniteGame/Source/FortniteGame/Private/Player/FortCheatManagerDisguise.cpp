@@ -338,7 +338,13 @@ namespace
             {
                 continue;
             }
-            for (TStructArray<FFortSpecializationSlot>* Slots : { &static_cast<TStructArray<FFortSpecializationSlot>&>(Specialization->SpecializationSlots), &static_cast<TStructArray<FFortSpecializationSlot>&>(Specialization->TacticalAbilitySlots) })
+            std::vector<TStructArray<FFortSpecializationSlot>*> SlotArrays{ &static_cast<TStructArray<FFortSpecializationSlot>&>(Specialization->SpecializationSlots) };
+            // 8.00 dropped UFortHeroSpecialization::TacticalAbilitySlots (the hero loadout's tactical slots replace it).
+            if (UFortHeroSpecialization::HasTacticalAbilitySlots())
+            {
+                SlotArrays.push_back(&static_cast<TStructArray<FFortSpecializationSlot>&>(Specialization->TacticalAbilitySlots));
+            }
+            for (TStructArray<FFortSpecializationSlot>* Slots : SlotArrays)
             {
                 for (int32_t Index = 0; Index < Slots->Num(); ++Index)
                 {
@@ -459,13 +465,17 @@ namespace
     std::vector<UFortAbilityKit*> HeroKits(UFortHeroType* HeroType, UFortHero* Hero)
     {
         std::vector<UFortAbilityKit*> Kits = SpecializationKits(Hero->Specializations);
-        const TStructArray<FHeroAbilityKit>& ClassKits = HeroType->AbilityKits;
-        for (int32_t Index = 0; Index < ClassKits.Num(); ++Index)
+        // 8.00 dropped UFortHeroType::AbilityKits: the hero loadout system grants the class's kits there.
+        if (UFortHeroType::HasAbilityKits())
         {
-            const TAssetPtr<UFortAbilityKit>& InherentKit = ClassKits[Index].InherentAbilityKit;
-            if (UFortAbilityKit* Kit = InherentKit.LoadSynchronous(); Kit && std::find(Kits.begin(), Kits.end(), Kit) == Kits.end())
+            const TStructArray<FHeroAbilityKit>& ClassKits = HeroType->AbilityKits;
+            for (int32_t Index = 0; Index < ClassKits.Num(); ++Index)
             {
-                Kits.push_back(Kit);
+                const TAssetPtr<UFortAbilityKit>& InherentKit = ClassKits[Index].InherentAbilityKit;
+                if (UFortAbilityKit* Kit = InherentKit.LoadSynchronous(); Kit && std::find(Kits.begin(), Kits.end(), Kit) == Kits.end())
+                {
+                    Kits.push_back(Kit);
+                }
             }
         }
         return Kits;

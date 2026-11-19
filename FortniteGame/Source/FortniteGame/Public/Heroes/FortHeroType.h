@@ -29,6 +29,8 @@ class UFortHeroType : public UFortItemDefinition
 
 public:
     DefineUStructArrayProperty(FHeroAbilityKit, AbilityKits)
+    // 8.00 drops it: the hero loadout's UFortHeroGameplayDefinition grants the kits there.
+    static bool HasAbilityKits() { return Member_AbilityKits.IsAvailable(); }
     DefineUStructArrayProperty(FGameplayEffectApplicationInfo, CombinedStatGEs)
     // The hero's specializations (HS_*): its character parts and its perks' and abilities' kits.
     DefineUProperty(TArray<TAssetPtr<UFortHeroSpecialization>>, Specializations)

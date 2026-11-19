@@ -27,6 +27,7 @@ public:
     static bool HasCharacterParts() { return Member_CharacterParts.IsAvailable(); }
     DefineUStructArrayProperty(FFortSpecializationSlot, SpecializationSlots)
     DefineUStructArrayProperty(FFortSpecializationSlot, TacticalAbilitySlots)
+    static bool HasTacticalAbilitySlots() { return Member_TacticalAbilitySlots.IsAvailable(); }
 };
 
 class UFortHero : public UFortItem

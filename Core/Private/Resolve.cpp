@@ -3880,6 +3880,18 @@ namespace
                 }
             }
         }
+        // 8.00 (CL-5203069) no longer inlines the call in SerializeNewActor or its direct callees: take
+        // GetArchetypeFromRequiredInfo from its own RF_NeedLoad report, "%s had RF_NeedLoad when searching for an
+        // archetype of %s in %s" (1.7.2 to 8.00 log it from this function, 8.00 0x1BA5930).
+        if (!ArchetypeCalls && Packed::Changelist() >= 5203069)
+        {
+            const uintptr_t LoggingArchetype = FunctionOf(L"%s had RF_NeedLoad when searching for an archetype of %s in %s");
+            if (LoggingArchetype && IsInText(LoggingArchetype))
+            {
+                Archetype = LoggingArchetype;
+                ++ArchetypeCalls;
+            }
+        }
         Require(L"UObject::GetArchetypeFromRequiredInfo", Natives::UObject_GetArchetypeFromRequiredInfo, ArchetypeCalls == 1 && IsInText(Archetype) ? Archetype : 0);
 
         const FCalledSlot NewActor = ReplicateActorEnd ? CalledSlot(ReplicateActor, ReplicateActorEnd, SerializeNewActor) : FCalledSlot();
@@ -5161,7 +5173,21 @@ namespace
         {
             TrySetHero = OnlyCaller(SetHero);
         }
-        Require(L"AFortPlayerController::TrySetHeroImplementation", Natives::AFortPlayerController_TrySetHeroImplementation, TrySetHero);
+        // 8.00 (CL-5203069) replaced setting a hero with the campaign hero loadout system (UFortCampaignHeroLoadoutItem,
+        // UFortHeroGameplayDefinition): the exe has no TrySetHeroImplementation to detour (its hero setter's only direct
+        // caller is the Battle Royale player state's virtual override) and its UFortHeroType has no AbilityKits, so Core's
+        // hero hook and the hero kit path are off there. The game's own loadout code applies the hero: its
+        // UFortGlobals::ApplyHeroEffectsAndAbilities (still the 7.00 shape, loadout first) is called from three functions.
+        const bool HeroLoadoutBuild = Packed::Changelist() >= 5203069;
+        if (HeroLoadoutBuild)
+        {
+            Natives::AFortPlayerController_TrySetHeroImplementation = nullptr;
+            Log::Info(L"Finder: AFortPlayerController::TrySetHeroImplementation isn't in this build (8.00's hero loadout system sets heroes); Core's hero hook is off");
+        }
+        else
+        {
+            Require(L"AFortPlayerController::TrySetHeroImplementation", Natives::AFortPlayerController_TrySetHeroImplementation, TrySetHero);
+        }
 
         const uintptr_t ApplyHero = reinterpret_cast<uintptr_t>(Natives::UFortGlobals_ApplyHeroEffectsAndAbilities);
         const uintptr_t ApplyHeroEnd = ApplyHero ? Finder::FunctionEnd(ApplyHero) : 0;
@@ -5222,6 +5248,12 @@ namespace
         {
             Natives::UAbilitySystemComponent_GameplayTagAssetInterface = *reinterpret_cast<const int32_t*>(TagAssetInterface + 3);
             Natives::IGameplayTagAssetInterface_HasAllMatchingGameplayTagsIndex = HasAllDisplacement / 8;
+        }
+        else if (HeroLoadoutBuild)
+        {
+            // Its only user is the Save the World hero kit path above, which 8.00 replaced with the hero loadout's own
+            // kits; UAbilitySystemComponent::HasAllMatchingGameplayTags answers false while the slots are unset.
+            Log::Info(L"Finder: IGameplayTagAssetInterface::HasAllMatchingGameplayTags isn't in this build (8.00's hero loadout system grants the kits); the hero kit path is off");
         }
         else
         {
@@ -8761,10 +8793,37 @@ bool Finder::ResolveMcpProfileWorldLive(void** ProfileVTable)
         }
     }
 
-    if (BindIndex < 0 || InventoryOffset <= 0 || InitializedOffset <= 0)
+    // 7.40 (CL-5046157, 0x12CE184) and 8.00 (0x1309244) stop clearing the profile's bIsInventoryInitialized: their bind
+    // clears the inventory's own byte instead (mov rax, [rbx+InventoryOffset]; mov byte ptr [rax+disp32], 0). Accept the
+    // missing flag only when that shape is there; older builds keep the strict finder.
+    bool bClearsInventoryFlag = false;
+    if (InitializedOffset <= 0)
+    {
+        for (uintptr_t Site = Bind; Site && Site + 7 <= BindEnd && !bClearsInventoryFlag; ++Site)
+        {
+            const uint8_t ModRm = Byte(Site + 2);
+            if (Byte(Site) != 0x48 || Byte(Site + 1) != 0x8B || (ModRm & 0xC0) != 0x80 || (ModRm & 0x07) == 0x04
+                || *reinterpret_cast<const int32_t*>(Site + 3) != InventoryOffset)
+            {
+                continue;
+            }
+            for (uintptr_t Store = Site + 7; Store + 7 <= BindEnd && Store < Site + 0x14; ++Store)
+            {
+                if (Byte(Store) == 0xC6 && Byte(Store + 1) == 0x80 && *reinterpret_cast<const int32_t*>(Store + 2) > 0 && Byte(Store + 6) == 0)
+                {
+                    bClearsInventoryFlag = true;
+                }
+            }
+        }
+    }
+    if (BindIndex < 0 || InventoryOffset <= 0 || (InitializedOffset <= 0 && !bClearsInventoryFlag))
     {
         Log::Error(L"Finder: UFortMcpProfileWorld inventory binding not found (bind slot {}, inventory {}, initialized {})", BindIndex, InventoryOffset, InitializedOffset);
         return false;
+    }
+    if (InitializedOffset <= 0)
+    {
+        Log::Info(L"Finder: UFortMcpProfileWorld::BindToPlayerController no longer clears bIsInventoryInitialized (this build clears the inventory's own flag)");
     }
     Natives::UFortMcpProfileWorld_BindToPlayerControllerIndex = BindIndex;
     Natives::UFortMcpProfileWorld_Inventory = InventoryOffset;
@@ -11827,6 +11886,13 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
     }
     if (Index < 0)
     {
+        // 8.00 (CL-5203069) has no AFortPlayerController::ShouldDropItem in its reflection: the mutator's drop filter is
+        // gone from the build, so there is no override for Core to find.
+        if (Packed::Changelist() >= 5203069)
+        {
+            Log::Info(L"Finder: AFortPlayerController::ShouldDropItem isn't in this build (8.00 removed the mutator's drop filter); Core's drop filter hook is off");
+            return false;
+        }
         Log::Error(L"Finder: AFortPlayerController::ShouldDropItem not found (GameplayMutators +0x{:X}), the game state's mutators aren't asked which items an eliminated player drops",
             GameplayMutatorsOffset > 0 ? static_cast<int32_t>(GameplayMutatorsOffset) : 0);
         return false;
@@ -16869,8 +16935,14 @@ uint8_t* Finder::ResolveItemCollectorSelectionSetupLive(void** CollectorVTable, 
         {
             const uint8_t Opcode = *reinterpret_cast<const uint8_t*>(Address);
             const uintptr_t Target = Opcode == 0xE8 || Opcode == 0xE9 ? Finder::RelativeTarget(Address, 1, 5) : 0;
-            if (Target && std::find(Taken.begin(), Taken.end(), Target) != Taken.end() && Finder::ReadsMemberAt(Target, ItemSelectionHandleOffset)
-                && Finder::ReadsMemberAt(Function, ItemSelectionHandleOffset))
+            // 8.00 (CL-5203069) puts the FDelegateHandle one byte earlier than the caller's ItemCollectorBehavior - 0x20:
+            // +0x750 (BeginPlay's mov [rdi+750h], rbx; FinishItemSelectionSetup's mov rbx, [rcx+750h]), the behavior at
+            // +0x771. A qword read there overlaps that byte, so the offset before it counts too.
+            const auto ReadsHandle = [ItemSelectionHandleOffset](uintptr_t Body)
+            {
+                return Finder::ReadsMemberAt(Body, ItemSelectionHandleOffset) || Finder::ReadsMemberAt(Body, ItemSelectionHandleOffset - 1);
+            };
+            if (Target && std::find(Taken.begin(), Taken.end(), Target) != Taken.end() && ReadsHandle(Target) && ReadsHandle(Function))
             {
                 if (Target != Setup)
                 {

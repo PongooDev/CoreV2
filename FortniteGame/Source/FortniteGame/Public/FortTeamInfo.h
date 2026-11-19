@@ -16,16 +16,10 @@ class EFortTeam
     DefineUEnumValue(Monster)
     DefineUEnumValue(HumanPvP_Team1)
     DefineUEnumValue(HumanPvP_Team2)
-    DefineUEnumValue(HumanPvP_Team3)
-    DefineUEnumValue(HumanPvP_Team4)
-    DefineUEnumValue(HumanPvP_Team5)
-    DefineUEnumValue(HumanPvP_Team6)
-    DefineUEnumValue(HumanPvP_Team7)
-    DefineUEnumValue(HumanPvP_Team8)
-    DefineUEnumValue(HumanPvP_Team9)
-    DefineUEnumValue(HumanPvP_Team10)
+    // 7.30 has Spectator 103 and MAX 104; 7.40 (CL-5046157) keeps only HumanPvP_Team1 and 2 named (a team is a
+    // uint8 from HumanPvP_Team1 on), with Spectator 0 and MAX 255. Teams are counted from HumanPvP_Team1, and MAX is
+    // read with FindValue where it is needed (255 is also its "not found").
     DefineUEnumValue(Spectator)
-    DefineUEnumValue(MAX)
 };
 
 struct FTeamSpottedActorInfo : public FFastArraySerializerItem

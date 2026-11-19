@@ -448,7 +448,9 @@ int32_t* AFortAthenaMutator_Barrier::GetWinningTeam() const
         return nullptr;
     }
     int32_t* WinningTeam = reinterpret_cast<int32_t*>(reinterpret_cast<uint8_t*>(const_cast<AFortAthenaMutator_Barrier*>(this)) + Member_ObjectiveFlag.GetOffsetChecked() + 0xC);
-    return *WinningTeam == NoWinningTeam || (*WinningTeam >= 0 && *WinningTeam < EFortTeam::GetMAX()) ? WinningTeam : nullptr;
+    // EFortTeam::MAX: 104 on 7.30, 255 from 7.40, which FindValue also returns for a missing name; either bounds a team.
+    const int32_t TeamMax = EFortTeam::StaticEnumInfo().FindValue(L"MAX");
+    return *WinningTeam == NoWinningTeam || (*WinningTeam >= 0 && *WinningTeam < TeamMax) ? WinningTeam : nullptr;
 }
 
 void AFortAthenaMutator_Barrier::SendMutatorEvent(int32_t EventId, int32_t EventParam1)

@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iterator>
+#include <map>
 #include <unordered_map>
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
@@ -1404,6 +1405,23 @@ namespace
             {
                 Notify = Byte(Lea + 3);
                 break;
+            }
+        }
+        // 7.40 (CL-5046157) keeps the world in rsi and the driver in rdi: lea rax, [rsi+28h], then mov [rdi+248h], rax
+        // (SetWorld 0x29FBCE0). So any base register: lea rax, [reg+disp8] (48 8D 4x), then mov [reg+disp32], rax.
+        for (uintptr_t Lea = !Notify && SetWorld && SetWorldEnd ? FindInstruction(SetWorld, SetWorldEnd, { 0x48, 0x8D }) : 0; Lea && !Notify; Lea = FindInstruction(Lea + 1, SetWorldEnd, { 0x48, 0x8D }))
+        {
+            if ((Byte(Lea + 2) & 0xF8) != 0x40 || Byte(Lea + 2) == 0x44)
+            {
+                continue;
+            }
+            for (uintptr_t Store = FindInstruction(Lea + 4, Lea + 0x20, { 0x48, 0x89 }); Store; Store = FindInstruction(Store + 1, Lea + 0x20, { 0x48, 0x89 }))
+            {
+                if ((Byte(Store + 2) & 0xF8) == 0x80 && Byte(Store + 2) != 0x84 && Byte(Store + 5) == 0x00 && Byte(Store + 6) == 0x00)
+                {
+                    Notify = Byte(Lea + 3);
+                    break;
+                }
             }
         }
         const uintptr_t NotifyBase = 0x10000;
@@ -4247,6 +4265,16 @@ namespace
                 ++ReplicationFrameReads;
             }
         }
+        // 7.40 (CL-5046157) loads the frame straight into the update's fourth argument and sets up two more before the
+        // call: mov r9d, [rdx+450h]; mov rdx, [rsi+320h]; mov [rsp+20h], eax; call (0x2839CC3, the call 0x12 bytes on).
+        for (uintptr_t Load = ReplicationFrameReads == 0 && ReplicatePropertiesEnd ? FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, { 0x44, 0x8B }) : 0; Load; Load = FindInstruction(Load + 1, ReplicatePropertiesEnd, { 0x44, 0x8B }))
+        {
+            if ((Byte(Load + 2) & 0xF8) == 0x88 && (Byte(Load + 2) & 0x07) != 0x04 && FindRawCall(Load + 7, Load + 0x20))
+            {
+                ReplicationFrame = *reinterpret_cast<const int32_t*>(Load + 3);
+                ++ReplicationFrameReads;
+            }
+        }
         RequireOffset(L"UNetDriver::ReplicationFrame", Natives::UNetDriver_ReplicationFrame, ReplicationFrameReads == 1 ? ReplicationFrame : 0);
 
         const uintptr_t DumpRelevantRef = OnlyRef(L"net.DumpRelevantActors");
@@ -4463,6 +4491,7 @@ namespace
         ptrdiff_t AssociatingLevel = 0;
         uint32_t AssociatingLevelMask = 0;
         int32_t AssociatingLevelTests = 0;
+        std::map<std::pair<ptrdiff_t, uint32_t>, int32_t> AssociatingLevelVotes;
         const uintptr_t TextEnd = Finder::TextEnd();
         for (uintptr_t Test = FindInstruction(Finder::TextBegin(), TextEnd, { 0xF6, -1, -1, -1, 0x00, 0x00, -1, 0x75, -1, 0xF6 }); Test; Test = FindInstruction(Test + 1, TextEnd, { 0xF6, -1, -1, -1, 0x00, 0x00, -1, 0x75, -1, 0xF6 }))
         {
@@ -4477,6 +4506,28 @@ namespace
                 AssociatingLevel = Offset;
                 AssociatingLevelMask = Byte(Test + 15);
                 AssociatingLevelTests = bAgrees ? AssociatingLevelTests + 1 : -1000;
+                ++AssociatingLevelVotes[{ Offset, AssociatingLevelMask }];
+            }
+        }
+        // 7.40 (CL-5046157) has one more such pair outside the actor iterator ([reg+10ECh], 2 then [reg+10EDh], 20h at
+        // 0xD8925A) beside the iterator's 157 copies (+0x1F5, 40h). So when the copies disagree, the test nearly all of
+        // them make is taken: at least 10 copies and nine in ten.
+        if (AssociatingLevelTests < 0)
+        {
+            int32_t Total = 0;
+            for (const auto& [Key, Votes] : AssociatingLevelVotes)
+            {
+                Total += Votes;
+            }
+            for (const auto& [Key, Votes] : AssociatingLevelVotes)
+            {
+                if (Votes >= 10 && Votes * 10 >= Total * 9)
+                {
+                    AssociatingLevel = Key.first;
+                    AssociatingLevelMask = Key.second;
+                    AssociatingLevelTests = Votes;
+                    Log::Info(L"Finder: ULevel::bIsAssociatingLevel +0x{:X} & 0x{:X} from {} of {} actor iterator tests", AssociatingLevel, AssociatingLevelMask, Votes, Total);
+                }
             }
         }
         RequireOffset(L"ULevel::bIsAssociatingLevel", Natives::ULevel_bIsAssociatingLevel, AssociatingLevelTests >= 1 ? AssociatingLevel : 0);
@@ -4665,6 +4716,38 @@ namespace
             {
                 OwningChannel = *reinterpret_cast<const int32_t*>(Load + 3);
                 ++OwningChannelLoads;
+            }
+        }
+        // 7.40 (CL-5046157) loads rax twice before the bits read: mov rax, [rsi+2C0h]; mov r8, r14; mov rbx, [rax+8];
+        // mov rax, [rsi+0F8h]; mov ecx, [rax+90h] (0x2839C81..0x2839C96), so the 5.0 read above counts both loads. Only
+        // the load that last wrote rax before the bits read is the channel's.
+        if (OwningChannelLoads > 1)
+        {
+            OwningChannelLoads = 0;
+            for (uintptr_t Load = ReplicatePropertiesEnd && ActorChannelBits > 0 ? FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, { 0x48, 0x8B }) : 0; Load; Load = FindInstruction(Load + 1, ReplicatePropertiesEnd, { 0x48, 0x8B }))
+            {
+                if ((Byte(Load + 2) & 0xF8) != 0x80 || (Byte(Load + 2) & 0x07) == 0x04)
+                {
+                    continue;
+                }
+                const std::initializer_list<int32_t> ReadBits = { 0x8B, -1, static_cast<int32_t>(ActorChannelBits & 0xFF), static_cast<int32_t>((ActorChannelBits >> 8) & 0xFF), 0x00, 0x00 };
+                uintptr_t BitsRead = FindInstruction(Load + 7, Load + 0x30, ReadBits);
+                while (BitsRead && ((Byte(BitsRead + 1) & 0xC7) != 0x80 || (Byte(BitsRead - 1) & 0xF0) == 0x40))
+                {
+                    BitsRead = FindInstruction(BitsRead + 1, Load + 0x30, ReadBits);
+                }
+                // Another mov rax, [reg+disp32] between them: rax isn't this load's any more.
+                bool bOverwritten = false;
+                for (uintptr_t Other = BitsRead ? FindInstruction(Load + 7, BitsRead, { 0x48, 0x8B }) : 0; Other && !bOverwritten; Other = FindInstruction(Other + 1, BitsRead, { 0x48, 0x8B }))
+                {
+                    bOverwritten = (Byte(Other + 2) & 0xF8) == 0x80 && (Byte(Other + 2) & 0x07) != 0x04;
+                }
+                const ptrdiff_t Offset = BitsRead && !bOverwritten ? *reinterpret_cast<const int32_t*>(Load + 3) : 0;
+                if (Offset && (!OwningChannelLoads || Offset != OwningChannel))
+                {
+                    OwningChannel = Offset;
+                    ++OwningChannelLoads;
+                }
             }
         }
         RequireOffset(L"FObjectReplicator::OwningChannel", Natives::FObjectReplicator_OwningChannel, OwningChannelLoads == 1 ? OwningChannel : 0);

@@ -210,6 +210,13 @@ public:
     static bool HasFriendsInSquad() { return Member_FriendsInSquad.IsAvailable(); }
     static bool HasFriendsInSquadAtPartnerCafe() { return Member_FriendsInSquadAtPartnerCafe.IsAvailable(); }
 
+    // Anonymous Mode (from 7.30): replicated to everyone; bit 2 of the byte of flags whose bit 1 is bInAircraft (7.30
+    // +0xF30). Only AFortPlayerControllerAthena::ServerEnableAnonymousMode sets it. Each client's player name for the HUD
+    // (7.30 0xD671A0) shows a player of another team who has it as "Anonymous" (Athena.AnonymousMode_Anonymous) with
+    // their PlayerId (Athena.HiddenPlayerNameFormat "{0}[{1}]").
+    DefineBitfieldUProperty(bUsingAnonymousMode)
+    static bool HasUsingAnonymousMode() { return Member_bUsingAnonymousMode.IsAvailable(); }
+
 private:
     // A set can't be assigned, so it has no DefineUProperty setter: read-only.
     static inline Reflection::FMemberInfo Member_HostilePlayersDamaged{ &StaticReflectionOwner, TEXT("HostilePlayersDamaged"), sizeof(TSet<AFortPlayerStateAthena*>), Reflection::EMemberKind::Value };

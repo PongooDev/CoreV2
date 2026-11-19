@@ -708,11 +708,36 @@ void AFortPlayerControllerAthena::ServerSendSquadFriend_ImplementationHK(AFortPl
     This->ServerSendSquadFriend_Implementation(FriendInSquad);
 }
 
+// Anonymous Mode (7.30, the settings' "Anonymous Mode"; UFortClientSettingsRecord::bAnonymousMode): the client's
+// OnReadyToStartMatch (7.30 0xD73A60, AFortPlayerControllerAthena's slot 0x28D) sends ServerEnableAnonymousMode when the
+// local setting is on (IsUsingAnonymousMode, 0x14411C0). Its _Implementation is the shared empty function (7.30 slot
+// 0x419, 7.40 and 8.30 too), and nothing else sets the player state's replicated bUsingAnonymousMode, which every other
+// team's client reads to show the player as "Anonymous" (0xD671A0): their name showed instead. No build on hand keeps
+// the body; the RPC (no parameters), the replicated member and its reader are the evidence.
+void AFortPlayerControllerAthena::ServerEnableAnonymousMode_Implementation()
+{
+#if WITH_SERVER_CODE
+    AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState)));
+    if (!AthenaState || AthenaState->bUsingAnonymousMode)
+    {
+        return;
+    }
+    AthenaState->bUsingAnonymousMode = true;
+    UE_LOG(LogFort, Log, TEXT("ServerEnableAnonymousMode: %s plays in Anonymous Mode"), *GetName());
+#endif
+}
+
+void AFortPlayerControllerAthena::ServerEnableAnonymousMode_ImplementationHK(AFortPlayerControllerAthena* This)
+{
+    This->ServerEnableAnonymousMode_Implementation();
+}
+
 void AFortPlayerControllerAthena::HookPlayerStateRpcVTables()
 {
 #if WITH_SERVER_CODE
     const std::tuple<UFunction*, bool, void*, const wchar_t*> Restorations[] = {
         { FindStaticFunction_ServerSendSquadFriend(), AFortPlayerStateAthena::HasFriendsInSquad(), reinterpret_cast<void*>(&ServerSendSquadFriend_ImplementationHK), L"AFortPlayerControllerAthena::ServerSendSquadFriend_Implementation" },
+        { FindStaticFunction_ServerEnableAnonymousMode(), AFortPlayerStateAthena::HasUsingAnonymousMode(), reinterpret_cast<void*>(&ServerEnableAnonymousMode_ImplementationHK), L"AFortPlayerControllerAthena::ServerEnableAnonymousMode_Implementation" },
     };
 
     for (const auto& [Function, bMembers, Implementation, Name] : Restorations)

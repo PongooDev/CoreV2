@@ -234,11 +234,13 @@ public:
     static void HookQuickChatVTables();
 
     // RPCs that only fill the sender's own player state: a squadmate the player's client calls a friend (from 3.0,
-    // AFortPlayerStateAthena::FriendsInSquad).
+    // AFortPlayerStateAthena::FriendsInSquad) and the player's Anonymous Mode setting (from 7.30, bUsingAnonymousMode).
     DefineUFunction(ServerSendSquadFriend)
+    DefineUFunction(ServerEnableAnonymousMode)
     void ServerSendSquadFriend_Implementation(AFortPlayerStateAthena* FriendInSquad);
+    void ServerEnableAnonymousMode_Implementation();
     // Where the build strips them: their _Implementation slots hold the shared empty function (7.30's ServerSendSquadFriend
-    // 0x41B, in every Athena controller class).
+    // 0x41B and ServerEnableAnonymousMode 0x419, in every Athena controller class).
     static void HookPlayerStateRpcVTables();
 
     // Creative (from 7.00; FortPlayerControllerAthenaCreative.cpp). The player's islands, replicated from their creative
@@ -429,6 +431,7 @@ private:
     static void ServerPlaySquadQuickChatMessage_ImplementationHK(AFortPlayerControllerAthena* This, FAthenaQuickChatActiveEntry* ChatEntry, void* SenderID);
     static inline void (*ServerPlaySquadQuickChatMessage_ImplementationOG)(AFortPlayerControllerAthena* This, FAthenaQuickChatActiveEntry* ChatEntry, void* SenderID) = nullptr;
     static void ServerSendSquadFriend_ImplementationHK(AFortPlayerControllerAthena* This, AFortPlayerStateAthena* FriendInSquad);
+    static void ServerEnableAnonymousMode_ImplementationHK(AFortPlayerControllerAthena* This);
 
     static void ServerGiveCreativeItem_ImplementationHK(AFortPlayerControllerAthena* This, const FFortItemEntry& CreativeItem);
     static void ServerReloadCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This);

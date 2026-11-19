@@ -1688,6 +1688,48 @@ void AFortPlayerController::ServerDropAllItems_Implementation(const UFortItemDef
 #endif
 }
 
+// Combining two stacks of the same item (from 5.10): the inventory's quick bar slotting (UFortInventoryContext's
+// DropItemOnQuickBar path, 7.30 CL-4834550 0x31546B0) sends ServerCombineInventoryItems(the slot's item, the item put on
+// it) when both have the same item definition and the slot's stack is below the definition's MaxStackSize, instead of
+// moving the item into the slot. Its _Implementation is the shared empty function (7.30 slot 0x208, the same stub from
+// 6.31 to 7.40 and in 8.30's image), so nothing happened. No build on hand keeps the body.
+void AFortPlayerController::ServerCombineInventoryItems_Implementation(const FGuid& TargetItemGuid, const FGuid& SourceItemGuid)
+{
+#if WITH_SERVER_CODE
+    AFortInventory* Inventory = WorldInventory;
+    UFortWorldItem* Target = Inventory ? Inventory->FindWorldItem(TargetItemGuid) : nullptr;
+    UFortWorldItem* Source = Inventory && !(SourceItemGuid == TargetItemGuid) ? Inventory->FindWorldItem(SourceItemGuid) : nullptr;
+    if (!Target || !Source)
+    {
+        UE_LOG(LogFort, Warning, TEXT("ServerCombineInventoryItems: %s named items that aren't two of its own"), *GetName());
+        return;
+    }
+
+    // The client's own conditions, held to on the server: the same item, and room left in the target's stack (the
+    // inventory's stack limit, which is the definition's or the owner's own).
+    FFortItemEntry& TargetEntry = Target->ItemEntry;
+    FFortItemEntry& SourceEntry = Source->ItemEntry;
+    UFortItemDefinition* ItemDefinition = TargetEntry.ItemDefinition;
+    if (!ItemDefinition || static_cast<UFortItemDefinition*>(SourceEntry.ItemDefinition) != ItemDefinition)
+    {
+        UE_LOG(LogFort, Warning, TEXT("ServerCombineInventoryItems: %s asked to combine two different items"), *GetName());
+        return;
+    }
+
+    // Core's: as much of the source as the target's stack has room for goes onto it; what is left stays its own stack,
+    // and a source moved whole is removed (with its quick bar slot).
+    const int32_t TargetCount = TargetEntry.Count;
+    const int32_t Moved = std::min<int32_t>(Inventory->GetMaxStackSize(ItemDefinition) - TargetCount, SourceEntry.Count);
+    if (Moved <= 0)
+    {
+        return;
+    }
+    Inventory->UpdateWorldItemCount(Target, TargetCount + Moved);
+    RemoveInventoryItem(SourceItemGuid, Moved, false, true);
+    UE_LOG(LogFort, Log, TEXT("ServerCombineInventoryItems: %s put %d %s onto its stack of %d"), *GetName(), Moved, *ItemDefinition->GetName(), TargetCount);
+#endif
+}
+
 bool AFortPlayerController::ShouldDropItem(const UFortWorldItemDefinition* ItemDefinition, bool bShouldDrop)
 {
     const int32_t Index = Natives::AFortPlayerController_ShouldDropItemIndex;
@@ -2272,6 +2314,36 @@ void AFortPlayerController::HookVTables()
         else if (Swapped == 0)
         {
             Log::Info(L"Finder: AFortPlayerController::ServerDropAllItems_Implementation (slot 0x{:X}) is native in this build", DropAllIndex);
+        }
+    }
+
+    // ServerCombineInventoryItems: only where the build has the RPC (5.10 on) and its body is the shared empty function
+    // (7.30's slot 0x208 in every controller class).
+    if (UFunction* CombineFunction = FindStaticFunction_ServerCombineInventoryItems())
+    {
+        const int32_t CombineIndex = Finder::ImplementationIndex(CombineFunction);
+        int32_t Swapped = 0;
+        for (TObjectIterator<UClass> It; CombineIndex >= 0 && It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[CombineIndex] == Natives::SharedEmptyFunction)
+            {
+                Swapped += Hooks::SwapVTable(L"AFortPlayerController::ServerCombineInventoryItems_Implementation", VTable, CombineIndex, reinterpret_cast<void*>(&ServerCombineInventoryItems_ImplementationHK)) ? 1 : 0;
+            }
+        }
+        if (CombineIndex < 0)
+        {
+            Log::Error(L"Finder: AFortPlayerController::ServerCombineInventoryItems_Implementation slot not found");
+        }
+        else if (Swapped == 0)
+        {
+            Log::Info(L"Finder: AFortPlayerController::ServerCombineInventoryItems_Implementation (slot 0x{:X}) is native in this build", CombineIndex);
+        }
+        else
+        {
+            Log::Info(L"Finder: AFortPlayerController::ServerCombineInventoryItems_Implementation (slot 0x{:X}) is stripped, restored in {} controller classes", CombineIndex, Swapped);
         }
     }
 
@@ -2891,6 +2963,11 @@ void AFortPlayerController::ServerSpotActor_ImplementationHK(AFortPlayerControll
 void AFortPlayerController::ServerDropAllItems_ImplementationHK(AFortPlayerController* This, const UFortItemDefinition* IgnoreItemDef)
 {
     This->ServerDropAllItems_Implementation(IgnoreItemDef);
+}
+
+void AFortPlayerController::ServerCombineInventoryItems_ImplementationHK(AFortPlayerController* This, const FGuid& TargetItemGuid, const FGuid& SourceItemGuid)
+{
+    This->ServerCombineInventoryItems_Implementation(TargetItemGuid, SourceItemGuid);
 }
 
 void AFortPlayerController::ServerCheat_ImplementationHK(AFortPlayerController* This, const FString& Msg)

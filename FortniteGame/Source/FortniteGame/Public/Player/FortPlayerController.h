@@ -150,6 +150,8 @@ public:
     DefineUFunction(ServerAttemptInventoryDrop)
     DefineUFunction(ServerRemoveInventoryItem)
     DefineUFunction(ServerDropAllItems)
+    // From 5.10 (CL-4240749): the inventory's quick bar slotting puts a stack onto a slot that holds the same item.
+    DefineUFunction(ServerCombineInventoryItems)
     DefineUFunction(ServerRemoveInventoryStateValue)
     DefineUFunction(ServerSpotActor)
     DefineUFunction(ServerDisassembleInventoryItem)
@@ -236,6 +238,7 @@ public:
     // ApplyGadgetData calls DropAllItems on the server. 4.1 strips both bodies.
     void DropAllItems(const UFortItemDefinition* IgnoreItemDef);
     void ServerDropAllItems_Implementation(const UFortItemDefinition* IgnoreItemDef);
+    void ServerCombineInventoryItems_Implementation(const FGuid& TargetItemGuid, const FGuid& SourceItemGuid);
     // The game's own virtual (from 6.01, CL-4424678 slot 0x31D; the mutators' side of it is 21.40's
     // FortGameStateAthena_ShouldDropItem): whether the player's death drops an item of this definition, bShouldDrop
     // being what it would do otherwise. AFortPlayerController's returns that; AFortPlayerControllerAthena's (0xC26970)
@@ -358,6 +361,8 @@ private:
     static void ServerExecuteInventoryItem_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid);
     static void ServerSpawnInventoryDrop_ImplementationHK(AFortPlayerController* This, const FGuid& ItemGuid, int32_t Count);
     static void ServerDropAllItems_ImplementationHK(AFortPlayerController* This, const UFortItemDefinition* IgnoreItemDef);
+    // The FGuids by value: the caller's copies, passed by address.
+    static void ServerCombineInventoryItems_ImplementationHK(AFortPlayerController* This, const FGuid& TargetItemGuid, const FGuid& SourceItemGuid);
     bool ValidateBuildingClassData(FBuildingClassData& BuildingClassData);
     bool HasRequiredBuildingLevel(const FBuildingClassData& BuildingClassData);
     void ExecuteEditTool(ABuildingSMActor* EditActor);

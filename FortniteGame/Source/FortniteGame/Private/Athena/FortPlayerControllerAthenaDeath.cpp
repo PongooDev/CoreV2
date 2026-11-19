@@ -168,6 +168,7 @@ void AFortPlayerControllerAthena::HookVTables()
 {
 #if WITH_SERVER_CODE
     HookQuickChatVTables();
+    HookSuicideVTables();
 
     // Only the slots that hold the stripped function: the class's own vtable and its Blueprint subclasses', which share it.
     const auto SwapStripped = [](const wchar_t* Name, int32_t Index, void* Replacement)
@@ -226,6 +227,66 @@ void AFortPlayerControllerAthena::HookVTables()
         Finder::ResolveSetDeathInfoLive(DeathInfoOffset, DeathInfoOffset + FDeathInfo::DeathCauseOffset(), DeathInfoOffset + FDeathInfo::InitializedOffset(),
             DeathCircumstanceOffset >= 0 ? DeathInfoOffset + DeathCircumstanceOffset : -1);
     }
+#endif
+}
+
+void AFortPlayerControllerAthena::HookSuicideVTables()
+{
+#if WITH_SERVER_CODE
+    // ServerSuicide is Suicide's RPC: AFortPlayerController::Suicide (an exec, BlueprintCallable; 7.40 0x1435A90) sends it
+    // while the controller is in the Playing state. 7.40 (CL-5046157) gives this class its own _Implementation (slot
+    // 0x26A), and it is the shared empty function (0x2B5120), so the self-destruct did nothing. 7.30 (CL-4834550) has no
+    // override here: the class inherits AFortPlayerControllerZone's (0x144FF60), which runs AFortPlayerController's
+    // (0x1417210: a pawn more than a second old suicides through AFortPawn's virtual) and then clears the death report's
+    // respawn times. 7.40 keeps both (Zone's 0x1464AE0, which this class's parent AFortPlayerControllerPvP inherits, and
+    // 0x142A750). Only where this class's slot is a stub and its parent's isn't.
+    UFunction* const Function = AFortPlayerController::FindStaticFunction_ServerSuicide();
+    const int32_t Index = Function ? Finder::ImplementationIndex(Function) : -1;
+    UClass* const SuperClass = Index >= 0 ? StaticClass()->GetSuperClass() : nullptr;
+    UObject* const SuperDefault = SuperClass ? SuperClass->GetDefaultObject(false) : nullptr;
+    void* const Super = SuperDefault ? (*reinterpret_cast<void***>(SuperDefault))[Index] : nullptr;
+    if (!Super || Finder::IsStubFunction(reinterpret_cast<uintptr_t>(Super)))
+    {
+        return;
+    }
+
+    int32_t Restored = 0;
+    for (TObjectIterator<UClass> It; It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[Index])))
+        {
+            ServerSuicide_ImplementationSuper = reinterpret_cast<decltype(ServerSuicide_ImplementationSuper)>(Super);
+            Hooks::SwapVTable(L"AFortPlayerControllerAthena::ServerSuicide_Implementation", VTable, Index, reinterpret_cast<void*>(&ServerSuicide_ImplementationHK));
+            ++Restored;
+        }
+    }
+    if (Restored > 0)
+    {
+        Log::Info(L"Finder: AFortPlayerControllerAthena::ServerSuicide_Implementation (slot 0x{:X}) is stripped, restored in {} vtables", Index, Restored);
+    }
+#endif
+}
+
+void AFortPlayerControllerAthena::ServerSuicide_ImplementationHK(AFortPlayerControllerAthena* This)
+{
+    This->ServerSuicide_Implementation();
+}
+
+void AFortPlayerControllerAthena::ServerSuicide_Implementation()
+{
+#if WITH_SERVER_CODE
+    // Core's: the parent's, as 7.30's class inherited it; 7.40's own body is compiled out, so what it added is unknown.
+    // The pawn's death then goes the way of any other (OnPawnDied, the death report, the respawn where the mode has one).
+    static bool bLoggedOnce = false;
+    if (!bLoggedOnce)
+    {
+        bLoggedOnce = true;
+        UE_LOG(LogFortDeath, Log, TEXT("ServerSuicide: %s self-destructs (pawn %s)"), *GetName(), *GetNameSafe(static_cast<AFortPawn*>(MyFortPawn)));
+    }
+    ServerSuicide_ImplementationSuper(this);
 #endif
 }
 

@@ -143,6 +143,8 @@ public:
     DefineUFunction(Cheat)
     DefineUFunction(ServerCheat)
     DefineUFunction(ServerReturnToMainMenu)
+    // Suicide's RPC: the exec Suicide (BlueprintCallable) sends it while the controller is in the Playing state.
+    DefineUFunction(ServerSuicide)
     DefineUFunction(ServerSetPartyOwner)
     DefineUFunction(ClientFinishedInteractionInZone)
     DefineUFunction(OnRep_CheatMovement)

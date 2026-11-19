@@ -406,8 +406,11 @@ public:
 
     static void HookCallSites();
     // Restores the pawn-death handler (OnPawnDied) and the Athena part of PrepareDeathReport where the build strips them
-    // (1.9.1).
+    // (1.9.1), and ServerSuicide (7.40).
     static void HookVTables();
+    // FortPlayerControllerAthenaDeath.cpp: the self-destruct (Suicide's RPC). 7.40 (CL-5046157) gives this class its own
+    // _Implementation, the shared empty function; Core's runs the one 7.30 inherited.
+    void ServerSuicide_Implementation();
     // -1 from 7.40 (CL-5046157), which drops the controller's TeamMembers and SquadMembers.
     static ptrdiff_t TeamMembersOffset() { return Member_TeamMembers.IsAvailable() ? Member_TeamMembers.GetOffsetChecked() : -1; }
     static bool HasTeamMembers() { return Member_TeamMembers.IsAvailable(); }
@@ -452,4 +455,11 @@ private:
     // game mode part 1.9.1 and 1.10 strip.
     void PrepareDeathReport(float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack);
     static void PrepareDeathReportHK(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack);
+    // FortPlayerControllerAthenaDeath.cpp: ServerSuicide_Implementation where this class's slot is a stub and its parent's
+    // isn't (7.40).
+    static void HookSuicideVTables();
+    static void ServerSuicide_ImplementationHK(AFortPlayerControllerAthena* This);
+    // The parent class's own _Implementation (7.40: AFortPlayerControllerZone's 0x1464AE0, which AFortPlayerControllerPvP
+    // inherits).
+    static inline void (*ServerSuicide_ImplementationSuper)(AFortPlayerControllerAthena* This) = nullptr;
 };

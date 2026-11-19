@@ -381,6 +381,13 @@ void AFortQuickBars::ActivateReplacementSlot()
 
 void AFortQuickBars::HookVTables()
 {
+    // 7.40 (CL-5046157) makes AFortQuickBars a client-only actor (AFortClientOnlyActor) without server RPCs: the server
+    // keeps no quickbars, so there is nothing to restore.
+    if (!FindStaticFunction_ServerRemoveItemInternal())
+    {
+        Log::Info(L"Hook AFortQuickBars::ServerRemoveItemInternal_Implementation: the build has no server quickbars");
+        return;
+    }
     const int32_t RemoveIndex = Finder::ImplementationIndex(StaticFunction_ServerRemoveItemInternal());
     if (RemoveIndex < 0)
     {

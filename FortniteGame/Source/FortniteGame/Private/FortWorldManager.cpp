@@ -1107,7 +1107,13 @@ void AFortWorldManager::HookCallSites()
         Log::Info(L"Item caches: picked-up caches are kept in UnsavedPlayerEarnedItemCaches (+0x{:X}) for EndPrimaryMission's EarnedItemCaches", Member_UnsavedPlayerEarnedItemCaches.GetOffsetChecked());
     }
 
-    if (uint8_t* Call = Finder::QuickBarChangedWorldManagerCall())
+    // 7.40 (CL-5046157) keeps the quickbars on the client only (AFortQuickBars is an AFortClientOnlyActor): the server's
+    // change handler is gone, and the player record no longer holds quickbars.
+    if (!AFortPlayerController::HasQuickBars())
+    {
+        Log::Info(L"Finder: no server quickbars in this build, so no AFortQuickBars change handler to redirect");
+    }
+    else if (uint8_t* Call = Finder::QuickBarChangedWorldManagerCall())
     {
         Hooks::RedirectCall(L"AFortQuickBars quickbar changed -> AFortWorldManager::UpdatePlayerQuickBarRecords", Call, reinterpret_cast<void*>(&UpdatePlayerQuickBarRecordsCall));
     }

@@ -56,7 +56,10 @@ class AFortPlayerController : public APlayerController
     DefineUnrealClass(AFortPlayerController, FortniteGame)
 
 public:
-    DefineUProperty(AFortQuickBars*, QuickBars)
+    // The server's quickbars, up to 7.30. 7.40 (CL-5046157) has none: AFortQuickBars is client-only there (the client's
+    // ClientQuickBars, built from the replicated inventory), so QuickBars reads as null and Core's quickbar upkeep skips.
+    DefineOptionalUProperty(AFortQuickBars*, QuickBars)
+    static bool HasQuickBars() { return Member_QuickBars.IsAvailable(); }
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)

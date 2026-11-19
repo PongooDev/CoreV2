@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 class UClass;
@@ -218,6 +219,16 @@ private: \
 public: \
     Type& GetMember_##Name() const { return Reflection::AccessMember<Type>(this, Member_##Name); } \
     void SetMember_##Name(Type const& Value) { GetMember_##Name() = Value; } \
+    __declspec(property(get = GetMember_##Name, put = SetMember_##Name)) Type Name;
+
+// A member only some builds reflect (AFortPlayerController::QuickBars, which 7.40 drops): where the build has none it
+// reads as Type{} and a write to it is dropped, so code that already handles the empty value needs no gate of its own.
+#define DefineOptionalUProperty(Type, Name) \
+private: \
+    static inline Reflection::FMemberInfo Member_##Name{ &StaticReflectionOwner, TEXT(#Name), sizeof(Type), Reflection::EMemberKind::Value, nullptr, Reflection::SoftPathGrowth<Type> }; \
+public: \
+    Type GetMember_##Name() const { return Member_##Name.IsAvailable() ? Reflection::AccessMember<Type>(this, Member_##Name) : std::type_identity_t<Type>{}; } \
+    void SetMember_##Name(Type const& Value) { if (Member_##Name.IsAvailable()) { Reflection::AccessMember<Type>(this, Member_##Name) = Value; } } \
     __declspec(property(get = GetMember_##Name, put = SetMember_##Name)) Type Name;
 
 #define DefineUStructProperty(Type, Name) \

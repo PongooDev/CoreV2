@@ -415,7 +415,11 @@ bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
         UE_LOG(LogFort, Log, TEXT("InitializeMcpProfile: %s has cheat manager %s"), *GetNameSafe(this), *GetNameSafe(static_cast<UObject*>(CheatManager)));
     }
 
-    if (Role == ROLE_Authority && !QuickBars)
+    // The controller's first initialisation: its quickbars aren't spawned yet. 7.40 (CL-5046157) has no server quickbars
+    // (QuickBars reads as null there), so its first is the one that finds the world inventory still empty.
+    AFortInventory* FirstInventory = !HasQuickBars() ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
+    const bool bFirstInitialization = HasQuickBars() ? !QuickBars : FirstInventory && FirstInventory->Inventory.ItemInstances.Num() == 0;
+    if (Role == ROLE_Authority && bFirstInitialization)
     {
         SpawnQuickBars();
         UWorld* World = GetWorld();
@@ -731,6 +735,10 @@ void AFortPlayerController::Possess(APawn* InPawn)
 void AFortPlayerController::SpawnQuickBars()
 {
 #if WITH_SERVER_CODE
+    if (!HasQuickBars())
+    {
+        return;
+    }
     FActorSpawnParameters SpawnInfo;
     SpawnInfo.Owner = this;
     QuickBars = GetWorld()->SpawnActor<AFortQuickBars>(AFortQuickBars::StaticClass(), SpawnInfo);
@@ -912,6 +920,11 @@ void AFortPlayerController::GiveStartingItems(const TStructArray<FItemAndCount>&
 void AFortPlayerController::TryAddToQuickBar(UFortWorldItem* Item)
 {
 #if WITH_SERVER_CODE
+    // 7.40 has no server quickbars: the client slots what its replicated inventory gains (ClientQuickBars).
+    if (!HasQuickBars())
+    {
+        return;
+    }
     if (!QuickBars || !Item)
     {
         UE_LOG(LogFort, Warning, TEXT("Failed TryAddToQuickBar due to invalid QuickBars '%s' or Item '%s'"), *GetNameSafe(static_cast<AFortQuickBars*>(QuickBars)), *GetNameSafe(Item));
@@ -1940,7 +1953,9 @@ void AFortPlayerController::HookVTables()
     {
         Log::Error(L"Finder: AFortPlayerController::Possess slot not found");
     }
-    if (UFunction* ActivateSlotFunction = StaticFunction_ActivateSlot(); ActivateSlotFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    // 7.40 (CL-5046157) drops ActivateSlot and SwapQuickBarFocus with the server's quickbars (AFortQuickBars is client-only
+    // there, the controller's ClientQuickBars): nothing to put back.
+    if (UFunction* ActivateSlotFunction = FindStaticFunction_ActivateSlot(); ActivateSlotFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
     {
         ActivateSlotFunction->SetNativeFunc(&execActivateSlot);
         Log::Info(L"Hook AFortPlayerController::ActivateSlot: native");
@@ -1953,7 +1968,7 @@ void AFortPlayerController::HookVTables()
     // SwapQuickBarFocus is stripped only where its exec calls a stub (Cert's, 0xA313C0). Other builds keep their own
     // (3.3 0xED0250: QuickBars->SwapQuickBarFocus(InQuickBar, -1)), and 5.10 adds SlotOverride to it (5.30 0x11D3170,
     // 5.41 0x11E0640, 6.00 0x1230E00); those stay. Core's took their place too, and stepped only InQuickBar (#405).
-    if (UFunction* SwapQuickBarFocusFunction = StaticFunction_SwapQuickBarFocus(); SwapQuickBarFocusFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
+    if (UFunction* SwapQuickBarFocusFunction = FindStaticFunction_SwapQuickBarFocus(); SwapQuickBarFocusFunction && (Natives::FFrame_Step || Finder::ResolveScriptFrame()))
     {
         const uint8_t* SwapCall = Finder::ImplementationCall(SwapQuickBarFocusFunction);
         if (SwapCall && !Finder::IsStubFunction(Finder::RelativeTarget(reinterpret_cast<uintptr_t>(SwapCall), 1, 5)))
@@ -2177,7 +2192,8 @@ ptrdiff_t AFortPlayerController::CriticalMatchBonusOffset()
 
 ptrdiff_t AFortPlayerController::QuickBarsOffset()
 {
-    return Member_QuickBars.GetOffsetChecked();
+    // -1 from 7.40, which has no server quickbars.
+    return Member_QuickBars.IsAvailable() ? Member_QuickBars.GetOffsetChecked() : -1;
 }
 
 bool AFortPlayerController::ResolveDurability()

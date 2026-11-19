@@ -2836,7 +2836,10 @@ namespace
 
     uintptr_t VTableEntry(void** VTable, int32_t Index)
     {
-        if (!VTable || Index < 0 || Index >= 0x400)
+        // 7.40's controllers have more than 0x400 slots (CL-5046157: AFortPlayerControllerOutpost's
+        // ServerNotifyPendingFabricationCompleted_Implementation is slot 0x407, 0x1464210), and an index taken from an
+        // exec's call is a real slot.
+        if (!VTable || Index < 0 || Index >= 0x800)
         {
             return 0;
         }

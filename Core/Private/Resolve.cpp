@@ -7127,13 +7127,21 @@ bool Finder::ResolvePickupLive()
 
 bool Finder::ResolvePickupGiveLive()
 {
-    const auto LastCall = [](uintptr_t Function)
+    // 7.30 (CL-4834550) checks the stack cookie last in SpawnMissionItemPickup's native (0x11FC3B0's last call, 0x11FC541,
+    // is __security_check_cookie 0x393F8C0: cmp rcx, [rip+cookie]); SetPickupTarget (0x1195E00) is the call before it.
+    // 7.20's (0x11C6850) has no cookie check, so older builds take the same last call as before.
+    const auto IsSecurityCheckCookie = [](uintptr_t Target)
+    {
+        return IsInText(Target) && Byte(Target) == 0x48 && Byte(Target + 1) == 0x3B && Byte(Target + 2) == 0x0D;
+    };
+    const auto LastCall = [&](uintptr_t Function)
     {
         const uintptr_t FunctionEnd = IsInText(Function) ? Finder::FunctionEnd(Function) : 0;
         uintptr_t Target = 0;
         for (uintptr_t Call = FunctionEnd ? FindRawCall(Function, FunctionEnd) : 0; Call; Call = FindRawCall(Call + 1, FunctionEnd))
         {
-            Target = Finder::RelativeTarget(Call, 1, 5);
+            const uintptr_t Callee = Finder::RelativeTarget(Call, 1, 5);
+            Target = IsSecurityCheckCookie(Callee) ? Target : Callee;
         }
         return Target;
     };

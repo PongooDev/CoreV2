@@ -484,7 +484,8 @@ void AFortPickup::CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFor
     }
 }
 
-AFortPickup* AFortPickup::CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation, AFortPlayerController* OptionalOwner, UClass* OverrideClass)
+AFortPickup* AFortPickup::CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation, const FRotator* SpawnRotation, AFortPlayerController* OptionalOwner, UClass* OverrideClass,
+    int32_t InPickupSourceTypeFlags, uint8_t InPickupSpawnSource)
 {
     if (!Natives::AFortPickup_CreatePickup && !Finder::ResolvePickupLive())
     {
@@ -500,6 +501,17 @@ AFortPickup* AFortPickup::CreatePickup(UWorld* World, const FFortItemEntry& Item
         PickupData.SpawnRotation = SpawnRotation;
         PickupData.PlayerController = OptionalOwner;
         PickupData.OverrideClass = OverrideClass;
+        // Other, the build's (15 on 4.1, 0 by 6.00, where 15 is Player | Destruction | Container | AI), unless the caller
+        // says where the pickup came from.
+        if (InPickupSourceTypeFlags >= 0)
+        {
+            PickupData.PickupSourceTypeFlags = static_cast<uint32_t>(InPickupSourceTypeFlags);
+        }
+        else if (const uint8_t Other = EFortPickupSourceTypeFlag::GetOther(); Other != Reflection::InvalidEnumValue)
+        {
+            PickupData.PickupSourceTypeFlags = Other;
+        }
+        PickupData.PickupSpawnSource = InPickupSpawnSource;
         return Natives::AFortPickup_CreateFromData(PickupData);
     }
     return Natives::AFortPickup_CreatePickup(World, ItemEntry, SpawnLocation, SpawnRotation, OptionalOwner, OverrideClass, 0, 0, 0);

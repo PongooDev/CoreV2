@@ -15065,6 +15065,19 @@ bool Finder::ResolveBuildingLootLive()
         SpawnLootCall = Site;
     }
     const int32_t SpawnLootIndex = SpawnLootCall ? VirtualSlot(SpawnLootCall) : -1;
+    // What the interaction hands SpawnLoot after the searcher: 7.10 (CL-4667333) the pickups' EFortPickupSourceTypeFlag,
+    // "mov r8b, 4" (Container; 0xD145DF), and 7.20 (CL-4727874) the EFortPickupSpawnSource too, "xor r9d, r9d; mov
+    // r8b, 4" (Unset; 0xDEFC3F, 7.30 0xE4588F, 7.40 0xE6C67F). 21.40's is SpawnLoot(AFortPlayerPawn*, const
+    // EFortPickupSourceTypeFlag, const EFortPickupSpawnSource, const bool). Read in the 0x10 bytes before the call.
+    bool bSpawnLootTakesSourceTypeFlag = false;
+    bool bSpawnLootTakesSpawnSource = false;
+    for (uintptr_t Site = SpawnLootCall ? SpawnLootCall - 0x10 : 0; Site && Site + 3 <= SpawnLootCall; ++Site)
+    {
+        // mov r8b, imm8 (41 B0); xor r9d, r9d (45 33 C9) or mov r9b, imm8 (41 B1)
+        bSpawnLootTakesSourceTypeFlag = bSpawnLootTakesSourceTypeFlag || (Byte(Site) == 0x41 && Byte(Site + 1) == 0xB0);
+        bSpawnLootTakesSpawnSource = bSpawnLootTakesSpawnSource || (Byte(Site) == 0x45 && Byte(Site + 1) == 0x33 && Byte(Site + 2) == 0xC9) || (Byte(Site) == 0x41 && Byte(Site + 1) == 0xB1);
+    }
+    bSpawnLootTakesSpawnSource = bSpawnLootTakesSpawnSource && bSpawnLootTakesSourceTypeFlag;
     // IsAlreadySearched: that first virtual (3.0 slot 0x1A1, 3.3 0x1A3), three slots before SpawnLoot up to 3.3. 3.5 adds
     // a virtual after it (0x1A5, which sets bAlreadySearched), so it is four before (3.5.1 0x1A4, SpawnLoot 0x1A8).
     const int32_t FirstInteractIndex = FirstInteractCall && FirstInteractCall != SpawnLootCall ? VirtualSlot(FirstInteractCall) : -1;
@@ -15206,9 +15219,13 @@ bool Finder::ResolveBuildingLootLive()
     Natives::ABuildingContainer_InitializeTierGroupDataIndex = InitializeTierGroupDataIndex;
     Natives::ABuildingContainer_IsAlreadySearchedIndex = IsAlreadySearchedIndex;
     Natives::ABuildingContainer_SpawnLootIndex = SpawnLootIndex;
+    Natives::ABuildingContainer_bSpawnLootTakesSourceTypeFlag = bSpawnLootTakesSourceTypeFlag;
+    Natives::ABuildingContainer_bSpawnLootTakesSpawnSource = bSpawnLootTakesSpawnSource;
     Natives::ABuildingContainer_ModifyLootDropsIndex = ModifyLootDropsIndex;
-    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, IsAlreadySearched slot 0x{:X}, SpawnLoot slot 0x{:X}, ModifyLootDrops slot 0x{:X}, InitializeTierGroupData slot {}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
-        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, IsAlreadySearchedIndex, SpawnLootIndex, ModifyLootDropsIndex, InitializeTierGroupDataIndex >= 0 ? std::format(L"0x{:X}", InitializeTierGroupDataIndex) : std::wstring(L"none"), HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
+    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, IsAlreadySearched slot 0x{:X}, SpawnLoot slot 0x{:X} (takes {}), ModifyLootDrops slot 0x{:X}, InitializeTierGroupData slot {}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
+        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, IsAlreadySearchedIndex, SpawnLootIndex,
+        bSpawnLootTakesSpawnSource ? L"the searcher, a source type and a spawn source" : bSpawnLootTakesSourceTypeFlag ? L"the searcher and a source type" : L"the searcher", ModifyLootDropsIndex,
+        InitializeTierGroupDataIndex >= 0 ? std::format(L"0x{:X}", InitializeTierGroupDataIndex) : std::wstring(L"none"), HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
     return true;
 }
 

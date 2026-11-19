@@ -52,7 +52,10 @@ public:
     void PostUpdate(EFortBuildingPersistentState State, FFortBuildingRandomList* RandomList);
     // 21.40 names only the bool's type; 3.2's PostUpdate passes false, and Core does not read it.
     void InitializeTierGroupData(EFortBuildingPersistentState State, bool bInitializeAgain);
-    bool SpawnLoot(AFortPawn* Looter);
+    // 21.40's SpawnLoot(AFortPlayerPawn*, const EFortPickupSourceTypeFlag, const EFortPickupSpawnSource, const bool). The
+    // builds' interaction passes the source type from 7.10 and the spawn source from 7.20
+    // (Natives::ABuildingContainer_bSpawnLootTakes*); each loot pickup is marked with both (FFortCreatePickupData).
+    bool SpawnLoot(AFortPawn* Looter, uint8_t InPickupSourceTypeFlag, uint8_t InPickupSpawnSource);
     void BounceContainer();
     // What the container's IFortInteractInterface::ServerOnAttemptInteract does once a pawn's search is done (3.0
     // 0xA3E4F0): unless it is already searched, its SpawnLoot (the game's, or Core's where the build strips it). For a
@@ -85,6 +88,6 @@ private:
     static void PostUpdateHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList);
     static void PostUpdateSuperHK(ABuildingContainer* This, uint8_t State, FFortBuildingRandomList* RandomList);
     static void InitializeTierGroupDataHK(ABuildingContainer* This, uint8_t State, bool bInitializeAgain);
-    static bool SpawnLootHK(ABuildingContainer* This, AFortPawn* Looter);
+    static bool SpawnLootHK(ABuildingContainer* This, AFortPawn* Looter, uint8_t InPickupSourceTypeFlag, uint8_t InPickupSpawnSource);
     static inline void (*PostLoadOG)(ABuildingContainer* This) = nullptr;
 };

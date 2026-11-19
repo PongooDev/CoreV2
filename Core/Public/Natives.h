@@ -1013,6 +1013,11 @@ namespace Natives
     inline int32_t ABuildingSMActor_SetMeshSetIndex = -1;
     inline int32_t ABuildingContainer_IsAlreadySearchedIndex = -1;
     inline int32_t ABuildingContainer_SpawnLootIndex = -1;
+    // Whether the game's SpawnLoot call (the container's ServerOnAttemptInteract) passes an EFortPickupSourceTypeFlag
+    // after the searcher (7.10 on: "mov r8b, 4", Container), and then an EFortPickupSpawnSource (7.20 on: "xor r9d,
+    // r9d", Unset).
+    inline bool ABuildingContainer_bSpawnLootTakesSourceTypeFlag = false;
+    inline bool ABuildingContainer_bSpawnLootTakesSpawnSource = false;
     // ModifyLootDrops, OnPickupSpawn the slot after it: SpawnLoot's next slot up to 7.20, the one after that from 7.30
     // (AllowsContainerItemCacheLootDrops comes between).
     inline int32_t ABuildingContainer_ModifyLootDropsIndex = -1;

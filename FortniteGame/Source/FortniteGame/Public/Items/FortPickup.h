@@ -29,6 +29,15 @@ class EFortPickupTossState
     DefineUEnumValue(AtRest)
 };
 
+// 4.1 on: where a pickup came from, bits or'd into AFortPickup::PickupSourceTypeFlags. Player 1, Destruction 2,
+// Container 4 and AI 8 throughout; Other is 15 on 4.1 and 0 by 6.00 (which adds Tossed 16 and FloorLoot 32).
+class EFortPickupSourceTypeFlag
+{
+    DefineUnrealEnum(EFortPickupSourceTypeFlag, FortniteGame)
+    DefineUEnumValue(Other)
+    DefineUEnumValue(Container)
+};
+
 struct FFortPickupLocationData
 {
     DefineUnrealStruct(FFortPickupLocationData, FortniteGame)
@@ -74,7 +83,8 @@ struct FFortCreatePickupData
     bool bRandomRotation = false;
     // Spawns the pickup bOnlyRelevantToOwner, owned by PlayerController.
     bool bOnlyRelevantToOwner = false;
-    // EFortPickupSourceTypeFlag bits, or'd into AFortPickup::PickupSourceTypeFlags; Epic's callers pass Other (15).
+    // EFortPickupSourceTypeFlag bits, or'd into AFortPickup::PickupSourceTypeFlags. Epic's callers pass Other, which is
+    // 15 on 4.1 and 0 by 6.00 (7.20's 0x11C6850 stores 0); AFortPickup::CreatePickup sets the build's value.
     uint32_t PickupSourceTypeFlags = 15;
     // From 7.20 (CL-4727874): EFortPickupSpawnSource, which CreateFromData (0x114BC20) copies into the pickup's
     // PickupSpawnSource; the game's own caller (0x11C6850) leaves it Unset (0). Builds before 7.20 don't read it.
@@ -126,11 +136,17 @@ public:
     // (Minigame_Spawner_Component) binds it to each pickup it spawns: the ammo for a weapon (GiveAdditionalAmmo) and
     // the room to spawn the next item (SpawnedPickups) come from it.
     DefineUProperty(FMulticastScriptDelegate, OnPickup)
+    // From 4.1: EFortPickupSourceTypeFlag bits, where the pickup came from (CreateFromData ors its data's in).
+    DefineUProperty(uint32_t, PickupSourceTypeFlags)
+    static bool HasPickupSourceTypeFlags() { return Member_PickupSourceTypeFlags.IsAvailable(); }
 
     // Merges entries of the same item and level up to its stack size, so a drop of five 1-plank rolls is one pickup of
     // five (CoreV2 #67). Without an inventory the stack size is the item's own.
     static void CombineItemEntries(TStructArray<FFortItemEntry>& Entries, AFortInventory* Inventory);
-    static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr);
+    // 4.1 on, the pickup is marked with InPickupSourceTypeFlags (EFortPickupSourceTypeFlag bits; -1 for the build's
+    // Other) and, from 7.20, InPickupSpawnSource (EFortPickupSpawnSource, Unset 0): the FFortCreatePickupData fields.
+    static AFortPickup* CreatePickup(UWorld* World, const FFortItemEntry& ItemEntry, const FVector* SpawnLocation = nullptr, const FRotator* SpawnRotation = nullptr, AFortPlayerController* OptionalOwner = nullptr, UClass* OverrideClass = nullptr,
+        int32_t InPickupSourceTypeFlags = -1, uint8_t InPickupSpawnSource = 0);
     // bToss false (1.8 on) puts the pickup at FinalLocation instead of tossing it there; before 1.8 a toss always flies.
     // InPickupSourceTypeFlags (6.22 on: EFortPickupSourceTypeFlag bits, or'd into PickupSourceTypeFlags) is 0, Other.
     void TossPickup(const FVector& FinalLocation, AFortPawn* ItemOwner, int32_t OverrideMaxStackCount, bool bToss = true, uint8_t InPickupSourceTypeFlags = 0);

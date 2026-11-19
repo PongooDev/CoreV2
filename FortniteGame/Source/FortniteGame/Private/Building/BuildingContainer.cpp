@@ -47,6 +47,13 @@ namespace
         return reinterpret_cast<TFunction>((*reinterpret_cast<void* const* const*>(Container))[Natives::ABuildingContainer_SpawnLootIndex + Offset]);
     }
 
+    // EFortPickupSourceTypeFlag::Container, what the game's interaction hands SpawnLoot from 7.10; 0 on a build whose
+    // pickups have no source type (before 4.1).
+    uint8_t LootSourceTypeFlag()
+    {
+        return AFortPickup::HasPickupSourceTypeFlags() ? static_cast<uint8_t>(EFortPickupSourceTypeFlag::GetContainer()) : 0;
+    }
+
     void ApplyLootedDurability(FFortItemEntry& Entry, UFortWorldItemDefinition* ItemDefinition, float DurabilityModifier)
     {
         const uint8_t ItemType = ItemDefinition->ItemType;
@@ -121,7 +128,9 @@ bool ABuildingContainer::ServerOnAttemptInteract(AFortPawn* InteractingPawn)
     {
         return false;
     }
-    return ContainerSlot<bool (*)(ABuildingContainer*, AFortPawn*)>(this, 0)(this, InteractingPawn);
+    // As the game's interaction calls it: from 7.10 with Container, from 7.20 with the spawn source Unset too (extra
+    // arguments a build's SpawnLoot doesn't take are only registers it doesn't read).
+    return ContainerSlot<bool (*)(ABuildingContainer*, AFortPawn*, uint8_t, uint8_t)>(this, 0)(this, InteractingPawn, LootSourceTypeFlag(), 0);
 #else
     return false;
 #endif
@@ -606,9 +615,13 @@ void ABuildingContainer::InitializeTierGroupData(EFortBuildingPersistentState St
 #endif
 }
 
-bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
+bool ABuildingContainer::SpawnLoot(AFortPawn* Looter, uint8_t InPickupSourceTypeFlag, uint8_t InPickupSpawnSource)
 {
 #if WITH_SERVER_CODE
+    // Each pickup comes out marked with where it came from: InPickupSourceTypeFlag or'd into its PickupSourceTypeFlags
+    // and InPickupSpawnSource as its PickupSpawnSource (FFortCreatePickupData, 7.20's CreateFromData 0x114BC20 copies
+    // both), the values the game's interaction hands SpawnLoot (Container, Unset).
+    const int32_t PickupSourceTypeFlags = AFortPickup::HasPickupSourceTypeFlags() ? static_cast<int32_t>(InPickupSourceTypeFlag) : -1;
     // A destroyed container (Battle Royale's chests and ammo boxes the match doesn't spawn, #205) has nothing to search.
     if (Role < ROLE_Authority || !Looter || bDestroyed)
     {
@@ -645,7 +658,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
             {
                 Entry->LoadFullClip();
             }
-            if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &SpawnLocation, &SpawnRotation))
+            if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, *Entry, &SpawnLocation, &SpawnRotation, nullptr, nullptr, PickupSourceTypeFlags, InPickupSpawnSource))
             {
                 Pickup->SetPickupTarget(Looter, -1.0f, FVector(0.0f, 0.0f, 1.0f), true);
                 bSpawnedLoot = true;
@@ -687,7 +700,7 @@ bool ABuildingContainer::SpawnLoot(AFortPawn* Looter)
                     // Battle Royale's looted weapons come loaded (#85); the ammo for them is the loot package's own drop.
                     Entry.LoadFullClip();
                 }
-                if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation))
+                if (AFortPickup* Pickup = AFortPickup::CreatePickup(World, Entry, &SpawnLocation, &SpawnRotation, nullptr, nullptr, PickupSourceTypeFlags, InPickupSpawnSource))
                 {
                     if (bAthena)
                     {
@@ -905,7 +918,12 @@ void ABuildingContainer::InitializeTierGroupDataHK(ABuildingContainer* This, uin
     This->InitializeTierGroupData(EFortBuildingPersistentState{ State }, bInitializeAgain);
 }
 
-bool ABuildingContainer::SpawnLootHK(ABuildingContainer* This, AFortPawn* Looter)
+bool ABuildingContainer::SpawnLootHK(ABuildingContainer* This, AFortPawn* Looter, uint8_t InPickupSourceTypeFlag, uint8_t InPickupSpawnSource)
 {
-    return This->SpawnLoot(Looter);
+    // Only the arguments the build's interaction passes are read (Finder::ResolveBuildingLootLive); before 7.10 its
+    // pickups are Container, as the game's interaction says from 7.10 (Core's: earlier builds' SpawnLoot bodies are
+    // stripped and the call passes nothing).
+    const uint8_t SourceTypeFlag = Natives::ABuildingContainer_bSpawnLootTakesSourceTypeFlag ? InPickupSourceTypeFlag : LootSourceTypeFlag();
+    const uint8_t SpawnSource = Natives::ABuildingContainer_bSpawnLootTakesSpawnSource ? InPickupSpawnSource : 0;
+    return This->SpawnLoot(Looter, SourceTypeFlag, SpawnSource);
 }

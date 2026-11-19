@@ -169,6 +169,23 @@ namespace
 
     std::unordered_map<const AFortPlayerController*, FHeroAbilityKitItems> HeroAbilityKitItems;
 
+    // The controllers whose first InitializeMcpProfile setup ran, where the build has no server quickbars to tell (7.40:
+    // Core's first setup ran while QuickBars was still null). Kept by pointer with a weak check, as HeroAbilityKitItems.
+    std::unordered_map<const AFortPlayerController*, TWeakObjectPtr<AFortPlayerController>> FirstSetupControllers;
+
+    // True the first time it is asked for a controller.
+    bool TakeFirstSetup(AFortPlayerController* PlayerController)
+    {
+        const auto Found = FirstSetupControllers.find(PlayerController);
+        if (Found != FirstSetupControllers.end() && Found->second.Get() == PlayerController)
+        {
+            return false;
+        }
+        std::erase_if(FirstSetupControllers, [](const auto& Entry) { return !Entry.second.Get(); });
+        FirstSetupControllers[PlayerController] = TWeakObjectPtr<AFortPlayerController>(PlayerController);
+        return true;
+    }
+
     FHeroAbilityKitItems& GetHeroAbilityKitItems(AFortPlayerController* PlayerController)
     {
         FHeroAbilityKitItems& Items = HeroAbilityKitItems[PlayerController];
@@ -416,10 +433,9 @@ bool AFortPlayerController::InitializeMcpProfile(const void* OnComplete)
     }
 
     // The controller's first initialisation: its quickbars aren't spawned yet. 7.40 (CL-5046157) has no server quickbars
-    // (QuickBars reads as null there), so its first is the one that finds the world inventory still empty.
-    AFortInventory* FirstInventory = !HasQuickBars() ? static_cast<AFortInventory*>(WorldInventory) : nullptr;
-    const bool bFirstInitialization = HasQuickBars() ? !QuickBars : FirstInventory && FirstInventory->Inventory.ItemInstances.Num() == 0;
-    if (Role == ROLE_Authority && bFirstInitialization)
+    // (QuickBars reads as null there), so the first is kept per controller (TakeFirstSetup).
+    const bool bFirstInitialization = Role == ROLE_Authority && (HasQuickBars() ? !QuickBars : TakeFirstSetup(this));
+    if (bFirstInitialization)
     {
         SpawnQuickBars();
         UWorld* World = GetWorld();

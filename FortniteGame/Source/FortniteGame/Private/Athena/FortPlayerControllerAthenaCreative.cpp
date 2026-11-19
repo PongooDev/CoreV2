@@ -252,10 +252,24 @@ namespace
             FunctionReferencing(L"Start playset async load for user %s, cloudsave=%s."));
         Natives::UFortLevelSaveComponent_LoadPlaysetAsyncTakesPlayset = Natives::UFortLevelSaveComponent_LoadPlaysetAsync
             && Finder::KeepsSecondArgument(reinterpret_cast<uintptr_t>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync));
+        const uintptr_t LoadPlayset = FunctionReferencing(L"UPlaysetLevelStreamComponent::LoadPlayset Error: no owner for %s");
+        const uintptr_t UnloadPlayset = FunctionReferencing(L"UPlaysetLevelStreamComponent::UnloadPlayset %s");
         Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback = reinterpret_cast<decltype(Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)>(
-            StepCalling(FunctionReferencing(L"UPlaysetLevelStreamComponent::LoadPlayset Error: no owner for %s")));
+            StepCalling(LoadPlayset));
         Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback = reinterpret_cast<decltype(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)>(
-            StepCalling(FunctionReferencing(L"UPlaysetLevelStreamComponent::UnloadPlayset %s")));
+            StepCalling(UnloadPlayset));
+        // 7.30 (CL-4834550) has no NoCallback steps: the island's own steps (BeginRestrictedPlotLoad 0x106A880, the reset
+        // 0x108F660) bind LoadPlayset (lea rax, 0x148A5A0) and UnloadPlayset (lea rax, 0x149A330) themselves, the unload
+        // with a true payload (mov byte ptr [rbx+20h], 1 at 0x106ACEC). LoadPlayset is the load step; the unload step is
+        // UnloadPlayset(true), which returns null without a playset (+0x158) as 7.20's step did (0x145B140).
+        if (!Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback && LoadPlayset && !Finder::AddressRefs(LoadPlayset).empty())
+        {
+            Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback = reinterpret_cast<decltype(Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)>(LoadPlayset);
+        }
+        if (!Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback && UnloadPlayset && !Finder::AddressRefs(UnloadPlayset).empty())
+        {
+            Natives::UPlaysetLevelStreamComponent_UnloadPlayset = reinterpret_cast<decltype(Natives::UPlaysetLevelStreamComponent_UnloadPlayset)>(UnloadPlayset);
+        }
         // UFortLevelSaveComponent::ResetLevelRecord: the function that sets the island file's "last-reset" meta, one of
         // the component's virtuals.
         const uintptr_t ResetRecord = FunctionReferencing(L"last-reset");
@@ -288,11 +302,13 @@ namespace
             Address(reinterpret_cast<const void*>(Natives::AFortVolume_ClearVolumeOnServer)), Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_LoadPlaysetAsync)),
             Natives::UFortLevelSaveComponent_LoadPlaysetAsyncTakesPlayset ? L" (takes the playset)" : L"",
             Address(reinterpret_cast<const void*>(Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)),
-            Address(reinterpret_cast<const void*>(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)),
+            Address(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback ? reinterpret_cast<const void*>(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)
+                : reinterpret_cast<const void*>(Natives::UPlaysetLevelStreamComponent_UnloadPlayset)),
             Address(reinterpret_cast<const void*>(Natives::UFortLevelSaveComponent_ResetLevelRecord)), ResetSlot, Address(reinterpret_cast<const void*>(Natives::ULevelSaveRecord_NotifyFinishedRead)));
         if (!Natives::AFortVolume_GetTaskQueue || !Natives::UAsyncTaskQueue_Add || !Natives::UAsyncTaskQueue_Start || !Natives::AFortVolume_ClearVolumeOnServer
             || !Natives::UFortLevelSaveComponent_LoadPlaysetAsync || !Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback
-            || !Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback || !Natives::UFortLevelSaveComponent_ResetLevelRecord || !Natives::ULevelSaveRecord_NotifyFinishedRead)
+            || (!Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback && !Natives::UPlaysetLevelStreamComponent_UnloadPlayset)
+            || !Natives::UFortLevelSaveComponent_ResetLevelRecord || !Natives::ULevelSaveRecord_NotifyFinishedRead)
         {
             Log::Error(L"Finder: Creative's island load is missing a part, so players' islands don't load (see the line above)");
         }
@@ -1315,7 +1331,15 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
     // The creative profile, which LoadCreativePlots reads (McpProfileSys, intact). UMcpProfile::GetStat: the second call
     // after the creative profile's plot permissions getter (0x1132C70) names "creative_plot_permissions" (the first is
     // the name's copy into its FString), the one whose answer's EJson type it checks next (cmp dword ptr [reg+8], 6).
-    for (const uintptr_t Ref : Finder::StringRefs(L"creative_plot_permissions"))
+    // 7.30 (CL-4834550) has no "creative_plot_permissions" left; the daily rewards reader asks GetStat the same way
+    // (0xFBAAC0: the call at 0xFBAB48 to GetStat 0xA4D4F0, then cmp dword ptr [rcx+8], 6; 7.20 0xF96F60 / 0xA3A7D0), so
+    // its "daily_rewards" is tried when the old string is gone.
+    std::vector<uintptr_t> StatRefs = Finder::StringRefs(L"creative_plot_permissions");
+    if (StatRefs.empty())
+    {
+        StatRefs = Finder::StringRefs(L"daily_rewards");
+    }
+    for (const uintptr_t Ref : StatRefs)
     {
         const uintptr_t Function = Finder::FunctionStart(Ref);
         int32_t CallsAfter = 0;

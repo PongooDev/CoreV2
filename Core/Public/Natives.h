@@ -1169,6 +1169,11 @@ namespace Natives
     inline bool UFortLevelSaveComponent_LoadPlaysetAsyncTakesPlayset = false;
     inline void* (*UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback)(UObject* This) = nullptr;
     inline void* (*UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)(UObject* This) = nullptr;
+    // 7.30 (CL-4834550) has no NoCallback steps: the island's own steps bind UPlaysetLevelStreamComponent::LoadPlayset
+    // (0x148A5A0) as the load step, which LoadPlaysetAsyncNoCallback then holds, and UnloadPlayset (0x149A330) with a
+    // true payload as the unload step (BeginRestrictedPlotLoad 0x106A880: mov byte ptr [rbx+20h], 1 at 0x106ACEC). The
+    // bool's name isn't in 21.40.
+    inline void* (*UPlaysetLevelStreamComponent_UnloadPlayset)(UObject* This, bool bForce) = nullptr;
     // UFortLevelSaveComponent::ResetLevelRecord (0xF5AAC0; 7.10 0xF88310, the function that sets the island file's
     // "last-reset" meta): the base's reset (0x108BBA0: the volume's playset's own record, else a new one; bValidRecord)
     // and the file's reset time. The reset's step of the same name calls it.

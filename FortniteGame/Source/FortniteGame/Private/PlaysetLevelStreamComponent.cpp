@@ -21,8 +21,13 @@ FMulticastScriptDelegate* UPlaysetLevelStreamComponent::LoadPlaysetAsyncNoCallba
 
 FMulticastScriptDelegate* UPlaysetLevelStreamComponent::UnloadPlaysetAsyncNoCallback()
 {
-    return Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback
-        ? static_cast<FMulticastScriptDelegate*>(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback(this)) : nullptr;
+    // 7.30 (CL-4834550) binds UnloadPlayset(true) as this step (see Natives::UPlaysetLevelStreamComponent_UnloadPlayset).
+    if (!Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)
+    {
+        return Natives::UPlaysetLevelStreamComponent_UnloadPlayset
+            ? static_cast<FMulticastScriptDelegate*>(Natives::UPlaysetLevelStreamComponent_UnloadPlayset(this, true)) : nullptr;
+    }
+    return static_cast<FMulticastScriptDelegate*>(Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback(this));
 }
 
 UPlaysetLevelStreamComponent* UPlaysetLevelStreamComponent::GetForActor(AActor* Actor)

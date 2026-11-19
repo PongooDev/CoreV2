@@ -329,7 +329,7 @@ void UFortLevelSaveComponent::LoadPlotForUser(const FUniqueNetIdRepl& UserId, UF
     UAsyncTaskQueue* Queue = UAsyncTaskQueue::IsAvailable() ? Volume->GetTaskQueue() : nullptr;
     if (!Queue || !Natives::AFortVolume_ClearVolumeOnServer || !Natives::UFortLevelSaveComponent_ResetLevelRecord || !Natives::ULevelSaveRecord_NotifyFinishedRead
         || !Natives::UFortLevelSaveComponent_LoadPlaysetAsync || !Natives::UPlaysetLevelStreamComponent_LoadPlaysetAsyncNoCallback
-        || !Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback)
+        || (!Natives::UPlaysetLevelStreamComponent_UnloadPlaysetAsyncNoCallback && !Natives::UPlaysetLevelStreamComponent_UnloadPlayset))
     {
         Log::Error(L"Creative: {}'s island {} can't load: the volume's task queue or one of the island's steps wasn't found (see the \"Finder: Creative's island load\" line)",
             User, PlotItem->GetItemId().ToStdString());

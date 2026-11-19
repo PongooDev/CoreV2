@@ -135,17 +135,19 @@ bool ABuildingContainer::IsAlreadySearched(AFortPawn* Looter)
 
 void ABuildingContainer::ModifyLootDrops(TStructArray<FFortItemEntry>& LootDrops, AFortPlayerController* Looter)
 {
-    ContainerSlot<void (*)(ABuildingContainer*, TStructArray<FFortItemEntry>&, AFortPlayerController*)>(this, 1)(this, LootDrops, Looter);
+    // The slot after SpawnLoot, two after it from 7.30 (Finder::ResolveBuildingLootLive).
+    ContainerSlot<void (*)(ABuildingContainer*, TStructArray<FFortItemEntry>&, AFortPlayerController*)>(this, Natives::ABuildingContainer_ModifyLootDropsIndex - Natives::ABuildingContainer_SpawnLootIndex)(this, LootDrops, Looter);
 }
 
 void ABuildingContainer::OnPickupSpawn(AFortPickup* Pickup, AFortPlayerController* Looter)
 {
-    ContainerSlot<void (*)(ABuildingContainer*, AFortPickup*, AFortPlayerController*)>(this, 2)(this, Pickup, Looter);
+    // The slot after ModifyLootDrops.
+    ContainerSlot<void (*)(ABuildingContainer*, AFortPickup*, AFortPlayerController*)>(this, Natives::ABuildingContainer_ModifyLootDropsIndex - Natives::ABuildingContainer_SpawnLootIndex + 1)(this, Pickup, Looter);
 }
 
 void ABuildingContainer::HideContainer()
 {
-    // Three slots after SpawnLoot, five from 3.2 (Finder::ResolveBuildingLootLive).
+    // Three slots after SpawnLoot, five from 3.2, six from 7.30 (Finder::ResolveBuildingLootLive).
     ContainerSlot<void (*)(ABuildingContainer*)>(this, Natives::ABuildingContainer_HideContainerIndex - Natives::ABuildingContainer_SpawnLootIndex)(this);
 }
 

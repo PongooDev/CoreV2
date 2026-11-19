@@ -1004,6 +1004,9 @@ namespace Natives
     inline int32_t ABuildingSMActor_SetMeshSetIndex = -1;
     inline int32_t ABuildingContainer_IsAlreadySearchedIndex = -1;
     inline int32_t ABuildingContainer_SpawnLootIndex = -1;
+    // ModifyLootDrops, OnPickupSpawn the slot after it: SpawnLoot's next slot up to 7.20, the one after that from 7.30
+    // (AllowsContainerItemCacheLootDrops comes between).
+    inline int32_t ABuildingContainer_ModifyLootDropsIndex = -1;
     inline int32_t ABuildingContainer_HideContainerIndex = -1;
     inline int32_t ABuildingContainer_InitializeTierGroupDataIndex = -1;
     inline uintptr_t ABuildingContainer_PostLoad = 0;

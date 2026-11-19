@@ -14849,14 +14849,22 @@ bool Finder::ResolveBuildingLootLive()
 
     // Three slots after SpawnLoot the container hides itself and records it as searched: lea r8d, [r9+4], then a tail jmp
     // (or call) to AFortWorldManager::UpdateActorRecord. 3.2 adds two virtuals after OnPickupSpawn (0xA2A550 twice), so
-    // HideContainer moves to five slots after SpawnLoot (3.2 0xA28E20; 3.1 0xA3F6D0 is at three).
+    // HideContainer moves to five slots after SpawnLoot (3.2 0xA28E20; 3.1 0xA3F6D0 is at three). 7.30 (CL-4834550) adds
+    // AllowsContainerItemCacheLootDrops right after SpawnLoot (21.40's order: SpawnLoot, AllowsContainerItemCacheLootDrops,
+    // ModifyLootDrops, OnPickupSpawn, InitializeTierGroupData, UnInitializeTierGroupData, HideContainer), so HideContainer
+    // is six after it (slot 0x1C9, 0xE46040; SpawnLoot 0x1C3, the new virtual 0xE31690). Six is tried last.
     void** ContainerVTable = ContainerDefault ? *reinterpret_cast<void***>(ContainerDefault) : nullptr;
     int32_t HideContainerIndex = -1;
     uintptr_t HideContainer = 0;
     uintptr_t HideContainerEnd = 0;
     uintptr_t SearchedState = 0;
-    for (int32_t Index = SpawnLootIndex >= 0 ? SpawnLootIndex + 3 : 0; SpawnLootIndex >= 0 && !SearchedState && Index <= SpawnLootIndex + 5; Index += 2)
+    for (const int32_t Offset : { 3, 5, 6 })
     {
+        if (SpawnLootIndex < 0 || SearchedState)
+        {
+            break;
+        }
+        const int32_t Index = SpawnLootIndex + Offset;
         HideContainerIndex = Index;
         HideContainer = VTableEntry(ContainerVTable, Index);
         HideContainerEnd = HideContainer ? Finder::FunctionEnd(HideContainer) : 0;
@@ -14873,10 +14881,15 @@ bool Finder::ResolveBuildingLootLive()
     const uintptr_t ContainerPostUpdateEnd = ContainerPostUpdate ? Finder::FunctionEnd(ContainerPostUpdate) : 0;
     const uintptr_t InitializeTierGroupDataCall = ContainerPostUpdateEnd ? FindVirtualCall(ContainerPostUpdate, ContainerPostUpdateEnd) : 0;
     int32_t InitializeTierGroupDataIndex = InitializeTierGroupDataCall ? VirtualSlot(InitializeTierGroupDataCall) : -1;
-    if (SpawnLootIndex < 0 || HideContainerIndex != SpawnLootIndex + 5 || InitializeTierGroupDataIndex != SpawnLootIndex + 3)
+    // With 7.30's extra virtual, InitializeTierGroupData is four after SpawnLoot (0x1C7: PostUpdate 0xE54090 calls
+    // [rax+0E38h]) and ModifyLootDrops two (one up to 7.20).
+    const bool bItemCacheSlot = SpawnLootIndex >= 0 && HideContainerIndex == SpawnLootIndex + 6;
+    if (SpawnLootIndex < 0 || (!bItemCacheSlot && (HideContainerIndex != SpawnLootIndex + 5 || InitializeTierGroupDataIndex != SpawnLootIndex + 3))
+        || (bItemCacheSlot && InitializeTierGroupDataIndex != SpawnLootIndex + 4))
     {
         InitializeTierGroupDataIndex = -1;
     }
+    const int32_t ModifyLootDropsIndex = SpawnLootIndex >= 0 ? SpawnLootIndex + (bItemCacheSlot ? 2 : 1) : -1;
 
     uintptr_t UpdateActorRecord = 0;
     for (uintptr_t Site = SearchedState ? SearchedState + 4 : 0; Site && !UpdateActorRecord && Site < SearchedState + 0x10 && Site + 5 <= HideContainerEnd; ++Site)
@@ -14970,8 +14983,9 @@ bool Finder::ResolveBuildingLootLive()
     Natives::ABuildingContainer_InitializeTierGroupDataIndex = InitializeTierGroupDataIndex;
     Natives::ABuildingContainer_IsAlreadySearchedIndex = IsAlreadySearchedIndex;
     Natives::ABuildingContainer_SpawnLootIndex = SpawnLootIndex;
-    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, IsAlreadySearched slot 0x{:X}, SpawnLoot slot 0x{:X}, InitializeTierGroupData slot {}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
-        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, IsAlreadySearchedIndex, SpawnLootIndex, InitializeTierGroupDataIndex >= 0 ? std::format(L"0x{:X}", InitializeTierGroupDataIndex) : std::wstring(L"none"), HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
+    Natives::ABuildingContainer_ModifyLootDropsIndex = ModifyLootDropsIndex;
+    Log::Info(L"Finder: building loot: PostUpdate slot 0x{:X} ({}), SetMeshSet slot 0x{:X}, IsAlreadySearched slot 0x{:X}, SpawnLoot slot 0x{:X}, ModifyLootDrops slot 0x{:X}, InitializeTierGroupData slot {}, HideContainer slot 0x{:X}, PostLoad slot 0x{:X} ({}), ModifyStat slot 0x{:X}, UpdateActorRecord 0x{:X}",
+        PostUpdateIndex, bPostUpdateSelectsMeshSet ? L"native" : L"stripped", SetMeshSetIndex, IsAlreadySearchedIndex, SpawnLootIndex, ModifyLootDropsIndex, InitializeTierGroupDataIndex >= 0 ? std::format(L"0x{:X}", InitializeTierGroupDataIndex) : std::wstring(L"none"), HideContainerIndex, PostLoadIndex, bPostLoadSelectsMeshSet ? L"native" : L"stripped", ModifyStatIndex, UpdateActorRecord - Finder::ImageBase());
     return true;
 }
 

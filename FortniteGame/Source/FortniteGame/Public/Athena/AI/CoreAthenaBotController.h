@@ -435,6 +435,8 @@ private:
     // 21.40's UFortAthenaAIBotEvaluator_JumpOffBus / _FreeFalling.
     void JumpOffBus(float Now);
     void FreeFalling(float Now);
+    // The game put the bot's pawn in a skydive from the ground (a rift's): FreeFalling takes it down.
+    void BeginFreeFalling(float Now);
     // _FreeFalling in what holds a pawn up in the air, as 21.40's does in a sky tube (ComputeDestinationInSkyTube, and
     // its SkyTubeDivingStuckTimeThreshold): a destination out of 6.x's vortex once the game puts the pawn in it
     // (AFortPlayerPawn::IsInVortex), and one away from wherever else the bot hasn't come down for a while.

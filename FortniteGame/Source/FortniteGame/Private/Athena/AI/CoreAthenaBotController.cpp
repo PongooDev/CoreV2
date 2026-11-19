@@ -1129,7 +1129,13 @@ namespace
     //   health and no bleed (#248);
     // - a long interaction's animation (GA_DefaultPlayer_InteractSearch, the Search montage): the pawn's
     //   StartItemInteractionAbility activates it by its tag (Gameplay.Action.Player.InteractSearch) as a teammate's
-    //   revive starts, and without it the reviving bot stood still (#393).
+    //   revive starts, and without it the reviving bot stood still (#393);
+    // - a rift's skydive (GA_Rift_Athena_Skydive and its _NoSound twin, 5.0+): BGA_RiftPortal_Athena takes the pawn up
+    //   and sends it Abilities.Generic.Rift.Trigger (SendGameplayEventToActor), which the ability triggers on. The
+    //   ability (ServerInitiated) holds the pawn a moment, then launches it with SetPendingSkydiveLaunch, and the
+    //   movement's pending launch begins the skydive (7.20 UFortMovementComp_Character 0x11D8BC0 -> AFortPlayerPawn::
+    //   BeginSkydiving 0x136F620), whose glider the game opens over the ground as it does after the bus. Without it the
+    //   rift's event found no ability and the bot fell from the rift's height with no skydive and no glider (#446).
     // The others of the set (death, the other interactions) are Core's for a bot.
     const std::vector<UClass*>& PlayerAbilityClasses()
     {
@@ -1148,7 +1154,8 @@ namespace
             for (UClass* Ability : Abilities)
             {
                 const std::wstring Name = Ability ? Ability->GetName().ToStdString() : std::wstring();
-                if (Name.find(L"DanceGrenade_Stun") != std::wstring::npos || Name == L"GAB_AthenaDBNO_C" || Name == L"GAB_AthenaDBNORevive_C" || Name == L"GA_DefaultPlayer_InteractSearch_C")
+                if (Name.find(L"DanceGrenade_Stun") != std::wstring::npos || Name == L"GAB_AthenaDBNO_C" || Name == L"GAB_AthenaDBNORevive_C" || Name == L"GA_DefaultPlayer_InteractSearch_C"
+                    || Name == L"GA_Rift_Athena_Skydive_C" || Name == L"GA_Rift_Athena_Skydive_NoSound_C")
                 {
                     Found.push_back(KeepLoaded(Ability));
                 }
@@ -2318,6 +2325,13 @@ void FCoreAthenaBotController::Tick(float Now, float DeltaSeconds)
         Manager->RemoveFromAliveBots(this, Killer ? Killer : BotKiller ? BotKiller : Downer.Get());
         return;
     }
+    // Put in a skydive by the game from the ground: a rift's (GA_Rift_Athena_Skydive, PlayerAbilityClasses). 21.40's
+    // UFortAthenaAIBotEvaluator_FreeFalling steers whenever the pawn skydives or glides, so the bot falls as it does
+    // after the bus (FreeFalling), the game opening its glider, and lands near where the rift took it up.
+    if (State == ECoreAthenaBotState::Landed && (Pawn->bIsSkydiving || Pawn->bIsParachuteOpen))
+    {
+        BeginFreeFalling(Now);
+    }
     if (State == ECoreAthenaBotState::Skydiving)
     {
         FreeFalling(Now);
@@ -2672,6 +2686,33 @@ void FCoreAthenaBotController::ThankBusDriver()
     }
     PlayerState->bThankedBusDriver = true;
     Log::Info(L"Battle Royale bots: {} thanks the bus driver", BotName);
+#endif
+}
+
+void FCoreAthenaBotController::BeginFreeFalling(float Now)
+{
+#if WITH_SERVER_CODE
+    // The game's skydive began while the bot walked (a rift's): what it was doing on the ground stops, and it comes down
+    // on the ground near where it went up, as a respawn's skydive does (RespawnPlayerAfterDeath).
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    const FVector Location = LocationOf(Pawn);
+    StopFiring();
+    StopMoving();
+    CancelHeal();
+    if (!Manager->FindGroundNear(Location, 3000.0f, DropTarget))
+    {
+        DropTarget = FVector(Location.X, Location.Y, LastKnownPosition.Z);
+    }
+    State = ECoreAthenaBotState::Skydiving;
+    LastKnownPosition = Location;
+    LandedTime = 0.0f;
+    FallLowestZTime = 0.0f;
+    bLeavingVortex = false;
+    bDiving = false;
+    HeldInAirCount = 0;
+    NextLogTime = Now + 3.0f;
+    Log::Info(L"Battle Royale bots: {} is put in a skydive at ({:.0f}, {:.0f}, {:.0f}) (glider {}) and comes down at ({:.0f}, {:.0f}, {:.0f})", BotName, Location.X, Location.Y,
+        Location.Z, Pawn->bIsParachuteOpen ? L"open" : L"closed", DropTarget.X, DropTarget.Y, DropTarget.Z);
 #endif
 }
 

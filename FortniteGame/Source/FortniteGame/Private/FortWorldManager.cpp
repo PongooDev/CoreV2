@@ -902,7 +902,8 @@ bool AFortWorldManager::GetPlayerQuickBarRecords(AFortPlayerController* PlayerCo
         return true;
     }
 
-    AFortPlayerState* PlayerState = PlayerController ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
+    // 7.40 (CL-5046157)'s player record has no quickbar records.
+    AFortPlayerState* PlayerState = PlayerController && FFortPlayerRecord::HasQuickBarRecords() ? Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerController->PlayerState))) : nullptr;
     UFortWorldRecord* WorldRecord = CurrentWorldRecord;
     const int32_t WorldPlayerId = PlayerState ? static_cast<int32_t>(PlayerState->WorldPlayerId) : -1;
     if (!WorldRecord || WorldPlayerId < 0)
@@ -928,24 +929,74 @@ bool AFortWorldManager::GetPlayerQuickBarRecords(AFortPlayerController* PlayerCo
 bool AFortWorldManager::UpdatePlayerQuickBarRecords(AFortPlayerController* PlayerController)
 {
 #if WITH_SERVER_CODE
-    AFortQuickBars* QuickBars = PlayerController ? static_cast<AFortQuickBars*>(PlayerController->QuickBars) : nullptr;
     FQuickBar* PrimaryRecord = nullptr;
     FQuickBar* SecondaryRecord = nullptr;
+    UScriptStruct* QuickBarStruct = FQuickBar::StaticStruct();
+    // 7.40 (CL-5046157): the client's own quickbars, as it last sent them (ServerUpdateQuickBarRecordsCache).
+    if (!AFortPlayerController::HasQuickBars())
+    {
+        if (!PlayerController || !AFortPlayerController::HasQuickBarRecordsCache() || !GetPlayerQuickBarRecords(PlayerController, PrimaryRecord, SecondaryRecord))
+        {
+            return false;
+        }
+        QuickBarStruct->CopyScriptStruct(PrimaryRecord, &static_cast<FQuickBar&>(PlayerController->CachedPrimaryQuickBarRecord));
+        QuickBarStruct->CopyScriptStruct(SecondaryRecord, &static_cast<FQuickBar&>(PlayerController->CachedSecondaryQuickBarRecord));
+        return true;
+    }
+
+    AFortQuickBars* QuickBars = PlayerController ? static_cast<AFortQuickBars*>(PlayerController->QuickBars) : nullptr;
     if (!QuickBars || !GetPlayerQuickBarRecords(PlayerController, PrimaryRecord, SecondaryRecord))
     {
         return false;
     }
 
-    UScriptStruct* QuickBarStruct = FQuickBar::StaticStruct();
     QuickBarStruct->CopyScriptStruct(PrimaryRecord, &QuickBars->GetQuickBar(EFortQuickBars::GetPrimary()));
     QuickBarStruct->CopyScriptStruct(SecondaryRecord, &QuickBars->GetQuickBar(EFortQuickBars::GetSecondary()));
 #endif
     return true;
 }
 
+bool AFortWorldManager::SendPlayerQuickBarRecords(AFortPlayerController* PlayerController)
+{
+#if WITH_SERVER_CODE
+    // 7.40 (CL-5046157) builds the quickbars on the client (ClientQuickBars), and only once it has been handed the saved
+    // layout: AFortPlayerController's quickbar setup (0x1431460, the controller classes Save the World plays) waits on
+    // bHasReceivedQuickBarRecords (+0x1445), which only ClientUpdateQuickBarRecordsCache_Implementation (0x13F4D20)
+    // sets. The server's call is stripped (the exe has no caller of the RPC). Core's: the player's saved layout (their
+    // world profile's loadout, theater0's player_loadout, as up to 7.30) or, without one, empty records, so the client
+    // still builds its quickbars; the controller keeps a copy (its CachedPrimary/SecondaryQuickBarRecord).
+    if (!PlayerController || !AFortPlayerController::HasQuickBarRecordsCache() || !AFortPlayerController::FindStaticFunction_ClientUpdateQuickBarRecordsCache())
+    {
+        return false;
+    }
+    FQuickBar& CachedPrimary = PlayerController->CachedPrimaryQuickBarRecord;
+    FQuickBar& CachedSecondary = PlayerController->CachedSecondaryQuickBarRecord;
+    FQuickBar* PrimaryRecord = nullptr;
+    FQuickBar* SecondaryRecord = nullptr;
+    const bool bSaved = GetPlayerQuickBarRecords(PlayerController, PrimaryRecord, SecondaryRecord);
+    if (bSaved)
+    {
+        UScriptStruct* QuickBarStruct = FQuickBar::StaticStruct();
+        QuickBarStruct->CopyScriptStruct(&CachedPrimary, PrimaryRecord);
+        QuickBarStruct->CopyScriptStruct(&CachedSecondary, SecondaryRecord);
+    }
+    PlayerController->ClientUpdateQuickBarRecordsCache(CachedPrimary, CachedSecondary);
+    UE_LOG(LogFortWorld, Log, TEXT("RestorePlayerQuickBars: %s gets its quickbar layout (%s, %d and %d slots)"), *GetNameSafe(PlayerController),
+        bSaved ? TEXT("saved") : TEXT("none saved"), CachedPrimary.Slots.Num(), CachedSecondary.Slots.Num());
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool AFortWorldManager::RestorePlayerQuickBars(AFortPlayerController* PlayerController)
 {
 #if WITH_SERVER_CODE
+    if (!AFortPlayerController::HasQuickBars())
+    {
+        return SendPlayerQuickBarRecords(PlayerController);
+    }
+
     AFortQuickBars* QuickBars = PlayerController ? static_cast<AFortQuickBars*>(PlayerController->QuickBars) : nullptr;
     AFortInventory* Inventory = PlayerController ? static_cast<AFortInventory*>(PlayerController->WorldInventory) : nullptr;
     FQuickBar* Records[2] = {};

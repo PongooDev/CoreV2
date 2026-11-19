@@ -60,6 +60,17 @@ public:
     // ClientQuickBars, built from the replicated inventory), so QuickBars reads as null and Core's quickbar upkeep skips.
     DefineOptionalUProperty(AFortQuickBars*, QuickBars)
     static bool HasQuickBars() { return Member_QuickBars.IsAvailable(); }
+    // 7.40's client-side quickbars: the layout records the server and the client keep (the client sends its own with
+    // ServerUpdateQuickBarRecordsCache, the server hands the saved ones over with ClientUpdateQuickBarRecordsCache).
+    DefineUStructProperty(FQuickBar, CachedPrimaryQuickBarRecord)
+    DefineUStructProperty(FQuickBar, CachedSecondaryQuickBarRecord)
+    static bool HasQuickBarRecordsCache() { return Member_CachedPrimaryQuickBarRecord.IsAvailable() && Member_CachedSecondaryQuickBarRecord.IsAvailable(); }
+    // Replicated (RepNotify UpdateQuickBars). From 7.40 the client builds its quickbars once both are set and it has the
+    // records (AFortPlayerController's virtual 0x1409670, which its quickbar setup 0x1431460 asks); nothing in 7.30's or
+    // 7.40's client exe sets them (the server code that did is stripped).
+    DefineBitfieldUProperty(bHasInitializedWorldInventory)
+    DefineBitfieldUProperty(bHasInitializedHeroInventory)
+    static bool HasInitializedInventoryFlags() { return Member_bHasInitializedWorldInventory.IsAvailable() && Member_bHasInitializedHeroInventory.IsAvailable(); }
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
@@ -145,6 +156,8 @@ public:
     DefineUFunction(ServerReturnToMainMenu)
     // Suicide's RPC: the exec Suicide (BlueprintCallable) sends it while the controller is in the Playing state.
     DefineUFunction(ServerSuicide)
+    DefineUFunction(ServerUpdateQuickBarRecordsCache)
+    DefineUFunction(ClientUpdateQuickBarRecordsCache)
     DefineUFunction(ServerSetPartyOwner)
     DefineUFunction(ClientFinishedInteractionInZone)
     DefineUFunction(OnRep_CheatMovement)
@@ -189,6 +202,13 @@ public:
     void ReconnectOutpostInventory(AFortInventory* InOutpostInventory);
     void GiveStartingItems(const TStructArray<FItemAndCount>& Items);
     void TryAddToQuickBar(UFortWorldItem* Item);
+    // 7.40 (CL-5046157), Save the World's quickbar layout with client-side quickbars: the client sends its layout when it
+    // changes (HandleQuickBarChanged, 0x14082A0), and the server keeps it here and in the player's saved layout
+    // (AFortWorldManager::UpdatePlayerQuickBarRecords). The _Implementation is stripped (slot 0x20F).
+    void ServerUpdateQuickBarRecordsCache_Implementation(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord);
+    // Hands the saved layout to the client (its _Implementation, 0x13F4D20, keeps the first it gets and builds the
+    // quickbars). Nothing in the client exe sends it: the server's caller is stripped.
+    void ClientUpdateQuickBarRecordsCache(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord);
     void TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused);
     void ApplyHeroAbilityKitItems(UFortHero* Hero);
     void AddHeroAbilityKitGadgetsToQuickBars();
@@ -351,4 +371,7 @@ private:
     static inline bool (*ModDurabilityOG)(void* InventoryOwner, const FGuid& ItemGuid, float DurabilityMod, bool bForceSet) = nullptr;
     static void ReconnectWorldInventoryHK(AFortPlayerController* This, AFortInventory* InWorldInventory);
     static void ReconnectOutpostInventoryHK(AFortPlayerController* This, AFortInventory* InOutpostInventory);
+    // 7.40's quickbar RPCs, swapped in where their slot is a stub.
+    static void HookQuickBarRecordVTables();
+    static void ServerUpdateQuickBarRecordsCache_ImplementationHK(AFortPlayerController* This, const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord);
 };

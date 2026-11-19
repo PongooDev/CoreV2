@@ -133,7 +133,11 @@ public:
     int32_t GetWorldLevel() const;
     void SpawnTileLoot(FFortTileLootData* TileLootData, const TArray<int32_t>& LevelIndices);
     AActor* SpawnPlayerSpawnPad(const FFortPlayerSpawnPadPlacementData& PlacementData, const FTransform& SpawnTransform);
+    // The player's saved quickbar layout from their quickbars: the server's (up to 7.30), or what the client last sent
+    // (7.40's AFortPlayerController::CachedPrimaryQuickBarRecord / CachedSecondaryQuickBarRecord).
     bool UpdatePlayerQuickBarRecords(AFortPlayerController* PlayerController);
+    // The saved layout back into the player's quickbars: the server's (up to 7.30), or handed to the client (7.40,
+    // SendPlayerQuickBarRecords).
     bool RestorePlayerQuickBars(AFortPlayerController* PlayerController);
 
     // Whether the build keeps the item caches players pick up (4.0's UnsavedPlayerEarnedItemCaches).
@@ -168,4 +172,5 @@ private:
     FFortBuildingRandomList* GetLootRandomList();
 
     bool GetPlayerQuickBarRecords(AFortPlayerController* PlayerController, FQuickBar*& OutPrimary, FQuickBar*& OutSecondary);
+    bool SendPlayerQuickBarRecords(AFortPlayerController* PlayerController);
 };

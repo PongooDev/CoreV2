@@ -823,6 +823,19 @@ void AFortPlayerController::InitializeInventory(const TStructArray<FItemDefiniti
             UFortKismetLibrary::K2_GiveItemToPlayer(this, ItemDefinition, Entry.Count, false);
         }
     }
+
+    // 7.40 (CL-5046157): the client builds its quickbars once it has the saved layout (RestorePlayerQuickBars, above,
+    // handed it over) and both of these are set (AFortPlayerController's 0x1409670, which its quickbar setup 0x1431460
+    // asks; they replicate with UpdateQuickBars as their RepNotify). Nothing in the exe sets them: the server's code is
+    // stripped. Core's: both here, once the world inventory has its items; later items (the hero's kit) reach the client's
+    // quickbars as any item it gains.
+    if (!HasQuickBars() && HasInitializedInventoryFlags())
+    {
+        bHasInitializedWorldInventory = true;
+        bHasInitializedHeroInventory = true;
+        ForceNetUpdate();
+        UE_LOG(LogFort, Log, TEXT("InitializeInventory: %s's world and hero inventories are ready for its quickbars (%d items)"), *GetNameSafe(this), Instances.Num());
+    }
 #endif
 }
 
@@ -978,6 +991,82 @@ void AFortPlayerController::TryAddToQuickBar(UFortWorldItem* Item)
         }
     }
 #endif
+}
+
+void AFortPlayerController::ServerUpdateQuickBarRecordsCache_Implementation(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord)
+{
+#if WITH_SERVER_CODE
+    // The client sends its layout whenever its quickbars change (0x14082A0, bound to its quickbars' change event once they
+    // are built). Core's: kept in the controller's cache, and as the player's saved layout (their world profile's loadout,
+    // which a rejoin in this mission hands back, as 7.30's server kept its own quickbars there).
+    UScriptStruct* QuickBarStruct = FQuickBar::StaticStruct();
+    if (!HasQuickBarRecordsCache() || !QuickBarStruct)
+    {
+        return;
+    }
+    QuickBarStruct->CopyScriptStruct(&static_cast<FQuickBar&>(CachedPrimaryQuickBarRecord), &PrimaryQuickBarRecord);
+    QuickBarStruct->CopyScriptStruct(&static_cast<FQuickBar&>(CachedSecondaryQuickBarRecord), &SecondaryQuickBarRecord);
+
+    UWorld* World = GetWorld();
+    AFortGameState* GameState = World ? Cast<AFortGameState>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    AFortWorldManager* WorldManager = GameState ? static_cast<AFortWorldManager*>(GameState->WorldManager) : nullptr;
+    const bool bSaved = WorldManager && WorldManager->UpdatePlayerQuickBarRecords(this);
+    static bool bLoggedOnce = false;
+    if (!bLoggedOnce)
+    {
+        bLoggedOnce = true;
+        UE_LOG(LogFort, Log, TEXT("ServerUpdateQuickBarRecordsCache: %s's quickbar layout (%d and %d slots)%s"), *GetName(), PrimaryQuickBarRecord.Slots.Num(),
+            SecondaryQuickBarRecord.Slots.Num(), bSaved ? TEXT(", saved") : TEXT(", not saved (no world profile)"));
+    }
+#endif
+}
+
+void AFortPlayerController::ClientUpdateQuickBarRecordsCache(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord)
+{
+    Reflection::FParams Params(StaticFunction_ClientUpdateQuickBarRecordsCache(), true);
+    Params.CopyStruct(L"PrimaryQuickBarRecord", &PrimaryQuickBarRecord);
+    Params.CopyStruct(L"SecondaryQuickBarRecord", &SecondaryQuickBarRecord);
+    Params.Call(this);
+}
+
+void AFortPlayerController::ServerUpdateQuickBarRecordsCache_ImplementationHK(AFortPlayerController* This, const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord)
+{
+    This->ServerUpdateQuickBarRecordsCache_Implementation(PrimaryQuickBarRecord, SecondaryQuickBarRecord);
+}
+
+void AFortPlayerController::HookQuickBarRecordVTables()
+{
+    // 7.40 (CL-5046157) declares it on this class, and every controller class's slot is the shared empty function
+    // (ServerUpdateQuickBarRecordsCache 0x20F; the _Validate before it returns true). Builds before 7.40 don't have it.
+    for (const auto& [Function, Implementation, Name, bMembers] : {
+             std::tuple{ FindStaticFunction_ServerUpdateQuickBarRecordsCache(), reinterpret_cast<void*>(&ServerUpdateQuickBarRecordsCache_ImplementationHK), L"AFortPlayerController::ServerUpdateQuickBarRecordsCache_Implementation", HasQuickBarRecordsCache() } })
+    {
+        const int32_t Index = Function && bMembers ? Finder::ImplementationIndex(Function) : -1;
+        if (!Function || !bMembers)
+        {
+            continue;
+        }
+        int32_t Restored = 0;
+        for (TObjectIterator<UClass> It; Index >= 0 && It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[Index])))
+            {
+                Hooks::SwapVTable(Name, VTable, Index, Implementation);
+                ++Restored;
+            }
+        }
+        if (Index < 0)
+        {
+            Log::Error(L"Finder: {} slot not found", Name);
+        }
+        else
+        {
+            Log::Info(L"Finder: {} (slot 0x{:X}) {}", Name, Index, Restored > 0 ? std::format(L"is stripped, restored in {} vtables", Restored) : std::wstring(L"is native in this build"));
+        }
+    }
 }
 
 void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused)
@@ -2177,6 +2266,7 @@ void AFortPlayerController::HookVTables()
     HookSprayVTables();
     HookToyNatives();
     HookPersonalVehicleVTables();
+    HookQuickBarRecordVTables();
 }
 
 int32_t AFortPlayerController::GetItemQuantity(const UFortItemDefinition* ItemDefinition)

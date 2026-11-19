@@ -377,7 +377,9 @@ public:
     // Restores the pawn-death handler (OnPawnDied) and the Athena part of PrepareDeathReport where the build strips them
     // (1.9.1).
     static void HookVTables();
-    static ptrdiff_t TeamMembersOffset() { return Member_TeamMembers.GetOffsetChecked(); }
+    // -1 from 7.40 (CL-5046157), which drops the controller's TeamMembers and SquadMembers.
+    static ptrdiff_t TeamMembersOffset() { return Member_TeamMembers.IsAvailable() ? Member_TeamMembers.GetOffsetChecked() : -1; }
+    static bool HasTeamMembers() { return Member_TeamMembers.IsAvailable(); }
     static ptrdiff_t PlayerDeathReportOffset() { return Member_PlayerDeathReport.GetOffsetChecked(); }
 
 private:

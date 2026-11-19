@@ -8,6 +8,7 @@
 #include "Athena/FortPlayerStateAthena.h"
 #include "Engine/World.h"
 #include "Finder.h"
+#include "FortTeamInfo.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
@@ -288,6 +289,24 @@ bool AFortPlayerControllerAthena::IsTeamOut()
     if (BotManager && AthenaState && BotManager->HasPlayersTeamBotsLeft(static_cast<uint8_t>(AthenaState->TeamIndex)))
     {
         return false;
+    }
+    // 7.40 (CL-5046157) drops the controller's TeamMembers: the team is then its player state's AFortTeamInfo, whose
+    // TeamMembers are the team's controllers (AddToTeam adds each), read through their player states the same way.
+    if (!HasTeamMembers())
+    {
+        AFortTeamInfo* Team = AthenaState && AFortTeamInfo::HasTeamMembers() ? static_cast<AFortTeamInfo*>(AthenaState->PlayerTeam) : nullptr;
+        const TArray<AController*>* Controllers = Team ? &Team->GetMember_TeamMembers() : nullptr;
+        for (int32_t MemberIndex = 0; Controllers && MemberIndex < Controllers->Num(); ++MemberIndex)
+        {
+            AController* Controller = (*Controllers)[MemberIndex];
+            AFortPlayerStateAthena* Member = Controller ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Controller->PlayerState))) : nullptr;
+            AFortPlayerPawn* MemberPawn = Member ? Member->GetCurrentPawn() : nullptr;
+            if (MemberPawn && !MemberPawn->bTearOff)
+            {
+                return false;
+            }
+        }
+        return true;
     }
     const TArray<AFortPlayerStateAthena*>& Members = TeamMembers;
     for (int32_t MemberIndex = 0; MemberIndex < Members.Num(); ++MemberIndex)

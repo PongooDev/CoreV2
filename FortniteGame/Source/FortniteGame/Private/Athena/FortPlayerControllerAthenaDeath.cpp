@@ -17,6 +17,7 @@
 #include "Logging/LogMacros.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
+#include "Packed.h"
 #include "Pawns/FortPawn.h"
 #include "Quests/FortQuestManager.h"
 #include "ReflectionParams.h"
@@ -44,6 +45,9 @@ DEFINE_LOG_CATEGORY_STATIC(LogFortDeath, Log, All);
 
 namespace
 {
+    // 7.20 (Release-7.20, CL-4727874): a bleed-out's elimination distance is the knock's (OnPawnDied).
+    constexpr uint32_t BleedOutKeepsKnockDistanceChangelist = 4727874;
+
     // A team game: the game mode's bSquadPlay up to 4.2. 4.4 drops it and reads the playlist instead: its team win
     // (4.4.2 0xA74DB0, RemoveFromAlivePlayers' last call) checks "cmp [CurrentPlaylistData + MaxTeamSize], 1; jle".
     bool IsSquadPlay(AFortGameModeAthena* GameMode, AFortGameStateAthena* GameState)
@@ -436,8 +440,15 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
             DeathInfo.DeathCause = DeathCause;
         }
         // How far away the eliminator was, or how far the player fell, as the DBNO handling has it (4.1 0xAAE559,
-        // 0xAAE619; 5.10 0xC11510).
-        if (FDeathInfo::HasDistance())
+        // 0xAAE619; 5.10 0xC11510). From 7.20 (CL-4727874) a player who bleeds out keeps the knock's distance: "When a
+        // player dies from Down-But-Not-Out bleed-out damage, the elimination distance is calculated from the original
+        // down location rather than the distance when they are fully eliminated" (v7.20 notes). The knock (7.20's DBNO
+        // handling 0xD986D0) stores it with bDBNO: the downer's pawn's GetDistanceTo the player (0xD98D41), or their
+        // LastFallDistance (0xD98DE4), handed to the player state's store (0xD98DEA), which the fields here start from.
+        // Before 7.20 the elimination took the distance at that moment, as this handler always did.
+        const bool bBledOut = bSetDeathInfo && Packed::Changelist() >= BleedOutKeepsKnockDistanceChangelist && DeathCause == EDeathCause::GetDBNOTimeout()
+            && FDeathInfo::HasInitialized() && StoredDeathInfo.bDBNO && StoredDeathInfo.bInitialized;
+        if (FDeathInfo::HasDistance() && !bBledOut)
         {
             AController* Finisher = Downer ? Downer : Instigator;
             APawn* FinisherPawn = Finisher && Finisher != this ? Finisher->GetPawn() : nullptr;

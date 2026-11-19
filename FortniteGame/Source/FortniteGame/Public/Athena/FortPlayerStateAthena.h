@@ -28,6 +28,8 @@ class EDeathCause
     DefineUnrealEnum(EDeathCause, FortniteGame)
     DefineUEnumValue(OutsideSafeZone)
     DefineUEnumValue(FallDamage)
+    // A DBNO player who bled out, or whom the storm or a fall finished while down (ToDeathCause with bWasDBNO).
+    DefineUEnumValue(DBNOTimeout)
     DefineUEnumValue(Unspecified)
 };
 

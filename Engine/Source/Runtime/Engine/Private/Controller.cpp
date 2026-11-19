@@ -23,3 +23,15 @@ void AController::UnPossess()
     Reflection::FParams Params(StaticFunction_UnPossess());
     Params.Call(this);
 }
+
+bool AController::SetControlRotation(const FRotator& NewRotation)
+{
+    Reflection::FParams Params(FindStaticFunction_SetControlRotation(), true);
+    return Params.Set(L"NewRotation", NewRotation) && Params.Call(this);
+}
+
+bool AController::ClientSetRotation(const FRotator& NewRotation, bool bResetCamera)
+{
+    Reflection::FParams Params(FindStaticFunction_ClientSetRotation(), true);
+    return Params.Set(L"NewRotation", NewRotation) && Params.Set(L"bResetCamera", bResetCamera) && Params.Call(this);
+}

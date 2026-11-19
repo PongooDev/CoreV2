@@ -301,6 +301,8 @@ void AFortMinigame::RespawnMinigamePlayers()
     // 7.40 (CL-5046157): the move goes through the travel screen and the game's client-acknowledged teleport
     // (StartTeleportForMinigameStart); the hold and the skydive's choice stay as below.
     const bool bClientAcknowledged = UsesClientAcknowledgedTeleport();
+    UFunction* const OverrideFunction = FindStaticFunction_OverridePlayerSpawnLocation();
+    const bool bRotationFromGame = OverrideFunction && OverrideFunction->FindPropertyByName(FName(L"OutRotation", FNAME_Find)) != nullptr;
     int32_t Moved = 0;
     int32_t Skydiving = 0;
     int32_t Held = 0;
@@ -352,12 +354,21 @@ void AFortMinigame::RespawnMinigamePlayers()
             continue;
         }
         AActor* PawnActor = reinterpret_cast<AActor*>(Pawn);
-        if (!PawnActor->TeleportTo(Location, PawnActor->GetActorRotation()))
+        if (!PawnActor->TeleportTo(Location, Rotation))
         {
             Held += bHold && !bSkydive ? 1 : 0;
             continue;
         }
         ++Moved;
+        // The game's rotation is the respawn's (7.30's volume manager hands it to the respawn with the location), and a
+        // respawned player looks that way: AGameModeBase::FinishRestartPlayer sets the controller's rotation (without
+        // roll) and sends the client ClientSetRotation(rotation, true). A player pawn turns with its controller's
+        // rotation, so the teleport's alone would last until the client's next move.
+        if (bRotationFromGame)
+        {
+            Controller->SetControlRotation(FRotator(Rotation.Pitch, Rotation.Yaw, 0.0f));
+            Controller->ClientSetRotation(Rotation, true);
+        }
         if (bSkydive)
         {
             AthenaPawn->BeginSkydiving(false);

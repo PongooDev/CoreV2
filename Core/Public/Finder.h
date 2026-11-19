@@ -339,6 +339,9 @@ namespace Finder
     // And the calls to the shared empty function in place of the stripped static team sender (6.00's TeamInteract): the
     // event's type, the instigating player controller, then the target, three tag containers, count and flush.
     const std::vector<uint8_t*>& StrippedQuestTeamStatEventCalls();
+    // 7.20 on, with the stat events stripped: the call in UFortQuestManager::SendComplexCustomStatEvent's exec to its
+    // native, whose first call is GetSourceAndContextTags' native and which sends nothing. Null when not found.
+    uint8_t* StrippedComplexCustomStatEventCall(UFunction* SendComplexCustomStatEvent);
     bool ResolveAthenaHeroLive();
     uint8_t* AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset);
     bool ResolveAthenaMenuHero();

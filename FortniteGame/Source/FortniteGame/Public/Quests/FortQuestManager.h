@@ -29,6 +29,8 @@ class EFortQuestObjectiveStatEvent
     DefineUEnumValue(Ability)
     DefineUEnumValue(WaveComplete)
     DefineUEnumValue(Custom)
+    // 7.20 on (after Custom): what UFortQuestManager::SendComplexCustomStatEvent sends.
+    DefineUEnumValue(ComplexCustom)
     DefineUEnumValue(Client)
     DefineUEnumValue(NumGameplayEvents)
     DefineUEnumValue(Acquire)
@@ -142,6 +144,7 @@ class UFortQuestManager : public UObject
     DefineUnrealClass(UFortQuestManager, FortniteGame)
     DefineUFunction(GetSourceAndContextTags)
     DefineUFunction(GetQuestWithDefinition)
+    DefineUFunction(SendComplexCustomStatEvent)
 
 public:
     // The quests the manager's profile holds, as quest items (the server's copy for a player).
@@ -165,6 +168,11 @@ public:
     int32_t AdvanceObjective(AFortPlayerController* PlayerController, UFortQuestItem* Quest, UFortQuestObjectiveInfo* Objective, int32_t Count);
     void SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
     void SendItemStatEvent(EFortQuestObjectiveStatEvent Type, UFortItemDefinition* ItemDefinition, int32_t Count);
+    // 7.20 on (Final, BlueprintAuthorityOnly, Blueprint-callable): a ComplexCustom stat event at TargetObject with
+    // TargetTags, from the player's own source tags and AdditionalSourceTags, in the player's context. 7.30 adds the
+    // out parameters QuestActive and QuestCompleted. The build's native keeps only the tags' gathering (Core restores the
+    // send, Hook).
+    void SendComplexCustomStatEvent(UObject* TargetObject, const FGameplayTagContainer& AdditionalSourceTags, const FGameplayTagContainer& TargetTags, bool& QuestActive, bool& QuestCompleted, int32_t Count);
     void SendEndPrimaryMission(const FString& MatchmakingSessionId, const FString& MissionName, const FString& MissionStatus, TStructArray<FFortQuestEarnedBadgeData>& EarnedBadges, const TArray<FString>& EarnedItemCaches, int32_t DifficultyIncreaseTier, int32_t NumMissionPoints, bool bCriticalMatchBonus);
     // 5.21's EndMatch, which replaced EndPrimaryMission: the player's FAccountIdAndMatchEndData (EndPrimaryMission's data
     // and the score EarnScore sent) through the bound account profile.
@@ -183,6 +191,11 @@ private:
     // the instigating controller's team.
     static void SendTeamStatEvent(uint8_t Type, AFortPlayerController* PlayerController, UObject* TargetObject, const FGameplayTagContainer& TargetTags, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& ContextTags, int32_t Count, bool bFlush);
     static void SendCustomStatEventHK(UFortQuestManager* This, const void* ObjectiveStat, int32_t Count, bool bForceFlush);
+    // The exec's call to the native (the containers by value, which the callee destroys, as the build's native does):
+    // 7.20's five arguments, and 7.30's with the out parameters' addresses.
+    static void SendComplexCustomStatEventHK(UFortQuestManager* This, UObject* TargetObject, FGameplayTagContainer AdditionalSourceTags, FGameplayTagContainer TargetTags, int32_t Count);
+    static void SendComplexCustomStatEventWithResultsHK(UFortQuestManager* This, UObject* TargetObject, FGameplayTagContainer AdditionalSourceTags, FGameplayTagContainer TargetTags, bool* QuestActive, bool* QuestCompleted,
+        int32_t Count);
 };
 
 class UFortRegisteredPlayerInfo : public UObject

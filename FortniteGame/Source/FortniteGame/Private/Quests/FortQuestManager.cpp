@@ -55,6 +55,10 @@ namespace
     // Whether the last event Core's SendStatEventWithTags took flushed (it asked to, or it completed an objective), for
     // SendStatEventWithTagsHK. The builds that keep the native one leave it false.
     bool bLastEventFlushed = false;
+    // Whether the last event Core's SendStatEventWithTags took matched an objective of an active quest, and whether it
+    // brought one to its count (SendComplexCustomStatEvent's QuestActive and QuestCompleted, 7.30 on).
+    bool bLastEventMatchedObjective = false;
+    bool bLastEventCompletedObjective = false;
 
     // Whether the match's playlist keeps its players' quests where they are (Playground's bIgnoreDefaultQuests, CoreV2
     // #344). False before 3.5, whose playlists aren't data assets.
@@ -1174,6 +1178,7 @@ namespace
                     {
                         continue;
                     }
+                    bLastEventMatchedObjective = true;
                     if (bOncePerMatch)
                     {
                         if (!UpdatedThisMatch)
@@ -1218,6 +1223,7 @@ namespace
                 {
                     bFlush = true;
                     NewCount = Required;
+                    bLastEventCompletedObjective = true;
                 }
                 ShowObjectiveCount(PlayerController, Definition, BackendName, NewCount);
             }
@@ -1343,6 +1349,60 @@ void UFortQuestManager::SendStatEvent(EFortQuestObjectiveStatEvent Type, UObject
     }
 }
 
+void UFortQuestManager::SendComplexCustomStatEvent(UObject* TargetObject, const FGameplayTagContainer& AdditionalSourceTags, const FGameplayTagContainer& TargetTags, bool& QuestActive, bool& QuestCompleted,
+    int32_t Count)
+{
+#if WITH_SERVER_CODE
+    // What the build's native keeps (7.20 0x1457270, 7.40 0x14A7B50): the player's source and context tags
+    // (GetSourceAndContextTags, its first call) and AdditionalSourceTags appended to the source tags. The event itself
+    // went with the stripped SendStatEventWithTags: a ComplexCustom one at TargetObject with TargetTags, which the
+    // challenges' ComplexCustom objectives listen to (7.20's destroy_biplanes_in_air and use_zipline, 7.30's
+    // complete_timed_trial_biplane_0N and destroy_athena_golden_balloon_NN by their Athena.Quests.* tags, 7.40's
+    // collect_creative_coin_custom).
+    FGameplayTagContainer SourceTags;
+    FGameplayTagContainer ContextTags;
+    GetSourceAndContextTags(SourceTags, ContextTags);
+    SourceTags.AppendTags(AdditionalSourceTags);
+    bLastEventMatchedObjective = false;
+    bLastEventCompletedObjective = false;
+    SendStatEvent(EFortQuestObjectiveStatEvent::GetComplexCustom(), TargetObject, TargetTags, SourceTags, ContextTags, Count, false);
+    // Core's: 7.30's QuestActive and QuestCompleted (the build's native never writes them) are whether the event matched
+    // an objective of one of the player's active quests, and whether it brought one to its count.
+    QuestActive = bLastEventMatchedObjective;
+    QuestCompleted = bLastEventCompletedObjective;
+    static bool bLoggedFirstUse = false;
+    if (!bLoggedFirstUse)
+    {
+        bLoggedFirstUse = true;
+        Log::Info(L"UFortQuestManager::SendComplexCustomStatEvent: first event for {} (target {}, {} target tags; an active quest's objective {}{})", GetName().ToStdString(),
+            TargetObject ? TargetObject->GetName().ToStdString() : std::wstring(L"none"), TargetTags.Num(), QuestActive ? L"matched" : L"didn't match", QuestCompleted ? L", completed" : L"");
+    }
+#endif
+}
+
+void UFortQuestManager::SendComplexCustomStatEventHK(UFortQuestManager* This, UObject* TargetObject, FGameplayTagContainer AdditionalSourceTags, FGameplayTagContainer TargetTags, int32_t Count)
+{
+    bool QuestActive = false;
+    bool QuestCompleted = false;
+    This->SendComplexCustomStatEvent(TargetObject, AdditionalSourceTags, TargetTags, QuestActive, QuestCompleted, Count);
+}
+
+void UFortQuestManager::SendComplexCustomStatEventWithResultsHK(UFortQuestManager* This, UObject* TargetObject, FGameplayTagContainer AdditionalSourceTags, FGameplayTagContainer TargetTags, bool* QuestActive,
+    bool* QuestCompleted, int32_t Count)
+{
+    bool Active = false;
+    bool Completed = false;
+    This->SendComplexCustomStatEvent(TargetObject, AdditionalSourceTags, TargetTags, Active, Completed, Count);
+    if (QuestActive)
+    {
+        *QuestActive = Active;
+    }
+    if (QuestCompleted)
+    {
+        *QuestCompleted = Completed;
+    }
+}
+
 // Collect and Craft events name the item definition, which item-event objectives (ItemReference) and stat rows with
 // Item.* conditions are matched against.
 void UFortQuestManager::SendItemStatEvent(EFortQuestObjectiveStatEvent Type, UFortItemDefinition* ItemDefinition, int32_t Count)
@@ -1461,6 +1521,24 @@ void UFortQuestManager::Hook()
         Hooks::RedirectCall(L"UFortQuestManager::SendTeamStatEvent (stripped)", Call, reinterpret_cast<void*>(&SendTeamStatEvent));
     }
     Hooks::Detour(L"UFortQuestManager::SendCustomStatEvent (stripped)", reinterpret_cast<void*>(Natives::UFortQuestManager_SendCustomStatEvent), &SendCustomStatEventHK, nullptr);
+
+    // 7.20 on: SendComplexCustomStatEvent's native gathers the event's tags and sends nothing (its send went with
+    // SendStatEventWithTags). The exec's call to it comes to Core's, with 7.30's QuestActive and QuestCompleted where the
+    // UFunction has them.
+    if (UFunction* ComplexCustom = FindStaticFunction_SendComplexCustomStatEvent())
+    {
+        uint8_t* Call = Finder::StrippedComplexCustomStatEventCall(ComplexCustom);
+        const bool bWithResults = ComplexCustom->FindPropertyByName(FName(L"QuestActive", FNAME_Find)) && ComplexCustom->FindPropertyByName(FName(L"QuestCompleted", FNAME_Find));
+        if (!Call)
+        {
+            Log::Error(L"Finder: UFortQuestManager::SendComplexCustomStatEvent's call to its native not found, so the challenges' ComplexCustom events from Blueprints move nothing");
+        }
+        else
+        {
+            Hooks::RedirectCall(L"UFortQuestManager::SendComplexCustomStatEvent (stripped send)", Call,
+                bWithResults ? reinterpret_cast<void*>(&SendComplexCustomStatEventWithResultsHK) : reinterpret_cast<void*>(&SendComplexCustomStatEventHK));
+        }
+    }
 #endif
 }
 

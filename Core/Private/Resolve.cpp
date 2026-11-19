@@ -7775,6 +7775,39 @@ uint8_t* Finder::ImplementationCall(UFunction* Function)
     return reinterpret_cast<uint8_t*>(Implementation);
 }
 
+uint8_t* Finder::StrippedComplexCustomStatEventCall(UFunction* SendComplexCustomStatEvent)
+{
+    // 7.20's exec (0x1795C60; 7.40 0x17F6950) steps over the parameters, copies the two tag containers and calls the
+    // native (7.20 0x1457270, 7.40 0x14A7B50), whose first call is GetSourceAndContextTags' native (7.20 0x1444C20) and
+    // which then appends AdditionalSourceTags and destroys its containers: no call is left of the send
+    // (SendStatEventWithTags is stripped, Natives::UFortQuestManager_bStatEventsStripped). Its call is the exec's call to
+    // the function whose first call is that one.
+    const uintptr_t SourceAndContextTags = Natives::UFortQuestManager_bStatEventsStripped ? ExecImplementation(L"/Script/FortniteGame.FortQuestManager:GetSourceAndContextTags") : 0;
+    const uintptr_t Exec = SendComplexCustomStatEvent && SourceAndContextTags ? reinterpret_cast<uintptr_t>(SendComplexCustomStatEvent->GetNativeFunc()) : 0;
+    const uintptr_t ExecEnd = IsInText(Exec) ? Finder::FunctionEnd(Exec) : 0;
+    uint8_t* Found = nullptr;
+    int32_t Matches = 0;
+    for (uintptr_t Call = ExecEnd ? FindRawCall(Exec, ExecEnd) : 0; Call; Call = FindRawCall(Call + 1, ExecEnd))
+    {
+        const uintptr_t Implementation = Finder::RelativeTarget(Call, 1, 5);
+        const uintptr_t ImplementationEnd = IsInText(Implementation) && Finder::FunctionStart(Implementation) == Implementation ? Finder::FunctionEnd(Implementation) : 0;
+        const uintptr_t First = ImplementationEnd ? FindRawCall(Implementation, ImplementationEnd) : 0;
+        if (First && Finder::RelativeTarget(First, 1, 5) == SourceAndContextTags)
+        {
+            // A native that still calls the stripped typed sender (the shared empty function) has its send among the
+            // stripped stat event calls already.
+            bool bCallsStub = false;
+            for (uintptr_t Inner = First; Inner && !bCallsStub; Inner = FindRawCall(Inner + 1, ImplementationEnd))
+            {
+                bCallsStub = Finder::RelativeTarget(Inner, 1, 5) == reinterpret_cast<uintptr_t>(Natives::SharedEmptyFunction);
+            }
+            Found = bCallsStub ? nullptr : reinterpret_cast<uint8_t*>(Call);
+            ++Matches;
+        }
+    }
+    return Matches == 1 ? Found : nullptr;
+}
+
 uint8_t* Finder::FirstCallInImplementation(UFunction* Function, uintptr_t Target)
 {
     const uintptr_t Exec = Function ? reinterpret_cast<uintptr_t>(Function->GetNativeFunc()) : 0;

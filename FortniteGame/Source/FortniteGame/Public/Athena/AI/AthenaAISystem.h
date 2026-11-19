@@ -51,4 +51,18 @@ public:
     // Where the match's AI settings arrive after the world began play (Core's playlist steps, after the map loaded),
     // they reach the perception manager as StartPlay would have given them (21.40's UAthenaAISystem::OnAISettingsUpdated).
     void OnAISettingsUpdated(const UObject* Settings);
+
+    // Takes each pending-kill controller still in AIControllers out with the build's UnregisterManagedController, as
+    // AAthenaAIController::BeginDestroy would (6.21 0xA899F0, 7.20 0xAFF570), but while its entry still points at it: an
+    // entry its ManagedTickIndex doesn't point at (a controller listed twice) goes too, through the same unregister with
+    // the index set to that entry. Returns how many entries left (Twice: how many of them were second entries).
+    int32_t UnregisterPendingKillControllers(int32_t& Twice);
+
+private:
+    // FCoreUObjectDelegates::GetPreGarbageCollectDelegate's handler (bound once, by the first system to watch):
+    // UnregisterPendingKillControllers for each watched system, before the collector marks what is reachable.
+    static void HandlePreGarbageCollect();
+    // Has this system's list cleared of pending-kill controllers as each garbage collection begins (#419). Needs the
+    // build's unregister (AAthenaAIController::BindDestroyedForWorld resolves it) and the delegate; logged once.
+    void WatchGarbageCollection();
 };

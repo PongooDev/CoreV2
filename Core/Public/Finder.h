@@ -218,8 +218,14 @@ namespace Finder
     // mode's AISettings (Natives::UAthenaAIPerceptionManager_OnAISettingsUpdated). False (quietly) without UAthenaAISystem.
     bool ResolveAthenaAIPerceptionLive();
     // UAthenaAISystem::UnregisterManagedController (Natives), from AAthenaAIController's UnPossess slot: its one direct
-    // call that reads the system's AIControllers array and count (AIControllersOffset and +8).
-    bool ResolveAthenaAIControllerUnregisterLive(ptrdiff_t AIControllersOffset);
+    // call that reads the system's AIControllers array and count (AIControllersOffset and +8). Also the controller's
+    // ManagedTickIndex (Natives::AAthenaAIController_ManagedTickIndex), the unregister's first clear of an index, when it
+    // lies in AAthenaAIController's own unreflected bytes (MinOffset to ClassSize); -1 otherwise.
+    bool ResolveAthenaAIControllerUnregisterLive(ptrdiff_t AIControllersOffset, int32_t MinOffset, int32_t ClassSize);
+    // FCoreUObjectDelegates::GetPreGarbageCollectDelegate()'s delegate (Natives::FCoreUObjectDelegates_PreGarbageCollect):
+    // the getter CollectGarbageInternal calls and broadcasts right after its "is flushing async loading" log. Checked on
+    // UE 4.21 and 4.22 (6.21 to 7.40); false (logged once) where that shape isn't there.
+    bool ResolvePreGarbageCollectLive();
     bool ResolveLoginLive();
     bool ResolveMissionGenerationLive();
     bool ResolveMissionObjectivesLive();

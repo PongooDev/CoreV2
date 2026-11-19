@@ -1,6 +1,8 @@
 #pragma once
 
 #include "AI/FortAIGoalManager.h"
+#include "Natives.h"
+#include "ObjectLayout.h"
 #include "UObject/Stack.h"
 
 class AActor;
@@ -21,11 +23,27 @@ class UWorld;
 // #447: 6.21, a 93-bot Deimos squads match, crashed in the garbage collector's BeginDestroy of such a controller
 // (0xAA6E71, writing null+0x558; the call from 0xA899F0 under UnhashUnreachableObjects 0x190C3F0). 6.20 would crash
 // in the next UnPossess instead.
+//
+// #419: the same crash on 7.20 (CL-4727874, Playlist_Deimos_Squad_Winter, 38 controllers listed) with the OnDestroyed
+// unregister below already bound: BeginDestroy (0xAFF570) of a pending-kill controller that still had its index took
+// it out (0xB1C720) and wrote through the null last entry (0xB1C802, null+0x570). Possess (slot 0xD1, 0xB146F0)
+// registers the controller after AFortAIController's Possess (0xB14A90) whatever that did, without looking at its
+// index, and that one does nothing for a null or pending-kill pawn: a controller already listed is listed again (a
+// headless 7.20 boot: two Possess(nullptr) listed one controller twice, and its OnDestroyed unregister then took out
+// only the entry its index pointed at, leaving the other pending kill). That the reporter's match got there this way
+// isn't proven. So UAthenaAISystem also takes every pending-kill controller's entries out as each garbage collection
+// begins (UAthenaAISystem::UnregisterPendingKillControllers).
 class AAthenaAIController : public AFortAIController
 {
     DefineUnrealClass(AAthenaAIController, FortniteGame)
 
 public:
+    // 21.40's name, unreflected: the controller's place in its AI system's AIControllers, which Possess's
+    // RegisterManagedController stores and UnregisterManagedController's RemoveAtSwap reads and leaves -1. Available once
+    // Finder::ResolveAthenaAIControllerUnregisterLive found it.
+    DefineNativeMember(int32_t, ManagedTickIndex, AAthenaAIController_ManagedTickIndex)
+    static bool HasManagedTickIndex() { return Natives::AAthenaAIController_ManagedTickIndex > 0; }
+
     // Has each of the world's Athena AI controllers, the ones already there and each one spawned later
     // (UWorld::OnActorSpawned), take itself out of the AI system as it is destroyed (AActor::OnDestroyed, which
     // AActor::Destroyed broadcasts after AController::Destroyed's UnPossess, before the actor is pending kill). Once per

@@ -864,6 +864,15 @@ namespace Natives
     // it takes the controller (and its behavior tree and path following components) out of, each where its index isn't
     // -1. Finder::ResolveAthenaAIControllerUnregisterLive.
     inline void (*UAthenaAISystem_UnregisterManagedController)(AAthenaAIController* Controller) = nullptr;
+    // From 6.x: AAthenaAIController::ManagedTickIndex (21.40's name), the controller's place in its AI system's
+    // AIControllers, -1 while it is out: the unregister's first `mov dword ptr [reg+X], -1` (6.21 CL-4526925 +0x558 at
+    // 0xAA6E0B, 7.20 CL-4727874 +0x570 at 0xB1C79C). The same finder.
+    inline ptrdiff_t AAthenaAIController_ManagedTickIndex = -1;
+    // FCoreUObjectDelegates::GetPreGarbageCollectDelegate()'s static FSimpleMulticastDelegate, which CollectGarbageInternal
+    // broadcasts before it marks what is reachable (6.21 CL-4526925 0x51DE780 from the getter 0x196A2A0 called at
+    // 0x18EB920; 7.20 CL-4727874 0x55FCCF0 from 0x1AE9CD0 at 0x1A73F5A; 7.30 CL-4834550 0x565A430; 7.40 CL-5046157
+    // 0x56D0320): Finder::ResolvePreGarbageCollectLive.
+    inline void* FCoreUObjectDelegates_PreGarbageCollect = nullptr;
     // AFortGameMode::AttemptChangeTeamInfoForController(uint8 Team, AFortPlayerController* Controller)'s slot (3.2 0xA88,
     // 0xB526C0; 21.40's name and signature): PlacePlayerOnTeam's change of a joining player's team, which puts the
     // controller in the team's AFortTeamInfo and its player state on the team. It takes any controller whose player

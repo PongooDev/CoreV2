@@ -11,6 +11,20 @@ enum ELoadFlags : uint32_t
     LOAD_Quiet = 0x00002000,
 };
 
+template <typename... ParamTypes>
+class TMulticastDelegate;
+using FSimpleMulticastDelegate = TMulticastDelegate<>;
+
+// Epic's FCoreUObjectDelegates (UObjectGlobals.h): the engine's own broadcasts about UObjects, reached through the
+// build's statics (found once, on the game thread).
+struct FCoreUObjectDelegates
+{
+    // Epic's: what CollectGarbageInternal broadcasts before it marks what is reachable, so a system can let go of objects
+    // that are on their way out while its references to them are still whole. Null where the build's isn't found
+    // (Finder::ResolvePreGarbageCollectLive, logged once): only looked for on UE 4.21 and later builds that need it.
+    static FSimpleMulticastDelegate* GetPreGarbageCollectDelegate();
+};
+
 UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass = false);
 UObject* StaticLoadObject(UClass* Class, UObject* InOuter, const wchar_t* Name, const wchar_t* Filename = nullptr, uint32_t LoadFlags = LOAD_None, void* Sandbox = nullptr, bool bAllowObjectReconciliation = true);
 UObject* StaticConstructObject_Internal(UClass* Class, UObject* InOuter = nullptr, FName Name = FName(), EObjectFlags SetFlags = RF_NoFlags, EInternalObjectFlags InternalSetFlags = EInternalObjectFlags::None, UObject* Template = nullptr, bool bCopyTransientsFromClassDefaults = false, void* InstanceGraph = nullptr, bool bAssumeTemplateIsArchetype = false);

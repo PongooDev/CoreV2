@@ -1,6 +1,13 @@
 #include "pch.h"
 #include "UObject/UObjectGlobals.h"
+#include "Delegates/Delegate.h"
+#include "Finder.h"
 #include "Natives.h"
+
+FSimpleMulticastDelegate* FCoreUObjectDelegates::GetPreGarbageCollectDelegate()
+{
+    return Finder::ResolvePreGarbageCollectLive() ? static_cast<FSimpleMulticastDelegate*>(Natives::FCoreUObjectDelegates_PreGarbageCollect) : nullptr;
+}
 
 UObject* StaticFindObject(UClass* Class, UObject* InOuter, const wchar_t* Name, bool ExactClass)
 {

@@ -9690,7 +9690,7 @@ bool Finder::ResolveAthenaAIPerceptionLive()
     return true;
 }
 
-bool Finder::ResolveAthenaAIControllerUnregisterLive(ptrdiff_t AIControllersOffset)
+bool Finder::ResolveAthenaAIControllerUnregisterLive(ptrdiff_t AIControllersOffset, int32_t MinOffset, int32_t ClassSize)
 {
     // AAthenaAIController's UnPossess (6.21 CL-4526925 slot 0xD2, 0xAA6A90; 6.20 CL-4497486 0xAAD970; 6.22 0xAA8630):
     // with a pawn (6.21/6.22: and its index not -1) it calls UAthenaAISystem::UnregisterManagedController (21.40's name;
@@ -9727,8 +9727,103 @@ bool Finder::ResolveAthenaAIControllerUnregisterLive(ptrdiff_t AIControllersOffs
         return false;
     }
     Natives::UAthenaAISystem_UnregisterManagedController = reinterpret_cast<decltype(Natives::UAthenaAISystem_UnregisterManagedController)>(Unregisters[0]);
-    Log::Info(L"Finder: UAthenaAISystem::UnregisterManagedController is at 0x{:X} (AAthenaAIController's UnPossess, slot 0x{:X} 0x{:X})", Unregisters[0] - Finder::ImageBase(),
-        UnPossessIndex, AthenaUnPossess - Finder::ImageBase());
+    // The unregister then clears the controller's ManagedTickIndex, before its behavior tree's and path following
+    // component's (6.21 0xAA6E0B mov dword ptr [rdi+558h], -1; 7.20 0xB1C79C [rdi+570h]): the first C7 /0 disp32 of -1.
+    // Only an offset inside AAthenaAIController's own bytes past its parent's is taken.
+    const uintptr_t UnregisterEnd = Finder::FunctionEnd(Unregisters[0]);
+    for (uintptr_t At = Unregisters[0]; At + 10 <= UnregisterEnd; ++At)
+    {
+        if (Byte(At) == 0xC7 && (Byte(At + 1) & 0xF8) == 0x80 && (Byte(At + 1) & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(At + 6) == -1)
+        {
+            const int32_t Offset = *reinterpret_cast<const int32_t*>(At + 2);
+            if (Offset >= MinOffset && Offset + 4 <= ClassSize)
+            {
+                Natives::AAthenaAIController_ManagedTickIndex = Offset;
+            }
+            break;
+        }
+    }
+    Log::Info(L"Finder: UAthenaAISystem::UnregisterManagedController is at 0x{:X} (AAthenaAIController's UnPossess, slot 0x{:X} 0x{:X}), the controller's ManagedTickIndex +0x{:X}",
+        Unregisters[0] - Finder::ImageBase(), UnPossessIndex, AthenaUnPossess - Finder::ImageBase(), Natives::AAthenaAIController_ManagedTickIndex);
+    return true;
+}
+
+bool Finder::ResolvePreGarbageCollectLive()
+{
+    // UE 4.21 and 4.22's CollectGarbageInternal, after it flushed async loading (the "is flushing async loading" log),
+    // runs FCoreUObjectDelegates::GetPreGarbageCollectDelegate().Broadcast() before it marks what is reachable:
+    //   call GetPreGarbageCollectDelegate; mov rcx, rax; call TMulticastDelegate<void>::Broadcast
+    // (6.21 CL-4526925 0x18EB920: 0x196A2A0, 0x2AF1B0; 7.20 CL-4727874 0x1A73F5A: 0x1AE9CD0, 0x2B2F60; 7.30 CL-4834550
+    // 0x1AB53CA; 7.40 CL-5046157 0x1ACF48A). The getter returns its function-local static (lea rax, [rip+X] after the
+    // thread-safe init check), and Broadcast first takes the invocation list's lock (inc dword ptr [rcx+14h]).
+    static bool bTried = false;
+    if (Natives::FCoreUObjectDelegates_PreGarbageCollect || bTried)
+    {
+        return Natives::FCoreUObjectDelegates_PreGarbageCollect != nullptr;
+    }
+    bTried = true;
+    const auto TakesLock = [](uintptr_t Broadcast)
+    {
+        for (uintptr_t At = Broadcast; At < Broadcast + 0x10 && IsInText(At + 3); ++At)
+        {
+            if (Byte(At) == 0xFF && Byte(At + 1) == 0x41 && Byte(At + 2) == 0x14)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    const auto ReturnedStatic = [](uintptr_t Getter) -> uintptr_t
+    {
+        for (uintptr_t At = Getter; At < Getter + 0x40 && IsInText(At + 7); ++At)
+        {
+            if (Byte(At) == 0x48 && Byte(At + 1) == 0x8D && Byte(At + 2) == 0x05)
+            {
+                const uintptr_t Static = Finder::RelativeTarget(At, 3, 7);
+                return IsInText(Static) ? 0 : Static;
+            }
+        }
+        return 0;
+    };
+    std::vector<uintptr_t> Found;
+    for (const uintptr_t Reference : Finder::StringRefs(L"CollectGarbageInternal() is flushing async loading"))
+    {
+        for (uintptr_t At = Reference; At < Reference + 0x100 && IsInText(At + 13); ++At)
+        {
+            if (Byte(At) != 0xE8 || Byte(At + 5) != 0x48 || Byte(At + 6) != 0x8B || Byte(At + 7) != 0xC8 || Byte(At + 8) != 0xE8)
+            {
+                continue;
+            }
+            const uintptr_t Getter = Finder::RelativeTarget(At, 1, 5);
+            const uintptr_t Broadcast = Finder::RelativeTarget(At + 8, 1, 5);
+            const uintptr_t Static = IsInText(Getter) && IsInText(Broadcast) && TakesLock(Broadcast) ? ReturnedStatic(Getter) : 0;
+            if (Static && std::find(Found.begin(), Found.end(), Static) == Found.end())
+            {
+                Found.push_back(Static);
+            }
+            break;
+        }
+    }
+    // A multicast delegate as the build lays it out (invocation list data, count +8, capacity +0xC, compaction threshold
+    // +0x10, lock count +0x14), not mid-broadcast.
+    const auto LooksLikeDelegate = [](uintptr_t Address)
+    {
+        if (!Finder::IsReadable(reinterpret_cast<const void*>(Address), 0x18))
+        {
+            return false;
+        }
+        const int32_t Num = *reinterpret_cast<const int32_t*>(Address + 8);
+        const int32_t Max = *reinterpret_cast<const int32_t*>(Address + 0xC);
+        const int32_t LockCount = *reinterpret_cast<const int32_t*>(Address + 0x14);
+        return Num >= 0 && Num <= Max && Max < 0x10000 && LockCount == 0 && (Max == 0 || *reinterpret_cast<const uintptr_t*>(Address) != 0);
+    };
+    if (Found.size() != 1 || !LooksLikeDelegate(Found[0]))
+    {
+        Log::Error(L"Finder: FCoreUObjectDelegates::GetPreGarbageCollectDelegate not found ({} candidates after CollectGarbageInternal's flush log)", Found.size());
+        return false;
+    }
+    Natives::FCoreUObjectDelegates_PreGarbageCollect = reinterpret_cast<void*>(Found[0]);
+    Log::Info(L"Finder: FCoreUObjectDelegates::GetPreGarbageCollectDelegate's delegate is at 0x{:X} (CollectGarbageInternal's broadcast)", Found[0] - Finder::ImageBase());
     return true;
 }
 

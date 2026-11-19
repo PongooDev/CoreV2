@@ -64,7 +64,10 @@ void AAthenaAIController::BindDestroyedForWorld(UWorld* World)
     {
         return;
     }
-    if (!Finder::ResolveAthenaAIControllerUnregisterLive(UAthenaAISystem::AIControllersOffset()))
+    // ManagedTickIndex lies in the controller's own bytes, past AFortAIController's.
+    const UClass* Parent = StaticClass()->GetSuperClass();
+    if (!Finder::ResolveAthenaAIControllerUnregisterLive(UAthenaAISystem::AIControllersOffset(), Parent ? Parent->GetPropertiesSize() : StaticClass()->GetPropertiesSize(),
+        StaticClass()->GetPropertiesSize()))
     {
         return;
     }

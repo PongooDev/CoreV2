@@ -14,3 +14,6 @@
 #include "Delegates/DelegateInstancesImpl.h"
 #include "Delegates/MulticastDelegateBase.h"
 #include "Delegates/DelegateSignatureImpl.inl"
+
+// Epic's DECLARE_MULTICAST_DELEGATE(FSimpleMulticastDelegate): a multicast delegate without parameters.
+using FSimpleMulticastDelegate = TMulticastDelegate<>;

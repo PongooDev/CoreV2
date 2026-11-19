@@ -214,9 +214,21 @@ namespace
     // shopping cart and golf cart (20%), the Quadcrasher (100%), the Stormwing (80%) and, as the native
     // FortAthenaJackalVehicle that no spawner spawns, the Driftboard (0%): no Driftboard stays. Not in Creative, whose
     // islands' vehicles are the players' own.
+    // From 7.30 the function is ShouldSpawnVehicle (the same check, but true while the game state's
+    // bPlaylistDataIsLoaded is false) and the spawner rolls it itself: Athena_VehicleSpawner_C's SpawnVehicle, with
+    // authority and AreAthenaVehiclesEnabled, calls ShouldSpawnVehicle(GetVehicleClassOverride(VehicleClass), or
+    // VehicleClass when there is no override) and spawns nothing when it says no. The spawner runs SpawnVehicle at
+    // BeginPlay once the map info is initialized, else from the game mode's OnMapInfoInitialized, which the game
+    // broadcasts from AFortGameStateAthena::OnPlaylistDataLoadCompleted (7.30 0xD722C0) -> AFortGameModeAthena::
+    // OnPlaylistDataLoaded (0xD238B0) -> AFortGameStateAthena::InitializeMapInfo (0xD6C400), all intact; it sets
+    // bPlaylistDataIsLoaded only after that, so the spawners already waiting keep their vehicle and later ones roll.
+    // That is the game's own order with its own check (0xD2FB60, called only through its exec), so Core rolls nothing
+    // on 7.30: a second roll would remove vehicles the game kept. It only counts what the spawners spawned. Builds with
+    // neither function (1.1 to 7.10) do nothing here.
     void ApplyVehicleSpawnPercents(AFortGameModeAthena* GameMode)
     {
-        if (!AFortGameModeAthena::HasShouldSpawnVehiclePostPlaylistLoad() || AFortPlayerControllerAthena::IsCreativeMatch(GameMode))
+        const bool bCoreRolls = AFortGameModeAthena::HasShouldSpawnVehiclePostPlaylistLoad();
+        if ((!bCoreRolls && !AFortGameModeAthena::HasShouldSpawnVehicle()) || AFortPlayerControllerAthena::IsCreativeMatch(GameMode))
         {
             return;
         }
@@ -231,6 +243,7 @@ namespace
         UWorld* World = GameMode->GetWorld();
         int32_t Placed = 0;
         int32_t Destroyed = 0;
+        int32_t Spawners = 0;
         for (TObjectIterator<AActor> It; It; ++It)
         {
             AActor* Spawner = *It;
@@ -241,6 +254,12 @@ namespace
             uint8_t* const SpawnerData = reinterpret_cast<uint8_t*>(Spawner);
             UClass* VehicleClass = *reinterpret_cast<UClass**>(SpawnerData + VehicleClassProperty->GetOffset_ForInternal());
             AActor*& Vehicle = *reinterpret_cast<AActor**>(SpawnerData + SpawnedVehicleProperty->GetOffset_ForInternal());
+            if (!bCoreRolls)
+            {
+                ++Spawners;
+                Placed += Vehicle && !Vehicle->IsPendingKill();
+                continue;
+            }
             if (!Vehicle || Vehicle->IsPendingKill())
             {
                 continue;
@@ -251,6 +270,11 @@ namespace
                 Vehicle = nullptr;
                 ++Destroyed;
             }
+        }
+        if (!bCoreRolls)
+        {
+            Log::Info(L"Battle Royale: {} of {} placed vehicle spawners spawned their vehicle (their own ShouldSpawnVehicle), {} didn't; Core rolls none", Placed, Spawners, Spawners - Placed);
+            return;
         }
         Log::Info(L"Battle Royale: {} of {} placed vehicles spawn (ShouldSpawnVehiclePostPlaylistLoad), {} destroyed", Placed - Destroyed, Placed, Destroyed);
     }

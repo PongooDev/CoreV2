@@ -439,7 +439,12 @@ namespace
         // StaticAllocateObject isn't a native Core calls, only how StaticConstructObject_Internal is told apart.
         size_t AllocateRef = 0;
         size_t AllocateRefs = 0;
-        const uintptr_t StaticAllocate = FunctionOfFirstRef(L"Objects have the same fully qualified name but different paths.\n\tNew Object: %s %s.%s\n\tExisting Object: %s", AllocateRef, AllocateRefs);
+        uintptr_t StaticAllocate = FunctionOfFirstRef(L"Objects have the same fully qualified name but different paths.\n\tNew Object: %s %s.%s\n\tExisting Object: %s", AllocateRef, AllocateRefs);
+        if (!StaticAllocate)
+        {
+            // 7.40 (CL-5046157) puts a message before it ("%sObjects have ...", 0x1B4FFD0).
+            StaticAllocate = FunctionOfFirstRef(L"%sObjects have the same fully qualified name but different paths.\n\tNew Object: %s %s.%s\n\tExisting Object: %s", AllocateRef, AllocateRefs);
+        }
         uintptr_t Construct = 0;
         std::wstring ConstructFrom;
         const std::vector<uintptr_t> Refs = Finder::StringRefs(L"NewObject with empty name can't be used to create default subobjects (inside of UObject derived class constructor) as it produces inconsistent object names. Use ObjectInitializer.CreateDefaultSuobject<> instead.");

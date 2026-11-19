@@ -1,7 +1,12 @@
 #pragma once
 
+#include "Engine/NetSerialization.h"
 #include "GameFramework/Info.h"
+#include "Internationalization/Text.h"
+#include "Math/Rotator.h"
+#include "Math/Vector.h"
 #include "Reflection.h"
+#include "StructArray.h"
 #include "UObject/ScriptDelegates.h"
 #include "UObject/Stack.h"
 
@@ -21,6 +26,28 @@ class EFortMinigameState
     DefineUnrealEnum(EFortMinigameState, FortniteGame)
     DefineUEnumValue(Warmup)
     DefineUEnumValue(InProgress)
+};
+
+// A player of a Creative game (from 7.00), in the game's PlayerArray. 7.40 (CL-5046157) reads
+// bIsTeleportingOrRespawningForGameplay (+0x37) in IsPlayerTeleportingOrRespawningForGameplay (0x11E05A0), which the
+// island volume's own check counts as still in the island while it is set; ClearTeleportForMinigame and
+// OnClientFinishTeleportingForMinigame clear it.
+struct FMinigamePlayer : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FMinigamePlayer, FortniteGame)
+
+public:
+    DefineUProperty(AFortPlayerState*, PlayerState)
+    DefineUProperty(bool, bIsTeleportingOrRespawningForGameplay)
+    static bool HasTeleportingOrRespawning() { return Member_PlayerState.IsAvailable() && Member_bIsTeleportingOrRespawningForGameplay.IsAvailable(); }
+};
+
+struct FMinigamePlayers : public FFastArraySerializer
+{
+    DefineUnrealStruct(FMinigamePlayers, FortniteGame)
+
+public:
+    DefineUStructArrayProperty(FMinigamePlayer, Players)
 };
 
 // What a game's warmup does with its players (7.10: Stasis, Respawn; the island games' Minigame_PlayerCreated has
@@ -54,10 +81,19 @@ class AFortMinigame : public AInfo
     DefineUFunction(RespawnMinigamePlayers)
     DefineUFunction(OverridePlayerSpawnLocation)
     DefineUFunction(PutPlayerIntoStasis)
+    // 7.40 (CL-5046157), which drops RespawnMinigamePlayers, TeleportPlayersToStartLocations and
+    // FinishPlayerTeleportedForMinigameStart: the two ends of its client-acknowledged teleport, intact natives with no
+    // caller or binding left in the image (Final, not Blueprint-callable; their binders went with the server code).
+    DefineUFunction(OnClientFinishTeleportingForMinigame)
+    DefineUFunction(ClearTeleportForMinigame)
 
 public:
     DefineUProperty(EFortMinigameWarmupType, WarmupType)
     DefineUProperty(EFortMinigamePlayerSpawnLocationSetting, SpawnLocationSetting)
+    DefineUProperty(EFortMinigameState, CurrentState)
+    DefineUStructProperty(FMinigamePlayers, PlayerArray)
+    // The travel screen's text at a game's start (Minigame_PlayerCreated: "Starting Game").
+    DefineUProperty(FText, ClientMinigameStartedText)
     // Broadcast by SetMinigameState (7.10 0x10BE210) with each new state, on the server too.
     DefineUProperty(FMulticastScriptDelegate, StateChangedDelegate)
     // Broadcast by HandleMinigameStarted_Implementation (7.10 0x10B1830) as the game goes in progress, and by
@@ -81,11 +117,24 @@ public:
     // TeleportPlayersToStartLocations instead): a game whose WarmupType is Respawn puts each of its players where the
     // game's respawn path would (OverridePlayerSpawnLocation: their latest checkpoint, a spawn pad for their team, or the
     // air) as its warmup starts, and holds them there until the warmup ends (PutPlayerIntoStasis, the game's own). No
-    // build has the body; Core's reconstruction.
+    // build has the body; Core's reconstruction. 7.40 has no such UFunction: its warmup (0x11EE110) keeps only the
+    // FName "MinigameStart" of its stripped Respawn branch, and the move goes through the travel screen
+    // (UsesClientAcknowledgedTeleport).
     void RespawnMinigamePlayers();
+    // 7.40's (CL-5046157) start of a game: the game's player teleport waits for the client (AFortMinigame::
+    // DelayedTeleportPlayer, 0x11D0790, on FMinigamePlayer's timer: bServerIsReady, then again until bClientIsReady)
+    // after the respawn preparation with RespawnCameraData's MinigameStart row and ClientMinigameStartedText, and the
+    // game's OnClientFinishTeleportingForMinigame or ClearTeleportForMinigame ends it.
+    static bool UsesClientAcknowledgedTeleport();
+    // The end of 7.40's DelayedTeleportPlayer once both sides are ready (0x11D0790 returns there with nothing: its move is
+    // stripped): the pawn goes to Location, and the game's own OnClientFinishTeleportingForMinigame (a skydiver: 0x11E1AF0
+    // starts its skydive, clears the player's teleport, resets their DeathInfo, broadcasts OnPawnTeleportedForMinigame)
+    // or ClearTeleportForMinigame (on the ground: 0x11CE480 clears the teleport) finishes it.
+    void DelayedTeleportPlayer(AFortPlayerControllerAthena* PlayerController, const FVector& Location, const FRotator& Rotation, bool bRespawningOnGround);
     // Core's native for the minigame's StateChangedDelegate (UClass::AddNativeFunction): RespawnMinigamePlayers where
     // StartMinigame (7.10 0x10BFC70) called it, as SetMinigameState puts a Respawn game in Warmup; and, as it goes
-    // InProgress after that warmup, ResumeSkydivingAfterWarmup for a game that spawns in the air.
+    // InProgress after that warmup, ResumeSkydivingAfterWarmup for a game that spawns in the air. On 7.40 the warmup's
+    // step runs on the next tick, after the island Blueprint's HandleMinigameWarmup has assigned the teams.
     void HandleStateChangedForWarmup(uint8_t NewState);
     // Core's (#502): the players a Respawn warmup held in the sky skydive again once the warmup's end releases them
     // (its SetStasisMode(None) leaves them walking on air). Epic's place, the island Blueprint's
@@ -109,10 +158,18 @@ private:
     static inline UFunction* ClearPlayerInventoriesFunction = nullptr;
     static inline UFunction* HandleStateChangedForWarmupFunction = nullptr;
 
-    bool OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation);
+    // OutRotation and bOutRespawningOnGround where the build answers them (7.40: OutRotation from 7.30).
+    bool OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation, FRotator* OutRotation = nullptr, bool* bOutRespawningOnGround = nullptr);
 
     TArray<AFortPlayerState*> GetParticipatingPlayers();
     bool DetermineSpawnLocation(AController* PlayerController, FVector& OutLocation, FRotator& OutRotation, bool& bShouldSkydive);
     void FinishPlayerTeleportedForMinigameStart(AFortPlayerPawn* PlayerPawn);
     void PutPlayerIntoStasis(APawn* PlayerPawn);
+    void OnClientFinishTeleportingForMinigame(AFortPlayerPawn* InPawn);
+    void ClearTeleportForMinigame(AFortPlayerPawn* InPawn);
+    // The player's entry in PlayerArray (as 7.40's own lookups find it, 0x11CE480), or null.
+    FMinigamePlayer* FindMinigamePlayer(const AFortPlayerState* PlayerState);
+    // RespawnMinigamePlayers' move of one player on 7.40, through the travel screen. False where nothing was sent (the
+    // build or the controller lacks the respawn preparation): the caller moves the pawn at once.
+    bool StartTeleportForMinigameStart(AController* Controller, APawn* Pawn, const FVector& Location, const FRotator& Rotation, bool bRespawningOnGround);
 };

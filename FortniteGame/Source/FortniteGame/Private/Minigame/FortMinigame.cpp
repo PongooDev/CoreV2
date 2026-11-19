@@ -22,6 +22,7 @@
 #include "Player/FortPlayerState.h"
 #include "ReflectionParams.h"
 #include "Templates/Casts.h"
+#include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
@@ -242,12 +243,13 @@ DEFINE_FUNCTION(AFortMinigame::execClearPlayerInventory)
     P_NATIVE_END;
 }
 
-bool AFortMinigame::OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation)
+bool AFortMinigame::OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation, FRotator* OutRotation, bool* bOutRespawningOnGround)
 {
     // The island game's answer in the game's respawn path (the volume manager's respawn place, 7.10 0xDBAD80, asks it for
     // a death in the island): _Implementation (7.10 slot 201, 0x10B7620), intact. In Warmup and InProgress it is the
     // SpawnLocationSetting's: ChoosePlayerStart (the player's highest checkpoint, else a spawn pad for their team), else
-    // the air (GetAirSpawnLocation).
+    // the air (GetAirSpawnLocation). 7.40's (slot 200, 0x11E2DE0) is DetermineSpawnLocation (0x11D1310): the start it
+    // picks is claimed there, its rotation comes back too, and bOutRespawningOnGround is false for the air.
     Reflection::FParams Params(FindStaticFunction_OverridePlayerSpawnLocation(), true);
     if (!Params.Set(L"PlayerPawn", PlayerPawn) || !Params.Set(L"PlayerState", reinterpret_cast<UObject*>(PlayerState)) || !Params.Call(this))
     {
@@ -260,6 +262,16 @@ bool AFortMinigame::OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerSt
         return false;
     }
     OutLocation = *Location;
+    const FRotator* Rotation = OutRotation && Params.Has(L"OutRotation") ? Params.Get<FRotator>(L"OutRotation") : nullptr;
+    const bool* OnGround = bOutRespawningOnGround && Params.Has(L"bOutRespawningOnGround") ? Params.Get<bool>(L"bOutRespawningOnGround") : nullptr;
+    if (Rotation)
+    {
+        *OutRotation = *Rotation;
+    }
+    if (OnGround)
+    {
+        *bOutRespawningOnGround = *OnGround;
+    }
     return true;
 }
 
@@ -286,9 +298,13 @@ void AFortMinigame::RespawnMinigamePlayers()
     }
     const bool bAir = SpawnLocationSetting == EFortMinigamePlayerSpawnLocationSetting::GetAir();
     const bool bHoldInStasis = FindStaticFunction_PutPlayerIntoStasis() != nullptr;
+    // 7.40 (CL-5046157): the move goes through the travel screen and the game's client-acknowledged teleport
+    // (StartTeleportForMinigameStart); the hold and the skydive's choice stay as below.
+    const bool bClientAcknowledged = UsesClientAcknowledgedTeleport();
     int32_t Moved = 0;
     int32_t Skydiving = 0;
     int32_t Held = 0;
+    int32_t Travelling = 0;
     const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
     for (AFortPlayerState* PlayerState : Players)
     {
@@ -297,7 +313,11 @@ void AFortMinigame::RespawnMinigamePlayers()
         APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
         AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
         FVector Location;
-        if (!Pawn || !AthenaState || !OverridePlayerSpawnLocation(Pawn, AthenaState, Location))
+        // 7.40 answers the start's rotation and whether it is on the ground (false for the air); 7.10 to 7.30 keep the
+        // pawn's rotation and SpawnLocationSetting's Air.
+        FRotator Rotation = Pawn ? reinterpret_cast<AActor*>(Pawn)->GetActorRotation() : FRotator();
+        bool bOnGround = !bAir;
+        if (!Pawn || !AthenaState || !OverridePlayerSpawnLocation(Pawn, AthenaState, Location, &Rotation, &bOnGround))
         {
             continue;
         }
@@ -318,11 +338,18 @@ void AFortMinigame::RespawnMinigamePlayers()
         // controller's move input ignored, StopMovementImmediately, DisableMovement) stops it where it is, and its
         // bIsSkydiving keeps the skydive pose. HandleStateChangedForWarmup puts it back into the skydive's movement as
         // the warmup's end releases it.
-        const bool bSkydive = bAir && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
+        const bool bSkydive = !bOnGround && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
         const bool bHold = bHoldInStasis;
         if (bHold && !bSkydive)
         {
             PutPlayerIntoStasis(Pawn);
+        }
+        // 7.40: held where they stand through the travel screen (a skydiver is held as it arrives, DelayedTeleportPlayer).
+        if (bClientAcknowledged && StartTeleportForMinigameStart(Controller, Pawn, Location, Rotation, !bSkydive))
+        {
+            ++Travelling;
+            Held += bHold && !bSkydive ? 1 : 0;
+            continue;
         }
         AActor* PawnActor = reinterpret_cast<AActor*>(Pawn);
         if (!PawnActor->TeleportTo(Location, PawnActor->GetActorRotation()))
@@ -343,8 +370,157 @@ void AFortMinigame::RespawnMinigamePlayers()
         Held += bHold ? 1 : 0;
         FinishPlayerTeleportedForMinigameStart(Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)));
     }
+    if (Travelling > 0)
+    {
+        Log::Info(L"Minigame: {} sends {} of its {} players to their respawn place for its warmup through the travel screen (MinigameStart){}, {} held where they stand meanwhile",
+            GetName().ToStdString(), Travelling, Players.Num(), Moved ? std::format(L"; {} moved at once", Moved) : std::wstring(), Held);
+        return;
+    }
     Log::Info(L"Minigame: {} respawns {} of its {} players for its warmup at their respawn place{}, {} held there until it ends", GetName().ToStdString(), Moved, Players.Num(),
         Skydiving ? std::format(L", {} of them skydiving", Skydiving) : std::wstring(), Held);
+#endif
+}
+
+bool AFortMinigame::UsesClientAcknowledgedTeleport()
+{
+    // 7.40's shape: no RespawnMinigamePlayers (7.10 to 7.30 have it, a stripped UFunction, and keep the move at once), and
+    // the two ends of the client-acknowledged teleport. Checked against 7.40 (CL-5046157) only: a later build's warmup has
+    // to be read again at its bring-up.
+    return StaticClass() && !FindStaticFunction_RespawnMinigamePlayers() && FindStaticFunction_OnClientFinishTeleportingForMinigame() && FindStaticFunction_ClearTeleportForMinigame();
+}
+
+FMinigamePlayer* AFortMinigame::FindMinigamePlayer(const AFortPlayerState* PlayerState)
+{
+    if (!PlayerState || !Member_PlayerArray.IsAvailable() || !FMinigamePlayer::HasTeleportingOrRespawning() || !FMinigamePlayer::StaticStruct())
+    {
+        return nullptr;
+    }
+    FMinigamePlayers& Array = PlayerArray;
+    TStructArray<FMinigamePlayer>& Entries = Array.Players;
+    for (int32_t Index = 0; Index < Entries.Num(); ++Index)
+    {
+        if (static_cast<AFortPlayerState*>(Entries[Index].PlayerState) == PlayerState)
+        {
+            return &Entries[Index];
+        }
+    }
+    return nullptr;
+}
+
+void AFortMinigame::OnClientFinishTeleportingForMinigame(AFortPlayerPawn* InPawn)
+{
+    Reflection::FParams Params(FindStaticFunction_OnClientFinishTeleportingForMinigame(), true);
+    if (Params.Set(L"InPawn", InPawn))
+    {
+        Params.Call(this);
+    }
+}
+
+void AFortMinigame::ClearTeleportForMinigame(AFortPlayerPawn* InPawn)
+{
+    Reflection::FParams Params(FindStaticFunction_ClearTeleportForMinigame(), true);
+    if (Params.Set(L"InPawn", InPawn))
+    {
+        Params.Call(this);
+    }
+}
+
+bool AFortMinigame::StartTeleportForMinigameStart(AController* Controller, APawn* Pawn, const FVector& Location, const FRotator& Rotation, bool bRespawningOnGround)
+{
+#if WITH_SERVER_CODE
+    // 7.40's warmup (0x11EE110) for a Respawn game keeps only `FName(L"MinigameStart")` of its per-player step
+    // (0x11EE17F-0x11EE193: the FName, then straight to the warmup's timer); a player joining a game in progress gets the
+    // same name with ClientMinigameStartedText (AddMinigamePlayer, 0x11C8C58), then the game's DelayedTeleportPlayer timer.
+    // MinigameStart is RespawnCameraData's row for it (FadeOutTime 0.001, WaitTime 1.75, SafetyTime 5), the respawn
+    // preparation's InRespawnCameraBehavior: the server stores the destination in RespawnData and sends
+    // ClientStartRespawnPreparation with the row and the text; the client blacks out, streams the place in and answers
+    // ServerClientIsReadyToRespawn (bClientIsReady, 0xDA6F40); DelayedTeleportPlayer sets bServerIsReady and waits for the
+    // client (0x11D0790). Core's StartDelayedTeleport and FinishDelayedTeleportWhenReady are that preparation and that wait
+    // (as #497's rift travel has them). The player is marked teleporting meanwhile (FMinigamePlayer::
+    // bIsTeleportingOrRespawningForGameplay, which the game's own teleport ends clear).
+    AFortPlayerControllerAthena* AthenaController = Controller ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)) : nullptr;
+    if (!AthenaController || !Pawn || !AFortPlayerControllerAthena::HasDelayedTeleport())
+    {
+        return false;
+    }
+    APlayerState* PlayerState = static_cast<APlayerState*>(Controller->PlayerState);
+    // A trip already under way (a rift's) is left to finish, as the trip back to the hub leaves one.
+    if (AthenaController->IsDelayedTeleporting())
+    {
+        Log::Info(L"Minigame: {}'s player {} is travelling already; their trip is left to finish", GetName().ToStdString(),
+            PlayerState ? PlayerState->GetPlayerName().ToStdString() : std::wstring(L"?"));
+        return true;
+    }
+    FMinigamePlayer* Entry = FindMinigamePlayer(reinterpret_cast<AFortPlayerState*>(PlayerState));
+    if (Entry)
+    {
+        Entry->bIsTeleportingOrRespawningForGameplay = true;
+    }
+    const FText* Text = Member_ClientMinigameStartedText.IsAvailable() ? &GetMember_ClientMinigameStartedText() : nullptr;
+    if (!AthenaController->StartDelayedTeleport(Location, Rotation, L"MinigameStart", Text))
+    {
+        if (Entry)
+        {
+            Entry->bIsTeleportingOrRespawningForGameplay = false;
+        }
+        return false;
+    }
+    const TWeakObjectPtr<AFortMinigame> WeakThis(this);
+    AthenaController->FinishDelayedTeleportWhenReady([WeakThis, bRespawningOnGround](AFortPlayerControllerAthena* ReadyController, const FVector& ReadyLocation, const FRotator& ReadyRotation)
+    {
+        if (AFortMinigame* Minigame = WeakThis.Get())
+        {
+            Minigame->DelayedTeleportPlayer(ReadyController, ReadyLocation, ReadyRotation, bRespawningOnGround);
+        }
+    });
+    return true;
+#else
+    return false;
+#endif
+}
+
+void AFortMinigame::DelayedTeleportPlayer(AFortPlayerControllerAthena* PlayerController, const FVector& Location, const FRotator& Rotation, bool bRespawningOnGround)
+{
+#if WITH_SERVER_CODE
+    // Both sides are ready (7.40 0x11D0790 returns at 0x11D0974 with nothing more: the move and the end of the teleport are
+    // stripped). Which of the game's two ends goes with which arrival isn't in the image (their binders are stripped);
+    // Core's reading: OnClientFinishTeleportingForMinigame starts a skydive unconditionally (0x11E1B10, BeginSkydiving
+    // 0x13C1DD0 with bFromBus false), so it is the air's, and ClearTeleportForMinigame, which only clears the player's
+    // teleport, the ground's.
+    APawn* Pawn = PlayerController && Role == ROLE_Authority ? PlayerController->GetPawn() : nullptr;
+    AFortPlayerPawn* PlayerPawn = Pawn ? Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)) : nullptr;
+    if (!PlayerPawn)
+    {
+        APlayerState* PlayerState = PlayerController ? static_cast<APlayerState*>(reinterpret_cast<AController*>(PlayerController)->PlayerState) : nullptr;
+        if (FMinigamePlayer* Entry = FindMinigamePlayer(reinterpret_cast<AFortPlayerState*>(PlayerState)))
+        {
+            Entry->bIsTeleportingOrRespawningForGameplay = false;
+        }
+        return;
+    }
+    const bool bMoved = reinterpret_cast<AActor*>(Pawn)->TeleportTo(Location, Rotation);
+    const bool bSkydive = bMoved && !bRespawningOnGround;
+    if (bSkydive)
+    {
+        OnClientFinishTeleportingForMinigame(PlayerPawn);
+    }
+    else
+    {
+        ClearTeleportForMinigame(PlayerPawn);
+    }
+    // A skydiver is held in the sky for the rest of the warmup (#502), after its skydive starts. 7.40's
+    // PutPlayerIntoStasis (0x11E4610) has no Warmup check of its own (7.20's had one), and the warmup's end releases only
+    // the pawns already held (RemovePlayersFromStasis, 0x11E6460), so an arrival after the warmup isn't held.
+    const bool bWarmup = Member_CurrentState.IsAvailable() && CurrentState == EFortMinigameState::GetWarmup();
+    const bool bHeld = bSkydive && bWarmup && FindStaticFunction_PutPlayerIntoStasis();
+    if (bHeld)
+    {
+        PutPlayerIntoStasis(Pawn);
+    }
+    APlayerState* PlayerState = static_cast<APlayerState*>(reinterpret_cast<AController*>(PlayerController)->PlayerState);
+    Log::Info(L"Minigame: {}'s player {} {} their start ({:.0f}, {:.0f}, {:.0f}){}", GetName().ToStdString(), PlayerState ? PlayerState->GetPlayerName().ToStdString() : std::wstring(L"?"),
+        bMoved ? L"arrives at" : L"couldn't be moved to", Location.X, Location.Y, Location.Z,
+        bSkydive ? (bHeld ? L", skydiving, held there until the warmup ends" : L", skydiving") : L"");
 #endif
 }
 
@@ -358,9 +534,31 @@ void AFortMinigame::HandleStateChangedForWarmup(uint8_t NewState)
     }
     if (NewState == EFortMinigameState::GetWarmup())
     {
+        // 7.40: the warmup's Respawn step comes after its SetMinigameState returns (0x11EE153, then 0x11EE158), and that
+        // runs the island Blueprint's HandleMinigameWarmup after this broadcast (OnRep_CurrentState 0x11E27C0: the
+        // broadcast at 0x11E2953, HandleMinigameWarmup at 0x11E299D), whose AssignTeams sets each player's team that
+        // DetermineSpawnLocation's start pads are chosen by. The engine's next tick is after both.
+        UWorld* World = UsesClientAcknowledgedTeleport() ? GetWorld() : nullptr;
+        if (World)
+        {
+            const TWeakObjectPtr<AFortMinigame> WeakThis(this);
+            World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakThis]()
+            {
+                AFortMinigame* Minigame = WeakThis.Get();
+                if (Minigame && (!Member_CurrentState.IsAvailable() || Minigame->CurrentState == EFortMinigameState::GetWarmup()))
+                {
+                    Minigame->RespawnMinigamePlayers();
+                }
+            }));
+            return;
+        }
         RespawnMinigamePlayers();
     }
-    else if (NewState == EFortMinigameState::GetInProgress() && SpawnLocationSetting == EFortMinigamePlayerSpawnLocationSetting::GetAir())
+    // 7.40 also sends a game on start pads to the air for a player it finds no pad for (DetermineSpawnLocation 0x11D1310:
+    // ChoosePlayerStart, else GetAirSpawnLocation), so it checks every game; ResumeSkydivingAfterWarmup touches only a
+    // skydiver the release left walking.
+    else if (NewState == EFortMinigameState::GetInProgress()
+        && (SpawnLocationSetting == EFortMinigamePlayerSpawnLocationSetting::GetAir() || UsesClientAcknowledgedTeleport()))
     {
         ResumeSkydivingAfterWarmup();
     }
@@ -529,18 +727,47 @@ void AFortMinigame::HookNatives()
     // 7.00 has no such UFunction (nor WarmupType's Respawn). Core's native for the minigame's StateChangedDelegate (its
     // OnStateChanged signature, the new EFortMinigameState) goes in the class's FuncMap.
     UFunction* Respawn = StaticClass() ? FindStaticFunction_RespawnMinigamePlayers() : nullptr;
+    const auto AddWarmupHandler = [](const UFunction*& Signature, bool& bReflected)
+    {
+        const UProperty* Property = Finder::ResolveClassFunctionMap() ? StaticClass()->FindPropertyByName(FName(L"StateChangedDelegate")) : nullptr;
+        Signature = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+            ? static_cast<const UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
+        bReflected = FindStaticFunction_OverridePlayerSpawnLocation() && EFortMinigameState::StaticEnum() && EFortMinigameWarmupType::StaticEnum();
+        HandleStateChangedForWarmupFunction = Signature && bReflected ? StaticClass()->AddNativeFunction(L"HandleStateChangedForWarmup", &execHandleStateChangedForWarmup, Signature) : nullptr;
+        return HandleStateChangedForWarmupFunction != nullptr;
+    };
     if (Respawn && !HasStrippedExec(Respawn))
     {
         Log::Info(L"Finder: AFortMinigame::RespawnMinigamePlayers is native in this build");
     }
+    else if (!Respawn && UsesClientAcknowledgedTeleport())
+    {
+        // 7.40 (CL-5046157): no RespawnMinigamePlayers UFunction. The Respawn branch of the warmup (0x11EE110, StartMinigame
+        // 0x11ED9D0's call for a game with a WarmupDuration) is stripped down to its FName "MinigameStart" (0x11EE17F) and
+        // no call; the Stasis branch beside it is intact (PutPlayerIntoStasis for each player). The same broadcast as on
+        // 7.10 to 7.30 (StateChangedDelegate with Warmup: the warmup's SetMinigameState, 0x11EE14C) runs Core's
+        // RespawnMinigamePlayers, which moves the players through the travel screen and the game's client-acknowledged
+        // teleport.
+        const UFunction* Signature = nullptr;
+        bool bReflected = false;
+        if (AddWarmupHandler(Signature, bReflected))
+        {
+            Log::Info(L"Finder: AFortMinigame's Respawn warmup is stripped in this build (no RespawnMinigamePlayers; the warmup keeps only its FName MinigameStart): restored "
+                L"(Core's RespawnMinigamePlayers from the minigames' StateChangedDelegate, through the travel screen; the delayed teleport {}, PlayerArray's teleport flag {}, "
+                L"ClientMinigameStartedText {})", AFortPlayerControllerAthena::HasDelayedTeleport() ? L"found" : L"not found (moved at once)",
+                Member_PlayerArray.IsAvailable() && FMinigamePlayer::HasTeleportingOrRespawning() ? L"found" : L"not found", Member_ClientMinigameStartedText.IsAvailable() ? L"found" : L"not found");
+        }
+        else
+        {
+            Log::Error(L"Hook AFortMinigame Respawn warmup: not restored (StateChangedDelegate's signature {}, OverridePlayerSpawnLocation and the minigame enums {}), so a Respawn warmup moves nobody to the spawn pads",
+                Signature ? L"found" : L"not found", bReflected ? L"found" : L"not found");
+        }
+    }
     else if (Respawn)
     {
-        const UProperty* Property = Finder::ResolveClassFunctionMap() ? StaticClass()->FindPropertyByName(FName(L"StateChangedDelegate")) : nullptr;
-        const UFunction* Signature = Property && Property->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
-            ? static_cast<const UFunction*>(static_cast<const UMulticastDelegateProperty*>(Property)->SignatureFunction) : nullptr;
-        const bool bReflected = FindStaticFunction_OverridePlayerSpawnLocation() && EFortMinigameState::StaticEnum() && EFortMinigameWarmupType::StaticEnum();
-        HandleStateChangedForWarmupFunction = Signature && bReflected ? StaticClass()->AddNativeFunction(L"HandleStateChangedForWarmup", &execHandleStateChangedForWarmup, Signature) : nullptr;
-        if (HandleStateChangedForWarmupFunction)
+        const UFunction* Signature = nullptr;
+        bool bReflected = false;
+        if (AddWarmupHandler(Signature, bReflected))
         {
             Respawn->SetNativeFunc(&execRespawnMinigamePlayers);
             Log::Info(L"Hook AFortMinigame::RespawnMinigamePlayers: native (Core's reconstruction), from the minigames' StateChangedDelegate");

@@ -17115,6 +17115,25 @@ bool Finder::ResolveAthenaPawnDiedLive(ptrdiff_t PlaceOffset, ptrdiff_t SecondsA
                 }
             }
         }
+        // 7.40 (CL-5046157) keeps the place in a register: lea r14d, [rbp+1] at the top of StartEndGamePhase (0xD5D2A7),
+        // then mov edx, r14d; mov rcx, rdi; call 0xDA9BE0 (0xD5D364). A mov edx, r32 (REX.B for r8d-r15d) whose call
+        // reaches the player state's Place setter.
+        for (uintptr_t Site = WinEnd ? FindInstruction(Win, WinEnd, { 0x8B }) : 0; Site; Site = FindInstruction(Site + 1, WinEnd, { 0x8B }))
+        {
+            if ((Byte(Site + 1) & 0xF8) != 0xD0 || (Site > Win && (Byte(Site - 1) & 0xF0) == 0x40 && Byte(Site - 1) != 0x41))
+            {
+                continue;
+            }
+            const uintptr_t Call = FindRawCall(Site + 2, std::min(WinEnd, Site + 0x10));
+            const uintptr_t Target = Call ? Finder::RelativeTarget(Call, 1, 5) : 0;
+            for (const auto& [CalleeSite, Callee] : CallsOf(Target))
+            {
+                if (WritesPlace(Callee))
+                {
+                    return Target;
+                }
+            }
+        }
         return uintptr_t{ 0 };
     };
     uintptr_t SetTeamPlace = FindSetTeamPlace(SoloWin);

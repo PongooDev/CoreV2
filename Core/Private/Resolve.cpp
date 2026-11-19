@@ -5783,21 +5783,41 @@ namespace
 
     void ResolveSession()
     {
-        const uintptr_t FortInitGame = FunctionOf(L"playlistId");
+        // AFortGameMode::InitGame reads the URL's "playlistId" option; its vtable's entry two past it is
+        // GetGameSessionClass. 7.30 (CL-4834550) has an earlier reference to that string in a function that isn't a
+        // virtual (0x5409F0), so each referencing function is tried in turn, the first one first, as before.
         uintptr_t SessionClass = 0;
         size_t SessionClassEntries = 0;
-        for (void** Entry : VTablesWithEntry(FortInitGame))
+        std::vector<uintptr_t> InitGameCandidates;
+        for (const uintptr_t Ref : Finder::StringRefs(L"playlistId"))
         {
-            const uintptr_t Candidate = reinterpret_cast<uintptr_t>(Entry[2]);
-            const bool bStaticClassGetter = IsInText(Candidate)
-                && FindInstruction(Candidate, Candidate + 0x1A, { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0xE8, -1, -1, -1, -1, 0x48, 0x89, 0x03, 0x48, 0x8B, 0xC3, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3 }) == Candidate;
-            if (!bStaticClassGetter || (SessionClass && Candidate != SessionClass))
+            const uintptr_t Function = Finder::FunctionStart(Ref);
+            if (Function && std::find(InitGameCandidates.begin(), InitGameCandidates.end(), Function) == InitGameCandidates.end())
             {
-                SessionClassEntries = 0;
+                InitGameCandidates.push_back(Function);
+            }
+        }
+        for (const uintptr_t FortInitGame : InitGameCandidates)
+        {
+            SessionClass = 0;
+            SessionClassEntries = 0;
+            for (void** Entry : VTablesWithEntry(FortInitGame))
+            {
+                const uintptr_t Candidate = reinterpret_cast<uintptr_t>(Entry[2]);
+                const bool bStaticClassGetter = IsInText(Candidate)
+                    && FindInstruction(Candidate, Candidate + 0x1A, { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0xE8, -1, -1, -1, -1, 0x48, 0x89, 0x03, 0x48, 0x8B, 0xC3, 0x48, 0x83, 0xC4, 0x20, 0x5B, 0xC3 }) == Candidate;
+                if (!bStaticClassGetter || (SessionClass && Candidate != SessionClass))
+                {
+                    SessionClassEntries = 0;
+                    break;
+                }
+                SessionClass = Candidate;
+                ++SessionClassEntries;
+            }
+            if (SessionClassEntries)
+            {
                 break;
             }
-            SessionClass = Candidate;
-            ++SessionClassEntries;
         }
         Require(L"AFortGameMode::GetGameSessionClass", Natives::AFortGameMode_GetGameSessionClass, SessionClassEntries ? SessionClass : 0);
 

@@ -70,13 +70,14 @@ public:
     DefineUProperty(uint8_t, StasisMode)
     // From 3.5: set while the player's controller takes this pawn back from the remote-controlled pawn they flew (the
     // Guided Missile's; AFortRemoteControlledPawnAthena, 5.41 0x1234EA0 around its Possess). The pawn isn't new to the
-    // player then: AFortPlayerPawnAthena::PossessedBy (5.41 0xC63200) skips the game mode's effects while it is set.
-    DefineUProperty(bool, bBeingRepossessed)
+    // player then: AFortPlayerPawnAthena::PossessedBy (5.41 0xC63200) skips the game mode's effects while it is set. A
+    // single bit from 7.40 (CL-5046157), as is bIsInVortex.
+    DefineBitfieldUProperty(bBeingRepossessed)
     // From 6.00: whether the pawn is in a vortex (the cube's, under the floating island: BGA_DudeBro_Area_Effect's funnel
     // gives an entering pawn GE_DudeBro_Area_Effect, whose GA_DudeBro_Vortex calls SetInVortex, 6.10 0x11FE900, the
     // pawn's virtual), and the gravity floor its movement has there. The funnel's end overlap removes the effect, which
     // cancels the ability, and its end calls SetInVortex(false).
-    DefineUProperty(bool, bIsInVortex)
+    DefineBitfieldUProperty(bIsInVortex)
     DefineUProperty(FVortexParams, VortexParams)
     // From 6.00: the anim Blueprint and footstep bank a held gadget gives the pawn (replicated; their OnReps swap the
     // mesh's anim class, keeping OriginalAnimBP, and the footsteps' bank, on the server and each client).

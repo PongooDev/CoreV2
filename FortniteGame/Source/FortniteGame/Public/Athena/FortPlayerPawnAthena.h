@@ -20,7 +20,8 @@ public:
     // From leaving the aircraft (0x415D90) until landing (0x41AB80).
     DefineUProperty(bool, bIsSkydiving)
     DefineUProperty(bool, bIsParachuteOpen)
-    DefineUProperty(bool, bIsSkydivingFromBus)
+    // A single bit from 7.40 (CL-5046157), a bool before.
+    DefineBitfieldUProperty(bIsSkydivingFromBus)
     static ptrdiff_t IsSkydivingOffset() { return Member_bIsSkydiving.GetOffsetChecked(); }
     static bool HasIsSkydiving() { return Member_bIsSkydiving.IsAvailable(); }
     // 1.8: the controller's loadout, copied by its Possess (0x444480). Every client sets up the glider of every pawn's

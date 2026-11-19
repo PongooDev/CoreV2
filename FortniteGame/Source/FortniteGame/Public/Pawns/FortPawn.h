@@ -67,11 +67,13 @@ public:
     DefineUProperty(FMulticastScriptDelegate, OnWeaponEquippedDelegate)
     static bool HasOnWeaponEquippedDelegate() { return Member_OnWeaponEquippedDelegate.IsAvailable(); }
     DefineUProperty(FName, SpottedEvent)
-    // Down But Not Out: knocked down until a teammate revives the pawn or it bleeds out.
-    DefineUProperty(bool, bIsDBNO)
-    DefineUProperty(bool, bPlayedDying)
+    // Down But Not Out: knocked down until a teammate revives the pawn or it bleeds out. bIsDBNO, bPlayedDying and
+    // bIsDying are bools up to 7.30 and single bits from 7.40 (CL-5046157: bIsDBNO +0x7CF bit 0, bIsDying +0x7C8 bit 2),
+    // so they are read and set through their property's mask.
+    DefineBitfieldUProperty(bIsDBNO)
+    DefineBitfieldUProperty(bPlayedDying)
     // Set on the server as the pawn dies (replicated: HandleIsDying).
-    DefineUProperty(bool, bIsDying)
+    DefineBitfieldUProperty(bIsDying)
     // EFortMovementStyle: Running 0, Walking 1, Charging 2, Sprinting 3 (replicated).
     DefineUProperty(uint8_t, CurrentMovementStyle)
     // The damage tags of the hit that killed the pawn.

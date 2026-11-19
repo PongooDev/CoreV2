@@ -27,6 +27,21 @@ public:
     DefineUProperty(FString, ErrorCode)
 };
 
+// An island's edit permissions (from 7.00): Permission (EFortCreativePlotPermission: Private 0, Public 1, everyone may
+// edit) and the account ids that may edit it while it is Private. 7.30 keeps them per island, on its
+// UFortLevelSaveComponent (PlotPermissions); 7.00 to 7.20 on the player's creative profile, one set for all their islands.
+struct FFortCreativePlotPermissionData
+{
+    DefineUnrealStruct(FFortCreativePlotPermissionData, FortniteGame)
+
+public:
+    DefineUProperty(uint8_t, Permission)
+    DefineUProperty(TArray<FString>, WhiteList)
+};
+
+// The MCP's answer to a profile command (UMcpProfileGroup's FMcpQueryResult): bSucceeded is its first member.
+struct FMcpQueryResult;
+
 // A Creative island's template (from 7.00; Temperate_Medium: "Island {islandIndex}", its BasePlayset and size).
 class UFortCreativeRealEstatePlotItemDefinition : public UObject
 {
@@ -202,7 +217,29 @@ public:
     // Whether UserId owns the island loaded here (AccountIdOfOwner).
     bool IsOwnedBy(const FUniqueNetIdRepl& UserId) const;
 
+    // The island's edit permissions (7.30+; 7.00 to 7.20 keep them on the creative profile), which replicate to its
+    // players (OnRep_PlotPermissionsChanged shows who was given or lost island edit).
+    DefineUStructProperty(FFortCreativePlotPermissionData, PlotPermissions)
+    DefineUFunction(DoesPlayerHavePermissionToEdit)
+    static bool HasPlotPermissions() { return Member_PlotPermissions.IsAvailable(); }
+    // The game's own check (from 7.00; 7.30 0x106FBE0, 7.40 0x10A1D80): the island's owner, anyone on an island without
+    // one, and from 7.30 anyone while PlotPermissions is Public, else the account ids in its WhiteList. What building
+    // (AFortPlayerControllerAthena::HasPermissionToEditWorld, 7.30 0xD6ACF0 through 0xD500C0), 7.40's game controls
+    // (0xD7E8C0) and Athena_PlayerController's HandlePermissions ask. False where the build has none.
+    bool DoesPlayerHavePermissionToEdit(const FUniqueNetIdRepl& UserRequestingPermission) const;
+
+    // 7.30+'s end of an island's permissions change (21.40's UPlayspaceComponent_CreativeToolsPermission::
+    // OnModifyCreativePlotPermissionsComplete), as the MCP's ModifyCreativePlotPermissions answers the request the
+    // island's owner made with AFortPlayerStateAthena::Server_SetCanEditCreativeIsland (7.30 0xDB0A30 ->
+    // 0x109B900). The build's own sets PlotPermissions; the part it lost is restored after it (see the .cpp).
+    void OnModifyCreativePlotPermissionsComplete(const FMcpQueryResult& Result, void* NewPermissions);
+    // Binds Core's into the request's completion delegate in place of the build's (7.30+; nothing on older builds).
+    static void HookPermissions();
+
 private:
+    static void OnModifyCreativePlotPermissionsCompleteHK(UFortLevelSaveComponent* This, const FMcpQueryResult* Result, void* NewPermissions);
+    // The island's owner and its PlotPermissions, with the players' names, for the permissions log line.
+    std::wstring DescribePlotPermissions() const;
     void FinishPlotLoad(bool bSucceeded, const std::wstring& ErrorCode);
     // The loaded island's last save, with its checkin (the game's own cloud save, as the component's EndPlay calls it).
     void CheckInLoadedPlot();

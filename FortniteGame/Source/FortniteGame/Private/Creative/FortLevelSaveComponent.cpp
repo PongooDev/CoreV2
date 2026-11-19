@@ -1,11 +1,16 @@
 #include "pch.h"
 #include "Creative/FortLevelSaveComponent.h"
 #include "AsyncTaskQueue.h"
+#include "Athena/FortPlayerControllerAthena.h"
 #include "BackendRequest.h"
 #include "Creative/FortVolume.h"
 #include "Engine/World.h"
+#include "Finder.h"
 #include "FortGameInstance.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/GameStateBase.h"
+#include "GameFramework/PlayerState.h"
+#include "Hooks.h"
 #include "Kismet/KismetTextLibrary.h"
 #include "Log.h"
 #include "GameThread.h"
@@ -20,6 +25,7 @@
 #include "UObject/WeakObjectPtr.h"
 
 #include <cstdlib>
+#include <cwchar>
 #include <format>
 #include <string>
 #include <string_view>
@@ -211,6 +217,142 @@ bool UFortLevelSaveComponent::IsOwnedBy(const FUniqueNetIdRepl& UserId) const
 {
     const FUniqueNetIdRepl& Owner = AccountIdOfOwner;
     return UserId.IsValid() && Owner.IsValid() && Owner.ToString().ToStdString() == UserId.ToString().ToStdString();
+}
+
+bool UFortLevelSaveComponent::DoesPlayerHavePermissionToEdit(const FUniqueNetIdRepl& UserRequestingPermission) const
+{
+    UFunction* Function = FindStaticFunction_DoesPlayerHavePermissionToEdit();
+    Reflection::FParams Params(Function, true);
+    if (!Function || !Params.CopyStruct(L"UserRequestingPermission", &UserRequestingPermission) || !Params.Call(const_cast<UFortLevelSaveComponent*>(this)))
+    {
+        return false;
+    }
+    const bool* Result = Params.Get<bool>(L"ReturnValue");
+    return Result && *Result;
+}
+
+std::wstring UFortLevelSaveComponent::DescribePlotPermissions() const
+{
+    // An account id as the player with it is named in the match ("Marvelco"), else the id itself.
+    const auto NameOf = [this](const std::wstring& AccountId)
+    {
+        UWorld* World = GetWorld();
+        AGameStateBase* GameState = World ? World->GetGameState() : nullptr;
+        if (GameState && !AccountId.empty())
+        {
+            const TArray<APlayerState*>& Players = GameState->PlayerArray;
+            for (int32_t Index = 0; Index < Players.Num(); ++Index)
+            {
+                APlayerState* Player = Players[Index];
+                const FUniqueNetIdRepl* PlayerId = Player ? &static_cast<const FUniqueNetIdRepl&>(Player->UniqueId) : nullptr;
+                if (PlayerId && PlayerId->IsValid() && _wcsicmp(PlayerId->ToString().ToStdString().c_str(), AccountId.c_str()) == 0)
+                {
+                    return Player->GetPlayerName().ToStdString();
+                }
+            }
+        }
+        return AccountId;
+    };
+    const FUniqueNetIdRepl& Owner = AccountIdOfOwner;
+    const std::wstring OwnerName = Owner.IsValid() ? NameOf(Owner.ToString().ToStdString()) : std::wstring(L"no one");
+    if (!HasPlotPermissions())
+    {
+        return std::format(L"owner {}", OwnerName);
+    }
+    const FFortCreativePlotPermissionData& Permissions = PlotPermissions;
+    std::wstring WhiteList;
+    const TArray<FString>& Ids = Permissions.WhiteList;
+    for (int32_t Index = 0; Index < Ids.Num(); ++Index)
+    {
+        WhiteList += (WhiteList.empty() ? L"" : L", ") + NameOf(Ids[Index].ToStdString());
+    }
+    // EFortCreativePlotPermission: Private 0, Public 1.
+    return std::format(L"owner {}, {}", OwnerName, static_cast<uint8_t>(Permissions.Permission) == 1 ? std::wstring(L"Public (everyone may edit)")
+        : std::format(L"Private (whitelist: {})", WhiteList.empty() ? std::wstring(L"empty") : WhiteList));
+}
+
+void UFortLevelSaveComponent::OnModifyCreativePlotPermissionsCompleteHK(UFortLevelSaveComponent* This, const FMcpQueryResult* Result, void* NewPermissions)
+{
+    This->OnModifyCreativePlotPermissionsComplete(*Result, NewPermissions);
+}
+
+void UFortLevelSaveComponent::OnModifyCreativePlotPermissionsComplete(const FMcpQueryResult& Result, void* NewPermissions)
+{
+    // FMcpQueryResult's first member is bSucceeded, what the build's own tests first (7.30 0x108EE7F).
+    const bool bSucceeded = *reinterpret_cast<const bool*>(&Result);
+    // The build's own: bPermissionsSaveInProgress cleared, then on success PlotPermissions takes the new permissions
+    // (7.30 0x108EE9B), which replicate to the island's players; on failure "Error changing perms %s". It takes the new
+    // permissions by value and destroys them.
+    Natives::UFortLevelSaveComponent_OnModifyCreativePlotPermissionsComplete(this, &Result, NewPermissions);
+
+#if WITH_SERVER_CODE
+    // What it lost: 7.10's and 7.20's end of a permissions change (AFortPlayerStateAthena's MCP completion, 7.10 0xCAC630,
+    // 7.20 0xD89D50: ProcessMulticastDelegate on each controller's OnCreativePermissionsChanged, +0x2118 and +0x2148)
+    // told every player in the owner's island its permissions had changed. 7.30 (CL-4834550) moved the permissions onto
+    // the island's component and this completion has no such broadcast, nor has anything else in the build: the only
+    // broadcaster of the delegate left is the controller's OnMinigameVolumeStateChanged (0xD70510, the island's state
+    // changing for a game). Athena_PlayerController still binds PermissionsChanged to it, and its HandlePermissions is
+    // what gives and takes the Creative phone; its recheck timer only runs for a player who already has the phone. So a
+    // player given island edit got the building and flying the game's own checks allow (DoesPlayerHavePermissionToEdit,
+    // 0x106FBE0, reads the whitelist) but no phone until they entered the island again (AFortVolumeManager's
+    // HandleActorEnteredVolume -> OnEnterVolume), and one whose edit was taken kept it up to the timer's 10 s.
+    // Core's: the broadcast restored here, after the build's own, to the players in this island (the volume manager's
+    // GetAllPlayersInVolume; 7.20 asked it for the players in the volume its owner stood in). It runs on a failed change
+    // too, as 7.20's did: they are re-checked against the permissions the island has.
+    AFortVolume* Island = GetVolume();
+    AFortVolumeManager* Manager = Island ? AFortVolumeManager::Get(this) : nullptr;
+    const std::vector<AController*> Players = Manager ? Manager->GetAllPlayersInVolume(Island) : std::vector<AController*>();
+    std::wstring Told;
+    int32_t Count = 0;
+    for (AController* Controller : Players)
+    {
+        AFortPlayerControllerAthena* Player = Controller ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)) : nullptr;
+        if (!Player)
+        {
+            continue;
+        }
+        const FMulticastScriptDelegate& PermissionsChanged = Player->OnCreativePermissionsChanged;
+        PermissionsChanged.ProcessMulticastDelegate(nullptr);
+        APlayerState* State = static_cast<APlayerState*>(reinterpret_cast<AController*>(Player)->PlayerState);
+        const bool bMayEdit = State && DoesPlayerHavePermissionToEdit(State->UniqueId);
+        Told += std::format(L"{}{} ({})", Told.empty() ? L"" : L", ", State ? State->GetPlayerName().ToStdString() : std::wstring(L"a player"),
+            bMayEdit ? L"may edit" : L"may not edit");
+        ++Count;
+    }
+    Log::Info(L"Creative: the island {}'s edit permissions {}: {}; {} player(s) on it told (OnCreativePermissionsChanged){}{}",
+        Island ? Island->GetName().ToStdString() : std::wstring(L"(none)"), bSucceeded ? L"changed" : L"didn't change (the MCP refused ModifyCreativePlotPermissions)",
+        DescribePlotPermissions(), Count, Told.empty() ? L"" : L": ", Told);
+#endif
+}
+
+void UFortLevelSaveComponent::HookPermissions()
+{
+#if WITH_SERVER_CODE
+    // 7.30+ only: the permissions on the island's component. 7.00 to 7.20 keep them on the creative profile, and their
+    // completion (on AFortPlayerStateAthena) makes the broadcast itself.
+    if (!IsAvailable() || !HasPlotPermissions() || !AFortPlayerControllerAthena::HasCreativePermissionsChanged())
+    {
+        return;
+    }
+    // The completion is the function that logs its failure (7.30 0x108EE70, 7.40 0x10B6800); the one place that takes
+    // its address is the request's (7.30 0x109B900, 7.40 0x10C35F0), which binds it with the new permissions as the
+    // delegate's payload (lea rax at 7.30 0x109B9CF, 7.40 0x10C36BF).
+    const std::vector<uintptr_t> Refs = Finder::StringRefs(L"Error changing perms %s");
+    const uintptr_t Complete = Refs.empty() ? 0 : Finder::FunctionStart(Refs.front());
+    const std::vector<uintptr_t> Binds = Complete ? Finder::AddressRefs(Complete) : std::vector<uintptr_t>();
+    if (Binds.size() != 1 || !AFortVolumeManager::FindStaticFunction_GetAllPlayersInVolume() || !FindStaticFunction_DoesPlayerHavePermissionToEdit())
+    {
+        Log::Error(L"Finder: UFortLevelSaveComponent::OnModifyCreativePlotPermissionsComplete 0x{:X} ({} binding(s), AFortVolumeManager::GetAllPlayersInVolume {}), "
+            L"so an island's players aren't told when its owner changes who may edit it (no Creative phone until they enter it again)",
+            Complete ? Complete - Finder::ImageBase() : 0, Binds.size(), AFortVolumeManager::FindStaticFunction_GetAllPlayersInVolume() ? L"found" : L"missing");
+        return;
+    }
+    Natives::UFortLevelSaveComponent_OnModifyCreativePlotPermissionsComplete = reinterpret_cast<decltype(Natives::UFortLevelSaveComponent_OnModifyCreativePlotPermissionsComplete)>(Complete);
+    const bool bBound = Hooks::RedirectAddress(L"UFortLevelSaveComponent::OnModifyCreativePlotPermissionsComplete", reinterpret_cast<uint8_t*>(Binds.front()),
+        reinterpret_cast<void*>(&OnModifyCreativePlotPermissionsCompleteHK));
+    Log::Info(L"Finder: UFortLevelSaveComponent::OnModifyCreativePlotPermissionsComplete 0x{:X}, bound at 0x{:X}: {}", Complete - Finder::ImageBase(),
+        Binds.front() - Finder::ImageBase(), bBound ? L"Core's tells the island's players their permissions changed" : L"not bound");
+#endif
 }
 
 FString UFortLevelSaveComponent::GetCloudSaveFileName() const

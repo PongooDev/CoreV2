@@ -250,6 +250,14 @@ public:
     DefineUProperty(AFortVolume*, CreativePlotLinkedVolume)
     DefineUProperty(AFortAthenaCreativePortal*, OwnedPortal)
     static bool HasOwnedPortal() { return Member_OwnedPortal.IsAvailable() && Member_CreativePlotLinkedVolume.IsAvailable(); }
+    // What tells the player their island edit rights may have changed (from 7.00): Athena_PlayerController binds its
+    // PermissionsChanged to it at BeginPlay in a Creative playlist, which runs HandlePermissions(GetCurrentVolume()): the
+    // Creative phone (WID_CreativeTool) given to a player the island's UFortLevelSaveComponent lets edit, taken from one
+    // it doesn't. The game broadcasts it from the controller's OnMinigameVolumeStateChanged (7.30 0xD70510) and, on 7.10
+    // and 7.20, from the end of a permissions change (AFortPlayerStateAthena's MCP completion, 7.20 0xD89D50); from 7.30
+    // Core's UFortLevelSaveComponent::OnModifyCreativePlotPermissionsComplete does that part.
+    DefineUProperty(FMulticastScriptDelegate, OnCreativePermissionsChanged)
+    static bool HasCreativePermissionsChanged() { return Member_OnCreativePermissionsChanged.IsAvailable(); }
     DefineUFunction(ServerGiveCreativeItem)
     DefineUFunction(ServerLoadPlotForPortal)
     DefineUFunction(ServerReloadCreativePlot)

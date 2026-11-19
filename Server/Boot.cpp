@@ -38,6 +38,7 @@
 #include "GameThread.h"
 #include "McpProfileGroup.h"
 #include "Creative/FortAthenaCreativePortal.h"
+#include "Creative/FortLevelSaveComponent.h"
 #include "Minigame/FortMinigame.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "OnlineSubsystemImpl.h"
@@ -433,6 +434,8 @@ static void InstallHooks()
             AFortPlayerControllerAthena::HookCreativeVTables();
             // 7.10's island codes, publishing and backups (#488).
             AFortPlayerControllerAthena::HookCreativeIslandTools();
+            // 7.30's island edit permissions: the players on the island told of a change (the Creative phone).
+            UFortLevelSaveComponent::HookPermissions();
             AFortMinigame::HookNatives();
             AFortGameModeAthena::HookBuildingVTables();
             AFortGameModeAthena::HookCallSites();

@@ -8,7 +8,9 @@
 #include "UObject/ScriptDelegates.h"
 
 #include <cstdint>
+#include <vector>
 
+class AController;
 class AFortAthenaCreativePortal;
 class AFortPlayerController;
 class AFortPlayerStartCreative;
@@ -81,10 +83,14 @@ class AFortVolumeManager : public AInfo
 {
     DefineUnrealClass(AFortVolumeManager, FortniteGame)
     DefineUFunction(GetVolumeForActor)
+    DefineUFunction(GetAllPlayersInVolume)
     DefineUFunction(ResetVolumeAndLevelRecord)
 
 public:
     AFortVolume* GetVolumeForActor(const AActor* Actor);
+    // The controllers of the players in Volume (the manager's VolumeActivePlayers), the game's own UFunction (from 7.00).
+    // Empty where the build has none.
+    std::vector<AController*> GetAllPlayersInVolume(AFortVolume* Volume);
     // The game's own reset of an island (7.00 0xDA0E70): what was built goes, the record with it, and the playset's
     // own actors come back. 7.10 adds the player who asked for it (RequestingFortPC).
     void ResetVolumeAndLevelRecord(AFortVolume* Volume, AFortPlayerController* RequestingFortPC = nullptr);

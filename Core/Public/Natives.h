@@ -1212,6 +1212,11 @@ namespace Natives
     // load of a published island by its code (0xF7EF90, the function that logs "Attempting to load plot from mnemonic
     // %s"; its BeginPlay, 0xF5E610, calls it for the featured rifts' CuratedLinkCodes): (this, the user's id, the code).
     inline void (*UFortLevelSaveComponent_LoadPlotFromMnemonic)(UObject* This, const FUniqueNetIdRepl& UserId, const FString& Mnemonic) = nullptr;
+    // From 7.30 (CL-4834550), UFortLevelSaveComponent::HookPermissions: the end of an island's permissions change, the
+    // game's own (21.40's UPlayspaceComponent_CreativeToolsPermission::OnModifyCreativePlotPermissionsComplete; 7.30
+    // 0x108EE70, 7.40 0x10B6800, the function that logs "Error changing perms %s"): the MCP command's result and the new
+    // permissions, which the completion delegate carries as its payload by value (the function destroys them).
+    inline void (*UFortLevelSaveComponent_OnModifyCreativePlotPermissionsComplete)(UObject* This, const void* Result, void* NewPermissions) = nullptr;
 }
 
 namespace Sites

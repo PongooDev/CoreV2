@@ -1147,16 +1147,15 @@ void AFortPlayerControllerAthena::ServerToggleAutoRestartMinigame_Implementation
 #if WITH_SERVER_CODE
     // Core's reconstruction (no build has the body), in the shape of 7.40's ServerRestartMinigame_Implementation (0xDA7860)
     // and ServerStartMinigame_Implementation (0xDA8720): the island the player is in, when they may run its game, then
-    // its minigame's own call. Their check (0xD7E8C0) is the island's edit permission (UFortLevelSaveComponent 0x10A1D80:
-    // its owner, or one an island without an owner, or a player its PlotPermissions allow), or a ReadOnly island (a
-    // published one, VolumeState 1). Core's: the owner, an island without one and a ReadOnly island; PlotPermissions'
-    // whitelist and Public aren't read (Core's islands are their owner's alone).
+    // its minigame's own call. Their check (0xD7E8C0) is the island's edit permission, the component's own
+    // DoesPlayerHavePermissionToEdit (0x10A1D80: its owner, anyone on an island without an owner, anyone while its
+    // PlotPermissions are Public, else the account ids in its whitelist), with no island or no component allowed, or a
+    // ReadOnly island (a published one, VolumeState 1).
     AFortVolume* Volume = GetCreativeVolume();
     UFortLevelSaveComponent* Component = UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume));
     const FUniqueNetIdRepl* UserId = UniqueIdOf(this);
     const bool bReadOnly = Volume && static_cast<uint8_t>(Volume->VolumeState) == 1;
-    const bool bNoOwner = Component && !static_cast<const FUniqueNetIdRepl&>(Component->AccountIdOfOwner).IsValid();
-    const bool bMayRun = !Volume || bReadOnly || bNoOwner || (Component && UserId && Component->IsOwnedBy(*UserId));
+    const bool bMayRun = !Volume || bReadOnly || !Component || (UserId && Component->DoesPlayerHavePermissionToEdit(*UserId));
     AFortMinigame* Minigame = bMayRun ? GetMinigame() : nullptr;
     if (!Minigame)
     {

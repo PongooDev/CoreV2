@@ -103,6 +103,25 @@ AFortVolume* AFortVolumeManager::GetVolumeForActor(const AActor* Actor)
     return Result ? *Result : nullptr;
 }
 
+std::vector<AController*> AFortVolumeManager::GetAllPlayersInVolume(AFortVolume* Volume)
+{
+    std::vector<AController*> Players;
+    UFunction* Function = FindStaticFunction_GetAllPlayersInVolume();
+    Reflection::FParams Params(Function, true);
+    if (!Function || !Volume || !Params.Set(L"Volume", Volume) || !Params.Call(this))
+    {
+        return Players;
+    }
+    if (const TArray<AController*>* Result = Params.Get<TArray<AController*>>(L"ReturnValue"))
+    {
+        for (int32_t Index = 0; Index < Result->Num(); ++Index)
+        {
+            Players.push_back((*Result)[Index]);
+        }
+    }
+    return Players;
+}
+
 void AFortVolumeManager::ResetVolumeAndLevelRecord(AFortVolume* Volume, AFortPlayerController* RequestingFortPC)
 {
     Reflection::FParams Params(FindStaticFunction_ResetVolumeAndLevelRecord(), true);

@@ -412,7 +412,9 @@ namespace
 
 void AFortPlayerControllerAthena::ClientPublishMyCurrentCreativePlotComplete(const FString& ResultErrorCode, const FString& LinkJson)
 {
-    Reflection::FParams Params(FindStaticFunction_ClientPublishMyCurrentCreativePlotComplete(), true);
+    // 7.40 (CL-5046157) names it ClientPublishCreativePlotComplete, with the same parameters.
+    UFunction* Complete = FindStaticFunction_ClientPublishMyCurrentCreativePlotComplete();
+    Reflection::FParams Params(Complete ? Complete : FindStaticFunction_ClientPublishCreativePlotComplete(), true);
     if (Params.Set(L"ResultErrorCode", ResultErrorCode) && Params.Set(L"LinkJson", LinkJson))
     {
         Params.Call(this);
@@ -421,7 +423,11 @@ void AFortPlayerControllerAthena::ClientPublishMyCurrentCreativePlotComplete(con
 
 UFortLevelSaveComponent* AFortPlayerControllerAthena::GetOwnLoadedIsland(AFortAthenaCreativePortal* Portal, const wchar_t*& Why)
 {
-    AFortVolume* Volume = Portal ? static_cast<AFortVolume*>(Portal->LinkedVolume) : GetCreativeVolume();
+    return GetOwnLoadedIslandIn(Portal ? static_cast<AFortVolume*>(Portal->LinkedVolume) : GetCreativeVolume(), Why);
+}
+
+UFortLevelSaveComponent* AFortPlayerControllerAthena::GetOwnLoadedIslandIn(AFortVolume* Volume, const wchar_t*& Why)
+{
     UFortLevelSaveComponent* Component = UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume));
     const FUniqueNetIdRepl* UserId = UniqueIdOf(this);
     Why = !Component ? L"not on an island"
@@ -433,11 +439,17 @@ UFortLevelSaveComponent* AFortPlayerControllerAthena::GetOwnLoadedIsland(AFortAt
 
 void AFortPlayerControllerAthena::PublishMyCurrentCreativePlot_Implementation(const FCreativePublishOptions& MyPublishOptions)
 {
+    PublishCreativePlot_Implementation(GetCreativeVolume(), MyPublishOptions);
+}
+
+void AFortPlayerControllerAthena::PublishCreativePlot_Implementation(AFortVolume* VolumeToPublish, const FCreativePublishOptions& MyPublishOptions)
+{
 #if WITH_SERVER_CODE
-    // The game's _Validate (7.10 0xC81590) has checked the lengths (a title of 3 to 40, a description up to 150, a locale
-    // up to 10). The island published is the one the player is on, theirs and loaded.
+    // The game's _Validate (7.10 0xC81590, 7.40 0xDA39A0) has checked the lengths (a title of 3 to 40, a description up to
+    // 150, a locale up to 10). The island published is the one in the volume (7.10 to 7.30: the one the player is on),
+    // theirs and loaded.
     const wchar_t* Why = nullptr;
-    UFortLevelSaveComponent* Component = GetOwnLoadedIsland(nullptr, Why);
+    UFortLevelSaveComponent* Component = GetOwnLoadedIslandIn(VolumeToPublish, Why);
     if (!Member_bIsAllowedToPublish.IsAvailable() || !bIsAllowedToPublish)
     {
         Why = L"they may not publish (no Support-A-Creator code)";
@@ -608,7 +620,7 @@ void AFortPlayerControllerAthena::QueryPublishingPermission()
     // CreateLink takes no one else's island). The server code that set bIsAllowedToPublish is stripped from 7.10 (only
     // the constructor writes it, 0xC525AD).
     const FUniqueNetIdRepl* UserId = Member_bIsAllowedToPublish.IsAvailable() ? UniqueIdOf(this) : nullptr;
-    if (!UserId || !UserId->IsValid() || !FindStaticFunction_PublishMyCurrentCreativePlot())
+    if (!UserId || !UserId->IsValid() || (!FindStaticFunction_PublishMyCurrentCreativePlot() && !FindStaticFunction_PublishCreativePlot()))
     {
         return;
     }
@@ -645,6 +657,16 @@ void AFortPlayerControllerAthena::PublishMyCurrentCreativePlot_ImplementationHK(
     }
     // The stripped body: the options' destructor, as the callee owns its by-value parameters.
     PublishMyCurrentCreativePlot_ImplementationOG(This, MyPublishOptions);
+}
+
+void AFortPlayerControllerAthena::PublishCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This, AFortVolume* VolumeToPublish, FCreativePublishOptions* MyPublishOptions)
+{
+    if (This && MyPublishOptions)
+    {
+        This->PublishCreativePlot_Implementation(VolumeToPublish, *MyPublishOptions);
+    }
+    // The stripped body: the options' destructor.
+    PublishCreativePlot_ImplementationOG(This, VolumeToPublish, MyPublishOptions);
 }
 
 void AFortPlayerControllerAthena::ServerSaveIslandCheckpoint_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal)
@@ -775,15 +797,26 @@ void AFortPlayerControllerAthena::HookCreativeIslandTools()
 
     // PublishMyCurrentCreativePlot: 7.10's body (0x3918A0) only destroys the options it takes by value, a few dozen bytes;
     // the game's publish would be far longer. Swapped, with the stripped body kept to destroy them after.
+    // 7.40 (CL-5046157) has PublishCreativePlot in its place (slot 0x457, 0xDA3950: the same destructor-only body).
     UFunction* Publish = FindStaticFunction_PublishMyCurrentCreativePlot();
+    const bool bPublishTakesVolume = !Publish && FindStaticFunction_PublishCreativePlot();
+    Publish = bPublishTakesVolume ? FindStaticFunction_PublishCreativePlot() : Publish;
     const int32_t PublishIndex = Publish ? Finder::ImplementationIndex(Publish) : -1;
     void* const PublishBody = PublishIndex >= 0 ? VTable[PublishIndex] : nullptr;
     const uintptr_t PublishEnd = PublishBody ? Finder::FunctionEnd(reinterpret_cast<uintptr_t>(PublishBody)) : 0;
     std::wstring PublishState = L"slot not found";
     if (PublishBody && PublishEnd && PublishEnd - reinterpret_cast<uintptr_t>(PublishBody) <= 0x80)
     {
-        PublishMyCurrentCreativePlot_ImplementationOG = reinterpret_cast<decltype(PublishMyCurrentCreativePlot_ImplementationOG)>(PublishBody);
-        SwapInSubclasses(PublishIndex, PublishBody, reinterpret_cast<void*>(&PublishMyCurrentCreativePlot_ImplementationHK), L"AFortPlayerControllerAthena::PublishMyCurrentCreativePlot_Implementation");
+        if (bPublishTakesVolume)
+        {
+            PublishCreativePlot_ImplementationOG = reinterpret_cast<decltype(PublishCreativePlot_ImplementationOG)>(PublishBody);
+            SwapInSubclasses(PublishIndex, PublishBody, reinterpret_cast<void*>(&PublishCreativePlot_ImplementationHK), L"AFortPlayerControllerAthena::PublishCreativePlot_Implementation");
+        }
+        else
+        {
+            PublishMyCurrentCreativePlot_ImplementationOG = reinterpret_cast<decltype(PublishMyCurrentCreativePlot_ImplementationOG)>(PublishBody);
+            SwapInSubclasses(PublishIndex, PublishBody, reinterpret_cast<void*>(&PublishMyCurrentCreativePlot_ImplementationHK), L"AFortPlayerControllerAthena::PublishMyCurrentCreativePlot_Implementation");
+        }
         PublishState = std::format(L"stripped (0x{:X}, slot 0x{:X}): restored", Address(reinterpret_cast<uintptr_t>(PublishBody)), PublishIndex);
     }
     else if (PublishBody)
@@ -807,8 +840,9 @@ void AFortPlayerControllerAthena::HookCreativeIslandTools()
         ? static_cast<UFunction*>(static_cast<const UMulticastDelegateProperty*>(Written)->SignatureFunction) : nullptr;
     IslandSavedHandler = Signature && Finder::ResolveClassFunctionMap() ? SaveClass->AddNativeFunction(L"HandleIslandSavedForTools", &ExecHandleIslandSaved, Signature) : nullptr;
 
-    Log::Info(L"Finder: Creative's island tools: UFortLevelSaveComponent's mnemonic load 0x{:X}; ServerLoadPlotForPortalFromMnemonic {}; PublishMyCurrentCreativePlot {}; "
-        L"the save's end handler {}", Address(reinterpret_cast<uintptr_t>(Natives::UFortLevelSaveComponent_LoadPlotFromMnemonic)), MnemonicState, PublishState,
+    Log::Info(L"Finder: Creative's island tools: UFortLevelSaveComponent's mnemonic load 0x{:X}; ServerLoadPlotForPortalFromMnemonic {}; {} {}; "
+        L"the save's end handler {}", Address(reinterpret_cast<uintptr_t>(Natives::UFortLevelSaveComponent_LoadPlotFromMnemonic)), MnemonicState,
+        bPublishTakesVolume ? L"PublishCreativePlot" : L"PublishMyCurrentCreativePlot", PublishState,
         IslandSavedHandler ? L"added" : L"not added");
     if (!Natives::UFortLevelSaveComponent_LoadPlotFromMnemonic || !IslandSavedHandler || !Natives::UFortLevelSaveComponent_CloudSave)
     {

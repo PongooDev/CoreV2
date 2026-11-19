@@ -47,14 +47,15 @@ public:
 };
 
 // What a player publishes their island with (7.10's island menu, Publish Island: UFortCreativePublishModal):
-// FCreativePublishOptions (7.10 SDK, 0x30 bytes), which PublishMyCurrentCreativePlot takes by value.
+// FCreativePublishOptions, which PublishMyCurrentCreativePlot (7.10 to 7.30, 0x30 bytes) and PublishCreativePlot
+// (7.40, 0x40 bytes: UserYoutubeVideoId before UserLocale) take by value. Read through reflection, as its layout moves.
 struct FCreativePublishOptions
 {
-    FString UserTitle;
-    FString UserDescription;
-    FString UserLocale;
+    DefineUnrealStruct(FCreativePublishOptions, FortniteGame)
+    DefineUProperty(FString, UserTitle)
+    DefineUProperty(FString, UserDescription)
+    DefineUProperty(FString, UserLocale)
 };
-static_assert(sizeof(FCreativePublishOptions) == 0x30);
 
 // A Battle Royale outfit (from 1.8; CID_*): the hero it plays (HID_*_Athena_Commando_*).
 class UAthenaCharacterItemDefinition : public UFortItemDefinition
@@ -340,12 +341,18 @@ public:
     DefineUProperty(bool, bIsAllowedToPublish)
     DefineUFunction(PublishMyCurrentCreativePlot)
     DefineUFunction(ClientPublishMyCurrentCreativePlotComplete)
+    // 7.40 (CL-5046157): the publish names the island's volume, and its answer is ClientPublishCreativePlotComplete.
+    DefineUFunction(PublishCreativePlot)
+    DefineUFunction(ClientPublishCreativePlotComplete)
     DefineUFunction(ServerSaveIslandCheckpoint)
     DefineUFunction(ServerLoadIslandCheckpoint)
     DefineUFunction(ServerLoadPlotForPortalFromMnemonic)
     // Restored (7.10 strips its body: 0x3918A0 only destroys the by-value options): the island the player is on, when it
     // is theirs, is saved and published through the links service; the client hears ClientPublishMyCurrentCreativePlotComplete.
     void PublishMyCurrentCreativePlot_Implementation(const FCreativePublishOptions& MyPublishOptions);
+    // Restored (7.40 strips its body: 0xDA3950 only destroys the by-value options): the island in VolumeToPublish, when
+    // it is the player's and loaded, as PublishMyCurrentCreativePlot publishes the one they are on.
+    void PublishCreativePlot_Implementation(AFortVolume* VolumeToPublish, const FCreativePublishOptions& MyPublishOptions);
     void ClientPublishMyCurrentCreativePlotComplete(const FString& ResultErrorCode, const FString& LinkJson);
     // Restored (7.10's are the shared empty function, slots 0x3FC and 0x3FA): the island's checkpoint, its backup.
     void ServerSaveIslandCheckpoint_Implementation(AFortAthenaCreativePortal* Portal);
@@ -363,6 +370,8 @@ public:
 private:
     static void PublishMyCurrentCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This, FCreativePublishOptions* MyPublishOptions);
     static inline void (*PublishMyCurrentCreativePlot_ImplementationOG)(AFortPlayerControllerAthena* This, FCreativePublishOptions* MyPublishOptions) = nullptr;
+    static void PublishCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This, AFortVolume* VolumeToPublish, FCreativePublishOptions* MyPublishOptions);
+    static inline void (*PublishCreativePlot_ImplementationOG)(AFortPlayerControllerAthena* This, AFortVolume* VolumeToPublish, FCreativePublishOptions* MyPublishOptions) = nullptr;
     static void ServerSaveIslandCheckpoint_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);
     static void ServerLoadIslandCheckpoint_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);
     static bool ServerIslandCheckpoint_ValidateHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);
@@ -370,6 +379,8 @@ private:
     static void ServerLoadPlotForPortalFromMnemonic_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& Mnemonic);
     // The island the player is on, when it is theirs and loaded (its component), else null with Why set.
     class UFortLevelSaveComponent* GetOwnLoadedIsland(AFortAthenaCreativePortal* Portal, const wchar_t*& Why);
+    // The same for the island in Volume.
+    class UFortLevelSaveComponent* GetOwnLoadedIslandIn(AFortVolume* Volume, const wchar_t*& Why);
 
 public:
 

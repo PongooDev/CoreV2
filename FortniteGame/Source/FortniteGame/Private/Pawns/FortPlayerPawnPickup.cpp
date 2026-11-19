@@ -394,6 +394,15 @@ void AFortPlayerPawnAthena::HookPickupNatives()
     {
         StrippedCheck = IsFalseStub(HandlingCalls[Index].second) ? HandlingCalls[Index].second : 0;
     }
+    // 7.40 (CL-5046157) puts one more function between them: the overlap (0x13D2F40) hands a pickup to 0x13DF580, whose
+    // last call is the handling 7.30 had (0x13DF6D0), which asks the false stub (0x2B6CD0) third, as 7.30's did.
+    const uintptr_t InnerHandling = !StrippedCheck && !HandlingCalls.empty() ? HandlingCalls.back().second : 0;
+    const uintptr_t InnerHandlingEnd = InnerHandling >= Finder::TextBegin() && InnerHandling < Finder::TextEnd() && Finder::FunctionStart(InnerHandling) == InnerHandling ? Finder::FunctionEnd(InnerHandling) : 0;
+    const std::vector<std::pair<uintptr_t, uintptr_t>> InnerHandlingCalls = InnerHandlingEnd > InnerHandling ? Finder::DirectCalls(InnerHandling, InnerHandlingEnd) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    for (size_t Index = 0; Index < InnerHandlingCalls.size() && Index < 3 && !StrippedCheck; ++Index)
+    {
+        StrippedCheck = IsFalseStub(InnerHandlingCalls[Index].second) ? InnerHandlingCalls[Index].second : 0;
+    }
     const bool bGatedByStub = StrippedCheck != 0;
     if (!Finder::IsStubFunction(Native) && !bGatedByStub)
     {

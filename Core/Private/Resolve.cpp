@@ -13762,29 +13762,34 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
 
     // TArray's Num, 8 bytes in.
     const int32_t TrackedAttributesNum = static_cast<int32_t>(TrackedAttributesOffset + 8);
-    std::vector<uintptr_t> Seen;
     uintptr_t Function = 0;
     int32_t Candidates = 0;
     std::vector<uintptr_t> Leas;
-    for (const auto& [Site, Target] : Finder::DecodedDirectCalls(ApplyGadgetData))
+    // 7.30 (CL-4834550) reads the Num through r13 (0x1432290: cmp dword ptr [r13+940h], 0 at 0x1432536), which the plain
+    // read test leaves out as a frame register; that pass runs only when the first finds nothing.
+    for (int32_t Pass = 0; Pass < 2 && !Candidates; ++Pass)
     {
-        if (std::find(Seen.begin(), Seen.end(), Target) != Seen.end() || !IsInText(Target) || Finder::FunctionStart(Target) != Target)
+        std::vector<uintptr_t> Seen;
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(ApplyGadgetData))
         {
-            continue;
-        }
-        Seen.push_back(Target);
-        if (!Finder::ReadsMemberAt(Target, TrackedAttributesNum))
-        {
-            continue;
-        }
-        ++Candidates;
-        Function = Target;
-        Leas.clear();
-        for (const auto& [Lea, Taken] : Finder::DecodedAddressesTaken(Target))
-        {
-            if (Taken == SharedEmpty)
+            if (std::find(Seen.begin(), Seen.end(), Target) != Seen.end() || !IsInText(Target) || Finder::FunctionStart(Target) != Target)
             {
-                Leas.push_back(Lea);
+                continue;
+            }
+            Seen.push_back(Target);
+            if (!Finder::ReadsMemberAt(Target, TrackedAttributesNum, Pass == 1))
+            {
+                continue;
+            }
+            ++Candidates;
+            Function = Target;
+            Leas.clear();
+            for (const auto& [Lea, Taken] : Finder::DecodedAddressesTaken(Target))
+            {
+                if (Taken == SharedEmpty)
+                {
+                    Leas.push_back(Lea);
+                }
             }
         }
     }
@@ -13806,23 +13811,28 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
         return Bind;
     }
 
-    // The map: the member passed as this to two different calls (its FindId and its Add), past AActor's members.
-    std::unordered_map<ptrdiff_t, std::vector<uintptr_t>> ThisCalls;
-    for (const auto& [Displacement, Callee] : Finder::MemberThisCalls(Function))
-    {
-        std::vector<uintptr_t>& Callees = ThisCalls[Displacement];
-        if (std::find(Callees.begin(), Callees.end(), Callee) == Callees.end())
-        {
-            Callees.push_back(Callee);
-        }
-    }
+    // The map: the member passed as this to two different calls (its FindId and its Add), past AActor's members. 7.30
+    // (CL-4834550) keeps the controller in r12 (lea rcx, [r12+1EA8h] before FindId 0xF82BF0 and Add 0x142BA00), a SIB
+    // form looked at only when the plain one finds no map.
     int32_t Maps = 0;
-    for (const auto& [Displacement, Callees] : ThisCalls)
+    for (int32_t Pass = 0; Pass < 2 && !Maps; ++Pass)
     {
-        if (Displacement >= 0x400 && Callees.size() >= 2)
+        std::unordered_map<ptrdiff_t, std::vector<uintptr_t>> ThisCalls;
+        for (const auto& [Displacement, Callee] : Finder::MemberThisCalls(Function, Pass == 1))
         {
-            ++Maps;
-            Bind.ItemInstanceIds = Displacement;
+            std::vector<uintptr_t>& Callees = ThisCalls[Displacement];
+            if (std::find(Callees.begin(), Callees.end(), Callee) == Callees.end())
+            {
+                Callees.push_back(Callee);
+            }
+        }
+        for (const auto& [Displacement, Callees] : ThisCalls)
+        {
+            if (Displacement >= 0x400 && Callees.size() >= 2)
+            {
+                ++Maps;
+                Bind.ItemInstanceIds = Displacement;
+            }
         }
     }
     if (Maps != 1)

@@ -527,6 +527,16 @@ namespace
         return bLea && Base != 4 && Base != 5 ? Instruction.modrm_reg | (Instruction.rex_r << 3) : -1;
     }
 
+    // MemberLeaDestination's base-only SIB form: lea r64, [base+disp32] with no index (SIB index 100 without REX.X), the
+    // way a base of r12 is encoded. Off rsp (the stack) is left out.
+    int32_t MemberSibLeaDestination(const hde64s& Instruction)
+    {
+        const bool bLea = Instruction.opcode == 0x8D && Instruction.rex_w && Instruction.modrm_mod == 2 && Instruction.modrm_rm == 4
+            && (Instruction.flags & F_SIB) && Instruction.sib_index == 4 && !Instruction.rex_x;
+        const int32_t Base = Instruction.sib_base | (Instruction.rex_b << 3);
+        return bLea && Base != 4 && Base != 5 ? Instruction.modrm_reg | (Instruction.rex_r << 3) : -1;
+    }
+
     // Calls Visit(Address, Instruction) for each instruction of the function's pieces, in order, until one doesn't
     // decode.
     template <typename VisitorType>
@@ -554,7 +564,7 @@ namespace
     }
 }
 
-std::vector<std::pair<ptrdiff_t, uintptr_t>> Finder::MemberThisCalls(uintptr_t Function)
+std::vector<std::pair<ptrdiff_t, uintptr_t>> Finder::MemberThisCalls(uintptr_t Function, bool bSibBase)
 {
     std::vector<std::pair<ptrdiff_t, uintptr_t>> Calls;
     int32_t LeaDestination = -1;
@@ -566,6 +576,7 @@ std::vector<std::pair<ptrdiff_t, uintptr_t>> Finder::MemberThisCalls(uintptr_t F
             Calls.emplace_back(LeaDisplacement, RelativeTarget(Address, 1, 5));
         }
         LeaDestination = MemberLeaDestination(Instruction);
+        LeaDestination = LeaDestination < 0 && bSibBase ? MemberSibLeaDestination(Instruction) : LeaDestination;
         LeaDisplacement = static_cast<int32_t>(Instruction.disp.disp32);
     });
     return Calls;
@@ -677,12 +688,12 @@ std::vector<std::pair<uintptr_t, uintptr_t>> Finder::DecodedAddressesTaken(uintp
     return Taken;
 }
 
-bool Finder::ReadsMemberAt(uintptr_t Function, int32_t Displacement)
+bool Finder::ReadsMemberAt(uintptr_t Function, int32_t Displacement, bool bR13Base)
 {
     bool bReads = false;
     ForEachInstruction(Function, [&](uintptr_t, const hde64s& Instruction)
     {
-        const bool bMemory = (Instruction.flags & F_MODRM) && Instruction.modrm_mod == 2 && Instruction.modrm_rm != 5;
+        const bool bMemory = (Instruction.flags & F_MODRM) && Instruction.modrm_mod == 2 && (Instruction.modrm_rm != 5 || (bR13Base && Instruction.rex_b));
         bReads = bReads || (bMemory && static_cast<int32_t>(Instruction.disp.disp32) == Displacement);
     });
     return bReads;

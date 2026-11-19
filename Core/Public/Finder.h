@@ -117,7 +117,9 @@ namespace Finder
     uintptr_t RelativeTarget(uintptr_t Instruction, uint32_t OperandOffset, uint32_t InstructionLength);
     // Every `lea rcx, [reg+disp32]` (not off rsp or rbp) right before a `call rel32` in the function's pieces, in code
     // order: the displacement and the call's target. A member passed as `this` (a container in its owner, a delegate).
-    std::vector<std::pair<ptrdiff_t, uintptr_t>> MemberThisCalls(uintptr_t Function);
+    // bSibBase also takes a base-only SIB form, [r12+disp32] (49 8D 8C 24): 7.30 (CL-4834550) keeps the controller in r12
+    // (AFortPlayerControllerZone::ApplyGadgetItemAttributeSet 0x1432290: lea rcx, [r12+1EA8h]).
+    std::vector<std::pair<ptrdiff_t, uintptr_t>> MemberThisCalls(uintptr_t Function, bool bSibBase = false);
     // The offset of the native multicast delegate the function broadcasts last, from the object it loads it off (an
     // unreflected TMulticastDelegate member): an inlined TMulticastDelegate::Broadcast (UE 4.21: lea r14, [r15+210h];
     // inc dword ptr [r14+14h], the invocation list's lock count) wins over a call of the out-of-line one (UE 4.16-4.20:
@@ -133,7 +135,9 @@ namespace Finder
     std::vector<std::pair<uintptr_t, uintptr_t>> DecodedAddressesTaken(uintptr_t Function);
     // Whether an instruction of the function's pieces addresses memory at [reg+Displacement] (disp32, not off rbp): a
     // member of an object it reads or writes.
-    bool ReadsMemberAt(uintptr_t Function, int32_t Displacement);
+    // bR13Base also takes [r13+Displacement] (mod 2, rm 5 with REX.B), which the rbp exclusion drops: 7.30 (CL-4834550)
+    // reads the gadget's TrackedAttributes through r13 (AFortPlayerControllerZone::ApplyGadgetItemAttributeSet 0x1432290).
+    bool ReadsMemberAt(uintptr_t Function, int32_t Displacement, bool bR13Base = false);
     // Whether the function keeps its second argument (rdx) before its first call: mov r64, rdx, or a spill of rdx. A
     // native that gained a parameter in a later build (UFortLevelSaveComponent::LoadPlaysetAsync's playset, 7.10+).
     bool KeepsSecondArgument(uintptr_t Function);

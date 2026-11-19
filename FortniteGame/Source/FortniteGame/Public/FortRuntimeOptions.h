@@ -26,6 +26,11 @@ public:
     // 7.10+ (PongooDev/CoreV2#488): the hub's featured rifts' island codes, in rift order. Each featured island space's
     // UFortLevelSaveComponent picks its own (LinkCodeNumberToAutoLoad) as it begins play (7.10 0xF5E610).
     DefineUProperty(TArray<FString>, CuratedLinkCodes)
+    // 7.00+: whether a wall the grid finds mostly underground gets a free piece on top (the grid query's
+    // FreeWallPieceOnTop, MaxBuildingIntoTerrainIntersectionPercentage 0.3). Off in 7.00's and 7.10's constructors
+    // (7.10 0x149A00E), on from 7.20's (0x1583225); config, so a hotfix can change it.
+    DefineUProperty(bool, bUsingBuildingExtraPiece)
+    static bool HasUsingBuildingExtraPiece() { return Member_bUsingBuildingExtraPiece.IsAvailable(); }
     static bool HasCuratedLinkCodes() { return Member_CuratedLinkCodes.IsAvailable(); }
     static bool HasMissionActivationVote() { return Member_bEnableMissionActivationVote.IsAvailable(); }
     static bool HasToyMessaging() { return Member_bToyMessagingEnabled.IsAvailable(); }

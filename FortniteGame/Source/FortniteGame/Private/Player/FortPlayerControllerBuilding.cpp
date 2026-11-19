@@ -10,6 +10,8 @@
 #include "Finder.h"
 #include "FortAssetManager.h"
 #include "FortGameData.h"
+#include "FortGameState.h"
+#include "FortRuntimeOptions.h"
 #include "GameplayTagContainer.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
@@ -301,53 +303,108 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
         return;
     }
 
-    // Props and trees in the way die as if they lost their support.
-    const uint64_t StructuralDeath = TagBits(L"Gameplay.Effect.InstantDeath.StructuralSupport");
-    for (int32_t Index = 0; Index < ExistingBuildings.Num(); ++Index)
+    AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(PlayerStateOf(this)));
+    const int32_t WorldPlayerId = FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -1;
+    UObject* GameMode = AuthGameModeOf(this);
+    // The piece at Location: what the grid says is in the way goes, and the piece is spawned as the player's.
+    const auto Place = [&](const FVector& Location, const FRotator& Rotation, TArray<ABuildingActor*>& InTheWay) -> ABuildingSMActor*
     {
-        ABuildingActor* Existing = ExistingBuildings[Index];
-        if (Existing && Existing->bDestroyOnPlayerBuildingPlacement)
+        // Props and trees in the way die as if they lost their support.
+        const uint64_t StructuralDeath = TagBits(L"Gameplay.Effect.InstantDeath.StructuralSupport");
+        for (int32_t Index = 0; Index < InTheWay.Num(); ++Index)
         {
-            CallVirtual<void>(Existing, Natives::ABuildingActor_DieIndex, StructuralDeath, static_cast<AController*>(nullptr), static_cast<AActor*>(nullptr));
+            ABuildingActor* Existing = InTheWay[Index];
+            if (Existing && Existing->bDestroyOnPlayerBuildingPlacement)
+            {
+                CallVirtual<void>(Existing, Natives::ABuildingActor_DieIndex, StructuralDeath, static_cast<AController*>(nullptr), static_cast<AActor*>(nullptr));
+            }
         }
-    }
 
-    FActorSpawnParameters SpawnParameters;
-    SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-    FTransform SpawnTransform;
-    SpawnTransform.Rotation = BuildRot.Quaternion();
-    SpawnTransform.SetLocation(BuildLoc);
-    ABuildingSMActor* Building = Cast<ABuildingSMActor>(World->SpawnActor(BuildingClass, &SpawnTransform, SpawnParameters));
+        FActorSpawnParameters SpawnParameters;
+        SpawnParameters.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+        FTransform SpawnTransform;
+        SpawnTransform.Rotation = Rotation.Quaternion();
+        SpawnTransform.SetLocation(Location);
+        ABuildingSMActor* Placed = Cast<ABuildingSMActor>(World->SpawnActor(BuildingClass, &SpawnTransform, SpawnParameters));
+        if (!Placed)
+        {
+            return nullptr;
+        }
+
+        // SetCurrentBuildingLevel (slot 0xC3): the level, on the server.
+        if (Placed->Role == ROLE_Authority)
+        {
+            Placed->CurrentBuildingLevel = BuildingClassData.UpgradeLevel;
+        }
+        CallVirtual<void>(Placed, Natives::ABuildingSMActor_SetMirroredIndex, bMirrored);
+        MarkPlayerPlaced(Placed);
+        CallVirtual<void>(Placed, Natives::ABuildingActor_InitializeBuildingActorIndex, EFortBuildingInitializationReason::Spawned, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
+        CallVirtual<void>(Placed, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, EFortBuildingInitializationReason::Spawned);
+        LogPlacedPieceBuildUp(Placed, FortPlayerState);
+        UAthenaNavSystem::AddDirtyArea(Placed);
+        return Placed;
+    };
+    // The game mode scores a piece with its builder; Battle Royale's gives it the builder's team there (#120).
+    const auto Score = [&](ABuildingSMActor* Placed)
+    {
+        if (GameMode)
+        {
+            CallVirtual<void>(GameMode, Natives::AFortGameMode_ScoreBuildingConstructionIndex, static_cast<AController*>(this), Placed);
+        }
+    };
+
+    ABuildingSMActor* Building = Place(BuildLoc, BuildRot, ExistingBuildings);
     if (!Building)
     {
         return;
     }
-
-    // SetCurrentBuildingLevel (slot 0xC3): the level, on the server.
-    if (Building->Role == ROLE_Authority)
-    {
-        Building->CurrentBuildingLevel = BuildingClassData.UpgradeLevel;
-    }
-    CallVirtual<void>(Building, Natives::ABuildingSMActor_SetMirroredIndex, bMirrored);
-    AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(PlayerStateOf(this)));
-    const int32_t WorldPlayerId = FortPlayerState ? static_cast<int32_t>(FortPlayerState->WorldPlayerId) : -1;
-    MarkPlayerPlaced(Building);
-    CallVirtual<void>(Building, Natives::ABuildingActor_InitializeBuildingActorIndex, EFortBuildingInitializationReason::Spawned, WorldPlayerId, static_cast<void*>(nullptr), static_cast<void*>(nullptr), false);
-    CallVirtual<void>(Building, Natives::ABuildingActor_PostInitializeSpawnedBuildingActorIndex, EFortBuildingInitializationReason::Spawned);
-    LogPlacedPieceBuildUp(Building, FortPlayerState);
-    UAthenaNavSystem::AddDirtyArea(Building);
     FBuildingClassData PayClassData = BuildingClassData;
     CallVirtual<int32_t>(this, Natives::AFortPlayerController_PayBuildableClassPlacementCostIndex, &PayClassData);
-
-    // The game mode scores the piece with its builder; Battle Royale's gives it the builder's team there (#120).
-    if (UObject* GameMode = AuthGameModeOf(this))
-    {
-        CallVirtual<void>(GameMode, Natives::AFortGameMode_ScoreBuildingConstructionIndex, static_cast<AController*>(this), Building);
-    }
+    Score(Building);
     if (AFortPawn* Pawn = MyFortPawn)
     {
         UAISense_Hearing::ReportNoiseEvent(Pawn, PieceLocation(Building), BuildingNoiseLoudness, Pawn, BuildingNoiseRange, FName());
     }
+
+    // 7.20: "To help with situations where walls are built mostly underground, we've added functionality where an extra
+    // piece will be built for free on top of that piece. This occurs when the wall piece is showing less than 30% above
+    // ground" (v7.20 notes). The grid's query gives the adjustment for such a wall (FreeWallPieceOnTop; 7.00's grid
+    // search 0xD8607E stores it), UFortRuntimeOptions::bUsingBuildingExtraPiece turns the feature on (its constructor
+    // sets it from 7.20, 0x1583225; 7.00 and 7.10 leave it off, 7.10 0x149A00E) and MaxBuildingIntoTerrainIntersection-
+    // Percentage is the 30% (0.3). The client draws the free piece's preview at the grid cell above (below for
+    // FreeWallPieceOnBottom) with the same X and Y and the rotation (7.20 0x13C1141: the support system's cell for the
+    // location, its Z index +1 or -1, that cell's world location's Z; shown only with bUsingBuildingExtraPiece, 0x13C1256).
+    // The server's half is stripped with ServerCreateBuildingActor_Implementation; this places it there. Core's: the free
+    // piece is asked of the grid like any piece (and placed only where it may go), is not paid for, and is scored with
+    // its builder as the first one is, which gives it the builder's team in Battle Royale.
+    const UFortRuntimeOptions* RuntimeOptions = MarkerOptionalAdjustment != EFortBuildPreviewMarkerOptionalAdjustment::None && UFortRuntimeOptions::HasUsingBuildingExtraPiece() ? UFortRuntimeOptions::Get() : nullptr;
+    AFortGameStateZone* GameStateZone = RuntimeOptions && RuntimeOptions->bUsingBuildingExtraPiece ? Cast<AFortGameStateZone>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    UBuildingStructuralSupportSystem* SupportSystem = GameStateZone ? static_cast<UBuildingStructuralSupportSystem*>(GameStateZone->StructuralSupportSystem) : nullptr;
+    FBuildingSupportCellIndex Cell;
+    FVector CellLocation;
+    if (!SupportSystem || !SupportSystem->K2_GetGridIndicesFromWorldLoc(BuildLoc, Cell))
+    {
+        return;
+    }
+    const bool bOnTop = MarkerOptionalAdjustment == EFortBuildPreviewMarkerOptionalAdjustment::FreeWallPieceOnTop;
+    Cell.Z += bOnTop ? 1 : -1;
+    if (!SupportSystem->K2_GetWorldLocFromGridIndices(Cell, CellLocation))
+    {
+        return;
+    }
+    FVector ExtraLoc(BuildLoc.X, BuildLoc.Y, CellLocation.Z);
+    FRotator ExtraRot = BuildRot;
+    TArray<ABuildingActor*> ExtraInTheWay;
+    EFortBuildPreviewMarkerOptionalAdjustment ExtraAdjustment = EFortBuildPreviewMarkerOptionalAdjustment::None;
+    const int32_t ExtraQuery = CallVirtual<int32_t>(this, Natives::AFortPlayerController_CanPlaceBuildableClassInStructuralGridIndex, BuildingClass, &ExtraLoc, &ExtraRot, bMirrored, &ExtraInTheWay,
+        &ExtraAdjustment);
+    ABuildingSMActor* ExtraPiece = ExtraQuery == 0 ? Place(ExtraLoc, ExtraRot, ExtraInTheWay) : nullptr;
+    if (ExtraPiece)
+    {
+        Score(ExtraPiece);
+    }
+    UE_LOG(LogFortBuilding, Log, TEXT("%s's wall %s is mostly underground: the free piece %s goes %s it at (%.0f, %.0f, %.0f) (grid query %d)"), *GetName(), *Building->GetName(),
+        ExtraPiece ? *ExtraPiece->GetName() : TEXT("(none)"), bOnTop ? TEXT("on top of") : TEXT("under"), ExtraLoc.X, ExtraLoc.Y, ExtraLoc.Z, ExtraQuery);
 #endif
 }
 

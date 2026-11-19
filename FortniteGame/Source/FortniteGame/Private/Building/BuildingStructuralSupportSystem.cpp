@@ -102,6 +102,42 @@ FBox UBuildingStructuralSupportSystem::K2_GetGridBoxFromWorldLoc(const FVector& 
     return *Box;
 }
 
+bool UBuildingStructuralSupportSystem::K2_GetGridIndicesFromWorldLoc(const FVector& WorldLoc, FBuildingSupportCellIndex& OutGridIndices)
+{
+    static UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.BuildingStructuralSupportSystem:K2_GetGridIndicesFromWorldLoc");
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function);
+    const bool* ReturnValue = Params.Get<bool>(L"ReturnValue");
+    const FBuildingSupportCellIndex* Indices = Params.Get<FBuildingSupportCellIndex>(L"OutGridIndices");
+    if (!ReturnValue || !Indices || !Params.Set(L"WorldLoc", WorldLoc) || !Params.Call(this) || !*ReturnValue)
+    {
+        return false;
+    }
+    OutGridIndices = *Indices;
+    return true;
+}
+
+bool UBuildingStructuralSupportSystem::K2_GetWorldLocFromGridIndices(const FBuildingSupportCellIndex& GridIndices, FVector& OutWorldLoc) const
+{
+    static UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.BuildingStructuralSupportSystem:K2_GetWorldLocFromGridIndices");
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function);
+    const bool* ReturnValue = Params.Get<bool>(L"ReturnValue");
+    const FVector* Location = Params.Get<FVector>(L"OutWorldLoc");
+    if (!ReturnValue || !Location || !Params.Set(L"GridIndices", GridIndices) || !Params.Call(const_cast<UBuildingStructuralSupportSystem*>(this)) || !*ReturnValue)
+    {
+        return false;
+    }
+    OutWorldLoc = *Location;
+    return true;
+}
+
 bool UBuildingStructuralSupportSystem::GetGrid(FVector& OutOrigin, int32_t OutSize[3]) const
 {
     if (Natives::UBuildingStructuralSupportSystem_GridSize < 0 || Natives::UBuildingStructuralSupportSystem_GridOrigin < 0)

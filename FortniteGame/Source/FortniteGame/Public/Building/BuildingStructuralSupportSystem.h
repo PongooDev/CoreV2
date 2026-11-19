@@ -40,6 +40,15 @@ enum class EFortBuildPreviewMarkerOptionalAdjustment : uint8_t
     FreeWallPieceOnBottom = 2,
 };
 
+// A grid cell (FBuildingSupportCellIndex): its X, Y and Z indices.
+struct FBuildingSupportCellIndex
+{
+    int32_t X = 0;
+    int32_t Y = 0;
+    int32_t Z = 0;
+};
+static_assert(sizeof(FBuildingSupportCellIndex) == 0xC);
+
 class UBuildingStructuralSupportSystem : public UObject
 {
     DefineUnrealClass(UBuildingStructuralSupportSystem, FortniteGame)
@@ -59,6 +68,10 @@ public:
     // floored to a 384 uu level above GridOrigin. The box is the cell (centre +-256 in X and Y, the level in Z). Its
     // IsValid is false where the build doesn't reflect it or the call fails.
     struct FBox K2_GetGridBoxFromWorldLoc(const FVector& WorldLocation) const;
+    // The grid's cell at WorldLoc, and a cell's world location (both reflected from 3.5). False where the build doesn't
+    // reflect them or the grid says the place is off it.
+    bool K2_GetGridIndicesFromWorldLoc(const FVector& WorldLoc, FBuildingSupportCellIndex& OutGridIndices);
+    bool K2_GetWorldLocFromGridIndices(const FBuildingSupportCellIndex& GridIndices, FVector& OutWorldLoc) const;
 
     // Whether a piece of BuildingSMActorClassToCheck may go at Location and Rotation: the grid's own query, which
     // AFortPlayerController::CanPlaceBuildableClassInStructuralGrid (5.40 0x1199920, after its permission and limit

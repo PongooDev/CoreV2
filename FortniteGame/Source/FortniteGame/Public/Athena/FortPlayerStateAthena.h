@@ -201,6 +201,15 @@ public:
     DefineBitfieldUProperty(bThankedBusDriver)
     static bool HasThankedBusDriver() { return Member_bThankedBusDriver.IsAvailable(); }
 
+    // The squadmates this player's client calls friends (from 3.0; transient, not replicated), which only
+    // AFortPlayerControllerAthena::ServerSendSquadFriend fills: the client's AddSquadMember (7.30 0xD4C2C0) sends it for
+    // a teammate its social list has as a friend. The quest condition context (7.30 0x1461F50) reads SquadFriend.Count as
+    // FriendsInSquad.Num() (+0xE78) and SquadPcbFriend.Count as FriendsInSquadAtPartnerCafe.Num() (+0xE88).
+    DefineUProperty(TArray<AFortPlayerStateAthena*>, FriendsInSquad)
+    DefineUProperty(TArray<AFortPlayerStateAthena*>, FriendsInSquadAtPartnerCafe)
+    static bool HasFriendsInSquad() { return Member_FriendsInSquad.IsAvailable(); }
+    static bool HasFriendsInSquadAtPartnerCafe() { return Member_FriendsInSquadAtPartnerCafe.IsAvailable(); }
+
 private:
     // A set can't be assigned, so it has no DefineUProperty setter: read-only.
     static inline Reflection::FMemberInfo Member_HostilePlayersDamaged{ &StaticReflectionOwner, TEXT("HostilePlayersDamaged"), sizeof(TSet<AFortPlayerStateAthena*>), Reflection::EMemberKind::Value };

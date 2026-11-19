@@ -233,6 +233,14 @@ public:
     // Where the build strips ServerPlaySquadQuickChatMessage_Implementation (3.5.1: its body only destroys SenderID).
     static void HookQuickChatVTables();
 
+    // RPCs that only fill the sender's own player state: a squadmate the player's client calls a friend (from 3.0,
+    // AFortPlayerStateAthena::FriendsInSquad).
+    DefineUFunction(ServerSendSquadFriend)
+    void ServerSendSquadFriend_Implementation(AFortPlayerStateAthena* FriendInSquad);
+    // Where the build strips them: their _Implementation slots hold the shared empty function (7.30's ServerSendSquadFriend
+    // 0x41B, in every Athena controller class).
+    static void HookPlayerStateRpcVTables();
+
     // Creative (from 7.00; FortPlayerControllerAthenaCreative.cpp). The player's islands, replicated from their creative
     // profile, the last one they used, their rift of the hub and the island space it is linked to.
     DefineUStructArrayProperty(FCreativeIslandData, CreativeIslands)
@@ -420,6 +428,7 @@ private:
     // _Implementation's parameters by value: the caller's copies, which the callee destroys (the original's body does).
     static void ServerPlaySquadQuickChatMessage_ImplementationHK(AFortPlayerControllerAthena* This, FAthenaQuickChatActiveEntry* ChatEntry, void* SenderID);
     static inline void (*ServerPlaySquadQuickChatMessage_ImplementationOG)(AFortPlayerControllerAthena* This, FAthenaQuickChatActiveEntry* ChatEntry, void* SenderID) = nullptr;
+    static void ServerSendSquadFriend_ImplementationHK(AFortPlayerControllerAthena* This, AFortPlayerStateAthena* FriendInSquad);
 
     static void ServerGiveCreativeItem_ImplementationHK(AFortPlayerControllerAthena* This, const FFortItemEntry& CreativeItem);
     static void ServerReloadCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This);

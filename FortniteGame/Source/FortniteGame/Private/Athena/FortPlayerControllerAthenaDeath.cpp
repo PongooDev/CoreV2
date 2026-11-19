@@ -169,6 +169,7 @@ void AFortPlayerControllerAthena::HookVTables()
 #if WITH_SERVER_CODE
     HookQuickChatVTables();
     HookSuicideVTables();
+    HookPlayerStateRpcVTables();
 
     // Only the slots that hold the stripped function: the class's own vtable and its Blueprint subclasses', which share it.
     const auto SwapStripped = [](const wchar_t* Name, int32_t Index, void* Replacement)

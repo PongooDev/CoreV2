@@ -31,11 +31,13 @@
 #include "TimerManager.h"
 #include "UObject/Class.h"
 #include "UObject/UObjectGlobals.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
+#include <tuple>
 #include <vector>
 
 DEFINE_LOG_CATEGORY_STATIC(LogFort, Log, All);
@@ -664,5 +666,88 @@ void AFortPlayerControllerAthena::ResetToStartingItems()
     }
     GiveStartingItems(StartingItems);
     UE_LOG(LogFort, Log, TEXT("ResetToStartingItems: %s boards the aircraft with its starting items, %d warmup items taken"), *GetName(), static_cast<int32_t>(Removals.size()));
+#endif
+}
+
+// "Play a match with a friend" (from 3.0): the client's AddSquadMember (7.30 0xD4C2C0) sends ServerSendSquadFriend for a
+// squadmate (a player state with a PlayerId and the local player's SquadId) whom its social list has as a friend. Its
+// _Implementation is the shared empty function (7.30 slot 0x41B, from 6.31 to 7.40 and in 8.30's image too), and nothing
+// else fills the player state's FriendsInSquad, so the match's SquadFriend.Count (FriendsInSquad.Num() in the quest
+// condition context, 7.30 0x1461F50) stayed 0 for complete_athena_friend ("SquadFriend.Count > 0": daily_athena_friend,
+// battlepass_athena_friend), which Core-Backend counts from the match's results with its own friends list. No build on
+// hand keeps the body; the RPC's name, its parameter and the member are the evidence.
+void AFortPlayerControllerAthena::ServerSendSquadFriend_Implementation(AFortPlayerStateAthena* FriendInSquad)
+{
+#if WITH_SERVER_CODE
+    AFortPlayerStateAthena* SenderState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState)));
+    if (!SenderState || !FriendInSquad || FriendInSquad == SenderState)
+    {
+        return;
+    }
+
+    // Core's: the client only names a member of its own squad (its SquadId, else its team where the build has no
+    // squads); the server holds it to that, as only it can.
+    const bool bSquads = AFortPlayerStateAthena::HasSquadId() && static_cast<uint8_t>(SenderState->SquadId) != 0;
+    if (FriendInSquad->TeamIndex != SenderState->TeamIndex || (bSquads && FriendInSquad->SquadId != SenderState->SquadId))
+    {
+        UE_LOG(LogFort, Log, TEXT("ServerSendSquadFriend: %s named %s, who isn't in their squad"), *GetName(), *FriendInSquad->GetName());
+        return;
+    }
+
+    TArray<AFortPlayerStateAthena*>& Friends = SenderState->FriendsInSquad;
+    if (!Friends.Contains(FriendInSquad))
+    {
+        Friends.Add(FriendInSquad);
+        UE_LOG(LogFort, Log, TEXT("ServerSendSquadFriend: %s plays with their friend %s (%d in the squad)"), *GetName(), *FriendInSquad->GetName(), Friends.Num());
+    }
+#endif
+}
+
+void AFortPlayerControllerAthena::ServerSendSquadFriend_ImplementationHK(AFortPlayerControllerAthena* This, AFortPlayerStateAthena* FriendInSquad)
+{
+    This->ServerSendSquadFriend_Implementation(FriendInSquad);
+}
+
+void AFortPlayerControllerAthena::HookPlayerStateRpcVTables()
+{
+#if WITH_SERVER_CODE
+    const std::tuple<UFunction*, bool, void*, const wchar_t*> Restorations[] = {
+        { FindStaticFunction_ServerSendSquadFriend(), AFortPlayerStateAthena::HasFriendsInSquad(), reinterpret_cast<void*>(&ServerSendSquadFriend_ImplementationHK), L"AFortPlayerControllerAthena::ServerSendSquadFriend_Implementation" },
+    };
+
+    for (const auto& [Function, bMembers, Implementation, Name] : Restorations)
+    {
+        if (!Function || !bMembers)
+        {
+            continue;
+        }
+        const int32_t Index = Finder::ImplementationIndex(Function);
+        if (Index < 0)
+        {
+            Log::Error(L"Finder: {} slot not found", Name);
+            continue;
+        }
+
+        // Only the classes whose slot is the shared empty function (every Athena controller class in 6.31 to 7.40).
+        int32_t Swapped = 0;
+        for (TObjectIterator<UClass> It; It; ++It)
+        {
+            UClass* Class = *It;
+            UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+            void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+            if (VTable && VTable[Index] == Natives::SharedEmptyFunction)
+            {
+                Swapped += Hooks::SwapVTable(Name, VTable, Index, Implementation) ? 1 : 0;
+            }
+        }
+        if (Swapped > 0)
+        {
+            Log::Info(L"Finder: {} (slot 0x{:X}) is stripped, restored in {} controller classes", Name, Index, Swapped);
+        }
+        else
+        {
+            Log::Info(L"Finder: {} (slot 0x{:X}) is native in this build", Name, Index);
+        }
+    }
 #endif
 }

@@ -544,8 +544,10 @@ namespace
     // event's own tags, Source.Tags and Target.Tags, which Season 3's challenges ask for: an elimination at a named
     // location ("Source.Tags HasTag Athena.Location.POI.TiltedTowers || Target.Tags HasTag ...": the killer's or the
     // victim's AFortPoiVolume tags) and the building resources collected ("Target.Tags HasTag Building.Resource.Wood").
-    // Variables that need the game's own getters Core doesn't have (Pawn.Level, Building.*, Mission.*, Account.*,
-    // Team.Size, SquadFriend.Count) are left out, so conditions on them don't hold.
+    // The squadmates the player's client called friends (SquadFriend.Count, SquadPcbFriend.Count: 7.30's (0x1461F50) reads
+    // the player state's FriendsInSquad.Num() and FriendsInSquadAtPartnerCafe.Num(), filled by ServerSendSquadFriend), which
+    // complete_athena_friend asks for ("SquadFriend.Count > 0"). Variables that need the game's own getters Core doesn't
+    // have (Pawn.Level, Building.*, Mission.*, Account.*, Team.Size) are left out, so conditions on them don't hold.
     FConditionContext MakeConditionContext(UObject* TargetObject, AFortPlayerController* PlayerController, const FGameplayTagContainer& SourceTags, const FGameplayTagContainer& TargetTags)
     {
         FConditionContext Context;
@@ -566,6 +568,14 @@ namespace
             if (AFortPlayerStateAthena::HasKillScore())
             {
                 Context.Numbers[L"athena.kills"] = static_cast<int32_t>(PlayerState->KillScore);
+            }
+            if (AFortPlayerStateAthena::HasFriendsInSquad())
+            {
+                Context.Numbers[L"squadfriend.count"] = PlayerState->FriendsInSquad.Num();
+            }
+            if (AFortPlayerStateAthena::HasFriendsInSquadAtPartnerCafe())
+            {
+                Context.Numbers[L"squadpcbfriend.count"] = PlayerState->FriendsInSquadAtPartnerCafe.Num();
             }
         }
         UWorld* World = PlayerController ? PlayerController->GetWorld() : nullptr;

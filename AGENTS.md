@@ -220,6 +220,13 @@ A change is done only when all of these hold:
 - Close an issue only with a comment that names the fixing commit and what was verified. Never close one with
   "should work now", without a commit, or without a comment. Reopen it if the reporter says it still happens.
 - Rejected issues (the build's own behaviour, out of scope) get a short comment saying why, then close as not planned.
+- **One issue, several problems** (in its body or later comments): don't ask the reporter to refile. Keep the original
+  for its first problem. Open a new issue for each extra problem under the owner's account (gh is logged in as the
+  owner). Start it "Split out of #N (reported by @name)" and give the build, the mode, what happened and what should
+  happen, with the reporter's screenshots and log links. Comment the new numbers on the original, then fix each one
+  (owner's rule, 2026-11-19).
+- **MrPodge6's decisions count as the owner's** on issues and PRs, from 2026-11-17 on (not earlier ones): reopening,
+  closing, approving a change, including a CoreClient change on his issue. The safety rules above still apply.
 - Unfinished work goes in `H:\CoreWork\HANDOFF.md`, never in a pushed WIP commit or branch.
 
 **Pull requests: review, fix, merge.** Agents review every open PR, make it right and merge it themselves (the

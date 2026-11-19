@@ -104,6 +104,10 @@ public:
     FName GetLootTierKey() const;
 
     int32_t LootTier = -1;
+
+private:
+    // Only the pre-4.22 layout. Read the key with GetLootTierKey: from 7.00 these bytes are the key's Number and the next
+    // member (ABuildingSMActor's DestructionLootTierKey), so reading the key here gave None (#491).
     int32_t Pad = 0;
     FName LootTierKey;
 };

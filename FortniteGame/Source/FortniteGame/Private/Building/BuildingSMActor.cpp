@@ -126,7 +126,7 @@ void ABuildingSMActor::PostUpdate(EFortBuildingPersistentState State, FFortBuild
         const FChosenQuotaInfo& ChosenQuota = DestructionLootTierChosenQuotaInfo;
         if (ChosenQuota.IsSet())
         {
-            DestructionLootTierKey = ChosenQuota.LootTierKey;
+            DestructionLootTierKey = ChosenQuota.GetLootTierKey();
             LootTier = ChosenQuota.LootTier;
         }
         else

@@ -191,6 +191,43 @@ namespace
             || (Consumable != Reflection::InvalidEnumValue && ItemType == Consumable);
     }
 
+    // From 7.40 (CL-5046157) the quickbars are the client's alone, so the server has no focused slot: the item a full
+    // backpack gives up is the one the client names (ServerHandlePickupWithSwap's Swap, kept in the pickup's
+    // PickupLocationData.PickupGuid). It is dropped as a focused slot's item is where the server has quickbars, under
+    // the same rules: Battle Royale, an item with no room at all, one that can be dropped. True when it was dropped.
+    bool DropRequestedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry, const FGuid& SwapGuid, const UFortItemDefinition*& OutDroppedDefinition)
+    {
+        const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
+        AFortInventory* Inventory = PlayerController->WorldInventory;
+        if (!SwapGuid.IsValid() || !ItemDefinition || !Inventory || ItemEntry.Count <= 0 || !AFortGameModeAthena::GetCurrent(PlayerController))
+        {
+            return false;
+        }
+        const EFortItemType ItemType = static_cast<EFortItemType>(ItemDefinition->ItemType);
+        if (!IsSwappableItemType(ItemType) || Inventory->GetOverflowAmount(ItemEntry, true) < ItemEntry.Count)
+        {
+            return false;
+        }
+        UFortWorldItem* SwapItem = Inventory->FindWorldItem(SwapGuid);
+        FFortItemEntry* SwapEntry = SwapItem ? &static_cast<FFortItemEntry&>(SwapItem->ItemEntry) : nullptr;
+        UFortWorldItemDefinition* SwapDefinition = SwapEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(SwapEntry->ItemDefinition)) : nullptr;
+        if (!SwapDefinition || !SwapDefinition->bCanBeDropped)
+        {
+            Log::Info(L"Battle Royale: {}'s {} isn't swapped: the item it asked to give up is {}", PlayerController->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(),
+                SwapDefinition ? L"one that can't be dropped" : L"not in its inventory");
+            return false;
+        }
+        PlayerController->ServerSpawnInventoryDrop_Implementation(SwapGuid, SwapEntry->Count);
+        if (Inventory->FindWorldItem(SwapGuid))
+        {
+            Log::Warning(L"Battle Royale: {}'s {} wasn't dropped, so {} isn't swapped in", PlayerController->GetName().ToStdString(), SwapDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString());
+            return false;
+        }
+        Log::Info(L"Battle Royale: {} swaps {} for {} (the item its client named)", PlayerController->GetName().ToStdString(), SwapDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString());
+        OutDroppedDefinition = SwapDefinition;
+        return true;
+    }
+
     int32_t DropFocusedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry, const UFortItemDefinition*& OutDroppedDefinition)
     {
         const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
@@ -1094,6 +1131,9 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
     UScriptStruct* EntryStruct = FFortItemEntry::StaticStruct();
     int32_t SwappedSlot = -1;
     const UFortItemDefinition* DroppedDefinition = nullptr;
+    // The item the client asked to give up for this pickup (ServerHandlePickupWithSwap), where the build keeps it.
+    const FGuid RequestedSwap = FFortPickupLocationData::HasPickupGuid() ? static_cast<FFortPickupLocationData&>(PickupLocationData).PickupGuid : FGuid();
+    bool bRequestedSwapDone = false;
     // An item cache (4.0) isn't an item the player carries: the world manager keeps it for the end of the mission, when
     // EndPrimaryMission's EarnedItemCaches has the MCP give its card pack (AFortWorldManager::AddEarnedItemCache).
     UWorld* World = GetWorld();
@@ -1116,7 +1156,12 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         }
 
         int32_t EntrySwappedSlot = -1;
-        if (SwappedSlot < 0)
+        if (!AFortPlayerController::HasQuickBars())
+        {
+            // 7.40: the client's named item, once (DropRequestedItemForSwap).
+            bRequestedSwapDone = bRequestedSwapDone || DropRequestedItemForSwap(PlayerController, *Entry, RequestedSwap, DroppedDefinition);
+        }
+        else if (SwappedSlot < 0)
         {
             SwappedSlot = EntrySwappedSlot = DropFocusedItemForSwap(PlayerController, *Entry, DroppedDefinition);
         }

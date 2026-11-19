@@ -43,6 +43,9 @@ public:
     // Where a pickup at rest lies: the toss branch of OnRep_PickupLocationData (AFortPickup::SetupForMovementCompToss,
     // 4.5 0xDC75B0, 5.0 CL-4204761 0xF533F0) puts an AtRest pickup there.
     DefineUProperty(FVector, FinalTossRestLocation)
+    // The item the pickup takes the place of (ServerHandlePickupWithSwap's Swap), else zero.
+    DefineUProperty(FGuid, PickupGuid)
+    static bool HasPickupGuid() { return Member_PickupGuid.IsAvailable(); }
 
     // Whether the build reflects what pickup combining uses.
     static bool IsCombineAvailable();

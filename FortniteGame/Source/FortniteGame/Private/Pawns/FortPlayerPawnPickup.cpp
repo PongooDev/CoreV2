@@ -119,6 +119,27 @@ void AFortPlayerPawn::ServerHandlePickup_Implementation(AFortPickup* Pickup, flo
 #endif
 }
 
+void AFortPlayerPawn::ServerHandlePickupWithSwap_Implementation(AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
+{
+#if WITH_SERVER_CODE
+    // The pickup keeps the item it takes the place of (PickupLocationData.PickupGuid), and flies in as any other; on
+    // its arrival that item is dropped first (AFortPickup::GivePickupToPlayer). A pickup already on its way or gone is
+    // left alone, as ServerHandlePickup leaves it.
+    if (!Pickup || Pickup->IsPendingKill() || !FFortPickupLocationData::HasPickupGuid())
+    {
+        ServerHandlePickup_Implementation(Pickup, InFlyTime, InStartDirection, bPlayPickupSound);
+        return;
+    }
+    FFortPickupLocationData& LocationData = Pickup->PickupLocationData;
+    if (!static_cast<AFortPawn*>(LocationData.PickupTarget))
+    {
+        LocationData.PickupGuid = Swap;
+        Log::Info(L"Pickup: {} takes {} in place of item {}", GetName().ToStdString(), Pickup->GetName().ToStdString(), std::format(L"{:08X}{:08X}{:08X}{:08X}", Swap.A, Swap.B, Swap.C, Swap.D));
+    }
+    ServerHandlePickup_Implementation(Pickup, InFlyTime, InStartDirection, bPlayPickupSound);
+#endif
+}
+
 void AFortPlayerPawn::HookPickupVTables()
 {
     const int32_t Index = Finder::ImplementationIndex(StaticFunction_ServerHandlePickup());
@@ -150,11 +171,31 @@ void AFortPlayerPawn::HookPickupVTables()
             Hooks::SwapVTable(L"AFortPlayerPawn::ServerHandlePickup_Implementation", VTable, Index, reinterpret_cast<void*>(&ServerHandlePickup_ImplementationHK));
         }
     }
+
+    // ServerHandlePickupWithSwap: stripped wherever ServerHandlePickup is from 7.30 on (7.30 slot 0x1B1, 7.40 slot 0x1B2, the
+    // shared empty function). Only where the build gives it a place to keep the item swapped (PickupGuid).
+    UFunction* WithSwap = FindStaticFunction_ServerHandlePickupWithSwap();
+    const int32_t SwapIndex = WithSwap && FFortPickupLocationData::HasPickupGuid() ? Finder::ImplementationIndex(WithSwap) : -1;
+    for (TObjectIterator<UClass> It; SwapIndex >= 0 && It; ++It)
+    {
+        UClass* Class = *It;
+        UObject* ClassDefault = Class->IsChildOf(StaticClass()) ? Class->GetDefaultObject(false) : nullptr;
+        void** VTable = ClassDefault ? *reinterpret_cast<void***>(ClassDefault) : nullptr;
+        if (VTable && Finder::IsStubFunction(reinterpret_cast<uintptr_t>(VTable[SwapIndex])))
+        {
+            Hooks::SwapVTable(L"AFortPlayerPawn::ServerHandlePickupWithSwap_Implementation", VTable, SwapIndex, reinterpret_cast<void*>(&ServerHandlePickupWithSwap_ImplementationHK));
+        }
+    }
 }
 
 void AFortPlayerPawn::ServerHandlePickup_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
 {
     This->ServerHandlePickup_Implementation(Pickup, InFlyTime, InStartDirection, bPlayPickupSound);
+}
+
+void AFortPlayerPawn::ServerHandlePickupWithSwap_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound)
+{
+    This->ServerHandlePickupWithSwap_Implementation(Pickup, Swap, InFlyTime, InStartDirection, bPlayPickupSound);
 }
 
 namespace

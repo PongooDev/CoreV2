@@ -46,6 +46,7 @@ class AFortPlayerPawn : public AFortPawn
     DefineUFunction(ServerSendZiplineState)
     DefineUFunction(OnRep_ZiplineState)
     DefineUFunction(ServerHandlePickup)
+    DefineUFunction(ServerHandlePickupWithSwap)
     DefineUFunction(IsUsingPersonalVehicle)
     DefineUFunction(PushAnimBPOverride)
     DefineUFunction(PopAnimBPOverride)
@@ -113,6 +114,11 @@ public:
     // 1.8.1's pickup RPC (0x80A2C0, with AFortPlayerPawnAthena's 0x4349E0), restored where the build strips
     // ServerHandlePickup_Implementation (1.8.2).
     void ServerHandlePickup_Implementation(AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
+    // The pickup that takes the place of one of the player's items (Swap, the item's guid), where the build strips
+    // ServerHandlePickupWithSwap_Implementation (7.30 and 7.40: the shared empty function). 7.40's client sends it when the
+    // player holds interact on a pickup ("swap the item in the currently selected slot"), the only way the server learns
+    // which item to give up there, as 7.40 keeps the quickbars on the client.
+    void ServerHandlePickupWithSwap_Implementation(AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
 
     static ptrdiff_t LastEquippedWeaponGUIDOffset();
     static ptrdiff_t StasisModeOffset() { return Member_StasisMode.GetOffsetChecked(); }
@@ -155,4 +161,5 @@ private:
     static void PushFootstepBankOverrideHK(AFortPlayerPawn* This, int32_t Priority, UObject* InFootstepBankOverride);
     static void PopFootstepBankOverrideHK(AFortPlayerPawn* This, int32_t Priority, UObject* InFootstepBankOverride);
     static void ServerHandlePickup_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
+    static void ServerHandlePickupWithSwap_ImplementationHK(AFortPlayerPawn* This, AFortPickup* Pickup, const FGuid& Swap, float InFlyTime, const FVector& InStartDirection, bool bPlayPickupSound);
 };

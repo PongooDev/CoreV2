@@ -223,6 +223,9 @@ void AFortMinigame::ClearPlayerInventory(AFortPlayerControllerAthena* PlayerCont
     {
         Log::Info(L"Minigame: {} loses {} items as {}'s inventory is reset", PlayerController->GetName().ToStdString(), Removed, GetName().ToStdString());
     }
+    // The game's start and end move each player's same pawn (Core's RespawnMinigamePlayers, the post-game place), where
+    // Epic's stripped respawn gave a new one: a Movement Modulator's speed and flight don't come along.
+    PlayerController->ResetCreativeMovementState();
 #endif
 }
 

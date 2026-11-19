@@ -1,4 +1,5 @@
 #include "pch.h"
+#include "AbilitySystemComponent.h"
 #include "AsyncTaskQueue.h"
 #include "Athena/FortGameModeAthena.h"
 #include "Athena/FortGameStateAthena.h"
@@ -13,6 +14,8 @@
 #include "Finder.h"
 #include "FortGameInstance.h"
 #include "FortGameModeZone.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Hooks.h"
 #include "Items/FortInventory.h"
@@ -853,6 +856,8 @@ void AFortPlayerControllerAthena::PostLobbyIslandTeleport(AFortPlayerPawn* Playe
     SetCreativePlotLinkedVolume(nullptr);
     const FFortRespawnData& RespawnData = AthenaState->RespawnData;
     TeleportPawnTo(RespawnData.RespawnLocation, RespawnData.RespawnRotation, L"the Creative hub");
+    // The same pawn arrives, where Epic's stripped trip would have given a new one: no island speed or flight in the hub.
+    ResetCreativeMovementState();
     // What they picked up or took from the Creative inventory stays on the island (#499): a game's end resets its
     // players (AFortMinigame::ClearPlayerInventory), but a player who leaves for the hub, during a game or outside one,
     // isn't one of its players any more. 7.20 strips both this function and ClearDroppableItems, and nothing in the image
@@ -911,6 +916,55 @@ int32_t AFortPlayerControllerAthena::ClearDroppableItems()
     return static_cast<int32_t>(Removals.size());
 #else
     return 0;
+#endif
+}
+
+void AFortPlayerControllerAthena::ResetCreativeMovementState()
+{
+#if WITH_SERVER_CODE
+    // Epic's 7.10-7.30 respawn a game's players for its warmup (AFortMinigame::RespawnMinigamePlayers) and take a player
+    // back to the hub (ServerTeleportToPlaygroundLobbyIsland) in server code the builds strip (7.30: exec 0x84BD00, slot
+    // 0x442); Core moves the same pawn there instead, so what the old pawn was doing goes with it.
+    if (Role != ROLE_Authority)
+    {
+        return;
+    }
+    // The Movement Modulator (Toy_Floor_SpeedIncrease): GA_Toy_SpeedAdjust applies GE_Toy_SpeedAdjust (HasDuration, the
+    // device's DurationValue, 3 to 120 s; Run/Sprint/Crouched speeds and TopSpeedScale) to the pawn's ability system,
+    // which for a player is the player state's (7.30 0x13B8C40 sets the pawn's from it), so the effect outlives a pawn.
+    // Loaded only once a device's ability set loaded it: nobody can have it otherwise, and older builds don't have it.
+    UClass* const Effect = FindObject<UClass>(nullptr, L"/Game/Abilities/Toys/SpeedBoost/GE_Toy_SpeedAdjust.GE_Toy_SpeedAdjust_C");
+    AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(reinterpret_cast<AController*>(this)->PlayerState)));
+    UAbilitySystemComponent* AbilitySystem = Effect && FortPlayerState
+        ? static_cast<UAbilitySystemComponent*>(FortPlayerState->AbilitySystemComponent) : nullptr;
+    if (Effect && AbilitySystem && AbilitySystem->GetGameplayEffectCount(Effect, nullptr, false) > 0
+        && AbilitySystem->RemoveActiveGameplayEffectBySourceEffect(Effect, nullptr, -1))
+    {
+        Log::Info(L"Creative: {} loses the Movement Modulator's speed (GE_Toy_SpeedAdjust)", PlayerNameOf(this));
+    }
+
+    // Creative flight (#512): AFortPlayerControllerGameplay's StartFly (7.30 0x14384F0) puts the pawn in MOVE_Flying. Its
+    // check while flying, OnVerifyAllowedToFly on VerifyAllowedToFlyTimerHandle (every UFortGlobals::
+    // FlyVerificationInterval), is stripped (7.30 and 7.40 bind an empty function), so nothing stops it. The game's own
+    // ServerCreativeStopFly_Implementation (7.30 0x1436500: a Creative game's StopFly 0x14389C0, MOVE_Falling, the fly
+    // tags off, OnCreativeFlyChangedDelegate, the timer cleared) runs here, and ClientCreativeStopFly (the same body) on
+    // the player's client, whose movement leads its pawn's.
+    UObject* const Self = reinterpret_cast<UObject*>(this);
+    UFunction* const ServerStopFly = Self->FindFunction(FName(L"ServerCreativeStopFly", FNAME_Find));
+    UFunction* const ClientStopFly = ServerStopFly ? Self->FindFunction(FName(L"ClientCreativeStopFly", FNAME_Find)) : nullptr;
+    APawn* const Pawn = ClientStopFly ? GetPawn() : nullptr;
+    ACharacter* const Character = Pawn ? Cast<ACharacter>(reinterpret_cast<UObject*>(Pawn)) : nullptr;
+    UCharacterMovementComponent* const Movement = Character ? static_cast<UCharacterMovementComponent*>(Character->CharacterMovement) : nullptr;
+    constexpr uint8_t MOVE_Flying = 5;
+    if (!Movement || Movement->MovementMode != MOVE_Flying)
+    {
+        return;
+    }
+    Reflection::FParams ServerParams(ServerStopFly, true);
+    ServerParams.Call(this);
+    Reflection::FParams ClientParams(ClientStopFly, true);
+    ClientParams.Call(this);
+    Log::Info(L"Creative: {} stops flying (ServerCreativeStopFly, ClientCreativeStopFly)", PlayerNameOf(this));
 #endif
 }
 

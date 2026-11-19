@@ -328,6 +328,12 @@ public:
     // (PostLobbyIslandTeleport). Returns how many stacks went.
     DefineUFunction(ClearDroppableItems)
     int32_t ClearDroppableItems();
+    // Core's (no Epic function by this name): what a Creative player's new pawn would not have carried over, where the
+    // build's stripped respawns are replaced by moving the same pawn (a game's start and end, through
+    // AFortMinigame::ClearPlayerInventory, and the trip back to the hub, PostLobbyIslandTeleport). The Movement
+    // Modulator's GE_Toy_SpeedAdjust comes off the player state's ability system, and a flying player stops flying through
+    // the game's own ServerCreativeStopFly and ClientCreativeStopFly (#512). Nothing where the build has neither.
+    void ResetCreativeMovementState();
 
     void ClientCycleQuickBarToCreativeItem(const FGuid& CreativeItemGuid, UFortWorldItemDefinition* CreativeItemDef);
     // The game's own ServerLoadPlotForPortal_Implementation (7.00 0xC65E80): finds PlotItemId in the player's creative

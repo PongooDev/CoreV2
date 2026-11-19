@@ -80,7 +80,8 @@ bool AFortMinigame::DetermineSpawnLocation(AController* PlayerController, FVecto
     if (Params.Has(L"PlayerState"))
     {
         APlayerState* PlayerState = PlayerController ? static_cast<APlayerState*>(PlayerController->PlayerState) : nullptr;
-        bSet = PlayerState && Params.Set(L"PlayerState", reinterpret_cast<UObject*>(PlayerState)) && Params.Set(L"bShouldClaim", true);
+        // 7.40 (CL-5046157) takes only the player state: no bShouldClaim.
+        bSet = PlayerState && Params.Set(L"PlayerState", reinterpret_cast<UObject*>(PlayerState)) && (!Params.Has(L"bShouldClaim") || Params.Set(L"bShouldClaim", true));
     }
     else
     {
@@ -93,6 +94,8 @@ bool AFortMinigame::DetermineSpawnLocation(AController* PlayerController, FVecto
     const FVector* Location = Params.Get<FVector>(L"OutLocation");
     const FRotator* Rotation = Params.Get<FRotator>(L"OutRotation");
     const bool* Skydive = Params.Get<bool>(L"bShouldSkydive");
+    // 7.40 (CL-5046157) answers whether the player respawns on the ground (bOutRespawningOnGround) instead.
+    const bool* OnGround = Skydive ? nullptr : Params.Get<bool>(L"bOutRespawningOnGround");
     const bool* ReturnValue = Params.Get<bool>(L"ReturnValue");
     if (!Location || !Rotation || !ReturnValue || !*ReturnValue)
     {
@@ -100,7 +103,7 @@ bool AFortMinigame::DetermineSpawnLocation(AController* PlayerController, FVecto
     }
     OutLocation = *Location;
     OutRotation = *Rotation;
-    bShouldSkydive = Skydive && *Skydive;
+    bShouldSkydive = Skydive ? *Skydive : OnGround && !*OnGround;
     return true;
 }
 

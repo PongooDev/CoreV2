@@ -18313,7 +18313,13 @@ bool Finder::ResolveTeamChangeLive()
     // team's AFortTeamInfo (GetTeamInfo) and calls SetTeam (0xB74220): RemoveFromTeam on the old team, then
     // AFortTeamInfo::AddToTeam (0xC01AE0), which adds the controller to TeamMembers and sets its player state's team
     // (AFortPlayerStateAthena::SetPlayerTeam, 0x9FAB50: PlayerTeam, PlayerTeamPrivate and TeamIndex).
-    const uintptr_t Place = FunctionOf(L"PlacePlayerOnTeam for %s Current: %s Actual: %s");
+    uintptr_t Place = FunctionOf(L"PlacePlayerOnTeam for %s Current: %s Actual: %s");
+    if (!Place)
+    {
+        // 7.40 (CL-5046157), whose teams are uint8 numbers, logs them as such (0x1021B80: PickTeam slot 0x166 at
+        // 0x1021BC6, AttemptChangeTeamInfoForController slot 0x163 at 0x1021C7A).
+        Place = FunctionOf(L"PlacePlayerOnTeam for %s Current: %d Actual: %d");
+    }
     const uintptr_t End = Place ? Finder::FunctionEnd(Place) : 0;
     std::vector<int32_t> Slots;
     for (uintptr_t Call = Place ? FindVirtualCall(Place, End) : 0; Call; Call = FindVirtualCall(Call + 6, End))

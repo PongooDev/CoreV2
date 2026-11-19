@@ -12879,6 +12879,37 @@ bool Finder::ResolveMcpProfileQuery()
     return true;
 }
 
+namespace
+{
+    // 7.40 (CL-5046157) makes bIsDBNO a bit (+0x7CF, bit 0) and sets it through a setter that also broadcasts the DBNO
+    // state (0x13B1670: movzx r8d, byte ptr [rcx+7CFh]; ...; and r8b, 0FEh; or r8b, dl; mov [rcx+7CFh], r8b), which
+    // StartDBNO calls with true: mov dl, 1; mov rcx, rdi; call (0x13DDB51, the Athena pawn's 0xDDFFC3). Where Site is
+    // such a call, the register the pawn is in (rax..rdi, the low bits of "mov rcx, reg"), else -1. Builds where bIsDBNO
+    // is a whole byte store 1 to it instead ("mov byte ptr [reg+IsDBNOOffset], 1"), which the callers still look for.
+    int32_t DBNOSetCallPawnRegister(uintptr_t Site, ptrdiff_t IsDBNOOffset)
+    {
+        const uintptr_t Target = Byte(Site) == 0xE8 ? Finder::RelativeTarget(Site, 1, 5) : 0;
+        bool bSetter = false;
+        for (uintptr_t Store = Target; IsInText(Target) && Store + 6 <= Target + 0x30 && !bSetter; ++Store)
+        {
+            // mov [rcx+IsDBNOOffset], r8 (88 /r, mod 10, rm rcx; an optional REX before it).
+            bSetter = Byte(Store) == 0x88 && (Byte(Store + 1) & 0xC7) == 0x81 && *reinterpret_cast<const int32_t*>(Store + 2) == static_cast<int32_t>(IsDBNOOffset);
+        }
+        if (!bSetter || !FindInstruction(Site - 0x18, Site, { 0xB2, 0x01 }))
+        {
+            return -1;
+        }
+        for (uintptr_t Move = Site - 3; Move + 0x10 >= Site; --Move)
+        {
+            if (Byte(Move) == 0x48 && Byte(Move + 1) == 0x8B && (Byte(Move + 2) & 0xF8) == 0xC8)
+            {
+                return (Byte(Move + 2) & 0x07) != 0x04 ? Byte(Move + 2) & 0x07 : -1;
+            }
+        }
+        return -1;
+    }
+}
+
 bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOffset)
 {
     static bool bSearched = false;
@@ -13014,7 +13045,10 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
             for (uintptr_t Site = Entry; End && Site + 7 <= End; ++Site)
             {
                 const uint8_t SetModRm = Byte(Site + 1);
-                if (Byte(Site) != 0xC6 || (SetModRm & 0xF8) != 0x80 || (SetModRm & 0x07) == 0x04 || *reinterpret_cast<const int32_t*>(Site + 2) != IsDBNOOffset || Byte(Site + 6) != 1)
+                const bool bStoresOne = Byte(Site) == 0xC6 && (SetModRm & 0xF8) == 0x80 && (SetModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 2) == IsDBNOOffset && Byte(Site + 6) == 1;
+                // 7.40 sets the bit through its setter (DBNOSetCallPawnRegister): 0x13DDB51, the timer at 0x13DDC.. on rdi.
+                const int32_t PawnRegister = bStoresOne ? SetModRm & 0x07 : DBNOSetCallPawnRegister(Site, IsDBNOOffset);
+                if (PawnRegister < 0)
                 {
                     continue;
                 }
@@ -13025,7 +13059,7 @@ bool Finder::ResolveDBNOReviveLive(ptrdiff_t IsDBNOOffset, ptrdiff_t QuickBarsOf
                     {
                         continue;
                     }
-                    const uintptr_t Lea = FindInstruction(Call, std::min(End, Call + 0x200), { 0x48, 0x8D, 0x90 | (SetModRm & 0x07) });
+                    const uintptr_t Lea = FindInstruction(Call, std::min(End, Call + 0x200), { 0x48, 0x8D, 0x90 | PawnRegister });
                     if (Lea)
                     {
                         TimerOffset = *reinterpret_cast<const int32_t*>(Lea + 3);
@@ -13206,9 +13240,11 @@ int32_t Finder::StartDBNOIndex(ptrdiff_t IsDBNOOffset)
         const uintptr_t End = Finder::FunctionStart(Entry) == Entry ? Finder::FunctionEnd(Entry) : 0;
         for (uintptr_t Site = Entry; End && Site + 7 <= End; ++Site)
         {
-            // mov byte ptr [reg+IsDBNOOffset], 1 (C6 /0, disp32, imm8, no SIB).
+            // mov byte ptr [reg+IsDBNOOffset], 1 (C6 /0, disp32, imm8, no SIB); from 7.40 a call of the bit's setter with
+            // true (the Athena pawn's 0xDDF7F0 at 0xDDFFD4).
             const uint8_t ModRm = Byte(Site + 1);
-            if (Byte(Site) == 0xC6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 2) == IsDBNOOffset && Byte(Site + 6) == 1)
+            if ((Byte(Site) == 0xC6 && (ModRm & 0xF8) == 0x80 && (ModRm & 0x07) != 0x04 && *reinterpret_cast<const int32_t*>(Site + 2) == IsDBNOOffset && Byte(Site + 6) == 1)
+                || DBNOSetCallPawnRegister(Site, IsDBNOOffset) >= 0)
             {
                 return true;
             }
@@ -14017,6 +14053,13 @@ uint8_t* Finder::ButterflyEventForceReviveCall(ptrdiff_t IsDBNOOffset)
             const uint8_t ModRm = Byte(Site + 1);
             if (Byte(Site) == 0x80 && (ModRm & 0xC0) == 0x80 && ((ModRm >> 3) & 7) == 7 && (ModRm & 7) != 4
                 && *reinterpret_cast<const int32_t*>(Site + 2) == static_cast<int32_t>(IsDBNOOffset) && Byte(Site + 6) == 0)
+            {
+                return true;
+            }
+            // 7.40 (CL-5046157), where bIsDBNO is a bit: test byte ptr [reg+IsDBNOOffset], bit (F6 /0 disp32 ib).
+            const uint8_t Bit = Byte(Site + 6);
+            if (Byte(Site) == 0xF6 && (ModRm & 0xC0) == 0x80 && ((ModRm >> 3) & 7) == 0 && (ModRm & 7) != 4
+                && *reinterpret_cast<const int32_t*>(Site + 2) == static_cast<int32_t>(IsDBNOOffset) && Bit && !(Bit & (Bit - 1)))
             {
                 return true;
             }

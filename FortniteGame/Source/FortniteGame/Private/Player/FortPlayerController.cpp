@@ -1029,17 +1029,54 @@ void AFortPlayerController::ClientUpdateQuickBarRecordsCache(const FQuickBar& Pr
     Params.Call(this);
 }
 
+void AFortPlayerController::ServerAcknowledgeDelayedQuickBarAction_Implementation(const TArray<uint16_t>& ProcessedActionIds)
+{
+#if WITH_SERVER_CODE
+    // The server queues changes for the client's quickbars in DelayedQuickBarActions (0x13EB800 and 0x13EB8B0: the next
+    // ActionId, from +0x1446; AddItemToQuickBars and the weapons' own on authority call them), the client carries out each
+    // new one (0x141FF90, OnRep_DelayedQuickBarActions' handler) and sends the ids it did. Core's: those are taken out of
+    // the list, which replicates without them; the client forgets the ids that are no longer in it (0x1419350).
+    if (!HasDelayedQuickBarActions())
+    {
+        return;
+    }
+    TStructArray<FDelayedQuickBarAction>& Actions = DelayedQuickBarActions;
+    int32_t Removed = 0;
+    for (int32_t Index = Actions.Num() - 1; Index >= 0; --Index)
+    {
+        if (ProcessedActionIds.Contains(Actions[Index].ActionId))
+        {
+            Actions.RemoveAt(Index);
+            ++Removed;
+        }
+    }
+    static bool bLoggedOnce = false;
+    if (!bLoggedOnce && Removed > 0)
+    {
+        bLoggedOnce = true;
+        UE_LOG(LogFort, Log, TEXT("ServerAcknowledgeDelayedQuickBarAction: %s's client did %d queued quickbar changes (%d left)"), *GetName(), Removed, Actions.Num());
+    }
+#endif
+}
+
 void AFortPlayerController::ServerUpdateQuickBarRecordsCache_ImplementationHK(AFortPlayerController* This, const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord)
 {
     This->ServerUpdateQuickBarRecordsCache_Implementation(PrimaryQuickBarRecord, SecondaryQuickBarRecord);
 }
 
+void AFortPlayerController::ServerAcknowledgeDelayedQuickBarAction_ImplementationHK(AFortPlayerController* This, const TArray<uint16_t>& ProcessedActionIds)
+{
+    This->ServerAcknowledgeDelayedQuickBarAction_Implementation(ProcessedActionIds);
+}
+
 void AFortPlayerController::HookQuickBarRecordVTables()
 {
-    // 7.40 (CL-5046157) declares it on this class, and every controller class's slot is the shared empty function
-    // (ServerUpdateQuickBarRecordsCache 0x20F; the _Validate before it returns true). Builds before 7.40 don't have it.
+    // 7.40 (CL-5046157) declares both on this class, and every controller class's slot is the shared empty function
+    // (ServerUpdateQuickBarRecordsCache 0x20F, ServerAcknowledgeDelayedQuickBarAction 0x212; the _Validates before them
+    // return true). Builds before 7.40 have neither RPC.
     for (const auto& [Function, Implementation, Name, bMembers] : {
-             std::tuple{ FindStaticFunction_ServerUpdateQuickBarRecordsCache(), reinterpret_cast<void*>(&ServerUpdateQuickBarRecordsCache_ImplementationHK), L"AFortPlayerController::ServerUpdateQuickBarRecordsCache_Implementation", HasQuickBarRecordsCache() } })
+             std::tuple{ FindStaticFunction_ServerUpdateQuickBarRecordsCache(), reinterpret_cast<void*>(&ServerUpdateQuickBarRecordsCache_ImplementationHK), L"AFortPlayerController::ServerUpdateQuickBarRecordsCache_Implementation", HasQuickBarRecordsCache() },
+             std::tuple{ FindStaticFunction_ServerAcknowledgeDelayedQuickBarAction(), reinterpret_cast<void*>(&ServerAcknowledgeDelayedQuickBarAction_ImplementationHK), L"AFortPlayerController::ServerAcknowledgeDelayedQuickBarAction_Implementation", HasDelayedQuickBarActions() } })
     {
         const int32_t Index = Function && bMembers ? Finder::ImplementationIndex(Function) : -1;
         if (!Function || !bMembers)

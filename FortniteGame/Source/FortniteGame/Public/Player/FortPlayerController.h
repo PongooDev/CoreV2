@@ -51,6 +51,14 @@ struct FBuildingClassData
 
 static_assert(sizeof(FBuildingClassData) == 0x10);
 
+// 7.40 (CL-5046157): a change the server queues for the client's quickbars (EFortDelayedQuickBarAction Add, Remove or
+// Replace an item), kept in the controller's replicated DelayedQuickBarActions until the client acknowledges its ActionId.
+struct FDelayedQuickBarAction
+{
+    DefineUnrealStruct(FDelayedQuickBarAction, FortniteGame)
+    DefineUProperty(uint16_t, ActionId)
+};
+
 class AFortPlayerController : public APlayerController
 {
     DefineUnrealClass(AFortPlayerController, FortniteGame)
@@ -61,10 +69,13 @@ public:
     DefineOptionalUProperty(AFortQuickBars*, QuickBars)
     static bool HasQuickBars() { return Member_QuickBars.IsAvailable(); }
     // 7.40's client-side quickbars: the layout records the server and the client keep (the client sends its own with
-    // ServerUpdateQuickBarRecordsCache, the server hands the saved ones over with ClientUpdateQuickBarRecordsCache).
+    // ServerUpdateQuickBarRecordsCache, the server hands the saved ones over with ClientUpdateQuickBarRecordsCache), and
+    // the changes the server queues for them (ServerAcknowledgeDelayedQuickBarAction takes the done ones out).
     DefineUStructProperty(FQuickBar, CachedPrimaryQuickBarRecord)
     DefineUStructProperty(FQuickBar, CachedSecondaryQuickBarRecord)
     static bool HasQuickBarRecordsCache() { return Member_CachedPrimaryQuickBarRecord.IsAvailable() && Member_CachedSecondaryQuickBarRecord.IsAvailable(); }
+    DefineUStructArrayProperty(FDelayedQuickBarAction, DelayedQuickBarActions)
+    static bool HasDelayedQuickBarActions() { return Member_DelayedQuickBarActions.IsAvailable(); }
     // Replicated (RepNotify UpdateQuickBars). From 7.40 the client builds its quickbars once both are set and it has the
     // records (AFortPlayerController's virtual 0x1409670, which its quickbar setup 0x1431460 asks); nothing in 7.30's or
     // 7.40's client exe sets them (the server code that did is stripped).
@@ -158,6 +169,7 @@ public:
     DefineUFunction(ServerSuicide)
     DefineUFunction(ServerUpdateQuickBarRecordsCache)
     DefineUFunction(ClientUpdateQuickBarRecordsCache)
+    DefineUFunction(ServerAcknowledgeDelayedQuickBarAction)
     DefineUFunction(ServerSetPartyOwner)
     DefineUFunction(ClientFinishedInteractionInZone)
     DefineUFunction(OnRep_CheatMovement)
@@ -209,6 +221,9 @@ public:
     // Hands the saved layout to the client (its _Implementation, 0x13F4D20, keeps the first it gets and builds the
     // quickbars). Nothing in the client exe sends it: the server's caller is stripped.
     void ClientUpdateQuickBarRecordsCache(const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord);
+    // 7.40: the client acknowledges the queued quickbar changes it has carried out (0x141FF90), and the server takes them
+    // out of DelayedQuickBarActions. The _Implementation is stripped (slot 0x212).
+    void ServerAcknowledgeDelayedQuickBarAction_Implementation(const TArray<uint16_t>& ProcessedActionIds);
     void TrySetHeroImplementation(UFortHero* NewHero, bool bSendToServer, bool bUnused);
     void ApplyHeroAbilityKitItems(UFortHero* Hero);
     void AddHeroAbilityKitGadgetsToQuickBars();
@@ -374,4 +389,5 @@ private:
     // 7.40's quickbar RPCs, swapped in where their slot is a stub.
     static void HookQuickBarRecordVTables();
     static void ServerUpdateQuickBarRecordsCache_ImplementationHK(AFortPlayerController* This, const FQuickBar& PrimaryQuickBarRecord, const FQuickBar& SecondaryQuickBarRecord);
+    static void ServerAcknowledgeDelayedQuickBarAction_ImplementationHK(AFortPlayerController* This, const TArray<uint16_t>& ProcessedActionIds);
 };

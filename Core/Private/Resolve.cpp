@@ -4303,6 +4303,17 @@ namespace
                 ++ReplicationFrameReads;
             }
         }
+        // 8.00 (CL-5203069) reaches the driver through the connection and loads the frame into eax for the update's
+        // stack argument: mov rax, [rdx+58h]; mov eax, [rax+450h]; mov [rsp+20h], eax; call (0x289EB8A..0x289EBB4).
+        // The offset is the same 0x450 the earlier shapes give on the driver.
+        for (uintptr_t Load = ReplicationFrameReads == 0 && ReplicatePropertiesEnd ? FindInstruction(ReplicateProperties, ReplicatePropertiesEnd, { 0x8B, 0x80 }) : 0; Load; Load = FindInstruction(Load + 1, ReplicatePropertiesEnd, { 0x8B, 0x80 }))
+        {
+            if (FindBackward(Load, 0x20, { 0x48, 0x8B, 0x42, 0x58 }) && FindRawCall(Load + 6, Load + 0x20))
+            {
+                ReplicationFrame = *reinterpret_cast<const int32_t*>(Load + 2);
+                ++ReplicationFrameReads;
+            }
+        }
         RequireOffset(L"UNetDriver::ReplicationFrame", Natives::UNetDriver_ReplicationFrame, ReplicationFrameReads == 1 ? ReplicationFrame : 0);
 
         const uintptr_t DumpRelevantRef = OnlyRef(L"net.DumpRelevantActors");

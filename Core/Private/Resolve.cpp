@@ -12361,6 +12361,7 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
     // tail-jumps to ServerActivateSlotInternal; 4.0's (0xF3F800) adds its bForceExecution (false) and calls it from a
     // frame of its own (sub rsp, 38h first), so the QuickBars load comes after that.
     std::vector<uintptr_t> LoneStubCalls;
+    std::vector<uintptr_t> ControllerOnlyStubCalls;
     std::vector<std::pair<uintptr_t, uintptr_t>> ActivateSlotCalls;
     const auto IsActivateSlot = [QuickBarsOffset](uintptr_t Target)
     {
@@ -12394,6 +12395,18 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
         {
             LoneStubCalls.push_back(StubCalls[0]);
         }
+        // 7.40 (CL-5046157, 0xD5C630) makes three calls to the shared empty function. The player's is the controller-only
+        // one 1.7.2 had after the warmup pawn is destroyed: xorps xmm3, xmm3; ...; call 0x17A6BC0 (the client's slot
+        // activation, controller, 0, 0, 0.0f, true); the pawn's destroy (0x265BC10); mov rcx, rbx; call (0xD5CFD3).
+        for (const uintptr_t Call : StubCalls)
+        {
+            const uintptr_t Xorps = FindInstruction(Call - 0x30, Call, { 0x0F, 0x57, 0xDB });
+            const bool bControllerOnly = Byte(Call - 3) == 0x48 && Byte(Call - 2) == 0x8B && (Byte(Call - 1) & 0xF8) == 0xC8;
+            if (Xorps && bControllerOnly && FindRawCall(Xorps, Call))
+            {
+                ControllerOnlyStubCalls.push_back(Call);
+            }
+        }
     }
     if (LoneStubCalls.size() == 1)
     {
@@ -12408,6 +12421,14 @@ uint8_t* Finder::AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset)
         Natives::AFortGameModeAthena_StartAircraftPhase = reinterpret_cast<decltype(Natives::AFortGameModeAthena_StartAircraftPhase)>(Finder::FunctionStart(Site));
         Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}, its call to AFortPlayerController::ActivateSlot (0x{:X}), before the warmup pawn is destroyed",
             Finder::FunctionStart(Site) - Finder::ImageBase(), Site - Finder::ImageBase(), Target - Finder::ImageBase());
+        return reinterpret_cast<uint8_t*>(Site);
+    }
+    if (LoneStubCalls.empty() && ActivateSlotCalls.empty() && ControllerOnlyStubCalls.size() == 1)
+    {
+        const uintptr_t Site = ControllerOnlyStubCalls[0];
+        Natives::AFortGameModeAthena_StartAircraftPhase = reinterpret_cast<decltype(Natives::AFortGameModeAthena_StartAircraftPhase)>(Finder::FunctionStart(Site));
+        Log::Info(L"Finder: AFortGameModeAthena::StartAircraftPhase at 0x{:X} clears each player at 0x{:X}, the controller-only call after the warmup pawn is destroyed",
+            Finder::FunctionStart(Site) - Finder::ImageBase(), Site - Finder::ImageBase());
         return reinterpret_cast<uint8_t*>(Site);
     }
     Log::Info(L"Finder: no stripped player cleanup in AFortGameModeAthena::StartAircraftPhase in this build");

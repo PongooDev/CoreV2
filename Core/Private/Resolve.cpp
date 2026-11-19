@@ -15262,6 +15262,37 @@ bool Finder::ResolveBuildingLootLive()
     return true;
 }
 
+bool Finder::ResolveGameSessionKickLive()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AGameSession_KickPlayerIndex >= 0;
+    }
+    bSearched = true;
+
+    // AFortGameModeAthena kicks a player who didn't load before the aircraft's phase ended through its game session
+    // (7.20 0xD0D530): GameSession->KickPlayer(Player, NSLOCTEXT("NetworkErrors", "FailedToLoad", "Failed to load before
+    // game started.")). The text's literal (lea rdx, 0xD0D74B), its FText, then the game session's virtual: "call qword
+    // ptr [rbx+668h]" (0xD0D76B, slot 0xCD; 7.10 and 7.40 have the same text). Every reference must agree.
+    int32_t Slot = -1;
+    bool bAgree = true;
+    for (const uintptr_t Ref : Finder::StringRefs(L"Failed to load before game started."))
+    {
+        const int32_t Found = VirtualSlot(FindVirtualCall(Ref, Ref + 0x40));
+        bAgree = bAgree && Found > 0 && (Slot < 0 || Slot == Found);
+        Slot = Found;
+    }
+    if (Slot <= 0 || !bAgree)
+    {
+        Log::Warning(L"Finder: AGameSession::KickPlayer's slot not found (the failed-to-load kick, slot {}{})", Slot, bAgree ? L"" : L", references disagree");
+        return false;
+    }
+    Natives::AGameSession_KickPlayerIndex = Slot;
+    Log::Info(L"Finder: AGameSession::KickPlayer is slot 0x{:X} (the game mode's failed-to-load kick)", Slot);
+    return true;
+}
+
 bool Finder::ResolveHarvestLive(ptrdiff_t AllowResourceDropOffset, uint8_t AllowResourceDropMask)
 {
     if (Natives::ABuildingSMActor_AttemptSpawnResourcesIndex >= 0)

@@ -885,6 +885,9 @@ namespace Natives
     // 0x217C620, slot 0x610), which gives a joining player's state its PlayerId from it. Battle Royale's player bots
     // take theirs from it too: Finder::ResolveNextPlayerIDLive.
     inline int32_t* AGameSession_NextPlayerID = nullptr;
+    // AGameSession::KickPlayer(APlayerController* KickedPlayer, const FText& KickReason)'s slot, as the game mode's kick of
+    // a player who didn't load calls it (7.20 0xD0D76B, slot 0xCD): Finder::ResolveGameSessionKickLive.
+    inline int32_t AGameSession_KickPlayerIndex = -1;
     // AFortTeamPrivateInfo::SetHealthAndShield (3.5.1 0xF83CB0, 21.40's name): the player state's CurrentHealth, MaxHealth,
     // CurrentShield and MaxShield into its team's replicated RepData (marking the changed items dirty), which squadmates'
     // squad bars read. The game mode's ReplicateHealthAndShield calls it for every player state each tick; Battle

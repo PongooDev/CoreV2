@@ -38,6 +38,16 @@ struct FAthenaPlaylistDataTableSet
     static bool HasFortAthenaPlaylistClass() { return Member_FortAthenaPlaylistClass.IsAvailable(); }
 };
 
+// 6.10 on: whether a team that is out of the match is kicked from spectating (AFortGameModeAthena::ForceKickAfterDeathMode,
+// UFortPlaylistAthena's from 7.20).
+class EForceKickAfterDeathMode
+{
+    DefineUnrealEnum(EForceKickAfterDeathMode, FortniteGame)
+    DefineUEnumValue(Disabled)
+    DefineUEnumValue(KickAll)
+    DefineUEnumValue(KickPrivate)
+};
+
 // Battle Royale's game mode (from 1.7.2; Athena_GameMode_C on Athena_Terrain). Its flow (warmup, aircraft, safe zones,
 // end game) is native; what the shipping exe stripped from it is restored here (Core-Docs Athena-Gameplay-1.7.2.md).
 class AFortGameModeAthena : public AFortGameModeZone
@@ -68,6 +78,12 @@ public:
     static bool HasSquadPlay() { return Member_bSquadPlay.IsAvailable(); }
     // Whether a dead player goes on to spectate (SpectateOnDeath).
     DefineUProperty(bool, bAllowSpectateAfterDeath)
+    // 6.10 on (config; the match's options in InitGame, 7.20 0xD0A6C2, and from 7.20 the playlist's own when it sets one,
+    // HandleCurrentPlaylistLoaded 0xD0E15B): EForceKickAfterDeathMode, and the seconds a team that is out spectates
+    // before its players are kicked (QueueTeamForServerRemoval).
+    DefineUProperty(uint8_t, ForceKickAfterDeathMode)
+    DefineUProperty(float, ForceKickAfterDeathTime)
+    static bool HasForceKickAfterDeath() { return Member_ForceKickAfterDeathMode.IsAvailable() && Member_ForceKickAfterDeathTime.IsAvailable(); }
     // 6.30 (CL-4573096): whether the warmup island hurts. A config bit (DefaultGame.ini sets it true); the game's
     // FinishRestartPlayer (6.30 0xC9F370) turns a warmup pawn's bCanBeDamaged off only while it is false, where earlier
     // builds always did (3.1 0x9B3FD7). A warmup death is no elimination: the player comes back on the island.
@@ -215,6 +231,11 @@ public:
     // elimination out of the match in the match's results. When KillerPlayerState (a player of another team) did it, it
     // is one more of their kills.
     void NoteRespawnDeath(AFortPlayerStateAthena* PlayerState, AFortPlayerStateAthena* KillerPlayerState);
+    // 21.40's AFortGameModeAthena::QueueTeamForServerRemoval (server code: no build has the body; 7.20 keeps its three
+    // log lines, 0x3CDEAB0, 0x3CDED10, 0x3CDEE00). A team that is out of the match: with ForceKickAfterDeathMode KickAll
+    // (7.20's to 7.40's tournament playlists, 60 s) each of its players is kicked from spectating ForceKickAfterDeathTime
+    // seconds later. Team is an EFortTeam.
+    void QueueTeamForServerRemoval(uint8_t Team);
 
     // Removes the placed chests and ammo boxes this match doesn't keep, from the map info's spawn percents (#205): once the
     // bus is under way on builds whose playlists bring their own game data (from 1.11, #238), at once before them. From

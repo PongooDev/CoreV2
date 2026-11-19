@@ -48,8 +48,10 @@
 #include "Math/Transform.h"
 #include "Misc/Guid.h"
 #include "Finder.h"
+#include "FortTeamInfo.h"
 #include "FortZoneTheme.h"
 #include "Hooks.h"
+#include "Kismet/KismetTextLibrary.h"
 #include "Log.h"
 #include "Natives.h"
 #include "ObjectLayout.h"
@@ -3284,6 +3286,68 @@ void AFortGameModeAthena::NoteRespawnDeath(AFortPlayerStateAthena* PlayerState, 
 #endif
 }
 
+void AFortGameModeAthena::QueueTeamForServerRemoval(uint8_t Team)
+{
+#if WITH_SERVER_CODE
+    // Core's reconstruction: 21.40 names it (its lambdas), and no build has its body. 7.20 (CL-4727874) keeps its three
+    // log lines with no code left that uses them: "QueueTeamForServerRemoval: ForceKickAfterDeathMode = %i,
+    // ForceKickAfterDeathTime = %f" (0x3CDEAB0), "QueueTeamForServerRemoval: bShouldKick result = %s" (0x3CDED10) and
+    // "Queuing all players in team [%s] to be kicked from spectating after %f seconds" (0x3CDEE00, the team as an
+    // EFortTeam). The v7.20 notes: "Players will automatically be removed from the match after 60 seconds of spectating
+    // after being eliminated", which the Showdown playlists ask for (ForceKickAfterDeathMode KickAll,
+    // ForceKickAfterDeathTime 60; HandleCurrentPlaylistLoaded copies them, 0xD0E167). The kick is the game session's, as
+    // the game mode's other kicks are (a player who didn't load, 0xD0D76B). Core's: KickPrivate kicks nobody, as nothing
+    // tells Core which matches count as private (no shipped playlist uses it), and the reason text is Core's (Epic's
+    // went with the code).
+    UWorld* World = HasForceKickAfterDeath() ? GetWorld() : nullptr;
+    if (!World)
+    {
+        return;
+    }
+    const uint8_t Mode = ForceKickAfterDeathMode;
+    const float KickTime = ForceKickAfterDeathTime;
+    Log::Info(L"QueueTeamForServerRemoval: ForceKickAfterDeathMode = {}, ForceKickAfterDeathTime = {:f}", static_cast<int32_t>(Mode), KickTime);
+    const bool bShouldKick = Mode == EForceKickAfterDeathMode::GetKickAll();
+    Log::Info(L"QueueTeamForServerRemoval: bShouldKick result = {}", bShouldKick ? L"true" : L"false");
+    if (!bShouldKick || !Finder::ResolveGameSessionKickLive())
+    {
+        return;
+    }
+    Log::Info(L"Queuing all players in team [{}] to be kicked from spectating after {:f} seconds", EFortTeam{ Team }.ToString(), KickTime);
+    const TWeakObjectPtr<AFortGameModeAthena> WeakThis(this);
+    FTimerHandle Handle;
+    World->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([WeakThis, Team]()
+    {
+        AFortGameModeAthena* GameMode = WeakThis.Get();
+        UWorld* GameWorld = GameMode ? GameMode->GetWorld() : nullptr;
+        AGameSession* Session = GameMode ? static_cast<AGameSession*>(GameMode->GameSession) : nullptr;
+        if (!GameWorld || !Session)
+        {
+            return;
+        }
+        // The team's players still here (a controller that left is gone already), each kicked from spectating.
+        std::vector<AFortPlayerControllerAthena*> Players;
+        for (TObjectIterator<AFortPlayerControllerAthena> It; It; ++It)
+        {
+            AFortPlayerControllerAthena* Controller = *It;
+            AFortPlayerStateAthena* State = Controller && !Controller->HasAnyFlags(RF_ClassDefaultObject | RF_ArchetypeObject) && Controller->GetWorld() == GameWorld
+                ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(reinterpret_cast<AController*>(Controller)->PlayerState))) : nullptr;
+            if (State && static_cast<uint8_t>(State->TeamIndex) == Team)
+            {
+                Players.push_back(Controller);
+            }
+        }
+        const FText Reason = UKismetTextLibrary::Conv_StringToText(FString(L"You were removed from the match after being eliminated."));
+        int32_t Kicked = 0;
+        for (AFortPlayerControllerAthena* Controller : Players)
+        {
+            Kicked += Session->KickPlayer(reinterpret_cast<APlayerController*>(Controller), Reason) ? 1 : 0;
+        }
+        Log::Info(L"QueueTeamForServerRemoval: team [{}]'s {} of {} players kicked from spectating", EFortTeam{ Team }.ToString(), Kicked, Players.size());
+    }), std::max(KickTime, 0.01f), false);
+#endif
+}
+
 void AFortGameModeAthena::HandlePlayerStateDestroyed(AActor* DestroyedActor)
 {
 #if WITH_SERVER_CODE
@@ -3487,6 +3551,11 @@ void AFortGameModeAthena::HookVTables()
     if (Configuration::Get().IsBattleRoyale() && StaticClass() && UFortPlaylist::HasDBNOType() && ListOffset >= 0)
     {
         Finder::ResolveDBNOEnabledLive(UFortPlaylist::DBNOTypeOffset(), ListOffset, GameplayMutatorsOffset() < 0);
+    }
+    // The game session's kick, which QueueTeamForServerRemoval's timer uses (6.10 on), looked for now so a boot shows it.
+    if (Configuration::Get().IsBattleRoyale() && StaticClass() && HasForceKickAfterDeath())
+    {
+        Finder::ResolveGameSessionKickLive();
     }
 
     UClass* AthenaClass = StaticClass();

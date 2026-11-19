@@ -590,7 +590,8 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
     {
         CallVirtual<void>(this, Natives::AFortPlayerControllerAthena_UpdateTeamMembersIndex);
     }
-    if (IsTeamOut())
+    const bool bTeamOut = IsTeamOut();
+    if (bTeamOut)
     {
         Natives::AFortPlayerControllerAthena_SetTeamPlace(this, GameState->TeamsLeft);
     }
@@ -621,6 +622,15 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         BotManager->OnPlayerRemoved(AthenaStateOf(Instigator), FinisherPawn, FinishingWeaponData, DeathCause);
     }
     UE_LOG(LogFortDeath, Log, TEXT("OnPawnDied: %s is out (place %d, %d players and %d teams left)"), *GetName(), static_cast<int32_t>(AthenaState->Place), static_cast<int32_t>(GameState->PlayersLeft), static_cast<int32_t>(GameState->TeamsLeft));
+    // The team is out: the game mode queues it for removal from the server (AFortGameModeAthena::QueueTeamForServerRemoval,
+    // 6.10 on). No build shows its caller (the call went with the server-only function). Core's: the moment a team is out
+    // in the game's code is RemoveFromAlivePlayers taking its last player off the team's alive count (7.20 0xD14D3A,
+    // which takes the team off TeamsLeft), which is intact code Core doesn't hook, so the restored handler that just
+    // called it makes the call.
+    if (bTeamOut && AFortGameModeAthena::HasForceKickAfterDeath())
+    {
+        GameMode->QueueTeamForServerRemoval(static_cast<uint8_t>(AthenaState->TeamIndex));
+    }
     GameMode->SendOutliveStatEvents(DeadPawn);
     // The player's own end-of-match stats, their team still in or not: the screen shows them under "Team Still Alive"
     // until the team's place and the rewards come with the match's results (#403). The tick after, as the game mode's

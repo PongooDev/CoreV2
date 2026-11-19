@@ -342,6 +342,8 @@ namespace Finder
     // 7.20 on, with the stat events stripped: the call in UFortQuestManager::SendComplexCustomStatEvent's exec to its
     // native, whose first call is GetSourceAndContextTags' native and which sends nothing. Null when not found.
     uint8_t* StrippedComplexCustomStatEventCall(UFunction* SendComplexCustomStatEvent);
+    // Natives::AGameSession_KickPlayerIndex.
+    bool ResolveGameSessionKickLive();
     bool ResolveAthenaHeroLive();
     uint8_t* AircraftPhasePlayerCleanupCall(ptrdiff_t QuickBarsOffset);
     bool ResolveAthenaMenuHero();

@@ -416,6 +416,12 @@ void AFortMinigame::OnClientFinishTeleportingForMinigame(AFortPlayerPawn* InPawn
     }
 }
 
+void AFortMinigame::ToggleAutoRestartMinigame()
+{
+    Reflection::FParams Params(FindStaticFunction_ToggleAutoRestartMinigame(), true);
+    Params.Call(this);
+}
+
 void AFortMinigame::ClearTeleportForMinigame(AFortPlayerPawn* InPawn)
 {
     Reflection::FParams Params(FindStaticFunction_ClearTeleportForMinigame(), true);

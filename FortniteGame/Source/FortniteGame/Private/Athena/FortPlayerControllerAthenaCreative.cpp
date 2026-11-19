@@ -21,6 +21,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "Log.h"
 #include "McpProfile.h"
+#include "Minigame/FortMinigame.h"
 #include "Natives.h"
 #include "Online/FortMcpProfileCreative.h"
 #include "Pawns/FortPlayerPawn.h"
@@ -1105,6 +1106,83 @@ void AFortPlayerControllerAthena::ServerTeleportToPlaygroundLobbyIsland_Implemen
 #endif
 }
 
+void AFortPlayerControllerAthena::ServerClaimPortal_Implementation()
+{
+#if WITH_SERVER_CODE
+    // Core's (no build has the body): the hub's portal manager claims a rift for the player, the one they get coming into
+    // the match, and their last used island loads into it. Nothing for a player who has one.
+    if (GetOwnedPortal())
+    {
+        Log::Info(L"Creative: {} asks for a rift and has one", PlayerNameOf(this));
+        return;
+    }
+    ClaimCreativePortal();
+    Log::Info(L"Creative: {} asks for a rift: {}", PlayerNameOf(this), GetOwnedPortal() ? GetOwnedPortal()->GetName().ToStdString() : std::wstring(L"none free"));
+#endif
+}
+
+void AFortPlayerControllerAthena::ServerReleasePortal_Implementation()
+{
+#if WITH_SERVER_CODE
+    // Core's (no build has the body): the player's rift goes back to the hub's portal manager, as when they leave.
+    AFortAthenaCreativePortal* Portal = GetOwnedPortal();
+    ReleaseCreativePortal(reinterpret_cast<AFortPlayerState*>(static_cast<APlayerState*>(reinterpret_cast<AController*>(this)->PlayerState)));
+    Log::Info(L"Creative: {} gives back their rift {}", PlayerNameOf(this), Portal ? Portal->GetName().ToStdString() : std::wstring(L"(they had none)"));
+#endif
+}
+
+AFortMinigame* AFortPlayerControllerAthena::GetMinigame()
+{
+    Reflection::FParams Params(FindStaticFunction_GetMinigame(), true);
+    if (!Params.Call(this))
+    {
+        return nullptr;
+    }
+    UObject** Minigame = Params.Get<UObject*>(L"ReturnValue");
+    return Minigame && *Minigame ? Cast<AFortMinigame>(*Minigame) : nullptr;
+}
+
+void AFortPlayerControllerAthena::ServerToggleAutoRestartMinigame_Implementation()
+{
+#if WITH_SERVER_CODE
+    // Core's reconstruction (no build has the body), in the shape of 7.40's ServerRestartMinigame_Implementation (0xDA7860)
+    // and ServerStartMinigame_Implementation (0xDA8720): the island the player is in, when they may run its game, then
+    // its minigame's own call. Their check (0xD7E8C0) is the island's edit permission (UFortLevelSaveComponent 0x10A1D80:
+    // its owner, or one an island without an owner, or a player its PlotPermissions allow), or a ReadOnly island (a
+    // published one, VolumeState 1). Core's: the owner, an island without one and a ReadOnly island; PlotPermissions'
+    // whitelist and Public aren't read (Core's islands are their owner's alone).
+    AFortVolume* Volume = GetCreativeVolume();
+    UFortLevelSaveComponent* Component = UFortLevelSaveComponent::GetForVolume(reinterpret_cast<AActor*>(Volume));
+    const FUniqueNetIdRepl* UserId = UniqueIdOf(this);
+    const bool bReadOnly = Volume && static_cast<uint8_t>(Volume->VolumeState) == 1;
+    const bool bNoOwner = Component && !static_cast<const FUniqueNetIdRepl&>(Component->AccountIdOfOwner).IsValid();
+    const bool bMayRun = !Volume || bReadOnly || bNoOwner || (Component && UserId && Component->IsOwnedBy(*UserId));
+    AFortMinigame* Minigame = bMayRun ? GetMinigame() : nullptr;
+    if (!Minigame)
+    {
+        Log::Info(L"Creative: {}'s auto restart toggle refused: {}", PlayerNameOf(this), bMayRun ? L"no game on their island" : L"the island isn't theirs to run");
+        return;
+    }
+    Minigame->ToggleAutoRestartMinigame();
+    Log::Info(L"Creative: {} toggles {}'s auto restart", PlayerNameOf(this), Minigame->GetName().ToStdString());
+#endif
+}
+
+void AFortPlayerControllerAthena::ServerClaimPortal_ImplementationHK(AFortPlayerControllerAthena* This)
+{
+    This->ServerClaimPortal_Implementation();
+}
+
+void AFortPlayerControllerAthena::ServerReleasePortal_ImplementationHK(AFortPlayerControllerAthena* This)
+{
+    This->ServerReleasePortal_Implementation();
+}
+
+void AFortPlayerControllerAthena::ServerToggleAutoRestartMinigame_ImplementationHK(AFortPlayerControllerAthena* This)
+{
+    This->ServerToggleAutoRestartMinigame_Implementation();
+}
+
 void AFortPlayerControllerAthena::ServerGiveCreativeItem_ImplementationHK(AFortPlayerControllerAthena* This, const FFortItemEntry& CreativeItem)
 {
     This->ServerGiveCreativeItem_Implementation(CreativeItem);
@@ -1162,6 +1240,26 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
         L"ServerTeleportToPlaygroundIslandDock");
     RestoreImplementation(FindStaticFunction_ServerTeleportToPlaygroundLobbyIsland(), reinterpret_cast<void*>(&ServerTeleportToPlaygroundLobbyIsland_ImplementationHK),
         L"ServerTeleportToPlaygroundLobbyIsland");
+    // 7.40 (CL-5046157): the new rift and auto-restart RPCs (slots 0x430, 0x42E, 0x420 hold the shared empty function
+    // 0x2B5120). Earlier builds have none of the three UFunctions.
+    if (FindStaticFunction_ServerClaimPortal())
+    {
+        RestoreImplementation(FindStaticFunction_ServerClaimPortal(), reinterpret_cast<void*>(&ServerClaimPortal_ImplementationHK), L"ServerClaimPortal");
+    }
+    if (FindStaticFunction_ServerReleasePortal())
+    {
+        RestoreImplementation(FindStaticFunction_ServerReleasePortal(), reinterpret_cast<void*>(&ServerReleasePortal_ImplementationHK), L"ServerReleasePortal");
+    }
+    if (FindStaticFunction_ServerToggleAutoRestartMinigame())
+    {
+        RestoreImplementation(FindStaticFunction_ServerToggleAutoRestartMinigame(), reinterpret_cast<void*>(&ServerToggleAutoRestartMinigame_ImplementationHK),
+            L"ServerToggleAutoRestartMinigame");
+        if (!FindStaticFunction_GetMinigame() || !AFortMinigame::FindStaticFunction_ToggleAutoRestartMinigame())
+        {
+            Log::Error(L"Finder: AFortPlayerControllerAthena::ServerToggleAutoRestartMinigame's restoration is missing a part (GetMinigame {}, AFortMinigame::ToggleAutoRestartMinigame {}), so the toggle does nothing",
+                FindStaticFunction_GetMinigame() ? L"found" : L"missing", AFortMinigame::FindStaticFunction_ToggleAutoRestartMinigame() ? L"found" : L"missing");
+        }
+    }
 
     // ServerLoadPlotForPortal_Implementation (7.00 0xC65E80) is the game's, but for the rift's half of the load: once it
     // has the player's id (0x1285700) it calls the shared empty function with the rift, the id and the plot item

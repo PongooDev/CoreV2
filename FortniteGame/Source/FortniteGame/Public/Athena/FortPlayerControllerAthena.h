@@ -335,6 +335,26 @@ public:
     // stripped call.
     static void HookCreativeVTables();
 
+    // 7.40's (CL-5046157) new Creative RPCs: no earlier build has them (7.30 neither). Their _Implementations are the
+    // shared empty function (slots 0x430, 0x42E, 0x420); their _Validates are the game's (0xDA6F10 for the rift two: the
+    // playlist's and UFortGlobals' bEnableCreativeMode; 0xDA72A0 for the auto restart: the same, or the game's Creative
+    // check 0xDB87B0). Their only senders in the image are the cheat manager's ClaimPortal, ReleasePortal and
+    // ToggleAutoRestartMinigame, stripped too (0x866D10, slot 0xA0). No build has the bodies: Core's, from 7.40's own pieces.
+    DefineUFunction(ServerClaimPortal)
+    DefineUFunction(ServerReleasePortal)
+    DefineUFunction(ServerToggleAutoRestartMinigame)
+    // The minigame of the island the player's state is in (7.40 0xD8F980: the volume manager's volume for the player, its
+    // UFortMinigameVolumeComponent's Minigame), from 7.00.
+    DefineUFunction(GetMinigame)
+    // The player's rift of the hub, as they get one coming into the match (ClaimCreativePortal).
+    void ServerClaimPortal_Implementation();
+    // Their rift given back to the hub's portal manager, as when they leave (ReleaseCreativePortal).
+    void ServerReleasePortal_Implementation();
+    // The game of the island they are on, when they may run it, toggles its auto restart (AFortMinigame::
+    // ToggleAutoRestartMinigame, the game's own).
+    void ServerToggleAutoRestartMinigame_Implementation();
+    class AFortMinigame* GetMinigame();
+
     // 7.10's (CL-4667333) island tools (PongooDev/CoreV2#488; FortPlayerControllerAthenaCreativeIslands.cpp): Publish
     // Island, Backup Island and Restore of the island menu, and an island code entered at a rift. Nothing on builds
     // without them (7.00 has none of these RPCs).
@@ -406,6 +426,9 @@ private:
     static void ServerTeleportToPlaygroundLobbyIsland_ImplementationHK(AFortPlayerControllerAthena* This);
     static bool ServerLoadPlotForPortal_ValidateHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& PlotItemId);
     static void ServerLoadPlotForPortal_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal, const FString& PlotItemId);
+    static void ServerClaimPortal_ImplementationHK(AFortPlayerControllerAthena* This);
+    static void ServerReleasePortal_ImplementationHK(AFortPlayerControllerAthena* This);
+    static void ServerToggleAutoRestartMinigame_ImplementationHK(AFortPlayerControllerAthena* This);
     // Whether Core restored ServerLoadPlotForPortal_Implementation (7.20), which LoadPlotForPortal then calls.
     static inline bool bServerLoadPlotForPortalRestored = false;
     // The player's island space: the one they stand in when it is theirs to edit, else their rift's.

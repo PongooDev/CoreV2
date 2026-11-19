@@ -88,6 +88,9 @@ class AFortMinigame : public AInfo
     DefineUFunction(ClearTeleportForMinigame)
 
 public:
+    // 7.40's (0x11EEAF0, intact; authority only): flips the game's auto restart (an unreflected flag, +0x651).
+    DefineUFunction(ToggleAutoRestartMinigame)
+    void ToggleAutoRestartMinigame();
     DefineUProperty(EFortMinigameWarmupType, WarmupType)
     DefineUProperty(EFortMinigamePlayerSpawnLocationSetting, SpawnLocationSetting)
     DefineUProperty(EFortMinigameState, CurrentState)

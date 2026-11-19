@@ -1324,6 +1324,27 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
                 break;
             }
         }
+        // 7.40 (CL-5046157) sets the four meta keys in a function of their own, which the save calls (0x10BE800 calls
+        // 0x10BE030 at 0x10BEABA, which calls the setter 0x2FABCA0 four times): read the save's callees the same way.
+        for (const auto& [Callee, CalleeCount] : Natives::USidecarSys_SetMeta ? std::map<uintptr_t, int32_t>{} : Counts)
+        {
+            std::map<uintptr_t, int32_t> InnerCounts;
+            for (const auto& [Site, Target] : Finder::FunctionStart(Callee) == Callee ? Finder::DecodedDirectCalls(Callee) : std::vector<std::pair<uintptr_t, uintptr_t>>())
+            {
+                ++InnerCounts[Target];
+            }
+            for (const auto& [Target, Count] : InnerCounts)
+            {
+                if (Count >= 4 && KeyFormatters.contains(Target) && !Natives::USidecarSys_SetMeta)
+                {
+                    Natives::USidecarSys_SetMeta = reinterpret_cast<decltype(Natives::USidecarSys_SetMeta)>(Target);
+                }
+            }
+            if (Natives::USidecarSys_SetMeta)
+            {
+                break;
+            }
+        }
     }
     // The island load's queue and steps (after ReadFromBuffer, which tells ULevelSaveRecord's end of a read from ReadFromDisk).
     ResolveIslandLoad();

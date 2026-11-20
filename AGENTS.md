@@ -81,8 +81,11 @@ These protect the owner's machine, builds and live setup. They apply to every ag
   (`Core.dll`) or in Core-Backend instead. If only a client change would fix it, say so on the issue.
 - **Never** print, copy or commit pak AES keys.
 - Run any Python that reads downloaded or untrusted files with `python -I`.
-- Work in git worktrees under `H:\CoreWork`. Never build into the main checkout's `x64\Release` (the owner's
-  launcher loads those DLLs).
+- Work in git worktrees under `H:\CoreWork`; build only there, never in the main checkout. The owner's launcher
+  loads the DLLs in the main checkout's `x64\Release` (`%USERPROFILE%\Documents\GitHub\CoreV2\x64\Release`), so
+  **after every clean full build, copy `Core.dll`, `CoreClient.dll` and `CoreRedirect.dll` there** (and their
+  `.pdb` files when no `FortniteClient*` process is running), before you finish. Copy only after the build has all
+  three outputs and 0 errors.
 - Rebase onto `origin/main` right before you push. Other agents push to this repo too.
 - Never change Windows, firewall or security settings.
 - Report honestly: what was checked live (a boot, a log line) and what was only checked statically.
@@ -185,7 +188,10 @@ build's IDB and SDK, and a headless boot of the affected builds (`docs/agents/he
 12. Comment on the issue with the commit and what was verified; close it if it's fixed.
 13. Run `deploy_main_build` (if available) so the owner's launcher gets the fix. Without it, note in
     `H:\CoreWork\HANDOFF.md` that main needs a build and deploy.
-14. Remove your worktree and branch: `git worktree remove H:\CoreWork\wt-<issue>` and `git branch -D fix-<issue>`.
+14. Copy the latest DLLs to the main checkout's `x64\Release` (the owner's launcher loads them): the three DLLs from
+    your worktree's `x64\Release`, and the PDBs when no `FortniteClient*` is running. Never run MSBuild in the main
+    checkout.
+15. Remove your worktree and branch: `git worktree remove H:\CoreWork\wt-<issue>` and `git branch -D fix-<issue>`.
 
 ## 6. Definition of done
 
@@ -207,6 +213,8 @@ A change is done only when all of these hold:
 - [ ] Every new finder's own boot line was read and shows the address or slot it found.
 - [ ] The report and commit message say what was verified live (which boots, which lines) and what only statically.
 - [ ] Rebased on `origin/main`, pushed, issue commented, worktree removed, no process of yours still running.
+- [ ] The three DLLs from the full build are copied to `%USERPROFILE%\Documents\GitHub\CoreV2\x64\Release` (and the
+      PDBs when no `FortniteClient*` was running), so the owner's launcher has the latest build.
 
 ## 7. Commits, issues and hand-off
 

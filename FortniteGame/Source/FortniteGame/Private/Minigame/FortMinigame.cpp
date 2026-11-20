@@ -318,6 +318,11 @@ void AFortMinigame::RespawnMinigamePlayers()
     const bool bClientAcknowledged = UsesClientAcknowledgedTeleport();
     UFunction* const OverrideFunction = FindStaticFunction_OverridePlayerSpawnLocation();
     const bool bRotationFromGame = OverrideFunction && OverrideFunction->FindPropertyByName(FName(L"OutRotation", FNAME_Find)) != nullptr;
+    // 7.20 and 7.30's DetermineSpawnLocation takes the player state and answers bShouldSkydive, what the Override does for
+    // the island's respawn; 7.10's takes the controller and keeps the Override + Air path. A game on start pads that finds
+    // no pad for a player still gets the air and bShouldSkydive from it (#513).
+    const UFunction* const DetermineFunction = FindStaticFunction_DetermineSpawnLocation();
+    const bool bDetermineForRespawn = !bClientAcknowledged && DetermineFunction && DetermineFunction->FindPropertyByName(FName(L"PlayerState", FNAME_Find)) != nullptr;
     int32_t Moved = 0;
     int32_t Skydiving = 0;
     int32_t Held = 0;
@@ -342,14 +347,34 @@ void AFortMinigame::RespawnMinigamePlayers()
                 ++Healed;
             }
         }
-        FVector Location;
-        // 7.40 answers the start's rotation and whether it is on the ground (false for the air); 7.10 to 7.30 keep the
-        // pawn's rotation and SpawnLocationSetting's Air.
-        FRotator Rotation = Pawn ? reinterpret_cast<AActor*>(Pawn)->GetActorRotation() : FRotator();
-        bool bOnGround = !bAir;
-        if (!Pawn || !AthenaState || !OverridePlayerSpawnLocation(Pawn, AthenaState, Location, &Rotation, &bOnGround))
+        if (!Pawn || !AthenaState)
         {
             continue;
+        }
+        AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Pawn));
+        FVector Location;
+        // 7.40 answers the start's rotation and whether it is on the ground (false for the air); 7.10 keeps the pawn's
+        // rotation and SpawnLocationSetting's Air; 7.20 and 7.30's DetermineSpawnLocation answers both.
+        FRotator Rotation = reinterpret_cast<AActor*>(Pawn)->GetActorRotation();
+        bool bSkydive = false;
+        bool bRotationFromSpawn = bRotationFromGame;
+        if (bDetermineForRespawn)
+        {
+            if (!DetermineSpawnLocation(Controller, Location, Rotation, bSkydive))
+            {
+                continue;
+            }
+            bSkydive = bSkydive && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
+            bRotationFromSpawn = true;
+        }
+        else
+        {
+            bool bOnGround = !bAir;
+            if (!OverridePlayerSpawnLocation(Pawn, AthenaState, Location, &Rotation, &bOnGround))
+            {
+                continue;
+            }
+            bSkydive = !bOnGround && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
         }
         // The hold comes before the move (#499). Epic's respawn put a new pawn into stasis as it was possessed (the
         // controller's pawn binding PutPlayerIntoStasis adds), before it ever moved. Moved first, the pawn was teleported
@@ -360,7 +385,6 @@ void AFortMinigame::RespawnMinigamePlayers()
         // The player couldn't open a chest until they jumped: the server refused every GA_DefaultPlayer_InteractSearch.
         // Held first, the pawn goes Walking to None to Falling, and nothing tags it. It settles onto the spawner
         // (Falling to Walking) with its input still ignored until the warmup ends.
-        AFortPlayerPawnAthena* AthenaPawn = Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(Pawn));
         // A skydiver (#502) is held after the move and the skydive's start instead. BeginSkydiving (7.20 0x136F620) sets
         // bIsSkydiving and the movement's custom Skydiving mode (SetMovementMode(MOVE_Custom, 4)), and the teleport sets
         // Falling, either of which would take a pawn held first out of the stasis's MOVE_None, and it fell through the
@@ -368,7 +392,6 @@ void AFortMinigame::RespawnMinigamePlayers()
         // controller's move input ignored, StopMovementImmediately, DisableMovement) stops it where it is, and its
         // bIsSkydiving keeps the skydive pose. HandleStateChangedForWarmup puts it back into the skydive's movement as
         // the warmup's end releases it.
-        const bool bSkydive = !bOnGround && AthenaPawn && AFortPlayerPawnAthena::HasIsSkydiving() && Finder::ResolveBotSkydiveLive(AFortPlayerPawnAthena::IsSkydivingOffset());
         const bool bHold = bHoldInStasis;
         if (bHold && !bSkydive)
         {
@@ -392,7 +415,7 @@ void AFortMinigame::RespawnMinigamePlayers()
         // respawned player looks that way: AGameModeBase::FinishRestartPlayer sets the controller's rotation (without
         // roll) and sends the client ClientSetRotation(rotation, true). A player pawn turns with its controller's
         // rotation, so the teleport's alone would last until the client's next move.
-        if (bRotationFromGame)
+        if (bRotationFromSpawn)
         {
             Controller->SetControlRotation(FRotator(Rotation.Pitch, Rotation.Yaw, 0.0f));
             Controller->ClientSetRotation(Rotation, true);
@@ -603,11 +626,10 @@ void AFortMinigame::HandleStateChangedForWarmup(uint8_t NewState)
         }
         RespawnMinigamePlayers();
     }
-    // 7.40 also sends a game on start pads to the air for a player it finds no pad for (DetermineSpawnLocation 0x11D1310:
-    // ChoosePlayerStart, else GetAirSpawnLocation), so it checks every game; ResumeSkydivingAfterWarmup touches only a
-    // skydiver the release left walking.
-    else if (NewState == EFortMinigameState::GetInProgress()
-        && (SpawnLocationSetting == EFortMinigamePlayerSpawnLocationSetting::GetAir() || UsesClientAcknowledgedTeleport()))
+    // 7.20 and 7.30's DetermineSpawnLocation and 7.40's also send a game on start pads to the air for a player it finds
+    // no pad for, so every Respawn game is checked; ResumeSkydivingAfterWarmup touches only a skydiver the release left
+    // walking.
+    else if (NewState == EFortMinigameState::GetInProgress())
     {
         ResumeSkydivingAfterWarmup();
     }

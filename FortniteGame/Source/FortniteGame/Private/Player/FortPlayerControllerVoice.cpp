@@ -249,6 +249,14 @@ void AFortPlayerController::UpdateTeamTalking()
         return;
     }
 
+    // 7.40 (CL-5046157) drops the controller's TeamMembers and SquadMembers; it has PlayersTalking (+0x24E8) and
+    // TalkingPlayersChanged (+0x2548) instead. Asking for TeamMembers aborted the client on the Creative loading
+    // screen (#517: "Member FortPlayerControllerAthena::TeamMembers is not available").
+    if (!AFortPlayerControllerAthena::HasSquadMembers() && !AFortPlayerControllerAthena::HasTeamMembers())
+    {
+        return;
+    }
+
     static std::unordered_set<const AFortPlayerStateAthena*> Shown;
     const APlayerState* const LocalState = Controller->PlayerState;
     const TArray<AFortPlayerStateAthena*>& TeamMembers = AFortPlayerControllerAthena::HasSquadMembers() ? Controller->GetMember_SquadMembers() : Controller->GetMember_TeamMembers();

@@ -1132,6 +1132,15 @@ void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bS
     }
 #endif
 
+    // 8.00 (CL-5203069) has no TrySetHeroImplementation to hook: Resolve.cpp leaves its native null and turns Core's
+    // hero hook off, because the game's hero loadout system sets the hero. SetupHero still reaches this when a player
+    // possesses, so without this guard the call ran a null pointer (0xC0000005 at 0x0, Core.dll+0x329343, from
+    // AFortPlayerControllerAthena::SetupHero). Leave the hero to 8.00's loadout system there.
+    if (!CanTrySetHero())
+    {
+        return;
+    }
+
     TrySetHeroImplementationOG(this, NewHero, bSendToServer, bUnused);
 
 #if WITH_SERVER_CODE

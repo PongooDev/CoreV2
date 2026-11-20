@@ -224,8 +224,20 @@ void AFortMinigame::ClearPlayerInventory(AFortPlayerControllerAthena* PlayerCont
         Log::Info(L"Minigame: {} loses {} items as {}'s inventory is reset", PlayerController->GetName().ToStdString(), Removed, GetName().ToStdString());
     }
     // The game's start and end move each player's same pawn (Core's RespawnMinigamePlayers, the post-game place), where
-    // Epic's stripped respawn gave a new one: a Movement Modulator's speed and flight don't come along.
+    // Epic's stripped respawn gave a new one: a Movement Modulator's speed and flight don't come along, and the damage
+    // taken in the game stays on the pawn at the hub and into the next game (#518). The new pawn came back at full
+    // health, so restore it here with the inventory and movement resets.
     PlayerController->ResetCreativeMovementState();
+    if (AFortPlayerPawn* FortPawn = Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(PlayerController->GetPawn())))
+    {
+        const float MaxHealth = FortPawn->GetMaxHealth();
+        if (MaxHealth > 0.0f && FortPawn->GetHealth() < MaxHealth)
+        {
+            FortPawn->SetHealth(MaxHealth);
+            Log::Info(L"Minigame: {} restores {} to full health as its game's inventory is reset", GetName().ToStdString(),
+                FortPawn->GetName().ToStdString());
+        }
+    }
 #endif
 }
 
@@ -310,6 +322,7 @@ void AFortMinigame::RespawnMinigamePlayers()
     int32_t Skydiving = 0;
     int32_t Held = 0;
     int32_t Travelling = 0;
+    int32_t Healed = 0;
     const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
     for (AFortPlayerState* PlayerState : Players)
     {
@@ -317,6 +330,18 @@ void AFortMinigame::RespawnMinigamePlayers()
         AController* Controller = Owner ? Cast<AController>(reinterpret_cast<UObject*>(Owner)) : nullptr;
         APawn* Pawn = Controller ? Controller->GetPawn() : nullptr;
         AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
+        // The same pawn comes back from the hub or goes into the next game, where Epic's stripped respawn gave a new
+        // one at full health: damage from the last game would otherwise stay on it (#518). Heal it here, at the start's
+        // warmup and at the trip back (the game's BP calls this for the post-game place too).
+        if (AFortPlayerPawn* FortPawn = Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)))
+        {
+            const float MaxHealth = FortPawn->GetMaxHealth();
+            if (MaxHealth > 0.0f && FortPawn->GetHealth() < MaxHealth)
+            {
+                FortPawn->SetHealth(MaxHealth);
+                ++Healed;
+            }
+        }
         FVector Location;
         // 7.40 answers the start's rotation and whether it is on the ground (false for the air); 7.10 to 7.30 keep the
         // pawn's rotation and SpawnLocationSetting's Air.
@@ -392,6 +417,10 @@ void AFortMinigame::RespawnMinigamePlayers()
     }
     Log::Info(L"Minigame: {} respawns {} of its {} players for its warmup at their respawn place{}, {} held there until it ends", GetName().ToStdString(), Moved, Players.Num(),
         Skydiving ? std::format(L", {} of them skydiving", Skydiving) : std::wstring(), Held);
+    if (Healed > 0)
+    {
+        Log::Info(L"Minigame: {} restores {} of its {} players to full health for the start or the trip back", GetName().ToStdString(), Healed, Players.Num());
+    }
 #endif
 }
 

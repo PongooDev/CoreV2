@@ -76,61 +76,6 @@ namespace
         return Query.IsEmpty() || UBlueprintGameplayTagLibrary::DoesContainerMatchTagQuery(Tags, Query);
     }
 
-    // The 7.30 client's NewPlayer mission event sender makes FortNewPlayerParams, but the mission's
-    // NewPlayerHasBegunPlay handler (Mission_Endless) casts its params to UFortNewPlayerHasBegunPlayParams and
-    // returns when the cast fails, so Frostnite's starting kit is never given (#516). Epic's server sender makes
-    // the subclass; redirect the class construction inside the sender to it. The class is looked up on the first
-    // event, after the game has loaded its classes; a build without it keeps the original class.
-    UClass* (*NewPlayerParamsClassOG)() = nullptr;
-
-    UClass* FindNewPlayerHasBegunPlayParamsClass()
-    {
-        UClass* Derived = FindObject<UClass>(nullptr, L"/Script/FortniteGame.UFortNewPlayerHasBegunPlayParams");
-        return Derived ? Derived : FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortNewPlayerHasBegunPlayParams");
-    }
-
-    UClass* NewPlayerParamsClassHK()
-    {
-        UClass* Derived = FindNewPlayerHasBegunPlayParamsClass();
-        return Derived ? Derived : (NewPlayerParamsClassOG ? NewPlayerParamsClassOG() : nullptr);
-    }
-
-    // Redirects the params class the NewPlayer event sender constructs (a direct call to that class's maker).
-    void HookNewPlayerEventParams(uintptr_t Sender)
-    {
-        const uintptr_t End = Finder::FunctionEnd(Sender);
-        if (!End)
-        {
-            return;
-        }
-
-        const std::vector<uintptr_t> Refs = Finder::StringRefs(L"FortNewPlayerParams");
-        for (const auto& [Call, Target] : Finder::DirectCalls(Sender, End))
-        {
-            const uintptr_t TargetEnd = Finder::FunctionEnd(Target);
-            const bool bMakesParamsClass = std::any_of(Refs.begin(), Refs.end(), [&](uintptr_t Ref) {
-                return Finder::FunctionStart(Ref) == Target || (TargetEnd > Target && Ref >= Target && Ref < TargetEnd);
-            });
-            if (!bMakesParamsClass)
-            {
-                continue;
-            }
-
-            NewPlayerParamsClassOG = reinterpret_cast<decltype(NewPlayerParamsClassOG)>(Target);
-            if (Hooks::RedirectCall(L"AFortPlayerController NewPlayer mission event -> FortNewPlayerHasBegunPlayParams", reinterpret_cast<uint8_t*>(Call), reinterpret_cast<void*>(&NewPlayerParamsClassHK)))
-            {
-                Log::Info(L"AFortPlayerController NewPlayer mission event: sends FortNewPlayerHasBegunPlayParams (class maker 0x{:X})", Target);
-            }
-            else
-            {
-                Log::Error(L"AFortPlayerController NewPlayer mission event: could not redirect the params class");
-            }
-            return;
-        }
-
-        Log::Info(L"AFortPlayerController NewPlayer mission event: no FortNewPlayerParams class maker in the sender, left alone");
-    }
-
     // The AFortPlayerController virtual that sends the NewPlayer mission event once client and server have finished loading
     // (called from SetHasClientFinishedLoading); the other function with its error string only checks the player state and logs.
     uintptr_t FindNewPlayerEventSender()
@@ -1197,7 +1142,6 @@ void AFortWorldManager::Hook()
     if (const uintptr_t NewPlayerEventSender = FindNewPlayerEventSender())
     {
         Hooks::Detour(L"AFortPlayerController NewPlayer mission event", reinterpret_cast<void*>(NewPlayerEventSender), &SendNewPlayerEventHK, &SendNewPlayerEventOG);
-        HookNewPlayerEventParams(NewPlayerEventSender);
     }
     else
     {
@@ -1209,12 +1153,6 @@ void AFortWorldManager::HookCallSites()
 {
     // On the game thread: Hook runs before the engine's WinMain on unpacked builds (1.1-1.9), where StaticFindObject's
     // hash table lock isn't made yet (#311).
-    if (const UClass* Derived = FindNewPlayerHasBegunPlayParamsClass())
-    {
-        const UClass* Base = FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortNewPlayerParams");
-        Log::Info(L"NewPlayer mission event params: base {}, derived {} (child: {})",
-            Base ? Base->GetName().ToStdString() : L"none", Derived->GetName().ToStdString(), Base && Derived->IsChildOf(Base));
-    }
     if (HasEarnedItemCaches())
     {
         Log::Info(L"Item caches: picked-up caches are kept in UnsavedPlayerEarnedItemCaches (+0x{:X}) for EndPrimaryMission's EarnedItemCaches", Member_UnsavedPlayerEarnedItemCaches.GetOffsetChecked());

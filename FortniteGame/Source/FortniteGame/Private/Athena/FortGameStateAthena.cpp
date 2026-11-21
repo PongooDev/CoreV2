@@ -282,6 +282,56 @@ void AFortGameStateAthena::ReportPropertyOverrides() const
 #endif
 }
 
+void AFortGameStateAthena::AddPlayerStateToGameMemberInfo(AFortPlayerStateAthena* PlayerState)
+{
+#if WITH_SERVER_CODE
+    if (Role != ROLE_Authority || !PlayerState || !HasGameMemberInfoArray() || !AFortPlayerStateAthena::HasSquadId())
+    {
+        return;
+    }
+    const FUniqueNetIdRepl& UniqueId = PlayerState->UniqueId;
+    const uint8_t SquadId = PlayerState->SquadId;
+    const uint8_t TeamIndex = static_cast<uint8_t>(PlayerState->TeamIndex);
+    // A player not placed yet: squad 0 is none, and the clients' maps would file them under it.
+    if (!UniqueId.IsValid() || SquadId == 0)
+    {
+        return;
+    }
+
+    FGameMemberInfoArray& MemberInfo = GameMemberInfoArray;
+    TStructArray<FGameMemberInfo>& Members = MemberInfo.Members;
+    const std::wstring Id = UniqueId.ToString().ToStdString();
+    bool bRemoved = false;
+    for (int32_t Index = Members.Num() - 1; Index >= 0; --Index)
+    {
+        FGameMemberInfo& Member = Members[Index];
+        const FUniqueNetIdRepl& MemberUniqueId = Member.MemberUniqueId;
+        if (MemberUniqueId.ToString().ToStdString() != Id)
+        {
+            continue;
+        }
+        if (Member.SquadId == SquadId && Member.TeamIndex == TeamIndex)
+        {
+            return;
+        }
+        Members.RemoveAt(Index);
+        bRemoved = true;
+    }
+    if (bRemoved)
+    {
+        MemberInfo.MarkArrayDirty();
+    }
+
+    FGameMemberInfo& Member = Members.AddDefaulted();
+    Member.SquadId = SquadId;
+    Member.TeamIndex = TeamIndex;
+    FUniqueNetIdRepl::StaticStruct()->CopyScriptStruct(&Member.MemberUniqueId, &UniqueId);
+    MemberInfo.MarkItemDirty(Member);
+    ForceNetUpdate();
+    Log::Info(L"Battle Royale: {} is a game member in squad {} of team {} ({} members)", PlayerState->GetPlayerName().ToStdString(), SquadId, TeamIndex, Members.Num());
+#endif
+}
+
 bool AFortGameStateAthena::HasStreamedAdditionalPlaylistLevels() const
 {
     UFortPlaylistAthena* Playlist = HasCurrentPlaylist() && UFortPlaylist::HasAdditionalLevels() && HasAdditionalPlaylistLevelsStreamed() ? GetCurrentPlaylist() : nullptr;

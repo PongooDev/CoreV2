@@ -1580,6 +1580,7 @@ namespace
         Watch.LateSquads.insert(Squad);
         State->SquadId = Squad;
         State->ForceNetUpdate();
+        GameState->AddPlayerStateToGameMemberInfo(State);
         Log::Info(L"Battle Royale: {} is in squad {} on {}", Id, Squad, static_cast<EFortTeam>(State->TeamIndex).ToString());
         return true;
     }
@@ -2585,6 +2586,7 @@ namespace
                 {
                     Other->SquadId = Squad;
                     Other->ForceNetUpdate();
+                    GameState->AddPlayerStateToGameMemberInfo(Other);
                     Joined += Other == State ? 0 : 1;
                 }
             }
@@ -3426,6 +3428,15 @@ void AFortGameModeAthena::OnPlayerPossessedPawn(AFortPlayerController* Player, A
         OnDestroyed.AddUniqueDynamic(this, PlayerStateDestroyedHandler->GetFName());
     }
     CheckTeamSwitches(this);
+    // 7.40: the player's squad and team for the clients' squad maps (GameMemberInfoArray), once the game has placed them
+    // (the game mode's squad assignment, 7.40 0xD4DC50, writes SquadId from the session's squads). A player Core places
+    // later gets theirs from PlaceLatePlayerInSquad, and a respawn's Possess finds their item already there.
+    AFortGameStateAthena* GameState = AthenaGameStateOf(this);
+    AFortPlayerStateAthena* AthenaState = GameState ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Player->PlayerState))) : nullptr;
+    if (AthenaState)
+    {
+        GameState->AddPlayerStateToGameMemberInfo(AthenaState);
+    }
     // Creative (7.00): the player's rift of the hub, with their last used island loading into it.
     if (AFortPlayerControllerAthena* AthenaPlayer = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Player)))
     {

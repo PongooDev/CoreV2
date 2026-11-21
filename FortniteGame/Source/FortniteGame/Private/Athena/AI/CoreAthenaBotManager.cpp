@@ -2092,6 +2092,11 @@ void FCoreAthenaBotManager::PlaceBotOnTeam(FCoreAthenaBotController* Bot)
         State->SquadId = Bot->GetSquad();
     }
     State->ForceNetUpdate();
+    // 7.40: the squad for the clients' squad maps too (GameMemberInfoArray), as a player's.
+    if (AFortGameStateAthena* GameState = AthenaGameStateOf(Athena))
+    {
+        GameState->AddPlayerStateToGameMemberInfo(State);
+    }
 #endif
 }
 
@@ -3393,6 +3398,7 @@ void FCoreAthenaBotManager::UpdatePlayerTeamBots(float Now)
             {
                 State->SquadId = Squad->second;
                 State->ForceNetUpdate();
+                GameState->AddPlayerStateToGameMemberInfo(State);
                 Log::Info(L"Battle Royale bots: {} is in squad {} with its player teammates", Bot->GetBotName(), Squad->second);
             }
         }

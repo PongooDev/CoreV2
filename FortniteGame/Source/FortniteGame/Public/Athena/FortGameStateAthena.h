@@ -3,6 +3,7 @@
 #include "Athena/FortAthenaAircraft.h"
 #include "Athena/FortPlaylistAthena.h"
 #include "FortGameState.h"
+#include "GameFramework/OnlineReplStructs.h"
 #include "UObject/ScriptDelegates.h"
 
 class AFortAthenaMapInfo;
@@ -68,6 +69,21 @@ struct FGameplayMutatorObjectDataArray : public FFastArraySerializer
 {
     DefineUnrealStruct(FGameplayMutatorObjectDataArray, FortniteGame)
     DefineUStructArrayProperty(FGameplayMutatorObjectData, ObjectDataList)
+};
+
+// From 7.40 (CL-5046157): one player of the match, with their squad and team (GameMemberInfoArray's items).
+struct FGameMemberInfo : public FFastArraySerializerItem
+{
+    DefineUnrealStruct(FGameMemberInfo, FortniteGame)
+    DefineUProperty(uint8_t, SquadId)
+    DefineUProperty(uint8_t, TeamIndex)
+    DefineUStructProperty(FUniqueNetIdRepl, MemberUniqueId)
+};
+
+struct FGameMemberInfoArray : public FFastArraySerializer
+{
+    DefineUnrealStruct(FGameMemberInfoArray, FortniteGame)
+    DefineUStructArrayProperty(FGameMemberInfo, Members)
 };
 
 class AFortGameStateAthena : public AFortGameStateZone
@@ -284,6 +300,24 @@ public:
     // game mode's HandleCurrentPlaylistLoaded): for each, the mutator of its scope and the value its property has now,
     // or that no mutator of that scope spawned. Nothing to say on a match without overrides.
     void ReportPropertyOverrides() const;
+
+    // From 7.40 (CL-5046157): the match's players with their squad and team, replicated (a fast array). It is the only
+    // way a 7.40 client learns its squads: FGameMemberInfo::PostReplicatedAdd (0xDA3010) hands each new item to
+    // HandleGameMemberAdded (0xD9AF80), which puts the player state with that MemberUniqueId into the game state's
+    // native team and squad maps (+0x1278, +0x12C8; a player state that hasn't replicated yet waits in two maps by id,
+    // and CheckAndAddMissedPlayerStatesToMaps, 0xDB2600, adds it when it comes). The full-screen map draws a squadmate's
+    // marker, the player's own among them (0x10A3E40), only for a player state in the squad map's entry for the local
+    // player's SquadId (0xD87BE0); 7.30 has no such array. The server's writer is stripped: of the 7.40 exe's code only
+    // the game state's destructor (0xD73920) takes the array's address (+0x13B8, Members +0x1468), and the reflected
+    // replication reads it, so the clients' maps stayed empty and no marker the player placed was drawn (CoreV2 #522).
+    DefineUStructProperty(FGameMemberInfoArray, GameMemberInfoArray)
+    static bool HasGameMemberInfoArray() { return Member_GameMemberInfoArray.IsAvailable() && FGameMemberInfo::StaticStruct(); }
+    // The server's side of GameMemberInfoArray, stripped from the client builds (21.40 exports only the clients' side:
+    // NotifyGameMemberAdded, NotifyGameMemberRemoved, FGameMemberInfo::PostReplicatedAdd and PreReplicatedRemove; the
+    // name is Core's): PlayerState's item with its SquadId, TeamIndex and UniqueId. An item the player already has with
+    // another squad or team is removed first, as the clients only hear of added and removed items. Nothing on a build
+    // without the array, for a player state without a valid UniqueId, or when the player has no squad yet.
+    void AddPlayerStateToGameMemberInfo(AFortPlayerStateAthena* PlayerState);
 
     // From 6.20: AddManagedCharacterMovementComponent and RemoveManagedCharacterMovementComponent hand a character's
     // movement to the active AI mutator before AFortGameState's own list; the mutator's two are stripped, and their

@@ -5183,6 +5183,8 @@ namespace
         {
             Natives::AFortPlayerController_TrySetHeroImplementation = nullptr;
             Log::Info(L"Finder: AFortPlayerController::TrySetHeroImplementation isn't in this build (8.00's hero loadout system sets heroes); Core's hero hook is off");
+            Natives::UFortGlobals_ApplyHeroEffectsAndAbilitiesCampaignOnly = true;
+            Log::Info(L"Finder: AFortGameState::ApplyHomebaseEffectsOnPlayerSetup applies the hero's effects and abilities in Save the World only; Battle Royale's players get the generic ability set on possession");
         }
         else
         {

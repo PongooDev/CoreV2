@@ -18,6 +18,7 @@
 #include "FortAssetManager.h"
 #include "FortGameData.h"
 #include "FortGameState.h"
+#include "FortGlobals.h"
 #include "FortWorldManager.h"
 #include "GameThread.h"
 #include "Heroes/FortHero.h"
@@ -611,6 +612,17 @@ void AFortPlayerController::Possess(APawn* InPawn)
         {
             UE_LOG(LogFort, Log, TEXT("Possess: %s's %s has the game state's gameplay modifiers"), *GetNameSafe(this), *GetNameSafe(PossessedPlayerPawn));
         }
+    }
+
+    // 8.00 (CL-5203069) on, AFortGameState::ApplyHomebaseEffectsOnPlayerSetup applies the hero's effects and abilities in
+    // Save the World only, where Core equips the generic player ability set (UFortGlobals::ApplyHeroEffectsAndAbilities).
+    // A Battle Royale player gets the set here, on the player state's ability system the pawn has just taken.
+    if (PossessedPlayerPawn && !bDisguisePossess && Natives::UFortGlobals_ApplyHeroEffectsAndAbilitiesCampaignOnly && AFortGameModeAthena::GetCurrent(this))
+    {
+        static UClass* const PlayerStateInterfaceClass = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemInterface");
+        UObject* const PlayerStateObject = reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState));
+        void* const PlayerStateInterface = PlayerStateInterfaceClass && PlayerStateObject ? Natives::UObject_GetInterfaceAddress(PlayerStateObject, PlayerStateInterfaceClass) : nullptr;
+        UFortGlobals::InitializePlayerGameplayAbilities(static_cast<IAbilitySystemInterface*>(PlayerStateInterface));
     }
 
     AFortPlayerControllerAthena* AthenaController = !bDisguisePossess && Role == ROLE_Authority && MyFortPawn && AFortGameModeAthena::GetCurrent(this) ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(this)) : nullptr;

@@ -146,8 +146,17 @@ public:
     static void HookZiplineVTables();
     // The four override natives and the gadget data's calls to them, where the build strips them.
     static void HookNatives();
+    // Both DLLs, before the detours are enabled: TryToAutoPickupWeapon's guard where the tick reaches it (7.40, 8.00).
+    static void Hook();
+
+    // The owning client's walk-over pickup (7.40 0x13DF6D0): picks the overlapped pickup up through the local player's
+    // interact, which sends ServerHandlePickup. Core's guard returns where there's no local player controller.
+    void TryToAutoPickupWeapon(AFortPickup* Pickup);
 
 private:
+    static void TryToAutoPickupWeaponHK(AFortPlayerPawn* This, AFortPickup* Pickup);
+    static inline void (*TryToAutoPickupWeaponOG)(AFortPlayerPawn* This, AFortPickup* Pickup) = nullptr;
+
     void ReviveFromDBNO(AController* EventInstigator);
 
     static void ServerReviveFromDBNO_ImplementationHK(AFortPlayerPawn* This, AController* EventInstigator);

@@ -858,3 +858,40 @@ void AFortPlayerPawn::HookNatives()
         }
     }
 }
+
+void AFortPlayerPawn::TryToAutoPickupWeapon(AFortPickup* Pickup)
+{
+    // The game's walk-over check (7.40 0x13DF580) hands each overlapped pickup here when the pawn IsLocallyControlled:
+    // on a player's own game for their pawn, and on a dedicated server for a pawn an AIController drives, since that
+    // controller is local to the server (AController::IsLocalController, 7.40 0x2809E20). The tick asks it too for
+    // every pickup in the pawn's overlaps (AFortPlayerPawn::Tick, 0x13C6237). The game's body opens by looking up the
+    // world's local player controller (0x10A9FA0) and reading its Player (0x13FD260, [PC+0x3B0]) without checking it. A
+    // dedicated server has no local player controller, so a Core bot walking over a pickup crashed the server there
+    // (CoreV2 #523, #524). With none, there's no local player whose settings or interact the pickup could go through,
+    // so it returns as the game's own body does when it finds no settings: nothing is picked up. Bots take pickups
+    // through their own controller (FCoreAthenaBotController::TakePickup).
+    UWorld* World = static_cast<const UObject*>(this)->GetWorld();
+    if (!World || !Natives::AFortPlayerPawn_AutoPickupLocalPlayerController(World, true, true))
+    {
+        return;
+    }
+    TryToAutoPickupWeaponOG(this, Pickup);
+}
+
+void AFortPlayerPawn::TryToAutoPickupWeaponHK(AFortPlayerPawn* This, AFortPickup* Pickup)
+{
+    This->TryToAutoPickupWeapon(Pickup);
+}
+
+void AFortPlayerPawn::Hook()
+{
+    // An exception the owner OK'd (2026-11-21) to "no hooks on intact engine code" and, for CoreClient.dll, to "no
+    // client fixes": the game's own TryToAutoPickupWeapon is intact, but its client-side check runs for AI-controlled
+    // bot pawns, and a dedicated server has no local player controller for it to read (CoreV2 #523, #524). Only where
+    // the pawn's tick reaches it (7.40, 8.00; Finder::ResolveAutoPickupLive), so other builds are untouched.
+    if (!Finder::ResolveAutoPickupLive())
+    {
+        return;
+    }
+    Hooks::Detour(L"AFortPlayerPawn::TryToAutoPickupWeapon", reinterpret_cast<void*>(Natives::AFortPlayerPawn_TryToAutoPickupWeapon), &TryToAutoPickupWeaponHK, &TryToAutoPickupWeaponOG);
+}

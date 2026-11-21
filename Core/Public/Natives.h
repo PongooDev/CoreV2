@@ -753,6 +753,10 @@ namespace Natives
     inline int32_t AFortPawn_StopNativeActionIndex = -1;
     inline void (*UAbilitySystemComponent_CancelAbilities)(UAbilitySystemComponent* This, const FGameplayTagContainer* WithTags, const FGameplayTagContainer* WithoutTags, UGameplayAbility* Ignore) = nullptr;
     inline void (*AFortPlayerPawn_UpdateDBNOInteractCollision)(AFortPawn* This) = nullptr;
+    // AFortPlayerPawn::TryToAutoPickupWeapon (7.40 0x13DF6D0, 8.00 0x141E6E0) and the local player controller lookup it
+    // opens with (7.40 0x10A9FA0, called (World, true, true)), where the game's tick reaches it: Finder::ResolveAutoPickupLive.
+    inline void (*AFortPlayerPawn_TryToAutoPickupWeapon)(AFortPlayerPawn* This, AFortPickup* Pickup) = nullptr;
+    inline APlayerController* (*AFortPlayerPawn_AutoPickupLocalPlayerController)(UWorld* World, bool bArg1, bool bArg2) = nullptr;
     inline ptrdiff_t AFortPlayerPawn_DBNOTimerHandle = -1;
     inline void (*AFortPawn_ForgetPawnForAllAI)(AFortPawn* This) = nullptr;
     inline int32_t AFortPlayerControllerZone_OnPawnRevivedIndex = -1;

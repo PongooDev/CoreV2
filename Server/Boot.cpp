@@ -310,6 +310,7 @@ static void InstallHooks()
         UGameMapsSettings::ModeDefaultMap = &AFortGameModeAthena::DefaultMatchURL;
     }
     UFortQuestManager::Hook();
+    AFortPlayerPawn::Hook();
     Hooks::EnableAll();
     if (bHoldCode)
     {

@@ -435,6 +435,10 @@ namespace Finder
     // AFortTeamInfo::RemoveFromTeam (Natives::AFortTeamInfo_RemoveFromTeam), from its log line, for Battle Royale's player
     // bots: one leaving the match leaves its team as a player changing teams does.
     bool ResolveTeamRemoveLive();
+    // AFortPlayerPawn::TryToAutoPickupWeapon (Natives::AFortPlayerPawn_TryToAutoPickupWeapon) and its local player
+    // controller lookup, from its log line, only where the pawn's tick also reaches it (7.40, 8.00) and it reads the
+    // controller it looked up without checking it. None elsewhere.
+    bool ResolveAutoPickupLive();
     // AActor::Destroy (Natives::AActor_Destroy), from AActor's own K2_DestroyActor (the slot execK2_DestroyActor calls, in
     // AActor's vtable), which jumps to it: for actors whose class overrides K2_DestroyActor with nothing (AController).
     bool ResolveActorDestroyLive();

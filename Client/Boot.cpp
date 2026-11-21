@@ -15,6 +15,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Misc/ConfigCacheIni.h"
 #include "OnlineVoiceImpl.h"
+#include "Pawns/FortPlayerPawn.h"
 #include "Player/FortCheatManager.h"
 #include "Player/FortPlayerController.h"
 #include "UI/AthenaHUDContext.h"
@@ -95,6 +96,13 @@ static void Start()
     // Packed builds only: the packer checks its decrypted code as the initial load ends, and patches
     // present at that moment hang the game, so the detours go in once the engine is up.
     Packed::WaitForCodeCheck(true);
+    // TryToAutoPickupWeapon's guard (the owner's OK, #523): found from its log line, which a packed build's references
+    // hold only once the stub has decrypted the code, so they are read again first.
+    if (Packed::IsPacked())
+    {
+        Finder::RescanStringRefs();
+    }
+    AFortPlayerPawn::Hook();
     Hooks::EnableAll();
 
     GameThread::Enqueue([]

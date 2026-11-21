@@ -18789,6 +18789,56 @@ bool Finder::ResolveTeamRemoveLive()
     return true;
 }
 
+bool Finder::ResolveAutoPickupLive()
+{
+    static bool bSearched = false;
+    if (bSearched)
+    {
+        return Natives::AFortPlayerPawn_TryToAutoPickupWeapon != nullptr;
+    }
+    bSearched = true;
+
+    // AFortPlayerPawn::TryToAutoPickupWeapon logs "TryToAutoPickupWeapon: '%s'" (7.40 0x13DF6D0, its only reference). It
+    // opens with GetWorld (vtable +0x140), then "mov r8b, 1; mov rcx, rax; movzx edx, r8b; call" the local player
+    // controller lookup (0x10A9FA0), then "mov rcx, rax; call" 0x13FD260, which reads the controller's Player
+    // ("push rbx; sub rsp, 20h; mov rbx, [rcx+3B0h]") without checking the controller. 7.20 (0x138C850), 7.30 (0x13C9AD0)
+    // and 8.00 (0x141E6E0) open the same way. Only 7.40 and 8.00 reach it from the pawn's tick too: the function that
+    // calls it (7.40 0x13DF580, 8.00 0x141E590) is called from AFortPlayerPawn::Tick (7.40 0x13C6237) and from the
+    // capsule overlap (0x13D2F40). On 7.20 and 7.30 its caller is the overlap native alone, which only its exec calls.
+    const std::vector<uintptr_t> Refs = Finder::StringRefs(L"TryToAutoPickupWeapon: '%s'");
+    if (Refs.empty())
+    {
+        Log::Info(L"Finder: AFortPlayerPawn::TryToAutoPickupWeapon none (no log line in this build)");
+        return false;
+    }
+    const uintptr_t Function = Finder::FunctionStart(Refs.front());
+    const std::vector<std::pair<uintptr_t, uintptr_t>> Calls = Function ? Finder::DecodedDirectCalls(Function) : std::vector<std::pair<uintptr_t, uintptr_t>>();
+    const uintptr_t LookupCall = Calls.size() >= 2 ? Calls[0].first : 0;
+    const bool bOpensWithLookup = LookupCall && Byte(LookupCall - 10) == 0x41 && Byte(LookupCall - 9) == 0xB0 && Byte(LookupCall - 8) == 0x01 && Byte(LookupCall - 7) == 0x48 &&
+        Byte(LookupCall - 6) == 0x8B && Byte(LookupCall - 5) == 0xC8 && Byte(LookupCall - 4) == 0x41 && Byte(LookupCall - 3) == 0x0F && Byte(LookupCall - 2) == 0xB6 &&
+        Byte(LookupCall - 1) == 0xD0 && Byte(LookupCall + 5) == 0x48 && Byte(LookupCall + 6) == 0x8B && Byte(LookupCall + 7) == 0xC8 && Calls[1].first == LookupCall + 8;
+    const bool bUncheckedRead = bOpensWithLookup && Finder::BodyIs(Calls[1].second, { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x99 });
+    if (!bUncheckedRead)
+    {
+        Log::Info(L"Finder: AFortPlayerPawn::TryToAutoPickupWeapon (+0x{:X}) none: it doesn't open with the unchecked local player controller read", Function ? Function - Finder::ImageBase() : 0);
+        return false;
+    }
+    const std::vector<uintptr_t> CallerSites = Finder::CallsTo(Function, false);
+    const uintptr_t Caller = CallerSites.size() == 1 ? Finder::FunctionStart(CallerSites.front()) : 0;
+    const size_t CallerCallers = Caller ? Finder::CallsTo(Caller, false).size() : 0;
+    if (CallerCallers < 2)
+    {
+        Log::Info(L"Finder: AFortPlayerPawn::TryToAutoPickupWeapon (+0x{:X}) none: only the capsule overlap reaches it ({} calls, its caller +0x{:X} has {})", Function - Finder::ImageBase(),
+            CallerSites.size(), Caller ? Caller - Finder::ImageBase() : 0, CallerCallers);
+        return false;
+    }
+    Natives::AFortPlayerPawn_TryToAutoPickupWeapon = reinterpret_cast<decltype(Natives::AFortPlayerPawn_TryToAutoPickupWeapon)>(Function);
+    Natives::AFortPlayerPawn_AutoPickupLocalPlayerController = reinterpret_cast<decltype(Natives::AFortPlayerPawn_AutoPickupLocalPlayerController)>(Calls[0].second);
+    Log::Info(L"Finder: AFortPlayerPawn::TryToAutoPickupWeapon at 0x{:X} (local player controller lookup 0x{:X}, unchecked read 0x{:X}; its caller 0x{:X} has {} callers)",
+        Function - Finder::ImageBase(), Calls[0].second - Finder::ImageBase(), Calls[1].second - Finder::ImageBase(), Caller - Finder::ImageBase(), CallerCallers);
+    return true;
+}
+
 bool Finder::ResolveActorDestroyLive()
 {
     static bool bSearched = false;

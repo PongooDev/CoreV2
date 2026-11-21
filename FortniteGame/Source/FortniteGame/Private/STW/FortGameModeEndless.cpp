@@ -8,6 +8,7 @@
 #include "Missions/FortMission.h"
 #include "Missions/FortMissionLibrary.h"
 #include "Missions/FortMissionManager.h"
+#include "Missions/FortNewPlayerHasBegunPlayParams.h"
 #include "Player/FortPlayerController.h"
 #include "Templates/Casts.h"
 #include "UObject/WeakObjectPtr.h"
@@ -38,6 +39,8 @@ void AFortGameModeEndless::HandleNewPlayerHasBegunPlay(AFortPlayerController* Pl
     {
         return;
     }
+    // The mission's own NewPlayerHasBegunPlay (its starting inventory, #516), which the client build doesn't send.
+    UFortNewPlayerHasBegunPlayParams::SendNewPlayerHasBegunPlay(PlayerController);
     PlayerBegunPlayIn = this;
     StartPrimaryMission();
 #endif

@@ -337,7 +337,7 @@ void AFortMinigame::RespawnMinigamePlayers()
         AFortPlayerStateAthena* AthenaState = Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(PlayerState));
         // The same pawn comes back from the hub or goes into the next game, where Epic's stripped respawn gave a new
         // one at full health: damage from the last game would otherwise stay on it (#518). Heal it here, at the start's
-        // warmup and at the trip back (the game's BP calls this for the post-game place too).
+        // Respawn warmup (this function's only caller); the trip back is healed in ClearPlayerInventory.
         if (AFortPlayerPawn* FortPawn = Cast<AFortPlayerPawn>(reinterpret_cast<UObject*>(Pawn)))
         {
             const float MaxHealth = FortPawn->GetMaxHealth();

@@ -114,7 +114,8 @@ namespace
         return false;
     }
 
-    int32_t GiveItemEntry(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry, int32_t SwappedSlot = -1)
+    // OutItem: the first item the entry went into.
+    int32_t GiveItemEntry(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry, int32_t SwappedSlot = -1, UFortWorldItem** OutItem = nullptr)
     {
         AFortInventory* Inventory = PlayerController->WorldInventory;
         UFortWorldItemDefinition* ItemDefinition = Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(ItemEntry.ItemDefinition));
@@ -128,6 +129,10 @@ namespace
         return Inventory->AddItemStacks(ItemEntry, Count, -1, true, false,
             [&](UFortWorldItem* Existing, int32_t Added)
             {
+                if (OutItem && !*OutItem)
+                {
+                    *OutItem = Existing;
+                }
                 FFortItemEntry& ExistingEntry = Existing->ItemEntry;
                 Inventory->UpdateWorldItemCount(Existing, ExistingEntry.Count + Added);
                 ExistingEntry.AddNewItemCount(Added, bShouldShowItemToast);
@@ -146,6 +151,10 @@ namespace
                 NewEntry.ItemGuid = ItemGuid;
                 NewEntry.Count = StackCount;
 
+                if (OutItem && !*OutItem)
+                {
+                    *OutItem = WorldItem;
+                }
                 WorldItem->SetOwningControllerForTemporaryItem(PlayerController);
                 Inventory->AddWorldItem(WorldItem);
                 NewEntry.SetNewItemCount(StackCount, bShouldShowItemToast);
@@ -1184,6 +1193,7 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         }
     }
     bool bRequestedSwapDone = false;
+    UFortWorldItem* SwappedInItem = nullptr;
     // An item cache (4.0) isn't an item the player carries: the world manager keeps it for the end of the mission, when
     // EndPrimaryMission's EarnedItemCaches has the MCP give its card pack (AFortWorldManager::AddEarnedItemCache).
     UWorld* World = GetWorld();
@@ -1206,16 +1216,18 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         }
 
         int32_t EntrySwappedSlot = -1;
+        bool bEntrySwapped = false;
         if (!AFortPlayerController::HasQuickBars())
         {
             // 7.40: the client's named item, once (DropRequestedItemForSwap).
-            bRequestedSwapDone = bRequestedSwapDone || DropRequestedItemForSwap(PlayerController, *Entry, RequestedSwap, DroppedDefinition, bHoldSwap);
+            bEntrySwapped = !bRequestedSwapDone && DropRequestedItemForSwap(PlayerController, *Entry, RequestedSwap, DroppedDefinition, bHoldSwap);
+            bRequestedSwapDone = bRequestedSwapDone || bEntrySwapped;
         }
         else if (SwappedSlot < 0)
         {
             SwappedSlot = EntrySwappedSlot = DropFocusedItemForSwap(PlayerController, *Entry, DroppedDefinition);
         }
-        const int32_t Given = GiveItemEntry(PlayerController, *Entry, EntrySwappedSlot);
+        const int32_t Given = GiveItemEntry(PlayerController, *Entry, EntrySwappedSlot, bEntrySwapped ? &SwappedInItem : nullptr);
         if (Given > 0)
         {
             UFortItemCollectedParams::SendItemCollected(PlayerController, Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition)), Given);
@@ -1242,6 +1254,16 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
             Pickup->TossPickup(Location, Pawn, 0);
         }
         EntryStruct->DestroyStruct(Leftover);
+    }
+
+    // 7.40: the client's own quickbar moves its focus off the dropped item's slot (to the next one) when the drop
+    // replicates, and the new item lands in that emptied slot unfocused: the player held the next slot's item, where
+    // Fortnite keeps the slot and puts the new item in the player's hands (#548). The server has the client equip it as
+    // it does an item that bForceFocusWhenAdded (UFortWorldItemDefinition's item-added handling, 0x11E21E0:
+    // ClientEquipItem(the item's guid, true)); the client keeps the guid until the inventory brings it the item.
+    if (SwappedInItem && AFortPlayerController::FindStaticFunction_ClientEquipItem())
+    {
+        PlayerController->ClientEquipItem(static_cast<FFortItemEntry&>(SwappedInItem->ItemEntry).ItemGuid, true);
     }
 
     // The new weapon, in the emptied slot (PutInSwappedSlot), goes into the player's hands; the slot kept the focus. If

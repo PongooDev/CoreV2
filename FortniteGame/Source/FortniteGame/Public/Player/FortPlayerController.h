@@ -162,6 +162,7 @@ public:
     DefineUFunction(SwapQuickBarFocus)
     DefineUFunction(ClientReportDamagedResourceBuilding)
     DefineUFunction(ClientExecuteInventoryItem)
+    DefineUFunction(ClientEquipItem)
     DefineUFunction(SetRotatePawnToCamera)
     DefineUFunction(GetRotatePawnToCamera)
     DefineUFunction(Cheat)
@@ -200,6 +201,9 @@ public:
     // equipped. A server slot activation sets it (ServerActivateSlotInternal_Implementation 3.5.2 0xD08860 -> 0xD09920
     // -> AFortPlayerController::ExecuteInventoryItem 0xECE9F0).
     void ClientExecuteInventoryItem(const FGuid& ItemGuid, float Delay, bool bForceExecute, bool bActivateSlotAfterSettingFocused = false);
+    // The client focuses the item's slot on its own quickbar and equips it, or keeps the guid and does it on the next
+    // inventory update when it doesn't have the item yet (AFortPlayerControllerAthena's, 7.40 0xD7FE90).
+    void ClientEquipItem(const FGuid& ItemGuid, bool bForceExecution);
     void SetRotatePawnToCamera(bool bNewRotatePawnToCamera);
     bool GetRotatePawnToCamera();
     void ServerSetPartyOwner(const FUniqueNetIdRepl& PartyOwnerUniqueId);

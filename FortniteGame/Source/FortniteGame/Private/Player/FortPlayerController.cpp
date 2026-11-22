@@ -2578,6 +2578,14 @@ void AFortPlayerController::ClientExecuteInventoryItem(const FGuid& ItemGuid, fl
     Params.Call(this);
 }
 
+void AFortPlayerController::ClientEquipItem(const FGuid& ItemGuid, bool bForceExecution)
+{
+    Reflection::FParams Params(StaticFunction_ClientEquipItem());
+    Params.Set(L"ItemGuid", ItemGuid);
+    Params.Set(L"bForceExecution", bForceExecution);
+    Params.Call(this);
+}
+
 DEFINE_FUNCTION(AFortPlayerController::execSwapQuickBarFocus)
 {
     P_GET_PROPERTY(UByteProperty, Z_Param_InQuickBar);

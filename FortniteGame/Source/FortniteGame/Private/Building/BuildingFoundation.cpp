@@ -158,12 +158,24 @@ void ABuildingFoundation::HookNatives()
 #if WITH_SERVER_CODE
     // Dynamic foundations are 6.00's (the floating island); older builds have no SetDynamicFoundationTransform. 6.20 adds
     // SetDynamicFoundationEnabled (Loot Lake's plots). Each is restored where the build's exec calls a stub.
+    // Once, before the first map's actors begin play (UWorld::ListenHK, LoadMap's Listen): 7.30 (CL-4834550)'s
+    // Athena_POI_Foundations level Blueprint calls SetDynamicFoundationTransform from its ReceiveBeginPlay, on
+    // LF_Athena_POI_25x36 (Dynamic_StartEnabled, Athena_POI_IceBergBottom: the ice under Polar Peak's castle). Restored
+    // only by the boot's game-thread queue, which runs after the map has begun play, that call reached the stub: the
+    // plot's transform was never set, its PostUpdate never streamed the level, and players walked under the castle
+    // (CoreV2 #519). The later call from the queue does nothing once this has run past its checks.
+    static bool bHooked = false;
+    if (bHooked)
+    {
+        return;
+    }
     UClass* Class = StaticClass();
     UObject* Default = Class ? Class->GetDefaultObject(false) : nullptr;
     if (!FindStaticFunction_SetDynamicFoundationTransform() || !Default || (!Natives::FFrame_Step && !Finder::ResolveScriptFrame()))
     {
         return;
     }
+    bHooked = true;
     const auto IsStripped = [](UFunction* Function)
     {
         uint8_t* NativeCall = Function ? Finder::ImplementationCall(Function) : nullptr;

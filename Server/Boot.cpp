@@ -286,6 +286,12 @@ static void InstallHooks()
     }
     UGameMapsSettings::Hook();
     UWorld::Hook();
+    // 7.30's Polar Peak ice (CoreV2 #519): Athena_POI_Foundations' level Blueprint calls the stripped
+    // SetDynamicFoundationTransform from its BeginPlay, before the game-thread queue below restores it.
+    if (Configuration::Get().IsBattleRoyale())
+    {
+        UWorld::OnBeforeBeginPlay = [](UWorld*) { ABuildingFoundation::HookNatives(); };
+    }
     UNetDriver::Hook();
     AActor::Hook();
     UGameInstance::Hook();

@@ -147,6 +147,9 @@ public:
         return Cast<T>(SpawnActor(Class, nullptr, SpawnParameters));
     }
 
+    // Core's: called from LoadMap's Listen (ListenHK), each time a map is loaded and before its actors begin play. The
+    // server's boot sets it (Server/Boot.cpp); null in the client DLLs.
+    static inline void (*OnBeforeBeginPlay)(UWorld* World) = nullptr;
     static void Hook();
 
 private:

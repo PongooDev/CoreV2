@@ -217,6 +217,12 @@ FLevelCollection* UWorld::FindCollectionByType(const ELevelCollectionType InType
 
 bool UWorld::ListenHK(UWorld* World, FURL& InURL)
 {
+    // LoadMap listens before the new world begins play: what the server's boot sets here runs before the map's actors
+    // call into the game from their BeginPlay.
+    if (OnBeforeBeginPlay)
+    {
+        OnBeforeBeginPlay(World);
+    }
     return World->Listen(InURL);
 }
 

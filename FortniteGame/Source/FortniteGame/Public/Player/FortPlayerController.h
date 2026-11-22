@@ -259,6 +259,9 @@ public:
     void OnRep_CheatMovement();
     // Building (FortPlayerControllerBuilding.cpp): 1.8.1 strips these server RPCs' bodies; Core's follow 1.8's.
     void ServerCreateBuildingActor_Implementation(const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored);
+    // The piece ServerCreateBuildingActor_Implementation places, returned; 7.40's AFortDecoTool::ServerCreateBuildingAndSpawnDeco_
+    // Implementation calls it for a trap's floor (Core's name: the build's call is into the stub, 21.40 has no name for it).
+    ABuildingSMActor* CreateBuildingActor(const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored);
     void ServerEditBuildingActor_Implementation(ABuildingSMActor* BuildingActorToEdit, UClass* NewBuildingClass, int32_t RotationIterations, bool bMirrored);
     void ServerBeginEditingBuildingActor_Implementation(ABuildingSMActor* BuildingActorToEdit);
     void ServerEndEditingBuildingActor_Implementation(ABuildingSMActor* BuildingActorToStopEditing);
@@ -367,6 +370,7 @@ private:
     bool HasRequiredBuildingLevel(const FBuildingClassData& BuildingClassData);
     void ExecuteEditTool(ABuildingSMActor* EditActor);
     static void ServerCreateBuildingActor_ImplementationHK(AFortPlayerController* This, const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored);
+    static ABuildingSMActor* CreateBuildingActorHK(AFortPlayerController* This, const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored, float SyncKey);
     static void ServerEditBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToEdit, UClass* NewBuildingClass, int32_t RotationIterations, bool bMirrored);
     static void ServerBeginEditingBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToEdit);
     static void ServerEndEditingBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToStopEditing);

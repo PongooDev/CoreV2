@@ -466,6 +466,7 @@ namespace Finder
     // NotifyActorChannelCleanedUp makes from it. Anything else leaves the build as it is and says so once.
     bool ResolveReplicationGraphActorInfoLive(void** GraphVTable);
     bool ResolveDecoSpawnedLive();
+    bool ResolveCreateBuildingAndSpawnDecoLive();
     bool ResolveScoreBuildingConstructionLive();
     bool ResolveGetPoiTagsForLive();
     bool ResolveBuildingRestorationLive(ptrdiff_t EditingPlayerOffset);

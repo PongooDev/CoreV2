@@ -709,6 +709,10 @@ namespace Natives
     inline void (*AFortGameStateZone_OnAbilitySystemInterfaceReadyForPersistentGameplayEffects)(AFortGameStateZone* This, IAbilitySystemInterface* AbilitySystemInterface) = nullptr;
     inline int32_t AFortPlayerController_GetOrInitializeHeroIndex = -1;
     inline int32_t AFortPlayerController_DecoSpawnedIndex = -1;
+    // From 7.40 (Finder::ResolveCreateBuildingAndSpawnDecoLive): the call in AFortDecoTool::ServerCreateBuildingAndSpawnDeco_
+    // Implementation (7.40 0x15C20D0, 8.00 0x15F9AE5) that should create the floor or wall a trap is placed on, a call into
+    // the shared return-zero stub. Null on builds without the RPC.
+    inline uint8_t* AFortDecoTool_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall = nullptr;
     inline int32_t AFortGameMode_ScoreBuildingConstructionIndex = -1;
     // From 3.0 (Finder::ResolveGetPoiTagsForLive): AFortGameMode::GetPoiTagsFor, a pawn's location tags (slot 0x144 on
     // 3.6 and 4.0; AFortGameModeAthena's asks its POI manager, AFortGameModeZone's is the shared empty function).

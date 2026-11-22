@@ -219,6 +219,15 @@ void AFortPlayerController::HookBuildingVTables()
             }
         }
     }
+
+    // 7.40's trap floor: AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation is the game's, but its call that
+    // makes the piece for the trap goes into the stub (Finder::ResolveCreateBuildingAndSpawnDecoLive), so it returns
+    // nothing and the trap isn't placed. It goes to the piece ServerCreateBuildingActor_Implementation places instead.
+    if (Finder::ResolveCreateBuildingAndSpawnDecoLive())
+    {
+        Hooks::RedirectCall(L"AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation -> AFortPlayerController::CreateBuildingActor",
+            Natives::AFortDecoTool_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall, reinterpret_cast<void*>(&CreateBuildingActorHK));
+    }
 }
 
 bool AFortPlayerController::ValidateBuildingClassData(FBuildingClassData& BuildingClassData)
@@ -259,21 +268,26 @@ bool AFortPlayerController::HasRequiredBuildingLevel(const FBuildingClassData& B
 
 void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuildingClassData& InBuildingClassData, const FVector& InBuildLoc, const FRotator& InBuildRot, bool bMirrored)
 {
+    CreateBuildingActor(InBuildingClassData, InBuildLoc, InBuildRot, bMirrored);
+}
+
+ABuildingSMActor* AFortPlayerController::CreateBuildingActor(const FBuildingClassData& InBuildingClassData, const FVector& InBuildLoc, const FRotator& InBuildRot, bool bMirrored)
+{
 #if WITH_SERVER_CODE
     FBuildingClassData BuildingClassData = InBuildingClassData;
     if (!ValidateBuildingClassData(BuildingClassData))
     {
-        return;
+        return nullptr;
     }
     UClass* BuildingClass = BuildingClassData.BuildingClass;
     if (!BuildingClass || !BuildingClass->IsChildOf(ABuildingSMActor::StaticClass()))
     {
-        return;
+        return nullptr;
     }
     const FGameplayTag InteractBuild{ FName(L"Gameplay.Action.Player.InteractBuild") };
     if (!CallVirtual<bool>(this, Natives::AFortPlayerController_CanPerformActionIndex, &InteractBuild))
     {
-        return;
+        return nullptr;
     }
 
     // The structural grid may snap the location and rotation; the piece goes where it says.
@@ -281,7 +295,7 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     FRotator BuildRot = InBuildRot;
     if (CallVirtual<bool>(this, Natives::AFortPlayerController_IsBuildingRestrictedIndex, &BuildingClassData, &BuildLoc, &BuildRot))
     {
-        return;
+        return nullptr;
     }
     FBuildingClassData AffordClassData = BuildingClassData;
     const bool bCanAfford = CallVirtual<bool>(this, Natives::AFortPlayerController_CanAffordToPlaceBuildableClassIndex, &AffordClassData);
@@ -300,7 +314,7 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     UWorld* World = GetWorld();
     if (!bCanAfford || !bHasRequiredLevel || QueryResult != 0 || !World)
     {
-        return;
+        return nullptr;
     }
 
     AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(PlayerStateOf(this)));
@@ -356,7 +370,7 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     ABuildingSMActor* Building = Place(BuildLoc, BuildRot, ExistingBuildings);
     if (!Building)
     {
-        return;
+        return nullptr;
     }
     FBuildingClassData PayClassData = BuildingClassData;
     CallVirtual<int32_t>(this, Natives::AFortPlayerController_PayBuildableClassPlacementCostIndex, &PayClassData);
@@ -384,13 +398,13 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     FVector CellLocation;
     if (!SupportSystem || !SupportSystem->K2_GetGridIndicesFromWorldLoc(BuildLoc, Cell))
     {
-        return;
+        return Building;
     }
     const bool bOnTop = MarkerOptionalAdjustment == EFortBuildPreviewMarkerOptionalAdjustment::FreeWallPieceOnTop;
     Cell.Z += bOnTop ? 1 : -1;
     if (!SupportSystem->K2_GetWorldLocFromGridIndices(Cell, CellLocation))
     {
-        return;
+        return Building;
     }
     FVector ExtraLoc(BuildLoc.X, BuildLoc.Y, CellLocation.Z);
     FRotator ExtraRot = BuildRot;
@@ -405,6 +419,9 @@ void AFortPlayerController::ServerCreateBuildingActor_Implementation(const FBuil
     }
     UE_LOG(LogFortBuilding, Log, TEXT("%s's wall %s is mostly underground: the free piece %s goes %s it at (%.0f, %.0f, %.0f) (grid query %d)"), *GetName(), *Building->GetName(),
         ExtraPiece ? *ExtraPiece->GetName() : TEXT("(none)"), bOnTop ? TEXT("on top of") : TEXT("under"), ExtraLoc.X, ExtraLoc.Y, ExtraLoc.Z, ExtraQuery);
+    return Building;
+#else
+    return nullptr;
 #endif
 }
 
@@ -563,6 +580,18 @@ void AFortPlayerController::ServerUpgradeBuildingActor_Implementation(ABuildingA
 void AFortPlayerController::ServerCreateBuildingActor_ImplementationHK(AFortPlayerController* This, const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored)
 {
     This->ServerCreateBuildingActor_Implementation(BuildingClassData, BuildLoc, BuildRot, bMirrored);
+}
+
+ABuildingSMActor* AFortPlayerController::CreateBuildingActorHK(AFortPlayerController* This, const FBuildingClassData& BuildingClassData, const FVector& BuildLoc, const FRotator& BuildRot, bool bMirrored,
+    float SyncKey)
+{
+    // The trap's owner's controller (7.40 0x15B0710), null when the tool's owner isn't a player's pawn. The client's sync
+    // key (the world's time here) only pairs a predicted piece with the server's; Core's pieces aren't predicted.
+    AFortPlayerController* Placer = Cast<AFortPlayerController>(reinterpret_cast<UObject*>(This));
+    ABuildingSMActor* Building = Placer ? Placer->CreateBuildingActor(BuildingClassData, BuildLoc, BuildRot, bMirrored) : nullptr;
+    UE_LOG(LogFortBuilding, Log, TEXT("%s's trap has nothing under it: %s %s for it at (%.0f, %.0f, %.0f)"), Placer ? *Placer->GetName() : TEXT("nobody"),
+        BuildingClassData.BuildingClass ? *BuildingClassData.BuildingClass->GetName() : TEXT("(no class)"), Building ? TEXT("placed") : TEXT("can't be placed"), BuildLoc.X, BuildLoc.Y, BuildLoc.Z);
+    return Building;
 }
 
 void AFortPlayerController::ServerEditBuildingActor_ImplementationHK(AFortPlayerController* This, ABuildingSMActor* BuildingActorToEdit, UClass* NewBuildingClass, int32_t RotationIterations, bool bMirrored)

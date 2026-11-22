@@ -13573,6 +13573,54 @@ bool Finder::ResolveDecoSpawnedLive()
     return true;
 }
 
+bool Finder::ResolveCreateBuildingAndSpawnDecoLive()
+{
+    static bool bSearched = false;
+    if (Natives::AFortDecoTool_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall || bSearched)
+    {
+        return Natives::AFortDecoTool_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall != nullptr;
+    }
+    bSearched = true;
+
+    // 7.40 added AFortDecoTool::ServerCreateBuildingAndSpawnDeco: a trap placed where nothing holds it, whose item has
+    // bAutoCreateAttachmentBuilding, gets a floor (or a wall) built for it first. The _Implementation is the game's (7.40
+    // 0x15C1F20 slot 0x13B, 8.00 0x15F9930): it picks the piece's class from the item's AutoCreateAttachmentBuildingShapes,
+    // then makes it with one direct call on the owner's controller, (FBuildingClassData, Location, Rotation, bMirrored
+    // false, the world's time), and hands what it returns to ServerSpawnDeco_Implementation (call [rax+9E8h]). That call
+    // is the build's only call into a stub: the shared return-zero function (7.40 0x15C20D0 -> 0x2B6D90, 8.00 0x15F9AE5 ->
+    // 0x2BB580), so no piece is made and no trap is placed. Builds before 7.40 have no such UFunction.
+    UFunction* Function = FindObject<UFunction>(nullptr, L"/Script/FortniteGame.FortDecoTool:ServerCreateBuildingAndSpawnDeco");
+    if (!Function)
+    {
+        return false;
+    }
+    const int32_t Index = ImplementationIndex(Function);
+    const uintptr_t Implementation = VTableEntry(CdoVTable(L"/Script/FortniteGame.FortDecoTool"), Index);
+    if (!Implementation || IsStubFunction(Implementation))
+    {
+        Log::Error(L"Finder: AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation not found or stripped (slot {}), so a trap placed with no floor gets none", Index);
+        return false;
+    }
+    std::vector<uintptr_t> StubCalls;
+    for (const auto& [Site, Target] : Finder::DecodedDirectCalls(Implementation))
+    {
+        if (IsStubFunction(Target))
+        {
+            StubCalls.push_back(Site);
+        }
+    }
+    if (StubCalls.size() != 1)
+    {
+        Log::Info(L"Finder: AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation (0x{:X}) has {} stub calls, none restored", Implementation - Finder::ImageBase(), StubCalls.size());
+        return false;
+    }
+
+    Natives::AFortDecoTool_ServerCreateBuildingAndSpawnDeco_CreateBuildingCall = reinterpret_cast<uint8_t*>(StubCalls[0]);
+    Log::Info(L"Finder: AFortDecoTool::ServerCreateBuildingAndSpawnDeco_Implementation (slot 0x{:X}, 0x{:X}) makes the trap's piece with a stripped call at 0x{:X}", Index,
+        Implementation - Finder::ImageBase(), StubCalls[0] - Finder::ImageBase());
+    return true;
+}
+
 bool Finder::ResolveScoreBuildingConstructionLive()
 {
     static bool bSearched = false;

@@ -197,7 +197,7 @@ namespace
 
     // From 7.40 (CL-5046157) the quickbars are the client's alone, so the server has no focused slot: the item a full
     // backpack gives up is the one the client names (ServerHandlePickupWithSwap's Swap, kept in the pickup's
-    // PickupLocationData.PickupGuid). It is dropped as a focused slot's item is where the server has quickbars, under
+    // PickupLocationData.PickupGuid), or else the held one (GivePickupToPlayer). It is dropped as a focused slot's item is where the server has quickbars, under
     // the same rules: Battle Royale, an item with no room at all, one that can be dropped. True when it was dropped.
     // bHoldSwap: the player held interact (7.40's hold to swap, AFortPlayerControllerAthena::bTryPickupSwap), so the
     // held item goes even when the backpack has room; a pickup of the held item's own definition stacks instead.
@@ -1156,20 +1156,31 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
     const UFortItemDefinition* DroppedDefinition = nullptr;
     // The item the client asked to give up for this pickup (ServerHandlePickupWithSwap), where the build keeps it.
     FGuid RequestedSwap = FFortPickupLocationData::HasPickupGuid() ? static_cast<FFortPickupLocationData&>(PickupLocationData).PickupGuid : FGuid();
-    // 7.40's hold to swap (7.30 to 8.00 declare it): holding interact on a pickup sends ServerSetShouldSwapPickup(true)
-    // (8.00 CL-5203069 0xDDA9C0), and releasing it false (0xDC6690). Its _Implementation is intact (0xDC97D0: it sets
-    // AFortPlayerControllerAthena::bTryPickupSwap), but nothing in the exe reads the flag: the server's pickup handling
-    // that did is stripped with ServerHandlePickup. The item given up is the one in the player's hands, the pawn's
-    // current weapon's item (the quickbars are the client's alone, so the server has no focused slot).
     bool bHoldSwap = false;
-    if (!RequestedSwap.IsValid() && !AFortPlayerController::HasQuickBars() && AFortPlayerControllerAthena::HasTryPickupSwap())
+    if (!AFortPlayerController::HasQuickBars())
     {
-        AFortPlayerControllerAthena* AthenaController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(PlayerController));
-        const AFortWeapon* HeldWeapon = AthenaController && AthenaController->bTryPickupSwap && Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
-        if (HeldWeapon)
+        // 7.40 (CL-5046157) gives every pickup its own PickupGuid: AFortPickup's constructor (0x1199BB0) calls
+        // FGuid::NewGuid (0x19710D0) for it, and it keys the pawn's PickupDirectionData (0x1380A90). Only
+        // ServerHandlePickupWithSwap puts an item's guid there, so a guid that names none of the player's items is the
+        // pickup's own, and a plain interact took nothing in its place: a full backpack tossed every pickup back down (#548).
+        AFortInventory* Inventory = PlayerController->WorldInventory;
+        if (RequestedSwap.IsValid() && (!Inventory || !Inventory->FindWorldItem(RequestedSwap)))
+        {
+            RequestedSwap = FGuid();
+        }
+        // Without a named item, the one given up is the one in the player's hands, the pawn's current weapon's item (the
+        // quickbars are the client's alone, so the server has no focused slot). A plain interact gives it up only when
+        // the pickup has no room. 7.40's hold to swap (7.30 to 8.00 declare it): holding interact sends
+        // ServerSetShouldSwapPickup(true) (8.00 CL-5203069 0xDDA9C0), and releasing it false (0xDC6690); its
+        // _Implementation is intact (0xDC97D0: it sets AFortPlayerControllerAthena::bTryPickupSwap), but nothing in the
+        // exe reads the flag: the server's pickup handling that did is stripped with ServerHandlePickup. Held, the item
+        // goes even when the backpack has room.
+        const AFortWeapon* HeldWeapon = Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        if (!RequestedSwap.IsValid() && HeldWeapon)
         {
             RequestedSwap = HeldWeapon->ItemEntryGuid;
-            bHoldSwap = true;
+            AFortPlayerControllerAthena* AthenaController = AFortPlayerControllerAthena::HasTryPickupSwap() ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(PlayerController)) : nullptr;
+            bHoldSwap = AthenaController && AthenaController->bTryPickupSwap;
         }
     }
     bool bRequestedSwapDone = false;

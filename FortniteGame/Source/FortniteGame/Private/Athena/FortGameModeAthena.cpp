@@ -3705,13 +3705,15 @@ void AFortGameModeAthena::ScoreBuildingConstructionHK(AFortGameModeAthena* This,
     // that isn't: anyone could edit anyone's walls (#120). The game mode scores the piece right after (0x825E72, 1.8
     // 0x8463D2) with its builder, whose team is the one CanBePlayerEdited reads for the editor (the controller's team is
     // its player state's, 0x80CE10, Athena's is TeamIndex, 0x42FE70). An edit's new piece copies the old one's team
-    // (ReplaceBuildingActor, 0x47D5D0). Save the World's game modes keep their slot.
+    // (ReplaceBuildingActor, 0x47D5D0). Save the World's game modes keep their slot. 7.40 (CL-5046157) reads a building's
+    // team from its new replicated TeamIndex, which writing Team alone left at 0, so CanBePlayerEdited (0xE8EF90) skipped
+    // its team check and anyone could edit anyone's walls again (#536): ABuildingActor::SetTeam writes both there.
     AFortPlayerStateAthena* PlayerState = Builder ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(Builder->PlayerState))) : nullptr;
     if (Building && Building->Role == ROLE_Authority && Building->Team == EFortTeam::GetSpectator())
     {
         if (PlayerState)
         {
-            Building->Team = PlayerState->TeamIndex;
+            Building->SetTeam(PlayerState->TeamIndex);
         }
         else
         {

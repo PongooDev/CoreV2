@@ -159,6 +159,21 @@ AFortPlayerState* ABuildingActor::GetOwningPlayerState() const
     return Function && Params.Call(const_cast<ABuildingActor*>(this)) ? Params.Take<AFortPlayerState*>(L"ReturnValue") : nullptr;
 }
 
+void ABuildingActor::SetTeam(uint8_t InTeam)
+{
+    if (UFunction* Function = FindStaticFunction_SetTeam())
+    {
+        Reflection::FParams Params(Function, true);
+        Params.Set(L"InTeam", InTeam);
+        Params.Call(this);
+        return;
+    }
+    if (Role == ROLE_Authority)
+    {
+        Team = EFortTeam{ InTeam };
+    }
+}
+
 bool ABuildingActor::CountsTowardStructureLimit() const
 {
     if (!Member_bFireBuiltAndDestroyedEvents.IsAvailable() || !Member_bPlayerPlaced.IsAvailable() || !Member_bDestroyed.IsAvailable())

@@ -44,13 +44,15 @@ class ABuildingActor : public AActor
     DefineUFunction(GetMaxHealth)
     DefineUFunction(GetCentroid)
     DefineUFunction(GetOwningPlayerState)
+    DefineUFunction(SetTeam)
 
 public:
     DefineUProperty(int32_t, OwnerPersistentID)
     // Spectator (the constructor's, 1.7.2 0x40B548) until the building gets one. A piece's team decides who may edit it:
     // ABuildingSMActor's CanBePlayerEdited (1.7.2 0x461EF0, 1.8 0x4646F0) lets only the editor's own team edit it, anyone
     // when it is Spectator. A trap's targets are filtered by it: a pawn on its team is friendly (AFortGameState 0x583360),
-    // any other an enemy; no team is friendly to everyone (see FFortTargetFilter).
+    // any other an enemy; no team is friendly to everyone (see FFortTargetFilter). 7.40 (CL-5046157) adds the replicated
+    // TeamIndex next to it, which is what the building's team interface reads: give a building its team with SetTeam.
     DefineUProperty(EFortTeam, Team)
     // UFortAbilitySystemComponent: a trap's holds the abilities its AbilitySet grants.
     DefineUProperty(UAbilitySystemComponent*, AbilitySystemComponent)
@@ -87,6 +89,13 @@ public:
     // OwnerPersistentID (a player who left: the game mode's inactive ones, by their CachedPreviousWorldPlayerId). A
     // reflected native (7.10 0xD11970, 7.20 0xDED150); null without an owner, or on a build without the function.
     AFortPlayerState* GetOwningPlayerState() const;
+    // Gives the building its team, on the server. 7.40 (CL-5046157) splits a building's team in two: Team (0x531, no
+    // longer replicated) and the replicated uint8 TeamIndex (0x532). The building's team interface (GetTeam, 0xE38B80:
+    // movzx eax, byte ptr [rcx+1F2h] off the interface at +0x340) reads TeamIndex, and so do CanBePlayerEdited
+    // (0xE8EF90, which compares it with the editor's team only when it isn't 0) and InitializeBuildingActor (0xE3BD20).
+    // Epic's virtual SetTeam (slot 0x126, 0xE4C820) writes both on the authority, and 7.40 reflects it (execSetTeam,
+    // 0x16027B0), so it is called there. Before 7.40 Team is the replicated one and is written as it was.
+    void SetTeam(uint8_t InTeam);
 
     void PostInitializeComponents();
     static void HookVTables();

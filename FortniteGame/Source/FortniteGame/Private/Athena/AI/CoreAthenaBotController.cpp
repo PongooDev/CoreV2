@@ -7301,7 +7301,7 @@ bool FCoreAthenaBotController::BuildPiece(const FCoreAthenaBotBuildDescriptor& D
     // edit it, and its shots and its teammates' pass it as their own.
     if (PlayerState && Building->Team == EFortTeam::GetSpectator())
     {
-        Building->Team = PlayerState->TeamIndex;
+        Building->SetTeam(PlayerState->TeamIndex);
     }
     UAthenaNavSystem::AddDirtyArea(Building);
     Materials[Kind] -= BuildingPieceCost;

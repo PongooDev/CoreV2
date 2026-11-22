@@ -145,6 +145,8 @@ class UFortQuestManager : public UObject
     DefineUFunction(GetSourceAndContextTags)
     DefineUFunction(GetQuestWithDefinition)
     DefineUFunction(SendComplexCustomStatEvent)
+    // 8.00 on: sends the quest owner's client Client_DisplayQuestUpdate_Self, which shows the challenge toast.
+    DefineUFunction(SelfCompletedUpdatedQuest)
 
 public:
     // The quests the manager's profile holds, as quest items (the server's copy for a player).

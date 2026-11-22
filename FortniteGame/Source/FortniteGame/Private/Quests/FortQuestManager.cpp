@@ -117,58 +117,6 @@ namespace
     }
 }
 
-namespace
-{
-    // An objective's new count for the player's client (AFortPlayerController::UpdatedObjectiveStats, replicated: its
-    // OnRep shows the quest update). Quest is the quest's definition.
-    struct FFortUpdatedObjectiveStat
-    {
-        DefineUnrealStruct(FFortUpdatedObjectiveStat, FortniteGame)
-        DefineUProperty(UFortItemDefinition*, Quest)
-        DefineUProperty(FName, BackendName)
-        DefineUProperty(int32_t, StatValue)
-    };
-
-    class AFortPlayerControllerQuests : public UObject
-    {
-        DefineUnrealClass(AFortPlayerController, FortniteGame)
-
-    public:
-        DefineUStructArrayProperty(FFortUpdatedObjectiveStat, UpdatedObjectiveStats)
-        static bool HasUpdatedObjectiveStats() { return Member_UpdatedObjectiveStats.IsAvailable(); }
-    };
-
-    // The objective's new count shows on the player's client, as SendStatEventWithTags gives it (1.9 0x866A00, 1.9.1
-    // 0x869010: the entry for the quest and objective, else a new one). 4.4.2 keeps it unchanged (0xFC0690: find by Quest
-    // and BackendName, else add, then StatValue), and its client shows the toast again (gone on 4.0-4.2, #320): the
-    // OnRep (0xFA5A30) has the Athena quest manager re-init its quests from the update (0x1008000), whose quest items
-    // take the replicated StatValue over the profile's count (0x101B430 reads it through 0xF7DE50).
-    void ShowObjectiveCount(AFortPlayerController* PlayerController, UFortItemDefinition* QuestDefinition, FName BackendName, int32_t Count)
-    {
-        if (!PlayerController || !AFortPlayerControllerQuests::HasUpdatedObjectiveStats())
-        {
-            return;
-        }
-        TStructArray<FFortUpdatedObjectiveStat>& Updated = reinterpret_cast<AFortPlayerControllerQuests*>(PlayerController)->UpdatedObjectiveStats;
-        FFortUpdatedObjectiveStat* Stat = nullptr;
-        for (int32_t Index = 0; Index < Updated.Num() && !Stat; ++Index)
-        {
-            if (Updated[Index].Quest == QuestDefinition && Updated[Index].BackendName == BackendName)
-            {
-                Stat = &Updated[Index];
-            }
-        }
-        if (!Stat)
-        {
-            Stat = &Updated.AddDefaulted();
-            Stat->Quest = QuestDefinition;
-            Stat->BackendName = BackendName;
-        }
-        Stat->StatValue = Count;
-        PlayerController->ForceNetUpdate();
-    }
-}
-
 #if WITH_SERVER_CODE
 // Core's SendStatEventWithTags and SaveStatEvents for builds that strip them (1.10), as 1.9.1's are (0x8CAC40, 0x8CBE80).
 namespace
@@ -206,6 +154,8 @@ namespace
         // The count that completes the objective.
         DefineUProperty(int32_t, Count)
         DefineUProperty(int32_t, Stage)
+        DefineBitfieldUProperty(bHidden)
+        static bool HasHidden() { return Member_bHidden.IsAvailable(); }
     };
 
     class UFortQuestItemDefinitionObjectives : public UFortItemDefinition
@@ -224,6 +174,93 @@ namespace
         static bool HasObjectiveCompletionCount() { return Member_ObjectiveCompletionCount.IsAvailable(); }
         static bool HasUpdateObjectiveOncePerMatch() { return Member_bAthenaUpdateObjectiveOncePerMatch.IsAvailable(); }
     };
+
+    // An objective's new count for the player's client (AFortPlayerController::UpdatedObjectiveStats, replicated: its
+    // OnRep shows the quest update). Quest is the quest's definition.
+    struct FFortUpdatedObjectiveStat
+    {
+        DefineUnrealStruct(FFortUpdatedObjectiveStat, FortniteGame)
+        DefineUProperty(UFortItemDefinition*, Quest)
+        DefineUProperty(FName, BackendName)
+        DefineUProperty(int32_t, StatValue)
+    };
+
+    class AFortPlayerControllerQuests : public UObject
+    {
+        DefineUnrealClass(AFortPlayerController, FortniteGame)
+
+    public:
+        DefineUStructArrayProperty(FFortUpdatedObjectiveStat, UpdatedObjectiveStats)
+        static bool HasUpdatedObjectiveStats() { return Member_UpdatedObjectiveStats.IsAvailable(); }
+    };
+
+    // The objective's new count shows on the player's client, as SendStatEventWithTags gives it (1.9 0x866A00, 1.9.1
+    // 0x869010: the entry for the quest and objective, else a new one). 4.4.2 keeps it unchanged (0xFC0690: find by Quest
+    // and BackendName, else add, then StatValue), and its client shows the toast again (gone on 4.0-4.2, #320): the
+    // OnRep (0xFA5A30) has the Athena quest manager re-init its quests from the update (0x1008000), whose quest items
+    // take the replicated StatValue over the profile's count (0x101B430 reads it through 0xF7DE50).
+    // 8.00 (CL-5203069) no longer toasts from the OnRep (0x1802830 only re-inits the quests): its setter (0x147C2E0)
+    // also broadcasts the controller's unreflected objective-changes delegate (+0x860, 21.40's OnQuestObjectiveChanges)
+    // when the count rose and the objective isn't bHidden, and the quest manager's SelfCompletedUpdatedQuest (0x14E8FF0)
+    // sends Client_DisplayQuestUpdate_Self, whose client side (0xDA08E0) shows the toast. The server code binding that
+    // delegate is compiled out of the build, so Core calls the bound UFunction where the setter broadcasts.
+    void ShowObjectiveCount(UFortQuestManager* QuestManager, AFortPlayerController* PlayerController, UFortQuestItem* Quest, FName BackendName, int32_t Count)
+    {
+        if (!PlayerController || !Quest || !AFortPlayerControllerQuests::HasUpdatedObjectiveStats())
+        {
+            return;
+        }
+        UFortItemDefinition* QuestDefinition = Quest->GetQuestDefinition();
+        TStructArray<FFortUpdatedObjectiveStat>& Updated = reinterpret_cast<AFortPlayerControllerQuests*>(PlayerController)->UpdatedObjectiveStats;
+        FFortUpdatedObjectiveStat* Stat = nullptr;
+        for (int32_t Index = 0; Index < Updated.Num() && !Stat; ++Index)
+        {
+            if (Updated[Index].Quest == QuestDefinition && Updated[Index].BackendName == BackendName)
+            {
+                Stat = &Updated[Index];
+            }
+        }
+        if (!Stat)
+        {
+            Stat = &Updated.AddDefaulted();
+            Stat->Quest = QuestDefinition;
+            Stat->BackendName = BackendName;
+        }
+        const int32_t DeltaChange = Count - Stat->StatValue;
+        Stat->StatValue = Count;
+        PlayerController->ForceNetUpdate();
+
+        UFunction* SelfCompletedUpdatedQuest = UFortQuestManager::FindStaticFunction_SelfCompletedUpdatedQuest();
+        UFortQuestItemDefinitionObjectives* Definition = Cast<UFortQuestItemDefinitionObjectives>(QuestDefinition);
+        if (!SelfCompletedUpdatedQuest || !QuestManager || DeltaChange <= 0 || !Definition)
+        {
+            return;
+        }
+        TStructArray<FFortMcpQuestObjectiveInfo>& Objectives = Definition->Objectives;
+        for (int32_t Index = 0; Index < Objectives.Num(); ++Index)
+        {
+            FFortMcpQuestObjectiveInfo& Objective = Objectives[Index];
+            if (Objective.BackendName != BackendName)
+            {
+                continue;
+            }
+            if (FFortMcpQuestObjectiveInfo::HasHidden() && Objective.bHidden)
+            {
+                return;
+            }
+            const uint8_t State = static_cast<uint8_t>(Quest->quest_state);
+            Reflection::FParams Params(SelfCompletedUpdatedQuest, true);
+            Params.Set(L"QuestOwner", PlayerController);
+            Params.Set(L"QuestDef", static_cast<const UFortItemDefinition*>(QuestDefinition));
+            Params.Set(L"BackendName", BackendName);
+            Params.Set(L"CompletionCount", Count);
+            Params.Set(L"DeltaChange", DeltaChange);
+            Params.Set(L"ObjectiveCompleted", static_cast<int32_t>(Objective.Count) <= Count);
+            Params.Set(L"QuestCompleted", State == static_cast<uint8_t>(EFortQuestState::GetCompleted()) || State == static_cast<uint8_t>(EFortQuestState::GetClaimed()));
+            Params.Call(QuestManager);
+            return;
+        }
+    }
 
     class UFortMcpProfileSubgame : public UObject
     {
@@ -1225,7 +1262,7 @@ namespace
                     NewCount = Required;
                     bLastEventCompletedObjective = true;
                 }
-                ShowObjectiveCount(PlayerController, Definition, BackendName, NewCount);
+                ShowObjectiveCount(This, PlayerController, Quest, BackendName, NewCount);
             }
         }
 
@@ -1286,7 +1323,7 @@ int32_t UFortQuestManager::AdvanceObjective(AFortPlayerController* PlayerControl
     SaveProgress(this);
 
     // The objective's new count for the client.
-    ShowObjectiveCount(PlayerController, Quest->GetQuestDefinition(), Objective->BackendName, NewCount);
+    ShowObjectiveCount(this, PlayerController, Quest, Objective->BackendName, NewCount);
     return NewCount;
 #else
     return -1;

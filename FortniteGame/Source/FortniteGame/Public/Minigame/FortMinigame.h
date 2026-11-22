@@ -104,6 +104,10 @@ public:
     DefineUProperty(FMulticastScriptDelegate, MinigameStartedDelegate)
     DefineUProperty(FMulticastScriptDelegate, MinigameEndedDelegate)
     static bool HasStartedAndEndedDelegates() { return Member_MinigameStartedDelegate.IsAvailable() && Member_MinigameEndedDelegate.IsAvailable(); }
+    // 7.40+: broadcast with the pawn by OnClientFinishTeleportingForMinigame (8.00 0x1228AD0, at 0x1228BFE) once a
+    // player's teleport for the game ends. The Creative devices bind to it for a game's start: the Game Starting
+    // Inventory's InitialInventorySetup (Trap_Floor_GameStartingInventory) gives its items there.
+    DefineUProperty(FMulticastScriptDelegate, OnPawnTeleportedForMinigame)
 
     // Restored native (7.00 strips it: its exec is the shared empty one the build gives every server-only native): at
     // the game's start each player goes to their start (DetermineSpawnLocation: the game's start pads for their team, the

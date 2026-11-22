@@ -27,6 +27,7 @@
 #include "UObject/UObjectIterator.h"
 #include "UObject/WeakObjectPtr.h"
 
+#include <algorithm>
 #include <format>
 #include <unordered_map>
 #include <utility>
@@ -35,6 +36,10 @@
 namespace
 {
     TWeakObjectPtr<UWorld> InventoryResetWorld;
+
+    // 7.40+ (#542): the players a game's start reset as it sent them to their start, which its InProgress reset skips
+    // (RespawnMinigamePlayers, ClearPlayerInventories).
+    std::vector<std::pair<TWeakObjectPtr<AFortMinigame>, TWeakObjectPtr<AFortPlayerControllerAthena>>> PlayersResetForStart;
 
     // The build's shared empty exec: the one exec many UFunctions have is the empty native the build gives the
     // server-only UFunctions it strips (7.00 0x1470620, 7.10 0x14BB380 for those without parameters and 0x14D99A0 for
@@ -194,18 +199,33 @@ void AFortMinigame::ClearPlayerInventories()
         return;
     }
     int32_t Cleared = 0;
+    int32_t ResetAtStart = 0;
+    const bool bInProgress = Member_CurrentState.IsAvailable() && CurrentState == EFortMinigameState::GetInProgress();
     const TArray<AFortPlayerState*> Players = GetParticipatingPlayers();
     for (AFortPlayerState* PlayerState : Players)
     {
         AActor* Owner = PlayerState ? reinterpret_cast<AActor*>(PlayerState)->GetOwner() : nullptr;
         AFortPlayerControllerAthena* Controller = Owner ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Owner)) : nullptr;
-        if (Controller)
+        if (!Controller)
         {
-            ClearPlayerInventory(Controller);
-            ++Cleared;
+            continue;
         }
+        // Reset already as the start sent them (7.40+): what the start's devices gave them on arrival stays.
+        const bool bResetAtStart = bInProgress && std::find_if(PlayersResetForStart.begin(), PlayersResetForStart.end(), [this, Controller](const auto& Entry)
+        {
+            return Entry.first.Get() == this && Entry.second.Get() == Controller;
+        }) != PlayersResetForStart.end();
+        if (bResetAtStart)
+        {
+            ++ResetAtStart;
+            continue;
+        }
+        ClearPlayerInventory(Controller);
+        ++Cleared;
     }
-    Log::Info(L"Minigame: {} resets the inventories of {} of its {} players", GetName().ToStdString(), Cleared, Players.Num());
+    std::erase_if(PlayersResetForStart, [this](const auto& Entry) { return !Entry.first.IsValid() || Entry.first.Get() == this; });
+    Log::Info(L"Minigame: {} resets the inventories of {} of its {} players{}", GetName().ToStdString(), Cleared, Players.Num(),
+        ResetAtStart ? std::format(L" ({} reset as they were sent to their start)", ResetAtStart) : std::wstring());
 #endif
 }
 
@@ -397,6 +417,18 @@ void AFortMinigame::RespawnMinigamePlayers()
         {
             PutPlayerIntoStasis(Pawn);
         }
+        // 7.40+ with OnPawnTeleportedForMinigame (#542): the start's reset comes as the player is sent, before the arrival,
+        // where the game's devices give a game's starting items (the Game Starting Inventory's InitialInventorySetup:
+        // its TryGiveAllItemsToPlayer clears the player's droppable items itself, then gives its own). Reset at
+        // InProgress instead, after the warmup's arrival, those items went. Core's: Epic's ClearPlayerInventories has
+        // no caller left (7.10 BindWorld above), so its moment is Core's choice.
+        AFortPlayerControllerAthena* AthenaController = bClientAcknowledged && Member_OnPawnTeleportedForMinigame.IsAvailable()
+            ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Controller)) : nullptr;
+        if (AthenaController && ClearPlayerInventoriesFunction)
+        {
+            ClearPlayerInventory(AthenaController);
+            PlayersResetForStart.emplace_back(this, AthenaController);
+        }
         // 7.40: held where they stand through the travel screen (a skydiver is held as it arrives, DelayedTeleportPlayer).
         if (bClientAcknowledged && StartTeleportForMinigameStart(Controller, Pawn, Location, Rotation, !bSkydive))
         {
@@ -579,6 +611,16 @@ void AFortMinigame::DelayedTeleportPlayer(AFortPlayerControllerAthena* PlayerCon
     else
     {
         ClearTeleportForMinigame(PlayerPawn);
+        // Core's: the ground's end tells the game the player is there too, as OnClientFinishTeleportingForMinigame does
+        // for the air (its last step, OnPawnTeleportedForMinigame with the pawn), without the skydive. The game's own
+        // devices need it for a game that starts on the spawn pads: the Game Starting Inventory gives its items from it
+        // (InitialInventorySetup, which checks IsInProgress: Warmup or InProgress, 8.00 0x17A8945), and ClearTeleport
+        // broadcasts nothing (#542).
+        if (bMoved && Member_OnPawnTeleportedForMinigame.IsAvailable())
+        {
+            AFortPlayerPawn* TeleportedPawn = PlayerPawn;
+            OnPawnTeleportedForMinigame.ProcessMulticastDelegate(&TeleportedPawn);
+        }
     }
     // A skydiver is held in the sky for the rest of the warmup (#502), after its skydive starts. 7.40's
     // PutPlayerIntoStasis (0x11E4610) has no Warmup check of its own (7.20's had one), and the warmup's end releases only

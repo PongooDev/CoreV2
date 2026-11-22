@@ -126,3 +126,30 @@ public:
     // at NumberToDrop each, all spawned at the pawn. Core's.
     void DropBotItemsOnDeath(AFortPawn* DeadPawn, const std::map<UFortItemDefinition*, int32_t>& Ammo) const;
 };
+
+// A gravity mutator's movement values (FGravityMovementData; 0x14 bytes in every SDK from 6.01 to 8.00).
+struct FGravityMovementData
+{
+    float GravityZScale = 1.0f;
+    float VehicleGravityZScale = 1.0f;
+    float JumpZVelocityOverride = 0.0f;
+    float JumpHorizontalAccelerationOverride = 0.0f;
+    float JumpHorizontalVelocityOverride = 0.0f;
+};
+static_assert(sizeof(FGravityMovementData) == 0x14);
+
+// The playlist's low gravity (6.01 on; 7.30's One Shot, Playlist_Low_Squads: ModifierDefinition_Low's Mutator_Low_C,
+// CustomGravityData { 0.377, 0.75, 896, 550, 1100 }). The game state asks it for the gravity a new pawn gets.
+class AFortAthenaMutator_GravityMultiplier : public AFortAthenaMutator
+{
+    DefineUnrealClass(AFortAthenaMutator_GravityMultiplier, FortniteGame)
+
+public:
+    DefineUProperty(int32_t, GravityOverride)
+    DefineUProperty(TArray<FGravityMovementData>, CustomGravityData)
+    static bool IsAvailable() { return StaticClass() && Member_GravityOverride.IsAvailable() && Member_CustomGravityData.IsAvailable(); }
+
+    // Its answer to the game state's gravity question (7.30 CL-4834550 0xDD0DE0, its virtual at +0x7A8): the
+    // CustomGravityData entry GravityOverride picks, none when the index is out of range.
+    bool GetGravityData(FGravityMovementData& OutData) const;
+};

@@ -1634,6 +1634,7 @@ bool FCoreAthenaBotController::SpawnPawnAt(const FVector& Location, float Yaw, b
     }
     LastStormHealth = -1.0f;
     ApplyStartingHealth();
+    ApplyGameStateModifiers(Pawn);
     // The warmup island hurts nobody: AFortGameModeAthena's restart of a player in the warmup turns the new pawn's
     // bCanBeDamaged off (3.1 0x9B3FD7, GamePhase == Warmup), so hits show their numbers and take nothing. The pawn the
     // bot leaves the bus with is a new one, which can be damaged.
@@ -1797,6 +1798,63 @@ void FCoreAthenaBotController::ApplyStartingHealth()
     Pawn->SetHealth(Settings.StartingHealth);
     Pawn->ForceMaxShield(100.0f);
     Pawn->SetShield(Settings.StartingShield);
+}
+
+void FCoreAthenaBotController::ApplyGameStateModifiers(AFortPlayerPawnAthena* Pawn)
+{
+#if WITH_SERVER_CODE
+    // What a player's new pawn gets from the match's playlist and a bot's didn't (CoreV2 #534, 7.30 CL-4834550 One Shot,
+    // Playlist_Low_Squads): a bot's pawn is spawned and possessed by Core, not restarted by the game mode, and its
+    // controller is a stock AAIController.
+    UWorld* const World = Pawn ? Pawn->GetWorld() : nullptr;
+    UObject* const GameStateObject = World ? reinterpret_cast<UObject*>(World->GetGameState()) : nullptr;
+    if (!GameStateObject)
+    {
+        return;
+    }
+    // The playlist's ModifierList: its persistent gameplay effects (One Shot's ModifierDefinition_Low:
+    // GE_Low_SetHealth, MaxHealth -50 from AthenaCompositeGD_Low's Low.HealthReduction, and GE_Low_SetFallImmune; both
+    // bApplyToPlayerPawns). A player's pawn has them from Core's call in AFortPlayerController::Possess (#399), the
+    // stripped player pawn call of AFortGameStateZone::OnAbilitySystemInterfaceReadyForPersistentGameplayEffects; an
+    // AI controller's possession runs none of it. After the admin panel's starting health, which they lower: MaxHealth's
+    // base set again makes its aggregator count the effect's modifier (ForceMaxHealth above set only its current value),
+    // and the health comes down to it.
+    AFortGameStateZone* const GameStateZone = Cast<AFortGameStateZone>(GameStateObject);
+    UAbilitySystemComponent* const AbilitySystem = static_cast<UAbilitySystemComponent*>(Pawn->AbilitySystemComponent);
+    static UClass* const AbilitySystemInterfaceClass = FindObject<UClass>(nullptr, L"/Script/GameplayAbilities.AbilitySystemInterface");
+    if (GameStateZone && AbilitySystem && AbilitySystemInterfaceClass && Finder::ResolvePersistentGameplayEffectsLive())
+    {
+        void* const PawnInterface = Natives::UObject_GetInterfaceAddress(reinterpret_cast<UObject*>(Pawn), AbilitySystemInterfaceClass);
+        if (PawnInterface && GameStateZone->OnAbilitySystemInterfaceReadyForPersistentGameplayEffects(static_cast<IAbilitySystemInterface*>(PawnInterface)))
+        {
+            Pawn->SetMaxHealth(100.0f);
+            Pawn->SetHealth(Manager->GetSettings().StartingHealth);
+            static int32_t LoggedModifiers = 0;
+            if (LoggedModifiers < 2)
+            {
+                ++LoggedModifiers;
+                Log::Info(L"Battle Royale bots: {}'s pawn has the game state's gameplay modifiers (health {:.0f} of {:.0f})", BotName, Pawn->GetHealth(), Pawn->GetMaxHealth());
+            }
+        }
+    }
+    // The playlist's gravity mutator (One Shot's Mutator_Low_C), as AFortGameModeAthena::FinishRestartPlayer (0xD1A0B0)
+    // gives a restarted player's pawn: the game state's answer (0xD4D100) through the pawn's SetGravityJumpMultipliers
+    // (0x139B190). Passed as 0xD1A2B3..0xD1A2E4 pass it: the gravity, the vehicle gravity, the jump's Z, then the data's
+    // JumpHorizontalVelocityOverride and JumpHorizontalAccelerationOverride, in that order.
+    AFortGameStateAthena* const GameState = Cast<AFortGameStateAthena>(GameStateObject);
+    FGravityMovementData Gravity;
+    if (GameState && GameState->GetMutatorGravityData(Gravity)
+        && Pawn->SetGravityJumpMultipliers(Gravity.GravityZScale, Gravity.VehicleGravityZScale, Gravity.JumpZVelocityOverride, Gravity.JumpHorizontalVelocityOverride, Gravity.JumpHorizontalAccelerationOverride))
+    {
+        static int32_t LoggedGravity = 0;
+        if (LoggedGravity < 2)
+        {
+            ++LoggedGravity;
+            Log::Info(L"Battle Royale bots: {}'s pawn has the playlist's gravity (x{:.3f}, vehicles x{:.2f}, jump {:.0f}, {:.0f}, {:.0f})", BotName, Gravity.GravityZScale, Gravity.VehicleGravityZScale,
+                Gravity.JumpZVelocityOverride, Gravity.JumpHorizontalVelocityOverride, Gravity.JumpHorizontalAccelerationOverride);
+        }
+    }
+#endif
 }
 
 void FCoreAthenaBotController::EnterAircraft(AFortAthenaAircraft* InAircraft, float InJumpTime, float InLatestJumpTime)

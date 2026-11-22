@@ -643,6 +643,9 @@ private:
     // What the playlist's AFortAthenaMutator_ItemDropOnDeath leaves where a player who comes back died (CoreV2 #537).
     void DropItemsOnDeathBeforeRespawning();
     void ApplyStartingHealth();
+    // A new pawn's share of the match's playlist that the game gives a player's at its restart and possession: the game
+    // state's persistent gameplay modifiers and its gravity mutator's gravity (CoreV2 #534). Nothing the build lacks.
+    void ApplyGameStateModifiers(AFortPlayerPawnAthena* Pawn);
     // The bot stops shooting: the shot's fire input is let go (EndShot) and a held fire cue goes (RemoveWeaponFireCue).
     void StopFiring();
     // One shot's fire input let go (the pawn's PawnStopFire, the game's fire ability's input release). A gun held

@@ -11,6 +11,7 @@ class AFortPlayerStateAthena;
 class AFortSafeZoneIndicator;
 class AFortSpecialActorReplicationInfo;
 class UFortMutatorListComponent;
+struct FGravityMovementData;
 
 class EAthenaGamePhase
 {
@@ -253,6 +254,10 @@ public:
     DefineUProperty(UFortMutatorListComponent*, MutatorListComponent)
     static bool HasMutatorListComponent() { return Member_MutatorListComponent.IsAvailable(); }
     TArray<UObject*>* GetGameplayMutatorList() const;
+    // The gravity a new pawn gets (7.30 CL-4834550 0xD4D100, which AFortGameModeAthena::FinishRestartPlayer, 0xD1A0B0,
+    // asks before it gives a restarted player's pawn SetGravityJumpMultipliers): the first of the list's mutators that
+    // answers, here its active gravity mutators. False when none does, or the build has none.
+    bool GetMutatorGravityData(FGravityMovementData& OutData) const;
     // From 6.30 (Food Fight's OpposingAirCraftForEachTeam): a bus path for each of the playlist's teams, in their order,
     // and the line between them, along which the Barrier mutator's wall stands. Replicated.
     DefineUStructArrayProperty(FAircraftFlightInfo, TeamFlightPaths)

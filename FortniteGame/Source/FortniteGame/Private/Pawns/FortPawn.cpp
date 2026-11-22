@@ -150,6 +150,18 @@ bool AFortPawn::SetMaxHealth(float NewMaxHealth)
     return CallFloatSetter(this, FindStaticFunction_SetMaxHealth(), NewMaxHealth);
 }
 
+bool AFortPawn::SetGravityJumpMultipliers(float NewGravityVal, float NewVehicleGravityVal, float NewJumpZ, float NewJumpHorizontalAcceleration, float NewJumpHorizontalVelocity)
+{
+    UFunction* const Function = FindStaticFunction_SetGravityJumpMultipliers();
+    if (!Function)
+    {
+        return false;
+    }
+    Reflection::FParams Params(Function);
+    return Params.Set(L"NewGravityVal", NewGravityVal) && Params.Set(L"NewVehicleGravityVal", NewVehicleGravityVal) && Params.Set(L"NewJumpZ", NewJumpZ)
+        && Params.Set(L"NewJumpHorizontalAcceleration", NewJumpHorizontalAcceleration) && Params.Set(L"NewJumpHorizontalVelocity", NewJumpHorizontalVelocity) && Params.Call(this);
+}
+
 bool AFortPawn::ForceMaxHealth(float NewMaxHealth)
 {
     // The aggregator works the current value out again only when MaxHealth's effects or base change; the property

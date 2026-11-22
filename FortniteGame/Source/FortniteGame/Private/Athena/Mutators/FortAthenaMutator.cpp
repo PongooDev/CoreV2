@@ -216,3 +216,19 @@ void AFortAthenaMutator_ItemDropOnDeath::DropBotItemsOnDeath(AFortPawn* DeadPawn
     Log::Info(L"ItemDropOnDeath: {} leaves {} stacks of ammo and items where it died", reinterpret_cast<UObject*>(DeadPawn)->GetName().ToStdString(), NumDrops);
 #endif
 }
+
+bool AFortAthenaMutator_GravityMultiplier::GetGravityData(FGravityMovementData& OutData) const
+{
+    if (!IsAvailable())
+    {
+        return false;
+    }
+    const TArray<FGravityMovementData>& Data = CustomGravityData;
+    const int32_t Index = GravityOverride;
+    if (Index < 0 || Index >= Data.Num())
+    {
+        return false;
+    }
+    OutData = Data[Index];
+    return true;
+}

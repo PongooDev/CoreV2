@@ -55,6 +55,7 @@ class AFortPawn : public APawn
     DefineUFunction(GetMaxShield)
     DefineUFunction(SetHealth)
     DefineUFunction(SetMaxHealth)
+    DefineUFunction(SetGravityJumpMultipliers)
 
 public:
     DefineUProperty(AFortWeapon*, CurrentWeapon)
@@ -139,6 +140,10 @@ public:
     // until the effects on MaxHealth or its base change again. Health's clamp follows it, so health can reach it, and a
     // health above it comes down to it. False without a health set.
     bool ForceMaxHealth(float NewMaxHealth);
+    // Server (6.01 on): the pawn's gravity and jump attributes, through AFortPawn::SetGravityJumpMultipliers (7.30
+    // CL-4834550 native 0x139B190), as AFortGameModeAthena::FinishRestartPlayer (0xD1A0B0) gives a restarted player's
+    // pawn the game state's gravity mutator's values. False when this build has no such UFunction.
+    bool SetGravityJumpMultipliers(float NewGravityVal, float NewVehicleGravityVal, float NewJumpZ, float NewJumpHorizontalAcceleration, float NewJumpHorizontalVelocity);
     // Server (#155): the health set's maximum shield (Shield) made NewMaxShield whatever its effects say, the way
     // ForceMaxHealth does it (Battle Royale's GE_Map_Athena_Vitality_Health caps it at 100), and the shield's clamp with
     // it. False without a health set that has shields.

@@ -222,6 +222,37 @@ TArray<UObject*>* AFortGameStateAthena::GetGameplayMutatorList() const
     return List ? &List->GetMember_Mutators() : nullptr;
 }
 
+bool AFortGameStateAthena::GetMutatorGravityData(FGravityMovementData& OutData) const
+{
+    // As 0xD4D100: each active mutator of the list in turn, the first answer kept. Only the gravity mutator answers in
+    // the builds checked (AFortAthenaMutator's own slot is the shared empty stub, 0x2B1CB0).
+    const TArray<UObject*>* MutatorList = AFortAthenaMutator_GravityMultiplier::IsAvailable() ? GetGameplayMutatorList() : nullptr;
+    if (!MutatorList)
+    {
+        return false;
+    }
+    UClass* const GravityClass = AFortAthenaMutator_GravityMultiplier::StaticClass();
+    const TArray<UObject*>& Mutators = *MutatorList;
+    for (int32_t Index = 0; Index < Mutators.Num(); ++Index)
+    {
+        UObject* const Object = Mutators[Index];
+        if (!Object || !Object->IsA(GravityClass))
+        {
+            continue;
+        }
+        const AFortAthenaMutator_GravityMultiplier* Mutator = reinterpret_cast<const AFortAthenaMutator_GravityMultiplier*>(Object);
+        if (AFortAthenaMutator::HasMutatorActive() && !Mutator->bMutatorActive)
+        {
+            continue;
+        }
+        if (Mutator->GetGravityData(OutData))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 void AFortGameStateAthena::ReportPropertyOverrides() const
 {
 #if WITH_SERVER_CODE

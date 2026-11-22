@@ -47,6 +47,12 @@ The owner wants this gameserver built the way Epic built Fortnite's server. Shor
 - **No polling loops.** No GameThread::Enqueue loops that re-queue themselves to watch state every frame or every second. If the build truly cut the call site out, a fallback is allowed only with a comment saying what Epic calls and why it can't be used.
 - **No hooks on intact engine code.** Only stripped functions are restored. Intact code is reached by calling its APIs.
 
+## Accuracy and code style
+- **Accuracy first.** Preserve each build as Epic shipped it. Keep the build's own bugs; fix them only if they make the game unplayable. From 8.30 the player bots are Epic's own (Phoebe), so Core's bot backport only gets needed fixes.
+- **Unreal Engine code.** Write it like Epic's code: TArray, TMap, TSet, FString, FName, TFunction, TOptional, not std:: containers. Convert std:: containers in code you touch. Keep it clean and readable.
+- **Comments only where they help the next agent:** addresses, why a gate exists, non-obvious engine facts. No explanations written for the owner.
+- **Doubtful reports get little effort.** Build behaviour, things never in the game, and things not confirmed broken get a short comment asking the reporter to confirm on Core with the build and logs, or are closed as the build's own behaviour. Spend agent time only on confirmed, Core-caused problems.
+
 ## Safety
 - **Don't break older builds.** Every change must keep 1.1+ working: gate on classes, properties and finders existing, keep finders additive (old patterns first), and keep fallbacks.
 - **No CoreClient.dll fixes.**

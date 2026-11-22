@@ -1153,12 +1153,10 @@ void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bS
     // hero hook off, because the game's hero loadout system sets the hero. SetupHero still reaches this when a player
     // possesses, so without this guard the call ran a null pointer (0xC0000005 at 0x0, Core.dll+0x329343, from
     // AFortPlayerControllerAthena::SetupHero). Leave the hero to 8.00's loadout system there.
-    if (!CanTrySetHero())
+    if (CanTrySetHero())
     {
-        return;
+        TrySetHeroImplementationOG(this, NewHero, bSendToServer, bUnused);
     }
-
-    TrySetHeroImplementationOG(this, NewHero, bSendToServer, bUnused);
 
 #if WITH_SERVER_CODE
     // The locker's back bling didn't show in a match (#226). The player state's hero setter (3.0 0xE9AED0, which
@@ -1168,6 +1166,9 @@ void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bS
     // AFortPlayerStateAthena overrides that virtual with an empty function (3.0 and 2.5) and nothing in the client exe
     // calls it: stripped server code. The override runs here, once the hero's id is the player state's, with the
     // controller's pawn when it has one; SetHeroType's own fill (the hook) has run inside the setter by then.
+    // 8.00 still strips it (AFortPlayerStateAthena's slot 0x6F0 is an empty function, 0x3E25CA0) and Core has no hook
+    // there, so SetupHero's call is the only one that reaches this: the game set the hero before Possess (#539: no
+    // back bling in 8.00 matches).
     AFortPlayerStateAthena* AthenaPlayerState = AthenaGameMode && NewHero && AFortPlayerState::CanApplyCharacterCustomization()
         ? Cast<AFortPlayerStateAthena>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState))) : nullptr;
     if (AthenaPlayerState)
@@ -1176,7 +1177,7 @@ void AFortPlayerController::TrySetHeroImplementation(UFortHero* NewHero, bool bS
     }
 
     // Hero ability kit items are Save the World gadgets and kit items.
-    if (!AthenaGameMode)
+    if (!AthenaGameMode && CanTrySetHero())
     {
         ApplyHeroAbilityKitItems(NewHero);
     }

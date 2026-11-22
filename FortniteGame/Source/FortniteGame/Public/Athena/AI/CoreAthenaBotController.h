@@ -400,6 +400,9 @@ public:
     // Whether the bot wants this floor pickup: a gun it would carry (WeaponSlotFor), ammo for its guns (and some of the
     // other kinds while it has a free weapon slot), materials below a stack, or a consumable it has room for.
     bool WantsPickup(UFortItemDefinition* Definition, bool bWeapon, bool bConsumable);
+    // With both healing item kinds taken, the held kind that restores nothing now, which a new kind that restores
+    // something takes the place of (null when there is no such swap; CoreV2 #538).
+    UFortItemDefinition* ConsumableToSwapFor(UFortItemDefinition* Definition);
     // 0 wood, 1 stone, 2 metal (UFortGameData's resource items), -1 for anything else.
     static int32_t MaterialKindOf(const UFortItemDefinition* Definition);
 

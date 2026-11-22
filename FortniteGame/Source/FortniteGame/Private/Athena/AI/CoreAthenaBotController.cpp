@@ -3269,7 +3269,7 @@ bool FCoreAthenaBotController::WantsPickup(UFortItemDefinition* Definition, bool
     {
         const FCoreAthenaBotConsumable* Info = GetConsumableInfo(Definition);
         const auto Held = Consumables.find(Definition);
-        return Info && (Held != Consumables.end() ? Held->second < Info->MaxStackSize : Consumables.size() < MaxConsumableKinds);
+        return Info && (Held != Consumables.end() ? Held->second < Info->MaxStackSize : Consumables.size() < MaxConsumableKinds || ConsumableToSwapFor(Definition));
     }
     // Materials (wood, stone, metal on the floor: a chest's or an eliminated player's) up to the stack a player holds
     // (CoreV2 #252: searched houses kept their floor loot).
@@ -3283,6 +3283,42 @@ bool FCoreAthenaBotController::WantsPickup(UFortItemDefinition* Definition, bool
     const int32_t Held = Reserve != Ammo.end() ? Reserve->second : 0;
     const bool bForItsGuns = std::any_of(WeaponList.begin(), WeaponList.end(), [Definition](const FCoreAthenaBotWeapon& Weapon) { return Weapon.AmmoDefinition == Definition; });
     return Cast<UFortAmmoItemDefinition>(Definition) && (bForItsGuns ? Held < 120 : WeaponList.size() < MaxWeapons && Held < 30);
+}
+
+UFortItemDefinition* FCoreAthenaBotController::ConsumableToSwapFor(UFortItemDefinition* Definition)
+{
+    // A bot holds MaxConsumableKinds kinds of healing items, a player's two slots. With both taken it never took a new
+    // kind (CoreV2 #538): its first two kinds stayed for the match even when neither restores anything, the bandages and
+    // the medkit of a bot at full health (Heal uses an item only while it restores something), so it walked past every
+    // shield potion. A player in its place swaps the item that does nothing now for the one that does. So a held kind
+    // that restores nothing at the bot's health and shield gives way to one that restores something: this is the held
+    // kind (null when there is none, or the new kind restores nothing either).
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    if (!Pawn || Consumables.size() < MaxConsumableKinds || Consumables.count(Definition))
+    {
+        return nullptr;
+    }
+    const float Health = Pawn->GetHealth();
+    const float Shield = Pawn->GetShield();
+    const float MaxHealth = std::max(Pawn->GetMaxHealth(), 1.0f);
+    const float MaxShield = std::max(Pawn->GetMaxShield(), 1.0f);
+    // What the item would give now, as Heal counts it.
+    const auto GainNow = [&](const FCoreAthenaBotConsumable* Info)
+    {
+        return !Info ? 0.0f : std::min(Info->Health, std::max(std::min(Info->HealthCap, MaxHealth) - Health, 0.0f)) + std::min(Info->Shield, std::max(std::min(Info->ShieldCap, MaxShield) - Shield, 0.0f));
+    };
+    if (GainNow(GetConsumableInfo(Definition)) <= 0.0f)
+    {
+        return nullptr;
+    }
+    for (const auto& [HeldDefinition, Count] : Consumables)
+    {
+        if (HeldDefinition != HealingItem && GainNow(GetConsumableInfo(HeldDefinition)) <= 0.0f)
+        {
+            return HeldDefinition;
+        }
+    }
+    return nullptr;
 }
 
 int32_t FCoreAthenaBotController::MaterialKindOf(const UFortItemDefinition* Definition)
@@ -4864,6 +4900,14 @@ void FCoreAthenaBotController::TakePickup(AFortPickup* Pickup)
     const int32_t Count = std::max(static_cast<int32_t>(Entry.Count), 1);
     if (const FCoreAthenaBotConsumable* Consumable = GetConsumableInfo(Definition))
     {
+        // A new kind with both kinds taken: the one that restores nothing now is dropped for it, as a player swaps it.
+        if (UFortItemDefinition* Swapped = ConsumableToSwapFor(Definition))
+        {
+            const int32_t SwappedCount = Consumables[Swapped];
+            Consumables.erase(Swapped);
+            DropItem(Swapped, SwappedCount, 0);
+            Log::Info(L"Battle Royale bots: {} swaps its {} {} for {}", BotName, SwappedCount, NameOf(Swapped), NameOf(Definition));
+        }
         // As many as the stack holds; the rest stays on the floor.
         int32_t& Held = Consumables[Definition];
         const int32_t Taken = std::min(Count, std::max(Consumable->MaxStackSize - Held, 0));

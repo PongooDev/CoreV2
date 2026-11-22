@@ -680,19 +680,24 @@ void AFortPlayerController::Possess(APawn* InPawn)
     }
 
     AFortQuickBars* Bars = QuickBars;
+    // Battle Royale's inventory is the game mode's StartingItems (with its own pickaxe) and what the player loots: no
+    // hero gadgets, harvesting tool from the account's attribute or homebase gadgets. The native homebase effects skip
+    // Athena too (UFortRegisteredPlayerInfo 0x5DC040, through the Athena check 0x5EAF90).
+    // 7.40 (CL-5046157) has no server quickbars (HasQuickBars), so this needed none there (#533: a 7.40 Save the World
+    // player had no harvesting tool). Its client builds its own and slots the harvesting tool it finds in the world
+    // inventory (AFortPlayerController's quickbar setup 0x1431460 walks UFortGameData::HarvestingTools, "HarvestToolAsset
+    // %s is valid"); one that arrives later is slotted by the client's world inventory update (0x14072F0, which calls
+    // TryAddToQuickBar 0x1438C20 for each item not yet on its quickbars).
+    if (Role == ROLE_Authority && (Bars || !HasQuickBars()) && MyFortPawn && !bDisguisePossess && !AFortGameModeAthena::GetCurrent(this))
+    {
+        AddHeroAbilityKitGadgetsToQuickBars();
+        ApplyHarvestingTool();
+        ApplyHomebaseGadgets();
+        LogHomebaseStats(this);
+    }
+
     if (Role == ROLE_Authority && Bars && MyFortPawn)
     {
-        // Battle Royale's inventory is the game mode's StartingItems (with its own pickaxe) and what the player loots: no
-        // hero gadgets, harvesting tool from the account's attribute or homebase gadgets. The native homebase effects skip
-        // Athena too (UFortRegisteredPlayerInfo 0x5DC040, through the Athena check 0x5EAF90).
-        if (!bDisguisePossess && !AFortGameModeAthena::GetCurrent(this))
-        {
-            AddHeroAbilityKitGadgetsToQuickBars();
-            ApplyHarvestingTool();
-            ApplyHomebaseGadgets();
-            LogHomebaseStats(this);
-        }
-
         // A Battle Royale player spawns holding the harvesting tool (slot 0) when the building bar has the focus. Both
         // bars start focused on slot 0, and adding an item to a bar's focused slot focuses that bar
         // (ServerAddItemInternal_Implementation, 1.8 0x693DF0), which unfocuses the other one (-1). 1.7.2's first
@@ -1333,7 +1338,8 @@ void AFortPlayerController::ApplyHarvestingTool()
     AFortPlayerState* FortPlayerState = Cast<AFortPlayerState>(reinterpret_cast<UObject*>(static_cast<APlayerState*>(PlayerState)));
     UAbilitySystemComponent* AbilitySystemComponent = FortPlayerState ? static_cast<UAbilitySystemComponent*>(FortPlayerState->AbilitySystemComponent) : nullptr;
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    if (Role != ROLE_Authority || !Inventory || !Bars || !GameData)
+    // 7.40 (CL-5046157) has no server quickbars: the item only goes into the world inventory, and the client slots it.
+    if (Role != ROLE_Authority || !Inventory || (!Bars && HasQuickBars()) || !GameData)
     {
         return;
     }
@@ -1385,10 +1391,11 @@ void AFortPlayerController::ApplyHarvestingTool()
     }
 
     int32_t QuickBarSlot = -1;
-    FQuickBar& PrimaryQuickBar = Bars->PrimaryQuickBar;
-    TStructArray<FQuickBarSlot>& Slots = PrimaryQuickBar.Slots;
-    for (int32_t SlotIndex = 0; SlotIndex < Slots.Num() && QuickBarSlot < 0 && !ReplacedItems.empty(); ++SlotIndex)
+    FQuickBar* PrimaryQuickBar = Bars ? &static_cast<FQuickBar&>(Bars->PrimaryQuickBar) : nullptr;
+    const int32_t NumSlots = PrimaryQuickBar ? static_cast<TStructArray<FQuickBarSlot>&>(PrimaryQuickBar->Slots).Num() : 0;
+    for (int32_t SlotIndex = 0; SlotIndex < NumSlots && QuickBarSlot < 0 && !ReplacedItems.empty(); ++SlotIndex)
     {
+        TStructArray<FQuickBarSlot>& Slots = PrimaryQuickBar->Slots;
         TArray<FGuid>& SlotItems = Slots[SlotIndex].Items;
         for (const FGuid& SlotItem : SlotItems)
         {
@@ -1419,7 +1426,7 @@ void AFortPlayerController::ApplyHarvestingTool()
     WorldItem->SetOwningControllerForTemporaryItem(this);
     Inventory->AddWorldItem(WorldItem);
     FFortItemEntry& WorldItemEntry = WorldItem->ItemEntry;
-    if (QuickBarSlot >= 0)
+    if (Bars && QuickBarSlot >= 0)
     {
         Bars->ServerAddItemInternal(WorldItemEntry.ItemGuid, EFortQuickBars::GetPrimary(), QuickBarSlot);
     }
@@ -1427,6 +1434,7 @@ void AFortPlayerController::ApplyHarvestingTool()
     {
         TryAddToQuickBar(WorldItem);
     }
+    UE_LOG(LogFort, Log, TEXT("ApplyHarvestingTool: %s gets %s (level %d)"), *GetName(), *HarvestingTool->GetName(), Level);
 #endif
 }
 
@@ -1438,7 +1446,8 @@ void AFortPlayerController::ApplyHomebaseGadgets()
     UFortRegisteredPlayerInfo* PlayerInfo = MyPlayerInfo;
     UFortMcpProfileCampaign* AccountProfile = PlayerInfo ? static_cast<UFortMcpProfileCampaign*>(PlayerInfo->AccountProfile) : nullptr;
     UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
-    if (Role != ROLE_Authority || !Inventory || !Bars || !AccountProfile || !GameData || !Finder::ResolveHomebaseGadgetsLive())
+    // 7.40 (CL-5046157) has no server quickbars: the gadgets only go into the world inventory, and the client slots them.
+    if (Role != ROLE_Authority || !Inventory || (!Bars && HasQuickBars()) || !AccountProfile || !GameData || !Finder::ResolveHomebaseGadgetsLive())
     {
         return;
     }
@@ -1458,7 +1467,7 @@ void AFortPlayerController::ApplyHomebaseGadgets()
     HomebaseManager->GetOwnedNodeAbilityKits(AccountProfile, Kits);
 
     std::vector<int32_t> GadgetSlots;
-    const int32_t NumSlots = Bars->GetQuickBar(EFortQuickBars::GetPrimary()).Slots.Num();
+    const int32_t NumSlots = Bars ? Bars->GetQuickBar(EFortQuickBars::GetPrimary()).Slots.Num() : 0;
     for (int32_t SlotIndex = 0; SlotIndex < NumSlots; ++SlotIndex)
     {
         const TArray<EFortItemType>& AcceptedItemTypes = Bars->GetSlotData(EFortQuickBars::GetPrimary(), SlotIndex).AcceptedItemTypes;
@@ -1501,11 +1510,14 @@ void AFortPlayerController::ApplyHomebaseGadgets()
         Granted.GrantedHomebaseGadgets.emplace_back(Gadget);
 
         const int32_t Level = GadgetEntry->Level;
-        const int32_t Slot = Index < static_cast<int32_t>(GadgetSlots.size()) && Bars->GetSlot(EFortQuickBars::GetPrimary(), GadgetSlots[Index]).Items.Num() == 0 ? GadgetSlots[Index] : -1;
+        const int32_t Slot = Bars && Index < static_cast<int32_t>(GadgetSlots.size()) && Bars->GetSlot(EFortQuickBars::GetPrimary(), GadgetSlots[Index]).Items.Num() == 0 ? GadgetSlots[Index] : -1;
         for (UFortWorldItem* GadgetItem : AddHeroAbilityKitItem(this, Inventory, Gadget, 1, Level))
         {
             FFortItemEntry& ItemEntry = GadgetItem->ItemEntry;
-            Bars->ServerAddItemInternal(ItemEntry.ItemGuid, EFortQuickBars::GetPrimary(), Slot);
+            if (Bars)
+            {
+                Bars->ServerAddItemInternal(ItemEntry.ItemGuid, EFortQuickBars::GetPrimary(), Slot);
+            }
         }
 
         for (UFortAbilityKit* Kit : Kits)

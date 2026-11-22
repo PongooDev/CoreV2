@@ -36,6 +36,7 @@ struct FAthenaRewardResult;
 struct FGameplayTagContainer;
 struct FFortItemEntry;
 struct FGuid;
+struct FMcpQueryResult;
 
 // One of a player's Creative islands as the controller replicates it (from 7.00): its name and its plot item's id.
 struct FCreativeIslandData
@@ -55,6 +56,16 @@ struct FCreativePublishOptions
     DefineUnrealStruct(FCreativePublishOptions, FortniteGame)
     DefineUProperty(FString, UserTitle)
     DefineUProperty(FString, UserDescription)
+    DefineUProperty(FString, UserLocale)
+};
+
+// An island's name and description as the island menu's Description tab sends them (7.40, CL-5046157:
+// UFortCreativeMoreInfoPanel's Apply), which UpdateCreativePlotData takes by value.
+struct FCreativeIslandInfo
+{
+    DefineUnrealStruct(FCreativeIslandInfo, FortniteGame)
+    DefineUProperty(FString, IslandTitle)
+    DefineUProperty(FString, IslandIntroduction)
     DefineUProperty(FString, UserLocale)
 };
 
@@ -396,6 +407,7 @@ public:
     // 7.40 (CL-5046157): the publish names the island's volume, and its answer is ClientPublishCreativePlotComplete.
     DefineUFunction(PublishCreativePlot)
     DefineUFunction(ClientPublishCreativePlotComplete)
+    DefineUFunction(UpdateCreativePlotData)
     DefineUFunction(ServerSaveIslandCheckpoint)
     DefineUFunction(ServerLoadIslandCheckpoint)
     DefineUFunction(ServerLoadPlotForPortalFromMnemonic)
@@ -406,6 +418,11 @@ public:
     // it is the player's and loaded, as PublishMyCurrentCreativePlot publishes the one they are on.
     void PublishCreativePlot_Implementation(AFortVolume* VolumeToPublish, const FCreativePublishOptions& MyPublishOptions);
     void ClientPublishMyCurrentCreativePlotComplete(const FString& ResultErrorCode, const FString& LinkJson);
+    // Restored (7.40 strips its body: 0xDB4300 only destroys the by-value info): the island's new name and description
+    // saved to its plot item (the creative profile's SetCreativePlotMetadata); the client hears
+    // ClientPublishCreativePlotComplete, which its Description tab waits on.
+    void UpdateCreativePlotData_Implementation(AFortVolume* VolumeToPublish, const FCreativeIslandInfo& MyInfo);
+    void OnUpdateCreativePlotDataComplete(const FMcpQueryResult& Result);
     // Restored (7.10's are the shared empty function, slots 0x3FC and 0x3FA): the island's checkpoint, its backup.
     void ServerSaveIslandCheckpoint_Implementation(AFortAthenaCreativePortal* Portal);
     void ServerLoadIslandCheckpoint_Implementation(AFortAthenaCreativePortal* Portal);
@@ -424,6 +441,8 @@ private:
     static inline void (*PublishMyCurrentCreativePlot_ImplementationOG)(AFortPlayerControllerAthena* This, FCreativePublishOptions* MyPublishOptions) = nullptr;
     static void PublishCreativePlot_ImplementationHK(AFortPlayerControllerAthena* This, AFortVolume* VolumeToPublish, FCreativePublishOptions* MyPublishOptions);
     static inline void (*PublishCreativePlot_ImplementationOG)(AFortPlayerControllerAthena* This, AFortVolume* VolumeToPublish, FCreativePublishOptions* MyPublishOptions) = nullptr;
+    static void UpdateCreativePlotData_ImplementationHK(AFortPlayerControllerAthena* This, AFortVolume* VolumeToPublish, FCreativeIslandInfo* MyInfo);
+    static inline void (*UpdateCreativePlotData_ImplementationOG)(AFortPlayerControllerAthena* This, AFortVolume* VolumeToPublish, FCreativeIslandInfo* MyInfo) = nullptr;
     static void ServerSaveIslandCheckpoint_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);
     static void ServerLoadIslandCheckpoint_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);
     static bool ServerIslandCheckpoint_ValidateHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal);

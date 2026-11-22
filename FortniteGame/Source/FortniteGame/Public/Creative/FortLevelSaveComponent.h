@@ -63,6 +63,11 @@ class UFortCreativeRealEstatePlotItem : public UObject
 public:
     DefineUProperty(int32_t, IslandIndex)
     DefineUProperty(FString, IslandName)
+    // 7.40's (CL-5046157) description, from the item's title, tagline and youtube_video_id attributes (FString there;
+    // 7.30's IslandTitle and IslandTagline are FText, so these don't resolve on it).
+    DefineOptionalUProperty(FString, IslandTitle)
+    DefineOptionalUProperty(FString, IslandTagline)
+    DefineOptionalUProperty(FString, YoutubeVideoId)
     // UFortAccountItem's: the item's template, and its id (the MCP item's instance id), which GetInstanceId returns.
     DefineUProperty(UObject*, ItemDefinition)
     DefineUProperty(FString, InstanceId)

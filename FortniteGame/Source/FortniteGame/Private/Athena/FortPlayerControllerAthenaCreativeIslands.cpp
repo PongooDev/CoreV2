@@ -12,6 +12,7 @@
 #include "Log.h"
 #include "Natives.h"
 #include "Player/FortPlayerState.h"
+#include "Online/FortMcpProfileCreative.h"
 #include "Online/NotForLicensees/FortMcpConfig.h"
 #include "ReflectionParams.h"
 #include "UObject/Class.h"
@@ -487,6 +488,63 @@ void AFortPlayerControllerAthena::PublishCreativePlot_Implementation(AFortVolume
 #endif
 }
 
+void AFortPlayerControllerAthena::UpdateCreativePlotData_Implementation(AFortVolume* VolumeToPublish, const FCreativeIslandInfo& MyInfo)
+{
+#if WITH_SERVER_CODE
+    // 7.40's island menu, Description tab (UFortCreativeMoreInfoPanel's Apply, 0x3200F90): the client binds its
+    // OnPublishComplete to the controller's publish-complete delegate (+0x2600), shows its spinner and sends this with
+    // its CreativePlotLinkedVolume; ClientPublishCreativePlotComplete (0xD80DC0) broadcasts it, and an empty result
+    // closes the tab as saved, any other shows "Try Again later. Error: <result>". The game's _Validate (0xDB4340) has
+    // checked the lengths (a title of 3 to 40, an introduction up to 1024, a locale up to 10). The island is the
+    // volume's, theirs and loaded; FCreativeIslandInfo has no tagline or video, so the plot keeps its own.
+    const wchar_t* Why = nullptr;
+    UFortLevelSaveComponent* Component = GetOwnLoadedIslandIn(VolumeToPublish, Why);
+    UMcpProfile* Profile = Component ? GetCreativeProfile() : nullptr;
+    UFortMcpProfileCreative* CreativeProfile = Profile && UFortMcpProfileCreative::StaticClass() && reinterpret_cast<UObject*>(Profile)->IsA(UFortMcpProfileCreative::StaticClass())
+        ? static_cast<UFortMcpProfileCreative*>(Profile) : nullptr;
+    if (Component && !CreativeProfile)
+    {
+        Why = L"the server has no creative profile for them";
+    }
+    UFortCreativeRealEstatePlotItem* Plot = Component ? static_cast<UFortCreativeRealEstatePlotItem*>(Component->LoadedPlot) : nullptr;
+    if (!Why && Plot)
+    {
+        UFortMcpProfileCreative::FOnQueryComplete Callback = UFortMcpProfileCreative::FOnQueryComplete::CreateUObject(this, &AFortPlayerControllerAthena::OnUpdateCreativePlotDataComplete);
+        const FString Tagline = Plot->IslandTagline;
+        const FString Video = Plot->YoutubeVideoId;
+        if (CreativeProfile->SetCreativePlotMetadata(Plot->GetItemId(), MyInfo.UserLocale, MyInfo.IslandTitle, Tagline, Video, MyInfo.IslandIntroduction, Callback))
+        {
+            Log::Info(L"Creative: {} renames their island {} to \"{}\"", PlayerNameOf(this), Plot->GetItemId().ToStdString(), MyInfo.IslandTitle.ToStdString());
+            return;
+        }
+        Why = L"UFortMcpProfileCreative::SetCreativePlotMetadata wasn't sent (not found, or its context isn't 4.2's)";
+    }
+    Log::Warning(L"Creative: {}'s island description refused: {}", PlayerNameOf(this), Why ? Why : L"no island");
+    ClientPublishMyCurrentCreativePlotComplete(FString(L"update_refused"), FString());
+#endif
+}
+
+void AFortPlayerControllerAthena::OnUpdateCreativePlotDataComplete(const FMcpQueryResult& Result)
+{
+#if WITH_SERVER_CODE
+    // FMcpQueryResult begins with FOnlineError: bSucceeded, ErrorRaw (+0x08), ErrorCode (+0x18) (7.40's
+    // FOnlineError::ToLogString, 0x3A97D0). The profile's own answer has already updated the plot item, and its
+    // ItemsUpdatedDelegate the controller's CreativeIslands (OnCreativeProfileItemsUpdated).
+    const uint8_t* Bytes = reinterpret_cast<const uint8_t*>(&Result);
+    const bool bSucceeded = *reinterpret_cast<const bool*>(Bytes);
+    FString ErrorCode = bSucceeded ? FString() : *reinterpret_cast<const FString*>(Bytes + 0x18);
+    if (!bSucceeded && ErrorCode.IsEmpty())
+    {
+        ErrorCode = FString(L"update_failed");
+    }
+    if (!bSucceeded)
+    {
+        Log::Warning(L"Creative: {}'s island description wasn't saved: {}", PlayerNameOf(this), ErrorCode.ToStdString());
+    }
+    ClientPublishMyCurrentCreativePlotComplete(ErrorCode, FString());
+#endif
+}
+
 void AFortPlayerControllerAthena::ServerSaveIslandCheckpoint_Implementation(AFortAthenaCreativePortal* Portal)
 {
 #if WITH_SERVER_CODE
@@ -669,6 +727,16 @@ void AFortPlayerControllerAthena::PublishCreativePlot_ImplementationHK(AFortPlay
     PublishCreativePlot_ImplementationOG(This, VolumeToPublish, MyPublishOptions);
 }
 
+void AFortPlayerControllerAthena::UpdateCreativePlotData_ImplementationHK(AFortPlayerControllerAthena* This, AFortVolume* VolumeToPublish, FCreativeIslandInfo* MyInfo)
+{
+    if (This && MyInfo)
+    {
+        This->UpdateCreativePlotData_Implementation(VolumeToPublish, *MyInfo);
+    }
+    // The stripped body: the info's destructor.
+    UpdateCreativePlotData_ImplementationOG(This, VolumeToPublish, MyInfo);
+}
+
 void AFortPlayerControllerAthena::ServerSaveIslandCheckpoint_ImplementationHK(AFortPlayerControllerAthena* This, AFortAthenaCreativePortal* Portal)
 {
     This->ServerSaveIslandCheckpoint_Implementation(Portal);
@@ -824,6 +892,23 @@ void AFortPlayerControllerAthena::HookCreativeIslandTools()
         PublishState = std::format(L"native in this build (slot 0x{:X})", PublishIndex);
     }
 
+    // UpdateCreativePlotData (7.40): its body (0xDB4300, slot 0x455) only destroys the info it takes by value.
+    UFunction* UpdatePlot = FindStaticFunction_UpdateCreativePlotData();
+    const int32_t UpdatePlotIndex = UpdatePlot ? Finder::ImplementationIndex(UpdatePlot) : -1;
+    void* const UpdatePlotBody = UpdatePlotIndex >= 0 ? VTable[UpdatePlotIndex] : nullptr;
+    const uintptr_t UpdatePlotEnd = UpdatePlotBody ? Finder::FunctionEnd(reinterpret_cast<uintptr_t>(UpdatePlotBody)) : 0;
+    std::wstring UpdatePlotState = UpdatePlot ? L"slot not found" : L"not in this build";
+    if (UpdatePlotBody && UpdatePlotEnd && UpdatePlotEnd - reinterpret_cast<uintptr_t>(UpdatePlotBody) <= 0x80)
+    {
+        UpdateCreativePlotData_ImplementationOG = reinterpret_cast<decltype(UpdateCreativePlotData_ImplementationOG)>(UpdatePlotBody);
+        SwapInSubclasses(UpdatePlotIndex, UpdatePlotBody, reinterpret_cast<void*>(&UpdateCreativePlotData_ImplementationHK), L"AFortPlayerControllerAthena::UpdateCreativePlotData_Implementation");
+        UpdatePlotState = std::format(L"stripped (0x{:X}, slot 0x{:X}): restored", Address(reinterpret_cast<uintptr_t>(UpdatePlotBody)), UpdatePlotIndex);
+    }
+    else if (UpdatePlotBody)
+    {
+        UpdatePlotState = std::format(L"native in this build (slot 0x{:X})", UpdatePlotIndex);
+    }
+
     // The checkpoints.
     UFunction* SaveCheckpoint = FindStaticFunction_ServerSaveIslandCheckpoint();
     UFunction* LoadCheckpoint = FindStaticFunction_ServerLoadIslandCheckpoint();
@@ -841,8 +926,8 @@ void AFortPlayerControllerAthena::HookCreativeIslandTools()
     IslandSavedHandler = Signature && Finder::ResolveClassFunctionMap() ? SaveClass->AddNativeFunction(L"HandleIslandSavedForTools", &ExecHandleIslandSaved, Signature) : nullptr;
 
     Log::Info(L"Finder: Creative's island tools: UFortLevelSaveComponent's mnemonic load 0x{:X}; ServerLoadPlotForPortalFromMnemonic {}; {} {}; "
-        L"the save's end handler {}", Address(reinterpret_cast<uintptr_t>(Natives::UFortLevelSaveComponent_LoadPlotFromMnemonic)), MnemonicState,
-        bPublishTakesVolume ? L"PublishCreativePlot" : L"PublishMyCurrentCreativePlot", PublishState,
+        L"UpdateCreativePlotData {}; the save's end handler {}", Address(reinterpret_cast<uintptr_t>(Natives::UFortLevelSaveComponent_LoadPlotFromMnemonic)), MnemonicState,
+        bPublishTakesVolume ? L"PublishCreativePlot" : L"PublishMyCurrentCreativePlot", PublishState, UpdatePlotState,
         IslandSavedHandler ? L"added" : L"not added");
     if (!Natives::UFortLevelSaveComponent_LoadPlotFromMnemonic || !IslandSavedHandler || !Natives::UFortLevelSaveComponent_CloudSave)
     {

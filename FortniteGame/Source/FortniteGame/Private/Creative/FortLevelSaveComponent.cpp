@@ -103,8 +103,9 @@ FString UFortCreativeRealEstatePlotItem::GetItemId() const
 FText UFortCreativeRealEstatePlotItem::GetIslandDisplayName() const
 {
     // The item's islandName attribute once the island has a name of its own (the client's SetCreativePlotIslandName,
-    // which 7.00 can't send, so none has); else the template's "Island {islandIndex}" with the item's number.
-    std::wstring Name = Member_IslandName.IsAvailable() ? IslandName.ToStdString() : std::wstring();
+    // which 7.00 can't send, so none has), from 7.40 its title (SetCreativePlotMetadata); else the template's
+    // "Island {islandIndex}" with the item's number.
+    std::wstring Name = Member_IslandName.IsAvailable() ? IslandName.ToStdString() : IslandTitle.ToStdString();
     if (Name.empty())
     {
         UObject* Definition = Member_ItemDefinition.IsAvailable() ? static_cast<UObject*>(ItemDefinition) : nullptr;

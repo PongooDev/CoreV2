@@ -422,6 +422,8 @@ namespace Finder
     {
         uint8_t* Lea = nullptr;
         ptrdiff_t ItemInstanceIds = -1;
+        // 7.30+: the container is a TSet<FGuid> of the items, not 6.31-7.20's TMap of each gadget to its item's guid.
+        bool bItemGuidSet = false;
     };
     FGadgetTrackedAttributeBind GadgetTrackedAttributeBind(ptrdiff_t TrackedAttributesOffset);
     // AFortPlayerPawnAthena::BeginSkydiving (Natives::AFortPlayerPawnAthena_BeginSkydiving), for Battle Royale's player

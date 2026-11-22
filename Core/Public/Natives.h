@@ -210,6 +210,8 @@ namespace Natives
     // AFortPlayerControllerZone's unreflected TMap<const UFortGadgetItemDefinition*, FGuid>: each applied gadget with
     // tracked attributes and its item (7.20 +0x1DF8), from Finder::GadgetTrackedAttributeBind. -1 when not found.
     inline ptrdiff_t AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds = -1;
+    // 7.30+: that member is a TSet<FGuid> of the items (Finder::GadgetTrackedAttributeBind's bItemGuidSet).
+    inline bool AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet = false;
     inline FString* (*UGameMapsSettings_GetGameDefaultMap)(FString* Result) = nullptr;
     inline const FString* (*UGameMapsSettings_GetGlobalDefaultGameMode)() = nullptr;
 

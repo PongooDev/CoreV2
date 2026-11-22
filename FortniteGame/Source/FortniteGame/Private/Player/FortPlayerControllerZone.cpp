@@ -236,6 +236,16 @@ namespace
     };
     static_assert(sizeof(FGadgetTrackedAttributeItem) == 0x20);
 
+    // 7.30+ (Natives::AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet): an element of the controller's
+    // TSet<FGuid> of the applied gadgets' items, the gadget being the item's definition (7.30 Add 0x142BA00).
+    struct FGadgetTrackedAttributeItemGuid
+    {
+        FGuid ItemGuid;
+        int32_t HashNextId;
+        int32_t HashIndex;
+    };
+    static_assert(sizeof(FGadgetTrackedAttributeItemGuid) == 0x18);
+
     // The attribute's base value on the ability system (what ApplyGadgetItemAttributeSet sets back, through
     // SetNumericAttributeBase): the FGameplayAttributeData its property holds in the ability system's set of the
     // attribute's class.
@@ -280,17 +290,37 @@ void AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged(float NewValue, 
         return;
     }
 
-    const TArray<FGadgetTrackedAttributeItem>& ItemInstanceIds = *reinterpret_cast<const TArray<FGadgetTrackedAttributeItem>*>(reinterpret_cast<const uint8_t*>(this) + ItemInstanceIdsOffset);
+    // 6.31-7.20 keep a map of each gadget to its item's guid; 7.30+ keep a set of the items' guids, whose gadget is the
+    // item's definition (Finder::GadgetTrackedAttributeBind tells which). Both are a sparse array read element by element.
+    const uint8_t* const Container = reinterpret_cast<const uint8_t*>(this) + ItemInstanceIdsOffset;
+    const bool bItemGuidSet = Natives::AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet;
+    const int32_t NumElements = bItemGuidSet ? reinterpret_cast<const TArray<FGadgetTrackedAttributeItemGuid>*>(Container)->Num()
+        : reinterpret_cast<const TArray<FGadgetTrackedAttributeItem>*>(Container)->Num();
     std::vector<std::pair<FGuid, const UFortGadgetItemDefinition*>> UsedUp;
-    for (int32_t Index = 0; Index < ItemInstanceIds.Num(); ++Index)
+    for (int32_t Index = 0; Index < NumElements; ++Index)
     {
-        // A free slot of the sparse array holds its free list's indices where the gadget would be, which never is an
-        // item's definition: only the slots whose item the inventory holds with that definition are read further.
-        const FGadgetTrackedAttributeItem& Applied = ItemInstanceIds[Index];
-        UFortWorldItem* Item = Inventory->FindWorldItem(Applied.ItemGuid);
+        // A free slot of the sparse array holds its free list's indices where the gadget or the guid would be, which
+        // never is an item's definition or an item's guid: only the slots whose item the inventory holds (with that
+        // definition, for the map) are read further.
+        FGuid ItemGuid;
+        const UFortGadgetItemDefinition* Gadget = nullptr;
+        if (bItemGuidSet)
+        {
+            ItemGuid = (*reinterpret_cast<const TArray<FGadgetTrackedAttributeItemGuid>*>(Container))[Index].ItemGuid;
+        }
+        else
+        {
+            const FGadgetTrackedAttributeItem& Applied = (*reinterpret_cast<const TArray<FGadgetTrackedAttributeItem>*>(Container))[Index];
+            ItemGuid = Applied.ItemGuid;
+            Gadget = Applied.Gadget;
+        }
+        UFortWorldItem* Item = Inventory->FindWorldItem(ItemGuid);
         FFortItemEntry* Entry = Item ? &static_cast<FFortItemEntry&>(Item->ItemEntry) : nullptr;
-        const UFortGadgetItemDefinition* Gadget = Applied.Gadget;
-        if (!Entry || static_cast<UFortItemDefinition*>(Entry->ItemDefinition) != static_cast<const UFortItemDefinition*>(Gadget))
+        if (Entry && bItemGuidSet)
+        {
+            Gadget = Cast<UFortGadgetItemDefinition>(static_cast<UFortItemDefinition*>(Entry->ItemDefinition));
+        }
+        if (!Entry || !Gadget || static_cast<UFortItemDefinition*>(Entry->ItemDefinition) != static_cast<const UFortItemDefinition*>(Gadget))
         {
             continue;
         }
@@ -389,6 +419,7 @@ void AFortPlayerControllerZone::HookGadgetTrackedAttributeDelegate()
         return;
     }
     Natives::AFortPlayerControllerZone_GadgetTrackedAttributeItemInstanceIds = Bind.ItemInstanceIds;
+    Natives::AFortPlayerControllerZone_bGadgetTrackedAttributeItemGuidSet = Bind.bItemGuidSet;
     Hooks::RedirectAddress(L"AFortPlayerControllerZone::OnGadgetTrackedAttributeChanged (ApplyGadgetItemAttributeSet's binding)", Bind.Lea, reinterpret_cast<void*>(&OnGadgetTrackedAttributeChangedHK));
 }
 

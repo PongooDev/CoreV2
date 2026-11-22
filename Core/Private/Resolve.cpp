@@ -14286,6 +14286,7 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
     // (CL-4834550) keeps the controller in r12 (lea rcx, [r12+1EA8h] before FindId 0xF82BF0 and Add 0x142BA00), a SIB
     // form looked at only when the plain one finds no map.
     int32_t Maps = 0;
+    std::vector<uintptr_t> MapCallees;
     for (int32_t Pass = 0; Pass < 2 && !Maps; ++Pass)
     {
         std::unordered_map<ptrdiff_t, std::vector<uintptr_t>> ThisCalls;
@@ -14303,6 +14304,7 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
             {
                 ++Maps;
                 Bind.ItemInstanceIds = Displacement;
+                MapCallees = Callees;
             }
         }
     }
@@ -14312,9 +14314,32 @@ Finder::FGadgetTrackedAttributeBind Finder::GadgetTrackedAttributeBind(ptrdiff_t
         Bind.ItemInstanceIds = -1;
         return Bind;
     }
+    // Which container it is. 6.31 (+0x1D00) to 7.20 keep a TMap<const UFortGadgetItemDefinition*, FGuid> (6.31 0x1311112:
+    // the element at + 32 * index, the item's guid stored at +8). 7.30 (CL-4834550) keeps a TSet<FGuid> of the items
+    // instead, looked up by the item's guid (0x1432304; 7.40 0x1446204, 8.00 0x1486404): its Add stores the 16-byte key
+    // and sets the element's HashNextId right after it, movups [reg], xmm0; mov dword ptr [reg+10h], -1 (7.30 0x142BA43,
+    // 7.40 0x143FAE3, 8.00 0x147FB93), where the map's Add writes it through its index (6.31 0x130B135: [rax+r9]).
+    for (const uintptr_t Callee : MapCallees)
+    {
+        for (uintptr_t At = Callee; At + 11 <= Callee + 0x80 && !Bind.bItemGuidSet; ++At)
+        {
+            const uint8_t ModRm = Byte(At + 2);
+            const uint8_t Base = ModRm & 7;
+            // movups [reg+disp8], xmm0 (0F 11 4x 00) or [reg] (0F 11 0x), then C7 4x 10 FF FF FF FF on the same reg.
+            const bool bDisp8 = (ModRm & 0xF8) == 0x40 && Byte(At + 3) == 0x00;
+            const bool bNoDisp = (ModRm & 0xF8) == 0x00 && Base != 5;
+            if (Byte(At) != 0x0F || Byte(At + 1) != 0x11 || Base == 4 || (!bDisp8 && !bNoDisp))
+            {
+                continue;
+            }
+            const uintptr_t Next = At + (bDisp8 ? 4 : 3);
+            Bind.bItemGuidSet = Byte(Next) == 0xC7 && Byte(Next + 1) == (0x40 | Base) && Byte(Next + 2) == 0x10
+                && *reinterpret_cast<const int32_t*>(Next + 3) == -1;
+        }
+    }
     Bind.Lea = reinterpret_cast<uint8_t*>(Leas.front());
-    Log::Info(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet (0x{:X}) binds the stripped tracked attribute handler at 0x{:X}, the applied gadgets at +0x{:X}",
-        Function - Finder::ImageBase(), Leas.front() - Finder::ImageBase(), Bind.ItemInstanceIds);
+    Log::Info(L"Finder: AFortPlayerControllerZone::ApplyGadgetItemAttributeSet (0x{:X}) binds the stripped tracked attribute handler at 0x{:X}, the applied gadgets at +0x{:X} ({})",
+        Function - Finder::ImageBase(), Leas.front() - Finder::ImageBase(), Bind.ItemInstanceIds, Bind.bItemGuidSet ? L"a set of their items' guids" : L"a map of each gadget to its item's guid");
     return Bind;
 }
 

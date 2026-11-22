@@ -162,6 +162,10 @@ public:
     // handler asks to take the player's map marker away (AFortPlayerControllerAthena 0xDBDEF0: [this+0x2DE8], 0xE2FB30).
     DefineUProperty(UAthenaMarkerComponent*, MarkerComponent)
     DefineUFunction(SpectateOnDeath)
+    // 7.30 to 8.00 (21.40 has it on AFortPlayerController): the player is holding interact to swap their held item for a
+    // pickup (ServerSetShouldSwapPickup sets it; its _Implementation is intact). Older builds don't have it.
+    DefineUProperty(bool, bTryPickupSwap)
+    static bool HasTryPickupSwap() { return Member_bTryPickupSwap.IsAvailable(); }
     // The build's SpectateOnDeath (1.9 0x438550, 3.3 0xA31650, 4.5 0xAAC400, 5.40 0xC34710), through its UFunction: what
     // the death's spectate timer calls (OnPawnDied).
     void SpectateOnDeath();

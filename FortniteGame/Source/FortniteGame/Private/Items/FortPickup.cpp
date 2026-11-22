@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "Items/FortPickup.h"
 #include "Athena/FortGameModeAthena.h"
+#include "Athena/FortPlayerControllerAthena.h"
 #include "Components/SceneComponent.h"
 #include "Curves/CurveBase.h"
 #include "Engine/EngineTypes.h"
@@ -198,7 +199,9 @@ namespace
     // backpack gives up is the one the client names (ServerHandlePickupWithSwap's Swap, kept in the pickup's
     // PickupLocationData.PickupGuid). It is dropped as a focused slot's item is where the server has quickbars, under
     // the same rules: Battle Royale, an item with no room at all, one that can be dropped. True when it was dropped.
-    bool DropRequestedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry, const FGuid& SwapGuid, const UFortItemDefinition*& OutDroppedDefinition)
+    // bHoldSwap: the player held interact (7.40's hold to swap, AFortPlayerControllerAthena::bTryPickupSwap), so the
+    // held item goes even when the backpack has room; a pickup of the held item's own definition stacks instead.
+    bool DropRequestedItemForSwap(AFortPlayerController* PlayerController, const FFortItemEntry& ItemEntry, const FGuid& SwapGuid, const UFortItemDefinition*& OutDroppedDefinition, bool bHoldSwap = false)
     {
         const UFortItemDefinition* ItemDefinition = ItemEntry.ItemDefinition;
         AFortInventory* Inventory = PlayerController->WorldInventory;
@@ -207,13 +210,17 @@ namespace
             return false;
         }
         const EFortItemType ItemType = static_cast<EFortItemType>(ItemDefinition->ItemType);
-        if (!IsSwappableItemType(ItemType) || Inventory->GetOverflowAmount(ItemEntry, true) < ItemEntry.Count)
+        if (!IsSwappableItemType(ItemType) || (!bHoldSwap && Inventory->GetOverflowAmount(ItemEntry, true) < ItemEntry.Count))
         {
             return false;
         }
         UFortWorldItem* SwapItem = Inventory->FindWorldItem(SwapGuid);
         FFortItemEntry* SwapEntry = SwapItem ? &static_cast<FFortItemEntry&>(SwapItem->ItemEntry) : nullptr;
         UFortWorldItemDefinition* SwapDefinition = SwapEntry ? Cast<UFortWorldItemDefinition>(static_cast<UFortItemDefinition*>(SwapEntry->ItemDefinition)) : nullptr;
+        if (bHoldSwap && SwapDefinition == ItemDefinition)
+        {
+            return false;
+        }
         if (!SwapDefinition || !SwapDefinition->bCanBeDropped)
         {
             Log::Info(L"Battle Royale: {}'s {} isn't swapped: the item it asked to give up is {}", PlayerController->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(),
@@ -226,7 +233,8 @@ namespace
             Log::Warning(L"Battle Royale: {}'s {} wasn't dropped, so {} isn't swapped in", PlayerController->GetName().ToStdString(), SwapDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString());
             return false;
         }
-        Log::Info(L"Battle Royale: {} swaps {} for {} (the item its client named)", PlayerController->GetName().ToStdString(), SwapDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString());
+        Log::Info(L"Battle Royale: {} swaps {} for {} ({})", PlayerController->GetName().ToStdString(), SwapDefinition->GetName().ToStdString(), ItemDefinition->GetName().ToStdString(),
+            bHoldSwap ? L"held interact: its held item" : L"the item its client named");
         OutDroppedDefinition = SwapDefinition;
         return true;
     }
@@ -1147,7 +1155,23 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
     int32_t SwappedSlot = -1;
     const UFortItemDefinition* DroppedDefinition = nullptr;
     // The item the client asked to give up for this pickup (ServerHandlePickupWithSwap), where the build keeps it.
-    const FGuid RequestedSwap = FFortPickupLocationData::HasPickupGuid() ? static_cast<FFortPickupLocationData&>(PickupLocationData).PickupGuid : FGuid();
+    FGuid RequestedSwap = FFortPickupLocationData::HasPickupGuid() ? static_cast<FFortPickupLocationData&>(PickupLocationData).PickupGuid : FGuid();
+    // 7.40's hold to swap (7.30 to 8.00 declare it): holding interact on a pickup sends ServerSetShouldSwapPickup(true)
+    // (8.00 CL-5203069 0xDDA9C0), and releasing it false (0xDC6690). Its _Implementation is intact (0xDC97D0: it sets
+    // AFortPlayerControllerAthena::bTryPickupSwap), but nothing in the exe reads the flag: the server's pickup handling
+    // that did is stripped with ServerHandlePickup. The item given up is the one in the player's hands, the pawn's
+    // current weapon's item (the quickbars are the client's alone, so the server has no focused slot).
+    bool bHoldSwap = false;
+    if (!RequestedSwap.IsValid() && !AFortPlayerController::HasQuickBars() && AFortPlayerControllerAthena::HasTryPickupSwap())
+    {
+        AFortPlayerControllerAthena* AthenaController = Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(PlayerController));
+        const AFortWeapon* HeldWeapon = AthenaController && AthenaController->bTryPickupSwap && Pawn ? static_cast<AFortWeapon*>(Pawn->CurrentWeapon) : nullptr;
+        if (HeldWeapon)
+        {
+            RequestedSwap = HeldWeapon->ItemEntryGuid;
+            bHoldSwap = true;
+        }
+    }
     bool bRequestedSwapDone = false;
     // An item cache (4.0) isn't an item the player carries: the world manager keeps it for the end of the mission, when
     // EndPrimaryMission's EarnedItemCaches has the MCP give its card pack (AFortWorldManager::AddEarnedItemCache).
@@ -1174,7 +1198,7 @@ void AFortPickup::GivePickupToPlayer(AFortPlayerController* PlayerController)
         if (!AFortPlayerController::HasQuickBars())
         {
             // 7.40: the client's named item, once (DropRequestedItemForSwap).
-            bRequestedSwapDone = bRequestedSwapDone || DropRequestedItemForSwap(PlayerController, *Entry, RequestedSwap, DroppedDefinition);
+            bRequestedSwapDone = bRequestedSwapDone || DropRequestedItemForSwap(PlayerController, *Entry, RequestedSwap, DroppedDefinition, bHoldSwap);
         }
         else if (SwappedSlot < 0)
         {

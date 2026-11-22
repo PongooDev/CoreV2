@@ -190,7 +190,10 @@ namespace
     // override (0x427BD0, AFortPlayerControllerAthena slot 0x2BC) takes Consumable as well (#124). Core's swap only
     // took the weapon types, so on 1.8.1 a consumable picked up with a full backpack flew in and was tossed straight
     // back down, the held item staying where it was. 7.20's Glider item is an AthenaGadgetItemDefinition with
-    // EFortItemType::Gadget and bCanBeDropped (#520): it is held in an inventory slot like a consumable, so it swaps too.
+    // bCanBeDropped (#520): it is held in an inventory slot like a consumable, so it swaps too. Its ItemType is
+    // AthenaGadget, which the class's constructor sets (7.40 0x1164ED0: ItemType = 13), not Gadget: #520 took Gadget,
+    // and a glider picked up with a full backpack still went back down (#548). 7.40's client takes AthenaGadget with
+    // the weapon types and Consumable for a swap (AFortPlayerControllerAthena's overflow bypass, 0xD98CE0).
     //
     // A stack that part fits, the overflow short of the pickup's count, isn't swapped: what fits tops up the player's
     // stacks and the rest goes back down, as before. Only an item with no room at all takes the held slot, so ammo,
@@ -198,10 +201,10 @@ namespace
     bool IsSwappableItemType(EFortItemType ItemType)
     {
         const EFortItemType Consumable = EFortItemType::GetConsumable();
-        const EFortItemType Gadget = EFortItemType::GetGadget();
+        const EFortItemType AthenaGadget = EFortItemType::GetAthenaGadget();
         return ItemType == EFortItemType::GetWeapon() || ItemType == EFortItemType::GetWeaponMelee() || ItemType == EFortItemType::GetWeaponRanged()
             || (Consumable != Reflection::InvalidEnumValue && ItemType == Consumable)
-            || (Gadget != Reflection::InvalidEnumValue && ItemType == Gadget);
+            || (AthenaGadget != Reflection::InvalidEnumValue && ItemType == AthenaGadget);
     }
 
     // From 7.40 (CL-5046157) the quickbars are the client's alone, so the server has no focused slot: the item a full

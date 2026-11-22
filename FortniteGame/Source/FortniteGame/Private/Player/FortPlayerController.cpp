@@ -762,6 +762,19 @@ void AFortPlayerController::Possess(APawn* InPawn)
             }
         }
     }
+
+    // OnPlayerPawnPossessed (#553): 7.30, 7.40 and 8.00 have no broadcast of it left; AFortPlayerController's OnPossess is
+    // only a jump to APlayerController's (8.00 0x145E0A0 -> 0x2B74330, 7.40 0x141E4C0 -> 0x2B0BC90). Its listeners: the
+    // minigame's OnPlayerPawnPossessed (8.00 0x1229230, the new pawn's OnDied for the game's player data) and
+    // PutPlayerIntoStasis (0x122C9B0), and Athena_PlayerController's ReactToPawnPossession, whose PawnPossessedDispatcher
+    // the Game Starting Inventory's OnPawnPossessed hears (GrantOnRespawn: TryGiveAllItemsToPlayer). Sent last, after the
+    // pawn's loadout, so the device's items aren't followed by anything of Core's. Not for the returns above (a guided
+    // missile and the pawn it gives back aren't a new pawn for the player).
+    if (Role == ROLE_Authority && InPawn && Member_OnPlayerPawnPossessed.IsAvailable())
+    {
+        APawn* PossessedPawn = InPawn;
+        OnPlayerPawnPossessed.ProcessMulticastDelegate(&PossessedPawn);
+    }
 #endif
 }
 

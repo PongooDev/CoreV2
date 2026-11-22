@@ -85,6 +85,9 @@ public:
     DefineUProperty(AFortInventory*, WorldInventory)
     DefineUProperty(AFortInventory*, OutpostInventory)
     DefineUProperty(AFortPawn*, MyFortPawn)
+    // 7.30+: broadcast with the new pawn as the player possesses it (the minigame's OnPlayerPawnPossessed and
+    // PutPlayerIntoStasis, Athena_PlayerController's ReactToPawnPossession for the Creative devices).
+    DefineUProperty(FMulticastScriptDelegate, OnPlayerPawnPossessed)
     // From 7.00: the player's creative profile on the server, copied from their registration (UFortRegisteredPlayerInfo
     // +0x108 on 7.00, 0x12AB7FF), which ServerLoadPlotForPortal finds their plot items in.
     DefineUProperty(UObject*, CreativeModeProfile)

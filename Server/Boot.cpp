@@ -75,6 +75,7 @@
 #include "Player/FortPlayerControllerDeployableBase.h"
 #include "DeployableBases/FortDeployableBaseLibrary.h"
 #include "Player/FortPlayerControllerOutpost.h"
+#include "Player/FortPlayerControllerPvE.h"
 #include "Player/FortPlayerControllerZone.h"
 #include "Player/FortPlayerState.h"
 #include "FortGlobals.h"
@@ -366,6 +367,7 @@ static void InstallHooks()
         UFortGameplayAbility::HookNatives();
         AFortPlayerController::HookVTables();
         AFortPlayerControllerZone::HookVTables();
+        AFortPlayerControllerPvE::HookVTables();
         AFortPlayerControllerOutpost::HookVTables();
         AFortPlayerControllerDeployableBase::HookVTables();
         UFortDeployableBaseLibrary::HookNatives();

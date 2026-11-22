@@ -11886,15 +11886,47 @@ bool Finder::ResolveShouldDropItemLive(ptrdiff_t GameplayMutatorsOffset)
             Function = Athena;
         }
     }
+    // 8.00 (CL-5203069) still has the virtual (AFortPlayerControllerAthena's 0xDCF6C0), only not its reflection. Its
+    // mutator iterator goes through FortMutatorContext (0xDB0000), so no function in reach reads the mutator list
+    // component's Mutators. The loop is the override's own: each mutator's drop answer, call [rax+760h], then cmp al, 2
+    // (the mutator overrides, 0xDCF7A0), AFortAthenaMutator_InventoryOverride's being 0xE222E0. Looked at only when no
+    // shape above is there, and only taken when exactly one such override is in the vtable.
+    int32_t AnswerLoopSlot = -1;
+    int32_t AnswerLoops = 0;
+    for (int32_t Slot = 0; Index < 0 && ControllerVTable && AthenaVTable && Slot < 0x400; ++Slot)
+    {
+        const uintptr_t Base = reinterpret_cast<uintptr_t>(ControllerVTable[Slot]);
+        const uintptr_t Athena = reinterpret_cast<uintptr_t>(AthenaVTable[Slot]);
+        if ((!IsInText(Base) && !IsCoreFunction(Base)) || (!IsInText(Athena) && !IsCoreFunction(Athena)))
+        {
+            break;
+        }
+        if (!IsInText(Base) || !IsInText(Athena) || Athena == Base || !Finder::BodyIs(Base, { 0x41, 0x0F, 0xB6, 0xC0, 0xC3 }))
+        {
+            continue;
+        }
+        const uintptr_t AthenaEnd = Finder::FunctionStart(Athena) == Athena ? Finder::FunctionEnd(Athena) : 0;
+        bool bAnswerLoop = false;
+        for (uintptr_t Site = AthenaEnd > Athena && AthenaEnd - Athena <= 0x200 ? FindVirtualCall(Athena, AthenaEnd) : 0; Site && !bAnswerLoop; Site = FindVirtualCall(Site + 1, AthenaEnd))
+        {
+            bAnswerLoop = Site + 8 <= AthenaEnd && Byte(Site + 6) == 0x3C && Byte(Site + 7) == 0x02;
+        }
+        if (bAnswerLoop && ++AnswerLoops == 1)
+        {
+            AnswerLoopSlot = Slot;
+            Function = Athena;
+        }
+    }
+    if (Index < 0 && AnswerLoops == 1)
+    {
+        Index = AnswerLoopSlot;
+    }
+    else if (Index < 0 && AnswerLoops > 1)
+    {
+        Log::Error(L"Finder: AFortPlayerController::ShouldDropItem: {} overrides loop over the mutators' answers, none is taken", AnswerLoops);
+    }
     if (Index < 0)
     {
-        // 8.00 (CL-5203069) has no AFortPlayerController::ShouldDropItem in its reflection: the mutator's drop filter is
-        // gone from the build, so there is no override for Core to find.
-        if (Packed::Changelist() >= 5203069)
-        {
-            Log::Info(L"Finder: AFortPlayerController::ShouldDropItem isn't in this build (8.00 removed the mutator's drop filter); Core's drop filter hook is off");
-            return false;
-        }
         Log::Error(L"Finder: AFortPlayerController::ShouldDropItem not found (GameplayMutators +0x{:X}), the game state's mutators aren't asked which items an eliminated player drops",
             GameplayMutatorsOffset > 0 ? static_cast<int32_t>(GameplayMutatorsOffset) : 0);
         return false;

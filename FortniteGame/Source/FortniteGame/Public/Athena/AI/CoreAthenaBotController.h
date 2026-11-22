@@ -637,6 +637,8 @@ private:
     // DeathSpot, its spot around the body (AFortPlayerControllerAthena::GetInventoryDropSpots).
     void DropItem(UFortItemDefinition* Definition, int32_t Count, int32_t LoadedAmmo, const FVector* DeathSpot = nullptr);
     void DropInventory();
+    // What the playlist's AFortAthenaMutator_ItemDropOnDeath leaves where a player who comes back died (CoreV2 #537).
+    void DropItemsOnDeathBeforeRespawning();
     void ApplyStartingHealth();
     // The bot stops shooting: the shot's fire input is let go (EndShot) and a held fire cue goes (RemoveWeaponFireCue).
     void StopFiring();

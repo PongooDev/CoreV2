@@ -52,6 +52,7 @@ class EFortItemType
     DefineUEnumValue(Ingredient)
     DefineUEnumValue(Food)
     DefineUEnumValue(Gadget)
+    DefineUEnumValue(AthenaGadget) // Battle Royale's gadgets; Reflection::InvalidEnumValue on builds without it
     DefineUEnumValue(HomebaseGadget)
     DefineUEnumValue(HeroAbility)
     DefineUEnumValue(MissionItem)

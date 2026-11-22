@@ -29,6 +29,7 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Athena/Mutators/FortAthenaMutator.h"
 #include "Athena/Mutators/FortAthenaMutator_Barrier.h"
 #include "Engine/AssetManager.h"
 #include "Engine/DataTable.h"
@@ -8491,7 +8492,38 @@ void FCoreAthenaBotController::DropInventory()
     // its own spot on the rings around the body (GetInventoryDropSpots) and is tossed onto it (TossOntoFloor). The plain
     // toss the bots used falls short of the spot it is aimed at (#89: aimed 1.2 to 2.8m out, it comes down 10 to 35 out),
     // so a bot's loot lay in a pile (#339).
+    //
+    // The game state's mutators have a say in each item too, as they have in a player's: DropInventoryOnDeath asks
+    // AFortPlayerController::ShouldDropItem, which asks each mutator's FortGameStateAthena_ShouldDropItem and stops at the
+    // first that answers (6.31 CL-4573279 0xCBAD80). 6.30+ answers with AFortAthenaMutator_InventoryOverride (0xD3C4C0),
+    // and 6.31's Team Rumble has one at ForceKeep (RespawnInventoryDropMutator), so a player keeps everything. A bot has
+    // no player controller to ask through, and dropped all of it on each death (CoreV2 #537); the mutator's answer for
+    // the bot's item is ShouldDropBotItem. What it keeps stays with the bot through its respawn (RespawnPlayerAfterDeath).
     HealingItem = nullptr;
+    AFortGameModeAthena* GameMode = Manager->GetGameMode();
+    UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
+    AFortGameStateAthena* GameState = World ? Cast<AFortGameStateAthena>(reinterpret_cast<UObject*>(World->GetGameState())) : nullptr;
+    UClass* const OverrideClass = AFortAthenaMutator_InventoryOverride::StaticClass();
+    const TArray<UObject*>* MutatorList = GameState && OverrideClass && AFortAthenaMutator_InventoryOverride::HasDropOverrides() ? GameState->GetGameplayMutatorList() : nullptr;
+    int32_t Kept = 0;
+    const auto ShouldDrop = [&](UFortItemDefinition* Definition)
+    {
+        for (int32_t Index = 0; MutatorList && Definition && Index < MutatorList->Num(); ++Index)
+        {
+            UObject* Mutator = (*MutatorList)[Index];
+            if (!Mutator || !Mutator->IsA(OverrideClass) || (AFortAthenaMutator::HasMutatorActive() && !reinterpret_cast<AFortAthenaMutator*>(Mutator)->bMutatorActive))
+            {
+                continue;
+            }
+            bool bShouldDrop = true;
+            if (reinterpret_cast<AFortAthenaMutator_InventoryOverride*>(Mutator)->ShouldDropBotItem(Definition, bShouldDrop))
+            {
+                Kept += bShouldDrop ? 0 : 1;
+                return bShouldDrop;
+            }
+        }
+        return true;
+    };
     struct FBotDrop
     {
         UFortItemDefinition* Definition;
@@ -8506,23 +8538,52 @@ void FCoreAthenaBotController::DropInventory()
             Drops.push_back({ Definition, Count, LoadedAmmo });
         }
     };
-    for (const FCoreAthenaBotWeapon& Weapon : WeaponList)
+    for (auto Weapon = WeaponList.begin(); Weapon != WeaponList.end();)
     {
-        AddDrop(Weapon.WeaponDefinition, 1, Weapon.LoadedAmmo);
+        if (ShouldDrop(Weapon->WeaponDefinition))
+        {
+            AddDrop(Weapon->WeaponDefinition, 1, Weapon->LoadedAmmo);
+            Weapon = WeaponList.erase(Weapon);
+        }
+        else
+        {
+            ++Weapon;
+        }
     }
-    for (const auto& [Definition, Count] : Ammo)
+    for (auto Stack = Ammo.begin(); Stack != Ammo.end();)
     {
-        AddDrop(Definition, Count, 0);
+        if (ShouldDrop(Stack->first))
+        {
+            AddDrop(Stack->first, Stack->second, 0);
+            Stack = Ammo.erase(Stack);
+        }
+        else
+        {
+            ++Stack;
+        }
     }
-    for (const auto& [Definition, Count] : Consumables)
+    for (auto Stack = Consumables.begin(); Stack != Consumables.end();)
     {
-        AddDrop(Definition, Count, 0);
+        if (ShouldDrop(Stack->first))
+        {
+            AddDrop(Stack->first, Stack->second, 0);
+            Stack = Consumables.erase(Stack);
+        }
+        else
+        {
+            ++Stack;
+        }
     }
-    if (UFortGameData* GameData = UFortAssetManager::Get().GetGameData())
+    UFortGameData* GameData = UFortAssetManager::Get().GetGameData();
+    UFortItemDefinition* const Resources[3] = { GameData ? GameData->GetWoodItemDefinition() : nullptr, GameData ? GameData->GetStoneItemDefinition() : nullptr,
+        GameData ? GameData->GetMetalItemDefinition() : nullptr };
+    for (int32_t Kind = 0; Kind < 3; ++Kind)
     {
-        AddDrop(GameData->GetWoodItemDefinition(), Materials[0], 0);
-        AddDrop(GameData->GetStoneItemDefinition(), Materials[1], 0);
-        AddDrop(GameData->GetMetalItemDefinition(), Materials[2], 0);
+        if (!Resources[Kind] || Materials[Kind] <= 0 || ShouldDrop(Resources[Kind]))
+        {
+            AddDrop(Resources[Kind], Materials[Kind], 0);
+            Materials[Kind] = 0;
+        }
     }
     if (AFortPlayerPawnAthena* Pawn = GetPawn(); Pawn && !Drops.empty())
     {
@@ -8532,11 +8593,41 @@ void FCoreAthenaBotController::DropInventory()
             DropItem(Drops[Index].Definition, Drops[Index].Count, Drops[Index].LoadedAmmo, &Spots[Index]);
         }
     }
-    Materials[0] = Materials[1] = Materials[2] = 0;
+    if (Kept > 0)
+    {
+        Log::Info(L"Battle Royale bots: {} keeps {} items, the game state's mutators say so, and drops {}", BotName, Kept, Drops.size());
+    }
     HarvestTarget = nullptr;
-    WeaponList.clear();
-    Ammo.clear();
-    Consumables.clear();
+    EquippedIndex = -1;
+#endif
+}
+
+void FCoreAthenaBotController::DropItemsOnDeathBeforeRespawning()
+{
+#if WITH_SERVER_CODE
+    // A player who comes back also leaves what the playlist's AFortAthenaMutator_ItemDropOnDeath drops (6.31's Team
+    // Rumble: a share of each ammo stack and a stack of wood, stone or metal; its
+    // AFortGameModeAthena_OnPawnDeathBeforeRespawning, 0xD30000). The game calls it from the pawn's death (0xD09E00) only
+    // for a pawn an AFortPlayerControllerAthena controls, so a bot's death never reaches it (CoreV2 #537):
+    // DropBotItemsOnDeath drops the same for the bot, from what it holds of each ammo.
+    AFortPlayerPawnAthena* Pawn = GetPawn();
+    AFortGameModeAthena* GameMode = Manager->GetGameMode();
+    UClass* const DropClass = AFortAthenaMutator_ItemDropOnDeath::StaticClass();
+    if (!Pawn || !GameMode || !DropClass || !AFortAthenaMutator_ItemDropOnDeath::HasItemsToDrop())
+    {
+        return;
+    }
+    // The mutator answers nothing of the game state's, so it is one of the game mode's (6.31's Team Rumble: 3 mutators
+    // for the game mode, 2 for the game state).
+    for (AActor* Actor : UGameplayStatics::GetAllActorsOfClass(GameMode, DropClass))
+    {
+        AFortAthenaMutator_ItemDropOnDeath* Mutator = reinterpret_cast<AFortAthenaMutator_ItemDropOnDeath*>(Actor);
+        if (Mutator && !Actor->IsPendingKill() && (!AFortAthenaMutator::HasMutatorActive() || Mutator->bMutatorActive))
+        {
+            Mutator->DropBotItemsOnDeath(reinterpret_cast<AFortPawn*>(Pawn), Ammo);
+            return;
+        }
+    }
 #endif
 }
 
@@ -8906,6 +8997,7 @@ void FCoreAthenaBotController::OnPossesedPawnDied(AFortPlayerStateAthena* Killer
     UWorld* World = GameMode ? GameMode->GetWorld() : nullptr;
     if (World && PlayerState && GameMode->IsRespawningAllowed(PlayerState))
     {
+        DropItemsOnDeathBeforeRespawning();
         RespawnTime = World->GetTimeSeconds() + RespawnDelay;
         Log::Info(L"Battle Royale bots: {} respawns in {:.0f} s, the playlist brings its players back", BotName, RespawnDelay);
         return;
@@ -8924,7 +9016,7 @@ void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
 #if WITH_SERVER_CODE
     // As AFortPlayerControllerAthena::RespawnPlayerAfterDeath brings a player back on such a playlist (CoreV2 #344): a new
     // pawn once the countdown is over, in the safe zones phase (PlayerCanRestart), skydiving from RespawnHeight over where
-    // the old one died, with nothing but the pickaxe (its loot dropped where it fell).
+    // the old one died, with the pickaxe and whatever the playlist let it keep (the rest dropped where it fell).
     if (Now < RespawnTime)
     {
         return;
@@ -8971,7 +9063,19 @@ void FCoreAthenaBotController::RespawnPlayerAfterDeath(float Now)
         }
     }
     PlayerBotPawn = nullptr;
+    // What the game state's mutators kept through the death (DropInventory: Team Rumble keeps everything) comes back with
+    // the bot, as a respawned player still holds theirs (CoreV2 #537); the rest was dropped where it fell.
+    std::vector<FCoreAthenaBotWeapon> KeptWeapons = std::move(WeaponList);
+    std::map<UFortItemDefinition*, int32_t> KeptAmmo = std::move(Ammo);
+    std::map<UFortItemDefinition*, int32_t> KeptConsumables = std::move(Consumables);
+    const int32_t KeptMaterials[3] = { Materials[0], Materials[1], Materials[2] };
     ClearInventory();
+    WeaponList = std::move(KeptWeapons);
+    Ammo = std::move(KeptAmmo);
+    Consumables = std::move(KeptConsumables);
+    Materials[0] = KeptMaterials[0];
+    Materials[1] = KeptMaterials[1];
+    Materials[2] = KeptMaterials[2];
     CurrentTarget = nullptr;
     LastAttacker = nullptr;
     Downer = nullptr;

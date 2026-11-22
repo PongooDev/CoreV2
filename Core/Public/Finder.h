@@ -364,7 +364,8 @@ namespace Finder
     // AFortPlayerStateAthena_HandleScoringEvent), the last call of the coin's and the supply drop's scoring natives.
     bool ResolveScoringEventLive();
     // The slot of AFortPlayerControllerAthena's pawn-death handler when the build strips it (1.9.1), else -1.
-    int32_t StrippedAthenaPawnDiedIndex();
+    // MarkerComponentOffset: the controller's MarkerComponent (8.00), -1 where the build has none.
+    int32_t StrippedAthenaPawnDiedIndex(ptrdiff_t MarkerComponentOffset = -1);
     // The slot of AFortPlayerControllerAthena's PrepareDeathReport override when the build strips its Athena game mode
     // part (1.9.1, 1.10), else -1. KillerPlayerStateOffset: PlayerDeathReport's KillerPlayerState in the controller.
     int32_t StrippedAthenaPrepareDeathReportIndex(ptrdiff_t KillerPlayerStateOffset);

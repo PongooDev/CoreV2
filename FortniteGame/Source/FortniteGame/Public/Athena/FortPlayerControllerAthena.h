@@ -25,6 +25,7 @@ class AFortPawn;
 class AFortPlayerPawn;
 class AFortPlayerPawnAthena;
 class AFortPlayerStateAthena;
+class UAthenaMarkerComponent;
 class UAthenaPlayerMatchReport;
 class UFortHero;
 class UFortHeroType;
@@ -157,6 +158,9 @@ public:
     DefineUProperty(bool, bMarkedAlive)
     // Server: who SpectateOnDeath watches first after a death, the eliminator's pawn.
     DefineUProperty(APawn*, PlayerToSpectateOnDeath)
+    // 8.00 (CL-5203069): the player's map and world markers (UAthenaMarkerComponent, new in 8.00), which the pawn-death
+    // handler asks to take the player's map marker away (AFortPlayerControllerAthena 0xDBDEF0: [this+0x2DE8], 0xE2FB30).
+    DefineUProperty(UAthenaMarkerComponent*, MarkerComponent)
     DefineUFunction(SpectateOnDeath)
     // The build's SpectateOnDeath (1.9 0x438550, 3.3 0xA31650, 4.5 0xAAC400, 5.40 0xC34710), through its UFunction: what
     // the death's spectate timer calls (OnPawnDied).
@@ -439,6 +443,8 @@ public:
     static ptrdiff_t TeamMembersOffset() { return Member_TeamMembers.IsAvailable() ? Member_TeamMembers.GetOffsetChecked() : -1; }
     static bool HasTeamMembers() { return Member_TeamMembers.IsAvailable(); }
     static ptrdiff_t PlayerDeathReportOffset() { return Member_PlayerDeathReport.GetOffsetChecked(); }
+    // -1 before 8.00 (CL-5203069), which adds the controller's MarkerComponent.
+    static ptrdiff_t MarkerComponentOffset() { return Member_MarkerComponent.IsAvailable() ? Member_MarkerComponent.GetOffsetChecked() : -1; }
 
 private:
     // _Implementation's parameters by value: the caller's copies, which the callee destroys (the original's body does).

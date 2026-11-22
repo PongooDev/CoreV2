@@ -201,7 +201,7 @@ void AFortPlayerControllerAthena::HookVTables()
         }
     }
 
-    const int32_t Index = Finder::StrippedAthenaPawnDiedIndex();
+    const int32_t Index = Finder::StrippedAthenaPawnDiedIndex(MarkerComponentOffset());
     if (Index < 0)
     {
         // The build's own handler takes a player out of the match and checks its win (1.8's RemoveFromAlivePlayers,
@@ -404,6 +404,14 @@ void AFortPlayerControllerAthena::OnPawnDied(float Damage, const FGameplayTagCon
         if (AFortPlayerStateAthena* MarkerState = AthenaStateOf(this))
         {
             Natives::AFortPlayerStateAthena_SetMapIndicatorPos(MarkerState, FVector2D(0.0f, 0.0f));
+        }
+    }
+    // 8.00 (0xDBDEF0) asks the controller's MarkerComponent to take the player's map marker away.
+    else if (Natives::UAthenaMarkerComponent_LocalRemoveMapMarker && Role == ROLE_Authority)
+    {
+        if (UAthenaMarkerComponent* Markers = MarkerComponent)
+        {
+            Natives::UAthenaMarkerComponent_LocalRemoveMapMarker(Markers);
         }
     }
 

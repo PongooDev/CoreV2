@@ -10,6 +10,7 @@ class FOutputDevice;
 class IModularFeatures;
 class UFortAbilitySystemComponent;
 class UAthenaAIPerceptionManager;
+class UAthenaMarkerComponent;
 class AAthenaAIController;
 struct FGameplayAbilityActivationInfo;
 struct FGameplayAbilityRepSharedAnim;
@@ -791,6 +792,10 @@ namespace Natives
     // the vector by value in rdx). Null elsewhere.
     inline void (*AFortPlayerControllerAthena_ServerRemoveMapCursor)(AFortPlayerControllerAthena* This) = nullptr;
     inline void (*AFortPlayerStateAthena_SetMapIndicatorPos)(AFortPlayerStateAthena* This, FVector2D InMapIndicatorPos) = nullptr;
+    // 8.00 (CL-5203069) moves the map marker to the controller's MarkerComponent: the stripped handler (0xDBDEF0) keeps,
+    // on the server, one call of it with the component (0xE2FB30: the owner's map marker in MarkerStream goes through
+    // ServerRemoveMapMarker). 21.40's UAthenaMarkerComponent::LocalRemoveMapMarker. Null elsewhere.
+    inline void (*UAthenaMarkerComponent_LocalRemoveMapMarker)(UAthenaMarkerComponent* This) = nullptr;
     // AFortPlayerControllerZone's death report (1.10 0x8DB450), which AFortPlayerControllerAthena's override calls first
     // where its Athena part is stripped (1.9.1, 1.10): Finder::StrippedAthenaPrepareDeathReportIndex.
     inline void (*AFortPlayerControllerZone_PrepareDeathReport)(AFortPlayerControllerAthena* This, float LethalDamage, const FGameplayTagContainer& DamageTags, const FVector& Momentum, AController* KillerController, AActor* DamageCauser, bool bDroppedBackpack) = nullptr;

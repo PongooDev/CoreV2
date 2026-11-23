@@ -15222,6 +15222,18 @@ bool Finder::ResolveOutpostMcpRequestLive()
                 CopySlot = Next + 5;
             }
         }
+        // 8.20 (CL-5625478, 0x15AD645) keeps the frame pointer and sets this between them too: lea rdx, [rbp-41h]; mov
+        // rcx, rbx; call [rax+40h]. Only looked for where the plain rbp form isn't there.
+        for (uintptr_t Site = !bRsp && !Copy ? Abort : 0; Site && !Copy && Site + 10 <= AbortEnd; ++Site)
+        {
+            const uintptr_t Slot = Byte(Site) == 0x48 && Byte(Site + 1) == 0x8D ? FrameSlot(Site + 2, 2, false) : 0;
+            const uintptr_t Next = Site + 3 + Slot;
+            if (Slot && Byte(Next) == 0x48 && Byte(Next + 1) == 0x8B && Byte(Next + 3) == 0xFF && Byte(Next + 4) == 0x50)
+            {
+                Copy = Site + 2 + Slot;
+                CopySlot = Next + 5;
+            }
+        }
         // lea rcx, [frame+UrlConfigName] for the FString the url name is copied into.
         for (uintptr_t Site = UrlLoad ? UrlLoad - 0x30 : 0; Site && Site < UrlLoad; ++Site)
         {

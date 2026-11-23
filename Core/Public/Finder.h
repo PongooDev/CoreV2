@@ -442,6 +442,10 @@ namespace Finder
     // controller lookup, from its log line, only where the pawn's tick also reaches it (7.40, 8.00) and it reads the
     // controller it looked up without checking it. None elsewhere.
     bool ResolveAutoPickupLive();
+    // AFortMinigame's unreflected bAutoRestart, from ToggleAutoRestartMinigame's body (its exec, ToggleAutoRestartExec,
+    // jumps there): cmp byte ptr [rcx+bAutoRestart], 0; setz al; mov [rcx+bAutoRestart], al (7.40 0x11EEAF0: +0x651, 8.00
+    // 0x1238A80: +0x669). -1 where it isn't that shape.
+    ptrdiff_t MinigameAutoRestartOffset(uintptr_t ToggleAutoRestartExec);
     // AActor::Destroy (Natives::AActor_Destroy), from AActor's own K2_DestroyActor (the slot execK2_DestroyActor calls, in
     // AActor's vtable), which jumps to it: for actors whose class overrides K2_DestroyActor with nothing (AController).
     bool ResolveActorDestroyLive();

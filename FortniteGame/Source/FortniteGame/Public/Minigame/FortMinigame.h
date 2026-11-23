@@ -16,6 +16,7 @@ class AFortPlayerControllerAthena;
 class AFortPlayerPawn;
 class AFortPlayerState;
 class AFortPlayerStateAthena;
+class AFortVolume;
 class APawn;
 class UFunction;
 class UWorld;
@@ -24,8 +25,11 @@ class UWorld;
 class EFortMinigameState
 {
     DefineUnrealEnum(EFortMinigameState, FortniteGame)
+    DefineUEnumValue(PreGame)
     DefineUEnumValue(Warmup)
     DefineUEnumValue(InProgress)
+    DefineUEnumValue(PostGameEnd)
+    DefineUEnumValue(PostGameAbandon)
 };
 
 // A player of a Creative game (from 7.00), in the game's PlayerArray. 7.40 (CL-5046157) reads
@@ -86,6 +90,8 @@ class AFortMinigame : public AInfo
     // caller or binding left in the image (Final, not Blueprint-callable; their binders went with the server code).
     DefineUFunction(OnClientFinishTeleportingForMinigame)
     DefineUFunction(ClearTeleportForMinigame)
+    DefineUFunction(OnRep_CurrentState)
+    DefineUFunction(StartMinigame)
 
 public:
     // 7.40's (0x11EEAF0, intact; authority only): flips the game's auto restart (an unreflected flag, +0x651).
@@ -94,6 +100,9 @@ public:
     DefineUProperty(EFortMinigameWarmupType, WarmupType)
     DefineUProperty(EFortMinigamePlayerSpawnLocationSetting, SpawnLocationSetting)
     DefineUProperty(EFortMinigameState, CurrentState)
+    DefineUProperty(AFortVolume*, Volume)
+    // Who started the game last (StartMinigame_Implementation) or asked for its restart (RestartMinigame_Implementation).
+    DefineUProperty(AFortPlayerState*, MinigameStarter)
     DefineUStructProperty(FMinigamePlayers, PlayerArray)
     // The travel screen's text at a game's start (Minigame_PlayerCreated: "Starting Game").
     DefineUProperty(FText, ClientMinigameStartedText)
@@ -147,12 +156,20 @@ public:
     // (its SetStasisMode(None) leaves them walking on air). Epic's place, the island Blueprint's
     // OnPlayerTeleportedForMinigameStart with bWantsToSkydive, went with the stripped RespawnMinigamePlayers' caller.
     void ResumeSkydivingAfterWarmup();
+    // Core's native for the volume manager's OnVolumeStateChanged (#543), as the game's island is Ready again after
+    // AFortMinigame::PostGameReset's restore. 8.00's PostGameReset (0x122AAF0) lost 7.40's step that puts the game back
+    // in PreGame (0x11E350F: CurrentState = PreGame, OnRep_CurrentState), so the game stayed post-game and couldn't
+    // start (StartMinigame_Implementation needs PreGame or Warmup); a game still post-game here gets that step. Then a
+    // restart RestartMinigame_Implementation left pending (bPendingRestart; or bAutoRestart after a game, Core's restored
+    // PreGame only) starts the game, as 8.20's SetMinigameState does on PreGame (0x1341C80).
+    void HandleVolumeStateChangedForReset(uint8_t NewState, AFortVolume* ChangedVolume);
 
     DECLARE_FUNCTION(execTeleportPlayersToStartLocations);
     DECLARE_FUNCTION(execClearPlayerInventories);
     DECLARE_FUNCTION(execClearPlayerInventory);
     DECLARE_FUNCTION(execRespawnMinigamePlayers);
     DECLARE_FUNCTION(execHandleStateChangedForWarmup);
+    DECLARE_FUNCTION(execHandleVolumeStateChangedForReset);
 
     // From 7.00, where the build's exec is the empty one.
     static void HookNatives();
@@ -164,6 +181,9 @@ private:
     static void BindGameEvents(AFortMinigame* Minigame);
     static inline UFunction* ClearPlayerInventoriesFunction = nullptr;
     static inline UFunction* HandleStateChangedForWarmupFunction = nullptr;
+    static inline UFunction* HandleVolumeStateChangedForResetFunction = nullptr;
+    // bPendingRestart, the unreflected flag after MinigameStarter (-1 without it).
+    static inline ptrdiff_t PendingRestartOffset = -1;
 
     // OutRotation and bOutRespawningOnGround where the build answers them (7.40: OutRotation from 7.30).
     bool OverridePlayerSpawnLocation(APawn* PlayerPawn, AFortPlayerStateAthena* PlayerState, FVector& OutLocation, FRotator* OutRotation = nullptr, bool* bOutRespawningOnGround = nullptr);

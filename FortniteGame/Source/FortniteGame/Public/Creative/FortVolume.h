@@ -87,6 +87,11 @@ class AFortVolumeManager : public AInfo
     DefineUFunction(ResetVolumeAndLevelRecord)
 
 public:
+    // Broadcast by HandleVolumeStateChanged (8.00 0xEF5E70) with each registered volume's new EVolumeState (the volume's
+    // SetVolumeState, 8.00 0xEEE730), on the server too.
+    DefineUProperty(FMulticastScriptDelegate, OnVolumeStateChanged)
+    static bool HasOnVolumeStateChanged() { return Member_OnVolumeStateChanged.IsAvailable(); }
+
     AFortVolume* GetVolumeForActor(const AActor* Actor);
     // The controllers of the players in Volume (the manager's VolumeActivePlayers), the game's own UFunction (from 7.00).
     // Empty where the build has none.

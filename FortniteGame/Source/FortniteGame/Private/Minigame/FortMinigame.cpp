@@ -17,6 +17,7 @@
 #include "Athena/FortPlayerControllerAthena.h"
 #include "Athena/FortPlayerPawnAthena.h"
 #include "Athena/FortPlayerStateAthena.h"
+#include "Creative/FortVolume.h"
 #include "UObject/UnrealType.h"
 #include "Pawns/FortPlayerPawn.h"
 #include "Player/FortPlayerState.h"
@@ -717,6 +718,59 @@ void AFortMinigame::ResumeSkydivingAfterWarmup()
 #endif
 }
 
+void AFortMinigame::HandleVolumeStateChangedForReset(uint8_t NewState, AFortVolume* ChangedVolume)
+{
+#if WITH_SERVER_CODE
+    // Ready is the end of PostGameReset's restore (AFortVolumeManager::MinigameExitReadOnlyForVolume, 8.00 0xEFB180: its
+    // last step sets the volume Ready), the moment the game's own OnVolumeStateChanged, which PostGameReset binds to the
+    // volume, unbinds itself. 7.40's game is in PreGame by then (its PostGameReset set it before the restore).
+    if (Role != ROLE_Authority || NewState != EVolumeState::Ready || !ChangedVolume || static_cast<AFortVolume*>(Volume) != ChangedVolume)
+    {
+        return;
+    }
+    const uint8_t State = CurrentState;
+    const bool bWasPostGame = State == EFortMinigameState::GetPostGameEnd() || State == EFortMinigameState::GetPostGameAbandon();
+    if (bWasPostGame)
+    {
+        CurrentState = EFortMinigameState::GetPreGame();
+        Reflection::FParams(FindStaticFunction_OnRep_CurrentState(), true).Call(this);
+        Log::Info(L"Minigame: {}'s island is reset after its game, and the game is back in PreGame", GetName().ToStdString());
+    }
+    if (PendingRestartOffset < 0 || CurrentState != EFortMinigameState::GetPreGame())
+    {
+        return;
+    }
+    bool& bPendingRestart = *reinterpret_cast<bool*>(reinterpret_cast<uint8_t*>(this) + PendingRestartOffset);
+    const bool bAutoRestart = *(reinterpret_cast<const uint8_t*>(this) + PendingRestartOffset + 1) != 0;
+    const bool bRequested = bPendingRestart;
+    if (!bRequested && !(bWasPostGame && bAutoRestart))
+    {
+        return;
+    }
+    bPendingRestart = false;
+    AFortPlayerState* Starter = MinigameStarter;
+    AActor* Owner = Starter ? reinterpret_cast<AActor*>(Starter)->GetOwner() : nullptr;
+    AFortPlayerControllerAthena* StarterController = Owner ? Cast<AFortPlayerControllerAthena>(reinterpret_cast<UObject*>(Owner)) : nullptr;
+    Reflection::FParams Params(FindStaticFunction_StartMinigame(), true);
+    if (!Params.Has(L"InstigatorPC") || Params.Set(L"InstigatorPC", reinterpret_cast<UObject*>(StarterController)))
+    {
+        Params.Call(this);
+    }
+    Log::Info(L"Minigame: {} starts again ({}), for {}", GetName().ToStdString(), bRequested ? L"its pending restart" : L"auto restart",
+        Starter ? reinterpret_cast<APlayerState*>(Starter)->GetPlayerName().ToStdString() : std::wstring(L"nobody"));
+#endif
+}
+
+DEFINE_FUNCTION(AFortMinigame::execHandleVolumeStateChangedForReset)
+{
+    P_GET_PROPERTY(UByteProperty, Z_Param_NewState);
+    P_GET_OBJECT(AFortVolume, Z_Param_ChangedVolume);
+    P_FINISH;
+    P_NATIVE_BEGIN;
+    static_cast<AFortMinigame*>(Context)->HandleVolumeStateChangedForReset(Z_Param_NewState, Z_Param_ChangedVolume);
+    P_NATIVE_END;
+}
+
 DEFINE_FUNCTION(AFortMinigame::execRespawnMinigamePlayers)
 {
     P_FINISH;
@@ -755,6 +809,18 @@ void AFortMinigame::BindGameEvents(AFortMinigame* Minigame)
         FMulticastScriptDelegate& StateChanged = Minigame->StateChangedDelegate;
         StateChanged.AddUniqueDynamic(Minigame, HandleStateChangedForWarmupFunction->GetFName());
     }
+    // The world's volume manager relays every island volume's state (its HandleVolumeStateChanged is bound to each as
+    // the volume registers, 8.00 0xEE7910); each game keeps to its own Volume.
+    AFortVolumeManager* Manager = HandleVolumeStateChangedForResetFunction ? AFortVolumeManager::Get(Minigame) : nullptr;
+    if (Manager)
+    {
+        FMulticastScriptDelegate& VolumeStateChanged = Manager->OnVolumeStateChanged;
+        VolumeStateChanged.AddUniqueDynamic(Minigame, HandleVolumeStateChangedForResetFunction->GetFName());
+    }
+    else if (HandleVolumeStateChangedForResetFunction)
+    {
+        Log::Warning(L"Minigame: {} has no volume manager to hear its island's reset from, so it may stay post-game", Minigame->GetName().ToStdString());
+    }
 }
 
 void AFortMinigame::BindWorld(UWorld* World)
@@ -769,7 +835,7 @@ void AFortMinigame::BindWorld(UWorld* World)
     // spawns its minigame (MinigameClass), so the world's spawns from now on are bound, and those already up.
     // RespawnMinigamePlayers likewise (its only caller was StartMinigame's Respawn warmup): the game's broadcast at that
     // moment is the minigame's StateChangedDelegate with Warmup.
-    if (!World || (!ClearPlayerInventoriesFunction && !HandleStateChangedForWarmupFunction) || InventoryResetWorld.Get() == World)
+    if (!World || (!ClearPlayerInventoriesFunction && !HandleStateChangedForWarmupFunction && !HandleVolumeStateChangedForResetFunction) || InventoryResetWorld.Get() == World)
     {
         return;
     }
@@ -788,9 +854,10 @@ void AFortMinigame::BindWorld(UWorld* World)
             ++Existing;
         }
     }
-    const std::wstring What = std::format(L"{}{}{}", ClearPlayerInventoriesFunction ? L"reset their players' inventories as their games start and end (MinigameStartedDelegate, MinigameEndedDelegate)" : L"",
+    const std::wstring What = std::format(L"{}{}{}{}", ClearPlayerInventoriesFunction ? L"reset their players' inventories as their games start and end (MinigameStartedDelegate, MinigameEndedDelegate)" : L"",
         ClearPlayerInventoriesFunction && HandleStateChangedForWarmupFunction ? L" and " : L"",
-        HandleStateChangedForWarmupFunction ? L"respawn their players for a Respawn warmup (StateChangedDelegate)" : L"");
+        HandleStateChangedForWarmupFunction ? L"respawn their players for a Respawn warmup (StateChangedDelegate)" : L"",
+        HandleVolumeStateChangedForResetFunction ? L"; they return to PreGame and restart once their island is reset after a game (AFortVolumeManager::OnVolumeStateChanged)" : L"");
     Log::Info(L"Minigame: the minigames {} ({} already up)", Handle.IsValid() ? What + L", bound as they spawn (UWorld::OnActorSpawned)"
         : std::wstring(L"can't be bound as they spawn: the world's OnActorSpawned wasn't found"), Existing);
 #endif
@@ -890,6 +957,31 @@ void AFortMinigame::HookNatives()
             Log::Error(L"Hook AFortMinigame::RespawnMinigamePlayers: not restored (StateChangedDelegate's signature {}, OverridePlayerSpawnLocation and the minigame enums {}), so a Respawn warmup moves nobody to the spawn pads",
                 Signature ? L"found" : L"not found", bReflected ? L"found" : L"not found");
         }
+    }
+
+    // 7.40+ (#543): the end of the post-game reset (see HandleVolumeStateChangedForReset), from the volume manager's
+    // OnVolumeStateChanged. bPendingRestart is the byte before bAutoRestart and after MinigameStarter (7.40 +0x650, 8.00
+    // +0x668; 21.40 keeps that order).
+    UFunction* ToggleAutoRestart = StaticClass() ? FindStaticFunction_ToggleAutoRestartMinigame() : nullptr;
+    const ptrdiff_t AutoRestart = ToggleAutoRestart ? Finder::MinigameAutoRestartOffset(reinterpret_cast<uintptr_t>(ToggleAutoRestart->GetNativeFunc())) : -1;
+    const ptrdiff_t Starter = Member_MinigameStarter.IsAvailable() ? static_cast<ptrdiff_t>(Member_MinigameStarter.GetOffsetChecked()) : -1;
+    const UProperty* ManagerDelegate = AFortVolumeManager::HasOnVolumeStateChanged() && Finder::ResolveClassFunctionMap()
+        ? AFortVolumeManager::StaticClass()->FindPropertyByName(FName(L"OnVolumeStateChanged")) : nullptr;
+    const UFunction* VolumeSignature = ManagerDelegate && ManagerDelegate->GetClass()->HasAnyCastFlag(CASTCLASS_UMulticastDelegateProperty)
+        ? static_cast<const UFunction*>(static_cast<const UMulticastDelegateProperty*>(ManagerDelegate)->SignatureFunction) : nullptr;
+    const bool bPendingRestartFound = AutoRestart > 0 && Starter >= 0 && AutoRestart - 1 == Starter + static_cast<ptrdiff_t>(sizeof(void*));
+    if (VolumeSignature && Member_CurrentState.IsAvailable() && Member_Volume.IsAvailable() && FindStaticFunction_OnRep_CurrentState()
+        && FindStaticFunction_StartMinigame() && EFortMinigameState::StaticEnum())
+    {
+        PendingRestartOffset = bPendingRestartFound ? AutoRestart - 1 : -1;
+        HandleVolumeStateChangedForResetFunction = StaticClass()->AddNativeFunction(L"HandleVolumeStateChangedForReset", &execHandleVolumeStateChangedForReset, VolumeSignature);
+        Log::Info(L"Finder: AFortMinigame's post-game reset end {}; bPendingRestart {}",
+            HandleVolumeStateChangedForResetFunction ? L"restored from the volume manager's OnVolumeStateChanged" : L"not restored (AddNativeFunction failed)",
+            bPendingRestartFound ? std::format(L"+0x{:X}", PendingRestartOffset) : std::wstring(L"not found (no restarts)"));
+    }
+    else if (AFortVolumeManager::HasOnVolumeStateChanged())
+    {
+        Log::Info(L"Finder: AFortMinigame's post-game reset end not restored (the volume manager's OnVolumeStateChanged signature {})", VolumeSignature ? L"found" : L"not found");
     }
 
     // The game mode binds its world's minigames as it binds the match's events (AFortGameModeAthena::BindMatchEvents);

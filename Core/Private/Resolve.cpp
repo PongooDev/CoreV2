@@ -19595,3 +19595,30 @@ bool Finder::ResolveModularFeaturesLive()
         reinterpret_cast<uintptr_t>(VTable[3]) - Finder::ImageBase());
     return true;
 }
+
+ptrdiff_t Finder::MinigameAutoRestartOffset(uintptr_t ToggleAutoRestartExec)
+{
+    static ptrdiff_t Offset = -2;
+    if (Offset != -2)
+    {
+        return Offset;
+    }
+    Offset = -1;
+    const uintptr_t Toggle = ToggleAutoRestartExec ? Finder::TraceFind(ToggleAutoRestartExec, 16, [](uintptr_t Instruction)
+    {
+        const int32_t Displacement = *reinterpret_cast<const int32_t*>(Instruction + 2);
+        return Byte(Instruction) == 0x80 && Byte(Instruction + 1) == 0xB9 && Byte(Instruction + 6) == 0x00
+            && Byte(Instruction + 7) == 0x0F && Byte(Instruction + 8) == 0x94 && Byte(Instruction + 9) == 0xC0
+            && Byte(Instruction + 10) == 0x88 && Byte(Instruction + 11) == 0x81 && *reinterpret_cast<const int32_t*>(Instruction + 12) == Displacement;
+    }) : 0;
+    if (Toggle)
+    {
+        Offset = *reinterpret_cast<const int32_t*>(Toggle + 2);
+        Log::Info(L"Finder: AFortMinigame::bAutoRestart at +0x{:X} (ToggleAutoRestartMinigame 0x{:X})", Offset, Toggle - Finder::ImageBase());
+    }
+    else
+    {
+        Log::Info(L"Finder: AFortMinigame::bAutoRestart: none (no ToggleAutoRestartMinigame of 7.40's shape)");
+    }
+    return Offset;
+}

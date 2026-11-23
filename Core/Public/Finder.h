@@ -188,6 +188,9 @@ namespace Finder
     bool ResolveOnlineSubsystemIsDedicated();
     bool ResolvePushToTalk();
     bool ResolveOnlineVoice();
+    // FPlatformFileManager::Get and FindPlatformFile, from the game's own FindPlatformFile(TEXT("PakFile")) lookups, and
+    // FPakPlatformFile::Mount with the offset of bSigned it reads. False (logged once) where they aren't found.
+    bool ResolvePakPlatformFileMount();
     // UEngine::Init's vtable slot, from FEngineLoop::Init's GEngine->Init call (needs GEngine).
     bool ResolveEngineInit();
     // FBaseServiceMcp::GetBasicAuth, which every MCP service's vtable holds (packed builds, FFortMcpConfig).

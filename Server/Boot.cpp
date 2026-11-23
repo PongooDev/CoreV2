@@ -7,6 +7,7 @@
 #include "GameMapsSettings.h"
 #include "Hooks.h"
 #include "LaunchEngineLoop.h"
+#include "IPlatformFilePak.h"
 #include "Misc/App.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Log.h"
@@ -288,6 +289,9 @@ static void InstallHooks()
         // The MCP services read their configs during PreInit, before the FortMcpConfig hook below, so the server's
         // client permission goes into them here, before anyone can join.
         FFortMcpConfig::AddDedicatedServerPermissionsToLoadedServices();
+        // 8.40+ reject Core's server assets pak in PreInit (it carries no signature of Epic's), so it goes in here, before
+        // UEngine::Init loads anything from it.
+        FPakPlatformFile::MountServerAssets();
     }
     else
     {

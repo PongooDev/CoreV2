@@ -5,6 +5,7 @@
 #include "Log.h"
 #include "ObjectLayout.h"
 #include "Packed.h"
+#include "Containers/Map.h"
 #include "Engine/EngineBaseTypes.h"
 #include "AI/Navigation/NavigationSystem.h"
 #include "Engine/World.h"
@@ -16809,6 +16810,81 @@ bool Finder::ResolveHotfixedEncryptionKeys()
     Log::Info(L"Finder: hotfixed encryption keys: handler +0x{:X}, FConfigCacheIni::GetArray +0x{:X}, keychain hash +0x{:X} called at +0x{:X}",
         Handler - Finder::ImageBase(), GetArray - Finder::ImageBase(), UpdateHash - Finder::ImageBase(), HashCall - Finder::ImageBase());
     return true;
+}
+
+bool Finder::ResolvePakPlatformFileMount()
+{
+    static const bool bResolved = []
+    {
+        // The game's FPlatformFileManager::Get().FindPlatformFile(TEXT("PakFile")) lookups (8.40: its chunk mounter at
+        // 0x6FCBFF, IPlatformFilePak's own at 0x28770CB): call Get; mov rcx, rax; lea rdx, [L"PakFile"]; call
+        // FindPlatformFile. One of the ten on 8.40 calls GetPlatformFile(TEXT("PakFile")) (0x1B4B8B0, 0x318A5D) instead,
+        // so the pair most of them call wins. FPakPlatformFile::GetTypeName's lea rax, [L"PakFile"]; ret isn't one.
+        TArray<TPair<uintptr_t, uintptr_t>> Lookups;
+        for (const uintptr_t Ref : Finder::StringRefs(L"PakFile"))
+        {
+            if (Byte(Ref) == 0x48 && Byte(Ref + 1) == 0x8D && Byte(Ref + 2) == 0x15 && Byte(Ref - 8) == 0xE8
+                && Byte(Ref - 3) == 0x48 && Byte(Ref - 2) == 0x8B && Byte(Ref - 1) == 0xC8 && Byte(Ref + 7) == 0xE8)
+            {
+                Lookups.Add({ Finder::RelativeTarget(Ref - 8, 1, 5), Finder::RelativeTarget(Ref + 7, 1, 5) });
+            }
+        }
+        uintptr_t Get = 0;
+        uintptr_t FindPlatformFile = 0;
+        int32_t Most = 0;
+        for (const TPair<uintptr_t, uintptr_t>& Candidate : Lookups)
+        {
+            int32_t Same = 0;
+            for (const TPair<uintptr_t, uintptr_t>& Other : Lookups)
+            {
+                Same += Other.Key == Candidate.Key && Other.Value == Candidate.Value;
+            }
+            if (Same > Most)
+            {
+                Get = Candidate.Key;
+                FindPlatformFile = Candidate.Value;
+                Most = Same;
+            }
+        }
+        const int32_t Disagreeing = Lookups.Num() - Most;
+
+
+        // FPakPlatformFile::Mount (8.40 0x2883A10) logs "Failed to mount pak \"%s\", pak is invalid." in its first
+        // piece (its "Mounting pak file %s." is in a separate function's .pdata, 0x2884270), and opens with
+        // new FPakFile(LowerLevel, InPakFilename, bSigned): mov rdx, [r12+8]; movzx r9d, byte ptr [r12+30h]; call
+        // (0x2883AC6).
+        const uintptr_t Mount = FunctionOf(L"Failed to mount pak \"%s\", pak is invalid.");
+        const bool bMountLogsFailure = Mount && Mount == FunctionOf(L"Pak \"%s\" does not exist!");
+        ptrdiff_t SignedOffset = -1;
+        Finder::TraceFind(bMountLogsFailure ? Mount : 0, 48, [&](uintptr_t Instruction)
+        {
+            const uint8_t Rex = Byte(Instruction);
+            if ((Rex != 0x44 && Rex != 0x45) || Byte(Instruction + 1) != 0x0F || Byte(Instruction + 2) != 0xB6 || (Byte(Instruction + 3) & 0xF8) != 0x48)
+            {
+                return false;
+            }
+            const bool bSib = (Byte(Instruction + 3) & 7) == 4;
+            SignedOffset = static_cast<int8_t>(Byte(Instruction + (bSib ? 5 : 4)));
+            return true;
+        });
+
+        if (!Get || !FindPlatformFile || Disagreeing > Most || !bMountLogsFailure || SignedOffset <= 0)
+        {
+            Log::Error(L"Finder: FPakPlatformFile::Mount not found (FPlatformFileManager::Get 0x{:X} and FindPlatformFile 0x{:X} from {} lookups, {} disagreeing; Mount 0x{:X}, bSigned {})",
+                Get ? Get - Finder::ImageBase() : 0, FindPlatformFile ? FindPlatformFile - Finder::ImageBase() : 0, Lookups.Num(), Disagreeing,
+                Mount ? Mount - Finder::ImageBase() : 0, SignedOffset);
+            return false;
+        }
+
+        Natives::FPlatformFileManager_Get = reinterpret_cast<decltype(Natives::FPlatformFileManager_Get)>(Get);
+        Natives::FPlatformFileManager_FindPlatformFile = reinterpret_cast<decltype(Natives::FPlatformFileManager_FindPlatformFile)>(FindPlatformFile);
+        Natives::FPakPlatformFile_Mount = reinterpret_cast<decltype(Natives::FPakPlatformFile_Mount)>(Mount);
+        Natives::FPakPlatformFile_bSigned = SignedOffset;
+        Log::Info(L"Finder: FPlatformFileManager::Get +0x{:X}, FindPlatformFile +0x{:X} ({} of {} lookups), FPakPlatformFile::Mount +0x{:X}, bSigned +0x{:X}",
+            Get - Finder::ImageBase(), FindPlatformFile - Finder::ImageBase(), Most, Lookups.Num(), Mount - Finder::ImageBase(), SignedOffset);
+        return true;
+    }();
+    return bResolved;
 }
 
 bool Finder::ResolveEngineInit()

@@ -7,6 +7,9 @@
 #include "Templates/SharedPointerInternals.h"
 
 class FOutputDevice;
+class FPlatformFileManager;
+class IPlatformFile;
+class FPakPlatformFile;
 class FLinkerInstancingContext;
 class UFortAssetManager;
 class IModularFeatures;
@@ -179,6 +182,13 @@ namespace Natives
     inline void (*FOutputDeviceRedirector_AddOutputDevice)(FOutputDeviceRedirector* This, FOutputDevice* OutputDevice) = nullptr;
 
     inline const wchar_t* (*FPlatformMisc_GameDir)() = nullptr;
+    // 8.40+ (Finder::ResolvePakPlatformFileMount): FPlatformFileManager::Get and FindPlatformFile (8.40 0x21466B0,
+    // 0x2144A70), FPakPlatformFile::Mount (0x2883A10) and the offset of FPakPlatformFile::bSigned (+0x30), which Mount
+    // hands to every FPakFile it makes.
+    inline FPlatformFileManager& (*FPlatformFileManager_Get)() = nullptr;
+    inline IPlatformFile* (*FPlatformFileManager_FindPlatformFile)(FPlatformFileManager* This, const wchar_t* Name) = nullptr;
+    inline bool (*FPakPlatformFile_Mount)(FPakPlatformFile* This, const wchar_t* InPakFilename, uint32_t PakOrder, const wchar_t* InPath) = nullptr;
+    inline ptrdiff_t FPakPlatformFile_bSigned = -1;
     inline const wchar_t* (*FPlatformProcess_UserName)(bool bOnlyAlphaNumeric) = nullptr;
     inline bool (*FPackageName_FindPackagesInDirectory)(TArray<FString>& OutPackages, const FString& RootDir) = nullptr;
     inline FString* FPackageName_MapPackageExtension = nullptr;

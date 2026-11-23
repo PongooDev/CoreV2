@@ -76,6 +76,15 @@
     <Filter Include="Engine\Source\Runtime\AIModule\Private\Perception">
       <UniqueIdentifier>{64f826b8-1194-45e8-a607-2420f7701bb7}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Engine\Source\Runtime\PakFile">
+      <UniqueIdentifier>{1c51b85c-bea1-4fdb-b36d-5ea82c0fc0b6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\PakFile\Private">
+      <UniqueIdentifier>{2076e279-bf4a-4512-b053-5a3ec974cd5d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Engine\Source\Runtime\PakFile\Public">
+      <UniqueIdentifier>{12b3e6e2-c39b-402f-83bc-e2c7fd958503}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Engine\Source\Runtime\Core">
       <UniqueIdentifier>{93194950-34f4-4daa-866c-c29025656dee}</UniqueIdentifier>
     </Filter>
@@ -715,6 +724,9 @@
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformMisc.h">
       <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
     </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformFilemanager.h">
+      <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
+    </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Core\Public\HAL\PlatformProcess.h">
       <Filter>Engine\Source\Runtime\Core\Public\HAL</Filter>
     </ClInclude>
@@ -1179,6 +1191,9 @@
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Launch\Public\LaunchEngineLoop.h">
       <Filter>Engine\Source\Runtime\Launch\Public</Filter>
+    </ClInclude>
+    <ClInclude Include="..\Engine\Source\Runtime\PakFile\Public\IPlatformFilePak.h">
+      <Filter>Engine\Source\Runtime\PakFile\Public</Filter>
     </ClInclude>
     <ClInclude Include="..\Engine\Source\Runtime\Online\HTTP\Public\Interfaces\IHttpBase.h">
       <Filter>Engine\Source\Runtime\Online\HTTP\Public\Interfaces</Filter>
@@ -1793,6 +1808,9 @@
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\PlatformMisc.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
     </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\PlatformFileManager.cpp">
+      <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
+    </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Core\Private\HAL\ThreadingBase.cpp">
       <Filter>Engine\Source\Runtime\Core\Private\HAL</Filter>
     </ClCompile>
@@ -2032,6 +2050,9 @@
     </ClCompile>
     <ClCompile Include="..\Engine\Source\Runtime\Launch\Private\LaunchEngineLoop.cpp">
       <Filter>Engine\Source\Runtime\Launch\Private</Filter>
+    </ClCompile>
+    <ClCompile Include="..\Engine\Source\Runtime\PakFile\Private\IPlatformFilePak.cpp">
+      <Filter>Engine\Source\Runtime\PakFile\Private</Filter>
     </ClCompile>
     <ClCompile Include="..\FortniteGame\Plugins\Online\OnlineSubsystem\Source\Private\OnlineSubsystemImpl.cpp">
       <Filter>FortniteGame\Plugins\Online\OnlineSubsystem\Source\Private</Filter>

@@ -1199,6 +1199,10 @@ namespace Natives
     // ItemsUpdatedDelegate (+0xF8), the delegate UMcpProfile::HandleProfileUpdate (0x955BE0) broadcasts last.
     inline void* (*UMcpProfile_GetStat)(const UMcpProfile* This, void* OutValue, const FString& StatName) = nullptr;
     inline ptrdiff_t UMcpProfile_ItemsUpdatedDelegate = -1;
+    // 8.20 (CL-5625478) keeps ItemsUpdatedDelegate in an unreflected object the profile points to: HandleProfileUpdate
+    // (0xBBFEC0) passes [profile+0xE8] to 0xBB3030, which broadcasts +0x108 of it last (add rcx, 108h; jmp 0x3135A0).
+    // UMcpProfile_ItemsUpdatedDelegate is then the offset inside that object. -1 where the delegate is the profile's own.
+    inline ptrdiff_t UMcpProfile_ItemsUpdatedDelegateHolder = -1;
     // From 7.00 (Creative), AFortPlayerControllerAthena::HookCreativeVTables: what an island's load runs on and with, the
     // way the game's own loads and resets do (UFortLevelSaveComponent::BeginRestrictedPlotLoad 0xF363B0,
     // AFortVolumeManager::ResetVolumeAndLevelRecord 0xDA0E70). AFortVolume::GetTaskQueue (0xD8F7A0; 7.10 0xDB2400), the

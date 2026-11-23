@@ -538,10 +538,9 @@ void AFortPlayerControllerAthena::ClaimCreativePortal()
     // The profile was queried as the player registered (QueryProfile?profileId=creative); its answer may come before or
     // after this. Its items arriving (and any later change to them) broadcast its ItemsUpdatedDelegate, which loads the
     // islands and the last used one into the rift; an answer that is already in is read now.
-    if (UMcpProfile::HasItemsUpdatedDelegate())
+    if (UMcpProfile::FOnItemsUpdated* ItemsUpdated = Profile->GetItemsUpdatedDelegate())
     {
-        UMcpProfile::FOnItemsUpdated& ItemsUpdated = Profile->ItemsUpdatedDelegate;
-        ItemsUpdated.AddUObject(this, &AFortPlayerControllerAthena::OnCreativeProfileItemsUpdated);
+        ItemsUpdated->AddUObject(this, &AFortPlayerControllerAthena::OnCreativeProfileItemsUpdated);
     }
     else
     {
@@ -1610,8 +1609,48 @@ void AFortPlayerControllerAthena::HookCreativeVTables()
     {
         Natives::UMcpProfile_ItemsUpdatedDelegate = ProfileMemberCalls.back().first;
     }
-    Log::Info(L"Finder: Creative's profile: UMcpProfile::GetStat 0x{:X}, UMcpProfile::ItemsUpdatedDelegate +0x{:X} (HandleProfileUpdate 0x{:X}, {} member call(s))",
-        Natives::UMcpProfile_GetStat ? reinterpret_cast<uintptr_t>(Natives::UMcpProfile_GetStat) - Finder::ImageBase() : 0, Natives::UMcpProfile_ItemsUpdatedDelegate,
+    else if (HandleProfileUpdate)
+    {
+        // 8.20: the last call after mov rcx, [reg+disp32] (0xBC01B4: 48 8B 8B E8 00 00 00, then call 0xBB3030), whose
+        // callee ends add rcx, imm32 ... jmp (0xBB32C6: 48 81 C1 08 01 00 00, the broadcast).
+        for (const auto& [Site, Target] : Finder::DecodedDirectCalls(HandleProfileUpdate))
+        {
+            const uint8_t* Load = reinterpret_cast<const uint8_t*>(Site - 7);
+            if (!Finder::IsReadable(Load, 7) || Load[0] != 0x48 || Load[1] != 0x8B || (Load[2] & 0xF8) != 0x88 || (Load[2] & 7) == 4)
+            {
+                continue;
+            }
+            const ptrdiff_t Holder = *reinterpret_cast<const int32_t*>(Load + 3);
+            const uintptr_t End = Finder::FunctionEnd(Target);
+            ptrdiff_t Inner = -1;
+            for (uintptr_t At = Target; End && At + 12 <= End; ++At)
+            {
+                const uint8_t* Code = reinterpret_cast<const uint8_t*>(At);
+                if (Code[0] != 0x48 || Code[1] != 0x81 || Code[2] != 0xC1)
+                {
+                    continue;
+                }
+                for (const uint8_t* Next = Code + 7; Next < Code + 0x30 && reinterpret_cast<uintptr_t>(Next) < End; ++Next)
+                {
+                    if (*Next == 0xE9)
+                    {
+                        Inner = *reinterpret_cast<const int32_t*>(Code + 3);
+                        break;
+                    }
+                }
+            }
+            if (Holder >= 0x28 && Holder + 8 <= ProfileSize && Inner > 0 && Inner < 0x1000)
+            {
+                Natives::UMcpProfile_ItemsUpdatedDelegateHolder = Holder;
+                Natives::UMcpProfile_ItemsUpdatedDelegate = Inner;
+            }
+        }
+    }
+    Log::Info(L"Finder: Creative's profile: UMcpProfile::GetStat 0x{:X}, UMcpProfile::ItemsUpdatedDelegate {} (HandleProfileUpdate 0x{:X}, {} member call(s))",
+        Natives::UMcpProfile_GetStat ? reinterpret_cast<uintptr_t>(Natives::UMcpProfile_GetStat) - Finder::ImageBase() : 0,
+        Natives::UMcpProfile_ItemsUpdatedDelegateHolder >= 0
+            ? std::format(L"+0x{:X} of [profile+0x{:X}]", Natives::UMcpProfile_ItemsUpdatedDelegate, Natives::UMcpProfile_ItemsUpdatedDelegateHolder)
+            : std::format(L"+0x{:X}", Natives::UMcpProfile_ItemsUpdatedDelegate),
         HandleProfileUpdate ? HandleProfileUpdate - Finder::ImageBase() : 0, ProfileMemberCalls.size());
     if (!Natives::UMcpProfile_GetStat || Natives::UMcpProfile_ItemsUpdatedDelegate <= 0)
     {

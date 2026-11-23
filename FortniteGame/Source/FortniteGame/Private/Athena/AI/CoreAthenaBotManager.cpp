@@ -817,11 +817,9 @@ bool FCoreAthenaBotManager::HasNativePlayerBots()
     static const bool bNative = []
     {
         const uint32_t Changelist = Packed::Changelist();
-        if (Changelist)
-        {
-            return Changelist >= 5793395;
-        }
-        return FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaAIBotController") != nullptr;
+        const bool bNativeCode = Changelist ? Changelist >= 5793395 : FindObject<UClass>(nullptr, L"/Script/FortniteGame.FortAthenaAIBotController") != nullptr;
+        // Native bots also need Phoebe's assets (missing in 8.30/8.40's paks, present in 10.40's), else the backport runs.
+        return bNativeCode && StaticLoadObject(UObject::StaticClass(), nullptr, L"/Game/Athena/AI/Phoebe/BehaviorTrees/BT_Phoebe.BT_Phoebe", nullptr, LOAD_NoWarn | LOAD_Quiet) != nullptr;
     }();
     return bNative;
 }

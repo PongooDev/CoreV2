@@ -6006,7 +6006,16 @@ namespace
             Sleep = FindInstruction(UpdateTime, UpdateTimeEnd, { 0x76, 0x10, 0x0F, 0x28, -1, 0xF3, 0x0F, 0x5C, -1, -1, -1, -1, -1, 0xE8 });
             Slack = Sleep ? Sleep + 5 : 0;
         }
-        const uintptr_t SleepTarget = Sleep ? Finder::RelativeTarget(Sleep + 13, 1, 5) : 0;
+        uintptr_t SleepCall = Sleep ? Sleep + 13 : 0;
+        // 8.40 (CL-6005771, 0x2F18BA3) keeps the wait in xmm8: jbe short +0x11; movaps xmm0, xmm8 (41 0F 28 C0); subss
+        // xmm0, [0.002f]; call. The REX prefix puts the subss and the call one byte later.
+        if (!Sleep && UpdateTimeEnd)
+        {
+            Sleep = FindInstruction(UpdateTime, UpdateTimeEnd, { 0x76, 0x11, 0x41, 0x0F, 0x28, -1, 0xF3, 0x0F, 0x5C, -1, -1, -1, -1, -1, 0xE8 });
+            Slack = Sleep ? Sleep + 6 : 0;
+            SleepCall = Sleep ? Sleep + 14 : 0;
+        }
+        const uintptr_t SleepTarget = SleepCall ? Finder::RelativeTarget(SleepCall, 1, 5) : 0;
         const bool bSlack = Slack && (Byte(Slack + 3) & 0xC7) == 0x05 && *reinterpret_cast<const float*>(Finder::RelativeTarget(Slack, 4, 8)) == 0.002f;
         uintptr_t Spin = 0;
         for (uintptr_t Exit = bSlack ? FindInstruction(Sleep + 18, Sleep + 0x60, { 0x73, -1, 0x0F, 0x28, -1, 0xE8 }) : 0; Exit && !Spin; Exit = FindInstruction(Exit + 1, Sleep + 0x60, { 0x73, -1, 0x0F, 0x28, -1, 0xE8 }))

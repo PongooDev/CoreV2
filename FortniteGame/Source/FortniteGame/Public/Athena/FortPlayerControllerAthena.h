@@ -106,8 +106,11 @@ struct FFortAthenaLoadout
     // The contrail and back bling (not on every build's loadout).
     DefineUProperty(UObject*, SkyDiveContrail)
     DefineUProperty(UObject*, Backpack)
+    // The locker's emote slots (UAthenaDanceItemDefinition*); the strong references that keep them loaded on the server.
+    DefineUProperty(TArray<UObject*>, Dances)
 
     static bool HasGlider() { return Member_Glider.IsAvailable(); }
+    static bool HasDances() { return Member_Dances.IsAvailable(); }
     static bool HasSkyDiveContrail() { return Member_SkyDiveContrail.IsAvailable(); }
     static bool HasBackpack() { return Member_Backpack.IsAvailable(); }
 };
@@ -223,6 +226,8 @@ public:
     UFortWorldItemDefinition* GetLoadoutPickaxe();
     // 1.8: puts the class's default loadout's glider and pickaxe where the loadout, and Pawn's copy of it, have none.
     void FillEmptyLoadout(AFortPlayerPawnAthena* Pawn);
+    // Core's: the emotes the controller's and the pawn's loadouts hold (#547).
+    void LogLoadoutEmotes(AFortPlayerPawnAthena* Pawn);
     UFortHero* GetOrInitializeHero();
     UFortHero* SetupHero();
     void SetupBackpackSize();

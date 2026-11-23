@@ -657,6 +657,7 @@ void AFortPlayerController::Possess(APawn* InPawn)
             UFortHeroType* HeroType = AthenaHero ? AthenaHero->GetHeroTypeBP() : nullptr;
             UE_LOG(LogFort, Log, TEXT("Possess: %s plays %s with health %.0f/%.0f, shield %.0f/%.0f"), *GetNameSafe(this), *GetNameSafe(HeroType),
                 PlayerPawn->GetHealth(), PlayerPawn->GetMaxHealth(), PlayerPawn->GetShield(), PlayerPawn->GetMaxShield());
+            AthenaController->LogLoadoutEmotes(Cast<AFortPlayerPawnAthena>(reinterpret_cast<UObject*>(PlayerPawn)));
         }
     }
 

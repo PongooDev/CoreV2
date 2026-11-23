@@ -153,6 +153,29 @@ void AFortPlayerControllerAthena::FillEmptyLoadout(AFortPlayerPawnAthena* Pawn)
 #endif
 }
 
+void AFortPlayerControllerAthena::LogLoadoutEmotes(AFortPlayerPawnAthena* Pawn)
+{
+    // #547: on 8.00 an equipped emote was garbage collected on the server, so its ServerPlayEmoteItem arrived empty and
+    // _Validate closed the connection. The loadouts' Dances are the strong references that should keep them loaded.
+    if (!Member_CustomizationLoadout.IsAvailable() || !FFortAthenaLoadout::HasDances())
+    {
+        return;
+    }
+    const auto DescribeDances = [](const FFortAthenaLoadout& Loadout)
+    {
+        FString Names;
+        const TArray<UObject*>& Dances = Loadout.Dances;
+        for (UObject* Dance : Dances)
+        {
+            Names += Names.Len() > 0 ? TEXT(", ") : TEXT("");
+            Names += GetNameSafe(Dance);
+        }
+        return Names;
+    };
+    const FString PawnDances = Pawn && Pawn->HasCustomizationLoadout() ? DescribeDances(Pawn->CustomizationLoadout) : FString(TEXT("none"));
+    UE_LOG(LogFort, Log, TEXT("Possess: %s's loadout emotes: controller [%s], pawn [%s]"), *GetName(), *DescribeDances(CustomizationLoadout), *PawnDances);
+}
+
 UFortHero* AFortPlayerControllerAthena::GetOrInitializeHero()
 {
     // The override (1.7.2 0x42E5E0) keeps the controller's hero, or makes a hero of the next of its DefaultHeroes (a

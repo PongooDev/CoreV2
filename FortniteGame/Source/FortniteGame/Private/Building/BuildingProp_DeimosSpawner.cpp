@@ -129,9 +129,7 @@ TAssetSubclassOf<UClass>* ABuildingProp_DeimosSpawner::GetSelectedOption(int32_t
     case 2:
         return Member_SelectedSpawnTiming.IsAvailable() ? &GetMember_SelectedSpawnTiming() : nullptr;
     case 3:
-        // Core's: the limit knob's "Infinite" (bNoSpawnLimitEnabled) leaves the limit out; its option is
-        // AA_EDO_SpawnLimitPawns_0.
-        return Member_SelectedSpawnLimit.IsAvailable() && !bNoSpawnLimitEnabled ? &GetMember_SelectedSpawnLimit() : nullptr;
+        return Member_SelectedSpawnLimit.IsAvailable() ? &GetMember_SelectedSpawnLimit() : nullptr;
     default:
         return nullptr;
     }
@@ -198,6 +196,22 @@ void ABuildingProp_DeimosSpawner::HandleAsyncLoadComplete()
             continue;
         }
         UClass* OptionClass = Selected->LoadSynchronous();
+        // Core's (8.20): the limit knob's "Infinite" (SetupConfigurables: preset 0, bNoSpawnLimitEnabled) selects
+        // AA_EDO_SpawnLimitPawns_0, which leaves the option's PawnNumberLimit at 0. The mission's option set
+        // (EDO_Set_Creative_Spawn) limits its encounters by pawn count (SpawnLimitMode NumPawnsLimit, its own
+        // PawnLimitCategory that same option), and the encounter's limit check (0xC70540) counts a limit of 0 as reached
+        // before the first creature: a headless 8.20 server's creature spawner had its encounter running, its rift ready
+        // with 13 spawn slots, bSpawnLimitReached set and no creature. The device's server half that read
+        // bNoSpawnLimitEnabled is stripped; "Infinite" gets the encounter's own "no limit", -1 (its constructor's,
+        // 0xC6A190), on that option.
+        if (Option == 3 && Member_bNoSpawnLimitEnabled.IsAvailable() && bNoSpawnLimitEnabled && OptionClass && OptionClass->IsChildOf(UFortDifficultyOptionEncounter_SpawnLimitPawns::StaticClass()))
+        {
+            UFortDifficultyOptionEncounter_SpawnLimitPawns* Limit = static_cast<UFortDifficultyOptionEncounter_SpawnLimitPawns*>(OptionClass->GetDefaultObject());
+            if (Limit && Limit->PawnNumberLimit == 0)
+            {
+                Limit->PawnNumberLimit = -1;
+            }
+        }
         if (OptionClass && Settings.InjectOverrideCategory(OptionClass))
         {
             ++Injected;

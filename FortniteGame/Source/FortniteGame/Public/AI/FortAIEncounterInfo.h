@@ -129,6 +129,15 @@ private:
     DefineUProperty(FScriptArray, PawnUpgrades)
 };
 
+// An encounter's limit on the pawns it spawns in all (its PawnNumberLimit, -1 for none: the encounter's constructor's).
+class UFortDifficultyOptionEncounter_SpawnLimitPawns : public UObject
+{
+    DefineUnrealClass(UFortDifficultyOptionEncounter_SpawnLimitPawns, FortniteGame)
+
+public:
+    DefineUProperty(int32_t, PawnNumberLimit)
+};
+
 // What a mission or a rift overrides in the AI encounters it starts.
 struct FFortEncounterSettings
 {
